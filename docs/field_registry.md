@@ -80,6 +80,44 @@ Notebook 与 repository module 的跨边界数据
 | import_target | governance | none | false | false | false | 导入检查使用的目标模块名。 |
 | import_succeeded | governance | none | false | false | false | 导入检查是否成功。 |
 | report_digest | governance | none | false | false | false | 本地阶段报告内容的稳定摘要。 |
+| summary_digest | governance | none | false | false | false | 本地阶段 summary 内容的稳定摘要。 |
+| primitive_status | governance | none | false | false | false | 阶段 summary 中记录的算法原语实现状态集合。 |
+| primitive_name | governance | none | false | false | false | 算法原语对象或阶段记录中的原语名称。 |
+| metrics | governance | none | false | false | false | 阶段 summary 中记录的指标集合。 |
+| record_count | governance | none | false | false | false | 阶段脚本生成的记录数量。 |
+| records_are_synthetic | governance | none | false | false | false | 标记本地 records 是否为 synthetic 阶段产物。 |
+| attention_runtime | method | none | false | false | false | attention 原语是否接入真实运行时的状态说明。 |
+| event_name | method | none | false | false | false | synthetic 阶段事件名称。 |
+| event_digest | method | none | false | false | false | 事件声明或 synthetic 事件的稳定摘要。 |
+| branch | method | none | false | false | false | 载体派生分支名称, 例如 LF、HF 或 attention。 |
+| field_length | method | none | false | false | false | synthetic 风险场或向量字段长度。 |
+| eta_saliency | method | none | false | false | false | 语义风险场中 saliency 权重。 |
+| eta_semantic | method | none | false | false | false | 语义风险场中 semantic 权重。 |
+| eta_texture | method | none | false | false | false | 语义风险场中 texture 权重。 |
+| eta_stability | method | none | false | false | false | 语义风险场中 stability 权重。 |
+| budget_min | method | none | false | false | false | 语义承载预算下界。 |
+| budget_max | method | none | false | false | false | 语义承载预算上界。 |
+| budget_gain | method | none | false | false | false | 由低风险区域提升承载预算的增益。 |
+| texture_threshold | method | none | false | false | false | LF/HF 路由的纹理阈值。 |
+| risk_threshold | method | none | false | false | false | LF 路由的风险阈值。 |
+| stability_threshold | method | none | false | false | false | HF 与 attention 路由的稳定性阈值。 |
+| attention_threshold | method | none | false | false | false | attention synthetic stub 路由阈值。 |
+| risk_values | method | none | false | false | false | 语义风险场逐位置风险值。 |
+| budget_values | method | none | false | false | false | 语义承载预算逐位置数值。 |
+| lf_mask | method | none | false | false | false | LF 主证据候选区域 mask。 |
+| hf_mask | method | none | false | false | false | HF 补充证据候选区域 mask。 |
+| attention_mask | method | none | false | false | false | attention 几何候选区域 mask。 |
+| mask_values | method | none | false | false | false | 投影到 latent 长度后的 mask 数值。 |
+| masked_latent_values | method | none | false | false | false | 应用 mask 后的 latent 数值。 |
+| source_length | method | none | false | false | false | 投影前 mask 长度。 |
+| target_length | method | none | false | false | false | 投影后目标 latent 长度。 |
+| projection_digest | method | none | false | false | false | latent mask 投影结果摘要。 |
+| safe_basis | method | none | false | false | false | 语义条件安全子空间 synthetic 基底。 |
+| lf_basis | method | none | false | false | false | LF 路由投影后的子基底。 |
+| hf_basis | method | none | false | false | false | HF 路由投影后的子基底。 |
+| attention_basis | method | none | false | false | false | attention 路由投影后的子基底。 |
+| selected_indices | method | none | false | false | false | synthetic 安全基底选中的 latent 位置。 |
+| basis_rank | method | none | false | false | false | synthetic 安全基底最大秩。 |
 | condition_id | method | none | false | false | false | 语义条件化水印路由对象的稳定标识。 |
 | semantic_digest | method | none | false | false | false | 语义输入或语义表示的稳定摘要。 |
 | semantic_tags | method | none | false | false | false | 语义条件对象携带的标签集合。 |
@@ -91,19 +129,66 @@ Notebook 与 repository module 的跨边界数据
 | carrier_id | method | none | false | false | false | 水印载体对象的稳定标识。 |
 | carrier_family | method | none | false | false | false | 水印载体所属机制族。 |
 | frequency_band | method | none | false | false | false | 水印载体使用的频带名称。 |
+| key_digest | method | none | false | false | false | 载体派生时使用的密钥材料摘要。 |
+| template_values | method | none | false | false | false | LF/HF/attention synthetic carrier 模板数值。 |
+| update_values | method | none | false | false | false | 单个 carrier 生成的 latent update 数值。 |
+| carrier_digest | method | none | false | false | false | 单个 carrier 的稳定摘要。 |
+| tail_threshold | method | none | false | false | false | HF tail truncation 使用的截断阈值。 |
+| retained_fraction | method | none | false | false | false | HF tail truncation 后保留的模板比例。 |
+| synthetic_stub | method | none | false | false | false | 标记 attention carrier 是否仅为 synthetic stub。 |
+| tail_fraction | method | none | false | false | false | HF tail truncation 的目标尾部保留比例。 |
 | embedding_strength | method | none | false | false | false | 水印嵌入强度。 |
 | anchor_id | method | none | false | false | false | 注意力几何锚点对象的稳定标识。 |
 | attention_layer | method | none | false | false | false | 注意力锚点对应的层或模块名称。 |
 | anchor_digest | method | none | false | false | false | 注意力锚点的稳定摘要。 |
+| lf_update_values | method | none | false | false | false | LF 分量 latent update 数值。 |
+| hf_update_values | method | none | false | false | false | HF 分量 latent update 数值。 |
+| attention_update_values | method | none | false | false | false | attention synthetic stub 分量 latent update 数值。 |
+| combined_update_values | method | none | false | false | false | 三个分量相加后的 latent update 数值。 |
+| update_digest | method | none | false | false | false | 组合 latent update 摘要。 |
 | evidence_id | method | none | true | false | false | 检测证据对象的稳定标识。 |
 | evidence_type | method | none | true | false | false | 检测证据类型, 例如 content、geometry 或 attention。 |
 | score_name | method | none | true | false | false | 检测证据分数名称。 |
 | score_value | method | none | true | false | false | 检测证据分数值。 |
+| lf_score | method | none | true | false | false | LF 分支归一化相关分数。 |
+| hf_score | method | none | true | false | false | HF 分支截断相关分数。 |
+| content_score | method | none | true | false | false | LF/HF 按固定权重融合后的内容分数。 |
+| lambda_lf | method | none | true | false | false | 内容分数中 LF 分支权重。 |
+| lambda_hf | method | none | true | false | false | 内容分数中 HF 分支权重。 |
+| used_independent_branch_vote | method | none | true | false | false | 是否使用 LF/HF 独立阈值投票。正式方法应为 false。 |
+| registration_confidence | method | none | true | false | false | 几何恢复的注册置信度。 |
+| anchor_inlier_ratio | method | none | true | false | false | attention anchor 内点比例。 |
+| recovered_sync_consistency | method | none | true | false | false | 恢复后相对关系同步一致性。 |
+| alignment_residual | method | none | true | false | false | 几何恢复后的残差。 |
+| geometry_reliable | method | none | true | false | false | 几何恢复是否可信。 |
+| direct_positive_decision | method | none | true | false | false | 几何链是否直接给出 positive。正式方法应为 false。 |
+| registration_threshold | method | none | true | false | false | 几何注册置信度阈值。 |
+| inlier_threshold | method | none | true | false | false | 几何内点比例阈值。 |
+| sync_threshold | method | none | true | false | false | 几何同步一致性阈值。 |
+| residual_threshold | method | none | true | false | false | 几何残差阈值。 |
 | decision_id | method | none | true | false | false | 多证据融合检测决策的稳定标识。 |
 | decision_label | method | none | true | false | false | 多证据融合检测决策标签。 |
 | threshold_name | protocol | none | true | false | false | 检测或校准协议使用的阈值名称。 |
 | threshold_value | protocol | none | true | false | false | 检测或校准协议使用的阈值数值。 |
 | evidence_ids | method | none | true | false | false | 融合决策引用的检测证据标识集合。 |
+| raw_content_score | method | none | true | false | false | 几何 rescue 前的内容分数。 |
+| aligned_content_score | method | none | true | false | false | 几何对齐后的内容分数。 |
+| content_threshold | protocol | none | true | false | false | fixed-FPR 内容阈值。 |
+| raw_content_margin | method | none | true | false | false | 原始内容分数相对内容阈值的边界余量。 |
+| aligned_content_margin | method | none | true | false | false | 对齐后内容分数相对内容阈值的边界余量。 |
+| fail_reason | method | none | true | false | false | 内容判定失败原因。 |
+| rescue_margin_low | protocol | none | true | false | false | rescue 边界失败窗口下界。 |
+| positive_by_content | method | none | true | false | false | 原始内容分支是否正判。 |
+| rescue_eligible | method | none | true | false | false | 样本是否满足 rescue 条件。 |
+| rescue_applied | method | none | true | false | false | 是否实际应用 rescue 并通过同阈值重判。 |
+| evidence_level | method | none | true | false | false | evidence-level 判定结果。 |
+| attestation_pass | method | none | true | false | false | attestation 是否验证通过。 |
+| final_level | method | none | true | false | false | final-level 判定结果。 |
+| final_label | method | none | true | false | false | final-level 判定标签。 |
+| correct_key_score | method | none | true | false | false | synthetic 原语中正确 key 的内容分数。 |
+| wrong_key_score | method | none | true | false | false | synthetic 原语中错误 key 的内容分数。 |
+| hf_tail_truncation_delta | method | none | true | false | false | HF tail truncation 前后分数差异。 |
+| attestation_layering_pass | method | none | true | false | false | attestation 是否只影响 final-level 的检查结果。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
