@@ -8,6 +8,20 @@
 
 框架固定使用 `main/` 作为核心 Python 包目录。`main/` 保存论文方法、实验协议、核心评估、表格重建和 CLI 复现入口。
 
+## stage00 核心包边界
+
+`stage_00_core_package_boundary_freeze` 冻结 `main/` 的最小方法包边界。该边界的含义是:
+
+1. `main/core/` 只保存 digest、records、manifest 和 SLM-WM 方法 typed object。
+2. `main/methods/` 只保存论文方法机制与机制变体。
+3. `main/protocol/` 只保存 split、threshold、runner 接口和协议对象。
+4. `main/analysis/` 可以构造表格、图数据、报告和 claim audit 所需的中间结构, 但不得反向依赖实验 runner、Notebook workflow 或 harness。
+5. `main/cli/` 只作为命令行复现入口, 不保存外部环境专用逻辑。
+
+本阶段新增的本地阶段报告由 `scripts/write_stage00_core_boundary_outputs.py` 写入
+`outputs/local_stage00_core_boundary/`。这些文件是阶段治理输出, 不是正式论文实验结果,
+默认不提交。
+
 ## 五层结构
 
 1. 契约层: `.codex/project_contract.md` 与 `docs/` 定义阶段、目录边界、字段、命名、测试和发布规则。

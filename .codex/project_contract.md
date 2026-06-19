@@ -76,6 +76,14 @@
 3. Placeholder 字段不得支持 supported claims。
 4. Governed fields 应先登记到 `docs/field_registry.md`。
 
+## Validation Boundary Governance
+
+1. 项目构建应避免在业务路径中大量重复防御式校验和错误信息构造。
+2. 重复校验逻辑应优先收敛到配置加载阶段校验、dataclass 构造阶段校验、专门的 schema validator 或测试用例。
+3. 业务函数内部只保留关键边界校验, 例如外部输入边界、不可恢复状态边界、跨模块协议边界或会导致静默错误的核心算法前置条件。
+4. 相同字段、相同配置项、相同数据结构的错误信息不应在多个业务函数中分散维护; 应由统一解析器、schema 或测试断言提供稳定诊断。
+5. 核心算法实现应优先呈现方法逻辑、数据流和统计边界, 不应被重复的防御式样板代码淹没。
+
 ## Test Governance
 
 1. 默认 `pytest -q` 只运行 `unit`、`constraint` 或 `quick` 测试。
