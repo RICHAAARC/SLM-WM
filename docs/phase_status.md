@@ -186,3 +186,45 @@
 | `pytest tests/functional/test_minimal_latent_injection_helpers.py -q` | pass, 7 passed |
 | `pytest -q` | pass, 38 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+## stage_05_colab_drive_workflow
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_05_colab_drive_workflow` |
+| phase_status | `in_progress` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/core_package_boundary_freeze/manifest.local.json`; `outputs/algorithm_primitives/manifest.local.json`; `outputs/core_method_synthetic_smoke/manifest.local.json`; `outputs/sd_runtime_adapter/manifest.local.json`; `outputs/real_sd_runtime_probe_package_20260620t10451781952321z_b2be25c.zip`; `outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip` |
+| expected_output_manifest | `outputs/colab_drive_workflow/manifest.local.json`; `GoogleDrive/SLM/colab_drive_workflow/manifest.json` |
+| expected_outputs | `paper_workflow/colab_drive_cold_start_smoke.ipynb`; `paper_workflow/drive_manifest_reload_smoke.ipynb`; `paper_workflow/colab_utils/drive_paths.py`; `paper_workflow/colab_utils/dependency_check.py`; `paper_workflow/colab_utils/mount_drive.py`; `paper_workflow/colab_utils/runtime_setup.py`; `paper_workflow/colab_utils/manifest_io.py`; `paper_workflow/colab_utils/drive_workflow.py`; `scripts/colab_drive_entry.py`; `scripts/sync_local_outputs_to_drive.py`; `scripts/write_workflow_manifest.py`; `scripts/verify_drive_artifacts.py`; `outputs/colab_drive_workflow/colab_env_report.json`; `outputs/colab_drive_workflow/drive_mount_report.json`; `outputs/colab_drive_workflow/cold_start_smoke_record.jsonl`; `outputs/colab_drive_workflow/reload_smoke_record.jsonl`; `outputs/colab_drive_workflow/local_output_sync_report.json`; `outputs/colab_drive_workflow/manifest.local.json` |
+| blocking_items | 本地环境不能真实挂载 Google Drive; Drive 侧 manifest reload 仍需要在 Colab 中执行 Notebook 或等价 CLI 后审计。 |
+| fallback_path | 若 Colab 无法挂载 Drive, 本地命令仅写入 `outputs/colab_drive_workflow/drive_mirror/` 镜像目录并记录 `unsupported_reason`; 该镜像不得支持正式论文 claim。 |
+| invariants | Notebook 只作为入口; Drive manifest、镜像与重载校验逻辑位于 repository helper 和 scripts; `main/` 不依赖 Colab、Drive 或 Notebook。 |
+| next_stage_entry | 只有 Drive manifest 在 Colab 中生成、镜像和 reload 校验均通过后, 才能进入 `stage_06_prompt_split_records_protocol`。 |
+
+### stage05 已完成内容
+
+1. 新增 Colab Drive workflow helper, 将路径解析、依赖快照、Drive 挂载报告、manifest 读写、本地 outputs 镜像和 reload 校验分离到 `paper_workflow/colab_utils/` 下的语义化模块。
+2. 新增 `scripts/colab_drive_entry.py`、`scripts/sync_local_outputs_to_drive.py`、`scripts/write_workflow_manifest.py` 和 `scripts/verify_drive_artifacts.py`, 作为 Notebook 可调用的仓库入口。
+3. 新增 `paper_workflow/colab_drive_cold_start_smoke.ipynb` 与 `paper_workflow/drive_manifest_reload_smoke.ipynb`, 两个 Notebook 均不保存执行输出, 且只调用 repository helper。
+4. 新增轻量测试覆盖本地 outputs 镜像、manifest 写入、reload 校验、本地输出目录约束、Drive 挂载跳过报告和依赖快照非 claim 边界。
+5. 本地执行 `python scripts/colab_drive_entry.py` 已在 `outputs/colab_drive_workflow/` 生成可审计 smoke 产物, 并验证本地镜像 reload 通过。
+6. `docs/field_registry.md` 已登记 Colab Drive workflow 新增字段。
+
+### stage05 尚未完成内容
+
+1. 尚未在 Colab 中运行 `paper_workflow/colab_drive_cold_start_smoke.ipynb` 生成真实 Google Drive 侧 `manifest.json`。
+2. 尚未在 Colab 中运行 `paper_workflow/drive_manifest_reload_smoke.ipynb` 验证 Drive manifest reload。
+3. 尚未审计 Google Drive 同步目录中的 `colab_env_report.json`、`drive_mount_report.json`、`local_output_sync_report.json`、`manifest.json` 和 `reload_smoke_record.jsonl`。
+
+### stage05 当前验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/colab_drive_entry.py` | pass, local_manifest_count=7, mirrored_file_count=18, reload_decision=pass |
+| `pytest tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 8 passed |
+| `pytest tests/functional/test_colab_drive_workflow_helpers.py -q` | pass, 4 passed |
+| `pytest -q` | pass, 43 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

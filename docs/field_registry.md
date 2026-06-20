@@ -319,6 +319,46 @@ Notebook 与 repository module 的跨边界数据
 | ssim | metric | none | true | false | false | paired image 的全图轻量 SSIM 指标。 |
 | mse | metric | none | true | false | false | paired image 的均方误差。 |
 | mean_abs_error | metric | none | true | false | false | paired image 的平均绝对误差。 |
+| workflow_name | governance | none | true | false | false | Colab Drive workflow 的语义名称。 |
+| workflow_decision | governance | none | true | false | false | Colab Drive workflow 的可审计通过状态。 |
+| drive_root | artifact | none | true | false | false | Google Drive 或本地镜像根目录。 |
+| drive_workflow_dir | artifact | none | true | false | false | Drive 中保存 workflow manifest 与镜像摘要的目录。 |
+| drive_local_output_dir | artifact | none | true | false | false | Drive 中保存本地 outputs 镜像文件的目录。 |
+| local_output_dir | artifact | none | true | false | false | Colab Drive workflow 在 outputs 下写入报告的目录。 |
+| local_manifests | artifact | none | true | false | false | 被 workflow 发现并登记的本地 manifest 引用集合。 |
+| local_manifest_count | artifact | none | true | false | false | 被 workflow 发现的本地 manifest 数量。 |
+| manifest_path | artifact | none | true | false | false | manifest 文件路径。 |
+| manifest_digest | artifact | none | true | false | false | manifest 文件或 manifest payload 的稳定摘要。 |
+| output_count | artifact | none | true | false | false | 单个 manifest 登记的输出路径数量。 |
+| dependency_decision | runtime | none | true | false | false | Colab workflow 依赖检查是否通过。 |
+| dependency_count | runtime | none | true | false | false | Colab workflow 检查的依赖数量。 |
+| missing_dependency_count | runtime | none | true | false | false | Colab workflow 缺失依赖数量。 |
+| dependency_name | runtime | none | true | false | false | Colab workflow 检查的依赖名称。 |
+| dependencies | runtime | none | true | false | false | Colab workflow 依赖检查记录集合。 |
+| module_available | runtime | none | true | false | false | Colab workflow 中单个依赖是否可导入。 |
+| installed_version | runtime | none | true | false | false | Colab workflow 中单个依赖的已安装版本。 |
+| dependency_report | runtime | none | true | false | false | Colab workflow 的依赖快照报告。 |
+| dependency_report_digest | artifact | none | false | false | false | Colab workflow 依赖报告 payload 摘要。 |
+| mount_decision | runtime | none | true | false | false | Google Drive 挂载动作或跳过动作的状态。 |
+| mount_point | runtime | none | true | false | false | Google Drive 挂载点。 |
+| mounted | runtime | none | true | false | false | Google Drive 是否被当前 workflow 视为已挂载。 |
+| mount_report_digest | artifact | none | false | false | false | Google Drive 挂载报告 payload 摘要。 |
+| sync_report_digest | artifact | none | false | false | false | 本地 outputs 镜像报告 payload 摘要。 |
+| source_path | artifact | none | true | false | false | 被镜像文件在仓库中的来源路径。 |
+| destination_path | artifact | none | true | false | false | 被镜像文件在 Drive workflow 目录中的目标路径。 |
+| file_digest | artifact | none | true | false | false | 被镜像文件的 SHA-256 摘要。 |
+| byte_count | artifact | none | true | false | false | 被镜像文件的字节数。 |
+| copy_decision | artifact | none | true | false | false | 单个文件镜像操作是否通过。 |
+| mirrored_files | artifact | none | true | false | false | 已镜像文件记录集合。 |
+| mirrored_file_count | artifact | none | true | false | false | 已镜像文件数量。 |
+| input_file_count | artifact | none | true | false | false | workflow 本次登记的输入文件数量。 |
+| input_manifest_digest | artifact | none | false | false | false | Drive input manifest payload 摘要。 |
+| output_manifest_digest | artifact | none | false | false | false | Drive output manifest payload 摘要。 |
+| reload_decision | artifact | none | true | false | false | 根据 Drive manifest 重载校验的通过状态。 |
+| verified_file_count | artifact | none | true | false | false | 重载校验中摘要匹配的文件数量。 |
+| missing_input_count | artifact | none | true | false | false | 重载校验中缺失的登记文件数量。 |
+| missing_input_paths | artifact | none | true | false | false | 重载校验中缺失的登记文件路径集合。 |
+| digest_mismatch_count | artifact | none | true | false | false | 重载校验中摘要不一致的文件数量。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

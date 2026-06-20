@@ -15,7 +15,14 @@ from tools.harness.lib.naming_rules import is_allowed_file_name
 
 RUNTIME_NOTEBOOK_PATH = Path("paper_workflow/sd_runtime_cold_start_probe.ipynb")
 INJECTION_NOTEBOOK_PATH = Path("paper_workflow/minimal_latent_injection_run.ipynb")
-NOTEBOOK_PATHS = (RUNTIME_NOTEBOOK_PATH, INJECTION_NOTEBOOK_PATH)
+DRIVE_COLD_START_NOTEBOOK_PATH = Path("paper_workflow/colab_drive_cold_start_smoke.ipynb")
+DRIVE_RELOAD_NOTEBOOK_PATH = Path("paper_workflow/drive_manifest_reload_smoke.ipynb")
+NOTEBOOK_PATHS = (
+    RUNTIME_NOTEBOOK_PATH,
+    INJECTION_NOTEBOOK_PATH,
+    DRIVE_COLD_START_NOTEBOOK_PATH,
+    DRIVE_RELOAD_NOTEBOOK_PATH,
+)
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
     "%pip install -q --upgrade diffusers transformers accelerate safetensors sentencepiece protobuf huggingface_hub"
@@ -108,6 +115,27 @@ def test_colab_notebook_delegates_injection_logic_to_helper() -> None:
     assert '"diffusers==' not in joined_source
     assert '"transformers==' not in joined_source
     assert '"accelerate==' not in joined_source
+
+
+@pytest.mark.constraint
+def test_colab_drive_notebooks_delegate_workflow_logic_to_helper() -> None:
+    """Drive workflow Notebook 必须调用 repository helper, 不直接拼接 manifest."""
+    cold_start_payload = json.loads(DRIVE_COLD_START_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    reload_payload = json.loads(DRIVE_RELOAD_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    cold_start_source = "\n".join("".join(cell.get("source", [])) for cell in cold_start_payload["cells"])
+    reload_source = "\n".join("".join(cell.get("source", [])) for cell in reload_payload["cells"])
+    first_cold_start_code = next(cell for cell in cold_start_payload["cells"] if cell["cell_type"] == "code")
+    first_reload_code = next(cell for cell in reload_payload["cells"] if cell["cell_type"] == "code")
+
+    assert "paper_workflow.colab_utils.drive_workflow" in cold_start_source
+    assert "run_colab_drive_workflow" in cold_start_source
+    assert "write_reload_smoke_record" in reload_source
+    assert "drive.mount('/content/drive')" in "".join(first_cold_start_code.get("source", []))
+    assert "drive.mount('/content/drive')" in "".join(first_reload_code.get("source", []))
+    assert "/content/drive/MyDrive/SLM" in cold_start_source
+    assert "/content/drive/MyDrive/SLM" in reload_source
+    assert "manifest.json" not in cold_start_source
+    assert "json.dumps" not in cold_start_source
 
 
 @pytest.mark.constraint
