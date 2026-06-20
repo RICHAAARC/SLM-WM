@@ -552,3 +552,54 @@
 | `pytest tests/functional/test_threshold_calibration.py -q` | pass, 2 passed |
 | `pytest -q` | pass, 74 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+## stage_13_attack_matrix_regeneration
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_13_attack_matrix_regeneration` |
+| phase_status | `local_attack_matrix_protocol_ready` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/geometric_rescue/manifest.local.json`; `outputs/threshold_calibration/manifest.local.json` |
+| expected_output_manifest | `outputs/attack_matrix/manifest.local.json` |
+| expected_outputs | `outputs/attack_matrix/attacked_images/`; `outputs/attack_matrix/attack_manifest.json`; `outputs/attack_matrix/attacked_image_registry.jsonl`; `outputs/attack_matrix/attack_detection_records.jsonl`; `outputs/attack_matrix/attack_family_metrics.csv`; `outputs/attack_matrix/attack_strength_curve.csv`; `outputs/attack_matrix/score_retention_by_attack.csv`; `outputs/attack_matrix/rescue_by_attack.csv`; `outputs/attack_matrix/manifest.local.json` |
+| blocking_items | 当前常规攻击为 record-level proxy, 未生成真实 attacked image 文件; 再扩散攻击需要真实 GPU 图像重生成产物, 当前统一标记为 `unsupported`。 |
+| fallback_path | 常规攻击只作为本地可重建协议与表格链路; 再扩散攻击保留配置、digest 和 unsupported reason, 不进入论文主张。 |
+| invariants | 攻击后检测复用 `stage_12` 冻结的 fixed-FPR 阈值、rescue window 和 fail reason gate; clean negative 与 attacked negative 分开统计; `full_method_claim_ready=false`; `supports_paper_claim=false`。 |
+| next_stage_entry | 可进入外部 baseline 对比与内部消融证据构建; 若要形成 robustness 主张, 需要用真实 attacked image 文件和真实再扩散攻击产物替换本地代理记录。 |
+
+### stage13 已完成内容
+
+1. 新增 `experiments/protocol/attacks.py`, 定义 `AttackConfig`、`AttackEvaluationBoundary`、`AttackDetectionRecord`、默认攻击矩阵配置、攻击配置摘要、record-level 攻击代理、attack family metrics、strength curve、score retention 和 rescue-by-attack 聚合函数。
+2. 更新 `experiments/protocol/__init__.py`, 导出攻击矩阵协议对象和聚合函数。
+3. 新增 `scripts/write_attack_matrix_outputs.py`, 从 `outputs/geometric_rescue/aligned_detection_records.jsonl`、`outputs/geometric_rescue/manifest.local.json`、`outputs/threshold_calibration/calibration_thresholds.json`、`outputs/threshold_calibration/threshold_degeneracy_report.json` 和 `outputs/threshold_calibration/manifest.local.json` 重建攻击矩阵产物。
+4. 当前默认攻击矩阵覆盖 JPEG compression、Gaussian noise、Gaussian blur、resize、crop、rotation、crop-resize、composite geometric attacks, 同时登记 img2img regeneration、DDIM inversion + regeneration、SDEdit regeneration 和 diffusion purification。
+5. 常规攻击配置写入 `probe`、`pilot` 和 `full_main` 资源档位; 再扩散攻击写入 `full_extra` 资源档位并保留 `real_gpu_attack_required` unsupported reason。
+6. 新增 `tests/functional/test_attack_matrix.py`, 覆盖攻击配置摘要稳定性、常规攻击分数保持率下降、再扩散攻击 unsupported 边界、脚本产物可重建和 outputs 目录约束。
+7. `docs/field_registry.md` 已登记攻击配置、攻击记录、source / attacked digest、score retention、quality proxy、attention consistency、攻击统计和 manifest 相关字段。
+
+### stage13 当前产物摘要
+
+1. `outputs/attack_matrix/attack_manifest.json` 显示 `attack_config_count=14`, `attack_family_count=3`, `attack_record_count=1344`, `performed_attack_record_count=960`, `gpu_attack_unsupported_count=384`, `attack_metrics_ready=true`。
+2. `outputs/attack_matrix/attack_family_metrics.csv` 已包含常规攻击的 `true_positive_rate`、`false_positive_rate`、`clean_false_positive_rate`、`attacked_false_positive_rate`、`quality_score_proxy_mean`、`score_retention_mean`、`lf_score_retention_mean`、`hf_score_retention_mean`、`attention_consistency_proxy_mean`、`geometry_reliable_rate` 和 `rescue_rate`。
+3. 再扩散攻击行保留配置与 digest, 但 `metric_status=unsupported`, `supported_record_count=0`, 不支持论文 robustness 主张。
+4. `outputs/attack_matrix/attacked_images/` 当前为空目录, 表示本地未生成真实 attacked image 文件; `attacked_image_registry.jsonl` 只登记受治理代理摘要。
+5. `outputs/attack_matrix/manifest.local.json` 记录输入路径、输出路径、配置摘要、代码版本和重建命令 `python scripts/write_attack_matrix_outputs.py`。
+
+### stage13 完成边界
+
+1. 本阶段完成的是攻击矩阵协议、表格重建链路和常规攻击本地代理统计, 不是正式 robustness 实验结论。
+2. record-level proxy 只能用于验证字段、统计边界、表格形态和 artifact rebuild, 不能替代真实图像攻击。
+3. 再扩散攻击必须在真实 GPU 环境中生成 attacked image、source image digest、attack config digest 和检测记录后, 才能从 `unsupported` 进入可统计状态。
+4. fixed-FPR 边界仍沿用 `stage_12` 的结论: raw content claim 可以局部 ready, 完整方法 `full_method_claim_ready=false`。
+
+### stage13 验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/write_attack_matrix_outputs.py` | pass, `attack_record_count=1344`, `performed_attack_record_count=960`, `gpu_attack_unsupported_count=384`, `attack_metrics_ready=true` |
+| `pytest tests/functional/test_attack_matrix.py -q` | pass, 4 passed |
+| `pytest -q` | pass, 78 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

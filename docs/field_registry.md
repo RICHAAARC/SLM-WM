@@ -554,6 +554,65 @@ Notebook 与 repository module 的跨边界数据
 | decision_scope | metric | none | false | false | false | FPR 审计中的判定范围。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
+| attack_record_id | protocol | none | true | false | false | 攻击检测 record 的稳定标识。 |
+| attack_id | protocol | none | true | false | false | 单个攻击配置的稳定标识。 |
+| attack_name | protocol | none | true | false | false | 攻击配置的语义名称。 |
+| attack_strength | protocol | none | true | false | false | 攻击配置使用的归一化强度。 |
+| resource_profile | protocol | none | true | false | false | 攻击矩阵运行使用的资源档位, 例如 probe、pilot、full_main 或 full_extra。 |
+| requires_gpu | protocol | none | true | false | false | 攻击配置是否需要真实 GPU 推理或重生成能力。 |
+| attack_parameters | protocol | none | true | false | false | 攻击配置的具体参数字典。 |
+| attack_config_digest | artifact | none | true | false | false | 攻击配置 payload 的稳定摘要。 |
+| attack_record_digest | artifact | none | true | false | false | 攻击检测 record payload 的稳定摘要。 |
+| source_record_id | protocol | none | true | false | false | 攻击记录引用的源检测 record 标识。 |
+| source_image_digest | artifact | none | true | false | false | 源图像或源记录代理的稳定摘要。 |
+| source_image_digest_source | artifact | none | true | false | false | source image digest 的来源说明。 |
+| attacked_image_digest | artifact | none | true | false | false | 攻击后图像或本地代理攻击结果的稳定摘要。 |
+| attacked_image_digest_source | artifact | none | true | false | false | attacked image digest 的来源说明。 |
+| attacked_image_available | artifact | none | true | false | false | 是否存在真实可读取的攻击后图像文件。 |
+| attack_performed | protocol | none | true | false | false | 当前记录是否实际执行了本地可用攻击路径。 |
+| raw_content_score_before | metric | none | true | false | false | 攻击前 raw content score。 |
+| raw_content_score_after | metric | none | true | false | false | 攻击后 raw content score。 |
+| aligned_content_score_before | metric | none | true | false | false | 攻击前 aligned content score。 |
+| aligned_content_score_after | metric | none | true | false | false | 攻击后 aligned content score。 |
+| lf_score_retention | metric | none | true | false | false | LF 内容分数在攻击后的保持率。 |
+| hf_score_retention | metric | none | true | false | false | HF 内容分数在攻击后的保持率。 |
+| score_retention | metric | none | true | false | false | 统一内容分数在攻击后的保持率。 |
+| quality_score_proxy | metric | none | true | false | false | 本地攻击代理估计的质量保持分数。 |
+| attention_consistency_proxy | metric | none | true | false | false | 本地攻击代理估计的 attention 一致性保持分数。 |
+| attack_record_count | metric | none | false | false | false | 攻击矩阵检测 records 数量。 |
+| attack_config_count | metric | none | false | false | false | 攻击矩阵配置数量。 |
+| attack_family_count | metric | none | false | false | false | 攻击矩阵中唯一攻击族数量。 |
+| supported_record_count | metric | none | false | false | false | 已执行本地代理攻击并可进入表格统计的记录数量。 |
+| unsupported_record_count | metric | none | false | false | false | 因真实资源或输入缺失而不能进入本地统计的记录数量。 |
+| gpu_attack_unsupported_count | metric | none | false | false | false | 需要真实 GPU 但当前没有真实攻击产物的记录数量。 |
+| attack_manifest_path | artifact | none | true | false | false | 攻击矩阵专用 manifest 路径。 |
+| attack_metrics_ready | artifact | none | false | false | false | 攻击矩阵常规攻击本地统计是否可重建。 |
+| clean_false_positive_rate | metric | none | false | false | false | clean negative 在攻击矩阵统计中的 false positive rate。 |
+| attacked_false_positive_rate | metric | none | false | false | false | attacked negative 在攻击矩阵统计中的 false positive rate。 |
+| score_retention_mean | metric | none | false | false | false | 攻击分组内 score retention 均值。 |
+| quality_score_proxy_mean | metric | none | false | false | false | 攻击分组内 quality score proxy 均值。 |
+| attention_consistency_proxy_mean | metric | none | false | false | false | 攻击分组内 attention consistency proxy 均值。 |
+| geometry_reliable_rate | metric | none | false | false | false | 攻击分组内几何可靠记录比例。 |
+| rescue_rate | metric | none | false | false | false | 攻击分组内 rescue_applied 比例。 |
+| input_manifests | artifact | none | false | false | false | 攻击矩阵或重建 manifest 引用的输入 manifest 集合。 |
+| input_records_path | artifact | none | true | false | false | 攻击矩阵重建读取的源 records 路径。 |
+| input_thresholds_path | artifact | none | true | false | false | 攻击矩阵重建读取的 fixed-FPR 阈值文件路径。 |
+| input_threshold_report_path | artifact | none | true | false | false | 攻击矩阵重建读取的阈值边界报告路径。 |
+| attacked_images_dir | artifact | none | true | false | false | 攻击后图像或本地攻击代理登记目录。 |
+| performed_attack_record_count | metric | none | false | false | false | 已执行本地攻击代理的记录数量。 |
+| resource_profiles | protocol | none | false | false | false | 攻击矩阵中出现的资源档位集合。 |
+| conventional_attack_names | protocol | none | false | false | false | 当前攻击矩阵登记的常规攻击名称集合。 |
+| regeneration_attack_names | protocol | none | false | false | false | 当前攻击矩阵登记的再扩散攻击名称集合。 |
+| evaluation_boundary | protocol | none | false | false | false | 攻击后检测复用的 fixed-FPR 与 rescue 统计边界。 |
+| local_proxy_boundary | governance | none | false | false | false | 本地攻击矩阵代理实现的能力边界说明。 |
+| regeneration_attack_status | governance | none | false | false | false | 再扩散攻击是否已有真实产物支持的状态说明。 |
+| source_supports_paper_claim | claim | none | true | false | false | 源记录是否支持论文主张的继承状态。 |
+| score_retention_min | metric | none | false | false | false | 攻击分组内 score retention 最小值。 |
+| score_retention_max | metric | none | false | false | false | 攻击分组内 score retention 最大值。 |
+| lf_score_retention_mean | metric | none | false | false | false | 攻击分组内 LF score retention 均值。 |
+| hf_score_retention_mean | metric | none | false | false | false | 攻击分组内 HF score retention 均值。 |
+| positive_count | metric | none | false | false | false | 攻击矩阵分组内 positive source 记录数量。 |
+| negative_count | metric | none | false | false | false | 攻击矩阵分组内非 positive source 记录数量。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
 | example_digest_random | random | _digest_random | true | false | false | 可复现随机轨迹的 digest 字段。 |
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |

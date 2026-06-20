@@ -1,0 +1,458 @@
+"""写出攻击矩阵、score retention 与 rescue-by-attack 产物。"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import subprocess
+import sys
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from experiments.protocol.attacks import (
+    AttackConfig,
+    AttackEvaluationBoundary,
+    build_attack_detection_records,
+    default_attack_configs,
+    family_metrics,
+    rescue_by_attack_rows,
+    score_retention_rows,
+    strength_curve,
+)
+from main.analysis.artifact_manifest import build_artifact_manifest
+from main.core.digest import build_stable_digest
+
+CONSTRUCTION_UNIT_NAME = "attack_matrix"
+DEFAULT_OUTPUT_DIR = Path("outputs/attack_matrix")
+DEFAULT_RESCUE_RECORDS_PATH = Path("outputs/geometric_rescue/aligned_detection_records.jsonl")
+DEFAULT_RESCUE_MANIFEST_PATH = Path("outputs/geometric_rescue/manifest.local.json")
+DEFAULT_CALIBRATION_THRESHOLDS_PATH = Path("outputs/threshold_calibration/calibration_thresholds.json")
+DEFAULT_THRESHOLD_REPORT_PATH = Path("outputs/threshold_calibration/threshold_degeneracy_report.json")
+DEFAULT_CALIBRATION_MANIFEST_PATH = Path("outputs/threshold_calibration/manifest.local.json")
+DEFAULT_MAX_SOURCE_RECORDS = 96
+
+
+def stable_json_text(value: Any) -> str:
+    """把 JSON 兼容对象转为稳定文本。"""
+    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def json_line(value: dict[str, Any]) -> str:
+    """把字典转为 JSONL 单行。"""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n"
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    """读取 JSON 文件。"""
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
+    """读取 JSONL 文件。"""
+    return tuple(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
+    """写出 CSV 表格。"""
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def resolve_code_version(root_path: Path) -> str:
+    """读取 Git 提交标识, 工作区有变更时附加 dirty 标记。"""
+    try:
+        commit_result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=root_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        status_result = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=root_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return "git_version_unavailable"
+    commit_id = commit_result.stdout.strip()
+    if not commit_id:
+        return "git_version_unavailable"
+    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
+
+
+def ensure_output_dir_under_outputs(root_path: Path, output_dir: Path) -> Path:
+    """确保持久化输出目录位于 outputs 下。"""
+    resolved_output_dir = (root_path / output_dir).resolve() if not output_dir.is_absolute() else output_dir.resolve()
+    outputs_root = (root_path / "outputs").resolve()
+    try:
+        resolved_output_dir.relative_to(outputs_root)
+    except ValueError as exc:
+        raise ValueError("攻击矩阵输出目录必须位于 outputs/ 下") from exc
+    return resolved_output_dir
+
+
+def resolve_input_path(root_path: Path, path: str | Path) -> Path:
+    """解析输入路径。"""
+    candidate = Path(path)
+    return candidate.resolve() if candidate.is_absolute() else (root_path / candidate).resolve()
+
+
+def relative_or_absolute(path: Path, root_path: Path) -> str:
+    """将路径尽量转为相对仓库根目录的字符串。"""
+    try:
+        return path.resolve().relative_to(root_path).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
+
+
+def full_rescue_records(records: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    """只保留完整 rescue 协议记录。"""
+    return tuple(record for record in records if record.get("rescue_ablation_mode") == "full_rescue")
+
+
+def build_boundary(thresholds: dict[str, Any], threshold_report: dict[str, Any]) -> AttackEvaluationBoundary:
+    """从阈值文件和退化报告构造攻击检测边界。"""
+    threshold_value = float(threshold_report.get("calibrated_content_threshold", thresholds["threshold_value"]))
+    target_fpr = float(threshold_report.get("target_fpr", thresholds.get("target_fpr", 0.05)))
+    rescue_margin_low = float(threshold_report.get("rescue_margin_low", -0.05))
+    allowed_fail_reasons = tuple(threshold_report.get("allowed_fail_reasons", ("geometry_suspected", "low_confidence")))
+    return AttackEvaluationBoundary(
+        calibrated_content_threshold=threshold_value,
+        target_fpr=target_fpr,
+        rescue_margin_low=rescue_margin_low,
+        allowed_fail_reasons=allowed_fail_reasons,
+    )
+
+
+def build_attacked_image_registry_rows(records: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
+    """构造 attacked image registry。
+
+    当前 registry 记录的是本地代理摘要, 不登记真实图像文件路径。
+    """
+    return [
+        {
+            "attack_record_id": record["attack_record_id"],
+            "source_record_id": record["source_record_id"],
+            "source_image_digest": record["source_image_digest"],
+            "source_image_digest_source": record["source_image_digest_source"],
+            "attack_config_digest": record["attack_config_digest"],
+            "attacked_image_digest": record["attacked_image_digest"],
+            "attacked_image_digest_source": record["attacked_image_digest_source"],
+            "attacked_image_available": record["attacked_image_available"],
+            "attack_performed": record["attack_performed"],
+            "metric_status": record["metric_status"],
+            "unsupported_reason": record["unsupported_reason"],
+            "supports_paper_claim": False,
+        }
+        for record in records
+    ]
+
+
+def build_attack_manifest(
+    root_path: Path,
+    output_dir: Path,
+    rescue_records_path: Path,
+    rescue_manifest_path: Path,
+    calibration_thresholds_path: Path,
+    threshold_report_path: Path,
+    calibration_manifest_path: Path,
+    rescue_manifest: dict[str, Any],
+    calibration_manifest: dict[str, Any],
+    attack_configs: tuple[AttackConfig, ...],
+    attack_records: tuple[dict[str, Any], ...],
+    family_rows: list[dict[str, Any]],
+    boundary: AttackEvaluationBoundary,
+) -> dict[str, Any]:
+    """构造攻击矩阵专用 manifest。"""
+    gpu_unsupported_count = sum(1 for record in attack_records if record["requires_gpu"] and record["metric_status"] == "unsupported")
+    performed_count = sum(1 for record in attack_records if record["attack_performed"])
+    attack_metrics_ready = bool(performed_count and family_rows)
+    return {
+        "construction_unit_name": CONSTRUCTION_UNIT_NAME,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "input_manifests": [
+            {
+                "manifest_path": relative_or_absolute(rescue_manifest_path, root_path),
+                "artifact_id": rescue_manifest.get("artifact_id", "unknown"),
+            },
+            {
+                "manifest_path": relative_or_absolute(calibration_manifest_path, root_path),
+                "artifact_id": calibration_manifest.get("artifact_id", "unknown"),
+            },
+        ],
+        "input_records_path": relative_or_absolute(rescue_records_path, root_path),
+        "input_thresholds_path": relative_or_absolute(calibration_thresholds_path, root_path),
+        "input_threshold_report_path": relative_or_absolute(threshold_report_path, root_path),
+        "attacked_images_dir": relative_or_absolute(output_dir / "attacked_images", root_path),
+        "attack_config_count": len(attack_configs),
+        "attack_record_count": len(attack_records),
+        "attack_family_count": len({config.attack_family for config in attack_configs}),
+        "performed_attack_record_count": performed_count,
+        "gpu_attack_unsupported_count": gpu_unsupported_count,
+        "attack_metrics_ready": attack_metrics_ready,
+        "resource_profiles": sorted({config.resource_profile for config in attack_configs}),
+        "conventional_attack_names": sorted({config.attack_name for config in attack_configs if not config.requires_gpu}),
+        "regeneration_attack_names": sorted({config.attack_name for config in attack_configs if config.requires_gpu}),
+        "evaluation_boundary": boundary.to_dict(),
+        "local_proxy_boundary": "conventional attacks are record-level proxies and no image files are generated locally",
+        "regeneration_attack_status": "unsupported_until_real_gpu_artifacts_exist",
+        "full_method_claim_ready": False,
+        "supports_paper_claim": False,
+    }
+
+
+def write_attack_matrix_outputs(
+    root: str | Path = ".",
+    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
+    rescue_records_path: str | Path = DEFAULT_RESCUE_RECORDS_PATH,
+    rescue_manifest_path: str | Path = DEFAULT_RESCUE_MANIFEST_PATH,
+    calibration_thresholds_path: str | Path = DEFAULT_CALIBRATION_THRESHOLDS_PATH,
+    threshold_report_path: str | Path = DEFAULT_THRESHOLD_REPORT_PATH,
+    calibration_manifest_path: str | Path = DEFAULT_CALIBRATION_MANIFEST_PATH,
+    max_source_records: int | None = DEFAULT_MAX_SOURCE_RECORDS,
+) -> dict[str, Any]:
+    """写出攻击矩阵相关产物。"""
+    root_path = Path(root).resolve()
+    resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
+    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+    attacked_images_dir = resolved_output_dir / "attacked_images"
+    attacked_images_dir.mkdir(parents=True, exist_ok=True)
+
+    resolved_records_path = resolve_input_path(root_path, rescue_records_path)
+    resolved_rescue_manifest_path = resolve_input_path(root_path, rescue_manifest_path)
+    resolved_thresholds_path = resolve_input_path(root_path, calibration_thresholds_path)
+    resolved_threshold_report_path = resolve_input_path(root_path, threshold_report_path)
+    resolved_calibration_manifest_path = resolve_input_path(root_path, calibration_manifest_path)
+
+    rescue_manifest = read_json(resolved_rescue_manifest_path)
+    calibration_manifest = read_json(resolved_calibration_manifest_path)
+    thresholds = read_json(resolved_thresholds_path)
+    threshold_report = read_json(resolved_threshold_report_path)
+    boundary = build_boundary(thresholds, threshold_report)
+    source_records = full_rescue_records(read_jsonl(resolved_records_path))
+    if max_source_records is not None:
+        source_records = source_records[:max_source_records]
+
+    attack_configs = default_attack_configs()
+    attack_records = build_attack_detection_records(source_records, attack_configs, boundary)
+    family_rows = family_metrics(attack_records)
+    strength_rows = strength_curve(attack_records)
+    retention_rows = score_retention_rows(attack_records)
+    rescue_rows = rescue_by_attack_rows(attack_records)
+    registry_rows = build_attacked_image_registry_rows(attack_records)
+
+    records_path = resolved_output_dir / "attack_detection_records.jsonl"
+    registry_path = resolved_output_dir / "attacked_image_registry.jsonl"
+    attack_manifest_path = resolved_output_dir / "attack_manifest.json"
+    family_metrics_path = resolved_output_dir / "attack_family_metrics.csv"
+    strength_curve_path = resolved_output_dir / "attack_strength_curve.csv"
+    retention_path = resolved_output_dir / "score_retention_by_attack.csv"
+    rescue_path = resolved_output_dir / "rescue_by_attack.csv"
+    manifest_path = resolved_output_dir / "manifest.local.json"
+
+    records_path.write_text("".join(json_line(record) for record in attack_records), encoding="utf-8")
+    registry_path.write_text("".join(json_line(record) for record in registry_rows), encoding="utf-8")
+    attack_manifest = build_attack_manifest(
+        root_path=root_path,
+        output_dir=resolved_output_dir,
+        rescue_records_path=resolved_records_path,
+        rescue_manifest_path=resolved_rescue_manifest_path,
+        calibration_thresholds_path=resolved_thresholds_path,
+        threshold_report_path=resolved_threshold_report_path,
+        calibration_manifest_path=resolved_calibration_manifest_path,
+        rescue_manifest=rescue_manifest,
+        calibration_manifest=calibration_manifest,
+        attack_configs=attack_configs,
+        attack_records=attack_records,
+        family_rows=family_rows,
+        boundary=boundary,
+    )
+    attack_manifest_path.write_text(stable_json_text(attack_manifest), encoding="utf-8")
+    write_csv(
+        family_metrics_path,
+        family_rows,
+        [
+            "attack_family",
+            "attack_name",
+            "resource_profile",
+            "metric_status",
+            "attack_record_count",
+            "supported_record_count",
+            "unsupported_record_count",
+            "positive_count",
+            "negative_count",
+            "true_positive_rate",
+            "false_positive_rate",
+            "clean_false_positive_rate",
+            "attacked_false_positive_rate",
+            "quality_score_proxy_mean",
+            "score_retention_mean",
+            "lf_score_retention_mean",
+            "hf_score_retention_mean",
+            "attention_consistency_proxy_mean",
+            "geometry_reliable_rate",
+            "rescue_rate",
+            "supports_paper_claim",
+        ],
+    )
+    write_csv(
+        strength_curve_path,
+        strength_rows,
+        [
+            "attack_family",
+            "attack_name",
+            "attack_strength",
+            "resource_profile",
+            "metric_status",
+            "attack_record_count",
+            "supported_record_count",
+            "true_positive_rate",
+            "false_positive_rate",
+            "score_retention_mean",
+            "quality_score_proxy_mean",
+            "supports_paper_claim",
+        ],
+    )
+    write_csv(
+        retention_path,
+        retention_rows,
+        [
+            "attack_family",
+            "attack_name",
+            "attack_strength",
+            "resource_profile",
+            "metric_status",
+            "attack_record_count",
+            "supported_record_count",
+            "score_retention_mean",
+            "score_retention_min",
+            "score_retention_max",
+            "lf_score_retention_mean",
+            "hf_score_retention_mean",
+            "supports_paper_claim",
+        ],
+    )
+    write_csv(
+        rescue_path,
+        rescue_rows,
+        [
+            "attack_family",
+            "attack_name",
+            "attack_strength",
+            "resource_profile",
+            "metric_status",
+            "attack_record_count",
+            "supported_record_count",
+            "rescue_eligible_count",
+            "rescue_applied_count",
+            "rescue_rate",
+            "geometry_reliable_rate",
+            "attention_consistency_proxy_mean",
+            "supports_paper_claim",
+        ],
+    )
+
+    output_paths = tuple(
+        relative_or_absolute(path, root_path)
+        for path in (
+            attacked_images_dir,
+            attack_manifest_path,
+            registry_path,
+            records_path,
+            family_metrics_path,
+            strength_curve_path,
+            retention_path,
+            rescue_path,
+            manifest_path,
+        )
+    )
+    summary = {
+        "attack_manifest": attack_manifest,
+        "family_metrics": family_rows,
+        "strength_curve": strength_rows,
+        "score_retention": retention_rows,
+        "rescue_by_attack": rescue_rows,
+    }
+    manifest = build_artifact_manifest(
+        artifact_id="attack_matrix_manifest",
+        artifact_type="local_manifest",
+        input_paths=(
+            relative_or_absolute(resolved_records_path, root_path),
+            relative_or_absolute(resolved_rescue_manifest_path, root_path),
+            relative_or_absolute(resolved_thresholds_path, root_path),
+            relative_or_absolute(resolved_threshold_report_path, root_path),
+            relative_or_absolute(resolved_calibration_manifest_path, root_path),
+        ),
+        output_paths=output_paths,
+        config={
+            **boundary.to_dict(),
+            "max_source_records": max_source_records,
+            "attack_config_digest": build_stable_digest([config.to_dict() for config in attack_configs]),
+            "summary_digest": build_stable_digest(summary),
+        },
+        code_version=resolve_code_version(root_path),
+        rebuild_command="python scripts/write_attack_matrix_outputs.py",
+        metadata={
+            "construction_unit_name": CONSTRUCTION_UNIT_NAME,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "protocol_decision": "pass" if attack_manifest["attack_metrics_ready"] else "fail",
+            "full_method_claim_ready": False,
+            "supports_paper_claim": False,
+        },
+    ).to_dict()
+    manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
+    return manifest
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """构造命令行参数解析器。"""
+    parser = argparse.ArgumentParser(description="写出攻击矩阵、score retention 与 rescue-by-attack 产物。")
+    parser.add_argument("--root", default=".", help="仓库根目录。")
+    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
+    parser.add_argument("--rescue-records-path", default=str(DEFAULT_RESCUE_RECORDS_PATH), help="几何 rescue 记录路径。")
+    parser.add_argument("--rescue-manifest-path", default=str(DEFAULT_RESCUE_MANIFEST_PATH), help="几何 rescue manifest 路径。")
+    parser.add_argument(
+        "--calibration-thresholds-path",
+        default=str(DEFAULT_CALIBRATION_THRESHOLDS_PATH),
+        help="fixed-FPR 阈值文件路径。",
+    )
+    parser.add_argument("--threshold-report-path", default=str(DEFAULT_THRESHOLD_REPORT_PATH), help="阈值边界报告路径。")
+    parser.add_argument(
+        "--calibration-manifest-path",
+        default=str(DEFAULT_CALIBRATION_MANIFEST_PATH),
+        help="阈值校准 manifest 路径。",
+    )
+    parser.add_argument("--max-source-records", type=int, default=DEFAULT_MAX_SOURCE_RECORDS, help="最多读取的 full rescue 源记录数。")
+    return parser
+
+
+def main() -> None:
+    """命令行入口。"""
+    args = build_parser().parse_args()
+    manifest = write_attack_matrix_outputs(
+        root=args.root,
+        output_dir=args.output_dir,
+        rescue_records_path=args.rescue_records_path,
+        rescue_manifest_path=args.rescue_manifest_path,
+        calibration_thresholds_path=args.calibration_thresholds_path,
+        threshold_report_path=args.threshold_report_path,
+        calibration_manifest_path=args.calibration_manifest_path,
+        max_source_records=args.max_source_records,
+    )
+    print(stable_json_text(manifest), end="")
+
+
+if __name__ == "__main__":
+    main()
