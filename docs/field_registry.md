@@ -220,7 +220,7 @@ Notebook 与 repository module 的跨边界数据
 | runtime_dependency_mode | runtime | none | true | false | false | runtime adapter 实际依赖模式。 |
 | prompt | runtime | none | false | false | false | runtime 配置中的正向提示词。 |
 | negative_prompt | runtime | none | false | false | false | runtime 配置中的反向提示词。 |
-| prompt_digest | runtime | none | true | false | false | prompt、negative prompt、model_id 和 seed 的稳定摘要。 |
+| prompt_digest | runtime | none | true | false | false | prompt 文本或 runtime prompt 配置的稳定摘要。 |
 | seed | runtime | none | true | false | false | runtime adapter 使用的确定性种子。 |
 | width | runtime | none | true | false | false | generation probe 的目标图像宽度。 |
 | height | runtime | none | true | false | false | generation probe 的目标图像高度。 |
@@ -359,6 +359,34 @@ Notebook 与 repository module 的跨边界数据
 | missing_input_count | artifact | none | true | false | false | 重载校验中缺失的登记文件数量。 |
 | missing_input_paths | artifact | none | true | false | false | 重载校验中缺失的登记文件路径集合。 |
 | digest_mismatch_count | artifact | none | true | false | false | 重载校验中摘要不一致的文件数量。 |
+| prompt_id | protocol | none | true | false | false | prompt 协议记录的稳定标识。 |
+| prompt_set | protocol | none | true | false | false | prompt 所属集合, 例如 probe、pilot 或 full。 |
+| prompt_index | protocol | none | true | false | false | prompt 在所属集合中的稳定序号。 |
+| prompt_text | protocol | none | true | false | false | 规范化后的 prompt 文本。 |
+| risk_profile | method | none | true | false | false | 由 prompt 语义标签派生的轻量风险配置名称。 |
+| split_names | protocol | none | false | false | false | split manifest 中登记的划分名称集合。 |
+| split_counts | protocol | none | false | false | false | split manifest 或统计摘要中的各 split 样本数量。 |
+| split_prompt_ids | protocol | none | false | false | false | split manifest 中按 split 聚合的 prompt_id 集合。 |
+| sample_role | protocol | none | true | false | false | 事件协议中样本角色, 例如 positive_source、clean_negative 或 attacked_negative。 |
+| event_id | protocol | none | true | false | false | 事件协议记录的稳定标识。 |
+| event_family | protocol | none | true | false | false | 事件所属机制族, 例如 watermark_embedding、clean_generation 或 attack_generation。 |
+| attack_family | protocol | none | true | false | false | 事件协议登记的攻击族。 |
+| protocol_decision | governance | none | true | false | false | 协议记录、manifest 或统计摘要的通过状态。 |
+| prompt_count | protocol | none | false | false | false | prompt 协议记录数量。 |
+| event_count | protocol | none | false | false | false | 事件协议记录数量。 |
+| sample_role_counts | protocol | none | false | false | false | 按 sample_role 聚合的事件数量。 |
+| prompt_set_counts | protocol | none | false | false | false | 按 prompt_set 聚合的 prompt 数量。 |
+| calibration_test_disjoint | protocol | none | false | false | false | calibration 与 test 的 prompt_id 是否无交叉。 |
+| prompt_records | artifact | none | false | false | false | prompt manifest 中嵌入的 prompt 协议记录集合。 |
+| event_records | artifact | none | false | false | false | event protocol manifest 中嵌入的事件协议记录集合。 |
+| prompt_manifest_digest | artifact | none | false | false | false | prompt manifest payload 的稳定摘要。 |
+| split_manifest_digest | artifact | none | false | false | false | split manifest payload 的稳定摘要。 |
+| event_protocol_digest | artifact | none | false | false | false | event protocol manifest payload 的稳定摘要。 |
+| prompt_statistics_digest | artifact | none | false | false | false | prompt statistics payload 的稳定摘要。 |
+| source_archive | artifact | none | false | false | false | prompt bank 导入摘要中的来源 archive 路径。 |
+| source_archive_digest | artifact | none | false | false | false | prompt bank 来源 archive 的 SHA-256 摘要。 |
+| prompt_counts | protocol | none | false | false | false | prompt bank 导入摘要中按 prompt_set 聚合的 prompt 数量。 |
+| sanitized_prompt_counts | protocol | none | false | false | false | prompt bank 导入摘要中因治理规则被替换的 prompt 数量。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

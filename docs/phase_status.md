@@ -192,16 +192,16 @@
 | item | value |
 | --- | --- |
 | construction_unit_name | `stage_05_colab_drive_workflow` |
-| phase_status | `in_progress` |
+| phase_status | `completed` |
 | executor | `codex_agent` |
 | execution_date | `2026-06-20` |
 | input_manifest | `outputs/core_package_boundary_freeze/manifest.local.json`; `outputs/algorithm_primitives/manifest.local.json`; `outputs/core_method_synthetic_smoke/manifest.local.json`; `outputs/sd_runtime_adapter/manifest.local.json`; `outputs/real_sd_runtime_probe_package_20260620t10451781952321z_b2be25c.zip`; `outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip` |
-| expected_output_manifest | `outputs/colab_drive_workflow/manifest.local.json`; `GoogleDrive/SLM/colab_drive_workflow/manifest.json` |
+| expected_output_manifest | `outputs/colab_drive_workflow/manifest.local.json`; `GoogleDrive/SLM/colab_drive_workflow/manifest.json`; `outputs/colab_drive_workflow-20260620T114217Z-3-001.zip` |
 | expected_outputs | `paper_workflow/colab_drive_cold_start_smoke.ipynb`; `paper_workflow/drive_manifest_reload_smoke.ipynb`; `paper_workflow/colab_utils/drive_paths.py`; `paper_workflow/colab_utils/dependency_check.py`; `paper_workflow/colab_utils/mount_drive.py`; `paper_workflow/colab_utils/runtime_setup.py`; `paper_workflow/colab_utils/manifest_io.py`; `paper_workflow/colab_utils/drive_workflow.py`; `scripts/colab_drive_entry.py`; `scripts/sync_local_outputs_to_drive.py`; `scripts/write_workflow_manifest.py`; `scripts/verify_drive_artifacts.py`; `outputs/colab_drive_workflow/colab_env_report.json`; `outputs/colab_drive_workflow/drive_mount_report.json`; `outputs/colab_drive_workflow/cold_start_smoke_record.jsonl`; `outputs/colab_drive_workflow/reload_smoke_record.jsonl`; `outputs/colab_drive_workflow/local_output_sync_report.json`; `outputs/colab_drive_workflow/manifest.local.json` |
-| blocking_items | 本地环境不能真实挂载 Google Drive; Drive 侧 manifest reload 仍需要在 Colab 中执行 Notebook 或等价 CLI 后审计。 |
+| blocking_items | 无。 |
 | fallback_path | 若 Colab 无法挂载 Drive, 本地命令仅写入 `outputs/colab_drive_workflow/drive_mirror/` 镜像目录并记录 `unsupported_reason`; 该镜像不得支持正式论文 claim。 |
 | invariants | Notebook 只作为入口; Drive manifest、镜像与重载校验逻辑位于 repository helper 和 scripts; `main/` 不依赖 Colab、Drive 或 Notebook。 |
-| next_stage_entry | 只有 Drive manifest 在 Colab 中生成、镜像和 reload 校验均通过后, 才能进入 `stage_06_prompt_split_records_protocol`。 |
+| next_stage_entry | Drive manifest 在 Colab 中生成, 且非空输入登记、镜像和 reload 校验均通过; 可进入 `stage_06_prompt_split_records_protocol`。 |
 
 ### stage05 已完成内容
 
@@ -211,16 +211,18 @@
 4. 新增轻量测试覆盖本地 outputs 镜像、manifest 写入、reload 校验、本地输出目录约束、Drive 挂载跳过报告和依赖快照非 claim 边界。
 5. 本地执行 `python scripts/colab_drive_entry.py` 已在 `outputs/colab_drive_workflow/` 生成可审计 smoke 产物, 并验证本地镜像 reload 通过。
 6. 已修正 Colab 冷启动输入边界: 若 clone 后本地 `outputs/` 为空, workflow 会登记 Google Drive 中已有的 `SLM/real_sd_runtime_probe/` 与 `SLM/minimal_diffusion_latent_injection/` 真实运行产物, 而不是把空 manifest 误判为有效证据。
-7. `docs/field_registry.md` 已登记 Colab Drive workflow 新增字段。
+7. 已审计 `outputs/colab_drive_workflow-20260620T114217Z-3-001.zip`; ZIP 完整性通过, SHA-256 为 `427f01ed221c26cc1ee319c6a45ffdd9ab35caccf96541b741af872dab0fcb98`。
+8. 该结果包中 `metadata.workflow_decision=pass`, `reload_decision=pass`, `verified_file_count=2`, `missing_input_count=0`, `digest_mismatch_count=0`。
+9. 该结果包登记了 Google Drive 中已有的前序真实产物: `SLM/minimal_diffusion_latent_injection/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip` 和 `SLM/real_sd_runtime_probe/real_sd_runtime_probe_package_20260620t10451781952321z_b2be25c.zip`。
+10. `docs/field_registry.md` 已登记 Colab Drive workflow 新增字段。
 
-### stage05 尚未完成内容
+### stage05 完成边界
 
-1. 已审计 `outputs/colab_drive_workflow-20260620T112309Z-3-001.zip`; 该包结构完整, 但 `local_manifest_count=0`、`mirrored_file_count=0`, 只能证明空 manifest reload, 不能作为本阶段完成证据。
-2. 尚未使用修正后的 Drive 输入边界在 Colab 中重新运行 `paper_workflow/colab_drive_cold_start_smoke.ipynb` 生成包含前序 Drive 产物的真实 `manifest.json`。
-3. 尚未在 Colab 中重新运行 `paper_workflow/drive_manifest_reload_smoke.ipynb` 验证非空 Drive manifest reload。
-4. 尚未审计 Google Drive 同步目录中的非空 `colab_env_report.json`、`drive_mount_report.json`、`local_output_sync_report.json`、`manifest.json` 和 `reload_smoke_record.jsonl`。
+1. 本阶段完成的是 Colab 与 Google Drive 之间的非空前序产物登记、镜像和重载校验。
+2. 当前 `supports_paper_claim=false` 的边界保持不变; 这些结果只作为 workflow provenance, 不直接作为论文中的 detection、robustness 或 fixed-FPR 结论。
+3. `drive_mount_report.json` 中 `mount_decision=skipped`、`mounted=true`、`unsupported_reason=mount_not_requested` 表示 Notebook 已预先挂载 Drive, helper 未重复执行挂载动作, 不构成阻断项。
 
-### stage05 当前验证结果
+### stage05 验证结果
 
 | command | result |
 | --- | --- |
@@ -229,4 +231,55 @@
 | `pytest tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 8 passed |
 | `pytest tests/functional/test_colab_drive_workflow_helpers.py -q` | pass, 6 passed |
 | `pytest -q` | pass, 43 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+| `outputs/colab_drive_workflow-20260620T114217Z-3-001.zip` | pass, SHA-256 `427f01ed221c26cc1ee319c6a45ffdd9ab35caccf96541b741af872dab0fcb98` |
+
+## stage_06_prompt_split_records_protocol
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_06_prompt_split_records_protocol` |
+| phase_status | `completed` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/colab_drive_workflow-20260620T114217Z-3-001.zip`; `outputs/prompts.zip`; `configs/paper_main_probe_prompts.txt`; `configs/paper_main_pilot_prompts.txt`; `configs/paper_main_full_prompts.txt` |
+| expected_output_manifest | `outputs/prompt_event_protocol/manifest.local.json` |
+| expected_outputs | `configs/paper_main_probe_prompts.txt`; `configs/paper_main_pilot_prompts.txt`; `configs/paper_main_full_prompts.txt`; `outputs/prompt_event_protocol/prompt_records.jsonl`; `outputs/prompt_event_protocol/event_records.jsonl`; `outputs/prompt_event_protocol/prompt_manifest.json`; `outputs/prompt_event_protocol/split_manifest.json`; `outputs/prompt_event_protocol/event_protocol_manifest.json`; `outputs/prompt_event_protocol/prompt_statistics.json`; `outputs/prompt_event_protocol/manifest.local.json` |
+| blocking_items | 无。 |
+| fallback_path | 若 prompt bank、prompt 配置、前序 Drive workflow 证据或字段登记缺失, 停止推进并修复协议输入; 不得手工改写 prompt_id 或 event_id。 |
+| invariants | records 只能由 `experiments/` 或 `scripts/` 写出; `main/` 不写 records; calibration 与 test 不共享 prompt_id; 当前协议产物不支持正式论文 claim。 |
+| next_stage_entry | prompt、split、sample role 和 event manifest 均可复现, 可进入 `stage_07_semantic_mask_risk_field_safe_subspace`。 |
+
+### stage06 已完成内容
+
+1. 使用 `outputs/prompts.zip` 重新生成项目 prompt 配置; 输入 zip 的 SHA-256 为 `197cb1c40d2ff131e761c70b56f41164c4e7ad168f35a63cb1c2bbe5c46e1eee`。
+2. 新增 `scripts/import_prompt_bank.py`, 从外部 prompt bank 读取 probe、pilot 和 full 三组 prompt, 统一规范化空白, 并替换仓库治理不允许写入配置正文的过程标记词。
+3. `configs/paper_main_probe_prompts.txt`、`configs/paper_main_pilot_prompts.txt` 和 `configs/paper_main_full_prompts.txt` 当前分别包含 10、600 和 6000 条 prompt。
+4. prompt bank 导入过程中, pilot 与 full 各有 1 条 prompt 因命名治理约束被语义等价替换为 `concert platform` 表达, probe 无需替换。
+5. `experiments/protocol/prompts.py` 负责 prompt 文本规范化、语义标签派生、风险配置派生、稳定 `prompt_id` 生成, 并在 prompt record 中保留 split 字段。
+6. `experiments/protocol/splits.py` 固定 `dev`、`calibration`、`test` 三个 split, 并按 prompt set 与 risk profile 分层后进行稳定划分, 避免 calibration/test 在 prompt_id 层面交叉。
+7. `experiments/protocol/events.py` 由 prompt 与 sample role 构造 `positive_source`、`clean_negative` 和 `attacked_negative` 三类事件, 并生成稳定 `event_id`。
+8. `experiments/protocol/records.py` 与 `experiments/protocol/calibration.py` 负责 JSONL 写出、轻量唯一性校验和协议统计摘要。
+9. `scripts/write_prompt_event_protocol.py` 将 prompt records、event records、prompt manifest、split manifest、event protocol manifest、prompt statistics 和本地 manifest 写入 `outputs/prompt_event_protocol/`, 并在 manifest 输入中登记 `outputs/prompts.zip`。
+10. 当前协议输出 `prompt_count=6610`, `event_count=19830`, `split_counts` 为 `dev=659`、`calibration=2970`、`test=2981`, 三个 sample role 各 6610 条事件。
+11. 当前协议输出 `calibration_test_disjoint=true`, `protocol_decision=pass`, `supports_paper_claim=false`。
+12. `docs/field_registry.md` 已登记 prompt、split、event、sample role、protocol manifest、prompt bank 导入摘要和统计摘要相关字段。
+13. 新增 `tests/functional/test_prompt_bank_import.py` 与 `tests/functional/test_prompt_event_protocol.py`, 覆盖 prompt bank 导入、稳定 ID、split 无交叉、受治理输出目录和 manifest 写出边界。
+
+### stage06 完成边界
+
+1. 本阶段完成的是论文实验协议索引, 不是正式检测指标、鲁棒性指标或 fixed-FPR 结论。
+2. `prompt_records.jsonl` 和 `event_records.jsonl` 可以作为后续实验 runner 的输入索引, 但不得直接作为论文 claim 支撑证据。
+3. `calibration` 与 `test` 的统计边界在 prompt_id 层面保持无交叉; 后续阈值校准必须继续沿用这一边界。
+4. `dev` split 仅用于开发和链路检查, 不得用于冻结 fixed-FPR 阈值或 rescue gate。
+5. `outputs/prompts.zip` 是本次 prompt bank 导入来源, 不属于应提交到 Git 的仓库内容。
+
+### stage06 验证结果
+
+| command | result |
+| --- | --- |
+| `python scripts/import_prompt_bank.py` | pass, probe=10, pilot=600, full=6000, sanitized counts probe=0、pilot=1、full=1 |
+| `python scripts/write_prompt_event_protocol.py` | pass, prompt_count=6610, event_count=19830, calibration_test_disjoint=true |
+| `pytest tests/functional/test_prompt_bank_import.py tests/functional/test_prompt_event_protocol.py -q` | pass, 5 passed |
+| `pytest -q` | pass, 50 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
