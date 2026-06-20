@@ -9,6 +9,7 @@ from zipfile import ZipFile
 import pytest
 
 from paper_workflow.colab_utils.minimal_latent_injection import package_injection_outputs
+from paper_workflow.colab_utils.aligned_rescoring import package_aligned_rescoring_outputs
 from paper_workflow.colab_utils.attention_latent_injection import package_attention_latent_injection_outputs
 from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
 from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outputs
@@ -21,6 +22,7 @@ DRIVE_COLD_START_NOTEBOOK_PATH = Path("paper_workflow/colab_drive_cold_start_smo
 DRIVE_RELOAD_NOTEBOOK_PATH = Path("paper_workflow/drive_manifest_reload_smoke.ipynb")
 ATTENTION_GEOMETRY_NOTEBOOK_PATH = Path("paper_workflow/attention_geometry_capture_run.ipynb")
 ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH = Path("paper_workflow/attention_latent_injection_run.ipynb")
+ALIGNED_RESCORING_NOTEBOOK_PATH = Path("paper_workflow/aligned_rescoring_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_NOTEBOOK_PATH,
     INJECTION_NOTEBOOK_PATH,
@@ -28,6 +30,7 @@ NOTEBOOK_PATHS = (
     DRIVE_RELOAD_NOTEBOOK_PATH,
     ATTENTION_GEOMETRY_NOTEBOOK_PATH,
     ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH,
+    ALIGNED_RESCORING_NOTEBOOK_PATH,
 )
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
@@ -158,6 +161,32 @@ def test_colab_notebook_delegates_attention_geometry_logic_to_helper() -> None:
     assert "drive.mount('/content/drive')" in first_code_source
     assert "/content/drive/MyDrive/SLM/attention_geometry" in joined_source
     assert "attention_geometry_ready" in joined_source
+    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
+    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
+    assert "archive_name=archive_name" in joined_source
+    assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
+    assert "--force-reinstall" not in joined_source
+    assert "numpy pillow" not in joined_source
+    assert "del sys.modules" not in joined_source
+    assert '"diffusers==' not in joined_source
+    assert '"transformers==' not in joined_source
+
+
+@pytest.mark.constraint
+def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
+    """Notebook 必须复用 repository helper 执行真实 aligned rescoring。"""
+    payload = json.loads(ALIGNED_RESCORING_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+    first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+    first_code_source = "".join(first_code_cell.get("source", []))
+
+    assert "paper_workflow.colab_utils.aligned_rescoring" in joined_source
+    assert "run_default_aligned_rescoring_plan" in joined_source
+    assert "package_aligned_rescoring_outputs" in joined_source
+    assert "drive.mount('/content/drive')" in first_code_source
+    assert "/content/drive/MyDrive/SLM/aligned_rescoring" in joined_source
+    assert "/content/drive/MyDrive/SLM/attention_geometry" in joined_source
+    assert "real_aligned_rescore_count" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source
@@ -303,3 +332,43 @@ def test_attention_latent_injection_outputs_can_be_packaged_and_mirrored(tmp_pat
         assert "outputs/attention_latent_update/attention_update_summary.json" in names
         assert "outputs/attention_latent_update/manifest.local.json" in names
         assert "outputs/attention_latent_injection/attention_latent_injection_package_input_manifest.json" in names
+
+
+@pytest.mark.constraint
+def test_aligned_rescoring_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
+    """真实 aligned rescoring 产物应能打包, 且包含重打分与方法核对文件。"""
+    rescoring_dir = tmp_path / "outputs" / "aligned_rescoring"
+    method_dir = tmp_path / "outputs" / "attention_latent_update"
+    rescoring_dir.mkdir(parents=True)
+    method_dir.mkdir(parents=True)
+    (rescoring_dir / "aligned_rescoring_result.json").write_text('{"run_decision":"pass"}\n', encoding="utf-8")
+    (rescoring_dir / "aligned_rescoring_records.jsonl").write_text('{"aligned_rescoring_ready":true}\n', encoding="utf-8")
+    (rescoring_dir / "aligned_rescoring_quality_metrics.csv").write_text("carrier_id,psnr\nsample,35.0\n", encoding="utf-8")
+    (rescoring_dir / "aligned_rescoring_environment_report.json").write_text('{"cuda_available":true}\n', encoding="utf-8")
+    (rescoring_dir / "aligned_rescoring_manifest.local.json").write_text('{"artifact_id":"aligned_rescoring_manifest"}\n', encoding="utf-8")
+    (method_dir / "attention_carrier_records.jsonl").write_text('{"carrier_id":"sample"}\n', encoding="utf-8")
+    (method_dir / "attention_update_summary.json").write_text('{"active_update_count":1}\n', encoding="utf-8")
+    (method_dir / "manifest.local.json").write_text('{"artifact_id":"attention_latent_update_manifest"}\n', encoding="utf-8")
+
+    drive_dir = tmp_path / "drive_mirror"
+    record = package_aligned_rescoring_outputs(root=tmp_path, drive_output_dir=str(drive_dir))
+    archive_path = tmp_path / record.archive_path
+
+    assert archive_path.exists()
+    assert (drive_dir / "aligned_rescoring_package.zip").exists()
+    assert record.archive_digest == record.drive_archive_digest
+    assert record.archive_entry_count >= 9
+    assert (rescoring_dir / "aligned_rescoring_archive_summary.json").exists()
+    assert (rescoring_dir / "aligned_rescoring_archive_manifest.local.json").exists()
+
+    with ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+        assert "outputs/aligned_rescoring/aligned_rescoring_result.json" in names
+        assert "outputs/aligned_rescoring/aligned_rescoring_records.jsonl" in names
+        assert "outputs/aligned_rescoring/aligned_rescoring_quality_metrics.csv" in names
+        assert "outputs/aligned_rescoring/aligned_rescoring_environment_report.json" in names
+        assert "outputs/aligned_rescoring/aligned_rescoring_manifest.local.json" in names
+        assert "outputs/attention_latent_update/attention_carrier_records.jsonl" in names
+        assert "outputs/attention_latent_update/attention_update_summary.json" in names
+        assert "outputs/attention_latent_update/manifest.local.json" in names
+        assert "outputs/aligned_rescoring/aligned_rescoring_package_input_manifest.json" in names

@@ -603,3 +603,42 @@
 | `pytest tests/functional/test_attack_matrix.py -q` | pass, 4 passed |
 | `pytest -q` | pass, 78 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+## real_gpu_aligned_rescoring_workflow
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `aligned_rescoring` |
+| phase_status | `colab_workflow_ready` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/attention_geometry/manifest.local.json`; `outputs/content_carriers/manifest.local.json`; `outputs/attention_latent_update/manifest.local.json` |
+| expected_output_manifest | `outputs/aligned_rescoring/aligned_rescoring_manifest.local.json` |
+| expected_outputs | `paper_workflow/aligned_rescoring_run.ipynb`; `paper_workflow/colab_utils/aligned_rescoring.py`; `outputs/aligned_rescoring/aligned_rescoring_records.jsonl`; `outputs/aligned_rescoring/aligned_rescoring_result.json`; `outputs/aligned_rescoring/aligned_rescoring_quality_metrics.csv`; `outputs/aligned_rescoring/aligned_rescoring_environment_report.json`; `outputs/aligned_rescoring/aligned_rescoring_manifest.local.json`; `GoogleDrive/SLM/aligned_rescoring/aligned_rescoring_package_<utc>_<short_commit>.zip` |
+| blocking_items | 本地环境无 GPU 和真实 SD3.5 Medium 权重, 因此本次只完成 Colab workflow 与 repository helper; 真实产物需要在 Colab GPU 中运行 notebook 后回传审计。 |
+| fallback_path | 若没有 ready attention geometry 包、HF_TOKEN、GPU runtime 或真实 latent callback, helper 会写出 fail result 和 unsupported reason, 不会伪造 real aligned score。 |
+| invariants | Notebook 只作为入口; 正式逻辑位于 `paper_workflow/colab_utils/aligned_rescoring.py`; 输出仍保持 `supports_paper_claim=false` 和 `full_method_claim_ready=false`, 直到重新运行 geometric rescue 与 threshold calibration 并审计 FPR。 |
+| next_stage_entry | Colab 生成并回传 aligned rescoring 包后, 本地应先审计包内 records、quality metrics、manifest 和 environment report, 再决定是否重跑 geometric rescue、threshold calibration 与 attack matrix。 |
+
+### aligned rescoring workflow 已完成内容
+
+1. 新增 `paper_workflow/colab_utils/aligned_rescoring.py`, 支持读取 ready attention geometry 包、重建 prompt / semantic / content / attention update 输入链, 选择 active attention carrier, 在真实 SD3.5 Medium latent callback 中获取对齐前后 latent 投影并重新计算 LF/HF 内容分数。
+2. 新增 `paper_workflow/aligned_rescoring_run.ipynb`, 支持 Colab 冷启动: 挂载 Google Drive、安装当前 Colab 可运行依赖组合、拉取仓库、读取 `HF_TOKEN`、检查 GPU、执行真实 aligned rescoring, 并将结果包保存到 `GoogleDrive/SLM/aligned_rescoring/`。
+3. 新增打包函数 `package_aligned_rescoring_outputs`, 会把 aligned rescoring records、result、quality metrics、environment report、manifest、attention update 方法文件和 package input manifest 纳入 zip。
+4. 更新 `tests/constraints/test_notebook_entrypoint_contract.py`, 覆盖新 Notebook 入口委托、无执行输出、Drive 镜像路径和打包产物核对。
+5. 更新 `docs/field_registry.md`, 登记真实 aligned rescoring、latent projection、LPIPS / FID / KID / CLIP 状态和质量指标相关字段。
+
+### aligned rescoring workflow 当前边界
+
+1. 当前 workflow 默认只运行少量 active attention carrier, 用于验证真实 GPU latent 投影重打分链路, 不是 full-main 规模统计。
+2. `aligned_rescoring_quality_metrics.csv` 默认记录 PSNR、SSIM、MSE 和 MAE; LPIPS、FID、KID、CLIP score 先保留 status 字段, 不伪造未计算指标。
+3. 真实 aligned rescoring 包回传后, 必须重新审计 `real_aligned_rescore_count > 0`、`image_quality_metrics_ready=true`、环境依赖版本和所有输入 manifest, 之后才能重跑 fixed-FPR 相关产物。
+
+### aligned rescoring workflow 验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `pytest tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 13 passed |
+| `pytest -q` | pass, 80 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

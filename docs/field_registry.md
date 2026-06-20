@@ -613,6 +613,35 @@ Notebook 与 repository module 的跨边界数据
 | hf_score_retention_mean | metric | none | false | false | false | 攻击分组内 HF score retention 均值。 |
 | positive_count | metric | none | false | false | false | 攻击矩阵分组内 positive source 记录数量。 |
 | negative_count | metric | none | false | false | false | 攻击矩阵分组内非 positive source 记录数量。 |
+| aligned_rescoring_record_id | protocol | none | true | false | false | 真实 aligned rescoring record 的稳定标识。 |
+| aligned_rescoring_record_count | metric | none | false | false | false | 真实 aligned rescoring records 数量。 |
+| aligned_rescoring_ready | method | none | true | false | false | 单条真实 aligned rescoring 记录是否具备真实 latent 投影重打分。 |
+| real_aligned_rescore_count | metric | none | false | false | false | 具备真实 latent 投影重打分的记录数量。 |
+| selected_attention_carrier_count | metric | none | false | false | false | 真实 aligned rescoring 运行中选用的 active attention carrier 数量。 |
+| real_raw_content_score | metric | none | true | false | false | 对齐前真实 latent 投影重新计算得到的内容分数。 |
+| real_aligned_content_score | metric | none | true | false | false | 对齐后真实 latent 投影重新计算得到的内容分数。 |
+| real_rescoring_score_gain | metric | none | true | false | false | 真实 aligned content score 相对 raw content score 的增益。 |
+| real_lf_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 LF 内容分数。 |
+| real_lf_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 LF 内容分数。 |
+| real_hf_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 HF 内容分数。 |
+| real_hf_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 HF 内容分数。 |
+| latent_projection_digest_before | artifact | none | true | false | false | 对齐前真实 latent 投影向量的稳定摘要。 |
+| latent_projection_digest_after | artifact | none | true | false | false | 对齐后真实 latent 投影向量的稳定摘要。 |
+| latent_projection_values_before | method | none | true | false | false | 对齐前真实 latent 投影到内容检测维度后的有界向量。 |
+| latent_projection_values_after | method | none | true | false | false | 对齐后真实 latent 投影到内容检测维度后的有界向量。 |
+| output_records_path | artifact | none | false | false | false | 真实 aligned rescoring result 中登记的 records 输出路径。 |
+| quality_metrics_path | artifact | none | false | false | false | 真实 aligned rescoring result 中登记的质量指标表路径。 |
+| aligned_image_path | artifact | none | true | false | false | 真实 aligned rescoring 运行保存的 aligned image 路径。 |
+| aligned_image_digest | artifact | none | true | false | false | 真实 aligned rescoring 运行保存的 aligned image 摘要。 |
+| perceptual_metrics_ready | metric | none | false | false | false | LPIPS / CLIP 等感知指标是否已经完成计算。 |
+| lpips | metric | none | false | false | false | Learned Perceptual Image Patch Similarity 指标值或 unsupported 状态。 |
+| lpips_status | metric | none | false | false | false | LPIPS 指标计算状态。 |
+| clip_score | metric | none | false | false | false | CLIP 图文一致性或图像一致性指标值或 unsupported 状态。 |
+| clip_score_status | metric | none | false | false | false | CLIP score 指标计算状态。 |
+| fid | metric | none | false | false | false | Fréchet Inception Distance 指标值或 unsupported 状态。 |
+| fid_status | metric | none | false | false | false | FID 指标计算状态。 |
+| kid | metric | none | false | false | false | Kernel Inception Distance 指标值或 unsupported 状态。 |
+| kid_status | metric | none | false | false | false | KID 指标计算状态。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
 | example_digest_random | random | _digest_random | true | false | false | 可复现随机轨迹的 digest 字段。 |
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |
