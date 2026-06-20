@@ -210,13 +210,15 @@
 3. 新增 `paper_workflow/colab_drive_cold_start_smoke.ipynb` 与 `paper_workflow/drive_manifest_reload_smoke.ipynb`, 两个 Notebook 均不保存执行输出, 且只调用 repository helper。
 4. 新增轻量测试覆盖本地 outputs 镜像、manifest 写入、reload 校验、本地输出目录约束、Drive 挂载跳过报告和依赖快照非 claim 边界。
 5. 本地执行 `python scripts/colab_drive_entry.py` 已在 `outputs/colab_drive_workflow/` 生成可审计 smoke 产物, 并验证本地镜像 reload 通过。
-6. `docs/field_registry.md` 已登记 Colab Drive workflow 新增字段。
+6. 已修正 Colab 冷启动输入边界: 若 clone 后本地 `outputs/` 为空, workflow 会登记 Google Drive 中已有的 `SLM/real_sd_runtime_probe/` 与 `SLM/minimal_diffusion_latent_injection/` 真实运行产物, 而不是把空 manifest 误判为有效证据。
+7. `docs/field_registry.md` 已登记 Colab Drive workflow 新增字段。
 
 ### stage05 尚未完成内容
 
-1. 尚未在 Colab 中运行 `paper_workflow/colab_drive_cold_start_smoke.ipynb` 生成真实 Google Drive 侧 `manifest.json`。
-2. 尚未在 Colab 中运行 `paper_workflow/drive_manifest_reload_smoke.ipynb` 验证 Drive manifest reload。
-3. 尚未审计 Google Drive 同步目录中的 `colab_env_report.json`、`drive_mount_report.json`、`local_output_sync_report.json`、`manifest.json` 和 `reload_smoke_record.jsonl`。
+1. 已审计 `outputs/colab_drive_workflow-20260620T112309Z-3-001.zip`; 该包结构完整, 但 `local_manifest_count=0`、`mirrored_file_count=0`, 只能证明空 manifest reload, 不能作为本阶段完成证据。
+2. 尚未使用修正后的 Drive 输入边界在 Colab 中重新运行 `paper_workflow/colab_drive_cold_start_smoke.ipynb` 生成包含前序 Drive 产物的真实 `manifest.json`。
+3. 尚未在 Colab 中重新运行 `paper_workflow/drive_manifest_reload_smoke.ipynb` 验证非空 Drive manifest reload。
+4. 尚未审计 Google Drive 同步目录中的非空 `colab_env_report.json`、`drive_mount_report.json`、`local_output_sync_report.json`、`manifest.json` 和 `reload_smoke_record.jsonl`。
 
 ### stage05 当前验证结果
 
@@ -225,6 +227,6 @@
 | `python tools/harness/inspect_repository.py .` | pass |
 | `python scripts/colab_drive_entry.py` | pass, local_manifest_count=7, mirrored_file_count=18, reload_decision=pass |
 | `pytest tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 8 passed |
-| `pytest tests/functional/test_colab_drive_workflow_helpers.py -q` | pass, 4 passed |
+| `pytest tests/functional/test_colab_drive_workflow_helpers.py -q` | pass, 6 passed |
 | `pytest -q` | pass, 43 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

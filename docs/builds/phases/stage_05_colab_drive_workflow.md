@@ -2,7 +2,7 @@
 
 ## 一、阶段定位
 
-在 core 和 runtime 最小闭环成立后，引入 Colab 冷启动与 Google Drive 持久化，并将 stage00 至 stage04 的本地产物补登记到 Drive。
+在 core 和 runtime 最小闭环成立后，引入 Colab 冷启动与 Google Drive 持久化。Colab 冷启动 clone 后的本地 `outputs/` 可能为空, 因此前序真实运行产物应优先从 Google Drive 的既有 `SLM/real_sd_runtime_probe/` 与 `SLM/minimal_diffusion_latent_injection/` 目录登记, 本地 `outputs/` 仅作为补充输入。
 
 本阶段属于 SLM-WM 项目分阶段构建流程的一部分。整体流程遵循 `core-first -> runtime-second -> workflow-third -> paper-artifact-final`。本阶段不得跳过前序 artifact 审计，不得绕过 harness，不得将临时结果伪装为正式论文证据。
 
@@ -36,8 +36,8 @@ python tools/harness/inspect_repository.py .
 
 本阶段开始时应确认以下输入存在、可读取、digest 可校验，并且已经登记到本地或 Drive manifest：
 
-1. stage00–stage04 本地 manifest。
-2. Google Drive 目标根目录。
+1. Google Drive 目标根目录, 其中应包含前序真实运行产物目录, 例如 `SLM/real_sd_runtime_probe/` 与 `SLM/minimal_diffusion_latent_injection/`。
+2. stage00–stage04 本地 manifest; 在 Colab 冷启动 clone 后本地 `outputs/` 为空时, 该项不得作为唯一输入来源。
 3. 现有 `paper_workflow/` 与 `scripts/` 边界。
 
 若任一输入缺失，应先写入阻断报告，不得通过手工补文件或临时路径继续执行。
@@ -49,8 +49,8 @@ python tools/harness/inspect_repository.py .
 1. 在 `paper_workflow/colab_utils/` 中实现 `mount_drive.py`、`runtime_setup.py`、`drive_paths.py`、`manifest_io.py`、`dependency_check.py`。
 2. 在 `scripts/` 中实现 `colab_stage_entry.py`、`write_stage_manifest.py`、`verify_drive_artifacts.py`、`sync_local_stages_to_drive.py`。
 3. 创建 Notebook：`paper_workflow/00_colab_cold_start_smoke.ipynb` 与 `paper_workflow/01_drive_manifest_reload_smoke.ipynb`。
-4. 同步 stage00–stage04 本地产物到 Google Drive，并生成 `local_stage_sync_report.json`。
-5. 实现 Drive manifest 校验，确保后续阶段只能读取 manifest 登记文件。
+4. 登记 Google Drive 中已有的前序真实运行产物, 同时在本地存在 outputs 产物时将其同步到 Google Drive, 并生成 `local_output_sync_report.json`。
+5. 实现 Drive manifest 校验，确保后续阶段只能读取 manifest 登记文件, 且空 manifest 不得被误判为有效 reload 证据。
 
 ## 六、禁止事项与边界
 
@@ -83,7 +83,7 @@ python tools/harness/inspect_repository.py .
 本阶段至少应完成以下验证：
 
 1. 重启 Colab runtime 后，能只凭 Drive manifest 重载前序结果。
-2. stage00–stage04 本地产物均已补登记到 Drive。
+2. Google Drive 中已有的前序真实运行产物已登记到 Drive manifest; 若本地存在 outputs 产物, 也应补登记到 Drive。
 3. Notebook 只调用 CLI 或 repository function。
 4. `main/` 仍不依赖 Colab / Drive。
 

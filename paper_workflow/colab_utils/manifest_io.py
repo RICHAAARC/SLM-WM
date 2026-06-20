@@ -29,6 +29,17 @@ LOCAL_ARCHIVE_PATTERNS = (
     "real_sd_runtime_probe_package_*.zip",
     "minimal_latent_injection_package_*.zip",
 )
+DRIVE_SOURCE_DIRECTORIES = (
+    "real_sd_runtime_probe",
+    "minimal_diffusion_latent_injection",
+)
+DRIVE_SOURCE_PATTERNS = (
+    "*.json",
+    "*.jsonl",
+    "*.csv",
+    "*.zip",
+    "*.png",
+)
 
 
 @dataclass(frozen=True)
@@ -134,10 +145,24 @@ def discover_local_files(root_path: Path) -> tuple[Path, ...]:
     return tuple(sorted(discovered))
 
 
+def discover_drive_source_files(paths: DriveWorkflowPaths) -> tuple[Path, ...]:
+    """枚举 Drive 中已有的前序真实运行产物。"""
+    discovered: set[Path] = set()
+    for directory_name in DRIVE_SOURCE_DIRECTORIES:
+        directory = paths.drive_root / directory_name
+        if directory.exists():
+            for pattern in DRIVE_SOURCE_PATTERNS:
+                discovered.update(path for path in directory.rglob(pattern) if path.is_file())
+    return tuple(sorted(discovered))
+
+
 def discover_local_manifests(root_path: Path) -> tuple[LocalManifestReference, ...]:
     """读取已存在的本地 manifest 摘要。"""
     references: list[LocalManifestReference] = []
     for manifest_path in sorted((root_path / "outputs").rglob("manifest.local.json")):
+        relative_parts = manifest_path.relative_to(root_path).parts
+        if WORKFLOW_UNIT_NAME in relative_parts:
+            continue
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         missing_fields = validate_manifest(payload)
         decision = "pass" if not missing_fields else "fail"
@@ -174,7 +199,24 @@ def mirror_files_to_drive(
                 destination_path=destination_path.as_posix(),
                 file_digest=file_digest(source_path),
                 byte_count=source_path.stat().st_size,
-                copy_decision="pass",
+                copy_decision="copied_to_drive_workflow",
+                unsupported_reason="",
+            )
+        )
+    return tuple(records)
+
+
+def register_drive_source_files(paths: DriveWorkflowPaths) -> tuple[FileMirrorRecord, ...]:
+    """登记 Drive 中已存在的前序产物, 避免依赖 Colab clone 后的空 outputs。"""
+    records: list[FileMirrorRecord] = []
+    for source_path in discover_drive_source_files(paths):
+        records.append(
+            FileMirrorRecord(
+                source_path=source_path.as_posix(),
+                destination_path=source_path.as_posix(),
+                file_digest=file_digest(source_path),
+                byte_count=source_path.stat().st_size,
+                copy_decision="registered_existing_drive_file",
                 unsupported_reason="",
             )
         )
@@ -187,7 +229,7 @@ def build_sync_report(
     mirror_records: tuple[FileMirrorRecord, ...],
     manifest_references: tuple[LocalManifestReference, ...],
 ) -> dict[str, Any]:
-    """构造本地 outputs 到 Drive 的镜像报告。"""
+    """构造本地 outputs 与 Drive 已有产物的登记报告。"""
     return {
         "construction_unit_name": WORKFLOW_UNIT_NAME,
         "workflow_name": paths.workflow_name,
@@ -198,7 +240,7 @@ def build_sync_report(
         "local_manifest_count": len(manifest_references),
         "mirrored_file_count": len(mirror_records),
         "input_file_count": len(mirror_records),
-        "unsupported_reason": "" if mirror_records else "no_local_outputs_found",
+        "unsupported_reason": "" if mirror_records else "no_local_or_drive_artifact_found",
         "supports_paper_claim": False,
         "local_manifests": [reference.to_dict() for reference in manifest_references],
         "mirrored_files": [record.to_dict() for record in mirror_records],
@@ -207,15 +249,20 @@ def build_sync_report(
 
 def build_input_manifest_payload(
     manifest_references: tuple[LocalManifestReference, ...],
+    mirror_records: tuple[FileMirrorRecord, ...],
 ) -> dict[str, Any]:
     """构造输入 manifest 摘要。"""
+    has_inputs = bool(manifest_references or mirror_records)
     return {
         "construction_unit_name": WORKFLOW_UNIT_NAME,
-        "workflow_decision": "pass" if manifest_references else "unsupported",
+        "workflow_decision": "pass" if has_inputs else "unsupported",
         "local_manifest_count": len(manifest_references),
-        "unsupported_reason": "" if manifest_references else "no_local_manifest_found",
+        "mirrored_file_count": len(mirror_records),
+        "input_file_count": len(mirror_records),
+        "unsupported_reason": "" if has_inputs else "no_registered_input_found",
         "supports_paper_claim": False,
         "local_manifests": [reference.to_dict() for reference in manifest_references],
+        "mirrored_files": [record.to_dict() for record in mirror_records],
     }
 
 
@@ -256,7 +303,8 @@ def build_drive_manifest_payload(
     manifest = build_artifact_manifest(
         artifact_id="colab_drive_workflow_manifest",
         artifact_type="drive_manifest",
-        input_paths=tuple(reference["manifest_path"] for reference in sync_report.get("local_manifests", [])),
+        input_paths=tuple(reference["manifest_path"] for reference in sync_report.get("local_manifests", []))
+        + tuple(record["destination_path"] for record in sync_report.get("mirrored_files", [])),
         output_paths=tuple(relative_to_root(root_path, path) for path in output_paths),
         config=config,
         code_version=resolve_code_version(root_path),
@@ -287,7 +335,7 @@ def write_manifest_bundle(
         LocalManifestReference(**item) for item in sync_report.get("local_manifests", [])
     )
     mirror_records = tuple(FileMirrorRecord(**item) for item in sync_report.get("mirrored_files", []))
-    input_manifest = build_input_manifest_payload(manifest_references)
+    input_manifest = build_input_manifest_payload(manifest_references, mirror_records)
     output_manifest = build_output_manifest_payload(mirror_records)
     drive_manifest = build_drive_manifest_payload(root_path, paths, sync_report, dependency_report, mount_report)
     artifact_manifest = {
@@ -327,7 +375,8 @@ def verify_drive_manifest(manifest_path: str | Path) -> ReloadCheckRecord:
     missing_paths: list[str] = []
     digest_mismatch_count = 0
     verified_file_count = 0
-    for item in manifest.get("mirrored_files", []):
+    mirrored_files = manifest.get("mirrored_files", [])
+    for item in mirrored_files:
         destination_path = Path(item["destination_path"])
         if not destination_path.exists():
             missing_paths.append(destination_path.as_posix())
@@ -336,8 +385,12 @@ def verify_drive_manifest(manifest_path: str | Path) -> ReloadCheckRecord:
             digest_mismatch_count += 1
             continue
         verified_file_count += 1
-    decision = "pass" if not missing_paths and digest_mismatch_count == 0 else "fail"
-    unsupported_reason = "" if decision == "pass" else "drive_manifest_reload_failed"
+    if not mirrored_files:
+        decision = "unsupported"
+        unsupported_reason = "no_manifest_file_registered"
+    else:
+        decision = "pass" if not missing_paths and digest_mismatch_count == 0 else "fail"
+        unsupported_reason = "" if decision == "pass" else "drive_manifest_reload_failed"
     return ReloadCheckRecord(
         reload_decision=decision,
         manifest_path=resolved_manifest_path.as_posix(),

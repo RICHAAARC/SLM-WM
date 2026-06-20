@@ -62,6 +62,53 @@ def test_drive_workflow_mirrors_outputs_and_reloads(tmp_path: Path) -> None:
 
 
 @pytest.mark.quick
+def test_drive_existing_artifacts_are_registered_without_local_outputs(tmp_path: Path) -> None:
+    """Colab 冷启动时应优先登记 Drive 中已有的真实运行产物。"""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    drive_root = tmp_path / "drive_root"
+    runtime_dir = drive_root / "real_sd_runtime_probe"
+    injection_dir = drive_root / "minimal_diffusion_latent_injection"
+    runtime_dir.mkdir(parents=True)
+    injection_dir.mkdir(parents=True)
+    (runtime_dir / "real_sd_runtime_probe_package_20260620t10451781952321z_b2be25c.zip").write_bytes(b"runtime")
+    (injection_dir / "minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip").write_bytes(b"injection")
+
+    summary = run_colab_drive_workflow(root=repo_root, drive_root=drive_root)
+
+    local_output_dir = repo_root / "outputs" / "colab_drive_workflow"
+    drive_workflow_dir = drive_root / "colab_drive_workflow"
+    sync_report = json.loads((local_output_dir / "local_output_sync_report.json").read_text(encoding="utf-8"))
+    input_manifest = json.loads((drive_workflow_dir / "input_manifest.json").read_text(encoding="utf-8"))
+    reload_record = json.loads((local_output_dir / "reload_smoke_record.jsonl").read_text(encoding="utf-8").strip())
+
+    assert summary["workflow_decision"] == "pass"
+    assert sync_report["local_manifest_count"] == 0
+    assert sync_report["mirrored_file_count"] == 2
+    assert input_manifest["workflow_decision"] == "pass"
+    assert input_manifest["input_file_count"] == 2
+    assert reload_record["reload_decision"] == "pass"
+    assert {record["copy_decision"] for record in sync_report["mirrored_files"]} == {"registered_existing_drive_file"}
+
+
+@pytest.mark.quick
+def test_empty_drive_manifest_reload_is_not_success(tmp_path: Path) -> None:
+    """空 manifest 不能被误判为有效 reload 证据。"""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    drive_root = tmp_path / "drive_root"
+
+    summary = run_colab_drive_workflow(root=repo_root, drive_root=drive_root)
+
+    local_output_dir = repo_root / "outputs" / "colab_drive_workflow"
+    reload_record = json.loads((local_output_dir / "reload_smoke_record.jsonl").read_text(encoding="utf-8").strip())
+
+    assert summary["workflow_decision"] == "unsupported"
+    assert reload_record["reload_decision"] == "unsupported"
+    assert reload_record["unsupported_reason"] == "no_manifest_file_registered"
+
+
+@pytest.mark.quick
 def test_local_output_dir_must_stay_under_outputs(tmp_path: Path) -> None:
     """本地持久化输出目录必须收敛在 outputs 下。"""
     repo_root = tmp_path / "repo"

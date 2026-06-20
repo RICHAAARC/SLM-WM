@@ -17,6 +17,7 @@ from paper_workflow.colab_utils.manifest_io import (
     build_sync_report,
     discover_local_manifests,
     mirror_files_to_drive,
+    register_drive_source_files,
     stable_json_text,
     verify_drive_manifest,
     write_json,
@@ -38,7 +39,9 @@ def run_local_output_sync(
     paths.local_output_dir.mkdir(parents=True, exist_ok=True)
     paths.drive_local_output_dir.mkdir(parents=True, exist_ok=True)
     manifest_references = discover_local_manifests(paths.repository_root)
-    mirror_records = mirror_files_to_drive(paths.repository_root, paths)
+    local_records = mirror_files_to_drive(paths.repository_root, paths)
+    drive_records = register_drive_source_files(paths)
+    mirror_records = tuple(sorted(local_records + drive_records, key=lambda record: record.destination_path))
     sync_report = build_sync_report(paths.repository_root, paths, mirror_records, manifest_references)
     write_json(paths.local_output_dir / "local_output_sync_report.json", sync_report)
     write_json(paths.drive_workflow_dir / "local_output_sync_report.json", sync_report)
