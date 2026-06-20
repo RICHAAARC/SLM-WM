@@ -440,6 +440,27 @@ Notebook 与 repository module 的跨边界数据
 | score_max | method | none | true | false | false | 内容分数集合的最大值。 |
 | score_mean | method | none | true | false | false | 内容分数集合的均值。 |
 | score_distribution_bin | method | none | true | false | false | 内容分数分布表使用的分数区间。 |
+| attention_graph_id | method | none | true | false | false | 注意力锚点图 record 的稳定标识。 |
+| stable_token_indices | method | none | true | false | false | 从 attention graph 中选出的稳定 token 索引集合。 |
+| relative_relation_values | method | none | true | false | false | 稳定 token 集内部的相对注意力关系权重。 |
+| anchor_graph_digest | method | none | true | false | false | 注意力锚点图 payload 的稳定摘要。 |
+| attention_relation_consistency | method | none | true | false | false | 稳定 token 双向注意力关系一致性。 |
+| geometry_evidence_record_id | method | none | true | false | false | 注意力几何证据 record 的稳定标识。 |
+| graph_source | method | none | true | false | false | 注意力图 record 的矩阵来源说明。 |
+| geometry_source | method | none | true | false | false | 几何证据 record 的来源说明。 |
+| attention_capture_record_count | method | none | false | false | false | attention capture records 数量。 |
+| attention_graph_record_count | method | none | false | false | false | 注意力锚点图 records 数量。 |
+| geometry_evidence_record_count | method | none | false | false | false | 几何证据 records 数量。 |
+| real_attention_capture_count | method | none | false | false | false | 无 unsupported reason 的真实 attention capture records 数量。 |
+| unsupported_capture_count | method | none | false | false | false | 带 unsupported reason 的 attention capture records 数量。 |
+| attention_relation_consistency_mean | metric | none | false | false | false | 注意力关系一致性的均值。 |
+| anchor_inlier_ratio_mean | metric | none | false | false | false | anchor inlier ratio 的均值。 |
+| registration_confidence_mean | metric | none | false | false | false | registration confidence 的均值。 |
+| recovered_sync_consistency_mean | metric | none | false | false | false | recovered sync consistency 的均值。 |
+| alignment_residual_mean | metric | none | false | false | false | alignment residual 的均值。 |
+| geometry_reliable_count | method | none | false | false | false | 几何证据中满足可靠性条件的记录数量。 |
+| direct_positive_decision_used | method | none | false | false | false | 几何证据链是否使用了直接 positive 判定。 |
+| attention_geometry_ready | method | none | false | false | false | 注意力几何证据是否已具备进入后续真实 attention 相对更新的条件。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

@@ -11,6 +11,7 @@ import math
 from typing import Any
 
 from main.core.digest import build_stable_digest
+from main.methods.geometry import attention_from_query_key
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,39 @@ def _matrix_entropy(matrix: tuple[tuple[float, ...], ...]) -> float:
     for row in matrix:
         entropies.append(-sum(value * math.log(value) for value in row if value > 0.0))
     return sum(entropies) / len(entropies) if entropies else 0.0
+
+
+def build_qk_attention_capture_record(
+    run_id: str,
+    model_family: str,
+    model_id: str,
+    attention_layer: str,
+    query_vectors: tuple[tuple[float, ...], ...],
+    key_vectors: tuple[tuple[float, ...], ...],
+    capture_backend: str,
+    unsupported_reason: str = "",
+) -> AttentionCaptureRecord:
+    """从 Q/K 向量构造可审计 attention capture 记录。"""
+    matrix = attention_from_query_key(query_vectors, key_vectors)
+    flattened = [value for row in matrix for value in row]
+    digest = build_stable_digest([[round(value, 12) for value in row] for row in matrix])
+    return AttentionCaptureRecord(
+        run_id=run_id,
+        model_family=model_family,
+        model_id=model_id,
+        capture_id=f"{attention_layer}_{digest[:12]}",
+        attention_layer=attention_layer,
+        attention_map_digest=digest,
+        attention_shape=(len(matrix), len(matrix[0]) if matrix else 0),
+        attention_mean=sum(flattened) / len(flattened),
+        attention_entropy=_matrix_entropy(matrix),
+        capture_backend=capture_backend,
+        unsupported_reason=unsupported_reason,
+        metadata={
+            "capture_is_synthetic": False,
+            "supports_paper_claim": False,
+        },
+    )
 
 
 def build_attention_capture_records(

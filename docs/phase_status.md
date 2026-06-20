@@ -374,3 +374,47 @@
 | `pytest tests/functional/test_content_carriers.py -q` | pass, 5 passed |
 | `pytest -q` | pass, 59 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+## stage_09_self_attention_graph_geometry
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_09_self_attention_graph_geometry` |
+| phase_status | `completed` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/content_carriers/manifest.local.json`; `outputs/content_carriers/content_carrier_summary.json`; `outputs/sd_runtime_adapter/manifest.local.json`; `outputs/sd_runtime_adapter/attention_capture_records.jsonl` |
+| expected_output_manifest | `outputs/attention_geometry/manifest.local.json` |
+| expected_outputs | `outputs/attention_geometry/attention_graph_records.jsonl`; `outputs/attention_geometry/geometry_evidence_records.jsonl`; `outputs/attention_geometry/attention_relation_consistency.csv`; `outputs/attention_geometry/geometry_evidence_summary.json`; `outputs/attention_geometry/manifest.local.json` |
+| blocking_items | 无工程阻断; 真实 Q/K attention hook 尚未在本地结果中打开, 当前 runtime 输入均带 `unsupported_reason`。 |
+| fallback_path | 若真实 attention hook 不可用, 仅允许基于已登记 attention capture 摘要重建可审计锚点图和几何统计, 并保持 `supports_paper_claim=false`; 不得把几何证据直接写成 positive 判定。 |
+| invariants | 几何证据只记录可靠性统计; `direct_positive_decision=false`; 当前 `attention_geometry_ready=false` 表示不能直接进入真实 attention-relative latent update 的论文主实验边界。 |
+| next_stage_entry | 注意力图与几何证据产物可重建; 后续若推进 `stage_10_attention_relative_latent_update`, 必须继续保留真实 Q/K attention hook 未打开的边界, 或先在 Colab 中补齐真实 attention capture。 |
+
+### stage09 已完成内容
+
+1. 新增 `main/methods/geometry/attention_graph_types.py`, 定义 attention graph record 与 geometry evidence record 的 typed object。
+2. 新增 `main/methods/geometry/recovery.py`, 实现 `softmax(QK^T / sqrt(d))`、稳定 token 集选择、相对关系抽取、anchor graph digest 和几何恢复统计。
+3. 更新 `experiments/runtime/diffusion/attention_capture.py`, 增加从 Q/K 向量构造可审计 attention capture record 的纯函数入口, 保持真实 runtime hook 与核心方法层解耦。
+4. 新增 `scripts/write_attention_geometry_outputs.py`, 从已登记 content carrier manifest 与 SD runtime attention capture records 重建 `attention_graph_records.jsonl`、`geometry_evidence_records.jsonl`、`attention_relation_consistency.csv`、summary 和 manifest。
+5. 当前 `outputs/attention_geometry/geometry_evidence_summary.json` 显示 `attention_capture_record_count=4`, `attention_graph_record_count=4`, `geometry_evidence_record_count=4`, `unsupported_capture_count=4`, `real_attention_capture_count=0`, `direct_positive_decision_used=false`, `protocol_decision=pass`, `supports_paper_claim=false`。
+6. 当前 `attention_geometry_ready=false`, 其含义是本地可重建几何证据链路已经完成, 但尚未获得无 unsupported reason 的真实 Q/K attention capture, 因此不能作为论文主实验或真实 attention-relative update 的直接证据。
+7. 新增 `tests/functional/test_attention_geometry.py`, 覆盖 Q/K 注意力公式、锚点图稳定性、几何证据统计边界、写出脚本 manifest 和 outputs 目录约束。
+8. `docs/field_registry.md` 已登记 attention graph、relative relation、geometry evidence、summary 和 ready gate 相关字段。
+
+### stage09 完成边界
+
+1. 本阶段完成的是注意力图几何证据机制和产物重建协议, 不是最终几何 rescue gate 或论文级 robustness 结论。
+2. 当前输入中的 attention capture records 均来自 synthetic latent adapter 摘要, 且保留 `unsupported_reason`; 因此所有产物均保持 `supports_paper_claim=false`。
+3. 几何证据只允许作为后续 rescue 或 alignment 统计的候选证据, 不允许直接给出 positive 判定。
+4. 若要打开真实 attention-relative latent update, 应先通过 Colab 或真实 GPU runtime 捕获 Q/K attention 或可审计 attention map, 并让 `real_attention_capture_count>0` 且 `unsupported_capture_count=0`。
+
+### stage09 验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/write_attention_geometry_outputs.py` | pass, attention_graph_record_count=4, geometry_evidence_record_count=4, protocol_decision=pass |
+| `pytest tests/functional/test_attention_geometry.py -q` | pass, 4 passed |
+| `pytest -q` | pass, 63 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
