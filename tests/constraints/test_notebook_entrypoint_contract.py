@@ -16,6 +16,9 @@ from tools.harness.lib.naming_rules import is_allowed_file_name
 RUNTIME_NOTEBOOK_PATH = Path("paper_workflow/sd_runtime_cold_start_probe.ipynb")
 INJECTION_NOTEBOOK_PATH = Path("paper_workflow/minimal_latent_injection_run.ipynb")
 NOTEBOOK_PATHS = (RUNTIME_NOTEBOOK_PATH, INJECTION_NOTEBOOK_PATH)
+COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
+    "%pip install -q --upgrade diffusers transformers accelerate safetensors sentencepiece protobuf huggingface_hub"
+)
 
 
 @pytest.mark.constraint
@@ -47,6 +50,17 @@ def test_colab_notebook_delegates_runtime_logic_to_helper() -> None:
     assert "package_probe_outputs" in joined_source
     assert "SLM_WM_MODEL_SELECTION', 'both'" in joined_source
     assert "/content/drive/MyDrive/SLM/real_sd_runtime_probe" in joined_source
+    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
+    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
+    assert "archive_name=archive_name" in joined_source
+    assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
+    assert "--force-reinstall" not in joined_source
+    assert "numpy pillow" not in joined_source
+    assert "del sys.modules" not in joined_source
+    assert "module_name == 'numpy'" not in joined_source
+    assert '"diffusers==' not in joined_source
+    assert '"transformers==' not in joined_source
+    assert '"accelerate==' not in joined_source
 
 
 @pytest.mark.constraint
@@ -63,6 +77,17 @@ def test_colab_notebook_delegates_injection_logic_to_helper() -> None:
     assert "SLM_WM_MODEL_SELECTION', 'auto'" in joined_source
     assert "/content/drive/MyDrive/SLM/minimal_diffusion_latent_injection" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
+    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
+    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
+    assert "archive_name=archive_name" in joined_source
+    assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
+    assert "--force-reinstall" not in joined_source
+    assert "numpy pillow" not in joined_source
+    assert "del sys.modules" not in joined_source
+    assert "module_name == 'numpy'" not in joined_source
+    assert '"diffusers==' not in joined_source
+    assert '"transformers==' not in joined_source
+    assert '"accelerate==' not in joined_source
 
 
 @pytest.mark.constraint

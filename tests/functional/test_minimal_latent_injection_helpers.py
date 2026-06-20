@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 from PIL import Image
 
+from paper_workflow.colab_utils import minimal_latent_injection as injection_helper
 from paper_workflow.colab_utils.minimal_latent_injection import (
     InjectionRunConfig,
     build_default_configs,
     build_injection_id,
     compute_image_quality_metrics,
     derive_core_carrier_values,
+)
+from paper_workflow.colab_utils.sd_runtime_cold_start import (
+    COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND,
+    build_runtime_environment_report,
+    flatten_environment_versions,
 )
 
 
@@ -82,3 +91,52 @@ def test_default_model_selection_keeps_primary_and_fallback() -> None:
 
     assert [config.model_family for config in configs] == ["sd35", "sd3"]
     assert [config.model_priority for config in configs] == ["primary", "compatibility_fallback"]
+
+
+@pytest.mark.quick
+def test_runtime_environment_report_records_dependency_provenance() -> None:
+    """环境快照应记录 Colab 动态升级命令和关键依赖版本, 便于复现实验。"""
+    report = build_runtime_environment_report()
+    versions = flatten_environment_versions(report)
+
+    assert report["dependency_mode"] == "colab_dynamic_upgrade"
+    assert report["manual_version_pins"] is False
+    assert report["pip_install_command"] == COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND
+    assert report["python_version"]
+    assert set(versions) >= {
+        "torch_version",
+        "diffusers_version",
+        "transformers_version",
+        "accelerate_version",
+        "huggingface_hub_version",
+        "numpy_version",
+        "pillow_version",
+    }
+
+
+@pytest.mark.quick
+def test_injection_writer_persists_environment_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """写出受治理产物时应同步保存环境报告, 即使真实后端不可用也能审计依赖。"""
+
+    def raise_backend_error(config: InjectionRunConfig) -> None:
+        raise RuntimeError("simulated_backend_unavailable")
+
+    monkeypatch.setattr(injection_helper, "run_single_injection", raise_backend_error)
+    config = make_config(output_dir="outputs/minimal_diffusion_latent_injection")
+
+    result = injection_helper.write_single_injection_outputs(config=config, root=tmp_path)
+
+    output_dir = tmp_path / "outputs" / "minimal_diffusion_latent_injection"
+    environment_path = output_dir / "sd35_environment_report.json"
+    result_path = output_dir / "sd35_injection_result.json"
+    manifest_path = output_dir / "sd35_manifest.local.json"
+    environment_report = json.loads(environment_path.read_text(encoding="utf-8"))
+    persisted_result = json.loads(result_path.read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert result["run_decision"] == "fail"
+    assert environment_report["pip_install_command"] == COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND
+    assert persisted_result["metadata"]["environment_report_path"] == (
+        "outputs/minimal_diffusion_latent_injection/sd35_environment_report.json"
+    )
+    assert "outputs/minimal_diffusion_latent_injection/sd35_environment_report.json" in manifest["output_paths"]

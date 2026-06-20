@@ -267,6 +267,28 @@ Notebook 与 repository module 的跨边界数据
 | hf_token_env | runtime | none | false | false | false | 真实 runtime 读取 Hugging Face token 的环境变量名。 |
 | torch_version | runtime | none | false | false | false | Colab runtime 中的 torch 版本。 |
 | diffusers_version | runtime | none | false | false | false | Colab runtime 中的 diffusers 版本。 |
+| transformers_version | runtime | none | false | false | false | Colab runtime 中的 transformers 版本。 |
+| accelerate_version | runtime | none | false | false | false | Colab runtime 中的 accelerate 版本。 |
+| huggingface_hub_version | runtime | none | false | false | false | Colab runtime 中的 huggingface_hub 版本。 |
+| tokenizers_version | runtime | none | false | false | false | Colab runtime 中的 tokenizers 版本。 |
+| safetensors_version | runtime | none | false | false | false | Colab runtime 中的 safetensors 版本。 |
+| sentencepiece_version | runtime | none | false | false | false | Colab runtime 中的 sentencepiece 版本。 |
+| protobuf_version | runtime | none | false | false | false | Colab runtime 中的 protobuf 版本。 |
+| numpy_version | runtime | none | false | false | false | Colab runtime 中的 numpy 版本。 |
+| pillow_version | runtime | none | false | false | false | Colab runtime 中的 pillow 版本。 |
+| dependency_mode | runtime | none | false | false | false | Colab runtime 依赖安装与解析模式。 |
+| manual_version_pins | runtime | none | false | false | false | 记录 Notebook 是否手工 pin 具体依赖版本。 |
+| pip_install_command | runtime | none | false | false | false | Colab runtime 中用于形成依赖组合的 pip 安装命令。 |
+| python_version | runtime | none | false | false | false | Colab runtime 中的 Python 版本。 |
+| python_executable | runtime | none | false | false | false | Colab runtime 中执行 Notebook 的 Python 解释器路径。 |
+| platform | runtime | none | false | false | false | Colab runtime 的平台摘要。 |
+| package_versions | runtime | none | false | false | false | Colab runtime 中关键 Python 包版本快照。 |
+| cuda_available | runtime | none | false | false | false | Colab runtime 是否可用 CUDA。 |
+| cuda_version | runtime | none | false | false | false | Colab runtime 中 torch 报告的 CUDA 版本。 |
+| device_count | runtime | none | false | false | false | Colab runtime 中可见 GPU 设备数量。 |
+| gpu_name | runtime | none | false | false | false | Colab runtime 中首个 GPU 设备名称。 |
+| runtime_environment | runtime | none | false | false | false | 真实 runtime 结果 metadata 中嵌入的环境快照。 |
+| environment_report_path | artifact | none | true | false | false | 指向完整 runtime environment report JSON 的受治理路径。 |
 | elapsed_seconds | runtime | none | true | false | false | 真实推理耗时秒数。 |
 | error_message | runtime | none | false | false | false | 真实后端不可用时的错误消息。 |
 | image_path | runtime | none | true | false | false | 真实推理输出图像的受治理路径。 |

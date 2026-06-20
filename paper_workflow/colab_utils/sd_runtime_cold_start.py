@@ -5,11 +5,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
+import importlib.metadata as importlib_metadata
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -22,6 +25,22 @@ DEFAULT_OUTPUT_DIR = "outputs/real_sd_runtime_probe"
 DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/real_sd_runtime_probe"
 PRIMARY_MODEL_FAMILY = "sd35"
 FALLBACK_MODEL_FAMILY = "sd3"
+COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
+    "%pip install -q --upgrade diffusers transformers accelerate safetensors sentencepiece protobuf huggingface_hub"
+)
+RUNTIME_ENVIRONMENT_PACKAGES = (
+    "torch",
+    "diffusers",
+    "transformers",
+    "accelerate",
+    "huggingface_hub",
+    "tokenizers",
+    "safetensors",
+    "sentencepiece",
+    "protobuf",
+    "numpy",
+    "pillow",
+)
 
 
 @dataclass(frozen=True)
@@ -168,6 +187,63 @@ def import_runtime_dependencies() -> tuple[Any, Any, Any]:
     return torch, diffusers, StableDiffusion3Pipeline
 
 
+def read_package_version(package_name: str) -> str:
+    """读取已安装 Python 包版本, 未安装时返回稳定的审计值。"""
+    try:
+        return importlib_metadata.version(package_name)
+    except importlib_metadata.PackageNotFoundError:
+        return "not_installed"
+
+
+def build_runtime_environment_report(
+    torch_module: Any | None = None,
+    install_command: str = COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND,
+) -> dict[str, Any]:
+    """构造 Colab 真实运行环境快照, 用于复现依赖组合与 GPU 条件。"""
+    package_versions = {package_name: read_package_version(package_name) for package_name in RUNTIME_ENVIRONMENT_PACKAGES}
+    cuda_available = None
+    cuda_version = None
+    gpu_name = ""
+    device_count = 0
+    if torch_module is not None:
+        package_versions["torch"] = str(getattr(torch_module, "__version__", package_versions["torch"]))
+        cuda_available = bool(torch_module.cuda.is_available())
+        cuda_version = getattr(torch_module.version, "cuda", None)
+        device_count = int(torch_module.cuda.device_count()) if cuda_available else 0
+        gpu_name = torch_module.cuda.get_device_name(0) if cuda_available and device_count else ""
+    return {
+        "dependency_mode": "colab_dynamic_upgrade",
+        "manual_version_pins": False,
+        "pip_install_command": install_command,
+        "python_version": sys.version.split()[0],
+        "python_executable": sys.executable,
+        "platform": platform.platform(),
+        "package_versions": package_versions,
+        "cuda_available": cuda_available,
+        "cuda_version": cuda_version,
+        "device_count": device_count,
+        "gpu_name": gpu_name,
+    }
+
+
+def flatten_environment_versions(environment_report: dict[str, Any]) -> dict[str, str]:
+    """把常用依赖版本提升为摘要字段, 兼容既有 result metadata 读取方式。"""
+    package_versions = environment_report["package_versions"]
+    return {
+        "torch_version": package_versions["torch"],
+        "diffusers_version": package_versions["diffusers"],
+        "transformers_version": package_versions["transformers"],
+        "accelerate_version": package_versions["accelerate"],
+        "huggingface_hub_version": package_versions["huggingface_hub"],
+        "tokenizers_version": package_versions["tokenizers"],
+        "safetensors_version": package_versions["safetensors"],
+        "sentencepiece_version": package_versions["sentencepiece"],
+        "protobuf_version": package_versions["protobuf"],
+        "numpy_version": package_versions["numpy"],
+        "pillow_version": package_versions["pillow"],
+    }
+
+
 def build_probe_id(config: RealRuntimeConfig) -> str:
     """根据配置生成稳定 probe id。"""
     return build_stable_digest(
@@ -197,7 +273,7 @@ def build_prompt_digest(config: RealRuntimeConfig) -> str:
     )
 
 
-def load_pipeline(config: RealRuntimeConfig) -> tuple[Any, dict[str, str]]:
+def load_pipeline(config: RealRuntimeConfig) -> tuple[Any, dict[str, Any]]:
     """加载真实 SD pipeline 并放入目标设备。"""
     torch, diffusers, pipeline_class = import_runtime_dependencies()
     if config.device_name == "cuda" and not torch.cuda.is_available():
@@ -211,9 +287,10 @@ def load_pipeline(config: RealRuntimeConfig) -> tuple[Any, dict[str, str]]:
     )
     pipeline = pipeline.to(config.device_name)
     pipeline.set_progress_bar_config(disable=False)
+    environment_report = build_runtime_environment_report(torch_module=torch)
     runtime_versions = {
-        "torch_version": torch.__version__,
-        "diffusers_version": diffusers.__version__,
+        **flatten_environment_versions(environment_report),
+        "runtime_environment": environment_report,
     }
     return pipeline, runtime_versions
 
@@ -285,6 +362,7 @@ def run_real_runtime(config: RealRuntimeConfig) -> tuple[RealRuntimeResult, tupl
 
 def build_failure_result(config: RealRuntimeConfig, error: Exception) -> RealRuntimeResult:
     """把不可用真实后端转为可审计失败摘要。"""
+    environment_report = build_runtime_environment_report()
     return RealRuntimeResult(
         probe_id=build_probe_id(config),
         model_family=config.model_family,
@@ -301,7 +379,11 @@ def build_failure_result(config: RealRuntimeConfig, error: Exception) -> RealRun
         device_name=config.device_name,
         torch_dtype=config.torch_dtype,
         elapsed_seconds=0.0,
-        metadata={"error_message": str(error)},
+        metadata={
+            **flatten_environment_versions(environment_report),
+            "error_message": str(error),
+            "runtime_environment": environment_report,
+        },
     )
 
 
@@ -331,7 +413,21 @@ def write_single_model_outputs(config: RealRuntimeConfig, root: str | Path = "."
     generation_path = output_dir / f"{config.model_family}_generation_record.json"
     trajectory_path = output_dir / f"{config.model_family}_latent_trajectory_records.jsonl"
     summary_path = output_dir / f"{config.model_family}_runtime_summary.json"
+    environment_path = output_dir / f"{config.model_family}_environment_report.json"
     manifest_path = output_dir / f"{config.model_family}_manifest.local.json"
+    environment_report = result.metadata.get("runtime_environment")
+    if environment_report is None:
+        environment_report = build_runtime_environment_report()
+    environment_report_relative_path = environment_path.relative_to(root_path).as_posix()
+    result = RealRuntimeResult(
+        **{
+            **result.to_dict(),
+            "metadata": {
+                **result.metadata,
+                "environment_report_path": environment_report_relative_path,
+            },
+        }
+    )
 
     summary = {
         "construction_unit_name": "minimal_diffusion_latent_injection",
@@ -343,14 +439,17 @@ def write_single_model_outputs(config: RealRuntimeConfig, root: str | Path = "."
         "model_priority": result.model_priority,
         "trajectory_entry_count": result.trajectory_entry_count,
         "image_digest": result.image_digest,
+        "environment_report_path": environment_report_relative_path,
         "metadata": result.metadata,
     }
     generation_path.write_text(stable_json_text(result.to_dict()), encoding="utf-8")
     trajectory_path.write_text("".join(json_line(record.to_dict()) for record in trajectory_records), encoding="utf-8")
+    environment_path.write_text(stable_json_text(environment_report), encoding="utf-8")
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
     output_paths = tuple(
-        path.relative_to(root_path).as_posix() for path in (generation_path, trajectory_path, summary_path, manifest_path)
+        path.relative_to(root_path).as_posix()
+        for path in (generation_path, trajectory_path, summary_path, environment_path, manifest_path)
     )
     manifest = build_artifact_manifest(
         artifact_id=f"{config.model_family}_real_sd_runtime_manifest",
@@ -367,6 +466,7 @@ def write_single_model_outputs(config: RealRuntimeConfig, root: str | Path = "."
             "prompt_digest": result.prompt_digest,
             "seed": config.seed,
             "trajectory_entry_count": result.trajectory_entry_count,
+            "environment_report_path": environment_report_relative_path,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="运行 paper_workflow/sd_runtime_cold_start_probe.ipynb",

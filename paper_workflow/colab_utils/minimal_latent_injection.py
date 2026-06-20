@@ -25,7 +25,13 @@ from main.methods.algorithm_primitives import (
     estimate_safe_basis,
     project_latent_mask,
 )
-from paper_workflow.colab_utils.sd_runtime_cold_start import file_digest, resolve_code_version, tensor_digest
+from paper_workflow.colab_utils.sd_runtime_cold_start import (
+    build_runtime_environment_report,
+    file_digest,
+    flatten_environment_versions,
+    resolve_code_version,
+    tensor_digest,
+)
 
 
 DEFAULT_OUTPUT_DIR = "outputs/minimal_diffusion_latent_injection"
@@ -202,7 +208,7 @@ def import_image_array_dependency() -> Any:
     return np
 
 
-def load_pipeline(config: InjectionRunConfig) -> tuple[Any, dict[str, str]]:
+def load_pipeline(config: InjectionRunConfig) -> tuple[Any, dict[str, Any]]:
     """加载真实 SD pipeline 并移动到目标设备."""
     _, torch, diffusers, pipeline_class = import_runtime_dependencies()
     if config.device_name == "cuda" and not torch.cuda.is_available():
@@ -212,7 +218,12 @@ def load_pipeline(config: InjectionRunConfig) -> tuple[Any, dict[str, str]]:
     pipeline = pipeline_class.from_pretrained(config.model_id, torch_dtype=dtype, token=token)
     pipeline = pipeline.to(config.device_name)
     pipeline.set_progress_bar_config(disable=False)
-    return pipeline, {"torch_version": torch.__version__, "diffusers_version": diffusers.__version__}
+    environment_report = build_runtime_environment_report(torch_module=torch)
+    runtime_versions = {
+        **flatten_environment_versions(environment_report),
+        "runtime_environment": environment_report,
+    }
+    return pipeline, runtime_versions
 
 
 def tensor_norm(tensor: Any) -> float:
@@ -330,6 +341,7 @@ def compute_image_quality_metrics(clean_image: Any, watermarked_image: Any) -> d
 def build_failure_result(config: InjectionRunConfig, error: Exception) -> tuple[InjectionRunResult, tuple[LatentUpdateRecord, ...]]:
     """把真实后端不可用状态转为可审计失败摘要."""
     injection_id = build_injection_id(config)
+    environment_report = build_runtime_environment_report()
     result = InjectionRunResult(
         injection_id=injection_id,
         model_family=config.model_family,
@@ -346,7 +358,12 @@ def build_failure_result(config: InjectionRunConfig, error: Exception) -> tuple[
         ssim=0.0,
         mse=0.0,
         mean_abs_error=0.0,
-        metadata={"error_message": str(error), "supports_paper_claim": False},
+        metadata={
+            **flatten_environment_versions(environment_report),
+            "error_message": str(error),
+            "runtime_environment": environment_report,
+            "supports_paper_claim": False,
+        },
     )
     return result, ()
 
@@ -460,9 +477,24 @@ def write_single_injection_outputs(config: InjectionRunConfig, root: str | Path 
     result_path = output_dir / f"{config.model_family}_injection_result.json"
     updates_path = output_dir / f"{config.model_family}_latent_update_records.jsonl"
     metrics_path = output_dir / f"{config.model_family}_paired_quality_metrics.csv"
+    environment_path = output_dir / f"{config.model_family}_environment_report.json"
     manifest_path = output_dir / f"{config.model_family}_manifest.local.json"
+    environment_report = result.metadata.get("runtime_environment")
+    if environment_report is None:
+        environment_report = build_runtime_environment_report()
+    environment_report_relative_path = environment_path.relative_to(root_path).as_posix()
+    result = InjectionRunResult(
+        **{
+            **result.to_dict(),
+            "metadata": {
+                **result.metadata,
+                "environment_report_path": environment_report_relative_path,
+            },
+        }
+    )
     result_path.write_text(stable_json_text(result.to_dict()), encoding="utf-8")
     updates_path.write_text("".join(json_line(record.to_dict()) for record in update_records), encoding="utf-8")
+    environment_path.write_text(stable_json_text(environment_report), encoding="utf-8")
     with metrics_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
             handle,
@@ -499,7 +531,8 @@ def write_single_injection_outputs(config: InjectionRunConfig, root: str | Path 
             }
         )
     output_paths = tuple(
-        path.relative_to(root_path).as_posix() for path in (result_path, updates_path, metrics_path, manifest_path)
+        path.relative_to(root_path).as_posix()
+        for path in (result_path, updates_path, metrics_path, environment_path, manifest_path)
     )
     manifest = build_artifact_manifest(
         artifact_id=f"{config.model_family}_minimal_latent_injection_manifest",
@@ -519,6 +552,7 @@ def write_single_injection_outputs(config: InjectionRunConfig, root: str | Path 
             "injection_step_indices": config.injection_step_indices,
             "watermark_key_digest": config.watermark_key_digest,
             "latent_update_count": result.latent_update_count,
+            "environment_report_path": environment_report_relative_path,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="运行 paper_workflow/minimal_latent_injection_run.ipynb",
