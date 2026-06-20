@@ -9,6 +9,7 @@ from zipfile import ZipFile
 import pytest
 
 from paper_workflow.colab_utils.minimal_latent_injection import package_injection_outputs
+from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
 from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outputs
 from tools.harness.lib.naming_rules import is_allowed_file_name
 
@@ -17,11 +18,13 @@ RUNTIME_NOTEBOOK_PATH = Path("paper_workflow/sd_runtime_cold_start_probe.ipynb")
 INJECTION_NOTEBOOK_PATH = Path("paper_workflow/minimal_latent_injection_run.ipynb")
 DRIVE_COLD_START_NOTEBOOK_PATH = Path("paper_workflow/colab_drive_cold_start_smoke.ipynb")
 DRIVE_RELOAD_NOTEBOOK_PATH = Path("paper_workflow/drive_manifest_reload_smoke.ipynb")
+ATTENTION_GEOMETRY_NOTEBOOK_PATH = Path("paper_workflow/attention_geometry_capture_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_NOTEBOOK_PATH,
     INJECTION_NOTEBOOK_PATH,
     DRIVE_COLD_START_NOTEBOOK_PATH,
     DRIVE_RELOAD_NOTEBOOK_PATH,
+    ATTENTION_GEOMETRY_NOTEBOOK_PATH,
 )
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
@@ -139,6 +142,31 @@ def test_colab_drive_notebooks_delegate_workflow_logic_to_helper() -> None:
 
 
 @pytest.mark.constraint
+def test_colab_notebook_delegates_attention_geometry_logic_to_helper() -> None:
+    """Notebook 必须复用 repository helper 执行真实 attention 捕获与几何重建。"""
+    payload = json.loads(ATTENTION_GEOMETRY_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+    first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+    first_code_source = "".join(first_code_cell.get("source", []))
+
+    assert "paper_workflow.colab_utils.attention_geometry_capture" in joined_source
+    assert "run_default_attention_geometry_plan" in joined_source
+    assert "package_attention_geometry_outputs" in joined_source
+    assert "drive.mount('/content/drive')" in first_code_source
+    assert "/content/drive/MyDrive/SLM/attention_geometry" in joined_source
+    assert "attention_geometry_ready" in joined_source
+    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
+    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
+    assert "archive_name=archive_name" in joined_source
+    assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
+    assert "--force-reinstall" not in joined_source
+    assert "numpy pillow" not in joined_source
+    assert "del sys.modules" not in joined_source
+    assert '"diffusers==' not in joined_source
+    assert '"transformers==' not in joined_source
+
+
+@pytest.mark.constraint
 def test_probe_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
     """真实 runtime 产物应能打包, 并可镜像到外部同步目录."""
     output_dir = tmp_path / "outputs" / "real_sd_runtime_probe"
@@ -190,3 +218,45 @@ def test_injection_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
             "sample_latent_update_records.jsonl",
             "sample_paired_quality_metrics.csv",
         ]
+
+
+@pytest.mark.constraint
+def test_attention_geometry_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
+    """真实 attention 几何产物应能打包, 且包含关键核对文件。"""
+    capture_dir = tmp_path / "outputs" / "real_attention_geometry"
+    geometry_dir = tmp_path / "outputs" / "attention_geometry"
+    capture_dir.mkdir(parents=True)
+    geometry_dir.mkdir(parents=True)
+    (capture_dir / "real_attention_capture_records.jsonl").write_text('{"capture_id":"sample"}\n', encoding="utf-8")
+    (capture_dir / "real_attention_capture_summary.json").write_text('{"attention_geometry_ready":true}\n', encoding="utf-8")
+    (capture_dir / "real_attention_environment_report.json").write_text('{"cuda_available":true}\n', encoding="utf-8")
+    (capture_dir / "real_attention_manifest.local.json").write_text('{"artifact_id":"real_attention_geometry_manifest"}\n', encoding="utf-8")
+    (geometry_dir / "attention_graph_records.jsonl").write_text('{"capture_id":"sample"}\n', encoding="utf-8")
+    (geometry_dir / "geometry_evidence_records.jsonl").write_text('{"capture_id":"sample"}\n', encoding="utf-8")
+    (geometry_dir / "attention_relation_consistency.csv").write_text("capture_id,attention_relation_consistency\nsample,1.0\n", encoding="utf-8")
+    (geometry_dir / "geometry_evidence_summary.json").write_text('{"attention_geometry_ready":true}\n', encoding="utf-8")
+    (geometry_dir / "manifest.local.json").write_text('{"artifact_id":"attention_geometry_manifest"}\n', encoding="utf-8")
+
+    drive_dir = tmp_path / "drive_mirror"
+    record = package_attention_geometry_outputs(root=tmp_path, drive_output_dir=str(drive_dir))
+    archive_path = tmp_path / record.archive_path
+
+    assert archive_path.exists()
+    assert (drive_dir / "attention_geometry_package.zip").exists()
+    assert record.archive_digest == record.drive_archive_digest
+    assert record.archive_entry_count >= 5
+    assert (capture_dir / "attention_geometry_archive_summary.json").exists()
+    assert (capture_dir / "attention_geometry_archive_manifest.local.json").exists()
+
+    with ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+        assert "outputs/real_attention_geometry/real_attention_capture_records.jsonl" in names
+        assert "outputs/real_attention_geometry/real_attention_capture_summary.json" in names
+        assert "outputs/real_attention_geometry/real_attention_environment_report.json" in names
+        assert "outputs/real_attention_geometry/real_attention_manifest.local.json" in names
+        assert "outputs/attention_geometry/attention_graph_records.jsonl" in names
+        assert "outputs/attention_geometry/geometry_evidence_records.jsonl" in names
+        assert "outputs/attention_geometry/attention_relation_consistency.csv" in names
+        assert "outputs/attention_geometry/geometry_evidence_summary.json" in names
+        assert "outputs/attention_geometry/manifest.local.json" in names
+        assert "outputs/real_attention_geometry/attention_geometry_package_input_manifest.json" in names

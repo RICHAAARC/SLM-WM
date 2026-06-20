@@ -1,5 +1,7 @@
 __pycache__/
 .pytest_cache/
+.pytest_work/
+.tmp/
 .venv/
 dist/
 build/

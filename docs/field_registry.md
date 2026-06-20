@@ -289,6 +289,7 @@ Notebook 与 repository module 的跨边界数据
 | gpu_name | runtime | none | false | false | false | Colab runtime 中首个 GPU 设备名称。 |
 | runtime_environment | runtime | none | false | false | false | 真实 runtime 结果 metadata 中嵌入的环境快照。 |
 | environment_report_path | artifact | none | true | false | false | 指向完整 runtime environment report JSON 的受治理路径。 |
+| geometry_manifest_digest | artifact | none | true | false | false | 真实 attention 捕获运行引用的几何 manifest 稳定摘要。 |
 | elapsed_seconds | runtime | none | true | false | false | 真实推理耗时秒数。 |
 | error_message | runtime | none | false | false | false | 真实后端不可用时的错误消息。 |
 | image_path | runtime | none | true | false | false | 真实推理输出图像的受治理路径。 |
@@ -451,7 +452,7 @@ Notebook 与 repository module 的跨边界数据
 | attention_capture_record_count | method | none | false | false | false | attention capture records 数量。 |
 | attention_graph_record_count | method | none | false | false | false | 注意力锚点图 records 数量。 |
 | geometry_evidence_record_count | method | none | false | false | false | 几何证据 records 数量。 |
-| real_attention_capture_count | method | none | false | false | false | 无 unsupported reason 的真实 attention capture records 数量。 |
+| real_attention_capture_count | method | none | false | false | false | 无 unsupported reason、metadata.capture_is_synthetic=false 且含有有界 attention_matrix_preview 的真实 attention capture records 数量。 |
 | unsupported_capture_count | method | none | false | false | false | 带 unsupported reason 的 attention capture records 数量。 |
 | attention_relation_consistency_mean | metric | none | false | false | false | 注意力关系一致性的均值。 |
 | anchor_inlier_ratio_mean | metric | none | false | false | false | anchor inlier ratio 的均值。 |
@@ -461,6 +462,15 @@ Notebook 与 repository module 的跨边界数据
 | geometry_reliable_count | method | none | false | false | false | 几何证据中满足可靠性条件的记录数量。 |
 | direct_positive_decision_used | method | none | false | false | false | 几何证据链是否使用了直接 positive 判定。 |
 | attention_geometry_ready | method | none | false | false | false | 注意力几何证据是否已具备进入后续真实 attention 相对更新的条件。 |
+| attention_records_path | artifact | none | true | false | false | 用于重建注意力几何证据的 attention capture records 输入路径。 |
+| attention_matrix_preview | method | none | true | false | false | 真实 attention 捕获中保存的有界 attention matrix 预览。 |
+| attention_matrix_source | method | none | true | false | false | 注意力几何重建时使用的矩阵来源, 例如 preview 或 digest replay。 |
+| attention_token_indices | method | none | true | false | false | 真实 attention map 预览中保留的 token 索引集合。 |
+| capture_tensor_shape | method | none | true | false | false | 真实 attention hook 捕获到的 tensor 形状。 |
+| geometry_manifest_path | artifact | none | true | false | false | 真实 attention 捕获运行引用的几何 manifest 路径。 |
+| geometry_summary_path | artifact | none | true | false | false | 真实 attention 捕获运行引用的几何 summary 路径。 |
+| entry_paths | artifact | none | false | false | false | 压缩包输入 manifest 中登记的入包文件路径集合。 |
+| entry_count | artifact | none | false | false | false | 压缩包输入 manifest 中登记的入包文件数量。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

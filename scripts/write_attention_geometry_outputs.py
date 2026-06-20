@@ -25,7 +25,7 @@ DEFAULT_OUTPUT_DIR = Path("outputs/attention_geometry")
 CONTENT_MANIFEST_PATH = Path("outputs/content_carriers/manifest.local.json")
 CONTENT_SUMMARY_PATH = Path("outputs/content_carriers/content_carrier_summary.json")
 RUNTIME_MANIFEST_PATH = Path("outputs/sd_runtime_adapter/manifest.local.json")
-ATTENTION_CAPTURE_RECORDS_PATH = Path("outputs/sd_runtime_adapter/attention_capture_records.jsonl")
+DEFAULT_ATTENTION_RECORDS_PATH = Path("outputs/sd_runtime_adapter/attention_capture_records.jsonl")
 
 
 def stable_json_text(value: Any) -> str:
@@ -74,6 +74,12 @@ def ensure_output_dir_under_outputs(root_path: Path, output_dir: Path) -> Path:
     return resolved_output_dir
 
 
+def resolve_repo_path(root_path: Path, path_value: str | Path) -> Path:
+    """把相对路径解析到仓库根目录下。"""
+    candidate = Path(path_value)
+    return candidate.resolve() if candidate.is_absolute() else (root_path / candidate).resolve()
+
+
 def relative_or_absolute(path: Path, root_path: Path) -> str:
     """将路径尽量转为相对仓库根目录的字符串。"""
     try:
@@ -105,6 +111,14 @@ def digest_attention_matrix(attention_map_digest: str, shape: tuple[int, int]) -
     return normalize_attention_rows(tuple(rows))
 
 
+def preview_attention_matrix(record: dict[str, Any]) -> tuple[tuple[float, ...], ...] | None:
+    """读取真实捕获时写入的有界 attention matrix 预览。"""
+    preview = record.get("metadata", {}).get("attention_matrix_preview")
+    if not preview:
+        return None
+    return normalize_attention_rows(tuple(tuple(float(value) for value in row) for row in preview))
+
+
 def attention_shape_from_record(record: dict[str, Any]) -> tuple[int, int]:
     """从 capture record 读取注意力矩阵形状。"""
     shape = tuple(int(value) for value in record.get("attention_shape", (4, 4)))
@@ -113,14 +127,31 @@ def attention_shape_from_record(record: dict[str, Any]) -> tuple[int, int]:
     return (shape[0], shape[1])
 
 
+def matrix_for_record(record: dict[str, Any]) -> tuple[tuple[float, ...], ...]:
+    """优先使用真实有界矩阵预览, 缺失时使用摘要重放矩阵。"""
+    preview = preview_attention_matrix(record)
+    if preview is not None:
+        return preview
+    return digest_attention_matrix(record["attention_map_digest"], attention_shape_from_record(record))
+
+
+def is_real_auditable_capture(record: dict[str, Any]) -> bool:
+    """判断 capture record 是否来自真实可审计 attention 捕获。"""
+    metadata = record.get("metadata", {})
+    return (
+        not record.get("unsupported_reason")
+        and metadata.get("capture_is_synthetic") is False
+        and preview_attention_matrix(record) is not None
+    )
+
+
 def build_geometry_records(capture_records: tuple[dict[str, Any], ...]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """从 attention capture records 构造图 records、证据 records 和统计表。"""
     graph_records: list[dict[str, Any]] = []
     evidence_records: list[dict[str, Any]] = []
     relation_rows: list[dict[str, Any]] = []
     for capture_record in capture_records:
-        shape = attention_shape_from_record(capture_record)
-        matrix = digest_attention_matrix(capture_record["attention_map_digest"], shape)
+        matrix = matrix_for_record(capture_record)
         graph = build_attention_graph_record(
             capture_id=capture_record["capture_id"],
             attention_layer=capture_record["attention_layer"],
@@ -137,6 +168,7 @@ def build_geometry_records(capture_records: tuple[dict[str, Any], ...]) -> tuple
                 "model_id": capture_record.get("model_id", ""),
                 "capture_backend": capture_record.get("capture_backend", ""),
                 "capture_is_synthetic": bool(capture_record.get("metadata", {}).get("capture_is_synthetic", False)),
+                "attention_matrix_source": "preview" if preview_attention_matrix(capture_record) is not None else "digest_replay",
             }
         )
         evidence_dict = evidence.to_dict()
@@ -184,14 +216,19 @@ def metric_mean(rows: list[dict[str, Any]], field_name: str) -> float:
     return sum(float(row[field_name]) for row in rows) / len(rows)
 
 
-def existing_input_paths(root_path: Path) -> tuple[str, ...]:
+def existing_input_paths(
+    root_path: Path,
+    content_manifest_path: Path,
+    content_summary_path: Path,
+    runtime_manifest_path: Path,
+    attention_records_path: Path,
+) -> tuple[str, ...]:
     """登记存在的输入路径。"""
-    candidates = (CONTENT_MANIFEST_PATH, CONTENT_SUMMARY_PATH, RUNTIME_MANIFEST_PATH, ATTENTION_CAPTURE_RECORDS_PATH)
+    candidates = (content_manifest_path, content_summary_path, runtime_manifest_path, attention_records_path)
     paths = []
     for candidate in candidates:
-        path = root_path / candidate
-        if path.exists():
-            paths.append(relative_or_absolute(path, root_path))
+        if candidate.exists():
+            paths.append(relative_or_absolute(candidate, root_path))
     return tuple(paths)
 
 
@@ -199,12 +236,20 @@ def write_attention_geometry_outputs(
     root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     max_records: int | None = None,
+    attention_records_path: str | Path = DEFAULT_ATTENTION_RECORDS_PATH,
+    content_manifest_path: str | Path = CONTENT_MANIFEST_PATH,
+    content_summary_path: str | Path = CONTENT_SUMMARY_PATH,
+    runtime_manifest_path: str | Path = RUNTIME_MANIFEST_PATH,
 ) -> dict[str, Any]:
     """写出注意力图与几何证据产物。"""
     root_path = Path(root).resolve()
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
-    capture_records = load_jsonl(root_path / ATTENTION_CAPTURE_RECORDS_PATH)
+    resolved_attention_records_path = resolve_repo_path(root_path, attention_records_path)
+    resolved_content_manifest_path = resolve_repo_path(root_path, content_manifest_path)
+    resolved_content_summary_path = resolve_repo_path(root_path, content_summary_path)
+    resolved_runtime_manifest_path = resolve_repo_path(root_path, runtime_manifest_path)
+    capture_records = load_jsonl(resolved_attention_records_path)
     if max_records is not None:
         capture_records = capture_records[:max_records]
     graph_records, evidence_records, relation_rows = build_geometry_records(capture_records)
@@ -235,12 +280,15 @@ def write_attention_geometry_outputs(
         ],
     )
     unsupported_count = sum(1 for record in capture_records if record.get("unsupported_reason"))
+    real_count = sum(1 for record in capture_records if is_real_auditable_capture(record))
+    direct_positive_decision_used = any(bool(row["direct_positive_decision"]) for row in relation_rows)
     summary = {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
+        "attention_records_path": relative_or_absolute(resolved_attention_records_path, root_path),
         "attention_capture_record_count": len(capture_records),
         "attention_graph_record_count": len(graph_records),
         "geometry_evidence_record_count": len(evidence_records),
-        "real_attention_capture_count": len(capture_records) - unsupported_count,
+        "real_attention_capture_count": real_count,
         "unsupported_capture_count": unsupported_count,
         "attention_relation_consistency_mean": metric_mean(relation_rows, "attention_relation_consistency"),
         "anchor_inlier_ratio_mean": metric_mean(relation_rows, "anchor_inlier_ratio"),
@@ -248,9 +296,9 @@ def write_attention_geometry_outputs(
         "recovered_sync_consistency_mean": metric_mean(relation_rows, "recovered_sync_consistency"),
         "alignment_residual_mean": metric_mean(relation_rows, "alignment_residual"),
         "geometry_reliable_count": sum(1 for row in relation_rows if bool(row["geometry_reliable"])),
-        "direct_positive_decision_used": any(bool(row["direct_positive_decision"]) for row in relation_rows),
-        "attention_geometry_ready": bool(relation_rows) and unsupported_count == 0,
-        "protocol_decision": "pass" if relation_rows and not any(bool(row["direct_positive_decision"]) for row in relation_rows) else "fail",
+        "direct_positive_decision_used": direct_positive_decision_used,
+        "attention_geometry_ready": bool(relation_rows) and real_count > 0 and unsupported_count == 0 and real_count == len(capture_records),
+        "protocol_decision": "pass" if relation_rows and not direct_positive_decision_used else "fail",
         "supports_paper_claim": False,
     }
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
@@ -264,12 +312,18 @@ def write_attention_geometry_outputs(
         "summary_digest": build_stable_digest(summary),
         "attention_graph_record_count": summary["attention_graph_record_count"],
         "geometry_evidence_record_count": summary["geometry_evidence_record_count"],
-        "manifest_digest": file_digest(root_path / CONTENT_MANIFEST_PATH) if (root_path / CONTENT_MANIFEST_PATH).exists() else "missing",
+        "manifest_digest": file_digest(resolved_content_manifest_path) if resolved_content_manifest_path.exists() else "missing",
     }
     manifest = build_artifact_manifest(
         artifact_id="attention_geometry_manifest",
         artifact_type="local_manifest",
-        input_paths=existing_input_paths(root_path),
+        input_paths=existing_input_paths(
+            root_path,
+            resolved_content_manifest_path,
+            resolved_content_summary_path,
+            resolved_runtime_manifest_path,
+            resolved_attention_records_path,
+        ),
         output_paths=output_paths,
         config=config,
         code_version=resolve_code_version(root_path),
@@ -292,13 +346,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument("--max-records", type=int, default=None, help="调试时限制处理记录数量。")
+    parser.add_argument("--attention-records-path", default=str(DEFAULT_ATTENTION_RECORDS_PATH), help="attention capture records 输入路径。")
+    parser.add_argument("--content-manifest-path", default=str(CONTENT_MANIFEST_PATH), help="内容载体 manifest 路径。")
+    parser.add_argument("--content-summary-path", default=str(CONTENT_SUMMARY_PATH), help="内容载体 summary 路径。")
+    parser.add_argument("--runtime-manifest-path", default=str(RUNTIME_MANIFEST_PATH), help="运行时 manifest 路径。")
     return parser
 
 
 def main() -> None:
     """命令行入口。"""
     args = build_parser().parse_args()
-    manifest = write_attention_geometry_outputs(root=args.root, output_dir=args.output_dir, max_records=args.max_records)
+    manifest = write_attention_geometry_outputs(
+        root=args.root,
+        output_dir=args.output_dir,
+        max_records=args.max_records,
+        attention_records_path=args.attention_records_path,
+        content_manifest_path=args.content_manifest_path,
+        content_summary_path=args.content_summary_path,
+        runtime_manifest_path=args.runtime_manifest_path,
+    )
     print(stable_json_text(manifest), end="")
 
 

@@ -9,6 +9,8 @@ SKIP_DIRECTORY_NAMES = {
     ".git",
     "__pycache__",
     ".pytest_cache",
+    ".pytest_work",
+    ".tmp",
     ".venv",
     "outputs",
     "audit_reports",

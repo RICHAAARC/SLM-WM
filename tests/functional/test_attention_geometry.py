@@ -88,7 +88,18 @@ def write_attention_inputs(repo_root: Path) -> None:
             "attention_entropy": 1.0,
             "capture_backend": "qk_hook",
             "unsupported_reason": "",
-            "metadata": {"capture_is_synthetic": False, "supports_paper_claim": False},
+            "metadata": {
+                "capture_is_synthetic": False,
+                "supports_paper_claim": False,
+                "attention_matrix_preview": [
+                    [0.55, 0.25, 0.15, 0.05],
+                    [0.20, 0.60, 0.15, 0.05],
+                    [0.15, 0.20, 0.60, 0.05],
+                    [0.10, 0.15, 0.20, 0.55],
+                ],
+                "attention_token_indices": [0, 4, 8, 12],
+                "capture_tensor_shape": [1, 16, 4],
+            },
         },
         {
             "run_id": "run_beta",
@@ -144,6 +155,54 @@ def test_attention_geometry_writer_creates_governed_outputs(tmp_path: Path) -> N
         "outputs/attention_geometry/geometry_evidence_summary.json",
         "outputs/attention_geometry/manifest.local.json",
     }
+
+
+@pytest.mark.quick
+def test_attention_geometry_writer_marks_real_capture_ready(tmp_path: Path) -> None:
+    """全部 capture records 均为真实记录时, ready gate 应为 true。"""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    write_attention_inputs(repo_root)
+    real_dir = repo_root / "outputs" / "real_attention_geometry"
+    real_dir.mkdir(parents=True)
+    real_records_path = real_dir / "real_attention_capture_records.jsonl"
+    real_record = {
+        "run_id": "run_real",
+        "model_family": "sd35",
+        "model_id": "model_real",
+        "capture_id": "capture_real",
+        "attention_layer": "attention_real",
+        "attention_map_digest": "3" * 64,
+        "attention_shape": [3, 3],
+        "attention_mean": 1.0 / 3.0,
+        "attention_entropy": 1.0,
+        "capture_backend": "auditable_hidden_state_attention_map",
+        "unsupported_reason": "",
+        "metadata": {
+            "capture_is_synthetic": False,
+            "supports_paper_claim": False,
+            "attention_matrix_preview": [
+                [0.60, 0.25, 0.15],
+                [0.20, 0.65, 0.15],
+                [0.15, 0.20, 0.65],
+            ],
+            "attention_token_indices": [0, 4, 8],
+            "capture_tensor_shape": [1, 9, 4],
+        },
+    }
+    real_records_path.write_text(json.dumps(real_record, sort_keys=True) + "\n", encoding="utf-8")
+
+    manifest = write_attention_geometry_outputs(
+        root=repo_root,
+        attention_records_path=real_records_path,
+    )
+    summary = json.loads((repo_root / "outputs" / "attention_geometry" / "geometry_evidence_summary.json").read_text(encoding="utf-8"))
+
+    assert manifest["metadata"]["attention_geometry_ready"] is True
+    assert summary["attention_geometry_ready"] is True
+    assert summary["real_attention_capture_count"] == 1
+    assert summary["unsupported_capture_count"] == 0
+    assert summary["attention_records_path"] == "outputs/real_attention_geometry/real_attention_capture_records.jsonl"
 
 
 @pytest.mark.quick
