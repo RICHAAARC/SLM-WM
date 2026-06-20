@@ -85,7 +85,11 @@ Notebook 与 repository module 的跨边界数据
 | primitive_name | governance | none | false | false | false | 算法原语对象或阶段记录中的原语名称。 |
 | metrics | governance | none | false | false | false | 阶段 summary 中记录的指标集合。 |
 | record_count | governance | none | false | false | false | 阶段脚本生成的记录数量。 |
+| scenario_count | governance | none | false | false | false | synthetic smoke 场景数量。 |
 | records_are_synthetic | governance | none | false | false | false | 标记本地 records 是否为 synthetic 阶段产物。 |
+| carrier_digests | method | none | false | false | false | smoke metrics 中记录的 carrier 摘要集合。 |
+| minimal_method_dependency | governance | none | false | false | false | minimal smoke 依赖的最小方法包入口。 |
+| writes_persistent_output_by_default | governance | none | false | false | false | 脚本默认是否写出持久化输出。 |
 | attention_runtime | method | none | false | false | false | attention 原语是否接入真实运行时的状态说明。 |
 | event_name | method | none | false | false | false | synthetic 阶段事件名称。 |
 | event_digest | method | none | false | false | false | 事件声明或 synthetic 事件的稳定摘要。 |
@@ -133,6 +137,9 @@ Notebook 与 repository module 的跨边界数据
 | template_values | method | none | false | false | false | LF/HF/attention synthetic carrier 模板数值。 |
 | update_values | method | none | false | false | false | 单个 carrier 生成的 latent update 数值。 |
 | carrier_digest | method | none | false | false | false | 单个 carrier 的稳定摘要。 |
+| lf_carrier_digest | method | none | false | false | false | LF carrier 的稳定摘要。 |
+| hf_carrier_digest | method | none | false | false | false | HF carrier 的稳定摘要。 |
+| attention_carrier_digest | method | none | false | false | false | attention synthetic stub carrier 的稳定摘要。 |
 | tail_threshold | method | none | false | false | false | HF tail truncation 使用的截断阈值。 |
 | retained_fraction | method | none | false | false | false | HF tail truncation 后保留的模板比例。 |
 | synthetic_stub | method | none | false | false | false | 标记 attention carrier 是否仅为 synthetic stub。 |
@@ -174,6 +181,10 @@ Notebook 与 repository module 的跨边界数据
 | raw_content_score | method | none | true | false | false | 几何 rescue 前的内容分数。 |
 | aligned_content_score | method | none | true | false | false | 几何对齐后的内容分数。 |
 | content_threshold | protocol | none | true | false | false | fixed-FPR 内容阈值。 |
+| scenario_id | protocol | none | true | false | false | synthetic smoke 场景标识。 |
+| scenario_role | protocol | none | true | false | false | synthetic smoke 场景角色。 |
+| observed_digest | method | none | true | false | false | synthetic 观测 latent 的稳定摘要。 |
+| score_margin | method | none | true | false | false | 内容分数相对内容阈值的边界余量。 |
 | raw_content_margin | method | none | true | false | false | 原始内容分数相对内容阈值的边界余量。 |
 | aligned_content_margin | method | none | true | false | false | 对齐后内容分数相对内容阈值的边界余量。 |
 | fail_reason | method | none | true | false | false | 内容判定失败原因。 |
@@ -182,11 +193,20 @@ Notebook 与 repository module 的跨边界数据
 | rescue_eligible | method | none | true | false | false | 样本是否满足 rescue 条件。 |
 | rescue_applied | method | none | true | false | false | 是否实际应用 rescue 并通过同阈值重判。 |
 | evidence_level | method | none | true | false | false | evidence-level 判定结果。 |
+| evidence_decision | method | none | true | false | false | smoke 场景中的 evidence-level 判定结果。 |
 | attestation_pass | method | none | true | false | false | attestation 是否验证通过。 |
 | final_level | method | none | true | false | false | final-level 判定结果。 |
+| final_decision | method | none | true | false | false | smoke 场景中的 final-level 判定结果。 |
 | final_label | method | none | true | false | false | final-level 判定标签。 |
 | correct_key_score | method | none | true | false | false | synthetic 原语中正确 key 的内容分数。 |
 | wrong_key_score | method | none | true | false | false | synthetic 原语中错误 key 的内容分数。 |
+| key_separation_margin | method | none | true | false | false | 正确 key 与错误 key 内容分数差。 |
+| score_margin_min | method | none | true | false | false | smoke 场景中的最小 score margin。 |
+| rescue_trigger_rate | method | none | true | false | false | smoke 场景中 rescue_applied 的触发比例。 |
+| wrong_key_over_threshold | method | none | true | false | false | 错误 key 是否超过内容阈值。 |
+| geometry_unreliable_rescue_blocked | method | none | true | false | false | 几何可靠性不足时 rescue 是否被阻断。 |
+| final_positive_count | method | none | true | false | false | smoke 场景 final positive 数量。 |
+| evidence_positive_count | method | none | true | false | false | smoke 场景 evidence positive 数量。 |
 | hf_tail_truncation_delta | method | none | true | false | false | HF tail truncation 前后分数差异。 |
 | attestation_layering_pass | method | none | true | false | false | attestation 是否只影响 final-level 的检查结果。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |

@@ -33,10 +33,13 @@ from main.methods.algorithm_primitives import (
     evaluate_geometry_reliability,
     project_latent_mask,
 )
+from main.methods.synthetic_smoke import build_core_method_smoke_bundle
 
 
 STAGE_NAME = "stage_01_algorithm_primitives"
+STAGE02_NAME = "stage_02_core_method_smoke_test"
 DEFAULT_OUTPUT_DIR = Path("outputs/local_stage01_core_primitives")
+DEFAULT_STAGE02_OUTPUT_DIR = Path("outputs/local_stage02_core_synthetic_smoke")
 
 
 def stable_json_text(value: Any) -> str:
@@ -313,13 +316,163 @@ def write_stage01_outputs(root: str | Path, output_dir: str | Path = DEFAULT_OUT
     return manifest
 
 
+def build_stage02_event_records(bundle: Any) -> list[ExperimentRecord]:
+    """把 stage02 smoke 场景转换为 synthetic event records。"""
+    run_id = "stage02_core_synthetic_smoke"
+    records: list[ExperimentRecord] = []
+    for scenario in bundle.scenarios:
+        records.append(
+            ExperimentRecord(
+                record_id=f"stage02_{scenario.scenario_id}",
+                run_id=run_id,
+                split="synthetic",
+                method_name="slm_wm_core_method_smoke",
+                metric_name="content_score",
+                metric_value=scenario.content_score,
+                metadata={
+                    "stage_name": STAGE02_NAME,
+                    "scenario_id": scenario.scenario_id,
+                    "scenario_role": scenario.scenario_role,
+                    "score_margin": scenario.score_margin,
+                    "positive_by_content": scenario.positive_by_content,
+                    "rescue_eligible": scenario.rescue_eligible,
+                    "rescue_applied": scenario.rescue_applied,
+                    "evidence_decision": scenario.evidence_decision,
+                    "final_decision": scenario.final_decision,
+                    "final_label": scenario.final_label,
+                    "geometry_reliable": scenario.geometry_reliable,
+                    "attestation_pass": scenario.attestation_pass,
+                    "observed_digest": scenario.observed_digest,
+                },
+            )
+        )
+    return records
+
+
+def build_stage02_metrics(bundle: Any) -> dict[str, Any]:
+    """构造 stage02 core smoke 指标文件。"""
+    scenario_payload = [scenario.to_dict() for scenario in bundle.scenarios]
+    return {
+        "stage_name": STAGE02_NAME,
+        "artifact_id": "stage02_core_smoke_metrics",
+        "artifact_type": "local_stage_metrics",
+        "decision": "pass"
+        if bundle.metrics["key_separation_margin"] > 0
+        and not bundle.metrics["wrong_key_over_threshold"]
+        and bundle.metrics["geometry_unreliable_rescue_blocked"]
+        and bundle.metrics["attestation_layering_pass"]
+        else "fail",
+        "metrics": bundle.metrics,
+        "carrier_digests": bundle.carrier_digests,
+        "scenario_count": len(bundle.scenarios),
+        "scenarios": scenario_payload,
+        "metadata": bundle.metadata,
+    }
+
+
+def build_stage02_summary_markdown(metrics: dict[str, Any]) -> str:
+    """构造 stage02 smoke summary 的 Markdown 文本。"""
+    metric_values = metrics["metrics"]
+    lines = [
+        "# stage02 core synthetic smoke summary",
+        "",
+        "本文件是本地阶段 smoke 产物, 不是正式论文 supported claim。",
+        "",
+        "## 结论",
+        "",
+        f"- decision: `{metrics['decision']}`",
+        f"- scenario_count: `{metrics['scenario_count']}`",
+        f"- key_separation_margin: `{metric_values['key_separation_margin']}`",
+        f"- rescue_trigger_rate: `{metric_values['rescue_trigger_rate']}`",
+        f"- wrong_key_over_threshold: `{metric_values['wrong_key_over_threshold']}`",
+        f"- geometry_unreliable_rescue_blocked: `{metric_values['geometry_unreliable_rescue_blocked']}`",
+        f"- attestation_layering_pass: `{metric_values['attestation_layering_pass']}`",
+        "",
+        "## 场景",
+        "",
+    ]
+    for scenario in metrics["scenarios"]:
+        lines.append(
+            "- "
+            f"{scenario['scenario_id']}: "
+            f"content_score={scenario['content_score']}, "
+            f"rescue_applied={scenario['rescue_applied']}, "
+            f"evidence_decision={scenario['evidence_decision']}, "
+            f"final_decision={scenario['final_decision']}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def write_stage02_outputs(
+    root: str | Path,
+    output_dir: str | Path = DEFAULT_STAGE02_OUTPUT_DIR,
+) -> dict[str, Any]:
+    """写出 stage02 synthetic smoke records、metrics、summary 和 manifest。"""
+    root_path = Path(root).resolve()
+    resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
+    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+
+    bundle = build_core_method_smoke_bundle()
+    records = build_stage02_event_records(bundle)
+    metrics = build_stage02_metrics(bundle)
+
+    records_path = resolved_output_dir / "synthetic_event_records.jsonl"
+    metrics_path = resolved_output_dir / "core_smoke_metrics.json"
+    summary_path = resolved_output_dir / "core_smoke_summary.md"
+    manifest_path = resolved_output_dir / "manifest.local.json"
+    records_path.write_text("".join(json_line(record.to_dict()) for record in records), encoding="utf-8")
+    metrics_path.write_text(stable_json_text(metrics), encoding="utf-8")
+    summary_path.write_text(build_stage02_summary_markdown(metrics), encoding="utf-8")
+
+    output_paths = tuple(
+        path.relative_to(root_path).as_posix() for path in (records_path, metrics_path, summary_path, manifest_path)
+    )
+    manifest = build_artifact_manifest(
+        artifact_id="stage02_core_synthetic_smoke_manifest",
+        artifact_type="local_stage_manifest",
+        input_paths=(
+            "outputs/local_stage00_core_boundary/manifest.local.json",
+            "outputs/local_stage01_core_primitives/manifest.local.json",
+            "docs/builds/phases/stage_02_core_method_smoke_test.md",
+            "docs/field_registry.md",
+            "docs/phase_status.md",
+            "main/methods/algorithm_primitives.py",
+            "main/methods/synthetic_smoke.py",
+            "scripts/run_core_smoke.py",
+            "scripts/run_minimal_method_smoke.py",
+            "tests/functional/test_core_method_smoke.py",
+        ),
+        output_paths=output_paths,
+        config={
+            "stage_name": STAGE02_NAME,
+            "metrics_digest": build_stable_digest(metrics),
+            "record_count": len(records),
+        },
+        code_version=resolve_code_version(root_path),
+        rebuild_command="python scripts/run_core_smoke.py --stage stage02",
+        metadata={
+            "stage_name": STAGE02_NAME,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "decision": metrics["decision"],
+        },
+    ).to_dict()
+    manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
+    return manifest
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
-    parser = argparse.ArgumentParser(description="运行 stage01 纯算法原语 smoke。")
+    parser = argparse.ArgumentParser(description="运行 SLM-WM 核心 smoke。")
+    parser.add_argument(
+        "--stage",
+        choices=("stage01", "stage02"),
+        default="stage01",
+        help="选择要写出的本地阶段产物。",
+    )
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument(
         "--output-dir",
-        default=str(DEFAULT_OUTPUT_DIR),
+        default=None,
         help="阶段输出目录, 必须位于 outputs/ 下。",
     )
     return parser
@@ -329,7 +482,10 @@ def main() -> None:
     """命令行入口。"""
     parser = build_parser()
     args = parser.parse_args()
-    manifest = write_stage01_outputs(args.root, args.output_dir)
+    if args.stage == "stage02":
+        manifest = write_stage02_outputs(args.root, args.output_dir or DEFAULT_STAGE02_OUTPUT_DIR)
+    else:
+        manifest = write_stage01_outputs(args.root, args.output_dir or DEFAULT_OUTPUT_DIR)
     print(stable_json_text(manifest), end="")
 
 

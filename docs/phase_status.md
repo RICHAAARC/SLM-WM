@@ -70,3 +70,37 @@
 | `pytest tests/constraints -q` | pass, 9 passed |
 | `pytest -q` | pass, 16 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+## stage_02_core_method_smoke_test
+
+| item | value |
+| --- | --- |
+| stage_name | `stage_02_core_method_smoke_test` |
+| phase_status | `completed` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/local_stage00_core_boundary/manifest.local.json`; `outputs/local_stage01_core_primitives/manifest.local.json` |
+| expected_output_manifest | `outputs/local_stage02_core_synthetic_smoke/manifest.local.json` |
+| expected_outputs | `outputs/local_stage02_core_synthetic_smoke/synthetic_event_records.jsonl`; `outputs/local_stage02_core_synthetic_smoke/core_smoke_metrics.json`; `outputs/local_stage02_core_synthetic_smoke/core_smoke_summary.md`; `outputs/local_stage02_core_synthetic_smoke/manifest.local.json` |
+| blocking_items | 无。 |
+| fallback_path | 若 synthetic latent smoke 不能复现 key 区分、rescue 边界或 attestation 分层, 停止推进并修复 `main/methods/synthetic_smoke.py`。 |
+| invariants | 不接入真实 SD3/SD3.5、Colab、Drive 或 Notebook; 不把 smoke 结果写成论文 supported claims; attention carrier 仍为 synthetic stub。 |
+| next_stage_entry | stage02 验证通过后, 才能进入 `stage_03_sd3_runtime_adapter`。 |
+
+### stage02 已完成内容
+
+1. `main/methods/synthetic_smoke.py` 构造 clean、watermarked、wrong-key negative、geometric shifted、aligned recovered、unattested positive 和 final positive 等 synthetic latent 场景。
+2. `scripts/run_core_smoke.py --stage stage02` 写出 stage02 synthetic records、metrics、summary 和 manifest。
+3. `scripts/run_minimal_method_smoke.py` 提供 minimal method package 可复用的 stdout smoke。
+4. `tests/functional/test_core_method_smoke.py` 覆盖错误 key、rescue 边界、几何可靠性不足阻断 rescue 和 attestation 分层。
+
+### stage02 验证结果
+
+| command | result |
+| --- | --- |
+| `python scripts/run_minimal_method_smoke.py` | pass |
+| `python scripts/run_core_smoke.py --stage stage02` | pass |
+| `pytest tests/functional -q` | pass, 11 passed |
+| `pytest tests/constraints -q` | pass, 9 passed |
+| `pytest -q` | pass, 20 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

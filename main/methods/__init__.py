@@ -21,6 +21,11 @@ from main.methods.algorithm_primitives import (
     evaluate_geometry_reliability,
     project_latent_mask,
 )
+from main.methods.synthetic_smoke import (
+    CoreSmokeBundle,
+    CoreSmokeScenario,
+    build_core_method_smoke_bundle,
+)
 
 __all__ = [
     "CarrierPrimitive",
@@ -42,4 +47,7 @@ __all__ = [
     "estimate_safe_basis",
     "evaluate_geometry_reliability",
     "project_latent_mask",
+    "CoreSmokeBundle",
+    "CoreSmokeScenario",
+    "build_core_method_smoke_bundle",
 ]
