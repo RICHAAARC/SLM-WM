@@ -16,6 +16,7 @@ from tools.harness.lib.naming_rules import is_allowed_file_name
 RUNTIME_NOTEBOOK_PATH = Path("paper_workflow/sd_runtime_cold_start_probe.ipynb")
 INJECTION_NOTEBOOK_PATH = Path("paper_workflow/minimal_latent_injection_run.ipynb")
 NOTEBOOK_PATHS = (RUNTIME_NOTEBOOK_PATH, INJECTION_NOTEBOOK_PATH)
+COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
     "%pip install -q --upgrade diffusers transformers accelerate safetensors sentencepiece protobuf huggingface_hub"
 )
@@ -37,6 +38,25 @@ def test_colab_notebooks_have_no_stored_outputs() -> None:
         assert code_cells
         assert all(cell.get("execution_count") is None for cell in code_cells)
         assert all(cell.get("outputs") == [] for cell in code_cells)
+
+
+@pytest.mark.constraint
+def test_colab_runtime_constraints_document_known_working_environment() -> None:
+    """Colab 依赖约束记录应保存已验证组合, 但不能强制安装平台提供的 torch."""
+    text = COLAB_RUNTIME_CONSTRAINTS_PATH.read_text(encoding="utf-8")
+    requirement_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+    assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in text
+    assert "diffusers==0.38.0" in requirement_lines
+    assert "transformers==5.12.1" in requirement_lines
+    assert "accelerate==1.14.0" in requirement_lines
+    assert "huggingface_hub==1.20.1" in requirement_lines
+    assert "numpy==2.0.2" in requirement_lines
+    assert all(not line.startswith("torch==") for line in requirement_lines)
 
 
 @pytest.mark.constraint

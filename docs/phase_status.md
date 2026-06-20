@@ -144,40 +144,45 @@
 | item | value |
 | --- | --- |
 | construction_unit_name | `stage_04_minimal_diffusion_latent_injection` |
-| phase_status | `in_progress` |
+| phase_status | `completed` |
 | executor | `codex_agent` |
 | execution_date | `2026-06-20` |
 | input_manifest | `outputs/sd_runtime_adapter/manifest.local.json`; `outputs/core_method_synthetic_smoke/manifest.local.json` |
 | expected_output_manifest | `outputs/minimal_diffusion_latent_injection/manifest.local.json` |
-| expected_outputs | `paper_workflow/sd_runtime_cold_start_probe.ipynb`; `paper_workflow/colab_utils/sd_runtime_cold_start.py`; `paper_workflow/minimal_latent_injection_run.ipynb`; `paper_workflow/colab_utils/minimal_latent_injection.py`; `outputs/real_sd_runtime_probe/*_manifest.local.json`; `outputs/real_sd_runtime_probe/*_environment_report.json`; `outputs/real_sd_runtime_probe/real_sd_runtime_probe_package_<utc>_<short_commit>.zip`; `GoogleDrive/SLM/real_sd_runtime_probe/real_sd_runtime_probe_package_<utc>_<short_commit>.zip`; `outputs/minimal_diffusion_latent_injection/*_injection_result.json`; `outputs/minimal_diffusion_latent_injection/*_latent_update_records.jsonl`; `outputs/minimal_diffusion_latent_injection/*_paired_quality_metrics.csv`; `outputs/minimal_diffusion_latent_injection/*_environment_report.json`; `outputs/minimal_diffusion_latent_injection/*_manifest.local.json`; `outputs/minimal_diffusion_latent_injection/minimal_latent_injection_package_<utc>_<short_commit>.zip`; `GoogleDrive/SLM/minimal_diffusion_latent_injection/minimal_latent_injection_package_<utc>_<short_commit>.zip` |
-| blocking_items | 本地无 GPU 与真实模型权重环境; 最小 latent injection 的真实 paired images、质量指标和 latent update records 仍需要在 Colab 执行。 |
+| expected_outputs | `paper_workflow/sd_runtime_cold_start_probe.ipynb`; `paper_workflow/colab_utils/sd_runtime_cold_start.py`; `paper_workflow/minimal_latent_injection_run.ipynb`; `paper_workflow/colab_utils/minimal_latent_injection.py`; `outputs/real_sd_runtime_probe/*_manifest.local.json`; `outputs/real_sd_runtime_probe/*_environment_report.json`; `outputs/real_sd_runtime_probe_package_<utc>_<short_commit>.zip`; `GoogleDrive/SLM/real_sd_runtime_probe/real_sd_runtime_probe_package_<utc>_<short_commit>.zip`; `outputs/minimal_diffusion_latent_injection/*_injection_result.json`; `outputs/minimal_diffusion_latent_injection/*_latent_update_records.jsonl`; `outputs/minimal_diffusion_latent_injection/*_paired_quality_metrics.csv`; `outputs/minimal_diffusion_latent_injection/*_environment_report.json`; `outputs/minimal_diffusion_latent_injection/*_manifest.local.json`; `outputs/minimal_latent_injection_package_<utc>_<short_commit>.zip`; `GoogleDrive/SLM/minimal_diffusion_latent_injection/minimal_latent_injection_package_<utc>_<short_commit>.zip` |
+| blocking_items | 无。 |
 | fallback_path | SD3.5 Medium 是主线; 若主模型在 Colab 不可用, 运行 SD3 Medium 兼容 fallback 并写出 `unsupported_reason`; fallback 产物不得支持正式论文 claim。 |
 | invariants | Notebook 只作为入口; runtime 逻辑位于 repository helper; `main/` 不依赖 Colab、Drive、diffusers、transformers 或模型权重。 |
-| next_stage_entry | 只有 Colab 真实推理、真实 latent trajectory、paired images 和质量指标通过后, 才能进入 `stage_05_colab_drive_workflow`。 |
+| next_stage_entry | Colab 真实推理、真实 latent trajectory、paired images、latent update records 和质量指标均已通过本地审计; 可进入 `stage_05_colab_drive_workflow`。 |
 
 ### stage04 已完成内容
 
-1. `paper_workflow/sd_runtime_cold_start_probe.ipynb` 提供 Colab 冷启动入口, 支持拉取代码、安装依赖、登录 Hugging Face、默认同时运行 SD3.5 Medium 主模型和 SD3 Medium 兼容对照。
+1. `paper_workflow/sd_runtime_cold_start_probe.ipynb` 提供 Colab 冷启动入口, 支持拉取代码、安装依赖、登录 Hugging Face、挂载 Google Drive, 并可运行 SD3.5 Medium 主模型与 SD3 Medium 兼容 fallback。
 2. `paper_workflow/colab_utils/sd_runtime_cold_start.py` 承载真实 SD runtime 调用、latent callback 捕获、图像摘要、trajectory records、environment report、summary、manifest、zip 打包和 Google Drive 镜像逻辑。
-3. Notebook 默认将 zip 保存到 Google Drive 的 `SLM/real_sd_runtime_probe/` 目录, 以便本地后续读取。
-4. 已审计 Google Drive 同步目录 `G:\我的云端硬盘\SLM\real_sd_runtime_probe` 中的 `real_sd_runtime_probe_package.zip`; SD3.5 Medium 主模型与 SD3 Medium 兼容对照均完成真实推理和真实 latent trajectory 捕获。
-5. `paper_workflow/minimal_latent_injection_run.ipynb` 提供最小 latent injection 的 Colab 冷启动入口, 首个代码单元先挂载 Google Drive, 默认 `SLM_WM_MODEL_SELECTION=auto`, 当前只运行 SD3.5 Medium 主模型, 并将 zip 镜像到 `SLM/minimal_diffusion_latent_injection/`。
-6. `paper_workflow/colab_utils/minimal_latent_injection.py` 承载 clean / watermarked paired image 生成、latent callback 注入、latent update records、paired quality metrics、environment report、manifest、zip 打包和 Google Drive 镜像逻辑。
-7. `tests/constraints/test_notebook_entrypoint_contract.py` 验证 Notebook 文件名、未保存执行输出、Notebook 调用 repository helper, 以及 probe / injection 产物可被打包和镜像。
-8. `tests/functional/test_minimal_latent_injection_helpers.py` 验证最小 injection 配置、稳定摘要、轻量质量指标、默认模型选择和运行环境版本快照。
-9. `docs/field_registry.md` 已登记真实 runtime probe、archive 和最小 latent injection 新增字段。
+3. 已审计 `outputs/real_sd_runtime_probe_package_20260620t10451781952321z_b2be25c.zip`; 该包对应提交 `b2be25c`, ZIP 完整性通过, SHA-256 为 `be6e4373edf81311209e0eb220ac189fd43e046128e2ba05815a0775dd9fceb7`。
+4. runtime probe 结果中, SD3.5 Medium 主模型 `stabilityai/stable-diffusion-3.5-medium` 与 SD3 Medium fallback `stabilityai/stable-diffusion-3-medium-diffusers` 均完成真实推理, 均捕获 28 条真实 latent trajectory records, latent shape 均为 `[1, 16, 64, 64]`。
+5. runtime probe 环境快照已记录 Colab L4、CUDA 12.8、Python 3.12.13、torch 2.11.0+cu128、diffusers 0.38.0、transformers 5.12.1、accelerate 1.14.0 和 huggingface_hub 1.20.1。
+6. `paper_workflow/minimal_latent_injection_run.ipynb` 提供最小 latent injection 的 Colab 冷启动入口, 首个代码单元先挂载 Google Drive, 默认 `SLM_WM_MODEL_SELECTION=auto`, 当前以 SD3.5 Medium 主模型为最小真实注入验证对象, 并将 zip 镜像到 `SLM/minimal_diffusion_latent_injection/`。
+7. `paper_workflow/colab_utils/minimal_latent_injection.py` 承载 clean / watermarked paired image 生成、latent callback 注入、latent update records、paired quality metrics、environment report、manifest、zip 打包和 Google Drive 镜像逻辑。
+8. 已审计 `outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip`; 该包对应提交 `b2be25c`, ZIP 完整性通过, SHA-256 为 `bff5f14c7e57e669dc6e9e371bb999fa663581bf4033ba771ab6595ff5d0ec0c`。
+9. minimal latent injection 结果中, SD3.5 Medium 生成 clean / watermarked paired images、3 条 latent update records、paired quality metrics、manifest 和 environment report; 质量指标记录包括 PSNR `37.86754851645436`、SSIM `0.9987065282916542`、MSE `0.00016339740250259638` 和 mean_abs_error `0.00732430862262845`。
+10. `configs/colab_sd35_runtime_constraints.txt` 记录本次已验证的 SD3.5 Medium Colab 依赖组合, 仅作为远程 Notebook 复现参考, 不属于本地默认安装依赖。
+11. `tests/constraints/test_notebook_entrypoint_contract.py` 验证 Notebook 文件名、未保存执行输出、Notebook 调用 repository helper、probe / injection 产物可被打包和镜像, 以及 Colab 运行环境约束记录不强制安装平台提供的 torch。
+12. `tests/functional/test_minimal_latent_injection_helpers.py` 验证最小 injection 配置、稳定摘要、轻量质量指标、默认模型选择、运行环境版本快照和 environment report 写出。
+13. `docs/field_registry.md` 已登记真实 runtime probe、archive 和最小 latent injection 新增字段。
 
-### stage04 尚未完成内容
+### stage04 完成边界
 
-1. 尚未在 Colab GPU 环境执行最小 latent injection。
-2. 尚未生成真实 paired clean / watermarked images、paired quality metrics 或 latent update records。
-3. 尚未形成 `outputs/minimal_diffusion_latent_injection/*_manifest.local.json` 与 `minimal_latent_injection_package_<utc>_<short_commit>.zip`。
+1. 本阶段完成的是真实 SD3.5 / SD3 推理链路、真实 latent trajectory 捕获和 SD3.5 Medium 最小 latent injection 工程验证。
+2. 当前 `supports_paper_claim=false` 的边界保持不变; 这些结果不得直接作为论文中的 watermark detection、robustness 或 fixed-FPR 结论。
+3. 当前阶段不要求真实 attention capture; Q/K attention 或可审计 attention map 应在后续 attention capture 专门构建单元中接入。
+4. SD3.5 Medium 是后续主线模型; SD3 Medium 仅保留为兼容性 fallback 与对照证据。
 
 ### stage04 当前验证结果
 
 | command | result |
 | --- | --- |
-| `pytest tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 6 passed |
+| `pytest tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 7 passed |
 | `pytest tests/functional/test_minimal_latent_injection_helpers.py -q` | pass, 7 passed |
-| `pytest -q` | pass, 35 passed |
+| `pytest -q` | pass, 38 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
