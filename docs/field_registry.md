@@ -498,6 +498,11 @@ Notebook 与 repository module 的跨边界数据
 | quality_metric_source | method | none | false | false | false | attention update 质量指标来源。 |
 | image_quality_metrics_ready | method | none | false | false | false | 是否已经完成真实图像质量指标测量。 |
 | full_method_claim_ready | method | none | false | false | false | 是否允许把 attention-relative update 写入 Full 方法主张。当前本地重建保持 false。 |
+| selected_attention_carrier_id | method | none | true | false | false | 真实 attention latent injection 中选用的 active carrier 标识。 |
+| attention_geometry_package_path | artifact | none | true | false | false | 真实 attention latent injection 使用的 geometry 输入包路径。 |
+| method_manifest_path | artifact | none | true | false | false | 真实运行引用的 attention latent update 方法 manifest 路径。 |
+| attention_runtime_strength | method | none | true | false | false | 真实 latent callback 中应用于 attention carrier tensor 的运行时强度。 |
+| attention_latent_injection_package_path | artifact | none | false | false | false | 真实 attention latent injection 打包产物路径。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

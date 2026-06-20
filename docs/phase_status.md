@@ -428,16 +428,16 @@
 | item | value |
 | --- | --- |
 | construction_unit_name | `stage_10_attention_relative_latent_update` |
-| phase_status | `local_method_proxy_ready` |
+| phase_status | `real_injection_workflow_ready` |
 | executor | `codex_agent` |
 | execution_date | `2026-06-20` |
 | input_manifest | `outputs/attention_geometry_package_20260620t13511781963497z_b237bb3.zip`; `outputs/semantic_subspace/manifest.local.json`; `outputs/content_carriers/manifest.local.json` |
-| expected_output_manifest | `outputs/attention_latent_update/manifest.local.json` |
-| expected_outputs | `outputs/attention_latent_update/attention_carrier_records.jsonl`; `outputs/attention_latent_update/attention_update_stability.csv`; `outputs/attention_latent_update/attention_update_quality_metrics.csv`; `outputs/attention_latent_update/attention_update_summary.json`; `outputs/attention_latent_update/manifest.local.json` |
-| blocking_items | 本地环境仍无 GPU, 本轮只完成由真实 attention geometry 包驱动的可审计 relation-gradient update 近似; 尚未在真实 SD3.5 latent callback 中执行该 update, 因此 `image_quality_metrics_ready=false` 且 `full_method_claim_ready=false`。 |
+| expected_output_manifest | `outputs/attention_latent_update/manifest.local.json`; Colab 运行后为 `outputs/attention_latent_injection/attention_latent_injection_manifest.local.json` |
+| expected_outputs | `outputs/attention_latent_update/attention_carrier_records.jsonl`; `outputs/attention_latent_update/attention_update_stability.csv`; `outputs/attention_latent_update/attention_update_quality_metrics.csv`; `outputs/attention_latent_update/attention_update_summary.json`; `outputs/attention_latent_update/manifest.local.json`; `paper_workflow/attention_latent_injection_run.ipynb`; `paper_workflow/colab_utils/attention_latent_injection.py`; Colab 运行后为 `outputs/attention_latent_injection/attention_latent_injection_result.json`; `outputs/attention_latent_injection/attention_latent_update_records.jsonl`; `outputs/attention_latent_injection/attention_paired_quality_metrics.csv`; `outputs/attention_latent_injection/attention_injection_environment_report.json`; `outputs/attention_latent_injection/attention_latent_injection_manifest.local.json`; `GoogleDrive/SLM/attention_latent_injection/attention_latent_injection_package_<utc>_<short_commit>.zip` |
+| blocking_items | 本地环境仍无 GPU, 当前已补齐 Colab 真实 latent callback 入口; 但真实运行结果尚需在 Colab GPU 中执行并回传审计, 因此本地 `image_quality_metrics_ready=false` 且 `full_method_claim_ready=false`。 |
 | fallback_path | 若几何证据不可靠或 update 稳定性边界不满足, carrier 自动降级为 `evidence_only`, 只保留几何证据, 不写入 Full 方法主张。 |
 | invariants | 几何链不直接 positive; attention update 只在 `attention_geometry_ready=true` 且几何证据可靠时 active; 本地质量仅为 proxy, 不替代真实 paired image 质量指标。 |
-| next_stage_entry | 若需要把 attention-relative update 作为真实 Full 方法载体, 下一步必须在 Colab GPU 中把 active carrier 接入 SD3.5 latent callback, 生成 paired images、latent update records 和真实质量指标后再审计。 |
+| next_stage_entry | 运行并审计 `attention_latent_injection_package_<utc>_<short_commit>.zip` 后, 若真实 paired image 质量指标和 latent update records 均通过边界, 才能考虑把 `image_quality_metrics_ready` 打开; `full_method_claim_ready` 仍需后续 fixed-FPR 与 rescue 链路共同确认。 |
 
 ### stage10 已完成内容
 
@@ -446,12 +446,15 @@
 3. 新增 `scripts/write_attention_latent_update_outputs.py`, 可从 ready attention geometry zip 或本地 ready 目录读取图与几何证据, 结合 semantic safe subspace records 生成 attention carrier records、强度稳定性表、质量代理表、summary 和 manifest。
 4. 新增 `tests/functional/test_attention_latent_update.py`, 覆盖可靠几何证据触发 active update、不可靠几何证据降级为 `evidence_only`, 以及脚本从 ready geometry 包重建受治理产物。
 5. `docs/field_registry.md` 已登记 attention-relative carrier、关系损失、强度稳定性、质量代理和 Full 方法 claim 边界相关字段。
+6. 新增 `paper_workflow/colab_utils/attention_latent_injection.py`, 支持从 Google Drive 读取最新 ready attention geometry 包, 重建 prompt / semantic / content / attention update 输入链, 选择 active carrier, 并在真实 SD3.5 latent callback 中执行 attention-relative update。
+7. 新增 `paper_workflow/attention_latent_injection_run.ipynb`, 支持 Colab 冷启动、挂载 Drive、读取 `HF_TOKEN`、检查 GPU、执行真实 attention latent injection、强断言真实 latent update 与质量指标存在, 并打包镜像到 `GoogleDrive/SLM/attention_latent_injection/`。
+8. 更新 `tests/constraints/test_notebook_entrypoint_contract.py`, 覆盖新 Notebook 入口委托、无执行输出和真实 injection 产物打包镜像。
 
 ### stage10 当前产物摘要
 
 1. 当前输入使用真实 SD3.5 Medium attention geometry 包 `outputs/attention_geometry_package_20260620t13511781963497z_b237bb3.zip`, 其中 `attention_geometry_ready=true`。
 2. `outputs/attention_latent_update/attention_update_summary.json` 显示 `attention_carrier_record_count=64`, `active_update_count=16`, `evidence_only_count=48`, `attention_update_stable_count=16`, `protocol_decision=pass`。
-3. 当前 `image_quality_metrics_ready=false` 且 `full_method_claim_ready=false`, 表示本轮尚不能声称真实图像质量或 Full 方法主载体结论已经完成。
+3. 当前本地 `image_quality_metrics_ready=false` 且 `full_method_claim_ready=false`, 表示本地尚不能声称真实图像质量或 Full 方法主载体结论已经完成; Colab Notebook 已具备生成真实 quality metrics 的入口。
 4. 所有新产物仍保持 `supports_paper_claim=false`, 等待真实 SD3.5 latent callback 与 paired image 审计补齐。
 
 ### stage10 验证结果
@@ -461,5 +464,6 @@
 | `python tools/harness/inspect_repository.py .` | pass |
 | `python scripts/write_attention_latent_update_outputs.py --attention-geometry-package-path outputs/attention_geometry_package_20260620t13511781963497z_b237bb3.zip` | pass, `active_update_count=16`, `evidence_only_count=48` |
 | `pytest tests/functional/test_attention_latent_update.py -q` | pass, 3 passed |
-| `pytest -q` | pass, 69 passed |
+| `pytest tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 11 passed |
+| `pytest -q` | pass, 70 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

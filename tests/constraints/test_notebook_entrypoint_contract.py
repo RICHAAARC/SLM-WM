@@ -9,6 +9,7 @@ from zipfile import ZipFile
 import pytest
 
 from paper_workflow.colab_utils.minimal_latent_injection import package_injection_outputs
+from paper_workflow.colab_utils.attention_latent_injection import package_attention_latent_injection_outputs
 from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
 from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outputs
 from tools.harness.lib.naming_rules import is_allowed_file_name
@@ -19,12 +20,14 @@ INJECTION_NOTEBOOK_PATH = Path("paper_workflow/minimal_latent_injection_run.ipyn
 DRIVE_COLD_START_NOTEBOOK_PATH = Path("paper_workflow/colab_drive_cold_start_smoke.ipynb")
 DRIVE_RELOAD_NOTEBOOK_PATH = Path("paper_workflow/drive_manifest_reload_smoke.ipynb")
 ATTENTION_GEOMETRY_NOTEBOOK_PATH = Path("paper_workflow/attention_geometry_capture_run.ipynb")
+ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH = Path("paper_workflow/attention_latent_injection_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_NOTEBOOK_PATH,
     INJECTION_NOTEBOOK_PATH,
     DRIVE_COLD_START_NOTEBOOK_PATH,
     DRIVE_RELOAD_NOTEBOOK_PATH,
     ATTENTION_GEOMETRY_NOTEBOOK_PATH,
+    ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH,
 )
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
@@ -260,3 +263,43 @@ def test_attention_geometry_outputs_can_be_packaged_and_mirrored(tmp_path: Path)
         assert "outputs/attention_geometry/geometry_evidence_summary.json" in names
         assert "outputs/attention_geometry/manifest.local.json" in names
         assert "outputs/real_attention_geometry/attention_geometry_package_input_manifest.json" in names
+
+
+@pytest.mark.constraint
+def test_attention_latent_injection_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
+    """真实 attention latent injection 产物应能打包, 且包含方法与运行核对文件。"""
+    injection_dir = tmp_path / "outputs" / "attention_latent_injection"
+    method_dir = tmp_path / "outputs" / "attention_latent_update"
+    injection_dir.mkdir(parents=True)
+    method_dir.mkdir(parents=True)
+    (injection_dir / "attention_latent_injection_result.json").write_text('{"run_decision":"pass"}\n', encoding="utf-8")
+    (injection_dir / "attention_latent_update_records.jsonl").write_text('{"trajectory_index":0}\n', encoding="utf-8")
+    (injection_dir / "attention_paired_quality_metrics.csv").write_text("injection_id,psnr\nsample,inf\n", encoding="utf-8")
+    (injection_dir / "attention_injection_environment_report.json").write_text('{"cuda_available":true}\n', encoding="utf-8")
+    (injection_dir / "attention_latent_injection_manifest.local.json").write_text('{"artifact_id":"attention_latent_injection_manifest"}\n', encoding="utf-8")
+    (method_dir / "attention_carrier_records.jsonl").write_text('{"carrier_id":"sample"}\n', encoding="utf-8")
+    (method_dir / "attention_update_summary.json").write_text('{"active_update_count":1}\n', encoding="utf-8")
+    (method_dir / "manifest.local.json").write_text('{"artifact_id":"attention_latent_update_manifest"}\n', encoding="utf-8")
+
+    drive_dir = tmp_path / "drive_mirror"
+    record = package_attention_latent_injection_outputs(root=tmp_path, drive_output_dir=str(drive_dir))
+    archive_path = tmp_path / record.archive_path
+
+    assert archive_path.exists()
+    assert (drive_dir / "attention_latent_injection_package.zip").exists()
+    assert record.archive_digest == record.drive_archive_digest
+    assert record.archive_entry_count >= 9
+    assert (injection_dir / "attention_latent_injection_archive_summary.json").exists()
+    assert (injection_dir / "attention_latent_injection_archive_manifest.local.json").exists()
+
+    with ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+        assert "outputs/attention_latent_injection/attention_latent_injection_result.json" in names
+        assert "outputs/attention_latent_injection/attention_latent_update_records.jsonl" in names
+        assert "outputs/attention_latent_injection/attention_paired_quality_metrics.csv" in names
+        assert "outputs/attention_latent_injection/attention_injection_environment_report.json" in names
+        assert "outputs/attention_latent_injection/attention_latent_injection_manifest.local.json" in names
+        assert "outputs/attention_latent_update/attention_carrier_records.jsonl" in names
+        assert "outputs/attention_latent_update/attention_update_summary.json" in names
+        assert "outputs/attention_latent_update/manifest.local.json" in names
+        assert "outputs/attention_latent_injection/attention_latent_injection_package_input_manifest.json" in names
