@@ -330,3 +330,47 @@
 | `pytest tests/functional/test_semantic_subspace.py -q` | pass, 4 passed |
 | `pytest -q` | pass, 54 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+## stage_08_lf_hf_content_carriers
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_08_lf_hf_content_carriers` |
+| phase_status | `completed` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/semantic_subspace/manifest.local.json`; `outputs/semantic_subspace/subspace_plan_records.jsonl`; `outputs/semantic_subspace/semantic_route_records.jsonl`; `outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip` |
+| expected_output_manifest | `outputs/content_carriers/manifest.local.json` |
+| expected_outputs | `outputs/content_carriers/content_detection_records.jsonl`; `outputs/content_carriers/lf_hf_score_table.csv`; `outputs/content_carriers/paired_quality_metrics.csv`; `outputs/content_carriers/content_score_distribution.csv`; `outputs/content_carriers/content_carrier_summary.json`; `outputs/content_carriers/manifest.local.json` |
+| blocking_items | 无。 |
+| fallback_path | 若语义子空间 records 或真实最小注入质量包不可用, 停止推进并修复前序输入; 不允许用手工阈值投票或未登记文件替代内容分数链路。 |
+| invariants | LF 为内容主证据, HF 仅为补充证据; 不为 LF/HF 分别设置独立正判阈值后投票; 当前产物保持 `supports_paper_claim=false`, 不能直接作为论文 fixed-FPR 或 robustness 结论。 |
+| next_stage_entry | 内容载体 records、统一内容分数、机制开关摘要与 manifest 均可重建, 可进入 `stage_09_self_attention_graph_geometry`。 |
+
+### stage08 已完成内容
+
+1. 新增 `main/methods/carrier/lf.py`, 实现稳定 LF 内容模板、低频平滑和 latent update 派生。
+2. 新增 `main/methods/carrier/hf.py`, 实现稳定 HF 内容模板、tail truncation 和关闭 tail truncation 的机制路径。
+3. 新增 `main/methods/carrier/compose.py`, 统一组合 `full_content_chain`、`lf_only`、`hf_only`、`no_hf`、`no_tail_truncation` 和 `no_lf` 六类内容机制开关。
+4. 新增 `main/methods/detection/scores.py` 和 `main/methods/detection/fusion.py`, 实现 `s_c = lambda_LF s_LF + lambda_HF s_HF`, 且 `lambda_LF > lambda_HF`, `used_independent_branch_vote=false`。
+5. 新增 `scripts/write_content_carrier_outputs.py`, 从语义子空间 records 与最小 latent injection 质量包重建内容检测 records、LF/HF score table、paired quality metrics、score distribution、summary 和 manifest。
+6. 当前 `outputs/content_carriers/content_carrier_summary.json` 显示 `content_detection_record_count=19830`, `score_count=19830`, `fixed_fpr_ready=true`, `used_independent_branch_vote=false`, `protocol_decision=pass`, `supports_paper_claim=false`。
+7. 新增 `tests/functional/test_content_carriers.py`, 覆盖 LF/HF 载体摘要稳定性、机制开关真实改变 update、统一内容分数 fixed-FPR 边界、写出脚本 manifest 和 outputs 目录约束。
+8. `docs/field_registry.md` 已登记内容载体、内容分数、机制开关、score distribution 和 summary 相关字段。
+
+### stage08 完成边界
+
+1. 本阶段完成的是核心方法层 LF/HF 内容载体和统一内容分数机制, 不是最终论文阈值校准、attack matrix 或正式固定 FPR 实验结论。
+2. `fixed_fpr_ready=true` 仅表示内容分数记录保留了可进入后续 fixed-FPR calibration 的统计形态; 真实阈值冻结必须继续使用 calibration split, 并且不能与 test split 混用。
+3. `rescue` 不在本阶段触发正判, 后续几何 rescue 必须在同一 fixed-FPR 统计边界内审计, 不能新增独立阳性通道。
+4. LF-only、HF-only、No-HF、No-tail-truncation 和 No-LF 均作为机制诊断或消融路径, 不得伪装为 SLM-WM 主方法。
+
+### stage08 验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/write_content_carrier_outputs.py` | pass, content_detection_record_count=19830, score_count=19830, protocol_decision=pass |
+| `pytest tests/functional/test_content_carriers.py -q` | pass, 5 passed |
+| `pytest -q` | pass, 59 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

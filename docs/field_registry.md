@@ -421,6 +421,25 @@ Notebook 与 repository module 的跨边界数据
 | lf_basis_count | method | none | false | false | false | LF 路由投影后的基底行数。 |
 | hf_basis_count | method | none | false | false | false | HF 路由投影后的基底行数。 |
 | attention_basis_count | method | none | false | false | false | attention 路由投影后的基底行数。 |
+| content_detection_record_id | method | none | true | false | false | 内容检测 record 的稳定标识。 |
+| content_mode | method | none | true | false | false | LF/HF 内容载体机制开关名称。 |
+| mechanism_scores | method | none | true | false | false | 同一观测样本在各内容机制开关下的统一内容分数集合。 |
+| lf_enabled | method | none | true | false | false | 内容 update 组合时是否启用 LF 主证据分量。 |
+| hf_enabled | method | none | true | false | false | 内容 update 组合时是否启用 HF 补充分量。 |
+| tail_truncation_enabled | method | none | true | false | false | HF 内容载体是否启用 tail truncation。 |
+| content_update_digest | method | none | true | false | false | LF/HF 内容 update 组合 payload 的稳定摘要。 |
+| content_chain_digest | method | none | true | false | false | 内容载体链路组合后的稳定摘要。 |
+| lf_content_carrier_digest | method | none | true | false | false | LF 内容载体 payload 的稳定摘要。 |
+| hf_content_carrier_digest | method | none | true | false | false | HF 内容载体 payload 的稳定摘要。 |
+| score_digest | method | none | true | false | false | 统一内容分数 payload 的稳定摘要。 |
+| fixed_fpr_ready | method | none | true | false | false | 内容分数是否已保持可进入 fixed-FPR 校准的统计边界。 |
+| content_detection_record_count | method | none | false | false | false | 内容检测 records 数量。 |
+| content_modes | method | none | false | false | false | 当前内容载体产物支持的机制开关集合。 |
+| score_count | method | none | true | false | false | 内容分数表或分布表中登记的分数数量。 |
+| score_min | method | none | true | false | false | 内容分数集合的最小值。 |
+| score_max | method | none | true | false | false | 内容分数集合的最大值。 |
+| score_mean | method | none | true | false | false | 内容分数集合的均值。 |
+| score_distribution_bin | method | none | true | false | false | 内容分数分布表使用的分数区间。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

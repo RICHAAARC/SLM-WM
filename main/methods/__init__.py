@@ -22,6 +22,22 @@ from main.methods.algorithm_primitives import (
     project_latent_mask,
 )
 
+
+from main.methods.carrier import (
+    CONTENT_MODES,
+    ContentUpdate,
+    HfContentCarrier,
+    LfContentCarrier,
+    compose_content_update,
+    derive_hf_content_carrier,
+    derive_lf_content_carrier,
+)
+from main.methods.detection import (
+    ContentDetectionRecord,
+    ContentScore,
+    build_content_detection_record,
+    compute_unified_content_score,
+)
 from main.methods.semantic import (
     LatentMaskResult,
     RiskFieldConfig,
@@ -67,6 +83,17 @@ __all__ = [
     "estimate_safe_basis",
     "evaluate_geometry_reliability",
     "project_latent_mask",
+    "CONTENT_MODES",
+    "ContentUpdate",
+    "HfContentCarrier",
+    "LfContentCarrier",
+    "compose_content_update",
+    "derive_hf_content_carrier",
+    "derive_lf_content_carrier",
+    "ContentDetectionRecord",
+    "ContentScore",
+    "build_content_detection_record",
+    "compute_unified_content_score",
     "LatentMaskResult",
     "RiskFieldConfig",
     "RiskFieldResult",
