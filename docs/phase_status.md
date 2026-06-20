@@ -138,3 +138,42 @@
 | `pytest tests/functional/test_diffusion_runtime_adapter.py -q` | pass, 3 passed |
 | `pytest -q` | pass, 24 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+## stage_04_minimal_diffusion_latent_injection
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_04_minimal_diffusion_latent_injection` |
+| phase_status | `in_progress` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/sd_runtime_adapter/manifest.local.json`; `outputs/core_method_synthetic_smoke/manifest.local.json` |
+| expected_output_manifest | `outputs/minimal_diffusion_latent_injection/manifest.local.json` |
+| expected_outputs | `paper_workflow/sd_runtime_cold_start_probe.ipynb`; `paper_workflow/colab_utils/sd_runtime_cold_start.py`; `outputs/real_sd_runtime_probe/*_manifest.local.json`; `outputs/real_sd_runtime_probe/real_sd_runtime_probe_package.zip`; `GoogleDrive/SLM/real_sd_runtime_probe/real_sd_runtime_probe_package.zip`; `outputs/minimal_diffusion_latent_injection/manifest.local.json` |
+| blocking_items | 本地无 GPU 与真实模型权重环境; 真实 SD3.5 Medium 推理、SD3 Medium 对照和真实 latent trajectory 需要在 Colab 执行。 |
+| fallback_path | SD3.5 Medium 是主线; 若主模型在 Colab 不可用, 运行 SD3 Medium 兼容 fallback 并写出 `unsupported_reason`; fallback 产物不得支持正式论文 claim。 |
+| invariants | Notebook 只作为入口; runtime 逻辑位于 repository helper; `main/` 不依赖 Colab、Drive、diffusers、transformers 或模型权重。 |
+| next_stage_entry | 只有 Colab 真实推理、真实 latent trajectory、paired images 和质量指标通过后, 才能进入 `stage_05_colab_drive_workflow`。 |
+
+### stage04 已完成内容
+
+1. `paper_workflow/sd_runtime_cold_start_probe.ipynb` 提供 Colab 冷启动入口, 支持拉取代码、安装依赖、登录 Hugging Face、默认同时运行 SD3.5 Medium 主模型和 SD3 Medium 兼容对照。
+2. `paper_workflow/colab_utils/sd_runtime_cold_start.py` 承载真实 SD runtime 调用、latent callback 捕获、图像摘要、trajectory records、summary、manifest、zip 打包和 Google Drive 镜像逻辑。
+3. Notebook 默认将 zip 保存到 Google Drive 的 `SLM/real_sd_runtime_probe/` 目录, 以便本地后续读取。
+4. `tests/constraints/test_notebook_entrypoint_contract.py` 验证 Notebook 文件名、未保存执行输出、Notebook 调用 repository helper, 以及 probe 产物可被打包和镜像。
+5. `docs/field_registry.md` 已登记真实 runtime probe 与 archive 新增字段。
+
+### stage04 尚未完成内容
+
+1. 尚未在 Colab GPU 环境执行真实 SD3.5 Medium 推理。
+2. 尚未在 Colab GPU 环境执行 SD3 Medium 对照或兼容 fallback。
+3. 尚未生成真实 paired clean / watermarked images、paired quality metrics 或 latent update records。
+4. 尚未形成 `outputs/minimal_diffusion_latent_injection/manifest.local.json`。
+
+### stage04 当前验证结果
+
+| command | result |
+| --- | --- |
+| `pytest tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 4 passed |
+| `pytest -q` | pass, 28 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

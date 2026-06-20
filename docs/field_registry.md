@@ -253,6 +253,26 @@ Notebook 与 repository module 的跨边界数据
 | unsupported_reason_count | runtime | none | false | false | false | runtime summary 中 unsupported_reason 数量。 |
 | reproducibility_digest | runtime | none | false | false | false | runtime summary 的复现摘要。 |
 | mean_quality_score | runtime | none | false | false | false | generation records 的平均质量分数。 |
+| model_priority | runtime | none | true | false | false | 真实 runtime 中模型作为主线、对照或兼容 fallback 的角色。 |
+| probe_id | runtime | none | true | false | false | Colab 真实 runtime probe 的稳定标识。 |
+| probe_decision | runtime | none | true | false | false | Colab 真实 runtime probe 的通过状态。 |
+| trajectory_entry_count | runtime | none | true | false | false | 真实 runtime 捕获到的 latent trajectory 记录数量。 |
+| pipeline_class | runtime | none | true | false | false | 实际加载的 diffusers pipeline 类名。 |
+| device_name | runtime | none | true | false | false | 真实推理使用的设备名称。 |
+| torch_dtype | runtime | none | true | false | false | 真实推理使用的 torch dtype。 |
+| hf_token_env | runtime | none | false | false | false | 真实 runtime 读取 Hugging Face token 的环境变量名。 |
+| torch_version | runtime | none | false | false | false | Colab runtime 中的 torch 版本。 |
+| diffusers_version | runtime | none | false | false | false | Colab runtime 中的 diffusers 版本。 |
+| elapsed_seconds | runtime | none | true | false | false | 真实推理耗时秒数。 |
+| error_message | runtime | none | false | false | false | 真实后端不可用时的错误消息。 |
+| image_path | runtime | none | true | false | false | 真实推理输出图像的受治理路径。 |
+| archive_name | artifact | none | false | false | false | 真实 runtime 产物 zip 文件名。 |
+| archive_path | artifact | none | true | false | false | 真实 runtime 产物 zip 在 outputs 下的受治理路径。 |
+| archive_digest | artifact | none | true | false | false | 真实 runtime 产物 zip 的 SHA-256 摘要。 |
+| archive_entry_count | artifact | none | true | false | false | 真实 runtime 产物 zip 中包含的文件数量。 |
+| drive_output_dir | artifact | none | false | false | false | Colab 镜像保存到 Google Drive 的目标目录。 |
+| drive_archive_path | artifact | none | true | false | false | Colab 镜像保存到 Google Drive 后的 zip 路径。 |
+| drive_archive_digest | artifact | none | true | false | false | Google Drive 镜像 zip 的 SHA-256 摘要。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

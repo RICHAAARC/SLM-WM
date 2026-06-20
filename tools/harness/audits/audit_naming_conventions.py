@@ -18,7 +18,7 @@ from tools.harness.lib.naming_rules import (
     is_allowed_file_name,
 )
 
-TEXT_SUFFIXES = {".md", ".py", ".json", ".toml", ".txt", ".yml", ".yaml"}
+TEXT_SUFFIXES = {".ipynb", ".md", ".py", ".json", ".toml", ".txt", ".yml", ".yaml"}
 
 
 def is_docs_path(path: Path) -> bool:

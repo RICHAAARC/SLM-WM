@@ -10,7 +10,7 @@ FORBIDDEN_WEAK_TOKEN_PATTERN = re.compile(r"(?:^|[_-])(new|old|best|final)(?:$|[
 RESERVED_PROGRESS_MARKERS = ("sta" + "ge", "pha" + "se", "\u9636\u6bb5")
 ALLOWED_LITERAL_FILE_NAMES = {"README.md", "AGENTS.md", ".gitignore", "pyproject.toml", "__init__.py"}
 ALLOWED_DIRECTORY_NAMES = {".agents", ".codex", ".git", ".pytest_cache", "__pycache__"}
-ALLOWED_FILE_SUFFIXES = {".md", ".py", ".json", ".toml", ".txt", ".yml", ".yaml"}
+ALLOWED_FILE_SUFFIXES = {".ipynb", ".md", ".py", ".json", ".toml", ".txt", ".yml", ".yaml"}
 
 
 def is_snake_case_name(name: str) -> bool:
