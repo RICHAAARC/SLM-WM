@@ -628,7 +628,8 @@
 4. 更新 `tests/constraints/test_notebook_entrypoint_contract.py`, 覆盖新 Notebook 入口委托、无执行输出、Drive 镜像路径和打包产物核对。
 5. 更新 `docs/field_registry.md`, 登记真实 aligned rescoring、latent projection、LPIPS / FID / KID / CLIP 状态、clean / aligned CLIP score、CLIP delta 和质量指标相关字段。
 6. 新增轻量测试 `tests/functional/test_aligned_rescoring_metrics.py`, 验证 LPIPS / CLIP pair-level ready 边界、默认配置和质量指标表字段。
-7. 更新感知指标诊断: 若 LPIPS 或 CLIP 未 measured, `unsupported_reason` 会写入 `lpips_status` 与 `clip_score_status`, 质量表会记录对应 error type; Notebook 在断言失败前会打印质量表便于定位。
+7. 更新感知指标诊断: 若 LPIPS 或 CLIP 未 measured, `unsupported_reason` 会写入 `lpips_status` 与 `clip_score_status`, 质量表会记录对应 error type 和压缩错误信息; Notebook 在断言失败前会打印质量表便于定位。
+8. 更新 CLIP 计算兼容路径: 优先使用 `get_image_features` / `get_text_features`, 若当前 transformers 版本缺少该 API, 则退回到 `CLIPModel` forward 输出中的 `image_embeds` / `text_embeds` 或 `logits_per_image`。
 
 ### aligned rescoring workflow 当前边界
 
@@ -642,6 +643,6 @@
 | command | result |
 | --- | --- |
 | `python tools/harness/inspect_repository.py .` | pass |
-| `pytest tests/functional/test_aligned_rescoring_metrics.py tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 17 passed |
-| `pytest -q` | pass, 84 passed |
+| `pytest tests/functional/test_aligned_rescoring_metrics.py tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 18 passed |
+| `pytest -q` | pass, 85 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

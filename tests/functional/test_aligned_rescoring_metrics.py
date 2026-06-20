@@ -50,7 +50,7 @@ def test_pair_perceptual_metrics_ready_requires_lpips_and_clip(monkeypatch: pyte
     """只有 LPIPS 与 CLIP 都实测时, pair perceptual metrics 才能视为 ready。"""
 
     def measured_lpips(clean_image: object, aligned_image: object, config: helper.AlignedRescoringConfig) -> dict[str, Any]:
-        return {"lpips": 0.12, "lpips_status": "measured", "lpips_error_type": ""}
+        return {"lpips": 0.12, "lpips_status": "measured", "lpips_error_type": "", "lpips_error_message": ""}
 
     def measured_clip(
         clean_image: object,
@@ -65,6 +65,7 @@ def test_pair_perceptual_metrics_ready_requires_lpips_and_clip(monkeypatch: pyte
             "clip_score_delta": 0.01,
             "clip_score_status": "measured",
             "clip_score_error_type": "",
+            "clip_score_error_message": "",
         }
 
     monkeypatch.setattr(helper, "compute_lpips_metric", measured_lpips)
@@ -79,6 +80,61 @@ def test_pair_perceptual_metrics_ready_requires_lpips_and_clip(monkeypatch: pyte
     assert metrics["perceptual_metrics_ready"] is True
     assert metrics["fid_status"] == "dataset_level_metric_not_computed_in_pair_run"
     assert metrics["kid_status"] == "dataset_level_metric_not_computed_in_pair_run"
+
+
+@pytest.mark.quick
+def test_clip_forward_api_fallback_reads_logits() -> None:
+    """CLIP embedding API 不可用时, 应能从 forward logits 中读取成对分数。"""
+
+    class FakeScalar:
+        def __init__(self, value: float) -> None:
+            self.value = value
+
+        def detach(self) -> "FakeScalar":
+            return self
+
+        def cpu(self) -> "FakeScalar":
+            return self
+
+        def item(self) -> float:
+            return self.value
+
+    class FakeScores:
+        def __init__(self, values: tuple[float, float]) -> None:
+            self.values = values
+
+        def float(self) -> "FakeScores":
+            return self
+
+        def reshape(self, *shape: int) -> "FakeScores":
+            return self
+
+        def __getitem__(self, index: int) -> FakeScalar:
+            return FakeScalar(self.values[index])
+
+    class FakeProcessor:
+        def __call__(self, **kwargs: Any) -> dict[str, Any]:
+            return {"pixel_values": object(), "input_ids": object()}
+
+    class FakeModel:
+        def __call__(self, **kwargs: Any) -> dict[str, Any]:
+            return {"logits_per_image": FakeScores((0.25, 0.375))}
+
+    class FakeImage:
+        def convert(self, mode: str) -> "FakeImage":
+            return self
+
+    clean_score, aligned_score = helper.compute_clip_scores_with_forward_api(
+        FakeModel(),
+        FakeProcessor(),
+        FakeImage(),
+        FakeImage(),
+        "semantic prompt",
+        object(),
+    )
+
+    assert clean_score == 0.25
+    assert aligned_score == 0.375
 
 
 @pytest.mark.quick
@@ -124,12 +180,14 @@ def test_quality_rows_include_pair_clip_columns(tmp_path: Path) -> None:
                 "lpips": 0.12,
                 "lpips_status": "measured",
                 "lpips_error_type": "",
+                "lpips_error_message": "",
                 "clip_score": 0.31,
                 "clip_score_clean": 0.30,
                 "clip_score_aligned": 0.31,
                 "clip_score_delta": 0.01,
                 "clip_score_status": "measured",
                 "clip_score_error_type": "",
+                "clip_score_error_message": "",
                 "fid": "unsupported",
                 "fid_status": "dataset_level_metric_not_computed_in_pair_run",
                 "kid": "unsupported",

@@ -398,18 +398,25 @@ def unsupported_perceptual_metric_rows(status: str) -> dict[str, Any]:
         "lpips": "unsupported",
         "lpips_status": status,
         "lpips_error_type": "",
+        "lpips_error_message": "",
         "clip_score": "unsupported",
         "clip_score_clean": "unsupported",
         "clip_score_aligned": "unsupported",
         "clip_score_delta": "unsupported",
         "clip_score_status": status,
         "clip_score_error_type": "",
+        "clip_score_error_message": "",
         "fid": "unsupported",
         "fid_status": "dataset_level_metric_not_computed_in_pair_run",
         "kid": "unsupported",
         "kid_status": "dataset_level_metric_not_computed_in_pair_run",
         "perceptual_metrics_ready": False,
     }
+
+
+def metric_error_message(error: Exception, limit: int = 240) -> str:
+    """压缩指标异常信息, 避免 CSV 中写入过长 traceback。"""
+    return str(error).replace("\n", " ")[:limit]
 
 
 def image_to_metric_tensor(image: Any, device: Any) -> Any:
@@ -423,7 +430,7 @@ def image_to_metric_tensor(image: Any, device: Any) -> Any:
 def compute_lpips_metric(clean_image: Any, aligned_image: Any, config: AlignedRescoringConfig) -> dict[str, Any]:
     """计算成对图像 LPIPS, 不可用时返回可审计 status。"""
     if not config.enable_pair_perceptual_metrics:
-        return {"lpips": "unsupported", "lpips_status": "disabled", "lpips_error_type": ""}
+        return {"lpips": "unsupported", "lpips_status": "disabled", "lpips_error_type": "", "lpips_error_message": ""}
     try:
         import lpips
         _, torch, _, _ = import_runtime_dependencies()
@@ -432,17 +439,24 @@ def compute_lpips_metric(clean_image: Any, aligned_image: Any, config: AlignedRe
             "lpips": "unsupported",
             "lpips_status": "optional_dependency_not_installed",
             "lpips_error_type": type(error).__name__,
+            "lpips_error_message": metric_error_message(error),
         }
     except Exception as error:
         return {
             "lpips": "unsupported",
             "lpips_status": "optional_dependency_import_error",
             "lpips_error_type": type(error).__name__,
+            "lpips_error_message": metric_error_message(error),
         }
     try:
         device = torch.device(config.perceptual_metric_device_name)
         if device.type == "cuda" and not torch.cuda.is_available():
-            return {"lpips": "unsupported", "lpips_status": "gpu_unavailable", "lpips_error_type": ""}
+            return {
+                "lpips": "unsupported",
+                "lpips_status": "gpu_unavailable",
+                "lpips_error_type": "",
+                "lpips_error_message": "",
+            }
         metric_model = lpips.LPIPS(net=config.lpips_network).to(device)
         metric_model.eval()
         clean_tensor = image_to_metric_tensor(clean_image, device)
@@ -453,14 +467,103 @@ def compute_lpips_metric(clean_image: Any, aligned_image: Any, config: AlignedRe
             "lpips": float(metric_value.detach().float().cpu().reshape(-1)[0].item()),
             "lpips_status": "measured",
             "lpips_error_type": "",
+            "lpips_error_message": "",
         }
     except Exception as error:
-        return {"lpips": "unsupported", "lpips_status": "metric_runtime_error", "lpips_error_type": type(error).__name__}
+        return {
+            "lpips": "unsupported",
+            "lpips_status": "metric_runtime_error",
+            "lpips_error_type": type(error).__name__,
+            "lpips_error_message": metric_error_message(error),
+        }
 
 
 def move_batch_to_device(batch: dict[str, Any], device: Any) -> dict[str, Any]:
     """把 transformers processor 生成的 batch 移动到目标设备。"""
     return {name: value.to(device) if hasattr(value, "to") else value for name, value in batch.items()}
+
+
+def unsupported_clip_metric(status: str, error: Exception | None = None) -> dict[str, Any]:
+    """构造统一的 CLIP 指标不可用状态。"""
+    return {
+        "clip_score": "unsupported",
+        "clip_score_clean": "unsupported",
+        "clip_score_aligned": "unsupported",
+        "clip_score_delta": "unsupported",
+        "clip_score_status": status,
+        "clip_score_error_type": "" if error is None else type(error).__name__,
+        "clip_score_error_message": "" if error is None else metric_error_message(error),
+    }
+
+
+def measured_clip_metric(clean_score: float, aligned_score: float) -> dict[str, Any]:
+    """构造统一的 CLIP 实测指标行。"""
+    return {
+        "clip_score": aligned_score,
+        "clip_score_clean": clean_score,
+        "clip_score_aligned": aligned_score,
+        "clip_score_delta": aligned_score - clean_score,
+        "clip_score_status": "measured",
+        "clip_score_error_type": "",
+        "clip_score_error_message": "",
+    }
+
+
+def read_output_value(outputs: Any, field_name: str) -> Any:
+    """兼容 transformers 输出对象和 dict 输出。"""
+    if hasattr(outputs, field_name):
+        return getattr(outputs, field_name)
+    if isinstance(outputs, dict):
+        return outputs.get(field_name)
+    return None
+
+
+def clip_scores_from_features(image_features: Any, text_features: Any) -> tuple[float, float]:
+    """由 CLIP image/text embeddings 计算 clean 和 aligned 的余弦相似度。"""
+    image_features = image_features.float()
+    text_features = text_features.float()
+    image_features = image_features / image_features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+    text_features = text_features / text_features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+    scores = (image_features @ text_features.T).reshape(-1)
+    return float(scores[0].detach().cpu().item()), float(scores[1].detach().cpu().item())
+
+
+def compute_clip_scores_with_feature_api(model: Any, image_inputs: dict[str, Any], text_inputs: dict[str, Any]) -> tuple[float, float]:
+    """使用 CLIPModel embedding API 计算图文相似度。"""
+    image_kwargs = {name: image_inputs[name] for name in ("pixel_values",) if name in image_inputs}
+    text_kwargs = {name: text_inputs[name] for name in ("input_ids", "attention_mask", "position_ids") if name in text_inputs}
+    image_features = model.get_image_features(**image_kwargs)
+    text_features = model.get_text_features(**text_kwargs)
+    return clip_scores_from_features(image_features, text_features)
+
+
+def compute_clip_scores_with_forward_api(
+    model: Any,
+    processor: Any,
+    clean_image: Any,
+    aligned_image: Any,
+    prompt_text: str,
+    device: Any,
+) -> tuple[float, float]:
+    """使用 CLIPModel forward 输出计算图文相似度, 兼容新版或裁剪版 API。"""
+    joint_inputs = processor(
+        text=[prompt_text],
+        images=[clean_image.convert("RGB"), aligned_image.convert("RGB")],
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+    )
+    joint_inputs = move_batch_to_device(joint_inputs, device)
+    outputs = model(**joint_inputs)
+    image_features = read_output_value(outputs, "image_embeds")
+    text_features = read_output_value(outputs, "text_embeds")
+    if image_features is not None and text_features is not None:
+        return clip_scores_from_features(image_features, text_features)
+    logits_per_image = read_output_value(outputs, "logits_per_image")
+    if logits_per_image is None:
+        raise AttributeError("clip_forward_output_missing_image_text_scores")
+    scores = logits_per_image.float().reshape(-1)
+    return float(scores[0].detach().cpu().item()), float(scores[1].detach().cpu().item())
 
 
 def compute_clip_pair_metrics(
@@ -471,46 +574,18 @@ def compute_clip_pair_metrics(
 ) -> dict[str, Any]:
     """计算 clean / aligned 图像相对 prompt 的 CLIP score。"""
     if not config.enable_pair_perceptual_metrics:
-        return {
-            "clip_score": "unsupported",
-            "clip_score_clean": "unsupported",
-            "clip_score_aligned": "unsupported",
-            "clip_score_delta": "unsupported",
-            "clip_score_status": "disabled",
-            "clip_score_error_type": "",
-        }
+        return unsupported_clip_metric("disabled")
     try:
         _, torch, _, _ = import_runtime_dependencies()
         from transformers import CLIPModel, CLIPProcessor
     except ModuleNotFoundError as error:
-        return {
-            "clip_score": "unsupported",
-            "clip_score_clean": "unsupported",
-            "clip_score_aligned": "unsupported",
-            "clip_score_delta": "unsupported",
-            "clip_score_status": "optional_dependency_not_installed",
-            "clip_score_error_type": type(error).__name__,
-        }
+        return unsupported_clip_metric("optional_dependency_not_installed", error)
     except Exception as error:
-        return {
-            "clip_score": "unsupported",
-            "clip_score_clean": "unsupported",
-            "clip_score_aligned": "unsupported",
-            "clip_score_delta": "unsupported",
-            "clip_score_status": "optional_dependency_import_error",
-            "clip_score_error_type": type(error).__name__,
-        }
+        return unsupported_clip_metric("optional_dependency_import_error", error)
     try:
         device = torch.device(config.perceptual_metric_device_name)
         if device.type == "cuda" and not torch.cuda.is_available():
-            return {
-                "clip_score": "unsupported",
-                "clip_score_clean": "unsupported",
-                "clip_score_aligned": "unsupported",
-                "clip_score_delta": "unsupported",
-                "clip_score_status": "gpu_unavailable",
-                "clip_score_error_type": "",
-            }
+            return unsupported_clip_metric("gpu_unavailable")
         token = os.environ.get(config.hf_token_env) or None
         model_kwargs = {"token": token} if token else {}
         processor = CLIPProcessor.from_pretrained(config.clip_model_id, **model_kwargs)
@@ -524,30 +599,20 @@ def compute_clip_pair_metrics(
         image_inputs = move_batch_to_device(image_inputs, device)
         text_inputs = move_batch_to_device(text_inputs, device)
         with torch.no_grad():
-            image_features = model.get_image_features(**image_inputs).float()
-            text_features = model.get_text_features(**text_inputs).float()
-        image_features = image_features / image_features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
-        scores = (image_features @ text_features.T).reshape(-1)
-        clean_score = float(scores[0].detach().cpu().item())
-        aligned_score = float(scores[1].detach().cpu().item())
-        return {
-            "clip_score": aligned_score,
-            "clip_score_clean": clean_score,
-            "clip_score_aligned": aligned_score,
-            "clip_score_delta": aligned_score - clean_score,
-            "clip_score_status": "measured",
-            "clip_score_error_type": "",
-        }
+            try:
+                clean_score, aligned_score = compute_clip_scores_with_feature_api(model, image_inputs, text_inputs)
+            except AttributeError:
+                clean_score, aligned_score = compute_clip_scores_with_forward_api(
+                    model,
+                    processor,
+                    clean_image,
+                    aligned_image,
+                    prompt_text,
+                    device,
+                )
+        return measured_clip_metric(clean_score, aligned_score)
     except Exception as error:
-        return {
-            "clip_score": "unsupported",
-            "clip_score_clean": "unsupported",
-            "clip_score_aligned": "unsupported",
-            "clip_score_delta": "unsupported",
-            "clip_score_status": "metric_runtime_error",
-            "clip_score_error_type": type(error).__name__,
-        }
+        return unsupported_clip_metric("metric_runtime_error", error)
 
 
 def compute_pair_perceptual_metrics(
@@ -733,12 +798,14 @@ def write_quality_rows(path: Path, rows: list[dict[str, Any]]) -> None:
         "lpips",
         "lpips_status",
         "lpips_error_type",
+        "lpips_error_message",
         "clip_score",
         "clip_score_clean",
         "clip_score_aligned",
         "clip_score_delta",
         "clip_score_status",
         "clip_score_error_type",
+        "clip_score_error_message",
         "fid",
         "fid_status",
         "kid",
