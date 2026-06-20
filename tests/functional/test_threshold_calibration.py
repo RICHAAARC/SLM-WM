@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -55,9 +56,8 @@ def rescue_record(
     }
 
 
-@pytest.mark.quick
-def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separate(tmp_path: Path) -> None:
-    """阈值、clean FPR、attacked FPR 和质量指标应可由 records 重建。"""
+def write_rescue_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    """写出可被阈值校准脚本读取的最小 rescue 输入。"""
     rescue_dir = tmp_path / "outputs" / "geometric_rescue"
     rescue_dir.mkdir(parents=True)
     records_path = rescue_dir / "aligned_detection_records.jsonl"
@@ -83,6 +83,38 @@ def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separ
         ),
         encoding="utf-8",
     )
+    return records_path, audit_path
+
+
+def write_aligned_rescoring_package(package_path: Path) -> None:
+    """写出包含 LPIPS 与 CLIP pair-level 指标的最小 aligned rescoring 结果包。"""
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    result = {
+        "run_decision": "pass",
+        "image_quality_metrics_ready": True,
+        "perceptual_metrics_ready": True,
+        "aligned_rescoring_record_count": 3,
+        "real_aligned_rescore_count": 3,
+    }
+    quality_text = (
+        "carrier_id,psnr,ssim,mse,mean_abs_error,lpips,lpips_status,clip_score,clip_score_clean,clip_score_aligned,"
+        "clip_score_delta,clip_score_status,fid,fid_status,kid,kid_status\n"
+        "carrier_a,30.0,0.99,0.001,0.02,0.12,measured,0.31,0.30,0.31,0.01,measured,"
+        "unsupported,dataset_level_metric_not_computed_in_pair_run,"
+        "unsupported,dataset_level_metric_not_computed_in_pair_run\n"
+    )
+    with ZipFile(package_path, "w") as archive:
+        archive.writestr(
+            "outputs/aligned_rescoring/aligned_rescoring_result.json",
+            json.dumps(result, ensure_ascii=False),
+        )
+        archive.writestr("outputs/aligned_rescoring/aligned_rescoring_quality_metrics.csv", quality_text)
+
+
+@pytest.mark.quick
+def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separate(tmp_path: Path) -> None:
+    """阈值、clean FPR、attacked FPR 和质量指标应可由 records 重建。"""
+    records_path, audit_path = write_rescue_inputs(tmp_path)
 
     manifest = write_threshold_calibration_outputs(
         root=tmp_path,
@@ -106,3 +138,38 @@ def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separ
         "evidence_attacked_negative",
     }
     assert any(row["quality_metric_name"] == "lpips" and row["metric_status"] == "unsupported" for row in quality_rows)
+
+
+@pytest.mark.quick
+def test_threshold_calibration_propagates_aligned_rescoring_pair_metrics(tmp_path: Path) -> None:
+    """最新真实 aligned rescoring 质量指标应进入阈值校准摘要和 manifest。"""
+    records_path, audit_path = write_rescue_inputs(tmp_path)
+    package_path = tmp_path / "outputs" / "aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip"
+    write_aligned_rescoring_package(package_path)
+
+    manifest = write_threshold_calibration_outputs(
+        root=tmp_path,
+        rescue_records_path=records_path,
+        rescue_audit_path=audit_path,
+        target_fpr=0.5,
+        aligned_rescoring_package_path=package_path,
+    )
+    output_dir = tmp_path / "outputs" / "threshold_calibration"
+    threshold_report = json.loads((output_dir / "threshold_degeneracy_report.json").read_text(encoding="utf-8"))
+    quality_rows = {
+        row["quality_metric_name"]: row
+        for row in csv.DictReader((output_dir / "quality_metrics_summary.csv").open(encoding="utf-8"))
+    }
+
+    assert quality_rows["psnr"]["quality_metric_value"] == "30.0"
+    assert quality_rows["psnr"]["quality_metric_source"] == "aligned_rescoring_package"
+    assert quality_rows["lpips"]["quality_metric_value"] == "0.12"
+    assert quality_rows["lpips"]["metric_status"] == "measured"
+    assert quality_rows["clip_score_clean"]["quality_metric_value"] == "0.30"
+    assert quality_rows["clip_score_aligned"]["quality_metric_value"] == "0.31"
+    assert quality_rows["clip_score_delta"]["quality_metric_value"] == "0.01"
+    assert quality_rows["fid"]["metric_status"] == "dataset_level_metric_not_computed_in_pair_run"
+    assert threshold_report["aligned_rescoring_quality_metrics_ready"] is True
+    assert threshold_report["real_aligned_rescore_count"] == 3
+    assert manifest["metadata"]["aligned_rescoring_quality_metrics_ready"] is True
+    assert "outputs/aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip" in manifest["input_paths"]

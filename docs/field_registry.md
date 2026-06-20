@@ -616,6 +616,9 @@ Notebook 与 repository module 的跨边界数据
 | aligned_rescoring_record_id | protocol | none | true | false | false | 真实 aligned rescoring record 的稳定标识。 |
 | aligned_rescoring_record_count | metric | none | false | false | false | 真实 aligned rescoring records 数量。 |
 | aligned_rescoring_ready | method | none | true | false | false | 单条真实 aligned rescoring 记录是否具备真实 latent 投影重打分。 |
+| aligned_rescoring_package_path | artifact | none | false | false | false | 向下游传播的真实 aligned rescoring 结果包路径。 |
+| aligned_rescoring_package_digest | artifact | none | false | false | false | 向下游传播的真实 aligned rescoring 结果包 SHA256 摘要。 |
+| aligned_rescoring_quality_metrics_ready | metric | none | false | false | false | 真实 aligned rescoring 结果包中的 pair-level 质量指标是否已完成并可向下游传播。 |
 | real_aligned_rescore_count | metric | none | false | false | false | 具备真实 latent 投影重打分的记录数量。 |
 | selected_attention_carrier_count | metric | none | false | false | false | 真实 aligned rescoring 运行中选用的 active attention carrier 数量。 |
 | real_raw_content_score | metric | none | true | false | false | 对齐前真实 latent 投影重新计算得到的内容分数。 |

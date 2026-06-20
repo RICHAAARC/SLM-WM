@@ -170,6 +170,7 @@ def build_attack_manifest(
     calibration_manifest_path: Path,
     rescue_manifest: dict[str, Any],
     calibration_manifest: dict[str, Any],
+    threshold_report: dict[str, Any],
     attack_configs: tuple[AttackConfig, ...],
     attack_records: tuple[dict[str, Any], ...],
     family_rows: list[dict[str, Any]],
@@ -179,6 +180,7 @@ def build_attack_manifest(
     gpu_unsupported_count = sum(1 for record in attack_records if record["requires_gpu"] and record["metric_status"] == "unsupported")
     performed_count = sum(1 for record in attack_records if record["attack_performed"])
     attack_metrics_ready = bool(performed_count and family_rows)
+    aligned_quality = extract_aligned_rescoring_metadata(threshold_report, calibration_manifest)
     return {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -195,6 +197,7 @@ def build_attack_manifest(
         "input_records_path": relative_or_absolute(rescue_records_path, root_path),
         "input_thresholds_path": relative_or_absolute(calibration_thresholds_path, root_path),
         "input_threshold_report_path": relative_or_absolute(threshold_report_path, root_path),
+        **aligned_quality,
         "attacked_images_dir": relative_or_absolute(output_dir / "attacked_images", root_path),
         "attack_config_count": len(attack_configs),
         "attack_record_count": len(attack_records),
@@ -210,6 +213,37 @@ def build_attack_manifest(
         "regeneration_attack_status": "unsupported_until_real_gpu_artifacts_exist",
         "full_method_claim_ready": False,
         "supports_paper_claim": False,
+    }
+
+
+def extract_aligned_rescoring_metadata(threshold_report: dict[str, Any], calibration_manifest: dict[str, Any]) -> dict[str, Any]:
+    """从阈值校准产物中提取真实 aligned rescoring 向下游传播的摘要。"""
+    manifest_metadata = calibration_manifest.get("metadata", {})
+    return {
+        "aligned_rescoring_package_path": threshold_report.get(
+            "aligned_rescoring_package_path",
+            manifest_metadata.get("aligned_rescoring_package_path", ""),
+        ),
+        "aligned_rescoring_package_digest": threshold_report.get(
+            "aligned_rescoring_package_digest",
+            manifest_metadata.get("aligned_rescoring_package_digest", ""),
+        ),
+        "aligned_rescoring_quality_metrics_ready": threshold_report.get(
+            "aligned_rescoring_quality_metrics_ready",
+            manifest_metadata.get("aligned_rescoring_quality_metrics_ready", False),
+        ),
+        "perceptual_metrics_ready": threshold_report.get(
+            "perceptual_metrics_ready",
+            manifest_metadata.get("perceptual_metrics_ready", False),
+        ),
+        "aligned_rescoring_record_count": threshold_report.get(
+            "aligned_rescoring_record_count",
+            manifest_metadata.get("aligned_rescoring_record_count", 0),
+        ),
+        "real_aligned_rescore_count": threshold_report.get(
+            "real_aligned_rescore_count",
+            manifest_metadata.get("real_aligned_rescore_count", 0),
+        ),
     }
 
 
@@ -274,6 +308,7 @@ def write_attack_matrix_outputs(
         calibration_manifest_path=resolved_calibration_manifest_path,
         rescue_manifest=rescue_manifest,
         calibration_manifest=calibration_manifest,
+        threshold_report=threshold_report,
         attack_configs=attack_configs,
         attack_records=attack_records,
         family_rows=family_rows,
@@ -385,6 +420,7 @@ def write_attack_matrix_outputs(
         "score_retention": retention_rows,
         "rescue_by_attack": rescue_rows,
     }
+    aligned_quality = extract_aligned_rescoring_metadata(threshold_report, calibration_manifest)
     manifest = build_artifact_manifest(
         artifact_id="attack_matrix_manifest",
         artifact_type="local_manifest",
@@ -410,6 +446,7 @@ def write_attack_matrix_outputs(
             "protocol_decision": "pass" if attack_manifest["attack_metrics_ready"] else "fail",
             "full_method_claim_ready": False,
             "supports_paper_claim": False,
+            **aligned_quality,
         },
     ).to_dict()
     manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")

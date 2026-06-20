@@ -6,7 +6,9 @@ import argparse
 import csv
 from datetime import datetime, timezone
 import hashlib
+from io import StringIO
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -34,6 +36,13 @@ DEFAULT_OUTPUT_DIR = Path("outputs/threshold_calibration")
 DEFAULT_RESCUE_RECORDS_PATH = Path("outputs/geometric_rescue/aligned_detection_records.jsonl")
 DEFAULT_RESCUE_AUDIT_PATH = Path("outputs/geometric_rescue/geometry_rescue_audit.json")
 DEFAULT_TARGET_FPR = 0.05
+ALIGNED_RESCORING_PACKAGE_ENV = "SLM_WM_ALIGNED_RESCORING_PACKAGE_PATH"
+ALIGNED_RESCORING_PACKAGE_PATTERNS = (
+    "outputs/aligned_rescoring_package_*.zip",
+    "outputs/aligned_rescoring/aligned_rescoring_package_*.zip",
+)
+ALIGNED_RESCORING_RESULT_MEMBER = "outputs/aligned_rescoring/aligned_rescoring_result.json"
+ALIGNED_RESCORING_QUALITY_MEMBER = "outputs/aligned_rescoring/aligned_rescoring_quality_metrics.csv"
 
 
 def stable_json_text(value: Any) -> str:
@@ -108,6 +117,12 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
         return path.resolve().as_posix()
 
 
+def resolve_input_path(root_path: Path, path: str | Path) -> Path:
+    """解析外部输入路径, 允许调用方传入绝对路径或相对仓库根目录的路径。"""
+    candidate = Path(path)
+    return candidate.resolve() if candidate.is_absolute() else (root_path / candidate).resolve()
+
+
 def full_rescue_records(records: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
     """只保留完整 rescue 协议记录。"""
     return tuple(record for record in records if record.get("rescue_ablation_mode") == "full_rescue")
@@ -134,28 +149,165 @@ def read_quality_metrics_from_attention_package(audit: dict[str, Any], root_path
     }
 
 
-def build_quality_metric_rows(audit: dict[str, Any], root_path: Path) -> list[dict[str, Any]]:
+def discover_latest_aligned_rescoring_package(root_path: Path) -> Path | None:
+    """在 outputs 中选择文件名或写入时间最新的 aligned rescoring 结果包。"""
+    candidates: list[Path] = []
+    for pattern in ALIGNED_RESCORING_PACKAGE_PATTERNS:
+        candidates.extend(path for path in root_path.glob(pattern) if path.is_file())
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: (path.name, path.stat().st_mtime_ns))
+
+
+def resolve_aligned_rescoring_package_path(
+    root_path: Path,
+    aligned_rescoring_package_path: str | Path | None,
+) -> Path | None:
+    """解析 aligned rescoring 结果包路径, 未显式传入时自动使用 outputs 中最新包。"""
+    if aligned_rescoring_package_path:
+        resolved_path = resolve_input_path(root_path, aligned_rescoring_package_path)
+        if not resolved_path.exists():
+            raise FileNotFoundError(f"aligned rescoring 结果包不存在: {resolved_path}")
+        return resolved_path
+    env_path = os.environ.get(ALIGNED_RESCORING_PACKAGE_ENV, "").strip()
+    if env_path:
+        resolved_path = resolve_input_path(root_path, env_path)
+        if not resolved_path.exists():
+            raise FileNotFoundError(f"aligned rescoring 结果包不存在: {resolved_path}")
+        return resolved_path
+    return discover_latest_aligned_rescoring_package(root_path)
+
+
+def empty_aligned_rescoring_quality() -> dict[str, Any]:
+    """构造没有真实 aligned rescoring 输入时的中性质量摘要。"""
+    return {
+        "aligned_rescoring_package_path": "",
+        "aligned_rescoring_package_digest": "",
+        "aligned_rescoring_quality_metrics_ready": False,
+        "perceptual_metrics_ready": False,
+        "aligned_rescoring_record_count": 0,
+        "real_aligned_rescore_count": 0,
+        "quality_metrics": {},
+    }
+
+
+def read_quality_metrics_from_aligned_rescoring_package(package_path: Path, root_path: Path) -> dict[str, Any]:
+    """从真实 aligned rescoring 结果包读取 LPIPS 与 CLIP 等 pair-level 指标。"""
+    with ZipFile(package_path) as archive:
+        result = json.loads(archive.read(ALIGNED_RESCORING_RESULT_MEMBER).decode("utf-8"))
+        rows = tuple(csv.DictReader(StringIO(archive.read(ALIGNED_RESCORING_QUALITY_MEMBER).decode("utf-8"))))
+    first_row = rows[0] if rows else {}
+    lpips_status = first_row.get("lpips_status", "unsupported")
+    clip_status = first_row.get("clip_score_status", "unsupported")
+    perceptual_metrics_ready = bool(result.get("perceptual_metrics_ready"))
+    image_metric_status = "measured" if first_row and result.get("image_quality_metrics_ready") else "unsupported"
+    return {
+        "aligned_rescoring_package_path": relative_or_absolute(package_path, root_path),
+        "aligned_rescoring_package_digest": file_digest(package_path),
+        "aligned_rescoring_quality_metrics_ready": bool(
+            result.get("run_decision") == "pass"
+            and result.get("image_quality_metrics_ready")
+            and perceptual_metrics_ready
+            and lpips_status == "measured"
+            and clip_status == "measured"
+        ),
+        "perceptual_metrics_ready": perceptual_metrics_ready,
+        "aligned_rescoring_record_count": result.get("aligned_rescoring_record_count", 0),
+        "real_aligned_rescore_count": result.get("real_aligned_rescore_count", 0),
+        "quality_metrics": {
+            "psnr": {
+                "value": first_row.get("psnr", "unsupported"),
+                "status": image_metric_status,
+            },
+            "ssim": {
+                "value": first_row.get("ssim", "unsupported"),
+                "status": image_metric_status,
+            },
+            "mse": {
+                "value": first_row.get("mse", "unsupported"),
+                "status": image_metric_status,
+            },
+            "mean_abs_error": {
+                "value": first_row.get("mean_abs_error", "unsupported"),
+                "status": image_metric_status,
+            },
+            "lpips": {
+                "value": first_row.get("lpips", "unsupported"),
+                "status": lpips_status,
+            },
+            "clip_score": {
+                "value": first_row.get("clip_score", "unsupported"),
+                "status": clip_status,
+            },
+            "clip_score_clean": {
+                "value": first_row.get("clip_score_clean", "unsupported"),
+                "status": clip_status,
+            },
+            "clip_score_aligned": {
+                "value": first_row.get("clip_score_aligned", "unsupported"),
+                "status": clip_status,
+            },
+            "clip_score_delta": {
+                "value": first_row.get("clip_score_delta", "unsupported"),
+                "status": clip_status,
+            },
+            "fid": {
+                "value": first_row.get("fid", "unsupported"),
+                "status": first_row.get("fid_status", "unsupported"),
+            },
+            "kid": {
+                "value": first_row.get("kid", "unsupported"),
+                "status": first_row.get("kid_status", "unsupported"),
+            },
+        },
+    }
+
+
+def aligned_rescoring_output_metadata(aligned_quality: dict[str, Any]) -> dict[str, Any]:
+    """提取需要写入下游 manifest 与报告的 aligned rescoring 摘要字段。"""
+    return {
+        "aligned_rescoring_package_path": aligned_quality["aligned_rescoring_package_path"],
+        "aligned_rescoring_package_digest": aligned_quality["aligned_rescoring_package_digest"],
+        "aligned_rescoring_quality_metrics_ready": aligned_quality["aligned_rescoring_quality_metrics_ready"],
+        "perceptual_metrics_ready": aligned_quality["perceptual_metrics_ready"],
+        "aligned_rescoring_record_count": aligned_quality["aligned_rescoring_record_count"],
+        "real_aligned_rescore_count": aligned_quality["real_aligned_rescore_count"],
+    }
+
+
+def build_quality_metric_rows(audit: dict[str, Any], root_path: Path, aligned_quality: dict[str, Any]) -> list[dict[str, Any]]:
     """构造常规图像质量指标摘要。"""
     measured = read_quality_metrics_from_attention_package(audit, root_path)
+    aligned_metrics = aligned_quality["quality_metrics"]
+    has_aligned_source = bool(aligned_quality["aligned_rescoring_package_path"])
     rows: list[dict[str, Any]] = []
     for metric_name in ("psnr", "ssim", "mse", "mean_abs_error"):
-        metric_value = measured.get(metric_name, "unsupported")
+        aligned_entry = aligned_metrics.get(metric_name, {})
+        if has_aligned_source and aligned_entry:
+            metric_value = aligned_entry.get("value", "unsupported")
+            metric_source = "aligned_rescoring_package"
+            metric_status = aligned_entry.get("status", "unsupported")
+        else:
+            metric_value = measured.get(metric_name, "unsupported")
+            metric_source = "attention_latent_injection_package" if metric_name in measured else "missing"
+            metric_status = "measured" if metric_name in measured else "unsupported"
         rows.append(
             {
                 "quality_metric_name": metric_name,
                 "quality_metric_value": metric_value,
-                "quality_metric_source": "attention_latent_injection_package" if metric_name in measured else "missing",
-                "metric_status": "measured" if metric_name in measured else "unsupported",
+                "quality_metric_source": metric_source,
+                "metric_status": metric_status,
                 "supports_paper_claim": False,
             }
         )
-    for metric_name in ("lpips", "fid", "kid", "clip_score"):
+    for metric_name in ("lpips", "clip_score", "clip_score_clean", "clip_score_aligned", "clip_score_delta", "fid", "kid"):
+        metric_entry = aligned_metrics.get(metric_name, {})
         rows.append(
             {
                 "quality_metric_name": metric_name,
-                "quality_metric_value": "unsupported",
-                "quality_metric_source": "not_computed_in_local_proxy",
-                "metric_status": "unsupported",
+                "quality_metric_value": metric_entry.get("value", "unsupported"),
+                "quality_metric_source": "aligned_rescoring_package" if has_aligned_source else "not_computed_in_local_proxy",
+                "metric_status": metric_entry.get("status", "unsupported"),
                 "supports_paper_claim": False,
             }
         )
@@ -238,6 +390,7 @@ def build_threshold_report(
     metrics: dict[str, Any],
     config: FixedFprCalibrationConfig,
     rescue_audit: dict[str, Any],
+    aligned_quality: dict[str, Any],
 ) -> dict[str, Any]:
     """构造阈值退化与 fixed-FPR 主张边界报告。"""
     report = threshold.to_dict()
@@ -263,6 +416,7 @@ def build_threshold_report(
             "supports_paper_claim": False,
         }
     )
+    report.update(aligned_rescoring_output_metadata(aligned_quality))
     return report
 
 
@@ -272,6 +426,7 @@ def write_threshold_calibration_outputs(
     rescue_records_path: str | Path = DEFAULT_RESCUE_RECORDS_PATH,
     rescue_audit_path: str | Path = DEFAULT_RESCUE_AUDIT_PATH,
     target_fpr: float = DEFAULT_TARGET_FPR,
+    aligned_rescoring_package_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """写出 fixed-FPR 阈值校准与指标产物。"""
     root_path = Path(root).resolve()
@@ -282,6 +437,12 @@ def write_threshold_calibration_outputs(
     resolved_records_path = records_path if records_path.is_absolute() else root_path / records_path
     resolved_audit_path = audit_path if audit_path.is_absolute() else root_path / audit_path
     rescue_audit = json.loads(resolved_audit_path.read_text(encoding="utf-8"))
+    resolved_aligned_package_path = resolve_aligned_rescoring_package_path(root_path, aligned_rescoring_package_path)
+    aligned_quality = (
+        read_quality_metrics_from_aligned_rescoring_package(resolved_aligned_package_path, root_path)
+        if resolved_aligned_package_path and resolved_aligned_package_path.exists()
+        else empty_aligned_rescoring_quality()
+    )
     config = FixedFprCalibrationConfig(target_fpr=target_fpr)
     records = full_rescue_records(read_jsonl(resolved_records_path))
     calibration_clean_records = split_role(records, config.calibration_split, config.clean_negative_role)
@@ -291,11 +452,11 @@ def write_threshold_calibration_outputs(
     )
     calibrated = calibrated_records(records, threshold, config)
     metrics = operating_point_metrics(calibrated, threshold, config)
-    threshold_report = build_threshold_report(threshold, metrics, config, rescue_audit)
+    threshold_report = build_threshold_report(threshold, metrics, config, rescue_audit, aligned_quality)
     roc_rows, det_rows = curve_rows(calibrated, config)
     distribution_rows = score_distribution_rows(calibrated)
     standard_rows = build_standard_metric_rows(metrics, calibrated)
-    quality_rows = build_quality_metric_rows(rescue_audit, root_path)
+    quality_rows = build_quality_metric_rows(rescue_audit, root_path, aligned_quality)
     fpr_rows = build_rescue_fpr_rows(metrics, threshold_report)
 
     thresholds_path = resolved_output_dir / "calibration_thresholds.json"
@@ -380,14 +541,24 @@ def write_threshold_calibration_outputs(
         "operating_point_metrics": metrics,
         "threshold_report": threshold_report,
         "rescue_fpr_audit": fpr_rows,
+        "aligned_rescoring_quality": aligned_rescoring_output_metadata(aligned_quality),
     }
+    input_paths = [
+        relative_or_absolute(resolved_records_path, root_path),
+        relative_or_absolute(resolved_audit_path, root_path),
+    ]
+    rebuild_command = "python scripts/write_threshold_calibration_outputs.py"
+    if resolved_aligned_package_path and resolved_aligned_package_path.exists():
+        aligned_package_text = relative_or_absolute(resolved_aligned_package_path, root_path)
+        input_paths.append(aligned_package_text)
+        rebuild_command = (
+            "python scripts/write_threshold_calibration_outputs.py "
+            f"--aligned-rescoring-package-path {aligned_package_text}"
+        )
     manifest = build_artifact_manifest(
         artifact_id="threshold_calibration_manifest",
         artifact_type="local_manifest",
-        input_paths=(
-            relative_or_absolute(resolved_records_path, root_path),
-            relative_or_absolute(resolved_audit_path, root_path),
-        ),
+        input_paths=tuple(input_paths),
         output_paths=output_paths,
         config={
             **config.to_dict(),
@@ -395,13 +566,14 @@ def write_threshold_calibration_outputs(
             "threshold_digest": build_stable_digest(threshold.to_dict()),
         },
         code_version=resolve_code_version(root_path),
-        rebuild_command="python scripts/write_threshold_calibration_outputs.py",
+        rebuild_command=rebuild_command,
         metadata={
             "construction_unit_name": CONSTRUCTION_UNIT_NAME,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "protocol_decision": "pass" if metrics["raw_content_clean_fpr"] <= target_fpr else "fail",
             "full_method_claim_ready": False,
             "supports_paper_claim": False,
+            **aligned_rescoring_output_metadata(aligned_quality),
         },
     ).to_dict()
     manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
@@ -416,6 +588,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rescue-records-path", default=str(DEFAULT_RESCUE_RECORDS_PATH), help="几何 rescue 记录路径。")
     parser.add_argument("--rescue-audit-path", default=str(DEFAULT_RESCUE_AUDIT_PATH), help="几何 rescue 审计路径。")
     parser.add_argument("--target-fpr", type=float, default=DEFAULT_TARGET_FPR, help="目标 false positive rate。")
+    parser.add_argument(
+        "--aligned-rescoring-package-path",
+        default=None,
+        help="真实 aligned rescoring 结果包路径; 未传入时自动读取 outputs 中最新包。",
+    )
     return parser
 
 
@@ -428,6 +605,7 @@ def main() -> None:
         rescue_records_path=args.rescue_records_path,
         rescue_audit_path=args.rescue_audit_path,
         target_fpr=args.target_fpr,
+        aligned_rescoring_package_path=args.aligned_rescoring_package_path,
     )
     print(stable_json_text(manifest), end="")
 

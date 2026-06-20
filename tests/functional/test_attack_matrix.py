@@ -125,6 +125,12 @@ def test_attack_matrix_outputs_are_rebuildable(tmp_path: Path) -> None:
                 "target_fpr": 0.05,
                 "rescue_margin_low": -0.05,
                 "allowed_fail_reasons": ["geometry_suspected", "low_confidence"],
+                "aligned_rescoring_package_path": "outputs/aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip",
+                "aligned_rescoring_package_digest": "abc123",
+                "aligned_rescoring_quality_metrics_ready": True,
+                "perceptual_metrics_ready": True,
+                "aligned_rescoring_record_count": 3,
+                "real_aligned_rescore_count": 3,
                 "full_method_claim_ready": False,
                 "supports_paper_claim": False,
             },
@@ -133,7 +139,16 @@ def test_attack_matrix_outputs_are_rebuildable(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     calibration_manifest_path = calibration_dir / "manifest.local.json"
-    calibration_manifest_path.write_text(json.dumps({"artifact_id": "threshold_calibration_manifest"}), encoding="utf-8")
+    calibration_manifest_path.write_text(
+        json.dumps(
+            {
+                "artifact_id": "threshold_calibration_manifest",
+                "metadata": {"aligned_rescoring_quality_metrics_ready": True},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     manifest = write_attack_matrix_outputs(
         root=tmp_path,
@@ -152,6 +167,9 @@ def test_attack_matrix_outputs_are_rebuildable(tmp_path: Path) -> None:
     assert manifest["artifact_id"] == "attack_matrix_manifest"
     assert attack_manifest["attack_metrics_ready"] is True
     assert attack_manifest["gpu_attack_unsupported_count"] > 0
+    assert attack_manifest["aligned_rescoring_quality_metrics_ready"] is True
+    assert attack_manifest["real_aligned_rescore_count"] == 3
+    assert manifest["metadata"]["aligned_rescoring_quality_metrics_ready"] is True
     assert (output_dir / "attacked_images").is_dir()
     assert len(registry_lines) == attack_manifest["attack_record_count"]
     assert any(row["metric_status"] == "unsupported" for row in family_rows)

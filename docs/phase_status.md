@@ -522,10 +522,10 @@
 | input_manifest | `outputs/geometric_rescue/manifest.local.json`; `outputs/geometric_rescue/geometry_rescue_audit.json`; `outputs/geometric_rescue/aligned_detection_records.jsonl` |
 | expected_output_manifest | `outputs/threshold_calibration/manifest.local.json` |
 | expected_outputs | `outputs/threshold_calibration/calibration_thresholds.json`; `outputs/threshold_calibration/fixed_fpr_operating_points.csv`; `outputs/threshold_calibration/standard_watermark_metrics.csv`; `outputs/threshold_calibration/quality_metrics_summary.csv`; `outputs/threshold_calibration/roc_curve_points.csv`; `outputs/threshold_calibration/det_curve_points.csv`; `outputs/threshold_calibration/score_distribution_table.csv`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/threshold_calibration/rescue_fpr_audit.csv`; `outputs/threshold_calibration/manifest.local.json` |
-| blocking_items | 当前 fixed-FPR 框架可由 governed records 重建, 但 `aligned_content_score` 仍来自本地代理, LPIPS / FID / KID / CLIP score 尚未真实计算; 因此 `full_method_claim_ready=false`。 |
+| blocking_items | 当前 fixed-FPR 框架可由 governed records 重建, 但 `aligned_content_score` 仍来自本地代理; 最新真实 aligned rescoring 包已向下游传播 PSNR、SSIM、MSE、MAE、LPIPS 与 CLIP score, FID / KID 仍是 dataset-level 未计算指标; 因此 `full_method_claim_ready=false`。 |
 | fallback_path | 若 rescue 后 evidence-level FPR 超过目标 operating point, 只允许保留 raw content claim 或将完整系统 fixed-FPR 主张标记为 unsupported; 不允许只报告 raw content FPR。 |
 | invariants | 内容阈值只由 calibration clean negative 冻结; test split 不参与调阈值; clean negative 与 attacked negative 分开审计; rescue window 与 fail reason gate 保持冻结。 |
-| next_stage_entry | 可以进入攻击矩阵与再扩散攻击记录构建; 若要支撑论文级 fixed-FPR 主张, 需先补齐真实 aligned latent 重判和完整质量指标。 |
+| next_stage_entry | 可以进入攻击矩阵与再扩散攻击记录构建; 若要支撑论文级 fixed-FPR 主张, 仍需把真实 aligned latent 重判扩展到完整 calibration / test 规模, 并补齐 dataset-level FID / KID 与真实图像攻击闭环。 |
 
 ### stage12 已完成内容
 
@@ -540,7 +540,7 @@
 1. `outputs/threshold_calibration/calibration_thresholds.json` 显示 `target_fpr=0.05`, `calibration_negative_count=14`, `observed_fpr=0.0`, `threshold_degenerate=false`, `threshold_value=0.5174190728458973`。
 2. `outputs/threshold_calibration/fixed_fpr_operating_points.csv` 显示 `true_positive_rate=0.84375`, `raw_content_clean_fpr=0.03125`, `evidence_clean_fpr=0.03125`, `evidence_attacked_fpr=0.15625`。
 3. `outputs/threshold_calibration/rescue_fpr_audit.csv` 显示 attacked negative 的 evidence-level FPR 超过 `target_fpr=0.05`, 因此完整系统 fixed-FPR 主张必须保持 unsupported。
-4. `outputs/threshold_calibration/quality_metrics_summary.csv` 已记录 PSNR、SSIM、MSE、MAE 来自真实 attention latent injection 包; LPIPS、FID、KID、CLIP score 当前均标记为 `unsupported`。
+4. `outputs/threshold_calibration/quality_metrics_summary.csv` 已由最新真实 aligned rescoring 包刷新: PSNR=`28.774532071397005`, SSIM=`0.9903153991736182`, MSE=`0.0013260099804028869`, MAE=`0.02013162337243557`, LPIPS=`0.03199240565299988`, `clip_score=0.3809072971343994`; FID / KID 仍保留 `dataset_level_metric_not_computed_in_pair_run`。
 5. `outputs/threshold_calibration/threshold_degeneracy_report.json` 中 `raw_content_claim_ready=true`, 但 `full_method_claim_ready=false`, `unsupported_reason=aligned_content_score_local_proxy`。
 
 ### stage12 验证结果
@@ -548,9 +548,9 @@
 | command | result |
 | --- | --- |
 | `python tools/harness/inspect_repository.py .` | pass |
-| `python scripts/write_threshold_calibration_outputs.py` | pass, `raw_content_clean_fpr=0.03125`, `evidence_clean_fpr=0.03125`, `evidence_attacked_fpr=0.15625` |
-| `pytest tests/functional/test_threshold_calibration.py -q` | pass, 2 passed |
-| `pytest -q` | pass, 74 passed |
+| `python scripts/write_threshold_calibration_outputs.py --aligned-rescoring-package-path outputs/aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip` | pass, `aligned_rescoring_quality_metrics_ready=true`, `real_aligned_rescore_count=3`, `evidence_attacked_fpr=0.15625` |
+| `pytest tests/functional/test_threshold_calibration.py -q` | pass, 3 passed |
+| `pytest -q` | pass, 86 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
 
 ## stage_13_attack_matrix_regeneration
@@ -585,7 +585,7 @@
 2. `outputs/attack_matrix/attack_family_metrics.csv` 已包含常规攻击的 `true_positive_rate`、`false_positive_rate`、`clean_false_positive_rate`、`attacked_false_positive_rate`、`quality_score_proxy_mean`、`score_retention_mean`、`lf_score_retention_mean`、`hf_score_retention_mean`、`attention_consistency_proxy_mean`、`geometry_reliable_rate` 和 `rescue_rate`。
 3. 再扩散攻击行保留配置与 digest, 但 `metric_status=unsupported`, `supported_record_count=0`, 不支持论文 robustness 主张。
 4. `outputs/attack_matrix/attacked_images/` 当前为空目录, 表示本地未生成真实 attacked image 文件; `attacked_image_registry.jsonl` 只登记受治理代理摘要。
-5. `outputs/attack_matrix/manifest.local.json` 记录输入路径、输出路径、配置摘要、代码版本和重建命令 `python scripts/write_attack_matrix_outputs.py`。
+5. `outputs/attack_matrix/attack_manifest.json` 与 `outputs/attack_matrix/manifest.local.json` 已继承最新真实 aligned rescoring 包路径、SHA256 摘要、`aligned_rescoring_quality_metrics_ready=true`、`perceptual_metrics_ready=true` 与 `real_aligned_rescore_count=3`。
 
 ### stage13 完成边界
 
@@ -601,7 +601,7 @@
 | `python tools/harness/inspect_repository.py .` | pass |
 | `python scripts/write_attack_matrix_outputs.py` | pass, `attack_record_count=1344`, `performed_attack_record_count=960`, `gpu_attack_unsupported_count=384`, `attack_metrics_ready=true` |
 | `pytest tests/functional/test_attack_matrix.py -q` | pass, 4 passed |
-| `pytest -q` | pass, 78 passed |
+| `pytest -q` | pass, 86 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
 
 ## real_gpu_aligned_rescoring_workflow
@@ -638,11 +638,18 @@
 3. FID / KID 仍是 dataset-level metric, 当前 pair-level Colab workflow 不计算 FID / KID, 继续写入明确的 unsupported status。
 4. 新真实 aligned rescoring 包回传后, 必须重新审计 `real_aligned_rescore_count > 0`、`image_quality_metrics_ready=true`、`perceptual_metrics_ready=true`、环境依赖版本和所有输入 manifest, 之后才能重跑 fixed-FPR 相关产物。
 
+### aligned rescoring result 下游传播记录
+
+1. 已将 `outputs/aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip` 作为阈值校准的显式输入, 并在 `outputs/threshold_calibration/manifest.local.json` 中记录输入路径与 SHA256 摘要 `ac1c8578f611de53aaae68ab22ecc667746090272bcb5c95d2e7844b6913964e`。
+2. `outputs/threshold_calibration/quality_metrics_summary.csv` 已改为优先使用 aligned rescoring 包中的真实 pair-level 质量指标; PSNR、SSIM、MSE、MAE、LPIPS 与 CLIP score 均为 measured, FID / KID 保持 dataset-level unsupported。
+3. `outputs/threshold_calibration/threshold_degeneracy_report.json`、`outputs/threshold_calibration/manifest.local.json`、`outputs/attack_matrix/attack_manifest.json` 与 `outputs/attack_matrix/manifest.local.json` 均已写入 `aligned_rescoring_quality_metrics_ready=true`、`perceptual_metrics_ready=true`、`aligned_rescoring_record_count=3` 与 `real_aligned_rescore_count=3`。
+4. 该传播只解决真实 aligned rescoring 包的质量指标与 provenance 进入下游产物的问题; fixed-FPR 统计仍沿用 governed geometric rescue records, 因此 `evidence_attacked_fpr=0.15625` 与 `full_method_claim_ready=false` 不因本次传播而改变。
+
 ### aligned rescoring workflow 验证结果
 
 | command | result |
 | --- | --- |
 | `python tools/harness/inspect_repository.py .` | pass |
 | `pytest tests/functional/test_aligned_rescoring_metrics.py tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 18 passed |
-| `pytest -q` | pass, 85 passed |
+| `pytest -q` | pass, 86 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
