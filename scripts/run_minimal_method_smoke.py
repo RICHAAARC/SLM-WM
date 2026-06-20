@@ -39,7 +39,7 @@ def build_minimal_smoke_report() -> dict[str, Any]:
     """构造最小方法包 smoke 报告。"""
     bundle = build_core_method_smoke_bundle()
     return {
-        "stage_name": "stage_02_core_method_smoke_test",
+        "construction_unit_name": "core_method_synthetic_smoke",
         "artifact_id": "minimal_method_smoke_report",
         "artifact_type": "stdout_or_local_report",
         "decision": "pass"

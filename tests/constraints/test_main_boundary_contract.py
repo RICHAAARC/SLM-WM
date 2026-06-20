@@ -1,4 +1,4 @@
-"""验证 stage00 冻结的 `main/` 核心包边界。"""
+"""验证冻结后的 `main/` 核心包边界。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.write_stage00_core_boundary_outputs import build_core_boundary_report
+from scripts.write_core_package_boundary_outputs import build_core_boundary_report
 
 
 @pytest.mark.constraint
@@ -25,8 +25,8 @@ def test_main_package_boundary_rejects_forbidden_outer_imports() -> None:
 
 
 @pytest.mark.constraint
-def test_main_package_contains_stage00_minimal_layout() -> None:
-    """核心包必须包含 stage00 规定的最小语义子包。"""
+def test_main_package_contains_core_minimal_layout() -> None:
+    """核心包必须包含最小语义子包。"""
     required_paths = (
         Path("main/core"),
         Path("main/methods"),

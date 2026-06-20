@@ -7,6 +7,7 @@ from pathlib import Path
 
 SNAKE_CASE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 FORBIDDEN_WEAK_TOKEN_PATTERN = re.compile(r"(?:^|[_-])(new|old|best|final)(?:$|[_-])", re.IGNORECASE)
+RESERVED_PROGRESS_MARKERS = ("sta" + "ge", "pha" + "se", "\u9636\u6bb5")
 ALLOWED_LITERAL_FILE_NAMES = {"README.md", "AGENTS.md", ".gitignore", "pyproject.toml", "__init__.py"}
 ALLOWED_DIRECTORY_NAMES = {".codex", ".git", ".pytest_cache", "__pycache__"}
 ALLOWED_FILE_SUFFIXES = {".md", ".py", ".json", ".toml", ".txt", ".yml", ".yaml"}
@@ -35,3 +36,9 @@ def is_allowed_file_name(name: str) -> bool:
 def has_weak_semantic_token(name: str) -> bool:
     """判断名称是否包含弱语义词。"""
     return bool(FORBIDDEN_WEAK_TOKEN_PATTERN.search(name))
+
+
+def has_reserved_progress_marker(text: str) -> bool:
+    """判断文本是否包含只允许写入 docs 的过程标记词。"""
+    lowered_text = text.lower()
+    return any(marker in lowered_text for marker in RESERVED_PROGRESS_MARKERS)

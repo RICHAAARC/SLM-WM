@@ -4,13 +4,13 @@
 
 ## 核心定位
 
-本框架适用于论文项目, 尤其适合需要长期迭代、阶段性实验、Notebook 远程运行、正式表格重建和审稿复现材料整理的研究代码库。
+本框架适用于论文项目, 尤其适合需要长期迭代、递进式实验、Notebook 远程运行、正式表格重建和审稿复现材料整理的研究代码库。
 
 框架固定使用 `main/` 作为核心 Python 包目录。`main/` 保存论文方法、实验协议、核心评估、表格重建和 CLI 复现入口。
 
-## stage00 核心包边界
+## 核心包边界
 
-`stage_00_core_package_boundary_freeze` 冻结 `main/` 的最小方法包边界。该边界的含义是:
+`core_package_boundary_freeze` 冻结 `main/` 的最小方法包边界。该边界的含义是:
 
 1. `main/core/` 只保存 digest、records、manifest 和 SLM-WM 方法 typed object。
 2. `main/methods/` 只保存论文方法机制与机制变体。
@@ -18,13 +18,11 @@
 4. `main/analysis/` 可以构造表格、图数据、报告和 claim audit 所需的中间结构, 但不得反向依赖实验 runner、Notebook workflow 或 harness。
 5. `main/cli/` 只作为命令行复现入口, 不保存外部环境专用逻辑。
 
-本阶段新增的本地阶段报告由 `scripts/write_stage00_core_boundary_outputs.py` 写入
-`outputs/local_stage00_core_boundary/`。这些文件是阶段治理输出, 不是正式论文实验结果,
-默认不提交。
+本地边界报告由 `scripts/write_core_package_boundary_outputs.py` 写入 `outputs/core_package_boundary_freeze/`。这些文件是治理输出, 不是正式论文实验结果, 默认不提交。
 
 ## 五层结构
 
-1. 契约层: `.codex/project_contract.md` 与 `docs/` 定义阶段、目录边界、字段、命名、测试和发布规则。
+1. 契约层: `.codex/project_contract.md` 与 `docs/` 定义推进单元、目录边界、字段、命名、测试和发布规则。
 2. Skill 层: `.codex/skills/*.skill.md` 约束 Agent 或协作者在不同任务中的允许行为与禁止行为。
 3. Harness 层: `tools/harness/` 将文档约束转化为可执行审计。
 4. 测试层: `tests/constraints/`、`tests/functional/`、`tests/integration/` 控制默认测试成本。
@@ -35,7 +33,7 @@
 ```text
 main/                   论文方法、协议、分析、CLI 和核心复现能力
 configs/                实验配置模板
-experiments/            阶段性实验 runner 和 paper protocol
+experiments/            递进式实验 runner 和 paper protocol
 paper_workflow/         Notebook / Colab workflow 入口和 session helper
 scripts/                数据准备、结果检查、打包和发布辅助命令
 docs/                   工程治理、实验协议和复现说明
@@ -57,16 +55,16 @@ python tools/harness/run_all_audits.py
 ## 复制到新论文项目
 
 1. 将本目录内容复制到新仓库根目录。
-2. 修改 `.codex/project_contract.md` 中的论文目标、阶段名称、方法对象和通过条件。
+2. 修改 `.codex/project_contract.md` 中的论文目标、推进单元名称、方法对象和通过条件。
 3. 在 `main/` 中实现论文方法和核心协议, 不要把正式逻辑只写在 Notebook 中。
-4. 在 `experiments/` 中放置阶段性实验 runner。
+4. 在 `experiments/` 中放置递进式实验 runner。
 5. 在 `paper_workflow/` 中放置 Notebook workflow, 但 Notebook 只负责调度。
 6. 在 `docs/field_registry.md` 中登记 governed fields。
 7. 保持 `pytest -q` 默认只运行 `unit`、`constraint` 或 `quick` 测试。
 
 ## 发布建议
 
-该框架可作为 GitHub 模板仓库发布。使用者应先替换论文主题、方法名称、阶段名称和 field registry, 再接入 CI。
+该框架可作为 GitHub 模板仓库发布。使用者应先替换论文主题、方法名称、推进单元名称和 field registry, 再接入 CI。
 
 ## 方法抽离与论文附件
 

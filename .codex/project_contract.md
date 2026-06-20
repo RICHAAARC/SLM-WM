@@ -4,14 +4,14 @@
 
 本项目采用 governed research project 方法构建论文相关代码库: 先定义契约、目录边界、字段注册、测试分层、Notebook 边界和论文产物重建规则, 再实现论文方法与实验流程。
 
-## Current Stage
+## Current Construction Unit
 
-- `project_stage`: `project_bootstrap`
-- `target_construction_phase`: `core_method_runtime_construction`
-- 当前阶段只允许建立目录、文档、skill、harness、测试分层和最小 `main/` 核心包骨架。
-- 当前阶段不应引入真实大规模数据、正式实验输出、论文最终图表或发布包。
+- `project_unit`: `project_bootstrap`
+- `target_construction_unit`: `core_method_runtime_construction`
+- 当前推进单元只允许建立目录、文档、skill、harness、测试分层和最小 `main/` 核心包骨架。
+- 当前推进单元不应引入真实大规模数据、正式实验输出、论文最终图表或发布包。
 
-## Ordered Semantic Stages
+## Ordered Semantic Construction Units
 
 1. `project_bootstrap`
 2. `core_method_runtime_construction`
@@ -23,7 +23,7 @@
 ## Core Directory Rules
 
 1. `main/` 保存论文方法、核心协议、核心评估、表格重建和 CLI 复现能力。
-2. `experiments/` 保存阶段性实验 runner、ablation、baseline 或 paper protocol。
+2. `experiments/` 保存递进式实验 runner、ablation、baseline 或 paper protocol。
 3. `paper_workflow/` 保存 Notebook / Colab workflow 入口和 session helper。
 4. `scripts/` 保存数据准备、结果检查、结果打包和 release 辅助命令。
 5. `tools/harness/` 保存外层治理审计, 不得被 `main/` 反向依赖。
@@ -59,8 +59,10 @@
 ## Naming Governance
 
 1. 正式文件名、目录名、模块名、配置键和字段名应使用 `snake_case`。
-2. 禁止用数字阶段名、弱版本后缀、`new`、`old`、`best`、`final` 等词作为正式语义。
-3. 方法、实验、报告和配置应使用能表达机制、实验协议或论文职责的名称。
+2. 正式名称必须表达职责、机制或业务含义。
+3. 除 `docs/` 下的人类可读规划文件外, 正式路径、配置键、字段名、测试名、报告名和正文不得使用 `docs/naming_governance.md` 中登记的过程标记词。
+4. 禁止用弱编号、弱版本后缀、`new`、`old`、`best`、`final` 等词作为正式语义。
+5. 方法、实验、报告和配置应使用能表达机制、实验协议或论文职责的名称。
 
 ## Git Commit Governance
 
@@ -79,7 +81,7 @@
 ## Validation Boundary Governance
 
 1. 项目构建应避免在业务路径中大量重复防御式校验和错误信息构造。
-2. 重复校验逻辑应优先收敛到配置加载阶段校验、dataclass 构造阶段校验、专门的 schema validator 或测试用例。
+2. 重复校验逻辑应优先收敛到配置加载时校验、dataclass 构造时校验、专门的 schema validator 或测试用例。
 3. 业务函数内部只保留关键边界校验, 例如外部输入边界、不可恢复状态边界、跨模块协议边界或会导致静默错误的核心算法前置条件。
 4. 相同字段、相同配置项、相同数据结构的错误信息不应在多个业务函数中分散维护; 应由统一解析器、schema 或测试断言提供稳定诊断。
 5. 核心算法实现应优先呈现方法逻辑、数据流和统计边界, 不应被重复的防御式样板代码淹没。

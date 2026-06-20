@@ -4,7 +4,7 @@ repository_intake
 
 ## Purpose
 
-在修改前检查仓库状态、目录边界和当前阶段。
+在修改前检查仓库状态、目录边界和当前推进单元。
 
 ## Scope
 

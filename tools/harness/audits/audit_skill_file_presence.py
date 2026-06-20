@@ -13,6 +13,7 @@ from tools.harness.lib.json_report import build_report, exit_with_report
 
 REQUIRED_SKILLS = {
     "repository_intake.skill.md",
+    "progression_guard.skill.md",
     "naming_governance.skill.md",
     "test_case_governance.skill.md",
     "artifact_rebuild.skill.md",

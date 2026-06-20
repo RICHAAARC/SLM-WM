@@ -34,8 +34,8 @@ Notebook 与 repository module 的跨边界数据
 
 | field_name | category | required_suffix | allowed_in_records | allowed_in_claims | replacement_required | description |
 | --- | --- | --- | --- | --- | --- | --- |
-| project_stage | governance | none | true | false | false | 当前项目语义阶段。 |
-| target_construction_phase | governance | none | true | false | false | 当前构建目标。 |
+| project_unit | governance | none | true | false | false | 当前项目语义阶段。 |
+| target_construction_unit | governance | none | true | false | false | 当前构建目标。 |
 | run_id | protocol | none | true | false | false | 一次运行的稳定标识。 |
 | record_id | protocol | none | true | false | false | 单条记录的稳定标识。 |
 | split | protocol | none | true | false | false | 数据或事件划分。 |
@@ -51,7 +51,7 @@ Notebook 与 repository module 的跨边界数据
 | code_version | artifact | none | false | false | false | 产物重建所用代码版本。 |
 | rebuild_command | artifact | none | false | false | false | 产物重建命令。 |
 | generated_at | governance | none | false | false | false | 本地报告或审计摘要的生成时间。 |
-| stage_name | governance | none | false | false | false | 项目分阶段构建流程中的语义阶段名称。 |
+| construction_unit_name | governance | none | false | false | false | 项目分阶段构建流程中的语义阶段名称。 |
 | phase_status | governance | none | false | false | false | 分阶段构建状态文档中的阶段推进状态。 |
 | executor | governance | none | false | false | false | 执行当前阶段推进的主体。 |
 | execution_date | governance | none | false | false | false | 当前阶段推进的执行日期。 |

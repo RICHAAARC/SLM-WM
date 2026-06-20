@@ -110,7 +110,7 @@ $$
 
 ## 五、阶段与项目契约的关系
 
-本文档中的 stage00 至 stage17 是 SLM-WM 构建工作包，不等同于 `.codex/project_contract.md` 中的 `project_stage`。当前项目契约的语义阶段仍为：
+本文档中的 stage00 至 stage17 是 SLM-WM 构建工作包，不等同于 `.codex/project_contract.md` 中的 `project_unit`。当前项目契约的语义阶段仍为：
 
 ```text
 project_bootstrap

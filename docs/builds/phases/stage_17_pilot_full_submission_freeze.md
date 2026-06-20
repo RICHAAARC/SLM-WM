@@ -14,7 +14,7 @@
 
 1. 读取 `AGENTS.md`，确认仓库协作约束。
 2. 读取 `.codex/project_contract.md`，确认 release boundary、paper artifact governance、Notebook 边界和测试治理。
-3. 读取本阶段相关 skill：`minimal_release.skill.md`、`artifact_rebuild.skill.md`、`claim_audit.skill.md`、`notebook_entrypoint.skill.md`、`stage_progression_guard.skill.md`。
+3. 读取本阶段相关 skill：`minimal_release.skill.md`、`artifact_rebuild.skill.md`、`claim_audit.skill.md`、`notebook_entrypoint.skill.md`、`progression_guard.skill.md`。
 4. 执行或检查仓库 intake：
 
 ```bash
@@ -30,7 +30,7 @@ python tools/harness/inspect_repository.py .
 2. `.codex/skills/artifact_rebuild.skill.md`
 3. `.codex/skills/claim_audit.skill.md`
 4. `.codex/skills/notebook_entrypoint.skill.md`
-5. `.codex/skills/stage_progression_guard.skill.md`
+5. `.codex/skills/progression_guard.skill.md`
 
 ## 四、阶段输入与前置条件
 

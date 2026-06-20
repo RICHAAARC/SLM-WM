@@ -1,7 +1,7 @@
-"""写出 stage00 核心包边界的本地审计产物。
+"""写出核心包边界的本地审计产物。
 
 该脚本属于仓库辅助命令, 不属于 `main/` 核心方法包。它只读取源码和文档,
-并把阶段本地输出写入 `outputs/local_stage00_core_boundary/`。
+并把本地治理输出写入 `outputs/core_package_boundary_freeze/`。
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 
-STAGE_NAME = "stage_00_core_package_boundary_freeze"
-DEFAULT_OUTPUT_DIR = Path("outputs/local_stage00_core_boundary")
+CONSTRUCTION_UNIT_NAME = "core_package_boundary_freeze"
+DEFAULT_OUTPUT_DIR = Path("outputs/core_package_boundary_freeze")
 REQUIRED_PACKAGE_DIRS = (
     "main/core",
     "main/methods",
@@ -85,7 +85,7 @@ def extract_imported_modules(path: Path) -> list[str]:
 
 
 def is_forbidden_import(module_name: str) -> bool:
-    """判断模块名是否命中 stage00 禁止导入前缀。"""
+    """判断模块名是否命中核心包禁止导入前缀。"""
     return any(
         module_name == prefix or module_name.startswith(f"{prefix}.") for prefix in FORBIDDEN_IMPORT_PREFIXES
     )
@@ -139,9 +139,9 @@ def build_core_boundary_report(root: str | Path) -> dict[str, Any]:
                 )
 
     return {
-        "artifact_id": "stage00_core_boundary_report",
-        "artifact_type": "stage_boundary_report",
-        "stage_name": STAGE_NAME,
+        "artifact_id": "core_boundary_report",
+        "artifact_type": "boundary_report",
+        "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "decision": "fail" if violations else "pass",
         "checked_paths": checked_paths,
         "violations": violations,
@@ -169,9 +169,9 @@ def build_core_import_report(root: str | Path) -> dict[str, Any]:
         violations.append({"path": "main/__init__.py", "reason": "main_import_failed", "value": repr(exc)})
 
     return {
-        "artifact_id": "stage00_core_import_report",
-        "artifact_type": "stage_import_report",
-        "stage_name": STAGE_NAME,
+        "artifact_id": "core_import_report",
+        "artifact_type": "import_report",
+        "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "decision": "fail" if violations else "pass",
         "checked_paths": checked_paths,
         "violations": violations,
@@ -230,18 +230,18 @@ def resolve_code_version(root_path: Path) -> str:
 
 
 def ensure_output_dir_under_outputs(root_path: Path, output_dir: Path) -> Path:
-    """确保阶段输出目录位于 `outputs/` 下。"""
+    """确保输出目录位于 `outputs/` 下。"""
     resolved_output_dir = (root_path / output_dir).resolve() if not output_dir.is_absolute() else output_dir.resolve()
     outputs_root = (root_path / "outputs").resolve()
     try:
         resolved_output_dir.relative_to(outputs_root)
     except ValueError as exc:
-        raise ValueError("stage00 输出目录必须位于 outputs/ 下") from exc
+        raise ValueError("核心包边界输出目录必须位于 outputs/ 下") from exc
     return resolved_output_dir
 
 
-def write_stage00_outputs(root: str | Path, output_dir: str | Path = DEFAULT_OUTPUT_DIR) -> dict[str, Any]:
-    """写出 stage00 本地报告、包结构清单和 manifest。"""
+def write_core_boundary_outputs(root: str | Path, output_dir: str | Path = DEFAULT_OUTPUT_DIR) -> dict[str, Any]:
+    """写出核心包边界报告、包结构清单和 manifest。"""
     root_path = Path(root).resolve()
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
@@ -263,7 +263,7 @@ def write_stage00_outputs(root: str | Path, output_dir: str | Path = DEFAULT_OUT
     generated_at = datetime.now(timezone.utc).isoformat()
     output_paths = tuple(path.relative_to(root_path).as_posix() for path in report_paths.values())
     config = {
-        "stage_name": STAGE_NAME,
+        "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "required_package_dirs": list(REQUIRED_PACKAGE_DIRS),
         "forbidden_import_prefixes": list(FORBIDDEN_IMPORT_PREFIXES),
         "forbidden_text_patterns": list(FORBIDDEN_TEXT_PATTERNS),
@@ -276,25 +276,22 @@ def write_stage00_outputs(root: str | Path, output_dir: str | Path = DEFAULT_OUT
         ),
     }
     manifest = build_artifact_manifest(
-        artifact_id="stage00_core_boundary_manifest",
-        artifact_type="local_stage_manifest",
+        artifact_id="core_package_boundary_manifest",
+        artifact_type="local_manifest",
         input_paths=(
             "AGENTS.md",
             ".codex/project_contract.md",
-            "docs/builds/phases/stage_00_core_package_boundary_freeze.md",
-            "docs/field_registry.md",
-            "docs/file_organization.md",
-            "docs/phase_status.md",
+            "docs",
             "main",
-            "scripts/write_stage00_core_boundary_outputs.py",
+            "scripts/write_core_package_boundary_outputs.py",
             "tests/constraints/test_main_boundary_contract.py",
         ),
         output_paths=output_paths,
         config=config,
         code_version=resolve_code_version(root_path),
-        rebuild_command="python scripts/write_stage00_core_boundary_outputs.py",
+        rebuild_command="python scripts/write_core_package_boundary_outputs.py",
         metadata={
-            "stage_name": STAGE_NAME,
+            "construction_unit_name": CONSTRUCTION_UNIT_NAME,
             "generated_at": generated_at,
             "decision": "fail" if boundary_report["decision"] != "pass" or import_report["decision"] != "pass" else "pass",
         },
@@ -305,12 +302,12 @@ def write_stage00_outputs(root: str | Path, output_dir: str | Path = DEFAULT_OUT
 
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
-    parser = argparse.ArgumentParser(description="写出 stage00 核心包边界本地输出。")
+    parser = argparse.ArgumentParser(description="写出核心包边界本地输出。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument(
         "--output-dir",
         default=str(DEFAULT_OUTPUT_DIR),
-        help="阶段输出目录, 必须位于 outputs/ 下。",
+        help="输出目录, 必须位于 outputs/ 下。",
     )
     return parser
 
@@ -319,7 +316,7 @@ def main() -> None:
     """命令行入口。"""
     parser = build_parser()
     args = parser.parse_args()
-    manifest = write_stage00_outputs(args.root, args.output_dir)
+    manifest = write_core_boundary_outputs(args.root, args.output_dir)
     print(stable_json_text(manifest), end="")
 
 

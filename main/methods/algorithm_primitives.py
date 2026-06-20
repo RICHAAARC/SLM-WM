@@ -2,7 +2,7 @@
 
 本模块只使用 Python 标准库和 `main/core` 中的稳定摘要能力, 不接入 SD3、
 SD3.5、Colab、Drive、Notebook 或真实 Self-Attention 运行时。该实现的定位是
-stage01 的 synthetic / tensor 原语闭环, 用于冻结方法数据流和统计边界。
+算法原语的 synthetic / tensor 闭环, 用于冻结方法数据流和统计边界。
 
 通用工程写法: 重复的向量形状校验集中在 dataclass 构造和少量私有辅助函数中。
 项目特定写法: LF、HF 与 attention synthetic stub 均从同一语义安全子空间导出,
@@ -156,7 +156,7 @@ def _basis_digest(basis: Sequence[Sequence[float]]) -> str:
 class RiskFieldParameters:
     """语义风险场参数。
 
-    参数校验集中在构造阶段, 后续业务函数只读取已合法的参数对象。
+    参数校验集中在构造时, 后续业务函数只读取已合法的参数对象。
     """
 
     eta_saliency: float = 0.35
@@ -630,7 +630,7 @@ def derive_attention_carrier_stub(
     """导出 attention-relative 几何载体的 synthetic stub。
 
     该函数不读取真实 Self-Attention map, 也不声称已接入真实 attention carrier。
-    它只提供与 LF/HF 同源的几何 update 形状, 便于后续阶段替换为真实运行时实现。
+    它只提供与 LF/HF 同源的几何 update 形状, 便于后续运行单元替换为真实运行时实现。
     """
     template = _stable_unit_values(
         (key, event_digest, safe_basis.basis_digest, safe_basis.route_digest, "attention_synthetic_stub"),

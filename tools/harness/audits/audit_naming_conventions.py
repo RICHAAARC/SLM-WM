@@ -11,7 +11,19 @@ if str(ROOT) not in sys.path:
 
 from tools.harness.lib.file_scanner import should_skip_path
 from tools.harness.lib.json_report import build_report, exit_with_report
-from tools.harness.lib.naming_rules import is_allowed_directory_name, is_allowed_file_name, has_weak_semantic_token
+from tools.harness.lib.naming_rules import (
+    has_reserved_progress_marker,
+    has_weak_semantic_token,
+    is_allowed_directory_name,
+    is_allowed_file_name,
+)
+
+TEXT_SUFFIXES = {".md", ".py", ".json", ".toml", ".txt", ".yml", ".yaml"}
+
+
+def is_docs_path(path: Path) -> bool:
+    """判断路径是否位于允许保留规划词的文档目录。"""
+    return bool(path.parts) and path.parts[0] == "docs"
 
 
 def run_audit(root: str | Path) -> dict:
@@ -31,6 +43,13 @@ def run_audit(root: str | Path) -> dict:
                 violations.append({"path": str(relative), "reason": "file_name_not_snake_case"})
         if has_weak_semantic_token(path.stem if path.is_file() else path.name):
             violations.append({"path": str(relative), "reason": "weak_semantic_token"})
+        if not is_docs_path(relative):
+            if has_reserved_progress_marker(str(relative)):
+                violations.append({"path": str(relative), "reason": "reserved_progress_marker"})
+            if path.is_file() and path.suffix.lower() in TEXT_SUFFIXES:
+                text = path.read_text(encoding="utf-8")
+                if has_reserved_progress_marker(text):
+                    violations.append({"path": str(relative), "reason": "reserved_progress_marker_in_text"})
     return build_report("audit_naming_conventions", "fail" if violations else "pass", violations, checked_paths)
 
 

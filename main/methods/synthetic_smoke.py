@@ -28,7 +28,7 @@ from main.methods.algorithm_primitives import (
 )
 
 
-SMOKE_STAGE_NAME = "stage_02_core_method_smoke_test"
+SMOKE_UNIT_NAME = "core_method_synthetic_smoke"
 CONTENT_THRESHOLD = 0.61
 RESCUE_MARGIN_LOW = -0.05
 
@@ -60,7 +60,7 @@ class CoreSmokeScenario:
 
 @dataclass(frozen=True)
 class CoreSmokeBundle:
-    """stage02 synthetic smoke 的完整内存结果。"""
+    """核心方法 synthetic smoke 的完整内存结果。"""
 
     scenarios: tuple[CoreSmokeScenario, ...]
     metrics: dict[str, Any]
@@ -83,7 +83,7 @@ def _interpolate_vectors(left: tuple[float, ...], right: tuple[float, ...], rati
 
 
 def _build_base_carriers() -> dict[str, Any]:
-    """构造 stage02 smoke 复用的 synthetic latent、基底和载体。"""
+    """构造 smoke 复用的 synthetic latent、基底和载体。"""
     latent_values = (0.2, -0.1, 0.4, -0.3, 0.6, -0.2, 0.1, -0.5)
     risk_field = build_semantic_risk_field(
         semantic_values=(0.2, 0.3, 0.4, 0.5, 0.7, 0.6, 0.2, 0.3),
@@ -94,7 +94,9 @@ def _build_base_carriers() -> dict[str, Any]:
     )
     projection = project_latent_mask(latent_values, mask_values=(1.0, 0.8, 0.9, 0.7))
     safe_basis = estimate_safe_basis(latent_values, projection, risk_field, basis_rank=4)
-    event_digest = build_stable_digest({"stage_name": SMOKE_STAGE_NAME, "event_name": "synthetic_smoke_event"})
+    event_digest = build_stable_digest(
+        {"construction_unit_name": SMOKE_UNIT_NAME, "event_name": "synthetic_smoke_event"}
+    )
     lf_carrier = derive_lf_carrier(safe_basis, key="correct_key", event_digest=event_digest)
     hf_carrier = derive_hf_carrier(safe_basis, risk_field, key="correct_key", event_digest=event_digest)
     attention_carrier = derive_attention_carrier_stub(safe_basis, key="correct_key", event_digest=event_digest)
@@ -195,7 +197,7 @@ def _make_scenario(
 
 
 def build_core_method_smoke_bundle() -> CoreSmokeBundle:
-    """构造 stage02 核心方法最小闭环 smoke 结果。"""
+    """构造核心方法最小闭环 smoke 结果。"""
     carrier_bundle = _build_base_carriers()
     latent_values = carrier_bundle["latent_values"]
     watermarked_values = carrier_bundle["watermarked_values"]
@@ -344,7 +346,7 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
             "event_digest": carrier_bundle["event_digest"],
         },
         metadata={
-            "stage_name": SMOKE_STAGE_NAME,
+            "construction_unit_name": SMOKE_UNIT_NAME,
             "attention_runtime": "not_connected",
             "records_are_synthetic": True,
         },

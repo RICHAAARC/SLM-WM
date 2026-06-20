@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tools.harness.lib.naming_rules import has_reserved_progress_marker
 from tools.harness.run_all_audits import run_all_audits
 
 
@@ -20,6 +21,14 @@ def test_harness_audits_pass_for_template() -> None:
     """模板仓库自身必须通过内置 harness 审计。"""
     summary = run_all_audits(Path.cwd())
     assert summary["overall_decision"] == "pass"
+
+
+@pytest.mark.constraint
+def test_reserved_progress_marker_detection() -> None:
+    """过程标记词必须被统一检测, 语义名称不得误报。"""
+    blocked_tokens = ("sta" + "ge", "pha" + "se", "\u9636\u6bb5")
+    assert all(has_reserved_progress_marker(token) for token in blocked_tokens)
+    assert not has_reserved_progress_marker("core_package_boundary_freeze")
 
 
 @pytest.mark.constraint

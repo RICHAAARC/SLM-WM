@@ -37,7 +37,7 @@ stage00 冻结后的 `main/` 边界进一步要求:
 1. `main/core/` 可以定义 SLM-WM 方法 typed object, 但不得写入运行输出或绑定外部执行环境。
 2. `main/methods/` 与 `main/protocol/` 可以引用 `main/core/`, 但不得引用实验 runner、脚本、测试、harness 或 Notebook workflow。
 3. `main/analysis/` 可以消费核心对象构造产物重建所需结构, 但不得依赖 `experiments/`、`scripts/`、`tests/`、`tools/harness/` 或 `paper_workflow/`。
-4. stage00 本地报告必须写入 `outputs/local_stage00_core_boundary/`, 不得写入仓库根目录或源码目录。
+4. stage00 本地报告必须写入 `outputs/core_package_boundary_freeze/`, 不得写入仓库根目录或源码目录。
 
 ## 禁止依赖方向
 

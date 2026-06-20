@@ -1,4 +1,4 @@
-"""验证 stage01 的纯算法原语闭环。"""
+"""验证纯算法原语闭环。"""
 
 from __future__ import annotations
 

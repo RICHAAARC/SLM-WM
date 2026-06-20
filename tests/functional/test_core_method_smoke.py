@@ -1,4 +1,4 @@
-"""验证 stage02 核心方法 synthetic smoke 闭环。"""
+"""验证核心方法 synthetic smoke 闭环。"""
 
 from __future__ import annotations
 

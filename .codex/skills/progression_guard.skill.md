@@ -1,14 +1,14 @@
 # Skill Name
 
-stage_progression_guard
+progression_guard
 
 ## Purpose
 
-防止项目阶段跳跃和弱阶段命名。
+防止项目推进跳跃和弱编号命名。
 
 ## Scope
 
-适用于 project stage、阶段配置和阶段推进决策。
+适用于 project unit、推进配置和递进式构建决策。
 
 ## Required Inputs
 
@@ -24,8 +24,8 @@ stage_progression_guard
 
 ## Blocking Rules
 
-- 阶段推进必须基于明确契约和通过的 harness gates。
-- 阶段名必须使用语义名称。
+- 项目推进必须基于明确契约和通过的 harness gates。
+- 推进单元名必须使用语义名称。
 
 ## Allowed Changes
 

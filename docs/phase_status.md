@@ -9,13 +9,13 @@
 
 | item | value |
 | --- | --- |
-| stage_name | `stage_00_core_package_boundary_freeze` |
+| construction_unit_name | `stage_00_core_package_boundary_freeze` |
 | phase_status | `completed` |
 | executor | `codex_agent` |
 | execution_date | `2026-06-20` |
 | input_manifest | `outputs/audit_reports/harness_audit_summary.json` |
-| expected_output_manifest | `outputs/local_stage00_core_boundary/manifest.local.json` |
-| expected_outputs | `outputs/local_stage00_core_boundary/core_boundary_report.json`; `outputs/local_stage00_core_boundary/core_import_report.json`; `outputs/local_stage00_core_boundary/core_package_layout.txt`; `outputs/local_stage00_core_boundary/manifest.local.json` |
+| expected_output_manifest | `outputs/core_package_boundary_freeze/manifest.local.json` |
+| expected_outputs | `outputs/core_package_boundary_freeze/core_boundary_report.json`; `outputs/core_package_boundary_freeze/core_import_report.json`; `outputs/core_package_boundary_freeze/core_package_layout.txt`; `outputs/core_package_boundary_freeze/manifest.local.json` |
 | blocking_items | 无。 |
 | fallback_path | 若核心包边界检查失败, 停止推进并修复 `main/` 反向依赖。 |
 | invariants | `main/` 不依赖 Colab、Drive、experiments、scripts、tests、tools/harness、paper_workflow 或外部 baseline。 |
@@ -26,14 +26,14 @@
 1. `main/` 最小包结构包括 `main/core/`、`main/methods/`、`main/protocol/`、`main/analysis/` 和 `main/cli/`。
 2. `main/core/method_objects.py` 定义语义条件、潜空间子空间、水印载体、注意力锚点、检测证据和融合决策的最小 typed object。
 3. `tests/constraints/test_main_boundary_contract.py` 对核心包导入边界进行轻量约束测试。
-4. `scripts/write_stage00_core_boundary_outputs.py` 只向 `outputs/local_stage00_core_boundary/` 写入本地阶段报告。
+4. `scripts/write_core_package_boundary_outputs.py` 只向 `outputs/core_package_boundary_freeze/` 写入本地阶段报告。
 
 ### stage00 验证结果
 
 | command | result |
 | --- | --- |
 | `python -c "import main"` | pass |
-| `python scripts/write_stage00_core_boundary_outputs.py` | pass |
+| `python scripts/write_core_package_boundary_outputs.py` | pass |
 | `pytest tests/constraints -q` | pass, 9 passed |
 | `pytest -q` | pass, 12 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
@@ -42,13 +42,13 @@
 
 | item | value |
 | --- | --- |
-| stage_name | `stage_01_algorithm_primitives` |
+| construction_unit_name | `stage_01_algorithm_primitives` |
 | phase_status | `completed` |
 | executor | `codex_agent` |
 | execution_date | `2026-06-20` |
-| input_manifest | `outputs/local_stage00_core_boundary/manifest.local.json` |
-| expected_output_manifest | `outputs/local_stage01_core_primitives/manifest.local.json` |
-| expected_outputs | `outputs/local_stage01_core_primitives/core_primitive_summary.json`; `outputs/local_stage01_core_primitives/synthetic_core_records.jsonl`; `outputs/local_stage01_core_primitives/manifest.local.json` |
+| input_manifest | `outputs/core_package_boundary_freeze/manifest.local.json` |
+| expected_output_manifest | `outputs/algorithm_primitives/manifest.local.json` |
+| expected_outputs | `outputs/algorithm_primitives/core_primitive_summary.json`; `outputs/algorithm_primitives/synthetic_core_records.jsonl`; `outputs/algorithm_primitives/manifest.local.json` |
 | blocking_items | 无。 |
 | fallback_path | 若纯算法原语不能在无 SD3、无 Colab、无 Drive 环境下通过测试, 停止推进并修复 `main/methods/` 原语实现。 |
 | invariants | 不引入 diffusers、transformers、SD 权重、Colab、Drive 或 Notebook; `main/` 不写出 records; attention carrier 仅为 synthetic stub。 |
@@ -57,7 +57,7 @@
 ### stage01 已完成内容
 
 1. `main/methods/algorithm_primitives.py` 实现纯算法原语闭环, 包括语义风险场、latent mask 投影、安全基底估计、LF/HF carrier、attention synthetic stub、latent update 合成、内容分数、几何可靠性和 evidence/final 判定。
-2. `scripts/run_core_smoke.py` 根据 typed objects 生成 stage01 本地 summary、synthetic records 和 manifest, 且所有输出均写入 `outputs/local_stage01_core_primitives/`。
+2. `scripts/run_core_smoke.py` 根据 typed objects 生成 stage01 本地 summary、synthetic records 和 manifest, 且所有输出均写入 `outputs/algorithm_primitives/`。
 3. `tests/functional/test_algorithm_primitives.py` 覆盖正确 key、错误 key、HF tail truncation、rescue 边界和 attestation 分层。
 4. `docs/field_registry.md` 已登记 stage01 新增字段。
 
@@ -75,13 +75,13 @@
 
 | item | value |
 | --- | --- |
-| stage_name | `stage_02_core_method_smoke_test` |
+| construction_unit_name | `stage_02_core_method_smoke_test` |
 | phase_status | `completed` |
 | executor | `codex_agent` |
 | execution_date | `2026-06-20` |
-| input_manifest | `outputs/local_stage00_core_boundary/manifest.local.json`; `outputs/local_stage01_core_primitives/manifest.local.json` |
-| expected_output_manifest | `outputs/local_stage02_core_synthetic_smoke/manifest.local.json` |
-| expected_outputs | `outputs/local_stage02_core_synthetic_smoke/synthetic_event_records.jsonl`; `outputs/local_stage02_core_synthetic_smoke/core_smoke_metrics.json`; `outputs/local_stage02_core_synthetic_smoke/core_smoke_summary.md`; `outputs/local_stage02_core_synthetic_smoke/manifest.local.json` |
+| input_manifest | `outputs/core_package_boundary_freeze/manifest.local.json`; `outputs/algorithm_primitives/manifest.local.json` |
+| expected_output_manifest | `outputs/core_method_synthetic_smoke/manifest.local.json` |
+| expected_outputs | `outputs/core_method_synthetic_smoke/synthetic_event_records.jsonl`; `outputs/core_method_synthetic_smoke/core_smoke_metrics.json`; `outputs/core_method_synthetic_smoke/core_smoke_summary.md`; `outputs/core_method_synthetic_smoke/manifest.local.json` |
 | blocking_items | 无。 |
 | fallback_path | 若 synthetic latent smoke 不能复现 key 区分、rescue 边界或 attestation 分层, 停止推进并修复 `main/methods/synthetic_smoke.py`。 |
 | invariants | 不接入真实 SD3/SD3.5、Colab、Drive 或 Notebook; 不把 smoke 结果写成论文 supported claims; attention carrier 仍为 synthetic stub。 |
@@ -90,7 +90,7 @@
 ### stage02 已完成内容
 
 1. `main/methods/synthetic_smoke.py` 构造 clean、watermarked、wrong-key negative、geometric shifted、aligned recovered、unattested positive 和 final positive 等 synthetic latent 场景。
-2. `scripts/run_core_smoke.py --stage stage02` 写出 stage02 synthetic records、metrics、summary 和 manifest。
+2. `scripts/run_core_smoke.py --unit core_method_smoke` 写出 stage02 synthetic records、metrics、summary 和 manifest。
 3. `scripts/run_minimal_method_smoke.py` 提供 minimal method package 可复用的 stdout smoke。
 4. `tests/functional/test_core_method_smoke.py` 覆盖错误 key、rescue 边界、几何可靠性不足阻断 rescue 和 attestation 分层。
 
@@ -99,7 +99,7 @@
 | command | result |
 | --- | --- |
 | `python scripts/run_minimal_method_smoke.py` | pass |
-| `python scripts/run_core_smoke.py --stage stage02` | pass |
+| `python scripts/run_core_smoke.py --unit core_method_smoke` | pass |
 | `pytest tests/functional -q` | pass, 11 passed |
 | `pytest tests/constraints -q` | pass, 9 passed |
 | `pytest -q` | pass, 20 passed |

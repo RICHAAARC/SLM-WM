@@ -11,8 +11,8 @@
 本阶段开始前，执行者必须先完成以下检查，且不得以任何理由绕过 harness、项目契约或阶段门禁。
 
 1. 读取 `AGENTS.md`，确认仓库协作约束，包括修改前读取项目契约、不得绕过 harness、不得在默认测试路径加入重型测试、placeholder 与 random 字段命名规则、正式 claim 必须绑定 governed artifacts 等规则。
-2. 读取 `.codex/project_contract.md`，确认当前 `project_stage`、`target_construction_phase`、目录边界、Notebook 边界、paper artifact governance、naming governance、placeholder/random governance 和 test governance。
-3. 读取本阶段相关 `.codex/skills/*.skill.md`。至少应读取 `repository_intake.skill.md`、`stage_progression_guard.skill.md`、`naming_governance.skill.md` 和 `test_case_governance.skill.md`；若本阶段涉及 Notebook、artifact、claim、release 或 placeholder/random 字段，还必须读取对应 skill。
+2. 读取 `.codex/project_contract.md`，确认当前 `project_unit`、`target_construction_unit`、目录边界、Notebook 边界、paper artifact governance、naming governance、placeholder/random governance 和 test governance。
+3. 读取本阶段相关 `.codex/skills/*.skill.md`。至少应读取 `repository_intake.skill.md`、`progression_guard.skill.md`、`naming_governance.skill.md` 和 `test_case_governance.skill.md`；若本阶段涉及 Notebook、artifact、claim、release 或 placeholder/random 字段，还必须读取对应 skill。
 4. 执行或检查仓库 intake：
 
 ```bash
@@ -30,7 +30,7 @@ python tools/harness/inspect_repository.py .
 1. `.codex/skills/repository_intake.skill.md`
 2. `.codex/skills/notebook_entrypoint.skill.md`
 3. `.codex/skills/artifact_rebuild.skill.md`
-4. `.codex/skills/stage_progression_guard.skill.md`
+4. `.codex/skills/progression_guard.skill.md`
 
 ## 四、阶段输入与前置条件
 

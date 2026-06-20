@@ -25,7 +25,8 @@ naming_governance
 ## Blocking Rules
 
 - 正式名称必须有语义。
-- 禁止弱阶段编号、弱版本后缀和无语义名称。
+- 除 `docs/` 外, 不得使用 `docs/naming_governance.md` 中登记的过程标记词。
+- 禁止弱编号、弱版本后缀和无语义名称。
 
 ## Allowed Changes
 
