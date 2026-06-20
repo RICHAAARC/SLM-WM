@@ -63,11 +63,11 @@ python tools/harness/inspect_repository.py .
 
 本阶段应产出或更新以下内容：
 
-1. `outputs/local_stage03_sd_adapter/sd_generation_records.jsonl`
-2. `outputs/local_stage03_sd_adapter/latent_trace_records.jsonl`
-3. `outputs/local_stage03_sd_adapter/attention_capture_records.jsonl`
-4. `outputs/local_stage03_sd_adapter/generation_quality_summary.json`
-5. `outputs/local_stage03_sd_adapter/manifest.local.json`
+1. `outputs/sd_runtime_adapter/sd_generation_records.jsonl`
+2. `outputs/sd_runtime_adapter/latent_trace_records.jsonl`
+3. `outputs/sd_runtime_adapter/attention_capture_records.jsonl`
+4. `outputs/sd_runtime_adapter/generation_quality_summary.json`
+5. `outputs/sd_runtime_adapter/manifest.local.json`
 
 同时必须更新以下项目信息：
 

@@ -1,0 +1,11 @@
+model_family: sd35
+model_id: stabilityai/stable-diffusion-3.5-medium
+backend_mode: synthetic_fallback
+prompt: a high quality photograph of a glass sphere on a wooden table
+negative_prompt: low quality, blurry
+seed: 1703
+width: 512
+height: 512
+inference_steps: 6
+guidance_scale: 4.5
+latent_width: 8

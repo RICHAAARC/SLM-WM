@@ -209,6 +209,50 @@ Notebook 与 repository module 的跨边界数据
 | evidence_positive_count | method | none | true | false | false | smoke 场景 evidence positive 数量。 |
 | hf_tail_truncation_delta | method | none | true | false | false | HF tail truncation 前后分数差异。 |
 | attestation_layering_pass | method | none | true | false | false | attestation 是否只影响 final-level 的检查结果。 |
+| model_family | runtime | none | true | false | false | SD runtime adapter 使用的模型族。 |
+| model_id | runtime | none | true | false | false | SD runtime adapter 使用的模型标识。 |
+| backend_name | runtime | none | true | false | false | 实际执行 generation probe 的后端名称。 |
+| backend_mode | runtime | none | true | false | false | 配置中要求的 runtime 后端模式。 |
+| runtime_dependency_mode | runtime | none | true | false | false | runtime adapter 实际依赖模式。 |
+| prompt | runtime | none | false | false | false | runtime 配置中的正向提示词。 |
+| negative_prompt | runtime | none | false | false | false | runtime 配置中的反向提示词。 |
+| prompt_digest | runtime | none | true | false | false | prompt、negative prompt、model_id 和 seed 的稳定摘要。 |
+| seed | runtime | none | true | false | false | runtime adapter 使用的确定性种子。 |
+| width | runtime | none | true | false | false | generation probe 的目标图像宽度。 |
+| height | runtime | none | true | false | false | generation probe 的目标图像高度。 |
+| inference_steps | runtime | none | true | false | false | runtime adapter 采样步数。 |
+| guidance_scale | runtime | none | true | false | false | runtime adapter guidance scale 配置。 |
+| latent_width | runtime | none | false | false | false | synthetic latent adapter 使用的 latent 向量宽度。 |
+| generation_id | runtime | none | true | false | false | generation record 的稳定标识。 |
+| latent_digest | runtime | none | true | false | false | latent 向量或最终 latent 的稳定摘要。 |
+| image_digest | runtime | none | true | false | false | synthetic 或真实生成图像的稳定摘要。 |
+| image_shape | runtime | none | true | false | false | generation record 记录的图像形状。 |
+| quality_score | runtime | none | true | false | false | runtime probe 的轻量质量分数。 |
+| unsupported_reason | runtime | none | true | false | false | 真实后端不可用或能力降级的原因。 |
+| unsupported_reasons | runtime | none | false | false | false | runtime summary 中聚合的 unsupported_reason 集合。 |
+| trajectory_index | runtime | none | true | false | false | latent trace 在采样序列中的索引。 |
+| timestep | runtime | none | true | false | false | latent trace 对应的采样时间位置。 |
+| latent_shape | runtime | none | true | false | false | latent trace 中记录的 latent 形状。 |
+| latent_mean | runtime | none | true | false | false | latent trace 中 latent 数值均值。 |
+| latent_std | runtime | none | true | false | false | latent trace 中 latent 数值标准差。 |
+| latent_min | runtime | none | true | false | false | latent trace 中 latent 数值最小值。 |
+| latent_max | runtime | none | true | false | false | latent trace 中 latent 数值最大值。 |
+| trace_source | runtime | none | false | false | false | latent trace 的来源后端。 |
+| capture_id | runtime | none | true | false | false | attention capture record 的稳定标识。 |
+| attention_map_digest | runtime | none | true | false | false | attention map 或降级摘要 map 的稳定摘要。 |
+| attention_shape | runtime | none | true | false | false | attention map 或降级摘要 map 的形状。 |
+| attention_mean | runtime | none | true | false | false | attention map 或降级摘要 map 的均值。 |
+| attention_entropy | runtime | none | true | false | false | attention map 或降级摘要 map 的平均熵。 |
+| capture_backend | runtime | none | true | false | false | attention capture record 的捕获后端。 |
+| capture_is_synthetic | runtime | none | false | false | false | 标记 attention capture 是否由 synthetic fallback 构造。 |
+| supports_paper_claim | governance | none | true | false | false | 记录或摘要是否允许支持正式论文 claim。 |
+| config_digests | artifact | none | false | false | false | runtime manifest 中记录的配置摘要集合。 |
+| generation_record_count | runtime | none | false | false | false | runtime summary 中 generation record 数量。 |
+| latent_trace_record_count | runtime | none | false | false | false | runtime summary 中 latent trace record 数量。 |
+| attention_capture_record_count | runtime | none | false | false | false | runtime summary 中 attention capture record 数量。 |
+| unsupported_reason_count | runtime | none | false | false | false | runtime summary 中 unsupported_reason 数量。 |
+| reproducibility_digest | runtime | none | false | false | false | runtime summary 的复现摘要。 |
+| mean_quality_score | runtime | none | false | false | false | generation records 的平均质量分数。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

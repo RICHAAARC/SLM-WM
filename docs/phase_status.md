@@ -104,3 +104,37 @@
 | `pytest tests/constraints -q` | pass, 9 passed |
 | `pytest -q` | pass, 20 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+## stage_03_sd3_runtime_adapter
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_03_sd3_runtime_adapter` |
+| phase_status | `completed` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/core_method_synthetic_smoke/manifest.local.json` |
+| expected_output_manifest | `outputs/sd_runtime_adapter/manifest.local.json` |
+| expected_outputs | `outputs/sd_runtime_adapter/sd_generation_records.jsonl`; `outputs/sd_runtime_adapter/latent_trace_records.jsonl`; `outputs/sd_runtime_adapter/attention_capture_records.jsonl`; `outputs/sd_runtime_adapter/generation_quality_summary.json`; `outputs/sd_runtime_adapter/manifest.local.json` |
+| blocking_items | 无。 |
+| fallback_path | 本地没有真实 SD3 / SD3.5 权重、GPU 或模型访问权限时, 使用 synthetic fallback 生成工程 records, 并在 records 中写入 `unsupported_reason`; fallback records 不支持正式论文 claim。 |
+| invariants | `main/` 不依赖 diffusers、transformers、模型权重、experiments runtime 或脚本; runtime 层只能调用 core, core 不反向依赖 runtime。 |
+| next_stage_entry | stage03 验证通过后, 才能进入 `stage_04_minimal_diffusion_latent_injection`。 |
+
+### stage03 已完成内容
+
+1. `experiments/runtime/diffusion/` 提供 SD3 / SD3.5 runtime adapter、synthetic fallback、sampler hook、latent trace、attention capture 和 latent estimator。
+2. `configs/model_sd3.yaml` 与 `configs/model_sd35.yaml` 提供轻量 runtime probe 配置。
+3. `scripts/run_diffusion_runtime_probe.py` 写出 generation records、latent trace records、attention capture records、quality summary 和 manifest, 且所有输出均写入 `outputs/sd_runtime_adapter/`。
+4. `tests/functional/test_diffusion_runtime_adapter.py` 覆盖 fallback 原因、相同 prompt / seed 复现和输出目录约束。
+5. `docs/field_registry.md` 已登记 runtime adapter 新增字段。
+
+### stage03 验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/run_diffusion_runtime_probe.py` | pass |
+| `pytest tests/functional/test_diffusion_runtime_adapter.py -q` | pass, 3 passed |
+| `pytest -q` | pass, 24 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
