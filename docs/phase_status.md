@@ -421,3 +421,45 @@
 | `pytest tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 10 passed |
 | `pytest -q` | pass, 66 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+
+## stage_10_attention_relative_latent_update
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_10_attention_relative_latent_update` |
+| phase_status | `local_method_proxy_ready` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/attention_geometry_package_20260620t13511781963497z_b237bb3.zip`; `outputs/semantic_subspace/manifest.local.json`; `outputs/content_carriers/manifest.local.json` |
+| expected_output_manifest | `outputs/attention_latent_update/manifest.local.json` |
+| expected_outputs | `outputs/attention_latent_update/attention_carrier_records.jsonl`; `outputs/attention_latent_update/attention_update_stability.csv`; `outputs/attention_latent_update/attention_update_quality_metrics.csv`; `outputs/attention_latent_update/attention_update_summary.json`; `outputs/attention_latent_update/manifest.local.json` |
+| blocking_items | 本地环境仍无 GPU, 本轮只完成由真实 attention geometry 包驱动的可审计 relation-gradient update 近似; 尚未在真实 SD3.5 latent callback 中执行该 update, 因此 `image_quality_metrics_ready=false` 且 `full_method_claim_ready=false`。 |
+| fallback_path | 若几何证据不可靠或 update 稳定性边界不满足, carrier 自动降级为 `evidence_only`, 只保留几何证据, 不写入 Full 方法主张。 |
+| invariants | 几何链不直接 positive; attention update 只在 `attention_geometry_ready=true` 且几何证据可靠时 active; 本地质量仅为 proxy, 不替代真实 paired image 质量指标。 |
+| next_stage_entry | 若需要把 attention-relative update 作为真实 Full 方法载体, 下一步必须在 Colab GPU 中把 active carrier 接入 SD3.5 latent callback, 生成 paired images、latent update records 和真实质量指标后再审计。 |
+
+### stage10 已完成内容
+
+1. 新增 `main/methods/carrier/attention.py`, 定义 `AttentionRelativeCarrier`, 关系损失、关系梯度投影、active update 与 `evidence_only` 降级边界。
+2. 更新 `main/methods/carrier/__init__.py`, 导出 attention-relative carrier 方法入口。
+3. 新增 `scripts/write_attention_latent_update_outputs.py`, 可从 ready attention geometry zip 或本地 ready 目录读取图与几何证据, 结合 semantic safe subspace records 生成 attention carrier records、强度稳定性表、质量代理表、summary 和 manifest。
+4. 新增 `tests/functional/test_attention_latent_update.py`, 覆盖可靠几何证据触发 active update、不可靠几何证据降级为 `evidence_only`, 以及脚本从 ready geometry 包重建受治理产物。
+5. `docs/field_registry.md` 已登记 attention-relative carrier、关系损失、强度稳定性、质量代理和 Full 方法 claim 边界相关字段。
+
+### stage10 当前产物摘要
+
+1. 当前输入使用真实 SD3.5 Medium attention geometry 包 `outputs/attention_geometry_package_20260620t13511781963497z_b237bb3.zip`, 其中 `attention_geometry_ready=true`。
+2. `outputs/attention_latent_update/attention_update_summary.json` 显示 `attention_carrier_record_count=64`, `active_update_count=16`, `evidence_only_count=48`, `attention_update_stable_count=16`, `protocol_decision=pass`。
+3. 当前 `image_quality_metrics_ready=false` 且 `full_method_claim_ready=false`, 表示本轮尚不能声称真实图像质量或 Full 方法主载体结论已经完成。
+4. 所有新产物仍保持 `supports_paper_claim=false`, 等待真实 SD3.5 latent callback 与 paired image 审计补齐。
+
+### stage10 验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/write_attention_latent_update_outputs.py --attention-geometry-package-path outputs/attention_geometry_package_20260620t13511781963497z_b237bb3.zip` | pass, `active_update_count=16`, `evidence_only_count=48` |
+| `pytest tests/functional/test_attention_latent_update.py -q` | pass, 3 passed |
+| `pytest -q` | pass, 69 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

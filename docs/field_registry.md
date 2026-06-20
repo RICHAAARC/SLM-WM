@@ -471,6 +471,33 @@ Notebook 与 repository module 的跨边界数据
 | geometry_summary_path | artifact | none | true | false | false | 真实 attention 捕获运行引用的几何 summary 路径。 |
 | entry_paths | artifact | none | false | false | false | 压缩包输入 manifest 中登记的入包文件路径集合。 |
 | entry_count | artifact | none | false | false | false | 压缩包输入 manifest 中登记的入包文件数量。 |
+| attention_geometry_source_path | artifact | none | false | false | false | attention-relative latent update 使用的 ready attention geometry 输入路径。 |
+| attention_carrier_record_count | method | none | false | false | false | attention-relative carrier records 数量。 |
+| subspace_record_count | method | none | false | false | false | 本地重建中用于派生 attention update 的语义安全子空间记录数量。 |
+| active_update_count | method | none | false | false | false | 通过稳定性边界并执行 active update 的 attention carrier 数量。 |
+| evidence_only_count | method | none | false | false | false | 因几何证据不可靠或 update 不稳定而降级为 evidence-only 的 carrier 数量。 |
+| attention_update_stable_count | method | none | false | false | false | carrier 级别满足 attention update 稳定性边界的数量。 |
+| attention_update_stability_row_count | method | none | false | false | false | attention update 强度稳定性表中的行数。 |
+| target_relation_values | method | none | true | false | false | attention-relative update 使用的目标相对关系权重。 |
+| baseline_relation_values | method | none | true | false | false | 未执行 attention update 时的相对关系近似。 |
+| relation_gradient_values | method | none | true | false | false | 相对关系误差投影到语义安全轴后的可审计梯度近似。 |
+| relation_loss_before | method | none | true | false | false | 执行 attention update 前的几何关系损失。 |
+| relation_loss_after | method | none | true | false | false | 执行 attention update 后或强度模拟后的几何关系损失。 |
+| relation_loss_delta | method | none | true | false | false | attention update 前后几何关系损失下降量。 |
+| relation_consistency_before | method | none | true | false | false | 执行 attention update 前的相对关系一致性。 |
+| relation_consistency_after | method | none | true | false | false | 执行 attention update 后或强度模拟后的相对关系一致性。 |
+| projected_update_norm | method | none | true | false | false | 投影到语义安全轴后的 attention update 二范数。 |
+| quality_proxy_drop | method | none | true | false | false | 本地重建中用于限制图像质量风险的轻量代理退化量。 |
+| attention_update_strength | method | none | true | false | false | attention update 强度曲线中的实际强度值。 |
+| attention_update_stable | method | none | true | false | false | 单条 carrier 或强度行是否满足 update 稳定性边界。 |
+| fallback_mode | method | none | true | false | false | attention carrier 的执行模式, active_update 表示可执行 update, evidence_only 表示仅保留几何证据。 |
+| attention_relative_carrier_digest | method | none | true | false | false | attention-relative carrier 的稳定摘要。 |
+| quality_metric_count | method | none | false | false | false | attention update 质量代理指标数量。 |
+| quality_metric_name | method | none | false | false | false | attention update 质量代理指标名称。 |
+| quality_metric_value | method | none | false | false | false | attention update 质量代理指标数值。 |
+| quality_metric_source | method | none | false | false | false | attention update 质量指标来源。 |
+| image_quality_metrics_ready | method | none | false | false | false | 是否已经完成真实图像质量指标测量。 |
+| full_method_claim_ready | method | none | false | false | false | 是否允许把 attention-relative update 写入 Full 方法主张。当前本地重建保持 false。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
