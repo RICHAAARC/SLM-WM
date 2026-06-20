@@ -200,3 +200,65 @@ def build_geometry_evidence_record(attention_graph: AttentionGraphRecord) -> Geo
         supports_paper_claim=False,
         metadata={"anchor_graph_digest": attention_graph.anchor_graph_digest},
     )
+
+
+def geometry_alignment_gain(
+    geometry_evidence: GeometryEvidenceRecord | dict[str, object],
+    raw_content_margin: float,
+    sample_role: str,
+    maximum_gain: float = 0.08,
+) -> float:
+    """估计几何恢复后内容重判可获得的分数增益。
+
+    该函数是项目特定的轻量代理实现。真实系统中应对 aligned latent
+    重新运行内容检测; 当前函数只用于本地受治理记录, 不支持论文主张。
+    """
+    if isinstance(geometry_evidence, dict):
+        geometry_reliable = bool(geometry_evidence.get("geometry_reliable", False))
+        registration_confidence = float(geometry_evidence.get("registration_confidence", 0.0))
+        recovered_sync_consistency_value = float(geometry_evidence.get("recovered_sync_consistency", 0.0))
+        alignment_residual = float(geometry_evidence.get("alignment_residual", 1.0))
+    else:
+        geometry_reliable = geometry_evidence.geometry_reliable
+        registration_confidence = geometry_evidence.registration_confidence
+        recovered_sync_consistency_value = geometry_evidence.recovered_sync_consistency
+        alignment_residual = geometry_evidence.alignment_residual
+    if not geometry_reliable:
+        return 0.0
+    reliability_weight = max(
+        0.0,
+        min(
+            1.0,
+            0.45 * registration_confidence
+            + 0.35 * recovered_sync_consistency_value
+            + 0.20 * (1.0 - alignment_residual),
+        ),
+    )
+    boundary_weight = max(0.0, 1.0 - min(abs(raw_content_margin) / 0.25, 1.0))
+    role_weight = {
+        "positive_source": 1.00,
+        "attacked_negative": 0.35,
+        "clean_negative": 0.20,
+    }.get(sample_role, 0.50)
+    return maximum_gain * reliability_weight * boundary_weight * role_weight
+
+
+def estimate_aligned_content_score(
+    raw_content_score: float,
+    content_threshold: float,
+    geometry_evidence: GeometryEvidenceRecord | dict[str, object],
+    sample_role: str,
+    maximum_gain: float = 0.08,
+) -> float:
+    """估计对齐后内容分数, 并保持同一个内容阈值不变。
+
+    该函数属于可替换的工程接口: 后续接入真实 aligned latent 内容检测时,
+    可以保留同一调用位置, 用真实检测分数替换该轻量代理分数。
+    """
+    raw_margin = raw_content_score - content_threshold
+    return raw_content_score + geometry_alignment_gain(
+        geometry_evidence=geometry_evidence,
+        raw_content_margin=raw_margin,
+        sample_role=sample_role,
+        maximum_gain=maximum_gain,
+    )

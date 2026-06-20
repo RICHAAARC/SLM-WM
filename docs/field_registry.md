@@ -503,6 +503,25 @@ Notebook 与 repository module 的跨边界数据
 | method_manifest_path | artifact | none | true | false | false | 真实运行引用的 attention latent update 方法 manifest 路径。 |
 | attention_runtime_strength | method | none | true | false | false | 真实 latent callback 中应用于 attention carrier tensor 的运行时强度。 |
 | attention_latent_injection_package_path | artifact | none | false | false | false | 真实 attention latent injection 打包产物路径。 |
+| attention_latent_injection_package_digest | artifact | none | false | false | false | 真实 attention latent injection 打包产物 SHA256 摘要。 |
+| aligned_detection_record_id | method | none | false | false | false | 几何恢复后内容重判记录的稳定标识。 |
+| aligned_detection_record_count | metric | none | false | false | false | 几何恢复后内容重判记录数量。 |
+| rescue_ablation_mode | method | none | false | false | false | 几何 rescue 消融模式, 用于区分完整 rescue、无 rescue、无 attention anchor 和反例审计。 |
+| rescue_score_gain | method | none | false | false | false | 几何对齐后内容分数相对原始内容分数的增益。 |
+| rescue_score_gain_mean | metric | none | false | false | false | 几何对齐后内容分数增益均值。 |
+| raw_content_positive_count | metric | none | false | false | false | 原始内容分支正判记录数量。 |
+| raw_content_failed_count | metric | none | false | false | false | 原始内容分支未正判记录数量。 |
+| rescue_eligible_count | metric | none | false | false | false | 满足 rescue 触发前置条件的记录数量。 |
+| rescue_applied_count | metric | none | false | false | false | 实际完成 rescue 并通过同阈值重判的记录数量。 |
+| full_rescue_record_count | metric | none | false | false | false | full_rescue 消融模式下的记录数量。 |
+| full_rescue_applied_count | metric | none | false | false | false | full_rescue 消融模式下实际完成 rescue 的记录数量。 |
+| raw_content_clean_fpr | metric | none | false | false | false | clean negative 上原始内容分支误报率。 |
+| evidence_clean_fpr | metric | none | false | false | false | clean negative 上 rescue 后 evidence-level 误报率。 |
+| evidence_attacked_fpr | metric | none | false | false | false | attacked negative 上 rescue 后 evidence-level 误报率。 |
+| geo_direct_positive_audit_decision | method | none | false | false | false | 仅用于反例审计的几何直接判正风险指示, 不进入正式 evidence decision。 |
+| geo_direct_positive_audit_rate | metric | none | false | false | false | clean negative 上几何直接判正反例审计触发率。 |
+| geo_direct_positive_audit_formal_method | method | none | false | false | false | 几何直接判正反例审计是否进入正式方法, 正式方法中必须为 false。 |
+| direct_positive_decision_used | method | none | false | false | false | 是否在正式 evidence decision 中使用几何直接判正。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

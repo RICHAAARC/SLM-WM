@@ -428,16 +428,16 @@
 | item | value |
 | --- | --- |
 | construction_unit_name | `stage_10_attention_relative_latent_update` |
-| phase_status | `real_injection_workflow_ready` |
+| phase_status | `real_injection_audited` |
 | executor | `codex_agent` |
 | execution_date | `2026-06-20` |
 | input_manifest | `outputs/attention_geometry_package_20260620t13511781963497z_b237bb3.zip`; `outputs/semantic_subspace/manifest.local.json`; `outputs/content_carriers/manifest.local.json` |
 | expected_output_manifest | `outputs/attention_latent_update/manifest.local.json`; Colab 运行后为 `outputs/attention_latent_injection/attention_latent_injection_manifest.local.json` |
 | expected_outputs | `outputs/attention_latent_update/attention_carrier_records.jsonl`; `outputs/attention_latent_update/attention_update_stability.csv`; `outputs/attention_latent_update/attention_update_quality_metrics.csv`; `outputs/attention_latent_update/attention_update_summary.json`; `outputs/attention_latent_update/manifest.local.json`; `paper_workflow/attention_latent_injection_run.ipynb`; `paper_workflow/colab_utils/attention_latent_injection.py`; Colab 运行后为 `outputs/attention_latent_injection/attention_latent_injection_result.json`; `outputs/attention_latent_injection/attention_latent_update_records.jsonl`; `outputs/attention_latent_injection/attention_paired_quality_metrics.csv`; `outputs/attention_latent_injection/attention_injection_environment_report.json`; `outputs/attention_latent_injection/attention_latent_injection_manifest.local.json`; `GoogleDrive/SLM/attention_latent_injection/attention_latent_injection_package_<utc>_<short_commit>.zip` |
-| blocking_items | 本地环境仍无 GPU, 当前已补齐 Colab 真实 latent callback 入口; 但真实运行结果尚需在 Colab GPU 中执行并回传审计, 因此本地 `image_quality_metrics_ready=false` 且 `full_method_claim_ready=false`。 |
+| blocking_items | 真实 Colab GPU 结果包已回传并完成本地审计, `image_quality_metrics_ready=true`; 但 `full_method_claim_ready=false`, 因为 fixed-FPR 与 rescue 统计边界尚未冻结。 |
 | fallback_path | 若几何证据不可靠或 update 稳定性边界不满足, carrier 自动降级为 `evidence_only`, 只保留几何证据, 不写入 Full 方法主张。 |
 | invariants | 几何链不直接 positive; attention update 只在 `attention_geometry_ready=true` 且几何证据可靠时 active; 本地质量仅为 proxy, 不替代真实 paired image 质量指标。 |
-| next_stage_entry | 运行并审计 `attention_latent_injection_package_<utc>_<short_commit>.zip` 后, 若真实 paired image 质量指标和 latent update records 均通过边界, 才能考虑把 `image_quality_metrics_ready` 打开; `full_method_claim_ready` 仍需后续 fixed-FPR 与 rescue 链路共同确认。 |
+| next_stage_entry | 已允许把真实 attention latent injection 包作为 same-threshold geometric rescue 的输入; `full_method_claim_ready` 仍需后续 fixed-FPR 与 rescue 链路共同确认。 |
 
 ### stage10 已完成内容
 
@@ -454,8 +454,9 @@
 
 1. 当前输入使用真实 SD3.5 Medium attention geometry 包 `outputs/attention_geometry_package_20260620t13511781963497z_b237bb3.zip`, 其中 `attention_geometry_ready=true`。
 2. `outputs/attention_latent_update/attention_update_summary.json` 显示 `attention_carrier_record_count=64`, `active_update_count=16`, `evidence_only_count=48`, `attention_update_stable_count=16`, `protocol_decision=pass`。
-3. 当前本地 `image_quality_metrics_ready=false` 且 `full_method_claim_ready=false`, 表示本地尚不能声称真实图像质量或 Full 方法主载体结论已经完成; Colab Notebook 已具备生成真实 quality metrics 的入口。
-4. 所有新产物仍保持 `supports_paper_claim=false`, 等待真实 SD3.5 latent callback 与 paired image 审计补齐。
+3. 已审计真实结果包 `outputs/attention_latent_injection_package_20260620t14471781966861z_8199dbc.zip`, SHA256 为 `c34577f71e549b6cf0dda43ed3dc8a582a45073f36b269d40cf454d598402b48`。
+4. 真实结果包显示 `run_decision=pass`, `latent_update_count=3`, 注入步为 `6, 10, 14`, `image_quality_metrics_ready=true`, PSNR 为 `35.18531747817406`, SSIM 为 `0.9976578187804996`。
+5. `full_method_claim_ready=false` 仍保持不变, 表示尚不能声称 fixed-FPR 完整方法主张已经完成。
 
 ### stage10 验证结果
 
@@ -466,4 +467,46 @@
 | `pytest tests/functional/test_attention_latent_update.py -q` | pass, 3 passed |
 | `pytest tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 11 passed |
 | `pytest -q` | pass, 70 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+## stage_11_same_threshold_geometric_rescue
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_11_same_threshold_geometric_rescue` |
+| phase_status | `local_rescue_protocol_ready` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/content_carriers/manifest.local.json`; `outputs/attention_latent_injection_package_20260620t14471781966861z_8199dbc.zip` |
+| expected_output_manifest | `outputs/geometric_rescue/manifest.local.json` |
+| expected_outputs | `outputs/geometric_rescue/aligned_detection_records.jsonl`; `outputs/geometric_rescue/rescue_metrics_summary.csv`; `outputs/geometric_rescue/content_failed_subset_summary.csv`; `outputs/geometric_rescue/geometry_rescue_audit.json`; `outputs/geometric_rescue/manifest.local.json` |
+| blocking_items | 当前为本地受治理机制记录, aligned content score 仍是由几何可靠性、边界距离和样本角色派生的轻量代理; 后续若要形成正式论文主张, 需要在真实 aligned latent 上重新运行内容检测, 并在 calibration split 中冻结完整 evidence-level 协议。 |
+| fallback_path | 若几何不可靠、内容分数不在边界失败窗口, 或 fail reason 不属于 `geometry_suspected` / `low_confidence`, 则不触发 rescue; `geo_direct_positive_audit` 只作为反例审计, 不进入正式方法。 |
+| invariants | 几何链不得直接 positive; rescue 后仍复用同一个 `content_threshold=0.75`; 当前 `supports_paper_claim=false` 且 `full_method_claim_ready=false`。 |
+| next_stage_entry | 可以进入 fixed-FPR calibration 与指标冻结构建; 下一步必须同时审计 raw content clean FPR、rescue 后 clean negative FPR 和 rescue 后 attacked negative FPR。 |
+
+### stage11 已完成内容
+
+1. 更新 `main/methods/detection/fusion.py`, 新增 `SameThresholdRescueConfig`、`GeometricRescueDecisionRecord`、`decide_same_threshold_geometric_rescue` 与消融模式下的几何可靠性选择逻辑。
+2. 更新 `main/methods/geometry/recovery.py`, 新增 `estimate_aligned_content_score` 轻量代理入口, 用于本地受治理记录; 后续真实 aligned latent 内容检测可替换该入口。
+3. 新增 `scripts/write_geometric_rescue_outputs.py`, 从真实 attention latent injection 包和内容检测 records 重建 aligned detection records、rescue metrics、内容失败子集摘要、geometry rescue audit 和 manifest。
+4. 新增 `tests/functional/test_geometric_rescue.py`, 覆盖同阈值 rescue、no-rescue 阻断、geo-direct-positive 反例审计以及受治理产物重建。
+5. `docs/field_registry.md` 已登记 aligned detection、rescue 消融、rescue gain、clean / attacked FPR 与 geo-direct-positive audit 字段。
+
+### stage11 当前产物摘要
+
+1. `outputs/geometric_rescue/geometry_rescue_audit.json` 显示 `protocol_decision=pass`, `attention_geometry_ready=true`, `image_quality_metrics_ready=true`, `latent_update_count=3`。
+2. 当前本地采样 `max_content_records=96`, 生成 `aligned_detection_record_count=576`, 其中 full-rescue 模式记录数为 `96`, `full_rescue_applied_count=1`。
+3. full-rescue 模式下 `raw_content_clean_fpr=0.0`, `evidence_clean_fpr=0.0`, `evidence_attacked_fpr=0.03125`; 这些统计只作为后续 fixed-FPR 构建输入, 不能替代正式 calibration。
+4. `geo_direct_positive_audit_rate=0.5625` 显示几何直接判正对 clean negative 具有明显 FPR 风险, 因此该分支继续保持为反例审计, 不进入正式方法。
+5. 所有新增产物保持 `supports_paper_claim=false`, `full_method_claim_ready=false`。
+
+### stage11 验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/write_geometric_rescue_outputs.py --attention-injection-package-path outputs/attention_latent_injection_package_20260620t14471781966861z_8199dbc.zip` | pass, `full_rescue_applied_count=1`, `evidence_clean_fpr=0.0`, `evidence_attacked_fpr=0.03125` |
+| `pytest tests/functional/test_geometric_rescue.py -q` | pass, 2 passed |
+| `pytest -q` | pass, 72 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
