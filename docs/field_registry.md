@@ -134,12 +134,16 @@ Notebook 与 repository module 的跨边界数据
 | carrier_family | method | none | false | false | false | 水印载体所属机制族。 |
 | frequency_band | method | none | false | false | false | 水印载体使用的频带名称。 |
 | key_digest | method | none | false | false | false | 载体派生时使用的密钥材料摘要。 |
+| watermark_key_digest | method | none | true | false | false | 最小 latent injection 使用的水印密钥材料摘要, 不记录原始密钥。 |
 | template_values | method | none | false | false | false | LF/HF/attention synthetic carrier 模板数值。 |
 | update_values | method | none | false | false | false | 单个 carrier 生成的 latent update 数值。 |
-| carrier_digest | method | none | false | false | false | 单个 carrier 的稳定摘要。 |
-| lf_carrier_digest | method | none | false | false | false | LF carrier 的稳定摘要。 |
-| hf_carrier_digest | method | none | false | false | false | HF carrier 的稳定摘要。 |
-| attention_carrier_digest | method | none | false | false | false | attention synthetic stub carrier 的稳定摘要。 |
+| carrier_digest | method | none | true | false | false | 单个 carrier 的稳定摘要。 |
+| carrier_source | method | none | true | false | false | 最小 latent injection 中 carrier 的来源机制。 |
+| carrier_width | method | none | true | false | false | 从核心算法原语导出的 carrier 基础宽度。 |
+| lf_carrier_digest | method | none | true | false | false | LF carrier 的稳定摘要。 |
+| hf_carrier_digest | method | none | true | false | false | HF carrier 的稳定摘要。 |
+| attention_carrier_digest | method | none | true | false | false | attention synthetic stub carrier 的稳定摘要。 |
+| core_update_digest | method | none | true | false | false | LF/HF/attention carrier 合成后的核心 update 摘要。 |
 | tail_threshold | method | none | false | false | false | HF tail truncation 使用的截断阈值。 |
 | retained_fraction | method | none | false | false | false | HF tail truncation 后保留的模板比例。 |
 | synthetic_stub | method | none | false | false | false | 标记 attention carrier 是否仅为 synthetic stub。 |
@@ -273,6 +277,26 @@ Notebook 与 repository module 的跨边界数据
 | drive_output_dir | artifact | none | false | false | false | Colab 镜像保存到 Google Drive 的目标目录。 |
 | drive_archive_path | artifact | none | true | false | false | Colab 镜像保存到 Google Drive 后的 zip 路径。 |
 | drive_archive_digest | artifact | none | true | false | false | Google Drive 镜像 zip 的 SHA-256 摘要。 |
+| injection_id | method | none | true | false | false | 最小 latent injection 运行的稳定标识。 |
+| run_decision | runtime | none | true | false | false | 最小 latent injection 运行是否形成可审计结果。 |
+| clean_image_path | artifact | none | true | false | false | clean paired image 在 outputs 下的受治理路径。 |
+| watermarked_image_path | artifact | none | true | false | false | watermarked paired image 在 outputs 下的受治理路径。 |
+| clean_image_digest | artifact | none | true | false | false | clean paired image 的 SHA-256 摘要。 |
+| watermarked_image_digest | artifact | none | true | false | false | watermarked paired image 的 SHA-256 摘要。 |
+| latent_update_count | method | none | true | false | false | 最小 latent injection 运行中实际执行的 latent update 数量。 |
+| update_index | method | none | true | false | false | latent update 在注入集合中的顺序索引。 |
+| injection_strength | method | none | true | false | false | 注入到 latent 的 carrier 扰动强度。 |
+| injection_step_indices | method | none | true | false | false | 执行 latent injection 的采样位置集合。 |
+| latent_digest_before | method | none | true | false | false | latent injection 前的 latent tensor 稳定摘要。 |
+| latent_digest_after | method | none | true | false | false | latent injection 后的 latent tensor 稳定摘要。 |
+| update_norm | method | none | true | false | false | 注入扰动 tensor 的二范数。 |
+| latent_norm_before | method | none | true | false | false | latent injection 前 latent tensor 的二范数。 |
+| latent_norm_after | method | none | true | false | false | latent injection 后 latent tensor 的二范数。 |
+| relative_update_norm | method | none | true | false | false | update_norm 与 latent_norm_before 的比值。 |
+| psnr | metric | none | true | false | false | paired image 的 PSNR 指标。 |
+| ssim | metric | none | true | false | false | paired image 的全图轻量 SSIM 指标。 |
+| mse | metric | none | true | false | false | paired image 的均方误差。 |
+| mean_abs_error | metric | none | true | false | false | paired image 的平均绝对误差。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

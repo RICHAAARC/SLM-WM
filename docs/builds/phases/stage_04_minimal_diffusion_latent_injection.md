@@ -40,7 +40,7 @@ python tools/harness/inspect_repository.py .
 2. stage01 / stage02 生成的 core carrier 与 synthetic smoke 配置。
 3. Colab GPU runtime、Hugging Face token、SD3.5 Medium 模型访问权限。
 4. SD3 Medium 模型访问权限作为对照与兼容性 fallback。
-5. Google Drive 可挂载, 默认目标目录为 `GoogleDrive/SLM/real_sd_runtime_probe/`。
+5. Google Drive 可挂载, runtime probe 默认目标目录为 `GoogleDrive/SLM/real_sd_runtime_probe/`, 最小 latent injection 默认目标目录为 `GoogleDrive/SLM/minimal_diffusion_latent_injection/`。
 
 若任一输入缺失，应先写入阻断报告，不得通过手工补文件或临时路径继续执行。
 
@@ -48,14 +48,15 @@ python tools/harness/inspect_repository.py .
 
 本阶段需要实现或更新以下功能：
 
-1. 先提供 Colab 冷启动 Notebook, 用于拉取仓库代码、安装依赖、登录 Hugging Face、加载真实模型、执行真实推理并捕获真实 latent trajectory。
-2. 真实运行主线模型为 SD3.5 Medium; SD3 Medium 保留为对照与兼容性 fallback。Colab Notebook 默认同时运行二者。
-3. Colab Notebook 必须把 `outputs/real_sd_runtime_probe/` 中的运行产物打包为 zip, 并保存到 Google Drive 的 `SLM/real_sd_runtime_probe/` 目录, 以便本地后续读取。
-4. 在采样 step set `T_inj` 中执行 `z_tilde = z_t + Delta z_t` 与 `z_{t-1}=S_theta(z_tilde,p,t)`。
-5. 使用 stage01 / stage02 的 core carrier 生成 `Delta z_t`。
+1. 提供 Colab 冷启动 Notebook, 用于拉取仓库代码、安装依赖、登录 Hugging Face、加载真实模型、执行真实推理并捕获真实 latent trajectory。
+2. 真实运行主线模型为 SD3.5 Medium; SD3 Medium 保留为对照与兼容性 fallback。最小 latent injection Notebook 当前默认 `SLM_WM_MODEL_SELECTION=auto`, 暂不运行 SD3 Medium 对照。
+3. Runtime probe Notebook 必须把 `outputs/real_sd_runtime_probe/` 中的运行产物打包为 zip, 并保存到 Google Drive 的 `SLM/real_sd_runtime_probe/` 目录, 以便本地后续读取。
+4. 提供最小 latent injection Notebook, 首个代码单元先挂载 Google Drive, 再执行依赖安装、仓库拉取、模型加载与采样; 在采样 step set `T_inj` 中执行 `z_tilde = z_t + Delta z_t` 与 `z_{t-1}=S_theta(z_tilde,p,t)`。
+5. `Delta z_t` 必须复用 `main/methods/algorithm_primitives.py` 的核心 carrier 原语生成, 当前运行单元使用稳定 semantic proxy 与 synthetic attention stub; 真实 Q/K attention 或可审计 attention map 留到后续 attention capture 运行单元接入。
 6. 生成少量 clean / watermarked paired images。
-7. 计算 PSNR、SSIM、LPIPS、CLIP score 等 paired quality metrics。
+7. 计算最小 paired quality metrics: PSNR、SSIM、MSE 与 mean absolute error。LPIPS 与 CLIP score 作为论文级质量评估套件的一部分在后续运行单元接入, 不作为本运行单元的本地完成前置条件。
 8. 记录 latent norm change、carrier digest、injection step、strength schedule 与 model config。
+9. 最小 latent injection Notebook 必须把 `outputs/minimal_diffusion_latent_injection/` 中的运行产物打包为 zip, 并保存到 Google Drive 的 `SLM/minimal_diffusion_latent_injection/` 目录, 以便本地后续读取和审计。
 
 ## 六、禁止事项与边界
 
@@ -72,20 +73,26 @@ python tools/harness/inspect_repository.py .
 
 1. `paper_workflow/sd_runtime_cold_start_probe.ipynb`
 2. `paper_workflow/colab_utils/sd_runtime_cold_start.py`
-3. `outputs/real_sd_runtime_probe/*_generation_record.json`
-4. `outputs/real_sd_runtime_probe/*_latent_trajectory_records.jsonl`
-5. `outputs/real_sd_runtime_probe/*_runtime_summary.json`
-6. `outputs/real_sd_runtime_probe/*_manifest.local.json`
-7. `outputs/real_sd_runtime_probe/real_sd_runtime_probe_package.zip`
-8. `outputs/real_sd_runtime_probe/real_sd_runtime_probe_archive_summary.json`
-9. `outputs/real_sd_runtime_probe/real_sd_runtime_probe_archive_manifest.local.json`
-10. `GoogleDrive/SLM/real_sd_runtime_probe/real_sd_runtime_probe_package.zip`
-11. `outputs/minimal_diffusion_latent_injection/clean_images/`
-12. `outputs/minimal_diffusion_latent_injection/watermarked_images/`
-13. `outputs/minimal_diffusion_latent_injection/paired_quality_metrics.csv`
-14. `outputs/minimal_diffusion_latent_injection/latent_update_records.jsonl`
-15. `outputs/minimal_diffusion_latent_injection/embedding_smoke_summary.json`
-16. `outputs/minimal_diffusion_latent_injection/manifest.local.json`
+3. `paper_workflow/minimal_latent_injection_run.ipynb`
+4. `paper_workflow/colab_utils/minimal_latent_injection.py`
+5. `outputs/real_sd_runtime_probe/*_generation_record.json`
+6. `outputs/real_sd_runtime_probe/*_latent_trajectory_records.jsonl`
+7. `outputs/real_sd_runtime_probe/*_runtime_summary.json`
+8. `outputs/real_sd_runtime_probe/*_manifest.local.json`
+9. `outputs/real_sd_runtime_probe/real_sd_runtime_probe_package.zip`
+10. `outputs/real_sd_runtime_probe/real_sd_runtime_probe_archive_summary.json`
+11. `outputs/real_sd_runtime_probe/real_sd_runtime_probe_archive_manifest.local.json`
+12. `GoogleDrive/SLM/real_sd_runtime_probe/real_sd_runtime_probe_package.zip`
+13. `outputs/minimal_diffusion_latent_injection/clean_images/`
+14. `outputs/minimal_diffusion_latent_injection/watermarked_images/`
+15. `outputs/minimal_diffusion_latent_injection/*_injection_result.json`
+16. `outputs/minimal_diffusion_latent_injection/*_paired_quality_metrics.csv`
+17. `outputs/minimal_diffusion_latent_injection/*_latent_update_records.jsonl`
+18. `outputs/minimal_diffusion_latent_injection/*_manifest.local.json`
+19. `outputs/minimal_diffusion_latent_injection/minimal_latent_injection_package.zip`
+20. `outputs/minimal_diffusion_latent_injection/minimal_latent_injection_archive_summary.json`
+21. `outputs/minimal_diffusion_latent_injection/minimal_latent_injection_archive_manifest.local.json`
+22. `GoogleDrive/SLM/minimal_diffusion_latent_injection/minimal_latent_injection_package.zip`
 
 同时必须更新以下项目信息：
 
