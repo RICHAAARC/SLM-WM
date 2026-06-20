@@ -283,3 +283,50 @@
 | `pytest tests/functional/test_prompt_bank_import.py tests/functional/test_prompt_event_protocol.py -q` | pass, 5 passed |
 | `pytest -q` | pass, 50 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+
+## stage_07_semantic_mask_risk_field_safe_subspace
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_07_semantic_mask_risk_field_safe_subspace` |
+| phase_status | `completed` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/prompt_event_protocol/manifest.local.json`; `outputs/prompt_event_protocol/prompt_records.jsonl`; `outputs/real_sd_runtime_probe_package_20260620t10451781952321z_b2be25c.zip`; `outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip` |
+| expected_output_manifest | `outputs/semantic_subspace/manifest.local.json` |
+| expected_outputs | `outputs/semantic_subspace/semantic_route_records.jsonl`; `outputs/semantic_subspace/subspace_plan_records.jsonl`; `outputs/semantic_subspace/mask_projection_reports/mask_projection_reports.jsonl`; `outputs/semantic_subspace/basis_digests.json`; `outputs/semantic_subspace/semantic_subspace_summary.json`; `outputs/semantic_subspace/manifest.local.json` |
+| blocking_items | 无。 |
+| fallback_path | 若真实 latent trace 摘要包不可用, 使用确定性 lightweight latent reference 继续验证语义掩码影响 feature operator 与 basis, 且保持 `supports_paper_claim=false`。 |
+| invariants | saliency、segmentation 和 SD attention capture 不进入 `main/`; `main/` 只接收标准化 mask、latent mask 和 feature tensor; 无语义掩码路径只作为消融或诊断路径。 |
+| next_stage_entry | semantic route、mask projection、approximate JVP 和 safe basis 均有 digest, 且语义掩码会改变 basis; 可进入 `stage_08_lf_hf_content_carriers`。 |
+
+### stage07 已完成内容
+
+1. 新增 `main/methods/semantic/risk_field.py`, 实现标准化语义、纹理、稳定性和显著性向量到风险场与承载预算的映射。
+2. 新增 `main/methods/semantic/latent_mask.py`, 实现 `M_z = Pi_{x->z}(M_x)` 的轻量投影和 `M_z * z_t` 掩码作用。
+3. 新增 `main/methods/semantic/routing.py`, 根据风险场与 latent mask 生成 LF、HF 和 attention 候选轴路由。
+4. 新增 `main/methods/subspace/trajectory_features.py`, 实现 `P^T vec(Norm(M_z * z_t))` 的轻量 feature operator。
+5. 新增 `main/methods/subspace/jvp_estimator.py`, 用相邻差分实现可审计 approximate JVP 摘要。
+6. 新增 `main/methods/subspace/safe_basis.py` 和 `main/methods/subspace/route_projection.py`, 实现 semantic safe basis、no semantic mask、global nullspace 和 diagnostic basis 四种可运行基底策略, 并生成 route projection digest。
+7. 新增 `scripts/write_semantic_subspace_outputs.py`, 从 prompt protocol records 与真实 SD3.5 latent trace 摘要包中构造 semantic route records、subspace plan records、mask projection reports、basis digests、summary 和 manifest。
+8. 当前 `outputs/semantic_subspace/semantic_subspace_summary.json` 显示 `semantic_route_record_count=6610`, `subspace_plan_record_count=6610`, `mask_projection_report_count=6610`, `unique_route_digest_count=6610`, `semantic_mask_changed_basis_count=6610`, `protocol_decision=pass`。
+9. 当前 `supports_paper_claim=false` 边界保持不变; 本阶段产物证明机制链路可审计, 不直接作为 detection 或 fixed-FPR 论文结论。
+10. 新增 `tests/functional/test_semantic_subspace.py`, 覆盖不同语义掩码产生不同 route、关闭语义掩码改变 basis、消融基底可运行、脚本输出 manifest 和输出目录约束。
+11. `docs/field_registry.md` 已登记本阶段新增 route、mask、feature operator、approximate JVP、basis strategy、basis digest 和 summary 字段。
+
+### stage07 完成边界
+
+1. 本阶段完成的是核心方法层的标准化 semantic mask、risk field、feature operator、approximate JVP 和 semantic safe basis, 不是正式 SD attention capture 或论文主实验统计。
+2. runtime 层仍负责 saliency、segmentation、predicted x0 与 attention capture; core 方法层不加载模型权重。
+3. `no_semantic_mask`、`global_nullspace` 和 `diagnostic_basis` 仅作为消融或诊断路径, 不得伪装成 SLM-WM 主方法。
+4. 后续 LF/HF carrier 构建应读取 `subspace_plan_records.jsonl` 与 `basis_digests.json`, 并保留 calibration/test split 边界。
+
+### stage07 验证结果
+
+| command | result |
+| --- | --- |
+| `python scripts/write_semantic_subspace_outputs.py` | pass, semantic_route_record_count=6610, subspace_plan_record_count=6610, semantic_mask_changed_basis_count=6610 |
+| `pytest tests/functional/test_semantic_subspace.py -q` | pass, 4 passed |
+| `pytest -q` | pass, 54 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

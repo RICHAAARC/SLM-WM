@@ -387,6 +387,40 @@ Notebook 与 repository module 的跨边界数据
 | source_archive_digest | artifact | none | false | false | false | prompt bank 来源 archive 的 SHA-256 摘要。 |
 | prompt_counts | protocol | none | false | false | false | prompt bank 导入摘要中按 prompt_set 聚合的 prompt 数量。 |
 | sanitized_prompt_counts | protocol | none | false | false | false | prompt bank 导入摘要中因治理规则被替换的 prompt 数量。 |
+| route_record_id | protocol | none | true | false | false | 语义路由 record 的稳定标识。 |
+| subspace_plan_id | protocol | none | true | false | false | 安全子空间 plan record 的稳定标识。 |
+| route_id | method | none | true | false | false | 语义条件路由对象的稳定标识。 |
+| route_label | method | none | true | false | false | 语义条件路由的机制标签。 |
+| route_digest | method | none | true | false | false | 语义条件路由 payload 的稳定摘要。 |
+| risk_field_digest | method | none | true | false | false | 语义风险场 payload 的稳定摘要。 |
+| mask_source | method | none | true | false | false | 语义掩码来源类型。 |
+| mask_source_digest | method | none | true | false | false | 语义掩码来源和掩码值的稳定摘要。 |
+| latent_mask_values | method | none | true | false | false | 投影到 latent 长度后的语义掩码值。 |
+| masked_feature_values | method | none | true | false | false | 语义掩码作用后归一化的 latent 特征值。 |
+| latent_mask_digest | method | none | true | false | false | latent mask 投影结果的稳定摘要。 |
+| feature_operator_digest | method | none | true | false | false | latent feature operator 的稳定摘要。 |
+| trajectory_feature_digest | method | none | true | false | false | 轨迹特征 payload 的稳定摘要。 |
+| approximate_jvp_values | method | none | true | false | false | 近似 JVP 的逐轴数值。 |
+| approximate_jvp_digest | method | none | true | false | false | 近似 JVP payload 的稳定摘要。 |
+| jvp_estimator_name | method | none | true | false | false | 近似 JVP 估计器名称。 |
+| basis_strategy | method | none | true | false | false | 安全基底求解策略。 |
+| semantic_mask_enabled | method | none | true | false | false | 安全基底求解是否启用语义掩码。 |
+| basis_digests | artifact | none | false | false | false | 各基底策略的摘要集合。 |
+| route_projection_digest | method | none | true | false | false | 安全基底按语义路由投影后的稳定摘要。 |
+| semantic_route_record_count | method | none | false | false | false | 语义路由 records 数量。 |
+| subspace_plan_record_count | method | none | false | false | false | 安全子空间 plan records 数量。 |
+| mask_projection_report_count | method | none | false | false | false | mask projection report 数量。 |
+| unique_route_digest_count | method | none | false | false | false | 唯一语义路由摘要数量。 |
+| semantic_mask_changed_basis_count | method | none | false | false | false | 启用语义掩码后基底相对无语义掩码路径发生变化的记录数量。 |
+| basis_strategies | method | none | false | false | false | 当前输出中可运行的基底策略集合。 |
+| risk_field_length | method | none | false | false | false | 语义风险场向量长度。 |
+| projection_operator | method | none | false | false | false | mask 投影算子名称。 |
+| feature_length | method | none | false | false | false | latent feature operator 输出长度。 |
+| jvp_value_count | method | none | false | false | false | 近似 JVP 数值数量。 |
+| plan_digest | method | none | false | false | false | 安全子空间 plan payload 的稳定摘要。 |
+| lf_basis_count | method | none | false | false | false | LF 路由投影后的基底行数。 |
+| hf_basis_count | method | none | false | false | false | HF 路由投影后的基底行数。 |
+| attention_basis_count | method | none | false | false | false | attention 路由投影后的基底行数。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |

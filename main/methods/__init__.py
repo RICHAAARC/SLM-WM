@@ -21,6 +21,26 @@ from main.methods.algorithm_primitives import (
     evaluate_geometry_reliability,
     project_latent_mask,
 )
+
+from main.methods.semantic import (
+    LatentMaskResult,
+    RiskFieldConfig,
+    RiskFieldResult,
+    SemanticRoute,
+    build_risk_field,
+    build_semantic_route,
+    project_mask_to_latent,
+)
+from main.methods.subspace import (
+    ApproximateJvpEstimate,
+    RouteBasisProjection,
+    SafeBasisPlan,
+    TrajectoryFeatureSet,
+    build_safe_basis_plan,
+    build_trajectory_features,
+    estimate_approximate_jvp,
+    project_basis_by_route,
+)
 from main.methods.synthetic_smoke import (
     CoreSmokeBundle,
     CoreSmokeScenario,
@@ -47,6 +67,21 @@ __all__ = [
     "estimate_safe_basis",
     "evaluate_geometry_reliability",
     "project_latent_mask",
+    "LatentMaskResult",
+    "RiskFieldConfig",
+    "RiskFieldResult",
+    "SemanticRoute",
+    "build_risk_field",
+    "build_semantic_route",
+    "project_mask_to_latent",
+    "ApproximateJvpEstimate",
+    "RouteBasisProjection",
+    "SafeBasisPlan",
+    "TrajectoryFeatureSet",
+    "build_safe_basis_plan",
+    "build_trajectory_features",
+    "estimate_approximate_jvp",
+    "project_basis_by_route",
     "CoreSmokeBundle",
     "CoreSmokeScenario",
     "build_core_method_smoke_bundle",
