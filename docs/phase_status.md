@@ -510,3 +510,45 @@
 | `pytest tests/functional/test_geometric_rescue.py -q` | pass, 2 passed |
 | `pytest -q` | pass, 72 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+## stage_12_threshold_calibration_metrics
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `stage_12_threshold_calibration_metrics` |
+| phase_status | `local_calibration_protocol_ready` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-20` |
+| input_manifest | `outputs/geometric_rescue/manifest.local.json`; `outputs/geometric_rescue/geometry_rescue_audit.json`; `outputs/geometric_rescue/aligned_detection_records.jsonl` |
+| expected_output_manifest | `outputs/threshold_calibration/manifest.local.json` |
+| expected_outputs | `outputs/threshold_calibration/calibration_thresholds.json`; `outputs/threshold_calibration/fixed_fpr_operating_points.csv`; `outputs/threshold_calibration/standard_watermark_metrics.csv`; `outputs/threshold_calibration/quality_metrics_summary.csv`; `outputs/threshold_calibration/roc_curve_points.csv`; `outputs/threshold_calibration/det_curve_points.csv`; `outputs/threshold_calibration/score_distribution_table.csv`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/threshold_calibration/rescue_fpr_audit.csv`; `outputs/threshold_calibration/manifest.local.json` |
+| blocking_items | 当前 fixed-FPR 框架可由 governed records 重建, 但 `aligned_content_score` 仍来自本地代理, LPIPS / FID / KID / CLIP score 尚未真实计算; 因此 `full_method_claim_ready=false`。 |
+| fallback_path | 若 rescue 后 evidence-level FPR 超过目标 operating point, 只允许保留 raw content claim 或将完整系统 fixed-FPR 主张标记为 unsupported; 不允许只报告 raw content FPR。 |
+| invariants | 内容阈值只由 calibration clean negative 冻结; test split 不参与调阈值; clean negative 与 attacked negative 分开审计; rescue window 与 fail reason gate 保持冻结。 |
+| next_stage_entry | 可以进入攻击矩阵与再扩散攻击记录构建; 若要支撑论文级 fixed-FPR 主张, 需先补齐真实 aligned latent 重判和完整质量指标。 |
+
+### stage12 已完成内容
+
+1. 更新 `experiments/protocol/calibration.py`, 新增 `FixedFprCalibrationConfig`、`FixedFprThreshold`、fixed-FPR 阈值冻结、校准后判定、AUC、ROC / DET 与 score distribution 计算函数。
+2. 更新 `experiments/protocol/__init__.py`, 导出 fixed-FPR 校准核心对象和函数。
+3. 新增 `scripts/write_threshold_calibration_outputs.py`, 从 `outputs/geometric_rescue/` 记录重建 calibration thresholds、operating point、standard metrics、quality metrics、ROC / DET、score distribution、threshold degeneracy 和 rescue FPR audit。
+4. 新增 `tests/functional/test_threshold_calibration.py`, 覆盖阈值只来自 calibration clean negative、clean negative 与 attacked negative 分开审计、unsupported 质量指标不伪装为论文证据。
+5. `docs/field_registry.md` 已登记 fixed-FPR、operating point、AUC、ROC / DET、FPR audit、metric status 和阈值退化相关字段。
+
+### stage12 当前产物摘要
+
+1. `outputs/threshold_calibration/calibration_thresholds.json` 显示 `target_fpr=0.05`, `calibration_negative_count=14`, `observed_fpr=0.0`, `threshold_degenerate=false`, `threshold_value=0.5174190728458973`。
+2. `outputs/threshold_calibration/fixed_fpr_operating_points.csv` 显示 `true_positive_rate=0.84375`, `raw_content_clean_fpr=0.03125`, `evidence_clean_fpr=0.03125`, `evidence_attacked_fpr=0.15625`。
+3. `outputs/threshold_calibration/rescue_fpr_audit.csv` 显示 attacked negative 的 evidence-level FPR 超过 `target_fpr=0.05`, 因此完整系统 fixed-FPR 主张必须保持 unsupported。
+4. `outputs/threshold_calibration/quality_metrics_summary.csv` 已记录 PSNR、SSIM、MSE、MAE 来自真实 attention latent injection 包; LPIPS、FID、KID、CLIP score 当前均标记为 `unsupported`。
+5. `outputs/threshold_calibration/threshold_degeneracy_report.json` 中 `raw_content_claim_ready=true`, 但 `full_method_claim_ready=false`, `unsupported_reason=aligned_content_score_local_proxy`。
+
+### stage12 验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/write_threshold_calibration_outputs.py` | pass, `raw_content_clean_fpr=0.03125`, `evidence_clean_fpr=0.03125`, `evidence_attacked_fpr=0.15625` |
+| `pytest tests/functional/test_threshold_calibration.py -q` | pass, 2 passed |
+| `pytest -q` | pass, 74 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |

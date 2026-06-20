@@ -522,6 +522,36 @@ Notebook 与 repository module 的跨边界数据
 | geo_direct_positive_audit_rate | metric | none | false | false | false | clean negative 上几何直接判正反例审计触发率。 |
 | geo_direct_positive_audit_formal_method | method | none | false | false | false | 几何直接判正反例审计是否进入正式方法, 正式方法中必须为 false。 |
 | direct_positive_decision_used | method | none | false | false | false | 是否在正式 evidence decision 中使用几何直接判正。 |
+| operating_point_id | metric | none | false | false | false | fixed-FPR operating point 的稳定标识。 |
+| target_fpr | protocol | none | false | false | false | 阈值校准协议的目标误报率。 |
+| calibrated_content_threshold | protocol | none | false | false | false | 由 calibration clean negative 冻结的内容阈值。 |
+| calibration_negative_count | metric | none | false | false | false | 用于阈值冻结的 calibration clean negative 样本数。 |
+| allowed_false_positive_count | metric | none | false | false | false | 目标 FPR 下允许的 false positive 数量。 |
+| observed_false_positive_count | metric | none | false | false | false | 阈值冻结数据上的实际 false positive 数量。 |
+| observed_fpr | metric | none | false | false | false | 阈值冻结数据上的实际 FPR。 |
+| threshold_tie_count | metric | none | false | false | false | 与冻结阈值数值相同的样本数量。 |
+| threshold_degenerate | metric | none | false | false | false | 阈值是否存在退化或并列导致的 FPR 风险。 |
+| threshold_source | protocol | none | false | false | false | 阈值来源, 正式协议应为 calibration clean negative。 |
+| rescue_window_frozen | protocol | none | false | false | false | rescue window 是否已冻结。 |
+| fail_reason_gate_frozen | protocol | none | false | false | false | fail reason gate 是否已冻结。 |
+| evidence_fpr_exceeds_target | metric | none | false | false | false | rescue 后 evidence-level FPR 是否超过目标 operating point。 |
+| raw_content_claim_ready | claim | none | false | false | false | raw content 分支是否满足当前 fixed-FPR 口径。 |
+| true_positive_rate | metric | none | false | false | false | positive source 上的 true positive rate。 |
+| false_positive_rate | metric | none | false | false | false | ROC 曲线点中的 false positive rate。 |
+| false_negative_rate | metric | none | false | false | false | DET 曲线点中的 false negative rate。 |
+| raw_score_auc | metric | none | false | false | false | raw content score 对 positive / clean negative 的 AUC。 |
+| aligned_score_auc | metric | none | false | false | false | aligned content score 对 positive / clean negative 的 AUC。 |
+| rescue_applied_rate | metric | none | false | false | false | 阈值校准口径下 rescue_applied 的比例。 |
+| metric_name | metric | none | false | false | false | 常规指标名称。 |
+| metric_value | metric | none | false | false | false | 常规指标数值。 |
+| metric_source | metric | none | false | false | false | 常规指标来源。 |
+| metric_status | metric | none | false | false | false | 指标状态, 例如 measured、proxy 或 unsupported。 |
+| roc_threshold | metric | none | false | false | false | ROC 曲线点对应阈值。 |
+| det_threshold | metric | none | false | false | false | DET 曲线点对应阈值。 |
+| det_false_positive_rate | metric | none | false | false | false | DET 曲线点中的 false positive rate。 |
+| det_false_negative_rate | metric | none | false | false | false | DET 曲线点中的 false negative rate。 |
+| fpr_exceeds_target | metric | none | false | false | false | 某一 FPR 审计口径是否超过目标 FPR。 |
+| decision_scope | metric | none | false | false | false | FPR 审计中的判定范围。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
 | evidence_path | claim | none | false | true | false | claim 绑定的证据路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
