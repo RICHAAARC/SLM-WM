@@ -40,6 +40,8 @@ RUNTIME_ENVIRONMENT_PACKAGES = (
     "protobuf",
     "numpy",
     "pillow",
+    "lpips",
+    "torchvision",
 )
 
 

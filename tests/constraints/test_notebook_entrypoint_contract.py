@@ -36,6 +36,7 @@ COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.tx
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
     "%pip install -q --upgrade diffusers transformers accelerate safetensors sentencepiece protobuf huggingface_hub"
 )
+PAIR_PERCEPTUAL_DEPENDENCY_INSTALL_COMMAND = "%pip install -q --upgrade lpips"
 
 
 @pytest.mark.constraint
@@ -67,6 +68,7 @@ def test_colab_runtime_constraints_document_known_working_environment() -> None:
     ]
 
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in text
+    assert PAIR_PERCEPTUAL_DEPENDENCY_INSTALL_COMMAND in text
     assert "diffusers==0.38.0" in requirement_lines
     assert "transformers==5.12.1" in requirement_lines
     assert "accelerate==1.14.0" in requirement_lines
@@ -187,10 +189,16 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
     assert "/content/drive/MyDrive/SLM/aligned_rescoring" in joined_source
     assert "/content/drive/MyDrive/SLM/attention_geometry" in joined_source
     assert "real_aligned_rescore_count" in joined_source
+    assert "SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
+    assert "SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
+    assert "openai/clip-vit-base-patch32" in joined_source
+    assert "SLM_WM_LPIPS_NETWORK', 'alex'" in joined_source
+    assert "perceptual_metrics_ready" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
+    assert PAIR_PERCEPTUAL_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert "--force-reinstall" not in joined_source
     assert "numpy pillow" not in joined_source
     assert "del sys.modules" not in joined_source

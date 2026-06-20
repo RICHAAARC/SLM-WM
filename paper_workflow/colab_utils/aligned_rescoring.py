@@ -22,6 +22,7 @@ from paper_workflow.colab_utils.attention_latent_injection import (
 )
 from paper_workflow.colab_utils.minimal_latent_injection import (
     compute_image_quality_metrics,
+    import_image_array_dependency,
     import_runtime_dependencies,
     load_pipeline,
     tensor_norm,
@@ -40,6 +41,9 @@ DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/aligned_rescoring"
 DEFAULT_GEOMETRY_DRIVE_DIR = "/content/drive/MyDrive/SLM/attention_geometry"
 PRIMARY_MODEL_FAMILY = "sd35"
 PRIMARY_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
+DEFAULT_CLIP_MODEL_ID = "openai/clip-vit-base-patch32"
+DEFAULT_LPIPS_NETWORK = "alex"
+PAIR_PERCEPTUAL_DEPENDENCY_INSTALL_COMMAND = "%pip install -q --upgrade lpips"
 PACKAGE_EXTRA_PATHS = (
     "paper_workflow/aligned_rescoring_run.ipynb",
     "paper_workflow/colab_utils/aligned_rescoring.py",
@@ -74,6 +78,11 @@ class AlignedRescoringConfig:
     device_name: str = "cuda"
     torch_dtype: str = "float16"
     hf_token_env: str = "HF_TOKEN"
+    enable_pair_perceptual_metrics: bool = True
+    require_pair_perceptual_metrics: bool = True
+    clip_model_id: str = DEFAULT_CLIP_MODEL_ID
+    lpips_network: str = DEFAULT_LPIPS_NETWORK
+    perceptual_metric_device_name: str = "cuda"
 
     def __post_init__(self) -> None:
         """集中校验配置边界, 避免运行路径重复构造错误信息。"""
@@ -91,6 +100,12 @@ class AlignedRescoringConfig:
             raise ValueError("guidance_scale 必须为正数, attention_runtime_strength 不得为负数")
         if any(index < 0 or index >= self.inference_steps for index in self.injection_step_indices):
             raise ValueError("injection_step_indices 必须位于采样步数边界内")
+        if self.require_pair_perceptual_metrics and not self.enable_pair_perceptual_metrics:
+            raise ValueError("要求 pair perceptual metrics 时必须启用指标计算")
+        if not self.clip_model_id.strip():
+            raise ValueError("clip_model_id 不能为空")
+        if self.lpips_network not in {"alex", "vgg", "squeeze"}:
+            raise ValueError("lpips_network 必须为 alex、vgg 或 squeeze")
 
 
 @dataclass(frozen=True)
@@ -186,6 +201,19 @@ def json_line(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n"
 
 
+def parse_bool_environment(name: str, default: bool) -> bool:
+    """解析布尔环境变量, 把配置合法性收敛到配置加载边界。"""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"{name} 必须使用布尔值文本")
+
+
 def read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
     """读取 JSONL 文件。"""
     return tuple(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
@@ -205,6 +233,10 @@ def build_run_id(config: AlignedRescoringConfig, carrier_ids: tuple[str, ...]) -
             "attention_runtime_strength": config.attention_runtime_strength,
             "injection_step_indices": config.injection_step_indices,
             "carrier_ids": carrier_ids,
+            "enable_pair_perceptual_metrics": config.enable_pair_perceptual_metrics,
+            "require_pair_perceptual_metrics": config.require_pair_perceptual_metrics,
+            "clip_model_id": config.clip_model_id,
+            "lpips_network": config.lpips_network,
         }
     )
 
@@ -360,18 +392,161 @@ def build_rescoring_records(
     return tuple(records)
 
 
-def unsupported_perceptual_metric_rows() -> dict[str, Any]:
-    """返回默认感知指标状态。"""
+def unsupported_perceptual_metric_rows(status: str) -> dict[str, Any]:
+    """返回统一的未测量感知指标状态。"""
     return {
         "lpips": "unsupported",
-        "lpips_status": "optional_dependency_not_enabled",
+        "lpips_status": status,
         "clip_score": "unsupported",
-        "clip_score_status": "optional_dependency_not_enabled",
+        "clip_score_clean": "unsupported",
+        "clip_score_aligned": "unsupported",
+        "clip_score_delta": "unsupported",
+        "clip_score_status": status,
         "fid": "unsupported",
         "fid_status": "dataset_level_metric_not_computed_in_pair_run",
         "kid": "unsupported",
         "kid_status": "dataset_level_metric_not_computed_in_pair_run",
         "perceptual_metrics_ready": False,
+    }
+
+
+def image_to_metric_tensor(image: Any, device: Any) -> Any:
+    """把 PIL 图像转为 LPIPS 需要的 [-1, 1] BCHW tensor。"""
+    np = import_image_array_dependency()
+    _, torch, _, _ = import_runtime_dependencies()
+    image_array = np.asarray(image.convert("RGB"), dtype=np.float32) / 127.5 - 1.0
+    return torch.from_numpy(image_array).permute(2, 0, 1).unsqueeze(0).to(device)
+
+
+def compute_lpips_metric(clean_image: Any, aligned_image: Any, config: AlignedRescoringConfig) -> dict[str, Any]:
+    """计算成对图像 LPIPS, 不可用时返回可审计 status。"""
+    if not config.enable_pair_perceptual_metrics:
+        return {"lpips": "unsupported", "lpips_status": "disabled"}
+    try:
+        import lpips
+        _, torch, _, _ = import_runtime_dependencies()
+    except ModuleNotFoundError:
+        return {"lpips": "unsupported", "lpips_status": "optional_dependency_not_installed"}
+    except Exception:
+        return {"lpips": "unsupported", "lpips_status": "optional_dependency_import_error"}
+    try:
+        device = torch.device(config.perceptual_metric_device_name)
+        if device.type == "cuda" and not torch.cuda.is_available():
+            return {"lpips": "unsupported", "lpips_status": "gpu_unavailable"}
+        metric_model = lpips.LPIPS(net=config.lpips_network).to(device)
+        metric_model.eval()
+        clean_tensor = image_to_metric_tensor(clean_image, device)
+        aligned_tensor = image_to_metric_tensor(aligned_image, device)
+        with torch.no_grad():
+            metric_value = metric_model(clean_tensor, aligned_tensor)
+        return {"lpips": float(metric_value.detach().float().cpu().reshape(-1)[0].item()), "lpips_status": "measured"}
+    except Exception:
+        return {"lpips": "unsupported", "lpips_status": "metric_runtime_error"}
+
+
+def move_batch_to_device(batch: dict[str, Any], device: Any) -> dict[str, Any]:
+    """把 transformers processor 生成的 batch 移动到目标设备。"""
+    return {name: value.to(device) if hasattr(value, "to") else value for name, value in batch.items()}
+
+
+def compute_clip_pair_metrics(
+    clean_image: Any,
+    aligned_image: Any,
+    prompt_text: str,
+    config: AlignedRescoringConfig,
+) -> dict[str, Any]:
+    """计算 clean / aligned 图像相对 prompt 的 CLIP score。"""
+    if not config.enable_pair_perceptual_metrics:
+        return {
+            "clip_score": "unsupported",
+            "clip_score_clean": "unsupported",
+            "clip_score_aligned": "unsupported",
+            "clip_score_delta": "unsupported",
+            "clip_score_status": "disabled",
+        }
+    try:
+        _, torch, _, _ = import_runtime_dependencies()
+        from transformers import CLIPModel, CLIPProcessor
+    except ModuleNotFoundError:
+        return {
+            "clip_score": "unsupported",
+            "clip_score_clean": "unsupported",
+            "clip_score_aligned": "unsupported",
+            "clip_score_delta": "unsupported",
+            "clip_score_status": "optional_dependency_not_installed",
+        }
+    except Exception:
+        return {
+            "clip_score": "unsupported",
+            "clip_score_clean": "unsupported",
+            "clip_score_aligned": "unsupported",
+            "clip_score_delta": "unsupported",
+            "clip_score_status": "optional_dependency_import_error",
+        }
+    try:
+        device = torch.device(config.perceptual_metric_device_name)
+        if device.type == "cuda" and not torch.cuda.is_available():
+            return {
+                "clip_score": "unsupported",
+                "clip_score_clean": "unsupported",
+                "clip_score_aligned": "unsupported",
+                "clip_score_delta": "unsupported",
+                "clip_score_status": "gpu_unavailable",
+            }
+        token = os.environ.get(config.hf_token_env) or None
+        model_kwargs = {"token": token} if token else {}
+        processor = CLIPProcessor.from_pretrained(config.clip_model_id, **model_kwargs)
+        model = CLIPModel.from_pretrained(config.clip_model_id, **model_kwargs).to(device)
+        model.eval()
+        image_inputs = processor(
+            images=[clean_image.convert("RGB"), aligned_image.convert("RGB")],
+            return_tensors="pt",
+        )
+        text_inputs = processor(text=[prompt_text], return_tensors="pt", padding=True, truncation=True)
+        image_inputs = move_batch_to_device(image_inputs, device)
+        text_inputs = move_batch_to_device(text_inputs, device)
+        with torch.no_grad():
+            image_features = model.get_image_features(**image_inputs).float()
+            text_features = model.get_text_features(**text_inputs).float()
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        text_features = text_features / text_features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+        scores = (image_features @ text_features.T).reshape(-1)
+        clean_score = float(scores[0].detach().cpu().item())
+        aligned_score = float(scores[1].detach().cpu().item())
+        return {
+            "clip_score": aligned_score,
+            "clip_score_clean": clean_score,
+            "clip_score_aligned": aligned_score,
+            "clip_score_delta": aligned_score - clean_score,
+            "clip_score_status": "measured",
+        }
+    except Exception:
+        return {
+            "clip_score": "unsupported",
+            "clip_score_clean": "unsupported",
+            "clip_score_aligned": "unsupported",
+            "clip_score_delta": "unsupported",
+            "clip_score_status": "metric_runtime_error",
+        }
+
+
+def compute_pair_perceptual_metrics(
+    clean_image: Any,
+    aligned_image: Any,
+    prompt_text: str,
+    config: AlignedRescoringConfig,
+) -> dict[str, Any]:
+    """计算 paired LPIPS 与 CLIP 指标, FID / KID 保持数据集级边界。"""
+    if not config.enable_pair_perceptual_metrics:
+        return unsupported_perceptual_metric_rows("disabled")
+    lpips_row = compute_lpips_metric(clean_image, aligned_image, config)
+    clip_row = compute_clip_pair_metrics(clean_image, aligned_image, prompt_text, config)
+    pair_ready = lpips_row.get("lpips_status") == "measured" and clip_row.get("clip_score_status") == "measured"
+    return {
+        **unsupported_perceptual_metric_rows("not_measured"),
+        **lpips_row,
+        **clip_row,
+        "perceptual_metrics_ready": pair_ready,
     }
 
 
@@ -446,6 +621,12 @@ def run_carrier_rescoring(
         update_count=update_count,
     )
     quality_metrics = compute_image_quality_metrics(clean_output.images[0], aligned_output.images[0])
+    perceptual_metrics = compute_pair_perceptual_metrics(
+        clean_image=clean_output.images[0],
+        aligned_image=aligned_output.images[0],
+        prompt_text=prompt_text,
+        config=config,
+    )
     quality_row = {
         "carrier_id": carrier_record["carrier_id"],
         "prompt_id": carrier_record.get("metadata", {}).get("prompt_id", ""),
@@ -458,7 +639,7 @@ def run_carrier_rescoring(
         "latent_norm_after": latest_snapshot["latent_norm_after"],
         "image_quality_metrics_ready": True,
         **quality_metrics,
-        **unsupported_perceptual_metric_rows(),
+        **perceptual_metrics,
     }
     return records, quality_row, clean_output.images[0], aligned_output.images[0]
 
@@ -485,6 +666,10 @@ def build_failure_result(config: AlignedRescoringConfig, error: Exception) -> Al
         metadata={
             "error_message": str(error),
             "runtime_environment": environment_report,
+            "enable_pair_perceptual_metrics": config.enable_pair_perceptual_metrics,
+            "require_pair_perceptual_metrics": config.require_pair_perceptual_metrics,
+            "clip_model_id": config.clip_model_id,
+            "lpips_network": config.lpips_network,
             "supports_paper_claim": False,
         },
     )
@@ -513,6 +698,9 @@ def write_quality_rows(path: Path, rows: list[dict[str, Any]]) -> None:
         "lpips",
         "lpips_status",
         "clip_score",
+        "clip_score_clean",
+        "clip_score_aligned",
+        "clip_score_delta",
         "clip_score_status",
         "fid",
         "fid_status",
@@ -558,6 +746,15 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
         )
         content_updates = build_content_update_lookup(root_path, selected_content_records)
         pipeline, runtime_versions = load_pipeline(config)  # type: ignore[arg-type]
+        runtime_versions = {
+            **runtime_versions,
+            "enable_pair_perceptual_metrics": config.enable_pair_perceptual_metrics,
+            "require_pair_perceptual_metrics": config.require_pair_perceptual_metrics,
+            "clip_model_id": config.clip_model_id,
+            "lpips_network": config.lpips_network,
+            "perceptual_metric_device_name": config.perceptual_metric_device_name,
+            "pair_perceptual_dependency_install_command": PAIR_PERCEPTUAL_DEPENDENCY_INSTALL_COMMAND,
+        }
         for run_index, carrier_record in enumerate(carrier_records):
             current_prompt_id = str(carrier_record.get("metadata", {}).get("prompt_id", ""))
             current_prompt_text = prompt_lookup[current_prompt_id]
@@ -585,17 +782,27 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
                 }
             )
             records.extend(carrier_records_out)
+        perceptual_metrics_ready = (
+            all(bool(row.get("perceptual_metrics_ready", False)) for row in quality_rows) if quality_rows else False
+        )
+        required_pair_metrics_missing = config.require_pair_perceptual_metrics and not perceptual_metrics_ready
+        run_decision = "pass" if records and not required_pair_metrics_missing else "fail"
+        unsupported_reason = ""
+        if not records:
+            unsupported_reason = "aligned_rescoring_records_missing"
+        elif required_pair_metrics_missing:
+            unsupported_reason = "pair_perceptual_metrics_missing"
         result = AlignedRescoringResult(
             run_id=build_run_id(config, tuple(record["carrier_id"] for record in carrier_records)),
             model_family=config.model_family,
             model_id=config.model_id,
-            run_decision="pass" if records else "fail",
-            unsupported_reason="" if records else "aligned_rescoring_records_missing",
+            run_decision=run_decision,
+            unsupported_reason=unsupported_reason,
             aligned_rescoring_record_count=len(records),
             real_aligned_rescore_count=sum(1 for record in records if record.aligned_rescoring_ready),
             selected_attention_carrier_count=len(carrier_records),
             image_quality_metrics_ready=bool(quality_rows),
-            perceptual_metrics_ready=all(bool(row.get("perceptual_metrics_ready", False)) for row in quality_rows) if quality_rows else False,
+            perceptual_metrics_ready=perceptual_metrics_ready,
             full_method_claim_ready=False,
             output_records_path="",
             quality_metrics_path="",
@@ -612,6 +819,15 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
     environment_path = output_dir / "aligned_rescoring_environment_report.json"
     manifest_path = output_dir / "aligned_rescoring_manifest.local.json"
     environment_report = result.metadata.get("runtime_environment") or build_runtime_environment_report()
+    if isinstance(environment_report, dict):
+        environment_report = {
+            **environment_report,
+            "pair_perceptual_dependency_install_command": PAIR_PERCEPTUAL_DEPENDENCY_INSTALL_COMMAND,
+            "enable_pair_perceptual_metrics": config.enable_pair_perceptual_metrics,
+            "require_pair_perceptual_metrics": config.require_pair_perceptual_metrics,
+            "clip_model_id": config.clip_model_id,
+            "lpips_network": config.lpips_network,
+        }
     records_path.write_text("".join(json_line(record.to_dict()) for record in records), encoding="utf-8")
     write_quality_rows(quality_path, quality_rows)
     environment_path.write_text(stable_json_text(environment_report), encoding="utf-8")
@@ -655,6 +871,11 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
             "max_rescore_carriers": config.max_rescore_carriers,
             "aligned_rescoring_record_count": result.aligned_rescoring_record_count,
             "real_aligned_rescore_count": result.real_aligned_rescore_count,
+            "enable_pair_perceptual_metrics": config.enable_pair_perceptual_metrics,
+            "require_pair_perceptual_metrics": config.require_pair_perceptual_metrics,
+            "clip_model_id": config.clip_model_id,
+            "lpips_network": config.lpips_network,
+            "perceptual_metrics_ready": result.perceptual_metrics_ready,
             "full_method_claim_ready": result.full_method_claim_ready,
         },
         code_version=resolve_code_version(root_path),
@@ -694,6 +915,11 @@ def build_default_config() -> AlignedRescoringConfig:
         max_subspace_records=int(os.environ.get("SLM_WM_ALIGNED_RESCORING_SUBSPACE_RECORDS", "16")),
         max_rescore_carriers=int(os.environ.get("SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT", "1")),
         negative_prompt=os.environ.get("SLM_WM_NEGATIVE_PROMPT", "low quality, blurry"),
+        enable_pair_perceptual_metrics=parse_bool_environment("SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS", True),
+        require_pair_perceptual_metrics=parse_bool_environment("SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS", True),
+        clip_model_id=os.environ.get("SLM_WM_CLIP_MODEL_ID", DEFAULT_CLIP_MODEL_ID),
+        lpips_network=os.environ.get("SLM_WM_LPIPS_NETWORK", DEFAULT_LPIPS_NETWORK),
+        perceptual_metric_device_name=os.environ.get("SLM_WM_PERCEPTUAL_METRIC_DEVICE", "cuda"),
     )
 
 
