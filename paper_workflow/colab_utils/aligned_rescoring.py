@@ -82,7 +82,7 @@ class AlignedRescoringConfig:
     require_pair_perceptual_metrics: bool = True
     clip_model_id: str = DEFAULT_CLIP_MODEL_ID
     lpips_network: str = DEFAULT_LPIPS_NETWORK
-    perceptual_metric_device_name: str = "cuda"
+    perceptual_metric_device_name: str = "cpu"
 
     def __post_init__(self) -> None:
         """集中校验配置边界, 避免运行路径重复构造错误信息。"""
@@ -397,11 +397,13 @@ def unsupported_perceptual_metric_rows(status: str) -> dict[str, Any]:
     return {
         "lpips": "unsupported",
         "lpips_status": status,
+        "lpips_error_type": "",
         "clip_score": "unsupported",
         "clip_score_clean": "unsupported",
         "clip_score_aligned": "unsupported",
         "clip_score_delta": "unsupported",
         "clip_score_status": status,
+        "clip_score_error_type": "",
         "fid": "unsupported",
         "fid_status": "dataset_level_metric_not_computed_in_pair_run",
         "kid": "unsupported",
@@ -421,27 +423,39 @@ def image_to_metric_tensor(image: Any, device: Any) -> Any:
 def compute_lpips_metric(clean_image: Any, aligned_image: Any, config: AlignedRescoringConfig) -> dict[str, Any]:
     """计算成对图像 LPIPS, 不可用时返回可审计 status。"""
     if not config.enable_pair_perceptual_metrics:
-        return {"lpips": "unsupported", "lpips_status": "disabled"}
+        return {"lpips": "unsupported", "lpips_status": "disabled", "lpips_error_type": ""}
     try:
         import lpips
         _, torch, _, _ = import_runtime_dependencies()
-    except ModuleNotFoundError:
-        return {"lpips": "unsupported", "lpips_status": "optional_dependency_not_installed"}
-    except Exception:
-        return {"lpips": "unsupported", "lpips_status": "optional_dependency_import_error"}
+    except ModuleNotFoundError as error:
+        return {
+            "lpips": "unsupported",
+            "lpips_status": "optional_dependency_not_installed",
+            "lpips_error_type": type(error).__name__,
+        }
+    except Exception as error:
+        return {
+            "lpips": "unsupported",
+            "lpips_status": "optional_dependency_import_error",
+            "lpips_error_type": type(error).__name__,
+        }
     try:
         device = torch.device(config.perceptual_metric_device_name)
         if device.type == "cuda" and not torch.cuda.is_available():
-            return {"lpips": "unsupported", "lpips_status": "gpu_unavailable"}
+            return {"lpips": "unsupported", "lpips_status": "gpu_unavailable", "lpips_error_type": ""}
         metric_model = lpips.LPIPS(net=config.lpips_network).to(device)
         metric_model.eval()
         clean_tensor = image_to_metric_tensor(clean_image, device)
         aligned_tensor = image_to_metric_tensor(aligned_image, device)
         with torch.no_grad():
             metric_value = metric_model(clean_tensor, aligned_tensor)
-        return {"lpips": float(metric_value.detach().float().cpu().reshape(-1)[0].item()), "lpips_status": "measured"}
-    except Exception:
-        return {"lpips": "unsupported", "lpips_status": "metric_runtime_error"}
+        return {
+            "lpips": float(metric_value.detach().float().cpu().reshape(-1)[0].item()),
+            "lpips_status": "measured",
+            "lpips_error_type": "",
+        }
+    except Exception as error:
+        return {"lpips": "unsupported", "lpips_status": "metric_runtime_error", "lpips_error_type": type(error).__name__}
 
 
 def move_batch_to_device(batch: dict[str, Any], device: Any) -> dict[str, Any]:
@@ -463,25 +477,28 @@ def compute_clip_pair_metrics(
             "clip_score_aligned": "unsupported",
             "clip_score_delta": "unsupported",
             "clip_score_status": "disabled",
+            "clip_score_error_type": "",
         }
     try:
         _, torch, _, _ = import_runtime_dependencies()
         from transformers import CLIPModel, CLIPProcessor
-    except ModuleNotFoundError:
+    except ModuleNotFoundError as error:
         return {
             "clip_score": "unsupported",
             "clip_score_clean": "unsupported",
             "clip_score_aligned": "unsupported",
             "clip_score_delta": "unsupported",
             "clip_score_status": "optional_dependency_not_installed",
+            "clip_score_error_type": type(error).__name__,
         }
-    except Exception:
+    except Exception as error:
         return {
             "clip_score": "unsupported",
             "clip_score_clean": "unsupported",
             "clip_score_aligned": "unsupported",
             "clip_score_delta": "unsupported",
             "clip_score_status": "optional_dependency_import_error",
+            "clip_score_error_type": type(error).__name__,
         }
     try:
         device = torch.device(config.perceptual_metric_device_name)
@@ -492,6 +509,7 @@ def compute_clip_pair_metrics(
                 "clip_score_aligned": "unsupported",
                 "clip_score_delta": "unsupported",
                 "clip_score_status": "gpu_unavailable",
+                "clip_score_error_type": "",
             }
         token = os.environ.get(config.hf_token_env) or None
         model_kwargs = {"token": token} if token else {}
@@ -519,14 +537,16 @@ def compute_clip_pair_metrics(
             "clip_score_aligned": aligned_score,
             "clip_score_delta": aligned_score - clean_score,
             "clip_score_status": "measured",
+            "clip_score_error_type": "",
         }
-    except Exception:
+    except Exception as error:
         return {
             "clip_score": "unsupported",
             "clip_score_clean": "unsupported",
             "clip_score_aligned": "unsupported",
             "clip_score_delta": "unsupported",
             "clip_score_status": "metric_runtime_error",
+            "clip_score_error_type": type(error).__name__,
         }
 
 
@@ -548,6 +568,21 @@ def compute_pair_perceptual_metrics(
         **clip_row,
         "perceptual_metrics_ready": pair_ready,
     }
+
+
+def pair_metric_status_summary(rows: list[dict[str, Any]]) -> str:
+    """汇总 LPIPS / CLIP 状态, 使失败摘要能直接定位缺失指标。"""
+    if not rows:
+        return "quality_rows_missing"
+    statuses = []
+    for row in rows:
+        statuses.append(
+            "lpips="
+            + str(row.get("lpips_status", "missing"))
+            + ";clip_score="
+            + str(row.get("clip_score_status", "missing"))
+        )
+    return "|".join(sorted(set(statuses)))
 
 
 def run_carrier_rescoring(
@@ -697,11 +732,13 @@ def write_quality_rows(path: Path, rows: list[dict[str, Any]]) -> None:
         "mean_abs_error",
         "lpips",
         "lpips_status",
+        "lpips_error_type",
         "clip_score",
         "clip_score_clean",
         "clip_score_aligned",
         "clip_score_delta",
         "clip_score_status",
+        "clip_score_error_type",
         "fid",
         "fid_status",
         "kid",
@@ -791,7 +828,7 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
         if not records:
             unsupported_reason = "aligned_rescoring_records_missing"
         elif required_pair_metrics_missing:
-            unsupported_reason = "pair_perceptual_metrics_missing"
+            unsupported_reason = "pair_perceptual_metrics_missing:" + pair_metric_status_summary(quality_rows)
         result = AlignedRescoringResult(
             run_id=build_run_id(config, tuple(record["carrier_id"] for record in carrier_records)),
             model_family=config.model_family,
@@ -919,7 +956,7 @@ def build_default_config() -> AlignedRescoringConfig:
         require_pair_perceptual_metrics=parse_bool_environment("SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS", True),
         clip_model_id=os.environ.get("SLM_WM_CLIP_MODEL_ID", DEFAULT_CLIP_MODEL_ID),
         lpips_network=os.environ.get("SLM_WM_LPIPS_NETWORK", DEFAULT_LPIPS_NETWORK),
-        perceptual_metric_device_name=os.environ.get("SLM_WM_PERCEPTUAL_METRIC_DEVICE", "cuda"),
+        perceptual_metric_device_name=os.environ.get("SLM_WM_PERCEPTUAL_METRIC_DEVICE", "cpu"),
     )
 
 

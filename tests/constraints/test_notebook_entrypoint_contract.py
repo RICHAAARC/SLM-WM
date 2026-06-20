@@ -193,6 +193,7 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
     assert "SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
     assert "openai/clip-vit-base-patch32" in joined_source
     assert "SLM_WM_LPIPS_NETWORK', 'alex'" in joined_source
+    assert "SLM_WM_PERCEPTUAL_METRIC_DEVICE', 'cpu'" in joined_source
     assert "perceptual_metrics_ready" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source

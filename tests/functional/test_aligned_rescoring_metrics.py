@@ -42,6 +42,7 @@ def test_default_config_requires_pair_perceptual_metrics(monkeypatch: pytest.Mon
     assert config.require_pair_perceptual_metrics is True
     assert config.clip_model_id == helper.DEFAULT_CLIP_MODEL_ID
     assert config.lpips_network == helper.DEFAULT_LPIPS_NETWORK
+    assert config.perceptual_metric_device_name == "cpu"
 
 
 @pytest.mark.quick
@@ -49,7 +50,7 @@ def test_pair_perceptual_metrics_ready_requires_lpips_and_clip(monkeypatch: pyte
     """只有 LPIPS 与 CLIP 都实测时, pair perceptual metrics 才能视为 ready。"""
 
     def measured_lpips(clean_image: object, aligned_image: object, config: helper.AlignedRescoringConfig) -> dict[str, Any]:
-        return {"lpips": 0.12, "lpips_status": "measured"}
+        return {"lpips": 0.12, "lpips_status": "measured", "lpips_error_type": ""}
 
     def measured_clip(
         clean_image: object,
@@ -63,6 +64,7 @@ def test_pair_perceptual_metrics_ready_requires_lpips_and_clip(monkeypatch: pyte
             "clip_score_aligned": 0.31,
             "clip_score_delta": 0.01,
             "clip_score_status": "measured",
+            "clip_score_error_type": "",
         }
 
     monkeypatch.setattr(helper, "compute_lpips_metric", measured_lpips)
@@ -77,6 +79,21 @@ def test_pair_perceptual_metrics_ready_requires_lpips_and_clip(monkeypatch: pyte
     assert metrics["perceptual_metrics_ready"] is True
     assert metrics["fid_status"] == "dataset_level_metric_not_computed_in_pair_run"
     assert metrics["kid_status"] == "dataset_level_metric_not_computed_in_pair_run"
+
+
+@pytest.mark.quick
+def test_pair_metric_status_summary_exposes_missing_metric() -> None:
+    """失败摘要应直接显示 LPIPS 与 CLIP 的具体状态。"""
+    summary = helper.pair_metric_status_summary(
+        [
+            {
+                "lpips_status": "measured",
+                "clip_score_status": "metric_runtime_error",
+            }
+        ]
+    )
+
+    assert summary == "lpips=measured;clip_score=metric_runtime_error"
 
 
 @pytest.mark.quick
@@ -106,11 +123,13 @@ def test_quality_rows_include_pair_clip_columns(tmp_path: Path) -> None:
                 "mean_abs_error": 0.02,
                 "lpips": 0.12,
                 "lpips_status": "measured",
+                "lpips_error_type": "",
                 "clip_score": 0.31,
                 "clip_score_clean": 0.30,
                 "clip_score_aligned": 0.31,
                 "clip_score_delta": 0.01,
                 "clip_score_status": "measured",
+                "clip_score_error_type": "",
                 "fid": "unsupported",
                 "fid_status": "dataset_level_metric_not_computed_in_pair_run",
                 "kid": "unsupported",

@@ -636,12 +636,14 @@ Notebook 与 repository module 的跨边界数据
 | perceptual_metrics_ready | metric | none | false | false | false | LPIPS / CLIP 等感知指标是否已经完成计算。 |
 | lpips | metric | none | false | false | false | Learned Perceptual Image Patch Similarity 指标值或 unsupported 状态。 |
 | lpips_status | metric | none | false | false | false | LPIPS 指标计算状态。 |
+| lpips_error_type | metric | none | false | false | false | LPIPS 指标不可用时记录的异常类型, 用于定位 Colab 运行失败边界。 |
 | lpips_network | runtime | none | false | false | false | aligned rescoring 中 LPIPS 使用的 backbone 名称, 例如 alex。 |
 | clip_score | metric | none | false | false | false | CLIP 图文一致性或图像一致性指标值或 unsupported 状态。 |
 | clip_score_clean | metric | none | false | false | false | clean image 与 prompt 的 CLIP 图文一致性分数。 |
 | clip_score_aligned | metric | none | false | false | false | aligned image 与 prompt 的 CLIP 图文一致性分数。 |
 | clip_score_delta | metric | none | false | false | false | aligned CLIP score 相对 clean CLIP score 的差值。 |
 | clip_score_status | metric | none | false | false | false | CLIP score 指标计算状态。 |
+| clip_score_error_type | metric | none | false | false | false | CLIP score 指标不可用时记录的异常类型, 用于定位 Colab 运行失败边界。 |
 | clip_model_id | runtime | none | false | false | false | aligned rescoring 中用于计算 CLIP score 的模型标识。 |
 | enable_pair_perceptual_metrics | runtime | none | false | false | false | 是否在真实 aligned rescoring workflow 中尝试计算 LPIPS 与 CLIP pair-level 指标。 |
 | require_pair_perceptual_metrics | runtime | none | false | false | false | 是否要求 LPIPS 与 CLIP pair-level 指标完成后才允许 aligned rescoring run_decision 为 pass。 |

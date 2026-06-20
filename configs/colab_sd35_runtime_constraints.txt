@@ -6,6 +6,7 @@
 # pip 命令: %pip install -q --upgrade diffusers transformers accelerate safetensors sentencepiece protobuf huggingface_hub
 # aligned rescoring pair-level LPIPS 命令: %pip install -q --upgrade lpips
 # lpips 具体版本以后续 aligned_rescoring_environment_report.json 中的 package_versions.lpips 为准。
+# aligned rescoring 默认在 CPU 上计算 LPIPS / CLIP pair-level 指标, 避免与 SD3.5 pipeline 竞争 GPU 显存。
 # Python: 3.12.13
 # CUDA: 12.8
 # GPU: NVIDIA L4
