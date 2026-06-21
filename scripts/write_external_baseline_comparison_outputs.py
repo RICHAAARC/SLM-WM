@@ -24,6 +24,7 @@ from experiments.baselines import (
     load_baseline_source_registry,
     normalize_baseline_result_record,
     overlay_specs_with_source_registry,
+    validate_primary_baseline_formal_import_rows,
 )
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -136,6 +137,7 @@ def build_runtime_report(
     observations: tuple[dict[str, Any], ...],
     source_registry: dict[str, Any],
     imported_result_count: int,
+    formal_import_validation: dict[str, Any],
 ) -> dict[str, Any]:
     """构造外部 baseline 对比运行摘要。"""
     baseline_count = len(baseline_metric_rows)
@@ -151,6 +153,11 @@ def build_runtime_report(
         "comparable_baseline_count": protocol_compatible_count,
         "official_source_ready_count": official_source_ready_count,
         "imported_baseline_result_count": imported_result_count,
+        "formal_import_input_record_count": int(formal_import_validation.get("input_record_count", 0)),
+        "accepted_formal_import_count": int(formal_import_validation.get("accepted_formal_import_count", 0)),
+        "rejected_formal_import_count": int(formal_import_validation.get("rejected_formal_import_count", 0)),
+        "formal_import_issue_count": int(formal_import_validation.get("formal_import_issue_count", 0)),
+        "formal_import_validation_ready": bool(formal_import_validation.get("formal_import_validation_ready", False)),
         "baseline_result_ready_count": ready_count,
         "comparison_protocol_ready": bool(attack_manifest.get("attack_metrics_ready"))
         and not threshold_report.get("threshold_degenerate", True),
@@ -196,8 +203,17 @@ def write_external_baseline_comparison_outputs(
         root=root_path,
     )
     baseline_result_rows = read_jsonl_rows(resolved_baseline_result_records_path)
-    baseline_result_records = [normalize_baseline_result_record(row) for row in baseline_result_rows]
     boundary = attack_manifest.get("evaluation_boundary", {})
+    target_fpr = float(boundary.get("target_fpr", 0.05))
+    formal_import_validation = validate_primary_baseline_formal_import_rows(
+        baseline_result_rows,
+        evidence_root=root_path,
+        target_fpr=target_fpr,
+        require_existing_evidence=True,
+    )
+    baseline_result_records = [
+        normalize_baseline_result_record(row) for row in formal_import_validation.get("accepted_records", [])
+    ]
 
     observations = build_baseline_observations(baseline_specs, attack_rows, boundary, baseline_result_records)
     baseline_metric_rows = aggregate_baseline_metrics(observations)
@@ -210,10 +226,12 @@ def write_external_baseline_comparison_outputs(
         observations,
         baseline_source_registry,
         len(baseline_result_records),
+        formal_import_validation,
     )
 
     observations_path = resolved_output_dir / "baseline_observations.jsonl"
     imported_records_path = resolved_output_dir / "baseline_result_records.jsonl"
+    formal_import_validation_path = resolved_output_dir / "baseline_formal_import_validation_report.json"
     metrics_path = resolved_output_dir / "baseline_metrics.csv"
     comparison_path = resolved_output_dir / "baseline_comparison_table.csv"
     runtime_report_path = resolved_output_dir / "baseline_runtime_report.json"
@@ -275,6 +293,7 @@ def write_external_baseline_comparison_outputs(
         ],
     )
     runtime_report_path.write_text(stable_json_text(runtime_report), encoding="utf-8")
+    formal_import_validation_path.write_text(stable_json_text(formal_import_validation), encoding="utf-8")
 
     output_paths = tuple(
         relative_or_absolute(path, root_path)
@@ -284,6 +303,7 @@ def write_external_baseline_comparison_outputs(
             metrics_path,
             comparison_path,
             runtime_report_path,
+            formal_import_validation_path,
             manifest_path,
         )
     )
@@ -307,6 +327,7 @@ def write_external_baseline_comparison_outputs(
         "imported_result_digest": build_stable_digest([record.to_dict() for record in baseline_result_records])
         if baseline_result_records
         else "",
+        "formal_import_validation_digest": build_stable_digest(formal_import_validation),
     }
     manifest = build_artifact_manifest(
         artifact_id="external_baseline_comparison_manifest",
@@ -318,6 +339,7 @@ def write_external_baseline_comparison_outputs(
             "summary_digest": build_stable_digest(summary),
             "baseline_source_registry_path": relative_or_absolute(resolved_baseline_source_registry_path, root_path),
             "baseline_result_records_path": relative_or_absolute(resolved_baseline_result_records_path, root_path),
+            "formal_import_validation_report_path": relative_or_absolute(formal_import_validation_path, root_path),
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_external_baseline_comparison_outputs.py",

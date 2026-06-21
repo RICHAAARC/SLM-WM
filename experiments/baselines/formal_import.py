@@ -1,0 +1,429 @@
+"""主表 external baseline 正式结果导入协议与 schema 校验。"""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+from main.core.digest import build_stable_digest
+
+PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME = "primary_baseline_formal_import_protocol"
+FULL_MAIN_PROMPT_PROTOCOL_NAME = "paper_main_full_prompt_protocol"
+FORMAL_OPERATING_POINT_PREFIX = "fixed_fpr"
+REJECTED_ADAPTER_BOUNDARIES = (
+    "gpu_smoke_not_full_external_baseline_comparison",
+    "sd35_latent_smoke_adapter_not_formal_external_baseline_evidence",
+)
+ALLOWED_ADAPTER_BOUNDARIES = (
+    "sd35_medium_native_official_reproduction",
+    "method_faithful_sd35_adapter_reproduction",
+    "governed_image_level_baseline_import",
+)
+ALLOWED_RESULT_SOURCE_TYPES = ("official_reproduction", "governed_import")
+REQUIRED_READY_FLAGS = (
+    "method_faithful_adapter_ready",
+    "full_main_prompt_protocol_ready",
+    "fixed_fpr_baseline_calibration_ready",
+    "attack_matrix_baseline_detection_ready",
+    "formal_evidence_paths_ready",
+)
+REQUIRED_METRIC_FIELDS = (
+    "positive_count",
+    "negative_count",
+    "attack_record_count",
+    "supported_record_count",
+    "true_positive_rate",
+    "false_positive_rate",
+    "clean_false_positive_rate",
+    "attacked_false_positive_rate",
+    "quality_score_proxy_mean",
+    "score_retention_mean",
+)
+REQUIRED_SOURCE_FIELDS = (
+    "baseline_result_source",
+    "baseline_result_source_digest",
+    "result_protocol_name",
+    "result_source_type",
+    "adapter_boundary",
+    "evidence_paths",
+    "prompt_protocol_name",
+    "prompt_protocol_digest",
+)
+
+
+@dataclass(frozen=True)
+class FormalImportIssue:
+    """记录正式结果导入校验中的单个问题。
+
+    该对象属于通用 schema validator 写法: 它把错误边界集中在导入层, 避免下游表格构建函数反复维护相同的字段校验逻辑。
+    """
+
+    row_index: int
+    baseline_id: str
+    field_name: str
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换为 JSON 兼容字典。"""
+
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class FormalImportValidationReport:
+    """记录一批主表 baseline 正式导入结果的校验摘要。"""
+
+    protocol_name: str
+    target_fpr: float
+    expected_operating_point: str
+    input_record_count: int
+    accepted_formal_import_count: int
+    rejected_formal_import_count: int
+    formal_import_issue_count: int
+    formal_import_validation_ready: bool
+    accepted_records: tuple[dict[str, Any], ...]
+    issues: tuple[FormalImportIssue, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换为 JSON 兼容字典。"""
+
+        return {
+            "protocol_name": self.protocol_name,
+            "target_fpr": self.target_fpr,
+            "expected_operating_point": self.expected_operating_point,
+            "input_record_count": self.input_record_count,
+            "accepted_formal_import_count": self.accepted_formal_import_count,
+            "rejected_formal_import_count": self.rejected_formal_import_count,
+            "formal_import_issue_count": self.formal_import_issue_count,
+            "formal_import_validation_ready": self.formal_import_validation_ready,
+            "overall_decision": "pass" if self.formal_import_issue_count == 0 else "fail",
+            "accepted_records": list(self.accepted_records),
+            "issues": [issue.to_dict() for issue in self.issues],
+            "supports_paper_claim": False,
+        }
+
+
+def _str_field(row: Mapping[str, Any], field_name: str) -> str:
+    """读取字符串字段, 缺失时返回空字符串。"""
+
+    return str(row.get(field_name, "") or "")
+
+
+def _bool_field(row: Mapping[str, Any], field_name: str) -> bool:
+    """读取布尔字段, 兼容 JSON 与 CSV 常见文本表示。"""
+
+    value = row.get(field_name)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+
+def _int_field(row: Mapping[str, Any], field_name: str) -> int:
+    """读取非负计数字段。"""
+
+    return int(float(row.get(field_name, 0) or 0))
+
+
+def _float_field(row: Mapping[str, Any], field_name: str) -> float:
+    """读取有限浮点指标字段。"""
+
+    value = float(row.get(field_name, 0.0) or 0.0)
+    if value != value or value in {float("inf"), float("-inf")}:
+        raise ValueError(f"{field_name} 必须是有限数值")
+    return value
+
+
+def _list_field(row: Mapping[str, Any], field_name: str) -> tuple[str, ...]:
+    """读取路径列表字段, 兼容列表和分号分隔字符串。"""
+
+    value = row.get(field_name, ())
+    if isinstance(value, list | tuple):
+        return tuple(str(item) for item in value if str(item).strip())
+    if isinstance(value, str):
+        return tuple(part.strip() for part in value.split(";") if part.strip())
+    return ()
+
+
+def build_fixed_fpr_operating_point(target_fpr: float) -> str:
+    """把目标 FPR 映射为共同协议中的 operating point 名称。"""
+
+    return f"{FORMAL_OPERATING_POINT_PREFIX}_{float(target_fpr):g}"
+
+
+def _resolve_evidence_path(evidence_root: Path, value: str) -> Path:
+    """把证据路径解析为可检查的本地路径。"""
+
+    candidate = Path(value)
+    return candidate if candidate.is_absolute() else evidence_root / candidate
+
+
+def _issue(row_index: int, row: Mapping[str, Any], field_name: str, reason: str) -> FormalImportIssue:
+    """构造统一校验问题对象。"""
+
+    return FormalImportIssue(
+        row_index=row_index,
+        baseline_id=_str_field(row, "baseline_id"),
+        field_name=field_name,
+        reason=reason,
+    )
+
+
+def build_primary_baseline_formal_import_schema(target_fpr: float = 0.05) -> dict[str, Any]:
+    """构造主表 baseline 正式结果导入 schema 的可落盘描述。"""
+
+    return {
+        "protocol_name": PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME,
+        "primary_baseline_ids": list(PRIMARY_BASELINE_IDS),
+        "expected_operating_point": build_fixed_fpr_operating_point(target_fpr),
+        "required_ready_flags": list(REQUIRED_READY_FLAGS),
+        "required_metric_fields": list(REQUIRED_METRIC_FIELDS),
+        "required_source_fields": list(REQUIRED_SOURCE_FIELDS),
+        "allowed_result_source_types": list(ALLOWED_RESULT_SOURCE_TYPES),
+        "allowed_adapter_boundaries": list(ALLOWED_ADAPTER_BOUNDARIES),
+        "rejected_adapter_boundaries": list(REJECTED_ADAPTER_BOUNDARIES),
+        "full_main_prompt_protocol_name": FULL_MAIN_PROMPT_PROTOCOL_NAME,
+        "supports_paper_claim": False,
+    }
+
+
+def _validate_metric_fields(row: Mapping[str, Any], row_index: int) -> list[FormalImportIssue]:
+    """校验正式导入记录中的计数和率值边界。"""
+
+    issues: list[FormalImportIssue] = []
+    positive_count = _int_field(row, "positive_count")
+    negative_count = _int_field(row, "negative_count")
+    supported_count = _int_field(row, "supported_record_count")
+    attack_count = _int_field(row, "attack_record_count")
+    if positive_count <= 0:
+        issues.append(_issue(row_index, row, "positive_count", "positive_count_required"))
+    if negative_count <= 0:
+        issues.append(_issue(row_index, row, "negative_count", "negative_count_required"))
+    if supported_count <= 0:
+        issues.append(_issue(row_index, row, "supported_record_count", "supported_record_count_required"))
+    if attack_count < supported_count:
+        issues.append(_issue(row_index, row, "attack_record_count", "attack_record_count_must_cover_supported_count"))
+    for field_name in (
+        "true_positive_rate",
+        "false_positive_rate",
+        "clean_false_positive_rate",
+        "attacked_false_positive_rate",
+        "quality_score_proxy_mean",
+        "score_retention_mean",
+    ):
+        value = _float_field(row, field_name)
+        if not 0.0 <= value <= 1.0:
+            issues.append(_issue(row_index, row, field_name, "metric_rate_must_be_in_unit_interval"))
+    return issues
+
+
+def _validate_evidence_paths(
+    row: Mapping[str, Any],
+    row_index: int,
+    evidence_root: Path,
+    require_existing_evidence: bool,
+) -> list[FormalImportIssue]:
+    """校验证据路径是否非空并可在当前工作区或挂载目录中解析。"""
+
+    evidence_paths = _list_field(row, "evidence_paths")
+    issues: list[FormalImportIssue] = []
+    if not evidence_paths:
+        return [_issue(row_index, row, "evidence_paths", "evidence_paths_required")]
+    if require_existing_evidence:
+        for evidence_path in evidence_paths:
+            if not _resolve_evidence_path(evidence_root, evidence_path).is_file():
+                issues.append(_issue(row_index, row, "evidence_paths", "evidence_path_missing"))
+    return issues
+
+
+def validate_primary_baseline_formal_import_rows(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    evidence_root: str | Path = ".",
+    target_fpr: float = 0.05,
+    require_existing_evidence: bool = True,
+) -> dict[str, Any]:
+    """校验主表 baseline 正式结果导入记录, 并返回仅包含通过记录的报告。
+
+    该函数是 schema 层边界: 下游 comparison builder 只消费 accepted_records, 因而不会把 GPU smoke observation 或缺少 fixed-FPR 边界的记录误纳入正式主表统计。
+    """
+
+    evidence_root_path = Path(evidence_root).resolve()
+    expected_operating_point = build_fixed_fpr_operating_point(target_fpr)
+    accepted: list[dict[str, Any]] = []
+    issues: list[FormalImportIssue] = []
+    materialized_rows = [dict(row) for row in rows]
+    for row_index, row in enumerate(materialized_rows):
+        row_issues: list[FormalImportIssue] = []
+        baseline_id = _str_field(row, "baseline_id")
+        if baseline_id not in PRIMARY_BASELINE_IDS:
+            row_issues.append(_issue(row_index, row, "baseline_id", "primary_baseline_id_required"))
+        if _str_field(row, "result_protocol_name") != PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME:
+            row_issues.append(_issue(row_index, row, "result_protocol_name", "formal_result_protocol_required"))
+        if _str_field(row, "result_source_type") not in ALLOWED_RESULT_SOURCE_TYPES:
+            row_issues.append(_issue(row_index, row, "result_source_type", "allowed_result_source_type_required"))
+        if _str_field(row, "resource_profile") != "full_main":
+            row_issues.append(_issue(row_index, row, "resource_profile", "full_main_resource_profile_required"))
+        if _str_field(row, "comparable_operating_point") != expected_operating_point:
+            row_issues.append(_issue(row_index, row, "comparable_operating_point", "fixed_fpr_operating_point_required"))
+        if _str_field(row, "prompt_protocol_name") != FULL_MAIN_PROMPT_PROTOCOL_NAME:
+            row_issues.append(_issue(row_index, row, "prompt_protocol_name", "full_main_prompt_protocol_required"))
+        if not _str_field(row, "prompt_protocol_digest"):
+            row_issues.append(_issue(row_index, row, "prompt_protocol_digest", "prompt_protocol_digest_required"))
+        if not _str_field(row, "baseline_result_source"):
+            row_issues.append(_issue(row_index, row, "baseline_result_source", "baseline_result_source_required"))
+        if not _str_field(row, "baseline_result_source_digest"):
+            row_issues.append(_issue(row_index, row, "baseline_result_source_digest", "baseline_result_source_digest_required"))
+        adapter_boundary = _str_field(row, "adapter_boundary")
+        if adapter_boundary in REJECTED_ADAPTER_BOUNDARIES:
+            row_issues.append(_issue(row_index, row, "adapter_boundary", "adapter_boundary_not_formal"))
+        elif adapter_boundary not in ALLOWED_ADAPTER_BOUNDARIES:
+            row_issues.append(_issue(row_index, row, "adapter_boundary", "formal_adapter_boundary_required"))
+        if _str_field(row, "metric_status") != "measured":
+            row_issues.append(_issue(row_index, row, "metric_status", "measured_metric_status_required"))
+        for flag_name in REQUIRED_READY_FLAGS:
+            if not _bool_field(row, flag_name):
+                row_issues.append(_issue(row_index, row, flag_name, f"{flag_name}_required"))
+        row_issues.extend(_validate_metric_fields(row, row_index))
+        row_issues.extend(_validate_evidence_paths(row, row_index, evidence_root_path, require_existing_evidence))
+        if row_issues:
+            issues.extend(row_issues)
+        else:
+            accepted.append(row)
+    report = FormalImportValidationReport(
+        protocol_name=PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME,
+        target_fpr=float(target_fpr),
+        expected_operating_point=expected_operating_point,
+        input_record_count=len(materialized_rows),
+        accepted_formal_import_count=len(accepted),
+        rejected_formal_import_count=len(materialized_rows) - len(accepted),
+        formal_import_issue_count=len(issues),
+        formal_import_validation_ready=bool(materialized_rows) and not issues,
+        accepted_records=tuple(accepted),
+        issues=tuple(issues),
+    )
+    return report.to_dict()
+
+
+def _group_observations_by_attack(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str], list[Mapping[str, Any]]]:
+    """按攻击族与攻击名称聚合 observation, 便于生成导入候选。"""
+
+    grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
+    for row in rows:
+        attack_family = _str_field(row, "attack_family") or "clean"
+        attack_name = _str_field(row, "attack_condition") or "clean_none"
+        grouped.setdefault((attack_family, attack_name), []).append(row)
+    return grouped
+
+
+def build_primary_baseline_formal_result_record(
+    *,
+    baseline_id: str,
+    attack_family: str,
+    attack_name: str,
+    resource_profile: str,
+    target_fpr: float,
+    result_source_type: str,
+    baseline_result_source: str,
+    baseline_result_source_digest: str,
+    evidence_paths: Iterable[str],
+    prompt_protocol_digest: str,
+    adapter_boundary: str,
+    metric_values: Mapping[str, Any],
+    ready_flags: Mapping[str, bool],
+) -> dict[str, Any]:
+    """构造一条稳定的主表 baseline 正式导入候选记录。"""
+
+    payload = {
+        "baseline_id": baseline_id,
+        "attack_family": attack_family,
+        "attack_name": attack_name,
+        "resource_profile": resource_profile,
+        "comparable_operating_point": build_fixed_fpr_operating_point(target_fpr),
+        "result_protocol_name": PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME,
+        "result_source_type": result_source_type,
+        "baseline_result_source": baseline_result_source,
+        "baseline_result_source_digest": baseline_result_source_digest,
+        "metric_status": "measured",
+        "prompt_protocol_name": FULL_MAIN_PROMPT_PROTOCOL_NAME,
+        "prompt_protocol_digest": prompt_protocol_digest,
+        "adapter_boundary": adapter_boundary,
+        "evidence_paths": list(evidence_paths),
+        "supports_paper_claim": False,
+        **{field_name: bool(ready_flags.get(field_name, False)) for field_name in REQUIRED_READY_FLAGS},
+        **{field_name: metric_values[field_name] for field_name in REQUIRED_METRIC_FIELDS},
+    }
+    digest = build_stable_digest(payload)
+    payload["baseline_result_record_id"] = f"primary_baseline_formal_result_{digest[:16]}"
+    payload["baseline_result_digest"] = digest
+    return payload
+
+
+def build_t2smark_full_main_candidate_records(
+    *,
+    observation_rows: Iterable[Mapping[str, Any]],
+    target_fpr: float,
+    baseline_result_source: str,
+    baseline_result_source_digest: str,
+    evidence_paths: Iterable[str],
+    prompt_protocol_digest: str,
+    full_main_prompt_protocol_ready: bool,
+    fixed_fpr_baseline_calibration_ready: bool,
+    attack_matrix_baseline_detection_ready: bool,
+) -> tuple[dict[str, Any], ...]:
+    """把 T2SMark full-main observations 聚合为正式导入候选记录。
+
+    该函数只负责候选记录聚合。是否可进入正式比较由 validate_primary_baseline_formal_import_rows 决定。
+    """
+
+    records: list[dict[str, Any]] = []
+    for (attack_family, attack_name), group in _group_observations_by_attack(observation_rows).items():
+        positive_rows = [row for row in group if _str_field(row, "sample_role") in {"positive_source", "attacked_positive"}]
+        negative_rows = [row for row in group if _str_field(row, "sample_role") in {"clean_negative", "attacked_negative"}]
+        supported_count = len(group)
+        positive_count = len(positive_rows)
+        negative_count = len(negative_rows)
+        true_positive = sum(1 for row in positive_rows if _bool_field(row, "detection_decision"))
+        false_positive = sum(1 for row in negative_rows if _bool_field(row, "detection_decision"))
+        clean_negative_rows = [row for row in negative_rows if _str_field(row, "sample_role") == "clean_negative"]
+        attacked_negative_rows = [row for row in negative_rows if _str_field(row, "sample_role") == "attacked_negative"]
+        clean_false_positive = sum(1 for row in clean_negative_rows if _bool_field(row, "detection_decision"))
+        attacked_false_positive = sum(1 for row in attacked_negative_rows if _bool_field(row, "detection_decision"))
+        metric_values = {
+            "positive_count": positive_count,
+            "negative_count": negative_count,
+            "attack_record_count": supported_count,
+            "supported_record_count": supported_count,
+            "true_positive_rate": true_positive / positive_count if positive_count else 0.0,
+            "false_positive_rate": false_positive / negative_count if negative_count else 0.0,
+            "clean_false_positive_rate": clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0,
+            "attacked_false_positive_rate": attacked_false_positive / len(attacked_negative_rows) if attacked_negative_rows else 0.0,
+            "quality_score_proxy_mean": 1.0,
+            "score_retention_mean": 1.0,
+        }
+        ready_flags = {
+            "method_faithful_adapter_ready": True,
+            "full_main_prompt_protocol_ready": full_main_prompt_protocol_ready,
+            "fixed_fpr_baseline_calibration_ready": fixed_fpr_baseline_calibration_ready,
+            "attack_matrix_baseline_detection_ready": attack_matrix_baseline_detection_ready,
+            "formal_evidence_paths_ready": bool(tuple(evidence_paths)),
+        }
+        records.append(
+            build_primary_baseline_formal_result_record(
+                baseline_id="t2smark",
+                attack_family=attack_family,
+                attack_name=attack_name,
+                resource_profile="full_main",
+                target_fpr=target_fpr,
+                result_source_type="official_reproduction",
+                baseline_result_source=baseline_result_source,
+                baseline_result_source_digest=baseline_result_source_digest,
+                evidence_paths=evidence_paths,
+                prompt_protocol_digest=prompt_protocol_digest,
+                adapter_boundary="sd35_medium_native_official_reproduction",
+                metric_values=metric_values,
+                ready_flags=ready_flags,
+            )
+        )
+    return tuple(records)

@@ -79,7 +79,7 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
             {
                 "attack_family": "standard_distortion",
                 "attack_name": "jpeg_compression",
-                "resource_profile": "probe",
+                "resource_profile": "full_main",
                 "metric_status": "measured_from_local_proxy",
                 "attack_record_count": 6,
                 "supported_record_count": 6,
@@ -196,6 +196,8 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     )
     result_dir = tmp_path / "outputs" / "external_baseline_results"
     result_dir.mkdir(parents=True)
+    evidence_path = result_dir / "tree_ring_metrics.csv"
+    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
     result_records_path = result_dir / "baseline_result_records.jsonl"
     result_records_path.write_text(
         json.dumps(
@@ -203,9 +205,9 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
                 "baseline_id": "tree_ring",
                 "attack_family": "standard_distortion",
                 "attack_name": "jpeg_compression",
-                "resource_profile": "probe",
+                "resource_profile": "full_main",
                 "comparable_operating_point": "fixed_fpr_0.05",
-                "result_protocol_name": "common_watermark_protocol",
+                "result_protocol_name": "primary_baseline_formal_import_protocol",
                 "result_source_type": "governed_import",
                 "baseline_result_source": "outputs/external_baseline_results/tree_ring_metrics.csv",
                 "baseline_result_source_digest": "tree_ring_digest",
@@ -220,6 +222,15 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
                 "attacked_false_positive_rate": 0.1,
                 "quality_score_proxy_mean": 0.88,
                 "score_retention_mean": 0.77,
+                "prompt_protocol_name": "paper_main_full_prompt_protocol",
+                "prompt_protocol_digest": "prompt_digest",
+                "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
+                "evidence_paths": ["outputs/external_baseline_results/tree_ring_metrics.csv"],
+                "method_faithful_adapter_ready": True,
+                "full_main_prompt_protocol_ready": True,
+                "fixed_fpr_baseline_calibration_ready": True,
+                "attack_matrix_baseline_detection_ready": True,
+                "formal_evidence_paths_ready": True,
             },
             ensure_ascii=False,
         )
@@ -241,12 +252,15 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     baseline_rows = list(csv.DictReader((output_dir / "baseline_metrics.csv").open(encoding="utf-8")))
     comparison_rows = list(csv.DictReader((output_dir / "baseline_comparison_table.csv").open(encoding="utf-8")))
     runtime_report = json.loads((output_dir / "baseline_runtime_report.json").read_text(encoding="utf-8"))
+    validation_report = json.loads((output_dir / "baseline_formal_import_validation_report.json").read_text(encoding="utf-8"))
     tree_row = next(row for row in baseline_rows if row["baseline_id"] == "tree_ring")
     tree_comparison_row = next(row for row in comparison_rows if row["method_id"] == "tree_ring")
 
     assert runtime_report["baseline_source_registry_ready"] is True
     assert runtime_report["official_source_ready_count"] == 1
     assert runtime_report["imported_baseline_result_count"] == 1
+    assert runtime_report["accepted_formal_import_count"] == 1
+    assert validation_report["formal_import_validation_ready"] is True
     assert runtime_report["baseline_result_ready_count"] == 1
     assert runtime_report["baseline_results_ready"] is False
     assert tree_row["metric_status"] == "measured"

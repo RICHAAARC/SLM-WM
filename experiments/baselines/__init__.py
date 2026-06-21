@@ -27,6 +27,15 @@ from experiments.baselines.command_plan import (
     selected_primary_baselines,
 )
 from experiments.baselines.evidence_validator import validate_external_baseline_evidence
+from experiments.baselines.formal_import import (
+    FULL_MAIN_PROMPT_PROTOCOL_NAME,
+    PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME,
+    build_fixed_fpr_operating_point,
+    build_primary_baseline_formal_import_schema,
+    build_primary_baseline_formal_result_record,
+    build_t2smark_full_main_candidate_records,
+    validate_primary_baseline_formal_import_rows,
+)
 from experiments.baselines.observation_io import (
     BaselineExecutionManifest,
     build_baseline_execution_manifest,
@@ -55,6 +64,8 @@ __all__ = [
     "BaselineObservation",
     "BaselineResultRecord",
     "BaselineSpec",
+    "PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME",
+    "FULL_MAIN_PROMPT_PROTOCOL_NAME",
     "PRIMARY_BASELINE_ADAPTERS",
     "PRIMARY_BASELINE_IDS",
     "PrimaryBaselineCommandProfile",
@@ -67,6 +78,11 @@ __all__ = [
     "build_baseline_execution_manifest",
     "build_baseline_observations",
     "build_baseline_result_index",
+    "validate_primary_baseline_formal_import_rows",
+    "build_t2smark_full_main_candidate_records",
+    "build_primary_baseline_formal_result_record",
+    "build_primary_baseline_formal_import_schema",
+    "build_fixed_fpr_operating_point",
     "build_comparison_rows",
     "build_primary_baseline_execution_plans",
     "build_primary_baseline_evidence_records",

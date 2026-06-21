@@ -1,0 +1,106 @@
+"""T2SMark full-main 真实复现 helper 的轻量功能测试。"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from paper_workflow.colab_utils.t2smark_full_main_reproduction import (
+    T2SMarkFullMainReproductionConfig,
+    build_t2smark_full_main_image_pairs,
+    output_paths,
+    write_full_main_prompt_inputs,
+    write_t2smark_full_main_reproduction_outputs,
+)
+
+
+@pytest.mark.quick
+def test_full_main_prompt_inputs_use_full_prompt_file(tmp_path: Path) -> None:
+    """helper 应把 full prompt 文件转换为官方 dataset_key 和 adapter prompt 计划。"""
+
+    prompt_file = tmp_path / "configs" / "paper_main_full_prompts.txt"
+    prompt_file.parent.mkdir(parents=True)
+    prompt_file.write_text("a red fox on a desk\na blue car near a lake\n", encoding="utf-8")
+    config = T2SMarkFullMainReproductionConfig(prompt_file="configs/paper_main_full_prompts.txt", require_cuda=False)
+    paths = output_paths(tmp_path, config)
+
+    report = write_full_main_prompt_inputs(tmp_path, config, paths)
+    dataset = json.loads(paths["prompt_dataset"].read_text(encoding="utf-8"))
+    prompt_plan = json.loads(paths["prompt_plan"].read_text(encoding="utf-8"))
+
+    assert report["full_main_prompt_count"] == 2
+    assert report["selected_prompt_count"] == 2
+    assert report["full_main_prompt_protocol_ready"] is True
+    assert dataset["annotations"][0]["caption"] == "a red fox on a desk"
+    assert prompt_plan[0]["prompt_set"] == "full"
+
+
+@pytest.mark.quick
+def test_full_main_image_pairs_record_image_digest(tmp_path: Path) -> None:
+    """image_pairs 应记录 full-main 生成图像路径和 digest。"""
+
+    config = T2SMarkFullMainReproductionConfig(require_cuda=False)
+    paths = output_paths(tmp_path, config)
+    paths["official_images"].mkdir(parents=True)
+    (paths["official_images"] / "00000.png").write_bytes(b"fake_image")
+    prompt_rows = [{"prompt_id": "prompt_alpha", "prompt_index": 0, "split": "test"}]
+
+    rows = build_t2smark_full_main_image_pairs(tmp_path, paths, prompt_rows)
+
+    assert rows[0]["generated_image_path"].endswith("images/00000.png")
+    assert rows[0]["generated_image_digest"]
+    assert json.loads(paths["image_pairs"].read_text(encoding="utf-8"))[0]["prompt_id"] == "prompt_alpha"
+
+
+@pytest.mark.quick
+def test_full_main_reproduction_reuses_existing_results_and_writes_candidate_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已有 T2SMark 官方结果可复用时, helper 应跑通 adapter、候选记录和校验报告落盘链路。"""
+
+    prompt_file = tmp_path / "configs" / "paper_main_full_prompts.txt"
+    prompt_file.parent.mkdir(parents=True)
+    prompt_file.write_text("a red fox on a desk\n", encoding="utf-8")
+    config = T2SMarkFullMainReproductionConfig(
+        output_dir="outputs/t2smark_full_main_reproduction",
+        prompt_file="configs/paper_main_full_prompts.txt",
+        require_cuda=False,
+        reuse_existing=True,
+        force_generate=False,
+    )
+    paths = output_paths(tmp_path, config)
+    paths["official_results"].parent.mkdir(parents=True)
+    paths["official_results"].write_text('{"0":{"robustness":{"norm1_no_w":0.1,"norm1_w":0.9}}}\n', encoding="utf-8")
+    paths["official_images"].mkdir(parents=True)
+    (paths["official_images"] / "00000.png").write_bytes(b"fake_png")
+
+    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
+        output_path = Path(command[command.index("--out") + 1])
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(
+            json.dumps(
+                [
+                    {"baseline_id": "t2smark", "attack_family": "clean", "attack_condition": "clean_none", "sample_role": "clean_negative", "detection_decision": False},
+                    {"baseline_id": "t2smark", "attack_family": "clean", "attack_condition": "clean_none", "sample_role": "positive_source", "detection_decision": True},
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr("paper_workflow.colab_utils.t2smark_full_main_reproduction.run_command", fake_run_command)
+
+    summary = write_t2smark_full_main_reproduction_outputs(config=config, root=tmp_path)
+    validation_report = json.loads(paths["validation_report"].read_text(encoding="utf-8"))
+
+    assert summary["run_decision"] == "pass"
+    assert summary["t2smark_full_main_reproduction_ready"] is True
+    assert summary["full_main_prompt_protocol_ready"] is True
+    assert summary["formal_import_candidate_record_count"] == 1
+    assert validation_report["accepted_formal_import_count"] == 0
+    assert paths["candidate_records"].is_file()
+    assert paths["manifest"].is_file()

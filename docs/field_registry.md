@@ -937,6 +937,24 @@ Notebook 与 repository module 的跨边界数据
 | t2smark_result_count | metric | none | false | false | false | T2SMark 官方 results.json 中可读取的样本数量。 |
 | missing_result_indices | metric | none | true | false | false | T2SMark 输入 image pair 中缺少官方结果的索引集合。 |
 | adapter_digest | artifact | none | true | false | false | 外部 baseline adapter manifest 的稳定摘要。 |
+| primary_baseline_formal_import_protocol_name | protocol | none | true | false | false | 主表 external baseline 正式结果导入协议名称。 |
+| formal_import_input_record_count | metric | none | false | false | false | 正式导入 validator 接收的候选记录数量。 |
+| accepted_formal_import_count | metric | none | false | false | false | 通过正式导入 validator 的记录数量。 |
+| rejected_formal_import_count | metric | none | false | false | false | 未通过正式导入 validator 的记录数量。 |
+| formal_import_issue_count | metric | none | false | false | false | 正式导入 validator 发现的问题数量。 |
+| formal_import_validation_ready | governance | none | false | false | false | 主表 baseline 正式导入候选记录是否全部通过 schema 校验。 |
+| formal_import_validation_report_path | artifact | none | false | false | false | 正式导入 validator 报告路径。 |
+| formal_import_candidate_records_path | artifact | none | false | false | false | T2SMark 或其他 baseline 写出的正式导入候选 JSONL 路径。 |
+| formal_import_candidate_record_count | metric | none | false | false | false | T2SMark 或其他 baseline 写出的正式导入候选记录数量。 |
+| prompt_protocol_name | protocol | none | false | false | false | 正式导入结果绑定的 prompt 协议名称。 |
+| prompt_protocol_digest | artifact | none | true | false | false | 正式导入结果绑定的 prompt 协议摘要。 |
+| prompt_set_name | protocol | none | false | false | false | 正式导入或运行计划绑定的 prompt set 名称。 |
+| selected_prompt_count | metric | none | false | false | false | 当前运行实际选择的 prompt 数量。 |
+| prompt_limit | protocol | none | false | false | false | full-main 运行入口的 prompt 截断上限, 0 表示不截断。 |
+| full_main_prompt_count | metric | none | false | false | false | full-main prompt 源文件中的 prompt 总数。 |
+| full_main_prompt_source_path | artifact | none | false | false | false | full-main prompt 源文件路径。 |
+| t2smark_full_main_reproduction_ready | artifact | none | false | false | false | T2SMark SD3.5 Medium full-main 官方运行与 adapter 转换链路是否跑通。 |
+| t2smark_full_main_formal_import_validation_report_path | artifact | none | false | false | false | T2SMark full-main 正式导入候选记录的 validator 报告路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
 | example_digest_random | random | _digest_random | true | false | false | 可复现随机轨迹的 digest 字段。 |
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |
