@@ -878,6 +878,27 @@ Notebook 与 repository module 的跨边界数据
 | baseline_result_records_path | artifact | none | false | false | false | 受治理外部 baseline 结果 JSONL 输入路径。 |
 | source_registry_digest | artifact | none | false | false | false | 外部 baseline 源码登记内容的稳定摘要。 |
 | imported_result_digest | artifact | none | false | false | false | 外部 baseline 受治理导入结果集合的稳定摘要。 |
+| baseline_execution_id | protocol | none | true | false | false | 主表外部 baseline 官方复现计划记录的稳定标识。 |
+| baseline_execution_digest | artifact | none | true | false | false | 主表外部 baseline 官方复现计划 payload 的稳定摘要。 |
+| command_profile_name | protocol | none | false | false | false | 外部 baseline 官方运行入口的命令画像名称。 |
+| dependency_profile | runtime | none | true | false | false | 外部 baseline 官方源码复现所需的依赖环境画像。 |
+| recommended_python | runtime | none | true | false | false | 外部 baseline 官方源码建议使用的 Python 版本。 |
+| official_entrypoint | artifact | none | true | false | false | 外部 baseline 官方源码中的运行入口脚本。 |
+| reproduction_command | runtime | none | true | false | false | 外部 baseline 官方复现建议命令模板。 |
+| expected_result_adapter | protocol | none | true | false | false | 官方输出转换为共同协议结果记录时需要使用的适配器名称。 |
+| model_alignment_status | protocol | none | true | false | false | 外部 baseline 与 SD3.5 主线模型边界的对齐状态。 |
+| result_import_required | governance | none | true | false | false | 外部 baseline 是否仍需导入共同协议结果记录。 |
+| result_record_template_id | protocol | none | true | false | false | 外部 baseline 共同协议结果导入模板的稳定标识。 |
+| result_record_template_digest | artifact | none | true | false | false | 外部 baseline 共同协议结果导入模板 payload 的稳定摘要。 |
+| required_metric_fields | protocol | none | true | false | false | 外部 baseline 结果导入时必须提供的指标字段集合。 |
+| required_source_fields | protocol | none | true | false | false | 外部 baseline 结果导入时必须提供的来源字段集合。 |
+| primary_baseline_count | metric | none | false | false | false | 主表外部 baseline 数量。 |
+| primary_source_ready_count | metric | none | false | false | false | 主表外部 baseline 中官方源码入口可检查的数量。 |
+| result_record_template_count | metric | none | false | false | false | 主表外部 baseline 需要补齐的共同协议结果模板数量。 |
+| primary_baseline_plan_ready | governance | none | false | false | false | 主表外部 baseline 官方复现计划是否已可审计。 |
+| result_import_template_ready | governance | none | false | false | false | 主表外部 baseline 共同协议结果导入模板是否已可审计。 |
+| execution_plan_digest | artifact | none | false | false | false | 主表外部 baseline 官方复现计划集合的稳定摘要。 |
+| result_template_digest | artifact | none | false | false | false | 主表外部 baseline 结果导入模板集合的稳定摘要。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
 | example_digest_random | random | _digest_random | true | false | false | 可复现随机轨迹的 digest 字段。 |
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |

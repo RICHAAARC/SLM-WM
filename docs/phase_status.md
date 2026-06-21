@@ -918,3 +918,42 @@
 | `pytest tests/functional/test_external_baseline_comparison.py tests/functional/test_external_baseline_source_registry.py -q` | pass, 5 passed |
 | `python scripts/write_external_baseline_comparison_outputs.py` | pass, `official_source_ready_count=8`, `baseline_results_ready=false` |
 
+
+## primary_baseline_reproduction_protocol
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `primary_baseline_reproduction` |
+| phase_status | `official_execution_plan_ready_result_import_required` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-21` |
+| input_manifest | `external_baseline/source_registry.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/attack_matrix/attack_family_metrics.csv` |
+| expected_output_manifest | `outputs/primary_baseline_reproduction/manifest.local.json` |
+| expected_outputs | `outputs/primary_baseline_reproduction/primary_baseline_execution_plan.jsonl`; `outputs/primary_baseline_reproduction/primary_baseline_result_record_template.jsonl`; `outputs/primary_baseline_reproduction/primary_baseline_reproduction_report.json`; `outputs/primary_baseline_reproduction/manifest.local.json` |
+| blocking_items | 当前只冻结官方复现命令、依赖画像和共同协议结果模板, 尚未运行真实 GPU baseline 复现, 因此 `baseline_results_ready=false`。 |
+| fallback_path | 若官方代码无法在统一环境运行, 应使用隔离环境或受治理导入记录进入 `outputs/external_baseline_results/baseline_result_records.jsonl`, 不得手工填表。 |
+| invariants | 第三方源码仍由 `external_baseline/` 缓存且不提交; 主表 baseline 结果必须通过共同协议键进入 records, 再由脚本重建对比表。 |
+
+### primary baseline 推进内容
+
+1. 新增 `experiments/baselines/primary_reproduction.py`, 冻结 Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark 的官方入口命令、依赖画像、模型对齐状态和结果适配器名称。
+2. 新增 `scripts/write_primary_baseline_reproduction_plan.py`, 从源码登记文件与攻击矩阵读取输入, 写出主表 baseline 官方复现计划和共同协议结果导入模板。
+3. 新增 `tests/functional/test_primary_baseline_reproduction_plan.py`, 验证 4 个主表 baseline 均进入计划, T2SMark 被标记为 SD3.5 Medium 原生入口, 其他旧版 SD 系 baseline 标记为需要协议适配。
+4. 当前计划将 Tree-Ring、Gaussian Shading、Shallow Diffuse 归入 `legacy_stable_diffusion_requires_protocol_adapter`, 将 T2SMark 归入 `sd35_medium_native_entrypoint`。
+
+### primary baseline 当前边界
+
+1. 本次完成的是主表 baseline 复现协议和结果导入模板, 不是外部 baseline 真实指标复现。
+2. 真实复现应在隔离 GPU 环境中运行官方代码, 并把结果转换成 `baseline_result_records.jsonl` 后再重建 `external_baseline_comparison`。
+3. 当前所有新增产物仍保持 `supports_paper_claim=false`, 不能支持 baseline superiority 结论。
+
+### primary baseline 验证结果
+
+| command | result |
+| --- | --- |
+| `python -m py_compile experiments/baselines/primary_reproduction.py scripts/write_primary_baseline_reproduction_plan.py tests/functional/test_primary_baseline_reproduction_plan.py` | pass |
+| `python scripts/write_primary_baseline_reproduction_plan.py` | pass, `primary_baseline_count=4`, `result_record_template_count=56` |
+| `pytest -q` | pass, 109 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+
