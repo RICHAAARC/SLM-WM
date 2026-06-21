@@ -5,15 +5,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from experiments.baselines import default_baseline_specs
 
 
+@pytest.mark.quick
 def test_external_baseline_source_cache_is_ignored_by_repository() -> None:
     """外部源码缓存目录应由根 .gitignore 排除, 防止第三方源码进入提交。"""
     ignored_lines = {line.strip() for line in Path(".gitignore").read_text(encoding="utf-8").splitlines()}
     assert "external_baseline/" in ignored_lines
 
 
+@pytest.mark.quick
 def test_external_baseline_source_registry_matches_adapter_specs_when_present() -> None:
     """若本地存在来源登记, 其内容应与 baseline adapter 的主表和补充表分组一致。"""
     registry_path = Path("external_baseline/source_registry.json")
