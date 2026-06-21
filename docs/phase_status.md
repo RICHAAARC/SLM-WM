@@ -987,3 +987,27 @@
 1. 本次变更建立外部 baseline 的实施流程, 不伪造外部 baseline 真实指标。
 2. `contract-only` 只证明命令编排、adapter 落盘和 harness 边界可用。
 3. 论文级对比必须有 `formal_result_claim=true`、真实 `evidence_paths`、官方源码 commit、运行日志和可重建 observation 或受治理结果记录。
+
+
+## external_baseline_gpu_smoke_colab_entrypoint
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `external_baseline_gpu_smoke` |
+| phase_status | `colab_gpu_smoke_entrypoint_ready` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-21` |
+| input_manifest | `external_baseline/source_registry.json`; Google Drive 历史 `external_baseline_gpu_smoke_package_*.zip` 可选 |
+| expected_output_manifest | `outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_manifest.local.json` |
+| expected_outputs | `outputs/external_baseline_gpu_smoke/t2smark_official/**`; `outputs/external_baseline_gpu_smoke/execution/baseline_observations.json`; `outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_summary.json`; Google Drive `SLM/external_baseline_gpu_smoke/external_baseline_gpu_smoke_package_<utc>_<short_commit>.zip` |
+| blocking_items | 该 Notebook 只覆盖 T2SMark SD3.5 Medium 最小真实 GPU smoke, 样本量默认为 1, 不支持论文级外部 baseline 对比结论。 |
+| fallback_path | 若 Google Drive 中已有可复用官方结果包, helper 会先解包复用; 若缺失, 则按源码登记表下载 T2SMark 官方源码并重新生成官方 `results.json`。 |
+| invariants | Notebook 只负责远程入口和打包, 真实逻辑位于 `paper_workflow/colab_utils/external_baseline_gpu_smoke.py`; 所有持久输出写入 `outputs/` 并镜像到 Google Drive。 |
+
+### external baseline GPU smoke 入口内容
+
+1. 新增 `paper_workflow/external_baseline_gpu_smoke_run.ipynb`, 支持 Colab 冷启动挂载 Google Drive、拉取仓库、读取 `HF_TOKEN`、检查 CUDA、执行最小 T2SMark SD3.5 Medium 真实 GPU smoke。
+2. 新增 `paper_workflow/colab_utils/external_baseline_gpu_smoke.py`, 将历史包复用、官方源码缓存补齐、官方 `results.json` 生成、image pair 构造、adapter 命令计划执行和 zip 打包收敛到 helper。
+3. 前序结果判断边界为: 优先查找 Google Drive `external_baseline_gpu_smoke_package_*.zip`, 仅解出 `outputs/external_baseline_gpu_smoke/` 下可复用文件; 若 `results.json` 存在且允许复用, 不重新运行官方推理; 否则执行真实 GPU 生成。
+4. 当前产物显式设置 `supports_paper_claim=false`, 只能证明外部 baseline 链路可运行, 不能替代 full-main prompt split、样本量冻结、固定 FPR 与 baseline 主表统计。
+

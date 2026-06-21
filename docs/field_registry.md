@@ -939,3 +939,31 @@ Notebook 与 repository module 的跨边界数据
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |
 | example_artifact_temporary | temporary | _temporary | false | false | true | 可清理的示例临时产物标记。 |
 | example_result_cache | cache | _cache | false | false | false | 可由输入、配置和代码重建的示例缓存标记。 |
+| external_baseline_gpu_smoke_ready | artifact | none | false | false | false | 外部 baseline 真实 GPU smoke 链路是否已跑通并生成可审计结果包。|
+| t2smark_real_gpu_smoke_ready | artifact | none | false | false | false | T2SMark 官方 SD3.5 Medium 真实 GPU 最小复现是否已生成或复用成功。|
+| t2smark_official_result_generated | artifact | none | false | false | false | T2SMark 官方 results.json 是否由本次运行生成。|
+| t2smark_official_result_reused | artifact | none | false | false | false | T2SMark 官方 results.json 是否来自本地或 Drive 历史结果复用。|
+| t2smark_source_available | artifact | none | false | false | false | T2SMark 官方源码入口在当前工作区中是否可用。|
+| t2smark_source_downloaded | artifact | none | false | false | false | T2SMark 官方源码缓存是否由本次冷启动流程下载。|
+| source_available | artifact | none | false | false | false | 外部源码缓存入口文件是否存在且可用于后续命令。|
+| source_downloaded | artifact | none | false | false | false | 外部源码缓存是否由本次命令补齐。|
+| source_entry_path | artifact | none | false | false | false | 外部源码缓存入口脚本路径。|
+| prior_package_reused | artifact | none | false | false | false | Google Drive 历史结果包是否被本次 workflow 复用。|
+| prior_package_path | artifact | none | false | false | false | 被复用的 Google Drive 历史结果包路径。|
+| prior_package_digest | artifact | none | false | false | false | 被复用的 Google Drive 历史结果包 SHA256 摘要。|
+| extracted_entry_count | metric | none | false | false | false | 从历史结果包中解出的可复用文件数量。|
+| extracted_entries | artifact | none | false | false | false | 从历史结果包中解出的可复用文件路径集合。|
+| adapter_execution_ready | artifact | none | false | false | false | 外部 baseline adapter 命令计划是否执行并通过证据边界校验。|
+| adapter_observation_count | metric | none | false | false | false | 外部 baseline adapter 输出的 observation 数量。|
+| adapter_unsupported_reason | governance | none | false | false | false | 外部 baseline adapter 未能通过 smoke 链路时记录的边界原因。|
+| official_result_generated | artifact | none | false | false | false | 外部 baseline 官方结果是否由本次命令生成。|
+| official_result_reused | artifact | none | false | false | false | 外部 baseline 官方结果是否由本地或历史结果复用。|
+| official_generation_reason | governance | none | false | false | false | 外部 baseline 官方结果生成或复用决策的原因。|
+| official_results_path | artifact | none | false | false | false | 外部 baseline 官方结果文件路径。|
+| official_return_code | runtime | none | false | false | false | 外部 baseline 官方入口命令返回码。|
+| official_command | runtime | none | false | false | false | 外部 baseline 官方入口命令 argv 列表。|
+| image_pairs_path | artifact | none | false | false | false | 外部 baseline adapter 使用的 image pair 输入路径。|
+| baseline_execution_manifest_path | artifact | none | false | false | false | 外部 baseline adapter 执行 manifest 路径。|
+| command_plan_path | artifact | none | false | false | false | 外部 baseline adapter 命令计划路径。|
+| clone_return_code | runtime | none | false | false | false | 外部源码缓存 git clone 命令返回码。|
+| checkout_return_code | runtime | none | false | false | false | 外部源码缓存 git checkout 命令返回码。|
