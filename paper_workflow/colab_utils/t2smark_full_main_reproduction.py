@@ -116,6 +116,42 @@ def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
+def synchronize_environment_report_with_device_report(
+    environment_report: dict[str, Any],
+    device_report: dict[str, Any],
+) -> dict[str, Any]:
+    """把显式 GPU 检查结果同步到环境报告顶层字段。
+
+    该函数属于项目特定写法: Colab helper 已经在运行入口检查真实 GPU, 因此环境报告顶层字段应直接反映该检查结果,
+    避免审计时出现顶层 `cuda_available=null` 但子节点显示 CUDA 可用的歧义。
+    """
+
+    merged_report = dict(environment_report)
+    merged_report["t2smark_full_main_device_report"] = dict(device_report)
+    if "cuda_available" in device_report:
+        merged_report["cuda_available"] = bool(device_report["cuda_available"])
+    if "device_count" in device_report:
+        merged_report["device_count"] = int(device_report["device_count"])
+    device_name = str(device_report.get("device_name") or device_report.get("gpu_name") or "")
+    if device_name:
+        merged_report["gpu_name"] = device_name
+    if device_report.get("cuda_version"):
+        merged_report["cuda_version"] = str(device_report["cuda_version"])
+    return merged_report
+
+
+def build_t2smark_full_main_environment_report(device_report: dict[str, Any]) -> dict[str, Any]:
+    """构造与 T2SMark full-main GPU 检查结果一致的环境报告。"""
+
+    try:
+        import torch
+    except Exception:  # pragma: no cover - 本地轻量测试不强制安装 torch
+        environment_report = build_runtime_environment_report()
+    else:
+        environment_report = build_runtime_environment_report(torch_module=torch)
+    return synchronize_environment_report_with_device_report(environment_report, device_report)
+
+
 def relative_or_absolute(path: Path, root_path: Path) -> str:
     """优先记录相对仓库根目录的路径。"""
 
@@ -459,8 +495,7 @@ def write_t2smark_full_main_reproduction_outputs(
         image_pairs = build_t2smark_full_main_image_pairs(root_path, paths, prompt_rows)
         adapter_report = run_t2smark_adapter(root_path, config, paths)
         candidate_report = build_candidate_records_and_validation(root_path, config, paths, prompt_report)
-        environment_report = build_runtime_environment_report()
-        environment_report["t2smark_full_main_device_report"] = device_report
+        environment_report = build_t2smark_full_main_environment_report(device_report)
         write_json(paths["environment_report"], environment_report)
     except Exception as error:
         return write_failure_outputs(root_path, config, paths, error)

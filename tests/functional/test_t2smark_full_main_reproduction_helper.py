@@ -11,6 +11,7 @@ from paper_workflow.colab_utils.t2smark_full_main_reproduction import (
     T2SMarkFullMainReproductionConfig,
     build_t2smark_full_main_image_pairs,
     output_paths,
+    synchronize_environment_report_with_device_report,
     write_full_main_prompt_inputs,
     write_t2smark_full_main_reproduction_outputs,
 )
@@ -52,6 +53,31 @@ def test_full_main_image_pairs_record_image_digest(tmp_path: Path) -> None:
     assert rows[0]["generated_image_path"].endswith("images/00000.png")
     assert rows[0]["generated_image_digest"]
     assert json.loads(paths["image_pairs"].read_text(encoding="utf-8"))[0]["prompt_id"] == "prompt_alpha"
+
+
+@pytest.mark.quick
+def test_environment_report_promotes_explicit_gpu_device_report() -> None:
+    """环境报告顶层 GPU 字段应与真实 GPU 检查结果保持一致。"""
+
+    environment_report = {
+        "cuda_available": None,
+        "cuda_version": None,
+        "device_count": 0,
+        "gpu_name": "",
+        "package_versions": {"torch": "2.11.0+cu128"},
+    }
+    device_report = {
+        "cuda_available": True,
+        "device_count": 1,
+        "device_name": "NVIDIA L4",
+    }
+
+    merged_report = synchronize_environment_report_with_device_report(environment_report, device_report)
+
+    assert merged_report["cuda_available"] is True
+    assert merged_report["device_count"] == 1
+    assert merged_report["gpu_name"] == "NVIDIA L4"
+    assert merged_report["t2smark_full_main_device_report"] == device_report
 
 
 @pytest.mark.quick
