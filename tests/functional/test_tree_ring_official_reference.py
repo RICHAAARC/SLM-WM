@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from experiments.baselines import (
@@ -9,6 +12,12 @@ from experiments.baselines import (
     build_tree_ring_official_reference_record,
     build_tree_ring_official_reference_schema,
     validate_tree_ring_official_reference_records,
+)
+from paper_workflow.colab_utils.tree_ring_official_reference import (
+    TreeRingOfficialReferenceConfig,
+    build_official_command,
+    parse_metric_text,
+    write_tree_ring_official_reference_outputs,
 )
 
 
@@ -86,3 +95,73 @@ def test_tree_ring_official_reference_rejects_main_table_eligibility() -> None:
 
     assert report["reference_import_ready"] is False
     assert "legacy_reference_must_not_enter_main_table" in reasons
+
+
+@pytest.mark.quick
+def test_tree_ring_official_reference_helper_imports_governed_summary(tmp_path: Path) -> None:
+    """专用 helper 应能把外部官方复现 summary 转换为 governed import 记录。"""
+
+    source_dir = tmp_path / "external_baseline" / "primary" / "tree_ring" / "source"
+    source_dir.mkdir(parents=True)
+    (source_dir / "run_tree_ring_watermark.py").write_text("print('tree-ring official entry')\n", encoding="utf-8")
+    (source_dir / "requirements.txt").write_text("diffusers==0.11.1\ntransformers==4.23.1\n", encoding="utf-8")
+    imported_summary = tmp_path / "outputs" / "tree_ring_official_reference" / "imported_summary.json"
+    imported_summary.parent.mkdir(parents=True)
+    imported_summary.write_text(
+        json.dumps(
+            {
+                "sample_count": 5,
+                "positive_count": 5,
+                "negative_count": 5,
+                "auc": 0.91,
+                "accuracy": 0.82,
+                "true_positive_rate_at_one_percent_fpr": 0.73,
+                "clip_score_mean": 0.31,
+                "watermarked_clip_score_mean": 0.3,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    config = TreeRingOfficialReferenceConfig(
+        output_dir="outputs/tree_ring_official_reference",
+        drive_output_dir=str(tmp_path / "drive"),
+        source_dir="external_baseline/primary/tree_ring/source",
+        sample_count=5,
+        run_official_command=False,
+        summary_import_path=str(imported_summary),
+        require_cuda=False,
+    )
+
+    summary = write_tree_ring_official_reference_outputs(config, root=tmp_path)
+    records_path = tmp_path / summary["reference_records_path"]
+    validation_path = tmp_path / summary["reference_validation_path"]
+
+    assert summary["run_decision"] == "pass"
+    assert summary["sample_count"] == 5
+    assert summary["governed_reference_record_count"] == 1
+    assert records_path.read_text(encoding="utf-8").strip()
+    assert json.loads(validation_path.read_text(encoding="utf-8"))["reference_import_ready"] is True
+
+
+@pytest.mark.quick
+def test_tree_ring_official_reference_parses_metric_text_and_custom_python(tmp_path: Path) -> None:
+    """官方日志解析与 legacy Python 可执行文件配置应保持可审计。"""
+
+    config = TreeRingOfficialReferenceConfig(
+        source_dir="external_baseline/primary/tree_ring/source",
+        official_python_executable="/opt/tree-ring-legacy/bin/python",
+        sample_count=5,
+    )
+
+    metrics = parse_metric_text(
+        "clip_score_mean: 0.33\nw_clip_score_mean: 0.32\nauc: 0.95\nacc: 0.84\nTPR@1%FPR: 0.72\n",
+        sample_count=5,
+    )
+    command = build_official_command(tmp_path, config)
+
+    assert metrics["sample_count"] == 5
+    assert metrics["auc"] == 0.95
+    assert command[0] == "/opt/tree-ring-legacy/bin/python"
+    assert "--start" in command
+    assert command[command.index("--end") + 1] == "5"

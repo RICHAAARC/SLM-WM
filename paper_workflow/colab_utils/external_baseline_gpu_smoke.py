@@ -29,7 +29,15 @@ DEFAULT_T2SMARK_INVERSION_ENTRY = "external_baseline/primary/t2smark/source/src/
 DEFAULT_SOURCE_REGISTRY_PATH = "external_baseline/source_registry.json"
 DEFAULT_T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 DEFAULT_PACKAGE_PATTERN = "external_baseline_gpu_smoke_package_*.zip"
+DEFAULT_SHARED_SAMPLE_COUNT = 5
 PRIMARY_BASELINE_METHODS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+SHARED_PROMPT_TEXTS = (
+    "a small ceramic fox sitting on a wooden desk under soft studio lighting",
+    "a red bicycle leaning against a brick wall on a rainy afternoon",
+    "a glass teapot filled with jasmine tea beside a linen notebook",
+    "a miniature lighthouse on a rocky beach at sunrise",
+    "a blue robot gardener watering tulips in a greenhouse",
+)
 T2SMARK_INVERSION_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为新版 Diffusers 显式补齐注解依赖。"
 T2SMARK_INVERSION_COMPAT_BLOCK = f"""{T2SMARK_INVERSION_COMPAT_MARKER}
 import torch
@@ -70,12 +78,12 @@ class ExternalBaselineGpuSmokeConfig:
     t2smark_run_name: str = DEFAULT_T2SMARK_RUN_NAME
     model_id: str = DEFAULT_T2SMARK_MODEL_ID
     seed: int = 20260621
-    robust_test_num: int = 1
+    robust_test_num: int = DEFAULT_SHARED_SAMPLE_COUNT
     clip_test_num: int = 0
     num_inference_steps: int = 8
     num_inversion_steps: int = 3
     guidance_scale: float = 4.0
-    primary_baseline_max_samples: int = 1
+    primary_baseline_max_samples: int = DEFAULT_SHARED_SAMPLE_COUNT
     tree_ring_adapter_mode: str = "method_faithful_sd35"
     tree_ring_attack_families: str = ""
     reuse_existing: bool = True
@@ -230,39 +238,63 @@ def materialize_prior_outputs(
     return manifest
 
 
+def count_t2smark_result_items(results_path: Path) -> int:
+    """统计 T2SMark results.json 中可用于 adapter 的数字样本条目数。"""
+
+    if not results_path.is_file():
+        return 0
+    try:
+        payload = read_json(results_path)
+    except Exception:
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    return sum(1 for key, value in payload.items() if str(key).isdigit() and isinstance(value, dict))
+
+
 def should_run_t2smark_official(config: ExternalBaselineGpuSmokeConfig, results_path: Path) -> tuple[bool, str]:
     """判断 T2SMark 官方 SD3.5 运行是否需要本次生成。"""
 
     if config.force_generate:
         return True, "force_generate_requested"
     if config.reuse_existing and results_path.is_file():
+        existing_count = count_t2smark_result_items(results_path)
+        required_count = max(1, int(config.robust_test_num))
+        if existing_count < required_count:
+            return True, "existing_results_sample_count_insufficient"
         return False, "existing_results_found"
     return True, "results_missing"
 
 
-def write_t2smark_prompt_input(paths: dict[str, Path]) -> Path:
-    """写出官方 T2SMark 入口可直接读取的最小 prompt 文件。"""
+def _shared_prompt_text(index: int) -> str:
+    """按序号读取共享小样本 prompt, 超出时循环复用。"""
+
+    return SHARED_PROMPT_TEXTS[index % len(SHARED_PROMPT_TEXTS)]
+
+
+def write_t2smark_prompt_input(paths: dict[str, Path], config: ExternalBaselineGpuSmokeConfig) -> Path:
+    """写出官方 T2SMark 入口可直接读取的共享 prompt 文件。"""
 
     prompt_payload = {
         "annotations": [
-            {
-                "caption": "a small ceramic fox sitting on a wooden desk under soft studio lighting",
-            }
+            {"caption": _shared_prompt_text(index)}
+            for index in range(max(1, int(config.robust_test_num)))
         ]
     }
     write_json(paths["t2smark_prompts"], prompt_payload)
     return paths["t2smark_prompts"]
 
 
-def write_primary_baseline_prompt_plan(paths: dict[str, Path]) -> Path:
-    """写出三类 latent smoke adapter 与 T2SMark 共用的最小 prompt 计划。"""
+def write_primary_baseline_prompt_plan(paths: dict[str, Path], config: ExternalBaselineGpuSmokeConfig) -> Path:
+    """写出三类扩散 adapter 与 T2SMark 共用的小样本 prompt 计划。"""
 
     prompt_rows = [
         {
-            "prompt_id": "primary_baseline_prompt_00000",
+            "prompt_id": f"primary_baseline_prompt_{index:05d}",
             "split": "gpu_smoke",
-            "prompt_text": "a small ceramic fox sitting on a wooden desk under soft studio lighting",
+            "prompt_text": _shared_prompt_text(index),
         }
+        for index in range(max(1, int(config.primary_baseline_max_samples)))
     ]
     write_json(paths["primary_prompt_plan"], prompt_rows)
     return paths["primary_prompt_plan"]
@@ -410,7 +442,7 @@ def run_t2smark_official_if_needed(
     source_report = ensure_t2smark_source_available(root_path, paths, timeout_seconds=300)
     source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
     ensure_cuda_if_requested(config.require_cuda)
-    prompt_input_path = write_t2smark_prompt_input(paths)
+    prompt_input_path = write_t2smark_prompt_input(paths, config)
     command = [
         sys.executable,
         str(source_entry),
@@ -526,7 +558,7 @@ def build_and_run_primary_baseline_adapters(
 ) -> dict[str, Any]:
     """生成命令计划并运行四个主表 external baseline adapter。"""
 
-    prompt_plan_path = write_primary_baseline_prompt_plan(paths)
+    prompt_plan_path = write_primary_baseline_prompt_plan(paths, config)
     build_command = [
         sys.executable,
         "scripts/build_external_baseline_command_plan.py",
@@ -704,7 +736,13 @@ def write_external_baseline_gpu_smoke_outputs(
     except Exception as error:
         return write_failure_outputs(root_path, config, paths, error)
 
-    official_ready = paths["official_results"].is_file() and official_report.get("official_return_code") == 0
+    t2smark_result_count = count_t2smark_result_items(paths["official_results"])
+    expected_sample_count = max(1, int(config.robust_test_num))
+    official_ready = (
+        paths["official_results"].is_file()
+        and official_report.get("official_return_code") == 0
+        and t2smark_result_count >= expected_sample_count
+    )
     adapter_ready = bool(adapter_report.get("adapter_execution_ready"))
     observation_count = int(adapter_report.get("adapter_observation_count", 0))
     primary_ready = bool(adapter_report.get("primary_baseline_adapter_ready"))
@@ -721,6 +759,8 @@ def write_external_baseline_gpu_smoke_outputs(
         "t2smark_source_available": bool(official_report.get("source_report", {}).get("source_available")),
         "t2smark_source_downloaded": bool(official_report.get("source_report", {}).get("source_downloaded")),
         "t2smark_source_patch_applied": bool(source_patch_report.get("source_patch_applied")),
+        "expected_sample_count": expected_sample_count,
+        "t2smark_result_count": t2smark_result_count,
         "prior_package_reused": bool(prior_manifest.get("prior_package_reused")),
         "image_pair_count": len(image_pairs),
         "adapter_execution_ready": adapter_ready,
@@ -788,12 +828,12 @@ def build_default_config() -> ExternalBaselineGpuSmokeConfig:
         t2smark_run_name=os.environ.get("SLM_WM_T2SMARK_RUN_NAME", DEFAULT_T2SMARK_RUN_NAME),
         model_id=os.environ.get("SLM_WM_T2SMARK_MODEL_ID", DEFAULT_T2SMARK_MODEL_ID),
         seed=int(os.environ.get("SLM_WM_EXTERNAL_BASELINE_SEED", "20260621")),
-        robust_test_num=int(os.environ.get("SLM_WM_T2SMARK_ROBUST_TEST_NUM", "1")),
+        robust_test_num=int(os.environ.get("SLM_WM_T2SMARK_ROBUST_TEST_NUM", str(DEFAULT_SHARED_SAMPLE_COUNT))),
         clip_test_num=int(os.environ.get("SLM_WM_T2SMARK_CLIP_TEST_NUM", "0")),
         num_inference_steps=int(os.environ.get("SLM_WM_T2SMARK_NUM_INFERENCE_STEPS", "8")),
         num_inversion_steps=int(os.environ.get("SLM_WM_T2SMARK_NUM_INVERSION_STEPS", "3")),
         guidance_scale=float(os.environ.get("SLM_WM_T2SMARK_GUIDANCE_SCALE", "4.0")),
-        primary_baseline_max_samples=int(os.environ.get("SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES", "1")),
+        primary_baseline_max_samples=int(os.environ.get("SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES", str(DEFAULT_SHARED_SAMPLE_COUNT))),
         tree_ring_adapter_mode=os.environ.get("SLM_WM_TREE_RING_ADAPTER_MODE", "method_faithful_sd35"),
         tree_ring_attack_families=os.environ.get("SLM_WM_TREE_RING_ATTACK_FAMILIES", ""),
         reuse_existing=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REUSE_EXISTING", "1") != "0",
