@@ -1019,3 +1019,10 @@
 3. 前序结果复用边界同步修正: 若 Google Drive 历史包中已有可复用 `results.json`, helper 会跳过源码缓存准备, 避免在不需要重新推理时被 GitHub 源码下载或补丁流程阻断。
 4. 该修正只提升 cold-start smoke 链路鲁棒性, 不改变 `supports_paper_claim=false` 的证据边界。
 
+
+### external baseline GPU smoke provenance 修正
+
+1. 已发现历史失败包复用时 `t2smark_image_pairs.json` 可能保留空的 `generated_image_path` 与 `generated_image_digest`, 但新的官方图像已经生成。
+2. 修正策略是将 image pair 构造改为以当前 `t2smark_official/.../images/` 目录为准: 若已有 image pair 与当前图像路径或 digest 不一致, helper 会自动重写 `t2smark_image_pairs.json`。
+3. 重新生成或刷新方式为重新运行 `paper_workflow/external_baseline_gpu_smoke_run.ipynb`; helper 会在官方推理或结果复用后自动执行刷新, 不需要手工编辑 JSON。
+

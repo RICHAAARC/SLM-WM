@@ -443,11 +443,13 @@ def run_t2smark_official_if_needed(
     }
 
 
-def build_t2smark_image_pairs(root_path: Path, config: ExternalBaselineGpuSmokeConfig, paths: dict[str, Path]) -> list[dict[str, Any]]:
-    """生成 T2SMark adapter 所需的 image_pairs 输入。"""
+def build_current_t2smark_image_pairs(
+    root_path: Path,
+    config: ExternalBaselineGpuSmokeConfig,
+    paths: dict[str, Path],
+) -> list[dict[str, Any]]:
+    """按当前官方图像目录重建 T2SMark adapter 所需的 image_pairs 输入。"""
 
-    if paths["image_pairs"].is_file() and config.reuse_existing and not config.force_generate:
-        return json.loads(paths["image_pairs"].read_text(encoding="utf-8"))
     image_dir = paths["official_images"]
     rows: list[dict[str, Any]] = []
     for index in range(config.robust_test_num):
@@ -463,8 +465,37 @@ def build_t2smark_image_pairs(root_path: Path, config: ExternalBaselineGpuSmokeC
             "generated_image_digest": file_digest(image_path) if image_path.is_file() else "",
         }
         rows.append(row)
-    write_json(paths["image_pairs"], rows)
     return rows
+
+
+def t2smark_image_pairs_are_current(
+    image_pairs: list[dict[str, Any]],
+    current_rows: list[dict[str, Any]],
+) -> bool:
+    """判断已有 image_pairs 是否已经包含当前图像路径与 digest。"""
+
+    if len(image_pairs) != len(current_rows):
+        return False
+    for old_row, current_row in zip(image_pairs, current_rows):
+        if old_row.get("image_id") != current_row.get("image_id"):
+            return False
+        if current_row.get("generated_image_digest") and old_row.get("generated_image_digest") != current_row.get("generated_image_digest"):
+            return False
+        if current_row.get("generated_image_path") and old_row.get("generated_image_path") != current_row.get("generated_image_path"):
+            return False
+    return True
+
+
+def build_t2smark_image_pairs(root_path: Path, config: ExternalBaselineGpuSmokeConfig, paths: dict[str, Path]) -> list[dict[str, Any]]:
+    """生成或刷新 T2SMark adapter 所需的 image_pairs 输入。"""
+
+    current_rows = build_current_t2smark_image_pairs(root_path, config, paths)
+    if paths["image_pairs"].is_file() and config.reuse_existing and not config.force_generate:
+        existing_rows = json.loads(paths["image_pairs"].read_text(encoding="utf-8"))
+        if t2smark_image_pairs_are_current(existing_rows, current_rows):
+            return existing_rows
+    write_json(paths["image_pairs"], current_rows)
+    return current_rows
 
 
 def build_and_run_t2smark_adapter(

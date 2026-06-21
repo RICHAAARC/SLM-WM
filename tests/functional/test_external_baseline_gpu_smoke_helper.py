@@ -11,6 +11,7 @@ from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
     DEFAULT_T2SMARK_SOURCE_ENTRY,
     T2SMARK_INVERSION_COMPAT_MARKER,
     ExternalBaselineGpuSmokeConfig,
+    build_t2smark_image_pairs,
     output_paths,
     patch_t2smark_inversion_compatibility,
     run_t2smark_official_if_needed,
@@ -59,3 +60,25 @@ def test_t2smark_result_reuse_does_not_require_source_cache(tmp_path: Path) -> N
     assert report["official_return_code"] == 0
     assert report["source_report"]["source_prepare_skipped"] is True
     assert not (tmp_path / DEFAULT_T2SMARK_SOURCE_ENTRY).exists()
+
+
+@pytest.mark.quick
+def test_t2smark_image_pairs_refreshes_stale_image_provenance(tmp_path: Path) -> None:
+    """已有 image_pairs 缺少图像路径与 digest 时, helper 应按当前图像目录刷新。"""
+
+    config = ExternalBaselineGpuSmokeConfig(require_cuda=False, reuse_existing=True, force_generate=False)
+    paths = output_paths(tmp_path, config)
+    paths["official_images"].mkdir(parents=True)
+    image_path = paths["official_images"] / "00000.png"
+    image_path.write_bytes(b"fake_png_bytes_for_t2smark_smoke")
+    paths["image_pairs"].parent.mkdir(parents=True, exist_ok=True)
+    paths["image_pairs"].write_text(
+        '[{"image_id":"t2smark_00000","generated_image_path":"","generated_image_digest":""}]\n',
+        encoding="utf-8",
+    )
+
+    rows = build_t2smark_image_pairs(tmp_path, config, paths)
+
+    assert rows[0]["generated_image_path"] == "outputs/external_baseline_gpu_smoke/t2smark_official/t2smark_sd35_medium_gpu_smoke/images/00000.png"
+    assert rows[0]["generated_image_digest"]
+    assert '"generated_image_digest": ""' not in paths["image_pairs"].read_text(encoding="utf-8")
