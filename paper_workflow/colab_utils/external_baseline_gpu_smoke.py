@@ -25,9 +25,20 @@ DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/external_baseline_gpu_smo
 DEFAULT_PRIOR_DRIVE_DIR = DEFAULT_DRIVE_OUTPUT_DIR
 DEFAULT_T2SMARK_RUN_NAME = "t2smark_sd35_medium_gpu_smoke"
 DEFAULT_T2SMARK_SOURCE_ENTRY = "external_baseline/primary/t2smark/source/run_sd35.py"
+DEFAULT_T2SMARK_INVERSION_ENTRY = "external_baseline/primary/t2smark/source/src/inversion/inverse_diffusion3.py"
 DEFAULT_SOURCE_REGISTRY_PATH = "external_baseline/source_registry.json"
 DEFAULT_T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 DEFAULT_PACKAGE_PATTERN = "external_baseline_gpu_smoke_package_*.zip"
+T2SMARK_INVERSION_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为新版 Diffusers 显式补齐注解依赖。"
+T2SMARK_INVERSION_COMPAT_BLOCK = f"""{T2SMARK_INVERSION_COMPAT_MARKER}
+import torch
+from typing import Any, Callable, Dict, List, Optional, Union
+
+try:
+    from diffusers.image_processor import PipelineImageInput
+except Exception:
+    PipelineImageInput = Any
+"""
 ALLOWED_PRIOR_PREFIXES = ("outputs/external_baseline_gpu_smoke/",)
 PACKAGE_EXTRA_PATHS = (
     "paper_workflow/external_baseline_gpu_smoke_run.ipynb",
@@ -274,15 +285,43 @@ def normalize_repository_url(repository_url: str) -> str:
     return repository_url
 
 
+def patch_t2smark_inversion_compatibility(root_path: Path, paths: dict[str, Path]) -> dict[str, Any]:
+    """为 T2SMark 官方 SD3.5 inversion 入口补齐新版环境所需导入。"""
+
+    inversion_path = root_path / DEFAULT_T2SMARK_INVERSION_ENTRY
+    if not inversion_path.is_file():
+        raise FileNotFoundError(f"t2smark_inversion_entry_missing:{inversion_path}")
+    source_text = inversion_path.read_text(encoding="utf-8")
+    patch_applied = False
+    if T2SMARK_INVERSION_COMPAT_MARKER not in source_text:
+        import_line = "from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import *\n"
+        if import_line in source_text:
+            source_text = source_text.replace(import_line, import_line + "\n" + T2SMARK_INVERSION_COMPAT_BLOCK + "\n", 1)
+        else:
+            source_text = T2SMARK_INVERSION_COMPAT_BLOCK + "\n" + source_text
+        inversion_path.write_text(source_text, encoding="utf-8")
+        patch_applied = True
+    report = {
+        "source_patch_applied": patch_applied,
+        "source_patch_needed": patch_applied,
+        "source_patch_path": relative_or_absolute(inversion_path, root_path),
+        "source_patch_reason": "typing_names_required_by_sd35_inversion_entry",
+    }
+    write_json(paths["output_dir"] / "t2smark_source_compatibility_patch.json", report)
+    return report
+
+
 def ensure_t2smark_source_available(root_path: Path, paths: dict[str, Path], timeout_seconds: int) -> dict[str, Any]:
     """在冷启动环境中按登记表补齐 T2SMark 官方源码缓存。"""
 
     source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
     if source_entry.is_file():
+        patch_report = patch_t2smark_inversion_compatibility(root_path, paths)
         return {
             "source_available": True,
             "source_downloaded": False,
             "source_entry_path": relative_or_absolute(source_entry, root_path),
+            "source_patch_report": patch_report,
         }
 
     registry_item = load_baseline_registry_item(root_path, "t2smark")
@@ -316,6 +355,11 @@ def ensure_t2smark_source_available(root_path: Path, paths: dict[str, Path], tim
     )
     if not source_report["source_available"]:
         raise FileNotFoundError(f"t2smark_source_entry_missing_after_source_prepare:{source_entry}")
+    source_report["source_patch_report"] = patch_t2smark_inversion_compatibility(root_path, paths)
+    write_json(
+        paths["output_dir"] / "t2smark_source_prepare_result.json",
+        {"source_report": source_report, "clone_result": clone_result, "checkout_result": checkout_result},
+    )
     return source_report
 
 
@@ -326,8 +370,6 @@ def run_t2smark_official_if_needed(
 ) -> dict[str, Any]:
     """根据本地和 Drive 结果状态决定是否运行 T2SMark 官方 SD3.5 入口。"""
 
-    source_report = ensure_t2smark_source_available(root_path, paths, timeout_seconds=300)
-    source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
     paths["official_root"].mkdir(parents=True, exist_ok=True)
     should_run, reason = should_run_t2smark_official(config, paths["official_results"])
     if not should_run:
@@ -338,8 +380,14 @@ def run_t2smark_official_if_needed(
             "official_results_path": relative_or_absolute(paths["official_results"], root_path),
             "official_return_code": 0,
             "official_command": [],
-            "source_report": source_report,
+            "source_report": {
+                "source_available": (root_path / DEFAULT_T2SMARK_SOURCE_ENTRY).is_file(),
+                "source_downloaded": False,
+                "source_prepare_skipped": True,
+            },
         }
+    source_report = ensure_t2smark_source_available(root_path, paths, timeout_seconds=300)
+    source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
     ensure_cuda_if_requested(config.require_cuda)
     prompt_input_path = write_t2smark_prompt_input(paths)
     command = [
@@ -546,6 +594,7 @@ def write_external_baseline_gpu_smoke_outputs(
     observation_count = int(adapter_report.get("adapter_observation_count", 0))
     run_ready = bool(official_ready and adapter_ready and observation_count > 0)
     unsupported_reason = "" if run_ready else "external_baseline_gpu_smoke_incomplete"
+    source_patch_report = official_report.get("source_report", {}).get("source_patch_report", {})
     summary = {
         "run_decision": "pass" if run_ready else "fail",
         "external_baseline_gpu_smoke_ready": run_ready,
@@ -554,6 +603,7 @@ def write_external_baseline_gpu_smoke_outputs(
         "t2smark_official_result_reused": bool(official_report.get("official_result_reused")),
         "t2smark_source_available": bool(official_report.get("source_report", {}).get("source_available")),
         "t2smark_source_downloaded": bool(official_report.get("source_report", {}).get("source_downloaded")),
+        "t2smark_source_patch_applied": bool(source_patch_report.get("source_patch_applied")),
         "prior_package_reused": bool(prior_manifest.get("prior_package_reused")),
         "image_pair_count": len(image_pairs),
         "adapter_execution_ready": adapter_ready,

@@ -967,3 +967,10 @@ Notebook 与 repository module 的跨边界数据
 | command_plan_path | artifact | none | false | false | false | 外部 baseline adapter 命令计划路径。|
 | clone_return_code | runtime | none | false | false | false | 外部源码缓存 git clone 命令返回码。|
 | checkout_return_code | runtime | none | false | false | false | 外部源码缓存 git checkout 命令返回码。|
+| t2smark_source_patch_applied | artifact | none | false | false | false | T2SMark 官方源码兼容补丁是否由本次 helper 应用。|
+| source_patch_applied | artifact | none | false | false | false | 外部源码缓存兼容补丁是否在本次调用中写入源码缓存。|
+| source_patch_needed | artifact | none | false | false | false | 外部源码缓存是否在本次调用中检测到需要补丁写入。|
+| source_patch_path | artifact | none | false | false | false | 外部源码缓存兼容补丁作用的文件路径。|
+| source_patch_reason | governance | none | false | false | false | 外部源码缓存兼容补丁被应用的原因说明。|
+| source_patch_report | artifact | none | false | false | false | 外部源码缓存兼容补丁报告对象。|
+| source_prepare_skipped | governance | none | false | false | false | 已有外部官方结果可复用时是否跳过源码缓存准备。|

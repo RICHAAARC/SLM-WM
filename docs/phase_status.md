@@ -1011,3 +1011,11 @@
 3. 前序结果判断边界为: 优先查找 Google Drive `external_baseline_gpu_smoke_package_*.zip`, 仅解出 `outputs/external_baseline_gpu_smoke/` 下可复用文件; 若 `results.json` 存在且允许复用, 不重新运行官方推理; 否则执行真实 GPU 生成。
 4. 当前产物显式设置 `supports_paper_claim=false`, 只能证明外部 baseline 链路可运行, 不能替代 full-main prompt split、样本量冻结、固定 FPR 与 baseline 主表统计。
 
+
+### external baseline GPU smoke Colab 兼容修正
+
+1. Colab 返回包显示 T2SMark 官方 `src/inversion/inverse_diffusion3.py` 在 Diffusers 0.38.0 / Transformers 5.12.1 环境中因 `Union` 未定义而在类定义阶段失败。
+2. 修正策略是在项目 helper 中对第三方源码缓存应用最小兼容补丁, 显式补齐 `torch`、`typing` 与 `PipelineImageInput` 导入; 第三方 `source/` 子树仍不进入 git 提交。
+3. 前序结果复用边界同步修正: 若 Google Drive 历史包中已有可复用 `results.json`, helper 会跳过源码缓存准备, 避免在不需要重新推理时被 GitHub 源码下载或补丁流程阻断。
+4. 该修正只提升 cold-start smoke 链路鲁棒性, 不改变 `supports_paper_claim=false` 的证据边界。
+
