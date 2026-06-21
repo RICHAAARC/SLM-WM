@@ -751,6 +751,53 @@
 | `pytest -q` | pass, 93 passed, 2 deselected |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
 
+
+## stage_17_pilot_full_submission_freeze
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `submission_readiness_gate` |
+| phase_status | `blocked_by_evidence_gaps` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-21` |
+| input_manifest | `outputs/paper_artifact_evidence_audit/manifest.local.json`; `outputs/paper_artifact_evidence_audit/artifact_builder_readiness_report.json`; `outputs/paper_artifact_evidence_audit/submission_blocker_report.json`; `outputs/paper_artifact_evidence_audit/evidence_gap_list.csv`; `docs/extraction_profiles.md`; `docs/release_boundary.md` |
+| expected_output_manifest | `outputs/submission_readiness/submission_readiness_manifest.local.json` |
+| expected_outputs | `outputs/submission_readiness/readiness_blocker_report.json`; `outputs/submission_readiness/required_evidence_inputs.csv`; `outputs/submission_readiness/release_profile_dry_run.csv`; `outputs/submission_readiness/submission_readiness_manifest.local.json` |
+| blocking_items | `readiness_decision=blocked`; `submission_ready=false`; `required_input_count=6`; `critical_required_input_count=4`; `paper_ready_artifact_count=0`。 |
+| fallback_path | 只生成投稿就绪阻断报告和 release dry-run 清单, 不导出投稿候选包, 不冻结论文级表格、图或 report。 |
+| invariants | stage16 evidence audit 未通过投稿冻结前, release dry-run 可运行不等价于投稿就绪; 所有新增产物保持 `supports_paper_claim=false`; 不手工补表或手工标记 claim。 |
+| next_stage_entry | 需要先补齐真实 attacked image 闭环、再扩散类攻击真实 GPU 验证、外部 baseline 结果、full-main 样本规模、完整方法 fixed-FPR 重校准和 dataset-level FID / KID, 再重新运行本门禁。 |
+
+### stage17 当前推进内容
+
+1. 新增 `main/analysis/submission_readiness.py`, 将 stage16 证据审计产物、证据缺口和 release dry-run 摘要合成为投稿就绪门禁判定。
+2. 新增 `scripts/write_submission_readiness_outputs.py`, 从 `outputs/paper_artifact_evidence_audit/` 读取受治理输入, 生成阻断报告、待补齐输入清单、release profile dry-run 表和 manifest。
+3. 新增 `tests/functional/test_submission_readiness.py`, 验证存在证据缺口时不得允许投稿冻结, 并验证输出目录、manifest 与 `supports_paper_claim=false` 边界。
+4. 更新 `docs/field_registry.md`, 登记投稿就绪门禁、待补齐输入和 release dry-run 相关字段。
+
+### stage17 当前产物摘要
+
+1. `readiness_blocker_report.json` 显示 `readiness_decision=blocked`, `submission_ready=false`, `package_freeze_allowed=false`, `release_dry_run_ready=true`。
+2. `required_evidence_inputs.csv` 包含6个待补齐输入, 其中4个为 critical: 真实 attacked image 闭环、再扩散类攻击真实 GPU 验证、外部 baseline 结果和 full-main 样本规模。
+3. `release_profile_dry_run.csv` 显示 `minimal_method_package` 与 `paper_artifact_rebuild_package` 的 dry-run 可生成文件清单, 但 `release_package_allowed=false`。
+4. 当前不能进入 submission-ready 状态, 因为证据缺口尚未关闭且 `paper_ready_artifact_count=0`。
+
+### stage17 当前完成边界
+
+1. 本次完成的是投稿就绪门禁的阻断审计链路, 不是 stage17 完整投稿冻结。
+2. 本次不运行 full-main 或 full-extra, 不导出 release package, 不生成论文级最终表图。
+3. 后续若补齐 evidence gap, 应先重新运行 stage16 artifact evidence audit, 再重新运行本门禁。
+
+### stage17 当前验证结果
+
+| command | result |
+| --- | --- |
+| `python -m py_compile main/analysis/submission_readiness.py scripts/write_submission_readiness_outputs.py tests/functional/test_submission_readiness.py` | pass |
+| `python scripts/write_submission_readiness_outputs.py` | pass, `readiness_decision=blocked`, `required_input_count=6`, `release_dry_run_ready=true` |
+| `pytest tests/functional/test_submission_readiness.py -q` | pass, 2 passed |
+| `pytest -q` | pass, 95 passed, 2 deselected |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
 ## real_gpu_aligned_rescoring_workflow
 
 | item | value |

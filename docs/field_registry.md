@@ -787,6 +787,34 @@ Notebook 与 repository module 的跨边界数据
 | dry_run_decision | governance | none | false | false | false | 论文证据审计 dry-run 的通过或失败判定。 |
 | artifact_builder_readiness_report | artifact | none | false | false | false | dry-run 报告中嵌入的论文产物构建器 readiness 摘要。 |
 | submission_blocker_report | governance | none | false | false | false | dry-run 报告中嵌入的投稿冻结阻断摘要。 |
+| evidence_manifest | governance | none | false | false | false | 投稿就绪门禁输入中引用的证据审计 manifest 摘要。 |
+| builder_report | artifact | none | false | false | false | 投稿就绪门禁输入中引用的产物构建器 readiness 报告。 |
+| blocker_report | governance | none | false | false | false | 投稿就绪门禁输入中引用的投稿阻断报告。 |
+| evidence_gaps | governance | none | false | false | false | 投稿就绪门禁输入中引用的证据缺口集合。 |
+| release_profiles | governance | none | false | false | false | 投稿就绪门禁输入中引用的 release profile dry-run 摘要集合。 |
+| required_input_id | governance | none | false | false | false | 投稿就绪门禁中待补齐输入的稳定标识。 |
+| required_input_area | governance | none | false | false | false | 投稿就绪门禁中待补齐输入所属的证据区域。 |
+| required_input_severity | governance | none | false | false | false | 投稿就绪门禁中待补齐输入的阻断严重程度。 |
+| input_ready | governance | none | false | false | false | 单个待补齐输入是否已经满足投稿冻结条件。 |
+| profile_name | governance | none | false | false | false | release 抽取配置的稳定名称。 |
+| root_path | governance | none | false | false | false | release 抽取 dry-run 使用的仓库根路径。 |
+| output_path | artifact | none | false | false | false | release 抽取 dry-run 指定的输出路径。 |
+| copied_files | artifact | none | false | false | false | release 抽取 dry-run 将会复制的文件清单。 |
+| missing_paths | artifact | none | false | false | false | release 抽取 dry-run 中缺失的输入路径清单。 |
+| excluded_parts | governance | none | false | false | false | release 抽取配置中排除的路径片段集合。 |
+| dry_run | governance | none | false | false | false | release 抽取或审计命令是否只执行 dry-run。 |
+| release_profile_name | governance | none | false | false | false | 投稿就绪门禁中被审计的 release profile 名称。 |
+| release_profile_file_count | metric | none | false | false | false | 单个 release profile dry-run 中可复制文件数量。 |
+| release_profile_missing_count | metric | none | false | false | false | 单个 release profile dry-run 中缺失路径数量。 |
+| release_dry_run_ready | governance | none | false | false | false | release profile dry-run 是否可执行并具备文件清单。 |
+| release_package_allowed | governance | none | false | false | false | 当前证据边界下是否允许导出 release package。 |
+| package_freeze_allowed | governance | none | false | false | false | 当前证据边界下是否允许冻结投稿候选包。 |
+| release_scope | governance | none | false | false | false | 当前 release 产物允许使用的范围。 |
+| readiness_decision | governance | none | false | false | false | 投稿就绪门禁的总体判定。 |
+| critical_required_input_count | metric | none | false | false | false | 投稿就绪门禁中 critical 待补齐输入数量。 |
+| required_input_count | metric | none | false | false | false | 投稿就绪门禁中待补齐输入总数。 |
+| release_profile_count | metric | none | false | false | false | 投稿就绪门禁中审计的 release profile 数量。 |
+| limitations | governance | none | false | false | false | 投稿就绪门禁报告中显式列出的适用边界和限制。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
 | example_digest_random | random | _digest_random | true | false | false | 可复现随机轨迹的 digest 字段。 |
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |
