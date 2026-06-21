@@ -847,3 +847,44 @@
 | `pytest tests/functional/test_aligned_rescoring_metrics.py tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 18 passed |
 | `pytest -q` | pass, 86 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
+
+## real_gpu_attack_evaluation_workflow
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `real_attack_evaluation` |
+| phase_status | `colab_workflow_ready_gpu_run_required` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-21` |
+| input_manifest | `outputs/aligned_rescoring/aligned_rescoring_manifest.local.json`; `outputs/attack_matrix/manifest.local.json`; `outputs/threshold_calibration/manifest.local.json` |
+| expected_output_manifest | `outputs/real_attack_evaluation/real_attack_manifest.local.json` |
+| expected_outputs | `paper_workflow/real_attack_evaluation_run.ipynb`; `paper_workflow/colab_utils/real_attack_evaluation.py`; `outputs/real_attack_evaluation/attacked_images/*.png`; `outputs/real_attack_evaluation/real_attack_detection_records.jsonl`; `outputs/real_attack_evaluation/real_attacked_image_registry.jsonl`; `outputs/real_attack_evaluation/real_attack_family_metrics.csv`; `outputs/real_attack_evaluation/real_attack_environment_report.json`; `outputs/real_attack_evaluation/real_attack_manifest.local.json`; `GoogleDrive/SLM/real_attack_evaluation/real_attack_evaluation_package_<utc>_<short_commit>.zip` |
+| blocking_items | 本地环境无 GPU 和真实 SD3.5 Medium 权重, 因此本次只能补齐 Colab 真实 GPU workflow、受治理字段、打包入口和轻量测试; 真实 attacked image 文件与 img2img / DDIM inversion / SDEdit / diffusion purification 实测仍需要在 Colab GPU 执行 notebook 后回传包审计。 |
+| fallback_path | 若缺少 aligned rescoring 包、HF_TOKEN、GPU runtime、image-to-image pipeline 或某个再扩散攻击后端, helper 会写出 `run_decision=fail`、`unsupported_reason` 和环境快照, 不会伪造真实 attacked image 结果。 |
+| invariants | Notebook 只作为远程入口; 正式逻辑位于 `paper_workflow/colab_utils/real_attack_evaluation.py`; 所有新增产物保持 `supports_paper_claim=false`, 直到重新运行 attack matrix、fixed-FPR 校准和论文证据审计。 |
+| next_stage_entry | Colab 生成并回传 `real_attack_evaluation_package_<utc>_<short_commit>.zip` 后, 本地应先审计 records、registry、attacked images、metrics、environment report 和 manifest, 再决定是否关闭真实图像级攻击闭环与再扩散 GPU 验证缺口。 |
+
+### real attack evaluation workflow 已完成内容
+
+1. 新增 `paper_workflow/colab_utils/real_attack_evaluation.py`, 支持从 aligned rescoring 输出图像读取 source image, 生成真实 attacked image 文件, 登记 source / attacked image SHA256 digest, 并写出真实攻击检测 records、attacked image registry、attack family metrics、environment report 和 manifest。
+2. 新增 `paper_workflow/real_attack_evaluation_run.ipynb`, 支持 Colab 冷启动: 挂载 Google Drive、安装当前 Colab 可运行依赖组合、拉取仓库、读取 `HF_TOKEN`、解压前序 aligned rescoring 包、检查 GPU、加载 SD3.5 Medium image-to-image pipeline、执行 img2img、DDIM inversion、SDEdit 和 diffusion purification 攻击, 并把结果包保存到 Drive。
+3. 新增 `package_real_attack_evaluation_outputs`, 会把 attacked images、records、registry、metrics、environment report、manifest、Notebook、helper 和关键上游 manifest 纳入 zip。
+4. 新增轻量测试 `tests/functional/test_real_attack_evaluation.py`, 使用 mock pipeline 验证 registry / digest / 检测记录 / 打包边界, 不在默认 pytest 中触发真实 GPU 推理。
+5. 更新 `tests/constraints/test_notebook_entrypoint_contract.py`, 覆盖 Notebook 委托、Drive 路径、无执行输出、动态依赖命令和打包产物核对。
+6. 更新 `docs/field_registry.md`, 登记真实攻击闭环、attacked image 文件、digest 注册、攻击后检测和再扩散 GPU 验证状态相关字段。
+
+### real attack evaluation workflow 当前边界
+
+1. 本地代码变更不能直接证明真实 attacked image 缺口已关闭; 需要 Colab GPU 运行后的 zip 包作为证据。
+2. 当前攻击后检测使用 `real_image_quality_proxy_after_attack` 受治理代理分数, 作用是完成真实图像文件闭环和重新检测记录, 不等价于论文级 robustness 结论。
+3. DDIM inversion 路径会尝试使用 diffusers 的 `DDIMScheduler`; 若当前 SD3.5 image-to-image 后端不接受该 scheduler, helper 会记录 unsupported, 而不是降级伪造 inversion 结果。
+4. Colab 包回传后, 仍需把真实攻击结果向 attack matrix、threshold calibration、paper artifact evidence audit 和 submission readiness gate 重新传播。
+
+### real attack evaluation workflow 追加修正
+
+1. Notebook 已改为从 Google Drive 中查找并选择性解压前序 `aligned_rescoring_package_*.zip` 与 `threshold_calibration_package_*.zip`, 不再依赖本地 `outputs/` 中的前序 zip, 也不再把包内代码文件覆盖回仓库工作区。
+2. Notebook 已改为先运行 workflow 并打包到 Drive, 再执行断言; 即使真实 GPU 攻击或 DDIM inversion 失败, 也会保留诊断 records、summary、environment report 和 manifest。
+3. helper 已按 aligned image 路径绑定前序 `prompt_id` 与 `prompt_text`, 每张 source image 使用对应真实 prompt 执行再扩散攻击。
+4. helper 已新增 `formal_attack_detection_records.jsonl`, 将真实 attacked image 结果接回 attack matrix 兼容 schema, 并复用 fixed-FPR threshold 与 rescue boundary 生成正式检测记录。
+5. DDIM inversion 路径已改为严格 `DDIMInverseScheduler` inversion + `DDIMScheduler` reconstruction, 默认 attacker model 为 `runwayml/stable-diffusion-v1-5`; 若组件不可用或后端失败, 会记录 unsupported 而不是伪造结果。

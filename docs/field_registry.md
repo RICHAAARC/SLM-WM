@@ -570,6 +570,35 @@ Notebook 与 repository module 的跨边界数据
 | attacked_image_digest_source | artifact | none | true | false | false | attacked image digest 的来源说明。 |
 | attacked_image_available | artifact | none | true | false | false | 是否存在真实可读取的攻击后图像文件。 |
 | attack_performed | protocol | none | true | false | false | 当前记录是否实际执行了本地可用攻击路径。 |
+| real_attack_record_id | protocol | none | true | false | false | 真实图像级攻击闭环中单条记录的稳定标识。 |
+| source_image_id | artifact | none | true | false | false | 真实 source image 文件的稳定标识。 |
+| source_image_path | artifact | none | true | false | false | 真实 source image 文件的受治理路径。 |
+| attacked_image_path | artifact | none | true | false | false | 真实 attacked image 文件的受治理路径。 |
+| attack_implementation | protocol | none | true | false | false | 真实图像级攻击运行使用的具体 pipeline 或算子机制。 |
+| detection_method | method | none | true | false | false | 攻击后重跑检测时使用的受治理检测方法名称。 |
+| detection_threshold | protocol | none | true | false | false | 攻击后重跑检测使用的检测阈值。 |
+| attacked_image_registry_path | artifact | none | false | false | false | 真实 attacked image 注册表 JSONL 文件路径。 |
+| attack_family_metrics_path | artifact | none | false | false | false | 真实图像级攻击分组指标表路径。 |
+| real_attack_record_count | metric | none | false | false | false | 真实图像级攻击检测记录数量。 |
+| real_attacked_image_count | metric | none | false | false | false | 已生成并登记 digest 的真实 attacked image 文件数量。 |
+| regeneration_attack_record_count | metric | none | false | false | false | 再扩散类攻击检测记录数量。 |
+| required_regeneration_attack_count | metric | none | false | false | false | 当前证据门禁要求的再扩散攻击类型数量。 |
+| measured_regeneration_attack_count | metric | none | false | false | false | 已在真实 GPU workflow 中完成测量的再扩散攻击类型数量。 |
+| real_attacked_image_closed_loop_ready | metric | none | false | false | false | 真实 source / attacked image 文件、路径和 digest 是否完成闭环。 |
+| regeneration_attack_gpu_validation_ready | metric | none | false | false | false | img2img、DDIM inversion、SDEdit 和 diffusion purification 是否已由真实 GPU workflow 生成并测量。 |
+| attack_detection_rerun_ready | metric | none | false | false | false | 真实 attacked image 生成后是否已重跑攻击后检测记录。 |
+| formal_attack_detection_ready | metric | none | false | false | false | 真实 attacked image 是否已经转换为 attack matrix 兼容正式检测记录。 |
+| formal_records_path | artifact | none | false | false | false | 真实攻击闭环写出的 attack matrix 兼容检测记录 JSONL 路径。 |
+| ddim_attack_model_id | runtime | none | false | false | false | 严格 DDIM inversion 攻击使用的 diffusion attacker 模型标识。 |
+| ddim_inversion_steps | runtime | none | false | false | false | DDIMInverseScheduler inversion 循环步数。 |
+| ddim_reconstruction_steps | runtime | none | false | false | false | DDIM inversion 后再生成循环步数。 |
+| aligned_rescoring_drive_dir | artifact | none | false | false | false | Colab workflow 查找前序 aligned rescoring 结果包的 Google Drive 目录。 |
+| threshold_calibration_drive_dir | artifact | none | false | false | false | Colab workflow 查找 fixed-FPR 阈值校准结果包的 Google Drive 目录。 |
+| threshold_calibration_package_path | artifact | none | false | false | false | 被解包为正式检测边界输入的 threshold calibration 结果包路径。 |
+| threshold_calibration_package_digest | artifact | none | false | false | false | threshold calibration 结果包 SHA256 摘要。 |
+| formal_boundary_ready | metric | none | true | false | false | 单条真实攻击正式检测记录是否已读取 fixed-FPR 与 rescue 边界。 |
+| measured_record_count | metric | none | false | false | false | 单个攻击分组中已实测的记录数量。 |
+| detection_positive_rate | metric | none | false | false | false | 单个攻击分组中重跑检测判正的比例。 |
 | raw_content_score_before | metric | none | true | false | false | 攻击前 raw content score。 |
 | raw_content_score_after | metric | none | true | false | false | 攻击后 raw content score。 |
 | aligned_content_score_before | metric | none | true | false | false | 攻击前 aligned content score。 |

@@ -12,6 +12,7 @@ from paper_workflow.colab_utils.minimal_latent_injection import package_injectio
 from paper_workflow.colab_utils.aligned_rescoring import package_aligned_rescoring_outputs
 from paper_workflow.colab_utils.attention_latent_injection import package_attention_latent_injection_outputs
 from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
+from paper_workflow.colab_utils.real_attack_evaluation import package_real_attack_evaluation_outputs
 from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outputs
 from tools.harness.lib.naming_rules import is_allowed_file_name
 
@@ -23,6 +24,7 @@ DRIVE_RELOAD_NOTEBOOK_PATH = Path("paper_workflow/drive_manifest_reload_smoke.ip
 ATTENTION_GEOMETRY_NOTEBOOK_PATH = Path("paper_workflow/attention_geometry_capture_run.ipynb")
 ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH = Path("paper_workflow/attention_latent_injection_run.ipynb")
 ALIGNED_RESCORING_NOTEBOOK_PATH = Path("paper_workflow/aligned_rescoring_run.ipynb")
+REAL_ATTACK_EVALUATION_NOTEBOOK_PATH = Path("paper_workflow/real_attack_evaluation_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_NOTEBOOK_PATH,
     INJECTION_NOTEBOOK_PATH,
@@ -31,6 +33,7 @@ NOTEBOOK_PATHS = (
     ATTENTION_GEOMETRY_NOTEBOOK_PATH,
     ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH,
     ALIGNED_RESCORING_NOTEBOOK_PATH,
+    REAL_ATTACK_EVALUATION_NOTEBOOK_PATH,
 )
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
@@ -200,6 +203,38 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
     assert "archive_name=archive_name" in joined_source
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert PAIR_PERCEPTUAL_DEPENDENCY_INSTALL_COMMAND in joined_source
+    assert "--force-reinstall" not in joined_source
+    assert "numpy pillow" not in joined_source
+    assert "del sys.modules" not in joined_source
+    assert '"diffusers==' not in joined_source
+    assert '"transformers==' not in joined_source
+
+
+@pytest.mark.constraint
+def test_colab_notebook_delegates_real_attack_evaluation_logic_to_helper() -> None:
+    """Notebook 必须复用 repository helper 执行真实再扩散攻击闭环。"""
+    payload = json.loads(REAL_ATTACK_EVALUATION_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+    first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+    first_code_source = "".join(first_code_cell.get("source", []))
+
+    assert "paper_workflow.colab_utils.real_attack_evaluation" in joined_source
+    assert "run_default_real_attack_evaluation_from_drive_plan" in joined_source
+    assert "package_real_attack_evaluation_outputs" in joined_source
+    assert "drive.mount('/content/drive')" in first_code_source
+    assert "/content/drive/MyDrive/SLM/real_attack_evaluation" in joined_source
+    assert "/content/drive/MyDrive/SLM/aligned_rescoring" in joined_source
+    assert "/content/drive/MyDrive/SLM/threshold_calibration" in joined_source
+    assert "aligned_rescoring_package_*.zip" in joined_source
+    assert "real_attacked_image_closed_loop_ready" in joined_source
+    assert "regeneration_attack_gpu_validation_ready" in joined_source
+    assert "attack_detection_rerun_ready" in joined_source
+    assert "formal_attack_detection_ready" in joined_source
+    assert "runwayml/stable-diffusion-v1-5" in joined_source
+    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
+    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
+    assert "archive_name=archive_name" in joined_source
+    assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert "--force-reinstall" not in joined_source
     assert "numpy pillow" not in joined_source
     assert "del sys.modules" not in joined_source
@@ -381,3 +416,42 @@ def test_aligned_rescoring_outputs_can_be_packaged_and_mirrored(tmp_path: Path) 
         assert "outputs/attention_latent_update/attention_update_summary.json" in names
         assert "outputs/attention_latent_update/manifest.local.json" in names
         assert "outputs/aligned_rescoring/aligned_rescoring_package_input_manifest.json" in names
+
+
+@pytest.mark.constraint
+def test_real_attack_evaluation_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
+    """真实攻击闭环产物应能打包, 且包含 attacked image 与 digest 注册表。"""
+    attack_dir = tmp_path / "outputs" / "real_attack_evaluation"
+    image_dir = attack_dir / "attacked_images"
+    image_dir.mkdir(parents=True)
+    (attack_dir / "real_attack_run_summary.json").write_text('{"run_decision":"pass"}\n', encoding="utf-8")
+    (attack_dir / "real_attack_detection_records.jsonl").write_text('{"attack_performed":true}\n', encoding="utf-8")
+    (attack_dir / "formal_attack_detection_records.jsonl").write_text('{"attack_performed":true}\n', encoding="utf-8")
+    (attack_dir / "real_attacked_image_registry.jsonl").write_text('{"attacked_image_digest":"abc"}\n', encoding="utf-8")
+    (attack_dir / "real_attack_family_metrics.csv").write_text("attack_name,measured_record_count\nimg2img_regeneration,1\n", encoding="utf-8")
+    (attack_dir / "real_attack_environment_report.json").write_text('{"cuda_available":true}\n', encoding="utf-8")
+    (attack_dir / "real_attack_manifest.local.json").write_text('{"artifact_id":"real_attack_evaluation_manifest"}\n', encoding="utf-8")
+    (image_dir / "sample_attacked.png").write_bytes(b"fake_png_bytes")
+
+    drive_dir = tmp_path / "drive_mirror"
+    record = package_real_attack_evaluation_outputs(root=tmp_path, drive_output_dir=str(drive_dir))
+    archive_path = tmp_path / record.archive_path
+
+    assert archive_path.exists()
+    assert (drive_dir / "real_attack_evaluation_package.zip").exists()
+    assert record.archive_digest == record.drive_archive_digest
+    assert record.archive_entry_count >= 8
+    assert (attack_dir / "real_attack_archive_summary.json").exists()
+    assert (attack_dir / "real_attack_archive_manifest.local.json").exists()
+
+    with ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+        assert "outputs/real_attack_evaluation/real_attack_run_summary.json" in names
+        assert "outputs/real_attack_evaluation/real_attack_detection_records.jsonl" in names
+        assert "outputs/real_attack_evaluation/formal_attack_detection_records.jsonl" in names
+        assert "outputs/real_attack_evaluation/real_attacked_image_registry.jsonl" in names
+        assert "outputs/real_attack_evaluation/real_attack_family_metrics.csv" in names
+        assert "outputs/real_attack_evaluation/real_attack_environment_report.json" in names
+        assert "outputs/real_attack_evaluation/real_attack_manifest.local.json" in names
+        assert "outputs/real_attack_evaluation/attacked_images/sample_attacked.png" in names
+        assert "outputs/real_attack_evaluation/real_attack_package_input_manifest.json" in names
