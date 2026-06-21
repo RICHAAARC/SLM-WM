@@ -703,6 +703,54 @@
 | `pytest -q` | pass, 91 passed, 2 deselected |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
 
+
+## stage_16_paper_artifact_evidence_audit
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `paper_artifact_evidence_audit` |
+| phase_status | `evidence_gap_report_ready` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-21` |
+| input_manifest | `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/threshold_calibration/manifest.local.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/attack_matrix/manifest.local.json`; `outputs/external_baseline_comparison/manifest.local.json`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/internal_ablation_evidence/manifest.local.json`; `outputs/internal_ablation_evidence/ablation_claim_summary.json` |
+| expected_output_manifest | `outputs/paper_artifact_evidence_audit/manifest.local.json` |
+| expected_outputs | `outputs/paper_artifact_evidence_audit/claim_audit_table.csv`; `outputs/paper_artifact_evidence_audit/paper_table_readiness.csv`; `outputs/paper_artifact_evidence_audit/paper_figure_readiness.csv`; `outputs/paper_artifact_evidence_audit/evidence_gap_list.csv`; `outputs/paper_artifact_evidence_audit/artifact_builder_readiness_report.json`; `outputs/paper_artifact_evidence_audit/evidence_audit_dry_run.json`; `outputs/paper_artifact_evidence_audit/submission_blocker_report.json`; `outputs/paper_artifact_evidence_audit/manifest.local.json` |
+| blocking_items | `submission_ready=false`; critical gaps 包括真实 attacked image 闭环、再扩散类攻击真实 GPU 验证、外部 baseline 结果、full-main 样本规模; major gaps 包括完整方法 fixed-FPR 重校准和 dataset-level FID / KID。 |
+| fallback_path | 当前仅冻结 artifact builder 与 evidence audit 链路, 不冻结投稿结果, 不把预览表格或本地代理结果写成论文级结论。 |
+| invariants | 所有新产物保持 `supports_paper_claim=false`; 不手工补表; Notebook 不能直接写正式 records、tables、figures 或 reports; `main/` 不绑定外层运行目录。 |
+| next_stage_entry | 需要先按 `outputs/paper_artifact_evidence_audit/evidence_gap_list.csv` 补齐真实攻击闭环、外部 baseline 结果、full-main 统计和质量数据集指标, 再进入投稿冻结。 |
+
+### stage16 已完成内容
+
+1. 新增 `main/analysis/paper_evidence_audit.py`, 将上游 threshold、attack matrix、external baseline 与 internal ablation 产物汇总为 claim audit、表格 readiness、图数据 readiness、证据缺口和投稿阻断摘要。
+2. 新增 `scripts/write_paper_artifact_evidence_audit_outputs.py`, 从受治理上游 manifest 和 report 重建 8 个本地审计产物, 并写入 `outputs/paper_artifact_evidence_audit/`。
+3. 新增 `tests/functional/test_paper_artifact_evidence_audit.py`, 验证 claim 边界、缺口列表、输出目录约束、manifest 重建和 `supports_paper_claim=false` 安全边界。
+4. 更新 `docs/field_registry.md`, 登记 claim audit、paper readiness、gap list、builder readiness 与 blocker report 相关字段。
+
+### stage16 当前产物摘要
+
+1. `artifact_builder_readiness_report.json` 显示 `artifact_builder_ready=true`, `paper_artifact_audit_ready=true`, `claim_audit_row_count=7`, `table_readiness_row_count=6`, `figure_readiness_row_count=5`, `rebuildable_artifact_count=10`, `blocked_artifact_count=1`, `paper_ready_artifact_count=0`。
+2. `submission_blocker_report.json` 显示 `submission_ready=false`, `blocking_claim_count=5`, `critical_gap_count=4`, `gap_count=6`。
+3. `evidence_gap_list.csv` 将真实 attacked image 闭环、再扩散类攻击真实 GPU 验证、外部 baseline 结果、full-main 样本规模、完整方法 fixed-FPR 重校准和 dataset-level FID / KID 列为后续补证项。
+4. `claim_audit_table.csv` 明确外部 baseline superiority 与 submission-ready package 仍为 `unsupported`, 攻击鲁棒性与内部机制必要性仍为 `preview_only`。
+
+### stage16 完成边界
+
+1. 本阶段完成的是论文产物证据审计链路和 artifact builder readiness, 不是论文级 robustness、baseline superiority 或 submission-ready 结论。
+2. 当前 `paper_ready_artifact_count=0`, 因为 full-main 统计、真实图像攻击闭环、外部 baseline 实测结果和 dataset-level FID / KID 尚未补齐。
+3. 当前产物可作为后续补证任务清单和自动重建入口, 不能作为论文主表、主图或最终 claim 的直接证据。
+
+### stage16 验证结果
+
+| command | result |
+| --- | --- |
+| `python -m py_compile main/analysis/paper_evidence_audit.py scripts/write_paper_artifact_evidence_audit_outputs.py tests/functional/test_paper_artifact_evidence_audit.py` | pass |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/write_paper_artifact_evidence_audit_outputs.py` | pass, `claim_audit_row_count=7`, `table_readiness_row_count=6`, `figure_readiness_row_count=5`, `gap_count=6`, `submission_ready=false` |
+| `pytest tests/functional/test_paper_artifact_evidence_audit.py -q` | pass, 2 passed |
+| `pytest -q` | pass, 93 passed, 2 deselected |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
 ## real_gpu_aligned_rescoring_workflow
 
 | item | value |

@@ -750,6 +750,43 @@ Notebook 与 repository module 的跨边界数据
 | fid_status | metric | none | false | false | false | FID 指标计算状态。 |
 | kid | metric | none | false | false | false | Kernel Inception Distance 指标值或 unsupported 状态。 |
 | kid_status | metric | none | false | false | false | KID 指标计算状态。 |
+| audit_item_id | governance | none | false | false | false | 论文证据审计表中单个可重建产物检查项的稳定标识。 |
+| artifact_kind | artifact | none | false | false | false | 论文证据审计中产物类型, 例如 table 或 figure_data。 |
+| artifact_name | artifact | none | false | false | false | 论文证据审计中产物的人类可读名称。 |
+| source_paths | artifact | none | false | false | false | 论文图表或审计产物可重建时依赖的上游路径集合。 |
+| source_path_map | artifact | none | false | false | false | 论文证据审计输入中由脚本层注入的逻辑路径到受治理路径映射。 |
+| builder_status | artifact | none | false | false | false | 论文产物构建器的当前状态, 例如可重建预览或阻断。 |
+| paper_ready | artifact | none | false | false | false | 单个论文产物是否已经具备投稿级使用条件。 |
+| claim_text | claim | none | false | false | false | 被审计论文主张的人类可读表述。 |
+| claim_decision | claim | none | false | false | false | 被审计论文主张的当前判定, 例如 unsupported 或 preview_only。 |
+| claim_scope | claim | none | false | false | false | 被审计论文主张所属的证据范围。 |
+| paper_claim_supported | claim | none | false | false | false | 单条 claim audit 行是否支持论文主张。 |
+| blocker_count | governance | none | false | false | false | 单个审计对象关联的阻断原因数量。 |
+| primary_blocker | governance | none | false | false | false | 单个审计对象最主要的阻断原因代码。 |
+| gap_id | governance | none | false | false | false | 投稿前证据缺口的稳定标识。 |
+| gap_area | governance | none | false | false | false | 投稿前证据缺口所属的实验或产物区域。 |
+| blocker_severity | governance | none | false | false | false | 证据缺口或阻断项的严重程度。 |
+| required_action | governance | none | false | false | false | 关闭证据缺口所需执行的具体补证动作。 |
+| related_artifacts | artifact | none | false | false | false | 证据缺口关联的上游或下游产物路径集合。 |
+| closes_claim_ids | claim | none | false | false | false | 证据缺口关闭后可解除阻断的 claim 标识集合。 |
+| recommended_order | governance | none | false | false | false | 补证任务建议执行顺序。 |
+| submission_ready | governance | none | false | false | false | 当前证据包是否已经具备投稿冻结条件。 |
+| critical_gap_count | metric | none | false | false | false | 当前审计中严重证据缺口数量。 |
+| blocking_claim_count | metric | none | false | false | false | 当前审计中不可支持或仅预览的 claim 数量。 |
+| artifact_builder_ready | artifact | none | false | false | false | 论文产物构建器是否至少具备可运行审计链路。 |
+| paper_artifact_audit_ready | artifact | none | false | false | false | 论文图表证据审计链路是否已经完成本地可审计输出。 |
+| claim_audit_row_count | metric | none | false | false | false | claim audit 表中的审计行数量。 |
+| table_readiness_row_count | metric | none | false | false | false | 论文表格 readiness 表中的审计行数量。 |
+| figure_readiness_row_count | metric | none | false | false | false | 论文图数据 readiness 表中的审计行数量。 |
+| rebuildable_artifact_count | metric | none | false | false | false | 当前可由受治理输入重建的论文产物数量。 |
+| blocked_artifact_count | metric | none | false | false | false | 当前被阻断的论文产物数量。 |
+| paper_ready_artifact_count | metric | none | false | false | false | 当前已经达到投稿级条件的论文产物数量。 |
+| primary_blockers | governance | none | false | false | false | 投稿冻结阻断报告中的主要阻断项列表。 |
+| recommended_next_action | governance | none | false | false | false | 审计报告建议优先执行的下一步补证动作。 |
+| gap_count | metric | none | false | false | false | 当前审计列出的证据缺口总数。 |
+| dry_run_decision | governance | none | false | false | false | 论文证据审计 dry-run 的通过或失败判定。 |
+| artifact_builder_readiness_report | artifact | none | false | false | false | dry-run 报告中嵌入的论文产物构建器 readiness 摘要。 |
+| submission_blocker_report | governance | none | false | false | false | dry-run 报告中嵌入的投稿冻结阻断摘要。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
 | example_digest_random | random | _digest_random | true | false | false | 可复现随机轨迹的 digest 字段。 |
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |
