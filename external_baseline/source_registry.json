@@ -21,8 +21,8 @@
       "downloaded_at_utc": "2026-06-21T04:35:26.447670+00:00",
       "official_source_tracked": false,
       "adapter_path": "external_baseline/primary/tree_ring/adapter/run_slm_eval.py",
-      "adapter_status": "sd35_latent_smoke_adapter_ready",
-      "model_alignment_status": "sd35_medium_latent_shape_adapter_required"
+      "adapter_status": "method_faithful_sd35_adapter_available",
+      "model_alignment_status": "sd35_medium_method_faithful_adapter_available"
     },
     {
       "baseline_id": "gaussian_shading",

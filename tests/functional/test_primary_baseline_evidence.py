@@ -102,6 +102,52 @@ def test_primary_baseline_evidence_distinguishes_smoke_from_formal_result(tmp_pa
 
 
 @pytest.mark.quick
+def test_primary_baseline_evidence_accepts_tree_ring_method_faithful_boundary(tmp_path: Path) -> None:
+    """Tree-Ring observation 明确来自方法忠实 adapter 时, 方法忠实边界应视为就绪。"""
+
+    registry_path = write_source_registry(tmp_path)
+    source_registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    command_results = [
+        {
+            "baseline_id": "tree_ring",
+            "return_code": 0,
+            "observation_count": 2,
+            "output_path": "outputs/tree_ring.json",
+        }
+    ]
+    observations = [
+        {
+            "event_id": "tree_ring_clean",
+            "baseline_id": "tree_ring",
+            "sample_role": "clean_negative",
+            "execution_device": "cuda",
+            "latent_shape": [1, 16, 64, 64],
+            "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
+        },
+        {
+            "event_id": "tree_ring_positive",
+            "baseline_id": "tree_ring",
+            "sample_role": "positive_source",
+            "execution_device": "cuda",
+            "latent_shape": [1, 16, 64, 64],
+            "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
+        },
+    ]
+
+    records = build_primary_baseline_evidence_records(
+        source_registry=source_registry,
+        command_results=command_results,
+        observation_rows=observations,
+    )
+
+    tree_ring = next(row for row in records if row["baseline_id"] == "tree_ring")
+    assert tree_ring["adapter_smoke_ready"] is True
+    assert tree_ring["method_faithful_adapter_ready"] is True
+    assert "method_faithful_sd35_adapter_required" not in tree_ring["blocking_reasons"]
+    assert "fixed_fpr_baseline_calibration_required" in tree_ring["blocking_reasons"]
+
+
+@pytest.mark.quick
 def test_primary_baseline_evidence_writer_outputs_records_summary_and_manifest(tmp_path: Path) -> None:
     """证据边界脚本应写出 records、summary 和 manifest, 且所有输出位于 outputs/。"""
 

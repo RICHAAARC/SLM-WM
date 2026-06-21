@@ -33,7 +33,9 @@ from experiments.baselines.formal_import import (
     build_fixed_fpr_operating_point,
     build_primary_baseline_formal_import_schema,
     build_primary_baseline_formal_result_record,
+    build_method_faithful_baseline_candidate_records,
     build_t2smark_full_main_candidate_records,
+    build_tree_ring_method_faithful_candidate_records,
     validate_primary_baseline_formal_import_rows,
 )
 from experiments.baselines.observation_io import (
@@ -56,6 +58,14 @@ from experiments.baselines.primary_evidence import (
     build_primary_baseline_evidence_records,
     build_primary_baseline_evidence_summary,
 )
+from experiments.baselines.tree_ring_official_reference import (
+    TREE_RING_OFFICIAL_REFERENCE_PROTOCOL_NAME,
+    TREE_RING_SUPPLEMENTAL_TABLE_ROLE,
+    TreeRingOfficialReferenceRecord,
+    build_tree_ring_official_reference_record,
+    build_tree_ring_official_reference_schema,
+    validate_tree_ring_official_reference_records,
+)
 
 __all__ = [
     "BaselineCommandResult",
@@ -72,6 +82,9 @@ __all__ = [
     "PrimaryBaselineExecutionPlan",
     "PrimaryBaselineEvidenceRecord",
     "PrimaryBaselineResultTemplate",
+    "TreeRingOfficialReferenceRecord",
+    "TREE_RING_OFFICIAL_REFERENCE_PROTOCOL_NAME",
+    "TREE_RING_SUPPLEMENTAL_TABLE_ROLE",
     "aggregate_baseline_metrics",
     "aggregate_slm_proxy_metrics",
     "build_baseline_command_plan_manifest",
@@ -79,7 +92,9 @@ __all__ = [
     "build_baseline_observations",
     "build_baseline_result_index",
     "validate_primary_baseline_formal_import_rows",
+    "build_method_faithful_baseline_candidate_records",
     "build_t2smark_full_main_candidate_records",
+    "build_tree_ring_method_faithful_candidate_records",
     "build_primary_baseline_formal_result_record",
     "build_primary_baseline_formal_import_schema",
     "build_fixed_fpr_operating_point",
@@ -89,6 +104,8 @@ __all__ = [
     "build_primary_baseline_evidence_summary",
     "build_primary_baseline_report",
     "build_primary_result_templates",
+    "build_tree_ring_official_reference_record",
+    "build_tree_ring_official_reference_schema",
     "default_baseline_specs",
     "default_primary_command_profiles",
     "load_baseline_command_plan",
@@ -100,4 +117,5 @@ __all__ = [
     "run_baseline_commands",
     "selected_primary_baselines",
     "validate_external_baseline_evidence",
+    "validate_tree_ring_official_reference_records",
 ]

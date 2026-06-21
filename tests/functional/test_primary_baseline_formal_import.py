@@ -11,6 +11,7 @@ import pytest
 from experiments.baselines import (
     build_primary_baseline_formal_import_schema,
     build_t2smark_full_main_candidate_records,
+    build_tree_ring_method_faithful_candidate_records,
     validate_primary_baseline_formal_import_rows,
 )
 from scripts.write_primary_baseline_formal_import_protocol import write_primary_baseline_formal_import_protocol_outputs
@@ -120,6 +121,54 @@ def test_t2smark_candidate_records_remain_rejected_until_attack_and_threshold_re
     assert report["accepted_formal_import_count"] == 0
     assert "fixed_fpr_baseline_calibration_ready_required" in reasons
     assert "attack_matrix_baseline_detection_ready_required" in reasons
+
+
+@pytest.mark.quick
+def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_path: Path) -> None:
+    """Tree-Ring 方法忠实 observations 应能聚合为 formal import 候选记录。"""
+
+    evidence_path = tmp_path / "outputs" / "tree_ring_method_faithful" / "baseline_observations.json"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text("[]\n", encoding="utf-8")
+    observations = [
+        {
+            "baseline_id": "tree_ring",
+            "attack_family": "clean",
+            "attack_condition": "clean_none",
+            "sample_role": "clean_negative",
+            "detection_decision": False,
+            "quality_score_proxy": 1.0,
+            "score_retention_proxy": 1.0,
+        },
+        {
+            "baseline_id": "tree_ring",
+            "attack_family": "clean",
+            "attack_condition": "clean_none",
+            "sample_role": "positive_source",
+            "detection_decision": True,
+            "quality_score_proxy": 1.0,
+            "score_retention_proxy": 1.0,
+        },
+    ]
+
+    records = build_tree_ring_method_faithful_candidate_records(
+        observation_rows=observations,
+        target_fpr=0.05,
+        baseline_result_source="outputs/tree_ring_method_faithful/baseline_observations.json",
+        baseline_result_source_digest="digest",
+        evidence_paths=["outputs/tree_ring_method_faithful/baseline_observations.json"],
+        prompt_protocol_digest="prompt_digest",
+        full_main_prompt_protocol_ready=True,
+        fixed_fpr_baseline_calibration_ready=True,
+        attack_matrix_baseline_detection_ready=True,
+    )
+    report = validate_primary_baseline_formal_import_rows(records, evidence_root=tmp_path, target_fpr=0.05)
+
+    assert len(records) == 1
+    assert records[0]["baseline_id"] == "tree_ring"
+    assert records[0]["adapter_boundary"] == "method_faithful_sd35_adapter_reproduction"
+    assert records[0]["result_source_type"] == "governed_import"
+    assert report["accepted_formal_import_count"] == 1
 
 
 @pytest.mark.quick

@@ -51,6 +51,7 @@ PACKAGE_EXTRA_PATHS = (
     "external_baseline/primary/t2smark/README.md",
     "external_baseline/primary/t2smark/adapter/run_slm_eval.py",
     "external_baseline/primary/tree_ring/adapter/run_slm_eval.py",
+    "external_baseline/primary/tree_ring/adapter/method_faithful_sd35.py",
     "external_baseline/primary/gaussian_shading/adapter/run_slm_eval.py",
     "external_baseline/primary/shallow_diffuse/adapter/run_slm_eval.py",
     "scripts/build_external_baseline_command_plan.py",
@@ -75,6 +76,8 @@ class ExternalBaselineGpuSmokeConfig:
     num_inversion_steps: int = 3
     guidance_scale: float = 4.0
     primary_baseline_max_samples: int = 1
+    tree_ring_adapter_mode: str = "method_faithful_sd35"
+    tree_ring_attack_families: str = ""
     reuse_existing: bool = True
     reuse_prior_drive_package: bool = True
     force_generate: bool = False
@@ -563,7 +566,11 @@ def build_and_run_primary_baseline_adapters(
         str(config.seed),
         "--max-samples",
         str(config.primary_baseline_max_samples),
+        "--tree-ring-adapter-mode",
+        str(config.tree_ring_adapter_mode),
     ]
+    if str(config.tree_ring_attack_families).strip():
+        build_command.extend(["--tree-ring-attack-families", str(config.tree_ring_attack_families)])
     if config.require_cuda:
         build_command.append("--require-cuda")
     build_result = run_command(build_command, cwd=root_path, timeout_seconds=300)
@@ -787,6 +794,8 @@ def build_default_config() -> ExternalBaselineGpuSmokeConfig:
         num_inversion_steps=int(os.environ.get("SLM_WM_T2SMARK_NUM_INVERSION_STEPS", "3")),
         guidance_scale=float(os.environ.get("SLM_WM_T2SMARK_GUIDANCE_SCALE", "4.0")),
         primary_baseline_max_samples=int(os.environ.get("SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES", "1")),
+        tree_ring_adapter_mode=os.environ.get("SLM_WM_TREE_RING_ADAPTER_MODE", "method_faithful_sd35"),
+        tree_ring_attack_families=os.environ.get("SLM_WM_TREE_RING_ATTACK_FAMILIES", ""),
         reuse_existing=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REUSE_EXISTING", "1") != "0",
         reuse_prior_drive_package=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REUSE_DRIVE", "1") != "0",
         force_generate=os.environ.get("SLM_WM_EXTERNAL_BASELINE_FORCE_GENERATE", "0") == "1",

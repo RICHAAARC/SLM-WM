@@ -51,6 +51,7 @@ REQUIRED_SOURCE_FIELDS = (
     "prompt_protocol_name",
     "prompt_protocol_digest",
 )
+METHOD_FAITHFUL_ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
 
 
 @dataclass(frozen=True)
@@ -427,3 +428,126 @@ def build_t2smark_full_main_candidate_records(
             )
         )
     return tuple(records)
+
+
+def _decision_field(row: Mapping[str, Any]) -> bool:
+    """读取 detection decision, 兼容不同 adapter 的字段命名。"""
+
+    if "detection_decision" in row:
+        return _bool_field(row, "detection_decision")
+    return _bool_field(row, "final_decision")
+
+
+def _mean_optional_rate(rows: Iterable[Mapping[str, Any]], field_name: str, default: float) -> float:
+    """读取可选 rate 字段并求均值, 缺失时使用默认值。"""
+
+    values: list[float] = []
+    for row in rows:
+        if field_name in row:
+            values.append(_float_field(row, field_name))
+    if not values:
+        return float(default)
+    return sum(values) / len(values)
+
+
+def build_method_faithful_baseline_candidate_records(
+    *,
+    baseline_id: str,
+    observation_rows: Iterable[Mapping[str, Any]],
+    target_fpr: float,
+    baseline_result_source: str,
+    baseline_result_source_digest: str,
+    evidence_paths: Iterable[str],
+    prompt_protocol_digest: str,
+    full_main_prompt_protocol_ready: bool,
+    fixed_fpr_baseline_calibration_ready: bool,
+    attack_matrix_baseline_detection_ready: bool,
+    result_source_type: str = "governed_import",
+    adapter_boundary: str = METHOD_FAITHFUL_ADAPTER_BOUNDARY,
+) -> tuple[dict[str, Any], ...]:
+    """把方法忠实 SD3.5 baseline observations 聚合为正式导入候选记录。
+
+    该函数属于通用 schema 前置聚合层。它只把已落盘 observation 映射到共同 fixed-FPR
+    结果记录, 不负责把候选结果升级为论文结论。正式可用性仍由
+    validate_primary_baseline_formal_import_rows 统一校验。
+    """
+
+    records: list[dict[str, Any]] = []
+    evidence_path_values = tuple(evidence_paths)
+    for (attack_family, attack_name), group in _group_observations_by_attack(observation_rows).items():
+        positive_rows = [row for row in group if _str_field(row, "sample_role") in {"positive_source", "attacked_positive"}]
+        negative_rows = [row for row in group if _str_field(row, "sample_role") in {"clean_negative", "attacked_negative"}]
+        supported_count = len(group)
+        positive_count = len(positive_rows)
+        negative_count = len(negative_rows)
+        true_positive = sum(1 for row in positive_rows if _decision_field(row))
+        false_positive = sum(1 for row in negative_rows if _decision_field(row))
+        clean_negative_rows = [row for row in negative_rows if _str_field(row, "sample_role") == "clean_negative"]
+        attacked_negative_rows = [row for row in negative_rows if _str_field(row, "sample_role") == "attacked_negative"]
+        clean_false_positive = sum(1 for row in clean_negative_rows if _decision_field(row))
+        attacked_false_positive = sum(1 for row in attacked_negative_rows if _decision_field(row))
+        metric_values = {
+            "positive_count": positive_count,
+            "negative_count": negative_count,
+            "attack_record_count": supported_count,
+            "supported_record_count": supported_count,
+            "true_positive_rate": true_positive / positive_count if positive_count else 0.0,
+            "false_positive_rate": false_positive / negative_count if negative_count else 0.0,
+            "clean_false_positive_rate": clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0,
+            "attacked_false_positive_rate": attacked_false_positive / len(attacked_negative_rows) if attacked_negative_rows else 0.0,
+            "quality_score_proxy_mean": _mean_optional_rate(group, "quality_score_proxy", 1.0),
+            "score_retention_mean": _mean_optional_rate(group, "score_retention_proxy", 1.0),
+        }
+        ready_flags = {
+            "method_faithful_adapter_ready": True,
+            "full_main_prompt_protocol_ready": full_main_prompt_protocol_ready,
+            "fixed_fpr_baseline_calibration_ready": fixed_fpr_baseline_calibration_ready,
+            "attack_matrix_baseline_detection_ready": attack_matrix_baseline_detection_ready,
+            "formal_evidence_paths_ready": bool(evidence_path_values),
+        }
+        records.append(
+            build_primary_baseline_formal_result_record(
+                baseline_id=baseline_id,
+                attack_family=attack_family,
+                attack_name=attack_name,
+                resource_profile="full_main",
+                target_fpr=target_fpr,
+                result_source_type=result_source_type,
+                baseline_result_source=baseline_result_source,
+                baseline_result_source_digest=baseline_result_source_digest,
+                evidence_paths=evidence_path_values,
+                prompt_protocol_digest=prompt_protocol_digest,
+                adapter_boundary=adapter_boundary,
+                metric_values=metric_values,
+                ready_flags=ready_flags,
+            )
+        )
+    return tuple(records)
+
+
+def build_tree_ring_method_faithful_candidate_records(
+    *,
+    observation_rows: Iterable[Mapping[str, Any]],
+    target_fpr: float,
+    baseline_result_source: str,
+    baseline_result_source_digest: str,
+    evidence_paths: Iterable[str],
+    prompt_protocol_digest: str,
+    full_main_prompt_protocol_ready: bool,
+    fixed_fpr_baseline_calibration_ready: bool,
+    attack_matrix_baseline_detection_ready: bool,
+) -> tuple[dict[str, Any], ...]:
+    """把 Tree-Ring SD3.5 方法忠实 observation 聚合为主表正式导入候选记录。"""
+
+    return build_method_faithful_baseline_candidate_records(
+        baseline_id="tree_ring",
+        observation_rows=observation_rows,
+        target_fpr=target_fpr,
+        baseline_result_source=baseline_result_source,
+        baseline_result_source_digest=baseline_result_source_digest,
+        evidence_paths=evidence_paths,
+        prompt_protocol_digest=prompt_protocol_digest,
+        full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
+        fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
+        attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
+    )

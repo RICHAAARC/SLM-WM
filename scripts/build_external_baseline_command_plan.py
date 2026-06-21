@@ -72,6 +72,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--guidance-scale", type=float, default=7.0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-samples", type=int, default=None)
+    parser.add_argument(
+        "--tree-ring-adapter-mode",
+        default="latent_smoke",
+        choices=("latent_smoke", "method_faithful_sd35"),
+        help="Tree-Ring adapter 运行模式。默认保留轻量链路检查, 真实 GPU 运行应使用 method_faithful_sd35。",
+    )
+    parser.add_argument("--tree-ring-watermark-seed", type=int, default=999999, help="Tree-Ring key 随机种子。")
+    parser.add_argument("--tree-ring-w-channel", type=int, default=0, help="Tree-Ring 写入通道, -1 表示全部通道。")
+    parser.add_argument("--tree-ring-w-radius", type=int, default=10, help="Tree-Ring 傅里叶域写入半径。")
+    parser.add_argument("--tree-ring-w-pattern", default="ring", choices=("ring", "rand", "zeros"), help="Tree-Ring key 模式。")
+    parser.add_argument("--tree-ring-attack-families", default="", help="Tree-Ring 适配器内部执行的轻量图像攻击族。")
     return parser
 
 
@@ -149,6 +160,23 @@ def build_plan(args: argparse.Namespace) -> list[dict[str, Any]]:
             if args.prompt_plan:
                 command.extend(["--prompt-plan", str(_resolve(root, args.prompt_plan))])
             _append_common_model_args(command, args)
+            if baseline_id == "tree_ring":
+                command.extend(["--adapter-mode", str(args.tree_ring_adapter_mode)])
+                if args.tree_ring_adapter_mode == "method_faithful_sd35":
+                    command.extend(
+                        [
+                            "--watermark-seed",
+                            str(args.tree_ring_watermark_seed),
+                            "--w-channel",
+                            str(args.tree_ring_w_channel),
+                            "--w-radius",
+                            str(args.tree_ring_w_radius),
+                            "--w-pattern",
+                            str(args.tree_ring_w_pattern),
+                        ]
+                    )
+                if args.tree_ring_adapter_mode == "method_faithful_sd35" and str(args.tree_ring_attack_families).strip():
+                    command.extend(["--attack-families", str(args.tree_ring_attack_families)])
         rows.append(
             {
                 "baseline_id": baseline_id,

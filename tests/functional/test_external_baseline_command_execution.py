@@ -15,6 +15,8 @@ from experiments.baselines import (
     run_baseline_commands,
 )
 from experiments.baselines.command_plan import build_baseline_command_plan_manifest, load_baseline_command_plan
+from scripts.build_external_baseline_command_plan import build_parser as build_external_plan_parser
+from scripts.build_external_baseline_command_plan import build_plan as build_external_plan
 
 PRIMARY_DIFFUSION_ADAPTERS = (
     "external_baseline/primary/tree_ring/adapter/run_slm_eval.py",
@@ -94,6 +96,46 @@ def test_external_baseline_command_plan_loader_accepts_json_list(tmp_path: Path)
     assert specs[0].command == (sys.executable, "adapter.py")
     assert specs[0].timeout_seconds == 7
     assert manifest["baseline_count"] == 1
+
+
+@pytest.mark.quick
+def test_tree_ring_command_plan_can_select_method_faithful_adapter(tmp_path: Path) -> None:
+    """命令计划应能为 Tree-Ring 显式选择 SD3.5 方法忠实 adapter。"""
+
+    root = tmp_path
+    adapter_path = root / "external_baseline" / "primary" / "tree_ring" / "adapter" / "run_slm_eval.py"
+    adapter_path.parent.mkdir(parents=True)
+    adapter_path.write_text("print('tree ring adapter')\n", encoding="utf-8")
+    prompt_plan = root / "prompt_plan.json"
+    prompt_plan.write_text('[{"prompt_text":"a ceramic fox","prompt_id":"p0"}]\n', encoding="utf-8")
+    output_root = root / "outputs" / "test_tree_ring_method_faithful_plan"
+    args = build_external_plan_parser().parse_args(
+        [
+            "--root",
+            str(root),
+            "--methods",
+            "tree_ring",
+            "--output-root",
+            str(output_root),
+            "--prompt-plan",
+            str(prompt_plan),
+            "--tree-ring-adapter-mode",
+            "method_faithful_sd35",
+            "--tree-ring-attack-families",
+            "jpeg",
+            "--max-samples",
+            "1",
+        ]
+    )
+
+    plan = build_external_plan(args)
+    command = plan[0]["command"]
+
+    assert plan[0]["baseline_id"] == "tree_ring"
+    assert "--adapter-mode" in command
+    assert command[command.index("--adapter-mode") + 1] == "method_faithful_sd35"
+    assert "--w-radius" in command
+    assert "--attack-families" in command
 
 
 @pytest.mark.quick

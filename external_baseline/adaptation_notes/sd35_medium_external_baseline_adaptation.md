@@ -8,7 +8,12 @@
 
 ### Tree-Ring
 
-原方法主要面向早期 Stable Diffusion latent 与 DDIM inversion。SD3.5 Medium 使用 16-channel latent, 因此不能直接沿用原 latent 形状、ring key 维度和 inversion 入口。需要在 adapter 中完成真实 SD3.5 推理、latent inversion、ring key 注入和检测分数转写。
+原方法主要面向早期 Stable Diffusion latent 与 DDIM inversion。SD3.5 Medium 使用 16-channel latent, 因此不能直接沿用原 latent 形状、ring key 维度和 inversion 入口。
+
+当前项目采用双轨证据:
+
+1. 主表使用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium latent 傅里叶域写入 ring key, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 近似反演得到检测分数。该路径用于 common-backbone 公平对比。
+2. 补充表保留官方原始环境复现。该路径运行 `source/run_tree_ring_watermark.py` 的 legacy Stable Diffusion / DDIM inversion 协议, 通过 governed import 记录官方源码 commit、依赖环境、运行命令和指标摘要。该路径用于审计方法忠实度, 不替代主表 SD3.5 对比。
 
 ### Gaussian Shading
 
@@ -34,7 +39,7 @@
 
 ## 当前 GPU smoke adapter 边界
 
-Tree-Ring、Gaussian Shading 和 Shallow Diffuse 已接入项目治理内的 SD3.5 latent 级 smoke adapter。该 adapter 使用 SD3.5 Medium 的 16-channel latent 形状, 在 CUDA 可用时执行最小 torch 张量路径, 并为每个 prompt 写出 clean negative 与 positive source observation。
+Tree-Ring、Gaussian Shading 和 Shallow Diffuse 已接入项目治理内的 SD3.5 latent 级 smoke adapter。Tree-Ring 额外提供 `method_faithful_sd35` adapter, 可在真实 GPU 环境中加载 SD3.5 Medium 并执行方法忠实的 ring key 注入与检测路径。Gaussian Shading 与 Shallow Diffuse 仍处于 latent smoke adapter 边界, 后续需按 Tree-Ring 样板补齐方法忠实 adapter。
 
 该实现的主要作用是验证以下工程链路:
 

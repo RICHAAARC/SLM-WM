@@ -11,6 +11,7 @@ from main.core.digest import build_stable_digest
 
 PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 METHOD_FAITHFUL_ADAPTER_REQUIRED_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse")
+METHOD_FAITHFUL_ADAPTER_BOUNDARIES = ("method_faithful_sd35_adapter_reproduction",)
 
 
 @dataclass(frozen=True)
@@ -127,11 +128,13 @@ def _adapter_smoke_ready(command_result: Mapping[str, Any] | None, rows: list[di
     return int(command_result.get("return_code", 1)) == 0 and int(command_result.get("observation_count", 0)) > 0 and bool(rows)
 
 
-def _method_faithful_adapter_ready(baseline_id: str, adapter_smoke_ready: bool) -> bool:
+def _method_faithful_adapter_ready(baseline_id: str, adapter_smoke_ready: bool, rows: list[dict[str, Any]]) -> bool:
     """判断当前 adapter 是否已达到方法忠实复现边界。"""
 
     if baseline_id in METHOD_FAITHFUL_ADAPTER_REQUIRED_IDS:
-        return False
+        return adapter_smoke_ready and any(
+            str(row.get("adapter_boundary", "")) in METHOD_FAITHFUL_ADAPTER_BOUNDARIES for row in rows
+        )
     return baseline_id == "t2smark" and adapter_smoke_ready
 
 
@@ -188,7 +191,7 @@ def build_primary_baseline_evidence_records(
         rows = rows_by_id.get(baseline_id, [])
         command_result = results_by_id.get(baseline_id)
         smoke_ready = _adapter_smoke_ready(command_result, rows)
-        method_ready = _method_faithful_adapter_ready(baseline_id, smoke_ready)
+        method_ready = _method_faithful_adapter_ready(baseline_id, smoke_ready, rows)
         reasons = _blocking_reasons(
             baseline_id=baseline_id,
             adapter_smoke_ready=smoke_ready,

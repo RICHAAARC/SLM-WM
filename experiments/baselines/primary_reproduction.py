@@ -106,8 +106,11 @@ def default_primary_command_profiles() -> dict[str, PrimaryBaselineCommandProfil
                 "--w_channel 3 --w_pattern ring --start 0 --end {sample_count} --with_tracking"
             ),
             expected_result_adapter="tree_ring_detection_metrics_adapter",
-            model_alignment_status="legacy_stable_diffusion_requires_protocol_adapter",
-            notes="官方入口面向旧版 diffusers 和 DDIM inversion, 需要隔离环境后导入共同协议指标。",
+            model_alignment_status="sd35_method_faithful_adapter_plus_legacy_official_reference",
+            notes=(
+                "主表使用 method_faithful_sd35 adapter 在 SD3.5 Medium 上重建 ring key 注入与检测; "
+                "补充表使用官方 legacy 入口隔离复现, 再以 governed import 记录忠实度参考。"
+            ),
         ),
         "gaussian_shading": PrimaryBaselineCommandProfile(
             baseline_id="gaussian_shading",
