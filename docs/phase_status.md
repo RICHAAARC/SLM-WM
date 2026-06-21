@@ -957,3 +957,33 @@
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
 
 
+
+## external_baseline_adapter_command_evidence_protocol
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `external_baseline_adapter_command_evidence` |
+| phase_status | `adapter_command_observation_evidence_ready` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-21` |
+| input_manifest | `external_baseline/source_registry.json` |
+| expected_output_manifest | `outputs/external_baseline_execution/baseline_execution_manifest.json` |
+| expected_outputs | `outputs/external_baseline_command_plan/baseline_command_plan.json`; `outputs/external_baseline_command_plan/baseline_command_plan_manifest.json`; `outputs/external_baseline_execution/baseline_command_results.json`; `outputs/external_baseline_execution/baseline_observations.json`; `outputs/external_baseline_execution/baseline_execution_manifest.json` |
+| blocking_items | Tree-Ring、Gaussian Shading 和 Shallow Diffuse 仍需要真实 SD3.5 Medium GPU adapter 实装; 当前只提供可审计命令契约。 |
+| fallback_path | 若官方源码暂不能直接适配 SD3.5 Medium, 只能保留 `contract-only` 诊断或导入受治理结果, 不得声明论文级 baseline 结论。 |
+| invariants | 官方源码快照位于 `external_baseline/*/*/source/` 且不由 git 跟踪; 项目维护 adapter、命令计划脚本、执行脚本和证据校验脚本必须接受 harness 审计。 |
+
+### external baseline 并入方法修正
+
+1. 根 `.gitignore` 不再忽略整个 `external_baseline/`, 改由 `external_baseline/.gitignore` 仅忽略第三方 `source/` 与 adapter 临时 `artifacts/` 子树。
+2. `tools/harness/lib/file_scanner.py` 已改为扫描 `external_baseline/` 中的 adapter、README 和登记文件, 但跳过第三方源码快照。
+3. 新增 `experiments/baselines/command_adapter.py`、`command_plan.py`、`observation_io.py` 和 `evidence_validator.py`, 形成 command plan、execution、observation 和 evidence 的统一入口。
+4. 新增 `scripts/build_external_baseline_command_plan.py`、`scripts/run_external_baseline_command_plan.py` 和 `scripts/validate_external_baseline_evidence.py`, 所有仓库命令输出默认写入 `outputs/`。
+5. 主表 baseline 已新增项目维护 adapter 路径。T2SMark adapter 可读取官方 `results.json`; Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前提供 `contract-only` 诊断入口, 真实指标仍需补齐 SD3.5 Medium GPU 运行路径。
+6. `external_baseline/source_registry.json` 已补充 `adapter_path`、`adapter_status`、`model_alignment_status` 和 `official_source_tracked` 字段。
+
+### 当前边界
+
+1. 本次变更建立外部 baseline 的实施流程, 不伪造外部 baseline 真实指标。
+2. `contract-only` 只证明命令编排、adapter 落盘和 harness 边界可用。
+3. 论文级对比必须有 `formal_result_claim=true`、真实 `evidence_paths`、官方源码 commit、运行日志和可重建 observation 或受治理结果记录。

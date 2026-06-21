@@ -899,6 +899,41 @@ Notebook 与 repository module 的跨边界数据
 | result_import_template_ready | governance | none | false | false | false | 主表外部 baseline 共同协议结果导入模板是否已可审计。 |
 | execution_plan_digest | artifact | none | false | false | false | 主表外部 baseline 官方复现计划集合的稳定摘要。 |
 | result_template_digest | artifact | none | false | false | false | 主表外部 baseline 结果导入模板集合的稳定摘要。 |
+| adapter_path | artifact | none | true | false | false | 外部 baseline 的项目维护 adapter 路径。 |
+| adapter_status | runtime | none | true | false | false | 外部 baseline adapter 当前可执行或需补齐的状态。 |
+| official_source_tracked | governance | none | false | false | false | 第三方官方源码是否由本项目 git 跟踪。 |
+| baseline_command_plan_manifest_path | artifact | none | false | false | false | 外部 baseline 命令计划 manifest 路径。 |
+| baseline_command_results_path | artifact | none | false | false | false | 外部 baseline 命令执行结果 JSON 路径。 |
+| baseline_observations_path | artifact | none | false | false | false | 外部 baseline observation 输出路径。 |
+| baseline_command_id | protocol | none | true | false | false | 外部 baseline 命令计划中单条命令的稳定标识。 |
+| baseline_command_digest | artifact | none | true | false | false | 外部 baseline 命令计划 payload 的稳定摘要。 |
+| command_count | metric | none | false | false | false | 外部 baseline 命令计划中的命令数量。 |
+| failed_command_count | metric | none | false | false | false | 外部 baseline 命令执行失败数量。 |
+| baseline_ids | protocol | none | true | false | false | 外部 baseline 命令计划或执行 manifest 中涉及的 baseline id 集合。 |
+| observation_count | metric | none | false | false | false | 外部 baseline adapter 或执行 manifest 中的 observation 数量。 |
+| return_code | runtime | none | false | false | false | 外部 baseline 命令进程返回码。 |
+| stdout | runtime | none | false | false | false | 外部 baseline 命令标准输出文本。 |
+| stderr | runtime | none | false | false | false | 外部 baseline 命令标准错误文本。 |
+| working_directory | runtime | none | false | false | false | 外部 baseline 命令执行工作目录。 |
+| timeout_seconds | runtime | none | false | false | false | 外部 baseline 命令允许运行的最长秒数。 |
+| command_results_path | artifact | none | false | false | false | 外部 baseline 命令结果文件路径。 |
+| execution_digest | artifact | none | true | false | false | 外部 baseline 执行 manifest 的稳定摘要。 |
+| evidence_paths | artifact | none | true | false | false | 外部 baseline 正式结果所绑定的证据文件路径集合。 |
+| formal_result_claim | claim | none | false | false | false | 外部 baseline 结果是否声明可作为正式论文对比证据。 |
+| execution_boundary | governance | none | true | false | false | 外部 baseline 执行 manifest 对工程链路与论文证据边界的说明。 |
+| producer_id | governance | none | true | false | false | 产物生成器或 adapter 的稳定标识。 |
+| producer_role | governance | none | true | false | false | 产物生成器在流程中的职责。 |
+| detection_decision | metric | none | false | false | false | 外部 baseline 单条 observation 根据 score 和 threshold 得到的检测判定。 |
+| score_name | metric | none | true | false | false | 外部 baseline observation 中分数字段的语义名称。 |
+| higher_is_positive | protocol | none | false | false | false | 分数越高是否代表越倾向水印阳性。 |
+| threshold_source | protocol | none | true | false | false | 外部 baseline observation 中 threshold 的来源说明。 |
+| bit_accuracy | metric | none | false | false | false | T2SMark 或同类方法记录的 bit 级准确率。 |
+| key_accuracy | metric | none | false | false | false | T2SMark 或同类方法记录的 key 级准确率。 |
+| t2smark_result_index | protocol | none | false | false | false | T2SMark 官方 results.json 中的样本索引。 |
+| image_pair_count | metric | none | false | false | false | T2SMark adapter 输入 image pair 数量。 |
+| t2smark_result_count | metric | none | false | false | false | T2SMark 官方 results.json 中可读取的样本数量。 |
+| missing_result_indices | metric | none | true | false | false | T2SMark 输入 image pair 中缺少官方结果的索引集合。 |
+| adapter_digest | artifact | none | true | false | false | 外部 baseline adapter manifest 的稳定摘要。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
 | example_digest_random | random | _digest_random | true | false | false | 可复现随机轨迹的 digest 字段。 |
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |

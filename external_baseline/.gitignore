@@ -1,0 +1,7 @@
+# 第三方 baseline 源码以本地外部快照形式保存, 不并入本项目提交。
+**/source/
+**/source/**
+
+# 外部 baseline 适配器运行产物必须写入 outputs/, 本目录内的临时产物不进入仓库。
+**/artifacts/
+**/artifacts/**

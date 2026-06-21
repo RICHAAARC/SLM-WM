@@ -12,15 +12,30 @@ SKIP_DIRECTORY_NAMES = {
     ".pytest_work",
     ".tmp",
     ".venv",
-    "external_baseline",
     "outputs",
     "audit_reports",
     "dist",
     "build",
 }
 
+EXTERNAL_BASELINE_VENDOR_DIRECTORY_NAMES = {"source", "artifacts"}
+
 BINARY_SUFFIXES = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf", ".zip", ".tar", ".gz", ".7z", ".exe", ".dll", ".so", ".pyc", ".pyd",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".pdf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".7z",
+    ".exe",
+    ".dll",
+    ".so",
+    ".pyc",
+    ".pyd",
 }
 
 DEFAULT_GOVERNED_SCAN_ROOTS = (
@@ -31,23 +46,47 @@ DEFAULT_GOVERNED_SCAN_ROOTS = (
     "configs",
     "docs",
     "main",
-    "main",
     "tools",
     "tests",
     "scripts",
     "experiments",
     "paper_workflow",
+    "external_baseline",
 )
 
 
+def _parts(path: str | Path) -> tuple[str, ...]:
+    """把路径转换为可比较的语义片段。"""
+
+    return tuple(Path(path).parts)
+
+
+def _is_external_baseline_vendor_path(path: str | Path) -> bool:
+    """判断路径是否位于外部 baseline 的第三方源码或运行产物边界内。
+
+    该判断属于项目特定写法: `external_baseline/` 下的 adapter 和登记文件需要接受 harness 审计,
+    但第三方官方源码快照不属于本项目实现, 因此只跳过 `source/` 和 `artifacts/` 子树。
+    """
+
+    parts = _parts(path)
+    if "external_baseline" not in parts:
+        return False
+    root_index = parts.index("external_baseline")
+    return any(part in EXTERNAL_BASELINE_VENDOR_DIRECTORY_NAMES for part in parts[root_index + 1 :])
+
+
 def should_skip_path(path: str | Path) -> bool:
-    """判断路径是否属于缓存、输出或构建产物。"""
-    candidate = Path(path)
-    return any(part in SKIP_DIRECTORY_NAMES for part in candidate.parts)
+    """判断路径是否属于缓存、输出、构建产物或外部第三方快照。"""
+
+    parts = _parts(path)
+    if any(part in SKIP_DIRECTORY_NAMES for part in parts):
+        return True
+    return _is_external_baseline_vendor_path(path)
 
 
 def iter_text_files(root: str | Path) -> Iterator[Path]:
     """遍历目录下的文本候选文件。"""
+
     root_path = Path(root)
     if not root_path.exists():
         return
@@ -60,7 +99,8 @@ def iter_text_files(root: str | Path) -> Iterator[Path]:
 
 
 def iter_governed_text_files(root: str | Path) -> Iterator[Path]:
-    """按默认治理根遍历文本文件。"""
+    """按默认受治理根目录遍历文本文件。"""
+
     root_path = Path(root)
     for relative_root in DEFAULT_GOVERNED_SCAN_ROOTS:
         candidate = root_path / relative_root
