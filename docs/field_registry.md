@@ -613,6 +613,49 @@ Notebook 与 repository module 的跨边界数据
 | hf_score_retention_mean | metric | none | false | false | false | 攻击分组内 HF score retention 均值。 |
 | positive_count | metric | none | false | false | false | 攻击矩阵分组内 positive source 记录数量。 |
 | negative_count | metric | none | false | false | false | 攻击矩阵分组内非 positive source 记录数量。 |
+| baseline_id | protocol | none | true | false | false | 外部 baseline 的稳定语义标识。 |
+| baseline_family | protocol | none | true | false | false | 外部 baseline 所属方法族。 |
+| baseline_name | protocol | none | true | false | false | 外部 baseline 的论文或方法显示名称。 |
+| comparison_group | protocol | none | true | false | false | 外部 baseline 在主表或补充表中的对比分组。 |
+| expected_input_mode | protocol | none | true | false | false | 外部 baseline 预期输入模式, 例如 diffusion latent 或 image space。 |
+| baseline_observation_id | protocol | none | true | false | false | 外部 baseline 在共同协议边界下的观测记录标识。 |
+| baseline_observation_digest | artifact | none | true | false | false | 外部 baseline 观测记录 payload 的稳定摘要。 |
+| comparable_operating_point | protocol | none | true | false | false | 外部 baseline 与当前方法对齐使用的可比较 operating point。 |
+| common_prompt_protocol_ready | protocol | none | false | false | false | 是否已将 baseline 对齐到相同 prompt 协议。 |
+| common_attack_protocol_ready | protocol | none | false | false | false | 是否已将 baseline 对齐到相同攻击矩阵协议。 |
+| common_threshold_protocol_ready | protocol | none | false | false | false | 是否已将 baseline 对齐到相同 fixed-FPR 或可比较阈值协议。 |
+| baseline_protocol_compatible | protocol | none | false | false | false | baseline adapter 是否可登记到当前共同协议边界。 |
+| baseline_requires_gpu | runtime | none | false | false | false | 外部 baseline 是否需要 GPU 才能复现实验结果。 |
+| baseline_requires_training | runtime | none | false | false | false | 外部 baseline 是否需要训练或微调才可复现实验结果。 |
+| baseline_adapter_ready | runtime | none | false | false | false | 仓库是否已有该外部 baseline 的协议 adapter。 |
+| baseline_official_code_ready | runtime | none | false | false | false | 外部 baseline 官方代码是否已接入并通过本项目协议检查。 |
+| baseline_reproduced_result_ready | runtime | none | false | false | false | 外部 baseline 是否已有本项目内复现实验结果。 |
+| baseline_imported_result_ready | runtime | none | false | false | false | 外部 baseline 是否已有受治理导入结果。 |
+| baseline_result_source | artifact | none | false | false | false | 外部 baseline 指标结果来源。 |
+| baseline_count | metric | none | false | false | false | 外部 baseline 对比清单中的 baseline 数量。 |
+| baseline_observation_count | metric | none | false | false | false | 外部 baseline 观测记录数量。 |
+| comparable_baseline_count | metric | none | false | false | false | 可登记到共同协议边界的外部 baseline 数量。 |
+| baseline_result_ready_count | metric | none | false | false | false | 已具备复现或导入结果的外部 baseline 数量。 |
+| baseline_result_ready | metric | none | false | false | false | 外部 baseline 对比 manifest 中的单数结果就绪状态。 |
+| baseline_results_ready | metric | none | false | false | false | 外部 baseline 对比运行中所有 baseline 结果是否就绪。 |
+| comparison_protocol_ready | protocol | none | false | false | false | 外部 baseline 对比所需共同协议边界是否已经可审计。 |
+| attack_manifest_supports_paper_claim | claim | none | false | false | false | 外部 baseline 对比输入的攻击矩阵 manifest 是否支持论文主张。 |
+| method_id | protocol | none | true | false | false | 对比表中的方法标识。 |
+| method_role | protocol | none | true | false | false | 对比表中的方法角色, 例如当前方法本地代理或外部 baseline。 |
+| comparison_scope | protocol | none | true | false | false | 对比表行对应的统计或协议范围。 |
+| registry_name | governance | none | false | false | false | 来源登记文件的稳定名称。 |
+| registry_status | governance | none | false | false | false | 来源登记文件当前治理状态。 |
+| source_root | artifact | none | false | false | false | 外部 baseline 源码缓存根目录。 |
+| managed_by | governance | none | false | false | false | 来源登记文件遵循的治理契约。 |
+| baseline_sources | artifact | none | false | false | false | 外部 baseline 来源登记条目集合。 |
+| source_dir | artifact | none | true | false | false | 单个外部 baseline 的本地源码缓存目录。 |
+| source_status | runtime | none | false | false | false | 单个外部 baseline 官方源码的本地获取状态。 |
+| official_repository_url | runtime | none | false | false | false | 外部 baseline 官方源码仓库 URL。 |
+| official_repository_commit | runtime | none | false | false | false | 外部 baseline 官方源码仓库提交标识。 |
+| source_license | governance | none | false | false | false | 外部 baseline 官方源码许可证记录。 |
+| local_code_tracked | governance | none | false | false | false | 外部 baseline 第三方源码是否由本仓库跟踪。 |
+| result_status | metric | none | false | false | false | 外部 baseline 复现或导入结果状态。 |
+| paper_claim_support | claim | none | false | false | false | 外部 baseline 来源或结果是否支持论文主张。 |
 | aligned_rescoring_record_id | protocol | none | true | false | false | 真实 aligned rescoring record 的稳定标识。 |
 | aligned_rescoring_record_count | metric | none | false | false | false | 真实 aligned rescoring records 数量。 |
 | aligned_rescoring_ready | method | none | true | false | false | 单条真实 aligned rescoring 记录是否具备真实 latent 投影重打分。 |

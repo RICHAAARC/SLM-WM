@@ -6,7 +6,19 @@ import json
 from pathlib import Path
 import sys
 
-DIRECTORIES = ["configs", "docs", "tools", "tests", "main", "experiments", "paper_workflow", "scripts", "outputs", ".codex"]
+DIRECTORIES = [
+    "configs",
+    "docs",
+    "tools",
+    "tests",
+    "main",
+    "experiments",
+    "external_baseline",
+    "paper_workflow",
+    "scripts",
+    "outputs",
+    ".codex",
+]
 
 
 def inspect_repository(root: str | Path) -> dict:

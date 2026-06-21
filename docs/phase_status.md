@@ -604,6 +604,55 @@
 | `pytest -q` | pass, 86 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
 
+## stage_14_external_baseline_comparison
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `external_baseline_comparison` |
+| phase_status | `baseline_protocol_ready` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-21` |
+| input_manifest | `outputs/attack_matrix/manifest.local.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/threshold_calibration/threshold_degeneracy_report.json` |
+| expected_output_manifest | `outputs/external_baseline_comparison/manifest.local.json` |
+| expected_outputs | `outputs/external_baseline_comparison/baseline_observations.jsonl`; `outputs/external_baseline_comparison/baseline_metrics.csv`; `outputs/external_baseline_comparison/baseline_comparison_table.csv`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
+| blocking_items | 当前只完成外部 baseline 的协议 adapter 与公平对比表格链路; 尚未接入官方代码、复现实验结果或受治理导入结果, 因此所有外部 baseline 指标保持 `unsupported`。 |
+| fallback_path | 外部 baseline 无结果时只登记 `external_baseline_result_missing`, 不手工填写指标; 当前方法行也只保留 attack matrix local proxy, 不作为论文级 superiority 或 robustness 主张。 |
+| invariants | baseline 与 SLM-WM 必须共享 prompt 协议、攻击矩阵协议和 fixed-FPR operating point; unsupported baseline 不进入主结论; 所有新产物保持 `supports_paper_claim=false`。 |
+| next_stage_entry | 可进入内部消融证据构建; 若要形成论文级外部对比, 需后续接入 baseline 官方代码或受治理导入结果, 并在相同协议下重建表格。 |
+
+### stage14 已完成内容
+
+1. 新增 `experiments/baselines/adapters.py`, 定义 `BaselineSpec`、`BaselineObservation`、默认外部 baseline 清单、baseline 观测记录构造、baseline 指标聚合和同协议对比表构造。
+2. 新增 `scripts/write_external_baseline_comparison_outputs.py`, 从 `outputs/attack_matrix/` 与 `outputs/threshold_calibration/` 读取受治理输入, 重建外部 baseline observations、metrics、comparison table、runtime report 和 manifest。
+3. 默认登记 8 个外部 baseline: Tree-Ring、Gaussian Shading、Shallow Diffuse、T2SMark、Stable Signature、RivaGAN、TrustMark 和 Watermark Anything。
+4. 新增根目录 `external_baseline/`, 用于本地保存外部 baseline 官方源码或复现镜像; 主表源码槽位包括 Tree-Ring、Gaussian Shading、Shallow Diffuse、T2SMark, 补充表源码槽位包括 Stable Signature、RivaGAN、TrustMark、Watermark Anything。
+5. 当前 baseline adapter 只冻结公平协议边界, 不运行或伪造外部方法结果; 所有外部 baseline 行均写入 `metric_status=unsupported` 与 `unsupported_reason=external_baseline_result_missing`。
+6. 新增 `tests/functional/test_external_baseline_comparison.py`, 覆盖默认 baseline 清单、产物重建、claim 安全边界和 outputs 目录约束。
+7. `docs/field_registry.md` 已登记 baseline observation、baseline readiness、共同协议、comparison table、runtime report 和外部源码来源登记相关字段。
+
+### stage14 当前产物摘要
+
+1. `outputs/external_baseline_comparison/baseline_runtime_report.json` 显示 `baseline_count=8`, `baseline_observation_count=112`, `comparable_baseline_count=8`, `baseline_result_ready_count=0`, `comparison_protocol_ready=true`, `baseline_results_ready=false`。
+2. `outputs/external_baseline_comparison/baseline_metrics.csv` 中 8 个 baseline 均为 `baseline_adapter_ready=True`, 但 `baseline_official_code_ready=False`, `baseline_reproduced_result_ready=False`, `baseline_imported_result_ready=False`。
+3. `outputs/external_baseline_comparison/baseline_comparison_table.csv` 包含 `slm_wm_current` 本地代理行和 8 个外部 baseline unsupported 行; 所有行均为 `supports_paper_claim=False`。
+4. `outputs/external_baseline_comparison/manifest.local.json` 记录输入、输出、baseline spec 摘要、summary 摘要、代码版本和重建命令 `python scripts/write_external_baseline_comparison_outputs.py`。
+
+### stage14 完成边界
+
+1. 本阶段完成的是外部 baseline 公平对比协议、schema adapter、受治理表格链路和缺失结果边界, 不是外部 baseline 实测性能结论。
+2. 当前外部 baseline 指标不得用于论文主表结论, 只能说明对比协议已经可审计、可复现并等待真实 baseline 结果接入。
+3. 后续若接入官方代码或导入结果, 必须由 adapter 或受治理导入文件生成 records, 不得手工补表。
+
+### stage14 验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/write_external_baseline_comparison_outputs.py` | pass, `baseline_count=8`, `baseline_observation_count=112`, `baseline_result_ready_count=0` |
+| `pytest tests/functional/test_external_baseline_comparison.py -q` | pass, 2 passed |
+| `pytest -q` | pass, 88 passed |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
 ## real_gpu_aligned_rescoring_workflow
 
 | item | value |

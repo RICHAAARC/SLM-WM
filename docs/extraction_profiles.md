@@ -23,6 +23,7 @@
 configs/
 docs/
 experiments/
+external_baseline/
 main/
 paper_workflow/
 scripts/
@@ -71,6 +72,7 @@ pyproject.toml
 ```text
 .codex/
 tools/harness/
+external_baseline/
 outputs/
 paper_workflow/
 tests/constraints/
@@ -101,6 +103,7 @@ pyproject.toml
 main/analysis/
 main/cli/
 experiments/
+external_baseline/
 scripts/
 paper_workflow/
 .codex/

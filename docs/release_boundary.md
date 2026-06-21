@@ -27,6 +27,7 @@ pyproject.toml
 main/analysis/
 main/cli/
 experiments/
+external_baseline/
 scripts/
 paper_workflow/
 .codex/
@@ -57,6 +58,7 @@ pyproject.toml
 ```text
 .codex/
 tools/harness/
+external_baseline/
 outputs/
 tests/constraints/
 tests/integration/
@@ -77,6 +79,7 @@ paper_workflow/
 - `.codex/`
 - `tools/harness/`
 - `outputs/`
+- `external_baseline/` 中的第三方源码缓存
 - 本地 Notebook 缓存
 - 私有数据或本地绝对路径配置
 - 未经治理的临时实验结果

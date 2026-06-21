@@ -12,6 +12,7 @@ SKIP_DIRECTORY_NAMES = {
     ".pytest_work",
     ".tmp",
     ".venv",
+    "external_baseline",
     "outputs",
     "audit_reports",
     "dist",

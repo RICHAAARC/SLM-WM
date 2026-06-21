@@ -8,3 +8,4 @@ build/
 outputs/
 release_packages/
 *.pyc
+external_baseline/
