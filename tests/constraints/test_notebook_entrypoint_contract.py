@@ -13,6 +13,7 @@ from paper_workflow.colab_utils.aligned_rescoring import package_aligned_rescori
 from paper_workflow.colab_utils.attention_latent_injection import package_attention_latent_injection_outputs
 from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
 from paper_workflow.colab_utils.real_attack_evaluation import package_real_attack_evaluation_outputs
+from paper_workflow.colab_utils.threshold_calibration import package_threshold_calibration_outputs
 from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outputs
 from tools.harness.lib.naming_rules import is_allowed_file_name
 
@@ -24,6 +25,7 @@ DRIVE_RELOAD_NOTEBOOK_PATH = Path("paper_workflow/drive_manifest_reload_smoke.ip
 ATTENTION_GEOMETRY_NOTEBOOK_PATH = Path("paper_workflow/attention_geometry_capture_run.ipynb")
 ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH = Path("paper_workflow/attention_latent_injection_run.ipynb")
 ALIGNED_RESCORING_NOTEBOOK_PATH = Path("paper_workflow/aligned_rescoring_run.ipynb")
+THRESHOLD_CALIBRATION_NOTEBOOK_PATH = Path("paper_workflow/threshold_calibration_run.ipynb")
 REAL_ATTACK_EVALUATION_NOTEBOOK_PATH = Path("paper_workflow/real_attack_evaluation_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_NOTEBOOK_PATH,
@@ -33,6 +35,7 @@ NOTEBOOK_PATHS = (
     ATTENTION_GEOMETRY_NOTEBOOK_PATH,
     ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH,
     ALIGNED_RESCORING_NOTEBOOK_PATH,
+    THRESHOLD_CALIBRATION_NOTEBOOK_PATH,
     REAL_ATTACK_EVALUATION_NOTEBOOK_PATH,
 )
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
@@ -203,6 +206,36 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
     assert "archive_name=archive_name" in joined_source
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert PAIR_PERCEPTUAL_DEPENDENCY_INSTALL_COMMAND in joined_source
+    assert "--force-reinstall" not in joined_source
+    assert "numpy pillow" not in joined_source
+    assert "del sys.modules" not in joined_source
+    assert '"diffusers==' not in joined_source
+    assert '"transformers==' not in joined_source
+
+
+@pytest.mark.constraint
+def test_colab_notebook_delegates_threshold_calibration_logic_to_helper() -> None:
+    """Notebook 必须复用 repository helper 生成 threshold calibration 结果包。"""
+    payload = json.loads(THRESHOLD_CALIBRATION_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+    first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+    first_code_source = "".join(first_code_cell.get("source", []))
+
+    assert "paper_workflow.colab_utils.threshold_calibration" in joined_source
+    assert "run_default_threshold_calibration_from_drive_plan" in joined_source
+    assert "package_threshold_calibration_outputs" in joined_source
+    assert "drive.mount('/content/drive')" in first_code_source
+    assert "/content/drive/MyDrive/SLM/threshold_calibration" in joined_source
+    assert "/content/drive/MyDrive/SLM/attention_latent_injection" in joined_source
+    assert "/content/drive/MyDrive/SLM/aligned_rescoring" in joined_source
+    assert "attention_latent_injection_package_*.zip" in joined_source
+    assert "aligned_rescoring_package_*.zip" in joined_source
+    assert "threshold_calibration_ready" in joined_source
+    assert "geometric_rescue_ready" in joined_source
+    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
+    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
+    assert "archive_name=archive_name" in joined_source
+    assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert "--force-reinstall" not in joined_source
     assert "numpy pillow" not in joined_source
     assert "del sys.modules" not in joined_source
@@ -419,6 +452,52 @@ def test_aligned_rescoring_outputs_can_be_packaged_and_mirrored(tmp_path: Path) 
 
 
 @pytest.mark.constraint
+def test_threshold_calibration_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
+    """Threshold calibration 产物应能打包, 且包含几何恢复核对文件。"""
+    threshold_dir = tmp_path / "outputs" / "threshold_calibration"
+    rescue_dir = tmp_path / "outputs" / "geometric_rescue"
+    content_dir = tmp_path / "outputs" / "content_carriers"
+    threshold_dir.mkdir(parents=True)
+    rescue_dir.mkdir(parents=True)
+    content_dir.mkdir(parents=True)
+    (threshold_dir / "threshold_calibration_result.json").write_text('{"run_decision":"pass"}\n', encoding="utf-8")
+    (threshold_dir / "calibration_thresholds.json").write_text('{"threshold_value":0.75}\n', encoding="utf-8")
+    (threshold_dir / "threshold_degeneracy_report.json").write_text('{"supports_paper_claim":false}\n', encoding="utf-8")
+    (threshold_dir / "fixed_fpr_operating_points.csv").write_text("target_fpr,raw_content_clean_fpr\n0.05,0.01\n", encoding="utf-8")
+    (threshold_dir / "manifest.local.json").write_text('{"artifact_id":"threshold_calibration_manifest"}\n', encoding="utf-8")
+    (rescue_dir / "aligned_detection_records.jsonl").write_text('{"rescue_ablation_mode":"full_rescue"}\n', encoding="utf-8")
+    (rescue_dir / "geometry_rescue_audit.json").write_text('{"protocol_decision":"pass"}\n', encoding="utf-8")
+    (rescue_dir / "manifest.local.json").write_text('{"artifact_id":"geometric_rescue_manifest"}\n', encoding="utf-8")
+    (content_dir / "content_detection_records.jsonl").write_text('{"content_detection_record_id":"sample"}\n', encoding="utf-8")
+
+    drive_dir = tmp_path / "drive_mirror"
+    record = package_threshold_calibration_outputs(root=tmp_path, drive_output_dir=str(drive_dir))
+    archive_path = tmp_path / record.archive_path
+
+    assert archive_path.exists()
+    assert (drive_dir / "threshold_calibration_package.zip").exists()
+    assert record.archive_digest == record.drive_archive_digest
+    assert record.archive_entry_count >= 10
+    assert (threshold_dir / "threshold_calibration_archive_summary.json").exists()
+    assert (threshold_dir / "threshold_calibration_archive_manifest.local.json").exists()
+
+    with ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+        assert "outputs/threshold_calibration/threshold_calibration_result.json" in names
+        assert "outputs/threshold_calibration/calibration_thresholds.json" in names
+        assert "outputs/threshold_calibration/threshold_degeneracy_report.json" in names
+        assert "outputs/threshold_calibration/fixed_fpr_operating_points.csv" in names
+        assert "outputs/threshold_calibration/manifest.local.json" in names
+        assert "outputs/geometric_rescue/aligned_detection_records.jsonl" in names
+        assert "outputs/geometric_rescue/geometry_rescue_audit.json" in names
+        assert "outputs/geometric_rescue/manifest.local.json" in names
+        assert "outputs/content_carriers/content_detection_records.jsonl" in names
+        assert "outputs/threshold_calibration/threshold_calibration_package_input_manifest.json" in names
+        assert "outputs/threshold_calibration/threshold_calibration_archive_summary.json" in names
+        assert "outputs/threshold_calibration/threshold_calibration_archive_manifest.local.json" in names
+
+
+@pytest.mark.constraint
 def test_real_attack_evaluation_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
     """真实攻击闭环产物应能打包, 且包含 attacked image 与 digest 注册表。"""
     attack_dir = tmp_path / "outputs" / "real_attack_evaluation"
@@ -455,3 +534,5 @@ def test_real_attack_evaluation_outputs_can_be_packaged_and_mirrored(tmp_path: P
         assert "outputs/real_attack_evaluation/real_attack_manifest.local.json" in names
         assert "outputs/real_attack_evaluation/attacked_images/sample_attacked.png" in names
         assert "outputs/real_attack_evaluation/real_attack_package_input_manifest.json" in names
+        assert "outputs/real_attack_evaluation/real_attack_archive_summary.json" in names
+        assert "outputs/real_attack_evaluation/real_attack_archive_manifest.local.json" in names

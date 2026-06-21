@@ -1202,7 +1202,7 @@ def package_real_attack_evaluation_outputs(
     drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
     archive_name: str = "real_attack_evaluation_package.zip",
 ) -> RealAttackArchiveRecord:
-    """打包真实攻击闭环产物并镜像到 Google Drive."""
+    """打包真实攻击闭环产物并镜像到 Google Drive。"""
     root_path = Path(root).resolve()
     source_dir = (root_path / output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -1210,6 +1210,9 @@ def package_real_attack_evaluation_outputs(
     package_manifest_path = source_dir / "real_attack_package_input_manifest.json"
     summary_path = source_dir / "real_attack_archive_summary.json"
     manifest_path = source_dir / "real_attack_archive_manifest.local.json"
+    for stale_path in (package_manifest_path, summary_path, manifest_path):
+        if stale_path.exists():
+            stale_path.unlink()
     entries = collect_package_entries(root_path, source_dir, archive_path)
     package_manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -1217,11 +1220,51 @@ def package_real_attack_evaluation_outputs(
         "entry_count": len(entries),
     }
     package_manifest_path.write_text(stable_json_text(package_manifest), encoding="utf-8")
-    entries = tuple((*entries, package_manifest_path))
+    drive_dir = Path(drive_output_dir).expanduser()
+    preliminary_record = RealAttackArchiveRecord(
+        archive_path=archive_path.relative_to(root_path).as_posix(),
+        archive_digest="",
+        archive_entry_count=len(entries) + 3,
+        drive_archive_path=str(drive_dir / archive_name),
+        drive_archive_digest="",
+        metadata={
+            "construction_unit_name": "real_attack_evaluation",
+            "drive_output_dir": str(drive_dir),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "embedded_digest_scope": "external_summary_records_final_archive_digest",
+        },
+    )
+    summary_path.write_text(stable_json_text(preliminary_record.to_dict()), encoding="utf-8")
+    manifest = build_artifact_manifest(
+        artifact_id="real_attack_evaluation_archive_manifest",
+        artifact_type="local_manifest",
+        input_paths=tuple(
+            [entry.relative_to(root_path).as_posix() for entry in entries]
+            + [package_manifest_path.relative_to(root_path).as_posix()]
+        ),
+        output_paths=(
+            archive_path.relative_to(root_path).as_posix(),
+            summary_path.relative_to(root_path).as_posix(),
+            manifest_path.relative_to(root_path).as_posix(),
+        ),
+        config={
+            "archive_name": archive_name,
+            "archive_entry_count": len(entries) + 3,
+            "drive_output_dir": str(drive_dir),
+        },
+        code_version=resolve_code_version(root_path),
+        rebuild_command="运行 paper_workflow/real_attack_evaluation_run.ipynb",
+        metadata={
+            "construction_unit_name": "real_attack_evaluation",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "embedded_digest_scope": "external_summary_records_final_archive_digest",
+        },
+    ).to_dict()
+    manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
+    entries = collect_package_entries(root_path, source_dir, archive_path)
     with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
         for entry in entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
-    drive_dir = Path(drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / archive_name
     shutil.copy2(archive_path, mirrored_path)
@@ -1238,28 +1281,7 @@ def package_real_attack_evaluation_outputs(
         },
     )
     summary_path.write_text(stable_json_text(record.to_dict()), encoding="utf-8")
-    manifest = build_artifact_manifest(
-        artifact_id="real_attack_evaluation_archive_manifest",
-        artifact_type="local_manifest",
-        input_paths=tuple(entry.relative_to(root_path).as_posix() for entry in entries),
-        output_paths=(
-            archive_path.relative_to(root_path).as_posix(),
-            summary_path.relative_to(root_path).as_posix(),
-            manifest_path.relative_to(root_path).as_posix(),
-        ),
-        config={
-            "archive_name": archive_name,
-            "archive_entry_count": len(entries),
-            "drive_output_dir": str(drive_dir),
-        },
-        code_version=resolve_code_version(root_path),
-        rebuild_command="运行 paper_workflow/real_attack_evaluation_run.ipynb",
-        metadata={
-            "construction_unit_name": "real_attack_evaluation",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "archive_digest": record.archive_digest,
-            "drive_archive_digest": record.drive_archive_digest,
-        },
-    ).to_dict()
+    manifest.setdefault("metadata", {})["archive_digest"] = record.archive_digest
+    manifest.setdefault("metadata", {})["drive_archive_digest"] = record.drive_archive_digest
     manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
     return record

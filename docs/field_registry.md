@@ -844,6 +844,25 @@ Notebook 与 repository module 的跨边界数据
 | required_input_count | metric | none | false | false | false | 投稿就绪门禁中待补齐输入总数。 |
 | release_profile_count | metric | none | false | false | false | 投稿就绪门禁中审计的 release profile 数量。 |
 | limitations | governance | none | false | false | false | 投稿就绪门禁报告中显式列出的适用边界和限制。 |
+| threshold_calibration_ready | artifact | none | false | false | false | threshold calibration 结果是否已经生成可供下游读取的阈值与审计产物。 |
+| geometric_rescue_ready | artifact | none | false | false | false | 几何恢复记录是否已经由前序结果包重建并满足下游阈值校准输入要求。 |
+| geometric_rescue_record_count | metric | none | false | false | false | 本次 threshold calibration workflow 重建得到的几何恢复记录数量。 |
+| threshold_manifest_path | artifact | none | false | false | false | threshold calibration manifest 的输出路径。 |
+| geometric_rescue_manifest_path | artifact | none | false | false | false | 几何恢复 manifest 的输出路径。 |
+| threshold_report_path | artifact | none | false | false | false | threshold degeneracy report 的输出路径。 |
+| rescue_audit_path | artifact | none | false | false | false | 几何恢复审计摘要的输出路径。 |
+| attention_injection_drive_package_path | artifact | none | false | false | false | Google Drive 中 attention latent injection 前序包路径。 |
+| attention_injection_drive_package_digest | artifact | none | false | false | false | Google Drive 中 attention latent injection 前序包 SHA256 摘要。 |
+| attention_injection_input_package_path | artifact | none | false | false | false | 复制到本次 threshold calibration 输入目录的 attention latent injection 包路径。 |
+| attention_injection_input_package_digest | artifact | none | false | false | false | 复制到本次 threshold calibration 输入目录的 attention latent injection 包 SHA256 摘要。 |
+| aligned_rescoring_drive_package_path | artifact | none | false | false | false | Google Drive 中 aligned rescoring 前序包路径。 |
+| aligned_rescoring_drive_package_digest | artifact | none | false | false | false | Google Drive 中 aligned rescoring 前序包 SHA256 摘要。 |
+| aligned_rescoring_input_package_path | artifact | none | false | false | false | 复制到本次 threshold calibration 输入目录的 aligned rescoring 包路径。 |
+| aligned_rescoring_input_package_digest | artifact | none | false | false | false | 复制到本次 threshold calibration 输入目录的 aligned rescoring 包 SHA256 摘要。 |
+| content_records_path | artifact | none | false | false | false | 从 aligned rescoring 前序包解出的内容检测记录路径。 |
+| content_extracted_entry_count | metric | none | false | false | false | 从 aligned rescoring 前序包解出的内容检测输入文件数量。 |
+| content_extracted_entries | artifact | none | false | false | false | 从 aligned rescoring 前序包解出的内容检测输入文件列表。 |
+| embedded_digest_scope | governance | none | false | false | false | 说明 zip 内嵌 archive 摘要文件与外部最终摘要之间的 digest 记录边界。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
 | example_digest_random | random | _digest_random | true | false | false | 可复现随机轨迹的 digest 字段。 |
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |
