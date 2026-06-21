@@ -653,6 +653,56 @@
 | `pytest -q` | pass, 88 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
 
+## stage_15_internal_ablation_evidence
+
+| item | value |
+| --- | --- |
+| construction_unit_name | `internal_ablation_evidence` |
+| phase_status | `ablation_protocol_ready` |
+| executor | `codex_agent` |
+| execution_date | `2026-06-21` |
+| input_manifest | `outputs/attack_matrix/manifest.local.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
+| expected_output_manifest | `outputs/internal_ablation_evidence/manifest.local.json` |
+| expected_outputs | `outputs/internal_ablation_evidence/ablation_records.jsonl`; `outputs/internal_ablation_evidence/mechanism_ablation_table.csv`; `outputs/internal_ablation_evidence/method_pairwise_delta_table.csv`; `outputs/internal_ablation_evidence/ablation_by_attack_family.csv`; `outputs/internal_ablation_evidence/ablation_claim_summary.json`; `outputs/internal_ablation_evidence/manifest.local.json` |
+| blocking_items | 当前内部消融复用 attack matrix 的 record-level proxy, 真实 attacked image 与再扩散攻击 GPU 闭环仍未补齐; 外部 baseline 真实结果仍为 `baseline_results_ready=false`, 因此外部 superiority 与完整 robustness 主张仍不能成立。 |
+| fallback_path | 内部消融只用于冻结机制必要性协议、退化链和表格重建链路; 不把本地代理消融结果写成论文 supported claim。 |
+| invariants | 每个消融必须真实改变机制字段或判定边界; `full_slm_wm` 为参考行; `geo_direct_positive_audit` 只能作为审计反例; 所有产物保持 `supports_paper_claim=false`。 |
+| next_stage_entry | 可进入论文产物证据审计, 但审计结论必须保留 local proxy 边界, 并把真实图像攻击、外部 baseline 实测与 full-main 规模统计列为后续补证任务。 |
+
+### stage15 已完成内容
+
+1. 新增 `experiments/ablations/mechanisms.py`, 定义 `AblationSpec`、默认内部消融清单、消融 records 构造、机制表聚合、按攻击族聚合、pairwise delta 和 claim summary 构造。
+2. 新增 `scripts/write_internal_ablation_outputs.py`, 从攻击矩阵、阈值校准和外部 baseline 对比 manifest 读取受治理输入, 重建内部消融 records、机制表、pairwise delta、attack-family 表、claim summary 和 manifest。
+3. 默认登记 17 个内部消融: Full SLM-WM、Global Null Space、No Semantic Mask、No Semantic JVP、No Risk Weight、Random Basis、LF-only、HF-only、No-HF、No-LF、No Tail Truncation、FFT-sync-only、Image-registration-only、No Attention Anchor、No Rescue、No Attestation 和 Geo-direct-positive audit。
+4. `full_slm_wm` 保持上游攻击记录的完整方法判定; 其他消融通过 LF/HF retention、aligned gain、attention consistency、geometry reliability、rescue gate、attestation gate 或 content gate 反例路径产生实际字段变化。
+5. 新增 `tests/functional/test_internal_ablation_evidence.py`, 覆盖消融清单完整性、关键机制实际变化、输出目录约束、claim 安全边界和表格可重建性。
+6. `docs/field_registry.md` 已登记内部消融 records、机制表、pairwise delta、claim summary 和 manifest 相关字段。
+
+### stage15 当前产物摘要
+
+1. `outputs/internal_ablation_evidence/ablation_claim_summary.json` 显示 `ablation_count=17`, `ablation_record_count=22848`, `mechanism_group_count=7`, `ablation_protocol_ready=true`, `mechanism_coverage_ready=true`, `attack_metrics_ready=true`, `external_baseline_result_ready=false`。
+2. `outputs/internal_ablation_evidence/mechanism_ablation_table.csv` 包含 17 个消融行, 每行均记录 TPR、FPR、score retention、quality proxy、attention consistency、geometry reliability、rescue rate、attestation availability 和相对完整方法的 delta。
+3. `outputs/internal_ablation_evidence/method_pairwise_delta_table.csv` 包含 96 条相对 `full_slm_wm` 的指标差异记录。
+4. `outputs/internal_ablation_evidence/ablation_by_attack_family.csv` 包含 51 条按消融和攻击族聚合的退化记录。
+5. 所有内部消融产物均保持 `supports_paper_claim=false`, `full_method_claim_ready=false`。
+
+### stage15 完成边界
+
+1. 本阶段完成的是内部消融协议、机制退化链、表格重建链路和 claim 安全边界, 不是论文级最终消融结论。
+2. 当前消融结果复用 record-level attack proxy, 不能替代真实图像攻击和 full-main 规模统计。
+3. `geo_direct_positive_audit` 明确是 content gate 反例审计, 不得作为正式方法或主表方法行。
+4. `no_attestation` 会让检测证据不能进入可审计方法主张, 用于证明 attestation gate 的必要性。
+
+### stage15 验证结果
+
+| command | result |
+| --- | --- |
+| `python tools/harness/inspect_repository.py .` | pass |
+| `python scripts/write_internal_ablation_outputs.py` | pass, `ablation_count=17`, `ablation_record_count=22848`, `mechanism_coverage_ready=true` |
+| `pytest tests/functional/test_internal_ablation_evidence.py -q` | pass, 3 passed |
+| `pytest -q` | pass, 91 passed, 2 deselected |
+| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+
 ## real_gpu_aligned_rescoring_workflow
 
 | item | value |

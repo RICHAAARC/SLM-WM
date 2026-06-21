@@ -643,6 +643,55 @@ Notebook 与 repository module 的跨边界数据
 | method_id | protocol | none | true | false | false | 对比表中的方法标识。 |
 | method_role | protocol | none | true | false | false | 对比表中的方法角色, 例如当前方法本地代理或外部 baseline。 |
 | comparison_scope | protocol | none | true | false | false | 对比表行对应的统计或协议范围。 |
+| ablation_record_id | protocol | none | true | false | false | 内部消融 record 的稳定标识。 |
+| ablation_record_digest | artifact | none | true | false | false | 内部消融 record payload 的稳定摘要。 |
+| ablation_id | protocol | none | true | false | false | 内部机制消融配置的稳定标识。 |
+| ablation_name | protocol | none | true | false | false | 内部机制消融配置的显示名称。 |
+| mechanism_group | protocol | none | true | false | false | 消融配置所属机制组。 |
+| ablated_mechanism | protocol | none | true | false | false | 被关闭或替换的具体机制。 |
+| mechanism_change | protocol | none | true | false | false | 消融配置实际施加的机制改变。 |
+| mechanism_change_digest | artifact | none | true | false | false | 消融机制改变配置的稳定摘要。 |
+| baseline_evidence_decision | metric | none | true | false | false | 完整方法代理记录中的 evidence 判定。 |
+| ablated_evidence_decision | metric | none | true | false | false | 消融后在相同 fixed-FPR 边界下的 evidence 判定。 |
+| ablated_detection_decision | metric | none | true | false | false | 消融后同时考虑 attestation gate 的最终检测判定。 |
+| baseline_score_retention | metric | none | true | false | false | 完整方法代理记录中的 score retention。 |
+| ablated_score_retention | metric | none | true | false | false | 消融后重新计算的 score retention。 |
+| baseline_lf_score_retention | metric | none | true | false | false | 完整方法代理记录中的 LF score retention。 |
+| ablated_lf_score_retention | metric | none | true | false | false | 消融后重新计算的 LF score retention。 |
+| baseline_hf_score_retention | metric | none | true | false | false | 完整方法代理记录中的 HF score retention。 |
+| ablated_hf_score_retention | metric | none | true | false | false | 消融后重新计算的 HF score retention。 |
+| baseline_quality_score_proxy | metric | none | true | false | false | 完整方法代理记录中的质量保持代理分数。 |
+| ablated_quality_score_proxy | metric | none | true | false | false | 消融后重新计算的质量保持代理分数。 |
+| baseline_attention_consistency_proxy | metric | none | true | false | false | 完整方法代理记录中的 attention 一致性代理分数。 |
+| ablated_attention_consistency_proxy | metric | none | true | false | false | 消融后重新计算的 attention 一致性代理分数。 |
+| baseline_geometry_reliable | metric | none | true | false | false | 完整方法代理记录中的几何可靠性。 |
+| ablated_geometry_reliable | metric | none | true | false | false | 消融后重新计算的几何可靠性。 |
+| baseline_rescue_applied | metric | none | true | false | false | 完整方法代理记录中的 rescue 触发状态。 |
+| ablated_rescue_applied | metric | none | true | false | false | 消融后重新计算的 rescue 触发状态。 |
+| ablated_raw_content_score_after | metric | none | true | false | false | 消融后攻击后的 raw content score。 |
+| ablated_aligned_content_score_after | metric | none | true | false | false | 消融后攻击后的 aligned content score。 |
+| attestation_required | claim | none | true | false | false | 消融记录是否要求 attestation gate。 |
+| attestation_available | claim | none | true | false | false | 消融记录是否具备 attestation。 |
+| attestation_available_rate | metric | none | false | false | false | 消融分组内 attestation 可用比例。 |
+| formal_method_allowed | claim | none | true | false | false | 消融配置是否允许被视为正式方法候选。 |
+| claim_status | claim | none | true | false | false | 消融记录的论文主张支持边界。 |
+| mechanism_explanation | claim | none | true | false | false | 消融配置对应的机制解释。 |
+| expected_failure_mode | claim | none | true | false | false | 消融配置预期暴露的失效模式。 |
+| ablation_count | metric | none | false | false | false | 内部消融配置数量。 |
+| ablation_record_count | metric | none | false | false | false | 内部消融 records 数量。 |
+| mechanism_group_count | metric | none | false | false | false | 内部消融覆盖的机制组数量。 |
+| mechanism_groups | protocol | none | false | false | false | 内部消融覆盖的机制组集合。 |
+| degradation_chain | claim | none | false | false | false | 按退化强度排序的消融链条。 |
+| degradation_chain_rank | metric | none | false | false | false | 消融表中相对完整方法的退化排序。 |
+| ablation_protocol_ready | protocol | none | false | false | false | 内部消融协议是否已生成完整消融记录和表格。 |
+| mechanism_coverage_ready | protocol | none | false | false | false | 内部消融是否覆盖预定义机制组。 |
+| external_baseline_result_ready | metric | none | false | false | false | 外部 baseline 真实结果是否已可供下游对照。 |
+| compared_to_ablation_id | protocol | none | false | false | false | pairwise delta 对比使用的参考消融标识。 |
+| full_metric_value | metric | none | false | false | false | 完整方法参考行中的指标值。 |
+| ablated_metric_value | metric | none | false | false | false | 消融方法行中的指标值。 |
+| delta_value | metric | none | false | false | false | 消融方法相对完整方法的指标差值。 |
+| degradation_direction | metric | none | false | false | false | 指标差值对应的退化方向解释。 |
+| mechanism_interpretation | claim | none | false | false | false | pairwise delta 行中的机制解释。 |
 | registry_name | governance | none | false | false | false | 来源登记文件的稳定名称。 |
 | registry_status | governance | none | false | false | false | 来源登记文件当前治理状态。 |
 | source_root | artifact | none | false | false | false | 外部 baseline 源码缓存根目录。 |
