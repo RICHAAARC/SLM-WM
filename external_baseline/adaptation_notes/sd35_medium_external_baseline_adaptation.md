@@ -31,3 +31,15 @@
 3. `baseline_observations.json` 与 `baseline_execution_manifest.json` 已落盘。
 4. manifest 中 `formal_result_claim` 为 true, 且 `evidence_paths` 指向真实存在的证据文件。
 5. 下游表格由 observation 或受治理结果记录重建。
+
+## 当前 GPU smoke adapter 边界
+
+Tree-Ring、Gaussian Shading 和 Shallow Diffuse 已接入项目治理内的 SD3.5 latent 级 smoke adapter。该 adapter 使用 SD3.5 Medium 的 16-channel latent 形状, 在 CUDA 可用时执行最小 torch 张量路径, 并为每个 prompt 写出 clean negative 与 positive source observation。
+
+该实现的主要作用是验证以下工程链路:
+
+1. `external_baseline_gpu_smoke_run.ipynb` 能在同一命令计划中调度四个主表 baseline。
+2. 三类旧版 Stable Diffusion baseline 可以被映射到 SD3.5 latent 形状和统一 observation schema。
+3. manifest 明确保留 `formal_result_claim=false` 与 `supports_paper_claim=false`。
+
+该 adapter 不复现第三方论文中的完整 inversion、message coding 或 shallow diffusion 训练 / 采样协议, 因此不得把当前 smoke 分数写入论文级主表。正式对比仍需后续接入官方代码真实复现或受治理结果导入。

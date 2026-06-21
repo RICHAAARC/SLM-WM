@@ -300,6 +300,11 @@ def test_colab_notebook_delegates_external_baseline_gpu_smoke_logic_to_helper() 
     assert "external_baseline_gpu_smoke_ready" in joined_source
     assert "t2smark_real_gpu_smoke_ready" in joined_source
     assert "adapter_observation_count" in joined_source
+    assert "primary_baseline_adapter_ready" in joined_source
+    assert "primary_baseline_observation_count" in joined_source
+    assert "tree_ring" in joined_source
+    assert "gaussian_shading" in joined_source
+    assert "shallow_diffuse" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source

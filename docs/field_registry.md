@@ -955,6 +955,18 @@ Notebook 与 repository module 的跨边界数据
 | extracted_entries | artifact | none | false | false | false | 从历史结果包中解出的可复用文件路径集合。|
 | adapter_execution_ready | artifact | none | false | false | false | 外部 baseline adapter 命令计划是否执行并通过证据边界校验。|
 | adapter_observation_count | metric | none | false | false | false | 外部 baseline adapter 输出的 observation 数量。|
+| primary_baseline_adapter_ready | artifact | none | false | false | false | 四个主表 external baseline adapter 在同一 GPU smoke 命令计划中是否全部跑通。|
+| primary_baseline_adapter_count | metric | none | false | false | false | 本次 GPU smoke 命令计划覆盖的主表 external baseline adapter 数量。|
+| primary_baseline_observation_count | metric | none | false | false | false | 本次 GPU smoke 命令计划中主表 external baseline adapter 输出的 observation 总数。|
+| primary_baseline_ids | protocol | none | false | false | false | 本次 GPU smoke 命令计划覆盖的主表 external baseline id 集合。|
+| ready_primary_baseline_ids | protocol | none | false | false | false | 本次 GPU smoke 命令计划中已经成功输出 observation 的主表 external baseline id 集合。|
+| primary_baseline_observation_count_by_id | metric | none | false | false | false | 按主表 external baseline id 聚合的 observation 数量。|
+| primary_baseline_prompt_plan_path | artifact | none | false | false | false | 三类 latent smoke adapter 读取的最小 prompt 计划路径。|
+| adapter_boundary | governance | none | false | false | false | adapter observation 或 manifest 对工程 smoke 与正式论文证据边界的说明。|
+| execution_device | runtime | none | false | false | false | adapter 张量或诊断分数实际执行设备。|
+| torch_available | runtime | none | false | false | false | adapter 运行环境中是否可导入 torch。|
+| adapter_seed | runtime | none | false | false | false | adapter 为单条 prompt 派生的可复现整数种子。|
+| score_metadata | runtime | none | false | false | false | adapter manifest 中按 prompt 记录的轻量分数计算元数据。|
 | adapter_unsupported_reason | governance | none | false | false | false | 外部 baseline adapter 未能通过 smoke 链路时记录的边界原因。|
 | official_result_generated | artifact | none | false | false | false | 外部 baseline 官方结果是否由本次命令生成。|
 | official_result_reused | artifact | none | false | false | false | 外部 baseline 官方结果是否由本地或历史结果复用。|

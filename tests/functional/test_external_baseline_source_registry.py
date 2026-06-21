@@ -59,6 +59,10 @@ def test_external_baseline_source_registry_matches_adapter_specs_when_present() 
         if item["comparison_group"] == "primary":
             assert item["adapter_path"] == PRIMARY_BASELINE_ADAPTERS[item["baseline_id"]]
             assert Path(item["adapter_path"]).is_file()
-            assert item["adapter_status"] in {"adapter_contract_ready", "sd35_native_result_adapter_ready"}
+            assert item["adapter_status"] in {
+                "adapter_contract_ready",
+                "sd35_latent_smoke_adapter_ready",
+                "sd35_native_result_adapter_ready",
+            }
         else:
             assert item["adapter_status"] == "source_registered_adapter_not_planned"

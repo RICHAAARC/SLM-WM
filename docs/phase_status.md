@@ -969,7 +969,7 @@
 | input_manifest | `external_baseline/source_registry.json` |
 | expected_output_manifest | `outputs/external_baseline_execution/baseline_execution_manifest.json` |
 | expected_outputs | `outputs/external_baseline_command_plan/baseline_command_plan.json`; `outputs/external_baseline_command_plan/baseline_command_plan_manifest.json`; `outputs/external_baseline_execution/baseline_command_results.json`; `outputs/external_baseline_execution/baseline_observations.json`; `outputs/external_baseline_execution/baseline_execution_manifest.json` |
-| blocking_items | Tree-Ring、Gaussian Shading 和 Shallow Diffuse 仍需要真实 SD3.5 Medium GPU adapter 实装; 当前只提供可审计命令契约。 |
+| blocking_items | Tree-Ring、Gaussian Shading 和 Shallow Diffuse 已具备 SD3.5 latent 级 GPU smoke adapter, 但仍需要官方完整复现或受治理结果导入才能支撑论文级外部 baseline 对比。 |
 | fallback_path | 若官方源码暂不能直接适配 SD3.5 Medium, 只能保留 `contract-only` 诊断或导入受治理结果, 不得声明论文级 baseline 结论。 |
 | invariants | 官方源码快照位于 `external_baseline/*/*/source/` 且不由 git 跟踪; 项目维护 adapter、命令计划脚本、执行脚本和证据校验脚本必须接受 harness 审计。 |
 
@@ -979,7 +979,7 @@
 2. `tools/harness/lib/file_scanner.py` 已改为扫描 `external_baseline/` 中的 adapter、README 和登记文件, 但跳过第三方源码快照。
 3. 新增 `experiments/baselines/command_adapter.py`、`command_plan.py`、`observation_io.py` 和 `evidence_validator.py`, 形成 command plan、execution、observation 和 evidence 的统一入口。
 4. 新增 `scripts/build_external_baseline_command_plan.py`、`scripts/run_external_baseline_command_plan.py` 和 `scripts/validate_external_baseline_evidence.py`, 所有仓库命令输出默认写入 `outputs/`。
-5. 主表 baseline 已新增项目维护 adapter 路径。T2SMark adapter 可读取官方 `results.json`; Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前提供 `contract-only` 诊断入口, 真实指标仍需补齐 SD3.5 Medium GPU 运行路径。
+5. 主表 baseline 已新增项目维护 adapter 路径。T2SMark adapter 可读取官方 `results.json`; Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前提供 SD3.5 latent 级 GPU smoke adapter, 正式指标仍需补齐官方完整复现或受治理导入路径。
 6. `external_baseline/source_registry.json` 已补充 `adapter_path`、`adapter_status`、`model_alignment_status` 和 `official_source_tracked` 字段。
 
 ### 当前边界
@@ -1000,16 +1000,17 @@
 | input_manifest | `external_baseline/source_registry.json`; Google Drive 历史 `external_baseline_gpu_smoke_package_*.zip` 可选 |
 | expected_output_manifest | `outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_manifest.local.json` |
 | expected_outputs | `outputs/external_baseline_gpu_smoke/t2smark_official/**`; `outputs/external_baseline_gpu_smoke/execution/baseline_observations.json`; `outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_summary.json`; Google Drive `SLM/external_baseline_gpu_smoke/external_baseline_gpu_smoke_package_<utc>_<short_commit>.zip` |
-| blocking_items | 该 Notebook 只覆盖 T2SMark SD3.5 Medium 最小真实 GPU smoke, 样本量默认为 1, 不支持论文级外部 baseline 对比结论。 |
+| blocking_items | 该 Notebook 已覆盖 T2SMark SD3.5 Medium 最小真实 GPU smoke, 并把 Tree-Ring、Gaussian Shading、Shallow Diffuse 接入 SD3.5 latent 级 GPU smoke adapter; 样本量默认为 1, 仍不支持论文级外部 baseline 对比结论。 |
 | fallback_path | 若 Google Drive 中已有可复用官方结果包, helper 会先解包复用; 若缺失, 则按源码登记表下载 T2SMark 官方源码并重新生成官方 `results.json`。 |
 | invariants | Notebook 只负责远程入口和打包, 真实逻辑位于 `paper_workflow/colab_utils/external_baseline_gpu_smoke.py`; 所有持久输出写入 `outputs/` 并镜像到 Google Drive。 |
 
 ### external baseline GPU smoke 入口内容
 
-1. 新增 `paper_workflow/external_baseline_gpu_smoke_run.ipynb`, 支持 Colab 冷启动挂载 Google Drive、拉取仓库、读取 `HF_TOKEN`、检查 CUDA、执行最小 T2SMark SD3.5 Medium 真实 GPU smoke。
-2. 新增 `paper_workflow/colab_utils/external_baseline_gpu_smoke.py`, 将历史包复用、官方源码缓存补齐、官方 `results.json` 生成、image pair 构造、adapter 命令计划执行和 zip 打包收敛到 helper。
+1. 新增 `paper_workflow/external_baseline_gpu_smoke_run.ipynb`, 支持 Colab 冷启动挂载 Google Drive、拉取仓库、读取 `HF_TOKEN`、检查 CUDA、执行最小 T2SMark SD3.5 Medium 真实 GPU smoke, 并在同一命令计划中运行四个主表 external baseline adapter。
+2. 新增 `paper_workflow/colab_utils/external_baseline_gpu_smoke.py`, 将历史包复用、官方源码缓存补齐、官方 `results.json` 生成、image pair 构造、主表 baseline adapter 命令计划执行和 zip 打包收敛到 helper。
 3. 前序结果判断边界为: 优先查找 Google Drive `external_baseline_gpu_smoke_package_*.zip`, 仅解出 `outputs/external_baseline_gpu_smoke/` 下可复用文件; 若 `results.json` 存在且允许复用, 不重新运行官方推理; 否则执行真实 GPU 生成。
 4. 当前产物显式设置 `supports_paper_claim=false`, 只能证明外部 baseline 链路可运行, 不能替代 full-main prompt split、样本量冻结、固定 FPR 与 baseline 主表统计。
+5. Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前采用项目治理内的 SD3.5 latent smoke adapter: 它验证 16-channel latent 形状、GPU 张量路径、clean / positive observation 输出和 manifest 边界, 不等同于第三方官方完整复现。
 
 
 ### external baseline GPU smoke Colab 兼容修正

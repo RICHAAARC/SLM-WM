@@ -29,6 +29,7 @@ DEFAULT_T2SMARK_INVERSION_ENTRY = "external_baseline/primary/t2smark/source/src/
 DEFAULT_SOURCE_REGISTRY_PATH = "external_baseline/source_registry.json"
 DEFAULT_T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 DEFAULT_PACKAGE_PATTERN = "external_baseline_gpu_smoke_package_*.zip"
+PRIMARY_BASELINE_METHODS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 T2SMARK_INVERSION_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为新版 Diffusers 显式补齐注解依赖。"
 T2SMARK_INVERSION_COMPAT_BLOCK = f"""{T2SMARK_INVERSION_COMPAT_MARKER}
 import torch
@@ -46,6 +47,7 @@ PACKAGE_EXTRA_PATHS = (
     "external_baseline/README.md",
     "external_baseline/source_registry.json",
     "external_baseline/adaptation_notes/sd35_medium_external_baseline_adaptation.md",
+    "external_baseline/primary/sd35_diffusion_baseline_common.py",
     "external_baseline/primary/t2smark/README.md",
     "external_baseline/primary/t2smark/adapter/run_slm_eval.py",
     "external_baseline/primary/tree_ring/adapter/run_slm_eval.py",
@@ -72,6 +74,7 @@ class ExternalBaselineGpuSmokeConfig:
     num_inference_steps: int = 8
     num_inversion_steps: int = 3
     guidance_scale: float = 4.0
+    primary_baseline_max_samples: int = 1
     reuse_existing: bool = True
     reuse_prior_drive_package: bool = True
     force_generate: bool = False
@@ -119,8 +122,8 @@ def write_json(path: Path, payload: Any) -> None:
     path.write_text(stable_json_text(payload), encoding="utf-8")
 
 
-def read_json(path: Path) -> dict[str, Any]:
-    """读取 JSON 对象文件。"""
+def read_json(path: Path) -> Any:
+    """读取 JSON 文件。"""
 
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -167,6 +170,7 @@ def output_paths(root_path: Path, config: ExternalBaselineGpuSmokeConfig) -> dic
         "official_settings": official_run_dir / "settings.json",
         "official_images": official_run_dir / "images",
         "t2smark_prompts": output_dir / "t2smark_smoke_prompts.json",
+        "primary_prompt_plan": output_dir / "primary_baseline_smoke_prompt_plan.json",
         "image_pairs": output_dir / "t2smark_image_pairs.json",
         "command_plan": output_dir / "baseline_command_plan.json",
         "adapter_output_root": adapter_output_root,
@@ -245,6 +249,20 @@ def write_t2smark_prompt_input(paths: dict[str, Path]) -> Path:
     }
     write_json(paths["t2smark_prompts"], prompt_payload)
     return paths["t2smark_prompts"]
+
+
+def write_primary_baseline_prompt_plan(paths: dict[str, Path]) -> Path:
+    """写出三类 latent smoke adapter 与 T2SMark 共用的最小 prompt 计划。"""
+
+    prompt_rows = [
+        {
+            "prompt_id": "primary_baseline_prompt_00000",
+            "split": "gpu_smoke",
+            "prompt_text": "a small ceramic fox sitting on a wooden desk under soft studio lighting",
+        }
+    ]
+    write_json(paths["primary_prompt_plan"], prompt_rows)
+    return paths["primary_prompt_plan"]
 
 
 def run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, Any]:
@@ -498,31 +516,56 @@ def build_t2smark_image_pairs(root_path: Path, config: ExternalBaselineGpuSmokeC
     return current_rows
 
 
-def build_and_run_t2smark_adapter(
+def build_and_run_primary_baseline_adapters(
     root_path: Path,
     config: ExternalBaselineGpuSmokeConfig,
     paths: dict[str, Path],
 ) -> dict[str, Any]:
-    """生成命令计划并运行 T2SMark 结果 adapter。"""
+    """生成命令计划并运行四个主表 external baseline adapter。"""
 
+    prompt_plan_path = write_primary_baseline_prompt_plan(paths)
     build_command = [
         sys.executable,
         "scripts/build_external_baseline_command_plan.py",
         "--root",
         str(root_path),
         "--methods",
-        "t2smark",
+        ",".join(PRIMARY_BASELINE_METHODS),
         "--out",
         str(paths["command_plan"]),
         "--output-root",
         str(paths["adapter_output_root"]),
+        "--prompt-plan",
+        str(prompt_plan_path),
         "--image-pairs",
         str(paths["image_pairs"]),
         "--t2smark-results",
         str(paths["official_results"]),
         "--timeout-seconds",
         str(config.timeout_seconds),
+        "--model-id",
+        str(config.model_id),
+        "--torch-dtype",
+        "float16",
+        "--height",
+        "512",
+        "--width",
+        "512",
+        "--latent-channels",
+        "16",
+        "--num-inference-steps",
+        str(config.num_inference_steps),
+        "--num-inversion-steps",
+        str(config.num_inversion_steps),
+        "--guidance-scale",
+        str(config.guidance_scale),
+        "--seed",
+        str(config.seed),
+        "--max-samples",
+        str(config.primary_baseline_max_samples),
     ]
+    if config.require_cuda:
+        build_command.append("--require-cuda")
     build_result = run_command(build_command, cwd=root_path, timeout_seconds=300)
     write_json(paths["output_dir"] / "baseline_command_plan_builder_result.json", build_result)
     if build_result["return_code"] != 0:
@@ -552,14 +595,44 @@ def build_and_run_t2smark_adapter(
     validation_result = run_command(validation_command, cwd=root_path, timeout_seconds=300)
     write_json(paths["output_dir"] / "baseline_evidence_validation_result.json", validation_result)
     execution_manifest = read_json(paths["execution_manifest"]) if paths["execution_manifest"].is_file() else {}
+    command_results = json.loads(paths["command_results"].read_text(encoding="utf-8")) if paths["command_results"].is_file() else []
+    observation_count_by_baseline = {
+        str(row.get("baseline_id")): int(row.get("observation_count", 0))
+        for row in command_results
+        if int(row.get("return_code", 1)) == 0
+    }
+    ready_baseline_ids = [
+        baseline_id
+        for baseline_id in PRIMARY_BASELINE_METHODS
+        if observation_count_by_baseline.get(baseline_id, 0) > 0
+    ]
+    primary_ready = set(ready_baseline_ids) == set(PRIMARY_BASELINE_METHODS)
+    adapter_execution_ready = validation_result["return_code"] == 0 and primary_ready
     return {
-        "adapter_execution_ready": validation_result["return_code"] == 0,
-        "adapter_unsupported_reason": "" if validation_result["return_code"] == 0 else "evidence_validation_failed",
+        "adapter_execution_ready": adapter_execution_ready,
+        "adapter_unsupported_reason": "" if adapter_execution_ready else "primary_baseline_adapter_smoke_incomplete",
         "adapter_observation_count": int(execution_manifest.get("observation_count", 0)),
+        "primary_baseline_adapter_ready": primary_ready,
+        "primary_baseline_adapter_count": len(PRIMARY_BASELINE_METHODS),
+        "primary_baseline_observation_count": sum(observation_count_by_baseline.values()),
+        "primary_baseline_ids": list(PRIMARY_BASELINE_METHODS),
+        "ready_primary_baseline_ids": ready_baseline_ids,
+        "primary_baseline_observation_count_by_id": observation_count_by_baseline,
+        "primary_baseline_prompt_plan_path": relative_or_absolute(prompt_plan_path, root_path),
         "baseline_execution_manifest_path": relative_or_absolute(paths["execution_manifest"], root_path),
         "baseline_observations_path": relative_or_absolute(paths["baseline_observations"], root_path),
         "command_plan_path": relative_or_absolute(paths["command_plan"], root_path),
     }
+
+
+def build_and_run_t2smark_adapter(
+    root_path: Path,
+    config: ExternalBaselineGpuSmokeConfig,
+    paths: dict[str, Path],
+) -> dict[str, Any]:
+    """兼容旧调用名称, 实际运行四个主表 external baseline adapter。"""
+
+    return build_and_run_primary_baseline_adapters(root_path, config, paths)
 
 
 def write_failure_outputs(
@@ -579,6 +652,10 @@ def write_failure_outputs(
         "t2smark_real_gpu_smoke_ready": False,
         "adapter_execution_ready": False,
         "adapter_observation_count": 0,
+        "primary_baseline_adapter_ready": False,
+        "primary_baseline_adapter_count": len(PRIMARY_BASELINE_METHODS),
+        "primary_baseline_observation_count": 0,
+        "primary_baseline_ids": list(PRIMARY_BASELINE_METHODS),
         "supports_paper_claim": False,
         "unsupported_reason": f"{type(error).__name__}:{error}",
         "environment_report_path": relative_or_absolute(paths["environment_report"], root_path),
@@ -613,7 +690,7 @@ def write_external_baseline_gpu_smoke_outputs(
         device_report = ensure_cuda_if_requested(config.require_cuda)
         official_report = run_t2smark_official_if_needed(root_path, config, paths)
         image_pairs = build_t2smark_image_pairs(root_path, config, paths)
-        adapter_report = build_and_run_t2smark_adapter(root_path, config, paths)
+        adapter_report = build_and_run_primary_baseline_adapters(root_path, config, paths)
         environment_report = build_runtime_environment_report()
         environment_report["external_baseline_device_report"] = device_report
         write_json(paths["environment_report"], environment_report)
@@ -623,7 +700,9 @@ def write_external_baseline_gpu_smoke_outputs(
     official_ready = paths["official_results"].is_file() and official_report.get("official_return_code") == 0
     adapter_ready = bool(adapter_report.get("adapter_execution_ready"))
     observation_count = int(adapter_report.get("adapter_observation_count", 0))
-    run_ready = bool(official_ready and adapter_ready and observation_count > 0)
+    primary_ready = bool(adapter_report.get("primary_baseline_adapter_ready"))
+    primary_observation_count = int(adapter_report.get("primary_baseline_observation_count", 0))
+    run_ready = bool(official_ready and adapter_ready and primary_ready and observation_count > 0)
     unsupported_reason = "" if run_ready else "external_baseline_gpu_smoke_incomplete"
     source_patch_report = official_report.get("source_report", {}).get("source_patch_report", {})
     summary = {
@@ -639,6 +718,12 @@ def write_external_baseline_gpu_smoke_outputs(
         "image_pair_count": len(image_pairs),
         "adapter_execution_ready": adapter_ready,
         "adapter_observation_count": observation_count,
+        "primary_baseline_adapter_ready": primary_ready,
+        "primary_baseline_adapter_count": int(adapter_report.get("primary_baseline_adapter_count", len(PRIMARY_BASELINE_METHODS))),
+        "primary_baseline_observation_count": primary_observation_count,
+        "primary_baseline_ids": list(adapter_report.get("primary_baseline_ids", PRIMARY_BASELINE_METHODS)),
+        "ready_primary_baseline_ids": list(adapter_report.get("ready_primary_baseline_ids", [])),
+        "primary_baseline_prompt_plan_path": str(adapter_report.get("primary_baseline_prompt_plan_path", "")),
         "supports_paper_claim": False,
         "unsupported_reason": unsupported_reason,
         "official_results_path": relative_or_absolute(paths["official_results"], root_path),
@@ -656,6 +741,8 @@ def write_external_baseline_gpu_smoke_outputs(
     input_paths = [relative_or_absolute(paths["official_results"], root_path), relative_or_absolute(paths["image_pairs"], root_path)]
     if paths["t2smark_prompts"].exists():
         input_paths.append(relative_or_absolute(paths["t2smark_prompts"], root_path))
+    if paths["primary_prompt_plan"].exists():
+        input_paths.append(relative_or_absolute(paths["primary_prompt_plan"], root_path))
     output_paths_for_manifest = [
         relative_or_absolute(paths["summary"], root_path),
         relative_or_absolute(paths["environment_report"], root_path),
@@ -675,6 +762,8 @@ def write_external_baseline_gpu_smoke_outputs(
             "run_decision": summary["run_decision"],
             "external_baseline_gpu_smoke_ready": run_ready,
             "adapter_observation_count": observation_count,
+            "primary_baseline_adapter_ready": primary_ready,
+            "primary_baseline_observation_count": primary_observation_count,
             "supports_paper_claim": False,
         },
     ).to_dict()
@@ -697,6 +786,7 @@ def build_default_config() -> ExternalBaselineGpuSmokeConfig:
         num_inference_steps=int(os.environ.get("SLM_WM_T2SMARK_NUM_INFERENCE_STEPS", "8")),
         num_inversion_steps=int(os.environ.get("SLM_WM_T2SMARK_NUM_INVERSION_STEPS", "3")),
         guidance_scale=float(os.environ.get("SLM_WM_T2SMARK_GUIDANCE_SCALE", "4.0")),
+        primary_baseline_max_samples=int(os.environ.get("SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES", "1")),
         reuse_existing=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REUSE_EXISTING", "1") != "0",
         reuse_prior_drive_package=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REUSE_DRIVE", "1") != "0",
         force_generate=os.environ.get("SLM_WM_EXTERNAL_BASELINE_FORCE_GENERATE", "0") == "1",

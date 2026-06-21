@@ -20,6 +20,8 @@
 - `primary/shallow_diffuse/`: Shallow Diffuse, 需要 SD3.5 shallow latent update 适配。
 - `primary/t2smark/`: T2SMark, 官方源码包含 SD3.5 入口, 当前 adapter 负责结果转写。
 
+当前 `external_baseline_gpu_smoke_run.ipynb` 会在同一命令计划中运行四个主表 baseline。Tree-Ring、Gaussian Shading 和 Shallow Diffuse 使用 SD3.5 latent 级 smoke adapter 验证 GPU 张量路径与 observation 落盘协议; T2SMark 使用官方 SD3.5 入口结果转写。该链路仍保持 `supports_paper_claim=false`。
+
 ## 补充表 baseline
 
 补充表 baseline 先登记来源与证据边界, 不默认进入主表对比命令计划。
