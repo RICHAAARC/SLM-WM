@@ -135,7 +135,7 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
             "sdedit_regeneration": (138, 100, 82),
             "diffusion_purification": (124, 91, 72),
         }
-        return Image.new("RGB", source_image.size, color=channels[spec.attack_name])
+        return Image.new("RGB", (source_image.width * 2, source_image.height * 2), color=channels[spec.attack_name])
 
     def fake_run_strict_ddim(
         source_image: Image.Image,
@@ -144,7 +144,7 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
         seed: int,
         prompt_text: str,
     ) -> Image.Image:
-        return Image.new("RGB", source_image.size, color=(130, 96, 78))
+        return Image.new("RGB", (source_image.width * 2, source_image.height * 2), color=(130, 96, 78))
 
     monkeypatch.setattr(real_attack_evaluation, "load_img2img_pipeline", fake_load_pipeline)
     monkeypatch.setattr(real_attack_evaluation, "run_pipeline_attack", fake_run_pipeline_attack)
@@ -180,6 +180,9 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     assert all(record["attacked_image_digest"] for record in records)
     assert all(record["supports_paper_claim"] is False for record in records)
     assert all((tmp_path / str(row["attacked_image_path"])).exists() for row in registry_rows)
+    for row in registry_rows:
+        with Image.open(tmp_path / str(row["attacked_image_path"])) as attacked_image:
+            assert attacked_image.size == (32, 32)
     assert (output_dir / "real_attack_family_metrics.csv").read_text(encoding="utf-8").count("\n") >= 5
     formal_records = read_jsonl(output_dir / "formal_attack_detection_records.jsonl")
     assert len(formal_records) == 4

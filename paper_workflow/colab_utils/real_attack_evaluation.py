@@ -420,6 +420,16 @@ def load_rgb_image(path: Path, config: RealAttackEvaluationConfig) -> Any:
     return image.resize((config.width, config.height))
 
 
+def normalize_attacked_image_size(attacked_image: Any, source_image: Any) -> Any:
+    """把 attacked image 对齐到 source image 尺寸, 保证后续质量指标可直接逐像素比较."""
+    if getattr(attacked_image, "size", None) == getattr(source_image, "size", None):
+        return attacked_image.convert("RGB") if hasattr(attacked_image, "convert") else attacked_image
+    from PIL import Image
+
+    resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
+    return attacked_image.convert("RGB").resize(source_image.size, resampling)
+
+
 def add_sdedit_noise(image: Any, noise_level: float, seed: int) -> Any:
     """为 SDEdit 风格攻击构造带噪输入图像."""
     import numpy as np
@@ -451,13 +461,15 @@ def run_pipeline_attack(
         prompt=prompt_text,
         negative_prompt=config.negative_prompt,
         image=input_image,
+        height=config.height,
+        width=config.width,
         strength=float(spec.attack_parameters["denoise_strength"]),
         num_inference_steps=int(spec.attack_parameters.get("purification_steps", config.inference_steps)),
         guidance_scale=config.guidance_scale,
         generator=generator,
         output_type="pil",
     )
-    return output.images[0]
+    return normalize_attacked_image_size(output.images[0], source_image)
 
 
 def encode_prompt_for_ddim(pipe: Any, config: RealAttackEvaluationConfig, prompt_text: str, do_guidance: bool) -> Any:
@@ -975,6 +987,7 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
             attack_seed = config.seed + source_index * 101 + attack_index
             try:
                 attacked_image = run_pipeline_attack(pipeline, source_image, spec, config, attack_seed, prompt_text)
+                attacked_image = normalize_attacked_image_size(attacked_image, source_image)
                 attacked_path = attacked_dir / f"{source_path.stem}_{spec.attack_name}_{source_digest[:8]}.png"
                 attacked_image.save(attacked_path)
                 record, registry_row = build_attack_record(
@@ -1010,6 +1023,7 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
             attack_seed = config.seed + source_index * 101 + 1000 + attack_index
             try:
                 attacked_image = run_strict_ddim_inversion_attack(source_image, spec, config, attack_seed, prompt_text)
+                attacked_image = normalize_attacked_image_size(attacked_image, source_image)
                 attacked_path = attacked_dir / f"{source_path.stem}_{spec.attack_name}_{source_digest[:8]}.png"
                 attacked_image.save(attacked_path)
                 record, registry_row = build_attack_record(
