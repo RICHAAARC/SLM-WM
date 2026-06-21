@@ -42,6 +42,11 @@ from experiments.baselines.primary_reproduction import (
     build_primary_result_templates,
     default_primary_command_profiles,
 )
+from experiments.baselines.primary_evidence import (
+    PrimaryBaselineEvidenceRecord,
+    build_primary_baseline_evidence_records,
+    build_primary_baseline_evidence_summary,
+)
 
 __all__ = [
     "BaselineCommandResult",
@@ -54,6 +59,7 @@ __all__ = [
     "PRIMARY_BASELINE_IDS",
     "PrimaryBaselineCommandProfile",
     "PrimaryBaselineExecutionPlan",
+    "PrimaryBaselineEvidenceRecord",
     "PrimaryBaselineResultTemplate",
     "aggregate_baseline_metrics",
     "aggregate_slm_proxy_metrics",
@@ -63,6 +69,8 @@ __all__ = [
     "build_baseline_result_index",
     "build_comparison_rows",
     "build_primary_baseline_execution_plans",
+    "build_primary_baseline_evidence_records",
+    "build_primary_baseline_evidence_summary",
     "build_primary_baseline_report",
     "build_primary_result_templates",
     "default_baseline_specs",

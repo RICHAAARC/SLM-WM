@@ -1027,3 +1027,11 @@
 2. 修正策略是将 image pair 构造改为以当前 `t2smark_official/.../images/` 目录为准: 若已有 image pair 与当前图像路径或 digest 不一致, helper 会自动重写 `t2smark_image_pairs.json`。
 3. 重新生成或刷新方式为重新运行 `paper_workflow/external_baseline_gpu_smoke_run.ipynb`; helper 会在官方推理或结果复用后自动执行刷新, 不需要手工编辑 JSON。
 
+
+### external baseline 主表证据边界推进
+
+1. 新增 `experiments/baselines/primary_evidence.py`, 将四个主表 baseline 的 adapter smoke 链路状态与正式共同协议结果边界分开记录。
+2. 新增 `scripts/write_primary_baseline_evidence_outputs.py`, 可读取 `external_baseline_gpu_smoke` 的 command results 与 observations, 也可直接读取 GPU smoke zip 包, 写出 `outputs/primary_baseline_evidence/primary_baseline_evidence_records.jsonl`、summary 和 manifest。
+3. 该证据边界明确记录: Tree-Ring、Gaussian Shading 和 Shallow Diffuse 虽已具备 SD3.5 latent smoke 链路, 但仍缺方法忠实 SD3.5 adapter、full-main prompt 协议、fixed-FPR 校准、攻击矩阵检测和正式证据路径。
+4. 该推进不改变 `supports_paper_claim=false`; 作用是防止 smoke observation 被误升级为论文级主表 external baseline 指标。
+

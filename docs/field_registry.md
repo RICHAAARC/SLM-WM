@@ -917,6 +917,9 @@ Notebook 与 repository module 的跨边界数据
 | working_directory | runtime | none | false | false | false | 外部 baseline 命令执行工作目录。 |
 | timeout_seconds | runtime | none | false | false | false | 外部 baseline 命令允许运行的最长秒数。 |
 | command_results_path | artifact | none | false | false | false | 外部 baseline 命令结果文件路径。 |
+| observations_path | artifact | none | false | false | false | 主表 baseline 证据边界读取的 observation 输入路径。 |
+| source_registry_path | artifact | none | false | false | false | 主表 baseline 证据边界读取的源码登记输入路径。 |
+| smoke_package_path | artifact | none | false | false | false | 主表 baseline 证据边界读取的 external baseline GPU smoke zip 包路径。 |
 | execution_digest | artifact | none | true | false | false | 外部 baseline 执行 manifest 的稳定摘要。 |
 | evidence_paths | artifact | none | true | false | false | 外部 baseline 正式结果所绑定的证据文件路径集合。 |
 | formal_result_claim | claim | none | false | false | false | 外部 baseline 结果是否声明可作为正式论文对比证据。 |
@@ -962,6 +965,25 @@ Notebook 与 repository module 的跨边界数据
 | ready_primary_baseline_ids | protocol | none | false | false | false | 本次 GPU smoke 命令计划中已经成功输出 observation 的主表 external baseline id 集合。|
 | primary_baseline_observation_count_by_id | metric | none | false | false | false | 按主表 external baseline id 聚合的 observation 数量。|
 | primary_baseline_prompt_plan_path | artifact | none | false | false | false | 三类 latent smoke adapter 读取的最小 prompt 计划路径。|
+| primary_baseline_evidence_id | artifact | none | true | false | false | 主表 external baseline 证据边界记录的稳定标识。|
+| primary_baseline_evidence_digest | artifact | none | true | false | false | 主表 external baseline 证据边界记录的稳定摘要。|
+| adapter_smoke_ready | artifact | none | false | false | false | 单个主表 external baseline 的 adapter smoke 命令是否成功并产生 observation。|
+| adapter_smoke_ready_count | metric | none | false | false | false | adapter smoke 已成功的主表 external baseline 数量。|
+| adapter_smoke_ready_ids | protocol | none | false | false | false | adapter smoke 已成功的主表 external baseline id 集合。|
+| adapter_smoke_observation_count | metric | none | false | false | false | 单个主表 external baseline 在 smoke 链路中产生的 observation 数量。|
+| adapter_smoke_execution_devices | runtime | none | false | false | false | 单个主表 external baseline smoke observation 中记录的执行设备集合。|
+| adapter_smoke_sample_roles | protocol | none | false | false | false | 单个主表 external baseline smoke observation 中记录的样本角色集合。|
+| adapter_smoke_latent_shapes | runtime | none | false | false | false | 单个主表 external baseline smoke observation 中记录的 latent shape 集合。|
+| method_faithful_adapter_ready | governance | none | false | false | false | 主表 external baseline 是否已达到方法忠实 SD3.5 适配边界。|
+| full_main_prompt_protocol_ready | governance | none | false | false | false | 主表 external baseline 是否已覆盖 full-main prompt 协议。|
+| fixed_fpr_baseline_calibration_ready | governance | none | false | false | false | 主表 external baseline 是否已完成 fixed-FPR 校准。|
+| attack_matrix_baseline_detection_ready | governance | none | false | false | false | 主表 external baseline 是否已完成共同攻击矩阵下的检测。|
+| formal_evidence_paths_ready | governance | none | false | false | false | 主表 external baseline 是否已绑定正式证据路径。|
+| formal_result_ready | governance | none | false | false | false | 单个主表 external baseline 是否已具备正式共同协议结果。|
+| formal_result_ready_count | metric | none | false | false | false | 已具备正式共同协议结果的主表 external baseline 数量。|
+| formal_result_ready_ids | protocol | none | false | false | false | 已具备正式共同协议结果的主表 external baseline id 集合。|
+| primary_baseline_formal_ready | governance | none | false | false | false | 四个主表 external baseline 是否全部具备正式共同协议结果。|
+| blocking_reasons | governance | none | false | false | false | 证据边界记录中阻断正式结果声明的原因集合。|
 | adapter_boundary | governance | none | false | false | false | adapter observation 或 manifest 对工程 smoke 与正式论文证据边界的说明。|
 | execution_device | runtime | none | false | false | false | adapter 张量或诊断分数实际执行设备。|
 | torch_available | runtime | none | false | false | false | adapter 运行环境中是否可导入 torch。|
