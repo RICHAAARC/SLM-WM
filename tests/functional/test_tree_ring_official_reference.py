@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
@@ -19,6 +20,7 @@ from paper_workflow.colab_utils.tree_ring_official_reference import (
     build_official_command,
     ensure_tree_ring_source_available,
     output_paths,
+    package_tree_ring_official_reference_outputs,
     parse_metric_text,
     patch_tree_ring_model_repository_layout,
     prepare_tree_ring_legacy_environment,
@@ -316,6 +318,67 @@ def test_tree_ring_official_reference_helper_imports_governed_summary(tmp_path: 
     assert summary["governed_reference_record_count"] == 1
     assert records_path.read_text(encoding="utf-8").strip()
     assert json.loads(validation_path.read_text(encoding="utf-8"))["reference_import_ready"] is True
+
+
+@pytest.mark.quick
+def test_tree_ring_official_reference_package_embeds_archive_self_description(tmp_path: Path) -> None:
+    """打包结果应包含归档摘要、归档 manifest 和输入清单。"""
+
+    output_dir = tmp_path / "outputs" / "tree_ring_official_reference"
+    output_dir.mkdir(parents=True)
+    (output_dir / "tree_ring_official_reference_summary.json").write_text(
+        json.dumps({"run_decision": "pass"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    record = package_tree_ring_official_reference_outputs(
+        root=tmp_path,
+        output_dir="outputs/tree_ring_official_reference",
+        drive_output_dir=str(tmp_path / "drive" / "SLM" / "tree_ring_official_reference"),
+        archive_name="tree_ring_official_reference_package.zip",
+    )
+
+    archive_path = tmp_path / record.archive_path
+    expected_entries = {
+        "outputs/tree_ring_official_reference/tree_ring_official_reference_summary.json",
+        "outputs/tree_ring_official_reference/tree_ring_official_reference_package_input_manifest.json",
+        "outputs/tree_ring_official_reference/tree_ring_official_reference_archive_summary.json",
+        "outputs/tree_ring_official_reference/tree_ring_official_reference_archive_manifest.local.json",
+    }
+    with ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+        package_manifest = json.loads(
+            archive.read(
+                "outputs/tree_ring_official_reference/tree_ring_official_reference_package_input_manifest.json"
+            ).decode("utf-8")
+        )
+        embedded_summary = json.loads(
+            archive.read("outputs/tree_ring_official_reference/tree_ring_official_reference_archive_summary.json").decode(
+                "utf-8"
+            )
+        )
+        embedded_manifest = json.loads(
+            archive.read(
+                "outputs/tree_ring_official_reference/tree_ring_official_reference_archive_manifest.local.json"
+            ).decode("utf-8")
+        )
+
+    local_summary = json.loads(
+        (output_dir / "tree_ring_official_reference_archive_summary.json").read_text(encoding="utf-8")
+    )
+    local_manifest = json.loads(
+        (output_dir / "tree_ring_official_reference_archive_manifest.local.json").read_text(encoding="utf-8")
+    )
+
+    assert expected_entries <= names
+    assert package_manifest["entry_count"] == len(names)
+    assert package_manifest["embedded_digest_scope"] == "external_summary_records_final_archive_digest"
+    assert embedded_summary["metadata"]["embedded_digest_scope"] == "external_summary_records_final_archive_digest"
+    assert embedded_manifest["metadata"]["embedded_digest_scope"] == "external_summary_records_final_archive_digest"
+    assert local_summary["archive_digest"] == record.archive_digest
+    assert local_summary["drive_archive_digest"] == record.drive_archive_digest
+    assert local_manifest["metadata"]["archive_digest"] == record.archive_digest
+    assert local_manifest["metadata"]["drive_archive_digest"] == record.drive_archive_digest
 
 
 @pytest.mark.quick

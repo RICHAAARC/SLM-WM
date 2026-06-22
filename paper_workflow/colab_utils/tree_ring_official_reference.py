@@ -1047,17 +1047,32 @@ def package_tree_ring_official_reference_outputs(
     for stale_path in (package_manifest_path, summary_path, manifest_path):
         if stale_path.exists():
             stale_path.unlink()
-    entries = collect_package_entries(root_path, source_dir, archive_path)
+    content_entries = collect_package_entries(root_path, source_dir, archive_path)
+    entries = tuple((*content_entries, package_manifest_path, summary_path, manifest_path))
     package_manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "entry_paths": [entry.relative_to(root_path).as_posix() for entry in entries],
         "entry_count": len(entries),
+        "embedded_digest_scope": "external_summary_records_final_archive_digest",
     }
     write_json(package_manifest_path, package_manifest)
+    preliminary_record = TreeRingOfficialReferenceArchiveRecord(
+        archive_path=relative_or_absolute(archive_path, root_path),
+        archive_digest="",
+        archive_entry_count=len(entries),
+        drive_archive_path=str(Path(drive_output_dir).expanduser() / archive_name),
+        drive_archive_digest="",
+        metadata={
+            "drive_output_dir": str(Path(drive_output_dir).expanduser()),
+            "embedded_digest_scope": "external_summary_records_final_archive_digest",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    write_json(summary_path, preliminary_record.to_dict())
     archive_manifest = build_artifact_manifest(
         artifact_id="tree_ring_official_reference_archive_manifest",
         artifact_type="local_manifest",
-        input_paths=tuple([entry.relative_to(root_path).as_posix() for entry in entries] + [package_manifest_path.relative_to(root_path).as_posix()]),
+        input_paths=tuple([entry.relative_to(root_path).as_posix() for entry in content_entries] + [package_manifest_path.relative_to(root_path).as_posix()]),
         output_paths=(
             archive_path.relative_to(root_path).as_posix(),
             summary_path.relative_to(root_path).as_posix(),
@@ -1066,10 +1081,13 @@ def package_tree_ring_official_reference_outputs(
         config={"archive_name": archive_name, "drive_output_dir": str(Path(drive_output_dir).expanduser())},
         code_version=resolve_code_version(root_path),
         rebuild_command="运行 paper_workflow/tree_ring_official_reference_run.ipynb",
-        metadata={"generated_at": datetime.now(timezone.utc).isoformat(), "main_table_eligible": False},
+        metadata={
+            "embedded_digest_scope": "external_summary_records_final_archive_digest",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "main_table_eligible": False,
+        },
     ).to_dict()
     write_json(manifest_path, archive_manifest)
-    entries = collect_package_entries(root_path, source_dir, archive_path)
     with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
         for entry in entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
