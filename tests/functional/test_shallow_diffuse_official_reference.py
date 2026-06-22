@@ -299,12 +299,17 @@ def test_shallow_diffuse_official_reference_parses_metric_text_and_custom_python
     )
 
     metrics = parse_metric_text(
-        "clip_score_mean: 0.0\navg_clip_score_mean: 0.0\nauc: 0.95, acc: 0.84, TPR@1%FPR: 0.72\n",
+        "CLIP scores\n"
+        "clip_score_mean: 0.39522719383239746\n"
+        "avg_clip_score_mean: 0.3972677767276764\n"
+        "auc: 0.95, acc: 0.84, TPR@1%FPR: 0.72\n",
         sample_count=5,
     )
     command = build_official_command(tmp_path, config)
 
     assert metrics["sample_count"] == 5
+    assert metrics["clip_score_mean"] == 0.39522719383239746
+    assert metrics["watermarked_clip_score_mean"] == 0.3972677767276764
     assert metrics["auc"] == 0.95
     assert command[0] == "/opt/shallow-diffuse-legacy/bin/python"
     assert "--edit_time_list" in command

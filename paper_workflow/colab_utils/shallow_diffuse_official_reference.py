@@ -831,11 +831,11 @@ def parse_metric_text(text: str, sample_count: int) -> dict[str, Any]:
     """从官方 stdout 或日志中解析 Shallow Diffuse 指标。"""
 
     patterns = {
-        "clip_score_mean": r"clip_score_mean:\s*([0-9eE+\-.]+)",
-        "watermarked_clip_score_mean": r"(?:avg_clip_score_mean|w_clip_score_mean):\s*([0-9eE+\-.]+)",
-        "auc": r"auc:\s*([0-9eE+\-.]+)",
-        "accuracy": r"acc:\s*([0-9eE+\-.]+)",
-        "true_positive_rate_at_one_percent_fpr": r"TPR@1%FPR:\s*([0-9eE+\-.]+)",
+        "clip_score_mean": r"(?m)^\s*clip_score_mean\s*:\s*([0-9eE+\-.]+)",
+        "watermarked_clip_score_mean": r"(?m)^\s*(?:avg_clip_score_mean|w_clip_score_mean)\s*:\s*([0-9eE+\-.]+)",
+        "auc": r"(?m)(?:^|[,\n])\s*auc\s*:\s*([0-9eE+\-.]+)",
+        "accuracy": r"(?m)(?:^|[,\n])\s*acc\s*:\s*([0-9eE+\-.]+)",
+        "true_positive_rate_at_one_percent_fpr": r"(?m)(?:^|[,\n])\s*TPR@1%FPR\s*:\s*([0-9eE+\-.]+)",
     }
     metrics: dict[str, Any] = {
         "sample_count": int(sample_count),
