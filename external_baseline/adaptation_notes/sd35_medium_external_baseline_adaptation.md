@@ -31,6 +31,8 @@
 
 当前项目采用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium denoising 过程中使用 callback 在浅层 latent 位置写入局部 watermark patch, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 近似反演恢复 latent, 最后以 masked patch 距离作为检测分数。若运行环境缺少中间 callback 能力, adapter 会显式记录 fallback, 不把该运行伪装为论文主表结果。
 
+补充表同时提供 `shallow_diffuse_official_reference_run.ipynb`。该入口运行官方 `run_shallow_diffuse_t2i.py` 的 legacy Stable Diffusion / shallow latent subspace 协议, 并通过 governed import 记录官方源码 commit、legacy 依赖环境、运行命令、`overall_scores.txt`、`clip_scores.txt` 和诊断日志。该路径用于审计 SD3.5 adapter 的方法忠实度, 不替代主表 SD3.5 对比。当前默认攻击器集合为 `none`, 目的是先关闭官方原始环境参考复现链路; 后续若需要官方攻击参考, 应在同一入口中显式扩展 `SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_ATTACKER_NAMES` 和运行预算。
+
 ### T2SMark
 
 官方源码包含 `run_sd35.py`, 可作为优先接入对象。本项目 adapter 首先支持读取官方 `results.json`, 生成统一 `baseline_observations.json` 与 `t2smark_slm_adapter_manifest.json`。

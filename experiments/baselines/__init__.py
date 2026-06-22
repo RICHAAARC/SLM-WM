@@ -76,6 +76,14 @@ from experiments.baselines.primary_evidence import (
     build_primary_baseline_evidence_records,
     build_primary_baseline_evidence_summary,
 )
+from experiments.baselines.shallow_diffuse_official_reference import (
+    SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_PROTOCOL_NAME,
+    SHALLOW_DIFFUSE_SUPPLEMENTAL_TABLE_ROLE,
+    ShallowDiffuseOfficialReferenceRecord,
+    build_shallow_diffuse_official_reference_record,
+    build_shallow_diffuse_official_reference_schema,
+    validate_shallow_diffuse_official_reference_records,
+)
 from experiments.baselines.tree_ring_official_reference import (
     TREE_RING_OFFICIAL_REFERENCE_PROTOCOL_NAME,
     TREE_RING_SUPPLEMENTAL_TABLE_ROLE,
@@ -107,10 +115,13 @@ __all__ = [
     "PrimaryBaselineExecutionPlan",
     "PrimaryBaselineEvidenceRecord",
     "PrimaryBaselineResultTemplate",
+    "ShallowDiffuseOfficialReferenceRecord",
     "TreeRingOfficialReferenceRecord",
     "TREE_RING_OFFICIAL_REFERENCE_PROTOCOL_NAME",
     "TREE_RING_SUPPLEMENTAL_TABLE_ROLE",
     "REJECTED_SMOKE_ADAPTER_BOUNDARIES",
+    "SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_PROTOCOL_NAME",
+    "SHALLOW_DIFFUSE_SUPPLEMENTAL_TABLE_ROLE",
     "aggregate_baseline_metrics",
     "aggregate_slm_proxy_metrics",
     "build_baseline_command_plan_manifest",
@@ -135,6 +146,8 @@ __all__ = [
     "build_primary_baseline_evidence_summary",
     "build_primary_baseline_report",
     "build_primary_result_templates",
+    "build_shallow_diffuse_official_reference_record",
+    "build_shallow_diffuse_official_reference_schema",
     "build_tree_ring_official_reference_record",
     "build_tree_ring_official_reference_schema",
     "default_baseline_specs",
@@ -149,5 +162,6 @@ __all__ = [
     "selected_primary_baselines",
     "validate_external_baseline_evidence",
     "validate_gaussian_shading_official_reference_records",
+    "validate_shallow_diffuse_official_reference_records",
     "validate_tree_ring_official_reference_records",
 ]
