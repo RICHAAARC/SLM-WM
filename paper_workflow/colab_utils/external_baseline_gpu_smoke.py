@@ -714,6 +714,10 @@ def write_failure_outputs(
         "unsupported_reason": f"{type(error).__name__}:{error}",
         "environment_report_path": relative_or_absolute(paths["environment_report"], root_path),
         "manifest_path": relative_or_absolute(paths["manifest"], root_path),
+        "baseline_execution_manifest_path": relative_or_absolute(paths["execution_manifest"], root_path),
+        "baseline_observations_path": relative_or_absolute(paths["baseline_observations"], root_path),
+        "baseline_command_results_path": relative_or_absolute(paths["command_results"], root_path),
+        "baseline_command_plan_path": relative_or_absolute(paths["command_plan"], root_path),
     }
     write_json(paths["summary"], summary)
     manifest = build_artifact_manifest(
@@ -792,6 +796,10 @@ def write_external_baseline_gpu_smoke_outputs(
         "image_pairs_path": relative_or_absolute(paths["image_pairs"], root_path),
         "environment_report_path": relative_or_absolute(paths["environment_report"], root_path),
         "manifest_path": relative_or_absolute(paths["manifest"], root_path),
+        "baseline_execution_manifest_path": relative_or_absolute(paths["execution_manifest"], root_path),
+        "baseline_observations_path": relative_or_absolute(paths["baseline_observations"], root_path),
+        "baseline_command_results_path": relative_or_absolute(paths["command_results"], root_path),
+        "baseline_command_plan_path": relative_or_absolute(paths["command_plan"], root_path),
         "metadata": {
             **official_report,
             **adapter_report,
