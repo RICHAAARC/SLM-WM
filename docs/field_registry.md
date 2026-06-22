@@ -993,6 +993,25 @@ Notebook 与 repository module 的跨边界数据
 | adapter_smoke_sample_roles | protocol | none | false | false | false | 单个主表 external baseline smoke observation 中记录的样本角色集合。|
 | adapter_smoke_latent_shapes | runtime | none | false | false | false | 单个主表 external baseline smoke observation 中记录的 latent shape 集合。|
 | method_faithful_adapter_ready | governance | none | false | false | false | 主表 external baseline 是否已达到方法忠实 SD3.5 适配边界。|
+| method_faithful_adapter_status_id | artifact | none | true | false | false | 主表 external baseline 方法忠实适配协议状态记录的稳定标识。|
+| method_faithful_adapter_status_digest | artifact | none | true | false | false | 主表 external baseline 方法忠实适配协议状态记录的稳定摘要。|
+| protocol_role | protocol | none | true | false | false | baseline 在当前协议中的角色, 例如 method-faithful adapter 必需项或 native official reproduction。|
+| expected_adapter_boundary | governance | none | true | false | false | 方法忠实适配协议要求的 adapter 边界名称。|
+| observed_adapter_boundaries | governance | none | true | false | false | observation 中实际出现的 adapter 边界集合。|
+| clean_negative_count | metric | none | true | false | false | 方法忠实适配协议中 clean negative observation 数量。|
+| positive_source_count | metric | none | true | false | false | 方法忠实适配协议中 positive source observation 数量。|
+| attacked_observation_count | metric | none | true | false | false | 方法忠实适配协议中攻击后 observation 数量。|
+| score_protocol_ready | governance | none | true | false | false | observation 是否具备 score、threshold、score_name 与分数方向字段。|
+| image_provenance_ready | governance | none | true | false | false | observation 是否具备 image_path 与 image_digest 图像 provenance 字段。|
+| formal_import_candidate_allowed | governance | none | true | false | false | 单个 baseline 是否允许作为正式导入候选继续进入后续共同协议。|
+| method_faithful_adapter_required_count | metric | none | false | false | false | 方法忠实 SD3.5 适配协议要求覆盖的主表 baseline 数量。|
+| method_faithful_adapter_ready_count | metric | none | false | false | false | 已达到方法忠实 SD3.5 适配边界的主表 baseline 数量。|
+| method_faithful_adapter_ready_ids | protocol | none | false | false | false | 已达到方法忠实 SD3.5 适配边界的主表 baseline id 集合。|
+| missing_method_faithful_adapter_ids | protocol | none | false | false | false | 尚未达到方法忠实 SD3.5 适配边界的主表 baseline id 集合。|
+| native_official_reproduction_ids | protocol | none | false | false | false | 不需要 method-faithful adapter 的 native official reproduction baseline id 集合。|
+| method_faithful_adapter_protocol_ready | governance | none | false | false | false | 主表 legacy diffusion watermark baseline 是否均达到方法忠实 SD3.5 适配协议边界。|
+| formal_import_candidate_allowed_ids | protocol | none | false | false | false | 已允许进入正式导入候选的 method-faithful adapter baseline id 集合。|
+| input_observation_count | metric | none | false | false | false | 协议写出脚本读取到的输入 observation 数量。|
 | full_main_prompt_protocol_ready | governance | none | false | false | false | 主表 external baseline 是否已覆盖 full-main prompt 协议。|
 | fixed_fpr_baseline_calibration_ready | governance | none | false | false | false | 主表 external baseline 是否已完成 fixed-FPR 校准。|
 | attack_matrix_baseline_detection_ready | governance | none | false | false | false | 主表 external baseline 是否已完成共同攻击矩阵下的检测。|
