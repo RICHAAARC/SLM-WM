@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import json
 import os
@@ -42,6 +42,15 @@ DEFAULT_SOURCE_DIR = "external_baseline/primary/tree_ring/source"
 DEFAULT_RUN_NAME = "tree_ring_official_legacy_reference"
 DEFAULT_SAMPLE_COUNT = 5
 DEFAULT_OFFICIAL_MODEL_ID = "stabilityai/stable-diffusion-2-1-base"
+DEFAULT_LEGACY_ENV_PREFIX = "/content/tree_ring_legacy_env"
+DEFAULT_MICROMAMBA_PATH = "/content/bin/micromamba"
+DEFAULT_LEGACY_PYTHON_VERSION = "3.9"
+DEFAULT_LEGACY_TORCH_SPECS = "torch==1.13.0+cu117 torchvision==0.14.0+cu117"
+DEFAULT_LEGACY_PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu117"
+DEFAULT_LEGACY_PACKAGE_SPECS = (
+    "transformers==4.23.1 diffusers==0.11.1 huggingface_hub==0.10.1 "
+    "datasets==2.6.1 pyarrow<13 fsspec<2024 numpy<2 scikit-learn scipy tqdm wandb open_clip_torch==2.7.0 ftfy regex"
+)
 PACKAGE_EXTRA_PATHS = (
     "paper_workflow/tree_ring_official_reference_run.ipynb",
     "paper_workflow/colab_utils/tree_ring_official_reference.py",
@@ -65,6 +74,13 @@ class TreeRingOfficialReferenceConfig:
     start_index: int = 0
     official_model_id: str = DEFAULT_OFFICIAL_MODEL_ID
     official_python_executable: str = ""
+    prepare_legacy_environment: bool = False
+    legacy_environment_prefix: str = DEFAULT_LEGACY_ENV_PREFIX
+    micromamba_path: str = DEFAULT_MICROMAMBA_PATH
+    legacy_python_version: str = DEFAULT_LEGACY_PYTHON_VERSION
+    legacy_torch_specs: str = DEFAULT_LEGACY_TORCH_SPECS
+    legacy_pytorch_index_url: str = DEFAULT_LEGACY_PYTORCH_INDEX_URL
+    legacy_package_specs: str = DEFAULT_LEGACY_PACKAGE_SPECS
     run_official_command: bool = True
     summary_import_path: str = ""
     log_import_path: str = ""
@@ -117,6 +133,56 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
         return path.resolve().as_posix()
 
 
+def split_package_specs(package_specs: str) -> list[str]:
+    """解析以空白分隔的 pip package spec 列表。"""
+
+    return [item.strip() for item in str(package_specs).split() if item.strip()]
+
+
+def command_exception_result(command: Any, error: Exception) -> dict[str, Any]:
+    """把环境准备异常转换为可落盘命令诊断, 避免 Notebook 直接中断。"""
+
+    return_code = 124 if isinstance(error, subprocess.TimeoutExpired) else 98
+    return {
+        "command": command,
+        "return_code": return_code,
+        "stdout": str(getattr(error, "stdout", "") or ""),
+        "stderr": f"{type(error).__name__}:{error}",
+    }
+
+
+def run_shell_command(command: str, *, cwd: Path, timeout_seconds: int) -> dict[str, Any]:
+    """执行 shell 命令并返回可落盘诊断。"""
+
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            timeout=timeout_seconds,
+            check=False,
+            text=True,
+            capture_output=True,
+            shell=True,
+        )
+    except Exception as error:
+        return command_exception_result(command, error)
+    return {
+        "command": command,
+        "return_code": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+    }
+
+
+def run_argv_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, Any]:
+    """执行 argv 命令并把失败收敛为可审计诊断。"""
+
+    try:
+        return run_command(command, cwd=cwd, timeout_seconds=timeout_seconds)
+    except Exception as error:
+        return command_exception_result(command, error)
+
+
 def output_paths(root_path: Path, config: TreeRingOfficialReferenceConfig) -> dict[str, Path]:
     """集中构造 Tree-Ring 官方参考 workflow 的输出路径。"""
 
@@ -125,6 +191,7 @@ def output_paths(root_path: Path, config: TreeRingOfficialReferenceConfig) -> di
         "output_dir": output_dir,
         "official_command_result": output_dir / "tree_ring_official_command_result.json",
         "source_prepare_result": output_dir / "tree_ring_official_source_prepare_result.json",
+        "legacy_environment_prepare_result": output_dir / "tree_ring_legacy_environment_prepare_result.json",
         "official_stdout": output_dir / "tree_ring_official_stdout.txt",
         "official_stderr": output_dir / "tree_ring_official_stderr.txt",
         "official_metric_summary": output_dir / "tree_ring_official_metric_summary.json",
@@ -135,6 +202,128 @@ def output_paths(root_path: Path, config: TreeRingOfficialReferenceConfig) -> di
         "summary": output_dir / "tree_ring_official_reference_summary.json",
         "manifest": output_dir / "manifest.local.json",
     }
+
+
+def prepare_tree_ring_legacy_environment(
+    root_path: Path,
+    config: TreeRingOfficialReferenceConfig,
+    paths: dict[str, Path],
+) -> dict[str, Any]:
+    """在独立 Colab 会话中准备 Tree-Ring 官方 legacy Python 环境。"""
+
+    if not config.prepare_legacy_environment:
+        report = {
+            "legacy_environment_requested": False,
+            "legacy_environment_ready": False,
+            "legacy_environment_skipped": True,
+            "legacy_environment_skip_reason": "prepare_legacy_environment_disabled",
+            "legacy_python_executable": config.official_python_executable or sys.executable,
+        }
+        write_json(paths["legacy_environment_prepare_result"], report)
+        return report
+    if config.official_python_executable:
+        report = {
+            "legacy_environment_requested": True,
+            "legacy_environment_ready": True,
+            "legacy_environment_skipped": True,
+            "legacy_environment_skip_reason": "explicit_official_python_executable_provided",
+            "legacy_python_executable": config.official_python_executable,
+        }
+        write_json(paths["legacy_environment_prepare_result"], report)
+        return report
+
+    micromamba_path = Path(config.micromamba_path)
+    legacy_env_prefix = Path(config.legacy_environment_prefix)
+    legacy_python = legacy_env_prefix / "bin" / "python"
+    command_results: list[dict[str, Any]] = []
+    if not micromamba_path.is_file():
+        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
+        command_results.append(
+            run_shell_command(
+                f"curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C {micromamba_path.parent.parent} bin/micromamba",
+                cwd=root_path,
+                timeout_seconds=600,
+            )
+        )
+    if not legacy_python.is_file():
+        if micromamba_path.is_file():
+            command_results.append(
+                run_argv_command(
+                    [
+                        str(micromamba_path),
+                        "create",
+                        "-y",
+                        "-p",
+                        str(legacy_env_prefix),
+                        "-c",
+                        "conda-forge",
+                        f"python={config.legacy_python_version}",
+                        "pip",
+                    ],
+                    cwd=root_path,
+                    timeout_seconds=1800,
+                )
+            )
+    if legacy_python.is_file():
+        command_results.append(
+            run_argv_command(
+                [str(legacy_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"],
+                cwd=root_path,
+                timeout_seconds=900,
+            )
+        )
+        torch_specs = split_package_specs(config.legacy_torch_specs)
+        if torch_specs:
+            torch_command = [str(legacy_python), "-m", "pip", "install"]
+            if config.legacy_pytorch_index_url:
+                torch_command.extend(["--extra-index-url", str(config.legacy_pytorch_index_url)])
+            torch_command.extend(torch_specs)
+            command_results.append(run_argv_command(torch_command, cwd=root_path, timeout_seconds=1800))
+        package_specs = split_package_specs(config.legacy_package_specs)
+        if package_specs:
+            command_results.append(
+                run_argv_command(
+                    [str(legacy_python), "-m", "pip", "install", *package_specs],
+                    cwd=root_path,
+                    timeout_seconds=1800,
+                )
+            )
+    verify_command = [
+        str(legacy_python),
+        "-c",
+        (
+            "import json, torch, transformers, diffusers; "
+            "from transformers import CLIPFeatureExtractor; "
+            "print(json.dumps({"
+            "'torch': torch.__version__, "
+            "'cuda_available': bool(torch.cuda.is_available()), "
+            "'transformers': transformers.__version__, "
+            "'diffusers': diffusers.__version__"
+            "}))"
+        ),
+    ]
+    verify_result = (
+        run_argv_command(verify_command, cwd=root_path, timeout_seconds=300)
+        if legacy_python.is_file()
+        else {"command": verify_command, "return_code": 127, "stdout": "", "stderr": "legacy_python_missing"}
+    )
+    command_results.append(verify_result)
+    report = {
+        "legacy_environment_requested": True,
+        "legacy_environment_ready": legacy_python.is_file() and verify_result["return_code"] == 0,
+        "legacy_environment_skipped": False,
+        "legacy_environment_prefix": str(legacy_env_prefix),
+        "micromamba_path": str(micromamba_path),
+        "legacy_python_executable": str(legacy_python),
+        "legacy_python_version": config.legacy_python_version,
+        "legacy_torch_specs": split_package_specs(config.legacy_torch_specs),
+        "legacy_package_specs": split_package_specs(config.legacy_package_specs),
+        "legacy_pytorch_index_url": config.legacy_pytorch_index_url,
+        "command_results": command_results,
+        "verify_result": verify_result,
+    }
+    write_json(paths["legacy_environment_prepare_result"], report)
+    return report
 
 
 def source_report(root_path: Path, config: TreeRingOfficialReferenceConfig) -> dict[str, Any]:
@@ -393,6 +582,29 @@ def run_official_command_if_requested(
     return result
 
 
+def write_official_command_skip_result(
+    root_path: Path,
+    paths: dict[str, Path],
+    *,
+    return_code: int,
+    reason: str,
+) -> dict[str, Any]:
+    """在前置环境不可用时写出官方命令跳过诊断。"""
+
+    paths["official_stdout"].write_text("", encoding="utf-8")
+    paths["official_stderr"].write_text(reason, encoding="utf-8")
+    result = {
+        "official_command_requested": True,
+        "official_command": [],
+        "return_code": int(return_code),
+        "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
+        "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
+        "error": reason,
+    }
+    write_json(paths["official_command_result"], result)
+    return result
+
+
 def build_reference_record_report(
     root_path: Path,
     config: TreeRingOfficialReferenceConfig,
@@ -449,26 +661,43 @@ def write_tree_ring_official_reference_outputs(
     root_path = Path(root).resolve()
     paths = output_paths(root_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
+    legacy_environment_report = prepare_tree_ring_legacy_environment(root_path, config, paths)
+    effective_config = config
+    if config.prepare_legacy_environment and legacy_environment_report.get("legacy_environment_ready"):
+        effective_config = replace(config, official_python_executable=str(legacy_environment_report["legacy_python_executable"]))
     device_report: dict[str, Any]
     try:
-        device_report = ensure_cuda_if_requested(config.require_cuda)
+        device_report = ensure_cuda_if_requested(effective_config.require_cuda)
     except Exception as error:
         device_report = {"cuda_available": False, "device_error": f"{type(error).__name__}:{error}"}
-    source_status = ensure_tree_ring_source_available(root_path, config, paths)
-    imported_metrics, imported_evidence = load_imported_metric_summary(root_path, config)
-    official_report = run_official_command_if_requested(root_path, config, paths)
+    source_status = ensure_tree_ring_source_available(root_path, effective_config, paths)
+    imported_metrics, imported_evidence = load_imported_metric_summary(root_path, effective_config)
+    if (
+        effective_config.run_official_command
+        and effective_config.prepare_legacy_environment
+        and not legacy_environment_report.get("legacy_environment_ready")
+    ):
+        official_report = write_official_command_skip_result(
+            root_path,
+            paths,
+            return_code=95,
+            reason="tree_ring_legacy_environment_prepare_failed",
+        )
+    else:
+        official_report = run_official_command_if_requested(root_path, effective_config, paths)
     if official_report.get("return_code") == 0 and paths["official_stdout"].is_file():
-        command_metrics = parse_metric_text(paths["official_stdout"].read_text(encoding="utf-8", errors="ignore"), config.sample_count)
-        metric_summary = normalize_metric_summary({**imported_metrics, **command_metrics}, config.sample_count)
+        command_metrics = parse_metric_text(paths["official_stdout"].read_text(encoding="utf-8", errors="ignore"), effective_config.sample_count)
+        metric_summary = normalize_metric_summary({**imported_metrics, **command_metrics}, effective_config.sample_count)
     else:
         metric_summary = imported_metrics
     environment_report = build_runtime_environment_report()
     environment_report["tree_ring_official_reference_device_report"] = device_report
     environment_report["tree_ring_official_reference_source_report"] = source_status
+    environment_report["tree_ring_official_reference_legacy_environment_report"] = legacy_environment_report
     write_json(paths["environment_report"], environment_report)
     record_report = build_reference_record_report(
         root_path,
-        config,
+        effective_config,
         paths,
         metric_summary,
         imported_evidence,
@@ -485,7 +714,9 @@ def write_tree_ring_official_reference_outputs(
         "tree_ring_official_reference_ready": run_ready,
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
-        "sample_count": int(config.sample_count),
+        "sample_count": int(effective_config.sample_count),
+        "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
+        "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
         "governed_reference_record_count": int(record_report.get("record_count", 0)),
         "reference_import_ready": bool(validation.get("reference_import_ready")),
         "main_table_eligible": False,
@@ -497,6 +728,7 @@ def write_tree_ring_official_reference_outputs(
         "reference_validation_path": relative_or_absolute(paths["reference_validation"], root_path),
         "metadata": {
             "source_report": source_status,
+            "legacy_environment_report": legacy_environment_report,
             "official_report": official_report,
             "validation": validation,
         },
@@ -514,12 +746,14 @@ def write_tree_ring_official_reference_outputs(
             output_paths_for_manifest.append(relative_or_absolute(optional_path, root_path))
     if paths["source_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["source_prepare_result"], root_path))
+    if paths["legacy_environment_prepare_result"].exists():
+        output_paths_for_manifest.append(relative_or_absolute(paths["legacy_environment_prepare_result"], root_path))
     manifest = build_artifact_manifest(
         artifact_id="tree_ring_official_reference_manifest",
         artifact_type="local_manifest",
         input_paths=(relative_or_absolute(root_path / config.source_dir, root_path),),
         output_paths=tuple(output_paths_for_manifest + [relative_or_absolute(paths["manifest"], root_path)]),
-        config=asdict(config),
+        config=asdict(effective_config),
         code_version=resolve_code_version(root_path),
         rebuild_command="运行 paper_workflow/tree_ring_official_reference_run.ipynb",
         metadata={
@@ -545,6 +779,13 @@ def build_default_config() -> TreeRingOfficialReferenceConfig:
         start_index=int(os.environ.get("SLM_WM_TREE_RING_OFFICIAL_START_INDEX", "0")),
         official_model_id=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_MODEL_ID", DEFAULT_OFFICIAL_MODEL_ID),
         official_python_executable=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_PYTHON_EXECUTABLE", ""),
+        prepare_legacy_environment=os.environ.get("SLM_WM_TREE_RING_PREPARE_LEGACY_ENV", "0") == "1",
+        legacy_environment_prefix=os.environ.get("SLM_WM_TREE_RING_LEGACY_ENV_PREFIX", DEFAULT_LEGACY_ENV_PREFIX),
+        micromamba_path=os.environ.get("SLM_WM_TREE_RING_MICROMAMBA_PATH", DEFAULT_MICROMAMBA_PATH),
+        legacy_python_version=os.environ.get("SLM_WM_TREE_RING_LEGACY_PYTHON_VERSION", DEFAULT_LEGACY_PYTHON_VERSION),
+        legacy_torch_specs=os.environ.get("SLM_WM_TREE_RING_LEGACY_TORCH_SPECS", DEFAULT_LEGACY_TORCH_SPECS),
+        legacy_pytorch_index_url=os.environ.get("SLM_WM_TREE_RING_LEGACY_PYTORCH_INDEX_URL", DEFAULT_LEGACY_PYTORCH_INDEX_URL),
+        legacy_package_specs=os.environ.get("SLM_WM_TREE_RING_LEGACY_PACKAGE_SPECS", DEFAULT_LEGACY_PACKAGE_SPECS),
         run_official_command=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_RUN_COMMAND", "1") != "0",
         summary_import_path=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_SUMMARY_IMPORT_PATH", ""),
         log_import_path=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_LOG_IMPORT_PATH", ""),

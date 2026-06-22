@@ -15,12 +15,76 @@ from experiments.baselines import (
 )
 from paper_workflow.colab_utils.tree_ring_official_reference import (
     TreeRingOfficialReferenceConfig,
+    build_default_config,
     build_official_command,
     ensure_tree_ring_source_available,
     output_paths,
     parse_metric_text,
+    prepare_tree_ring_legacy_environment,
     write_tree_ring_official_reference_outputs,
 )
+
+
+@pytest.mark.quick
+def test_tree_ring_official_reference_prepares_isolated_legacy_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Colab 独立会话应能把官方 legacy 依赖准备过程收敛为可审计报告。"""
+
+    config = TreeRingOfficialReferenceConfig(
+        output_dir="outputs/tree_ring_official_reference",
+        source_dir="external_baseline/primary/tree_ring/source",
+        require_cuda=False,
+        prepare_legacy_environment=True,
+        legacy_environment_prefix=str(tmp_path / "legacy_env"),
+        micromamba_path=str(tmp_path / "bin" / "micromamba"),
+        legacy_torch_specs="torch==1.13.0+cu117 torchvision==0.14.0+cu117",
+        legacy_package_specs="transformers==4.23.1 diffusers==0.11.1",
+    )
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True, exist_ok=True)
+
+    def fake_run_shell_command(command: str, *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
+        micromamba_path = Path(config.micromamba_path)
+        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
+        micromamba_path.write_text("#!/bin/sh\n", encoding="utf-8")
+        return {"command": command, "return_code": 0, "stdout": "micromamba ready", "stderr": ""}
+
+    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
+        if command[:2] == [config.micromamba_path, "create"]:
+            legacy_python = Path(config.legacy_environment_prefix) / "bin" / "python"
+            legacy_python.parent.mkdir(parents=True, exist_ok=True)
+            legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
+        return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
+
+    monkeypatch.setattr("paper_workflow.colab_utils.tree_ring_official_reference.run_shell_command", fake_run_shell_command)
+    monkeypatch.setattr("paper_workflow.colab_utils.tree_ring_official_reference.run_command", fake_run_command)
+
+    report = prepare_tree_ring_legacy_environment(tmp_path, config, paths)
+    saved_report = json.loads(paths["legacy_environment_prepare_result"].read_text(encoding="utf-8"))
+
+    assert report["legacy_environment_requested"] is True
+    assert report["legacy_environment_ready"] is True
+    assert saved_report["legacy_python_executable"].replace("\\", "/").endswith("legacy_env/bin/python")
+    assert len(saved_report["command_results"]) >= 4
+
+
+@pytest.mark.quick
+def test_tree_ring_official_reference_default_config_reads_legacy_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Notebook 参数层应能显式开启 Tree-Ring 官方 legacy 环境准备。"""
+
+    monkeypatch.setenv("SLM_WM_TREE_RING_PREPARE_LEGACY_ENV", "1")
+    monkeypatch.setenv("SLM_WM_TREE_RING_LEGACY_ENV_PREFIX", "/content/tree_ring_legacy_env")
+    monkeypatch.setenv("SLM_WM_TREE_RING_LEGACY_TORCH_SPECS", "torch==1.13.0+cu117")
+    monkeypatch.setenv("SLM_WM_TREE_RING_LEGACY_PACKAGE_SPECS", "transformers==4.23.1 diffusers==0.11.1")
+
+    config = build_default_config()
+
+    assert config.prepare_legacy_environment is True
+    assert config.legacy_environment_prefix == "/content/tree_ring_legacy_env"
+    assert config.legacy_torch_specs == "torch==1.13.0+cu117"
+    assert config.legacy_package_specs == "transformers==4.23.1 diffusers==0.11.1"
 
 
 @pytest.mark.quick
