@@ -55,7 +55,7 @@ DEFAULT_LEGACY_TORCH_SPECS = "torch==1.13.0+cu117 torchvision==0.14.0+cu117"
 DEFAULT_LEGACY_PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu117"
 DEFAULT_LEGACY_PACKAGE_SPECS = (
     "transformers==4.23.1 diffusers==0.11.1 huggingface_hub==0.10.1 "
-    "datasets==2.6.1 pyarrow<13 fsspec<2024 numpy<2 scikit-learn scipy tqdm wandb open_clip_torch==2.7.0 ftfy regex"
+    "datasets==2.6.1 pyarrow<13 fsspec==2022.10.0 numpy<2 scikit-learn scipy tqdm wandb open_clip_torch==2.7.0 ftfy regex"
 )
 PACKAGE_EXTRA_PATHS = (
     "paper_workflow/tree_ring_official_reference_run.ipynb",

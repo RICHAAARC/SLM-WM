@@ -186,6 +186,16 @@ def test_tree_ring_official_reference_default_config_reads_legacy_environment(mo
 
 
 @pytest.mark.quick
+def test_tree_ring_official_reference_default_legacy_dependency_specs_pin_dataset_filesystem() -> None:
+    """默认 legacy 依赖应固定 datasets 与 fsspec 的兼容组合。"""
+
+    config = TreeRingOfficialReferenceConfig()
+
+    assert "datasets==2.6.1" in config.legacy_package_specs
+    assert "fsspec==2022.10.0" in config.legacy_package_specs
+
+
+@pytest.mark.quick
 def test_tree_ring_official_reference_record_validates_when_all_boundaries_ready() -> None:
     """官方 legacy 复现记录满足证据边界时应通过补充表导入校验。"""
 
