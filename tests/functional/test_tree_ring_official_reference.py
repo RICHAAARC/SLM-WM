@@ -22,8 +22,57 @@ from paper_workflow.colab_utils.tree_ring_official_reference import (
     parse_metric_text,
     patch_tree_ring_model_repository_layout,
     prepare_tree_ring_legacy_environment,
+    prepare_tree_ring_model_repository,
     write_tree_ring_official_reference_outputs,
 )
+
+
+@pytest.mark.quick
+def test_tree_ring_official_reference_prepares_local_model_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """本地模型目录应补齐 legacy transformers 需要的 model_index 兼容项。"""
+
+    local_model_dir = tmp_path / "runtime_model" / "stable_diffusion_2_1_base"
+    config = TreeRingOfficialReferenceConfig(
+        output_dir="outputs/tree_ring_official_reference",
+        source_dir="external_baseline/primary/tree_ring/source",
+        official_model_id="Manojb/stable-diffusion-2-1-base",
+        local_model_repository_dir=str(local_model_dir),
+        prepare_local_model_repository=True,
+        patch_model_index_for_legacy_transformers=True,
+        require_cuda=False,
+    )
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True, exist_ok=True)
+
+    def fake_download_hf_snapshot(repo_id: str, *, local_dir: Path, token: str | None) -> str:
+        local_dir.mkdir(parents=True, exist_ok=True)
+        (local_dir / "model_index.json").write_text(
+            json.dumps(
+                {
+                    "_class_name": "StableDiffusionPipeline",
+                    "feature_extractor": ["transformers", "CLIPImageProcessor"],
+                    "scheduler": ["diffusers", "PNDMScheduler"],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return str(local_dir)
+
+    monkeypatch.setattr("paper_workflow.colab_utils.tree_ring_official_reference.download_hf_snapshot", fake_download_hf_snapshot)
+
+    report = prepare_tree_ring_model_repository(tmp_path, config, paths)
+    patched_index = json.loads((local_model_dir / "model_index.json").read_text(encoding="utf-8"))
+    saved_report = json.loads(paths["model_repository_prepare_result"].read_text(encoding="utf-8"))
+
+    assert report["local_model_repository_ready"] is True
+    assert report["model_index_patch_applied"] is True
+    assert report["effective_official_model_id"] == str(local_model_dir)
+    assert patched_index["feature_extractor"] == ["transformers", "CLIPFeatureExtractor"]
+    assert saved_report["model_index_feature_extractor"] == ["transformers", "CLIPFeatureExtractor"]
 
 
 @pytest.mark.quick
@@ -118,6 +167,9 @@ def test_tree_ring_official_reference_default_config_reads_legacy_environment(mo
     monkeypatch.setenv("SLM_WM_TREE_RING_LEGACY_PACKAGE_SPECS", "transformers==4.23.1 diffusers==0.11.1")
     monkeypatch.setenv("SLM_WM_TREE_RING_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
     monkeypatch.setenv("SLM_WM_TREE_RING_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
+    monkeypatch.setenv("SLM_WM_TREE_RING_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
+    monkeypatch.setenv("SLM_WM_TREE_RING_LOCAL_MODEL_REPOSITORY_DIR", "/content/tree_ring_model_repository/stable_diffusion_2_1_base")
+    monkeypatch.setenv("SLM_WM_TREE_RING_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1")
 
     config = build_default_config()
 
@@ -128,6 +180,9 @@ def test_tree_ring_official_reference_default_config_reads_legacy_environment(mo
     assert config.official_model_id == "Manojb/stable-diffusion-2-1-base"
     assert config.upstream_official_model_id == "stabilityai/stable-diffusion-2-1-base"
     assert config.patch_model_repository_layout is True
+    assert config.prepare_local_model_repository is True
+    assert config.local_model_repository_dir == "/content/tree_ring_model_repository/stable_diffusion_2_1_base"
+    assert config.patch_model_index_for_legacy_transformers is True
 
 
 @pytest.mark.quick

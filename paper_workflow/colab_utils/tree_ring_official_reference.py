@@ -47,6 +47,7 @@ DEFAULT_MODEL_SOURCE_NOTE = (
     "官方 Tree-Ring 使用的 stabilityai/stable-diffusion-2-1-base 当前不可直接访问; "
     "默认改用 Hugging Face 上标记为 cloned from stabilityai/stable-diffusion-2-1-base 的公开镜像。"
 )
+DEFAULT_LOCAL_MODEL_REPOSITORY_DIR = "/content/tree_ring_model_repository/stable_diffusion_2_1_base"
 DEFAULT_LEGACY_ENV_PREFIX = "/content/tree_ring_legacy_env"
 DEFAULT_MICROMAMBA_PATH = "/content/bin/micromamba"
 DEFAULT_LEGACY_PYTHON_VERSION = "3.9"
@@ -81,6 +82,9 @@ class TreeRingOfficialReferenceConfig:
     upstream_official_model_id: str = DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID
     model_source_note: str = DEFAULT_MODEL_SOURCE_NOTE
     patch_model_repository_layout: bool = True
+    prepare_local_model_repository: bool = True
+    local_model_repository_dir: str = DEFAULT_LOCAL_MODEL_REPOSITORY_DIR
+    patch_model_index_for_legacy_transformers: bool = True
     official_python_executable: str = ""
     prepare_legacy_environment: bool = False
     legacy_environment_prefix: str = DEFAULT_LEGACY_ENV_PREFIX
@@ -200,6 +204,7 @@ def output_paths(root_path: Path, config: TreeRingOfficialReferenceConfig) -> di
         "official_command_result": output_dir / "tree_ring_official_command_result.json",
         "source_prepare_result": output_dir / "tree_ring_official_source_prepare_result.json",
         "source_patch_result": output_dir / "tree_ring_official_source_patch_result.json",
+        "model_repository_prepare_result": output_dir / "tree_ring_model_repository_prepare_result.json",
         "legacy_environment_prepare_result": output_dir / "tree_ring_legacy_environment_prepare_result.json",
         "official_stdout": output_dir / "tree_ring_official_stdout.txt",
         "official_stderr": output_dir / "tree_ring_official_stderr.txt",
@@ -480,6 +485,108 @@ def patch_tree_ring_model_repository_layout(
     write_json(paths["source_patch_result"], report)
     return report
 
+
+def download_hf_snapshot(
+    repo_id: str,
+    *,
+    local_dir: Path,
+    token: str | None,
+) -> str:
+    """下载 Hugging Face 模型快照到受控运行缓存目录。"""
+
+    from huggingface_hub import snapshot_download
+
+    return str(
+        snapshot_download(
+            repo_id=repo_id,
+            local_dir=str(local_dir),
+            local_dir_use_symlinks=False,
+            token=token or None,
+        )
+    )
+
+
+def prepare_tree_ring_model_repository(
+    root_path: Path,
+    config: TreeRingOfficialReferenceConfig,
+    paths: dict[str, Path],
+) -> dict[str, Any]:
+    """准备本地模型目录并补齐 legacy transformers 所需的 model_index 兼容项。"""
+
+    local_model_path = Path(config.local_model_repository_dir).expanduser()
+    model_index_path = local_model_path / "model_index.json"
+    report: dict[str, Any] = {
+        "local_model_repository_requested": bool(config.prepare_local_model_repository),
+        "local_model_repository_ready": False,
+        "local_model_repository_path": str(local_model_path),
+        "official_model_id": config.official_model_id,
+        "upstream_official_model_id": config.upstream_official_model_id,
+        "effective_official_model_id": config.official_model_id,
+        "model_index_patch_requested": bool(config.patch_model_index_for_legacy_transformers),
+        "model_index_patch_applied": False,
+        "model_source_note": config.model_source_note,
+    }
+    if not config.prepare_local_model_repository:
+        report.update({"local_model_repository_skipped": True, "skip_reason": "prepare_local_model_repository_disabled"})
+        write_json(paths["model_repository_prepare_result"], report)
+        return report
+
+    download_result: dict[str, Any] = {"download_requested": not model_index_path.is_file()}
+    if not model_index_path.is_file():
+        try:
+            local_model_path.mkdir(parents=True, exist_ok=True)
+            snapshot_path = download_hf_snapshot(
+                config.official_model_id,
+                local_dir=local_model_path,
+                token=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None,
+            )
+            download_result.update({"return_code": 0, "snapshot_path": snapshot_path})
+        except Exception as error:
+            download_result.update({"return_code": 98, "error": f"{type(error).__name__}:{error}"})
+            report["download_result"] = download_result
+            write_json(paths["model_repository_prepare_result"], report)
+            return report
+    else:
+        download_result.update({"return_code": 0, "snapshot_path": str(local_model_path), "download_skipped_reason": "model_index_already_exists"})
+
+    report["download_result"] = download_result
+    if not model_index_path.is_file():
+        report.update({"local_model_repository_ready": False, "failure_reason": "model_index_missing_after_download"})
+        write_json(paths["model_repository_prepare_result"], report)
+        return report
+
+    before_digest = file_digest(model_index_path)
+    model_index = read_json(model_index_path)
+    report["model_index_digest_before"] = before_digest
+    feature_extractor = model_index.get("feature_extractor")
+    if (
+        config.patch_model_index_for_legacy_transformers
+        and isinstance(feature_extractor, list)
+        and len(feature_extractor) >= 2
+        and feature_extractor[0] == "transformers"
+        and feature_extractor[1] == "CLIPImageProcessor"
+    ):
+        feature_extractor[1] = "CLIPFeatureExtractor"
+        write_json(model_index_path, model_index)
+        report["model_index_patch_applied"] = True
+        report["model_index_patch_reason"] = "legacy_transformers_4_23_1_requires_clip_feature_extractor"
+    elif not config.patch_model_index_for_legacy_transformers:
+        report["model_index_patch_skip_reason"] = "patch_model_index_for_legacy_transformers_disabled"
+    else:
+        report["model_index_patch_skip_reason"] = "model_index_feature_extractor_already_compatible"
+
+    report.update(
+        {
+            "model_index_digest_after": file_digest(model_index_path),
+            "model_index_feature_extractor": read_json(model_index_path).get("feature_extractor"),
+            "local_model_repository_ready": True,
+            "effective_official_model_id": str(local_model_path),
+        }
+    )
+    write_json(paths["model_repository_prepare_result"], report)
+    return report
+
+
 def build_official_command(root_path: Path, config: TreeRingOfficialReferenceConfig) -> list[str]:
     """构造 Tree-Ring 官方 legacy 入口命令。"""
 
@@ -748,6 +855,13 @@ def write_tree_ring_official_reference_outputs(
         device_report = {"cuda_available": False, "device_error": f"{type(error).__name__}:{error}"}
     source_status = ensure_tree_ring_source_available(root_path, effective_config, paths)
     source_patch_report = patch_tree_ring_model_repository_layout(root_path, effective_config, paths)
+    should_prepare_model_repository = effective_config.run_official_command and not (
+        effective_config.prepare_legacy_environment and not legacy_environment_report.get("legacy_environment_ready")
+    )
+    model_repository_config = effective_config if should_prepare_model_repository else replace(effective_config, prepare_local_model_repository=False)
+    model_repository_report = prepare_tree_ring_model_repository(root_path, model_repository_config, paths)
+    if model_repository_report.get("local_model_repository_ready"):
+        effective_config = replace(effective_config, official_model_id=str(model_repository_report["effective_official_model_id"]))
     imported_metrics, imported_evidence = load_imported_metric_summary(root_path, effective_config)
     if (
         effective_config.run_official_command
@@ -771,6 +885,7 @@ def write_tree_ring_official_reference_outputs(
     environment_report["tree_ring_official_reference_device_report"] = device_report
     environment_report["tree_ring_official_reference_source_report"] = source_status
     environment_report["tree_ring_official_reference_source_patch_report"] = source_patch_report
+    environment_report["tree_ring_official_reference_model_repository_report"] = model_repository_report
     environment_report["tree_ring_official_reference_legacy_environment_report"] = legacy_environment_report
     write_json(paths["environment_report"], environment_report)
     record_report = build_reference_record_report(
@@ -796,6 +911,8 @@ def write_tree_ring_official_reference_outputs(
         "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
         "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
         "source_patch_applied": bool(source_patch_report.get("patch_applied")),
+        "local_model_repository_ready": bool(model_repository_report.get("local_model_repository_ready")),
+        "model_index_patch_applied": bool(model_repository_report.get("model_index_patch_applied")),
         "official_model_id": effective_config.official_model_id,
         "upstream_official_model_id": effective_config.upstream_official_model_id,
         "governed_reference_record_count": int(record_report.get("record_count", 0)),
@@ -810,6 +927,7 @@ def write_tree_ring_official_reference_outputs(
         "metadata": {
             "source_report": source_status,
             "source_patch_report": source_patch_report,
+            "model_repository_report": model_repository_report,
             "legacy_environment_report": legacy_environment_report,
             "official_report": official_report,
             "validation": validation,
@@ -830,6 +948,8 @@ def write_tree_ring_official_reference_outputs(
         output_paths_for_manifest.append(relative_or_absolute(paths["source_prepare_result"], root_path))
     if paths["source_patch_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["source_patch_result"], root_path))
+    if paths["model_repository_prepare_result"].exists():
+        output_paths_for_manifest.append(relative_or_absolute(paths["model_repository_prepare_result"], root_path))
     if paths["legacy_environment_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["legacy_environment_prepare_result"], root_path))
     manifest = build_artifact_manifest(
@@ -865,6 +985,9 @@ def build_default_config() -> TreeRingOfficialReferenceConfig:
         upstream_official_model_id=os.environ.get("SLM_WM_TREE_RING_UPSTREAM_OFFICIAL_MODEL_ID", DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID),
         model_source_note=os.environ.get("SLM_WM_TREE_RING_MODEL_SOURCE_NOTE", DEFAULT_MODEL_SOURCE_NOTE),
         patch_model_repository_layout=os.environ.get("SLM_WM_TREE_RING_PATCH_MODEL_REPOSITORY_LAYOUT", "1") != "0",
+        prepare_local_model_repository=os.environ.get("SLM_WM_TREE_RING_PREPARE_LOCAL_MODEL_REPOSITORY", "1") != "0",
+        local_model_repository_dir=os.environ.get("SLM_WM_TREE_RING_LOCAL_MODEL_REPOSITORY_DIR", DEFAULT_LOCAL_MODEL_REPOSITORY_DIR),
+        patch_model_index_for_legacy_transformers=os.environ.get("SLM_WM_TREE_RING_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1") != "0",
         official_python_executable=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_PYTHON_EXECUTABLE", ""),
         prepare_legacy_environment=os.environ.get("SLM_WM_TREE_RING_PREPARE_LEGACY_ENV", "0") == "1",
         legacy_environment_prefix=os.environ.get("SLM_WM_TREE_RING_LEGACY_ENV_PREFIX", DEFAULT_LEGACY_ENV_PREFIX),
