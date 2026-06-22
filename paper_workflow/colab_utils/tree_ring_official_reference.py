@@ -24,7 +24,12 @@ from experiments.baselines import (
     validate_tree_ring_official_reference_records,
 )
 from main.analysis.artifact_manifest import build_artifact_manifest
-from paper_workflow.colab_utils.external_baseline_gpu_smoke import ensure_cuda_if_requested, run_command
+from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
+    ensure_cuda_if_requested,
+    load_baseline_registry_item,
+    normalize_repository_url,
+    run_command,
+)
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
     file_digest,
@@ -119,6 +124,7 @@ def output_paths(root_path: Path, config: TreeRingOfficialReferenceConfig) -> di
     return {
         "output_dir": output_dir,
         "official_command_result": output_dir / "tree_ring_official_command_result.json",
+        "source_prepare_result": output_dir / "tree_ring_official_source_prepare_result.json",
         "official_stdout": output_dir / "tree_ring_official_stdout.txt",
         "official_stderr": output_dir / "tree_ring_official_stderr.txt",
         "official_metric_summary": output_dir / "tree_ring_official_metric_summary.json",
@@ -147,6 +153,66 @@ def source_report(root_path: Path, config: TreeRingOfficialReferenceConfig) -> d
         "requirements_text": requirements.read_text(encoding="utf-8") if requirements.is_file() else "",
         "official_python_executable": config.official_python_executable or sys.executable,
     }
+
+
+def ensure_tree_ring_source_available(
+    root_path: Path,
+    config: TreeRingOfficialReferenceConfig,
+    paths: dict[str, Path],
+) -> dict[str, Any]:
+    """在 Colab 冷启动环境中按登记表补齐 Tree-Ring 官方源码。"""
+
+    initial_report = source_report(root_path, config)
+    if initial_report["official_entrypoint_ready"]:
+        source_prepare_report = {
+            **initial_report,
+            "source_available": True,
+            "source_downloaded": False,
+            "source_prepare_reason": "existing_source_entrypoint_found",
+        }
+        write_json(paths["source_prepare_result"], source_prepare_report)
+        return source_prepare_report
+
+    registry_item = load_baseline_registry_item(root_path, "tree_ring")
+    source_dir = (root_path / config.source_dir).resolve()
+    source_entry = source_dir / "run_tree_ring_watermark.py"
+    if source_dir.exists() and any(source_dir.iterdir()):
+        source_prepare_report = {
+            **initial_report,
+            "source_available": False,
+            "source_downloaded": False,
+            "source_prepare_reason": "source_dir_exists_without_official_entrypoint",
+            "official_repository_url": normalize_repository_url(str(registry_item.get("official_repository_url", ""))),
+            "official_repository_commit": registry_item.get("official_repository_commit", ""),
+        }
+        write_json(paths["source_prepare_result"], source_prepare_report)
+        return source_prepare_report
+
+    source_dir.parent.mkdir(parents=True, exist_ok=True)
+    repository_url = normalize_repository_url(str(registry_item["official_repository_url"]))
+    clone_result = run_command(["git", "clone", repository_url, str(source_dir)], cwd=root_path, timeout_seconds=300)
+    checkout_result: dict[str, Any] = {"command": [], "return_code": 0, "stdout": "", "stderr": ""}
+    if clone_result["return_code"] == 0 and registry_item.get("official_repository_commit"):
+        checkout_result = run_command(
+            ["git", "checkout", str(registry_item["official_repository_commit"])],
+            cwd=source_dir,
+            timeout_seconds=300,
+        )
+    refreshed_report = source_report(root_path, config)
+    source_prepare_report = {
+        **refreshed_report,
+        "source_available": source_entry.is_file() and clone_result["return_code"] == 0 and checkout_result["return_code"] == 0,
+        "source_downloaded": clone_result["return_code"] == 0,
+        "source_prepare_reason": "source_cloned_from_registry",
+        "official_repository_url": repository_url,
+        "official_repository_commit": registry_item.get("official_repository_commit", ""),
+        "clone_return_code": clone_result["return_code"],
+        "checkout_return_code": checkout_result["return_code"],
+        "clone_result": clone_result,
+        "checkout_result": checkout_result,
+    }
+    write_json(paths["source_prepare_result"], source_prepare_report)
+    return source_prepare_report
 
 
 def build_official_command(root_path: Path, config: TreeRingOfficialReferenceConfig) -> list[str]:
@@ -273,6 +339,20 @@ def run_official_command_if_requested(
             }
             write_json(paths["official_command_result"], result)
             return result
+    source_status = source_report(root_path, config)
+    if not source_status["official_entrypoint_ready"]:
+        paths["official_stdout"].write_text("", encoding="utf-8")
+        paths["official_stderr"].write_text("tree_ring_official_source_entrypoint_missing", encoding="utf-8")
+        result = {
+            "official_command_requested": True,
+            "official_command": build_official_command(root_path, config),
+            "return_code": 96,
+            "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
+            "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
+            "error": "tree_ring_official_source_entrypoint_missing",
+        }
+        write_json(paths["official_command_result"], result)
+        return result
     command = build_official_command(root_path, config)
     source_dir = (root_path / config.source_dir).resolve()
     env = os.environ.copy()
@@ -374,7 +454,7 @@ def write_tree_ring_official_reference_outputs(
         device_report = ensure_cuda_if_requested(config.require_cuda)
     except Exception as error:
         device_report = {"cuda_available": False, "device_error": f"{type(error).__name__}:{error}"}
-    source_status = source_report(root_path, config)
+    source_status = ensure_tree_ring_source_available(root_path, config, paths)
     imported_metrics, imported_evidence = load_imported_metric_summary(root_path, config)
     official_report = run_official_command_if_requested(root_path, config, paths)
     if official_report.get("return_code") == 0 and paths["official_stdout"].is_file():
@@ -432,6 +512,8 @@ def write_tree_ring_official_reference_outputs(
     for optional_path in (paths["official_command_result"], paths["official_stdout"], paths["official_stderr"], paths["official_metric_summary"]):
         if optional_path.exists():
             output_paths_for_manifest.append(relative_or_absolute(optional_path, root_path))
+    if paths["source_prepare_result"].exists():
+        output_paths_for_manifest.append(relative_or_absolute(paths["source_prepare_result"], root_path))
     manifest = build_artifact_manifest(
         artifact_id="tree_ring_official_reference_manifest",
         artifact_type="local_manifest",

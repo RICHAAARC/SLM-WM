@@ -16,6 +16,8 @@ from experiments.baselines import (
 from paper_workflow.colab_utils.tree_ring_official_reference import (
     TreeRingOfficialReferenceConfig,
     build_official_command,
+    ensure_tree_ring_source_available,
+    output_paths,
     parse_metric_text,
     write_tree_ring_official_reference_outputs,
 )
@@ -142,6 +144,57 @@ def test_tree_ring_official_reference_helper_imports_governed_summary(tmp_path: 
     assert summary["governed_reference_record_count"] == 1
     assert records_path.read_text(encoding="utf-8").strip()
     assert json.loads(validation_path.read_text(encoding="utf-8"))["reference_import_ready"] is True
+
+
+@pytest.mark.quick
+def test_tree_ring_official_reference_cold_start_clones_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Colab 冷启动缺少官方源码时, helper 应按登记表补齐 source 缓存。"""
+
+    registry_path = tmp_path / "external_baseline" / "source_registry.json"
+    registry_path.parent.mkdir(parents=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "baseline_sources": [
+                    {
+                        "baseline_id": "tree_ring",
+                        "source_dir": "external_baseline/primary/tree_ring/source",
+                        "official_repository_url": "git@github.com:YuxinWenRick/tree-ring-watermark.git",
+                        "official_repository_commit": "3015283d9cf82e90b628f02ad2121bd37408ca9a",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    config = TreeRingOfficialReferenceConfig(
+        output_dir="outputs/tree_ring_official_reference",
+        source_dir="external_baseline/primary/tree_ring/source",
+        require_cuda=False,
+    )
+    paths = output_paths(tmp_path, config)
+
+    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
+        if command[:2] == ["git", "clone"]:
+            source_dir = Path(command[-1])
+            source_dir.mkdir(parents=True, exist_ok=True)
+            (source_dir / "run_tree_ring_watermark.py").write_text("print('official source')\n", encoding="utf-8")
+            (source_dir / "requirements.txt").write_text("diffusers==0.11.1\n", encoding="utf-8")
+        return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr("paper_workflow.colab_utils.tree_ring_official_reference.run_command", fake_run_command)
+
+    report = ensure_tree_ring_source_available(tmp_path, config, paths)
+
+    assert report["source_available"] is True
+    assert report["source_downloaded"] is True
+    assert report["official_entrypoint_ready"] is True
+    assert report["official_repository_url"] == "https://github.com/YuxinWenRick/tree-ring-watermark.git"
+    assert paths["source_prepare_result"].is_file()
 
 
 @pytest.mark.quick
