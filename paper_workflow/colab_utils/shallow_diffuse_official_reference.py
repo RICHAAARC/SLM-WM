@@ -63,6 +63,8 @@ DEFAULT_LEGACY_PACKAGE_SPECS = (
 )
 DEFAULT_EDIT_TIME_LIST = "0.3"
 DEFAULT_ATTACKER_NAMES = "none"
+DEFAULT_REFERENCE_MODEL = "ViT-g-14"
+DEFAULT_REFERENCE_MODEL_PRETRAIN = "laion2b_s12b_b42k"
 PACKAGE_EXTRA_PATHS = (
     "paper_workflow/shallow_diffuse_official_reference_run.ipynb",
     "paper_workflow/colab_utils/shallow_diffuse_official_reference.py",
@@ -98,6 +100,8 @@ class ShallowDiffuseOfficialReferenceConfig:
     w_radius: int = 10
     w_measurement: str = "l1_complex2"
     w_injection: str = "complex2"
+    reference_model: str = DEFAULT_REFERENCE_MODEL
+    reference_model_pretrain: str = DEFAULT_REFERENCE_MODEL_PRETRAIN
     attacker_names: str = DEFAULT_ATTACKER_NAMES
     patch_model_repository_layout: bool = True
     prepare_local_model_repository: bool = True
@@ -741,6 +745,10 @@ def build_official_command(root_path: Path, config: ShallowDiffuseOfficialRefere
         str(config.w_measurement),
         "--w_injection",
         str(config.w_injection),
+        "--reference_model",
+        str(config.reference_model),
+        "--reference_model_pretrain",
+        str(config.reference_model_pretrain),
         "--edit_time_list",
         str(config.edit_time_list),
         "--start",
@@ -1069,6 +1077,8 @@ def write_shallow_diffuse_official_reference_outputs(
         "edit_time_list": effective_config.edit_time_list,
         "primary_edit_timestep": primary_edit_timestep(effective_config),
         "attacker_names": effective_config.attacker_names,
+        "reference_model": effective_config.reference_model,
+        "reference_model_pretrain": effective_config.reference_model_pretrain,
         "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
         "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
         "source_patch_applied": bool(source_patch_report.get("patch_applied")),
@@ -1167,6 +1177,8 @@ def build_default_config() -> ShallowDiffuseOfficialReferenceConfig:
         w_radius=int(os.environ.get("SLM_WM_SHALLOW_DIFFUSE_W_RADIUS", "10")),
         w_measurement=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_W_MEASUREMENT", "l1_complex2"),
         w_injection=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_W_INJECTION", "complex2"),
+        reference_model=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_REFERENCE_MODEL", DEFAULT_REFERENCE_MODEL),
+        reference_model_pretrain=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_REFERENCE_MODEL_PRETRAIN", DEFAULT_REFERENCE_MODEL_PRETRAIN),
         attacker_names=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_ATTACKER_NAMES", DEFAULT_ATTACKER_NAMES),
         patch_model_repository_layout=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_PATCH_MODEL_REPOSITORY_LAYOUT", "1") != "0",
         prepare_local_model_repository=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_PREPARE_LOCAL_MODEL_REPOSITORY", "1") != "0",

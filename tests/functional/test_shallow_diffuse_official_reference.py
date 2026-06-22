@@ -279,6 +279,8 @@ def test_shallow_diffuse_official_reference_parses_metric_text_and_custom_python
     assert metrics["auc"] == 0.95
     assert command[0] == "/opt/shallow-diffuse-legacy/bin/python"
     assert "--edit_time_list" in command
+    assert command[command.index("--reference_model") + 1] == "ViT-g-14"
+    assert command[command.index("--reference_model_pretrain") + 1] == "laion2b_s12b_b42k"
     assert command[command.index("--end") + 1] == "5"
 
 
@@ -432,6 +434,8 @@ def test_shallow_diffuse_official_reference_default_config_reads_runtime_paramet
     monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_W_PATTERN", "complex2_ring")
     monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_W_MEASUREMENT", "l1_complex2")
     monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
+    monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_REFERENCE_MODEL", "ViT-g-14")
+    monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_REFERENCE_MODEL_PRETRAIN", "laion2b_s12b_b42k")
 
     config = build_default_config()
 
@@ -442,3 +446,5 @@ def test_shallow_diffuse_official_reference_default_config_reads_runtime_paramet
     assert config.w_pattern == "complex2_ring"
     assert config.w_measurement == "l1_complex2"
     assert config.official_model_id == "Manojb/stable-diffusion-2-1-base"
+    assert config.reference_model == "ViT-g-14"
+    assert config.reference_model_pretrain == "laion2b_s12b_b42k"
