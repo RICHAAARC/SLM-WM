@@ -123,7 +123,10 @@ def test_shallow_diffuse_official_reference_patches_source_runtime_boundaries(tm
         "    attackers = {\n"
         "        'none': image_distortion_none,\n"
         "        'diffpure': image_distortion_diffpure,\n"
-        "    }\n",
+        "    }\n"
+        "    sims = measure_similarity([x0_no_w_img, averaged_image], current_prompt, ref_model, ref_clip_preprocess, ref_tokenizer, device)\n"
+        "    w_no_sim = sim[0].item()\n"
+        "    avg_sim = sims[1].item()\n",
         encoding="utf-8",
     )
     attackers = source_dir / "attackers.py"
@@ -173,11 +176,14 @@ def test_shallow_diffuse_official_reference_patches_source_runtime_boundaries(tm
     assert report["patch_applied"] is True
     assert "remove_fp16_revision_branch" in report["patch_items"]
     assert "environment_controlled_attacker_suffixes" in report["patch_items"]
+    assert "fix_reference_similarity_variable" in report["patch_items"]
     assert "lazy_heavy_attacker_initialization" in report["patch_items"]
     assert "float32_fft_for_legacy_cuda" in report["patch_items"]
     assert "preserve_latent_dtype_after_fft_injection" in report["patch_items"]
     assert "revision='fp16'" not in patched_entrypoint
     assert "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_ATTACKER_NAMES" in patched_entrypoint
+    assert "w_no_sim = sims[0].item()" in patched_entrypoint
+    assert "w_no_sim = sim[0].item()" not in patched_entrypoint
     assert "compressai_required_for_vae_attackers" in patched_attackers
     assert "def slm_wm_fft2_float32" in patched_optim_utils
     assert "gt_patch = slm_wm_fft2_float32(gt_init)" in patched_optim_utils

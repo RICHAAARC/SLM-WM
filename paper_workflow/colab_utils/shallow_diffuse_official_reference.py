@@ -541,6 +541,19 @@ def patch_shallow_diffuse_model_repository_layout(
         patched_text = patched_text.replace(attacker_filter_anchor, attacker_filter_replacement)
         report["patch_items"].append("filter_attacker_dictionary")
 
+    similarity_marker = "# SLM-WM: 官方脚本此处变量名误写为 sim, 应使用上方 measure_similarity 返回的 sims。"
+    similarity_target = "        w_no_sim = sim[0].item()\n"
+    similarity_replacement = f"        {similarity_marker}\n        w_no_sim = sims[0].item()\n"
+    if similarity_marker not in patched_text and similarity_target in patched_text:
+        patched_text = patched_text.replace(similarity_target, similarity_replacement, 1)
+        report["patch_items"].append("fix_reference_similarity_variable")
+    else:
+        similarity_target_compact = "    w_no_sim = sim[0].item()\n"
+        similarity_replacement_compact = f"    {similarity_marker}\n    w_no_sim = sims[0].item()\n"
+        if similarity_marker not in patched_text and similarity_target_compact in patched_text:
+            patched_text = patched_text.replace(similarity_target_compact, similarity_replacement_compact, 1)
+            report["patch_items"].append("fix_reference_similarity_variable")
+
     compressai_marker = "# SLM-WM: VAE 攻击器依赖按需导入, 默认 none 攻击不要求 compressai。"
     compressai_target = (
         "from compressai.zoo import bmshj2018_factorized, bmshj2018_hyperprior, mbt2018_mean, mbt2018, cheng2020_anchor\n"
