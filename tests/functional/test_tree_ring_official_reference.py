@@ -20,9 +20,47 @@ from paper_workflow.colab_utils.tree_ring_official_reference import (
     ensure_tree_ring_source_available,
     output_paths,
     parse_metric_text,
+    patch_tree_ring_model_repository_layout,
     prepare_tree_ring_legacy_environment,
     write_tree_ring_official_reference_outputs,
 )
+
+
+@pytest.mark.quick
+def test_tree_ring_official_reference_patches_model_repository_layout(tmp_path: Path) -> None:
+    """公开镜像缺少 fp16 分支时, helper 应把官方入口补丁记录为可审计产物。"""
+
+    source_dir = tmp_path / "external_baseline" / "primary" / "tree_ring" / "source"
+    source_dir.mkdir(parents=True)
+    entrypoint = source_dir / "run_tree_ring_watermark.py"
+    entrypoint.write_text(
+        "pipe = InversableStableDiffusionPipeline.from_pretrained(\n"
+        "        args.model_id,\n"
+        "        scheduler=scheduler,\n"
+        "        torch_dtype=torch.float16,\n"
+        "        revision='fp16',\n"
+        "        )\n",
+        encoding="utf-8",
+    )
+    config = TreeRingOfficialReferenceConfig(
+        output_dir="outputs/tree_ring_official_reference",
+        source_dir="external_baseline/primary/tree_ring/source",
+        official_model_id="Manojb/stable-diffusion-2-1-base",
+        patch_model_repository_layout=True,
+        require_cuda=False,
+    )
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True, exist_ok=True)
+
+    report = patch_tree_ring_model_repository_layout(tmp_path, config, paths)
+    patched_text = entrypoint.read_text(encoding="utf-8")
+    saved_report = json.loads(paths["source_patch_result"].read_text(encoding="utf-8"))
+
+    assert report["patch_applied"] is True
+    assert "revision='fp16'" not in patched_text
+    assert "公开镜像没有 fp16 分支" in patched_text
+    assert saved_report["official_model_id"] == "Manojb/stable-diffusion-2-1-base"
+    assert saved_report["upstream_official_model_id"] == "stabilityai/stable-diffusion-2-1-base"
 
 
 @pytest.mark.quick
@@ -78,6 +116,8 @@ def test_tree_ring_official_reference_default_config_reads_legacy_environment(mo
     monkeypatch.setenv("SLM_WM_TREE_RING_LEGACY_ENV_PREFIX", "/content/tree_ring_legacy_env")
     monkeypatch.setenv("SLM_WM_TREE_RING_LEGACY_TORCH_SPECS", "torch==1.13.0+cu117")
     monkeypatch.setenv("SLM_WM_TREE_RING_LEGACY_PACKAGE_SPECS", "transformers==4.23.1 diffusers==0.11.1")
+    monkeypatch.setenv("SLM_WM_TREE_RING_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
+    monkeypatch.setenv("SLM_WM_TREE_RING_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
 
     config = build_default_config()
 
@@ -85,6 +125,9 @@ def test_tree_ring_official_reference_default_config_reads_legacy_environment(mo
     assert config.legacy_environment_prefix == "/content/tree_ring_legacy_env"
     assert config.legacy_torch_specs == "torch==1.13.0+cu117"
     assert config.legacy_package_specs == "transformers==4.23.1 diffusers==0.11.1"
+    assert config.official_model_id == "Manojb/stable-diffusion-2-1-base"
+    assert config.upstream_official_model_id == "stabilityai/stable-diffusion-2-1-base"
+    assert config.patch_model_repository_layout is True
 
 
 @pytest.mark.quick

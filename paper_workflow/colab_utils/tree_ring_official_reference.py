@@ -41,7 +41,12 @@ DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/tree_ring_official_refere
 DEFAULT_SOURCE_DIR = "external_baseline/primary/tree_ring/source"
 DEFAULT_RUN_NAME = "tree_ring_official_legacy_reference"
 DEFAULT_SAMPLE_COUNT = 5
-DEFAULT_OFFICIAL_MODEL_ID = "stabilityai/stable-diffusion-2-1-base"
+DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID = "stabilityai/stable-diffusion-2-1-base"
+DEFAULT_OFFICIAL_MODEL_ID = "Manojb/stable-diffusion-2-1-base"
+DEFAULT_MODEL_SOURCE_NOTE = (
+    "官方 Tree-Ring 使用的 stabilityai/stable-diffusion-2-1-base 当前不可直接访问; "
+    "默认改用 Hugging Face 上标记为 cloned from stabilityai/stable-diffusion-2-1-base 的公开镜像。"
+)
 DEFAULT_LEGACY_ENV_PREFIX = "/content/tree_ring_legacy_env"
 DEFAULT_MICROMAMBA_PATH = "/content/bin/micromamba"
 DEFAULT_LEGACY_PYTHON_VERSION = "3.9"
@@ -73,6 +78,9 @@ class TreeRingOfficialReferenceConfig:
     sample_count: int = DEFAULT_SAMPLE_COUNT
     start_index: int = 0
     official_model_id: str = DEFAULT_OFFICIAL_MODEL_ID
+    upstream_official_model_id: str = DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID
+    model_source_note: str = DEFAULT_MODEL_SOURCE_NOTE
+    patch_model_repository_layout: bool = True
     official_python_executable: str = ""
     prepare_legacy_environment: bool = False
     legacy_environment_prefix: str = DEFAULT_LEGACY_ENV_PREFIX
@@ -191,6 +199,7 @@ def output_paths(root_path: Path, config: TreeRingOfficialReferenceConfig) -> di
         "output_dir": output_dir,
         "official_command_result": output_dir / "tree_ring_official_command_result.json",
         "source_prepare_result": output_dir / "tree_ring_official_source_prepare_result.json",
+        "source_patch_result": output_dir / "tree_ring_official_source_patch_result.json",
         "legacy_environment_prepare_result": output_dir / "tree_ring_legacy_environment_prepare_result.json",
         "official_stdout": output_dir / "tree_ring_official_stdout.txt",
         "official_stderr": output_dir / "tree_ring_official_stderr.txt",
@@ -403,6 +412,73 @@ def ensure_tree_ring_source_available(
     write_json(paths["source_prepare_result"], source_prepare_report)
     return source_prepare_report
 
+
+
+def patch_tree_ring_model_repository_layout(
+    root_path: Path,
+    config: TreeRingOfficialReferenceConfig,
+    paths: dict[str, Path],
+) -> dict[str, Any]:
+    """为公开镜像缺少 fp16 分支的情况应用最小源码入口补丁。"""
+
+    source_dir = (root_path / config.source_dir).resolve()
+    entrypoint = source_dir / "run_tree_ring_watermark.py"
+    report = {
+        "patch_requested": bool(config.patch_model_repository_layout),
+        "patch_applied": False,
+        "patch_skipped": False,
+        "official_entrypoint": relative_or_absolute(entrypoint, root_path),
+        "official_model_id": config.official_model_id,
+        "upstream_official_model_id": config.upstream_official_model_id,
+        "model_source_note": config.model_source_note,
+        "patch_reason": "mirror_has_fp16_weights_on_main_without_fp16_branch",
+    }
+    if not config.patch_model_repository_layout:
+        report.update({"patch_skipped": True, "patch_skip_reason": "patch_model_repository_layout_disabled"})
+        write_json(paths["source_patch_result"], report)
+        return report
+    if not entrypoint.is_file():
+        report.update({"patch_skipped": True, "patch_skip_reason": "official_entrypoint_missing"})
+        write_json(paths["source_patch_result"], report)
+        return report
+
+    source_text = entrypoint.read_text(encoding="utf-8")
+    before_digest = file_digest(entrypoint)
+    marker = "# SLM-WM: 公开镜像没有 fp16 分支, 因此从 main 分支加载模型权重。"
+    target = "        revision='fp16',\n"
+    if marker in source_text:
+        report.update(
+            {
+                "patch_skipped": True,
+                "patch_skip_reason": "model_repository_layout_patch_already_present",
+                "entrypoint_digest_before": before_digest,
+                "entrypoint_digest_after": before_digest,
+            }
+        )
+        write_json(paths["source_patch_result"], report)
+        return report
+    patched_text = source_text.replace(target, f"        {marker}\n")
+    if patched_text == source_text:
+        report.update(
+            {
+                "patch_skipped": True,
+                "patch_skip_reason": "fp16_revision_line_not_found",
+                "entrypoint_digest_before": before_digest,
+                "entrypoint_digest_after": before_digest,
+            }
+        )
+        write_json(paths["source_patch_result"], report)
+        return report
+    entrypoint.write_text(patched_text, encoding="utf-8")
+    report.update(
+        {
+            "patch_applied": True,
+            "entrypoint_digest_before": before_digest,
+            "entrypoint_digest_after": file_digest(entrypoint),
+        }
+    )
+    write_json(paths["source_patch_result"], report)
+    return report
 
 def build_official_command(root_path: Path, config: TreeRingOfficialReferenceConfig) -> list[str]:
     """构造 Tree-Ring 官方 legacy 入口命令。"""
@@ -671,6 +747,7 @@ def write_tree_ring_official_reference_outputs(
     except Exception as error:
         device_report = {"cuda_available": False, "device_error": f"{type(error).__name__}:{error}"}
     source_status = ensure_tree_ring_source_available(root_path, effective_config, paths)
+    source_patch_report = patch_tree_ring_model_repository_layout(root_path, effective_config, paths)
     imported_metrics, imported_evidence = load_imported_metric_summary(root_path, effective_config)
     if (
         effective_config.run_official_command
@@ -693,6 +770,7 @@ def write_tree_ring_official_reference_outputs(
     environment_report = build_runtime_environment_report()
     environment_report["tree_ring_official_reference_device_report"] = device_report
     environment_report["tree_ring_official_reference_source_report"] = source_status
+    environment_report["tree_ring_official_reference_source_patch_report"] = source_patch_report
     environment_report["tree_ring_official_reference_legacy_environment_report"] = legacy_environment_report
     write_json(paths["environment_report"], environment_report)
     record_report = build_reference_record_report(
@@ -717,6 +795,9 @@ def write_tree_ring_official_reference_outputs(
         "sample_count": int(effective_config.sample_count),
         "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
         "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
+        "source_patch_applied": bool(source_patch_report.get("patch_applied")),
+        "official_model_id": effective_config.official_model_id,
+        "upstream_official_model_id": effective_config.upstream_official_model_id,
         "governed_reference_record_count": int(record_report.get("record_count", 0)),
         "reference_import_ready": bool(validation.get("reference_import_ready")),
         "main_table_eligible": False,
@@ -728,6 +809,7 @@ def write_tree_ring_official_reference_outputs(
         "reference_validation_path": relative_or_absolute(paths["reference_validation"], root_path),
         "metadata": {
             "source_report": source_status,
+            "source_patch_report": source_patch_report,
             "legacy_environment_report": legacy_environment_report,
             "official_report": official_report,
             "validation": validation,
@@ -746,6 +828,8 @@ def write_tree_ring_official_reference_outputs(
             output_paths_for_manifest.append(relative_or_absolute(optional_path, root_path))
     if paths["source_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["source_prepare_result"], root_path))
+    if paths["source_patch_result"].exists():
+        output_paths_for_manifest.append(relative_or_absolute(paths["source_patch_result"], root_path))
     if paths["legacy_environment_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["legacy_environment_prepare_result"], root_path))
     manifest = build_artifact_manifest(
@@ -778,6 +862,9 @@ def build_default_config() -> TreeRingOfficialReferenceConfig:
         sample_count=int(os.environ.get("SLM_WM_TREE_RING_OFFICIAL_SAMPLE_COUNT", str(DEFAULT_SAMPLE_COUNT))),
         start_index=int(os.environ.get("SLM_WM_TREE_RING_OFFICIAL_START_INDEX", "0")),
         official_model_id=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_MODEL_ID", DEFAULT_OFFICIAL_MODEL_ID),
+        upstream_official_model_id=os.environ.get("SLM_WM_TREE_RING_UPSTREAM_OFFICIAL_MODEL_ID", DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID),
+        model_source_note=os.environ.get("SLM_WM_TREE_RING_MODEL_SOURCE_NOTE", DEFAULT_MODEL_SOURCE_NOTE),
+        patch_model_repository_layout=os.environ.get("SLM_WM_TREE_RING_PATCH_MODEL_REPOSITORY_LAYOUT", "1") != "0",
         official_python_executable=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_PYTHON_EXECUTABLE", ""),
         prepare_legacy_environment=os.environ.get("SLM_WM_TREE_RING_PREPARE_LEGACY_ENV", "0") == "1",
         legacy_environment_prefix=os.environ.get("SLM_WM_TREE_RING_LEGACY_ENV_PREFIX", DEFAULT_LEGACY_ENV_PREFIX),
