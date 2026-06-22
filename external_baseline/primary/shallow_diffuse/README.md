@@ -24,3 +24,5 @@
 Shallow Diffuse 官方源码默认把运行结果写到相对路径 `output/{run_name}`。本项目 helper 会在 `outputs/shallow_diffuse_official_reference` 作为运行目录调用官方脚本, 因此官方相对输出仍位于项目统一 `outputs/` 边界内。
 
 当前官方参考入口默认只运行 `none` 攻击器, 目标是先验证 shallow latent injection、DDIM inversion、metric parsing 和 governed import 链路。VAE / diffusion 类攻击器属于重型可选参考, 需要后续单独扩展依赖和运行预算。
+
+为兼容 Colab L4 与 legacy PyTorch 组合, helper 会对官方 `optim_utils.py` 中的 FFT 调用做 float32 输入保护, 并在频域注入完成后恢复 latent dtype。该补丁用于避免 half precision / complex half 在 `torch.fft.fft2` 上触发 cuFFT 内部错误, 同时保持官方 fp16 pipeline 的输入契约; 补丁项会进入 `shallow_diffuse_official_source_patch_result.json`。

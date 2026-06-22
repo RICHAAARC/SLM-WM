@@ -472,12 +472,14 @@ def patch_shallow_diffuse_model_repository_layout(
     source_dir = (root_path / config.source_dir).resolve()
     entrypoint = source_dir / "run_shallow_diffuse_t2i.py"
     attackers_path = source_dir / "attackers.py"
+    optim_utils_path = source_dir / "optim_utils.py"
     report = {
         "patch_requested": bool(config.patch_model_repository_layout),
         "patch_applied": False,
         "patch_skipped": False,
         "official_entrypoint": relative_or_absolute(entrypoint, root_path),
         "attackers_path": relative_or_absolute(attackers_path, root_path),
+        "optim_utils_path": relative_or_absolute(optim_utils_path, root_path),
         "official_model_id": config.official_model_id,
         "upstream_official_model_id": config.upstream_official_model_id,
         "model_source_note": config.model_source_note,
@@ -495,10 +497,13 @@ def patch_shallow_diffuse_model_repository_layout(
 
     source_text = entrypoint.read_text(encoding="utf-8")
     attackers_text = attackers_path.read_text(encoding="utf-8")
+    optim_text = optim_utils_path.read_text(encoding="utf-8") if optim_utils_path.is_file() else ""
     before_digest = file_digest(entrypoint)
     attackers_before_digest = file_digest(attackers_path)
+    optim_before_digest = file_digest(optim_utils_path) if optim_utils_path.is_file() else ""
     patched_text = source_text
     patched_attackers_text = attackers_text
+    patched_optim_text = optim_text
 
     revision_marker = "# SLM-WM: 公开镜像没有 fp16 分支, 因此从 main 分支加载模型权重。"
     revision_target = "        revision='fp16',\n"
@@ -578,7 +583,52 @@ def patch_shallow_diffuse_model_repository_layout(
         )
         report["patch_items"].append("lazy_heavy_attacker_initialization")
 
-    if patched_text == source_text and patched_attackers_text == attackers_text:
+    fft_marker = "# SLM-WM: legacy CUDA half precision FFT 在部分 Colab GPU 上不稳定, 统一用 float32 执行频域变换。"
+    fft_target = "torch.fft.fft2("
+    fft_replacement = "slm_wm_fft2_float32("
+    fft_helper_anchor = "import torch.nn.functional as F\n"
+    fft_helper = (
+        f"\n{fft_marker}\n"
+        "def slm_wm_fft2_float32(tensor):\n"
+        "    if tensor.dtype in (torch.float16, torch.bfloat16):\n"
+        "        return torch.fft.fft2(tensor.float())\n"
+        "    if tensor.is_complex() and str(tensor.dtype) == 'torch.complex32':\n"
+        "        return torch.fft.fft2(tensor.to(torch.complex64))\n"
+        "    return torch.fft.fft2(tensor)\n"
+    )
+    if optim_text and fft_marker not in patched_optim_text and fft_target in patched_optim_text:
+        patched_optim_text = patched_optim_text.replace(fft_target, fft_replacement)
+        if fft_helper_anchor in patched_optim_text:
+            patched_optim_text = patched_optim_text.replace(fft_helper_anchor, fft_helper_anchor + fft_helper, 1)
+        else:
+            patched_optim_text = fft_helper + "\n" + patched_optim_text
+        report["patch_items"].append("float32_fft_for_legacy_cuda")
+
+    latent_dtype_marker = (
+        "# SLM-WM: 频域注入完成后恢复 latent dtype, 保持与官方 fp16 pipeline 的输入契约一致。"
+    )
+    inject_function_header = "def inject_watermark(init_latents_w, watermarking_mask, gt_patch, w_injection):\n"
+    if optim_text and latent_dtype_marker not in patched_optim_text and inject_function_header in patched_optim_text:
+        patched_optim_text = patched_optim_text.replace(
+            inject_function_header,
+            inject_function_header
+            + f"    {latent_dtype_marker}\n"
+            + "    slm_wm_init_latents_dtype = init_latents_w.dtype\n",
+            1,
+        )
+        patched_optim_text = patched_optim_text.replace(
+            "        init_latents_w = torch.fft.ifft2(torch.fft.ifftshift(init_latents_w_fft, dim=(-1, -2))).real\n",
+            "        init_latents_w = torch.fft.ifft2(torch.fft.ifftshift(init_latents_w_fft, dim=(-1, -2))).real.to(slm_wm_init_latents_dtype)\n",
+            1,
+        )
+        patched_optim_text = patched_optim_text.replace(
+            "        init_latents_w = torch.fft.ifft2(init_latents_w_fft).real\n",
+            "        init_latents_w = torch.fft.ifft2(init_latents_w_fft).real.to(slm_wm_init_latents_dtype)\n",
+            1,
+        )
+        report["patch_items"].append("preserve_latent_dtype_after_fft_injection")
+
+    if patched_text == source_text and patched_attackers_text == attackers_text and patched_optim_text == optim_text:
         report.update(
             {
                 "patch_skipped": True,
@@ -587,6 +637,8 @@ def patch_shallow_diffuse_model_repository_layout(
                 "entrypoint_digest_after": before_digest,
                 "attackers_digest_before": attackers_before_digest,
                 "attackers_digest_after": attackers_before_digest,
+                "optim_utils_digest_before": optim_before_digest,
+                "optim_utils_digest_after": optim_before_digest,
             }
         )
         write_json(paths["source_patch_result"], report)
@@ -595,6 +647,8 @@ def patch_shallow_diffuse_model_repository_layout(
         entrypoint.write_text(patched_text, encoding="utf-8")
     if patched_attackers_text != attackers_text:
         attackers_path.write_text(patched_attackers_text, encoding="utf-8")
+    if patched_optim_text != optim_text and optim_utils_path.is_file():
+        optim_utils_path.write_text(patched_optim_text, encoding="utf-8")
     report.update(
         {
             "patch_applied": True,
@@ -602,6 +656,8 @@ def patch_shallow_diffuse_model_repository_layout(
             "entrypoint_digest_after": file_digest(entrypoint),
             "attackers_digest_before": attackers_before_digest,
             "attackers_digest_after": file_digest(attackers_path),
+            "optim_utils_digest_before": optim_before_digest,
+            "optim_utils_digest_after": file_digest(optim_utils_path) if optim_utils_path.is_file() else "",
         }
     )
     write_json(paths["source_patch_result"], report)

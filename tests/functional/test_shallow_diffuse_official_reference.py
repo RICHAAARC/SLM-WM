@@ -141,6 +141,21 @@ def test_shallow_diffuse_official_reference_patches_source_runtime_boundaries(tm
         "    return\n",
         encoding="utf-8",
     )
+    optim_utils = source_dir / "optim_utils.py"
+    optim_utils.write_text(
+        "import torch\n"
+        "import torch.nn.functional as F\n"
+        "def get_watermarking_pattern(pipe, args, device):\n"
+        "    gt_init = pipe.get_random_latents()\n"
+        "    gt_patch = torch.fft.fft2(gt_init)\n"
+        "    return gt_patch\n"
+        "def inject_watermark(init_latents_w, watermarking_mask, gt_patch, w_injection):\n"
+        "    if 'complex2' == w_injection:\n"
+        "        init_latents_w_fft = torch.fft.fft2(init_latents_w)\n"
+        "        init_latents_w = torch.fft.ifft2(init_latents_w_fft).real\n"
+        "        return init_latents_w\n",
+        encoding="utf-8",
+    )
     config = ShallowDiffuseOfficialReferenceConfig(
         output_dir="outputs/shallow_diffuse_official_reference",
         source_dir="external_baseline/primary/shallow_diffuse/source",
@@ -153,14 +168,22 @@ def test_shallow_diffuse_official_reference_patches_source_runtime_boundaries(tm
     report = patch_shallow_diffuse_model_repository_layout(tmp_path, config, paths)
     patched_entrypoint = entrypoint.read_text(encoding="utf-8")
     patched_attackers = attackers.read_text(encoding="utf-8")
+    patched_optim_utils = optim_utils.read_text(encoding="utf-8")
 
     assert report["patch_applied"] is True
     assert "remove_fp16_revision_branch" in report["patch_items"]
     assert "environment_controlled_attacker_suffixes" in report["patch_items"]
     assert "lazy_heavy_attacker_initialization" in report["patch_items"]
+    assert "float32_fft_for_legacy_cuda" in report["patch_items"]
+    assert "preserve_latent_dtype_after_fft_injection" in report["patch_items"]
     assert "revision='fp16'" not in patched_entrypoint
     assert "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_ATTACKER_NAMES" in patched_entrypoint
     assert "compressai_required_for_vae_attackers" in patched_attackers
+    assert "def slm_wm_fft2_float32" in patched_optim_utils
+    assert "gt_patch = slm_wm_fft2_float32(gt_init)" in patched_optim_utils
+    assert "init_latents_w_fft = slm_wm_fft2_float32(init_latents_w)" in patched_optim_utils
+    assert "slm_wm_init_latents_dtype = init_latents_w.dtype" in patched_optim_utils
+    assert "torch.fft.ifft2(init_latents_w_fft).real.to(slm_wm_init_latents_dtype)" in patched_optim_utils
 
 
 @pytest.mark.quick
