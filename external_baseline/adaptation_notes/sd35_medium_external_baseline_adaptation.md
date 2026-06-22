@@ -19,9 +19,13 @@
 
 原方法依赖 latent noise message、truncated Gaussian sampling 和 bit voting。SD3.5 Medium 的 latent channel 与 pipeline 组件不同, 因此需要重新定义 message 到 16-channel latent 的映射和可审计阈值边界。
 
+当前项目采用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium latent 中用二值 message 控制正负截断 Gaussian noise, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 近似反演恢复 noise sign, 最后经 key 解码与 block voting 计算 bit accuracy 分数。该路径用于 common-backbone 公平对比候选, 但仍需后续 full-main prompt、fixed-FPR 与共同攻击矩阵闭合后才能进入主表正式结果。
+
 ### Shallow Diffuse
 
 原方法依赖 shallow latent subspace 和局部注入掩码。SD3.5 Medium 需要重新对齐 latent 分辨率、通道布局和再扩散攻击路径。
+
+当前项目采用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium denoising 过程中使用 callback 在浅层 latent 位置写入局部 watermark patch, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 近似反演恢复 latent, 最后以 masked patch 距离作为检测分数。若运行环境缺少中间 callback 能力, adapter 会显式记录 fallback, 不把该运行伪装为论文主表结果。
 
 ### T2SMark
 
@@ -39,7 +43,7 @@
 
 ## 当前 GPU smoke adapter 边界
 
-Tree-Ring、Gaussian Shading 和 Shallow Diffuse 已接入项目治理内的 SD3.5 latent 级 smoke adapter。Tree-Ring 额外提供 `method_faithful_sd35` adapter, 可在真实 GPU 环境中加载 SD3.5 Medium 并执行方法忠实的 ring key 注入与检测路径。Gaussian Shading 与 Shallow Diffuse 仍处于 latent smoke adapter 边界, 后续需按 Tree-Ring 样板补齐方法忠实 adapter。
+Tree-Ring、Gaussian Shading 和 Shallow Diffuse 已接入项目治理内的 SD3.5 latent 级 smoke adapter, 并均提供 `method_faithful_sd35` adapter。真实 GPU workflow 默认可以在同一命令计划中调用三类 method-faithful adapter, 但这些 adapter 输出仍保持 `formal_result_claim=false` 与 `supports_paper_claim=false`, 防止小样本链路测试被误读为论文级正式对比。
 
 该实现的主要作用是验证以下工程链路:
 

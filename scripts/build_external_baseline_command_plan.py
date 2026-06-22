@@ -78,11 +78,42 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("latent_smoke", "method_faithful_sd35"),
         help="Tree-Ring adapter 运行模式。默认保留轻量链路检查, 真实 GPU 运行应使用 method_faithful_sd35。",
     )
+    parser.add_argument(
+        "--gaussian-shading-adapter-mode",
+        default="latent_smoke",
+        choices=("latent_smoke", "method_faithful_sd35"),
+        help="Gaussian Shading adapter 运行模式。默认保留轻量链路检查, 真实 GPU 运行应使用 method_faithful_sd35。",
+    )
+    parser.add_argument(
+        "--shallow-diffuse-adapter-mode",
+        default="latent_smoke",
+        choices=("latent_smoke", "method_faithful_sd35"),
+        help="Shallow Diffuse adapter 运行模式。默认保留轻量链路检查, 真实 GPU 运行应使用 method_faithful_sd35。",
+    )
     parser.add_argument("--tree-ring-watermark-seed", type=int, default=999999, help="Tree-Ring key 随机种子。")
     parser.add_argument("--tree-ring-w-channel", type=int, default=0, help="Tree-Ring 写入通道, -1 表示全部通道。")
     parser.add_argument("--tree-ring-w-radius", type=int, default=10, help="Tree-Ring 傅里叶域写入半径。")
     parser.add_argument("--tree-ring-w-pattern", default="ring", choices=("ring", "rand", "zeros"), help="Tree-Ring key 模式。")
     parser.add_argument("--tree-ring-attack-families", default="", help="Tree-Ring 适配器内部执行的轻量图像攻击族。")
+    parser.add_argument("--gaussian-shading-watermark-seed", type=int, default=20260622, help="Gaussian Shading message 随机种子。")
+    parser.add_argument("--gaussian-shading-channel-copy", type=int, default=1, help="Gaussian Shading 通道重复因子。")
+    parser.add_argument("--gaussian-shading-hw-copy", type=int, default=8, help="Gaussian Shading 空间重复因子。")
+    parser.add_argument("--gaussian-shading-attack-families", default="", help="Gaussian Shading 适配器内部执行的轻量图像攻击族。")
+    parser.add_argument("--shallow-diffuse-watermark-seed", type=int, default=42, help="Shallow Diffuse patch 随机种子。")
+    parser.add_argument("--shallow-diffuse-w-channel", type=int, default=0, help="Shallow Diffuse 写入通道, -1 表示全部通道。")
+    parser.add_argument("--shallow-diffuse-w-radius", type=int, default=10, help="Shallow Diffuse mask 半径。")
+    parser.add_argument("--shallow-diffuse-w-inner-radius", type=int, default=0, help="Shallow Diffuse ring mask 内半径。")
+    parser.add_argument(
+        "--shallow-diffuse-w-mask-shape",
+        default="circle",
+        choices=("circle", "ring", "square", "whole", "outercircle"),
+        help="Shallow Diffuse mask 形状。",
+    )
+    parser.add_argument("--shallow-diffuse-w-pattern", default="complex_rand", help="Shallow Diffuse watermark patch 模式。")
+    parser.add_argument("--shallow-diffuse-w-injection", default="complex", help="Shallow Diffuse watermark 注入模式。")
+    parser.add_argument("--shallow-diffuse-w-measurement", default="l1_complex", help="Shallow Diffuse watermark 检测度量。")
+    parser.add_argument("--shallow-diffuse-edit-fraction", type=float, default=0.2, help="Shallow Diffuse 浅层注入采样位置比例。")
+    parser.add_argument("--shallow-diffuse-attack-families", default="", help="Shallow Diffuse 适配器内部执行的轻量图像攻击族。")
     return parser
 
 
@@ -177,6 +208,48 @@ def build_plan(args: argparse.Namespace) -> list[dict[str, Any]]:
                     )
                 if args.tree_ring_adapter_mode == "method_faithful_sd35" and str(args.tree_ring_attack_families).strip():
                     command.extend(["--attack-families", str(args.tree_ring_attack_families)])
+            elif baseline_id == "gaussian_shading":
+                command.extend(["--adapter-mode", str(args.gaussian_shading_adapter_mode)])
+                if args.gaussian_shading_adapter_mode == "method_faithful_sd35":
+                    command.extend(
+                        [
+                            "--watermark-seed",
+                            str(args.gaussian_shading_watermark_seed),
+                            "--channel-copy",
+                            str(args.gaussian_shading_channel_copy),
+                            "--hw-copy",
+                            str(args.gaussian_shading_hw_copy),
+                        ]
+                    )
+                if args.gaussian_shading_adapter_mode == "method_faithful_sd35" and str(args.gaussian_shading_attack_families).strip():
+                    command.extend(["--attack-families", str(args.gaussian_shading_attack_families)])
+            elif baseline_id == "shallow_diffuse":
+                command.extend(["--adapter-mode", str(args.shallow_diffuse_adapter_mode)])
+                if args.shallow_diffuse_adapter_mode == "method_faithful_sd35":
+                    command.extend(
+                        [
+                            "--watermark-seed",
+                            str(args.shallow_diffuse_watermark_seed),
+                            "--w-channel",
+                            str(args.shallow_diffuse_w_channel),
+                            "--w-radius",
+                            str(args.shallow_diffuse_w_radius),
+                            "--w-inner-radius",
+                            str(args.shallow_diffuse_w_inner_radius),
+                            "--w-mask-shape",
+                            str(args.shallow_diffuse_w_mask_shape),
+                            "--w-pattern",
+                            str(args.shallow_diffuse_w_pattern),
+                            "--w-injection",
+                            str(args.shallow_diffuse_w_injection),
+                            "--w-measurement",
+                            str(args.shallow_diffuse_w_measurement),
+                            "--edit-fraction",
+                            str(args.shallow_diffuse_edit_fraction),
+                        ]
+                    )
+                if args.shallow_diffuse_adapter_mode == "method_faithful_sd35" and str(args.shallow_diffuse_attack_families).strip():
+                    command.extend(["--attack-families", str(args.shallow_diffuse_attack_families)])
         rows.append(
             {
                 "baseline_id": baseline_id,

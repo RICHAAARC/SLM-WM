@@ -937,6 +937,26 @@ Notebook 与 repository module 的跨边界数据
 | t2smark_result_count | metric | none | false | false | false | T2SMark 官方 results.json 中可读取的样本数量。 |
 | missing_result_indices | metric | none | true | false | false | T2SMark 输入 image pair 中缺少官方结果的索引集合。 |
 | adapter_digest | artifact | none | true | false | false | 外部 baseline adapter manifest 的稳定摘要。 |
+| score_retention_proxy | metric | none | true | false | false | 外部 baseline adapter observation 中记录的分数保持代理值。|
+| generation_model_id | runtime | none | true | false | false | 生成外部 baseline 图像所使用的模型标识。|
+| watermark_parameters | protocol | none | true | false | false | 外部 baseline method-faithful adapter 的水印参数摘要。|
+| message_mapping | protocol | none | true | false | false | Gaussian Shading adapter 中 message 到 latent noise 的映射说明。|
+| tree_ring_adapter_mode | protocol | none | false | false | false | Tree-Ring adapter 在命令计划中的运行模式。|
+| gaussian_shading_adapter_mode | protocol | none | false | false | false | Gaussian Shading adapter 在命令计划中的运行模式。|
+| shallow_diffuse_adapter_mode | protocol | none | false | false | false | Shallow Diffuse adapter 在命令计划中的运行模式。|
+| tree_ring_attack_families | protocol | none | false | false | false | Tree-Ring adapter 内部可选轻量攻击族列表。|
+| gaussian_shading_attack_families | protocol | none | false | false | false | Gaussian Shading adapter 内部可选轻量攻击族列表。|
+| shallow_diffuse_attack_families | protocol | none | false | false | false | Shallow Diffuse adapter 内部可选轻量攻击族列表。|
+| channel_copy | protocol | none | true | false | false | Gaussian Shading bit 在 SD3.5 latent 通道维度上的重复因子。|
+| hw_copy | protocol | none | true | false | false | Gaussian Shading bit 在 SD3.5 latent 空间维度上的重复因子。|
+| shallow_injection_mode | protocol | none | true | false | false | Shallow Diffuse adapter 单条 observation 使用的浅层注入执行模式。|
+| shallow_injection_modes | protocol | none | false | false | false | Shallow Diffuse adapter manifest 中出现过的浅层注入执行模式集合。|
+| edit_fraction | protocol | none | true | false | false | Shallow Diffuse 在 denoising 过程中的注入位置比例。|
+| w_inner_radius | protocol | none | true | false | false | Shallow Diffuse ring mask 的内半径。|
+| w_mask_shape | protocol | none | true | false | false | Shallow Diffuse watermark mask 形状。|
+| w_injection | protocol | none | true | false | false | Shallow Diffuse watermark 注入模式。|
+| w_measurement | protocol | none | true | false | false | Shallow Diffuse watermark 检测度量。|
+| source_role | protocol | none | true | false | false | attacked image manifest 中源图像的角色。|
 | primary_baseline_formal_import_protocol_name | protocol | none | true | false | false | 主表 external baseline 正式结果导入协议名称。 |
 | formal_import_input_record_count | metric | none | false | false | false | 正式导入 validator 接收的候选记录数量。 |
 | accepted_formal_import_count | metric | none | false | false | false | 通过正式导入 validator 的记录数量。 |

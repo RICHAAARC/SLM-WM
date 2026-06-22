@@ -166,6 +166,9 @@ def test_primary_baseline_adapter_plan_includes_four_methods(tmp_path: Path, mon
     assert build_command[build_command.index("--methods") + 1] == ",".join(PRIMARY_BASELINE_METHODS)
     assert "--prompt-plan" in build_command
     assert "--require-cuda" in build_command
+    assert build_command[build_command.index("--tree-ring-adapter-mode") + 1] == "method_faithful_sd35"
+    assert build_command[build_command.index("--gaussian-shading-adapter-mode") + 1] == "method_faithful_sd35"
+    assert build_command[build_command.index("--shallow-diffuse-adapter-mode") + 1] == "method_faithful_sd35"
     assert paths["primary_prompt_plan"].is_file()
     assert report["primary_baseline_adapter_ready"] is True
     assert report["primary_baseline_adapter_count"] == 4

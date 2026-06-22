@@ -41,8 +41,8 @@
       "downloaded_at_utc": "2026-06-21T04:35:26.568318+00:00",
       "official_source_tracked": false,
       "adapter_path": "external_baseline/primary/gaussian_shading/adapter/run_slm_eval.py",
-      "adapter_status": "sd35_latent_smoke_adapter_ready",
-      "model_alignment_status": "sd35_medium_noise_message_adapter_required"
+      "adapter_status": "method_faithful_sd35_adapter_available",
+      "model_alignment_status": "sd35_medium_method_faithful_adapter_available"
     },
     {
       "baseline_id": "shallow_diffuse",
@@ -61,8 +61,8 @@
       "downloaded_at_utc": "2026-06-21T04:35:26.684130+00:00",
       "official_source_tracked": false,
       "adapter_path": "external_baseline/primary/shallow_diffuse/adapter/run_slm_eval.py",
-      "adapter_status": "sd35_latent_smoke_adapter_ready",
-      "model_alignment_status": "sd35_medium_shallow_latent_adapter_required"
+      "adapter_status": "method_faithful_sd35_adapter_available",
+      "model_alignment_status": "sd35_medium_method_faithful_adapter_available"
     },
     {
       "baseline_id": "t2smark",

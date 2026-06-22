@@ -139,6 +139,56 @@ def test_tree_ring_command_plan_can_select_method_faithful_adapter(tmp_path: Pat
 
 
 @pytest.mark.quick
+def test_diffusion_command_plan_can_select_all_method_faithful_adapters(tmp_path: Path) -> None:
+    """命令计划应能为三类扩散主表 baseline 同时选择方法忠实 adapter。"""
+
+    root = tmp_path
+    for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse"):
+        adapter_path = root / "external_baseline" / "primary" / baseline_id / "adapter" / "run_slm_eval.py"
+        adapter_path.parent.mkdir(parents=True, exist_ok=True)
+        adapter_path.write_text(f"print('{baseline_id} adapter')\n", encoding="utf-8")
+    prompt_plan = root / "prompt_plan.json"
+    prompt_plan.write_text('[{"prompt_text":"a ceramic fox","prompt_id":"p0"}]\n', encoding="utf-8")
+    output_root = root / "outputs" / "test_diffusion_method_faithful_plan"
+    args = build_external_plan_parser().parse_args(
+        [
+            "--root",
+            str(root),
+            "--methods",
+            "tree_ring,gaussian_shading,shallow_diffuse",
+            "--output-root",
+            str(output_root),
+            "--prompt-plan",
+            str(prompt_plan),
+            "--tree-ring-adapter-mode",
+            "method_faithful_sd35",
+            "--gaussian-shading-adapter-mode",
+            "method_faithful_sd35",
+            "--shallow-diffuse-adapter-mode",
+            "method_faithful_sd35",
+            "--gaussian-shading-channel-copy",
+            "1",
+            "--gaussian-shading-hw-copy",
+            "8",
+            "--shallow-diffuse-edit-fraction",
+            "0.25",
+            "--max-samples",
+            "1",
+        ]
+    )
+
+    plan = build_external_plan(args)
+    commands = {row["baseline_id"]: row["command"] for row in plan}
+
+    assert set(commands) == {"tree_ring", "gaussian_shading", "shallow_diffuse"}
+    assert all("--adapter-mode" in command for command in commands.values())
+    assert commands["gaussian_shading"][commands["gaussian_shading"].index("--adapter-mode") + 1] == "method_faithful_sd35"
+    assert "--channel-copy" in commands["gaussian_shading"]
+    assert commands["shallow_diffuse"][commands["shallow_diffuse"].index("--adapter-mode") + 1] == "method_faithful_sd35"
+    assert "--edit-fraction" in commands["shallow_diffuse"]
+
+
+@pytest.mark.quick
 @pytest.mark.parametrize("adapter_path", PRIMARY_DIFFUSION_ADAPTERS)
 def test_primary_diffusion_adapter_writes_latent_smoke_observations(tmp_path: Path, adapter_path: str) -> None:
     """三类扩散 baseline adapter 应在轻量配置下写出 clean 与 positive observation。"""
