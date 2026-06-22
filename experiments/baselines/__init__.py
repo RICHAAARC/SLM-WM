@@ -38,6 +38,14 @@ from experiments.baselines.formal_import import (
     build_tree_ring_method_faithful_candidate_records,
     validate_primary_baseline_formal_import_rows,
 )
+from experiments.baselines.gaussian_shading_official_reference import (
+    GAUSSIAN_SHADING_OFFICIAL_REFERENCE_PROTOCOL_NAME,
+    GAUSSIAN_SHADING_SUPPLEMENTAL_TABLE_ROLE,
+    GaussianShadingOfficialReferenceRecord,
+    build_gaussian_shading_official_reference_record,
+    build_gaussian_shading_official_reference_schema,
+    validate_gaussian_shading_official_reference_records,
+)
 from experiments.baselines.method_faithful_adapter_protocol import (
     METHOD_FAITHFUL_ADAPTER_BOUNDARY,
     METHOD_FAITHFUL_ADAPTER_REQUIRED_IDS,
@@ -84,6 +92,8 @@ __all__ = [
     "BaselineObservation",
     "BaselineResultRecord",
     "BaselineSpec",
+    "GAUSSIAN_SHADING_OFFICIAL_REFERENCE_PROTOCOL_NAME",
+    "GAUSSIAN_SHADING_SUPPLEMENTAL_TABLE_ROLE",
     "PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME",
     "PRIMARY_BASELINE_METHOD_FAITHFUL_ADAPTER_PROTOCOL_NAME",
     "FULL_MAIN_PROMPT_PROTOCOL_NAME",
@@ -92,6 +102,7 @@ __all__ = [
     "NATIVE_OFFICIAL_REPRODUCTION_IDS",
     "PRIMARY_BASELINE_ADAPTERS",
     "PRIMARY_BASELINE_IDS",
+    "GaussianShadingOfficialReferenceRecord",
     "PrimaryBaselineCommandProfile",
     "PrimaryBaselineExecutionPlan",
     "PrimaryBaselineEvidenceRecord",
@@ -106,6 +117,8 @@ __all__ = [
     "build_baseline_execution_manifest",
     "build_baseline_observations",
     "build_baseline_result_index",
+    "build_gaussian_shading_official_reference_record",
+    "build_gaussian_shading_official_reference_schema",
     "validate_primary_baseline_formal_import_rows",
     "build_method_faithful_baseline_candidate_records",
     "build_t2smark_full_main_candidate_records",
@@ -135,5 +148,6 @@ __all__ = [
     "run_baseline_commands",
     "selected_primary_baselines",
     "validate_external_baseline_evidence",
+    "validate_gaussian_shading_official_reference_records",
     "validate_tree_ring_official_reference_records",
 ]
