@@ -208,7 +208,7 @@ def test_gaussian_shading_official_reference_prepares_isolated_legacy_environmen
         legacy_environment_prefix=str(tmp_path / "legacy_env"),
         micromamba_path=str(tmp_path / "bin" / "micromamba"),
         legacy_torch_specs="torch==1.13.0+cu117 torchvision==0.14.0+cu117",
-        legacy_package_specs="transformers==4.34.0 diffusers==0.11.1 datasets==2.18.0",
+        legacy_package_specs="transformers==4.23.1 diffusers==0.11.1 datasets==2.6.1",
     )
     paths = output_paths(tmp_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
@@ -221,7 +221,8 @@ def test_gaussian_shading_official_reference_prepares_isolated_legacy_environmen
 
     def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
         if command[:2] == [config.micromamba_path, "create"]:
-            legacy_python = Path(config.legacy_environment_prefix) / "bin" / "python"
+            environment_prefix = Path(command[command.index("-p") + 1])
+            legacy_python = environment_prefix / "bin" / "python"
             legacy_python.parent.mkdir(parents=True, exist_ok=True)
             legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
         return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
@@ -234,8 +235,117 @@ def test_gaussian_shading_official_reference_prepares_isolated_legacy_environmen
 
     assert report["legacy_environment_requested"] is True
     assert report["legacy_environment_ready"] is True
-    assert saved_report["legacy_python_executable"].replace("\\", "/").endswith("legacy_env/bin/python")
+    assert saved_report["legacy_environment_profile"] == "colab_compatible_fallback"
+    assert saved_report["strict_official_environment_ready"] is False
+    assert saved_report["compatible_environment_fallback_ready"] is True
+    assert saved_report["legacy_python_executable"].replace("\\", "/").endswith(
+        "legacy_env/colab_compatible_fallback/bin/python"
+    )
     assert len(saved_report["command_results"]) >= 4
+
+
+@pytest.mark.quick
+def test_gaussian_shading_official_reference_prefers_strict_official_requirements(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """官方 requirements 可安装时, helper 应优先使用严格官方环境。"""
+
+    source_dir = tmp_path / "external_baseline" / "primary" / "gaussian_shading" / "source"
+    source_dir.mkdir(parents=True)
+    (source_dir / "requirements.txt").write_text("diffusers==0.11.1\n", encoding="utf-8")
+    config = GaussianShadingOfficialReferenceConfig(
+        output_dir="outputs/gaussian_shading_official_reference",
+        source_dir="external_baseline/primary/gaussian_shading/source",
+        require_cuda=False,
+        prepare_legacy_environment=True,
+        legacy_environment_prefix=str(tmp_path / "legacy_env"),
+        micromamba_path=str(tmp_path / "bin" / "micromamba"),
+    )
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True, exist_ok=True)
+
+    def fake_run_shell_command(command: str, *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
+        micromamba_path = Path(config.micromamba_path)
+        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
+        micromamba_path.write_text("#!/bin/sh\n", encoding="utf-8")
+        return {"command": command, "return_code": 0, "stdout": "micromamba ready", "stderr": ""}
+
+    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
+        if command[:2] == [config.micromamba_path, "create"]:
+            environment_prefix = Path(command[command.index("-p") + 1])
+            legacy_python = environment_prefix / "bin" / "python"
+            legacy_python.parent.mkdir(parents=True, exist_ok=True)
+            legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
+        return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
+
+    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
+    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_command", fake_run_command)
+
+    report = prepare_gaussian_shading_legacy_environment(tmp_path, config, paths)
+
+    assert report["legacy_environment_ready"] is True
+    assert report["legacy_environment_profile"] == "official_requirements_strict"
+    assert report["strict_official_environment_ready"] is True
+    assert report["compatible_environment_fallback_ready"] is False
+    assert report["legacy_python_executable"].replace("\\", "/").endswith(
+        "legacy_env/official_requirements_strict/bin/python"
+    )
+
+
+@pytest.mark.quick
+def test_gaussian_shading_official_reference_falls_back_after_strict_dependency_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """官方 requirements 依赖冲突时, helper 应切换到受治理兼容环境。"""
+
+    source_dir = tmp_path / "external_baseline" / "primary" / "gaussian_shading" / "source"
+    source_dir.mkdir(parents=True)
+    (source_dir / "requirements.txt").write_text("transformers==4.34.0\ndiffusers==0.11.1\n", encoding="utf-8")
+    config = GaussianShadingOfficialReferenceConfig(
+        output_dir="outputs/gaussian_shading_official_reference",
+        source_dir="external_baseline/primary/gaussian_shading/source",
+        require_cuda=False,
+        prepare_legacy_environment=True,
+        legacy_environment_prefix=str(tmp_path / "legacy_env"),
+        micromamba_path=str(tmp_path / "bin" / "micromamba"),
+        legacy_torch_specs="torch==1.13.0+cu117 torchvision==0.14.0+cu117",
+        legacy_package_specs="transformers==4.23.1 diffusers==0.11.1 datasets==2.6.1",
+    )
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True, exist_ok=True)
+
+    def fake_run_shell_command(command: str, *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
+        micromamba_path = Path(config.micromamba_path)
+        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
+        micromamba_path.write_text("#!/bin/sh\n", encoding="utf-8")
+        return {"command": command, "return_code": 0, "stdout": "micromamba ready", "stderr": ""}
+
+    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
+        if command[:2] == [config.micromamba_path, "create"]:
+            environment_prefix = Path(command[command.index("-p") + 1])
+            legacy_python = environment_prefix / "bin" / "python"
+            legacy_python.parent.mkdir(parents=True, exist_ok=True)
+            legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
+        is_strict_pip_install = "-r" in command and "official_requirements_strict" in str(command[0])
+        if is_strict_pip_install:
+            return {"command": command, "return_code": 1, "stdout": "", "stderr": "ResolutionImpossible"}
+        return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
+
+    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
+    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_command", fake_run_command)
+
+    report = prepare_gaussian_shading_legacy_environment(tmp_path, config, paths)
+
+    assert report["legacy_environment_ready"] is True
+    assert report["legacy_environment_profile"] == "colab_compatible_fallback"
+    assert report["strict_official_environment_ready"] is False
+    assert report["compatible_environment_fallback_ready"] is True
+    assert any(
+        item["environment_profile"] == "official_requirements_strict" and not item["environment_ready"]
+        for item in report["environment_profile_reports"]
+    )
 
 
 @pytest.mark.quick
@@ -429,8 +539,11 @@ def test_gaussian_shading_official_reference_default_config_reads_legacy_environ
 
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PREPARE_LEGACY_ENV", "1")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_ENV_PREFIX", "/content/gaussian_shading_legacy_env")
+    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_PYTHON_VERSION", "3.8")
+    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_STRICT_OFFICIAL_ENV", "1")
+    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_ALLOW_COMPATIBLE_ENV_FALLBACK", "1")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_TORCH_SPECS", "torch==1.13.0+cu117")
-    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_PACKAGE_SPECS", "transformers==4.34.0 diffusers==0.11.1")
+    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_PACKAGE_SPECS", "transformers==4.23.1 diffusers==0.11.1")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
@@ -444,8 +557,11 @@ def test_gaussian_shading_official_reference_default_config_reads_legacy_environ
 
     assert config.prepare_legacy_environment is True
     assert config.legacy_environment_prefix == "/content/gaussian_shading_legacy_env"
+    assert config.legacy_python_version == "3.8"
+    assert config.strict_official_environment is True
+    assert config.allow_compatible_environment_fallback is True
     assert config.legacy_torch_specs == "torch==1.13.0+cu117"
-    assert config.legacy_package_specs == "transformers==4.34.0 diffusers==0.11.1"
+    assert config.legacy_package_specs == "transformers==4.23.1 diffusers==0.11.1"
     assert config.official_model_id == "Manojb/stable-diffusion-2-1-base"
     assert config.upstream_official_model_id == "stabilityai/stable-diffusion-2-1-base"
     assert config.patch_model_repository_layout is True

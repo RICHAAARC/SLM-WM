@@ -20,3 +20,10 @@
 ## 官方原始环境参考复现
 
 官方参考入口用于补充表方法忠实度审计, 不替代 SD3.5 Medium common-backbone 主表对比。该入口会尝试在 Colab 独立 legacy 环境中运行 `source/run_gaussian_shading.py`, 并把官方命令、stdout、stderr、`Identity.txt` 指标、schema、validation report、环境报告和压缩包写入 `outputs/gaussian_shading_official_reference/` 及 Google Drive 的 `SLM/gaussian_shading_official_reference` 目录。
+
+legacy 环境准备采用双层策略:
+
+1. 优先创建 Python 3.8 的 `official_requirements_strict` 环境, 并直接安装官方 `source/requirements.txt`。该路径用于证明是否可以完全按官方依赖声明复现。
+2. 若官方 `requirements.txt` 在 Colab 当前包索引中出现 dependency resolution 冲突, helper 会切换到 `colab_compatible_fallback` 环境。fallback 仍固定 `diffusers==0.11.1`、`torch==1.13.0+cu117` 和 legacy `transformers` / `huggingface_hub` 组合, 用于解决新版本 `transformers`、`datasets` 与旧版 `diffusers` 的不可同时满足问题。
+
+两条环境路径都会写入 `gaussian_shading_legacy_environment_prepare_result.json`。只有环境创建、核心包导入验证、官方命令和 governed import 记录全部通过时, 该官方参考包才可视为补充表方法忠实度证据; fallback 成功不改变其“补充表参考”身份, 也不会进入 SD3.5 主表。

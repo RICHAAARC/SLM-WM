@@ -23,6 +23,8 @@
 
 补充表同时提供 `gaussian_shading_official_reference_run.ipynb`。该入口运行官方 `run_gaussian_shading.py` 的 legacy Stable Diffusion / truncated Gaussian message 协议, 并通过 governed import 记录官方源码 commit、依赖环境、运行命令、`Identity.txt` 指标和诊断日志。该路径用于审计 SD3.5 adapter 的方法忠实度, 不替代主表 SD3.5 对比。
 
+该官方参考入口的环境策略分为两层: 先创建 Python 3.8 的 `official_requirements_strict` 环境并安装官方 `requirements.txt`; 若该官方声明在 Colab 当前包索引中因旧版 `diffusers` 与较新版 `transformers` / `datasets` 组合冲突而失败, 再创建 `colab_compatible_fallback` 环境。fallback 仍固定 legacy `diffusers==0.11.1`、`torch==1.13.0+cu117`、legacy `transformers` 和 legacy `huggingface_hub`, 其作用是让官方运行链路可审计地继续尝试, 而不是把依赖调整伪装成官方原始声明。
+
 ### Shallow Diffuse
 
 原方法依赖 shallow latent subspace 和局部注入掩码。SD3.5 Medium 需要重新对齐 latent 分辨率、通道布局和再扩散攻击路径。
