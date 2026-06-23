@@ -45,6 +45,9 @@ DEFAULT_FORMAL_TEMPLATE_COVERAGE_SUMMARY_PATH = Path(
 DEFAULT_FORMAL_EVIDENCE_COLLECTION_SUMMARY_PATH = Path(
     "outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_summary.json"
 )
+DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH = Path(
+    "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json"
+)
 DEFAULT_BASELINE_SOURCE_REGISTRY_PATH = Path("external_baseline/source_registry.json")
 
 
@@ -161,6 +164,8 @@ def build_runtime_report(
     formal_template_coverage_summary_path: str,
     formal_evidence_collection_summary: dict[str, Any],
     formal_evidence_collection_summary_path: str,
+    baseline_small_sample_summary: dict[str, Any],
+    baseline_small_sample_summary_path: str,
 ) -> dict[str, Any]:
     """构造外部 baseline 对比运行摘要。"""
     baseline_count = len(baseline_metric_rows)
@@ -172,6 +177,13 @@ def build_runtime_report(
         bool(formal_import_readiness_summary.get("primary_baseline_formal_ready", False))
         and bool(formal_template_coverage_summary.get("primary_baseline_formal_template_coverage_ready", False))
         and bool(formal_evidence_collection_summary.get("primary_baseline_formal_evidence_collection_ready", False))
+    )
+    small_sample_boundary_ready = (
+        bool(baseline_small_sample_summary.get("small_sample_evidence_ready", False))
+        and bool(baseline_small_sample_summary.get("small_sample_common_protocol_ready", False))
+        and int(baseline_small_sample_summary.get("covered_primary_baseline_count", 0)) >= 4
+        and not bool(baseline_small_sample_summary.get("paper_claim_ready", False))
+        and not bool(baseline_small_sample_summary.get("supports_paper_claim", False))
     )
     return {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
@@ -220,6 +232,27 @@ def build_runtime_report(
         "primary_baseline_formal_evidence_collection_ready": bool(
             formal_evidence_collection_summary.get("primary_baseline_formal_evidence_collection_ready", False)
         ),
+        "baseline_small_sample_summary_path": baseline_small_sample_summary_path,
+        "small_sample_baseline_evidence_ready": bool(
+            baseline_small_sample_summary.get("small_sample_evidence_ready", False)
+        ),
+        "small_sample_baseline_common_protocol_ready": bool(
+            baseline_small_sample_summary.get("small_sample_common_protocol_ready", False)
+        ),
+        "small_sample_baseline_boundary_ready": small_sample_boundary_ready,
+        "small_sample_baseline_covered_count": int(
+            baseline_small_sample_summary.get("covered_primary_baseline_count", 0)
+        ),
+        "small_sample_baseline_formal_import_ready_count": int(
+            baseline_small_sample_summary.get("formal_import_ready_count", 0)
+        ),
+        "formal_full_paper_run_requested": bool(
+            baseline_small_sample_summary.get("formal_full_paper_run_requested", False)
+        ),
+        "formal_full_paper_run_permitted": bool(
+            baseline_small_sample_summary.get("formal_full_paper_run_permitted", False)
+        ),
+        "excluded_operating_points": list(baseline_small_sample_summary.get("excluded_operating_points", ())),
         "baseline_result_ready_count": ready_count,
         "comparison_protocol_ready": bool(attack_manifest.get("attack_metrics_ready"))
         and not threshold_report.get("threshold_degenerate", True),
@@ -243,6 +276,7 @@ def write_external_baseline_comparison_outputs(
     formal_import_readiness_summary_path: str | Path = DEFAULT_FORMAL_IMPORT_READINESS_SUMMARY_PATH,
     formal_template_coverage_summary_path: str | Path = DEFAULT_FORMAL_TEMPLATE_COVERAGE_SUMMARY_PATH,
     formal_evidence_collection_summary_path: str | Path = DEFAULT_FORMAL_EVIDENCE_COLLECTION_SUMMARY_PATH,
+    baseline_small_sample_summary_path: str | Path = DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH,
     baseline_source_registry_path: str | Path = DEFAULT_BASELINE_SOURCE_REGISTRY_PATH,
 ) -> dict[str, Any]:
     """写出外部 baseline 对比 records, 表格, 运行报告与 manifest。"""
@@ -261,6 +295,7 @@ def write_external_baseline_comparison_outputs(
         root_path,
         formal_evidence_collection_summary_path,
     )
+    resolved_baseline_small_sample_summary_path = resolve_input_path(root_path, baseline_small_sample_summary_path)
     resolved_baseline_source_registry_path = resolve_input_path(root_path, baseline_source_registry_path)
 
     attack_manifest = read_json(resolved_attack_manifest_path)
@@ -270,6 +305,7 @@ def write_external_baseline_comparison_outputs(
     formal_import_readiness_summary = read_optional_json(resolved_formal_import_readiness_summary_path)
     formal_template_coverage_summary = read_optional_json(resolved_formal_template_coverage_summary_path)
     formal_evidence_collection_summary = read_optional_json(resolved_formal_evidence_collection_summary_path)
+    baseline_small_sample_summary = read_optional_json(resolved_baseline_small_sample_summary_path)
     baseline_source_registry = load_baseline_source_registry(resolved_baseline_source_registry_path)
     baseline_specs = overlay_specs_with_source_registry(
         default_baseline_specs(),
@@ -312,6 +348,10 @@ def write_external_baseline_comparison_outputs(
         formal_evidence_collection_summary,
         relative_or_absolute(resolved_formal_evidence_collection_summary_path, root_path)
         if resolved_formal_evidence_collection_summary_path.exists()
+        else "",
+        baseline_small_sample_summary,
+        relative_or_absolute(resolved_baseline_small_sample_summary_path, root_path)
+        if resolved_baseline_small_sample_summary_path.exists()
         else "",
     )
 
@@ -409,6 +449,8 @@ def write_external_baseline_comparison_outputs(
         input_path_candidates.append(
             relative_or_absolute(resolved_formal_evidence_collection_summary_path, root_path)
         )
+    if resolved_baseline_small_sample_summary_path.exists():
+        input_path_candidates.append(relative_or_absolute(resolved_baseline_small_sample_summary_path, root_path))
     if resolved_baseline_source_registry_path.exists():
         input_path_candidates.append(relative_or_absolute(resolved_baseline_source_registry_path, root_path))
     input_paths = tuple(input_path_candidates)
@@ -443,6 +485,10 @@ def write_external_baseline_comparison_outputs(
             ),
             "formal_evidence_collection_summary_path": relative_or_absolute(
                 resolved_formal_evidence_collection_summary_path,
+                root_path,
+            ),
+            "baseline_small_sample_summary_path": relative_or_absolute(
+                resolved_baseline_small_sample_summary_path,
                 root_path,
             ),
             "formal_import_validation_report_path": relative_or_absolute(formal_import_validation_path, root_path),
@@ -496,6 +542,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="主表 baseline 正式证据收集摘要路径; 缺失时保持 formal ready 为 false。",
     )
     parser.add_argument(
+        "--baseline-small-sample-summary-path",
+        default=str(DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH),
+        help="主表 baseline 小样本证据摘要路径; 缺失时仅保留正式导入边界。",
+    )
+    parser.add_argument(
         "--baseline-source-registry-path",
         default=str(DEFAULT_BASELINE_SOURCE_REGISTRY_PATH),
         help="外部 baseline 官方源码登记 JSON 路径; 缺失时仅使用默认 spec。",
@@ -517,6 +568,7 @@ def main() -> None:
         formal_import_readiness_summary_path=args.formal_import_readiness_summary_path,
         formal_template_coverage_summary_path=args.formal_template_coverage_summary_path,
         formal_evidence_collection_summary_path=args.formal_evidence_collection_summary_path,
+        baseline_small_sample_summary_path=args.baseline_small_sample_summary_path,
         baseline_source_registry_path=args.baseline_source_registry_path,
     )
     print(stable_json_text(manifest), end="")

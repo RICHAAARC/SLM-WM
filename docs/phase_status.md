@@ -1003,3 +1003,10 @@
 2. 数据集级质量打包逻辑已改为只从真实攻击包解出 `real_attacked_image_registry.jsonl`; source 与 attacked image 均通过 `outputs/dataset_level_quality/materialized_image_inputs/` 物化后进入结果包, 避免包内记录指向未打包的前序目录图像。
 3. zip 内部的 `dataset_level_quality_archive_summary.json` 不再写入空的最终 `archive_digest` 或 `drive_archive_digest`; 内部摘要改用 `archive_payload_digest` 表示打包输入条目的稳定摘要。
 4. 最终 zip 文件 SHA-256 与 Google Drive 镜像 SHA-256 继续写入同目录 sidecar summary 与 manifest, 通过 `archive_digest_scope` 和 `final_archive_digest_available_in_sidecar` 明确摘要边界。
+
+### external baseline comparison 小样本边界联动
+
+1. `external_baseline_comparison` 已补充读取主表 baseline 小样本证据摘要, 在 runtime report 中同时暴露正式导入状态与小样本共同协议边界。
+2. 小样本字段只用于审计可见性, 不改变 `baseline_results_ready=false` 与 `supports_paper_claim=false` 的正式论文声明边界。
+3. 当 `primary_baseline_small_sample_evidence_summary.json` 缺失时, comparison 仍可重建正式导入状态, 但会显式记录小样本 baseline 证据未就绪。
+4. 该联动用于把已完成的小样本主表 baseline 链路向下游 evidence audit / submission readiness 传播, 不触发正式 full paper 样本规模、TPR@FPR=0.01 或 TPR@FPR=0.001 运行。

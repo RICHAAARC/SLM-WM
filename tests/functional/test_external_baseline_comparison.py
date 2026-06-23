@@ -173,6 +173,12 @@ def test_external_baseline_outputs_are_rebuildable_and_claim_safe(tmp_path: Path
     assert runtime_report["formal_evidence_collection_task_count"] == 0
     assert runtime_report["missing_formal_evidence_collection_task_count"] == 0
     assert runtime_report["primary_baseline_formal_evidence_collection_ready"] is False
+    assert runtime_report["baseline_small_sample_summary_path"] == ""
+    assert runtime_report["small_sample_baseline_evidence_ready"] is False
+    assert runtime_report["small_sample_baseline_common_protocol_ready"] is False
+    assert runtime_report["small_sample_baseline_boundary_ready"] is False
+    assert runtime_report["small_sample_baseline_covered_count"] == 0
+    assert runtime_report["small_sample_baseline_formal_import_ready_count"] == 0
     assert {row["metric_status"] for row in baseline_rows} == {"unsupported"}
     assert any(row["method_id"] == "slm_wm_current" for row in comparison_rows)
     assert all(row["supports_paper_claim"] == "False" for row in comparison_rows)
@@ -301,6 +307,27 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
         ),
         encoding="utf-8",
     )
+    small_sample_summary_path = tmp_path / "outputs" / "primary_baseline_small_sample_evidence" / (
+        "primary_baseline_small_sample_evidence_summary.json"
+    )
+    small_sample_summary_path.parent.mkdir(parents=True)
+    small_sample_summary_path.write_text(
+        json.dumps(
+            {
+                "small_sample_evidence_ready": True,
+                "small_sample_common_protocol_ready": True,
+                "covered_primary_baseline_count": 4,
+                "formal_import_ready_count": 0,
+                "formal_full_paper_run_requested": False,
+                "formal_full_paper_run_permitted": False,
+                "excluded_operating_points": ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"],
+                "paper_claim_ready": False,
+                "supports_paper_claim": False,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     write_external_baseline_comparison_outputs(
         root=tmp_path,
@@ -312,6 +339,7 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
         formal_import_readiness_summary_path=readiness_summary_path,
         formal_template_coverage_summary_path=coverage_summary_path,
         formal_evidence_collection_summary_path=collection_summary_path,
+        baseline_small_sample_summary_path=small_sample_summary_path,
         baseline_source_registry_path=source_registry_path,
     )
 
@@ -340,6 +368,17 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     assert runtime_report["ready_formal_evidence_collection_task_count"] == 1
     assert runtime_report["missing_formal_evidence_collection_task_count"] == 31
     assert runtime_report["primary_baseline_formal_evidence_collection_ready"] is False
+    assert runtime_report["baseline_small_sample_summary_path"].endswith(
+        "primary_baseline_small_sample_evidence_summary.json"
+    )
+    assert runtime_report["small_sample_baseline_evidence_ready"] is True
+    assert runtime_report["small_sample_baseline_common_protocol_ready"] is True
+    assert runtime_report["small_sample_baseline_boundary_ready"] is True
+    assert runtime_report["small_sample_baseline_covered_count"] == 4
+    assert runtime_report["small_sample_baseline_formal_import_ready_count"] == 0
+    assert runtime_report["formal_full_paper_run_requested"] is False
+    assert runtime_report["formal_full_paper_run_permitted"] is False
+    assert runtime_report["excluded_operating_points"] == ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"]
     assert runtime_report["baseline_result_ready_count"] == 1
     assert runtime_report["baseline_results_ready"] is False
     assert tree_row["metric_status"] == "measured"
