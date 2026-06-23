@@ -35,7 +35,6 @@ ALIGNED_RESCORING_PACKAGE_PATTERN = "aligned_rescoring_package_*.zip"
 DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 50
 REAL_ATTACK_ALLOWED_PREFIXES = (
     "outputs/real_attack_evaluation/real_attacked_image_registry.jsonl",
-    "outputs/real_attack_evaluation/attacked_images/",
 )
 PACKAGE_EXTRA_PATHS = (
     "paper_workflow/dataset_level_quality_run.ipynb",
@@ -461,6 +460,23 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
     return tuple(unique_entries)
 
 
+def build_entries_digest(entries: tuple[Path, ...], root_path: Path) -> str:
+    """计算打包输入条目的稳定摘要.
+
+    该摘要用于嵌入 zip 内部的 archive summary。最终 zip 文件自身的 SHA-256 会写入
+    zip 外侧的 sidecar summary, 因为把最终 zip 摘要写回 zip 内部会形成自引用摘要问题。
+    """
+
+    payload = [
+        {
+            "entry_path": entry.relative_to(root_path).as_posix(),
+            "entry_digest": file_digest(entry),
+        }
+        for entry in entries
+    ]
+    return build_stable_digest(payload)
+
+
 def write_archive(path: Path, entries: tuple[Path, ...], root_path: Path) -> None:
     """根据给定 entry 列表写出 zip 文件."""
 
@@ -489,26 +505,28 @@ def package_dataset_level_quality_outputs(
             stale_path.unlink()
 
     entries = collect_package_entries(root_path, source_dir, archive_path)
+    entry_payload_digest = build_entries_digest(entries, root_path)
     package_manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "entry_paths": [entry.relative_to(root_path).as_posix() for entry in entries],
         "entry_count": len(entries),
+        "entry_payload_digest": entry_payload_digest,
     }
     package_manifest_path.write_text(stable_json_text(package_manifest), encoding="utf-8")
-    preliminary_record = DatasetLevelQualityArchiveRecord(
-        archive_path=relative_or_absolute(archive_path, root_path),
-        archive_digest="",
-        archive_entry_count=len(entries) + 3,
-        drive_archive_path=str(Path(drive_output_dir).expanduser() / archive_name),
-        drive_archive_digest="",
-        metadata={
+    embedded_summary = {
+        "archive_path": relative_or_absolute(archive_path, root_path),
+        "archive_entry_count": len(entries) + 3,
+        "drive_archive_path": str(Path(drive_output_dir).expanduser() / archive_name),
+        "metadata": {
             "construction_unit_name": "dataset_level_quality_evidence",
             "drive_output_dir": str(Path(drive_output_dir).expanduser()),
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "embedded_digest_scope": "archive_summary_records_final_archive_digest",
+            "archive_payload_digest": entry_payload_digest,
+            "archive_digest_scope": "external_sidecar_after_archive_write",
+            "final_archive_digest_available_in_sidecar": True,
         },
-    )
-    summary_path.write_text(stable_json_text(preliminary_record.to_dict()), encoding="utf-8")
+    }
+    summary_path.write_text(stable_json_text(embedded_summary), encoding="utf-8")
     archive_manifest = build_artifact_manifest(
         artifact_id="dataset_level_quality_archive_manifest",
         artifact_type="local_manifest",
@@ -526,7 +544,7 @@ def package_dataset_level_quality_outputs(
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="运行 paper_workflow/dataset_level_quality_run.ipynb",
-        metadata=preliminary_record.metadata,
+        metadata=embedded_summary["metadata"],
     ).to_dict()
     manifest_path.write_text(stable_json_text(archive_manifest), encoding="utf-8")
 
@@ -546,6 +564,9 @@ def package_dataset_level_quality_outputs(
             "construction_unit_name": "dataset_level_quality_evidence",
             "drive_output_dir": str(drive_dir),
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "archive_payload_digest": entry_payload_digest,
+            "archive_digest_scope": "final_archive_file",
+            "final_archive_digest_available_in_sidecar": True,
         },
     )
     summary_path.write_text(stable_json_text(record.to_dict()), encoding="utf-8")

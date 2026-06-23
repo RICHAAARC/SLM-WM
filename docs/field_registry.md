@@ -296,7 +296,11 @@ Notebook 与 repository module 的跨边界数据
 | archive_name | artifact | none | false | false | false | 真实 runtime 产物 zip 文件名。 |
 | archive_path | artifact | none | true | false | false | 真实 runtime 产物 zip 在 outputs 下的受治理路径。 |
 | archive_digest | artifact | none | true | false | false | 真实 runtime 产物 zip 的 SHA-256 摘要。 |
+| archive_payload_digest | artifact | none | false | false | false | 打包输入条目内容与路径的稳定摘要, 用于避免 zip 自引用摘要问题。 |
+| archive_digest_scope | governance | none | false | false | false | archive digest 字段对应的摘要边界, 例如最终 zip 文件或外部 sidecar。 |
 | archive_entry_count | artifact | none | true | false | false | 真实 runtime 产物 zip 中包含的文件数量。 |
+| entry_payload_digest | artifact | none | false | false | false | package input manifest 记录的打包输入条目稳定摘要。 |
+| final_archive_digest_available_in_sidecar | governance | none | false | false | false | 最终 zip 文件 SHA-256 是否写入同目录 sidecar summary 与 manifest。 |
 | drive_output_dir | artifact | none | false | false | false | Colab 镜像保存到 Google Drive 的目标目录。 |
 | drive_archive_path | artifact | none | true | false | false | Colab 镜像保存到 Google Drive 后的 zip 路径。 |
 | drive_archive_digest | artifact | none | true | false | false | Google Drive 镜像 zip 的 SHA-256 摘要。 |

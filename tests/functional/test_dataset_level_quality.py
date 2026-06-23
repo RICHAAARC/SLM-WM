@@ -271,6 +271,11 @@ def test_dataset_quality_drive_plan_imports_mock_formal_features(tmp_path: Path)
     ]
     import_report = json.loads((output_dir / "dataset_quality_formal_feature_import_report.json").read_text(encoding="utf-8"))
     summary = json.loads((output_dir / "dataset_quality_summary.json").read_text(encoding="utf-8"))
+    resolution_rows = [
+        json.loads(line)
+        for line in (output_dir / "dataset_quality_image_resolution_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
     assert result["run_decision"] == "pass"
     assert result["formal_feature_backend_ready"] is True
@@ -281,4 +286,7 @@ def test_dataset_quality_drive_plan_imports_mock_formal_features(tmp_path: Path)
     assert import_report["accepted_feature_pair_count"] == 1
     assert import_report["formal_sample_scale_ready"] is False
     assert summary["formal_feature_backend_ready"] is True
+    assert summary["materialized_image_input_count"] == 2
+    assert all(row["materialized_image_input"] is True for row in resolution_rows)
+    assert all("outputs/dataset_level_quality/materialized_image_inputs/" in row["resolved_image_path"] for row in resolution_rows)
     assert (output_dir / "dataset_level_quality_colab_manifest.local.json").exists()

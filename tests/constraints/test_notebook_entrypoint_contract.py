@@ -708,6 +708,13 @@ def test_dataset_level_quality_outputs_can_be_packaged_and_mirrored(tmp_path: Pa
     assert record.archive_entry_count >= 10
     assert (quality_dir / "dataset_level_quality_archive_summary.json").exists()
     assert (quality_dir / "dataset_level_quality_archive_manifest.local.json").exists()
+    sidecar_summary = json.loads((quality_dir / "dataset_level_quality_archive_summary.json").read_text(encoding="utf-8"))
+
+    assert sidecar_summary["archive_digest"]
+    assert sidecar_summary["drive_archive_digest"]
+    assert sidecar_summary["metadata"]["archive_payload_digest"]
+    assert sidecar_summary["metadata"]["archive_digest_scope"] == "final_archive_file"
+    assert sidecar_summary["metadata"]["final_archive_digest_available_in_sidecar"] is True
 
     with ZipFile(archive_path) as archive:
         names = set(archive.namelist())
@@ -724,3 +731,16 @@ def test_dataset_level_quality_outputs_can_be_packaged_and_mirrored(tmp_path: Pa
         assert "outputs/dataset_level_quality/dataset_level_quality_package_input_manifest.json" in names
         assert "outputs/dataset_level_quality/dataset_level_quality_archive_summary.json" in names
         assert "outputs/dataset_level_quality/dataset_level_quality_archive_manifest.local.json" in names
+        embedded_summary = json.loads(
+            archive.read("outputs/dataset_level_quality/dataset_level_quality_archive_summary.json").decode("utf-8")
+        )
+        input_manifest = json.loads(
+            archive.read("outputs/dataset_level_quality/dataset_level_quality_package_input_manifest.json").decode("utf-8")
+        )
+
+        assert "archive_digest" not in embedded_summary
+        assert "drive_archive_digest" not in embedded_summary
+        assert embedded_summary["metadata"]["archive_payload_digest"]
+        assert embedded_summary["metadata"]["archive_payload_digest"] == input_manifest["entry_payload_digest"]
+        assert embedded_summary["metadata"]["archive_digest_scope"] == "external_sidecar_after_archive_write"
+        assert embedded_summary["metadata"]["final_archive_digest_available_in_sidecar"] is True

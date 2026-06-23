@@ -996,3 +996,10 @@
 2. 新增 `scripts/write_primary_baseline_formal_import_protocol.py`, 可写出正式导入 schema、主表结果模板、正式模板覆盖、证据收集计划、候选记录校验报告和 manifest。该脚本只生成治理产物, 不手工填充论文结果。
 3. 新增 `paper_workflow/colab_utils/t2smark_full_main_reproduction.py` 与 `paper_workflow/t2smark_full_main_reproduction_run.ipynb`, 支持 Colab 冷启动下读取 `configs/paper_main_full_prompts.txt`, 运行 T2SMark SD3.5 Medium full-main 官方入口, 生成 image_pairs、统一 adapter observations、正式导入候选记录、validator 报告, 并打包镜像到 Google Drive。
 4. 当前 T2SMark full-main 路径默认 `supports_paper_claim=false`。若 fixed-FPR 校准和攻击矩阵检测未闭合, validator 会保留 `formal_import_validation_ready=false`, 防止 raw full-main 官方结果被误声明为论文级主表 robustness 结论。
+
+### dataset-level quality 打包自描述修正
+
+1. Google Drive 审计边界以 `SLM/dataset_level_quality/` 为准, 本地 `outputs/` 中同名 zip 仅视为手动下载副本。
+2. 数据集级质量打包逻辑已改为只从真实攻击包解出 `real_attacked_image_registry.jsonl`; source 与 attacked image 均通过 `outputs/dataset_level_quality/materialized_image_inputs/` 物化后进入结果包, 避免包内记录指向未打包的前序目录图像。
+3. zip 内部的 `dataset_level_quality_archive_summary.json` 不再写入空的最终 `archive_digest` 或 `drive_archive_digest`; 内部摘要改用 `archive_payload_digest` 表示打包输入条目的稳定摘要。
+4. 最终 zip 文件 SHA-256 与 Google Drive 镜像 SHA-256 继续写入同目录 sidecar summary 与 manifest, 通过 `archive_digest_scope` 和 `final_archive_digest_available_in_sidecar` 明确摘要边界。
