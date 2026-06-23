@@ -986,6 +986,26 @@ Notebook 与 repository module 的跨边界数据
 | candidate_record_digest | artifact | none | false | false | false | 主表 external baseline 候选记录集合的稳定摘要。|
 | validation_report_digest | artifact | none | false | false | false | 主表 external baseline 候选校验报告的稳定摘要。|
 | method_resource_profile | protocol | none | false | false | false | 方法忠实 adapter 候选记录声明的资源配置名称。|
+| small_sample_evidence_id | artifact | none | true | false | false | 主表 external baseline 小样本证据记录的稳定标识。|
+| small_sample_evidence_digest | artifact | none | true | false | false | 主表 external baseline 小样本证据记录的稳定摘要。|
+| small_sample_boundary | protocol | none | true | false | false | 当前 baseline 证据仅允许解释为小样本边界。|
+| paper_claim_boundary | governance | none | false | false | false | 当前证据与正式论文 claim 之间的边界说明。|
+| small_sample_evidence_ready | governance | none | false | false | false | 小样本 evidence paths 与基本样本计数是否就绪。|
+| small_sample_evidence_record_count | metric | none | false | false | false | 主表 external baseline 小样本证据记录数量。|
+| small_sample_evidence_ready_count | metric | none | false | false | false | 小样本证据就绪的主表 external baseline 记录数量。|
+| covered_primary_baseline_count | metric | none | false | false | false | 小样本证据已覆盖的主表 external baseline 数量。|
+| covered_primary_baseline_ids | protocol | none | false | false | false | 小样本证据已覆盖的主表 external baseline id 集合。|
+| missing_primary_baseline_ids | protocol | none | false | false | false | 小样本证据尚未覆盖的主表 external baseline id 集合。|
+| formal_import_ready | governance | none | true | false | false | 单条小样本证据是否已经通过正式导入 validator。|
+| formal_import_ready_count | metric | none | false | false | false | 已通过正式导入 validator 的小样本候选记录数量。|
+| formal_import_ready_ids | protocol | none | false | false | false | 已通过正式导入 validator 的 baseline id 集合。|
+| formal_import_blocking_reasons | governance | none | true | false | false | 单条候选记录未通过正式导入 validator 的原因集合。|
+| formal_full_paper_run_requested | governance | none | false | false | false | 当前流程是否请求正式 full paper 规模运行。|
+| formal_full_paper_run_permitted | governance | none | false | false | false | 当前项目边界是否允许正式 full paper 规模运行。|
+| excluded_operating_points | protocol | none | false | false | false | 当前小样本边界显式排除的论文级 operating point 集合。|
+| paper_claim_ready | governance | none | false | false | false | 当前证据是否允许支持论文级 claim。|
+| candidate_records_path | artifact | none | false | false | false | 小样本证据写出脚本读取的候选记录路径。|
+| validation_report_path | artifact | none | false | false | false | 小样本证据写出脚本读取的 validator 报告路径。|
 | prompt_protocol_name | protocol | none | false | false | false | 正式导入结果绑定的 prompt 协议名称。 |
 | prompt_protocol_digest | artifact | none | true | false | false | 正式导入结果绑定的 prompt 协议摘要。 |
 | prompt_set_name | protocol | none | false | false | false | 正式导入或运行计划绑定的 prompt set 名称。 |

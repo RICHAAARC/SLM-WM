@@ -84,6 +84,14 @@ from experiments.baselines.shallow_diffuse_official_reference import (
     build_shallow_diffuse_official_reference_schema,
     validate_shallow_diffuse_official_reference_records,
 )
+from experiments.baselines.small_sample_evidence import (
+    EXCLUDED_OPERATING_POINTS,
+    PAPER_CLAIM_BOUNDARY,
+    SMALL_SAMPLE_BOUNDARY,
+    SmallSampleEvidenceRecord,
+    build_primary_baseline_small_sample_evidence_records,
+    build_primary_baseline_small_sample_evidence_summary,
+)
 from experiments.baselines.tree_ring_official_reference import (
     TREE_RING_OFFICIAL_REFERENCE_PROTOCOL_NAME,
     TREE_RING_SUPPLEMENTAL_TABLE_ROLE,
@@ -100,6 +108,7 @@ __all__ = [
     "BaselineObservation",
     "BaselineResultRecord",
     "BaselineSpec",
+    "EXCLUDED_OPERATING_POINTS",
     "GAUSSIAN_SHADING_OFFICIAL_REFERENCE_PROTOCOL_NAME",
     "GAUSSIAN_SHADING_SUPPLEMENTAL_TABLE_ROLE",
     "PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME",
@@ -115,7 +124,10 @@ __all__ = [
     "PrimaryBaselineExecutionPlan",
     "PrimaryBaselineEvidenceRecord",
     "PrimaryBaselineResultTemplate",
+    "PAPER_CLAIM_BOUNDARY",
     "ShallowDiffuseOfficialReferenceRecord",
+    "SMALL_SAMPLE_BOUNDARY",
+    "SmallSampleEvidenceRecord",
     "TreeRingOfficialReferenceRecord",
     "TREE_RING_OFFICIAL_REFERENCE_PROTOCOL_NAME",
     "TREE_RING_SUPPLEMENTAL_TABLE_ROLE",
@@ -141,6 +153,8 @@ __all__ = [
     "build_method_faithful_adapter_summary",
     "build_comparison_rows",
     "build_primary_baseline_method_faithful_adapter_schema",
+    "build_primary_baseline_small_sample_evidence_records",
+    "build_primary_baseline_small_sample_evidence_summary",
     "build_primary_baseline_execution_plans",
     "build_primary_baseline_evidence_records",
     "build_primary_baseline_evidence_summary",
