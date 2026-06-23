@@ -21,7 +21,10 @@ from experiments.protocol.calibration import (
     operating_point_metrics,
 )
 from experiments.protocol.dataset_quality import (
+    FORMAL_FEATURE_BACKEND,
     FORMAL_FID_KID_BLOCKER,
+    FORMAL_FID_KID_NUMERIC_BLOCKER,
+    FORMAL_FID_KID_SAMPLE_BLOCKER,
     PIXEL_FEATURE_BACKEND,
     DatasetQualityImageRecord,
     build_dataset_quality_image_records,
@@ -40,7 +43,10 @@ __all__ = [
     "DatasetQualityImageRecord",
     "FixedFprCalibrationConfig",
     "FixedFprThreshold",
+    "FORMAL_FEATURE_BACKEND",
     "FORMAL_FID_KID_BLOCKER",
+    "FORMAL_FID_KID_NUMERIC_BLOCKER",
+    "FORMAL_FID_KID_SAMPLE_BLOCKER",
     "PIXEL_FEATURE_BACKEND",
     "SAMPLE_ROLES",
     "SPLIT_NAMES",

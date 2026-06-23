@@ -811,6 +811,17 @@ Notebook 与 repository module 的跨边界数据
 | sample_pair_count | metric | none | false | false | false | 数据集级质量输入中的图像配对数量。 |
 | dataset_level_quality_proxy_ready | governance | none | false | false | false | 数据集级质量 proxy 是否已完成并可审计。 |
 | formal_fid_kid_ready | governance | none | false | false | false | 正式 FID / KID 是否已由论文约定特征后端完成。 |
+| dataset_quality_formal_feature_import_report_path | artifact | none | false | false | false | 数据集级质量正式特征导入报告路径。 |
+| dataset_quality_image_role | protocol | none | true | false | false | 数据集级质量正式特征记录对应 source 或 comparison 图像角色。 |
+| feature_vector | artifact | none | true | false | false | 由 Inception 或论文约定视觉特征后端导出的单张图像特征向量。 |
+| input_feature_record_count | metric | none | false | false | false | 数据集级质量正式特征导入记录输入数量。 |
+| accepted_feature_pair_count | metric | none | false | false | false | 可用于正式 FID / KID 协议的 source / comparison 特征配对数量。 |
+| missing_feature_pair_count | metric | none | false | false | false | 正式特征导入中缺失 source 或 comparison 特征的图像对数量。 |
+| formal_feature_issue_count | metric | none | false | false | false | 正式特征导入 schema 检查发现的问题数量。 |
+| feature_dimension | metric | none | false | false | false | 正式特征记录中的视觉特征维度。 |
+| formal_feature_backend_ready | governance | none | false | false | false | 数据集级质量正式视觉特征后端是否已导入并通过 schema 检查。 |
+| formal_sample_scale_ready | governance | none | false | false | false | 数据集级质量正式 FID / KID 是否具备足够样本规模。 |
+| formal_min_sample_count | governance | none | false | false | false | 数据集级质量正式 FID / KID 协议要求的最小图像对数量。 |
 | dataset_quality_metrics_path | artifact | none | false | false | false | 数据集级质量指标表路径。 |
 | real_attack_registry_path | artifact | none | false | false | false | 数据集级质量脚本读取的真实攻击图像 registry 路径。 |
 | dataset_quality_image_resolution_records_path | artifact | none | false | false | false | 数据集级质量图像解析记录 JSONL 路径。 |

@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol import (
+    FORMAL_FEATURE_BACKEND,
     build_dataset_quality_image_records,
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
@@ -27,6 +28,7 @@ from main.core.digest import build_stable_digest
 
 DEFAULT_OUTPUT_DIR = Path("outputs/dataset_level_quality")
 DEFAULT_REAL_ATTACK_REGISTRY_PATH = Path("outputs/real_attack_evaluation/real_attacked_image_registry.jsonl")
+DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 50
 
 
 def stable_json_text(value: Any) -> str:
@@ -49,6 +51,14 @@ def read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
 
 
+def read_formal_feature_rows(path: Path) -> list[dict[str, Any]]:
+    """读取正式特征导入记录, 文件缺失时返回空集合。"""
+
+    if not path.is_file():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+
+
 def path_digest(path: Path) -> str:
     """计算文件 SHA-256 摘要, 用于记录外部 ZIP 与物化图像来源。"""
 
@@ -57,6 +67,108 @@ def path_digest(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _numeric_vector(value: Any) -> list[float]:
+    """在输入解析层把 feature vector 规整为浮点列表。"""
+
+    if not isinstance(value, list):
+        return []
+    vector: list[float] = []
+    for item in value:
+        try:
+            vector.append(float(item))
+        except (TypeError, ValueError):
+            return []
+    return vector
+
+
+def build_formal_feature_import_payload(
+    *,
+    records: Any,
+    feature_rows: list[dict[str, Any]],
+    formal_feature_records_path: Path,
+    root_path: Path,
+    formal_min_sample_count: int,
+) -> dict[str, Any]:
+    """把外部 Inception 特征记录解析为正式 FID / KID 可消费的矩阵和导入报告。
+
+    该函数属于 schema / 配置解析层: 它集中处理字段缺失、角色不合法和维度不一致问题, 下游指标函数只接收矩阵。
+    """
+
+    record_ids = [record.dataset_quality_record_id for record in records]
+    expected_pairs = {(record_id, role) for record_id in record_ids for role in ("source", "comparison")}
+    vectors_by_key: dict[tuple[str, str], list[float]] = {}
+    issues: list[dict[str, Any]] = []
+    for row_index, row in enumerate(feature_rows):
+        record_id = str(row.get("dataset_quality_record_id", "") or "")
+        image_role = str(row.get("dataset_quality_image_role", "") or "")
+        feature_backend = str(row.get("feature_backend", "") or "")
+        feature_vector = _numeric_vector(row.get("feature_vector"))
+        key = (record_id, image_role)
+        if key not in expected_pairs:
+            issues.append({"row_index": row_index, "field_name": "dataset_quality_record_id", "reason": "record_role_not_expected"})
+            continue
+        if feature_backend != FORMAL_FEATURE_BACKEND:
+            issues.append({"row_index": row_index, "field_name": "feature_backend", "reason": "inception_feature_backend_required"})
+            continue
+        if not feature_vector:
+            issues.append({"row_index": row_index, "field_name": "feature_vector", "reason": "numeric_feature_vector_required"})
+            continue
+        vectors_by_key[key] = feature_vector
+
+    source_vectors: list[list[float]] = []
+    comparison_vectors: list[list[float]] = []
+    missing_feature_count = 0
+    for record_id in record_ids:
+        source_vector = vectors_by_key.get((record_id, "source"))
+        comparison_vector = vectors_by_key.get((record_id, "comparison"))
+        if source_vector is None or comparison_vector is None:
+            missing_feature_count += 1
+            continue
+        if len(source_vector) != len(comparison_vector):
+            issues.append({"row_index": -1, "field_name": "feature_vector", "reason": "source_comparison_feature_dimension_mismatch"})
+            continue
+        source_vectors.append(source_vector)
+        comparison_vectors.append(comparison_vector)
+
+    feature_dimension_values = sorted({len(vector) for vector in (*source_vectors, *comparison_vectors)})
+    dimension_consistent = len(feature_dimension_values) <= 1
+    if not dimension_consistent:
+        issues.append({"row_index": -1, "field_name": "feature_vector", "reason": "feature_dimension_inconsistent"})
+        source_vectors = []
+        comparison_vectors = []
+    accepted_pair_count = min(len(source_vectors), len(comparison_vectors))
+    formal_feature_backend_ready = accepted_pair_count > 0 and not issues
+    formal_sample_scale_ready = formal_feature_backend_ready and accepted_pair_count >= formal_min_sample_count
+    if not feature_rows:
+        unsupported_reason = "inception_feature_records_missing"
+    elif not formal_feature_backend_ready:
+        unsupported_reason = "inception_feature_records_invalid"
+    elif not formal_sample_scale_ready:
+        unsupported_reason = "requires_full_main_sample_scale"
+    else:
+        unsupported_reason = ""
+    report = {
+        "formal_feature_records_path": relative_or_absolute(formal_feature_records_path, root_path),
+        "feature_backend": FORMAL_FEATURE_BACKEND,
+        "input_feature_record_count": len(feature_rows),
+        "accepted_feature_pair_count": accepted_pair_count,
+        "missing_feature_pair_count": missing_feature_count,
+        "formal_feature_issue_count": len(issues),
+        "feature_dimension": feature_dimension_values[0] if dimension_consistent and feature_dimension_values else 0,
+        "formal_min_sample_count": formal_min_sample_count,
+        "formal_feature_backend_ready": formal_feature_backend_ready,
+        "formal_sample_scale_ready": formal_sample_scale_ready,
+        "unsupported_reason": unsupported_reason,
+        "issues": issues,
+        "supports_paper_claim": False,
+    }
+    return {
+        "source_features": source_vectors if formal_feature_backend_ready else None,
+        "comparison_features": comparison_vectors if formal_feature_backend_ready else None,
+        "report": report,
+    }
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
@@ -271,6 +383,8 @@ def write_dataset_level_quality_outputs(
     real_attack_registry_path: str | Path = DEFAULT_REAL_ATTACK_REGISTRY_PATH,
     image_search_roots: Any = (),
     input_package_paths: Any = (),
+    formal_feature_records_path: str | Path | None = None,
+    formal_min_sample_count: int = DEFAULT_FORMAL_MIN_SAMPLE_COUNT,
 ) -> dict[str, Any]:
     """写出数据集级质量 records、metrics、summary 和 manifest。
 
@@ -280,6 +394,11 @@ def write_dataset_level_quality_outputs(
     root_path = Path(root).resolve()
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, output_dir)
     resolved_registry_path = resolve_path(root_path, real_attack_registry_path)
+    resolved_formal_feature_records_path = (
+        resolve_path(root_path, formal_feature_records_path)
+        if formal_feature_records_path
+        else resolved_output_dir / "dataset_quality_formal_feature_records.jsonl"
+    )
     resolved_input_package_paths = expand_input_package_paths(root_path, input_package_paths)
     explicit_image_search_roots = tuple(
         resolve_path(root_path, path) for path in normalize_path_values(image_search_roots)
@@ -302,10 +421,25 @@ def write_dataset_level_quality_outputs(
         materialized_root=materialized_root,
         materialized_records=materialized_records,
     )
-    metric_rows = build_dataset_quality_metric_rows(records, root_path, image_search_roots=all_image_search_roots)
+    formal_feature_payload = build_formal_feature_import_payload(
+        records=records,
+        feature_rows=read_formal_feature_rows(resolved_formal_feature_records_path),
+        formal_feature_records_path=resolved_formal_feature_records_path,
+        root_path=root_path,
+        formal_min_sample_count=formal_min_sample_count,
+    )
+    metric_rows = build_dataset_quality_metric_rows(
+        records,
+        root_path,
+        image_search_roots=all_image_search_roots,
+        formal_source_features=formal_feature_payload["source_features"],
+        formal_comparison_features=formal_feature_payload["comparison_features"],
+        formal_min_sample_count=formal_min_sample_count,
+    )
 
     records_path = resolved_output_dir / "dataset_quality_image_records.jsonl"
     image_resolution_records_path = resolved_output_dir / "dataset_quality_image_resolution_records.jsonl"
+    formal_feature_import_report_path = resolved_output_dir / "dataset_quality_formal_feature_import_report.json"
     metrics_path = resolved_output_dir / "dataset_quality_metrics.csv"
     summary_path = resolved_output_dir / "dataset_quality_summary.json"
     manifest_path = resolved_output_dir / "manifest.local.json"
@@ -318,16 +452,27 @@ def write_dataset_level_quality_outputs(
         "real_attack_registry_path": relative_or_absolute(resolved_registry_path, root_path),
         "dataset_quality_metrics_path": relative_or_absolute(metrics_path, root_path),
         "dataset_quality_image_resolution_records_path": relative_or_absolute(image_resolution_records_path, root_path),
+        "dataset_quality_formal_feature_import_report_path": relative_or_absolute(
+            formal_feature_import_report_path,
+            root_path,
+        ),
         "image_resolution_record_count": len(image_resolution_records),
         "resolved_image_file_count": resolved_image_file_count,
         "missing_image_file_count": len(image_resolution_records) - resolved_image_file_count,
         "materialized_image_input_count": materialized_image_input_count,
         "input_package_count": len(resolved_input_package_paths),
+        "formal_feature_backend_ready": formal_feature_payload["report"]["formal_feature_backend_ready"],
+        "formal_sample_scale_ready": formal_feature_payload["report"]["formal_sample_scale_ready"],
+        "formal_min_sample_count": formal_min_sample_count,
     }
 
     records_path.write_text("".join(json_line(record.to_dict()) for record in records), encoding="utf-8")
     image_resolution_records_path.write_text(
         "".join(json_line(record) for record in image_resolution_records),
+        encoding="utf-8",
+    )
+    formal_feature_import_report_path.write_text(
+        stable_json_text(formal_feature_payload["report"]),
         encoding="utf-8",
     )
     write_csv(
@@ -349,6 +494,8 @@ def write_dataset_level_quality_outputs(
 
     input_paths = [relative_or_absolute(resolved_registry_path, root_path)] if resolved_registry_path.exists() else []
     input_paths.extend(relative_or_absolute(path, root_path) for path in resolved_input_package_paths)
+    if resolved_formal_feature_records_path.exists():
+        input_paths.append(relative_or_absolute(resolved_formal_feature_records_path, root_path))
     materialized_image_paths = tuple(
         resolve_path(root_path, record["resolved_image_path"])
         for record in image_resolution_records
@@ -359,6 +506,7 @@ def write_dataset_level_quality_outputs(
         for path in (
             records_path,
             image_resolution_records_path,
+            formal_feature_import_report_path,
             metrics_path,
             summary_path,
             *materialized_image_paths,
@@ -373,6 +521,7 @@ def write_dataset_level_quality_outputs(
         config={
             "records_digest": build_stable_digest([record.to_dict() for record in records]),
             "image_resolution_records_digest": build_stable_digest(image_resolution_records),
+            "formal_feature_import_report_digest": build_stable_digest(formal_feature_payload["report"]),
             "metric_rows_digest": build_stable_digest(metric_rows),
             "summary_digest": build_stable_digest(summary),
         },
@@ -403,6 +552,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         help="前序结果 ZIP 文件或包含 ZIP 的目录, 可重复传入; 脚本只会物化当前 records 需要的图像。",
     )
+    parser.add_argument(
+        "--formal-feature-records-path",
+        default=None,
+        help="可选的 Inception 特征 JSONL 记录路径; 缺失时正式 FID / KID 保持 unsupported。",
+    )
+    parser.add_argument(
+        "--formal-min-sample-count",
+        type=int,
+        default=DEFAULT_FORMAL_MIN_SAMPLE_COUNT,
+        help="正式 FID / KID 所需的最小图像对数量, 默认不适配小样本。",
+    )
     return parser
 
 
@@ -416,6 +576,8 @@ def main() -> None:
         real_attack_registry_path=args.real_attack_registry_path,
         image_search_roots=args.image_search_root,
         input_package_paths=args.input_package_path,
+        formal_feature_records_path=args.formal_feature_records_path,
+        formal_min_sample_count=args.formal_min_sample_count,
     )
     print(stable_json_text(manifest), end="")
 

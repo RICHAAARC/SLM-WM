@@ -12,7 +12,10 @@ from PIL import Image
 from main.core.digest import build_stable_digest
 
 PIXEL_FEATURE_BACKEND = "pixel_histogram_feature_proxy"
+FORMAL_FEATURE_BACKEND = "inception_feature_backend"
 FORMAL_FID_KID_BLOCKER = "requires_inception_feature_backend"
+FORMAL_FID_KID_SAMPLE_BLOCKER = "requires_full_main_sample_scale"
+FORMAL_FID_KID_NUMERIC_BLOCKER = "requires_covariance_square_root_backend"
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,127 @@ def _biased_polynomial_mmd(source_features: np.ndarray, comparison_features: np.
     return float(max(source_kernel + comparison_kernel - 2.0 * cross_kernel, 0.0))
 
 
+def _feature_array_or_none(feature_values: Any) -> np.ndarray | None:
+    """把可选特征矩阵规整为二维浮点数组。
+
+    该函数属于配置解析边界: 业务逻辑只消费已经规整的矩阵, 避免在指标构造路径中重复处理列表、空值和维度差异。
+    """
+
+    if feature_values is None:
+        return None
+    array = np.asarray(feature_values, dtype=np.float64)
+    if array.ndim != 2 or array.shape[0] == 0 or array.shape[1] == 0:
+        return None
+    return array
+
+
+def _exact_gaussian_fid(source_features: np.ndarray, comparison_features: np.ndarray) -> float | None:
+    """使用完整协方差矩阵计算 FID。
+
+    此处设计的主要考虑在于: 正式 FID 必须基于视觉特征分布的均值与协方差, 不能复用轻量 pixel proxy 的对角近似。
+    scipy 只在导入正式特征并且样本规模满足要求时作为可选后端使用, 默认小样本链路不会触发该依赖。
+    """
+
+    try:
+        from scipy import linalg
+    except Exception:
+        return None
+    source_mean = source_features.mean(axis=0)
+    comparison_mean = comparison_features.mean(axis=0)
+    source_covariance = np.atleast_2d(np.cov(source_features, rowvar=False))
+    comparison_covariance = np.atleast_2d(np.cov(comparison_features, rowvar=False))
+    covariance_mean = linalg.sqrtm(source_covariance @ comparison_covariance)
+    if not np.isfinite(covariance_mean).all():
+        offset = np.eye(source_covariance.shape[0]) * 1e-6
+        covariance_mean = linalg.sqrtm((source_covariance + offset) @ (comparison_covariance + offset))
+    if np.iscomplexobj(covariance_mean):
+        covariance_mean = covariance_mean.real
+    mean_term = np.sum((source_mean - comparison_mean) ** 2)
+    covariance_term = np.trace(source_covariance + comparison_covariance - 2.0 * covariance_mean)
+    return float(max(mean_term + covariance_term, 0.0))
+
+
+def _unbiased_polynomial_mmd(source_features: np.ndarray, comparison_features: np.ndarray) -> float:
+    """使用三阶多项式核计算 KID 的无偏 MMD 形式。"""
+
+    source_count = source_features.shape[0]
+    comparison_count = comparison_features.shape[0]
+    source_kernel = _polynomial_kernel(source_features, source_features)
+    comparison_kernel = _polynomial_kernel(comparison_features, comparison_features)
+    cross_kernel = _polynomial_kernel(source_features, comparison_features)
+    source_term = (source_kernel.sum() - np.trace(source_kernel)) / max(source_count * (source_count - 1), 1)
+    comparison_term = (comparison_kernel.sum() - np.trace(comparison_kernel)) / max(
+        comparison_count * (comparison_count - 1),
+        1,
+    )
+    cross_term = cross_kernel.mean()
+    return float(max(source_term + comparison_term - 2.0 * cross_term, 0.0))
+
+
+def _formal_metric_rows(
+    source_features: Any,
+    comparison_features: Any,
+    *,
+    sample_pair_count: int,
+    formal_min_sample_count: int,
+) -> list[dict[str, Any]]:
+    """构造正式 FID / KID 指标行。
+
+    通用工程写法是把正式特征后端、样本规模和数值后端的边界集中在该函数中。
+    项目特定约束是: 小样本链路即使提供了特征记录, 也只能输出受治理的阻断状态, 不能被提升为投稿级结论。
+    """
+
+    source_array = _feature_array_or_none(source_features)
+    comparison_array = _feature_array_or_none(comparison_features)
+    source_count = int(source_array.shape[0]) if source_array is not None else sample_pair_count
+    comparison_count = int(comparison_array.shape[0]) if comparison_array is not None else sample_pair_count
+    metric_context = {
+        "feature_backend": FORMAL_FEATURE_BACKEND,
+        "source_image_count": source_count,
+        "comparison_image_count": comparison_count,
+        "sample_pair_count": sample_pair_count,
+        "supports_paper_claim": False,
+    }
+    if source_array is None or comparison_array is None:
+        metric_status = FORMAL_FID_KID_BLOCKER
+        fid_value: str | float = "unsupported"
+        kid_value: str | float = "unsupported"
+    elif (
+        source_array.shape != comparison_array.shape
+        or source_array.shape[0] < formal_min_sample_count
+        or comparison_array.shape[0] < formal_min_sample_count
+    ):
+        metric_status = FORMAL_FID_KID_SAMPLE_BLOCKER
+        fid_value = "unsupported"
+        kid_value = "unsupported"
+    else:
+        fid_result = _exact_gaussian_fid(source_array, comparison_array)
+        if fid_result is None:
+            metric_status = FORMAL_FID_KID_NUMERIC_BLOCKER
+            fid_value = "unsupported"
+            kid_value = "unsupported"
+        else:
+            metric_status = "measured"
+            fid_value = fid_result
+            kid_value = _unbiased_polynomial_mmd(source_array, comparison_array)
+    return [
+        {
+            "quality_metric_name": "fid",
+            "quality_metric_value": fid_value,
+            "metric_status": metric_status,
+            "paper_metric_name": "fid",
+            **metric_context,
+        },
+        {
+            "quality_metric_name": "kid",
+            "quality_metric_value": kid_value,
+            "metric_status": metric_status,
+            "paper_metric_name": "kid",
+            **metric_context,
+        },
+    ]
+
+
 def build_dataset_quality_image_records(
     registry_rows: Iterable[Mapping[str, Any]],
     root_path: Path,
@@ -183,6 +307,9 @@ def build_dataset_quality_metric_rows(
     records: Iterable[DatasetQualityImageRecord],
     root_path: Path,
     image_search_roots: Iterable[Path] = (),
+    formal_source_features: Any = None,
+    formal_comparison_features: Any = None,
+    formal_min_sample_count: int = 50,
 ) -> list[dict[str, Any]]:
     """构造数据集级质量指标表。
 
@@ -202,29 +329,19 @@ def build_dataset_quality_metric_rows(
     missing_image_file_count = sum(1 for path in source_paths + comparison_paths if not path.is_file())
     source_count = len(source_paths)
     comparison_count = len(comparison_paths)
-    metric_context = {
+    pixel_metric_context = {
         "feature_backend": PIXEL_FEATURE_BACKEND,
         "source_image_count": source_count,
         "comparison_image_count": comparison_count,
         "sample_pair_count": len(record_values),
         "supports_paper_claim": False,
     }
-    rows = [
-        {
-            "quality_metric_name": "fid",
-            "quality_metric_value": "unsupported",
-            "metric_status": FORMAL_FID_KID_BLOCKER,
-            "paper_metric_name": "fid",
-            **metric_context,
-        },
-        {
-            "quality_metric_name": "kid",
-            "quality_metric_value": "unsupported",
-            "metric_status": FORMAL_FID_KID_BLOCKER,
-            "paper_metric_name": "kid",
-            **metric_context,
-        },
-    ]
+    rows = _formal_metric_rows(
+        formal_source_features,
+        formal_comparison_features,
+        sample_pair_count=len(record_values),
+        formal_min_sample_count=formal_min_sample_count,
+    )
     if not record_values:
         return rows
     if missing_image_file_count:
@@ -235,14 +352,14 @@ def build_dataset_quality_metric_rows(
                     "quality_metric_value": "unsupported",
                     "metric_status": "image_file_missing",
                     "paper_metric_name": "fid",
-                    **metric_context,
+                    **pixel_metric_context,
                 },
                 {
                     "quality_metric_name": "kid_pixel_feature_proxy",
                     "quality_metric_value": "unsupported",
                     "metric_status": "image_file_missing",
                     "paper_metric_name": "kid",
-                    **metric_context,
+                    **pixel_metric_context,
                 },
             ]
         )
@@ -258,14 +375,14 @@ def build_dataset_quality_metric_rows(
                 "quality_metric_value": _diagonal_gaussian_fid(source_array, comparison_array),
                 "metric_status": "measured_small_sample_proxy",
                 "paper_metric_name": "fid",
-                **metric_context,
+                **pixel_metric_context,
             },
             {
                 "quality_metric_name": "kid_pixel_feature_proxy",
                 "quality_metric_value": _biased_polynomial_mmd(source_array, comparison_array),
                 "metric_status": "measured_small_sample_proxy",
                 "paper_metric_name": "kid",
-                **metric_context,
+                **pixel_metric_context,
             },
         ]
     )
@@ -285,6 +402,11 @@ def build_dataset_quality_summary(
         str(row.get("quality_metric_name")) in {"fid", "kid"} and str(row.get("metric_status")) == "measured"
         for row in rows
     )
+    formal_status_values = tuple(
+        str(row.get("metric_status"))
+        for row in rows
+        if str(row.get("quality_metric_name")) in {"fid", "kid"} and str(row.get("metric_status"))
+    )
     return {
         "construction_unit_name": "dataset_level_quality_evidence",
         "dataset_quality_record_count": len(record_values),
@@ -295,6 +417,6 @@ def build_dataset_quality_summary(
         "dataset_level_quality_proxy_ready": proxy_ready,
         "formal_fid_kid_ready": formal_ready,
         "paper_claim_ready": False,
-        "unsupported_reason": FORMAL_FID_KID_BLOCKER if not formal_ready else "",
+        "unsupported_reason": formal_status_values[0] if not formal_ready and formal_status_values else "",
         "supports_paper_claim": False,
     }
