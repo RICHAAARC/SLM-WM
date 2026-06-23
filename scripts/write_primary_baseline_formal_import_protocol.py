@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -15,7 +16,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.baselines import (
+    build_primary_baseline_formal_import_readiness_rows,
+    build_primary_baseline_formal_import_readiness_summary,
     build_primary_baseline_formal_import_schema,
+    build_primary_baseline_formal_template_coverage_rows,
+    build_primary_baseline_formal_template_coverage_summary,
     build_primary_result_templates,
     build_primary_baseline_execution_plans,
     load_baseline_source_registry,
@@ -43,6 +48,16 @@ def json_line(value: dict[str, Any]) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n"
 
 
+def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
+    """按固定字段顺序写出 CSV 表格。"""
+
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
 def read_json(path: Path) -> dict[str, Any]:
     """读取 JSON 文件。"""
 
@@ -51,8 +66,6 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def read_csv_rows(path: Path) -> list[dict[str, Any]]:
     """读取 CSV 表格。"""
-
-    import csv
 
     with path.open(encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
@@ -145,6 +158,7 @@ def write_primary_baseline_formal_import_protocol_outputs(
     target_fpr = float(attack_manifest.get("evaluation_boundary", {}).get("target_fpr", 0.05))
     execution_plans = build_primary_baseline_execution_plans(source_registry, root=root_path)
     template_rows = build_primary_result_templates(execution_plans, attack_rows, attack_manifest.get("evaluation_boundary", {}))
+    formal_template_rows = [row for row in template_rows if str(row.get("resource_profile", "")) == "full_main"]
     schema = build_primary_baseline_formal_import_schema(target_fpr=target_fpr)
     candidate_rows = read_jsonl_rows(resolved_candidate_records_path)
     validation_report = validate_primary_baseline_formal_import_rows(
@@ -153,32 +167,94 @@ def write_primary_baseline_formal_import_protocol_outputs(
         target_fpr=target_fpr,
         require_existing_evidence=True,
     )
+    readiness_rows = build_primary_baseline_formal_import_readiness_rows(candidate_rows, validation_report)
+    readiness_summary = build_primary_baseline_formal_import_readiness_summary(readiness_rows)
+    coverage_rows = build_primary_baseline_formal_template_coverage_rows(
+        formal_template_rows,
+        candidate_rows,
+        validation_report,
+    )
+    coverage_summary = build_primary_baseline_formal_template_coverage_summary(coverage_rows)
     summary = {
         "construction_unit_name": "primary_baseline_formal_import_protocol",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "target_fpr": target_fpr,
-        "template_record_count": len(template_rows),
+        "template_record_count": len(formal_template_rows),
         "candidate_record_count": len(candidate_rows),
         "accepted_formal_import_count": validation_report["accepted_formal_import_count"],
         "rejected_formal_import_count": validation_report["rejected_formal_import_count"],
         "formal_import_validation_ready": validation_report["formal_import_validation_ready"],
+        "formal_result_ready_count": readiness_summary["formal_result_ready_count"],
+        "formal_template_coverage_ready_count": coverage_summary["formal_template_coverage_ready_count"],
+        "missing_formal_template_count": coverage_summary["missing_formal_template_count"],
+        "primary_baseline_formal_ready": readiness_summary["primary_baseline_formal_ready"]
+        and coverage_summary["primary_baseline_formal_template_coverage_ready"],
         "supports_paper_claim": False,
     }
 
     schema_path = resolved_output_dir / "primary_baseline_formal_import_schema.json"
     template_path = resolved_output_dir / "primary_baseline_formal_result_template.jsonl"
     validation_path = resolved_output_dir / "primary_baseline_formal_import_validation_report.json"
+    readiness_path = resolved_output_dir / "primary_baseline_formal_import_readiness.csv"
+    readiness_summary_path = resolved_output_dir / "primary_baseline_formal_import_readiness_summary.json"
+    coverage_path = resolved_output_dir / "primary_baseline_formal_template_coverage.csv"
+    coverage_summary_path = resolved_output_dir / "primary_baseline_formal_template_coverage_summary.json"
     summary_path = resolved_output_dir / "primary_baseline_formal_import_summary.json"
     manifest_path = resolved_output_dir / "manifest.local.json"
 
     schema_path.write_text(stable_json_text(schema), encoding="utf-8")
-    template_path.write_text("".join(json_line(row) for row in template_rows), encoding="utf-8")
+    template_path.write_text("".join(json_line(row) for row in formal_template_rows), encoding="utf-8")
     validation_path.write_text(stable_json_text(validation_report), encoding="utf-8")
+    write_csv(
+        readiness_path,
+        readiness_rows,
+        [
+            "baseline_id",
+            "candidate_record_count",
+            "accepted_formal_import_count",
+            "rejected_formal_import_count",
+            "formal_import_issue_count",
+            "formal_result_ready",
+            "blocking_reason_count",
+            "blocking_reasons",
+            "missing_resource_profile_full_main",
+            "missing_full_main_prompt_protocol",
+            "missing_fixed_fpr_baseline_calibration",
+            "missing_attack_matrix_baseline_detection",
+            "formal_evidence_paths_ready",
+            "supports_paper_claim",
+        ],
+    )
+    readiness_summary_path.write_text(stable_json_text(readiness_summary), encoding="utf-8")
+    write_csv(
+        coverage_path,
+        coverage_rows,
+        [
+            "baseline_id",
+            "expected_formal_template_count",
+            "candidate_template_match_count",
+            "accepted_template_match_count",
+            "missing_formal_template_count",
+            "formal_template_coverage_ready",
+            "supports_paper_claim",
+        ],
+    )
+    coverage_summary_path.write_text(stable_json_text(coverage_summary), encoding="utf-8")
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
     output_paths = tuple(
         relative_or_absolute(path, root_path)
-        for path in (schema_path, template_path, validation_path, summary_path, manifest_path)
+        for path in (
+            schema_path,
+            template_path,
+            validation_path,
+            readiness_path,
+            readiness_summary_path,
+            coverage_path,
+            coverage_summary_path,
+            summary_path,
+            manifest_path,
+        )
     )
     input_paths = [
         relative_or_absolute(resolved_source_registry_path, root_path),
@@ -194,8 +270,12 @@ def write_primary_baseline_formal_import_protocol_outputs(
         output_paths=output_paths,
         config={
             "schema_digest": build_stable_digest(schema),
-            "template_digest": build_stable_digest(template_rows),
+            "template_digest": build_stable_digest(formal_template_rows),
             "validation_report_digest": build_stable_digest(validation_report),
+            "formal_import_readiness_digest": build_stable_digest(readiness_rows),
+            "formal_import_readiness_summary_digest": build_stable_digest(readiness_summary),
+            "formal_template_coverage_digest": build_stable_digest(coverage_rows),
+            "formal_template_coverage_summary_digest": build_stable_digest(coverage_summary),
             "summary_digest": build_stable_digest(summary),
         },
         code_version=resolve_code_version(root_path),

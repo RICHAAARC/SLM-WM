@@ -10,6 +10,8 @@ import pytest
 
 from experiments.baselines import (
     build_primary_baseline_formal_import_schema,
+    build_primary_baseline_formal_template_coverage_rows,
+    build_primary_baseline_formal_template_coverage_summary,
     build_t2smark_full_main_candidate_records,
     build_tree_ring_method_faithful_candidate_records,
     validate_primary_baseline_formal_import_rows,
@@ -172,6 +174,44 @@ def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_p
 
 
 @pytest.mark.quick
+def test_formal_template_coverage_requires_matching_full_main_records(tmp_path: Path) -> None:
+    """正式模板覆盖应检查候选记录是否覆盖共同协议要求的 full-main 攻击模板。"""
+
+    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
+    accepted_row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    missing_template = {
+        "baseline_id": "tree_ring",
+        "attack_family": "standard_distortion",
+        "attack_name": "gaussian_noise",
+        "resource_profile": "full_main",
+        "comparable_operating_point": "fixed_fpr_0.05",
+    }
+    template_rows = [
+        {
+            "baseline_id": "tree_ring",
+            "attack_family": "standard_distortion",
+            "attack_name": "jpeg_compression",
+            "resource_profile": "full_main",
+            "comparable_operating_point": "fixed_fpr_0.05",
+        },
+        missing_template,
+    ]
+    report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=0.05)
+
+    coverage_rows = build_primary_baseline_formal_template_coverage_rows(template_rows, [accepted_row], report)
+    coverage_summary = build_primary_baseline_formal_template_coverage_summary(coverage_rows)
+    tree_row = next(row for row in coverage_rows if row["baseline_id"] == "tree_ring")
+
+    assert tree_row["expected_formal_template_count"] == 2
+    assert tree_row["accepted_template_match_count"] == 1
+    assert tree_row["missing_formal_template_count"] == 1
+    assert tree_row["formal_template_coverage_ready"] is False
+    assert coverage_summary["primary_baseline_formal_template_coverage_ready"] is False
+
+
+@pytest.mark.quick
 def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tmp_path: Path) -> None:
     """协议写出脚本应生成 schema、模板、候选校验报告和 manifest。"""
 
@@ -218,8 +258,29 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
     output_dir = tmp_path / "outputs" / "primary_baseline_formal_import"
     schema = json.loads((output_dir / "primary_baseline_formal_import_schema.json").read_text(encoding="utf-8"))
     validation = json.loads((output_dir / "primary_baseline_formal_import_validation_report.json").read_text(encoding="utf-8"))
+    template_rows = [
+        json.loads(line)
+        for line in (output_dir / "primary_baseline_formal_result_template.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    readiness_rows = list(
+        csv.DictReader((output_dir / "primary_baseline_formal_import_readiness.csv").open(encoding="utf-8"))
+    )
+    coverage_rows = list(
+        csv.DictReader((output_dir / "primary_baseline_formal_template_coverage.csv").open(encoding="utf-8"))
+    )
+    coverage_summary = json.loads(
+        (output_dir / "primary_baseline_formal_template_coverage_summary.json").read_text(encoding="utf-8")
+    )
+    summary = json.loads((output_dir / "primary_baseline_formal_import_summary.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "primary_baseline_formal_import_protocol_manifest"
     assert schema == build_primary_baseline_formal_import_schema(target_fpr=0.05)
+    assert len(template_rows) == 4
     assert validation["input_record_count"] == 0
+    assert len(readiness_rows) == 4
+    assert len(coverage_rows) == 4
+    assert coverage_summary["formal_template_record_count"] == 4
+    assert coverage_summary["missing_formal_template_count"] == 4
+    assert summary["primary_baseline_formal_ready"] is False
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])

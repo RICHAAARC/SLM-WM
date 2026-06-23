@@ -447,6 +447,76 @@ def build_primary_baseline_formal_import_readiness_summary(
     }
 
 
+def _formal_template_key(row: Mapping[str, Any]) -> tuple[str, str, str, str, str]:
+    """生成正式共同协议模板覆盖检查使用的稳定键。"""
+
+    return (
+        _str_field(row, "baseline_id"),
+        _str_field(row, "attack_family"),
+        _str_field(row, "attack_name"),
+        _str_field(row, "resource_profile"),
+        _str_field(row, "comparable_operating_point"),
+    )
+
+
+def build_primary_baseline_formal_template_coverage_rows(
+    template_rows: Iterable[Mapping[str, Any]],
+    candidate_rows: Iterable[Mapping[str, Any]],
+    validation_report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """构造主表 baseline 正式模板覆盖行。
+
+    该函数属于项目特定写法: row-level validator 只能说明单条记录是否符合 schema,
+    template coverage 进一步说明每个主表 baseline 是否覆盖了正式共同协议要求的全部攻击模板。
+    """
+
+    templates = [dict(row) for row in template_rows]
+    candidates = [dict(row) for row in candidate_rows]
+    accepted_records = [dict(row) for row in validation_report.get("accepted_records", ())]
+    candidate_keys = {_formal_template_key(row) for row in candidates}
+    accepted_keys = {_formal_template_key(row) for row in accepted_records}
+    rows: list[dict[str, Any]] = []
+    for baseline_id in PRIMARY_BASELINE_IDS:
+        baseline_templates = [row for row in templates if _str_field(row, "baseline_id") == baseline_id]
+        template_keys = {_formal_template_key(row) for row in baseline_templates}
+        candidate_match_count = sum(1 for key in template_keys if key in candidate_keys)
+        accepted_match_count = sum(1 for key in template_keys if key in accepted_keys)
+        missing_count = max(len(template_keys) - accepted_match_count, 0)
+        rows.append(
+            {
+                "baseline_id": baseline_id,
+                "expected_formal_template_count": len(template_keys),
+                "candidate_template_match_count": candidate_match_count,
+                "accepted_template_match_count": accepted_match_count,
+                "missing_formal_template_count": missing_count,
+                "formal_template_coverage_ready": bool(template_keys) and missing_count == 0,
+                "supports_paper_claim": False,
+            }
+        )
+    return rows
+
+
+def build_primary_baseline_formal_template_coverage_summary(
+    coverage_rows: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """构造主表 baseline 正式模板覆盖摘要。"""
+
+    rows = [dict(row) for row in coverage_rows]
+    ready_ids = tuple(row["baseline_id"] for row in rows if _bool_field(row, "formal_template_coverage_ready"))
+    blocked_ids = tuple(row["baseline_id"] for row in rows if not _bool_field(row, "formal_template_coverage_ready"))
+    return {
+        "primary_baseline_count": len(rows),
+        "formal_template_record_count": sum(_int_field(row, "expected_formal_template_count") for row in rows),
+        "formal_template_coverage_ready_count": len(ready_ids),
+        "formal_template_coverage_ready_ids": list(ready_ids),
+        "blocked_primary_baseline_ids": list(blocked_ids),
+        "primary_baseline_formal_template_coverage_ready": len(ready_ids) == len(PRIMARY_BASELINE_IDS)
+        and len(rows) == len(PRIMARY_BASELINE_IDS),
+        "missing_formal_template_count": sum(_int_field(row, "missing_formal_template_count") for row in rows),
+        "supports_paper_claim": False,
+    }
+
+
 def _group_observations_by_attack(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str], list[Mapping[str, Any]]]:
     """按攻击族与攻击名称聚合 observation, 便于生成导入候选。"""
 

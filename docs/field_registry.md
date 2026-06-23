@@ -1151,6 +1151,18 @@ Notebook 与 repository module 的跨边界数据
 | missing_fixed_fpr_baseline_calibration | governance | none | false | false | false | 主表 baseline 候选是否缺少 fixed-FPR baseline 校准边界。|
 | missing_attack_matrix_baseline_detection | governance | none | false | false | false | 主表 baseline 候选是否缺少共同攻击矩阵检测边界。|
 | formal_import_readiness_summary_path | artifact | none | false | false | false | 主表 baseline 正式导入 readiness 摘要路径。|
+| expected_formal_template_count | metric | none | false | false | false | 单个主表 baseline 需要覆盖的正式共同协议模板数量。|
+| formal_template_record_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板总数量。|
+| candidate_template_match_count | metric | none | false | false | false | 单个主表 baseline 候选记录中匹配正式模板键的数量。|
+| accepted_template_match_count | metric | none | false | false | false | 单个主表 baseline 已通过 validator 且匹配正式模板键的数量。|
+| missing_formal_template_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板仍缺失的数量。|
+| formal_template_coverage_ready | governance | none | false | false | false | 单个主表 baseline 是否已覆盖所有正式共同协议模板。|
+| formal_template_coverage_ready_count | metric | none | false | false | false | 已覆盖所有正式共同协议模板的主表 baseline 数量。|
+| formal_template_coverage_ready_ids | protocol | none | false | false | false | 已覆盖所有正式共同协议模板的主表 baseline id 集合。|
+| primary_baseline_formal_template_coverage_ready | governance | none | false | false | false | 四个主表 external baseline 是否全部覆盖正式共同协议模板。|
+| formal_template_coverage_digest | artifact | none | false | false | false | 主表 external baseline 正式模板覆盖表的稳定摘要。|
+| formal_template_coverage_summary_digest | artifact | none | false | false | false | 主表 external baseline 正式模板覆盖摘要的稳定摘要。|
+| formal_template_coverage_summary_path | artifact | none | false | false | false | 主表 baseline 正式模板覆盖摘要路径。|
 | adapter_boundary | governance | none | false | false | false | adapter observation 或 manifest 对工程 smoke 与正式论文证据边界的说明。|
 | execution_device | runtime | none | false | false | false | adapter 张量或诊断分数实际执行设备。|
 | torch_available | runtime | none | false | false | false | adapter 运行环境中是否可导入 torch。|

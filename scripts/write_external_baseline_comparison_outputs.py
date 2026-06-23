@@ -39,6 +39,9 @@ DEFAULT_BASELINE_RESULT_RECORDS_PATH = Path("outputs/external_baseline_results/b
 DEFAULT_FORMAL_IMPORT_READINESS_SUMMARY_PATH = Path(
     "outputs/external_baseline_results/baseline_formal_import_readiness_summary.json"
 )
+DEFAULT_FORMAL_TEMPLATE_COVERAGE_SUMMARY_PATH = Path(
+    "outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage_summary.json"
+)
 DEFAULT_BASELINE_SOURCE_REGISTRY_PATH = Path("external_baseline/source_registry.json")
 
 
@@ -151,6 +154,8 @@ def build_runtime_report(
     formal_import_validation: dict[str, Any],
     formal_import_readiness_summary: dict[str, Any],
     formal_import_readiness_summary_path: str,
+    formal_template_coverage_summary: dict[str, Any],
+    formal_template_coverage_summary_path: str,
 ) -> dict[str, Any]:
     """构造外部 baseline 对比运行摘要。"""
     baseline_count = len(baseline_metric_rows)
@@ -179,6 +184,15 @@ def build_runtime_report(
         "dominant_formal_import_blocking_reasons": list(
             formal_import_readiness_summary.get("dominant_blocking_reasons", ())
         ),
+        "formal_template_coverage_summary_path": formal_template_coverage_summary_path,
+        "formal_template_record_count": int(formal_template_coverage_summary.get("formal_template_record_count", 0)),
+        "formal_template_coverage_ready_count": int(
+            formal_template_coverage_summary.get("formal_template_coverage_ready_count", 0)
+        ),
+        "missing_formal_template_count": int(formal_template_coverage_summary.get("missing_formal_template_count", 0)),
+        "primary_baseline_formal_template_coverage_ready": bool(
+            formal_template_coverage_summary.get("primary_baseline_formal_template_coverage_ready", False)
+        ),
         "baseline_result_ready_count": ready_count,
         "comparison_protocol_ready": bool(attack_manifest.get("attack_metrics_ready"))
         and not threshold_report.get("threshold_degenerate", True),
@@ -200,6 +214,7 @@ def write_external_baseline_comparison_outputs(
     threshold_report_path: str | Path = DEFAULT_THRESHOLD_REPORT_PATH,
     baseline_result_records_path: str | Path = DEFAULT_BASELINE_RESULT_RECORDS_PATH,
     formal_import_readiness_summary_path: str | Path = DEFAULT_FORMAL_IMPORT_READINESS_SUMMARY_PATH,
+    formal_template_coverage_summary_path: str | Path = DEFAULT_FORMAL_TEMPLATE_COVERAGE_SUMMARY_PATH,
     baseline_source_registry_path: str | Path = DEFAULT_BASELINE_SOURCE_REGISTRY_PATH,
 ) -> dict[str, Any]:
     """写出外部 baseline 对比 records, 表格, 运行报告与 manifest。"""
@@ -213,6 +228,7 @@ def write_external_baseline_comparison_outputs(
     resolved_threshold_report_path = resolve_input_path(root_path, threshold_report_path)
     resolved_baseline_result_records_path = resolve_input_path(root_path, baseline_result_records_path)
     resolved_formal_import_readiness_summary_path = resolve_input_path(root_path, formal_import_readiness_summary_path)
+    resolved_formal_template_coverage_summary_path = resolve_input_path(root_path, formal_template_coverage_summary_path)
     resolved_baseline_source_registry_path = resolve_input_path(root_path, baseline_source_registry_path)
 
     attack_manifest = read_json(resolved_attack_manifest_path)
@@ -220,6 +236,7 @@ def write_external_baseline_comparison_outputs(
     threshold_report = read_json(resolved_threshold_report_path)
     attack_rows = read_csv_rows(resolved_attack_family_metrics_path)
     formal_import_readiness_summary = read_optional_json(resolved_formal_import_readiness_summary_path)
+    formal_template_coverage_summary = read_optional_json(resolved_formal_template_coverage_summary_path)
     baseline_source_registry = load_baseline_source_registry(resolved_baseline_source_registry_path)
     baseline_specs = overlay_specs_with_source_registry(
         default_baseline_specs(),
@@ -254,6 +271,10 @@ def write_external_baseline_comparison_outputs(
         formal_import_readiness_summary,
         relative_or_absolute(resolved_formal_import_readiness_summary_path, root_path)
         if resolved_formal_import_readiness_summary_path.exists()
+        else "",
+        formal_template_coverage_summary,
+        relative_or_absolute(resolved_formal_template_coverage_summary_path, root_path)
+        if resolved_formal_template_coverage_summary_path.exists()
         else "",
     )
 
@@ -345,6 +366,8 @@ def write_external_baseline_comparison_outputs(
         input_path_candidates.append(relative_or_absolute(resolved_baseline_result_records_path, root_path))
     if resolved_formal_import_readiness_summary_path.exists():
         input_path_candidates.append(relative_or_absolute(resolved_formal_import_readiness_summary_path, root_path))
+    if resolved_formal_template_coverage_summary_path.exists():
+        input_path_candidates.append(relative_or_absolute(resolved_formal_template_coverage_summary_path, root_path))
     if resolved_baseline_source_registry_path.exists():
         input_path_candidates.append(relative_or_absolute(resolved_baseline_source_registry_path, root_path))
     input_paths = tuple(input_path_candidates)
@@ -371,6 +394,10 @@ def write_external_baseline_comparison_outputs(
             "baseline_result_records_path": relative_or_absolute(resolved_baseline_result_records_path, root_path),
             "formal_import_readiness_summary_path": relative_or_absolute(
                 resolved_formal_import_readiness_summary_path,
+                root_path,
+            ),
+            "formal_template_coverage_summary_path": relative_or_absolute(
+                resolved_formal_template_coverage_summary_path,
                 root_path,
             ),
             "formal_import_validation_report_path": relative_or_absolute(formal_import_validation_path, root_path),
@@ -414,6 +441,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="主表 baseline 正式导入 readiness 摘要路径; 缺失时只使用 validator 摘要。",
     )
     parser.add_argument(
+        "--formal-template-coverage-summary-path",
+        default=str(DEFAULT_FORMAL_TEMPLATE_COVERAGE_SUMMARY_PATH),
+        help="主表 baseline 正式模板覆盖摘要路径; 缺失时不阻断 comparison 产物重建。",
+    )
+    parser.add_argument(
         "--baseline-source-registry-path",
         default=str(DEFAULT_BASELINE_SOURCE_REGISTRY_PATH),
         help="外部 baseline 官方源码登记 JSON 路径; 缺失时仅使用默认 spec。",
@@ -433,6 +465,7 @@ def main() -> None:
         threshold_report_path=args.threshold_report_path,
         baseline_result_records_path=args.baseline_result_records_path,
         formal_import_readiness_summary_path=args.formal_import_readiness_summary_path,
+        formal_template_coverage_summary_path=args.formal_template_coverage_summary_path,
         baseline_source_registry_path=args.baseline_source_registry_path,
     )
     print(stable_json_text(manifest), end="")

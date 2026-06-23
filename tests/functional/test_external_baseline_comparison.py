@@ -166,6 +166,9 @@ def test_external_baseline_outputs_are_rebuildable_and_claim_safe(tmp_path: Path
     assert runtime_report["primary_baseline_formal_ready"] is False
     assert runtime_report["formal_result_ready_count"] == 0
     assert runtime_report["blocked_primary_baseline_ids"] == []
+    assert runtime_report["formal_template_coverage_summary_path"] == ""
+    assert runtime_report["formal_template_record_count"] == 0
+    assert runtime_report["missing_formal_template_count"] == 0
     assert {row["metric_status"] for row in baseline_rows} == {"unsupported"}
     assert any(row["method_id"] == "slm_wm_current" for row in comparison_rows)
     assert all(row["supports_paper_claim"] == "False" for row in comparison_rows)
@@ -258,6 +261,26 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
         ),
         encoding="utf-8",
     )
+    coverage_summary_path = tmp_path / "outputs" / "primary_baseline_formal_import" / (
+        "primary_baseline_formal_template_coverage_summary.json"
+    )
+    coverage_summary_path.parent.mkdir(parents=True)
+    coverage_summary_path.write_text(
+        json.dumps(
+            {
+                "primary_baseline_count": 4,
+                "formal_template_record_count": 32,
+                "formal_template_coverage_ready_count": 1,
+                "formal_template_coverage_ready_ids": ["tree_ring"],
+                "blocked_primary_baseline_ids": ["gaussian_shading", "shallow_diffuse", "t2smark"],
+                "primary_baseline_formal_template_coverage_ready": False,
+                "missing_formal_template_count": 24,
+                "supports_paper_claim": False,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
     write_external_baseline_comparison_outputs(
         root=tmp_path,
@@ -267,6 +290,7 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
         threshold_report_path=threshold_report_path,
         baseline_result_records_path=result_records_path,
         formal_import_readiness_summary_path=readiness_summary_path,
+        formal_template_coverage_summary_path=coverage_summary_path,
         baseline_source_registry_path=source_registry_path,
     )
 
@@ -287,6 +311,10 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     assert runtime_report["formal_result_ready_count"] == 1
     assert runtime_report["blocked_primary_baseline_ids"] == ["gaussian_shading", "shallow_diffuse", "t2smark"]
     assert runtime_report["dominant_formal_import_blocking_reasons"] == ["candidate_record_missing"]
+    assert runtime_report["formal_template_record_count"] == 32
+    assert runtime_report["formal_template_coverage_ready_count"] == 1
+    assert runtime_report["missing_formal_template_count"] == 24
+    assert runtime_report["primary_baseline_formal_template_coverage_ready"] is False
     assert runtime_report["baseline_result_ready_count"] == 1
     assert runtime_report["baseline_results_ready"] is False
     assert tree_row["metric_status"] == "measured"
