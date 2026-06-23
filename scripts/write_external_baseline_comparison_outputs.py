@@ -195,8 +195,13 @@ def build_runtime_report(
         ),
         "formal_template_coverage_summary_path": formal_template_coverage_summary_path,
         "formal_template_record_count": int(formal_template_coverage_summary.get("formal_template_record_count", 0)),
+        "candidate_template_match_count": int(formal_template_coverage_summary.get("candidate_template_match_count", 0)),
+        "accepted_template_match_count": int(formal_template_coverage_summary.get("accepted_template_match_count", 0)),
         "formal_template_coverage_ready_count": int(
             formal_template_coverage_summary.get("formal_template_coverage_ready_count", 0)
+        ),
+        "missing_candidate_template_count": int(
+            formal_template_coverage_summary.get("missing_candidate_template_count", 0)
         ),
         "missing_formal_template_count": int(formal_template_coverage_summary.get("missing_formal_template_count", 0)),
         "primary_baseline_formal_template_coverage_ready": bool(

@@ -1051,6 +1051,8 @@ Notebook 与 repository module 的跨边界数据
 | small_sample_fixed_fpr_boundary_ready_count | metric | none | false | false | false | 具备 fixed_fpr_0.05 命名边界的小样本 baseline 记录数量。|
 | small_sample_attack_detection_ready_count | metric | none | false | false | false | 具备 attack detection 观测边界的小样本 baseline 记录数量。|
 | small_sample_common_protocol_ready_count | metric | none | false | false | false | 同时具备小样本共同协议边界的 baseline 记录数量。|
+| small_sample_common_protocol_ready_baseline_count | metric | none | false | false | false | 至少有一条记录具备小样本共同协议边界的主表 baseline 数量。|
+| small_sample_common_protocol_ready_ids | protocol | none | false | false | false | 至少有一条记录具备小样本共同协议边界的主表 baseline id 集合。|
 | covered_primary_baseline_count | metric | none | false | false | false | 小样本证据已覆盖的主表 external baseline 数量。|
 | covered_primary_baseline_ids | protocol | none | false | false | false | 小样本证据已覆盖的主表 external baseline id 集合。|
 | missing_primary_baseline_ids | protocol | none | false | false | false | 小样本证据尚未覆盖的主表 external baseline id 集合。|
@@ -1159,6 +1161,7 @@ Notebook 与 repository module 的跨边界数据
 | formal_template_record_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板总数量。|
 | candidate_template_match_count | metric | none | false | false | false | 单个主表 baseline 候选记录中匹配正式模板键的数量。|
 | accepted_template_match_count | metric | none | false | false | false | 单个主表 baseline 已通过 validator 且匹配正式模板键的数量。|
+| missing_candidate_template_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板中尚未出现候选记录匹配的数量。|
 | missing_formal_template_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板仍缺失的数量。|
 | formal_template_coverage_ready | governance | none | false | false | false | 单个主表 baseline 是否已覆盖所有正式共同协议模板。|
 | formal_template_coverage_ready_count | metric | none | false | false | false | 已覆盖所有正式共同协议模板的主表 baseline 数量。|

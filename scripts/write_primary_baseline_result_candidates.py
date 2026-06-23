@@ -38,6 +38,7 @@ T2SMARK_CANDIDATE_RECORDS_ENTRY = (
     "outputs/t2smark_full_main_reproduction/t2smark_full_main_formal_import_candidate_records.jsonl"
 )
 METHOD_FAITHFUL_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse")
+T2SMARK_BASELINE_ID = "t2smark"
 
 
 def stable_json_text(value: Any) -> str:
@@ -326,6 +327,49 @@ def build_method_candidate_rows(
     return records
 
 
+def build_t2smark_smoke_candidate_rows(
+    *,
+    observations: Iterable[Mapping[str, Any]],
+    source_path: Path | None,
+    local_observations_path: Path,
+    root_path: Path,
+    target_fpr: float,
+    resource_profile: str,
+    full_main_prompt_protocol_ready: bool,
+    fixed_fpr_baseline_calibration_ready: bool,
+    attack_matrix_baseline_detection_ready: bool,
+) -> list[dict[str, Any]]:
+    """把 T2SMark GPU smoke observation 映射为小样本候选记录, 不提升为正式论文结论。"""
+
+    observation_rows = [dict(row) for row in observations if str(row.get("baseline_id", "")) == T2SMARK_BASELINE_ID]
+    if not observation_rows:
+        return []
+    evidence_paths = evidence_path_for_source(source_path, local_observations_path, root_path)
+    if source_path and source_path.is_file():
+        baseline_result_source = relative_or_absolute(source_path, root_path)
+    else:
+        baseline_result_source = relative_or_absolute(local_observations_path, root_path)
+    source_digest = digest_for_source(source_path if source_path and source_path.is_file() else local_observations_path, observation_rows)
+    prompt_protocol_digest = build_prompt_protocol_digest(observation_rows)
+    return list(
+        build_method_faithful_baseline_candidate_records(
+            baseline_id=T2SMARK_BASELINE_ID,
+            observation_rows=observation_rows,
+            target_fpr=target_fpr,
+            baseline_result_source=baseline_result_source,
+            baseline_result_source_digest=source_digest,
+            evidence_paths=evidence_paths,
+            prompt_protocol_digest=prompt_protocol_digest,
+            full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
+            fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
+            attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
+            result_source_type="official_reproduction",
+            adapter_boundary="sd35_medium_native_official_reproduction",
+            resource_profile=resource_profile,
+        )
+    )
+
+
 def write_primary_baseline_result_candidate_outputs(
     *,
     root: str | Path = ".",
@@ -386,6 +430,18 @@ def write_primary_baseline_result_candidate_outputs(
         local_candidate_records_path=resolved_t2smark_candidate_records_path,
         root_path=root_path,
     )
+    if not normalized_t2smark_rows:
+        normalized_t2smark_rows = build_t2smark_smoke_candidate_rows(
+            observations=gpu_observations,
+            source_path=resolved_external_gpu_smoke_package_path,
+            local_observations_path=resolved_gpu_smoke_observations_path,
+            root_path=root_path,
+            target_fpr=target_fpr,
+            resource_profile=method_resource_profile,
+            full_main_prompt_protocol_ready=method_full_main_prompt_protocol_ready,
+            fixed_fpr_baseline_calibration_ready=method_fixed_fpr_baseline_calibration_ready,
+            attack_matrix_baseline_detection_ready=method_attack_matrix_baseline_detection_ready,
+        )
     candidate_rows = method_candidate_rows + normalized_t2smark_rows
     validation_report = validate_primary_baseline_formal_import_rows(
         candidate_rows,

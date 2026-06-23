@@ -50,6 +50,31 @@ def method_observations() -> list[dict[str, object]]:
     return rows
 
 
+def t2smark_smoke_observations() -> list[dict[str, object]]:
+    """构造 T2SMark GPU smoke adapter 的最小 observation 集合。"""
+
+    return [
+        {
+            "baseline_id": "t2smark",
+            "attack_family": "clean",
+            "attack_condition": "clean_none",
+            "sample_role": "clean_negative",
+            "detection_decision": False,
+            "prompt_id": "prompt_000",
+            "prompt_text": "a ceramic fox on a wooden desk",
+        },
+        {
+            "baseline_id": "t2smark",
+            "attack_family": "clean",
+            "attack_condition": "clean_none",
+            "sample_role": "positive_source",
+            "detection_decision": True,
+            "prompt_id": "prompt_000",
+            "prompt_text": "a ceramic fox on a wooden desk",
+        },
+    ]
+
+
 def t2smark_candidate_record() -> dict[str, object]:
     """构造一个尚未完成共同协议闭合的 T2SMark 候选记录。"""
 
@@ -166,3 +191,45 @@ def test_primary_baseline_candidate_writer_imports_packages_without_promoting_sm
     assert "fixed_fpr_baseline_calibration_ready_required" in reasons
     assert "attack_matrix_baseline_detection_ready_required" in reasons
     assert "evidence_path_missing" not in reasons
+
+
+@pytest.mark.quick
+def test_primary_baseline_candidate_writer_imports_t2smark_smoke_when_full_main_package_missing(
+    tmp_path: Path,
+) -> None:
+    """T2SMark full-main 包缺失时, writer 应保留 GPU smoke observation 作为小样本候选。"""
+
+    attack_dir = tmp_path / "outputs" / "attack_matrix"
+    attack_dir.mkdir(parents=True)
+    (attack_dir / "attack_manifest.json").write_text(
+        json.dumps({"evaluation_boundary": {"target_fpr": 0.05}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    smoke_package_path = tmp_path / "external_baseline_gpu_smoke_package.zip"
+    write_text_package(
+        smoke_package_path,
+        {GPU_SMOKE_OBSERVATIONS_ENTRY: json.dumps(method_observations() + t2smark_smoke_observations(), ensure_ascii=False)},
+    )
+
+    write_primary_baseline_result_candidate_outputs(
+        root=tmp_path,
+        external_gpu_smoke_package_path=smoke_package_path,
+    )
+    output_dir = tmp_path / "outputs" / "external_baseline_results"
+    records = [
+        json.loads(line)
+        for line in (output_dir / "baseline_result_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    validation = json.loads(
+        (output_dir / "baseline_result_candidate_validation_report.json").read_text(encoding="utf-8")
+    )
+    t2smark_row = next(row for row in records if row["baseline_id"] == "t2smark")
+    reasons = {issue["reason"] for issue in validation["issues"] if issue["baseline_id"] == "t2smark"}
+
+    assert len(records) == 4
+    assert t2smark_row["resource_profile"] == "gpu_smoke"
+    assert t2smark_row["adapter_boundary"] == "sd35_medium_native_official_reproduction"
+    assert t2smark_row["result_source_type"] == "official_reproduction"
+    assert t2smark_row["formal_evidence_paths_ready"] is True
+    assert "full_main_resource_profile_required" in reasons

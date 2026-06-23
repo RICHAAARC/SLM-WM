@@ -194,6 +194,9 @@ def write_primary_baseline_formal_import_protocol_outputs(
         "formal_import_validation_ready": validation_report["formal_import_validation_ready"],
         "formal_result_ready_count": readiness_summary["formal_result_ready_count"],
         "formal_template_coverage_ready_count": coverage_summary["formal_template_coverage_ready_count"],
+        "candidate_template_match_count": coverage_summary["candidate_template_match_count"],
+        "accepted_template_match_count": coverage_summary["accepted_template_match_count"],
+        "missing_candidate_template_count": coverage_summary["missing_candidate_template_count"],
         "missing_formal_template_count": coverage_summary["missing_formal_template_count"],
         "formal_evidence_collection_task_count": collection_summary["formal_evidence_collection_task_count"],
         "missing_formal_evidence_collection_task_count": collection_summary[

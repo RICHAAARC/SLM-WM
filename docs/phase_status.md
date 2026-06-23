@@ -843,26 +843,30 @@
 3. 已新增正式模板覆盖检查, 将 full-main 攻击模板覆盖情况写入 `primary_baseline_formal_template_coverage.csv` 与 `primary_baseline_formal_template_coverage_summary.json`。
 4. 已新增正式证据收集计划, 将缺失 full-main 模板转换为逐项补证任务, 写入 `primary_baseline_formal_evidence_collection_plan.jsonl` 与 `primary_baseline_formal_evidence_collection_summary.json`。
 5. 已补齐 method-faithful SD3.5 adapter 的图像级攻击覆盖入口, 默认覆盖 `jpeg_compression`、`gaussian_noise`、`gaussian_blur`、`rotation`、`resize`、`crop`、`crop_resize` 和 `composite_geometric_attacks`, 并记录 attacked image provenance。
-6. 当前官方源码缓存登记显示8个 baseline 的源码入口可检查, 但正式结果仍为未就绪。
-7. 下一步应在共同协议下补齐 full-main prompt、fixed-FPR baseline calibration、attack matrix baseline detection 和正式证据路径, 再重新运行导入 validator。
+6. 已允许 `write_primary_baseline_result_candidates.py` 在 T2SMark full-main 包缺失时, 从 external GPU smoke 包中的 T2SMark observations 构造小样本候选记录, 从而保持4个主表 baseline 的小样本证据边界完整。
+7. 已修正小样本证据摘要的 common protocol readiness 聚合方式: 多攻击记录按 baseline 覆盖判断, 不再因单个 baseline 产生多条攻击记录而误判 common protocol 未就绪。
+8. 当前官方源码缓存登记显示8个 baseline 的源码入口可检查, 但正式结果仍为未就绪。
+9. 下一步应在共同协议下补齐 full-main prompt、fixed-FPR baseline calibration、attack matrix baseline detection 和正式证据路径, 再重新运行导入 validator。
 
 ### external baseline 当前产物摘要
 
-1. `baseline_result_candidate_summary.json` 显示 `formal_import_candidate_record_count=4`, `accepted_formal_import_count=0`, `rejected_formal_import_count=4`, `formal_import_issue_count=15`。
+1. `baseline_result_candidate_summary.json` 显示 `formal_import_candidate_record_count=28`, `accepted_formal_import_count=0`, `rejected_formal_import_count=28`, `formal_import_issue_count=112`。
 2. `baseline_formal_import_readiness.csv` 对4个主表 baseline 均给出 `formal_result_ready=false`。
 3. `baseline_formal_import_readiness_summary.json` 显示 `blocked_primary_baseline_ids=[tree_ring, gaussian_shading, shallow_diffuse, t2smark]`。
-4. `primary_baseline_formal_template_coverage_summary.json` 显示 `formal_template_record_count=32`, `formal_template_coverage_ready_count=0`, `missing_formal_template_count=32`。
+4. `primary_baseline_formal_template_coverage_summary.json` 显示 `formal_template_record_count=32`, `candidate_template_match_count=0`, `accepted_template_match_count=0`, `missing_candidate_template_count=32`, `missing_formal_template_count=32`。
 5. `primary_baseline_formal_evidence_collection_summary.json` 显示 `formal_evidence_collection_task_count=32`, `missing_formal_evidence_collection_task_count=32`。
-6. `baseline_runtime_report.json` 显示 `official_source_ready_count=8`, `baseline_results_ready=false`, `supports_paper_claim=false`。
+6. `baseline_runtime_report.json` 显示 `official_source_ready_count=8`, `formal_import_input_record_count=28`, `baseline_results_ready=false`, `supports_paper_claim=false`。
+7. `primary_baseline_small_sample_evidence_summary.json` 显示 `small_sample_evidence_ready=true`, `small_sample_common_protocol_ready=true`, `covered_primary_baseline_count=4`, 但 `formal_import_ready_count=0` 且 `supports_paper_claim=false`。
 
 ### external baseline 当前验证结果
 
 | command | result |
 | --- | --- |
-| `python scripts/write_primary_baseline_result_candidates.py --external-gpu-smoke-package-path <drive_zip> --t2smark-full-main-package-path <drive_zip>` | pass |
-| `python scripts/write_primary_baseline_formal_import_protocol.py` | pass, `template_record_count=32`, `missing_formal_template_count=32`, `missing_formal_evidence_collection_task_count=32` |
+| `python scripts/write_primary_baseline_result_candidates.py --external-gpu-smoke-package-path outputs/external_baseline_gpu_smoke_package_20260623t14351782225358z_020d16f.zip` | pass, `formal_import_candidate_record_count=28` |
+| `python scripts/write_primary_baseline_formal_import_protocol.py` | pass, `template_record_count=32`, `candidate_template_match_count=0`, `missing_formal_template_count=32`, `missing_formal_evidence_collection_task_count=32` |
 | `python scripts/write_external_baseline_comparison_outputs.py` | pass |
-| `pytest tests/functional/test_primary_baseline_result_candidates.py tests/functional/test_external_baseline_comparison.py -q` | pass |
+| `python scripts/write_primary_baseline_small_sample_evidence_outputs.py` | pass, `small_sample_evidence_ready=true`, `small_sample_common_protocol_ready=true` |
+| `pytest tests/functional/test_primary_baseline_result_candidates.py tests/functional/test_primary_baseline_small_sample_evidence.py tests/functional/test_primary_baseline_formal_import.py tests/functional/test_external_baseline_comparison.py -q` | pass |
 
 ## primary_baseline_reproduction_protocol
 
@@ -945,7 +949,7 @@
 | input_manifest | `external_baseline/source_registry.json`; Google Drive 历史 `external_baseline_gpu_smoke_package_*.zip` 可选 |
 | expected_output_manifest | `outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_manifest.local.json` |
 | expected_outputs | `outputs/external_baseline_gpu_smoke/t2smark_official/**`; `outputs/external_baseline_gpu_smoke/execution/baseline_observations.json`; `outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_summary.json`; Google Drive `SLM/external_baseline_gpu_smoke/external_baseline_gpu_smoke_package_<utc>_<short_commit>.zip` |
-| blocking_items | 该 Notebook 已覆盖 T2SMark SD3.5 Medium 最小真实 GPU smoke, 并把 Tree-Ring、Gaussian Shading、Shallow Diffuse 接入 SD3.5 latent 级 GPU smoke adapter; 样本量默认为 1, 仍不支持论文级外部 baseline 对比结论。 |
+| blocking_items | 该 Notebook 已覆盖 T2SMark SD3.5 Medium 最小真实 GPU smoke, 并把 Tree-Ring、Gaussian Shading、Shallow Diffuse 接入 SD3.5 method-faithful GPU smoke adapter; 默认样本量为5, 默认覆盖8类图像级攻击, 仍不支持论文级外部 baseline 对比结论。 |
 | fallback_path | 若 Google Drive 中已有可复用官方结果包, helper 会先解包复用; 若缺失, 则按源码登记表下载 T2SMark 官方源码并重新生成官方 `results.json`。 |
 | invariants | Notebook 只负责远程入口和打包, 真实逻辑位于 `paper_workflow/colab_utils/external_baseline_gpu_smoke.py`; 所有持久输出写入 `outputs/` 并镜像到 Google Drive。 |
 
@@ -955,7 +959,8 @@
 2. 新增 `paper_workflow/colab_utils/external_baseline_gpu_smoke.py`, 将历史包复用、官方源码缓存补齐、官方 `results.json` 生成、image pair 构造、主表 baseline adapter 命令计划执行和 zip 打包收敛到 helper。
 3. 前序结果判断边界为: 优先查找 Google Drive `external_baseline_gpu_smoke_package_*.zip`, 仅解出 `outputs/external_baseline_gpu_smoke/` 下可复用文件; 若 `results.json` 存在且允许复用, 不重新运行官方推理; 否则执行真实 GPU 生成。
 4. 当前产物显式设置 `supports_paper_claim=false`, 只能证明外部 baseline 链路可运行, 不能替代 full-main prompt split、样本量冻结、固定 FPR 与 baseline 主表统计。
-5. Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前采用项目治理内的 SD3.5 latent smoke adapter: 它验证 16-channel latent 形状、GPU 张量路径、clean / positive observation 输出和 manifest 边界, 不等同于第三方官方完整复现。
+5. Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前采用项目治理内的 SD3.5 method-faithful smoke adapter: 它验证 16-channel latent 形状、GPU 张量路径、clean / positive observation 输出、8类图像级攻击 observation 输出和 manifest 边界, 不等同于第三方官方完整复现。
+6. `external_baseline_gpu_smoke_package_20260623t14351782225358z_020d16f.zip` 已显示 `primary_baseline_attacked_image_count=240`, 三个 method-faithful baseline 各80张 attacked image, source / attacked image digest 均可核验。
 
 
 ### external baseline GPU smoke Colab 兼容修正

@@ -214,6 +214,37 @@ def test_formal_template_coverage_requires_matching_full_main_records(tmp_path: 
 
 
 @pytest.mark.quick
+def test_formal_template_coverage_separates_candidate_and_accepted_matches(tmp_path: Path) -> None:
+    """已有候选但未通过 validator 时, 摘要应保留候选覆盖进度并继续阻断正式结论。"""
+
+    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
+    candidate_row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    candidate_row["fixed_fpr_baseline_calibration_ready"] = False
+    template_rows = [
+        {
+            "baseline_id": "tree_ring",
+            "attack_family": "standard_distortion",
+            "attack_name": "jpeg_compression",
+            "resource_profile": "full_main",
+            "comparable_operating_point": "fixed_fpr_0.05",
+        }
+    ]
+    report = validate_primary_baseline_formal_import_rows([candidate_row], evidence_root=tmp_path, target_fpr=0.05)
+
+    coverage_rows = build_primary_baseline_formal_template_coverage_rows(template_rows, [candidate_row], report)
+    coverage_summary = build_primary_baseline_formal_template_coverage_summary(coverage_rows)
+
+    assert report["accepted_formal_import_count"] == 0
+    assert coverage_summary["candidate_template_match_count"] == 1
+    assert coverage_summary["accepted_template_match_count"] == 0
+    assert coverage_summary["missing_candidate_template_count"] == 0
+    assert coverage_summary["missing_formal_template_count"] == 1
+    assert coverage_summary["primary_baseline_formal_template_coverage_ready"] is False
+
+
+@pytest.mark.quick
 def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path) -> None:
     """正式证据收集计划应把未通过正式导入的模板转换为可执行补证任务。"""
 

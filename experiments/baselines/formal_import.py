@@ -504,14 +504,20 @@ def build_primary_baseline_formal_template_coverage_summary(
     rows = [dict(row) for row in coverage_rows]
     ready_ids = tuple(row["baseline_id"] for row in rows if _bool_field(row, "formal_template_coverage_ready"))
     blocked_ids = tuple(row["baseline_id"] for row in rows if not _bool_field(row, "formal_template_coverage_ready"))
+    formal_template_count = sum(_int_field(row, "expected_formal_template_count") for row in rows)
+    candidate_match_count = sum(_int_field(row, "candidate_template_match_count") for row in rows)
+    accepted_match_count = sum(_int_field(row, "accepted_template_match_count") for row in rows)
     return {
         "primary_baseline_count": len(rows),
-        "formal_template_record_count": sum(_int_field(row, "expected_formal_template_count") for row in rows),
+        "formal_template_record_count": formal_template_count,
+        "candidate_template_match_count": candidate_match_count,
+        "accepted_template_match_count": accepted_match_count,
         "formal_template_coverage_ready_count": len(ready_ids),
         "formal_template_coverage_ready_ids": list(ready_ids),
         "blocked_primary_baseline_ids": list(blocked_ids),
         "primary_baseline_formal_template_coverage_ready": len(ready_ids) == len(PRIMARY_BASELINE_IDS)
         and len(rows) == len(PRIMARY_BASELINE_IDS),
+        "missing_candidate_template_count": max(formal_template_count - candidate_match_count, 0),
         "missing_formal_template_count": sum(_int_field(row, "missing_formal_template_count") for row in rows),
         "supports_paper_claim": False,
     }

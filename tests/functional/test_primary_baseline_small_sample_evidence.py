@@ -83,6 +83,7 @@ def test_small_sample_evidence_records_are_ready_but_not_paper_claims() -> None:
     assert summary["small_sample_fixed_fpr_boundary_ready_count"] == 4
     assert summary["small_sample_attack_detection_ready_count"] == 4
     assert summary["small_sample_common_protocol_ready_count"] == 4
+    assert summary["small_sample_common_protocol_ready_baseline_count"] == 4
     assert summary["covered_primary_baseline_count"] == 4
     assert summary["formal_import_ready_count"] == 0
     assert summary["formal_full_paper_run_requested"] is False
@@ -97,6 +98,32 @@ def test_small_sample_evidence_records_are_ready_but_not_paper_claims() -> None:
     assert {row["comparison_scope"] for row in comparison_rows} == {"small_sample_common_protocol"}
     assert all(row["metric_status"] == "measured" for row in comparison_rows)
     assert all(row["supports_paper_claim"] is False for row in comparison_rows)
+
+
+@pytest.mark.quick
+def test_small_sample_summary_uses_baseline_level_common_protocol_readiness() -> None:
+    """同一 baseline 有多条攻击记录时, common protocol readiness 应按 baseline 覆盖判断。"""
+
+    rows = [
+        candidate_row("tree_ring", "gpu_smoke"),
+        {**candidate_row("tree_ring", "gpu_smoke"), "attack_family": "standard_distortion", "attack_name": "jpeg_compression"},
+        candidate_row("gaussian_shading", "gpu_smoke"),
+        candidate_row("shallow_diffuse", "gpu_smoke"),
+        candidate_row("t2smark", "full_main"),
+    ]
+
+    records = build_primary_baseline_small_sample_evidence_records(rows, validation_report())
+    summary = build_primary_baseline_small_sample_evidence_summary(records)
+
+    assert summary["small_sample_common_protocol_ready_count"] == 5
+    assert summary["small_sample_common_protocol_ready_baseline_count"] == 4
+    assert summary["small_sample_common_protocol_ready_ids"] == [
+        "gaussian_shading",
+        "shallow_diffuse",
+        "t2smark",
+        "tree_ring",
+    ]
+    assert summary["small_sample_common_protocol_ready"] is True
 
 
 @pytest.mark.quick

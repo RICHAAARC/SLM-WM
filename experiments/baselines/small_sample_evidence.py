@@ -270,6 +270,7 @@ def build_primary_baseline_small_sample_evidence_summary(
     common_protocol_ready_records = tuple(record for record in record_values if record.small_sample_common_protocol_ready)
     covered_ids = tuple(sorted({record.baseline_id for record in ready_records}))
     missing_ids = tuple(baseline_id for baseline_id in PRIMARY_BASELINE_IDS if baseline_id not in covered_ids)
+    common_protocol_ready_ids = tuple(sorted({record.baseline_id for record in common_protocol_ready_records}))
     formal_ready_ids = tuple(sorted({record.baseline_id for record in record_values if record.formal_import_ready}))
     return {
         "construction_unit_name": "primary_baseline_small_sample_evidence",
@@ -281,13 +282,15 @@ def build_primary_baseline_small_sample_evidence_summary(
         "covered_primary_baseline_count": len(covered_ids),
         "covered_primary_baseline_ids": list(covered_ids),
         "missing_primary_baseline_ids": list(missing_ids),
+        "small_sample_common_protocol_ready_baseline_count": len(common_protocol_ready_ids),
+        "small_sample_common_protocol_ready_ids": list(common_protocol_ready_ids),
         "formal_import_ready_count": len(formal_ready_ids),
         "formal_import_ready_ids": list(formal_ready_ids),
         "formal_full_paper_run_requested": False,
         "formal_full_paper_run_permitted": False,
         "excluded_operating_points": list(EXCLUDED_OPERATING_POINTS),
         "small_sample_evidence_ready": not missing_ids and len(record_values) > 0,
-        "small_sample_common_protocol_ready": len(common_protocol_ready_records) == len(PRIMARY_BASELINE_IDS),
+        "small_sample_common_protocol_ready": len(common_protocol_ready_ids) == len(PRIMARY_BASELINE_IDS),
         "paper_claim_boundary": PAPER_CLAIM_BOUNDARY,
         "paper_claim_ready": False,
         "supports_paper_claim": False,
