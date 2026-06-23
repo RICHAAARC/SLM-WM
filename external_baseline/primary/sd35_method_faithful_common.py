@@ -10,6 +10,30 @@ from typing import Any, Iterable
 from main.core.digest import build_stable_digest
 
 METHOD_FAITHFUL_ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
+FORMAL_IMAGE_ATTACK_SPECS = {
+    "jpeg": ("standard_distortion", "jpeg_compression"),
+    "jpeg_compression": ("standard_distortion", "jpeg_compression"),
+    "gaussian_noise": ("standard_distortion", "gaussian_noise"),
+    "noise": ("standard_distortion", "gaussian_noise"),
+    "gaussian_blur": ("standard_distortion", "gaussian_blur"),
+    "blur": ("standard_distortion", "gaussian_blur"),
+    "rotation": ("geometric_transform", "rotation"),
+    "rotate": ("geometric_transform", "rotation"),
+    "resize": ("geometric_transform", "resize"),
+    "crop": ("geometric_transform", "crop"),
+    "crop_resize": ("geometric_transform", "crop_resize"),
+    "composite_geometric_attacks": ("geometric_transform", "composite_geometric_attacks"),
+}
+FORMAL_IMAGE_ATTACK_NAMES = (
+    "jpeg_compression",
+    "gaussian_noise",
+    "gaussian_blur",
+    "rotation",
+    "resize",
+    "crop",
+    "crop_resize",
+    "composite_geometric_attacks",
+)
 
 
 def load_json(path: str | Path) -> Any:
@@ -120,6 +144,35 @@ def circle_mask(size: int, radius: int, *, x_offset: int = 0, y_offset: int = 0)
     y_axis, x_axis = np.ogrid[: int(size), : int(size)]
     y_axis = y_axis[::-1]
     return ((x_axis - x0) ** 2 + (y_axis - y0) ** 2) <= int(radius) ** 2
+
+
+def normalize_attack_request(attack_family: str) -> str:
+    """把外部传入的攻击名称规范化为攻击矩阵使用的语义名称。"""
+
+    text = str(attack_family).strip().lower().replace("-", "_").replace(" ", "_")
+    if ":" in text:
+        text = text.rsplit(":", 1)[-1]
+    if text not in FORMAL_IMAGE_ATTACK_SPECS:
+        raise ValueError(f"unsupported_sd35_adapter_attack:{attack_family}")
+    return FORMAL_IMAGE_ATTACK_SPECS[text][1]
+
+
+def canonical_attack_family(attack_family: str) -> str:
+    """返回攻击矩阵共同协议中的攻击族名称。"""
+
+    return FORMAL_IMAGE_ATTACK_SPECS[normalize_attack_request(attack_family)][0]
+
+
+def canonical_attack_name(attack_family: str) -> str:
+    """返回攻击矩阵共同协议中的攻击名称。"""
+
+    return FORMAL_IMAGE_ATTACK_SPECS[normalize_attack_request(attack_family)][1]
+
+
+def supported_formal_image_attack_names() -> tuple[str, ...]:
+    """返回当前 method-faithful adapter 可生成的正式图像级攻击名称集合。"""
+
+    return FORMAL_IMAGE_ATTACK_NAMES
 
 
 class InversionStableDiffusion3PipelineMixin:
@@ -248,23 +301,52 @@ def apply_image_attack(image: Any, *, attack_family: str, seed: int) -> tuple[An
 
     from io import BytesIO
     import random
-    from PIL import Image, ImageEnhance, ImageFilter
+    import numpy as np
+    from PIL import Image, ImageFilter
 
-    family = str(attack_family).strip().lower()
+    family = normalize_attack_request(attack_family)
     rng = random.Random(int(seed))
     source = image.convert("RGB")
-    if family in {"jpeg", "jpeg_compression"}:
+    width, height = source.size
+
+    def center_crop(fraction: float) -> Any:
+        crop_width = max(1, int(width * float(fraction)))
+        crop_height = max(1, int(height * float(fraction)))
+        left = max(0, (width - crop_width) // 2)
+        upper = max(0, (height - crop_height) // 2)
+        return source.crop((left, upper, left + crop_width, upper + crop_height))
+
+    if family == "jpeg_compression":
         buffer = BytesIO()
         source.save(buffer, format="JPEG", quality=75)
         buffer.seek(0)
         return Image.open(buffer).convert("RGB"), "jpeg_quality_75"
-    if family in {"rotation", "rotate"}:
+    if family == "gaussian_noise":
+        array = np.asarray(source).astype("float32")
+        noise_rng = np.random.default_rng(int(seed))
+        noisy = np.clip(array + noise_rng.normal(0.0, 8.0, size=array.shape), 0, 255).astype("uint8")
+        return Image.fromarray(noisy, mode="RGB"), "gaussian_noise_sigma_8"
+    if family == "gaussian_blur":
+        return source.filter(ImageFilter.GaussianBlur(radius=1.0)), "gaussian_blur_radius_1"
+    if family == "rotation":
         angle = 5.0 if rng.random() >= 0.5 else -5.0
         return source.rotate(angle, resample=Image.Resampling.BICUBIC), f"rotation_{angle:g}_degree"
-    if family in {"gaussian_blur", "blur"}:
-        return source.filter(ImageFilter.GaussianBlur(radius=1.0)), "gaussian_blur_radius_1"
-    if family in {"brightness", "brightness_jitter"}:
-        return ImageEnhance.Brightness(source).enhance(0.9), "brightness_factor_0.9"
+    if family == "resize":
+        resized = source.resize((max(1, int(width * 0.75)), max(1, int(height * 0.75))), Image.Resampling.BICUBIC)
+        return resized.resize((width, height), Image.Resampling.BICUBIC), "resize_downscale_0.75_restore"
+    if family == "crop":
+        return center_crop(0.90), "center_crop_0.90"
+    if family == "crop_resize":
+        return center_crop(0.85).resize((width, height), Image.Resampling.BICUBIC), "center_crop_0.85_resize"
+    if family == "composite_geometric_attacks":
+        angle = 5.0 if rng.random() >= 0.5 else -5.0
+        rotated = source.rotate(angle, resample=Image.Resampling.BICUBIC)
+        crop_width = max(1, int(width * 0.90))
+        crop_height = max(1, int(height * 0.90))
+        left = max(0, (width - crop_width) // 2)
+        upper = max(0, (height - crop_height) // 2)
+        cropped = rotated.crop((left, upper, left + crop_width, upper + crop_height))
+        return cropped.resize((width, height), Image.Resampling.BICUBIC), f"rotation_{angle:g}_degree_crop_resize"
     raise ValueError(f"unsupported_sd35_adapter_attack:{attack_family}")
 
 

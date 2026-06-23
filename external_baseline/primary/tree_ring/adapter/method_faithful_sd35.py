@@ -25,6 +25,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from main.core.digest import build_stable_digest
+from external_baseline.primary.sd35_method_faithful_common import (
+    apply_image_attack,
+    canonical_attack_family,
+    canonical_attack_name,
+)
 
 BASELINE_ID = "tree_ring"
 ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
@@ -337,6 +342,7 @@ def build_observation(
         "split": split_name(row),
         "sample_role": sample_role,
         "attack_family": attack_family,
+        "attack_name": attack_condition,
         "attack_condition": attack_condition,
         "prompt_id": row_id(row, index, "prompt_id", "prompt"),
         "prompt_text": prompt_text(row),
@@ -372,34 +378,6 @@ def derive_threshold(observations: Iterable[dict[str, Any]], explicit_threshold:
         return (max(negative_scores) + min(positive_scores)) / 2.0, "midpoint_between_negative_max_and_positive_min"
     return 0.0, "fallback_zero_insufficient_calibration_pairs"
 
-
-def apply_image_attack(image: Any, *, attack_family: str, seed: int) -> tuple[Any, str]:
-    """对 PIL 图像执行轻量图像级攻击。
-
-    该函数只覆盖 Tree-Ring adapter 内部可直接审计的图像变换。再扩散类攻击应由本项目真实攻击评估 workflow
-    单独生成 attacked image 后再导入检测协议, 不在该轻量适配器中伪造。
-    """
-
-    from io import BytesIO
-    import random
-    from PIL import Image, ImageEnhance, ImageFilter
-
-    family = str(attack_family).strip().lower()
-    rng = random.Random(int(seed))
-    source = image.convert("RGB")
-    if family in {"jpeg", "jpeg_compression"}:
-        buffer = BytesIO()
-        source.save(buffer, format="JPEG", quality=75)
-        buffer.seek(0)
-        return Image.open(buffer).convert("RGB"), "jpeg_quality_75"
-    if family in {"rotation", "rotate"}:
-        angle = 5.0 if rng.random() >= 0.5 else -5.0
-        return source.rotate(angle, resample=Image.Resampling.BICUBIC), f"rotation_{angle:g}_degree"
-    if family in {"gaussian_blur", "blur"}:
-        return source.filter(ImageFilter.GaussianBlur(radius=1.0)), "gaussian_blur_radius_1"
-    if family in {"brightness", "brightness_jitter"}:
-        return ImageEnhance.Brightness(source).enhance(0.9), "brightness_factor_0.9"
-    raise ValueError(f"unsupported_tree_ring_adapter_attack:{attack_family}")
 
 
 def score_image(pipe: Any, image: Any, *, size: int, device: str, mask: Any, key: Any, num_inversion_steps: int) -> float:
@@ -577,6 +555,8 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
     attacked_records: list[dict[str, Any]] = []
     attack_families = [item.strip() for item in str(args.attack_families or "").split(",") if item.strip()]
     for attack_family in attack_families:
+        attack_matrix_family = canonical_attack_family(attack_family)
+        attack_matrix_name = canonical_attack_name(attack_family)
         for pair_index, pair in enumerate(image_pairs, start=1):
             image_id = str(pair["image_id"])
             runtime = runtime_keys[image_id]
@@ -585,16 +565,16 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 ("watermarked", "watermarked_image_path", "watermarked_image_digest", "attacked_positive"),
             ):
                 with Image.open(pair[source_path_field]) as source_image:
-                    attacked_image, attack_condition = apply_image_attack(
+                    attacked_image, attack_transform_name = apply_image_attack(
                         source_image,
                         attack_family=attack_family,
                         seed=int(args.seed) + pair_index,
                     )
-                attacked_stem = safe_file_stem(f"{image_id}_{role_name}_{attack_family}", f"attacked_{pair_index:05d}")
+                attacked_stem = safe_file_stem(f"{image_id}_{role_name}_{attack_matrix_name}", f"attacked_{pair_index:05d}")
                 attacked_path = attacked_dir / f"{attacked_stem}.png"
                 attacked_image.save(attacked_path)
                 attacked_digest = file_digest(attacked_path)
-                attacked_id = f"{image_id}__{role_name}__{attack_condition}"
+                attacked_id = f"{image_id}__{role_name}__{attack_matrix_name}"
                 score = score_image(
                     pipe,
                     attacked_image,
@@ -613,8 +593,8 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                         row=runtime["row"],
                         index=int(runtime["row_index"]),
                         sample_role=sample_role,
-                        attack_family=str(attack_family),
-                        attack_condition=attack_condition,
+                        attack_family=attack_matrix_family,
+                        attack_condition=attack_matrix_name,
                         image_id=image_id,
                         image_path=str(attacked_path),
                         image_digest=attacked_digest,
@@ -633,8 +613,10 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                         "source_image_digest": pair[source_digest_field],
                         "attacked_image_path": str(attacked_path),
                         "attacked_image_digest": attacked_digest,
-                        "attack_family": str(attack_family),
-                        "attack_condition": attack_condition,
+                        "attack_family": attack_matrix_family,
+                        "attack_name": attack_matrix_name,
+                        "attack_condition": attack_matrix_name,
+                        "attack_transform_name": attack_transform_name,
                     }
                 )
                 if device == "cuda":

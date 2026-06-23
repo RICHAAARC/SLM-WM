@@ -842,8 +842,9 @@
 2. 已把 readiness 摘要并入 `baseline_runtime_report.json`, 使下游审计能够直接读取 `blocked_primary_baseline_ids` 与 `dominant_formal_import_blocking_reasons`。
 3. 已新增正式模板覆盖检查, 将 full-main 攻击模板覆盖情况写入 `primary_baseline_formal_template_coverage.csv` 与 `primary_baseline_formal_template_coverage_summary.json`。
 4. 已新增正式证据收集计划, 将缺失 full-main 模板转换为逐项补证任务, 写入 `primary_baseline_formal_evidence_collection_plan.jsonl` 与 `primary_baseline_formal_evidence_collection_summary.json`。
-5. 当前官方源码缓存登记显示8个 baseline 的源码入口可检查, 但正式结果仍为未就绪。
-6. 下一步应在共同协议下补齐 full-main prompt、fixed-FPR baseline calibration、attack matrix baseline detection 和正式证据路径, 再重新运行导入 validator。
+5. 已补齐 method-faithful SD3.5 adapter 的图像级攻击覆盖入口, 默认覆盖 `jpeg_compression`、`gaussian_noise`、`gaussian_blur`、`rotation`、`resize`、`crop`、`crop_resize` 和 `composite_geometric_attacks`, 并记录 attacked image provenance。
+6. 当前官方源码缓存登记显示8个 baseline 的源码入口可检查, 但正式结果仍为未就绪。
+7. 下一步应在共同协议下补齐 full-main prompt、fixed-FPR baseline calibration、attack matrix baseline detection 和正式证据路径, 再重新运行导入 validator。
 
 ### external baseline 当前产物摘要
 

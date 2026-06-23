@@ -30,6 +30,9 @@ DEFAULT_SOURCE_REGISTRY_PATH = "external_baseline/source_registry.json"
 DEFAULT_T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 DEFAULT_PACKAGE_PATTERN = "external_baseline_gpu_smoke_package_*.zip"
 DEFAULT_SHARED_SAMPLE_COUNT = 5
+DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES = (
+    "jpeg_compression,gaussian_noise,gaussian_blur,rotation,resize,crop,crop_resize,composite_geometric_attacks"
+)
 PRIMARY_BASELINE_METHODS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 SHARED_PROMPT_TEXTS = (
     "a small ceramic fox sitting on a wooden desk under soft studio lighting",
@@ -90,9 +93,9 @@ class ExternalBaselineGpuSmokeConfig:
     tree_ring_adapter_mode: str = "method_faithful_sd35"
     gaussian_shading_adapter_mode: str = "method_faithful_sd35"
     shallow_diffuse_adapter_mode: str = "method_faithful_sd35"
-    tree_ring_attack_families: str = ""
-    gaussian_shading_attack_families: str = ""
-    shallow_diffuse_attack_families: str = ""
+    tree_ring_attack_families: str = DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES
+    gaussian_shading_attack_families: str = DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES
+    shallow_diffuse_attack_families: str = DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES
     reuse_existing: bool = True
     reuse_prior_drive_package: bool = True
     force_generate: bool = False
@@ -660,6 +663,12 @@ def build_and_run_primary_baseline_adapters(
         for baseline_id in PRIMARY_BASELINE_METHODS
         if observation_count_by_baseline.get(baseline_id, 0) > 0
     ]
+    attacked_image_count_by_baseline: dict[str, int] = {}
+    for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse"):
+        manifest_path = paths["adapter_output_root"] / baseline_id / f"{baseline_id}_method_faithful_sd35_adapter_manifest.json"
+        manifest = read_json(manifest_path) if manifest_path.is_file() else {}
+        attacked_image_count_by_baseline[baseline_id] = int(manifest.get("attacked_image_count", 0) or 0)
+    attacked_image_count_by_baseline["t2smark"] = 0
     primary_ready = set(ready_baseline_ids) == set(PRIMARY_BASELINE_METHODS)
     adapter_execution_ready = validation_result["return_code"] == 0 and primary_ready
     return {
@@ -672,6 +681,8 @@ def build_and_run_primary_baseline_adapters(
         "primary_baseline_ids": list(PRIMARY_BASELINE_METHODS),
         "ready_primary_baseline_ids": ready_baseline_ids,
         "primary_baseline_observation_count_by_id": observation_count_by_baseline,
+        "primary_baseline_attacked_image_count": sum(attacked_image_count_by_baseline.values()),
+        "attacked_image_count_by_baseline": attacked_image_count_by_baseline,
         "primary_baseline_prompt_plan_path": relative_or_absolute(prompt_plan_path, root_path),
         "baseline_execution_manifest_path": relative_or_absolute(paths["execution_manifest"], root_path),
         "baseline_observations_path": relative_or_absolute(paths["baseline_observations"], root_path),
@@ -769,6 +780,18 @@ def write_external_baseline_gpu_smoke_outputs(
     run_ready = bool(official_ready and adapter_ready and primary_ready and observation_count > 0)
     unsupported_reason = "" if run_ready else "external_baseline_gpu_smoke_incomplete"
     source_patch_report = official_report.get("source_report", {}).get("source_patch_report", {})
+    formal_image_attack_families = sorted(
+        {
+            item.strip()
+            for configured_attacks in (
+                config.tree_ring_attack_families,
+                config.gaussian_shading_attack_families,
+                config.shallow_diffuse_attack_families,
+            )
+            for item in str(configured_attacks).split(",")
+            if item.strip()
+        }
+    )
     summary = {
         "run_decision": "pass" if run_ready else "fail",
         "external_baseline_gpu_smoke_ready": run_ready,
@@ -787,6 +810,9 @@ def write_external_baseline_gpu_smoke_outputs(
         "primary_baseline_adapter_ready": primary_ready,
         "primary_baseline_adapter_count": int(adapter_report.get("primary_baseline_adapter_count", len(PRIMARY_BASELINE_METHODS))),
         "primary_baseline_observation_count": primary_observation_count,
+        "primary_baseline_attacked_image_count": int(adapter_report.get("primary_baseline_attacked_image_count", 0)),
+        "attacked_image_count_by_baseline": dict(adapter_report.get("attacked_image_count_by_baseline", {})),
+        "formal_image_attack_families": formal_image_attack_families,
         "primary_baseline_ids": list(adapter_report.get("primary_baseline_ids", PRIMARY_BASELINE_METHODS)),
         "ready_primary_baseline_ids": list(adapter_report.get("ready_primary_baseline_ids", [])),
         "primary_baseline_prompt_plan_path": str(adapter_report.get("primary_baseline_prompt_plan_path", "")),
@@ -834,6 +860,7 @@ def write_external_baseline_gpu_smoke_outputs(
             "adapter_observation_count": observation_count,
             "primary_baseline_adapter_ready": primary_ready,
             "primary_baseline_observation_count": primary_observation_count,
+            "primary_baseline_attacked_image_count": int(adapter_report.get("primary_baseline_attacked_image_count", 0)),
             "supports_paper_claim": False,
         },
     ).to_dict()
@@ -860,9 +887,15 @@ def build_default_config() -> ExternalBaselineGpuSmokeConfig:
         tree_ring_adapter_mode=os.environ.get("SLM_WM_TREE_RING_ADAPTER_MODE", "method_faithful_sd35"),
         gaussian_shading_adapter_mode=os.environ.get("SLM_WM_GAUSSIAN_SHADING_ADAPTER_MODE", "method_faithful_sd35"),
         shallow_diffuse_adapter_mode=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_ADAPTER_MODE", "method_faithful_sd35"),
-        tree_ring_attack_families=os.environ.get("SLM_WM_TREE_RING_ATTACK_FAMILIES", ""),
-        gaussian_shading_attack_families=os.environ.get("SLM_WM_GAUSSIAN_SHADING_ATTACK_FAMILIES", ""),
-        shallow_diffuse_attack_families=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_ATTACK_FAMILIES", ""),
+        tree_ring_attack_families=os.environ.get("SLM_WM_TREE_RING_ATTACK_FAMILIES", DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES),
+        gaussian_shading_attack_families=os.environ.get(
+            "SLM_WM_GAUSSIAN_SHADING_ATTACK_FAMILIES",
+            DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
+        ),
+        shallow_diffuse_attack_families=os.environ.get(
+            "SLM_WM_SHALLOW_DIFFUSE_ATTACK_FAMILIES",
+            DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
+        ),
         reuse_existing=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REUSE_EXISTING", "1") != "0",
         reuse_prior_drive_package=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REUSE_DRIVE", "1") != "0",
         force_generate=os.environ.get("SLM_WM_EXTERNAL_BASELINE_FORCE_GENERATE", "0") == "1",

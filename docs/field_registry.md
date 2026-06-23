@@ -570,6 +570,10 @@ Notebook 与 repository module 的跨边界数据
 | attack_record_id | protocol | none | true | false | false | 攻击检测 record 的稳定标识。 |
 | attack_id | protocol | none | true | false | false | 单个攻击配置的稳定标识。 |
 | attack_name | protocol | none | true | false | false | 攻击配置的语义名称。 |
+| attack_transform_name | protocol | none | false | false | false | 图像级攻击实际执行的变换参数名称, 用于区分共同协议攻击名称与具体实现参数。 |
+| primary_baseline_attacked_image_count | metric | none | false | false | false | 主表 external baseline method-faithful adapter 生成的攻击后图像总数。 |
+| attacked_image_count_by_baseline | metric | none | false | false | false | 按 baseline id 聚合的攻击后图像数量。 |
+| formal_image_attack_families | protocol | none | false | false | false | method-faithful adapter 默认覆盖的正式图像级攻击名称列表。 |
 | attack_strength | protocol | none | true | false | false | 攻击配置使用的归一化强度。 |
 | resource_profile | protocol | none | true | false | false | 攻击矩阵运行使用的资源档位, 例如 probe、pilot、full_main 或 full_extra。 |
 | requires_gpu | protocol | none | true | false | false | 攻击配置是否需要真实 GPU 推理或重生成能力。 |

@@ -6,8 +6,16 @@ import json
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
+from external_baseline.primary.sd35_method_faithful_common import (
+    apply_image_attack,
+    canonical_attack_family,
+    canonical_attack_name,
+    supported_formal_image_attack_names,
+)
 from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
+    DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
     DEFAULT_T2SMARK_INVERSION_ENTRY,
     DEFAULT_T2SMARK_SOURCE_ENTRY,
     PRIMARY_BASELINE_METHODS,
@@ -23,6 +31,23 @@ from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
     write_primary_baseline_prompt_plan,
     write_t2smark_prompt_input,
 )
+
+
+@pytest.mark.quick
+def test_formal_image_attack_taxonomy_matches_attack_matrix_names() -> None:
+    """method-faithful adapter 应把图像攻击名称映射到攻击矩阵共同协议。"""
+
+    image = Image.new("RGB", (16, 16), color=(128, 128, 128))
+    expected_names = set(DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES.split(","))
+
+    assert set(supported_formal_image_attack_names()) == expected_names
+    assert canonical_attack_family("jpeg_compression") == "standard_distortion"
+    assert canonical_attack_name("rotate") == "rotation"
+    assert canonical_attack_family("crop_resize") == "geometric_transform"
+    for attack_name in supported_formal_image_attack_names():
+        attacked_image, transform_name = apply_image_attack(image, attack_family=attack_name, seed=17)
+        assert attacked_image.mode == "RGB"
+        assert transform_name
 
 
 @pytest.mark.quick
@@ -134,6 +159,9 @@ def test_primary_baseline_adapter_plan_includes_four_methods(tmp_path: Path, mon
         output_dir="outputs/external_baseline_gpu_smoke",
         require_cuda=True,
         primary_baseline_max_samples=1,
+        tree_ring_attack_families="jpeg_compression,rotation",
+        gaussian_shading_attack_families="jpeg_compression,rotation",
+        shallow_diffuse_attack_families="jpeg_compression,rotation",
     )
     paths = output_paths(tmp_path, config)
     paths["output_dir"].mkdir(parents=True)
@@ -155,6 +183,13 @@ def test_primary_baseline_adapter_plan_includes_four_methods(tmp_path: Path, mon
                 + "]\n",
                 encoding="utf-8",
             )
+            for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse"):
+                manifest_path = paths["adapter_output_root"] / baseline_id / f"{baseline_id}_method_faithful_sd35_adapter_manifest.json"
+                manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                manifest_path.write_text(
+                    json.dumps({"baseline_id": baseline_id, "attacked_image_count": 4}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
         return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
 
     monkeypatch.setattr("paper_workflow.colab_utils.external_baseline_gpu_smoke.run_command", fake_run_command)
@@ -169,7 +204,11 @@ def test_primary_baseline_adapter_plan_includes_four_methods(tmp_path: Path, mon
     assert build_command[build_command.index("--tree-ring-adapter-mode") + 1] == "method_faithful_sd35"
     assert build_command[build_command.index("--gaussian-shading-adapter-mode") + 1] == "method_faithful_sd35"
     assert build_command[build_command.index("--shallow-diffuse-adapter-mode") + 1] == "method_faithful_sd35"
+    assert build_command[build_command.index("--tree-ring-attack-families") + 1] == "jpeg_compression,rotation"
+    assert build_command[build_command.index("--gaussian-shading-attack-families") + 1] == "jpeg_compression,rotation"
+    assert build_command[build_command.index("--shallow-diffuse-attack-families") + 1] == "jpeg_compression,rotation"
     assert paths["primary_prompt_plan"].is_file()
     assert report["primary_baseline_adapter_ready"] is True
     assert report["primary_baseline_adapter_count"] == 4
     assert report["primary_baseline_observation_count"] == 8
+    assert report["primary_baseline_attacked_image_count"] == 12

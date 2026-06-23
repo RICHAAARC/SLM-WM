@@ -596,7 +596,7 @@ def _group_observations_by_attack(rows: Iterable[Mapping[str, Any]]) -> dict[tup
     grouped: dict[tuple[str, str], list[Mapping[str, Any]]] = {}
     for row in rows:
         attack_family = _str_field(row, "attack_family") or "clean"
-        attack_name = _str_field(row, "attack_condition") or "clean_none"
+        attack_name = _str_field(row, "attack_name") or _str_field(row, "attack_condition") or "clean_none"
         grouped.setdefault((attack_family, attack_name), []).append(row)
     return grouped
 
