@@ -16,6 +16,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.baselines import (
+    build_primary_baseline_formal_evidence_collection_rows,
+    build_primary_baseline_formal_evidence_collection_summary,
     build_primary_baseline_formal_import_readiness_rows,
     build_primary_baseline_formal_import_readiness_summary,
     build_primary_baseline_formal_import_schema,
@@ -175,6 +177,12 @@ def write_primary_baseline_formal_import_protocol_outputs(
         validation_report,
     )
     coverage_summary = build_primary_baseline_formal_template_coverage_summary(coverage_rows)
+    collection_rows = build_primary_baseline_formal_evidence_collection_rows(
+        formal_template_rows,
+        candidate_rows,
+        validation_report,
+    )
+    collection_summary = build_primary_baseline_formal_evidence_collection_summary(collection_rows)
     summary = {
         "construction_unit_name": "primary_baseline_formal_import_protocol",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -187,8 +195,13 @@ def write_primary_baseline_formal_import_protocol_outputs(
         "formal_result_ready_count": readiness_summary["formal_result_ready_count"],
         "formal_template_coverage_ready_count": coverage_summary["formal_template_coverage_ready_count"],
         "missing_formal_template_count": coverage_summary["missing_formal_template_count"],
+        "formal_evidence_collection_task_count": collection_summary["formal_evidence_collection_task_count"],
+        "missing_formal_evidence_collection_task_count": collection_summary[
+            "missing_formal_evidence_collection_task_count"
+        ],
         "primary_baseline_formal_ready": readiness_summary["primary_baseline_formal_ready"]
-        and coverage_summary["primary_baseline_formal_template_coverage_ready"],
+        and coverage_summary["primary_baseline_formal_template_coverage_ready"]
+        and collection_summary["primary_baseline_formal_evidence_collection_ready"],
         "supports_paper_claim": False,
     }
 
@@ -199,6 +212,8 @@ def write_primary_baseline_formal_import_protocol_outputs(
     readiness_summary_path = resolved_output_dir / "primary_baseline_formal_import_readiness_summary.json"
     coverage_path = resolved_output_dir / "primary_baseline_formal_template_coverage.csv"
     coverage_summary_path = resolved_output_dir / "primary_baseline_formal_template_coverage_summary.json"
+    collection_path = resolved_output_dir / "primary_baseline_formal_evidence_collection_plan.jsonl"
+    collection_summary_path = resolved_output_dir / "primary_baseline_formal_evidence_collection_summary.json"
     summary_path = resolved_output_dir / "primary_baseline_formal_import_summary.json"
     manifest_path = resolved_output_dir / "manifest.local.json"
 
@@ -240,6 +255,8 @@ def write_primary_baseline_formal_import_protocol_outputs(
         ],
     )
     coverage_summary_path.write_text(stable_json_text(coverage_summary), encoding="utf-8")
+    collection_path.write_text("".join(json_line(row) for row in collection_rows), encoding="utf-8")
+    collection_summary_path.write_text(stable_json_text(collection_summary), encoding="utf-8")
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
     output_paths = tuple(
@@ -252,6 +269,8 @@ def write_primary_baseline_formal_import_protocol_outputs(
             readiness_summary_path,
             coverage_path,
             coverage_summary_path,
+            collection_path,
+            collection_summary_path,
             summary_path,
             manifest_path,
         )
@@ -276,6 +295,8 @@ def write_primary_baseline_formal_import_protocol_outputs(
             "formal_import_readiness_summary_digest": build_stable_digest(readiness_summary),
             "formal_template_coverage_digest": build_stable_digest(coverage_rows),
             "formal_template_coverage_summary_digest": build_stable_digest(coverage_summary),
+            "formal_evidence_collection_plan_digest": build_stable_digest(collection_rows),
+            "formal_evidence_collection_summary_digest": build_stable_digest(collection_summary),
             "summary_digest": build_stable_digest(summary),
         },
         code_version=resolve_code_version(root_path),

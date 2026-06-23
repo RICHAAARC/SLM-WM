@@ -599,7 +599,7 @@
 | execution_date | `2026-06-23` |
 | input_manifest | `outputs/attack_matrix/manifest.local.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/external_baseline_results/manifest.local.json`; `external_baseline/source_registry.json` |
 | expected_output_manifest | `outputs/external_baseline_comparison/manifest.local.json` |
-| expected_outputs | `outputs/external_baseline_results/baseline_result_records.jsonl`; `outputs/external_baseline_results/baseline_formal_import_readiness.csv`; `outputs/primary_baseline_formal_import/primary_baseline_formal_result_template.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage.csv`; `outputs/external_baseline_comparison/baseline_observations.jsonl`; `outputs/external_baseline_comparison/baseline_result_records.jsonl`; `outputs/external_baseline_comparison/baseline_formal_import_validation_report.json`; `outputs/external_baseline_comparison/baseline_metrics.csv`; `outputs/external_baseline_comparison/baseline_comparison_table.csv`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
+| expected_outputs | `outputs/external_baseline_results/baseline_result_records.jsonl`; `outputs/external_baseline_results/baseline_formal_import_readiness.csv`; `outputs/primary_baseline_formal_import/primary_baseline_formal_result_template.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage.csv`; `outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_plan.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_summary.json`; `outputs/external_baseline_comparison/baseline_observations.jsonl`; `outputs/external_baseline_comparison/baseline_result_records.jsonl`; `outputs/external_baseline_comparison/baseline_formal_import_validation_report.json`; `outputs/external_baseline_comparison/baseline_metrics.csv`; `outputs/external_baseline_comparison/baseline_comparison_table.csv`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
 | blocking_items | 8个 baseline 的 source registry 已可审计, 但主表4个正式导入候选均未通过共同协议 validator; 因此 `baseline_results_ready=false`, `primary_baseline_formal_ready=false`, `supports_paper_claim=false`。 |
 | fallback_path | 外部 baseline 无正式结果时只登记 `external_baseline_result_missing`; 允许保留小样本候选和拒绝原因, 但不允许把候选或 smoke 结果写入主表结论。 |
 | invariants | baseline 与 SLM-WM 必须共享 prompt 协议、攻击矩阵协议和 fixed-FPR operating point; unsupported baseline 不进入论文主结论; 所有新增产物保持 `supports_paper_claim=false`。 |
@@ -617,15 +617,16 @@
 1. `baseline_runtime_report.json` 显示 `baseline_count=8`, `official_source_ready_count=8`, `baseline_result_ready_count=0`, `baseline_results_ready=false`。
 2. `formal_import_input_record_count=4`, `accepted_formal_import_count=0`, `rejected_formal_import_count=4`, `formal_import_issue_count=15`。
 3. `formal_template_record_count=32`, `formal_template_coverage_ready_count=0`, `missing_formal_template_count=32`, 说明当前候选尚未覆盖正式共同协议要求的 full-main 攻击模板。
-4. `blocked_primary_baseline_ids=[tree_ring, gaussian_shading, shallow_diffuse, t2smark]`。
-5. 主要阻断原因为 `attack_matrix_baseline_detection_ready_required`、`fixed_fpr_baseline_calibration_ready_required`、`full_main_prompt_protocol_ready_required` 和 `full_main_resource_profile_required`。
+4. `formal_evidence_collection_task_count=32`, `missing_formal_evidence_collection_task_count=32`, 说明后续真实 GPU 或受治理导入需要逐模板补齐正式证据记录。
+5. `blocked_primary_baseline_ids=[tree_ring, gaussian_shading, shallow_diffuse, t2smark]`。
+6. 主要阻断原因为 `attack_matrix_baseline_detection_ready_required`、`fixed_fpr_baseline_calibration_ready_required`、`full_main_prompt_protocol_ready_required` 和 `full_main_resource_profile_required`。
 
 ### stage14 当前验证结果
 
 | command | result |
 | --- | --- |
 | `python scripts/write_primary_baseline_result_candidates.py --external-gpu-smoke-package-path <drive_zip> --t2smark-full-main-package-path <drive_zip>` | pass, `formal_import_candidate_record_count=4`, `accepted_formal_import_count=0` |
-| `python scripts/write_primary_baseline_formal_import_protocol.py` | pass, `template_record_count=32`, `missing_formal_template_count=32` |
+| `python scripts/write_primary_baseline_formal_import_protocol.py` | pass, `template_record_count=32`, `missing_formal_template_count=32`, `missing_formal_evidence_collection_task_count=32` |
 | `python scripts/write_external_baseline_comparison_outputs.py` | pass, `baseline_results_ready=false`, `formal_result_ready_count=0` |
 | `pytest tests/functional/test_primary_baseline_result_candidates.py tests/functional/test_external_baseline_comparison.py -q` | pass |
 | `python tools/harness/run_all_audits.py` | pass |
@@ -830,7 +831,7 @@
 | execution_date | `2026-06-23` |
 | input_manifest | `outputs/attack_matrix/manifest.local.json`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/external_baseline_results/manifest.local.json`; `external_baseline/source_registry.json` |
 | expected_output_manifest | `outputs/external_baseline_comparison/manifest.local.json` |
-| expected_outputs | `outputs/external_baseline_results/baseline_result_records.jsonl`; `outputs/external_baseline_results/baseline_result_candidate_validation_report.json`; `outputs/external_baseline_results/baseline_formal_import_readiness.csv`; `outputs/external_baseline_results/baseline_formal_import_readiness_summary.json`; `outputs/primary_baseline_formal_import/primary_baseline_formal_result_template.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage.csv`; `outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage_summary.json`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
+| expected_outputs | `outputs/external_baseline_results/baseline_result_records.jsonl`; `outputs/external_baseline_results/baseline_result_candidate_validation_report.json`; `outputs/external_baseline_results/baseline_formal_import_readiness.csv`; `outputs/external_baseline_results/baseline_formal_import_readiness_summary.json`; `outputs/primary_baseline_formal_import/primary_baseline_formal_result_template.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage.csv`; `outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage_summary.json`; `outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_plan.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_summary.json`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
 | blocking_items | 当前4条主表候选均未通过正式导入 validator; `accepted_formal_import_count=0`, `formal_result_ready_count=0`, `primary_baseline_formal_ready=false`。 |
 | fallback_path | 允许保存候选记录与拒绝原因作为后续补证输入; 不允许把小样本候选、GPU smoke observation 或 legacy reference 结果直接手工写入主表。 |
 | invariants | 第三方源码缓存仍由 `external_baseline/source_registry.json` 记录; 本项目提交 adapter、schema、导入报告与测试, 不把不受治理的第三方输出当作 supported claim。 |
@@ -840,8 +841,9 @@
 1. 已建立主表 external baseline 正式共同协议导入 readiness 表, 对 Tree-Ring、Gaussian Shading、Shallow Diffuse 与 T2SMark 分别聚合候选数量、接受数量、拒绝数量和阻断原因。
 2. 已把 readiness 摘要并入 `baseline_runtime_report.json`, 使下游审计能够直接读取 `blocked_primary_baseline_ids` 与 `dominant_formal_import_blocking_reasons`。
 3. 已新增正式模板覆盖检查, 将 full-main 攻击模板覆盖情况写入 `primary_baseline_formal_template_coverage.csv` 与 `primary_baseline_formal_template_coverage_summary.json`。
-4. 当前官方源码缓存登记显示8个 baseline 的源码入口可检查, 但正式结果仍为未就绪。
-5. 下一步应在共同协议下补齐 full-main prompt、fixed-FPR baseline calibration、attack matrix baseline detection 和正式证据路径, 再重新运行导入 validator。
+4. 已新增正式证据收集计划, 将缺失 full-main 模板转换为逐项补证任务, 写入 `primary_baseline_formal_evidence_collection_plan.jsonl` 与 `primary_baseline_formal_evidence_collection_summary.json`。
+5. 当前官方源码缓存登记显示8个 baseline 的源码入口可检查, 但正式结果仍为未就绪。
+6. 下一步应在共同协议下补齐 full-main prompt、fixed-FPR baseline calibration、attack matrix baseline detection 和正式证据路径, 再重新运行导入 validator。
 
 ### external baseline 当前产物摘要
 
@@ -849,14 +851,15 @@
 2. `baseline_formal_import_readiness.csv` 对4个主表 baseline 均给出 `formal_result_ready=false`。
 3. `baseline_formal_import_readiness_summary.json` 显示 `blocked_primary_baseline_ids=[tree_ring, gaussian_shading, shallow_diffuse, t2smark]`。
 4. `primary_baseline_formal_template_coverage_summary.json` 显示 `formal_template_record_count=32`, `formal_template_coverage_ready_count=0`, `missing_formal_template_count=32`。
-5. `baseline_runtime_report.json` 显示 `official_source_ready_count=8`, `baseline_results_ready=false`, `supports_paper_claim=false`。
+5. `primary_baseline_formal_evidence_collection_summary.json` 显示 `formal_evidence_collection_task_count=32`, `missing_formal_evidence_collection_task_count=32`。
+6. `baseline_runtime_report.json` 显示 `official_source_ready_count=8`, `baseline_results_ready=false`, `supports_paper_claim=false`。
 
 ### external baseline 当前验证结果
 
 | command | result |
 | --- | --- |
 | `python scripts/write_primary_baseline_result_candidates.py --external-gpu-smoke-package-path <drive_zip> --t2smark-full-main-package-path <drive_zip>` | pass |
-| `python scripts/write_primary_baseline_formal_import_protocol.py` | pass, `template_record_count=32`, `missing_formal_template_count=32` |
+| `python scripts/write_primary_baseline_formal_import_protocol.py` | pass, `template_record_count=32`, `missing_formal_template_count=32`, `missing_formal_evidence_collection_task_count=32` |
 | `python scripts/write_external_baseline_comparison_outputs.py` | pass |
 | `pytest tests/functional/test_primary_baseline_result_candidates.py tests/functional/test_external_baseline_comparison.py -q` | pass |
 
@@ -981,6 +984,6 @@
 ### 主表 baseline 正式导入协议与 T2SMark full-main 路径补充
 
 1. 新增 `experiments/baselines/formal_import.py`, 将主表 external baseline 的正式结果导入边界集中到 schema validator 中, 下游 `external_baseline_comparison` 只消费 `accepted_records`, 不再把 GPU smoke observation 或缺少 fixed-FPR / full-main / attack matrix 边界的记录纳入正式比较。
-2. 新增 `scripts/write_primary_baseline_formal_import_protocol.py`, 可写出正式导入 schema、主表结果模板、候选记录校验报告和 manifest。该脚本只生成治理产物, 不手工填充论文结果。
+2. 新增 `scripts/write_primary_baseline_formal_import_protocol.py`, 可写出正式导入 schema、主表结果模板、正式模板覆盖、证据收集计划、候选记录校验报告和 manifest。该脚本只生成治理产物, 不手工填充论文结果。
 3. 新增 `paper_workflow/colab_utils/t2smark_full_main_reproduction.py` 与 `paper_workflow/t2smark_full_main_reproduction_run.ipynb`, 支持 Colab 冷启动下读取 `configs/paper_main_full_prompts.txt`, 运行 T2SMark SD3.5 Medium full-main 官方入口, 生成 image_pairs、统一 adapter observations、正式导入候选记录、validator 报告, 并打包镜像到 Google Drive。
 4. 当前 T2SMark full-main 路径默认 `supports_paper_claim=false`。若 fixed-FPR 校准和攻击矩阵检测未闭合, validator 会保留 `formal_import_validation_ready=false`, 防止 raw full-main 官方结果被误声明为论文级主表 robustness 结论。

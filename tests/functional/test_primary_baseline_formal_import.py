@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from experiments.baselines import (
+    build_primary_baseline_formal_evidence_collection_rows,
+    build_primary_baseline_formal_evidence_collection_summary,
     build_primary_baseline_formal_import_schema,
     build_primary_baseline_formal_template_coverage_rows,
     build_primary_baseline_formal_template_coverage_summary,
@@ -212,6 +214,49 @@ def test_formal_template_coverage_requires_matching_full_main_records(tmp_path: 
 
 
 @pytest.mark.quick
+def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path) -> None:
+    """正式证据收集计划应把未通过正式导入的模板转换为可执行补证任务。"""
+
+    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
+    accepted_row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    missing_template = {
+        "baseline_id": "tree_ring",
+        "attack_family": "standard_distortion",
+        "attack_name": "gaussian_noise",
+        "resource_profile": "full_main",
+        "comparable_operating_point": "fixed_fpr_0.05",
+        "required_metric_fields": ["true_positive_rate"],
+        "required_source_fields": ["baseline_result_source"],
+    }
+    template_rows = [
+        {
+            "baseline_id": "tree_ring",
+            "attack_family": "standard_distortion",
+            "attack_name": "jpeg_compression",
+            "resource_profile": "full_main",
+            "comparable_operating_point": "fixed_fpr_0.05",
+            "required_metric_fields": ["true_positive_rate"],
+            "required_source_fields": ["baseline_result_source"],
+        },
+        missing_template,
+    ]
+    report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=0.05)
+
+    collection_rows = build_primary_baseline_formal_evidence_collection_rows(template_rows, [accepted_row], report)
+    collection_summary = build_primary_baseline_formal_evidence_collection_summary(collection_rows)
+    missing_row = next(row for row in collection_rows if row["attack_name"] == "gaussian_noise")
+
+    assert len(collection_rows) == 2
+    assert missing_row["formal_evidence_collection_ready"] is False
+    assert "generate_full_main_baseline_result_record" in missing_row["required_collection_actions"]
+    assert collection_summary["formal_evidence_collection_task_count"] == 2
+    assert collection_summary["missing_formal_evidence_collection_task_count"] == 1
+    assert collection_summary["primary_baseline_formal_evidence_collection_ready"] is False
+
+
+@pytest.mark.quick
 def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tmp_path: Path) -> None:
     """协议写出脚本应生成 schema、模板、候选校验报告和 manifest。"""
 
@@ -272,6 +317,16 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
     coverage_summary = json.loads(
         (output_dir / "primary_baseline_formal_template_coverage_summary.json").read_text(encoding="utf-8")
     )
+    collection_rows = [
+        json.loads(line)
+        for line in (output_dir / "primary_baseline_formal_evidence_collection_plan.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    ]
+    collection_summary = json.loads(
+        (output_dir / "primary_baseline_formal_evidence_collection_summary.json").read_text(encoding="utf-8")
+    )
     summary = json.loads((output_dir / "primary_baseline_formal_import_summary.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "primary_baseline_formal_import_protocol_manifest"
@@ -282,5 +337,8 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
     assert len(coverage_rows) == 4
     assert coverage_summary["formal_template_record_count"] == 4
     assert coverage_summary["missing_formal_template_count"] == 4
+    assert len(collection_rows) == 4
+    assert collection_summary["formal_evidence_collection_task_count"] == 4
+    assert collection_summary["missing_formal_evidence_collection_task_count"] == 4
     assert summary["primary_baseline_formal_ready"] is False
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])

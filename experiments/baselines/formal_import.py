@@ -517,6 +517,79 @@ def build_primary_baseline_formal_template_coverage_summary(
     }
 
 
+def build_primary_baseline_formal_evidence_collection_rows(
+    template_rows: Iterable[Mapping[str, Any]],
+    candidate_rows: Iterable[Mapping[str, Any]],
+    validation_report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """构造主表 baseline 正式证据收集计划行。
+
+    该函数属于项目特定写法: 它不生成或伪造 baseline 结果, 只把缺失的正式模板
+    转换为可执行的证据收集任务, 便于后续 Colab 或受治理导入流程逐项补齐。
+    """
+
+    candidates = [dict(row) for row in candidate_rows]
+    accepted_records = [dict(row) for row in validation_report.get("accepted_records", ())]
+    candidate_keys = [_formal_template_key(row) for row in candidates]
+    accepted_keys = [_formal_template_key(row) for row in accepted_records]
+    rows: list[dict[str, Any]] = []
+    for template_row in template_rows:
+        template = dict(template_row)
+        template_key = _formal_template_key(template)
+        candidate_match_count = candidate_keys.count(template_key)
+        accepted_match_count = accepted_keys.count(template_key)
+        actions: list[str] = []
+        if candidate_match_count == 0:
+            actions.append("generate_full_main_baseline_result_record")
+        if accepted_match_count == 0:
+            actions.extend(
+                [
+                    "run_full_main_prompt_protocol",
+                    "calibrate_fixed_fpr_baseline",
+                    "run_attack_matrix_baseline_detection",
+                    "attach_formal_evidence_paths",
+                ]
+            )
+        ready = accepted_match_count > 0
+        payload = {
+            "baseline_id": _str_field(template, "baseline_id"),
+            "attack_family": _str_field(template, "attack_family"),
+            "attack_name": _str_field(template, "attack_name"),
+            "resource_profile": _str_field(template, "resource_profile"),
+            "comparable_operating_point": _str_field(template, "comparable_operating_point"),
+            "candidate_template_match_count": candidate_match_count,
+            "accepted_template_match_count": accepted_match_count,
+            "formal_evidence_collection_ready": ready,
+            "required_collection_actions": actions,
+            "required_metric_fields": list(template.get("required_metric_fields", ())),
+            "required_source_fields": list(template.get("required_source_fields", ())),
+            "required_result_record_path": "outputs/external_baseline_results/baseline_result_records.jsonl",
+            "supports_paper_claim": False,
+        }
+        digest = build_stable_digest(payload)
+        payload["formal_evidence_collection_id"] = f"primary_baseline_formal_evidence_collection_{digest[:16]}"
+        payload["formal_evidence_collection_digest"] = digest
+        rows.append(payload)
+    return rows
+
+
+def build_primary_baseline_formal_evidence_collection_summary(
+    collection_rows: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """构造主表 baseline 正式证据收集计划摘要。"""
+
+    rows = [dict(row) for row in collection_rows]
+    ready_count = sum(1 for row in rows if _bool_field(row, "formal_evidence_collection_ready"))
+    missing_count = max(len(rows) - ready_count, 0)
+    return {
+        "formal_evidence_collection_task_count": len(rows),
+        "ready_formal_evidence_collection_task_count": ready_count,
+        "missing_formal_evidence_collection_task_count": missing_count,
+        "primary_baseline_formal_evidence_collection_ready": bool(rows) and missing_count == 0,
+        "supports_paper_claim": False,
+    }
+
+
 def _group_observations_by_attack(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str], list[Mapping[str, Any]]]:
     """按攻击族与攻击名称聚合 observation, 便于生成导入候选。"""
 

@@ -1163,6 +1163,18 @@ Notebook 与 repository module 的跨边界数据
 | formal_template_coverage_digest | artifact | none | false | false | false | 主表 external baseline 正式模板覆盖表的稳定摘要。|
 | formal_template_coverage_summary_digest | artifact | none | false | false | false | 主表 external baseline 正式模板覆盖摘要的稳定摘要。|
 | formal_template_coverage_summary_path | artifact | none | false | false | false | 主表 baseline 正式模板覆盖摘要路径。|
+| formal_evidence_collection_id | artifact | none | false | false | false | 主表 external baseline 正式证据收集计划行的稳定标识。 |
+| formal_evidence_collection_digest | artifact | none | false | false | false | 主表 external baseline 正式证据收集计划行的稳定摘要。 |
+| formal_evidence_collection_ready | governance | none | false | false | false | 单条正式模板是否已经具备可导入的正式证据记录。 |
+| formal_evidence_collection_task_count | metric | none | false | false | false | 主表 external baseline 正式证据收集任务总数。 |
+| ready_formal_evidence_collection_task_count | metric | none | false | false | false | 已具备正式证据记录的主表 external baseline 任务数量。 |
+| missing_formal_evidence_collection_task_count | metric | none | false | false | false | 仍需补齐正式证据记录的主表 external baseline 任务数量。 |
+| primary_baseline_formal_evidence_collection_ready | governance | none | false | false | false | 四个主表 external baseline 是否全部完成正式证据收集。 |
+| required_collection_actions | protocol | none | false | false | false | 正式证据收集计划中对缺失模板给出的后续补证动作集合。 |
+| required_result_record_path | artifact | none | false | false | false | 正式证据收集计划要求写入或导入的 baseline 结果记录路径。 |
+| formal_evidence_collection_plan_digest | artifact | none | false | false | false | 主表 external baseline 正式证据收集计划的稳定摘要。 |
+| formal_evidence_collection_summary_digest | artifact | none | false | false | false | 主表 external baseline 正式证据收集摘要的稳定摘要。 |
+| formal_evidence_collection_summary_path | artifact | none | false | false | false | 主表 external baseline 正式证据收集摘要路径。 |
 | adapter_boundary | governance | none | false | false | false | adapter observation 或 manifest 对工程 smoke 与正式论文证据边界的说明。|
 | execution_device | runtime | none | false | false | false | adapter 张量或诊断分数实际执行设备。|
 | torch_available | runtime | none | false | false | false | adapter 运行环境中是否可导入 torch。|
