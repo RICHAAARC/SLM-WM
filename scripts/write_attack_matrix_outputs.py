@@ -133,6 +133,17 @@ def build_boundary(thresholds: dict[str, Any], threshold_report: dict[str, Any])
         target_fpr=target_fpr,
         rescue_margin_low=rescue_margin_low,
         allowed_fail_reasons=allowed_fail_reasons,
+        fixed_fpr_control_scope=str(threshold_report.get("fixed_fpr_control_scope", "calibration_clean_negative")),
+        fixed_fpr_denominator_role=str(threshold_report.get("fixed_fpr_denominator_role", "clean_negative_only")),
+        rescue_control_scope=str(threshold_report.get("rescue_control_scope", "evidence_clean_negative")),
+        rescue_changes_fpr_denominator=bool(threshold_report.get("rescue_changes_fpr_denominator", False)),
+        attacked_negative_boundary_role=str(
+            threshold_report.get(
+                "attacked_negative_boundary_role",
+                "attack_robustness_diagnostic_not_fpr_denominator",
+            )
+        ),
+        attacked_negative_governs_fixed_fpr=bool(threshold_report.get("attacked_negative_governs_fixed_fpr", False)),
     )
 
 

@@ -48,6 +48,12 @@ class AttackEvaluationBoundary:
     target_fpr: float
     rescue_margin_low: float
     allowed_fail_reasons: tuple[str, ...]
+    fixed_fpr_control_scope: str = "calibration_clean_negative"
+    fixed_fpr_denominator_role: str = "clean_negative_only"
+    rescue_control_scope: str = "evidence_clean_negative"
+    rescue_changes_fpr_denominator: bool = False
+    attacked_negative_boundary_role: str = "attack_robustness_diagnostic_not_fpr_denominator"
+    attacked_negative_governs_fixed_fpr: bool = False
 
     def __post_init__(self) -> None:
         """集中校验检测边界。"""

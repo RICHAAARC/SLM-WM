@@ -152,6 +152,11 @@ def test_threshold_calibration_drive_workflow_generates_package_ready_outputs(tm
     assert summary["threshold_calibration_ready"] is True
     assert summary["geometric_rescue_ready"] is True
     assert summary["geometric_rescue_record_count"] > 0
+    assert summary["metadata"]["fixed_fpr_control_scope"] == "calibration_clean_negative"
+    assert summary["metadata"]["rescue_control_scope"] == "evidence_clean_negative"
+    assert summary["metadata"]["attacked_negative_governs_fixed_fpr"] is False
+    assert summary["metadata"]["evidence_fpr_exceeds_target"] is False
+    assert summary["metadata"]["attacked_fpr_diagnostic_exceeds_target"] is True
     assert archive_path.exists()
     assert record.archive_digest == record.drive_archive_digest
     with ZipFile(archive_path) as archive:

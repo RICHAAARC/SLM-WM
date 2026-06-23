@@ -36,6 +36,10 @@ DEFAULT_OUTPUT_DIR = Path("outputs/threshold_calibration")
 DEFAULT_RESCUE_RECORDS_PATH = Path("outputs/geometric_rescue/aligned_detection_records.jsonl")
 DEFAULT_RESCUE_AUDIT_PATH = Path("outputs/geometric_rescue/geometry_rescue_audit.json")
 DEFAULT_TARGET_FPR = 0.05
+FIXED_FPR_CONTROL_SCOPE = "calibration_clean_negative"
+FIXED_FPR_DENOMINATOR_ROLE = "clean_negative_only"
+RESCUE_CONTROL_SCOPE = "evidence_clean_negative"
+ATTACKED_NEGATIVE_BOUNDARY_ROLE = "attack_robustness_diagnostic_not_fpr_denominator"
 ALIGNED_RESCORING_PACKAGE_ENV = "SLM_WM_ALIGNED_RESCORING_PACKAGE_PATH"
 ALIGNED_RESCORING_PACKAGE_PATTERNS = (
     "outputs/aligned_rescoring_package_*.zip",
@@ -354,34 +358,39 @@ def build_standard_metric_rows(metrics: dict[str, Any], records: tuple[dict[str,
 
 def build_rescue_fpr_rows(metrics: dict[str, Any], threshold_report: dict[str, Any]) -> list[dict[str, Any]]:
     """构造 rescue 前后 FPR 审计表。"""
+    row_specs = (
+        (
+            "raw_content_clean_negative",
+            "fixed_fpr_raw_clean_control",
+            metrics["raw_content_clean_fpr"],
+            True,
+        ),
+        (
+            RESCUE_CONTROL_SCOPE,
+            "fixed_fpr_evidence_clean_control",
+            metrics["evidence_clean_fpr"],
+            True,
+        ),
+        (
+            "evidence_attacked_negative",
+            "attack_robustness_diagnostic",
+            metrics["evidence_attacked_fpr"],
+            False,
+        ),
+    )
     return [
         {
             "operating_point_id": metrics["operating_point_id"],
             "target_fpr": metrics["target_fpr"],
-            "decision_scope": "raw_content_clean_negative",
-            "observed_fpr": metrics["raw_content_clean_fpr"],
-            "fpr_exceeds_target": metrics["raw_content_clean_fpr"] > metrics["target_fpr"],
+            "decision_scope": decision_scope,
+            "statistical_boundary": statistical_boundary,
+            "observed_fpr": observed_fpr,
+            "fpr_exceeds_target": observed_fpr > metrics["target_fpr"],
+            "governs_fixed_fpr": governs_fixed_fpr,
             "threshold_degenerate": threshold_report["threshold_degenerate"],
             "supports_paper_claim": False,
-        },
-        {
-            "operating_point_id": metrics["operating_point_id"],
-            "target_fpr": metrics["target_fpr"],
-            "decision_scope": "evidence_clean_negative",
-            "observed_fpr": metrics["evidence_clean_fpr"],
-            "fpr_exceeds_target": metrics["evidence_clean_fpr"] > metrics["target_fpr"],
-            "threshold_degenerate": threshold_report["threshold_degenerate"],
-            "supports_paper_claim": False,
-        },
-        {
-            "operating_point_id": metrics["operating_point_id"],
-            "target_fpr": metrics["target_fpr"],
-            "decision_scope": "evidence_attacked_negative",
-            "observed_fpr": metrics["evidence_attacked_fpr"],
-            "fpr_exceeds_target": metrics["evidence_attacked_fpr"] > metrics["target_fpr"],
-            "threshold_degenerate": threshold_report["threshold_degenerate"],
-            "supports_paper_claim": False,
-        },
+        }
+        for decision_scope, statistical_boundary, observed_fpr, governs_fixed_fpr in row_specs
     ]
 
 
@@ -394,20 +403,30 @@ def build_threshold_report(
 ) -> dict[str, Any]:
     """构造阈值退化与 fixed-FPR 主张边界报告。"""
     report = threshold.to_dict()
-    evidence_fpr_exceeds_target = (
-        metrics["evidence_clean_fpr"] > config.target_fpr
-        or metrics["evidence_attacked_fpr"] > config.target_fpr
-    )
+    clean_fpr_exceeds_target = metrics["evidence_clean_fpr"] > config.target_fpr
+    attacked_fpr_diagnostic_exceeds_target = metrics["evidence_attacked_fpr"] > config.target_fpr
+    fixed_fpr_and_rescue_boundary_ready = not threshold.threshold_degenerate and not clean_fpr_exceeds_target
     report.update(
         {
             "construction_unit_name": CONSTRUCTION_UNIT_NAME,
             "calibrated_content_threshold": threshold.threshold_value,
+            "fixed_fpr_control_scope": FIXED_FPR_CONTROL_SCOPE,
+            "fixed_fpr_denominator_role": FIXED_FPR_DENOMINATOR_ROLE,
+            "rescue_control_scope": RESCUE_CONTROL_SCOPE,
             "rescue_margin_low": config.rescue_margin_low,
             "allowed_fail_reasons": list(config.allowed_fail_reasons),
             "rescue_window_frozen": True,
             "fail_reason_gate_frozen": True,
             "geometry_gate_source": "geometric_rescue_records",
-            "evidence_fpr_exceeds_target": evidence_fpr_exceeds_target,
+            "rescue_changes_fpr_denominator": False,
+            "attacked_negative_boundary_role": ATTACKED_NEGATIVE_BOUNDARY_ROLE,
+            "attacked_negative_governs_fixed_fpr": False,
+            "clean_fpr_exceeds_target": clean_fpr_exceeds_target,
+            "attacked_fpr_diagnostic_exceeds_target": attacked_fpr_diagnostic_exceeds_target,
+            "evidence_fpr_exceeds_target": clean_fpr_exceeds_target,
+            "fixed_fpr_boundary_ready": not threshold.threshold_degenerate,
+            "rescue_boundary_ready": not clean_fpr_exceeds_target,
+            "fixed_fpr_and_rescue_boundary_ready": fixed_fpr_and_rescue_boundary_ready,
             "raw_content_claim_ready": not threshold.threshold_degenerate and metrics["raw_content_clean_fpr"] <= config.target_fpr,
             "full_method_claim_ready": False,
             "unsupported_reason": "aligned_content_score_local_proxy",
@@ -515,8 +534,10 @@ def write_threshold_calibration_outputs(
             "operating_point_id",
             "target_fpr",
             "decision_scope",
+            "statistical_boundary",
             "observed_fpr",
             "fpr_exceeds_target",
+            "governs_fixed_fpr",
             "threshold_degenerate",
             "supports_paper_claim",
         ],

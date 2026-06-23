@@ -86,6 +86,37 @@ def write_rescue_inputs(tmp_path: Path) -> tuple[Path, Path]:
     return records_path, audit_path
 
 
+def write_boundary_separation_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    """写出 attacked negative 超标但 clean negative 仍满足 fixed-FPR 的输入。"""
+    rescue_dir = tmp_path / "outputs" / "geometric_rescue"
+    rescue_dir.mkdir(parents=True)
+    records_path = rescue_dir / "aligned_detection_records.jsonl"
+    audit_path = rescue_dir / "geometry_rescue_audit.json"
+    records = [
+        rescue_record("cal_pos", "calibration", "positive_source", 0.90),
+        rescue_record("cal_clean_a", "calibration", "clean_negative", 0.10),
+        rescue_record("cal_clean_b", "calibration", "clean_negative", 0.20),
+        rescue_record("cal_clean_c", "calibration", "clean_negative", 0.30),
+        rescue_record("cal_clean_d", "calibration", "clean_negative", 0.40),
+        rescue_record("test_clean", "test", "clean_negative", 0.10),
+        rescue_record("test_attacked", "test", "attacked_negative", 0.45),
+    ]
+    records_path.write_text("".join(json_line(record) for record in records), encoding="utf-8")
+    audit_path.write_text(
+        json.dumps(
+            {
+                "attention_geometry_ready": True,
+                "image_quality_metrics_ready": True,
+                "attention_latent_injection_package_path": "",
+                "supports_paper_claim": False,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return records_path, audit_path
+
+
 def write_aligned_rescoring_package(package_path: Path) -> None:
     """写出包含 LPIPS 与 CLIP pair-level 指标的最小 aligned rescoring 结果包。"""
     package_path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +168,44 @@ def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separ
         "evidence_clean_negative",
         "evidence_attacked_negative",
     }
+    fpr_by_scope = {row["decision_scope"]: row for row in fpr_rows}
+    assert fpr_by_scope["raw_content_clean_negative"]["statistical_boundary"] == "fixed_fpr_raw_clean_control"
+    assert fpr_by_scope["raw_content_clean_negative"]["governs_fixed_fpr"] == "True"
+    assert fpr_by_scope["evidence_clean_negative"]["statistical_boundary"] == "fixed_fpr_evidence_clean_control"
+    assert fpr_by_scope["evidence_clean_negative"]["governs_fixed_fpr"] == "True"
+    assert fpr_by_scope["evidence_attacked_negative"]["statistical_boundary"] == "attack_robustness_diagnostic"
+    assert fpr_by_scope["evidence_attacked_negative"]["governs_fixed_fpr"] == "False"
+    assert threshold_report["fixed_fpr_control_scope"] == "calibration_clean_negative"
+    assert threshold_report["rescue_control_scope"] == "evidence_clean_negative"
+    assert threshold_report["attacked_negative_governs_fixed_fpr"] is False
+    assert threshold_report["rescue_changes_fpr_denominator"] is False
     assert any(row["quality_metric_name"] == "lpips" and row["metric_status"] == "unsupported" for row in quality_rows)
+
+
+@pytest.mark.quick
+def test_attacked_negative_fpr_is_diagnostic_not_fixed_fpr_denominator(tmp_path: Path) -> None:
+    """attacked negative FPR 超标不应改变 fixed-FPR 的 clean negative 控制边界。"""
+    records_path, audit_path = write_boundary_separation_inputs(tmp_path)
+
+    write_threshold_calibration_outputs(
+        root=tmp_path,
+        rescue_records_path=records_path,
+        rescue_audit_path=audit_path,
+        target_fpr=0.5,
+    )
+    output_dir = tmp_path / "outputs" / "threshold_calibration"
+    threshold_report = json.loads((output_dir / "threshold_degeneracy_report.json").read_text(encoding="utf-8"))
+    fpr_rows = {
+        row["decision_scope"]: row
+        for row in csv.DictReader((output_dir / "rescue_fpr_audit.csv").open(encoding="utf-8"))
+    }
+
+    assert threshold_report["clean_fpr_exceeds_target"] is False
+    assert threshold_report["attacked_fpr_diagnostic_exceeds_target"] is True
+    assert threshold_report["evidence_fpr_exceeds_target"] is False
+    assert threshold_report["fixed_fpr_and_rescue_boundary_ready"] is True
+    assert fpr_rows["evidence_attacked_negative"]["fpr_exceeds_target"] == "True"
+    assert fpr_rows["evidence_attacked_negative"]["governs_fixed_fpr"] == "False"
 
 
 @pytest.mark.quick

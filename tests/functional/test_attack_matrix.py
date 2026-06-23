@@ -125,6 +125,12 @@ def test_attack_matrix_outputs_are_rebuildable(tmp_path: Path) -> None:
                 "target_fpr": 0.05,
                 "rescue_margin_low": -0.05,
                 "allowed_fail_reasons": ["geometry_suspected", "low_confidence"],
+                "fixed_fpr_control_scope": "calibration_clean_negative",
+                "fixed_fpr_denominator_role": "clean_negative_only",
+                "rescue_control_scope": "evidence_clean_negative",
+                "rescue_changes_fpr_denominator": False,
+                "attacked_negative_boundary_role": "attack_robustness_diagnostic_not_fpr_denominator",
+                "attacked_negative_governs_fixed_fpr": False,
                 "aligned_rescoring_package_path": "outputs/aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip",
                 "aligned_rescoring_package_digest": "abc123",
                 "aligned_rescoring_quality_metrics_ready": True,
@@ -169,6 +175,9 @@ def test_attack_matrix_outputs_are_rebuildable(tmp_path: Path) -> None:
     assert attack_manifest["gpu_attack_unsupported_count"] > 0
     assert attack_manifest["aligned_rescoring_quality_metrics_ready"] is True
     assert attack_manifest["real_aligned_rescore_count"] == 3
+    assert attack_manifest["evaluation_boundary"]["fixed_fpr_control_scope"] == "calibration_clean_negative"
+    assert attack_manifest["evaluation_boundary"]["rescue_control_scope"] == "evidence_clean_negative"
+    assert attack_manifest["evaluation_boundary"]["attacked_negative_governs_fixed_fpr"] is False
     assert manifest["metadata"]["aligned_rescoring_quality_metrics_ready"] is True
     assert (output_dir / "attacked_images").is_dir()
     assert len(registry_lines) == attack_manifest["attack_record_count"]

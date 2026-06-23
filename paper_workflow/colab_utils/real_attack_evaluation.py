@@ -761,6 +761,17 @@ def formal_boundary(root_path: Path, config: RealAttackEvaluationConfig) -> dict
         "target_fpr": float(thresholds.get("target_fpr", report.get("target_fpr", 0.05))),
         "rescue_margin_low": float(report.get("rescue_margin_low", -0.05)),
         "allowed_fail_reasons": tuple(report.get("allowed_fail_reasons", ("geometry_suspected", "low_confidence"))),
+        "fixed_fpr_control_scope": str(report.get("fixed_fpr_control_scope", "calibration_clean_negative")),
+        "fixed_fpr_denominator_role": str(report.get("fixed_fpr_denominator_role", "clean_negative_only")),
+        "rescue_control_scope": str(report.get("rescue_control_scope", "evidence_clean_negative")),
+        "rescue_changes_fpr_denominator": bool(report.get("rescue_changes_fpr_denominator", False)),
+        "attacked_negative_boundary_role": str(
+            report.get(
+                "attacked_negative_boundary_role",
+                "attack_robustness_diagnostic_not_fpr_denominator",
+            )
+        ),
+        "attacked_negative_governs_fixed_fpr": bool(report.get("attacked_negative_governs_fixed_fpr", False)),
         "boundary_ready": bool(thresholds and report),
     }
 
