@@ -464,6 +464,7 @@ def build_method_faithful_baseline_candidate_records(
     attack_matrix_baseline_detection_ready: bool,
     result_source_type: str = "governed_import",
     adapter_boundary: str = METHOD_FAITHFUL_ADAPTER_BOUNDARY,
+    resource_profile: str = "full_main",
 ) -> tuple[dict[str, Any], ...]:
     """把方法忠实 SD3.5 baseline observations 聚合为正式导入候选记录。
 
@@ -510,7 +511,7 @@ def build_method_faithful_baseline_candidate_records(
                 baseline_id=baseline_id,
                 attack_family=attack_family,
                 attack_name=attack_name,
-                resource_profile="full_main",
+                resource_profile=resource_profile,
                 target_fpr=target_fpr,
                 result_source_type=result_source_type,
                 baseline_result_source=baseline_result_source,
