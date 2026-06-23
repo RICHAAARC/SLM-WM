@@ -22,6 +22,8 @@ class AuditInputBundle:
     baseline_runtime_report: dict[str, Any]
     baseline_small_sample_manifest: dict[str, Any]
     baseline_small_sample_summary: dict[str, Any]
+    dataset_quality_manifest: dict[str, Any]
+    dataset_quality_summary: dict[str, Any]
     ablation_manifest: dict[str, Any]
     ablation_claim_summary: dict[str, Any]
     source_path_map: dict[str, str]
@@ -112,6 +114,17 @@ def _fixed_fpr_and_rescue_boundary_ready(threshold_report: dict[str, Any], attac
     )
 
 
+def _dataset_level_quality_blockers(dataset_quality_summary: dict[str, Any]) -> list[str]:
+    """生成数据集级质量指标的当前阻断项。"""
+
+    blockers = []
+    if not _yes(dataset_quality_summary.get("dataset_level_quality_proxy_ready")):
+        blockers.append("dataset_level_quality_proxy_missing")
+    if not _yes(dataset_quality_summary.get("formal_fid_kid_ready")):
+        blockers.append("fid_kid_dataset_metrics_missing")
+    return blockers
+
+
 def _row(
     claim_id: str,
     claim_scope: str,
@@ -142,6 +155,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     attack = bundle.attack_manifest
     baseline = bundle.baseline_runtime_report
     baseline_small_sample = bundle.baseline_small_sample_summary
+    dataset_quality = bundle.dataset_quality_summary
     ablation = bundle.ablation_claim_summary
     full_ready = _yes(threshold.get("full_method_claim_ready")) and _yes(attack.get("full_method_claim_ready"))
     return [
@@ -206,6 +220,14 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             [] if _yes(threshold.get("perceptual_metrics_ready")) else ["perceptual_metrics_missing"],
         ),
         _row(
+            "claim_dataset_level_quality_boundary",
+            "quality",
+            "数据集级 FID / KID 入口已受治理, 但当前小样本 proxy 不支持正式论文结论。",
+            "engineering_supported_not_paper_final",
+            _source(bundle, "dataset_quality_summary", "outputs/dataset_level_quality/dataset_quality_summary.json"),
+            _dataset_level_quality_blockers(dataset_quality),
+        ),
+        _row(
             "claim_submission_ready_package",
             "submission_readiness",
             "当前仓库已具备投稿冻结所需的完整证据。",
@@ -250,6 +272,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
     attack = bundle.attack_manifest
     baseline = bundle.baseline_runtime_report
     baseline_small_sample = bundle.baseline_small_sample_summary
+    dataset_quality = bundle.dataset_quality_summary
     ablation = bundle.ablation_claim_summary
     return [
         _artifact_row(
@@ -319,10 +342,13 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             "table_quality_metrics",
             "table",
             "图像质量与感知指标表",
-            [_source(bundle, "quality_metrics_summary", "outputs/threshold_calibration/quality_metrics_summary.csv")],
+            [
+                _source(bundle, "quality_metrics_summary", "outputs/threshold_calibration/quality_metrics_summary.csv"),
+                _source(bundle, "dataset_quality_metrics", "outputs/dataset_level_quality/dataset_quality_metrics.csv"),
+            ],
             "rebuildable_preview",
             False,
-            ["fid_kid_dataset_metrics_missing"],
+            _dataset_level_quality_blockers(dataset_quality),
         ),
     ]
 
@@ -390,6 +416,7 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     """构造投稿前证据缺口清单。"""
     attack = bundle.attack_manifest
     threshold = bundle.threshold_report
+    dataset_quality = bundle.dataset_quality_summary
     rows: list[dict[str, Any]] = []
     if not _real_attack_closed_loop_ready(attack):
         rows.append(
@@ -454,20 +481,19 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "supports_paper_claim": False,
             },
         )
-    rows.extend(
-        [
+    if not _yes(dataset_quality.get("formal_fid_kid_ready")):
+        rows.append(
             {
                 "gap_id": "gap_dataset_level_fid_kid",
                 "gap_area": "quality_metrics",
                 "blocker_severity": "major",
-                "required_action": "在成组图像集合上计算 FID / KID, pair-level LPIPS / CLIP 不能替代数据集级指标。",
-                "related_artifacts": "outputs/threshold_calibration/quality_metrics_summary.csv",
-                "closes_claim_ids": "claim_quality_preservation_pair_metrics",
+                "required_action": "在成组图像集合上计算正式 FID / KID, 当前小样本 pixel feature proxy 不能替代 Inception 特征后端指标。",
+                "related_artifacts": _source(bundle, "dataset_quality_metrics", "outputs/dataset_level_quality/dataset_quality_metrics.csv"),
+                "closes_claim_ids": "claim_dataset_level_quality_boundary;claim_quality_preservation_pair_metrics",
                 "recommended_order": 6,
                 "supports_paper_claim": False,
-            },
-        ]
-    )
+            }
+        )
     return rows
 
 

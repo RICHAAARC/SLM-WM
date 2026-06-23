@@ -796,6 +796,25 @@ Notebook 与 repository module 的跨边界数据
 | fid_status | metric | none | false | false | false | FID 指标计算状态。 |
 | kid | metric | none | false | false | false | Kernel Inception Distance 指标值或 unsupported 状态。 |
 | kid_status | metric | none | false | false | false | KID 指标计算状态。 |
+| fid_pixel_feature_proxy | metric | none | false | false | false | 使用轻量 pixel feature backend 计算的 FID proxy, 不等同于正式 FID。 |
+| kid_pixel_feature_proxy | metric | none | false | false | false | 使用轻量 pixel feature backend 计算的 KID proxy, 不等同于正式 KID。 |
+| dataset_quality_record_id | artifact | none | true | false | false | 数据集级质量图像对记录的稳定标识。 |
+| dataset_quality_record_digest | artifact | none | true | false | false | 数据集级质量图像对记录的稳定摘要。 |
+| image_pair_index | protocol | none | true | false | false | 数据集级质量图像对在 registry 中的序号。 |
+| image_pair_role | protocol | none | true | false | false | 数据集级质量图像对的比较角色或攻击名称。 |
+| comparison_image_path | artifact | none | true | false | false | 数据集级质量图像对中的 comparison 图像路径。 |
+| comparison_image_digest | artifact | none | true | false | false | 数据集级质量图像对中的 comparison 图像摘要。 |
+| feature_backend | protocol | none | true | false | false | 数据集级质量指标使用的图像特征后端。 |
+| paper_metric_name | metric | none | false | false | false | proxy 指标对应但不能替代的论文指标名称。 |
+| source_image_count | metric | none | false | false | false | 数据集级质量输入中的 source 图像数量。 |
+| comparison_image_count | metric | none | false | false | false | 数据集级质量输入中的 comparison 图像数量。 |
+| sample_pair_count | metric | none | false | false | false | 数据集级质量输入中的图像配对数量。 |
+| dataset_level_quality_proxy_ready | governance | none | false | false | false | 数据集级质量 proxy 是否已完成并可审计。 |
+| formal_fid_kid_ready | governance | none | false | false | false | 正式 FID / KID 是否已由论文约定特征后端完成。 |
+| dataset_quality_metrics_path | artifact | none | false | false | false | 数据集级质量指标表路径。 |
+| real_attack_registry_path | artifact | none | false | false | false | 数据集级质量脚本读取的真实攻击图像 registry 路径。 |
+| dataset_quality_summary | artifact | none | false | false | false | 论文证据审计中数据集级质量摘要的逻辑路径键。 |
+| dataset_quality_metrics | artifact | none | false | false | false | 论文证据审计中数据集级质量指标表的逻辑路径键。 |
 | audit_item_id | governance | none | false | false | false | 论文证据审计表中单个可重建产物检查项的稳定标识。 |
 | artifact_kind | artifact | none | false | false | false | 论文证据审计中产物类型, 例如 table 或 figure_data。 |
 | artifact_name | artifact | none | false | false | false | 论文证据审计中产物的人类可读名称。 |

@@ -47,6 +47,12 @@ def make_audit_input_bundle() -> AuditInputBundle:
             "paper_claim_ready": False,
             "supports_paper_claim": False,
         },
+        dataset_quality_manifest={"artifact_id": "dataset_level_quality_manifest", "supports_paper_claim": False},
+        dataset_quality_summary={
+            "dataset_level_quality_proxy_ready": True,
+            "formal_fid_kid_ready": False,
+            "supports_paper_claim": False,
+        },
         ablation_manifest={"artifact_id": "internal_ablation_evidence_manifest", "supports_paper_claim": False},
         ablation_claim_summary={"mechanism_coverage_ready": True, "supports_paper_claim": False},
         source_path_map={
@@ -57,6 +63,8 @@ def make_audit_input_bundle() -> AuditInputBundle:
             "baseline_small_sample_summary": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json",
             "baseline_small_sample_records": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_records.jsonl",
             "baseline_small_sample_comparison_table": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_comparison_table.csv",
+            "dataset_quality_summary": "outputs/dataset_level_quality/dataset_quality_summary.json",
+            "dataset_quality_metrics": "outputs/dataset_level_quality/dataset_quality_metrics.csv",
             "ablation_claim_summary": "outputs/internal_ablation_evidence/ablation_claim_summary.json",
             "quality_metrics_summary": "outputs/threshold_calibration/quality_metrics_summary.csv",
         },
@@ -85,6 +93,8 @@ def make_real_attack_ready_bundle() -> AuditInputBundle:
         baseline_runtime_report=bundle.baseline_runtime_report,
         baseline_small_sample_manifest=bundle.baseline_small_sample_manifest,
         baseline_small_sample_summary=bundle.baseline_small_sample_summary,
+        dataset_quality_manifest=bundle.dataset_quality_manifest,
+        dataset_quality_summary=bundle.dataset_quality_summary,
         ablation_manifest=bundle.ablation_manifest,
         ablation_claim_summary=bundle.ablation_claim_summary,
         source_path_map=bundle.source_path_map,
@@ -109,6 +119,8 @@ def make_boundary_ready_bundle() -> AuditInputBundle:
         baseline_runtime_report=bundle.baseline_runtime_report,
         baseline_small_sample_manifest=bundle.baseline_small_sample_manifest,
         baseline_small_sample_summary=bundle.baseline_small_sample_summary,
+        dataset_quality_manifest=bundle.dataset_quality_manifest,
+        dataset_quality_summary=bundle.dataset_quality_summary,
         ablation_manifest=bundle.ablation_manifest,
         ablation_claim_summary=bundle.ablation_claim_summary,
         source_path_map=bundle.source_path_map,
@@ -234,6 +246,18 @@ def write_minimal_upstream_artifacts(tmp_path: Path) -> None:
             "covered_primary_baseline_count": 4,
             "formal_full_paper_run_requested": False,
             "paper_claim_ready": False,
+            "supports_paper_claim": False,
+        },
+    )
+    write_json(
+        tmp_path / "outputs" / "dataset_level_quality" / "manifest.local.json",
+        {"artifact_id": "dataset_level_quality_manifest", "supports_paper_claim": False},
+    )
+    write_json(
+        tmp_path / "outputs" / "dataset_level_quality" / "dataset_quality_summary.json",
+        {
+            "dataset_level_quality_proxy_ready": True,
+            "formal_fid_kid_ready": False,
             "supports_paper_claim": False,
         },
     )

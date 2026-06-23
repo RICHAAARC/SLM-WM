@@ -39,6 +39,8 @@ DEFAULT_BASELINE_SMALL_SAMPLE_MANIFEST_PATH = Path("outputs/primary_baseline_sma
 DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH = Path(
     "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json"
 )
+DEFAULT_DATASET_QUALITY_MANIFEST_PATH = Path("outputs/dataset_level_quality/manifest.local.json")
+DEFAULT_DATASET_QUALITY_SUMMARY_PATH = Path("outputs/dataset_level_quality/dataset_quality_summary.json")
 DEFAULT_ABLATION_MANIFEST_PATH = Path("outputs/internal_ablation_evidence/manifest.local.json")
 DEFAULT_ABLATION_CLAIM_SUMMARY_PATH = Path("outputs/internal_ablation_evidence/ablation_claim_summary.json")
 
@@ -121,6 +123,8 @@ def build_input_bundle(
     baseline_runtime_report_path: Path,
     baseline_small_sample_manifest_path: Path,
     baseline_small_sample_summary_path: Path,
+    dataset_quality_manifest_path: Path,
+    dataset_quality_summary_path: Path,
     ablation_manifest_path: Path,
     ablation_claim_summary_path: Path,
 ) -> AuditInputBundle:
@@ -134,6 +138,8 @@ def build_input_bundle(
         baseline_runtime_report=read_json(baseline_runtime_report_path),
         baseline_small_sample_manifest=read_json(baseline_small_sample_manifest_path),
         baseline_small_sample_summary=read_json(baseline_small_sample_summary_path),
+        dataset_quality_manifest=read_json(dataset_quality_manifest_path),
+        dataset_quality_summary=read_json(dataset_quality_summary_path),
         ablation_manifest=read_json(ablation_manifest_path),
         ablation_claim_summary=read_json(ablation_claim_summary_path),
         source_path_map={
@@ -141,6 +147,8 @@ def build_input_bundle(
             "fixed_fpr_operating_points": "outputs/threshold_calibration/fixed_fpr_operating_points.csv",
             "standard_watermark_metrics": "outputs/threshold_calibration/standard_watermark_metrics.csv",
             "quality_metrics_summary": "outputs/threshold_calibration/quality_metrics_summary.csv",
+            "dataset_quality_summary": "outputs/dataset_level_quality/dataset_quality_summary.json",
+            "dataset_quality_metrics": "outputs/dataset_level_quality/dataset_quality_metrics.csv",
             "score_distribution_table": "outputs/threshold_calibration/score_distribution_table.csv",
             "roc_curve_points": "outputs/threshold_calibration/roc_curve_points.csv",
             "det_curve_points": "outputs/threshold_calibration/det_curve_points.csv",
@@ -173,6 +181,8 @@ def write_paper_artifact_evidence_audit_outputs(
     baseline_runtime_report_path: str | Path = DEFAULT_BASELINE_RUNTIME_REPORT_PATH,
     baseline_small_sample_manifest_path: str | Path = DEFAULT_BASELINE_SMALL_SAMPLE_MANIFEST_PATH,
     baseline_small_sample_summary_path: str | Path = DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH,
+    dataset_quality_manifest_path: str | Path = DEFAULT_DATASET_QUALITY_MANIFEST_PATH,
+    dataset_quality_summary_path: str | Path = DEFAULT_DATASET_QUALITY_SUMMARY_PATH,
     ablation_manifest_path: str | Path = DEFAULT_ABLATION_MANIFEST_PATH,
     ablation_claim_summary_path: str | Path = DEFAULT_ABLATION_CLAIM_SUMMARY_PATH,
 ) -> dict[str, Any]:
@@ -189,6 +199,8 @@ def write_paper_artifact_evidence_audit_outputs(
     resolved_baseline_runtime_report_path = resolve_input_path(root_path, baseline_runtime_report_path)
     resolved_baseline_small_sample_manifest_path = resolve_input_path(root_path, baseline_small_sample_manifest_path)
     resolved_baseline_small_sample_summary_path = resolve_input_path(root_path, baseline_small_sample_summary_path)
+    resolved_dataset_quality_manifest_path = resolve_input_path(root_path, dataset_quality_manifest_path)
+    resolved_dataset_quality_summary_path = resolve_input_path(root_path, dataset_quality_summary_path)
     resolved_ablation_manifest_path = resolve_input_path(root_path, ablation_manifest_path)
     resolved_ablation_claim_summary_path = resolve_input_path(root_path, ablation_claim_summary_path)
 
@@ -201,6 +213,8 @@ def write_paper_artifact_evidence_audit_outputs(
         resolved_baseline_runtime_report_path,
         resolved_baseline_small_sample_manifest_path,
         resolved_baseline_small_sample_summary_path,
+        resolved_dataset_quality_manifest_path,
+        resolved_dataset_quality_summary_path,
         resolved_ablation_manifest_path,
         resolved_ablation_claim_summary_path,
     )
@@ -273,6 +287,8 @@ def write_paper_artifact_evidence_audit_outputs(
             resolved_baseline_runtime_report_path,
             resolved_baseline_small_sample_manifest_path,
             resolved_baseline_small_sample_summary_path,
+            resolved_dataset_quality_manifest_path,
+            resolved_dataset_quality_summary_path,
             resolved_ablation_manifest_path,
             resolved_ablation_claim_summary_path,
         )
@@ -339,6 +355,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH),
         help="外部 baseline 小样本证据 summary 路径。",
     )
+    parser.add_argument("--dataset-quality-manifest-path", default=str(DEFAULT_DATASET_QUALITY_MANIFEST_PATH), help="数据集级质量 manifest 路径。")
+    parser.add_argument("--dataset-quality-summary-path", default=str(DEFAULT_DATASET_QUALITY_SUMMARY_PATH), help="数据集级质量 summary 路径。")
     parser.add_argument("--ablation-manifest-path", default=str(DEFAULT_ABLATION_MANIFEST_PATH), help="内部消融 manifest 路径。")
     parser.add_argument("--ablation-claim-summary-path", default=str(DEFAULT_ABLATION_CLAIM_SUMMARY_PATH), help="内部消融 claim summary 路径。")
     return parser
@@ -358,6 +376,8 @@ def main() -> None:
         baseline_runtime_report_path=args.baseline_runtime_report_path,
         baseline_small_sample_manifest_path=args.baseline_small_sample_manifest_path,
         baseline_small_sample_summary_path=args.baseline_small_sample_summary_path,
+        dataset_quality_manifest_path=args.dataset_quality_manifest_path,
+        dataset_quality_summary_path=args.dataset_quality_summary_path,
         ablation_manifest_path=args.ablation_manifest_path,
         ablation_claim_summary_path=args.ablation_claim_summary_path,
     )
