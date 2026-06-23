@@ -154,6 +154,9 @@ def test_external_baseline_outputs_are_rebuildable_and_claim_safe(tmp_path: Path
     baseline_rows = list(csv.DictReader((output_dir / "baseline_metrics.csv").open(encoding="utf-8")))
     comparison_rows = list(csv.DictReader((output_dir / "baseline_comparison_table.csv").open(encoding="utf-8")))
     runtime_report = json.loads((output_dir / "baseline_runtime_report.json").read_text(encoding="utf-8"))
+    evidence_path_report = json.loads(
+        (output_dir / "baseline_formal_evidence_path_resolution_report.json").read_text(encoding="utf-8")
+    )
 
     assert manifest["artifact_id"] == "external_baseline_comparison_manifest"
     assert len(observations) == len(default_baseline_specs()) * 2
@@ -179,6 +182,15 @@ def test_external_baseline_outputs_are_rebuildable_and_claim_safe(tmp_path: Path
     assert runtime_report["small_sample_baseline_boundary_ready"] is False
     assert runtime_report["small_sample_baseline_covered_count"] == 0
     assert runtime_report["small_sample_baseline_formal_import_ready_count"] == 0
+    assert runtime_report["formal_evidence_path_resolution_report_path"].endswith(
+        "baseline_formal_evidence_path_resolution_report.json"
+    )
+    assert runtime_report["formal_evidence_path_reference_count"] == 0
+    assert runtime_report["existing_formal_evidence_path_count"] == 0
+    assert runtime_report["missing_formal_evidence_path_count"] == 0
+    assert runtime_report["formal_evidence_path_resolution_ready"] is False
+    assert evidence_path_report["candidate_record_count"] == 0
+    assert evidence_path_report["supports_paper_claim"] is False
     assert {row["metric_status"] for row in baseline_rows} == {"unsupported"}
     assert any(row["method_id"] == "slm_wm_current" for row in comparison_rows)
     assert all(row["supports_paper_claim"] == "False" for row in comparison_rows)
@@ -348,6 +360,9 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     comparison_rows = list(csv.DictReader((output_dir / "baseline_comparison_table.csv").open(encoding="utf-8")))
     runtime_report = json.loads((output_dir / "baseline_runtime_report.json").read_text(encoding="utf-8"))
     validation_report = json.loads((output_dir / "baseline_formal_import_validation_report.json").read_text(encoding="utf-8"))
+    evidence_path_report = json.loads(
+        (output_dir / "baseline_formal_evidence_path_resolution_report.json").read_text(encoding="utf-8")
+    )
     tree_row = next(row for row in baseline_rows if row["baseline_id"] == "tree_ring")
     tree_comparison_row = next(row for row in comparison_rows if row["method_id"] == "tree_ring")
 
@@ -379,6 +394,13 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     assert runtime_report["formal_full_paper_run_requested"] is False
     assert runtime_report["formal_full_paper_run_permitted"] is False
     assert runtime_report["excluded_operating_points"] == ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"]
+    assert runtime_report["formal_evidence_path_reference_count"] == 1
+    assert runtime_report["existing_formal_evidence_path_count"] == 1
+    assert runtime_report["missing_formal_evidence_path_count"] == 0
+    assert runtime_report["formal_evidence_path_resolution_ready"] is True
+    assert runtime_report["formal_evidence_path_missing_baseline_ids"] == []
+    assert evidence_path_report["formal_evidence_path_reference_count"] == 1
+    assert evidence_path_report["formal_evidence_path_resolution_ready"] is True
     assert runtime_report["baseline_result_ready_count"] == 1
     assert runtime_report["baseline_results_ready"] is False
     assert tree_row["metric_status"] == "measured"

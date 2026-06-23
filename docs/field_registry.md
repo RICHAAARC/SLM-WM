@@ -1043,6 +1043,13 @@ Notebook 与 repository module 的跨边界数据
 | formal_import_issue_count | metric | none | false | false | false | 正式导入 validator 发现的问题数量。 |
 | formal_import_validation_ready | governance | none | false | false | false | 主表 baseline 正式导入候选记录是否全部通过 schema 校验。 |
 | formal_import_validation_report_path | artifact | none | false | false | false | 正式导入 validator 报告路径。 |
+| formal_evidence_path_resolution_report_path | artifact | none | false | false | false | 正式导入候选记录 evidence paths 在当前工作区或挂载目录下的可解析状态报告路径。 |
+| formal_evidence_path_reference_count | metric | none | false | false | false | 正式导入候选记录中声明的 evidence path 引用数量。 |
+| existing_formal_evidence_path_count | metric | none | false | false | false | 当前工作区或挂载目录下可解析的正式 evidence path 数量。 |
+| missing_formal_evidence_path_count | metric | none | false | false | false | 当前工作区或挂载目录下不可解析的正式 evidence path 数量。 |
+| formal_evidence_path_resolution_ready | governance | none | false | false | false | 正式导入候选记录的 evidence paths 是否在当前审计边界内全部可解析。 |
+| formal_evidence_path_missing_baseline_ids | protocol | none | false | false | false | 存在不可解析 evidence paths 的主表 baseline id 集合。 |
+| missing_formal_evidence_paths | artifact | none | false | false | false | 当前工作区或挂载目录下不可解析的正式 evidence path 集合。 |
 | formal_import_candidate_records_path | artifact | none | false | false | false | T2SMark 或其他 baseline 写出的正式导入候选 JSONL 路径。 |
 | formal_import_candidate_record_count | metric | none | false | false | false | T2SMark 或其他 baseline 写出的正式导入候选记录数量。 |
 | candidate_record_count | metric | none | false | false | false | 单个主表 baseline 在正式导入 readiness 行中的候选记录数量。 |

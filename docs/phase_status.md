@@ -1010,3 +1010,10 @@
 2. 小样本字段只用于审计可见性, 不改变 `baseline_results_ready=false` 与 `supports_paper_claim=false` 的正式论文声明边界。
 3. 当 `primary_baseline_small_sample_evidence_summary.json` 缺失时, comparison 仍可重建正式导入状态, 但会显式记录小样本 baseline 证据未就绪。
 4. 该联动用于把已完成的小样本主表 baseline 链路向下游 evidence audit / submission readiness 传播, 不触发正式 full paper 样本规模、TPR@FPR=0.01 或 TPR@FPR=0.001 运行。
+
+### external baseline formal evidence path resolution
+
+1. `external_baseline_comparison` 已新增 `baseline_formal_evidence_path_resolution_report.json`, 用于单独汇总正式导入候选记录的 evidence paths 在当前工作区或挂载目录下是否可解析。
+2. 该报告解释 candidate validator 与 comparison 重新校验之间可能出现的差异: 若本地 `outputs/` 中缺少从 Google Drive 下载的前序 zip, comparison 会把 evidence path 缺失显式记录为 provenance 问题。
+3. 该检查不改变小样本 evidence boundary, 也不把 GPU smoke 或小样本记录提升为正式 external baseline 论文结论。
+4. 若需要关闭正式 baseline 结果缺口, 应先确保受治理结果包或官方复现 evidence paths 在当前审计边界内可解析, 再重建 comparison、evidence audit 和 submission readiness。

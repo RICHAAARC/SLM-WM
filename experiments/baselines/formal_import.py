@@ -196,6 +196,48 @@ def build_primary_baseline_formal_import_schema(target_fpr: float = 0.05) -> dic
     }
 
 
+def build_primary_baseline_formal_evidence_path_summary(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    evidence_root: str | Path = ".",
+) -> dict[str, Any]:
+    """汇总正式导入候选记录中的证据路径可解析状态.
+
+    该函数属于 schema / provenance 层边界: 它只说明 evidence paths 在当前工作区或挂载目录下是否可解析,
+    不改变正式导入 validator 的接受规则, 也不会把小样本候选记录升级为论文级 baseline 结论。
+    """
+
+    evidence_root_path = Path(evidence_root).resolve()
+    materialized_rows = [dict(row) for row in rows]
+    reference_count = 0
+    existing_count = 0
+    missing_count = 0
+    missing_baseline_ids: set[str] = set()
+    missing_paths: list[str] = []
+    for row in materialized_rows:
+        baseline_id = _str_field(row, "baseline_id")
+        for evidence_path in _list_field(row, "evidence_paths"):
+            reference_count += 1
+            if _resolve_evidence_path(evidence_root_path, evidence_path).is_file():
+                existing_count += 1
+            else:
+                missing_count += 1
+                if baseline_id:
+                    missing_baseline_ids.add(baseline_id)
+                missing_paths.append(evidence_path)
+    return {
+        "construction_unit_name": "primary_baseline_formal_evidence_path_resolution",
+        "candidate_record_count": len(materialized_rows),
+        "formal_evidence_path_reference_count": reference_count,
+        "existing_formal_evidence_path_count": existing_count,
+        "missing_formal_evidence_path_count": missing_count,
+        "formal_evidence_path_resolution_ready": bool(materialized_rows) and reference_count > 0 and missing_count == 0,
+        "formal_evidence_path_missing_baseline_ids": sorted(missing_baseline_ids),
+        "missing_formal_evidence_paths": sorted(set(missing_paths)),
+        "supports_paper_claim": False,
+    }
+
+
 def _validate_metric_fields(row: Mapping[str, Any], row_index: int) -> list[FormalImportIssue]:
     """校验正式导入记录中的计数和率值边界。"""
 

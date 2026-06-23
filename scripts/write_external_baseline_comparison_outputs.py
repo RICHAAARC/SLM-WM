@@ -21,6 +21,7 @@ from experiments.baselines import (
     build_baseline_observations,
     build_comparison_rows,
     default_baseline_specs,
+    build_primary_baseline_formal_evidence_path_summary,
     load_baseline_source_registry,
     normalize_baseline_result_record,
     overlay_specs_with_source_registry,
@@ -166,6 +167,8 @@ def build_runtime_report(
     formal_evidence_collection_summary_path: str,
     baseline_small_sample_summary: dict[str, Any],
     baseline_small_sample_summary_path: str,
+    formal_evidence_path_summary: dict[str, Any],
+    formal_evidence_path_summary_path: str,
 ) -> dict[str, Any]:
     """构造外部 baseline 对比运行摘要。"""
     baseline_count = len(baseline_metric_rows)
@@ -253,6 +256,22 @@ def build_runtime_report(
             baseline_small_sample_summary.get("formal_full_paper_run_permitted", False)
         ),
         "excluded_operating_points": list(baseline_small_sample_summary.get("excluded_operating_points", ())),
+        "formal_evidence_path_resolution_report_path": formal_evidence_path_summary_path,
+        "formal_evidence_path_reference_count": int(
+            formal_evidence_path_summary.get("formal_evidence_path_reference_count", 0)
+        ),
+        "existing_formal_evidence_path_count": int(
+            formal_evidence_path_summary.get("existing_formal_evidence_path_count", 0)
+        ),
+        "missing_formal_evidence_path_count": int(
+            formal_evidence_path_summary.get("missing_formal_evidence_path_count", 0)
+        ),
+        "formal_evidence_path_resolution_ready": bool(
+            formal_evidence_path_summary.get("formal_evidence_path_resolution_ready", False)
+        ),
+        "formal_evidence_path_missing_baseline_ids": list(
+            formal_evidence_path_summary.get("formal_evidence_path_missing_baseline_ids", ())
+        ),
         "baseline_result_ready_count": ready_count,
         "comparison_protocol_ready": bool(attack_manifest.get("attack_metrics_ready"))
         and not threshold_report.get("threshold_degenerate", True),
@@ -324,11 +343,18 @@ def write_external_baseline_comparison_outputs(
     baseline_result_records = [
         normalize_baseline_result_record(row) for row in formal_import_validation.get("accepted_records", [])
     ]
+    formal_evidence_path_summary = build_primary_baseline_formal_evidence_path_summary(
+        baseline_result_rows,
+        evidence_root=root_path,
+    )
 
     observations = build_baseline_observations(baseline_specs, attack_rows, boundary, baseline_result_records)
     baseline_metric_rows = aggregate_baseline_metrics(observations)
     slm_proxy_metrics = aggregate_slm_proxy_metrics(attack_rows)
     comparison_rows = build_comparison_rows(slm_proxy_metrics, baseline_metric_rows)
+    formal_evidence_path_summary_path = (
+        resolved_output_dir / "baseline_formal_evidence_path_resolution_report.json"
+    )
     runtime_report = build_runtime_report(
         attack_manifest,
         threshold_report,
@@ -353,6 +379,8 @@ def write_external_baseline_comparison_outputs(
         relative_or_absolute(resolved_baseline_small_sample_summary_path, root_path)
         if resolved_baseline_small_sample_summary_path.exists()
         else "",
+        formal_evidence_path_summary,
+        relative_or_absolute(formal_evidence_path_summary_path, root_path),
     )
 
     observations_path = resolved_output_dir / "baseline_observations.jsonl"
@@ -420,6 +448,7 @@ def write_external_baseline_comparison_outputs(
     )
     runtime_report_path.write_text(stable_json_text(runtime_report), encoding="utf-8")
     formal_import_validation_path.write_text(stable_json_text(formal_import_validation), encoding="utf-8")
+    formal_evidence_path_summary_path.write_text(stable_json_text(formal_evidence_path_summary), encoding="utf-8")
 
     output_paths = tuple(
         relative_or_absolute(path, root_path)
@@ -430,6 +459,7 @@ def write_external_baseline_comparison_outputs(
             comparison_path,
             runtime_report_path,
             formal_import_validation_path,
+            formal_evidence_path_summary_path,
             manifest_path,
         )
     )
@@ -464,6 +494,7 @@ def write_external_baseline_comparison_outputs(
         if baseline_result_records
         else "",
         "formal_import_validation_digest": build_stable_digest(formal_import_validation),
+        "formal_evidence_path_summary_digest": build_stable_digest(formal_evidence_path_summary),
     }
     manifest = build_artifact_manifest(
         artifact_id="external_baseline_comparison_manifest",
@@ -492,6 +523,10 @@ def write_external_baseline_comparison_outputs(
                 root_path,
             ),
             "formal_import_validation_report_path": relative_or_absolute(formal_import_validation_path, root_path),
+            "formal_evidence_path_resolution_report_path": relative_or_absolute(
+                formal_evidence_path_summary_path,
+                root_path,
+            ),
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_external_baseline_comparison_outputs.py",
