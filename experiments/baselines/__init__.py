@@ -90,6 +90,7 @@ from experiments.baselines.small_sample_evidence import (
     SMALL_SAMPLE_BOUNDARY,
     SMALL_SAMPLE_OPERATING_POINT,
     SmallSampleEvidenceRecord,
+    build_primary_baseline_small_sample_comparison_rows,
     build_primary_baseline_small_sample_evidence_records,
     build_primary_baseline_small_sample_evidence_summary,
 )
@@ -155,6 +156,7 @@ __all__ = [
     "build_method_faithful_adapter_summary",
     "build_comparison_rows",
     "build_primary_baseline_method_faithful_adapter_schema",
+    "build_primary_baseline_small_sample_comparison_rows",
     "build_primary_baseline_small_sample_evidence_records",
     "build_primary_baseline_small_sample_evidence_summary",
     "build_primary_baseline_execution_plans",

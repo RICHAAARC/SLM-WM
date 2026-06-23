@@ -154,6 +154,7 @@ def build_input_bundle(
             "baseline_comparison_table": "outputs/external_baseline_comparison/baseline_comparison_table.csv",
             "baseline_small_sample_summary": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json",
             "baseline_small_sample_records": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_records.jsonl",
+            "baseline_small_sample_comparison_table": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_comparison_table.csv",
             "ablation_claim_summary": "outputs/internal_ablation_evidence/ablation_claim_summary.json",
             "mechanism_ablation_table": "outputs/internal_ablation_evidence/mechanism_ablation_table.csv",
             "method_pairwise_delta_table": "outputs/internal_ablation_evidence/method_pairwise_delta_table.csv",

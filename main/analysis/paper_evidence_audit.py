@@ -283,8 +283,8 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             [
                 _source(
                     bundle,
-                    "baseline_small_sample_records",
-                    "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_records.jsonl",
+                    "baseline_small_sample_comparison_table",
+                    "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_comparison_table.csv",
                 )
             ],
             "rebuildable_preview",

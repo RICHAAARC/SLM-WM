@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import csv
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from experiments.baselines import (
     SMALL_SAMPLE_OPERATING_POINT,
     build_primary_baseline_small_sample_evidence_records,
     build_primary_baseline_small_sample_evidence_summary,
+    build_primary_baseline_small_sample_comparison_rows,
 )
 from scripts.write_primary_baseline_small_sample_evidence_outputs import (
     write_primary_baseline_small_sample_evidence_outputs,
@@ -33,6 +35,13 @@ def candidate_row(baseline_id: str, resource_profile: str) -> dict[str, object]:
         "negative_count": 5,
         "supported_record_count": 10,
         "attack_record_count": 10,
+        "metric_status": "measured",
+        "true_positive_rate": 0.6,
+        "false_positive_rate": 0.2,
+        "clean_false_positive_rate": 0.2,
+        "attacked_false_positive_rate": 0.0,
+        "quality_score_proxy_mean": 1.0,
+        "score_retention_mean": 1.0,
         "evidence_paths": [f"outputs/external_baseline_results/{baseline_id}.json"],
         "formal_evidence_paths_ready": True,
         "supports_paper_claim": False,
@@ -65,8 +74,10 @@ def test_small_sample_evidence_records_are_ready_but_not_paper_claims() -> None:
 
     records = build_primary_baseline_small_sample_evidence_records(rows, validation_report())
     summary = build_primary_baseline_small_sample_evidence_summary(records)
+    comparison_rows = build_primary_baseline_small_sample_comparison_rows(records)
 
     assert len(records) == 4
+    assert len(comparison_rows) == 4
     assert summary["small_sample_evidence_ready"] is True
     assert summary["small_sample_common_protocol_ready"] is True
     assert summary["small_sample_fixed_fpr_boundary_ready_count"] == 4
@@ -83,6 +94,9 @@ def test_small_sample_evidence_records_are_ready_but_not_paper_claims() -> None:
     assert all(record.small_sample_attack_detection_ready is True for record in records)
     assert all(record.small_sample_common_protocol_ready is True for record in records)
     assert all(record.excluded_operating_points == EXCLUDED_OPERATING_POINTS for record in records)
+    assert {row["comparison_scope"] for row in comparison_rows} == {"small_sample_common_protocol"}
+    assert all(row["metric_status"] == "measured" for row in comparison_rows)
+    assert all(row["supports_paper_claim"] is False for row in comparison_rows)
 
 
 @pytest.mark.quick
@@ -104,6 +118,9 @@ def test_small_sample_evidence_writer_outputs_rebuildable_artifacts(tmp_path: Pa
     manifest = write_primary_baseline_small_sample_evidence_outputs(root=tmp_path)
     output_dir = tmp_path / "outputs" / "primary_baseline_small_sample_evidence"
     summary = json.loads((output_dir / "primary_baseline_small_sample_evidence_summary.json").read_text(encoding="utf-8"))
+    table_rows = list(
+        csv.DictReader((output_dir / "primary_baseline_small_sample_comparison_table.csv").open(encoding="utf-8"))
+    )
     records = [
         json.loads(line)
         for line in (output_dir / "primary_baseline_small_sample_evidence_records.jsonl").read_text(encoding="utf-8").splitlines()
@@ -112,7 +129,10 @@ def test_small_sample_evidence_writer_outputs_rebuildable_artifacts(tmp_path: Pa
 
     assert manifest["artifact_id"] == "primary_baseline_small_sample_evidence_manifest"
     assert len(records) == 4
+    assert len(table_rows) == 4
     assert summary["small_sample_evidence_ready"] is True
     assert summary["small_sample_common_protocol_ready"] is True
+    assert summary["small_sample_comparison_table_path"].endswith("primary_baseline_small_sample_comparison_table.csv")
     assert summary["supports_paper_claim"] is False
+    assert all(row["supports_paper_claim"] == "False" for row in table_rows)
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])

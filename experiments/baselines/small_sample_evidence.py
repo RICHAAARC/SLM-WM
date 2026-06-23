@@ -31,12 +31,19 @@ class SmallSampleEvidenceRecord:
     comparable_operating_point: str
     attack_family: str
     attack_name: str
+    metric_status: str
     small_sample_boundary: str
     paper_claim_boundary: str
     positive_count: int
     negative_count: int
     supported_record_count: int
     attack_record_count: int
+    true_positive_rate: float
+    false_positive_rate: float
+    clean_false_positive_rate: float
+    attacked_false_positive_rate: float
+    quality_score_proxy_mean: float
+    score_retention_mean: float
     evidence_path_count: int
     small_sample_evidence_ready: bool
     small_sample_fixed_fpr_boundary_ready: bool
@@ -72,6 +79,12 @@ def _bool_field(row: Mapping[str, Any], field_name: str) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+
+def _float_field(row: Mapping[str, Any], field_name: str) -> float:
+    """读取指标字段, 缺失时返回 0.0 以保持小样本表格可重建。"""
+
+    return float(row.get(field_name, 0.0) or 0.0)
 
 
 def _list_field(row: Mapping[str, Any], field_name: str) -> tuple[str, ...]:
@@ -142,12 +155,19 @@ def build_primary_baseline_small_sample_evidence_records(
             "comparable_operating_point": comparable_operating_point,
             "attack_family": attack_family,
             "attack_name": attack_name,
+            "metric_status": _str_field(row, "metric_status") or "not_recorded",
             "small_sample_boundary": SMALL_SAMPLE_BOUNDARY,
             "paper_claim_boundary": PAPER_CLAIM_BOUNDARY,
             "positive_count": positive_count,
             "negative_count": negative_count,
             "supported_record_count": supported_count,
             "attack_record_count": attack_count,
+            "true_positive_rate": _float_field(row, "true_positive_rate"),
+            "false_positive_rate": _float_field(row, "false_positive_rate"),
+            "clean_false_positive_rate": _float_field(row, "clean_false_positive_rate"),
+            "attacked_false_positive_rate": _float_field(row, "attacked_false_positive_rate"),
+            "quality_score_proxy_mean": _float_field(row, "quality_score_proxy_mean"),
+            "score_retention_mean": _float_field(row, "score_retention_mean"),
             "evidence_path_count": len(evidence_paths),
             "small_sample_evidence_ready": evidence_ready,
             "small_sample_fixed_fpr_boundary_ready": fixed_fpr_boundary_ready,
@@ -170,12 +190,19 @@ def build_primary_baseline_small_sample_evidence_records(
                 comparable_operating_point=payload["comparable_operating_point"],
                 attack_family=payload["attack_family"],
                 attack_name=payload["attack_name"],
+                metric_status=payload["metric_status"],
                 small_sample_boundary=payload["small_sample_boundary"],
                 paper_claim_boundary=payload["paper_claim_boundary"],
                 positive_count=payload["positive_count"],
                 negative_count=payload["negative_count"],
                 supported_record_count=payload["supported_record_count"],
                 attack_record_count=payload["attack_record_count"],
+                true_positive_rate=payload["true_positive_rate"],
+                false_positive_rate=payload["false_positive_rate"],
+                clean_false_positive_rate=payload["clean_false_positive_rate"],
+                attacked_false_positive_rate=payload["attacked_false_positive_rate"],
+                quality_score_proxy_mean=payload["quality_score_proxy_mean"],
+                score_retention_mean=payload["score_retention_mean"],
                 evidence_path_count=payload["evidence_path_count"],
                 small_sample_evidence_ready=payload["small_sample_evidence_ready"],
                 small_sample_fixed_fpr_boundary_ready=payload["small_sample_fixed_fpr_boundary_ready"],
@@ -188,6 +215,47 @@ def build_primary_baseline_small_sample_evidence_records(
             )
         )
     return tuple(records)
+
+
+def build_primary_baseline_small_sample_comparison_rows(
+    records: Iterable[SmallSampleEvidenceRecord],
+) -> list[dict[str, Any]]:
+    """把小样本 evidence records 转换为可读共同协议对比表行。
+
+    该表属于工程审计表: 它允许查看小样本链路下的指标和证据边界, 但每一行都保持
+    `supports_paper_claim=false`, 不能替代正式 full paper 统计表。
+    """
+
+    rows = []
+    for record in sorted(records, key=lambda item: item.baseline_id):
+        rows.append(
+            {
+                "baseline_id": record.baseline_id,
+                "comparison_scope": "small_sample_common_protocol",
+                "resource_profile": record.resource_profile,
+                "comparable_operating_point": record.comparable_operating_point,
+                "attack_family": record.attack_family,
+                "attack_name": record.attack_name,
+                "metric_status": record.metric_status,
+                "true_positive_rate": record.true_positive_rate,
+                "false_positive_rate": record.false_positive_rate,
+                "clean_false_positive_rate": record.clean_false_positive_rate,
+                "attacked_false_positive_rate": record.attacked_false_positive_rate,
+                "quality_score_proxy_mean": record.quality_score_proxy_mean,
+                "score_retention_mean": record.score_retention_mean,
+                "positive_count": record.positive_count,
+                "negative_count": record.negative_count,
+                "supported_record_count": record.supported_record_count,
+                "attack_record_count": record.attack_record_count,
+                "small_sample_evidence_ready": record.small_sample_evidence_ready,
+                "small_sample_common_protocol_ready": record.small_sample_common_protocol_ready,
+                "formal_import_ready": record.formal_import_ready,
+                "paper_claim_boundary": record.paper_claim_boundary,
+                "excluded_operating_points": ";".join(record.excluded_operating_points),
+                "supports_paper_claim": False,
+            }
+        )
+    return rows
 
 
 def build_primary_baseline_small_sample_evidence_summary(

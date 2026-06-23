@@ -1012,6 +1012,7 @@ Notebook 与 repository module 的跨边界数据
 | paper_claim_ready | governance | none | false | false | false | 当前证据是否允许支持论文级 claim。|
 | candidate_records_path | artifact | none | false | false | false | 小样本证据写出脚本读取的候选记录路径。|
 | validation_report_path | artifact | none | false | false | false | 小样本证据写出脚本读取的 validator 报告路径。|
+| small_sample_comparison_table_path | artifact | none | false | false | false | 主表 baseline 小样本共同协议对比表路径。|
 | baseline_small_sample_summary_path | artifact | none | false | false | false | 投稿就绪审计读取的主表 baseline 小样本证据摘要路径。|
 | small_sample_baseline_evidence_ready | governance | none | false | false | false | 投稿就绪审计中主表 baseline 小样本证据是否可审计。|
 | small_sample_baseline_common_protocol_ready | governance | none | false | false | false | 投稿就绪审计中主表 baseline 小样本共同协议是否就绪。|

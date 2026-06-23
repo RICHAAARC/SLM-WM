@@ -56,6 +56,7 @@ def make_audit_input_bundle() -> AuditInputBundle:
             "baseline_comparison_table": "outputs/external_baseline_comparison/baseline_comparison_table.csv",
             "baseline_small_sample_summary": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json",
             "baseline_small_sample_records": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_records.jsonl",
+            "baseline_small_sample_comparison_table": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_comparison_table.csv",
             "ablation_claim_summary": "outputs/internal_ablation_evidence/ablation_claim_summary.json",
             "quality_metrics_summary": "outputs/threshold_calibration/quality_metrics_summary.csv",
         },
