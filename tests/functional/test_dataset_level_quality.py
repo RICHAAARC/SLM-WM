@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 import zipfile
@@ -20,6 +21,9 @@ from experiments.protocol import (
     build_dataset_quality_summary,
 )
 from scripts.write_dataset_level_quality_outputs import write_dataset_level_quality_outputs
+from paper_workflow.colab_utils.dataset_level_quality import (
+    run_default_dataset_level_quality_from_drive_plan,
+)
 
 
 def write_image(path: Path, color: tuple[int, int, int]) -> None:
@@ -27,6 +31,12 @@ def write_image(path: Path, color: tuple[int, int, int]) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (16, 16), color=color).save(path)
+
+
+def file_digest(path: Path) -> str:
+    """计算测试图像文件的 SHA-256 摘要."""
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def registry_rows(root_path: Path) -> list[dict[str, object]]:
@@ -196,3 +206,79 @@ def test_dataset_quality_formal_feature_import_keeps_small_sample_blocked(tmp_pa
     assert summary["formal_feature_backend_ready"] is True
     assert summary["formal_sample_scale_ready"] is False
     assert any(path.endswith("dataset_quality_formal_feature_import_report.json") for path in manifest["output_paths"])
+
+
+@pytest.mark.quick
+def test_dataset_quality_drive_plan_imports_mock_formal_features(tmp_path: Path) -> None:
+    """Drive 前序包链路应能生成正式特征记录, 但小样本仍保持 FID / KID 阻断."""
+
+    staging_dir = tmp_path / "staging"
+    source_entry = Path("outputs/aligned_rescoring/aligned_images/source.png")
+    attacked_entry = Path("outputs/real_attack_evaluation/attacked_images/attacked.png")
+    source_file = staging_dir / source_entry
+    attacked_file = staging_dir / attacked_entry
+    write_image(source_file, (30, 60, 90))
+    write_image(attacked_file, (35, 65, 95))
+
+    real_attack_drive_dir = tmp_path / "drive" / "real_attack_evaluation"
+    aligned_drive_dir = tmp_path / "drive" / "aligned_rescoring"
+    real_attack_drive_dir.mkdir(parents=True)
+    aligned_drive_dir.mkdir(parents=True)
+    registry_entry = Path("outputs/real_attack_evaluation/real_attacked_image_registry.jsonl")
+    registry_file = staging_dir / registry_entry
+    registry_file.parent.mkdir(parents=True, exist_ok=True)
+    registry_file.write_text(
+        json.dumps(
+            {
+                "attack_name": "img2img_regeneration",
+                "source_image_path": source_entry.as_posix(),
+                "source_image_digest": file_digest(source_file),
+                "attacked_image_path": attacked_entry.as_posix(),
+                "attacked_image_digest": file_digest(attacked_file),
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    real_attack_package = real_attack_drive_dir / "real_attack_evaluation_package_20260623.zip"
+    aligned_package = aligned_drive_dir / "aligned_rescoring_package_20260623.zip"
+    with zipfile.ZipFile(real_attack_package, "w") as archive:
+        archive.write(registry_file, registry_entry.as_posix())
+        archive.write(attacked_file, attacked_entry.as_posix())
+    with zipfile.ZipFile(aligned_package, "w") as archive:
+        archive.write(source_file, source_entry.as_posix())
+
+    def mock_feature_extractor(image_path: Path) -> list[float]:
+        """测试用轻量特征后端, 避免默认测试下载 Inception 权重."""
+
+        return [float(len(image_path.name)), 0.5, 1.0]
+
+    result = run_default_dataset_level_quality_from_drive_plan(
+        root=tmp_path,
+        real_attack_evaluation_drive_dir=str(real_attack_drive_dir),
+        aligned_rescoring_drive_dir=str(aligned_drive_dir),
+        formal_min_sample_count=10,
+        feature_extractor=mock_feature_extractor,
+        environment_report={"feature_backend": FORMAL_FEATURE_BACKEND, "package_versions": {}},
+    )
+    output_dir = tmp_path / "outputs" / "dataset_level_quality"
+    feature_rows = [
+        json.loads(line)
+        for line in (output_dir / "dataset_quality_formal_feature_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    import_report = json.loads((output_dir / "dataset_quality_formal_feature_import_report.json").read_text(encoding="utf-8"))
+    summary = json.loads((output_dir / "dataset_quality_summary.json").read_text(encoding="utf-8"))
+
+    assert result["run_decision"] == "pass"
+    assert result["formal_feature_backend_ready"] is True
+    assert result["formal_fid_kid_ready"] is False
+    assert result["unsupported_reason"] == FORMAL_FID_KID_SAMPLE_BLOCKER
+    assert len(feature_rows) == 2
+    assert {row["dataset_quality_image_role"] for row in feature_rows} == {"source", "comparison"}
+    assert import_report["accepted_feature_pair_count"] == 1
+    assert import_report["formal_sample_scale_ready"] is False
+    assert summary["formal_feature_backend_ready"] is True
+    assert (output_dir / "dataset_level_quality_colab_manifest.local.json").exists()

@@ -826,6 +826,9 @@ Notebook 与 repository module 的跨边界数据
 | formal_feature_backend_ready | governance | none | false | false | false | 数据集级质量正式视觉特征后端是否已导入并通过 schema 检查。 |
 | formal_sample_scale_ready | governance | none | false | false | false | 数据集级质量正式 FID / KID 是否具备足够样本规模。 |
 | formal_min_sample_count | governance | none | false | false | false | 数据集级质量正式 FID / KID 协议要求的最小图像对数量。 |
+| formal_feature_records_path | artifact | none | false | false | false | 数据集级质量正式视觉特征 JSONL 记录路径。 |
+| feature_model_name | runtime | none | false | false | false | 数据集级质量正式视觉特征提取所使用的模型名称。 |
+| feature_device_name | runtime | none | false | false | false | 数据集级质量正式视觉特征提取所使用的运行设备。 |
 | dataset_quality_metrics_path | artifact | none | false | false | false | 数据集级质量指标表路径。 |
 | real_attack_registry_path | artifact | none | false | false | false | 数据集级质量脚本读取的真实攻击图像 registry 路径。 |
 | dataset_quality_image_resolution_records_path | artifact | none | false | false | false | 数据集级质量图像解析记录 JSONL 路径。 |
@@ -843,6 +846,12 @@ Notebook 与 repository module 的跨边界数据
 | missing_image_file_count | metric | none | false | false | false | 数据集级质量图像解析流程仍然缺失的图像文件数量。 |
 | materialized_image_input_count | metric | none | false | false | false | 从前序结果 ZIP 物化到 outputs 下的图像输入数量。 |
 | input_package_count | metric | none | false | false | false | 数据集级质量指标脚本读取的前序结果 ZIP 数量。 |
+| real_attack_evaluation_drive_package_path | artifact | none | false | false | false | Google Drive 中真实攻击闭环前序包路径。 |
+| real_attack_evaluation_drive_package_digest | artifact | none | false | false | false | Google Drive 中真实攻击闭环前序包 SHA-256 摘要。 |
+| real_attack_evaluation_input_package_path | artifact | none | false | false | false | 复制到本次数据集级质量输入目录的真实攻击闭环包路径。 |
+| real_attack_evaluation_input_package_digest | artifact | none | false | false | false | 本次数据集级质量输入目录中真实攻击闭环包的 SHA-256 摘要。 |
+| real_attack_extracted_entry_count | metric | none | false | false | false | 从真实攻击闭环前序包中解出的 registry 与 attacked image 文件数量。 |
+| real_attack_extracted_entries | artifact | none | false | false | false | 从真实攻击闭环前序包中解出的 registry 与 attacked image 文件路径集合。 |
 | dataset_quality_summary | artifact | none | false | false | false | 论文证据审计中数据集级质量摘要的逻辑路径键。 |
 | dataset_quality_metrics | artifact | none | false | false | false | 论文证据审计中数据集级质量指标表的逻辑路径键。 |
 | audit_item_id | governance | none | false | false | false | 论文证据审计表中单个可重建产物检查项的稳定标识。 |

@@ -688,19 +688,21 @@
 1. 论文产物证据审计已经消费最新 threshold、attack matrix、external baseline、小样本 baseline、dataset-level quality 和 internal ablation 产物。
 2. `submission_blocker_report.json` 已将缺口收敛到3项, 并移除了已完成的真实 attacked image 与再扩散 GPU 验证阻断项。
 3. `artifact_builder_readiness_report.json` 保持 artifact builder 可重建, 但 paper-ready artifact 数量仍为0。
+4. 已新增 `paper_workflow/dataset_level_quality_run.ipynb` 与 `paper_workflow/colab_utils/dataset_level_quality.py`, 用于从 Google Drive 中的真实攻击包和 aligned rescoring 包生成 Inception 特征 JSONL, 再调用正式数据集级质量脚本重建 FID / KID 治理产物。
 
 ### stage16 当前产物摘要
 
 1. `artifact_builder_ready=true`, `paper_artifact_audit_ready=true`, `claim_audit_row_count=9`, `table_readiness_row_count=7`, `figure_readiness_row_count=5`。
 2. `rebuildable_artifact_count=11`, `blocked_artifact_count=1`, `paper_ready_artifact_count=0`。
 3. `submission_blocker_report.json` 显示 `gap_count=3`, `critical_gap_count=2`, `blocking_claim_count=5`, `primary_blockers=[gap_baseline_results, gap_full_main_sample_scale, gap_dataset_level_fid_kid]`。
-4. dataset-level quality 当前为 `dataset_level_quality_proxy_ready=true`, 但 `formal_feature_backend_ready=false`, `formal_sample_scale_ready=false`, `formal_fid_kid_ready=false`。
+4. dataset-level quality 当前本地重建仍为 `dataset_level_quality_proxy_ready=true`, `formal_feature_backend_ready=false`, `formal_sample_scale_ready=false`, `formal_fid_kid_ready=false`; 新增 Colab 入口用于把 `formal_feature_backend_ready` 推进为可验证状态, 但小样本下 `formal_sample_scale_ready` 与 `formal_fid_kid_ready` 仍应保持 false。
 
 ### stage16 当前验证结果
 
 | command | result |
 | --- | --- |
 | `python scripts/write_paper_artifact_evidence_audit_outputs.py` | pass, `gap_count=3`, `submission_ready=false` |
+| `pytest tests/functional/test_dataset_level_quality.py tests/constraints/test_notebook_entrypoint_contract.py -q` | pass, 数据集级质量特征导入 helper 与 Colab 入口契约通过 |
 | `pytest tests/functional/test_paper_artifact_evidence_audit.py -q` | pass |
 | `python tools/harness/run_all_audits.py` | pass |
 

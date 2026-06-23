@@ -14,6 +14,7 @@ from paper_workflow.colab_utils.attention_latent_injection import package_attent
 from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
 from paper_workflow.colab_utils.external_baseline_gpu_smoke import package_external_baseline_gpu_smoke_outputs
 from paper_workflow.colab_utils.real_attack_evaluation import package_real_attack_evaluation_outputs
+from paper_workflow.colab_utils.dataset_level_quality import package_dataset_level_quality_outputs
 from paper_workflow.colab_utils.threshold_calibration import package_threshold_calibration_outputs
 from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outputs
 from tools.harness.lib.naming_rules import is_allowed_file_name
@@ -29,6 +30,7 @@ ALIGNED_RESCORING_NOTEBOOK_PATH = Path("paper_workflow/aligned_rescoring_run.ipy
 THRESHOLD_CALIBRATION_NOTEBOOK_PATH = Path("paper_workflow/threshold_calibration_run.ipynb")
 REAL_ATTACK_EVALUATION_NOTEBOOK_PATH = Path("paper_workflow/real_attack_evaluation_run.ipynb")
 EXTERNAL_BASELINE_GPU_SMOKE_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_gpu_smoke_run.ipynb")
+DATASET_LEVEL_QUALITY_NOTEBOOK_PATH = Path("paper_workflow/dataset_level_quality_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_NOTEBOOK_PATH,
     INJECTION_NOTEBOOK_PATH,
@@ -40,6 +42,7 @@ NOTEBOOK_PATHS = (
     THRESHOLD_CALIBRATION_NOTEBOOK_PATH,
     REAL_ATTACK_EVALUATION_NOTEBOOK_PATH,
     EXTERNAL_BASELINE_GPU_SMOKE_NOTEBOOK_PATH,
+    DATASET_LEVEL_QUALITY_NOTEBOOK_PATH,
 )
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
@@ -314,6 +317,35 @@ def test_colab_notebook_delegates_external_baseline_gpu_smoke_logic_to_helper() 
     assert "del sys.modules" not in joined_source
     assert '"diffusers==' not in joined_source
     assert '"transformers==' not in joined_source
+
+
+@pytest.mark.constraint
+def test_colab_notebook_delegates_dataset_level_quality_logic_to_helper() -> None:
+    """Notebook 必须复用 repository helper 执行数据集级质量特征导入."""
+    payload = json.loads(DATASET_LEVEL_QUALITY_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+    first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+    first_code_source = "".join(first_code_cell.get("source", []))
+
+    assert "paper_workflow.colab_utils.dataset_level_quality" in joined_source
+    assert "run_default_dataset_level_quality_from_drive_plan" in joined_source
+    assert "package_dataset_level_quality_outputs" in joined_source
+    assert "drive.mount('/content/drive')" in first_code_source
+    assert "/content/drive/MyDrive/SLM/dataset_level_quality" in joined_source
+    assert "/content/drive/MyDrive/SLM/real_attack_evaluation" in joined_source
+    assert "/content/drive/MyDrive/SLM/aligned_rescoring" in joined_source
+    assert "real_attack_evaluation_package_*.zip" in joined_source
+    assert "aligned_rescoring_package_*.zip" in joined_source
+    assert "formal_feature_backend_ready" in joined_source
+    assert "formal_fid_kid_ready" in joined_source
+    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
+    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
+    assert "archive_name=archive_name" in joined_source
+    assert "--force-reinstall" not in joined_source
+    assert "numpy pillow" not in joined_source
+    assert "del sys.modules" not in joined_source
+    assert '"torch==' not in joined_source
+    assert '"torchvision==' not in joined_source
 
 
 @pytest.mark.constraint
@@ -636,3 +668,59 @@ def test_external_baseline_gpu_smoke_outputs_can_be_packaged_and_mirrored(tmp_pa
         assert "outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_package_input_manifest.json" in names
         assert "outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_archive_summary.json" in names
         assert "outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_archive_manifest.local.json" in names
+
+
+@pytest.mark.constraint
+def test_dataset_level_quality_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
+    """数据集级质量产物应能打包, 且包含正式特征导入核对文件."""
+    quality_dir = tmp_path / "outputs" / "dataset_level_quality"
+    quality_dir.mkdir(parents=True)
+    (quality_dir / "dataset_level_quality_result.json").write_text('{"run_decision":"pass"}\n', encoding="utf-8")
+    (quality_dir / "dataset_quality_image_records.jsonl").write_text('{"dataset_quality_record_id":"sample"}\n', encoding="utf-8")
+    (quality_dir / "dataset_quality_image_resolution_records.jsonl").write_text(
+        '{"image_resolution_record_id":"sample"}\n',
+        encoding="utf-8",
+    )
+    (quality_dir / "dataset_quality_formal_feature_records.jsonl").write_text(
+        '{"dataset_quality_record_id":"sample","dataset_quality_image_role":"source"}\n',
+        encoding="utf-8",
+    )
+    (quality_dir / "dataset_quality_formal_feature_import_report.json").write_text(
+        '{"formal_feature_backend_ready":true}\n',
+        encoding="utf-8",
+    )
+    (quality_dir / "dataset_quality_metrics.csv").write_text("quality_metric_name,metric_status\nfid,unsupported\n", encoding="utf-8")
+    (quality_dir / "dataset_quality_summary.json").write_text('{"formal_fid_kid_ready":false}\n', encoding="utf-8")
+    (quality_dir / "dataset_level_quality_environment_report.json").write_text('{"cuda_available":true}\n', encoding="utf-8")
+    (quality_dir / "manifest.local.json").write_text('{"artifact_id":"dataset_level_quality_manifest"}\n', encoding="utf-8")
+    (quality_dir / "dataset_level_quality_colab_manifest.local.json").write_text(
+        '{"artifact_id":"dataset_level_quality_colab_manifest"}\n',
+        encoding="utf-8",
+    )
+
+    drive_dir = tmp_path / "drive_mirror"
+    record = package_dataset_level_quality_outputs(root=tmp_path, drive_output_dir=str(drive_dir))
+    archive_path = tmp_path / record.archive_path
+
+    assert archive_path.exists()
+    assert (drive_dir / "dataset_level_quality_package.zip").exists()
+    assert record.archive_digest == record.drive_archive_digest
+    assert record.archive_entry_count >= 10
+    assert (quality_dir / "dataset_level_quality_archive_summary.json").exists()
+    assert (quality_dir / "dataset_level_quality_archive_manifest.local.json").exists()
+
+    with ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+        assert "outputs/dataset_level_quality/dataset_level_quality_result.json" in names
+        assert "outputs/dataset_level_quality/dataset_quality_image_records.jsonl" in names
+        assert "outputs/dataset_level_quality/dataset_quality_image_resolution_records.jsonl" in names
+        assert "outputs/dataset_level_quality/dataset_quality_formal_feature_records.jsonl" in names
+        assert "outputs/dataset_level_quality/dataset_quality_formal_feature_import_report.json" in names
+        assert "outputs/dataset_level_quality/dataset_quality_metrics.csv" in names
+        assert "outputs/dataset_level_quality/dataset_quality_summary.json" in names
+        assert "outputs/dataset_level_quality/dataset_level_quality_environment_report.json" in names
+        assert "outputs/dataset_level_quality/manifest.local.json" in names
+        assert "outputs/dataset_level_quality/dataset_level_quality_colab_manifest.local.json" in names
+        assert "outputs/dataset_level_quality/dataset_level_quality_package_input_manifest.json" in names
+        assert "outputs/dataset_level_quality/dataset_level_quality_archive_summary.json" in names
+        assert "outputs/dataset_level_quality/dataset_level_quality_archive_manifest.local.json" in names
