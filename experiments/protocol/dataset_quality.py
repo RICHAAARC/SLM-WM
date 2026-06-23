@@ -69,6 +69,28 @@ def _row_digest(row: Mapping[str, Any], field_name: str, path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _resolve_existing_image_path(
+    image_path_text: str,
+    root_path: Path,
+    image_search_roots: Iterable[Path] = (),
+) -> Path:
+    """在仓库根目录和补充图像根目录中解析图像路径。
+
+    该函数属于通用工程写法: 记录层保留原始相对路径, 度量层只在需要读取图像时解析实际文件位置。
+    这样可以复用同一批 records, 同时允许前序 Colab 产物从 Google Drive ZIP 中解包到受治理的 outputs 子目录后参与计算。
+    """
+
+    raw_path = Path(image_path_text)
+    if raw_path.is_absolute():
+        return raw_path.resolve()
+    candidates = [(root_path / raw_path).resolve()]
+    candidates.extend((Path(search_root) / raw_path).resolve() for search_root in image_search_roots)
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
+
+
 def extract_pixel_histogram_feature(image_path: Path, image_size: int = 32, hist_bins: int = 8) -> np.ndarray:
     """从图像中提取轻量 RGB 统计特征。
 
@@ -160,6 +182,7 @@ def build_dataset_quality_image_records(
 def build_dataset_quality_metric_rows(
     records: Iterable[DatasetQualityImageRecord],
     root_path: Path,
+    image_search_roots: Iterable[Path] = (),
 ) -> list[dict[str, Any]]:
     """构造数据集级质量指标表。
 
@@ -167,8 +190,15 @@ def build_dataset_quality_metric_rows(
     """
 
     record_values = tuple(records)
-    source_paths = tuple((root_path / record.source_image_path).resolve() for record in record_values)
-    comparison_paths = tuple((root_path / record.comparison_image_path).resolve() for record in record_values)
+    image_root_values = tuple(Path(path).resolve() for path in image_search_roots)
+    source_paths = tuple(
+        _resolve_existing_image_path(record.source_image_path, root_path, image_root_values)
+        for record in record_values
+    )
+    comparison_paths = tuple(
+        _resolve_existing_image_path(record.comparison_image_path, root_path, image_root_values)
+        for record in record_values
+    )
     missing_image_file_count = sum(1 for path in source_paths + comparison_paths if not path.is_file())
     source_count = len(source_paths)
     comparison_count = len(comparison_paths)

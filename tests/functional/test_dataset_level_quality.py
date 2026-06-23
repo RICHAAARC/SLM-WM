@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+import zipfile
 
 from PIL import Image
 import pytest
@@ -96,3 +97,49 @@ def test_dataset_quality_writer_outputs_rebuildable_artifacts(tmp_path: Path) ->
     assert summary["dataset_level_quality_proxy_ready"] is True
     assert summary["formal_fid_kid_ready"] is False
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])
+
+
+@pytest.mark.quick
+def test_dataset_quality_writer_materializes_missing_images_from_input_package(tmp_path: Path) -> None:
+    """当前序图像只存在于 ZIP 包中时, 写出脚本应只物化所需图像并完成小样本 proxy 计算。"""
+
+    source_path = tmp_path / "outputs" / "aligned_rescoring" / "aligned_images" / "source_from_package.png"
+    attacked_path = tmp_path / "outputs" / "real_attack_evaluation" / "attacked_images" / "attacked_existing.png"
+    write_image(source_path, (120, 10, 10))
+    write_image(attacked_path, (100, 20, 20))
+
+    package_path = tmp_path / "outputs" / "input_packages" / "aligned_rescoring_package.zip"
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(package_path, "w") as archive:
+        archive.write(source_path, source_path.relative_to(tmp_path).as_posix())
+    source_path.unlink()
+
+    registry_path = tmp_path / "outputs" / "real_attack_evaluation" / "real_attacked_image_registry.jsonl"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "attack_name": "img2img_regeneration",
+                "source_image_path": "outputs/aligned_rescoring/aligned_images/source_from_package.png",
+                "attacked_image_path": attacked_path.relative_to(tmp_path).as_posix(),
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    manifest = write_dataset_level_quality_outputs(root=tmp_path, input_package_paths=(package_path,))
+    output_dir = tmp_path / "outputs" / "dataset_level_quality"
+    summary = json.loads((output_dir / "dataset_quality_summary.json").read_text(encoding="utf-8"))
+    resolution_rows = [
+        json.loads(line)
+        for line in (output_dir / "dataset_quality_image_resolution_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert summary["dataset_level_quality_proxy_ready"] is True
+    assert summary["formal_fid_kid_ready"] is False
+    assert summary["materialized_image_input_count"] == 1
+    assert any(row["resolution_status"] == "materialized_from_input_package" for row in resolution_rows)
+    assert any("materialized_image_inputs" in path for path in manifest["output_paths"])

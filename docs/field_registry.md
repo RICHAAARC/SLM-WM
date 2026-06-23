@@ -813,6 +813,21 @@ Notebook 与 repository module 的跨边界数据
 | formal_fid_kid_ready | governance | none | false | false | false | 正式 FID / KID 是否已由论文约定特征后端完成。 |
 | dataset_quality_metrics_path | artifact | none | false | false | false | 数据集级质量指标表路径。 |
 | real_attack_registry_path | artifact | none | false | false | false | 数据集级质量脚本读取的真实攻击图像 registry 路径。 |
+| dataset_quality_image_resolution_records_path | artifact | none | false | false | false | 数据集级质量图像解析记录 JSONL 路径。 |
+| image_resolution_record_id | artifact | none | true | false | false | 单个数据集级质量图像解析记录的稳定标识。 |
+| image_resolution_record_digest | artifact | none | true | false | false | 单个数据集级质量图像解析记录的稳定摘要。 |
+| requested_image_path | artifact | none | true | false | false | 数据集级质量指标请求读取的原始图像路径。 |
+| resolved_image_path | artifact | none | true | false | false | 图像解析流程最终找到或物化的可读取图像路径。 |
+| resolved_from_package_path | artifact | none | true | false | false | 图像从前序结果 ZIP 物化时对应的来源包路径。 |
+| resolved_image_digest | artifact | none | true | false | false | 图像解析流程最终读取到的图像文件摘要。 |
+| resolved_from_package_digest | artifact | none | true | false | false | 图像来源 ZIP 包的 SHA-256 摘要。 |
+| resolution_status | governance | none | true | false | false | 单个图像路径的解析状态, 例如已存在、从输入包物化或缺失。 |
+| materialized_image_input | artifact | none | true | false | false | 图像是否由前序结果 ZIP 物化到 outputs 下作为本次质量指标输入。 |
+| image_resolution_record_count | metric | none | false | false | false | 数据集级质量图像解析记录总数。 |
+| resolved_image_file_count | metric | none | false | false | false | 数据集级质量图像解析流程成功找到的图像文件数量。 |
+| missing_image_file_count | metric | none | false | false | false | 数据集级质量图像解析流程仍然缺失的图像文件数量。 |
+| materialized_image_input_count | metric | none | false | false | false | 从前序结果 ZIP 物化到 outputs 下的图像输入数量。 |
+| input_package_count | metric | none | false | false | false | 数据集级质量指标脚本读取的前序结果 ZIP 数量。 |
 | dataset_quality_summary | artifact | none | false | false | false | 论文证据审计中数据集级质量摘要的逻辑路径键。 |
 | dataset_quality_metrics | artifact | none | false | false | false | 论文证据审计中数据集级质量指标表的逻辑路径键。 |
 | audit_item_id | governance | none | false | false | false | 论文证据审计表中单个可重建产物检查项的稳定标识。 |
