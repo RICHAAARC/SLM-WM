@@ -36,6 +36,9 @@ DEFAULT_ATTACK_FAMILY_METRICS_PATH = Path("outputs/attack_matrix/attack_family_m
 DEFAULT_ATTACK_MATRIX_MANIFEST_PATH = Path("outputs/attack_matrix/manifest.local.json")
 DEFAULT_THRESHOLD_REPORT_PATH = Path("outputs/threshold_calibration/threshold_degeneracy_report.json")
 DEFAULT_BASELINE_RESULT_RECORDS_PATH = Path("outputs/external_baseline_results/baseline_result_records.jsonl")
+DEFAULT_FORMAL_IMPORT_READINESS_SUMMARY_PATH = Path(
+    "outputs/external_baseline_results/baseline_formal_import_readiness_summary.json"
+)
 DEFAULT_BASELINE_SOURCE_REGISTRY_PATH = Path("external_baseline/source_registry.json")
 
 
@@ -52,6 +55,14 @@ def json_line(value: dict[str, Any]) -> str:
 def read_json(path: Path) -> dict[str, Any]:
     """读取 JSON 文件。"""
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_optional_json(path: Path) -> dict[str, Any]:
+    """读取可选 JSON 文件; 文件缺失时返回空字典。"""
+
+    if not path.exists():
+        return {}
+    return read_json(path)
 
 
 def read_csv_rows(path: Path) -> list[dict[str, Any]]:
@@ -138,6 +149,8 @@ def build_runtime_report(
     source_registry: dict[str, Any],
     imported_result_count: int,
     formal_import_validation: dict[str, Any],
+    formal_import_readiness_summary: dict[str, Any],
+    formal_import_readiness_summary_path: str,
 ) -> dict[str, Any]:
     """构造外部 baseline 对比运行摘要。"""
     baseline_count = len(baseline_metric_rows)
@@ -145,6 +158,7 @@ def build_runtime_report(
     official_source_ready_count = sum(1 for row in baseline_metric_rows if row["baseline_official_code_ready"])
     protocol_compatible_count = sum(1 for row in baseline_metric_rows if row["baseline_protocol_compatible"])
     unsupported_reasons = sorted({row["unsupported_reason"] for row in baseline_metric_rows if row["unsupported_reason"]})
+    primary_formal_ready = bool(formal_import_readiness_summary.get("primary_baseline_formal_ready", False))
     return {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -158,6 +172,13 @@ def build_runtime_report(
         "rejected_formal_import_count": int(formal_import_validation.get("rejected_formal_import_count", 0)),
         "formal_import_issue_count": int(formal_import_validation.get("formal_import_issue_count", 0)),
         "formal_import_validation_ready": bool(formal_import_validation.get("formal_import_validation_ready", False)),
+        "formal_import_readiness_summary_path": formal_import_readiness_summary_path,
+        "primary_baseline_formal_ready": primary_formal_ready,
+        "formal_result_ready_count": int(formal_import_readiness_summary.get("formal_result_ready_count", 0)),
+        "blocked_primary_baseline_ids": list(formal_import_readiness_summary.get("blocked_primary_baseline_ids", ())),
+        "dominant_formal_import_blocking_reasons": list(
+            formal_import_readiness_summary.get("dominant_blocking_reasons", ())
+        ),
         "baseline_result_ready_count": ready_count,
         "comparison_protocol_ready": bool(attack_manifest.get("attack_metrics_ready"))
         and not threshold_report.get("threshold_degenerate", True),
@@ -178,6 +199,7 @@ def write_external_baseline_comparison_outputs(
     attack_matrix_manifest_path: str | Path = DEFAULT_ATTACK_MATRIX_MANIFEST_PATH,
     threshold_report_path: str | Path = DEFAULT_THRESHOLD_REPORT_PATH,
     baseline_result_records_path: str | Path = DEFAULT_BASELINE_RESULT_RECORDS_PATH,
+    formal_import_readiness_summary_path: str | Path = DEFAULT_FORMAL_IMPORT_READINESS_SUMMARY_PATH,
     baseline_source_registry_path: str | Path = DEFAULT_BASELINE_SOURCE_REGISTRY_PATH,
 ) -> dict[str, Any]:
     """写出外部 baseline 对比 records, 表格, 运行报告与 manifest。"""
@@ -190,12 +212,14 @@ def write_external_baseline_comparison_outputs(
     resolved_attack_matrix_manifest_path = resolve_input_path(root_path, attack_matrix_manifest_path)
     resolved_threshold_report_path = resolve_input_path(root_path, threshold_report_path)
     resolved_baseline_result_records_path = resolve_input_path(root_path, baseline_result_records_path)
+    resolved_formal_import_readiness_summary_path = resolve_input_path(root_path, formal_import_readiness_summary_path)
     resolved_baseline_source_registry_path = resolve_input_path(root_path, baseline_source_registry_path)
 
     attack_manifest = read_json(resolved_attack_manifest_path)
     attack_matrix_manifest = read_json(resolved_attack_matrix_manifest_path)
     threshold_report = read_json(resolved_threshold_report_path)
     attack_rows = read_csv_rows(resolved_attack_family_metrics_path)
+    formal_import_readiness_summary = read_optional_json(resolved_formal_import_readiness_summary_path)
     baseline_source_registry = load_baseline_source_registry(resolved_baseline_source_registry_path)
     baseline_specs = overlay_specs_with_source_registry(
         default_baseline_specs(),
@@ -227,6 +251,10 @@ def write_external_baseline_comparison_outputs(
         baseline_source_registry,
         len(baseline_result_records),
         formal_import_validation,
+        formal_import_readiness_summary,
+        relative_or_absolute(resolved_formal_import_readiness_summary_path, root_path)
+        if resolved_formal_import_readiness_summary_path.exists()
+        else "",
     )
 
     observations_path = resolved_output_dir / "baseline_observations.jsonl"
@@ -315,6 +343,8 @@ def write_external_baseline_comparison_outputs(
     ]
     if resolved_baseline_result_records_path.exists():
         input_path_candidates.append(relative_or_absolute(resolved_baseline_result_records_path, root_path))
+    if resolved_formal_import_readiness_summary_path.exists():
+        input_path_candidates.append(relative_or_absolute(resolved_formal_import_readiness_summary_path, root_path))
     if resolved_baseline_source_registry_path.exists():
         input_path_candidates.append(relative_or_absolute(resolved_baseline_source_registry_path, root_path))
     input_paths = tuple(input_path_candidates)
@@ -339,6 +369,10 @@ def write_external_baseline_comparison_outputs(
             "summary_digest": build_stable_digest(summary),
             "baseline_source_registry_path": relative_or_absolute(resolved_baseline_source_registry_path, root_path),
             "baseline_result_records_path": relative_or_absolute(resolved_baseline_result_records_path, root_path),
+            "formal_import_readiness_summary_path": relative_or_absolute(
+                resolved_formal_import_readiness_summary_path,
+                root_path,
+            ),
             "formal_import_validation_report_path": relative_or_absolute(formal_import_validation_path, root_path),
         },
         code_version=resolve_code_version(root_path),
@@ -375,6 +409,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="受治理外部 baseline 结果 JSONL 路径; 缺失时保持 unsupported 状态。",
     )
     parser.add_argument(
+        "--formal-import-readiness-summary-path",
+        default=str(DEFAULT_FORMAL_IMPORT_READINESS_SUMMARY_PATH),
+        help="主表 baseline 正式导入 readiness 摘要路径; 缺失时只使用 validator 摘要。",
+    )
+    parser.add_argument(
         "--baseline-source-registry-path",
         default=str(DEFAULT_BASELINE_SOURCE_REGISTRY_PATH),
         help="外部 baseline 官方源码登记 JSON 路径; 缺失时仅使用默认 spec。",
@@ -393,6 +432,7 @@ def main() -> None:
         attack_matrix_manifest_path=args.attack_matrix_manifest_path,
         threshold_report_path=args.threshold_report_path,
         baseline_result_records_path=args.baseline_result_records_path,
+        formal_import_readiness_summary_path=args.formal_import_readiness_summary_path,
         baseline_source_registry_path=args.baseline_source_registry_path,
     )
     print(stable_json_text(manifest), end="")

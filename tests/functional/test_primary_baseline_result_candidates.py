@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 from zipfile import ZipFile
@@ -129,6 +130,10 @@ def test_primary_baseline_candidate_writer_imports_packages_without_promoting_sm
     validation = json.loads(
         (output_dir / "baseline_result_candidate_validation_report.json").read_text(encoding="utf-8")
     )
+    readiness_rows = list(csv.DictReader((output_dir / "baseline_formal_import_readiness.csv").open(encoding="utf-8")))
+    readiness_summary = json.loads(
+        (output_dir / "baseline_formal_import_readiness_summary.json").read_text(encoding="utf-8")
+    )
     reasons = {issue["reason"] for issue in validation["issues"]}
 
     assert manifest["artifact_id"] == "primary_baseline_result_candidate_import_manifest"
@@ -142,6 +147,20 @@ def test_primary_baseline_candidate_writer_imports_packages_without_promoting_sm
     assert all(row["evidence_paths"] for row in records)
     assert validation["accepted_formal_import_count"] == 0
     assert validation["rejected_formal_import_count"] == 4
+    assert len(readiness_rows) == 4
+    assert readiness_summary["primary_baseline_formal_ready"] is False
+    assert readiness_summary["formal_result_ready_count"] == 0
+    assert readiness_summary["blocked_primary_baseline_ids"] == [
+        "tree_ring",
+        "gaussian_shading",
+        "shallow_diffuse",
+        "t2smark",
+    ]
+    tree_readiness = next(row for row in readiness_rows if row["baseline_id"] == "tree_ring")
+    t2smark_readiness = next(row for row in readiness_rows if row["baseline_id"] == "t2smark")
+    assert tree_readiness["missing_resource_profile_full_main"] == "True"
+    assert t2smark_readiness["missing_resource_profile_full_main"] == "False"
+    assert "full_main_prompt_protocol_ready_required" in tree_readiness["blocking_reasons"]
     assert "full_main_resource_profile_required" in reasons
     assert "full_main_prompt_protocol_ready_required" in reasons
     assert "fixed_fpr_baseline_calibration_ready_required" in reasons

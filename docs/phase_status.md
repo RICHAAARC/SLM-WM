@@ -515,194 +515,154 @@
 
 | item | value |
 | --- | --- |
-| construction_unit_name | `stage_12_threshold_calibration_metrics` |
-| phase_status | `local_calibration_protocol_ready` |
+| construction_unit_name | `threshold_calibration` |
+| phase_status | `fixed_fpr_and_rescue_boundary_ready` |
 | executor | `codex_agent` |
-| execution_date | `2026-06-20` |
-| input_manifest | `outputs/geometric_rescue/manifest.local.json`; `outputs/geometric_rescue/geometry_rescue_audit.json`; `outputs/geometric_rescue/aligned_detection_records.jsonl` |
+| execution_date | `2026-06-23` |
+| input_manifest | `outputs/geometric_rescue/manifest.local.json`; `outputs/geometric_rescue/geometry_rescue_audit.json`; `outputs/geometric_rescue/aligned_detection_records.jsonl`; `outputs/aligned_rescoring/manifest.local.json` |
 | expected_output_manifest | `outputs/threshold_calibration/manifest.local.json` |
 | expected_outputs | `outputs/threshold_calibration/calibration_thresholds.json`; `outputs/threshold_calibration/fixed_fpr_operating_points.csv`; `outputs/threshold_calibration/standard_watermark_metrics.csv`; `outputs/threshold_calibration/quality_metrics_summary.csv`; `outputs/threshold_calibration/roc_curve_points.csv`; `outputs/threshold_calibration/det_curve_points.csv`; `outputs/threshold_calibration/score_distribution_table.csv`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/threshold_calibration/rescue_fpr_audit.csv`; `outputs/threshold_calibration/manifest.local.json` |
-| blocking_items | 褰撳墠 fixed-FPR 妗嗘灦鍙敱 governed records 閲嶅缓, 浣?`aligned_content_score` 浠嶆潵鑷湰鍦颁唬鐞? 鏈€鏂扮湡瀹?aligned rescoring 鍖呭凡鍚戜笅娓镐紶鎾?PSNR銆丼SIM銆丮SE銆丮AE銆丩PIPS 涓?CLIP score, FID / KID 浠嶆槸 dataset-level 鏈绠楁寚鏍? 鍥犳 `full_method_claim_ready=false`銆?|
-| fallback_path | 鑻?rescue 鍚?evidence-level FPR 瓒呰繃鐩爣 operating point, 鍙厑璁镐繚鐣?raw content claim 鎴栧皢瀹屾暣绯荤粺 fixed-FPR 涓诲紶鏍囪涓?unsupported; 涓嶅厑璁稿彧鎶ュ憡 raw content FPR銆?|
-| invariants | 鍐呭闃堝€煎彧鐢?calibration clean negative 鍐荤粨; test split 涓嶅弬涓庤皟闃堝€? clean negative 涓?attacked negative 鍒嗗紑瀹¤; rescue window 涓?fail reason gate 淇濇寔鍐荤粨銆?|
-| next_stage_entry | 鍙互杩涘叆鏀诲嚮鐭╅樀涓庡啀鎵╂暎鏀诲嚮璁板綍鏋勫缓; 鑻ヨ鏀拺璁烘枃绾?fixed-FPR 涓诲紶, 浠嶉渶鎶婄湡瀹?aligned latent 閲嶅垽鎵╁睍鍒板畬鏁?calibration / test 瑙勬ā, 骞惰ˉ榻?dataset-level FID / KID 涓庣湡瀹炲浘鍍忔敾鍑婚棴鐜€?|
+| blocking_items | fixed-FPR 与 rescue 的统计边界已经可审计并已冻结; 论文级完整方法 claim 仍为 `full_method_claim_ready=false`, 原因是当前样本规模、外部 baseline 正式结果与 dataset-level FID / KID 尚未补齐。 |
+| fallback_path | 若后续重跑发现 calibration clean negative 的 observed FPR 超过目标 operating point, 应保持完整系统 fixed-FPR 主张为 unsupported; 不允许用 attacked negative 或 rescue 后样本改写 fixed-FPR 分母。 |
+| invariants | fixed-FPR 分母仅使用 calibration clean negative; attacked negative 只作为鲁棒性诊断, 不治理 fixed-FPR 分母; rescue window 与 fail reason gate 已冻结, rescue 不改变 FPR 分母。 |
+| next_stage_entry | 可继续进入真实攻击闭环、外部 baseline 导入、内部消融与论文产物审计; 若要形成论文级统计结论, 需要扩展到 full-main 样本规模并补齐 dataset-level FID / KID。 |
 
-### stage12 宸插畬鎴愬唴瀹?
+### stage12 当前完成内容
 
-1. 鏇存柊 `experiments/protocol/calibration.py`, 鏂板 `FixedFprCalibrationConfig`銆乣FixedFprThreshold`銆乫ixed-FPR 闃堝€煎喕缁撱€佹牎鍑嗗悗鍒ゅ畾銆丄UC銆丷OC / DET 涓?score distribution 璁＄畻鍑芥暟銆?
-2. 鏇存柊 `experiments/protocol/__init__.py`, 瀵煎嚭 fixed-FPR 鏍″噯鏍稿績瀵硅薄鍜屽嚱鏁般€?
-3. 鏂板 `scripts/write_threshold_calibration_outputs.py`, 浠?`outputs/geometric_rescue/` 璁板綍閲嶅缓 calibration thresholds銆乷perating point銆乻tandard metrics銆乹uality metrics銆丷OC / DET銆乻core distribution銆乼hreshold degeneracy 鍜?rescue FPR audit銆?
-4. 鏂板 `tests/functional/test_threshold_calibration.py`, 瑕嗙洊闃堝€煎彧鏉ヨ嚜 calibration clean negative銆乧lean negative 涓?attacked negative 鍒嗗紑瀹¤銆乽nsupported 璐ㄩ噺鎸囨爣涓嶄吉瑁呬负璁烘枃璇佹嵁銆?
-5. `docs/field_registry.md` 宸茬櫥璁?fixed-FPR銆乷perating point銆丄UC銆丷OC / DET銆丗PR audit銆乵etric status 鍜岄槇鍊奸€€鍖栫浉鍏冲瓧娈点€?
+1. `threshold_degeneracy_report.json` 显示 `threshold_degenerate=false`, `fixed_fpr_boundary_ready=true`, `rescue_boundary_ready=true`, `fixed_fpr_and_rescue_boundary_ready=true`。
+2. 当前 fixed-FPR 控制域为 `calibration_clean_negative`, 分母角色为 `clean_negative_only`, `attacked_negative_governs_fixed_fpr=false`。
+3. 当前 rescue 控制域为 `evidence_clean_negative`, `rescue_changes_fpr_denominator=false`, `rescue_window_frozen=true`, `fail_reason_gate_frozen=true`。
+4. 当前质量摘要已接收真实 aligned rescoring 的 pair-level PSNR、SSIM、MSE、MAE、LPIPS 与 CLIP score; FID / KID 仍属于 dataset-level 缺口, 不能由 pair-level 指标替代。
+5. `supports_paper_claim=false` 与 `full_method_claim_ready=false` 是有意边界, 不是脚本失败。
 
-### stage12 褰撳墠浜х墿鎽樿
+### stage12 当前产物摘要
 
-1. `outputs/threshold_calibration/calibration_thresholds.json` 鏄剧ず `target_fpr=0.05`, `calibration_negative_count=14`, `observed_fpr=0.0`, `threshold_degenerate=false`, `threshold_value=0.5174190728458973`銆?
-2. `outputs/threshold_calibration/fixed_fpr_operating_points.csv` 鏄剧ず `true_positive_rate=0.84375`, `raw_content_clean_fpr=0.03125`, `evidence_clean_fpr=0.03125`, `evidence_attacked_fpr=0.15625`銆?
-3. `outputs/threshold_calibration/rescue_fpr_audit.csv` 鏄剧ず attacked negative 鐨?evidence-level FPR 瓒呰繃 `target_fpr=0.05`, 鍥犳瀹屾暣绯荤粺 fixed-FPR 涓诲紶蹇呴』淇濇寔 unsupported銆?
-4. `outputs/threshold_calibration/quality_metrics_summary.csv` 宸茬敱鏈€鏂扮湡瀹?aligned rescoring 鍖呭埛鏂? PSNR=`28.774532071397005`, SSIM=`0.9903153991736182`, MSE=`0.0013260099804028869`, MAE=`0.02013162337243557`, LPIPS=`0.03199240565299988`, `clip_score=0.3809072971343994`; FID / KID 浠嶄繚鐣?`dataset_level_metric_not_computed_in_pair_run`銆?
-5. `outputs/threshold_calibration/threshold_degeneracy_report.json` 涓?`raw_content_claim_ready=true`, 浣?`full_method_claim_ready=false`, `unsupported_reason=aligned_content_score_local_proxy`銆?
+1. `target_fpr=0.05`, `calibration_negative_count=6`, `observed_fpr=0.0`, `allowed_false_positive_count=0`。
+2. `calibrated_content_threshold=0.6343560311356602`, `threshold_value=0.6343560311356602`。
+3. `attacked_fpr_diagnostic_exceeds_target=true`, 但 attacked negative 只用于鲁棒性诊断, 不进入 fixed-FPR 分母。
+4. `real_aligned_rescore_count=3`, `perceptual_metrics_ready=true`, `input_attention_geometry_ready=true`, `input_image_quality_metrics_ready=true`。
 
-### stage12 楠岃瘉缁撴灉
+### stage12 当前验证结果
 
 | command | result |
 | --- | --- |
-| `python tools/harness/inspect_repository.py .` | pass |
-| `python scripts/write_threshold_calibration_outputs.py --aligned-rescoring-package-path outputs/aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip` | pass, `aligned_rescoring_quality_metrics_ready=true`, `real_aligned_rescore_count=3`, `evidence_attacked_fpr=0.15625` |
-| `pytest tests/functional/test_threshold_calibration.py -q` | pass, 3 passed |
-| `pytest -q` | pass, 86 passed |
-| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+| `python scripts/write_threshold_calibration_outputs.py` | pass, `fixed_fpr_boundary_ready=true`, `rescue_boundary_ready=true` |
+| `pytest tests/functional/test_threshold_calibration.py -q` | pass |
+| `python tools/harness/run_all_audits.py` | pass |
 
 ## stage_13_attack_matrix_regeneration
 
 | item | value |
 | --- | --- |
-| construction_unit_name | `stage_13_attack_matrix_regeneration` |
-| phase_status | `local_attack_matrix_protocol_ready` |
+| construction_unit_name | `attack_matrix` |
+| phase_status | `real_attack_matrix_protocol_ready` |
 | executor | `codex_agent` |
-| execution_date | `2026-06-20` |
-| input_manifest | `outputs/geometric_rescue/manifest.local.json`; `outputs/threshold_calibration/manifest.local.json` |
+| execution_date | `2026-06-23` |
+| input_manifest | `outputs/geometric_rescue/manifest.local.json`; `outputs/threshold_calibration/manifest.local.json`; `outputs/real_attack_evaluation/real_attack_manifest.local.json` |
 | expected_output_manifest | `outputs/attack_matrix/manifest.local.json` |
-| expected_outputs | `outputs/attack_matrix/attacked_images/`; `outputs/attack_matrix/attack_manifest.json`; `outputs/attack_matrix/attacked_image_registry.jsonl`; `outputs/attack_matrix/attack_detection_records.jsonl`; `outputs/attack_matrix/attack_family_metrics.csv`; `outputs/attack_matrix/attack_strength_curve.csv`; `outputs/attack_matrix/score_retention_by_attack.csv`; `outputs/attack_matrix/rescue_by_attack.csv`; `outputs/attack_matrix/manifest.local.json` |
-| blocking_items | 褰撳墠甯歌鏀诲嚮涓?record-level proxy, 鏈敓鎴愮湡瀹?attacked image 鏂囦欢; 鍐嶆墿鏁ｆ敾鍑婚渶瑕佺湡瀹?GPU 鍥惧儚閲嶇敓鎴愪骇鐗? 褰撳墠缁熶竴鏍囪涓?`unsupported`銆?|
-| fallback_path | 甯歌鏀诲嚮鍙綔涓烘湰鍦板彲閲嶅缓鍗忚涓庤〃鏍奸摼璺? 鍐嶆墿鏁ｆ敾鍑讳繚鐣欓厤缃€乨igest 鍜?unsupported reason, 涓嶈繘鍏ヨ鏂囦富寮犮€?|
-| invariants | 鏀诲嚮鍚庢娴嬪鐢?`stage_12` 鍐荤粨鐨?fixed-FPR 闃堝€笺€乺escue window 鍜?fail reason gate; clean negative 涓?attacked negative 鍒嗗紑缁熻; `full_method_claim_ready=false`; `supports_paper_claim=false`銆?|
-| next_stage_entry | 鍙繘鍏ュ閮?baseline 瀵规瘮涓庡唴閮ㄦ秷铻嶈瘉鎹瀯寤? 鑻ヨ褰㈡垚 robustness 涓诲紶, 闇€瑕佺敤鐪熷疄 attacked image 鏂囦欢鍜岀湡瀹炲啀鎵╂暎鏀诲嚮浜х墿鏇挎崲鏈湴浠ｇ悊璁板綍銆?|
+| expected_outputs | `outputs/attack_matrix/attack_manifest.json`; `outputs/attack_matrix/attacked_image_registry.jsonl`; `outputs/attack_matrix/attack_detection_records.jsonl`; `outputs/attack_matrix/attack_family_metrics.csv`; `outputs/attack_matrix/attack_strength_curve.csv`; `outputs/attack_matrix/score_retention_by_attack.csv`; `outputs/attack_matrix/rescue_by_attack.csv`; `outputs/attack_matrix/manifest.local.json`; `outputs/real_attack_evaluation/formal_attack_detection_records.jsonl` |
+| blocking_items | 真实 attacked image 小样本闭环、再扩散类 GPU 验证与 formal attack detection 已完成并并入 attack matrix; 论文级 robustness 结论仍受外部 baseline 正式结果、full-main 样本规模和 dataset-level FID / KID 三项缺口阻断。 |
+| fallback_path | 若后续真实攻击包缺失或 formal records 不可解析, attack matrix 应退回 `formal_attack_detection_ready=false` 并保留 unsupported reason, 不允许用 record-level proxy 冒充真实图像攻击结果。 |
+| invariants | 攻击后检测复用 stage12 冻结的 fixed-FPR threshold、rescue window 和 fail reason gate; clean negative 与 attacked negative 分开统计; `supports_paper_claim=false`, `full_method_claim_ready=false`。 |
+| next_stage_entry | 可继续推进外部 baseline 正式共同协议导入、内部消融和论文产物审计; 但不得把小样本真实攻击闭环写成论文级 full robustness 结论。 |
 
-### stage13 宸插畬鎴愬唴瀹?
+### stage13 当前完成内容
 
-1. 鏂板 `experiments/protocol/attacks.py`, 瀹氫箟 `AttackConfig`銆乣AttackEvaluationBoundary`銆乣AttackDetectionRecord`銆侀粯璁ゆ敾鍑荤煩闃甸厤缃€佹敾鍑婚厤缃憳瑕併€乺ecord-level 鏀诲嚮浠ｇ悊銆乤ttack family metrics銆乻trength curve銆乻core retention 鍜?rescue-by-attack 鑱氬悎鍑芥暟銆?
-2. 鏇存柊 `experiments/protocol/__init__.py`, 瀵煎嚭鏀诲嚮鐭╅樀鍗忚瀵硅薄鍜岃仛鍚堝嚱鏁般€?
-3. 鏂板 `scripts/write_attack_matrix_outputs.py`, 浠?`outputs/geometric_rescue/aligned_detection_records.jsonl`銆乣outputs/geometric_rescue/manifest.local.json`銆乣outputs/threshold_calibration/calibration_thresholds.json`銆乣outputs/threshold_calibration/threshold_degeneracy_report.json` 鍜?`outputs/threshold_calibration/manifest.local.json` 閲嶅缓鏀诲嚮鐭╅樀浜х墿銆?
-4. 褰撳墠榛樿鏀诲嚮鐭╅樀瑕嗙洊 JPEG compression銆丟aussian noise銆丟aussian blur銆乺esize銆乧rop銆乺otation銆乧rop-resize銆乧omposite geometric attacks, 鍚屾椂鐧昏 img2img regeneration銆丏DIM inversion + regeneration銆丼DEdit regeneration 鍜?diffusion purification銆?
-5. 甯歌鏀诲嚮閰嶇疆鍐欏叆 `probe`銆乣pilot` 鍜?`full_main` 璧勬簮妗ｄ綅; 鍐嶆墿鏁ｆ敾鍑诲啓鍏?`full_extra` 璧勬簮妗ｄ綅骞朵繚鐣?`real_gpu_attack_required` unsupported reason銆?
-6. 鏂板 `tests/functional/test_attack_matrix.py`, 瑕嗙洊鏀诲嚮閰嶇疆鎽樿绋冲畾鎬с€佸父瑙勬敾鍑诲垎鏁颁繚鎸佺巼涓嬮檷銆佸啀鎵╂暎鏀诲嚮 unsupported 杈圭晫銆佽剼鏈骇鐗╁彲閲嶅缓鍜?outputs 鐩綍绾︽潫銆?
-7. `docs/field_registry.md` 宸茬櫥璁版敾鍑婚厤缃€佹敾鍑昏褰曘€乻ource / attacked digest銆乻core retention銆乹uality proxy銆乤ttention consistency銆佹敾鍑荤粺璁″拰 manifest 鐩稿叧瀛楁銆?
+1. `outputs/real_attack_evaluation/attacked_images/` 中已有4张真实 attacked image, 覆盖 `img2img_regeneration`、`ddim_inversion_regeneration`、`sdedit_regeneration` 与 `diffusion_purification`。
+2. `real_attacked_image_registry.jsonl` 已记录 source image digest、attacked image digest、攻击名称、图像路径和运行边界。
+3. `formal_attack_detection_records.jsonl` 已接回正式 attack matrix schema, 并复用冻结的 fixed-FPR 与 rescue 边界重跑攻击后检测。
+4. `outputs/attack_matrix/attack_manifest.json` 已记录 `real_attacked_image_closed_loop_ready=true`, `formal_attack_detection_ready=true`, `regeneration_attack_gpu_validation_ready=true`。
+5. 当前真实攻击闭环属于小样本工程证据, 用于关闭“真实图像文件与再扩散路径是否可跑通”的工程缺口; 不等价于论文级 full-main robustness 统计。
 
-### stage13 褰撳墠浜х墿鎽樿
+### stage13 当前产物摘要
 
-1. `outputs/attack_matrix/attack_manifest.json` 鏄剧ず `attack_config_count=14`, `attack_family_count=3`, `attack_record_count=1344`, `performed_attack_record_count=960`, `gpu_attack_unsupported_count=384`, `attack_metrics_ready=true`銆?
-2. `outputs/attack_matrix/attack_family_metrics.csv` 宸插寘鍚父瑙勬敾鍑荤殑 `true_positive_rate`銆乣false_positive_rate`銆乣clean_false_positive_rate`銆乣attacked_false_positive_rate`銆乣quality_score_proxy_mean`銆乣score_retention_mean`銆乣lf_score_retention_mean`銆乣hf_score_retention_mean`銆乣attention_consistency_proxy_mean`銆乣geometry_reliable_rate` 鍜?`rescue_rate`銆?
-3. 鍐嶆墿鏁ｆ敾鍑昏淇濈暀閰嶇疆涓?digest, 浣?`metric_status=unsupported`, `supported_record_count=0`, 涓嶆敮鎸佽鏂?robustness 涓诲紶銆?
-4. `outputs/attack_matrix/attacked_images/` 褰撳墠涓虹┖鐩綍, 琛ㄧず鏈湴鏈敓鎴愮湡瀹?attacked image 鏂囦欢; `attacked_image_registry.jsonl` 鍙櫥璁板彈娌荤悊浠ｇ悊鎽樿銆?
-5. `outputs/attack_matrix/attack_manifest.json` 涓?`outputs/attack_matrix/manifest.local.json` 宸茬户鎵挎渶鏂扮湡瀹?aligned rescoring 鍖呰矾寰勩€丼HA256 鎽樿銆乣aligned_rescoring_quality_metrics_ready=true`銆乣perceptual_metrics_ready=true` 涓?`real_aligned_rescore_count=3`銆?
+1. `attack_record_count=676`, `performed_attack_record_count=484`, `attack_metrics_ready=true`。
+2. `formal_real_attack_record_count=4`, `real_attacked_image_count=4`, `measured_regeneration_attack_count=4`。
+3. `gpu_attack_unsupported_count=0`, `gpu_attack_real_measurement_missing_count=0`, `regeneration_attack_status=real_gpu_formal_records_available`。
+4. `real_attack_records_path=outputs/real_attack_evaluation/formal_attack_detection_records.jsonl`。
 
-### stage13 瀹屾垚杈圭晫
-
-1. 鏈樁娈靛畬鎴愮殑鏄敾鍑荤煩闃靛崗璁€佽〃鏍奸噸寤洪摼璺拰甯歌鏀诲嚮鏈湴浠ｇ悊缁熻, 涓嶆槸姝ｅ紡 robustness 瀹為獙缁撹銆?
-2. record-level proxy 鍙兘鐢ㄤ簬楠岃瘉瀛楁銆佺粺璁¤竟鐣屻€佽〃鏍煎舰鎬佸拰 artifact rebuild, 涓嶈兘鏇夸唬鐪熷疄鍥惧儚鏀诲嚮銆?
-3. 鍐嶆墿鏁ｆ敾鍑诲繀椤诲湪鐪熷疄 GPU 鐜涓敓鎴?attacked image銆乻ource image digest銆乤ttack config digest 鍜屾娴嬭褰曞悗, 鎵嶈兘浠?`unsupported` 杩涘叆鍙粺璁＄姸鎬併€?
-4. fixed-FPR 杈圭晫浠嶆部鐢?`stage_12` 鐨勭粨璁? raw content claim 鍙互灞€閮?ready, 瀹屾暣鏂规硶 `full_method_claim_ready=false`銆?
-
-### stage13 楠岃瘉缁撴灉
+### stage13 当前验证结果
 
 | command | result |
 | --- | --- |
-| `python tools/harness/inspect_repository.py .` | pass |
-| `python scripts/write_attack_matrix_outputs.py` | pass, `attack_record_count=1344`, `performed_attack_record_count=960`, `gpu_attack_unsupported_count=384`, `attack_metrics_ready=true` |
-| `pytest tests/functional/test_attack_matrix.py -q` | pass, 4 passed |
-| `pytest -q` | pass, 86 passed |
-| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+| `python scripts/write_attack_matrix_outputs.py` | pass, `formal_attack_detection_ready=true`, `real_attacked_image_count=4` |
+| `pytest tests/functional/test_attack_matrix.py -q` | pass |
+| `python tools/harness/run_all_audits.py` | pass |
 
 ## stage_14_external_baseline_comparison
 
 | item | value |
 | --- | --- |
 | construction_unit_name | `external_baseline_comparison` |
-| phase_status | `baseline_protocol_ready` |
+| phase_status | `baseline_protocol_and_formal_import_readiness_ready` |
 | executor | `codex_agent` |
-| execution_date | `2026-06-21` |
-| input_manifest | `outputs/attack_matrix/manifest.local.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/threshold_calibration/threshold_degeneracy_report.json` |
+| execution_date | `2026-06-23` |
+| input_manifest | `outputs/attack_matrix/manifest.local.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/external_baseline_results/manifest.local.json`; `external_baseline/source_registry.json` |
 | expected_output_manifest | `outputs/external_baseline_comparison/manifest.local.json` |
-| expected_outputs | `outputs/external_baseline_comparison/baseline_observations.jsonl`; `outputs/external_baseline_comparison/baseline_metrics.csv`; `outputs/external_baseline_comparison/baseline_comparison_table.csv`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
-| blocking_items | 褰撳墠鍙畬鎴愬閮?baseline 鐨勫崗璁?adapter 涓庡叕骞冲姣旇〃鏍奸摼璺? 灏氭湭鎺ュ叆瀹樻柟浠ｇ爜銆佸鐜板疄楠岀粨鏋滄垨鍙楁不鐞嗗鍏ョ粨鏋? 鍥犳鎵€鏈夊閮?baseline 鎸囨爣淇濇寔 `unsupported`銆?|
-| fallback_path | 澶栭儴 baseline 鏃犵粨鏋滄椂鍙櫥璁?`external_baseline_result_missing`, 涓嶆墜宸ュ～鍐欐寚鏍? 褰撳墠鏂规硶琛屼篃鍙繚鐣?attack matrix local proxy, 涓嶄綔涓鸿鏂囩骇 superiority 鎴?robustness 涓诲紶銆?|
-| invariants | baseline 涓?SLM-WM 蹇呴』鍏变韩 prompt 鍗忚銆佹敾鍑荤煩闃靛崗璁拰 fixed-FPR operating point; unsupported baseline 涓嶈繘鍏ヤ富缁撹; 鎵€鏈夋柊浜х墿淇濇寔 `supports_paper_claim=false`銆?|
-| next_stage_entry | 鍙繘鍏ュ唴閮ㄦ秷铻嶈瘉鎹瀯寤? 鑻ヨ褰㈡垚璁烘枃绾у閮ㄥ姣? 闇€鍚庣画鎺ュ叆 baseline 瀹樻柟浠ｇ爜鎴栧彈娌荤悊瀵煎叆缁撴灉, 骞跺湪鐩稿悓鍗忚涓嬮噸寤鸿〃鏍笺€?|
+| expected_outputs | `outputs/external_baseline_comparison/baseline_observations.jsonl`; `outputs/external_baseline_comparison/baseline_result_records.jsonl`; `outputs/external_baseline_comparison/baseline_formal_import_validation_report.json`; `outputs/external_baseline_comparison/baseline_metrics.csv`; `outputs/external_baseline_comparison/baseline_comparison_table.csv`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
+| blocking_items | 8个 baseline 的 source registry 已可审计, 但主表4个正式导入候选均未通过共同协议 validator; 因此 `baseline_results_ready=false`, `primary_baseline_formal_ready=false`, `supports_paper_claim=false`。 |
+| fallback_path | 外部 baseline 无正式结果时只登记 `external_baseline_result_missing`; 允许保留小样本候选和拒绝原因, 但不允许把候选或 smoke 结果写入主表结论。 |
+| invariants | baseline 与 SLM-WM 必须共享 prompt 协议、攻击矩阵协议和 fixed-FPR operating point; unsupported baseline 不进入论文主结论; 所有新增产物保持 `supports_paper_claim=false`。 |
+| next_stage_entry | 可继续导入受治理正式结果或运行官方复现; 若要形成论文级外部 baseline 对比, 必须使主表 baseline 在 full-main prompt、fixed-FPR、攻击矩阵检测和证据路径四个边界上同时通过 validator。 |
 
-### stage14 宸插畬鎴愬唴瀹?
+### stage14 当前完成内容
 
-1. 鏂板 `experiments/baselines/adapters.py`, 瀹氫箟 `BaselineSpec`銆乣BaselineObservation`銆侀粯璁ゅ閮?baseline 娓呭崟銆乥aseline 瑙傛祴璁板綍鏋勯€犮€乥aseline 鎸囨爣鑱氬悎鍜屽悓鍗忚瀵规瘮琛ㄦ瀯閫犮€?
-2. 鏂板 `scripts/write_external_baseline_comparison_outputs.py`, 浠?`outputs/attack_matrix/` 涓?`outputs/threshold_calibration/` 璇诲彇鍙楁不鐞嗚緭鍏? 閲嶅缓澶栭儴 baseline observations銆乵etrics銆乧omparison table銆乺untime report 鍜?manifest銆?
-3. 榛樿鐧昏 8 涓閮?baseline: Tree-Ring銆丟aussian Shading銆丼hallow Diffuse銆乀2SMark銆丼table Signature銆丷ivaGAN銆乀rustMark 鍜?Watermark Anything銆?
-4. 鏂板鏍圭洰褰?`external_baseline/`, 鐢ㄤ簬鏈湴淇濆瓨澶栭儴 baseline 瀹樻柟婧愮爜鎴栧鐜伴暅鍍? 涓昏〃婧愮爜妲戒綅鍖呮嫭 Tree-Ring銆丟aussian Shading銆丼hallow Diffuse銆乀2SMark, 琛ュ厖琛ㄦ簮鐮佹Ы浣嶅寘鎷?Stable Signature銆丷ivaGAN銆乀rustMark銆乄atermark Anything銆?
-5. 褰撳墠 baseline adapter 鍙喕缁撳叕骞冲崗璁竟鐣? 涓嶈繍琛屾垨浼€犲閮ㄦ柟娉曠粨鏋? 鎵€鏈夊閮?baseline 琛屽潎鍐欏叆 `metric_status=unsupported` 涓?`unsupported_reason=external_baseline_result_missing`銆?
-6. 鏂板 `tests/functional/test_external_baseline_comparison.py`, 瑕嗙洊榛樿 baseline 娓呭崟銆佷骇鐗╅噸寤恒€乧laim 瀹夊叏杈圭晫鍜?outputs 鐩綍绾︽潫銆?
-7. `docs/field_registry.md` 宸茬櫥璁?baseline observation銆乥aseline readiness銆佸叡鍚屽崗璁€乧omparison table銆乺untime report 鍜屽閮ㄦ簮鐮佹潵婧愮櫥璁扮浉鍏冲瓧娈点€?
+1. `experiments/baselines/formal_import.py` 已提供主表 external baseline 正式导入 schema、候选记录 validator 和 per-baseline readiness 聚合。
+2. `scripts/write_primary_baseline_result_candidates.py` 已写出 `baseline_result_records.jsonl`、`baseline_result_candidate_validation_report.json`、`baseline_formal_import_readiness.csv` 与 `baseline_formal_import_readiness_summary.json`。
+3. `scripts/write_external_baseline_comparison_outputs.py` 已读取正式导入 readiness 摘要, 并将 `formal_result_ready_count`、`blocked_primary_baseline_ids` 和主要阻断原因透传到 `baseline_runtime_report.json`。
+4. 当前主表候选来源为 Google Drive 中的小样本 GPU smoke / T2SMark 链路包, 候选可以审计, 但不能升级为正式论文结果。
 
-### stage14 褰撳墠浜х墿鎽樿
+### stage14 当前产物摘要
 
-1. `outputs/external_baseline_comparison/baseline_runtime_report.json` 鏄剧ず `baseline_count=8`, `baseline_observation_count=112`, `comparable_baseline_count=8`, `baseline_result_ready_count=0`, `comparison_protocol_ready=true`, `baseline_results_ready=false`銆?
-2. `outputs/external_baseline_comparison/baseline_metrics.csv` 涓?8 涓?baseline 鍧囦负 `baseline_adapter_ready=True`, 浣?`baseline_official_code_ready=False`, `baseline_reproduced_result_ready=False`, `baseline_imported_result_ready=False`銆?
-3. `outputs/external_baseline_comparison/baseline_comparison_table.csv` 鍖呭惈 `slm_wm_current` 鏈湴浠ｇ悊琛屽拰 8 涓閮?baseline unsupported 琛? 鎵€鏈夎鍧囦负 `supports_paper_claim=False`銆?
-4. `outputs/external_baseline_comparison/manifest.local.json` 璁板綍杈撳叆銆佽緭鍑恒€乥aseline spec 鎽樿銆乻ummary 鎽樿銆佷唬鐮佺増鏈拰閲嶅缓鍛戒护 `python scripts/write_external_baseline_comparison_outputs.py`銆?
+1. `baseline_runtime_report.json` 显示 `baseline_count=8`, `official_source_ready_count=8`, `baseline_result_ready_count=0`, `baseline_results_ready=false`。
+2. `formal_import_input_record_count=4`, `accepted_formal_import_count=0`, `rejected_formal_import_count=4`, `formal_import_issue_count=15`。
+3. `blocked_primary_baseline_ids=[tree_ring, gaussian_shading, shallow_diffuse, t2smark]`。
+4. 主要阻断原因为 `attack_matrix_baseline_detection_ready_required`、`fixed_fpr_baseline_calibration_ready_required`、`full_main_prompt_protocol_ready_required` 和 `full_main_resource_profile_required`。
 
-### stage14 瀹屾垚杈圭晫
-
-1. 鏈樁娈靛畬鎴愮殑鏄閮?baseline 鍏钩瀵规瘮鍗忚銆乻chema adapter銆佸彈娌荤悊琛ㄦ牸閾捐矾鍜岀己澶辩粨鏋滆竟鐣? 涓嶆槸澶栭儴 baseline 瀹炴祴鎬ц兘缁撹銆?
-2. 褰撳墠澶栭儴 baseline 鎸囨爣涓嶅緱鐢ㄤ簬璁烘枃涓昏〃缁撹, 鍙兘璇存槑瀵规瘮鍗忚宸茬粡鍙璁°€佸彲澶嶇幇骞剁瓑寰呯湡瀹?baseline 缁撴灉鎺ュ叆銆?
-3. 鍚庣画鑻ユ帴鍏ュ畼鏂逛唬鐮佹垨瀵煎叆缁撴灉, 蹇呴』鐢?adapter 鎴栧彈娌荤悊瀵煎叆鏂囦欢鐢熸垚 records, 涓嶅緱鎵嬪伐琛ヨ〃銆?
-
-### stage14 楠岃瘉缁撴灉
+### stage14 当前验证结果
 
 | command | result |
 | --- | --- |
-| `python tools/harness/inspect_repository.py .` | pass |
-| `python scripts/write_external_baseline_comparison_outputs.py` | pass, `baseline_count=8`, `baseline_observation_count=112`, `baseline_result_ready_count=0` |
-| `pytest tests/functional/test_external_baseline_comparison.py -q` | pass, 2 passed |
-| `pytest -q` | pass, 88 passed |
-| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+| `python scripts/write_primary_baseline_result_candidates.py --external-gpu-smoke-package-path <drive_zip> --t2smark-full-main-package-path <drive_zip>` | pass, `formal_import_candidate_record_count=4`, `accepted_formal_import_count=0` |
+| `python scripts/write_external_baseline_comparison_outputs.py` | pass, `baseline_results_ready=false`, `formal_result_ready_count=0` |
+| `pytest tests/functional/test_primary_baseline_result_candidates.py tests/functional/test_external_baseline_comparison.py -q` | pass |
+| `python tools/harness/run_all_audits.py` | pass |
 
 ## stage_15_internal_ablation_evidence
 
 | item | value |
 | --- | --- |
 | construction_unit_name | `internal_ablation_evidence` |
-| phase_status | `ablation_protocol_ready` |
+| phase_status | `ablation_protocol_ready_with_real_attack_inputs` |
 | executor | `codex_agent` |
-| execution_date | `2026-06-21` |
+| execution_date | `2026-06-23` |
 | input_manifest | `outputs/attack_matrix/manifest.local.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
 | expected_output_manifest | `outputs/internal_ablation_evidence/manifest.local.json` |
 | expected_outputs | `outputs/internal_ablation_evidence/ablation_records.jsonl`; `outputs/internal_ablation_evidence/mechanism_ablation_table.csv`; `outputs/internal_ablation_evidence/method_pairwise_delta_table.csv`; `outputs/internal_ablation_evidence/ablation_by_attack_family.csv`; `outputs/internal_ablation_evidence/ablation_claim_summary.json`; `outputs/internal_ablation_evidence/manifest.local.json` |
-| blocking_items | 褰撳墠鍐呴儴娑堣瀺澶嶇敤 attack matrix 鐨?record-level proxy, 鐪熷疄 attacked image 涓庡啀鎵╂暎鏀诲嚮 GPU 闂幆浠嶆湭琛ラ綈; 澶栭儴 baseline 鐪熷疄缁撴灉浠嶄负 `baseline_results_ready=false`, 鍥犳澶栭儴 superiority 涓庡畬鏁?robustness 涓诲紶浠嶄笉鑳芥垚绔嬨€?|
-| fallback_path | 鍐呴儴娑堣瀺鍙敤浜庡喕缁撴満鍒跺繀瑕佹€у崗璁€侀€€鍖栭摼鍜岃〃鏍奸噸寤洪摼璺? 涓嶆妸鏈湴浠ｇ悊娑堣瀺缁撴灉鍐欐垚璁烘枃 supported claim銆?|
-| invariants | 姣忎釜娑堣瀺蹇呴』鐪熷疄鏀瑰彉鏈哄埗瀛楁鎴栧垽瀹氳竟鐣? `full_slm_wm` 涓哄弬鑰冭; `geo_direct_positive_audit` 鍙兘浣滀负瀹¤鍙嶄緥; 鎵€鏈変骇鐗╀繚鎸?`supports_paper_claim=false`銆?|
-| next_stage_entry | 鍙繘鍏ヨ鏂囦骇鐗╄瘉鎹璁? 浣嗗璁＄粨璁哄繀椤讳繚鐣?local proxy 杈圭晫, 骞舵妸鐪熷疄鍥惧儚鏀诲嚮銆佸閮?baseline 瀹炴祴涓?full-main 瑙勬ā缁熻鍒椾负鍚庣画琛ヨ瘉浠诲姟銆?|
+| blocking_items | 内部消融协议已可重建并可读取最新 attack matrix; 论文级消融结论仍受 full-main 样本规模、外部 baseline 正式结果和 dataset-level FID / KID 缺口限制。 |
+| fallback_path | 内部消融只用于机制必要性链路和表格重建链路; 若上游 attack matrix 或 threshold 边界退化, 消融 claim summary 必须保持 `supports_paper_claim=false`。 |
+| invariants | 每个消融必须真实改变机制字段或判定边界; `full_slm_wm` 为参考行; `geo_direct_positive_audit` 只作为审计反例; 所有产物保持 `supports_paper_claim=false`。 |
+| next_stage_entry | 可进入论文产物证据审计; 审计必须继续保留当前证据边界, 不得把小样本消融写成最终论文结论。 |
 
-### stage15 宸插畬鎴愬唴瀹?
+### stage15 当前完成内容
 
-1. 鏂板 `experiments/ablations/mechanisms.py`, 瀹氫箟 `AblationSpec`銆侀粯璁ゅ唴閮ㄦ秷铻嶆竻鍗曘€佹秷铻?records 鏋勯€犮€佹満鍒惰〃鑱氬悎銆佹寜鏀诲嚮鏃忚仛鍚堛€乸airwise delta 鍜?claim summary 鏋勯€犮€?
-2. 鏂板 `scripts/write_internal_ablation_outputs.py`, 浠庢敾鍑荤煩闃点€侀槇鍊兼牎鍑嗗拰澶栭儴 baseline 瀵规瘮 manifest 璇诲彇鍙楁不鐞嗚緭鍏? 閲嶅缓鍐呴儴娑堣瀺 records銆佹満鍒惰〃銆乸airwise delta銆乤ttack-family 琛ㄣ€乧laim summary 鍜?manifest銆?
-3. 榛樿鐧昏 17 涓唴閮ㄦ秷铻? Full SLM-WM銆丟lobal Null Space銆丯o Semantic Mask銆丯o Semantic JVP銆丯o Risk Weight銆丷andom Basis銆丩F-only銆丠F-only銆丯o-HF銆丯o-LF銆丯o Tail Truncation銆丗FT-sync-only銆両mage-registration-only銆丯o Attention Anchor銆丯o Rescue銆丯o Attestation 鍜?Geo-direct-positive audit銆?
-4. `full_slm_wm` 淇濇寔涓婃父鏀诲嚮璁板綍鐨勫畬鏁存柟娉曞垽瀹? 鍏朵粬娑堣瀺閫氳繃 LF/HF retention銆乤ligned gain銆乤ttention consistency銆乬eometry reliability銆乺escue gate銆乤ttestation gate 鎴?content gate 鍙嶄緥璺緞浜х敓瀹為檯瀛楁鍙樺寲銆?
-5. 鏂板 `tests/functional/test_internal_ablation_evidence.py`, 瑕嗙洊娑堣瀺娓呭崟瀹屾暣鎬с€佸叧閿満鍒跺疄闄呭彉鍖栥€佽緭鍑虹洰褰曠害鏉熴€乧laim 瀹夊叏杈圭晫鍜岃〃鏍煎彲閲嶅缓鎬с€?
-6. `docs/field_registry.md` 宸茬櫥璁板唴閮ㄦ秷铻?records銆佹満鍒惰〃銆乸airwise delta銆乧laim summary 鍜?manifest 鐩稿叧瀛楁銆?
+1. 内部消融产物已基于最新 attack matrix 重建, 上游真实再扩散攻击记录已经通过 attack matrix 进入消融输入边界。
+2. `ablation_claim_summary.json` 仍保持 `supports_paper_claim=false`, 因为当前缺口来自论文级统计与外部 baseline, 而不是消融脚本不可运行。
+3. 当前消融可用于检查机制路径、字段退化和表格重建, 不能替代 full-main 统计。
 
-### stage15 褰撳墠浜х墿鎽樿
+### stage15 当前产物摘要
 
-1. `outputs/internal_ablation_evidence/ablation_claim_summary.json` 鏄剧ず `ablation_count=17`, `ablation_record_count=22848`, `mechanism_group_count=7`, `ablation_protocol_ready=true`, `mechanism_coverage_ready=true`, `attack_metrics_ready=true`, `external_baseline_result_ready=false`銆?
-2. `outputs/internal_ablation_evidence/mechanism_ablation_table.csv` 鍖呭惈 17 涓秷铻嶈, 姣忚鍧囪褰?TPR銆丗PR銆乻core retention銆乹uality proxy銆乤ttention consistency銆乬eometry reliability銆乺escue rate銆乤ttestation availability 鍜岀浉瀵瑰畬鏁存柟娉曠殑 delta銆?
-3. `outputs/internal_ablation_evidence/method_pairwise_delta_table.csv` 鍖呭惈 96 鏉＄浉瀵?`full_slm_wm` 鐨勬寚鏍囧樊寮傝褰曘€?
-4. `outputs/internal_ablation_evidence/ablation_by_attack_family.csv` 鍖呭惈 51 鏉℃寜娑堣瀺鍜屾敾鍑绘棌鑱氬悎鐨勯€€鍖栬褰曘€?
-5. 鎵€鏈夊唴閮ㄦ秷铻嶄骇鐗╁潎淇濇寔 `supports_paper_claim=false`, `full_method_claim_ready=false`銆?
+1. `ablation_count=17`, `mechanism_group_count=7`, `ablation_protocol_ready=true`, `mechanism_coverage_ready=true`。
+2. `external_baseline_result_ready=false`, 因此外部 superiority 与完整 robustness 主张不能成立。
+3. `mechanism_ablation_table.csv`、`method_pairwise_delta_table.csv` 和 `ablation_by_attack_family.csv` 均可由 records 重建。
 
-### stage15 瀹屾垚杈圭晫
-
-1. 鏈樁娈靛畬鎴愮殑鏄唴閮ㄦ秷铻嶅崗璁€佹満鍒堕€€鍖栭摼銆佽〃鏍奸噸寤洪摼璺拰 claim 瀹夊叏杈圭晫, 涓嶆槸璁烘枃绾ф渶缁堟秷铻嶇粨璁恒€?
-2. 褰撳墠娑堣瀺缁撴灉澶嶇敤 record-level attack proxy, 涓嶈兘鏇夸唬鐪熷疄鍥惧儚鏀诲嚮鍜?full-main 瑙勬ā缁熻銆?
-3. `geo_direct_positive_audit` 鏄庣‘鏄?content gate 鍙嶄緥瀹¤, 涓嶅緱浣滀负姝ｅ紡鏂规硶鎴栦富琛ㄦ柟娉曡銆?
-4. `no_attestation` 浼氳妫€娴嬭瘉鎹笉鑳借繘鍏ュ彲瀹¤鏂规硶涓诲紶, 鐢ㄤ簬璇佹槑 attestation gate 鐨勫繀瑕佹€с€?
-
-### stage15 楠岃瘉缁撴灉
+### stage15 当前验证结果
 
 | command | result |
 | --- | --- |
-| `python tools/harness/inspect_repository.py .` | pass |
-| `python scripts/write_internal_ablation_outputs.py` | pass, `ablation_count=17`, `ablation_record_count=22848`, `mechanism_coverage_ready=true` |
-| `pytest tests/functional/test_internal_ablation_evidence.py -q` | pass, 3 passed |
-| `pytest -q` | pass, 91 passed, 2 deselected |
-| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
-
+| `python scripts/write_internal_ablation_outputs.py` | pass |
+| `pytest tests/functional/test_internal_ablation_evidence.py -q` | pass |
+| `python tools/harness/run_all_audits.py` | pass |
 
 ## stage_16_paper_artifact_evidence_audit
 
@@ -711,92 +671,72 @@
 | construction_unit_name | `paper_artifact_evidence_audit` |
 | phase_status | `evidence_gap_report_ready` |
 | executor | `codex_agent` |
-| execution_date | `2026-06-21` |
-| input_manifest | `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/threshold_calibration/manifest.local.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/attack_matrix/manifest.local.json`; `outputs/external_baseline_comparison/manifest.local.json`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/internal_ablation_evidence/manifest.local.json`; `outputs/internal_ablation_evidence/ablation_claim_summary.json` |
+| execution_date | `2026-06-23` |
+| input_manifest | `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/threshold_calibration/manifest.local.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/attack_matrix/manifest.local.json`; `outputs/external_baseline_comparison/manifest.local.json`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/primary_baseline_small_sample_evidence/manifest.local.json`; `outputs/dataset_level_quality/manifest.local.json`; `outputs/internal_ablation_evidence/manifest.local.json` |
 | expected_output_manifest | `outputs/paper_artifact_evidence_audit/manifest.local.json` |
 | expected_outputs | `outputs/paper_artifact_evidence_audit/claim_audit_table.csv`; `outputs/paper_artifact_evidence_audit/paper_table_readiness.csv`; `outputs/paper_artifact_evidence_audit/paper_figure_readiness.csv`; `outputs/paper_artifact_evidence_audit/evidence_gap_list.csv`; `outputs/paper_artifact_evidence_audit/artifact_builder_readiness_report.json`; `outputs/paper_artifact_evidence_audit/evidence_audit_dry_run.json`; `outputs/paper_artifact_evidence_audit/submission_blocker_report.json`; `outputs/paper_artifact_evidence_audit/manifest.local.json` |
-| blocking_items | `submission_ready=false`; critical gaps 鍖呮嫭鐪熷疄 attacked image 闂幆銆佸啀鎵╂暎绫绘敾鍑荤湡瀹?GPU 楠岃瘉銆佸閮?baseline 缁撴灉銆乫ull-main 鏍锋湰瑙勬ā; major gaps 鍖呮嫭瀹屾暣鏂规硶 fixed-FPR 閲嶆牎鍑嗗拰 dataset-level FID / KID銆?|
-| fallback_path | 褰撳墠浠呭喕缁?artifact builder 涓?evidence audit 閾捐矾, 涓嶅喕缁撴姇绋跨粨鏋? 涓嶆妸棰勮琛ㄦ牸鎴栨湰鍦颁唬鐞嗙粨鏋滃啓鎴愯鏂囩骇缁撹銆?|
-| invariants | 鎵€鏈夋柊浜х墿淇濇寔 `supports_paper_claim=false`; 涓嶆墜宸ヨˉ琛? Notebook 涓嶈兘鐩存帴鍐欐寮?records銆乼ables銆乫igures 鎴?reports; `main/` 涓嶇粦瀹氬灞傝繍琛岀洰褰曘€?|
-| next_stage_entry | 闇€瑕佸厛鎸?`outputs/paper_artifact_evidence_audit/evidence_gap_list.csv` 琛ラ綈鐪熷疄鏀诲嚮闂幆銆佸閮?baseline 缁撴灉銆乫ull-main 缁熻鍜岃川閲忔暟鎹泦鎸囨爣, 鍐嶈繘鍏ユ姇绋垮喕缁撱€?|
+| blocking_items | `submission_ready=false`; 当前只剩3个主要缺口: `gap_baseline_results`, `gap_full_main_sample_scale`, `gap_dataset_level_fid_kid`。真实 attacked image 闭环、再扩散 GPU 验证、fixed-FPR 边界和 rescue 边界已不再列为当前阻断项。 |
+| fallback_path | 当前只冻结 artifact builder 与 evidence audit 链路, 不冻结投稿结果; 不把预览表格、小样本候选或本地代理结果写成论文级结论。 |
+| invariants | 所有新增产物保持 `supports_paper_claim=false`; 不手工补表; Notebook 不能直接写正式 records、tables、figures 或 reports; `main/` 不绑定外层运行目录。 |
+| next_stage_entry | 需要先补齐外部 baseline 正式结果、full-main 样本规模统计和 dataset-level FID / KID, 再进入投稿冻结。 |
 
-### stage16 宸插畬鎴愬唴瀹?
+### stage16 当前完成内容
 
-1. 鏂板 `main/analysis/paper_evidence_audit.py`, 灏嗕笂娓?threshold銆乤ttack matrix銆乪xternal baseline 涓?internal ablation 浜х墿姹囨€讳负 claim audit銆佽〃鏍?readiness銆佸浘鏁版嵁 readiness銆佽瘉鎹己鍙ｅ拰鎶曠闃绘柇鎽樿銆?
-2. 鏂板 `scripts/write_paper_artifact_evidence_audit_outputs.py`, 浠庡彈娌荤悊涓婃父 manifest 鍜?report 閲嶅缓 8 涓湰鍦板璁′骇鐗? 骞跺啓鍏?`outputs/paper_artifact_evidence_audit/`銆?
-3. 鏂板 `tests/functional/test_paper_artifact_evidence_audit.py`, 楠岃瘉 claim 杈圭晫銆佺己鍙ｅ垪琛ㄣ€佽緭鍑虹洰褰曠害鏉熴€乵anifest 閲嶅缓鍜?`supports_paper_claim=false` 瀹夊叏杈圭晫銆?
-4. 鏇存柊 `docs/field_registry.md`, 鐧昏 claim audit銆乸aper readiness銆乬ap list銆乥uilder readiness 涓?blocker report 鐩稿叧瀛楁銆?
+1. 论文产物证据审计已经消费最新 threshold、attack matrix、external baseline、小样本 baseline、dataset-level quality 和 internal ablation 产物。
+2. `submission_blocker_report.json` 已将缺口收敛到3项, 并移除了已完成的真实 attacked image 与再扩散 GPU 验证阻断项。
+3. `artifact_builder_readiness_report.json` 保持 artifact builder 可重建, 但 paper-ready artifact 数量仍为0。
 
-### stage16 褰撳墠浜х墿鎽樿
+### stage16 当前产物摘要
 
-1. `artifact_builder_readiness_report.json` 鏄剧ず `artifact_builder_ready=true`, `paper_artifact_audit_ready=true`, `claim_audit_row_count=7`, `table_readiness_row_count=6`, `figure_readiness_row_count=5`, `rebuildable_artifact_count=10`, `blocked_artifact_count=1`, `paper_ready_artifact_count=0`銆?
-2. `submission_blocker_report.json` 鏄剧ず `submission_ready=false`, `blocking_claim_count=5`, `critical_gap_count=4`, `gap_count=6`銆?
-3. `evidence_gap_list.csv` 灏嗙湡瀹?attacked image 闂幆銆佸啀鎵╂暎绫绘敾鍑荤湡瀹?GPU 楠岃瘉銆佸閮?baseline 缁撴灉銆乫ull-main 鏍锋湰瑙勬ā銆佸畬鏁存柟娉?fixed-FPR 閲嶆牎鍑嗗拰 dataset-level FID / KID 鍒椾负鍚庣画琛ヨ瘉椤广€?
-4. `claim_audit_table.csv` 鏄庣‘澶栭儴 baseline superiority 涓?submission-ready package 浠嶄负 `unsupported`, 鏀诲嚮椴佹鎬т笌鍐呴儴鏈哄埗蹇呰鎬т粛涓?`preview_only`銆?
+1. `artifact_builder_ready=true`, `paper_artifact_audit_ready=true`, `claim_audit_row_count=9`, `table_readiness_row_count=7`, `figure_readiness_row_count=5`。
+2. `rebuildable_artifact_count=11`, `blocked_artifact_count=1`, `paper_ready_artifact_count=0`。
+3. `submission_blocker_report.json` 显示 `gap_count=3`, `critical_gap_count=2`, `blocking_claim_count=5`, `primary_blockers=[gap_baseline_results, gap_full_main_sample_scale, gap_dataset_level_fid_kid]`。
+4. dataset-level quality 当前为 `dataset_level_quality_proxy_ready=true`, 但 `formal_feature_backend_ready=false`, `formal_sample_scale_ready=false`, `formal_fid_kid_ready=false`。
 
-### stage16 瀹屾垚杈圭晫
-
-1. 鏈樁娈靛畬鎴愮殑鏄鏂囦骇鐗╄瘉鎹璁￠摼璺拰 artifact builder readiness, 涓嶆槸璁烘枃绾?robustness銆乥aseline superiority 鎴?submission-ready 缁撹銆?
-2. 褰撳墠 `paper_ready_artifact_count=0`, 鍥犱负 full-main 缁熻銆佺湡瀹炲浘鍍忔敾鍑婚棴鐜€佸閮?baseline 瀹炴祴缁撴灉鍜?dataset-level FID / KID 灏氭湭琛ラ綈銆?
-3. 褰撳墠浜х墿鍙綔涓哄悗缁ˉ璇佷换鍔℃竻鍗曞拰鑷姩閲嶅缓鍏ュ彛, 涓嶈兘浣滀负璁烘枃涓昏〃銆佷富鍥炬垨鏈€缁?claim 鐨勭洿鎺ヨ瘉鎹€?
-
-### stage16 楠岃瘉缁撴灉
+### stage16 当前验证结果
 
 | command | result |
 | --- | --- |
-| `python -m py_compile main/analysis/paper_evidence_audit.py scripts/write_paper_artifact_evidence_audit_outputs.py tests/functional/test_paper_artifact_evidence_audit.py` | pass |
-| `python tools/harness/inspect_repository.py .` | pass |
-| `python scripts/write_paper_artifact_evidence_audit_outputs.py` | pass, `claim_audit_row_count=7`, `table_readiness_row_count=6`, `figure_readiness_row_count=5`, `gap_count=6`, `submission_ready=false` |
-| `pytest tests/functional/test_paper_artifact_evidence_audit.py -q` | pass, 2 passed |
-| `pytest -q` | pass, 93 passed, 2 deselected |
-| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
-
+| `python scripts/write_paper_artifact_evidence_audit_outputs.py` | pass, `gap_count=3`, `submission_ready=false` |
+| `pytest tests/functional/test_paper_artifact_evidence_audit.py -q` | pass |
+| `python tools/harness/run_all_audits.py` | pass |
 
 ## stage_17_pilot_full_submission_freeze
 
 | item | value |
 | --- | --- |
 | construction_unit_name | `submission_readiness_gate` |
-| phase_status | `blocked_by_evidence_gaps` |
+| phase_status | `blocked_by_current_evidence_gaps` |
 | executor | `codex_agent` |
-| execution_date | `2026-06-21` |
-| input_manifest | `outputs/paper_artifact_evidence_audit/manifest.local.json`; `outputs/paper_artifact_evidence_audit/artifact_builder_readiness_report.json`; `outputs/paper_artifact_evidence_audit/submission_blocker_report.json`; `outputs/paper_artifact_evidence_audit/evidence_gap_list.csv`; `docs/extraction_profiles.md`; `docs/release_boundary.md` |
+| execution_date | `2026-06-23` |
+| input_manifest | `outputs/paper_artifact_evidence_audit/manifest.local.json`; `outputs/paper_artifact_evidence_audit/artifact_builder_readiness_report.json`; `outputs/paper_artifact_evidence_audit/submission_blocker_report.json`; `outputs/paper_artifact_evidence_audit/evidence_gap_list.csv`; `outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json`; `docs/extraction_profiles.md`; `docs/release_boundary.md` |
 | expected_output_manifest | `outputs/submission_readiness/submission_readiness_manifest.local.json` |
 | expected_outputs | `outputs/submission_readiness/readiness_blocker_report.json`; `outputs/submission_readiness/required_evidence_inputs.csv`; `outputs/submission_readiness/release_profile_dry_run.csv`; `outputs/submission_readiness/submission_readiness_manifest.local.json` |
-| blocking_items | `readiness_decision=blocked`; `submission_ready=false`; `required_input_count=6`; `critical_required_input_count=4`; `paper_ready_artifact_count=0`銆?|
-| fallback_path | 鍙敓鎴愭姇绋垮氨缁樆鏂姤鍛婂拰 release dry-run 娓呭崟, 涓嶅鍑烘姇绋垮€欓€夊寘, 涓嶅喕缁撹鏂囩骇琛ㄦ牸銆佸浘鎴?report銆?|
-| invariants | stage16 evidence audit 鏈€氳繃鎶曠鍐荤粨鍓? release dry-run 鍙繍琛屼笉绛変环浜庢姇绋垮氨缁? 鎵€鏈夋柊澧炰骇鐗╀繚鎸?`supports_paper_claim=false`; 涓嶆墜宸ヨˉ琛ㄦ垨鎵嬪伐鏍囪 claim銆?|
-| next_stage_entry | 闇€瑕佸厛琛ラ綈鐪熷疄 attacked image 闂幆銆佸啀鎵╂暎绫绘敾鍑荤湡瀹?GPU 楠岃瘉銆佸閮?baseline 缁撴灉銆乫ull-main 鏍锋湰瑙勬ā銆佸畬鏁存柟娉?fixed-FPR 閲嶆牎鍑嗗拰 dataset-level FID / KID, 鍐嶉噸鏂拌繍琛屾湰闂ㄧ銆?|
+| blocking_items | `readiness_decision=blocked`; `submission_ready=false`; `required_input_count=3`; `critical_required_input_count=2`; `paper_ready_artifact_count=0`。 |
+| fallback_path | 只生成投稿就绪阻断报告和 release dry-run 清单, 不导出投稿候选包, 不冻结论文级表格、图或 report。 |
+| invariants | stage16 evidence audit 未通过投稿冻结前, release dry-run 可运行不等价于投稿就绪; 所有新增产物保持 `supports_paper_claim=false`; 不手工补表或手工标记 claim。 |
+| next_stage_entry | 需要先补齐 `gap_baseline_results`、`gap_full_main_sample_scale` 和 `gap_dataset_level_fid_kid`, 然后重跑 stage16 与本门禁。当前不进行 TPR@FPR=0.01 或 TPR@FPR=0.001 的正式 full paper 运行。 |
 
-### stage17 褰撳墠鎺ㄨ繘鍐呭
+### stage17 当前完成内容
 
-1. 鏂板 `main/analysis/submission_readiness.py`, 灏?stage16 璇佹嵁瀹¤浜х墿銆佽瘉鎹己鍙ｅ拰 release dry-run 鎽樿鍚堟垚涓烘姇绋垮氨缁棬绂佸垽瀹氥€?
-2. 鏂板 `scripts/write_submission_readiness_outputs.py`, 浠?`outputs/paper_artifact_evidence_audit/` 璇诲彇鍙楁不鐞嗚緭鍏? 鐢熸垚闃绘柇鎶ュ憡銆佸緟琛ラ綈杈撳叆娓呭崟銆乺elease profile dry-run 琛ㄥ拰 manifest銆?
-3. 鏂板 `tests/functional/test_submission_readiness.py`, 楠岃瘉瀛樺湪璇佹嵁缂哄彛鏃朵笉寰楀厑璁告姇绋垮喕缁? 骞堕獙璇佽緭鍑虹洰褰曘€乵anifest 涓?`supports_paper_claim=false` 杈圭晫銆?
-4. 鏇存柊 `docs/field_registry.md`, 鐧昏鎶曠灏辩华闂ㄧ銆佸緟琛ラ綈杈撳叆鍜?release dry-run 鐩稿叧瀛楁銆?
+1. `main/analysis/submission_readiness.py` 已将 stage16 证据审计产物、缺口列表、小样本 baseline 摘要和 release dry-run 摘要合成为投稿就绪门禁判定。
+2. `scripts/write_submission_readiness_outputs.py` 已生成阻断报告、待补齐输入清单、release profile dry-run 表和 manifest。
+3. 当前小样本 baseline 证据只允许解释为小样本共同协议边界, 不能支持正式 full paper 统计声明。
 
-### stage17 褰撳墠浜х墿鎽樿
+### stage17 当前产物摘要
 
-1. `readiness_blocker_report.json` 鏄剧ず `readiness_decision=blocked`, `submission_ready=false`, `package_freeze_allowed=false`, `release_dry_run_ready=true`銆?
-2. `required_evidence_inputs.csv` 鍖呭惈6涓緟琛ラ綈杈撳叆, 鍏朵腑4涓负 critical: 鐪熷疄 attacked image 闂幆銆佸啀鎵╂暎绫绘敾鍑荤湡瀹?GPU 楠岃瘉銆佸閮?baseline 缁撴灉鍜?full-main 鏍锋湰瑙勬ā銆?
-3. `release_profile_dry_run.csv` 鏄剧ず `minimal_method_package` 涓?`paper_artifact_rebuild_package` 鐨?dry-run 鍙敓鎴愭枃浠舵竻鍗? 浣?`release_package_allowed=false`銆?
-4. 褰撳墠涓嶈兘杩涘叆 submission-ready 鐘舵€? 鍥犱负璇佹嵁缂哄彛灏氭湭鍏抽棴涓?`paper_ready_artifact_count=0`銆?
+1. `readiness_blocker_report.json` 显示 `readiness_decision=blocked`, `submission_ready=false`, `package_freeze_allowed=false`, `release_dry_run_ready=true`。
+2. `required_evidence_inputs.csv` 只包含3个待补齐输入, 其中2个为 critical: 外部 baseline 正式结果与 full-main 样本规模; dataset-level FID / KID 为 major 缺口。
+3. `paper_ready_artifact_count=0`, `formal_full_paper_run_requested=false`, `formal_full_paper_run_permitted=false`。
+4. 已显式排除当前小样本流程下的 `tpr_at_fpr_0_01` 与 `tpr_at_fpr_0_001` 操作点。
 
-### stage17 褰撳墠瀹屾垚杈圭晫
-
-1. 鏈瀹屾垚鐨勬槸鎶曠灏辩华闂ㄧ鐨勯樆鏂璁￠摼璺? 涓嶆槸 stage17 瀹屾暣鎶曠鍐荤粨銆?
-2. 鏈涓嶈繍琛?full-main 鎴?full-extra, 涓嶅鍑?release package, 涓嶇敓鎴愯鏂囩骇鏈€缁堣〃鍥俱€?
-3. 鍚庣画鑻ヨˉ榻?evidence gap, 搴斿厛閲嶆柊杩愯 stage16 artifact evidence audit, 鍐嶉噸鏂拌繍琛屾湰闂ㄧ銆?
-
-### stage17 褰撳墠楠岃瘉缁撴灉
+### stage17 当前验证结果
 
 | command | result |
 | --- | --- |
-| `python -m py_compile main/analysis/submission_readiness.py scripts/write_submission_readiness_outputs.py tests/functional/test_submission_readiness.py` | pass |
-| `python scripts/write_submission_readiness_outputs.py` | pass, `readiness_decision=blocked`, `required_input_count=6`, `release_dry_run_ready=true` |
-| `pytest tests/functional/test_submission_readiness.py -q` | pass, 2 passed |
-| `pytest -q` | pass, 95 passed, 2 deselected |
-| `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
+| `python scripts/write_submission_readiness_outputs.py` | pass, `required_input_count=3`, `critical_required_input_count=2` |
+| `pytest tests/functional/test_submission_readiness.py -q` | pass |
+| `python tools/harness/run_all_audits.py` | pass |
 
 ## real_gpu_aligned_rescoring_workflow
 
@@ -854,70 +794,66 @@
 | item | value |
 | --- | --- |
 | construction_unit_name | `real_attack_evaluation` |
-| phase_status | `colab_workflow_ready_gpu_run_required` |
+| phase_status | `real_gpu_small_sample_attack_closed_loop_ready` |
 | executor | `codex_agent` |
-| execution_date | `2026-06-21` |
+| execution_date | `2026-06-23` |
 | input_manifest | `outputs/aligned_rescoring/aligned_rescoring_manifest.local.json`; `outputs/attack_matrix/manifest.local.json`; `outputs/threshold_calibration/manifest.local.json` |
 | expected_output_manifest | `outputs/real_attack_evaluation/real_attack_manifest.local.json` |
-| expected_outputs | `paper_workflow/real_attack_evaluation_run.ipynb`; `paper_workflow/colab_utils/real_attack_evaluation.py`; `outputs/real_attack_evaluation/attacked_images/*.png`; `outputs/real_attack_evaluation/real_attack_detection_records.jsonl`; `outputs/real_attack_evaluation/real_attacked_image_registry.jsonl`; `outputs/real_attack_evaluation/real_attack_family_metrics.csv`; `outputs/real_attack_evaluation/real_attack_environment_report.json`; `outputs/real_attack_evaluation/real_attack_manifest.local.json`; `GoogleDrive/SLM/real_attack_evaluation/real_attack_evaluation_package_<utc>_<short_commit>.zip` |
-| blocking_items | 鏈湴鐜鏃?GPU 鍜岀湡瀹?SD3.5 Medium 鏉冮噸, 鍥犳鏈鍙兘琛ラ綈 Colab 鐪熷疄 GPU workflow銆佸彈娌荤悊瀛楁銆佹墦鍖呭叆鍙ｅ拰杞婚噺娴嬭瘯; 鐪熷疄 attacked image 鏂囦欢涓?img2img / DDIM inversion / SDEdit / diffusion purification 瀹炴祴浠嶉渶瑕佸湪 Colab GPU 鎵ц notebook 鍚庡洖浼犲寘瀹¤銆?|
-| fallback_path | 鑻ョ己灏?aligned rescoring 鍖呫€丠F_TOKEN銆丟PU runtime銆乮mage-to-image pipeline 鎴栨煇涓啀鎵╂暎鏀诲嚮鍚庣, helper 浼氬啓鍑?`run_decision=fail`銆乣unsupported_reason` 鍜岀幆澧冨揩鐓? 涓嶄細浼€犵湡瀹?attacked image 缁撴灉銆?|
-| invariants | Notebook 鍙綔涓鸿繙绋嬪叆鍙? 姝ｅ紡閫昏緫浣嶄簬 `paper_workflow/colab_utils/real_attack_evaluation.py`; 鎵€鏈夋柊澧炰骇鐗╀繚鎸?`supports_paper_claim=false`, 鐩村埌閲嶆柊杩愯 attack matrix銆乫ixed-FPR 鏍″噯鍜岃鏂囪瘉鎹璁°€?|
-| next_stage_entry | Colab 鐢熸垚骞跺洖浼?`real_attack_evaluation_package_<utc>_<short_commit>.zip` 鍚? 鏈湴搴斿厛瀹¤ records銆乺egistry銆乤ttacked images銆乵etrics銆乪nvironment report 鍜?manifest, 鍐嶅喅瀹氭槸鍚﹀叧闂湡瀹炲浘鍍忕骇鏀诲嚮闂幆涓庡啀鎵╂暎 GPU 楠岃瘉缂哄彛銆?|
+| expected_outputs | `paper_workflow/real_attack_evaluation_run.ipynb`; `paper_workflow/colab_utils/real_attack_evaluation.py`; `outputs/real_attack_evaluation/attacked_images/*.png`; `outputs/real_attack_evaluation/real_attack_detection_records.jsonl`; `outputs/real_attack_evaluation/formal_attack_detection_records.jsonl`; `outputs/real_attack_evaluation/real_attacked_image_registry.jsonl`; `outputs/real_attack_evaluation/real_attack_family_metrics.csv`; `outputs/real_attack_evaluation/real_attack_environment_report.json`; `outputs/real_attack_evaluation/real_attack_manifest.local.json`; `GoogleDrive/SLM/real_attack_evaluation/real_attack_evaluation_package_<utc>_<short_commit>.zip` |
+| blocking_items | 小样本真实 GPU 链路已跑通; 当前不再阻断 attack matrix 重建。论文级 robustness 仍需要 full-main 样本规模和后续 evidence audit。 |
+| fallback_path | 若后续 Colab 结果包缺失、模型不可用或 DDIM inversion 后端失败, helper 必须写出 `run_decision=fail` 与 `unsupported_reason`, 不得伪造 attacked image 或 formal detection records。 |
+| invariants | Notebook 只作为远程入口; 正式逻辑位于 `paper_workflow/colab_utils/real_attack_evaluation.py`; 产物保持 `supports_paper_claim=false`, 直到 full-main 统计和证据审计通过。 |
+| next_stage_entry | 真实攻击包已回传并通过本地审计后, 应继续把 formal records 向 attack matrix、paper artifact evidence audit 和 submission readiness 传播。 |
 
-### real attack evaluation workflow 宸插畬鎴愬唴瀹?
+### real attack evaluation workflow 当前完成内容
 
-1. 鏂板 `paper_workflow/colab_utils/real_attack_evaluation.py`, 鏀寔浠?aligned rescoring 杈撳嚭鍥惧儚璇诲彇 source image, 鐢熸垚鐪熷疄 attacked image 鏂囦欢, 鐧昏 source / attacked image SHA256 digest, 骞跺啓鍑虹湡瀹炴敾鍑绘娴?records銆乤ttacked image registry銆乤ttack family metrics銆乪nvironment report 鍜?manifest銆?
-2. 鏂板 `paper_workflow/real_attack_evaluation_run.ipynb`, 鏀寔 Colab 鍐峰惎鍔? 鎸傝浇 Google Drive銆佸畨瑁呭綋鍓?Colab 鍙繍琛屼緷璧栫粍鍚堛€佹媺鍙栦粨搴撱€佽鍙?`HF_TOKEN`銆佽В鍘嬪墠搴?aligned rescoring 鍖呫€佹鏌?GPU銆佸姞杞?SD3.5 Medium image-to-image pipeline銆佹墽琛?img2img銆丏DIM inversion銆丼DEdit 鍜?diffusion purification 鏀诲嚮, 骞舵妸缁撴灉鍖呬繚瀛樺埌 Drive銆?
-3. 鏂板 `package_real_attack_evaluation_outputs`, 浼氭妸 attacked images銆乺ecords銆乺egistry銆乵etrics銆乪nvironment report銆乵anifest銆丯otebook銆乭elper 鍜屽叧閿笂娓?manifest 绾冲叆 zip銆?
-4. 鏂板杞婚噺娴嬭瘯 `tests/functional/test_real_attack_evaluation.py`, 浣跨敤 mock pipeline 楠岃瘉 registry / digest / 妫€娴嬭褰?/ 鎵撳寘杈圭晫, 涓嶅湪榛樿 pytest 涓Е鍙戠湡瀹?GPU 鎺ㄧ悊銆?
-5. 鏇存柊 `tests/constraints/test_notebook_entrypoint_contract.py`, 瑕嗙洊 Notebook 濮旀墭銆丏rive 璺緞銆佹棤鎵ц杈撳嚭銆佸姩鎬佷緷璧栧懡浠ゅ拰鎵撳寘浜х墿鏍稿銆?
-6. 鏇存柊 `docs/field_registry.md`, 鐧昏鐪熷疄鏀诲嚮闂幆銆乤ttacked image 鏂囦欢銆乨igest 娉ㄥ唽銆佹敾鍑诲悗妫€娴嬪拰鍐嶆墿鏁?GPU 楠岃瘉鐘舵€佺浉鍏冲瓧娈点€?
+1. Colab GPU 运行已生成4个再扩散类真实攻击结果, 覆盖 img2img、DDIM inversion、SDEdit 与 diffusion purification。
+2. 每条真实攻击记录均已写出 source image digest、attacked image digest、攻击名称、图像路径和 formal detection 字段。
+3. `run_decision=pass`, `real_attack_record_count=4`, `real_attacked_image_count=4`, `formal_attack_detection_ready=true`。
+4. 运行环境已记录 Colab L4、CUDA 12.8、Python 3.12.13、torch 2.11.0+cu128、diffusers 0.38.0 和 transformers 5.12.1。
 
-### real attack evaluation workflow 褰撳墠杈圭晫
+### real attack evaluation workflow 当前边界
 
-1. 鏈湴浠ｇ爜鍙樻洿涓嶈兘鐩存帴璇佹槑鐪熷疄 attacked image 缂哄彛宸插叧闂? 闇€瑕?Colab GPU 杩愯鍚庣殑 zip 鍖呬綔涓鸿瘉鎹€?
-2. 褰撳墠鏀诲嚮鍚庢娴嬩娇鐢?`real_image_quality_proxy_after_attack` 鍙楁不鐞嗕唬鐞嗗垎鏁? 浣滅敤鏄畬鎴愮湡瀹炲浘鍍忔枃浠堕棴鐜拰閲嶆柊妫€娴嬭褰? 涓嶇瓑浠蜂簬璁烘枃绾?robustness 缁撹銆?
-3. DDIM inversion 璺緞浼氬皾璇曚娇鐢?diffusers 鐨?`DDIMScheduler`; 鑻ュ綋鍓?SD3.5 image-to-image 鍚庣涓嶆帴鍙楄 scheduler, helper 浼氳褰?unsupported, 鑰屼笉鏄檷绾т吉閫?inversion 缁撴灉銆?
-4. Colab 鍖呭洖浼犲悗, 浠嶉渶鎶婄湡瀹炴敾鍑荤粨鏋滃悜 attack matrix銆乼hreshold calibration銆乸aper artifact evidence audit 鍜?submission readiness gate 閲嶆柊浼犳挱銆?
-
-### real attack evaluation workflow 杩藉姞淇
-
-1. Notebook 宸叉敼涓轰粠 Google Drive 涓煡鎵惧苟閫夋嫨鎬цВ鍘嬪墠搴?`aligned_rescoring_package_*.zip` 涓?`threshold_calibration_package_*.zip`, 涓嶅啀渚濊禆鏈湴 `outputs/` 涓殑鍓嶅簭 zip, 涔熶笉鍐嶆妸鍖呭唴浠ｇ爜鏂囦欢瑕嗙洊鍥炰粨搴撳伐浣滃尯銆?
-2. Notebook 宸叉敼涓哄厛杩愯 workflow 骞舵墦鍖呭埌 Drive, 鍐嶆墽琛屾柇瑷€; 鍗充娇鐪熷疄 GPU 鏀诲嚮鎴?DDIM inversion 澶辫触, 涔熶細淇濈暀璇婃柇 records銆乻ummary銆乪nvironment report 鍜?manifest銆?
-3. helper 宸叉寜 aligned image 璺緞缁戝畾鍓嶅簭 `prompt_id` 涓?`prompt_text`, 姣忓紶 source image 浣跨敤瀵瑰簲鐪熷疄 prompt 鎵ц鍐嶆墿鏁ｆ敾鍑汇€?
-4. helper 宸叉柊澧?`formal_attack_detection_records.jsonl`, 灏嗙湡瀹?attacked image 缁撴灉鎺ュ洖 attack matrix 鍏煎 schema, 骞跺鐢?fixed-FPR threshold 涓?rescue boundary 鐢熸垚姝ｅ紡妫€娴嬭褰曘€?
-5. DDIM inversion 璺緞宸叉敼涓轰弗鏍?`DDIMInverseScheduler` inversion + `DDIMScheduler` reconstruction, 榛樿 attacker model 涓?`runwayml/stable-diffusion-v1-5`; 鑻ョ粍浠朵笉鍙敤鎴栧悗绔け璐? 浼氳褰?unsupported 鑰屼笉鏄吉閫犵粨鏋溿€?
+1. 该 workflow 关闭的是“小样本真实图像攻击闭环能否跑通”的工程缺口, 不是论文级 robustness 结论。
+2. formal fixed-FPR 边界沿用 threshold calibration: clean negative 控制 FPR, attacked negative 作为鲁棒性诊断。
+3. 后续 full-main 运行可以复用该 workflow, 但必须重新生成更大样本量的 records、表格和审计报告。
 
 ## external_baseline_governed_ingestion
 
 | item | value |
 | --- | --- |
 | construction_unit_name | `external_baseline_comparison` |
-| phase_status | `official_source_cached_result_import_ready` |
+| phase_status | `formal_import_readiness_audit_ready` |
 | executor | `codex_agent` |
-| execution_date | `2026-06-21` |
-| input_manifest | `outputs/attack_matrix/manifest.local.json`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `external_baseline/source_registry.json` |
+| execution_date | `2026-06-23` |
+| input_manifest | `outputs/attack_matrix/manifest.local.json`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/external_baseline_results/manifest.local.json`; `external_baseline/source_registry.json` |
 | expected_output_manifest | `outputs/external_baseline_comparison/manifest.local.json` |
-| expected_outputs | `outputs/external_baseline_comparison/baseline_observations.jsonl`; `outputs/external_baseline_comparison/baseline_result_records.jsonl`; `outputs/external_baseline_comparison/baseline_metrics.csv`; `outputs/external_baseline_comparison/baseline_comparison_table.csv`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
-| blocking_items | 澶栭儴 baseline 鎸囨爣缁撴灉灏氭湭澶嶇幇鎴栧鍏? 鍥犳 `baseline_results_ready=false` 涓?`supports_paper_claim=false`銆?|
-| fallback_path | 鑻ュ畼鏂规簮鐮佹棤娉曠洿鎺ヨ繍琛? 鍙粠鍙楁不鐞嗘潵婧愬鍏?`baseline_result_records.jsonl`, 浣嗗繀椤讳繚鐣欐潵婧愯矾寰勩€佹潵婧愭憳瑕併€佸叡鍚屽崗璁敭鍜屾寚鏍囧瓧娈点€?|
-| invariants | 绗笁鏂规簮鐮佷粛淇濈暀鍦ㄨ蹇界暐鐨?`external_baseline/` 缂撳瓨涓? 鏈」鐩彧鎻愪氦 adapter銆佹潵婧愮櫥璁拌鍙栭€昏緫銆佸鍏ヨ褰?schema銆佸姣旇〃閲嶅缓鑴氭湰鍜岃交閲忔祴璇曘€?|
+| expected_outputs | `outputs/external_baseline_results/baseline_result_records.jsonl`; `outputs/external_baseline_results/baseline_result_candidate_validation_report.json`; `outputs/external_baseline_results/baseline_formal_import_readiness.csv`; `outputs/external_baseline_results/baseline_formal_import_readiness_summary.json`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
+| blocking_items | 当前4条主表候选均未通过正式导入 validator; `accepted_formal_import_count=0`, `formal_result_ready_count=0`, `primary_baseline_formal_ready=false`。 |
+| fallback_path | 允许保存候选记录与拒绝原因作为后续补证输入; 不允许把小样本候选、GPU smoke observation 或 legacy reference 结果直接手工写入主表。 |
+| invariants | 第三方源码缓存仍由 `external_baseline/source_registry.json` 记录; 本项目提交 adapter、schema、导入报告与测试, 不把不受治理的第三方输出当作 supported claim。 |
 
-### external baseline 鎺ュ叆鎺ㄨ繘鍐呭
+### external baseline 正式导入推进内容
 
-1. `experiments/baselines/adapters.py` 宸叉墿灞曚负鏀寔瀹樻柟婧愮爜鐧昏 overlay 鍜屽彈娌荤悊 `baseline_result_records.jsonl` 瀵煎叆銆?2. `scripts/write_external_baseline_comparison_outputs.py` 宸叉敮鎸佽鍙?`external_baseline/source_registry.json`, 灏嗘湰鍦扮紦瀛樻簮鐮佺姸鎬佸啓鍏ヨ繍琛屾姤鍛? 骞惰緭鍑鸿鑼冨寲鐨?`baseline_result_records.jsonl`銆?3. 褰撳墠鏈湴婧愮爜缂撳瓨涓?8 涓閮?baseline 鍧囧彲琚櫥璁颁负 `baseline_official_code_ready=true`, 浣嗗皻鏃犲叡鍚屽崗璁笅鐨勫鐜板疄娴嬬粨鏋滄垨鍙楁不鐞嗗鍏ョ粨鏋溿€?4. 宸茶ˉ鍏呰交閲忔祴璇? 瑕嗙洊缂哄け缁撴灉鏃剁殑 unsupported 杈圭晫, 浠ュ強鍗曚釜鍙楁不鐞嗗鍏ョ粨鏋滆繘鍏ヨ娴嬭褰曘€佽仛鍚堟寚鏍囧拰鍏卞悓鍗忚瀵规瘮琛ㄧ殑閾捐矾銆?
-### external baseline 褰撳墠浜х墿鎽樿
+1. 已建立主表 external baseline 正式共同协议导入 readiness 表, 对 Tree-Ring、Gaussian Shading、Shallow Diffuse 与 T2SMark 分别聚合候选数量、接受数量、拒绝数量和阻断原因。
+2. 已把 readiness 摘要并入 `baseline_runtime_report.json`, 使下游审计能够直接读取 `blocked_primary_baseline_ids` 与 `dominant_formal_import_blocking_reasons`。
+3. 当前官方源码缓存登记显示8个 baseline 的源码入口可检查, 但正式结果仍为未就绪。
+4. 下一步应在共同协议下补齐 full-main prompt、fixed-FPR baseline calibration、attack matrix baseline detection 和正式证据路径, 再重新运行导入 validator。
 
-1. `baseline_runtime_report.json` 鏄剧ず `baseline_source_registry_ready=true`, `official_source_ready_count=8`, `imported_baseline_result_count=0`, `baseline_result_ready_count=0`, `baseline_results_ready=false`銆?2. `baseline_metrics.csv` 浠嶄繚鎸佹墍鏈?baseline 鐨勭粨鏋滀负 unsupported, 璇ョ姸鎬佹槸姝ｇ‘杈圭晫, 琛ㄧず瀹樻柟婧愮爜宸茬紦瀛樹絾灏氭湭褰㈡垚鍏卞悓鍗忚鎸囨爣銆?3. 涓嬩竴姝ュ簲閫夋嫨涓昏〃 baseline 浼樺厛绾? 鍏堝 Tree-Ring銆丟aussian Shading銆丼hallow Diffuse 鍜?T2SMark 寤虹珛鍙楁不鐞嗗鐜版垨瀵煎叆璁板綍, 鍐嶆墿灞曡ˉ鍏呰〃 baseline銆?
-### external baseline 楠岃瘉缁撴灉
+### external baseline 当前产物摘要
+
+1. `baseline_result_candidate_summary.json` 显示 `formal_import_candidate_record_count=4`, `accepted_formal_import_count=0`, `rejected_formal_import_count=4`, `formal_import_issue_count=15`。
+2. `baseline_formal_import_readiness.csv` 对4个主表 baseline 均给出 `formal_result_ready=false`。
+3. `baseline_formal_import_readiness_summary.json` 显示 `blocked_primary_baseline_ids=[tree_ring, gaussian_shading, shallow_diffuse, t2smark]`。
+4. `baseline_runtime_report.json` 显示 `official_source_ready_count=8`, `baseline_results_ready=false`, `supports_paper_claim=false`。
+
+### external baseline 当前验证结果
 
 | command | result |
 | --- | --- |
-| `python -m py_compile experiments/baselines/adapters.py experiments/baselines/__init__.py scripts/write_external_baseline_comparison_outputs.py tests/functional/test_external_baseline_comparison.py` | pass |
-| `pytest tests/functional/test_external_baseline_comparison.py tests/functional/test_external_baseline_source_registry.py -q` | pass, 5 passed |
-| `python scripts/write_external_baseline_comparison_outputs.py` | pass, `official_source_ready_count=8`, `baseline_results_ready=false` |
-
+| `python scripts/write_primary_baseline_result_candidates.py --external-gpu-smoke-package-path <drive_zip> --t2smark-full-main-package-path <drive_zip>` | pass |
+| `python scripts/write_external_baseline_comparison_outputs.py` | pass |
+| `pytest tests/functional/test_primary_baseline_result_candidates.py tests/functional/test_external_baseline_comparison.py -q` | pass |
 
 ## primary_baseline_reproduction_protocol
 

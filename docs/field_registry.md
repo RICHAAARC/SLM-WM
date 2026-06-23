@@ -1028,8 +1028,11 @@ Notebook 与 repository module 的跨边界数据
 | formal_import_validation_report_path | artifact | none | false | false | false | 正式导入 validator 报告路径。 |
 | formal_import_candidate_records_path | artifact | none | false | false | false | T2SMark 或其他 baseline 写出的正式导入候选 JSONL 路径。 |
 | formal_import_candidate_record_count | metric | none | false | false | false | T2SMark 或其他 baseline 写出的正式导入候选记录数量。 |
+| candidate_record_count | metric | none | false | false | false | 单个主表 baseline 在正式导入 readiness 行中的候选记录数量。 |
 | candidate_record_digest | artifact | none | false | false | false | 主表 external baseline 候选记录集合的稳定摘要。|
 | validation_report_digest | artifact | none | false | false | false | 主表 external baseline 候选校验报告的稳定摘要。|
+| formal_import_readiness_digest | artifact | none | false | false | false | 主表 external baseline 正式导入 readiness 表的稳定摘要。|
+| formal_import_readiness_summary_digest | artifact | none | false | false | false | 主表 external baseline 正式导入 readiness 摘要的稳定摘要。|
 | method_resource_profile | protocol | none | false | false | false | 方法忠实 adapter 候选记录声明的资源配置名称。|
 | small_sample_evidence_id | artifact | none | true | false | false | 主表 external baseline 小样本证据记录的稳定标识。|
 | small_sample_evidence_digest | artifact | none | true | false | false | 主表 external baseline 小样本证据记录的稳定摘要。|
@@ -1138,7 +1141,16 @@ Notebook 与 repository module 的跨边界数据
 | formal_result_ready_count | metric | none | false | false | false | 已具备正式共同协议结果的主表 external baseline 数量。|
 | formal_result_ready_ids | protocol | none | false | false | false | 已具备正式共同协议结果的主表 external baseline id 集合。|
 | primary_baseline_formal_ready | governance | none | false | false | false | 四个主表 external baseline 是否全部具备正式共同协议结果。|
+| blocked_primary_baseline_ids | protocol | none | false | false | false | 尚未具备正式共同协议结果的主表 external baseline id 集合。|
+| blocking_reason_count | metric | none | false | false | false | 单个主表 baseline readiness 行中的阻断原因数量。|
 | blocking_reasons | governance | none | false | false | false | 证据边界记录中阻断正式结果声明的原因集合。|
+| dominant_blocking_reasons | governance | none | false | false | false | 主表 baseline 正式导入 readiness 摘要中的主要阻断原因集合。|
+| dominant_formal_import_blocking_reasons | governance | none | false | false | false | 外部 baseline 对比运行报告中透传的正式导入主要阻断原因集合。|
+| missing_resource_profile_full_main | governance | none | false | false | false | 主表 baseline 候选是否缺少 full_main 资源档位边界。|
+| missing_full_main_prompt_protocol | governance | none | false | false | false | 主表 baseline 候选是否缺少 full-main prompt 协议边界。|
+| missing_fixed_fpr_baseline_calibration | governance | none | false | false | false | 主表 baseline 候选是否缺少 fixed-FPR baseline 校准边界。|
+| missing_attack_matrix_baseline_detection | governance | none | false | false | false | 主表 baseline 候选是否缺少共同攻击矩阵检测边界。|
+| formal_import_readiness_summary_path | artifact | none | false | false | false | 主表 baseline 正式导入 readiness 摘要路径。|
 | adapter_boundary | governance | none | false | false | false | adapter observation 或 manifest 对工程 smoke 与正式论文证据边界的说明。|
 | execution_device | runtime | none | false | false | false | adapter 张量或诊断分数实际执行设备。|
 | torch_available | runtime | none | false | false | false | adapter 运行环境中是否可导入 torch。|

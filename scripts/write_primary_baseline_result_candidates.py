@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -18,6 +19,8 @@ if str(ROOT) not in sys.path:
 
 from experiments.baselines import (
     build_method_faithful_baseline_candidate_records,
+    build_primary_baseline_formal_import_readiness_rows,
+    build_primary_baseline_formal_import_readiness_summary,
     validate_primary_baseline_formal_import_rows,
 )
 from main.analysis.artifact_manifest import build_artifact_manifest
@@ -47,6 +50,16 @@ def json_line(value: dict[str, Any]) -> str:
     """把单条记录写成稳定 JSONL 行。"""
 
     return json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n"
+
+
+def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
+    """写出稳定字段顺序的 CSV 文件。"""
+
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
 
 
 def resolve_path(root_path: Path, path: str | Path | None) -> Path | None:
@@ -380,6 +393,8 @@ def write_primary_baseline_result_candidate_outputs(
         target_fpr=target_fpr,
         require_existing_evidence=True,
     )
+    readiness_rows = build_primary_baseline_formal_import_readiness_rows(candidate_rows, validation_report)
+    readiness_summary = build_primary_baseline_formal_import_readiness_summary(readiness_rows)
     summary = {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -389,16 +404,43 @@ def write_primary_baseline_result_candidate_outputs(
         "rejected_formal_import_count": validation_report["rejected_formal_import_count"],
         "formal_import_issue_count": validation_report["formal_import_issue_count"],
         "formal_import_validation_ready": validation_report["formal_import_validation_ready"],
+        "formal_result_ready_count": readiness_summary["formal_result_ready_count"],
+        "blocked_primary_baseline_ids": readiness_summary["blocked_primary_baseline_ids"],
+        "primary_baseline_formal_ready": readiness_summary["primary_baseline_formal_ready"],
+        "dominant_blocking_reasons": readiness_summary["dominant_blocking_reasons"],
         "supports_paper_claim": False,
     }
 
     records_path = resolved_output_dir / "baseline_result_records.jsonl"
     validation_path = resolved_output_dir / "baseline_result_candidate_validation_report.json"
+    readiness_path = resolved_output_dir / "baseline_formal_import_readiness.csv"
+    readiness_summary_path = resolved_output_dir / "baseline_formal_import_readiness_summary.json"
     summary_path = resolved_output_dir / "baseline_result_candidate_summary.json"
     manifest_path = resolved_output_dir / "manifest.local.json"
 
     records_path.write_text("".join(json_line(row) for row in candidate_rows), encoding="utf-8")
     validation_path.write_text(stable_json_text(validation_report), encoding="utf-8")
+    write_csv(
+        readiness_path,
+        readiness_rows,
+        [
+            "baseline_id",
+            "candidate_record_count",
+            "accepted_formal_import_count",
+            "rejected_formal_import_count",
+            "formal_import_issue_count",
+            "formal_result_ready",
+            "blocking_reason_count",
+            "blocking_reasons",
+            "missing_resource_profile_full_main",
+            "missing_full_main_prompt_protocol",
+            "missing_fixed_fpr_baseline_calibration",
+            "missing_attack_matrix_baseline_detection",
+            "formal_evidence_paths_ready",
+            "supports_paper_claim",
+        ],
+    )
+    readiness_summary_path.write_text(stable_json_text(readiness_summary), encoding="utf-8")
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
     input_paths = []
@@ -412,7 +454,15 @@ def write_primary_baseline_result_candidate_outputs(
         if path and path.exists():
             input_paths.append(relative_or_absolute(path, root_path))
     output_paths = tuple(
-        relative_or_absolute(path, root_path) for path in (records_path, validation_path, summary_path, manifest_path)
+        relative_or_absolute(path, root_path)
+        for path in (
+            records_path,
+            validation_path,
+            readiness_path,
+            readiness_summary_path,
+            summary_path,
+            manifest_path,
+        )
     )
     manifest = build_artifact_manifest(
         artifact_id="primary_baseline_result_candidate_import_manifest",
@@ -422,6 +472,8 @@ def write_primary_baseline_result_candidate_outputs(
         config={
             "candidate_record_digest": build_stable_digest(candidate_rows),
             "validation_report_digest": build_stable_digest(validation_report),
+            "formal_import_readiness_digest": build_stable_digest(readiness_rows),
+            "formal_import_readiness_summary_digest": build_stable_digest(readiness_summary),
             "summary_digest": build_stable_digest(summary),
             "method_resource_profile": method_resource_profile,
         },

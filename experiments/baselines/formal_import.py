@@ -52,6 +52,13 @@ REQUIRED_SOURCE_FIELDS = (
     "prompt_protocol_digest",
 )
 METHOD_FAITHFUL_ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
+FORMAL_READINESS_BLOCKING_FLAG_GROUPS = {
+    "missing_resource_profile_full_main": {"resource_profile"},
+    "missing_full_main_prompt_protocol": {"prompt_protocol_name", "full_main_prompt_protocol_ready"},
+    "missing_fixed_fpr_baseline_calibration": {"comparable_operating_point", "fixed_fpr_baseline_calibration_ready"},
+    "missing_attack_matrix_baseline_detection": {"attack_matrix_baseline_detection_ready"},
+    "missing_formal_evidence_paths": {"evidence_paths", "formal_evidence_paths_ready"},
+}
 
 
 @dataclass(frozen=True)
@@ -305,6 +312,139 @@ def validate_primary_baseline_formal_import_rows(
         issues=tuple(issues),
     )
     return report.to_dict()
+
+
+def _issue_rows_by_baseline(validation_report: Mapping[str, Any]) -> dict[str, list[Mapping[str, Any]]]:
+    """把正式导入校验问题按 baseline id 聚合。"""
+
+    grouped = {baseline_id: [] for baseline_id in PRIMARY_BASELINE_IDS}
+    for issue_row in validation_report.get("issues", ()):
+        baseline_id = _str_field(issue_row, "baseline_id")
+        if baseline_id in grouped:
+            grouped[baseline_id].append(issue_row)
+    return grouped
+
+
+def _record_counts_by_baseline(rows: Iterable[Mapping[str, Any]]) -> dict[str, int]:
+    """统计每个主表 baseline 的记录数量。"""
+
+    counts = {baseline_id: 0 for baseline_id in PRIMARY_BASELINE_IDS}
+    for row in rows:
+        baseline_id = _str_field(row, "baseline_id")
+        if baseline_id in counts:
+            counts[baseline_id] += 1
+    return counts
+
+
+def _candidate_flag_ready(rows: Iterable[Mapping[str, Any]], baseline_id: str, flag_name: str) -> bool:
+    """检查同一 baseline 的任一候选记录是否声明给定 ready 标志。"""
+
+    return any(_str_field(row, "baseline_id") == baseline_id and _bool_field(row, flag_name) for row in rows)
+
+
+def _issue_fields(issues: Iterable[Mapping[str, Any]]) -> set[str]:
+    """提取一组校验问题涉及的字段名。"""
+
+    return {_str_field(issue, "field_name") for issue in issues}
+
+
+def _issue_reasons(issues: Iterable[Mapping[str, Any]]) -> tuple[str, ...]:
+    """提取一组校验问题涉及的原因码。"""
+
+    return tuple(sorted({_str_field(issue, "reason") for issue in issues if _str_field(issue, "reason")}))
+
+
+def build_primary_baseline_formal_import_readiness_rows(
+    candidate_rows: Iterable[Mapping[str, Any]],
+    validation_report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """构造主表 baseline 正式共同协议导入 readiness 行。
+
+    该函数属于 schema 汇总层: 它把候选记录的拒绝原因集中整理为每个主表 baseline 一行,
+    供文档审计和下游对比报告读取, 但不会把小样本或 smoke 候选提升为论文级正式结果。
+    """
+
+    materialized_candidates = [dict(row) for row in candidate_rows]
+    candidate_counts = _record_counts_by_baseline(materialized_candidates)
+    accepted_counts = _record_counts_by_baseline(validation_report.get("accepted_records", ()))
+    issues_by_baseline = _issue_rows_by_baseline(validation_report)
+    rows: list[dict[str, Any]] = []
+    for baseline_id in PRIMARY_BASELINE_IDS:
+        candidate_count = candidate_counts[baseline_id]
+        accepted_count = accepted_counts[baseline_id]
+        rejected_count = max(candidate_count - accepted_count, 0)
+        issues = issues_by_baseline[baseline_id]
+        reason_values = _issue_reasons(issues)
+        if candidate_count == 0:
+            reason_values = tuple(sorted((*reason_values, "candidate_record_missing")))
+        field_values = _issue_fields(issues)
+        formal_result_ready = bool(candidate_count) and accepted_count == candidate_count and not reason_values
+        row = {
+            "baseline_id": baseline_id,
+            "candidate_record_count": candidate_count,
+            "accepted_formal_import_count": accepted_count,
+            "rejected_formal_import_count": rejected_count,
+            "formal_import_issue_count": len(issues),
+            "formal_result_ready": formal_result_ready,
+            "blocking_reason_count": len(reason_values),
+            "blocking_reasons": ";".join(reason_values),
+            "missing_resource_profile_full_main": bool(
+                candidate_count == 0
+                or field_values & FORMAL_READINESS_BLOCKING_FLAG_GROUPS["missing_resource_profile_full_main"]
+            ),
+            "missing_full_main_prompt_protocol": bool(
+                candidate_count == 0
+                or field_values & FORMAL_READINESS_BLOCKING_FLAG_GROUPS["missing_full_main_prompt_protocol"]
+            ),
+            "missing_fixed_fpr_baseline_calibration": bool(
+                candidate_count == 0
+                or field_values & FORMAL_READINESS_BLOCKING_FLAG_GROUPS["missing_fixed_fpr_baseline_calibration"]
+            ),
+            "missing_attack_matrix_baseline_detection": bool(
+                candidate_count == 0
+                or field_values & FORMAL_READINESS_BLOCKING_FLAG_GROUPS["missing_attack_matrix_baseline_detection"]
+            ),
+            "formal_evidence_paths_ready": _candidate_flag_ready(
+                materialized_candidates,
+                baseline_id,
+                "formal_evidence_paths_ready",
+            )
+            and "evidence_paths" not in field_values,
+            "supports_paper_claim": False,
+        }
+        rows.append(row)
+    return rows
+
+
+def build_primary_baseline_formal_import_readiness_summary(
+    readiness_rows: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """构造主表 baseline 正式共同协议导入 readiness 摘要。"""
+
+    rows = [dict(row) for row in readiness_rows]
+    ready_ids = tuple(row["baseline_id"] for row in rows if _bool_field(row, "formal_result_ready"))
+    blocked_ids = tuple(row["baseline_id"] for row in rows if not _bool_field(row, "formal_result_ready"))
+    reason_counts: dict[str, int] = {}
+    for row in rows:
+        for reason in _list_field(row, "blocking_reasons"):
+            reason_counts[reason] = reason_counts.get(reason, 0) + 1
+    dominant_reasons = tuple(
+        reason
+        for reason, _ in sorted(
+            reason_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    )
+    return {
+        "primary_baseline_count": len(rows),
+        "formal_result_ready_count": len(ready_ids),
+        "formal_result_ready_ids": list(ready_ids),
+        "blocked_primary_baseline_ids": list(blocked_ids),
+        "primary_baseline_formal_ready": len(ready_ids) == len(PRIMARY_BASELINE_IDS) and len(rows) == len(PRIMARY_BASELINE_IDS),
+        "dominant_blocking_reasons": list(dominant_reasons),
+        "formal_import_issue_count": sum(_int_field(row, "formal_import_issue_count") for row in rows),
+        "supports_paper_claim": False,
+    }
 
 
 def _group_observations_by_attack(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str], list[Mapping[str, Any]]]:
