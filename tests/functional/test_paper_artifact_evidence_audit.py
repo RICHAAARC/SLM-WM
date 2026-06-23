@@ -39,6 +39,14 @@ def make_audit_input_bundle() -> AuditInputBundle:
         attack_matrix_manifest={"artifact_id": "attack_matrix_manifest", "supports_paper_claim": False},
         baseline_manifest={"artifact_id": "external_baseline_comparison_manifest", "supports_paper_claim": False},
         baseline_runtime_report={"baseline_results_ready": False, "supports_paper_claim": False},
+        baseline_small_sample_manifest={"artifact_id": "primary_baseline_small_sample_evidence_manifest", "supports_paper_claim": False},
+        baseline_small_sample_summary={
+            "small_sample_evidence_ready": True,
+            "covered_primary_baseline_count": 4,
+            "formal_full_paper_run_requested": False,
+            "paper_claim_ready": False,
+            "supports_paper_claim": False,
+        },
         ablation_manifest={"artifact_id": "internal_ablation_evidence_manifest", "supports_paper_claim": False},
         ablation_claim_summary={"mechanism_coverage_ready": True, "supports_paper_claim": False},
         source_path_map={
@@ -46,6 +54,8 @@ def make_audit_input_bundle() -> AuditInputBundle:
             "attack_manifest": "outputs/attack_matrix/attack_manifest.json",
             "baseline_runtime_report": "outputs/external_baseline_comparison/baseline_runtime_report.json",
             "baseline_comparison_table": "outputs/external_baseline_comparison/baseline_comparison_table.csv",
+            "baseline_small_sample_summary": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json",
+            "baseline_small_sample_records": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_records.jsonl",
             "ablation_claim_summary": "outputs/internal_ablation_evidence/ablation_claim_summary.json",
             "quality_metrics_summary": "outputs/threshold_calibration/quality_metrics_summary.csv",
         },
@@ -72,6 +82,8 @@ def make_real_attack_ready_bundle() -> AuditInputBundle:
         attack_matrix_manifest=bundle.attack_matrix_manifest,
         baseline_manifest=bundle.baseline_manifest,
         baseline_runtime_report=bundle.baseline_runtime_report,
+        baseline_small_sample_manifest=bundle.baseline_small_sample_manifest,
+        baseline_small_sample_summary=bundle.baseline_small_sample_summary,
         ablation_manifest=bundle.ablation_manifest,
         ablation_claim_summary=bundle.ablation_claim_summary,
         source_path_map=bundle.source_path_map,
@@ -94,6 +106,7 @@ def test_claim_audit_reports_current_paper_evidence_boundary() -> None:
 
     assert len(claim_rows) >= 7
     assert claims_by_id["claim_baseline_superiority"]["claim_decision"] == "unsupported"
+    assert claims_by_id["claim_baseline_small_sample_evidence_boundary"]["primary_blocker"] == "not_full_paper_claim"
     assert claims_by_id["claim_attack_robustness_under_common_matrix"]["claim_decision"] == "preview_only"
     assert "gap_real_attacked_image_closed_loop" in gap_ids
     assert builder_report["artifact_builder_ready"] is True
@@ -122,6 +135,7 @@ def test_real_attack_ready_manifest_removes_real_attack_gap_items() -> None:
     assert "gap_regeneration_attack_gpu_validation" not in gap_ids
     assert claims_by_id["claim_attack_robustness_under_common_matrix"]["primary_blocker"] == "record_level_proxy_boundary"
     assert table_by_id["table_attack_robustness"]["primary_blocker"] == "record_level_proxy_boundary"
+    assert table_by_id["table_baseline_small_sample_evidence"]["primary_blocker"] == "not_full_paper_claim"
     assert figure_by_id["figure_attack_robustness"]["primary_blocker"] == "record_level_proxy_boundary"
     assert "真实攻击闭环" not in blocker_report["recommended_next_action"]
 
@@ -163,6 +177,20 @@ def write_minimal_upstream_artifacts(tmp_path: Path) -> None:
     write_json(
         tmp_path / "outputs" / "external_baseline_comparison" / "baseline_runtime_report.json",
         {"baseline_results_ready": False, "supports_paper_claim": False},
+    )
+    write_json(
+        tmp_path / "outputs" / "primary_baseline_small_sample_evidence" / "manifest.local.json",
+        {"artifact_id": "primary_baseline_small_sample_evidence_manifest", "supports_paper_claim": False},
+    )
+    write_json(
+        tmp_path / "outputs" / "primary_baseline_small_sample_evidence" / "primary_baseline_small_sample_evidence_summary.json",
+        {
+            "small_sample_evidence_ready": True,
+            "covered_primary_baseline_count": 4,
+            "formal_full_paper_run_requested": False,
+            "paper_claim_ready": False,
+            "supports_paper_claim": False,
+        },
     )
     write_json(
         tmp_path / "outputs" / "internal_ablation_evidence" / "manifest.local.json",

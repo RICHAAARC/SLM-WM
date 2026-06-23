@@ -20,6 +20,8 @@ class AuditInputBundle:
     attack_matrix_manifest: dict[str, Any]
     baseline_manifest: dict[str, Any]
     baseline_runtime_report: dict[str, Any]
+    baseline_small_sample_manifest: dict[str, Any]
+    baseline_small_sample_summary: dict[str, Any]
     ablation_manifest: dict[str, Any]
     ablation_claim_summary: dict[str, Any]
     source_path_map: dict[str, str]
@@ -57,6 +59,31 @@ def _regeneration_attack_gpu_ready(attack_manifest: dict[str, Any]) -> bool:
     required_count = int(attack_manifest.get("required_regeneration_attack_count", 0))
     measured_count = int(attack_manifest.get("measured_regeneration_attack_count", 0))
     return _yes(attack_manifest.get("regeneration_attack_gpu_validation_ready")) and required_count > 0 and measured_count >= required_count
+
+
+def _baseline_small_sample_ready(baseline_small_sample_summary: dict[str, Any]) -> bool:
+    """判断主表 baseline 小样本证据是否已经覆盖当前四个主表方法。
+
+    该判断只用于工程审计可见性, 不会把小样本结果升级为正式论文 claim。
+    """
+
+    return (
+        _yes(baseline_small_sample_summary.get("small_sample_evidence_ready"))
+        and int(baseline_small_sample_summary.get("covered_primary_baseline_count", 0)) >= 4
+        and not _yes(baseline_small_sample_summary.get("paper_claim_ready"))
+    )
+
+
+def _baseline_small_sample_blockers(baseline_small_sample_summary: dict[str, Any]) -> list[str]:
+    """生成主表 baseline 小样本证据的当前阻断项。"""
+
+    blockers = []
+    if not _baseline_small_sample_ready(baseline_small_sample_summary):
+        blockers.append("small_sample_baseline_evidence_missing")
+    if _yes(baseline_small_sample_summary.get("formal_full_paper_run_requested")):
+        blockers.append("formal_full_paper_run_must_remain_disabled")
+    blockers.append("not_full_paper_claim")
+    return blockers
 
 
 def _attack_robustness_blockers(attack_manifest: dict[str, Any]) -> list[str]:
@@ -99,6 +126,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     threshold = bundle.threshold_report
     attack = bundle.attack_manifest
     baseline = bundle.baseline_runtime_report
+    baseline_small_sample = bundle.baseline_small_sample_summary
     ablation = bundle.ablation_claim_summary
     full_ready = _yes(threshold.get("full_method_claim_ready")) and _yes(attack.get("full_method_claim_ready"))
     return [
@@ -133,6 +161,18 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "unsupported",
             _source(bundle, "baseline_runtime_report", "baseline_runtime_report.json"),
             [] if _yes(baseline.get("baseline_results_ready")) else ["baseline_result_missing"],
+        ),
+        _row(
+            "claim_baseline_small_sample_evidence_boundary",
+            "baseline_comparison",
+            "主表 external baseline 已有小样本受治理证据, 但不支持正式 full paper 结论。",
+            "engineering_supported_not_paper_final",
+            _source(
+                bundle,
+                "baseline_small_sample_summary",
+                "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json",
+            ),
+            _baseline_small_sample_blockers(baseline_small_sample),
         ),
         _row(
             "claim_internal_mechanism_necessity",
@@ -194,6 +234,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
     threshold = bundle.threshold_report
     attack = bundle.attack_manifest
     baseline = bundle.baseline_runtime_report
+    baseline_small_sample = bundle.baseline_small_sample_summary
     ablation = bundle.ablation_claim_summary
     return [
         _artifact_row(
@@ -234,6 +275,21 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             "protocol_ready_result_missing",
             False,
             [] if _yes(baseline.get("baseline_results_ready")) else ["baseline_result_missing"],
+        ),
+        _artifact_row(
+            "table_baseline_small_sample_evidence",
+            "table",
+            "主表 external baseline 小样本证据边界表",
+            [
+                _source(
+                    bundle,
+                    "baseline_small_sample_records",
+                    "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_records.jsonl",
+                )
+            ],
+            "rebuildable_preview",
+            False,
+            _baseline_small_sample_blockers(baseline_small_sample),
         ),
         _artifact_row(
             "table_internal_ablation",

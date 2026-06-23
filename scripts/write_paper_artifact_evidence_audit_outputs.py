@@ -35,6 +35,10 @@ DEFAULT_ATTACK_MANIFEST_PATH = Path("outputs/attack_matrix/attack_manifest.json"
 DEFAULT_ATTACK_MATRIX_MANIFEST_PATH = Path("outputs/attack_matrix/manifest.local.json")
 DEFAULT_BASELINE_MANIFEST_PATH = Path("outputs/external_baseline_comparison/manifest.local.json")
 DEFAULT_BASELINE_RUNTIME_REPORT_PATH = Path("outputs/external_baseline_comparison/baseline_runtime_report.json")
+DEFAULT_BASELINE_SMALL_SAMPLE_MANIFEST_PATH = Path("outputs/primary_baseline_small_sample_evidence/manifest.local.json")
+DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH = Path(
+    "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json"
+)
 DEFAULT_ABLATION_MANIFEST_PATH = Path("outputs/internal_ablation_evidence/manifest.local.json")
 DEFAULT_ABLATION_CLAIM_SUMMARY_PATH = Path("outputs/internal_ablation_evidence/ablation_claim_summary.json")
 
@@ -115,6 +119,8 @@ def build_input_bundle(
     attack_matrix_manifest_path: Path,
     baseline_manifest_path: Path,
     baseline_runtime_report_path: Path,
+    baseline_small_sample_manifest_path: Path,
+    baseline_small_sample_summary_path: Path,
     ablation_manifest_path: Path,
     ablation_claim_summary_path: Path,
 ) -> AuditInputBundle:
@@ -126,6 +132,8 @@ def build_input_bundle(
         attack_matrix_manifest=read_json(attack_matrix_manifest_path),
         baseline_manifest=read_json(baseline_manifest_path),
         baseline_runtime_report=read_json(baseline_runtime_report_path),
+        baseline_small_sample_manifest=read_json(baseline_small_sample_manifest_path),
+        baseline_small_sample_summary=read_json(baseline_small_sample_summary_path),
         ablation_manifest=read_json(ablation_manifest_path),
         ablation_claim_summary=read_json(ablation_claim_summary_path),
         source_path_map={
@@ -144,6 +152,8 @@ def build_input_bundle(
             "attacked_image_registry": "outputs/attack_matrix/attacked_image_registry.jsonl",
             "baseline_runtime_report": "outputs/external_baseline_comparison/baseline_runtime_report.json",
             "baseline_comparison_table": "outputs/external_baseline_comparison/baseline_comparison_table.csv",
+            "baseline_small_sample_summary": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json",
+            "baseline_small_sample_records": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_records.jsonl",
             "ablation_claim_summary": "outputs/internal_ablation_evidence/ablation_claim_summary.json",
             "mechanism_ablation_table": "outputs/internal_ablation_evidence/mechanism_ablation_table.csv",
             "method_pairwise_delta_table": "outputs/internal_ablation_evidence/method_pairwise_delta_table.csv",
@@ -160,6 +170,8 @@ def write_paper_artifact_evidence_audit_outputs(
     attack_matrix_manifest_path: str | Path = DEFAULT_ATTACK_MATRIX_MANIFEST_PATH,
     baseline_manifest_path: str | Path = DEFAULT_BASELINE_MANIFEST_PATH,
     baseline_runtime_report_path: str | Path = DEFAULT_BASELINE_RUNTIME_REPORT_PATH,
+    baseline_small_sample_manifest_path: str | Path = DEFAULT_BASELINE_SMALL_SAMPLE_MANIFEST_PATH,
+    baseline_small_sample_summary_path: str | Path = DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH,
     ablation_manifest_path: str | Path = DEFAULT_ABLATION_MANIFEST_PATH,
     ablation_claim_summary_path: str | Path = DEFAULT_ABLATION_CLAIM_SUMMARY_PATH,
 ) -> dict[str, Any]:
@@ -174,6 +186,8 @@ def write_paper_artifact_evidence_audit_outputs(
     resolved_attack_matrix_manifest_path = resolve_input_path(root_path, attack_matrix_manifest_path)
     resolved_baseline_manifest_path = resolve_input_path(root_path, baseline_manifest_path)
     resolved_baseline_runtime_report_path = resolve_input_path(root_path, baseline_runtime_report_path)
+    resolved_baseline_small_sample_manifest_path = resolve_input_path(root_path, baseline_small_sample_manifest_path)
+    resolved_baseline_small_sample_summary_path = resolve_input_path(root_path, baseline_small_sample_summary_path)
     resolved_ablation_manifest_path = resolve_input_path(root_path, ablation_manifest_path)
     resolved_ablation_claim_summary_path = resolve_input_path(root_path, ablation_claim_summary_path)
 
@@ -184,6 +198,8 @@ def write_paper_artifact_evidence_audit_outputs(
         resolved_attack_matrix_manifest_path,
         resolved_baseline_manifest_path,
         resolved_baseline_runtime_report_path,
+        resolved_baseline_small_sample_manifest_path,
+        resolved_baseline_small_sample_summary_path,
         resolved_ablation_manifest_path,
         resolved_ablation_claim_summary_path,
     )
@@ -254,6 +270,8 @@ def write_paper_artifact_evidence_audit_outputs(
             resolved_attack_matrix_manifest_path,
             resolved_baseline_manifest_path,
             resolved_baseline_runtime_report_path,
+            resolved_baseline_small_sample_manifest_path,
+            resolved_baseline_small_sample_summary_path,
             resolved_ablation_manifest_path,
             resolved_ablation_claim_summary_path,
         )
@@ -310,6 +328,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--attack-matrix-manifest-path", default=str(DEFAULT_ATTACK_MATRIX_MANIFEST_PATH), help="攻击矩阵产物 manifest 路径。")
     parser.add_argument("--baseline-manifest-path", default=str(DEFAULT_BASELINE_MANIFEST_PATH), help="外部 baseline 产物 manifest 路径。")
     parser.add_argument("--baseline-runtime-report-path", default=str(DEFAULT_BASELINE_RUNTIME_REPORT_PATH), help="外部 baseline runtime report 路径。")
+    parser.add_argument(
+        "--baseline-small-sample-manifest-path",
+        default=str(DEFAULT_BASELINE_SMALL_SAMPLE_MANIFEST_PATH),
+        help="外部 baseline 小样本证据 manifest 路径。",
+    )
+    parser.add_argument(
+        "--baseline-small-sample-summary-path",
+        default=str(DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH),
+        help="外部 baseline 小样本证据 summary 路径。",
+    )
     parser.add_argument("--ablation-manifest-path", default=str(DEFAULT_ABLATION_MANIFEST_PATH), help="内部消融 manifest 路径。")
     parser.add_argument("--ablation-claim-summary-path", default=str(DEFAULT_ABLATION_CLAIM_SUMMARY_PATH), help="内部消融 claim summary 路径。")
     return parser
@@ -327,6 +355,8 @@ def main() -> None:
         attack_matrix_manifest_path=args.attack_matrix_manifest_path,
         baseline_manifest_path=args.baseline_manifest_path,
         baseline_runtime_report_path=args.baseline_runtime_report_path,
+        baseline_small_sample_manifest_path=args.baseline_small_sample_manifest_path,
+        baseline_small_sample_summary_path=args.baseline_small_sample_summary_path,
         ablation_manifest_path=args.ablation_manifest_path,
         ablation_claim_summary_path=args.ablation_claim_summary_path,
     )
