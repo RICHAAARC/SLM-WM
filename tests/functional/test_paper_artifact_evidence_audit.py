@@ -52,6 +52,32 @@ def make_audit_input_bundle() -> AuditInputBundle:
     )
 
 
+def make_real_attack_ready_bundle() -> AuditInputBundle:
+    """构造真实攻击闭环已进入 manifest 的审计输入。"""
+    bundle = make_audit_input_bundle()
+    ready_attack_manifest = {
+        **bundle.attack_manifest,
+        "gpu_attack_unsupported_count": 0,
+        "real_attacked_image_closed_loop_ready": True,
+        "formal_attack_detection_ready": True,
+        "real_attacked_image_count": 4,
+        "required_regeneration_attack_count": 4,
+        "measured_regeneration_attack_count": 4,
+        "regeneration_attack_gpu_validation_ready": True,
+    }
+    return AuditInputBundle(
+        threshold_report=bundle.threshold_report,
+        threshold_manifest=bundle.threshold_manifest,
+        attack_manifest=ready_attack_manifest,
+        attack_matrix_manifest=bundle.attack_matrix_manifest,
+        baseline_manifest=bundle.baseline_manifest,
+        baseline_runtime_report=bundle.baseline_runtime_report,
+        ablation_manifest=bundle.ablation_manifest,
+        ablation_claim_summary=bundle.ablation_claim_summary,
+        source_path_map=bundle.source_path_map,
+    )
+
+
 @pytest.mark.quick
 def test_claim_audit_reports_current_paper_evidence_boundary() -> None:
     """审计表应明确区分工程可重建证据、预览证据和不可支持的论文主张。"""
@@ -74,6 +100,30 @@ def test_claim_audit_reports_current_paper_evidence_boundary() -> None:
     assert blocker_report["submission_ready"] is False
     assert blocker_report["critical_gap_count"] >= 4
     assert all(row["supports_paper_claim"] is False for row in claim_rows + table_rows + figure_rows + gap_rows)
+
+
+@pytest.mark.quick
+def test_real_attack_ready_manifest_removes_real_attack_gap_items() -> None:
+    """真实攻击闭环 ready 后, 审计不应继续报告对应旧缺口。"""
+    bundle = make_real_attack_ready_bundle()
+    claim_rows = build_claim_audit_rows(bundle)
+    table_rows = build_table_readiness_rows(bundle)
+    figure_rows = build_figure_readiness_rows(bundle)
+    gap_rows = build_evidence_gap_rows(bundle)
+    builder_report = build_builder_readiness_report(claim_rows, table_rows, figure_rows)
+    blocker_report = build_submission_blocker_report(claim_rows, gap_rows, builder_report)
+
+    claims_by_id = {row["claim_id"]: row for row in claim_rows}
+    table_by_id = {row["audit_item_id"]: row for row in table_rows}
+    figure_by_id = {row["audit_item_id"]: row for row in figure_rows}
+    gap_ids = {row["gap_id"] for row in gap_rows}
+
+    assert "gap_real_attacked_image_closed_loop" not in gap_ids
+    assert "gap_regeneration_attack_gpu_validation" not in gap_ids
+    assert claims_by_id["claim_attack_robustness_under_common_matrix"]["primary_blocker"] == "record_level_proxy_boundary"
+    assert table_by_id["table_attack_robustness"]["primary_blocker"] == "record_level_proxy_boundary"
+    assert figure_by_id["figure_attack_robustness"]["primary_blocker"] == "record_level_proxy_boundary"
+    assert "真实攻击闭环" not in blocker_report["recommended_next_action"]
 
 
 def write_json(path: Path, value: dict) -> None:

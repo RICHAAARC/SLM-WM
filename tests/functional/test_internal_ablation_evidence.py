@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from experiments.ablations import build_ablation_records, default_ablation_specs
+from experiments.ablations import aggregate_ablation_by_attack_family, build_ablation_claim_summary, build_ablation_records, default_ablation_specs
 from scripts.write_internal_ablation_outputs import write_internal_ablation_outputs
 
 
@@ -111,6 +111,31 @@ def test_ablation_records_apply_real_mechanism_changes() -> None:
     geo_audit_clean = by_key[("geo_direct_positive_audit", "clean_rotation")]
     assert geo_audit_clean["formal_method_allowed"] is False
     assert geo_audit_clean["ablated_detection_decision"] is True
+
+
+@pytest.mark.quick
+def test_ablation_preserves_real_attack_metric_status() -> None:
+    """消融证据应保留真实 attacked image formal record 的统计来源。"""
+    real_record = {
+        **sample_attack_record("real_img2img", "attacked_negative", "regeneration_attack", False),
+        "attack_name": "img2img_regeneration",
+        "metric_status": "measured_from_real_attacked_image_formal_protocol",
+    }
+
+    rows = build_ablation_records((real_record,), default_ablation_specs(), threshold=0.50)
+    family_rows = aggregate_ablation_by_attack_family(rows)
+    summary = build_ablation_claim_summary(
+        default_ablation_specs(),
+        rows,
+        [],
+        {"attack_metrics_ready": True, "regeneration_attack_gpu_validation_ready": True},
+        {"metadata": {"baseline_results_ready": False}},
+    )
+
+    assert {row["metric_status"] for row in rows} == {"measured_from_real_attacked_image_formal_protocol"}
+    assert {row["metric_status"] for row in family_rows} == {"measured_from_real_attacked_image_formal_protocol"}
+    assert summary["unsupported_reasons"] == []
+    assert "governed real regeneration records" in summary["local_proxy_boundary"]
 
 
 def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:

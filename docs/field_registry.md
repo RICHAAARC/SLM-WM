@@ -626,7 +626,7 @@ Notebook 与 repository module 的跨边界数据
 | attack_family_count | metric | none | false | false | false | 攻击矩阵中唯一攻击族数量。 |
 | supported_record_count | metric | none | false | false | false | 已执行本地代理攻击并可进入表格统计的记录数量。 |
 | unsupported_record_count | metric | none | false | false | false | 因真实资源或输入缺失而不能进入本地统计的记录数量。 |
-| gpu_attack_unsupported_count | metric | none | false | false | false | 需要真实 GPU 但当前没有真实攻击产物的记录数量。 |
+| gpu_attack_unsupported_count | metric | none | false | false | false | 需要真实 GPU 但当前尚未由真实 formal records 覆盖的攻击类型数量。 |
 | attack_manifest_path | artifact | none | true | false | false | 攻击矩阵专用 manifest 路径。 |
 | attack_metrics_ready | artifact | none | false | false | false | 攻击矩阵常规攻击本地统计是否可重建。 |
 | clean_false_positive_rate | metric | none | false | false | false | clean negative 在攻击矩阵统计中的 false positive rate。 |
@@ -640,11 +640,15 @@ Notebook 与 repository module 的跨边界数据
 | input_records_path | artifact | none | true | false | false | 攻击矩阵重建读取的源 records 路径。 |
 | input_thresholds_path | artifact | none | true | false | false | 攻击矩阵重建读取的 fixed-FPR 阈值文件路径。 |
 | input_threshold_report_path | artifact | none | true | false | false | 攻击矩阵重建读取的阈值边界报告路径。 |
+| real_attack_records_path | artifact | none | false | false | false | 攻击矩阵可选读取的真实 attacked image formal records JSONL 路径。 |
+| formal_real_attack_record_count | metric | none | false | false | false | 已并入攻击矩阵的真实 attacked image formal detection record 数量。 |
 | attacked_images_dir | artifact | none | true | false | false | 攻击后图像或本地攻击代理登记目录。 |
 | performed_attack_record_count | metric | none | false | false | false | 已执行本地攻击代理的记录数量。 |
+| gpu_attack_real_measurement_missing_count | metric | none | false | false | false | 默认再扩散攻击清单中尚未由真实 GPU formal records 覆盖的攻击类型数量。 |
 | resource_profiles | protocol | none | false | false | false | 攻击矩阵中出现的资源档位集合。 |
 | conventional_attack_names | protocol | none | false | false | false | 当前攻击矩阵登记的常规攻击名称集合。 |
 | regeneration_attack_names | protocol | none | false | false | false | 当前攻击矩阵登记的再扩散攻击名称集合。 |
+| real_regeneration_attack_names | protocol | none | false | false | false | 已由真实 attacked image formal records 覆盖的再扩散攻击名称集合。 |
 | evaluation_boundary | protocol | none | false | false | false | 攻击后检测复用的 fixed-FPR 与 rescue 统计边界。 |
 | local_proxy_boundary | governance | none | false | false | false | 本地攻击矩阵代理实现的能力边界说明。 |
 | regeneration_attack_status | governance | none | false | false | false | 再扩散攻击是否已有真实产物支持的状态说明。 |

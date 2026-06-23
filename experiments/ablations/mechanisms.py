@@ -356,6 +356,20 @@ def _supported(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return [row for row in rows if row.get("metric_status") != "unsupported"]
 
 
+def _metric_status_for_group(rows: Iterable[dict[str, Any]]) -> str:
+    """根据消融记录来源汇总分组级 metric_status。"""
+    supported = list(rows)
+    if not supported:
+        return "unsupported"
+    statuses = {str(row.get("metric_status", "")) for row in supported}
+    real_status = "measured_from_real_attacked_image_formal_protocol"
+    if statuses == {real_status}:
+        return real_status
+    if real_status in statuses:
+        return "measured_from_mixed_real_and_local_proxy"
+    return "measured_from_local_proxy"
+
+
 def _group(rows: Iterable[dict[str, Any]], keys: tuple[str, ...]) -> dict[tuple[Any, ...], list[dict[str, Any]]]:
     """按字段组合分组。"""
     grouped: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
@@ -490,7 +504,7 @@ def build_ablation_records(
                     "resource_profile": record.get("resource_profile", ""),
                     "split": record.get("split", ""),
                     "sample_role": record.get("sample_role", ""),
-                    "metric_status": "unsupported" if unsupported else "measured_from_local_proxy",
+                    "metric_status": "unsupported" if unsupported else str(record.get("metric_status", "measured_from_local_proxy")),
                     "unsupported_reason": record.get("unsupported_reason", "") if unsupported else "",
                     "baseline_evidence_decision": _as_bool(record, "evidence_decision"),
                     "ablated_evidence_decision": ablated["ablated_evidence_decision"],
@@ -535,7 +549,7 @@ def _aggregate_group(rows: list[dict[str, Any]]) -> dict[str, Any]:
     attacked_negatives = [row for row in supported if row["sample_role"] == "attacked_negative"]
     negatives = [row for row in supported if row["sample_role"] != "positive_source"]
     return {
-        "metric_status": "measured_from_local_proxy" if supported else "unsupported",
+        "metric_status": _metric_status_for_group(supported),
         "ablation_record_count": len(rows),
         "supported_record_count": len(supported),
         "unsupported_record_count": len(rows) - len(supported),
@@ -669,6 +683,13 @@ def build_ablation_claim_summary(
     actual_ids = {spec.ablation_id for spec in spec_tuple}
     mechanism_groups = sorted({spec.mechanism_group for spec in spec_tuple})
     unsupported_reasons = sorted({row.get("unsupported_reason", "") for row in record_tuple if row.get("unsupported_reason")})
+    if bool(attack_manifest.get("regeneration_attack_gpu_validation_ready")):
+        unsupported_reasons = [reason for reason in unsupported_reasons if reason != "real_gpu_attack_required"]
+    local_proxy_boundary = (
+        "internal ablation rows include governed real regeneration records, while conventional attacks remain record-level proxies"
+        if bool(attack_manifest.get("regeneration_attack_gpu_validation_ready"))
+        else "internal ablation rows reuse record-level attack proxies and do not replace real image attack evidence"
+    )
     protocol_ready = bool(record_tuple) and required_ids.issubset(actual_ids) and bool(attack_manifest.get("attack_metrics_ready"))
     return {
         "construction_unit_name": "internal_ablation_evidence",
@@ -682,7 +703,7 @@ def build_ablation_claim_summary(
         "external_baseline_result_ready": bool(baseline_manifest.get("metadata", {}).get("baseline_results_ready", False)),
         "attack_metrics_ready": bool(attack_manifest.get("attack_metrics_ready", False)),
         "unsupported_reasons": unsupported_reasons,
-        "local_proxy_boundary": "internal ablation rows reuse record-level attack proxies and do not replace real image attack evidence",
+        "local_proxy_boundary": local_proxy_boundary,
         "full_method_claim_ready": False,
         "supports_paper_claim": False,
     }

@@ -492,6 +492,20 @@ def _supported(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return [record for record in records if record.get("metric_status") != "unsupported"]
 
 
+def _metric_status_for_group(records: Iterable[dict[str, Any]]) -> str:
+    """根据受支持记录的真实来源, 归纳分组级 metric_status。"""
+    supported = list(records)
+    if not supported:
+        return "unsupported"
+    statuses = {str(record.get("metric_status", "")) for record in supported}
+    real_status = "measured_from_real_attacked_image_formal_protocol"
+    if statuses == {real_status}:
+        return real_status
+    if real_status in statuses:
+        return "measured_from_mixed_real_and_local_proxy"
+    return "measured_from_local_proxy"
+
+
 def _rates_for_group(records: list[dict[str, Any]]) -> dict[str, Any]:
     """计算单个攻击分组的检测率与恢复率。"""
     supported = _supported(records)
@@ -499,7 +513,7 @@ def _rates_for_group(records: list[dict[str, Any]]) -> dict[str, Any]:
     clean_negatives = [record for record in supported if record["sample_role"] == "clean_negative"]
     attacked_negatives = [record for record in supported if record["sample_role"] == "attacked_negative"]
     negatives = [record for record in supported if record["sample_role"] != "positive_source"]
-    metric_status = "measured_from_local_proxy" if supported else "unsupported"
+    metric_status = _metric_status_for_group(supported)
     return {
         "metric_status": metric_status,
         "attack_record_count": len(records),
@@ -578,7 +592,7 @@ def score_retention_rows(records: Iterable[dict[str, Any]]) -> list[dict[str, An
                 "attack_name": attack_name,
                 "attack_strength": attack_strength,
                 "resource_profile": resource_profile,
-                "metric_status": "measured_from_local_proxy" if supported else "unsupported",
+                "metric_status": _metric_status_for_group(supported),
                 "attack_record_count": len(group),
                 "supported_record_count": len(supported),
                 "score_retention_mean": sum(score_values) / len(score_values) if score_values else 0.0,
@@ -605,7 +619,7 @@ def rescue_by_attack_rows(records: Iterable[dict[str, Any]]) -> list[dict[str, A
                 "attack_name": attack_name,
                 "attack_strength": attack_strength,
                 "resource_profile": resource_profile,
-                "metric_status": "measured_from_local_proxy" if supported else "unsupported",
+                "metric_status": _metric_status_for_group(supported),
                 "attack_record_count": len(group),
                 "supported_record_count": len(supported),
                 "rescue_eligible_count": sum(1 for record in supported if bool(record["rescue_eligible"])),

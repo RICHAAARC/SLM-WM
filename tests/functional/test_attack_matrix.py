@@ -41,6 +41,53 @@ def source_record(record_id: str, sample_role: str, raw_score: float, aligned_sc
     }
 
 
+def formal_real_attack_record(attack_name: str, score_after: float, evidence_decision: bool) -> dict[str, object]:
+    """构造真实 attacked image formal record fixture。"""
+    record_digest = f"digest_{attack_name}"
+    return {
+        "attack_record_id": f"real_{attack_name}",
+        "attack_record_digest": record_digest,
+        "source_record_id": "aligned_real_source",
+        "source_image_digest": f"source_digest_{attack_name}",
+        "source_image_digest_source": "sha256_file",
+        "attack_id": f"real_{attack_name}",
+        "attack_family": "regeneration_attack",
+        "attack_name": attack_name,
+        "attack_strength": 0.35,
+        "resource_profile": "full_extra",
+        "requires_gpu": True,
+        "attack_parameters": {"fixture": True},
+        "attack_config_digest": f"config_digest_{attack_name}",
+        "attacked_image_digest": f"attacked_digest_{attack_name}",
+        "attacked_image_digest_source": "sha256_file",
+        "attacked_image_available": True,
+        "attack_performed": True,
+        "split": "calibration",
+        "sample_role": "attacked_negative",
+        "raw_content_score_before": 0.70,
+        "raw_content_score_after": score_after,
+        "aligned_content_score_before": 0.72,
+        "aligned_content_score_after": score_after,
+        "lf_score_retention": 0.60,
+        "hf_score_retention": 0.62,
+        "score_retention": 0.61,
+        "quality_score_proxy": 0.82,
+        "attention_consistency_proxy": 0.57,
+        "geometry_reliable": True,
+        "rescue_eligible": False,
+        "rescue_applied": False,
+        "evidence_decision": evidence_decision,
+        "metric_status": "measured_from_real_attacked_image_formal_protocol",
+        "unsupported_reason": "",
+        "supports_paper_claim": False,
+        "metadata": {
+            "formal_boundary_ready": True,
+            "source_image_path": f"outputs/aligned_rescoring/aligned_images/{attack_name}_source.png",
+            "attacked_image_path": f"outputs/real_attack_evaluation/attacked_images/{attack_name}_attacked.png",
+        },
+    }
+
+
 @pytest.mark.quick
 def test_attack_config_digest_is_stable() -> None:
     """攻击配置摘要应保持稳定。"""
@@ -183,3 +230,79 @@ def test_attack_matrix_outputs_are_rebuildable(tmp_path: Path) -> None:
     assert len(registry_lines) == attack_manifest["attack_record_count"]
     assert any(row["metric_status"] == "unsupported" for row in family_rows)
     assert all(row["supports_paper_claim"] == "False" for row in family_rows)
+
+
+@pytest.mark.quick
+def test_attack_matrix_ingests_real_attack_formal_records(tmp_path: Path) -> None:
+    """真实 attacked image formal records 应进入正式攻击矩阵统计边界。"""
+    rescue_dir = tmp_path / "outputs" / "geometric_rescue"
+    calibration_dir = tmp_path / "outputs" / "threshold_calibration"
+    real_attack_dir = tmp_path / "outputs" / "real_attack_evaluation"
+    rescue_dir.mkdir(parents=True)
+    calibration_dir.mkdir(parents=True)
+    real_attack_dir.mkdir(parents=True)
+
+    records_path = rescue_dir / "aligned_detection_records.jsonl"
+    records_path.write_text(
+        json_line(source_record("pos", "positive_source", 0.82, 0.86)),
+        encoding="utf-8",
+    )
+    rescue_manifest_path = rescue_dir / "manifest.local.json"
+    rescue_manifest_path.write_text(json.dumps({"artifact_id": "geometric_rescue_manifest"}), encoding="utf-8")
+    thresholds_path = calibration_dir / "calibration_thresholds.json"
+    thresholds_path.write_text(json.dumps({"threshold_value": 0.50, "target_fpr": 0.05}), encoding="utf-8")
+    threshold_report_path = calibration_dir / "threshold_degeneracy_report.json"
+    threshold_report_path.write_text(
+        json.dumps(
+            {
+                "calibrated_content_threshold": 0.50,
+                "target_fpr": 0.05,
+                "rescue_margin_low": -0.05,
+                "allowed_fail_reasons": ["geometry_suspected", "low_confidence"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    calibration_manifest_path = calibration_dir / "manifest.local.json"
+    calibration_manifest_path.write_text(json.dumps({"artifact_id": "threshold_calibration_manifest"}), encoding="utf-8")
+    real_attack_records_path = real_attack_dir / "formal_attack_detection_records.jsonl"
+    real_records = [
+        formal_real_attack_record("img2img_regeneration", 0.44, False),
+        formal_real_attack_record("ddim_inversion_regeneration", 0.46, False),
+        formal_real_attack_record("sdedit_regeneration", 0.48, False),
+        formal_real_attack_record("diffusion_purification", 0.54, True),
+    ]
+    real_attack_records_path.write_text("".join(json_line(record) for record in real_records), encoding="utf-8")
+
+    write_attack_matrix_outputs(
+        root=tmp_path,
+        rescue_records_path=records_path,
+        rescue_manifest_path=rescue_manifest_path,
+        calibration_thresholds_path=thresholds_path,
+        threshold_report_path=threshold_report_path,
+        calibration_manifest_path=calibration_manifest_path,
+        real_attack_records_path=real_attack_records_path,
+        max_source_records=None,
+    )
+
+    output_dir = tmp_path / "outputs" / "attack_matrix"
+    attack_manifest = json.loads((output_dir / "attack_manifest.json").read_text(encoding="utf-8"))
+    family_rows = list(csv.DictReader((output_dir / "attack_family_metrics.csv").open(encoding="utf-8")))
+    regeneration_rows = [row for row in family_rows if row["attack_family"] == "regeneration_attack"]
+
+    assert attack_manifest["formal_real_attack_record_count"] == 4
+    assert attack_manifest["real_attacked_image_count"] == 4
+    assert attack_manifest["real_attacked_image_closed_loop_ready"] is True
+    assert attack_manifest["formal_attack_detection_ready"] is True
+    assert attack_manifest["regeneration_attack_gpu_validation_ready"] is True
+    assert attack_manifest["gpu_attack_real_measurement_missing_count"] == 0
+    assert attack_manifest["gpu_attack_unsupported_count"] == 0
+    assert set(attack_manifest["real_regeneration_attack_names"]) == {
+        "img2img_regeneration",
+        "ddim_inversion_regeneration",
+        "sdedit_regeneration",
+        "diffusion_purification",
+    }
+    assert regeneration_rows
+    assert all(row["metric_status"] == "measured_from_real_attacked_image_formal_protocol" for row in regeneration_rows)

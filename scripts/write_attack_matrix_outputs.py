@@ -35,7 +35,9 @@ DEFAULT_RESCUE_MANIFEST_PATH = Path("outputs/geometric_rescue/manifest.local.jso
 DEFAULT_CALIBRATION_THRESHOLDS_PATH = Path("outputs/threshold_calibration/calibration_thresholds.json")
 DEFAULT_THRESHOLD_REPORT_PATH = Path("outputs/threshold_calibration/threshold_degeneracy_report.json")
 DEFAULT_CALIBRATION_MANIFEST_PATH = Path("outputs/threshold_calibration/manifest.local.json")
+DEFAULT_REAL_ATTACK_RECORDS_PATH = Path("outputs/real_attack_evaluation/formal_attack_detection_records.jsonl")
 DEFAULT_MAX_SOURCE_RECORDS = 96
+REAL_ATTACK_METRIC_STATUS = "measured_from_real_attacked_image_formal_protocol"
 
 
 def stable_json_text(value: Any) -> str:
@@ -56,6 +58,13 @@ def read_json(path: Path) -> dict[str, Any]:
 def read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
     """读取 JSONL 文件。"""
     return tuple(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def read_optional_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
+    """读取可选 JSONL 输入, 文件不存在时返回空记录集。"""
+    if not path.exists():
+        return ()
+    return read_jsonl(path)
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
@@ -122,6 +131,52 @@ def full_rescue_records(records: tuple[dict[str, Any], ...]) -> tuple[dict[str, 
     return tuple(record for record in records if record.get("rescue_ablation_mode") == "full_rescue")
 
 
+def formal_real_attack_records(records: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    """筛选真实 attacked image 闭环产出的正式检测记录。"""
+    return tuple(record for record in records if record.get("metric_status") == REAL_ATTACK_METRIC_STATUS)
+
+
+def build_real_attack_ingestion_summary(
+    attack_configs: tuple[AttackConfig, ...],
+    formal_records: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    """汇总真实攻击记录覆盖范围, 供 attack matrix 和 paper audit 复用。"""
+    required_names = sorted({config.attack_name for config in attack_configs if config.requires_gpu})
+    measured_names = sorted(
+        {
+            str(record.get("attack_name", ""))
+            for record in formal_records
+            if record.get("attack_family") == "regeneration_attack"
+        }
+    )
+    measured_required_names = sorted(set(required_names).intersection(measured_names))
+    real_attacked_image_count = sum(1 for record in formal_records if bool(record.get("attacked_image_available")))
+    closed_loop_ready = bool(formal_records) and all(
+        bool(record.get("attacked_image_available"))
+        and bool(record.get("attacked_image_digest"))
+        and bool(record.get("source_image_digest"))
+        and bool(record.get("metadata", {}).get("attacked_image_path"))
+        and bool(record.get("metadata", {}).get("source_image_path"))
+        for record in formal_records
+    )
+    formal_detection_ready = bool(formal_records) and all(
+        bool(record.get("metadata", {}).get("formal_boundary_ready")) for record in formal_records
+    )
+    required_count = len(required_names)
+    measured_count = len(measured_required_names)
+    return {
+        "formal_real_attack_record_count": len(formal_records),
+        "real_attacked_image_count": real_attacked_image_count,
+        "real_attacked_image_closed_loop_ready": closed_loop_ready,
+        "formal_attack_detection_ready": formal_detection_ready,
+        "required_regeneration_attack_count": required_count,
+        "measured_regeneration_attack_count": measured_count,
+        "regeneration_attack_gpu_validation_ready": bool(required_count and measured_count == required_count),
+        "gpu_attack_real_measurement_missing_count": max(0, required_count - measured_count),
+        "real_regeneration_attack_names": measured_names,
+    }
+
+
 def build_boundary(thresholds: dict[str, Any], threshold_report: dict[str, Any]) -> AttackEvaluationBoundary:
     """从阈值文件和退化报告构造攻击检测边界。"""
     threshold_value = float(threshold_report.get("calibrated_content_threshold", thresholds["threshold_value"]))
@@ -179,16 +234,19 @@ def build_attack_manifest(
     calibration_thresholds_path: Path,
     threshold_report_path: Path,
     calibration_manifest_path: Path,
+    real_attack_records_path: Path,
     rescue_manifest: dict[str, Any],
     calibration_manifest: dict[str, Any],
     threshold_report: dict[str, Any],
     attack_configs: tuple[AttackConfig, ...],
     attack_records: tuple[dict[str, Any], ...],
+    formal_real_records: tuple[dict[str, Any], ...],
     family_rows: list[dict[str, Any]],
     boundary: AttackEvaluationBoundary,
 ) -> dict[str, Any]:
     """构造攻击矩阵专用 manifest。"""
-    gpu_unsupported_count = sum(1 for record in attack_records if record["requires_gpu"] and record["metric_status"] == "unsupported")
+    real_attack_summary = build_real_attack_ingestion_summary(attack_configs, formal_real_records)
+    gpu_unsupported_count = real_attack_summary["gpu_attack_real_measurement_missing_count"]
     performed_count = sum(1 for record in attack_records if record["attack_performed"])
     attack_metrics_ready = bool(performed_count and family_rows)
     aligned_quality = extract_aligned_rescoring_metadata(threshold_report, calibration_manifest)
@@ -208,6 +266,7 @@ def build_attack_manifest(
         "input_records_path": relative_or_absolute(rescue_records_path, root_path),
         "input_thresholds_path": relative_or_absolute(calibration_thresholds_path, root_path),
         "input_threshold_report_path": relative_or_absolute(threshold_report_path, root_path),
+        "real_attack_records_path": relative_or_absolute(real_attack_records_path, root_path) if real_attack_records_path.exists() else "",
         **aligned_quality,
         "attacked_images_dir": relative_or_absolute(output_dir / "attacked_images", root_path),
         "attack_config_count": len(attack_configs),
@@ -215,13 +274,16 @@ def build_attack_manifest(
         "attack_family_count": len({config.attack_family for config in attack_configs}),
         "performed_attack_record_count": performed_count,
         "gpu_attack_unsupported_count": gpu_unsupported_count,
+        **real_attack_summary,
         "attack_metrics_ready": attack_metrics_ready,
         "resource_profiles": sorted({config.resource_profile for config in attack_configs}),
         "conventional_attack_names": sorted({config.attack_name for config in attack_configs if not config.requires_gpu}),
         "regeneration_attack_names": sorted({config.attack_name for config in attack_configs if config.requires_gpu}),
         "evaluation_boundary": boundary.to_dict(),
-        "local_proxy_boundary": "conventional attacks are record-level proxies and no image files are generated locally",
-        "regeneration_attack_status": "unsupported_until_real_gpu_artifacts_exist",
+        "local_proxy_boundary": "conventional attacks remain record-level proxies; regeneration attacks may be supplied by governed real-image records",
+        "regeneration_attack_status": "real_gpu_formal_records_available"
+        if real_attack_summary["regeneration_attack_gpu_validation_ready"]
+        else "unsupported_until_real_gpu_artifacts_exist",
         "full_method_claim_ready": False,
         "supports_paper_claim": False,
     }
@@ -266,6 +328,7 @@ def write_attack_matrix_outputs(
     calibration_thresholds_path: str | Path = DEFAULT_CALIBRATION_THRESHOLDS_PATH,
     threshold_report_path: str | Path = DEFAULT_THRESHOLD_REPORT_PATH,
     calibration_manifest_path: str | Path = DEFAULT_CALIBRATION_MANIFEST_PATH,
+    real_attack_records_path: str | Path = DEFAULT_REAL_ATTACK_RECORDS_PATH,
     max_source_records: int | None = DEFAULT_MAX_SOURCE_RECORDS,
 ) -> dict[str, Any]:
     """写出攻击矩阵相关产物。"""
@@ -280,6 +343,7 @@ def write_attack_matrix_outputs(
     resolved_thresholds_path = resolve_input_path(root_path, calibration_thresholds_path)
     resolved_threshold_report_path = resolve_input_path(root_path, threshold_report_path)
     resolved_calibration_manifest_path = resolve_input_path(root_path, calibration_manifest_path)
+    resolved_real_attack_records_path = resolve_input_path(root_path, real_attack_records_path)
 
     rescue_manifest = read_json(resolved_rescue_manifest_path)
     calibration_manifest = read_json(resolved_calibration_manifest_path)
@@ -291,7 +355,9 @@ def write_attack_matrix_outputs(
         source_records = source_records[:max_source_records]
 
     attack_configs = default_attack_configs()
-    attack_records = build_attack_detection_records(source_records, attack_configs, boundary)
+    proxy_attack_records = build_attack_detection_records(source_records, attack_configs, boundary)
+    real_attack_records = formal_real_attack_records(read_optional_jsonl(resolved_real_attack_records_path))
+    attack_records = tuple(proxy_attack_records) + tuple(real_attack_records)
     family_rows = family_metrics(attack_records)
     strength_rows = strength_curve(attack_records)
     retention_rows = score_retention_rows(attack_records)
@@ -317,11 +383,13 @@ def write_attack_matrix_outputs(
         calibration_thresholds_path=resolved_thresholds_path,
         threshold_report_path=resolved_threshold_report_path,
         calibration_manifest_path=resolved_calibration_manifest_path,
+        real_attack_records_path=resolved_real_attack_records_path,
         rescue_manifest=rescue_manifest,
         calibration_manifest=calibration_manifest,
         threshold_report=threshold_report,
         attack_configs=attack_configs,
         attack_records=attack_records,
+        formal_real_records=real_attack_records,
         family_rows=family_rows,
         boundary=boundary,
     )
@@ -441,6 +509,11 @@ def write_attack_matrix_outputs(
             relative_or_absolute(resolved_thresholds_path, root_path),
             relative_or_absolute(resolved_threshold_report_path, root_path),
             relative_or_absolute(resolved_calibration_manifest_path, root_path),
+            *(
+                (relative_or_absolute(resolved_real_attack_records_path, root_path),)
+                if resolved_real_attack_records_path.exists()
+                else ()
+            ),
         ),
         output_paths=output_paths,
         config={
@@ -482,6 +555,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_CALIBRATION_MANIFEST_PATH),
         help="阈值校准 manifest 路径。",
     )
+    parser.add_argument(
+        "--real-attack-records-path",
+        default=str(DEFAULT_REAL_ATTACK_RECORDS_PATH),
+        help="真实 attacked image formal records 路径, 文件不存在时跳过。",
+    )
     parser.add_argument("--max-source-records", type=int, default=DEFAULT_MAX_SOURCE_RECORDS, help="最多读取的 full rescue 源记录数。")
     return parser
 
@@ -497,6 +575,7 @@ def main() -> None:
         calibration_thresholds_path=args.calibration_thresholds_path,
         threshold_report_path=args.threshold_report_path,
         calibration_manifest_path=args.calibration_manifest_path,
+        real_attack_records_path=args.real_attack_records_path,
         max_source_records=args.max_source_records,
     )
     print(stable_json_text(manifest), end="")

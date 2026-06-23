@@ -43,6 +43,33 @@ def _source(bundle: AuditInputBundle, key: str, fallback: str) -> str:
     return bundle.source_path_map.get(key, fallback)
 
 
+def _real_attack_closed_loop_ready(attack_manifest: dict[str, Any]) -> bool:
+    """判断真实 attacked image 文件与摘要闭环是否已经进入正式 manifest。"""
+    return (
+        _yes(attack_manifest.get("real_attacked_image_closed_loop_ready"))
+        and _yes(attack_manifest.get("formal_attack_detection_ready"))
+        and int(attack_manifest.get("real_attacked_image_count", 0)) > 0
+    )
+
+
+def _regeneration_attack_gpu_ready(attack_manifest: dict[str, Any]) -> bool:
+    """判断再扩散类攻击是否已经由真实 GPU formal records 覆盖。"""
+    required_count = int(attack_manifest.get("required_regeneration_attack_count", 0))
+    measured_count = int(attack_manifest.get("measured_regeneration_attack_count", 0))
+    return _yes(attack_manifest.get("regeneration_attack_gpu_validation_ready")) and required_count > 0 and measured_count >= required_count
+
+
+def _attack_robustness_blockers(attack_manifest: dict[str, Any]) -> list[str]:
+    """生成攻击鲁棒性声明的当前阻断项。"""
+    blockers = []
+    if not _real_attack_closed_loop_ready(attack_manifest):
+        blockers.append("attacked_image_files_missing")
+    if not _regeneration_attack_gpu_ready(attack_manifest):
+        blockers.append("regeneration_attack_real_gpu_missing")
+    blockers.append("record_level_proxy_boundary")
+    return blockers
+
+
 def _row(
     claim_id: str,
     claim_scope: str,
@@ -97,11 +124,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "SLM-WM 在共同攻击矩阵下具有稳健检测表现。",
             "preview_only",
             _source(bundle, "attack_manifest", "outputs/attack_matrix/attack_manifest.json"),
-            [
-                "attacked_image_files_missing",
-                "regeneration_attack_real_gpu_missing" if int(attack.get("gpu_attack_unsupported_count", 0)) else "",
-                "record_level_proxy_boundary",
-            ],
+            _attack_robustness_blockers(attack),
         ),
         _row(
             "claim_baseline_superiority",
@@ -133,7 +156,11 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "当前仓库已具备投稿冻结所需的完整证据。",
             "unsupported",
             "outputs/paper_artifact_evidence_audit/submission_blocker_report.json",
-            ["full_method_claim_ready_false", "baseline_result_missing", "real_attack_evidence_missing"],
+            [
+                "full_method_claim_ready_false",
+                "baseline_result_missing",
+                "" if _real_attack_closed_loop_ready(attack) and _regeneration_attack_gpu_ready(attack) else "real_attack_evidence_missing",
+            ],
         ),
     ]
 
@@ -197,7 +224,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             [_source(bundle, "attack_family_metrics", "outputs/attack_matrix/attack_family_metrics.csv")],
             "rebuildable_preview",
             False,
-            ["record_level_proxy_boundary", "regeneration_attack_real_gpu_missing" if int(attack.get("gpu_attack_unsupported_count", 0)) else ""],
+            _attack_robustness_blockers(attack),
         ),
         _artifact_row(
             "table_baseline_comparison",
@@ -265,7 +292,7 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
             ],
             "rebuildable_preview",
             False,
-            ["real_attacked_image_files_missing", "regeneration_attack_real_gpu_missing" if int(attack.get("gpu_attack_unsupported_count", 0)) else ""],
+            _attack_robustness_blockers(attack),
         ),
         _artifact_row(
             "figure_ablation_delta",
@@ -290,27 +317,36 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
 
 def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     """构造投稿前证据缺口清单。"""
-    return [
-        {
-            "gap_id": "gap_real_attacked_image_closed_loop",
-            "gap_area": "attack_matrix",
-            "blocker_severity": "critical",
-            "required_action": "生成真实 attacked image 文件, 记录 source / attacked image digest, 并重跑攻击后检测。",
-            "related_artifacts": "outputs/attack_matrix/attacked_images;outputs/attack_matrix/attacked_image_registry.jsonl",
-            "closes_claim_ids": "claim_attack_robustness_under_common_matrix",
-            "recommended_order": 1,
-            "supports_paper_claim": False,
-        },
-        {
-            "gap_id": "gap_regeneration_attack_gpu_validation",
-            "gap_area": "attack_matrix",
-            "blocker_severity": "critical",
-            "required_action": "在真实 GPU 环境补齐 img2img、DDIM inversion、SDEdit 和 diffusion purification 攻击。",
-            "related_artifacts": "outputs/attack_matrix/attack_family_metrics.csv",
-            "closes_claim_ids": "claim_attack_robustness_under_common_matrix",
-            "recommended_order": 2,
-            "supports_paper_claim": False,
-        },
+    attack = bundle.attack_manifest
+    rows: list[dict[str, Any]] = []
+    if not _real_attack_closed_loop_ready(attack):
+        rows.append(
+            {
+                "gap_id": "gap_real_attacked_image_closed_loop",
+                "gap_area": "attack_matrix",
+                "blocker_severity": "critical",
+                "required_action": "生成真实 attacked image 文件, 记录 source / attacked image digest, 并重跑攻击后检测。",
+                "related_artifacts": "outputs/attack_matrix/attacked_images;outputs/attack_matrix/attacked_image_registry.jsonl",
+                "closes_claim_ids": "claim_attack_robustness_under_common_matrix",
+                "recommended_order": 1,
+                "supports_paper_claim": False,
+            }
+        )
+    if not _regeneration_attack_gpu_ready(attack):
+        rows.append(
+            {
+                "gap_id": "gap_regeneration_attack_gpu_validation",
+                "gap_area": "attack_matrix",
+                "blocker_severity": "critical",
+                "required_action": "在真实 GPU 环境补齐 img2img、DDIM inversion、SDEdit 和 diffusion purification 攻击。",
+                "related_artifacts": "outputs/attack_matrix/attack_family_metrics.csv",
+                "closes_claim_ids": "claim_attack_robustness_under_common_matrix",
+                "recommended_order": 2,
+                "supports_paper_claim": False,
+            }
+        )
+    rows.extend(
+        [
         {
             "gap_id": "gap_baseline_results",
             "gap_area": "baseline_comparison",
@@ -351,7 +387,9 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "recommended_order": 6,
             "supports_paper_claim": False,
         },
-    ]
+        ]
+    )
+    return rows
 
 
 def build_builder_readiness_report(
@@ -389,6 +427,13 @@ def build_submission_blocker_report(
     gaps = list(gap_rows)
     critical_gaps = [row for row in gaps if row["blocker_severity"] == "critical"]
     blocking_claims = [row for row in claims if row["claim_decision"] in {"unsupported", "preview_only"}]
+    real_attack_gap_ids = {"gap_real_attacked_image_closed_loop", "gap_regeneration_attack_gpu_validation"}
+    real_attack_gap_present = any(row["gap_id"] in real_attack_gap_ids for row in gaps)
+    recommended_next_action = (
+        "先按 evidence_gap_list.csv 补齐真实攻击闭环、外部 baseline 结果和 full-main 统计, 再进入投稿冻结。"
+        if real_attack_gap_present
+        else "先按 evidence_gap_list.csv 补齐外部 baseline 结果、full-main 统计、完整方法 fixed-FPR 重校准和 dataset-level FID / KID, 再进入投稿冻结。"
+    )
     return {
         "construction_unit_name": "paper_artifact_evidence_audit",
         "submission_ready": False,
@@ -398,7 +443,7 @@ def build_submission_blocker_report(
         "critical_gap_count": len(critical_gaps),
         "gap_count": len(gaps),
         "primary_blockers": [row["gap_id"] for row in sorted(gaps, key=lambda item: int(item["recommended_order"]))[:4]],
-        "recommended_next_action": "先按 evidence_gap_list.csv 补齐真实攻击闭环、外部 baseline 结果和 full-main 统计, 再进入投稿冻结。",
+        "recommended_next_action": recommended_next_action,
         "full_method_claim_ready": False,
         "supports_paper_claim": False,
     }
