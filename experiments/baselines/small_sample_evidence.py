@@ -10,6 +10,7 @@ from main.core.digest import build_stable_digest
 PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 SMALL_SAMPLE_BOUNDARY = "small_sample_only"
 PAPER_CLAIM_BOUNDARY = "not_full_paper_claim"
+SMALL_SAMPLE_OPERATING_POINT = "fixed_fpr_0.05"
 EXCLUDED_OPERATING_POINTS = ("tpr_at_fpr_0_01", "tpr_at_fpr_0_001")
 
 
@@ -27,6 +28,9 @@ class SmallSampleEvidenceRecord:
     baseline_result_record_id: str
     baseline_result_digest: str
     resource_profile: str
+    comparable_operating_point: str
+    attack_family: str
+    attack_name: str
     small_sample_boundary: str
     paper_claim_boundary: str
     positive_count: int
@@ -35,6 +39,9 @@ class SmallSampleEvidenceRecord:
     attack_record_count: int
     evidence_path_count: int
     small_sample_evidence_ready: bool
+    small_sample_fixed_fpr_boundary_ready: bool
+    small_sample_attack_detection_ready: bool
+    small_sample_common_protocol_ready: bool
     formal_import_ready: bool
     formal_import_blocking_reasons: tuple[str, ...]
     excluded_operating_points: tuple[str, ...]
@@ -114,6 +121,11 @@ def build_primary_baseline_small_sample_evidence_records(
         supported_count = _int_field(row, "supported_record_count")
         attack_count = _int_field(row, "attack_record_count")
         blocking_reasons = grouped_issues.get(row_index, ())
+        comparable_operating_point = _str_field(row, "comparable_operating_point")
+        attack_family = _str_field(row, "attack_family")
+        attack_name = _str_field(row, "attack_name")
+        fixed_fpr_boundary_ready = comparable_operating_point == SMALL_SAMPLE_OPERATING_POINT
+        attack_detection_ready = bool(attack_family) and bool(attack_name) and attack_count >= supported_count > 0
         evidence_ready = (
             bool(evidence_paths)
             and _bool_field(row, "formal_evidence_paths_ready")
@@ -121,11 +133,15 @@ def build_primary_baseline_small_sample_evidence_records(
             and negative_count > 0
             and supported_count > 0
         )
+        common_protocol_ready = evidence_ready and fixed_fpr_boundary_ready and attack_detection_ready
         payload = {
             "baseline_id": baseline_id,
             "baseline_result_record_id": _str_field(row, "baseline_result_record_id"),
             "baseline_result_digest": _str_field(row, "baseline_result_digest"),
             "resource_profile": _str_field(row, "resource_profile"),
+            "comparable_operating_point": comparable_operating_point,
+            "attack_family": attack_family,
+            "attack_name": attack_name,
             "small_sample_boundary": SMALL_SAMPLE_BOUNDARY,
             "paper_claim_boundary": PAPER_CLAIM_BOUNDARY,
             "positive_count": positive_count,
@@ -134,6 +150,9 @@ def build_primary_baseline_small_sample_evidence_records(
             "attack_record_count": attack_count,
             "evidence_path_count": len(evidence_paths),
             "small_sample_evidence_ready": evidence_ready,
+            "small_sample_fixed_fpr_boundary_ready": fixed_fpr_boundary_ready,
+            "small_sample_attack_detection_ready": attack_detection_ready,
+            "small_sample_common_protocol_ready": common_protocol_ready,
             "formal_import_ready": not blocking_reasons,
             "formal_import_blocking_reasons": blocking_reasons,
             "excluded_operating_points": EXCLUDED_OPERATING_POINTS,
@@ -148,6 +167,9 @@ def build_primary_baseline_small_sample_evidence_records(
                 baseline_result_record_id=payload["baseline_result_record_id"],
                 baseline_result_digest=payload["baseline_result_digest"],
                 resource_profile=payload["resource_profile"],
+                comparable_operating_point=payload["comparable_operating_point"],
+                attack_family=payload["attack_family"],
+                attack_name=payload["attack_name"],
                 small_sample_boundary=payload["small_sample_boundary"],
                 paper_claim_boundary=payload["paper_claim_boundary"],
                 positive_count=payload["positive_count"],
@@ -156,6 +178,9 @@ def build_primary_baseline_small_sample_evidence_records(
                 attack_record_count=payload["attack_record_count"],
                 evidence_path_count=payload["evidence_path_count"],
                 small_sample_evidence_ready=payload["small_sample_evidence_ready"],
+                small_sample_fixed_fpr_boundary_ready=payload["small_sample_fixed_fpr_boundary_ready"],
+                small_sample_attack_detection_ready=payload["small_sample_attack_detection_ready"],
+                small_sample_common_protocol_ready=payload["small_sample_common_protocol_ready"],
                 formal_import_ready=payload["formal_import_ready"],
                 formal_import_blocking_reasons=payload["formal_import_blocking_reasons"],
                 excluded_operating_points=payload["excluded_operating_points"],
@@ -172,6 +197,9 @@ def build_primary_baseline_small_sample_evidence_summary(
 
     record_values = tuple(records)
     ready_records = tuple(record for record in record_values if record.small_sample_evidence_ready)
+    fixed_fpr_ready_records = tuple(record for record in record_values if record.small_sample_fixed_fpr_boundary_ready)
+    attack_ready_records = tuple(record for record in record_values if record.small_sample_attack_detection_ready)
+    common_protocol_ready_records = tuple(record for record in record_values if record.small_sample_common_protocol_ready)
     covered_ids = tuple(sorted({record.baseline_id for record in ready_records}))
     missing_ids = tuple(baseline_id for baseline_id in PRIMARY_BASELINE_IDS if baseline_id not in covered_ids)
     formal_ready_ids = tuple(sorted({record.baseline_id for record in record_values if record.formal_import_ready}))
@@ -179,6 +207,9 @@ def build_primary_baseline_small_sample_evidence_summary(
         "construction_unit_name": "primary_baseline_small_sample_evidence",
         "small_sample_evidence_record_count": len(record_values),
         "small_sample_evidence_ready_count": len(ready_records),
+        "small_sample_fixed_fpr_boundary_ready_count": len(fixed_fpr_ready_records),
+        "small_sample_attack_detection_ready_count": len(attack_ready_records),
+        "small_sample_common_protocol_ready_count": len(common_protocol_ready_records),
         "covered_primary_baseline_count": len(covered_ids),
         "covered_primary_baseline_ids": list(covered_ids),
         "missing_primary_baseline_ids": list(missing_ids),
@@ -188,6 +219,7 @@ def build_primary_baseline_small_sample_evidence_summary(
         "formal_full_paper_run_permitted": False,
         "excluded_operating_points": list(EXCLUDED_OPERATING_POINTS),
         "small_sample_evidence_ready": not missing_ids and len(record_values) > 0,
+        "small_sample_common_protocol_ready": len(common_protocol_ready_records) == len(PRIMARY_BASELINE_IDS),
         "paper_claim_boundary": PAPER_CLAIM_BOUNDARY,
         "paper_claim_ready": False,
         "supports_paper_claim": False,

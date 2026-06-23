@@ -9,6 +9,7 @@ import pytest
 
 from experiments.baselines import (
     EXCLUDED_OPERATING_POINTS,
+    SMALL_SAMPLE_OPERATING_POINT,
     build_primary_baseline_small_sample_evidence_records,
     build_primary_baseline_small_sample_evidence_summary,
 )
@@ -25,6 +26,9 @@ def candidate_row(baseline_id: str, resource_profile: str) -> dict[str, object]:
         "baseline_result_record_id": f"record_{baseline_id}",
         "baseline_result_digest": f"digest_{baseline_id}",
         "resource_profile": resource_profile,
+        "comparable_operating_point": SMALL_SAMPLE_OPERATING_POINT,
+        "attack_family": "clean",
+        "attack_name": "clean_none",
         "positive_count": 5,
         "negative_count": 5,
         "supported_record_count": 10,
@@ -64,6 +68,10 @@ def test_small_sample_evidence_records_are_ready_but_not_paper_claims() -> None:
 
     assert len(records) == 4
     assert summary["small_sample_evidence_ready"] is True
+    assert summary["small_sample_common_protocol_ready"] is True
+    assert summary["small_sample_fixed_fpr_boundary_ready_count"] == 4
+    assert summary["small_sample_attack_detection_ready_count"] == 4
+    assert summary["small_sample_common_protocol_ready_count"] == 4
     assert summary["covered_primary_baseline_count"] == 4
     assert summary["formal_import_ready_count"] == 0
     assert summary["formal_full_paper_run_requested"] is False
@@ -71,6 +79,9 @@ def test_small_sample_evidence_records_are_ready_but_not_paper_claims() -> None:
     assert tuple(summary["excluded_operating_points"]) == EXCLUDED_OPERATING_POINTS
     assert summary["paper_claim_ready"] is False
     assert all(record.supports_paper_claim is False for record in records)
+    assert all(record.small_sample_fixed_fpr_boundary_ready is True for record in records)
+    assert all(record.small_sample_attack_detection_ready is True for record in records)
+    assert all(record.small_sample_common_protocol_ready is True for record in records)
     assert all(record.excluded_operating_points == EXCLUDED_OPERATING_POINTS for record in records)
 
 
@@ -102,5 +113,6 @@ def test_small_sample_evidence_writer_outputs_rebuildable_artifacts(tmp_path: Pa
     assert manifest["artifact_id"] == "primary_baseline_small_sample_evidence_manifest"
     assert len(records) == 4
     assert summary["small_sample_evidence_ready"] is True
+    assert summary["small_sample_common_protocol_ready"] is True
     assert summary["supports_paper_claim"] is False
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])

@@ -993,6 +993,12 @@ Notebook 与 repository module 的跨边界数据
 | small_sample_evidence_ready | governance | none | false | false | false | 小样本 evidence paths 与基本样本计数是否就绪。|
 | small_sample_evidence_record_count | metric | none | false | false | false | 主表 external baseline 小样本证据记录数量。|
 | small_sample_evidence_ready_count | metric | none | false | false | false | 小样本证据就绪的主表 external baseline 记录数量。|
+| small_sample_fixed_fpr_boundary_ready | governance | none | true | false | false | 单条小样本 baseline 证据是否绑定 fixed_fpr_0.05 命名边界。|
+| small_sample_attack_detection_ready | governance | none | true | false | false | 单条小样本 baseline 证据是否包含 attack family/name 与检测计数边界。|
+| small_sample_common_protocol_ready | governance | none | false | false | false | 小样本 baseline 证据是否同时具备 evidence、fixed-FPR 命名边界和 attack detection 边界。|
+| small_sample_fixed_fpr_boundary_ready_count | metric | none | false | false | false | 具备 fixed_fpr_0.05 命名边界的小样本 baseline 记录数量。|
+| small_sample_attack_detection_ready_count | metric | none | false | false | false | 具备 attack detection 观测边界的小样本 baseline 记录数量。|
+| small_sample_common_protocol_ready_count | metric | none | false | false | false | 同时具备小样本共同协议边界的 baseline 记录数量。|
 | covered_primary_baseline_count | metric | none | false | false | false | 小样本证据已覆盖的主表 external baseline 数量。|
 | covered_primary_baseline_ids | protocol | none | false | false | false | 小样本证据已覆盖的主表 external baseline id 集合。|
 | missing_primary_baseline_ids | protocol | none | false | false | false | 小样本证据尚未覆盖的主表 external baseline id 集合。|
