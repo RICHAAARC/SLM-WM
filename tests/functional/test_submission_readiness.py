@@ -58,7 +58,23 @@ def make_input_bundle() -> SubmissionReadinessInput:
             {"profile_name": "minimal_method_package", "copied_files": ["main/__init__.py"], "missing_paths": [], "dry_run": True},
             {"profile_name": "paper_artifact_rebuild_package", "copied_files": ["main/__init__.py"], "missing_paths": [], "dry_run": True},
         ),
+        baseline_small_sample_summary=sample_baseline_small_sample_summary(),
     )
+
+
+def sample_baseline_small_sample_summary() -> dict:
+    """构造主表 baseline 小样本证据摘要, 用于验证其不会升级为正式论文声明。"""
+    return {
+        "small_sample_evidence_ready": True,
+        "small_sample_common_protocol_ready": True,
+        "covered_primary_baseline_count": 4,
+        "formal_import_ready_count": 0,
+        "formal_full_paper_run_requested": False,
+        "formal_full_paper_run_permitted": False,
+        "excluded_operating_points": ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"],
+        "paper_claim_ready": False,
+        "supports_paper_claim": False,
+    }
 
 
 @pytest.mark.quick
@@ -73,6 +89,14 @@ def test_submission_readiness_remains_blocked_when_evidence_gaps_exist() -> None
     assert report["submission_ready"] is False
     assert report["package_freeze_allowed"] is False
     assert report["release_dry_run_ready"] is True
+    assert report["small_sample_baseline_evidence_ready"] is True
+    assert report["small_sample_baseline_common_protocol_ready"] is True
+    assert report["small_sample_baseline_boundary_ready"] is True
+    assert report["small_sample_baseline_covered_count"] == 4
+    assert report["small_sample_baseline_formal_import_ready_count"] == 0
+    assert report["formal_full_paper_run_requested"] is False
+    assert report["formal_full_paper_run_permitted"] is False
+    assert report["excluded_operating_points"] == ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"]
     assert report["required_input_count"] == 2
     assert report["critical_required_input_count"] == 2
     assert report["primary_blockers"] == ["gap_real_attacked_image_closed_loop", "gap_baseline_results"]
@@ -141,6 +165,8 @@ def write_upstream_audit_outputs(tmp_path: Path) -> None:
         {"submission_ready": False, "blocking_claim_count": 2, "recommended_next_action": "先补齐关键证据缺口。"},
     )
     write_csv(audit_dir / "evidence_gap_list.csv", sample_gap_rows())
+    small_sample_dir = tmp_path / "outputs" / "primary_baseline_small_sample_evidence"
+    write_json(small_sample_dir / "primary_baseline_small_sample_evidence_summary.json", sample_baseline_small_sample_summary())
 
 
 @pytest.mark.quick
@@ -159,6 +185,11 @@ def test_submission_readiness_outputs_are_rebuildable_and_claim_safe(tmp_path: P
     assert manifest["metadata"]["readiness_decision"] == "blocked"
     assert report["submission_ready"] is False
     assert report["release_dry_run_ready"] is True
+    assert report["small_sample_baseline_evidence_ready"] is True
+    assert report["small_sample_baseline_common_protocol_ready"] is True
+    assert report["formal_full_paper_run_requested"] is False
+    assert report["formal_full_paper_run_permitted"] is False
+    assert report["excluded_operating_points"] == ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"]
     assert {row["required_input_id"] for row in required_rows} == {"gap_real_attacked_image_closed_loop", "gap_baseline_results"}
     assert {row["release_profile_name"] for row in release_rows} == {"minimal_method_package", "paper_artifact_rebuild_package"}
     assert all(row["supports_paper_claim"] == "False" for row in required_rows + release_rows)

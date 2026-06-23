@@ -1012,6 +1012,12 @@ Notebook 与 repository module 的跨边界数据
 | paper_claim_ready | governance | none | false | false | false | 当前证据是否允许支持论文级 claim。|
 | candidate_records_path | artifact | none | false | false | false | 小样本证据写出脚本读取的候选记录路径。|
 | validation_report_path | artifact | none | false | false | false | 小样本证据写出脚本读取的 validator 报告路径。|
+| baseline_small_sample_summary_path | artifact | none | false | false | false | 投稿就绪审计读取的主表 baseline 小样本证据摘要路径。|
+| small_sample_baseline_evidence_ready | governance | none | false | false | false | 投稿就绪审计中主表 baseline 小样本证据是否可审计。|
+| small_sample_baseline_common_protocol_ready | governance | none | false | false | false | 投稿就绪审计中主表 baseline 小样本共同协议是否就绪。|
+| small_sample_baseline_boundary_ready | governance | none | false | false | false | 投稿就绪审计中小样本 baseline 是否仅在受限边界内就绪且未升级为正式论文声明。|
+| small_sample_baseline_covered_count | metric | none | false | false | false | 投稿就绪审计中小样本 baseline 已覆盖的主表方法数量。|
+| small_sample_baseline_formal_import_ready_count | metric | none | false | false | false | 投稿就绪审计中小样本 baseline 已通过正式导入 validator 的记录数量。|
 | prompt_protocol_name | protocol | none | false | false | false | 正式导入结果绑定的 prompt 协议名称。 |
 | prompt_protocol_digest | artifact | none | true | false | false | 正式导入结果绑定的 prompt 协议摘要。 |
 | prompt_set_name | protocol | none | false | false | false | 正式导入或运行计划绑定的 prompt set 名称。 |

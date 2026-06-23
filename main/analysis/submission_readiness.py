@@ -19,6 +19,7 @@ class SubmissionReadinessInput:
     blocker_report: dict[str, Any]
     evidence_gaps: tuple[dict[str, Any], ...]
     release_profiles: tuple[dict[str, Any], ...]
+    baseline_small_sample_summary: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 兼容字典, 便于生成 manifest 摘要。"""
@@ -32,6 +33,36 @@ def _bool_value(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"true", "pass", "ready", "measured"}
     return bool(value)
+
+
+def _small_sample_baseline_boundary_ready(summary: dict[str, Any]) -> bool:
+    """判定小样本 baseline 证据是否只在受限边界内可审计。
+
+    该函数属于项目特定写法: 它不是判断论文级 full paper 结论是否成立, 而是检查当前小样本 baseline
+    是否已经覆盖主表候选方法、共同协议边界和 fixed-FPR 边界, 同时显式保持 full paper 统计声明关闭。
+    """
+    return (
+        _bool_value(summary.get("small_sample_evidence_ready"))
+        and _bool_value(summary.get("small_sample_common_protocol_ready"))
+        and int(summary.get("covered_primary_baseline_count", 0)) >= 4
+        and not _bool_value(summary.get("paper_claim_ready"))
+        and not _bool_value(summary.get("supports_paper_claim"))
+        and not _bool_value(summary.get("formal_full_paper_run_requested"))
+        and not _bool_value(summary.get("formal_full_paper_run_permitted"))
+    )
+
+
+def _small_sample_baseline_limitations(summary: dict[str, Any]) -> list[str]:
+    """生成小样本 baseline 证据边界说明, 避免将链路测试误读为正式论文统计。"""
+    excluded_points = list(summary.get("excluded_operating_points", ()))
+    limitations = [
+        "当前 baseline 证据仅覆盖小样本共同协议边界, 不支持正式 full paper 统计声明。",
+    ]
+    if excluded_points:
+        limitations.append(f"已显式排除的操作点包括: {', '.join(str(point) for point in excluded_points)}。")
+    if not _small_sample_baseline_boundary_ready(summary):
+        limitations.append("小样本 baseline 共同协议边界尚未完全就绪, 不能关闭正式 baseline 结果缺口。")
+    return limitations
 
 
 def build_required_evidence_rows(bundle: SubmissionReadinessInput) -> list[dict[str, Any]]:
@@ -93,6 +124,8 @@ def build_submission_readiness_report(
     blocker_submission_ready = _bool_value(bundle.blocker_report.get("submission_ready"))
     artifact_builder_ready = _bool_value(bundle.builder_report.get("artifact_builder_ready"))
     release_dry_run_ready = bool(releases) and all(_bool_value(row["release_dry_run_ready"]) for row in releases)
+    small_sample_summary = bundle.baseline_small_sample_summary
+    small_sample_boundary_ready = _small_sample_baseline_boundary_ready(small_sample_summary)
     package_freeze_allowed = blocker_submission_ready and release_dry_run_ready and not required
     readiness_decision = "ready" if package_freeze_allowed else "blocked"
     return {
@@ -107,6 +140,16 @@ def build_submission_readiness_report(
         "release_profile_count": len(releases),
         "blocking_claim_count": int(bundle.blocker_report.get("blocking_claim_count", 0)),
         "paper_ready_artifact_count": int(bundle.builder_report.get("paper_ready_artifact_count", 0)),
+        "small_sample_baseline_evidence_ready": _bool_value(small_sample_summary.get("small_sample_evidence_ready")),
+        "small_sample_baseline_common_protocol_ready": _bool_value(
+            small_sample_summary.get("small_sample_common_protocol_ready")
+        ),
+        "small_sample_baseline_boundary_ready": small_sample_boundary_ready,
+        "small_sample_baseline_covered_count": int(small_sample_summary.get("covered_primary_baseline_count", 0)),
+        "small_sample_baseline_formal_import_ready_count": int(small_sample_summary.get("formal_import_ready_count", 0)),
+        "formal_full_paper_run_requested": _bool_value(small_sample_summary.get("formal_full_paper_run_requested")),
+        "formal_full_paper_run_permitted": _bool_value(small_sample_summary.get("formal_full_paper_run_permitted")),
+        "excluded_operating_points": list(small_sample_summary.get("excluded_operating_points", ())),
         "primary_blockers": [row["required_input_id"] for row in required[:4]],
         "recommended_next_action": bundle.blocker_report.get(
             "recommended_next_action",
@@ -115,6 +158,7 @@ def build_submission_readiness_report(
         "limitations": [
             "当前报告只审计投稿冻结边界, 不生成论文级主表或主图。",
             "release dry-run 可运行不等价于投稿就绪。",
-        ],
+        ]
+        + _small_sample_baseline_limitations(small_sample_summary),
         "supports_paper_claim": False,
     }

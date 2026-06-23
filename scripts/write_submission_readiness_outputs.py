@@ -31,6 +31,9 @@ DEFAULT_EVIDENCE_MANIFEST_PATH = Path("outputs/paper_artifact_evidence_audit/man
 DEFAULT_BUILDER_REPORT_PATH = Path("outputs/paper_artifact_evidence_audit/artifact_builder_readiness_report.json")
 DEFAULT_BLOCKER_REPORT_PATH = Path("outputs/paper_artifact_evidence_audit/submission_blocker_report.json")
 DEFAULT_GAP_LIST_PATH = Path("outputs/paper_artifact_evidence_audit/evidence_gap_list.csv")
+DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH = Path(
+    "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json"
+)
 
 
 def stable_json_text(value: Any) -> str:
@@ -131,6 +134,7 @@ def build_input_bundle(
     builder_report_path: Path,
     blocker_report_path: Path,
     gap_list_path: Path,
+    baseline_small_sample_summary_path: Path,
 ) -> SubmissionReadinessInput:
     """读取受治理输入并构造投稿就绪门禁输入对象。"""
     return SubmissionReadinessInput(
@@ -139,6 +143,7 @@ def build_input_bundle(
         blocker_report=read_json(blocker_report_path),
         evidence_gaps=tuple(read_csv(gap_list_path)),
         release_profiles=build_release_profile_dry_runs(root_path, output_dir),
+        baseline_small_sample_summary=read_json(baseline_small_sample_summary_path),
     )
 
 
@@ -149,6 +154,7 @@ def write_submission_readiness_outputs(
     builder_report_path: str | Path = DEFAULT_BUILDER_REPORT_PATH,
     blocker_report_path: str | Path = DEFAULT_BLOCKER_REPORT_PATH,
     gap_list_path: str | Path = DEFAULT_GAP_LIST_PATH,
+    baseline_small_sample_summary_path: str | Path = DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH,
 ) -> dict[str, Any]:
     """写出投稿就绪阻断报告、所需输入清单、release dry-run 表和 manifest。"""
     root_path = Path(root).resolve()
@@ -159,6 +165,7 @@ def write_submission_readiness_outputs(
     resolved_builder_report_path = resolve_input_path(root_path, builder_report_path)
     resolved_blocker_report_path = resolve_input_path(root_path, blocker_report_path)
     resolved_gap_list_path = resolve_input_path(root_path, gap_list_path)
+    resolved_baseline_small_sample_summary_path = resolve_input_path(root_path, baseline_small_sample_summary_path)
 
     bundle = build_input_bundle(
         root_path,
@@ -167,6 +174,7 @@ def write_submission_readiness_outputs(
         resolved_builder_report_path,
         resolved_blocker_report_path,
         resolved_gap_list_path,
+        resolved_baseline_small_sample_summary_path,
     )
     required_rows = build_required_evidence_rows(bundle)
     release_rows = build_release_profile_rows(bundle)
@@ -215,6 +223,7 @@ def write_submission_readiness_outputs(
             resolved_builder_report_path,
             resolved_blocker_report_path,
             resolved_gap_list_path,
+            resolved_baseline_small_sample_summary_path,
             root_path / "docs" / "extraction_profiles.md",
             root_path / "docs" / "release_boundary.md",
         )
@@ -262,6 +271,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--builder-report-path", default=str(DEFAULT_BUILDER_REPORT_PATH), help="产物构建器 readiness report 路径。")
     parser.add_argument("--blocker-report-path", default=str(DEFAULT_BLOCKER_REPORT_PATH), help="投稿阻断 report 路径。")
     parser.add_argument("--gap-list-path", default=str(DEFAULT_GAP_LIST_PATH), help="证据缺口列表路径。")
+    parser.add_argument(
+        "--baseline-small-sample-summary-path",
+        default=str(DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH),
+        help="主表 baseline 小样本证据摘要路径。",
+    )
     return parser
 
 
@@ -275,6 +289,7 @@ def main() -> None:
         builder_report_path=args.builder_report_path,
         blocker_report_path=args.blocker_report_path,
         gap_list_path=args.gap_list_path,
+        baseline_small_sample_summary_path=args.baseline_small_sample_summary_path,
     )
     print(stable_json_text(manifest), end="")
 
