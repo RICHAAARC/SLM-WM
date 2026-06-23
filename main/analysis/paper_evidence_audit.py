@@ -97,6 +97,21 @@ def _attack_robustness_blockers(attack_manifest: dict[str, Any]) -> list[str]:
     return blockers
 
 
+def _fixed_fpr_and_rescue_boundary_ready(threshold_report: dict[str, Any], attack_manifest: dict[str, Any]) -> bool:
+    """判断 fixed-FPR 与 rescue 边界是否已在当前小样本证据内闭合。
+
+    该函数属于项目特定写法: 它只移除“还需要重新校准边界”的工程缺口, 不会把当前结果升级为
+    正式 full paper 统计声明。正式声明仍由 sample scale、baseline、dataset-level 指标等缺口控制。
+    """
+    return (
+        _yes(threshold_report.get("fixed_fpr_and_rescue_boundary_ready"))
+        and _yes(threshold_report.get("fixed_fpr_boundary_ready"))
+        and _yes(threshold_report.get("rescue_boundary_ready"))
+        and _real_attack_closed_loop_ready(attack_manifest)
+        and _regeneration_attack_gpu_ready(attack_manifest)
+    )
+
+
 def _row(
     claim_id: str,
     claim_scope: str,
@@ -374,6 +389,7 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
 def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     """构造投稿前证据缺口清单。"""
     attack = bundle.attack_manifest
+    threshold = bundle.threshold_report
     rows: list[dict[str, Any]] = []
     if not _real_attack_closed_loop_ready(attack):
         rows.append(
@@ -403,49 +419,75 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
         )
     rows.extend(
         [
-        {
-            "gap_id": "gap_baseline_results",
-            "gap_area": "baseline_comparison",
-            "blocker_severity": "critical",
-            "required_action": "接入外部 baseline 官方代码复现结果或受治理导入结果, 并在共同协议下重建对比表。",
-            "related_artifacts": _source(bundle, "baseline_comparison_table", "baseline_comparison_table.csv"),
-            "closes_claim_ids": "claim_baseline_superiority",
-            "recommended_order": 3,
-            "supports_paper_claim": False,
-        },
-        {
-            "gap_id": "gap_full_main_sample_scale",
-            "gap_area": "statistical_power",
-            "blocker_severity": "critical",
-            "required_action": "冻结 full-main prompt split、样本量和随机种子, 重建 threshold、attack、baseline 与 ablation 统计。",
-            "related_artifacts": "outputs/threshold_calibration;outputs/attack_matrix;outputs/internal_ablation_evidence",
-            "closes_claim_ids": "claim_full_method_fixed_fpr_boundary;claim_submission_ready_package",
-            "recommended_order": 4,
-            "supports_paper_claim": False,
-        },
-        {
-            "gap_id": "gap_full_method_fixed_fpr_recalibration",
-            "gap_area": "threshold_calibration",
-            "blocker_severity": "major",
-            "required_action": "在真实 aligned content score 与真实攻击闭环完成后重新校准 fixed-FPR 和 rescue 边界。",
-            "related_artifacts": "outputs/threshold_calibration/threshold_degeneracy_report.json",
-            "closes_claim_ids": "claim_full_method_fixed_fpr_boundary",
-            "recommended_order": 5,
-            "supports_paper_claim": False,
-        },
-        {
-            "gap_id": "gap_dataset_level_fid_kid",
-            "gap_area": "quality_metrics",
-            "blocker_severity": "major",
-            "required_action": "在成组图像集合上计算 FID / KID, pair-level LPIPS / CLIP 不能替代数据集级指标。",
-            "related_artifacts": "outputs/threshold_calibration/quality_metrics_summary.csv",
-            "closes_claim_ids": "claim_quality_preservation_pair_metrics",
-            "recommended_order": 6,
-            "supports_paper_claim": False,
-        },
+            {
+                "gap_id": "gap_baseline_results",
+                "gap_area": "baseline_comparison",
+                "blocker_severity": "critical",
+                "required_action": "接入外部 baseline 官方代码复现结果或受治理导入结果, 并在共同协议下重建对比表。",
+                "related_artifacts": _source(bundle, "baseline_comparison_table", "baseline_comparison_table.csv"),
+                "closes_claim_ids": "claim_baseline_superiority",
+                "recommended_order": 3,
+                "supports_paper_claim": False,
+            },
+            {
+                "gap_id": "gap_full_main_sample_scale",
+                "gap_area": "statistical_power",
+                "blocker_severity": "critical",
+                "required_action": "冻结 full-main prompt split、样本量和随机种子, 重建 threshold、attack、baseline 与 ablation 统计。",
+                "related_artifacts": "outputs/threshold_calibration;outputs/attack_matrix;outputs/internal_ablation_evidence",
+                "closes_claim_ids": "claim_full_method_fixed_fpr_boundary;claim_submission_ready_package",
+                "recommended_order": 4,
+                "supports_paper_claim": False,
+            },
+        ]
+    )
+    if not _fixed_fpr_and_rescue_boundary_ready(threshold, attack):
+        rows.append(
+            {
+                "gap_id": "gap_full_method_fixed_fpr_recalibration",
+                "gap_area": "threshold_calibration",
+                "blocker_severity": "major",
+                "required_action": "在真实 aligned content score 与真实攻击闭环完成后重新校准 fixed-FPR 和 rescue 边界。",
+                "related_artifacts": "outputs/threshold_calibration/threshold_degeneracy_report.json",
+                "closes_claim_ids": "claim_full_method_fixed_fpr_boundary",
+                "recommended_order": 5,
+                "supports_paper_claim": False,
+            },
+        )
+    rows.extend(
+        [
+            {
+                "gap_id": "gap_dataset_level_fid_kid",
+                "gap_area": "quality_metrics",
+                "blocker_severity": "major",
+                "required_action": "在成组图像集合上计算 FID / KID, pair-level LPIPS / CLIP 不能替代数据集级指标。",
+                "related_artifacts": "outputs/threshold_calibration/quality_metrics_summary.csv",
+                "closes_claim_ids": "claim_quality_preservation_pair_metrics",
+                "recommended_order": 6,
+                "supports_paper_claim": False,
+            },
         ]
     )
     return rows
+
+
+def _recommended_next_action(gap_rows: Iterable[dict[str, Any]]) -> str:
+    """根据剩余缺口生成投稿前推进建议, 避免已经闭合的工程边界继续出现在建议中。"""
+    gap_ids = {str(row["gap_id"]) for row in gap_rows}
+    if {"gap_real_attacked_image_closed_loop", "gap_regeneration_attack_gpu_validation"} & gap_ids:
+        return "先按 evidence_gap_list.csv 补齐真实攻击闭环、外部 baseline 结果和 full-main 统计, 再进入投稿冻结。"
+    actions = []
+    if "gap_baseline_results" in gap_ids:
+        actions.append("外部 baseline 结果")
+    if "gap_full_main_sample_scale" in gap_ids:
+        actions.append("full-main 统计")
+    if "gap_full_method_fixed_fpr_recalibration" in gap_ids:
+        actions.append("完整方法 fixed-FPR 重校准")
+    if "gap_dataset_level_fid_kid" in gap_ids:
+        actions.append("dataset-level FID / KID")
+    if not actions:
+        return "重新运行投稿就绪门禁并审计 release dry-run 产物。"
+    return f"先按 evidence_gap_list.csv 补齐{'、'.join(actions)}, 再进入投稿冻结。"
 
 
 def build_builder_readiness_report(
@@ -483,13 +525,7 @@ def build_submission_blocker_report(
     gaps = list(gap_rows)
     critical_gaps = [row for row in gaps if row["blocker_severity"] == "critical"]
     blocking_claims = [row for row in claims if row["claim_decision"] in {"unsupported", "preview_only"}]
-    real_attack_gap_ids = {"gap_real_attacked_image_closed_loop", "gap_regeneration_attack_gpu_validation"}
-    real_attack_gap_present = any(row["gap_id"] in real_attack_gap_ids for row in gaps)
-    recommended_next_action = (
-        "先按 evidence_gap_list.csv 补齐真实攻击闭环、外部 baseline 结果和 full-main 统计, 再进入投稿冻结。"
-        if real_attack_gap_present
-        else "先按 evidence_gap_list.csv 补齐外部 baseline 结果、full-main 统计、完整方法 fixed-FPR 重校准和 dataset-level FID / KID, 再进入投稿冻结。"
-    )
+    recommended_next_action = _recommended_next_action(gaps)
     return {
         "construction_unit_name": "paper_artifact_evidence_audit",
         "submission_ready": False,

@@ -91,6 +91,30 @@ def make_real_attack_ready_bundle() -> AuditInputBundle:
     )
 
 
+def make_boundary_ready_bundle() -> AuditInputBundle:
+    """构造真实攻击与 fixed-FPR / rescue 边界均已闭合的小样本审计输入。"""
+    bundle = make_real_attack_ready_bundle()
+    ready_threshold_report = {
+        **bundle.threshold_report,
+        "fixed_fpr_and_rescue_boundary_ready": True,
+        "fixed_fpr_boundary_ready": True,
+        "rescue_boundary_ready": True,
+    }
+    return AuditInputBundle(
+        threshold_report=ready_threshold_report,
+        threshold_manifest=bundle.threshold_manifest,
+        attack_manifest=bundle.attack_manifest,
+        attack_matrix_manifest=bundle.attack_matrix_manifest,
+        baseline_manifest=bundle.baseline_manifest,
+        baseline_runtime_report=bundle.baseline_runtime_report,
+        baseline_small_sample_manifest=bundle.baseline_small_sample_manifest,
+        baseline_small_sample_summary=bundle.baseline_small_sample_summary,
+        ablation_manifest=bundle.ablation_manifest,
+        ablation_claim_summary=bundle.ablation_claim_summary,
+        source_path_map=bundle.source_path_map,
+    )
+
+
 @pytest.mark.quick
 def test_claim_audit_reports_current_paper_evidence_boundary() -> None:
     """审计表应明确区分工程可重建证据、预览证据和不可支持的论文主张。"""
@@ -139,6 +163,26 @@ def test_real_attack_ready_manifest_removes_real_attack_gap_items() -> None:
     assert table_by_id["table_baseline_small_sample_evidence"]["primary_blocker"] == "not_full_paper_claim"
     assert figure_by_id["figure_attack_robustness"]["primary_blocker"] == "record_level_proxy_boundary"
     assert "真实攻击闭环" not in blocker_report["recommended_next_action"]
+    assert "完整方法 fixed-FPR 重校准" in blocker_report["recommended_next_action"]
+
+
+@pytest.mark.quick
+def test_ready_fixed_fpr_and_rescue_boundary_removes_recalibration_gap() -> None:
+    """真实攻击闭环和阈值边界均 ready 后, 审计不应继续要求重复重校准。"""
+    bundle = make_boundary_ready_bundle()
+    claim_rows = build_claim_audit_rows(bundle)
+    table_rows = build_table_readiness_rows(bundle)
+    figure_rows = build_figure_readiness_rows(bundle)
+    gap_rows = build_evidence_gap_rows(bundle)
+    builder_report = build_builder_readiness_report(claim_rows, table_rows, figure_rows)
+    blocker_report = build_submission_blocker_report(claim_rows, gap_rows, builder_report)
+
+    gap_ids = {row["gap_id"] for row in gap_rows}
+
+    assert "gap_full_method_fixed_fpr_recalibration" not in gap_ids
+    assert {"gap_baseline_results", "gap_full_main_sample_scale", "gap_dataset_level_fid_kid"}.issubset(gap_ids)
+    assert "完整方法 fixed-FPR 重校准" not in blocker_report["recommended_next_action"]
+    assert blocker_report["submission_ready"] is False
 
 
 def write_json(path: Path, value: dict) -> None:
