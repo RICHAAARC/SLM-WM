@@ -600,7 +600,7 @@
 | input_manifest | `outputs/attack_matrix/manifest.local.json`; `outputs/attack_matrix/attack_manifest.json`; `outputs/threshold_calibration/threshold_degeneracy_report.json`; `outputs/external_baseline_results/manifest.local.json`; `external_baseline/source_registry.json` |
 | expected_output_manifest | `outputs/external_baseline_comparison/manifest.local.json` |
 | expected_outputs | `outputs/external_baseline_results/baseline_result_records.jsonl`; `outputs/external_baseline_results/baseline_formal_import_readiness.csv`; `outputs/primary_baseline_formal_import/primary_baseline_formal_result_template.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage.csv`; `outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_plan.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_summary.json`; `outputs/external_baseline_comparison/baseline_observations.jsonl`; `outputs/external_baseline_comparison/baseline_result_records.jsonl`; `outputs/external_baseline_comparison/baseline_formal_import_validation_report.json`; `outputs/external_baseline_comparison/baseline_metrics.csv`; `outputs/external_baseline_comparison/baseline_comparison_table.csv`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
-| blocking_items | 8个 baseline 的 source registry 已可审计, 但主表4个正式导入候选均未通过共同协议 validator; 因此 `baseline_results_ready=false`, `primary_baseline_formal_ready=false`, `supports_paper_claim=false`。 |
+| blocking_items | 8个 baseline 的 source registry 已可审计, 主表4个 baseline 已产生28条小样本候选记录, 但候选均未通过共同协议 validator; 因此 `baseline_results_ready=false`, `primary_baseline_formal_ready=false`, `supports_paper_claim=false`。 |
 | fallback_path | 外部 baseline 无正式结果时只登记 `external_baseline_result_missing`; 允许保留小样本候选和拒绝原因, 但不允许把候选或 smoke 结果写入主表结论。 |
 | invariants | baseline 与 SLM-WM 必须共享 prompt 协议、攻击矩阵协议和 fixed-FPR operating point; unsupported baseline 不进入论文主结论; 所有新增产物保持 `supports_paper_claim=false`。 |
 | next_stage_entry | 可继续导入受治理正式结果或运行官方复现; 若要形成论文级外部 baseline 对比, 必须使主表 baseline 在 full-main prompt、fixed-FPR、攻击矩阵检测和证据路径四个边界上同时通过 validator。 |
@@ -610,13 +610,13 @@
 1. `experiments/baselines/formal_import.py` 已提供主表 external baseline 正式导入 schema、候选记录 validator 和 per-baseline readiness 聚合。
 2. `scripts/write_primary_baseline_result_candidates.py` 已写出 `baseline_result_records.jsonl`、`baseline_result_candidate_validation_report.json`、`baseline_formal_import_readiness.csv` 与 `baseline_formal_import_readiness_summary.json`。
 3. `scripts/write_external_baseline_comparison_outputs.py` 已读取正式导入 readiness 摘要, 并将 `formal_result_ready_count`、`blocked_primary_baseline_ids` 和主要阻断原因透传到 `baseline_runtime_report.json`。
-4. 当前主表候选来源为 Google Drive 中的小样本 GPU smoke / T2SMark 链路包, 候选可以审计, 但不能升级为正式论文结果。
+4. 当前主表候选来源为 Google Drive 中的小样本 GPU smoke 链路包; T2SMark 在缺少 full-main 包时也可从 GPU smoke observations 构造小样本候选, 候选可以审计, 但不能升级为正式论文结果。
 
 ### stage14 当前产物摘要
 
-1. `baseline_runtime_report.json` 显示 `baseline_count=8`, `official_source_ready_count=8`, `baseline_result_ready_count=0`, `baseline_results_ready=false`。
-2. `formal_import_input_record_count=4`, `accepted_formal_import_count=0`, `rejected_formal_import_count=4`, `formal_import_issue_count=15`。
-3. `formal_template_record_count=32`, `formal_template_coverage_ready_count=0`, `missing_formal_template_count=32`, 说明当前候选尚未覆盖正式共同协议要求的 full-main 攻击模板。
+1. `baseline_runtime_report.json` 显示 `baseline_count=8`, `official_source_ready_count=8`, `baseline_observation_count=112`, `baseline_result_ready_count=0`, `baseline_results_ready=false`。
+2. `formal_import_input_record_count=28`, `accepted_formal_import_count=0`, `rejected_formal_import_count=28`, `formal_import_issue_count=112`。
+3. `formal_template_record_count=32`, `candidate_template_match_count=0`, `accepted_template_match_count=0`, `formal_template_coverage_ready_count=0`, `missing_candidate_template_count=32`, `missing_formal_template_count=32`, 说明当前候选尚未覆盖正式共同协议要求的 full-main 攻击模板。
 4. `formal_evidence_collection_task_count=32`, `missing_formal_evidence_collection_task_count=32`, 说明后续真实 GPU 或受治理导入需要逐模板补齐正式证据记录。
 5. `blocked_primary_baseline_ids=[tree_ring, gaussian_shading, shallow_diffuse, t2smark]`。
 6. 主要阻断原因为 `attack_matrix_baseline_detection_ready_required`、`fixed_fpr_baseline_calibration_ready_required`、`full_main_prompt_protocol_ready_required` 和 `full_main_resource_profile_required`。
@@ -625,8 +625,8 @@
 
 | command | result |
 | --- | --- |
-| `python scripts/write_primary_baseline_result_candidates.py --external-gpu-smoke-package-path <drive_zip> --t2smark-full-main-package-path <drive_zip>` | pass, `formal_import_candidate_record_count=4`, `accepted_formal_import_count=0` |
-| `python scripts/write_primary_baseline_formal_import_protocol.py` | pass, `template_record_count=32`, `missing_formal_template_count=32`, `missing_formal_evidence_collection_task_count=32` |
+| `python scripts/write_primary_baseline_result_candidates.py --external-gpu-smoke-package-path <drive_zip>` | pass, `formal_import_candidate_record_count=28`, `accepted_formal_import_count=0` |
+| `python scripts/write_primary_baseline_formal_import_protocol.py` | pass, `template_record_count=32`, `candidate_template_match_count=0`, `missing_formal_template_count=32`, `missing_formal_evidence_collection_task_count=32` |
 | `python scripts/write_external_baseline_comparison_outputs.py` | pass, `baseline_results_ready=false`, `formal_result_ready_count=0` |
 | `pytest tests/functional/test_primary_baseline_result_candidates.py tests/functional/test_external_baseline_comparison.py -q` | pass |
 | `python tools/harness/run_all_audits.py` | pass |
@@ -725,6 +725,7 @@
 1. `main/analysis/submission_readiness.py` 已将 stage16 证据审计产物、缺口列表、小样本 baseline 摘要和 release dry-run 摘要合成为投稿就绪门禁判定。
 2. `scripts/write_submission_readiness_outputs.py` 已生成阻断报告、待补齐输入清单、release profile dry-run 表和 manifest。
 3. 当前小样本 baseline 证据只允许解释为小样本共同协议边界, 不能支持正式 full paper 统计声明。
+4. 最新小样本 baseline 摘要显示 `small_sample_evidence_ready=true`, `small_sample_common_protocol_ready=true`, `small_sample_baseline_covered_count=4`, 但 `small_sample_baseline_formal_import_ready_count=0`。
 
 ### stage17 当前产物摘要
 
