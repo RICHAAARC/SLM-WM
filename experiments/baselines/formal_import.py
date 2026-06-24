@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -160,11 +161,86 @@ def build_fixed_fpr_operating_point(target_fpr: float) -> str:
     return f"{FORMAL_OPERATING_POINT_PREFIX}_{float(target_fpr):g}"
 
 
-def _resolve_evidence_path(evidence_root: Path, value: str) -> Path:
-    """把证据路径解析为可检查的本地路径。"""
+def _normalized_search_roots(evidence_root: Path, evidence_search_roots: Iterable[str | Path]) -> tuple[Path, ...]:
+    """把外部 evidence 搜索根目录解析为绝对路径集合."""
+
+    roots: list[Path] = []
+    for search_root in evidence_search_roots:
+        candidate = Path(search_root).expanduser()
+        resolved = candidate.resolve() if candidate.is_absolute() else (evidence_root / candidate).resolve()
+        if resolved not in roots:
+            roots.append(resolved)
+    return tuple(roots)
+
+
+def _candidate_relative_suffix(candidate: Path) -> Path | None:
+    """提取可用于外部镜像目录的相对路径后缀.
+
+    该函数属于路径 schema 解析层, 用于把 `outputs/<name>` 形式的本地记录映射到 Google Drive `SLM/<name>` 镜像布局。
+    """
+
+    parts = candidate.parts
+    if not parts or parts[0] != "outputs" or len(parts) <= 1:
+        return None
+    return Path(*parts[1:])
+
+
+def _package_family_dirname(basename: str) -> str:
+    """从标准 package 文件名中提取镜像目录名."""
+
+    marker = "_package_"
+    if marker not in basename:
+        return ""
+    return basename.split(marker, maxsplit=1)[0]
+
+
+@lru_cache(maxsize=256)
+def _find_evidence_by_mirror_layout(search_roots: tuple[Path, ...], candidate: Path) -> Path | None:
+    """在显式搜索根目录中按受治理镜像布局查找 evidence 文件.
+
+    该查找只在 schema / provenance 层使用。它优先尝试固定镜像布局, 避免对 Google Drive 目录执行大范围递归扫描。
+    """
+
+    basename = candidate.name
+    if not basename:
+        return None
+    suffix = _candidate_relative_suffix(candidate)
+    package_dirname = _package_family_dirname(basename)
+    for search_root in search_roots:
+        if not search_root.exists():
+            continue
+        path_candidates = [search_root / basename]
+        if suffix is not None:
+            path_candidates.append(search_root / suffix)
+        if package_dirname:
+            path_candidates.append(search_root / package_dirname / basename)
+        for path_candidate in path_candidates:
+            if path_candidate.is_file():
+                return path_candidate
+        for child in sorted(search_root.iterdir()):
+            child_candidate = child / basename
+            if child.is_dir() and child_candidate.is_file():
+                return child_candidate
+    return None
+
+
+def _resolve_evidence_path(
+    evidence_root: Path,
+    value: str,
+    evidence_search_roots: Iterable[str | Path] = (),
+) -> Path:
+    """把证据路径解析为可检查的本地路径.
+
+    优先使用记录中的原始路径; 若原始路径在本地 outputs 副本中不可解析, 则只在显式传入的搜索根目录中按文件名查找。
+    """
 
     candidate = Path(value)
-    return candidate if candidate.is_absolute() else evidence_root / candidate
+    direct_path = candidate if candidate.is_absolute() else evidence_root / candidate
+    if direct_path.is_file():
+        return direct_path
+    search_roots = _normalized_search_roots(evidence_root, evidence_search_roots)
+    mirror_path = _find_evidence_by_mirror_layout(search_roots, candidate)
+    return mirror_path if mirror_path is not None else direct_path
 
 
 def _issue(row_index: int, row: Mapping[str, Any], field_name: str, reason: str) -> FormalImportIssue:
@@ -200,6 +276,7 @@ def build_primary_baseline_formal_evidence_path_summary(
     rows: Iterable[Mapping[str, Any]],
     *,
     evidence_root: str | Path = ".",
+    evidence_search_roots: Iterable[str | Path] = (),
 ) -> dict[str, Any]:
     """汇总正式导入候选记录中的证据路径可解析状态.
 
@@ -208,18 +285,30 @@ def build_primary_baseline_formal_evidence_path_summary(
     """
 
     evidence_root_path = Path(evidence_root).resolve()
+    search_roots = _normalized_search_roots(evidence_root_path, evidence_search_roots)
     materialized_rows = [dict(row) for row in rows]
     reference_count = 0
     existing_count = 0
+    direct_count = 0
+    search_resolved_count = 0
     missing_count = 0
     missing_baseline_ids: set[str] = set()
     missing_paths: list[str] = []
+    resolved_paths: list[str] = []
     for row in materialized_rows:
         baseline_id = _str_field(row, "baseline_id")
         for evidence_path in _list_field(row, "evidence_paths"):
             reference_count += 1
-            if _resolve_evidence_path(evidence_root_path, evidence_path).is_file():
+            candidate = Path(evidence_path)
+            direct_path = candidate if candidate.is_absolute() else evidence_root_path / candidate
+            resolved_path = _resolve_evidence_path(evidence_root_path, evidence_path, search_roots)
+            if resolved_path.is_file():
                 existing_count += 1
+                resolved_paths.append(resolved_path.as_posix())
+                if direct_path.is_file():
+                    direct_count += 1
+                else:
+                    search_resolved_count += 1
             else:
                 missing_count += 1
                 if baseline_id:
@@ -230,8 +319,12 @@ def build_primary_baseline_formal_evidence_path_summary(
         "candidate_record_count": len(materialized_rows),
         "formal_evidence_path_reference_count": reference_count,
         "existing_formal_evidence_path_count": existing_count,
+        "direct_formal_evidence_path_count": direct_count,
+        "search_resolved_formal_evidence_path_count": search_resolved_count,
         "missing_formal_evidence_path_count": missing_count,
         "formal_evidence_path_resolution_ready": bool(materialized_rows) and reference_count > 0 and missing_count == 0,
+        "evidence_search_roots": [path.as_posix() for path in search_roots],
+        "resolved_formal_evidence_paths": sorted(set(resolved_paths)),
         "formal_evidence_path_missing_baseline_ids": sorted(missing_baseline_ids),
         "missing_formal_evidence_paths": sorted(set(missing_paths)),
         "supports_paper_claim": False,
@@ -273,6 +366,7 @@ def _validate_evidence_paths(
     row_index: int,
     evidence_root: Path,
     require_existing_evidence: bool,
+    evidence_search_roots: Iterable[str | Path] = (),
 ) -> list[FormalImportIssue]:
     """校验证据路径是否非空并可在当前工作区或挂载目录中解析。"""
 
@@ -282,7 +376,7 @@ def _validate_evidence_paths(
         return [_issue(row_index, row, "evidence_paths", "evidence_paths_required")]
     if require_existing_evidence:
         for evidence_path in evidence_paths:
-            if not _resolve_evidence_path(evidence_root, evidence_path).is_file():
+            if not _resolve_evidence_path(evidence_root, evidence_path, evidence_search_roots).is_file():
                 issues.append(_issue(row_index, row, "evidence_paths", "evidence_path_missing"))
     return issues
 
@@ -293,6 +387,7 @@ def validate_primary_baseline_formal_import_rows(
     evidence_root: str | Path = ".",
     target_fpr: float = 0.05,
     require_existing_evidence: bool = True,
+    evidence_search_roots: Iterable[str | Path] = (),
 ) -> dict[str, Any]:
     """校验主表 baseline 正式结果导入记录, 并返回仅包含通过记录的报告。
 
@@ -300,6 +395,7 @@ def validate_primary_baseline_formal_import_rows(
     """
 
     evidence_root_path = Path(evidence_root).resolve()
+    search_roots = _normalized_search_roots(evidence_root_path, evidence_search_roots)
     expected_operating_point = build_fixed_fpr_operating_point(target_fpr)
     accepted: list[dict[str, Any]] = []
     issues: list[FormalImportIssue] = []
@@ -336,7 +432,9 @@ def validate_primary_baseline_formal_import_rows(
             if not _bool_field(row, flag_name):
                 row_issues.append(_issue(row_index, row, flag_name, f"{flag_name}_required"))
         row_issues.extend(_validate_metric_fields(row, row_index))
-        row_issues.extend(_validate_evidence_paths(row, row_index, evidence_root_path, require_existing_evidence))
+        row_issues.extend(
+            _validate_evidence_paths(row, row_index, evidence_root_path, require_existing_evidence, search_roots)
+        )
         if row_issues:
             issues.extend(row_issues)
         else:

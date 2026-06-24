@@ -187,8 +187,11 @@ def test_external_baseline_outputs_are_rebuildable_and_claim_safe(tmp_path: Path
     )
     assert runtime_report["formal_evidence_path_reference_count"] == 0
     assert runtime_report["existing_formal_evidence_path_count"] == 0
+    assert runtime_report["direct_formal_evidence_path_count"] == 0
+    assert runtime_report["search_resolved_formal_evidence_path_count"] == 0
     assert runtime_report["missing_formal_evidence_path_count"] == 0
     assert runtime_report["formal_evidence_path_resolution_ready"] is False
+    assert runtime_report["evidence_search_roots"] == []
     assert evidence_path_report["candidate_record_count"] == 0
     assert evidence_path_report["supports_paper_claim"] is False
     assert {row["metric_status"] for row in baseline_rows} == {"unsupported"}
@@ -396,8 +399,11 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     assert runtime_report["excluded_operating_points"] == ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"]
     assert runtime_report["formal_evidence_path_reference_count"] == 1
     assert runtime_report["existing_formal_evidence_path_count"] == 1
+    assert runtime_report["direct_formal_evidence_path_count"] == 1
+    assert runtime_report["search_resolved_formal_evidence_path_count"] == 0
     assert runtime_report["missing_formal_evidence_path_count"] == 0
     assert runtime_report["formal_evidence_path_resolution_ready"] is True
+    assert runtime_report["evidence_search_roots"] == []
     assert runtime_report["formal_evidence_path_missing_baseline_ids"] == []
     assert evidence_path_report["formal_evidence_path_reference_count"] == 1
     assert evidence_path_report["formal_evidence_path_resolution_ready"] is True
@@ -410,3 +416,85 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     assert tree_comparison_row["comparison_scope"] == "common_protocol_governed_result"
     assert tree_comparison_row["attacked_false_positive_rate"] == "0.1"
     assert tree_comparison_row["supports_paper_claim"] == "False"
+
+
+@pytest.mark.quick
+def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(tmp_path: Path) -> None:
+    """显式镜像根目录中的 evidence 文件应能进入 schema 层路径解析, 但不改变正式导入规则。"""
+
+    attack_manifest_path, attack_family_metrics_path, attack_matrix_manifest_path, threshold_report_path = (
+        write_input_artifacts(tmp_path)
+    )
+    result_dir = tmp_path / "outputs" / "external_baseline_results"
+    result_dir.mkdir(parents=True)
+    mirror_root = tmp_path / "drive_mirror" / "SLM"
+    mirror_evidence_dir = mirror_root / "external_baseline_gpu_smoke"
+    mirror_evidence_dir.mkdir(parents=True)
+    mirror_evidence_path = mirror_evidence_dir / "tree_ring_metrics.csv"
+    mirror_evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
+    result_records_path = result_dir / "baseline_result_records.jsonl"
+    result_records_path.write_text(
+        json.dumps(
+            {
+                "baseline_id": "tree_ring",
+                "attack_family": "standard_distortion",
+                "attack_name": "jpeg_compression",
+                "resource_profile": "full_main",
+                "comparable_operating_point": "fixed_fpr_0.05",
+                "result_protocol_name": "primary_baseline_formal_import_protocol",
+                "result_source_type": "governed_import",
+                "baseline_result_source": "outputs/external_baseline_results/tree_ring_metrics.csv",
+                "baseline_result_source_digest": "tree_ring_digest",
+                "metric_status": "measured",
+                "positive_count": 10,
+                "negative_count": 20,
+                "attack_record_count": 30,
+                "supported_record_count": 30,
+                "true_positive_rate": 0.7,
+                "false_positive_rate": 0.05,
+                "clean_false_positive_rate": 0.0,
+                "attacked_false_positive_rate": 0.1,
+                "quality_score_proxy_mean": 0.88,
+                "score_retention_mean": 0.77,
+                "prompt_protocol_name": "paper_main_full_prompt_protocol",
+                "prompt_protocol_digest": "prompt_digest",
+                "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
+                "evidence_paths": ["outputs/external_baseline_results/tree_ring_metrics.csv"],
+                "method_faithful_adapter_ready": True,
+                "full_main_prompt_protocol_ready": True,
+                "fixed_fpr_baseline_calibration_ready": True,
+                "attack_matrix_baseline_detection_ready": True,
+                "formal_evidence_paths_ready": True,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    write_external_baseline_comparison_outputs(
+        root=tmp_path,
+        attack_manifest_path=attack_manifest_path,
+        attack_family_metrics_path=attack_family_metrics_path,
+        attack_matrix_manifest_path=attack_matrix_manifest_path,
+        threshold_report_path=threshold_report_path,
+        baseline_result_records_path=result_records_path,
+        evidence_search_roots=(mirror_root,),
+    )
+
+    output_dir = tmp_path / "outputs" / "external_baseline_comparison"
+    runtime_report = json.loads((output_dir / "baseline_runtime_report.json").read_text(encoding="utf-8"))
+    validation_report = json.loads((output_dir / "baseline_formal_import_validation_report.json").read_text(encoding="utf-8"))
+    evidence_path_report = json.loads(
+        (output_dir / "baseline_formal_evidence_path_resolution_report.json").read_text(encoding="utf-8")
+    )
+
+    assert validation_report["formal_import_validation_ready"] is True
+    assert runtime_report["formal_evidence_path_reference_count"] == 1
+    assert runtime_report["existing_formal_evidence_path_count"] == 1
+    assert runtime_report["direct_formal_evidence_path_count"] == 0
+    assert runtime_report["search_resolved_formal_evidence_path_count"] == 1
+    assert runtime_report["missing_formal_evidence_path_count"] == 0
+    assert runtime_report["formal_evidence_path_resolution_ready"] is True
+    assert runtime_report["evidence_search_roots"] == [mirror_root.resolve().as_posix()]
+    assert evidence_path_report["resolved_formal_evidence_paths"] == [mirror_evidence_path.resolve().as_posix()]

@@ -1046,8 +1046,12 @@ Notebook 与 repository module 的跨边界数据
 | formal_evidence_path_resolution_report_path | artifact | none | false | false | false | 正式导入候选记录 evidence paths 在当前工作区或挂载目录下的可解析状态报告路径。 |
 | formal_evidence_path_reference_count | metric | none | false | false | false | 正式导入候选记录中声明的 evidence path 引用数量。 |
 | existing_formal_evidence_path_count | metric | none | false | false | false | 当前工作区或挂载目录下可解析的正式 evidence path 数量。 |
+| direct_formal_evidence_path_count | metric | none | false | false | false | 直接按记录原始路径即可解析的正式 evidence path 数量。 |
+| search_resolved_formal_evidence_path_count | metric | none | false | false | false | 通过显式外部镜像根目录按文件名解析到的正式 evidence path 数量。 |
 | missing_formal_evidence_path_count | metric | none | false | false | false | 当前工作区或挂载目录下不可解析的正式 evidence path 数量。 |
 | formal_evidence_path_resolution_ready | governance | none | false | false | false | 正式导入候选记录的 evidence paths 是否在当前审计边界内全部可解析。 |
+| evidence_search_roots | protocol | none | false | false | false | 正式 evidence path 解析时使用的显式外部镜像根目录集合。 |
+| resolved_formal_evidence_paths | artifact | none | false | false | false | 在当前审计边界内解析成功的正式 evidence path 集合。 |
 | formal_evidence_path_missing_baseline_ids | protocol | none | false | false | false | 存在不可解析 evidence paths 的主表 baseline id 集合。 |
 | missing_formal_evidence_paths | artifact | none | false | false | false | 当前工作区或挂载目录下不可解析的正式 evidence path 集合。 |
 | formal_import_candidate_records_path | artifact | none | false | false | false | T2SMark 或其他 baseline 写出的正式导入候选 JSONL 路径。 |

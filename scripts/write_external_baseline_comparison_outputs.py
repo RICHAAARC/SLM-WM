@@ -6,10 +6,11 @@ import argparse
 import csv
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
-from typing import Any
+from typing import Any, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -50,6 +51,7 @@ DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH = Path(
     "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json"
 )
 DEFAULT_BASELINE_SOURCE_REGISTRY_PATH = Path("external_baseline/source_registry.json")
+DEFAULT_EVIDENCE_SEARCH_ROOTS_ENV = "SLM_WM_EVIDENCE_SEARCH_ROOTS"
 
 
 def stable_json_text(value: Any) -> str:
@@ -90,6 +92,18 @@ def read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
         if line.strip():
             rows.append(json.loads(line))
     return rows
+
+
+def parse_evidence_search_roots(values: Iterable[str | Path] | None = None) -> tuple[str, ...]:
+    """解析外部 evidence 镜像根目录.
+
+    该函数属于配置解析层: 它把命令行参数或环境变量统一收敛为路径列表, 避免在正式比较逻辑中硬编码 Google Drive 等机器相关目录。
+    """
+
+    if values is not None:
+        return tuple(str(value) for value in values if str(value).strip())
+    raw_value = os.environ.get(DEFAULT_EVIDENCE_SEARCH_ROOTS_ENV, "")
+    return tuple(part.strip() for part in raw_value.split(";") if part.strip())
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
@@ -263,12 +277,19 @@ def build_runtime_report(
         "existing_formal_evidence_path_count": int(
             formal_evidence_path_summary.get("existing_formal_evidence_path_count", 0)
         ),
+        "direct_formal_evidence_path_count": int(
+            formal_evidence_path_summary.get("direct_formal_evidence_path_count", 0)
+        ),
+        "search_resolved_formal_evidence_path_count": int(
+            formal_evidence_path_summary.get("search_resolved_formal_evidence_path_count", 0)
+        ),
         "missing_formal_evidence_path_count": int(
             formal_evidence_path_summary.get("missing_formal_evidence_path_count", 0)
         ),
         "formal_evidence_path_resolution_ready": bool(
             formal_evidence_path_summary.get("formal_evidence_path_resolution_ready", False)
         ),
+        "evidence_search_roots": list(formal_evidence_path_summary.get("evidence_search_roots", ())),
         "formal_evidence_path_missing_baseline_ids": list(
             formal_evidence_path_summary.get("formal_evidence_path_missing_baseline_ids", ())
         ),
@@ -297,6 +318,7 @@ def write_external_baseline_comparison_outputs(
     formal_evidence_collection_summary_path: str | Path = DEFAULT_FORMAL_EVIDENCE_COLLECTION_SUMMARY_PATH,
     baseline_small_sample_summary_path: str | Path = DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH,
     baseline_source_registry_path: str | Path = DEFAULT_BASELINE_SOURCE_REGISTRY_PATH,
+    evidence_search_roots: Iterable[str | Path] | None = None,
 ) -> dict[str, Any]:
     """写出外部 baseline 对比 records, 表格, 运行报告与 manifest。"""
     root_path = Path(root).resolve()
@@ -316,6 +338,7 @@ def write_external_baseline_comparison_outputs(
     )
     resolved_baseline_small_sample_summary_path = resolve_input_path(root_path, baseline_small_sample_summary_path)
     resolved_baseline_source_registry_path = resolve_input_path(root_path, baseline_source_registry_path)
+    resolved_evidence_search_roots = parse_evidence_search_roots(evidence_search_roots)
 
     attack_manifest = read_json(resolved_attack_manifest_path)
     attack_matrix_manifest = read_json(resolved_attack_matrix_manifest_path)
@@ -339,6 +362,7 @@ def write_external_baseline_comparison_outputs(
         evidence_root=root_path,
         target_fpr=target_fpr,
         require_existing_evidence=True,
+        evidence_search_roots=resolved_evidence_search_roots,
     )
     baseline_result_records = [
         normalize_baseline_result_record(row) for row in formal_import_validation.get("accepted_records", [])
@@ -346,6 +370,7 @@ def write_external_baseline_comparison_outputs(
     formal_evidence_path_summary = build_primary_baseline_formal_evidence_path_summary(
         baseline_result_rows,
         evidence_root=root_path,
+        evidence_search_roots=resolved_evidence_search_roots,
     )
 
     observations = build_baseline_observations(baseline_specs, attack_rows, boundary, baseline_result_records)
@@ -527,6 +552,7 @@ def write_external_baseline_comparison_outputs(
                 formal_evidence_path_summary_path,
                 root_path,
             ),
+            "evidence_search_roots": list(resolved_evidence_search_roots),
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_external_baseline_comparison_outputs.py",
@@ -586,6 +612,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_BASELINE_SOURCE_REGISTRY_PATH),
         help="外部 baseline 官方源码登记 JSON 路径; 缺失时仅使用默认 spec。",
     )
+    parser.add_argument(
+        "--evidence-search-root",
+        action="append",
+        default=None,
+        help="用于解析外部 baseline evidence paths 的额外镜像根目录; 可重复传入。",
+    )
     return parser
 
 
@@ -605,6 +637,7 @@ def main() -> None:
         formal_evidence_collection_summary_path=args.formal_evidence_collection_summary_path,
         baseline_small_sample_summary_path=args.baseline_small_sample_summary_path,
         baseline_source_registry_path=args.baseline_source_registry_path,
+        evidence_search_roots=args.evidence_search_root,
     )
     print(stable_json_text(manifest), end="")
 
