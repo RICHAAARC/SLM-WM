@@ -923,6 +923,20 @@ Notebook 与 repository module 的跨边界数据
 | required_input_count | metric | none | false | false | false | 投稿就绪门禁中待补齐输入总数。 |
 | release_profile_count | metric | none | false | false | false | 投稿就绪门禁中审计的 release profile 数量。 |
 | limitations | governance | none | false | false | false | 投稿就绪门禁报告中显式列出的适用边界和限制。 |
+| entry_review_ready | governance | none | false | false | false | 论文投稿级证据闭合入口审计是否已生成可审计判定。 |
+| user_audit_required | governance | none | false | false | false | 是否需要用户审计后再决定是否进入论文投稿级证据闭合。 |
+| evidence_closure_allowed | governance | none | false | false | false | 当前受治理证据是否允许进入论文投稿级证据闭合。 |
+| entry_review_decision | governance | none | false | false | false | 证据闭合入口审计的总体判定。 |
+| review_item_count | metric | none | false | false | false | 证据闭合入口审计清单中的检查项数量。 |
+| blocked_review_item_count | metric | none | false | false | false | 证据闭合入口审计清单中仍被阻断的检查项数量。 |
+| blocked_review_item_ids | governance | none | false | false | false | 证据闭合入口审计清单中仍被阻断的检查项 id 集合。 |
+| review_item_id | governance | none | false | false | false | 证据闭合入口审计清单中的检查项 id。 |
+| review_area | governance | none | false | false | false | 证据闭合入口审计清单中的检查领域。 |
+| review_status | governance | none | false | false | false | 证据闭合入口审计清单中单项检查状态。 |
+| source_artifact | artifact | none | false | false | false | 单项入口审计检查依据的受治理产物路径。 |
+| blocker_reason | governance | none | false | false | false | 单项入口审计检查未通过时的阻断原因。 |
+| user_audit_note | governance | none | false | false | false | 提供给用户审计入口检查项时使用的说明。 |
+| user_audit_question | governance | none | false | false | false | 证据闭合入口报告中需要用户审计的问题说明。 |
 | threshold_calibration_ready | artifact | none | false | false | false | threshold calibration 结果是否已经生成可供下游读取的阈值与审计产物。 |
 | geometric_rescue_ready | artifact | none | false | false | false | 几何恢复记录是否已经由前序结果包重建并满足下游阈值校准输入要求。 |
 | geometric_rescue_record_count | metric | none | false | false | false | 本次 threshold calibration workflow 重建得到的几何恢复记录数量。 |

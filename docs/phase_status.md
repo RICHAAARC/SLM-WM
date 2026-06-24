@@ -1019,3 +1019,10 @@
 4. 若需要关闭正式 baseline 结果缺口, 应先确保受治理结果包或官方复现 evidence paths 在当前审计边界内可解析, 再重建 comparison、evidence audit 和 submission readiness。
 5. formal evidence path resolution 已支持显式外部镜像根目录, 例如通过 `--evidence-search-root` 或 `SLM_WM_EVIDENCE_SEARCH_ROOTS` 指向 Google Drive 的 `SLM` 目录; 仓库不会硬编码用户机器路径, 也不会因此改变 full-main、fixed-FPR、攻击矩阵检测和正式 claim 的接受边界。
 6. 当前通过显式镜像根目录重建后, `formal_evidence_path_reference_count=28`, `search_resolved_formal_evidence_path_count=28`, `missing_formal_evidence_path_count=0`, `formal_evidence_path_resolution_ready=true`; 但 `formal_import_validation_ready=false`, 主要阻断仍是 `full_main_resource_profile_required`、`full_main_prompt_protocol_ready_required`、`fixed_fpr_baseline_calibration_ready_required` 与 `attack_matrix_baseline_detection_ready_required`。
+
+### evidence closure entry review
+
+1. 已新增 `evidence_closure_entry_review` 审计入口, 用于在进入论文投稿级证据闭合前汇总 submission readiness、external baseline、dataset-level quality 和 small-sample boundary。
+2. 该入口只生成 `entry_review_report.json`、`entry_review_checklist.csv` 与 manifest, 不生成论文主表、主图或 supported claim。
+3. 当前设计把 `entry_review_ready` 与 `evidence_closure_allowed` 分开: 即使报告可供用户审计, 只要 formal baseline、full-main 样本规模、fixed-FPR 重校准或 dataset-level FID / KID 未闭合, 就保持 `evidence_closure_allowed=false`。
+4. 用户应审计该报告后再决定是否允许项目进入论文投稿级证据闭合; 若仍保持小样本约束, 则只能继续在受限证据边界内推进, 不得声明论文级结论。
