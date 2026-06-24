@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 import json
 import os
 from pathlib import Path
@@ -427,6 +428,18 @@ def image_to_metric_tensor(image: Any, device: Any) -> Any:
     return torch.from_numpy(image_array).permute(2, 0, 1).unsqueeze(0).to(device)
 
 
+@lru_cache(maxsize=8)
+def load_lpips_metric_model(lpips_network: str, perceptual_metric_device_name: str) -> Any:
+    """加载并缓存 LPIPS 模型, 避免每个 carrier 重复初始化感知损失网络。"""
+    import lpips
+
+    _, torch, _, _ = import_runtime_dependencies()
+    device = torch.device(perceptual_metric_device_name)
+    metric_model = lpips.LPIPS(net=lpips_network).to(device)
+    metric_model.eval()
+    return metric_model
+
+
 def compute_lpips_metric(clean_image: Any, aligned_image: Any, config: AlignedRescoringConfig) -> dict[str, Any]:
     """计算成对图像 LPIPS, 不可用时返回可审计 status。"""
     if not config.enable_pair_perceptual_metrics:
@@ -457,8 +470,7 @@ def compute_lpips_metric(clean_image: Any, aligned_image: Any, config: AlignedRe
                 "lpips_error_type": "",
                 "lpips_error_message": "",
             }
-        metric_model = lpips.LPIPS(net=config.lpips_network).to(device)
-        metric_model.eval()
+        metric_model = load_lpips_metric_model(config.lpips_network, config.perceptual_metric_device_name)
         clean_tensor = image_to_metric_tensor(clean_image, device)
         aligned_tensor = image_to_metric_tensor(aligned_image, device)
         with torch.no_grad():
@@ -566,6 +578,24 @@ def compute_clip_scores_with_forward_api(
     return float(scores[0].detach().cpu().item()), float(scores[1].detach().cpu().item())
 
 
+@lru_cache(maxsize=8)
+def load_clip_metric_objects(
+    clip_model_id: str,
+    perceptual_metric_device_name: str,
+    hf_token: str,
+) -> tuple[Any, Any]:
+    """加载并缓存 CLIP processor / model, 让成对图文分数计算复用同一模型对象。"""
+    _, torch, _, _ = import_runtime_dependencies()
+    from transformers import CLIPModel, CLIPProcessor
+
+    device = torch.device(perceptual_metric_device_name)
+    model_kwargs = {"token": hf_token} if hf_token else {}
+    processor = CLIPProcessor.from_pretrained(clip_model_id, **model_kwargs)
+    model = CLIPModel.from_pretrained(clip_model_id, **model_kwargs).to(device)
+    model.eval()
+    return processor, model
+
+
 def compute_clip_pair_metrics(
     clean_image: Any,
     aligned_image: Any,
@@ -586,11 +616,12 @@ def compute_clip_pair_metrics(
         device = torch.device(config.perceptual_metric_device_name)
         if device.type == "cuda" and not torch.cuda.is_available():
             return unsupported_clip_metric("gpu_unavailable")
-        token = os.environ.get(config.hf_token_env) or None
-        model_kwargs = {"token": token} if token else {}
-        processor = CLIPProcessor.from_pretrained(config.clip_model_id, **model_kwargs)
-        model = CLIPModel.from_pretrained(config.clip_model_id, **model_kwargs).to(device)
-        model.eval()
+        token = os.environ.get(config.hf_token_env) or ""
+        processor, model = load_clip_metric_objects(
+            config.clip_model_id,
+            config.perceptual_metric_device_name,
+            token,
+        )
         image_inputs = processor(
             images=[clean_image.convert("RGB"), aligned_image.convert("RGB")],
             return_tensors="pt",

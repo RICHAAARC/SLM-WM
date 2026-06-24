@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+import sys
+import types
 from typing import Any
 
 import pytest
@@ -43,6 +45,97 @@ def test_default_config_requires_pair_perceptual_metrics(monkeypatch: pytest.Mon
     assert config.clip_model_id == helper.DEFAULT_CLIP_MODEL_ID
     assert config.lpips_network == helper.DEFAULT_LPIPS_NETWORK
     assert config.perceptual_metric_device_name == "cpu"
+
+
+@pytest.mark.quick
+def test_lpips_metric_model_loader_reuses_cached_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LPIPS 模型加载应在相同配置下复用缓存, 避免每个 carrier 重复初始化。"""
+    load_count = {"lpips": 0}
+
+    class FakeLpipsModel:
+        def to(self, device: object) -> "FakeLpipsModel":
+            self.device = device
+            return self
+
+        def eval(self) -> None:
+            self.evaluated = True
+
+    class FakeTorch:
+        @staticmethod
+        def device(device_name: str) -> str:
+            return device_name
+
+    fake_lpips = types.ModuleType("lpips")
+
+    def fake_lpips_factory(net: str) -> FakeLpipsModel:
+        load_count["lpips"] += 1
+        assert net == "alex"
+        return FakeLpipsModel()
+
+    fake_lpips.LPIPS = fake_lpips_factory  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "lpips", fake_lpips)
+    monkeypatch.setattr(helper, "import_runtime_dependencies", lambda: (None, FakeTorch, None, None))
+    helper.load_lpips_metric_model.cache_clear()
+
+    try:
+        first_model = helper.load_lpips_metric_model("alex", "cpu")
+        second_model = helper.load_lpips_metric_model("alex", "cpu")
+    finally:
+        helper.load_lpips_metric_model.cache_clear()
+
+    assert first_model is second_model
+    assert load_count["lpips"] == 1
+
+
+@pytest.mark.quick
+def test_clip_metric_loader_reuses_cached_model_and_processor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLIP processor 和 model 应在相同配置下复用缓存, 避免成对质量计算重复下载或加载。"""
+    load_count = {"processor": 0, "model": 0}
+
+    class FakeTorch:
+        @staticmethod
+        def device(device_name: str) -> str:
+            return device_name
+
+    class FakeProcessor:
+        @classmethod
+        def from_pretrained(cls, model_id: str, **kwargs: Any) -> "FakeProcessor":
+            load_count["processor"] += 1
+            assert model_id == helper.DEFAULT_CLIP_MODEL_ID
+            assert kwargs == {}
+            return cls()
+
+    class FakeModel:
+        @classmethod
+        def from_pretrained(cls, model_id: str, **kwargs: Any) -> "FakeModel":
+            load_count["model"] += 1
+            assert model_id == helper.DEFAULT_CLIP_MODEL_ID
+            assert kwargs == {}
+            return cls()
+
+        def to(self, device: object) -> "FakeModel":
+            self.device = device
+            return self
+
+        def eval(self) -> None:
+            self.evaluated = True
+
+    fake_transformers = types.ModuleType("transformers")
+    fake_transformers.CLIPProcessor = FakeProcessor  # type: ignore[attr-defined]
+    fake_transformers.CLIPModel = FakeModel  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
+    monkeypatch.setattr(helper, "import_runtime_dependencies", lambda: (None, FakeTorch, None, None))
+    helper.load_clip_metric_objects.cache_clear()
+
+    try:
+        first_processor, first_model = helper.load_clip_metric_objects(helper.DEFAULT_CLIP_MODEL_ID, "cpu", "")
+        second_processor, second_model = helper.load_clip_metric_objects(helper.DEFAULT_CLIP_MODEL_ID, "cpu", "")
+    finally:
+        helper.load_clip_metric_objects.cache_clear()
+
+    assert first_processor is second_processor
+    assert first_model is second_model
+    assert load_count == {"processor": 1, "model": 1}
 
 
 @pytest.mark.quick
