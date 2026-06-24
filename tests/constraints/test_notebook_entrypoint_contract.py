@@ -158,7 +158,7 @@ def test_colab_notebook_delegates_attention_geometry_logic_to_helper() -> None:
     assert "paper_workflow.colab_utils.attention_geometry_capture" in joined_source
     assert "run_default_attention_geometry_plan" in joined_source
     assert "package_attention_geometry_outputs" in joined_source
-    assert "paper_run_name = os.environ.get('SLM_WM_PAPER_RUN_NAME', 'pilot_paper').strip() or 'pilot_paper'" in joined_source
+    assert 'SLM_WM_PAPER_RUN_NAME = "pilot_paper"' in joined_source
     assert "SLM_WM_PAPER_RUN_SAMPLE_COUNT', 'all'" in joined_source
     assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
