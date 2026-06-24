@@ -28,6 +28,10 @@
 - `gaussian_shading_official_reference_run.ipynb`: 运行 Gaussian Shading 官方原始环境参考复现, 默认样本数120, 结果写入 `/content/drive/MyDrive/SLM/pilot_paper_results/gaussian_shading_official_reference`。
 - `shallow_diffuse_official_reference_run.ipynb`: 运行 Shallow Diffuse 官方原始环境参考复现, 默认样本数120, 结果写入 `/content/drive/MyDrive/SLM/pilot_paper_results/shallow_diffuse_official_reference`。
 
+### 结果闭合入口
+
+- `pilot_paper_result_closure_run.ipynb`: 在前序结果包已经写入 Google Drive 后, 从 `/content/drive/MyDrive/SLM/pilot_paper_results` 物化上游包, 依次重建 attack matrix、external baseline formal import、internal ablation、pilot_paper fixed-FPR 共同协议记录和完整结果包。该入口不需要 GPU, 只调度 `scripts/` 中的 repository commands, 不直接手写正式 records、tables、figures 或 reports。
+
 ## pilot_paper 与 full_paper 运行原则
 
 pilot_paper 与 full_paper 应共享同一批方法主流程和 baseline 入口, 只通过配置切换 prompt split、样本量、随机种子、Drive 输出根目录、攻击覆盖范围和 bootstrap 次数。不得为 pilot_paper 和 full_paper 维护两套互相分叉的 Notebook 逻辑。pilot_paper 是受样本规模约束的论文主张层级, 不是仅用于链路调试的临时层级。
@@ -51,8 +55,9 @@ pilot_paper 与 full_paper 应共享同一批方法主流程和 baseline 入口,
 11. 官方复现: `tree_ring_official_reference_run.ipynb`。
 12. 官方复现: `gaussian_shading_official_reference_run.ipynb`。
 13. 官方复现: `shallow_diffuse_official_reference_run.ipynb`。
+14. 结果闭合: `pilot_paper_result_closure_run.ipynb`。
 
-完成上述 Notebook 后, 在同一个 Colab 仓库工作区或本地仓库中执行以下收尾命令。若在本地执行, `--package-search-root` 应指向已经同步或挂载的 Google Drive `SLM/pilot_paper_results` 目录。
+第14个 Notebook 已经封装以下收尾命令。若不使用该 Notebook, 也可以在同一个 Colab 仓库工作区或本地仓库中手动执行以下等价命令。若在本地执行, `--package-search-root` 应指向已经同步或挂载的 Google Drive `SLM/pilot_paper_results` 目录。
 
 ```bash
 python scripts/write_pilot_paper_result_records.py \

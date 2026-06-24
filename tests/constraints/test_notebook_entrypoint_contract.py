@@ -33,6 +33,7 @@ T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH = Path("paper_workflow/t2smark_full_
 TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/tree_ring_official_reference_run.ipynb")
 GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/gaussian_shading_official_reference_run.ipynb")
 SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/shallow_diffuse_official_reference_run.ipynb")
+PILOT_PAPER_RESULT_CLOSURE_NOTEBOOK_PATH = Path("paper_workflow/pilot_paper_result_closure_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH,
     DRIVE_COLD_START_NOTEBOOK_PATH,
@@ -47,6 +48,7 @@ NOTEBOOK_PATHS = (
     TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
     GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
     SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
+    PILOT_PAPER_RESULT_CLOSURE_NOTEBOOK_PATH,
 )
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
@@ -418,9 +420,52 @@ def test_official_baseline_notebooks_default_to_pilot_paper_outputs() -> None:
         assert "pilot_paper_fixed_fpr_0_01" in joined_source
         assert "SLM_WM_PROMPT_SET', 'pilot_paper'" in joined_source
         assert "默认样本数为 5" not in joined_source
+        assert "sample_count'] == 5" not in joined_source
         assert "configs/paper_main_full_paper_prompts.txt" not in joined_source
         for required_text in required_texts:
             assert required_text in joined_source
+
+    official_sample_assertions = {
+        TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: "expected_sample_count = int(os.environ['SLM_WM_TREE_RING_OFFICIAL_SAMPLE_COUNT'])",
+        GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
+            "expected_sample_count = int(os.environ['SLM_WM_GAUSSIAN_SHADING_OFFICIAL_SAMPLE_COUNT'])"
+        ),
+        SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
+            "expected_sample_count = int(os.environ['SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT'])"
+        ),
+    }
+    for notebook_path, required_assertion in official_sample_assertions.items():
+        payload = json.loads(notebook_path.read_text(encoding="utf-8"))
+        joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+        assert required_assertion in joined_source
+        assert "['sample_count'] == expected_sample_count" in joined_source
+
+
+@pytest.mark.constraint
+def test_pilot_paper_result_closure_notebook_delegates_to_repository_commands() -> None:
+    """pilot_paper 结果闭合入口必须只调度 repository commands, 不直接拼写正式产物。"""
+    payload = json.loads(PILOT_PAPER_RESULT_CLOSURE_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+    first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+    first_code_source = "".join(first_code_cell.get("source", []))
+
+    assert "drive.mount('/content/drive')" in first_code_source
+    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/complete_result_package" in joined_source
+    assert "scripts/write_pilot_paper_result_records.py" in joined_source
+    assert "--materialize-only" in joined_source
+    assert "scripts/write_attack_matrix_outputs.py" in joined_source
+    assert "scripts/write_primary_baseline_result_candidates.py" in joined_source
+    assert "--target-fpr-override" in joined_source
+    assert "scripts/write_primary_baseline_formal_import_protocol.py" in joined_source
+    assert "scripts/write_external_baseline_comparison_outputs.py" in joined_source
+    assert "scripts/write_internal_ablation_outputs.py" in joined_source
+    assert "scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py" in joined_source
+    assert "scripts/write_pilot_paper_complete_result_package.py" in joined_source
+    assert "json.dumps" not in joined_source
+    assert "write_text(" not in joined_source
 
 
 @pytest.mark.constraint
