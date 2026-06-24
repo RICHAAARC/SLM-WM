@@ -34,8 +34,8 @@ from scripts.write_semantic_subspace_outputs import write_semantic_subspace_outp
 
 DEFAULT_OUTPUT_DIR = "outputs/attention_latent_injection"
 DEFAULT_METHOD_OUTPUT_DIR = "outputs/attention_latent_update"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/attention_latent_injection"
-DEFAULT_GEOMETRY_DRIVE_DIR = "/content/drive/MyDrive/SLM/attention_geometry"
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_latent_injection"
+DEFAULT_GEOMETRY_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry"
 PRIMARY_MODEL_FAMILY = "sd35"
 PRIMARY_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 GEOMETRY_PACKAGE_PATTERN = "attention_geometry_package_*.zip"

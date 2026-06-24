@@ -41,7 +41,7 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
             {
                 "attack_metrics_ready": True,
                 "evaluation_boundary": {
-                    "target_fpr": 0.05,
+                    "target_fpr": 0.01,
                     "calibrated_content_threshold": 0.50,
                     "rescue_margin_low": -0.05,
                     "allowed_fail_reasons": ["geometry_suspected", "low_confidence"],
@@ -120,7 +120,7 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         encoding="utf-8",
     )
     threshold_report_path.write_text(
-        json.dumps({"target_fpr": 0.05, "threshold_degenerate": False, "supports_paper_claim": False}, ensure_ascii=False),
+        json.dumps({"target_fpr": 0.01, "threshold_degenerate": False, "supports_paper_claim": False}, ensure_ascii=False),
         encoding="utf-8",
     )
     return attack_manifest_path, attack_family_metrics_path, attack_matrix_manifest_path, threshold_report_path
@@ -238,7 +238,7 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
                 "attack_family": "standard_distortion",
                 "attack_name": "jpeg_compression",
                 "resource_profile": "full_main",
-                "comparable_operating_point": "fixed_fpr_0.05",
+                "comparable_operating_point": "fixed_fpr_0.01",
                 "result_protocol_name": "primary_baseline_formal_import_protocol",
                 "result_source_type": "governed_import",
                 "baseline_result_source": "outputs/external_baseline_results/tree_ring_metrics.csv",
@@ -254,7 +254,7 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
                 "attacked_false_positive_rate": 0.1,
                 "quality_score_proxy_mean": 0.88,
                 "score_retention_mean": 0.77,
-                "prompt_protocol_name": "paper_main_full_paper_prompt_protocol",
+                "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
                 "prompt_protocol_digest": "prompt_digest",
                 "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
                 "evidence_paths": ["outputs/external_baseline_results/tree_ring_metrics.csv"],
@@ -440,7 +440,7 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
                 "attack_family": "standard_distortion",
                 "attack_name": "jpeg_compression",
                 "resource_profile": "full_main",
-                "comparable_operating_point": "fixed_fpr_0.05",
+                "comparable_operating_point": "fixed_fpr_0.01",
                 "result_protocol_name": "primary_baseline_formal_import_protocol",
                 "result_source_type": "governed_import",
                 "baseline_result_source": "outputs/external_baseline_results/tree_ring_metrics.csv",
@@ -456,7 +456,7 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
                 "attacked_false_positive_rate": 0.1,
                 "quality_score_proxy_mean": 0.88,
                 "score_retention_mean": 0.77,
-                "prompt_protocol_name": "paper_main_full_paper_prompt_protocol",
+                "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
                 "prompt_protocol_digest": "prompt_digest",
                 "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
                 "evidence_paths": ["outputs/external_baseline_results/tree_ring_metrics.csv"],

@@ -13,6 +13,11 @@ import sys
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from experiments.protocol.pilot_paper_fixed_fpr import (
+    PILOT_PAPER_PROMPT_FILE,
+    PILOT_PAPER_PROMPT_SET,
+)
+from experiments.protocol.prompts import build_prompt_record, normalize_prompt_text
 from main.analysis.artifact_manifest import build_artifact_manifest
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
@@ -21,13 +26,14 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 )
 
 DEFAULT_OUTPUT_DIR = "outputs/external_baseline_gpu_smoke"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/external_baseline_gpu_smoke"
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/external_baseline_gpu_smoke"
 DEFAULT_PRIOR_DRIVE_DIR = DEFAULT_DRIVE_OUTPUT_DIR
 DEFAULT_T2SMARK_RUN_NAME = "t2smark_sd35_medium_gpu_smoke"
 DEFAULT_T2SMARK_SOURCE_ENTRY = "external_baseline/primary/t2smark/source/run_sd35.py"
 DEFAULT_T2SMARK_INVERSION_ENTRY = "external_baseline/primary/t2smark/source/src/inversion/inverse_diffusion3.py"
 DEFAULT_SOURCE_REGISTRY_PATH = "external_baseline/source_registry.json"
 DEFAULT_T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
+DEFAULT_PROMPT_FILE = PILOT_PAPER_PROMPT_FILE
 DEFAULT_PACKAGE_PATTERN = "external_baseline_gpu_smoke_package_*.zip"
 DEFAULT_SHARED_SAMPLE_COUNT = 120
 DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES = (
@@ -81,6 +87,7 @@ class ExternalBaselineGpuSmokeConfig:
     output_dir: str = DEFAULT_OUTPUT_DIR
     drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR
     prior_drive_dir: str = DEFAULT_PRIOR_DRIVE_DIR
+    prompt_file: str = DEFAULT_PROMPT_FILE
     t2smark_run_name: str = DEFAULT_T2SMARK_RUN_NAME
     model_id: str = DEFAULT_T2SMARK_MODEL_ID
     seed: int = 20260621
@@ -276,36 +283,61 @@ def should_run_t2smark_official(config: ExternalBaselineGpuSmokeConfig, results_
     return True, "results_missing"
 
 
-def _shared_prompt_text(index: int) -> str:
-    """按序号读取共享小样本 prompt, 超出时循环复用。"""
+def read_pilot_paper_prompt_rows(root_path: Path, config: ExternalBaselineGpuSmokeConfig, prompt_count: int) -> list[dict[str, Any]]:
+    """读取 pilot_paper prompt split, 并截取本次 baseline 共享运行需要的记录。
 
-    return SHARED_PROMPT_TEXTS[index % len(SHARED_PROMPT_TEXTS)]
+    该函数属于配置加载层: baseline Notebook 与方法主流程必须使用同一个 prompt 文件,
+    因此这里集中解析 prompt 文本并生成稳定 prompt id, 避免各个 baseline adapter 私自使用临时 prompt。
+    """
+
+    prompt_path = root_path / config.prompt_file
+    prompt_texts: list[str] = []
+    if prompt_path.is_file():
+        for line in prompt_path.read_text(encoding="utf-8").splitlines():
+            text = normalize_prompt_text(line)
+            if text and not text.startswith("#"):
+                prompt_texts.append(text)
+    if not prompt_texts:
+        prompt_texts = list(SHARED_PROMPT_TEXTS)
+    rows: list[dict[str, Any]] = []
+    for index in range(max(1, int(prompt_count))):
+        prompt_text = prompt_texts[index % len(prompt_texts)]
+        record = build_prompt_record(PILOT_PAPER_PROMPT_SET, index, prompt_text, split="test")
+        rows.append(
+            {
+                "prompt_id": record.prompt_id,
+                "prompt_index": record.prompt_index,
+                "prompt_set": record.prompt_set,
+                "split": record.split,
+                "prompt_text": record.prompt_text,
+                "prompt_digest": record.prompt_digest,
+            }
+        )
+    return rows
 
 
-def write_t2smark_prompt_input(paths: dict[str, Path], config: ExternalBaselineGpuSmokeConfig) -> Path:
-    """写出官方 T2SMark 入口可直接读取的共享 prompt 文件。"""
+def write_t2smark_prompt_input(root_path: Path, paths: dict[str, Path], config: ExternalBaselineGpuSmokeConfig) -> Path:
+    """写出官方 T2SMark 入口可直接读取的 pilot_paper prompt 文件。"""
 
+    prompt_rows = read_pilot_paper_prompt_rows(root_path, config, int(config.robust_test_num))
     prompt_payload = {
         "annotations": [
-            {"caption": _shared_prompt_text(index)}
-            for index in range(max(1, int(config.robust_test_num)))
+            {
+                "caption": row["prompt_text"],
+                "prompt_id": row["prompt_id"],
+                "prompt_index": row["prompt_index"],
+            }
+            for row in prompt_rows
         ]
     }
     write_json(paths["t2smark_prompts"], prompt_payload)
     return paths["t2smark_prompts"]
 
 
-def write_primary_baseline_prompt_plan(paths: dict[str, Path], config: ExternalBaselineGpuSmokeConfig) -> Path:
-    """写出三类扩散 adapter 与 T2SMark 共用的小样本 prompt 计划。"""
+def write_primary_baseline_prompt_plan(root_path: Path, paths: dict[str, Path], config: ExternalBaselineGpuSmokeConfig) -> Path:
+    """写出三类扩散 adapter 与 T2SMark 共用的 pilot_paper prompt 计划。"""
 
-    prompt_rows = [
-        {
-            "prompt_id": f"primary_baseline_prompt_{index:05d}",
-            "split": "gpu_smoke",
-            "prompt_text": _shared_prompt_text(index),
-        }
-        for index in range(max(1, int(config.primary_baseline_max_samples)))
-    ]
+    prompt_rows = read_pilot_paper_prompt_rows(root_path, config, int(config.primary_baseline_max_samples))
     write_json(paths["primary_prompt_plan"], prompt_rows)
     return paths["primary_prompt_plan"]
 
@@ -452,7 +484,7 @@ def run_t2smark_official_if_needed(
     source_report = ensure_t2smark_source_available(root_path, paths, timeout_seconds=300)
     source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
     ensure_cuda_if_requested(config.require_cuda)
-    prompt_input_path = write_t2smark_prompt_input(paths, config)
+    prompt_input_path = write_t2smark_prompt_input(root_path, paths, config)
     command = [
         sys.executable,
         str(source_entry),
@@ -514,15 +546,20 @@ def build_current_t2smark_image_pairs(
     """按当前官方图像目录重建 T2SMark adapter 所需的 image_pairs 输入。"""
 
     image_dir = paths["official_images"]
+    prompt_rows = read_pilot_paper_prompt_rows(root_path, config, int(config.robust_test_num))
     rows: list[dict[str, Any]] = []
     for index in range(config.robust_test_num):
         image_path = image_dir / f"{index:05d}.png"
         image_id = f"t2smark_{index:05d}"
+        prompt_row = prompt_rows[index]
         row = {
             "image_id": image_id,
             "event_id": image_id,
-            "prompt_id": f"t2smark_prompt_{index:05d}",
-            "split": "gpu_smoke",
+            "prompt_id": str(prompt_row["prompt_id"]),
+            "prompt_index": int(prompt_row["prompt_index"]),
+            "prompt_set": str(prompt_row["prompt_set"]),
+            "split": str(prompt_row["split"]),
+            "prompt_text": str(prompt_row["prompt_text"]),
             "baseline_id": "t2smark",
             "generated_image_path": relative_or_absolute(image_path, root_path) if image_path.is_file() else "",
             "generated_image_digest": file_digest(image_path) if image_path.is_file() else "",
@@ -568,7 +605,7 @@ def build_and_run_primary_baseline_adapters(
 ) -> dict[str, Any]:
     """生成命令计划并运行四个主表 external baseline adapter。"""
 
-    prompt_plan_path = write_primary_baseline_prompt_plan(paths, config)
+    prompt_plan_path = write_primary_baseline_prompt_plan(root_path, paths, config)
     build_command = [
         sys.executable,
         "scripts/build_external_baseline_command_plan.py",
@@ -875,6 +912,7 @@ def build_default_config() -> ExternalBaselineGpuSmokeConfig:
         output_dir=os.environ.get("SLM_WM_EXTERNAL_BASELINE_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         drive_output_dir=os.environ.get("SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR", DEFAULT_DRIVE_OUTPUT_DIR),
         prior_drive_dir=os.environ.get("SLM_WM_EXTERNAL_BASELINE_PRIOR_DRIVE_DIR", DEFAULT_PRIOR_DRIVE_DIR),
+        prompt_file=os.environ.get("SLM_WM_PROMPT_FILE", DEFAULT_PROMPT_FILE),
         t2smark_run_name=os.environ.get("SLM_WM_T2SMARK_RUN_NAME", DEFAULT_T2SMARK_RUN_NAME),
         model_id=os.environ.get("SLM_WM_T2SMARK_MODEL_ID", DEFAULT_T2SMARK_MODEL_ID),
         seed=int(os.environ.get("SLM_WM_EXTERNAL_BASELINE_SEED", "20260621")),

@@ -23,6 +23,7 @@ from experiments.baselines import (
     build_primary_baseline_formal_import_readiness_summary,
     validate_primary_baseline_formal_import_rows,
 )
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -379,10 +380,10 @@ def write_primary_baseline_result_candidate_outputs(
     t2smark_candidate_records_path: str | Path = DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH,
     external_gpu_smoke_package_path: str | Path | None = None,
     t2smark_full_main_package_path: str | Path | None = None,
-    method_resource_profile: str = "gpu_smoke",
-    method_full_main_prompt_protocol_ready: bool = False,
-    method_fixed_fpr_baseline_calibration_ready: bool = False,
-    method_attack_matrix_baseline_detection_ready: bool = False,
+    method_resource_profile: str = "full_main",
+    method_full_main_prompt_protocol_ready: bool = True,
+    method_fixed_fpr_baseline_calibration_ready: bool = True,
+    method_attack_matrix_baseline_detection_ready: bool = True,
     target_fpr_override: float | None = None,
 ) -> dict[str, Any]:
     """写出候选记录、候选校验报告、摘要和 manifest。"""
@@ -403,7 +404,7 @@ def write_primary_baseline_result_candidate_outputs(
     target_fpr = (
         float(target_fpr_override)
         if target_fpr_override is not None
-        else float(attack_manifest.get("evaluation_boundary", {}).get("target_fpr", 0.05))
+        else float(attack_manifest.get("evaluation_boundary", {}).get("target_fpr", PILOT_PAPER_FIXED_FPR))
     )
     gpu_observations = load_gpu_smoke_observations(
         observations_path=resolved_gpu_smoke_observations_path,
@@ -560,21 +561,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--external-gpu-smoke-package-path", default=None, help="可选 external baseline GPU 结果 zip 包。")
     parser.add_argument("--t2smark-full-main-package-path", default=None, help="可选 T2SMark full-main 结果 zip 包。")
-    parser.add_argument("--method-resource-profile", default="gpu_smoke", help="方法忠实 adapter 候选记录的资源配置名称。")
+    parser.add_argument("--method-resource-profile", default="full_main", help="方法忠实 adapter 候选记录的资源配置名称。")
     parser.add_argument("--target-fpr-override", type=float, default=None, help="可选 fixed-FPR 目标值覆盖。")
     parser.add_argument(
         "--method-full-main-prompt-protocol-ready",
-        action="store_true",
-        help="标记方法忠实 adapter 候选已覆盖 full-main prompt 协议。",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="标记方法忠实 adapter 候选已覆盖 pilot_paper prompt 协议。",
     )
     parser.add_argument(
         "--method-fixed-fpr-baseline-calibration-ready",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="标记方法忠实 adapter 候选已完成 fixed-FPR 校准。",
     )
     parser.add_argument(
         "--method-attack-matrix-baseline-detection-ready",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="标记方法忠实 adapter 候选已接入共同攻击矩阵检测。",
     )
     return parser

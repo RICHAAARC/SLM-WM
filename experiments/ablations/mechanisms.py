@@ -6,6 +6,10 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
+from experiments.protocol.pilot_paper_fixed_fpr import (
+    PILOT_PAPER_FIXED_FPR,
+    PILOT_PAPER_RESULT_PROTOCOL_NAME,
+)
 from main.core.digest import build_stable_digest
 
 
@@ -691,8 +695,12 @@ def build_ablation_claim_summary(
         else "internal ablation rows reuse record-level attack proxies and do not replace real image attack evidence"
     )
     protocol_ready = bool(record_tuple) and required_ids.issubset(actual_ids) and bool(attack_manifest.get("attack_metrics_ready"))
+    evaluation_boundary = dict(attack_manifest.get("evaluation_boundary", {}))
     return {
         "construction_unit_name": "internal_ablation_evidence",
+        "result_protocol_name": PILOT_PAPER_RESULT_PROTOCOL_NAME,
+        "paper_claim_scale": "pilot_paper",
+        "target_fpr": float(evaluation_boundary.get("target_fpr", PILOT_PAPER_FIXED_FPR)),
         "ablation_protocol_ready": protocol_ready,
         "mechanism_coverage_ready": required_ids.issubset(actual_ids),
         "ablation_count": len(spec_tuple),

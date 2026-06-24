@@ -25,7 +25,7 @@ from scripts.write_attention_geometry_outputs import write_attention_geometry_ou
 
 DEFAULT_OUTPUT_DIR = "outputs/real_attention_geometry"
 DEFAULT_GEOMETRY_OUTPUT_DIR = "outputs/attention_geometry"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/attention_geometry"
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry"
 PRIMARY_MODEL_FAMILY = "sd35"
 PRIMARY_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (

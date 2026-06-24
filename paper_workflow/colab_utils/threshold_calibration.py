@@ -10,6 +10,7 @@ import shutil
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
     file_digest,
@@ -21,10 +22,10 @@ from scripts.write_threshold_calibration_outputs import write_threshold_calibrat
 DEFAULT_OUTPUT_DIR = "outputs/threshold_calibration"
 DEFAULT_GEOMETRIC_RESCUE_DIR = "outputs/geometric_rescue"
 DEFAULT_CONTENT_CARRIER_DIR = "outputs/content_carriers"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/threshold_calibration"
-DEFAULT_ATTENTION_INJECTION_DRIVE_DIR = "/content/drive/MyDrive/SLM/attention_latent_injection"
-DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/aligned_rescoring"
-DEFAULT_TARGET_FPR = 0.05
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/threshold_calibration"
+DEFAULT_ATTENTION_INJECTION_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_latent_injection"
+DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring"
+DEFAULT_TARGET_FPR = PILOT_PAPER_FIXED_FPR
 ATTENTION_INJECTION_PACKAGE_PATTERN = "attention_latent_injection_package_*.zip"
 ALIGNED_RESCORING_PACKAGE_PATTERN = "aligned_rescoring_package_*.zip"
 CONTENT_CARRIER_PREFIXES = ("outputs/content_carriers/",)

@@ -7,11 +7,15 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from experiments.protocol.pilot_paper_fixed_fpr import (
+    PILOT_PAPER_FIXED_FPR,
+    PILOT_PAPER_PROMPT_PROTOCOL_NAME,
+)
 from main.core.digest import build_stable_digest
 
 PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME = "primary_baseline_formal_import_protocol"
-FULL_MAIN_PROMPT_PROTOCOL_NAME = "paper_main_full_paper_prompt_protocol"
+FULL_MAIN_PROMPT_PROTOCOL_NAME = PILOT_PAPER_PROMPT_PROTOCOL_NAME
 FORMAL_OPERATING_POINT_PREFIX = "fixed_fpr"
 REJECTED_ADAPTER_BOUNDARIES = (
     "gpu_smoke_not_full_external_baseline_comparison",
@@ -254,7 +258,7 @@ def _issue(row_index: int, row: Mapping[str, Any], field_name: str, reason: str)
     )
 
 
-def build_primary_baseline_formal_import_schema(target_fpr: float = 0.05) -> dict[str, Any]:
+def build_primary_baseline_formal_import_schema(target_fpr: float = PILOT_PAPER_FIXED_FPR) -> dict[str, Any]:
     """构造主表 baseline 正式结果导入 schema 的可落盘描述。"""
 
     return {
@@ -268,6 +272,8 @@ def build_primary_baseline_formal_import_schema(target_fpr: float = 0.05) -> dic
         "allowed_adapter_boundaries": list(ALLOWED_ADAPTER_BOUNDARIES),
         "rejected_adapter_boundaries": list(REJECTED_ADAPTER_BOUNDARIES),
         "full_main_prompt_protocol_name": FULL_MAIN_PROMPT_PROTOCOL_NAME,
+        "pilot_paper_prompt_protocol_name": PILOT_PAPER_PROMPT_PROTOCOL_NAME,
+        "paper_claim_scale": "pilot_paper",
         "supports_paper_claim": False,
     }
 
@@ -385,7 +391,7 @@ def validate_primary_baseline_formal_import_rows(
     rows: Iterable[Mapping[str, Any]],
     *,
     evidence_root: str | Path = ".",
-    target_fpr: float = 0.05,
+    target_fpr: float = PILOT_PAPER_FIXED_FPR,
     require_existing_evidence: bool = True,
     evidence_search_roots: Iterable[str | Path] = (),
 ) -> dict[str, Any]:
@@ -686,11 +692,11 @@ def build_primary_baseline_formal_evidence_collection_rows(
         accepted_match_count = accepted_keys.count(template_key)
         actions: list[str] = []
         if candidate_match_count == 0:
-            actions.append("generate_full_main_baseline_result_record")
+            actions.append("generate_pilot_paper_baseline_result_record")
         if accepted_match_count == 0:
             actions.extend(
                 [
-                    "run_full_main_prompt_protocol",
+                    "run_pilot_paper_prompt_protocol",
                     "calibrate_fixed_fpr_baseline",
                     "run_attack_matrix_baseline_detection",
                     "attach_formal_evidence_paths",

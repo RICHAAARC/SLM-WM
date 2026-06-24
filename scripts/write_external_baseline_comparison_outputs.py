@@ -28,6 +28,7 @@ from experiments.baselines import (
     overlay_specs_with_source_registry,
     validate_primary_baseline_formal_import_rows,
 )
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -356,7 +357,7 @@ def write_external_baseline_comparison_outputs(
     )
     baseline_result_rows = read_jsonl_rows(resolved_baseline_result_records_path)
     boundary = attack_manifest.get("evaluation_boundary", {})
-    target_fpr = float(boundary.get("target_fpr", 0.05))
+    target_fpr = float(boundary.get("target_fpr", PILOT_PAPER_FIXED_FPR))
     formal_import_validation = validate_primary_baseline_formal_import_rows(
         baseline_result_rows,
         evidence_root=root_path,

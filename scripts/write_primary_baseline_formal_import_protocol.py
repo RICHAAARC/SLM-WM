@@ -28,6 +28,7 @@ from experiments.baselines import (
     load_baseline_source_registry,
     validate_primary_baseline_formal_import_rows,
 )
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -157,7 +158,7 @@ def write_primary_baseline_formal_import_protocol_outputs(
     source_registry = load_baseline_source_registry(resolved_source_registry_path)
     attack_manifest = read_json(resolved_attack_manifest_path)
     attack_rows = read_csv_rows(resolved_attack_family_metrics_path)
-    target_fpr = float(attack_manifest.get("evaluation_boundary", {}).get("target_fpr", 0.05))
+    target_fpr = float(attack_manifest.get("evaluation_boundary", {}).get("target_fpr", PILOT_PAPER_FIXED_FPR))
     execution_plans = build_primary_baseline_execution_plans(source_registry, root=root_path)
     template_rows = build_primary_result_templates(execution_plans, attack_rows, attack_manifest.get("evaluation_boundary", {}))
     formal_template_rows = [row for row in template_rows if str(row.get("resource_profile", "")) == "full_main"]

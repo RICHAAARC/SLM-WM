@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from experiments.baselines import PRIMARY_BASELINE_IDS, build_primary_baseline_execution_plans
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from scripts.write_primary_baseline_reproduction_plan import write_primary_baseline_reproduction_plan
 
 
@@ -48,7 +49,10 @@ def write_attack_inputs(tmp_path: Path) -> tuple[Path, Path]:
     attack_manifest_path = attack_dir / "attack_manifest.json"
     attack_metrics_path = attack_dir / "attack_family_metrics.csv"
     attack_manifest_path.write_text(
-        json.dumps({"attack_metrics_ready": True, "evaluation_boundary": {"target_fpr": 0.05}}, ensure_ascii=False),
+        json.dumps(
+            {"attack_metrics_ready": True, "evaluation_boundary": {"target_fpr": PILOT_PAPER_FIXED_FPR}},
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     with attack_metrics_path.open("w", newline="", encoding="utf-8") as handle:
@@ -121,4 +125,4 @@ def test_primary_reproduction_writer_outputs_plan_and_result_templates(tmp_path:
     assert report["result_import_template_ready"] is True
     assert report["baseline_results_ready"] is False
     assert report["supports_paper_claim"] is False
-    assert {row["comparable_operating_point"] for row in template_rows} == {"fixed_fpr_0.05"}
+    assert {row["comparable_operating_point"] for row in template_rows} == {"fixed_fpr_0.01"}

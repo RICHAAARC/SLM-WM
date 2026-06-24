@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from paper_workflow.colab_utils.minimal_latent_injection import compute_image_quality_metrics
@@ -30,9 +31,9 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 
 DEFAULT_OUTPUT_DIR = "outputs/real_attack_evaluation"
 DEFAULT_SOURCE_IMAGE_DIR = "outputs/aligned_rescoring/aligned_images"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/real_attack_evaluation"
-DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/aligned_rescoring"
-DEFAULT_THRESHOLD_CALIBRATION_DRIVE_DIR = "/content/drive/MyDrive/SLM/threshold_calibration"
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/real_attack_evaluation"
+DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring"
+DEFAULT_THRESHOLD_CALIBRATION_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/threshold_calibration"
 PRIMARY_MODEL_FAMILY = "sd35"
 PRIMARY_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 DEFAULT_DDIM_ATTACK_MODEL_ID = "runwayml/stable-diffusion-v1-5"
@@ -758,7 +759,7 @@ def formal_boundary(root_path: Path, config: RealAttackEvaluationConfig) -> dict
     threshold_value = float(thresholds.get("threshold_value", report.get("calibrated_content_threshold", config.detection_threshold)))
     return {
         "content_threshold": threshold_value,
-        "target_fpr": float(thresholds.get("target_fpr", report.get("target_fpr", 0.05))),
+        "target_fpr": float(thresholds.get("target_fpr", report.get("target_fpr", PILOT_PAPER_FIXED_FPR))),
         "rescue_margin_low": float(report.get("rescue_margin_low", -0.05)),
         "allowed_fail_reasons": tuple(report.get("allowed_fail_reasons", ("geometry_suspected", "low_confidence"))),
         "fixed_fpr_control_scope": str(report.get("fixed_fpr_control_scope", "calibration_clean_negative")),

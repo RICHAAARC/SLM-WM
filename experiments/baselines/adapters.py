@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 from typing import Any, Iterable, Mapping
 
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.core.digest import build_stable_digest
 
 
@@ -297,7 +298,7 @@ def _weighted_mean(rows: Iterable[Mapping[str, Any]], value_field: str, weight_f
 
 def _operating_point(boundary: Mapping[str, Any]) -> str:
     """根据 fixed-FPR 边界生成可读 operating point 名称。"""
-    target_fpr = float(boundary.get("target_fpr", 0.05))
+    target_fpr = float(boundary.get("target_fpr", PILOT_PAPER_FIXED_FPR))
     return f"fixed_fpr_{target_fpr:g}"
 
 

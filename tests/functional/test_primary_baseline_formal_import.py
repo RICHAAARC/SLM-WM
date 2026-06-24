@@ -29,7 +29,7 @@ def formal_tree_ring_row(evidence_path: str) -> dict[str, object]:
         "attack_family": "standard_distortion",
         "attack_name": "jpeg_compression",
         "resource_profile": "full_main",
-        "comparable_operating_point": "fixed_fpr_0.05",
+        "comparable_operating_point": "fixed_fpr_0.01",
         "result_protocol_name": "primary_baseline_formal_import_protocol",
         "result_source_type": "governed_import",
         "baseline_result_source": evidence_path,
@@ -45,7 +45,7 @@ def formal_tree_ring_row(evidence_path: str) -> dict[str, object]:
         "attacked_false_positive_rate": 0.1,
         "quality_score_proxy_mean": 0.88,
         "score_retention_mean": 0.77,
-        "prompt_protocol_name": "paper_main_full_paper_prompt_protocol",
+        "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
         "prompt_protocol_digest": "prompt_digest",
         "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
         "evidence_paths": [evidence_path],
@@ -66,7 +66,7 @@ def test_formal_import_validator_accepts_governed_full_main_record(tmp_path: Pat
     evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
     row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
 
-    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.05)
+    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.01)
 
     assert report["overall_decision"] == "pass"
     assert report["accepted_formal_import_count"] == 1
@@ -85,7 +85,7 @@ def test_formal_import_validator_rejects_smoke_boundary_and_missing_readiness(tm
     row["adapter_boundary"] = "sd35_latent_smoke_adapter_not_formal_external_baseline_evidence"
     row["fixed_fpr_baseline_calibration_ready"] = False
 
-    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.05)
+    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.01)
     reasons = {issue["reason"] for issue in report["issues"]}
 
     assert report["overall_decision"] == "fail"
@@ -108,7 +108,7 @@ def test_t2smark_candidate_records_remain_rejected_until_attack_and_threshold_re
 
     records = build_t2smark_full_main_candidate_records(
         observation_rows=observations,
-        target_fpr=0.05,
+        target_fpr=0.01,
         baseline_result_source="outputs/t2smark_full_main_reproduction/results.json",
         baseline_result_source_digest="digest",
         evidence_paths=["outputs/t2smark_full_main_reproduction/results.json"],
@@ -117,7 +117,7 @@ def test_t2smark_candidate_records_remain_rejected_until_attack_and_threshold_re
         fixed_fpr_baseline_calibration_ready=False,
         attack_matrix_baseline_detection_ready=False,
     )
-    report = validate_primary_baseline_formal_import_rows(records, evidence_root=tmp_path, target_fpr=0.05)
+    report = validate_primary_baseline_formal_import_rows(records, evidence_root=tmp_path, target_fpr=0.01)
     reasons = {issue["reason"] for issue in report["issues"]}
 
     assert len(records) == 1
@@ -157,7 +157,7 @@ def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_p
 
     records = build_tree_ring_method_faithful_candidate_records(
         observation_rows=observations,
-        target_fpr=0.05,
+        target_fpr=0.01,
         baseline_result_source="outputs/tree_ring_method_faithful/baseline_observations.json",
         baseline_result_source_digest="digest",
         evidence_paths=["outputs/tree_ring_method_faithful/baseline_observations.json"],
@@ -166,7 +166,7 @@ def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_p
         fixed_fpr_baseline_calibration_ready=True,
         attack_matrix_baseline_detection_ready=True,
     )
-    report = validate_primary_baseline_formal_import_rows(records, evidence_root=tmp_path, target_fpr=0.05)
+    report = validate_primary_baseline_formal_import_rows(records, evidence_root=tmp_path, target_fpr=0.01)
 
     assert len(records) == 1
     assert records[0]["baseline_id"] == "tree_ring"
@@ -188,7 +188,7 @@ def test_formal_template_coverage_requires_matching_full_main_records(tmp_path: 
         "attack_family": "standard_distortion",
         "attack_name": "gaussian_noise",
         "resource_profile": "full_main",
-        "comparable_operating_point": "fixed_fpr_0.05",
+        "comparable_operating_point": "fixed_fpr_0.01",
     }
     template_rows = [
         {
@@ -196,11 +196,11 @@ def test_formal_template_coverage_requires_matching_full_main_records(tmp_path: 
             "attack_family": "standard_distortion",
             "attack_name": "jpeg_compression",
             "resource_profile": "full_main",
-            "comparable_operating_point": "fixed_fpr_0.05",
+            "comparable_operating_point": "fixed_fpr_0.01",
         },
         missing_template,
     ]
-    report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=0.05)
+    report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=0.01)
 
     coverage_rows = build_primary_baseline_formal_template_coverage_rows(template_rows, [accepted_row], report)
     coverage_summary = build_primary_baseline_formal_template_coverage_summary(coverage_rows)
@@ -228,10 +228,10 @@ def test_formal_template_coverage_separates_candidate_and_accepted_matches(tmp_p
             "attack_family": "standard_distortion",
             "attack_name": "jpeg_compression",
             "resource_profile": "full_main",
-            "comparable_operating_point": "fixed_fpr_0.05",
+            "comparable_operating_point": "fixed_fpr_0.01",
         }
     ]
-    report = validate_primary_baseline_formal_import_rows([candidate_row], evidence_root=tmp_path, target_fpr=0.05)
+    report = validate_primary_baseline_formal_import_rows([candidate_row], evidence_root=tmp_path, target_fpr=0.01)
 
     coverage_rows = build_primary_baseline_formal_template_coverage_rows(template_rows, [candidate_row], report)
     coverage_summary = build_primary_baseline_formal_template_coverage_summary(coverage_rows)
@@ -257,7 +257,7 @@ def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path)
         "attack_family": "standard_distortion",
         "attack_name": "gaussian_noise",
         "resource_profile": "full_main",
-        "comparable_operating_point": "fixed_fpr_0.05",
+        "comparable_operating_point": "fixed_fpr_0.01",
         "required_metric_fields": ["true_positive_rate"],
         "required_source_fields": ["baseline_result_source"],
     }
@@ -267,13 +267,13 @@ def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path)
             "attack_family": "standard_distortion",
             "attack_name": "jpeg_compression",
             "resource_profile": "full_main",
-            "comparable_operating_point": "fixed_fpr_0.05",
+            "comparable_operating_point": "fixed_fpr_0.01",
             "required_metric_fields": ["true_positive_rate"],
             "required_source_fields": ["baseline_result_source"],
         },
         missing_template,
     ]
-    report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=0.05)
+    report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=0.01)
 
     collection_rows = build_primary_baseline_formal_evidence_collection_rows(template_rows, [accepted_row], report)
     collection_summary = build_primary_baseline_formal_evidence_collection_summary(collection_rows)
@@ -281,7 +281,7 @@ def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path)
 
     assert len(collection_rows) == 2
     assert missing_row["formal_evidence_collection_ready"] is False
-    assert "generate_full_main_baseline_result_record" in missing_row["required_collection_actions"]
+    assert "generate_pilot_paper_baseline_result_record" in missing_row["required_collection_actions"]
     assert collection_summary["formal_evidence_collection_task_count"] == 2
     assert collection_summary["missing_formal_evidence_collection_task_count"] == 1
     assert collection_summary["primary_baseline_formal_evidence_collection_ready"] is False
@@ -317,7 +317,7 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
     attack_manifest_path = attack_dir / "attack_manifest.json"
     attack_metrics_path = attack_dir / "attack_family_metrics.csv"
     attack_manifest_path.write_text(
-        json.dumps({"evaluation_boundary": {"target_fpr": 0.05}}, ensure_ascii=False),
+        json.dumps({"evaluation_boundary": {"target_fpr": 0.01}}, ensure_ascii=False),
         encoding="utf-8",
     )
     with attack_metrics_path.open("w", encoding="utf-8", newline="") as handle:
@@ -361,7 +361,7 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
     summary = json.loads((output_dir / "primary_baseline_formal_import_summary.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "primary_baseline_formal_import_protocol_manifest"
-    assert schema == build_primary_baseline_formal_import_schema(target_fpr=0.05)
+    assert schema == build_primary_baseline_formal_import_schema(target_fpr=0.01)
     assert len(template_rows) == 4
     assert validation["input_record_count"] == 0
     assert len(readiness_rows) == 4

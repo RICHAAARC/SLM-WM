@@ -37,10 +37,10 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 )
 
 DEFAULT_OUTPUT_DIR = "outputs/shallow_diffuse_official_reference"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/shallow_diffuse_official_reference"
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/shallow_diffuse_official_reference"
 DEFAULT_SOURCE_DIR = "external_baseline/primary/shallow_diffuse/source"
 DEFAULT_RUN_NAME = "shallow_diffuse_official_legacy_reference"
-DEFAULT_SAMPLE_COUNT = 5
+DEFAULT_SAMPLE_COUNT = 120
 DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID = "stabilityai/stable-diffusion-2-1-base"
 DEFAULT_OFFICIAL_MODEL_ID = "Manojb/stable-diffusion-2-1-base"
 DEFAULT_MODEL_SOURCE_NOTE = (
@@ -1143,6 +1143,7 @@ def write_shallow_diffuse_official_reference_outputs(
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
         "sample_count": int(effective_config.sample_count),
+        "paper_claim_scale": "pilot_paper",
         "edit_time_list": effective_config.edit_time_list,
         "primary_edit_timestep": primary_edit_timestep(effective_config),
         "attacker_names": effective_config.attacker_names,

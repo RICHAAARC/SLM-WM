@@ -28,6 +28,7 @@ from experiments.protocol.calibration import (
     score_distribution_rows,
     split_role,
 )
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -35,7 +36,7 @@ CONSTRUCTION_UNIT_NAME = "threshold_calibration"
 DEFAULT_OUTPUT_DIR = Path("outputs/threshold_calibration")
 DEFAULT_RESCUE_RECORDS_PATH = Path("outputs/geometric_rescue/aligned_detection_records.jsonl")
 DEFAULT_RESCUE_AUDIT_PATH = Path("outputs/geometric_rescue/geometry_rescue_audit.json")
-DEFAULT_TARGET_FPR = 0.05
+DEFAULT_TARGET_FPR = PILOT_PAPER_FIXED_FPR
 FIXED_FPR_CONTROL_SCOPE = "calibration_clean_negative"
 FIXED_FPR_DENOMINATOR_ROLE = "clean_negative_only"
 RESCUE_CONTROL_SCOPE = "evidence_clean_negative"

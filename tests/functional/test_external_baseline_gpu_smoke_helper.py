@@ -117,14 +117,15 @@ def test_shared_prompt_inputs_default_to_pilot_paper_samples(tmp_path: Path) -> 
     config = ExternalBaselineGpuSmokeConfig(require_cuda=False)
     paths = output_paths(tmp_path, config)
 
-    t2smark_prompt_path = write_t2smark_prompt_input(paths, config)
-    primary_prompt_path = write_primary_baseline_prompt_plan(paths, config)
+    t2smark_prompt_path = write_t2smark_prompt_input(tmp_path, paths, config)
+    primary_prompt_path = write_primary_baseline_prompt_plan(tmp_path, paths, config)
 
     t2smark_payload = json.loads(t2smark_prompt_path.read_text(encoding="utf-8"))
     primary_rows = json.loads(primary_prompt_path.read_text(encoding="utf-8"))
     assert len(t2smark_payload["annotations"]) == 120
     assert len(primary_rows) == 120
     assert primary_rows[0]["prompt_text"] == t2smark_payload["annotations"][0]["caption"]
+    assert primary_rows[0]["prompt_set"] == "pilot_paper"
 
 
 @pytest.mark.quick

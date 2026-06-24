@@ -19,6 +19,12 @@ from experiments.baselines import (
     build_t2smark_full_main_candidate_records,
     validate_primary_baseline_formal_import_rows,
 )
+from experiments.protocol.pilot_paper_fixed_fpr import (
+    PILOT_PAPER_FIXED_FPR,
+    PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
+    PILOT_PAPER_PROMPT_FILE,
+    PILOT_PAPER_PROMPT_SET,
+)
 from experiments.protocol.prompts import build_prompt_record, normalize_prompt_text
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -36,10 +42,11 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 )
 
 DEFAULT_OUTPUT_DIR = "outputs/t2smark_full_main_reproduction"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/t2smark_full_main_reproduction"
-DEFAULT_PROMPT_FILE = "configs/paper_main_full_paper_prompts.txt"
-DEFAULT_RUN_NAME = "t2smark_sd35_medium_full_main"
-DEFAULT_TARGET_FPR = 0.05
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/t2smark_full_main_reproduction"
+DEFAULT_PROMPT_FILE = PILOT_PAPER_PROMPT_FILE
+DEFAULT_RUN_NAME = "t2smark_sd35_medium_pilot_paper"
+DEFAULT_TARGET_FPR = PILOT_PAPER_FIXED_FPR
+DEFAULT_PROMPT_LIMIT = 120
 PACKAGE_EXTRA_PATHS = (
     "paper_workflow/t2smark_full_main_reproduction_run.ipynb",
     "paper_workflow/colab_utils/t2smark_full_main_reproduction.py",
@@ -59,7 +66,7 @@ class T2SMarkFullMainReproductionConfig:
     t2smark_run_name: str = DEFAULT_RUN_NAME
     model_id: str = DEFAULT_T2SMARK_MODEL_ID
     seed: int = 20260621
-    prompt_limit: int = 0
+    prompt_limit: int = DEFAULT_PROMPT_LIMIT
     clip_test_num: int = 0
     num_inference_steps: int = 28
     num_inversion_steps: int = 28
@@ -189,7 +196,7 @@ def output_paths(root_path: Path, config: T2SMarkFullMainReproductionConfig) -> 
 
 
 def read_prompt_texts(prompt_file: str | Path) -> tuple[str, ...]:
-    """读取 full-main prompt 文件, 忽略空行与注释行。"""
+    """读取 pilot_paper prompt 文件, 忽略空行与注释行。"""
 
     prompts: list[str] = []
     for line in Path(prompt_file).read_text(encoding="utf-8").splitlines():
@@ -200,7 +207,7 @@ def read_prompt_texts(prompt_file: str | Path) -> tuple[str, ...]:
 
 
 def selected_prompt_texts(prompt_texts: tuple[str, ...], prompt_limit: int) -> tuple[str, ...]:
-    """按可选上限截取 prompt, 0 表示使用全部 full-main prompt。"""
+    """按 pilot_paper 运行上限截取 prompt, 0 表示使用全部 prompt。"""
 
     if int(prompt_limit) <= 0:
         return prompt_texts
@@ -208,11 +215,11 @@ def selected_prompt_texts(prompt_texts: tuple[str, ...], prompt_limit: int) -> t
 
 
 def build_full_main_prompt_rows(prompt_texts: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
-    """构造 T2SMark full-main 运行使用的 prompt 计划。"""
+    """构造 T2SMark pilot_paper 运行使用的 prompt 计划。"""
 
     rows: list[dict[str, Any]] = []
     for index, prompt_text in enumerate(prompt_texts):
-        record = build_prompt_record("full_paper", index, prompt_text, split="test")
+        record = build_prompt_record(PILOT_PAPER_PROMPT_SET, index, prompt_text, split="test")
         rows.append(
             {
                 "prompt_id": record.prompt_id,
@@ -231,7 +238,7 @@ def write_full_main_prompt_inputs(
     config: T2SMarkFullMainReproductionConfig,
     paths: dict[str, Path],
 ) -> dict[str, Any]:
-    """写出 T2SMark 官方入口与 adapter 共享的 full-main prompt 输入。"""
+    """写出 T2SMark 官方入口与 adapter 共享的 pilot_paper prompt 输入。"""
 
     prompt_source_path = root_path / config.prompt_file
     all_prompt_texts = read_prompt_texts(prompt_source_path)
@@ -254,7 +261,11 @@ def write_full_main_prompt_inputs(
         "full_main_prompt_count": len(all_prompt_texts),
         "selected_prompt_count": len(prompt_rows),
         "prompt_limit": int(config.prompt_limit),
-        "full_main_prompt_protocol_ready": bool(prompt_rows) and len(prompt_rows) == len(all_prompt_texts),
+        "full_main_prompt_protocol_ready": bool(prompt_rows)
+        and len(prompt_rows) >= PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
+        "pilot_paper_prompt_protocol_ready": bool(prompt_rows)
+        and len(prompt_rows) >= PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
+        "paper_claim_scale": "pilot_paper",
         "prompt_protocol_name": FULL_MAIN_PROMPT_PROTOCOL_NAME,
         "prompt_protocol_digest": build_stable_digest([row["prompt_digest"] for row in prompt_rows]),
         "prompt_dataset_path": relative_or_absolute(paths["prompt_dataset"], root_path),
@@ -354,7 +365,7 @@ def build_t2smark_full_main_image_pairs(
                 "event_id": image_id,
                 "prompt_id": str(prompt_row["prompt_id"]),
                 "prompt_index": int(prompt_row["prompt_index"]),
-                "prompt_set": "full_paper",
+                "prompt_set": PILOT_PAPER_PROMPT_SET,
                 "split": str(prompt_row.get("split", "test")),
                 "baseline_id": "t2smark",
                 "generated_image_path": relative_or_absolute(image_path, root_path) if image_path.is_file() else "",
@@ -510,9 +521,11 @@ def write_t2smark_full_main_reproduction_outputs(
         "t2smark_official_result_generated": bool(official_report.get("official_result_generated")),
         "t2smark_official_result_reused": bool(official_report.get("official_result_reused")),
         "full_main_prompt_count": int(prompt_report["full_main_prompt_count"]),
+        "pilot_paper_prompt_count": int(prompt_report["full_main_prompt_count"]),
         "selected_prompt_count": int(prompt_report["selected_prompt_count"]),
         "prompt_limit": int(config.prompt_limit),
         "full_main_prompt_protocol_ready": bool(prompt_report["full_main_prompt_protocol_ready"]),
+        "pilot_paper_prompt_protocol_ready": bool(prompt_report["pilot_paper_prompt_protocol_ready"]),
         "image_pair_count": len(image_pairs),
         "formal_import_candidate_record_count": int(candidate_report["candidate_record_count"]),
         "accepted_formal_import_count": int(validation_report.get("accepted_formal_import_count", 0)),
@@ -528,11 +541,12 @@ def write_t2smark_full_main_reproduction_outputs(
         "manifest_path": relative_or_absolute(paths["manifest"], root_path),
         "supports_paper_claim": False,
         "unsupported_reason": "" if run_ready else "t2smark_full_main_reproduction_incomplete",
+        "paper_claim_scale": "pilot_paper",
         "metadata": {
             "prompt_report": prompt_report,
             "official_report": official_report,
             "adapter_report": adapter_report,
-            "claim_boundary": "full_main_raw_reproduction_requires_formal_import_validation_and_attack_matrix_closure",
+            "claim_boundary": "pilot_paper_raw_reproduction_requires_formal_import_validation_and_attack_matrix_closure",
         },
     }
     write_json(paths["summary"], summary)
@@ -574,7 +588,7 @@ def build_default_config() -> T2SMarkFullMainReproductionConfig:
         t2smark_run_name=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_RUN_NAME", DEFAULT_RUN_NAME),
         model_id=os.environ.get("SLM_WM_T2SMARK_MODEL_ID", DEFAULT_T2SMARK_MODEL_ID),
         seed=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_SEED", "20260621")),
-        prompt_limit=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT", "0")),
+        prompt_limit=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT", str(DEFAULT_PROMPT_LIMIT))),
         clip_test_num=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_CLIP_TEST_NUM", "0")),
         num_inference_steps=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_NUM_INFERENCE_STEPS", "28")),
         num_inversion_steps=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_NUM_INVERSION_STEPS", "28")),

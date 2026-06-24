@@ -29,6 +29,10 @@ THRESHOLD_CALIBRATION_NOTEBOOK_PATH = Path("paper_workflow/threshold_calibration
 REAL_ATTACK_EVALUATION_NOTEBOOK_PATH = Path("paper_workflow/real_attack_evaluation_run.ipynb")
 EXTERNAL_BASELINE_GPU_SMOKE_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_gpu_smoke_run.ipynb")
 DATASET_LEVEL_QUALITY_NOTEBOOK_PATH = Path("paper_workflow/dataset_level_quality_run.ipynb")
+T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH = Path("paper_workflow/t2smark_full_main_reproduction_run.ipynb")
+TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/tree_ring_official_reference_run.ipynb")
+GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/gaussian_shading_official_reference_run.ipynb")
+SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/shallow_diffuse_official_reference_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH,
     DRIVE_COLD_START_NOTEBOOK_PATH,
@@ -39,6 +43,10 @@ NOTEBOOK_PATHS = (
     REAL_ATTACK_EVALUATION_NOTEBOOK_PATH,
     EXTERNAL_BASELINE_GPU_SMOKE_NOTEBOOK_PATH,
     DATASET_LEVEL_QUALITY_NOTEBOOK_PATH,
+    T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH,
+    TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
+    GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
+    SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
 )
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
@@ -324,6 +332,9 @@ def test_colab_notebook_delegates_external_baseline_gpu_smoke_logic_to_helper() 
     assert "primary_baseline_observation_count" in joined_source
     assert "SLM_WM_T2SMARK_ROBUST_TEST_NUM', '120'" in joined_source
     assert "SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES', '120'" in joined_source
+    assert "5 个数字样本条目" not in joined_source
+    assert "新的 5 样本真实 GPU 结果" not in joined_source
+    assert "默认共享样本数为 5" not in joined_source
     assert "expected_sample_count = int(os.environ['SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES'])" in joined_source
     assert "tree_ring" in joined_source
     assert "gaussian_shading" in joined_source
@@ -369,6 +380,47 @@ def test_colab_notebook_delegates_dataset_level_quality_logic_to_helper() -> Non
     assert "del sys.modules" not in joined_source
     assert '"torch==' not in joined_source
     assert '"torchvision==' not in joined_source
+
+
+@pytest.mark.constraint
+def test_official_baseline_notebooks_default_to_pilot_paper_outputs() -> None:
+    """四个官方 baseline 复现入口应默认写入 pilot_paper 结果目录并使用 pilot_paper 规模。"""
+
+    expectations = {
+        T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH: (
+            "/content/drive/MyDrive/SLM/pilot_paper_results/t2smark_full_main_reproduction",
+            "SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT', '120'",
+            "SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR', '0.01'",
+        ),
+        TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
+            "/content/drive/MyDrive/SLM/pilot_paper_results/tree_ring_official_reference",
+            "SLM_WM_TREE_RING_OFFICIAL_SAMPLE_COUNT', '120'",
+            "configs/paper_main_pilot_paper_prompts.txt",
+        ),
+        GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
+            "/content/drive/MyDrive/SLM/pilot_paper_results/gaussian_shading_official_reference",
+            "SLM_WM_GAUSSIAN_SHADING_OFFICIAL_SAMPLE_COUNT', '120'",
+            "configs/paper_main_pilot_paper_prompts.txt",
+        ),
+        SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
+            "/content/drive/MyDrive/SLM/pilot_paper_results/shallow_diffuse_official_reference",
+            "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT', '120'",
+            "configs/paper_main_pilot_paper_prompts.txt",
+        ),
+    }
+    for notebook_path, required_texts in expectations.items():
+        payload = json.loads(notebook_path.read_text(encoding="utf-8"))
+        joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+        first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+        first_code_source = "".join(first_code_cell.get("source", []))
+
+        assert "drive.mount('/content/drive')" in first_code_source
+        assert "pilot_paper_fixed_fpr_0_01" in joined_source
+        assert "SLM_WM_PROMPT_SET', 'pilot_paper'" in joined_source
+        assert "默认样本数为 5" not in joined_source
+        assert "configs/paper_main_full_paper_prompts.txt" not in joined_source
+        for required_text in required_texts:
+            assert required_text in joined_source
 
 
 @pytest.mark.constraint

@@ -37,8 +37,8 @@ from scripts.write_content_carrier_outputs import build_carrier_bundle
 
 DEFAULT_OUTPUT_DIR = "outputs/aligned_rescoring"
 DEFAULT_METHOD_OUTPUT_DIR = "outputs/attention_latent_update"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/aligned_rescoring"
-DEFAULT_GEOMETRY_DRIVE_DIR = "/content/drive/MyDrive/SLM/attention_geometry"
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring"
+DEFAULT_GEOMETRY_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry"
 PRIMARY_MODEL_FAMILY = "sd35"
 PRIMARY_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 DEFAULT_CLIP_MODEL_ID = "openai/clip-vit-base-patch32"

@@ -23,10 +23,10 @@
 ### 外部 baseline 入口
 
 - `external_baseline_gpu_smoke_run.ipynb`: 运行主表 baseline 的 SD3.5 method-faithful adapter 链路, 当前覆盖 Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark。当前默认写入 `/content/drive/MyDrive/SLM/pilot_paper_results/external_baseline_gpu_smoke`, 共享样本数为120。
-- `t2smark_full_main_reproduction_run.ipynb`: 运行 T2SMark 官方路径并生成 governed import 候选记录。该入口属于专项复现入口, 不应替代共同协议入口。
-- `tree_ring_official_reference_run.ipynb`: 运行 Tree-Ring 官方原始环境参考复现, 生成补充表 governed import 记录和 Google Drive 压缩包。
-- `gaussian_shading_official_reference_run.ipynb`: 运行 Gaussian Shading 官方原始环境参考复现, 生成补充表 governed import 记录和 Google Drive 压缩包。
-- `shallow_diffuse_official_reference_run.ipynb`: 运行 Shallow Diffuse 官方原始环境参考复现, 生成补充表 governed import 记录和 Google Drive 压缩包。
+- `t2smark_full_main_reproduction_run.ipynb`: 运行 T2SMark 官方 SD3.5 路径并生成 governed import 候选记录。当前默认使用 pilot_paper prompt 文件、120个 prompt、fixed-FPR=0.01, 并写入 `/content/drive/MyDrive/SLM/pilot_paper_results/t2smark_full_main_reproduction`。
+- `tree_ring_official_reference_run.ipynb`: 运行 Tree-Ring 官方原始环境参考复现, 默认样本数120, 结果写入 `/content/drive/MyDrive/SLM/pilot_paper_results/tree_ring_official_reference`。
+- `gaussian_shading_official_reference_run.ipynb`: 运行 Gaussian Shading 官方原始环境参考复现, 默认样本数120, 结果写入 `/content/drive/MyDrive/SLM/pilot_paper_results/gaussian_shading_official_reference`。
+- `shallow_diffuse_official_reference_run.ipynb`: 运行 Shallow Diffuse 官方原始环境参考复现, 默认样本数120, 结果写入 `/content/drive/MyDrive/SLM/pilot_paper_results/shallow_diffuse_official_reference`。
 
 ## pilot_paper 与 full_paper 运行原则
 
@@ -47,6 +47,10 @@ pilot_paper 与 full_paper 应共享同一批方法主流程和 baseline 入口,
 7. 真实攻击闭环: `real_attack_evaluation_run.ipynb`。
 8. 数据集级质量: `dataset_level_quality_run.ipynb`。
 9. 主表 baseline: `external_baseline_gpu_smoke_run.ipynb`。
+10. 官方复现: `t2smark_full_main_reproduction_run.ipynb`。
+11. 官方复现: `tree_ring_official_reference_run.ipynb`。
+12. 官方复现: `gaussian_shading_official_reference_run.ipynb`。
+13. 官方复现: `shallow_diffuse_official_reference_run.ipynb`。
 
 完成上述 Notebook 后, 在同一个 Colab 仓库工作区或本地仓库中执行以下收尾命令。若在本地执行, `--package-search-root` 应指向已经同步或挂载的 Google Drive `SLM/pilot_paper_results` 目录。
 
@@ -58,11 +62,13 @@ python scripts/write_pilot_paper_result_records.py \
 python scripts/write_attack_matrix_outputs.py
 
 python scripts/write_primary_baseline_result_candidates.py \
-  --target-fpr-override 0.01 \
-  --method-resource-profile full_main \
-  --method-full-main-prompt-protocol-ready \
-  --method-fixed-fpr-baseline-calibration-ready \
-  --method-attack-matrix-baseline-detection-ready
+  --target-fpr-override 0.01
+
+python scripts/write_primary_baseline_formal_import_protocol.py
+
+python scripts/write_external_baseline_comparison_outputs.py
+
+python scripts/write_internal_ablation_outputs.py
 
 python scripts/write_pilot_paper_result_records.py \
   --package-search-root /content/drive/MyDrive/SLM/pilot_paper_results \
@@ -71,6 +77,10 @@ python scripts/write_pilot_paper_result_records.py \
 python scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py \
   --candidate-records-path outputs/pilot_paper_fixed_fpr_results/pilot_paper_result_records.jsonl \
   --require-existing-evidence
+
+python scripts/write_pilot_paper_complete_result_package.py \
+  --package-search-root /content/drive/MyDrive/SLM/pilot_paper_results \
+  --drive-output-dir /content/drive/MyDrive/SLM/pilot_paper_results/complete_result_package
 ```
 
 第一条 `write_pilot_paper_result_records.py --materialize-only` 命令用于把 Google Drive 结果包中的 `outputs/` 条目物化到当前仓库工作区, 供后续重建脚本读取。最后两条命令才生成正式的 pilot_paper result records 和共同协议导入报告。若模板覆盖仍不完整, 产物会保留 `pilot_paper_template_coverage_ready=false`, 这表示只能继续补齐缺失方法或攻击项, 不能提升为 full_paper 主张。

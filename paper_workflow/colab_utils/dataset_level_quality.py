@@ -27,9 +27,9 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 from scripts.write_dataset_level_quality_outputs import write_dataset_level_quality_outputs
 
 DEFAULT_OUTPUT_DIR = "outputs/dataset_level_quality"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/dataset_level_quality"
-DEFAULT_REAL_ATTACK_EVALUATION_DRIVE_DIR = "/content/drive/MyDrive/SLM/real_attack_evaluation"
-DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/aligned_rescoring"
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/dataset_level_quality"
+DEFAULT_REAL_ATTACK_EVALUATION_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/real_attack_evaluation"
+DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring"
 REAL_ATTACK_EVALUATION_PACKAGE_PATTERN = "real_attack_evaluation_package_*.zip"
 ALIGNED_RESCORING_PACKAGE_PATTERN = "aligned_rescoring_package_*.zip"
 DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 100

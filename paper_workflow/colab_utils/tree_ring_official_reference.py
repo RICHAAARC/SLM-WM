@@ -37,10 +37,10 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 )
 
 DEFAULT_OUTPUT_DIR = "outputs/tree_ring_official_reference"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/tree_ring_official_reference"
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/tree_ring_official_reference"
 DEFAULT_SOURCE_DIR = "external_baseline/primary/tree_ring/source"
 DEFAULT_RUN_NAME = "tree_ring_official_legacy_reference"
-DEFAULT_SAMPLE_COUNT = 5
+DEFAULT_SAMPLE_COUNT = 120
 DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID = "stabilityai/stable-diffusion-2-1-base"
 DEFAULT_OFFICIAL_MODEL_ID = "Manojb/stable-diffusion-2-1-base"
 DEFAULT_MODEL_SOURCE_NOTE = (
@@ -908,6 +908,7 @@ def write_tree_ring_official_reference_outputs(
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
         "sample_count": int(effective_config.sample_count),
+        "paper_claim_scale": "pilot_paper",
         "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
         "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
         "source_patch_applied": bool(source_patch_report.get("patch_applied")),

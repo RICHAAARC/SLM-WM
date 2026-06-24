@@ -37,10 +37,10 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 )
 
 DEFAULT_OUTPUT_DIR = "outputs/gaussian_shading_official_reference"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/gaussian_shading_official_reference"
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/gaussian_shading_official_reference"
 DEFAULT_SOURCE_DIR = "external_baseline/primary/gaussian_shading/source"
 DEFAULT_RUN_NAME = "gaussian_shading_official_legacy_reference"
-DEFAULT_SAMPLE_COUNT = 5
+DEFAULT_SAMPLE_COUNT = 120
 DEFAULT_OUTPUT_SUBDIR = "official_output"
 DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID = "stabilityai/stable-diffusion-2-1-base"
 DEFAULT_OFFICIAL_MODEL_ID = "Manojb/stable-diffusion-2-1-base"
@@ -1088,6 +1088,7 @@ def write_gaussian_shading_official_reference_outputs(
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
         "sample_count": int(effective_config.sample_count),
+        "paper_claim_scale": "pilot_paper",
         "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
         "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
         "legacy_environment_profile": str(legacy_environment_report.get("legacy_environment_profile", "")),

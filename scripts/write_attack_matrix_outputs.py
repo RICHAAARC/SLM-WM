@@ -25,6 +25,7 @@ from experiments.protocol.attacks import (
     score_retention_rows,
     strength_curve,
 )
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -180,7 +181,7 @@ def build_real_attack_ingestion_summary(
 def build_boundary(thresholds: dict[str, Any], threshold_report: dict[str, Any]) -> AttackEvaluationBoundary:
     """从阈值文件和退化报告构造攻击检测边界。"""
     threshold_value = float(threshold_report.get("calibrated_content_threshold", thresholds["threshold_value"]))
-    target_fpr = float(threshold_report.get("target_fpr", thresholds.get("target_fpr", 0.05)))
+    target_fpr = float(threshold_report.get("target_fpr", thresholds.get("target_fpr", PILOT_PAPER_FIXED_FPR)))
     rescue_margin_low = float(threshold_report.get("rescue_margin_low", -0.05))
     allowed_fail_reasons = tuple(threshold_report.get("allowed_fail_reasons", ("geometry_suspected", "low_confidence")))
     return AttackEvaluationBoundary(

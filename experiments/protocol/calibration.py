@@ -8,6 +8,7 @@ import math
 from typing import Any, Iterable
 
 from experiments.protocol.events import EventProtocolRecord
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from experiments.protocol.prompts import PromptProtocolRecord
 from experiments.protocol.splits import assert_disjoint_calibration_and_test, group_prompt_ids_by_split
 
@@ -44,7 +45,7 @@ class FixedFprCalibrationConfig:
     到配置对象, 让统计函数只关注阈值和指标计算。
     """
 
-    target_fpr: float = 0.05
+    target_fpr: float = PILOT_PAPER_FIXED_FPR
     calibration_split: str = "calibration"
     positive_role: str = "positive_source"
     clean_negative_role: str = "clean_negative"

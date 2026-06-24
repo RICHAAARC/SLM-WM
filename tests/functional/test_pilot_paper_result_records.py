@@ -132,7 +132,7 @@ def baseline_candidate_row() -> dict[str, object]:
         "baseline_result_source": "outputs/external_baseline_results/baseline_result_records.jsonl",
         "baseline_result_source_digest": "baseline_source_digest",
         "metric_status": "measured",
-        "prompt_protocol_name": "paper_main_full_paper_prompt_protocol",
+        "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
         "prompt_protocol_digest": "pilot_prompt_digest",
         "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
         "evidence_paths": ["outputs/external_baseline_results/baseline_result_records.jsonl"],

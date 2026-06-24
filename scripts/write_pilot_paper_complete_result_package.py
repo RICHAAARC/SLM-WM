@@ -1,0 +1,351 @@
+"""打包 pilot_paper 完整结果包。
+
+该脚本只负责把已经由 Notebook 或本地受治理 builder 产出的 records、tables、
+reports、manifests 和官方复现核对文件收敛到一个可审计压缩包中。它不直接生成
+GPU 结果, 也不手写正式论文表格。
+"""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+import hashlib
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+from typing import Any, Iterable
+from zipfile import ZIP_DEFLATED, ZipFile
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from main.analysis.artifact_manifest import build_artifact_manifest
+from main.core.digest import build_stable_digest
+from scripts.write_pilot_paper_result_records import expand_package_paths, materialize_output_entries
+
+CONSTRUCTION_UNIT_NAME = "pilot_paper_complete_result_package"
+DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_complete_result_package")
+DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/complete_result_package"
+DEFAULT_PACKAGE_SEARCH_ROOT = "/content/drive/MyDrive/SLM/pilot_paper_results"
+REQUIRED_OUTPUT_DIRS = (
+    "outputs/real_attention_geometry",
+    "outputs/attention_geometry",
+    "outputs/attention_latent_injection",
+    "outputs/attention_latent_update",
+    "outputs/aligned_rescoring",
+    "outputs/threshold_calibration",
+    "outputs/geometric_rescue",
+    "outputs/real_attack_evaluation",
+    "outputs/dataset_level_quality",
+    "outputs/external_baseline_gpu_smoke",
+    "outputs/tree_ring_official_reference",
+    "outputs/gaussian_shading_official_reference",
+    "outputs/shallow_diffuse_official_reference",
+    "outputs/t2smark_full_main_reproduction",
+    "outputs/external_baseline_results",
+    "outputs/primary_baseline_formal_import",
+    "outputs/internal_ablation_evidence",
+    "outputs/pilot_paper_fixed_fpr_results",
+    "outputs/pilot_paper_fixed_fpr_common_protocol",
+)
+PACKAGE_EXTRA_PATHS = (
+    "configs/paper_main_pilot_paper_prompts.txt",
+    "paper_workflow/README.md",
+    "scripts/write_pilot_paper_result_records.py",
+    "scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py",
+    "scripts/write_primary_baseline_result_candidates.py",
+    "scripts/write_primary_baseline_formal_import_protocol.py",
+    "scripts/write_internal_ablation_outputs.py",
+)
+
+
+@dataclass(frozen=True)
+class PilotPaperCompletePackageRecord:
+    """记录 pilot_paper 完整结果包与 Drive 镜像信息。"""
+
+    archive_path: str
+    archive_digest: str
+    archive_entry_count: int
+    drive_archive_path: str
+    drive_archive_digest: str
+    metadata: dict[str, Any]
+
+    def to_dict(self) -> dict[str, Any]:
+        """转换为 JSON 兼容字典。"""
+
+        return asdict(self)
+
+
+def stable_json_text(value: Any) -> str:
+    """把 JSON 兼容对象转为稳定文本。"""
+
+    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def write_json(path: Path, payload: Any) -> None:
+    """写出 JSON 文件并创建父目录。"""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(stable_json_text(payload), encoding="utf-8")
+
+
+def file_digest(path: Path) -> str:
+    """计算文件 SHA-256 摘要。"""
+
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def resolve_code_version(root_path: Path) -> str:
+    """读取 Git 短提交标识, 工作区有变更时附加 dirty 标记。"""
+
+    try:
+        commit_result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=root_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        status_result = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=root_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return "git_version_unavailable"
+    commit_id = commit_result.stdout.strip()
+    if not commit_id:
+        return "git_version_unavailable"
+    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
+
+
+def resolve_path(root_path: Path, path: str | Path | None) -> Path | None:
+    """解析可选路径。"""
+
+    if path is None or not str(path).strip():
+        return None
+    candidate = Path(path).expanduser()
+    return candidate.resolve() if candidate.is_absolute() else (root_path / candidate).resolve()
+
+
+def relative_or_absolute(path: Path, root_path: Path) -> str:
+    """优先记录相对仓库根目录路径。"""
+
+    try:
+        return path.resolve().relative_to(root_path.resolve()).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
+
+
+def ensure_output_dir_under_outputs(root_path: Path, output_dir: str | Path) -> Path:
+    """确保完整结果包本地输出目录位于 outputs/ 下。"""
+
+    resolved = resolve_path(root_path, output_dir)
+    if resolved is None:
+        raise ValueError("pilot_paper 完整结果包输出目录不能为空")
+    outputs_root = (root_path / "outputs").resolve()
+    try:
+        resolved.relative_to(outputs_root)
+    except ValueError as exc:
+        raise ValueError("pilot_paper 完整结果包输出目录必须位于 outputs/ 下") from exc
+    resolved.mkdir(parents=True, exist_ok=True)
+    return resolved
+
+
+def collect_required_entries(root_path: Path, output_dir: Path, archive_path: Path) -> tuple[Path, ...]:
+    """收集完整结果包应包含的受治理核对文件。"""
+
+    entries: list[Path] = []
+    for relative_dir in REQUIRED_OUTPUT_DIRS:
+        directory = root_path / relative_dir
+        if not directory.exists():
+            continue
+        for path in sorted(directory.rglob("*")):
+            if path.is_file() and path.resolve() != archive_path.resolve() and path.suffix.lower() != ".zip":
+                entries.append(path)
+    for relative_path in PACKAGE_EXTRA_PATHS:
+        path = root_path / relative_path
+        if path.is_file():
+            entries.append(path)
+    for path in sorted(output_dir.glob("*.json")):
+        if path.is_file():
+            entries.append(path)
+    unique_entries: list[Path] = []
+    for entry in entries:
+        resolved = entry.resolve()
+        if resolved not in [item.resolve() for item in unique_entries]:
+            unique_entries.append(entry)
+    return tuple(unique_entries)
+
+
+def build_readiness_summary(root_path: Path, entries: Iterable[Path], materialization_report: dict[str, Any]) -> dict[str, Any]:
+    """汇总完整结果包覆盖状态。"""
+
+    existing_dirs = [relative_dir for relative_dir in REQUIRED_OUTPUT_DIRS if (root_path / relative_dir).exists()]
+    missing_dirs = [relative_dir for relative_dir in REQUIRED_OUTPUT_DIRS if not (root_path / relative_dir).exists()]
+    entry_list = tuple(entries)
+    return {
+        "construction_unit_name": CONSTRUCTION_UNIT_NAME,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "paper_claim_scale": "pilot_paper",
+        "required_output_dir_count": len(REQUIRED_OUTPUT_DIRS),
+        "existing_required_output_dir_count": len(existing_dirs),
+        "missing_required_output_dir_count": len(missing_dirs),
+        "existing_required_output_dirs": existing_dirs,
+        "missing_required_output_dirs": missing_dirs,
+        "archive_entry_count": len(entry_list),
+        "archive_entry_digest": build_stable_digest([relative_or_absolute(path, root_path) for path in entry_list]),
+        "materialization_report": materialization_report,
+        "pilot_paper_complete_result_package_ready": len(missing_dirs) == 0 and bool(entry_list),
+        "supports_paper_claim": False,
+    }
+
+
+def write_pilot_paper_complete_result_package_outputs(
+    *,
+    root: str | Path = ".",
+    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
+    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    archive_name: str = "pilot_paper_complete_result_package.zip",
+    package_paths: Iterable[str | Path] = (),
+    package_search_roots: Iterable[str | Path] = (DEFAULT_PACKAGE_SEARCH_ROOT,),
+) -> dict[str, Any]:
+    """写出 pilot_paper 完整结果包, 并按需从 Drive 结果包物化 outputs/ 条目。"""
+
+    root_path = Path(root).resolve()
+    output_path = ensure_output_dir_under_outputs(root_path, output_dir)
+    archive_path = output_path / archive_name
+    packages = expand_package_paths(root_path, package_paths, package_search_roots)
+    materialization_report = (
+        materialize_output_entries(root_path, packages)
+        if packages
+        else {
+            "input_package_count": 0,
+            "materialized_output_entry_count": 0,
+            "skipped_output_entry_count": 0,
+            "materialized_output_entries_digest": build_stable_digest([]),
+            "skipped_output_entries": [],
+        }
+    )
+
+    package_manifest_path = output_path / "pilot_paper_complete_package_input_manifest.json"
+    summary_path = output_path / "pilot_paper_complete_package_summary.json"
+    manifest_path = output_path / "manifest.local.json"
+    for stale_path in (package_manifest_path, summary_path, manifest_path):
+        if stale_path.exists():
+            stale_path.unlink()
+
+    entries = collect_required_entries(root_path, output_path, archive_path)
+    summary = build_readiness_summary(root_path, entries, materialization_report)
+    package_manifest = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "paper_claim_scale": "pilot_paper",
+        "entry_paths": [relative_or_absolute(entry, root_path) for entry in entries],
+        "entry_count": len(entries),
+        "entry_paths_digest": build_stable_digest([relative_or_absolute(entry, root_path) for entry in entries]),
+    }
+    write_json(package_manifest_path, package_manifest)
+    write_json(summary_path, summary)
+    manifest = build_artifact_manifest(
+        artifact_id="pilot_paper_complete_result_package_manifest",
+        artifact_type="local_manifest",
+        input_paths=tuple([relative_or_absolute(path, root_path) for path in packages] + package_manifest["entry_paths"]),
+        output_paths=(
+            relative_or_absolute(archive_path, root_path),
+            relative_or_absolute(package_manifest_path, root_path),
+            relative_or_absolute(summary_path, root_path),
+            relative_or_absolute(manifest_path, root_path),
+        ),
+        config={
+            "archive_name": archive_name,
+            "drive_output_dir": drive_output_dir,
+            "required_output_dirs": list(REQUIRED_OUTPUT_DIRS),
+            "package_search_roots": [str(value) for value in package_search_roots],
+        },
+        code_version=resolve_code_version(root_path),
+        rebuild_command="python scripts/write_pilot_paper_complete_result_package.py",
+        metadata=summary,
+    ).to_dict()
+    write_json(manifest_path, manifest)
+    entries = collect_required_entries(root_path, output_path, archive_path)
+    summary = build_readiness_summary(root_path, entries, materialization_report)
+    package_manifest = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "paper_claim_scale": "pilot_paper",
+        "entry_paths": [relative_or_absolute(entry, root_path) for entry in entries],
+        "entry_count": len(entries),
+        "entry_paths_digest": build_stable_digest([relative_or_absolute(entry, root_path) for entry in entries]),
+    }
+    write_json(package_manifest_path, package_manifest)
+    write_json(summary_path, summary)
+    with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
+        for entry in entries:
+            archive.write(entry, relative_or_absolute(entry, root_path))
+
+    drive_archive_path = ""
+    drive_archive_digest = ""
+    if drive_output_dir:
+        drive_dir = Path(drive_output_dir).expanduser()
+        drive_dir.mkdir(parents=True, exist_ok=True)
+        mirrored_path = drive_dir / archive_name
+        shutil.copy2(archive_path, mirrored_path)
+        drive_archive_path = str(mirrored_path)
+        drive_archive_digest = file_digest(mirrored_path)
+
+    record = PilotPaperCompletePackageRecord(
+        archive_path=relative_or_absolute(archive_path, root_path),
+        archive_digest=file_digest(archive_path),
+        archive_entry_count=len(entries),
+        drive_archive_path=drive_archive_path,
+        drive_archive_digest=drive_archive_digest,
+        metadata=summary,
+    )
+    final_summary = record.to_dict()
+    write_json(summary_path, final_summary)
+    manifest.setdefault("metadata", {})["archive_digest"] = record.archive_digest
+    manifest.setdefault("metadata", {})["drive_archive_digest"] = record.drive_archive_digest
+    manifest.setdefault("metadata", {})["archive_entry_count"] = record.archive_entry_count
+    write_json(manifest_path, manifest)
+    return manifest
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """构造命令行参数解析器。"""
+
+    parser = argparse.ArgumentParser(description="打包 pilot_paper 完整结果包。")
+    parser.add_argument("--root", default=".", help="仓库根目录。")
+    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="本地输出目录, 必须位于 outputs/ 下。")
+    parser.add_argument("--drive-output-dir", default=DEFAULT_DRIVE_OUTPUT_DIR, help="Google Drive 镜像目录。")
+    parser.add_argument("--archive-name", default="pilot_paper_complete_result_package.zip", help="压缩包文件名。")
+    parser.add_argument("--package-path", action="append", default=[], help="可重复传入的前序结果 zip 包。")
+    parser.add_argument("--package-search-root", action="append", default=[DEFAULT_PACKAGE_SEARCH_ROOT], help="递归查找 zip 包的目录。")
+    return parser
+
+
+def main() -> None:
+    """命令行入口。"""
+
+    args = build_parser().parse_args()
+    manifest = write_pilot_paper_complete_result_package_outputs(
+        root=args.root,
+        output_dir=args.output_dir,
+        drive_output_dir=args.drive_output_dir,
+        archive_name=args.archive_name,
+        package_paths=args.package_path,
+        package_search_roots=args.package_search_root,
+    )
+    print(stable_json_text(manifest), end="")
+
+
+if __name__ == "__main__":
+    main()

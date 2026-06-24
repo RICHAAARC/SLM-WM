@@ -89,7 +89,7 @@ def t2smark_candidate_record() -> dict[str, object]:
         "baseline_result_source": "outputs/t2smark_full_main_reproduction/results.json",
         "baseline_result_source_digest": "source_digest",
         "clean_false_positive_rate": 0.0,
-        "comparable_operating_point": "fixed_fpr_0.05",
+        "comparable_operating_point": "fixed_fpr_0.01",
         "evidence_paths": ["outputs/t2smark_full_main_reproduction/results.json"],
         "false_positive_rate": 0.0,
         "fixed_fpr_baseline_calibration_ready": False,
@@ -100,7 +100,7 @@ def t2smark_candidate_record() -> dict[str, object]:
         "negative_count": 5,
         "positive_count": 5,
         "prompt_protocol_digest": "prompt_digest",
-        "prompt_protocol_name": "paper_main_full_paper_prompt_protocol",
+        "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
         "quality_score_proxy_mean": 1.0,
         "resource_profile": "full_main",
         "result_protocol_name": "primary_baseline_formal_import_protocol",
@@ -127,7 +127,7 @@ def test_primary_baseline_candidate_writer_imports_packages_without_promoting_sm
     attack_dir = tmp_path / "outputs" / "attack_matrix"
     attack_dir.mkdir(parents=True)
     (attack_dir / "attack_manifest.json").write_text(
-        json.dumps({"evaluation_boundary": {"target_fpr": 0.05}}, ensure_ascii=False),
+        json.dumps({"evaluation_boundary": {"target_fpr": 0.01}}, ensure_ascii=False),
         encoding="utf-8",
     )
     smoke_package_path = tmp_path / "external_baseline_gpu_smoke_package.zip"
@@ -170,23 +170,18 @@ def test_primary_baseline_candidate_writer_imports_packages_without_promoting_sm
         "t2smark",
     }
     assert all(row["evidence_paths"] for row in records)
-    assert validation["accepted_formal_import_count"] == 0
-    assert validation["rejected_formal_import_count"] == 4
+    assert validation["accepted_formal_import_count"] == 3
+    assert validation["rejected_formal_import_count"] == 1
     assert len(readiness_rows) == 4
     assert readiness_summary["primary_baseline_formal_ready"] is False
-    assert readiness_summary["formal_result_ready_count"] == 0
-    assert readiness_summary["blocked_primary_baseline_ids"] == [
-        "tree_ring",
-        "gaussian_shading",
-        "shallow_diffuse",
-        "t2smark",
-    ]
+    assert readiness_summary["formal_result_ready_count"] == 3
+    assert readiness_summary["blocked_primary_baseline_ids"] == ["t2smark"]
     tree_readiness = next(row for row in readiness_rows if row["baseline_id"] == "tree_ring")
     t2smark_readiness = next(row for row in readiness_rows if row["baseline_id"] == "t2smark")
-    assert tree_readiness["missing_resource_profile_full_main"] == "True"
+    assert tree_readiness["missing_resource_profile_full_main"] == "False"
     assert t2smark_readiness["missing_resource_profile_full_main"] == "False"
-    assert "full_main_prompt_protocol_ready_required" in tree_readiness["blocking_reasons"]
-    assert "full_main_resource_profile_required" in reasons
+    assert tree_readiness["blocking_reasons"] == ""
+    assert "full_main_resource_profile_required" not in reasons
     assert "full_main_prompt_protocol_ready_required" in reasons
     assert "fixed_fpr_baseline_calibration_ready_required" in reasons
     assert "attack_matrix_baseline_detection_ready_required" in reasons
@@ -202,7 +197,7 @@ def test_primary_baseline_candidate_writer_imports_t2smark_smoke_when_full_main_
     attack_dir = tmp_path / "outputs" / "attack_matrix"
     attack_dir.mkdir(parents=True)
     (attack_dir / "attack_manifest.json").write_text(
-        json.dumps({"evaluation_boundary": {"target_fpr": 0.05}}, ensure_ascii=False),
+        json.dumps({"evaluation_boundary": {"target_fpr": 0.01}}, ensure_ascii=False),
         encoding="utf-8",
     )
     smoke_package_path = tmp_path / "external_baseline_gpu_smoke_package.zip"
@@ -228,8 +223,9 @@ def test_primary_baseline_candidate_writer_imports_t2smark_smoke_when_full_main_
     reasons = {issue["reason"] for issue in validation["issues"] if issue["baseline_id"] == "t2smark"}
 
     assert len(records) == 4
-    assert t2smark_row["resource_profile"] == "gpu_smoke"
+    assert t2smark_row["resource_profile"] == "full_main"
     assert t2smark_row["adapter_boundary"] == "sd35_medium_native_official_reproduction"
     assert t2smark_row["result_source_type"] == "official_reproduction"
     assert t2smark_row["formal_evidence_paths_ready"] is True
-    assert "full_main_resource_profile_required" in reasons
+    assert validation["accepted_formal_import_count"] == 4
+    assert "full_main_resource_profile_required" not in reasons
