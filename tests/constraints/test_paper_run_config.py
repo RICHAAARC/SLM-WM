@@ -29,6 +29,8 @@ def test_paper_run_config_resolves_pilot_paper_defaults(tmp_path: Path, monkeypa
     monkeypatch.delenv("SLM_WM_PAPER_RUN_NAME", raising=False)
     monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
     monkeypatch.delenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
 
     config = build_paper_run_config(root=tmp_path)
 
@@ -51,6 +53,8 @@ def test_paper_run_config_switches_to_full_paper_without_notebook_rewrite(
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
     monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", "all")
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
 
     config = build_paper_run_config(root=tmp_path)
 
@@ -83,5 +87,27 @@ def test_count_environment_resolver_inherits_current_paper_run(
     write_prompt_file(tmp_path / "configs" / "paper_main_pilot_paper_prompts.txt", 13)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
     monkeypatch.setenv("SLM_WM_EXAMPLE_COUNT", "all")
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
 
     assert resolve_count_from_environment("SLM_WM_EXAMPLE_COUNT", root=tmp_path) == 13
+
+
+@pytest.mark.constraint
+def test_paper_run_config_rejects_stale_prompt_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """切换到 full_paper 时不得静默沿用 pilot_paper prompt 环境变量."""
+
+    write_prompt_file(tmp_path / "configs" / "paper_main_full_paper_prompts.txt", 11)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
+    monkeypatch.setenv("SLM_WM_PROMPT_SET", "pilot_paper")
+    monkeypatch.setenv("SLM_WM_PROMPT_FILE", "configs/paper_main_pilot_paper_prompts.txt")
+
+    with pytest.raises(ValueError, match="SLM_WM_PROMPT_SET"):
+        build_paper_run_config(root=tmp_path)
+
+    monkeypatch.setenv("SLM_WM_PROMPT_SET", "full_paper")
+    with pytest.raises(ValueError, match="SLM_WM_PROMPT_FILE"):
+        build_paper_run_config(root=tmp_path)

@@ -116,6 +116,11 @@ def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
     defaults = RUN_DEFAULTS[run_name]
     prompt_set = os.environ.get("SLM_WM_PROMPT_SET", str(defaults["prompt_set"]))
     prompt_file = os.environ.get("SLM_WM_PROMPT_FILE", str(defaults["prompt_file"]))
+    if prompt_set != str(defaults["prompt_set"]):
+        raise ValueError("SLM_WM_PROMPT_SET 必须与 SLM_WM_PAPER_RUN_NAME 对应的论文运行层级一致")
+    expected_prompt_file_name = Path(str(defaults["prompt_file"])).name
+    if Path(prompt_file).name != expected_prompt_file_name:
+        raise ValueError("SLM_WM_PROMPT_FILE 必须使用当前论文运行层级对应的 prompt 文件")
     prompt_count = _read_prompt_count(prompt_file, int(defaults["fallback_prompt_count"]), root)
     sample_count = parse_record_limit(
         os.environ.get("SLM_WM_PAPER_RUN_SAMPLE_COUNT", str(defaults["sample_count"])),

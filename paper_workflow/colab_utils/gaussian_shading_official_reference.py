@@ -1089,7 +1089,7 @@ def write_gaussian_shading_official_reference_outputs(
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
         "sample_count": int(effective_config.sample_count),
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": build_paper_run_config(root_path).run_name,
         "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
         "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
         "legacy_environment_profile": str(legacy_environment_report.get("legacy_environment_profile", "")),

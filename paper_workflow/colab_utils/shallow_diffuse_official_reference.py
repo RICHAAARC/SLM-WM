@@ -1144,7 +1144,7 @@ def write_shallow_diffuse_official_reference_outputs(
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
         "sample_count": int(effective_config.sample_count),
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": build_paper_run_config(root_path).run_name,
         "edit_time_list": effective_config.edit_time_list,
         "primary_edit_timestep": primary_edit_timestep(effective_config),
         "attacker_names": effective_config.attacker_names,

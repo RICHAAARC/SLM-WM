@@ -8,12 +8,17 @@ baseline 导入模板和声明边界。它不执行 GPU 推理。pilot_paper 与
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import math
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from experiments.protocol.attacks import AttackConfig, attack_config_digest
+from experiments.protocol.paper_run_config import (
+    FULL_PAPER_RUN_NAME,
+    RUN_DEFAULTS,
+    build_paper_run_config,
+)
 from experiments.protocol.prompts import PromptProtocolRecord
 from experiments.protocol.splits import apply_split_assignments
 from main.core.digest import build_stable_digest
@@ -88,31 +93,72 @@ PILOT_PAPER_CI_FIELD_GROUPS = (
 )
 
 
+def prompt_protocol_name_for_run(run_name: str) -> str:
+    """根据论文运行层级生成 prompt 协议名称。"""
+
+    return f"paper_main_{run_name}_prompt_protocol"
+
+
+def result_protocol_name_for_run(run_name: str) -> str:
+    """根据论文运行层级生成 fixed-FPR 共同协议名称。"""
+
+    return f"{run_name}_fixed_fpr_common_protocol"
+
+
+def result_scope_for_run(run_name: str) -> str:
+    """根据论文运行层级生成结果范围名称。"""
+
+    return f"{run_name}_common_protocol"
+
+
+def result_claim_scope_for_run(run_name: str) -> str:
+    """根据论文运行层级生成论文主张边界名称。"""
+
+    return f"{run_name}_paper_claim"
+
+
+def _default_paper_run_value(field_name: str) -> Any:
+    """从统一论文运行配置读取 dataclass 默认值。"""
+
+    return getattr(build_paper_run_config("."), field_name)
+
+
 @dataclass(frozen=True)
 class PilotPaperFixedFprConfig:
-    """集中描述 pilot_paper 级 fixed-FPR 共同协议配置。
+    """集中描述论文运行级 fixed-FPR 共同协议配置。
 
     该对象属于通用工程写法: 把 prompt set、固定 FPR、bootstrap 次数和
     论文声明边界集中在 dataclass 构造层, 业务函数只消费已经归一化的配置。
     """
 
-    prompt_set: str = PILOT_PAPER_PROMPT_SET
-    prompt_file: str = PILOT_PAPER_PROMPT_FILE
-    prompt_protocol_name: str = PILOT_PAPER_PROMPT_PROTOCOL_NAME
-    result_protocol_name: str = PILOT_PAPER_RESULT_PROTOCOL_NAME
-    result_scope: str = PILOT_PAPER_RESULT_SCOPE
-    result_claim_scope: str = PILOT_PAPER_CLAIM_BOUNDARY
-    target_fpr: float = PILOT_PAPER_FIXED_FPR
+    paper_run_name: str = field(default_factory=lambda: _default_paper_run_value("run_name"))
+    prompt_set: str = field(default_factory=lambda: _default_paper_run_value("prompt_set"))
+    prompt_file: str = field(default_factory=lambda: _default_paper_run_value("prompt_file"))
+    prompt_protocol_name: str = field(
+        default_factory=lambda: prompt_protocol_name_for_run(_default_paper_run_value("run_name"))
+    )
+    result_protocol_name: str = field(
+        default_factory=lambda: result_protocol_name_for_run(_default_paper_run_value("run_name"))
+    )
+    result_scope: str = field(default_factory=lambda: result_scope_for_run(_default_paper_run_value("run_name")))
+    result_claim_scope: str = field(default_factory=lambda: result_claim_scope_for_run(_default_paper_run_value("run_name")))
+    target_fpr: float = field(default_factory=lambda: float(_default_paper_run_value("target_fpr")))
     bootstrap_iteration_count: int = PILOT_PAPER_BOOTSTRAP_ITERATION_COUNT
     confidence_level: float = PILOT_PAPER_CONFIDENCE_LEVEL
-    minimum_clean_negative_count: int = PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT
+    minimum_clean_negative_count: int = field(
+        default_factory=lambda: int(_default_paper_run_value("minimum_clean_negative_count"))
+    )
     attack_resource_profiles: tuple[str, ...] = PILOT_PAPER_ATTACK_RESOURCE_PROFILES
 
     def __post_init__(self) -> None:
         """集中校验不可恢复的协议边界。"""
 
-        if self.prompt_set != PILOT_PAPER_PROMPT_SET:
-            raise ValueError("pilot_paper fixed-FPR 协议只能使用 pilot_paper prompt set")
+        if self.prompt_set not in RUN_DEFAULTS:
+            raise ValueError(f"未知论文运行 prompt set: {self.prompt_set}")
+        if self.paper_run_name not in RUN_DEFAULTS:
+            raise ValueError(f"未知论文运行层级: {self.paper_run_name}")
+        if not self.prompt_file:
+            raise ValueError("prompt_file 不得为空")
         if not 0.0 < self.target_fpr < 1.0:
             raise ValueError("target_fpr 必须位于 (0, 1)")
         if self.bootstrap_iteration_count <= 0:
@@ -128,6 +174,23 @@ class PilotPaperFixedFprConfig:
         payload = asdict(self)
         payload["attack_resource_profiles"] = list(self.attack_resource_profiles)
         return payload
+
+
+def build_paper_fixed_fpr_config(root: str | Path = ".") -> PilotPaperFixedFprConfig:
+    """按统一论文运行配置构造 fixed-FPR 共同协议配置。"""
+
+    paper_run = build_paper_run_config(root)
+    return PilotPaperFixedFprConfig(
+        paper_run_name=paper_run.run_name,
+        prompt_set=paper_run.prompt_set,
+        prompt_file=paper_run.prompt_file,
+        prompt_protocol_name=prompt_protocol_name_for_run(paper_run.run_name),
+        result_protocol_name=result_protocol_name_for_run(paper_run.run_name),
+        result_scope=result_scope_for_run(paper_run.run_name),
+        result_claim_scope=result_claim_scope_for_run(paper_run.run_name),
+        target_fpr=paper_run.target_fpr,
+        minimum_clean_negative_count=paper_run.minimum_clean_negative_count,
+    )
 
 
 @dataclass(frozen=True)
@@ -350,7 +413,7 @@ def build_pilot_paper_result_import_schema(
         "required_rate_fields": list(PILOT_PAPER_RATE_FIELDS),
         "ci_field_groups": [list(group) for group in PILOT_PAPER_CI_FIELD_GROUPS],
         "supports_paper_claim": True,
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": resolved_config.prompt_set,
         "full_paper_claim_boundary": FULL_PAPER_CLAIM_BOUNDARY,
     }
 
@@ -394,7 +457,7 @@ def build_pilot_paper_method_registry_rows(
                 "result_claim_scope": resolved_config.result_claim_scope,
                 "governed_import_required": True,
                 "supports_paper_claim": True,
-                "paper_claim_scale": "pilot_paper",
+                "paper_claim_scale": resolved_config.prompt_set,
             }
         )
     return tuple(rows)
@@ -438,7 +501,7 @@ def build_pilot_paper_result_import_template_rows(
                 "required_source_fields": list(PILOT_PAPER_REQUIRED_SOURCE_FIELDS),
                 "required_result_record_path": "outputs/pilot_paper_fixed_fpr_results/pilot_paper_result_records.jsonl",
                 "supports_paper_claim": False,
-                "paper_claim_scale": "pilot_paper",
+                "paper_claim_scale": resolved_config.prompt_set,
             }
             digest = build_stable_digest(payload)
             payload["pilot_paper_result_template_id"] = f"pilot_paper_result_template_{digest[:16]}"
@@ -522,8 +585,14 @@ def _validate_protocol_fields(row: Mapping[str, Any], row_index: int, schema: Ma
     ):
         issues.append(_issue(row_index, row, "confidence_level", "confidence_level_mismatch"))
     paper_claim_scale = _str_field(row, "paper_claim_scale")
-    if paper_claim_scale and paper_claim_scale != "pilot_paper":
-        issues.append(_issue(row_index, row, "paper_claim_scale", "pilot_paper_claim_scale_required"))
+    expected_paper_claim_scale = str(schema.get("paper_claim_scale", PILOT_PAPER_PROMPT_SET))
+    if paper_claim_scale and paper_claim_scale != expected_paper_claim_scale:
+        reason = (
+            "pilot_paper_claim_scale_required"
+            if expected_paper_claim_scale == PILOT_PAPER_PROMPT_SET
+            else "paper_claim_scale_mismatch"
+        )
+        issues.append(_issue(row_index, row, "paper_claim_scale", reason))
     return issues
 
 
@@ -624,17 +693,25 @@ def build_pilot_paper_common_protocol_summary(
         and len(materialized_template_rows) == len(materialized_attack_rows) * len(materialized_method_rows)
         and math.isclose(float(resolved_config.target_fpr), PILOT_PAPER_FIXED_FPR, rel_tol=0.0, abs_tol=1e-12)
     )
-    pilot_paper_claim_ready = ready and bool(import_validation_report.get("pilot_paper_result_import_ready", False)) and claim_coverage_ready
+    paper_run_claim_ready = (
+        ready
+        and bool(import_validation_report.get("pilot_paper_result_import_ready", False))
+        and claim_coverage_ready
+    )
+    pilot_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == PILOT_PAPER_PROMPT_SET
+    full_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == FULL_PAPER_RUN_NAME
     return {
         "construction_unit_name": "pilot_paper_fixed_fpr_common_protocol",
         "result_protocol_name": resolved_config.result_protocol_name,
         "result_scope": resolved_config.result_scope,
         "result_claim_scope": resolved_config.result_claim_scope,
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": resolved_config.prompt_set,
         "full_paper_claim_boundary": FULL_PAPER_CLAIM_BOUNDARY,
         "pilot_paper_common_protocol_ready": ready,
         "pilot_paper_prompt_count": prompt_summary.get("pilot_paper_prompt_count", 0),
+        "paper_prompt_count": prompt_summary.get("pilot_paper_prompt_count", 0),
         "pilot_paper_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
+        "paper_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
         "pilot_paper_target_fpr": resolved_config.target_fpr,
         "pilot_paper_negative_count_minimum_required": resolved_config.minimum_clean_negative_count,
         "minimum_result_positive_count": resolved_config.minimum_clean_negative_count,
@@ -650,9 +727,11 @@ def build_pilot_paper_common_protocol_summary(
         "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
         "confidence_level": resolved_config.confidence_level,
         "pilot_paper_supports_superiority_claim": pilot_paper_claim_ready,
-        "paper_claim_ready": pilot_paper_claim_ready,
-        "full_paper_claim_ready": False,
-        "supports_paper_claim": pilot_paper_claim_ready,
+        "paper_run_claim_ready": paper_run_claim_ready,
+        "paper_run_supports_superiority_claim": paper_run_claim_ready,
+        "paper_claim_ready": paper_run_claim_ready,
+        "full_paper_claim_ready": full_paper_claim_ready,
+        "supports_paper_claim": paper_run_claim_ready,
     }
 
 

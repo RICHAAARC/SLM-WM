@@ -28,6 +28,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     PilotPaperFixedFprConfig,
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
+    build_paper_fixed_fpr_config,
     build_pilot_paper_attack_matrix_rows,
     build_pilot_paper_method_registry_rows,
     build_pilot_paper_prompt_split_summary,
@@ -281,7 +282,7 @@ def build_protocol_context(root_path: Path, config: PilotPaperFixedFprConfig) ->
 
     prompt_path = resolve_path(root_path, config.prompt_file)
     if prompt_path is None or not prompt_path.is_file():
-        raise FileNotFoundError(f"缺少 pilot_paper prompt 文件: {config.prompt_file}")
+        raise FileNotFoundError(f"缺少论文运行 prompt 文件: {config.prompt_file}")
     prompt_records = build_prompt_records(config.prompt_set, read_prompt_file(prompt_path))
     prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
     attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
@@ -346,7 +347,7 @@ def build_common_result_fields(
         "baseline_result_source": baseline_result_source,
         "baseline_result_source_digest": baseline_result_source_digest,
         "evidence_paths": evidence_paths,
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": schema.get("paper_claim_scale", "pilot_paper"),
     }
 
 
@@ -619,6 +620,7 @@ def build_result_summary(
     coverage_rows: list[dict[str, Any]],
     validation_report: Mapping[str, Any],
     materialization_report: Mapping[str, Any],
+    schema: Mapping[str, Any],
 ) -> dict[str, Any]:
     """汇总 pilot_paper 结果记录物化状态。"""
 
@@ -640,7 +642,7 @@ def build_result_summary(
         "pilot_paper_claim_record_ready": bool(validation_report.get("pilot_paper_claim_record_ready", False)),
         "missing_template_examples": missing_rows[:20],
         "materialization_report": dict(materialization_report),
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": str(schema.get("paper_claim_scale", "pilot_paper")),
         "supports_paper_claim": bool(validation_report.get("supports_paper_claim", False)) and not missing_rows,
     }
 
@@ -695,7 +697,7 @@ def write_pilot_paper_result_record_outputs(
         manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
         return manifest
 
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config(root_path)
     context = build_protocol_context(root_path, config)
     schema = context["schema"]
     template_rows = context["template_rows"]
@@ -755,6 +757,7 @@ def write_pilot_paper_result_record_outputs(
         coverage_rows=coverage_rows,
         validation_report=validation_report,
         materialization_report=materialization_report,
+        schema=schema,
     )
 
     records_path = output_path / "pilot_paper_result_records.jsonl"

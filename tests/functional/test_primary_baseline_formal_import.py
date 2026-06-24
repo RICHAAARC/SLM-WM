@@ -75,6 +75,33 @@ def test_formal_import_validator_accepts_governed_full_main_record(tmp_path: Pat
 
 
 @pytest.mark.quick
+def test_formal_import_protocol_switches_prompt_schema_to_full_paper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """主表 baseline 正式导入 schema 和 validator 应跟随 full_paper 运行层级。"""
+
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir(parents=True)
+    (config_dir / "paper_main_full_paper_prompts.txt").write_text("a full paper prompt\n", encoding="utf-8")
+    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
+    row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    row["prompt_protocol_name"] = "paper_main_full_paper_prompt_protocol"
+
+    schema = build_primary_baseline_formal_import_schema(target_fpr=0.01, root=tmp_path)
+    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.01)
+
+    assert schema["paper_claim_scale"] == "full_paper"
+    assert schema["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol"
+    assert schema["full_main_prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol"
+    assert report["overall_decision"] == "pass"
+    assert report["accepted_formal_import_count"] == 1
+
+
+@pytest.mark.quick
 def test_formal_import_validator_rejects_smoke_boundary_and_missing_readiness(tmp_path: Path) -> None:
     """GPU smoke adapter observation 不得被升级为主表正式结果。"""
 

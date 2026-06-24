@@ -17,9 +17,9 @@ if str(ROOT) not in sys.path:
 
 from experiments.protocol.attacks import default_attack_configs
 from experiments.protocol.pilot_paper_fixed_fpr import (
-    PilotPaperFixedFprConfig,
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
+    build_paper_fixed_fpr_config,
     build_pilot_paper_attack_matrix_rows,
     build_pilot_paper_common_protocol_summary,
     build_pilot_paper_manifest_config,
@@ -144,7 +144,7 @@ def write_pilot_paper_fixed_fpr_common_protocol_outputs(
 
     root_path = Path(root).resolve()
     output_path = ensure_output_dir_under_outputs(root_path, output_dir)
-    config = PilotPaperFixedFprConfig()
+    config = build_paper_fixed_fpr_config(root_path)
     prompt_path = resolve_input_path(root_path, config.prompt_file)
     candidate_path = resolve_input_path(root_path, candidate_records_path)
 

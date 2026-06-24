@@ -34,6 +34,18 @@ def write_pilot_prompt_file(repo_root: Path, prompt_count: int = 240) -> None:
     )
 
 
+def write_full_prompt_file(repo_root: Path, prompt_count: int = 240) -> None:
+    """写入满足 full_paper fixed-FPR 最小 clean negative 数量的 prompt 文件。"""
+
+    config_dir = repo_root / "configs"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    prompt_path = config_dir / "paper_main_full_paper_prompts.txt"
+    prompt_path.write_text(
+        "\n".join(f"a controlled full_paper prompt for result import {index}" for index in range(prompt_count)) + "\n",
+        encoding="utf-8",
+    )
+
+
 def write_csv_rows(path: Path, rows: list[dict[str, object]], fieldnames: list[str]) -> None:
     """写出测试 CSV 表格。"""
 
@@ -214,6 +226,37 @@ def test_pilot_paper_result_writer_materializes_slm_and_governed_baseline_record
     assert summary["pilot_paper_template_missing_count"] > 0
     assert any(row["template_covered"] == "True" for row in coverage_rows)
     assert all(path.startswith("outputs/") for path in manifest["output_paths"])
+
+
+@pytest.mark.quick
+def test_result_writer_switches_records_to_full_paper_claim_scale(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """结果记录写出脚本应随论文运行配置切换协议名和主张层级。"""
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    write_full_prompt_file(repo_root)
+    write_attack_matrix_inputs(repo_root)
+    write_baseline_inputs(repo_root, accepted=True)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
+
+    write_pilot_paper_result_record_outputs(root=repo_root, require_existing_evidence=True)
+    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_results"
+    records = [
+        json.loads(line)
+        for line in (output_dir / "pilot_paper_result_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    summary = json.loads((output_dir / "pilot_paper_result_record_summary.json").read_text(encoding="utf-8"))
+
+    assert {row["method_id"] for row in records} == {"slm_wm_current", "tree_ring"}
+    assert all(row["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol" for row in records)
+    assert all(row["result_claim_scope"] == "full_paper_paper_claim" for row in records)
+    assert all(row["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol" for row in records)
+    assert all(row["paper_claim_scale"] == "full_paper" for row in records)
+    assert summary["paper_claim_scale"] == "full_paper"
 
 
 @pytest.mark.quick

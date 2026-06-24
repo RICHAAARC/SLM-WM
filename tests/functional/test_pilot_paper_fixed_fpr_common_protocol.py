@@ -33,6 +33,17 @@ def write_pilot_paper_prompts(repo_root: Path, prompt_count: int = 240) -> Path:
     return prompt_path
 
 
+def write_full_paper_prompts(repo_root: Path, prompt_count: int = 240) -> Path:
+    """写入测试用 full_paper prompt 配置。"""
+
+    config_dir = repo_root / "configs"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    prompt_path = config_dir / "paper_main_full_paper_prompts.txt"
+    prompt_lines = [f"a controlled city full_paper prompt variant {index}" for index in range(prompt_count)]
+    prompt_path.write_text("\n".join(prompt_lines) + "\n", encoding="utf-8")
+    return prompt_path
+
+
 @pytest.mark.quick
 def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_path: Path) -> None:
     """写出脚本应冻结同一 prompt split、同一攻击矩阵和同一 fixed-FPR 协议。"""
@@ -84,6 +95,43 @@ def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_p
     assert all(row["result_claim_scope"] == "pilot_paper_paper_claim" for row in template_rows)
     assert all("true_positive_rate_ci_low" in row["required_metric_fields"] for row in template_rows)
     assert all(path.startswith("outputs/") for path in manifest["output_paths"])
+
+
+@pytest.mark.quick
+def test_writer_switches_common_protocol_to_full_paper_without_logic_fork(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同一共同协议写出脚本应仅凭论文运行配置切换到 full_paper。"""
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    write_full_paper_prompts(repo_root)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
+
+    write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
+    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_common_protocol"
+    summary = json.loads((output_dir / "pilot_paper_common_protocol_summary.json").read_text(encoding="utf-8"))
+    prompt_summary = json.loads((output_dir / "pilot_paper_prompt_split_summary.json").read_text(encoding="utf-8"))
+    schema = json.loads((output_dir / "pilot_paper_result_import_schema.json").read_text(encoding="utf-8"))
+    template_rows = [
+        json.loads(line)
+        for line in (output_dir / "pilot_paper_result_import_template.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert summary["paper_claim_scale"] == "full_paper"
+    assert summary["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol"
+    assert summary["result_claim_scope"] == "full_paper_paper_claim"
+    assert summary["full_paper_claim_ready"] is False
+    assert prompt_summary["prompt_set"] == "full_paper"
+    assert prompt_summary["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol"
+    assert schema["paper_claim_scale"] == "full_paper"
+    assert schema["prompt_set"] == "full_paper"
+    assert schema["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol"
+    assert schema["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol"
+    assert all(row["paper_claim_scale"] == "full_paper" for row in template_rows)
+    assert all(row["result_claim_scope"] == "full_paper_paper_claim" for row in template_rows)
 
 
 def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dict[str, object]:

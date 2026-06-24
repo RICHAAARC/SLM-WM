@@ -138,6 +138,26 @@ def test_ablation_preserves_real_attack_metric_status() -> None:
     assert "governed real regeneration records" in summary["local_proxy_boundary"]
 
 
+@pytest.mark.quick
+def test_ablation_claim_summary_uses_current_paper_run_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
+    """内部消融声明摘要应跟随当前论文运行层级, 不能固定为 pilot_paper。"""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+
+    summary = build_ablation_claim_summary(
+        default_ablation_specs(),
+        (),
+        (),
+        {"attack_metrics_ready": False, "evaluation_boundary": {"target_fpr": 0.01}},
+        {"metadata": {"baseline_results_ready": False}},
+    )
+
+    assert summary["paper_claim_scale"] == "full_paper"
+    assert summary["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol"
+
+
 def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
     """写出内部消融脚本所需的最小上游输入。"""
     attack_dir = tmp_path / "outputs" / "attack_matrix"

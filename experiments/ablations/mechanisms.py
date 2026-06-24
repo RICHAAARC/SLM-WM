@@ -8,8 +8,9 @@ from typing import Any, Iterable
 
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_FIXED_FPR,
-    PILOT_PAPER_RESULT_PROTOCOL_NAME,
+    result_protocol_name_for_run,
 )
+from experiments.protocol.paper_run_config import build_paper_run_config
 from main.core.digest import build_stable_digest
 
 
@@ -696,10 +697,11 @@ def build_ablation_claim_summary(
     )
     protocol_ready = bool(record_tuple) and required_ids.issubset(actual_ids) and bool(attack_manifest.get("attack_metrics_ready"))
     evaluation_boundary = dict(attack_manifest.get("evaluation_boundary", {}))
+    paper_run = build_paper_run_config(".")
     return {
         "construction_unit_name": "internal_ablation_evidence",
-        "result_protocol_name": PILOT_PAPER_RESULT_PROTOCOL_NAME,
-        "paper_claim_scale": "pilot_paper",
+        "result_protocol_name": result_protocol_name_for_run(paper_run.run_name),
+        "paper_claim_scale": paper_run.run_name,
         "target_fpr": float(evaluation_boundary.get("target_fpr", PILOT_PAPER_FIXED_FPR)),
         "ablation_protocol_ready": protocol_ready,
         "mechanism_coverage_ready": required_ids.issubset(actual_ids),

@@ -43,6 +43,7 @@ from experiments.baselines.formal_import import (
     build_primary_baseline_formal_template_coverage_summary,
     build_t2smark_full_main_candidate_records,
     build_tree_ring_method_faithful_candidate_records,
+    resolve_full_main_prompt_protocol_name,
     validate_primary_baseline_formal_import_rows,
 )
 from experiments.baselines.gaussian_shading_official_reference import (
@@ -178,6 +179,7 @@ __all__ = [
     "build_primary_baseline_evidence_summary",
     "build_primary_baseline_report",
     "build_primary_result_templates",
+    "resolve_full_main_prompt_protocol_name",
     "build_shallow_diffuse_official_reference_record",
     "build_shallow_diffuse_official_reference_schema",
     "build_tree_ring_official_reference_record",

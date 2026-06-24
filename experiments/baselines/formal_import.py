@@ -10,7 +10,9 @@ from typing import Any, Iterable, Mapping
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_FIXED_FPR,
     PILOT_PAPER_PROMPT_PROTOCOL_NAME,
+    prompt_protocol_name_for_run,
 )
+from experiments.protocol.paper_run_config import build_paper_run_config
 from main.core.digest import build_stable_digest
 
 PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
@@ -258,9 +260,21 @@ def _issue(row_index: int, row: Mapping[str, Any], field_name: str, reason: str)
     )
 
 
-def build_primary_baseline_formal_import_schema(target_fpr: float = PILOT_PAPER_FIXED_FPR) -> dict[str, Any]:
+def resolve_full_main_prompt_protocol_name(root: str | Path = ".") -> str:
+    """解析当前论文运行层级对应的主表 prompt 协议名称。"""
+
+    return prompt_protocol_name_for_run(build_paper_run_config(root).run_name)
+
+
+def build_primary_baseline_formal_import_schema(
+    target_fpr: float = PILOT_PAPER_FIXED_FPR,
+    *,
+    root: str | Path = ".",
+) -> dict[str, Any]:
     """构造主表 baseline 正式结果导入 schema 的可落盘描述。"""
 
+    paper_run = build_paper_run_config(root)
+    prompt_protocol_name = prompt_protocol_name_for_run(paper_run.run_name)
     return {
         "protocol_name": PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME,
         "primary_baseline_ids": list(PRIMARY_BASELINE_IDS),
@@ -271,9 +285,10 @@ def build_primary_baseline_formal_import_schema(target_fpr: float = PILOT_PAPER_
         "allowed_result_source_types": list(ALLOWED_RESULT_SOURCE_TYPES),
         "allowed_adapter_boundaries": list(ALLOWED_ADAPTER_BOUNDARIES),
         "rejected_adapter_boundaries": list(REJECTED_ADAPTER_BOUNDARIES),
-        "full_main_prompt_protocol_name": FULL_MAIN_PROMPT_PROTOCOL_NAME,
+        "prompt_protocol_name": prompt_protocol_name,
+        "full_main_prompt_protocol_name": prompt_protocol_name,
         "pilot_paper_prompt_protocol_name": PILOT_PAPER_PROMPT_PROTOCOL_NAME,
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": paper_run.run_name,
         "supports_paper_claim": False,
     }
 
@@ -394,6 +409,7 @@ def validate_primary_baseline_formal_import_rows(
     target_fpr: float = PILOT_PAPER_FIXED_FPR,
     require_existing_evidence: bool = True,
     evidence_search_roots: Iterable[str | Path] = (),
+    prompt_protocol_name: str | None = None,
 ) -> dict[str, Any]:
     """校验主表 baseline 正式结果导入记录, 并返回仅包含通过记录的报告。
 
@@ -403,6 +419,7 @@ def validate_primary_baseline_formal_import_rows(
     evidence_root_path = Path(evidence_root).resolve()
     search_roots = _normalized_search_roots(evidence_root_path, evidence_search_roots)
     expected_operating_point = build_fixed_fpr_operating_point(target_fpr)
+    expected_prompt_protocol_name = prompt_protocol_name or resolve_full_main_prompt_protocol_name(evidence_root_path)
     accepted: list[dict[str, Any]] = []
     issues: list[FormalImportIssue] = []
     materialized_rows = [dict(row) for row in rows]
@@ -419,7 +436,7 @@ def validate_primary_baseline_formal_import_rows(
             row_issues.append(_issue(row_index, row, "resource_profile", "full_main_resource_profile_required"))
         if _str_field(row, "comparable_operating_point") != expected_operating_point:
             row_issues.append(_issue(row_index, row, "comparable_operating_point", "fixed_fpr_operating_point_required"))
-        if _str_field(row, "prompt_protocol_name") != FULL_MAIN_PROMPT_PROTOCOL_NAME:
+        if _str_field(row, "prompt_protocol_name") != expected_prompt_protocol_name:
             row_issues.append(_issue(row_index, row, "prompt_protocol_name", "full_main_prompt_protocol_required"))
         if not _str_field(row, "prompt_protocol_digest"):
             row_issues.append(_issue(row_index, row, "prompt_protocol_digest", "prompt_protocol_digest_required"))
@@ -765,6 +782,7 @@ def build_primary_baseline_formal_result_record(
     baseline_result_source_digest: str,
     evidence_paths: Iterable[str],
     prompt_protocol_digest: str,
+    prompt_protocol_name: str | None = None,
     adapter_boundary: str,
     metric_values: Mapping[str, Any],
     ready_flags: Mapping[str, bool],
@@ -782,7 +800,7 @@ def build_primary_baseline_formal_result_record(
         "baseline_result_source": baseline_result_source,
         "baseline_result_source_digest": baseline_result_source_digest,
         "metric_status": "measured",
-        "prompt_protocol_name": FULL_MAIN_PROMPT_PROTOCOL_NAME,
+        "prompt_protocol_name": prompt_protocol_name or resolve_full_main_prompt_protocol_name(),
         "prompt_protocol_digest": prompt_protocol_digest,
         "adapter_boundary": adapter_boundary,
         "evidence_paths": list(evidence_paths),

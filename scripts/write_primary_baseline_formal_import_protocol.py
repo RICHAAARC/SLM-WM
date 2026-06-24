@@ -162,13 +162,14 @@ def write_primary_baseline_formal_import_protocol_outputs(
     execution_plans = build_primary_baseline_execution_plans(source_registry, root=root_path)
     template_rows = build_primary_result_templates(execution_plans, attack_rows, attack_manifest.get("evaluation_boundary", {}))
     formal_template_rows = [row for row in template_rows if str(row.get("resource_profile", "")) == "full_main"]
-    schema = build_primary_baseline_formal_import_schema(target_fpr=target_fpr)
+    schema = build_primary_baseline_formal_import_schema(target_fpr=target_fpr, root=root_path)
     candidate_rows = read_jsonl_rows(resolved_candidate_records_path)
     validation_report = validate_primary_baseline_formal_import_rows(
         candidate_rows,
         evidence_root=root_path,
         target_fpr=target_fpr,
         require_existing_evidence=True,
+        prompt_protocol_name=str(schema["prompt_protocol_name"]),
     )
     readiness_rows = build_primary_baseline_formal_import_readiness_rows(candidate_rows, validation_report)
     readiness_summary = build_primary_baseline_formal_import_readiness_summary(readiness_rows)

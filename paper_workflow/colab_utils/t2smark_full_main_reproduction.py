@@ -14,9 +14,9 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from experiments.baselines import (
-    FULL_MAIN_PROMPT_PROTOCOL_NAME,
     build_fixed_fpr_operating_point,
     build_t2smark_full_main_candidate_records,
+    resolve_full_main_prompt_protocol_name,
     validate_primary_baseline_formal_import_rows,
 )
 from experiments.protocol.pilot_paper_fixed_fpr import (
@@ -269,7 +269,7 @@ def write_full_main_prompt_inputs(
         "pilot_paper_prompt_protocol_ready": bool(prompt_rows)
         and len(prompt_rows) >= PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
         "paper_claim_scale": config.prompt_set,
-        "prompt_protocol_name": FULL_MAIN_PROMPT_PROTOCOL_NAME,
+        "prompt_protocol_name": resolve_full_main_prompt_protocol_name(root_path),
         "prompt_protocol_digest": build_stable_digest([row["prompt_digest"] for row in prompt_rows]),
         "prompt_dataset_path": relative_or_absolute(paths["prompt_dataset"], root_path),
         "prompt_plan_path": relative_or_absolute(paths["prompt_plan"], root_path),
