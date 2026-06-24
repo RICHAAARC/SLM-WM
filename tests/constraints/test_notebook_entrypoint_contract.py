@@ -229,6 +229,8 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
     assert "openai/clip-vit-base-patch32" in joined_source
     assert "SLM_WM_LPIPS_NETWORK', 'alex'" in joined_source
     assert "SLM_WM_PERCEPTUAL_METRIC_DEVICE', 'cpu'" in joined_source
+    assert "SLM_WM_ENABLE_PIPELINE_PROGRESS_BAR', '0'" in joined_source
+    assert "SLM_WM_ENABLE_CARRIER_PROGRESS_BAR', '1'" in joined_source
     assert "perceptual_metrics_ready" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source

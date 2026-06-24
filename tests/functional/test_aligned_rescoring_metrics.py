@@ -37,6 +37,8 @@ def test_default_config_requires_pair_perceptual_metrics(monkeypatch: pytest.Mon
     monkeypatch.delenv("SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS", raising=False)
     monkeypatch.delenv("SLM_WM_CLIP_MODEL_ID", raising=False)
     monkeypatch.delenv("SLM_WM_LPIPS_NETWORK", raising=False)
+    monkeypatch.delenv("SLM_WM_ENABLE_PIPELINE_PROGRESS_BAR", raising=False)
+    monkeypatch.delenv("SLM_WM_ENABLE_CARRIER_PROGRESS_BAR", raising=False)
 
     config = helper.build_default_config()
 
@@ -45,6 +47,54 @@ def test_default_config_requires_pair_perceptual_metrics(monkeypatch: pytest.Mon
     assert config.clip_model_id == helper.DEFAULT_CLIP_MODEL_ID
     assert config.lpips_network == helper.DEFAULT_LPIPS_NETWORK
     assert config.perceptual_metric_device_name == "cpu"
+    assert config.enable_pipeline_progress_bar is False
+    assert config.enable_carrier_progress_bar is True
+
+
+@pytest.mark.quick
+def test_pipeline_progress_bar_defaults_to_disabled() -> None:
+    """Diffusers 单次推理进度条默认关闭, 由 carrier 总进度承担长流程反馈。"""
+
+    class FakePipeline:
+        def __init__(self) -> None:
+            self.progress_bar_config: dict[str, bool] = {}
+
+        def set_progress_bar_config(self, **kwargs: bool) -> None:
+            self.progress_bar_config.update(kwargs)
+
+    pipeline = FakePipeline()
+    status = helper.configure_pipeline_progress_bar(pipeline, make_config())
+
+    assert status == "pipeline_progress_bar_disabled"
+    assert pipeline.progress_bar_config == {"disable": True}
+
+
+@pytest.mark.quick
+def test_pipeline_progress_bar_can_be_reenabled() -> None:
+    """排查单次 diffusion 调用时, 仍可通过配置恢复 pipeline 内部进度条。"""
+
+    class FakePipeline:
+        def __init__(self) -> None:
+            self.progress_bar_config: dict[str, bool] = {}
+
+        def set_progress_bar_config(self, **kwargs: bool) -> None:
+            self.progress_bar_config.update(kwargs)
+
+    pipeline = FakePipeline()
+    status = helper.configure_pipeline_progress_bar(pipeline, make_config(enable_pipeline_progress_bar=True))
+
+    assert status == "pipeline_progress_bar_enabled"
+    assert pipeline.progress_bar_config == {"disable": False}
+
+
+@pytest.mark.quick
+def test_carrier_progress_iterator_preserves_record_order_without_tqdm() -> None:
+    """关闭总进度条时, carrier 迭代顺序和索引应保持不变。"""
+    records = ({"carrier_id": "a"}, {"carrier_id": "b"})
+
+    observed = list(helper.iterate_carriers_with_progress(records, make_config(enable_carrier_progress_bar=False)))
+
+    assert observed == [(0, {"carrier_id": "a"}), (1, {"carrier_id": "b"})]
 
 
 @pytest.mark.quick

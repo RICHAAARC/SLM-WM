@@ -84,6 +84,8 @@ class AlignedRescoringConfig:
     clip_model_id: str = DEFAULT_CLIP_MODEL_ID
     lpips_network: str = DEFAULT_LPIPS_NETWORK
     perceptual_metric_device_name: str = "cpu"
+    enable_pipeline_progress_bar: bool = False
+    enable_carrier_progress_bar: bool = True
 
     def __post_init__(self) -> None:
         """集中校验配置边界, 避免运行路径重复构造错误信息。"""
@@ -213,6 +215,29 @@ def parse_bool_environment(name: str, default: bool) -> bool:
     if normalized in {"0", "false", "no", "n", "off"}:
         return False
     raise ValueError(f"{name} 必须使用布尔值文本")
+
+
+def configure_pipeline_progress_bar(pipeline: Any, config: AlignedRescoringConfig) -> str:
+    """配置 Diffusers 单次推理进度条, 使长流程默认只展示 carrier 总进度。"""
+    if not hasattr(pipeline, "set_progress_bar_config"):
+        return "pipeline_progress_bar_config_unavailable"
+    pipeline.set_progress_bar_config(disable=not config.enable_pipeline_progress_bar)
+    return "pipeline_progress_bar_enabled" if config.enable_pipeline_progress_bar else "pipeline_progress_bar_disabled"
+
+
+def iterate_carriers_with_progress(
+    carrier_records: tuple[dict[str, Any], ...],
+    config: AlignedRescoringConfig,
+) -> Any:
+    """按 carrier 维度提供总进度, 避免每次 diffusion 调用刷屏。"""
+    enumerated_records = enumerate(carrier_records)
+    if not config.enable_carrier_progress_bar:
+        return enumerated_records
+    try:
+        from tqdm.auto import tqdm
+    except Exception:
+        return enumerated_records
+    return tqdm(enumerated_records, total=len(carrier_records), desc="aligned rescoring carriers")
 
 
 def read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
@@ -801,6 +826,8 @@ def build_failure_result(config: AlignedRescoringConfig, error: Exception) -> Al
             "require_pair_perceptual_metrics": config.require_pair_perceptual_metrics,
             "clip_model_id": config.clip_model_id,
             "lpips_network": config.lpips_network,
+            "enable_pipeline_progress_bar": config.enable_pipeline_progress_bar,
+            "enable_carrier_progress_bar": config.enable_carrier_progress_bar,
             "supports_paper_claim": False,
         },
     )
@@ -881,6 +908,7 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
         )
         content_updates = build_content_update_lookup(root_path, selected_content_records)
         pipeline, runtime_versions = load_pipeline(config)  # type: ignore[arg-type]
+        pipeline_progress_bar_status = configure_pipeline_progress_bar(pipeline, config)
         runtime_versions = {
             **runtime_versions,
             "enable_pair_perceptual_metrics": config.enable_pair_perceptual_metrics,
@@ -889,8 +917,11 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
             "lpips_network": config.lpips_network,
             "perceptual_metric_device_name": config.perceptual_metric_device_name,
             "pair_perceptual_dependency_install_command": PAIR_PERCEPTUAL_DEPENDENCY_INSTALL_COMMAND,
+            "enable_pipeline_progress_bar": config.enable_pipeline_progress_bar,
+            "enable_carrier_progress_bar": config.enable_carrier_progress_bar,
+            "pipeline_progress_bar_status": pipeline_progress_bar_status,
         }
-        for run_index, carrier_record in enumerate(carrier_records):
+        for run_index, carrier_record in iterate_carriers_with_progress(carrier_records, config):
             current_prompt_id = str(carrier_record.get("metadata", {}).get("prompt_id", ""))
             current_prompt_text = prompt_lookup[current_prompt_id]
             current_content_records = content_by_prompt.get(current_prompt_id, ())
@@ -1011,6 +1042,8 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
             "clip_model_id": config.clip_model_id,
             "lpips_network": config.lpips_network,
             "perceptual_metrics_ready": result.perceptual_metrics_ready,
+            "enable_pipeline_progress_bar": config.enable_pipeline_progress_bar,
+            "enable_carrier_progress_bar": config.enable_carrier_progress_bar,
             "full_method_claim_ready": result.full_method_claim_ready,
         },
         code_version=resolve_code_version(root_path),
@@ -1055,6 +1088,8 @@ def build_default_config() -> AlignedRescoringConfig:
         clip_model_id=os.environ.get("SLM_WM_CLIP_MODEL_ID", DEFAULT_CLIP_MODEL_ID),
         lpips_network=os.environ.get("SLM_WM_LPIPS_NETWORK", DEFAULT_LPIPS_NETWORK),
         perceptual_metric_device_name=os.environ.get("SLM_WM_PERCEPTUAL_METRIC_DEVICE", "cpu"),
+        enable_pipeline_progress_bar=parse_bool_environment("SLM_WM_ENABLE_PIPELINE_PROGRESS_BAR", False),
+        enable_carrier_progress_bar=parse_bool_environment("SLM_WM_ENABLE_CARRIER_PROGRESS_BAR", True),
     )
 
 
