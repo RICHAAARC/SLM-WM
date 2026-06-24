@@ -1244,3 +1244,42 @@ Notebook 与 repository module 的跨边界数据
 | source_patch_reason | governance | none | false | false | false | 外部源码缓存兼容补丁被应用的原因说明。|
 | source_patch_report | artifact | none | false | false | false | 外部源码缓存兼容补丁报告对象。|
 | source_prepare_skipped | governance | none | false | false | false | 已有外部官方结果可复用时是否跳过源码缓存准备。|
+
+| prompt_file | protocol | none | false | false | false | prompt 协议使用的配置文件路径。|
+| risk_profile_counts | protocol | none | false | false | false | 按 risk_profile 聚合的 prompt 数量。|
+| calibration_clean_negative_count | metric | none | false | false | false | fixed-FPR 校准 split 中 clean negative 样本数量。|
+| test_clean_negative_count | metric | none | false | false | false | fixed-FPR 测试 split 中 clean negative 样本数量。|
+| pilot_common_protocol_ready | governance | none | false | false | false | pilot 级 fixed-FPR 共同协议是否完成运行前治理冻结。|
+| pilot_prompt_count | metric | none | false | false | false | pilot prompt split 中的 prompt 数量。|
+| pilot_prompt_split_ready | governance | none | false | false | false | pilot prompt split 是否可供共同协议使用。|
+| pilot_target_fpr | protocol | none | false | false | false | pilot 共同协议使用的 fixed-FPR 目标值。|
+| pilot_negative_count_minimum_required | metric | none | false | false | false | pilot fixed-FPR 校准所要求的最小 clean negative 数量。|
+| pilot_negative_count_ready | governance | none | false | false | false | pilot prompt split 中 clean negative 数量是否满足最小要求。|
+| pilot_attack_count | metric | none | false | false | false | pilot 共同协议攻击矩阵中的攻击配置数量。|
+| pilot_method_count | metric | none | false | false | false | pilot 共同协议覆盖的方法数量。|
+| pilot_import_template_count | metric | none | false | false | false | pilot 共同协议生成的 method × attack 导入模板数量。|
+| pilot_result_import_ready | governance | none | false | false | false | pilot 结果候选记录是否已通过受治理导入 schema。|
+| accepted_pilot_import_count | metric | none | false | false | false | 已通过 pilot 受治理导入 schema 的结果记录数量。|
+| rejected_pilot_import_count | metric | none | false | false | false | 未通过 pilot 受治理导入 schema 的结果记录数量。|
+| pilot_import_issue_count | metric | none | false | false | false | pilot 受治理导入 schema 发现的问题数量。|
+| pilot_supports_superiority_claim | governance | none | false | false | false | pilot 结果是否允许支撑方法显著优越主张。当前必须为 false。|
+| full_main_paper_claim_ready | governance | none | false | false | false | full-main 论文主张是否已具备证据闭合。pilot 共同协议中必须为 false。|
+| prompt_split_digest | artifact | none | false | false | false | 共同协议使用的 prompt split 稳定摘要。|
+| attack_matrix_digest | artifact | none | false | false | false | 共同协议使用的攻击矩阵稳定摘要。|
+| fixed_fpr_protocol_digest | artifact | none | false | false | false | fixed-FPR 校准协议的稳定摘要。|
+| bootstrap_iteration_count | protocol | none | false | false | false | 结果置信区间 bootstrap 采样次数。|
+| confidence_level | protocol | none | false | false | false | 置信区间使用的置信水平。|
+| result_scope | protocol | none | false | false | false | 结果记录所属的共同协议范围。|
+| result_claim_scope | governance | none | false | false | false | 结果记录允许支撑的声明范围。|
+| governed_import_required | governance | none | false | false | false | 方法结果是否必须通过受治理导入协议进入对比表。|
+| method_ids | protocol | none | false | false | false | 当前共同协议要求覆盖的方法 id 集合。|
+| required_rate_fields | protocol | none | false | false | false | 导入 schema 要求按 [0,1] 率值校验的字段集合。|
+| ci_field_groups | protocol | none | false | false | false | 导入 schema 中 metric 与置信区间上下界的字段组合。|
+| pilot_result_template_id | artifact | none | true | false | false | pilot 共同协议结果导入模板行的稳定标识。|
+| pilot_result_template_digest | artifact | none | true | false | false | pilot 共同协议结果导入模板行的稳定摘要。|
+| quality_score_mean | metric | none | true | false | false | pilot 共同协议中的图像质量分数均值。|
+| quality_score_ci_low | metric | none | true | false | false | pilot 图像质量分数置信区间下界。|
+| quality_score_ci_high | metric | none | true | false | false | pilot 图像质量分数置信区间上界。|
+| score_retention_ci_low | metric | none | true | false | false | pilot 攻击后分数保持率置信区间下界。|
+| score_retention_ci_high | metric | none | true | false | false | pilot 攻击后分数保持率置信区间上界。|
+| prompt_split_ready | governance | none | false | false | false | prompt split 是否满足共同协议使用条件。|

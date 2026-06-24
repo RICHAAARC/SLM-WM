@@ -1,0 +1,656 @@
+"""构建 pilot 级 fixed-FPR 共同协议。
+
+该模块只描述 pilot 共同验证协议的受治理输入、阈值边界、攻击矩阵、
+baseline 导入模板和声明边界。它不执行 GPU 推理, 也不把 pilot 结果
+提升为 full-main 论文主张。
+"""
+
+from __future__ import annotations
+
+from collections import Counter
+from dataclasses import asdict, dataclass
+import math
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+from experiments.protocol.attacks import AttackConfig, attack_config_digest
+from experiments.protocol.prompts import PromptProtocolRecord
+from experiments.protocol.splits import apply_split_assignments
+from main.core.digest import build_stable_digest
+
+PILOT_PROMPT_SET = "pilot"
+PILOT_PROMPT_FILE = "configs/paper_main_pilot_prompts.txt"
+PILOT_PROMPT_PROTOCOL_NAME = "paper_main_pilot_prompt_protocol"
+PILOT_RESULT_PROTOCOL_NAME = "pilot_fixed_fpr_common_protocol"
+PILOT_RESULT_SCOPE = "pilot_common_protocol"
+PILOT_CLAIM_BOUNDARY = "pilot_not_full_main_paper_claim"
+PILOT_FIXED_FPR = 0.01
+PILOT_BOOTSTRAP_ITERATION_COUNT = 1000
+PILOT_CONFIDENCE_LEVEL = 0.95
+PILOT_MINIMUM_CLEAN_NEGATIVE_COUNT = 100
+PILOT_METHOD_IDS = ("slm_wm_current", "tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+PILOT_PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+PILOT_ATTACK_RESOURCE_PROFILES = ("pilot", "full_main", "full_extra")
+
+PILOT_REQUIRED_METRIC_FIELDS = (
+    "positive_count",
+    "negative_count",
+    "attack_record_count",
+    "supported_record_count",
+    "true_positive_rate",
+    "true_positive_rate_ci_low",
+    "true_positive_rate_ci_high",
+    "false_positive_rate",
+    "false_positive_rate_ci_low",
+    "false_positive_rate_ci_high",
+    "clean_false_positive_rate",
+    "clean_false_positive_rate_ci_low",
+    "clean_false_positive_rate_ci_high",
+    "attacked_false_positive_rate",
+    "attacked_false_positive_rate_ci_low",
+    "attacked_false_positive_rate_ci_high",
+    "quality_score_mean",
+    "quality_score_ci_low",
+    "quality_score_ci_high",
+    "score_retention_mean",
+    "score_retention_ci_low",
+    "score_retention_ci_high",
+)
+PILOT_REQUIRED_SOURCE_FIELDS = (
+    "result_protocol_name",
+    "result_scope",
+    "result_claim_scope",
+    "method_id",
+    "prompt_protocol_name",
+    "prompt_split_digest",
+    "attack_matrix_digest",
+    "fixed_fpr_protocol_digest",
+    "baseline_result_source",
+    "baseline_result_source_digest",
+    "evidence_paths",
+)
+PILOT_RATE_FIELDS = (
+    "true_positive_rate",
+    "false_positive_rate",
+    "clean_false_positive_rate",
+    "attacked_false_positive_rate",
+    "quality_score_mean",
+    "score_retention_mean",
+)
+PILOT_CI_FIELD_GROUPS = (
+    ("true_positive_rate_ci_low", "true_positive_rate", "true_positive_rate_ci_high"),
+    ("false_positive_rate_ci_low", "false_positive_rate", "false_positive_rate_ci_high"),
+    ("clean_false_positive_rate_ci_low", "clean_false_positive_rate", "clean_false_positive_rate_ci_high"),
+    ("attacked_false_positive_rate_ci_low", "attacked_false_positive_rate", "attacked_false_positive_rate_ci_high"),
+    ("quality_score_ci_low", "quality_score_mean", "quality_score_ci_high"),
+    ("score_retention_ci_low", "score_retention_mean", "score_retention_ci_high"),
+)
+
+
+@dataclass(frozen=True)
+class PilotFixedFprConfig:
+    """集中描述 pilot 级 fixed-FPR 共同协议配置。
+
+    该对象属于通用工程写法: 把 prompt set、固定 FPR、bootstrap 次数和
+    论文声明边界集中在 dataclass 构造层, 业务函数只消费已经归一化的配置。
+    """
+
+    prompt_set: str = PILOT_PROMPT_SET
+    prompt_file: str = PILOT_PROMPT_FILE
+    prompt_protocol_name: str = PILOT_PROMPT_PROTOCOL_NAME
+    result_protocol_name: str = PILOT_RESULT_PROTOCOL_NAME
+    result_scope: str = PILOT_RESULT_SCOPE
+    result_claim_scope: str = PILOT_CLAIM_BOUNDARY
+    target_fpr: float = PILOT_FIXED_FPR
+    bootstrap_iteration_count: int = PILOT_BOOTSTRAP_ITERATION_COUNT
+    confidence_level: float = PILOT_CONFIDENCE_LEVEL
+    minimum_clean_negative_count: int = PILOT_MINIMUM_CLEAN_NEGATIVE_COUNT
+    attack_resource_profiles: tuple[str, ...] = PILOT_ATTACK_RESOURCE_PROFILES
+
+    def __post_init__(self) -> None:
+        """集中校验不可恢复的协议边界。"""
+
+        if self.prompt_set != PILOT_PROMPT_SET:
+            raise ValueError("pilot fixed-FPR 协议只能使用 pilot prompt set")
+        if not 0.0 < self.target_fpr < 1.0:
+            raise ValueError("target_fpr 必须位于 (0, 1)")
+        if self.bootstrap_iteration_count <= 0:
+            raise ValueError("bootstrap_iteration_count 必须为正整数")
+        if not 0.0 < self.confidence_level < 1.0:
+            raise ValueError("confidence_level 必须位于 (0, 1)")
+        if self.minimum_clean_negative_count <= 0:
+            raise ValueError("minimum_clean_negative_count 必须为正整数")
+
+    def to_dict(self) -> dict[str, Any]:
+        """转为 JSON 兼容字典。"""
+
+        payload = asdict(self)
+        payload["attack_resource_profiles"] = list(self.attack_resource_profiles)
+        return payload
+
+
+@dataclass(frozen=True)
+class PilotImportIssue:
+    """记录 pilot 结果导入 schema 校验中的单个问题。"""
+
+    row_index: int
+    method_id: str
+    field_name: str
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        """转为 JSON 兼容字典。"""
+
+        return asdict(self)
+
+
+def _str_field(row: Mapping[str, Any], field_name: str) -> str:
+    """读取字符串字段, 缺失时返回空字符串。"""
+
+    return str(row.get(field_name, "") or "")
+
+
+def _bool_field(row: Mapping[str, Any], field_name: str) -> bool:
+    """读取布尔字段, 兼容 JSON 与 CSV 文本表示。"""
+
+    value = row.get(field_name)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+
+def _int_field(row: Mapping[str, Any], field_name: str) -> int:
+    """读取非负计数字段。"""
+
+    return int(float(row.get(field_name, 0) or 0))
+
+
+def _float_field(row: Mapping[str, Any], field_name: str) -> float:
+    """读取有限浮点字段。"""
+
+    value = float(row.get(field_name, 0.0) or 0.0)
+    if value != value or value in {float("inf"), float("-inf")}:
+        raise ValueError(f"{field_name} 必须是有限数值")
+    return value
+
+
+def _list_field(row: Mapping[str, Any], field_name: str) -> tuple[str, ...]:
+    """读取列表字段, 兼容列表、元组和分号分隔文本。"""
+
+    value = row.get(field_name, ())
+    if isinstance(value, list | tuple):
+        return tuple(str(item) for item in value if str(item).strip())
+    if isinstance(value, str):
+        return tuple(part.strip() for part in value.split(";") if part.strip())
+    return ()
+
+
+def _issue(row_index: int, row: Mapping[str, Any], field_name: str, reason: str) -> PilotImportIssue:
+    """构造统一 schema issue。"""
+
+    return PilotImportIssue(
+        row_index=row_index,
+        method_id=_str_field(row, "method_id"),
+        field_name=field_name,
+        reason=reason,
+    )
+
+
+def _relative_or_absolute(path: Path, root_path: Path) -> str:
+    """优先记录相对仓库根目录的路径。"""
+
+    try:
+        return path.resolve().relative_to(root_path.resolve()).as_posix()
+    except ValueError:
+        return path.resolve().as_posix()
+
+
+def _stable_records_for_prompt_split(records: Iterable[PromptProtocolRecord]) -> list[dict[str, Any]]:
+    """提取生成 prompt split 摘要所需的稳定字段。"""
+
+    return [
+        {
+            "prompt_id": record.prompt_id,
+            "prompt_digest": record.prompt_digest,
+            "prompt_set": record.prompt_set,
+            "risk_profile": record.risk_profile,
+            "split": record.split,
+        }
+        for record in sorted(records, key=lambda item: item.prompt_id)
+    ]
+
+
+def build_pilot_prompt_split_summary(
+    prompt_records: Iterable[PromptProtocolRecord],
+    config: PilotFixedFprConfig | None = None,
+) -> dict[str, Any]:
+    """构建 pilot prompt split 摘要。
+
+    此处设计的主要考虑在于: pilot 共同协议必须冻结同一个 prompt split
+    digest, 后续 proposed method 与全部 baseline 只能引用该 digest, 不能各自
+    重新划分样本。
+    """
+
+    resolved_config = config or PilotFixedFprConfig()
+    pilot_records = tuple(record for record in prompt_records if record.prompt_set == resolved_config.prompt_set)
+    assigned_records = apply_split_assignments(pilot_records)
+    split_counts = dict(sorted(Counter(record.split for record in assigned_records).items()))
+    risk_profile_counts = dict(sorted(Counter(record.risk_profile for record in assigned_records).items()))
+    split_record_payload = _stable_records_for_prompt_split(assigned_records)
+    calibration_ids = {record.prompt_id for record in assigned_records if record.split == "calibration"}
+    test_ids = {record.prompt_id for record in assigned_records if record.split == "test"}
+    calibration_clean_negative_count = len(calibration_ids)
+    test_clean_negative_count = len(test_ids)
+    allowed_false_positive_count = math.floor(resolved_config.target_fpr * calibration_clean_negative_count)
+    prompt_split_digest = build_stable_digest(split_record_payload)
+    minimum_ready = (
+        calibration_clean_negative_count >= resolved_config.minimum_clean_negative_count
+        and test_clean_negative_count >= resolved_config.minimum_clean_negative_count
+    )
+    return {
+        "prompt_set": resolved_config.prompt_set,
+        "prompt_file": resolved_config.prompt_file,
+        "prompt_protocol_name": resolved_config.prompt_protocol_name,
+        "pilot_prompt_count": len(assigned_records),
+        "split_counts": split_counts,
+        "risk_profile_counts": risk_profile_counts,
+        "calibration_test_disjoint": calibration_ids.isdisjoint(test_ids),
+        "calibration_clean_negative_count": calibration_clean_negative_count,
+        "test_clean_negative_count": test_clean_negative_count,
+        "pilot_negative_count_minimum_required": resolved_config.minimum_clean_negative_count,
+        "pilot_negative_count_ready": minimum_ready,
+        "target_fpr": resolved_config.target_fpr,
+        "allowed_false_positive_count": allowed_false_positive_count,
+        "prompt_split_digest": prompt_split_digest,
+        "prompt_split_ready": bool(assigned_records) and calibration_ids.isdisjoint(test_ids) and minimum_ready,
+        "supports_paper_claim": False,
+    }
+
+
+def build_pilot_attack_matrix_rows(
+    attack_configs: Iterable[AttackConfig],
+    config: PilotFixedFprConfig | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """构建 pilot 共同协议使用的同一攻击矩阵行。
+
+    这一实现属于项目特定写法: 它复用已有攻击配置, 但用 pilot 协议 digest
+    约束所有方法共享同一批攻击定义。
+    """
+
+    resolved_config = config or PilotFixedFprConfig()
+    rows: list[dict[str, Any]] = []
+    for attack_config in attack_configs:
+        if not attack_config.enabled or attack_config.resource_profile not in resolved_config.attack_resource_profiles:
+            continue
+        config_digest = attack_config_digest(attack_config)
+        row = {
+            "attack_id": attack_config.attack_id,
+            "attack_family": attack_config.attack_family,
+            "attack_name": attack_config.attack_name,
+            "attack_strength": attack_config.attack_strength,
+            "resource_profile": attack_config.resource_profile,
+            "requires_gpu": attack_config.requires_gpu,
+            "attack_parameters": dict(attack_config.attack_parameters),
+            "attack_config_digest": config_digest,
+            "result_scope": resolved_config.result_scope,
+            "supports_paper_claim": False,
+        }
+        rows.append(row)
+    return tuple(sorted(rows, key=lambda item: (item["resource_profile"], item["attack_family"], item["attack_name"], item["attack_id"])))
+
+
+def build_fixed_fpr_protocol_digest(config: PilotFixedFprConfig | None = None) -> str:
+    """生成 pilot fixed-FPR 协议摘要。"""
+
+    resolved_config = config or PilotFixedFprConfig()
+    payload = {
+        "result_protocol_name": resolved_config.result_protocol_name,
+        "result_scope": resolved_config.result_scope,
+        "target_fpr": resolved_config.target_fpr,
+        "calibration_split": "calibration",
+        "test_split": "test",
+        "calibration_role": "clean_negative",
+        "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
+        "confidence_level": resolved_config.confidence_level,
+        "result_claim_scope": resolved_config.result_claim_scope,
+    }
+    return build_stable_digest(payload)
+
+
+def build_pilot_result_import_schema(
+    *,
+    prompt_split_digest: str,
+    attack_matrix_digest: str,
+    fixed_fpr_protocol_digest: str,
+    config: PilotFixedFprConfig | None = None,
+) -> dict[str, Any]:
+    """构建 pilot 结果受治理导入 schema 描述。"""
+
+    resolved_config = config or PilotFixedFprConfig()
+    return {
+        "result_protocol_name": resolved_config.result_protocol_name,
+        "result_scope": resolved_config.result_scope,
+        "result_claim_scope": resolved_config.result_claim_scope,
+        "prompt_set": resolved_config.prompt_set,
+        "prompt_protocol_name": resolved_config.prompt_protocol_name,
+        "prompt_split_digest": prompt_split_digest,
+        "attack_matrix_digest": attack_matrix_digest,
+        "fixed_fpr_protocol_digest": fixed_fpr_protocol_digest,
+        "target_fpr": resolved_config.target_fpr,
+        "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
+        "confidence_level": resolved_config.confidence_level,
+        "method_ids": list(PILOT_METHOD_IDS),
+        "primary_baseline_ids": list(PILOT_PRIMARY_BASELINE_IDS),
+        "required_metric_fields": list(PILOT_REQUIRED_METRIC_FIELDS),
+        "required_source_fields": list(PILOT_REQUIRED_SOURCE_FIELDS),
+        "required_rate_fields": list(PILOT_RATE_FIELDS),
+        "ci_field_groups": [list(group) for group in PILOT_CI_FIELD_GROUPS],
+        "supports_paper_claim": False,
+    }
+
+
+def build_pilot_method_registry_rows(
+    *,
+    prompt_split_digest: str,
+    attack_matrix_digest: str,
+    fixed_fpr_protocol_digest: str,
+    config: PilotFixedFprConfig | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """构建参与 pilot 共同协议的方法登记表。"""
+
+    resolved_config = config or PilotFixedFprConfig()
+    display_names = {
+        "slm_wm_current": "SLM-WM",
+        "tree_ring": "Tree-Ring",
+        "gaussian_shading": "Gaussian Shading",
+        "shallow_diffuse": "Shallow Diffuse",
+        "t2smark": "T2SMark",
+    }
+    rows: list[dict[str, Any]] = []
+    for method_id in PILOT_METHOD_IDS:
+        role = "proposed_method" if method_id == "slm_wm_current" else "primary_baseline"
+        rows.append(
+            {
+                "method_id": method_id,
+                "method_name": display_names[method_id],
+                "method_role": role,
+                "prompt_set": resolved_config.prompt_set,
+                "prompt_file": resolved_config.prompt_file,
+                "prompt_protocol_name": resolved_config.prompt_protocol_name,
+                "prompt_split_digest": prompt_split_digest,
+                "attack_matrix_digest": attack_matrix_digest,
+                "fixed_fpr_protocol_digest": fixed_fpr_protocol_digest,
+                "target_fpr": resolved_config.target_fpr,
+                "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
+                "confidence_level": resolved_config.confidence_level,
+                "result_protocol_name": resolved_config.result_protocol_name,
+                "result_scope": resolved_config.result_scope,
+                "result_claim_scope": resolved_config.result_claim_scope,
+                "governed_import_required": True,
+                "supports_paper_claim": False,
+            }
+        )
+    return tuple(rows)
+
+
+def build_pilot_result_import_template_rows(
+    method_rows: Iterable[Mapping[str, Any]],
+    attack_rows: Iterable[Mapping[str, Any]],
+    config: PilotFixedFprConfig | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """构建 method × attack 的 pilot 结果导入模板。
+
+    在其他项目中可复用的部分是模板生成方式: 它不依赖具体 baseline 代码,
+    只要求每个方法在同一 prompt split、同一 attack matrix 和同一 fixed-FPR
+    协议下提交同构结果记录。
+    """
+
+    resolved_config = config or PilotFixedFprConfig()
+    rows: list[dict[str, Any]] = []
+    for method_row in method_rows:
+        for attack_row in attack_rows:
+            payload = {
+                "method_id": _str_field(method_row, "method_id"),
+                "method_role": _str_field(method_row, "method_role"),
+                "attack_id": _str_field(attack_row, "attack_id"),
+                "attack_family": _str_field(attack_row, "attack_family"),
+                "attack_name": _str_field(attack_row, "attack_name"),
+                "resource_profile": _str_field(attack_row, "resource_profile"),
+                "requires_gpu": bool(attack_row.get("requires_gpu")),
+                "target_fpr": resolved_config.target_fpr,
+                "result_protocol_name": resolved_config.result_protocol_name,
+                "result_scope": resolved_config.result_scope,
+                "result_claim_scope": resolved_config.result_claim_scope,
+                "prompt_protocol_name": resolved_config.prompt_protocol_name,
+                "prompt_split_digest": _str_field(method_row, "prompt_split_digest"),
+                "attack_matrix_digest": _str_field(method_row, "attack_matrix_digest"),
+                "fixed_fpr_protocol_digest": _str_field(method_row, "fixed_fpr_protocol_digest"),
+                "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
+                "confidence_level": resolved_config.confidence_level,
+                "required_metric_fields": list(PILOT_REQUIRED_METRIC_FIELDS),
+                "required_source_fields": list(PILOT_REQUIRED_SOURCE_FIELDS),
+                "required_result_record_path": "outputs/pilot_fixed_fpr_results/pilot_result_records.jsonl",
+                "supports_paper_claim": False,
+            }
+            digest = build_stable_digest(payload)
+            payload["pilot_result_template_id"] = f"pilot_result_template_{digest[:16]}"
+            payload["pilot_result_template_digest"] = digest
+            rows.append(payload)
+    return tuple(rows)
+
+
+def _validate_required_fields(row: Mapping[str, Any], row_index: int, schema: Mapping[str, Any]) -> list[PilotImportIssue]:
+    """校验 schema 要求的字段是否存在。"""
+
+    issues: list[PilotImportIssue] = []
+    for field_name in tuple(schema["required_metric_fields"]) + tuple(schema["required_source_fields"]):
+        value = row.get(field_name)
+        missing = (
+            field_name not in row
+            or value is None
+            or (isinstance(value, str) and not value.strip())
+            or (isinstance(value, list | tuple) and not value)
+        )
+        if missing:
+            issues.append(_issue(row_index, row, field_name, "required_field_missing"))
+    return issues
+
+
+def _validate_counts_and_rates(row: Mapping[str, Any], row_index: int, schema: Mapping[str, Any]) -> list[PilotImportIssue]:
+    """校验计数、率值和置信区间边界。"""
+
+    issues: list[PilotImportIssue] = []
+    for field_name in ("positive_count", "negative_count", "supported_record_count"):
+        if _int_field(row, field_name) <= 0:
+            issues.append(_issue(row_index, row, field_name, "positive_count_required"))
+    if _int_field(row, "attack_record_count") < _int_field(row, "supported_record_count"):
+        issues.append(_issue(row_index, row, "attack_record_count", "attack_record_count_must_cover_supported_count"))
+    for field_name in schema["required_rate_fields"]:
+        value = _float_field(row, field_name)
+        if not 0.0 <= value <= 1.0:
+            issues.append(_issue(row_index, row, field_name, "metric_rate_must_be_in_unit_interval"))
+    for low_name, value_name, high_name in schema["ci_field_groups"]:
+        low = _float_field(row, low_name)
+        value = _float_field(row, value_name)
+        high = _float_field(row, high_name)
+        if not (0.0 <= low <= value <= high <= 1.0):
+            issues.append(_issue(row_index, row, value_name, "confidence_interval_must_cover_metric"))
+    return issues
+
+
+def _validate_protocol_fields(row: Mapping[str, Any], row_index: int, schema: Mapping[str, Any]) -> list[PilotImportIssue]:
+    """校验 prompt、attack、fixed-FPR 和声明边界是否与 schema 一致。"""
+
+    issues: list[PilotImportIssue] = []
+    equality_fields = (
+        "result_protocol_name",
+        "result_scope",
+        "result_claim_scope",
+        "prompt_protocol_name",
+        "prompt_split_digest",
+        "attack_matrix_digest",
+        "fixed_fpr_protocol_digest",
+    )
+    for field_name in equality_fields:
+        if _str_field(row, field_name) != str(schema[field_name]):
+            issues.append(_issue(row_index, row, field_name, "protocol_value_mismatch"))
+    if _str_field(row, "method_id") not in set(schema["method_ids"]):
+        issues.append(_issue(row_index, row, "method_id", "pilot_method_id_required"))
+    if not math.isclose(_float_field(row, "target_fpr"), float(schema["target_fpr"]), rel_tol=0.0, abs_tol=1e-12):
+        issues.append(_issue(row_index, row, "target_fpr", "target_fpr_mismatch"))
+    if _int_field(row, "bootstrap_iteration_count") < int(schema["bootstrap_iteration_count"]):
+        issues.append(_issue(row_index, row, "bootstrap_iteration_count", "bootstrap_iteration_count_too_small"))
+    if not math.isclose(
+        _float_field(row, "confidence_level"),
+        float(schema["confidence_level"]),
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        issues.append(_issue(row_index, row, "confidence_level", "confidence_level_mismatch"))
+    if _bool_field(row, "supports_paper_claim"):
+        issues.append(_issue(row_index, row, "supports_paper_claim", "pilot_result_must_not_support_paper_claim"))
+    return issues
+
+
+def _validate_evidence_paths(
+    row: Mapping[str, Any],
+    row_index: int,
+    evidence_root: Path,
+    require_existing_evidence: bool,
+) -> list[PilotImportIssue]:
+    """校验证据路径字段是否非空, 并在需要时检查文件存在。"""
+
+    evidence_paths = _list_field(row, "evidence_paths")
+    if not evidence_paths:
+        return [_issue(row_index, row, "evidence_paths", "evidence_paths_required")]
+    if not require_existing_evidence:
+        return []
+    issues: list[PilotImportIssue] = []
+    for evidence_path in evidence_paths:
+        candidate = Path(evidence_path)
+        resolved_path = candidate if candidate.is_absolute() else evidence_root / candidate
+        if not resolved_path.is_file():
+            issues.append(_issue(row_index, row, "evidence_paths", "evidence_path_missing"))
+    return issues
+
+
+def validate_pilot_result_import_rows(
+    rows: Iterable[Mapping[str, Any]],
+    schema: Mapping[str, Any],
+    *,
+    evidence_root: str | Path = ".",
+    require_existing_evidence: bool = False,
+) -> dict[str, Any]:
+    """校验 pilot 共同协议结果导入记录。
+
+    该函数属于 schema validator 层, 负责收敛重复字段校验。下游对比表只应消费
+    accepted_records, 从而避免把小样本或未对齐协议的结果误当作正式论文结论。
+    """
+
+    evidence_root_path = Path(evidence_root).resolve()
+    materialized_rows = [dict(row) for row in rows]
+    accepted: list[dict[str, Any]] = []
+    issues: list[PilotImportIssue] = []
+    for row_index, row in enumerate(materialized_rows):
+        row_issues: list[PilotImportIssue] = []
+        row_issues.extend(_validate_required_fields(row, row_index, schema))
+        if not row_issues:
+            row_issues.extend(_validate_counts_and_rates(row, row_index, schema))
+            row_issues.extend(_validate_protocol_fields(row, row_index, schema))
+            row_issues.extend(_validate_evidence_paths(row, row_index, evidence_root_path, require_existing_evidence))
+        if row_issues:
+            issues.extend(row_issues)
+        else:
+            accepted.append(row)
+    return {
+        "protocol_name": schema["result_protocol_name"],
+        "result_scope": schema["result_scope"],
+        "target_fpr": schema["target_fpr"],
+        "input_record_count": len(materialized_rows),
+        "accepted_pilot_import_count": len(accepted),
+        "rejected_pilot_import_count": len(materialized_rows) - len(accepted),
+        "pilot_import_issue_count": len(issues),
+        "pilot_result_import_ready": bool(materialized_rows) and not issues,
+        "accepted_records": accepted,
+        "issues": [issue.to_dict() for issue in issues],
+        "supports_paper_claim": False,
+    }
+
+
+def build_pilot_common_protocol_summary(
+    *,
+    prompt_summary: Mapping[str, Any],
+    attack_rows: Iterable[Mapping[str, Any]],
+    method_rows: Iterable[Mapping[str, Any]],
+    template_rows: Iterable[Mapping[str, Any]],
+    import_validation_report: Mapping[str, Any],
+    config: PilotFixedFprConfig | None = None,
+) -> dict[str, Any]:
+    """汇总 pilot fixed-FPR 共同协议的运行前治理状态。"""
+
+    resolved_config = config or PilotFixedFprConfig()
+    materialized_attack_rows = tuple(attack_rows)
+    materialized_method_rows = tuple(method_rows)
+    materialized_template_rows = tuple(template_rows)
+    method_ids = {str(row["method_id"]) for row in materialized_method_rows}
+    ready = (
+        bool(prompt_summary.get("prompt_split_ready"))
+        and bool(materialized_attack_rows)
+        and method_ids == set(PILOT_METHOD_IDS)
+        and len(materialized_template_rows) == len(materialized_attack_rows) * len(materialized_method_rows)
+        and math.isclose(float(resolved_config.target_fpr), PILOT_FIXED_FPR, rel_tol=0.0, abs_tol=1e-12)
+    )
+    return {
+        "construction_unit_name": "pilot_fixed_fpr_common_protocol",
+        "result_protocol_name": resolved_config.result_protocol_name,
+        "result_scope": resolved_config.result_scope,
+        "result_claim_scope": resolved_config.result_claim_scope,
+        "pilot_common_protocol_ready": ready,
+        "pilot_prompt_count": prompt_summary.get("pilot_prompt_count", 0),
+        "pilot_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
+        "pilot_target_fpr": resolved_config.target_fpr,
+        "pilot_negative_count_minimum_required": resolved_config.minimum_clean_negative_count,
+        "pilot_attack_count": len(materialized_attack_rows),
+        "pilot_method_count": len(materialized_method_rows),
+        "pilot_import_template_count": len(materialized_template_rows),
+        "pilot_result_import_ready": bool(import_validation_report.get("pilot_result_import_ready", False)),
+        "accepted_pilot_import_count": int(import_validation_report.get("accepted_pilot_import_count", 0)),
+        "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
+        "confidence_level": resolved_config.confidence_level,
+        "pilot_supports_superiority_claim": False,
+        "paper_claim_ready": False,
+        "full_main_paper_claim_ready": False,
+        "supports_paper_claim": False,
+    }
+
+
+def build_attack_matrix_digest(attack_rows: Iterable[Mapping[str, Any]]) -> str:
+    """生成 pilot 攻击矩阵摘要。"""
+
+    stable_rows = sorted((dict(row) for row in attack_rows), key=lambda item: str(item["attack_id"]))
+    return build_stable_digest(stable_rows)
+
+
+def build_pilot_manifest_config(
+    *,
+    prompt_summary: Mapping[str, Any],
+    attack_rows: Iterable[Mapping[str, Any]],
+    method_rows: Iterable[Mapping[str, Any]],
+    template_rows: Iterable[Mapping[str, Any]],
+    schema: Mapping[str, Any],
+    validation_report: Mapping[str, Any],
+    summary: Mapping[str, Any],
+    config: PilotFixedFprConfig,
+) -> dict[str, Any]:
+    """构建 manifest 使用的稳定配置摘要输入。"""
+
+    return {
+        "config": config.to_dict(),
+        "prompt_summary_digest": build_stable_digest(dict(prompt_summary)),
+        "attack_matrix_digest": build_stable_digest(tuple(dict(row) for row in attack_rows)),
+        "method_registry_digest": build_stable_digest(tuple(dict(row) for row in method_rows)),
+        "template_digest": build_stable_digest(tuple(dict(row) for row in template_rows)),
+        "schema_digest": build_stable_digest(dict(schema)),
+        "validation_report_digest": build_stable_digest(dict(validation_report)),
+        "summary_digest": build_stable_digest(dict(summary)),
+    }

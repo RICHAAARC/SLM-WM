@@ -1026,3 +1026,12 @@
 2. 该入口只生成 `entry_review_report.json`、`entry_review_checklist.csv` 与 manifest, 不生成论文主表、主图或 supported claim。
 3. 当前设计把 `entry_review_ready` 与 `evidence_closure_allowed` 分开: 即使报告可供用户审计, 只要 formal baseline、full-main 样本规模、fixed-FPR 重校准或 dataset-level FID / KID 未闭合, 就保持 `evidence_closure_allowed=false`。
 4. 用户应审计该报告后再决定是否允许项目进入论文投稿级证据闭合; 若仍保持小样本约束, 则只能继续在受限证据边界内推进, 不得声明论文级结论。
+
+
+### pilot fixed-FPR=0.01 共同协议入口
+
+1. 新增 `pilot_fixed_fpr_common_protocol`, 用于在 `paper_main_pilot_prompts` 上冻结同一 prompt split、同一 attack matrix、同一 fixed-FPR=0.01 校准协议和同一 bootstrap 置信区间字段要求。
+2. 该入口覆盖 `slm_wm_current`、Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark, 并要求所有方法结果通过 `pilot_result_import_schema` 进入受治理导入协议。
+3. 该入口只允许形成 pilot 级方法机制判断和运行前治理检查, `pilot_supports_superiority_claim=false`, `paper_claim_ready=false`, `full_main_paper_claim_ready=false`。
+4. 后续 Colab 真实 GPU 运行应使用该模板产出 `outputs/pilot_fixed_fpr_results/pilot_result_records.jsonl`, 再重建 `outputs/pilot_fixed_fpr_common_protocol/` 以获得 accepted pilot import 记录。
+5. 该推进不触发 full-main 样本规模运行, 也不支持 TPR@FPR=0.01 的正式论文主张; 仅用于在 pilot 规模下检查方法机制、baseline 差距和数据集级质量差距是否值得继续放大。
