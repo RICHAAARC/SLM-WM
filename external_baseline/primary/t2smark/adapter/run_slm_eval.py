@@ -140,6 +140,8 @@ def _observation(
     result_index: int,
     threshold_source: str,
     robustness: dict[str, Any],
+    image_path: str = "",
+    image_digest: str = "",
 ) -> dict[str, Any]:
     """构造一条 SLM baseline observation row。"""
 
@@ -159,7 +161,10 @@ def _observation(
         "attack_family": attack_family,
         "attack_condition": attack_condition,
         "prompt_id": _prompt_id(row, image_id),
+        "prompt_text": str(row.get("prompt_text") or row.get("caption") or ""),
         "image_id": image_id,
+        "image_path": image_path,
+        "image_digest": image_digest,
         "t2smark_result_index": result_index,
         "threshold_source": threshold_source,
         "bit_accuracy": robustness.get("acc_msg"),
@@ -212,6 +217,8 @@ def build_t2smark_observations(
                 result_index=index,
                 threshold_source=threshold_source,
                 robustness=robustness,
+                image_path=str(row.get("generated_image_path") or ""),
+                image_digest=str(row.get("generated_image_digest") or ""),
             )
         )
         observations.append(
@@ -226,8 +233,52 @@ def build_t2smark_observations(
                 result_index=index,
                 threshold_source=threshold_source,
                 robustness=robustness,
+                image_path=str(row.get("generated_image_path") or ""),
+                image_digest=str(row.get("generated_image_digest") or ""),
             )
         )
+        formal_attacks = result.get("formal_attacks")
+        if isinstance(formal_attacks, dict):
+            for attack_key, attack_payload in formal_attacks.items():
+                if not isinstance(attack_payload, dict):
+                    continue
+                attack_name = str(attack_payload.get("attack_name") or attack_key)
+                attack_family_name = str(attack_payload.get("attack_family") or "regeneration_attack")
+                attack_condition = str(attack_payload.get("attack_condition") or attack_name)
+                attacked_image_path = str(attack_payload.get("attacked_image_path") or "")
+                attacked_image_digest = str(attack_payload.get("attacked_image_digest") or "")
+                observations.append(
+                    _observation(
+                        event_id=f"{image_id}__attacked_negative__{attack_name}",
+                        score=_finite_score(attack_payload.get("norm1_no_w"), field_name="formal_attacks.norm1_no_w"),
+                        threshold=threshold_value,
+                        row=row,
+                        sample_role="attacked_negative",
+                        attack_family=attack_family_name,
+                        attack_condition=attack_condition,
+                        result_index=index,
+                        threshold_source=threshold_source,
+                        robustness=attack_payload,
+                        image_path=attacked_image_path,
+                        image_digest=attacked_image_digest,
+                    )
+                )
+                observations.append(
+                    _observation(
+                        event_id=f"{image_id}__attacked_positive__{attack_name}",
+                        score=_finite_score(attack_payload.get("norm1_w"), field_name="formal_attacks.norm1_w"),
+                        threshold=threshold_value,
+                        row=row,
+                        sample_role="attacked_positive",
+                        attack_family=attack_family_name,
+                        attack_condition=attack_condition,
+                        result_index=index,
+                        threshold_source=threshold_source,
+                        robustness=attack_payload,
+                        image_path=attacked_image_path,
+                        image_digest=attacked_image_digest,
+                    )
+                )
 
     if attacked_image_manifest:
         lookup = _source_index_lookup(image_pairs)
@@ -260,6 +311,14 @@ def build_t2smark_observations(
                 )
             )
 
+    formal_attack_names = sorted(
+        {
+            str(attack_name)
+            for result in results_by_index.values()
+            if isinstance(result.get("formal_attacks"), dict)
+            for attack_name in result["formal_attacks"].keys()
+        }
+    )
     manifest = {
         "artifact_name": "t2smark_slm_adapter_manifest.json",
         "producer_id": "t2smark_slm_observation_adapter",
@@ -269,6 +328,8 @@ def build_t2smark_observations(
         "image_pair_count": len(image_pairs),
         "t2smark_result_count": len(results_by_index),
         "observation_count": len(observations),
+        "formal_attack_names": formal_attack_names,
+        "formal_attack_observation_count": sum(1 for row in observations if str(row.get("sample_role", "")).startswith("attacked_")),
         "missing_result_indices": missing_indices,
         "threshold": threshold_value,
         "threshold_source": threshold_source,

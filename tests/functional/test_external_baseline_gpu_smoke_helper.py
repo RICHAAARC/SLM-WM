@@ -12,12 +12,15 @@ from external_baseline.primary.sd35_method_faithful_common import (
     apply_image_attack,
     canonical_attack_family,
     canonical_attack_name,
+    regeneration_formal_image_attack_names,
+    standard_geometric_formal_image_attack_names,
     supported_formal_image_attack_names,
 )
 from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
     DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
     DEFAULT_T2SMARK_INVERSION_ENTRY,
     DEFAULT_T2SMARK_SOURCE_ENTRY,
+    T2SMARK_FORMAL_ATTACK_COMPAT_MARKER,
     PRIMARY_BASELINE_METHODS,
     T2SMARK_INVERSION_COMPAT_MARKER,
     ExternalBaselineGpuSmokeConfig,
@@ -25,6 +28,7 @@ from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
     build_t2smark_image_pairs,
     count_t2smark_result_items,
     output_paths,
+    patch_t2smark_formal_attack_compatibility,
     patch_t2smark_inversion_compatibility,
     run_t2smark_official_if_needed,
     should_run_t2smark_official,
@@ -44,7 +48,10 @@ def test_formal_image_attack_taxonomy_matches_attack_matrix_names() -> None:
     assert canonical_attack_family("jpeg_compression") == "standard_distortion"
     assert canonical_attack_name("rotate") == "rotation"
     assert canonical_attack_family("crop_resize") == "geometric_transform"
-    for attack_name in supported_formal_image_attack_names():
+    assert canonical_attack_family("ddim_inversion") == "regeneration_attack"
+    assert canonical_attack_name("purification") == "diffusion_purification"
+    assert set(regeneration_formal_image_attack_names()).issubset(expected_names)
+    for attack_name in standard_geometric_formal_image_attack_names():
         attacked_image, transform_name = apply_image_attack(image, attack_family=attack_name, seed=17)
         assert attacked_image.mode == "RGB"
         assert transform_name
@@ -78,10 +85,58 @@ def test_t2smark_inversion_import_patch_is_idempotent(tmp_path: Path) -> None:
 
 
 @pytest.mark.quick
+def test_t2smark_formal_attack_patch_adds_common_attack_outputs(tmp_path: Path) -> None:
+    """T2SMark 官方入口应在冷启动时被补齐共同攻击簇输出参数与逻辑。"""
+
+    source_path = tmp_path / DEFAULT_T2SMARK_SOURCE_ENTRY
+    option_path = source_path.with_name("option.py")
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text(
+        "import os\n"
+        "import json\n"
+        "import torch\n"
+        "from option import args\n\n"
+        "def decode(post_reversed_latents, master_key, key, fake_key, msg):\n"
+        "    return {'norm1_no_w': 0.0, 'norm1_w': 1.0}\n\n"
+        "pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)\n"
+        "results = {}\n"
+        "            results[prompt_id][\"robustness\"] = decode_result\n",
+        encoding="utf-8",
+    )
+    option_path.write_text(
+        "import argparse\n\n"
+        "def parse_args():\n"
+        "    parser = argparse.ArgumentParser()\n"
+        "    parser.add_argument(\"--SDv35M\", action=\"store_true\", default=False)\n"
+        "    return parser.parse_args()\n",
+        encoding="utf-8",
+    )
+    paths = {"output_dir": tmp_path / "outputs" / "external_baseline_gpu_smoke"}
+
+    first_report = patch_t2smark_formal_attack_compatibility(tmp_path, paths)
+    second_report = patch_t2smark_formal_attack_compatibility(tmp_path, paths)
+    patched_source = source_path.read_text(encoding="utf-8")
+    patched_option = option_path.read_text(encoding="utf-8")
+
+    assert first_report["formal_attack_patch_applied"] is True
+    assert second_report["formal_attack_patch_applied"] is False
+    assert T2SMARK_FORMAL_ATTACK_COMPAT_MARKER in patched_source
+    assert "slm_attack_families" in patched_option
+    assert "formal_attacks" in patched_source
+    assert "apply_formal_image_attack" in patched_source
+
+
+@pytest.mark.quick
 def test_t2smark_result_reuse_does_not_require_source_cache(tmp_path: Path) -> None:
     """已有官方结果可复用时, helper 不应要求重新下载或修补 T2SMark 源码。"""
 
-    config = ExternalBaselineGpuSmokeConfig(require_cuda=False, reuse_existing=True, force_generate=False, robust_test_num=1)
+    config = ExternalBaselineGpuSmokeConfig(
+        require_cuda=False,
+        reuse_existing=True,
+        force_generate=False,
+        robust_test_num=1,
+        t2smark_formal_attack_families="",
+    )
     paths = output_paths(tmp_path, config)
     paths["official_results"].parent.mkdir(parents=True)
     paths["official_results"].write_text('{"0":{"robustness":{"norm1_no_w":0.1,"norm1_w":0.9}}}\n', encoding="utf-8")
@@ -98,7 +153,12 @@ def test_t2smark_result_reuse_does_not_require_source_cache(tmp_path: Path) -> N
 def test_t2smark_result_reuse_requires_configured_sample_count(tmp_path: Path) -> None:
     """历史 T2SMark 结果样本数不足时, helper 应重新运行而不是复用旧包。"""
 
-    config = ExternalBaselineGpuSmokeConfig(require_cuda=False, reuse_existing=True, robust_test_num=5)
+    config = ExternalBaselineGpuSmokeConfig(
+        require_cuda=False,
+        reuse_existing=True,
+        robust_test_num=5,
+        t2smark_formal_attack_families="",
+    )
     results_path = tmp_path / "outputs" / "external_baseline_gpu_smoke" / "results.json"
     results_path.parent.mkdir(parents=True)
     results_path.write_text('{"0":{"robustness":{}},"metadata":{"note":"old smoke"}}\n', encoding="utf-8")
@@ -132,7 +192,13 @@ def test_shared_prompt_inputs_default_to_pilot_paper_samples(tmp_path: Path) -> 
 def test_t2smark_image_pairs_refreshes_stale_image_provenance(tmp_path: Path) -> None:
     """已有 image_pairs 缺少图像路径与 digest 时, helper 应按当前图像目录刷新。"""
 
-    config = ExternalBaselineGpuSmokeConfig(require_cuda=False, reuse_existing=True, force_generate=False, robust_test_num=5)
+    config = ExternalBaselineGpuSmokeConfig(
+        require_cuda=False,
+        reuse_existing=True,
+        force_generate=False,
+        robust_test_num=5,
+        t2smark_formal_attack_families="",
+    )
     paths = output_paths(tmp_path, config)
     paths["official_images"].mkdir(parents=True)
     for index in range(5):

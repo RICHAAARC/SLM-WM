@@ -410,6 +410,7 @@ def validate_primary_baseline_formal_import_rows(
     require_existing_evidence: bool = True,
     evidence_search_roots: Iterable[str | Path] = (),
     prompt_protocol_name: str | None = None,
+    allowed_resource_profiles: Iterable[str] = ("full_main",),
 ) -> dict[str, Any]:
     """校验主表 baseline 正式结果导入记录, 并返回仅包含通过记录的报告。
 
@@ -420,6 +421,12 @@ def validate_primary_baseline_formal_import_rows(
     search_roots = _normalized_search_roots(evidence_root_path, evidence_search_roots)
     expected_operating_point = build_fixed_fpr_operating_point(target_fpr)
     expected_prompt_protocol_name = prompt_protocol_name or resolve_full_main_prompt_protocol_name(evidence_root_path)
+    resource_profiles = tuple(str(value) for value in allowed_resource_profiles if str(value).strip())
+    resource_profile_issue_reason = (
+        "full_main_resource_profile_required"
+        if resource_profiles == ("full_main",)
+        else "allowed_resource_profile_required"
+    )
     accepted: list[dict[str, Any]] = []
     issues: list[FormalImportIssue] = []
     materialized_rows = [dict(row) for row in rows]
@@ -432,8 +439,8 @@ def validate_primary_baseline_formal_import_rows(
             row_issues.append(_issue(row_index, row, "result_protocol_name", "formal_result_protocol_required"))
         if _str_field(row, "result_source_type") not in ALLOWED_RESULT_SOURCE_TYPES:
             row_issues.append(_issue(row_index, row, "result_source_type", "allowed_result_source_type_required"))
-        if _str_field(row, "resource_profile") != "full_main":
-            row_issues.append(_issue(row_index, row, "resource_profile", "full_main_resource_profile_required"))
+        if _str_field(row, "resource_profile") not in resource_profiles:
+            row_issues.append(_issue(row_index, row, "resource_profile", resource_profile_issue_reason))
         if _str_field(row, "comparable_operating_point") != expected_operating_point:
             row_issues.append(_issue(row_index, row, "comparable_operating_point", "fixed_fpr_operating_point_required"))
         if _str_field(row, "prompt_protocol_name") != expected_prompt_protocol_name:

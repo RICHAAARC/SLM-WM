@@ -26,7 +26,7 @@ from typing import Any, Iterable
 
 from main.core.digest import build_stable_digest
 from external_baseline.primary.sd35_method_faithful_common import (
-    apply_image_attack,
+    apply_formal_image_attack,
     canonical_attack_family,
     canonical_attack_name,
 )
@@ -565,10 +565,15 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 ("watermarked", "watermarked_image_path", "watermarked_image_digest", "attacked_positive"),
             ):
                 with Image.open(pair[source_path_field]) as source_image:
-                    attacked_image, attack_transform_name = apply_image_attack(
+                    attacked_image, attack_transform_name = apply_formal_image_attack(
                         source_image,
                         attack_family=attack_family,
                         seed=int(args.seed) + pair_index,
+                        pipe=pipe,
+                        prompt=str(pair["prompt_text"]),
+                        size=int(args.height),
+                        device=device,
+                        num_inference_steps=int(args.num_inference_steps),
                     )
                 attacked_stem = safe_file_stem(f"{image_id}_{role_name}_{attack_matrix_name}", f"attacked_{pair_index:05d}")
                 attacked_path = attacked_dir / f"{attacked_stem}.png"

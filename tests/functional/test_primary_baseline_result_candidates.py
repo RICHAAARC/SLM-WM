@@ -75,6 +75,37 @@ def t2smark_smoke_observations() -> list[dict[str, object]]:
     ]
 
 
+def regeneration_observations() -> list[dict[str, object]]:
+    """构造覆盖再生成攻击的最小 method-faithful observation 集合。"""
+
+    return [
+        {
+            "baseline_id": "tree_ring",
+            "attack_family": "regeneration_attack",
+            "attack_name": "img2img_regeneration",
+            "attack_condition": "img2img_regeneration",
+            "sample_role": "attacked_negative",
+            "detection_decision": False,
+            "prompt_id": "prompt_000",
+            "prompt_text": "a ceramic fox on a wooden desk",
+            "quality_score_proxy": 1.0,
+            "score_retention_proxy": 0.8,
+        },
+        {
+            "baseline_id": "tree_ring",
+            "attack_family": "regeneration_attack",
+            "attack_name": "img2img_regeneration",
+            "attack_condition": "img2img_regeneration",
+            "sample_role": "attacked_positive",
+            "detection_decision": True,
+            "prompt_id": "prompt_000",
+            "prompt_text": "a ceramic fox on a wooden desk",
+            "quality_score_proxy": 1.0,
+            "score_retention_proxy": 0.8,
+        },
+    ]
+
+
 def t2smark_candidate_record() -> dict[str, object]:
     """构造一个尚未完成共同协议闭合的 T2SMark 候选记录。"""
 
@@ -186,6 +217,42 @@ def test_primary_baseline_candidate_writer_imports_packages_without_promoting_sm
     assert "fixed_fpr_baseline_calibration_ready_required" in reasons
     assert "attack_matrix_baseline_detection_ready_required" in reasons
     assert "evidence_path_missing" not in reasons
+
+
+@pytest.mark.quick
+def test_primary_baseline_candidate_writer_preserves_regeneration_resource_profile(tmp_path: Path) -> None:
+    """再生成攻击候选记录应使用攻击矩阵中的 full_extra 资源档位。"""
+
+    attack_dir = tmp_path / "outputs" / "attack_matrix"
+    attack_dir.mkdir(parents=True)
+    (attack_dir / "attack_manifest.json").write_text(
+        json.dumps({"evaluation_boundary": {"target_fpr": 0.01}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    smoke_package_path = tmp_path / "external_baseline_gpu_smoke_package.zip"
+    write_text_package(
+        smoke_package_path,
+        {GPU_SMOKE_OBSERVATIONS_ENTRY: json.dumps(method_observations() + regeneration_observations(), ensure_ascii=False)},
+    )
+
+    write_primary_baseline_result_candidate_outputs(
+        root=tmp_path,
+        external_gpu_smoke_package_path=smoke_package_path,
+    )
+    output_dir = tmp_path / "outputs" / "external_baseline_results"
+    records = [
+        json.loads(line)
+        for line in (output_dir / "baseline_result_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    validation = json.loads(
+        (output_dir / "baseline_result_candidate_validation_report.json").read_text(encoding="utf-8")
+    )
+    regeneration_row = next(row for row in records if row["attack_name"] == "img2img_regeneration")
+
+    assert regeneration_row["resource_profile"] == "full_extra"
+    assert validation["accepted_formal_import_count"] == 4
+    assert "allowed_resource_profile_required" not in {issue["reason"] for issue in validation["issues"]}
 
 
 @pytest.mark.quick

@@ -13,6 +13,11 @@ import sys
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from external_baseline.primary.sd35_method_faithful_common import (
+    regeneration_formal_image_attack_names,
+    standard_geometric_formal_image_attack_names,
+    supported_formal_image_attack_names,
+)
 from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
 from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
 from experiments.protocol.splits import apply_split_assignments
@@ -35,9 +40,7 @@ DEFAULT_T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 DEFAULT_PROMPT_FILE = "configs/paper_main_pilot_paper_prompts.txt"
 DEFAULT_PACKAGE_PATTERN = "external_baseline_gpu_smoke_package_*.zip"
 DEFAULT_SHARED_SAMPLE_COUNT = 600
-DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES = (
-    "jpeg_compression,gaussian_noise,gaussian_blur,rotation,resize,crop,crop_resize,composite_geometric_attacks"
-)
+DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES = ",".join(supported_formal_image_attack_names())
 PRIMARY_BASELINE_METHODS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 SHARED_PROMPT_TEXTS = (
     "a small ceramic fox sitting on a wooden desk under soft studio lighting",
@@ -47,6 +50,7 @@ SHARED_PROMPT_TEXTS = (
     "a blue robot gardener watering tulips in a greenhouse",
 )
 T2SMARK_INVERSION_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为新版 Diffusers 显式补齐注解依赖。"
+T2SMARK_FORMAL_ATTACK_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为共同攻击簇补齐正式攻击输出。"
 T2SMARK_INVERSION_COMPAT_BLOCK = f"""{T2SMARK_INVERSION_COMPAT_MARKER}
 import torch
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -55,6 +59,81 @@ try:
     from diffusers.image_processor import PipelineImageInput
 except Exception:
     PipelineImageInput = Any
+"""
+T2SMARK_FORMAL_ATTACK_IMPORT_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_COMPAT_MARKER}
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from external_baseline.primary.sd35_method_faithful_common import (
+    apply_formal_image_attack,
+    canonical_attack_family,
+    canonical_attack_name,
+    file_digest,
+)
+"""
+T2SMARK_FORMAL_ATTACK_HELPER_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_COMPAT_MARKER}
+def configured_formal_attack_names():
+    return [item.strip() for item in str(args.slm_attack_families or "").split(",") if item.strip()]
+
+
+def decode_attacked_image(attacked_image, master_key, key, fake_key, msg):
+    image_tensor = utils.to_tensor(attacked_image).to(device).half()
+    latents = pipe.get_image_latents(image_tensor, sample=False)
+    reversed_latents = pipe.naive_forward_diffusion(
+        latents=latents,
+        num_inference_steps=args.num_inversion_steps
+    )
+    return decode(reversed_latents, master_key, key, fake_key, msg)
+
+"""
+T2SMARK_FORMAL_ATTACK_DIR_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_COMPAT_MARKER}
+formal_attack_names = configured_formal_attack_names()
+formal_attack_image_dir = args.slm_attack_image_dir
+if args.save_image and formal_attack_names:
+    if formal_attack_image_dir is None:
+        formal_attack_image_dir = os.path.join(args.output_dir, args.name, "formal_attacks")
+    os.makedirs(formal_attack_image_dir, exist_ok=True)
+"""
+T2SMARK_FORMAL_ATTACK_LOOP_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_COMPAT_MARKER}
+            if formal_attack_names:
+                results[prompt_id]["formal_attacks"] = {{}}
+                for formal_attack_name in formal_attack_names:
+                    attack_matrix_family = canonical_attack_family(formal_attack_name)
+                    attack_matrix_name = canonical_attack_name(formal_attack_name)
+                    attacked_image, attack_transform_name = apply_formal_image_attack(
+                        generated_image,
+                        attack_family=formal_attack_name,
+                        seed=args.seed + prompt_id,
+                        pipe=pipe,
+                        prompt=prompt,
+                        size=512,
+                        device=str(device),
+                        num_inference_steps=args.num_inference_steps,
+                    )
+                    attacked_path = ""
+                    attacked_digest = ""
+                    if args.save_image and formal_attack_image_dir:
+                        attacked_path = os.path.join(
+                            formal_attack_image_dir,
+                            f"{{str(prompt_id).zfill(5)}}_{{attack_matrix_name}}.png",
+                        )
+                        attacked_image.save(attacked_path)
+                        attacked_digest = file_digest(attacked_path)
+                    formal_decode_result = decode_attacked_image(attacked_image, master_key, key, fake_key, msg)
+                    formal_decode_result.update(
+                        {{
+                            "attack_family": attack_matrix_family,
+                            "attack_name": attack_matrix_name,
+                            "attack_condition": attack_matrix_name,
+                            "attack_transform_name": attack_transform_name,
+                            "attacked_image_path": attacked_path,
+                            "attacked_image_digest": attacked_digest,
+                        }}
+                    )
+                    results[prompt_id]["formal_attacks"][attack_matrix_name] = formal_decode_result
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 """
 ALLOWED_PRIOR_PREFIXES = ("outputs/external_baseline_gpu_smoke/",)
 PACKAGE_EXTRA_PATHS = (
@@ -67,6 +146,7 @@ PACKAGE_EXTRA_PATHS = (
     "external_baseline/primary/sd35_method_faithful_common.py",
     "external_baseline/primary/t2smark/README.md",
     "external_baseline/primary/t2smark/adapter/run_slm_eval.py",
+    "external_baseline/primary/t2smark/source/option.py",
     "external_baseline/primary/tree_ring/adapter/run_slm_eval.py",
     "external_baseline/primary/tree_ring/adapter/method_faithful_sd35.py",
     "external_baseline/primary/gaussian_shading/adapter/run_slm_eval.py",
@@ -97,6 +177,7 @@ class ExternalBaselineGpuSmokeConfig:
     seed: int = 20260621
     robust_test_num: int = DEFAULT_SHARED_SAMPLE_COUNT
     clip_test_num: int = 0
+    t2smark_formal_attack_families: str = DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES
     num_inference_steps: int = 8
     num_inversion_steps: int = 3
     guidance_scale: float = 4.0
@@ -273,6 +354,31 @@ def count_t2smark_result_items(results_path: Path) -> int:
     return sum(1 for key, value in payload.items() if str(key).isdigit() and isinstance(value, dict))
 
 
+def configured_attack_names(value: str) -> tuple[str, ...]:
+    """解析逗号分隔的正式攻击名称配置。"""
+
+    return tuple(item.strip() for item in str(value or "").split(",") if item.strip())
+
+
+def count_t2smark_formal_attack_items(results_path: Path, attack_names: tuple[str, ...]) -> int:
+    """统计 T2SMark 结果中已经包含完整正式攻击记录的样本数。"""
+
+    if not attack_names or not results_path.is_file():
+        return 0
+    try:
+        payload = read_json(results_path)
+    except Exception:
+        return 0
+    count = 0
+    for key, value in payload.items():
+        if not str(key).isdigit() or not isinstance(value, dict):
+            continue
+        formal_attacks = value.get("formal_attacks")
+        if isinstance(formal_attacks, dict) and all(name in formal_attacks for name in attack_names):
+            count += 1
+    return count
+
+
 def should_run_t2smark_official(config: ExternalBaselineGpuSmokeConfig, results_path: Path) -> tuple[bool, str]:
     """判断 T2SMark 官方 SD3.5 运行是否需要本次生成。"""
 
@@ -283,6 +389,9 @@ def should_run_t2smark_official(config: ExternalBaselineGpuSmokeConfig, results_
         required_count = max(1, int(config.robust_test_num))
         if existing_count < required_count:
             return True, "existing_results_sample_count_insufficient"
+        attack_names = configured_attack_names(config.t2smark_formal_attack_families)
+        if attack_names and count_t2smark_formal_attack_items(results_path, attack_names) < required_count:
+            return True, "existing_results_formal_attack_count_insufficient"
         return False, "existing_results_found"
     return True, "results_missing"
 
@@ -411,12 +520,75 @@ def patch_t2smark_inversion_compatibility(root_path: Path, paths: dict[str, Path
     return report
 
 
+def patch_t2smark_formal_attack_compatibility(root_path: Path, paths: dict[str, Path]) -> dict[str, Any]:
+    """为 T2SMark 官方 SD3.5 入口补齐共同攻击簇输出能力。"""
+
+    source_path = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
+    option_path = source_path.with_name("option.py")
+    if not source_path.is_file():
+        raise FileNotFoundError(f"t2smark_source_entry_missing:{source_path}")
+    if not option_path.is_file():
+        raise FileNotFoundError(f"t2smark_option_entry_missing:{option_path}")
+
+    option_text = option_path.read_text(encoding="utf-8")
+    option_patch_applied = False
+    if "slm_attack_families" not in option_text:
+        option_anchor = '    parser.add_argument("--SDv35M", action="store_true", default=False)\n'
+        if option_anchor not in option_text:
+            raise RuntimeError("t2smark_option_patch_anchor_missing")
+        option_text = option_text.replace(
+            option_anchor,
+            option_anchor
+            + '    parser.add_argument("--slm_attack_families", type=str, default="")\n'
+            + '    parser.add_argument("--slm_attack_image_dir", type=str, default=None)\n',
+            1,
+        )
+        option_path.write_text(option_text, encoding="utf-8")
+        option_patch_applied = True
+
+    source_text = source_path.read_text(encoding="utf-8")
+    source_patch_applied = False
+    if "configured_formal_attack_names" not in source_text:
+        if "import sys\n" not in source_text:
+            source_text = source_text.replace("import os\n", "import os\nimport sys\n", 1)
+        import_anchor = "from option import args\n"
+        helper_anchor = "pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)\n"
+        dir_anchor = "results = {}\n"
+        loop_anchor = '            results[prompt_id]["robustness"] = decode_result\n'
+        for anchor_name, anchor in (
+            ("t2smark_source_import_anchor_missing", import_anchor),
+            ("t2smark_source_helper_anchor_missing", helper_anchor),
+            ("t2smark_source_results_anchor_missing", dir_anchor),
+            ("t2smark_source_loop_anchor_missing", loop_anchor),
+        ):
+            if anchor not in source_text:
+                raise RuntimeError(anchor_name)
+        source_text = source_text.replace(import_anchor, import_anchor + "\n" + T2SMARK_FORMAL_ATTACK_IMPORT_BLOCK + "\n", 1)
+        source_text = source_text.replace(helper_anchor, T2SMARK_FORMAL_ATTACK_HELPER_BLOCK + "\n" + helper_anchor, 1)
+        source_text = source_text.replace(dir_anchor, T2SMARK_FORMAL_ATTACK_DIR_BLOCK + "\n" + dir_anchor, 1)
+        source_text = source_text.replace(loop_anchor, loop_anchor + T2SMARK_FORMAL_ATTACK_LOOP_BLOCK + "\n", 1)
+        source_path.write_text(source_text, encoding="utf-8")
+        source_patch_applied = True
+
+    report = {
+        "formal_attack_patch_applied": bool(option_patch_applied or source_patch_applied),
+        "option_patch_applied": option_patch_applied,
+        "source_patch_applied": source_patch_applied,
+        "option_patch_path": relative_or_absolute(option_path, root_path),
+        "source_patch_path": relative_or_absolute(source_path, root_path),
+        "source_patch_reason": "formal_attack_matrix_outputs_required_by_common_protocol",
+    }
+    write_json(paths["output_dir"] / "t2smark_formal_attack_source_patch.json", report)
+    return report
+
+
 def ensure_t2smark_source_available(root_path: Path, paths: dict[str, Path], timeout_seconds: int) -> dict[str, Any]:
     """在冷启动环境中按登记表补齐 T2SMark 官方源码缓存。"""
 
     source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
     if source_entry.is_file():
         patch_report = patch_t2smark_inversion_compatibility(root_path, paths)
+        patch_report["formal_attack_patch_report"] = patch_t2smark_formal_attack_compatibility(root_path, paths)
         return {
             "source_available": True,
             "source_downloaded": False,
@@ -456,6 +628,10 @@ def ensure_t2smark_source_available(root_path: Path, paths: dict[str, Path], tim
     if not source_report["source_available"]:
         raise FileNotFoundError(f"t2smark_source_entry_missing_after_source_prepare:{source_entry}")
     source_report["source_patch_report"] = patch_t2smark_inversion_compatibility(root_path, paths)
+    source_report["source_patch_report"]["formal_attack_patch_report"] = patch_t2smark_formal_attack_compatibility(
+        root_path,
+        paths,
+    )
     write_json(
         paths["output_dir"] / "t2smark_source_prepare_result.json",
         {"source_report": source_report, "clone_result": clone_result, "checkout_result": checkout_result},
@@ -516,6 +692,15 @@ def run_t2smark_official_if_needed(
         "--fix_key",
         "--SDv35M",
     ]
+    if str(config.t2smark_formal_attack_families).strip():
+        command.extend(
+            [
+                "--slm_attack_families",
+                str(config.t2smark_formal_attack_families),
+                "--slm_attack_image_dir",
+                str(paths["official_run_dir"] / "formal_attacks"),
+            ]
+        )
     if config.save_image:
         command.append("--save_image")
     result = run_command(command, cwd=root_path, timeout_seconds=config.timeout_seconds)
@@ -816,11 +1001,17 @@ def write_external_baseline_gpu_smoke_outputs(
         return write_failure_outputs(root_path, config, paths, error)
 
     t2smark_result_count = count_t2smark_result_items(paths["official_results"])
+    t2smark_formal_attack_names = configured_attack_names(config.t2smark_formal_attack_families)
+    t2smark_formal_attack_result_count = count_t2smark_formal_attack_items(
+        paths["official_results"],
+        t2smark_formal_attack_names,
+    )
     expected_sample_count = max(1, int(config.robust_test_num))
     official_ready = (
         paths["official_results"].is_file()
         and official_report.get("official_return_code") == 0
         and t2smark_result_count >= expected_sample_count
+        and (not t2smark_formal_attack_names or t2smark_formal_attack_result_count >= expected_sample_count)
     )
     adapter_ready = bool(adapter_report.get("adapter_execution_ready"))
     observation_count = int(adapter_report.get("adapter_observation_count", 0))
@@ -852,6 +1043,8 @@ def write_external_baseline_gpu_smoke_outputs(
         "t2smark_source_patch_applied": bool(source_patch_report.get("source_patch_applied")),
         "expected_sample_count": expected_sample_count,
         "t2smark_result_count": t2smark_result_count,
+        "t2smark_formal_attack_families": list(t2smark_formal_attack_names),
+        "t2smark_formal_attack_result_count": t2smark_formal_attack_result_count,
         "prior_package_reused": bool(prior_manifest.get("prior_package_reused")),
         "image_pair_count": len(image_pairs),
         "adapter_execution_ready": adapter_ready,
@@ -862,6 +1055,8 @@ def write_external_baseline_gpu_smoke_outputs(
         "primary_baseline_attacked_image_count": int(adapter_report.get("primary_baseline_attacked_image_count", 0)),
         "attacked_image_count_by_baseline": dict(adapter_report.get("attacked_image_count_by_baseline", {})),
         "formal_image_attack_families": formal_image_attack_families,
+        "standard_geometric_formal_image_attack_families": list(standard_geometric_formal_image_attack_names()),
+        "regeneration_formal_image_attack_families": list(regeneration_formal_image_attack_names()),
         "primary_baseline_ids": list(adapter_report.get("primary_baseline_ids", PRIMARY_BASELINE_METHODS)),
         "ready_primary_baseline_ids": list(adapter_report.get("ready_primary_baseline_ids", [])),
         "primary_baseline_prompt_plan_path": str(adapter_report.get("primary_baseline_prompt_plan_path", "")),
@@ -941,6 +1136,10 @@ def build_default_config() -> ExternalBaselineGpuSmokeConfig:
             default_value=paper_run.sample_count,
         ),
         clip_test_num=int(os.environ.get("SLM_WM_T2SMARK_CLIP_TEST_NUM", "0")),
+        t2smark_formal_attack_families=os.environ.get(
+            "SLM_WM_T2SMARK_FORMAL_ATTACK_FAMILIES",
+            DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
+        ),
         num_inference_steps=int(os.environ.get("SLM_WM_T2SMARK_NUM_INFERENCE_STEPS", "8")),
         num_inversion_steps=int(os.environ.get("SLM_WM_T2SMARK_NUM_INVERSION_STEPS", "3")),
         guidance_scale=float(os.environ.get("SLM_WM_T2SMARK_GUIDANCE_SCALE", "4.0")),

@@ -23,7 +23,7 @@
 
 ### 外部 baseline 入口
 
-- `external_baseline_gpu_smoke_run.ipynb`: 运行主表 baseline 的 SD3.5 method-faithful adapter 链路, 当前覆盖 Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark。输出目录和共享样本数由当前论文运行层级派生。
+- `external_baseline_gpu_smoke_run.ipynb`: 运行主表 baseline 的 SD3.5 method-faithful adapter 链路, 当前覆盖 Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark。Tree-Ring、Gaussian Shading、Shallow Diffuse 默认使用共同攻击矩阵中的常规失真、几何变换与再生成攻击; T2SMark 官方 SD3.5 入口会在冷启动时补丁为同一攻击簇输出正式攻击分数。输出目录和共享样本数由当前论文运行层级派生。
 - `t2smark_full_main_reproduction_run.ipynb`: 运行 T2SMark 官方 SD3.5 路径并生成 governed import 候选记录。默认使用当前论文运行层级的 prompt 文件、样本数和 fixed-FPR=0.01。
 - `tree_ring_official_reference_run.ipynb`: 运行 Tree-Ring 官方原始环境参考复现, 样本数和 Drive 目录由当前论文运行层级派生。
 - `gaussian_shading_official_reference_run.ipynb`: 运行 Gaussian Shading 官方原始环境参考复现, 样本数和 Drive 目录由当前论文运行层级派生。

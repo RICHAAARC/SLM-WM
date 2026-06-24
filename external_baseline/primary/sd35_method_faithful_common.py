@@ -10,6 +10,23 @@ from typing import Any, Iterable
 from main.core.digest import build_stable_digest
 
 METHOD_FAITHFUL_ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
+STANDARD_GEOMETRIC_FORMAL_IMAGE_ATTACK_NAMES = (
+    "jpeg_compression",
+    "gaussian_noise",
+    "gaussian_blur",
+    "rotation",
+    "resize",
+    "crop",
+    "crop_resize",
+    "composite_geometric_attacks",
+)
+REGENERATION_FORMAL_IMAGE_ATTACK_NAMES = (
+    "img2img_regeneration",
+    "ddim_inversion_regeneration",
+    "sdedit_regeneration",
+    "diffusion_purification",
+)
+FORMAL_IMAGE_ATTACK_NAMES = STANDARD_GEOMETRIC_FORMAL_IMAGE_ATTACK_NAMES + REGENERATION_FORMAL_IMAGE_ATTACK_NAMES
 FORMAL_IMAGE_ATTACK_SPECS = {
     "jpeg": ("standard_distortion", "jpeg_compression"),
     "jpeg_compression": ("standard_distortion", "jpeg_compression"),
@@ -23,17 +40,15 @@ FORMAL_IMAGE_ATTACK_SPECS = {
     "crop": ("geometric_transform", "crop"),
     "crop_resize": ("geometric_transform", "crop_resize"),
     "composite_geometric_attacks": ("geometric_transform", "composite_geometric_attacks"),
+    "img2img": ("regeneration_attack", "img2img_regeneration"),
+    "img2img_regeneration": ("regeneration_attack", "img2img_regeneration"),
+    "ddim_inversion": ("regeneration_attack", "ddim_inversion_regeneration"),
+    "ddim_inversion_regeneration": ("regeneration_attack", "ddim_inversion_regeneration"),
+    "sdedit": ("regeneration_attack", "sdedit_regeneration"),
+    "sdedit_regeneration": ("regeneration_attack", "sdedit_regeneration"),
+    "diffusion_purification": ("regeneration_attack", "diffusion_purification"),
+    "purification": ("regeneration_attack", "diffusion_purification"),
 }
-FORMAL_IMAGE_ATTACK_NAMES = (
-    "jpeg_compression",
-    "gaussian_noise",
-    "gaussian_blur",
-    "rotation",
-    "resize",
-    "crop",
-    "crop_resize",
-    "composite_geometric_attacks",
-)
 
 
 def load_json(path: str | Path) -> Any:
@@ -175,6 +190,30 @@ def supported_formal_image_attack_names() -> tuple[str, ...]:
     return FORMAL_IMAGE_ATTACK_NAMES
 
 
+def standard_geometric_formal_image_attack_names() -> tuple[str, ...]:
+    """返回不需要额外扩散生成的常规失真与几何攻击名称集合。"""
+
+    return STANDARD_GEOMETRIC_FORMAL_IMAGE_ATTACK_NAMES
+
+
+def regeneration_formal_image_attack_names() -> tuple[str, ...]:
+    """返回需要真实扩散 pipeline 参与的再生成攻击名称集合。"""
+
+    return REGENERATION_FORMAL_IMAGE_ATTACK_NAMES
+
+
+def is_regeneration_attack(attack_family: str) -> bool:
+    """判断外部传入的攻击请求是否属于再生成攻击。"""
+
+    return normalize_attack_request(attack_family) in REGENERATION_FORMAL_IMAGE_ATTACK_NAMES
+
+
+def formal_image_attack_resource_profile(attack_family: str) -> str:
+    """返回攻击矩阵中该攻击默认对应的资源档位。"""
+
+    return "full_extra" if is_regeneration_attack(attack_family) else "full_main"
+
+
 class InversionStableDiffusion3PipelineMixin:
     """为 StableDiffusion3Pipeline 增加外部 baseline 检测所需的轻量反演方法。"""
 
@@ -296,8 +335,8 @@ def derive_threshold(observations: Iterable[dict[str, Any]], explicit_threshold:
     return 0.0, "fallback_zero_insufficient_calibration_pairs"
 
 
-def apply_image_attack(image: Any, *, attack_family: str, seed: int) -> tuple[Any, str]:
-    """对 PIL 图像执行轻量图像级攻击。"""
+def apply_standard_geometric_image_attack(image: Any, *, attack_family: str, seed: int) -> tuple[Any, str]:
+    """对 PIL 图像执行不依赖扩散模型的常规失真或几何攻击。"""
 
     from io import BytesIO
     import random
@@ -305,6 +344,8 @@ def apply_image_attack(image: Any, *, attack_family: str, seed: int) -> tuple[An
     from PIL import Image, ImageFilter
 
     family = normalize_attack_request(attack_family)
+    if family in REGENERATION_FORMAL_IMAGE_ATTACK_NAMES:
+        raise ValueError(f"regeneration_attack_requires_pipeline:{attack_family}")
     rng = random.Random(int(seed))
     source = image.convert("RGB")
     width, height = source.size
@@ -348,6 +389,130 @@ def apply_image_attack(image: Any, *, attack_family: str, seed: int) -> tuple[An
         cropped = rotated.crop((left, upper, left + crop_width, upper + crop_height))
         return cropped.resize((width, height), Image.Resampling.BICUBIC), f"rotation_{angle:g}_degree_crop_resize"
     raise ValueError(f"unsupported_sd35_adapter_attack:{attack_family}")
+
+
+def _encode_image_latents(pipe: Any, image: Any, *, size: int, device: str) -> Any:
+    """把图像编码到当前 pipeline 的 VAE latent 空间。"""
+
+    import torch
+
+    dtype = getattr(pipe.vae, "dtype", torch.float16)
+    tensor = image_to_tensor(image, size=int(size), device=device, dtype=dtype)
+    return pipe.get_image_latents(tensor, sample=False)
+
+
+def _approximate_inversion_latents(pipe: Any, latents: Any, *, prompt: str, num_inference_steps: int) -> Any:
+    """复用当前 pipeline 可用的近似反演接口。"""
+
+    if hasattr(pipe, "approximate_forward_diffusion"):
+        return pipe.approximate_forward_diffusion(
+            latents,
+            prompt=prompt,
+            num_inference_steps=int(num_inference_steps),
+            guidance_scale=1.0,
+        )
+    if hasattr(pipe, "naive_forward_diffusion"):
+        return pipe.naive_forward_diffusion(latents=latents, num_inference_steps=int(num_inference_steps))
+    return latents
+
+
+def apply_regeneration_image_attack(
+    image: Any,
+    *,
+    attack_family: str,
+    seed: int,
+    pipe: Any,
+    prompt: str,
+    size: int,
+    device: str,
+    num_inference_steps: int,
+) -> tuple[Any, str]:
+    """使用 SD3.5 adapter 的可审计 latent 再生成路径执行再扩散类攻击。
+
+    该实现属于项目特定的 method-faithful adapter 工程路径: 它把输入图像编码到
+    SD3.5 latent, 再按攻击名称执行不同强度的 latent 扰动或近似反演, 最后调用同一
+    pipeline 重新生成图像。它用于共同攻击簇对齐, 不伪装为外部方法官方 legacy 结果。
+    """
+
+    import torch
+
+    family = normalize_attack_request(attack_family)
+    if family not in REGENERATION_FORMAL_IMAGE_ATTACK_NAMES:
+        raise ValueError(f"regeneration_attack_name_required:{attack_family}")
+    base_latents = _encode_image_latents(pipe, image.convert("RGB"), size=int(size), device=device)
+    generator = torch.Generator(device=device).manual_seed(int(seed))
+    noise = torch.randn(base_latents.shape, generator=generator, device=device, dtype=base_latents.dtype)
+    strength_by_attack = {
+        "img2img_regeneration": 0.35,
+        "ddim_inversion_regeneration": 0.40,
+        "sdedit_regeneration": 0.45,
+        "diffusion_purification": 0.32,
+    }
+    strength = float(strength_by_attack[family])
+    if family == "ddim_inversion_regeneration":
+        inverted_latents = _approximate_inversion_latents(
+            pipe,
+            base_latents,
+            prompt=prompt,
+            num_inference_steps=max(1, int(num_inference_steps)),
+        )
+        attack_latents = (1.0 - strength) * inverted_latents + strength * noise
+        transform_name = "sd35_adapter_approximate_ddim_inversion_regeneration"
+    elif family == "sdedit_regeneration":
+        attack_latents = base_latents + strength * noise
+        transform_name = "sd35_adapter_sdedit_latent_noise_regeneration"
+    elif family == "diffusion_purification":
+        attack_latents = (1.0 - strength) * base_latents + strength * noise
+        transform_name = "sd35_adapter_diffusion_purification_regeneration"
+    else:
+        attack_latents = (1.0 - strength) * base_latents + strength * noise
+        transform_name = "sd35_adapter_img2img_latent_regeneration"
+    with torch.inference_mode():
+        generated = pipe(
+            prompt,
+            guidance_scale=1.0,
+            num_inference_steps=max(1, int(num_inference_steps)),
+            height=int(size),
+            width=int(size),
+            latents=attack_latents.to(dtype=getattr(getattr(pipe, "transformer", None), "dtype", attack_latents.dtype)),
+            generator=generator,
+        ).images[0]
+    return generated.convert("RGB"), transform_name
+
+
+def apply_formal_image_attack(
+    image: Any,
+    *,
+    attack_family: str,
+    seed: int,
+    pipe: Any | None = None,
+    prompt: str = "",
+    size: int = 512,
+    device: str = "cuda",
+    num_inference_steps: int = 8,
+) -> tuple[Any, str]:
+    """执行共同攻击矩阵中的图像级攻击, 并对再生成攻击显式要求 pipeline。"""
+
+    if is_regeneration_attack(attack_family):
+        if pipe is None:
+            raise RuntimeError(f"regeneration_attack_pipeline_missing:{attack_family}")
+        return apply_regeneration_image_attack(
+            image,
+            attack_family=attack_family,
+            seed=int(seed),
+            pipe=pipe,
+            prompt=prompt,
+            size=int(size),
+            device=device,
+            num_inference_steps=int(num_inference_steps),
+        )
+    return apply_standard_geometric_image_attack(image, attack_family=attack_family, seed=int(seed))
+
+
+def apply_image_attack(image: Any, *, attack_family: str, seed: int) -> tuple[Any, str]:
+    """兼容旧调用名称, 仅用于不需要扩散 pipeline 的图像攻击。"""
+
+    return apply_formal_image_attack(image, attack_family=attack_family, seed=int(seed))
 
 
 def observation_digest(payload: dict[str, Any]) -> dict[str, Any]:

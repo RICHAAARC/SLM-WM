@@ -23,6 +23,7 @@ from experiments.baselines import (
     build_primary_baseline_formal_import_readiness_summary,
     validate_primary_baseline_formal_import_rows,
 )
+from experiments.protocol.attacks import default_attack_configs
 from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -242,6 +243,42 @@ def group_method_observations(rows: Iterable[Mapping[str, Any]]) -> dict[str, li
     return grouped
 
 
+def observation_attack_key(row: Mapping[str, Any]) -> tuple[str, str]:
+    """读取 observation 对应的攻击族与攻击名称。"""
+
+    attack_family = str(row.get("attack_family") or "clean")
+    attack_name = str(row.get("attack_name") or row.get("attack_condition") or "clean_none")
+    return attack_family, attack_name
+
+
+def group_observations_by_attack(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """按攻击族与攻击名称拆分 observation, 便于绑定攻击矩阵资源档位。"""
+
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(observation_attack_key(row), []).append(dict(row))
+    return grouped
+
+
+def build_attack_resource_profile_lookup() -> dict[tuple[str, str], str]:
+    """从默认攻击矩阵生成攻击到资源档位的映射, 并优先选择正式主档位。"""
+
+    priority = {"full_main": 0, "full_extra": 1, "probe": 2}
+    lookup: dict[tuple[str, str], str] = {("clean", "clean_none"): "full_main"}
+    for config in default_attack_configs():
+        key = (config.attack_family, config.attack_name)
+        current = lookup.get(key)
+        if current is None or priority[config.resource_profile] < priority[current]:
+            lookup[key] = config.resource_profile
+    return lookup
+
+
+def allowed_resource_profiles_from_attack_lookup(lookup: Mapping[tuple[str, str], str]) -> tuple[str, ...]:
+    """返回候选导入校验应接受的资源档位集合。"""
+
+    return tuple(sorted(set(lookup.values())))
+
+
 def evidence_path_for_source(source_path: Path | None, fallback_path: Path, root_path: Path) -> tuple[str, ...]:
     """为候选记录构造可被 validator 解析的证据路径。"""
 
@@ -307,24 +344,26 @@ def build_method_candidate_rows(
     source_digest = digest_for_source(source_path if source_path and source_path.is_file() else local_observations_path, observation_rows)
     prompt_protocol_digest = build_prompt_protocol_digest(observation_rows)
     records: list[dict[str, Any]] = []
+    attack_profile_lookup = build_attack_resource_profile_lookup()
     for baseline_id, baseline_rows in group_method_observations(observation_rows).items():
         if not baseline_rows:
             continue
-        records.extend(
-            build_method_faithful_baseline_candidate_records(
-                baseline_id=baseline_id,
-                observation_rows=baseline_rows,
-                target_fpr=target_fpr,
-                baseline_result_source=baseline_result_source,
-                baseline_result_source_digest=source_digest,
-                evidence_paths=evidence_paths,
-                prompt_protocol_digest=prompt_protocol_digest,
-                full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
-                fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
-                attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
-                resource_profile=resource_profile,
+        for attack_key, attack_rows in group_observations_by_attack(baseline_rows).items():
+            records.extend(
+                build_method_faithful_baseline_candidate_records(
+                    baseline_id=baseline_id,
+                    observation_rows=attack_rows,
+                    target_fpr=target_fpr,
+                    baseline_result_source=baseline_result_source,
+                    baseline_result_source_digest=source_digest,
+                    evidence_paths=evidence_paths,
+                    prompt_protocol_digest=prompt_protocol_digest,
+                    full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
+                    fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
+                    attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
+                    resource_profile=attack_profile_lookup.get(attack_key, resource_profile),
+                )
             )
-        )
     return records
 
 
@@ -352,23 +391,27 @@ def build_t2smark_smoke_candidate_rows(
         baseline_result_source = relative_or_absolute(local_observations_path, root_path)
     source_digest = digest_for_source(source_path if source_path and source_path.is_file() else local_observations_path, observation_rows)
     prompt_protocol_digest = build_prompt_protocol_digest(observation_rows)
-    return list(
-        build_method_faithful_baseline_candidate_records(
-            baseline_id=T2SMARK_BASELINE_ID,
-            observation_rows=observation_rows,
-            target_fpr=target_fpr,
-            baseline_result_source=baseline_result_source,
-            baseline_result_source_digest=source_digest,
-            evidence_paths=evidence_paths,
-            prompt_protocol_digest=prompt_protocol_digest,
-            full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
-            fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
-            attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
-            result_source_type="official_reproduction",
-            adapter_boundary="sd35_medium_native_official_reproduction",
-            resource_profile=resource_profile,
+    records: list[dict[str, Any]] = []
+    attack_profile_lookup = build_attack_resource_profile_lookup()
+    for attack_key, attack_rows in group_observations_by_attack(observation_rows).items():
+        records.extend(
+            build_method_faithful_baseline_candidate_records(
+                baseline_id=T2SMARK_BASELINE_ID,
+                observation_rows=attack_rows,
+                target_fpr=target_fpr,
+                baseline_result_source=baseline_result_source,
+                baseline_result_source_digest=source_digest,
+                evidence_paths=evidence_paths,
+                prompt_protocol_digest=prompt_protocol_digest,
+                full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
+                fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
+                attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
+                result_source_type="official_reproduction",
+                adapter_boundary="sd35_medium_native_official_reproduction",
+                resource_profile=attack_profile_lookup.get(attack_key, resource_profile),
+            )
         )
-    )
+    return records
 
 
 def write_primary_baseline_result_candidate_outputs(
@@ -444,11 +487,13 @@ def write_primary_baseline_result_candidate_outputs(
             attack_matrix_baseline_detection_ready=method_attack_matrix_baseline_detection_ready,
         )
     candidate_rows = method_candidate_rows + normalized_t2smark_rows
+    attack_profile_lookup = build_attack_resource_profile_lookup()
     validation_report = validate_primary_baseline_formal_import_rows(
         candidate_rows,
         evidence_root=root_path,
         target_fpr=target_fpr,
         require_existing_evidence=True,
+        allowed_resource_profiles=allowed_resource_profiles_from_attack_lookup(attack_profile_lookup),
     )
     readiness_rows = build_primary_baseline_formal_import_readiness_rows(candidate_rows, validation_report)
     readiness_summary = build_primary_baseline_formal_import_readiness_summary(readiness_rows)

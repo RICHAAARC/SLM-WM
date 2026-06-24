@@ -164,24 +164,25 @@ def write_primary_baseline_formal_import_protocol_outputs(
     formal_template_rows = [row for row in template_rows if str(row.get("resource_profile", "")) == "full_main"]
     schema = build_primary_baseline_formal_import_schema(target_fpr=target_fpr, root=root_path)
     candidate_rows = read_jsonl_rows(resolved_candidate_records_path)
+    formal_candidate_rows = [row for row in candidate_rows if str(row.get("resource_profile", "")) == "full_main"]
     validation_report = validate_primary_baseline_formal_import_rows(
-        candidate_rows,
+        formal_candidate_rows,
         evidence_root=root_path,
         target_fpr=target_fpr,
         require_existing_evidence=True,
         prompt_protocol_name=str(schema["prompt_protocol_name"]),
     )
-    readiness_rows = build_primary_baseline_formal_import_readiness_rows(candidate_rows, validation_report)
+    readiness_rows = build_primary_baseline_formal_import_readiness_rows(formal_candidate_rows, validation_report)
     readiness_summary = build_primary_baseline_formal_import_readiness_summary(readiness_rows)
     coverage_rows = build_primary_baseline_formal_template_coverage_rows(
         formal_template_rows,
-        candidate_rows,
+        formal_candidate_rows,
         validation_report,
     )
     coverage_summary = build_primary_baseline_formal_template_coverage_summary(coverage_rows)
     collection_rows = build_primary_baseline_formal_evidence_collection_rows(
         formal_template_rows,
-        candidate_rows,
+        formal_candidate_rows,
         validation_report,
     )
     collection_summary = build_primary_baseline_formal_evidence_collection_summary(collection_rows)
@@ -191,6 +192,7 @@ def write_primary_baseline_formal_import_protocol_outputs(
         "target_fpr": target_fpr,
         "template_record_count": len(formal_template_rows),
         "candidate_record_count": len(candidate_rows),
+        "formal_candidate_record_count": len(formal_candidate_rows),
         "accepted_formal_import_count": validation_report["accepted_formal_import_count"],
         "rejected_formal_import_count": validation_report["rejected_formal_import_count"],
         "formal_import_validation_ready": validation_report["formal_import_validation_ready"],

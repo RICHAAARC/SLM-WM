@@ -364,6 +364,7 @@ def write_external_baseline_comparison_outputs(
         target_fpr=target_fpr,
         require_existing_evidence=True,
         evidence_search_roots=resolved_evidence_search_roots,
+        allowed_resource_profiles=("full_main", "full_extra"),
     )
     baseline_result_records = [
         normalize_baseline_result_record(row) for row in formal_import_validation.get("accepted_records", [])

@@ -30,6 +30,48 @@ def test_t2smark_adapter_builds_positive_and_negative_observations() -> None:
 
 
 @pytest.mark.quick
+def test_t2smark_adapter_maps_formal_attack_results_to_common_observations() -> None:
+    """T2SMark adapter 应把官方运行中的正式攻击结果映射为共同攻击簇观测。"""
+
+    image_pairs = [
+        {
+            "image_id": "img_001",
+            "prompt_id": "prompt_001",
+            "prompt_text": "a ceramic fox",
+            "generated_image_path": "outputs/t2smark/images/00000.png",
+            "generated_image_digest": "source_digest",
+        }
+    ]
+    results = {
+        "0": {
+            "robustness": {"norm1_no_w": 0.1, "norm1_w": 0.9, "acc_msg": 1.0, "acc_key": 1.0},
+            "formal_attacks": {
+                "img2img_regeneration": {
+                    "norm1_no_w": 0.2,
+                    "norm1_w": 0.7,
+                    "acc_msg": 0.8,
+                    "acc_key": 0.9,
+                    "attack_family": "regeneration_attack",
+                    "attack_name": "img2img_regeneration",
+                    "attack_condition": "img2img_regeneration",
+                    "attacked_image_path": "outputs/t2smark/formal_attacks/00000_img2img_regeneration.png",
+                    "attacked_image_digest": "attacked_digest",
+                }
+            },
+        }
+    }
+
+    observations, manifest = build_t2smark_observations(image_pairs=image_pairs, t2smark_results=results)
+
+    attacked_rows = [row for row in observations if row["attack_condition"] == "img2img_regeneration"]
+    assert len(observations) == 4
+    assert {row["sample_role"] for row in attacked_rows} == {"attacked_negative", "attacked_positive"}
+    assert all(row["attack_family"] == "regeneration_attack" for row in attacked_rows)
+    assert manifest["formal_attack_names"] == ["img2img_regeneration"]
+    assert manifest["formal_attack_observation_count"] == 2
+
+
+@pytest.mark.quick
 def test_t2smark_adapter_cli_writes_observation_file(tmp_path: Path) -> None:
     """T2SMark adapter CLI 应写出 observation 和 manifest 文件。"""
 
