@@ -66,6 +66,7 @@ THRESHOLD_PACKAGE_PREFIXES = (
     "outputs/geometric_rescue/",
     "outputs/attack_matrix/",
 )
+STRICT_DDIM_RUNTIME_CACHE: dict[tuple[str, str, str, bool], dict[str, Any]] = {}
 
 
 @dataclass(frozen=True)
@@ -257,6 +258,51 @@ def read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
     return tuple(rows)
 
 
+def configure_model_loading_output(config: RealAttackEvaluationConfig) -> None:
+    """在使用统一工作量进度条时, 静默第三方模型下载和加载进度条.
+
+    该函数属于 Colab workflow 的通用工程写法: 项目自身已经输出统一工作量进度,
+    因此当 `enable_pipeline_progress_bar=False` 时, 需要同步关闭 Hugging Face Hub、
+    Diffusers 和 Transformers 的细粒度加载进度, 避免日志被单样本模型加载信息淹没。
+    """
+
+    if config.enable_pipeline_progress_bar:
+        return
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("DIFFUSERS_VERBOSITY", "error")
+    os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+    try:
+        from huggingface_hub.utils import disable_progress_bars
+
+        disable_progress_bars()
+    except Exception:
+        pass
+    try:
+        import diffusers
+
+        diffusers.utils.logging.set_verbosity_error()
+    except Exception:
+        pass
+    try:
+        import transformers
+
+        transformers.utils.logging.set_verbosity_error()
+    except Exception:
+        pass
+
+
+def scheduler_config_without_ignored_fields(scheduler_config: Any) -> dict[str, Any]:
+    """移除 DDIM scheduler 在当前 Diffusers 版本中会重复告警的兼容字段.
+
+    该处理只影响配置解析边界, 不改变 DDIM inversion 的数学路径; `skip_prk_steps`
+    属于 DDIMInverseScheduler 不消费的历史字段, Diffusers 本身也会忽略该字段。
+    """
+
+    cleaned_config = dict(scheduler_config)
+    cleaned_config.pop("skip_prk_steps", None)
+    return cleaned_config
+
+
 def latest_drive_package(drive_dir: str | Path, pattern: str) -> Path:
     """从 Google Drive 目录中选择最新结果包."""
     candidates = sorted(Path(drive_dir).expanduser().glob(pattern))
@@ -407,6 +453,7 @@ def load_img2img_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict
     import torch
     import diffusers
 
+    configure_model_loading_output(config)
     if config.device_name == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("gpu_unavailable")
     dtype = getattr(torch, config.torch_dtype)
@@ -535,17 +582,32 @@ def predict_ddim_noise(
     return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
 
-def run_strict_ddim_inversion_attack(
-    source_image: Any,
-    spec: RealAttackSpec,
-    config: RealAttackEvaluationConfig,
-    seed: int,
-    prompt_text: str,
-) -> Any:
-    """使用 DDIMInverseScheduler 执行真正的 inversion 再生成攻击."""
+def strict_ddim_runtime_cache_key(config: RealAttackEvaluationConfig) -> tuple[str, str, str, bool]:
+    """构造 DDIM inversion 运行时缓存键.
+
+    该键只包含会影响 pipeline 加载结果的配置项。prompt、seed 和 attack 参数属于单样本执行参数,
+    不应导致重复加载模型。
+    """
+
+    return (
+        str(config.ddim_attack_model_id),
+        str(config.device_name),
+        str(config.torch_dtype),
+        bool(config.enable_pipeline_progress_bar),
+    )
+
+
+def load_strict_ddim_inversion_runtime(config: RealAttackEvaluationConfig) -> dict[str, Any]:
+    """加载一次 DDIM inversion 所需的 legacy pipeline 与 scheduler 类.
+
+    该函数将模型加载收敛到运行时缓存边界, 避免每个 source image 都重新下载或重新构造
+    Stable Diffusion pipeline。单样本函数只复用该运行时对象并重置 scheduler 状态。
+    """
+
     import torch
     import diffusers
 
+    configure_model_loading_output(config)
     if config.device_name == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("gpu_unavailable")
     pipeline_class = getattr(diffusers, "StableDiffusionPipeline", None)
@@ -566,8 +628,58 @@ def run_strict_ddim_inversion_attack(
     pipe.torch = torch
     if hasattr(pipe, "set_progress_bar_config"):
         pipe.set_progress_bar_config(disable=not config.enable_pipeline_progress_bar)
-    pipe.scheduler = scheduler_class.from_config(pipe.scheduler.config)
-    inverse_scheduler = inverse_scheduler_class.from_config(pipe.scheduler.config)
+    scheduler_config = scheduler_config_without_ignored_fields(pipe.scheduler.config)
+    pipe.scheduler = scheduler_class.from_config(scheduler_config)
+    return {
+        "pipe": pipe,
+        "torch": torch,
+        "scheduler_class": scheduler_class,
+        "inverse_scheduler_class": inverse_scheduler_class,
+        "scheduler_config": scheduler_config,
+    }
+
+
+def get_strict_ddim_inversion_runtime(config: RealAttackEvaluationConfig) -> dict[str, Any]:
+    """按配置复用 DDIM inversion pipeline, 使日志只保留统一工作量进度."""
+
+    cache_key = strict_ddim_runtime_cache_key(config)
+    runtime = STRICT_DDIM_RUNTIME_CACHE.get(cache_key)
+    if runtime is None:
+        runtime = load_strict_ddim_inversion_runtime(config)
+        STRICT_DDIM_RUNTIME_CACHE[cache_key] = runtime
+    return runtime
+
+
+def clear_strict_ddim_inversion_runtime_cache() -> None:
+    """释放 DDIM inversion pipeline 缓存, 避免后续 Notebook cell 持续占用显存."""
+
+    for runtime in STRICT_DDIM_RUNTIME_CACHE.values():
+        runtime.pop("pipe", None)
+    STRICT_DDIM_RUNTIME_CACHE.clear()
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def run_strict_ddim_inversion_attack(
+    source_image: Any,
+    spec: RealAttackSpec,
+    config: RealAttackEvaluationConfig,
+    seed: int,
+    prompt_text: str,
+) -> Any:
+    """使用 DDIMInverseScheduler 执行真正的 inversion 再生成攻击."""
+
+    runtime = get_strict_ddim_inversion_runtime(config)
+    pipe = runtime["pipe"]
+    torch = runtime["torch"]
+    pipe.scheduler = runtime["scheduler_class"].from_config(runtime["scheduler_config"])
+    inverse_scheduler = runtime["inverse_scheduler_class"].from_config(runtime["scheduler_config"])
     inversion_steps = int(spec.attack_parameters.get("inversion_steps", config.ddim_inversion_steps))
     reconstruction_steps = config.ddim_reconstruction_steps
     do_guidance = config.guidance_scale > 1.0
@@ -1091,6 +1203,8 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
                             f"seed={attack_seed}"
                         ),
                     )
+
+    clear_strict_ddim_inversion_runtime_cache()
 
     record_rows = tuple(records)
     registry_tuple = tuple(registry_rows)
