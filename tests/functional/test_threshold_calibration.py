@@ -209,6 +209,65 @@ def test_attacked_negative_fpr_is_diagnostic_not_fixed_fpr_denominator(tmp_path:
 
 
 @pytest.mark.quick
+def test_evidence_clean_fpr_governs_threshold_protocol_decision(tmp_path: Path) -> None:
+    """rescue 后 clean negative FPR 超标时, 阈值协议必须失败。"""
+    rescue_dir = tmp_path / "outputs" / "geometric_rescue"
+    rescue_dir.mkdir(parents=True)
+    records_path = rescue_dir / "aligned_detection_records.jsonl"
+    audit_path = rescue_dir / "geometry_rescue_audit.json"
+    records = [
+        rescue_record("cal_pos", "calibration", "positive_source", 0.90),
+        rescue_record("cal_clean_a", "calibration", "clean_negative", 0.10),
+        rescue_record("cal_clean_b", "calibration", "clean_negative", 0.20),
+        rescue_record("test_clean_rescued", "test", "clean_negative", 0.18, 0.25),
+    ]
+    records_path.write_text("".join(json_line(record) for record in records), encoding="utf-8")
+    audit_path.write_text(
+        json.dumps({"attention_geometry_ready": True, "image_quality_metrics_ready": True}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    manifest = write_threshold_calibration_outputs(
+        root=tmp_path,
+        rescue_records_path=records_path,
+        rescue_audit_path=audit_path,
+        target_fpr=0.5,
+    )
+    threshold_report = json.loads(
+        (tmp_path / "outputs" / "threshold_calibration" / "threshold_degeneracy_report.json").read_text(encoding="utf-8")
+    )
+
+    assert threshold_report["raw_content_claim_ready"] is True
+    assert threshold_report["evidence_fpr_exceeds_target"] is True
+    assert threshold_report["fixed_fpr_and_rescue_boundary_ready"] is False
+    assert manifest["metadata"]["protocol_decision"] == "fail"
+
+
+@pytest.mark.quick
+def test_minimum_clean_negative_count_gates_fixed_fpr_readiness(tmp_path: Path) -> None:
+    """pilot_paper 规模门控不足时, 即使经验 FPR 满足也不能标记为 ready。"""
+    records_path, audit_path = write_rescue_inputs(tmp_path)
+
+    manifest = write_threshold_calibration_outputs(
+        root=tmp_path,
+        rescue_records_path=records_path,
+        rescue_audit_path=audit_path,
+        target_fpr=0.5,
+        minimum_clean_negative_count=100,
+    )
+    threshold_report = json.loads(
+        (tmp_path / "outputs" / "threshold_calibration" / "threshold_degeneracy_report.json").read_text(encoding="utf-8")
+    )
+
+    assert threshold_report["minimum_clean_negative_count"] == 100
+    assert threshold_report["calibration_negative_count_ready"] is False
+    assert threshold_report["evidence_clean_negative_count_ready"] is False
+    assert threshold_report["minimum_clean_negative_count_ready"] is False
+    assert threshold_report["fixed_fpr_and_rescue_boundary_ready"] is False
+    assert manifest["metadata"]["protocol_decision"] == "fail"
+
+
+@pytest.mark.quick
 def test_threshold_calibration_propagates_aligned_rescoring_pair_metrics(tmp_path: Path) -> None:
     """最新真实 aligned rescoring 质量指标应进入阈值校准摘要和 manifest。"""
     records_path, audit_path = write_rescue_inputs(tmp_path)

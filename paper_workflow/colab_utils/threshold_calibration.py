@@ -10,7 +10,10 @@ import shutil
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
+from experiments.protocol.pilot_paper_fixed_fpr import (
+    PILOT_PAPER_FIXED_FPR,
+    PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
+)
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
     file_digest,
@@ -26,6 +29,8 @@ DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/thres
 DEFAULT_ATTENTION_INJECTION_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_latent_injection"
 DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring"
 DEFAULT_TARGET_FPR = PILOT_PAPER_FIXED_FPR
+DEFAULT_MAX_CONTENT_RECORDS: int | None = None
+DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT = PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT
 ATTENTION_INJECTION_PACKAGE_PATTERN = "attention_latent_injection_package_*.zip"
 ALIGNED_RESCORING_PACKAGE_PATTERN = "aligned_rescoring_package_*.zip"
 CONTENT_CARRIER_PREFIXES = ("outputs/content_carriers/",)
@@ -77,6 +82,34 @@ def latest_drive_package(drive_dir: str | Path, pattern: str) -> Path:
     if not candidates:
         raise FileNotFoundError(f"drive_package_missing:{drive_dir}:{pattern}")
     return candidates[-1]
+
+
+def parse_optional_record_limit(value: int | str | None) -> int | None:
+    """解析可选记录上限, all 或空值表示使用全部记录。
+
+    该函数属于配置解析层: Notebook 只传入环境变量文本, 由 helper 统一完成
+    语义归一化, 避免入口 cell 中散落重复解析逻辑。
+    """
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    normalized = value.strip().lower()
+    if normalized in {"", "all", "none", "unlimited"}:
+        return None
+    return max(0, int(normalized))
+
+
+def parse_non_negative_count(value: int | str | None, default: int) -> int:
+    """解析非负计数配置。"""
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return max(0, value)
+    normalized = value.strip()
+    if not normalized:
+        return default
+    return max(0, int(normalized))
 
 
 def copy_package_to_input_dir(package_path: Path, input_dir: Path) -> Path:
@@ -194,9 +227,16 @@ def run_default_threshold_calibration_from_drive_plan(
     attention_injection_drive_dir: str = DEFAULT_ATTENTION_INJECTION_DRIVE_DIR,
     aligned_rescoring_drive_dir: str = DEFAULT_ALIGNED_RESCORING_DRIVE_DIR,
     target_fpr: float = DEFAULT_TARGET_FPR,
+    max_content_records: int | str | None = DEFAULT_MAX_CONTENT_RECORDS,
+    minimum_clean_negative_count: int | str | None = DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT,
 ) -> dict[str, Any]:
     """从 Google Drive 前序结果包重建几何恢复记录并写出 threshold calibration 产物。"""
     root_path = Path(root).resolve()
+    resolved_max_content_records = parse_optional_record_limit(max_content_records)
+    resolved_minimum_clean_negative_count = parse_non_negative_count(
+        minimum_clean_negative_count,
+        DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT,
+    )
     try:
         input_manifest = materialize_threshold_calibration_inputs(
             root=root_path,
@@ -207,11 +247,13 @@ def run_default_threshold_calibration_from_drive_plan(
             root=root_path,
             content_records_path=input_manifest["content_records_path"],
             attention_injection_package_path=input_manifest["attention_injection_input_package_path"],
+            max_content_records=resolved_max_content_records,
         )
         threshold_manifest = write_threshold_calibration_outputs(
             root=root_path,
             target_fpr=target_fpr,
             aligned_rescoring_package_path=input_manifest["aligned_rescoring_input_package_path"],
+            minimum_clean_negative_count=resolved_minimum_clean_negative_count,
         )
     except Exception as error:
         return write_failure_outputs(root_path, error)
@@ -241,6 +283,14 @@ def run_default_threshold_calibration_from_drive_plan(
             "claim_boundary": "paper_ready_only_after_full_external_protocol",
             "threshold_protocol_decision": threshold_manifest.get("metadata", {}).get("protocol_decision", ""),
             "geometric_protocol_decision": rescue_audit.get("protocol_decision", ""),
+            "max_content_records": resolved_max_content_records,
+            "minimum_clean_negative_count": threshold_report.get(
+                "minimum_clean_negative_count",
+                resolved_minimum_clean_negative_count,
+            ),
+            "minimum_clean_negative_count_ready": threshold_report.get("minimum_clean_negative_count_ready", False),
+            "calibration_negative_count": threshold_report.get("calibration_negative_count", 0),
+            "clean_negative_count": threshold_report.get("clean_negative_count", 0),
             "fixed_fpr_control_scope": threshold_report.get("fixed_fpr_control_scope", "calibration_clean_negative"),
             "fixed_fpr_denominator_role": threshold_report.get("fixed_fpr_denominator_role", "clean_negative_only"),
             "rescue_control_scope": threshold_report.get("rescue_control_scope", "evidence_clean_negative"),

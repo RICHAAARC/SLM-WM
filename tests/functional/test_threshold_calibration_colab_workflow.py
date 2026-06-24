@@ -8,8 +8,10 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 
+from main.methods.detection import RESCUE_ABLATION_MODES
 from paper_workflow.colab_utils.threshold_calibration import (
     package_threshold_calibration_outputs,
+    parse_optional_record_limit,
     run_default_threshold_calibration_from_drive_plan,
 )
 
@@ -92,10 +94,10 @@ def write_attention_injection_package(package_path: Path) -> None:
         )
 
 
-def write_aligned_rescoring_package(package_path: Path) -> None:
+def write_aligned_rescoring_package(package_path: Path, records: list[dict[str, object]] | None = None) -> None:
     """写出包含内容检测记录与 pair-level 质量指标的最小 aligned rescoring 包。"""
     package_path.parent.mkdir(parents=True, exist_ok=True)
-    records = [
+    resolved_records = records or [
         content_record("cal_pos", "calibration", "positive_source", 0.90),
         content_record("cal_clean_a", "calibration", "clean_negative", 0.10),
         content_record("cal_clean_b", "calibration", "clean_negative", 0.20),
@@ -127,8 +129,17 @@ def write_aligned_rescoring_package(package_path: Path) -> None:
         archive.writestr("outputs/aligned_rescoring/aligned_rescoring_quality_metrics.csv", quality_text)
         archive.writestr(
             "outputs/content_carriers/content_detection_records.jsonl",
-            "".join(json_line(record) for record in records),
+            "".join(json_line(record) for record in resolved_records),
         )
+
+
+@pytest.mark.quick
+def test_optional_record_limit_parser_treats_all_as_unbounded() -> None:
+    """threshold calibration helper 应把 all 解析为不截断。"""
+    assert parse_optional_record_limit("all") is None
+    assert parse_optional_record_limit("unlimited") is None
+    assert parse_optional_record_limit(None) is None
+    assert parse_optional_record_limit("96") == 96
 
 
 @pytest.mark.quick
@@ -144,6 +155,7 @@ def test_threshold_calibration_drive_workflow_generates_package_ready_outputs(tm
         attention_injection_drive_dir=str(attention_dir),
         aligned_rescoring_drive_dir=str(aligned_dir),
         target_fpr=0.5,
+        minimum_clean_negative_count=0,
     )
     record = package_threshold_calibration_outputs(root=tmp_path, drive_output_dir=str(tmp_path / "drive" / "threshold_calibration"))
     archive_path = tmp_path / record.archive_path
@@ -166,3 +178,36 @@ def test_threshold_calibration_drive_workflow_generates_package_ready_outputs(tm
         assert "outputs/content_carriers/content_detection_records.jsonl" in names
         assert "outputs/threshold_calibration/threshold_calibration_archive_summary.json" in names
         assert "outputs/threshold_calibration/threshold_calibration_archive_manifest.local.json" in names
+
+
+@pytest.mark.quick
+def test_threshold_calibration_drive_workflow_uses_all_content_records_by_default(tmp_path: Path) -> None:
+    """pilot_paper 阈值校准路径默认不应沿用 96 条诊断截断。"""
+    attention_dir = tmp_path / "drive" / "attention_latent_injection"
+    aligned_dir = tmp_path / "drive" / "aligned_rescoring"
+    write_attention_injection_package(attention_dir / "attention_latent_injection_package_20260621t000000z_sample.zip")
+    records: list[dict[str, object]] = []
+    for index in range(40):
+        records.extend(
+            [
+                content_record(f"cal_pos_{index}", "calibration", "positive_source", 0.90),
+                content_record(f"cal_clean_{index}", "calibration", "clean_negative", 0.01 + index * 0.001),
+                content_record(f"test_attacked_{index}", "test", "attacked_negative", 0.20),
+            ]
+        )
+    write_aligned_rescoring_package(
+        aligned_dir / "aligned_rescoring_package_20260621t000000z_sample.zip",
+        records=records,
+    )
+
+    summary = run_default_threshold_calibration_from_drive_plan(
+        root=tmp_path,
+        attention_injection_drive_dir=str(attention_dir),
+        aligned_rescoring_drive_dir=str(aligned_dir),
+        target_fpr=0.5,
+        minimum_clean_negative_count=0,
+    )
+
+    assert summary["run_decision"] == "pass"
+    assert summary["metadata"]["max_content_records"] is None
+    assert summary["geometric_rescue_record_count"] == len(records) * len(RESCUE_ABLATION_MODES)

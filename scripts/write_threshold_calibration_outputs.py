@@ -401,16 +401,31 @@ def build_threshold_report(
     config: FixedFprCalibrationConfig,
     rescue_audit: dict[str, Any],
     aligned_quality: dict[str, Any],
+    minimum_clean_negative_count: int,
 ) -> dict[str, Any]:
     """构造阈值退化与 fixed-FPR 主张边界报告。"""
     report = threshold.to_dict()
     clean_fpr_exceeds_target = metrics["evidence_clean_fpr"] > config.target_fpr
     attacked_fpr_diagnostic_exceeds_target = metrics["evidence_attacked_fpr"] > config.target_fpr
-    fixed_fpr_and_rescue_boundary_ready = not threshold.threshold_degenerate and not clean_fpr_exceeds_target
+    calibration_negative_count_ready = threshold.calibration_negative_count >= minimum_clean_negative_count
+    evidence_clean_negative_count_ready = metrics["clean_negative_count"] >= minimum_clean_negative_count
+    minimum_clean_negative_count_ready = calibration_negative_count_ready and evidence_clean_negative_count_ready
+    fixed_fpr_and_rescue_boundary_ready = (
+        not threshold.threshold_degenerate
+        and not clean_fpr_exceeds_target
+        and minimum_clean_negative_count_ready
+    )
     report.update(
         {
             "construction_unit_name": CONSTRUCTION_UNIT_NAME,
             "calibrated_content_threshold": threshold.threshold_value,
+            "positive_count": metrics["positive_count"],
+            "clean_negative_count": metrics["clean_negative_count"],
+            "attacked_negative_count": metrics["attacked_negative_count"],
+            "minimum_clean_negative_count": minimum_clean_negative_count,
+            "calibration_negative_count_ready": calibration_negative_count_ready,
+            "evidence_clean_negative_count_ready": evidence_clean_negative_count_ready,
+            "minimum_clean_negative_count_ready": minimum_clean_negative_count_ready,
             "fixed_fpr_control_scope": FIXED_FPR_CONTROL_SCOPE,
             "fixed_fpr_denominator_role": FIXED_FPR_DENOMINATOR_ROLE,
             "rescue_control_scope": RESCUE_CONTROL_SCOPE,
@@ -425,10 +440,14 @@ def build_threshold_report(
             "clean_fpr_exceeds_target": clean_fpr_exceeds_target,
             "attacked_fpr_diagnostic_exceeds_target": attacked_fpr_diagnostic_exceeds_target,
             "evidence_fpr_exceeds_target": clean_fpr_exceeds_target,
-            "fixed_fpr_boundary_ready": not threshold.threshold_degenerate,
-            "rescue_boundary_ready": not clean_fpr_exceeds_target,
+            "fixed_fpr_boundary_ready": not threshold.threshold_degenerate and minimum_clean_negative_count_ready,
+            "rescue_boundary_ready": not clean_fpr_exceeds_target and minimum_clean_negative_count_ready,
             "fixed_fpr_and_rescue_boundary_ready": fixed_fpr_and_rescue_boundary_ready,
-            "raw_content_claim_ready": not threshold.threshold_degenerate and metrics["raw_content_clean_fpr"] <= config.target_fpr,
+            "raw_content_claim_ready": (
+                not threshold.threshold_degenerate
+                and metrics["raw_content_clean_fpr"] <= config.target_fpr
+                and minimum_clean_negative_count_ready
+            ),
             "full_method_claim_ready": False,
             "unsupported_reason": "aligned_content_score_local_proxy",
             "input_attention_geometry_ready": rescue_audit.get("attention_geometry_ready", False),
@@ -447,6 +466,7 @@ def write_threshold_calibration_outputs(
     rescue_audit_path: str | Path = DEFAULT_RESCUE_AUDIT_PATH,
     target_fpr: float = DEFAULT_TARGET_FPR,
     aligned_rescoring_package_path: str | Path | None = None,
+    minimum_clean_negative_count: int = 0,
 ) -> dict[str, Any]:
     """写出 fixed-FPR 阈值校准与指标产物。"""
     root_path = Path(root).resolve()
@@ -472,7 +492,14 @@ def write_threshold_calibration_outputs(
     )
     calibrated = calibrated_records(records, threshold, config)
     metrics = operating_point_metrics(calibrated, threshold, config)
-    threshold_report = build_threshold_report(threshold, metrics, config, rescue_audit, aligned_quality)
+    threshold_report = build_threshold_report(
+        threshold,
+        metrics,
+        config,
+        rescue_audit,
+        aligned_quality,
+        max(0, int(minimum_clean_negative_count)),
+    )
     roc_rows, det_rows = curve_rows(calibrated, config)
     distribution_rows = score_distribution_rows(calibrated)
     standard_rows = build_standard_metric_rows(metrics, calibrated)
@@ -577,6 +604,8 @@ def write_threshold_calibration_outputs(
             "python scripts/write_threshold_calibration_outputs.py "
             f"--aligned-rescoring-package-path {aligned_package_text}"
         )
+    if minimum_clean_negative_count:
+        rebuild_command = f"{rebuild_command} --minimum-clean-negative-count {max(0, int(minimum_clean_negative_count))}"
     manifest = build_artifact_manifest(
         artifact_id="threshold_calibration_manifest",
         artifact_type="local_manifest",
@@ -584,6 +613,7 @@ def write_threshold_calibration_outputs(
         output_paths=output_paths,
         config={
             **config.to_dict(),
+            "minimum_clean_negative_count": max(0, int(minimum_clean_negative_count)),
             "summary_digest": build_stable_digest(summary),
             "threshold_digest": build_stable_digest(threshold.to_dict()),
         },
@@ -592,7 +622,8 @@ def write_threshold_calibration_outputs(
         metadata={
             "construction_unit_name": CONSTRUCTION_UNIT_NAME,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "protocol_decision": "pass" if metrics["raw_content_clean_fpr"] <= target_fpr else "fail",
+            "protocol_decision": "pass" if threshold_report["fixed_fpr_and_rescue_boundary_ready"] else "fail",
+            "minimum_clean_negative_count_ready": threshold_report["minimum_clean_negative_count_ready"],
             "full_method_claim_ready": False,
             "supports_paper_claim": False,
             **aligned_rescoring_output_metadata(aligned_quality),
@@ -611,6 +642,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rescue-audit-path", default=str(DEFAULT_RESCUE_AUDIT_PATH), help="几何 rescue 审计路径。")
     parser.add_argument("--target-fpr", type=float, default=DEFAULT_TARGET_FPR, help="目标 false positive rate。")
     parser.add_argument(
+        "--minimum-clean-negative-count",
+        type=int,
+        default=0,
+        help="fixed-FPR 协议要求的最小 clean negative 数量; 0 表示不启用规模门控。",
+    )
+    parser.add_argument(
         "--aligned-rescoring-package-path",
         default=None,
         help="真实 aligned rescoring 结果包路径; 未传入时自动读取 outputs 中最新包。",
@@ -628,6 +665,7 @@ def main() -> None:
         rescue_audit_path=args.rescue_audit_path,
         target_fpr=args.target_fpr,
         aligned_rescoring_package_path=args.aligned_rescoring_package_path,
+        minimum_clean_negative_count=args.minimum_clean_negative_count,
     )
     print(stable_json_text(manifest), end="")
 

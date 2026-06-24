@@ -265,6 +265,10 @@ def test_colab_notebook_delegates_threshold_calibration_logic_to_helper() -> Non
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "threshold_calibration_ready" in joined_source
     assert "SLM_WM_THRESHOLD_TARGET_FPR', '0.01'" in joined_source
+    assert "SLM_WM_THRESHOLD_MAX_CONTENT_RECORDS', 'all'" in joined_source
+    assert "SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT', '100'" in joined_source
+    assert "max_content_records=os.environ['SLM_WM_THRESHOLD_MAX_CONTENT_RECORDS']" in joined_source
+    assert "minimum_clean_negative_count=os.environ['SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT']" in joined_source
     assert "geometric_rescue_ready" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
