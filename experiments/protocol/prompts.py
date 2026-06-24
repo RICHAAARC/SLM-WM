@@ -10,8 +10,8 @@ from main.core.digest import build_stable_digest
 
 PROMPT_FILES = {
     "probe": Path("configs/paper_main_probe_prompts.txt"),
-    "pilot": Path("configs/paper_main_pilot_prompts.txt"),
-    "full": Path("configs/paper_main_full_prompts.txt"),
+    "pilot_paper": Path("configs/paper_main_pilot_paper_prompts.txt"),
+    "full_paper": Path("configs/paper_main_full_paper_prompts.txt"),
 }
 
 

@@ -30,7 +30,7 @@ class AttackConfig:
         """集中校验攻击配置边界。"""
         if self.attack_strength < 0.0:
             raise ValueError("attack_strength 不得小于 0")
-        if self.resource_profile not in {"probe", "pilot", "full_main", "full_extra"}:
+        if self.resource_profile not in {"probe", "full_main", "full_extra"}:
             raise ValueError("resource_profile 必须属于受治理资源档位")
         if not self.attack_id or not self.attack_name or not self.attack_family:
             raise ValueError("攻击配置标识、名称和族名称不得为空")
@@ -209,16 +209,6 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             requires_gpu=False,
             enabled=True,
             attack_parameters={"crop_ratio": 0.80, "resize_scale": 1.0},
-        ),
-        AttackConfig(
-            attack_id="composite_geometric_pilot",
-            attack_family="geometric_transform",
-            attack_name="composite_geometric_attacks",
-            attack_strength=0.22,
-            resource_profile="pilot",
-            requires_gpu=False,
-            enabled=True,
-            attack_parameters={"crop_ratio": 0.88, "degrees": 3.0, "resize_scale": 0.9},
         ),
         AttackConfig(
             attack_id="composite_geometric_main",

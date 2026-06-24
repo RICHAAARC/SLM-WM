@@ -100,7 +100,7 @@ def t2smark_candidate_record() -> dict[str, object]:
         "negative_count": 5,
         "positive_count": 5,
         "prompt_protocol_digest": "prompt_digest",
-        "prompt_protocol_name": "paper_main_full_prompt_protocol",
+        "prompt_protocol_name": "paper_main_full_paper_prompt_protocol",
         "quality_score_proxy_mean": 1.0,
         "resource_profile": "full_main",
         "result_protocol_name": "primary_baseline_formal_import_protocol",

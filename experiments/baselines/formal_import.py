@@ -11,7 +11,7 @@ from main.core.digest import build_stable_digest
 
 PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME = "primary_baseline_formal_import_protocol"
-FULL_MAIN_PROMPT_PROTOCOL_NAME = "paper_main_full_prompt_protocol"
+FULL_MAIN_PROMPT_PROTOCOL_NAME = "paper_main_full_paper_prompt_protocol"
 FORMAL_OPERATING_POINT_PREFIX = "fixed_fpr"
 REJECTED_ADAPTER_BOUNDARIES = (
     "gpu_smoke_not_full_external_baseline_comparison",

@@ -20,10 +20,8 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outpu
 from tools.harness.lib.naming_rules import is_allowed_file_name
 
 
-RUNTIME_NOTEBOOK_PATH = Path("paper_workflow/sd_runtime_cold_start_probe.ipynb")
-INJECTION_NOTEBOOK_PATH = Path("paper_workflow/minimal_latent_injection_run.ipynb")
+RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH = Path("paper_workflow/runtime_method_precheck_run.ipynb")
 DRIVE_COLD_START_NOTEBOOK_PATH = Path("paper_workflow/colab_drive_cold_start_smoke.ipynb")
-DRIVE_RELOAD_NOTEBOOK_PATH = Path("paper_workflow/drive_manifest_reload_smoke.ipynb")
 ATTENTION_GEOMETRY_NOTEBOOK_PATH = Path("paper_workflow/attention_geometry_capture_run.ipynb")
 ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH = Path("paper_workflow/attention_latent_injection_run.ipynb")
 ALIGNED_RESCORING_NOTEBOOK_PATH = Path("paper_workflow/aligned_rescoring_run.ipynb")
@@ -32,10 +30,8 @@ REAL_ATTACK_EVALUATION_NOTEBOOK_PATH = Path("paper_workflow/real_attack_evaluati
 EXTERNAL_BASELINE_GPU_SMOKE_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_gpu_smoke_run.ipynb")
 DATASET_LEVEL_QUALITY_NOTEBOOK_PATH = Path("paper_workflow/dataset_level_quality_run.ipynb")
 NOTEBOOK_PATHS = (
-    RUNTIME_NOTEBOOK_PATH,
-    INJECTION_NOTEBOOK_PATH,
+    RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH,
     DRIVE_COLD_START_NOTEBOOK_PATH,
-    DRIVE_RELOAD_NOTEBOOK_PATH,
     ATTENTION_GEOMETRY_NOTEBOOK_PATH,
     ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH,
     ALIGNED_RESCORING_NOTEBOOK_PATH,
@@ -94,46 +90,27 @@ def test_colab_runtime_constraints_document_known_working_environment() -> None:
 
 
 @pytest.mark.constraint
-def test_colab_notebook_delegates_runtime_logic_to_helper() -> None:
-    """Notebook 必须调用 repository helper, 不能成为唯一实现."""
-    payload = json.loads(RUNTIME_NOTEBOOK_PATH.read_text(encoding="utf-8"))
-    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
-
-    assert "paper_workflow.colab_utils.sd_runtime_cold_start" in joined_source
-    assert "run_default_model_plan" in joined_source
-    assert "package_probe_outputs" in joined_source
-    assert "SLM_WM_MODEL_SELECTION', 'both'" in joined_source
-    assert "/content/drive/MyDrive/SLM/real_sd_runtime_probe" in joined_source
-    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
-    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
-    assert "archive_name=archive_name" in joined_source
-    assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
-    assert "--force-reinstall" not in joined_source
-    assert "numpy pillow" not in joined_source
-    assert "del sys.modules" not in joined_source
-    assert "module_name == 'numpy'" not in joined_source
-    assert '"diffusers==' not in joined_source
-    assert '"transformers==' not in joined_source
-    assert '"accelerate==' not in joined_source
-
-
-@pytest.mark.constraint
-def test_colab_notebook_delegates_injection_logic_to_helper() -> None:
-    """Notebook 必须复用 repository helper 执行最小 latent injection."""
-    payload = json.loads(INJECTION_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+def test_colab_notebook_delegates_runtime_and_method_precheck_logic_to_helpers() -> None:
+    """合并后的预检 Notebook 必须同时调度运行时诊断和最小机制 helper。"""
+    payload = json.loads(RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH.read_text(encoding="utf-8"))
     joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
     first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
     first_code_source = "".join(first_code_cell.get("source", []))
 
+    assert "paper_workflow.colab_utils.sd_runtime_cold_start" in joined_source
+    assert "run_default_model_plan" in joined_source
+    assert "package_probe_outputs" in joined_source
     assert "paper_workflow.colab_utils.minimal_latent_injection" in joined_source
     assert "run_default_injection_plan" in joined_source
     assert "package_injection_outputs" in joined_source
-    assert "SLM_WM_MODEL_SELECTION', 'auto'" in joined_source
-    assert "/content/drive/MyDrive/SLM/minimal_diffusion_latent_injection" in joined_source
+    assert "SLM_WM_RUNTIME_MODEL_SELECTION', 'auto'" in joined_source
+    assert "SLM_WM_INJECTION_MODEL_SELECTION', 'auto'" in joined_source
+    assert "/content/drive/MyDrive/SLM/runtime_method_precheck" in joined_source
+    assert "real_sd_runtime_probe_package_" in joined_source
+    assert "minimal_latent_injection_package_" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
-    assert "archive_name=archive_name" in joined_source
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert "--force-reinstall" not in joined_source
     assert "numpy pillow" not in joined_source
@@ -145,22 +122,17 @@ def test_colab_notebook_delegates_injection_logic_to_helper() -> None:
 
 
 @pytest.mark.constraint
-def test_colab_drive_notebooks_delegate_workflow_logic_to_helper() -> None:
-    """Drive workflow Notebook 必须调用 repository helper, 不直接拼接 manifest."""
+def test_colab_drive_notebook_delegates_workflow_logic_to_helper() -> None:
+    """Drive workflow Notebook 必须调用 repository helper, 不直接拼接受治理清单。"""
     cold_start_payload = json.loads(DRIVE_COLD_START_NOTEBOOK_PATH.read_text(encoding="utf-8"))
-    reload_payload = json.loads(DRIVE_RELOAD_NOTEBOOK_PATH.read_text(encoding="utf-8"))
     cold_start_source = "\n".join("".join(cell.get("source", [])) for cell in cold_start_payload["cells"])
-    reload_source = "\n".join("".join(cell.get("source", [])) for cell in reload_payload["cells"])
     first_cold_start_code = next(cell for cell in cold_start_payload["cells"] if cell["cell_type"] == "code")
-    first_reload_code = next(cell for cell in reload_payload["cells"] if cell["cell_type"] == "code")
 
     assert "paper_workflow.colab_utils.drive_workflow" in cold_start_source
     assert "run_colab_drive_workflow" in cold_start_source
-    assert "write_reload_smoke_record" in reload_source
+    assert "reload_smoke_record.jsonl" in cold_start_source
     assert "drive.mount('/content/drive')" in "".join(first_cold_start_code.get("source", []))
-    assert "drive.mount('/content/drive')" in "".join(first_reload_code.get("source", []))
     assert "/content/drive/MyDrive/SLM" in cold_start_source
-    assert "/content/drive/MyDrive/SLM" in reload_source
     assert "manifest.json" not in cold_start_source
     assert "json.dumps" not in cold_start_source
 
@@ -176,9 +148,39 @@ def test_colab_notebook_delegates_attention_geometry_logic_to_helper() -> None:
     assert "paper_workflow.colab_utils.attention_geometry_capture" in joined_source
     assert "run_default_attention_geometry_plan" in joined_source
     assert "package_attention_geometry_outputs" in joined_source
+    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/attention_geometry" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry" in joined_source
     assert "attention_geometry_ready" in joined_source
+    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
+    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
+    assert "archive_name=archive_name" in joined_source
+    assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
+    assert "--force-reinstall" not in joined_source
+    assert "numpy pillow" not in joined_source
+    assert "del sys.modules" not in joined_source
+    assert '"diffusers==' not in joined_source
+    assert '"transformers==' not in joined_source
+
+
+@pytest.mark.constraint
+def test_colab_notebook_delegates_attention_latent_injection_logic_to_helper() -> None:
+    """Notebook 必须复用 repository helper 执行 attention-relative latent update。"""
+    payload = json.loads(ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+    first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+    first_code_source = "".join(first_code_cell.get("source", []))
+
+    assert "paper_workflow.colab_utils.attention_latent_injection" in joined_source
+    assert "run_default_attention_latent_injection_plan" in joined_source
+    assert "package_attention_latent_injection_outputs" in joined_source
+    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
+    assert "drive.mount('/content/drive')" in first_code_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_latent_injection" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry" in joined_source
+    assert "SLM_WM_ATTENTION_RUNTIME_STRENGTH', '0.025'" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source
@@ -201,10 +203,13 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
     assert "paper_workflow.colab_utils.aligned_rescoring" in joined_source
     assert "run_default_aligned_rescoring_plan" in joined_source
     assert "package_aligned_rescoring_outputs" in joined_source
+    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/aligned_rescoring" in joined_source
-    assert "/content/drive/MyDrive/SLM/attention_geometry" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry" in joined_source
     assert "real_aligned_rescore_count" in joined_source
+    assert "SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT', '5'" in joined_source
     assert "SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
     assert "SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
     assert "openai/clip-vit-base-patch32" in joined_source
@@ -234,13 +239,16 @@ def test_colab_notebook_delegates_threshold_calibration_logic_to_helper() -> Non
     assert "paper_workflow.colab_utils.threshold_calibration" in joined_source
     assert "run_default_threshold_calibration_from_drive_plan" in joined_source
     assert "package_threshold_calibration_outputs" in joined_source
+    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/threshold_calibration" in joined_source
-    assert "/content/drive/MyDrive/SLM/attention_latent_injection" in joined_source
-    assert "/content/drive/MyDrive/SLM/aligned_rescoring" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/threshold_calibration" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_latent_injection" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring" in joined_source
     assert "attention_latent_injection_package_*.zip" in joined_source
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "threshold_calibration_ready" in joined_source
+    assert "SLM_WM_THRESHOLD_TARGET_FPR', '0.01'" in joined_source
     assert "geometric_rescue_ready" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
@@ -264,15 +272,18 @@ def test_colab_notebook_delegates_real_attack_evaluation_logic_to_helper() -> No
     assert "paper_workflow.colab_utils.real_attack_evaluation" in joined_source
     assert "run_default_real_attack_evaluation_from_drive_plan" in joined_source
     assert "package_real_attack_evaluation_outputs" in joined_source
+    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/real_attack_evaluation" in joined_source
-    assert "/content/drive/MyDrive/SLM/aligned_rescoring" in joined_source
-    assert "/content/drive/MyDrive/SLM/threshold_calibration" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/real_attack_evaluation" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/threshold_calibration" in joined_source
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "real_attacked_image_closed_loop_ready" in joined_source
     assert "regeneration_attack_gpu_validation_ready" in joined_source
     assert "attack_detection_rerun_ready" in joined_source
     assert "formal_attack_detection_ready" in joined_source
+    assert "SLM_WM_REAL_ATTACK_SOURCE_COUNT', '5'" in joined_source
     assert "runwayml/stable-diffusion-v1-5" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
@@ -296,8 +307,10 @@ def test_colab_notebook_delegates_external_baseline_gpu_smoke_logic_to_helper() 
     assert "paper_workflow.colab_utils.external_baseline_gpu_smoke" in joined_source
     assert "run_default_external_baseline_gpu_smoke_plan" in joined_source
     assert "package_external_baseline_gpu_smoke_outputs" in joined_source
+    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/external_baseline_gpu_smoke" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/external_baseline_gpu_smoke" in joined_source
     assert "external_baseline/source_registry.json" in joined_source
     assert "stabilityai/stable-diffusion-3.5-medium" in joined_source
     assert "external_baseline_gpu_smoke_ready" in joined_source
@@ -330,14 +343,17 @@ def test_colab_notebook_delegates_dataset_level_quality_logic_to_helper() -> Non
     assert "paper_workflow.colab_utils.dataset_level_quality" in joined_source
     assert "run_default_dataset_level_quality_from_drive_plan" in joined_source
     assert "package_dataset_level_quality_outputs" in joined_source
+    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/dataset_level_quality" in joined_source
-    assert "/content/drive/MyDrive/SLM/real_attack_evaluation" in joined_source
-    assert "/content/drive/MyDrive/SLM/aligned_rescoring" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/dataset_level_quality" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/real_attack_evaluation" in joined_source
+    assert "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring" in joined_source
     assert "real_attack_evaluation_package_*.zip" in joined_source
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "formal_feature_backend_ready" in joined_source
     assert "formal_fid_kid_ready" in joined_source
+    assert "SLM_WM_FORMAL_MIN_SAMPLE_COUNT', '5'" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source

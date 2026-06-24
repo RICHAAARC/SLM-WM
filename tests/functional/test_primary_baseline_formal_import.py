@@ -45,7 +45,7 @@ def formal_tree_ring_row(evidence_path: str) -> dict[str, object]:
         "attacked_false_positive_rate": 0.1,
         "quality_score_proxy_mean": 0.88,
         "score_retention_mean": 0.77,
-        "prompt_protocol_name": "paper_main_full_prompt_protocol",
+        "prompt_protocol_name": "paper_main_full_paper_prompt_protocol",
         "prompt_protocol_digest": "prompt_digest",
         "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
         "evidence_paths": [evidence_path],

@@ -1,8 +1,8 @@
-# 阶段17：Pilot、Full 与提交前冻结
+# 阶段17：PilotPaper、Full 与提交前冻结
 
 ## 一、阶段定位
 
-本阶段负责完成 probe、pilot、full-main 与必要 full-extra，冻结最终 records、最终论文产物、最终 evidence audit 和 release profiles。本阶段必须调用 stage16 已验证的 artifact builders 重新生成最终论文表格、图、报告和 evidence audit。
+本阶段负责完成 probe、pilot_paper、full-main 与必要 full-extra，冻结最终 records、最终论文产物、最终 evidence audit 和 release profiles。本阶段必须调用 stage16 已验证的 artifact builders 重新生成最终论文表格、图、报告和 evidence audit。
 
 本阶段属于 submission readiness gate 与 minimal release extraction 的衔接阶段。其职责不是重新设计 artifact rebuild 规则，而是在配置冻结后运行最终实验、重建最终产物并验证发布包。
 
@@ -38,7 +38,7 @@ python tools/harness/inspect_repository.py .
 
 1. stage16 artifact builder readiness manifest。
 2. stage06 至 stage15 的协议、阈值、攻击、baseline、ablation 和 evidence manifests。
-3. probe、pilot、full-main 和 full-extra 配置。
+3. probe、pilot_paper、full-main 和 full-extra 配置。
 4. calibration 冻结阈值与 fixed-FPR 统计边界说明。
 5. release profile 文档：`docs/extraction_profiles.md` 与 `docs/release_boundary.md`。
 
@@ -49,8 +49,8 @@ python tools/harness/inspect_repository.py .
 本阶段需要实现或更新以下功能：
 
 1. 跑通 probe，确认 runner、manifest、records 和 artifact builder 调用路径有效。
-2. 跑通 pilot，用于发现失败模式、确认攻击强度和固定 full-main 配置。
-3. 在 pilot 后冻结 full-main 配置、阈值和 rescue 协议；full-main 不得继续调参。
+2. 跑通 pilot_paper，用于发现失败模式、确认攻击强度和固定 full-main 配置。
+3. 在 pilot_paper 后冻结 full-main 配置、阈值和 rescue 协议；full-main 不得继续调参。
 4. 执行 full-main，覆盖常规攻击、主表 baseline、主要消融和质量指标。
 5. 执行必要 full-extra，覆盖再扩散攻击或高成本实验代表子集，并明确其规模和主张边界。
 6. 调用 stage16 builders，从 final records 自动重建最终 tables、figures、reports、latex tables、paper results package 和 evidence audit。

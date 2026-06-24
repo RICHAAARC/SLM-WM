@@ -21,7 +21,7 @@
 python tools/harness/inspect_repository.py .
 ```
 
-5. 检查上一阶段 records 与 manifests 的可用性。若只有 probe / pilot records，本阶段只能产出 builder readiness 或预览产物，不得冻结最终论文结果。
+5. 检查上一阶段 records 与 manifests 的可用性。若只有 probe / pilot_paper records，本阶段只能产出 builder readiness 或预览产物，不得冻结最终论文结果。
 6. 检查 `outputs/audit_reports/harness_audit_summary.json`。若上一阶段存在 harness fail、unsupported reason 未处理、placeholder claim 或字段未登记问题，本阶段不得进入正式 artifact rebuild。
 
 ## 三、本阶段必须读取的 skill
@@ -61,7 +61,7 @@ python tools/harness/inspect_repository.py .
 1. 不得手工填写正式表格或图数据。
 2. Notebook 不得直接写正式 records、tables、figures、reports 或 thresholds。
 3. 无 evidence path 的 claim 不得进入 reports。
-4. 不得将 probe、pilot、synthetic 或 fallback 结果伪装为 full-main 最终结果。
+4. 不得将 probe、pilot_paper、synthetic 或 fallback 结果伪装为 full-main 最终结果。
 5. 不得把 stage16 预览产物作为 submission-ready final package。
 
 ## 七、产物与项目信息更新

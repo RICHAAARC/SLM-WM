@@ -538,7 +538,7 @@ def write_single_injection_outputs(config: InjectionRunConfig, root: str | Path 
         artifact_id=f"{config.model_family}_minimal_latent_injection_manifest",
         artifact_type="local_manifest",
         input_paths=(
-            "paper_workflow/minimal_latent_injection_run.ipynb",
+            "paper_workflow/runtime_method_precheck_run.ipynb",
             "paper_workflow/colab_utils/minimal_latent_injection.py",
         ),
         output_paths=output_paths,
@@ -555,7 +555,7 @@ def write_single_injection_outputs(config: InjectionRunConfig, root: str | Path 
             "environment_report_path": environment_report_relative_path,
         },
         code_version=resolve_code_version(root_path),
-        rebuild_command="运行 paper_workflow/minimal_latent_injection_run.ipynb",
+        rebuild_command="运行 paper_workflow/runtime_method_precheck_run.ipynb",
         metadata={
             "construction_unit_name": "minimal_diffusion_latent_injection",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -669,7 +669,7 @@ def package_injection_outputs(
         artifact_id="minimal_latent_injection_archive_manifest",
         artifact_type="local_manifest",
         input_paths=(
-            "paper_workflow/minimal_latent_injection_run.ipynb",
+            "paper_workflow/runtime_method_precheck_run.ipynb",
             "paper_workflow/colab_utils/minimal_latent_injection.py",
             output_dir,
         ),
@@ -684,7 +684,7 @@ def package_injection_outputs(
             "drive_output_dir": str(drive_dir),
         },
         code_version=resolve_code_version(root_path),
-        rebuild_command="运行 paper_workflow/minimal_latent_injection_run.ipynb",
+        rebuild_command="运行 paper_workflow/runtime_method_precheck_run.ipynb",
         metadata={
             "construction_unit_name": "minimal_diffusion_latent_injection",
             "generated_at": datetime.now(timezone.utc).isoformat(),

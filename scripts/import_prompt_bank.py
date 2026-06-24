@@ -14,13 +14,13 @@ DEFAULT_SOURCE_ARCHIVE = Path("outputs/prompts.zip")
 DEFAULT_CONFIG_DIR = Path("configs")
 PROMPT_SOURCE_ENTRIES = {
     "probe": "prompts/prompt_plans/paper_main_probe_prompt_plan.json",
-    "pilot": "prompts/sources/paper_main_pilot_prompts.txt",
-    "full": "prompts/sources/paper_main_full_prompts.txt",
+    "pilot_paper": "prompts/sources/paper_main_pilot_paper_prompts.txt",
+    "full_paper": "prompts/sources/paper_main_full_paper_prompts.txt",
 }
 PROMPT_CONFIG_NAMES = {
     "probe": "paper_main_probe_prompts.txt",
-    "pilot": "paper_main_pilot_prompts.txt",
-    "full": "paper_main_full_prompts.txt",
+    "pilot_paper": "paper_main_pilot_paper_prompts.txt",
+    "full_paper": "paper_main_full_paper_prompts.txt",
 }
 _RESTRICTED_MARKER_PATTERNS = (
     re.compile(r"\b" + "sta" + "ge" + r"\b", re.IGNORECASE),
@@ -82,12 +82,12 @@ def read_source_prompts(archive: zipfile.ZipFile, entry_name: str) -> tuple[str,
 
 
 def load_prompt_bank(source_archive: Path) -> dict[str, tuple[tuple[str, ...], int]]:
-    """从 zip 中加载并治理 probe、pilot 和 full 三组 prompt。"""
+    """从 zip 中加载并治理 probe、pilot_paper 和 full_paper 三组 prompt。"""
     with zipfile.ZipFile(source_archive) as archive:
         raw_prompts = {
             "probe": read_probe_prompts(archive),
-            "pilot": read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["pilot"]),
-            "full": read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["full"]),
+            "pilot_paper": read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["pilot_paper"]),
+            "full_paper": read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["full_paper"]),
         }
     return {name: unique_normalized_prompts(prompts) for name, prompts in raw_prompts.items()}
 

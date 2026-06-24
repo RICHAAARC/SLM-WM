@@ -37,7 +37,7 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 
 DEFAULT_OUTPUT_DIR = "outputs/t2smark_full_main_reproduction"
 DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/t2smark_full_main_reproduction"
-DEFAULT_PROMPT_FILE = "configs/paper_main_full_prompts.txt"
+DEFAULT_PROMPT_FILE = "configs/paper_main_full_paper_prompts.txt"
 DEFAULT_RUN_NAME = "t2smark_sd35_medium_full_main"
 DEFAULT_TARGET_FPR = 0.05
 PACKAGE_EXTRA_PATHS = (
@@ -212,7 +212,7 @@ def build_full_main_prompt_rows(prompt_texts: tuple[str, ...]) -> tuple[dict[str
 
     rows: list[dict[str, Any]] = []
     for index, prompt_text in enumerate(prompt_texts):
-        record = build_prompt_record("full", index, prompt_text, split="test")
+        record = build_prompt_record("full_paper", index, prompt_text, split="test")
         rows.append(
             {
                 "prompt_id": record.prompt_id,
@@ -354,7 +354,7 @@ def build_t2smark_full_main_image_pairs(
                 "event_id": image_id,
                 "prompt_id": str(prompt_row["prompt_id"]),
                 "prompt_index": int(prompt_row["prompt_index"]),
-                "prompt_set": "full",
+                "prompt_set": "full_paper",
                 "split": str(prompt_row.get("split", "test")),
                 "baseline_id": "t2smark",
                 "generated_image_path": relative_or_absolute(image_path, root_path) if image_path.is_file() else "",

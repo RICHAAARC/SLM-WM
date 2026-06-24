@@ -365,7 +365,7 @@ Notebook 与 repository module 的跨边界数据
 | missing_input_paths | artifact | none | true | false | false | 重载校验中缺失的登记文件路径集合。 |
 | digest_mismatch_count | artifact | none | true | false | false | 重载校验中摘要不一致的文件数量。 |
 | prompt_id | protocol | none | true | false | false | prompt 协议记录的稳定标识。 |
-| prompt_set | protocol | none | true | false | false | prompt 所属集合, 例如 probe、pilot 或 full。 |
+| prompt_set | protocol | none | true | false | false | prompt 所属集合, 例如 probe、pilot_paper 或 full_paper。 |
 | prompt_index | protocol | none | true | false | false | prompt 在所属集合中的稳定序号。 |
 | prompt_text | protocol | none | true | false | false | 规范化后的 prompt 文本。 |
 | risk_profile | method | none | true | false | false | 由 prompt 语义标签派生的轻量风险配置名称。 |
@@ -579,7 +579,7 @@ Notebook 与 repository module 的跨边界数据
 | attacked_image_count_by_baseline | metric | none | false | false | false | 按 baseline id 聚合的攻击后图像数量。 |
 | formal_image_attack_families | protocol | none | false | false | false | method-faithful adapter 默认覆盖的正式图像级攻击名称列表。 |
 | attack_strength | protocol | none | true | false | false | 攻击配置使用的归一化强度。 |
-| resource_profile | protocol | none | true | false | false | 攻击矩阵运行使用的资源档位, 例如 probe、pilot、full_main 或 full_extra。 |
+| resource_profile | protocol | none | true | false | false | 攻击矩阵运行使用的资源档位, 例如 probe、full_main 或 full_extra。 |
 | requires_gpu | protocol | none | true | false | false | 攻击配置是否需要真实 GPU 推理或重生成能力。 |
 | attack_parameters | protocol | none | true | false | false | 攻击配置的具体参数字典。 |
 | attack_config_digest | artifact | none | true | false | false | 攻击配置 payload 的稳定摘要。 |
@@ -1115,9 +1115,9 @@ Notebook 与 repository module 的跨边界数据
 | prompt_protocol_digest | artifact | none | true | false | false | 正式导入结果绑定的 prompt 协议摘要。 |
 | prompt_set_name | protocol | none | false | false | false | 正式导入或运行计划绑定的 prompt set 名称。 |
 | selected_prompt_count | metric | none | false | false | false | 当前运行实际选择的 prompt 数量。 |
-| prompt_limit | protocol | none | false | false | false | full-main 运行入口的 prompt 截断上限, 0 表示不截断。 |
-| full_main_prompt_count | metric | none | false | false | false | full-main prompt 源文件中的 prompt 总数。 |
-| full_main_prompt_source_path | artifact | none | false | false | false | full-main prompt 源文件路径。 |
+| prompt_limit | protocol | none | false | false | false | full_paper 运行入口的 prompt 截断上限, 0 表示不截断。 |
+| full_main_prompt_count | metric | none | false | false | false | 兼容既有 baseline 导入字段名, 表示 full_paper prompt 源文件中的 prompt 总数。 |
+| full_main_prompt_source_path | artifact | none | false | false | false | 兼容既有 baseline 导入字段名, 表示 full_paper prompt 源文件路径。 |
 | t2smark_full_main_reproduction_ready | artifact | none | false | false | false | T2SMark SD3.5 Medium full-main 官方运行与 adapter 转换链路是否跑通。 |
 | t2smark_full_main_formal_import_validation_report_path | artifact | none | false | false | false | T2SMark full-main 正式导入候选记录的 validator 报告路径。 |
 | backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
@@ -1177,7 +1177,7 @@ Notebook 与 repository module 的跨边界数据
 | method_faithful_adapter_protocol_ready | governance | none | false | false | false | 主表 legacy diffusion watermark baseline 是否均达到方法忠实 SD3.5 适配协议边界。|
 | formal_import_candidate_allowed_ids | protocol | none | false | false | false | 已允许进入正式导入候选的 method-faithful adapter baseline id 集合。|
 | input_observation_count | metric | none | false | false | false | 协议写出脚本读取到的输入 observation 数量。|
-| full_main_prompt_protocol_ready | governance | none | false | false | false | 主表 external baseline 是否已覆盖 full-main prompt 协议。|
+| full_main_prompt_protocol_ready | governance | none | false | false | false | 兼容既有 baseline 导入字段名, 表示主表 external baseline 是否已覆盖 full_paper prompt 协议。|
 | fixed_fpr_baseline_calibration_ready | governance | none | false | false | false | 主表 external baseline 是否已完成 fixed-FPR 校准。|
 | attack_matrix_baseline_detection_ready | governance | none | false | false | false | 主表 external baseline 是否已完成共同攻击矩阵下的检测。|
 | formal_evidence_paths_ready | governance | none | false | false | false | 主表 external baseline 是否已绑定正式证据路径。|
@@ -1191,7 +1191,7 @@ Notebook 与 repository module 的跨边界数据
 | dominant_blocking_reasons | governance | none | false | false | false | 主表 baseline 正式导入 readiness 摘要中的主要阻断原因集合。|
 | dominant_formal_import_blocking_reasons | governance | none | false | false | false | 外部 baseline 对比运行报告中透传的正式导入主要阻断原因集合。|
 | missing_resource_profile_full_main | governance | none | false | false | false | 主表 baseline 候选是否缺少 full_main 资源档位边界。|
-| missing_full_main_prompt_protocol | governance | none | false | false | false | 主表 baseline 候选是否缺少 full-main prompt 协议边界。|
+| missing_full_main_prompt_protocol | governance | none | false | false | false | 兼容既有 baseline 导入字段名, 表示主表 baseline 候选是否缺少 full_paper prompt 协议边界。|
 | missing_fixed_fpr_baseline_calibration | governance | none | false | false | false | 主表 baseline 候选是否缺少 fixed-FPR baseline 校准边界。|
 | missing_attack_matrix_baseline_detection | governance | none | false | false | false | 主表 baseline 候选是否缺少共同攻击矩阵检测边界。|
 | formal_import_readiness_summary_path | artifact | none | false | false | false | 主表 baseline 正式导入 readiness 摘要路径。|
@@ -1249,21 +1249,26 @@ Notebook 与 repository module 的跨边界数据
 | risk_profile_counts | protocol | none | false | false | false | 按 risk_profile 聚合的 prompt 数量。|
 | calibration_clean_negative_count | metric | none | false | false | false | fixed-FPR 校准 split 中 clean negative 样本数量。|
 | test_clean_negative_count | metric | none | false | false | false | fixed-FPR 测试 split 中 clean negative 样本数量。|
-| pilot_common_protocol_ready | governance | none | false | false | false | pilot 级 fixed-FPR 共同协议是否完成运行前治理冻结。|
-| pilot_prompt_count | metric | none | false | false | false | pilot prompt split 中的 prompt 数量。|
-| pilot_prompt_split_ready | governance | none | false | false | false | pilot prompt split 是否可供共同协议使用。|
-| pilot_target_fpr | protocol | none | false | false | false | pilot 共同协议使用的 fixed-FPR 目标值。|
-| pilot_negative_count_minimum_required | metric | none | false | false | false | pilot fixed-FPR 校准所要求的最小 clean negative 数量。|
-| pilot_negative_count_ready | governance | none | false | false | false | pilot prompt split 中 clean negative 数量是否满足最小要求。|
-| pilot_attack_count | metric | none | false | false | false | pilot 共同协议攻击矩阵中的攻击配置数量。|
-| pilot_method_count | metric | none | false | false | false | pilot 共同协议覆盖的方法数量。|
-| pilot_import_template_count | metric | none | false | false | false | pilot 共同协议生成的 method × attack 导入模板数量。|
-| pilot_result_import_ready | governance | none | false | false | false | pilot 结果候选记录是否已通过受治理导入 schema。|
-| accepted_pilot_import_count | metric | none | false | false | false | 已通过 pilot 受治理导入 schema 的结果记录数量。|
-| rejected_pilot_import_count | metric | none | false | false | false | 未通过 pilot 受治理导入 schema 的结果记录数量。|
-| pilot_import_issue_count | metric | none | false | false | false | pilot 受治理导入 schema 发现的问题数量。|
-| pilot_supports_superiority_claim | governance | none | false | false | false | pilot 结果是否允许支撑方法显著优越主张。当前必须为 false。|
-| full_main_paper_claim_ready | governance | none | false | false | false | full-main 论文主张是否已具备证据闭合。pilot 共同协议中必须为 false。|
+| pilot_paper_common_protocol_ready | governance | none | false | false | false | pilot_paper 级 fixed-FPR 共同协议是否完成运行前治理冻结。|
+| pilot_paper_prompt_count | metric | none | false | false | false | pilot_paper prompt split 中的 prompt 数量。|
+| pilot_paper_prompt_split_ready | governance | none | false | false | false | pilot_paper prompt split 是否可供共同协议使用。|
+| pilot_paper_target_fpr | protocol | none | false | false | false | pilot_paper 共同协议使用的 fixed-FPR 目标值。|
+| pilot_paper_negative_count_minimum_required | metric | none | false | false | false | pilot_paper fixed-FPR 校准所要求的最小 clean negative 数量。|
+| pilot_paper_negative_count_ready | governance | none | false | false | false | pilot_paper prompt split 中 clean negative 数量是否满足最小要求。|
+| pilot_paper_attack_count | metric | none | false | false | false | pilot_paper 共同协议攻击矩阵中的攻击配置数量。|
+| pilot_paper_method_count | metric | none | false | false | false | pilot_paper 共同协议覆盖的方法数量。|
+| pilot_paper_import_template_count | metric | none | false | false | false | pilot_paper 共同协议生成的 method × attack 导入模板数量。|
+| pilot_paper_result_import_ready | governance | none | false | false | false | pilot_paper 结果候选记录是否已通过受治理导入 schema。|
+| accepted_pilot_paper_import_count | metric | none | false | false | false | 已通过 pilot_paper 受治理导入 schema 的结果记录数量。|
+| rejected_pilot_paper_import_count | metric | none | false | false | false | 未通过 pilot_paper 受治理导入 schema 的结果记录数量。|
+| pilot_paper_import_issue_count | metric | none | false | false | false | pilot_paper 受治理导入 schema 发现的问题数量。|
+| accepted_pilot_paper_claim_record_count | metric | none | false | false | false | 已通过 pilot_paper 受治理导入且显式允许支撑 pilot_paper 论文主张的结果记录数量。|
+| pilot_paper_claim_record_ready | governance | none | false | false | false | pilot_paper 结果导入记录是否已覆盖模板并具备 pilot_paper 论文主张记录边界。|
+| pilot_paper_claim_ready | governance | none | false | false | false | pilot_paper 规模论文主张是否已由同一 prompt split、同一攻击矩阵、fixed-FPR 协议和受治理导入记录闭合。|
+| pilot_paper_supports_superiority_claim | governance | none | false | false | false | pilot_paper 结果是否允许在 pilot_paper 样本规模边界内支撑方法优越性主张。|
+| full_paper_claim_ready | governance | none | false | false | false | full_paper 规模论文主张是否已具备证据闭合。pilot_paper 共同协议中必须为 false。|
+| paper_claim_scale | governance | none | false | false | false | 当前结果或协议允许支撑的论文主张规模, 例如 pilot_paper 或 full_paper。|
+| full_paper_claim_boundary | governance | none | false | false | false | pilot_paper 结果与 full_paper 规模论文主张之间的样本规模边界说明。|
 | prompt_split_digest | artifact | none | false | false | false | 共同协议使用的 prompt split 稳定摘要。|
 | attack_matrix_digest | artifact | none | false | false | false | 共同协议使用的攻击矩阵稳定摘要。|
 | fixed_fpr_protocol_digest | artifact | none | false | false | false | fixed-FPR 校准协议的稳定摘要。|
@@ -1275,11 +1280,11 @@ Notebook 与 repository module 的跨边界数据
 | method_ids | protocol | none | false | false | false | 当前共同协议要求覆盖的方法 id 集合。|
 | required_rate_fields | protocol | none | false | false | false | 导入 schema 要求按 [0,1] 率值校验的字段集合。|
 | ci_field_groups | protocol | none | false | false | false | 导入 schema 中 metric 与置信区间上下界的字段组合。|
-| pilot_result_template_id | artifact | none | true | false | false | pilot 共同协议结果导入模板行的稳定标识。|
-| pilot_result_template_digest | artifact | none | true | false | false | pilot 共同协议结果导入模板行的稳定摘要。|
-| quality_score_mean | metric | none | true | false | false | pilot 共同协议中的图像质量分数均值。|
-| quality_score_ci_low | metric | none | true | false | false | pilot 图像质量分数置信区间下界。|
-| quality_score_ci_high | metric | none | true | false | false | pilot 图像质量分数置信区间上界。|
-| score_retention_ci_low | metric | none | true | false | false | pilot 攻击后分数保持率置信区间下界。|
-| score_retention_ci_high | metric | none | true | false | false | pilot 攻击后分数保持率置信区间上界。|
+| pilot_paper_result_template_id | artifact | none | true | false | false | pilot_paper 共同协议结果导入模板行的稳定标识。|
+| pilot_paper_result_template_digest | artifact | none | true | false | false | pilot_paper 共同协议结果导入模板行的稳定摘要。|
+| quality_score_mean | metric | none | true | false | false | pilot_paper 共同协议中的图像质量分数均值。|
+| quality_score_ci_low | metric | none | true | false | false | pilot_paper 图像质量分数置信区间下界。|
+| quality_score_ci_high | metric | none | true | false | false | pilot_paper 图像质量分数置信区间上界。|
+| score_retention_ci_low | metric | none | true | false | false | pilot_paper 攻击后分数保持率置信区间下界。|
+| score_retention_ci_high | metric | none | true | false | false | pilot_paper 攻击后分数保持率置信区间上界。|
 | prompt_split_ready | governance | none | false | false | false | prompt split 是否满足共同协议使用条件。|

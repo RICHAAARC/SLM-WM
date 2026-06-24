@@ -23,11 +23,11 @@ def write_prompt_bank_zip(path: Path) -> None:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("prompts/prompt_plans/paper_main_probe_prompt_plan.json", json.dumps(probe_plan))
         archive.writestr(
-            "prompts/sources/paper_main_pilot_prompts.txt",
+            "prompts/sources/paper_main_pilot_paper_prompts.txt",
             "a small cat near a window\n" + marker_prompt + "\n",
         )
         archive.writestr(
-            "prompts/sources/paper_main_full_prompts.txt",
+            "prompts/sources/paper_main_full_paper_prompts.txt",
             "a calm lake with trees\n" + marker_prompt + "\n",
         )
 
@@ -40,13 +40,13 @@ def test_prompt_bank_import_writes_sanitized_configs(tmp_path: Path) -> None:
     write_prompt_bank_zip(source_archive)
 
     summary = import_prompt_bank_configs(source_archive=source_archive, config_dir=config_dir)
-    pilot_text = (config_dir / "paper_main_pilot_prompts.txt").read_text(encoding="utf-8")
-    full_text = (config_dir / "paper_main_full_prompts.txt").read_text(encoding="utf-8")
+    pilot_paper_text = (config_dir / "paper_main_pilot_paper_prompts.txt").read_text(encoding="utf-8")
+    full_paper_text = (config_dir / "paper_main_full_paper_prompts.txt").read_text(encoding="utf-8")
     probe_text = (config_dir / "paper_main_probe_prompts.txt").read_text(encoding="utf-8")
 
-    assert summary["prompt_counts"] == {"probe": 2, "pilot": 2, "full": 2}
-    assert summary["sanitized_prompt_counts"] == {"probe": 1, "pilot": 1, "full": 1}
-    assert "concert platform" in pilot_text
-    assert "concert platform" in full_text
+    assert summary["prompt_counts"] == {"probe": 2, "pilot_paper": 2, "full_paper": 2}
+    assert summary["sanitized_prompt_counts"] == {"probe": 1, "pilot_paper": 1, "full_paper": 1}
+    assert "concert platform" in pilot_paper_text
+    assert "concert platform" in full_paper_text
     assert "concert platform" in probe_text
-    assert "sta" + "ge" not in pilot_text.lower()
+    assert "sta" + "ge" not in pilot_paper_text.lower()

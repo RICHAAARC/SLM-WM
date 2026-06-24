@@ -36,7 +36,7 @@ def test_prompt_and_event_ids_are_stable_and_unique() -> None:
 def test_calibration_and_test_prompt_ids_are_disjoint() -> None:
     """calibration 与 test 的 prompt_id 不能交叉。"""
     prompt_records = build_prompt_records(
-        "pilot",
+        "pilot_paper",
         tuple(f"a controlled prompt variant {index}" for index in range(9)),
     )
     split_groups = group_prompt_ids_by_split(prompt_records)
@@ -58,8 +58,8 @@ def test_protocol_writer_creates_governed_outputs(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     write_prompt_config(repo_root, "probe", ("a city street with lamps", "a calm lake at sunrise"))
-    write_prompt_config(repo_root, "pilot", ("a ceramic teapot on a table",))
-    write_prompt_config(repo_root, "full", ("a quiet library reading room",))
+    write_prompt_config(repo_root, "pilot_paper", ("a ceramic teapot on a table",))
+    write_prompt_config(repo_root, "full_paper", ("a quiet library reading room",))
 
     manifest = write_prompt_event_protocol_outputs(root=repo_root)
     output_dir = repo_root / "outputs" / "prompt_event_protocol"

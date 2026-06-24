@@ -1,4 +1,4 @@
-"""写出 pilot 级 fixed-FPR=0.01 共同协议产物。"""
+"""写出 pilot_paper 级 fixed-FPR=0.01 共同协议产物。"""
 
 from __future__ import annotations
 
@@ -16,24 +16,24 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol.attacks import default_attack_configs
-from experiments.protocol.pilot_fixed_fpr import (
-    PilotFixedFprConfig,
+from experiments.protocol.pilot_paper_fixed_fpr import (
+    PilotPaperFixedFprConfig,
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
-    build_pilot_attack_matrix_rows,
-    build_pilot_common_protocol_summary,
-    build_pilot_manifest_config,
-    build_pilot_method_registry_rows,
-    build_pilot_prompt_split_summary,
-    build_pilot_result_import_schema,
-    build_pilot_result_import_template_rows,
-    validate_pilot_result_import_rows,
+    build_pilot_paper_attack_matrix_rows,
+    build_pilot_paper_common_protocol_summary,
+    build_pilot_paper_manifest_config,
+    build_pilot_paper_method_registry_rows,
+    build_pilot_paper_prompt_split_summary,
+    build_pilot_paper_result_import_schema,
+    build_pilot_paper_result_import_template_rows,
+    validate_pilot_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from main.analysis.artifact_manifest import build_artifact_manifest
 
-DEFAULT_OUTPUT_DIR = Path("outputs/pilot_fixed_fpr_common_protocol")
-DEFAULT_CANDIDATE_RECORDS_PATH = Path("outputs/pilot_fixed_fpr_results/pilot_result_records.jsonl")
+DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_fixed_fpr_common_protocol")
+DEFAULT_CANDIDATE_RECORDS_PATH = Path("outputs/pilot_paper_fixed_fpr_results/pilot_paper_result_records.jsonl")
 
 
 def stable_json_text(value: Any) -> str:
@@ -89,7 +89,7 @@ def ensure_output_dir_under_outputs(root_path: Path, output_dir: str | Path) -> 
     try:
         resolved_output_dir.relative_to(outputs_root)
     except ValueError as exc:
-        raise ValueError(f"pilot fixed-FPR 共同协议输出目录必须位于 outputs/ 下: {resolved_output_dir}") from exc
+        raise ValueError(f"pilot_paper fixed-FPR 共同协议输出目录必须位于 outputs/ 下: {resolved_output_dir}") from exc
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
     return resolved_output_dir
 
@@ -133,47 +133,47 @@ def serializable_attack_rows(rows: tuple[dict[str, Any], ...]) -> list[dict[str,
     ]
 
 
-def write_pilot_fixed_fpr_common_protocol_outputs(
+def write_pilot_paper_fixed_fpr_common_protocol_outputs(
     *,
     root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     candidate_records_path: str | Path = DEFAULT_CANDIDATE_RECORDS_PATH,
     require_existing_evidence: bool = False,
 ) -> dict[str, Any]:
-    """写出 pilot fixed-FPR=0.01 共同协议的运行前治理产物。"""
+    """写出 pilot_paper fixed-FPR=0.01 共同协议的运行前治理产物。"""
 
     root_path = Path(root).resolve()
     output_path = ensure_output_dir_under_outputs(root_path, output_dir)
-    config = PilotFixedFprConfig()
+    config = PilotPaperFixedFprConfig()
     prompt_path = resolve_input_path(root_path, config.prompt_file)
     candidate_path = resolve_input_path(root_path, candidate_records_path)
 
     prompt_records = build_prompt_records(config.prompt_set, read_prompt_file(prompt_path))
-    prompt_summary = build_pilot_prompt_split_summary(prompt_records, config)
-    attack_rows = build_pilot_attack_matrix_rows(default_attack_configs(), config)
+    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
     attack_matrix_digest = build_attack_matrix_digest(attack_rows)
     fixed_fpr_protocol_digest = build_fixed_fpr_protocol_digest(config)
-    method_rows = build_pilot_method_registry_rows(
+    method_rows = build_pilot_paper_method_registry_rows(
         prompt_split_digest=prompt_summary["prompt_split_digest"],
         attack_matrix_digest=attack_matrix_digest,
         fixed_fpr_protocol_digest=fixed_fpr_protocol_digest,
         config=config,
     )
-    schema = build_pilot_result_import_schema(
+    schema = build_pilot_paper_result_import_schema(
         prompt_split_digest=prompt_summary["prompt_split_digest"],
         attack_matrix_digest=attack_matrix_digest,
         fixed_fpr_protocol_digest=fixed_fpr_protocol_digest,
         config=config,
     )
-    template_rows = build_pilot_result_import_template_rows(method_rows, attack_rows, config)
+    template_rows = build_pilot_paper_result_import_template_rows(method_rows, attack_rows, config)
     candidate_rows = read_jsonl_rows(candidate_path)
-    validation_report = validate_pilot_result_import_rows(
+    validation_report = validate_pilot_paper_result_import_rows(
         candidate_rows,
         schema,
         evidence_root=root_path,
         require_existing_evidence=require_existing_evidence,
     )
-    summary = build_pilot_common_protocol_summary(
+    summary = build_pilot_paper_common_protocol_summary(
         prompt_summary=prompt_summary,
         attack_rows=attack_rows,
         method_rows=method_rows,
@@ -185,13 +185,13 @@ def write_pilot_fixed_fpr_common_protocol_outputs(
     summary["candidate_records_path"] = relative_or_absolute(candidate_path, root_path)
     summary["candidate_record_count"] = len(candidate_rows)
 
-    prompt_summary_path = output_path / "pilot_prompt_split_summary.json"
-    attack_matrix_path = output_path / "pilot_attack_matrix.csv"
-    method_registry_path = output_path / "pilot_method_registry.csv"
-    schema_path = output_path / "pilot_result_import_schema.json"
-    template_path = output_path / "pilot_result_import_template.jsonl"
-    validation_path = output_path / "pilot_result_import_validation_report.json"
-    summary_path = output_path / "pilot_common_protocol_summary.json"
+    prompt_summary_path = output_path / "pilot_paper_prompt_split_summary.json"
+    attack_matrix_path = output_path / "pilot_paper_attack_matrix.csv"
+    method_registry_path = output_path / "pilot_paper_method_registry.csv"
+    schema_path = output_path / "pilot_paper_result_import_schema.json"
+    template_path = output_path / "pilot_paper_result_import_template.jsonl"
+    validation_path = output_path / "pilot_paper_result_import_validation_report.json"
+    summary_path = output_path / "pilot_paper_common_protocol_summary.json"
     manifest_path = output_path / "manifest.local.json"
 
     prompt_summary_path.write_text(stable_json_text(prompt_summary), encoding="utf-8")
@@ -232,6 +232,7 @@ def write_pilot_fixed_fpr_common_protocol_outputs(
             "result_claim_scope",
             "governed_import_required",
             "supports_paper_claim",
+            "paper_claim_scale",
         ],
     )
     schema_path.write_text(stable_json_text(schema), encoding="utf-8")
@@ -256,11 +257,11 @@ def write_pilot_fixed_fpr_common_protocol_outputs(
     if candidate_path.exists():
         input_paths.append(relative_or_absolute(candidate_path, root_path))
     manifest = build_artifact_manifest(
-        artifact_id="pilot_fixed_fpr_common_protocol_manifest",
+        artifact_id="pilot_paper_fixed_fpr_common_protocol_manifest",
         artifact_type="local_manifest",
         input_paths=tuple(input_paths),
         output_paths=output_paths,
-        config=build_pilot_manifest_config(
+        config=build_pilot_paper_manifest_config(
             prompt_summary=prompt_summary,
             attack_rows=attack_rows,
             method_rows=method_rows,
@@ -271,7 +272,7 @@ def write_pilot_fixed_fpr_common_protocol_outputs(
             config=config,
         ),
         code_version=resolve_code_version(root_path),
-        rebuild_command="python scripts/write_pilot_fixed_fpr_common_protocol_outputs.py",
+        rebuild_command="python scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py",
         metadata=summary,
     ).to_dict()
     manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
@@ -281,13 +282,13 @@ def write_pilot_fixed_fpr_common_protocol_outputs(
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
 
-    parser = argparse.ArgumentParser(description="写出 pilot 级 fixed-FPR=0.01 共同协议产物。")
+    parser = argparse.ArgumentParser(description="写出 pilot_paper 级 fixed-FPR=0.01 共同协议产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument(
         "--candidate-records-path",
         default=str(DEFAULT_CANDIDATE_RECORDS_PATH),
-        help="待导入 pilot 结果 JSONL 路径。",
+        help="待导入 pilot_paper 结果 JSONL 路径。",
     )
     parser.add_argument("--require-existing-evidence", action="store_true", help="校验 evidence_paths 指向的文件存在。")
     return parser
@@ -297,7 +298,7 @@ def main() -> None:
     """命令行入口。"""
 
     args = build_parser().parse_args()
-    manifest = write_pilot_fixed_fpr_common_protocol_outputs(
+    manifest = write_pilot_paper_fixed_fpr_common_protocol_outputs(
         root=args.root,
         output_dir=args.output_dir,
         candidate_records_path=args.candidate_records_path,

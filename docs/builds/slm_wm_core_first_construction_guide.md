@@ -230,9 +230,9 @@ stage16 的职责是实现并验证 artifact rebuild 层。该阶段应完成表
 
 stage16 的产物应说明：给定 governed records 与 manifests，是否可以自动重建论文 tables、figures、reports 和 claim evidence audit。
 
-### stage17：Pilot、Full 与提交前冻结
+### stage17：PilotPaper、Full 与提交前冻结
 
-stage17 的职责是完成 probe、pilot、full-main 与必要 full-extra，冻结配置和最终 records，然后调用 stage16 已验证的 artifact builders 重新生成最终论文表格、图、报告和 evidence audit。最终发布包在本阶段导出和验证。
+stage17 的职责是完成 probe、pilot_paper、full-main 与必要 full-extra，冻结配置和最终 records，然后调用 stage16 已验证的 artifact builders 重新生成最终论文表格、图、报告和 evidence audit。最终发布包在本阶段导出和验证。
 
 ---
 
