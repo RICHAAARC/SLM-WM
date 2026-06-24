@@ -45,7 +45,7 @@ DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_fixed_fpr_results")
 DEFAULT_ATTACK_FAMILY_METRICS_PATH = Path("outputs/attack_matrix/attack_family_metrics.csv")
 DEFAULT_ATTACK_MANIFEST_PATH = Path("outputs/attack_matrix/attack_manifest.json")
 DEFAULT_ATTACK_RECORDS_PATH = Path("outputs/attack_matrix/attack_detection_records.jsonl")
-DEFAULT_REAL_ATTACK_RECORDS_PATH = Path("outputs/real_attack_evaluation/formal_attack_detection_records.jsonl")
+DEFAULT_REAL_ATTACK_RECORDS_PATH = Path("outputs/image_attack_evidence/formal_attack_detection_records.jsonl")
 DEFAULT_BASELINE_RECORDS_PATH = Path("outputs/external_baseline_results/baseline_result_records.jsonl")
 DEFAULT_BASELINE_VALIDATION_REPORT_PATH = Path(
     "outputs/external_baseline_results/baseline_result_candidate_validation_report.json"

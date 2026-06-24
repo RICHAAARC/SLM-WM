@@ -48,6 +48,8 @@ def test_complete_result_package_collects_required_pilot_outputs(tmp_path: Path)
     assert (drive_dir / "pilot_paper_complete_result_package.zip").is_file()
     with ZipFile(archive_path) as archive:
         names = set(archive.namelist())
-    assert "outputs/pilot_paper_fixed_fpr_results/sample_17.json" in names
-    assert "outputs/pilot_paper_fixed_fpr_common_protocol/sample_18.json" in names
+    result_index = REQUIRED_OUTPUT_DIRS.index("outputs/pilot_paper_fixed_fpr_results")
+    protocol_index = REQUIRED_OUTPUT_DIRS.index("outputs/pilot_paper_fixed_fpr_common_protocol")
+    assert f"outputs/pilot_paper_fixed_fpr_results/sample_{result_index}.json" in names
+    assert f"outputs/pilot_paper_fixed_fpr_common_protocol/sample_{protocol_index}.json" in names
     assert "configs/paper_main_pilot_paper_prompts.txt" in names

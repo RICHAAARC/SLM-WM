@@ -14,6 +14,9 @@ from paper_workflow.colab_utils.attention_latent_injection import package_attent
 from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
 from paper_workflow.colab_utils.external_baseline_gpu_smoke import package_external_baseline_gpu_smoke_outputs
 from paper_workflow.colab_utils.real_attack_evaluation import package_real_attack_evaluation_outputs
+from paper_workflow.colab_utils.conventional_geometric_attack_evaluation import (
+    package_conventional_geometric_attack_evaluation_outputs,
+)
 from paper_workflow.colab_utils.dataset_level_quality import package_dataset_level_quality_outputs
 from paper_workflow.colab_utils.threshold_calibration import package_threshold_calibration_outputs
 from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outputs
@@ -27,6 +30,9 @@ ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH = Path("paper_workflow/attention_latent
 ALIGNED_RESCORING_NOTEBOOK_PATH = Path("paper_workflow/aligned_rescoring_run.ipynb")
 THRESHOLD_CALIBRATION_NOTEBOOK_PATH = Path("paper_workflow/threshold_calibration_run.ipynb")
 REAL_ATTACK_EVALUATION_NOTEBOOK_PATH = Path("paper_workflow/real_attack_evaluation_run.ipynb")
+CONVENTIONAL_GEOMETRIC_ATTACK_EVALUATION_NOTEBOOK_PATH = Path(
+    "paper_workflow/conventional_geometric_attack_evaluation_run.ipynb"
+)
 EXTERNAL_BASELINE_GPU_SMOKE_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_gpu_smoke_run.ipynb")
 DATASET_LEVEL_QUALITY_NOTEBOOK_PATH = Path("paper_workflow/dataset_level_quality_run.ipynb")
 T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH = Path("paper_workflow/t2smark_full_main_reproduction_run.ipynb")
@@ -42,6 +48,7 @@ NOTEBOOK_PATHS = (
     ALIGNED_RESCORING_NOTEBOOK_PATH,
     THRESHOLD_CALIBRATION_NOTEBOOK_PATH,
     REAL_ATTACK_EVALUATION_NOTEBOOK_PATH,
+    CONVENTIONAL_GEOMETRIC_ATTACK_EVALUATION_NOTEBOOK_PATH,
     EXTERNAL_BASELINE_GPU_SMOKE_NOTEBOOK_PATH,
     DATASET_LEVEL_QUALITY_NOTEBOOK_PATH,
     T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH,
@@ -316,6 +323,31 @@ def test_colab_notebook_delegates_real_attack_evaluation_logic_to_helper() -> No
     assert "del sys.modules" not in joined_source
     assert '"diffusers==' not in joined_source
     assert '"transformers==' not in joined_source
+
+
+@pytest.mark.constraint
+def test_colab_notebook_delegates_conventional_geometric_attack_logic_to_helper() -> None:
+    """Notebook 必须复用 repository helper 执行常规失真与几何变换攻击闭环。"""
+    payload = json.loads(CONVENTIONAL_GEOMETRIC_ATTACK_EVALUATION_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+    first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+    first_code_source = "".join(first_code_cell.get("source", []))
+
+    assert "paper_workflow.colab_utils.conventional_geometric_attack_evaluation" in joined_source
+    assert "run_default_conventional_geometric_attack_evaluation_from_drive_plan" in joined_source
+    assert "package_conventional_geometric_attack_evaluation_outputs" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
+    assert "drive.mount('/content/drive')" in first_code_source
+    assert "f'{drive_result_root}/conventional_geometric_attack_evaluation'" in joined_source
+    assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
+    assert "f'{drive_result_root}/threshold_calibration'" in joined_source
+    assert "os.environ['SLM_WM_CONVENTIONAL_GEOMETRIC_ATTACK_SOURCE_COUNT'] = paper_run_sample_count" in joined_source
+    assert "real_attacked_image_closed_loop_ready" in joined_source
+    assert "formal_attack_detection_ready" in joined_source
+    assert "datetime.now(timezone.utc).strftime" in joined_source
+    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
+    assert "archive_name=archive_name" in joined_source
 
 
 @pytest.mark.constraint
@@ -736,6 +768,62 @@ def test_real_attack_evaluation_outputs_can_be_packaged_and_mirrored(tmp_path: P
         assert "outputs/real_attack_evaluation/real_attack_package_input_manifest.json" in names
         assert "outputs/real_attack_evaluation/real_attack_archive_summary.json" in names
         assert "outputs/real_attack_evaluation/real_attack_archive_manifest.local.json" in names
+
+
+@pytest.mark.constraint
+def test_conventional_geometric_attack_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
+    """常规失真与几何变换攻击闭环产物应能打包并镜像。"""
+    attack_dir = tmp_path / "outputs" / "conventional_geometric_attack_evaluation"
+    image_dir = attack_dir / "attacked_images"
+    image_dir.mkdir(parents=True)
+    (attack_dir / "conventional_geometric_attack_run_summary.json").write_text('{"run_decision":"pass"}\n', encoding="utf-8")
+    (attack_dir / "conventional_geometric_attack_detection_records.jsonl").write_text(
+        '{"attack_performed":true}\n',
+        encoding="utf-8",
+    )
+    (attack_dir / "formal_attack_detection_records.jsonl").write_text('{"attack_performed":true}\n', encoding="utf-8")
+    (attack_dir / "conventional_geometric_attacked_image_registry.jsonl").write_text(
+        '{"attacked_image_digest":"abc"}\n',
+        encoding="utf-8",
+    )
+    (attack_dir / "conventional_geometric_attack_family_metrics.csv").write_text(
+        "attack_name,measured_record_count\njpeg_compression,1\n",
+        encoding="utf-8",
+    )
+    (attack_dir / "conventional_geometric_attack_environment_report.json").write_text(
+        '{"cuda_available":false}\n',
+        encoding="utf-8",
+    )
+    (attack_dir / "conventional_geometric_attack_manifest.local.json").write_text(
+        '{"artifact_id":"conventional_geometric_attack_evaluation_manifest"}\n',
+        encoding="utf-8",
+    )
+    (image_dir / "sample_attacked.png").write_bytes(b"fake_png_bytes")
+
+    drive_dir = tmp_path / "drive_mirror"
+    record = package_conventional_geometric_attack_evaluation_outputs(root=tmp_path, drive_output_dir=str(drive_dir))
+    archive_path = tmp_path / record.archive_path
+
+    assert archive_path.exists()
+    assert (drive_dir / "conventional_geometric_attack_evaluation_package.zip").exists()
+    assert record.archive_digest == record.drive_archive_digest
+    assert record.archive_entry_count >= 8
+    assert (attack_dir / "conventional_geometric_attack_archive_summary.json").exists()
+    assert (attack_dir / "conventional_geometric_attack_archive_manifest.local.json").exists()
+
+    with ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+        assert "outputs/conventional_geometric_attack_evaluation/conventional_geometric_attack_run_summary.json" in names
+        assert "outputs/conventional_geometric_attack_evaluation/conventional_geometric_attack_detection_records.jsonl" in names
+        assert "outputs/conventional_geometric_attack_evaluation/formal_attack_detection_records.jsonl" in names
+        assert "outputs/conventional_geometric_attack_evaluation/conventional_geometric_attacked_image_registry.jsonl" in names
+        assert "outputs/conventional_geometric_attack_evaluation/conventional_geometric_attack_family_metrics.csv" in names
+        assert "outputs/conventional_geometric_attack_evaluation/conventional_geometric_attack_environment_report.json" in names
+        assert "outputs/conventional_geometric_attack_evaluation/conventional_geometric_attack_manifest.local.json" in names
+        assert "outputs/conventional_geometric_attack_evaluation/attacked_images/sample_attacked.png" in names
+        assert "outputs/conventional_geometric_attack_evaluation/conventional_geometric_attack_package_input_manifest.json" in names
+        assert "outputs/conventional_geometric_attack_evaluation/conventional_geometric_attack_archive_summary.json" in names
+        assert "outputs/conventional_geometric_attack_evaluation/conventional_geometric_attack_archive_manifest.local.json" in names
 
 
 @pytest.mark.constraint

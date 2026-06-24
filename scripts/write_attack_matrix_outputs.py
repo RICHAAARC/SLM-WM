@@ -37,6 +37,10 @@ DEFAULT_CALIBRATION_THRESHOLDS_PATH = Path("outputs/threshold_calibration/calibr
 DEFAULT_THRESHOLD_REPORT_PATH = Path("outputs/threshold_calibration/threshold_degeneracy_report.json")
 DEFAULT_CALIBRATION_MANIFEST_PATH = Path("outputs/threshold_calibration/manifest.local.json")
 DEFAULT_REAL_ATTACK_RECORDS_PATH = Path("outputs/real_attack_evaluation/formal_attack_detection_records.jsonl")
+DEFAULT_CONVENTIONAL_GEOMETRIC_ATTACK_RECORDS_PATH = Path(
+    "outputs/conventional_geometric_attack_evaluation/formal_attack_detection_records.jsonl"
+)
+DEFAULT_IMAGE_ATTACK_EVIDENCE_RECORDS_PATH = Path("outputs/image_attack_evidence/formal_attack_detection_records.jsonl")
 DEFAULT_MAX_SOURCE_RECORDS: int | None = None
 REAL_ATTACK_METRIC_STATUS = "measured_from_real_attacked_image_formal_protocol"
 
@@ -137,6 +141,52 @@ def formal_real_attack_records(records: tuple[dict[str, Any], ...]) -> tuple[dic
     return tuple(record for record in records if record.get("metric_status") == REAL_ATTACK_METRIC_STATUS)
 
 
+def attack_record_key(record: dict[str, Any]) -> tuple[str, str, str]:
+    """返回攻击记录在聚合表中的稳定键。"""
+
+    return (
+        str(record.get("attack_family", "")),
+        str(record.get("attack_name", "")),
+        str(record.get("resource_profile", "")),
+    )
+
+
+def deduplicate_formal_attack_records(records: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    """按正式记录标识去重, 保留多来源真实图像攻击记录的稳定顺序。"""
+
+    seen: set[str] = set()
+    deduplicated: list[dict[str, Any]] = []
+    for record in records:
+        record_id = str(record.get("attack_record_id") or record.get("attack_record_digest") or build_stable_digest(record))
+        if record_id in seen:
+            continue
+        seen.add(record_id)
+        deduplicated.append(record)
+    return tuple(deduplicated)
+
+
+def filter_proxy_records_covered_by_formal_records(
+    proxy_records: tuple[dict[str, Any], ...],
+    formal_records: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, Any], ...]:
+    """移除已被真实图像级 formal records 覆盖的本地代理记录。
+
+    该实现属于项目特定的证据治理逻辑: 当同一攻击配置已有真实
+    attacked image 记录时, 聚合表应优先使用真实记录, 避免 proxy 与
+    真实记录混合后掩盖当前攻击簇是否已经完成图像级闭环。
+    """
+
+    covered_keys = {attack_record_key(record) for record in formal_records if bool(record.get("attack_performed"))}
+    return tuple(record for record in proxy_records if attack_record_key(record) not in covered_keys)
+
+
+def write_consolidated_formal_attack_records(path: Path, records: tuple[dict[str, Any], ...]) -> None:
+    """写出多来源真实图像攻击 formal records 合并文件。"""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json_line(record) for record in records), encoding="utf-8")
+
+
 def build_real_attack_ingestion_summary(
     attack_configs: tuple[AttackConfig, ...],
     formal_records: tuple[dict[str, Any], ...],
@@ -206,7 +256,9 @@ def build_boundary(thresholds: dict[str, Any], threshold_report: dict[str, Any])
 def build_attacked_image_registry_rows(records: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
     """构造 attacked image registry。
 
-    当前 registry 记录的是本地代理摘要, 不登记真实图像文件路径。
+    registry 同时登记本地代理摘要和已导入的图像级 attacked image 摘要。
+    真实图像路径仍保留在 formal record 的 metadata 中, 避免 registry 与
+    正式检测记录之间出现重复路径治理逻辑。
     """
     return [
         {
@@ -268,6 +320,9 @@ def build_attack_manifest(
         "input_thresholds_path": relative_or_absolute(calibration_thresholds_path, root_path),
         "input_threshold_report_path": relative_or_absolute(threshold_report_path, root_path),
         "real_attack_records_path": relative_or_absolute(real_attack_records_path, root_path) if real_attack_records_path.exists() else "",
+        "image_attack_evidence_records_path": relative_or_absolute(real_attack_records_path, root_path)
+        if real_attack_records_path.exists()
+        else "",
         **aligned_quality,
         "attacked_images_dir": relative_or_absolute(output_dir / "attacked_images", root_path),
         "attack_config_count": len(attack_configs),
@@ -276,12 +331,13 @@ def build_attack_manifest(
         "performed_attack_record_count": performed_count,
         "gpu_attack_unsupported_count": gpu_unsupported_count,
         **real_attack_summary,
+        "formal_image_attack_record_count": len(formal_real_records),
         "attack_metrics_ready": attack_metrics_ready,
         "resource_profiles": sorted({config.resource_profile for config in attack_configs}),
         "conventional_attack_names": sorted({config.attack_name for config in attack_configs if not config.requires_gpu}),
         "regeneration_attack_names": sorted({config.attack_name for config in attack_configs if config.requires_gpu}),
         "evaluation_boundary": boundary.to_dict(),
-        "local_proxy_boundary": "conventional attacks remain record-level proxies; regeneration attacks may be supplied by governed real-image records",
+        "local_proxy_boundary": "local proxy records are retained only for attack configurations without governed real-image formal records",
         "regeneration_attack_status": "real_gpu_formal_records_available"
         if real_attack_summary["regeneration_attack_gpu_validation_ready"]
         else "unsupported_until_real_gpu_artifacts_exist",
@@ -330,6 +386,8 @@ def write_attack_matrix_outputs(
     threshold_report_path: str | Path = DEFAULT_THRESHOLD_REPORT_PATH,
     calibration_manifest_path: str | Path = DEFAULT_CALIBRATION_MANIFEST_PATH,
     real_attack_records_path: str | Path = DEFAULT_REAL_ATTACK_RECORDS_PATH,
+    conventional_geometric_records_path: str | Path = DEFAULT_CONVENTIONAL_GEOMETRIC_ATTACK_RECORDS_PATH,
+    image_attack_evidence_records_path: str | Path = DEFAULT_IMAGE_ATTACK_EVIDENCE_RECORDS_PATH,
     max_source_records: int | None = DEFAULT_MAX_SOURCE_RECORDS,
 ) -> dict[str, Any]:
     """写出攻击矩阵相关产物。"""
@@ -345,6 +403,8 @@ def write_attack_matrix_outputs(
     resolved_threshold_report_path = resolve_input_path(root_path, threshold_report_path)
     resolved_calibration_manifest_path = resolve_input_path(root_path, calibration_manifest_path)
     resolved_real_attack_records_path = resolve_input_path(root_path, real_attack_records_path)
+    resolved_conventional_geometric_records_path = resolve_input_path(root_path, conventional_geometric_records_path)
+    resolved_image_attack_evidence_records_path = resolve_input_path(root_path, image_attack_evidence_records_path)
 
     rescue_manifest = read_json(resolved_rescue_manifest_path)
     calibration_manifest = read_json(resolved_calibration_manifest_path)
@@ -356,8 +416,14 @@ def write_attack_matrix_outputs(
         source_records = source_records[:max_source_records]
 
     attack_configs = default_attack_configs()
-    proxy_attack_records = build_attack_detection_records(source_records, attack_configs, boundary)
-    real_attack_records = formal_real_attack_records(read_optional_jsonl(resolved_real_attack_records_path))
+    proxy_attack_records_all = build_attack_detection_records(source_records, attack_configs, boundary)
+    formal_input_records = deduplicate_formal_attack_records(
+        formal_real_attack_records(read_optional_jsonl(resolved_real_attack_records_path))
+        + formal_real_attack_records(read_optional_jsonl(resolved_conventional_geometric_records_path))
+    )
+    write_consolidated_formal_attack_records(resolved_image_attack_evidence_records_path, formal_input_records)
+    proxy_attack_records = filter_proxy_records_covered_by_formal_records(proxy_attack_records_all, formal_input_records)
+    real_attack_records = formal_input_records
     attack_records = tuple(proxy_attack_records) + tuple(real_attack_records)
     family_rows = family_metrics(attack_records)
     strength_rows = strength_curve(attack_records)
@@ -384,7 +450,7 @@ def write_attack_matrix_outputs(
         calibration_thresholds_path=resolved_thresholds_path,
         threshold_report_path=resolved_threshold_report_path,
         calibration_manifest_path=resolved_calibration_manifest_path,
-        real_attack_records_path=resolved_real_attack_records_path,
+        real_attack_records_path=resolved_image_attack_evidence_records_path,
         rescue_manifest=rescue_manifest,
         calibration_manifest=calibration_manifest,
         threshold_report=threshold_report,
@@ -490,6 +556,7 @@ def write_attack_matrix_outputs(
             strength_curve_path,
             retention_path,
             rescue_path,
+            resolved_image_attack_evidence_records_path,
             manifest_path,
         )
     )
@@ -515,6 +582,11 @@ def write_attack_matrix_outputs(
                 if resolved_real_attack_records_path.exists()
                 else ()
             ),
+            *(
+                (relative_or_absolute(resolved_conventional_geometric_records_path, root_path),)
+                if resolved_conventional_geometric_records_path.exists()
+                else ()
+            ),
         ),
         output_paths=output_paths,
         config={
@@ -522,6 +594,8 @@ def write_attack_matrix_outputs(
             "max_source_records": max_source_records,
             "attack_config_digest": build_stable_digest([config.to_dict() for config in attack_configs]),
             "summary_digest": build_stable_digest(summary),
+            "formal_image_attack_record_count": len(real_attack_records),
+            "image_attack_evidence_records_path": relative_or_absolute(resolved_image_attack_evidence_records_path, root_path),
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_attack_matrix_outputs.py",
@@ -561,6 +635,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_REAL_ATTACK_RECORDS_PATH),
         help="真实 attacked image formal records 路径, 文件不存在时跳过。",
     )
+    parser.add_argument(
+        "--conventional-geometric-records-path",
+        default=str(DEFAULT_CONVENTIONAL_GEOMETRIC_ATTACK_RECORDS_PATH),
+        help="常规失真与几何变换 attacked image formal records 路径, 文件不存在时跳过。",
+    )
+    parser.add_argument(
+        "--image-attack-evidence-records-path",
+        default=str(DEFAULT_IMAGE_ATTACK_EVIDENCE_RECORDS_PATH),
+        help="多来源 formal image attack records 合并输出路径。",
+    )
     parser.add_argument("--max-source-records", type=int, default=DEFAULT_MAX_SOURCE_RECORDS, help="最多读取的 full rescue 源记录数。")
     return parser
 
@@ -577,6 +661,8 @@ def main() -> None:
         threshold_report_path=args.threshold_report_path,
         calibration_manifest_path=args.calibration_manifest_path,
         real_attack_records_path=args.real_attack_records_path,
+        conventional_geometric_records_path=args.conventional_geometric_records_path,
+        image_attack_evidence_records_path=args.image_attack_evidence_records_path,
         max_source_records=args.max_source_records,
     )
     print(stable_json_text(manifest), end="")

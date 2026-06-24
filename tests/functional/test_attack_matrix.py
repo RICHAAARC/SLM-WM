@@ -41,7 +41,15 @@ def source_record(record_id: str, sample_role: str, raw_score: float, aligned_sc
     }
 
 
-def formal_real_attack_record(attack_name: str, score_after: float, evidence_decision: bool) -> dict[str, object]:
+def formal_real_attack_record(
+    attack_name: str,
+    score_after: float,
+    evidence_decision: bool,
+    *,
+    attack_family: str = "regeneration_attack",
+    resource_profile: str = "full_extra",
+    requires_gpu: bool = True,
+) -> dict[str, object]:
     """构造真实 attacked image formal record fixture。"""
     record_digest = f"digest_{attack_name}"
     return {
@@ -51,11 +59,11 @@ def formal_real_attack_record(attack_name: str, score_after: float, evidence_dec
         "source_image_digest": f"source_digest_{attack_name}",
         "source_image_digest_source": "sha256_file",
         "attack_id": f"real_{attack_name}",
-        "attack_family": "regeneration_attack",
+        "attack_family": attack_family,
         "attack_name": attack_name,
         "attack_strength": 0.35,
-        "resource_profile": "full_extra",
-        "requires_gpu": True,
+        "resource_profile": resource_profile,
+        "requires_gpu": requires_gpu,
         "attack_parameters": {"fixture": True},
         "attack_config_digest": f"config_digest_{attack_name}",
         "attacked_image_digest": f"attacked_digest_{attack_name}",
@@ -306,3 +314,89 @@ def test_attack_matrix_ingests_real_attack_formal_records(tmp_path: Path) -> Non
     }
     assert regeneration_rows
     assert all(row["metric_status"] == "measured_from_real_attacked_image_formal_protocol" for row in regeneration_rows)
+
+
+@pytest.mark.quick
+def test_attack_matrix_prefers_formal_image_attack_records_over_local_proxy(tmp_path: Path) -> None:
+    """已有图像级 formal records 时, 攻击矩阵应移除同配置本地代理记录。"""
+    rescue_dir = tmp_path / "outputs" / "geometric_rescue"
+    calibration_dir = tmp_path / "outputs" / "threshold_calibration"
+    conventional_dir = tmp_path / "outputs" / "conventional_geometric_attack_evaluation"
+    rescue_dir.mkdir(parents=True)
+    calibration_dir.mkdir(parents=True)
+    conventional_dir.mkdir(parents=True)
+
+    records_path = rescue_dir / "aligned_detection_records.jsonl"
+    records_path.write_text(
+        json_line(source_record("pos", "positive_source", 0.82, 0.86)),
+        encoding="utf-8",
+    )
+    rescue_manifest_path = rescue_dir / "manifest.local.json"
+    rescue_manifest_path.write_text(json.dumps({"artifact_id": "geometric_rescue_manifest"}), encoding="utf-8")
+    thresholds_path = calibration_dir / "calibration_thresholds.json"
+    thresholds_path.write_text(json.dumps({"threshold_value": 0.50, "target_fpr": 0.05}), encoding="utf-8")
+    threshold_report_path = calibration_dir / "threshold_degeneracy_report.json"
+    threshold_report_path.write_text(
+        json.dumps(
+            {
+                "calibrated_content_threshold": 0.50,
+                "target_fpr": 0.05,
+                "rescue_margin_low": -0.05,
+                "allowed_fail_reasons": ["geometry_suspected", "low_confidence"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    calibration_manifest_path = calibration_dir / "manifest.local.json"
+    calibration_manifest_path.write_text(json.dumps({"artifact_id": "threshold_calibration_manifest"}), encoding="utf-8")
+    conventional_records_path = conventional_dir / "formal_attack_detection_records.jsonl"
+    conventional_record = formal_real_attack_record(
+        "jpeg_compression",
+        0.43,
+        False,
+        attack_family="standard_distortion",
+        resource_profile="full_main",
+        requires_gpu=False,
+    )
+    conventional_records_path.write_text(json_line(conventional_record), encoding="utf-8")
+
+    write_attack_matrix_outputs(
+        root=tmp_path,
+        rescue_records_path=records_path,
+        rescue_manifest_path=rescue_manifest_path,
+        calibration_thresholds_path=thresholds_path,
+        threshold_report_path=threshold_report_path,
+        calibration_manifest_path=calibration_manifest_path,
+        conventional_geometric_records_path=conventional_records_path,
+        max_source_records=None,
+    )
+
+    output_dir = tmp_path / "outputs" / "attack_matrix"
+    evidence_records_path = tmp_path / "outputs" / "image_attack_evidence" / "formal_attack_detection_records.jsonl"
+    attack_records = [json.loads(line) for line in (output_dir / "attack_detection_records.jsonl").read_text(encoding="utf-8").splitlines()]
+    family_rows = list(csv.DictReader((output_dir / "attack_family_metrics.csv").open(encoding="utf-8")))
+    attack_manifest = json.loads((output_dir / "attack_manifest.json").read_text(encoding="utf-8"))
+    jpeg_full_main_records = [
+        record
+        for record in attack_records
+        if record["attack_family"] == "standard_distortion"
+        and record["attack_name"] == "jpeg_compression"
+        and record["resource_profile"] == "full_main"
+    ]
+    jpeg_full_main_rows = [
+        row
+        for row in family_rows
+        if row["attack_family"] == "standard_distortion"
+        and row["attack_name"] == "jpeg_compression"
+        and row["resource_profile"] == "full_main"
+    ]
+
+    assert evidence_records_path.exists()
+    assert len(evidence_records_path.read_text(encoding="utf-8").splitlines()) == 1
+    assert len(jpeg_full_main_records) == 1
+    assert jpeg_full_main_records[0]["metric_status"] == "measured_from_real_attacked_image_formal_protocol"
+    assert jpeg_full_main_rows[0]["metric_status"] == "measured_from_real_attacked_image_formal_protocol"
+    assert jpeg_full_main_rows[0]["attack_record_count"] == "1"
+    assert attack_manifest["formal_real_attack_record_count"] == 1
+    assert attack_manifest["image_attack_evidence_records_path"] == "outputs/image_attack_evidence/formal_attack_detection_records.jsonl"

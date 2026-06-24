@@ -17,6 +17,7 @@ from experiments.protocol.paper_run_config import build_paper_run_config, resolv
 from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
 from experiments.protocol.splits import apply_split_assignments
 from main.analysis.artifact_manifest import build_artifact_manifest
+from paper_workflow.colab_utils.progress import progress_bar, update_progress
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
     file_digest,
@@ -796,14 +797,21 @@ def write_external_baseline_gpu_smoke_outputs(
     paths = output_paths(root_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
     try:
-        prior_manifest = materialize_prior_outputs(root_path, config, paths)
-        device_report = ensure_cuda_if_requested(config.require_cuda)
-        official_report = run_t2smark_official_if_needed(root_path, config, paths)
-        image_pairs = build_t2smark_image_pairs(root_path, config, paths)
-        adapter_report = build_and_run_primary_baseline_adapters(root_path, config, paths)
-        environment_report = build_runtime_environment_report()
-        environment_report["external_baseline_device_report"] = device_report
-        write_json(paths["environment_report"], environment_report)
+        with progress_bar(6, desc="external baseline gpu smoke", enabled=True) as run_progress:
+            prior_manifest = materialize_prior_outputs(root_path, config, paths)
+            update_progress(run_progress, profile="operation=materialize_prior_outputs")
+            device_report = ensure_cuda_if_requested(config.require_cuda)
+            update_progress(run_progress, profile="operation=ensure_cuda")
+            official_report = run_t2smark_official_if_needed(root_path, config, paths)
+            update_progress(run_progress, profile="operation=t2smark_official_reference")
+            image_pairs = build_t2smark_image_pairs(root_path, config, paths)
+            update_progress(run_progress, profile=f"operation=build_image_pairs pairs={len(image_pairs)}")
+            adapter_report = build_and_run_primary_baseline_adapters(root_path, config, paths)
+            update_progress(run_progress, profile="operation=primary_baseline_adapters baselines=4")
+            environment_report = build_runtime_environment_report()
+            environment_report["external_baseline_device_report"] = device_report
+            write_json(paths["environment_report"], environment_report)
+            update_progress(run_progress, profile="operation=write_environment_report")
     except Exception as error:
         return write_failure_outputs(root_path, config, paths, error)
 

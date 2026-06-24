@@ -23,6 +23,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from paper_workflow.colab_utils.minimal_latent_injection import compute_image_quality_metrics
+from paper_workflow.colab_utils.progress import progress_bar, update_progress
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
     file_digest,
@@ -91,6 +92,8 @@ class RealAttackEvaluationConfig:
     ddim_attack_model_id: str = DEFAULT_DDIM_ATTACK_MODEL_ID
     ddim_inversion_steps: int = 30
     ddim_reconstruction_steps: int = 30
+    enable_pipeline_progress_bar: bool = False
+    enable_attack_progress_bar: bool = True
 
 
 @dataclass(frozen=True)
@@ -413,7 +416,7 @@ def load_img2img_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict
     token = os.environ.get(config.hf_token_env) or None
     pipeline = pipeline_class.from_pretrained(config.model_id, torch_dtype=dtype, token=token)
     pipeline = pipeline.to(config.device_name)
-    pipeline.set_progress_bar_config(disable=False)
+    pipeline.set_progress_bar_config(disable=not config.enable_pipeline_progress_bar)
     environment_report = build_runtime_environment_report(torch_module=torch)
     runtime_versions = {
         **flatten_environment_versions(environment_report),
@@ -561,6 +564,8 @@ def run_strict_ddim_inversion_attack(
     )
     pipe = pipe.to(config.device_name)
     pipe.torch = torch
+    if hasattr(pipe, "set_progress_bar_config"):
+        pipe.set_progress_bar_config(disable=not config.enable_pipeline_progress_bar)
     pipe.scheduler = scheduler_class.from_config(pipe.scheduler.config)
     inverse_scheduler = inverse_scheduler_class.from_config(pipe.scheduler.config)
     inversion_steps = int(spec.attack_parameters.get("inversion_steps", config.ddim_inversion_steps))
@@ -687,6 +692,8 @@ def build_attack_record(
             "image_quality_metrics": metrics,
             "claim_boundary": "requires_attack_matrix_and_fixed_fpr_rebuild",
             "attacked_image_closed_loop": True,
+            "resource_profile": str(getattr(spec, "resource_profile", "full_extra")),
+            "requires_gpu": bool(getattr(spec, "requires_gpu", True)),
         },
     )
     registry_row = {
@@ -846,8 +853,8 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
         "attack_family": real_record["attack_family"],
         "attack_name": real_record["attack_name"],
         "attack_strength": real_record["attack_strength"],
-        "resource_profile": "full_extra",
-        "requires_gpu": True,
+        "resource_profile": str(real_record.get("metadata", {}).get("resource_profile", "full_extra")),
+        "requires_gpu": bool(real_record.get("metadata", {}).get("requires_gpu", True)),
         "attack_parameters": real_record["attack_parameters"],
         "attack_config_digest": attack_config_digest,
         "attacked_image_digest": real_record["attacked_image_digest"],
@@ -998,68 +1005,92 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
     specs = default_attack_specs()
     main_specs = tuple(spec for spec in specs if spec.attack_name != "ddim_inversion_regeneration")
     ddim_specs = tuple(spec for spec in specs if spec.attack_name == "ddim_inversion_regeneration")
-    for source_index, source_path in enumerate(source_paths):
-        source_digest = file_digest(source_path)
-        source_image = load_rgb_image(source_path, config)
-        source_context = context_for_source(source_path, root_path, source_contexts, config)
-        prompt_text = str(source_context["prompt_text"])
-        contexts_by_record_source_path[relative_or_absolute(source_path, root_path)] = source_context
-        for attack_index, spec in enumerate(main_specs):
-            attack_seed = config.seed + source_index * 101 + attack_index
-            try:
-                attacked_image = run_pipeline_attack(pipeline, source_image, spec, config, attack_seed, prompt_text)
-                attacked_image = normalize_attacked_image_size(attacked_image, source_image)
-                attacked_path = attacked_dir / f"{source_path.stem}_{spec.attack_name}_{source_digest[:8]}.png"
-                attacked_image.save(attacked_path)
-                record, registry_row = build_attack_record(
-                    root_path=root_path,
-                    source_path=source_path,
-                    source_image=source_image,
-                    attacked_image=attacked_image,
-                    attacked_path=attacked_path,
-                    spec=spec,
-                    config=config,
-                )
-                records.append(record.to_dict())
-                registry_rows.append(registry_row)
-            except Exception as error:
-                records.append(unsupported_record(root_path, source_path, source_digest, spec, config, error).to_dict())
+    total_attack_tasks = len(source_paths) * len(specs)
+    with progress_bar(
+        total_attack_tasks,
+        desc="real regeneration attacks",
+        enabled=config.enable_attack_progress_bar,
+    ) as attack_progress:
+        for source_index, source_path in enumerate(source_paths):
+            source_digest = file_digest(source_path)
+            source_image = load_rgb_image(source_path, config)
+            source_context = context_for_source(source_path, root_path, source_contexts, config)
+            prompt_text = str(source_context["prompt_text"])
+            contexts_by_record_source_path[relative_or_absolute(source_path, root_path)] = source_context
+            for attack_index, spec in enumerate(main_specs):
+                attack_seed = config.seed + source_index * 101 + attack_index
+                try:
+                    attacked_image = run_pipeline_attack(pipeline, source_image, spec, config, attack_seed, prompt_text)
+                    attacked_image = normalize_attacked_image_size(attacked_image, source_image)
+                    attacked_path = attacked_dir / f"{source_path.stem}_{spec.attack_name}_{source_digest[:8]}.png"
+                    attacked_image.save(attacked_path)
+                    record, registry_row = build_attack_record(
+                        root_path=root_path,
+                        source_path=source_path,
+                        source_image=source_image,
+                        attacked_image=attacked_image,
+                        attacked_path=attacked_path,
+                        spec=spec,
+                        config=config,
+                    )
+                    records.append(record.to_dict())
+                    registry_rows.append(registry_row)
+                except Exception as error:
+                    records.append(unsupported_record(root_path, source_path, source_digest, spec, config, error).to_dict())
+                finally:
+                    update_progress(
+                        attack_progress,
+                        profile=(
+                            f"attack={spec.attack_name} "
+                            f"source={source_index + 1}/{len(source_paths)} "
+                            f"seed={attack_seed}"
+                        ),
+                    )
 
-    del pipeline
-    gc.collect()
-    try:
-        import torch
+        del pipeline
+        gc.collect()
+        try:
+            import torch
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        pass
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
-    for source_index, source_path in enumerate(source_paths):
-        source_digest = file_digest(source_path)
-        source_image = load_rgb_image(source_path, config)
-        source_context = context_for_source(source_path, root_path, source_contexts, config)
-        prompt_text = str(source_context["prompt_text"])
-        for attack_index, spec in enumerate(ddim_specs):
-            attack_seed = config.seed + source_index * 101 + 1000 + attack_index
-            try:
-                attacked_image = run_strict_ddim_inversion_attack(source_image, spec, config, attack_seed, prompt_text)
-                attacked_image = normalize_attacked_image_size(attacked_image, source_image)
-                attacked_path = attacked_dir / f"{source_path.stem}_{spec.attack_name}_{source_digest[:8]}.png"
-                attacked_image.save(attacked_path)
-                record, registry_row = build_attack_record(
-                    root_path=root_path,
-                    source_path=source_path,
-                    source_image=source_image,
-                    attacked_image=attacked_image,
-                    attacked_path=attacked_path,
-                    spec=spec,
-                    config=config,
-                )
-                records.append(record.to_dict())
-                registry_rows.append(registry_row)
-            except Exception as error:
-                records.append(unsupported_record(root_path, source_path, source_digest, spec, config, error).to_dict())
+        for source_index, source_path in enumerate(source_paths):
+            source_digest = file_digest(source_path)
+            source_image = load_rgb_image(source_path, config)
+            source_context = context_for_source(source_path, root_path, source_contexts, config)
+            prompt_text = str(source_context["prompt_text"])
+            for attack_index, spec in enumerate(ddim_specs):
+                attack_seed = config.seed + source_index * 101 + 1000 + attack_index
+                try:
+                    attacked_image = run_strict_ddim_inversion_attack(source_image, spec, config, attack_seed, prompt_text)
+                    attacked_image = normalize_attacked_image_size(attacked_image, source_image)
+                    attacked_path = attacked_dir / f"{source_path.stem}_{spec.attack_name}_{source_digest[:8]}.png"
+                    attacked_image.save(attacked_path)
+                    record, registry_row = build_attack_record(
+                        root_path=root_path,
+                        source_path=source_path,
+                        source_image=source_image,
+                        attacked_image=attacked_image,
+                        attacked_path=attacked_path,
+                        spec=spec,
+                        config=config,
+                    )
+                    records.append(record.to_dict())
+                    registry_rows.append(registry_row)
+                except Exception as error:
+                    records.append(unsupported_record(root_path, source_path, source_digest, spec, config, error).to_dict())
+                finally:
+                    update_progress(
+                        attack_progress,
+                        profile=(
+                            f"attack={spec.attack_name} "
+                            f"source={source_index + 1}/{len(source_paths)} "
+                            f"seed={attack_seed}"
+                        ),
+                    )
 
     record_rows = tuple(records)
     registry_tuple = tuple(registry_rows)
@@ -1182,6 +1213,8 @@ def build_default_config() -> RealAttackEvaluationConfig:
         ddim_attack_model_id=os.environ.get("SLM_WM_DDIM_ATTACK_MODEL_ID", DEFAULT_DDIM_ATTACK_MODEL_ID),
         ddim_inversion_steps=int(os.environ.get("SLM_WM_DDIM_INVERSION_STEPS", "30")),
         ddim_reconstruction_steps=int(os.environ.get("SLM_WM_DDIM_RECONSTRUCTION_STEPS", "30")),
+        enable_pipeline_progress_bar=os.environ.get("SLM_WM_ENABLE_PIPELINE_PROGRESS_BAR", "0") == "1",
+        enable_attack_progress_bar=os.environ.get("SLM_WM_ENABLE_ATTACK_PROGRESS_BAR", "1") != "0",
     )
 
 

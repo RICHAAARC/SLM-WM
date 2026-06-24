@@ -19,6 +19,7 @@ from experiments.protocol import FORMAL_FEATURE_BACKEND
 from experiments.protocol.paper_run_config import build_paper_run_config
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
+from paper_workflow.colab_utils.progress import progress_bar, update_progress
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
     file_digest,
@@ -286,24 +287,31 @@ def write_formal_feature_records(
     }
 
     feature_rows: list[dict[str, Any]] = []
-    for record in records:
-        record_id = str(record["dataset_quality_record_id"])
-        role_paths = (
-            ("source", str(record["source_image_path"])),
-            ("comparison", str(record["comparison_image_path"])),
-        )
-        for image_role, image_path_text in role_paths:
-            resolved_path = resolve_dataset_image_path(image_path_text, root_path, resolution_by_request)
-            if not resolved_path.is_file():
-                raise FileNotFoundError(f"dataset_quality_image_missing:{image_path_text}")
-            feature_rows.append(
-                {
-                    "dataset_quality_record_id": record_id,
-                    "dataset_quality_image_role": image_role,
-                    "feature_backend": FORMAL_FEATURE_BACKEND,
-                    "feature_vector": feature_extractor(resolved_path),
-                }
+    with progress_bar(len(records) * 2, desc="dataset-level feature extraction", enabled=True) as feature_progress:
+        for record_index, record in enumerate(records, start=1):
+            record_id = str(record["dataset_quality_record_id"])
+            role_paths = (
+                ("source", str(record["source_image_path"])),
+                ("comparison", str(record["comparison_image_path"])),
             )
+            for image_role, image_path_text in role_paths:
+                try:
+                    resolved_path = resolve_dataset_image_path(image_path_text, root_path, resolution_by_request)
+                    if not resolved_path.is_file():
+                        raise FileNotFoundError(f"dataset_quality_image_missing:{image_path_text}")
+                    feature_rows.append(
+                        {
+                            "dataset_quality_record_id": record_id,
+                            "dataset_quality_image_role": image_role,
+                            "feature_backend": FORMAL_FEATURE_BACKEND,
+                            "feature_vector": feature_extractor(resolved_path),
+                        }
+                    )
+                finally:
+                    update_progress(
+                        feature_progress,
+                        profile=f"record={record_index}/{len(records)} image_role={image_role}",
+                    )
 
     feature_records_path.write_text("".join(json_line(row) for row in feature_rows), encoding="utf-8")
     environment_path.write_text(stable_json_text(environment_report), encoding="utf-8")

@@ -18,6 +18,7 @@
 - `aligned_rescoring_run.ipynb`: 对注入结果进行 aligned rescoring, 生成检测重打分记录和配对感知质量指标。`pilot_paper` 默认使用该层级全部 prompt, 当前配置为600个; `full_paper` 当前配置为6000个。
 - `threshold_calibration_run.ipynb`: 在 fixed-FPR=0.01 协议下校准阈值, 并记录 geometric rescue 边界。
 - `real_attack_evaluation_run.ipynb`: 生成或导入真实 attacked image, 执行正式攻击后检测, 记录 source / attacked image digest 和再扩散攻击覆盖状态。处理数量由当前论文运行层级的样本数派生。
+- `conventional_geometric_attack_evaluation_run.ipynb`: 使用 CPU 图像算子生成常规失真与几何变换 attacked image, 写出 source / attacked image digest、formal detection records 和总体进度条。该入口不运行 diffusion 模型, 负责补齐 `standard_distortion` 与 `geometric_transform` 的真实图像级攻击闭环。
 - `dataset_level_quality_run.ipynb`: 从受治理图像集合导入 dataset-level 质量特征, 计算或登记 FID / KID 等集合级指标。pilot_paper 默认使用100作为 dataset-level 正式特征最小样本阈值, 其结果只允许支撑 pilot_paper 样本规模内的主张, 不得提升为 full_paper 主张。
 
 ### 外部 baseline 入口
@@ -48,14 +49,15 @@ pilot_paper 与 full_paper 应共享同一批方法主流程和 baseline 入口,
 4. 方法主流程: `attention_latent_injection_run.ipynb`。
 5. 方法主流程: `aligned_rescoring_run.ipynb`。
 6. 阈值与 rescue 边界: `threshold_calibration_run.ipynb`。
-7. 真实攻击闭环: `real_attack_evaluation_run.ipynb`。
-8. 数据集级质量: `dataset_level_quality_run.ipynb`。
-9. 主表 baseline: `external_baseline_gpu_smoke_run.ipynb`。
-10. 官方复现: `t2smark_full_main_reproduction_run.ipynb`。
-11. 官方复现: `tree_ring_official_reference_run.ipynb`。
-12. 官方复现: `gaussian_shading_official_reference_run.ipynb`。
-13. 官方复现: `shallow_diffuse_official_reference_run.ipynb`。
-14. 结果闭合: `pilot_paper_result_closure_run.ipynb`。
+7. 再扩散真实攻击闭环: `real_attack_evaluation_run.ipynb`。
+8. 常规失真与几何变换真实攻击闭环: `conventional_geometric_attack_evaluation_run.ipynb`。
+9. 数据集级质量: `dataset_level_quality_run.ipynb`。
+10. 主表 baseline: `external_baseline_gpu_smoke_run.ipynb`。
+11. 官方复现: `t2smark_full_main_reproduction_run.ipynb`。
+12. 官方复现: `tree_ring_official_reference_run.ipynb`。
+13. 官方复现: `gaussian_shading_official_reference_run.ipynb`。
+14. 官方复现: `shallow_diffuse_official_reference_run.ipynb`。
+15. 结果闭合: `pilot_paper_result_closure_run.ipynb`。
 
 第14个 Notebook 已经封装以下收尾命令。若不使用该 Notebook, 也可以在同一个 Colab 仓库工作区或本地仓库中手动执行以下等价命令。若在本地执行, `--package-search-root` 应指向已经同步或挂载的 Google Drive `SLM/pilot_paper_results` 目录。
 

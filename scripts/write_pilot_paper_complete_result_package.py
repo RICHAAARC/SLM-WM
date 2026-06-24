@@ -41,6 +41,8 @@ REQUIRED_OUTPUT_DIRS = (
     "outputs/threshold_calibration",
     "outputs/geometric_rescue",
     "outputs/real_attack_evaluation",
+    "outputs/conventional_geometric_attack_evaluation",
+    "outputs/image_attack_evidence",
     "outputs/dataset_level_quality",
     "outputs/external_baseline_gpu_smoke",
     "outputs/tree_ring_official_reference",
