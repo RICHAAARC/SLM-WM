@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 import json
@@ -15,6 +15,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
+from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
 from main.methods.detection.scores import compute_unified_content_score
 from paper_workflow.colab_utils.attention_latent_injection import (
     attention_carrier_tensor,
@@ -38,8 +39,8 @@ from scripts.write_content_carrier_outputs import build_carrier_bundle
 
 DEFAULT_OUTPUT_DIR = "outputs/aligned_rescoring"
 DEFAULT_METHOD_OUTPUT_DIR = "outputs/attention_latent_update"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring"
-DEFAULT_GEOMETRY_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry"
+DEFAULT_DRIVE_OUTPUT_DIR = ""
+DEFAULT_GEOMETRY_DRIVE_DIR = ""
 PRIMARY_MODEL_FAMILY = "sd35"
 PRIMARY_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 DEFAULT_CLIP_MODEL_ID = "openai/clip-vit-base-patch32"
@@ -71,10 +72,10 @@ class AlignedRescoringConfig:
     injection_step_indices: tuple[int, ...]
     output_dir: str = DEFAULT_OUTPUT_DIR
     method_output_dir: str = DEFAULT_METHOD_OUTPUT_DIR
-    geometry_drive_dir: str = DEFAULT_GEOMETRY_DRIVE_DIR
+    geometry_drive_dir: str = field(default_factory=lambda: build_paper_run_config(".").drive_dir("attention_geometry"))
     attention_geometry_package_path: str = ""
-    max_subspace_records: int = 128
-    max_rescore_carriers: int = 120
+    max_subspace_records: int = 600
+    max_rescore_carriers: int = 600
     negative_prompt: str = "low quality, blurry"
     device_name: str = "cuda"
     torch_dtype: str = "float16"
@@ -1062,6 +1063,7 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
 
 def build_default_config() -> AlignedRescoringConfig:
     """根据环境变量构造默认真实 aligned rescoring 配置。"""
+    paper_run = build_paper_run_config(".")
     return AlignedRescoringConfig(
         model_family=PRIMARY_MODEL_FAMILY,
         model_id=os.environ.get("SLM_WM_SD35_MODEL_ID", PRIMARY_MODEL_ID),
@@ -1078,10 +1080,19 @@ def build_default_config() -> AlignedRescoringConfig:
         ),
         output_dir=os.environ.get("SLM_WM_ALIGNED_RESCORING_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         method_output_dir=os.environ.get("SLM_WM_ATTENTION_METHOD_OUTPUT_DIR", DEFAULT_METHOD_OUTPUT_DIR),
-        geometry_drive_dir=os.environ.get("SLM_WM_ATTENTION_GEOMETRY_DRIVE_DIR", DEFAULT_GEOMETRY_DRIVE_DIR),
+        geometry_drive_dir=os.environ.get(
+            "SLM_WM_ATTENTION_GEOMETRY_DRIVE_DIR",
+            paper_run.drive_dir("attention_geometry"),
+        ),
         attention_geometry_package_path=os.environ.get("SLM_WM_ATTENTION_GEOMETRY_PACKAGE_PATH", ""),
-        max_subspace_records=int(os.environ.get("SLM_WM_ALIGNED_RESCORING_SUBSPACE_RECORDS", "128")),
-        max_rescore_carriers=int(os.environ.get("SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT", "120")),
+        max_subspace_records=resolve_count_from_environment(
+            "SLM_WM_ALIGNED_RESCORING_SUBSPACE_RECORDS",
+            default_value=paper_run.sample_count,
+        ),
+        max_rescore_carriers=resolve_count_from_environment(
+            "SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT",
+            default_value=paper_run.sample_count,
+        ),
         negative_prompt=os.environ.get("SLM_WM_NEGATIVE_PROMPT", "low quality, blurry"),
         enable_pair_perceptual_metrics=parse_bool_environment("SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS", True),
         require_pair_perceptual_metrics=parse_bool_environment("SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS", True),
@@ -1122,11 +1133,12 @@ def package_aligned_rescoring_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
     method_output_dir: str = DEFAULT_METHOD_OUTPUT_DIR,
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    drive_output_dir: str | None = None,
     archive_name: str = "aligned_rescoring_package.zip",
 ) -> AlignedRescoringArchiveRecord:
     """打包真实 aligned rescoring 产物并镜像到 Google Drive。"""
     root_path = Path(root).resolve()
+    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir("aligned_rescoring")
     source_dir = (root_path / output_dir).resolve()
     method_dir = (root_path / method_output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -1145,7 +1157,7 @@ def package_aligned_rescoring_outputs(
     with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
         for entry in entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
-    drive_dir = Path(drive_output_dir).expanduser()
+    drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / archive_name
     shutil.copy2(archive_path, mirrored_path)

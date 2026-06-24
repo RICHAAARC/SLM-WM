@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
 import os
@@ -22,10 +22,10 @@ from experiments.baselines import (
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_FIXED_FPR,
     PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
-    PILOT_PAPER_PROMPT_FILE,
-    PILOT_PAPER_PROMPT_SET,
 )
-from experiments.protocol.prompts import build_prompt_record, normalize_prompt_text
+from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
+from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
+from experiments.protocol.splits import apply_split_assignments
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
@@ -42,11 +42,11 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 )
 
 DEFAULT_OUTPUT_DIR = "outputs/t2smark_full_main_reproduction"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/t2smark_full_main_reproduction"
-DEFAULT_PROMPT_FILE = PILOT_PAPER_PROMPT_FILE
+DEFAULT_DRIVE_OUTPUT_DIR = ""
+DEFAULT_PROMPT_FILE = "configs/paper_main_pilot_paper_prompts.txt"
 DEFAULT_RUN_NAME = "t2smark_sd35_medium_pilot_paper"
 DEFAULT_TARGET_FPR = PILOT_PAPER_FIXED_FPR
-DEFAULT_PROMPT_LIMIT = 120
+DEFAULT_PROMPT_LIMIT = 600
 PACKAGE_EXTRA_PATHS = (
     "paper_workflow/t2smark_full_main_reproduction_run.ipynb",
     "paper_workflow/colab_utils/t2smark_full_main_reproduction.py",
@@ -61,7 +61,10 @@ class T2SMarkFullMainReproductionConfig:
     """描述 T2SMark full-main 真实复现所需的最小配置。"""
 
     output_dir: str = DEFAULT_OUTPUT_DIR
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR
+    drive_output_dir: str = field(
+        default_factory=lambda: build_paper_run_config(".").drive_dir("t2smark_full_main_reproduction")
+    )
+    prompt_set: str = "pilot_paper"
     prompt_file: str = DEFAULT_PROMPT_FILE
     t2smark_run_name: str = DEFAULT_RUN_NAME
     model_id: str = DEFAULT_T2SMARK_MODEL_ID
@@ -196,7 +199,7 @@ def output_paths(root_path: Path, config: T2SMarkFullMainReproductionConfig) -> 
 
 
 def read_prompt_texts(prompt_file: str | Path) -> tuple[str, ...]:
-    """读取 pilot_paper prompt 文件, 忽略空行与注释行。"""
+    """读取 prompt 文件, 忽略空行与注释行。"""
 
     prompts: list[str] = []
     for line in Path(prompt_file).read_text(encoding="utf-8").splitlines():
@@ -207,19 +210,19 @@ def read_prompt_texts(prompt_file: str | Path) -> tuple[str, ...]:
 
 
 def selected_prompt_texts(prompt_texts: tuple[str, ...], prompt_limit: int) -> tuple[str, ...]:
-    """按 pilot_paper 运行上限截取 prompt, 0 表示使用全部 prompt。"""
+    """按论文运行上限截取 prompt, 0 表示使用全部 prompt。"""
 
     if int(prompt_limit) <= 0:
         return prompt_texts
     return prompt_texts[: int(prompt_limit)]
 
 
-def build_full_main_prompt_rows(prompt_texts: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
-    """构造 T2SMark pilot_paper 运行使用的 prompt 计划。"""
+def build_full_main_prompt_rows(prompt_set: str, prompt_texts: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
+    """构造 T2SMark 运行使用的 prompt 计划。"""
 
     rows: list[dict[str, Any]] = []
-    for index, prompt_text in enumerate(prompt_texts):
-        record = build_prompt_record(PILOT_PAPER_PROMPT_SET, index, prompt_text, split="test")
+    records = apply_split_assignments(build_prompt_records(prompt_set, prompt_texts))
+    for record in records:
         rows.append(
             {
                 "prompt_id": record.prompt_id,
@@ -238,12 +241,12 @@ def write_full_main_prompt_inputs(
     config: T2SMarkFullMainReproductionConfig,
     paths: dict[str, Path],
 ) -> dict[str, Any]:
-    """写出 T2SMark 官方入口与 adapter 共享的 pilot_paper prompt 输入。"""
+    """写出 T2SMark 官方入口与 adapter 共享的 prompt 输入。"""
 
     prompt_source_path = root_path / config.prompt_file
     all_prompt_texts = read_prompt_texts(prompt_source_path)
     chosen_prompt_texts = selected_prompt_texts(all_prompt_texts, config.prompt_limit)
-    prompt_rows = build_full_main_prompt_rows(chosen_prompt_texts)
+    prompt_rows = build_full_main_prompt_rows(config.prompt_set, chosen_prompt_texts)
     dataset_payload = {
         "annotations": [
             {
@@ -265,7 +268,7 @@ def write_full_main_prompt_inputs(
         and len(prompt_rows) >= PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
         "pilot_paper_prompt_protocol_ready": bool(prompt_rows)
         and len(prompt_rows) >= PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": config.prompt_set,
         "prompt_protocol_name": FULL_MAIN_PROMPT_PROTOCOL_NAME,
         "prompt_protocol_digest": build_stable_digest([row["prompt_digest"] for row in prompt_rows]),
         "prompt_dataset_path": relative_or_absolute(paths["prompt_dataset"], root_path),
@@ -365,7 +368,7 @@ def build_t2smark_full_main_image_pairs(
                 "event_id": image_id,
                 "prompt_id": str(prompt_row["prompt_id"]),
                 "prompt_index": int(prompt_row["prompt_index"]),
-                "prompt_set": PILOT_PAPER_PROMPT_SET,
+                "prompt_set": str(prompt_row.get("prompt_set", "")),
                 "split": str(prompt_row.get("split", "test")),
                 "baseline_id": "t2smark",
                 "generated_image_path": relative_or_absolute(image_path, root_path) if image_path.is_file() else "",
@@ -521,7 +524,7 @@ def write_t2smark_full_main_reproduction_outputs(
         "t2smark_official_result_generated": bool(official_report.get("official_result_generated")),
         "t2smark_official_result_reused": bool(official_report.get("official_result_reused")),
         "full_main_prompt_count": int(prompt_report["full_main_prompt_count"]),
-        "pilot_paper_prompt_count": int(prompt_report["full_main_prompt_count"]),
+        "paper_prompt_count": int(prompt_report["full_main_prompt_count"]),
         "selected_prompt_count": int(prompt_report["selected_prompt_count"]),
         "prompt_limit": int(config.prompt_limit),
         "full_main_prompt_protocol_ready": bool(prompt_report["full_main_prompt_protocol_ready"]),
@@ -541,7 +544,7 @@ def write_t2smark_full_main_reproduction_outputs(
         "manifest_path": relative_or_absolute(paths["manifest"], root_path),
         "supports_paper_claim": False,
         "unsupported_reason": "" if run_ready else "t2smark_full_main_reproduction_incomplete",
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": config.prompt_set,
         "metadata": {
             "prompt_report": prompt_report,
             "official_report": official_report,
@@ -581,19 +584,27 @@ def write_t2smark_full_main_reproduction_outputs(
 def build_default_config() -> T2SMarkFullMainReproductionConfig:
     """从环境变量构造默认 Colab 运行配置。"""
 
+    paper_run = build_paper_run_config(".")
     return T2SMarkFullMainReproductionConfig(
         output_dir=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
-        drive_output_dir=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_DRIVE_OUTPUT_DIR", DEFAULT_DRIVE_OUTPUT_DIR),
-        prompt_file=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PROMPT_FILE", DEFAULT_PROMPT_FILE),
+        drive_output_dir=os.environ.get(
+            "SLM_WM_T2SMARK_FULL_MAIN_DRIVE_OUTPUT_DIR",
+            paper_run.drive_dir("t2smark_full_main_reproduction"),
+        ),
+        prompt_set=os.environ.get("SLM_WM_PROMPT_SET", paper_run.prompt_set),
+        prompt_file=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PROMPT_FILE", paper_run.prompt_file),
         t2smark_run_name=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_RUN_NAME", DEFAULT_RUN_NAME),
         model_id=os.environ.get("SLM_WM_T2SMARK_MODEL_ID", DEFAULT_T2SMARK_MODEL_ID),
         seed=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_SEED", "20260621")),
-        prompt_limit=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT", str(DEFAULT_PROMPT_LIMIT))),
+        prompt_limit=resolve_count_from_environment(
+            "SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT",
+            default_value=paper_run.sample_count,
+        ),
         clip_test_num=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_CLIP_TEST_NUM", "0")),
         num_inference_steps=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_NUM_INFERENCE_STEPS", "28")),
         num_inversion_steps=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_NUM_INVERSION_STEPS", "28")),
         guidance_scale=float(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_GUIDANCE_SCALE", "4.0")),
-        target_fpr=float(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR", str(DEFAULT_TARGET_FPR))),
+        target_fpr=float(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR", str(paper_run.target_fpr))),
         fixed_fpr_baseline_calibration_ready=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_FIXED_FPR_READY", "0") == "1",
         attack_matrix_baseline_detection_ready=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_ATTACK_MATRIX_READY", "0") == "1",
         reuse_existing=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_REUSE_EXISTING", "1") != "0",
@@ -632,12 +643,15 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
 def package_t2smark_full_main_reproduction_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    drive_output_dir: str | None = None,
     archive_name: str = "t2smark_full_main_reproduction_package.zip",
 ) -> T2SMarkFullMainArchiveRecord:
     """打包 T2SMark full-main 复现产物并镜像到 Google Drive。"""
 
     root_path = Path(root).resolve()
+    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir(
+        "t2smark_full_main_reproduction"
+    )
     source_dir = (root_path / output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
     archive_path = source_dir / archive_name
@@ -663,7 +677,7 @@ def package_t2smark_full_main_reproduction_outputs(
             summary_path.relative_to(root_path).as_posix(),
             manifest_path.relative_to(root_path).as_posix(),
         ),
-        config={"archive_name": archive_name, "drive_output_dir": str(Path(drive_output_dir).expanduser())},
+        config={"archive_name": archive_name, "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser())},
         code_version=resolve_code_version(root_path),
         rebuild_command="运行 paper_workflow/t2smark_full_main_reproduction_run.ipynb",
         metadata={"construction_unit_name": "t2smark_full_main_reproduction", "generated_at": datetime.now(timezone.utc).isoformat()},
@@ -673,7 +687,7 @@ def package_t2smark_full_main_reproduction_outputs(
     with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
         for entry in entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
-    drive_dir = Path(drive_output_dir).expanduser()
+    drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / archive_name
     shutil.copy2(archive_path, mirrored_path)

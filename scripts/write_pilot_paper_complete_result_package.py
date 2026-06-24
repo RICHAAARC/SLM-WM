@@ -23,14 +23,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from experiments.protocol.paper_run_config import build_paper_run_config
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from scripts.write_pilot_paper_result_records import expand_package_paths, materialize_output_entries
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_complete_result_package"
 DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_complete_result_package")
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/complete_result_package"
-DEFAULT_PACKAGE_SEARCH_ROOT = "/content/drive/MyDrive/SLM/pilot_paper_results"
+DEFAULT_DRIVE_OUTPUT_DIR = ""
+DEFAULT_PACKAGE_SEARCH_ROOT = ""
 REQUIRED_OUTPUT_DIRS = (
     "outputs/real_attention_geometry",
     "outputs/attention_geometry",
@@ -54,6 +55,7 @@ REQUIRED_OUTPUT_DIRS = (
 )
 PACKAGE_EXTRA_PATHS = (
     "configs/paper_main_pilot_paper_prompts.txt",
+    "configs/paper_main_full_paper_prompts.txt",
     "paper_workflow/README.md",
     "scripts/write_pilot_paper_result_records.py",
     "scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py",
@@ -188,7 +190,12 @@ def collect_required_entries(root_path: Path, output_dir: Path, archive_path: Pa
     return tuple(unique_entries)
 
 
-def build_readiness_summary(root_path: Path, entries: Iterable[Path], materialization_report: dict[str, Any]) -> dict[str, Any]:
+def build_readiness_summary(
+    root_path: Path,
+    entries: Iterable[Path],
+    materialization_report: dict[str, Any],
+    paper_claim_scale: str,
+) -> dict[str, Any]:
     """汇总完整结果包覆盖状态。"""
 
     existing_dirs = [relative_dir for relative_dir in REQUIRED_OUTPUT_DIRS if (root_path / relative_dir).exists()]
@@ -197,7 +204,7 @@ def build_readiness_summary(root_path: Path, entries: Iterable[Path], materializ
     return {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": paper_claim_scale,
         "required_output_dir_count": len(REQUIRED_OUTPUT_DIRS),
         "existing_required_output_dir_count": len(existing_dirs),
         "missing_required_output_dir_count": len(missing_dirs),
@@ -215,17 +222,20 @@ def write_pilot_paper_complete_result_package_outputs(
     *,
     root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    drive_output_dir: str | None = None,
     archive_name: str = "pilot_paper_complete_result_package.zip",
     package_paths: Iterable[str | Path] = (),
-    package_search_roots: Iterable[str | Path] = (DEFAULT_PACKAGE_SEARCH_ROOT,),
+    package_search_roots: Iterable[str | Path] | None = None,
 ) -> dict[str, Any]:
     """写出 pilot_paper 完整结果包, 并按需从 Drive 结果包物化 outputs/ 条目。"""
 
     root_path = Path(root).resolve()
+    paper_run = build_paper_run_config(root_path)
+    resolved_drive_output_dir = drive_output_dir or paper_run.drive_dir("complete_result_package")
+    resolved_package_search_roots = tuple(package_search_roots or (paper_run.drive_result_root,))
     output_path = ensure_output_dir_under_outputs(root_path, output_dir)
     archive_path = output_path / archive_name
-    packages = expand_package_paths(root_path, package_paths, package_search_roots)
+    packages = expand_package_paths(root_path, package_paths, resolved_package_search_roots)
     materialization_report = (
         materialize_output_entries(root_path, packages)
         if packages
@@ -246,10 +256,10 @@ def write_pilot_paper_complete_result_package_outputs(
             stale_path.unlink()
 
     entries = collect_required_entries(root_path, output_path, archive_path)
-    summary = build_readiness_summary(root_path, entries, materialization_report)
+    summary = build_readiness_summary(root_path, entries, materialization_report, paper_run.run_name)
     package_manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": paper_run.run_name,
         "entry_paths": [relative_or_absolute(entry, root_path) for entry in entries],
         "entry_count": len(entries),
         "entry_paths_digest": build_stable_digest([relative_or_absolute(entry, root_path) for entry in entries]),
@@ -268,9 +278,9 @@ def write_pilot_paper_complete_result_package_outputs(
         ),
         config={
             "archive_name": archive_name,
-            "drive_output_dir": drive_output_dir,
+            "drive_output_dir": resolved_drive_output_dir,
             "required_output_dirs": list(REQUIRED_OUTPUT_DIRS),
-            "package_search_roots": [str(value) for value in package_search_roots],
+            "package_search_roots": [str(value) for value in resolved_package_search_roots],
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_pilot_paper_complete_result_package.py",
@@ -278,10 +288,10 @@ def write_pilot_paper_complete_result_package_outputs(
     ).to_dict()
     write_json(manifest_path, manifest)
     entries = collect_required_entries(root_path, output_path, archive_path)
-    summary = build_readiness_summary(root_path, entries, materialization_report)
+    summary = build_readiness_summary(root_path, entries, materialization_report, paper_run.run_name)
     package_manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "paper_claim_scale": "pilot_paper",
+        "paper_claim_scale": paper_run.run_name,
         "entry_paths": [relative_or_absolute(entry, root_path) for entry in entries],
         "entry_count": len(entries),
         "entry_paths_digest": build_stable_digest([relative_or_absolute(entry, root_path) for entry in entries]),
@@ -294,8 +304,8 @@ def write_pilot_paper_complete_result_package_outputs(
 
     drive_archive_path = ""
     drive_archive_digest = ""
-    if drive_output_dir:
-        drive_dir = Path(drive_output_dir).expanduser()
+    if resolved_drive_output_dir:
+        drive_dir = Path(resolved_drive_output_dir).expanduser()
         drive_dir.mkdir(parents=True, exist_ok=True)
         mirrored_path = drive_dir / archive_name
         shutil.copy2(archive_path, mirrored_path)
@@ -325,10 +335,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="打包 pilot_paper 完整结果包。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="本地输出目录, 必须位于 outputs/ 下。")
-    parser.add_argument("--drive-output-dir", default=DEFAULT_DRIVE_OUTPUT_DIR, help="Google Drive 镜像目录。")
+    parser.add_argument("--drive-output-dir", default=None, help="Google Drive 镜像目录。")
     parser.add_argument("--archive-name", default="pilot_paper_complete_result_package.zip", help="压缩包文件名。")
     parser.add_argument("--package-path", action="append", default=[], help="可重复传入的前序结果 zip 包。")
-    parser.add_argument("--package-search-root", action="append", default=[DEFAULT_PACKAGE_SEARCH_ROOT], help="递归查找 zip 包的目录。")
+    parser.add_argument("--package-search-root", action="append", default=[], help="递归查找 zip 包的目录。")
     return parser
 
 

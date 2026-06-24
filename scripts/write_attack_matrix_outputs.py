@@ -37,7 +37,7 @@ DEFAULT_CALIBRATION_THRESHOLDS_PATH = Path("outputs/threshold_calibration/calibr
 DEFAULT_THRESHOLD_REPORT_PATH = Path("outputs/threshold_calibration/threshold_degeneracy_report.json")
 DEFAULT_CALIBRATION_MANIFEST_PATH = Path("outputs/threshold_calibration/manifest.local.json")
 DEFAULT_REAL_ATTACK_RECORDS_PATH = Path("outputs/real_attack_evaluation/formal_attack_detection_records.jsonl")
-DEFAULT_MAX_SOURCE_RECORDS = 96
+DEFAULT_MAX_SOURCE_RECORDS: int | None = None
 REAL_ATTACK_METRIC_STATUS = "measured_from_real_attacked_image_formal_protocol"
 
 

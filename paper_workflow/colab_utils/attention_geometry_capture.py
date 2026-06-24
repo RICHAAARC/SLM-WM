@@ -18,6 +18,7 @@ import time
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.runtime.diffusion.attention_capture import AttentionCaptureRecord
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -25,7 +26,7 @@ from scripts.write_attention_geometry_outputs import write_attention_geometry_ou
 
 DEFAULT_OUTPUT_DIR = "outputs/real_attention_geometry"
 DEFAULT_GEOMETRY_OUTPUT_DIR = "outputs/attention_geometry"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry"
+DEFAULT_DRIVE_OUTPUT_DIR = ""
 PRIMARY_MODEL_FAMILY = "sd35"
 PRIMARY_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
@@ -619,11 +620,12 @@ def package_attention_geometry_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
     geometry_output_dir: str = DEFAULT_GEOMETRY_OUTPUT_DIR,
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    drive_output_dir: str | None = None,
     archive_name: str = "attention_geometry_package.zip",
 ) -> AttentionGeometryArchiveRecord:
     """把真实 attention 几何产物打包为 zip, 并镜像到 Google Drive。"""
     root_path = Path(root).resolve()
+    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir("attention_geometry")
     source_dir = (root_path / output_dir).resolve()
     geometry_dir = (root_path / geometry_output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -644,7 +646,7 @@ def package_attention_geometry_outputs(
         for entry in entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
 
-    drive_dir = Path(drive_output_dir).expanduser()
+    drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / archive_name
     shutil.copy2(archive_path, mirrored_path)

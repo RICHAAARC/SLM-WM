@@ -10,6 +10,7 @@ import shutil
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_FIXED_FPR,
     PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
@@ -25,9 +26,9 @@ from scripts.write_threshold_calibration_outputs import write_threshold_calibrat
 DEFAULT_OUTPUT_DIR = "outputs/threshold_calibration"
 DEFAULT_GEOMETRIC_RESCUE_DIR = "outputs/geometric_rescue"
 DEFAULT_CONTENT_CARRIER_DIR = "outputs/content_carriers"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/threshold_calibration"
-DEFAULT_ATTENTION_INJECTION_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_latent_injection"
-DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring"
+DEFAULT_DRIVE_OUTPUT_DIR = ""
+DEFAULT_ATTENTION_INJECTION_DRIVE_DIR = ""
+DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = ""
 DEFAULT_TARGET_FPR = PILOT_PAPER_FIXED_FPR
 DEFAULT_MAX_CONTENT_RECORDS: int | None = None
 DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT = PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT
@@ -145,16 +146,21 @@ def safe_extract_selected_entries(
 
 def materialize_threshold_calibration_inputs(
     root: str | Path = ".",
-    attention_injection_drive_dir: str = DEFAULT_ATTENTION_INJECTION_DRIVE_DIR,
-    aligned_rescoring_drive_dir: str = DEFAULT_ALIGNED_RESCORING_DRIVE_DIR,
+    attention_injection_drive_dir: str | None = None,
+    aligned_rescoring_drive_dir: str | None = None,
 ) -> dict[str, Any]:
     """从 Google Drive 准备 threshold calibration 所需的前序结果包与内容检测记录。"""
     root_path = Path(root).resolve()
+    paper_run = build_paper_run_config(root_path)
+    resolved_attention_injection_drive_dir = (
+        attention_injection_drive_dir or paper_run.drive_dir("attention_latent_injection")
+    )
+    resolved_aligned_rescoring_drive_dir = aligned_rescoring_drive_dir or paper_run.drive_dir("aligned_rescoring")
     output_dir = root_path / DEFAULT_OUTPUT_DIR
     input_dir = output_dir / "input_packages"
     output_dir.mkdir(parents=True, exist_ok=True)
-    attention_package = latest_drive_package(attention_injection_drive_dir, ATTENTION_INJECTION_PACKAGE_PATTERN)
-    aligned_package = latest_drive_package(aligned_rescoring_drive_dir, ALIGNED_RESCORING_PACKAGE_PATTERN)
+    attention_package = latest_drive_package(resolved_attention_injection_drive_dir, ATTENTION_INJECTION_PACKAGE_PATTERN)
+    aligned_package = latest_drive_package(resolved_aligned_rescoring_drive_dir, ALIGNED_RESCORING_PACKAGE_PATTERN)
     local_attention_package = copy_package_to_input_dir(attention_package, input_dir)
     local_aligned_package = copy_package_to_input_dir(aligned_package, input_dir)
     extracted_content_entries = safe_extract_selected_entries(local_aligned_package, root_path, CONTENT_CARRIER_PREFIXES)
@@ -224,14 +230,16 @@ def write_failure_outputs(root_path: Path, error: Exception) -> dict[str, Any]:
 
 def run_default_threshold_calibration_from_drive_plan(
     root: str | Path = ".",
-    attention_injection_drive_dir: str = DEFAULT_ATTENTION_INJECTION_DRIVE_DIR,
-    aligned_rescoring_drive_dir: str = DEFAULT_ALIGNED_RESCORING_DRIVE_DIR,
-    target_fpr: float = DEFAULT_TARGET_FPR,
+    attention_injection_drive_dir: str | None = None,
+    aligned_rescoring_drive_dir: str | None = None,
+    target_fpr: float | None = None,
     max_content_records: int | str | None = DEFAULT_MAX_CONTENT_RECORDS,
     minimum_clean_negative_count: int | str | None = DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT,
 ) -> dict[str, Any]:
     """从 Google Drive 前序结果包重建几何恢复记录并写出 threshold calibration 产物。"""
     root_path = Path(root).resolve()
+    paper_run = build_paper_run_config(root_path)
+    resolved_target_fpr = paper_run.target_fpr if target_fpr is None else target_fpr
     resolved_max_content_records = parse_optional_record_limit(max_content_records)
     resolved_minimum_clean_negative_count = parse_non_negative_count(
         minimum_clean_negative_count,
@@ -251,7 +259,7 @@ def run_default_threshold_calibration_from_drive_plan(
         )
         threshold_manifest = write_threshold_calibration_outputs(
             root=root_path,
-            target_fpr=target_fpr,
+            target_fpr=resolved_target_fpr,
             aligned_rescoring_package_path=input_manifest["aligned_rescoring_input_package_path"],
             minimum_clean_negative_count=resolved_minimum_clean_negative_count,
         )
@@ -272,7 +280,7 @@ def run_default_threshold_calibration_from_drive_plan(
         "threshold_calibration_ready": threshold_ready,
         "geometric_rescue_ready": geometric_ready,
         "geometric_rescue_record_count": rescue_record_count,
-        "target_fpr": target_fpr,
+        "target_fpr": resolved_target_fpr,
         "threshold_manifest_path": f"{DEFAULT_OUTPUT_DIR}/manifest.local.json",
         "geometric_rescue_manifest_path": f"{DEFAULT_GEOMETRIC_RESCUE_DIR}/manifest.local.json",
         "threshold_report_path": f"{DEFAULT_OUTPUT_DIR}/threshold_degeneracy_report.json",
@@ -342,11 +350,12 @@ def write_archive(path: Path, entries: tuple[Path, ...], root_path: Path) -> Non
 def package_threshold_calibration_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    drive_output_dir: str | None = None,
     archive_name: str = "threshold_calibration_package.zip",
 ) -> ThresholdCalibrationArchiveRecord:
     """打包 threshold calibration 产物并镜像到 Google Drive。"""
     root_path = Path(root).resolve()
+    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir("threshold_calibration")
     source_dir = (root_path / output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
     archive_path = source_dir / archive_name
@@ -368,11 +377,11 @@ def package_threshold_calibration_outputs(
         archive_path=relative_or_absolute(archive_path, root_path),
         archive_digest="",
         archive_entry_count=len(entries) + 3,
-        drive_archive_path=str(Path(drive_output_dir).expanduser() / archive_name),
+        drive_archive_path=str(Path(resolved_drive_output_dir).expanduser() / archive_name),
         drive_archive_digest="",
         metadata={
             "construction_unit_name": "threshold_calibration",
-            "drive_output_dir": str(Path(drive_output_dir).expanduser()),
+            "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "embedded_digest_scope": "external_summary_records_final_archive_digest",
         },
@@ -401,7 +410,7 @@ def package_threshold_calibration_outputs(
 
     entries = collect_package_entries(root_path, source_dir, archive_path)
     write_archive(archive_path, entries, root_path)
-    drive_dir = Path(drive_output_dir).expanduser()
+    drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / archive_name
     shutil.copy2(archive_path, mirrored_path)

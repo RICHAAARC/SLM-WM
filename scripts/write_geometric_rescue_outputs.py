@@ -33,7 +33,7 @@ DEFAULT_OUTPUT_DIR = Path("outputs/geometric_rescue")
 DEFAULT_CONTENT_RECORDS_PATH = Path("outputs/content_carriers/content_detection_records.jsonl")
 DEFAULT_CONTENT_THRESHOLD = 0.75
 DEFAULT_RESCUE_MARGIN_LOW = -0.05
-DEFAULT_MAX_CONTENT_RECORDS = 96
+DEFAULT_MAX_CONTENT_RECORDS: int | None = None
 ATTENTION_INJECTION_PACKAGE_PATTERN = "attention_latent_injection_package_*.zip"
 
 

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
 from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -31,9 +32,9 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 
 DEFAULT_OUTPUT_DIR = "outputs/real_attack_evaluation"
 DEFAULT_SOURCE_IMAGE_DIR = "outputs/aligned_rescoring/aligned_images"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/real_attack_evaluation"
-DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring"
-DEFAULT_THRESHOLD_CALIBRATION_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/threshold_calibration"
+DEFAULT_DRIVE_OUTPUT_DIR = ""
+DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = ""
+DEFAULT_THRESHOLD_CALIBRATION_DRIVE_DIR = ""
 PRIMARY_MODEL_FAMILY = "sd35"
 PRIMARY_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 DEFAULT_DDIM_ATTACK_MODEL_ID = "runwayml/stable-diffusion-v1-5"
@@ -81,7 +82,7 @@ class RealAttackEvaluationConfig:
     guidance_scale: float
     output_dir: str = DEFAULT_OUTPUT_DIR
     source_image_dir: str = DEFAULT_SOURCE_IMAGE_DIR
-    max_source_images: int = 120
+    max_source_images: int = 600
     device_name: str = "cuda"
     torch_dtype: str = "float16"
     hf_token_env: str = "HF_TOKEN"
@@ -281,21 +282,29 @@ def safe_extract_selected_entries(package_path: Path, root_path: Path, allowed_p
 
 def materialize_drive_package_inputs(
     root: str | Path = ".",
-    aligned_rescoring_drive_dir: str = DEFAULT_ALIGNED_RESCORING_DRIVE_DIR,
-    threshold_calibration_drive_dir: str = DEFAULT_THRESHOLD_CALIBRATION_DRIVE_DIR,
+    aligned_rescoring_drive_dir: str | None = None,
+    threshold_calibration_drive_dir: str | None = None,
     require_threshold_package: bool = True,
 ) -> dict[str, Any]:
     """从 Google Drive 查找前序结果包, 并只解压正式输入所需的 outputs 文件."""
     root_path = Path(root).resolve()
+    paper_run = build_paper_run_config(root_path)
+    resolved_aligned_rescoring_drive_dir = aligned_rescoring_drive_dir or paper_run.drive_dir("aligned_rescoring")
+    resolved_threshold_calibration_drive_dir = (
+        threshold_calibration_drive_dir or paper_run.drive_dir("threshold_calibration")
+    )
     output_dir = root_path / DEFAULT_OUTPUT_DIR
     output_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "real_attack_input_package_manifest.json"
-    aligned_package = latest_drive_package(aligned_rescoring_drive_dir, ALIGNED_RESCORING_PACKAGE_PATTERN)
+    aligned_package = latest_drive_package(resolved_aligned_rescoring_drive_dir, ALIGNED_RESCORING_PACKAGE_PATTERN)
     extracted_aligned = safe_extract_selected_entries(aligned_package, root_path, ALIGNED_PACKAGE_PREFIXES)
     threshold_package = None
     extracted_threshold: tuple[str, ...] = ()
     try:
-        threshold_package = latest_drive_package(threshold_calibration_drive_dir, THRESHOLD_CALIBRATION_PACKAGE_PATTERN)
+        threshold_package = latest_drive_package(
+            resolved_threshold_calibration_drive_dir,
+            THRESHOLD_CALIBRATION_PACKAGE_PATTERN,
+        )
         extracted_threshold = safe_extract_selected_entries(threshold_package, root_path, THRESHOLD_PACKAGE_PREFIXES)
     except FileNotFoundError:
         if require_threshold_package:
@@ -1165,7 +1174,7 @@ def build_default_config() -> RealAttackEvaluationConfig:
         guidance_scale=float(os.environ.get("SLM_WM_GUIDANCE_SCALE", "5.0")),
         output_dir=os.environ.get("SLM_WM_REAL_ATTACK_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         source_image_dir=os.environ.get("SLM_WM_REAL_ATTACK_SOURCE_IMAGE_DIR", DEFAULT_SOURCE_IMAGE_DIR),
-        max_source_images=int(os.environ.get("SLM_WM_REAL_ATTACK_SOURCE_COUNT", "120")),
+        max_source_images=resolve_count_from_environment("SLM_WM_REAL_ATTACK_SOURCE_COUNT"),
         device_name=os.environ.get("SLM_WM_DEVICE", "cuda"),
         torch_dtype=os.environ.get("SLM_WM_TORCH_DTYPE", "float16"),
         detection_threshold=float(os.environ.get("SLM_WM_REAL_ATTACK_DETECTION_THRESHOLD", "0.50")),
@@ -1183,20 +1192,25 @@ def run_default_real_attack_evaluation_plan(root: str | Path = ".") -> dict[str,
 
 def run_default_real_attack_evaluation_from_drive_plan(
     root: str | Path = ".",
-    aligned_rescoring_drive_dir: str = DEFAULT_ALIGNED_RESCORING_DRIVE_DIR,
-    threshold_calibration_drive_dir: str = DEFAULT_THRESHOLD_CALIBRATION_DRIVE_DIR,
+    aligned_rescoring_drive_dir: str | None = None,
+    threshold_calibration_drive_dir: str | None = None,
     require_threshold_package: bool = True,
 ) -> dict[str, Any]:
     """从 Google Drive 前序包准备输入后运行真实攻击闭环, 失败时仍写出诊断产物."""
     root_path = Path(root).resolve()
+    paper_run = build_paper_run_config(root_path)
+    resolved_aligned_rescoring_drive_dir = aligned_rescoring_drive_dir or paper_run.drive_dir("aligned_rescoring")
+    resolved_threshold_calibration_drive_dir = (
+        threshold_calibration_drive_dir or paper_run.drive_dir("threshold_calibration")
+    )
     config = build_default_config()
     output_dir = (root_path / config.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
         materialize_drive_package_inputs(
             root=root_path,
-            aligned_rescoring_drive_dir=aligned_rescoring_drive_dir,
-            threshold_calibration_drive_dir=threshold_calibration_drive_dir,
+            aligned_rescoring_drive_dir=resolved_aligned_rescoring_drive_dir,
+            threshold_calibration_drive_dir=resolved_threshold_calibration_drive_dir,
             require_threshold_package=require_threshold_package,
         )
     except Exception as error:
@@ -1225,11 +1239,12 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
 def package_real_attack_evaluation_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    drive_output_dir: str | None = None,
     archive_name: str = "real_attack_evaluation_package.zip",
 ) -> RealAttackArchiveRecord:
     """打包真实攻击闭环产物并镜像到 Google Drive。"""
     root_path = Path(root).resolve()
+    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir("real_attack_evaluation")
     source_dir = (root_path / output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
     archive_path = source_dir / archive_name
@@ -1246,7 +1261,7 @@ def package_real_attack_evaluation_outputs(
         "entry_count": len(entries),
     }
     package_manifest_path.write_text(stable_json_text(package_manifest), encoding="utf-8")
-    drive_dir = Path(drive_output_dir).expanduser()
+    drive_dir = Path(resolved_drive_output_dir).expanduser()
     preliminary_record = RealAttackArchiveRecord(
         archive_path=archive_path.relative_to(root_path).as_posix(),
         archive_digest="",

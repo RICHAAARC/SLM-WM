@@ -112,7 +112,7 @@ def test_t2smark_result_reuse_requires_configured_sample_count(tmp_path: Path) -
 
 @pytest.mark.quick
 def test_shared_prompt_inputs_default_to_pilot_paper_samples(tmp_path: Path) -> None:
-    """T2SMark 与主表 adapter 应共享 pilot_paper 样本 prompt 计划。"""
+    """T2SMark 与主表 adapter 应共享 pilot_paper 规模 prompt 计划。"""
 
     config = ExternalBaselineGpuSmokeConfig(require_cuda=False)
     paths = output_paths(tmp_path, config)
@@ -122,8 +122,8 @@ def test_shared_prompt_inputs_default_to_pilot_paper_samples(tmp_path: Path) -> 
 
     t2smark_payload = json.loads(t2smark_prompt_path.read_text(encoding="utf-8"))
     primary_rows = json.loads(primary_prompt_path.read_text(encoding="utf-8"))
-    assert len(t2smark_payload["annotations"]) == 120
-    assert len(primary_rows) == 120
+    assert len(t2smark_payload["annotations"]) == 600
+    assert len(primary_rows) == 600
     assert primary_rows[0]["prompt_text"] == t2smark_payload["annotations"][0]["caption"]
     assert primary_rows[0]["prompt_set"] == "pilot_paper"
 

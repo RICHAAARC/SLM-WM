@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
 import math
@@ -15,6 +15,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
+from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
 from paper_workflow.colab_utils.minimal_latent_injection import (
     compute_image_quality_metrics,
     import_runtime_dependencies,
@@ -34,8 +35,8 @@ from scripts.write_semantic_subspace_outputs import write_semantic_subspace_outp
 
 DEFAULT_OUTPUT_DIR = "outputs/attention_latent_injection"
 DEFAULT_METHOD_OUTPUT_DIR = "outputs/attention_latent_update"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_latent_injection"
-DEFAULT_GEOMETRY_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry"
+DEFAULT_DRIVE_OUTPUT_DIR = ""
+DEFAULT_GEOMETRY_DRIVE_DIR = ""
 PRIMARY_MODEL_FAMILY = "sd35"
 PRIMARY_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 GEOMETRY_PACKAGE_PATTERN = "attention_geometry_package_*.zip"
@@ -58,9 +59,9 @@ class AttentionLatentInjectionConfig:
     injection_step_indices: tuple[int, ...]
     output_dir: str = DEFAULT_OUTPUT_DIR
     method_output_dir: str = DEFAULT_METHOD_OUTPUT_DIR
-    geometry_drive_dir: str = DEFAULT_GEOMETRY_DRIVE_DIR
+    geometry_drive_dir: str = field(default_factory=lambda: build_paper_run_config(".").drive_dir("attention_geometry"))
     attention_geometry_package_path: str = ""
-    max_subspace_records: int = 16
+    max_subspace_records: int = 600
     attention_carrier_index: int = 0
     device_name: str = "cuda"
     torch_dtype: str = "float16"
@@ -580,6 +581,7 @@ def write_attention_latent_injection_outputs(
 
 def build_default_config() -> AttentionLatentInjectionConfig:
     """根据环境变量构造默认真实 attention latent injection 配置。"""
+    paper_run = build_paper_run_config(".")
     return AttentionLatentInjectionConfig(
         model_family=PRIMARY_MODEL_FAMILY,
         model_id=os.environ.get("SLM_WM_SD35_MODEL_ID", PRIMARY_MODEL_ID),
@@ -598,9 +600,15 @@ def build_default_config() -> AttentionLatentInjectionConfig:
         ),
         output_dir=os.environ.get("SLM_WM_ATTENTION_INJECTION_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         method_output_dir=os.environ.get("SLM_WM_ATTENTION_METHOD_OUTPUT_DIR", DEFAULT_METHOD_OUTPUT_DIR),
-        geometry_drive_dir=os.environ.get("SLM_WM_ATTENTION_GEOMETRY_DRIVE_DIR", DEFAULT_GEOMETRY_DRIVE_DIR),
+        geometry_drive_dir=os.environ.get(
+            "SLM_WM_ATTENTION_GEOMETRY_DRIVE_DIR",
+            paper_run.drive_dir("attention_geometry"),
+        ),
         attention_geometry_package_path=os.environ.get("SLM_WM_ATTENTION_GEOMETRY_PACKAGE_PATH", ""),
-        max_subspace_records=int(os.environ.get("SLM_WM_ATTENTION_SUBSPACE_RECORDS", "128")),
+        max_subspace_records=resolve_count_from_environment(
+            "SLM_WM_ATTENTION_SUBSPACE_RECORDS",
+            default_value=paper_run.sample_count,
+        ),
         attention_carrier_index=int(os.environ.get("SLM_WM_ATTENTION_CARRIER_INDEX", "0")),
     )
 
@@ -630,11 +638,14 @@ def package_attention_latent_injection_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
     method_output_dir: str = DEFAULT_METHOD_OUTPUT_DIR,
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    drive_output_dir: str | None = None,
     archive_name: str = "attention_latent_injection_package.zip",
 ) -> AttentionLatentInjectionArchiveRecord:
     """打包真实 attention latent injection 产物并镜像到 Google Drive。"""
     root_path = Path(root).resolve()
+    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir(
+        "attention_latent_injection"
+    )
     source_dir = (root_path / output_dir).resolve()
     method_dir = (root_path / method_output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -653,7 +664,7 @@ def package_attention_latent_injection_outputs(
     with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
         for entry in entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
-    drive_dir = Path(drive_output_dir).expanduser()
+    drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / archive_name
     shutil.copy2(archive_path, mirrored_path)

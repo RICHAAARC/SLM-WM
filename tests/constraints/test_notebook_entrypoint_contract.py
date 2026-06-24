@@ -158,10 +158,12 @@ def test_colab_notebook_delegates_attention_geometry_logic_to_helper() -> None:
     assert "paper_workflow.colab_utils.attention_geometry_capture" in joined_source
     assert "run_default_attention_geometry_plan" in joined_source
     assert "package_attention_geometry_outputs" in joined_source
-    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "paper_run_name = os.environ.setdefault" in joined_source
+    assert "SLM_WM_PAPER_RUN_SAMPLE_COUNT', 'all'" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry" in joined_source
+    assert "f'{drive_result_root}/attention_geometry'" in joined_source
     assert "attention_geometry_ready" in joined_source
     assert "SLM_WM_ATTENTION_CAPTURE_COUNT', '16'" in joined_source
     assert "SLM_WM_ATTENTION_TOKEN_COUNT', '32'" in joined_source
@@ -187,12 +189,12 @@ def test_colab_notebook_delegates_attention_latent_injection_logic_to_helper() -
     assert "paper_workflow.colab_utils.attention_latent_injection" in joined_source
     assert "run_default_attention_latent_injection_plan" in joined_source
     assert "package_attention_latent_injection_outputs" in joined_source
-    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_latent_injection" in joined_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry" in joined_source
-    assert "SLM_WM_ATTENTION_SUBSPACE_RECORDS', '128'" in joined_source
+    assert "f'{drive_result_root}/attention_latent_injection'" in joined_source
+    assert "f'{drive_result_root}/attention_geometry'" in joined_source
+    assert "SLM_WM_ATTENTION_SUBSPACE_RECORDS', paper_run_sample_count" in joined_source
     assert "SLM_WM_ATTENTION_RUNTIME_STRENGTH', '0.025'" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
@@ -216,14 +218,14 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
     assert "paper_workflow.colab_utils.aligned_rescoring" in joined_source
     assert "run_default_aligned_rescoring_plan" in joined_source
     assert "package_aligned_rescoring_outputs" in joined_source
-    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring" in joined_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry" in joined_source
+    assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
+    assert "f'{drive_result_root}/attention_geometry'" in joined_source
     assert "real_aligned_rescore_count" in joined_source
-    assert "SLM_WM_ALIGNED_RESCORING_SUBSPACE_RECORDS', '128'" in joined_source
-    assert "SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT', '120'" in joined_source
+    assert "SLM_WM_ALIGNED_RESCORING_SUBSPACE_RECORDS', paper_run_sample_count" in joined_source
+    assert "SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT', paper_run_sample_count" in joined_source
     assert "SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
     assert "SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
     assert "openai/clip-vit-base-patch32" in joined_source
@@ -255,18 +257,18 @@ def test_colab_notebook_delegates_threshold_calibration_logic_to_helper() -> Non
     assert "paper_workflow.colab_utils.threshold_calibration" in joined_source
     assert "run_default_threshold_calibration_from_drive_plan" in joined_source
     assert "package_threshold_calibration_outputs" in joined_source
-    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/threshold_calibration" in joined_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_latent_injection" in joined_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring" in joined_source
+    assert "f'{drive_result_root}/threshold_calibration'" in joined_source
+    assert "f'{drive_result_root}/attention_latent_injection'" in joined_source
+    assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
     assert "attention_latent_injection_package_*.zip" in joined_source
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "threshold_calibration_ready" in joined_source
     assert "SLM_WM_THRESHOLD_TARGET_FPR', '0.01'" in joined_source
     assert "SLM_WM_THRESHOLD_MAX_CONTENT_RECORDS', 'all'" in joined_source
-    assert "SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT', '100'" in joined_source
+    assert "SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT', paper_run_minimum_clean_negative_count" in joined_source
     assert "max_content_records=os.environ['SLM_WM_THRESHOLD_MAX_CONTENT_RECORDS']" in joined_source
     assert "minimum_clean_negative_count=os.environ['SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT']" in joined_source
     assert "geometric_rescue_ready" in joined_source
@@ -292,18 +294,18 @@ def test_colab_notebook_delegates_real_attack_evaluation_logic_to_helper() -> No
     assert "paper_workflow.colab_utils.real_attack_evaluation" in joined_source
     assert "run_default_real_attack_evaluation_from_drive_plan" in joined_source
     assert "package_real_attack_evaluation_outputs" in joined_source
-    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/real_attack_evaluation" in joined_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring" in joined_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/threshold_calibration" in joined_source
+    assert "f'{drive_result_root}/real_attack_evaluation'" in joined_source
+    assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
+    assert "f'{drive_result_root}/threshold_calibration'" in joined_source
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "real_attacked_image_closed_loop_ready" in joined_source
     assert "regeneration_attack_gpu_validation_ready" in joined_source
     assert "attack_detection_rerun_ready" in joined_source
     assert "formal_attack_detection_ready" in joined_source
-    assert "SLM_WM_REAL_ATTACK_SOURCE_COUNT', '120'" in joined_source
+    assert "SLM_WM_REAL_ATTACK_SOURCE_COUNT', paper_run_sample_count" in joined_source
     assert "runwayml/stable-diffusion-v1-5" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
@@ -327,10 +329,10 @@ def test_colab_notebook_delegates_external_baseline_gpu_smoke_logic_to_helper() 
     assert "paper_workflow.colab_utils.external_baseline_gpu_smoke" in joined_source
     assert "run_default_external_baseline_gpu_smoke_plan" in joined_source
     assert "package_external_baseline_gpu_smoke_outputs" in joined_source
-    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/external_baseline_gpu_smoke" in joined_source
+    assert "f'{drive_result_root}/external_baseline_gpu_smoke'" in joined_source
     assert "external_baseline/source_registry.json" in joined_source
     assert "stabilityai/stable-diffusion-3.5-medium" in joined_source
     assert "external_baseline_gpu_smoke_ready" in joined_source
@@ -338,12 +340,12 @@ def test_colab_notebook_delegates_external_baseline_gpu_smoke_logic_to_helper() 
     assert "adapter_observation_count" in joined_source
     assert "primary_baseline_adapter_ready" in joined_source
     assert "primary_baseline_observation_count" in joined_source
-    assert "SLM_WM_T2SMARK_ROBUST_TEST_NUM', '120'" in joined_source
-    assert "SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES', '120'" in joined_source
+    assert "SLM_WM_T2SMARK_ROBUST_TEST_NUM', paper_run_sample_count" in joined_source
+    assert "SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES', paper_run_sample_count" in joined_source
     assert "5 个数字样本条目" not in joined_source
     assert "新的 5 样本真实 GPU 结果" not in joined_source
     assert "默认共享样本数为 5" not in joined_source
-    assert "expected_sample_count = int(os.environ['SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES'])" in joined_source
+    assert "expected_sample_count = paper_run_expected_sample_count" in joined_source
     assert "tree_ring" in joined_source
     assert "gaussian_shading" in joined_source
     assert "shallow_diffuse" in joined_source
@@ -369,17 +371,17 @@ def test_colab_notebook_delegates_dataset_level_quality_logic_to_helper() -> Non
     assert "paper_workflow.colab_utils.dataset_level_quality" in joined_source
     assert "run_default_dataset_level_quality_from_drive_plan" in joined_source
     assert "package_dataset_level_quality_outputs" in joined_source
-    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/dataset_level_quality" in joined_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/real_attack_evaluation" in joined_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring" in joined_source
+    assert "f'{drive_result_root}/dataset_level_quality'" in joined_source
+    assert "f'{drive_result_root}/real_attack_evaluation'" in joined_source
+    assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
     assert "real_attack_evaluation_package_*.zip" in joined_source
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "formal_feature_backend_ready" in joined_source
     assert "formal_fid_kid_ready" in joined_source
-    assert "SLM_WM_FORMAL_MIN_SAMPLE_COUNT', '100'" in joined_source
+    assert "SLM_WM_FORMAL_MIN_SAMPLE_COUNT', paper_run_dataset_minimum_count" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source
@@ -391,28 +393,28 @@ def test_colab_notebook_delegates_dataset_level_quality_logic_to_helper() -> Non
 
 
 @pytest.mark.constraint
-def test_official_baseline_notebooks_default_to_pilot_paper_outputs() -> None:
-    """四个官方 baseline 复现入口应默认写入 pilot_paper 结果目录并使用 pilot_paper 规模。"""
+def test_official_baseline_notebooks_use_paper_run_configuration() -> None:
+    """四个官方 baseline 复现入口应使用统一论文运行配置派生目录和样本规模。"""
 
     expectations = {
         T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH: (
-            "/content/drive/MyDrive/SLM/pilot_paper_results/t2smark_full_main_reproduction",
-            "SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT', '120'",
+            "f'{drive_result_root}/t2smark_full_main_reproduction'",
+            "SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT', paper_run_sample_count",
             "SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR', '0.01'",
         ),
         TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "/content/drive/MyDrive/SLM/pilot_paper_results/tree_ring_official_reference",
-            "SLM_WM_TREE_RING_OFFICIAL_SAMPLE_COUNT', '120'",
+            "f'{drive_result_root}/tree_ring_official_reference'",
+            "SLM_WM_TREE_RING_OFFICIAL_SAMPLE_COUNT', paper_run_sample_count",
             "configs/paper_main_pilot_paper_prompts.txt",
         ),
         GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "/content/drive/MyDrive/SLM/pilot_paper_results/gaussian_shading_official_reference",
-            "SLM_WM_GAUSSIAN_SHADING_OFFICIAL_SAMPLE_COUNT', '120'",
+            "f'{drive_result_root}/gaussian_shading_official_reference'",
+            "SLM_WM_GAUSSIAN_SHADING_OFFICIAL_SAMPLE_COUNT', paper_run_sample_count",
             "configs/paper_main_pilot_paper_prompts.txt",
         ),
         SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "/content/drive/MyDrive/SLM/pilot_paper_results/shallow_diffuse_official_reference",
-            "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT', '120'",
+            "f'{drive_result_root}/shallow_diffuse_official_reference'",
+            "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT', paper_run_sample_count",
             "configs/paper_main_pilot_paper_prompts.txt",
         ),
     }
@@ -423,21 +425,20 @@ def test_official_baseline_notebooks_default_to_pilot_paper_outputs() -> None:
         first_code_source = "".join(first_code_cell.get("source", []))
 
         assert "drive.mount('/content/drive')" in first_code_source
-        assert "pilot_paper_fixed_fpr_0_01" in joined_source
-        assert "SLM_WM_PROMPT_SET', 'pilot_paper'" in joined_source
+        assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+        assert "SLM_WM_PROMPT_SET', paper_run_name" in joined_source
         assert "默认样本数为 5" not in joined_source
         assert "sample_count'] == 5" not in joined_source
-        assert "configs/paper_main_full_paper_prompts.txt" not in joined_source
         for required_text in required_texts:
             assert required_text in joined_source
 
     official_sample_assertions = {
-        TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: "expected_sample_count = int(os.environ['SLM_WM_TREE_RING_OFFICIAL_SAMPLE_COUNT'])",
+        TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: "expected_sample_count = paper_run_expected_sample_count",
         GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "expected_sample_count = int(os.environ['SLM_WM_GAUSSIAN_SHADING_OFFICIAL_SAMPLE_COUNT'])"
+            "expected_sample_count = paper_run_expected_sample_count"
         ),
         SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "expected_sample_count = int(os.environ['SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT'])"
+            "expected_sample_count = paper_run_expected_sample_count"
         ),
     }
     for notebook_path, required_assertion in official_sample_assertions.items():
@@ -456,10 +457,10 @@ def test_pilot_paper_result_closure_notebook_delegates_to_repository_commands() 
     first_code_source = "".join(first_code_cell.get("source", []))
 
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "pilot_paper_fixed_fpr_0_01" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results" in joined_source
-    assert "/content/drive/MyDrive/SLM/pilot_paper_results/complete_result_package" in joined_source
+    assert "drive_result_root" in joined_source
+    assert "f'{drive_result_root}/complete_result_package'" in joined_source
     assert "scripts/write_pilot_paper_result_records.py" in joined_source
     assert "--materialize-only" in joined_source
     assert "scripts/write_attack_matrix_outputs.py" in joined_source

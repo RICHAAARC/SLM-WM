@@ -16,6 +16,7 @@ from typing import Any, Callable
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from experiments.protocol import FORMAL_FEATURE_BACKEND
+from experiments.protocol.paper_run_config import build_paper_run_config
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
@@ -27,9 +28,9 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 from scripts.write_dataset_level_quality_outputs import write_dataset_level_quality_outputs
 
 DEFAULT_OUTPUT_DIR = "outputs/dataset_level_quality"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/dataset_level_quality"
-DEFAULT_REAL_ATTACK_EVALUATION_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/real_attack_evaluation"
-DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring"
+DEFAULT_DRIVE_OUTPUT_DIR = ""
+DEFAULT_REAL_ATTACK_EVALUATION_DRIVE_DIR = ""
+DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = ""
 REAL_ATTACK_EVALUATION_PACKAGE_PATTERN = "real_attack_evaluation_package_*.zip"
 ALIGNED_RESCORING_PACKAGE_PATTERN = "aligned_rescoring_package_*.zip"
 DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 100
@@ -136,18 +137,29 @@ def safe_extract_selected_entries(
 
 def materialize_dataset_level_quality_inputs(
     root: str | Path = ".",
-    real_attack_evaluation_drive_dir: str = DEFAULT_REAL_ATTACK_EVALUATION_DRIVE_DIR,
-    aligned_rescoring_drive_dir: str = DEFAULT_ALIGNED_RESCORING_DRIVE_DIR,
+    real_attack_evaluation_drive_dir: str | None = None,
+    aligned_rescoring_drive_dir: str | None = None,
 ) -> dict[str, Any]:
     """从 Google Drive 准备数据集级质量协议所需的前序包与攻击 registry."""
 
     root_path = Path(root).resolve()
+    paper_run = build_paper_run_config(root_path)
+    resolved_real_attack_evaluation_drive_dir = (
+        real_attack_evaluation_drive_dir or paper_run.drive_dir("real_attack_evaluation")
+    )
+    resolved_aligned_rescoring_drive_dir = aligned_rescoring_drive_dir or paper_run.drive_dir("aligned_rescoring")
     output_dir = root_path / DEFAULT_OUTPUT_DIR
     input_dir = output_dir / "input_packages"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    real_attack_package = latest_drive_package(real_attack_evaluation_drive_dir, REAL_ATTACK_EVALUATION_PACKAGE_PATTERN)
-    aligned_rescoring_package = latest_drive_package(aligned_rescoring_drive_dir, ALIGNED_RESCORING_PACKAGE_PATTERN)
+    real_attack_package = latest_drive_package(
+        resolved_real_attack_evaluation_drive_dir,
+        REAL_ATTACK_EVALUATION_PACKAGE_PATTERN,
+    )
+    aligned_rescoring_package = latest_drive_package(
+        resolved_aligned_rescoring_drive_dir,
+        ALIGNED_RESCORING_PACKAGE_PATTERN,
+    )
     local_real_attack_package = copy_package_to_input_dir(real_attack_package, input_dir)
     local_aligned_rescoring_package = copy_package_to_input_dir(aligned_rescoring_package, input_dir)
     extracted_entries = safe_extract_selected_entries(
@@ -345,9 +357,9 @@ def write_failure_outputs(root_path: Path, error: Exception) -> dict[str, Any]:
 
 def run_default_dataset_level_quality_from_drive_plan(
     root: str | Path = ".",
-    real_attack_evaluation_drive_dir: str = DEFAULT_REAL_ATTACK_EVALUATION_DRIVE_DIR,
-    aligned_rescoring_drive_dir: str = DEFAULT_ALIGNED_RESCORING_DRIVE_DIR,
-    formal_min_sample_count: int = DEFAULT_FORMAL_MIN_SAMPLE_COUNT,
+    real_attack_evaluation_drive_dir: str | None = None,
+    aligned_rescoring_drive_dir: str | None = None,
+    formal_min_sample_count: int | None = None,
     feature_extractor: FeatureExtractor | None = None,
     environment_report: dict[str, Any] | None = None,
     device_name: str = "cuda",
@@ -355,6 +367,12 @@ def run_default_dataset_level_quality_from_drive_plan(
     """从 Drive 前序包生成数据集级质量正式特征记录并重建质量产物."""
 
     root_path = Path(root).resolve()
+    paper_run = build_paper_run_config(root_path)
+    resolved_formal_min_sample_count = (
+        paper_run.dataset_level_quality_minimum_count
+        if formal_min_sample_count is None
+        else formal_min_sample_count
+    )
     output_dir = root_path / DEFAULT_OUTPUT_DIR
     try:
         input_manifest = materialize_dataset_level_quality_inputs(
@@ -377,7 +395,7 @@ def run_default_dataset_level_quality_from_drive_plan(
             root=root_path,
             input_package_paths=input_packages,
             formal_feature_records_path=feature_payload["formal_feature_records_path"],
-            formal_min_sample_count=formal_min_sample_count,
+            formal_min_sample_count=resolved_formal_min_sample_count,
         )
     except Exception as error:  # pragma: no cover - 该路径依赖 Drive、GPU 或远程权重状态。
         return write_failure_outputs(root_path, error)
@@ -394,7 +412,7 @@ def run_default_dataset_level_quality_from_drive_plan(
         "formal_feature_backend_ready": import_report["formal_feature_backend_ready"],
         "formal_sample_scale_ready": import_report["formal_sample_scale_ready"],
         "formal_fid_kid_ready": summary["formal_fid_kid_ready"],
-        "formal_min_sample_count": formal_min_sample_count,
+        "formal_min_sample_count": resolved_formal_min_sample_count,
         "input_feature_record_count": import_report["input_feature_record_count"],
         "accepted_feature_pair_count": import_report["accepted_feature_pair_count"],
         "sample_pair_count": summary["sample_pair_count"],
@@ -426,7 +444,7 @@ def run_default_dataset_level_quality_from_drive_plan(
             relative_or_absolute(colab_manifest_path, root_path),
         ),
         config={
-            "formal_min_sample_count": formal_min_sample_count,
+            "formal_min_sample_count": resolved_formal_min_sample_count,
             "input_feature_record_count": result["input_feature_record_count"],
             "accepted_feature_pair_count": result["accepted_feature_pair_count"],
             "formal_fid_kid_ready": result["formal_fid_kid_ready"],
@@ -488,12 +506,13 @@ def write_archive(path: Path, entries: tuple[Path, ...], root_path: Path) -> Non
 def package_dataset_level_quality_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    drive_output_dir: str | None = None,
     archive_name: str = "dataset_level_quality_package.zip",
 ) -> DatasetLevelQualityArchiveRecord:
     """打包数据集级质量产物并镜像到 Google Drive."""
 
     root_path = Path(root).resolve()
+    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir("dataset_level_quality")
     source_dir = (root_path / output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
     archive_path = source_dir / archive_name
@@ -516,10 +535,10 @@ def package_dataset_level_quality_outputs(
     embedded_summary = {
         "archive_path": relative_or_absolute(archive_path, root_path),
         "archive_entry_count": len(entries) + 3,
-        "drive_archive_path": str(Path(drive_output_dir).expanduser() / archive_name),
+        "drive_archive_path": str(Path(resolved_drive_output_dir).expanduser() / archive_name),
         "metadata": {
             "construction_unit_name": "dataset_level_quality_evidence",
-            "drive_output_dir": str(Path(drive_output_dir).expanduser()),
+            "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "archive_payload_digest": entry_payload_digest,
             "archive_digest_scope": "external_sidecar_after_archive_write",
@@ -540,7 +559,7 @@ def package_dataset_level_quality_outputs(
         config={
             "archive_name": archive_name,
             "archive_entry_count": len(entries),
-            "drive_output_dir": str(Path(drive_output_dir).expanduser()),
+            "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="运行 paper_workflow/dataset_level_quality_run.ipynb",
@@ -550,7 +569,7 @@ def package_dataset_level_quality_outputs(
 
     entries = collect_package_entries(root_path, source_dir, archive_path)
     write_archive(archive_path, entries, root_path)
-    drive_dir = Path(drive_output_dir).expanduser()
+    drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / archive_name
     shutil.copy2(archive_path, mirrored_path)

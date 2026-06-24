@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
 import os
@@ -13,11 +13,9 @@ import sys
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    PILOT_PAPER_PROMPT_FILE,
-    PILOT_PAPER_PROMPT_SET,
-)
-from experiments.protocol.prompts import build_prompt_record, normalize_prompt_text
+from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
+from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
+from experiments.protocol.splits import apply_split_assignments
 from main.analysis.artifact_manifest import build_artifact_manifest
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
@@ -26,16 +24,16 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 )
 
 DEFAULT_OUTPUT_DIR = "outputs/external_baseline_gpu_smoke"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/external_baseline_gpu_smoke"
+DEFAULT_DRIVE_OUTPUT_DIR = ""
 DEFAULT_PRIOR_DRIVE_DIR = DEFAULT_DRIVE_OUTPUT_DIR
 DEFAULT_T2SMARK_RUN_NAME = "t2smark_sd35_medium_gpu_smoke"
 DEFAULT_T2SMARK_SOURCE_ENTRY = "external_baseline/primary/t2smark/source/run_sd35.py"
 DEFAULT_T2SMARK_INVERSION_ENTRY = "external_baseline/primary/t2smark/source/src/inversion/inverse_diffusion3.py"
 DEFAULT_SOURCE_REGISTRY_PATH = "external_baseline/source_registry.json"
 DEFAULT_T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
-DEFAULT_PROMPT_FILE = PILOT_PAPER_PROMPT_FILE
+DEFAULT_PROMPT_FILE = "configs/paper_main_pilot_paper_prompts.txt"
 DEFAULT_PACKAGE_PATTERN = "external_baseline_gpu_smoke_package_*.zip"
-DEFAULT_SHARED_SAMPLE_COUNT = 120
+DEFAULT_SHARED_SAMPLE_COUNT = 600
 DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES = (
     "jpeg_compression,gaussian_noise,gaussian_blur,rotation,resize,crop,crop_resize,composite_geometric_attacks"
 )
@@ -85,8 +83,13 @@ class ExternalBaselineGpuSmokeConfig:
     """描述一次外部 baseline 真实 GPU smoke 所需的最小配置。"""
 
     output_dir: str = DEFAULT_OUTPUT_DIR
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR
-    prior_drive_dir: str = DEFAULT_PRIOR_DRIVE_DIR
+    drive_output_dir: str = field(
+        default_factory=lambda: build_paper_run_config(".").drive_dir("external_baseline_gpu_smoke")
+    )
+    prior_drive_dir: str = field(
+        default_factory=lambda: build_paper_run_config(".").drive_dir("external_baseline_gpu_smoke")
+    )
+    prompt_set: str = "pilot_paper"
     prompt_file: str = DEFAULT_PROMPT_FILE
     t2smark_run_name: str = DEFAULT_T2SMARK_RUN_NAME
     model_id: str = DEFAULT_T2SMARK_MODEL_ID
@@ -283,8 +286,8 @@ def should_run_t2smark_official(config: ExternalBaselineGpuSmokeConfig, results_
     return True, "results_missing"
 
 
-def read_pilot_paper_prompt_rows(root_path: Path, config: ExternalBaselineGpuSmokeConfig, prompt_count: int) -> list[dict[str, Any]]:
-    """读取 pilot_paper prompt split, 并截取本次 baseline 共享运行需要的记录。
+def read_paper_prompt_rows(root_path: Path, config: ExternalBaselineGpuSmokeConfig, prompt_count: int) -> list[dict[str, Any]]:
+    """读取论文运行 prompt split, 并截取本次 baseline 共享运行需要的记录。
 
     该函数属于配置加载层: baseline Notebook 与方法主流程必须使用同一个 prompt 文件,
     因此这里集中解析 prompt 文本并生成稳定 prompt id, 避免各个 baseline adapter 私自使用临时 prompt。
@@ -299,27 +302,28 @@ def read_pilot_paper_prompt_rows(root_path: Path, config: ExternalBaselineGpuSmo
                 prompt_texts.append(text)
     if not prompt_texts:
         prompt_texts = list(SHARED_PROMPT_TEXTS)
-    rows: list[dict[str, Any]] = []
-    for index in range(max(1, int(prompt_count))):
-        prompt_text = prompt_texts[index % len(prompt_texts)]
-        record = build_prompt_record(PILOT_PAPER_PROMPT_SET, index, prompt_text, split="test")
-        rows.append(
-            {
-                "prompt_id": record.prompt_id,
-                "prompt_index": record.prompt_index,
-                "prompt_set": record.prompt_set,
-                "split": record.split,
-                "prompt_text": record.prompt_text,
-                "prompt_digest": record.prompt_digest,
-            }
-        )
-    return rows
+    records = apply_split_assignments(build_prompt_records(config.prompt_set, tuple(prompt_texts)))
+    if len(records) < int(prompt_count):
+        repeated_records = tuple(records[index % len(records)] for index in range(int(prompt_count)))
+    else:
+        repeated_records = records[: int(prompt_count)]
+    return [
+        {
+            "prompt_id": record.prompt_id,
+            "prompt_index": record.prompt_index,
+            "prompt_set": record.prompt_set,
+            "split": record.split,
+            "prompt_text": record.prompt_text,
+            "prompt_digest": record.prompt_digest,
+        }
+        for record in repeated_records
+    ]
 
 
 def write_t2smark_prompt_input(root_path: Path, paths: dict[str, Path], config: ExternalBaselineGpuSmokeConfig) -> Path:
-    """写出官方 T2SMark 入口可直接读取的 pilot_paper prompt 文件。"""
+    """写出官方 T2SMark 入口可直接读取的 prompt 文件。"""
 
-    prompt_rows = read_pilot_paper_prompt_rows(root_path, config, int(config.robust_test_num))
+    prompt_rows = read_paper_prompt_rows(root_path, config, int(config.robust_test_num))
     prompt_payload = {
         "annotations": [
             {
@@ -335,9 +339,9 @@ def write_t2smark_prompt_input(root_path: Path, paths: dict[str, Path], config: 
 
 
 def write_primary_baseline_prompt_plan(root_path: Path, paths: dict[str, Path], config: ExternalBaselineGpuSmokeConfig) -> Path:
-    """写出三类扩散 adapter 与 T2SMark 共用的 pilot_paper prompt 计划。"""
+    """写出三类扩散 adapter 与 T2SMark 共用的 prompt 计划。"""
 
-    prompt_rows = read_pilot_paper_prompt_rows(root_path, config, int(config.primary_baseline_max_samples))
+    prompt_rows = read_paper_prompt_rows(root_path, config, int(config.primary_baseline_max_samples))
     write_json(paths["primary_prompt_plan"], prompt_rows)
     return paths["primary_prompt_plan"]
 
@@ -546,7 +550,7 @@ def build_current_t2smark_image_pairs(
     """按当前官方图像目录重建 T2SMark adapter 所需的 image_pairs 输入。"""
 
     image_dir = paths["official_images"]
-    prompt_rows = read_pilot_paper_prompt_rows(root_path, config, int(config.robust_test_num))
+    prompt_rows = read_paper_prompt_rows(root_path, config, int(config.robust_test_num))
     rows: list[dict[str, Any]] = []
     for index in range(config.robust_test_num):
         image_path = image_dir / f"{index:05d}.png"
@@ -908,20 +912,34 @@ def write_external_baseline_gpu_smoke_outputs(
 def build_default_config() -> ExternalBaselineGpuSmokeConfig:
     """从环境变量构造默认 Colab 运行配置。"""
 
+    paper_run = build_paper_run_config(".")
     return ExternalBaselineGpuSmokeConfig(
         output_dir=os.environ.get("SLM_WM_EXTERNAL_BASELINE_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
-        drive_output_dir=os.environ.get("SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR", DEFAULT_DRIVE_OUTPUT_DIR),
-        prior_drive_dir=os.environ.get("SLM_WM_EXTERNAL_BASELINE_PRIOR_DRIVE_DIR", DEFAULT_PRIOR_DRIVE_DIR),
-        prompt_file=os.environ.get("SLM_WM_PROMPT_FILE", DEFAULT_PROMPT_FILE),
+        drive_output_dir=os.environ.get(
+            "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
+            paper_run.drive_dir("external_baseline_gpu_smoke"),
+        ),
+        prior_drive_dir=os.environ.get(
+            "SLM_WM_EXTERNAL_BASELINE_PRIOR_DRIVE_DIR",
+            paper_run.drive_dir("external_baseline_gpu_smoke"),
+        ),
+        prompt_set=os.environ.get("SLM_WM_PROMPT_SET", paper_run.prompt_set),
+        prompt_file=os.environ.get("SLM_WM_PROMPT_FILE", paper_run.prompt_file),
         t2smark_run_name=os.environ.get("SLM_WM_T2SMARK_RUN_NAME", DEFAULT_T2SMARK_RUN_NAME),
         model_id=os.environ.get("SLM_WM_T2SMARK_MODEL_ID", DEFAULT_T2SMARK_MODEL_ID),
         seed=int(os.environ.get("SLM_WM_EXTERNAL_BASELINE_SEED", "20260621")),
-        robust_test_num=int(os.environ.get("SLM_WM_T2SMARK_ROBUST_TEST_NUM", str(DEFAULT_SHARED_SAMPLE_COUNT))),
+        robust_test_num=resolve_count_from_environment(
+            "SLM_WM_T2SMARK_ROBUST_TEST_NUM",
+            default_value=paper_run.sample_count,
+        ),
         clip_test_num=int(os.environ.get("SLM_WM_T2SMARK_CLIP_TEST_NUM", "0")),
         num_inference_steps=int(os.environ.get("SLM_WM_T2SMARK_NUM_INFERENCE_STEPS", "8")),
         num_inversion_steps=int(os.environ.get("SLM_WM_T2SMARK_NUM_INVERSION_STEPS", "3")),
         guidance_scale=float(os.environ.get("SLM_WM_T2SMARK_GUIDANCE_SCALE", "4.0")),
-        primary_baseline_max_samples=int(os.environ.get("SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES", str(DEFAULT_SHARED_SAMPLE_COUNT))),
+        primary_baseline_max_samples=resolve_count_from_environment(
+            "SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES",
+            default_value=paper_run.sample_count,
+        ),
         tree_ring_adapter_mode=os.environ.get("SLM_WM_TREE_RING_ADAPTER_MODE", "method_faithful_sd35"),
         gaussian_shading_adapter_mode=os.environ.get("SLM_WM_GAUSSIAN_SHADING_ADAPTER_MODE", "method_faithful_sd35"),
         shallow_diffuse_adapter_mode=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_ADAPTER_MODE", "method_faithful_sd35"),
@@ -971,12 +989,15 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
 def package_external_baseline_gpu_smoke_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    drive_output_dir: str | None = None,
     archive_name: str = "external_baseline_gpu_smoke_package.zip",
 ) -> ExternalBaselineGpuSmokeArchiveRecord:
     """打包外部 baseline GPU smoke 产物并镜像到 Google Drive。"""
 
     root_path = Path(root).resolve()
+    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir(
+        "external_baseline_gpu_smoke"
+    )
     source_dir = (root_path / output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
     archive_path = source_dir / archive_name
@@ -997,11 +1018,11 @@ def package_external_baseline_gpu_smoke_outputs(
         archive_path=relative_or_absolute(archive_path, root_path),
         archive_digest="",
         archive_entry_count=len(entries) + 3,
-        drive_archive_path=str(Path(drive_output_dir).expanduser() / archive_name),
+        drive_archive_path=str(Path(resolved_drive_output_dir).expanduser() / archive_name),
         drive_archive_digest="",
         metadata={
             "construction_unit_name": "external_baseline_gpu_smoke",
-            "drive_output_dir": str(Path(drive_output_dir).expanduser()),
+            "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "embedded_digest_scope": "external_summary_records_final_archive_digest",
         },
@@ -1016,7 +1037,7 @@ def package_external_baseline_gpu_smoke_outputs(
             summary_path.relative_to(root_path).as_posix(),
             manifest_path.relative_to(root_path).as_posix(),
         ),
-        config={"archive_name": archive_name, "drive_output_dir": str(Path(drive_output_dir).expanduser())},
+        config={"archive_name": archive_name, "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser())},
         code_version=resolve_code_version(root_path),
         rebuild_command="运行 paper_workflow/external_baseline_gpu_smoke_run.ipynb",
         metadata={
@@ -1031,7 +1052,7 @@ def package_external_baseline_gpu_smoke_outputs(
     with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
         for entry in entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
-    drive_dir = Path(drive_output_dir).expanduser()
+    drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / archive_name
     shutil.copy2(archive_path, mirrored_path)

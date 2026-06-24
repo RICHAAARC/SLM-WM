@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 import json
 import os
@@ -18,6 +18,7 @@ import sys
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
+from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
 from experiments.baselines import (
     build_shallow_diffuse_official_reference_record,
     build_shallow_diffuse_official_reference_schema,
@@ -37,10 +38,10 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
 )
 
 DEFAULT_OUTPUT_DIR = "outputs/shallow_diffuse_official_reference"
-DEFAULT_DRIVE_OUTPUT_DIR = "/content/drive/MyDrive/SLM/pilot_paper_results/shallow_diffuse_official_reference"
+DEFAULT_DRIVE_OUTPUT_DIR = ""
 DEFAULT_SOURCE_DIR = "external_baseline/primary/shallow_diffuse/source"
 DEFAULT_RUN_NAME = "shallow_diffuse_official_legacy_reference"
-DEFAULT_SAMPLE_COUNT = 120
+DEFAULT_SAMPLE_COUNT = 600
 DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID = "stabilityai/stable-diffusion-2-1-base"
 DEFAULT_OFFICIAL_MODEL_ID = "Manojb/stable-diffusion-2-1-base"
 DEFAULT_MODEL_SOURCE_NOTE = (
@@ -80,7 +81,7 @@ class ShallowDiffuseOfficialReferenceConfig:
     """描述 Shallow Diffuse 官方原始环境复现与导入所需配置。"""
 
     output_dir: str = DEFAULT_OUTPUT_DIR
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR
+    drive_output_dir: str = field(default_factory=lambda: build_paper_run_config(".").drive_dir("shallow_diffuse_official_reference"))
     source_dir: str = DEFAULT_SOURCE_DIR
     run_name: str = DEFAULT_RUN_NAME
     sample_count: int = DEFAULT_SAMPLE_COUNT
@@ -1225,12 +1226,13 @@ def write_shallow_diffuse_official_reference_outputs(
 def build_default_config() -> ShallowDiffuseOfficialReferenceConfig:
     """从环境变量构造默认 Colab 运行配置。"""
 
+    paper_run = build_paper_run_config(".")
     return ShallowDiffuseOfficialReferenceConfig(
         output_dir=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
-        drive_output_dir=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_DRIVE_OUTPUT_DIR", DEFAULT_DRIVE_OUTPUT_DIR),
+        drive_output_dir=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_DRIVE_OUTPUT_DIR", paper_run.drive_dir("shallow_diffuse_official_reference")),
         source_dir=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SOURCE_DIR", DEFAULT_SOURCE_DIR),
         run_name=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_RUN_NAME", DEFAULT_RUN_NAME),
-        sample_count=int(os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT", str(DEFAULT_SAMPLE_COUNT))),
+        sample_count=resolve_count_from_environment("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT", default_value=paper_run.sample_count),
         start_index=int(os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_START_INDEX", "0")),
         official_model_id=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_ID", DEFAULT_OFFICIAL_MODEL_ID),
         upstream_official_model_id=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_UPSTREAM_OFFICIAL_MODEL_ID", DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID),
@@ -1298,12 +1300,13 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
 def package_shallow_diffuse_official_reference_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
-    drive_output_dir: str = DEFAULT_DRIVE_OUTPUT_DIR,
+    drive_output_dir: str | None = None,
     archive_name: str = "shallow_diffuse_official_reference_package.zip",
 ) -> ShallowDiffuseOfficialReferenceArchiveRecord:
     """打包 Shallow Diffuse 官方参考产物并镜像到 Google Drive。"""
 
     root_path = Path(root).resolve()
+    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir("shallow_diffuse_official_reference")
     source_dir = (root_path / output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
     archive_path = source_dir / archive_name
@@ -1326,10 +1329,10 @@ def package_shallow_diffuse_official_reference_outputs(
         archive_path=relative_or_absolute(archive_path, root_path),
         archive_digest="",
         archive_entry_count=len(entries),
-        drive_archive_path=str(Path(drive_output_dir).expanduser() / archive_name),
+        drive_archive_path=str(Path(resolved_drive_output_dir).expanduser() / archive_name),
         drive_archive_digest="",
         metadata={
-            "drive_output_dir": str(Path(drive_output_dir).expanduser()),
+            "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
             "embedded_digest_scope": "external_summary_records_final_archive_digest",
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
@@ -1344,7 +1347,7 @@ def package_shallow_diffuse_official_reference_outputs(
             summary_path.relative_to(root_path).as_posix(),
             manifest_path.relative_to(root_path).as_posix(),
         ),
-        config={"archive_name": archive_name, "drive_output_dir": str(Path(drive_output_dir).expanduser())},
+        config={"archive_name": archive_name, "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser())},
         code_version=resolve_code_version(root_path),
         rebuild_command="运行 paper_workflow/shallow_diffuse_official_reference_run.ipynb",
         metadata={
@@ -1357,7 +1360,7 @@ def package_shallow_diffuse_official_reference_outputs(
     with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
         for entry in entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
-    drive_dir = Path(drive_output_dir).expanduser()
+    drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / archive_name
     shutil.copy2(archive_path, mirrored_path)

@@ -177,11 +177,13 @@ def evidence_records_by_graph(evidence_records: tuple[dict[str, Any], ...]) -> d
     return {record["attention_graph_id"]: record for record in evidence_records}
 
 
-def select_subspace_records(records: tuple[dict[str, Any], ...], max_records: int) -> tuple[dict[str, Any], ...]:
-    """选择语义安全子空间记录, 控制本地重建成本。"""
+def select_subspace_records(records: tuple[dict[str, Any], ...], max_records: int | None) -> tuple[dict[str, Any], ...]:
+    """选择语义安全子空间记录, 可选控制本地重建成本。"""
     selected = [record for record in records if record.get("basis_strategy") == "semantic_safe_basis"]
     if not selected:
         selected = list(records)
+    if max_records is None:
+        return tuple(selected)
     return tuple(selected[:max_records])
 
 
@@ -292,7 +294,7 @@ def write_attention_latent_update_outputs(
     root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     attention_geometry_package_path: str | Path | None = None,
-    max_subspace_records: int = 16,
+    max_subspace_records: int | None = None,
     vector_width: int = VECTOR_WIDTH,
     embedding_strength: float = 0.08,
 ) -> dict[str, Any]:
@@ -409,7 +411,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument("--attention-geometry-package-path", default=None, help="真实 attention geometry zip 输入路径。")
-    parser.add_argument("--max-subspace-records", type=int, default=16, help="限制处理的语义子空间记录数量。")
+    parser.add_argument("--max-subspace-records", type=int, default=None, help="限制处理的语义子空间记录数量。")
     parser.add_argument("--vector-width", type=int, default=VECTOR_WIDTH, help="attention update 向量宽度。")
     parser.add_argument("--embedding-strength", type=float, default=0.08, help="attention update 嵌入强度。")
     return parser

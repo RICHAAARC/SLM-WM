@@ -28,7 +28,7 @@ from main.core.digest import build_stable_digest
 
 DEFAULT_OUTPUT_DIR = Path("outputs/dataset_level_quality")
 DEFAULT_REAL_ATTACK_REGISTRY_PATH = Path("outputs/real_attack_evaluation/real_attacked_image_registry.jsonl")
-DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 50
+DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 100
 
 
 def stable_json_text(value: Any) -> str:
