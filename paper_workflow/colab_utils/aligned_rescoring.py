@@ -72,8 +72,8 @@ class AlignedRescoringConfig:
     method_output_dir: str = DEFAULT_METHOD_OUTPUT_DIR
     geometry_drive_dir: str = DEFAULT_GEOMETRY_DRIVE_DIR
     attention_geometry_package_path: str = ""
-    max_subspace_records: int = 16
-    max_rescore_carriers: int = 1
+    max_subspace_records: int = 128
+    max_rescore_carriers: int = 120
     negative_prompt: str = "low quality, blurry"
     device_name: str = "cuda"
     torch_dtype: str = "float16"
@@ -1016,8 +1016,8 @@ def build_default_config() -> AlignedRescoringConfig:
         method_output_dir=os.environ.get("SLM_WM_ATTENTION_METHOD_OUTPUT_DIR", DEFAULT_METHOD_OUTPUT_DIR),
         geometry_drive_dir=os.environ.get("SLM_WM_ATTENTION_GEOMETRY_DRIVE_DIR", DEFAULT_GEOMETRY_DRIVE_DIR),
         attention_geometry_package_path=os.environ.get("SLM_WM_ATTENTION_GEOMETRY_PACKAGE_PATH", ""),
-        max_subspace_records=int(os.environ.get("SLM_WM_ALIGNED_RESCORING_SUBSPACE_RECORDS", "16")),
-        max_rescore_carriers=int(os.environ.get("SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT", "1")),
+        max_subspace_records=int(os.environ.get("SLM_WM_ALIGNED_RESCORING_SUBSPACE_RECORDS", "128")),
+        max_rescore_carriers=int(os.environ.get("SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT", "120")),
         negative_prompt=os.environ.get("SLM_WM_NEGATIVE_PROMPT", "low quality, blurry"),
         enable_pair_perceptual_metrics=parse_bool_environment("SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS", True),
         require_pair_perceptual_metrics=parse_bool_environment("SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS", True),

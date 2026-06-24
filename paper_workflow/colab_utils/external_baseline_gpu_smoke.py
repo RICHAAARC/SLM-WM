@@ -29,7 +29,7 @@ DEFAULT_T2SMARK_INVERSION_ENTRY = "external_baseline/primary/t2smark/source/src/
 DEFAULT_SOURCE_REGISTRY_PATH = "external_baseline/source_registry.json"
 DEFAULT_T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 DEFAULT_PACKAGE_PATTERN = "external_baseline_gpu_smoke_package_*.zip"
-DEFAULT_SHARED_SAMPLE_COUNT = 5
+DEFAULT_SHARED_SAMPLE_COUNT = 120
 DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES = (
     "jpeg_compression,gaussian_noise,gaussian_blur,rotation,resize,crop,crop_resize,composite_geometric_attacks"
 )

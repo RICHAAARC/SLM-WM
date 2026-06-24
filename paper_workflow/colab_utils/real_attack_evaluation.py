@@ -80,7 +80,7 @@ class RealAttackEvaluationConfig:
     guidance_scale: float
     output_dir: str = DEFAULT_OUTPUT_DIR
     source_image_dir: str = DEFAULT_SOURCE_IMAGE_DIR
-    max_source_images: int = 1
+    max_source_images: int = 120
     device_name: str = "cuda"
     torch_dtype: str = "float16"
     hf_token_env: str = "HF_TOKEN"
@@ -1164,7 +1164,7 @@ def build_default_config() -> RealAttackEvaluationConfig:
         guidance_scale=float(os.environ.get("SLM_WM_GUIDANCE_SCALE", "5.0")),
         output_dir=os.environ.get("SLM_WM_REAL_ATTACK_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         source_image_dir=os.environ.get("SLM_WM_REAL_ATTACK_SOURCE_IMAGE_DIR", DEFAULT_SOURCE_IMAGE_DIR),
-        max_source_images=int(os.environ.get("SLM_WM_REAL_ATTACK_SOURCE_COUNT", "1")),
+        max_source_images=int(os.environ.get("SLM_WM_REAL_ATTACK_SOURCE_COUNT", "120")),
         device_name=os.environ.get("SLM_WM_DEVICE", "cuda"),
         torch_dtype=os.environ.get("SLM_WM_TORCH_DTYPE", "float16"),
         detection_threshold=float(os.environ.get("SLM_WM_REAL_ATTACK_DETECTION_THRESHOLD", "0.50")),

@@ -952,7 +952,7 @@
 | input_manifest | `external_baseline/source_registry.json`; Google Drive 历史 `external_baseline_gpu_smoke_package_*.zip` 可选 |
 | expected_output_manifest | `outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_manifest.local.json` |
 | expected_outputs | `outputs/external_baseline_gpu_smoke/t2smark_official/**`; `outputs/external_baseline_gpu_smoke/execution/baseline_observations.json`; `outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_summary.json`; Google Drive `SLM/external_baseline_gpu_smoke/external_baseline_gpu_smoke_package_<utc>_<short_commit>.zip` |
-| blocking_items | 该 Notebook 已覆盖 T2SMark SD3.5 Medium 最小真实 GPU smoke, 并把 Tree-Ring、Gaussian Shading、Shallow Diffuse 接入 SD3.5 method-faithful GPU smoke adapter; 默认样本量为5, 默认覆盖8类图像级攻击, 仍不支持论文级外部 baseline 对比结论。 |
+| blocking_items | 该 Notebook 已覆盖 T2SMark SD3.5 Medium 最小真实 GPU smoke, 并把 Tree-Ring、Gaussian Shading、Shallow Diffuse 接入 SD3.5 method-faithful GPU smoke adapter; 默认共享样本数已切换为120, 默认覆盖8类图像级攻击; 该入口可产出 pilot_paper 受治理候选证据, 但仍不得单独替代 full_paper 外部 baseline 对比结论。 |
 | fallback_path | 若 Google Drive 中已有可复用官方结果包, helper 会先解包复用; 若缺失, 则按源码登记表下载 T2SMark 官方源码并重新生成官方 `results.json`。 |
 | invariants | Notebook 只负责远程入口和打包, 真实逻辑位于 `paper_workflow/colab_utils/external_baseline_gpu_smoke.py`; 所有持久输出写入 `outputs/` 并镜像到 Google Drive。 |
 
@@ -1041,5 +1041,14 @@
 1. `paper_workflow/runtime_method_precheck_run.ipynb` 合并运行时诊断与最小机制预检, 替代原独立运行时诊断入口和最小 latent injection 入口。该入口默认写入 `GoogleDrive/SLM/runtime_method_precheck/`, 只用于 Colab 环境与机制闭环预检。
 2. 方法主流程 Notebook 当前默认使用 `SLM_WM_PROTOCOL_PROFILE=pilot_paper_fixed_fpr_0_01`, `SLM_WM_PROMPT_SET=pilot_paper`, `SLM_WM_PROMPT_FILE=configs/paper_main_pilot_paper_prompts.txt`。
 3. 方法主流程和主表 baseline 默认写入 `GoogleDrive/SLM/pilot_paper_results/` 下的对应子目录, 便于与历史链路测试和后续 full_paper 结果隔离。
-4. 当前 `pilot_paper` 默认仍是小样本论文配置: aligned rescoring carrier 上限为5, 真实攻击 source image 上限为5, dataset-level 质量入口的小样本复盘阈值为5。其结果只能支撑 `pilot_paper` 样本规模内的论文主张, 不得被提升为 `full_paper` 论文主张。
+4. 当前 `pilot_paper` 默认已切换为 pilot_paper 论文配置: aligned rescoring carrier 上限为120, 真实攻击 source image 上限为120, external baseline 共享样本数为120, dataset-level 质量入口的正式特征最小样本阈值为100。其结果只能支撑 `pilot_paper` 样本规模内的论文主张, 不得被提升为 `full_paper` 论文主张。
+
+### pilot_paper result records 物化层补齐
+
+1. 新增 `scripts/write_pilot_paper_result_records.py`, 用于从 Google Drive 结果包或仓库 `outputs/` 中汇总方法主流程、攻击矩阵、dataset-level quality 和外部 baseline 受治理候选记录, 写出 `outputs/pilot_paper_fixed_fpr_results/pilot_paper_result_records.jsonl`。
+2. 该脚本只物化 zip 包中的 `outputs/` 条目, 非 `outputs/` 条目和路径越界条目会被记录为 skipped, 不会写入仓库根目录或源码目录。
+3. 外部 baseline 记录只有在 `baseline_result_candidate_validation_report.json` 的 accepted records 中出现时, 才允许在转换后的 pilot_paper 记录中支撑 pilot_paper 主张; 未接受候选会保留为可审计记录, 但 `supports_paper_claim=false`。
+4. 已在 `paper_workflow/README.md` 中补充 Colab pilot_paper 重跑顺序和收尾命令: 先通过 `--materialize-only` 从 `/content/drive/MyDrive/SLM/pilot_paper_results` 物化上游包, 再重建 attack matrix、baseline candidates、pilot_paper result records 和 fixed-FPR common protocol。
+5. 当前仍不触发 full_paper 样本规模运行; 结果是否可支撑 pilot_paper 主张由 `pilot_paper_result_import_ready`、`pilot_paper_template_coverage_ready` 和 `pilot_paper_claim_ready` 共同决定。
+6. `pilot_paper_result_import_schema` 已新增 `minimum_result_positive_count=100` 与 `minimum_result_negative_count=100`, 低于该边界的链路测试记录会被导入 validator 拒绝, 不能误入 pilot_paper 主张边界。
 

@@ -600,7 +600,7 @@ def build_default_config() -> AttentionLatentInjectionConfig:
         method_output_dir=os.environ.get("SLM_WM_ATTENTION_METHOD_OUTPUT_DIR", DEFAULT_METHOD_OUTPUT_DIR),
         geometry_drive_dir=os.environ.get("SLM_WM_ATTENTION_GEOMETRY_DRIVE_DIR", DEFAULT_GEOMETRY_DRIVE_DIR),
         attention_geometry_package_path=os.environ.get("SLM_WM_ATTENTION_GEOMETRY_PACKAGE_PATH", ""),
-        max_subspace_records=int(os.environ.get("SLM_WM_ATTENTION_SUBSPACE_RECORDS", "16")),
+        max_subspace_records=int(os.environ.get("SLM_WM_ATTENTION_SUBSPACE_RECORDS", "128")),
         attention_carrier_index=int(os.environ.get("SLM_WM_ATTENTION_CARRIER_INDEX", "0")),
     )
 

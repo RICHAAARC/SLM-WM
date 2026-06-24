@@ -313,6 +313,7 @@ def build_fixed_fpr_protocol_digest(config: PilotPaperFixedFprConfig | None = No
         "calibration_role": "clean_negative",
         "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
         "confidence_level": resolved_config.confidence_level,
+        "minimum_clean_negative_count": resolved_config.minimum_clean_negative_count,
         "result_claim_scope": resolved_config.result_claim_scope,
     }
     return build_stable_digest(payload)
@@ -340,6 +341,8 @@ def build_pilot_paper_result_import_schema(
         "target_fpr": resolved_config.target_fpr,
         "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
         "confidence_level": resolved_config.confidence_level,
+        "minimum_result_positive_count": resolved_config.minimum_clean_negative_count,
+        "minimum_result_negative_count": resolved_config.minimum_clean_negative_count,
         "method_ids": list(PILOT_PAPER_METHOD_IDS),
         "primary_baseline_ids": list(PILOT_PAPER_PRIMARY_BASELINE_IDS),
         "required_metric_fields": list(PILOT_PAPER_REQUIRED_METRIC_FIELDS),
@@ -465,9 +468,15 @@ def _validate_counts_and_rates(row: Mapping[str, Any], row_index: int, schema: M
     """校验计数、率值和置信区间边界。"""
 
     issues: list[PilotPaperImportIssue] = []
-    for field_name in ("positive_count", "negative_count", "supported_record_count"):
-        if _int_field(row, field_name) <= 0:
-            issues.append(_issue(row_index, row, field_name, "positive_count_required"))
+    minimum_count_fields = {
+        "positive_count": int(schema.get("minimum_result_positive_count", 1)),
+        "negative_count": int(schema.get("minimum_result_negative_count", 1)),
+    }
+    for field_name, minimum_count in minimum_count_fields.items():
+        if _int_field(row, field_name) < minimum_count:
+            issues.append(_issue(row_index, row, field_name, "pilot_paper_minimum_sample_count_required"))
+    if _int_field(row, "supported_record_count") <= 0:
+        issues.append(_issue(row_index, row, "supported_record_count", "positive_count_required"))
     if _int_field(row, "attack_record_count") < _int_field(row, "supported_record_count"):
         issues.append(_issue(row_index, row, "attack_record_count", "attack_record_count_must_cover_supported_count"))
     for field_name in schema["required_rate_fields"]:
@@ -628,6 +637,8 @@ def build_pilot_paper_common_protocol_summary(
         "pilot_paper_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
         "pilot_paper_target_fpr": resolved_config.target_fpr,
         "pilot_paper_negative_count_minimum_required": resolved_config.minimum_clean_negative_count,
+        "minimum_result_positive_count": resolved_config.minimum_clean_negative_count,
+        "minimum_result_negative_count": resolved_config.minimum_clean_negative_count,
         "pilot_paper_attack_count": len(materialized_attack_rows),
         "pilot_paper_method_count": len(materialized_method_rows),
         "pilot_paper_import_template_count": len(materialized_template_rows),

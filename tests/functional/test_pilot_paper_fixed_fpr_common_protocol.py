@@ -65,6 +65,8 @@ def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_p
     assert prompt_summary["prompt_set"] == "pilot_paper"
     assert prompt_summary["target_fpr"] == 0.01
     assert prompt_summary["prompt_split_ready"] is True
+    assert schema["minimum_result_positive_count"] == 100
+    assert schema["minimum_result_negative_count"] == 100
     assert validation["input_record_count"] == 0
     assert validation["pilot_paper_result_import_ready"] is False
     assert {row["method_id"] for row in method_rows} == {
@@ -105,10 +107,10 @@ def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dic
         "baseline_result_source": evidence_path,
         "baseline_result_source_digest": "digest",
         "evidence_paths": [evidence_path],
-        "positive_count": 20,
-        "negative_count": 30,
-        "attack_record_count": 50,
-        "supported_record_count": 50,
+        "positive_count": 120,
+        "negative_count": 120,
+        "attack_record_count": 240,
+        "supported_record_count": 240,
         "true_positive_rate": 0.80,
         "true_positive_rate_ci_low": 0.70,
         "true_positive_rate_ci_high": 0.90,
@@ -195,3 +197,31 @@ def test_pilot_paper_import_validator_rejects_full_paper_claim_boundary(tmp_path
     assert report["accepted_pilot_paper_import_count"] == 0
     assert "protocol_value_mismatch" in reasons
     assert "pilot_paper_claim_scale_required" in reasons
+
+
+@pytest.mark.quick
+def test_pilot_paper_import_validator_rejects_small_sample_result_records(tmp_path: Path) -> None:
+    """低于 pilot_paper fixed-FPR 统计边界的记录不得进入受治理导入协议。"""
+
+    config = PilotPaperFixedFprConfig()
+    prompt_records = build_prompt_records(
+        "pilot_paper",
+        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(240)),
+    )
+    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
+    schema = build_pilot_paper_result_import_schema(
+        prompt_split_digest=prompt_summary["prompt_split_digest"],
+        attack_matrix_digest=build_attack_matrix_digest(attack_rows),
+        fixed_fpr_protocol_digest=build_fixed_fpr_protocol_digest(config),
+        config=config,
+    )
+    row = pilot_paper_result_row(schema, "outputs/pilot_paper_fixed_fpr_results/tree_ring_metrics.json")
+    row["positive_count"] = 5
+    row["negative_count"] = 5
+
+    report = validate_pilot_paper_result_import_rows([row], schema, evidence_root=tmp_path)
+    reasons = {issue["reason"] for issue in report["issues"]}
+
+    assert report["accepted_pilot_paper_import_count"] == 0
+    assert "pilot_paper_minimum_sample_count_required" in reasons

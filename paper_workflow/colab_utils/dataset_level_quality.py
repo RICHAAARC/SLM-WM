@@ -32,7 +32,7 @@ DEFAULT_REAL_ATTACK_EVALUATION_DRIVE_DIR = "/content/drive/MyDrive/SLM/real_atta
 DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = "/content/drive/MyDrive/SLM/aligned_rescoring"
 REAL_ATTACK_EVALUATION_PACKAGE_PATTERN = "real_attack_evaluation_package_*.zip"
 ALIGNED_RESCORING_PACKAGE_PATTERN = "aligned_rescoring_package_*.zip"
-DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 50
+DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 100
 REAL_ATTACK_ALLOWED_PREFIXES = (
     "outputs/real_attack_evaluation/real_attacked_image_registry.jsonl",
 )

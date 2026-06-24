@@ -111,8 +111,8 @@ def test_t2smark_result_reuse_requires_configured_sample_count(tmp_path: Path) -
 
 
 @pytest.mark.quick
-def test_shared_prompt_inputs_default_to_five_samples(tmp_path: Path) -> None:
-    """T2SMark 与主表 adapter 应共享 5 条小样本 prompt 计划。"""
+def test_shared_prompt_inputs_default_to_pilot_paper_samples(tmp_path: Path) -> None:
+    """T2SMark 与主表 adapter 应共享 pilot_paper 样本 prompt 计划。"""
 
     config = ExternalBaselineGpuSmokeConfig(require_cuda=False)
     paths = output_paths(tmp_path, config)
@@ -122,8 +122,8 @@ def test_shared_prompt_inputs_default_to_five_samples(tmp_path: Path) -> None:
 
     t2smark_payload = json.loads(t2smark_prompt_path.read_text(encoding="utf-8"))
     primary_rows = json.loads(primary_prompt_path.read_text(encoding="utf-8"))
-    assert len(t2smark_payload["annotations"]) == 5
-    assert len(primary_rows) == 5
+    assert len(t2smark_payload["annotations"]) == 120
+    assert len(primary_rows) == 120
     assert primary_rows[0]["prompt_text"] == t2smark_payload["annotations"][0]["caption"]
 
 
@@ -131,7 +131,7 @@ def test_shared_prompt_inputs_default_to_five_samples(tmp_path: Path) -> None:
 def test_t2smark_image_pairs_refreshes_stale_image_provenance(tmp_path: Path) -> None:
     """已有 image_pairs 缺少图像路径与 digest 时, helper 应按当前图像目录刷新。"""
 
-    config = ExternalBaselineGpuSmokeConfig(require_cuda=False, reuse_existing=True, force_generate=False)
+    config = ExternalBaselineGpuSmokeConfig(require_cuda=False, reuse_existing=True, force_generate=False, robust_test_num=5)
     paths = output_paths(tmp_path, config)
     paths["official_images"].mkdir(parents=True)
     for index in range(5):

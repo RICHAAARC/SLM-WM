@@ -587,8 +587,8 @@ def build_default_config() -> AttentionGeometryRunConfig:
         height=int(os.environ.get("SLM_WM_HEIGHT", "512")),
         inference_steps=int(os.environ.get("SLM_WM_INFERENCE_STEPS", "20")),
         guidance_scale=float(os.environ.get("SLM_WM_GUIDANCE_SCALE", "4.5")),
-        max_capture_count=int(os.environ.get("SLM_WM_ATTENTION_CAPTURE_COUNT", "4")),
-        max_attention_tokens=int(os.environ.get("SLM_WM_ATTENTION_TOKEN_COUNT", "16")),
+        max_capture_count=int(os.environ.get("SLM_WM_ATTENTION_CAPTURE_COUNT", "16")),
+        max_attention_tokens=int(os.environ.get("SLM_WM_ATTENTION_TOKEN_COUNT", "32")),
         output_dir=os.environ.get("SLM_WM_ATTENTION_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         geometry_output_dir=os.environ.get("SLM_WM_GEOMETRY_OUTPUT_DIR", DEFAULT_GEOMETRY_OUTPUT_DIR),
     )

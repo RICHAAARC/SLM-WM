@@ -153,6 +153,8 @@ def test_colab_notebook_delegates_attention_geometry_logic_to_helper() -> None:
     assert "drive.mount('/content/drive')" in first_code_source
     assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry" in joined_source
     assert "attention_geometry_ready" in joined_source
+    assert "SLM_WM_ATTENTION_CAPTURE_COUNT', '16'" in joined_source
+    assert "SLM_WM_ATTENTION_TOKEN_COUNT', '32'" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source
@@ -180,6 +182,7 @@ def test_colab_notebook_delegates_attention_latent_injection_logic_to_helper() -
     assert "drive.mount('/content/drive')" in first_code_source
     assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_latent_injection" in joined_source
     assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry" in joined_source
+    assert "SLM_WM_ATTENTION_SUBSPACE_RECORDS', '128'" in joined_source
     assert "SLM_WM_ATTENTION_RUNTIME_STRENGTH', '0.025'" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
@@ -209,7 +212,8 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
     assert "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring" in joined_source
     assert "/content/drive/MyDrive/SLM/pilot_paper_results/attention_geometry" in joined_source
     assert "real_aligned_rescore_count" in joined_source
-    assert "SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT', '5'" in joined_source
+    assert "SLM_WM_ALIGNED_RESCORING_SUBSPACE_RECORDS', '128'" in joined_source
+    assert "SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT', '120'" in joined_source
     assert "SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
     assert "SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
     assert "openai/clip-vit-base-patch32" in joined_source
@@ -283,7 +287,7 @@ def test_colab_notebook_delegates_real_attack_evaluation_logic_to_helper() -> No
     assert "regeneration_attack_gpu_validation_ready" in joined_source
     assert "attack_detection_rerun_ready" in joined_source
     assert "formal_attack_detection_ready" in joined_source
-    assert "SLM_WM_REAL_ATTACK_SOURCE_COUNT', '5'" in joined_source
+    assert "SLM_WM_REAL_ATTACK_SOURCE_COUNT', '120'" in joined_source
     assert "runwayml/stable-diffusion-v1-5" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
@@ -318,6 +322,9 @@ def test_colab_notebook_delegates_external_baseline_gpu_smoke_logic_to_helper() 
     assert "adapter_observation_count" in joined_source
     assert "primary_baseline_adapter_ready" in joined_source
     assert "primary_baseline_observation_count" in joined_source
+    assert "SLM_WM_T2SMARK_ROBUST_TEST_NUM', '120'" in joined_source
+    assert "SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES', '120'" in joined_source
+    assert "expected_sample_count = int(os.environ['SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES'])" in joined_source
     assert "tree_ring" in joined_source
     assert "gaussian_shading" in joined_source
     assert "shallow_diffuse" in joined_source
@@ -353,7 +360,7 @@ def test_colab_notebook_delegates_dataset_level_quality_logic_to_helper() -> Non
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "formal_feature_backend_ready" in joined_source
     assert "formal_fid_kid_ready" in joined_source
-    assert "SLM_WM_FORMAL_MIN_SAMPLE_COUNT', '5'" in joined_source
+    assert "SLM_WM_FORMAL_MIN_SAMPLE_COUNT', '100'" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source

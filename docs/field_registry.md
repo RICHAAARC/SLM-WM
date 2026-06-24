@@ -1254,6 +1254,9 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_prompt_split_ready | governance | none | false | false | false | pilot_paper prompt split 是否可供共同协议使用。|
 | pilot_paper_target_fpr | protocol | none | false | false | false | pilot_paper 共同协议使用的 fixed-FPR 目标值。|
 | pilot_paper_negative_count_minimum_required | metric | none | false | false | false | pilot_paper fixed-FPR 校准所要求的最小 clean negative 数量。|
+| minimum_clean_negative_count | metric | none | false | false | false | fixed-FPR 协议配置中要求的最小 clean negative 样本数。|
+| minimum_result_positive_count | metric | none | false | false | false | pilot_paper 结果导入 schema 要求的最小 positive 样本数, 当前与 fixed-FPR clean negative 最小数一致。|
+| minimum_result_negative_count | metric | none | false | false | false | pilot_paper 结果导入 schema 要求的最小 negative 样本数, 用于避免小样本链路结果误入 pilot_paper claim 边界。|
 | pilot_paper_negative_count_ready | governance | none | false | false | false | pilot_paper prompt split 中 clean negative 数量是否满足最小要求。|
 | pilot_paper_attack_count | metric | none | false | false | false | pilot_paper 共同协议攻击矩阵中的攻击配置数量。|
 | pilot_paper_method_count | metric | none | false | false | false | pilot_paper 共同协议覆盖的方法数量。|
@@ -1287,4 +1290,22 @@ Notebook 与 repository module 的跨边界数据
 | quality_score_ci_high | metric | none | true | false | false | pilot_paper 图像质量分数置信区间上界。|
 | score_retention_ci_low | metric | none | true | false | false | pilot_paper 攻击后分数保持率置信区间下界。|
 | score_retention_ci_high | metric | none | true | false | false | pilot_paper 攻击后分数保持率置信区间上界。|
+| baseline_formal_import_record_accepted | governance | none | true | false | false | 外部 baseline 候选记录是否已经被主表受治理导入报告接受。|
+| template_covered | governance | none | true | false | false | 单个 pilot_paper method × attack 模板是否已被结果记录覆盖。|
+| pilot_paper_result_record_digest | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定摘要。|
+| pilot_paper_result_record_id | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定标识。|
+| result_source_kind | governance | none | true | false | false | pilot_paper 结果记录来源类型, 区分 SLM-WM 攻击矩阵与外部 baseline 结果。|
+| skipped_output_entries | governance | none | true | false | false | 被结果物化层跳过的 zip 条目名称集合。|
+| materialized_output_entries_digest | artifact | none | true | false | false | 已物化 outputs/ 条目名称集合的稳定摘要。|
+| skipped_output_entry_count | metric | none | true | false | false | 由于非 outputs/ 路径或路径越界而被跳过的结果包条目数量。|
+| materialized_output_entry_count | metric | none | true | false | false | 从结果包中成功物化到 outputs/ 的条目数量。|
+| input_package_paths | artifact | none | true | false | false | 参与结果物化的 zip 结果包路径集合。|
+| materialization_report | artifact | none | true | false | false | 从 Google Drive 或其他结果包物化 outputs 条目的摘要报告对象。|
+| missing_template_examples | governance | none | true | false | false | pilot_paper 结果记录物化摘要中用于诊断的缺失模板示例集合。|
+| pilot_paper_template_coverage_ready | governance | none | true | false | false | pilot_paper 结果记录是否覆盖全部 method × attack 导入模板。|
+| pilot_paper_template_missing_count | metric | none | true | false | false | 尚未被结果记录覆盖的 pilot_paper 导入模板数量。|
+| pilot_paper_template_covered_count | metric | none | true | false | false | 已被结果记录覆盖的 pilot_paper 导入模板数量。|
+| pilot_paper_template_record_count | metric | none | true | false | false | pilot_paper 共同协议结果导入模板总数量。|
+| pilot_paper_result_method_ids | protocol | none | true | false | false | pilot_paper 结果记录实际覆盖的方法 id 集合。|
+| pilot_paper_result_record_count | metric | none | true | false | false | pilot_paper 共同协议结果记录物化后的记录数量。|
 | prompt_split_ready | governance | none | false | false | false | prompt split 是否满足共同协议使用条件。|
