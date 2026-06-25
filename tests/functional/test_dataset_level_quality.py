@@ -23,6 +23,7 @@ from experiments.protocol import (
 )
 from scripts.write_dataset_level_quality_outputs import write_dataset_level_quality_outputs
 from paper_workflow.colab_utils.dataset_level_quality import (
+    dataset_level_quality_claim_boundary,
     run_default_dataset_level_quality_from_drive_plan,
 )
 
@@ -295,6 +296,10 @@ def test_dataset_quality_formal_feature_import_measures_when_scale_is_ready(tmp_
     assert isinstance(rows_by_name["fid"]["quality_metric_value"], float)
     assert isinstance(rows_by_name["kid"]["quality_metric_value"], float)
     assert summary["formal_fid_kid_ready"] is True
+    assert (
+        dataset_level_quality_claim_boundary(summary)
+        == "formal_fid_kid_measured_but_paper_claim_requires_evidence_closure"
+    )
 
 
 @pytest.mark.quick
@@ -370,6 +375,7 @@ def test_dataset_quality_drive_plan_imports_mock_formal_features(tmp_path: Path)
     assert result["formal_feature_backend_ready"] is True
     assert result["formal_fid_kid_ready"] is False
     assert result["unsupported_reason"] == FORMAL_FID_KID_SAMPLE_BLOCKER
+    assert result["metadata"]["claim_boundary"] == "formal_feature_backend_ready_but_formal_fid_kid_blocked"
     assert len(feature_rows) == 2
     assert {row["dataset_quality_image_role"] for row in feature_rows} == {"source", "comparison"}
     assert import_report["accepted_feature_pair_count"] == 1

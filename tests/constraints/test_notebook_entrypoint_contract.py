@@ -413,6 +413,9 @@ def test_colab_notebook_delegates_dataset_level_quality_logic_to_helper() -> Non
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "formal_feature_backend_ready" in joined_source
     assert "formal_fid_kid_ready" in joined_source
+    assert "dataset_level_quality_summary['formal_fid_kid_ready'] is True" in joined_source
+    assert "dataset_level_quality_summary['supports_paper_claim'] is False" in joined_source
+    assert "dataset_level_quality_summary['formal_fid_kid_ready'] is False" not in joined_source
     assert "os.environ['SLM_WM_FORMAL_MIN_SAMPLE_COUNT'] = paper_run_dataset_minimum_count" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source

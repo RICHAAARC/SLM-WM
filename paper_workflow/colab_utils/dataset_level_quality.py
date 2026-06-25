@@ -415,6 +415,22 @@ def write_failure_outputs(root_path: Path, error: Exception) -> dict[str, Any]:
     return result
 
 
+def dataset_level_quality_claim_boundary(summary: dict[str, Any]) -> str:
+    """根据质量指标状态生成论文主张边界说明.
+
+    该函数属于项目特定写法: dataset-level FID / KID 可以在 pilot_paper
+    配置下形成受治理的数值结果, 但项目仍要求正式论文主张由后续统一
+    evidence closure 聚合产物决定。因此这里明确区分“指标已经测量”和
+    “可以直接支撑论文主张”。
+    """
+
+    if summary.get("formal_fid_kid_ready") is True:
+        return "formal_fid_kid_measured_but_paper_claim_requires_evidence_closure"
+    if summary.get("formal_feature_backend_ready") is True:
+        return "formal_feature_backend_ready_but_formal_fid_kid_blocked"
+    return "formal_feature_backend_missing_for_dataset_quality_claim"
+
+
 def run_default_dataset_level_quality_from_drive_plan(
     root: str | Path = ".",
     real_attack_evaluation_drive_dir: str | None = None,
@@ -495,7 +511,7 @@ def run_default_dataset_level_quality_from_drive_plan(
         ],
         "environment_report_path": "outputs/dataset_level_quality/dataset_level_quality_environment_report.json",
         "metadata": {
-            "claim_boundary": "formal_feature_backend_ready_but_paper_claim_requires_full_main_sample_scale",
+            "claim_boundary": dataset_level_quality_claim_boundary(summary),
             "manifest_path": "outputs/dataset_level_quality/manifest.local.json",
             "input_manifest_path": "outputs/dataset_level_quality/dataset_level_quality_input_package_manifest.json",
             "code_version": manifest["code_version"],
