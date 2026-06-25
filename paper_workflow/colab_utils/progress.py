@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from os import PathLike
+import subprocess
 import sys
 import time
-from typing import TypeVar
+from typing import Any, Callable, TypeVar
 
 T = TypeVar("T")
 
@@ -162,3 +164,115 @@ def update_progress(bar: object | None, count: int = 1, *, profile: str | None =
             bar.update(count, profile=profile)
         except TypeError:
             bar.update(count)
+
+
+def emit_progress_status(bar: object | None, *, profile: str) -> None:
+    """强制刷新当前工作量状态而不增加完成数。
+
+    该函数属于通用工程写法: 长耗时 Colab 命令通常需要保持 stdout / stderr
+    捕获落盘, 不能直接把第三方下载或推理日志持续刷到 Notebook 输出区。调用方
+    可以在长命令启动、心跳和完成时刷新同一行状态, 从而保留可观察性并减少噪声。
+    """
+
+    if bar is None:
+        return
+    if hasattr(bar, "profile"):
+        try:
+            setattr(bar, "profile", profile)
+        except Exception:
+            return
+    if hasattr(bar, "emit"):
+        try:
+            bar.emit(force=True)
+        except TypeError:
+            bar.emit()
+
+
+def run_quiet_subprocess_with_progress(
+    command: list[str] | str,
+    *,
+    cwd: str | PathLike[str] | None = None,
+    timeout_seconds: int | float | None = None,
+    shell: bool = False,
+    env: dict[str, str] | None = None,
+    progress: object | None = None,
+    progress_profile: str = "",
+    heartbeat_seconds: float = 60.0,
+) -> subprocess.CompletedProcess[str]:
+    """执行子进程并用单行心跳显示长耗时状态。
+
+    此处保留 `subprocess.run(..., capture_output=True)` 的核心语义: 子命令的
+    stdout / stderr 不实时刷屏, 而是在命令结束后由调用方写入诊断文件。区别在于
+    父进程会按固定间隔刷新一行总体进度, 适合 Colab 中的官方复现命令和 adapter
+    命令。
+    """
+
+    started_at = time.monotonic()
+    heartbeat_seconds = max(1.0, float(heartbeat_seconds))
+    base_profile = progress_profile or "operation=subprocess"
+    emit_progress_status(progress, profile=f"{base_profile} status=running")
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        shell=shell,
+        env=env,
+    )
+    while True:
+        elapsed_seconds = time.monotonic() - started_at
+        remaining_timeout = None if timeout_seconds is None else max(0.0, float(timeout_seconds) - elapsed_seconds)
+        wait_seconds = heartbeat_seconds if remaining_timeout is None else min(heartbeat_seconds, remaining_timeout)
+        try:
+            stdout, stderr = process.communicate(timeout=wait_seconds)
+            break
+        except subprocess.TimeoutExpired as timeout_error:
+            elapsed_minutes = (time.monotonic() - started_at) / 60.0
+            if timeout_seconds is not None and elapsed_seconds >= float(timeout_seconds):
+                process.kill()
+                stdout, stderr = process.communicate()
+                emit_progress_status(progress, profile=f"{base_profile} status=timeout elapsed={elapsed_minutes:.1f}min")
+                raise subprocess.TimeoutExpired(
+                    cmd=command,
+                    timeout=timeout_seconds,
+                    output=stdout,
+                    stderr=stderr,
+                ) from timeout_error
+            emit_progress_status(progress, profile=f"{base_profile} status=running elapsed={elapsed_minutes:.1f}min")
+    elapsed_minutes = (time.monotonic() - started_at) / 60.0
+    emit_progress_status(progress, profile=f"{base_profile} status=completed return_code={process.returncode} elapsed={elapsed_minutes:.1f}min")
+    return subprocess.CompletedProcess(command, int(process.returncode or 0), stdout, stderr)
+
+
+def call_runner_with_progress_status(
+    runner: Callable[..., dict[str, Any]],
+    command: Any,
+    *,
+    cwd: str | PathLike[str] | None,
+    timeout_seconds: int,
+    progress: object | None = None,
+    progress_profile: str = "",
+) -> dict[str, Any]:
+    """调用支持可选进度参数的命令 runner。
+
+    该函数把测试替身兼容逻辑集中在配置边界附近: 真实 Colab runner 可以接收
+    `progress` 和 `progress_profile`, 轻量测试替身则继续只接收命令、cwd 和
+    timeout。业务函数只表达当前要执行的命令职责, 不重复维护兼容分支。
+    """
+
+    if progress is None:
+        return runner(command, cwd=cwd, timeout_seconds=timeout_seconds)
+    try:
+        return runner(
+            command,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            progress=progress,
+            progress_profile=progress_profile,
+        )
+    except TypeError as error:
+        message = str(error)
+        if "progress" not in message and "progress_profile" not in message:
+            raise
+        return runner(command, cwd=cwd, timeout_seconds=timeout_seconds)

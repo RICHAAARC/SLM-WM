@@ -35,6 +35,7 @@ from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
     ensure_t2smark_source_available,
     run_command,
 )
+from paper_workflow.colab_utils.progress import call_runner_with_progress_status, emit_progress_status, progress_bar, update_progress
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
     file_digest,
@@ -82,6 +83,7 @@ class T2SMarkFullMainReproductionConfig:
     save_image: bool = True
     require_cuda: bool = True
     timeout_seconds: int = 86400
+    enable_workflow_progress_bar: bool = True
 
 
 @dataclass(frozen=True)
@@ -124,6 +126,26 @@ def read_json(path: Path) -> Any:
     """读取 JSON 文件。"""
 
     return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def run_command_with_progress_status(
+    command: list[str],
+    *,
+    cwd: Path,
+    timeout_seconds: int,
+    progress: object | None = None,
+    progress_profile: str = "",
+) -> dict[str, Any]:
+    """调用可被测试替换的命令 runner, 同时在真实 Colab 中保留进度状态。"""
+
+    return call_runner_with_progress_status(
+        run_command,
+        command,
+        cwd=cwd,
+        timeout_seconds=timeout_seconds,
+        progress=progress,
+        progress_profile=progress_profile,
+    )
 
 
 def synchronize_environment_report_with_device_report(
@@ -292,6 +314,7 @@ def run_t2smark_official_if_needed(
     config: T2SMarkFullMainReproductionConfig,
     paths: dict[str, Path],
     prompt_report: dict[str, Any],
+    progress: object | None = None,
 ) -> dict[str, Any]:
     """运行或复用 T2SMark 官方 SD3.5 Medium full-main 结果。"""
 
@@ -307,7 +330,7 @@ def run_t2smark_official_if_needed(
             "official_command": [],
             "source_report": {"source_prepare_skipped": True},
         }
-    source_report = ensure_t2smark_source_available(root_path, paths, timeout_seconds=300)
+    source_report = ensure_t2smark_source_available(root_path, paths, timeout_seconds=300, progress=progress)
     ensure_cuda_if_requested(config.require_cuda)
     source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
     command = [
@@ -338,7 +361,13 @@ def run_t2smark_official_if_needed(
     ]
     if config.save_image:
         command.append("--save_image")
-    result = run_command(command, cwd=root_path, timeout_seconds=config.timeout_seconds)
+    result = run_command_with_progress_status(
+        command,
+        cwd=root_path,
+        timeout_seconds=config.timeout_seconds,
+        progress=progress,
+        progress_profile=f"operation=t2smark_full_main_official_reference samples={prompt_report['selected_prompt_count']}",
+    )
     write_json(paths["output_dir"] / "t2smark_full_main_official_command_result.json", result)
     return {
         "official_result_generated": result["return_code"] == 0,
@@ -383,6 +412,7 @@ def run_t2smark_adapter(
     root_path: Path,
     config: T2SMarkFullMainReproductionConfig,
     paths: dict[str, Path],
+    progress: object | None = None,
 ) -> dict[str, Any]:
     """把 T2SMark 官方结果转换为项目统一 baseline observations。"""
 
@@ -405,7 +435,13 @@ def run_t2smark_adapter(
     ]
     if config.require_cuda:
         command.append("--require-cuda")
-    result = run_command(command, cwd=root_path, timeout_seconds=config.timeout_seconds)
+    result = run_command_with_progress_status(
+        command,
+        cwd=root_path,
+        timeout_seconds=config.timeout_seconds,
+        progress=progress,
+        progress_profile="operation=t2smark_full_main_adapter",
+    )
     write_json(paths["output_dir"] / "t2smark_full_main_adapter_command_result.json", result)
     return {
         "adapter_return_code": result["return_code"],
@@ -502,15 +538,28 @@ def write_t2smark_full_main_reproduction_outputs(
     paths = output_paths(root_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
     try:
-        device_report = ensure_cuda_if_requested(config.require_cuda)
-        prompt_report = write_full_main_prompt_inputs(root_path, config, paths)
-        prompt_rows = read_json(paths["prompt_plan"])
-        official_report = run_t2smark_official_if_needed(root_path, config, paths, prompt_report)
-        image_pairs = build_t2smark_full_main_image_pairs(root_path, paths, prompt_rows)
-        adapter_report = run_t2smark_adapter(root_path, config, paths)
-        candidate_report = build_candidate_records_and_validation(root_path, config, paths, prompt_report)
-        environment_report = build_t2smark_full_main_environment_report(device_report)
-        write_json(paths["environment_report"], environment_report)
+        with progress_bar(7, desc="t2smark full main reproduction", enabled=config.enable_workflow_progress_bar) as run_progress:
+            emit_progress_status(run_progress, profile="operation=ensure_cuda status=running")
+            device_report = ensure_cuda_if_requested(config.require_cuda)
+            update_progress(run_progress, profile="operation=ensure_cuda")
+            emit_progress_status(run_progress, profile="operation=write_prompt_inputs status=running")
+            prompt_report = write_full_main_prompt_inputs(root_path, config, paths)
+            prompt_rows = read_json(paths["prompt_plan"])
+            update_progress(run_progress, profile=f"operation=write_prompt_inputs prompts={prompt_report['selected_prompt_count']}")
+            official_report = run_t2smark_official_if_needed(root_path, config, paths, prompt_report, progress=run_progress)
+            update_progress(run_progress, profile="operation=t2smark_full_main_official_reference")
+            emit_progress_status(run_progress, profile="operation=build_image_pairs status=running")
+            image_pairs = build_t2smark_full_main_image_pairs(root_path, paths, prompt_rows)
+            update_progress(run_progress, profile=f"operation=build_image_pairs pairs={len(image_pairs)}")
+            adapter_report = run_t2smark_adapter(root_path, config, paths, progress=run_progress)
+            update_progress(run_progress, profile="operation=t2smark_full_main_adapter")
+            emit_progress_status(run_progress, profile="operation=build_candidate_records status=running")
+            candidate_report = build_candidate_records_and_validation(root_path, config, paths, prompt_report)
+            update_progress(run_progress, profile=f"operation=build_candidate_records records={candidate_report['candidate_record_count']}")
+            emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
+            environment_report = build_t2smark_full_main_environment_report(device_report)
+            write_json(paths["environment_report"], environment_report)
+            update_progress(run_progress, profile="operation=write_environment_report")
     except Exception as error:
         return write_failure_outputs(root_path, config, paths, error)
 
@@ -612,6 +661,7 @@ def build_default_config() -> T2SMarkFullMainReproductionConfig:
         save_image=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_SAVE_IMAGE", "1") != "0",
         require_cuda=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_REQUIRE_CUDA", "1") != "0",
         timeout_seconds=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_TIMEOUT_SECONDS", "86400")),
+        enable_workflow_progress_bar=os.environ.get("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1") != "0",
     )
 
 

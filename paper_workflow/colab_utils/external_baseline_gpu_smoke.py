@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import subprocess
 import sys
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -22,7 +21,13 @@ from experiments.protocol.paper_run_config import build_paper_run_config, resolv
 from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
 from experiments.protocol.splits import apply_split_assignments
 from main.analysis.artifact_manifest import build_artifact_manifest
-from paper_workflow.colab_utils.progress import progress_bar, update_progress
+from paper_workflow.colab_utils.progress import (
+    call_runner_with_progress_status,
+    emit_progress_status,
+    progress_bar,
+    run_quiet_subprocess_with_progress,
+    update_progress,
+)
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
     file_digest,
@@ -194,6 +199,7 @@ class ExternalBaselineGpuSmokeConfig:
     save_image: bool = True
     require_cuda: bool = True
     timeout_seconds: int = 86400
+    enable_workflow_progress_bar: bool = True
 
 
 @dataclass(frozen=True)
@@ -456,16 +462,22 @@ def write_primary_baseline_prompt_plan(root_path: Path, paths: dict[str, Path], 
     return paths["primary_prompt_plan"]
 
 
-def run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, Any]:
+def run_command(
+    command: list[str],
+    *,
+    cwd: Path,
+    timeout_seconds: int,
+    progress: object | None = None,
+    progress_profile: str = "",
+) -> dict[str, Any]:
     """执行显式 argv 命令并返回可落盘诊断。"""
 
-    completed = subprocess.run(
+    completed = run_quiet_subprocess_with_progress(
         command,
         cwd=cwd,
-        timeout=timeout_seconds,
-        check=False,
-        text=True,
-        capture_output=True,
+        timeout_seconds=timeout_seconds,
+        progress=progress,
+        progress_profile=progress_profile or "operation=argv_command",
     )
     return {
         "command": command,
@@ -473,6 +485,31 @@ def run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[
         "stdout": completed.stdout,
         "stderr": completed.stderr,
     }
+
+
+def run_command_with_progress_status(
+    command: list[str],
+    *,
+    cwd: Path,
+    timeout_seconds: int,
+    progress: object | None = None,
+    progress_profile: str = "",
+) -> dict[str, Any]:
+    """兼容带进度和无进度的命令 runner。
+
+    测试会用轻量 fake runner 替换 `run_command`, 这些 fake 只关心命令语义,
+    不需要进度参数。该包装函数让业务逻辑在真实 Colab 中显示进度, 同时保持
+    单元测试中的命令替身最小化。
+    """
+
+    return call_runner_with_progress_status(
+        run_command,
+        command,
+        cwd=cwd,
+        timeout_seconds=timeout_seconds,
+        progress=progress,
+        progress_profile=progress_profile,
+    )
 
 
 def load_baseline_registry_item(root_path: Path, baseline_id: str) -> dict[str, Any]:
@@ -582,7 +619,12 @@ def patch_t2smark_formal_attack_compatibility(root_path: Path, paths: dict[str, 
     return report
 
 
-def ensure_t2smark_source_available(root_path: Path, paths: dict[str, Path], timeout_seconds: int) -> dict[str, Any]:
+def ensure_t2smark_source_available(
+    root_path: Path,
+    paths: dict[str, Path],
+    timeout_seconds: int,
+    progress: object | None = None,
+) -> dict[str, Any]:
     """在冷启动环境中按登记表补齐 T2SMark 官方源码缓存。"""
 
     source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
@@ -603,13 +645,21 @@ def ensure_t2smark_source_available(root_path: Path, paths: dict[str, Path], tim
         raise FileNotFoundError(f"t2smark_source_entry_missing_in_existing_source_cache:{source_entry}")
 
     source_dir.parent.mkdir(parents=True, exist_ok=True)
-    clone_result = run_command(["git", "clone", repository_url, str(source_dir)], cwd=root_path, timeout_seconds=timeout_seconds)
+    clone_result = run_command_with_progress_status(
+        ["git", "clone", repository_url, str(source_dir)],
+        cwd=root_path,
+        timeout_seconds=timeout_seconds,
+        progress=progress,
+        progress_profile="operation=t2smark_source_clone",
+    )
     checkout_result: dict[str, Any] = {"command": [], "return_code": 0, "stdout": "", "stderr": ""}
     if clone_result["return_code"] == 0 and registry_item.get("official_repository_commit"):
-        checkout_result = run_command(
+        checkout_result = run_command_with_progress_status(
             ["git", "checkout", str(registry_item["official_repository_commit"])],
             cwd=source_dir,
             timeout_seconds=300,
+            progress=progress,
+            progress_profile="operation=t2smark_source_checkout",
         )
     source_report = {
         "source_available": source_entry.is_file() and clone_result["return_code"] == 0 and checkout_result["return_code"] == 0,
@@ -643,6 +693,7 @@ def run_t2smark_official_if_needed(
     root_path: Path,
     config: ExternalBaselineGpuSmokeConfig,
     paths: dict[str, Path],
+    progress: object | None = None,
 ) -> dict[str, Any]:
     """根据本地和 Drive 结果状态决定是否运行 T2SMark 官方 SD3.5 入口。"""
 
@@ -662,7 +713,7 @@ def run_t2smark_official_if_needed(
                 "source_prepare_skipped": True,
             },
         }
-    source_report = ensure_t2smark_source_available(root_path, paths, timeout_seconds=300)
+    source_report = ensure_t2smark_source_available(root_path, paths, timeout_seconds=300, progress=progress)
     source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
     ensure_cuda_if_requested(config.require_cuda)
     prompt_input_path = write_t2smark_prompt_input(root_path, paths, config)
@@ -703,7 +754,13 @@ def run_t2smark_official_if_needed(
         )
     if config.save_image:
         command.append("--save_image")
-    result = run_command(command, cwd=root_path, timeout_seconds=config.timeout_seconds)
+    result = run_command_with_progress_status(
+        command,
+        cwd=root_path,
+        timeout_seconds=config.timeout_seconds,
+        progress=progress,
+        progress_profile=f"operation=t2smark_official_reference samples={config.robust_test_num}",
+    )
     write_json(paths["output_dir"] / "t2smark_official_command_result.json", result)
     if result["return_code"] != 0:
         return {
@@ -792,6 +849,7 @@ def build_and_run_primary_baseline_adapters(
     root_path: Path,
     config: ExternalBaselineGpuSmokeConfig,
     paths: dict[str, Path],
+    progress: object | None = None,
 ) -> dict[str, Any]:
     """生成命令计划并运行四个主表 external baseline adapter。"""
 
@@ -850,7 +908,13 @@ def build_and_run_primary_baseline_adapters(
         build_command.extend(["--shallow-diffuse-attack-families", str(config.shallow_diffuse_attack_families)])
     if config.require_cuda:
         build_command.append("--require-cuda")
-    build_result = run_command(build_command, cwd=root_path, timeout_seconds=300)
+    build_result = run_command_with_progress_status(
+        build_command,
+        cwd=root_path,
+        timeout_seconds=300,
+        progress=progress,
+        progress_profile="operation=build_primary_baseline_command_plan",
+    )
     write_json(paths["output_dir"] / "baseline_command_plan_builder_result.json", build_result)
     if build_result["return_code"] != 0:
         return {"adapter_execution_ready": False, "adapter_unsupported_reason": "command_plan_builder_failed"}
@@ -864,7 +928,13 @@ def build_and_run_primary_baseline_adapters(
         str(paths["execution_output_dir"]),
         "--require-pass",
     ]
-    execution_result = run_command(run_command_args, cwd=root_path, timeout_seconds=config.timeout_seconds)
+    execution_result = run_command_with_progress_status(
+        run_command_args,
+        cwd=root_path,
+        timeout_seconds=config.timeout_seconds,
+        progress=progress,
+        progress_profile=f"operation=run_primary_baseline_adapters baselines={len(PRIMARY_BASELINE_METHODS)}",
+    )
     write_json(paths["output_dir"] / "baseline_command_plan_runner_result.json", execution_result)
     if execution_result["return_code"] != 0:
         return {"adapter_execution_ready": False, "adapter_unsupported_reason": "command_plan_runner_failed"}
@@ -876,7 +946,13 @@ def build_and_run_primary_baseline_adapters(
         str(paths["execution_manifest"]),
         "--require-pass",
     ]
-    validation_result = run_command(validation_command, cwd=root_path, timeout_seconds=300)
+    validation_result = run_command_with_progress_status(
+        validation_command,
+        cwd=root_path,
+        timeout_seconds=300,
+        progress=progress,
+        progress_profile="operation=validate_primary_baseline_evidence",
+    )
     write_json(paths["output_dir"] / "baseline_evidence_validation_result.json", validation_result)
     execution_manifest = read_json(paths["execution_manifest"]) if paths["execution_manifest"].is_file() else {}
     command_results = json.loads(paths["command_results"].read_text(encoding="utf-8")) if paths["command_results"].is_file() else []
@@ -982,17 +1058,21 @@ def write_external_baseline_gpu_smoke_outputs(
     paths = output_paths(root_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
     try:
-        with progress_bar(6, desc="external baseline gpu smoke", enabled=True) as run_progress:
+        with progress_bar(6, desc="external baseline gpu smoke", enabled=config.enable_workflow_progress_bar) as run_progress:
+            emit_progress_status(run_progress, profile="operation=materialize_prior_outputs status=running")
             prior_manifest = materialize_prior_outputs(root_path, config, paths)
             update_progress(run_progress, profile="operation=materialize_prior_outputs")
+            emit_progress_status(run_progress, profile="operation=ensure_cuda status=running")
             device_report = ensure_cuda_if_requested(config.require_cuda)
             update_progress(run_progress, profile="operation=ensure_cuda")
-            official_report = run_t2smark_official_if_needed(root_path, config, paths)
+            official_report = run_t2smark_official_if_needed(root_path, config, paths, progress=run_progress)
             update_progress(run_progress, profile="operation=t2smark_official_reference")
+            emit_progress_status(run_progress, profile="operation=build_image_pairs status=running")
             image_pairs = build_t2smark_image_pairs(root_path, config, paths)
             update_progress(run_progress, profile=f"operation=build_image_pairs pairs={len(image_pairs)}")
-            adapter_report = build_and_run_primary_baseline_adapters(root_path, config, paths)
+            adapter_report = build_and_run_primary_baseline_adapters(root_path, config, paths, progress=run_progress)
             update_progress(run_progress, profile="operation=primary_baseline_adapters baselines=4")
+            emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
             environment_report = build_runtime_environment_report()
             environment_report["external_baseline_device_report"] = device_report
             write_json(paths["environment_report"], environment_report)
@@ -1165,6 +1245,7 @@ def build_default_config() -> ExternalBaselineGpuSmokeConfig:
         save_image=os.environ.get("SLM_WM_T2SMARK_SAVE_IMAGE", "1") != "0",
         require_cuda=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REQUIRE_CUDA", "1") != "0",
         timeout_seconds=int(os.environ.get("SLM_WM_EXTERNAL_BASELINE_TIMEOUT_SECONDS", "86400")),
+        enable_workflow_progress_bar=os.environ.get("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1") != "0",
     )
 
 
