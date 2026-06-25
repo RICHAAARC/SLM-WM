@@ -209,6 +209,38 @@ def test_dataset_quality_formal_feature_import_keeps_small_sample_blocked(tmp_pa
 
 
 @pytest.mark.quick
+def test_dataset_quality_formal_feature_import_measures_when_scale_is_ready(tmp_path: Path) -> None:
+    """样本规模达到门槛时, 正式 Inception 特征应完成 FID / KID 后处理。"""
+
+    rows = registry_rows(tmp_path)
+    records = build_dataset_quality_image_records(rows, tmp_path)
+    formal_source_features = [
+        [0.0, 0.0, 1.0],
+        [1.0, 0.0, 0.0],
+    ]
+    formal_comparison_features = [
+        [0.1, 0.0, 0.9],
+        [0.9, 0.1, 0.0],
+    ]
+
+    metric_rows = build_dataset_quality_metric_rows(
+        records,
+        tmp_path,
+        formal_source_features=formal_source_features,
+        formal_comparison_features=formal_comparison_features,
+        formal_min_sample_count=2,
+    )
+    summary = build_dataset_quality_summary(records, metric_rows)
+    rows_by_name = {row["quality_metric_name"]: row for row in metric_rows}
+
+    assert rows_by_name["fid"]["metric_status"] == "measured"
+    assert rows_by_name["kid"]["metric_status"] == "measured"
+    assert isinstance(rows_by_name["fid"]["quality_metric_value"], float)
+    assert isinstance(rows_by_name["kid"]["quality_metric_value"], float)
+    assert summary["formal_fid_kid_ready"] is True
+
+
+@pytest.mark.quick
 def test_dataset_quality_drive_plan_imports_mock_formal_features(tmp_path: Path) -> None:
     """Drive 前序包链路应能生成正式特征记录, 但小样本仍保持 FID / KID 阻断."""
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import os
 from pathlib import Path
+import time
 from typing import Any, Iterable, Mapping
 
 import numpy as np
@@ -16,6 +18,10 @@ FORMAL_FEATURE_BACKEND = "inception_feature_backend"
 FORMAL_FID_KID_BLOCKER = "requires_inception_feature_backend"
 FORMAL_FID_KID_SAMPLE_BLOCKER = "requires_full_main_sample_scale"
 FORMAL_FID_KID_NUMERIC_BLOCKER = "requires_covariance_square_root_backend"
+FORMAL_FID_CPU_MAX_FEATURE_DIM = 512
+FORMAL_KID_EXACT_MAX_SAMPLE_COUNT = 3000
+FORMAL_KID_SUBSET_COUNT = 8
+FORMAL_KID_SUBSET_SIZE = 512
 
 
 @dataclass(frozen=True)
@@ -141,6 +147,42 @@ def _biased_polynomial_mmd(source_features: np.ndarray, comparison_features: np.
     return float(max(source_kernel + comparison_kernel - 2.0 * cross_kernel, 0.0))
 
 
+def _metric_progress_enabled() -> bool:
+    """判断是否输出数据集级质量指标重建进度。"""
+
+    value = os.environ.get("SLM_WM_DATASET_QUALITY_METRIC_PROGRESS", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _emit_metric_progress(
+    *,
+    started_at: float,
+    completed: int,
+    total: int,
+    profile: str,
+) -> None:
+    """输出长耗时数据集级指标的总体进度。
+
+    该函数属于通用工程写法: 它只报告当前指标重建所处的资源环节, 不参与
+    FID / KID 数值逻辑。这样可以避免用户在 Colab 中看到特征提取完成后
+    长时间没有任何反馈, 同时保持核心指标计算路径可复用。
+    """
+
+    if not _metric_progress_enabled():
+        return
+    elapsed_seconds = max(0.0, time.monotonic() - started_at)
+    percent = completed / max(total, 1) * 100.0
+    eta_seconds = elapsed_seconds * max(total - completed, 0) / completed if completed > 0 else 0.0
+    print(
+        (
+            f"工作量进度 | dataset-level metric reconstruction | {completed}/{total} ({percent:.1f}%) | "
+            f"elapsed={elapsed_seconds / 60.0:.1f} min | eta={eta_seconds / 60.0:.1f} min | "
+            f"profile={profile}"
+        ),
+        flush=True,
+    )
+
+
 def _feature_array_or_none(feature_values: Any) -> np.ndarray | None:
     """把可选特征矩阵规整为二维浮点数组。
 
@@ -155,35 +197,161 @@ def _feature_array_or_none(feature_values: Any) -> np.ndarray | None:
     return array
 
 
-def _exact_gaussian_fid(source_features: np.ndarray, comparison_features: np.ndarray) -> float | None:
-    """使用完整协方差矩阵计算 FID。
+def _fid_cpu_feature_dim_limit() -> int:
+    """读取 CPU FID 最大特征维度, 防止无 GPU 会话长时间阻塞。"""
 
-    此处设计的主要考虑在于: 正式 FID 必须基于视觉特征分布的均值与协方差, 不能复用轻量 pixel proxy 的对角近似。
-    scipy 只在导入正式特征并且样本规模满足要求时作为可选后端使用, 默认小样本链路不会触发该依赖。
+    return int(os.environ.get("SLM_WM_FID_CPU_MAX_FEATURE_DIM", str(FORMAL_FID_CPU_MAX_FEATURE_DIM)))
+
+
+def _sqrt_trace_fid_from_covariances(
+    source_mean: np.ndarray,
+    comparison_mean: np.ndarray,
+    source_covariance: np.ndarray,
+    comparison_covariance: np.ndarray,
+) -> float:
+    """用对称特征分解计算完整协方差 FID。
+
+    这一实现属于通用工程写法: FID 只需要 `sqrt(C1 C2)` 的迹, 不需要构造
+    SciPy `sqrtm` 返回的完整复数矩阵。先构造 `sqrt(C1) C2 sqrt(C1)` 这个
+    对称半正定矩阵, 再对其特征值开方求和, 可以显著降低数值后处理的
+    常数开销, 并避免 Colab CPU 在 2048 维 Inception 特征上长时间无反馈。
+    """
+
+    source_covariance = (source_covariance + source_covariance.T) * 0.5
+    comparison_covariance = (comparison_covariance + comparison_covariance.T) * 0.5
+    source_eigenvalues, source_eigenvectors = np.linalg.eigh(source_covariance)
+    source_eigenvalues = np.clip(source_eigenvalues, 0.0, None)
+    source_covariance_sqrt = (source_eigenvectors * np.sqrt(source_eigenvalues)[None, :]) @ source_eigenvectors.T
+    middle = source_covariance_sqrt @ comparison_covariance @ source_covariance_sqrt
+    middle = (middle + middle.T) * 0.5
+    middle_eigenvalues = np.linalg.eigvalsh(middle)
+    covariance_sqrt_trace = np.sqrt(np.clip(middle_eigenvalues, 0.0, None)).sum()
+    mean_term = np.sum((source_mean - comparison_mean) ** 2)
+    covariance_term = np.trace(source_covariance) + np.trace(comparison_covariance) - 2.0 * covariance_sqrt_trace
+    return float(max(mean_term + covariance_term, 0.0))
+
+
+def _torch_gaussian_fid(
+    source_features: np.ndarray,
+    comparison_features: np.ndarray,
+    *,
+    progress: Any = None,
+) -> float | None:
+    """优先使用 PyTorch 后端计算完整协方差 FID。
+
+    项目特定考虑在于: Colab `pilot_paper` 会产生 2048 维 Inception 特征,
+    SciPy `sqrtm` 在 CPU 上可能阻塞数小时。这里在 CUDA 可用时使用
+    `torch.linalg.eigh` 计算同一 FID 公式; CUDA 不可用且维度过高时返回
+    `None`, 由上层写出受治理的 numeric blocker, 而不是让 Notebook 静默卡住。
     """
 
     try:
-        from scipy import linalg
+        import torch
     except Exception:
         return None
+    feature_dim = int(source_features.shape[1])
+    use_cuda = bool(torch.cuda.is_available())
+    if not use_cuda and feature_dim > _fid_cpu_feature_dim_limit():
+        return None
+    device = torch.device("cuda" if use_cuda else "cpu")
+    dtype = torch.float32 if use_cuda else torch.float64
+    try:
+        with torch.no_grad():
+            if progress is not None:
+                progress("fid_torch_feature_transfer")
+            source_tensor = torch.as_tensor(source_features, dtype=dtype, device=device)
+            comparison_tensor = torch.as_tensor(comparison_features, dtype=dtype, device=device)
+            if progress is not None:
+                progress("fid_torch_covariance")
+            source_mean = source_tensor.mean(dim=0)
+            comparison_mean = comparison_tensor.mean(dim=0)
+            source_centered = source_tensor - source_mean
+            comparison_centered = comparison_tensor - comparison_mean
+            source_denominator = max(int(source_tensor.shape[0]) - 1, 1)
+            comparison_denominator = max(int(comparison_tensor.shape[0]) - 1, 1)
+            source_covariance = source_centered.T.matmul(source_centered) / source_denominator
+            comparison_covariance = comparison_centered.T.matmul(comparison_centered) / comparison_denominator
+            source_covariance = (source_covariance + source_covariance.T) * 0.5
+            comparison_covariance = (comparison_covariance + comparison_covariance.T) * 0.5
+            if progress is not None:
+                progress("fid_torch_covariance_square_root")
+            source_eigenvalues, source_eigenvectors = torch.linalg.eigh(source_covariance)
+            source_eigenvalues = torch.clamp(source_eigenvalues, min=0.0)
+            source_covariance_sqrt = (
+                source_eigenvectors * torch.sqrt(source_eigenvalues).unsqueeze(0)
+            ).matmul(source_eigenvectors.T)
+            middle = source_covariance_sqrt.matmul(comparison_covariance).matmul(source_covariance_sqrt)
+            middle = (middle + middle.T) * 0.5
+            middle_eigenvalues = torch.linalg.eigvalsh(middle)
+            covariance_sqrt_trace = torch.sqrt(torch.clamp(middle_eigenvalues, min=0.0)).sum()
+            mean_term = torch.sum((source_mean - comparison_mean) ** 2)
+            covariance_term = torch.trace(source_covariance) + torch.trace(comparison_covariance) - 2.0 * covariance_sqrt_trace
+            value = torch.clamp(mean_term + covariance_term, min=0.0).detach().cpu().item()
+    except Exception:
+        return None
+    return float(value)
+
+
+def _exact_gaussian_fid(
+    source_features: np.ndarray,
+    comparison_features: np.ndarray,
+    *,
+    progress: Any = None,
+) -> float | None:
+    """使用完整协方差矩阵计算 FID。
+
+    此处设计的主要考虑在于: 正式 FID 必须基于视觉特征分布的均值与协方差,
+    不能复用轻量 pixel proxy 的对角近似。实现优先使用 CUDA 上的对称
+    特征分解; 在无 GPU 且特征维度过高时返回 numeric blocker, 防止
+    repository runner 或 Notebook 长时间卡死。
+    """
+
+    torch_value = _torch_gaussian_fid(source_features, comparison_features, progress=progress)
+    if torch_value is not None:
+        return torch_value
+    feature_dim = int(source_features.shape[1])
+    if feature_dim > _fid_cpu_feature_dim_limit():
+        return None
+    if progress is not None:
+        progress("fid_numpy_covariance")
     source_mean = source_features.mean(axis=0)
     comparison_mean = comparison_features.mean(axis=0)
     source_covariance = np.atleast_2d(np.cov(source_features, rowvar=False))
     comparison_covariance = np.atleast_2d(np.cov(comparison_features, rowvar=False))
-    covariance_mean = linalg.sqrtm(source_covariance @ comparison_covariance)
-    if not np.isfinite(covariance_mean).all():
-        offset = np.eye(source_covariance.shape[0]) * 1e-6
-        covariance_mean = linalg.sqrtm((source_covariance + offset) @ (comparison_covariance + offset))
-    if np.iscomplexobj(covariance_mean):
-        covariance_mean = covariance_mean.real
-    mean_term = np.sum((source_mean - comparison_mean) ** 2)
-    covariance_term = np.trace(source_covariance + comparison_covariance - 2.0 * covariance_mean)
-    return float(max(mean_term + covariance_term, 0.0))
+    if progress is not None:
+        progress("fid_numpy_covariance_square_root")
+    return _sqrt_trace_fid_from_covariances(
+        source_mean,
+        comparison_mean,
+        source_covariance,
+        comparison_covariance,
+    )
 
 
-def _unbiased_polynomial_mmd(source_features: np.ndarray, comparison_features: np.ndarray) -> float:
-    """使用三阶多项式核计算 KID 的无偏 MMD 形式。"""
+def _kid_exact_max_sample_count() -> int:
+    """读取 KID 完整核矩阵计算的样本上限。"""
 
+    return int(os.environ.get("SLM_WM_KID_EXACT_MAX_SAMPLE_COUNT", str(FORMAL_KID_EXACT_MAX_SAMPLE_COUNT)))
+
+
+def _kid_subset_count() -> int:
+    """读取大样本 KID 确定性子集数量。"""
+
+    return max(1, int(os.environ.get("SLM_WM_KID_SUBSET_COUNT", str(FORMAL_KID_SUBSET_COUNT))))
+
+
+def _kid_subset_size() -> int:
+    """读取大样本 KID 确定性子集大小。"""
+
+    return max(2, int(os.environ.get("SLM_WM_KID_SUBSET_SIZE", str(FORMAL_KID_SUBSET_SIZE))))
+
+
+def _unbiased_polynomial_mmd_exact(source_features: np.ndarray, comparison_features: np.ndarray) -> float:
+    """使用三阶多项式核计算完整无偏 MMD。"""
+
+    torch_value = _torch_unbiased_polynomial_mmd_exact(source_features, comparison_features)
+    if torch_value is not None:
+        return torch_value
     source_count = source_features.shape[0]
     comparison_count = comparison_features.shape[0]
     source_kernel = _polynomial_kernel(source_features, source_features)
@@ -196,6 +364,85 @@ def _unbiased_polynomial_mmd(source_features: np.ndarray, comparison_features: n
     )
     cross_term = cross_kernel.mean()
     return float(max(source_term + comparison_term - 2.0 * cross_term, 0.0))
+
+
+def _torch_unbiased_polynomial_mmd_exact(
+    source_features: np.ndarray,
+    comparison_features: np.ndarray,
+) -> float | None:
+    """在 CUDA 可用时计算完整 KID 核矩阵, 避免 Colab CPU 后处理过慢。"""
+
+    try:
+        import torch
+    except Exception:
+        return None
+    if not torch.cuda.is_available():
+        return None
+    try:
+        with torch.no_grad():
+            device = torch.device("cuda")
+            source_tensor = torch.as_tensor(source_features, dtype=torch.float32, device=device)
+            comparison_tensor = torch.as_tensor(comparison_features, dtype=torch.float32, device=device)
+            feature_dim = max(int(source_tensor.shape[1]), 1)
+            source_kernel = (source_tensor.matmul(source_tensor.T) / feature_dim + 1.0) ** 3
+            comparison_kernel = (comparison_tensor.matmul(comparison_tensor.T) / feature_dim + 1.0) ** 3
+            cross_kernel = (source_tensor.matmul(comparison_tensor.T) / feature_dim + 1.0) ** 3
+            source_count = int(source_tensor.shape[0])
+            comparison_count = int(comparison_tensor.shape[0])
+            source_term = (source_kernel.sum() - torch.trace(source_kernel)) / max(source_count * (source_count - 1), 1)
+            comparison_term = (comparison_kernel.sum() - torch.trace(comparison_kernel)) / max(
+                comparison_count * (comparison_count - 1),
+                1,
+            )
+            cross_term = cross_kernel.mean()
+            value = torch.clamp(source_term + comparison_term - 2.0 * cross_term, min=0.0).detach().cpu().item()
+    except Exception:
+        return None
+    return float(value)
+
+
+def _deterministic_subset_indices(total: int, subset_size: int, subset_index: int, subset_count: int) -> np.ndarray:
+    """生成可复现的大样本 KID 子集索引。"""
+
+    if total <= subset_size:
+        return np.arange(total)
+    if subset_count <= 1:
+        start = max(0, (total - subset_size) // 2)
+    else:
+        start = round(subset_index * (total - subset_size) / (subset_count - 1))
+    return np.arange(int(start), int(start) + subset_size)
+
+
+def _deterministic_subset_polynomial_mmd(source_features: np.ndarray, comparison_features: np.ndarray) -> float:
+    """使用确定性子集估计大样本 KID, 避免构造超大核矩阵。"""
+
+    subset_size = min(_kid_subset_size(), source_features.shape[0], comparison_features.shape[0])
+    subset_count = _kid_subset_count()
+    values: list[float] = []
+    for subset_index in range(subset_count):
+        source_indices = _deterministic_subset_indices(source_features.shape[0], subset_size, subset_index, subset_count)
+        comparison_indices = _deterministic_subset_indices(
+            comparison_features.shape[0],
+            subset_size,
+            subset_index,
+            subset_count,
+        )
+        values.append(
+            _unbiased_polynomial_mmd_exact(
+                source_features[source_indices],
+                comparison_features[comparison_indices],
+            )
+        )
+    return float(max(np.mean(values), 0.0))
+
+
+def _unbiased_polynomial_mmd(source_features: np.ndarray, comparison_features: np.ndarray) -> float:
+    """使用三阶多项式核计算 KID 的无偏 MMD 形式。"""
+
+    max_count = max(int(source_features.shape[0]), int(comparison_features.shape[0]))
+    if max_count <= _kid_exact_max_sample_count():
+        return _unbiased_polynomial_mmd_exact(source_features, comparison_features)
+    return _deterministic_subset_polynomial_mmd(source_features, comparison_features)
 
 
 def _formal_metric_rows(
@@ -222,6 +469,18 @@ def _formal_metric_rows(
         "sample_pair_count": sample_pair_count,
         "supports_paper_claim": False,
     }
+    progress_started_at = time.monotonic()
+
+    def metric_progress(profile: str) -> None:
+        """输出当前正式质量指标重建位置。"""
+
+        _emit_metric_progress(
+            started_at=progress_started_at,
+            completed=1,
+            total=4,
+            profile=profile,
+        )
+
     if source_array is None or comparison_array is None:
         metric_status = FORMAL_FID_KID_BLOCKER
         fid_value: str | float = "unsupported"
@@ -235,15 +494,34 @@ def _formal_metric_rows(
         fid_value = "unsupported"
         kid_value = "unsupported"
     else:
-        fid_result = _exact_gaussian_fid(source_array, comparison_array)
+        metric_progress("formal_fid_start")
+        fid_result = _exact_gaussian_fid(source_array, comparison_array, progress=metric_progress)
         if fid_result is None:
             metric_status = FORMAL_FID_KID_NUMERIC_BLOCKER
             fid_value = "unsupported"
             kid_value = "unsupported"
+            _emit_metric_progress(
+                started_at=progress_started_at,
+                completed=4,
+                total=4,
+                profile="formal_metrics_numeric_blocker",
+            )
         else:
+            _emit_metric_progress(
+                started_at=progress_started_at,
+                completed=3,
+                total=4,
+                profile="formal_kid_start",
+            )
             metric_status = "measured"
             fid_value = fid_result
             kid_value = _unbiased_polynomial_mmd(source_array, comparison_array)
+            _emit_metric_progress(
+                started_at=progress_started_at,
+                completed=4,
+                total=4,
+                profile="formal_metrics_done",
+            )
     return [
         {
             "quality_metric_name": "fid",
