@@ -154,6 +154,19 @@ def _metric_progress_enabled() -> bool:
     return value not in {"0", "false", "no", "off"}
 
 
+def _metric_progress_interval_items() -> int:
+    """读取图像级 proxy 进度刷新间隔."""
+
+    return max(1, int(os.environ.get("SLM_WM_DATASET_QUALITY_PROGRESS_INTERVAL_ITEMS", "50")))
+
+
+def _should_emit_metric_item_progress(completed: int, total: int) -> bool:
+    """判断图像级 proxy 进度是否需要刷新."""
+
+    interval = _metric_progress_interval_items()
+    return completed in {0, total} or completed % interval == 0
+
+
 def _emit_metric_progress(
     *,
     started_at: float,
@@ -642,8 +655,36 @@ def build_dataset_quality_metric_rows(
             ]
         )
         return rows
-    source_features = [extract_pixel_histogram_feature(path) for path in source_paths]
-    comparison_features = [extract_pixel_histogram_feature(path) for path in comparison_paths]
+    pixel_started_at = time.monotonic()
+    pixel_total = len(source_paths) + len(comparison_paths)
+    _emit_metric_progress(
+        started_at=pixel_started_at,
+        completed=0,
+        total=pixel_total,
+        profile="pixel_proxy_start",
+    )
+    source_features = []
+    for source_index, path in enumerate(source_paths, start=1):
+        source_features.append(extract_pixel_histogram_feature(path))
+        completed = source_index
+        if _should_emit_metric_item_progress(completed, pixel_total):
+            _emit_metric_progress(
+                started_at=pixel_started_at,
+                completed=completed,
+                total=pixel_total,
+                profile=f"pixel_proxy_source={source_index}/{len(source_paths)}",
+            )
+    comparison_features = []
+    for comparison_index, path in enumerate(comparison_paths, start=1):
+        comparison_features.append(extract_pixel_histogram_feature(path))
+        completed = len(source_paths) + comparison_index
+        if _should_emit_metric_item_progress(completed, pixel_total):
+            _emit_metric_progress(
+                started_at=pixel_started_at,
+                completed=completed,
+                total=pixel_total,
+                profile=f"pixel_proxy_comparison={comparison_index}/{len(comparison_paths)}",
+            )
     source_array = np.vstack(source_features)
     comparison_array = np.vstack(comparison_features)
     rows.extend(

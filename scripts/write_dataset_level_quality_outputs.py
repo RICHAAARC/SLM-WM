@@ -7,9 +7,11 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import Any
 import zipfile
 
@@ -29,6 +31,52 @@ from main.core.digest import build_stable_digest
 DEFAULT_OUTPUT_DIR = Path("outputs/dataset_level_quality")
 DEFAULT_REAL_ATTACK_REGISTRY_PATH = Path("outputs/real_attack_evaluation/real_attacked_image_registry.jsonl")
 DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 100
+DEFAULT_PROGRESS_INTERVAL_ITEMS = 50
+
+
+def dataset_quality_io_progress_enabled() -> bool:
+    """判断是否输出数据集级质量 I/O 与 proxy 进度."""
+
+    value = os.environ.get("SLM_WM_DATASET_QUALITY_IO_PROGRESS", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def progress_interval_items() -> int:
+    """读取进度刷新间隔, 避免 Colab 输出区被逐图像刷屏."""
+
+    return max(1, int(os.environ.get("SLM_WM_DATASET_QUALITY_PROGRESS_INTERVAL_ITEMS", str(DEFAULT_PROGRESS_INTERVAL_ITEMS))))
+
+
+def should_emit_progress(completed: int, total: int) -> bool:
+    """判断当前计数是否需要输出进度."""
+
+    interval = progress_interval_items()
+    return completed in {0, total} or completed % interval == 0
+
+
+def emit_dataset_quality_progress(
+    *,
+    desc: str,
+    started_at: float,
+    completed: int,
+    total: int,
+    profile: str,
+) -> None:
+    """输出数据集级质量重建的总体工作量进度."""
+
+    if not dataset_quality_io_progress_enabled() or not should_emit_progress(completed, total):
+        return
+    elapsed_seconds = max(0.0, time.monotonic() - started_at)
+    percent = completed / max(total, 1) * 100.0
+    eta_seconds = elapsed_seconds * max(total - completed, 0) / completed if completed > 0 else 0.0
+    print(
+        (
+            f"工作量进度 | {desc} | {completed}/{total} ({percent:.1f}%) | "
+            f"elapsed={elapsed_seconds / 60.0:.1f} min | eta={eta_seconds / 60.0:.1f} min | "
+            f"profile={profile}"
+        ),
+        flush=True,
+    )
 
 
 def stable_json_text(value: Any) -> str:
@@ -264,10 +312,24 @@ def materialize_images_from_input_packages(
     if not wanted_members:
         return ()
     materialized_root.mkdir(parents=True, exist_ok=True)
+    matched_members_by_package: list[tuple[Path, tuple[str, ...]]] = []
     for package_path in input_package_paths:
         with zipfile.ZipFile(package_path) as archive:
             archive_members = set(archive.namelist())
-            for member_name in sorted(wanted_members & archive_members):
+            matched_members_by_package.append((package_path, tuple(sorted(wanted_members & archive_members))))
+    total_materialization_count = sum(len(members) for _, members in matched_members_by_package)
+    completed_count = 0
+    started_at = time.monotonic()
+    emit_dataset_quality_progress(
+        desc="dataset-level image materialization",
+        started_at=started_at,
+        completed=0,
+        total=total_materialization_count,
+        profile=f"package_count={len(matched_members_by_package)}",
+    )
+    for package_path, matched_members in matched_members_by_package:
+        with zipfile.ZipFile(package_path) as archive:
+            for member_name in matched_members:
                 target_path = _safe_materialized_path(materialized_root, member_name)
                 target_path.parent.mkdir(parents=True, exist_ok=True)
                 with archive.open(member_name) as source_handle, target_path.open("wb") as target_handle:
@@ -285,6 +347,14 @@ def materialize_images_from_input_packages(
                     f"dataset_quality_image_resolution_{payload['image_resolution_record_digest'][:16]}"
                 )
                 materialized_records.append(payload)
+                completed_count += 1
+                emit_dataset_quality_progress(
+                    desc="dataset-level image materialization",
+                    started_at=started_at,
+                    completed=completed_count,
+                    total=total_materialization_count,
+                    profile=f"package={package_path.name} image={Path(member_name).name}",
+                )
     return tuple(materialized_records)
 
 

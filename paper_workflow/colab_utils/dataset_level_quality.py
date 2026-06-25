@@ -35,6 +35,7 @@ DEFAULT_ALIGNED_RESCORING_DRIVE_DIR = ""
 REAL_ATTACK_EVALUATION_PACKAGE_PATTERN = "real_attack_evaluation_package_*.zip"
 ALIGNED_RESCORING_PACKAGE_PATTERN = "aligned_rescoring_package_*.zip"
 DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 100
+COPY_CHUNK_SIZE_BYTES = 16 * 1024 * 1024
 REAL_ATTACK_ALLOWED_PREFIXES = (
     "outputs/real_attack_evaluation/real_attacked_image_registry.jsonl",
 )
@@ -103,13 +104,53 @@ def latest_drive_package(drive_dir: str | Path, pattern: str) -> Path:
     return candidates[-1]
 
 
+def emit_dataset_level_quality_status(message: str, **metadata: Any) -> None:
+    """输出数据集级质量 workflow 的关键环节状态.
+
+    该函数属于 Notebook 运行观测层: 它只帮助用户判断长耗时 Colab cell
+    当前运行到哪个资源环节, 不参与正式 records、metrics 或 manifest
+    的构造, 因而不会改变论文证据语义。
+    """
+
+    metadata_text = json.dumps(metadata, ensure_ascii=False, sort_keys=True) if metadata else "{}"
+    print(f"数据集级质量状态 | {message} | {metadata_text}", flush=True)
+
+
+def copy_file_with_progress(source_path: Path, target_path: Path, *, desc: str) -> None:
+    """按块复制大文件并输出总体进度.
+
+    Google Drive 到 Colab 本地磁盘的大 ZIP 复制可能持续数十分钟。使用按块复制可以
+    保留 `shutil.copy2` 的元数据语义, 同时让用户看到复制进展和当前文件名。
+    """
+
+    total_bytes = source_path.stat().st_size
+    total_chunks = max(1, (total_bytes + COPY_CHUNK_SIZE_BYTES - 1) // COPY_CHUNK_SIZE_BYTES)
+    copied_bytes = 0
+    with source_path.open("rb") as source_handle, target_path.open("wb") as target_handle:
+        with progress_bar(total_chunks, desc=desc, enabled=True) as copy_progress:
+            while True:
+                chunk = source_handle.read(COPY_CHUNK_SIZE_BYTES)
+                if not chunk:
+                    break
+                target_handle.write(chunk)
+                copied_bytes += len(chunk)
+                update_progress(
+                    copy_progress,
+                    profile=(
+                        f"file={source_path.name} copied_mb={copied_bytes / 1024 / 1024:.1f}/"
+                        f"{total_bytes / 1024 / 1024:.1f}"
+                    ),
+                )
+    shutil.copystat(source_path, target_path)
+
+
 def copy_package_to_input_dir(package_path: Path, input_dir: Path) -> Path:
     """把 Drive 前序包复制到本次输出目录, 便于打包核对和本地重建."""
 
     input_dir.mkdir(parents=True, exist_ok=True)
     target_path = input_dir / package_path.name
     if package_path.resolve() != target_path.resolve():
-        shutil.copy2(package_path, target_path)
+        copy_file_with_progress(package_path, target_path, desc="dataset-level package copy")
     return target_path
 
 
@@ -153,6 +194,11 @@ def materialize_dataset_level_quality_inputs(
     input_dir = output_dir / "input_packages"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    emit_dataset_level_quality_status(
+        "查找前序结果包",
+        real_attack_evaluation_drive_dir=str(resolved_real_attack_evaluation_drive_dir),
+        aligned_rescoring_drive_dir=str(resolved_aligned_rescoring_drive_dir),
+    )
     real_attack_package = latest_drive_package(
         resolved_real_attack_evaluation_drive_dir,
         REAL_ATTACK_EVALUATION_PACKAGE_PATTERN,
@@ -161,8 +207,14 @@ def materialize_dataset_level_quality_inputs(
         resolved_aligned_rescoring_drive_dir,
         ALIGNED_RESCORING_PACKAGE_PATTERN,
     )
+    emit_dataset_level_quality_status(
+        "复制前序结果包到本地 workspace",
+        real_attack_package=real_attack_package.name,
+        aligned_rescoring_package=aligned_rescoring_package.name,
+    )
     local_real_attack_package = copy_package_to_input_dir(real_attack_package, input_dir)
     local_aligned_rescoring_package = copy_package_to_input_dir(aligned_rescoring_package, input_dir)
+    emit_dataset_level_quality_status("抽取真实攻击 registry")
     extracted_entries = safe_extract_selected_entries(
         local_real_attack_package,
         root_path,
@@ -383,6 +435,11 @@ def run_default_dataset_level_quality_from_drive_plan(
     )
     output_dir = root_path / DEFAULT_OUTPUT_DIR
     try:
+        emit_dataset_level_quality_status(
+            "启动数据集级质量 workflow",
+            paper_run_name=paper_run.run_name,
+            formal_min_sample_count=resolved_formal_min_sample_count,
+        )
         input_manifest = materialize_dataset_level_quality_inputs(
             root=root_path,
             real_attack_evaluation_drive_dir=real_attack_evaluation_drive_dir,
@@ -392,12 +449,18 @@ def run_default_dataset_level_quality_from_drive_plan(
             input_manifest["real_attack_evaluation_input_package_path"],
             input_manifest["aligned_rescoring_input_package_path"],
         )
+        emit_dataset_level_quality_status("生成初始图像记录与 pixel proxy")
         write_dataset_level_quality_outputs(root=root_path, input_package_paths=input_packages)
+        emit_dataset_level_quality_status("提取 Inception 特征")
         feature_payload = write_formal_feature_records(
             root=root_path,
             feature_extractor=feature_extractor,
             environment_report=environment_report,
             device_name=device_name,
+        )
+        emit_dataset_level_quality_status(
+            "重建正式特征导入与质量指标",
+            input_feature_record_count=feature_payload["input_feature_record_count"],
         )
         manifest = write_dataset_level_quality_outputs(
             root=root_path,
