@@ -11,6 +11,7 @@ import zipfile
 from PIL import Image
 import pytest
 
+import scripts.write_dataset_level_quality_outputs as dataset_quality_writer
 from experiments.protocol import (
     FORMAL_FEATURE_BACKEND,
     FORMAL_FID_KID_BLOCKER,
@@ -155,6 +156,62 @@ def test_dataset_quality_writer_materializes_missing_images_from_input_package(t
     assert summary["materialized_image_input_count"] == 1
     assert any(row["resolution_status"] == "materialized_from_input_package" for row in resolution_rows)
     assert any("materialized_image_inputs" in path for path in manifest["output_paths"])
+
+
+@pytest.mark.quick
+def test_dataset_quality_materialization_caches_package_digest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """物化多张图像时应按包缓存 ZIP 摘要, 避免重复扫描大文件。"""
+
+    image_entries = (
+        Path("outputs/images/source_a.png"),
+        Path("outputs/images/attacked_a.png"),
+        Path("outputs/images/source_b.png"),
+        Path("outputs/images/attacked_b.png"),
+    )
+    colors = ((10, 20, 30), (11, 21, 31), (40, 50, 60), (41, 51, 61))
+    for entry, color in zip(image_entries, colors, strict=True):
+        write_image(tmp_path / entry, color)
+
+    records = build_dataset_quality_image_records(
+        [
+            {
+                "attack_name": "jpeg_compression",
+                "source_image_path": image_entries[0].as_posix(),
+                "attacked_image_path": image_entries[1].as_posix(),
+            },
+            {
+                "attack_name": "gaussian_blur",
+                "source_image_path": image_entries[2].as_posix(),
+                "attacked_image_path": image_entries[3].as_posix(),
+            },
+        ],
+        tmp_path,
+    )
+    package_path = tmp_path / "outputs" / "input_packages" / "dataset_quality_images.zip"
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(package_path, "w") as archive:
+        for entry in image_entries:
+            archive.write(tmp_path / entry, entry.as_posix())
+
+    original_path_digest = dataset_quality_writer.path_digest
+    package_digest_calls: list[str] = []
+
+    def counting_path_digest(path: Path) -> str:
+        """统计 ZIP 摘要计算次数, 保持原始摘要语义不变。"""
+
+        if Path(path).suffix == ".zip":
+            package_digest_calls.append(Path(path).name)
+        return original_path_digest(path)
+
+    monkeypatch.setattr(dataset_quality_writer, "path_digest", counting_path_digest)
+    materialized_records = dataset_quality_writer.materialize_images_from_input_packages(
+        records=records,
+        materialized_root=tmp_path / "outputs" / "dataset_level_quality" / "materialized_image_inputs",
+        input_package_paths=(package_path,),
+    )
+
+    assert len(materialized_records) == 4
+    assert package_digest_calls == [package_path.name]
 
 
 @pytest.mark.quick

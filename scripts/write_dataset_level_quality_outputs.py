@@ -299,6 +299,22 @@ def _safe_materialized_path(materialized_root: Path, member_name: str) -> Path:
     return target_path
 
 
+def write_archive_member_with_digest(archive: zipfile.ZipFile, member_name: str, target_path: Path) -> str:
+    """把 ZIP member 写入目标路径并同步计算图像摘要.
+
+    该函数属于通用工程写法: 图像物化时已经需要逐块读取 ZIP member,
+    因此同时更新 SHA-256 可以避免写盘后再次读取同一图像文件。前序
+    ZIP 包摘要则由调用方按包级别缓存, 避免每张图像重复扫描 GB 级包。
+    """
+
+    digest = hashlib.sha256()
+    with archive.open(member_name) as source_handle, target_path.open("wb") as target_handle:
+        for chunk in iter(lambda: source_handle.read(1024 * 1024), b""):
+            target_handle.write(chunk)
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def materialize_images_from_input_packages(
     *,
     records: Any,
@@ -328,18 +344,18 @@ def materialize_images_from_input_packages(
         profile=f"package_count={len(matched_members_by_package)}",
     )
     for package_path, matched_members in matched_members_by_package:
+        package_digest = path_digest(package_path)
         with zipfile.ZipFile(package_path) as archive:
             for member_name in matched_members:
                 target_path = _safe_materialized_path(materialized_root, member_name)
                 target_path.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(member_name) as source_handle, target_path.open("wb") as target_handle:
-                    target_handle.write(source_handle.read())
+                resolved_image_digest = write_archive_member_with_digest(archive, member_name, target_path)
                 payload = {
                     "requested_image_path": member_name,
                     "resolved_image_path": target_path.as_posix(),
                     "resolved_from_package_path": package_path.as_posix(),
-                    "resolved_image_digest": path_digest(target_path),
-                    "resolved_from_package_digest": path_digest(package_path),
+                    "resolved_image_digest": resolved_image_digest,
+                    "resolved_from_package_digest": package_digest,
                     "resolution_status": "materialized_from_input_package",
                 }
                 payload["image_resolution_record_digest"] = build_stable_digest(payload)
