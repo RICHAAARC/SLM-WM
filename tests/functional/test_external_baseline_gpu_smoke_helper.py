@@ -124,6 +124,9 @@ def test_t2smark_formal_attack_patch_adds_common_attack_outputs(tmp_path: Path) 
     assert "slm_attack_families" in patched_option
     assert "formal_attacks" in patched_source
     assert "apply_formal_image_attack" in patched_source
+    assert "from PIL import Image" in patched_source
+    assert "prepare_t2smark_decode_image" in patched_source
+    assert "resize((512, 512), Image.Resampling.BICUBIC)" in patched_source
 
 
 @pytest.mark.quick
@@ -279,3 +282,56 @@ def test_primary_baseline_adapter_plan_includes_four_methods(tmp_path: Path, mon
     assert report["primary_baseline_adapter_count"] == 4
     assert report["primary_baseline_observation_count"] == 8
     assert report["primary_baseline_attacked_image_count"] == 12
+
+
+@pytest.mark.quick
+def test_primary_baseline_adapter_report_keeps_partial_counts_on_runner_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """命令计划中单个 baseline 失败时, helper 仍应汇总已完成 baseline 的诊断计数。"""
+
+    config = ExternalBaselineGpuSmokeConfig(
+        output_dir="outputs/external_baseline_gpu_smoke",
+        require_cuda=True,
+        primary_baseline_max_samples=1,
+    )
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True)
+
+    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
+        command_text = " ".join(command)
+        if "run_external_baseline_command_plan.py" in command_text:
+            paths["execution_manifest"].parent.mkdir(parents=True, exist_ok=True)
+            paths["execution_manifest"].write_text('{"observation_count":6}\n', encoding="utf-8")
+            paths["baseline_observations"].write_text("[]\n", encoding="utf-8")
+            paths["command_results"].write_text(
+                "["
+                '{"baseline_id":"tree_ring","return_code":0,"observation_count":2},'
+                '{"baseline_id":"gaussian_shading","return_code":0,"observation_count":2},'
+                '{"baseline_id":"shallow_diffuse","return_code":0,"observation_count":2},'
+                '{"baseline_id":"t2smark","return_code":1,"observation_count":0}'
+                "]\n",
+                encoding="utf-8",
+            )
+            for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse"):
+                manifest_path = paths["adapter_output_root"] / baseline_id / f"{baseline_id}_method_faithful_sd35_adapter_manifest.json"
+                manifest_path.parent.mkdir(parents=True, exist_ok=True)
+                manifest_path.write_text(
+                    json.dumps({"baseline_id": baseline_id, "attacked_image_count": 4}, ensure_ascii=False),
+                    encoding="utf-8",
+                )
+            return {"command": command, "return_code": 1, "stdout": "", "stderr": ""}
+        return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr("paper_workflow.colab_utils.external_baseline_gpu_smoke.run_command", fake_run_command)
+
+    report = build_and_run_primary_baseline_adapters(tmp_path, config, paths)
+
+    assert report["adapter_execution_ready"] is False
+    assert report["adapter_unsupported_reason"] == "command_plan_runner_failed"
+    assert report["adapter_observation_count"] == 6
+    assert report["primary_baseline_adapter_ready"] is False
+    assert report["primary_baseline_observation_count"] == 6
+    assert report["ready_primary_baseline_ids"] == ["tree_ring", "gaussian_shading", "shallow_diffuse"]
+    assert report["attacked_image_count_by_baseline"]["t2smark"] == 0

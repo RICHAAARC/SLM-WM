@@ -76,14 +76,20 @@ from external_baseline.primary.sd35_method_faithful_common import (
     canonical_attack_name,
     file_digest,
 )
+from PIL import Image
 """
 T2SMARK_FORMAL_ATTACK_HELPER_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_COMPAT_MARKER}
 def configured_formal_attack_names():
     return [item.strip() for item in str(args.slm_attack_families or "").split(",") if item.strip()]
 
 
+def prepare_t2smark_decode_image(attacked_image):
+    \"\"\"将任意攻击图像归一到 T2SMark/SD3.5 检测入口期望的 512x512 RGB。\"\"\"
+    return attacked_image.convert("RGB").resize((512, 512), Image.Resampling.BICUBIC)
+
+
 def decode_attacked_image(attacked_image, master_key, key, fake_key, msg):
-    image_tensor = utils.to_tensor(attacked_image).to(device).half()
+    image_tensor = utils.to_tensor(prepare_t2smark_decode_image(attacked_image)).to(device).half()
     latents = pipe.get_image_latents(image_tensor, sample=False)
     reversed_latents = pipe.naive_forward_diffusion(
         latents=latents,
@@ -151,7 +157,9 @@ PACKAGE_EXTRA_PATHS = (
     "external_baseline/primary/sd35_method_faithful_common.py",
     "external_baseline/primary/t2smark/README.md",
     "external_baseline/primary/t2smark/adapter/run_slm_eval.py",
+    "external_baseline/primary/t2smark/source/run_sd35.py",
     "external_baseline/primary/t2smark/source/option.py",
+    "external_baseline/primary/t2smark/source/src/inversion/inverse_diffusion3.py",
     "external_baseline/primary/tree_ring/adapter/run_slm_eval.py",
     "external_baseline/primary/tree_ring/adapter/method_faithful_sd35.py",
     "external_baseline/primary/gaussian_shading/adapter/run_slm_eval.py",
@@ -606,6 +614,28 @@ def patch_t2smark_formal_attack_compatibility(root_path: Path, paths: dict[str, 
         source_text = source_text.replace(loop_anchor, loop_anchor + T2SMARK_FORMAL_ATTACK_LOOP_BLOCK + "\n", 1)
         source_path.write_text(source_text, encoding="utf-8")
         source_patch_applied = True
+    elif "prepare_t2smark_decode_image" not in source_text:
+        decode_anchor = "def decode_attacked_image(attacked_image, master_key, key, fake_key, msg):\n"
+        decode_input_line = "    image_tensor = utils.to_tensor(attacked_image).to(device).half()\n"
+        if decode_anchor not in source_text or decode_input_line not in source_text:
+            raise RuntimeError("t2smark_source_decode_resize_patch_anchor_missing")
+        if "from PIL import Image\n" not in source_text:
+            source_text = source_text.replace("from option import args\n", "from option import args\nfrom PIL import Image\n", 1)
+        source_text = source_text.replace(
+            decode_anchor,
+            "def prepare_t2smark_decode_image(attacked_image):\n"
+            "    \"\"\"将任意攻击图像归一到 T2SMark/SD3.5 检测入口期望的 512x512 RGB。\"\"\"\n"
+            "    return attacked_image.convert(\"RGB\").resize((512, 512), Image.Resampling.BICUBIC)\n\n\n"
+            + decode_anchor,
+            1,
+        )
+        source_text = source_text.replace(
+            decode_input_line,
+            "    image_tensor = utils.to_tensor(prepare_t2smark_decode_image(attacked_image)).to(device).half()\n",
+            1,
+        )
+        source_path.write_text(source_text, encoding="utf-8")
+        source_patch_applied = True
 
     report = {
         "formal_attack_patch_applied": bool(option_patch_applied or source_patch_applied),
@@ -845,6 +875,64 @@ def build_t2smark_image_pairs(root_path: Path, config: ExternalBaselineGpuSmokeC
     return current_rows
 
 
+def summarize_primary_baseline_adapter_outputs(
+    root_path: Path,
+    paths: dict[str, Path],
+    *,
+    prompt_plan_path: Path,
+    execution_return_code: int,
+    validation_return_code: int | None,
+) -> dict[str, Any]:
+    """汇总主表 baseline adapter 产物, 失败时也保留已完成方法的诊断计数。"""
+
+    execution_manifest = read_json(paths["execution_manifest"]) if paths["execution_manifest"].is_file() else {}
+    command_results = json.loads(paths["command_results"].read_text(encoding="utf-8")) if paths["command_results"].is_file() else []
+    observation_count_by_baseline = {
+        str(row.get("baseline_id")): int(row.get("observation_count", 0))
+        for row in command_results
+        if int(row.get("return_code", 1)) == 0
+    }
+    ready_baseline_ids = [
+        baseline_id
+        for baseline_id in PRIMARY_BASELINE_METHODS
+        if observation_count_by_baseline.get(baseline_id, 0) > 0
+    ]
+    attacked_image_count_by_baseline: dict[str, int] = {}
+    for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse"):
+        manifest_path = paths["adapter_output_root"] / baseline_id / f"{baseline_id}_method_faithful_sd35_adapter_manifest.json"
+        manifest = read_json(manifest_path) if manifest_path.is_file() else {}
+        attacked_image_count_by_baseline[baseline_id] = int(manifest.get("attacked_image_count", 0) or 0)
+    attacked_image_count_by_baseline["t2smark"] = 0
+    primary_ready = set(ready_baseline_ids) == set(PRIMARY_BASELINE_METHODS)
+    validation_ready = validation_return_code == 0
+    adapter_execution_ready = int(execution_return_code) == 0 and validation_ready and primary_ready
+    if adapter_execution_ready:
+        unsupported_reason = ""
+    elif int(execution_return_code) != 0:
+        unsupported_reason = "command_plan_runner_failed"
+    elif not validation_ready:
+        unsupported_reason = "primary_baseline_evidence_validation_failed"
+    else:
+        unsupported_reason = "primary_baseline_adapter_smoke_incomplete"
+    return {
+        "adapter_execution_ready": adapter_execution_ready,
+        "adapter_unsupported_reason": unsupported_reason,
+        "adapter_observation_count": int(execution_manifest.get("observation_count", 0)),
+        "primary_baseline_adapter_ready": primary_ready,
+        "primary_baseline_adapter_count": len(PRIMARY_BASELINE_METHODS),
+        "primary_baseline_observation_count": sum(observation_count_by_baseline.values()),
+        "primary_baseline_ids": list(PRIMARY_BASELINE_METHODS),
+        "ready_primary_baseline_ids": ready_baseline_ids,
+        "primary_baseline_observation_count_by_id": observation_count_by_baseline,
+        "primary_baseline_attacked_image_count": sum(attacked_image_count_by_baseline.values()),
+        "attacked_image_count_by_baseline": attacked_image_count_by_baseline,
+        "primary_baseline_prompt_plan_path": relative_or_absolute(prompt_plan_path, root_path),
+        "baseline_execution_manifest_path": relative_or_absolute(paths["execution_manifest"], root_path),
+        "baseline_observations_path": relative_or_absolute(paths["baseline_observations"], root_path),
+        "command_plan_path": relative_or_absolute(paths["command_plan"], root_path),
+    }
+
+
 def build_and_run_primary_baseline_adapters(
     root_path: Path,
     config: ExternalBaselineGpuSmokeConfig,
@@ -937,7 +1025,13 @@ def build_and_run_primary_baseline_adapters(
     )
     write_json(paths["output_dir"] / "baseline_command_plan_runner_result.json", execution_result)
     if execution_result["return_code"] != 0:
-        return {"adapter_execution_ready": False, "adapter_unsupported_reason": "command_plan_runner_failed"}
+        return summarize_primary_baseline_adapter_outputs(
+            root_path,
+            paths,
+            prompt_plan_path=prompt_plan_path,
+            execution_return_code=int(execution_result["return_code"]),
+            validation_return_code=None,
+        )
 
     validation_command = [
         sys.executable,
@@ -954,43 +1048,13 @@ def build_and_run_primary_baseline_adapters(
         progress_profile="operation=validate_primary_baseline_evidence",
     )
     write_json(paths["output_dir"] / "baseline_evidence_validation_result.json", validation_result)
-    execution_manifest = read_json(paths["execution_manifest"]) if paths["execution_manifest"].is_file() else {}
-    command_results = json.loads(paths["command_results"].read_text(encoding="utf-8")) if paths["command_results"].is_file() else []
-    observation_count_by_baseline = {
-        str(row.get("baseline_id")): int(row.get("observation_count", 0))
-        for row in command_results
-        if int(row.get("return_code", 1)) == 0
-    }
-    ready_baseline_ids = [
-        baseline_id
-        for baseline_id in PRIMARY_BASELINE_METHODS
-        if observation_count_by_baseline.get(baseline_id, 0) > 0
-    ]
-    attacked_image_count_by_baseline: dict[str, int] = {}
-    for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse"):
-        manifest_path = paths["adapter_output_root"] / baseline_id / f"{baseline_id}_method_faithful_sd35_adapter_manifest.json"
-        manifest = read_json(manifest_path) if manifest_path.is_file() else {}
-        attacked_image_count_by_baseline[baseline_id] = int(manifest.get("attacked_image_count", 0) or 0)
-    attacked_image_count_by_baseline["t2smark"] = 0
-    primary_ready = set(ready_baseline_ids) == set(PRIMARY_BASELINE_METHODS)
-    adapter_execution_ready = validation_result["return_code"] == 0 and primary_ready
-    return {
-        "adapter_execution_ready": adapter_execution_ready,
-        "adapter_unsupported_reason": "" if adapter_execution_ready else "primary_baseline_adapter_smoke_incomplete",
-        "adapter_observation_count": int(execution_manifest.get("observation_count", 0)),
-        "primary_baseline_adapter_ready": primary_ready,
-        "primary_baseline_adapter_count": len(PRIMARY_BASELINE_METHODS),
-        "primary_baseline_observation_count": sum(observation_count_by_baseline.values()),
-        "primary_baseline_ids": list(PRIMARY_BASELINE_METHODS),
-        "ready_primary_baseline_ids": ready_baseline_ids,
-        "primary_baseline_observation_count_by_id": observation_count_by_baseline,
-        "primary_baseline_attacked_image_count": sum(attacked_image_count_by_baseline.values()),
-        "attacked_image_count_by_baseline": attacked_image_count_by_baseline,
-        "primary_baseline_prompt_plan_path": relative_or_absolute(prompt_plan_path, root_path),
-        "baseline_execution_manifest_path": relative_or_absolute(paths["execution_manifest"], root_path),
-        "baseline_observations_path": relative_or_absolute(paths["baseline_observations"], root_path),
-        "command_plan_path": relative_or_absolute(paths["command_plan"], root_path),
-    }
+    return summarize_primary_baseline_adapter_outputs(
+        root_path,
+        paths,
+        prompt_plan_path=prompt_plan_path,
+        execution_return_code=int(execution_result["return_code"]),
+        validation_return_code=int(validation_result["return_code"]),
+    )
 
 
 def build_and_run_t2smark_adapter(
