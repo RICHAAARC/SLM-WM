@@ -506,6 +506,10 @@ def test_pilot_paper_result_closure_notebook_delegates_to_repository_commands() 
     assert "scripts/write_internal_ablation_outputs.py" in joined_source
     assert "scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py" in joined_source
     assert "scripts/write_pilot_paper_complete_result_package.py" in joined_source
+    assert "--skip-package-materialization" in joined_source
+    assert "--zip-compression" in joined_source
+    assert "stored" in joined_source
+    assert "complete_archive_name" in joined_source
     assert "json.dumps" not in joined_source
     assert "write_text(" not in joined_source
 

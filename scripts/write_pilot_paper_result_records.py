@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import time
 from typing import Any, Iterable, Mapping
 from zipfile import ZipFile
 
@@ -140,6 +141,76 @@ def file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+class WorkProgress:
+    """按文件数与字节数输出低噪声工作量进度。
+
+    该工具用于 Colab / Google Drive 的长耗时 I/O 路径。它不改变业务记录语义,
+    只让使用者能够判断当前是在扫描、解压还是复制, 便于定位远程文件系统卡顿。
+    """
+
+    def __init__(
+        self,
+        label: str,
+        total_count: int,
+        *,
+        total_bytes: int = 0,
+        emit_every_count: int = 50,
+        emit_every_seconds: float = 15.0,
+    ) -> None:
+        self.label = label
+        self.total_count = max(0, int(total_count))
+        self.total_bytes = max(0, int(total_bytes))
+        self.emit_every_count = max(1, int(emit_every_count))
+        self.emit_every_seconds = max(0.1, float(emit_every_seconds))
+        self.started_at = time.monotonic()
+        self.last_emit_at = 0.0
+        self.last_emit_count = -1
+
+    def emit(self, count: int, *, copied_bytes: int = 0, profile: str = "", force: bool = False) -> None:
+        """输出一行总体进度, 默认按时间和条目数节流。"""
+
+        current_count = max(0, int(count))
+        now = time.monotonic()
+        if not force and current_count != self.total_count:
+            enough_count = current_count - self.last_emit_count >= self.emit_every_count
+            enough_time = now - self.last_emit_at >= self.emit_every_seconds
+            if not enough_count and not enough_time:
+                return
+        elapsed = max(0.0, now - self.started_at)
+        count_ratio = 1.0 if self.total_count == 0 else min(1.0, current_count / max(1, self.total_count))
+        if self.total_count <= 1 and self.total_bytes and current_count < self.total_count:
+            ratio = min(1.0, max(0.0, float(copied_bytes) / max(1.0, float(self.total_bytes))))
+        else:
+            ratio = count_ratio
+        eta = 0.0 if ratio <= 0.0 else max(0.0, elapsed * (1.0 - ratio) / ratio)
+        bytes_profile = ""
+        if self.total_bytes:
+            copied_mb = float(copied_bytes) / (1024.0 * 1024.0)
+            total_mb = float(self.total_bytes) / (1024.0 * 1024.0)
+            bytes_profile = f" copied_mb={copied_mb:.1f}/{total_mb:.1f}"
+        print(
+            f"工作量进度 | {self.label} | {current_count}/{self.total_count} ({ratio * 100.0:.1f}%) | "
+            f"elapsed={elapsed / 60.0:.1f} min | eta={eta / 60.0:.1f} min | "
+            f"profile={profile}{bytes_profile}",
+            flush=True,
+        )
+        self.last_emit_at = now
+        self.last_emit_count = current_count
+
+
+def is_safe_output_zip_entry(entry_name: str, root_path: Path, outputs_root: Path) -> tuple[bool, Path | None]:
+    """判断 zip 条目是否允许物化到仓库 outputs/ 目录。"""
+
+    if not entry_name.startswith("outputs/"):
+        return False, None
+    destination = (root_path / entry_name).resolve()
+    try:
+        destination.relative_to(outputs_root)
+    except ValueError:
+        return False, None
+    return True, destination
+
+
 def read_json(path: Path) -> dict[str, Any]:
     """读取 JSON 文件, 文件缺失时返回空字典。"""
 
@@ -250,27 +321,71 @@ def materialize_output_entries(root_path: Path, package_paths: Iterable[Path]) -
     outputs_root = (root_path / "outputs").resolve()
     materialized_entries: list[str] = []
     skipped_entries: list[str] = []
+    planned_items: list[tuple[Path, Any, Path]] = []
     for package_path in package_path_values:
         with ZipFile(package_path) as archive:
-            for entry in archive.namelist():
+            for entry_info in archive.infolist():
+                entry = entry_info.filename
                 if entry.endswith("/"):
                     continue
-                if not entry.startswith("outputs/"):
+                is_safe, destination = is_safe_output_zip_entry(entry, root_path, outputs_root)
+                if not is_safe or destination is None:
                     skipped_entries.append(entry)
                     continue
-                destination = (root_path / entry).resolve()
-                try:
-                    destination.relative_to(outputs_root)
-                except ValueError:
-                    skipped_entries.append(entry)
-                    continue
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(archive.read(entry))
-                materialized_entries.append(entry)
+                planned_items.append((package_path, entry_info, destination))
+
+    total_bytes = sum(int(entry_info.file_size) for _, entry_info, _ in planned_items)
+    progress = WorkProgress(
+        "pilot_paper package materialization",
+        len(planned_items),
+        total_bytes=total_bytes,
+        emit_every_count=100,
+    )
+    progress.emit(0, copied_bytes=0, profile=f"package_count={len(package_path_values)}", force=True)
+    copied_bytes = 0
+    completed_count = 0
+    current_package: Path | None = None
+    current_archive: ZipFile | None = None
+    try:
+        for package_path, entry_info, destination in planned_items:
+            if current_package != package_path:
+                if current_archive is not None:
+                    current_archive.close()
+                current_package = package_path
+                current_archive = ZipFile(package_path)
+            if current_archive is None:
+                raise RuntimeError("zip_archive_not_open")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with current_archive.open(entry_info.filename, "r") as source_handle, destination.open("wb") as target_handle:
+                for chunk in iter(lambda: source_handle.read(8 * 1024 * 1024), b""):
+                    target_handle.write(chunk)
+                    copied_bytes += len(chunk)
+                    progress.emit(
+                        completed_count,
+                        copied_bytes=copied_bytes,
+                        profile=f"package={package_path.name} extracting={entry_info.filename}",
+                    )
+            completed_count += 1
+            materialized_entries.append(entry_info.filename)
+            progress.emit(
+                completed_count,
+                copied_bytes=copied_bytes,
+                profile=f"package={package_path.name} file={entry_info.filename}",
+            )
+    finally:
+        if current_archive is not None:
+            current_archive.close()
+    progress.emit(
+        completed_count,
+        copied_bytes=copied_bytes,
+        profile=f"package_count={len(package_path_values)} done",
+        force=True,
+    )
     return {
         "input_package_count": len(package_path_values),
         "input_package_paths": [relative_or_absolute(path, root_path) for path in package_path_values],
         "materialized_output_entry_count": len(materialized_entries),
+        "materialized_output_total_bytes": copied_bytes,
         "skipped_output_entry_count": len(skipped_entries),
         "materialized_output_entries_digest": build_stable_digest(sorted(materialized_entries)),
         "skipped_output_entries": sorted(skipped_entries),

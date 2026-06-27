@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import sys
 from typing import Any, Iterable
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -26,12 +26,16 @@ if str(ROOT) not in sys.path:
 from experiments.protocol.paper_run_config import build_paper_run_config
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
-from scripts.write_pilot_paper_result_records import expand_package_paths, materialize_output_entries
+from scripts.write_pilot_paper_result_records import WorkProgress, expand_package_paths, materialize_output_entries
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_complete_result_package"
 DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_complete_result_package")
 DEFAULT_DRIVE_OUTPUT_DIR = ""
 DEFAULT_PACKAGE_SEARCH_ROOT = ""
+ZIP_COMPRESSION_METHODS = {
+    "stored": ZIP_STORED,
+    "deflated": ZIP_DEFLATED,
+}
 REQUIRED_OUTPUT_DIRS = (
     "outputs/real_attention_geometry",
     "outputs/attention_geometry",
@@ -105,6 +109,41 @@ def file_digest(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def file_digest_with_progress(path: Path, label: str) -> str:
+    """计算大文件摘要并输出读取进度。"""
+
+    total_bytes = path.stat().st_size if path.is_file() else 0
+    progress = WorkProgress(label, 1, total_bytes=total_bytes, emit_every_count=1)
+    progress.emit(0, copied_bytes=0, profile=f"file={path.name}", force=True)
+    digest = hashlib.sha256()
+    copied_bytes = 0
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+            copied_bytes += len(chunk)
+            progress.emit(0, copied_bytes=copied_bytes, profile=f"file={path.name}")
+    progress.emit(1, copied_bytes=copied_bytes, profile=f"file={path.name} done", force=True)
+    return digest.hexdigest()
+
+
+def copy_file_with_progress(source_path: Path, target_path: Path, label: str) -> int:
+    """以流式复制方式镜像大文件并输出复制进度。"""
+
+    total_bytes = source_path.stat().st_size
+    progress = WorkProgress(label, 1, total_bytes=total_bytes, emit_every_count=1)
+    progress.emit(0, copied_bytes=0, profile=f"file={source_path.name}", force=True)
+    copied_bytes = 0
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    with source_path.open("rb") as source_handle, target_path.open("wb") as target_handle:
+        for chunk in iter(lambda: source_handle.read(8 * 1024 * 1024), b""):
+            target_handle.write(chunk)
+            copied_bytes += len(chunk)
+            progress.emit(0, copied_bytes=copied_bytes, profile=f"file={source_path.name}")
+    shutil.copystat(source_path, target_path)
+    progress.emit(1, copied_bytes=copied_bytes, profile=f"file={source_path.name} done", force=True)
+    return copied_bytes
 
 
 def resolve_code_version(root_path: Path) -> str:
@@ -185,11 +224,43 @@ def collect_required_entries(root_path: Path, output_dir: Path, archive_path: Pa
         if path.is_file():
             entries.append(path)
     unique_entries: list[Path] = []
+    seen_paths: set[Path] = set()
     for entry in entries:
         resolved = entry.resolve()
-        if resolved not in [item.resolve() for item in unique_entries]:
+        if resolved not in seen_paths:
             unique_entries.append(entry)
+            seen_paths.add(resolved)
     return tuple(unique_entries)
+
+
+def write_archive_with_progress(root_path: Path, archive_path: Path, entries: Iterable[Path], compression_method: int) -> None:
+    """把完整结果写入 zip, 并按文件数和字节数显示打包进度。"""
+
+    entry_list = tuple(entries)
+    total_bytes = sum(path.stat().st_size for path in entry_list if path.is_file())
+    progress = WorkProgress(
+        "pilot_paper complete package archive",
+        len(entry_list),
+        total_bytes=total_bytes,
+        emit_every_count=100,
+    )
+    progress.emit(0, copied_bytes=0, profile=f"archive={archive_path.name}", force=True)
+    copied_bytes = 0
+    with ZipFile(archive_path, mode="w", compression=compression_method) as archive:
+        for index, entry in enumerate(entry_list, start=1):
+            archive.write(entry, relative_or_absolute(entry, root_path))
+            copied_bytes += entry.stat().st_size if entry.is_file() else 0
+            progress.emit(
+                index,
+                copied_bytes=copied_bytes,
+                profile=f"archive={archive_path.name} file={relative_or_absolute(entry, root_path)}",
+            )
+    progress.emit(
+        len(entry_list),
+        copied_bytes=copied_bytes,
+        profile=f"archive={archive_path.name} done",
+        force=True,
+    )
 
 
 def build_readiness_summary(
@@ -228,27 +299,37 @@ def write_pilot_paper_complete_result_package_outputs(
     archive_name: str = "pilot_paper_complete_result_package.zip",
     package_paths: Iterable[str | Path] = (),
     package_search_roots: Iterable[str | Path] | None = None,
+    materialize_packages: bool = True,
+    zip_compression: str = "stored",
 ) -> dict[str, Any]:
     """写出 pilot_paper 完整结果包, 并按需从 Drive 结果包物化 outputs/ 条目。"""
 
     root_path = Path(root).resolve()
     paper_run = build_paper_run_config(root_path)
-    resolved_drive_output_dir = drive_output_dir or paper_run.drive_dir("complete_result_package")
-    resolved_package_search_roots = tuple(package_search_roots or (paper_run.drive_result_root,))
+    resolved_drive_output_dir = paper_run.drive_dir("complete_result_package") if drive_output_dir is None else drive_output_dir
+    resolved_package_search_roots = (
+        (paper_run.drive_result_root,) if package_search_roots is None else tuple(package_search_roots)
+    )
     output_path = ensure_output_dir_under_outputs(root_path, output_dir)
     archive_path = output_path / archive_name
     packages = expand_package_paths(root_path, package_paths, resolved_package_search_roots)
     materialization_report = (
         materialize_output_entries(root_path, packages)
-        if packages
+        if packages and materialize_packages
         else {
-            "input_package_count": 0,
+            "input_package_count": len(packages),
+            "input_package_paths": [relative_or_absolute(path, root_path) for path in packages],
             "materialized_output_entry_count": 0,
+            "materialized_output_total_bytes": 0,
             "skipped_output_entry_count": 0,
             "materialized_output_entries_digest": build_stable_digest([]),
             "skipped_output_entries": [],
+            "materialization_skipped": bool(packages) and not materialize_packages,
         }
     )
+    compression_method = ZIP_COMPRESSION_METHODS.get(str(zip_compression).strip().lower())
+    if compression_method is None:
+        raise ValueError(f"未知完整结果包 zip 压缩方式: {zip_compression}")
 
     package_manifest_path = output_path / "pilot_paper_complete_package_input_manifest.json"
     summary_path = output_path / "pilot_paper_complete_package_summary.json"
@@ -283,6 +364,8 @@ def write_pilot_paper_complete_result_package_outputs(
             "drive_output_dir": resolved_drive_output_dir,
             "required_output_dirs": list(REQUIRED_OUTPUT_DIRS),
             "package_search_roots": [str(value) for value in resolved_package_search_roots],
+            "materialize_packages": materialize_packages,
+            "zip_compression": str(zip_compression),
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_pilot_paper_complete_result_package.py",
@@ -300,9 +383,9 @@ def write_pilot_paper_complete_result_package_outputs(
     }
     write_json(package_manifest_path, package_manifest)
     write_json(summary_path, summary)
-    with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
-        for entry in entries:
-            archive.write(entry, relative_or_absolute(entry, root_path))
+    write_archive_with_progress(root_path, archive_path, entries, compression_method)
+
+    archive_digest = file_digest_with_progress(archive_path, "pilot_paper complete package digest")
 
     drive_archive_path = ""
     drive_archive_digest = ""
@@ -310,13 +393,13 @@ def write_pilot_paper_complete_result_package_outputs(
         drive_dir = Path(resolved_drive_output_dir).expanduser()
         drive_dir.mkdir(parents=True, exist_ok=True)
         mirrored_path = drive_dir / archive_name
-        shutil.copy2(archive_path, mirrored_path)
+        copy_file_with_progress(archive_path, mirrored_path, "pilot_paper complete package drive copy")
         drive_archive_path = str(mirrored_path)
-        drive_archive_digest = file_digest(mirrored_path)
+        drive_archive_digest = archive_digest
 
     record = PilotPaperCompletePackageRecord(
         archive_path=relative_or_absolute(archive_path, root_path),
-        archive_digest=file_digest(archive_path),
+        archive_digest=archive_digest,
         archive_entry_count=len(entries),
         drive_archive_path=drive_archive_path,
         drive_archive_digest=drive_archive_digest,
@@ -341,6 +424,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--archive-name", default="pilot_paper_complete_result_package.zip", help="压缩包文件名。")
     parser.add_argument("--package-path", action="append", default=[], help="可重复传入的前序结果 zip 包。")
     parser.add_argument("--package-search-root", action="append", default=[], help="递归查找 zip 包的目录。")
+    parser.add_argument("--skip-package-materialization", action="store_true", help="跳过从前序 zip 物化 outputs/ 条目。")
+    parser.add_argument(
+        "--zip-compression",
+        choices=sorted(ZIP_COMPRESSION_METHODS),
+        default="stored",
+        help="完整结果包 zip 压缩方式; stored 对 PNG 和已有压缩包更快。",
+    )
     return parser
 
 
@@ -355,6 +445,8 @@ def main() -> None:
         archive_name=args.archive_name,
         package_paths=args.package_path,
         package_search_roots=args.package_search_root,
+        materialize_packages=not args.skip_package_materialization,
+        zip_compression=args.zip_compression,
     )
     print(stable_json_text(manifest), end="")
 

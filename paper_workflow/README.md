@@ -78,7 +78,6 @@ python scripts/write_external_baseline_comparison_outputs.py
 python scripts/write_internal_ablation_outputs.py
 
 python scripts/write_pilot_paper_result_records.py \
-  --package-search-root /content/drive/MyDrive/SLM/pilot_paper_results \
   --require-existing-evidence
 
 python scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py \
@@ -87,7 +86,10 @@ python scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py \
 
 python scripts/write_pilot_paper_complete_result_package.py \
   --package-search-root /content/drive/MyDrive/SLM/pilot_paper_results \
-  --drive-output-dir /content/drive/MyDrive/SLM/pilot_paper_results/complete_result_package
+  --drive-output-dir /content/drive/MyDrive/SLM/pilot_paper_results/complete_result_package \
+  --archive-name pilot_paper_complete_result_package_<utc>_<short_commit>.zip \
+  --skip-package-materialization \
+  --zip-compression stored
 ```
 
-第一条 `write_pilot_paper_result_records.py --materialize-only` 命令用于把 Google Drive 结果包中的 `outputs/` 条目物化到当前仓库工作区, 供后续重建脚本读取。最后两条命令才生成正式的 pilot_paper result records 和共同协议导入报告。若模板覆盖仍不完整, 产物会保留 `pilot_paper_template_coverage_ready=false`, 这表示只能继续补齐缺失方法或攻击项, 不能提升为 full_paper 主张。
+第一条 `write_pilot_paper_result_records.py --materialize-only` 命令用于把 Google Drive 结果包中的 `outputs/` 条目物化到当前仓库工作区, 供后续重建脚本读取。后续结果记录命令不应再次传入 `--package-search-root`, 否则会重复解压大包。完整结果包命令默认使用 `--skip-package-materialization` 复用已物化的本地 `outputs/`, 并用 `--zip-compression stored` 避免对 PNG 和已有压缩内容重复压缩。若模板覆盖仍不完整, 产物会保留 `pilot_paper_template_coverage_ready=false`, 这表示只能继续补齐缺失方法或攻击项, 不能提升为 full_paper 主张。
