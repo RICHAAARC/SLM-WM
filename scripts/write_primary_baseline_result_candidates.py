@@ -31,11 +31,13 @@ from main.core.digest import build_stable_digest
 CONSTRUCTION_UNIT_NAME = "primary_baseline_result_candidate_import"
 DEFAULT_OUTPUT_DIR = Path("outputs/external_baseline_results")
 DEFAULT_ATTACK_MANIFEST_PATH = Path("outputs/attack_matrix/attack_manifest.json")
-DEFAULT_GPU_SMOKE_OBSERVATIONS_PATH = Path("outputs/external_baseline_gpu_smoke/execution/baseline_observations.json")
+DEFAULT_METHOD_FAITHFUL_OBSERVATIONS_PATH = Path("outputs/external_baseline_method_faithful/execution/baseline_observations.json")
+DEFAULT_METHOD_FAITHFUL_SPLIT_OBSERVATIONS_DIR = Path("outputs/external_baseline_method_faithful/split_observations")
 DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH = Path(
     "outputs/t2smark_full_main_reproduction/t2smark_full_main_formal_import_candidate_records.jsonl"
 )
-GPU_SMOKE_OBSERVATIONS_ENTRY = "outputs/external_baseline_gpu_smoke/execution/baseline_observations.json"
+METHOD_FAITHFUL_OBSERVATIONS_ENTRY = "outputs/external_baseline_method_faithful/execution/baseline_observations.json"
+METHOD_FAITHFUL_SPLIT_OBSERVATIONS_ENTRY_PREFIX = "outputs/external_baseline_method_faithful/split_observations/"
 T2SMARK_CANDIDATE_RECORDS_ENTRY = (
     "outputs/t2smark_full_main_reproduction/t2smark_full_main_formal_import_candidate_records.jsonl"
 )
@@ -181,6 +183,24 @@ def read_json_array_from_package(package_path: Path, entry_name: str) -> list[di
     return [dict(row) for row in payload] if isinstance(payload, list) else []
 
 
+def read_split_json_arrays_from_package(package_path: Path, entry_prefix: str) -> list[dict[str, Any]]:
+    """从 zip 结果包中读取按 baseline 拆分的 observation JSON 数组。"""
+
+    if not package_path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    with ZipFile(package_path) as archive:
+        for entry_name in sorted(archive.namelist()):
+            normalized_name = entry_name.replace("\\", "/")
+            if not normalized_name.startswith(entry_prefix) or not normalized_name.endswith("_baseline_observations.json"):
+                continue
+            with archive.open(entry_name) as handle:
+                payload = json.loads(handle.read().decode("utf-8-sig"))
+            if isinstance(payload, list):
+                rows.extend(dict(row) for row in payload)
+    return rows
+
+
 def read_jsonl_rows_from_package(package_path: Path, entry_name: str) -> list[dict[str, Any]]:
     """从 zip 结果包中读取 JSONL 条目。"""
 
@@ -190,17 +210,32 @@ def read_jsonl_rows_from_package(package_path: Path, entry_name: str) -> list[di
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def load_gpu_smoke_observations(
+def load_method_faithful_observations(
     *,
     observations_path: Path,
     package_path: Path | None,
 ) -> list[dict[str, Any]]:
-    """读取方法忠实 SD3.5 adapter observation, 优先使用显式结果包。"""
+    """读取方法忠实 SD3.5 adapter observation, 并合并单 baseline 拆分文件。"""
 
-    rows = read_json_array_from_package(package_path, GPU_SMOKE_OBSERVATIONS_ENTRY) if package_path else []
+    rows: list[dict[str, Any]] = []
+    if package_path:
+        rows.extend(read_json_array_from_package(package_path, METHOD_FAITHFUL_OBSERVATIONS_ENTRY))
+        rows.extend(read_split_json_arrays_from_package(package_path, METHOD_FAITHFUL_SPLIT_OBSERVATIONS_ENTRY_PREFIX))
     if not rows:
-        rows = read_json_array(observations_path)
-    return rows
+        rows.extend(read_json_array(observations_path))
+    split_dir = observations_path.parent.parent / DEFAULT_METHOD_FAITHFUL_SPLIT_OBSERVATIONS_DIR.name
+    if split_dir.is_dir():
+        for path in sorted(split_dir.glob("*_baseline_observations.json")):
+            rows.extend(read_json_array(path))
+    deduplicated: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        digest = build_stable_digest(row)
+        if digest in seen:
+            continue
+        seen.add(digest)
+        deduplicated.append(dict(row))
+    return deduplicated
 
 
 def load_t2smark_candidate_rows(
@@ -367,7 +402,7 @@ def build_method_candidate_rows(
     return records
 
 
-def build_t2smark_smoke_candidate_rows(
+def build_t2smark_method_faithful_candidate_rows(
     *,
     observations: Iterable[Mapping[str, Any]],
     source_path: Path | None,
@@ -379,7 +414,7 @@ def build_t2smark_smoke_candidate_rows(
     fixed_fpr_baseline_calibration_ready: bool,
     attack_matrix_baseline_detection_ready: bool,
 ) -> list[dict[str, Any]]:
-    """把 T2SMark GPU smoke observation 映射为小样本候选记录, 不提升为正式论文结论。"""
+    """把 T2SMark method-faithful observation 映射为小样本候选记录, 不提升为正式论文结论。"""
 
     observation_rows = [dict(row) for row in observations if str(row.get("baseline_id", "")) == T2SMARK_BASELINE_ID]
     if not observation_rows:
@@ -414,14 +449,43 @@ def build_t2smark_smoke_candidate_rows(
     return records
 
 
+def merge_t2smark_candidate_rows(
+    preferred_rows: Iterable[Mapping[str, Any]],
+    fallback_rows: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """按攻击项合并 T2SMark 正式复现记录与 method-faithful 观测记录。
+
+    该函数的主要考虑在于: T2SMark 专用复现包可能只提供 clean 校准记录,
+    而共同攻击矩阵的非 clean 记录来自同一 method-faithful 工作流中的 adapter observation。
+    合并时优先保留专用复现包中的同键记录, 再用 observation 补齐缺失攻击项,
+    避免因为存在一个 clean 正式记录而丢弃已经生成的攻击矩阵证据。
+    """
+
+    merged_rows: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str, str, str]] = set()
+    for row in list(preferred_rows) + list(fallback_rows):
+        record = dict(row)
+        key = (
+            str(record.get("baseline_id", "")),
+            str(record.get("attack_family", "")),
+            str(record.get("attack_name", "")),
+            str(record.get("resource_profile", "full_main") or "full_main"),
+        )
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        merged_rows.append(record)
+    return merged_rows
+
+
 def write_primary_baseline_result_candidate_outputs(
     *,
     root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     attack_manifest_path: str | Path = DEFAULT_ATTACK_MANIFEST_PATH,
-    gpu_smoke_observations_path: str | Path = DEFAULT_GPU_SMOKE_OBSERVATIONS_PATH,
+    method_faithful_observations_path: str | Path = DEFAULT_METHOD_FAITHFUL_OBSERVATIONS_PATH,
     t2smark_candidate_records_path: str | Path = DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH,
-    external_gpu_smoke_package_path: str | Path | None = None,
+    external_method_faithful_package_path: str | Path | None = None,
     t2smark_full_main_package_path: str | Path | None = None,
     method_resource_profile: str = "full_main",
     method_full_main_prompt_protocol_ready: bool = True,
@@ -434,11 +498,11 @@ def write_primary_baseline_result_candidate_outputs(
     root_path = Path(root).resolve()
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, output_dir)
     resolved_attack_manifest_path = resolve_path(root_path, attack_manifest_path)
-    resolved_gpu_smoke_observations_path = resolve_path(root_path, gpu_smoke_observations_path)
+    resolved_method_faithful_observations_path = resolve_path(root_path, method_faithful_observations_path)
     resolved_t2smark_candidate_records_path = resolve_path(root_path, t2smark_candidate_records_path)
-    resolved_external_gpu_smoke_package_path = resolve_path(root_path, external_gpu_smoke_package_path)
+    resolved_external_method_faithful_package_path = resolve_path(root_path, external_method_faithful_package_path)
     resolved_t2smark_full_main_package_path = resolve_path(root_path, t2smark_full_main_package_path)
-    if resolved_attack_manifest_path is None or resolved_gpu_smoke_observations_path is None:
+    if resolved_attack_manifest_path is None or resolved_method_faithful_observations_path is None:
         raise ValueError("必要输入路径不能为空。")
     if resolved_t2smark_candidate_records_path is None:
         raise ValueError("T2SMark 候选记录路径不能为空。")
@@ -449,18 +513,18 @@ def write_primary_baseline_result_candidate_outputs(
         if target_fpr_override is not None
         else float(attack_manifest.get("evaluation_boundary", {}).get("target_fpr", PILOT_PAPER_FIXED_FPR))
     )
-    gpu_observations = load_gpu_smoke_observations(
-        observations_path=resolved_gpu_smoke_observations_path,
-        package_path=resolved_external_gpu_smoke_package_path,
+    method_faithful_observations = load_method_faithful_observations(
+        observations_path=resolved_method_faithful_observations_path,
+        package_path=resolved_external_method_faithful_package_path,
     )
     t2smark_rows = load_t2smark_candidate_rows(
         candidate_records_path=resolved_t2smark_candidate_records_path,
         package_path=resolved_t2smark_full_main_package_path,
     )
     method_candidate_rows = build_method_candidate_rows(
-        observations=gpu_observations,
-        source_path=resolved_external_gpu_smoke_package_path,
-        local_observations_path=resolved_gpu_smoke_observations_path,
+        observations=method_faithful_observations,
+        source_path=resolved_external_method_faithful_package_path,
+        local_observations_path=resolved_method_faithful_observations_path,
         root_path=root_path,
         target_fpr=target_fpr,
         resource_profile=method_resource_profile,
@@ -474,19 +538,19 @@ def write_primary_baseline_result_candidate_outputs(
         local_candidate_records_path=resolved_t2smark_candidate_records_path,
         root_path=root_path,
     )
-    if not normalized_t2smark_rows:
-        normalized_t2smark_rows = build_t2smark_smoke_candidate_rows(
-            observations=gpu_observations,
-            source_path=resolved_external_gpu_smoke_package_path,
-            local_observations_path=resolved_gpu_smoke_observations_path,
-            root_path=root_path,
-            target_fpr=target_fpr,
-            resource_profile=method_resource_profile,
-            full_main_prompt_protocol_ready=method_full_main_prompt_protocol_ready,
-            fixed_fpr_baseline_calibration_ready=method_fixed_fpr_baseline_calibration_ready,
-            attack_matrix_baseline_detection_ready=method_attack_matrix_baseline_detection_ready,
-        )
-    candidate_rows = method_candidate_rows + normalized_t2smark_rows
+    t2smark_method_faithful_rows = build_t2smark_method_faithful_candidate_rows(
+        observations=method_faithful_observations,
+        source_path=resolved_external_method_faithful_package_path,
+        local_observations_path=resolved_method_faithful_observations_path,
+        root_path=root_path,
+        target_fpr=target_fpr,
+        resource_profile=method_resource_profile,
+        full_main_prompt_protocol_ready=method_full_main_prompt_protocol_ready,
+        fixed_fpr_baseline_calibration_ready=method_fixed_fpr_baseline_calibration_ready,
+        attack_matrix_baseline_detection_ready=method_attack_matrix_baseline_detection_ready,
+    )
+    merged_t2smark_rows = merge_t2smark_candidate_rows(normalized_t2smark_rows, t2smark_method_faithful_rows)
+    candidate_rows = method_candidate_rows + merged_t2smark_rows
     attack_profile_lookup = build_attack_resource_profile_lookup()
     validation_report = validate_primary_baseline_formal_import_rows(
         candidate_rows,
@@ -548,13 +612,20 @@ def write_primary_baseline_result_candidate_outputs(
     input_paths = []
     for path in (
         resolved_attack_manifest_path,
-        resolved_gpu_smoke_observations_path,
+        resolved_method_faithful_observations_path,
         resolved_t2smark_candidate_records_path,
-        resolved_external_gpu_smoke_package_path,
+        resolved_external_method_faithful_package_path,
         resolved_t2smark_full_main_package_path,
     ):
         if path and path.exists():
             input_paths.append(relative_or_absolute(path, root_path))
+    split_observation_dir = resolved_method_faithful_observations_path.parent.parent / DEFAULT_METHOD_FAITHFUL_SPLIT_OBSERVATIONS_DIR.name
+    if split_observation_dir.is_dir():
+        input_paths.extend(
+            relative_or_absolute(path, root_path)
+            for path in sorted(split_observation_dir.glob("*_baseline_observations.json"))
+            if path.is_file()
+        )
     output_paths = tuple(
         relative_or_absolute(path, root_path)
         for path in (
@@ -595,8 +666,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument("--attack-manifest-path", default=str(DEFAULT_ATTACK_MANIFEST_PATH), help="攻击矩阵 manifest 路径。")
     parser.add_argument(
-        "--gpu-smoke-observations-path",
-        default=str(DEFAULT_GPU_SMOKE_OBSERVATIONS_PATH),
+        "--method-faithful-observations-path",
+        default=str(DEFAULT_METHOD_FAITHFUL_OBSERVATIONS_PATH),
         help="方法忠实 SD3.5 adapter observation JSON 路径。",
     )
     parser.add_argument(
@@ -604,7 +675,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH),
         help="T2SMark full-main 候选 JSONL 路径。",
     )
-    parser.add_argument("--external-gpu-smoke-package-path", default=None, help="可选 external baseline GPU 结果 zip 包。")
+    parser.add_argument("--external-method-faithful-package-path", default=None, help="可选 external baseline method-faithful 结果 zip 包。")
     parser.add_argument("--t2smark-full-main-package-path", default=None, help="可选 T2SMark full-main 结果 zip 包。")
     parser.add_argument("--method-resource-profile", default="full_main", help="方法忠实 adapter 候选记录的资源配置名称。")
     parser.add_argument("--target-fpr-override", type=float, default=None, help="可选 fixed-FPR 目标值覆盖。")
@@ -637,9 +708,9 @@ def main() -> None:
         root=args.root,
         output_dir=args.output_dir,
         attack_manifest_path=args.attack_manifest_path,
-        gpu_smoke_observations_path=args.gpu_smoke_observations_path,
+        method_faithful_observations_path=args.method_faithful_observations_path,
         t2smark_candidate_records_path=args.t2smark_candidate_records_path,
-        external_gpu_smoke_package_path=args.external_gpu_smoke_package_path,
+        external_method_faithful_package_path=args.external_method_faithful_package_path,
         t2smark_full_main_package_path=args.t2smark_full_main_package_path,
         method_resource_profile=args.method_resource_profile,
         method_full_main_prompt_protocol_ready=args.method_full_main_prompt_protocol_ready,

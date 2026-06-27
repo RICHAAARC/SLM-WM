@@ -29,7 +29,7 @@ SCORE_NAMES: dict[str, str] = {
     "shallow_diffuse": "shallow_diffuse_sd35_shallow_update_score",
 }
 
-ADAPTER_BOUNDARY = "sd35_latent_smoke_adapter_not_formal_external_baseline_evidence"
+ADAPTER_BOUNDARY = "sd35_method_faithful_adapter_not_formal_external_baseline_evidence"
 
 
 def load_json(path: str | Path) -> Any:
@@ -94,10 +94,10 @@ def _prompt_id(row: dict[str, Any], index: int) -> str:
 
 
 def _split(row: dict[str, Any]) -> str:
-    """读取 prompt split, 缺失时按 gpu_smoke 处理。"""
+    """读取 prompt split, 缺失时按 method_faithful 处理。"""
 
-    value = str(row.get("split") or "gpu_smoke").strip()
-    return value or "gpu_smoke"
+    value = str(row.get("split") or "method_faithful").strip()
+    return value or "method_faithful"
 
 
 def _stable_seed(base_seed: int, baseline_id: str, prompt_id: str) -> int:
@@ -142,7 +142,7 @@ def _normalize_direction(torch_module: Any, direction: Any) -> Any:
 def _method_direction(torch_module: Any, baseline_id: str, shape: tuple[int, int, int], seed: int, device: Any, dtype: Any) -> Any:
     """构造三类主表 baseline 的 SD3.5 latent 级载体方向。
 
-    该实现属于项目特定的 GPU smoke adapter, 只验证 SD3.5 latent 形状、GPU 张量路径和 observation 落盘链路;
+    该实现属于项目特定的 method-faithful adapter, 只验证 SD3.5 latent 形状、GPU 张量路径和 observation 落盘链路;
     它不等价于第三方论文的正式官方复现。
     """
 
@@ -248,7 +248,7 @@ def _baseline_observation(
         "baseline_id": baseline_id,
         "score": float(score),
         "threshold": float(threshold),
-        "score_name": SCORE_NAMES.get(baseline_id, f"{baseline_id}_sd35_latent_smoke_score"),
+        "score_name": SCORE_NAMES.get(baseline_id, f"{baseline_id}_sd35_method_faithful_score"),
         "higher_is_positive": True,
         "detection_decision": bool(float(score) >= float(threshold)),
         "split": _split(row),
@@ -258,8 +258,8 @@ def _baseline_observation(
         "prompt_id": prompt_id,
         "prompt_text": _prompt_text(row),
         "image_id": f"{baseline_id}_{row_index:05d}",
-        "threshold_source": "latent_smoke_midpoint_between_clean_and_positive",
-        "producer_id": f"{baseline_id}_sd35_latent_smoke_adapter",
+        "threshold_source": "method_faithful_midpoint_between_clean_and_positive",
+        "producer_id": f"{baseline_id}_sd35_method_faithful_adapter",
         "producer_role": "external_baseline_result_adapter",
         "adapter_boundary": ADAPTER_BOUNDARY,
         "formal_result_claim": False,
@@ -271,13 +271,13 @@ def _baseline_observation(
     return payload
 
 
-def build_sd35_latent_smoke_observations(
+def build_sd35_method_faithful_observations(
     *,
     baseline_id: str,
     args: argparse.Namespace,
     prompt_rows: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """生成三类扩散外部 baseline 的 SD3.5 latent 级 smoke observations。"""
+    """生成三类扩散外部 baseline 的 SD3.5 method-faithful observations。"""
 
     observations: list[dict[str, Any]] = []
     score_metadata: list[dict[str, Any]] = []
@@ -419,7 +419,7 @@ def run_contract_or_report_required_adapter(
     """运行 SD3.5 latent 级外部扩散 baseline adapter。
 
     当使用 `--contract-only` 时, 该函数写出空 observation 与诊断 manifest, 用于检查命令编排和
-    产物落盘链路。当未使用该选项时, 该函数生成项目治理内的 latent smoke observations。
+    产物落盘链路。当未使用该选项时, 该函数生成项目治理内的 method-faithful observations。
     该路径只验证 SD3.5 latent 张量、GPU 运行和落盘协议, 不声明第三方 baseline 正式复现结果。
     """
 
@@ -442,9 +442,9 @@ def run_contract_or_report_required_adapter(
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
         return
     if not args.prompt_plan:
-        raise SystemExit("SD3.5 latent smoke adapter 运行必须提供 --prompt-plan。")
+        raise SystemExit("SD3.5 method-faithful adapter 运行必须提供 --prompt-plan。")
     prompt_rows = selected_prompt_rows(load_prompt_rows(args.prompt_plan), args.max_samples)
-    observations, adapter_metadata = build_sd35_latent_smoke_observations(
+    observations, adapter_metadata = build_sd35_method_faithful_observations(
         baseline_id=baseline_id,
         args=args,
         prompt_rows=prompt_rows,
@@ -453,7 +453,7 @@ def run_contract_or_report_required_adapter(
     manifest = write_contract_manifest(
         baseline_id=baseline_id,
         args=args,
-        adapter_status="sd35_latent_smoke_adapter_ready",
+        adapter_status="sd35_method_faithful_adapter_ready",
         model_alignment_status=model_alignment_status,
         observation_count=len(observations),
         unsupported_reason=real_run_unsupported_reason,

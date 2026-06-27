@@ -25,7 +25,7 @@ from experiments.baselines import (
     validate_gaussian_shading_official_reference_records,
 )
 from main.analysis.artifact_manifest import build_artifact_manifest
-from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
+from paper_workflow.colab_utils.external_baseline_method_faithful import (
     ensure_cuda_if_requested,
     load_baseline_registry_item,
     normalize_repository_url,
@@ -72,7 +72,7 @@ DEFAULT_LEGACY_PACKAGE_SPECS = (
     "einops==0.4.1 kornia==0.6.4 matplotlib==3.7.5 timm==0.5.4"
 )
 PACKAGE_EXTRA_PATHS = (
-    "paper_workflow/gaussian_shading_official_reference_run.ipynb",
+    "paper_workflow/official_reference_gaussian_shading_run.ipynb",
     "paper_workflow/colab_utils/gaussian_shading_official_reference.py",
     "experiments/baselines/gaussian_shading_official_reference.py",
     "external_baseline/primary/gaussian_shading/README.md",
@@ -1282,7 +1282,7 @@ def write_gaussian_shading_official_reference_outputs(
         output_paths=tuple(output_paths_for_manifest + [relative_or_absolute(paths["manifest"], root_path)]),
         config=asdict(effective_config),
         code_version=resolve_code_version(root_path),
-        rebuild_command="运行 paper_workflow/gaussian_shading_official_reference_run.ipynb",
+        rebuild_command="运行 paper_workflow/official_reference_gaussian_shading_run.ipynb",
         metadata={
             "run_decision": summary["run_decision"],
             "gaussian_shading_official_reference_ready": run_ready,
@@ -1435,7 +1435,7 @@ def package_gaussian_shading_official_reference_outputs(
         ),
         config={"archive_name": archive_name, "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser())},
         code_version=resolve_code_version(root_path),
-        rebuild_command="运行 paper_workflow/gaussian_shading_official_reference_run.ipynb",
+        rebuild_command="运行 paper_workflow/official_reference_gaussian_shading_run.ipynb",
         metadata={
             "embedded_digest_scope": "external_summary_records_final_archive_digest",
             "generated_at": datetime.now(timezone.utc).isoformat(),

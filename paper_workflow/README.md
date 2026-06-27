@@ -23,11 +23,14 @@
 
 ### 外部 baseline 入口
 
-- `external_baseline_gpu_smoke_run.ipynb`: 运行主表 baseline 的 SD3.5 method-faithful adapter 链路, 当前覆盖 Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark。Tree-Ring、Gaussian Shading、Shallow Diffuse 默认使用共同攻击矩阵中的常规失真、几何变换与再生成攻击; T2SMark 官方 SD3.5 入口会在冷启动时补丁为同一攻击簇输出正式攻击分数。输出目录和共享样本数由当前论文运行层级派生。
-- `t2smark_full_main_reproduction_run.ipynb`: 运行 T2SMark 官方 SD3.5 路径并生成 governed import 候选记录。默认使用当前论文运行层级的 prompt 文件、样本数和 fixed-FPR=0.01。
-- `tree_ring_official_reference_run.ipynb`: 运行 Tree-Ring 官方原始环境参考复现, 样本数和 Drive 目录由当前论文运行层级派生。
-- `gaussian_shading_official_reference_run.ipynb`: 运行 Gaussian Shading 官方原始环境参考复现, 样本数和 Drive 目录由当前论文运行层级派生。
-- `shallow_diffuse_official_reference_run.ipynb`: 运行 Shallow Diffuse 官方原始环境参考复现, 样本数和 Drive 目录由当前论文运行层级派生。
+- `external_baseline_tree_ring_run.ipynb`: 只运行 Tree-Ring 的 SD3.5 method-faithful adapter, 覆盖共同攻击矩阵中的常规失真、几何变换与再生成攻击, 并写出 `split_observations/tree_ring_baseline_observations.json`。
+- `external_baseline_gaussian_shading_run.ipynb`: 只运行 Gaussian Shading 的 SD3.5 method-faithful adapter, 覆盖共同攻击矩阵中的常规失真、几何变换与再生成攻击, 并写出 `split_observations/gaussian_shading_baseline_observations.json`。
+- `external_baseline_shallow_diffuse_run.ipynb`: 只运行 Shallow Diffuse 的 SD3.5 method-faithful adapter, 覆盖共同攻击矩阵中的常规失真、几何变换与再生成攻击, 并写出 `split_observations/shallow_diffuse_baseline_observations.json`。
+- `external_baseline_t2smark_run.ipynb`: 只运行 T2SMark 官方 SD3.5 路径和 adapter, 冷启动时会补丁为同一攻击簇输出正式攻击分数, 并写出 `split_observations/t2smark_baseline_observations.json`。
+- `official_reference_t2smark_run.ipynb`: 运行 T2SMark 官方 SD3.5 路径并生成 governed import 候选记录。默认使用当前论文运行层级的 prompt 文件、样本数和 fixed-FPR=0.01。
+- `official_reference_tree_ring_run.ipynb`: 运行 Tree-Ring 官方原始环境参考复现, 样本数和 Drive 目录由当前论文运行层级派生。
+- `official_reference_gaussian_shading_run.ipynb`: 运行 Gaussian Shading 官方原始环境参考复现, 样本数和 Drive 目录由当前论文运行层级派生。
+- `official_reference_shallow_diffuse_run.ipynb`: 运行 Shallow Diffuse 官方原始环境参考复现, 样本数和 Drive 目录由当前论文运行层级派生。
 
 ### 结果闭合入口
 
@@ -52,14 +55,17 @@ pilot_paper 与 full_paper 应共享同一批方法主流程和 baseline 入口,
 7. 再扩散真实攻击闭环: `real_attack_evaluation_run.ipynb`。
 8. 常规失真与几何变换真实攻击闭环: `conventional_geometric_attack_evaluation_run.ipynb`。
 9. 数据集级质量: `dataset_level_quality_run.ipynb`。
-10. 主表 baseline: `external_baseline_gpu_smoke_run.ipynb`。
-11. 官方复现: `t2smark_full_main_reproduction_run.ipynb`。
-12. 官方复现: `tree_ring_official_reference_run.ipynb`。
-13. 官方复现: `gaussian_shading_official_reference_run.ipynb`。
-14. 官方复现: `shallow_diffuse_official_reference_run.ipynb`。
-15. 结果闭合: `pilot_paper_result_closure_run.ipynb`。
+10. 主表 baseline: `external_baseline_tree_ring_run.ipynb`。
+11. 主表 baseline: `external_baseline_gaussian_shading_run.ipynb`。
+12. 主表 baseline: `external_baseline_shallow_diffuse_run.ipynb`。
+13. 主表 baseline: `external_baseline_t2smark_run.ipynb`。
+14. 官方复现: `official_reference_t2smark_run.ipynb`。
+15. 官方复现: `official_reference_tree_ring_run.ipynb`。
+16. 官方复现: `official_reference_gaussian_shading_run.ipynb`。
+17. 官方复现: `official_reference_shallow_diffuse_run.ipynb`。
+18. 结果闭合: `pilot_paper_result_closure_run.ipynb`。
 
-第14个 Notebook 已经封装以下收尾命令。若不使用该 Notebook, 也可以在同一个 Colab 仓库工作区或本地仓库中手动执行以下等价命令。若在本地执行, `--package-search-root` 应指向已经同步或挂载的 Google Drive `SLM/pilot_paper_results` 目录。
+结果闭合 Notebook 已经封装以下收尾命令。若不使用该 Notebook, 也可以在同一个 Colab 仓库工作区或本地仓库中手动执行以下等价命令。若在本地执行, `--package-search-root` 应指向已经同步或挂载的 Google Drive `SLM/pilot_paper_results` 目录。
 
 ```bash
 python scripts/write_pilot_paper_result_records.py \

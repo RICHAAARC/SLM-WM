@@ -1,6 +1,6 @@
 """运行 Tree-Ring 的 SLM 外部 baseline adapter。
 
-默认模式保留轻量 SD3.5 latent smoke adapter, 用于本地快速测试和命令计划链路检查。
+默认模式保留轻量 SD3.5 method-faithful adapter, 用于本地快速测试和命令计划链路检查。
 显式传入 `--adapter-mode method_faithful_sd35` 时, 该入口调用 Tree-Ring 方法忠实
 SD3.5 适配器, 在真实 GPU 环境加载 SD3.5 Medium 并执行 Fourier ring key 注入、生成、
 近似反演和检测分数写出。
@@ -22,14 +22,14 @@ BASELINE_ID = "tree_ring"
 MODEL_ALIGNMENT_STATUS = "sd35_medium_method_faithful_adapter_available"
 REAL_RUN_UNSUPPORTED_REASON = "tree_ring_method_faithful_sd35_mode_requires_explicit_adapter_mode"
 METHOD_FAITHFUL_MODE = "method_faithful_sd35"
-LATENT_SMOKE_MODE = "latent_smoke"
+METHOD_FAITHFUL_COMPAT_MODE = "method_faithful"
 
 
 def _extract_adapter_mode(argv: list[str]) -> tuple[str, list[str]]:
     """从 argv 中提取 adapter mode, 并返回移除该参数后的参数列表。"""
 
     cleaned: list[str] = []
-    mode = LATENT_SMOKE_MODE
+    mode = METHOD_FAITHFUL_COMPAT_MODE
     index = 0
     while index < len(argv):
         item = argv[index]
@@ -55,7 +55,7 @@ def main() -> None:
     if mode == METHOD_FAITHFUL_MODE:
         run_method_faithful_cli(cleaned_argv)
         return
-    if mode != LATENT_SMOKE_MODE:
+    if mode != METHOD_FAITHFUL_COMPAT_MODE:
         raise SystemExit(f"unsupported_tree_ring_adapter_mode:{mode}")
     original_argv = sys.argv
     try:

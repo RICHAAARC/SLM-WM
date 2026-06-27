@@ -13,7 +13,7 @@
 
 - adapter: `external_baseline/primary/gaussian_shading/adapter/run_slm_eval.py`
 - method-faithful 模式: `--adapter-mode method_faithful_sd35`
-- 官方原始环境参考入口: `paper_workflow/gaussian_shading_official_reference_run.ipynb`
+- 官方原始环境参考入口: `paper_workflow/official_reference_gaussian_shading_run.ipynb`
 - 输出边界: 只能写入 `outputs/` 下的命令计划、observation、manifest 和证据报告。
 - 论文主张: 当前 adapter 默认不声明 `formal_result_claim`, 需要真实 GPU 运行证据后才能进入正式对比。
 

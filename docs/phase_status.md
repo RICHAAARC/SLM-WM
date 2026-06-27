@@ -83,7 +83,7 @@
 | expected_output_manifest | `outputs/core_method_synthetic_smoke/manifest.local.json` |
 | expected_outputs | `outputs/core_method_synthetic_smoke/synthetic_event_records.jsonl`; `outputs/core_method_synthetic_smoke/core_smoke_metrics.json`; `outputs/core_method_synthetic_smoke/core_smoke_summary.md`; `outputs/core_method_synthetic_smoke/manifest.local.json` |
 | blocking_items | 鏃犮€?|
-| fallback_path | 鑻?synthetic latent smoke 涓嶈兘澶嶇幇 key 鍖哄垎銆乺escue 杈圭晫鎴?attestation 鍒嗗眰, 鍋滄鎺ㄨ繘骞朵慨澶?`main/methods/synthetic_smoke.py`銆?|
+| fallback_path | 鑻?synthetic method-faithful 涓嶈兘澶嶇幇 key 鍖哄垎銆乺escue 杈圭晫鎴?attestation 鍒嗗眰, 鍋滄鎺ㄨ繘骞朵慨澶?`main/methods/synthetic_smoke.py`銆?|
 | invariants | 涓嶆帴鍏ョ湡瀹?SD3/SD3.5銆丆olab銆丏rive 鎴?Notebook; 涓嶆妸 smoke 缁撴灉鍐欐垚璁烘枃 supported claims; attention carrier 浠嶄负 synthetic stub銆?|
 | next_stage_entry | stage02 楠岃瘉閫氳繃鍚? 鎵嶈兘杩涘叆 `stage_03_sd3_runtime_adapter`銆?|
 
@@ -601,7 +601,7 @@
 | expected_output_manifest | `outputs/external_baseline_comparison/manifest.local.json` |
 | expected_outputs | `outputs/external_baseline_results/baseline_result_records.jsonl`; `outputs/external_baseline_results/baseline_formal_import_readiness.csv`; `outputs/primary_baseline_formal_import/primary_baseline_formal_result_template.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage.csv`; `outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_plan.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_summary.json`; `outputs/external_baseline_comparison/baseline_observations.jsonl`; `outputs/external_baseline_comparison/baseline_result_records.jsonl`; `outputs/external_baseline_comparison/baseline_formal_import_validation_report.json`; `outputs/external_baseline_comparison/baseline_metrics.csv`; `outputs/external_baseline_comparison/baseline_comparison_table.csv`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
 | blocking_items | 8个 baseline 的 source registry 已可审计, 主表4个 baseline 已产生28条小样本候选记录, 但候选均未通过共同协议 validator; 因此 `baseline_results_ready=false`, `primary_baseline_formal_ready=false`, `supports_paper_claim=false`。 |
-| fallback_path | 外部 baseline 无正式结果时只登记 `external_baseline_result_missing`; 允许保留小样本候选和拒绝原因, 但不允许把候选或 smoke 结果写入主表结论。 |
+| fallback_path | 外部 baseline 无正式结果时只登记 `external_baseline_result_missing`; 允许保留小样本候选和拒绝原因, 但不允许把候选或 method-faithful 结果写入主表结论。 |
 | invariants | baseline 与 SLM-WM 必须共享 prompt 协议、攻击矩阵协议和 fixed-FPR operating point; unsupported baseline 不进入论文主结论; 所有新增产物保持 `supports_paper_claim=false`。 |
 | next_stage_entry | 可继续导入受治理正式结果或运行官方复现; 若要形成论文级外部 baseline 对比, 必须使主表 baseline 在 full-main prompt、fixed-FPR、攻击矩阵检测和证据路径四个边界上同时通过 validator。 |
 
@@ -610,7 +610,7 @@
 1. `experiments/baselines/formal_import.py` 已提供主表 external baseline 正式导入 schema、候选记录 validator 和 per-baseline readiness 聚合。
 2. `scripts/write_primary_baseline_result_candidates.py` 已写出 `baseline_result_records.jsonl`、`baseline_result_candidate_validation_report.json`、`baseline_formal_import_readiness.csv` 与 `baseline_formal_import_readiness_summary.json`。
 3. `scripts/write_external_baseline_comparison_outputs.py` 已读取正式导入 readiness 摘要, 并将 `formal_result_ready_count`、`blocked_primary_baseline_ids` 和主要阻断原因透传到 `baseline_runtime_report.json`。
-4. 当前主表候选来源为 Google Drive 中的小样本 GPU smoke 链路包; T2SMark 在缺少 full-main 包时也可从 GPU smoke observations 构造小样本候选, 候选可以审计, 但不能升级为正式论文结果。
+4. 当前主表候选来源为 Google Drive 中的小样本 method-faithful 链路包; T2SMark 在缺少 full-main 包时也可从 method-faithful observations 构造小样本候选, 候选可以审计, 但不能升级为正式论文结果。
 
 ### stage14 当前产物摘要
 
@@ -625,7 +625,7 @@
 
 | command | result |
 | --- | --- |
-| `python scripts/write_primary_baseline_result_candidates.py --external-gpu-smoke-package-path <drive_zip>` | pass, `formal_import_candidate_record_count=28`, `accepted_formal_import_count=0` |
+| `python scripts/write_primary_baseline_result_candidates.py --external-method-faithful-package-path <drive_zip>` | pass, `formal_import_candidate_record_count=28`, `accepted_formal_import_count=0` |
 | `python scripts/write_primary_baseline_formal_import_protocol.py` | pass, `template_record_count=32`, `candidate_template_match_count=0`, `missing_formal_template_count=32`, `missing_formal_evidence_collection_task_count=32` |
 | `python scripts/write_external_baseline_comparison_outputs.py` | pass, `baseline_results_ready=false`, `formal_result_ready_count=0` |
 | `pytest tests/functional/test_primary_baseline_result_candidates.py tests/functional/test_external_baseline_comparison.py -q` | pass |
@@ -836,7 +836,7 @@
 | expected_output_manifest | `outputs/external_baseline_comparison/manifest.local.json` |
 | expected_outputs | `outputs/external_baseline_results/baseline_result_records.jsonl`; `outputs/external_baseline_results/baseline_result_candidate_validation_report.json`; `outputs/external_baseline_results/baseline_formal_import_readiness.csv`; `outputs/external_baseline_results/baseline_formal_import_readiness_summary.json`; `outputs/primary_baseline_formal_import/primary_baseline_formal_result_template.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage.csv`; `outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage_summary.json`; `outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_plan.jsonl`; `outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_summary.json`; `outputs/external_baseline_comparison/baseline_runtime_report.json`; `outputs/external_baseline_comparison/manifest.local.json` |
 | blocking_items | 当前4条主表候选均未通过正式导入 validator; `accepted_formal_import_count=0`, `formal_result_ready_count=0`, `primary_baseline_formal_ready=false`。 |
-| fallback_path | 允许保存候选记录与拒绝原因作为后续补证输入; 不允许把小样本候选、GPU smoke observation 或 legacy reference 结果直接手工写入主表。 |
+| fallback_path | 允许保存候选记录与拒绝原因作为后续补证输入; 不允许把小样本候选、method-faithful observation 或 legacy reference 结果直接手工写入主表。 |
 | invariants | 第三方源码缓存仍由 `external_baseline/source_registry.json` 记录; 本项目提交 adapter、schema、导入报告与测试, 不把不受治理的第三方输出当作 supported claim。 |
 
 ### external baseline 正式导入推进内容
@@ -846,7 +846,7 @@
 3. 已新增正式模板覆盖检查, 将 full-main 攻击模板覆盖情况写入 `primary_baseline_formal_template_coverage.csv` 与 `primary_baseline_formal_template_coverage_summary.json`。
 4. 已新增正式证据收集计划, 将缺失 full-main 模板转换为逐项补证任务, 写入 `primary_baseline_formal_evidence_collection_plan.jsonl` 与 `primary_baseline_formal_evidence_collection_summary.json`。
 5. 已补齐 method-faithful SD3.5 adapter 的图像级攻击覆盖入口, 默认覆盖 `jpeg_compression`、`gaussian_noise`、`gaussian_blur`、`rotation`、`resize`、`crop`、`crop_resize` 和 `composite_geometric_attacks`, 并记录 attacked image provenance。
-6. 已允许 `write_primary_baseline_result_candidates.py` 在 T2SMark full-main 包缺失时, 从 external GPU smoke 包中的 T2SMark observations 构造小样本候选记录, 从而保持4个主表 baseline 的小样本证据边界完整。
+6. 已允许 `write_primary_baseline_result_candidates.py` 在 T2SMark full-main 包缺失时, 从 external method-faithful 包中的 T2SMark observations 构造小样本候选记录, 从而保持4个主表 baseline 的小样本证据边界完整。
 7. 已修正小样本证据摘要的 common protocol readiness 聚合方式: 多攻击记录按 baseline 覆盖判断, 不再因单个 baseline 产生多条攻击记录而误判 common protocol 未就绪。
 8. 当前官方源码缓存登记显示8个 baseline 的源码入口可检查, 但正式结果仍为未就绪。
 9. 下一步应在共同协议下补齐 full-main prompt、fixed-FPR baseline calibration、attack matrix baseline detection 和正式证据路径, 再重新运行导入 validator。
@@ -865,7 +865,7 @@
 
 | command | result |
 | --- | --- |
-| `python scripts/write_primary_baseline_result_candidates.py --external-gpu-smoke-package-path outputs/external_baseline_gpu_smoke_package_20260623t14351782225358z_020d16f.zip` | pass, `formal_import_candidate_record_count=28` |
+| `python scripts/write_primary_baseline_result_candidates.py --external-method-faithful-package-path outputs/external_baseline_method_faithful_package_20260623t14351782225358z_020d16f.zip` | pass, `formal_import_candidate_record_count=28` |
 | `python scripts/write_primary_baseline_formal_import_protocol.py` | pass, `template_record_count=32`, `candidate_template_match_count=0`, `missing_formal_template_count=32`, `missing_formal_evidence_collection_task_count=32` |
 | `python scripts/write_external_baseline_comparison_outputs.py` | pass |
 | `python scripts/write_primary_baseline_small_sample_evidence_outputs.py` | pass, `small_sample_evidence_ready=true`, `small_sample_common_protocol_ready=true` |
@@ -921,7 +921,7 @@
 | input_manifest | `external_baseline/source_registry.json` |
 | expected_output_manifest | `outputs/external_baseline_execution/baseline_execution_manifest.json` |
 | expected_outputs | `outputs/external_baseline_command_plan/baseline_command_plan.json`; `outputs/external_baseline_command_plan/baseline_command_plan_manifest.json`; `outputs/external_baseline_execution/baseline_command_results.json`; `outputs/external_baseline_execution/baseline_observations.json`; `outputs/external_baseline_execution/baseline_execution_manifest.json` |
-| blocking_items | Tree-Ring、Gaussian Shading 和 Shallow Diffuse 已具备 SD3.5 latent 级 GPU smoke adapter, 但仍需要官方完整复现或受治理结果导入才能支撑论文级外部 baseline 对比。 |
+| blocking_items | Tree-Ring、Gaussian Shading 和 Shallow Diffuse 已具备 SD3.5 latent 级 method-faithful adapter, 但仍需要官方完整复现或受治理结果导入才能支撑论文级外部 baseline 对比。 |
 | fallback_path | 若官方源码暂不能直接适配 SD3.5 Medium, 只能保留 `contract-only` 诊断或导入受治理结果, 不得声明论文级 baseline 结论。 |
 | invariants | 官方源码快照位于 `external_baseline/*/*/source/` 且不由 git 跟踪; 项目维护 adapter、命令计划脚本、执行脚本和证据校验脚本必须接受 harness 审计。 |
 
@@ -931,7 +931,7 @@
 2. `tools/harness/lib/file_scanner.py` 已改为扫描 `external_baseline/` 中的 adapter、README 和登记文件, 但跳过第三方源码快照。
 3. 新增 `experiments/baselines/command_adapter.py`、`command_plan.py`、`observation_io.py` 和 `evidence_validator.py`, 形成 command plan、execution、observation 和 evidence 的统一入口。
 4. 新增 `scripts/build_external_baseline_command_plan.py`、`scripts/run_external_baseline_command_plan.py` 和 `scripts/validate_external_baseline_evidence.py`, 所有仓库命令输出默认写入 `outputs/`。
-5. 主表 baseline 已新增项目维护 adapter 路径。T2SMark adapter 可读取官方 `results.json`; Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前提供 SD3.5 latent 级 GPU smoke adapter, 正式指标仍需补齐官方完整复现或受治理导入路径。
+5. 主表 baseline 已新增项目维护 adapter 路径。T2SMark adapter 可读取官方 `results.json`; Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前提供 SD3.5 latent 级 method-faithful adapter, 正式指标仍需补齐官方完整复现或受治理导入路径。
 6. `external_baseline/source_registry.json` 已补充 `adapter_path`、`adapter_status`、`model_alignment_status` 和 `official_source_tracked` 字段。
 
 ### 当前边界
@@ -941,60 +941,60 @@
 3. 论文级对比必须有 `formal_result_claim=true`、真实 `evidence_paths`、官方源码 commit、运行日志和可重建 observation 或受治理结果记录。
 
 
-## external_baseline_gpu_smoke_colab_entrypoint
+## external_baseline_method_faithful_colab_entrypoint
 
 | item | value |
 | --- | --- |
-| construction_unit_name | `external_baseline_gpu_smoke` |
-| phase_status | `colab_gpu_smoke_entrypoint_ready` |
+| construction_unit_name | `external_baseline_method_faithful` |
+| phase_status | `colab_method_faithful_entrypoint_ready` |
 | executor | `codex_agent` |
 | execution_date | `2026-06-21` |
-| input_manifest | `external_baseline/source_registry.json`; Google Drive 历史 `external_baseline_gpu_smoke_package_*.zip` 可选 |
-| expected_output_manifest | `outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_manifest.local.json` |
-| expected_outputs | `outputs/external_baseline_gpu_smoke/t2smark_official/**`; `outputs/external_baseline_gpu_smoke/execution/baseline_observations.json`; `outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_summary.json`; Google Drive `SLM/external_baseline_gpu_smoke/external_baseline_gpu_smoke_package_<utc>_<short_commit>.zip` |
-| blocking_items | 该 Notebook 已覆盖 T2SMark SD3.5 Medium 最小真实 GPU smoke, 并把 Tree-Ring、Gaussian Shading、Shallow Diffuse 接入 SD3.5 method-faithful GPU smoke adapter; 默认共享样本数已切换为120, 默认覆盖8类图像级攻击; 该入口可产出 pilot_paper 受治理候选证据, 但仍不得单独替代 full_paper 外部 baseline 对比结论。 |
+| input_manifest | `external_baseline/source_registry.json`; Google Drive 历史 `external_baseline_method_faithful_package_*.zip` 可选 |
+| expected_output_manifest | `outputs/external_baseline_method_faithful/external_baseline_method_faithful_manifest.local.json` |
+| expected_outputs | `outputs/external_baseline_method_faithful/t2smark_official/**`; `outputs/external_baseline_method_faithful/execution/baseline_observations.json`; `outputs/external_baseline_method_faithful/external_baseline_method_faithful_summary.json`; Google Drive `SLM/external_baseline_method_faithful/external_baseline_method_faithful_package_<utc>_<short_commit>.zip` |
+| blocking_items | 该 Notebook 已覆盖 T2SMark SD3.5 Medium 最小真实 method-faithful, 并把 Tree-Ring、Gaussian Shading、Shallow Diffuse 接入 SD3.5 method-faithful method-faithful adapter; 默认共享样本数已切换为120, 默认覆盖8类图像级攻击; 该入口可产出 pilot_paper 受治理候选证据, 但仍不得单独替代 full_paper 外部 baseline 对比结论。 |
 | fallback_path | 若 Google Drive 中已有可复用官方结果包, helper 会先解包复用; 若缺失, 则按源码登记表下载 T2SMark 官方源码并重新生成官方 `results.json`。 |
-| invariants | Notebook 只负责远程入口和打包, 真实逻辑位于 `paper_workflow/colab_utils/external_baseline_gpu_smoke.py`; 所有持久输出写入 `outputs/` 并镜像到 Google Drive。 |
+| invariants | Notebook 只负责远程入口和打包, 真实逻辑位于 `paper_workflow/colab_utils/external_baseline_method_faithful.py`; 所有持久输出写入 `outputs/` 并镜像到 Google Drive。 |
 
-### external baseline GPU smoke 入口内容
+### external baseline method-faithful 入口内容
 
-1. 新增 `paper_workflow/external_baseline_gpu_smoke_run.ipynb`, 支持 Colab 冷启动挂载 Google Drive、拉取仓库、读取 `HF_TOKEN`、检查 CUDA、执行最小 T2SMark SD3.5 Medium 真实 GPU smoke, 并在同一命令计划中运行四个主表 external baseline adapter。
-2. 新增 `paper_workflow/colab_utils/external_baseline_gpu_smoke.py`, 将历史包复用、官方源码缓存补齐、官方 `results.json` 生成、image pair 构造、主表 baseline adapter 命令计划执行和 zip 打包收敛到 helper。
-3. 前序结果判断边界为: 优先查找 Google Drive `external_baseline_gpu_smoke_package_*.zip`, 仅解出 `outputs/external_baseline_gpu_smoke/` 下可复用文件; 若 `results.json` 存在且允许复用, 不重新运行官方推理; 否则执行真实 GPU 生成。
+1. 新增 `paper_workflow/external_baseline_tree_ring_run.ipynb`、`paper_workflow/external_baseline_gaussian_shading_run.ipynb`、`paper_workflow/external_baseline_shallow_diffuse_run.ipynb` 与 `paper_workflow/external_baseline_t2smark_run.ipynb`, 支持 Colab 冷启动挂载 Google Drive、拉取仓库、读取 `HF_TOKEN`、检查 CUDA, 并将四个主表 external baseline 拆分为单 baseline 入口运行。
+2. 新增 `paper_workflow/colab_utils/external_baseline_method_faithful.py`, 将历史包复用、官方源码缓存补齐、官方 `results.json` 生成、image pair 构造、主表 baseline adapter 命令计划执行和 zip 打包收敛到 helper。
+3. 前序结果判断边界为: 优先查找 Google Drive `external_baseline_method_faithful_package_*.zip`, 仅解出 `outputs/external_baseline_method_faithful/` 下可复用文件; 若 `results.json` 存在且允许复用, 不重新运行官方推理; 否则执行真实 GPU 生成。
 4. 当前产物显式设置 `supports_paper_claim=false`, 只能证明外部 baseline 链路可运行, 不能替代 full-main prompt split、样本量冻结、固定 FPR 与 baseline 主表统计。
-5. Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前采用项目治理内的 SD3.5 method-faithful smoke adapter: 它验证 16-channel latent 形状、GPU 张量路径、clean / positive observation 输出、8类图像级攻击 observation 输出和 manifest 边界, 不等同于第三方官方完整复现。
-6. `external_baseline_gpu_smoke_package_20260623t14351782225358z_020d16f.zip` 已显示 `primary_baseline_attacked_image_count=240`, 三个 method-faithful baseline 各80张 attacked image, source / attacked image digest 均可核验。
+5. Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前采用项目治理内的 SD3.5 method-faithful method-faithful adapter: 它验证 16-channel latent 形状、GPU 张量路径、clean / positive observation 输出、8类图像级攻击 observation 输出和 manifest 边界, 不等同于第三方官方完整复现。
+6. `external_baseline_method_faithful_package_20260623t14351782225358z_020d16f.zip` 已显示 `primary_baseline_attacked_image_count=240`, 三个 method-faithful baseline 各80张 attacked image, source / attacked image digest 均可核验。
 
 
-### external baseline GPU smoke Colab 兼容修正
+### external baseline method-faithful Colab 兼容修正
 
 1. Colab 返回包显示 T2SMark 官方 `src/inversion/inverse_diffusion3.py` 在 Diffusers 0.38.0 / Transformers 5.12.1 环境中因 `Union` 未定义而在类定义阶段失败。
 2. 修正策略是在项目 helper 中对第三方源码缓存应用最小兼容补丁, 显式补齐 `torch`、`typing` 与 `PipelineImageInput` 导入; 第三方 `source/` 子树仍不进入 git 提交。
 3. 前序结果复用边界同步修正: 若 Google Drive 历史包中已有可复用 `results.json`, helper 会跳过源码缓存准备, 避免在不需要重新推理时被 GitHub 源码下载或补丁流程阻断。
-4. 该修正只提升 cold-start smoke 链路鲁棒性, 不改变 `supports_paper_claim=false` 的证据边界。
+4. 该修正只提升 cold-start method-faithful 链路鲁棒性, 不改变 `supports_paper_claim=false` 的证据边界。
 
 
-### external baseline GPU smoke provenance 修正
+### external baseline method-faithful provenance 修正
 
 1. 已发现历史失败包复用时 `t2smark_image_pairs.json` 可能保留空的 `generated_image_path` 与 `generated_image_digest`, 但新的官方图像已经生成。
 2. 修正策略是将 image pair 构造改为以当前 `t2smark_official/.../images/` 目录为准: 若已有 image pair 与当前图像路径或 digest 不一致, helper 会自动重写 `t2smark_image_pairs.json`。
-3. 重新生成或刷新方式为重新运行 `paper_workflow/external_baseline_gpu_smoke_run.ipynb`; helper 会在官方推理或结果复用后自动执行刷新, 不需要手工编辑 JSON。
+3. 重新生成或刷新方式为重新运行 `paper_workflow/external_baseline_t2smark_run.ipynb`; helper 会在官方推理或结果复用后自动执行刷新, 不需要手工编辑 JSON。
 
 
 ### external baseline 主表证据边界推进
 
-1. 新增 `experiments/baselines/primary_evidence.py`, 将四个主表 baseline 的 adapter smoke 链路状态与正式共同协议结果边界分开记录。
-2. 新增 `scripts/write_primary_baseline_evidence_outputs.py`, 可读取 `external_baseline_gpu_smoke` 的 command results 与 observations, 也可直接读取 GPU smoke zip 包, 写出 `outputs/primary_baseline_evidence/primary_baseline_evidence_records.jsonl`、summary 和 manifest。
-3. 该证据边界明确记录: Tree-Ring、Gaussian Shading 和 Shallow Diffuse 虽已具备 SD3.5 latent smoke 链路, 但仍缺方法忠实 SD3.5 adapter、full-main prompt 协议、fixed-FPR 校准、攻击矩阵检测和正式证据路径。
-4. 该推进不改变 `supports_paper_claim=false`; 作用是防止 smoke observation 被误升级为论文级主表 external baseline 指标。
+1. 新增 `experiments/baselines/primary_evidence.py`, 将四个主表 baseline 的 adapter method-faithful 链路状态与正式共同协议结果边界分开记录。
+2. 新增 `scripts/write_primary_baseline_evidence_outputs.py`, 可读取 `external_baseline_method_faithful` 的 command results 与 observations, 也可直接读取 method-faithful zip 包, 写出 `outputs/primary_baseline_evidence/primary_baseline_evidence_records.jsonl`、summary 和 manifest。
+3. 该证据边界明确记录: Tree-Ring、Gaussian Shading 和 Shallow Diffuse 虽已具备 SD3.5 method-faithful 链路, 但仍缺方法忠实 SD3.5 adapter、full-main prompt 协议、fixed-FPR 校准、攻击矩阵检测和正式证据路径。
+4. 该推进不改变 `supports_paper_claim=false`; 作用是防止 method-faithful observation 被误升级为论文级主表 external baseline 指标。
 
 
 
 ### 主表 baseline 正式导入协议与 T2SMark full-main 路径补充
 
-1. 新增 `experiments/baselines/formal_import.py`, 将主表 external baseline 的正式结果导入边界集中到 schema validator 中, 下游 `external_baseline_comparison` 只消费 `accepted_records`, 不再把 GPU smoke observation 或缺少 fixed-FPR / full-main / attack matrix 边界的记录纳入正式比较。
+1. 新增 `experiments/baselines/formal_import.py`, 将主表 external baseline 的正式结果导入边界集中到 schema validator 中, 下游 `external_baseline_comparison` 只消费 `accepted_records`, 不再把 method-faithful observation 或缺少 fixed-FPR / full-main / attack matrix 边界的记录纳入正式比较。
 2. 新增 `scripts/write_primary_baseline_formal_import_protocol.py`, 可写出正式导入 schema、主表结果模板、正式模板覆盖、证据收集计划、候选记录校验报告和 manifest。该脚本只生成治理产物, 不手工填充论文结果。
-3. 新增 `paper_workflow/colab_utils/t2smark_full_main_reproduction.py` 与 `paper_workflow/t2smark_full_main_reproduction_run.ipynb`, 支持 Colab 冷启动下读取 `configs/paper_main_full_paper_prompts.txt`, 运行 T2SMark SD3.5 Medium full-main 官方入口, 生成 image_pairs、统一 adapter observations、正式导入候选记录、validator 报告, 并打包镜像到 Google Drive。
+3. 新增 `paper_workflow/colab_utils/t2smark_full_main_reproduction.py` 与 `paper_workflow/official_reference_t2smark_run.ipynb`, 支持 Colab 冷启动下读取 `configs/paper_main_full_paper_prompts.txt`, 运行 T2SMark SD3.5 Medium full-main 官方入口, 生成 image_pairs、统一 adapter observations、正式导入候选记录、validator 报告, 并打包镜像到 Google Drive。
 4. 当前 T2SMark full-main 路径默认 `supports_paper_claim=false`。若 fixed-FPR 校准和攻击矩阵检测未闭合, validator 会保留 `formal_import_validation_ready=false`, 防止 raw full-main 官方结果被误声明为论文级主表 robustness 结论。
 
 ### dataset-level quality 打包自描述修正
@@ -1015,7 +1015,7 @@
 
 1. `external_baseline_comparison` 已新增 `baseline_formal_evidence_path_resolution_report.json`, 用于单独汇总正式导入候选记录的 evidence paths 在当前工作区或挂载目录下是否可解析。
 2. 该报告解释 candidate validator 与 comparison 重新校验之间可能出现的差异: 若本地 `outputs/` 中缺少从 Google Drive 下载的前序 zip, comparison 会把 evidence path 缺失显式记录为 provenance 问题。
-3. 该检查不改变小样本 evidence boundary, 也不把 GPU smoke 或小样本记录提升为正式 external baseline 论文结论。
+3. 该检查不改变小样本 evidence boundary, 也不把 method-faithful 或小样本记录提升为正式 external baseline 论文结论。
 4. 若需要关闭正式 baseline 结果缺口, 应先确保受治理结果包或官方复现 evidence paths 在当前审计边界内可解析, 再重建 comparison、evidence audit 和 submission readiness。
 5. formal evidence path resolution 已支持显式外部镜像根目录, 例如通过 `--evidence-search-root` 或 `SLM_WM_EVIDENCE_SEARCH_ROOTS` 指向 Google Drive 的 `SLM` 目录; 仓库不会硬编码用户机器路径, 也不会因此改变 full-main、fixed-FPR、攻击矩阵检测和正式 claim 的接受边界。
 6. 当前通过显式镜像根目录重建后, `formal_evidence_path_reference_count=28`, `search_resolved_formal_evidence_path_count=28`, `missing_formal_evidence_path_count=0`, `formal_evidence_path_resolution_ready=true`; 但 `formal_import_validation_ready=false`, 主要阻断仍是 `full_main_resource_profile_required`、`full_main_prompt_protocol_ready_required`、`fixed_fpr_baseline_calibration_ready_required` 与 `attack_matrix_baseline_detection_ready_required`。

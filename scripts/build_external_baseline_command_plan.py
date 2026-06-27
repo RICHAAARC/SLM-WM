@@ -74,20 +74,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument(
         "--tree-ring-adapter-mode",
-        default="latent_smoke",
-        choices=("latent_smoke", "method_faithful_sd35"),
+        default="method_faithful",
+        choices=("method_faithful", "method_faithful_sd35"),
         help="Tree-Ring adapter 运行模式。默认保留轻量链路检查, 真实 GPU 运行应使用 method_faithful_sd35。",
     )
     parser.add_argument(
         "--gaussian-shading-adapter-mode",
-        default="latent_smoke",
-        choices=("latent_smoke", "method_faithful_sd35"),
+        default="method_faithful",
+        choices=("method_faithful", "method_faithful_sd35"),
         help="Gaussian Shading adapter 运行模式。默认保留轻量链路检查, 真实 GPU 运行应使用 method_faithful_sd35。",
     )
     parser.add_argument(
         "--shallow-diffuse-adapter-mode",
-        default="latent_smoke",
-        choices=("latent_smoke", "method_faithful_sd35"),
+        default="method_faithful",
+        choices=("method_faithful", "method_faithful_sd35"),
         help="Shallow Diffuse adapter 运行模式。默认保留轻量链路检查, 真实 GPU 运行应使用 method_faithful_sd35。",
     )
     parser.add_argument("--tree-ring-watermark-seed", type=int, default=999999, help="Tree-Ring key 随机种子。")

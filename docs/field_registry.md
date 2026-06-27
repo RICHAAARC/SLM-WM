@@ -1012,7 +1012,7 @@ Notebook 与 repository module 的跨边界数据
 | command_results_path | artifact | none | false | false | false | 外部 baseline 命令结果文件路径。 |
 | observations_path | artifact | none | false | false | false | 主表 baseline 证据边界读取的 observation 输入路径。 |
 | source_registry_path | artifact | none | false | false | false | 主表 baseline 证据边界读取的源码登记输入路径。 |
-| smoke_package_path | artifact | none | false | false | false | 主表 baseline 证据边界读取的 external baseline GPU smoke zip 包路径。 |
+| method_faithful_package_path | artifact | none | false | false | false | 主表 baseline 证据边界读取的 external baseline method-faithful zip 包路径。 |
 | execution_digest | artifact | none | true | false | false | 外部 baseline 执行 manifest 的稳定摘要。 |
 | evidence_paths | artifact | none | true | false | false | 外部 baseline 正式结果所绑定的证据文件路径集合。 |
 | formal_result_claim | claim | none | false | false | false | 外部 baseline 结果是否声明可作为正式论文对比证据。 |
@@ -1125,8 +1125,8 @@ Notebook 与 repository module 的跨边界数据
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |
 | example_artifact_temporary | temporary | _temporary | false | false | true | 可清理的示例临时产物标记。 |
 | example_result_cache | cache | _cache | false | false | false | 可由输入、配置和代码重建的示例缓存标记。 |
-| external_baseline_gpu_smoke_ready | artifact | none | false | false | false | 外部 baseline 真实 GPU smoke 链路是否已跑通并生成可审计结果包。|
-| t2smark_real_gpu_smoke_ready | artifact | none | false | false | false | T2SMark 官方 SD3.5 Medium 真实 GPU 最小复现是否已生成或复用成功。|
+| external_baseline_method_faithful_ready | artifact | none | false | false | false | 外部 baseline 真实 method-faithful 链路是否已跑通并生成可审计结果包。|
+| t2smark_real_method_faithful_ready | artifact | none | false | false | false | T2SMark 官方 SD3.5 Medium 真实 GPU 最小复现是否已生成或复用成功。|
 | t2smark_official_result_generated | artifact | none | false | false | false | T2SMark 官方 results.json 是否由本次运行生成。|
 | t2smark_official_result_reused | artifact | none | false | false | false | T2SMark 官方 results.json 是否来自本地或 Drive 历史结果复用。|
 | t2smark_source_available | artifact | none | false | false | false | T2SMark 官方源码入口在当前工作区中是否可用。|
@@ -1141,22 +1141,22 @@ Notebook 与 repository module 的跨边界数据
 | extracted_entries | artifact | none | false | false | false | 从历史结果包中解出的可复用文件路径集合。|
 | adapter_execution_ready | artifact | none | false | false | false | 外部 baseline adapter 命令计划是否执行并通过证据边界校验。|
 | adapter_observation_count | metric | none | false | false | false | 外部 baseline adapter 输出的 observation 数量。|
-| primary_baseline_adapter_ready | artifact | none | false | false | false | 四个主表 external baseline adapter 在同一 GPU smoke 命令计划中是否全部跑通。|
-| primary_baseline_adapter_count | metric | none | false | false | false | 本次 GPU smoke 命令计划覆盖的主表 external baseline adapter 数量。|
-| primary_baseline_observation_count | metric | none | false | false | false | 本次 GPU smoke 命令计划中主表 external baseline adapter 输出的 observation 总数。|
-| primary_baseline_ids | protocol | none | false | false | false | 本次 GPU smoke 命令计划覆盖的主表 external baseline id 集合。|
-| ready_primary_baseline_ids | protocol | none | false | false | false | 本次 GPU smoke 命令计划中已经成功输出 observation 的主表 external baseline id 集合。|
+| primary_baseline_adapter_ready | artifact | none | false | false | false | 四个主表 external baseline adapter 在同一 method-faithful 命令计划中是否全部跑通。|
+| primary_baseline_adapter_count | metric | none | false | false | false | 本次 method-faithful 命令计划覆盖的主表 external baseline adapter 数量。|
+| primary_baseline_observation_count | metric | none | false | false | false | 本次 method-faithful 命令计划中主表 external baseline adapter 输出的 observation 总数。|
+| primary_baseline_ids | protocol | none | false | false | false | 本次 method-faithful 命令计划覆盖的主表 external baseline id 集合。|
+| ready_primary_baseline_ids | protocol | none | false | false | false | 本次 method-faithful 命令计划中已经成功输出 observation 的主表 external baseline id 集合。|
 | primary_baseline_observation_count_by_id | metric | none | false | false | false | 按主表 external baseline id 聚合的 observation 数量。|
-| primary_baseline_prompt_plan_path | artifact | none | false | false | false | 三类 latent smoke adapter 读取的最小 prompt 计划路径。|
+| primary_baseline_prompt_plan_path | artifact | none | false | false | false | 三类 method-faithful adapter 读取的最小 prompt 计划路径。|
 | primary_baseline_evidence_id | artifact | none | true | false | false | 主表 external baseline 证据边界记录的稳定标识。|
 | primary_baseline_evidence_digest | artifact | none | true | false | false | 主表 external baseline 证据边界记录的稳定摘要。|
 | adapter_smoke_ready | artifact | none | false | false | false | 单个主表 external baseline 的 adapter smoke 命令是否成功并产生 observation。|
 | adapter_smoke_ready_count | metric | none | false | false | false | adapter smoke 已成功的主表 external baseline 数量。|
 | adapter_smoke_ready_ids | protocol | none | false | false | false | adapter smoke 已成功的主表 external baseline id 集合。|
-| adapter_smoke_observation_count | metric | none | false | false | false | 单个主表 external baseline 在 smoke 链路中产生的 observation 数量。|
-| adapter_smoke_execution_devices | runtime | none | false | false | false | 单个主表 external baseline smoke observation 中记录的执行设备集合。|
-| adapter_smoke_sample_roles | protocol | none | false | false | false | 单个主表 external baseline smoke observation 中记录的样本角色集合。|
-| adapter_smoke_latent_shapes | runtime | none | false | false | false | 单个主表 external baseline smoke observation 中记录的 latent shape 集合。|
+| adapter_smoke_observation_count | metric | none | false | false | false | 单个主表 external baseline 在 method-faithful 链路中产生的 observation 数量。|
+| adapter_smoke_execution_devices | runtime | none | false | false | false | 单个主表 external baseline method-faithful observation 中记录的执行设备集合。|
+| adapter_smoke_sample_roles | protocol | none | false | false | false | 单个主表 external baseline method-faithful observation 中记录的样本角色集合。|
+| adapter_smoke_latent_shapes | runtime | none | false | false | false | 单个主表 external baseline method-faithful observation 中记录的 latent shape 集合。|
 | method_faithful_adapter_ready | governance | none | false | false | false | 主表 external baseline 是否已达到方法忠实 SD3.5 适配边界。|
 | method_faithful_adapter_status_id | artifact | none | true | false | false | 主表 external baseline 方法忠实适配协议状态记录的稳定标识。|
 | method_faithful_adapter_status_digest | artifact | none | true | false | false | 主表 external baseline 方法忠实适配协议状态记录的稳定摘要。|
@@ -1225,7 +1225,7 @@ Notebook 与 repository module 的跨边界数据
 | torch_available | runtime | none | false | false | false | adapter 运行环境中是否可导入 torch。|
 | adapter_seed | runtime | none | false | false | false | adapter 为单条 prompt 派生的可复现整数种子。|
 | score_metadata | runtime | none | false | false | false | adapter manifest 中按 prompt 记录的轻量分数计算元数据。|
-| adapter_unsupported_reason | governance | none | false | false | false | 外部 baseline adapter 未能通过 smoke 链路时记录的边界原因。|
+| adapter_unsupported_reason | governance | none | false | false | false | 外部 baseline adapter 未能通过 method-faithful 链路时记录的边界原因。|
 | official_result_generated | artifact | none | false | false | false | 外部 baseline 官方结果是否由本次命令生成。|
 | official_result_reused | artifact | none | false | false | false | 外部 baseline 官方结果是否由本地或历史结果复用。|
 | official_generation_reason | governance | none | false | false | false | 外部 baseline 官方结果生成或复用决策的原因。|

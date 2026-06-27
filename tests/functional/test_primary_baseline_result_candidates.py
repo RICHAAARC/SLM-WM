@@ -10,7 +10,7 @@ from zipfile import ZipFile
 import pytest
 
 from scripts.write_primary_baseline_result_candidates import (
-    GPU_SMOKE_OBSERVATIONS_ENTRY,
+    METHOD_FAITHFUL_OBSERVATIONS_ENTRY,
     T2SMARK_CANDIDATE_RECORDS_ENTRY,
     write_primary_baseline_result_candidate_outputs,
 )
@@ -50,8 +50,8 @@ def method_observations() -> list[dict[str, object]]:
     return rows
 
 
-def t2smark_smoke_observations() -> list[dict[str, object]]:
-    """构造 T2SMark GPU smoke adapter 的最小 observation 集合。"""
+def t2smark_method_faithful_observations() -> list[dict[str, object]]:
+    """构造 T2SMark method-faithful adapter 的最小 observation 集合。"""
 
     return [
         {
@@ -71,6 +71,35 @@ def t2smark_smoke_observations() -> list[dict[str, object]]:
             "detection_decision": True,
             "prompt_id": "prompt_000",
             "prompt_text": "a ceramic fox on a wooden desk",
+        },
+    ]
+
+
+def t2smark_attack_method_faithful_observations() -> list[dict[str, object]]:
+    """构造 T2SMark 非 clean 攻击 observation, 用于验证缺失攻击项合并。"""
+
+    return [
+        {
+            "baseline_id": "t2smark",
+            "attack_family": "standard_distortion",
+            "attack_condition": "gaussian_blur",
+            "sample_role": "attacked_negative",
+            "detection_decision": False,
+            "prompt_id": "prompt_000",
+            "prompt_text": "a ceramic fox on a wooden desk",
+            "quality_score_proxy": 0.9,
+            "score_retention_proxy": 0.8,
+        },
+        {
+            "baseline_id": "t2smark",
+            "attack_family": "standard_distortion",
+            "attack_condition": "gaussian_blur",
+            "sample_role": "attacked_positive",
+            "detection_decision": True,
+            "prompt_id": "prompt_000",
+            "prompt_text": "a ceramic fox on a wooden desk",
+            "quality_score_proxy": 0.9,
+            "score_retention_proxy": 0.8,
         },
     ]
 
@@ -152,7 +181,7 @@ def write_text_package(path: Path, entries: dict[str, str]) -> None:
 
 
 @pytest.mark.quick
-def test_primary_baseline_candidate_writer_imports_packages_without_promoting_smoke_results(tmp_path: Path) -> None:
+def test_primary_baseline_candidate_writer_imports_packages_without_promoting_method_faithful_results(tmp_path: Path) -> None:
     """候选导入脚本应保留候选证据, 但不能把小样本 GPU 链路升级为主表结论。"""
 
     attack_dir = tmp_path / "outputs" / "attack_matrix"
@@ -161,11 +190,11 @@ def test_primary_baseline_candidate_writer_imports_packages_without_promoting_sm
         json.dumps({"evaluation_boundary": {"target_fpr": 0.01}}, ensure_ascii=False),
         encoding="utf-8",
     )
-    smoke_package_path = tmp_path / "external_baseline_gpu_smoke_package.zip"
+    method_faithful_package_path = tmp_path / "external_baseline_method_faithful_package.zip"
     t2smark_package_path = tmp_path / "t2smark_full_main_reproduction_package.zip"
     write_text_package(
-        smoke_package_path,
-        {GPU_SMOKE_OBSERVATIONS_ENTRY: json.dumps(method_observations(), ensure_ascii=False)},
+        method_faithful_package_path,
+        {METHOD_FAITHFUL_OBSERVATIONS_ENTRY: json.dumps(method_observations(), ensure_ascii=False)},
     )
     write_text_package(
         t2smark_package_path,
@@ -174,7 +203,7 @@ def test_primary_baseline_candidate_writer_imports_packages_without_promoting_sm
 
     manifest = write_primary_baseline_result_candidate_outputs(
         root=tmp_path,
-        external_gpu_smoke_package_path=smoke_package_path,
+        external_method_faithful_package_path=method_faithful_package_path,
         t2smark_full_main_package_path=t2smark_package_path,
     )
     output_dir = tmp_path / "outputs" / "external_baseline_results"
@@ -229,15 +258,15 @@ def test_primary_baseline_candidate_writer_preserves_regeneration_resource_profi
         json.dumps({"evaluation_boundary": {"target_fpr": 0.01}}, ensure_ascii=False),
         encoding="utf-8",
     )
-    smoke_package_path = tmp_path / "external_baseline_gpu_smoke_package.zip"
+    method_faithful_package_path = tmp_path / "external_baseline_method_faithful_package.zip"
     write_text_package(
-        smoke_package_path,
-        {GPU_SMOKE_OBSERVATIONS_ENTRY: json.dumps(method_observations() + regeneration_observations(), ensure_ascii=False)},
+        method_faithful_package_path,
+        {METHOD_FAITHFUL_OBSERVATIONS_ENTRY: json.dumps(method_observations() + regeneration_observations(), ensure_ascii=False)},
     )
 
     write_primary_baseline_result_candidate_outputs(
         root=tmp_path,
-        external_gpu_smoke_package_path=smoke_package_path,
+        external_method_faithful_package_path=method_faithful_package_path,
     )
     output_dir = tmp_path / "outputs" / "external_baseline_results"
     records = [
@@ -256,10 +285,10 @@ def test_primary_baseline_candidate_writer_preserves_regeneration_resource_profi
 
 
 @pytest.mark.quick
-def test_primary_baseline_candidate_writer_imports_t2smark_smoke_when_full_main_package_missing(
+def test_primary_baseline_candidate_writer_imports_t2smark_method_faithful_when_full_main_package_missing(
     tmp_path: Path,
 ) -> None:
-    """T2SMark full-main 包缺失时, writer 应保留 GPU smoke observation 作为小样本候选。"""
+    """T2SMark full-main 包缺失时, writer 应保留 method-faithful observation 作为小样本候选。"""
 
     attack_dir = tmp_path / "outputs" / "attack_matrix"
     attack_dir.mkdir(parents=True)
@@ -267,15 +296,15 @@ def test_primary_baseline_candidate_writer_imports_t2smark_smoke_when_full_main_
         json.dumps({"evaluation_boundary": {"target_fpr": 0.01}}, ensure_ascii=False),
         encoding="utf-8",
     )
-    smoke_package_path = tmp_path / "external_baseline_gpu_smoke_package.zip"
+    method_faithful_package_path = tmp_path / "external_baseline_method_faithful_package.zip"
     write_text_package(
-        smoke_package_path,
-        {GPU_SMOKE_OBSERVATIONS_ENTRY: json.dumps(method_observations() + t2smark_smoke_observations(), ensure_ascii=False)},
+        method_faithful_package_path,
+        {METHOD_FAITHFUL_OBSERVATIONS_ENTRY: json.dumps(method_observations() + t2smark_method_faithful_observations(), ensure_ascii=False)},
     )
 
     write_primary_baseline_result_candidate_outputs(
         root=tmp_path,
-        external_gpu_smoke_package_path=smoke_package_path,
+        external_method_faithful_package_path=method_faithful_package_path,
     )
     output_dir = tmp_path / "outputs" / "external_baseline_results"
     records = [
@@ -296,3 +325,96 @@ def test_primary_baseline_candidate_writer_imports_t2smark_smoke_when_full_main_
     assert t2smark_row["formal_evidence_paths_ready"] is True
     assert validation["accepted_formal_import_count"] == 4
     assert "full_main_resource_profile_required" not in reasons
+
+
+@pytest.mark.quick
+def test_primary_baseline_candidate_writer_merges_t2smark_formal_and_method_faithful_attack_rows(
+    tmp_path: Path,
+) -> None:
+    """T2SMark 专用复现包只含 clean 时, 不得丢弃 GPU 观测中的攻击矩阵记录。"""
+
+    attack_dir = tmp_path / "outputs" / "attack_matrix"
+    attack_dir.mkdir(parents=True)
+    (attack_dir / "attack_manifest.json").write_text(
+        json.dumps({"evaluation_boundary": {"target_fpr": 0.01}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    method_faithful_package_path = tmp_path / "external_baseline_method_faithful_package.zip"
+    t2smark_package_path = tmp_path / "t2smark_full_main_reproduction_package.zip"
+    write_text_package(
+        method_faithful_package_path,
+        {
+            METHOD_FAITHFUL_OBSERVATIONS_ENTRY: json.dumps(
+                method_observations() + t2smark_method_faithful_observations() + t2smark_attack_method_faithful_observations(),
+                ensure_ascii=False,
+            )
+        },
+    )
+    write_text_package(
+        t2smark_package_path,
+        {T2SMARK_CANDIDATE_RECORDS_ENTRY: json.dumps(t2smark_candidate_record(), ensure_ascii=False) + "\n"},
+    )
+
+    write_primary_baseline_result_candidate_outputs(
+        root=tmp_path,
+        external_method_faithful_package_path=method_faithful_package_path,
+        t2smark_full_main_package_path=t2smark_package_path,
+    )
+    output_dir = tmp_path / "outputs" / "external_baseline_results"
+    records = [
+        json.loads(line)
+        for line in (output_dir / "baseline_result_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    validation = json.loads(
+        (output_dir / "baseline_result_candidate_validation_report.json").read_text(encoding="utf-8")
+    )
+    t2smark_keys = {
+        (row["attack_family"], row["attack_name"], row["resource_profile"])
+        for row in records
+        if row["baseline_id"] == "t2smark"
+    }
+
+    assert ("clean", "clean_none", "full_main") in t2smark_keys
+    assert ("standard_distortion", "gaussian_blur", "full_main") in t2smark_keys
+    assert len([row for row in records if row["baseline_id"] == "t2smark"]) == 2
+    assert validation["accepted_formal_import_count"] == 4
+
+
+@pytest.mark.quick
+def test_primary_baseline_candidate_writer_merges_split_baseline_observations(tmp_path: Path) -> None:
+    """四个单 baseline 包物化后, writer 应合并 split_observations 而不是只读最后一次 execution。"""
+
+    attack_dir = tmp_path / "outputs" / "attack_matrix"
+    split_dir = tmp_path / "outputs" / "external_baseline_method_faithful" / "split_observations"
+    attack_dir.mkdir(parents=True)
+    split_dir.mkdir(parents=True)
+    (attack_dir / "attack_manifest.json").write_text(
+        json.dumps({"evaluation_boundary": {"target_fpr": 0.01}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse"):
+        rows = [row for row in method_observations() if row["baseline_id"] == baseline_id]
+        (split_dir / f"{baseline_id}_baseline_observations.json").write_text(
+            json.dumps(rows, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    (split_dir / "t2smark_baseline_observations.json").write_text(
+        json.dumps(t2smark_method_faithful_observations(), ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    write_primary_baseline_result_candidate_outputs(root=tmp_path)
+    output_dir = tmp_path / "outputs" / "external_baseline_results"
+    records = [
+        json.loads(line)
+        for line in (output_dir / "baseline_result_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert {row["baseline_id"] for row in records} == {
+        "tree_ring",
+        "gaussian_shading",
+        "shallow_diffuse",
+        "t2smark",
+    }

@@ -43,6 +43,7 @@ from paper_workflow.colab_utils.real_attack_evaluation import (
     read_jsonl,
     relative_or_absolute,
     safe_extract_selected_entries,
+    discover_source_images as discover_governed_source_images,
     source_context_by_image_path,
     stable_json_text,
     write_csv,
@@ -208,6 +209,10 @@ def materialize_drive_package_inputs(
 def discover_source_images(root_path: Path, config: ConventionalGeometricAttackEvaluationConfig) -> tuple[Path, ...]:
     """查找进入常规失真与几何变换攻击闭环的 source image."""
 
+    if config.source_image_dir == DEFAULT_SOURCE_IMAGE_DIR:
+        governed_paths = discover_governed_source_images(root_path, config)  # type: ignore[arg-type]
+        if governed_paths:
+            return governed_paths
     configured_dir = (root_path / config.source_image_dir).resolve()
     candidates: list[Path] = []
     for directory in (configured_dir, root_path / "outputs" / "aligned_rescoring"):

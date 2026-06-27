@@ -87,9 +87,13 @@ def test_drive_workflow_writes_failure_summary_when_required_package_missing(tmp
 def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """真实攻击闭环 helper 应记录 source / attacked digest 并重跑攻击后检测."""
     source_dir = tmp_path / "outputs" / "aligned_rescoring" / "aligned_images"
+    clean_dir = tmp_path / "outputs" / "aligned_rescoring" / "clean_images"
     source_dir.mkdir(parents=True)
+    clean_dir.mkdir(parents=True)
     source_path = source_dir / "sample_aligned.png"
+    clean_source_path = clean_dir / "sample_clean.png"
     Image.new("RGB", (32, 32), color=(120, 90, 70)).save(source_path)
+    Image.new("RGB", (32, 32), color=(80, 100, 120)).save(clean_source_path)
     prompt_dir = tmp_path / "outputs" / "prompt_event_protocol"
     prompt_dir.mkdir(parents=True)
     (prompt_dir / "prompt_records.jsonl").write_text(
@@ -98,13 +102,21 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     )
     aligned_dir = tmp_path / "outputs" / "aligned_rescoring"
     (aligned_dir / "aligned_rescoring_quality_metrics.csv").write_text(
-        "prompt_id,aligned_image_path\nprompt_a,outputs/aligned_rescoring/aligned_images/sample_aligned.png\n",
+        "prompt_id,clean_image_path,aligned_image_path\n"
+        "prompt_a,outputs/aligned_rescoring/clean_images/sample_clean.png,"
+        "outputs/aligned_rescoring/aligned_images/sample_aligned.png\n",
         encoding="utf-8",
     )
     (aligned_dir / "aligned_rescoring_records.jsonl").write_text(
         '{"aligned_rescoring_record_id":"aligned_a","prompt_id":"prompt_a","real_raw_content_score":0.8,'
         '"real_aligned_content_score":0.82,"aligned_rescoring_ready":true,'
-        '"split":"test","sample_role":"positive_source","supports_paper_claim":false}\n',
+        '"split":"test","sample_role":"positive_source","supports_paper_claim":false}\n'
+        '{"aligned_rescoring_record_id":"clean_a","prompt_id":"prompt_a","real_raw_content_score":0.1,'
+        '"real_aligned_content_score":0.12,"aligned_rescoring_ready":true,'
+        '"split":"test","sample_role":"clean_negative","supports_paper_claim":false}\n'
+        '{"aligned_rescoring_record_id":"attacked_a","prompt_id":"prompt_a","real_raw_content_score":0.2,'
+        '"real_aligned_content_score":0.22,"aligned_rescoring_ready":true,'
+        '"split":"test","sample_role":"attacked_negative","supports_paper_claim":false}\n',
         encoding="utf-8",
     )
     threshold_dir = tmp_path / "outputs" / "threshold_calibration"
@@ -172,9 +184,9 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     assert summary["regeneration_attack_gpu_validation_ready"] is True
     assert summary["attack_detection_rerun_ready"] is True
     assert summary["formal_attack_detection_ready"] is True
-    assert summary["real_attacked_image_count"] == 4
-    assert len(records) == 4
-    assert len(registry_rows) == 4
+    assert summary["real_attacked_image_count"] == 8
+    assert len(records) == 8
+    assert len(registry_rows) == 8
     assert all(record["metric_status"] == "measured_from_real_attacked_image" for record in records)
     assert all(record["source_image_digest"] for record in records)
     assert all(record["attacked_image_digest"] for record in records)
@@ -185,8 +197,9 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
             assert attacked_image.size == (32, 32)
     assert (output_dir / "real_attack_family_metrics.csv").read_text(encoding="utf-8").count("\n") >= 5
     formal_records = read_jsonl(output_dir / "formal_attack_detection_records.jsonl")
-    assert len(formal_records) == 4
+    assert len(formal_records) == 8
     assert all(record["metric_status"] == "measured_from_real_attacked_image_formal_protocol" for record in formal_records)
+    assert {record["sample_role"] for record in formal_records} == {"positive_source", "clean_negative"}
 
 
 @pytest.mark.quick

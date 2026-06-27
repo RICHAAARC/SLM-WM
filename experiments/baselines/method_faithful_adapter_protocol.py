@@ -25,9 +25,9 @@ PRIMARY_BASELINE_METHOD_FAITHFUL_ADAPTER_PROTOCOL_NAME = "primary_baseline_metho
 METHOD_FAITHFUL_ADAPTER_REQUIRED_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse")
 NATIVE_OFFICIAL_REPRODUCTION_IDS = ("t2smark",)
 METHOD_FAITHFUL_ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
-REJECTED_SMOKE_ADAPTER_BOUNDARIES = (
-    "gpu_smoke_not_full_external_baseline_comparison",
-    "sd35_latent_smoke_adapter_not_formal_external_baseline_evidence",
+REJECTED_INCOMPLETE_ADAPTER_BOUNDARIES = (
+    "method_faithful_not_full_external_baseline_comparison",
+    "sd35_method_faithful_adapter_not_formal_external_baseline_evidence",
 )
 REQUIRED_SAMPLE_ROLES = ("clean_negative", "positive_source")
 REQUIRED_OBSERVATION_FIELDS = (
@@ -56,7 +56,7 @@ class MethodFaithfulAdapterStatusRecord:
     """记录单个主表 baseline 的方法忠实适配协议状态。
 
     该对象不是论文结果, 而是工程治理记录。它显式区分 method-faithful adapter、
-    native official reproduction 和不合格 smoke boundary, 防止 smoke observation
+    native official reproduction 和不合格 incomplete adapter boundary, 防止 method-faithful observation
     被误导入为主表正式结果。
     """
 
@@ -94,7 +94,7 @@ def build_primary_baseline_method_faithful_adapter_schema() -> dict[str, Any]:
         "method_faithful_adapter_required_ids": list(METHOD_FAITHFUL_ADAPTER_REQUIRED_IDS),
         "native_official_reproduction_ids": list(NATIVE_OFFICIAL_REPRODUCTION_IDS),
         "accepted_adapter_boundary": METHOD_FAITHFUL_ADAPTER_BOUNDARY,
-        "rejected_smoke_adapter_boundaries": list(REJECTED_SMOKE_ADAPTER_BOUNDARIES),
+        "rejected_incomplete_adapter_boundaries": list(REJECTED_INCOMPLETE_ADAPTER_BOUNDARIES),
         "required_sample_roles": list(REQUIRED_SAMPLE_ROLES),
         "required_observation_fields": list(REQUIRED_OBSERVATION_FIELDS),
         "required_image_provenance_fields": list(REQUIRED_IMAGE_PROVENANCE_FIELDS),
@@ -205,8 +205,8 @@ def _method_faithful_reasons(
     if baseline_id in METHOD_FAITHFUL_ADAPTER_REQUIRED_IDS:
         if METHOD_FAITHFUL_ADAPTER_BOUNDARY not in observed_boundaries:
             reasons.append("method_faithful_adapter_boundary_required")
-        if any(boundary in REJECTED_SMOKE_ADAPTER_BOUNDARIES for boundary in observed_boundaries):
-            reasons.append("smoke_adapter_boundary_rejected")
+        if any(boundary in REJECTED_INCOMPLETE_ADAPTER_BOUNDARIES for boundary in observed_boundaries):
+            reasons.append("incomplete_adapter_boundary_rejected")
     if clean_negative_count <= 0:
         reasons.append("clean_negative_observations_required")
     if positive_source_count <= 0:

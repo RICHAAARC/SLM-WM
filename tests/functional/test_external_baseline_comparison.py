@@ -428,7 +428,7 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
     result_dir = tmp_path / "outputs" / "external_baseline_results"
     result_dir.mkdir(parents=True)
     mirror_root = tmp_path / "drive_mirror" / "SLM"
-    mirror_evidence_dir = mirror_root / "external_baseline_gpu_smoke"
+    mirror_evidence_dir = mirror_root / "external_baseline_method_faithful"
     mirror_evidence_dir.mkdir(parents=True)
     mirror_evidence_path = mirror_evidence_dir / "tree_ring_metrics.csv"
     mirror_evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")

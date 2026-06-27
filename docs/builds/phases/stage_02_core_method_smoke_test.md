@@ -57,7 +57,7 @@ python tools/harness/inspect_repository.py .
 
 1. 不得接入真实 SD3 / SD3.5。
 2. 不得实现 Colab / Drive。
-3. 不得把 smoke 结果写成论文 supported claims。
+3. 不得把 method-faithful 结果写成论文 supported claims。
 4. 不得将 synthetic attention stub 宣称为真实 attention geometry。
 
 ## 七、产物与项目信息更新

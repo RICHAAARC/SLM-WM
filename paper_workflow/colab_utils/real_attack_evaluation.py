@@ -427,8 +427,54 @@ def real_attack_record_id(source_digest: str, spec: RealAttackSpec, attacked_dig
     return f"real_attack_{build_stable_digest(payload)[:16]}"
 
 
+def resolve_repo_image_path(root_path: Path, image_path: str) -> Path | None:
+    """把记录中的图像路径解析为本地文件路径.
+
+    该函数属于通用工程写法: 前序结果包中的图像路径通常是仓库相对路径,
+    但在人工诊断时也可能传入绝对路径。统一解析可以避免后续攻击闭环
+    在每个业务分支中重复处理路径边界。
+    """
+
+    normalized = str(image_path or "").strip()
+    if not normalized:
+        return None
+    candidate = Path(normalized)
+    return candidate.resolve() if candidate.is_absolute() else (root_path / candidate).resolve()
+
+
+def aligned_rescoring_source_image_paths(root_path: Path, config: RealAttackEvaluationConfig) -> tuple[Path, ...]:
+    """从 aligned rescoring 质量表读取成组 clean / aligned source image.
+
+    此处是项目特定写法: pilot_paper 与 full_paper 的 fixed-FPR 共同协议需要
+    同时攻击 clean_negative 和 positive_source 图像。`max_source_images` 在该
+    受治理路径中表示最多读取多少个 prompt / carrier 质量记录, 每条质量记录
+    最多贡献一张 aligned 图像和一张 clean 图像。
+    """
+
+    quality_rows = read_csv_rows(root_path / "outputs" / "aligned_rescoring" / "aligned_rescoring_quality_metrics.csv")
+    if not quality_rows:
+        return ()
+    row_limit = max(0, int(config.max_source_images))
+    selected_rows = quality_rows[:row_limit] if row_limit else quality_rows
+    candidates: list[Path] = []
+    for quality_row in selected_rows:
+        for field_name in ("aligned_image_path", "clean_image_path"):
+            image_path = resolve_repo_image_path(root_path, str(quality_row.get(field_name, "")))
+            if image_path and image_path.is_file() and image_path.suffix.lower() in IMAGE_SUFFIXES:
+                candidates.append(image_path)
+    unique: list[Path] = []
+    for path in candidates:
+        if path not in unique:
+            unique.append(path)
+    return tuple(unique)
+
+
 def discover_source_images(root_path: Path, config: RealAttackEvaluationConfig) -> tuple[Path, ...]:
     """查找需要进入真实攻击闭环的 source image 文件."""
+    if config.source_image_dir == DEFAULT_SOURCE_IMAGE_DIR:
+        governed_paths = aligned_rescoring_source_image_paths(root_path, config)
+        if governed_paths:
+            return governed_paths
     candidates: list[Path] = []
     configured_dir = (root_path / config.source_image_dir).resolve()
     fallback_dirs = (
@@ -829,30 +875,77 @@ def prompt_lookup(root_path: Path) -> dict[str, str]:
     return {str(row["prompt_id"]): str(row["prompt_text"]) for row in rows}
 
 
+def preferred_rescoring_record(
+    records_by_prompt_role: dict[tuple[str, str], dict[str, Any]],
+    records_by_prompt: dict[str, dict[str, Any]],
+    prompt_id: str,
+    sample_role: str,
+) -> dict[str, Any]:
+    """优先按 prompt 和 sample_role 读取 rescoring 记录.
+
+    该函数修复的核心问题是: 同一个 prompt 会同时产生 `positive_source`、
+    `clean_negative` 和 `attacked_negative` 记录, 不能只按 prompt id 建立单值
+    字典, 否则后写入的角色会覆盖真实 source image 对应的角色。
+    """
+
+    return records_by_prompt_role.get((prompt_id, sample_role), records_by_prompt.get(prompt_id, {}))
+
+
+def build_source_context(
+    *,
+    prompt_id: str,
+    prompt_text: str,
+    source_record: dict[str, Any],
+    sample_role: str,
+) -> dict[str, Any]:
+    """把 rescoring 记录转换为攻击闭环可复用的 source context."""
+
+    effective_role = str(source_record.get("sample_role", sample_role) or sample_role)
+    return {
+        "prompt_id": prompt_id,
+        "prompt_text": prompt_text,
+        "source_record": source_record,
+        "split": source_record.get("split", "unknown"),
+        "sample_role": effective_role,
+        "raw_content_score_before": float(source_record.get("real_raw_content_score", source_record.get("raw_content_score", 0.0))),
+        "aligned_content_score_before": float(
+            source_record.get("real_aligned_content_score", source_record.get("aligned_content_score", 0.0))
+        ),
+        "geometry_reliable": bool(source_record.get("aligned_rescoring_ready", False)),
+        "fail_reason": source_record.get("fail_reason", "geometry_suspected"),
+    }
+
+
 def source_context_by_image_path(root_path: Path, config: RealAttackEvaluationConfig) -> dict[str, dict[str, Any]]:
-    """把 aligned image 路径映射回真实 aligned rescoring 记录与 prompt."""
+    """把 clean / aligned image 路径映射回真实 aligned rescoring 记录与 prompt."""
     quality_rows = read_csv_rows(root_path / "outputs" / "aligned_rescoring" / "aligned_rescoring_quality_metrics.csv")
     rescoring_rows = read_jsonl(root_path / "outputs" / "aligned_rescoring" / "aligned_rescoring_records.jsonl")
     prompts = prompt_lookup(root_path)
-    records_by_prompt = {str(row.get("prompt_id", "")): row for row in rescoring_rows}
+    records_by_prompt: dict[str, dict[str, Any]] = {}
+    records_by_prompt_role: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rescoring_rows:
+        prompt_id = str(row.get("prompt_id", ""))
+        sample_role = str(row.get("sample_role", ""))
+        records_by_prompt.setdefault(prompt_id, row)
+        records_by_prompt_role[(prompt_id, sample_role)] = row
     contexts: dict[str, dict[str, Any]] = {}
     for quality_row in quality_rows:
-        image_path = str(quality_row.get("aligned_image_path", ""))
         prompt_id = str(quality_row.get("prompt_id", ""))
-        source_record = records_by_prompt.get(prompt_id, {})
-        contexts[image_path] = {
-            "prompt_id": prompt_id,
-            "prompt_text": prompts.get(prompt_id, config.prompt),
-            "source_record": source_record,
-            "split": source_record.get("split", "unknown"),
-            "sample_role": source_record.get("sample_role", "unknown"),
-            "raw_content_score_before": float(source_record.get("real_raw_content_score", source_record.get("raw_content_score", 0.0))),
-            "aligned_content_score_before": float(
-                source_record.get("real_aligned_content_score", source_record.get("aligned_content_score", 0.0))
-            ),
-            "geometry_reliable": bool(source_record.get("aligned_rescoring_ready", False)),
-            "fail_reason": source_record.get("fail_reason", "geometry_suspected"),
-        }
+        prompt_text = prompts.get(prompt_id, config.prompt)
+        for image_field, sample_role in (
+            ("aligned_image_path", "positive_source"),
+            ("clean_image_path", "clean_negative"),
+        ):
+            image_path = str(quality_row.get(image_field, "")).strip()
+            if not image_path:
+                continue
+            source_record = preferred_rescoring_record(records_by_prompt_role, records_by_prompt, prompt_id, sample_role)
+            contexts[image_path] = build_source_context(
+                prompt_id=prompt_id,
+                prompt_text=prompt_text,
+                source_record=source_record,
+                sample_role=sample_role,
+            )
     return contexts
 
 

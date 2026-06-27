@@ -66,9 +66,9 @@ def test_small_sample_evidence_records_are_ready_but_not_paper_claims() -> None:
     """四个 baseline 均有小样本证据时, 摘要应 ready, 但论文级 claim 仍保持关闭。"""
 
     rows = [
-        candidate_row("tree_ring", "gpu_smoke"),
-        candidate_row("gaussian_shading", "gpu_smoke"),
-        candidate_row("shallow_diffuse", "gpu_smoke"),
+        candidate_row("tree_ring", "method_faithful"),
+        candidate_row("gaussian_shading", "method_faithful"),
+        candidate_row("shallow_diffuse", "method_faithful"),
         candidate_row("t2smark", "full_main"),
     ]
 
@@ -105,10 +105,10 @@ def test_small_sample_summary_uses_baseline_level_common_protocol_readiness() ->
     """同一 baseline 有多条攻击记录时, common protocol readiness 应按 baseline 覆盖判断。"""
 
     rows = [
-        candidate_row("tree_ring", "gpu_smoke"),
-        {**candidate_row("tree_ring", "gpu_smoke"), "attack_family": "standard_distortion", "attack_name": "jpeg_compression"},
-        candidate_row("gaussian_shading", "gpu_smoke"),
-        candidate_row("shallow_diffuse", "gpu_smoke"),
+        candidate_row("tree_ring", "method_faithful"),
+        {**candidate_row("tree_ring", "method_faithful"), "attack_family": "standard_distortion", "attack_name": "jpeg_compression"},
+        candidate_row("gaussian_shading", "method_faithful"),
+        candidate_row("shallow_diffuse", "method_faithful"),
         candidate_row("t2smark", "full_main"),
     ]
 
@@ -134,9 +134,9 @@ def test_small_sample_evidence_writer_outputs_rebuildable_artifacts(tmp_path: Pa
     validation_path = tmp_path / "outputs" / "external_baseline_results" / "baseline_result_candidate_validation_report.json"
     candidate_path.parent.mkdir(parents=True)
     rows = [
-        candidate_row("tree_ring", "gpu_smoke"),
-        candidate_row("gaussian_shading", "gpu_smoke"),
-        candidate_row("shallow_diffuse", "gpu_smoke"),
+        candidate_row("tree_ring", "method_faithful"),
+        candidate_row("gaussian_shading", "method_faithful"),
+        candidate_row("shallow_diffuse", "method_faithful"),
         candidate_row("t2smark", "full_main"),
     ]
     candidate_path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")

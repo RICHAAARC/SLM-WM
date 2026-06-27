@@ -25,7 +25,7 @@ from experiments.baselines import (
     validate_shallow_diffuse_official_reference_records,
 )
 from main.analysis.artifact_manifest import build_artifact_manifest
-from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
+from paper_workflow.colab_utils.external_baseline_method_faithful import (
     ensure_cuda_if_requested,
     load_baseline_registry_item,
     normalize_repository_url,
@@ -74,7 +74,7 @@ DEFAULT_ATTACKER_NAMES = "none"
 DEFAULT_REFERENCE_MODEL = "ViT-g-14"
 DEFAULT_REFERENCE_MODEL_PRETRAIN = "laion2b_s12b_b42k"
 PACKAGE_EXTRA_PATHS = (
-    "paper_workflow/shallow_diffuse_official_reference_run.ipynb",
+    "paper_workflow/official_reference_shallow_diffuse_run.ipynb",
     "paper_workflow/colab_utils/shallow_diffuse_official_reference.py",
     "experiments/baselines/shallow_diffuse_official_reference.py",
     "external_baseline/primary/shallow_diffuse/README.md",
@@ -1331,7 +1331,7 @@ def write_shallow_diffuse_official_reference_outputs(
         output_paths=tuple(output_paths_for_manifest + [relative_or_absolute(paths["manifest"], root_path)]),
         config=asdict(effective_config),
         code_version=resolve_code_version(root_path),
-        rebuild_command="运行 paper_workflow/shallow_diffuse_official_reference_run.ipynb",
+        rebuild_command="运行 paper_workflow/official_reference_shallow_diffuse_run.ipynb",
         metadata={
             "run_decision": summary["run_decision"],
             "shallow_diffuse_official_reference_ready": run_ready,
@@ -1470,7 +1470,7 @@ def package_shallow_diffuse_official_reference_outputs(
         ),
         config={"archive_name": archive_name, "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser())},
         code_version=resolve_code_version(root_path),
-        rebuild_command="运行 paper_workflow/shallow_diffuse_official_reference_run.ipynb",
+        rebuild_command="运行 paper_workflow/official_reference_shallow_diffuse_run.ipynb",
         metadata={
             "embedded_digest_scope": "external_summary_records_final_archive_digest",
             "generated_at": datetime.now(timezone.utc).isoformat(),

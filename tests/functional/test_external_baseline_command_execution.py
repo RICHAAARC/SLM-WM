@@ -190,7 +190,7 @@ def test_diffusion_command_plan_can_select_all_method_faithful_adapters(tmp_path
 
 @pytest.mark.quick
 @pytest.mark.parametrize("adapter_path", PRIMARY_DIFFUSION_ADAPTERS)
-def test_primary_diffusion_adapter_writes_latent_smoke_observations(tmp_path: Path, adapter_path: str) -> None:
+def test_primary_diffusion_adapter_writes_method_faithful_observations(tmp_path: Path, adapter_path: str) -> None:
     """三类扩散 baseline adapter 应在轻量配置下写出 clean 与 positive observation。"""
 
     prompt_plan = tmp_path / "prompt_plan.json"
@@ -201,7 +201,7 @@ def test_primary_diffusion_adapter_writes_latent_smoke_observations(tmp_path: Pa
             [
                 {
                     "prompt_id": "prompt_00000",
-                    "split": "gpu_smoke",
+                    "split": "method_faithful",
                     "prompt_text": "a small ceramic fox sitting on a wooden desk",
                 }
             ],

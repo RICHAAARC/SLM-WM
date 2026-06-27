@@ -20,8 +20,8 @@ PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME = "primary_baseline_formal_import_protocol
 FULL_MAIN_PROMPT_PROTOCOL_NAME = PILOT_PAPER_PROMPT_PROTOCOL_NAME
 FORMAL_OPERATING_POINT_PREFIX = "fixed_fpr"
 REJECTED_ADAPTER_BOUNDARIES = (
-    "gpu_smoke_not_full_external_baseline_comparison",
-    "sd35_latent_smoke_adapter_not_formal_external_baseline_evidence",
+    "method_faithful_not_full_external_baseline_comparison",
+    "sd35_method_faithful_adapter_not_formal_external_baseline_evidence",
 )
 ALLOWED_ADAPTER_BOUNDARIES = (
     "sd35_medium_native_official_reproduction",
@@ -414,7 +414,7 @@ def validate_primary_baseline_formal_import_rows(
 ) -> dict[str, Any]:
     """校验主表 baseline 正式结果导入记录, 并返回仅包含通过记录的报告。
 
-    该函数是 schema 层边界: 下游 comparison builder 只消费 accepted_records, 因而不会把 GPU smoke observation 或缺少 fixed-FPR 边界的记录误纳入正式主表统计。
+    该函数是 schema 层边界: 下游 comparison builder 只消费 accepted_records, 因而不会把 method-faithful observation 或缺少 fixed-FPR 边界的记录误纳入正式主表统计。
     """
 
     evidence_root_path = Path(evidence_root).resolve()
@@ -531,7 +531,7 @@ def build_primary_baseline_formal_import_readiness_rows(
     """构造主表 baseline 正式共同协议导入 readiness 行。
 
     该函数属于 schema 汇总层: 它把候选记录的拒绝原因集中整理为每个主表 baseline 一行,
-    供文档审计和下游对比报告读取, 但不会把小样本或 smoke 候选提升为论文级正式结果。
+    供文档审计和下游对比报告读取, 但不会把小样本或 method-faithful 候选提升为论文级正式结果。
     """
 
     materialized_candidates = [dict(row) for row in candidate_rows]

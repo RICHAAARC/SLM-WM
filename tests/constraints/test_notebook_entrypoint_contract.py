@@ -12,7 +12,7 @@ from paper_workflow.colab_utils.minimal_latent_injection import package_injectio
 from paper_workflow.colab_utils.aligned_rescoring import package_aligned_rescoring_outputs
 from paper_workflow.colab_utils.attention_latent_injection import package_attention_latent_injection_outputs
 from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
-from paper_workflow.colab_utils.external_baseline_gpu_smoke import package_external_baseline_gpu_smoke_outputs
+from paper_workflow.colab_utils.external_baseline_method_faithful import package_external_baseline_method_faithful_outputs
 from paper_workflow.colab_utils.real_attack_evaluation import package_real_attack_evaluation_outputs
 from paper_workflow.colab_utils.conventional_geometric_attack_evaluation import (
     package_conventional_geometric_attack_evaluation_outputs,
@@ -33,12 +33,15 @@ REAL_ATTACK_EVALUATION_NOTEBOOK_PATH = Path("paper_workflow/real_attack_evaluati
 CONVENTIONAL_GEOMETRIC_ATTACK_EVALUATION_NOTEBOOK_PATH = Path(
     "paper_workflow/conventional_geometric_attack_evaluation_run.ipynb"
 )
-EXTERNAL_BASELINE_GPU_SMOKE_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_gpu_smoke_run.ipynb")
+EXTERNAL_BASELINE_TREE_RING_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_tree_ring_run.ipynb")
+EXTERNAL_BASELINE_GAUSSIAN_SHADING_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_gaussian_shading_run.ipynb")
+EXTERNAL_BASELINE_SHALLOW_DIFFUSE_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_shallow_diffuse_run.ipynb")
+EXTERNAL_BASELINE_T2SMARK_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_t2smark_run.ipynb")
 DATASET_LEVEL_QUALITY_NOTEBOOK_PATH = Path("paper_workflow/dataset_level_quality_run.ipynb")
-T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH = Path("paper_workflow/t2smark_full_main_reproduction_run.ipynb")
-TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/tree_ring_official_reference_run.ipynb")
-GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/gaussian_shading_official_reference_run.ipynb")
-SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/shallow_diffuse_official_reference_run.ipynb")
+T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH = Path("paper_workflow/official_reference_t2smark_run.ipynb")
+TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/official_reference_tree_ring_run.ipynb")
+GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/official_reference_gaussian_shading_run.ipynb")
+SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/official_reference_shallow_diffuse_run.ipynb")
 PILOT_PAPER_RESULT_CLOSURE_NOTEBOOK_PATH = Path("paper_workflow/pilot_paper_result_closure_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH,
@@ -49,7 +52,10 @@ NOTEBOOK_PATHS = (
     THRESHOLD_CALIBRATION_NOTEBOOK_PATH,
     REAL_ATTACK_EVALUATION_NOTEBOOK_PATH,
     CONVENTIONAL_GEOMETRIC_ATTACK_EVALUATION_NOTEBOOK_PATH,
-    EXTERNAL_BASELINE_GPU_SMOKE_NOTEBOOK_PATH,
+    EXTERNAL_BASELINE_TREE_RING_NOTEBOOK_PATH,
+    EXTERNAL_BASELINE_GAUSSIAN_SHADING_NOTEBOOK_PATH,
+    EXTERNAL_BASELINE_SHALLOW_DIFFUSE_NOTEBOOK_PATH,
+    EXTERNAL_BASELINE_T2SMARK_NOTEBOOK_PATH,
     DATASET_LEVEL_QUALITY_NOTEBOOK_PATH,
     T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH,
     TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
@@ -351,45 +357,32 @@ def test_colab_notebook_delegates_conventional_geometric_attack_logic_to_helper(
 
 
 @pytest.mark.constraint
-def test_colab_notebook_delegates_external_baseline_gpu_smoke_logic_to_helper() -> None:
-    """Notebook 必须复用 repository helper 执行外部 baseline 真实 GPU smoke。"""
-    payload = json.loads(EXTERNAL_BASELINE_GPU_SMOKE_NOTEBOOK_PATH.read_text(encoding="utf-8"))
-    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
-    first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
-    first_code_source = "".join(first_code_cell.get("source", []))
+def test_single_external_baseline_notebooks_select_one_method_and_delegate_to_helper() -> None:
+    """单 baseline Notebook 应只选择一个主表 baseline, 并复用共享 helper。"""
 
-    assert "paper_workflow.colab_utils.external_baseline_gpu_smoke" in joined_source
-    assert "run_default_external_baseline_gpu_smoke_plan" in joined_source
-    assert "package_external_baseline_gpu_smoke_outputs" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
-    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
-    assert "drive.mount('/content/drive')" in first_code_source
-    assert "f'{drive_result_root}/external_baseline_gpu_smoke'" in joined_source
-    assert "external_baseline/source_registry.json" in joined_source
-    assert "stabilityai/stable-diffusion-3.5-medium" in joined_source
-    assert "external_baseline_gpu_smoke_ready" in joined_source
-    assert "t2smark_real_gpu_smoke_ready" in joined_source
-    assert "adapter_observation_count" in joined_source
-    assert "primary_baseline_adapter_ready" in joined_source
-    assert "primary_baseline_observation_count" in joined_source
-    assert "os.environ['SLM_WM_T2SMARK_ROBUST_TEST_NUM'] = paper_run_sample_count" in joined_source
-    assert "os.environ['SLM_WM_PRIMARY_BASELINE_MAX_SAMPLES'] = paper_run_sample_count" in joined_source
-    assert "5 个数字样本条目" not in joined_source
-    assert "新的 5 样本真实 GPU 结果" not in joined_source
-    assert "默认共享样本数为 5" not in joined_source
-    assert "expected_sample_count = paper_run_expected_sample_count" in joined_source
-    assert "tree_ring" in joined_source
-    assert "gaussian_shading" in joined_source
-    assert "shallow_diffuse" in joined_source
-    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
-    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
-    assert "archive_name=archive_name" in joined_source
-    assert EXTERNAL_BASELINE_DEPENDENCY_INSTALL_COMMAND in joined_source
-    assert "--force-reinstall" not in joined_source
-    assert "numpy pillow" not in joined_source
-    assert "del sys.modules" not in joined_source
-    assert '"diffusers==' not in joined_source
-    assert '"transformers==' not in joined_source
+    expected = {
+        EXTERNAL_BASELINE_TREE_RING_NOTEBOOK_PATH: "tree_ring",
+        EXTERNAL_BASELINE_GAUSSIAN_SHADING_NOTEBOOK_PATH: "gaussian_shading",
+        EXTERNAL_BASELINE_SHALLOW_DIFFUSE_NOTEBOOK_PATH: "shallow_diffuse",
+        EXTERNAL_BASELINE_T2SMARK_NOTEBOOK_PATH: "t2smark",
+    }
+    for notebook_path, baseline_id in expected.items():
+        payload = json.loads(notebook_path.read_text(encoding="utf-8"))
+        joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+        first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+        first_code_source = "".join(first_code_cell.get("source", []))
+
+        assert "drive.mount('/content/drive')" in first_code_source
+        assert f'SLM_WM_PRIMARY_BASELINE_METHODS = "{baseline_id}"' in joined_source
+        assert "run_default_external_baseline_method_faithful_plan" in joined_source
+        assert "package_external_baseline_method_faithful_outputs" in joined_source
+        assert "split_observations" in joined_source
+        assert "external_baseline_method_faithful_package_" in joined_source
+        assert "img2img_regeneration" in joined_source
+        assert "ddim_inversion_regeneration" in joined_source
+        assert "sdedit_regeneration" in joined_source
+        assert "diffusion_purification" in joined_source
+        assert EXTERNAL_BASELINE_DEPENDENCY_INSTALL_COMMAND in joined_source
 
 
 @pytest.mark.constraint
@@ -834,62 +827,66 @@ def test_conventional_geometric_attack_outputs_can_be_packaged_and_mirrored(tmp_
 
 
 @pytest.mark.constraint
-def test_external_baseline_gpu_smoke_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
-    """外部 baseline 真实 GPU smoke 产物应能打包, 且包含官方结果与 adapter 观测。"""
-    smoke_dir = tmp_path / "outputs" / "external_baseline_gpu_smoke"
-    official_dir = smoke_dir / "t2smark_official" / "t2smark_sd35_medium_gpu_smoke"
-    execution_dir = smoke_dir / "execution"
+def test_external_baseline_method_faithful_outputs_can_be_packaged_and_mirrored(tmp_path: Path) -> None:
+    """外部 baseline 真实 method-faithful 产物应能打包, 且包含官方结果与 adapter 观测。"""
+    method_faithful_dir = tmp_path / "outputs" / "external_baseline_method_faithful"
+    official_dir = method_faithful_dir / "t2smark_official" / "t2smark_sd35_medium_method_faithful"
+    execution_dir = method_faithful_dir / "execution"
+    split_dir = method_faithful_dir / "split_observations"
     image_dir = official_dir / "images"
     image_dir.mkdir(parents=True)
+    split_dir.mkdir(parents=True)
     execution_dir.mkdir(parents=True)
     (official_dir / "results.json").write_text('{"0":{"robustness":{"acc_msg":1.0}},"bit_accuracy":1.0}\n', encoding="utf-8")
     (official_dir / "settings.json").write_text('{"model_key":"stabilityai/stable-diffusion-3.5-medium"}\n', encoding="utf-8")
     (image_dir / "00000.png").write_bytes(b"fake_png_bytes")
-    (smoke_dir / "t2smark_smoke_prompts.json").write_text(
+    (method_faithful_dir / "t2smark_method_faithful_prompts.json").write_text(
         '{"annotations":[{"caption":"a small ceramic fox"}]}\n',
         encoding="utf-8",
     )
-    (smoke_dir / "t2smark_image_pairs.json").write_text('[{"image_id":"t2smark_00000"}]\n', encoding="utf-8")
-    (smoke_dir / "baseline_command_plan.json").write_text('{"command_count":1}\n', encoding="utf-8")
+    (method_faithful_dir / "t2smark_image_pairs.json").write_text('[{"image_id":"t2smark_00000"}]\n', encoding="utf-8")
+    (method_faithful_dir / "baseline_command_plan.json").write_text('{"command_count":1}\n', encoding="utf-8")
     (execution_dir / "baseline_execution_manifest.json").write_text('{"observation_count":1}\n', encoding="utf-8")
     (execution_dir / "baseline_observations.json").write_text('[{"baseline_id":"t2smark"}]\n', encoding="utf-8")
-    (smoke_dir / "external_baseline_gpu_smoke_summary.json").write_text(
-        '{"run_decision":"pass","external_baseline_gpu_smoke_ready":true}\n',
+    (split_dir / "t2smark_baseline_observations.json").write_text('[{"baseline_id":"t2smark"}]\n', encoding="utf-8")
+    (method_faithful_dir / "external_baseline_method_faithful_summary.json").write_text(
+        '{"run_decision":"pass","external_baseline_method_faithful_ready":true}\n',
         encoding="utf-8",
     )
-    (smoke_dir / "external_baseline_gpu_smoke_environment_report.json").write_text('{"cuda_available":true}\n', encoding="utf-8")
-    (smoke_dir / "external_baseline_gpu_smoke_manifest.local.json").write_text(
-        '{"artifact_id":"external_baseline_gpu_smoke_manifest"}\n',
+    (method_faithful_dir / "external_baseline_method_faithful_environment_report.json").write_text('{"cuda_available":true}\n', encoding="utf-8")
+    (method_faithful_dir / "external_baseline_method_faithful_manifest.local.json").write_text(
+        '{"artifact_id":"external_baseline_method_faithful_manifest"}\n',
         encoding="utf-8",
     )
 
     drive_dir = tmp_path / "drive_mirror"
-    record = package_external_baseline_gpu_smoke_outputs(root=tmp_path, drive_output_dir=str(drive_dir))
+    record = package_external_baseline_method_faithful_outputs(root=tmp_path, drive_output_dir=str(drive_dir))
     archive_path = tmp_path / record.archive_path
 
     assert archive_path.exists()
-    assert (drive_dir / "external_baseline_gpu_smoke_package.zip").exists()
+    assert (drive_dir / "external_baseline_method_faithful_package.zip").exists()
     assert record.archive_digest == record.drive_archive_digest
     assert record.archive_entry_count >= 11
-    assert (smoke_dir / "external_baseline_gpu_smoke_archive_summary.json").exists()
-    assert (smoke_dir / "external_baseline_gpu_smoke_archive_manifest.local.json").exists()
+    assert (method_faithful_dir / "external_baseline_method_faithful_archive_summary.json").exists()
+    assert (method_faithful_dir / "external_baseline_method_faithful_archive_manifest.local.json").exists()
 
     with ZipFile(archive_path) as archive:
         names = set(archive.namelist())
-        assert "outputs/external_baseline_gpu_smoke/t2smark_official/t2smark_sd35_medium_gpu_smoke/results.json" in names
-        assert "outputs/external_baseline_gpu_smoke/t2smark_official/t2smark_sd35_medium_gpu_smoke/settings.json" in names
-        assert "outputs/external_baseline_gpu_smoke/t2smark_official/t2smark_sd35_medium_gpu_smoke/images/00000.png" in names
-        assert "outputs/external_baseline_gpu_smoke/t2smark_smoke_prompts.json" in names
-        assert "outputs/external_baseline_gpu_smoke/t2smark_image_pairs.json" in names
-        assert "outputs/external_baseline_gpu_smoke/baseline_command_plan.json" in names
-        assert "outputs/external_baseline_gpu_smoke/execution/baseline_execution_manifest.json" in names
-        assert "outputs/external_baseline_gpu_smoke/execution/baseline_observations.json" in names
-        assert "outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_summary.json" in names
-        assert "outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_environment_report.json" in names
-        assert "outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_manifest.local.json" in names
-        assert "outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_package_input_manifest.json" in names
-        assert "outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_archive_summary.json" in names
-        assert "outputs/external_baseline_gpu_smoke/external_baseline_gpu_smoke_archive_manifest.local.json" in names
+        assert "outputs/external_baseline_method_faithful/t2smark_official/t2smark_sd35_medium_method_faithful/results.json" in names
+        assert "outputs/external_baseline_method_faithful/t2smark_official/t2smark_sd35_medium_method_faithful/settings.json" in names
+        assert "outputs/external_baseline_method_faithful/t2smark_official/t2smark_sd35_medium_method_faithful/images/00000.png" in names
+        assert "outputs/external_baseline_method_faithful/t2smark_method_faithful_prompts.json" in names
+        assert "outputs/external_baseline_method_faithful/t2smark_image_pairs.json" in names
+        assert "outputs/external_baseline_method_faithful/baseline_command_plan.json" in names
+        assert "outputs/external_baseline_method_faithful/execution/baseline_execution_manifest.json" in names
+        assert "outputs/external_baseline_method_faithful/execution/baseline_observations.json" in names
+        assert "outputs/external_baseline_method_faithful/split_observations/t2smark_baseline_observations.json" in names
+        assert "outputs/external_baseline_method_faithful/external_baseline_method_faithful_summary.json" in names
+        assert "outputs/external_baseline_method_faithful/external_baseline_method_faithful_environment_report.json" in names
+        assert "outputs/external_baseline_method_faithful/external_baseline_method_faithful_manifest.local.json" in names
+        assert "outputs/external_baseline_method_faithful/external_baseline_method_faithful_package_input_manifest.json" in names
+        assert "outputs/external_baseline_method_faithful/external_baseline_method_faithful_archive_summary.json" in names
+        assert "outputs/external_baseline_method_faithful/external_baseline_method_faithful_archive_manifest.local.json" in names
 
 
 @pytest.mark.constraint

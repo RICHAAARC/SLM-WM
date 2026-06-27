@@ -28,7 +28,7 @@ from experiments.protocol.prompts import build_prompt_records, normalize_prompt_
 from experiments.protocol.splits import apply_split_assignments
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
-from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
+from paper_workflow.colab_utils.external_baseline_method_faithful import (
     DEFAULT_T2SMARK_MODEL_ID,
     DEFAULT_T2SMARK_SOURCE_ENTRY,
     ensure_cuda_if_requested,
@@ -49,7 +49,7 @@ DEFAULT_RUN_NAME = "t2smark_sd35_medium_pilot_paper"
 DEFAULT_TARGET_FPR = PILOT_PAPER_FIXED_FPR
 DEFAULT_PROMPT_LIMIT = 600
 PACKAGE_EXTRA_PATHS = (
-    "paper_workflow/t2smark_full_main_reproduction_run.ipynb",
+    "paper_workflow/official_reference_t2smark_run.ipynb",
     "paper_workflow/colab_utils/t2smark_full_main_reproduction.py",
     "experiments/baselines/formal_import.py",
     "scripts/write_primary_baseline_formal_import_protocol.py",
@@ -521,7 +521,7 @@ def write_failure_outputs(
         output_paths=(relative_or_absolute(paths["summary"], root_path), relative_or_absolute(paths["environment_report"], root_path)),
         config=asdict(config),
         code_version=resolve_code_version(root_path),
-        rebuild_command="运行 paper_workflow/t2smark_full_main_reproduction_run.ipynb",
+        rebuild_command="运行 paper_workflow/official_reference_t2smark_run.ipynb",
         metadata={"run_decision": "fail", "supports_paper_claim": False},
     ).to_dict()
     write_json(paths["manifest"], manifest)
@@ -618,7 +618,7 @@ def write_t2smark_full_main_reproduction_outputs(
         output_paths=tuple(output_paths_for_manifest + [relative_or_absolute(paths["manifest"], root_path)]),
         config=asdict(config),
         code_version=resolve_code_version(root_path),
-        rebuild_command="运行 paper_workflow/t2smark_full_main_reproduction_run.ipynb",
+        rebuild_command="运行 paper_workflow/official_reference_t2smark_run.ipynb",
         metadata={
             "run_decision": summary["run_decision"],
             "t2smark_full_main_reproduction_ready": run_ready,
@@ -729,7 +729,7 @@ def package_t2smark_full_main_reproduction_outputs(
         ),
         config={"archive_name": archive_name, "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser())},
         code_version=resolve_code_version(root_path),
-        rebuild_command="运行 paper_workflow/t2smark_full_main_reproduction_run.ipynb",
+        rebuild_command="运行 paper_workflow/official_reference_t2smark_run.ipynb",
         metadata={"construction_unit_name": "t2smark_full_main_reproduction", "generated_at": datetime.now(timezone.utc).isoformat()},
     ).to_dict()
     write_json(manifest_path, archive_manifest)

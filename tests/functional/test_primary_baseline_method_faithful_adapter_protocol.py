@@ -51,7 +51,7 @@ def observation_row(
 
 
 def mixed_observations() -> list[dict[str, object]]:
-    """构造 Tree-Ring ready、Gaussian smoke 被拒绝、T2SMark native 的混合记录。"""
+    """构造 Tree-Ring ready、Gaussian incomplete adapter 被拒绝、T2SMark native 的混合记录。"""
 
     rows: list[dict[str, object]] = []
     for index, sample_role in enumerate(("clean_negative", "positive_source")):
@@ -68,7 +68,7 @@ def mixed_observations() -> list[dict[str, object]]:
             observation_row(
                 baseline_id="gaussian_shading",
                 sample_role=sample_role,
-                adapter_boundary="sd35_latent_smoke_adapter_not_formal_external_baseline_evidence",
+                adapter_boundary="sd35_method_faithful_adapter_not_formal_external_baseline_evidence",
                 detection_decision=sample_role == "positive_source",
                 image_index=index,
             )
@@ -87,7 +87,7 @@ def mixed_observations() -> list[dict[str, object]]:
 
 @pytest.mark.quick
 def test_method_faithful_adapter_schema_freezes_primary_baseline_boundary() -> None:
-    """schema 应明确主表 adapter 边界、native baseline 和不合格 smoke 边界。"""
+    """schema 应明确主表 adapter 边界、native baseline 和不合格 adapter 边界。"""
 
     schema = build_primary_baseline_method_faithful_adapter_schema()
 
@@ -95,13 +95,13 @@ def test_method_faithful_adapter_schema_freezes_primary_baseline_boundary() -> N
     assert schema["method_faithful_adapter_required_ids"] == ["tree_ring", "gaussian_shading", "shallow_diffuse"]
     assert schema["native_official_reproduction_ids"] == ["t2smark"]
     assert schema["accepted_adapter_boundary"] == METHOD_FAITHFUL_ADAPTER_BOUNDARY
-    assert "sd35_latent_smoke_adapter_not_formal_external_baseline_evidence" in schema["rejected_smoke_adapter_boundaries"]
+    assert "sd35_method_faithful_adapter_not_formal_external_baseline_evidence" in schema["rejected_incomplete_adapter_boundaries"]
     assert schema["supports_paper_claim"] is False
 
 
 @pytest.mark.quick
-def test_method_faithful_adapter_records_reject_smoke_boundary() -> None:
-    """协议记录应允许 Tree-Ring method-faithful 候选, 同时拒绝 Gaussian smoke observation。"""
+def test_method_faithful_adapter_records_reject_incomplete_adapter_boundary() -> None:
+    """协议记录应允许 Tree-Ring method-faithful 候选, 同时拒绝 Gaussian method-faithful observation。"""
 
     records = build_method_faithful_adapter_status_records(mixed_observations())
     summary = build_method_faithful_adapter_summary(records)
@@ -116,7 +116,7 @@ def test_method_faithful_adapter_records_reject_smoke_boundary() -> None:
     assert tree_ring["score_protocol_ready"] is True
     assert tree_ring["image_provenance_ready"] is True
     assert gaussian["method_faithful_adapter_ready"] is False
-    assert "smoke_adapter_boundary_rejected" in gaussian["blocking_reasons"]
+    assert "incomplete_adapter_boundary_rejected" in gaussian["blocking_reasons"]
     assert shallow["method_faithful_adapter_ready"] is False
     assert "method_faithful_observations_missing" in shallow["blocking_reasons"]
     assert t2smark["protocol_role"] == "native_official_reproduction"
@@ -128,20 +128,20 @@ def test_method_faithful_adapter_records_reject_smoke_boundary() -> None:
 
 
 @pytest.mark.quick
-def test_method_faithful_adapter_writer_can_read_smoke_package(tmp_path: Path) -> None:
-    """协议写出脚本应可从 GPU smoke zip 包读取 observation 并写出治理产物。"""
+def test_method_faithful_adapter_writer_can_read_method_faithful_package(tmp_path: Path) -> None:
+    """协议写出脚本应可从 method-faithful zip 包读取 observation 并写出治理产物。"""
 
-    observations_path = tmp_path / "outputs" / "external_baseline_gpu_smoke" / "execution" / "baseline_observations.json"
+    observations_path = tmp_path / "outputs" / "external_baseline_method_faithful" / "execution" / "baseline_observations.json"
     observations_path.parent.mkdir(parents=True)
     observations_path.write_text(json.dumps(mixed_observations(), ensure_ascii=False), encoding="utf-8")
-    package_path = tmp_path / "outputs" / "external_baseline_gpu_smoke_package.zip"
+    package_path = tmp_path / "outputs" / "external_baseline_method_faithful_package.zip"
     with ZipFile(package_path, "w") as archive:
-        archive.write(observations_path, "outputs/external_baseline_gpu_smoke/execution/baseline_observations.json")
+        archive.write(observations_path, "outputs/external_baseline_method_faithful/execution/baseline_observations.json")
     observations_path.unlink()
 
     manifest = write_primary_baseline_method_faithful_adapter_protocol_outputs(
         root=tmp_path,
-        smoke_package_path=package_path,
+        method_faithful_package_path=package_path,
     )
 
     output_dir = tmp_path / "outputs" / "primary_baseline_method_faithful_adapter_protocol"
@@ -160,5 +160,5 @@ def test_method_faithful_adapter_writer_can_read_smoke_package(tmp_path: Path) -
     assert len(records) == 4
     assert summary["input_observation_count"] == 6
     assert summary["formal_import_candidate_allowed_ids"] == ["tree_ring"]
-    assert summary["smoke_package_path"] == "outputs/external_baseline_gpu_smoke_package.zip"
+    assert summary["method_faithful_package_path"] == "outputs/external_baseline_method_faithful_package.zip"
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])

@@ -24,8 +24,10 @@ from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 DEFAULT_OUTPUT_DIR = Path("outputs/primary_baseline_method_faithful_adapter_protocol")
-DEFAULT_OBSERVATIONS_PATH = Path("outputs/external_baseline_gpu_smoke/execution/baseline_observations.json")
-PACKAGE_OBSERVATIONS_ENTRY = "outputs/external_baseline_gpu_smoke/execution/baseline_observations.json"
+DEFAULT_OBSERVATIONS_PATH = Path("outputs/external_baseline_method_faithful/execution/baseline_observations.json")
+DEFAULT_SPLIT_OBSERVATIONS_DIR = Path("outputs/external_baseline_method_faithful/split_observations")
+PACKAGE_OBSERVATIONS_ENTRY = "outputs/external_baseline_method_faithful/execution/baseline_observations.json"
+PACKAGE_SPLIT_OBSERVATIONS_ENTRY_PREFIX = "outputs/external_baseline_method_faithful/split_observations/"
 
 
 def stable_json_text(value: Any) -> str:
@@ -105,17 +107,54 @@ def load_json_from_package(package_path: Path, entry_name: str) -> Any:
             return json.loads(handle.read().decode("utf-8-sig"))
 
 
+def load_split_json_from_package(package_path: Path, entry_prefix: str) -> list[dict[str, Any]]:
+    """从结果包读取单 baseline 拆分 observation。"""
+
+    if not package_path.is_file():
+        return []
+    rows: list[dict[str, Any]] = []
+    with ZipFile(package_path) as archive:
+        for entry_name in sorted(archive.namelist()):
+            normalized_name = entry_name.replace("\\", "/")
+            if not normalized_name.startswith(entry_prefix) or not normalized_name.endswith("_baseline_observations.json"):
+                continue
+            with archive.open(entry_name) as handle:
+                payload = json.loads(handle.read().decode("utf-8-sig"))
+            if isinstance(payload, list):
+                rows.extend(dict(row) for row in payload)
+    return rows
+
+
 def load_observation_rows(
     *,
     observations_path: Path,
-    smoke_package_path: Path | None = None,
+    method_faithful_package_path: Path | None = None,
 ) -> list[dict[str, Any]]:
-    """读取 observation 行, 优先使用显式传入的结果包。"""
+    """读取 observation 行, 并兼容单 baseline 拆分文件。"""
 
-    rows = load_json_from_package(smoke_package_path, PACKAGE_OBSERVATIONS_ENTRY) if smoke_package_path else []
+    rows = []
+    if method_faithful_package_path:
+        package_rows = load_json_from_package(method_faithful_package_path, PACKAGE_OBSERVATIONS_ENTRY)
+        rows.extend(package_rows if isinstance(package_rows, list) else [])
+        rows.extend(load_split_json_from_package(method_faithful_package_path, PACKAGE_SPLIT_OBSERVATIONS_ENTRY_PREFIX))
     if not rows:
-        rows = load_optional_json(observations_path)
-    return [dict(row) for row in rows] if isinstance(rows, list) else []
+        local_rows = load_optional_json(observations_path)
+        rows.extend(local_rows if isinstance(local_rows, list) else [])
+    split_dir = observations_path.parent.parent / DEFAULT_SPLIT_OBSERVATIONS_DIR.name
+    if split_dir.is_dir():
+        for path in sorted(split_dir.glob("*_baseline_observations.json")):
+            payload = load_optional_json(path)
+            if isinstance(payload, list):
+                rows.extend(dict(row) for row in payload)
+    deduplicated: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        digest = build_stable_digest(row)
+        if digest in seen:
+            continue
+        seen.add(digest)
+        deduplicated.append(dict(row))
+    return deduplicated
 
 
 def write_primary_baseline_method_faithful_adapter_protocol_outputs(
@@ -123,26 +162,26 @@ def write_primary_baseline_method_faithful_adapter_protocol_outputs(
     root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     observations_path: str | Path = DEFAULT_OBSERVATIONS_PATH,
-    smoke_package_path: str | Path | None = None,
+    method_faithful_package_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """写出方法忠实 adapter schema、状态记录、摘要和 manifest。"""
 
     root_path = Path(root).resolve()
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, output_dir)
     resolved_observations_path = resolve_path(root_path, observations_path)
-    resolved_smoke_package_path = resolve_path(root_path, smoke_package_path) if smoke_package_path else None
+    resolved_method_faithful_package_path = resolve_path(root_path, method_faithful_package_path) if method_faithful_package_path else None
 
     observation_rows = load_observation_rows(
         observations_path=resolved_observations_path,
-        smoke_package_path=resolved_smoke_package_path,
+        method_faithful_package_path=resolved_method_faithful_package_path,
     )
     schema = build_primary_baseline_method_faithful_adapter_schema()
     records = build_method_faithful_adapter_status_records(observation_rows)
     summary = build_method_faithful_adapter_summary(records)
     summary["generated_at"] = datetime.now(timezone.utc).isoformat()
     summary["observations_path"] = relative_or_absolute(resolved_observations_path, root_path)
-    summary["smoke_package_path"] = (
-        relative_or_absolute(resolved_smoke_package_path, root_path) if resolved_smoke_package_path else ""
+    summary["method_faithful_package_path"] = (
+        relative_or_absolute(resolved_method_faithful_package_path, root_path) if resolved_method_faithful_package_path else ""
     )
     summary["input_observation_count"] = len(observation_rows)
 
@@ -158,8 +197,8 @@ def write_primary_baseline_method_faithful_adapter_protocol_outputs(
     input_paths = []
     if resolved_observations_path.exists():
         input_paths.append(relative_or_absolute(resolved_observations_path, root_path))
-    if resolved_smoke_package_path and resolved_smoke_package_path.exists():
-        input_paths.append(relative_or_absolute(resolved_smoke_package_path, root_path))
+    if resolved_method_faithful_package_path and resolved_method_faithful_package_path.exists():
+        input_paths.append(relative_or_absolute(resolved_method_faithful_package_path, root_path))
     output_paths = tuple(
         relative_or_absolute(path, root_path) for path in (schema_path, records_path, summary_path, manifest_path)
     )
@@ -188,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument("--observations-path", default=str(DEFAULT_OBSERVATIONS_PATH), help="baseline observation JSON 路径。")
-    parser.add_argument("--smoke-package-path", default=None, help="可选 external baseline GPU smoke 结果 zip 包。")
+    parser.add_argument("--method-faithful-package-path", default=None, help="可选 external baseline method-faithful 结果 zip 包。")
     return parser
 
 
@@ -200,7 +239,7 @@ def main() -> None:
         root=args.root,
         output_dir=args.output_dir,
         observations_path=args.observations_path,
-        smoke_package_path=args.smoke_package_path,
+        method_faithful_package_path=args.method_faithful_package_path,
     )
     print(stable_json_text(manifest), end="")
 

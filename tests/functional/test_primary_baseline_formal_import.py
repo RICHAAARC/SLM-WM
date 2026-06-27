@@ -102,14 +102,14 @@ def test_formal_import_protocol_switches_prompt_schema_to_full_paper(
 
 
 @pytest.mark.quick
-def test_formal_import_validator_rejects_smoke_boundary_and_missing_readiness(tmp_path: Path) -> None:
-    """GPU smoke adapter observation 不得被升级为主表正式结果。"""
+def test_formal_import_validator_rejects_incomplete_adapter_boundary_and_missing_readiness(tmp_path: Path) -> None:
+    """method-faithful adapter observation 不得被升级为主表正式结果。"""
 
     evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
     evidence_path.parent.mkdir(parents=True)
     evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
     row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
-    row["adapter_boundary"] = "sd35_latent_smoke_adapter_not_formal_external_baseline_evidence"
+    row["adapter_boundary"] = "sd35_method_faithful_adapter_not_formal_external_baseline_evidence"
     row["fixed_fpr_baseline_calibration_ready"] = False
 
     report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.01)

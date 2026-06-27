@@ -1,4 +1,4 @@
-"""验证外部 baseline GPU smoke helper 的冷启动兼容能力。"""
+"""验证外部 baseline method-faithful helper 的冷启动兼容能力。"""
 
 from __future__ import annotations
 
@@ -16,14 +16,14 @@ from external_baseline.primary.sd35_method_faithful_common import (
     standard_geometric_formal_image_attack_names,
     supported_formal_image_attack_names,
 )
-from paper_workflow.colab_utils.external_baseline_gpu_smoke import (
+from paper_workflow.colab_utils.external_baseline_method_faithful import (
     DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
     DEFAULT_T2SMARK_INVERSION_ENTRY,
     DEFAULT_T2SMARK_SOURCE_ENTRY,
     T2SMARK_FORMAL_ATTACK_COMPAT_MARKER,
     PRIMARY_BASELINE_METHODS,
     T2SMARK_INVERSION_COMPAT_MARKER,
-    ExternalBaselineGpuSmokeConfig,
+    ExternalBaselineMethodFaithfulConfig,
     build_and_run_primary_baseline_adapters,
     build_t2smark_image_pairs,
     count_t2smark_result_items,
@@ -70,7 +70,7 @@ def test_t2smark_inversion_import_patch_is_idempotent(tmp_path: Path) -> None:
         "        return prompt\n",
         encoding="utf-8",
     )
-    paths = {"output_dir": tmp_path / "outputs" / "external_baseline_gpu_smoke"}
+    paths = {"output_dir": tmp_path / "outputs" / "external_baseline_method_faithful"}
 
     first_report = patch_t2smark_inversion_compatibility(tmp_path, paths)
     second_report = patch_t2smark_inversion_compatibility(tmp_path, paths)
@@ -111,7 +111,7 @@ def test_t2smark_formal_attack_patch_adds_common_attack_outputs(tmp_path: Path) 
         "    return parser.parse_args()\n",
         encoding="utf-8",
     )
-    paths = {"output_dir": tmp_path / "outputs" / "external_baseline_gpu_smoke"}
+    paths = {"output_dir": tmp_path / "outputs" / "external_baseline_method_faithful"}
 
     first_report = patch_t2smark_formal_attack_compatibility(tmp_path, paths)
     second_report = patch_t2smark_formal_attack_compatibility(tmp_path, paths)
@@ -133,7 +133,7 @@ def test_t2smark_formal_attack_patch_adds_common_attack_outputs(tmp_path: Path) 
 def test_t2smark_result_reuse_does_not_require_source_cache(tmp_path: Path) -> None:
     """已有官方结果可复用时, helper 不应要求重新下载或修补 T2SMark 源码。"""
 
-    config = ExternalBaselineGpuSmokeConfig(
+    config = ExternalBaselineMethodFaithfulConfig(
         require_cuda=False,
         reuse_existing=True,
         force_generate=False,
@@ -156,15 +156,15 @@ def test_t2smark_result_reuse_does_not_require_source_cache(tmp_path: Path) -> N
 def test_t2smark_result_reuse_requires_configured_sample_count(tmp_path: Path) -> None:
     """历史 T2SMark 结果样本数不足时, helper 应重新运行而不是复用旧包。"""
 
-    config = ExternalBaselineGpuSmokeConfig(
+    config = ExternalBaselineMethodFaithfulConfig(
         require_cuda=False,
         reuse_existing=True,
         robust_test_num=5,
         t2smark_formal_attack_families="",
     )
-    results_path = tmp_path / "outputs" / "external_baseline_gpu_smoke" / "results.json"
+    results_path = tmp_path / "outputs" / "external_baseline_method_faithful" / "results.json"
     results_path.parent.mkdir(parents=True)
-    results_path.write_text('{"0":{"robustness":{}},"metadata":{"note":"old smoke"}}\n', encoding="utf-8")
+    results_path.write_text('{"0":{"robustness":{}},"metadata":{"note":"old method-faithful"}}\n', encoding="utf-8")
 
     should_run, reason = should_run_t2smark_official(config, results_path)
 
@@ -177,7 +177,7 @@ def test_t2smark_result_reuse_requires_configured_sample_count(tmp_path: Path) -
 def test_shared_prompt_inputs_default_to_pilot_paper_samples(tmp_path: Path) -> None:
     """T2SMark 与主表 adapter 应共享 pilot_paper 规模 prompt 计划。"""
 
-    config = ExternalBaselineGpuSmokeConfig(require_cuda=False)
+    config = ExternalBaselineMethodFaithfulConfig(require_cuda=False)
     paths = output_paths(tmp_path, config)
 
     t2smark_prompt_path = write_t2smark_prompt_input(tmp_path, paths, config)
@@ -195,7 +195,7 @@ def test_shared_prompt_inputs_default_to_pilot_paper_samples(tmp_path: Path) -> 
 def test_t2smark_image_pairs_refreshes_stale_image_provenance(tmp_path: Path) -> None:
     """已有 image_pairs 缺少图像路径与 digest 时, helper 应按当前图像目录刷新。"""
 
-    config = ExternalBaselineGpuSmokeConfig(
+    config = ExternalBaselineMethodFaithfulConfig(
         require_cuda=False,
         reuse_existing=True,
         force_generate=False,
@@ -206,7 +206,7 @@ def test_t2smark_image_pairs_refreshes_stale_image_provenance(tmp_path: Path) ->
     paths["official_images"].mkdir(parents=True)
     for index in range(5):
         image_path = paths["official_images"] / f"{index:05d}.png"
-        image_path.write_bytes(f"fake_png_bytes_for_t2smark_smoke_{index}".encode("utf-8"))
+        image_path.write_bytes(f"fake_png_bytes_for_t2smark_method_faithful_{index}".encode("utf-8"))
     paths["image_pairs"].parent.mkdir(parents=True, exist_ok=True)
     paths["image_pairs"].write_text(
         '[{"image_id":"t2smark_00000","generated_image_path":"","generated_image_digest":""}]\n',
@@ -216,17 +216,17 @@ def test_t2smark_image_pairs_refreshes_stale_image_provenance(tmp_path: Path) ->
     rows = build_t2smark_image_pairs(tmp_path, config, paths)
 
     assert len(rows) == 5
-    assert rows[0]["generated_image_path"] == "outputs/external_baseline_gpu_smoke/t2smark_official/t2smark_sd35_medium_gpu_smoke/images/00000.png"
+    assert rows[0]["generated_image_path"] == "outputs/external_baseline_method_faithful/t2smark_official/t2smark_sd35_medium_method_faithful/images/00000.png"
     assert rows[0]["generated_image_digest"]
     assert '"generated_image_digest": ""' not in paths["image_pairs"].read_text(encoding="utf-8")
 
 
 @pytest.mark.quick
 def test_primary_baseline_adapter_plan_includes_four_methods(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """GPU smoke helper 应把四个主表 baseline 并入同一个命令计划。"""
+    """method-faithful helper 应把四个主表 baseline 并入同一个命令计划。"""
 
-    config = ExternalBaselineGpuSmokeConfig(
-        output_dir="outputs/external_baseline_gpu_smoke",
+    config = ExternalBaselineMethodFaithfulConfig(
+        output_dir="outputs/external_baseline_method_faithful",
         require_cuda=True,
         primary_baseline_max_samples=1,
         tree_ring_attack_families="jpeg_compression,rotation",
@@ -262,7 +262,7 @@ def test_primary_baseline_adapter_plan_includes_four_methods(tmp_path: Path, mon
                 )
         return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.external_baseline_gpu_smoke.run_command", fake_run_command)
+    monkeypatch.setattr("paper_workflow.colab_utils.external_baseline_method_faithful.run_command", fake_run_command)
 
     report = build_and_run_primary_baseline_adapters(tmp_path, config, paths)
 
@@ -285,14 +285,63 @@ def test_primary_baseline_adapter_plan_includes_four_methods(tmp_path: Path, mon
 
 
 @pytest.mark.quick
+def test_primary_baseline_adapter_plan_can_select_single_method(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """单 baseline Notebook 应只生成当前 baseline 的命令计划与拆分 observation。"""
+
+    config = ExternalBaselineMethodFaithfulConfig(
+        output_dir="outputs/external_baseline_method_faithful",
+        require_cuda=True,
+        primary_baseline_max_samples=1,
+        primary_baseline_methods="tree_ring",
+        tree_ring_attack_families="jpeg_compression,rotation",
+    )
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True)
+    captured_commands: list[list[str]] = []
+
+    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
+        captured_commands.append(command)
+        command_text = " ".join(command)
+        if "run_external_baseline_command_plan.py" in command_text:
+            paths["execution_manifest"].parent.mkdir(parents=True, exist_ok=True)
+            paths["execution_manifest"].write_text('{"observation_count":2}\n', encoding="utf-8")
+            paths["baseline_observations"].write_text(
+                '[{"baseline_id":"tree_ring","sample_role":"clean_negative"},'
+                '{"baseline_id":"tree_ring","sample_role":"positive_source"}]\n',
+                encoding="utf-8",
+            )
+            paths["command_results"].write_text(
+                '[{"baseline_id":"tree_ring","return_code":0,"observation_count":2}]\n',
+                encoding="utf-8",
+            )
+            manifest_path = paths["adapter_output_root"] / "tree_ring" / "tree_ring_method_faithful_sd35_adapter_manifest.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text('{"baseline_id":"tree_ring","attacked_image_count":4}\n', encoding="utf-8")
+        return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr("paper_workflow.colab_utils.external_baseline_method_faithful.run_command", fake_run_command)
+
+    report = build_and_run_primary_baseline_adapters(tmp_path, config, paths)
+
+    build_command = captured_commands[0]
+    assert build_command[build_command.index("--methods") + 1] == "tree_ring"
+    assert report["primary_baseline_adapter_ready"] is True
+    assert report["primary_baseline_adapter_count"] == 1
+    assert report["primary_baseline_ids"] == ["tree_ring"]
+    assert report["ready_primary_baseline_ids"] == ["tree_ring"]
+    assert report["primary_baseline_observation_count"] == 2
+    assert (paths["split_observation_dir"] / "tree_ring_baseline_observations.json").is_file()
+
+
+@pytest.mark.quick
 def test_primary_baseline_adapter_report_keeps_partial_counts_on_runner_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """命令计划中单个 baseline 失败时, helper 仍应汇总已完成 baseline 的诊断计数。"""
 
-    config = ExternalBaselineGpuSmokeConfig(
-        output_dir="outputs/external_baseline_gpu_smoke",
+    config = ExternalBaselineMethodFaithfulConfig(
+        output_dir="outputs/external_baseline_method_faithful",
         require_cuda=True,
         primary_baseline_max_samples=1,
     )
@@ -324,7 +373,7 @@ def test_primary_baseline_adapter_report_keeps_partial_counts_on_runner_failure(
             return {"command": command, "return_code": 1, "stdout": "", "stderr": ""}
         return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.external_baseline_gpu_smoke.run_command", fake_run_command)
+    monkeypatch.setattr("paper_workflow.colab_utils.external_baseline_method_faithful.run_command", fake_run_command)
 
     report = build_and_run_primary_baseline_adapters(tmp_path, config, paths)
 

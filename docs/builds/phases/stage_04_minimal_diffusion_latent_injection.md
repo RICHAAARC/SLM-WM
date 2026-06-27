@@ -65,7 +65,7 @@ python tools/harness/inspect_repository.py .
 1. 不得进入 full paper workflow。
 2. 不得将 fallback adapter 输出作为论文主结果。
 3. 不得跳过质量指标或 latent update 记录。
-4. 不得在本阶段将 Colab 入口中的真实推理 smoke 结果伪装为完整 latent injection 结果; 若尚未生成 paired images 和质量指标, 阶段状态必须保持 `in_progress`。
+4. 不得在本阶段将 Colab 入口中的真实推理 method-faithful 结果伪装为完整 latent injection 结果; 若尚未生成 paired images 和质量指标, 阶段状态必须保持 `in_progress`。
 
 ## 七、产物与项目信息更新
 

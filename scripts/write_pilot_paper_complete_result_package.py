@@ -48,7 +48,7 @@ REQUIRED_OUTPUT_DIRS = (
     "outputs/conventional_geometric_attack_evaluation",
     "outputs/image_attack_evidence",
     "outputs/dataset_level_quality",
-    "outputs/external_baseline_gpu_smoke",
+    "outputs/external_baseline_method_faithful",
     "outputs/tree_ring_official_reference",
     "outputs/gaussian_shading_official_reference",
     "outputs/shallow_diffuse_official_reference",

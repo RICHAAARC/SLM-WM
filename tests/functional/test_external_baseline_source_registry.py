@@ -61,7 +61,7 @@ def test_external_baseline_source_registry_matches_adapter_specs_when_present() 
             assert Path(item["adapter_path"]).is_file()
             assert item["adapter_status"] in {
                 "adapter_contract_ready",
-                "sd35_latent_smoke_adapter_ready",
+                "sd35_method_faithful_adapter_ready",
                 "method_faithful_sd35_adapter_available",
                 "sd35_native_result_adapter_ready",
             }

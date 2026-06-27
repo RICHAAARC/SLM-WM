@@ -1,4 +1,4 @@
-"""主表 external baseline 的 smoke 证据与正式结果边界审计。"""
+"""主表 external baseline 的 adapter 证据与正式结果边界审计。"""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ METHOD_FAITHFUL_ADAPTER_BOUNDARIES = ("method_faithful_sd35_adapter_reproduction
 class PrimaryBaselineEvidenceRecord:
     """记录一个主表 baseline 当前证据链的工程状态与正式结果缺口。
 
-    该对象属于项目特定写法: 它把 GPU smoke 链路和论文级正式结果边界拆开记录, 防止把 smoke observation
+    该对象属于项目特定写法: 它把 method-faithful 链路和论文级正式结果边界拆开记录, 防止把 method-faithful observation
     误当成正式 external baseline 对比指标。
     """
 
@@ -31,11 +31,11 @@ class PrimaryBaselineEvidenceRecord:
     official_repository_commit: str
     adapter_status: str
     model_alignment_status: str
-    adapter_smoke_ready: bool
-    adapter_smoke_observation_count: int
-    adapter_smoke_execution_devices: tuple[str, ...]
-    adapter_smoke_sample_roles: tuple[str, ...]
-    adapter_smoke_latent_shapes: tuple[tuple[int, ...], ...]
+    adapter_run_ready: bool
+    adapter_run_observation_count: int
+    adapter_run_execution_devices: tuple[str, ...]
+    adapter_run_sample_roles: tuple[str, ...]
+    adapter_run_latent_shapes: tuple[tuple[int, ...], ...]
     method_faithful_adapter_ready: bool
     full_main_prompt_protocol_ready: bool
     fixed_fpr_baseline_calibration_ready: bool
@@ -49,9 +49,9 @@ class PrimaryBaselineEvidenceRecord:
         """转换为 JSON 兼容字典。"""
 
         data = asdict(self)
-        data["adapter_smoke_execution_devices"] = list(self.adapter_smoke_execution_devices)
-        data["adapter_smoke_sample_roles"] = list(self.adapter_smoke_sample_roles)
-        data["adapter_smoke_latent_shapes"] = [list(shape) for shape in self.adapter_smoke_latent_shapes]
+        data["adapter_run_execution_devices"] = list(self.adapter_run_execution_devices)
+        data["adapter_run_sample_roles"] = list(self.adapter_run_sample_roles)
+        data["adapter_run_latent_shapes"] = [list(shape) for shape in self.adapter_run_latent_shapes]
         data["blocking_reasons"] = list(self.blocking_reasons)
         return data
 
@@ -120,28 +120,28 @@ def _unique_shapes(values: Iterable[Any]) -> tuple[tuple[int, ...], ...]:
     return tuple(sorted(shapes))
 
 
-def _adapter_smoke_ready(command_result: Mapping[str, Any] | None, rows: list[dict[str, Any]]) -> bool:
-    """判断 adapter smoke 命令是否成功并产生 observation。"""
+def _adapter_run_ready(command_result: Mapping[str, Any] | None, rows: list[dict[str, Any]]) -> bool:
+    """判断 adapter 运行命令是否成功并产生 observation。"""
 
     if not command_result:
         return False
     return int(command_result.get("return_code", 1)) == 0 and int(command_result.get("observation_count", 0)) > 0 and bool(rows)
 
 
-def _method_faithful_adapter_ready(baseline_id: str, adapter_smoke_ready: bool, rows: list[dict[str, Any]]) -> bool:
+def _method_faithful_adapter_ready(baseline_id: str, adapter_run_ready: bool, rows: list[dict[str, Any]]) -> bool:
     """判断当前 adapter 是否已达到方法忠实复现边界。"""
 
     if baseline_id in METHOD_FAITHFUL_ADAPTER_REQUIRED_IDS:
-        return adapter_smoke_ready and any(
+        return adapter_run_ready and any(
             str(row.get("adapter_boundary", "")) in METHOD_FAITHFUL_ADAPTER_BOUNDARIES for row in rows
         )
-    return baseline_id == "t2smark" and adapter_smoke_ready
+    return baseline_id == "t2smark" and adapter_run_ready
 
 
 def _blocking_reasons(
     *,
     baseline_id: str,
-    adapter_smoke_ready: bool,
+    adapter_run_ready: bool,
     method_faithful_adapter_ready: bool,
     full_main_prompt_protocol_ready: bool,
     fixed_fpr_baseline_calibration_ready: bool,
@@ -151,8 +151,8 @@ def _blocking_reasons(
     """生成正式主表 baseline 结果仍缺失的原因集合。"""
 
     reasons: list[str] = []
-    if not adapter_smoke_ready:
-        reasons.append("adapter_smoke_missing")
+    if not adapter_run_ready:
+        reasons.append("adapter_run_missing")
     if baseline_id in METHOD_FAITHFUL_ADAPTER_REQUIRED_IDS and not method_faithful_adapter_ready:
         reasons.append("method_faithful_sd35_adapter_required")
     if not full_main_prompt_protocol_ready:
@@ -178,7 +178,7 @@ def build_primary_baseline_evidence_records(
 ) -> tuple[dict[str, Any], ...]:
     """构造主表 baseline 证据边界记录。
 
-    通用工程写法是将命令执行结果、observation 和源码登记解耦; 项目特定写法是显式阻断 smoke 结果升级为论文级
+    通用工程写法是将命令执行结果、observation 和源码登记解耦; 项目特定写法是显式阻断 method-faithful 结果升级为论文级
     formal result。
     """
 
@@ -190,11 +190,11 @@ def build_primary_baseline_evidence_records(
         source = source_items.get(baseline_id, {})
         rows = rows_by_id.get(baseline_id, [])
         command_result = results_by_id.get(baseline_id)
-        smoke_ready = _adapter_smoke_ready(command_result, rows)
-        method_ready = _method_faithful_adapter_ready(baseline_id, smoke_ready, rows)
+        adapter_ready = _adapter_run_ready(command_result, rows)
+        method_ready = _method_faithful_adapter_ready(baseline_id, adapter_ready, rows)
         reasons = _blocking_reasons(
             baseline_id=baseline_id,
-            adapter_smoke_ready=smoke_ready,
+            adapter_run_ready=adapter_ready,
             method_faithful_adapter_ready=method_ready,
             full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
             fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
@@ -207,8 +207,8 @@ def build_primary_baseline_evidence_records(
             "source_status": str(source.get("source_status", "not_registered")),
             "official_repository_commit": str(source.get("official_repository_commit", "")),
             "adapter_status": str(source.get("adapter_status", "")),
-            "adapter_smoke_ready": smoke_ready,
-            "adapter_smoke_observation_count": len(rows),
+            "adapter_run_ready": adapter_ready,
+            "adapter_run_observation_count": len(rows),
             "method_faithful_adapter_ready": method_ready,
             "blocking_reasons": reasons,
         }
@@ -223,11 +223,11 @@ def build_primary_baseline_evidence_records(
             official_repository_commit=str(source.get("official_repository_commit", "")),
             adapter_status=str(source.get("adapter_status", "")),
             model_alignment_status=str(source.get("model_alignment_status", "")),
-            adapter_smoke_ready=smoke_ready,
-            adapter_smoke_observation_count=len(rows),
-            adapter_smoke_execution_devices=_unique_strings(row.get("execution_device", "") for row in rows),
-            adapter_smoke_sample_roles=_unique_strings(row.get("sample_role", "") for row in rows),
-            adapter_smoke_latent_shapes=_unique_shapes(row.get("latent_shape", []) for row in rows),
+            adapter_run_ready=adapter_ready,
+            adapter_run_observation_count=len(rows),
+            adapter_run_execution_devices=_unique_strings(row.get("execution_device", "") for row in rows),
+            adapter_run_sample_roles=_unique_strings(row.get("sample_role", "") for row in rows),
+            adapter_run_latent_shapes=_unique_shapes(row.get("latent_shape", []) for row in rows),
             method_faithful_adapter_ready=method_ready,
             full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
             fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
@@ -245,13 +245,13 @@ def build_primary_baseline_evidence_summary(records: Iterable[Mapping[str, Any]]
     """聚合主表 baseline 证据边界摘要。"""
 
     rows = [dict(row) for row in records]
-    smoke_ready_ids = [str(row["baseline_id"]) for row in rows if row.get("adapter_smoke_ready")]
+    adapter_ready_ids = [str(row["baseline_id"]) for row in rows if row.get("adapter_run_ready")]
     formal_ready_ids = [str(row["baseline_id"]) for row in rows if row.get("formal_result_ready")]
     blocking_reasons = sorted({reason for row in rows for reason in row.get("blocking_reasons", [])})
     return {
         "primary_baseline_count": len(rows),
-        "adapter_smoke_ready_count": len(smoke_ready_ids),
-        "adapter_smoke_ready_ids": smoke_ready_ids,
+        "adapter_run_ready_count": len(adapter_ready_ids),
+        "adapter_run_ready_ids": adapter_ready_ids,
         "formal_result_ready_count": len(formal_ready_ids),
         "formal_result_ready_ids": formal_ready_ids,
         "primary_baseline_formal_ready": len(formal_ready_ids) == len(rows) and bool(rows),
