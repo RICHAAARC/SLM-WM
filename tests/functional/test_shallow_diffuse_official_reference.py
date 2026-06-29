@@ -379,8 +379,8 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
     record = package_shallow_diffuse_official_reference_outputs(
         root=tmp_path,
         output_dir="outputs/shallow_diffuse_official_reference",
-        drive_output_dir=str(tmp_path / "drive" / "SLM" / "shallow_diffuse_official_reference"),
-        archive_name="shallow_diffuse_official_reference_package.zip",
+        drive_output_dir=str(tmp_path / "drive" / "SLM" / "external_baseline_official_reference"),
+        archive_name="external_baseline_official_reference_package_shallow_diffuse.zip",
     )
 
     archive_path = tmp_path / record.archive_path

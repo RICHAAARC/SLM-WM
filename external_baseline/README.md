@@ -27,3 +27,5 @@
 ## 补充表 baseline
 
 补充表 baseline 先登记来源与证据边界, 不默认进入主表对比命令计划。
+
+官方原始环境参考复现由 `paper_workflow/official_reference_*_run.ipynb` 分别调度。四个入口的 Google Drive 镜像目录统一为当前论文运行层级下的 `external_baseline_official_reference/`, 便于结果闭合时一次性扫描官方参考包; 本地 `outputs/` 仍按方法保留原始语义目录。

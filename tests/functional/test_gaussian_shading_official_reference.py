@@ -409,8 +409,8 @@ def test_gaussian_shading_official_reference_package_embeds_archive_self_descrip
     record = package_gaussian_shading_official_reference_outputs(
         root=tmp_path,
         output_dir="outputs/gaussian_shading_official_reference",
-        drive_output_dir=str(tmp_path / "drive" / "SLM" / "gaussian_shading_official_reference"),
-        archive_name="gaussian_shading_official_reference_package.zip",
+        drive_output_dir=str(tmp_path / "drive" / "SLM" / "external_baseline_official_reference"),
+        archive_name="external_baseline_official_reference_package_gaussian_shading.zip",
     )
 
     archive_path = tmp_path / record.archive_path

@@ -426,22 +426,26 @@ def test_official_baseline_notebooks_use_paper_run_configuration() -> None:
 
     expectations = {
         T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH: (
-            "f'{drive_result_root}/t2smark_full_main_reproduction'",
+            "f'{drive_result_root}/external_baseline_official_reference'",
+            "external_baseline_official_reference_package_t2smark_",
             "os.environ['SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT'] = paper_run_sample_count",
             "os.environ['SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR'] = '0.01'",
         ),
         TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "f'{drive_result_root}/tree_ring_official_reference'",
+            "f'{drive_result_root}/external_baseline_official_reference'",
+            "external_baseline_official_reference_package_tree_ring_",
             "os.environ['SLM_WM_TREE_RING_OFFICIAL_SAMPLE_COUNT'] = paper_run_sample_count",
             "configs/paper_main_pilot_paper_prompts.txt",
         ),
         GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "f'{drive_result_root}/gaussian_shading_official_reference'",
+            "f'{drive_result_root}/external_baseline_official_reference'",
+            "external_baseline_official_reference_package_gaussian_shading_",
             "os.environ['SLM_WM_GAUSSIAN_SHADING_OFFICIAL_SAMPLE_COUNT'] = paper_run_sample_count",
             "configs/paper_main_pilot_paper_prompts.txt",
         ),
         SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "f'{drive_result_root}/shallow_diffuse_official_reference'",
+            "f'{drive_result_root}/external_baseline_official_reference'",
+            "external_baseline_official_reference_package_shallow_diffuse_",
             "os.environ['SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT'] = paper_run_sample_count",
             "configs/paper_main_pilot_paper_prompts.txt",
         ),

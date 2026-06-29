@@ -63,7 +63,7 @@ class T2SMarkFullMainReproductionConfig:
 
     output_dir: str = DEFAULT_OUTPUT_DIR
     drive_output_dir: str = field(
-        default_factory=lambda: build_paper_run_config(".").drive_dir("t2smark_full_main_reproduction")
+        default_factory=lambda: build_paper_run_config(".").drive_dir("external_baseline_official_reference")
     )
     prompt_set: str = "pilot_paper"
     prompt_file: str = DEFAULT_PROMPT_FILE
@@ -638,7 +638,7 @@ def build_default_config() -> T2SMarkFullMainReproductionConfig:
         output_dir=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         drive_output_dir=os.environ.get(
             "SLM_WM_T2SMARK_FULL_MAIN_DRIVE_OUTPUT_DIR",
-            paper_run.drive_dir("t2smark_full_main_reproduction"),
+            paper_run.drive_dir("external_baseline_official_reference"),
         ),
         prompt_set=os.environ.get("SLM_WM_PROMPT_SET", paper_run.prompt_set),
         prompt_file=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PROMPT_FILE", paper_run.prompt_file),
@@ -694,13 +694,13 @@ def package_t2smark_full_main_reproduction_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
     drive_output_dir: str | None = None,
-    archive_name: str = "t2smark_full_main_reproduction_package.zip",
+    archive_name: str = "external_baseline_official_reference_package_t2smark.zip",
 ) -> T2SMarkFullMainArchiveRecord:
     """打包 T2SMark full-main 复现产物并镜像到 Google Drive。"""
 
     root_path = Path(root).resolve()
     resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir(
-        "t2smark_full_main_reproduction"
+        "external_baseline_official_reference"
     )
     source_dir = (root_path / output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)

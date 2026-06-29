@@ -32,6 +32,8 @@
 - `official_reference_gaussian_shading_run.ipynb`: 运行 Gaussian Shading 官方原始环境参考复现, 样本数和 Drive 目录由当前论文运行层级派生。
 - `official_reference_shallow_diffuse_run.ipynb`: 运行 Shallow Diffuse 官方原始环境参考复现, 样本数和 Drive 目录由当前论文运行层级派生。
 
+四个官方参考复现入口统一把压缩包镜像到当前论文运行层级的 Google Drive 子目录 `external_baseline_official_reference/`。本地 `outputs/` 子目录仍保留各方法原有语义名称, 用于结果闭合脚本读取和产物来源审计。
+
 ### 结果闭合入口
 
 - `pilot_paper_result_closure_run.ipynb`: 在前序结果包已经写入 Google Drive 后, 从当前论文运行层级的 Drive 根目录物化上游包, 依次重建 attack matrix、external baseline formal import、internal ablation、fixed-FPR 共同协议记录和完整结果包。该入口不需要 GPU, 只调度 `scripts/` 中的 repository commands, 不直接手写正式 records、tables、figures 或 reports。

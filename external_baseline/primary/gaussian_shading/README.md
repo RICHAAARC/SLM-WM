@@ -19,7 +19,7 @@
 
 ## 官方原始环境参考复现
 
-官方参考入口用于补充表方法忠实度审计, 不替代 SD3.5 Medium common-backbone 主表对比。该入口会尝试在 Colab 独立 legacy 环境中运行 `source/run_gaussian_shading.py`, 并把官方命令、stdout、stderr、`Identity.txt` 指标、schema、validation report、环境报告和压缩包写入 `outputs/gaussian_shading_official_reference/` 及 Google Drive 的 `SLM/gaussian_shading_official_reference` 目录。
+官方参考入口用于补充表方法忠实度审计, 不替代 SD3.5 Medium common-backbone 主表对比。该入口会尝试在 Colab 独立 legacy 环境中运行 `source/run_gaussian_shading.py`, 并把官方命令、stdout、stderr、`Identity.txt` 指标、schema、validation report、环境报告和压缩包写入 `outputs/gaussian_shading_official_reference/` 及当前论文运行层级 Google Drive 根目录下的 `external_baseline_official_reference/` 目录。
 
 legacy 环境准备采用双层策略:
 

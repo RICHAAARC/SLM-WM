@@ -994,7 +994,7 @@
 
 1. 新增 `experiments/baselines/formal_import.py`, 将主表 external baseline 的正式结果导入边界集中到 schema validator 中, 下游 `external_baseline_comparison` 只消费 `accepted_records`, 不再把 method-faithful observation 或缺少 fixed-FPR / full-main / attack matrix 边界的记录纳入正式比较。
 2. 新增 `scripts/write_primary_baseline_formal_import_protocol.py`, 可写出正式导入 schema、主表结果模板、正式模板覆盖、证据收集计划、候选记录校验报告和 manifest。该脚本只生成治理产物, 不手工填充论文结果。
-3. 新增 `paper_workflow/colab_utils/t2smark_full_main_reproduction.py` 与 `paper_workflow/official_reference_t2smark_run.ipynb`, 支持 Colab 冷启动下读取 `configs/paper_main_full_paper_prompts.txt`, 运行 T2SMark SD3.5 Medium full-main 官方入口, 生成 image_pairs、统一 adapter observations、正式导入候选记录、validator 报告, 并打包镜像到 Google Drive。
+3. 新增 `paper_workflow/colab_utils/t2smark_full_main_reproduction.py` 与 `paper_workflow/official_reference_t2smark_run.ipynb`, 支持 Colab 冷启动下读取当前论文运行层级的 prompt 文件, 运行 T2SMark SD3.5 Medium full-main 官方入口, 生成 image_pairs、统一 adapter observations、正式导入候选记录、validator 报告, 并打包镜像到当前论文运行层级 Google Drive 的 `external_baseline_official_reference/` 目录。
 4. 当前 T2SMark full-main 路径默认 `supports_paper_claim=false`。若 fixed-FPR 校准和攻击矩阵检测未闭合, validator 会保留 `formal_import_validation_ready=false`, 防止 raw full-main 官方结果被误声明为论文级主表 robustness 结论。
 
 ### dataset-level quality 打包自描述修正

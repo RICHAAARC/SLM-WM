@@ -334,8 +334,8 @@ def test_tree_ring_official_reference_package_embeds_archive_self_description(tm
     record = package_tree_ring_official_reference_outputs(
         root=tmp_path,
         output_dir="outputs/tree_ring_official_reference",
-        drive_output_dir=str(tmp_path / "drive" / "SLM" / "tree_ring_official_reference"),
-        archive_name="tree_ring_official_reference_package.zip",
+        drive_output_dir=str(tmp_path / "drive" / "SLM" / "external_baseline_official_reference"),
+        archive_name="external_baseline_official_reference_package_tree_ring.zip",
     )
 
     archive_path = tmp_path / record.archive_path

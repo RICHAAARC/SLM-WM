@@ -88,7 +88,7 @@ class ShallowDiffuseOfficialReferenceConfig:
     """描述 Shallow Diffuse 官方原始环境复现与导入所需配置。"""
 
     output_dir: str = DEFAULT_OUTPUT_DIR
-    drive_output_dir: str = field(default_factory=lambda: build_paper_run_config(".").drive_dir("shallow_diffuse_official_reference"))
+    drive_output_dir: str = field(default_factory=lambda: build_paper_run_config(".").drive_dir("external_baseline_official_reference"))
     source_dir: str = DEFAULT_SOURCE_DIR
     run_name: str = DEFAULT_RUN_NAME
     sample_count: int = DEFAULT_SAMPLE_COUNT
@@ -1349,7 +1349,7 @@ def build_default_config() -> ShallowDiffuseOfficialReferenceConfig:
     paper_run = build_paper_run_config(".")
     return ShallowDiffuseOfficialReferenceConfig(
         output_dir=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
-        drive_output_dir=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_DRIVE_OUTPUT_DIR", paper_run.drive_dir("shallow_diffuse_official_reference")),
+        drive_output_dir=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_DRIVE_OUTPUT_DIR", paper_run.drive_dir("external_baseline_official_reference")),
         source_dir=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SOURCE_DIR", DEFAULT_SOURCE_DIR),
         run_name=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_RUN_NAME", DEFAULT_RUN_NAME),
         sample_count=resolve_count_from_environment("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT", default_value=paper_run.sample_count),
@@ -1422,12 +1422,12 @@ def package_shallow_diffuse_official_reference_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
     drive_output_dir: str | None = None,
-    archive_name: str = "shallow_diffuse_official_reference_package.zip",
+    archive_name: str = "external_baseline_official_reference_package_shallow_diffuse.zip",
 ) -> ShallowDiffuseOfficialReferenceArchiveRecord:
     """打包 Shallow Diffuse 官方参考产物并镜像到 Google Drive。"""
 
     root_path = Path(root).resolve()
-    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir("shallow_diffuse_official_reference")
+    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir("external_baseline_official_reference")
     source_dir = (root_path / output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
     archive_path = source_dir / archive_name
