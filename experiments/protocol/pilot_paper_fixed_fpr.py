@@ -35,6 +35,7 @@ PILOT_PAPER_BOOTSTRAP_ITERATION_COUNT = 1000
 PILOT_PAPER_CONFIDENCE_LEVEL = 0.95
 PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT = 100
 PILOT_PAPER_METHOD_IDS = ("slm_wm_current", "tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+PILOT_PAPER_PRIMARY_METHOD_ID = "slm_wm_current"
 PILOT_PAPER_PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 PILOT_PAPER_ATTACK_RESOURCE_PROFILES = ("full_main", "full_extra")
 
@@ -663,6 +664,81 @@ def validate_pilot_paper_result_import_rows(
     }
 
 
+def _record_key(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    """提取共同协议模板键, 用于比较同一攻击设置下的方法结果。"""
+
+    return (str(row.get("attack_family", "")), str(row.get("attack_name", "")), str(row.get("resource_profile", "")))
+
+
+def _mean_rate(rows: tuple[Mapping[str, Any], ...], field_name: str) -> float:
+    """计算结果记录中的平均 rate, 空集合返回 0。"""
+
+    return sum(float(row.get(field_name, 0.0)) for row in rows) / len(rows) if rows else 0.0
+
+
+def build_superiority_gate_summary(
+    accepted_records: Iterable[Mapping[str, Any]],
+    config: PilotPaperFixedFprConfig,
+) -> dict[str, Any]:
+    """根据受治理结果记录判断是否支持 SLM-WM 优势性主张。
+
+    该函数属于项目特定的论文声明门禁: common protocol 覆盖完整只说明证据可导入,
+    不能自动推出方法优越。这里显式要求 SLM-WM 与主表 baseline 在相同攻击模板
+    上比较, 且 SLM-WM 平均 TPR 高于最佳 baseline, 同时平均 FPR 不超过 fixed-FPR
+    目标, 才允许支持 superiority claim。
+    """
+
+    materialized = tuple(row for row in accepted_records if _bool_field(row, "supports_paper_claim"))
+    slm_rows = tuple(row for row in materialized if str(row.get("method_id", "")) == PILOT_PAPER_PRIMARY_METHOD_ID)
+    baseline_rows_by_method = {
+        method_id: tuple(row for row in materialized if str(row.get("method_id", "")) == method_id)
+        for method_id in PILOT_PAPER_PRIMARY_BASELINE_IDS
+    }
+    slm_keys = {_record_key(row) for row in slm_rows}
+    missing_baseline_methods = tuple(method_id for method_id, rows in baseline_rows_by_method.items() if not rows)
+    template_aligned = bool(slm_rows) and all({_record_key(row) for row in rows} == slm_keys for rows in baseline_rows_by_method.values())
+    slm_mean_tpr = _mean_rate(slm_rows, "true_positive_rate")
+    slm_mean_fpr = _mean_rate(slm_rows, "false_positive_rate")
+    baseline_mean_tprs = {
+        method_id: _mean_rate(rows, "true_positive_rate") for method_id, rows in baseline_rows_by_method.items() if rows
+    }
+    best_baseline_method_id = max(baseline_mean_tprs, key=baseline_mean_tprs.get) if baseline_mean_tprs else ""
+    best_baseline_mean_tpr = baseline_mean_tprs.get(best_baseline_method_id, 0.0)
+    fixed_fpr_ready = bool(slm_rows) and slm_mean_fpr <= config.target_fpr
+    superiority_ready = (
+        bool(materialized)
+        and bool(slm_rows)
+        and not missing_baseline_methods
+        and template_aligned
+        and fixed_fpr_ready
+        and slm_mean_tpr > best_baseline_mean_tpr
+    )
+    if superiority_ready:
+        reason = "slm_wm_tpr_exceeds_best_baseline_within_fixed_fpr"
+    elif not slm_rows:
+        reason = "slm_wm_records_missing"
+    elif missing_baseline_methods:
+        reason = "baseline_records_missing"
+    elif not template_aligned:
+        reason = "method_attack_templates_not_aligned"
+    elif not fixed_fpr_ready:
+        reason = "slm_wm_fpr_exceeds_fixed_fpr_target"
+    else:
+        reason = "slm_wm_tpr_not_above_best_baseline"
+    return {
+        "superiority_gate_ready": superiority_ready,
+        "superiority_gate_reason": reason,
+        "slm_wm_record_count": len(slm_rows),
+        "slm_wm_mean_true_positive_rate": slm_mean_tpr,
+        "slm_wm_mean_false_positive_rate": slm_mean_fpr,
+        "slm_wm_fixed_fpr_boundary_ready": fixed_fpr_ready,
+        "best_baseline_method_id": best_baseline_method_id,
+        "best_baseline_mean_true_positive_rate": best_baseline_mean_tpr,
+        "missing_baseline_methods": list(missing_baseline_methods),
+        "method_attack_templates_aligned": template_aligned,
+    }
+
+
 def build_pilot_paper_common_protocol_summary(
     *,
     prompt_summary: Mapping[str, Any],
@@ -686,6 +762,7 @@ def build_pilot_paper_common_protocol_summary(
         and len(accepted_records) >= len(materialized_template_rows)
         and accepted_claim_record_count == len(accepted_records)
     )
+    superiority_gate = build_superiority_gate_summary(accepted_records, resolved_config)
     ready = (
         bool(prompt_summary.get("prompt_split_ready"))
         and bool(materialized_attack_rows)
@@ -697,6 +774,7 @@ def build_pilot_paper_common_protocol_summary(
         ready
         and bool(import_validation_report.get("pilot_paper_result_import_ready", False))
         and claim_coverage_ready
+        and superiority_gate["superiority_gate_ready"]
     )
     pilot_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == PILOT_PAPER_PROMPT_SET
     full_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == FULL_PAPER_RUN_NAME
@@ -723,6 +801,14 @@ def build_pilot_paper_common_protocol_summary(
         "accepted_pilot_paper_import_count": int(import_validation_report.get("accepted_pilot_paper_import_count", 0)),
         "accepted_pilot_paper_claim_record_count": accepted_claim_record_count,
         "pilot_paper_claim_record_ready": claim_coverage_ready,
+        "pilot_paper_evidence_coverage_ready": claim_coverage_ready,
+        "pilot_paper_effectiveness_gate_ready": superiority_gate["superiority_gate_ready"],
+        "pilot_paper_effectiveness_gate_reason": superiority_gate["superiority_gate_reason"],
+        "slm_wm_mean_true_positive_rate": superiority_gate["slm_wm_mean_true_positive_rate"],
+        "slm_wm_mean_false_positive_rate": superiority_gate["slm_wm_mean_false_positive_rate"],
+        "best_baseline_mean_true_positive_rate": superiority_gate["best_baseline_mean_true_positive_rate"],
+        "best_baseline_method_id": superiority_gate["best_baseline_method_id"],
+        "slm_wm_fixed_fpr_boundary_ready": superiority_gate["slm_wm_fixed_fpr_boundary_ready"],
         "pilot_paper_claim_ready": pilot_paper_claim_ready,
         "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
         "confidence_level": resolved_config.confidence_level,

@@ -48,6 +48,9 @@ ALIGNED_RESCORING_PACKAGE_PATTERNS = (
 )
 ALIGNED_RESCORING_RESULT_MEMBER = "outputs/aligned_rescoring/aligned_rescoring_result.json"
 ALIGNED_RESCORING_QUALITY_MEMBER = "outputs/aligned_rescoring/aligned_rescoring_quality_metrics.csv"
+ALIGNED_RESCORING_RECORDS_MEMBER = "outputs/aligned_rescoring/aligned_rescoring_records.jsonl"
+REAL_SCORE_SPACE_NAME = "real_sd_latent_projection"
+PROXY_SCORE_SPACE_NAME = "proxy_content_score"
 
 
 def stable_json_text(value: Any) -> str:
@@ -268,6 +271,102 @@ def read_quality_metrics_from_aligned_rescoring_package(package_path: Path, root
     }
 
 
+def has_real_aligned_rescoring_scores(record: dict[str, Any]) -> bool:
+    """判断 aligned rescoring 记录是否包含真实分数空间所需字段。"""
+
+    return "real_raw_content_score" in record and "real_aligned_content_score" in record
+
+
+def real_score_calibration_record(record: dict[str, Any]) -> dict[str, Any]:
+    """把 aligned rescoring 记录归一化为 fixed-FPR 校准记录。
+
+    该函数属于协议适配层: 它把真实 SD latent projection 分数显式映射到
+    校准协议消费的 `raw_content_score` 和 `aligned_content_score` 字段, 从而
+    避免阈值在 proxy content score 上冻结、下游却在真实分数上判定的分数空间错配。
+    """
+
+    raw_score = float(record["real_raw_content_score"])
+    aligned_score = float(record["real_aligned_content_score"])
+    payload = dict(record)
+    payload.update(
+        {
+            "raw_content_score": raw_score,
+            "aligned_content_score": aligned_score,
+            "rescue_ablation_mode": "full_rescue",
+            "geometry_reliable": bool(record.get("aligned_rescoring_ready", False)),
+            "fail_reason": str(record.get("fail_reason", "geometry_suspected")),
+            "rescue_score_gain": float(record.get("real_rescoring_score_gain", aligned_score - raw_score)),
+            "score_space_name": REAL_SCORE_SPACE_NAME,
+            "raw_content_score_source_field": "real_raw_content_score",
+            "aligned_content_score_source_field": "real_aligned_content_score",
+            "proxy_raw_content_score": float(record.get("raw_content_score", raw_score)),
+            "proxy_aligned_content_score": float(record.get("aligned_content_score", aligned_score)),
+        }
+    )
+    return payload
+
+
+def read_real_score_calibration_records_from_aligned_rescoring_package(package_path: Path | None) -> tuple[dict[str, Any], ...]:
+    """从 aligned rescoring 结果包读取真实分数空间校准记录。"""
+
+    if package_path is None or not package_path.exists():
+        return tuple()
+    with ZipFile(package_path) as archive:
+        if ALIGNED_RESCORING_RECORDS_MEMBER not in archive.namelist():
+            return tuple()
+        rows = (
+            json.loads(line)
+            for line in archive.read(ALIGNED_RESCORING_RECORDS_MEMBER).decode("utf-8").splitlines()
+            if line.strip()
+        )
+        return tuple(real_score_calibration_record(row) for row in rows if has_real_aligned_rescoring_scores(row))
+
+
+def select_threshold_calibration_records(
+    *,
+    rescue_records: tuple[dict[str, Any], ...],
+    aligned_rescoring_package_path: Path | None,
+) -> tuple[tuple[dict[str, Any], ...], dict[str, Any]]:
+    """选择 fixed-FPR 校准使用的记录集合并返回分数空间元数据。"""
+
+    real_records = read_real_score_calibration_records_from_aligned_rescoring_package(aligned_rescoring_package_path)
+    if real_records:
+        return real_records, {
+            "calibration_records_source": "aligned_rescoring_real_scores",
+            "calibration_records_source_member": ALIGNED_RESCORING_RECORDS_MEMBER,
+            "calibration_record_count": len(real_records),
+            "score_space_name": REAL_SCORE_SPACE_NAME,
+            "real_score_calibration_ready": True,
+            "proxy_score_calibration_used": False,
+            "raw_content_score_source_field": "real_raw_content_score",
+            "aligned_content_score_source_field": "real_aligned_content_score",
+        }
+    return rescue_records, {
+        "calibration_records_source": "geometric_rescue_proxy_scores",
+        "calibration_records_source_member": "",
+        "calibration_record_count": len(rescue_records),
+        "score_space_name": PROXY_SCORE_SPACE_NAME,
+        "real_score_calibration_ready": False,
+        "proxy_score_calibration_used": True,
+        "raw_content_score_source_field": "raw_content_score",
+        "aligned_content_score_source_field": "aligned_content_score",
+    }
+
+
+def threshold_payload(threshold: Any, score_space_metadata: dict[str, Any]) -> dict[str, Any]:
+    """构造带分数空间来源的阈值记录。"""
+
+    payload = threshold.to_dict()
+    payload["metadata"] = {
+        **payload.get("metadata", {}),
+        "score_space_name": score_space_metadata["score_space_name"],
+        "calibration_records_source": score_space_metadata["calibration_records_source"],
+        "raw_content_score_source_field": score_space_metadata["raw_content_score_source_field"],
+        "aligned_content_score_source_field": score_space_metadata["aligned_content_score_source_field"],
+    }
+    return payload
+
+
 def aligned_rescoring_output_metadata(aligned_quality: dict[str, Any]) -> dict[str, Any]:
     """提取需要写入下游 manifest 与报告的 aligned rescoring 摘要字段。"""
     return {
@@ -402,9 +501,10 @@ def build_threshold_report(
     rescue_audit: dict[str, Any],
     aligned_quality: dict[str, Any],
     minimum_clean_negative_count: int,
+    score_space_metadata: dict[str, Any],
 ) -> dict[str, Any]:
     """构造阈值退化与 fixed-FPR 主张边界报告。"""
-    report = threshold.to_dict()
+    report = threshold_payload(threshold, score_space_metadata)
     clean_fpr_exceeds_target = metrics["evidence_clean_fpr"] > config.target_fpr
     attacked_fpr_diagnostic_exceeds_target = metrics["evidence_attacked_fpr"] > config.target_fpr
     calibration_negative_count_ready = threshold.calibration_negative_count >= minimum_clean_negative_count
@@ -449,13 +549,17 @@ def build_threshold_report(
                 and minimum_clean_negative_count_ready
             ),
             "full_method_claim_ready": False,
-            "unsupported_reason": "aligned_content_score_local_proxy",
+            "unsupported_reason": ""
+            if score_space_metadata["real_score_calibration_ready"]
+            else "aligned_content_score_local_proxy",
             "input_attention_geometry_ready": rescue_audit.get("attention_geometry_ready", False),
             "input_image_quality_metrics_ready": rescue_audit.get("image_quality_metrics_ready", False),
             "supports_paper_claim": False,
         }
     )
     report.update(aligned_rescoring_output_metadata(aligned_quality))
+    report.update(score_space_metadata)
+    report["score_space_alignment_ready"] = bool(score_space_metadata["real_score_calibration_ready"])
     return report
 
 
@@ -484,7 +588,11 @@ def write_threshold_calibration_outputs(
         else empty_aligned_rescoring_quality()
     )
     config = FixedFprCalibrationConfig(target_fpr=target_fpr)
-    records = full_rescue_records(read_jsonl(resolved_records_path))
+    rescue_records = full_rescue_records(read_jsonl(resolved_records_path))
+    records, score_space_metadata = select_threshold_calibration_records(
+        rescue_records=rescue_records,
+        aligned_rescoring_package_path=resolved_aligned_package_path,
+    )
     calibration_clean_records = split_role(records, config.calibration_split, config.clean_negative_role)
     threshold = empirical_threshold_at_fpr(
         (record["raw_content_score"] for record in calibration_clean_records),
@@ -499,6 +607,7 @@ def write_threshold_calibration_outputs(
         rescue_audit,
         aligned_quality,
         max(0, int(minimum_clean_negative_count)),
+        score_space_metadata,
     )
     roc_rows, det_rows = curve_rows(calibrated, config)
     distribution_rows = score_distribution_rows(calibrated)
@@ -517,7 +626,7 @@ def write_threshold_calibration_outputs(
     fpr_audit_path = resolved_output_dir / "rescue_fpr_audit.csv"
     manifest_path = resolved_output_dir / "manifest.local.json"
 
-    thresholds_path.write_text(stable_json_text(threshold.to_dict()), encoding="utf-8")
+    thresholds_path.write_text(stable_json_text(threshold_payload(threshold, score_space_metadata)), encoding="utf-8")
     write_csv(
         operating_points_path,
         [metrics],
@@ -591,6 +700,7 @@ def write_threshold_calibration_outputs(
         "threshold_report": threshold_report,
         "rescue_fpr_audit": fpr_rows,
         "aligned_rescoring_quality": aligned_rescoring_output_metadata(aligned_quality),
+        "score_space_metadata": score_space_metadata,
     }
     input_paths = [
         relative_or_absolute(resolved_records_path, root_path),
@@ -615,7 +725,8 @@ def write_threshold_calibration_outputs(
             **config.to_dict(),
             "minimum_clean_negative_count": max(0, int(minimum_clean_negative_count)),
             "summary_digest": build_stable_digest(summary),
-            "threshold_digest": build_stable_digest(threshold.to_dict()),
+            "threshold_digest": build_stable_digest(threshold_payload(threshold, score_space_metadata)),
+            **score_space_metadata,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command=rebuild_command,
@@ -627,6 +738,8 @@ def write_threshold_calibration_outputs(
             "full_method_claim_ready": False,
             "supports_paper_claim": False,
             **aligned_rescoring_output_metadata(aligned_quality),
+            **score_space_metadata,
+            "score_space_alignment_ready": threshold_report["score_space_alignment_ready"],
         },
     ).to_dict()
     manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")

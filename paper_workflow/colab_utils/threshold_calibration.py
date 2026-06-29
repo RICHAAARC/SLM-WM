@@ -312,6 +312,11 @@ def run_default_threshold_calibration_from_drive_plan(
             "attacked_fpr_diagnostic_exceeds_target": threshold_report.get("attacked_fpr_diagnostic_exceeds_target", False),
             "aligned_rescoring_quality_metrics_ready": threshold_report.get("aligned_rescoring_quality_metrics_ready", False),
             "perceptual_metrics_ready": threshold_report.get("perceptual_metrics_ready", False),
+            "score_space_name": threshold_report.get("score_space_name", ""),
+            "score_space_alignment_ready": threshold_report.get("score_space_alignment_ready", False),
+            "real_score_calibration_ready": threshold_report.get("real_score_calibration_ready", False),
+            "proxy_score_calibration_used": threshold_report.get("proxy_score_calibration_used", False),
+            "calibration_records_source": threshold_report.get("calibration_records_source", ""),
         },
     }
     result_path = output_dir / "threshold_calibration_result.json"

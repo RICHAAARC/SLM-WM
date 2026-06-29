@@ -14,7 +14,10 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
     build_pilot_paper_attack_matrix_rows,
+    build_pilot_paper_common_protocol_summary,
+    build_pilot_paper_method_registry_rows,
     build_pilot_paper_prompt_split_summary,
+    build_pilot_paper_result_import_template_rows,
     build_pilot_paper_result_import_schema,
     validate_pilot_paper_result_import_rows,
 )
@@ -95,6 +98,55 @@ def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_p
     assert all(row["result_claim_scope"] == "pilot_paper_paper_claim" for row in template_rows)
     assert all("true_positive_rate_ci_low" in row["required_metric_fields"] for row in template_rows)
     assert all(path.startswith("outputs/") for path in manifest["output_paths"])
+
+
+@pytest.mark.quick
+def test_common_protocol_blocks_superiority_claim_when_slm_wm_tpr_is_below_baselines() -> None:
+    """证据覆盖完整但 SLM-WM TPR 低于 baseline 时, 不得支持优势性主张。"""
+
+    config = PilotPaperFixedFprConfig()
+    prompt_summary = {
+        "prompt_split_ready": True,
+        "pilot_paper_prompt_count": 240,
+        "prompt_split_digest": "prompt_digest",
+    }
+    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
+    method_rows = build_pilot_paper_method_registry_rows(
+        prompt_split_digest="prompt_digest",
+        attack_matrix_digest="attack_digest",
+        fixed_fpr_protocol_digest="fixed_fpr_digest",
+        config=config,
+    )
+    template_rows = build_pilot_paper_result_import_template_rows(method_rows, attack_rows, config)
+    accepted_records = []
+    for row in template_rows:
+        method_id = str(row["method_id"])
+        accepted_records.append(
+            {
+                **row,
+                "true_positive_rate": 0.01 if method_id == "slm_wm_current" else 0.50,
+                "false_positive_rate": 0.001,
+                "supports_paper_claim": True,
+            }
+        )
+    summary = build_pilot_paper_common_protocol_summary(
+        prompt_summary=prompt_summary,
+        attack_rows=attack_rows,
+        method_rows=method_rows,
+        template_rows=template_rows,
+        import_validation_report={
+            "pilot_paper_result_import_ready": True,
+            "accepted_pilot_paper_import_count": len(accepted_records),
+            "accepted_records": accepted_records,
+        },
+        config=config,
+    )
+
+    assert summary["pilot_paper_evidence_coverage_ready"] is True
+    assert summary["pilot_paper_effectiveness_gate_ready"] is False
+    assert summary["pilot_paper_effectiveness_gate_reason"] == "slm_wm_tpr_not_above_best_baseline"
+    assert summary["pilot_paper_supports_superiority_claim"] is False
+    assert summary["paper_claim_ready"] is False
 
 
 @pytest.mark.quick

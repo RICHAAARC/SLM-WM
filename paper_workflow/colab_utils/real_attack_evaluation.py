@@ -978,6 +978,7 @@ def formal_boundary(root_path: Path, config: RealAttackEvaluationConfig) -> dict
     thresholds = read_json(root_path / "outputs" / "threshold_calibration" / "calibration_thresholds.json")
     report = read_json(root_path / "outputs" / "threshold_calibration" / "threshold_degeneracy_report.json")
     threshold_value = float(thresholds.get("threshold_value", report.get("calibrated_content_threshold", config.detection_threshold)))
+    threshold_metadata = thresholds.get("metadata", {}) if isinstance(thresholds.get("metadata", {}), dict) else {}
     return {
         "content_threshold": threshold_value,
         "target_fpr": float(thresholds.get("target_fpr", report.get("target_fpr", PILOT_PAPER_FIXED_FPR))),
@@ -994,6 +995,10 @@ def formal_boundary(root_path: Path, config: RealAttackEvaluationConfig) -> dict
             )
         ),
         "attacked_negative_governs_fixed_fpr": bool(report.get("attacked_negative_governs_fixed_fpr", False)),
+        "score_space_name": str(report.get("score_space_name", threshold_metadata.get("score_space_name", ""))),
+        "score_space_alignment_ready": bool(report.get("score_space_alignment_ready", False)),
+        "real_score_calibration_ready": bool(report.get("real_score_calibration_ready", False)),
+        "calibration_records_source": str(report.get("calibration_records_source", "")),
         "boundary_ready": bool(thresholds and report),
     }
 
@@ -1091,6 +1096,10 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
             "detection_method": "fixed_fpr_attack_matrix_schema_from_real_attacked_image",
             "attack_implementation": real_record["attack_implementation"],
             "formal_boundary_ready": boundary["boundary_ready"],
+            "score_space_name": boundary.get("score_space_name", ""),
+            "score_space_alignment_ready": boundary.get("score_space_alignment_ready", False),
+            "real_score_calibration_ready": boundary.get("real_score_calibration_ready", False),
+            "calibration_records_source": boundary.get("calibration_records_source", ""),
             "claim_boundary": "requires_full_sample_scale_and_evidence_audit",
         },
     }

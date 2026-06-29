@@ -770,6 +770,17 @@ Notebook 与 repository module 的跨边界数据
 | real_raw_content_score | metric | none | true | false | false | 对齐前真实 latent 投影重新计算得到的内容分数。 |
 | real_aligned_content_score | metric | none | true | false | false | 对齐后真实 latent 投影重新计算得到的内容分数。 |
 | real_rescoring_score_gain | metric | none | true | false | false | 真实 aligned content score 相对 raw content score 的增益。 |
+| score_space_name | protocol | none | true | false | false | fixed-FPR 校准、攻击检测或结果摘要实际使用的分数空间名称。 |
+| score_space_alignment_ready | governance | none | false | false | false | fixed-FPR 校准分数空间是否已与真实检测分数空间对齐。 |
+| real_score_calibration_ready | governance | none | false | false | false | fixed-FPR 阈值是否基于真实 aligned rescoring 分数记录校准。 |
+| proxy_score_calibration_used | governance | none | false | false | false | fixed-FPR 阈值是否退回使用 proxy content score 校准。 |
+| calibration_records_source | protocol | none | false | false | false | fixed-FPR 校准记录来源, 例如 aligned_rescoring_real_scores。 |
+| calibration_records_source_member | artifact | none | false | false | false | fixed-FPR 校准记录在输入压缩包中的成员路径。 |
+| calibration_record_count | metric | none | false | false | false | fixed-FPR 校准实际消费的记录数量。 |
+| raw_content_score_source_field | protocol | none | true | false | false | 归一化 raw_content_score 时使用的原始字段名。 |
+| aligned_content_score_source_field | protocol | none | true | false | false | 归一化 aligned_content_score 时使用的原始字段名。 |
+| proxy_raw_content_score | metric | none | true | false | false | 真实分数校准记录中保留的原 proxy raw content score。 |
+| proxy_aligned_content_score | metric | none | true | false | false | 真实分数校准记录中保留的原 proxy aligned content score。 |
 | real_lf_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 LF 内容分数。 |
 | real_lf_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 LF 内容分数。 |
 | real_hf_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 HF 内容分数。 |
@@ -1267,6 +1278,16 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_import_issue_count | metric | none | false | false | false | pilot_paper 受治理导入 schema 发现的问题数量。|
 | accepted_pilot_paper_claim_record_count | metric | none | false | false | false | 已通过 pilot_paper 受治理导入且显式允许支撑 pilot_paper 论文主张的结果记录数量。|
 | pilot_paper_claim_record_ready | governance | none | false | false | false | pilot_paper 结果导入记录是否已覆盖模板并具备 pilot_paper 论文主张记录边界。|
+| pilot_paper_evidence_coverage_ready | governance | none | false | false | false | pilot_paper 结果是否已覆盖共同协议模板并完成受治理证据导入。|
+| pilot_paper_effectiveness_gate_ready | governance | none | false | false | false | pilot_paper 结果是否通过方法效果门禁并允许支持优势性主张。|
+| pilot_paper_effectiveness_gate_reason | governance | none | false | false | false | pilot_paper 方法效果门禁未通过或通过的原因代码。|
+| slm_wm_mean_true_positive_rate | metric | none | false | false | false | SLM-WM 在共同攻击模板上的平均 true positive rate。|
+| slm_wm_mean_false_positive_rate | metric | none | false | false | false | SLM-WM 在共同攻击模板上的平均 false positive rate。|
+| slm_wm_fixed_fpr_boundary_ready | governance | none | false | false | false | SLM-WM 平均 false positive rate 是否满足 fixed-FPR 目标边界。|
+| best_baseline_mean_true_positive_rate | metric | none | false | false | false | 主表 baseline 中平均 true positive rate 最高的方法结果。|
+| best_baseline_method_id | protocol | none | false | false | false | 主表 baseline 中平均 true positive rate 最高的方法标识。|
+| missing_baseline_methods | governance | none | false | false | false | 方法效果门禁中缺失结果记录的 baseline 方法集合。|
+| method_attack_templates_aligned | governance | none | false | false | false | SLM-WM 与 baseline 是否在相同攻击模板上进行比较。|
 | pilot_paper_claim_ready | governance | none | false | false | false | pilot_paper 规模论文主张是否已由同一 prompt split、同一攻击矩阵、fixed-FPR 协议和受治理导入记录闭合。|
 | pilot_paper_supports_superiority_claim | governance | none | false | false | false | pilot_paper 结果是否允许在 pilot_paper 样本规模边界内支撑方法优越性主张。|
 | full_paper_claim_ready | governance | none | false | false | false | full_paper 规模论文主张是否已具备证据闭合。pilot_paper 共同协议中必须为 false。|

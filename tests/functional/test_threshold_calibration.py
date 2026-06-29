@@ -142,6 +142,52 @@ def write_aligned_rescoring_package(package_path: Path) -> None:
         archive.writestr("outputs/aligned_rescoring/aligned_rescoring_quality_metrics.csv", quality_text)
 
 
+def aligned_rescoring_record(
+    record_id: str,
+    split: str,
+    sample_role: str,
+    proxy_score: float,
+    real_raw_score: float,
+    real_aligned_score: float | None = None,
+) -> dict[str, object]:
+    """构造包含 proxy 与真实分数的 aligned rescoring 记录。"""
+
+    resolved_aligned_score = real_raw_score if real_aligned_score is None else real_aligned_score
+    return {
+        "aligned_rescoring_record_id": record_id,
+        "content_detection_record_id": f"content_{record_id}",
+        "prompt_id": f"prompt_{record_id}",
+        "split": split,
+        "sample_role": sample_role,
+        "raw_content_score": proxy_score,
+        "aligned_content_score": proxy_score,
+        "real_raw_content_score": real_raw_score,
+        "real_aligned_content_score": resolved_aligned_score,
+        "real_rescoring_score_gain": resolved_aligned_score - real_raw_score,
+        "aligned_rescoring_ready": True,
+        "supports_paper_claim": False,
+    }
+
+
+def write_aligned_rescoring_package_with_real_scores(package_path: Path) -> None:
+    """写出包含真实分数空间记录的 aligned rescoring 结果包。"""
+
+    write_aligned_rescoring_package(package_path)
+    records = [
+        aligned_rescoring_record("cal_pos", "calibration", "positive_source", 0.95, 0.15),
+        aligned_rescoring_record("cal_clean_a", "calibration", "clean_negative", 0.10, 0.60),
+        aligned_rescoring_record("cal_clean_b", "calibration", "clean_negative", 0.20, 0.70),
+        aligned_rescoring_record("test_pos", "test", "positive_source", 0.90, 0.16),
+        aligned_rescoring_record("test_clean", "test", "clean_negative", 0.30, 0.65),
+        aligned_rescoring_record("test_attacked", "test", "attacked_negative", 0.35, 0.66),
+    ]
+    with ZipFile(package_path, "a") as archive:
+        archive.writestr(
+            "outputs/aligned_rescoring/aligned_rescoring_records.jsonl",
+            "".join(json_line(record) for record in records),
+        )
+
+
 @pytest.mark.quick
 def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separate(tmp_path: Path) -> None:
     """阈值、clean FPR、attacked FPR 和质量指标应可由 records 重建。"""
@@ -300,3 +346,30 @@ def test_threshold_calibration_propagates_aligned_rescoring_pair_metrics(tmp_pat
     assert threshold_report["real_aligned_rescore_count"] == 3
     assert manifest["metadata"]["aligned_rescoring_quality_metrics_ready"] is True
     assert "outputs/aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip" in manifest["input_paths"]
+
+
+@pytest.mark.quick
+def test_threshold_calibration_prefers_real_aligned_rescoring_score_space(tmp_path: Path) -> None:
+    """存在真实 aligned rescoring 分数时, fixed-FPR 不应继续使用 proxy 内容分数。"""
+
+    records_path, audit_path = write_rescue_inputs(tmp_path)
+    package_path = tmp_path / "outputs" / "aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip"
+    write_aligned_rescoring_package_with_real_scores(package_path)
+
+    write_threshold_calibration_outputs(
+        root=tmp_path,
+        rescue_records_path=records_path,
+        rescue_audit_path=audit_path,
+        target_fpr=0.5,
+        aligned_rescoring_package_path=package_path,
+    )
+    output_dir = tmp_path / "outputs" / "threshold_calibration"
+    thresholds = json.loads((output_dir / "calibration_thresholds.json").read_text(encoding="utf-8"))
+    threshold_report = json.loads((output_dir / "threshold_degeneracy_report.json").read_text(encoding="utf-8"))
+
+    assert thresholds["threshold_value"] == 0.7
+    assert thresholds["metadata"]["score_space_name"] == "real_sd_latent_projection"
+    assert threshold_report["score_space_alignment_ready"] is True
+    assert threshold_report["real_score_calibration_ready"] is True
+    assert threshold_report["proxy_score_calibration_used"] is False
+    assert threshold_report["calibration_records_source"] == "aligned_rescoring_real_scores"
