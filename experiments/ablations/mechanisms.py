@@ -367,10 +367,13 @@ def _metric_status_for_group(rows: Iterable[dict[str, Any]]) -> str:
     if not supported:
         return "unsupported"
     statuses = {str(row.get("metric_status", "")) for row in supported}
-    real_status = "measured_from_real_attacked_image_formal_protocol"
-    if statuses == {real_status}:
-        return real_status
-    if real_status in statuses:
+    retention_proxy_status = "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+    legacy_real_status = "measured_from_real_attacked_image_formal_protocol"
+    if statuses == {retention_proxy_status}:
+        return retention_proxy_status
+    if statuses == {legacy_real_status}:
+        return "measured_from_legacy_real_attacked_image_protocol"
+    if retention_proxy_status in statuses or legacy_real_status in statuses:
         return "measured_from_mixed_real_and_local_proxy"
     return "measured_from_local_proxy"
 

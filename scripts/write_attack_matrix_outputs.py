@@ -42,7 +42,12 @@ DEFAULT_CONVENTIONAL_GEOMETRIC_ATTACK_RECORDS_PATH = Path(
 )
 DEFAULT_IMAGE_ATTACK_EVIDENCE_RECORDS_PATH = Path("outputs/image_attack_evidence/formal_attack_detection_records.jsonl")
 DEFAULT_MAX_SOURCE_RECORDS: int | None = None
-REAL_ATTACK_METRIC_STATUS = "measured_from_real_attacked_image_formal_protocol"
+REAL_ATTACK_RETENTION_PROXY_METRIC_STATUS = "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+LEGACY_REAL_ATTACK_METRIC_STATUS = "measured_from_real_attacked_image_formal_protocol"
+REAL_ATTACK_METRIC_STATUSES = (
+    REAL_ATTACK_RETENTION_PROXY_METRIC_STATUS,
+    LEGACY_REAL_ATTACK_METRIC_STATUS,
+)
 
 
 def stable_json_text(value: Any) -> str:
@@ -138,7 +143,7 @@ def full_rescue_records(records: tuple[dict[str, Any], ...]) -> tuple[dict[str, 
 
 def formal_real_attack_records(records: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
     """筛选真实 attacked image 闭环产出的正式检测记录。"""
-    return tuple(record for record in records if record.get("metric_status") == REAL_ATTACK_METRIC_STATUS)
+    return tuple(record for record in records if record.get("metric_status") in REAL_ATTACK_METRIC_STATUSES)
 
 
 def attack_record_key(record: dict[str, Any]) -> tuple[str, str, str]:

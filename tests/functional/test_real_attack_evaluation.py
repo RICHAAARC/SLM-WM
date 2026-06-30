@@ -198,7 +198,13 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     assert (output_dir / "real_attack_family_metrics.csv").read_text(encoding="utf-8").count("\n") >= 5
     formal_records = read_jsonl(output_dir / "formal_attack_detection_records.jsonl")
     assert len(formal_records) == 8
-    assert all(record["metric_status"] == "measured_from_real_attacked_image_formal_protocol" for record in formal_records)
+    assert all(
+        record["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+        for record in formal_records
+    )
+    assert all(record["metadata"]["formal_detection_proxy"] is True for record in formal_records)
+    assert all(record["metadata"]["attacked_image_rescore_performed"] is False for record in formal_records)
+    assert all(record["metadata"]["attacked_image_rescore_required_for_claim"] is True for record in formal_records)
     assert {record["sample_role"] for record in formal_records} == {"positive_source", "clean_negative"}
 
 

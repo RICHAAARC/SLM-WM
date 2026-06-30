@@ -85,7 +85,7 @@ def formal_real_attack_record(
         "rescue_eligible": False,
         "rescue_applied": False,
         "evidence_decision": evidence_decision,
-        "metric_status": "measured_from_real_attacked_image_formal_protocol",
+        "metric_status": "measured_from_real_attacked_image_retention_proxy_formal_protocol",
         "unsupported_reason": "",
         "supports_paper_claim": False,
         "metadata": {
@@ -313,7 +313,10 @@ def test_attack_matrix_ingests_real_attack_formal_records(tmp_path: Path) -> Non
         "diffusion_purification",
     }
     assert regeneration_rows
-    assert all(row["metric_status"] == "measured_from_real_attacked_image_formal_protocol" for row in regeneration_rows)
+    assert all(
+        row["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+        for row in regeneration_rows
+    )
 
 
 @pytest.mark.quick
@@ -395,8 +398,8 @@ def test_attack_matrix_prefers_formal_image_attack_records_over_local_proxy(tmp_
     assert evidence_records_path.exists()
     assert len(evidence_records_path.read_text(encoding="utf-8").splitlines()) == 1
     assert len(jpeg_full_main_records) == 1
-    assert jpeg_full_main_records[0]["metric_status"] == "measured_from_real_attacked_image_formal_protocol"
-    assert jpeg_full_main_rows[0]["metric_status"] == "measured_from_real_attacked_image_formal_protocol"
+    assert jpeg_full_main_records[0]["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+    assert jpeg_full_main_rows[0]["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
     assert jpeg_full_main_rows[0]["attack_record_count"] == "1"
     assert attack_manifest["formal_real_attack_record_count"] == 1
     assert attack_manifest["image_attack_evidence_records_path"] == "outputs/image_attack_evidence/formal_attack_detection_records.jsonl"

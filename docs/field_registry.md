@@ -1332,6 +1332,11 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_result_record_digest | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定摘要。|
 | pilot_paper_result_record_id | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定标识。|
 | result_source_kind | governance | none | true | false | false | pilot_paper 结果记录来源类型, 区分 SLM-WM 攻击矩阵与外部 baseline 结果。|
+| formal_detection_proxy | governance | none | true | false | false | 攻击后 formal 记录是否仍使用图像质量保持率代理而非 attacked image 直接水印重检测。|
+| attacked_image_rescore_performed | governance | none | true | false | false | 是否已经对 attacked image 执行直接水印重检测。|
+| attacked_image_rescore_required_for_claim | governance | none | true | false | false | 当前记录若要支撑论文主张是否仍需要 attacked image 直接水印重检测。|
+| detection_score_source | governance | none | true | false | false | 攻击后检测分数的来源, 用于区分真实重检测、latent score 传播或图像质量保持率代理。|
+| retention_source_field | governance | none | true | false | false | 图像质量保持率代理使用的源字段名称。|
 | skipped_output_entries | governance | none | true | false | false | 被结果物化层跳过的 zip 条目名称集合。|
 | materialized_output_entries_digest | artifact | none | true | false | false | 已物化 outputs/ 条目名称集合的稳定摘要。|
 | skipped_output_entry_count | metric | none | true | false | false | 由于非 outputs/ 路径或路径越界而被跳过的结果包条目数量。|

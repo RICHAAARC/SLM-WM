@@ -119,7 +119,7 @@ def test_ablation_preserves_real_attack_metric_status() -> None:
     real_record = {
         **sample_attack_record("real_img2img", "attacked_negative", "regeneration_attack", False),
         "attack_name": "img2img_regeneration",
-        "metric_status": "measured_from_real_attacked_image_formal_protocol",
+        "metric_status": "measured_from_real_attacked_image_retention_proxy_formal_protocol",
     }
 
     rows = build_ablation_records((real_record,), default_ablation_specs(), threshold=0.50)
@@ -132,8 +132,12 @@ def test_ablation_preserves_real_attack_metric_status() -> None:
         {"metadata": {"baseline_results_ready": False}},
     )
 
-    assert {row["metric_status"] for row in rows} == {"measured_from_real_attacked_image_formal_protocol"}
-    assert {row["metric_status"] for row in family_rows} == {"measured_from_real_attacked_image_formal_protocol"}
+    assert {row["metric_status"] for row in rows} == {
+        "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+    }
+    assert {row["metric_status"] for row in family_rows} == {
+        "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+    }
     assert summary["unsupported_reasons"] == []
     assert "governed real regeneration records" in summary["local_proxy_boundary"]
 
