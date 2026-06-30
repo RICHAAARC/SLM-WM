@@ -1353,6 +1353,8 @@ Notebook 与 repository module 的跨边界数据
 | runtime_content_attention_norm_ratio | metric | none | true | false | false | 运行时 content 分量与 attention 分量的加权范数比。|
 | runtime_final_carrier_content_cosine | metric | none | true | false | false | 最终写入 carrier 与 content carrier 方向的余弦相似度。|
 | runtime_final_carrier_attention_cosine | metric | none | true | false | false | 最终写入 carrier 与带符号 attention carrier 方向的余弦相似度。|
+| content_update_width | metric | none | true | false | false | aligned rescoring 批次中用于 latent projection 的内容 update 向量宽度。|
+| content_update_width_consistent | governance | none | true | false | false | aligned rescoring 批次内所有 content update 是否具有一致向量宽度。|
 | skipped_output_entries | governance | none | true | false | false | 被结果物化层跳过的 zip 条目名称集合。|
 | materialized_output_entries_digest | artifact | none | true | false | false | 已物化 outputs/ 条目名称集合的稳定摘要。|
 | skipped_output_entry_count | metric | none | true | false | false | 由于非 outputs/ 路径或路径越界而被跳过的结果包条目数量。|

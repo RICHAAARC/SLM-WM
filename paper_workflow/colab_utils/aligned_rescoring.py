@@ -335,6 +335,22 @@ def latent_projection_values(latents: Any, value_count: int) -> tuple[float, ...
     return normalized_slot_projection_from_values(flattened, value_count)
 
 
+def single_content_update_width(
+    content_records: tuple[dict[str, Any], ...],
+    content_updates: dict[str, Any],
+) -> int:
+    """确认同一重打分批次中的 content update 宽度一致。"""
+
+    widths = {
+        record["content_detection_record_id"]: len(content_updates[record["content_detection_record_id"]].combined_update_values)
+        for record in content_records
+    }
+    unique_widths = sorted(set(widths.values()))
+    if len(unique_widths) != 1:
+        raise RuntimeError(f"content_update_width_mismatch:{widths}")
+    return unique_widths[0]
+
+
 def build_rescoring_records(
     config: AlignedRescoringConfig,
     carrier_record: dict[str, Any],
@@ -351,9 +367,9 @@ def build_rescoring_records(
     """根据真实 latent 对齐前后状态构造内容重打分记录。"""
     if not content_records:
         return ()
-    sample_update = content_updates[content_records[0]["content_detection_record_id"]]
-    values_before = latent_projection_values(latent_before, len(sample_update.combined_update_values))
-    values_after = latent_projection_values(latent_after, len(sample_update.combined_update_values))
+    content_update_width = single_content_update_width(content_records, content_updates)
+    values_before = latent_projection_values(latent_before, content_update_width)
+    values_after = latent_projection_values(latent_after, content_update_width)
     digest_before = build_stable_digest([round(value, 12) for value in values_before])
     digest_after = build_stable_digest([round(value, 12) for value in values_after])
     records: list[AlignedRescoringRecord] = []
@@ -409,6 +425,8 @@ def build_rescoring_records(
                     "latent_update_count": update_count,
                     "score_source": "real_sd_latent_projection",
                     "latent_projection_mode": "periodic_slot_pooled_content_carrier",
+                    "content_update_width": content_update_width,
+                    "content_update_width_consistent": True,
                     "detector_input_access_mode": "generation_latent_trace_required",
                     "blind_image_detector": False,
                     "latent_trace_detection_claim_boundary": "not_blind_image_watermark_detection",

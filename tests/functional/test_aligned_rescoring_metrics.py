@@ -375,6 +375,27 @@ def test_aligned_rescoring_run_id_includes_content_vector_width() -> None:
 
 
 @pytest.mark.quick
+def test_rescoring_rejects_mixed_content_update_widths() -> None:
+    """同一 aligned rescoring 批次不能混用不同内容向量宽度。"""
+
+    class ContentUpdate:
+        def __init__(self, values: tuple[float, ...]) -> None:
+            self.combined_update_values = values
+
+    content_records = (
+        {"content_detection_record_id": "content_a"},
+        {"content_detection_record_id": "content_b"},
+    )
+    content_updates = {
+        "content_a": ContentUpdate((0.1, 0.2, 0.3)),
+        "content_b": ContentUpdate((0.1, 0.2, 0.3, 0.4)),
+    }
+
+    with pytest.raises(RuntimeError, match="content_update_width_mismatch"):
+        helper.single_content_update_width(content_records, content_updates)
+
+
+@pytest.mark.quick
 def test_aligned_latent_snapshot_keeps_raw_boundary_before_first_injection(monkeypatch: pytest.MonkeyPatch) -> None:
     """raw latent 边界应固定为第一次注入前状态, 避免被后续注入污染。"""
 
