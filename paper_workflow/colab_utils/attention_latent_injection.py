@@ -397,6 +397,17 @@ def runtime_attention_sign(alignment: float) -> float:
     return -1.0 if alignment < 0.0 else 1.0
 
 
+def tensor_cosine_similarity(left: Any, right: Any) -> float:
+    """计算两个 tensor 展平后的余弦相似度。"""
+
+    left_values = left.detach().float().reshape(-1)
+    right_values = right.detach().float().reshape(-1)
+    denominator = left_values.norm() * right_values.norm()
+    if float(denominator.item()) <= 1e-12:
+        return 0.0
+    return float(((left_values * right_values).sum() / denominator).item())
+
+
 def compose_runtime_watermark_tensor(
     latents: Any,
     carrier_record: dict[str, Any],
@@ -410,9 +421,14 @@ def compose_runtime_watermark_tensor(
     content_tensor, content_metadata = runtime_content_carrier_tensor(latents, content_update, content_record)
     alignment = float((attention_tensor.detach().float() * content_tensor.detach().float()).mean().item())
     attention_sign = runtime_attention_sign(alignment)
-    combined = content_weight * content_tensor + attention_weight * attention_sign * attention_tensor
+    signed_attention_tensor = attention_sign * attention_tensor
+    weighted_content_tensor = content_weight * content_tensor
+    weighted_attention_tensor = attention_weight * signed_attention_tensor
+    combined = weighted_content_tensor + weighted_attention_tensor
     centered = combined - combined.detach().float().mean().to(latents.dtype)
     carrier = centered / centered.detach().float().std().clamp_min(1e-6).to(latents.dtype)
+    content_norm = tensor_norm(weighted_content_tensor)
+    attention_norm = tensor_norm(weighted_attention_tensor)
     metadata = {
         **attention_metadata,
         **content_metadata,
@@ -421,6 +437,11 @@ def compose_runtime_watermark_tensor(
         "runtime_attention_weight": attention_weight,
         "runtime_attention_alignment": alignment,
         "runtime_attention_sign": attention_sign,
+        "runtime_weighted_content_component_norm": content_norm,
+        "runtime_weighted_attention_component_norm": attention_norm,
+        "runtime_content_attention_norm_ratio": content_norm / max(attention_norm, 1e-12),
+        "runtime_final_carrier_content_cosine": tensor_cosine_similarity(carrier, content_tensor),
+        "runtime_final_carrier_attention_cosine": tensor_cosine_similarity(carrier, signed_attention_tensor),
         "latent_projection_mode": "periodic_slot_pooled_content_carrier",
     }
     return carrier, metadata

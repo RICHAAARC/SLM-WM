@@ -123,6 +123,49 @@ def test_runtime_watermark_tensor_is_content_aligned_when_attention_direction_co
 
 
 @pytest.mark.quick
+def test_runtime_watermark_tensor_reports_component_audit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """运行时 carrier 应输出 content 与 attention 分量贡献审计。"""
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(attention_helper, "import_runtime_dependencies", lambda: (None, torch, None, None))
+
+    class RuntimeContentUpdate:
+        combined_update_values = (1.0, -1.0, 0.5, -0.5)
+        content_update_digest = "content_update_digest"
+        content_chain_digest = "content_chain_digest"
+        content_mode = "full_content_chain"
+        lf_enabled = True
+        hf_enabled = True
+        tail_truncation_enabled = False
+
+    latents = torch.zeros((1, 1, 4, 4), dtype=torch.float32)
+    carrier_record = {
+        "update_values": (-1.0, 1.0, -0.5, 0.5),
+        "carrier_id": "carrier",
+        "attention_relative_carrier_digest": "attention_digest",
+        "attention_graph_id": "graph",
+        "capture_id": "capture",
+        "fallback_mode": "active_update",
+        "relation_loss_before": 1.0,
+        "relation_loss_after": 0.5,
+        "relation_loss_delta": 0.5,
+        "relation_consistency_before": 0.7,
+        "relation_consistency_after": 0.8,
+    }
+
+    _, metadata = attention_helper.compose_runtime_watermark_tensor(
+        latents,
+        carrier_record,
+        RuntimeContentUpdate(),
+    )
+
+    assert metadata["runtime_weighted_content_component_norm"] > 0.0
+    assert metadata["runtime_weighted_attention_component_norm"] > 0.0
+    assert metadata["runtime_content_attention_norm_ratio"] > 1.0
+    assert metadata["runtime_final_carrier_content_cosine"] > 0.99
+    assert metadata["runtime_final_carrier_attention_cosine"] > 0.99
+
+
+@pytest.mark.quick
 def test_lpips_metric_model_loader_reuses_cached_model(monkeypatch: pytest.MonkeyPatch) -> None:
     """LPIPS 模型加载应在相同配置下复用缓存, 避免每个 carrier 重复初始化。"""
     load_count = {"lpips": 0}
