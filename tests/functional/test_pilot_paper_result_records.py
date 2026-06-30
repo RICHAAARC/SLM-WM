@@ -73,7 +73,7 @@ def write_attack_matrix_inputs(repo_root: Path) -> None:
                 "attack_family": "standard_distortion",
                 "attack_name": "jpeg_compression",
                 "resource_profile": "full_main",
-                "metric_status": "measured_from_real_attacked_image_formal_protocol",
+                "metric_status": "measured_from_real_attacked_image_watermark_rescore_formal_protocol",
                 "attack_record_count": 240,
                 "supported_record_count": 240,
                 "unsupported_record_count": 0,
@@ -257,6 +257,39 @@ def test_result_writer_switches_records_to_full_paper_claim_scale(
     assert all(row["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol" for row in records)
     assert all(row["paper_claim_scale"] == "full_paper" for row in records)
     assert summary["paper_claim_scale"] == "full_paper"
+
+
+@pytest.mark.quick
+def test_result_writer_blocks_retention_proxy_from_claim_boundary(tmp_path: Path) -> None:
+    """攻击后检测仅为 retention proxy 时, 结果记录不得支撑论文主张。"""
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    write_pilot_prompt_file(repo_root)
+    write_attack_matrix_inputs(repo_root)
+    write_baseline_inputs(repo_root, accepted=True)
+    metrics_path = repo_root / "outputs" / "attack_matrix" / "attack_family_metrics.csv"
+    text = metrics_path.read_text(encoding="utf-8")
+    metrics_path.write_text(
+        text.replace(
+            "measured_from_real_attacked_image_watermark_rescore_formal_protocol",
+            "measured_from_real_attacked_image_retention_proxy_formal_protocol",
+        ),
+        encoding="utf-8",
+    )
+
+    write_pilot_paper_result_record_outputs(root=repo_root, require_existing_evidence=True)
+    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_results"
+    records = [
+        json.loads(line)
+        for line in (output_dir / "pilot_paper_result_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    slm_record = next(row for row in records if row["method_id"] == "slm_wm_current")
+    baseline_record = next(row for row in records if row["method_id"] == "tree_ring")
+
+    assert slm_record["supports_paper_claim"] is False
+    assert baseline_record["supports_paper_claim"] is True
 
 
 @pytest.mark.quick

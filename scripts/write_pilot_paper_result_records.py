@@ -52,10 +52,15 @@ DEFAULT_BASELINE_VALIDATION_REPORT_PATH = Path(
     "outputs/external_baseline_results/baseline_result_candidate_validation_report.json"
 )
 DEFAULT_DATASET_QUALITY_METRICS_PATH = Path("outputs/dataset_level_quality/dataset_quality_metrics.csv")
-SUPPORTED_METHOD_STATUSES = {
+CLAIM_SUPPORTED_METHOD_STATUSES = {
     "measured",
+    "measured_from_real_attacked_image_watermark_rescore_formal_protocol",
+}
+DIAGNOSTIC_ONLY_METHOD_STATUSES = {
     "measured_from_local_proxy",
+    "measured_from_real_attacked_image_retention_proxy_formal_protocol",
     "measured_from_real_attacked_image_formal_protocol",
+    "measured_from_legacy_real_attacked_image_protocol",
     "measured_from_mixed_real_and_local_proxy",
 }
 
@@ -537,7 +542,7 @@ def finalize_result_record(
 
     supports_claim = (
         claim_ready
-        and metric_status in SUPPORTED_METHOD_STATUSES
+        and metric_status in CLAIM_SUPPORTED_METHOD_STATUSES
         and int(payload.get("positive_count", 0)) >= PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT
         and int(payload.get("negative_count", 0)) >= PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT
         and int(payload.get("supported_record_count", 0)) > 0
