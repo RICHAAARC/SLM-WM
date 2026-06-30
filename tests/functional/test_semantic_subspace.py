@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 
 from main.methods.semantic import build_risk_field, build_semantic_route, project_mask_to_latent
 from main.methods.subspace import build_safe_basis_plan, build_trajectory_features, estimate_approximate_jvp
-from scripts.write_semantic_subspace_outputs import write_semantic_subspace_outputs
+from scripts.write_semantic_subspace_outputs import (
+    RUNTIME_PROBE_ARCHIVE,
+    load_latent_reference,
+    write_semantic_subspace_outputs,
+)
 
 
 @pytest.mark.quick
@@ -114,6 +119,27 @@ def test_semantic_subspace_writer_outputs_manifest(tmp_path: Path) -> None:
     assert summary["semantic_route_record_count"] == 2
     assert summary["semantic_mask_changed_basis_count"] == 2
     assert (output_dir / "mask_projection_reports" / "mask_projection_reports.jsonl").exists()
+
+
+@pytest.mark.quick
+def test_short_runtime_latent_reference_is_expanded_to_method_width(tmp_path: Path) -> None:
+    """短 runtime trajectory 摘要不得让语义子空间退回旧短向量宽度。"""
+    repo_root = tmp_path / "repo"
+    archive_path = repo_root / RUNTIME_PROBE_ARCHIVE
+    archive_path.parent.mkdir(parents=True)
+    records = [
+        {"latent_mean": 0.1, "latent_std": 0.2},
+        {"latent_mean": 0.3, "latent_std": 0.4},
+        {"latent_mean": 0.5, "latent_std": 0.6},
+    ]
+    with ZipFile(archive_path, "w") as archive:
+        archive.writestr("sd35_latent_trajectory_records.jsonl", "".join(json.dumps(record) + "\n" for record in records))
+
+    reference = load_latent_reference(repo_root, vector_width=10)
+
+    assert len(reference) == 10
+    assert reference[:3] == pytest.approx((0.11, 0.32, 0.53))
+    assert reference[3:6] == reference[:3]
 
 
 @pytest.mark.quick

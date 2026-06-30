@@ -321,6 +321,17 @@ def test_pair_metric_status_summary_exposes_missing_metric() -> None:
 
 
 @pytest.mark.quick
+def test_aligned_rescoring_run_id_includes_content_vector_width() -> None:
+    """内容向量宽度改变时 run_id 必须变化, 避免复用旧结果诊断。"""
+    carrier_ids = ("carrier_a",)
+
+    first_run_id = helper.build_run_id(make_config(content_vector_width=64), carrier_ids)
+    second_run_id = helper.build_run_id(make_config(content_vector_width=128), carrier_ids)
+
+    assert first_run_id != second_run_id
+
+
+@pytest.mark.quick
 def test_aligned_latent_snapshot_keeps_raw_boundary_before_first_injection(monkeypatch: pytest.MonkeyPatch) -> None:
     """raw latent 边界应固定为第一次注入前状态, 避免被后续注入污染。"""
 

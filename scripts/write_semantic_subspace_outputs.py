@@ -104,12 +104,25 @@ def load_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
     return tuple(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
+def fit_reference_width(values: tuple[float, ...], vector_width: int) -> tuple[float, ...]:
+    """把外部 runtime 摘要向量扩展或截断到方法配置宽度。
+
+    Colab 诊断包中的 latent trajectory 条目数通常等于 diffusion 采样步数,
+    可能小于 pilot_paper / full_paper 使用的内容载体宽度。此处把宽度归一化
+    收敛在数据加载边界, 避免下游语义路由仍按旧短向量工作。
+    """
+
+    if not values:
+        seed_values = (0.2, -0.1, 0.4, -0.3, 0.6, -0.2, 0.1, -0.5)
+        values = seed_values
+    return tuple(values[index % len(values)] for index in range(vector_width))
+
+
 def load_latent_reference(root_path: Path, vector_width: int) -> tuple[float, ...]:
     """从真实运行包摘要中提取轻量 latent 参考向量。"""
     archive_path = root_path / RUNTIME_PROBE_ARCHIVE
     if not archive_path.exists():
-        seed_values = (0.2, -0.1, 0.4, -0.3, 0.6, -0.2, 0.1, -0.5)
-        return tuple(seed_values[index % len(seed_values)] for index in range(vector_width))
+        return fit_reference_width((), vector_width)
     values: list[float] = []
     with zipfile.ZipFile(archive_path) as archive:
         text = archive.read("sd35_latent_trajectory_records.jsonl").decode("utf-8")
@@ -117,10 +130,7 @@ def load_latent_reference(root_path: Path, vector_width: int) -> tuple[float, ..
         record = json.loads(line)
         value = float(record["latent_mean"]) + 0.05 * float(record["latent_std"])
         values.append(value)
-    if values:
-        return tuple(values)
-    seed_values = (0.2, -0.1, 0.4, -0.3, 0.6, -0.2, 0.1, -0.5)
-    return tuple(seed_values[index % len(seed_values)] for index in range(vector_width))
+    return fit_reference_width(tuple(values), vector_width)
 
 
 def build_prompt_latent_values(prompt_record: dict[str, Any], latent_reference: tuple[float, ...]) -> tuple[float, ...]:

@@ -267,6 +267,7 @@ def build_run_id(config: AlignedRescoringConfig, carrier_ids: tuple[str, ...]) -
             "guidance_scale": config.guidance_scale,
             "attention_runtime_strength": config.attention_runtime_strength,
             "injection_step_indices": config.injection_step_indices,
+            "content_vector_width": config.content_vector_width,
             "carrier_ids": carrier_ids,
             "enable_pair_perceptual_metrics": config.enable_pair_perceptual_metrics,
             "require_pair_perceptual_metrics": config.require_pair_perceptual_metrics,
