@@ -233,6 +233,75 @@ def operating_point_metrics(
     }
 
 
+def fixed_threshold_rate(records: Iterable[dict[str, Any]], score_field: str, threshold_value: float) -> float:
+    """按指定分数字段计算固定阈值通过率。"""
+    record_tuple = tuple(records)
+    if not record_tuple:
+        return 0.0
+    return sum(1 for record in record_tuple if float(record[score_field]) >= threshold_value) / len(record_tuple)
+
+
+def score_mode_operating_point_rows(
+    records: Iterable[dict[str, Any]],
+    threshold: FixedFprThreshold,
+    config: FixedFprCalibrationConfig,
+) -> list[dict[str, Any]]:
+    """按 raw、aligned 和 evidence 三种判定模式输出 fixed-FPR 诊断行。
+
+    该函数属于协议诊断层: 它不改变正式阈值, 只显式展示 raw score、
+    aligned score 与 rescue 后 evidence decision 各自的 TPR/FPR, 用于排查
+    clean negative 高尾、aligned score 增益不足或 rescue 窗口过窄等问题。
+    """
+
+    calibrated = tuple(records)
+    positives = tuple(record for record in calibrated if record["sample_role"] == config.positive_role)
+    clean_negatives = tuple(record for record in calibrated if record["sample_role"] == config.clean_negative_role)
+    attacked_negatives = tuple(record for record in calibrated if record["sample_role"] == config.attacked_negative_role)
+    mode_specs = (
+        ("raw_content_threshold", "raw_content_score", "raw_score_auc", True),
+        ("aligned_content_threshold", "aligned_content_score", "aligned_score_auc", False),
+    )
+    rows = [
+        {
+            "decision_mode": decision_mode,
+            "score_field": score_field,
+            "target_fpr": config.target_fpr,
+            "threshold_value": threshold.threshold_value,
+            "positive_count": len(positives),
+            "clean_negative_count": len(clean_negatives),
+            "attacked_negative_count": len(attacked_negatives),
+            "true_positive_rate": fixed_threshold_rate(positives, score_field, threshold.threshold_value),
+            "clean_false_positive_rate": fixed_threshold_rate(clean_negatives, score_field, threshold.threshold_value),
+            "attacked_false_positive_rate": fixed_threshold_rate(attacked_negatives, score_field, threshold.threshold_value),
+            "score_auc": score_auc(
+                (record[score_field] for record in positives),
+                (record[score_field] for record in clean_negatives),
+            ),
+            "governs_fixed_fpr": governs_fixed_fpr,
+            "supports_paper_claim": False,
+        }
+        for decision_mode, score_field, _, governs_fixed_fpr in mode_specs
+    ]
+    rows.append(
+        {
+            "decision_mode": "evidence_after_rescue",
+            "score_field": "evidence_decision",
+            "target_fpr": config.target_fpr,
+            "threshold_value": threshold.threshold_value,
+            "positive_count": len(positives),
+            "clean_negative_count": len(clean_negatives),
+            "attacked_negative_count": len(attacked_negatives),
+            "true_positive_rate": binary_rate(positives, "evidence_decision"),
+            "clean_false_positive_rate": binary_rate(clean_negatives, "evidence_decision"),
+            "attacked_false_positive_rate": binary_rate(attacked_negatives, "evidence_decision"),
+            "score_auc": 0.0,
+            "governs_fixed_fpr": True,
+            "supports_paper_claim": False,
+        }
+    )
+    return rows
+
+
 def threshold_grid(records: Iterable[dict[str, Any]], score_field: str = "raw_content_score", max_points: int = 21) -> tuple[float, ...]:
     """构造 ROC / DET 曲线使用的阈值网格。"""
     scores = sorted({float(record[score_field]) for record in records})

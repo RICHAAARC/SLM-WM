@@ -25,6 +25,7 @@ from experiments.protocol.calibration import (
     curve_rows,
     empirical_threshold_at_fpr,
     operating_point_metrics,
+    score_mode_operating_point_rows,
     score_distribution_rows,
     split_role,
 )
@@ -614,6 +615,7 @@ def write_threshold_calibration_outputs(
     standard_rows = build_standard_metric_rows(metrics, calibrated)
     quality_rows = build_quality_metric_rows(rescue_audit, root_path, aligned_quality)
     fpr_rows = build_rescue_fpr_rows(metrics, threshold_report)
+    score_mode_rows = score_mode_operating_point_rows(calibrated, threshold, config)
 
     thresholds_path = resolved_output_dir / "calibration_thresholds.json"
     operating_points_path = resolved_output_dir / "fixed_fpr_operating_points.csv"
@@ -624,6 +626,7 @@ def write_threshold_calibration_outputs(
     distribution_path = resolved_output_dir / "score_distribution_table.csv"
     degeneracy_path = resolved_output_dir / "threshold_degeneracy_report.json"
     fpr_audit_path = resolved_output_dir / "rescue_fpr_audit.csv"
+    score_mode_path = resolved_output_dir / "score_mode_operating_points.csv"
     manifest_path = resolved_output_dir / "manifest.local.json"
 
     thresholds_path.write_text(stable_json_text(threshold_payload(threshold, score_space_metadata)), encoding="utf-8")
@@ -679,6 +682,25 @@ def write_threshold_calibration_outputs(
             "supports_paper_claim",
         ],
     )
+    write_csv(
+        score_mode_path,
+        score_mode_rows,
+        [
+            "decision_mode",
+            "score_field",
+            "target_fpr",
+            "threshold_value",
+            "positive_count",
+            "clean_negative_count",
+            "attacked_negative_count",
+            "true_positive_rate",
+            "clean_false_positive_rate",
+            "attacked_false_positive_rate",
+            "score_auc",
+            "governs_fixed_fpr",
+            "supports_paper_claim",
+        ],
+    )
 
     output_paths = tuple(
         relative_or_absolute(path, root_path)
@@ -692,6 +714,7 @@ def write_threshold_calibration_outputs(
             distribution_path,
             degeneracy_path,
             fpr_audit_path,
+            score_mode_path,
             manifest_path,
         )
     )
@@ -699,6 +722,7 @@ def write_threshold_calibration_outputs(
         "operating_point_metrics": metrics,
         "threshold_report": threshold_report,
         "rescue_fpr_audit": fpr_rows,
+        "score_mode_operating_points": score_mode_rows,
         "aligned_rescoring_quality": aligned_rescoring_output_metadata(aligned_quality),
         "score_space_metadata": score_space_metadata,
     }

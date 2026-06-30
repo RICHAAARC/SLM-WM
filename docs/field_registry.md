@@ -1341,6 +1341,9 @@ Notebook 与 repository module 的跨边界数据
 | formal_proxy_replacement_incomplete_count | metric | none | true | false | false | 攻击矩阵中存在真实图像 formal records 但未完整覆盖同配置 proxy records 的攻击配置数量。|
 | formal_proxy_replacement_incomplete_examples | governance | none | true | false | false | 真实图像 formal records 覆盖不完整的攻击配置示例。|
 | formal_proxy_replacement_requires_complete_split_role_coverage | governance | none | true | false | false | 是否要求真实图像 formal records 按 split 和 sample_role 完整覆盖后才能替换 proxy records。|
+| decision_mode | protocol | none | true | false | false | fixed-FPR 诊断表中的判定模式, 用于区分 raw、aligned 和 rescue 后 evidence。|
+| score_field | metric | none | true | false | false | fixed-FPR 诊断表使用的分数字段或布尔判定字段。|
+| score_mode_operating_points | artifact | none | true | false | false | raw、aligned 和 rescue 后 evidence 三种判定模式的 fixed-FPR operating point 诊断行集合。|
 | skipped_output_entries | governance | none | true | false | false | 被结果物化层跳过的 zip 条目名称集合。|
 | materialized_output_entries_digest | artifact | none | true | false | false | 已物化 outputs/ 条目名称集合的稳定摘要。|
 | skipped_output_entry_count | metric | none | true | false | false | 由于非 outputs/ 路径或路径越界而被跳过的结果包条目数量。|

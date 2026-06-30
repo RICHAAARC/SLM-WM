@@ -203,6 +203,7 @@ def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separ
     threshold_report = json.loads((output_dir / "threshold_degeneracy_report.json").read_text(encoding="utf-8"))
     operating_rows = list(csv.DictReader((output_dir / "fixed_fpr_operating_points.csv").open(encoding="utf-8")))
     fpr_rows = list(csv.DictReader((output_dir / "rescue_fpr_audit.csv").open(encoding="utf-8")))
+    score_mode_rows = list(csv.DictReader((output_dir / "score_mode_operating_points.csv").open(encoding="utf-8")))
     quality_rows = list(csv.DictReader((output_dir / "quality_metrics_summary.csv").open(encoding="utf-8")))
 
     assert manifest["artifact_id"] == "threshold_calibration_manifest"
@@ -225,6 +226,17 @@ def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separ
     assert threshold_report["rescue_control_scope"] == "evidence_clean_negative"
     assert threshold_report["attacked_negative_governs_fixed_fpr"] is False
     assert threshold_report["rescue_changes_fpr_denominator"] is False
+    assert {row["decision_mode"] for row in score_mode_rows} == {
+        "raw_content_threshold",
+        "aligned_content_threshold",
+        "evidence_after_rescue",
+    }
+    score_mode_by_name = {row["decision_mode"]: row for row in score_mode_rows}
+    assert score_mode_by_name["raw_content_threshold"]["score_field"] == "raw_content_score"
+    assert score_mode_by_name["aligned_content_threshold"]["score_field"] == "aligned_content_score"
+    assert score_mode_by_name["evidence_after_rescue"]["score_field"] == "evidence_decision"
+    assert score_mode_by_name["raw_content_threshold"]["governs_fixed_fpr"] == "True"
+    assert score_mode_by_name["aligned_content_threshold"]["governs_fixed_fpr"] == "False"
     assert any(row["quality_metric_name"] == "lpips" and row["metric_status"] == "unsupported" for row in quality_rows)
 
 
