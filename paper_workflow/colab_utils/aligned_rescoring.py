@@ -409,6 +409,10 @@ def build_rescoring_records(
                     "latent_update_count": update_count,
                     "score_source": "real_sd_latent_projection",
                     "latent_projection_mode": "periodic_slot_pooled_content_carrier",
+                    "detector_input_access_mode": "generation_latent_trace_required",
+                    "blind_image_detector": False,
+                    "latent_trace_detection_claim_boundary": "not_blind_image_watermark_detection",
+                    "baseline_fairness_boundary": "external_baseline_comparison_requires_matching_detector_access",
                     "content_vector_width": config.content_vector_width,
                     "runtime_content_update_digest": ""
                     if runtime_content_update is None

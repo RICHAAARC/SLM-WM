@@ -218,6 +218,12 @@ def test_pilot_paper_result_writer_materializes_slm_and_governed_baseline_record
     assert all(row["target_fpr"] == 0.01 for row in records)
     assert all(row["paper_claim_scale"] == "pilot_paper" for row in records)
     assert all(row["evidence_paths"] for row in records)
+    slm_record = next(row for row in records if row["method_id"] == "slm_wm_current")
+    baseline_record = next(row for row in records if row["method_id"] == "tree_ring")
+    assert slm_record["detector_input_access_mode"] == "generation_latent_trace_required"
+    assert slm_record["blind_image_detector"] is False
+    assert slm_record["baseline_fairness_boundary"] == "external_baseline_comparison_requires_matching_detector_access"
+    assert baseline_record["detector_input_access_mode"] == "method_native_or_final_image"
     assert validation["pilot_paper_result_import_ready"] is True
     assert validation["accepted_pilot_paper_import_count"] == 2
     assert validation["accepted_pilot_paper_claim_record_count"] == 2

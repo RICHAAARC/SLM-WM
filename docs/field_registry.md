@@ -1344,6 +1344,10 @@ Notebook 与 repository module 的跨边界数据
 | decision_mode | protocol | none | true | false | false | fixed-FPR 诊断表中的判定模式, 用于区分 raw、aligned 和 rescue 后 evidence。|
 | score_field | metric | none | true | false | false | fixed-FPR 诊断表使用的分数字段或布尔判定字段。|
 | score_mode_operating_points | artifact | none | true | false | false | raw、aligned 和 rescue 后 evidence 三种判定模式的 fixed-FPR operating point 诊断行集合。|
+| detector_input_access_mode | governance | none | true | false | false | 检测器需要访问的输入类型, 用于区分 generation latent trace、最终图像或方法原生输入。|
+| blind_image_detector | governance | none | true | false | false | 检测器是否仅依赖最终图像而不访问生成轨迹或内部 latent。|
+| latent_trace_detection_claim_boundary | governance | none | true | false | false | 依赖生成轨迹的检测结果不能被误表述为 blind image watermark detection 的声明边界。|
+| baseline_fairness_boundary | governance | none | true | false | false | 外部 baseline 对比所需的检测权限公平性边界说明。|
 | skipped_output_entries | governance | none | true | false | false | 被结果物化层跳过的 zip 条目名称集合。|
 | materialized_output_entries_digest | artifact | none | true | false | false | 已物化 outputs/ 条目名称集合的稳定摘要。|
 | skipped_output_entry_count | metric | none | true | false | false | 由于非 outputs/ 路径或路径越界而被跳过的结果包条目数量。|

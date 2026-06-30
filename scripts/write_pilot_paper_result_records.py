@@ -614,6 +614,13 @@ def build_slm_wm_result_records(
             baseline_result_source_digest=source_digest,
             evidence_paths=evidence_paths,
         )
+        payload.update(
+            {
+                "detector_input_access_mode": "generation_latent_trace_required",
+                "blind_image_detector": False,
+                "baseline_fairness_boundary": "external_baseline_comparison_requires_matching_detector_access",
+            }
+        )
         attach_metric_fields(
             payload,
             positive_count=_int_field(row, "positive_count"),
@@ -670,6 +677,17 @@ def build_baseline_result_records(
             baseline_result_source=_str_field(row, "baseline_result_source", relative_or_absolute(baseline_records_path, root_path)),
             baseline_result_source_digest=_str_field(row, "baseline_result_source_digest", source_digest),
             evidence_paths=evidence_paths,
+        )
+        payload.update(
+            {
+                "detector_input_access_mode": _str_field(row, "detector_input_access_mode", "method_native_or_final_image"),
+                "blind_image_detector": str(row.get("blind_image_detector", "")).lower() in {"true", "1", "yes"},
+                "baseline_fairness_boundary": _str_field(
+                    row,
+                    "baseline_fairness_boundary",
+                    "requires_common_attack_matrix_and_declared_detector_access",
+                ),
+            }
         )
         attach_metric_fields(
             payload,
