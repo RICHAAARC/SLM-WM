@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
+from experiments.protocol.paper_run_config import DEFAULT_CONTENT_VECTOR_WIDTH, build_paper_run_config
 from main.methods.semantic import build_risk_field, build_semantic_route, project_mask_to_latent
 from main.methods.subspace import (
     build_safe_basis_plan,
@@ -32,7 +33,7 @@ PROMPT_RECORDS_PATH = Path("outputs/prompt_event_protocol/prompt_records.jsonl")
 PROMPT_MANIFEST_PATH = Path("outputs/prompt_event_protocol/manifest.local.json")
 RUNTIME_PROBE_ARCHIVE = Path("outputs/real_sd_runtime_probe_package_20260620t10451781952321z_b2be25c.zip")
 INJECTION_ARCHIVE = Path("outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip")
-VECTOR_WIDTH = 8
+VECTOR_WIDTH = DEFAULT_CONTENT_VECTOR_WIDTH
 
 
 def stable_json_text(value: Any) -> str:
@@ -103,19 +104,23 @@ def load_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
     return tuple(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
-def load_latent_reference(root_path: Path) -> tuple[float, ...]:
+def load_latent_reference(root_path: Path, vector_width: int) -> tuple[float, ...]:
     """从真实运行包摘要中提取轻量 latent 参考向量。"""
     archive_path = root_path / RUNTIME_PROBE_ARCHIVE
     if not archive_path.exists():
-        return (0.2, -0.1, 0.4, -0.3, 0.6, -0.2, 0.1, -0.5)
+        seed_values = (0.2, -0.1, 0.4, -0.3, 0.6, -0.2, 0.1, -0.5)
+        return tuple(seed_values[index % len(seed_values)] for index in range(vector_width))
     values: list[float] = []
     with zipfile.ZipFile(archive_path) as archive:
         text = archive.read("sd35_latent_trajectory_records.jsonl").decode("utf-8")
-    for line in text.splitlines()[:VECTOR_WIDTH]:
+    for line in text.splitlines()[:vector_width]:
         record = json.loads(line)
         value = float(record["latent_mean"]) + 0.05 * float(record["latent_std"])
         values.append(value)
-    return tuple(values) if values else (0.2, -0.1, 0.4, -0.3, 0.6, -0.2, 0.1, -0.5)
+    if values:
+        return tuple(values)
+    seed_values = (0.2, -0.1, 0.4, -0.3, 0.6, -0.2, 0.1, -0.5)
+    return tuple(seed_values[index % len(seed_values)] for index in range(vector_width))
 
 
 def build_prompt_latent_values(prompt_record: dict[str, Any], latent_reference: tuple[float, ...]) -> tuple[float, ...]:
@@ -142,15 +147,15 @@ def semantic_base_for_tags(tags: tuple[str, ...]) -> float:
     return max(weights.get(tag, 0.50) for tag in tags)
 
 
-def build_prompt_feature_inputs(prompt_record: dict[str, Any]) -> dict[str, tuple[float, ...]]:
+def build_prompt_feature_inputs(prompt_record: dict[str, Any], vector_width: int) -> dict[str, tuple[float, ...]]:
     """从 prompt 记录派生标准化语义输入向量。"""
     tags = tuple(prompt_record.get("semantic_tags", ("general",)))
     digest = prompt_record["prompt_digest"]
     base = semantic_base_for_tags(tags)
-    semantic_noise = digest_to_unit_values(digest, VECTOR_WIDTH, "semantic")
-    texture_values = digest_to_unit_values(digest, VECTOR_WIDTH, "texture")
-    stability_source = digest_to_unit_values(digest, VECTOR_WIDTH, "stability")
-    saliency_source = digest_to_unit_values(digest, VECTOR_WIDTH, "saliency")
+    semantic_noise = digest_to_unit_values(digest, vector_width, "semantic")
+    texture_values = digest_to_unit_values(digest, vector_width, "texture")
+    stability_source = digest_to_unit_values(digest, vector_width, "stability")
+    saliency_source = digest_to_unit_values(digest, vector_width, "saliency")
     semantic_values = tuple(min(1.0, max(0.0, base * 0.7 + value * 0.3)) for value in semantic_noise)
     stability_values = tuple(min(1.0, max(0.0, 0.35 + value * 0.6)) for value in stability_source)
     saliency_values = tuple(min(1.0, max(0.0, 0.25 + value * 0.7)) for value in saliency_source)
@@ -164,9 +169,13 @@ def build_prompt_feature_inputs(prompt_record: dict[str, Any]) -> dict[str, tupl
     }
 
 
-def build_prompt_subspace_bundle(prompt_record: dict[str, Any], latent_reference: tuple[float, ...]) -> dict[str, Any]:
+def build_prompt_subspace_bundle(
+    prompt_record: dict[str, Any],
+    latent_reference: tuple[float, ...],
+    vector_width: int,
+) -> dict[str, Any]:
     """为单条 prompt 构造语义路由与安全子空间计划。"""
-    feature_inputs = build_prompt_feature_inputs(prompt_record)
+    feature_inputs = build_prompt_feature_inputs(prompt_record, vector_width)
     latent_values = build_prompt_latent_values(prompt_record, latent_reference)
     risk_field = build_risk_field(
         semantic_values=feature_inputs["semantic_values"],
@@ -297,16 +306,18 @@ def write_semantic_subspace_outputs(
     root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     max_records: int | None = None,
+    vector_width: int | None = None,
 ) -> dict[str, Any]:
     """写出语义子空间产物。"""
     root_path = Path(root).resolve()
+    resolved_vector_width = int(vector_width or build_paper_run_config(root_path).content_vector_width)
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
     mask_report_dir = resolved_output_dir / "mask_projection_reports"
     mask_report_dir.mkdir(parents=True, exist_ok=True)
     prompt_records = load_jsonl(root_path / PROMPT_RECORDS_PATH)
     if max_records is not None:
         prompt_records = prompt_records[:max_records]
-    latent_reference = load_latent_reference(root_path)
+    latent_reference = load_latent_reference(root_path, resolved_vector_width)
 
     route_records = []
     subspace_records = []
@@ -321,7 +332,7 @@ def write_semantic_subspace_outputs(
     route_digests = set()
 
     for prompt_record in prompt_records:
-        bundle = build_prompt_subspace_bundle(prompt_record, latent_reference)
+        bundle = build_prompt_subspace_bundle(prompt_record, latent_reference, resolved_vector_width)
         route_records.append(route_record(prompt_record, bundle))
         subspace_records.append(subspace_record(prompt_record, bundle))
         mask_reports.append(mask_report(prompt_record, bundle))
@@ -358,6 +369,7 @@ def write_semantic_subspace_outputs(
         "unique_route_digest_count": len(route_digests),
         "semantic_mask_changed_basis_count": changed_basis_count,
         "basis_strategies": sorted(basis_digest_sets),
+        "content_vector_width": resolved_vector_width,
         "protocol_decision": "pass" if route_records and changed_basis_count > 0 else "fail",
         "supports_paper_claim": False,
     }
@@ -387,6 +399,7 @@ def write_semantic_subspace_outputs(
             "semantic_route_record_count": summary["semantic_route_record_count"],
             "subspace_plan_record_count": summary["subspace_plan_record_count"],
             "mask_projection_report_count": summary["mask_projection_report_count"],
+            "content_vector_width": resolved_vector_width,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_semantic_subspace_outputs.py",
@@ -407,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument("--max-records", type=int, default=None, help="调试时限制处理记录数量。")
+    parser.add_argument("--vector-width", type=int, default=None, help="内容载体向量宽度, 默认读取论文运行配置。")
     return parser
 
 
@@ -417,6 +431,7 @@ def main() -> None:
         root=args.root,
         output_dir=args.output_dir,
         max_records=args.max_records,
+        vector_width=args.vector_width,
     )
     print(stable_json_text(manifest), end="")
 

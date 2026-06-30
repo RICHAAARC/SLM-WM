@@ -321,6 +321,57 @@ def test_pair_metric_status_summary_exposes_missing_metric() -> None:
 
 
 @pytest.mark.quick
+def test_aligned_latent_snapshot_keeps_raw_boundary_before_first_injection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """raw latent 边界应固定为第一次注入前状态, 避免被后续注入污染。"""
+
+    class RuntimeContentUpdate:
+        content_update_digest = "runtime_update_digest"
+
+    class FakeLatent:
+        def __init__(self, values: tuple[float, ...]) -> None:
+            self.values = values
+
+        def detach(self) -> "FakeLatent":
+            return self
+
+        def clone(self) -> "FakeLatent":
+            return FakeLatent(self.values)
+
+    monkeypatch.setattr(helper, "tensor_norm", lambda tensor: float(sum(abs(value) for value in tensor.values)))
+    snapshot: dict[str, Any] = {}
+    runtime_content_record = {"content_detection_record_id": "content_record"}
+    helper.update_aligned_latent_snapshot(
+        snapshot,
+        latents=FakeLatent((1.0, 2.0, 3.0)),
+        aligned=FakeLatent((1.1, 2.1, 3.1)),
+        update=FakeLatent((0.1, 0.1, 0.1)),
+        trajectory_index=6,
+        timestep=900.0,
+        runtime_content_record=runtime_content_record,
+        runtime_content_update=RuntimeContentUpdate(),
+        carrier_metadata={"carrier": "first"},
+    )
+    helper.update_aligned_latent_snapshot(
+        snapshot,
+        latents=FakeLatent((10.0, 20.0, 30.0)),
+        aligned=FakeLatent((11.0, 21.0, 31.0)),
+        update=FakeLatent((1.0, 1.0, 1.0)),
+        trajectory_index=14,
+        timestep=300.0,
+        runtime_content_record=runtime_content_record,
+        runtime_content_update=RuntimeContentUpdate(),
+        carrier_metadata={"carrier": "final"},
+    )
+
+    assert snapshot["latent_before"].values == (1.0, 2.0, 3.0)
+    assert snapshot["latent_after"].values == (11.0, 21.0, 31.0)
+    assert snapshot["latent_projection_boundary_before"] == "first_clean_latent_before_any_injection"
+    assert snapshot["latent_projection_boundary_after"] == "final_aligned_latent_after_all_injections"
+    assert snapshot["first_injection_trajectory_index"] == 6
+    assert snapshot["final_injection_trajectory_index"] == 14
+
+
+@pytest.mark.quick
 def test_quality_rows_include_pair_clip_columns(tmp_path: Path) -> None:
     """质量指标表应显式区分 clean / aligned CLIP score 和 delta。"""
     path = tmp_path / "quality.csv"

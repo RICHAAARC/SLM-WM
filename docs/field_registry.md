@@ -790,6 +790,12 @@ Notebook 与 repository module 的跨边界数据
 | latent_projection_values_before | method | none | true | false | false | 对齐前真实 latent 投影到内容检测维度后的有界向量。 |
 | latent_projection_values_after | method | none | true | false | false | 对齐后真实 latent 投影到内容检测维度后的有界向量。 |
 | latent_projection_mode | method | none | true | false | false | 真实 latent 到内容检测向量的投影模式。 |
+| latent_projection_boundary_before | method | none | true | false | false | real_raw_content_score 使用的真实 latent 边界, 应固定为首次注入前未被 watermark update 污染的 latent。 |
+| latent_projection_boundary_after | method | none | true | false | false | real_aligned_content_score 使用的真实 latent 边界, 应为完成所有 runtime 注入后的 aligned latent。 |
+| first_injection_trajectory_index | protocol | none | true | false | false | 真实 aligned rescoring 中首次 runtime 注入所在的采样轨迹索引。 |
+| first_injection_timestep | protocol | none | true | false | false | 真实 aligned rescoring 中首次 runtime 注入对应的 diffusion timestep。 |
+| final_injection_trajectory_index | protocol | none | true | false | false | 真实 aligned rescoring 中最终 runtime 注入所在的采样轨迹索引。 |
+| final_injection_timestep | protocol | none | true | false | false | 真实 aligned rescoring 中最终 runtime 注入对应的 diffusion timestep。 |
 | content_carrier_source | method | none | true | false | false | 真实 runtime carrier 中内容载体分量的来源。 |
 | runtime_content_update_digest | method | none | true | false | false | 真实 runtime latent 写入所使用的 content update 摘要。 |
 | runtime_content_detection_record_id | method | none | true | false | false | 真实 runtime latent 写入所绑定的内容检测 record 标识。 |
@@ -1266,6 +1272,7 @@ Notebook 与 repository module 的跨边界数据
 | source_prepare_skipped | governance | none | false | false | false | 已有外部官方结果可复用时是否跳过源码缓存准备。|
 
 | prompt_file | protocol | none | false | false | false | prompt 协议使用的配置文件路径。|
+| content_vector_width | protocol | none | false | false | false | pilot_paper 与 full_paper 共享的内容载体向量宽度, 只能通过统一论文运行配置或显式实验覆盖修改。|
 | risk_profile_counts | protocol | none | false | false | false | 按 risk_profile 聚合的 prompt 数量。|
 | calibration_clean_negative_count | metric | none | false | false | false | fixed-FPR 校准 split 中 clean negative 样本数量。|
 | test_clean_negative_count | metric | none | false | false | false | fixed-FPR 测试 split 中 clean negative 样本数量。|

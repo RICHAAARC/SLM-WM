@@ -15,7 +15,11 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
-from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
+from experiments.protocol.paper_run_config import (
+    DEFAULT_CONTENT_VECTOR_WIDTH,
+    build_paper_run_config,
+    resolve_count_from_environment,
+)
 from main.methods.detection.scores import compute_unified_content_score
 from paper_workflow.colab_utils.attention_latent_injection import (
     build_content_update_lookup,
@@ -78,6 +82,7 @@ class AlignedRescoringConfig:
     attention_geometry_package_path: str = ""
     max_subspace_records: int = 600
     max_rescore_carriers: int = 600
+    content_vector_width: int = DEFAULT_CONTENT_VECTOR_WIDTH
     negative_prompt: str = "low quality, blurry"
     device_name: str = "cuda"
     torch_dtype: str = "float16"
@@ -98,6 +103,7 @@ class AlignedRescoringConfig:
             "inference_steps": self.inference_steps,
             "max_subspace_records": self.max_subspace_records,
             "max_rescore_carriers": self.max_rescore_carriers,
+            "content_vector_width": self.content_vector_width,
         }
         invalid_fields = {name: value for name, value in positive_fields.items() if value <= 0}
         if invalid_fields:
@@ -339,6 +345,7 @@ def build_rescoring_records(
     update_count: int,
     runtime_content_record: dict[str, Any] | None = None,
     runtime_content_update: Any | None = None,
+    latent_boundary_metadata: dict[str, Any] | None = None,
 ) -> tuple[AlignedRescoringRecord, ...]:
     """根据真实 latent 对齐前后状态构造内容重打分记录。"""
     if not content_records:
@@ -401,6 +408,7 @@ def build_rescoring_records(
                     "latent_update_count": update_count,
                     "score_source": "real_sd_latent_projection",
                     "latent_projection_mode": "periodic_slot_pooled_content_carrier",
+                    "content_vector_width": config.content_vector_width,
                     "runtime_content_update_digest": ""
                     if runtime_content_update is None
                     else runtime_content_update.content_update_digest,
@@ -411,6 +419,7 @@ def build_rescoring_records(
                     if runtime_content_record is None
                     else runtime_content_record.get("metadata", {}).get("sample_role", ""),
                     "supports_paper_claim": False,
+                    **(latent_boundary_metadata or {}),
                 },
             )
         )
@@ -705,6 +714,68 @@ def pair_metric_status_summary(rows: list[dict[str, Any]]) -> str:
     return "|".join(sorted(set(statuses)))
 
 
+def update_aligned_latent_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    latents: Any,
+    aligned: Any,
+    update: Any,
+    trajectory_index: int,
+    timestep: Any,
+    runtime_content_record: dict[str, Any],
+    runtime_content_update: Any,
+    carrier_metadata: dict[str, Any],
+) -> None:
+    """维护 aligned rescoring 的 raw/aligned latent 边界。
+
+    该函数属于真实 Colab workflow 的关键边界修复: `latent_before` 只在第一次
+    注入前记录一次, 表示尚未被任何 watermark update 污染的 clean latent;
+    `latent_after` 则随每次注入更新, 最终表示所有注入完成后的 aligned latent。
+    这样可以避免旧实现把最后一次注入前的 latent 误当作 raw latent。
+    """
+
+    current_trajectory_index = int(trajectory_index)
+    current_timestep = float(timestep)
+    if "latent_before" not in snapshot:
+        snapshot.update(
+            {
+                "latent_before": latents.detach().clone(),
+                "latent_projection_boundary_before": "first_clean_latent_before_any_injection",
+                "first_injection_trajectory_index": current_trajectory_index,
+                "first_injection_timestep": current_timestep,
+                "latent_norm_before": tensor_norm(latents),
+            }
+        )
+    snapshot.update(
+        {
+            "latent_after": aligned.detach().clone(),
+            "latent_projection_boundary_after": "final_aligned_latent_after_all_injections",
+            "trajectory_index": current_trajectory_index,
+            "timestep": current_timestep,
+            "final_injection_trajectory_index": current_trajectory_index,
+            "final_injection_timestep": current_timestep,
+            "update_norm": tensor_norm(update),
+            "latent_norm_after": tensor_norm(aligned),
+            "runtime_content_update_digest": runtime_content_update.content_update_digest,
+            "runtime_content_detection_record_id": runtime_content_record.get("content_detection_record_id", ""),
+            "carrier_metadata": carrier_metadata,
+        }
+    )
+
+
+def latent_boundary_metadata_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """从 runtime snapshot 中抽取会随 records 落盘的 latent 边界元数据。"""
+
+    return {
+        "latent_projection_boundary_before": snapshot["latent_projection_boundary_before"],
+        "latent_projection_boundary_after": snapshot["latent_projection_boundary_after"],
+        "first_injection_trajectory_index": snapshot["first_injection_trajectory_index"],
+        "first_injection_timestep": snapshot["first_injection_timestep"],
+        "final_injection_trajectory_index": snapshot["final_injection_trajectory_index"],
+        "final_injection_timestep": snapshot["final_injection_timestep"],
+    }
+
+
 def run_carrier_rescoring(
     pipeline: Any,
     config: AlignedRescoringConfig,
@@ -730,7 +801,7 @@ def run_carrier_rescoring(
     aligned_generator = torch.Generator(device=config.device_name).manual_seed(seed)
     clean_output = pipeline(generator=clean_generator, **common_kwargs)
     update_steps = set(config.injection_step_indices)
-    latest_snapshot: dict[str, Any] = {}
+    latent_snapshot: dict[str, Any] = {}
     update_count = 0
     runtime_content_record, runtime_content_update = select_runtime_content_update(content_records, content_updates)
 
@@ -747,20 +818,16 @@ def run_carrier_rescoring(
         )
         update = carrier * config.attention_runtime_strength
         aligned = latents + update
-        latest_snapshot.clear()
-        latest_snapshot.update(
-            {
-                "latent_before": latents.detach().clone(),
-                "latent_after": aligned.detach().clone(),
-                "trajectory_index": int(trajectory_index),
-                "timestep": float(timestep),
-                "update_norm": tensor_norm(update),
-                "latent_norm_before": tensor_norm(latents),
-                "latent_norm_after": tensor_norm(aligned),
-                "runtime_content_update_digest": runtime_content_update.content_update_digest,
-                "runtime_content_detection_record_id": runtime_content_record.get("content_detection_record_id", ""),
-                "carrier_metadata": carrier_metadata,
-            }
+        update_aligned_latent_snapshot(
+            latent_snapshot,
+            latents=latents,
+            aligned=aligned,
+            update=update,
+            trajectory_index=trajectory_index,
+            timestep=timestep,
+            runtime_content_record=runtime_content_record,
+            runtime_content_update=runtime_content_update,
+            carrier_metadata=carrier_metadata,
         )
         update_count += 1
         callback_kwargs["latents"] = aligned
@@ -772,7 +839,7 @@ def run_carrier_rescoring(
         callback_on_step_end_tensor_inputs=["latents"],
         **common_kwargs,
     )
-    if not latest_snapshot:
+    if not latent_snapshot:
         raise RuntimeError("aligned_latent_snapshot_missing")
     records = build_rescoring_records(
         config=config,
@@ -780,11 +847,12 @@ def run_carrier_rescoring(
         prompt_text=prompt_text,
         content_records=content_records,
         content_updates=content_updates,
-        latent_before=latest_snapshot["latent_before"],
-        latent_after=latest_snapshot["latent_after"],
+        latent_before=latent_snapshot["latent_before"],
+        latent_after=latent_snapshot["latent_after"],
         update_count=update_count,
         runtime_content_record=runtime_content_record,
         runtime_content_update=runtime_content_update,
+        latent_boundary_metadata=latent_boundary_metadata_from_snapshot(latent_snapshot),
     )
     quality_metrics = compute_image_quality_metrics(clean_output.images[0], aligned_output.images[0])
     perceptual_metrics = compute_pair_perceptual_metrics(
@@ -798,11 +866,11 @@ def run_carrier_rescoring(
         "prompt_id": carrier_record.get("metadata", {}).get("prompt_id", ""),
         "attention_graph_id": carrier_record["attention_graph_id"],
         "capture_id": carrier_record["capture_id"],
-        "trajectory_index": latest_snapshot["trajectory_index"],
-        "timestep": latest_snapshot["timestep"],
-        "update_norm": latest_snapshot["update_norm"],
-        "latent_norm_before": latest_snapshot["latent_norm_before"],
-        "latent_norm_after": latest_snapshot["latent_norm_after"],
+        "trajectory_index": latent_snapshot["trajectory_index"],
+        "timestep": latent_snapshot["timestep"],
+        "update_norm": latent_snapshot["update_norm"],
+        "latent_norm_before": latent_snapshot["latent_norm_before"],
+        "latent_norm_after": latent_snapshot["latent_norm_after"],
         "image_quality_metrics_ready": True,
         **quality_metrics,
         **perceptual_metrics,
@@ -1047,6 +1115,7 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
             "seed": config.seed,
             "attention_runtime_strength": config.attention_runtime_strength,
             "injection_step_indices": config.injection_step_indices,
+            "content_vector_width": config.content_vector_width,
             "max_subspace_records": config.max_subspace_records,
             "max_rescore_carriers": config.max_rescore_carriers,
             "aligned_rescoring_record_count": result.aligned_rescoring_record_count,
@@ -1083,12 +1152,17 @@ def build_default_config() -> AlignedRescoringConfig:
         seed=int(os.environ.get("SLM_WM_SEED", "1703")),
         width=int(os.environ.get("SLM_WM_WIDTH", "512")),
         height=int(os.environ.get("SLM_WM_HEIGHT", "512")),
-        inference_steps=int(os.environ.get("SLM_WM_INFERENCE_STEPS", "20")),
-        guidance_scale=float(os.environ.get("SLM_WM_GUIDANCE_SCALE", "4.5")),
-        attention_runtime_strength=float(os.environ.get("SLM_WM_ATTENTION_RUNTIME_STRENGTH", "0.025")),
+        inference_steps=int(os.environ.get("SLM_WM_INFERENCE_STEPS", str(paper_run.inference_steps))),
+        guidance_scale=float(os.environ.get("SLM_WM_GUIDANCE_SCALE", str(paper_run.guidance_scale))),
+        attention_runtime_strength=float(
+            os.environ.get("SLM_WM_ATTENTION_RUNTIME_STRENGTH", str(paper_run.attention_runtime_strength))
+        ),
         injection_step_indices=tuple(
             int(value.strip())
-            for value in os.environ.get("SLM_WM_ATTENTION_INJECTION_STEPS", "6,10,14").split(",")
+            for value in os.environ.get(
+                "SLM_WM_ATTENTION_INJECTION_STEPS",
+                ",".join(str(value) for value in paper_run.attention_injection_steps),
+            ).split(",")
             if value.strip()
         ),
         output_dir=os.environ.get("SLM_WM_ALIGNED_RESCORING_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
@@ -1106,6 +1180,7 @@ def build_default_config() -> AlignedRescoringConfig:
             "SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT",
             default_value=paper_run.sample_count,
         ),
+        content_vector_width=int(os.environ.get("SLM_WM_CONTENT_VECTOR_WIDTH", str(paper_run.content_vector_width))),
         negative_prompt=os.environ.get("SLM_WM_NEGATIVE_PROMPT", "low quality, blurry"),
         enable_pair_perceptual_metrics=parse_bool_environment("SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS", True),
         require_pair_perceptual_metrics=parse_bool_environment("SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS", True),

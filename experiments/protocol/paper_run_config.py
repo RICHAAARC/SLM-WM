@@ -20,7 +20,22 @@ DEFAULT_TARGET_FPR = 0.01
 DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT = 100
 DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT = 100
 DEFAULT_DRIVE_ROOT = "/content/drive/MyDrive/SLM"
+DEFAULT_CONTENT_VECTOR_WIDTH = 128
+DEFAULT_INFERENCE_STEPS = 20
+DEFAULT_GUIDANCE_SCALE = 4.5
+DEFAULT_ATTENTION_RUNTIME_STRENGTH = 0.025
+DEFAULT_ATTENTION_INJECTION_STEPS = (6, 10, 14)
 UNBOUNDED_LIMIT_TOKENS = {"", "all", "none", "unlimited"}
+SHARED_METHOD_SETTING_FIELDS = (
+    "target_fpr",
+    "minimum_clean_negative_count",
+    "dataset_level_quality_minimum_count",
+    "content_vector_width",
+    "inference_steps",
+    "guidance_scale",
+    "attention_runtime_strength",
+    "attention_injection_steps",
+)
 
 RUN_DEFAULTS: dict[str, dict[str, Any]] = {
     PILOT_PAPER_RUN_NAME: {
@@ -56,6 +71,11 @@ class PaperRunConfig:
     target_fpr: float = DEFAULT_TARGET_FPR
     minimum_clean_negative_count: int = DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT
     dataset_level_quality_minimum_count: int = DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT
+    content_vector_width: int = DEFAULT_CONTENT_VECTOR_WIDTH
+    inference_steps: int = DEFAULT_INFERENCE_STEPS
+    guidance_scale: float = DEFAULT_GUIDANCE_SCALE
+    attention_runtime_strength: float = DEFAULT_ATTENTION_RUNTIME_STRENGTH
+    attention_injection_steps: tuple[int, ...] = DEFAULT_ATTENTION_INJECTION_STEPS
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 兼容字典, 便于写入 manifest 或 Notebook 日志。"""
@@ -109,6 +129,34 @@ def parse_record_limit(value: str | int | None, *, prompt_count: int, default_va
     return resolved
 
 
+def parse_positive_int(value: str | int | None, default_value: int) -> int:
+    """解析正整数配置。
+
+    该函数属于配置解析层, 用于让 method 级运行设置在 pilot_paper 与
+    full_paper 之间保持同一套默认值, 业务路径只消费已经归一化后的数值。
+    """
+
+    raw_value = default_value if value is None else value
+    resolved = int(str(raw_value).strip()) if isinstance(raw_value, str) else int(raw_value)
+    if resolved <= 0:
+        raise ValueError("正整数配置必须大于 0")
+    return resolved
+
+
+def parse_non_negative_int_tuple(value: str | tuple[int, ...] | None, default_value: tuple[int, ...]) -> tuple[int, ...]:
+    """解析逗号分隔的非负整数元组配置。"""
+
+    if value is None:
+        resolved = default_value
+    elif isinstance(value, tuple):
+        resolved = tuple(int(item) for item in value)
+    else:
+        resolved = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    if not resolved or any(item < 0 for item in resolved):
+        raise ValueError("整数元组配置必须包含非负整数")
+    return resolved
+
+
 def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
     """从环境变量构建当前论文运行配置。"""
 
@@ -145,6 +193,19 @@ def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
                 str(DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT),
             )
         ),
+        content_vector_width=parse_positive_int(
+            os.environ.get("SLM_WM_CONTENT_VECTOR_WIDTH"),
+            DEFAULT_CONTENT_VECTOR_WIDTH,
+        ),
+        inference_steps=parse_positive_int(os.environ.get("SLM_WM_INFERENCE_STEPS"), DEFAULT_INFERENCE_STEPS),
+        guidance_scale=float(os.environ.get("SLM_WM_GUIDANCE_SCALE", str(DEFAULT_GUIDANCE_SCALE))),
+        attention_runtime_strength=float(
+            os.environ.get("SLM_WM_ATTENTION_RUNTIME_STRENGTH", str(DEFAULT_ATTENTION_RUNTIME_STRENGTH))
+        ),
+        attention_injection_steps=parse_non_negative_int_tuple(
+            os.environ.get("SLM_WM_ATTENTION_INJECTION_STEPS"),
+            DEFAULT_ATTENTION_INJECTION_STEPS,
+        ),
     )
 
 
@@ -162,3 +223,10 @@ def resolve_count_from_environment(
         prompt_count=paper_run.prompt_count,
         default_value=paper_run.sample_count if default_value is None else default_value,
     )
+
+
+def shared_method_settings(config: PaperRunConfig) -> dict[str, Any]:
+    """返回应在 pilot_paper 与 full_paper 间保持一致的方法级设置。"""
+
+    payload = config.to_dict()
+    return {field_name: payload[field_name] for field_name in SHARED_METHOD_SETTING_FIELDS}

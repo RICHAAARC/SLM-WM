@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
 
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
+from experiments.protocol.paper_run_config import DEFAULT_CONTENT_VECTOR_WIDTH, build_paper_run_config
 from main.methods.carrier import derive_attention_relative_carrier, simulate_attention_update_strengths
 
 CONSTRUCTION_UNIT_NAME = "attention_latent_update"
@@ -29,7 +30,7 @@ CONTENT_MANIFEST_PATH = Path("outputs/content_carriers/manifest.local.json")
 CONTENT_SUMMARY_PATH = Path("outputs/content_carriers/content_carrier_summary.json")
 LOCAL_GEOMETRY_DIR = Path("outputs/attention_geometry")
 GEOMETRY_PACKAGE_PATTERN = "attention_geometry_package_*.zip"
-VECTOR_WIDTH = 8
+VECTOR_WIDTH = DEFAULT_CONTENT_VECTOR_WIDTH
 STRENGTH_SCALES = (0.0, 0.5, 1.0, 1.5)
 
 
@@ -295,11 +296,12 @@ def write_attention_latent_update_outputs(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     attention_geometry_package_path: str | Path | None = None,
     max_subspace_records: int | None = None,
-    vector_width: int = VECTOR_WIDTH,
+    vector_width: int | None = None,
     embedding_strength: float = 0.08,
 ) -> dict[str, Any]:
     """写出 attention-relative latent update 产物。"""
     root_path = Path(root).resolve()
+    resolved_vector_width = int(vector_width or build_paper_run_config(root_path).content_vector_width)
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
     geometry_bundle = load_attention_geometry(root_path, attention_geometry_package_path)
@@ -313,7 +315,7 @@ def write_attention_latent_update_outputs(
         route_lookup=route_lookup,
         graph_records=geometry_bundle["graph_records"],
         evidence_lookup=evidence_lookup,
-        vector_width=vector_width,
+        vector_width=resolved_vector_width,
         embedding_strength=embedding_strength,
     )
     quality_rows = build_quality_rows(carrier_records, stability_rows)
@@ -363,6 +365,7 @@ def write_attention_latent_update_outputs(
         "attention_update_stable_count": stable_carrier_count,
         "attention_update_stability_row_count": len(stability_rows),
         "quality_metric_count": len(quality_rows),
+        "content_vector_width": resolved_vector_width,
         "relation_loss_delta_mean": metric_mean(stability_rows, "relation_loss_delta"),
         "quality_proxy_drop_mean": metric_mean(stability_rows, "quality_proxy_drop"),
         "image_quality_metrics_ready": False,
@@ -388,7 +391,7 @@ def write_attention_latent_update_outputs(
             "attention_carrier_record_count": summary["attention_carrier_record_count"],
             "active_update_count": active_update_count,
             "embedding_strength": embedding_strength,
-            "vector_width": vector_width,
+            "content_vector_width": resolved_vector_width,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_attention_latent_update_outputs.py",
@@ -412,7 +415,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument("--attention-geometry-package-path", default=None, help="真实 attention geometry zip 输入路径。")
     parser.add_argument("--max-subspace-records", type=int, default=None, help="限制处理的语义子空间记录数量。")
-    parser.add_argument("--vector-width", type=int, default=VECTOR_WIDTH, help="attention update 向量宽度。")
+    parser.add_argument("--vector-width", type=int, default=None, help="attention update 向量宽度, 默认读取论文运行配置。")
     parser.add_argument("--embedding-strength", type=float, default=0.08, help="attention update 嵌入强度。")
     return parser
 

@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
+from experiments.protocol.paper_run_config import DEFAULT_CONTENT_VECTOR_WIDTH, build_paper_run_config
 from main.methods.carrier import CONTENT_MODES, compose_content_update, derive_hf_content_carrier, derive_lf_content_carrier
 from main.methods.detection import build_content_detection_record, compute_unified_content_score
 
@@ -28,7 +29,7 @@ SEMANTIC_MANIFEST_PATH = Path("outputs/semantic_subspace/manifest.local.json")
 SUBSPACE_RECORDS_PATH = Path("outputs/semantic_subspace/subspace_plan_records.jsonl")
 ROUTE_RECORDS_PATH = Path("outputs/semantic_subspace/semantic_route_records.jsonl")
 QUALITY_ARCHIVE_PATH = Path("outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip")
-VECTOR_WIDTH = 8
+VECTOR_WIDTH = DEFAULT_CONTENT_VECTOR_WIDTH
 KEY_MATERIAL = "slm_wm_content_carrier_key_v1"
 SAMPLE_ROLES = ("positive_source", "clean_negative", "attacked_negative")
 
@@ -124,7 +125,12 @@ def build_observed_values(prompt_id: str, sample_role: str, combined_update: tup
     return tuple(0.10 * noise for noise in probe)
 
 
-def build_carrier_bundle(subspace_record: dict[str, Any], route_record: dict[str, Any], sample_role: str) -> dict[str, Any]:
+def build_carrier_bundle(
+    subspace_record: dict[str, Any],
+    route_record: dict[str, Any],
+    sample_role: str,
+    vector_width: int = VECTOR_WIDTH,
+) -> dict[str, Any]:
     """构造 LF/HF 载体、机制开关和内容分数。"""
     selected_indices = tuple(int(value) for value in subspace_record["selected_indices"])
     event_digest = event_digest_for(subspace_record, route_record, sample_role)
@@ -134,7 +140,7 @@ def build_carrier_bundle(subspace_record: dict[str, Any], route_record: dict[str
         route_digest=route_record["route_digest"],
         event_digest=event_digest,
         key_material=KEY_MATERIAL,
-        vector_width=VECTOR_WIDTH,
+        vector_width=vector_width,
     )
     hf_carrier = derive_hf_content_carrier(
         selected_indices=selected_indices,
@@ -142,7 +148,7 @@ def build_carrier_bundle(subspace_record: dict[str, Any], route_record: dict[str
         route_digest=route_record["route_digest"],
         event_digest=event_digest,
         key_material=KEY_MATERIAL,
-        vector_width=VECTOR_WIDTH,
+        vector_width=vector_width,
     )
     hf_no_tail = derive_hf_content_carrier(
         selected_indices=selected_indices,
@@ -150,7 +156,7 @@ def build_carrier_bundle(subspace_record: dict[str, Any], route_record: dict[str
         route_digest=route_record["route_digest"],
         event_digest=event_digest,
         key_material=KEY_MATERIAL,
-        vector_width=VECTOR_WIDTH,
+        vector_width=vector_width,
         tail_truncation_enabled=False,
     )
     full_update = compose_content_update(lf_carrier, hf_carrier, "full_content_chain")
@@ -177,6 +183,7 @@ def build_carrier_bundle(subspace_record: dict[str, Any], route_record: dict[str
 def build_records(
     subspace_records: tuple[dict[str, Any], ...],
     route_records_by_prompt: dict[str, dict[str, Any]],
+    vector_width: int,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """构造内容检测 records 和 score table 行。"""
     detection_records = []
@@ -184,7 +191,7 @@ def build_records(
     for subspace_record in subspace_records:
         route_record = route_records_by_prompt[subspace_record["prompt_id"]]
         for sample_role in SAMPLE_ROLES:
-            bundle = build_carrier_bundle(subspace_record, route_record, sample_role)
+            bundle = build_carrier_bundle(subspace_record, route_record, sample_role, vector_width=vector_width)
             full_update = bundle["updates"]["full_content_chain"]
             full_score = bundle["scores"]["full_content_chain"]
             mechanism_scores = {name: score.content_score for name, score in bundle["scores"].items()}
@@ -199,6 +206,7 @@ def build_records(
                     "hf_content_carrier_digest": bundle["hf_carrier"].hf_content_carrier_digest,
                     "mechanism_scores": mechanism_scores,
                     "used_independent_branch_vote": False,
+                    "content_vector_width": vector_width,
                     "supports_paper_claim": False,
                 },
             ).to_dict()
@@ -280,9 +288,11 @@ def write_content_carrier_outputs(
     root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     max_records: int | None = None,
+    vector_width: int | None = None,
 ) -> dict[str, Any]:
     """写出 LF/HF 内容载体产物。"""
     root_path = Path(root).resolve()
+    resolved_vector_width = int(vector_width or build_paper_run_config(root_path).content_vector_width)
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
     subspace_records = load_jsonl(root_path / SUBSPACE_RECORDS_PATH)
@@ -290,7 +300,7 @@ def write_content_carrier_outputs(
         subspace_records = subspace_records[:max_records]
     route_records = load_jsonl(root_path / ROUTE_RECORDS_PATH)
     route_records_by_prompt = {record["prompt_id"]: record for record in route_records}
-    detection_records, score_rows = build_records(subspace_records, route_records_by_prompt)
+    detection_records, score_rows = build_records(subspace_records, route_records_by_prompt, resolved_vector_width)
     distribution_rows = score_distribution_rows(score_rows)
 
     detection_records_path = resolved_output_dir / "content_detection_records.jsonl"
@@ -334,6 +344,7 @@ def write_content_carrier_outputs(
         "score_max": max(content_scores) if content_scores else 0.0,
         "score_mean": sum(content_scores) / len(content_scores) if content_scores else 0.0,
         "content_modes": list(CONTENT_MODES),
+        "content_vector_width": resolved_vector_width,
         "fixed_fpr_ready": all(bool(row["fixed_fpr_ready"]) for row in score_rows),
         "used_independent_branch_vote": False,
         "protocol_decision": "pass" if detection_records and content_scores else "fail",
@@ -361,6 +372,7 @@ def write_content_carrier_outputs(
             "summary_digest": build_stable_digest(summary),
             "content_detection_record_count": summary["content_detection_record_count"],
             "score_count": summary["score_count"],
+            "content_vector_width": resolved_vector_width,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_content_carrier_outputs.py",
@@ -381,13 +393,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument("--max-records", type=int, default=None, help="调试时限制处理记录数量。")
+    parser.add_argument("--vector-width", type=int, default=None, help="内容载体向量宽度, 默认读取论文运行配置。")
     return parser
 
 
 def main() -> None:
     """命令行入口。"""
     args = build_parser().parse_args()
-    manifest = write_content_carrier_outputs(root=args.root, output_dir=args.output_dir, max_records=args.max_records)
+    manifest = write_content_carrier_outputs(
+        root=args.root,
+        output_dir=args.output_dir,
+        max_records=args.max_records,
+        vector_width=args.vector_width,
+    )
     print(stable_json_text(manifest), end="")
 
 
