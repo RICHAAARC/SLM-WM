@@ -22,6 +22,7 @@ FORMAL_FID_CPU_MAX_FEATURE_DIM = 512
 FORMAL_KID_EXACT_MAX_SAMPLE_COUNT = 3000
 FORMAL_KID_SUBSET_COUNT = 8
 FORMAL_KID_SUBSET_SIZE = 512
+SAFE_ELEMENTWISE_KERNEL_MAX_OPERATIONS = 2_000_000
 
 
 @dataclass(frozen=True)
@@ -135,7 +136,12 @@ def _polynomial_kernel(values_a: np.ndarray, values_b: np.ndarray) -> np.ndarray
     """计算 KID proxy 使用的三阶多项式核矩阵。"""
 
     feature_dim = max(int(values_a.shape[1]), 1)
-    return ((values_a @ values_b.T) / feature_dim + 1.0) ** 3
+    operation_count = int(values_a.shape[0]) * int(values_b.shape[0]) * feature_dim
+    if operation_count <= SAFE_ELEMENTWISE_KERNEL_MAX_OPERATIONS:
+        dot_products = np.sum(values_a[:, None, :] * values_b[None, :, :], axis=2)
+    else:
+        dot_products = values_a @ values_b.T
+    return (dot_products / feature_dim + 1.0) ** 3
 
 
 def _biased_polynomial_mmd(source_features: np.ndarray, comparison_features: np.ndarray) -> float:
