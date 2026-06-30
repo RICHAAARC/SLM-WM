@@ -279,6 +279,9 @@ def test_colab_notebook_delegates_threshold_calibration_logic_to_helper() -> Non
     assert "attention_latent_injection_package_*.zip" in joined_source
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "threshold_calibration_ready" in joined_source
+    assert "real_score_calibration_ready" in joined_source
+    assert "proxy_score_calibration_used" in joined_source
+    assert "threshold_calibration_summary['run_decision'] == 'pass'" not in joined_source
     assert "os.environ['SLM_WM_THRESHOLD_TARGET_FPR'] = '0.01'" in joined_source
     assert "os.environ['SLM_WM_THRESHOLD_MAX_CONTENT_RECORDS'] = 'all'" in joined_source
     assert "os.environ['SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT'] = paper_run_minimum_clean_negative_count" in joined_source
