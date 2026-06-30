@@ -789,6 +789,15 @@ Notebook 与 repository module 的跨边界数据
 | latent_projection_digest_after | artifact | none | true | false | false | 对齐后真实 latent 投影向量的稳定摘要。 |
 | latent_projection_values_before | method | none | true | false | false | 对齐前真实 latent 投影到内容检测维度后的有界向量。 |
 | latent_projection_values_after | method | none | true | false | false | 对齐后真实 latent 投影到内容检测维度后的有界向量。 |
+| latent_projection_mode | method | none | true | false | false | 真实 latent 到内容检测向量的投影模式。 |
+| content_carrier_source | method | none | true | false | false | 真实 runtime carrier 中内容载体分量的来源。 |
+| runtime_content_update_digest | method | none | true | false | false | 真实 runtime latent 写入所使用的 content update 摘要。 |
+| runtime_content_detection_record_id | method | none | true | false | false | 真实 runtime latent 写入所绑定的内容检测 record 标识。 |
+| runtime_content_sample_role | protocol | none | true | false | false | 真实 runtime latent 写入所绑定的内容样本角色。 |
+| runtime_content_weight | method | none | true | false | false | 真实 runtime carrier 中 content 分量的组合权重。 |
+| runtime_attention_weight | method | none | true | false | false | 真实 runtime carrier 中 attention 分量的组合权重。 |
+| runtime_attention_alignment | method | none | true | false | false | 真实 runtime carrier 中 attention 分量与 content 分量的方向一致性。 |
+| runtime_attention_sign | method | none | true | false | false | 真实 runtime carrier 中 attention 分量为避免抵消内容信号所采用的符号。 |
 | output_records_path | artifact | none | false | false | false | 真实 aligned rescoring result 中登记的 records 输出路径。 |
 | quality_metrics_path | artifact | none | false | false | false | 真实 aligned rescoring result 中登记的质量指标表路径。 |
 | aligned_image_path | artifact | none | true | false | false | 真实 aligned rescoring 运行保存的 aligned image 路径。 |

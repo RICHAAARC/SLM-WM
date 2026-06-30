@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from paper_workflow.colab_utils import aligned_rescoring as helper
+from paper_workflow.colab_utils import attention_latent_injection as attention_helper
 
 
 def make_config(**overrides: Any) -> helper.AlignedRescoringConfig:
@@ -95,6 +96,30 @@ def test_carrier_progress_iterator_preserves_record_order_without_tqdm() -> None
     observed = list(helper.iterate_carriers_with_progress(records, make_config(enable_carrier_progress_bar=False)))
 
     assert observed == [(0, {"carrier_id": "a"}), (1, {"carrier_id": "b"})]
+
+
+@pytest.mark.quick
+def test_slot_pooled_projection_recovers_repeated_content_carrier() -> None:
+    """真实 latent 投影应读取重复写入的 content carrier 槽位信号。"""
+    update_values = (0.40, -0.20, 0.35, -0.15, 0.10, -0.30, 0.25, -0.45)
+    repeated_values = update_values * 16
+
+    projected = helper.normalized_slot_projection_from_values(repeated_values, len(update_values))
+
+    mean_value = sum(update_values) / len(update_values)
+    centered = tuple(value - mean_value for value in update_values)
+    norm = sum(value * value for value in centered) ** 0.5
+    expected = tuple(value / norm for value in centered)
+    similarity = sum(left * right for left, right in zip(projected, expected))
+    assert similarity > 0.99
+
+
+@pytest.mark.quick
+def test_runtime_watermark_tensor_is_content_aligned_when_attention_direction_conflicts() -> None:
+    """attention 几何方向与内容方向相反时, 运行时 carrier 应翻转几何方向并保持内容可检测。"""
+    assert attention_helper.runtime_attention_sign(-0.2) == -1.0
+    assert attention_helper.runtime_attention_sign(0.0) == 1.0
+    assert attention_helper.runtime_attention_sign(0.2) == 1.0
 
 
 @pytest.mark.quick

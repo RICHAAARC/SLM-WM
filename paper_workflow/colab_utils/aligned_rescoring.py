@@ -18,9 +18,12 @@ from main.core.digest import build_stable_digest
 from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
 from main.methods.detection.scores import compute_unified_content_score
 from paper_workflow.colab_utils.attention_latent_injection import (
-    attention_carrier_tensor,
+    build_content_update_lookup,
+    compose_runtime_watermark_tensor,
+    load_content_records_by_prompt,
     materialize_geometry_package,
     prepare_attention_method_outputs,
+    select_runtime_content_update,
 )
 from paper_workflow.colab_utils.minimal_latent_injection import (
     compute_image_quality_metrics,
@@ -35,7 +38,6 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
     resolve_code_version,
     tensor_digest,
 )
-from scripts.write_content_carrier_outputs import build_carrier_bundle
 
 DEFAULT_OUTPUT_DIR = "outputs/aligned_rescoring"
 DEFAULT_METHOD_OUTPUT_DIR = "outputs/attention_latent_update"
@@ -300,46 +302,30 @@ def prompt_text_by_id(root_path: Path) -> dict[str, str]:
     return {record["prompt_id"]: record["prompt_text"] for record in read_jsonl(records_path)}
 
 
-def load_content_records_by_prompt(root_path: Path) -> dict[str, tuple[dict[str, Any], ...]]:
-    """读取 prompt_id 到内容检测 records 的映射。"""
-    records_path = root_path / "outputs" / "content_carriers" / "content_detection_records.jsonl"
-    mapping: dict[str, list[dict[str, Any]]] = {}
-    for record in read_jsonl(records_path):
-        mapping.setdefault(record["prompt_id"], []).append(record)
-    return {prompt_id: tuple(records) for prompt_id, records in mapping.items()}
-
-
-def build_content_update_lookup(root_path: Path, content_records: tuple[dict[str, Any], ...]) -> dict[str, Any]:
-    """为真实重打分记录重建对应的 LF/HF 内容 update。"""
-    subspace_records = read_jsonl(root_path / "outputs" / "semantic_subspace" / "subspace_plan_records.jsonl")
-    route_records = read_jsonl(root_path / "outputs" / "semantic_subspace" / "semantic_route_records.jsonl")
-    subspace_by_prompt = {record["prompt_id"]: record for record in subspace_records}
-    route_by_prompt = {record["prompt_id"]: record for record in route_records}
-    lookup: dict[str, Any] = {}
-    for record in content_records:
-        bundle = build_carrier_bundle(
-            subspace_by_prompt[record["prompt_id"]],
-            route_by_prompt[record["prompt_id"]],
-            str(record.get("metadata", {}).get("sample_role", record.get("sample_role", "unknown"))),
+def normalized_slot_projection_from_values(flattened_values: tuple[float, ...], value_count: int) -> tuple[float, ...]:
+    """把平铺 latent 数值按重复槽位聚合为单位检测向量。"""
+    if not flattened_values:
+        raise RuntimeError("latent_tensor_empty")
+    if value_count <= 1:
+        selected = flattened_values[:1]
+    else:
+        selected = tuple(
+            sum(flattened_values[index::value_count]) / len(flattened_values[index::value_count])
+            for index in range(value_count)
+            if flattened_values[index::value_count]
         )
-        lookup[record["content_detection_record_id"]] = bundle["updates"]["full_content_chain"]
-    return lookup
+    mean_value = sum(selected) / len(selected)
+    centered = tuple(value - mean_value for value in selected)
+    norm = sum(value * value for value in centered) ** 0.5
+    if norm <= 1e-6:
+        return tuple(0.0 for _ in centered)
+    return tuple(value / norm for value in centered)
 
 
 def latent_projection_values(latents: Any, value_count: int) -> tuple[float, ...]:
-    """把真实 latent tensor 投影为内容检测可用的有界向量。"""
-    _, torch, _, _ = import_runtime_dependencies()
-    flattened = latents.detach().float().reshape(-1)
-    if int(flattened.numel()) <= 0:
-        raise RuntimeError("latent_tensor_empty")
-    if value_count <= 1:
-        indices = torch.tensor([0], device=flattened.device)
-    else:
-        indices = torch.linspace(0, flattened.numel() - 1, steps=value_count, device=flattened.device).round().long()
-    selected = flattened.index_select(0, indices)
-    centered = selected - selected.mean()
-    normalized = centered / centered.norm().clamp_min(1e-6)
-    return tuple(float(value) for value in normalized.detach().cpu().tolist())
+    """把真实 latent tensor 按 carrier 重复槽位池化为内容检测向量。"""
+    flattened = tuple(float(value) for value in latents.detach().float().reshape(-1).cpu().tolist())
+    return normalized_slot_projection_from_values(flattened, value_count)
 
 
 def build_rescoring_records(
@@ -351,6 +337,8 @@ def build_rescoring_records(
     latent_before: Any,
     latent_after: Any,
     update_count: int,
+    runtime_content_record: dict[str, Any] | None = None,
+    runtime_content_update: Any | None = None,
 ) -> tuple[AlignedRescoringRecord, ...]:
     """根据真实 latent 对齐前后状态构造内容重打分记录。"""
     if not content_records:
@@ -412,6 +400,16 @@ def build_rescoring_records(
                     "attention_runtime_strength": config.attention_runtime_strength,
                     "latent_update_count": update_count,
                     "score_source": "real_sd_latent_projection",
+                    "latent_projection_mode": "periodic_slot_pooled_content_carrier",
+                    "runtime_content_update_digest": ""
+                    if runtime_content_update is None
+                    else runtime_content_update.content_update_digest,
+                    "runtime_content_detection_record_id": ""
+                    if runtime_content_record is None
+                    else runtime_content_record.get("content_detection_record_id", ""),
+                    "runtime_content_sample_role": ""
+                    if runtime_content_record is None
+                    else runtime_content_record.get("metadata", {}).get("sample_role", ""),
                     "supports_paper_claim": False,
                 },
             )
@@ -734,13 +732,19 @@ def run_carrier_rescoring(
     update_steps = set(config.injection_step_indices)
     latest_snapshot: dict[str, Any] = {}
     update_count = 0
+    runtime_content_record, runtime_content_update = select_runtime_content_update(content_records, content_updates)
 
     def align_latents(pipe: Any, trajectory_index: int, timestep: Any, callback_kwargs: dict[str, Any]) -> dict[str, Any]:
         nonlocal update_count
         latents = callback_kwargs.get("latents")
         if latents is None or trajectory_index not in update_steps:
             return callback_kwargs
-        carrier, _ = attention_carrier_tensor(latents, carrier_record)
+        carrier, carrier_metadata = compose_runtime_watermark_tensor(
+            latents=latents,
+            carrier_record=carrier_record,
+            content_record=runtime_content_record,
+            content_update=runtime_content_update,
+        )
         update = carrier * config.attention_runtime_strength
         aligned = latents + update
         latest_snapshot.clear()
@@ -753,6 +757,9 @@ def run_carrier_rescoring(
                 "update_norm": tensor_norm(update),
                 "latent_norm_before": tensor_norm(latents),
                 "latent_norm_after": tensor_norm(aligned),
+                "runtime_content_update_digest": runtime_content_update.content_update_digest,
+                "runtime_content_detection_record_id": runtime_content_record.get("content_detection_record_id", ""),
+                "carrier_metadata": carrier_metadata,
             }
         )
         update_count += 1
@@ -776,6 +783,8 @@ def run_carrier_rescoring(
         latent_before=latest_snapshot["latent_before"],
         latent_after=latest_snapshot["latent_after"],
         update_count=update_count,
+        runtime_content_record=runtime_content_record,
+        runtime_content_update=runtime_content_update,
     )
     quality_metrics = compute_image_quality_metrics(clean_output.images[0], aligned_output.images[0])
     perceptual_metrics = compute_pair_perceptual_metrics(
@@ -975,7 +984,11 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
             quality_metrics_path="",
             method_manifest_path="" if method_manifest_path is None else method_manifest_path.relative_to(root_path).as_posix(),
             attention_geometry_package_path="" if geometry_package_path is None else geometry_package_path.relative_to(root_path).as_posix(),
-            metadata={**runtime_versions, "supports_paper_claim": False},
+            metadata={
+                **runtime_versions,
+                "latent_projection_mode": "periodic_slot_pooled_content_carrier",
+                "supports_paper_claim": False,
+            },
         )
     except Exception as error:  # pragma: no cover - 该路径依赖 Colab、GPU 与远程模型状态。
         result = build_failure_result(config, error)
@@ -1199,3 +1212,5 @@ def package_aligned_rescoring_outputs(
     ).to_dict()
     manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
     return record
+
+

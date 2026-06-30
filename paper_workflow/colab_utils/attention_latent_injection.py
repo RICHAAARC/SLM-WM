@@ -29,6 +29,7 @@ from paper_workflow.colab_utils.sd_runtime_cold_start import (
     tensor_digest,
 )
 from scripts.write_attention_latent_update_outputs import write_attention_latent_update_outputs
+from scripts.write_content_carrier_outputs import build_carrier_bundle
 from scripts.write_content_carrier_outputs import write_content_carrier_outputs
 from scripts.write_prompt_event_protocol import write_prompt_event_protocol_outputs
 from scripts.write_semantic_subspace_outputs import write_semantic_subspace_outputs
@@ -173,7 +174,11 @@ def json_line(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n"
 
 
-def build_injection_id(config: AttentionLatentInjectionConfig, carrier_record: dict[str, Any]) -> str:
+def build_injection_id(
+    config: AttentionLatentInjectionConfig,
+    carrier_record: dict[str, Any],
+    content_update: Any | None = None,
+) -> str:
     """根据模型配置和 attention carrier 生成稳定 injection id。"""
     return build_stable_digest(
         {
@@ -189,6 +194,7 @@ def build_injection_id(config: AttentionLatentInjectionConfig, carrier_record: d
             "injection_step_indices": config.injection_step_indices,
             "carrier_id": carrier_record["carrier_id"],
             "attention_relative_carrier_digest": carrier_record["attention_relative_carrier_digest"],
+            "content_update_digest": "" if content_update is None else content_update.content_update_digest,
         }
     )
 
@@ -196,6 +202,48 @@ def build_injection_id(config: AttentionLatentInjectionConfig, carrier_record: d
 def read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
     """读取 JSONL 文件。"""
     return tuple(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def load_content_records_by_prompt(root_path: Path) -> dict[str, tuple[dict[str, Any], ...]]:
+    """读取 prompt_id 到内容检测 records 的映射。"""
+    records_path = root_path / "outputs" / "content_carriers" / "content_detection_records.jsonl"
+    mapping: dict[str, list[dict[str, Any]]] = {}
+    for record in read_jsonl(records_path):
+        mapping.setdefault(record["prompt_id"], []).append(record)
+    return {prompt_id: tuple(records) for prompt_id, records in mapping.items()}
+
+
+def build_content_update_lookup(root_path: Path, content_records: tuple[dict[str, Any], ...]) -> dict[str, Any]:
+    """为真实 latent 写入和重打分重建对应的 LF/HF 内容 update。"""
+    subspace_records = read_jsonl(root_path / "outputs" / "semantic_subspace" / "subspace_plan_records.jsonl")
+    route_records = read_jsonl(root_path / "outputs" / "semantic_subspace" / "semantic_route_records.jsonl")
+    subspace_by_prompt = {record["prompt_id"]: record for record in subspace_records}
+    route_by_prompt = {record["prompt_id"]: record for record in route_records}
+    lookup: dict[str, Any] = {}
+    for record in content_records:
+        bundle = build_carrier_bundle(
+            subspace_by_prompt[record["prompt_id"]],
+            route_by_prompt[record["prompt_id"]],
+            str(record.get("metadata", {}).get("sample_role", record.get("sample_role", "unknown"))),
+        )
+        lookup[record["content_detection_record_id"]] = bundle["updates"]["full_content_chain"]
+    return lookup
+
+
+def select_runtime_content_update(
+    content_records: tuple[dict[str, Any], ...],
+    content_updates: dict[str, Any],
+) -> tuple[dict[str, Any], Any]:
+    """选择真正写入 latent 的 positive content carrier。"""
+    if not content_records:
+        raise RuntimeError("runtime_content_records_missing")
+    preferred_records = [
+        record
+        for record in content_records
+        if str(record.get("metadata", {}).get("sample_role", record.get("sample_role", ""))) == "positive_source"
+    ]
+    selected_record = preferred_records[0] if preferred_records else content_records[0]
+    return selected_record, content_updates[selected_record["content_detection_record_id"]]
 
 
 def latest_geometry_package(directory: Path) -> Path | None:
@@ -267,15 +315,20 @@ def select_active_carrier(carrier_records_path: Path, carrier_index: int) -> dic
     return ordered[carrier_index % len(ordered)]
 
 
-def attention_carrier_tensor(latents: Any, carrier_record: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-    """把 attention carrier update_values 平铺为与 latent 同形状的 tensor。"""
+def normalized_tiled_latent_tensor(latents: Any, update_values: tuple[float, ...]) -> Any:
+    """把短 update 向量按相位平铺为真实 latent tensor, 并做零均值单位方差归一化。"""
     _, torch, _, _ = import_runtime_dependencies()
-    update_values = tuple(float(value) for value in carrier_record["update_values"])
     base = torch.tensor(update_values, device=latents.device, dtype=latents.dtype)
     repeat_count = math.ceil(latents.numel() / base.numel())
     tiled = base.repeat(repeat_count)[: latents.numel()].reshape(latents.shape)
     centered = tiled - tiled.detach().float().mean().to(latents.dtype)
-    carrier = centered / centered.detach().float().std().clamp_min(1e-6).to(latents.dtype)
+    return centered / centered.detach().float().std().clamp_min(1e-6).to(latents.dtype)
+
+
+def attention_carrier_tensor(latents: Any, carrier_record: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    """把 attention carrier update_values 平铺为与 latent 同形状的 tensor。"""
+    update_values = tuple(float(value) for value in carrier_record["update_values"])
+    carrier = normalized_tiled_latent_tensor(latents, update_values)
     metadata = {
         "carrier_source": "attention_relative_latent_update",
         "carrier_id": carrier_record["carrier_id"],
@@ -292,15 +345,79 @@ def attention_carrier_tensor(latents: Any, carrier_record: dict[str, Any]) -> tu
     return carrier, metadata
 
 
+def runtime_content_carrier_tensor(
+    latents: Any,
+    content_update: Any,
+    content_record: dict[str, Any] | None = None,
+) -> tuple[Any, dict[str, Any]]:
+    """把 LF/HF content update 写成与真实 latent 同形状的 carrier tensor。"""
+    update_values = tuple(float(value) for value in content_update.combined_update_values)
+    carrier = normalized_tiled_latent_tensor(latents, update_values)
+    metadata = {
+        "content_carrier_source": "lf_hf_content_chain",
+        "content_update_digest": content_update.content_update_digest,
+        "content_chain_digest": content_update.content_chain_digest,
+        "content_mode": content_update.content_mode,
+        "lf_enabled": content_update.lf_enabled,
+        "hf_enabled": content_update.hf_enabled,
+        "tail_truncation_enabled": content_update.tail_truncation_enabled,
+    }
+    if content_record is not None:
+        metadata.update(
+            {
+                "runtime_content_detection_record_id": content_record.get("content_detection_record_id", ""),
+                "prompt_id": content_record.get("prompt_id", ""),
+                "runtime_content_sample_role": content_record.get("metadata", {}).get("sample_role", ""),
+            }
+        )
+    return carrier, metadata
+
+
+def runtime_attention_sign(alignment: float) -> float:
+    """根据 attention 与 content 方向一致性确定 attention 分量符号。"""
+    return -1.0 if alignment < 0.0 else 1.0
+
+
+def compose_runtime_watermark_tensor(
+    latents: Any,
+    carrier_record: dict[str, Any],
+    content_update: Any,
+    content_record: dict[str, Any] | None = None,
+    attention_weight: float = 0.25,
+    content_weight: float = 1.0,
+) -> tuple[Any, dict[str, Any]]:
+    """组合 content carrier 与 attention geometry, 保证真实 latent 写入的是可检测内容载体。"""
+    attention_tensor, attention_metadata = attention_carrier_tensor(latents, carrier_record)
+    content_tensor, content_metadata = runtime_content_carrier_tensor(latents, content_update, content_record)
+    alignment = float((attention_tensor.detach().float() * content_tensor.detach().float()).mean().item())
+    attention_sign = runtime_attention_sign(alignment)
+    combined = content_weight * content_tensor + attention_weight * attention_sign * attention_tensor
+    centered = combined - combined.detach().float().mean().to(latents.dtype)
+    carrier = centered / centered.detach().float().std().clamp_min(1e-6).to(latents.dtype)
+    metadata = {
+        **attention_metadata,
+        **content_metadata,
+        "carrier_source": "content_conditioned_attention_relative_latent_update",
+        "runtime_content_weight": content_weight,
+        "runtime_attention_weight": attention_weight,
+        "runtime_attention_alignment": alignment,
+        "runtime_attention_sign": attention_sign,
+        "latent_projection_mode": "periodic_slot_pooled_content_carrier",
+    }
+    return carrier, metadata
+
+
 def run_attention_latent_injection(
     config: AttentionLatentInjectionConfig,
     carrier_record: dict[str, Any],
+    content_record: dict[str, Any],
+    content_update: Any,
     geometry_package_path: Path,
     method_manifest_path: Path,
 ) -> tuple[AttentionLatentInjectionResult, tuple[AttentionLatentUpdateRecord, ...], Any, Any]:
     """运行真实 SD3.5 clean / attention-watermarked paired generation。"""
     _, torch, _, _ = import_runtime_dependencies()
-    injection_id = build_injection_id(config, carrier_record)
+    injection_id = build_injection_id(config, carrier_record, content_update)
     pipeline, runtime_versions = load_pipeline(config)  # type: ignore[arg-type]
     clean_generator = torch.Generator(device=config.device_name).manual_seed(config.seed)
     watermarked_generator = torch.Generator(device=config.device_name).manual_seed(config.seed)
@@ -321,7 +438,12 @@ def run_attention_latent_injection(
         latents = callback_kwargs.get("latents")
         if latents is None or trajectory_index not in update_index_by_step:
             return callback_kwargs
-        carrier, carrier_metadata = attention_carrier_tensor(latents, carrier_record)
+        carrier, carrier_metadata = compose_runtime_watermark_tensor(
+            latents=latents,
+            carrier_record=carrier_record,
+            content_record=content_record,
+            content_update=content_update,
+        )
         update = carrier * config.attention_runtime_strength
         injected = latents + update
         latent_norm_before = tensor_norm(latents)
@@ -387,7 +509,14 @@ def run_attention_latent_injection(
         method_manifest_path=str(method_manifest_path),
         image_quality_metrics_ready=bool(update_records),
         full_method_claim_ready=False,
-        metadata={**runtime_versions, "supports_paper_claim": False},
+        metadata={
+            **runtime_versions,
+            "runtime_content_update_digest": content_update.content_update_digest,
+            "runtime_content_detection_record_id": content_record.get("content_detection_record_id", ""),
+            "runtime_content_sample_role": content_record.get("metadata", {}).get("sample_role", ""),
+            "latent_projection_mode": "periodic_slot_pooled_content_carrier",
+            "supports_paper_claim": False,
+        },
         **metrics,
     )
     return result, tuple(update_records), clean_image, watermarked_image
@@ -454,9 +583,14 @@ def write_attention_latent_injection_outputs(
         geometry_package_path = prepared["geometry_package_path"]
         method_manifest_path = prepared["method_manifest_path"]
         carrier_record = select_active_carrier(prepared["carrier_records_path"], config.attention_carrier_index)
+        content_records = load_content_records_by_prompt(root_path)[str(carrier_record.get("metadata", {}).get("prompt_id", ""))]
+        content_updates = build_content_update_lookup(root_path, content_records)
+        content_record, content_update = select_runtime_content_update(content_records, content_updates)
         result, update_records, clean_image, watermarked_image = run_attention_latent_injection(
             config=config,
             carrier_record=carrier_record,
+            content_record=content_record,
+            content_update=content_update,
             geometry_package_path=geometry_package_path,
             method_manifest_path=method_manifest_path,
         )
@@ -706,3 +840,5 @@ def package_attention_latent_injection_outputs(
     ).to_dict()
     manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
     return record
+
+
