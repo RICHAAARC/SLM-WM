@@ -1337,6 +1337,10 @@ Notebook 与 repository module 的跨边界数据
 | attacked_image_rescore_required_for_claim | governance | none | true | false | false | 当前记录若要支撑论文主张是否仍需要 attacked image 直接水印重检测。|
 | detection_score_source | governance | none | true | false | false | 攻击后检测分数的来源, 用于区分真实重检测、latent score 传播或图像质量保持率代理。|
 | retention_source_field | governance | none | true | false | false | 图像质量保持率代理使用的源字段名称。|
+| formal_proxy_replacement_complete_count | metric | none | true | false | false | 攻击矩阵中真实图像 formal records 完整覆盖并替换同配置 proxy records 的攻击配置数量。|
+| formal_proxy_replacement_incomplete_count | metric | none | true | false | false | 攻击矩阵中存在真实图像 formal records 但未完整覆盖同配置 proxy records 的攻击配置数量。|
+| formal_proxy_replacement_incomplete_examples | governance | none | true | false | false | 真实图像 formal records 覆盖不完整的攻击配置示例。|
+| formal_proxy_replacement_requires_complete_split_role_coverage | governance | none | true | false | false | 是否要求真实图像 formal records 按 split 和 sample_role 完整覆盖后才能替换 proxy records。|
 | skipped_output_entries | governance | none | true | false | false | 被结果物化层跳过的 zip 条目名称集合。|
 | materialized_output_entries_digest | artifact | none | true | false | false | 已物化 outputs/ 条目名称集合的稳定摘要。|
 | skipped_output_entry_count | metric | none | true | false | false | 由于非 outputs/ 路径或路径越界而被跳过的结果包条目数量。|

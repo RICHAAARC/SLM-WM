@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import csv
 from datetime import datetime, timezone
 import json
@@ -156,6 +157,81 @@ def attack_record_key(record: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+def split_role_key(record: dict[str, Any]) -> tuple[str, str]:
+    """返回攻击记录的 split 与样本角色键。"""
+
+    return (str(record.get("split", "")), str(record.get("sample_role", "")))
+
+
+def group_records_by_attack_key(records: tuple[dict[str, Any], ...]) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
+    """按攻击配置键分组记录。"""
+
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for record in records:
+        grouped.setdefault(attack_record_key(record), []).append(record)
+    return grouped
+
+
+def formal_coverage_complete(proxy_group: list[dict[str, Any]], formal_group: list[dict[str, Any]]) -> bool:
+    """判断真实图像 formal records 是否完整覆盖同一攻击配置的 proxy records。
+
+    该函数属于证据治理层: 只有当 formal records 的总量和 split/sample_role
+    分布都覆盖 proxy records 时, 才允许移除同配置 proxy 记录。这样可以避免
+    少量真实 attacked image 记录把同攻击配置的大量 proxy 统计整体覆盖。
+    """
+
+    performed_formal = [record for record in formal_group if bool(record.get("attack_performed"))]
+    if not proxy_group or not performed_formal or len(performed_formal) < len(proxy_group):
+        return False
+    proxy_role_counts = Counter(split_role_key(record) for record in proxy_group)
+    formal_role_counts = Counter(split_role_key(record) for record in performed_formal)
+    return all(formal_role_counts[key] >= count for key, count in proxy_role_counts.items())
+
+
+def serializable_split_role_counts(records: list[dict[str, Any]]) -> dict[str, int]:
+    """把 split/sample_role 计数转为 JSON 兼容字典。"""
+
+    counts = Counter(split_role_key(record) for record in records)
+    return {f"{split_name}|{sample_role}": count for (split_name, sample_role), count in sorted(counts.items())}
+
+
+def build_formal_attack_coverage_report(
+    proxy_records: tuple[dict[str, Any], ...],
+    formal_records: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    """汇总真实图像 formal records 对 proxy records 的覆盖完整性。"""
+
+    proxy_groups = group_records_by_attack_key(proxy_records)
+    formal_groups = group_records_by_attack_key(tuple(record for record in formal_records if bool(record.get("attack_performed"))))
+    complete_keys: list[tuple[str, str, str]] = []
+    incomplete_rows: list[dict[str, Any]] = []
+    for key, proxy_group in sorted(proxy_groups.items()):
+        formal_group = formal_groups.get(key, [])
+        complete = formal_coverage_complete(proxy_group, formal_group)
+        if complete:
+            complete_keys.append(key)
+        elif formal_group:
+            attack_family, attack_name, resource_profile = key
+            incomplete_rows.append(
+                {
+                    "attack_family": attack_family,
+                    "attack_name": attack_name,
+                    "resource_profile": resource_profile,
+                    "proxy_record_count": len(proxy_group),
+                    "formal_record_count": len(formal_group),
+                    "proxy_split_role_counts": serializable_split_role_counts(proxy_group),
+                    "formal_split_role_counts": serializable_split_role_counts(formal_group),
+                }
+            )
+    return {
+        "formal_proxy_replacement_complete_keys": complete_keys,
+        "formal_proxy_replacement_complete_count": len(complete_keys),
+        "formal_proxy_replacement_incomplete_count": len(incomplete_rows),
+        "formal_proxy_replacement_incomplete_examples": incomplete_rows[:20],
+        "formal_proxy_replacement_requires_complete_split_role_coverage": True,
+    }
+
+
 def deduplicate_formal_attack_records(records: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
     """按正式记录标识去重, 保留多来源真实图像攻击记录的稳定顺序。"""
 
@@ -173,6 +249,7 @@ def deduplicate_formal_attack_records(records: tuple[dict[str, Any], ...]) -> tu
 def filter_proxy_records_covered_by_formal_records(
     proxy_records: tuple[dict[str, Any], ...],
     formal_records: tuple[dict[str, Any], ...],
+    coverage_report: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """移除已被真实图像级 formal records 覆盖的本地代理记录。
 
@@ -181,7 +258,8 @@ def filter_proxy_records_covered_by_formal_records(
     真实记录混合后掩盖当前攻击簇是否已经完成图像级闭环。
     """
 
-    covered_keys = {attack_record_key(record) for record in formal_records if bool(record.get("attack_performed"))}
+    report = coverage_report or build_formal_attack_coverage_report(proxy_records, formal_records)
+    covered_keys = {tuple(key) for key in report["formal_proxy_replacement_complete_keys"]}
     return tuple(record for record in proxy_records if attack_record_key(record) not in covered_keys)
 
 
@@ -427,7 +505,12 @@ def write_attack_matrix_outputs(
         + formal_real_attack_records(read_optional_jsonl(resolved_conventional_geometric_records_path))
     )
     write_consolidated_formal_attack_records(resolved_image_attack_evidence_records_path, formal_input_records)
-    proxy_attack_records = filter_proxy_records_covered_by_formal_records(proxy_attack_records_all, formal_input_records)
+    formal_coverage_report = build_formal_attack_coverage_report(proxy_attack_records_all, formal_input_records)
+    proxy_attack_records = filter_proxy_records_covered_by_formal_records(
+        proxy_attack_records_all,
+        formal_input_records,
+        formal_coverage_report,
+    )
     real_attack_records = formal_input_records
     attack_records = tuple(proxy_attack_records) + tuple(real_attack_records)
     family_rows = family_metrics(attack_records)
@@ -465,6 +548,7 @@ def write_attack_matrix_outputs(
         family_rows=family_rows,
         boundary=boundary,
     )
+    attack_manifest.update(formal_coverage_report)
     attack_manifest_path.write_text(stable_json_text(attack_manifest), encoding="utf-8")
     write_csv(
         family_metrics_path,
