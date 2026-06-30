@@ -84,6 +84,11 @@ def test_dataset_quality_protocol_keeps_formal_fid_kid_unsupported(tmp_path: Pat
     assert summary["feature_backend"] == PIXEL_FEATURE_BACKEND
     assert summary["dataset_level_quality_proxy_ready"] is True
     assert summary["formal_fid_kid_ready"] is False
+    assert summary["formal_fid_kid_metric_names_ready"] is False
+    assert summary["formal_fid_kid_claim_gate_ready"] is False
+    assert summary["formal_fid_kid_claim_blocker"] == FORMAL_FID_KID_BLOCKER
+    assert summary["dataset_quality_proxy_only"] is True
+    assert summary["dataset_quality_claim_boundary"] == "formal_feature_backend_missing_for_dataset_quality_claim"
     assert summary["supports_paper_claim"] is False
 
 
@@ -110,7 +115,12 @@ def test_dataset_quality_writer_outputs_rebuildable_artifacts(tmp_path: Path) ->
     }
     assert summary["dataset_level_quality_proxy_ready"] is True
     assert summary["formal_fid_kid_ready"] is False
+    assert summary["formal_fid_kid_claim_gate_ready"] is False
+    assert summary["dataset_quality_proxy_only"] is True
+    assert summary["dataset_quality_claim_boundary"] == "formal_feature_backend_missing_for_dataset_quality_claim"
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])
+    assert manifest["metadata"]["formal_fid_kid_claim_gate_ready"] is False
+    assert manifest["metadata"]["formal_fid_kid_claim_blocker"] == FORMAL_FID_KID_BLOCKER
 
 
 @pytest.mark.quick
@@ -263,6 +273,9 @@ def test_dataset_quality_formal_feature_import_keeps_small_sample_blocked(tmp_pa
     assert summary["formal_fid_kid_ready"] is False
     assert summary["formal_feature_backend_ready"] is True
     assert summary["formal_sample_scale_ready"] is False
+    assert summary["formal_fid_kid_claim_gate_ready"] is False
+    assert summary["formal_fid_kid_claim_blocker"] == FORMAL_FID_KID_SAMPLE_BLOCKER
+    assert summary["dataset_quality_claim_boundary"] == "formal_feature_backend_ready_but_formal_fid_kid_blocked"
     assert any(path.endswith("dataset_quality_formal_feature_import_report.json") for path in manifest["output_paths"])
 
 
@@ -296,6 +309,10 @@ def test_dataset_quality_formal_feature_import_measures_when_scale_is_ready(tmp_
     assert isinstance(rows_by_name["fid"]["quality_metric_value"], float)
     assert isinstance(rows_by_name["kid"]["quality_metric_value"], float)
     assert summary["formal_fid_kid_ready"] is True
+    assert summary["formal_fid_kid_metric_names_ready"] is True
+    assert summary["formal_fid_kid_claim_gate_ready"] is True
+    assert summary["formal_fid_kid_claim_blocker"] == ""
+    assert summary["dataset_quality_proxy_only"] is False
     assert (
         dataset_level_quality_claim_boundary(summary)
         == "formal_fid_kid_measured_but_paper_claim_requires_evidence_closure"
@@ -374,6 +391,10 @@ def test_dataset_quality_drive_plan_imports_mock_formal_features(tmp_path: Path)
     assert result["run_decision"] == "pass"
     assert result["formal_feature_backend_ready"] is True
     assert result["formal_fid_kid_ready"] is False
+    assert result["formal_fid_kid_claim_gate_ready"] is False
+    assert result["formal_fid_kid_claim_blocker"] == FORMAL_FID_KID_SAMPLE_BLOCKER
+    assert result["dataset_quality_proxy_only"] is True
+    assert result["dataset_quality_claim_boundary"] == "formal_feature_backend_ready_but_formal_fid_kid_blocked"
     assert result["unsupported_reason"] == FORMAL_FID_KID_SAMPLE_BLOCKER
     assert result["metadata"]["claim_boundary"] == "formal_feature_backend_ready_but_formal_fid_kid_blocked"
     assert len(feature_rows) == 2

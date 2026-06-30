@@ -845,6 +845,12 @@ Notebook 与 repository module 的跨边界数据
 | sample_pair_count | metric | none | false | false | false | 数据集级质量输入中的图像配对数量。 |
 | dataset_level_quality_proxy_ready | governance | none | false | false | false | 数据集级质量 proxy 是否已完成并可审计。 |
 | formal_fid_kid_ready | governance | none | false | false | false | 正式 FID / KID 是否已由论文约定特征后端完成。 |
+| formal_fid_kid_metric_names_ready | governance | none | false | false | false | 正式 FID 与 KID 两个指标是否均已测量, 防止单个指标被误判为完整质量结论。 |
+| formal_fid_kid_claim_gate_ready | governance | none | false | false | false | 数据集级正式 FID / KID 是否通过论文质量主张门禁。 |
+| formal_fid_kid_claim_blocker | governance | none | false | false | false | 阻断正式 FID / KID 质量主张的原因。 |
+| dataset_quality_proxy_only | governance | none | false | false | false | 数据集级质量当前是否只有 pixel feature proxy 可用。 |
+| dataset_quality_claim_boundary | governance | none | false | false | false | 数据集级质量证据能够支撑的论文主张边界。 |
+| dataset_quality_summary_path | artifact | none | false | false | false | 数据集级质量摘要 JSON 路径。 |
 | dataset_quality_formal_feature_import_report_path | artifact | none | false | false | false | 数据集级质量正式特征导入报告路径。 |
 | dataset_quality_image_role | protocol | none | true | false | false | 数据集级质量正式特征记录对应 source 或 comparison 图像角色。 |
 | feature_vector | artifact | none | true | false | false | 由 Inception 或论文约定视觉特征后端导出的单张图像特征向量。 |

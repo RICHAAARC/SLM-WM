@@ -391,6 +391,11 @@ def write_failure_outputs(root_path: Path, error: Exception) -> dict[str, Any]:
         "formal_feature_backend_ready": False,
         "formal_sample_scale_ready": False,
         "formal_fid_kid_ready": False,
+        "formal_fid_kid_metric_names_ready": False,
+        "formal_fid_kid_claim_gate_ready": False,
+        "formal_fid_kid_claim_blocker": "dataset_level_quality_workflow_failed",
+        "dataset_quality_proxy_only": False,
+        "dataset_quality_claim_boundary": "formal_feature_backend_missing_for_dataset_quality_claim",
         "supports_paper_claim": False,
         "unsupported_reason": f"{type(error).__name__}:{error}",
         "environment_report_path": relative_or_absolute(environment_path, root_path),
@@ -424,6 +429,9 @@ def dataset_level_quality_claim_boundary(summary: dict[str, Any]) -> str:
     “可以直接支撑论文主张”。
     """
 
+    explicit_boundary = str(summary.get("dataset_quality_claim_boundary", "") or "")
+    if explicit_boundary:
+        return explicit_boundary
     if summary.get("formal_fid_kid_ready") is True:
         return "formal_fid_kid_measured_but_paper_claim_requires_evidence_closure"
     if summary.get("formal_feature_backend_ready") is True:
@@ -499,6 +507,11 @@ def run_default_dataset_level_quality_from_drive_plan(
         "formal_feature_backend_ready": import_report["formal_feature_backend_ready"],
         "formal_sample_scale_ready": import_report["formal_sample_scale_ready"],
         "formal_fid_kid_ready": summary["formal_fid_kid_ready"],
+        "formal_fid_kid_metric_names_ready": summary.get("formal_fid_kid_metric_names_ready", False),
+        "formal_fid_kid_claim_gate_ready": summary.get("formal_fid_kid_claim_gate_ready", False),
+        "formal_fid_kid_claim_blocker": summary.get("formal_fid_kid_claim_blocker", summary["unsupported_reason"]),
+        "dataset_quality_proxy_only": summary.get("dataset_quality_proxy_only", False),
+        "dataset_quality_claim_boundary": dataset_level_quality_claim_boundary(summary),
         "formal_min_sample_count": resolved_formal_min_sample_count,
         "input_feature_record_count": import_report["input_feature_record_count"],
         "accepted_feature_pair_count": import_report["accepted_feature_pair_count"],
@@ -535,6 +548,7 @@ def run_default_dataset_level_quality_from_drive_plan(
             "input_feature_record_count": result["input_feature_record_count"],
             "accepted_feature_pair_count": result["accepted_feature_pair_count"],
             "formal_fid_kid_ready": result["formal_fid_kid_ready"],
+            "formal_fid_kid_claim_gate_ready": result["formal_fid_kid_claim_gate_ready"],
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="运行 paper_workflow/dataset_level_quality_run.ipynb",

@@ -52,6 +52,7 @@ DEFAULT_BASELINE_VALIDATION_REPORT_PATH = Path(
     "outputs/external_baseline_results/baseline_result_candidate_validation_report.json"
 )
 DEFAULT_DATASET_QUALITY_METRICS_PATH = Path("outputs/dataset_level_quality/dataset_quality_metrics.csv")
+DEFAULT_DATASET_QUALITY_SUMMARY_NAME = "dataset_quality_summary.json"
 CLAIM_SUPPORTED_METHOD_STATUSES = {
     "measured",
     "measured_from_real_attacked_image_watermark_rescore_formal_protocol",
@@ -436,6 +437,47 @@ def evidence_paths_for_existing(paths: Iterable[Path], root_path: Path) -> list[
     return [relative_or_absolute(path, root_path) for path in paths if path.is_file()]
 
 
+def dataset_quality_claim_gate_fields(dataset_quality_metrics_path: Path, root_path: Path) -> dict[str, Any]:
+    """读取数据集级质量主张门禁字段, 防止 proxy FID / KID 被误解为正式指标。"""
+
+    dataset_quality_summary_path = dataset_quality_metrics_path.with_name(DEFAULT_DATASET_QUALITY_SUMMARY_NAME)
+    summary = read_json(dataset_quality_summary_path)
+    metric_rows = read_csv_rows(dataset_quality_metrics_path)
+    measured_formal_names = {
+        _str_field(row, "quality_metric_name")
+        for row in metric_rows
+        if _str_field(row, "quality_metric_name") in {"fid", "kid"} and _str_field(row, "metric_status") == "measured"
+    }
+    metric_names_ready = bool(summary.get("formal_fid_kid_metric_names_ready", measured_formal_names == {"fid", "kid"}))
+    claim_gate_ready = bool(summary.get("formal_fid_kid_claim_gate_ready", metric_names_ready))
+    proxy_ready = bool(
+        summary.get(
+            "dataset_level_quality_proxy_ready",
+            any(_str_field(row, "metric_status") == "measured_small_sample_proxy" for row in metric_rows),
+        )
+    )
+    blocker = _str_field(summary, "formal_fid_kid_claim_blocker")
+    if not blocker and not claim_gate_ready:
+        blocker = "formal_fid_kid_not_measured"
+    boundary = _str_field(summary, "dataset_quality_claim_boundary")
+    if not boundary:
+        boundary = (
+            "formal_fid_kid_measured_but_paper_claim_requires_evidence_closure"
+            if claim_gate_ready
+            else "dataset_quality_proxy_only_formal_fid_kid_blocked"
+        )
+    return {
+        "formal_fid_kid_metric_names_ready": metric_names_ready,
+        "formal_fid_kid_claim_gate_ready": claim_gate_ready,
+        "formal_fid_kid_claim_blocker": blocker,
+        "dataset_quality_proxy_only": bool(summary.get("dataset_quality_proxy_only", proxy_ready and not claim_gate_ready)),
+        "dataset_quality_claim_boundary": boundary,
+        "dataset_quality_summary_path": (
+            relative_or_absolute(dataset_quality_summary_path, root_path) if dataset_quality_summary_path.is_file() else ""
+        ),
+    }
+
+
 def build_common_result_fields(
     *,
     schema: Mapping[str, Any],
@@ -595,9 +637,11 @@ def build_slm_wm_result_records(
             attack_records_path,
             real_attack_records_path,
             dataset_quality_metrics_path,
+            dataset_quality_metrics_path.with_name(DEFAULT_DATASET_QUALITY_SUMMARY_NAME),
         ),
         root_path,
     )
+    dataset_quality_gate_fields = dataset_quality_claim_gate_fields(dataset_quality_metrics_path, root_path)
     source_digest = file_digest(attack_family_metrics_path) if attack_family_metrics_path.is_file() else build_stable_digest(rows)
     records: list[dict[str, Any]] = []
     for row in rows:
@@ -619,6 +663,7 @@ def build_slm_wm_result_records(
                 "detector_input_access_mode": "generation_latent_trace_required",
                 "blind_image_detector": False,
                 "baseline_fairness_boundary": "external_baseline_comparison_requires_matching_detector_access",
+                **dataset_quality_gate_fields,
             }
         )
         attach_metric_fields(

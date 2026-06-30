@@ -717,15 +717,42 @@ def build_dataset_quality_summary(
     record_values = tuple(records)
     rows = tuple(metric_rows)
     proxy_ready = any(str(row.get("metric_status")) == "measured_small_sample_proxy" for row in rows)
-    formal_ready = any(
-        str(row.get("quality_metric_name")) in {"fid", "kid"} and str(row.get("metric_status")) == "measured"
+    measured_formal_metric_names = {
+        str(row.get("quality_metric_name"))
         for row in rows
-    )
+        if str(row.get("quality_metric_name")) in {"fid", "kid"} and str(row.get("metric_status")) == "measured"
+    }
+    formal_ready = measured_formal_metric_names == {"fid", "kid"}
     formal_status_values = tuple(
         str(row.get("metric_status"))
         for row in rows
         if str(row.get("quality_metric_name")) in {"fid", "kid"} and str(row.get("metric_status"))
     )
+    if formal_ready:
+        formal_fid_kid_claim_blocker = ""
+        dataset_quality_claim_boundary = "formal_fid_kid_measured_but_paper_claim_requires_evidence_closure"
+    elif not formal_status_values:
+        formal_fid_kid_claim_blocker = "formal_fid_kid_metric_rows_missing"
+        dataset_quality_claim_boundary = "formal_feature_backend_missing_for_dataset_quality_claim"
+    else:
+        formal_fid_kid_claim_blocker = next(
+            (
+                status
+                for status in formal_status_values
+                if status
+                in {
+                    FORMAL_FID_KID_BLOCKER,
+                    FORMAL_FID_KID_SAMPLE_BLOCKER,
+                    FORMAL_FID_KID_NUMERIC_BLOCKER,
+                }
+            ),
+            next((status for status in formal_status_values if status != "measured"), "formal_fid_kid_not_measured"),
+        )
+        dataset_quality_claim_boundary = (
+            "formal_feature_backend_missing_for_dataset_quality_claim"
+            if formal_fid_kid_claim_blocker == FORMAL_FID_KID_BLOCKER
+            else "formal_feature_backend_ready_but_formal_fid_kid_blocked"
+        )
     return {
         "construction_unit_name": "dataset_level_quality_evidence",
         "dataset_quality_record_count": len(record_values),
@@ -735,7 +762,12 @@ def build_dataset_quality_summary(
         "feature_backend": PIXEL_FEATURE_BACKEND,
         "dataset_level_quality_proxy_ready": proxy_ready,
         "formal_fid_kid_ready": formal_ready,
+        "formal_fid_kid_metric_names_ready": formal_ready,
+        "formal_fid_kid_claim_gate_ready": formal_ready,
+        "formal_fid_kid_claim_blocker": formal_fid_kid_claim_blocker,
+        "dataset_quality_proxy_only": proxy_ready and not formal_ready,
+        "dataset_quality_claim_boundary": dataset_quality_claim_boundary,
         "paper_claim_ready": False,
-        "unsupported_reason": formal_status_values[0] if not formal_ready and formal_status_values else "",
+        "unsupported_reason": formal_fid_kid_claim_blocker if not formal_ready else "",
         "supports_paper_claim": False,
     }

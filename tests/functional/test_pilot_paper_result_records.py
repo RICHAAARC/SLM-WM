@@ -128,6 +128,20 @@ def write_attack_matrix_inputs(repo_root: Path) -> None:
         [{"quality_metric_name": "fid_pixel_feature_proxy", "metric_status": "measured_small_sample_proxy"}],
         ["quality_metric_name", "metric_status"],
     )
+    (quality_dir / "dataset_quality_summary.json").write_text(
+        json.dumps(
+            {
+                "formal_fid_kid_metric_names_ready": False,
+                "formal_fid_kid_claim_gate_ready": False,
+                "formal_fid_kid_claim_blocker": "requires_inception_feature_backend",
+                "dataset_quality_proxy_only": True,
+                "dataset_quality_claim_boundary": "formal_feature_backend_missing_for_dataset_quality_claim",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def baseline_candidate_row() -> dict[str, object]:
@@ -223,6 +237,11 @@ def test_pilot_paper_result_writer_materializes_slm_and_governed_baseline_record
     assert slm_record["detector_input_access_mode"] == "generation_latent_trace_required"
     assert slm_record["blind_image_detector"] is False
     assert slm_record["baseline_fairness_boundary"] == "external_baseline_comparison_requires_matching_detector_access"
+    assert slm_record["formal_fid_kid_claim_gate_ready"] is False
+    assert slm_record["formal_fid_kid_claim_blocker"] == "requires_inception_feature_backend"
+    assert slm_record["dataset_quality_proxy_only"] is True
+    assert slm_record["dataset_quality_claim_boundary"] == "formal_feature_backend_missing_for_dataset_quality_claim"
+    assert "outputs/dataset_level_quality/dataset_quality_summary.json" in slm_record["evidence_paths"]
     assert baseline_record["detector_input_access_mode"] == "method_native_or_final_image"
     assert validation["pilot_paper_result_import_ready"] is True
     assert validation["accepted_pilot_paper_import_count"] == 2
