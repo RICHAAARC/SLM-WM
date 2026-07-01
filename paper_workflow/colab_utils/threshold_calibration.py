@@ -299,6 +299,20 @@ def run_default_threshold_calibration_from_drive_plan(
             "minimum_clean_negative_count_ready": threshold_report.get("minimum_clean_negative_count_ready", False),
             "calibration_negative_count": threshold_report.get("calibration_negative_count", 0),
             "clean_negative_count": threshold_report.get("clean_negative_count", 0),
+            "false_positive_budget_mode": threshold_report.get("false_positive_budget_mode", ""),
+            "nominal_allowed_false_positive_count": threshold_report.get("nominal_allowed_false_positive_count", 0),
+            "confidence_controlled_false_positive_count": threshold_report.get(
+                "confidence_controlled_false_positive_count",
+                0,
+            ),
+            "calibration_fpr_confidence_upper_bound": threshold_report.get(
+                "calibration_fpr_confidence_upper_bound",
+                1.0,
+            ),
+            "calibration_confidence_boundary_ready": threshold_report.get(
+                "calibration_confidence_boundary_ready",
+                False,
+            ),
             "fixed_fpr_control_scope": threshold_report.get("fixed_fpr_control_scope", "calibration_clean_negative"),
             "fixed_fpr_denominator_role": threshold_report.get("fixed_fpr_denominator_role", "clean_negative_only"),
             "rescue_control_scope": threshold_report.get("rescue_control_scope", "evidence_clean_negative"),

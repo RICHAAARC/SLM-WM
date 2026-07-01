@@ -52,6 +52,8 @@ class FixedFprCalibrationConfig:
     attacked_negative_role: str = "attacked_negative"
     rescue_margin_low: float = -0.05
     allowed_fail_reasons: tuple[str, ...] = ("geometry_suspected", "low_confidence")
+    confidence_level: float = 0.95
+    false_positive_budget_mode: str = "empirical"
 
     def __post_init__(self) -> None:
         """集中校验校准协议边界。"""
@@ -59,6 +61,10 @@ class FixedFprCalibrationConfig:
             raise ValueError("target_fpr 必须位于 (0, 1)")
         if self.rescue_margin_low >= 0.0:
             raise ValueError("rescue_margin_low 必须小于 0")
+        if not 0.0 < self.confidence_level < 1.0:
+            raise ValueError("confidence_level 必须位于 (0, 1)")
+        if self.false_positive_budget_mode not in {"empirical", "confidence_controlled"}:
+            raise ValueError("false_positive_budget_mode 必须为 empirical 或 confidence_controlled")
 
     def to_dict(self) -> dict[str, Any]:
         """转为 JSON 兼容字典。"""
@@ -96,7 +102,17 @@ def empirical_threshold_at_fpr(clean_negative_scores: Iterable[float], config: F
     if not scores:
         raise ValueError("clean_negative_scores 不得为空")
     ordered_desc = tuple(sorted(scores, reverse=True))
-    allowed_count = math.floor(config.target_fpr * len(scores))
+    nominal_allowed_count = math.floor(config.target_fpr * len(scores))
+    confidence_allowed_count = confidence_controlled_false_positive_budget(
+        negative_count=len(scores),
+        target_fpr=config.target_fpr,
+        confidence_level=config.confidence_level,
+    )
+    allowed_count = (
+        confidence_allowed_count
+        if config.false_positive_budget_mode == "confidence_controlled"
+        else nominal_allowed_count
+    )
     if allowed_count <= 0:
         threshold = max(scores) + 1e-12
     else:
@@ -119,8 +135,81 @@ def empirical_threshold_at_fpr(clean_negative_scores: Iterable[float], config: F
         metadata={
             "calibration_split": config.calibration_split,
             "threshold_source": "calibration_clean_negative",
+            "false_positive_budget_mode": config.false_positive_budget_mode,
+            "nominal_allowed_false_positive_count": nominal_allowed_count,
+            "confidence_controlled_false_positive_count": confidence_allowed_count,
+            "confidence_level": config.confidence_level,
+            "calibration_fpr_confidence_upper_bound": binomial_rate_upper_confidence_bound(
+                observed_count,
+                len(scores),
+                config.confidence_level,
+            ),
         },
     )
+
+
+def binomial_rate_upper_confidence_bound(
+    false_positive_count: int,
+    negative_count: int,
+    confidence_level: float,
+) -> float:
+    """计算 false positive rate 的单侧置信上界。
+
+    该函数属于统计协议层: full_paper 目标会推进到 FPR=0.001, 仅报告
+    observed FPR 不足以支撑正式论文结论。因此这里提供一个无需外部依赖的
+    Wilson 单侧上界, 用于选择更保守的 calibration false positive 预算。
+    """
+
+    if negative_count <= 0:
+        return 1.0
+    phat = max(0.0, min(1.0, false_positive_count / negative_count))
+    z_value = normal_quantile_for_confidence(confidence_level)
+    denominator = 1.0 + z_value * z_value / negative_count
+    center = phat + z_value * z_value / (2.0 * negative_count)
+    margin = z_value * math.sqrt((phat * (1.0 - phat) + z_value * z_value / (4.0 * negative_count)) / negative_count)
+    return min(1.0, (center + margin) / denominator)
+
+
+def normal_quantile_for_confidence(confidence_level: float) -> float:
+    """返回常用单侧置信水平对应的正态分位近似。"""
+
+    if confidence_level >= 0.999:
+        return 3.090232306167813
+    if confidence_level >= 0.99:
+        return 2.3263478740408408
+    if confidence_level >= 0.975:
+        return 1.959963984540054
+    if confidence_level >= 0.95:
+        return 1.6448536269514722
+    if confidence_level >= 0.90:
+        return 1.2815515655446004
+    return 1.0
+
+
+def confidence_controlled_false_positive_budget(
+    negative_count: int,
+    target_fpr: float,
+    confidence_level: float,
+) -> int:
+    """选择满足置信上界约束的 false positive 预算。
+
+    返回值不会超过 nominal `floor(target_fpr * negative_count)`。如果样本量太小,
+    即使 0 个 false positive 的置信上界也可能高于目标 FPR, 此时仍返回 0,
+    但 downstream report 会通过置信上界字段明确说明论文声明边界尚未闭合。
+    """
+
+    if negative_count <= 0:
+        return 0
+    nominal_allowed_count = math.floor(target_fpr * negative_count)
+    for false_positive_count in range(nominal_allowed_count, -1, -1):
+        upper_bound = binomial_rate_upper_confidence_bound(
+            false_positive_count,
+            negative_count,
+            confidence_level,
+        )
+        if upper_bound <= target_fpr:
+            return false_positive_count
+    return 0
 
 
 def split_role(records: Iterable[dict[str, Any]], split: str, sample_role: str) -> tuple[dict[str, Any], ...]:

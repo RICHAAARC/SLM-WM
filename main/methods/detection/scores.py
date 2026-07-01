@@ -14,9 +14,10 @@ from main.methods.carrier.compose import ContentUpdate
 class ContentScore:
     """内容载体检测分数。
 
-    content_score 是正式 fixed-FPR 检测使用的分数。由于真实 latent 写入
-    使用的是 LF/HF 合成后的 combined_update_values, 正式分数也必须在同一
-    combined 方向上计算; LF/HF 加权融合仅作为分量诊断保留。
+    content_score 是正式 fixed-FPR 检测使用的分数。真实 latent 写入仍使用
+    LF/HF 合成后的 combined_update_values, 但正式检测必须同时约束 LF 与 HF
+    两条证据链的一致性, 以降低 wrong-key 或 wrong-message carrier 在单一
+    combined 方向上偶然高相关造成的 clean negative 高尾。
     """
 
     lf_score: float
@@ -65,17 +66,20 @@ def compute_unified_content_score(
     lambda_lf: float = 0.70,
     lambda_hf: float = 0.30,
 ) -> ContentScore:
-    """计算统一内容分数, 不使用 LF/HF 独立阈值投票。
+    """计算带 LF/HF 一致性约束的统一内容分数。
 
     该函数属于项目特定方法逻辑: runtime 写入的水印方向是
-    `combined_update_values`, 因此 fixed-FPR 正式分数使用 combined 相关性。
-    LF/HF 加权分数仍然输出, 用于定位某一分支是否对检测增益产生负贡献。
+    `combined_update_values`, 但论文级 fixed-FPR 检测不能只看单一 combined
+    相关性。正式分数取 combined 相关性与 LF/HF 加权一致性分数的较小值,
+    这样只有 combined 方向和 LF/HF 分支同时支持同一个 content carrier 时,
+    样本才会获得高分。该设计属于项目特定写法, 主要用于压低 clean negative
+    的 wrong-key 高分尾部, 为 full_paper 的 FPR=0.001 边界保留统计余量。
     """
     lf_score = correlation(observed_values, content_update.lf_update_values)
     hf_score = correlation(observed_values, content_update.hf_update_values)
     combined_score = correlation(observed_values, content_update.combined_update_values)
     lf_hf_fusion_score = lambda_lf * lf_score + lambda_hf * hf_score
-    content_score = combined_score
+    content_score = min(combined_score, lf_hf_fusion_score)
     payload = {
         "content_update_digest": content_update.content_update_digest,
         "lf_score": round(lf_score, 12),
@@ -85,6 +89,7 @@ def compute_unified_content_score(
         "content_score": round(content_score, 12),
         "lambda_lf": lambda_lf,
         "lambda_hf": lambda_hf,
+        "formal_score_source": "lf_hf_consistency_guarded_combined_correlation",
     }
     return ContentScore(
         lf_score=lf_score,
@@ -99,8 +104,9 @@ def compute_unified_content_score(
         score_digest=build_stable_digest(payload),
         supports_paper_claim=False,
         metadata={
-            "score_name": "combined_content_score",
-            "lf_hf_fusion_score_name": "diagnostic_lf_hf_weighted_score",
-            "formal_score_source": "combined_update_correlation",
+            "score_name": "lf_hf_consistency_guarded_content_score",
+            "combined_score_name": "diagnostic_combined_update_correlation",
+            "lf_hf_fusion_score_name": "lf_hf_weighted_consistency_score",
+            "formal_score_source": "lf_hf_consistency_guarded_combined_correlation",
         },
     )

@@ -28,7 +28,6 @@ DEFAULT_ATTENTION_RUNTIME_STRENGTH = 0.025
 DEFAULT_ATTENTION_INJECTION_STEPS = (6, 10, 14)
 UNBOUNDED_LIMIT_TOKENS = {"", "all", "none", "unlimited"}
 SHARED_METHOD_SETTING_FIELDS = (
-    "target_fpr",
     "minimum_clean_negative_count",
     "dataset_level_quality_minimum_count",
     "content_vector_width",
@@ -46,6 +45,7 @@ RUN_DEFAULTS: dict[str, dict[str, Any]] = {
         "fallback_prompt_count": 600,
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results",
         "protocol_profile": "pilot_paper_fixed_fpr_0_01",
+        "target_fpr": 0.01,
         "sample_count": "all",
     },
     FULL_PAPER_RUN_NAME: {
@@ -53,7 +53,8 @@ RUN_DEFAULTS: dict[str, dict[str, Any]] = {
         "prompt_file": PROMPT_FILES[FULL_PAPER_RUN_NAME].as_posix(),
         "fallback_prompt_count": 6000,
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/full_paper_results",
-        "protocol_profile": "full_paper_fixed_fpr_0_01",
+        "protocol_profile": "full_paper_fixed_fpr_0_001",
+        "target_fpr": 0.001,
         "sample_count": "all",
     },
 }
@@ -199,7 +200,7 @@ def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
         prompt_count=prompt_count,
         sample_count=sample_count,
         drive_result_root=os.environ.get("SLM_WM_DRIVE_RESULT_ROOT", str(defaults["drive_result_root"])),
-        target_fpr=float(os.environ.get("SLM_WM_PAPER_RUN_TARGET_FPR", str(DEFAULT_TARGET_FPR))),
+        target_fpr=float(os.environ.get("SLM_WM_PAPER_RUN_TARGET_FPR", str(defaults.get("target_fpr", DEFAULT_TARGET_FPR)))),
         minimum_clean_negative_count=int(
             os.environ.get("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", str(DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT))
         ),

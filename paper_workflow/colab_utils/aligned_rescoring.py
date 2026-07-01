@@ -445,7 +445,10 @@ def build_rescoring_records(
                     "baseline_fairness_boundary": "external_baseline_comparison_requires_matching_detector_access",
                     "content_vector_width": config.content_vector_width,
                     "content_basis_rank": config.content_basis_rank,
-                    "formal_score_source": "combined_update_correlation",
+                    "formal_score_source": score_after.metadata.get(
+                        "formal_score_source",
+                        "lf_hf_consistency_guarded_combined_correlation",
+                    ),
                     "runtime_content_update_digest": ""
                     if runtime_content_update is None
                     else runtime_content_update.content_update_digest,

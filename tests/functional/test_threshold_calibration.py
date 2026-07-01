@@ -9,7 +9,11 @@ from zipfile import ZipFile
 
 import pytest
 
-from experiments.protocol.calibration import FixedFprCalibrationConfig, empirical_threshold_at_fpr
+from experiments.protocol.calibration import (
+    FixedFprCalibrationConfig,
+    confidence_controlled_false_positive_budget,
+    empirical_threshold_at_fpr,
+)
 from scripts.write_threshold_calibration_outputs import write_threshold_calibration_outputs
 
 
@@ -30,6 +34,21 @@ def test_fixed_fpr_threshold_uses_calibration_clean_negative_only() -> None:
     assert threshold.observed_fpr == 0.25
     assert threshold.metadata["threshold_source"] == "calibration_clean_negative"
     assert threshold.supports_paper_claim is False
+
+
+@pytest.mark.quick
+def test_confidence_controlled_budget_is_conservative_for_low_fpr_claim() -> None:
+    """full_paper 的低 FPR 声明应使用置信上界控制 false positive 预算。"""
+    assert confidence_controlled_false_positive_budget(
+        negative_count=256,
+        target_fpr=0.01,
+        confidence_level=0.95,
+    ) == 0
+    assert confidence_controlled_false_positive_budget(
+        negative_count=6000,
+        target_fpr=0.001,
+        confidence_level=0.95,
+    ) < 6
 
 
 def rescue_record(
@@ -430,13 +449,15 @@ def test_threshold_calibration_prefers_real_aligned_rescoring_score_space(tmp_pa
         for row in csv.DictReader((output_dir / "score_mode_operating_points.csv").open(encoding="utf-8"))
     }
 
-    assert thresholds["threshold_value"] == 0.2
+    assert thresholds["threshold_value"] == pytest.approx(0.20000000000100002)
+    assert thresholds["allowed_false_positive_count"] == 0
+    assert thresholds["metadata"]["false_positive_budget_mode"] == "confidence_controlled"
     assert thresholds["metadata"]["score_space_name"] == "real_sd_latent_projection"
     assert thresholds["metadata"]["threshold_score_field"] == "formal_detection_score"
     assert thresholds["metadata"]["threshold_score_source_field"] == "real_aligned_content_score"
     assert operating_rows[0]["threshold_score_field"] == "formal_detection_score"
     assert operating_rows[0]["true_positive_rate"] == "1.0"
-    assert operating_rows[0]["evidence_clean_fpr"] == "0.3333333333333333"
+    assert operating_rows[0]["evidence_clean_fpr"] == "0.0"
     assert score_mode_rows["formal_detection_threshold"]["governs_fixed_fpr"] == "True"
     assert score_mode_rows["formal_detection_threshold"]["score_field"] == "formal_detection_score"
     assert score_mode_rows["aligned_content_threshold"]["governs_fixed_fpr"] == "True"
@@ -444,3 +465,4 @@ def test_threshold_calibration_prefers_real_aligned_rescoring_score_space(tmp_pa
     assert threshold_report["real_score_calibration_ready"] is True
     assert threshold_report["proxy_score_calibration_used"] is False
     assert threshold_report["calibration_records_source"] == "aligned_rescoring_real_scores"
+    assert threshold_report["false_positive_budget_mode"] == "confidence_controlled"

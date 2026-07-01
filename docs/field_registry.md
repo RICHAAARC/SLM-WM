@@ -545,6 +545,12 @@ Notebook 与 repository module 的跨边界数据
 | formal_detection_claim_ready | governance | none | false | false | false | 正式判定分数是否同时满足校准 split fixed-FPR 边界和测试 clean negative 经验 FPR 诊断边界。 |
 | calibration_negative_count | metric | none | false | false | false | 用于阈值冻结的 calibration clean negative 样本数。 |
 | allowed_false_positive_count | metric | none | false | false | false | 目标 FPR 下允许的 false positive 数量。 |
+| nominal_allowed_false_positive_count | metric | none | false | false | false | 按 floor(target_fpr * negative_count) 得到的名义 false positive 预算。 |
+| confidence_controlled_false_positive_count | metric | none | false | false | false | 在 calibration FPR 置信上界不超过目标 FPR 时允许的保守 false positive 预算。 |
+| false_positive_budget_mode | protocol | none | false | false | false | fixed-FPR 阈值冻结使用的 false positive 预算模式, 例如 empirical 或 confidence_controlled。 |
+| calibration_confidence_level | protocol | none | false | false | false | calibration FPR 置信上界使用的单侧置信水平。 |
+| calibration_fpr_confidence_upper_bound | metric | none | false | false | false | calibration split false positive rate 的单侧置信上界。 |
+| calibration_confidence_boundary_ready | governance | none | false | false | false | calibration FPR 置信上界是否不超过目标 FPR, 用于 full_paper 论文级 fixed-FPR 声明门禁。 |
 | observed_false_positive_count | metric | none | false | false | false | 阈值冻结数据上的实际 false positive 数量。 |
 | observed_fpr | metric | none | false | false | false | 阈值冻结数据上的实际 FPR。 |
 | threshold_tie_count | metric | none | false | false | false | 与冻结阈值数值相同的样本数量。 |
@@ -1310,6 +1316,8 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_prompt_count | metric | none | false | false | false | pilot_paper prompt split 中的 prompt 数量。|
 | pilot_paper_prompt_split_ready | governance | none | false | false | false | pilot_paper prompt split 是否可供共同协议使用。|
 | pilot_paper_target_fpr | protocol | none | false | false | false | pilot_paper 共同协议使用的 fixed-FPR 目标值。|
+| paper_target_fpr | protocol | none | false | false | false | 当前论文运行层级使用的 fixed-FPR 目标值, pilot_paper 默认为 0.01, full_paper 默认为 0.001。|
+| expected_target_fpr | protocol | none | false | false | false | 当前论文运行层级按协议应匹配的 fixed-FPR 目标值。|
 | pilot_paper_negative_count_minimum_required | metric | none | false | false | false | pilot_paper fixed-FPR 校准所要求的最小 clean negative 数量。|
 | minimum_clean_negative_count | metric | none | false | false | false | fixed-FPR 协议配置中要求的最小 clean negative 样本数。|
 | minimum_result_positive_count | metric | none | false | false | false | pilot_paper 结果导入 schema 要求的最小 positive 样本数, 当前与 fixed-FPR clean negative 最小数一致。|

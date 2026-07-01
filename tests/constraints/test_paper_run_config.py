@@ -42,6 +42,8 @@ def test_paper_run_config_resolves_pilot_paper_defaults(tmp_path: Path, monkeypa
     assert config.prompt_count == 7
     assert config.sample_count == 7
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results"
+    assert config.protocol_profile == "pilot_paper_fixed_fpr_0_01"
+    assert config.target_fpr == 0.01
     assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
     assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
     assert config.drive_dir("aligned_rescoring").endswith("/pilot_paper_results/aligned_rescoring")
@@ -68,14 +70,16 @@ def test_paper_run_config_switches_to_full_paper_without_notebook_rewrite(
     assert config.prompt_count == 11
     assert config.sample_count == 11
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/full_paper_results"
+    assert config.protocol_profile == "full_paper_fixed_fpr_0_001"
+    assert config.target_fpr == 0.001
     assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
     assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
     assert config.drive_dir("threshold_calibration").endswith("/full_paper_results/threshold_calibration")
 
 
 @pytest.mark.constraint
-def test_pilot_and_full_paper_share_method_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """pilot_paper 与 full_paper 只能改变样本来源和落盘根目录, 方法级参数必须一致."""
+def test_pilot_and_full_paper_share_method_settings_except_claim_fpr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """pilot_paper 与 full_paper 共享方法参数, 但 full_paper 可使用更严格声明 FPR."""
 
     write_prompt_file(tmp_path / "configs" / "paper_main_pilot_paper_prompts.txt", 7)
     write_prompt_file(tmp_path / "configs" / "paper_main_full_paper_prompts.txt", 11)
@@ -90,6 +94,8 @@ def test_pilot_and_full_paper_share_method_settings(tmp_path: Path, monkeypatch:
     full_config = build_paper_run_config(root=tmp_path)
 
     assert shared_method_settings(pilot_config) == shared_method_settings(full_config)
+    assert pilot_config.target_fpr == 0.01
+    assert full_config.target_fpr == 0.001
     assert pilot_config.sample_count != full_config.sample_count
     assert pilot_config.prompt_file != full_config.prompt_file
 

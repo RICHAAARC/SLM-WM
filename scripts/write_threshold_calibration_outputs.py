@@ -542,6 +542,10 @@ def build_threshold_report(
     calibration_fpr_exceeds_target = threshold.observed_fpr > config.target_fpr
     test_clean_fpr_exceeds_target = metrics["evidence_clean_fpr"] > config.target_fpr
     formal_detection_test_clean_fpr_exceeds_target = metrics["formal_detection_score_clean_fpr"] > config.target_fpr
+    calibration_fpr_confidence_upper_bound = float(
+        threshold.metadata.get("calibration_fpr_confidence_upper_bound", 1.0)
+    )
+    calibration_confidence_boundary_ready = calibration_fpr_confidence_upper_bound <= config.target_fpr
     attacked_fpr_diagnostic_exceeds_target = metrics["evidence_attacked_fpr"] > config.target_fpr
     calibration_negative_count_ready = threshold.calibration_negative_count >= minimum_clean_negative_count
     evidence_clean_negative_count_ready = metrics["clean_negative_count"] >= minimum_clean_negative_count
@@ -577,6 +581,18 @@ def build_threshold_report(
             "calibration_negative_count_ready": calibration_negative_count_ready,
             "evidence_clean_negative_count_ready": evidence_clean_negative_count_ready,
             "minimum_clean_negative_count_ready": minimum_clean_negative_count_ready,
+            "false_positive_budget_mode": threshold.metadata.get("false_positive_budget_mode", "empirical"),
+            "nominal_allowed_false_positive_count": threshold.metadata.get(
+                "nominal_allowed_false_positive_count",
+                threshold.allowed_false_positive_count,
+            ),
+            "confidence_controlled_false_positive_count": threshold.metadata.get(
+                "confidence_controlled_false_positive_count",
+                threshold.allowed_false_positive_count,
+            ),
+            "calibration_confidence_level": threshold.metadata.get("confidence_level", config.confidence_level),
+            "calibration_fpr_confidence_upper_bound": calibration_fpr_confidence_upper_bound,
+            "calibration_confidence_boundary_ready": calibration_confidence_boundary_ready,
             "fixed_fpr_control_scope": FIXED_FPR_CONTROL_SCOPE,
             "fixed_fpr_denominator_role": FIXED_FPR_DENOMINATOR_ROLE,
             "rescue_control_scope": RESCUE_CONTROL_SCOPE,
@@ -601,6 +617,7 @@ def build_threshold_report(
             "paper_claim_empirical_fpr_ready": paper_claim_empirical_fpr_ready,
             "formal_detection_claim_ready": (
                 fixed_fpr_boundary_ready
+                and calibration_confidence_boundary_ready
                 and paper_claim_empirical_fpr_ready
                 and minimum_clean_negative_count_ready
             ),
@@ -649,11 +666,19 @@ def write_threshold_calibration_outputs(
         if resolved_aligned_package_path and resolved_aligned_package_path.exists()
         else empty_aligned_rescoring_quality()
     )
-    config = FixedFprCalibrationConfig(target_fpr=target_fpr)
+    initial_config = FixedFprCalibrationConfig(target_fpr=target_fpr)
     rescue_records = full_rescue_records(read_jsonl(resolved_records_path))
     records, score_space_metadata = select_threshold_calibration_records(
         rescue_records=rescue_records,
         aligned_rescoring_package_path=resolved_aligned_package_path,
+    )
+    config = FixedFprCalibrationConfig(
+        target_fpr=target_fpr,
+        false_positive_budget_mode=(
+            "confidence_controlled"
+            if score_space_metadata["real_score_calibration_ready"]
+            else initial_config.false_positive_budget_mode
+        ),
     )
     calibration_clean_records = split_role(records, config.calibration_split, config.clean_negative_role)
     selected_threshold_score_field = score_space_metadata["threshold_score_field"]

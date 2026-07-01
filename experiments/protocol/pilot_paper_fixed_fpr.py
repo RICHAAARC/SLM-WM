@@ -31,6 +31,11 @@ PILOT_PAPER_RESULT_SCOPE = "pilot_paper_common_protocol"
 PILOT_PAPER_CLAIM_BOUNDARY = "pilot_paper_paper_claim"
 FULL_PAPER_CLAIM_BOUNDARY = "full_paper_claim_requires_full_paper_sample_scale"
 PILOT_PAPER_FIXED_FPR = 0.01
+FULL_PAPER_FIXED_FPR = 0.001
+PAPER_RUN_FIXED_FPR = {
+    PILOT_PAPER_PROMPT_SET: PILOT_PAPER_FIXED_FPR,
+    FULL_PAPER_RUN_NAME: FULL_PAPER_FIXED_FPR,
+}
 PILOT_PAPER_BOOTSTRAP_ITERATION_COUNT = 1000
 PILOT_PAPER_CONFIDENCE_LEVEL = 0.95
 PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT = 100
@@ -763,12 +768,13 @@ def build_pilot_paper_common_protocol_summary(
         and accepted_claim_record_count == len(accepted_records)
     )
     superiority_gate = build_superiority_gate_summary(accepted_records, resolved_config)
+    expected_target_fpr = PAPER_RUN_FIXED_FPR.get(resolved_config.paper_run_name, PILOT_PAPER_FIXED_FPR)
     ready = (
         bool(prompt_summary.get("prompt_split_ready"))
         and bool(materialized_attack_rows)
         and method_ids == set(PILOT_PAPER_METHOD_IDS)
         and len(materialized_template_rows) == len(materialized_attack_rows) * len(materialized_method_rows)
-        and math.isclose(float(resolved_config.target_fpr), PILOT_PAPER_FIXED_FPR, rel_tol=0.0, abs_tol=1e-12)
+        and math.isclose(float(resolved_config.target_fpr), expected_target_fpr, rel_tol=0.0, abs_tol=1e-12)
     )
     paper_run_claim_ready = (
         ready
@@ -791,6 +797,8 @@ def build_pilot_paper_common_protocol_summary(
         "pilot_paper_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
         "paper_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
         "pilot_paper_target_fpr": resolved_config.target_fpr,
+        "paper_target_fpr": resolved_config.target_fpr,
+        "expected_target_fpr": expected_target_fpr,
         "pilot_paper_negative_count_minimum_required": resolved_config.minimum_clean_negative_count,
         "minimum_result_positive_count": resolved_config.minimum_clean_negative_count,
         "minimum_result_negative_count": resolved_config.minimum_clean_negative_count,

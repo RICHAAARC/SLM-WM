@@ -173,7 +173,8 @@ def test_colab_notebook_delegates_attention_geometry_logic_to_helper() -> None:
     assert "package_attention_geometry_outputs" in joined_source
     assert 'SLM_WM_PAPER_RUN_NAME = "pilot_paper"' in joined_source
     assert "SLM_WM_PAPER_RUN_SAMPLE_COUNT', 'all'" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+    assert "paper_run_target_fpr_token" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
     assert "f'{drive_result_root}/attention_geometry'" in joined_source
@@ -202,7 +203,8 @@ def test_colab_notebook_delegates_attention_latent_injection_logic_to_helper() -
     assert "paper_workflow.colab_utils.attention_latent_injection" in joined_source
     assert "run_default_attention_latent_injection_plan" in joined_source
     assert "package_attention_latent_injection_outputs" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+    assert "paper_run_target_fpr_token" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
     assert "f'{drive_result_root}/attention_latent_injection'" in joined_source
@@ -231,7 +233,8 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
     assert "paper_workflow.colab_utils.aligned_rescoring" in joined_source
     assert "run_default_aligned_rescoring_plan" in joined_source
     assert "package_aligned_rescoring_outputs" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+    assert "paper_run_target_fpr_token" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
     assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
@@ -270,7 +273,8 @@ def test_colab_notebook_delegates_threshold_calibration_logic_to_helper() -> Non
     assert "paper_workflow.colab_utils.threshold_calibration" in joined_source
     assert "run_default_threshold_calibration_from_drive_plan" in joined_source
     assert "package_threshold_calibration_outputs" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+    assert "paper_run_target_fpr_token" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
     assert "f'{drive_result_root}/threshold_calibration'" in joined_source
@@ -282,7 +286,7 @@ def test_colab_notebook_delegates_threshold_calibration_logic_to_helper() -> Non
     assert "real_score_calibration_ready" in joined_source
     assert "proxy_score_calibration_used" in joined_source
     assert "threshold_calibration_summary['run_decision'] == 'pass'" not in joined_source
-    assert "os.environ['SLM_WM_THRESHOLD_TARGET_FPR'] = '0.01'" in joined_source
+    assert "os.environ['SLM_WM_THRESHOLD_TARGET_FPR'] = paper_run_target_fpr" in joined_source
     assert "os.environ['SLM_WM_THRESHOLD_MAX_CONTENT_RECORDS'] = 'all'" in joined_source
     assert "os.environ['SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT'] = paper_run_minimum_clean_negative_count" in joined_source
     assert "max_content_records=os.environ['SLM_WM_THRESHOLD_MAX_CONTENT_RECORDS']" in joined_source
@@ -310,7 +314,8 @@ def test_colab_notebook_delegates_real_attack_evaluation_logic_to_helper() -> No
     assert "paper_workflow.colab_utils.real_attack_evaluation" in joined_source
     assert "run_default_real_attack_evaluation_from_drive_plan" in joined_source
     assert "package_real_attack_evaluation_outputs" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+    assert "paper_run_target_fpr_token" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
     assert "f'{drive_result_root}/real_attack_evaluation'" in joined_source
@@ -345,7 +350,8 @@ def test_colab_notebook_delegates_conventional_geometric_attack_logic_to_helper(
     assert "paper_workflow.colab_utils.conventional_geometric_attack_evaluation" in joined_source
     assert "run_default_conventional_geometric_attack_evaluation_from_drive_plan" in joined_source
     assert "package_conventional_geometric_attack_evaluation_outputs" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+    assert "paper_run_target_fpr_token" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
     assert "f'{drive_result_root}/conventional_geometric_attack_evaluation'" in joined_source
@@ -399,7 +405,8 @@ def test_colab_notebook_delegates_dataset_level_quality_logic_to_helper() -> Non
     assert "paper_workflow.colab_utils.dataset_level_quality" in joined_source
     assert "run_default_dataset_level_quality_from_drive_plan" in joined_source
     assert "package_dataset_level_quality_outputs" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+    assert "paper_run_target_fpr_token" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
     assert "f'{drive_result_root}/dataset_level_quality'" in joined_source
@@ -432,7 +439,7 @@ def test_official_baseline_notebooks_use_paper_run_configuration() -> None:
             "f'{drive_result_root}/external_baseline_official_reference'",
             "external_baseline_official_reference_package_t2smark_",
             "os.environ['SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT'] = paper_run_sample_count",
-            "os.environ['SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR'] = '0.01'",
+            "os.environ['SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR'] = paper_run_target_fpr",
         ),
         TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
             "f'{drive_result_root}/external_baseline_official_reference'",
@@ -460,7 +467,8 @@ def test_official_baseline_notebooks_use_paper_run_configuration() -> None:
         first_code_source = "".join(first_code_cell.get("source", []))
 
         assert "drive.mount('/content/drive')" in first_code_source
-        assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+        assert "paper_run_target_fpr_token" in joined_source
+        assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
         assert "os.environ['SLM_WM_PROMPT_SET'] = paper_run_name" in joined_source
         assert "默认样本数为 5" not in joined_source
         assert "sample_count'] == 5" not in joined_source
@@ -492,7 +500,8 @@ def test_pilot_paper_result_closure_notebook_delegates_to_repository_commands() 
     first_code_source = "".join(first_code_cell.get("source", []))
 
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "f'{paper_run_name}_fixed_fpr_0_01'" in joined_source
+    assert "paper_run_target_fpr_token" in joined_source
+    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
     assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive_result_root" in joined_source
     assert "f'{drive_result_root}/complete_result_package'" in joined_source
