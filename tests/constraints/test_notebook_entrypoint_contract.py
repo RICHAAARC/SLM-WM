@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -18,6 +19,7 @@ from paper_workflow.colab_utils.conventional_geometric_attack_evaluation import 
     package_conventional_geometric_attack_evaluation_outputs,
 )
 from paper_workflow.colab_utils.dataset_level_quality import package_dataset_level_quality_outputs
+from paper_workflow.colab_utils.paper_run_environment import FORMAL_IMAGE_ATTACK_FAMILIES, configure_paper_run_environment
 from paper_workflow.colab_utils.threshold_calibration import package_threshold_calibration_outputs
 from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outputs
 from tools.harness.lib.naming_rules import is_allowed_file_name
@@ -72,6 +74,77 @@ EXTERNAL_BASELINE_DEPENDENCY_INSTALL_COMMAND = (
     "%pip install -q --upgrade diffusers transformers accelerate safetensors sentencepiece protobuf "
     "huggingface_hub open_clip_torch scikit-learn scipy pandas datasets tqdm"
 )
+
+
+@pytest.fixture(autouse=True)
+def restore_slm_environment() -> None:
+    """Notebook 入口测试不得把 SLM_WM 环境变量泄漏给后续测试。"""
+
+    original_values = {key: value for key, value in os.environ.items() if key.startswith("SLM_WM_")}
+    try:
+        yield
+    finally:
+        for key in tuple(os.environ):
+            if key.startswith("SLM_WM_"):
+                os.environ.pop(key, None)
+        os.environ.update(original_values)
+
+
+def assert_uses_paper_run_environment_helper(joined_source: str, workflow_name: str, baseline_id: str = "") -> None:
+    """Notebook 应把运行层级配置委托给统一 helper。"""
+
+    assert "paper_workflow.colab_utils.paper_run_environment" in joined_source
+    assert "configure_paper_run_environment" in joined_source
+    assert f'workflow_name="{workflow_name}"' in joined_source
+    if baseline_id:
+        assert f'SLM_WM_PRIMARY_BASELINE_METHODS = "{baseline_id}"' in joined_source
+        assert 'baseline_id=os.environ["SLM_WM_PRIMARY_BASELINE_METHODS"]' in joined_source
+    assert "prompt_file_by_run" not in joined_source
+    assert "prompt_count_by_run" not in joined_source
+    assert "target_fpr_by_run" not in joined_source
+    assert "drive_result_root = f'/content/drive/MyDrive/SLM/{paper_run_name}_results'" not in joined_source
+    assert "paper_run_target_fpr_token" not in joined_source
+
+
+@pytest.mark.constraint
+def test_paper_run_environment_helper_preserves_drive_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    """统一环境 helper 不得改变既有 Google Drive 落盘目录约定。"""
+
+    for key in tuple(os_key for os_key in os.environ if os_key.startswith("SLM_WM_")):
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+    aligned_env = configure_paper_run_environment("aligned_rescoring")
+    assert aligned_env["drive_result_root"] == "/content/drive/MyDrive/SLM/pilot_paper_results"
+    assert os.environ["SLM_WM_DRIVE_OUTPUT_DIR"] == (
+        "/content/drive/MyDrive/SLM/pilot_paper_results/aligned_rescoring"
+    )
+
+    threshold_env = configure_paper_run_environment("threshold_calibration")
+    assert threshold_env["target_fpr"] == "0.01"
+    assert os.environ["SLM_WM_THRESHOLD_CALIBRATION_DRIVE_DIR"] == (
+        "/content/drive/MyDrive/SLM/pilot_paper_results/threshold_calibration"
+    )
+
+    baseline_env = configure_paper_run_environment("external_baseline_method_faithful", baseline_id="tree_ring")
+    assert baseline_env["selected_baseline_id"] == "tree_ring"
+    assert os.environ["SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR"] == (
+        "/content/drive/MyDrive/SLM/pilot_paper_results/external_baseline_method_faithful"
+    )
+
+    official_env = configure_paper_run_environment("official_reference_tree_ring")
+    assert official_env["paper_run_name"] == "pilot_paper"
+    assert os.environ["SLM_WM_TREE_RING_OFFICIAL_DRIVE_OUTPUT_DIR"] == (
+        "/content/drive/MyDrive/SLM/pilot_paper_results/external_baseline_official_reference"
+    )
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
+    full_env = configure_paper_run_environment("threshold_calibration")
+    assert full_env["drive_result_root"] == "/content/drive/MyDrive/SLM/full_paper_results"
+    assert full_env["target_fpr"] == "0.001"
+    assert os.environ["SLM_WM_THRESHOLD_CALIBRATION_DRIVE_DIR"] == (
+        "/content/drive/MyDrive/SLM/full_paper_results/threshold_calibration"
+    )
 
 
 @pytest.mark.constraint
@@ -171,16 +244,10 @@ def test_colab_notebook_delegates_attention_geometry_logic_to_helper() -> None:
     assert "paper_workflow.colab_utils.attention_geometry_capture" in joined_source
     assert "run_default_attention_geometry_plan" in joined_source
     assert "package_attention_geometry_outputs" in joined_source
+    assert_uses_paper_run_environment_helper(joined_source, "attention_geometry")
     assert 'SLM_WM_PAPER_RUN_NAME = "pilot_paper"' in joined_source
-    assert "SLM_WM_PAPER_RUN_SAMPLE_COUNT', 'all'" in joined_source
-    assert "paper_run_target_fpr_token" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
-    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "f'{drive_result_root}/attention_geometry'" in joined_source
     assert "attention_geometry_ready" in joined_source
-    assert "SLM_WM_ATTENTION_CAPTURE_COUNT', '16'" in joined_source
-    assert "SLM_WM_ATTENTION_TOKEN_COUNT', '32'" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source
@@ -203,14 +270,8 @@ def test_colab_notebook_delegates_attention_latent_injection_logic_to_helper() -
     assert "paper_workflow.colab_utils.attention_latent_injection" in joined_source
     assert "run_default_attention_latent_injection_plan" in joined_source
     assert "package_attention_latent_injection_outputs" in joined_source
-    assert "paper_run_target_fpr_token" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
-    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
+    assert_uses_paper_run_environment_helper(joined_source, "attention_latent_injection")
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "f'{drive_result_root}/attention_latent_injection'" in joined_source
-    assert "f'{drive_result_root}/attention_geometry'" in joined_source
-    assert "os.environ['SLM_WM_ATTENTION_SUBSPACE_RECORDS'] = paper_run_sample_count" in joined_source
-    assert "SLM_WM_ATTENTION_RUNTIME_STRENGTH', '0.025'" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source
@@ -233,22 +294,9 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
     assert "paper_workflow.colab_utils.aligned_rescoring" in joined_source
     assert "run_default_aligned_rescoring_plan" in joined_source
     assert "package_aligned_rescoring_outputs" in joined_source
-    assert "paper_run_target_fpr_token" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
-    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
+    assert_uses_paper_run_environment_helper(joined_source, "aligned_rescoring")
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
-    assert "f'{drive_result_root}/attention_geometry'" in joined_source
     assert "real_aligned_rescore_count" in joined_source
-    assert "os.environ['SLM_WM_ALIGNED_RESCORING_SUBSPACE_RECORDS'] = paper_run_sample_count" in joined_source
-    assert "os.environ['SLM_WM_ALIGNED_RESCORING_CARRIER_COUNT'] = paper_run_sample_count" in joined_source
-    assert "SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
-    assert "SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS', '1'" in joined_source
-    assert "openai/clip-vit-base-patch32" in joined_source
-    assert "SLM_WM_LPIPS_NETWORK', 'alex'" in joined_source
-    assert "SLM_WM_PERCEPTUAL_METRIC_DEVICE', 'cpu'" in joined_source
-    assert "SLM_WM_ENABLE_PIPELINE_PROGRESS_BAR', '0'" in joined_source
-    assert "SLM_WM_ENABLE_CARRIER_PROGRESS_BAR', '1'" in joined_source
     assert "perceptual_metrics_ready" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
@@ -273,22 +321,12 @@ def test_colab_notebook_delegates_threshold_calibration_logic_to_helper() -> Non
     assert "paper_workflow.colab_utils.threshold_calibration" in joined_source
     assert "run_default_threshold_calibration_from_drive_plan" in joined_source
     assert "package_threshold_calibration_outputs" in joined_source
-    assert "paper_run_target_fpr_token" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
-    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
+    assert_uses_paper_run_environment_helper(joined_source, "threshold_calibration")
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "f'{drive_result_root}/threshold_calibration'" in joined_source
-    assert "f'{drive_result_root}/attention_latent_injection'" in joined_source
-    assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
-    assert "attention_latent_injection_package_*.zip" in joined_source
-    assert "aligned_rescoring_package_*.zip" in joined_source
     assert "threshold_calibration_ready" in joined_source
     assert "real_score_calibration_ready" in joined_source
     assert "proxy_score_calibration_used" in joined_source
     assert "threshold_calibration_summary['run_decision'] == 'pass'" not in joined_source
-    assert "os.environ['SLM_WM_THRESHOLD_TARGET_FPR'] = paper_run_target_fpr" in joined_source
-    assert "os.environ['SLM_WM_THRESHOLD_MAX_CONTENT_RECORDS'] = 'all'" in joined_source
-    assert "os.environ['SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT'] = paper_run_minimum_clean_negative_count" in joined_source
     assert "max_content_records=os.environ['SLM_WM_THRESHOLD_MAX_CONTENT_RECORDS']" in joined_source
     assert "minimum_clean_negative_count=os.environ['SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT']" in joined_source
     assert "geometric_rescue_ready" in joined_source
@@ -314,20 +352,13 @@ def test_colab_notebook_delegates_real_attack_evaluation_logic_to_helper() -> No
     assert "paper_workflow.colab_utils.real_attack_evaluation" in joined_source
     assert "run_default_real_attack_evaluation_from_drive_plan" in joined_source
     assert "package_real_attack_evaluation_outputs" in joined_source
-    assert "paper_run_target_fpr_token" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
-    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
+    assert_uses_paper_run_environment_helper(joined_source, "real_attack_evaluation")
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "f'{drive_result_root}/real_attack_evaluation'" in joined_source
-    assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
-    assert "f'{drive_result_root}/threshold_calibration'" in joined_source
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "real_attacked_image_closed_loop_ready" in joined_source
     assert "regeneration_attack_gpu_validation_ready" in joined_source
     assert "attack_detection_rerun_ready" in joined_source
     assert "formal_attack_detection_ready" in joined_source
-    assert "os.environ['SLM_WM_REAL_ATTACK_SOURCE_COUNT'] = paper_run_sample_count" in joined_source
-    assert "runwayml/stable-diffusion-v1-5" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source
@@ -350,14 +381,8 @@ def test_colab_notebook_delegates_conventional_geometric_attack_logic_to_helper(
     assert "paper_workflow.colab_utils.conventional_geometric_attack_evaluation" in joined_source
     assert "run_default_conventional_geometric_attack_evaluation_from_drive_plan" in joined_source
     assert "package_conventional_geometric_attack_evaluation_outputs" in joined_source
-    assert "paper_run_target_fpr_token" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
-    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
+    assert_uses_paper_run_environment_helper(joined_source, "conventional_geometric_attack_evaluation")
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "f'{drive_result_root}/conventional_geometric_attack_evaluation'" in joined_source
-    assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
-    assert "f'{drive_result_root}/threshold_calibration'" in joined_source
-    assert "os.environ['SLM_WM_CONVENTIONAL_GEOMETRIC_ATTACK_SOURCE_COUNT'] = paper_run_sample_count" in joined_source
     assert "real_attacked_image_closed_loop_ready" in joined_source
     assert "formal_attack_detection_ready" in joined_source
     assert "datetime.now(timezone.utc).strftime" in joined_source
@@ -383,14 +408,15 @@ def test_single_external_baseline_notebooks_select_one_method_and_delegate_to_he
 
         assert "drive.mount('/content/drive')" in first_code_source
         assert f'SLM_WM_PRIMARY_BASELINE_METHODS = "{baseline_id}"' in joined_source
+        assert_uses_paper_run_environment_helper(joined_source, "external_baseline_method_faithful", baseline_id)
         assert "run_default_external_baseline_method_faithful_plan" in joined_source
         assert "package_external_baseline_method_faithful_outputs" in joined_source
         assert "split_observations" in joined_source
         assert "external_baseline_method_faithful_package_" in joined_source
-        assert "img2img_regeneration" in joined_source
-        assert "ddim_inversion_regeneration" in joined_source
-        assert "sdedit_regeneration" in joined_source
-        assert "diffusion_purification" in joined_source
+        assert "img2img_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
+        assert "ddim_inversion_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
+        assert "sdedit_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
+        assert "diffusion_purification" in FORMAL_IMAGE_ATTACK_FAMILIES
         assert EXTERNAL_BASELINE_DEPENDENCY_INSTALL_COMMAND in joined_source
 
 
@@ -405,21 +431,13 @@ def test_colab_notebook_delegates_dataset_level_quality_logic_to_helper() -> Non
     assert "paper_workflow.colab_utils.dataset_level_quality" in joined_source
     assert "run_default_dataset_level_quality_from_drive_plan" in joined_source
     assert "package_dataset_level_quality_outputs" in joined_source
-    assert "paper_run_target_fpr_token" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
-    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
+    assert_uses_paper_run_environment_helper(joined_source, "dataset_level_quality")
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "f'{drive_result_root}/dataset_level_quality'" in joined_source
-    assert "f'{drive_result_root}/real_attack_evaluation'" in joined_source
-    assert "f'{drive_result_root}/aligned_rescoring'" in joined_source
-    assert "real_attack_evaluation_package_*.zip" in joined_source
-    assert "aligned_rescoring_package_*.zip" in joined_source
     assert "formal_feature_backend_ready" in joined_source
     assert "formal_fid_kid_ready" in joined_source
     assert "dataset_level_quality_summary['formal_fid_kid_ready'] is True" in joined_source
     assert "dataset_level_quality_summary['supports_paper_claim'] is False" in joined_source
     assert "dataset_level_quality_summary['formal_fid_kid_ready'] is False" not in joined_source
-    assert "os.environ['SLM_WM_FORMAL_MIN_SAMPLE_COUNT'] = paper_run_dataset_minimum_count" in joined_source
     assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
     assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert "archive_name=archive_name" in joined_source
@@ -436,28 +454,23 @@ def test_official_baseline_notebooks_use_paper_run_configuration() -> None:
 
     expectations = {
         T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH: (
-            "f'{drive_result_root}/external_baseline_official_reference'",
+            'workflow_name="official_reference_t2smark"',
             "external_baseline_official_reference_package_t2smark_",
-            "os.environ['SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT'] = paper_run_sample_count",
-            "os.environ['SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR'] = paper_run_target_fpr",
         ),
         TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "f'{drive_result_root}/external_baseline_official_reference'",
+            'workflow_name="official_reference_tree_ring"',
             "external_baseline_official_reference_package_tree_ring_",
-            "os.environ['SLM_WM_TREE_RING_OFFICIAL_SAMPLE_COUNT'] = paper_run_sample_count",
-            "configs/paper_main_pilot_paper_prompts.txt",
+            "SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT",
         ),
         GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "f'{drive_result_root}/external_baseline_official_reference'",
+            'workflow_name="official_reference_gaussian_shading"',
             "external_baseline_official_reference_package_gaussian_shading_",
-            "os.environ['SLM_WM_GAUSSIAN_SHADING_OFFICIAL_SAMPLE_COUNT'] = paper_run_sample_count",
-            "configs/paper_main_pilot_paper_prompts.txt",
+            "SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT",
         ),
         SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "f'{drive_result_root}/external_baseline_official_reference'",
+            'workflow_name="official_reference_shallow_diffuse"',
             "external_baseline_official_reference_package_shallow_diffuse_",
-            "os.environ['SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT'] = paper_run_sample_count",
-            "configs/paper_main_pilot_paper_prompts.txt",
+            "SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT",
         ),
     }
     for notebook_path, required_texts in expectations.items():
@@ -467,21 +480,20 @@ def test_official_baseline_notebooks_use_paper_run_configuration() -> None:
         first_code_source = "".join(first_code_cell.get("source", []))
 
         assert "drive.mount('/content/drive')" in first_code_source
-        assert "paper_run_target_fpr_token" in joined_source
-        assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
-        assert "os.environ['SLM_WM_PROMPT_SET'] = paper_run_name" in joined_source
+        assert "paper_workflow.colab_utils.paper_run_environment" in joined_source
+        assert "configure_paper_run_environment" in joined_source
         assert "默认样本数为 5" not in joined_source
         assert "sample_count'] == 5" not in joined_source
         for required_text in required_texts:
             assert required_text in joined_source
 
     official_sample_assertions = {
-        TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: "expected_sample_count = paper_run_expected_sample_count",
+        TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: "expected_sample_count = int(os.environ['SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT'])",
         GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "expected_sample_count = paper_run_expected_sample_count"
+            "expected_sample_count = int(os.environ['SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT'])"
         ),
         SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
-            "expected_sample_count = paper_run_expected_sample_count"
+            "expected_sample_count = int(os.environ['SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT'])"
         ),
     }
     for notebook_path, required_assertion in official_sample_assertions.items():
@@ -500,25 +512,11 @@ def test_pilot_paper_result_closure_notebook_delegates_to_repository_commands() 
     first_code_source = "".join(first_code_cell.get("source", []))
 
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "paper_run_target_fpr_token" in joined_source
-    assert "f'{paper_run_name}_fixed_fpr_{paper_run_target_fpr_token}'" in joined_source
-    assert "configs/paper_main_pilot_paper_prompts.txt" in joined_source
-    assert "drive_result_root" in joined_source
-    assert "f'{drive_result_root}/complete_result_package'" in joined_source
-    assert "scripts/write_pilot_paper_result_records.py" in joined_source
-    assert "--materialize-only" in joined_source
-    assert "scripts/write_attack_matrix_outputs.py" in joined_source
-    assert "scripts/write_primary_baseline_result_candidates.py" in joined_source
-    assert "--target-fpr-override" in joined_source
-    assert "scripts/write_primary_baseline_formal_import_protocol.py" in joined_source
-    assert "scripts/write_external_baseline_comparison_outputs.py" in joined_source
-    assert "scripts/write_internal_ablation_outputs.py" in joined_source
-    assert "scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py" in joined_source
-    assert "scripts/write_pilot_paper_complete_result_package.py" in joined_source
-    assert "--skip-package-materialization" in joined_source
-    assert "--zip-compression" in joined_source
-    assert "stored" in joined_source
-    assert "complete_archive_name" in joined_source
+    assert_uses_paper_run_environment_helper(joined_source, "paper_result_closure")
+    assert "paper_workflow.colab_utils.paper_result_closure" in joined_source
+    assert "run_paper_result_closure_commands" in joined_source
+    assert "scripts/write_pilot_paper_result_records.py" not in joined_source
+    assert "complete_archive_name" not in joined_source
     assert "json.dumps" not in joined_source
     assert "write_text(" not in joined_source
 
