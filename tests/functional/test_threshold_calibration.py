@@ -13,6 +13,7 @@ from experiments.protocol.calibration import (
     FixedFprCalibrationConfig,
     confidence_controlled_false_positive_budget,
     empirical_threshold_at_fpr,
+    score_distribution_rows,
 )
 from scripts.write_threshold_calibration_outputs import write_threshold_calibration_outputs
 
@@ -150,6 +151,9 @@ def write_aligned_rescoring_package(package_path: Path) -> None:
         "carrier_id,psnr,ssim,mse,mean_abs_error,lpips,lpips_status,clip_score,clip_score_clean,clip_score_aligned,"
         "clip_score_delta,clip_score_status,fid,fid_status,kid,kid_status\n"
         "carrier_a,30.0,0.99,0.001,0.02,0.12,measured,0.31,0.30,0.31,0.01,measured,"
+        "unsupported,dataset_level_metric_not_computed_in_pair_run,"
+        "unsupported,dataset_level_metric_not_computed_in_pair_run\n"
+        "carrier_b,34.0,0.97,0.003,0.04,0.20,measured,0.35,0.32,0.35,0.03,measured,"
         "unsupported,dataset_level_metric_not_computed_in_pair_run,"
         "unsupported,dataset_level_metric_not_computed_in_pair_run\n"
     )
@@ -391,7 +395,7 @@ def test_minimum_clean_negative_count_gates_fixed_fpr_readiness(tmp_path: Path) 
 
 @pytest.mark.quick
 def test_threshold_calibration_propagates_aligned_rescoring_pair_metrics(tmp_path: Path) -> None:
-    """最新真实 aligned rescoring 质量指标应进入阈值校准摘要和 manifest。"""
+    """最新真实 aligned rescoring 质量指标应按全量样本均值进入阈值校准摘要。"""
     records_path, audit_path = write_rescue_inputs(tmp_path)
     package_path = tmp_path / "outputs" / "aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip"
     write_aligned_rescoring_package(package_path)
@@ -410,18 +414,40 @@ def test_threshold_calibration_propagates_aligned_rescoring_pair_metrics(tmp_pat
         for row in csv.DictReader((output_dir / "quality_metrics_summary.csv").open(encoding="utf-8"))
     }
 
-    assert quality_rows["psnr"]["quality_metric_value"] == "30.0"
+    assert float(quality_rows["psnr"]["quality_metric_value"]) == pytest.approx(32.0)
     assert quality_rows["psnr"]["quality_metric_source"] == "aligned_rescoring_package"
-    assert quality_rows["lpips"]["quality_metric_value"] == "0.12"
+    assert float(quality_rows["lpips"]["quality_metric_value"]) == pytest.approx(0.16)
     assert quality_rows["lpips"]["metric_status"] == "measured"
-    assert quality_rows["clip_score_clean"]["quality_metric_value"] == "0.30"
-    assert quality_rows["clip_score_aligned"]["quality_metric_value"] == "0.31"
-    assert quality_rows["clip_score_delta"]["quality_metric_value"] == "0.01"
+    assert float(quality_rows["clip_score_clean"]["quality_metric_value"]) == pytest.approx(0.31)
+    assert float(quality_rows["clip_score_aligned"]["quality_metric_value"]) == pytest.approx(0.33)
+    assert float(quality_rows["clip_score_delta"]["quality_metric_value"]) == pytest.approx(0.02)
     assert quality_rows["fid"]["metric_status"] == "dataset_level_metric_not_computed_in_pair_run"
     assert threshold_report["aligned_rescoring_quality_metrics_ready"] is True
     assert threshold_report["real_aligned_rescore_count"] == 3
     assert manifest["metadata"]["aligned_rescoring_quality_metrics_ready"] is True
     assert "outputs/aligned_rescoring_package_20260620t17281781976491z_b37b14f.zip" in manifest["input_paths"]
+
+
+@pytest.mark.quick
+def test_score_distribution_rows_counts_each_role_once_per_bin() -> None:
+    """分数分布表的每个角色计数总和应等于该角色真实记录数。"""
+
+    records = [
+        {"sample_role": "clean_negative", "formal_detection_score": 0.10},
+        {"sample_role": "clean_negative", "formal_detection_score": 0.20},
+        {"sample_role": "clean_negative", "formal_detection_score": 0.30},
+        {"sample_role": "positive_source", "formal_detection_score": 0.80},
+        {"sample_role": "positive_source", "formal_detection_score": 0.90},
+    ]
+
+    rows = score_distribution_rows(records, bin_count=4, score_field="formal_detection_score")
+    count_by_role: dict[str, int] = {}
+    for row in rows:
+        count_by_role[row["sample_role"]] = count_by_role.get(row["sample_role"], 0) + int(row["score_count"])
+
+    assert count_by_role == {"clean_negative": 3, "positive_source": 2}
+    clean_rows = [row for row in rows if row["sample_role"] == "clean_negative"]
+    assert int(clean_rows[-1]["score_count"]) == 0
 
 
 @pytest.mark.quick

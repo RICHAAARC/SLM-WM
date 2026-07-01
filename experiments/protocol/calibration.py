@@ -518,8 +518,10 @@ def score_distribution_rows(
             count = sum(
                 1
                 for record in role_records
-                if lower <= float(record[score_field]) < upper
-                or (index == bin_count - 1 and float(record[score_field]) <= upper)
+                if (
+                    lower <= float(record[score_field]) < upper
+                    or (index == bin_count - 1 and lower <= float(record[score_field]) <= upper)
+                )
             )
             rows.append(
                 {

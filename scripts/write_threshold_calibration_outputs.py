@@ -207,11 +207,38 @@ def read_quality_metrics_from_aligned_rescoring_package(package_path: Path, root
     with ZipFile(package_path) as archive:
         result = json.loads(archive.read(ALIGNED_RESCORING_RESULT_MEMBER).decode("utf-8"))
         rows = tuple(csv.DictReader(StringIO(archive.read(ALIGNED_RESCORING_QUALITY_MEMBER).decode("utf-8"))))
-    first_row = rows[0] if rows else {}
-    lpips_status = first_row.get("lpips_status", "unsupported")
-    clip_status = first_row.get("clip_score_status", "unsupported")
+
+    def mean_metric(metric_name: str) -> str:
+        """返回多样本 pair-level 指标均值, 避免摘要表误用第一条样本。"""
+
+        values: list[float] = []
+        for row in rows:
+            raw_value = row.get(metric_name, "")
+            if raw_value in {"", "unsupported", None}:
+                continue
+            values.append(float(raw_value))
+        if not values:
+            return "unsupported"
+        return str(sum(values) / len(values))
+
+    def aggregate_status(status_name: str) -> str:
+        """合并逐样本状态; 只有全部样本 measured 时才标记 measured。"""
+
+        statuses = tuple(row.get(status_name, "unsupported") for row in rows)
+        if not statuses:
+            return "unsupported"
+        if all(status == "measured" for status in statuses):
+            return "measured"
+        if any(status == "measured" for status in statuses):
+            return "partial"
+        return statuses[0]
+
+    lpips_status = aggregate_status("lpips_status")
+    clip_status = aggregate_status("clip_score_status")
+    fid_status = rows[0].get("fid_status", "unsupported") if rows else "unsupported"
+    kid_status = rows[0].get("kid_status", "unsupported") if rows else "unsupported"
     perceptual_metrics_ready = bool(result.get("perceptual_metrics_ready"))
-    image_metric_status = "measured" if first_row and result.get("image_quality_metrics_ready") else "unsupported"
+    image_metric_status = "measured" if rows and result.get("image_quality_metrics_ready") else "unsupported"
     return {
         "aligned_rescoring_package_path": relative_or_absolute(package_path, root_path),
         "aligned_rescoring_package_digest": file_digest(package_path),
@@ -227,48 +254,48 @@ def read_quality_metrics_from_aligned_rescoring_package(package_path: Path, root
         "real_aligned_rescore_count": result.get("real_aligned_rescore_count", 0),
         "quality_metrics": {
             "psnr": {
-                "value": first_row.get("psnr", "unsupported"),
+                "value": mean_metric("psnr"),
                 "status": image_metric_status,
             },
             "ssim": {
-                "value": first_row.get("ssim", "unsupported"),
+                "value": mean_metric("ssim"),
                 "status": image_metric_status,
             },
             "mse": {
-                "value": first_row.get("mse", "unsupported"),
+                "value": mean_metric("mse"),
                 "status": image_metric_status,
             },
             "mean_abs_error": {
-                "value": first_row.get("mean_abs_error", "unsupported"),
+                "value": mean_metric("mean_abs_error"),
                 "status": image_metric_status,
             },
             "lpips": {
-                "value": first_row.get("lpips", "unsupported"),
+                "value": mean_metric("lpips"),
                 "status": lpips_status,
             },
             "clip_score": {
-                "value": first_row.get("clip_score", "unsupported"),
+                "value": mean_metric("clip_score"),
                 "status": clip_status,
             },
             "clip_score_clean": {
-                "value": first_row.get("clip_score_clean", "unsupported"),
+                "value": mean_metric("clip_score_clean"),
                 "status": clip_status,
             },
             "clip_score_aligned": {
-                "value": first_row.get("clip_score_aligned", "unsupported"),
+                "value": mean_metric("clip_score_aligned"),
                 "status": clip_status,
             },
             "clip_score_delta": {
-                "value": first_row.get("clip_score_delta", "unsupported"),
+                "value": mean_metric("clip_score_delta"),
                 "status": clip_status,
             },
             "fid": {
-                "value": first_row.get("fid", "unsupported"),
-                "status": first_row.get("fid_status", "unsupported"),
+                "value": mean_metric("fid"),
+                "status": fid_status,
             },
             "kid": {
-                "value": first_row.get("kid", "unsupported"),
-                "status": first_row.get("kid_status", "unsupported"),
+                "value": mean_metric("kid"),
+                "status": kid_status,
             },
         },
     }
