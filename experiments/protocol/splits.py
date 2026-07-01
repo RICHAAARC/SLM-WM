@@ -11,13 +11,28 @@ from experiments.protocol.prompts import PromptProtocolRecord
 SPLIT_NAMES = ("dev", "calibration", "test")
 SAMPLE_ROLES = ("positive_source", "clean_negative", "attacked_negative")
 UNASSIGNED_SPLIT = "unassigned"
+LARGE_SCALE_PROMPT_COUNT = 1000
+SMALL_SCALE_DEV_RATIO = 0.10
+LARGE_SCALE_DEV_RATIO = 0.09
+
+
+def dev_ratio_for_prompt_count(prompt_count: int) -> float:
+    """按样本规模选择 dev 占比。
+
+    full_paper 目标会推进到 fixed-FPR=0.001。若仍使用 10% dev,
+    6000 个 prompt 在分层 split 后的 calibration clean negative 数量会略低于
+    95% 单侧置信边界所需数量。这里仅在大规模运行中将 dev 占比收缩到 9%,
+    保持 calibration 与 test 有足够样本支撑低误报结论。
+    """
+
+    return LARGE_SCALE_DEV_RATIO if prompt_count >= LARGE_SCALE_PROMPT_COUNT else SMALL_SCALE_DEV_RATIO
 
 
 def build_group_split_counts(prompt_count: int) -> dict[str, int]:
     """根据语义桶大小计算开发、校准和测试数量。"""
     if prompt_count <= 0:
         return {name: 0 for name in SPLIT_NAMES}
-    dev_count = round(prompt_count * 0.1) if prompt_count >= 10 else 0
+    dev_count = round(prompt_count * dev_ratio_for_prompt_count(prompt_count)) if prompt_count >= 10 else 0
     remaining_count = prompt_count - dev_count
     calibration_count = remaining_count // 2
     test_count = remaining_count - calibration_count

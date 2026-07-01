@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from experiments.protocol.calibration import binomial_rate_upper_confidence_bound
 from experiments.protocol.events import build_event_records
-from experiments.protocol.prompts import build_prompt_record, build_prompt_records
+from experiments.protocol.prompts import PROMPT_FILES, build_prompt_record, build_prompt_records, read_prompt_file
 from experiments.protocol.splits import SAMPLE_ROLES, assert_disjoint_calibration_and_test, group_prompt_ids_by_split
 from scripts.write_prompt_event_protocol import write_prompt_event_protocol_outputs
 
@@ -43,6 +44,19 @@ def test_calibration_and_test_prompt_ids_are_disjoint() -> None:
 
     assert assert_disjoint_calibration_and_test(split_groups)
     assert set(split_groups["calibration"]).isdisjoint(split_groups["test"])
+
+
+@pytest.mark.quick
+def test_full_paper_split_supports_low_fpr_confidence_boundary() -> None:
+    """full_paper split 应为 FPR=0.001 保留足够 clean negative 样本。"""
+    prompt_records = build_prompt_records(
+        "full_paper",
+        tuple(read_prompt_file(PROMPT_FILES["full_paper"])),
+    )
+    split_groups = group_prompt_ids_by_split(prompt_records)
+
+    assert binomial_rate_upper_confidence_bound(0, len(split_groups["calibration"]), 0.95) <= 0.001
+    assert binomial_rate_upper_confidence_bound(0, len(split_groups["test"]), 0.95) <= 0.001
 
 
 def write_prompt_config(repo_root: Path, prompt_set: str, lines: tuple[str, ...]) -> None:
