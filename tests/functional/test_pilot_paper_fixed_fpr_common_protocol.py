@@ -25,7 +25,7 @@ from experiments.protocol.prompts import build_prompt_records
 from scripts.write_pilot_paper_fixed_fpr_common_protocol_outputs import write_pilot_paper_fixed_fpr_common_protocol_outputs
 
 
-def write_pilot_paper_prompts(repo_root: Path, prompt_count: int = 240) -> Path:
+def write_pilot_paper_prompts(repo_root: Path, prompt_count: int = 250) -> Path:
     """写入测试用 pilot_paper prompt 配置。"""
 
     config_dir = repo_root / "configs"
@@ -36,7 +36,7 @@ def write_pilot_paper_prompts(repo_root: Path, prompt_count: int = 240) -> Path:
     return prompt_path
 
 
-def write_full_paper_prompts(repo_root: Path, prompt_count: int = 240) -> Path:
+def write_full_paper_prompts(repo_root: Path, prompt_count: int = 250) -> Path:
     """写入测试用 full_paper prompt 配置。"""
 
     config_dir = repo_root / "configs"
@@ -241,7 +241,7 @@ def test_pilot_paper_import_validator_accepts_governed_bootstrap_record(tmp_path
     config = PilotPaperFixedFprConfig()
     prompt_records = build_prompt_records(
         "pilot_paper",
-        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(240)),
+        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(250)),
     )
     prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
     attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
@@ -277,7 +277,7 @@ def test_pilot_paper_import_validator_rejects_full_paper_claim_boundary(tmp_path
     config = PilotPaperFixedFprConfig()
     prompt_records = build_prompt_records(
         "pilot_paper",
-        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(240)),
+        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(250)),
     )
     prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
     attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
@@ -306,7 +306,7 @@ def test_pilot_paper_import_validator_rejects_small_sample_result_records(tmp_pa
     config = PilotPaperFixedFprConfig()
     prompt_records = build_prompt_records(
         "pilot_paper",
-        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(240)),
+        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(250)),
     )
     prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
     attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
