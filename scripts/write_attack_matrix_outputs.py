@@ -322,6 +322,8 @@ def build_boundary(thresholds: dict[str, Any], threshold_report: dict[str, Any])
         target_fpr=target_fpr,
         rescue_margin_low=rescue_margin_low,
         allowed_fail_reasons=allowed_fail_reasons,
+        threshold_score_field=str(threshold_report.get("threshold_score_field", "raw_content_score")),
+        threshold_score_source_field=str(threshold_report.get("threshold_score_source_field", "raw_content_score")),
         fixed_fpr_control_scope=str(threshold_report.get("fixed_fpr_control_scope", "calibration_clean_negative")),
         fixed_fpr_denominator_role=str(threshold_report.get("fixed_fpr_denominator_role", "clean_negative_only")),
         rescue_control_scope=str(threshold_report.get("rescue_control_scope", "evidence_clean_negative")),

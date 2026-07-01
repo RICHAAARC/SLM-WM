@@ -181,9 +181,13 @@ Notebook 与 repository module 的跨边界数据
 | decision_label | method | none | true | false | false | 多证据融合检测决策标签。 |
 | threshold_name | protocol | none | true | false | false | 检测或校准协议使用的阈值名称。 |
 | threshold_value | protocol | none | true | false | false | 检测或校准协议使用的阈值数值。 |
+| threshold_score_field | protocol | none | true | false | false | fixed-FPR 阈值实际校准和正式判定使用的分数字段。 |
+| threshold_score_source_field | protocol | none | true | false | false | fixed-FPR 正式判定分数在上游记录中的来源字段。 |
 | evidence_ids | method | none | true | false | false | 融合决策引用的检测证据标识集合。 |
 | raw_content_score | method | none | true | false | false | 几何 rescue 前的内容分数。 |
 | aligned_content_score | method | none | true | false | false | 几何对齐后的内容分数。 |
+| formal_detection_score | method | none | true | false | false | fixed-FPR 正式判定使用的分数, 其来源由 threshold_score_field 说明。 |
+| threshold_score_after | method | none | true | false | false | 攻击或质量保持作用后用于 fixed-FPR 判定的正式分数。 |
 | content_threshold | protocol | none | true | false | false | fixed-FPR 内容阈值。 |
 | scenario_id | protocol | none | true | false | false | synthetic smoke 场景标识。 |
 | scenario_role | protocol | none | true | false | false | synthetic smoke 场景角色。 |
@@ -191,9 +195,11 @@ Notebook 与 repository module 的跨边界数据
 | score_margin | method | none | true | false | false | 内容分数相对内容阈值的边界余量。 |
 | raw_content_margin | method | none | true | false | false | 原始内容分数相对内容阈值的边界余量。 |
 | aligned_content_margin | method | none | true | false | false | 对齐后内容分数相对内容阈值的边界余量。 |
+| formal_detection_margin | method | none | true | false | false | 正式判定分数相对 fixed-FPR 阈值的边界余量。 |
 | fail_reason | method | none | true | false | false | 内容判定失败原因。 |
 | rescue_margin_low | protocol | none | true | false | false | rescue 边界失败窗口下界。 |
 | positive_by_content | method | none | true | false | false | 原始内容分支是否正判。 |
+| formal_detection_decision | method | none | true | false | false | 按 threshold_score_field 与 fixed-FPR 阈值得到的正式检测判定。 |
 | rescue_eligible | method | none | true | false | false | 样本是否满足 rescue 条件。 |
 | rescue_applied | method | none | true | false | false | 是否实际应用 rescue 并通过同阈值重判。 |
 | evidence_level | method | none | true | false | false | evidence-level 判定结果。 |
@@ -520,6 +526,8 @@ Notebook 与 repository module 的跨边界数据
 | full_rescue_record_count | metric | none | false | false | false | full_rescue 消融模式下的记录数量。 |
 | full_rescue_applied_count | metric | none | false | false | false | full_rescue 消融模式下实际完成 rescue 的记录数量。 |
 | raw_content_clean_fpr | metric | none | false | false | false | clean negative 上原始内容分支误报率。 |
+| formal_detection_score_clean_fpr | metric | none | false | false | false | clean negative 上正式判定分数的误报率。 |
+| formal_detection_score_attacked_fpr | metric | none | false | false | false | attacked negative 上正式判定分数的诊断误报率。 |
 | evidence_clean_fpr | metric | none | false | false | false | clean negative 上 rescue 后 evidence-level 误报率。 |
 | evidence_attacked_fpr | metric | none | false | false | false | attacked negative 上 rescue 后 evidence-level 误报率。 |
 | geo_direct_positive_audit_decision | method | none | false | false | false | 仅用于反例审计的几何直接判正风险指示, 不进入正式 evidence decision。 |
@@ -529,6 +537,8 @@ Notebook 与 repository module 的跨边界数据
 | operating_point_id | metric | none | false | false | false | fixed-FPR operating point 的稳定标识。 |
 | target_fpr | protocol | none | false | false | false | 阈值校准协议的目标误报率。 |
 | calibrated_content_threshold | protocol | none | false | false | false | 由 calibration clean negative 冻结的内容阈值。 |
+| calibrated_detection_threshold | protocol | none | false | false | false | 由 calibration clean negative 在 threshold_score_field 指定分数空间中冻结的正式检测阈值。 |
+| formal_detection_claim_ready | governance | none | false | false | false | 正式判定分数是否满足 fixed-FPR 统计边界。 |
 | calibration_negative_count | metric | none | false | false | false | 用于阈值冻结的 calibration clean negative 样本数。 |
 | allowed_false_positive_count | metric | none | false | false | false | 目标 FPR 下允许的 false positive 数量。 |
 | observed_false_positive_count | metric | none | false | false | false | 阈值冻结数据上的实际 false positive 数量。 |

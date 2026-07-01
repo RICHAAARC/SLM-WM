@@ -48,6 +48,8 @@ class AttackEvaluationBoundary:
     target_fpr: float
     rescue_margin_low: float
     allowed_fail_reasons: tuple[str, ...]
+    threshold_score_field: str = "raw_content_score"
+    threshold_score_source_field: str = "raw_content_score"
     fixed_fpr_control_scope: str = "calibration_clean_negative"
     fixed_fpr_denominator_role: str = "clean_negative_only"
     rescue_control_scope: str = "evidence_clean_negative"
@@ -63,6 +65,8 @@ class AttackEvaluationBoundary:
             raise ValueError("rescue_margin_low 必须小于 0")
         if not self.allowed_fail_reasons:
             raise ValueError("allowed_fail_reasons 不得为空")
+        if self.threshold_score_field not in {"raw_content_score", "aligned_content_score", "formal_detection_score"}:
+            raise ValueError("threshold_score_field 必须属于受治理检测分数字段")
 
     def to_dict(self) -> dict[str, Any]:
         """转为 JSON 兼容字典。"""
@@ -120,6 +124,14 @@ class AttackDetectionRecord:
     def to_dict(self) -> dict[str, Any]:
         """转为可写入 JSON 的字典。"""
         return asdict(self)
+
+
+def threshold_score_for_boundary(raw_score: float, aligned_score: float, boundary: AttackEvaluationBoundary) -> float:
+    """按 fixed-FPR 边界选择攻击后正式判定分数。"""
+
+    if boundary.threshold_score_field in {"aligned_content_score", "formal_detection_score"}:
+        return aligned_score
+    return raw_score
 
 
 def attack_config_digest(config: AttackConfig) -> str:
@@ -369,24 +381,30 @@ def build_attack_detection_record(
         quality_score_proxy = 1.0
         attention_consistency_proxy = 1.0
 
+    threshold_score_after = threshold_score_for_boundary(raw_after, aligned_after, boundary)
     margin_after = raw_after - boundary.calibrated_content_threshold
     aligned_margin_after = aligned_after - boundary.calibrated_content_threshold
+    formal_detection_margin_after = threshold_score_after - boundary.calibrated_content_threshold
     positive_by_content = margin_after >= 0.0
+    formal_detection_decision = formal_detection_margin_after >= 0.0
+    formal_score_is_raw = boundary.threshold_score_field == "raw_content_score"
     fail_reason = str(_field_value(source_record, "fail_reason", "geometry_suspected"))
     rescue_eligible = (
-        attack_performed
+        formal_score_is_raw
+        and attack_performed
         and boundary.rescue_margin_low <= margin_after < 0.0
         and geometry_reliable
         and fail_reason in boundary.allowed_fail_reasons
     )
     rescue_applied = rescue_eligible and aligned_margin_after >= 0.0
-    evidence_decision = positive_by_content or rescue_applied
+    evidence_decision = (positive_by_content or rescue_applied) if formal_score_is_raw else formal_detection_decision
     attacked_image_digest = build_stable_digest(
         {
             "source_image_digest": source_image_digest,
             "attack_config_digest": config_digest,
             "raw_content_score_after": round(raw_after, 12),
             "aligned_content_score_after": round(aligned_after, 12),
+            "threshold_score_after": round(threshold_score_after, 12),
             "metric_status": metric_status,
         }
     )
@@ -436,6 +454,9 @@ def build_attack_detection_record(
         supports_paper_claim=False,
         metadata={
             "calibrated_content_threshold": boundary.calibrated_content_threshold,
+            "threshold_score_field": boundary.threshold_score_field,
+            "threshold_score_after": threshold_score_after,
+            "formal_detection_decision": formal_detection_decision,
             "target_fpr": boundary.target_fpr,
             "rescue_margin_low": boundary.rescue_margin_low,
             "source_supports_paper_claim": bool(_field_value(source_record, "supports_paper_claim", False)),

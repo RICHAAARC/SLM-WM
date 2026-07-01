@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 
 from experiments.protocol.calibration import (
     FixedFprCalibrationConfig,
+    FixedFprThreshold,
     calibrated_records,
     curve_rows,
     empirical_threshold_at_fpr,
@@ -28,6 +29,7 @@ from experiments.protocol.calibration import (
     score_mode_operating_point_rows,
     score_distribution_rows,
     split_role,
+    threshold_score_field,
 )
 from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
@@ -293,6 +295,7 @@ def real_score_calibration_record(record: dict[str, Any]) -> dict[str, Any]:
         {
             "raw_content_score": raw_score,
             "aligned_content_score": aligned_score,
+            "formal_detection_score": aligned_score,
             "rescue_ablation_mode": "full_rescue",
             "geometry_reliable": bool(record.get("aligned_rescoring_ready", False)),
             "fail_reason": str(record.get("fail_reason", "geometry_suspected")),
@@ -300,6 +303,7 @@ def real_score_calibration_record(record: dict[str, Any]) -> dict[str, Any]:
             "score_space_name": REAL_SCORE_SPACE_NAME,
             "raw_content_score_source_field": "real_raw_content_score",
             "aligned_content_score_source_field": "real_aligned_content_score",
+            "formal_detection_score_source_field": "real_aligned_content_score",
             "proxy_raw_content_score": float(record.get("raw_content_score", raw_score)),
             "proxy_aligned_content_score": float(record.get("aligned_content_score", aligned_score)),
         }
@@ -341,6 +345,9 @@ def select_threshold_calibration_records(
             "proxy_score_calibration_used": False,
             "raw_content_score_source_field": "real_raw_content_score",
             "aligned_content_score_source_field": "real_aligned_content_score",
+            "formal_detection_score_source_field": "real_aligned_content_score",
+            "threshold_score_field": "formal_detection_score",
+            "threshold_score_source_field": "real_aligned_content_score",
         }
     return rescue_records, {
         "calibration_records_source": "geometric_rescue_proxy_scores",
@@ -351,7 +358,22 @@ def select_threshold_calibration_records(
         "proxy_score_calibration_used": True,
         "raw_content_score_source_field": "raw_content_score",
         "aligned_content_score_source_field": "aligned_content_score",
+        "formal_detection_score_source_field": "raw_content_score",
+        "threshold_score_field": "raw_content_score",
+        "threshold_score_source_field": "raw_content_score",
     }
+
+
+def threshold_with_score_space_metadata(threshold: FixedFprThreshold, score_space_metadata: dict[str, Any]) -> FixedFprThreshold:
+    """把正式判定分数字段写入冻结阈值对象, 确保校准和判定使用同一分数空间。"""
+
+    payload = threshold.to_dict()
+    payload["metadata"] = {
+        **payload.get("metadata", {}),
+        "threshold_score_field": score_space_metadata["threshold_score_field"],
+        "threshold_score_source_field": score_space_metadata["threshold_score_source_field"],
+    }
+    return FixedFprThreshold(**payload)
 
 
 def threshold_payload(threshold: Any, score_space_metadata: dict[str, Any]) -> dict[str, Any]:
@@ -364,6 +386,9 @@ def threshold_payload(threshold: Any, score_space_metadata: dict[str, Any]) -> d
         "calibration_records_source": score_space_metadata["calibration_records_source"],
         "raw_content_score_source_field": score_space_metadata["raw_content_score_source_field"],
         "aligned_content_score_source_field": score_space_metadata["aligned_content_score_source_field"],
+        "formal_detection_score_source_field": score_space_metadata["formal_detection_score_source_field"],
+        "threshold_score_field": score_space_metadata["threshold_score_field"],
+        "threshold_score_source_field": score_space_metadata["threshold_score_source_field"],
     }
     return payload
 
@@ -434,6 +459,8 @@ def build_standard_metric_rows(metrics: dict[str, Any], records: tuple[dict[str,
     metric_values = {
         "true_positive_rate": metrics["true_positive_rate"],
         "raw_content_clean_fpr": metrics["raw_content_clean_fpr"],
+        "formal_detection_score_clean_fpr": metrics["formal_detection_score_clean_fpr"],
+        "formal_detection_score_attacked_fpr": metrics["formal_detection_score_attacked_fpr"],
         "evidence_clean_fpr": metrics["evidence_clean_fpr"],
         "evidence_attacked_fpr": metrics["evidence_attacked_fpr"],
         "raw_score_auc": metrics["raw_score_auc"],
@@ -464,6 +491,12 @@ def build_rescue_fpr_rows(metrics: dict[str, Any], threshold_report: dict[str, A
             "raw_content_clean_negative",
             "fixed_fpr_raw_clean_control",
             metrics["raw_content_clean_fpr"],
+            metrics["threshold_score_field"] == "raw_content_score",
+        ),
+        (
+            "formal_detection_clean_negative",
+            "fixed_fpr_formal_detection_control",
+            metrics["formal_detection_score_clean_fpr"],
             True,
         ),
         (
@@ -520,6 +553,9 @@ def build_threshold_report(
         {
             "construction_unit_name": CONSTRUCTION_UNIT_NAME,
             "calibrated_content_threshold": threshold.threshold_value,
+            "calibrated_detection_threshold": threshold.threshold_value,
+            "threshold_score_field": metrics["threshold_score_field"],
+            "threshold_score_source_field": score_space_metadata["threshold_score_source_field"],
             "positive_count": metrics["positive_count"],
             "clean_negative_count": metrics["clean_negative_count"],
             "attacked_negative_count": metrics["attacked_negative_count"],
@@ -544,8 +580,14 @@ def build_threshold_report(
             "fixed_fpr_boundary_ready": not threshold.threshold_degenerate and minimum_clean_negative_count_ready,
             "rescue_boundary_ready": not clean_fpr_exceeds_target and minimum_clean_negative_count_ready,
             "fixed_fpr_and_rescue_boundary_ready": fixed_fpr_and_rescue_boundary_ready,
-            "raw_content_claim_ready": (
+            "formal_detection_claim_ready": (
                 not threshold.threshold_degenerate
+                and metrics["formal_detection_score_clean_fpr"] <= config.target_fpr
+                and minimum_clean_negative_count_ready
+            ),
+            "raw_content_claim_ready": (
+                metrics["threshold_score_field"] == "raw_content_score"
+                and not threshold.threshold_degenerate
                 and metrics["raw_content_clean_fpr"] <= config.target_fpr
                 and minimum_clean_negative_count_ready
             ),
@@ -595,10 +637,12 @@ def write_threshold_calibration_outputs(
         aligned_rescoring_package_path=resolved_aligned_package_path,
     )
     calibration_clean_records = split_role(records, config.calibration_split, config.clean_negative_role)
+    selected_threshold_score_field = score_space_metadata["threshold_score_field"]
     threshold = empirical_threshold_at_fpr(
-        (record["raw_content_score"] for record in calibration_clean_records),
+        (record[selected_threshold_score_field] for record in calibration_clean_records),
         config,
     )
+    threshold = threshold_with_score_space_metadata(threshold, score_space_metadata)
     calibrated = calibrated_records(records, threshold, config)
     metrics = operating_point_metrics(calibrated, threshold, config)
     threshold_report = build_threshold_report(
@@ -610,8 +654,9 @@ def write_threshold_calibration_outputs(
         max(0, int(minimum_clean_negative_count)),
         score_space_metadata,
     )
-    roc_rows, det_rows = curve_rows(calibrated, config)
-    distribution_rows = score_distribution_rows(calibrated)
+    formal_score_field = threshold_score_field(threshold)
+    roc_rows, det_rows = curve_rows(calibrated, config, score_field=formal_score_field)
+    distribution_rows = score_distribution_rows(calibrated, score_field=formal_score_field)
     standard_rows = build_standard_metric_rows(metrics, calibrated)
     quality_rows = build_quality_metric_rows(rescue_audit, root_path, aligned_quality)
     fpr_rows = build_rescue_fpr_rows(metrics, threshold_report)
@@ -637,12 +682,16 @@ def write_threshold_calibration_outputs(
             "operating_point_id",
             "target_fpr",
             "calibrated_content_threshold",
+            "calibrated_detection_threshold",
+            "threshold_score_field",
             "threshold_degenerate",
             "positive_count",
             "clean_negative_count",
             "attacked_negative_count",
             "true_positive_rate",
             "raw_content_clean_fpr",
+            "formal_detection_score_clean_fpr",
+            "formal_detection_score_attacked_fpr",
             "evidence_clean_fpr",
             "evidence_attacked_fpr",
             "rescue_applied_rate",

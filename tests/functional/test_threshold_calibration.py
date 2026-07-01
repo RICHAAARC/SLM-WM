@@ -174,12 +174,12 @@ def write_aligned_rescoring_package_with_real_scores(package_path: Path) -> None
 
     write_aligned_rescoring_package(package_path)
     records = [
-        aligned_rescoring_record("cal_pos", "calibration", "positive_source", 0.95, 0.15),
-        aligned_rescoring_record("cal_clean_a", "calibration", "clean_negative", 0.10, 0.60),
-        aligned_rescoring_record("cal_clean_b", "calibration", "clean_negative", 0.20, 0.70),
-        aligned_rescoring_record("test_pos", "test", "positive_source", 0.90, 0.16),
-        aligned_rescoring_record("test_clean", "test", "clean_negative", 0.30, 0.65),
-        aligned_rescoring_record("test_attacked", "test", "attacked_negative", 0.35, 0.66),
+        aligned_rescoring_record("cal_pos", "calibration", "positive_source", 0.95, 0.15, 0.95),
+        aligned_rescoring_record("cal_clean_a", "calibration", "clean_negative", 0.10, 0.60, 0.10),
+        aligned_rescoring_record("cal_clean_b", "calibration", "clean_negative", 0.20, 0.70, 0.20),
+        aligned_rescoring_record("test_pos", "test", "positive_source", 0.90, 0.16, 0.90),
+        aligned_rescoring_record("test_clean", "test", "clean_negative", 0.30, 0.65, 0.15),
+        aligned_rescoring_record("test_attacked", "test", "attacked_negative", 0.35, 0.66, 0.18),
     ]
     with ZipFile(package_path, "a") as archive:
         archive.writestr(
@@ -210,14 +210,18 @@ def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separ
     assert threshold_report["metadata"]["threshold_source"] == "calibration_clean_negative"
     assert threshold_report["full_method_claim_ready"] is False
     assert operating_rows[0]["supports_paper_claim"] == "False"
+    assert operating_rows[0]["threshold_score_field"] == "raw_content_score"
     assert {row["decision_scope"] for row in fpr_rows} == {
         "raw_content_clean_negative",
+        "formal_detection_clean_negative",
         "evidence_clean_negative",
         "evidence_attacked_negative",
     }
     fpr_by_scope = {row["decision_scope"]: row for row in fpr_rows}
     assert fpr_by_scope["raw_content_clean_negative"]["statistical_boundary"] == "fixed_fpr_raw_clean_control"
     assert fpr_by_scope["raw_content_clean_negative"]["governs_fixed_fpr"] == "True"
+    assert fpr_by_scope["formal_detection_clean_negative"]["statistical_boundary"] == "fixed_fpr_formal_detection_control"
+    assert fpr_by_scope["formal_detection_clean_negative"]["governs_fixed_fpr"] == "True"
     assert fpr_by_scope["evidence_clean_negative"]["statistical_boundary"] == "fixed_fpr_evidence_clean_control"
     assert fpr_by_scope["evidence_clean_negative"]["governs_fixed_fpr"] == "True"
     assert fpr_by_scope["evidence_attacked_negative"]["statistical_boundary"] == "attack_robustness_diagnostic"
@@ -229,11 +233,13 @@ def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separ
     assert {row["decision_mode"] for row in score_mode_rows} == {
         "raw_content_threshold",
         "aligned_content_threshold",
+        "formal_detection_threshold",
         "evidence_after_rescue",
     }
     score_mode_by_name = {row["decision_mode"]: row for row in score_mode_rows}
     assert score_mode_by_name["raw_content_threshold"]["score_field"] == "raw_content_score"
     assert score_mode_by_name["aligned_content_threshold"]["score_field"] == "aligned_content_score"
+    assert score_mode_by_name["formal_detection_threshold"]["score_field"] == "raw_content_score"
     assert score_mode_by_name["evidence_after_rescue"]["score_field"] == "evidence_decision"
     assert score_mode_by_name["raw_content_threshold"]["governs_fixed_fpr"] == "True"
     assert score_mode_by_name["aligned_content_threshold"]["governs_fixed_fpr"] == "False"
@@ -379,8 +385,22 @@ def test_threshold_calibration_prefers_real_aligned_rescoring_score_space(tmp_pa
     thresholds = json.loads((output_dir / "calibration_thresholds.json").read_text(encoding="utf-8"))
     threshold_report = json.loads((output_dir / "threshold_degeneracy_report.json").read_text(encoding="utf-8"))
 
-    assert thresholds["threshold_value"] == 0.7
+    operating_rows = list(csv.DictReader((output_dir / "fixed_fpr_operating_points.csv").open(encoding="utf-8")))
+    score_mode_rows = {
+        row["decision_mode"]: row
+        for row in csv.DictReader((output_dir / "score_mode_operating_points.csv").open(encoding="utf-8"))
+    }
+
+    assert thresholds["threshold_value"] == 0.2
     assert thresholds["metadata"]["score_space_name"] == "real_sd_latent_projection"
+    assert thresholds["metadata"]["threshold_score_field"] == "formal_detection_score"
+    assert thresholds["metadata"]["threshold_score_source_field"] == "real_aligned_content_score"
+    assert operating_rows[0]["threshold_score_field"] == "formal_detection_score"
+    assert operating_rows[0]["true_positive_rate"] == "1.0"
+    assert operating_rows[0]["evidence_clean_fpr"] == "0.3333333333333333"
+    assert score_mode_rows["formal_detection_threshold"]["governs_fixed_fpr"] == "True"
+    assert score_mode_rows["formal_detection_threshold"]["score_field"] == "formal_detection_score"
+    assert score_mode_rows["aligned_content_threshold"]["governs_fixed_fpr"] == "True"
     assert threshold_report["score_space_alignment_ready"] is True
     assert threshold_report["real_score_calibration_ready"] is True
     assert threshold_report["proxy_score_calibration_used"] is False

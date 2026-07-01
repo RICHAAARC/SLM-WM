@@ -996,6 +996,10 @@ def formal_boundary(root_path: Path, config: RealAttackEvaluationConfig) -> dict
         ),
         "attacked_negative_governs_fixed_fpr": bool(report.get("attacked_negative_governs_fixed_fpr", False)),
         "score_space_name": str(report.get("score_space_name", threshold_metadata.get("score_space_name", ""))),
+        "threshold_score_field": str(report.get("threshold_score_field", threshold_metadata.get("threshold_score_field", "raw_content_score"))),
+        "threshold_score_source_field": str(
+            report.get("threshold_score_source_field", threshold_metadata.get("threshold_score_source_field", "raw_content_score"))
+        ),
         "score_space_alignment_ready": bool(report.get("score_space_alignment_ready", False)),
         "real_score_calibration_ready": bool(report.get("real_score_calibration_ready", False)),
         "calibration_records_source": str(report.get("calibration_records_source", "")),
@@ -1010,6 +1014,7 @@ def formal_attack_record_id(real_record: dict[str, Any], boundary: dict[str, Any
         "source_image_digest": real_record["source_image_digest"],
         "attacked_image_digest": real_record["attacked_image_digest"],
         "content_threshold": boundary["content_threshold"],
+        "threshold_score_field": boundary.get("threshold_score_field", "raw_content_score"),
     }
     return f"attack_record_{build_stable_digest(payload)[:16]}"
 
@@ -1019,20 +1024,26 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
     raw_before = float(source_context["raw_content_score_before"])
     aligned_before = float(source_context["aligned_content_score_before"])
     retention = float(real_record["aligned_content_score_after"])
-    raw_after = max(0.0, min(1.0, raw_before * retention))
-    aligned_after = max(0.0, min(1.0, aligned_before * retention))
+    raw_after = raw_before * retention
+    aligned_after = aligned_before * retention
     threshold = float(boundary["content_threshold"])
+    threshold_score_field = str(boundary.get("threshold_score_field", "raw_content_score"))
+    threshold_score_after = aligned_after if threshold_score_field in {"aligned_content_score", "formal_detection_score"} else raw_after
     margin_after = raw_after - threshold
     aligned_margin_after = aligned_after - threshold
+    formal_detection_margin_after = threshold_score_after - threshold
     positive_by_content = margin_after >= 0.0
+    formal_detection_decision = formal_detection_margin_after >= 0.0
     geometry_reliable = bool(source_context["geometry_reliable"])
+    formal_score_is_raw = threshold_score_field == "raw_content_score"
     rescue_eligible = (
-        boundary["rescue_margin_low"] <= margin_after < 0.0
+        formal_score_is_raw
+        and boundary["rescue_margin_low"] <= margin_after < 0.0
         and geometry_reliable
         and source_context["fail_reason"] in boundary["allowed_fail_reasons"]
     )
     rescue_applied = rescue_eligible and aligned_margin_after >= 0.0
-    evidence_decision = positive_by_content or rescue_applied
+    evidence_decision = (positive_by_content or rescue_applied) if formal_score_is_raw else formal_detection_decision
     attack_config_digest = build_stable_digest(
         {
             "attack_id": real_record["attack_id"],
@@ -1050,6 +1061,7 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
             "attacked_image_digest": real_record["attacked_image_digest"],
             "raw_content_score_after": raw_after,
             "aligned_content_score_after": aligned_after,
+            "threshold_score_after": threshold_score_after,
             "boundary": boundary,
         }
     )
@@ -1098,6 +1110,10 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
             "detection_method": "fixed_fpr_attack_matrix_schema_from_real_attacked_image_retention_proxy",
             "attack_implementation": real_record["attack_implementation"],
             "formal_boundary_ready": boundary["boundary_ready"],
+            "threshold_score_field": threshold_score_field,
+            "threshold_score_source_field": boundary.get("threshold_score_source_field", ""),
+            "threshold_score_after": threshold_score_after,
+            "formal_detection_decision": formal_detection_decision,
             "formal_detection_proxy": True,
             "attacked_image_rescore_performed": False,
             "attacked_image_rescore_required_for_claim": True,

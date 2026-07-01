@@ -158,6 +158,12 @@ def score_auc(positive_scores: Iterable[float], negative_scores: Iterable[float]
     return wins / (len(positives) * len(negatives))
 
 
+def threshold_score_field(threshold: FixedFprThreshold) -> str:
+    """读取当前 fixed-FPR 正式判定使用的分数字段。"""
+
+    return str(threshold.metadata.get("threshold_score_field", "raw_content_score"))
+
+
 def decision_fields_at_threshold(
     record: dict[str, Any],
     threshold: FixedFprThreshold,
@@ -166,21 +172,36 @@ def decision_fields_at_threshold(
     """在冻结阈值下重算 raw content 与 rescue 后 evidence 判定。"""
     raw_score = float(record["raw_content_score"])
     aligned_score = float(record["aligned_content_score"])
+    formal_score_field = threshold_score_field(threshold)
+    formal_score = float(
+        record.get(
+            formal_score_field,
+            aligned_score if formal_score_field in {"aligned_content_score", "formal_detection_score"} else raw_score,
+        )
+    )
     raw_margin = raw_score - threshold.threshold_value
     aligned_margin = aligned_score - threshold.threshold_value
+    formal_margin = formal_score - threshold.threshold_value
     positive_by_content = raw_margin >= 0.0
+    formal_detection_decision = formal_margin >= 0.0
+    formal_score_is_raw = formal_score_field == "raw_content_score"
     rescue_eligible = (
-        config.rescue_margin_low <= raw_margin < 0.0
+        formal_score_is_raw
+        and config.rescue_margin_low <= raw_margin < 0.0
         and bool(record.get("geometry_reliable", False))
         and str(record.get("fail_reason", "")) in config.allowed_fail_reasons
         and record.get("rescue_ablation_mode") == "full_rescue"
     )
     rescue_applied = rescue_eligible and aligned_margin >= 0.0
-    evidence_decision = positive_by_content or rescue_applied
+    evidence_decision = (positive_by_content or rescue_applied) if formal_score_is_raw else formal_detection_decision
     return {
         "raw_content_margin": raw_margin,
         "aligned_content_margin": aligned_margin,
+        "formal_detection_score": formal_score,
+        "formal_detection_margin": formal_margin,
+        "threshold_score_field": formal_score_field,
         "positive_by_content": positive_by_content,
+        "formal_detection_decision": formal_detection_decision,
         "rescue_eligible": rescue_eligible,
         "rescue_applied": rescue_applied,
         "evidence_decision": evidence_decision,
@@ -206,16 +227,21 @@ def operating_point_metrics(
     positives = tuple(record for record in calibrated if record["sample_role"] == config.positive_role)
     clean_negatives = tuple(record for record in calibrated if record["sample_role"] == config.clean_negative_role)
     attacked_negatives = tuple(record for record in calibrated if record["sample_role"] == config.attacked_negative_role)
+    formal_score_field = threshold_score_field(threshold)
     return {
         "operating_point_id": f"fixed_fpr_{config.target_fpr:g}",
         "target_fpr": config.target_fpr,
         "calibrated_content_threshold": threshold.threshold_value,
+        "calibrated_detection_threshold": threshold.threshold_value,
+        "threshold_score_field": formal_score_field,
         "threshold_degenerate": threshold.threshold_degenerate,
         "positive_count": len(positives),
         "clean_negative_count": len(clean_negatives),
         "attacked_negative_count": len(attacked_negatives),
         "true_positive_rate": binary_rate(positives, "evidence_decision"),
         "raw_content_clean_fpr": binary_rate(clean_negatives, "positive_by_content"),
+        "formal_detection_score_clean_fpr": binary_rate(clean_negatives, "formal_detection_decision"),
+        "formal_detection_score_attacked_fpr": binary_rate(attacked_negatives, "formal_detection_decision"),
         "evidence_clean_fpr": binary_rate(clean_negatives, "evidence_decision"),
         "evidence_attacked_fpr": binary_rate(attacked_negatives, "evidence_decision"),
         "rescue_applied_rate": binary_rate(calibrated, "rescue_applied"),
@@ -257,9 +283,15 @@ def score_mode_operating_point_rows(
     positives = tuple(record for record in calibrated if record["sample_role"] == config.positive_role)
     clean_negatives = tuple(record for record in calibrated if record["sample_role"] == config.clean_negative_role)
     attacked_negatives = tuple(record for record in calibrated if record["sample_role"] == config.attacked_negative_role)
+    formal_score_field = threshold_score_field(threshold)
     mode_specs = (
-        ("raw_content_threshold", "raw_content_score", "raw_score_auc", True),
-        ("aligned_content_threshold", "aligned_content_score", "aligned_score_auc", False),
+        ("raw_content_threshold", "raw_content_score", "raw_score_auc", formal_score_field == "raw_content_score"),
+        (
+            "aligned_content_threshold",
+            "aligned_content_score",
+            "aligned_score_auc",
+            formal_score_field in {"aligned_content_score", "formal_detection_score"},
+        ),
     )
     rows = [
         {
@@ -282,6 +314,26 @@ def score_mode_operating_point_rows(
         }
         for decision_mode, score_field, _, governs_fixed_fpr in mode_specs
     ]
+    rows.append(
+        {
+            "decision_mode": "formal_detection_threshold",
+            "score_field": formal_score_field,
+            "target_fpr": config.target_fpr,
+            "threshold_value": threshold.threshold_value,
+            "positive_count": len(positives),
+            "clean_negative_count": len(clean_negatives),
+            "attacked_negative_count": len(attacked_negatives),
+            "true_positive_rate": binary_rate(positives, "formal_detection_decision"),
+            "clean_false_positive_rate": binary_rate(clean_negatives, "formal_detection_decision"),
+            "attacked_false_positive_rate": binary_rate(attacked_negatives, "formal_detection_decision"),
+            "score_auc": score_auc(
+                (record["formal_detection_score"] for record in positives),
+                (record["formal_detection_score"] for record in clean_negatives),
+            ),
+            "governs_fixed_fpr": True,
+            "supports_paper_claim": False,
+        }
+    )
     rows.append(
         {
             "decision_mode": "evidence_after_rescue",
@@ -313,21 +365,25 @@ def threshold_grid(records: Iterable[dict[str, Any]], score_field: str = "raw_co
     return tuple(reversed([scores[index] for index in indices]))
 
 
-def curve_rows(records: Iterable[dict[str, Any]], config: FixedFprCalibrationConfig) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def curve_rows(
+    records: Iterable[dict[str, Any]],
+    config: FixedFprCalibrationConfig,
+    score_field: str = "raw_content_score",
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """生成 ROC 与 DET 曲线点。"""
     record_tuple = tuple(records)
     positives = tuple(record for record in record_tuple if record["sample_role"] == config.positive_role)
     clean_negatives = tuple(record for record in record_tuple if record["sample_role"] == config.clean_negative_role)
     roc_rows: list[dict[str, Any]] = []
     det_rows: list[dict[str, Any]] = []
-    for threshold in threshold_grid(record_tuple):
+    for threshold in threshold_grid(record_tuple, score_field=score_field):
         true_positive_rate = (
-            sum(1 for record in positives if float(record["raw_content_score"]) >= threshold) / len(positives)
+            sum(1 for record in positives if float(record[score_field]) >= threshold) / len(positives)
             if positives
             else 0.0
         )
         false_positive_rate = (
-            sum(1 for record in clean_negatives if float(record["raw_content_score"]) >= threshold) / len(clean_negatives)
+            sum(1 for record in clean_negatives if float(record[score_field]) >= threshold) / len(clean_negatives)
             if clean_negatives
             else 0.0
         )
@@ -351,10 +407,14 @@ def curve_rows(records: Iterable[dict[str, Any]], config: FixedFprCalibrationCon
     return roc_rows, det_rows
 
 
-def score_distribution_rows(records: Iterable[dict[str, Any]], bin_count: int = 10) -> list[dict[str, Any]]:
+def score_distribution_rows(
+    records: Iterable[dict[str, Any]],
+    bin_count: int = 10,
+    score_field: str = "raw_content_score",
+) -> list[dict[str, Any]]:
     """生成分数分布表。"""
     record_tuple = tuple(records)
-    scores = [float(record["raw_content_score"]) for record in record_tuple]
+    scores = [float(record[score_field]) for record in record_tuple]
     if not scores:
         return []
     lower_bound = min(scores)
@@ -369,17 +429,17 @@ def score_distribution_rows(records: Iterable[dict[str, Any]], bin_count: int = 
             count = sum(
                 1
                 for record in role_records
-                if lower <= float(record["raw_content_score"]) < upper
-                or (index == bin_count - 1 and float(record["raw_content_score"]) <= upper)
+                if lower <= float(record[score_field]) < upper
+                or (index == bin_count - 1 and float(record[score_field]) <= upper)
             )
             rows.append(
                 {
                     "sample_role": sample_role,
                     "score_distribution_bin": f"[{lower:.6f},{upper:.6f}]",
                     "score_count": count,
-                    "score_min": min(float(record["raw_content_score"]) for record in role_records),
-                    "score_max": max(float(record["raw_content_score"]) for record in role_records),
-                    "score_mean": mean_value(role_records, "raw_content_score"),
+                    "score_min": min(float(record[score_field]) for record in role_records),
+                    "score_max": max(float(record[score_field]) for record in role_records),
+                    "score_mean": mean_value(role_records, score_field),
                     "supports_paper_claim": False,
                 }
             )
