@@ -542,7 +542,7 @@ Notebook 与 repository module 的跨边界数据
 | target_fpr | protocol | none | false | false | false | 阈值校准协议的目标误报率。 |
 | calibrated_content_threshold | protocol | none | false | false | false | 由 calibration clean negative 冻结的内容阈值。 |
 | calibrated_detection_threshold | protocol | none | false | false | false | 由 calibration clean negative 在 threshold_score_field 指定分数空间中冻结的正式检测阈值。 |
-| formal_detection_claim_ready | governance | none | false | false | false | 正式判定分数是否满足 fixed-FPR 统计边界。 |
+| formal_detection_claim_ready | governance | none | false | false | false | 正式判定分数是否同时满足校准 split fixed-FPR 边界和测试 clean negative 经验 FPR 诊断边界。 |
 | calibration_negative_count | metric | none | false | false | false | 用于阈值冻结的 calibration clean negative 样本数。 |
 | allowed_false_positive_count | metric | none | false | false | false | 目标 FPR 下允许的 false positive 数量。 |
 | observed_false_positive_count | metric | none | false | false | false | 阈值冻结数据上的实际 false positive 数量。 |
@@ -552,18 +552,23 @@ Notebook 与 repository module 的跨边界数据
 | threshold_source | protocol | none | false | false | false | 阈值来源, 正式协议应为 calibration clean negative。 |
 | rescue_window_frozen | protocol | none | false | false | false | rescue window 是否已冻结。 |
 | fail_reason_gate_frozen | protocol | none | false | false | false | fail reason gate 是否已冻结。 |
-| evidence_fpr_exceeds_target | metric | none | false | false | false | rescue 后 clean negative evidence-level FPR 是否超过目标 operating point, 不包含 attacked negative 诊断分母。 |
+| evidence_fpr_exceeds_target | metric | none | false | false | false | 测试 clean negative evidence-level FPR 是否超过目标 operating point, 不包含 attacked negative 诊断分母; 该字段用于经验诊断, 不直接阻断阈值冻结 workflow。 |
 | fixed_fpr_control_scope | protocol | none | false | false | false | fixed-FPR 阈值冻结时实际使用的控制样本范围, 正式协议应为 calibration clean negative。 |
 | fixed_fpr_denominator_role | protocol | none | false | false | false | fixed-FPR 统计分母的样本角色说明, 当前只允许 clean negative 作为控制分母。 |
 | rescue_control_scope | protocol | none | false | false | false | rescue 后 evidence-level FPR 的控制样本范围, 当前为 evidence clean negative。 |
 | rescue_changes_fpr_denominator | protocol | none | false | false | false | rescue 是否改变 fixed-FPR 分母, 当前必须为 false。 |
 | attacked_negative_boundary_role | governance | none | false | false | false | attacked negative 在 fixed-FPR 协议中的边界角色, 当前仅作为 robustness diagnostic。 |
 | attacked_negative_governs_fixed_fpr | governance | none | false | false | false | attacked negative FPR 是否参与 fixed-FPR 阈值控制, 当前必须为 false。 |
-| clean_fpr_exceeds_target | metric | none | false | false | false | clean negative evidence-level FPR 是否超过目标 FPR, 该字段控制 evidence_fpr_exceeds_target。 |
+| calibration_fpr_exceeds_target | metric | none | false | false | false | calibration clean negative 上冻结阈值的实际 FPR 是否超过目标 FPR, 该字段控制 fixed-FPR 校准门禁。 |
+| test_clean_fpr_exceeds_target | metric | none | false | false | false | 测试 clean negative 上 evidence-level FPR 是否超过目标 FPR, 该字段用于经验泛化诊断。 |
+| formal_detection_test_clean_fpr_exceeds_target | metric | none | false | false | false | 测试 clean negative 上 formal detection score FPR 是否超过目标 FPR, 该字段用于正式判定分数的经验泛化诊断。 |
+| clean_fpr_exceeds_target | metric | none | false | false | false | 兼容旧字段名, 表示测试 clean negative evidence-level FPR 是否超过目标 FPR。 |
 | attacked_fpr_diagnostic_exceeds_target | metric | none | false | false | false | attacked negative evidence-level FPR 是否超过目标 FPR, 该字段只作为攻击鲁棒性诊断。 |
-| fixed_fpr_boundary_ready | metric | none | false | false | false | fixed-FPR 阈值边界是否未退化并可被下游检测协议复用。 |
-| rescue_boundary_ready | metric | none | false | false | false | rescue 后 clean negative evidence-level FPR 是否仍满足目标约束。 |
-| fixed_fpr_and_rescue_boundary_ready | metric | none | false | false | false | fixed-FPR 阈值和 rescue clean negative 统计边界是否同时满足当前工程审计要求。 |
+| fixed_fpr_boundary_ready | metric | none | false | false | false | fixed-FPR 阈值冻结边界是否未退化、calibration FPR 未超标并可被下游检测协议复用。 |
+| rescue_boundary_ready | metric | none | false | false | false | rescue 统计边界是否已冻结且不改变 fixed-FPR 分母; 测试 clean negative FPR 超标仅作为经验诊断。 |
+| fixed_fpr_and_rescue_boundary_ready | metric | none | false | false | false | fixed-FPR 阈值冻结边界和 rescue 协议边界是否同时满足当前工程审计要求。 |
+| workflow_calibration_ready | governance | none | false | false | false | 阈值校准 workflow 是否满足可继续下游重建的工程门禁。 |
+| paper_claim_empirical_fpr_ready | governance | none | false | false | false | 测试 clean negative 经验 FPR 是否足以支持论文声明层面的 fixed-FPR 结论。 |
 | statistical_boundary | protocol | none | false | false | false | FPR 审计表中单行记录所属的统计边界名称。 |
 | governs_fixed_fpr | governance | none | false | false | false | FPR 审计表中单行记录是否参与 fixed-FPR 控制边界。 |
 | raw_content_claim_ready | claim | none | false | false | false | raw content 分支是否满足当前 fixed-FPR 口径。 |

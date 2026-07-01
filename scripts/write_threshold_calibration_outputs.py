@@ -539,15 +539,29 @@ def build_threshold_report(
 ) -> dict[str, Any]:
     """构造阈值退化与 fixed-FPR 主张边界报告。"""
     report = threshold_payload(threshold, score_space_metadata)
-    clean_fpr_exceeds_target = metrics["evidence_clean_fpr"] > config.target_fpr
+    calibration_fpr_exceeds_target = threshold.observed_fpr > config.target_fpr
+    test_clean_fpr_exceeds_target = metrics["evidence_clean_fpr"] > config.target_fpr
+    formal_detection_test_clean_fpr_exceeds_target = metrics["formal_detection_score_clean_fpr"] > config.target_fpr
     attacked_fpr_diagnostic_exceeds_target = metrics["evidence_attacked_fpr"] > config.target_fpr
     calibration_negative_count_ready = threshold.calibration_negative_count >= minimum_clean_negative_count
     evidence_clean_negative_count_ready = metrics["clean_negative_count"] >= minimum_clean_negative_count
     minimum_clean_negative_count_ready = calibration_negative_count_ready and evidence_clean_negative_count_ready
-    fixed_fpr_and_rescue_boundary_ready = (
+    fixed_fpr_boundary_ready = (
         not threshold.threshold_degenerate
-        and not clean_fpr_exceeds_target
-        and minimum_clean_negative_count_ready
+        and not calibration_fpr_exceeds_target
+        and calibration_negative_count_ready
+    )
+    rescue_boundary_ready = (
+        fixed_fpr_boundary_ready
+        and evidence_clean_negative_count_ready
+    )
+    fixed_fpr_and_rescue_boundary_ready = (
+        fixed_fpr_boundary_ready
+        and rescue_boundary_ready
+    )
+    paper_claim_empirical_fpr_ready = (
+        not test_clean_fpr_exceeds_target
+        and not formal_detection_test_clean_fpr_exceeds_target
     )
     report.update(
         {
@@ -574,20 +588,25 @@ def build_threshold_report(
             "rescue_changes_fpr_denominator": False,
             "attacked_negative_boundary_role": ATTACKED_NEGATIVE_BOUNDARY_ROLE,
             "attacked_negative_governs_fixed_fpr": False,
-            "clean_fpr_exceeds_target": clean_fpr_exceeds_target,
+            "calibration_fpr_exceeds_target": calibration_fpr_exceeds_target,
+            "test_clean_fpr_exceeds_target": test_clean_fpr_exceeds_target,
+            "formal_detection_test_clean_fpr_exceeds_target": formal_detection_test_clean_fpr_exceeds_target,
+            "clean_fpr_exceeds_target": test_clean_fpr_exceeds_target,
             "attacked_fpr_diagnostic_exceeds_target": attacked_fpr_diagnostic_exceeds_target,
-            "evidence_fpr_exceeds_target": clean_fpr_exceeds_target,
-            "fixed_fpr_boundary_ready": not threshold.threshold_degenerate and minimum_clean_negative_count_ready,
-            "rescue_boundary_ready": not clean_fpr_exceeds_target and minimum_clean_negative_count_ready,
+            "evidence_fpr_exceeds_target": test_clean_fpr_exceeds_target,
+            "fixed_fpr_boundary_ready": fixed_fpr_boundary_ready,
+            "rescue_boundary_ready": rescue_boundary_ready,
             "fixed_fpr_and_rescue_boundary_ready": fixed_fpr_and_rescue_boundary_ready,
+            "workflow_calibration_ready": fixed_fpr_and_rescue_boundary_ready,
+            "paper_claim_empirical_fpr_ready": paper_claim_empirical_fpr_ready,
             "formal_detection_claim_ready": (
-                not threshold.threshold_degenerate
-                and metrics["formal_detection_score_clean_fpr"] <= config.target_fpr
+                fixed_fpr_boundary_ready
+                and paper_claim_empirical_fpr_ready
                 and minimum_clean_negative_count_ready
             ),
             "raw_content_claim_ready": (
                 metrics["threshold_score_field"] == "raw_content_score"
-                and not threshold.threshold_degenerate
+                and fixed_fpr_boundary_ready
                 and metrics["raw_content_clean_fpr"] <= config.target_fpr
                 and minimum_clean_negative_count_ready
             ),

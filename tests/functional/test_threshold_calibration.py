@@ -273,8 +273,8 @@ def test_attacked_negative_fpr_is_diagnostic_not_fixed_fpr_denominator(tmp_path:
 
 
 @pytest.mark.quick
-def test_evidence_clean_fpr_governs_threshold_protocol_decision(tmp_path: Path) -> None:
-    """rescue 后 clean negative FPR 超标时, 阈值协议必须失败。"""
+def test_test_clean_fpr_exceeding_target_is_diagnostic_not_protocol_gate(tmp_path: Path) -> None:
+    """测试 split clean FPR 超标时, 阈值冻结门禁仍由 calibration split 控制。"""
     rescue_dir = tmp_path / "outputs" / "geometric_rescue"
     rescue_dir.mkdir(parents=True)
     records_path = rescue_dir / "aligned_detection_records.jsonl"
@@ -303,6 +303,45 @@ def test_evidence_clean_fpr_governs_threshold_protocol_decision(tmp_path: Path) 
 
     assert threshold_report["raw_content_claim_ready"] is True
     assert threshold_report["evidence_fpr_exceeds_target"] is True
+    assert threshold_report["test_clean_fpr_exceeds_target"] is True
+    assert threshold_report["calibration_fpr_exceeds_target"] is False
+    assert threshold_report["fixed_fpr_and_rescue_boundary_ready"] is True
+    assert threshold_report["formal_detection_claim_ready"] is False
+    assert threshold_report["paper_claim_empirical_fpr_ready"] is False
+    assert manifest["metadata"]["protocol_decision"] == "pass"
+
+
+@pytest.mark.quick
+def test_calibration_fpr_exceeding_target_blocks_threshold_protocol(tmp_path: Path) -> None:
+    """calibration split 阈值退化时, 阈值协议必须失败。"""
+    rescue_dir = tmp_path / "outputs" / "geometric_rescue"
+    rescue_dir.mkdir(parents=True)
+    records_path = rescue_dir / "aligned_detection_records.jsonl"
+    audit_path = rescue_dir / "geometry_rescue_audit.json"
+    records = [
+        rescue_record("cal_pos", "calibration", "positive_source", 0.90),
+        rescue_record("cal_clean_a", "calibration", "clean_negative", 0.20),
+        rescue_record("cal_clean_b", "calibration", "clean_negative", 0.20),
+        rescue_record("test_clean", "test", "clean_negative", 0.10),
+    ]
+    records_path.write_text("".join(json_line(record) for record in records), encoding="utf-8")
+    audit_path.write_text(
+        json.dumps({"attention_geometry_ready": True, "image_quality_metrics_ready": True}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    manifest = write_threshold_calibration_outputs(
+        root=tmp_path,
+        rescue_records_path=records_path,
+        rescue_audit_path=audit_path,
+        target_fpr=0.5,
+    )
+    threshold_report = json.loads(
+        (tmp_path / "outputs" / "threshold_calibration" / "threshold_degeneracy_report.json").read_text(encoding="utf-8")
+    )
+
+    assert threshold_report["calibration_fpr_exceeds_target"] is True
+    assert threshold_report["fixed_fpr_boundary_ready"] is False
     assert threshold_report["fixed_fpr_and_rescue_boundary_ready"] is False
     assert manifest["metadata"]["protocol_decision"] == "fail"
 
