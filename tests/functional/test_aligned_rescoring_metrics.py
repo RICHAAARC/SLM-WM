@@ -40,6 +40,7 @@ def test_default_config_requires_pair_perceptual_metrics(monkeypatch: pytest.Mon
     monkeypatch.delenv("SLM_WM_LPIPS_NETWORK", raising=False)
     monkeypatch.delenv("SLM_WM_ENABLE_PIPELINE_PROGRESS_BAR", raising=False)
     monkeypatch.delenv("SLM_WM_ENABLE_CARRIER_PROGRESS_BAR", raising=False)
+    monkeypatch.delenv("SLM_WM_CONTENT_BASIS_RANK", raising=False)
 
     config = helper.build_default_config()
 
@@ -50,6 +51,7 @@ def test_default_config_requires_pair_perceptual_metrics(monkeypatch: pytest.Mon
     assert config.perceptual_metric_device_name == "cpu"
     assert config.enable_pipeline_progress_bar is False
     assert config.enable_carrier_progress_bar is True
+    assert config.content_basis_rank == 64
 
 
 @pytest.mark.quick
@@ -370,6 +372,17 @@ def test_aligned_rescoring_run_id_includes_content_vector_width() -> None:
 
     first_run_id = helper.build_run_id(make_config(content_vector_width=64), carrier_ids)
     second_run_id = helper.build_run_id(make_config(content_vector_width=128), carrier_ids)
+
+    assert first_run_id != second_run_id
+
+
+@pytest.mark.quick
+def test_aligned_rescoring_run_id_includes_content_basis_rank() -> None:
+    """内容有效基底秩改变时 run_id 必须变化, 避免复用低秩旧结果。"""
+    carrier_ids = ("carrier_a",)
+
+    first_run_id = helper.build_run_id(make_config(content_basis_rank=32), carrier_ids)
+    second_run_id = helper.build_run_id(make_config(content_basis_rank=64), carrier_ids)
 
     assert first_run_id != second_run_id
 

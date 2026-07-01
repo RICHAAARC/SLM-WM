@@ -16,6 +16,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from experiments.protocol.paper_run_config import (
+    DEFAULT_CONTENT_BASIS_RANK,
     DEFAULT_CONTENT_VECTOR_WIDTH,
     build_paper_run_config,
     resolve_count_from_environment,
@@ -83,6 +84,7 @@ class AlignedRescoringConfig:
     max_subspace_records: int = 600
     max_rescore_carriers: int = 600
     content_vector_width: int = DEFAULT_CONTENT_VECTOR_WIDTH
+    content_basis_rank: int = DEFAULT_CONTENT_BASIS_RANK
     negative_prompt: str = "low quality, blurry"
     device_name: str = "cuda"
     torch_dtype: str = "float16"
@@ -104,6 +106,7 @@ class AlignedRescoringConfig:
             "max_subspace_records": self.max_subspace_records,
             "max_rescore_carriers": self.max_rescore_carriers,
             "content_vector_width": self.content_vector_width,
+            "content_basis_rank": self.content_basis_rank,
         }
         invalid_fields = {name: value for name, value in positive_fields.items() if value <= 0}
         if invalid_fields:
@@ -144,6 +147,10 @@ class AlignedRescoringRecord:
     real_lf_score_after: float
     real_hf_score_before: float
     real_hf_score_after: float
+    real_combined_score_before: float
+    real_combined_score_after: float
+    real_lf_hf_fusion_score_before: float
+    real_lf_hf_fusion_score_after: float
     latent_digest_before: str
     latent_digest_after: str
     latent_projection_digest_before: str
@@ -268,6 +275,7 @@ def build_run_id(config: AlignedRescoringConfig, carrier_ids: tuple[str, ...]) -
             "attention_runtime_strength": config.attention_runtime_strength,
             "injection_step_indices": config.injection_step_indices,
             "content_vector_width": config.content_vector_width,
+            "content_basis_rank": config.content_basis_rank,
             "carrier_ids": carrier_ids,
             "enable_pair_perceptual_metrics": config.enable_pair_perceptual_metrics,
             "require_pair_perceptual_metrics": config.require_pair_perceptual_metrics,
@@ -408,6 +416,10 @@ def build_rescoring_records(
                 real_lf_score_after=score_after.lf_score,
                 real_hf_score_before=score_before.hf_score,
                 real_hf_score_after=score_after.hf_score,
+                real_combined_score_before=score_before.combined_score,
+                real_combined_score_after=score_after.combined_score,
+                real_lf_hf_fusion_score_before=score_before.lf_hf_fusion_score,
+                real_lf_hf_fusion_score_after=score_after.lf_hf_fusion_score,
                 latent_digest_before=tensor_digest(latent_before.detach().float().cpu()),
                 latent_digest_after=tensor_digest(latent_after.detach().float().cpu()),
                 latent_projection_digest_before=digest_before,
@@ -432,6 +444,8 @@ def build_rescoring_records(
                     "latent_trace_detection_claim_boundary": "not_blind_image_watermark_detection",
                     "baseline_fairness_boundary": "external_baseline_comparison_requires_matching_detector_access",
                     "content_vector_width": config.content_vector_width,
+                    "content_basis_rank": config.content_basis_rank,
+                    "formal_score_source": "combined_update_correlation",
                     "runtime_content_update_digest": ""
                     if runtime_content_update is None
                     else runtime_content_update.content_update_digest,
@@ -1078,6 +1092,7 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
             metadata={
                 **runtime_versions,
                 "latent_projection_mode": "periodic_slot_pooled_content_carrier",
+                "content_basis_rank": config.content_basis_rank,
                 "supports_paper_claim": False,
             },
         )
@@ -1139,6 +1154,7 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
             "attention_runtime_strength": config.attention_runtime_strength,
             "injection_step_indices": config.injection_step_indices,
             "content_vector_width": config.content_vector_width,
+            "content_basis_rank": config.content_basis_rank,
             "max_subspace_records": config.max_subspace_records,
             "max_rescore_carriers": config.max_rescore_carriers,
             "aligned_rescoring_record_count": result.aligned_rescoring_record_count,
@@ -1204,6 +1220,7 @@ def build_default_config() -> AlignedRescoringConfig:
             default_value=paper_run.sample_count,
         ),
         content_vector_width=int(os.environ.get("SLM_WM_CONTENT_VECTOR_WIDTH", str(paper_run.content_vector_width))),
+        content_basis_rank=int(os.environ.get("SLM_WM_CONTENT_BASIS_RANK", str(paper_run.content_basis_rank))),
         negative_prompt=os.environ.get("SLM_WM_NEGATIVE_PROMPT", "low quality, blurry"),
         enable_pair_perceptual_metrics=parse_bool_environment("SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS", True),
         require_pair_perceptual_metrics=parse_bool_environment("SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS", True),

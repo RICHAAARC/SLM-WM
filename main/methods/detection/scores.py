@@ -12,10 +12,17 @@ from main.methods.carrier.compose import ContentUpdate
 
 @dataclass(frozen=True)
 class ContentScore:
-    """LF/HF 统一内容分数。"""
+    """内容载体检测分数。
+
+    content_score 是正式 fixed-FPR 检测使用的分数。由于真实 latent 写入
+    使用的是 LF/HF 合成后的 combined_update_values, 正式分数也必须在同一
+    combined 方向上计算; LF/HF 加权融合仅作为分量诊断保留。
+    """
 
     lf_score: float
     hf_score: float
+    combined_score: float
+    lf_hf_fusion_score: float
     content_score: float
     lambda_lf: float
     lambda_hf: float
@@ -58,14 +65,23 @@ def compute_unified_content_score(
     lambda_lf: float = 0.70,
     lambda_hf: float = 0.30,
 ) -> ContentScore:
-    """计算统一内容分数, 不使用 LF/HF 独立阈值投票。"""
+    """计算统一内容分数, 不使用 LF/HF 独立阈值投票。
+
+    该函数属于项目特定方法逻辑: runtime 写入的水印方向是
+    `combined_update_values`, 因此 fixed-FPR 正式分数使用 combined 相关性。
+    LF/HF 加权分数仍然输出, 用于定位某一分支是否对检测增益产生负贡献。
+    """
     lf_score = correlation(observed_values, content_update.lf_update_values)
     hf_score = correlation(observed_values, content_update.hf_update_values)
-    content_score = lambda_lf * lf_score + lambda_hf * hf_score
+    combined_score = correlation(observed_values, content_update.combined_update_values)
+    lf_hf_fusion_score = lambda_lf * lf_score + lambda_hf * hf_score
+    content_score = combined_score
     payload = {
         "content_update_digest": content_update.content_update_digest,
         "lf_score": round(lf_score, 12),
         "hf_score": round(hf_score, 12),
+        "combined_score": round(combined_score, 12),
+        "lf_hf_fusion_score": round(lf_hf_fusion_score, 12),
         "content_score": round(content_score, 12),
         "lambda_lf": lambda_lf,
         "lambda_hf": lambda_hf,
@@ -73,6 +89,8 @@ def compute_unified_content_score(
     return ContentScore(
         lf_score=lf_score,
         hf_score=hf_score,
+        combined_score=combined_score,
+        lf_hf_fusion_score=lf_hf_fusion_score,
         content_score=content_score,
         lambda_lf=lambda_lf,
         lambda_hf=lambda_hf,
@@ -80,5 +98,9 @@ def compute_unified_content_score(
         fixed_fpr_ready=True,
         score_digest=build_stable_digest(payload),
         supports_paper_claim=False,
-        metadata={"score_name": "unified_content_score"},
+        metadata={
+            "score_name": "combined_content_score",
+            "lf_hf_fusion_score_name": "diagnostic_lf_hf_weighted_score",
+            "formal_score_source": "combined_update_correlation",
+        },
     )

@@ -122,6 +122,8 @@ Notebook 与 repository module 的跨边界数据
 | attention_basis | method | none | false | false | false | attention 路由投影后的子基底。 |
 | selected_indices | method | none | false | false | false | synthetic 安全基底选中的 latent 位置。 |
 | basis_rank | method | none | false | false | false | synthetic 安全基底最大秩。 |
+| selected_index_count_min | metric | none | false | false | false | 当前语义子空间输出中每条安全基底选中索引数量的最小值。 |
+| selected_index_count_max | metric | none | false | false | false | 当前语义子空间输出中每条安全基底选中索引数量的最大值。 |
 | condition_id | method | none | false | false | false | 语义条件化水印路由对象的稳定标识。 |
 | semantic_digest | method | none | false | false | false | 语义输入或语义表示的稳定摘要。 |
 | semantic_tags | method | none | false | false | false | 语义条件对象携带的标签集合。 |
@@ -163,7 +165,9 @@ Notebook 与 repository module 的跨边界数据
 | score_value | method | none | true | false | false | 检测证据分数值。 |
 | lf_score | method | none | true | false | false | LF 分支归一化相关分数。 |
 | hf_score | method | none | true | false | false | HF 分支截断相关分数。 |
-| content_score | method | none | true | false | false | LF/HF 按固定权重融合后的内容分数。 |
+| combined_score | method | none | true | false | false | 观测向量与实际 runtime 写入的 combined_update_values 方向之间的归一化相关分数。 |
+| lf_hf_fusion_score | method | none | true | false | false | LF/HF 按固定权重融合后的诊断分数, 不作为正式 fixed-FPR 分数空间。 |
+| content_score | method | none | true | false | false | fixed-FPR 正式内容分数, 当前对齐 combined_update_values 写入方向。 |
 | lambda_lf | method | none | true | false | false | 内容分数中 LF 分支权重。 |
 | lambda_hf | method | none | true | false | false | 内容分数中 HF 分支权重。 |
 | used_independent_branch_vote | method | none | true | false | false | 是否使用 LF/HF 独立阈值投票。正式方法应为 false。 |
@@ -795,6 +799,10 @@ Notebook 与 repository module 的跨边界数据
 | real_lf_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 LF 内容分数。 |
 | real_hf_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 HF 内容分数。 |
 | real_hf_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 HF 内容分数。 |
+| real_combined_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 combined 内容分数。 |
+| real_combined_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 combined 内容分数。 |
+| real_lf_hf_fusion_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 LF/HF 加权诊断分数。 |
+| real_lf_hf_fusion_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 LF/HF 加权诊断分数。 |
 | latent_projection_digest_before | artifact | none | true | false | false | 对齐前真实 latent 投影向量的稳定摘要。 |
 | latent_projection_digest_after | artifact | none | true | false | false | 对齐后真实 latent 投影向量的稳定摘要。 |
 | latent_projection_values_before | method | none | true | false | false | 对齐前真实 latent 投影到内容检测维度后的有界向量。 |
@@ -1289,6 +1297,7 @@ Notebook 与 repository module 的跨边界数据
 
 | prompt_file | protocol | none | false | false | false | prompt 协议使用的配置文件路径。|
 | content_vector_width | protocol | none | false | false | false | pilot_paper 与 full_paper 共享的内容载体向量宽度, 只能通过统一论文运行配置或显式实验覆盖修改。|
+| content_basis_rank | protocol | none | false | false | false | pilot_paper 与 full_paper 共享的内容载体有效基底秩, 用于控制 fixed-FPR 统计空间的有效自由度。|
 | risk_profile_counts | protocol | none | false | false | false | 按 risk_profile 聚合的 prompt 数量。|
 | calibration_clean_negative_count | metric | none | false | false | false | fixed-FPR 校准 split 中 clean negative 样本数量。|
 | test_clean_negative_count | metric | none | false | false | false | fixed-FPR 测试 split 中 clean negative 样本数量。|

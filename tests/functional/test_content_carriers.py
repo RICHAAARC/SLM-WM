@@ -107,7 +107,7 @@ def test_content_modes_change_updates_without_branch_vote() -> None:
 
 @pytest.mark.quick
 def test_unified_content_score_keeps_fixed_fpr_boundary() -> None:
-    """统一内容分数应使用 LF 主权重, 并显式保留 fixed-FPR 可校准边界。"""
+    """正式内容分数应对齐 runtime 写入的 combined carrier 方向。"""
     lf_carrier, hf_carrier, _ = build_lf_hf_carriers()
     content_update = compose_content_update(lf_carrier, hf_carrier, "full_content_chain")
     score = compute_unified_content_score(content_update.combined_update_values, content_update)
@@ -116,9 +116,25 @@ def test_unified_content_score_keeps_fixed_fpr_boundary() -> None:
     assert score.used_independent_branch_vote is False
     assert score.fixed_fpr_ready is True
     assert score.supports_paper_claim is False
+    assert score.combined_score == pytest.approx(score.content_score)
+    assert score.lf_hf_fusion_score == pytest.approx(0.70 * score.lf_score + 0.30 * score.hf_score)
     assert score.content_score > 0.0
     with pytest.raises(ValueError):
         compute_unified_content_score(content_update.combined_update_values, content_update, lambda_lf=0.40, lambda_hf=0.60)
+
+
+@pytest.mark.quick
+def test_formal_score_is_not_dragged_down_by_diagnostic_branch_conflict() -> None:
+    """当 LF/HF 分量互相冲突时, 正式分数仍应匹配实际写入方向。"""
+    lf_carrier, hf_carrier, _ = build_lf_hf_carriers()
+    content_update = compose_content_update(lf_carrier, hf_carrier, "full_content_chain")
+    observed_values = content_update.combined_update_values
+
+    score = compute_unified_content_score(observed_values, content_update)
+
+    assert score.content_score == pytest.approx(1.0)
+    assert score.combined_score == pytest.approx(1.0)
+    assert score.content_score >= score.lf_hf_fusion_score
 
 
 def write_semantic_inputs(repo_root: Path) -> None:

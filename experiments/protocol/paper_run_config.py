@@ -21,6 +21,7 @@ DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT = 100
 DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT = 100
 DEFAULT_DRIVE_ROOT = "/content/drive/MyDrive/SLM"
 DEFAULT_CONTENT_VECTOR_WIDTH = 128
+DEFAULT_CONTENT_BASIS_RANK = 64
 DEFAULT_INFERENCE_STEPS = 20
 DEFAULT_GUIDANCE_SCALE = 4.5
 DEFAULT_ATTENTION_RUNTIME_STRENGTH = 0.025
@@ -31,6 +32,7 @@ SHARED_METHOD_SETTING_FIELDS = (
     "minimum_clean_negative_count",
     "dataset_level_quality_minimum_count",
     "content_vector_width",
+    "content_basis_rank",
     "inference_steps",
     "guidance_scale",
     "attention_runtime_strength",
@@ -72,10 +74,24 @@ class PaperRunConfig:
     minimum_clean_negative_count: int = DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT
     dataset_level_quality_minimum_count: int = DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT
     content_vector_width: int = DEFAULT_CONTENT_VECTOR_WIDTH
+    content_basis_rank: int = DEFAULT_CONTENT_BASIS_RANK
     inference_steps: int = DEFAULT_INFERENCE_STEPS
     guidance_scale: float = DEFAULT_GUIDANCE_SCALE
     attention_runtime_strength: float = DEFAULT_ATTENTION_RUNTIME_STRENGTH
     attention_injection_steps: tuple[int, ...] = DEFAULT_ATTENTION_INJECTION_STEPS
+
+    def __post_init__(self) -> None:
+        """集中校验内容载体维度边界。
+
+        content_basis_rank 是检测统计的有效自由度。该值必须显著大于早期
+        诊断用 4 维稀疏设置, 否则 clean negative 的随机高分尾部会抬高
+        fixed-FPR 阈值, 造成真实 positive 难以越过阈值。
+        """
+
+        if self.content_basis_rank <= 0:
+            raise ValueError("content_basis_rank 必须为正整数")
+        if self.content_basis_rank > self.content_vector_width:
+            raise ValueError("content_basis_rank 不得大于 content_vector_width")
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 兼容字典, 便于写入 manifest 或 Notebook 日志。"""
@@ -196,6 +212,10 @@ def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
         content_vector_width=parse_positive_int(
             os.environ.get("SLM_WM_CONTENT_VECTOR_WIDTH"),
             DEFAULT_CONTENT_VECTOR_WIDTH,
+        ),
+        content_basis_rank=parse_positive_int(
+            os.environ.get("SLM_WM_CONTENT_BASIS_RANK"),
+            DEFAULT_CONTENT_BASIS_RANK,
         ),
         inference_steps=parse_positive_int(os.environ.get("SLM_WM_INFERENCE_STEPS"), DEFAULT_INFERENCE_STEPS),
         guidance_scale=float(os.environ.get("SLM_WM_GUIDANCE_SCALE", str(DEFAULT_GUIDANCE_SCALE))),

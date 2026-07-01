@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from experiments.protocol.paper_run_config import (
+    DEFAULT_CONTENT_BASIS_RANK,
     DEFAULT_CONTENT_VECTOR_WIDTH,
     DEFAULT_DRIVE_ROOT,
     build_paper_run_config,
@@ -42,6 +43,7 @@ def test_paper_run_config_resolves_pilot_paper_defaults(tmp_path: Path, monkeypa
     assert config.sample_count == 7
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results"
     assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
+    assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
     assert config.drive_dir("aligned_rescoring").endswith("/pilot_paper_results/aligned_rescoring")
 
 
@@ -67,6 +69,7 @@ def test_paper_run_config_switches_to_full_paper_without_notebook_rewrite(
     assert config.sample_count == 11
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/full_paper_results"
     assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
+    assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
     assert config.drive_dir("threshold_calibration").endswith("/full_paper_results/threshold_calibration")
 
 

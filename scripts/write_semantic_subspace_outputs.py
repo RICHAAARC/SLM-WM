@@ -18,7 +18,11 @@ if str(ROOT) not in sys.path:
 
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
-from experiments.protocol.paper_run_config import DEFAULT_CONTENT_VECTOR_WIDTH, build_paper_run_config
+from experiments.protocol.paper_run_config import (
+    DEFAULT_CONTENT_BASIS_RANK,
+    DEFAULT_CONTENT_VECTOR_WIDTH,
+    build_paper_run_config,
+)
 from main.methods.semantic import build_risk_field, build_semantic_route, project_mask_to_latent
 from main.methods.subspace import (
     build_safe_basis_plan,
@@ -34,6 +38,7 @@ PROMPT_MANIFEST_PATH = Path("outputs/prompt_event_protocol/manifest.local.json")
 RUNTIME_PROBE_ARCHIVE = Path("outputs/real_sd_runtime_probe_package_20260620t10451781952321z_b2be25c.zip")
 INJECTION_ARCHIVE = Path("outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip")
 VECTOR_WIDTH = DEFAULT_CONTENT_VECTOR_WIDTH
+BASIS_RANK = DEFAULT_CONTENT_BASIS_RANK
 
 
 def stable_json_text(value: Any) -> str:
@@ -183,6 +188,7 @@ def build_prompt_subspace_bundle(
     prompt_record: dict[str, Any],
     latent_reference: tuple[float, ...],
     vector_width: int,
+    basis_rank: int,
 ) -> dict[str, Any]:
     """为单条 prompt 构造语义路由与安全子空间计划。"""
     feature_inputs = build_prompt_feature_inputs(prompt_record, vector_width)
@@ -206,17 +212,32 @@ def build_prompt_subspace_bundle(
     )
     features = build_trajectory_features(latent_mask)
     jvp_estimate = estimate_approximate_jvp(features)
-    semantic_basis = build_safe_basis_plan(features, jvp_estimate, risk_field, route)
+    semantic_basis = build_safe_basis_plan(features, jvp_estimate, risk_field, route, basis_rank=basis_rank)
     no_mask_basis = build_safe_basis_plan(
         features,
         jvp_estimate,
         risk_field,
         route,
+        basis_rank=basis_rank,
         semantic_mask_enabled=False,
         basis_strategy="no_semantic_mask",
     )
-    global_basis = build_safe_basis_plan(features, jvp_estimate, risk_field, route, basis_strategy="global_nullspace")
-    diagnostic_basis = build_safe_basis_plan(features, jvp_estimate, risk_field, route, basis_strategy="diagnostic_basis")
+    global_basis = build_safe_basis_plan(
+        features,
+        jvp_estimate,
+        risk_field,
+        route,
+        basis_rank=basis_rank,
+        basis_strategy="global_nullspace",
+    )
+    diagnostic_basis = build_safe_basis_plan(
+        features,
+        jvp_estimate,
+        risk_field,
+        route,
+        basis_rank=basis_rank,
+        basis_strategy="diagnostic_basis",
+    )
     projection = project_basis_by_route(semantic_basis, route)
     return {
         "risk_field": risk_field,
@@ -269,6 +290,7 @@ def subspace_record(prompt_record: dict[str, Any], bundle: dict[str, Any]) -> di
         "basis_strategy": semantic_basis.basis_strategy,
         "semantic_mask_enabled": semantic_basis.semantic_mask_enabled,
         "selected_indices": semantic_basis.selected_indices,
+        "basis_rank": semantic_basis.metadata["basis_rank"],
         "basis_digests": {
             "semantic_safe_basis": semantic_basis.basis_digest,
             "no_semantic_mask": bundle["no_mask_basis"].basis_digest,
@@ -317,10 +339,15 @@ def write_semantic_subspace_outputs(
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     max_records: int | None = None,
     vector_width: int | None = None,
+    basis_rank: int | None = None,
 ) -> dict[str, Any]:
     """写出语义子空间产物。"""
     root_path = Path(root).resolve()
-    resolved_vector_width = int(vector_width or build_paper_run_config(root_path).content_vector_width)
+    paper_run = build_paper_run_config(root_path)
+    resolved_vector_width = int(vector_width or paper_run.content_vector_width)
+    resolved_basis_rank = int(basis_rank or paper_run.content_basis_rank)
+    if resolved_basis_rank > resolved_vector_width:
+        raise ValueError("content_basis_rank 不得大于 content_vector_width")
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
     mask_report_dir = resolved_output_dir / "mask_projection_reports"
     mask_report_dir.mkdir(parents=True, exist_ok=True)
@@ -342,7 +369,12 @@ def write_semantic_subspace_outputs(
     route_digests = set()
 
     for prompt_record in prompt_records:
-        bundle = build_prompt_subspace_bundle(prompt_record, latent_reference, resolved_vector_width)
+        bundle = build_prompt_subspace_bundle(
+            prompt_record,
+            latent_reference,
+            resolved_vector_width,
+            resolved_basis_rank,
+        )
         route_records.append(route_record(prompt_record, bundle))
         subspace_records.append(subspace_record(prompt_record, bundle))
         mask_reports.append(mask_report(prompt_record, bundle))
@@ -380,6 +412,9 @@ def write_semantic_subspace_outputs(
         "semantic_mask_changed_basis_count": changed_basis_count,
         "basis_strategies": sorted(basis_digest_sets),
         "content_vector_width": resolved_vector_width,
+        "content_basis_rank": resolved_basis_rank,
+        "selected_index_count_min": min((len(record["selected_indices"]) for record in subspace_records), default=0),
+        "selected_index_count_max": max((len(record["selected_indices"]) for record in subspace_records), default=0),
         "protocol_decision": "pass" if route_records and changed_basis_count > 0 else "fail",
         "supports_paper_claim": False,
     }
@@ -410,6 +445,7 @@ def write_semantic_subspace_outputs(
             "subspace_plan_record_count": summary["subspace_plan_record_count"],
             "mask_projection_report_count": summary["mask_projection_report_count"],
             "content_vector_width": resolved_vector_width,
+            "content_basis_rank": resolved_basis_rank,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_semantic_subspace_outputs.py",
@@ -431,6 +467,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument("--max-records", type=int, default=None, help="调试时限制处理记录数量。")
     parser.add_argument("--vector-width", type=int, default=None, help="内容载体向量宽度, 默认读取论文运行配置。")
+    parser.add_argument("--basis-rank", type=int, default=None, help="内容载体有效基底秩, 默认读取论文运行配置。")
     return parser
 
 
@@ -442,6 +479,7 @@ def main() -> None:
         output_dir=args.output_dir,
         max_records=args.max_records,
         vector_width=args.vector_width,
+        basis_rank=args.basis_rank,
     )
     print(stable_json_text(manifest), end="")
 

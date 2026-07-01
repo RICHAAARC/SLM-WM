@@ -33,6 +33,8 @@ class ContentDetectionRecord:
     tail_truncation_enabled: bool
     lf_score: float
     hf_score: float
+    combined_score: float
+    lf_hf_fusion_score: float
     content_score: float
     fixed_fpr_ready: bool
     content_update_digest: str
@@ -72,6 +74,8 @@ def build_content_detection_record(
         tail_truncation_enabled=content_update.tail_truncation_enabled,
         lf_score=score.lf_score,
         hf_score=score.hf_score,
+        combined_score=score.combined_score,
+        lf_hf_fusion_score=score.lf_hf_fusion_score,
         content_score=score.content_score,
         fixed_fpr_ready=score.fixed_fpr_ready,
         content_update_digest=content_update.content_update_digest,

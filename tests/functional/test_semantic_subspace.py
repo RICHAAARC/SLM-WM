@@ -110,14 +110,23 @@ def test_semantic_subspace_writer_outputs_manifest(tmp_path: Path) -> None:
     repo_root.mkdir()
     write_prompt_records(repo_root)
 
-    manifest = write_semantic_subspace_outputs(root=repo_root)
+    manifest = write_semantic_subspace_outputs(root=repo_root, vector_width=16, basis_rank=8)
     output_dir = repo_root / "outputs" / "semantic_subspace"
     summary = json.loads((output_dir / "semantic_subspace_summary.json").read_text(encoding="utf-8"))
+    subspace_records = [
+        json.loads(line)
+        for line in (output_dir / "subspace_plan_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
     assert manifest["metadata"]["protocol_decision"] == "pass"
     assert manifest["metadata"]["supports_paper_claim"] is False
     assert summary["semantic_route_record_count"] == 2
     assert summary["semantic_mask_changed_basis_count"] == 2
+    assert summary["content_basis_rank"] == 8
+    assert summary["selected_index_count_min"] == 8
+    assert summary["selected_index_count_max"] == 8
+    assert {record["basis_rank"] for record in subspace_records} == {8}
     assert (output_dir / "mask_projection_reports" / "mask_projection_reports.jsonl").exists()
 
 

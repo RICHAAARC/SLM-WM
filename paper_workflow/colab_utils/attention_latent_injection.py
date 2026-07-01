@@ -16,6 +16,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from experiments.protocol.paper_run_config import (
+    DEFAULT_CONTENT_BASIS_RANK,
     DEFAULT_CONTENT_VECTOR_WIDTH,
     build_paper_run_config,
     resolve_count_from_environment,
@@ -68,6 +69,7 @@ class AttentionLatentInjectionConfig:
     attention_geometry_package_path: str = ""
     max_subspace_records: int = 600
     content_vector_width: int = DEFAULT_CONTENT_VECTOR_WIDTH
+    content_basis_rank: int = DEFAULT_CONTENT_BASIS_RANK
     attention_carrier_index: int = 0
     device_name: str = "cuda"
     torch_dtype: str = "float16"
@@ -81,6 +83,7 @@ class AttentionLatentInjectionConfig:
             "inference_steps": self.inference_steps,
             "max_subspace_records": self.max_subspace_records,
             "content_vector_width": self.content_vector_width,
+            "content_basis_rank": self.content_basis_rank,
         }
         invalid_fields = {name: value for name, value in positive_fields.items() if value <= 0}
         if invalid_fields:
@@ -199,6 +202,7 @@ def build_injection_id(
             "attention_runtime_strength": config.attention_runtime_strength,
             "injection_step_indices": config.injection_step_indices,
             "content_vector_width": config.content_vector_width,
+            "content_basis_rank": config.content_basis_rank,
             "carrier_id": carrier_record["carrier_id"],
             "attention_relative_carrier_digest": carrier_record["attention_relative_carrier_digest"],
             "content_update_digest": "" if content_update is None else content_update.content_update_digest,
@@ -298,6 +302,7 @@ def prepare_attention_method_outputs(config: Any, root_path: Path) -> dict[str, 
         root=root_path,
         max_records=config.max_subspace_records,
         vector_width=config.content_vector_width,
+        basis_rank=config.content_basis_rank,
     )
     write_content_carrier_outputs(
         root=root_path,
@@ -518,6 +523,7 @@ def run_attention_latent_injection(
                     "geometry_package_path": str(geometry_package_path),
                     "method_manifest_path": str(method_manifest_path),
                     "content_vector_width": config.content_vector_width,
+                    "content_basis_rank": config.content_basis_rank,
                     "supports_paper_claim": False,
                 },
             )
@@ -557,6 +563,7 @@ def run_attention_latent_injection(
             "runtime_content_sample_role": content_record.get("metadata", {}).get("sample_role", ""),
             "latent_projection_mode": "periodic_slot_pooled_content_carrier",
             "content_vector_width": config.content_vector_width,
+            "content_basis_rank": config.content_basis_rank,
             "supports_paper_claim": False,
         },
         **metrics,
@@ -737,6 +744,7 @@ def write_attention_latent_injection_outputs(
             "attention_runtime_strength": config.attention_runtime_strength,
             "injection_step_indices": config.injection_step_indices,
             "content_vector_width": config.content_vector_width,
+            "content_basis_rank": config.content_basis_rank,
             "latent_update_count": result.latent_update_count,
             "selected_attention_carrier_id": result.selected_attention_carrier_id,
             "image_quality_metrics_ready": result.image_quality_metrics_ready,
@@ -792,6 +800,7 @@ def build_default_config() -> AttentionLatentInjectionConfig:
             default_value=paper_run.sample_count,
         ),
         content_vector_width=int(os.environ.get("SLM_WM_CONTENT_VECTOR_WIDTH", str(paper_run.content_vector_width))),
+        content_basis_rank=int(os.environ.get("SLM_WM_CONTENT_BASIS_RANK", str(paper_run.content_basis_rank))),
         attention_carrier_index=int(os.environ.get("SLM_WM_ATTENTION_CARRIER_INDEX", "0")),
     )
 

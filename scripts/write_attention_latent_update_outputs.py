@@ -308,6 +308,7 @@ def write_attention_latent_update_outputs(
     geometry_summary = geometry_bundle["summary"]
     geometry_ready = bool(geometry_summary.get("attention_geometry_ready", False))
     subspace_records = select_subspace_records(load_jsonl(root_path / SUBSPACE_RECORDS_PATH), max_subspace_records)
+    content_basis_rank = min((len(record.get("selected_indices", ())) for record in subspace_records), default=0)
     route_lookup = route_records_by_prompt(load_jsonl(root_path / ROUTE_RECORDS_PATH))
     evidence_lookup = evidence_records_by_graph(geometry_bundle["evidence_records"])
     carrier_records, stability_rows = build_attention_update_records(
@@ -366,6 +367,7 @@ def write_attention_latent_update_outputs(
         "attention_update_stability_row_count": len(stability_rows),
         "quality_metric_count": len(quality_rows),
         "content_vector_width": resolved_vector_width,
+        "content_basis_rank": content_basis_rank,
         "relation_loss_delta_mean": metric_mean(stability_rows, "relation_loss_delta"),
         "quality_proxy_drop_mean": metric_mean(stability_rows, "quality_proxy_drop"),
         "image_quality_metrics_ready": False,
@@ -392,6 +394,7 @@ def write_attention_latent_update_outputs(
             "active_update_count": active_update_count,
             "embedding_strength": embedding_strength,
             "content_vector_width": resolved_vector_width,
+            "content_basis_rank": content_basis_rank,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_attention_latent_update_outputs.py",
