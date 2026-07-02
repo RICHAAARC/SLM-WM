@@ -47,6 +47,7 @@ class FixedFprCalibrationConfig:
 
     target_fpr: float = PILOT_PAPER_FIXED_FPR
     calibration_split: str = "calibration"
+    evaluation_split: str = "test"
     positive_role: str = "positive_source"
     clean_negative_role: str = "clean_negative"
     attacked_negative_role: str = "attacked_negative"
@@ -215,6 +216,16 @@ def confidence_controlled_false_positive_budget(
 def split_role(records: Iterable[dict[str, Any]], split: str, sample_role: str) -> tuple[dict[str, Any], ...]:
     """按 split 和样本角色筛选记录。"""
     return tuple(record for record in records if record.get("split") == split and record.get("sample_role") == sample_role)
+
+
+def split_records(records: Iterable[dict[str, Any]], split: str) -> tuple[dict[str, Any], ...]:
+    """按 split 筛选记录。
+
+    该函数属于通用协议工具: 阈值冻结使用 calibration split, 论文指标报告使用
+    evaluation split, 二者必须显式分离, 避免把 calibration 或 dev 样本混入正式表格。
+    """
+
+    return tuple(record for record in records if record.get("split") == split)
 
 
 def binary_rate(records: Iterable[dict[str, Any]], field_name: str) -> float:

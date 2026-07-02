@@ -996,6 +996,159 @@ def write_quality_rows(path: Path, rows: list[dict[str, Any]]) -> None:
             writer.writerow(row)
 
 
+def write_csv_rows(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
+    """按固定字段写出 CSV, 缺失字段留空。"""
+
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field_name: row.get(field_name, "") for field_name in fieldnames})
+
+
+def aligned_component_audit_rows(records: list[AlignedRescoringRecord]) -> list[dict[str, Any]]:
+    """构造逐记录 LF/HF/combined 分量审计表。
+
+    该表属于诊断与论文解释层: 正式 fixed-FPR 判定仍使用
+    `real_aligned_content_score`, 但该表显式展示 LF、HF 和融合分数如何变化,
+    便于定位 clean negative 高尾或 positive 低尾样本。
+    """
+
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        metadata = record.metadata
+        rows.append(
+            {
+                "aligned_rescoring_record_id": record.aligned_rescoring_record_id,
+                "content_detection_record_id": record.content_detection_record_id,
+                "prompt_id": record.prompt_id,
+                "split": record.split,
+                "sample_role": record.sample_role,
+                "carrier_id": record.carrier_id,
+                "real_raw_content_score": record.real_raw_content_score,
+                "real_aligned_content_score": record.real_aligned_content_score,
+                "real_rescoring_score_gain": record.real_rescoring_score_gain,
+                "real_lf_score_before": record.real_lf_score_before,
+                "real_lf_score_after": record.real_lf_score_after,
+                "real_lf_score_gain": record.real_lf_score_after - record.real_lf_score_before,
+                "real_hf_score_before": record.real_hf_score_before,
+                "real_hf_score_after": record.real_hf_score_after,
+                "real_hf_score_gain": record.real_hf_score_after - record.real_hf_score_before,
+                "real_combined_score_before": record.real_combined_score_before,
+                "real_combined_score_after": record.real_combined_score_after,
+                "real_combined_score_gain": record.real_combined_score_after - record.real_combined_score_before,
+                "real_lf_hf_fusion_score_before": record.real_lf_hf_fusion_score_before,
+                "real_lf_hf_fusion_score_after": record.real_lf_hf_fusion_score_after,
+                "real_lf_hf_fusion_score_gain": (
+                    record.real_lf_hf_fusion_score_after - record.real_lf_hf_fusion_score_before
+                ),
+                "content_vector_width": metadata.get("content_vector_width", ""),
+                "content_basis_rank": metadata.get("content_basis_rank", ""),
+                "latent_projection_boundary_before": metadata.get("latent_projection_boundary_before", ""),
+                "latent_projection_boundary_after": metadata.get("latent_projection_boundary_after", ""),
+                "formal_score_source": metadata.get("formal_score_source", ""),
+                "metric_status": record.metric_status,
+                "supports_paper_claim": record.supports_paper_claim,
+            }
+        )
+    return rows
+
+
+def _mean(values: list[float]) -> float:
+    """计算均值, 空列表返回 0。"""
+
+    return sum(values) / len(values) if values else 0.0
+
+
+def aligned_component_summary_rows(component_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按 sample role 汇总内容分量, 并补充 positive-clean delta。"""
+
+    sample_roles = sorted({str(row["sample_role"]) for row in component_rows})
+    score_fields = (
+        "real_raw_content_score",
+        "real_aligned_content_score",
+        "real_rescoring_score_gain",
+        "real_lf_score_before",
+        "real_lf_score_after",
+        "real_hf_score_before",
+        "real_hf_score_after",
+        "real_combined_score_before",
+        "real_combined_score_after",
+        "real_lf_hf_fusion_score_before",
+        "real_lf_hf_fusion_score_after",
+    )
+    rows: list[dict[str, Any]] = []
+    means_by_role: dict[str, dict[str, float]] = {}
+    for sample_role in sample_roles:
+        role_rows = [row for row in component_rows if row["sample_role"] == sample_role]
+        means = {
+            field_name: _mean([float(row[field_name]) for row in role_rows])
+            for field_name in score_fields
+        }
+        means_by_role[sample_role] = means
+        rows.append(
+            {
+                "summary_scope": sample_role,
+                "record_count": len(role_rows),
+                **{f"{field_name}_mean": value for field_name, value in means.items()},
+                "supports_paper_claim": False,
+            }
+        )
+    if "positive_source" in means_by_role and "clean_negative" in means_by_role:
+        delta = {
+            field_name: means_by_role["positive_source"][field_name] - means_by_role["clean_negative"][field_name]
+            for field_name in score_fields
+        }
+        rows.append(
+            {
+                "summary_scope": "positive_source_minus_clean_negative",
+                "record_count": min(
+                    len([row for row in component_rows if row["sample_role"] == "positive_source"]),
+                    len([row for row in component_rows if row["sample_role"] == "clean_negative"]),
+                ),
+                **{f"{field_name}_mean": value for field_name, value in delta.items()},
+                "supports_paper_claim": False,
+            }
+        )
+    return rows
+
+
+def aligned_tail_audit_rows(records: list[AlignedRescoringRecord], tail_count: int = 20) -> list[dict[str, Any]]:
+    """构造高尾 negative 与低尾 positive 样本审计表。"""
+
+    specs = (
+        ("low_tail_positive", "positive_source", False),
+        ("high_tail_clean_negative", "clean_negative", True),
+        ("high_tail_attacked_negative", "attacked_negative", True),
+    )
+    rows: list[dict[str, Any]] = []
+    for tail_bucket, sample_role, reverse in specs:
+        role_records = [record for record in records if record.sample_role == sample_role]
+        ranked = sorted(role_records, key=lambda record: record.real_aligned_content_score, reverse=reverse)
+        for rank, record in enumerate(ranked[:tail_count], start=1):
+            rows.append(
+                {
+                    "tail_bucket": tail_bucket,
+                    "tail_rank": rank,
+                    "aligned_rescoring_record_id": record.aligned_rescoring_record_id,
+                    "content_detection_record_id": record.content_detection_record_id,
+                    "prompt_id": record.prompt_id,
+                    "split": record.split,
+                    "sample_role": record.sample_role,
+                    "carrier_id": record.carrier_id,
+                    "real_raw_content_score": record.real_raw_content_score,
+                    "real_aligned_content_score": record.real_aligned_content_score,
+                    "real_rescoring_score_gain": record.real_rescoring_score_gain,
+                    "real_lf_hf_fusion_score_after": record.real_lf_hf_fusion_score_after,
+                    "latent_projection_digest_before": record.latent_projection_digest_before,
+                    "latent_projection_digest_after": record.latent_projection_digest_after,
+                    "metric_status": record.metric_status,
+                    "supports_paper_claim": record.supports_paper_claim,
+                }
+            )
+    return rows
+
+
 def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | Path = ".") -> dict[str, Any]:
     """运行真实 aligned rescoring 并写出受治理产物。"""
     root_path = Path(root).resolve()
@@ -1105,6 +1258,9 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
     records_path = output_dir / "aligned_rescoring_records.jsonl"
     result_path = output_dir / "aligned_rescoring_result.json"
     quality_path = output_dir / "aligned_rescoring_quality_metrics.csv"
+    component_audit_path = output_dir / "aligned_rescoring_component_audit.csv"
+    component_summary_path = output_dir / "aligned_rescoring_component_summary.csv"
+    tail_audit_path = output_dir / "aligned_rescoring_tail_audit.csv"
     environment_path = output_dir / "aligned_rescoring_environment_report.json"
     manifest_path = output_dir / "aligned_rescoring_manifest.local.json"
     environment_report = result.metadata.get("runtime_environment") or build_runtime_environment_report()
@@ -1119,6 +1275,78 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
         }
     records_path.write_text("".join(json_line(record.to_dict()) for record in records), encoding="utf-8")
     write_quality_rows(quality_path, quality_rows)
+    component_rows = aligned_component_audit_rows(records)
+    component_summary_rows = aligned_component_summary_rows(component_rows)
+    tail_rows = aligned_tail_audit_rows(records)
+    component_fieldnames = [
+        "aligned_rescoring_record_id",
+        "content_detection_record_id",
+        "prompt_id",
+        "split",
+        "sample_role",
+        "carrier_id",
+        "real_raw_content_score",
+        "real_aligned_content_score",
+        "real_rescoring_score_gain",
+        "real_lf_score_before",
+        "real_lf_score_after",
+        "real_lf_score_gain",
+        "real_hf_score_before",
+        "real_hf_score_after",
+        "real_hf_score_gain",
+        "real_combined_score_before",
+        "real_combined_score_after",
+        "real_combined_score_gain",
+        "real_lf_hf_fusion_score_before",
+        "real_lf_hf_fusion_score_after",
+        "real_lf_hf_fusion_score_gain",
+        "content_vector_width",
+        "content_basis_rank",
+        "latent_projection_boundary_before",
+        "latent_projection_boundary_after",
+        "formal_score_source",
+        "metric_status",
+        "supports_paper_claim",
+    ]
+    summary_fieldnames = [
+        "summary_scope",
+        "record_count",
+        *[f"{field_name}_mean" for field_name in (
+            "real_raw_content_score",
+            "real_aligned_content_score",
+            "real_rescoring_score_gain",
+            "real_lf_score_before",
+            "real_lf_score_after",
+            "real_hf_score_before",
+            "real_hf_score_after",
+            "real_combined_score_before",
+            "real_combined_score_after",
+            "real_lf_hf_fusion_score_before",
+            "real_lf_hf_fusion_score_after",
+        )],
+        "supports_paper_claim",
+    ]
+    tail_fieldnames = [
+        "tail_bucket",
+        "tail_rank",
+        "aligned_rescoring_record_id",
+        "content_detection_record_id",
+        "prompt_id",
+        "split",
+        "sample_role",
+        "carrier_id",
+        "real_raw_content_score",
+        "real_aligned_content_score",
+        "real_rescoring_score_gain",
+        "real_lf_hf_fusion_score_after",
+        "latent_projection_digest_before",
+        "latent_projection_digest_after",
+        "metric_status",
+        "supports_paper_claim",
+    ]
+    write_csv_rows(component_audit_path, component_rows, component_fieldnames)
+    write_csv_rows(component_summary_path, component_summary_rows, summary_fieldnames)
+    write_csv_rows(tail_audit_path, tail_rows, tail_fieldnames)
     environment_path.write_text(stable_json_text(environment_report), encoding="utf-8")
     result = AlignedRescoringResult(
         **{
@@ -1128,13 +1356,25 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
             "metadata": {
                 **result.metadata,
                 "environment_report_path": environment_path.relative_to(root_path).as_posix(),
+                "component_audit_path": component_audit_path.relative_to(root_path).as_posix(),
+                "component_summary_path": component_summary_path.relative_to(root_path).as_posix(),
+                "tail_audit_path": tail_audit_path.relative_to(root_path).as_posix(),
             },
         }
     )
     result_path.write_text(stable_json_text(result.to_dict()), encoding="utf-8")
     output_paths = tuple(
         path.relative_to(root_path).as_posix()
-        for path in (records_path, result_path, quality_path, environment_path, manifest_path)
+        for path in (
+            records_path,
+            result_path,
+            quality_path,
+            component_audit_path,
+            component_summary_path,
+            tail_audit_path,
+            environment_path,
+            manifest_path,
+        )
     )
     input_paths = [
         "paper_workflow/aligned_rescoring_run.ipynb",

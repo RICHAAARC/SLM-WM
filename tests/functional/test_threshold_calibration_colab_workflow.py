@@ -178,6 +178,12 @@ def test_threshold_calibration_drive_workflow_generates_package_ready_outputs(tm
         assert "outputs/content_carriers/content_detection_records.jsonl" in names
         assert "outputs/threshold_calibration/threshold_calibration_archive_summary.json" in names
         assert "outputs/threshold_calibration/threshold_calibration_archive_manifest.local.json" in names
+        embedded_summary = json.loads(
+            archive.read("outputs/threshold_calibration/threshold_calibration_archive_summary.json").decode("utf-8")
+        )
+        assert embedded_summary["metadata"]["archive_payload_digest"]
+        assert embedded_summary["metadata"]["archive_digest_scope"] == "external_sidecar_after_archive_write"
+        assert "archive_digest" not in embedded_summary
 
 
 @pytest.mark.quick

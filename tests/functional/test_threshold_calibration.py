@@ -225,6 +225,9 @@ def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separ
     output_dir = tmp_path / "outputs" / "threshold_calibration"
     threshold_report = json.loads((output_dir / "threshold_degeneracy_report.json").read_text(encoding="utf-8"))
     operating_rows = list(csv.DictReader((output_dir / "fixed_fpr_operating_points.csv").open(encoding="utf-8")))
+    split_operating_rows = list(
+        csv.DictReader((output_dir / "fixed_fpr_operating_points_by_split.csv").open(encoding="utf-8"))
+    )
     fpr_rows = list(csv.DictReader((output_dir / "rescue_fpr_audit.csv").open(encoding="utf-8")))
     score_mode_rows = list(csv.DictReader((output_dir / "score_mode_operating_points.csv").open(encoding="utf-8")))
     quality_rows = list(csv.DictReader((output_dir / "quality_metrics_summary.csv").open(encoding="utf-8")))
@@ -232,8 +235,15 @@ def test_threshold_calibration_outputs_are_rebuildable_and_keep_fpr_scopes_separ
     assert manifest["artifact_id"] == "threshold_calibration_manifest"
     assert threshold_report["metadata"]["threshold_source"] == "calibration_clean_negative"
     assert threshold_report["full_method_claim_ready"] is False
+    assert threshold_report["evaluation_split"] == "test"
+    assert threshold_report["evaluation_scope"] == "test"
+    assert threshold_report["evaluation_record_count"] == 3
     assert operating_rows[0]["supports_paper_claim"] == "False"
+    assert operating_rows[0]["evaluation_scope"] == "test"
+    assert operating_rows[0]["evaluation_record_count"] == "3"
+    assert operating_rows[0]["positive_count"] == "1"
     assert operating_rows[0]["threshold_score_field"] == "raw_content_score"
+    assert {row["evaluation_scope"] for row in split_operating_rows} == {"all", "dev", "calibration", "test"}
     assert {row["decision_scope"] for row in fpr_rows} == {
         "raw_content_clean_negative",
         "formal_detection_clean_negative",
@@ -482,6 +492,9 @@ def test_threshold_calibration_prefers_real_aligned_rescoring_score_space(tmp_pa
     assert thresholds["metadata"]["threshold_score_field"] == "formal_detection_score"
     assert thresholds["metadata"]["threshold_score_source_field"] == "real_aligned_content_score"
     assert operating_rows[0]["threshold_score_field"] == "formal_detection_score"
+    assert operating_rows[0]["evaluation_scope"] == "test"
+    assert operating_rows[0]["positive_count"] == "1"
+    assert operating_rows[0]["clean_negative_count"] == "1"
     assert operating_rows[0]["true_positive_rate"] == "1.0"
     assert operating_rows[0]["evidence_clean_fpr"] == "0.0"
     assert score_mode_rows["formal_detection_threshold"]["governs_fixed_fpr"] == "True"

@@ -3,12 +3,31 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import subprocess
 import sys
 from typing import Any
 
 from paper_workflow.colab_utils.progress import progress_bar, update_progress
+
+REQUIRED_CLOSURE_PACKAGE_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("attention_geometry", "attention_geometry_package_*.zip"),
+    ("attention_latent_injection", "attention_latent_injection_package_*.zip"),
+    ("aligned_rescoring", "aligned_rescoring_package_*.zip"),
+    ("threshold_calibration", "threshold_calibration_package_*.zip"),
+    ("real_attack_evaluation", "real_attack_evaluation_package_*.zip"),
+    ("conventional_geometric_attack_evaluation", "conventional_geometric_attack_evaluation_package_*.zip"),
+    ("dataset_level_quality", "dataset_level_quality_package_*.zip"),
+    ("method_faithful_tree_ring", "external_baseline_method_faithful_package_tree_ring_*.zip"),
+    ("method_faithful_gaussian_shading", "external_baseline_method_faithful_package_gaussian_shading_*.zip"),
+    ("method_faithful_shallow_diffuse", "external_baseline_method_faithful_package_shallow_diffuse_*.zip"),
+    ("method_faithful_t2smark", "external_baseline_method_faithful_package_t2smark_*.zip"),
+    ("official_reference_tree_ring", "external_baseline_official_reference_package_tree_ring_*.zip"),
+    ("official_reference_gaussian_shading", "external_baseline_official_reference_package_gaussian_shading_*.zip"),
+    ("official_reference_shallow_diffuse", "external_baseline_official_reference_package_shallow_diffuse_*.zip"),
+    ("official_reference_t2smark", "external_baseline_official_reference_package_t2smark_*.zip"),
+)
 
 
 def _short_commit() -> str:
@@ -27,6 +46,50 @@ def _complete_archive_name(paper_run_name: str) -> str:
 
     utc_suffix = datetime.now(timezone.utc).strftime("%Y%m%dt%H%M%sz")
     return f"{paper_run_name}_complete_result_package_{utc_suffix}_{_short_commit()}.zip"
+
+
+def build_paper_result_closure_preflight_report(package_search_root: str) -> dict[str, Any]:
+    """检查完整论文结果闭合所需的 Drive 结果包是否齐备。
+
+    该检查属于 workflow 门禁层: 它不替代各个 builder 的 schema 校验, 只在
+    长耗时闭合命令启动前发现明显缺失的前序结果包, 避免生成不完整结果包。
+    """
+
+    root_path = Path(package_search_root).expanduser()
+    package_status: list[dict[str, Any]] = []
+    missing_package_families: list[str] = []
+    for family_name, pattern in REQUIRED_CLOSURE_PACKAGE_PATTERNS:
+        matches = sorted(root_path.rglob(pattern)) if root_path.exists() else []
+        package_status.append(
+            {
+                "package_family": family_name,
+                "pattern": pattern,
+                "match_count": len(matches),
+                "latest_match": str(matches[-1]) if matches else "",
+            }
+        )
+        if not matches:
+            missing_package_families.append(family_name)
+    return {
+        "package_search_root": str(root_path),
+        "package_search_root_exists": root_path.exists(),
+        "required_package_family_count": len(REQUIRED_CLOSURE_PACKAGE_PATTERNS),
+        "missing_package_family_count": len(missing_package_families),
+        "missing_package_families": missing_package_families,
+        "package_status": package_status,
+        "closure_preflight_ready": root_path.exists() and not missing_package_families,
+    }
+
+
+def require_paper_result_closure_inputs(package_search_root: str) -> dict[str, Any]:
+    """在闭合命令前强制检查完整结果包输入。"""
+
+    report = build_paper_result_closure_preflight_report(package_search_root)
+    print("paper_result_closure_preflight", json.dumps(report, ensure_ascii=False, sort_keys=True))
+    if not report["closure_preflight_ready"]:
+        missing = ",".join(report["missing_package_families"])
+        raise FileNotFoundError(f"pilot_paper_closure_required_packages_missing:{missing}")
+    return report
 
 
 def build_paper_result_closure_commands(
@@ -83,6 +146,7 @@ def run_paper_result_closure_commands(
 ) -> dict[str, Any]:
     """运行论文结果闭合命令, 并返回最新 Drive 结果包路径。"""
 
+    preflight_report = require_paper_result_closure_inputs(package_search_root)
     commands = build_paper_result_closure_commands(
         package_search_root=package_search_root,
         complete_drive_output_dir=complete_drive_output_dir,
@@ -108,4 +172,5 @@ def run_paper_result_closure_commands(
         "command_count": len(commands),
         "paper_run_name": paper_run_name,
         "target_fpr": target_fpr,
+        "preflight_report": preflight_report,
     }

@@ -15,6 +15,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_FIXED_FPR,
     PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
 )
+from main.core.digest import build_stable_digest
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
     build_runtime_environment_report,
     file_digest,
@@ -375,6 +376,23 @@ def write_archive(path: Path, entries: tuple[Path, ...], root_path: Path) -> Non
             archive.write(entry, entry.relative_to(root_path).as_posix())
 
 
+def build_entries_digest(entries: tuple[Path, ...], root_path: Path) -> str:
+    """计算打包输入条目的稳定摘要。
+
+    该摘要可以安全写入 zip 内部。最终 zip 文件自身的 SHA-256 只能写入
+    zip 外侧 sidecar, 否则会形成自引用摘要问题。
+    """
+
+    payload = [
+        {
+            "entry_path": entry.relative_to(root_path).as_posix(),
+            "entry_digest": file_digest(entry),
+        }
+        for entry in entries
+    ]
+    return build_stable_digest(payload)
+
+
 def package_threshold_calibration_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
@@ -395,26 +413,28 @@ def package_threshold_calibration_outputs(
             stale_path.unlink()
 
     entries = collect_package_entries(root_path, source_dir, archive_path)
+    entry_payload_digest = build_entries_digest(entries, root_path)
     package_manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "entry_paths": [entry.relative_to(root_path).as_posix() for entry in entries],
         "entry_count": len(entries),
+        "entry_payload_digest": entry_payload_digest,
     }
     package_manifest_path.write_text(stable_json_text(package_manifest), encoding="utf-8")
-    preliminary_record = ThresholdCalibrationArchiveRecord(
-        archive_path=relative_or_absolute(archive_path, root_path),
-        archive_digest="",
-        archive_entry_count=len(entries) + 3,
-        drive_archive_path=str(Path(resolved_drive_output_dir).expanduser() / archive_name),
-        drive_archive_digest="",
-        metadata={
+    embedded_summary = {
+        "archive_path": relative_or_absolute(archive_path, root_path),
+        "archive_entry_count": len(entries) + 3,
+        "drive_archive_path": str(Path(resolved_drive_output_dir).expanduser() / archive_name),
+        "metadata": {
             "construction_unit_name": "threshold_calibration",
             "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "embedded_digest_scope": "external_summary_records_final_archive_digest",
+            "archive_payload_digest": entry_payload_digest,
+            "archive_digest_scope": "external_sidecar_after_archive_write",
+            "final_archive_digest_available_in_sidecar": True,
         },
-    )
-    summary_path.write_text(stable_json_text(preliminary_record.to_dict()), encoding="utf-8")
+    }
+    summary_path.write_text(stable_json_text(embedded_summary), encoding="utf-8")
     archive_manifest = {
         "artifact_id": "threshold_calibration_archive_manifest",
         "artifact_type": "local_manifest",
@@ -430,7 +450,9 @@ def package_threshold_calibration_outputs(
         "metadata": {
             "construction_unit_name": "threshold_calibration",
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "embedded_digest_scope": "external_summary_records_final_archive_digest",
+            "archive_payload_digest": entry_payload_digest,
+            "archive_digest_scope": "external_sidecar_after_archive_write",
+            "final_archive_digest_available_in_sidecar": True,
         },
         "rebuild_command": "运行 paper_workflow/threshold_calibration_run.ipynb",
     }
@@ -452,6 +474,9 @@ def package_threshold_calibration_outputs(
             "construction_unit_name": "threshold_calibration",
             "drive_output_dir": str(drive_dir),
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "archive_payload_digest": entry_payload_digest,
+            "archive_digest_scope": "final_archive_file",
+            "final_archive_digest_available_in_sidecar": True,
         },
     )
     summary_path.write_text(stable_json_text(record.to_dict()), encoding="utf-8")

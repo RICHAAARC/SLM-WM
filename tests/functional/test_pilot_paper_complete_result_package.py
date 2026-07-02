@@ -8,6 +8,7 @@ from zipfile import ZIP_STORED, ZipFile
 
 import pytest
 
+from paper_workflow.colab_utils.paper_result_closure import build_paper_result_closure_preflight_report
 from scripts.write_pilot_paper_complete_result_package import (
     REQUIRED_OUTPUT_DIRS,
     write_pilot_paper_complete_result_package_outputs,
@@ -86,3 +87,14 @@ def test_complete_result_package_can_skip_repeated_package_materialization(tmp_p
     assert not (tmp_path / "outputs" / "should_not_be_recreated" / "result.json").exists()
     assert summary["metadata"]["materialization_report"]["materialization_skipped"] is True
     assert summary["metadata"]["materialization_report"]["input_package_count"] == 1
+
+
+@pytest.mark.quick
+def test_paper_result_closure_preflight_reports_missing_drive_packages(tmp_path: Path) -> None:
+    """闭合 helper 应在长耗时命令前报告缺失的 Drive 结果包族。"""
+
+    report = build_paper_result_closure_preflight_report(str(tmp_path))
+
+    assert report["closure_preflight_ready"] is False
+    assert "real_attack_evaluation" in report["missing_package_families"]
+    assert report["missing_package_family_count"] > 0

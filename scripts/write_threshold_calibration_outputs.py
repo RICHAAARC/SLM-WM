@@ -28,6 +28,7 @@ from experiments.protocol.calibration import (
     operating_point_metrics,
     score_mode_operating_point_rows,
     score_distribution_rows,
+    split_records,
     split_role,
     threshold_score_field,
 )
@@ -511,6 +512,32 @@ def build_standard_metric_rows(metrics: dict[str, Any], records: tuple[dict[str,
     ]
 
 
+def with_metric_scope(metrics: dict[str, Any], *, evaluation_scope: str, record_count: int) -> dict[str, Any]:
+    """给 operating point 指标补充统计口径字段。"""
+
+    return {
+        **metrics,
+        "evaluation_scope": evaluation_scope,
+        "evaluation_record_count": record_count,
+    }
+
+
+def build_split_operating_point_rows(
+    calibrated: tuple[dict[str, Any], ...],
+    threshold: FixedFprThreshold,
+    config: FixedFprCalibrationConfig,
+) -> list[dict[str, Any]]:
+    """输出 all/dev/calibration/test 诊断口径, 明确正式表格只消费 test split。"""
+
+    split_names = ("all", "dev", "calibration", config.evaluation_split)
+    rows: list[dict[str, Any]] = []
+    for split_name in split_names:
+        scoped_records = calibrated if split_name == "all" else split_records(calibrated, split_name)
+        metrics = operating_point_metrics(scoped_records, threshold, config)
+        rows.append(with_metric_scope(metrics, evaluation_scope=split_name, record_count=len(scoped_records)))
+    return rows
+
+
 def build_rescue_fpr_rows(metrics: dict[str, Any], threshold_report: dict[str, Any]) -> list[dict[str, Any]]:
     """构造 rescue 前后 FPR 审计表。"""
     row_specs = (
@@ -558,6 +585,7 @@ def build_rescue_fpr_rows(metrics: dict[str, Any], threshold_report: dict[str, A
 def build_threshold_report(
     threshold: Any,
     metrics: dict[str, Any],
+    all_metrics: dict[str, Any],
     config: FixedFprCalibrationConfig,
     rescue_audit: dict[str, Any],
     aligned_quality: dict[str, Any],
@@ -604,6 +632,12 @@ def build_threshold_report(
             "positive_count": metrics["positive_count"],
             "clean_negative_count": metrics["clean_negative_count"],
             "attacked_negative_count": metrics["attacked_negative_count"],
+            "evaluation_split": config.evaluation_split,
+            "evaluation_scope": metrics.get("evaluation_scope", config.evaluation_split),
+            "evaluation_record_count": metrics.get("evaluation_record_count", 0),
+            "all_positive_count": all_metrics["positive_count"],
+            "all_clean_negative_count": all_metrics["clean_negative_count"],
+            "all_attacked_negative_count": all_metrics["attacked_negative_count"],
             "minimum_clean_negative_count": minimum_clean_negative_count,
             "calibration_negative_count_ready": calibration_negative_count_ready,
             "evidence_clean_negative_count_ready": evidence_clean_negative_count_ready,
@@ -715,10 +749,21 @@ def write_threshold_calibration_outputs(
     )
     threshold = threshold_with_score_space_metadata(threshold, score_space_metadata)
     calibrated = calibrated_records(records, threshold, config)
-    metrics = operating_point_metrics(calibrated, threshold, config)
+    evaluation_records = split_records(calibrated, config.evaluation_split)
+    metrics = with_metric_scope(
+        operating_point_metrics(evaluation_records, threshold, config),
+        evaluation_scope=config.evaluation_split,
+        record_count=len(evaluation_records),
+    )
+    all_metrics = with_metric_scope(
+        operating_point_metrics(calibrated, threshold, config),
+        evaluation_scope="all",
+        record_count=len(calibrated),
+    )
     threshold_report = build_threshold_report(
         threshold,
         metrics,
+        all_metrics,
         config,
         rescue_audit,
         aligned_quality,
@@ -726,12 +771,13 @@ def write_threshold_calibration_outputs(
         score_space_metadata,
     )
     formal_score_field = threshold_score_field(threshold)
-    roc_rows, det_rows = curve_rows(calibrated, config, score_field=formal_score_field)
-    distribution_rows = score_distribution_rows(calibrated, score_field=formal_score_field)
-    standard_rows = build_standard_metric_rows(metrics, calibrated)
+    roc_rows, det_rows = curve_rows(evaluation_records, config, score_field=formal_score_field)
+    distribution_rows = score_distribution_rows(evaluation_records, score_field=formal_score_field)
+    standard_rows = build_standard_metric_rows(metrics, evaluation_records)
     quality_rows = build_quality_metric_rows(rescue_audit, root_path, aligned_quality)
     fpr_rows = build_rescue_fpr_rows(metrics, threshold_report)
-    score_mode_rows = score_mode_operating_point_rows(calibrated, threshold, config)
+    score_mode_rows = score_mode_operating_point_rows(evaluation_records, threshold, config)
+    split_operating_rows = build_split_operating_point_rows(calibrated, threshold, config)
 
     thresholds_path = resolved_output_dir / "calibration_thresholds.json"
     operating_points_path = resolved_output_dir / "fixed_fpr_operating_points.csv"
@@ -743,6 +789,7 @@ def write_threshold_calibration_outputs(
     degeneracy_path = resolved_output_dir / "threshold_degeneracy_report.json"
     fpr_audit_path = resolved_output_dir / "rescue_fpr_audit.csv"
     score_mode_path = resolved_output_dir / "score_mode_operating_points.csv"
+    split_operating_points_path = resolved_output_dir / "fixed_fpr_operating_points_by_split.csv"
     manifest_path = resolved_output_dir / "manifest.local.json"
 
     thresholds_path.write_text(stable_json_text(threshold_payload(threshold, score_space_metadata)), encoding="utf-8")
@@ -750,6 +797,37 @@ def write_threshold_calibration_outputs(
         operating_points_path,
         [metrics],
         [
+            "evaluation_scope",
+            "evaluation_record_count",
+            "operating_point_id",
+            "target_fpr",
+            "calibrated_content_threshold",
+            "calibrated_detection_threshold",
+            "threshold_score_field",
+            "threshold_degenerate",
+            "positive_count",
+            "clean_negative_count",
+            "attacked_negative_count",
+            "true_positive_rate",
+            "raw_content_clean_fpr",
+            "formal_detection_score_clean_fpr",
+            "formal_detection_score_attacked_fpr",
+            "evidence_clean_fpr",
+            "evidence_attacked_fpr",
+            "rescue_applied_rate",
+            "aligned_score_gain_mean",
+            "raw_score_auc",
+            "aligned_score_auc",
+            "full_method_claim_ready",
+            "supports_paper_claim",
+        ],
+    )
+    write_csv(
+        split_operating_points_path,
+        split_operating_rows,
+        [
+            "evaluation_scope",
+            "evaluation_record_count",
             "operating_point_id",
             "target_fpr",
             "calibrated_content_threshold",
@@ -835,6 +913,7 @@ def write_threshold_calibration_outputs(
             degeneracy_path,
             fpr_audit_path,
             score_mode_path,
+            split_operating_points_path,
             manifest_path,
         )
     )
@@ -843,6 +922,7 @@ def write_threshold_calibration_outputs(
         "threshold_report": threshold_report,
         "rescue_fpr_audit": fpr_rows,
         "score_mode_operating_points": score_mode_rows,
+        "split_operating_points": split_operating_rows,
         "aligned_rescoring_quality": aligned_rescoring_output_metadata(aligned_quality),
         "score_space_metadata": score_space_metadata,
     }

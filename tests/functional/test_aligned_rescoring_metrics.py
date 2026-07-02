@@ -207,6 +207,82 @@ def test_lpips_metric_model_loader_reuses_cached_model(monkeypatch: pytest.Monke
     assert load_count["lpips"] == 1
 
 
+def make_aligned_record(record_id: str, sample_role: str, aligned_score: float, raw_score: float = 0.0) -> helper.AlignedRescoringRecord:
+    """构造用于审计表测试的 aligned rescoring 记录。"""
+
+    return helper.AlignedRescoringRecord(
+        aligned_rescoring_record_id=f"aligned_{record_id}",
+        content_detection_record_id=f"content_{record_id}",
+        prompt_id=f"prompt_{record_id}",
+        prompt_digest=f"digest_{record_id}",
+        split="test",
+        sample_role=sample_role,
+        carrier_id=f"carrier_{record_id}",
+        attention_graph_id="graph",
+        capture_id="capture",
+        content_update_digest="content_update",
+        content_chain_digest="content_chain",
+        raw_content_score=raw_score,
+        aligned_content_score=aligned_score,
+        real_raw_content_score=raw_score,
+        real_aligned_content_score=aligned_score,
+        real_rescoring_score_gain=aligned_score - raw_score,
+        real_lf_score_before=raw_score,
+        real_lf_score_after=aligned_score,
+        real_hf_score_before=raw_score / 2.0,
+        real_hf_score_after=aligned_score / 2.0,
+        real_combined_score_before=raw_score,
+        real_combined_score_after=aligned_score,
+        real_lf_hf_fusion_score_before=raw_score,
+        real_lf_hf_fusion_score_after=aligned_score,
+        latent_digest_before="latent_before",
+        latent_digest_after="latent_after",
+        latent_projection_digest_before="projection_before",
+        latent_projection_digest_after="projection_after",
+        latent_projection_values_before=(0.0, 1.0),
+        latent_projection_values_after=(1.0, 0.0),
+        aligned_rescoring_ready=True,
+        metric_status="measured_from_real_latent_projection",
+        full_method_claim_ready=False,
+        supports_paper_claim=False,
+        metadata={
+            "content_vector_width": 128,
+            "content_basis_rank": 64,
+            "latent_projection_boundary_before": "first_clean_latent_before_any_injection",
+            "latent_projection_boundary_after": "final_aligned_latent_after_all_injections",
+            "formal_score_source": "lf_hf_consistency_guarded_combined_correlation",
+        },
+    )
+
+
+@pytest.mark.quick
+def test_aligned_rescoring_component_and_tail_audits_are_materialized() -> None:
+    """aligned rescoring 应单独产出分量审计和高低尾审计所需行。"""
+
+    records = [
+        make_aligned_record("positive_low", "positive_source", 0.20),
+        make_aligned_record("positive_high", "positive_source", 0.80),
+        make_aligned_record("clean_low", "clean_negative", -0.10),
+        make_aligned_record("clean_high", "clean_negative", 0.30),
+        make_aligned_record("attacked_high", "attacked_negative", 0.40),
+    ]
+
+    component_rows = helper.aligned_component_audit_rows(records)
+    summary_rows = helper.aligned_component_summary_rows(component_rows)
+    tail_rows = helper.aligned_tail_audit_rows(records, tail_count=1)
+
+    assert component_rows[0]["content_vector_width"] == 128
+    assert component_rows[0]["latent_projection_boundary_before"] == "first_clean_latent_before_any_injection"
+    assert any(row["summary_scope"] == "positive_source_minus_clean_negative" for row in summary_rows)
+    assert {row["tail_bucket"] for row in tail_rows} == {
+        "low_tail_positive",
+        "high_tail_clean_negative",
+        "high_tail_attacked_negative",
+    }
+    low_positive = next(row for row in tail_rows if row["tail_bucket"] == "low_tail_positive")
+    assert low_positive["aligned_rescoring_record_id"] == "aligned_positive_low"
+
+
 @pytest.mark.quick
 def test_clip_metric_loader_reuses_cached_model_and_processor(monkeypatch: pytest.MonkeyPatch) -> None:
     """CLIP processor 和 model 应在相同配置下复用缓存, 避免成对质量计算重复下载或加载。"""
