@@ -159,9 +159,44 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     ) -> Image.Image:
         return Image.new("RGB", (source_image.width * 2, source_image.height * 2), color=(130, 96, 78))
 
+    def fake_rescore_attacked_image_with_detector(
+        detector_pipeline: object,
+        attacked_image: Image.Image,
+        source_context: dict[str, object],
+        boundary: dict[str, object],
+        config: RealAttackEvaluationConfig,
+    ) -> dict[str, object]:
+        raw_score = 0.74 if source_context["sample_role"] == "positive_source" else 0.10
+        aligned_score = 0.80 if source_context["sample_role"] == "positive_source" else 0.12
+        return {
+            "raw_content_score_after": raw_score,
+            "aligned_content_score_after": aligned_score,
+            "threshold_score_after": aligned_score,
+            "raw_content_margin_after": raw_score - float(boundary["content_threshold"]),
+            "aligned_content_margin_after": aligned_score - float(boundary["content_threshold"]),
+            "positive_by_content": raw_score >= float(boundary["content_threshold"]),
+            "geometry_reliable": True,
+            "registration_confidence": 0.82,
+            "anchor_inlier_ratio": 0.75,
+            "recovered_sync_consistency": 0.88,
+            "alignment_residual": 0.18,
+            "rescue_eligible": False,
+            "rescue_applied": False,
+            "evidence_decision": aligned_score >= float(boundary["content_threshold"]),
+            "formal_detection_decision": aligned_score >= float(boundary["content_threshold"]),
+            "attacked_image_rescore_performed": True,
+            "formal_detection_proxy": False,
+            "detection_score_source": "attacked_image_vae_latent_projection_watermark_rescore",
+            "latent_projection_mode": "periodic_slot_pooled_content_carrier",
+            "attacked_latent_projection_digest": "fake_projection_digest",
+            "watermark_coordinate": 1.0,
+            "bounded_watermark_coordinate": 1.0,
+        }
+
     monkeypatch.setattr(real_attack_evaluation, "load_img2img_pipeline", fake_load_pipeline)
     monkeypatch.setattr(real_attack_evaluation, "run_pipeline_attack", fake_run_pipeline_attack)
     monkeypatch.setattr(real_attack_evaluation, "run_strict_ddim_inversion_attack", fake_run_strict_ddim)
+    monkeypatch.setattr(real_attack_evaluation, "rescore_attacked_image_with_detector", fake_rescore_attacked_image_with_detector)
     config = RealAttackEvaluationConfig(
         model_family=PRIMARY_MODEL_FAMILY,
         model_id=PRIMARY_MODEL_ID,
@@ -185,10 +220,12 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     assert summary["regeneration_attack_gpu_validation_ready"] is True
     assert summary["attack_detection_rerun_ready"] is True
     assert summary["formal_attack_detection_ready"] is True
+    assert summary["attacked_image_rescore_ready"] is True
+    assert summary["proxy_formal_record_count"] == 0
     assert summary["real_attacked_image_count"] == 8
     assert len(records) == 8
     assert len(registry_rows) == 8
-    assert all(record["metric_status"] == "measured_from_real_attacked_image" for record in records)
+    assert all(record["metric_status"] == "measured_from_real_attacked_image_watermark_rescore" for record in records)
     assert all(record["source_image_digest"] for record in records)
     assert all(record["attacked_image_digest"] for record in records)
     assert all(record["supports_paper_claim"] is False for record in records)
@@ -201,11 +238,11 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     family_rows = list(csv.DictReader((output_dir / "real_attack_family_metrics.csv").open(encoding="utf-8")))
     assert len(formal_records) == 8
     assert all(
-        record["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+        record["metric_status"] == "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
         for record in formal_records
     )
-    assert all(record["metadata"]["formal_detection_proxy"] is True for record in formal_records)
-    assert all(record["metadata"]["attacked_image_rescore_performed"] is False for record in formal_records)
+    assert all(record["metadata"]["formal_detection_proxy"] is False for record in formal_records)
+    assert all(record["metadata"]["attacked_image_rescore_performed"] is True for record in formal_records)
     assert all(record["metadata"]["attacked_image_rescore_required_for_claim"] is True for record in formal_records)
     assert {record["sample_role"] for record in formal_records} == {"positive_source", "clean_negative"}
     for family_row in family_rows:

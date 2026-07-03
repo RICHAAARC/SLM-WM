@@ -27,6 +27,8 @@ from paper_workflow.colab_utils.real_attack_evaluation import (
     ALIGNED_RESCORING_PACKAGE_PATTERN,
     DEFAULT_SOURCE_IMAGE_DIR,
     IMAGE_SUFFIXES,
+    PRIMARY_MODEL_FAMILY,
+    PRIMARY_MODEL_ID,
     THRESHOLD_CALIBRATION_PACKAGE_PATTERN,
     THRESHOLD_PACKAGE_PREFIXES,
     build_attack_record,
@@ -37,6 +39,7 @@ from paper_workflow.colab_utils.real_attack_evaluation import (
     formal_boundary,
     jsonl_text,
     latest_drive_package,
+    load_img2img_pipeline,
     load_rgb_image,
     normalize_attacked_image_size,
     read_csv_rows,
@@ -46,6 +49,7 @@ from paper_workflow.colab_utils.real_attack_evaluation import (
     discover_source_images as discover_governed_source_images,
     source_context_by_image_path,
     stable_json_text,
+    unsupported_record,
     write_csv,
 )
 from paper_workflow.colab_utils.sd_runtime_cold_start import build_runtime_environment_report, resolve_code_version
@@ -72,11 +76,21 @@ class ConventionalGeometricAttackEvaluationConfig:
     negative_prompt: str
     width: int
     height: int
+    model_family: str = PRIMARY_MODEL_FAMILY
+    model_id: str = PRIMARY_MODEL_ID
     output_dir: str = DEFAULT_OUTPUT_DIR
     source_image_dir: str = DEFAULT_SOURCE_IMAGE_DIR
     max_source_images: int = 600
     detection_threshold: float = 0.50
+    device_name: str = "cuda"
+    torch_dtype: str = "float16"
+    hf_token_env: str = "HF_TOKEN"
+    inference_steps: int = 20
+    guidance_scale: float = 5.0
+    enable_pipeline_progress_bar: bool = False
     enable_attack_progress_bar: bool = True
+    enable_attacked_image_latent_rescore: bool = True
+    require_attacked_image_latent_rescore: bool = True
 
 
 @dataclass(frozen=True)
@@ -357,6 +371,7 @@ def write_conventional_geometric_attack_evaluation_outputs(
             raise FileNotFoundError("source_image_files_missing")
         source_contexts = source_context_by_image_path(root_path, config)  # type: ignore[arg-type]
         boundary = formal_boundary(root_path, config)  # type: ignore[arg-type]
+        detector_pipeline, detector_runtime_versions = load_img2img_pipeline(config)  # type: ignore[arg-type]
     except Exception as error:
         return write_failure_outputs(root_path, config, output_dir, error)
 
@@ -373,12 +388,12 @@ def write_conventional_geometric_attack_evaluation_outputs(
             contexts_by_record_source_path[relative_or_absolute(source_path, root_path)] = source_context
             for attack_index, attack_config in enumerate(attack_configs):
                 seed = config.seed + source_index * 101 + attack_index
+                spec = conventional_attack_spec(attack_config)
                 try:
                     attacked_image = apply_conventional_geometric_attack(source_image, attack_config, seed)
                     attacked_image = normalize_attacked_image_size(attacked_image, source_image)
                     attacked_path = attacked_dir / f"{source_path.stem}_{attack_config.attack_name}_{source_digest[:8]}.png"
                     attacked_image.save(attacked_path)
-                    spec = conventional_attack_spec(attack_config)
                     record, registry_row = build_attack_record(
                         root_path=root_path,
                         source_path=source_path,
@@ -387,9 +402,14 @@ def write_conventional_geometric_attack_evaluation_outputs(
                         attacked_path=attacked_path,
                         spec=spec,  # type: ignore[arg-type]
                         config=config,  # type: ignore[arg-type]
+                        source_context=source_context,
+                        boundary=boundary,
+                        detector_pipeline=detector_pipeline,
                     )
                     records.append(record.to_dict())
                     registry_rows.append(registry_row)
+                except Exception as error:
+                    records.append(unsupported_record(root_path, source_path, source_digest, spec, config, error).to_dict())  # type: ignore[arg-type]
                 finally:
                     update_progress(
                         task_progress,
@@ -400,32 +420,51 @@ def write_conventional_geometric_attack_evaluation_outputs(
                         ),
                     )
 
+    try:
+        del detector_pipeline
+    except Exception:
+        pass
+
     record_rows = tuple(records)
     registry_tuple = tuple(registry_rows)
     formal_rows = tuple(
         build_formal_attack_record(record, contexts_by_record_source_path[record["source_image_path"]], boundary)
         for record in record_rows
-        if record["metric_status"] == "measured_from_real_attacked_image"
+        if str(record.get("metric_status", "")).startswith("measured_from_real_attacked_image")
     )
     family_metrics = build_family_metrics(formal_rows)
     records_path.write_text(jsonl_text(record_rows), encoding="utf-8")
     formal_records_path.write_text(jsonl_text(formal_rows), encoding="utf-8")
     registry_path.write_text(jsonl_text(registry_tuple), encoding="utf-8")
     write_csv(metrics_path, family_metrics)
-    environment_report = build_runtime_environment_report()
+    environment_report = detector_runtime_versions.get("runtime_environment", build_runtime_environment_report())
     environment_path.write_text(stable_json_text(environment_report), encoding="utf-8")
 
-    measured_names = {record["attack_name"] for record in record_rows if record["metric_status"] == "measured_from_real_attacked_image"}
+    measured_names = {
+        record["attack_name"]
+        for record in record_rows
+        if str(record.get("metric_status", "")).startswith("measured_from_real_attacked_image")
+    }
     real_attacked_image_count = sum(1 for record in record_rows if record["attacked_image_available"])
     closed_loop_ready = real_attacked_image_count > 0 and all(
         row.get("source_image_digest") and row.get("attacked_image_digest") for row in registry_tuple
     )
-    detection_ready = any(record["metric_status"] == "measured_from_real_attacked_image" for record in record_rows)
-    formal_ready = bool(formal_rows) and boundary["boundary_ready"] and len(formal_rows) == real_attacked_image_count
+    detection_ready = any(str(record.get("metric_status", "")).startswith("measured_from_real_attacked_image") for record in record_rows)
+    attacked_image_rescore_count = sum(
+        1 for record in record_rows if bool(record.get("metadata", {}).get("attacked_image_rescore_performed", False))
+    )
+    proxy_formal_record_count = sum(1 for record in formal_rows if bool(record.get("metadata", {}).get("formal_detection_proxy", False)))
+    attacked_image_rescore_ready = attacked_image_rescore_count == real_attacked_image_count and real_attacked_image_count > 0
+    formal_ready = (
+        bool(formal_rows)
+        and boundary["boundary_ready"]
+        and len(formal_rows) == real_attacked_image_count
+        and (attacked_image_rescore_ready or not config.require_attacked_image_latent_rescore)
+    )
     image_quality_ready = all(
         "image_quality_metrics" in record.get("metadata", {})
         for record in record_rows
-        if record["metric_status"] == "measured_from_real_attacked_image"
+        if str(record.get("metric_status", "")).startswith("measured_from_real_attacked_image")
     )
     required_names = {config.attack_name for config in attack_configs}
     run_decision = "pass" if closed_loop_ready and detection_ready and formal_ready and required_names.issubset(measured_names) else "fail"
@@ -454,6 +493,9 @@ def write_conventional_geometric_attack_evaluation_outputs(
             "required_attack_names": sorted(required_names),
             "measured_attack_names": sorted(measured_names),
             "formal_boundary": boundary,
+            "attacked_image_rescore_count": attacked_image_rescore_count,
+            "attacked_image_rescore_ready": attacked_image_rescore_ready,
+            "proxy_formal_record_count": proxy_formal_record_count,
             "claim_boundary": "requires_attack_matrix_rebuild_and_evidence_audit",
         },
     )
@@ -477,6 +519,9 @@ def write_conventional_geometric_attack_evaluation_outputs(
             "run_decision": run_decision,
             "real_attacked_image_count": real_attacked_image_count,
             "formal_attack_detection_ready": formal_ready,
+            "attacked_image_rescore_count": attacked_image_rescore_count,
+            "attacked_image_rescore_ready": attacked_image_rescore_ready,
+            "proxy_formal_record_count": proxy_formal_record_count,
             "supports_paper_claim": False,
         },
     ).to_dict()
@@ -493,11 +538,20 @@ def build_default_config() -> ConventionalGeometricAttackEvaluationConfig:
         negative_prompt=os.environ.get("SLM_WM_NEGATIVE_PROMPT", "low quality, blurry"),
         width=int(os.environ.get("SLM_WM_IMAGE_WIDTH", "512")),
         height=int(os.environ.get("SLM_WM_IMAGE_HEIGHT", "512")),
+        model_family=os.environ.get("SLM_WM_MODEL_FAMILY", PRIMARY_MODEL_FAMILY),
+        model_id=os.environ.get("SLM_WM_MODEL_ID", PRIMARY_MODEL_ID),
         output_dir=os.environ.get("SLM_WM_CONVENTIONAL_GEOMETRIC_ATTACK_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         source_image_dir=os.environ.get("SLM_WM_REAL_ATTACK_SOURCE_IMAGE_DIR", DEFAULT_SOURCE_IMAGE_DIR),
         max_source_images=resolve_count_from_environment("SLM_WM_CONVENTIONAL_GEOMETRIC_ATTACK_SOURCE_COUNT"),
         detection_threshold=float(os.environ.get("SLM_WM_REAL_ATTACK_DETECTION_THRESHOLD", "0.50")),
+        device_name=os.environ.get("SLM_WM_DEVICE", "cuda"),
+        torch_dtype=os.environ.get("SLM_WM_TORCH_DTYPE", "float16"),
+        inference_steps=int(os.environ.get("SLM_WM_INFERENCE_STEPS", "20")),
+        guidance_scale=float(os.environ.get("SLM_WM_GUIDANCE_SCALE", "5.0")),
+        enable_pipeline_progress_bar=os.environ.get("SLM_WM_ENABLE_PIPELINE_PROGRESS_BAR", "0") == "1",
         enable_attack_progress_bar=os.environ.get("SLM_WM_ENABLE_ATTACK_PROGRESS_BAR", "1") != "0",
+        enable_attacked_image_latent_rescore=os.environ.get("SLM_WM_ENABLE_ATTACKED_IMAGE_LATENT_RESCORE", "1") != "0",
+        require_attacked_image_latent_rescore=os.environ.get("SLM_WM_REQUIRE_ATTACKED_IMAGE_LATENT_RESCORE", "1") != "0",
     )
 
 

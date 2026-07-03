@@ -1370,11 +1370,19 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_result_record_digest | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定摘要。|
 | pilot_paper_result_record_id | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定标识。|
 | result_source_kind | governance | none | true | false | false | pilot_paper 结果记录来源类型, 区分 SLM-WM 攻击矩阵与外部 baseline 结果。|
+| attacked_image_latent_rescore | method | none | true | false | false | attacked image 经过 VAE latent 投影后的直接水印重检测摘要对象。|
+| attacked_image_rescore_count | metric | none | true | false | false | 已完成 attacked image 直接水印重检测的记录数量。|
+| attacked_image_rescore_ready | governance | none | true | false | false | attacked image 直接水印重检测是否覆盖当前闭环内全部真实 attacked image。|
+| proxy_formal_record_count | metric | none | true | false | false | 当前 formal 攻击记录中仍使用代理分数边界的记录数量。|
 | formal_detection_proxy | governance | none | true | false | false | 攻击后 formal 记录是否仍使用图像质量保持率代理而非 attacked image 直接水印重检测。|
 | attacked_image_rescore_performed | governance | none | true | false | false | 是否已经对 attacked image 执行直接水印重检测。|
 | attacked_image_rescore_required_for_claim | governance | none | true | false | false | 当前记录若要支撑论文主张是否仍需要 attacked image 直接水印重检测。|
 | detection_score_source | governance | none | true | false | false | 攻击后检测分数的来源, 用于区分真实重检测、latent score 传播或图像质量保持率代理。|
 | retention_source_field | governance | none | true | false | false | 图像质量保持率代理使用的源字段名称。|
+| same_threshold_rescue_source | governance | none | true | false | false | same-threshold 几何恢复重判所使用的分数来源边界。|
+| attacked_latent_projection_digest | artifact | none | true | false | false | attacked image 经 VAE 编码和槽位投影后的稳定摘要。|
+| watermark_coordinate | metric | none | true | false | false | attacked image latent 投影在 source clean-to-aligned 水印方向上的无界坐标。|
+| bounded_watermark_coordinate | metric | none | true | false | false | 用于正式分数映射的 bounded watermark coordinate。|
 | formal_proxy_replacement_complete_count | metric | none | true | false | false | 攻击矩阵中真实图像 formal records 完整覆盖并替换同配置 proxy records 的攻击配置数量。|
 | formal_proxy_replacement_incomplete_count | metric | none | true | false | false | 攻击矩阵中存在真实图像 formal records 但未完整覆盖同配置 proxy records 的攻击配置数量。|
 | formal_proxy_replacement_incomplete_examples | governance | none | true | false | false | 真实图像 formal records 覆盖不完整的攻击配置示例。|

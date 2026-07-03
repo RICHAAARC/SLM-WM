@@ -43,9 +43,11 @@ DEFAULT_CONVENTIONAL_GEOMETRIC_ATTACK_RECORDS_PATH = Path(
 )
 DEFAULT_IMAGE_ATTACK_EVIDENCE_RECORDS_PATH = Path("outputs/image_attack_evidence/formal_attack_detection_records.jsonl")
 DEFAULT_MAX_SOURCE_RECORDS: int | None = None
+REAL_ATTACK_WATERMARK_RESCORE_METRIC_STATUS = "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
 REAL_ATTACK_RETENTION_PROXY_METRIC_STATUS = "measured_from_real_attacked_image_retention_proxy_formal_protocol"
 LEGACY_REAL_ATTACK_METRIC_STATUS = "measured_from_real_attacked_image_formal_protocol"
 REAL_ATTACK_METRIC_STATUSES = (
+    REAL_ATTACK_WATERMARK_RESCORE_METRIC_STATUS,
     REAL_ATTACK_RETENTION_PROXY_METRIC_STATUS,
     LEGACY_REAL_ATTACK_METRIC_STATUS,
 )

@@ -509,13 +509,16 @@ def _metric_status_for_group(records: Iterable[dict[str, Any]]) -> str:
     if not supported:
         return "unsupported"
     statuses = {str(record.get("metric_status", "")) for record in supported}
+    watermark_rescore_status = "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
     retention_proxy_status = "measured_from_real_attacked_image_retention_proxy_formal_protocol"
     legacy_real_status = "measured_from_real_attacked_image_formal_protocol"
+    if statuses == {watermark_rescore_status}:
+        return watermark_rescore_status
     if statuses == {retention_proxy_status}:
         return retention_proxy_status
     if statuses == {legacy_real_status}:
         return "measured_from_legacy_real_attacked_image_protocol"
-    if retention_proxy_status in statuses or legacy_real_status in statuses:
+    if watermark_rescore_status in statuses or retention_proxy_status in statuses or legacy_real_status in statuses:
         return "measured_from_mixed_real_and_local_proxy"
     return "measured_from_local_proxy"
 

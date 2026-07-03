@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import gc
 import json
+import math
 import os
 import shutil
 from dataclasses import asdict, dataclass
@@ -22,6 +23,7 @@ from experiments.protocol.paper_run_config import build_paper_run_config, resolv
 from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
+from main.methods.geometry.recovery import estimate_aligned_content_score
 from paper_workflow.colab_utils.minimal_latent_injection import compute_image_quality_metrics
 from paper_workflow.colab_utils.progress import progress_bar, update_progress
 from paper_workflow.colab_utils.sd_runtime_cold_start import (
@@ -67,6 +69,9 @@ THRESHOLD_PACKAGE_PREFIXES = (
     "outputs/attack_matrix/",
 )
 STRICT_DDIM_RUNTIME_CACHE: dict[tuple[str, str, str, bool], dict[str, Any]] = {}
+REAL_ATTACK_WATERMARK_RESCORE_STATUS = "measured_from_real_attacked_image_watermark_rescore"
+FORMAL_WATERMARK_RESCORE_STATUS = "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
+FORMAL_RETENTION_PROXY_STATUS = "measured_from_real_attacked_image_retention_proxy_formal_protocol"
 
 
 @dataclass(frozen=True)
@@ -95,6 +100,8 @@ class RealAttackEvaluationConfig:
     ddim_reconstruction_steps: int = 30
     enable_pipeline_progress_bar: bool = False
     enable_attack_progress_bar: bool = True
+    enable_attacked_image_latent_rescore: bool = True
+    require_attacked_image_latent_rescore: bool = True
 
 
 @dataclass(frozen=True)
@@ -164,6 +171,9 @@ class RealAttackEvaluationResult:
     required_regeneration_attack_count: int
     measured_regeneration_attack_count: int
     real_attacked_image_closed_loop_ready: bool
+    attacked_image_rescore_count: int
+    attacked_image_rescore_ready: bool
+    proxy_formal_record_count: int
     regeneration_attack_gpu_validation_ready: bool
     attack_detection_rerun_ready: bool
     formal_attack_detection_ready: bool
@@ -768,6 +778,216 @@ def quality_detection_scores(source_image: Any, attacked_image: Any, threshold: 
     return metrics, raw_score, aligned_score, decision
 
 
+def normalized_slot_projection_from_values(flattened_values: tuple[float, ...], value_count: int) -> tuple[float, ...]:
+    """把平铺 latent 数值按重复槽位聚合为单位检测向量.
+
+    该函数复用 aligned rescoring 的投影思想, 但放在攻击检测 helper 内部,
+    避免 attacked image 检测路径为了一个轻量数学原语反向依赖 Notebook 级重打分模块。
+    """
+
+    if not flattened_values:
+        raise RuntimeError("attacked_image_latent_tensor_empty")
+    bounded_count = max(1, int(value_count))
+    selected = tuple(
+        sum(flattened_values[index::bounded_count]) / len(flattened_values[index::bounded_count])
+        for index in range(bounded_count)
+        if flattened_values[index::bounded_count]
+    )
+    mean_value = sum(selected) / len(selected)
+    centered = tuple(value - mean_value for value in selected)
+    norm = math.sqrt(sum(value * value for value in centered))
+    if norm <= 1e-6:
+        return tuple(0.0 for _ in centered)
+    return tuple(value / norm for value in centered)
+
+
+def _float_tuple(values: Any) -> tuple[float, ...]:
+    """把 JSON 数组或 tuple 转为浮点 tuple, 缺失时返回空序列."""
+
+    if not isinstance(values, (list, tuple)):
+        return ()
+    return tuple(float(value) for value in values)
+
+
+def encode_attacked_image_projection(detector_pipeline: Any, image: Any, config: RealAttackEvaluationConfig, value_count: int) -> tuple[float, ...]:
+    """使用主检测模型 VAE 把 attacked image 编码到真实 latent 投影空间.
+
+    这是修复 proxy 边界的核心路径: 正式攻击后检测不再用图像质量分数缩放
+    pre-attack latent score, 而是先把 attacked image 重新编码为 latent, 再在
+    与 aligned rescoring 一致的周期槽位投影空间中计算水印响应。
+    """
+
+    import torch
+
+    image_tensor = detector_pipeline.image_processor.preprocess(image).to(
+        device=config.device_name,
+        dtype=getattr(torch, config.torch_dtype),
+    )
+    with torch.no_grad():
+        latent_dist = detector_pipeline.vae.encode(image_tensor).latent_dist
+        latents = latent_dist.mode() if hasattr(latent_dist, "mode") else latent_dist.mean
+    scale = float(getattr(detector_pipeline.vae.config, "scaling_factor", 1.0))
+    shift = float(getattr(detector_pipeline.vae.config, "shift_factor", 0.0) or 0.0)
+    latents = (latents - shift) * scale
+    flattened = tuple(float(value) for value in latents.detach().float().reshape(-1).cpu().tolist())
+    return normalized_slot_projection_from_values(flattened, value_count)
+
+
+def projection_digest(values: tuple[float, ...]) -> str:
+    """计算 latent 投影向量的稳定摘要."""
+
+    return build_stable_digest([round(value, 12) for value in values])
+
+
+def latent_projection_watermark_score(
+    attacked_values: tuple[float, ...],
+    source_context: dict[str, Any],
+) -> dict[str, Any]:
+    """根据 source clean/aligned latent 端点计算 attacked image 水印分数.
+
+    该实现属于项目特定写法: 真实写入是在 clean latent 到 aligned latent 之间
+    形成的内容条件化方向。检测时使用 attacked image 的 VAE latent 投影在该方向
+    上的位置, 而不是用像素质量指标近似分数保留率。
+    """
+
+    before_values = _float_tuple(source_context.get("latent_projection_values_before"))
+    after_values = _float_tuple(source_context.get("latent_projection_values_after"))
+    if not before_values or not after_values or len(before_values) != len(after_values):
+        raise RuntimeError("source_latent_projection_endpoints_missing")
+    if len(attacked_values) != len(before_values):
+        raise RuntimeError("attacked_projection_width_mismatch")
+    direction = tuple(after - before for before, after in zip(before_values, after_values))
+    direction_norm_sq = sum(value * value for value in direction)
+    if direction_norm_sq <= 1e-12:
+        raise RuntimeError("source_watermark_direction_degenerate")
+    centered_attacked = tuple(value - before for value, before in zip(attacked_values, before_values))
+    coordinate = sum(value * axis for value, axis in zip(centered_attacked, direction)) / direction_norm_sq
+    bounded_coordinate = max(-0.25, min(1.25, coordinate))
+    raw_before = float(source_context["raw_content_score_before"])
+    aligned_before = float(source_context["aligned_content_score_before"])
+    score_delta = aligned_before - raw_before
+    score_after = raw_before + bounded_coordinate * score_delta
+    return {
+        "watermark_coordinate": coordinate,
+        "bounded_watermark_coordinate": bounded_coordinate,
+        "raw_attacked_latent_score": score_after,
+        "score_delta_from_source_endpoints": score_delta,
+        "latent_projection_width": len(attacked_values),
+        "attacked_latent_projection_digest": projection_digest(attacked_values),
+        "source_projection_digest_before": source_context.get("latent_projection_digest_before", ""),
+        "source_projection_digest_after": source_context.get("latent_projection_digest_after", ""),
+    }
+
+
+def geometry_evidence_from_source_context(source_context: dict[str, Any]) -> dict[str, Any]:
+    """从 source context 提取 same-threshold rescue 所需几何证据."""
+
+    return {
+        "geometry_reliable": bool(source_context.get("geometry_reliable", False)),
+        "registration_confidence": float(source_context.get("registration_confidence", 0.0)),
+        "anchor_inlier_ratio": float(source_context.get("anchor_inlier_ratio", 0.0)),
+        "recovered_sync_consistency": float(source_context.get("recovered_sync_consistency", 0.0)),
+        "alignment_residual": float(source_context.get("alignment_residual", 1.0)),
+    }
+
+
+def decide_attack_rescore_with_same_threshold_rescue(
+    raw_score_after: float,
+    source_context: dict[str, Any],
+    boundary: dict[str, Any],
+) -> dict[str, Any]:
+    """在 attacked image 真实 latent 分数上执行 same-threshold 几何恢复重判."""
+
+    threshold = float(boundary["content_threshold"])
+    raw_margin_after = raw_score_after - threshold
+    geometry_evidence = geometry_evidence_from_source_context(source_context)
+    geometry_reliable = bool(geometry_evidence["geometry_reliable"])
+    fail_reason = str(source_context.get("fail_reason", "geometry_suspected"))
+    rescue_eligible = (
+        float(boundary["rescue_margin_low"]) <= raw_margin_after < 0.0
+        and geometry_reliable
+        and fail_reason in boundary["allowed_fail_reasons"]
+    )
+    aligned_score_after = estimate_aligned_content_score(
+        raw_content_score=raw_score_after,
+        content_threshold=threshold,
+        geometry_evidence=geometry_evidence,
+        sample_role=str(source_context.get("sample_role", "unknown")),
+    )
+    aligned_margin_after = aligned_score_after - threshold
+    positive_by_content = raw_margin_after >= 0.0
+    rescue_applied = rescue_eligible and aligned_margin_after >= 0.0
+    return {
+        "raw_content_score_after": raw_score_after,
+        "aligned_content_score_after": aligned_score_after,
+        "threshold_score_after": aligned_score_after,
+        "raw_content_margin_after": raw_margin_after,
+        "aligned_content_margin_after": aligned_margin_after,
+        "positive_by_content": positive_by_content,
+        "geometry_reliable": geometry_reliable,
+        "rescue_eligible": rescue_eligible,
+        "rescue_applied": rescue_applied,
+        "evidence_decision": positive_by_content or rescue_applied,
+        "formal_detection_decision": aligned_margin_after >= 0.0,
+    }
+
+
+def rescore_attacked_image_with_detector(
+    detector_pipeline: Any,
+    attacked_image: Any,
+    source_context: dict[str, Any],
+    boundary: dict[str, Any],
+    config: RealAttackEvaluationConfig,
+) -> dict[str, Any]:
+    """对 attacked image 执行真实 VAE latent 投影检测和 same-threshold rescue."""
+
+    width = len(_float_tuple(source_context.get("latent_projection_values_after")))
+    if width <= 0:
+        width = len(_float_tuple(source_context.get("latent_projection_values_before")))
+    if width <= 0:
+        raise RuntimeError("source_projection_width_missing")
+    attacked_values = encode_attacked_image_projection(detector_pipeline, attacked_image, config, width)
+    projection_score = latent_projection_watermark_score(attacked_values, source_context)
+    rescue_decision = decide_attack_rescore_with_same_threshold_rescue(
+        raw_score_after=float(projection_score["raw_attacked_latent_score"]),
+        source_context=source_context,
+        boundary=boundary,
+    )
+    return {
+        **projection_score,
+        **rescue_decision,
+        **geometry_evidence_from_source_context(source_context),
+        "attacked_image_rescore_performed": True,
+        "formal_detection_proxy": False,
+        "detection_score_source": "attacked_image_vae_latent_projection_watermark_rescore",
+        "latent_projection_mode": "periodic_slot_pooled_content_carrier",
+    }
+
+
+def retention_proxy_rescore_from_quality(
+    source_image: Any,
+    attacked_image: Any,
+    threshold: float,
+) -> tuple[dict[str, float | str], dict[str, Any]]:
+    """保留旧的质量 retention 代理路径, 仅用于诊断或显式降级."""
+
+    metrics, raw_score, aligned_score, decision = quality_detection_scores(source_image, attacked_image, threshold)
+    return metrics, {
+        "raw_content_score_after": raw_score,
+        "aligned_content_score_after": aligned_score,
+        "threshold_score_after": aligned_score,
+        "positive_by_content": raw_score >= threshold,
+        "geometry_reliable": False,
+        "rescue_eligible": False,
+        "rescue_applied": False,
+        "evidence_decision": decision,
+        "formal_detection_decision": decision,
+        "attacked_image_rescore_performed": False,
+        "formal_detection_proxy": True,
+        "detection_score_source": "image_quality_retention_proxy",
+    }
+
+
 def unsupported_record(
     root_path: Path,
     source_path: Path,
@@ -814,13 +1034,31 @@ def build_attack_record(
     attacked_path: Path,
     spec: RealAttackSpec,
     config: RealAttackEvaluationConfig,
+    source_context: dict[str, Any] | None = None,
+    boundary: dict[str, Any] | None = None,
+    detector_pipeline: Any | None = None,
 ) -> tuple[RealAttackDetectionRecord, dict[str, Any]]:
     """由真实 attacked image 构造检测记录和注册表行."""
     source_digest = file_digest(source_path)
     attacked_digest = file_digest(attacked_path)
-    metrics, raw_score, aligned_score, decision = quality_detection_scores(
-        source_image, attacked_image, config.detection_threshold
-    )
+    metrics: dict[str, Any]
+    if config.enable_attacked_image_latent_rescore and source_context and boundary and detector_pipeline is not None:
+        metrics = compute_image_quality_metrics(source_image, attacked_image)
+        rescore = rescore_attacked_image_with_detector(
+            detector_pipeline=detector_pipeline,
+            attacked_image=attacked_image,
+            source_context=source_context,
+            boundary=boundary,
+            config=config,
+        )
+        metric_status = REAL_ATTACK_WATERMARK_RESCORE_STATUS
+        detection_method = "real_attacked_image_vae_latent_projection_watermark_rescore"
+    else:
+        if config.require_attacked_image_latent_rescore:
+            raise RuntimeError("attacked_image_latent_rescore_unavailable")
+        metrics, rescore = retention_proxy_rescore_from_quality(source_image, attacked_image, config.detection_threshold)
+        metric_status = "measured_from_real_attacked_image"
+        detection_method = "real_image_quality_proxy_after_attack"
     record = RealAttackDetectionRecord(
         real_attack_record_id=real_attack_record_id(source_digest, spec, attacked_digest),
         source_image_id=source_image_id(source_path, source_digest),
@@ -838,16 +1076,20 @@ def build_attack_record(
         attacked_image_digest_source="sha256_file",
         attacked_image_available=True,
         attack_performed=True,
-        detection_method="real_image_quality_proxy_after_attack",
+        detection_method=detection_method,
         detection_threshold=config.detection_threshold,
-        raw_content_score_after=raw_score,
-        aligned_content_score_after=aligned_score,
-        evidence_decision=decision,
-        metric_status="measured_from_real_attacked_image",
+        raw_content_score_after=float(rescore["raw_content_score_after"]),
+        aligned_content_score_after=float(rescore["aligned_content_score_after"]),
+        evidence_decision=bool(rescore["evidence_decision"]),
+        metric_status=metric_status,
         unsupported_reason="",
         supports_paper_claim=False,
         metadata={
             "image_quality_metrics": metrics,
+            "attacked_image_latent_rescore": rescore,
+            "attacked_image_rescore_performed": bool(rescore["attacked_image_rescore_performed"]),
+            "formal_detection_proxy": bool(rescore["formal_detection_proxy"]),
+            "detection_score_source": rescore["detection_score_source"],
             "claim_boundary": "requires_attack_matrix_and_fixed_fpr_rebuild",
             "attacked_image_closed_loop": True,
             "resource_profile": str(getattr(spec, "resource_profile", "full_extra")),
@@ -897,10 +1139,12 @@ def build_source_context(
     prompt_text: str,
     source_record: dict[str, Any],
     sample_role: str,
+    geometry_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """把 rescoring 记录转换为攻击闭环可复用的 source context."""
 
     effective_role = str(source_record.get("sample_role", sample_role) or sample_role)
+    geometry = geometry_record or {}
     return {
         "prompt_id": prompt_id,
         "prompt_text": prompt_text,
@@ -911,9 +1155,34 @@ def build_source_context(
         "aligned_content_score_before": float(
             source_record.get("real_aligned_content_score", source_record.get("aligned_content_score", 0.0))
         ),
-        "geometry_reliable": bool(source_record.get("aligned_rescoring_ready", False)),
-        "fail_reason": source_record.get("fail_reason", "geometry_suspected"),
+        "latent_projection_values_before": source_record.get("latent_projection_values_before", ()),
+        "latent_projection_values_after": source_record.get("latent_projection_values_after", ()),
+        "latent_projection_digest_before": source_record.get("latent_projection_digest_before", ""),
+        "latent_projection_digest_after": source_record.get("latent_projection_digest_after", ""),
+        "geometry_evidence_record_id": geometry.get("geometry_evidence_record_id", ""),
+        "attention_graph_id": geometry.get("attention_graph_id", source_record.get("attention_graph_id", "")),
+        "capture_id": geometry.get("capture_id", source_record.get("capture_id", "")),
+        "registration_confidence": float(geometry.get("registration_confidence", 0.0)),
+        "anchor_inlier_ratio": float(geometry.get("anchor_inlier_ratio", 0.0)),
+        "recovered_sync_consistency": float(geometry.get("recovered_sync_consistency", 0.0)),
+        "alignment_residual": float(geometry.get("alignment_residual", 1.0)),
+        "geometry_reliable": bool(geometry.get("geometry_reliable", False)),
+        "fail_reason": geometry.get("fail_reason", source_record.get("fail_reason", "geometry_suspected")),
     }
+
+
+def geometric_rescue_context_by_content_record_id(root_path: Path) -> dict[str, dict[str, Any]]:
+    """读取 full_rescue 几何恢复记录, 作为攻击后 same-threshold rescue 证据."""
+
+    rows = read_jsonl(root_path / "outputs" / "geometric_rescue" / "aligned_detection_records.jsonl")
+    mapping: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if row.get("rescue_ablation_mode") != "full_rescue":
+            continue
+        content_id = str(row.get("content_detection_record_id", ""))
+        if content_id and content_id not in mapping:
+            mapping[content_id] = row
+    return mapping
 
 
 def source_context_by_image_path(root_path: Path, config: RealAttackEvaluationConfig) -> dict[str, dict[str, Any]]:
@@ -921,6 +1190,7 @@ def source_context_by_image_path(root_path: Path, config: RealAttackEvaluationCo
     quality_rows = read_csv_rows(root_path / "outputs" / "aligned_rescoring" / "aligned_rescoring_quality_metrics.csv")
     rescoring_rows = read_jsonl(root_path / "outputs" / "aligned_rescoring" / "aligned_rescoring_records.jsonl")
     prompts = prompt_lookup(root_path)
+    geometry_by_content_id = geometric_rescue_context_by_content_record_id(root_path)
     records_by_prompt: dict[str, dict[str, Any]] = {}
     records_by_prompt_role: dict[tuple[str, str], dict[str, Any]] = {}
     for row in rescoring_rows:
@@ -945,6 +1215,7 @@ def source_context_by_image_path(root_path: Path, config: RealAttackEvaluationCo
                 prompt_text=prompt_text,
                 source_record=source_record,
                 sample_role=sample_role,
+                geometry_record=geometry_by_content_id.get(str(source_record.get("content_detection_record_id", ""))),
             )
     return contexts
 
@@ -967,6 +1238,10 @@ def context_for_source(
             "sample_role": "unknown",
             "raw_content_score_before": 0.0,
             "aligned_content_score_before": 0.0,
+            "latent_projection_values_before": (),
+            "latent_projection_values_after": (),
+            "latent_projection_digest_before": "",
+            "latent_projection_digest_after": "",
             "geometry_reliable": False,
             "fail_reason": "geometry_suspected",
         },
@@ -1023,9 +1298,21 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
     """把真实 attacked image 结果接回 attack matrix 正式记录 schema."""
     raw_before = float(source_context["raw_content_score_before"])
     aligned_before = float(source_context["aligned_content_score_before"])
-    retention = float(real_record["aligned_content_score_after"])
-    raw_after = raw_before * retention
-    aligned_after = aligned_before * retention
+    rescore_metadata = real_record.get("metadata", {}).get("attacked_image_latent_rescore", {})
+    attacked_image_rescore_performed = bool(real_record.get("metadata", {}).get("attacked_image_rescore_performed", False))
+    if attacked_image_rescore_performed:
+        raw_after = float(real_record["raw_content_score_after"])
+        aligned_after = float(real_record["aligned_content_score_after"])
+        detection_score_source = str(
+            rescore_metadata.get("detection_score_source", "attacked_image_vae_latent_projection_watermark_rescore")
+        )
+        metric_status = FORMAL_WATERMARK_RESCORE_STATUS if boundary["boundary_ready"] else "formal_boundary_missing"
+    else:
+        retention = float(real_record["aligned_content_score_after"])
+        raw_after = raw_before * retention
+        aligned_after = aligned_before * retention
+        detection_score_source = "pre_attack_latent_score_scaled_by_attacked_image_quality_retention"
+        metric_status = FORMAL_RETENTION_PROXY_STATUS if boundary["boundary_ready"] else "formal_boundary_missing"
     threshold = float(boundary["content_threshold"])
     threshold_score_field = str(boundary.get("threshold_score_field", "raw_content_score"))
     threshold_score_after = aligned_after if threshold_score_field in {"aligned_content_score", "formal_detection_score"} else raw_after
@@ -1034,16 +1321,16 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
     formal_detection_margin_after = threshold_score_after - threshold
     positive_by_content = margin_after >= 0.0
     formal_detection_decision = formal_detection_margin_after >= 0.0
-    geometry_reliable = bool(source_context["geometry_reliable"])
-    formal_score_is_raw = threshold_score_field == "raw_content_score"
+    geometry_reliable = bool(rescore_metadata.get("geometry_reliable", source_context["geometry_reliable"]))
     rescue_eligible = (
-        formal_score_is_raw
-        and boundary["rescue_margin_low"] <= margin_after < 0.0
+        boundary["rescue_margin_low"] <= margin_after < 0.0
         and geometry_reliable
         and source_context["fail_reason"] in boundary["allowed_fail_reasons"]
     )
     rescue_applied = rescue_eligible and aligned_margin_after >= 0.0
-    evidence_decision = (positive_by_content or rescue_applied) if formal_score_is_raw else formal_detection_decision
+    evidence_decision = positive_by_content or rescue_applied or formal_detection_decision
+    score_retention = max(0.0, aligned_after) / max(max(0.0, aligned_before), 1e-6)
+    quality_proxy_default = score_retention if attacked_image_rescore_performed else float(real_record["aligned_content_score_after"])
     attack_config_digest = build_stable_digest(
         {
             "attack_id": real_record["attack_id"],
@@ -1089,18 +1376,20 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
         "raw_content_score_after": raw_after,
         "aligned_content_score_before": aligned_before,
         "aligned_content_score_after": aligned_after,
-        "lf_score_retention": retention,
-        "hf_score_retention": retention,
-        "score_retention": retention,
-        "quality_score_proxy": real_record["metadata"].get("image_quality_metrics", {}).get("ssim", retention),
-        "attention_consistency_proxy": retention,
+        "lf_score_retention": score_retention,
+        "hf_score_retention": score_retention,
+        "score_retention": score_retention,
+        "quality_score_proxy": real_record["metadata"].get("image_quality_metrics", {}).get("ssim", quality_proxy_default),
+        "attention_consistency_proxy": float(
+            rescore_metadata.get("recovered_sync_consistency", source_context.get("recovered_sync_consistency", 0.0))
+        )
+        if attacked_image_rescore_performed
+        else float(real_record["aligned_content_score_after"]),
         "geometry_reliable": geometry_reliable,
         "rescue_eligible": rescue_eligible,
         "rescue_applied": rescue_applied,
         "evidence_decision": evidence_decision,
-        "metric_status": "measured_from_real_attacked_image_retention_proxy_formal_protocol"
-        if boundary["boundary_ready"]
-        else "formal_boundary_missing",
+        "metric_status": metric_status,
         "unsupported_reason": "" if boundary["boundary_ready"] else "threshold_calibration_inputs_missing",
         "supports_paper_claim": False,
         "metadata": {
@@ -1114,11 +1403,22 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
             "threshold_score_source_field": boundary.get("threshold_score_source_field", ""),
             "threshold_score_after": threshold_score_after,
             "formal_detection_decision": formal_detection_decision,
-            "formal_detection_proxy": True,
-            "attacked_image_rescore_performed": False,
+            "formal_detection_proxy": not attacked_image_rescore_performed,
+            "attacked_image_rescore_performed": attacked_image_rescore_performed,
             "attacked_image_rescore_required_for_claim": True,
-            "detection_score_source": "pre_attack_latent_score_scaled_by_attacked_image_quality_retention",
-            "retention_source_field": "real_attack_detection_records.aligned_content_score_after",
+            "detection_score_source": detection_score_source,
+            "retention_source_field": ""
+            if attacked_image_rescore_performed
+            else "real_attack_detection_records.aligned_content_score_after",
+            "same_threshold_rescue_source": "attacked_image_latent_rescore"
+            if attacked_image_rescore_performed
+            else "retention_proxy_boundary",
+            "geometry_evidence_record_id": source_context.get("geometry_evidence_record_id", ""),
+            "attention_graph_id": source_context.get("attention_graph_id", ""),
+            "capture_id": source_context.get("capture_id", ""),
+            "attacked_latent_projection_digest": rescore_metadata.get("attacked_latent_projection_digest", ""),
+            "watermark_coordinate": rescore_metadata.get("watermark_coordinate", ""),
+            "bounded_watermark_coordinate": rescore_metadata.get("bounded_watermark_coordinate", ""),
             "score_space_name": boundary.get("score_space_name", ""),
             "score_space_alignment_ready": boundary.get("score_space_alignment_ready", False),
             "real_score_calibration_ready": boundary.get("real_score_calibration_ready", False),
@@ -1223,6 +1523,9 @@ def write_failure_outputs(
         required_regeneration_attack_count=len(REQUIRED_REGENERATION_ATTACKS),
         measured_regeneration_attack_count=0,
         real_attacked_image_closed_loop_ready=False,
+        attacked_image_rescore_count=0,
+        attacked_image_rescore_ready=False,
+        proxy_formal_record_count=0,
         regeneration_attack_gpu_validation_ready=False,
         attack_detection_rerun_ready=False,
         formal_attack_detection_ready=False,
@@ -1282,6 +1585,7 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
     records: list[dict[str, Any]] = []
     registry_rows: list[dict[str, Any]] = []
     contexts_by_record_source_path: dict[str, dict[str, Any]] = {}
+    pending_ddim_attacks: list[tuple[Path, Path, RealAttackSpec]] = []
     specs = default_attack_specs()
     main_specs = tuple(spec for spec in specs if spec.attack_name != "ddim_inversion_regeneration")
     ddim_specs = tuple(spec for spec in specs if spec.attack_name == "ddim_inversion_regeneration")
@@ -1312,6 +1616,9 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
                         attacked_path=attacked_path,
                         spec=spec,
                         config=config,
+                        source_context=source_context,
+                        boundary=boundary,
+                        detector_pipeline=pipeline,
                     )
                     records.append(record.to_dict())
                     registry_rows.append(registry_row)
@@ -1349,17 +1656,7 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
                     attacked_image = normalize_attacked_image_size(attacked_image, source_image)
                     attacked_path = attacked_dir / f"{source_path.stem}_{spec.attack_name}_{source_digest[:8]}.png"
                     attacked_image.save(attacked_path)
-                    record, registry_row = build_attack_record(
-                        root_path=root_path,
-                        source_path=source_path,
-                        source_image=source_image,
-                        attacked_image=attacked_image,
-                        attacked_path=attacked_path,
-                        spec=spec,
-                        config=config,
-                    )
-                    records.append(record.to_dict())
-                    registry_rows.append(registry_row)
+                    pending_ddim_attacks.append((source_path, attacked_path, spec))
                 except Exception as error:
                     records.append(unsupported_record(root_path, source_path, source_digest, spec, config, error).to_dict())
                 finally:
@@ -1374,12 +1671,57 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
 
     clear_strict_ddim_inversion_runtime_cache()
 
+    if pending_ddim_attacks:
+        try:
+            detector_pipeline, detector_runtime_versions = load_img2img_pipeline(config)
+            runtime_versions = {**runtime_versions, **detector_runtime_versions}
+            from PIL import Image
+
+            for source_path, attacked_path, spec in pending_ddim_attacks:
+                source_digest = file_digest(source_path)
+                try:
+                    source_image = load_rgb_image(source_path, config)
+                    attacked_image = Image.open(attacked_path).convert("RGB")
+                    source_context = context_for_source(source_path, root_path, source_contexts, config)
+                    record, registry_row = build_attack_record(
+                        root_path=root_path,
+                        source_path=source_path,
+                        source_image=source_image,
+                        attacked_image=attacked_image,
+                        attacked_path=attacked_path,
+                        spec=spec,
+                        config=config,
+                        source_context=source_context,
+                        boundary=boundary,
+                        detector_pipeline=detector_pipeline,
+                    )
+                    records.append(record.to_dict())
+                    registry_rows.append(registry_row)
+                except Exception as error:
+                    records.append(unsupported_record(root_path, source_path, source_digest, spec, config, error).to_dict())
+        except Exception as error:
+            for source_path, _, spec in pending_ddim_attacks:
+                records.append(unsupported_record(root_path, source_path, file_digest(source_path), spec, config, error).to_dict())
+        finally:
+            try:
+                del detector_pipeline
+            except Exception:
+                pass
+            gc.collect()
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+
     record_rows = tuple(records)
     registry_tuple = tuple(registry_rows)
     formal_rows = tuple(
         build_formal_attack_record(record, contexts_by_record_source_path[record["source_image_path"]], boundary)
         for record in record_rows
-        if record["metric_status"] == "measured_from_real_attacked_image"
+        if _is_measured_attack_record(record)
     )
     family_metrics = build_family_metrics(formal_rows)
     records_path.write_text(jsonl_text(record_rows), encoding="utf-8")
@@ -1389,18 +1731,28 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
     environment_report = runtime_versions.get("runtime_environment", build_runtime_environment_report())
     environment_path.write_text(stable_json_text(environment_report), encoding="utf-8")
 
-    measured_names = {record["attack_name"] for record in record_rows if record["metric_status"] == "measured_from_real_attacked_image"}
+    measured_names = {record["attack_name"] for record in record_rows if _is_measured_attack_record(record)}
     real_attacked_image_count = sum(1 for record in record_rows if record["attacked_image_available"])
     closed_loop_ready = real_attacked_image_count > 0 and all(
         row.get("source_image_digest") and row.get("attacked_image_digest") for row in registry_tuple
     )
     regeneration_ready = all(name in measured_names for name in REQUIRED_REGENERATION_ATTACKS)
-    detection_ready = any(record["metric_status"] == "measured_from_real_attacked_image" for record in record_rows)
-    formal_ready = bool(formal_rows) and boundary["boundary_ready"] and len(formal_rows) == real_attacked_image_count
+    detection_ready = any(_is_measured_attack_record(record) for record in record_rows)
+    attacked_image_rescore_count = sum(
+        1 for record in record_rows if bool(record.get("metadata", {}).get("attacked_image_rescore_performed", False))
+    )
+    proxy_formal_record_count = sum(1 for record in formal_rows if bool(record.get("metadata", {}).get("formal_detection_proxy", False)))
+    attacked_image_rescore_ready = attacked_image_rescore_count == real_attacked_image_count and real_attacked_image_count > 0
+    formal_ready = (
+        bool(formal_rows)
+        and boundary["boundary_ready"]
+        and len(formal_rows) == real_attacked_image_count
+        and (attacked_image_rescore_ready or not config.require_attacked_image_latent_rescore)
+    )
     image_quality_ready = all(
         "image_quality_metrics" in record.get("metadata", {})
         for record in record_rows
-        if record["metric_status"] == "measured_from_real_attacked_image"
+        if _is_measured_attack_record(record)
     )
     run_decision = (
         "pass"
@@ -1424,6 +1776,9 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
         required_regeneration_attack_count=len(REQUIRED_REGENERATION_ATTACKS),
         measured_regeneration_attack_count=len(measured_names.intersection(REQUIRED_REGENERATION_ATTACKS)),
         real_attacked_image_closed_loop_ready=closed_loop_ready,
+        attacked_image_rescore_count=attacked_image_rescore_count,
+        attacked_image_rescore_ready=attacked_image_rescore_ready,
+        proxy_formal_record_count=proxy_formal_record_count,
         regeneration_attack_gpu_validation_ready=regeneration_ready,
         attack_detection_rerun_ready=detection_ready,
         formal_attack_detection_ready=formal_ready,
@@ -1439,6 +1794,9 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
             **runtime_versions,
             "required_regeneration_attacks": REQUIRED_REGENERATION_ATTACKS,
             "formal_boundary": boundary,
+            "require_attacked_image_latent_rescore": config.require_attacked_image_latent_rescore,
+            "formal_watermark_rescore_status": FORMAL_WATERMARK_RESCORE_STATUS,
+            "formal_retention_proxy_status": FORMAL_RETENTION_PROXY_STATUS,
             "claim_boundary": "requires_full_sample_scale_and_evidence_audit",
         },
     )
@@ -1462,6 +1820,9 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
             "supports_paper_claim": False,
             "run_decision": run_decision,
             "real_attacked_image_count": real_attacked_image_count,
+            "attacked_image_rescore_count": attacked_image_rescore_count,
+            "attacked_image_rescore_ready": attacked_image_rescore_ready,
+            "proxy_formal_record_count": proxy_formal_record_count,
             "regeneration_attack_gpu_validation_ready": regeneration_ready,
             "formal_attack_detection_ready": formal_ready,
         },
@@ -1497,6 +1858,8 @@ def build_default_config() -> RealAttackEvaluationConfig:
         ddim_reconstruction_steps=int(os.environ.get("SLM_WM_DDIM_RECONSTRUCTION_STEPS", "30")),
         enable_pipeline_progress_bar=os.environ.get("SLM_WM_ENABLE_PIPELINE_PROGRESS_BAR", "0") == "1",
         enable_attack_progress_bar=os.environ.get("SLM_WM_ENABLE_ATTACK_PROGRESS_BAR", "1") != "0",
+        enable_attacked_image_latent_rescore=os.environ.get("SLM_WM_ENABLE_ATTACKED_IMAGE_LATENT_RESCORE", "1") != "0",
+        require_attacked_image_latent_rescore=os.environ.get("SLM_WM_REQUIRE_ATTACKED_IMAGE_LATENT_RESCORE", "1") != "0",
     )
 
 
