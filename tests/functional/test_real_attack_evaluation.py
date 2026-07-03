@@ -405,6 +405,10 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     assert all(record["metadata"]["formal_detection_proxy"] is False for record in formal_records)
     assert all(record["metadata"]["attacked_image_rescore_performed"] is True for record in formal_records)
     assert all(record["metadata"]["attacked_image_rescore_required_for_claim"] is True for record in formal_records)
+    assert all(
+        record["metadata"]["detection_method"] == "fixed_fpr_attack_matrix_schema_from_real_attacked_image_latent_rescore"
+        for record in formal_records
+    )
     assert {record["sample_role"] for record in formal_records} == {"positive_source", "clean_negative"}
     for family_row in family_rows:
         positive_records = [

@@ -1575,12 +1575,14 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
         detection_score_source = str(
             rescore_metadata.get("detection_score_source", "attacked_image_vae_latent_projection_watermark_rescore")
         )
+        formal_detection_method = "fixed_fpr_attack_matrix_schema_from_real_attacked_image_latent_rescore"
         metric_status = FORMAL_WATERMARK_RESCORE_STATUS if boundary["boundary_ready"] else "formal_boundary_missing"
     else:
         retention = float(real_record["aligned_content_score_after"])
         raw_after = raw_before * retention
         aligned_after = aligned_before * retention
         detection_score_source = "pre_attack_latent_score_scaled_by_attacked_image_quality_retention"
+        formal_detection_method = "fixed_fpr_attack_matrix_schema_from_real_attacked_image_retention_proxy"
         metric_status = FORMAL_RETENTION_PROXY_STATUS if boundary["boundary_ready"] else "formal_boundary_missing"
     threshold = float(boundary["content_threshold"])
     threshold_score_field = str(boundary.get("threshold_score_field", "raw_content_score"))
@@ -1665,7 +1667,7 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
             "real_attack_record_id": real_record["real_attack_record_id"],
             "attacked_image_path": real_record["attacked_image_path"],
             "source_image_path": real_record["source_image_path"],
-            "detection_method": "fixed_fpr_attack_matrix_schema_from_real_attacked_image_retention_proxy",
+            "detection_method": formal_detection_method,
             "attack_implementation": real_record["attack_implementation"],
             "formal_boundary_ready": boundary["boundary_ready"],
             "threshold_score_field": threshold_score_field,
