@@ -518,6 +518,54 @@ def _runtime_versions_from_torch(torch_module: Any) -> dict[str, Any]:
     }
 
 
+class DetectorPipeline:
+    """保存检测侧 VAE 与图像预处理器的轻量 pipeline。
+
+    该类属于项目特定工程适配: 正式攻击后检测只需要把 attacked image
+    重新编码到 SD3.5 VAE latent 空间, 不需要加载 transformer、text encoder
+    或 image-to-image pipeline。通过该轻量对象可以降低 Colab 依赖导入失败
+    对常规失真与几何攻击闭环的影响。
+    """
+
+    def __init__(self, vae: Any, image_processor: Any, loader_name: str) -> None:
+        """保存 VAE、预处理器与 loader 来源, 便于 manifest 审计。"""
+
+        self.vae = vae
+        self.image_processor = image_processor
+        self.detector_loader_name = loader_name
+
+    def to(self, device_name: str) -> "DetectorPipeline":
+        """把 VAE 放到目标设备并返回自身, 对齐 diffusers pipeline 的用法。"""
+
+        self.vae = self.vae.to(device_name)
+        return self
+
+
+class SimpleVaeImageProcessor:
+    """提供最小 VAE 图像预处理能力。
+
+    该实现是通用工程兜底: 当无法安全导入 diffusers 的 pipeline 类时,
+    仍可把 PIL 图像转换为 VAE 期望的 [-1, 1] tensor, 从而保持真实
+    attacked image latent re-score 路径不退化为 retention proxy。
+    """
+
+    def preprocess(self, image: Any) -> Any:
+        """将 PIL 图像转换为 NCHW float tensor, 数值范围为 [-1, 1]。"""
+
+        import numpy as np
+        import torch
+
+        array = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+        tensor = torch.from_numpy(array).permute(2, 0, 1).unsqueeze(0)
+        return tensor * 2.0 - 1.0
+
+
+def _compact_error(error: Exception, max_length: int = 240) -> str:
+    """压缩异常信息, 用于 runtime provenance 字段。"""
+
+    return f"{type(error).__name__}:{str(error)[:max_length]}"
+
+
 def load_img2img_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict[str, Any]]:
     """加载真实 SD3/SD3.5 image-to-image pipeline。
 
@@ -542,30 +590,92 @@ def load_img2img_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict
     return pipeline, _runtime_versions_from_torch(torch)
 
 
-def load_detector_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict[str, Any]]:
-    """加载只用于 attacked image latent re-score 的 SD3/SD3.5 detector pipeline。
+def _load_detector_pipeline_from_sd3_pipeline(config: RealAttackEvaluationConfig, torch_module: Any) -> Any:
+    """优先通过 SD3 pipeline 获取检测侧 VAE 与 image processor。"""
 
-    此处设计的主要考虑在于: 常规失真和几何攻击只需要主模型 VAE 与
-    image_processor 来把 attacked image 重新编码到 latent 空间, 不需要
-    image-to-image pipeline。将 detector loader 与 img2img loader 拆开, 可以
-    避免 Colab 依赖组合无法导入 `StableDiffusion3Img2ImgPipeline` 时阻断
-    JPEG、噪声、模糊、裁剪和旋转等正式图像级攻击闭环。
-    """
-
-    import torch
     from diffusers import StableDiffusion3Pipeline
 
-    configure_model_loading_output(config)
-    if config.device_name == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("gpu_unavailable")
-    dtype = getattr(torch, config.torch_dtype)
+    dtype = getattr(torch_module, config.torch_dtype)
     token = os.environ.get(config.hf_token_env) or None
     pipeline = StableDiffusion3Pipeline.from_pretrained(config.model_id, torch_dtype=dtype, token=token)
     pipeline = pipeline.to(config.device_name)
     pipeline.set_progress_bar_config(disable=not config.enable_pipeline_progress_bar)
     if hasattr(pipeline, "vae"):
         pipeline.vae.eval()
-    return pipeline, _runtime_versions_from_torch(torch)
+    return pipeline
+
+
+def _import_autoencoder_kl() -> Any:
+    """导入 AutoencoderKL, 并兼容不同 diffusers 版本的导出位置。"""
+
+    try:
+        from diffusers import AutoencoderKL
+
+        return AutoencoderKL
+    except Exception as public_error:
+        try:
+            from diffusers.models.autoencoders.autoencoder_kl import AutoencoderKL
+
+            return AutoencoderKL
+        except Exception as direct_error:
+            raise RuntimeError(
+                "autoencoder_kl_import_failed:"
+                f"public={_compact_error(public_error)};"
+                f"direct={_compact_error(direct_error)}"
+            ) from direct_error
+
+
+def _load_detector_pipeline_from_vae(config: RealAttackEvaluationConfig, torch_module: Any) -> DetectorPipeline:
+    """只加载模型仓库中的 VAE 子模块, 避免导入完整 SD3 pipeline。"""
+
+    autoencoder_kl = _import_autoencoder_kl()
+    dtype = getattr(torch_module, config.torch_dtype)
+    token = os.environ.get(config.hf_token_env) or None
+    vae = autoencoder_kl.from_pretrained(
+        config.model_id,
+        subfolder="vae",
+        torch_dtype=dtype,
+        token=token,
+    )
+    vae = vae.to(config.device_name)
+    vae.eval()
+    return DetectorPipeline(vae=vae, image_processor=SimpleVaeImageProcessor(), loader_name="vae_subfolder")
+
+
+def load_detector_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict[str, Any]]:
+    """加载只用于 attacked image latent re-score 的 SD3/SD3.5 detector pipeline。
+
+    此处设计的主要考虑在于: 常规失真和几何攻击只需要主模型 VAE 与
+    image_processor 来把 attacked image 重新编码到 latent 空间, 不需要
+    image-to-image pipeline。该 loader 会优先复用 SD3 pipeline; 若 Colab
+    依赖组合无法导入完整 SD3 pipeline, 则退到 VAE 子模块加载路径, 仍保持
+    真实 attacked image latent re-score, 不退化为 retention proxy。
+    """
+
+    import torch
+
+    configure_model_loading_output(config)
+    if config.device_name == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("gpu_unavailable")
+    runtime_versions = _runtime_versions_from_torch(torch)
+    try:
+        pipeline = _load_detector_pipeline_from_sd3_pipeline(config, torch)
+        runtime_versions["detector_loader_name"] = "stable_diffusion_3_pipeline"
+        return pipeline, runtime_versions
+    except Exception as pipeline_error:
+        try:
+            pipeline = _load_detector_pipeline_from_vae(config, torch)
+        except Exception as vae_error:
+            raise RuntimeError(
+                "detector_pipeline_unavailable:"
+                f"sd3_pipeline={_compact_error(pipeline_error)};"
+                f"vae_subfolder={_compact_error(vae_error)}"
+            ) from vae_error
+        runtime_versions["detector_loader_name"] = "vae_subfolder"
+        runtime_versions["detector_loader_fallback_reason"] = _compact_error(pipeline_error)
+        runtime_versions["runtime_environment"]["detector_loader_name"] = "vae_subfolder"
+        runtime_versions["runtime_environment"]["detector_loader_fallback_reason"] = _compact_error(pipeline_error)
+        return pipeline, runtime_versions
 
 
 def load_rgb_image(path: Path, config: RealAttackEvaluationConfig) -> Any:

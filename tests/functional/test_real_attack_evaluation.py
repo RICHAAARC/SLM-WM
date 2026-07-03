@@ -69,6 +69,54 @@ def test_slm_attack_workflows_cover_paper_formal_attack_matrix() -> None:
 
 
 @pytest.mark.quick
+def test_detector_loader_falls_back_to_vae_subfolder(monkeypatch: pytest.MonkeyPatch) -> None:
+    """完整 SD3 pipeline 导入失败时, detector loader 应退到 VAE 子模块路径。"""
+
+    class FakeVae:
+        """模拟测试用 VAE, 避免加载真实模型。"""
+
+        def to(self, device_name: str) -> "FakeVae":
+            self.device_name = device_name
+            return self
+
+        def eval(self) -> None:
+            self.eval_called = True
+
+    def fake_sd3_loader(config: RealAttackEvaluationConfig, torch_module: object) -> object:
+        raise RuntimeError("stable_diffusion_3_import_failed")
+
+    def fake_vae_loader(config: RealAttackEvaluationConfig, torch_module: object) -> real_attack_evaluation.DetectorPipeline:
+        return real_attack_evaluation.DetectorPipeline(
+            vae=FakeVae(),
+            image_processor=real_attack_evaluation.SimpleVaeImageProcessor(),
+            loader_name="vae_subfolder",
+        )
+
+    monkeypatch.setattr(real_attack_evaluation, "_load_detector_pipeline_from_sd3_pipeline", fake_sd3_loader)
+    monkeypatch.setattr(real_attack_evaluation, "_load_detector_pipeline_from_vae", fake_vae_loader)
+    config = RealAttackEvaluationConfig(
+        model_family=PRIMARY_MODEL_FAMILY,
+        model_id=PRIMARY_MODEL_ID,
+        seed=20260621,
+        prompt="test prompt",
+        negative_prompt="low quality",
+        width=32,
+        height=32,
+        inference_steps=2,
+        guidance_scale=1.0,
+        device_name="cpu",
+        torch_dtype="float32",
+    )
+
+    detector_pipeline, runtime_versions = real_attack_evaluation.load_detector_pipeline(config)
+
+    assert isinstance(detector_pipeline, real_attack_evaluation.DetectorPipeline)
+    assert runtime_versions["detector_loader_name"] == "vae_subfolder"
+    assert "stable_diffusion_3_import_failed" in runtime_versions["detector_loader_fallback_reason"]
+    assert runtime_versions["runtime_environment"]["detector_loader_name"] == "vae_subfolder"
+
+
+@pytest.mark.quick
 def test_materialize_drive_package_inputs_extracts_only_governed_outputs(tmp_path: Path) -> None:
     """前序结果应来自 Drive 包, 且不能把包内代码文件覆盖回工作区。"""
     aligned_drive = tmp_path / "drive" / "aligned_rescoring"
