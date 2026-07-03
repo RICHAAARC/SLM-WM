@@ -1128,16 +1128,37 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
     }
 
 
+def _is_measured_attack_record(record: dict[str, Any]) -> bool:
+    """判断记录是否进入真实攻击测量空间.
+
+    通用工程写法是让聚合函数只依赖稳定的 metric_status 前缀, 避免把同一攻击的非正式检测记录
+    和 formal records 混在不同统计口径中。项目特定设计是: formal records 会把真实攻击图像分数
+    映射到 fixed-FPR 边界, 因此 family metrics 必须优先使用 formal records 作为事实来源。
+    """
+
+    return str(record.get("metric_status", "")).startswith("measured_from_real_attacked_image")
+
+
 def build_family_metrics(records: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
-    """按攻击名称聚合真实攻击闭环检测指标."""
+    """按攻击名称聚合真实攻击闭环检测指标.
+
+    `detection_positive_rate` 表示 formal positive_source 记录的通过率, 不把 clean negative 混入
+    TPR 分母。clean negative 的误检率单独写入 `formal_clean_false_positive_rate`, 从而和
+    fixed-FPR 协议的统计边界保持一致。
+    """
     rows: list[dict[str, Any]] = []
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for record in records:
         grouped.setdefault((record["attack_family"], record["attack_name"]), []).append(record)
     for (attack_family, attack_name), group in sorted(grouped.items()):
-        measured = [record for record in group if record["metric_status"] == "measured_from_real_attacked_image"]
-        decisions = [bool(record["evidence_decision"]) for record in measured]
-        scores = [float(record["aligned_content_score_after"]) for record in measured]
+        measured = [record for record in group if _is_measured_attack_record(record)]
+        positive_records = [record for record in measured if record.get("sample_role", "positive_source") == "positive_source"]
+        clean_negative_records = [record for record in measured if record.get("sample_role") == "clean_negative"]
+        positive_decisions = [bool(record["evidence_decision"]) for record in positive_records]
+        clean_negative_decisions = [bool(record["evidence_decision"]) for record in clean_negative_records]
+        all_decisions = [bool(record["evidence_decision"]) for record in measured]
+        positive_scores = [float(record["aligned_content_score_after"]) for record in positive_records]
+        all_scores = [float(record["aligned_content_score_after"]) for record in measured]
         rows.append(
             {
                 "attack_family": attack_family,
@@ -1146,9 +1167,31 @@ def build_family_metrics(records: tuple[dict[str, Any], ...]) -> tuple[dict[str,
                 "measured_record_count": len(measured),
                 "unsupported_record_count": len(group) - len(measured),
                 "real_attacked_image_count": sum(1 for record in measured if record["attacked_image_available"]),
-                "detection_positive_rate": sum(1 for decision in decisions if decision) / len(decisions) if decisions else 0.0,
-                "aligned_content_score_after_mean": sum(scores) / len(scores) if scores else 0.0,
-                "metric_status": "measured_from_real_attacked_image" if measured else "unsupported",
+                "formal_positive_count": len(positive_records),
+                "formal_clean_negative_count": len(clean_negative_records),
+                "detection_positive_rate": (
+                    sum(1 for decision in positive_decisions if decision) / len(positive_decisions)
+                    if positive_decisions
+                    else 0.0
+                ),
+                "formal_clean_false_positive_rate": (
+                    sum(1 for decision in clean_negative_decisions if decision) / len(clean_negative_decisions)
+                    if clean_negative_decisions
+                    else 0.0
+                ),
+                "all_record_positive_rate": (
+                    sum(1 for decision in all_decisions if decision) / len(all_decisions) if all_decisions else 0.0
+                ),
+                "aligned_content_score_after_mean": sum(positive_scores) / len(positive_scores) if positive_scores else 0.0,
+                "all_record_aligned_content_score_after_mean": sum(all_scores) / len(all_scores) if all_scores else 0.0,
+                "metric_status": (
+                    "measured_from_real_attacked_image_formal_records"
+                    if positive_records or clean_negative_records
+                    else "measured_from_real_attacked_image"
+                    if measured
+                    else "unsupported"
+                ),
+                "metrics_source": "formal_attack_detection_records" if positive_records or clean_negative_records else "attack_detection_records",
                 "supports_paper_claim": False,
             }
         )
@@ -1338,7 +1381,7 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
         for record in record_rows
         if record["metric_status"] == "measured_from_real_attacked_image"
     )
-    family_metrics = build_family_metrics(record_rows)
+    family_metrics = build_family_metrics(formal_rows)
     records_path.write_text(jsonl_text(record_rows), encoding="utf-8")
     formal_records_path.write_text(jsonl_text(formal_rows), encoding="utf-8")
     registry_path.write_text(jsonl_text(registry_tuple), encoding="utf-8")

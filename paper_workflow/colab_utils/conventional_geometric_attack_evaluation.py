@@ -407,7 +407,7 @@ def write_conventional_geometric_attack_evaluation_outputs(
         for record in record_rows
         if record["metric_status"] == "measured_from_real_attacked_image"
     )
-    family_metrics = build_family_metrics(record_rows)
+    family_metrics = build_family_metrics(formal_rows)
     records_path.write_text(jsonl_text(record_rows), encoding="utf-8")
     formal_records_path.write_text(jsonl_text(formal_rows), encoding="utf-8")
     registry_path.write_text(jsonl_text(registry_tuple), encoding="utf-8")

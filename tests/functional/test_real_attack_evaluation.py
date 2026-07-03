@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import csv
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -197,6 +198,7 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
             assert attacked_image.size == (32, 32)
     assert (output_dir / "real_attack_family_metrics.csv").read_text(encoding="utf-8").count("\n") >= 5
     formal_records = read_jsonl(output_dir / "formal_attack_detection_records.jsonl")
+    family_rows = list(csv.DictReader((output_dir / "real_attack_family_metrics.csv").open(encoding="utf-8")))
     assert len(formal_records) == 8
     assert all(
         record["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
@@ -206,6 +208,24 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     assert all(record["metadata"]["attacked_image_rescore_performed"] is False for record in formal_records)
     assert all(record["metadata"]["attacked_image_rescore_required_for_claim"] is True for record in formal_records)
     assert {record["sample_role"] for record in formal_records} == {"positive_source", "clean_negative"}
+    for family_row in family_rows:
+        positive_records = [
+            record
+            for record in formal_records
+            if record["attack_name"] == family_row["attack_name"] and record["sample_role"] == "positive_source"
+        ]
+        clean_negative_records = [
+            record
+            for record in formal_records
+            if record["attack_name"] == family_row["attack_name"] and record["sample_role"] == "clean_negative"
+        ]
+        expected_positive_rate = sum(1 for record in positive_records if record["evidence_decision"]) / len(positive_records)
+        expected_clean_fpr = sum(1 for record in clean_negative_records if record["evidence_decision"]) / len(
+            clean_negative_records
+        )
+        assert family_row["metrics_source"] == "formal_attack_detection_records"
+        assert float(family_row["detection_positive_rate"]) == pytest.approx(expected_positive_rate)
+        assert float(family_row["formal_clean_false_positive_rate"]) == pytest.approx(expected_clean_fpr)
 
 
 @pytest.mark.quick

@@ -729,6 +729,7 @@ def build_dataset_quality_summary(
         if str(row.get("quality_metric_name")) in {"fid", "kid"} and str(row.get("metric_status")) == "measured"
     }
     formal_ready = measured_formal_metric_names == {"fid", "kid"}
+    summary_feature_backend = FORMAL_FEATURE_BACKEND if formal_ready else PIXEL_FEATURE_BACKEND
     formal_status_values = tuple(
         str(row.get("metric_status"))
         for row in rows
@@ -765,7 +766,10 @@ def build_dataset_quality_summary(
         "source_image_count": len(record_values),
         "comparison_image_count": len(record_values),
         "sample_pair_count": len(record_values),
-        "feature_backend": PIXEL_FEATURE_BACKEND,
+        "feature_backend": summary_feature_backend,
+        "formal_feature_backend": FORMAL_FEATURE_BACKEND,
+        "pixel_proxy_feature_backend": PIXEL_FEATURE_BACKEND,
+        "primary_metric_backend": summary_feature_backend,
         "dataset_level_quality_proxy_ready": proxy_ready,
         "formal_fid_kid_ready": formal_ready,
         "formal_fid_kid_metric_names_ready": formal_ready,

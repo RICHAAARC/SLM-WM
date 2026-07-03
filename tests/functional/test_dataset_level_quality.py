@@ -82,6 +82,9 @@ def test_dataset_quality_protocol_keeps_formal_fid_kid_unsupported(tmp_path: Pat
     assert rows_by_name["fid_pixel_feature_proxy"]["metric_status"] == "measured_small_sample_proxy"
     assert rows_by_name["kid_pixel_feature_proxy"]["metric_status"] == "measured_small_sample_proxy"
     assert summary["feature_backend"] == PIXEL_FEATURE_BACKEND
+    assert summary["formal_feature_backend"] == FORMAL_FEATURE_BACKEND
+    assert summary["pixel_proxy_feature_backend"] == PIXEL_FEATURE_BACKEND
+    assert summary["primary_metric_backend"] == PIXEL_FEATURE_BACKEND
     assert summary["dataset_level_quality_proxy_ready"] is True
     assert summary["formal_fid_kid_ready"] is False
     assert summary["formal_fid_kid_metric_names_ready"] is False
@@ -312,6 +315,10 @@ def test_dataset_quality_formal_feature_import_measures_when_scale_is_ready(tmp_
     assert summary["formal_fid_kid_metric_names_ready"] is True
     assert summary["formal_fid_kid_claim_gate_ready"] is True
     assert summary["formal_fid_kid_claim_blocker"] == ""
+    assert summary["feature_backend"] == FORMAL_FEATURE_BACKEND
+    assert summary["primary_metric_backend"] == FORMAL_FEATURE_BACKEND
+    assert summary["formal_feature_backend"] == FORMAL_FEATURE_BACKEND
+    assert summary["pixel_proxy_feature_backend"] == PIXEL_FEATURE_BACKEND
     assert summary["dataset_quality_proxy_only"] is False
     assert (
         dataset_level_quality_claim_boundary(summary)
