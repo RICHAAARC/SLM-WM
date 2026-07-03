@@ -552,11 +552,13 @@ class SimpleVaeImageProcessor:
     def preprocess(self, image: Any) -> Any:
         """将 PIL 图像转换为 NCHW float tensor, 数值范围为 [-1, 1]。"""
 
-        import numpy as np
         import torch
 
-        array = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
-        tensor = torch.from_numpy(array).permute(2, 0, 1).unsqueeze(0)
+        rgb_image = image.convert("RGB")
+        width, height = rgb_image.size
+        image_bytes = bytearray(rgb_image.tobytes())
+        tensor = torch.frombuffer(image_bytes, dtype=torch.uint8)
+        tensor = tensor.reshape(height, width, 3).permute(2, 0, 1).unsqueeze(0).float() / 255.0
         return tensor * 2.0 - 1.0
 
 
@@ -564,6 +566,39 @@ def _compact_error(error: Exception, max_length: int = 240) -> str:
     """压缩异常信息, 用于 runtime provenance 字段。"""
 
     return f"{type(error).__name__}:{str(error)[:max_length]}"
+
+
+def patch_numpy_core_umath_string_center_compatibility() -> dict[str, Any]:
+    """为不完整的 NumPy 运行时补齐字符串居中 ufunc 导出。
+
+    部分 Colab 动态依赖组合会出现 NumPy Python 层代码期望
+    `numpy._core.umath._center`, 但底层扩展尚未导出该名称的情况。该缺口会在
+    torch / diffusers 导入链路中表现为 `_center` ImportError。这里补齐一个
+    只用于导入兼容的占位 callable; 本项目不会在正式检测路径中调用 NumPy
+    字符串居中逻辑。
+    """
+
+    report: dict[str, Any] = {
+        "numpy_umath_center_patch_applied": False,
+    }
+    try:
+        import importlib
+
+        umath = importlib.import_module("numpy._core.umath")
+    except Exception as error:
+        report["numpy_umath_import_error"] = _compact_error(error)
+        return report
+    if hasattr(umath, "_center"):
+        return report
+
+    def _center_import_compatibility_placeholder(*_args: Any, **_kwargs: Any) -> Any:
+        """导入兼容占位实现, 不用于本项目数值路径。"""
+
+        raise RuntimeError("numpy_umath_center_runtime_unavailable")
+
+    setattr(umath, "_center", _center_import_compatibility_placeholder)
+    report["numpy_umath_center_patch_applied"] = True
+    return report
 
 
 def patch_transformers_for_diffusers_autoencoder_import() -> dict[str, Any]:
@@ -610,6 +645,7 @@ def load_img2img_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict
     `StableDiffusion3Img2ImgPipeline`, 否则会把攻击图像生成与检测侧 VAE
     重评分错误绑定。
     """
+    patch_numpy_core_umath_string_center_compatibility()
     import torch
     import diffusers
 
@@ -691,12 +727,15 @@ def load_detector_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dic
     真实 attacked image latent re-score, 不退化为 retention proxy。
     """
 
+    numpy_report = patch_numpy_core_umath_string_center_compatibility()
     import torch
 
     configure_model_loading_output(config)
     if config.device_name == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("gpu_unavailable")
     runtime_versions = _runtime_versions_from_torch(torch)
+    runtime_versions.update(numpy_report)
+    runtime_versions["runtime_environment"].update(numpy_report)
     compat_report = patch_transformers_for_diffusers_autoencoder_import()
     runtime_versions.update(compat_report)
     runtime_versions["runtime_environment"].update(compat_report)
@@ -740,14 +779,20 @@ def normalize_attacked_image_size(attacked_image: Any, source_image: Any) -> Any
 
 def add_sdedit_noise(image: Any, noise_level: float, seed: int) -> Any:
     """为 SDEdit 风格攻击构造带噪输入图像."""
-    import numpy as np
+
+    import torch
     from PIL import Image
 
-    rng = np.random.default_rng(seed)
-    array = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
-    noise = rng.normal(loc=0.0, scale=noise_level, size=array.shape).astype(np.float32)
-    mixed = np.clip(array * (1.0 - noise_level) + noise_level * np.clip(array + noise, 0.0, 1.0), 0.0, 1.0)
-    return Image.fromarray((mixed * 255.0).round().astype(np.uint8), mode="RGB")
+    rgb_image = image.convert("RGB")
+    width, height = rgb_image.size
+    image_bytes = bytearray(rgb_image.tobytes())
+    image_tensor = torch.frombuffer(image_bytes, dtype=torch.uint8).reshape(height, width, 3).float() / 255.0
+    generator = torch.Generator(device="cpu").manual_seed(int(seed))
+    noise = torch.randn(image_tensor.shape, generator=generator, dtype=torch.float32) * float(noise_level)
+    noisy_image = torch.clamp(image_tensor + noise, 0.0, 1.0)
+    mixed = torch.clamp(image_tensor * (1.0 - noise_level) + noisy_image * noise_level, 0.0, 1.0)
+    byte_values = (mixed * 255.0).round().to(torch.uint8).contiguous().view(-1).tolist()
+    return Image.frombytes("RGB", (width, height), bytes(byte_values))
 
 
 def run_pipeline_attack(

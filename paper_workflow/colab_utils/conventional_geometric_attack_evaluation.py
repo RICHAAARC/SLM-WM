@@ -264,7 +264,6 @@ def _center_crop(image: Any, ratio: float) -> Any:
 def apply_conventional_geometric_attack(source_image: Any, config: AttackConfig, seed: int) -> Any:
     """执行单个 CPU 图像攻击并返回 attacked image."""
 
-    import numpy as np
     from PIL import Image, ImageFilter
 
     resampling = getattr(getattr(Image, "Resampling", Image), "BICUBIC")
@@ -275,11 +274,17 @@ def apply_conventional_geometric_attack(source_image: Any, config: AttackConfig,
         buffer.seek(0)
         return Image.open(buffer).convert("RGB")
     if config.attack_name == "gaussian_noise":
-        rng = np.random.default_rng(seed)
-        array = np.asarray(image, dtype=np.float32) / 255.0
-        noise = rng.normal(0.0, float(config.attack_parameters["sigma"]), size=array.shape).astype(np.float32)
-        noised = np.clip(array + noise, 0.0, 1.0)
-        return Image.fromarray((noised * 255.0).round().astype(np.uint8), mode="RGB")
+        import torch
+
+        # 该实现避免在 Colab 动态依赖组合中重新导入 NumPy, 防止 NumPy 扩展与 Python 层不一致阻断攻击闭环。
+        width, height = image.size
+        image_bytes = bytearray(image.tobytes())
+        image_tensor = torch.frombuffer(image_bytes, dtype=torch.uint8).reshape(height, width, 3).float() / 255.0
+        generator = torch.Generator(device="cpu").manual_seed(int(seed))
+        noise = torch.randn(image_tensor.shape, generator=generator, dtype=torch.float32)
+        noised = torch.clamp(image_tensor + noise * float(config.attack_parameters["sigma"]), 0.0, 1.0)
+        byte_values = (noised * 255.0).round().to(torch.uint8).contiguous().view(-1).tolist()
+        return Image.frombytes("RGB", image.size, bytes(byte_values))
     if config.attack_name == "gaussian_blur":
         return image.filter(ImageFilter.GaussianBlur(radius=float(config.attack_parameters["radius"])))
     if config.attack_name == "resize":

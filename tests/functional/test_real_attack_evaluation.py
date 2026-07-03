@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import csv
+import json
+import sys
 import types
 from pathlib import Path
 from zipfile import ZipFile
@@ -138,6 +139,39 @@ def test_transformers_dinov2_registers_compatibility_patch(monkeypatch: pytest.M
     }
     assert fake_transformers.Dinov2WithRegistersConfig is fake_transformers.Dinov2Config
     assert fake_transformers.Dinov2WithRegistersModel is fake_transformers.Dinov2Model
+
+
+@pytest.mark.quick
+def test_numpy_umath_center_compatibility_patch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """NumPy 字符串居中导出缺失时应由兼容补丁补齐。"""
+
+    fake_umath = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "numpy._core.umath", fake_umath)
+
+    report = real_attack_evaluation.patch_numpy_core_umath_string_center_compatibility()
+
+    assert report["numpy_umath_center_patch_applied"] is True
+    assert hasattr(fake_umath, "_center")
+
+
+@pytest.mark.quick
+def test_conventional_gaussian_noise_attack_is_deterministic_without_numpy() -> None:
+    """常规高斯噪声攻击应由 torch 生成, 避免依赖 Colab 中易错的 NumPy 重载状态。"""
+
+    attack_config = next(config for config in conventional_attack_configs() if config.attack_name == "gaussian_noise")
+    source_image = Image.new("RGB", (8, 8), color=(120, 90, 70))
+
+    first = conventional_geometric_attack_evaluation.apply_conventional_geometric_attack(
+        source_image, attack_config, seed=20260703
+    )
+    second = conventional_geometric_attack_evaluation.apply_conventional_geometric_attack(
+        source_image, attack_config, seed=20260703
+    )
+
+    assert first.mode == "RGB"
+    assert first.size == source_image.size
+    assert first.tobytes() == second.tobytes()
+    assert first.tobytes() != source_image.tobytes()
 
 
 @pytest.mark.quick
