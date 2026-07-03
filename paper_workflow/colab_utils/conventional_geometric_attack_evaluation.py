@@ -42,6 +42,7 @@ from paper_workflow.colab_utils.real_attack_evaluation import (
     load_detector_pipeline,
     load_rgb_image,
     normalize_attacked_image_size,
+    patch_pillow_typing_ink_compatibility,
     read_csv_rows,
     read_jsonl,
     relative_or_absolute,
@@ -264,6 +265,7 @@ def _center_crop(image: Any, ratio: float) -> Any:
 def apply_conventional_geometric_attack(source_image: Any, config: AttackConfig, seed: int) -> Any:
     """执行单个 CPU 图像攻击并返回 attacked image."""
 
+    patch_pillow_typing_ink_compatibility()
     from PIL import Image, ImageFilter
 
     resampling = getattr(getattr(Image, "Resampling", Image), "BICUBIC")

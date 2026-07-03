@@ -155,6 +155,19 @@ def test_numpy_umath_center_compatibility_patch(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.quick
+def test_pillow_typing_ink_compatibility_patch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pillow `_Ink` 类型导出缺失时应由兼容补丁补齐。"""
+
+    fake_pil_typing = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "PIL._typing", fake_pil_typing)
+
+    report = real_attack_evaluation.patch_pillow_typing_ink_compatibility()
+
+    assert report["pillow_typing_ink_patch_applied"] is True
+    assert hasattr(fake_pil_typing, "_Ink")
+
+
+@pytest.mark.quick
 def test_conventional_gaussian_noise_attack_is_deterministic_without_numpy() -> None:
     """常规高斯噪声攻击应由 torch 生成, 避免依赖 Colab 中易错的 NumPy 重载状态。"""
 

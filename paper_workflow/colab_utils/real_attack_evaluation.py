@@ -601,6 +601,31 @@ def patch_numpy_core_umath_string_center_compatibility() -> dict[str, Any]:
     return report
 
 
+def patch_pillow_typing_ink_compatibility() -> dict[str, Any]:
+    """为不完整的 Pillow 运行时补齐仅供类型导入使用的 `_Ink` 导出。
+
+    部分 Colab 运行时在同一内核中升级 Pillow 后, 会出现 `PIL.Image`
+    代码期望 `PIL._typing._Ink`, 但已加载的 `PIL._typing` 仍来自旧版本的情况。
+    `_Ink` 只参与 Pillow 内部类型标注导入, 本项目不会把该补丁用于图像数值逻辑。
+    """
+
+    report: dict[str, Any] = {
+        "pillow_typing_ink_patch_applied": False,
+    }
+    try:
+        import importlib
+
+        pil_typing = importlib.import_module("PIL._typing")
+    except Exception as error:
+        report["pillow_typing_import_error"] = _compact_error(error)
+        return report
+    if hasattr(pil_typing, "_Ink"):
+        return report
+    setattr(pil_typing, "_Ink", Any)
+    report["pillow_typing_ink_patch_applied"] = True
+    return report
+
+
 def patch_transformers_for_diffusers_autoencoder_import() -> dict[str, Any]:
     """为 diffusers 新版 autoencoder 导入补齐 transformers 兼容导出。
 
@@ -646,6 +671,7 @@ def load_img2img_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict
     重评分错误绑定。
     """
     patch_numpy_core_umath_string_center_compatibility()
+    patch_pillow_typing_ink_compatibility()
     import torch
     import diffusers
 
@@ -728,6 +754,7 @@ def load_detector_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dic
     """
 
     numpy_report = patch_numpy_core_umath_string_center_compatibility()
+    pillow_report = patch_pillow_typing_ink_compatibility()
     import torch
 
     configure_model_loading_output(config)
@@ -735,7 +762,9 @@ def load_detector_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dic
         raise RuntimeError("gpu_unavailable")
     runtime_versions = _runtime_versions_from_torch(torch)
     runtime_versions.update(numpy_report)
+    runtime_versions.update(pillow_report)
     runtime_versions["runtime_environment"].update(numpy_report)
+    runtime_versions["runtime_environment"].update(pillow_report)
     compat_report = patch_transformers_for_diffusers_autoencoder_import()
     runtime_versions.update(compat_report)
     runtime_versions["runtime_environment"].update(compat_report)
@@ -761,6 +790,7 @@ def load_detector_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dic
 
 def load_rgb_image(path: Path, config: RealAttackEvaluationConfig) -> Any:
     """读取 source image 并调整为 pipeline 输入尺寸."""
+    patch_pillow_typing_ink_compatibility()
     from PIL import Image
 
     image = Image.open(path).convert("RGB")
@@ -771,6 +801,7 @@ def normalize_attacked_image_size(attacked_image: Any, source_image: Any) -> Any
     """把 attacked image 对齐到 source image 尺寸, 保证后续质量指标可直接逐像素比较."""
     if getattr(attacked_image, "size", None) == getattr(source_image, "size", None):
         return attacked_image.convert("RGB") if hasattr(attacked_image, "convert") else attacked_image
+    patch_pillow_typing_ink_compatibility()
     from PIL import Image
 
     resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
@@ -781,6 +812,7 @@ def add_sdedit_noise(image: Any, noise_level: float, seed: int) -> Any:
     """为 SDEdit 风格攻击构造带噪输入图像."""
 
     import torch
+    patch_pillow_typing_ink_compatibility()
     from PIL import Image
 
     rgb_image = image.convert("RGB")
@@ -1912,6 +1944,7 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
         try:
             detector_pipeline, detector_runtime_versions = load_detector_pipeline(config)
             runtime_versions = {**runtime_versions, **detector_runtime_versions}
+            patch_pillow_typing_ink_compatibility()
             from PIL import Image
 
             for source_path, attacked_path, spec in pending_ddim_attacks:

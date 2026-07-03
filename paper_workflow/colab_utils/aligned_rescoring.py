@@ -32,7 +32,6 @@ from paper_workflow.colab_utils.attention_latent_injection import (
 )
 from paper_workflow.colab_utils.minimal_latent_injection import (
     compute_image_quality_metrics,
-    import_image_array_dependency,
     import_runtime_dependencies,
     load_pipeline,
     tensor_norm,
@@ -495,10 +494,14 @@ def metric_error_message(error: Exception, limit: int = 240) -> str:
 
 def image_to_metric_tensor(image: Any, device: Any) -> Any:
     """把 PIL 图像转为 LPIPS 需要的 [-1, 1] BCHW tensor。"""
-    np = import_image_array_dependency()
-    _, torch, _, _ = import_runtime_dependencies()
-    image_array = np.asarray(image.convert("RGB"), dtype=np.float32) / 127.5 - 1.0
-    return torch.from_numpy(image_array).permute(2, 0, 1).unsqueeze(0).to(device)
+    import torch
+
+    rgb_image = image.convert("RGB")
+    width, height = rgb_image.size
+    image_bytes = bytearray(rgb_image.tobytes())
+    image_tensor = torch.frombuffer(image_bytes, dtype=torch.uint8).reshape(height, width, 3).float()
+    image_tensor = image_tensor / 127.5 - 1.0
+    return image_tensor.permute(2, 0, 1).unsqueeze(0).to(device)
 
 
 @lru_cache(maxsize=8)
