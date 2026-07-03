@@ -566,6 +566,43 @@ def _compact_error(error: Exception, max_length: int = 240) -> str:
     return f"{type(error).__name__}:{str(error)[:max_length]}"
 
 
+def patch_transformers_for_diffusers_autoencoder_import() -> dict[str, Any]:
+    """为 diffusers 新版 autoencoder 导入补齐 transformers 兼容导出。
+
+    当前 Colab 动态升级组合可能出现 diffusers 已经引用
+    `Dinov2WithRegistersConfig` / `Dinov2WithRegistersModel`, 但 transformers
+    顶层尚未导出这些名称的情况。该问题发生在 diffusers 导入过程, 即使本项目
+    只使用 SD3.5 VAE, 也会被 autoencoder package 的额外导入牵连。
+    这里把缺失名称映射到同族 DINOv2 类, 仅用于让无关 RAE 模块完成导入;
+    正式检测仍只调用 AutoencoderKL, 不使用这些补齐类执行论文方法逻辑。
+    """
+
+    report: dict[str, Any] = {
+        "transformers_dinov2_registers_patch_applied": False,
+        "patched_transformers_exports": [],
+    }
+    try:
+        import transformers
+    except Exception as error:
+        report["transformers_import_error"] = _compact_error(error)
+        return report
+
+    alias_pairs = (
+        ("Dinov2WithRegistersConfig", "Dinov2Config"),
+        ("Dinov2WithRegistersModel", "Dinov2Model"),
+        ("Dinov2WithRegistersPreTrainedModel", "Dinov2PreTrainedModel"),
+    )
+    patched: list[str] = []
+    for missing_name, fallback_name in alias_pairs:
+        if hasattr(transformers, missing_name) or not hasattr(transformers, fallback_name):
+            continue
+        setattr(transformers, missing_name, getattr(transformers, fallback_name))
+        patched.append(missing_name)
+    report["transformers_dinov2_registers_patch_applied"] = bool(patched)
+    report["patched_transformers_exports"] = patched
+    return report
+
+
 def load_img2img_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict[str, Any]]:
     """加载真实 SD3/SD3.5 image-to-image pipeline。
 
@@ -593,6 +630,7 @@ def load_img2img_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict
 def _load_detector_pipeline_from_sd3_pipeline(config: RealAttackEvaluationConfig, torch_module: Any) -> Any:
     """优先通过 SD3 pipeline 获取检测侧 VAE 与 image processor。"""
 
+    patch_transformers_for_diffusers_autoencoder_import()
     from diffusers import StableDiffusion3Pipeline
 
     dtype = getattr(torch_module, config.torch_dtype)
@@ -608,6 +646,7 @@ def _load_detector_pipeline_from_sd3_pipeline(config: RealAttackEvaluationConfig
 def _import_autoencoder_kl() -> Any:
     """导入 AutoencoderKL, 并兼容不同 diffusers 版本的导出位置。"""
 
+    patch_transformers_for_diffusers_autoencoder_import()
     try:
         from diffusers import AutoencoderKL
 
@@ -658,6 +697,9 @@ def load_detector_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dic
     if config.device_name == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("gpu_unavailable")
     runtime_versions = _runtime_versions_from_torch(torch)
+    compat_report = patch_transformers_for_diffusers_autoencoder_import()
+    runtime_versions.update(compat_report)
+    runtime_versions["runtime_environment"].update(compat_report)
     try:
         pipeline = _load_detector_pipeline_from_sd3_pipeline(config, torch)
         runtime_versions["detector_loader_name"] = "stable_diffusion_3_pipeline"
@@ -2154,3 +2196,4 @@ def package_real_attack_evaluation_outputs(
     manifest.setdefault("metadata", {})["drive_archive_digest"] = record.drive_archive_digest
     manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
     return record
+

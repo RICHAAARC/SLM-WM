@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import csv
+import types
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -114,6 +115,29 @@ def test_detector_loader_falls_back_to_vae_subfolder(monkeypatch: pytest.MonkeyP
     assert runtime_versions["detector_loader_name"] == "vae_subfolder"
     assert "stable_diffusion_3_import_failed" in runtime_versions["detector_loader_fallback_reason"]
     assert runtime_versions["runtime_environment"]["detector_loader_name"] == "vae_subfolder"
+
+
+@pytest.mark.quick
+def test_transformers_dinov2_registers_compatibility_patch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """transformers 缺少 registers 导出时应由兼容补丁补齐。"""
+
+    fake_transformers = types.SimpleNamespace(
+        Dinov2Config=type("Dinov2Config", (), {}),
+        Dinov2Model=type("Dinov2Model", (), {}),
+        Dinov2PreTrainedModel=type("Dinov2PreTrainedModel", (), {}),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "transformers", fake_transformers)
+
+    report = real_attack_evaluation.patch_transformers_for_diffusers_autoencoder_import()
+
+    assert report["transformers_dinov2_registers_patch_applied"] is True
+    assert set(report["patched_transformers_exports"]) == {
+        "Dinov2WithRegistersConfig",
+        "Dinov2WithRegistersModel",
+        "Dinov2WithRegistersPreTrainedModel",
+    }
+    assert fake_transformers.Dinov2WithRegistersConfig is fake_transformers.Dinov2Config
+    assert fake_transformers.Dinov2WithRegistersModel is fake_transformers.Dinov2Model
 
 
 @pytest.mark.quick
