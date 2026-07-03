@@ -504,8 +504,27 @@ def discover_source_images(root_path: Path, config: RealAttackEvaluationConfig) 
     return tuple(unique[: config.max_source_images])
 
 
+def _runtime_versions_from_torch(torch_module: Any) -> dict[str, Any]:
+    """构造 diffusion runtime 版本报告, 供攻击与检测 loader 复用。
+
+    该函数属于通用工程写法: 把环境记录收敛到单一位置, 避免不同 loader
+    分散维护相同的 provenance 字段。
+    """
+
+    environment_report = build_runtime_environment_report(torch_module=torch_module)
+    return {
+        **flatten_environment_versions(environment_report),
+        "runtime_environment": environment_report,
+    }
+
+
 def load_img2img_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict[str, Any]]:
-    """加载真实 SD3/SD3.5 image-to-image pipeline."""
+    """加载真实 SD3/SD3.5 image-to-image pipeline。
+
+    该 loader 只用于再扩散类攻击生成。常规失真与几何攻击不应依赖
+    `StableDiffusion3Img2ImgPipeline`, 否则会把攻击图像生成与检测侧 VAE
+    重评分错误绑定。
+    """
     import torch
     import diffusers
 
@@ -520,12 +539,33 @@ def load_img2img_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict
     pipeline = pipeline_class.from_pretrained(config.model_id, torch_dtype=dtype, token=token)
     pipeline = pipeline.to(config.device_name)
     pipeline.set_progress_bar_config(disable=not config.enable_pipeline_progress_bar)
-    environment_report = build_runtime_environment_report(torch_module=torch)
-    runtime_versions = {
-        **flatten_environment_versions(environment_report),
-        "runtime_environment": environment_report,
-    }
-    return pipeline, runtime_versions
+    return pipeline, _runtime_versions_from_torch(torch)
+
+
+def load_detector_pipeline(config: RealAttackEvaluationConfig) -> tuple[Any, dict[str, Any]]:
+    """加载只用于 attacked image latent re-score 的 SD3/SD3.5 detector pipeline。
+
+    此处设计的主要考虑在于: 常规失真和几何攻击只需要主模型 VAE 与
+    image_processor 来把 attacked image 重新编码到 latent 空间, 不需要
+    image-to-image pipeline。将 detector loader 与 img2img loader 拆开, 可以
+    避免 Colab 依赖组合无法导入 `StableDiffusion3Img2ImgPipeline` 时阻断
+    JPEG、噪声、模糊、裁剪和旋转等正式图像级攻击闭环。
+    """
+
+    import torch
+    from diffusers import StableDiffusion3Pipeline
+
+    configure_model_loading_output(config)
+    if config.device_name == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("gpu_unavailable")
+    dtype = getattr(torch, config.torch_dtype)
+    token = os.environ.get(config.hf_token_env) or None
+    pipeline = StableDiffusion3Pipeline.from_pretrained(config.model_id, torch_dtype=dtype, token=token)
+    pipeline = pipeline.to(config.device_name)
+    pipeline.set_progress_bar_config(disable=not config.enable_pipeline_progress_bar)
+    if hasattr(pipeline, "vae"):
+        pipeline.vae.eval()
+    return pipeline, _runtime_versions_from_torch(torch)
 
 
 def load_rgb_image(path: Path, config: RealAttackEvaluationConfig) -> Any:
@@ -1673,7 +1713,7 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
 
     if pending_ddim_attacks:
         try:
-            detector_pipeline, detector_runtime_versions = load_img2img_pipeline(config)
+            detector_pipeline, detector_runtime_versions = load_detector_pipeline(config)
             runtime_versions = {**runtime_versions, **detector_runtime_versions}
             from PIL import Image
 

@@ -39,7 +39,7 @@ from paper_workflow.colab_utils.real_attack_evaluation import (
     formal_boundary,
     jsonl_text,
     latest_drive_package,
-    load_img2img_pipeline,
+    load_detector_pipeline,
     load_rgb_image,
     normalize_attacked_image_size,
     read_csv_rows,
@@ -160,9 +160,18 @@ class ConventionalGeometricAttackArchiveRecord:
 
 
 def conventional_attack_configs() -> tuple[AttackConfig, ...]:
-    """返回需要真实图像级执行的非 diffusion 攻击配置."""
+    """返回 paper 共同协议需要真实图像级执行的非 diffusion 攻击配置。
 
-    return tuple(config for config in default_attack_configs() if config.attack_family in CONVENTIONAL_GEOMETRIC_FAMILIES)
+    该函数只选择 `full_main` 资源档位。`probe` 攻击用于诊断, 不应进入
+    pilot_paper 或 full_paper 的正式攻击闭环, 否则会导致 SLM 主方法与
+    external baseline 的共同攻击模板不一致。
+    """
+
+    return tuple(
+        config
+        for config in default_attack_configs()
+        if config.attack_family in CONVENTIONAL_GEOMETRIC_FAMILIES and config.resource_profile == "full_main"
+    )
 
 
 def conventional_attack_spec(config: AttackConfig) -> ConventionalGeometricAttackSpec:
@@ -371,7 +380,7 @@ def write_conventional_geometric_attack_evaluation_outputs(
             raise FileNotFoundError("source_image_files_missing")
         source_contexts = source_context_by_image_path(root_path, config)  # type: ignore[arg-type]
         boundary = formal_boundary(root_path, config)  # type: ignore[arg-type]
-        detector_pipeline, detector_runtime_versions = load_img2img_pipeline(config)  # type: ignore[arg-type]
+        detector_pipeline, detector_runtime_versions = load_detector_pipeline(config)  # type: ignore[arg-type]
     except Exception as error:
         return write_failure_outputs(root_path, config, output_dir, error)
 

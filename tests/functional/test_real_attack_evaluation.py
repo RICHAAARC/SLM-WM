@@ -10,7 +10,10 @@ from zipfile import ZipFile
 import pytest
 from PIL import Image
 
-from paper_workflow.colab_utils import real_attack_evaluation
+from paper_workflow.colab_utils import conventional_geometric_attack_evaluation, real_attack_evaluation
+from experiments.protocol.attacks import default_attack_configs
+from external_baseline.primary.sd35_method_faithful_common import supported_formal_image_attack_names
+from paper_workflow.colab_utils.conventional_geometric_attack_evaluation import conventional_attack_configs
 from paper_workflow.colab_utils.real_attack_evaluation import (
     PRIMARY_MODEL_FAMILY,
     PRIMARY_MODEL_ID,
@@ -18,6 +21,7 @@ from paper_workflow.colab_utils.real_attack_evaluation import (
     package_real_attack_evaluation_outputs,
     materialize_drive_package_inputs,
     run_default_real_attack_evaluation_from_drive_plan,
+    default_attack_specs,
     write_real_attack_evaluation_outputs,
 )
 
@@ -25,6 +29,43 @@ from paper_workflow.colab_utils.real_attack_evaluation import (
 def read_jsonl(path: Path) -> list[dict[str, object]]:
     """读取测试中生成的 JSONL 记录."""
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+@pytest.mark.quick
+def test_slm_attack_workflows_cover_paper_formal_attack_matrix() -> None:
+    """SLM 两类攻击 workflow 应共同覆盖 paper 共同协议的 12 类正式攻击。"""
+
+    paper_attack_names = {
+        config.attack_name
+        for config in default_attack_configs()
+        if config.resource_profile in {"full_main", "full_extra"}
+    }
+    conventional_names = {config.attack_name for config in conventional_attack_configs()}
+    regeneration_names = {spec.attack_name for spec in default_attack_specs()}
+
+    assert len(paper_attack_names) == 12
+    assert conventional_names == {
+        "jpeg_compression",
+        "gaussian_noise",
+        "gaussian_blur",
+        "resize",
+        "crop",
+        "rotation",
+        "crop_resize",
+        "composite_geometric_attacks",
+    }
+    assert regeneration_names == {
+        "img2img_regeneration",
+        "ddim_inversion_regeneration",
+        "sdedit_regeneration",
+        "diffusion_purification",
+    }
+    assert conventional_names.isdisjoint(regeneration_names)
+    assert conventional_names | regeneration_names == paper_attack_names
+    assert paper_attack_names == set(supported_formal_image_attack_names())
+    assert all(config.resource_profile == "full_main" for config in conventional_attack_configs())
+    assert conventional_geometric_attack_evaluation.load_detector_pipeline is real_attack_evaluation.load_detector_pipeline
+    assert not hasattr(conventional_geometric_attack_evaluation, "load_img2img_pipeline")
 
 
 @pytest.mark.quick
@@ -194,6 +235,7 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
         }
 
     monkeypatch.setattr(real_attack_evaluation, "load_img2img_pipeline", fake_load_pipeline)
+    monkeypatch.setattr(real_attack_evaluation, "load_detector_pipeline", fake_load_pipeline)
     monkeypatch.setattr(real_attack_evaluation, "run_pipeline_attack", fake_run_pipeline_attack)
     monkeypatch.setattr(real_attack_evaluation, "run_strict_ddim_inversion_attack", fake_run_strict_ddim)
     monkeypatch.setattr(real_attack_evaluation, "rescore_attacked_image_with_detector", fake_rescore_attacked_image_with_detector)

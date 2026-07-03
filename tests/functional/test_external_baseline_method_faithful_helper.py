@@ -58,6 +58,33 @@ def test_formal_image_attack_taxonomy_matches_attack_matrix_names() -> None:
 
 
 @pytest.mark.quick
+def test_external_baseline_notebooks_use_default_formal_attack_matrix() -> None:
+    """四个 method-faithful baseline 入口应默认使用同一 12 类正式攻击矩阵。"""
+
+    repo_root = Path(__file__).resolve().parents[2]
+    expected_attack_names = set(supported_formal_image_attack_names())
+    assert expected_attack_names == set(DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES.split(","))
+    assert len(expected_attack_names) == 12
+    notebook_by_method = {
+        "tree_ring": "external_baseline_tree_ring_run.ipynb",
+        "gaussian_shading": "external_baseline_gaussian_shading_run.ipynb",
+        "shallow_diffuse": "external_baseline_shallow_diffuse_run.ipynb",
+        "t2smark": "external_baseline_t2smark_run.ipynb",
+    }
+    for method_id, notebook_name in notebook_by_method.items():
+        notebook_path = repo_root / "paper_workflow" / notebook_name
+        notebook_payload = json.loads(notebook_path.read_text(encoding="utf-8"))
+        notebook_text = "\n".join(
+            "".join(cell.get("source", "")) for cell in notebook_payload.get("cells", [])
+        )
+        assert f'SLM_WM_PRIMARY_BASELINE_METHODS = "{method_id}"' in notebook_text
+        assert 'os.environ["SLM_WM_TREE_RING_ATTACK_FAMILIES"] =' not in notebook_text
+        assert 'os.environ["SLM_WM_GAUSSIAN_SHADING_ATTACK_FAMILIES"] =' not in notebook_text
+        assert 'os.environ["SLM_WM_SHALLOW_DIFFUSE_ATTACK_FAMILIES"] =' not in notebook_text
+        assert 'os.environ["SLM_WM_T2SMARK_FORMAL_ATTACK_FAMILIES"] =' not in notebook_text
+
+
+@pytest.mark.quick
 def test_t2smark_inversion_import_patch_is_idempotent(tmp_path: Path) -> None:
     """T2SMark 官方 inversion 入口缺少 typing 导入时应被 helper 自动补齐。"""
 
