@@ -9,6 +9,7 @@ import subprocess
 import sys
 from typing import Any
 
+from paper_workflow.colab_utils.notebook_runtime import write_notebook_runtime_report
 from paper_workflow.colab_utils.progress import progress_bar, update_progress
 
 REQUIRED_CLOSURE_PACKAGE_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -156,6 +157,14 @@ def run_paper_result_closure_commands(
     with progress_bar(len(commands), desc="paper result closure commands", enabled=True) as command_progress:
         for command_index, command in enumerate(commands, start=1):
             command_name = command[1] if len(command) > 1 else command[0]
+            if command_name.endswith("write_pilot_paper_complete_result_package.py"):
+                write_notebook_runtime_report(
+                    root=".",
+                    workflow_name="paper_result_closure",
+                    output_dir="outputs/pilot_paper_complete_result_package",
+                    drive_output_dir=complete_drive_output_dir,
+                    archive_name=command[command.index("--archive-name") + 1] if "--archive-name" in command else "",
+                )
             print("run_repository_command", " ".join(command))
             subprocess.run(command, check=True)
             update_progress(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ from paper_workflow.colab_utils.manifest_io import (
     write_manifest_bundle,
 )
 from paper_workflow.colab_utils.mount_drive import build_drive_mount_report
+from paper_workflow.colab_utils.notebook_runtime import mark_notebook_runtime_start, write_notebook_runtime_report
 from paper_workflow.colab_utils.runtime_setup import build_runtime_setup_report
 
 
@@ -96,6 +98,10 @@ def run_colab_drive_workflow(
     perform_mount: bool = False,
 ) -> dict[str, Any]:
     """执行 Colab Drive workflow 的轻量可审计闭环。"""
+    mark_notebook_runtime_start(
+        workflow_name=workflow_name,
+        source="run_colab_drive_workflow",
+    )
     paths = build_drive_workflow_paths(root, local_output_dir, drive_root, workflow_name)
     paths.local_output_dir.mkdir(parents=True, exist_ok=True)
     paths.drive_workflow_dir.mkdir(parents=True, exist_ok=True)
@@ -127,9 +133,19 @@ def run_colab_drive_workflow(
     write_json(paths.local_output_dir / "colab_env_report.json", runtime_report)
     write_json(paths.local_output_dir / "drive_mount_report.json", mount_report)
     write_jsonl(paths.local_output_dir / "cold_start_smoke_record.jsonl", [cold_start_record])
+    notebook_runtime_report_path = write_notebook_runtime_report(
+        root=root,
+        workflow_name=workflow_name,
+        output_dir=paths.local_output_dir,
+        drive_output_dir=paths.drive_workflow_dir.as_posix(),
+    )
     write_json(paths.drive_workflow_dir / "colab_env_report.json", runtime_report)
     write_json(paths.drive_workflow_dir / "drive_mount_report.json", mount_report)
     write_jsonl(paths.drive_workflow_dir / "cold_start_smoke_record.jsonl", [cold_start_record])
+    write_json(
+        paths.drive_workflow_dir / "notebook_runtime_report.json",
+        json.loads(notebook_runtime_report_path.read_text(encoding="utf-8")),
+    )
 
     return {
         "workflow_decision": cold_start_record["workflow_decision"],

@@ -13,6 +13,8 @@ from pathlib import Path
 import subprocess
 from typing import Any, Callable
 
+from paper_workflow.colab_utils.notebook_runtime import write_notebook_runtime_report
+
 WORKFLOW_ARCHIVE_PREFIXES = {
     "real_sd_runtime_probe": "real_sd_runtime_probe_package",
     "minimal_diffusion_latent_injection": "minimal_latent_injection_package",
@@ -45,6 +47,22 @@ WORKFLOW_DRIVE_OUTPUT_ENV_KEYS = {
     "official_reference_shallow_diffuse": "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_DRIVE_OUTPUT_DIR",
     "official_reference_t2smark": "SLM_WM_T2SMARK_FULL_MAIN_DRIVE_OUTPUT_DIR",
 }
+WORKFLOW_LOCAL_OUTPUT_DIRS = {
+    "real_sd_runtime_probe": "outputs/real_sd_runtime_probe",
+    "minimal_diffusion_latent_injection": "outputs/minimal_diffusion_latent_injection",
+    "attention_geometry": "outputs/real_attention_geometry",
+    "attention_latent_injection": "outputs/attention_latent_injection",
+    "aligned_rescoring": "outputs/aligned_rescoring",
+    "threshold_calibration": "outputs/threshold_calibration",
+    "real_attack_evaluation": "outputs/real_attack_evaluation",
+    "conventional_geometric_attack_evaluation": "outputs/conventional_geometric_attack_evaluation",
+    "dataset_level_quality": "outputs/dataset_level_quality",
+    "external_baseline_method_faithful": "outputs/external_baseline_method_faithful",
+    "official_reference_tree_ring": "outputs/tree_ring_official_reference",
+    "official_reference_gaussian_shading": "outputs/gaussian_shading_official_reference",
+    "official_reference_shallow_diffuse": "outputs/shallow_diffuse_official_reference",
+    "official_reference_t2smark": "outputs/t2smark_full_main_reproduction",
+}
 
 
 def resolve_short_commit(root: str | Path = ".") -> str:
@@ -66,7 +84,8 @@ def resolve_short_commit(root: str | Path = ".") -> str:
 def utc_archive_token() -> str:
     """生成所有 Notebook 归档共用的 UTC 时间后缀。"""
 
-    return datetime.now(timezone.utc).strftime("%Y%m%dt%H%M%sz")
+    current_time = datetime.now(timezone.utc)
+    return f"{current_time:%Y%m%d}t{current_time:%H%M%S}z"
 
 
 def build_workflow_archive_name(
@@ -188,6 +207,14 @@ def package_workflow_outputs(
     package_function = _package_function_for_workflow(workflow_name)
     archive_name = build_workflow_archive_name(workflow_name, root=root, baseline_id=baseline_id)
     resolved_drive_output_dir = resolve_drive_output_dir(workflow_name, drive_output_dir)
+    write_notebook_runtime_report(
+        root=root,
+        workflow_name=workflow_name,
+        output_dir=WORKFLOW_LOCAL_OUTPUT_DIRS[workflow_name],
+        baseline_id=baseline_id or os.environ.get("SLM_WM_PRIMARY_BASELINE_METHODS", ""),
+        drive_output_dir=resolved_drive_output_dir,
+        archive_name=archive_name,
+    )
     package_kwargs: dict[str, Any] = {"root": root, "archive_name": archive_name}
     if resolved_drive_output_dir is not None:
         package_kwargs["drive_output_dir"] = resolved_drive_output_dir

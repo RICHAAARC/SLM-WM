@@ -10,6 +10,8 @@ from zipfile import ZipFile
 import pytest
 
 from paper_workflow.colab_utils.minimal_latent_injection import package_injection_outputs
+from paper_workflow.colab_utils.notebook_entrypoint import package_workflow_outputs
+from paper_workflow.colab_utils.notebook_runtime import mark_notebook_runtime_start
 from paper_workflow.colab_utils.aligned_rescoring import package_aligned_rescoring_outputs
 from paper_workflow.colab_utils.attention_latent_injection import package_attention_latent_injection_outputs
 from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
@@ -766,6 +768,47 @@ def test_threshold_calibration_outputs_can_be_packaged_and_mirrored(tmp_path: Pa
         assert "outputs/threshold_calibration/threshold_calibration_package_input_manifest.json" in names
         assert "outputs/threshold_calibration/threshold_calibration_archive_summary.json" in names
         assert "outputs/threshold_calibration/threshold_calibration_archive_manifest.local.json" in names
+
+
+@pytest.mark.constraint
+def test_unified_notebook_runtime_report_is_packaged(tmp_path: Path) -> None:
+    """统一 Notebook 入口打包应补充运行时间报告。"""
+
+    threshold_dir = tmp_path / "outputs" / "threshold_calibration"
+    rescue_dir = tmp_path / "outputs" / "geometric_rescue"
+    content_dir = tmp_path / "outputs" / "content_carriers"
+    threshold_dir.mkdir(parents=True)
+    rescue_dir.mkdir(parents=True)
+    content_dir.mkdir(parents=True)
+    (threshold_dir / "threshold_calibration_result.json").write_text('{"run_decision":"pass"}\n', encoding="utf-8")
+    (threshold_dir / "calibration_thresholds.json").write_text('{"threshold_value":0.75}\n', encoding="utf-8")
+    (threshold_dir / "threshold_degeneracy_report.json").write_text('{"supports_paper_claim":false}\n', encoding="utf-8")
+    (threshold_dir / "fixed_fpr_operating_points.csv").write_text("target_fpr,raw_content_clean_fpr\n0.05,0.01\n", encoding="utf-8")
+    (threshold_dir / "manifest.local.json").write_text('{"artifact_id":"threshold_calibration_manifest"}\n', encoding="utf-8")
+    (rescue_dir / "aligned_detection_records.jsonl").write_text('{"rescue_ablation_mode":"full_rescue"}\n', encoding="utf-8")
+    (rescue_dir / "geometry_rescue_audit.json").write_text('{"protocol_decision":"pass"}\n', encoding="utf-8")
+    (rescue_dir / "manifest.local.json").write_text('{"artifact_id":"geometric_rescue_manifest"}\n', encoding="utf-8")
+    (content_dir / "content_detection_records.jsonl").write_text('{"content_detection_record_id":"sample"}\n', encoding="utf-8")
+
+    mark_notebook_runtime_start(workflow_name="threshold_calibration", source="test_runtime_start")
+    drive_dir = tmp_path / "drive_mirror"
+    record = package_workflow_outputs(
+        root=tmp_path,
+        workflow_name="threshold_calibration",
+        drive_output_dir=str(drive_dir),
+    )
+    archive_path = tmp_path / record.archive_path
+    report_path = threshold_dir / "notebook_runtime_report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert archive_path.exists()
+    assert report["workflow_name"] == "threshold_calibration"
+    assert report["notebook_runtime_start_source"] == "test_runtime_start"
+    assert report["notebook_runtime_elapsed_seconds"] >= 0.0
+    assert report["supports_paper_claim"] is False
+    with ZipFile(archive_path) as archive:
+        names = set(archive.namelist())
+        assert "outputs/threshold_calibration/notebook_runtime_report.json" in names
 
 
 @pytest.mark.constraint

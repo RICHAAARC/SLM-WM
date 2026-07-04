@@ -19,6 +19,7 @@ from experiments.protocol.paper_run_config import (
     build_paper_run_config,
     normalize_paper_run_name,
 )
+from paper_workflow.colab_utils.notebook_runtime import mark_notebook_runtime_start
 
 FORMAL_IMAGE_ATTACK_FAMILIES = (
     "jpeg_compression,gaussian_noise,gaussian_blur,rotation,resize,crop,crop_resize,"
@@ -386,6 +387,11 @@ def configure_paper_run_environment(
     只把 Notebook 过去重复维护的环境变量写入收敛到一个可测试位置。
     """
 
+    mark_notebook_runtime_start(
+        workflow_name=workflow_name,
+        baseline_id=baseline_id,
+        source="configure_paper_run_environment",
+    )
     paper_run, sample_count_token, target_fpr_text = _configure_common_paper_run_environment()
     if workflow_name == "external_baseline_method_faithful":
         if not baseline_id:

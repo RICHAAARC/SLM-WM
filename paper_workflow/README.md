@@ -77,6 +77,8 @@ SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 
 切换到完整论文运行层级时只修改这一行。依赖诊断由 `paper_workflow.colab_utils.dependency_check.build_notebook_dependency_report` 统一执行, archive 文件名和 Drive 镜像打包由 `paper_workflow.colab_utils.notebook_entrypoint.package_workflow_outputs` 统一执行。Notebook 不再维护单独的短提交读取、UTC 后缀拼接或具体 `package_*_outputs` 调用, 以避免项目代码调试时同步修改多个 Notebook。
 
+统一 archive 打包入口会在对应 `outputs/<workflow>/notebook_runtime_report.json` 写入运行时间报告, 并把该报告纳入当前结果包。报告字段包括 `notebook_runtime_started_at`、`notebook_runtime_finished_at`、`notebook_runtime_elapsed_seconds`、`notebook_runtime_start_source` 和 `notebook_runtime_timing_boundary`。该报告只用于 Colab 运行观测和耗时审计, 不作为方法有效性或论文结论的证据来源。
+
 诊断入口不参与 `pilot_paper` 或 `full_paper` 的正式统计产出。它们只用于在 Colab 环境、模型依赖或 Drive 持久化出问题时进行预检。
 
 ## Notebook 运行依赖与并行关系
