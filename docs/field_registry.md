@@ -628,8 +628,8 @@ Notebook 与 repository module 的跨边界数据
 | real_attack_record_count | metric | none | false | false | false | 真实图像级攻击检测记录数量。 |
 | real_attacked_image_count | metric | none | false | false | false | 已生成并登记 digest 的真实 attacked image 文件数量。 |
 | regeneration_attack_record_count | metric | none | false | false | false | 再扩散类攻击检测记录数量。 |
-| required_regeneration_attack_count | metric | none | false | false | false | 当前证据门禁要求的再扩散攻击类型数量。 |
-| measured_regeneration_attack_count | metric | none | false | false | false | 已在真实 GPU workflow 中完成测量的再扩散攻击类型数量。 |
+| required_regeneration_attack_count | metric | none | false | false | false | 向后兼容字段, 当前表示证据门禁要求的真实 GPU 攻击类型数量。 |
+| measured_regeneration_attack_count | metric | none | false | false | false | 向后兼容字段, 当前表示已在真实 GPU workflow 中完成测量的攻击类型数量。 |
 | real_attacked_image_closed_loop_ready | metric | none | false | false | false | 真实 source / attacked image 文件、路径和 digest 是否完成闭环。 |
 | regeneration_attack_gpu_validation_ready | metric | none | false | false | false | img2img、DDIM inversion、SDEdit 和 diffusion purification 是否已由真实 GPU workflow 生成并测量。 |
 | attack_detection_rerun_ready | metric | none | false | false | false | 真实 attacked image 生成后是否已重跑攻击后检测记录。 |
@@ -682,6 +682,10 @@ Notebook 与 repository module 的跨边界数据
 | conventional_attack_names | protocol | none | false | false | false | 当前攻击矩阵登记的常规攻击名称集合。 |
 | regeneration_attack_names | protocol | none | false | false | false | 当前攻击矩阵登记的再扩散攻击名称集合。 |
 | real_regeneration_attack_names | protocol | none | false | false | false | 已由真实 attacked image formal records 覆盖的再扩散攻击名称集合。 |
+| required_real_gpu_attack_count | metric | none | true | false | false | 共同攻击矩阵中需要真实 GPU 图像攻击闭环覆盖的攻击名称数量。|
+| measured_real_gpu_attack_count | metric | none | true | false | false | 已由真实 GPU 图像攻击 formal records 覆盖的攻击名称数量。|
+| real_gpu_attack_validation_ready | governance | none | true | false | false | 再扩散、高级编辑和自适应去水印等真实 GPU 攻击是否已全部覆盖。|
+| real_gpu_attack_names | protocol | none | true | false | false | 已由真实 GPU attacked image formal records 覆盖的攻击名称集合。|
 | evaluation_boundary | protocol | none | false | false | false | 攻击后检测复用的 fixed-FPR 与 rescue 统计边界。 |
 | local_proxy_boundary | governance | none | false | false | false | 本地攻击矩阵代理实现的能力边界说明。 |
 | regeneration_attack_status | governance | none | false | false | false | 再扩散攻击是否已有真实产物支持的状态说明。 |

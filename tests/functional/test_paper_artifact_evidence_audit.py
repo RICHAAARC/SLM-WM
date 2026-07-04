@@ -80,9 +80,12 @@ def make_real_attack_ready_bundle() -> AuditInputBundle:
         "real_attacked_image_closed_loop_ready": True,
         "formal_attack_detection_ready": True,
         "real_attacked_image_count": 4,
-        "required_regeneration_attack_count": 4,
-        "measured_regeneration_attack_count": 4,
+        "required_regeneration_attack_count": 8,
+        "measured_regeneration_attack_count": 8,
+        "required_real_gpu_attack_count": 8,
+        "measured_real_gpu_attack_count": 8,
         "regeneration_attack_gpu_validation_ready": True,
+        "real_gpu_attack_validation_ready": True,
     }
     return AuditInputBundle(
         threshold_report=bundle.threshold_report,

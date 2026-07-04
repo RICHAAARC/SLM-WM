@@ -282,6 +282,10 @@ def test_attack_matrix_ingests_real_attack_formal_records(tmp_path: Path) -> Non
         formal_real_attack_record("ddim_inversion_regeneration", 0.46, False),
         formal_real_attack_record("sdedit_regeneration", 0.48, False),
         formal_real_attack_record("diffusion_purification", 0.54, True),
+        formal_real_attack_record("global_editing_attack", 0.42, False, attack_family="global_editing_attack"),
+        formal_real_attack_record("local_editing_attack", 0.45, False, attack_family="local_editing_attack"),
+        formal_real_attack_record("visual_paraphrase_attack", 0.40, False, attack_family="visual_paraphrase_attack"),
+        formal_real_attack_record("adversarial_removal_attack", 0.43, False, attack_family="adversarial_removal_attack"),
     ]
     real_attack_records_path.write_text("".join(json_line(record) for record in real_records), encoding="utf-8")
 
@@ -301,8 +305,8 @@ def test_attack_matrix_ingests_real_attack_formal_records(tmp_path: Path) -> Non
     family_rows = list(csv.DictReader((output_dir / "attack_family_metrics.csv").open(encoding="utf-8")))
     regeneration_rows = [row for row in family_rows if row["attack_family"] == "regeneration_attack"]
 
-    assert attack_manifest["formal_real_attack_record_count"] == 4
-    assert attack_manifest["real_attacked_image_count"] == 4
+    assert attack_manifest["formal_real_attack_record_count"] == 8
+    assert attack_manifest["real_attacked_image_count"] == 8
     assert attack_manifest["real_attacked_image_closed_loop_ready"] is True
     assert attack_manifest["formal_attack_detection_ready"] is True
     assert attack_manifest["regeneration_attack_gpu_validation_ready"] is True
@@ -313,6 +317,16 @@ def test_attack_matrix_ingests_real_attack_formal_records(tmp_path: Path) -> Non
         "ddim_inversion_regeneration",
         "sdedit_regeneration",
         "diffusion_purification",
+    }
+    assert set(attack_manifest["real_gpu_attack_names"]) == {
+        "img2img_regeneration",
+        "ddim_inversion_regeneration",
+        "sdedit_regeneration",
+        "diffusion_purification",
+        "global_editing_attack",
+        "local_editing_attack",
+        "visual_paraphrase_attack",
+        "adversarial_removal_attack",
     }
     assert regeneration_rows
     assert all(

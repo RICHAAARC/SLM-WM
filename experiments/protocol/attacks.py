@@ -233,6 +233,16 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             attack_parameters={"crop_ratio": 0.78, "degrees": 7.0, "resize_scale": 0.85},
         ),
         AttackConfig(
+            attack_id="photometric_distortion_main",
+            attack_family="photometric_distortion_attack",
+            attack_name="photometric_distortion_attack",
+            attack_strength=0.30,
+            resource_profile="full_main",
+            requires_gpu=False,
+            enabled=True,
+            attack_parameters={"brightness": 1.12, "contrast": 1.10, "saturation": 0.88, "gamma": 0.92},
+        ),
+        AttackConfig(
             attack_id="img2img_regeneration_extra",
             attack_family="regeneration_attack",
             attack_name="img2img_regeneration",
@@ -272,6 +282,46 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             enabled=True,
             attack_parameters={"purification_steps": 20, "noise_level": 0.32},
         ),
+        AttackConfig(
+            attack_id="global_editing_extra",
+            attack_family="global_editing_attack",
+            attack_name="global_editing_attack",
+            attack_strength=0.48,
+            resource_profile="full_extra",
+            requires_gpu=True,
+            enabled=True,
+            attack_parameters={"denoise_strength": 0.48, "edit_prompt_suffix": "with a changed global style and lighting"},
+        ),
+        AttackConfig(
+            attack_id="local_editing_extra",
+            attack_family="local_editing_attack",
+            attack_name="local_editing_attack",
+            attack_strength=0.42,
+            resource_profile="full_extra",
+            requires_gpu=True,
+            enabled=True,
+            attack_parameters={"denoise_strength": 0.42, "local_mask_ratio": 0.36},
+        ),
+        AttackConfig(
+            attack_id="visual_paraphrase_extra",
+            attack_family="visual_paraphrase_attack",
+            attack_name="visual_paraphrase_attack",
+            attack_strength=0.55,
+            resource_profile="full_extra",
+            requires_gpu=True,
+            enabled=True,
+            attack_parameters={"denoise_strength": 0.55, "paraphrase_prompt_suffix": "redrawn with the same semantics but different visual composition"},
+        ),
+        AttackConfig(
+            attack_id="adversarial_removal_extra",
+            attack_family="adversarial_removal_attack",
+            attack_name="adversarial_removal_attack",
+            attack_strength=0.38,
+            resource_profile="full_extra",
+            requires_gpu=True,
+            enabled=True,
+            attack_parameters={"denoise_strength": 0.38, "pre_noise_level": 0.035, "anti_watermark_bias": 0.20},
+        ),
     )
 
 
@@ -288,6 +338,11 @@ _ATTACK_EFFECTS: dict[str, dict[str, float]] = {
     "ddim_inversion_regeneration": {"lf": 0.66, "hf": 0.74, "quality": 0.68, "attention": 0.80},
     "sdedit_regeneration": {"lf": 0.72, "hf": 0.78, "quality": 0.72, "attention": 0.84},
     "diffusion_purification": {"lf": 0.58, "hf": 0.68, "quality": 0.60, "attention": 0.76},
+    "photometric_distortion_attack": {"lf": 0.18, "hf": 0.34, "quality": 0.36, "attention": 0.22},
+    "global_editing_attack": {"lf": 0.76, "hf": 0.82, "quality": 0.80, "attention": 0.88},
+    "local_editing_attack": {"lf": 0.60, "hf": 0.72, "quality": 0.66, "attention": 0.86},
+    "visual_paraphrase_attack": {"lf": 0.84, "hf": 0.88, "quality": 0.86, "attention": 0.92},
+    "adversarial_removal_attack": {"lf": 0.70, "hf": 0.84, "quality": 0.74, "attention": 0.82},
 }
 
 

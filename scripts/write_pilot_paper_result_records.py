@@ -818,7 +818,7 @@ def filter_records_to_template(
     """只保留共同协议模板内的结果记录。
 
     该过滤属于论文 claim 边界治理: baseline 的 clean_none 行和 SLM-WM 的
-    probe 行可用于诊断, 但不属于 12 类攻击矩阵的同模板比较, 不能进入
+    probe 行可用于诊断, 但不属于 17 类攻击矩阵的同模板比较, 不能进入
     pilot_paper fixed-FPR superiority gate。
     """
 

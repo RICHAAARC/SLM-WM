@@ -1,6 +1,6 @@
 """常规失真与几何变换真实图像级攻击闭环 helper.
 
-该模块只执行不依赖 diffusion 模型的图像攻击, 例如 JPEG、噪声、模糊、缩放、裁剪和旋转。
+该模块只执行不依赖 diffusion 模型的图像攻击, 例如 JPEG、噪声、模糊、缩放、裁剪、旋转和光照颜色扰动。
 Notebook 仍然只作为入口, 正式记录、注册表、metrics 和 manifest 均由该 helper 写出。
 """
 
@@ -65,7 +65,7 @@ PACKAGE_EXTRA_PATHS = (
     "outputs/attack_matrix/manifest.local.json",
     "outputs/threshold_calibration/manifest.local.json",
 )
-CONVENTIONAL_GEOMETRIC_FAMILIES = ("standard_distortion", "geometric_transform")
+CONVENTIONAL_GEOMETRIC_FAMILIES = ("standard_distortion", "geometric_transform", "photometric_distortion_attack")
 
 
 @dataclass(frozen=True)
@@ -266,7 +266,7 @@ def apply_conventional_geometric_attack(source_image: Any, config: AttackConfig,
     """执行单个 CPU 图像攻击并返回 attacked image."""
 
     patch_pillow_typing_ink_compatibility()
-    from PIL import Image, ImageFilter
+    from PIL import Image, ImageEnhance, ImageFilter
 
     resampling = getattr(getattr(Image, "Resampling", Image), "BICUBIC")
     image = source_image.convert("RGB")
@@ -289,6 +289,13 @@ def apply_conventional_geometric_attack(source_image: Any, config: AttackConfig,
         return Image.frombytes("RGB", image.size, bytes(byte_values))
     if config.attack_name == "gaussian_blur":
         return image.filter(ImageFilter.GaussianBlur(radius=float(config.attack_parameters["radius"])))
+    if config.attack_name == "photometric_distortion_attack":
+        adjusted = ImageEnhance.Brightness(image).enhance(float(config.attack_parameters["brightness"]))
+        adjusted = ImageEnhance.Contrast(adjusted).enhance(float(config.attack_parameters["contrast"]))
+        adjusted = ImageEnhance.Color(adjusted).enhance(float(config.attack_parameters["saturation"]))
+        gamma = float(config.attack_parameters["gamma"])
+        lookup = [max(0, min(255, int(((value / 255.0) ** gamma) * 255.0 + 0.5))) for value in range(256)]
+        return adjusted.point(lookup * 3)
     if config.attack_name == "resize":
         width, height = image.size
         scale = float(config.attack_parameters["scale"])

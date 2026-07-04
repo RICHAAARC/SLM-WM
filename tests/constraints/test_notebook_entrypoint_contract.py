@@ -417,6 +417,11 @@ def test_single_external_baseline_notebooks_select_one_method_and_delegate_to_he
         assert "ddim_inversion_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
         assert "sdedit_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
         assert "diffusion_purification" in FORMAL_IMAGE_ATTACK_FAMILIES
+        assert "photometric_distortion_attack" in FORMAL_IMAGE_ATTACK_FAMILIES
+        assert "global_editing_attack" in FORMAL_IMAGE_ATTACK_FAMILIES
+        assert "local_editing_attack" in FORMAL_IMAGE_ATTACK_FAMILIES
+        assert "visual_paraphrase_attack" in FORMAL_IMAGE_ATTACK_FAMILIES
+        assert "adversarial_removal_attack" in FORMAL_IMAGE_ATTACK_FAMILIES
         assert EXTERNAL_BASELINE_DEPENDENCY_INSTALL_COMMAND in joined_source
 
 

@@ -288,14 +288,22 @@ def build_real_attack_ingestion_summary(
 ) -> dict[str, Any]:
     """汇总真实攻击记录覆盖范围, 供 attack matrix 和 paper audit 复用。"""
     required_names = sorted({config.attack_name for config in attack_configs if config.requires_gpu})
-    measured_names = sorted(
+    measured_gpu_names = sorted(
+        {
+            str(record.get("attack_name", ""))
+            for record in formal_records
+            if str(record.get("resource_profile", "")) == "full_extra"
+            or str(record.get("attack_name", "")) in set(required_names)
+        }
+    )
+    measured_regeneration_names = sorted(
         {
             str(record.get("attack_name", ""))
             for record in formal_records
             if record.get("attack_family") == "regeneration_attack"
         }
     )
-    measured_required_names = sorted(set(required_names).intersection(measured_names))
+    measured_required_names = sorted(set(required_names).intersection(measured_gpu_names))
     real_attacked_image_count = sum(1 for record in formal_records if bool(record.get("attacked_image_available")))
     closed_loop_ready = bool(formal_records) and all(
         bool(record.get("attacked_image_available"))
@@ -316,10 +324,14 @@ def build_real_attack_ingestion_summary(
         "real_attacked_image_closed_loop_ready": closed_loop_ready,
         "formal_attack_detection_ready": formal_detection_ready,
         "required_regeneration_attack_count": required_count,
+        "required_real_gpu_attack_count": required_count,
         "measured_regeneration_attack_count": measured_count,
+        "measured_real_gpu_attack_count": measured_count,
         "regeneration_attack_gpu_validation_ready": bool(required_count and measured_count == required_count),
+        "real_gpu_attack_validation_ready": bool(required_count and measured_count == required_count),
         "gpu_attack_real_measurement_missing_count": max(0, required_count - measured_count),
-        "real_regeneration_attack_names": measured_names,
+        "real_regeneration_attack_names": measured_regeneration_names,
+        "real_gpu_attack_names": measured_gpu_names,
     }
 
 

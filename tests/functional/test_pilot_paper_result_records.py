@@ -204,7 +204,7 @@ def write_baseline_inputs(repo_root: Path, accepted: bool = True) -> None:
 
 
 def append_diagnostic_records_outside_template(repo_root: Path) -> None:
-    """追加不属于 pilot_paper 12 类攻击模板的诊断记录。"""
+    """追加不属于 pilot_paper 17 类攻击模板的诊断记录。"""
 
     metrics_path = repo_root / "outputs" / "attack_matrix" / "attack_family_metrics.csv"
     rows = list(csv.DictReader(metrics_path.open(encoding="utf-8")))

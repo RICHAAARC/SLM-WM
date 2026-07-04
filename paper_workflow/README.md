@@ -35,15 +35,15 @@ SLM_WM_PRIMARY_BASELINE_METHODS = "tree_ring"
 - `attention_latent_injection_run.ipynb`: 基于 attention geometry 执行 attention-relative latent update, 生成注入记录和配对质量记录。
 - `aligned_rescoring_run.ipynb`: 对注入结果进行 aligned rescoring, 生成检测重打分记录和配对感知质量指标。`pilot_paper` 默认使用该层级全部 prompt, 当前配置为600个; `full_paper` 当前配置为6000个。
 - `threshold_calibration_run.ipynb`: 按当前运行层级的 fixed-FPR 协议校准阈值, 并记录 geometric rescue 边界。`pilot_paper` 使用 FPR=0.01, `full_paper` 使用 FPR=0.001。
-- `real_attack_evaluation_run.ipynb`: 生成或导入真实 attacked image, 执行正式攻击后检测, 记录 source / attacked image digest 和再扩散攻击覆盖状态。处理数量由当前论文运行层级的样本数派生。
-- `conventional_geometric_attack_evaluation_run.ipynb`: 使用 CPU 图像算子生成常规失真与几何变换 attacked image, 写出 source / attacked image digest、formal detection records 和总体进度条。该入口不运行 diffusion 模型, 负责补齐 `standard_distortion` 与 `geometric_transform` 的真实图像级攻击闭环。
+- `real_attack_evaluation_run.ipynb`: 生成或导入真实 attacked image, 执行正式攻击后检测, 记录 source / attacked image digest 和真实 GPU 攻击覆盖状态。该入口负责再扩散、全局编辑、局部编辑、视觉改写和自适应去水印类攻击。处理数量由当前论文运行层级的样本数派生。
+- `conventional_geometric_attack_evaluation_run.ipynb`: 使用 CPU 图像算子生成常规失真、几何变换与 photometric attacked image, 写出 source / attacked image digest、formal detection records 和总体进度条。该入口不运行 diffusion 模型, 负责补齐 `standard_distortion`、`geometric_transform` 与 `photometric_distortion_attack` 的真实图像级攻击闭环。
 - `dataset_level_quality_run.ipynb`: 从受治理图像集合导入 dataset-level 质量特征, 计算或登记 FID / KID 等集合级指标。`pilot_paper` 默认使用100作为 dataset-level 正式特征最小样本阈值, 其结果只允许支撑 `pilot_paper` 样本规模内的主张, 不得提升为 `full_paper` 主张。
 
 ### 外部 baseline 入口
 
 method-faithful 入口把外部方法适配到 SD3.5 共同协议, 便于与主方法共享 prompt split、攻击矩阵和 fixed-FPR 校准边界。
 
-- `external_baseline_tree_ring_run.ipynb`: 只运行 Tree-Ring 的 SD3.5 method-faithful adapter, 覆盖共同攻击矩阵中的常规失真、几何变换与再生成攻击, 并写出 `split_observations/tree_ring_baseline_observations.json`。
+- `external_baseline_tree_ring_run.ipynb`: 只运行 Tree-Ring 的 SD3.5 method-faithful adapter, 覆盖共同攻击矩阵中的常规失真、几何变换、photometric、再生成和高级编辑攻击, 并写出 `split_observations/tree_ring_baseline_observations.json`。
 - `external_baseline_gaussian_shading_run.ipynb`: 只运行 Gaussian Shading 的 SD3.5 method-faithful adapter, 覆盖共同攻击矩阵中的常规失真、几何变换与再生成攻击, 并写出 `split_observations/gaussian_shading_baseline_observations.json`。
 - `external_baseline_shallow_diffuse_run.ipynb`: 只运行 Shallow Diffuse 的 SD3.5 method-faithful adapter, 覆盖共同攻击矩阵中的常规失真、几何变换与再生成攻击, 并写出 `split_observations/shallow_diffuse_baseline_observations.json`。
 - `external_baseline_t2smark_run.ipynb`: 只运行 T2SMark 官方 SD3.5 路径和 adapter, 冷启动时会补丁为同一攻击簇输出正式攻击分数, 并写出 `split_observations/t2smark_baseline_observations.json`。

@@ -58,9 +58,17 @@ def _real_attack_closed_loop_ready(attack_manifest: dict[str, Any]) -> bool:
 
 def _regeneration_attack_gpu_ready(attack_manifest: dict[str, Any]) -> bool:
     """判断再扩散类攻击是否已经由真实 GPU formal records 覆盖。"""
-    required_count = int(attack_manifest.get("required_regeneration_attack_count", 0))
-    measured_count = int(attack_manifest.get("measured_regeneration_attack_count", 0))
-    return _yes(attack_manifest.get("regeneration_attack_gpu_validation_ready")) and required_count > 0 and measured_count >= required_count
+    required_count = int(
+        attack_manifest.get("required_real_gpu_attack_count", attack_manifest.get("required_regeneration_attack_count", 0))
+    )
+    measured_count = int(
+        attack_manifest.get("measured_real_gpu_attack_count", attack_manifest.get("measured_regeneration_attack_count", 0))
+    )
+    ready_flag = attack_manifest.get(
+        "real_gpu_attack_validation_ready",
+        attack_manifest.get("regeneration_attack_gpu_validation_ready"),
+    )
+    return _yes(ready_flag) and required_count > 0 and measured_count >= required_count
 
 
 def _baseline_small_sample_ready(baseline_small_sample_summary: dict[str, Any]) -> bool:

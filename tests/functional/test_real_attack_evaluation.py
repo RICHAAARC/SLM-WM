@@ -35,7 +35,7 @@ def read_jsonl(path: Path) -> list[dict[str, object]]:
 
 @pytest.mark.quick
 def test_slm_attack_workflows_cover_paper_formal_attack_matrix() -> None:
-    """SLM 两类攻击 workflow 应共同覆盖 paper 共同协议的 12 类正式攻击。"""
+    """SLM 两类攻击 workflow 应共同覆盖 paper 共同协议的 17 类正式攻击。"""
 
     paper_attack_names = {
         config.attack_name
@@ -45,7 +45,7 @@ def test_slm_attack_workflows_cover_paper_formal_attack_matrix() -> None:
     conventional_names = {config.attack_name for config in conventional_attack_configs()}
     regeneration_names = {spec.attack_name for spec in default_attack_specs()}
 
-    assert len(paper_attack_names) == 12
+    assert len(paper_attack_names) == 17
     assert conventional_names == {
         "jpeg_compression",
         "gaussian_noise",
@@ -55,12 +55,17 @@ def test_slm_attack_workflows_cover_paper_formal_attack_matrix() -> None:
         "rotation",
         "crop_resize",
         "composite_geometric_attacks",
+        "photometric_distortion_attack",
     }
     assert regeneration_names == {
         "img2img_regeneration",
         "ddim_inversion_regeneration",
         "sdedit_regeneration",
         "diffusion_purification",
+        "global_editing_attack",
+        "local_editing_attack",
+        "visual_paraphrase_attack",
+        "adversarial_removal_attack",
     }
     assert conventional_names.isdisjoint(regeneration_names)
     assert conventional_names | regeneration_names == paper_attack_names
@@ -307,6 +312,10 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
             "img2img_regeneration": (126, 92, 73),
             "sdedit_regeneration": (138, 100, 82),
             "diffusion_purification": (124, 91, 72),
+            "global_editing_attack": (144, 104, 86),
+            "local_editing_attack": (132, 98, 80),
+            "visual_paraphrase_attack": (150, 108, 90),
+            "adversarial_removal_attack": (128, 94, 76),
         }
         return Image.new("RGB", (source_image.width * 2, source_image.height * 2), color=channels[spec.attack_name])
 
@@ -383,9 +392,10 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     assert summary["formal_attack_detection_ready"] is True
     assert summary["attacked_image_rescore_ready"] is True
     assert summary["proxy_formal_record_count"] == 0
-    assert summary["real_attacked_image_count"] == 8
-    assert len(records) == 8
-    assert len(registry_rows) == 8
+    assert summary["real_gpu_attack_validation_ready"] is True
+    assert summary["real_attacked_image_count"] == 16
+    assert len(records) == 16
+    assert len(registry_rows) == 16
     assert all(record["metric_status"] == "measured_from_real_attacked_image_watermark_rescore" for record in records)
     assert all(record["source_image_digest"] for record in records)
     assert all(record["attacked_image_digest"] for record in records)
@@ -397,7 +407,7 @@ def test_real_attack_evaluation_writes_image_registry_and_detection_records(tmp_
     assert (output_dir / "real_attack_family_metrics.csv").read_text(encoding="utf-8").count("\n") >= 5
     formal_records = read_jsonl(output_dir / "formal_attack_detection_records.jsonl")
     family_rows = list(csv.DictReader((output_dir / "real_attack_family_metrics.csv").open(encoding="utf-8")))
-    assert len(formal_records) == 8
+    assert len(formal_records) == 16
     assert all(
         record["metric_status"] == "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
         for record in formal_records

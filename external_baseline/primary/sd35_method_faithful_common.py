@@ -19,6 +19,7 @@ STANDARD_GEOMETRIC_FORMAL_IMAGE_ATTACK_NAMES = (
     "crop",
     "crop_resize",
     "composite_geometric_attacks",
+    "photometric_distortion_attack",
 )
 REGENERATION_FORMAL_IMAGE_ATTACK_NAMES = (
     "img2img_regeneration",
@@ -26,7 +27,14 @@ REGENERATION_FORMAL_IMAGE_ATTACK_NAMES = (
     "sdedit_regeneration",
     "diffusion_purification",
 )
-FORMAL_IMAGE_ATTACK_NAMES = STANDARD_GEOMETRIC_FORMAL_IMAGE_ATTACK_NAMES + REGENERATION_FORMAL_IMAGE_ATTACK_NAMES
+ADVANCED_GPU_FORMAL_IMAGE_ATTACK_NAMES = (
+    "global_editing_attack",
+    "local_editing_attack",
+    "visual_paraphrase_attack",
+    "adversarial_removal_attack",
+)
+DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES = REGENERATION_FORMAL_IMAGE_ATTACK_NAMES + ADVANCED_GPU_FORMAL_IMAGE_ATTACK_NAMES
+FORMAL_IMAGE_ATTACK_NAMES = STANDARD_GEOMETRIC_FORMAL_IMAGE_ATTACK_NAMES + DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES
 FORMAL_IMAGE_ATTACK_SPECS = {
     "jpeg": ("standard_distortion", "jpeg_compression"),
     "jpeg_compression": ("standard_distortion", "jpeg_compression"),
@@ -40,6 +48,9 @@ FORMAL_IMAGE_ATTACK_SPECS = {
     "crop": ("geometric_transform", "crop"),
     "crop_resize": ("geometric_transform", "crop_resize"),
     "composite_geometric_attacks": ("geometric_transform", "composite_geometric_attacks"),
+    "photometric": ("photometric_distortion_attack", "photometric_distortion_attack"),
+    "photometric_distortion": ("photometric_distortion_attack", "photometric_distortion_attack"),
+    "photometric_distortion_attack": ("photometric_distortion_attack", "photometric_distortion_attack"),
     "img2img": ("regeneration_attack", "img2img_regeneration"),
     "img2img_regeneration": ("regeneration_attack", "img2img_regeneration"),
     "ddim_inversion": ("regeneration_attack", "ddim_inversion_regeneration"),
@@ -48,6 +59,14 @@ FORMAL_IMAGE_ATTACK_SPECS = {
     "sdedit_regeneration": ("regeneration_attack", "sdedit_regeneration"),
     "diffusion_purification": ("regeneration_attack", "diffusion_purification"),
     "purification": ("regeneration_attack", "diffusion_purification"),
+    "global_editing": ("global_editing_attack", "global_editing_attack"),
+    "global_editing_attack": ("global_editing_attack", "global_editing_attack"),
+    "local_editing": ("local_editing_attack", "local_editing_attack"),
+    "local_editing_attack": ("local_editing_attack", "local_editing_attack"),
+    "visual_paraphrase": ("visual_paraphrase_attack", "visual_paraphrase_attack"),
+    "visual_paraphrase_attack": ("visual_paraphrase_attack", "visual_paraphrase_attack"),
+    "adversarial_removal": ("adversarial_removal_attack", "adversarial_removal_attack"),
+    "adversarial_removal_attack": ("adversarial_removal_attack", "adversarial_removal_attack"),
 }
 
 
@@ -202,10 +221,22 @@ def regeneration_formal_image_attack_names() -> tuple[str, ...]:
     return REGENERATION_FORMAL_IMAGE_ATTACK_NAMES
 
 
-def is_regeneration_attack(attack_family: str) -> bool:
-    """判断外部传入的攻击请求是否属于再生成攻击。"""
+def advanced_gpu_formal_image_attack_names() -> tuple[str, ...]:
+    """返回需要真实扩散 pipeline 参与的高级编辑与去水印攻击名称集合。"""
 
-    return normalize_attack_request(attack_family) in REGENERATION_FORMAL_IMAGE_ATTACK_NAMES
+    return ADVANCED_GPU_FORMAL_IMAGE_ATTACK_NAMES
+
+
+def diffusion_formal_image_attack_names() -> tuple[str, ...]:
+    """返回所有需要真实扩散 pipeline 参与的图像级攻击名称集合。"""
+
+    return DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES
+
+
+def is_regeneration_attack(attack_family: str) -> bool:
+    """判断外部传入的攻击请求是否需要真实扩散 pipeline。"""
+
+    return normalize_attack_request(attack_family) in DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES
 
 
 def formal_image_attack_resource_profile(attack_family: str) -> str:
@@ -344,7 +375,7 @@ def apply_standard_geometric_image_attack(image: Any, *, attack_family: str, see
     from PIL import Image, ImageFilter
 
     family = normalize_attack_request(attack_family)
-    if family in REGENERATION_FORMAL_IMAGE_ATTACK_NAMES:
+    if family in DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES:
         raise ValueError(f"regeneration_attack_requires_pipeline:{attack_family}")
     rng = random.Random(int(seed))
     source = image.convert("RGB")
@@ -369,6 +400,14 @@ def apply_standard_geometric_image_attack(image: Any, *, attack_family: str, see
         return Image.fromarray(noisy, mode="RGB"), "gaussian_noise_sigma_8"
     if family == "gaussian_blur":
         return source.filter(ImageFilter.GaussianBlur(radius=1.0)), "gaussian_blur_radius_1"
+    if family == "photometric_distortion_attack":
+        from PIL import ImageEnhance
+
+        adjusted = ImageEnhance.Brightness(source).enhance(1.12)
+        adjusted = ImageEnhance.Contrast(adjusted).enhance(1.10)
+        adjusted = ImageEnhance.Color(adjusted).enhance(0.88)
+        lookup = [max(0, min(255, int(((value / 255.0) ** 0.92) * 255.0 + 0.5))) for value in range(256)]
+        return adjusted.point(lookup * 3), "photometric_brightness_contrast_saturation_gamma"
     if family == "rotation":
         angle = 5.0 if rng.random() >= 0.5 else -5.0
         return source.rotate(angle, resample=Image.Resampling.BICUBIC), f"rotation_{angle:g}_degree"
@@ -437,7 +476,7 @@ def apply_regeneration_image_attack(
     import torch
 
     family = normalize_attack_request(attack_family)
-    if family not in REGENERATION_FORMAL_IMAGE_ATTACK_NAMES:
+    if family not in DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES:
         raise ValueError(f"regeneration_attack_name_required:{attack_family}")
     base_latents = _encode_image_latents(pipe, image.convert("RGB"), size=int(size), device=device)
     generator = torch.Generator(device=device).manual_seed(int(seed))
@@ -447,6 +486,10 @@ def apply_regeneration_image_attack(
         "ddim_inversion_regeneration": 0.40,
         "sdedit_regeneration": 0.45,
         "diffusion_purification": 0.32,
+        "global_editing_attack": 0.48,
+        "local_editing_attack": 0.42,
+        "visual_paraphrase_attack": 0.55,
+        "adversarial_removal_attack": 0.38,
     }
     strength = float(strength_by_attack[family])
     if family == "ddim_inversion_regeneration":
@@ -464,6 +507,26 @@ def apply_regeneration_image_attack(
     elif family == "diffusion_purification":
         attack_latents = (1.0 - strength) * base_latents + strength * noise
         transform_name = "sd35_adapter_diffusion_purification_regeneration"
+    elif family == "global_editing_attack":
+        attack_latents = (1.0 - strength) * base_latents + strength * noise
+        prompt = f"{prompt}, with a changed global style and lighting"
+        transform_name = "sd35_adapter_global_editing_attack"
+    elif family == "local_editing_attack":
+        local_mask = torch.zeros_like(base_latents)
+        height_start = local_mask.shape[-2] // 4
+        height_end = height_start + max(1, local_mask.shape[-2] // 2)
+        width_start = local_mask.shape[-1] // 4
+        width_end = width_start + max(1, local_mask.shape[-1] // 2)
+        local_mask[..., height_start:height_end, width_start:width_end] = 1.0
+        attack_latents = base_latents + strength * noise * local_mask
+        transform_name = "sd35_adapter_local_editing_attack"
+    elif family == "visual_paraphrase_attack":
+        attack_latents = (1.0 - strength) * base_latents + strength * noise
+        prompt = f"{prompt}, redrawn with the same semantics but different visual composition"
+        transform_name = "sd35_adapter_visual_paraphrase_attack"
+    elif family == "adversarial_removal_attack":
+        attack_latents = (1.0 - strength) * base_latents + strength * torch.sign(noise) * 0.50
+        transform_name = "sd35_adapter_adversarial_removal_attack"
     else:
         attack_latents = (1.0 - strength) * base_latents + strength * noise
         transform_name = "sd35_adapter_img2img_latent_regeneration"

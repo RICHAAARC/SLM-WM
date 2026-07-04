@@ -22,8 +22,9 @@ from experiments.protocol.paper_run_config import (
 
 FORMAL_IMAGE_ATTACK_FAMILIES = (
     "jpeg_compression,gaussian_noise,gaussian_blur,rotation,resize,crop,crop_resize,"
-    "composite_geometric_attacks,img2img_regeneration,ddim_inversion_regeneration,"
-    "sdedit_regeneration,diffusion_purification"
+    "composite_geometric_attacks,photometric_distortion_attack,img2img_regeneration,"
+    "ddim_inversion_regeneration,sdedit_regeneration,diffusion_purification,"
+    "global_editing_attack,local_editing_attack,visual_paraphrase_attack,adversarial_removal_attack"
 )
 
 

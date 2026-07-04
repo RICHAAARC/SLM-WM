@@ -54,6 +54,13 @@ REQUIRED_REGENERATION_ATTACKS = (
     "sdedit_regeneration",
     "diffusion_purification",
 )
+REQUIRED_ADVANCED_GPU_ATTACKS = (
+    "global_editing_attack",
+    "local_editing_attack",
+    "visual_paraphrase_attack",
+    "adversarial_removal_attack",
+)
+REQUIRED_REAL_GPU_ATTACKS = REQUIRED_REGENERATION_ATTACKS + REQUIRED_ADVANCED_GPU_ATTACKS
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 ALIGNED_RESCORING_PACKAGE_PATTERN = "aligned_rescoring_package_*.zip"
 THRESHOLD_CALIBRATION_PACKAGE_PATTERN = "threshold_calibration_package_*.zip"
@@ -169,12 +176,15 @@ class RealAttackEvaluationResult:
     real_attacked_image_count: int
     regeneration_attack_record_count: int
     required_regeneration_attack_count: int
+    required_real_gpu_attack_count: int
     measured_regeneration_attack_count: int
+    measured_real_gpu_attack_count: int
     real_attacked_image_closed_loop_ready: bool
     attacked_image_rescore_count: int
     attacked_image_rescore_ready: bool
     proxy_formal_record_count: int
     regeneration_attack_gpu_validation_ready: bool
+    real_gpu_attack_validation_ready: bool
     attack_detection_rerun_ready: bool
     formal_attack_detection_ready: bool
     image_quality_metrics_ready: bool
@@ -417,6 +427,41 @@ def default_attack_specs() -> tuple[RealAttackSpec, ...]:
             attack_strength=0.40,
             attack_parameters={"inversion_steps": 30, "denoise_strength": 0.40},
             attack_implementation="ddim_inverse_scheduler_reconstruction",
+        ),
+        RealAttackSpec(
+            attack_id="real_global_editing_attack",
+            attack_family="global_editing_attack",
+            attack_name="global_editing_attack",
+            attack_strength=0.48,
+            attack_parameters={"denoise_strength": 0.48, "edit_prompt_suffix": "with a changed global style and lighting"},
+            attack_implementation="sd3_img2img_global_editing",
+        ),
+        RealAttackSpec(
+            attack_id="real_local_editing_attack",
+            attack_family="local_editing_attack",
+            attack_name="local_editing_attack",
+            attack_strength=0.42,
+            attack_parameters={"denoise_strength": 0.42, "local_mask_ratio": 0.36},
+            attack_implementation="sd3_img2img_local_editing",
+        ),
+        RealAttackSpec(
+            attack_id="real_visual_paraphrase_attack",
+            attack_family="visual_paraphrase_attack",
+            attack_name="visual_paraphrase_attack",
+            attack_strength=0.55,
+            attack_parameters={
+                "denoise_strength": 0.55,
+                "paraphrase_prompt_suffix": "redrawn with the same semantics but different visual composition",
+            },
+            attack_implementation="sd3_img2img_visual_paraphrase",
+        ),
+        RealAttackSpec(
+            attack_id="real_adversarial_removal_attack",
+            attack_family="adversarial_removal_attack",
+            attack_name="adversarial_removal_attack",
+            attack_strength=0.38,
+            attack_parameters={"denoise_strength": 0.38, "pre_noise_level": 0.035, "anti_watermark_bias": 0.20},
+            attack_implementation="sd3_img2img_adversarial_removal",
         ),
     )
 
@@ -827,6 +872,36 @@ def add_sdedit_noise(image: Any, noise_level: float, seed: int) -> Any:
     return Image.frombytes("RGB", (width, height), bytes(byte_values))
 
 
+def add_local_editing_patch(image: Any, mask_ratio: float, seed: int) -> Any:
+    """构造局部编辑攻击的可审计输入图像。
+
+    该函数只负责给 img2img pipeline 提供局部扰动初值, 真正的生成式重写仍由
+    SD3.5 img2img 后端完成。这样可以复用同一真实 GPU 链路, 同时保留局部编辑
+    攻击相对全局再生成攻击的统计边界。
+    """
+
+    import random
+
+    patch_pillow_typing_ink_compatibility()
+    from PIL import ImageDraw, ImageFilter
+
+    rng = random.Random(int(seed))
+    rgb_image = image.convert("RGB")
+    width, height = rgb_image.size
+    patch_width = max(1, int(width * float(mask_ratio)))
+    patch_height = max(1, int(height * float(mask_ratio)))
+    left = rng.randint(0, max(0, width - patch_width))
+    top = rng.randint(0, max(0, height - patch_height))
+    blurred_patch = rgb_image.crop((left, top, left + patch_width, top + patch_height)).filter(
+        ImageFilter.GaussianBlur(radius=max(1.0, min(width, height) * 0.01))
+    )
+    edited = rgb_image.copy()
+    edited.paste(blurred_patch, (left, top))
+    draw = ImageDraw.Draw(edited, "RGBA")
+    draw.rectangle((left, top, left + patch_width, top + patch_height), fill=(255, 255, 255, 24))
+    return edited
+
+
 def run_pipeline_attack(
     pipeline: Any,
     source_image: Any,
@@ -839,11 +914,20 @@ def run_pipeline_attack(
     import torch
 
     input_image = source_image
+    prompt = prompt_text
     if spec.attack_name == "sdedit_regeneration":
         input_image = add_sdedit_noise(source_image, float(spec.attack_parameters["noise_level"]), seed)
+    if spec.attack_name == "adversarial_removal_attack":
+        input_image = add_sdedit_noise(source_image, float(spec.attack_parameters["pre_noise_level"]), seed)
+    if spec.attack_name == "local_editing_attack":
+        input_image = add_local_editing_patch(source_image, float(spec.attack_parameters["local_mask_ratio"]), seed)
+    if spec.attack_name == "global_editing_attack":
+        prompt = f"{prompt_text}, {spec.attack_parameters['edit_prompt_suffix']}"
+    if spec.attack_name == "visual_paraphrase_attack":
+        prompt = f"{prompt_text}, {spec.attack_parameters['paraphrase_prompt_suffix']}"
     generator = torch.Generator(device=config.device_name).manual_seed(seed)
     output = pipeline(
-        prompt=prompt_text,
+        prompt=prompt,
         negative_prompt=config.negative_prompt,
         image=input_image,
         height=config.height,
@@ -1791,13 +1875,16 @@ def write_failure_outputs(
         real_attack_record_count=0,
         real_attacked_image_count=0,
         regeneration_attack_record_count=0,
-        required_regeneration_attack_count=len(REQUIRED_REGENERATION_ATTACKS),
+        required_regeneration_attack_count=len(REQUIRED_REAL_GPU_ATTACKS),
+        required_real_gpu_attack_count=len(REQUIRED_REAL_GPU_ATTACKS),
         measured_regeneration_attack_count=0,
+        measured_real_gpu_attack_count=0,
         real_attacked_image_closed_loop_ready=False,
         attacked_image_rescore_count=0,
         attacked_image_rescore_ready=False,
         proxy_formal_record_count=0,
         regeneration_attack_gpu_validation_ready=False,
+        real_gpu_attack_validation_ready=False,
         attack_detection_rerun_ready=False,
         formal_attack_detection_ready=False,
         image_quality_metrics_ready=False,
@@ -2009,6 +2096,7 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
         row.get("source_image_digest") and row.get("attacked_image_digest") for row in registry_tuple
     )
     regeneration_ready = all(name in measured_names for name in REQUIRED_REGENERATION_ATTACKS)
+    real_gpu_attack_ready = all(name in measured_names for name in REQUIRED_REAL_GPU_ATTACKS)
     detection_ready = any(_is_measured_attack_record(record) for record in record_rows)
     attacked_image_rescore_count = sum(
         1 for record in record_rows if bool(record.get("metadata", {}).get("attacked_image_rescore_performed", False))
@@ -2031,7 +2119,7 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
         if closed_loop_ready
         and detection_ready
         and formal_ready
-        and (regeneration_ready or not config.require_all_regeneration_attacks)
+        and (real_gpu_attack_ready or not config.require_all_regeneration_attacks)
         else "fail"
     )
     unsupported_reason = "" if run_decision == "pass" else "real_attack_closed_loop_incomplete"
@@ -2045,13 +2133,16 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
         real_attack_record_count=len(record_rows),
         real_attacked_image_count=real_attacked_image_count,
         regeneration_attack_record_count=sum(1 for record in record_rows if record["attack_family"] == "regeneration_attack"),
-        required_regeneration_attack_count=len(REQUIRED_REGENERATION_ATTACKS),
-        measured_regeneration_attack_count=len(measured_names.intersection(REQUIRED_REGENERATION_ATTACKS)),
+        required_regeneration_attack_count=len(REQUIRED_REAL_GPU_ATTACKS),
+        required_real_gpu_attack_count=len(REQUIRED_REAL_GPU_ATTACKS),
+        measured_regeneration_attack_count=len(measured_names.intersection(REQUIRED_REAL_GPU_ATTACKS)),
+        measured_real_gpu_attack_count=len(measured_names.intersection(REQUIRED_REAL_GPU_ATTACKS)),
         real_attacked_image_closed_loop_ready=closed_loop_ready,
         attacked_image_rescore_count=attacked_image_rescore_count,
         attacked_image_rescore_ready=attacked_image_rescore_ready,
         proxy_formal_record_count=proxy_formal_record_count,
-        regeneration_attack_gpu_validation_ready=regeneration_ready,
+        regeneration_attack_gpu_validation_ready=real_gpu_attack_ready,
+        real_gpu_attack_validation_ready=real_gpu_attack_ready,
         attack_detection_rerun_ready=detection_ready,
         formal_attack_detection_ready=formal_ready,
         image_quality_metrics_ready=image_quality_ready,
@@ -2065,6 +2156,9 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
         metadata={
             **runtime_versions,
             "required_regeneration_attacks": REQUIRED_REGENERATION_ATTACKS,
+            "required_advanced_gpu_attacks": REQUIRED_ADVANCED_GPU_ATTACKS,
+            "required_real_gpu_attacks": REQUIRED_REAL_GPU_ATTACKS,
+            "real_gpu_attack_validation_ready": real_gpu_attack_ready,
             "formal_boundary": boundary,
             "require_attacked_image_latent_rescore": config.require_attacked_image_latent_rescore,
             "formal_watermark_rescore_status": FORMAL_WATERMARK_RESCORE_STATUS,
@@ -2095,7 +2189,8 @@ def write_real_attack_evaluation_outputs(config: RealAttackEvaluationConfig, roo
             "attacked_image_rescore_count": attacked_image_rescore_count,
             "attacked_image_rescore_ready": attacked_image_rescore_ready,
             "proxy_formal_record_count": proxy_formal_record_count,
-            "regeneration_attack_gpu_validation_ready": regeneration_ready,
+            "regeneration_attack_gpu_validation_ready": real_gpu_attack_ready,
+            "real_gpu_attack_validation_ready": real_gpu_attack_ready,
             "formal_attack_detection_ready": formal_ready,
         },
     ).to_dict()

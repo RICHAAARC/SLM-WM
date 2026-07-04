@@ -50,6 +50,10 @@ def test_formal_image_attack_taxonomy_matches_attack_matrix_names() -> None:
     assert canonical_attack_family("crop_resize") == "geometric_transform"
     assert canonical_attack_family("ddim_inversion") == "regeneration_attack"
     assert canonical_attack_name("purification") == "diffusion_purification"
+    assert canonical_attack_family("photometric") == "photometric_distortion_attack"
+    assert canonical_attack_name("global_editing") == "global_editing_attack"
+    assert canonical_attack_family("visual_paraphrase") == "visual_paraphrase_attack"
+    assert canonical_attack_family("adversarial_removal") == "adversarial_removal_attack"
     assert set(regeneration_formal_image_attack_names()).issubset(expected_names)
     for attack_name in standard_geometric_formal_image_attack_names():
         attacked_image, transform_name = apply_image_attack(image, attack_family=attack_name, seed=17)
@@ -59,12 +63,12 @@ def test_formal_image_attack_taxonomy_matches_attack_matrix_names() -> None:
 
 @pytest.mark.quick
 def test_external_baseline_notebooks_use_default_formal_attack_matrix() -> None:
-    """四个 method-faithful baseline 入口应默认使用同一 12 类正式攻击矩阵。"""
+    """四个 method-faithful baseline 入口应默认使用同一 17 类正式攻击矩阵。"""
 
     repo_root = Path(__file__).resolve().parents[2]
     expected_attack_names = set(supported_formal_image_attack_names())
     assert expected_attack_names == set(DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES.split(","))
-    assert len(expected_attack_names) == 12
+    assert len(expected_attack_names) == 17
     notebook_by_method = {
         "tree_ring": "external_baseline_tree_ring_run.ipynb",
         "gaussian_shading": "external_baseline_gaussian_shading_run.ipynb",
