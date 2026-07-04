@@ -492,3 +492,116 @@ def test_attack_matrix_keeps_proxy_records_when_formal_coverage_is_partial(tmp_p
     assert len(jpeg_full_main_records) == 3
     assert attack_manifest["formal_proxy_replacement_complete_count"] == 0
     assert attack_manifest["formal_proxy_replacement_incomplete_count"] == 1
+
+
+@pytest.mark.quick
+def test_attack_matrix_formal_claim_roles_replace_proxy_even_with_attacked_negative_proxy(tmp_path: Path) -> None:
+    """formal 覆盖 fixed-FPR claim 角色时, attacked_negative proxy 不应导致 mixed 口径。"""
+    rescue_dir = tmp_path / "outputs" / "geometric_rescue"
+    calibration_dir = tmp_path / "outputs" / "threshold_calibration"
+    conventional_dir = tmp_path / "outputs" / "conventional_geometric_attack_evaluation"
+    rescue_dir.mkdir(parents=True)
+    calibration_dir.mkdir(parents=True)
+    conventional_dir.mkdir(parents=True)
+
+    records_path = rescue_dir / "aligned_detection_records.jsonl"
+    records_path.write_text(
+        "".join(
+            json_line(record)
+            for record in (
+                source_record("pos", "positive_source", 0.82, 0.86),
+                source_record("clean", "clean_negative", 0.20, 0.22),
+                source_record("attacked", "attacked_negative", 0.48, 0.52),
+            )
+        ),
+        encoding="utf-8",
+    )
+    rescue_manifest_path = rescue_dir / "manifest.local.json"
+    rescue_manifest_path.write_text(json.dumps({"artifact_id": "geometric_rescue_manifest"}), encoding="utf-8")
+    thresholds_path = calibration_dir / "calibration_thresholds.json"
+    thresholds_path.write_text(json.dumps({"threshold_value": 0.50, "target_fpr": 0.05}), encoding="utf-8")
+    threshold_report_path = calibration_dir / "threshold_degeneracy_report.json"
+    threshold_report_path.write_text(
+        json.dumps(
+            {
+                "calibrated_content_threshold": 0.50,
+                "target_fpr": 0.05,
+                "rescue_margin_low": -0.05,
+                "allowed_fail_reasons": ["geometry_suspected", "low_confidence"],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    calibration_manifest_path = calibration_dir / "manifest.local.json"
+    calibration_manifest_path.write_text(json.dumps({"artifact_id": "threshold_calibration_manifest"}), encoding="utf-8")
+    conventional_records_path = conventional_dir / "formal_attack_detection_records.jsonl"
+    formal_positive = formal_real_attack_record(
+        "jpeg_compression",
+        0.71,
+        True,
+        attack_family="standard_distortion",
+        resource_profile="full_main",
+        requires_gpu=False,
+        split="test",
+        sample_role="positive_source",
+    )
+    formal_clean = formal_real_attack_record(
+        "jpeg_compression",
+        0.11,
+        False,
+        attack_family="standard_distortion",
+        resource_profile="full_main",
+        requires_gpu=False,
+        split="test",
+        sample_role="clean_negative",
+    )
+    formal_clean["attack_record_id"] = "real_jpeg_compression_clean"
+    formal_clean["attack_record_digest"] = "digest_jpeg_compression_clean"
+    conventional_records_path.write_text(
+        "".join(json_line(record) for record in (formal_positive, formal_clean)),
+        encoding="utf-8",
+    )
+
+    write_attack_matrix_outputs(
+        root=tmp_path,
+        rescue_records_path=records_path,
+        rescue_manifest_path=rescue_manifest_path,
+        calibration_thresholds_path=thresholds_path,
+        threshold_report_path=threshold_report_path,
+        calibration_manifest_path=calibration_manifest_path,
+        conventional_geometric_records_path=conventional_records_path,
+        max_source_records=None,
+    )
+
+    output_dir = tmp_path / "outputs" / "attack_matrix"
+    attack_records = [
+        json.loads(line)
+        for line in (output_dir / "attack_detection_records.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    family_rows = list(csv.DictReader((output_dir / "attack_family_metrics.csv").open(encoding="utf-8")))
+    attack_manifest = json.loads((output_dir / "attack_manifest.json").read_text(encoding="utf-8"))
+    jpeg_full_main_records = [
+        record
+        for record in attack_records
+        if record["attack_family"] == "standard_distortion"
+        and record["attack_name"] == "jpeg_compression"
+        and record["resource_profile"] == "full_main"
+    ]
+    jpeg_full_main_rows = [
+        row
+        for row in family_rows
+        if row["attack_family"] == "standard_distortion"
+        and row["attack_name"] == "jpeg_compression"
+        and row["resource_profile"] == "full_main"
+    ]
+
+    assert len(jpeg_full_main_records) == 2
+    assert {record["sample_role"] for record in jpeg_full_main_records} == {"positive_source", "clean_negative"}
+    assert jpeg_full_main_rows[0]["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+    assert jpeg_full_main_rows[0]["attack_record_count"] == "2"
+    assert jpeg_full_main_rows[0]["positive_count"] == "1"
+    assert jpeg_full_main_rows[0]["negative_count"] == "1"
+    assert attack_manifest["formal_proxy_replacement_complete_count"] == 1
+    assert attack_manifest["formal_proxy_replacement_incomplete_count"] == 0
+    assert attack_manifest["formal_proxy_replacement_requires_complete_split_role_coverage"] is False

@@ -51,6 +51,7 @@ REAL_ATTACK_METRIC_STATUSES = (
     REAL_ATTACK_RETENTION_PROXY_METRIC_STATUS,
     LEGACY_REAL_ATTACK_METRIC_STATUS,
 )
+FORMAL_PROXY_REPLACEMENT_SAMPLE_ROLES = ("positive_source", "clean_negative")
 
 
 def stable_json_text(value: Any) -> str:
@@ -175,17 +176,26 @@ def group_records_by_attack_key(records: tuple[dict[str, Any], ...]) -> dict[tup
 
 
 def formal_coverage_complete(proxy_group: list[dict[str, Any]], formal_group: list[dict[str, Any]]) -> bool:
-    """判断真实图像 formal records 是否完整覆盖同一攻击配置的 proxy records。
+    """判断真实图像 formal records 是否覆盖同一攻击配置的 fixed-FPR claim 角色。
 
-    该函数属于证据治理层: 只有当 formal records 的总量和 split/sample_role
-    分布都覆盖 proxy records 时, 才允许移除同配置 proxy 记录。这样可以避免
-    少量真实 attacked image 记录把同攻击配置的大量 proxy 统计整体覆盖。
+    该函数属于证据治理层: fixed-FPR 的正式误报边界只由 clean negative
+    控制, 攻击后 attacked negative 只用于鲁棒性诊断, 不进入 fixed-FPR
+    分母。因此当真实图像级 formal records 已经覆盖 positive_source 与
+    clean_negative 时, 应整体替换同攻击配置的本地 proxy 记录, 避免 proxy
+    attacked_negative 与真实记录混合后把该攻击配置降级为 mixed/proxy 口径。
     """
 
     performed_formal = [record for record in formal_group if bool(record.get("attack_performed"))]
-    if not proxy_group or not performed_formal or len(performed_formal) < len(proxy_group):
+    if not proxy_group or not performed_formal:
         return False
-    proxy_role_counts = Counter(split_role_key(record) for record in proxy_group)
+    formal_claim_roles = set(FORMAL_PROXY_REPLACEMENT_SAMPLE_ROLES)
+    proxy_role_counts = Counter(
+        split_role_key(record)
+        for record in proxy_group
+        if str(record.get("sample_role", "")) in formal_claim_roles
+    )
+    if not proxy_role_counts:
+        return False
     formal_role_counts = Counter(split_role_key(record) for record in performed_formal)
     return all(formal_role_counts[key] >= count for key, count in proxy_role_counts.items())
 
@@ -230,7 +240,7 @@ def build_formal_attack_coverage_report(
         "formal_proxy_replacement_complete_count": len(complete_keys),
         "formal_proxy_replacement_incomplete_count": len(incomplete_rows),
         "formal_proxy_replacement_incomplete_examples": incomplete_rows[:20],
-        "formal_proxy_replacement_requires_complete_split_role_coverage": True,
+        "formal_proxy_replacement_requires_complete_split_role_coverage": False,
     }
 
 

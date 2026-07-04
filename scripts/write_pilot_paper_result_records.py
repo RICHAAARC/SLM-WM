@@ -797,6 +797,45 @@ def build_template_coverage_rows(
     return rows
 
 
+def template_record_keys(template_rows: Iterable[Mapping[str, Any]]) -> set[tuple[str, str, str, str]]:
+    """提取 pilot_paper 共同协议允许进入 claim 比较的模板键。"""
+
+    return {
+        (
+            _str_field(row, "method_id"),
+            _str_field(row, "attack_family"),
+            _str_field(row, "attack_name"),
+            _str_field(row, "resource_profile"),
+        )
+        for row in template_rows
+    }
+
+
+def filter_records_to_template(
+    records: Iterable[dict[str, Any]],
+    template_rows: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """只保留共同协议模板内的结果记录。
+
+    该过滤属于论文 claim 边界治理: baseline 的 clean_none 行和 SLM-WM 的
+    probe 行可用于诊断, 但不属于 12 类攻击矩阵的同模板比较, 不能进入
+    pilot_paper fixed-FPR superiority gate。
+    """
+
+    allowed_keys = template_record_keys(template_rows)
+    return [
+        record
+        for record in records
+        if (
+            _str_field(record, "method_id"),
+            _str_field(record, "attack_family"),
+            _str_field(record, "attack_name"),
+            _str_field(record, "resource_profile"),
+        )
+        in allowed_keys
+    ]
+
+
 def build_result_summary(
     *,
     records: list[dict[str, Any]],
@@ -920,7 +959,7 @@ def write_pilot_paper_result_record_outputs(
         baseline_validation_report_path=resolved_baseline_validation_report_path,  # type: ignore[arg-type]
     )
     result_records = sorted(
-        slm_wm_records + baseline_records,
+        filter_records_to_template(slm_wm_records + baseline_records, template_rows),
         key=lambda row: (
             str(row.get("method_id", "")),
             str(row.get("resource_profile", "")),

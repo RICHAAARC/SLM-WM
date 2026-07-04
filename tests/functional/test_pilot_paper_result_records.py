@@ -203,6 +203,53 @@ def write_baseline_inputs(repo_root: Path, accepted: bool = True) -> None:
     )
 
 
+def append_diagnostic_records_outside_template(repo_root: Path) -> None:
+    """追加不属于 pilot_paper 12 类攻击模板的诊断记录。"""
+
+    metrics_path = repo_root / "outputs" / "attack_matrix" / "attack_family_metrics.csv"
+    rows = list(csv.DictReader(metrics_path.open(encoding="utf-8")))
+    fieldnames = list(rows[0].keys())
+    probe_row = dict(rows[0])
+    probe_row.update(
+        {
+            "resource_profile": "probe",
+            "metric_status": "measured_from_local_proxy",
+            "supports_paper_claim": "False",
+        }
+    )
+    write_csv_rows(metrics_path, rows + [probe_row], fieldnames)
+
+    baseline_dir = repo_root / "outputs" / "external_baseline_results"
+    baseline_rows = [
+        json.loads(line)
+        for line in (baseline_dir / "baseline_result_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    clean_row = dict(baseline_rows[0])
+    clean_row.update(
+        {
+            "attack_family": "clean",
+            "attack_name": "clean_none",
+            "resource_profile": "full_main",
+            "baseline_result_record_id": "primary_baseline_formal_result_clean_none",
+            "baseline_result_digest": "baseline_result_digest_clean_none",
+        }
+    )
+    all_rows = baseline_rows + [clean_row]
+    (baseline_dir / "baseline_result_records.jsonl").write_text(
+        "".join(json_line(row) for row in all_rows),
+        encoding="utf-8",
+    )
+    validation_report = json.loads(
+        (baseline_dir / "baseline_result_candidate_validation_report.json").read_text(encoding="utf-8")
+    )
+    validation_report["accepted_records"] = all_rows
+    (baseline_dir / "baseline_result_candidate_validation_report.json").write_text(
+        json.dumps(validation_report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.quick
 def test_pilot_paper_result_writer_materializes_slm_and_governed_baseline_records(tmp_path: Path) -> None:
     """结果物化脚本应把方法主流程与已接受 baseline 候选统一转换为 pilot_paper 记录。"""
@@ -251,6 +298,37 @@ def test_pilot_paper_result_writer_materializes_slm_and_governed_baseline_record
     assert summary["pilot_paper_template_missing_count"] > 0
     assert any(row["template_covered"] == "True" for row in coverage_rows)
     assert all(path.startswith("outputs/") for path in manifest["output_paths"])
+
+
+@pytest.mark.quick
+def test_pilot_paper_result_writer_excludes_diagnostic_records_outside_template(tmp_path: Path) -> None:
+    """clean_none 与 probe 诊断记录不应进入 pilot_paper claim 比较集合。"""
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    write_pilot_prompt_file(repo_root)
+    write_attack_matrix_inputs(repo_root)
+    write_baseline_inputs(repo_root, accepted=True)
+    append_diagnostic_records_outside_template(repo_root)
+
+    write_pilot_paper_result_record_outputs(root=repo_root, require_existing_evidence=True)
+    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_results"
+    records = [
+        json.loads(line)
+        for line in (output_dir / "pilot_paper_result_records.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    validation = json.loads(
+        (output_dir / "pilot_paper_result_import_validation_report.json").read_text(encoding="utf-8")
+    )
+
+    assert len(records) == 2
+    assert {row["method_id"] for row in records} == {"slm_wm_current", "tree_ring"}
+    assert {row["attack_name"] for row in records} == {"jpeg_compression"}
+    assert {row["resource_profile"] for row in records} == {"full_main"}
+    assert all(row["supports_paper_claim"] is True for row in records)
+    assert validation["accepted_pilot_paper_import_count"] == 2
+    assert validation["accepted_pilot_paper_claim_record_count"] == 2
 
 
 @pytest.mark.quick
