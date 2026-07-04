@@ -22,6 +22,7 @@ from experiments.ablations import (
     build_ablation_records,
     build_pairwise_delta_rows,
     default_ablation_specs,
+    filter_ablation_claim_input_records,
 )
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -148,16 +149,26 @@ def write_internal_ablation_outputs(
     ablation_specs = default_ablation_specs()
     threshold = _threshold_value(attack_manifest, threshold_report)
 
-    ablation_records = build_ablation_records(attack_records, ablation_specs, threshold)
+    claim_input_records, claim_input_report = filter_ablation_claim_input_records(attack_records)
+    ablation_records = build_ablation_records(claim_input_records, ablation_specs, threshold)
     mechanism_rows = aggregate_mechanism_ablation_table(ablation_records)
     pairwise_rows = build_pairwise_delta_rows(mechanism_rows)
     family_rows = aggregate_ablation_by_attack_family(ablation_records)
-    claim_summary = build_ablation_claim_summary(ablation_specs, ablation_records, mechanism_rows, attack_manifest, baseline_manifest)
+    claim_summary = {
+        **build_ablation_claim_summary(ablation_specs, ablation_records, mechanism_rows, attack_manifest, baseline_manifest),
+        "ablation_claim_input_filter": claim_input_report,
+        "ablation_claim_total_source_record_count": claim_input_report["ablation_claim_total_source_record_count"],
+        "ablation_claim_input_record_count": claim_input_report["ablation_claim_input_record_count"],
+        "ablation_claim_excluded_record_count": claim_input_report["ablation_claim_excluded_record_count"],
+        "ablation_claim_excluded_proxy_record_count": claim_input_report["ablation_claim_excluded_proxy_record_count"],
+        "ablation_claim_excluded_record_examples": claim_input_report["ablation_claim_excluded_record_examples"],
+    }
 
     records_path = resolved_output_dir / "ablation_records.jsonl"
     mechanism_table_path = resolved_output_dir / "mechanism_ablation_table.csv"
     pairwise_delta_path = resolved_output_dir / "method_pairwise_delta_table.csv"
     family_table_path = resolved_output_dir / "ablation_by_attack_family.csv"
+    claim_input_report_path = resolved_output_dir / "ablation_claim_input_report.json"
     claim_summary_path = resolved_output_dir / "ablation_claim_summary.json"
     manifest_path = resolved_output_dir / "manifest.local.json"
 
@@ -238,11 +249,20 @@ def write_internal_ablation_outputs(
             "supports_paper_claim",
         ],
     )
+    claim_input_report_path.write_text(stable_json_text(claim_input_report), encoding="utf-8")
     claim_summary_path.write_text(stable_json_text(claim_summary), encoding="utf-8")
 
     output_paths = tuple(
         relative_or_absolute(path, root_path)
-        for path in (records_path, mechanism_table_path, pairwise_delta_path, family_table_path, claim_summary_path, manifest_path)
+        for path in (
+            records_path,
+            mechanism_table_path,
+            pairwise_delta_path,
+            family_table_path,
+            claim_input_report_path,
+            claim_summary_path,
+            manifest_path,
+        )
     )
     input_paths = (
         relative_or_absolute(resolved_attack_records_path, root_path),
@@ -267,6 +287,7 @@ def write_internal_ablation_outputs(
             "ablation_spec_digest": build_stable_digest([spec.to_dict() for spec in ablation_specs]),
             "summary_digest": build_stable_digest(summary),
             "threshold_value": threshold,
+            "claim_input_digest": build_stable_digest(claim_input_report),
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_internal_ablation_outputs.py",

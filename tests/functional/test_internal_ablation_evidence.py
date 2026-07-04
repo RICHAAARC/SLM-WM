@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from experiments.ablations import aggregate_ablation_by_attack_family, build_ablation_claim_summary, build_ablation_records, default_ablation_specs
+from experiments.ablations import (
+    FORMAL_ABLATION_METRIC_STATUS,
+    aggregate_ablation_by_attack_family,
+    build_ablation_claim_summary,
+    build_ablation_records,
+    default_ablation_specs,
+    filter_ablation_claim_input_records,
+)
 from scripts.write_internal_ablation_outputs import write_internal_ablation_outputs
 
 
@@ -31,6 +38,7 @@ REQUIRED_ABLATIONS = {
     "no_attestation",
     "geo_direct_positive_audit",
 }
+CORE_CLAIM_ABLATIONS = REQUIRED_ABLATIONS - {"geo_direct_positive_audit"}
 
 
 def sample_attack_record(record_id: str, sample_role: str, attack_family: str, evidence_decision: bool) -> dict:
@@ -57,6 +65,29 @@ def sample_attack_record(record_id: str, sample_role: str, attack_family: str, e
         "raw_content_score_after": 0.64 if is_positive else 0.16,
         "aligned_content_score_after": 0.74 if is_positive else 0.18,
         "supports_paper_claim": False,
+    }
+
+
+def formal_attack_record(record_id: str, sample_role: str, attack_family: str, evidence_decision: bool) -> dict:
+    """构造可进入正式消融 claim gate 的真实图像级攻击记录。"""
+    return {
+        **sample_attack_record(record_id, sample_role, attack_family, evidence_decision),
+        "resource_profile": "full_main",
+        "metric_status": FORMAL_ABLATION_METRIC_STATUS,
+        "supports_paper_claim": True,
+    }
+
+
+def formal_attack_manifest() -> dict:
+    """构造正式攻击闭环 ready 的最小 manifest。"""
+    return {
+        "attack_metrics_ready": True,
+        "real_attacked_image_closed_loop_ready": True,
+        "formal_attack_detection_ready": True,
+        "regeneration_attack_gpu_validation_ready": True,
+        "formal_proxy_replacement_incomplete_count": 0,
+        "evaluation_boundary": {"calibrated_content_threshold": 0.50, "target_fpr": 0.05},
+        "supports_paper_claim": True,
     }
 
 
@@ -115,11 +146,10 @@ def test_ablation_records_apply_real_mechanism_changes() -> None:
 
 @pytest.mark.quick
 def test_ablation_preserves_real_attack_metric_status() -> None:
-    """消融证据应保留真实 attacked image formal record 的统计来源。"""
+    """消融证据应保留真实 attacked image watermark rescore formal record 的统计来源。"""
     real_record = {
-        **sample_attack_record("real_img2img", "attacked_negative", "regeneration_attack", False),
+        **formal_attack_record("real_img2img", "positive_source", "regeneration_attack", True),
         "attack_name": "img2img_regeneration",
-        "metric_status": "measured_from_real_attacked_image_retention_proxy_formal_protocol",
     }
 
     rows = build_ablation_records((real_record,), default_ablation_specs(), threshold=0.50)
@@ -128,18 +158,33 @@ def test_ablation_preserves_real_attack_metric_status() -> None:
         default_ablation_specs(),
         rows,
         [],
-        {"attack_metrics_ready": True, "regeneration_attack_gpu_validation_ready": True},
-        {"metadata": {"baseline_results_ready": False}},
+        formal_attack_manifest(),
+        {"metadata": {"baseline_results_ready": True}},
     )
 
-    assert {row["metric_status"] for row in rows} == {
-        "measured_from_real_attacked_image_retention_proxy_formal_protocol"
-    }
-    assert {row["metric_status"] for row in family_rows} == {
-        "measured_from_real_attacked_image_retention_proxy_formal_protocol"
-    }
+    assert {row["metric_status"] for row in rows} == {FORMAL_ABLATION_METRIC_STATUS}
+    assert {row["metric_status"] for row in family_rows} == {FORMAL_ABLATION_METRIC_STATUS}
     assert summary["unsupported_reasons"] == []
-    assert "governed real regeneration records" in summary["local_proxy_boundary"]
+    assert summary["ablation_claim_formal_input_ready"] is True
+
+
+@pytest.mark.quick
+def test_ablation_claim_input_filter_excludes_probe_proxy_records() -> None:
+    """正式消融 claim 输入应排除 probe proxy, 避免 mixed/local proxy 口径污染。"""
+    records = (
+        formal_attack_record("formal_positive", "positive_source", "standard_distortion", True),
+        formal_attack_record("formal_clean", "clean_negative", "standard_distortion", False),
+        sample_attack_record("probe_positive", "positive_source", "standard_distortion", True),
+        {**sample_attack_record("unsupported", "positive_source", "regeneration_attack", False), "metric_status": "unsupported"},
+    )
+
+    accepted, report = filter_ablation_claim_input_records(records)
+
+    assert len(accepted) == 2
+    assert report["ablation_claim_input_record_count"] == 2
+    assert report["ablation_claim_excluded_record_count"] == 2
+    assert report["ablation_claim_excluded_proxy_record_count"] == 1
+    assert {row["attack_record_id"] for row in accepted} == {"formal_positive", "formal_clean"}
 
 
 @pytest.mark.quick
@@ -162,7 +207,7 @@ def test_ablation_claim_summary_uses_current_paper_run_protocol(monkeypatch: pyt
     assert summary["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol"
 
 
-def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
+def write_input_artifacts(tmp_path: Path, *, formal: bool) -> tuple[Path, Path, Path, Path, Path]:
     """写出内部消融脚本所需的最小上游输入。"""
     attack_dir = tmp_path / "outputs" / "attack_matrix"
     threshold_dir = tmp_path / "outputs" / "threshold_calibration"
@@ -177,40 +222,84 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]
     threshold_report_path = threshold_dir / "threshold_degeneracy_report.json"
     baseline_manifest_path = baseline_dir / "manifest.local.json"
 
-    records = [
-        sample_attack_record("positive_jpeg", "positive_source", "standard_distortion", True),
-        sample_attack_record("clean_jpeg", "clean_negative", "standard_distortion", False),
-        sample_attack_record("attacked_rotation", "attacked_negative", "geometric_transform", False),
-        {**sample_attack_record("unsupported_gpu", "positive_source", "regeneration_attack", False), "metric_status": "unsupported", "unsupported_reason": "real_gpu_attack_required"},
-    ]
-    records_path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in records), encoding="utf-8")
-    attack_manifest_path.write_text(
-        json.dumps(
+    if formal:
+        records = [
+            formal_attack_record("positive_jpeg", "positive_source", "standard_distortion", True),
+            formal_attack_record("clean_jpeg", "clean_negative", "standard_distortion", False),
+            formal_attack_record("positive_rotation", "positive_source", "geometric_transform", True),
+            formal_attack_record("clean_rotation", "clean_negative", "geometric_transform", False),
+            {**formal_attack_record("positive_img2img", "positive_source", "regeneration_attack", True), "resource_profile": "full_extra", "attack_name": "img2img_regeneration"},
+            {**formal_attack_record("clean_img2img", "clean_negative", "regeneration_attack", False), "resource_profile": "full_extra", "attack_name": "img2img_regeneration"},
+            sample_attack_record("probe_positive_jpeg", "positive_source", "standard_distortion", True),
+        ]
+        attack_manifest = formal_attack_manifest()
+        baseline_manifest = {"metadata": {"baseline_results_ready": True, "supports_paper_claim": True}}
+    else:
+        records = [
+            sample_attack_record("positive_jpeg", "positive_source", "standard_distortion", True),
+            sample_attack_record("clean_jpeg", "clean_negative", "standard_distortion", False),
+            sample_attack_record("attacked_rotation", "attacked_negative", "geometric_transform", False),
             {
-                "attack_metrics_ready": True,
-                "evaluation_boundary": {"calibrated_content_threshold": 0.50, "target_fpr": 0.05},
-                "supports_paper_claim": False,
+                **sample_attack_record("unsupported_gpu", "positive_source", "regeneration_attack", False),
+                "metric_status": "unsupported",
+                "unsupported_reason": "real_gpu_attack_required",
             },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
+        ]
+        attack_manifest = {
+            "attack_metrics_ready": True,
+            "evaluation_boundary": {"calibrated_content_threshold": 0.50, "target_fpr": 0.05},
+            "supports_paper_claim": False,
+        }
+        baseline_manifest = {"metadata": {"baseline_results_ready": False, "supports_paper_claim": False}}
+
+    records_path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in records), encoding="utf-8")
+    attack_manifest_path.write_text(json.dumps(attack_manifest, ensure_ascii=False), encoding="utf-8")
     attack_matrix_manifest_path.write_text(json.dumps({"artifact_id": "attack_matrix_manifest", "config_digest": "digest"}), encoding="utf-8")
     threshold_report_path.write_text(
-        json.dumps({"calibrated_content_threshold": 0.50, "target_fpr": 0.05, "supports_paper_claim": False}, ensure_ascii=False),
+        json.dumps({"calibrated_content_threshold": 0.50, "target_fpr": 0.05, "supports_paper_claim": formal}, ensure_ascii=False),
         encoding="utf-8",
     )
-    baseline_manifest_path.write_text(
-        json.dumps({"metadata": {"baseline_results_ready": False, "supports_paper_claim": False}}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    baseline_manifest_path.write_text(json.dumps(baseline_manifest, ensure_ascii=False), encoding="utf-8")
     return records_path, attack_manifest_path, attack_matrix_manifest_path, threshold_report_path, baseline_manifest_path
 
 
 @pytest.mark.quick
-def test_internal_ablation_outputs_are_rebuildable_and_claim_safe(tmp_path: Path) -> None:
-    """内部消融产物应由上游 records 和 manifest 重建, 且不支持论文主张。"""
-    records_path, attack_manifest_path, attack_matrix_manifest_path, threshold_report_path, baseline_manifest_path = write_input_artifacts(tmp_path)
+def test_internal_ablation_outputs_are_rebuildable_and_claim_safe_for_proxy_inputs(tmp_path: Path) -> None:
+    """只有 probe proxy 输入时, 脚本应重建治理报告但不得支持论文主张。"""
+    records_path, attack_manifest_path, attack_matrix_manifest_path, threshold_report_path, baseline_manifest_path = write_input_artifacts(
+        tmp_path,
+        formal=False,
+    )
+
+    manifest = write_internal_ablation_outputs(
+        root=tmp_path,
+        attack_records_path=records_path,
+        attack_manifest_path=attack_manifest_path,
+        attack_matrix_manifest_path=attack_matrix_manifest_path,
+        threshold_report_path=threshold_report_path,
+        baseline_manifest_path=baseline_manifest_path,
+    )
+    output_dir = tmp_path / "outputs" / "internal_ablation_evidence"
+    records = [json.loads(line) for line in (output_dir / "ablation_records.jsonl").read_text(encoding="utf-8").splitlines()]
+    mechanism_rows = list(csv.DictReader((output_dir / "mechanism_ablation_table.csv").open(encoding="utf-8")))
+    claim_summary = json.loads((output_dir / "ablation_claim_summary.json").read_text(encoding="utf-8"))
+
+    assert manifest["artifact_id"] == "internal_ablation_evidence_manifest"
+    assert records == []
+    assert mechanism_rows == []
+    assert claim_summary["ablation_claim_input_record_count"] == 0
+    assert claim_summary["ablation_claim_excluded_record_count"] == 4
+    assert claim_summary["ablation_claim_gate_ready"] is False
+    assert claim_summary["supports_paper_claim"] is False
+
+
+@pytest.mark.quick
+def test_internal_ablation_outputs_build_standalone_claim_gate_from_formal_records(tmp_path: Path) -> None:
+    """正式输入应生成强消融 standalone claim gate, 且排除 probe proxy 记录。"""
+    records_path, attack_manifest_path, attack_matrix_manifest_path, threshold_report_path, baseline_manifest_path = write_input_artifacts(
+        tmp_path,
+        formal=True,
+    )
 
     manifest = write_internal_ablation_outputs(
         root=tmp_path,
@@ -224,13 +313,20 @@ def test_internal_ablation_outputs_are_rebuildable_and_claim_safe(tmp_path: Path
     records = [json.loads(line) for line in (output_dir / "ablation_records.jsonl").read_text(encoding="utf-8").splitlines()]
     mechanism_rows = list(csv.DictReader((output_dir / "mechanism_ablation_table.csv").open(encoding="utf-8")))
     delta_rows = list(csv.DictReader((output_dir / "method_pairwise_delta_table.csv").open(encoding="utf-8")))
+    family_rows = list(csv.DictReader((output_dir / "ablation_by_attack_family.csv").open(encoding="utf-8")))
+    claim_input_report = json.loads((output_dir / "ablation_claim_input_report.json").read_text(encoding="utf-8"))
     claim_summary = json.loads((output_dir / "ablation_claim_summary.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "internal_ablation_evidence_manifest"
-    assert len(records) == len(REQUIRED_ABLATIONS) * 4
+    assert len(records) == len(REQUIRED_ABLATIONS) * 6
     assert {row["ablation_id"] for row in mechanism_rows} == REQUIRED_ABLATIONS
-    assert any(row["ablation_id"] == "no_attestation" for row in delta_rows)
-    assert claim_summary["ablation_protocol_ready"] is True
-    assert claim_summary["mechanism_coverage_ready"] is True
-    assert claim_summary["supports_paper_claim"] is False
-    assert all(row["supports_paper_claim"] == "False" for row in mechanism_rows)
+    assert {row["metric_status"] for row in mechanism_rows} == {FORMAL_ABLATION_METRIC_STATUS}
+    assert {row["metric_status"] for row in family_rows} == {FORMAL_ABLATION_METRIC_STATUS}
+    assert {row["supports_paper_claim"] for row in mechanism_rows if row["ablation_id"] in CORE_CLAIM_ABLATIONS} == {"True"}
+    assert next(row for row in mechanism_rows if row["ablation_id"] == "geo_direct_positive_audit")["supports_paper_claim"] == "False"
+    assert any(row["ablation_id"] == "no_attestation" and row["supports_paper_claim"] == "True" for row in delta_rows)
+    assert claim_input_report["ablation_claim_excluded_proxy_record_count"] == 1
+    assert claim_summary["ablation_claim_gate_ready"] is True
+    assert claim_summary["strong_ablation_standalone_claim_ready"] is True
+    assert claim_summary["core_ablation_ready_count"] == len(CORE_CLAIM_ABLATIONS)
+    assert claim_summary["supports_paper_claim"] is True

@@ -145,7 +145,7 @@ def _row(
         "blocker_count": len(blocker_list),
         "primary_blocker": blocker_list[0] if blocker_list else "",
         "paper_claim_supported": paper_claim_supported,
-        "supports_paper_claim": False,
+        "supports_paper_claim": paper_claim_supported,
     }
 
 
@@ -158,6 +158,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     dataset_quality = bundle.dataset_quality_summary
     ablation = bundle.ablation_claim_summary
     full_ready = _yes(threshold.get("full_method_claim_ready")) and _yes(attack.get("full_method_claim_ready"))
+    ablation_claim_ready = _yes(ablation.get("ablation_claim_gate_ready")) and _yes(ablation.get("supports_paper_claim"))
     return [
         _row(
             "claim_raw_content_fixed_fpr_boundary",
@@ -207,9 +208,10 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "claim_internal_mechanism_necessity",
             "ablation",
             "语义路由、安全子空间、LF/HF 载体、几何恢复和 attestation 均为必要机制。",
-            "preview_only",
+            "paper_supported" if ablation_claim_ready else "preview_only",
             _source(bundle, "ablation_claim_summary", "outputs/internal_ablation_evidence/ablation_claim_summary.json"),
-            [] if _yes(ablation.get("mechanism_coverage_ready")) else ["mechanism_coverage_missing"],
+            [] if ablation_claim_ready else ["ablation_claim_gate_not_ready"],
+            paper_claim_supported=ablation_claim_ready,
         ),
         _row(
             "claim_quality_preservation_pair_metrics",
@@ -262,7 +264,7 @@ def _artifact_row(
         "paper_ready": paper_ready,
         "blocker_count": len(blocker_list),
         "primary_blocker": blocker_list[0] if blocker_list else "",
-        "supports_paper_claim": False,
+        "supports_paper_claim": paper_ready,
     }
 
 
@@ -274,6 +276,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
     baseline_small_sample = bundle.baseline_small_sample_summary
     dataset_quality = bundle.dataset_quality_summary
     ablation = bundle.ablation_claim_summary
+    ablation_claim_ready = _yes(ablation.get("ablation_claim_gate_ready")) and _yes(ablation.get("supports_paper_claim"))
     return [
         _artifact_row(
             "table_fixed_fpr_operating_points",
@@ -334,9 +337,9 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             "table",
             "内部机制消融表",
             [_source(bundle, "mechanism_ablation_table", "outputs/internal_ablation_evidence/mechanism_ablation_table.csv")],
-            "rebuildable_preview",
-            False,
-            [] if _yes(ablation.get("mechanism_coverage_ready")) else ["mechanism_coverage_missing"],
+            "rebuildable_paper_claim" if ablation_claim_ready else "rebuildable_preview",
+            ablation_claim_ready,
+            [] if ablation_claim_ready else ["ablation_claim_gate_not_ready"],
         ),
         _artifact_row(
             "table_quality_metrics",
@@ -357,6 +360,8 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
     """构造论文图数据 readiness 审计行。"""
     baseline = bundle.baseline_runtime_report
     attack = bundle.attack_manifest
+    ablation = bundle.ablation_claim_summary
+    ablation_claim_ready = _yes(ablation.get("ablation_claim_gate_ready")) and _yes(ablation.get("supports_paper_claim"))
     return [
         _artifact_row(
             "figure_score_distribution",
@@ -396,9 +401,9 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
             "figure_data",
             "内部消融 delta 图数据",
             [_source(bundle, "method_pairwise_delta_table", "outputs/internal_ablation_evidence/method_pairwise_delta_table.csv")],
-            "rebuildable_preview",
-            False,
-            ["record_level_proxy_boundary"],
+            "rebuildable_paper_claim" if ablation_claim_ready else "rebuildable_preview",
+            ablation_claim_ready,
+            [] if ablation_claim_ready else ["ablation_claim_gate_not_ready"],
         ),
         _artifact_row(
             "figure_baseline_comparison",

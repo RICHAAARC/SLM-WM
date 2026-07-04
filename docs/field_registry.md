@@ -758,6 +758,23 @@ Notebook 与 repository module 的跨边界数据
 | expected_failure_mode | claim | none | true | false | false | 消融配置预期暴露的失效模式。 |
 | ablation_count | metric | none | false | false | false | 内部消融配置数量。 |
 | ablation_record_count | metric | none | false | false | false | 内部消融 records 数量。 |
+| ablation_claim_input_record_count | metric | none | false | false | false | 进入正式 standalone ablation claim 的 formal attacked image watermark rescore 记录数量。 |
+| ablation_claim_total_source_record_count | metric | none | false | false | false | 内部消融输入筛选前的源攻击 records 数量。 |
+| ablation_claim_excluded_record_count | metric | none | false | false | false | 被正式消融 claim gate 排除的 probe、proxy、unsupported 或非声明 sample role 记录数量。 |
+| ablation_claim_excluded_proxy_record_count | metric | none | false | false | false | 被正式消融 claim gate 排除的 proxy 来源记录数量。 |
+| ablation_claim_excluded_record_examples | governance | none | false | false | false | 被正式消融 claim gate 排除的代表性记录示例。 |
+| ablation_claim_metric_status | governance | none | false | false | false | 正式消融 claim 使用的统一 metric_status 边界。 |
+| ablation_claim_formal_input_ready | governance | none | false | false | false | 内部消融 claim 输入是否全部来自正式 attacked image watermark rescore 记录。 |
+| ablation_claim_gate_ready | governance | none | false | false | false | 内部消融 standalone claim 是否通过正式门禁。 |
+| ablation_standalone_claim_ready | claim | none | false | false | false | 内部机制消融是否可作为独立论文主张证据。 |
+| strong_ablation_standalone_claim_ready | claim | none | false | false | false | 核心强消融集合是否具备独立论文主张证据。 |
+| core_ablation_claim_ready | governance | none | false | false | false | 核心机制消融集合是否全部由正式输入覆盖并支持 claim。 |
+| core_ablation_claim_ids | protocol | none | false | false | false | 进入强消融 standalone claim 的核心消融标识集合。 |
+| core_ablation_ready_count | metric | none | false | false | false | 已通过正式 claim gate 的核心消融数量。 |
+| core_ablation_required_count | metric | none | false | false | false | 强消融 standalone claim 要求覆盖的核心消融数量。 |
+| attack_formal_evidence_ready | governance | none | false | false | false | 消融 claim 依赖的攻击矩阵是否已完成真实图像级 formal evidence。 |
+| ablation_real_linkage_boundary | governance | none | false | false | false | 内部消融与真实攻击闭环之间的证据链接边界说明。 |
+| ablation_claim_input_filter | governance | none | false | false | false | 内部消融 claim 输入筛选报告的嵌套摘要。 |
 | mechanism_group_count | metric | none | false | false | false | 内部消融覆盖的机制组数量。 |
 | mechanism_groups | protocol | none | false | false | false | 内部消融覆盖的机制组集合。 |
 | degradation_chain | claim | none | false | false | false | 按退化强度排序的消融链条。 |

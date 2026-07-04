@@ -127,6 +127,33 @@ def make_boundary_ready_bundle() -> AuditInputBundle:
     )
 
 
+def make_ablation_claim_ready_bundle() -> AuditInputBundle:
+    """构造内部强消融 standalone claim 已闭合的审计输入。"""
+    bundle = make_boundary_ready_bundle()
+    ready_ablation_summary = {
+        **bundle.ablation_claim_summary,
+        "mechanism_coverage_ready": True,
+        "ablation_claim_gate_ready": True,
+        "strong_ablation_standalone_claim_ready": True,
+        "supports_paper_claim": True,
+    }
+    return AuditInputBundle(
+        threshold_report=bundle.threshold_report,
+        threshold_manifest=bundle.threshold_manifest,
+        attack_manifest=bundle.attack_manifest,
+        attack_matrix_manifest=bundle.attack_matrix_manifest,
+        baseline_manifest=bundle.baseline_manifest,
+        baseline_runtime_report=bundle.baseline_runtime_report,
+        baseline_small_sample_manifest=bundle.baseline_small_sample_manifest,
+        baseline_small_sample_summary=bundle.baseline_small_sample_summary,
+        dataset_quality_manifest=bundle.dataset_quality_manifest,
+        dataset_quality_summary=bundle.dataset_quality_summary,
+        ablation_manifest=bundle.ablation_manifest,
+        ablation_claim_summary=ready_ablation_summary,
+        source_path_map=bundle.source_path_map,
+    )
+
+
 @pytest.mark.quick
 def test_claim_audit_reports_current_paper_evidence_boundary() -> None:
     """审计表应明确区分工程可重建证据、预览证据和不可支持的论文主张。"""
@@ -195,6 +222,26 @@ def test_ready_fixed_fpr_and_rescue_boundary_removes_recalibration_gap() -> None
     assert {"gap_baseline_results", "gap_full_main_sample_scale", "gap_dataset_level_fid_kid"}.issubset(gap_ids)
     assert "完整方法 fixed-FPR 重校准" not in blocker_report["recommended_next_action"]
     assert blocker_report["submission_ready"] is False
+
+
+@pytest.mark.quick
+def test_ablation_claim_gate_marks_ablation_claim_artifacts_ready() -> None:
+    """内部强消融门禁 ready 后, claim、表格和图数据应显式支持 standalone claim。"""
+    bundle = make_ablation_claim_ready_bundle()
+    claim_rows = build_claim_audit_rows(bundle)
+    table_rows = build_table_readiness_rows(bundle)
+    figure_rows = build_figure_readiness_rows(bundle)
+
+    claims_by_id = {row["claim_id"]: row for row in claim_rows}
+    table_by_id = {row["audit_item_id"]: row for row in table_rows}
+    figure_by_id = {row["audit_item_id"]: row for row in figure_rows}
+
+    assert claims_by_id["claim_internal_mechanism_necessity"]["claim_decision"] == "paper_supported"
+    assert claims_by_id["claim_internal_mechanism_necessity"]["supports_paper_claim"] is True
+    assert table_by_id["table_internal_ablation"]["paper_ready"] is True
+    assert table_by_id["table_internal_ablation"]["supports_paper_claim"] is True
+    assert figure_by_id["figure_ablation_delta"]["paper_ready"] is True
+    assert figure_by_id["figure_ablation_delta"]["supports_paper_claim"] is True
 
 
 def write_json(path: Path, value: dict) -> None:

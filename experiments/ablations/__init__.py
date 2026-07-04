@@ -2,20 +2,28 @@
 
 from experiments.ablations.mechanisms import (
     AblationSpec,
+    CORE_ABLATION_CLAIM_IDS,
+    FORMAL_ABLATION_METRIC_STATUS,
     aggregate_ablation_by_attack_family,
     aggregate_mechanism_ablation_table,
+    build_ablation_claim_input_report,
     build_ablation_claim_summary,
     build_ablation_records,
     build_pairwise_delta_rows,
     default_ablation_specs,
+    filter_ablation_claim_input_records,
 )
 
 __all__ = [
     "AblationSpec",
+    "CORE_ABLATION_CLAIM_IDS",
+    "FORMAL_ABLATION_METRIC_STATUS",
     "aggregate_ablation_by_attack_family",
     "aggregate_mechanism_ablation_table",
+    "build_ablation_claim_input_report",
     "build_ablation_claim_summary",
     "build_ablation_records",
     "build_pairwise_delta_rows",
     "default_ablation_specs",
+    "filter_ablation_claim_input_records",
 ]
