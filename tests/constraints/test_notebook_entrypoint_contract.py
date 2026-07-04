@@ -65,6 +65,7 @@ NOTEBOOK_PATHS = (
     SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
     PILOT_PAPER_RESULT_CLOSURE_NOTEBOOK_PATH,
 )
+PAPER_RUN_NOTEBOOK_PATHS = NOTEBOOK_PATHS
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
 COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
     "%pip install -q --upgrade diffusers transformers accelerate safetensors sentencepiece protobuf huggingface_hub"
@@ -104,6 +105,27 @@ def assert_uses_paper_run_environment_helper(joined_source: str, workflow_name: 
     assert "target_fpr_by_run" not in joined_source
     assert "drive_result_root = f'/content/drive/MyDrive/SLM/{paper_run_name}_results'" not in joined_source
     assert "paper_run_target_fpr_token" not in joined_source
+
+
+def assert_uses_unified_dependency_report(joined_source: str, dependency_profile_name: str) -> None:
+    """Notebook 应通过统一依赖诊断 helper 生成环境报告。"""
+
+    assert "paper_workflow.colab_utils.dependency_check" in joined_source
+    assert "build_notebook_dependency_report" in joined_source
+    assert f'build_notebook_dependency_report("{dependency_profile_name}")' in joined_source
+    assert "def package_version_or_missing" not in joined_source
+    assert "dependency_report = {" not in joined_source
+
+
+def assert_uses_unified_archive_entrypoint(joined_source: str, workflow_name: str) -> None:
+    """Notebook 应通过统一 archive 打包入口落盘。"""
+
+    assert "paper_workflow.colab_utils.notebook_entrypoint" in joined_source
+    assert "package_workflow_outputs" in joined_source
+    assert f'workflow_name="{workflow_name}"' in joined_source
+    assert "def resolve_short_commit" not in joined_source
+    assert "datetime.now(timezone.utc)" not in joined_source
+    assert "archive_name=archive_name" not in joined_source
 
 
 @pytest.mark.constraint
@@ -166,6 +188,21 @@ def test_colab_notebooks_have_no_stored_outputs() -> None:
 
 
 @pytest.mark.constraint
+def test_paper_run_notebooks_keep_run_name_as_first_line() -> None:
+    """正式运行入口应只通过第一行切换 pilot_paper / full_paper。"""
+
+    for notebook_path in PAPER_RUN_NOTEBOOK_PATHS:
+        payload = json.loads(notebook_path.read_text(encoding="utf-8"))
+        first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+        first_non_empty_line = next(
+            line.strip()
+            for line in "".join(first_code_cell.get("source", [])).splitlines()
+            if line.strip()
+        )
+        assert first_non_empty_line == 'SLM_WM_PAPER_RUN_NAME = "pilot_paper"'
+
+
+@pytest.mark.constraint
 def test_colab_runtime_constraints_document_known_working_environment() -> None:
     """Colab 依赖约束记录应保存已验证组合, 但不能强制安装平台提供的 torch."""
     text = COLAB_RUNTIME_CONSTRAINTS_PATH.read_text(encoding="utf-8")
@@ -195,18 +232,15 @@ def test_colab_notebook_delegates_runtime_and_method_precheck_logic_to_helpers()
 
     assert "paper_workflow.colab_utils.sd_runtime_cold_start" in joined_source
     assert "run_default_model_plan" in joined_source
-    assert "package_probe_outputs" in joined_source
     assert "paper_workflow.colab_utils.minimal_latent_injection" in joined_source
     assert "run_default_injection_plan" in joined_source
-    assert "package_injection_outputs" in joined_source
+    assert "paper_workflow.colab_utils.notebook_entrypoint" in joined_source
+    assert "package_runtime_method_precheck_outputs" in joined_source
+    assert_uses_unified_dependency_report(joined_source, "sd35_runtime")
     assert "SLM_WM_RUNTIME_MODEL_SELECTION', 'auto'" in joined_source
     assert "SLM_WM_INJECTION_MODEL_SELECTION', 'auto'" in joined_source
     assert "/content/drive/MyDrive/SLM/runtime_method_precheck" in joined_source
-    assert "real_sd_runtime_probe_package_" in joined_source
-    assert "minimal_latent_injection_package_" in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
-    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert "--force-reinstall" not in joined_source
     assert "numpy pillow" not in joined_source
@@ -243,14 +277,12 @@ def test_colab_notebook_delegates_attention_geometry_logic_to_helper() -> None:
 
     assert "paper_workflow.colab_utils.attention_geometry_capture" in joined_source
     assert "run_default_attention_geometry_plan" in joined_source
-    assert "package_attention_geometry_outputs" in joined_source
     assert_uses_paper_run_environment_helper(joined_source, "attention_geometry")
+    assert_uses_unified_dependency_report(joined_source, "sd35_runtime")
+    assert_uses_unified_archive_entrypoint(joined_source, "attention_geometry")
     assert 'SLM_WM_PAPER_RUN_NAME = "pilot_paper"' in joined_source
     assert "drive.mount('/content/drive')" in first_code_source
     assert "attention_geometry_ready" in joined_source
-    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
-    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
-    assert "archive_name=archive_name" in joined_source
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert "--force-reinstall" not in joined_source
     assert "numpy pillow" not in joined_source
@@ -269,12 +301,10 @@ def test_colab_notebook_delegates_attention_latent_injection_logic_to_helper() -
 
     assert "paper_workflow.colab_utils.attention_latent_injection" in joined_source
     assert "run_default_attention_latent_injection_plan" in joined_source
-    assert "package_attention_latent_injection_outputs" in joined_source
     assert_uses_paper_run_environment_helper(joined_source, "attention_latent_injection")
+    assert_uses_unified_dependency_report(joined_source, "sd35_runtime")
+    assert_uses_unified_archive_entrypoint(joined_source, "attention_latent_injection")
     assert "drive.mount('/content/drive')" in first_code_source
-    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
-    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
-    assert "archive_name=archive_name" in joined_source
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert "--force-reinstall" not in joined_source
     assert "numpy pillow" not in joined_source
@@ -293,14 +323,12 @@ def test_colab_notebook_delegates_aligned_rescoring_logic_to_helper() -> None:
 
     assert "paper_workflow.colab_utils.aligned_rescoring" in joined_source
     assert "run_default_aligned_rescoring_plan" in joined_source
-    assert "package_aligned_rescoring_outputs" in joined_source
     assert_uses_paper_run_environment_helper(joined_source, "aligned_rescoring")
+    assert_uses_unified_dependency_report(joined_source, "aligned_rescoring")
+    assert_uses_unified_archive_entrypoint(joined_source, "aligned_rescoring")
     assert "drive.mount('/content/drive')" in first_code_source
     assert "real_aligned_rescore_count" in joined_source
     assert "perceptual_metrics_ready" in joined_source
-    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
-    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
-    assert "archive_name=archive_name" in joined_source
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert PAIR_PERCEPTUAL_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert "--force-reinstall" not in joined_source
@@ -320,8 +348,9 @@ def test_colab_notebook_delegates_threshold_calibration_logic_to_helper() -> Non
 
     assert "paper_workflow.colab_utils.threshold_calibration" in joined_source
     assert "run_default_threshold_calibration_from_drive_plan" in joined_source
-    assert "package_threshold_calibration_outputs" in joined_source
     assert_uses_paper_run_environment_helper(joined_source, "threshold_calibration")
+    assert_uses_unified_dependency_report(joined_source, "threshold_calibration")
+    assert_uses_unified_archive_entrypoint(joined_source, "threshold_calibration")
     assert "drive.mount('/content/drive')" in first_code_source
     assert "threshold_calibration_ready" in joined_source
     assert "real_score_calibration_ready" in joined_source
@@ -330,9 +359,6 @@ def test_colab_notebook_delegates_threshold_calibration_logic_to_helper() -> Non
     assert "max_content_records=os.environ['SLM_WM_THRESHOLD_MAX_CONTENT_RECORDS']" in joined_source
     assert "minimum_clean_negative_count=os.environ['SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT']" in joined_source
     assert "geometric_rescue_ready" in joined_source
-    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
-    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
-    assert "archive_name=archive_name" in joined_source
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert "--force-reinstall" not in joined_source
     assert "numpy pillow" not in joined_source
@@ -351,17 +377,15 @@ def test_colab_notebook_delegates_real_attack_evaluation_logic_to_helper() -> No
 
     assert "paper_workflow.colab_utils.real_attack_evaluation" in joined_source
     assert "run_default_real_attack_evaluation_from_drive_plan" in joined_source
-    assert "package_real_attack_evaluation_outputs" in joined_source
     assert_uses_paper_run_environment_helper(joined_source, "real_attack_evaluation")
+    assert_uses_unified_dependency_report(joined_source, "real_attack_evaluation")
+    assert_uses_unified_archive_entrypoint(joined_source, "real_attack_evaluation")
     assert "drive.mount('/content/drive')" in first_code_source
     assert "aligned_rescoring_package_*.zip" in joined_source
     assert "real_attacked_image_closed_loop_ready" in joined_source
     assert "regeneration_attack_gpu_validation_ready" in joined_source
     assert "attack_detection_rerun_ready" in joined_source
     assert "formal_attack_detection_ready" in joined_source
-    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
-    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
-    assert "archive_name=archive_name" in joined_source
     assert COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND in joined_source
     assert "--force-reinstall" not in joined_source
     assert "numpy pillow" not in joined_source
@@ -380,14 +404,12 @@ def test_colab_notebook_delegates_conventional_geometric_attack_logic_to_helper(
 
     assert "paper_workflow.colab_utils.conventional_geometric_attack_evaluation" in joined_source
     assert "run_default_conventional_geometric_attack_evaluation_from_drive_plan" in joined_source
-    assert "package_conventional_geometric_attack_evaluation_outputs" in joined_source
     assert_uses_paper_run_environment_helper(joined_source, "conventional_geometric_attack_evaluation")
+    assert_uses_unified_dependency_report(joined_source, "conventional_geometric_attack")
+    assert_uses_unified_archive_entrypoint(joined_source, "conventional_geometric_attack_evaluation")
     assert "drive.mount('/content/drive')" in first_code_source
     assert "real_attacked_image_closed_loop_ready" in joined_source
     assert "formal_attack_detection_ready" in joined_source
-    assert "datetime.now(timezone.utc).strftime" in joined_source
-    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
-    assert "archive_name=archive_name" in joined_source
 
 
 @pytest.mark.constraint
@@ -409,10 +431,10 @@ def test_single_external_baseline_notebooks_select_one_method_and_delegate_to_he
         assert "drive.mount('/content/drive')" in first_code_source
         assert f'SLM_WM_PRIMARY_BASELINE_METHODS = "{baseline_id}"' in joined_source
         assert_uses_paper_run_environment_helper(joined_source, "external_baseline_method_faithful", baseline_id)
+        assert_uses_unified_dependency_report(joined_source, "external_baseline_method_faithful")
+        assert_uses_unified_archive_entrypoint(joined_source, "external_baseline_method_faithful")
         assert "run_default_external_baseline_method_faithful_plan" in joined_source
-        assert "package_external_baseline_method_faithful_outputs" in joined_source
         assert "split_observations" in joined_source
-        assert "external_baseline_method_faithful_package_" in joined_source
         assert "img2img_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
         assert "ddim_inversion_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
         assert "sdedit_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
@@ -435,17 +457,15 @@ def test_colab_notebook_delegates_dataset_level_quality_logic_to_helper() -> Non
 
     assert "paper_workflow.colab_utils.dataset_level_quality" in joined_source
     assert "run_default_dataset_level_quality_from_drive_plan" in joined_source
-    assert "package_dataset_level_quality_outputs" in joined_source
     assert_uses_paper_run_environment_helper(joined_source, "dataset_level_quality")
+    assert_uses_unified_dependency_report(joined_source, "dataset_level_quality")
+    assert_uses_unified_archive_entrypoint(joined_source, "dataset_level_quality")
     assert "drive.mount('/content/drive')" in first_code_source
     assert "formal_feature_backend_ready" in joined_source
     assert "formal_fid_kid_ready" in joined_source
     assert "dataset_level_quality_summary['formal_fid_kid_ready'] is True" in joined_source
     assert "dataset_level_quality_summary['supports_paper_claim'] is False" in joined_source
     assert "dataset_level_quality_summary['formal_fid_kid_ready'] is False" not in joined_source
-    assert "datetime.now(timezone.utc).strftime('%Y%m%dt%H%M%sz')" in joined_source
-    assert "['git', 'rev-parse', '--short', 'HEAD']" in joined_source
-    assert "archive_name=archive_name" in joined_source
     assert "--force-reinstall" not in joined_source
     assert "numpy pillow" not in joined_source
     assert "del sys.modules" not in joined_source
@@ -460,21 +480,17 @@ def test_official_baseline_notebooks_use_paper_run_configuration() -> None:
     expectations = {
         T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH: (
             'workflow_name="official_reference_t2smark"',
-            "external_baseline_official_reference_package_t2smark_",
         ),
         TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
             'workflow_name="official_reference_tree_ring"',
-            "external_baseline_official_reference_package_tree_ring_",
             "SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT",
         ),
         GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
             'workflow_name="official_reference_gaussian_shading"',
-            "external_baseline_official_reference_package_gaussian_shading_",
             "SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT",
         ),
         SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH: (
             'workflow_name="official_reference_shallow_diffuse"',
-            "external_baseline_official_reference_package_shallow_diffuse_",
             "SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT",
         ),
     }
@@ -487,6 +503,10 @@ def test_official_baseline_notebooks_use_paper_run_configuration() -> None:
         assert "drive.mount('/content/drive')" in first_code_source
         assert "paper_workflow.colab_utils.paper_run_environment" in joined_source
         assert "configure_paper_run_environment" in joined_source
+        workflow_name = next(text for text in required_texts if text.startswith('workflow_name="')).split('"')[1]
+        profile_name = "official_reference_t2smark" if "t2smark" in workflow_name else "official_reference_light"
+        assert_uses_unified_dependency_report(joined_source, profile_name)
+        assert_uses_unified_archive_entrypoint(joined_source, workflow_name)
         assert "默认样本数为 5" not in joined_source
         assert "sample_count'] == 5" not in joined_source
         for required_text in required_texts:

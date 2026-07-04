@@ -18,6 +18,67 @@ WORKFLOW_DEPENDENCIES = (
     "protobuf",
     "huggingface_hub",
 )
+DEPENDENCY_IMPORT_NAMES = {
+    "protobuf": "google.protobuf",
+    "pillow": "PIL",
+    "open_clip_torch": "open_clip",
+    "scikit-learn": "sklearn",
+}
+NOTEBOOK_DEPENDENCY_PROFILES = {
+    "sd35_runtime": WORKFLOW_DEPENDENCIES
+    + (
+        "numpy",
+        "tokenizers",
+        "scipy",
+        "torchvision",
+    ),
+    "aligned_rescoring": WORKFLOW_DEPENDENCIES
+    + (
+        "numpy",
+        "tokenizers",
+        "lpips",
+        "torchvision",
+        "scipy",
+    ),
+    "threshold_calibration": WORKFLOW_DEPENDENCIES
+    + (
+        "pillow",
+    ),
+    "real_attack_evaluation": WORKFLOW_DEPENDENCIES
+    + (
+        "pillow",
+    ),
+    "conventional_geometric_attack": (
+        "pillow",
+        "numpy",
+        "tqdm",
+    ),
+    "dataset_level_quality": (
+        "torch",
+        "torchvision",
+        "scipy",
+        "pillow",
+    ),
+    "external_baseline_method_faithful": WORKFLOW_DEPENDENCIES
+    + (
+        "open_clip_torch",
+        "scikit-learn",
+        "scipy",
+        "pandas",
+        "datasets",
+        "tqdm",
+    ),
+    "official_reference_light": (
+        "packaging",
+        "huggingface_hub",
+        "torch",
+    ),
+    "official_reference_t2smark": WORKFLOW_DEPENDENCIES
+    + (
+        "open_clip_torch",
+        "torch",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -43,7 +104,7 @@ def read_dependency_version(dependency_name: str) -> str:
 
 def inspect_dependency(dependency_name: str) -> DependencyStatus:
     """检查单个依赖是否存在。"""
-    import_name = "google.protobuf" if dependency_name == "protobuf" else dependency_name
+    import_name = DEPENDENCY_IMPORT_NAMES.get(dependency_name, dependency_name)
     return DependencyStatus(
         dependency_name=dependency_name,
         module_available=find_spec(import_name) is not None,
@@ -69,4 +130,21 @@ def build_dependency_report(
         },
         "dependencies": [status.to_dict() for status in statuses],
         "supports_paper_claim": False,
+    }
+
+
+def build_notebook_dependency_report(profile_name: str) -> dict[str, Any]:
+    """按 Notebook 入口职责生成统一依赖诊断报告。
+
+    Notebook 只传入语义化 profile 名称, 具体依赖清单集中维护在本模块。
+    这样后续依赖增删只需修改 repository helper, 不需要同步修改多个
+    Colab Notebook 入口。
+    """
+
+    if profile_name not in NOTEBOOK_DEPENDENCY_PROFILES:
+        raise ValueError(f"unknown_notebook_dependency_profile:{profile_name}")
+    report = build_dependency_report(NOTEBOOK_DEPENDENCY_PROFILES[profile_name])
+    return {
+        **report,
+        "dependency_profile_name": profile_name,
     }

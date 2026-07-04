@@ -69,6 +69,14 @@ method-faithful 入口统一把压缩包镜像到当前论文运行层级的 Goo
 
 `pilot_paper` 与 `full_paper` 应共享同一批方法主流程和 baseline 入口, 只通过配置切换 prompt split、样本量、随机种子、Drive 输出根目录、攻击覆盖范围、目标 FPR 和 bootstrap 次数。不得为 `pilot_paper` 和 `full_paper` 维护两套互相分叉的 Notebook 逻辑。`pilot_paper` 是受样本规模约束的论文主张层级, 不是仅用于链路调试的临时层级。
 
+除诊断入口外, 正式运行 Notebook 的第一个代码行固定为:
+
+```python
+SLM_WM_PAPER_RUN_NAME = "pilot_paper"
+```
+
+切换到完整论文运行层级时只修改这一行。依赖诊断由 `paper_workflow.colab_utils.dependency_check.build_notebook_dependency_report` 统一执行, archive 文件名和 Drive 镜像打包由 `paper_workflow.colab_utils.notebook_entrypoint.package_workflow_outputs` 统一执行。Notebook 不再维护单独的短提交读取、UTC 后缀拼接或具体 `package_*_outputs` 调用, 以避免项目代码调试时同步修改多个 Notebook。
+
 诊断入口不参与 `pilot_paper` 或 `full_paper` 的正式统计产出。它们只用于在 Colab 环境、模型依赖或 Drive 持久化出问题时进行预检。
 
 ## Colab `pilot_paper` 重跑顺序
