@@ -36,7 +36,7 @@ SLM_WM_PRIMARY_BASELINE_METHODS = "tree_ring"
 - `aligned_rescoring_run.ipynb`: 对注入结果进行 aligned rescoring, 生成检测重打分记录和配对感知质量指标。`pilot_paper` 默认使用该层级全部 prompt, 当前配置为600个; `full_paper` 当前配置为6000个。
 - `threshold_calibration_run.ipynb`: 按当前运行层级的 fixed-FPR 协议校准阈值, 并记录 geometric rescue 边界。`pilot_paper` 使用 FPR=0.01, `full_paper` 使用 FPR=0.001。
 - `real_attack_evaluation_run.ipynb`: 生成或导入真实 attacked image, 执行正式攻击后检测, 记录 source / attacked image digest 和真实 GPU 攻击覆盖状态。该入口负责再扩散、全局编辑、局部编辑、视觉改写和自适应去水印类攻击。处理数量由当前论文运行层级的样本数派生。
-- `conventional_geometric_attack_evaluation_run.ipynb`: 使用 CPU 图像算子生成常规失真、几何变换与 photometric attacked image, 写出 source / attacked image digest、formal detection records 和总体进度条。该入口不运行 diffusion 模型, 负责补齐 `standard_distortion`、`geometric_transform` 与 `photometric_distortion_attack` 的真实图像级攻击闭环。
+- `conventional_geometric_attack_evaluation_run.ipynb`: 使用 CPU / PIL 图像算子生成常规失真、几何变换与 photometric attacked image, 写出 source / attacked image digest、formal detection records 和总体进度条。正式检测口径需要对 attacked image 执行 SD3.5 detector / VAE latent rescore, 因此论文运行应使用 Colab GPU。该入口负责补齐 `standard_distortion`、`geometric_transform` 与 `photometric_distortion_attack` 的真实图像级攻击闭环。
 - `dataset_level_quality_run.ipynb`: 从受治理图像集合导入 dataset-level 质量特征, 计算或登记 FID / KID 等集合级指标。`pilot_paper` 默认使用100作为 dataset-level 正式特征最小样本阈值, 其结果只允许支撑 `pilot_paper` 样本规模内的主张, 不得提升为 `full_paper` 主张。
 
 ### 外部 baseline 入口
@@ -79,28 +79,47 @@ SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 
 诊断入口不参与 `pilot_paper` 或 `full_paper` 的正式统计产出。它们只用于在 Colab 环境、模型依赖或 Drive 持久化出问题时进行预检。
 
+## Notebook 运行依赖与并行关系
+
+下表只描述 Notebook 入口之间的运行依赖。具体配置、路径、打包命名和依赖诊断仍由 `paper_workflow/colab_utils/` 与 `scripts/` 统一实现, Notebook 不承载正式算法或统计逻辑。
+
+| Notebook 入口 | GPU 要求 | 必须依赖的前序结果包 | 并行关系 | 说明 |
+|---|---|---|---|---|
+| `colab_drive_cold_start_smoke.ipynb` | 不需要 | 无 | 可独立运行 | 仅检查 Drive 挂载、仓库拉取、结果包镜像和清单重载。 |
+| `runtime_method_precheck_run.ipynb` | 需要 | 无 | 可独立运行 | 检查 SD3.5 Medium 加载、真实 latent trajectory 和最小 latent injection 闭环, 不进入正式统计。 |
+| `attention_geometry_capture_run.ipynb` | 需要 | 无 | 主方法链路起点 | 生成后续注入与重打分需要的 attention geometry 包。 |
+| `attention_latent_injection_run.ipynb` | 需要 | `attention_geometry` | 不能早于 `attention_geometry_capture_run.ipynb` | 读取 attention geometry, 执行 attention-relative latent update。 |
+| `aligned_rescoring_run.ipynb` | 需要 | `attention_geometry`, `attention_latent_injection` | 不能早于主方法注入结果 | 生成正式 fixed-FPR 校准与攻击检测需要的 real aligned scores 和图像。 |
+| `threshold_calibration_run.ipynb` | 通常不需要; 可复用 GPU 会话 | `attention_latent_injection`, `aligned_rescoring` | 不能早于 aligned rescoring | 校准 fixed-FPR 阈值, 记录 rescue 边界和统计口径。 |
+| `real_attack_evaluation_run.ipynb` | 需要 | `aligned_rescoring`, `threshold_calibration` | 可与 `conventional_geometric_attack_evaluation_run.ipynb` 并行 | 覆盖再扩散、再生成、全局编辑、局部编辑、视觉改写和自适应去水印类真实攻击闭环。 |
+| `conventional_geometric_attack_evaluation_run.ipynb` | 需要 | `aligned_rescoring`, `threshold_calibration` | 可与 `real_attack_evaluation_run.ipynb` 并行 | 攻击图像生成主要是 CPU / PIL 算子, 但正式 attacked image latent rescore 需要 SD3.5 detector / VAE pipeline, 因此论文运行使用 GPU。 |
+| `dataset_level_quality_run.ipynb` | 建议使用 GPU | `aligned_rescoring`, `real_attack_evaluation`, `conventional_geometric_attack_evaluation` | 必须等待攻击产物齐备 | 计算或导入 dataset-level FID / KID 特征, 不替代攻击检测。 |
+| `external_baseline_tree_ring_run.ipynb` | 需要 | 无; 共享当前 prompt 与配置 | 可与其他 external baseline 入口并行 | 生成 Tree-Ring method-faithful SD3.5 观测记录。 |
+| `external_baseline_gaussian_shading_run.ipynb` | 需要 | 无; 共享当前 prompt 与配置 | 可与其他 external baseline 入口并行 | 生成 Gaussian Shading method-faithful SD3.5 观测记录。 |
+| `external_baseline_shallow_diffuse_run.ipynb` | 需要 | 无; 共享当前 prompt 与配置 | 可与其他 external baseline 入口并行 | 生成 Shallow Diffuse method-faithful SD3.5 观测记录。 |
+| `external_baseline_t2smark_run.ipynb` | 需要 | 无; 共享当前 prompt 与配置 | 可与其他 external baseline 入口并行 | 生成 T2SMark method-faithful SD3.5 观测记录。 |
+| `official_reference_t2smark_run.ipynb` | 需要 | 无; 共享当前 prompt 与配置 | 可与其他 official reference 入口并行 | 生成 T2SMark 官方路径 governed import 候选记录。 |
+| `official_reference_tree_ring_run.ipynb` | 建议使用 GPU | 无; 共享当前 prompt 与配置 | 可与其他 official reference 入口并行 | 生成 Tree-Ring 官方原始环境参考记录。 |
+| `official_reference_gaussian_shading_run.ipynb` | 建议使用 GPU | 无; 共享当前 prompt 与配置 | 可与其他 official reference 入口并行 | 生成 Gaussian Shading 官方原始环境参考记录。 |
+| `official_reference_shallow_diffuse_run.ipynb` | 建议使用 GPU | 无; 共享当前 prompt 与配置 | 可与其他 official reference 入口并行 | 生成 Shallow Diffuse 官方原始环境参考记录。 |
+| `pilot_paper_result_closure_run.ipynb` | 不需要 | 所有需要纳入完整结果包的前序结果包 | 必须最后运行 | 物化 Drive 结果包, 重建 attack matrix、baseline import、ablation、fixed-FPR common protocol 和完整结果包。 |
+
+
 ## Colab `pilot_paper` 重跑顺序
 
 建议在清理 `/content/drive/MyDrive/SLM/pilot_paper_results/` 后按以下顺序重跑。该顺序只依赖 Google Drive 结果包, 不要求本地 `outputs/` 中存在历史文件。
 
 1. 可选诊断: `colab_drive_cold_start_smoke.ipynb`。
 2. 可选诊断: `runtime_method_precheck_run.ipynb`。
-3. 方法主流程: `attention_geometry_capture_run.ipynb`。
-4. 方法主流程: `attention_latent_injection_run.ipynb`。
-5. 方法主流程: `aligned_rescoring_run.ipynb`。
+3. 主方法串行链路: `attention_geometry_capture_run.ipynb`。
+4. 主方法串行链路: `attention_latent_injection_run.ipynb`。
+5. 主方法串行链路: `aligned_rescoring_run.ipynb`。
 6. 阈值与 rescue 边界: `threshold_calibration_run.ipynb`。
-7. 再扩散真实攻击闭环: `real_attack_evaluation_run.ipynb`。
-8. 常规失真与几何变换真实攻击闭环: `conventional_geometric_attack_evaluation_run.ipynb`。
-9. 数据集级质量: `dataset_level_quality_run.ipynb`。
-10. 主表 baseline: `external_baseline_tree_ring_run.ipynb`。
-11. 主表 baseline: `external_baseline_gaussian_shading_run.ipynb`。
-12. 主表 baseline: `external_baseline_shallow_diffuse_run.ipynb`。
-13. 主表 baseline: `external_baseline_t2smark_run.ipynb`。
-14. 官方复现: `official_reference_t2smark_run.ipynb`。
-15. 官方复现: `official_reference_tree_ring_run.ipynb`。
-16. 官方复现: `official_reference_gaussian_shading_run.ipynb`。
-17. 官方复现: `official_reference_shallow_diffuse_run.ipynb`。
-18. 结果闭合: `pilot_paper_result_closure_run.ipynb`。
+7. 攻击闭环并行批次: `real_attack_evaluation_run.ipynb` 与 `conventional_geometric_attack_evaluation_run.ipynb` 可在两个 Colab 会话中并行运行。
+8. 数据集级质量: `dataset_level_quality_run.ipynb`, 必须等待两个攻击闭环入口都完成。
+9. method-faithful external baseline 并行批次: `external_baseline_tree_ring_run.ipynb`、`external_baseline_gaussian_shading_run.ipynb`、`external_baseline_shallow_diffuse_run.ipynb`、`external_baseline_t2smark_run.ipynb` 可分别在独立 Colab 会话中并行运行。
+10. official reference 并行批次: `official_reference_t2smark_run.ipynb`、`official_reference_tree_ring_run.ipynb`、`official_reference_gaussian_shading_run.ipynb`、`official_reference_shallow_diffuse_run.ipynb` 可分别在独立 Colab 会话中并行运行。
+11. 结果闭合: `pilot_paper_result_closure_run.ipynb`, 必须等待本次要纳入完整结果包的所有前序结果包写入 Drive 后再运行。
 
 ## 结果闭合等价命令
 
