@@ -437,6 +437,8 @@ def test_single_external_baseline_notebooks_select_one_method_and_delegate_to_he
         assert_uses_unified_archive_entrypoint(joined_source, "external_baseline_method_faithful")
         assert "run_default_external_baseline_method_faithful_plan" in joined_source
         assert "split_observations" in joined_source
+        assert "paper_run_expected_sample_count" not in joined_source
+        assert "expected_sample_count = int(os.environ['SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT'])" in joined_source
         assert "img2img_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
         assert "ddim_inversion_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
         assert "sdedit_regeneration" in FORMAL_IMAGE_ATTACK_FAMILIES
