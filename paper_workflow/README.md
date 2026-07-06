@@ -81,6 +81,74 @@ SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 
 诊断入口不参与 `pilot_paper` 或 `full_paper` 的正式统计产出。它们只用于在 Colab 环境、模型依赖或 Drive 持久化出问题时进行预检。
 
+## GPU 服务器命令行入口
+
+`scripts/run_gpu_server_workflow.py` 和 `scripts/run_gpu_server_result_closure.py`
+提供独立于 Colab Notebook 的服务器运行路径。该路径不挂载 Google Drive, 不调用
+`google.colab`, 也不会修改现有 Notebook 的 `/content/drive/MyDrive/SLM/...`
+落盘流程。服务器脚本只在当前进程内把 `SLM_WM_DRIVE_RESULT_ROOT` 指向本地
+结果根目录, 然后复用已有 repository helper 生成受治理结果包。
+
+典型四服务器布局如下:
+
+```text
+计算服务器 A: 主方法 workflow
+计算服务器 B: method-faithful external baseline
+计算服务器 C: official reference
+汇总服务器 D: result closure
+```
+
+主方法服务器示例:
+
+```bash
+export HF_TOKEN=<your-token>
+python scripts/run_gpu_server_workflow.py \
+  --workflow attention_geometry \
+  --paper-run-name full_paper \
+  --result-root /data/slm_exchange/full_paper_results
+
+python scripts/run_gpu_server_workflow.py \
+  --workflow attention_latent_injection \
+  --paper-run-name full_paper \
+  --result-root /data/slm_exchange/full_paper_results
+
+python scripts/run_gpu_server_workflow.py \
+  --workflow aligned_rescoring \
+  --paper-run-name full_paper \
+  --result-root /data/slm_exchange/full_paper_results
+```
+
+method-faithful baseline 服务器示例:
+
+```bash
+python scripts/run_gpu_server_workflow.py \
+  --workflow external_baseline_tree_ring \
+  --paper-run-name full_paper \
+  --result-root /data/slm_exchange/full_paper_results
+```
+
+official reference 服务器示例:
+
+```bash
+python scripts/run_gpu_server_workflow.py \
+  --workflow official_reference_tree_ring \
+  --paper-run-name full_paper \
+  --result-root /data/slm_exchange/full_paper_results
+```
+
+汇总服务器示例:
+
+```bash
+python scripts/run_gpu_server_result_closure.py \
+  --paper-run-name full_paper \
+  --package-search-root /data/slm_exchange/full_paper_results \
+  --complete-output-dir /data/slm_exchange/full_paper_results/complete_result_package
+```
+
+每个服务器 workflow 成功打包后会在本地结果根目录写出 zip、`.sha256`
+sidecar 和 `.ready.json` 清单。汇总服务器应只消费已经完成上传并通过摘要校验的
+zip 包, 避免读取半上传文件。
+
 ## Notebook 运行依赖与并行关系
 
 下表只描述 Notebook 入口之间的运行依赖。具体配置、路径、打包命名和依赖诊断仍由 `paper_workflow/colab_utils/` 与 `scripts/` 统一实现, Notebook 不承载正式算法或统计逻辑。
