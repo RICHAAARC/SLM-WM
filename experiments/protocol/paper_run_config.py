@@ -15,6 +15,7 @@ from typing import Any
 from experiments.protocol.prompts import PROMPT_FILES, read_prompt_file
 
 PILOT_PAPER_RUN_NAME = "pilot_paper"
+PROBE_PAPER_RUN_NAME = "probe_paper"
 FULL_PAPER_RUN_NAME = "full_paper"
 DEFAULT_TARGET_FPR = 0.01
 DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT = 100
@@ -39,6 +40,15 @@ SHARED_METHOD_SETTING_FIELDS = (
 )
 
 RUN_DEFAULTS: dict[str, dict[str, Any]] = {
+    PROBE_PAPER_RUN_NAME: {
+        "prompt_set": PROBE_PAPER_RUN_NAME,
+        "prompt_file": PROMPT_FILES[PROBE_PAPER_RUN_NAME].as_posix(),
+        "fallback_prompt_count": 60,
+        "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/probe_paper_results",
+        "protocol_profile": "probe_paper_fixed_fpr_0_1",
+        "target_fpr": 0.1,
+        "sample_count": "all",
+    },
     PILOT_PAPER_RUN_NAME: {
         "prompt_set": PILOT_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[PILOT_PAPER_RUN_NAME].as_posix(),
@@ -149,8 +159,8 @@ def parse_record_limit(value: str | int | None, *, prompt_count: int, default_va
 def parse_positive_int(value: str | int | None, default_value: int) -> int:
     """解析正整数配置。
 
-    该函数属于配置解析层, 用于让 method 级运行设置在 pilot_paper 与
-    full_paper 之间保持同一套默认值, 业务路径只消费已经归一化后的数值。
+    该函数属于配置解析层, 用于让 method 级运行设置在 probe_paper、
+    pilot_paper 与 full_paper 之间保持同一套默认值, 业务路径只消费已经归一化后的数值。
     """
 
     raw_value = default_value if value is None else value

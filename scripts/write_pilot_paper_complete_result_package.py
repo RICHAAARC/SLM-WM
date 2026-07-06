@@ -61,6 +61,7 @@ REQUIRED_OUTPUT_DIRS = (
     "outputs/pilot_paper_fixed_fpr_common_protocol",
 )
 PACKAGE_EXTRA_PATHS = (
+    "configs/paper_main_probe_paper_prompts.txt",
     "configs/paper_main_pilot_paper_prompts.txt",
     "configs/paper_main_full_paper_prompts.txt",
     "paper_workflow/README.md",

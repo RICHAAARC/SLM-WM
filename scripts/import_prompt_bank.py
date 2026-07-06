@@ -19,6 +19,7 @@ PROMPT_SOURCE_ENTRIES = {
 }
 PROMPT_CONFIG_NAMES = {
     "probe": "paper_main_probe_prompts.txt",
+    "probe_paper": "paper_main_probe_paper_prompts.txt",
     "pilot_paper": "paper_main_pilot_paper_prompts.txt",
     "full_paper": "paper_main_full_paper_prompts.txt",
 }
@@ -82,11 +83,13 @@ def read_source_prompts(archive: zipfile.ZipFile, entry_name: str) -> tuple[str,
 
 
 def load_prompt_bank(source_archive: Path) -> dict[str, tuple[tuple[str, ...], int]]:
-    """从 zip 中加载并治理 probe、pilot_paper 和 full_paper 三组 prompt。"""
+    """从 zip 中加载并治理四组 prompt 配置。"""
     with zipfile.ZipFile(source_archive) as archive:
+        pilot_source_prompts = read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["pilot_paper"])
         raw_prompts = {
             "probe": read_probe_prompts(archive),
-            "pilot_paper": read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["pilot_paper"]),
+            "probe_paper": pilot_source_prompts[:60],
+            "pilot_paper": pilot_source_prompts,
             "full_paper": read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["full_paper"]),
         }
     return {name: unique_normalized_prompts(prompts) for name, prompts in raw_prompts.items()}

@@ -53,8 +53,9 @@ def test_calibration_and_test_prompt_ids_are_disjoint() -> None:
 
 @pytest.mark.quick
 def test_paper_prompt_split_uses_shared_calibration_heavy_ratio() -> None:
-    """pilot_paper 与 full_paper 应共享 dev 5%、calibration 55%、test 40% 的目标比例。"""
+    """三类论文运行层级应共享 dev 5%、calibration 55%、test 40% 的目标比例。"""
 
+    assert build_group_split_counts(60) == {"dev": 3, "calibration": 33, "test": 24}
     assert build_group_split_counts(600) == {"dev": 30, "calibration": 330, "test": 240}
     assert build_group_split_counts(6000) == {"dev": 300, "calibration": 3300, "test": 2400}
 
@@ -85,6 +86,7 @@ def test_protocol_writer_creates_governed_outputs(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     write_prompt_config(repo_root, "probe", ("a city street with lamps", "a calm lake at sunrise"))
+    write_prompt_config(repo_root, "probe_paper", ("a small server validation prompt",))
     write_prompt_config(repo_root, "pilot_paper", ("a ceramic teapot on a table",))
     write_prompt_config(repo_root, "full_paper", ("a quiet library reading room",))
 
@@ -108,8 +110,8 @@ def test_protocol_writer_creates_governed_outputs(tmp_path: Path) -> None:
     assert prompt_manifest["protocol_decision"] == "pass"
     assert event_manifest["protocol_decision"] == "pass"
     assert {record["split"] for record in prompt_manifest["prompt_records"]} <= {"dev", "calibration", "test"}
-    assert statistics["prompt_count"] == 4
-    assert statistics["event_count"] == 4 * len(SAMPLE_ROLES)
+    assert statistics["prompt_count"] == 5
+    assert statistics["event_count"] == 5 * len(SAMPLE_ROLES)
     assert statistics["calibration_test_disjoint"] is True
 
 

@@ -28,7 +28,9 @@ def test_complete_result_package_collects_required_pilot_outputs(tmp_path: Path)
         )
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
+    (config_dir / "paper_main_probe_paper_prompts.txt").write_text("a probe paper prompt\n", encoding="utf-8")
     (config_dir / "paper_main_pilot_paper_prompts.txt").write_text("a pilot prompt\n", encoding="utf-8")
+    (config_dir / "paper_main_full_paper_prompts.txt").write_text("a full paper prompt\n", encoding="utf-8")
     workflow_dir = tmp_path / "paper_workflow"
     workflow_dir.mkdir()
     (workflow_dir / "README.md").write_text("# Paper Workflow\n", encoding="utf-8")
@@ -54,7 +56,9 @@ def test_complete_result_package_collects_required_pilot_outputs(tmp_path: Path)
     protocol_index = REQUIRED_OUTPUT_DIRS.index("outputs/pilot_paper_fixed_fpr_common_protocol")
     assert f"outputs/pilot_paper_fixed_fpr_results/sample_{result_index}.json" in names
     assert f"outputs/pilot_paper_fixed_fpr_common_protocol/sample_{protocol_index}.json" in names
+    assert "configs/paper_main_probe_paper_prompts.txt" in names
     assert "configs/paper_main_pilot_paper_prompts.txt" in names
+    assert "configs/paper_main_full_paper_prompts.txt" in names
     assert compression_types == {ZIP_STORED}
 
 

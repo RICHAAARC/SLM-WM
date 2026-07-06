@@ -25,16 +25,16 @@ SLM_WM_PRIMARY_BASELINE_METHODS = "tree_ring"
 ### 诊断入口
 
 - `colab_drive_cold_start_smoke.ipynb`: 验证 Colab 挂载 Google Drive、拉取仓库、镜像本地 `outputs/`、写入工作流清单并重载校验。该入口已经合并原独立 reload 功能。
-- `runtime_method_precheck_run.ipynb`: 合并运行时诊断与最小机制预检。该入口验证 Colab 依赖组合、Hugging Face 登录、SD3.5 Medium 加载、真实 latent trajectory 捕获和最小 latent injection 闭环。该入口不参与 `pilot_paper` 或 `full_paper` 的正式统计产出。
+- `runtime_method_precheck_run.ipynb`: 合并运行时诊断与最小机制预检。该入口验证 Colab 依赖组合、Hugging Face 登录、SD3.5 Medium 加载、真实 latent trajectory 捕获和最小 latent injection 闭环。该入口不参与 `probe_paper`、`pilot_paper` 或 `full_paper` 的正式统计产出。
 
 ### 方法主流程入口
 
-以下入口统一由 `SLM_WM_PAPER_RUN_NAME` 派生协议、prompt 文件、样本数、目标 FPR 和 Google Drive 结果根目录。默认值为 `pilot_paper`; 切换为 `full_paper` 时, helper 会重新写入 `SLM_WM_PROTOCOL_PROFILE`、`SLM_WM_PROMPT_SET`、`SLM_WM_PROMPT_FILE`、`SLM_WM_PAPER_RUN_TARGET_FPR` 和各子流程 Drive 目录, 避免沿用旧运行层级的环境变量。
+以下入口统一由 `SLM_WM_PAPER_RUN_NAME` 派生协议、prompt 文件、样本数、目标 FPR 和 Google Drive 结果根目录。默认值为 `pilot_paper`; 切换为 `probe_paper` 或 `full_paper` 时, helper 会重新写入 `SLM_WM_PROTOCOL_PROFILE`、`SLM_WM_PROMPT_SET`、`SLM_WM_PROMPT_FILE`、`SLM_WM_PAPER_RUN_TARGET_FPR` 和各子流程 Drive 目录, 避免沿用旧运行层级的环境变量。
 
 - `attention_geometry_capture_run.ipynb`: 捕获真实 attention 载体或可审计 attention map, 生成 attention geometry 产物。
 - `attention_latent_injection_run.ipynb`: 基于 attention geometry 执行 attention-relative latent update, 生成注入记录和配对质量记录。
-- `aligned_rescoring_run.ipynb`: 对注入结果进行 aligned rescoring, 生成检测重打分记录和配对感知质量指标。`pilot_paper` 默认使用该层级全部 prompt, 当前配置为600个; `full_paper` 当前配置为6000个。
-- `threshold_calibration_run.ipynb`: 按当前运行层级的 fixed-FPR 协议校准阈值, 并记录 geometric rescue 边界。`pilot_paper` 使用 FPR=0.01, `full_paper` 使用 FPR=0.001。
+- `aligned_rescoring_run.ipynb`: 对注入结果进行 aligned rescoring, 生成检测重打分记录和配对感知质量指标。`probe_paper` 当前配置为60个 prompt, `pilot_paper` 当前配置为600个, `full_paper` 当前配置为6000个。
+- `threshold_calibration_run.ipynb`: 按当前运行层级的 fixed-FPR 协议校准阈值, 并记录 geometric rescue 边界。`probe_paper` 使用 FPR=0.1, `pilot_paper` 使用 FPR=0.01, `full_paper` 使用 FPR=0.001。
 - `real_attack_evaluation_run.ipynb`: 生成或导入真实 attacked image, 执行正式攻击后检测, 记录 source / attacked image digest 和真实 GPU 攻击覆盖状态。该入口负责再扩散、全局编辑、局部编辑、视觉改写和自适应去水印类攻击。处理数量由当前论文运行层级的样本数派生。
 - `conventional_geometric_attack_evaluation_run.ipynb`: 使用 CPU / PIL 图像算子生成常规失真、几何变换与 photometric attacked image, 写出 source / attacked image digest、formal detection records 和总体进度条。正式检测口径需要对 attacked image 执行 SD3.5 detector / VAE latent rescore, 因此论文运行应使用 Colab GPU。该入口负责补齐 `standard_distortion`、`geometric_transform` 与 `photometric_distortion_attack` 的真实图像级攻击闭环。
 - `dataset_level_quality_run.ipynb`: 从受治理图像集合导入 dataset-level 质量特征, 计算或登记 FID / KID 等集合级指标。`pilot_paper` 默认使用100作为 dataset-level 正式特征最小样本阈值, 其结果只允许支撑 `pilot_paper` 样本规模内的主张, 不得提升为 `full_paper` 主张。
@@ -65,9 +65,9 @@ method-faithful 入口统一把压缩包镜像到当前论文运行层级的 Goo
 
 - `pilot_paper_result_closure_run.ipynb`: 在前序结果包已经写入 Google Drive 后, 从当前论文运行层级的 Drive 根目录物化上游包, 依次重建 attack matrix、external baseline formal import、internal ablation、fixed-FPR 共同协议记录和完整结果包。该入口不需要 GPU, 只调度 `scripts/` 和 `paper_workflow/colab_utils/paper_result_closure.py`, 不直接手写正式 records、tables、figures 或 reports。
 
-## `pilot_paper` 与 `full_paper` 运行原则
+## `probe_paper`、`pilot_paper` 与 `full_paper` 运行原则
 
-`pilot_paper` 与 `full_paper` 应共享同一批方法主流程和 baseline 入口, 只通过配置切换 prompt split、样本量、随机种子、Drive 输出根目录、攻击覆盖范围、目标 FPR 和 bootstrap 次数。不得为 `pilot_paper` 和 `full_paper` 维护两套互相分叉的 Notebook 逻辑。`pilot_paper` 是受样本规模约束的论文主张层级, 不是仅用于链路调试的临时层级。
+`probe_paper`、`pilot_paper` 与 `full_paper` 应共享同一批方法主流程和 baseline 入口, 只通过配置切换 prompt split、样本量、随机种子、Drive 输出根目录、攻击覆盖范围、目标 FPR 和 bootstrap 次数。不得为 `probe_paper`、`pilot_paper` 和 `full_paper` 维护互相分叉的 Notebook 逻辑。`probe_paper` 用于服务器小规模流程对齐验证; `pilot_paper` 是受样本规模约束的论文主张层级, 不是仅用于链路调试的临时层级。
 
 除诊断入口外, 正式运行 Notebook 的第一个代码行固定为:
 
@@ -75,11 +75,11 @@ method-faithful 入口统一把压缩包镜像到当前论文运行层级的 Goo
 SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 ```
 
-切换到完整论文运行层级时只修改这一行。依赖诊断由 `paper_workflow.colab_utils.dependency_check.build_notebook_dependency_report` 统一执行, archive 文件名和 Drive 镜像打包由 `paper_workflow.colab_utils.notebook_entrypoint.package_workflow_outputs` 统一执行。Notebook 不再维护单独的短提交读取、UTC 后缀拼接或具体 `package_*_outputs` 调用, 以避免项目代码调试时同步修改多个 Notebook。
+切换运行层级时只修改这一行。依赖诊断由 `paper_workflow.colab_utils.dependency_check.build_notebook_dependency_report` 统一执行, archive 文件名和 Drive 镜像打包由 `paper_workflow.colab_utils.notebook_entrypoint.package_workflow_outputs` 统一执行。Notebook 不再维护单独的短提交读取、UTC 后缀拼接或具体 `package_*_outputs` 调用, 以避免项目代码调试时同步修改多个 Notebook。
 
 统一 archive 打包入口会在对应 `outputs/<workflow>/notebook_runtime_report.json` 写入运行时间报告, 并把该报告纳入当前结果包。报告字段包括 `notebook_runtime_started_at`、`notebook_runtime_finished_at`、`notebook_runtime_elapsed_seconds`、`notebook_runtime_start_source` 和 `notebook_runtime_timing_boundary`。该报告只用于 Colab 运行观测和耗时审计, 不作为方法有效性或论文结论的证据来源。
 
-诊断入口不参与 `pilot_paper` 或 `full_paper` 的正式统计产出。它们只用于在 Colab 环境、模型依赖或 Drive 持久化出问题时进行预检。
+诊断入口不参与 `probe_paper`、`pilot_paper` 或 `full_paper` 的正式统计产出。它们只用于在 Colab 环境、模型依赖或 Drive 持久化出问题时进行预检。
 
 ## GPU 服务器命令行入口
 

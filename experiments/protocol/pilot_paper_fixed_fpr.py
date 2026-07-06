@@ -16,6 +16,7 @@ from typing import Any, Iterable, Mapping
 from experiments.protocol.attacks import AttackConfig, attack_config_digest
 from experiments.protocol.paper_run_config import (
     FULL_PAPER_RUN_NAME,
+    PROBE_PAPER_RUN_NAME,
     RUN_DEFAULTS,
     build_paper_run_config,
 )
@@ -30,9 +31,11 @@ PILOT_PAPER_RESULT_PROTOCOL_NAME = "pilot_paper_fixed_fpr_common_protocol"
 PILOT_PAPER_RESULT_SCOPE = "pilot_paper_common_protocol"
 PILOT_PAPER_CLAIM_BOUNDARY = "pilot_paper_paper_claim"
 FULL_PAPER_CLAIM_BOUNDARY = "full_paper_claim_requires_full_paper_sample_scale"
+PROBE_PAPER_FIXED_FPR = 0.1
 PILOT_PAPER_FIXED_FPR = 0.01
 FULL_PAPER_FIXED_FPR = 0.001
 PAPER_RUN_FIXED_FPR = {
+    PROBE_PAPER_RUN_NAME: PROBE_PAPER_FIXED_FPR,
     PILOT_PAPER_PROMPT_SET: PILOT_PAPER_FIXED_FPR,
     FULL_PAPER_RUN_NAME: FULL_PAPER_FIXED_FPR,
 }
@@ -782,6 +785,7 @@ def build_pilot_paper_common_protocol_summary(
         and claim_coverage_ready
         and superiority_gate["superiority_gate_ready"]
     )
+    probe_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == PROBE_PAPER_RUN_NAME
     pilot_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == PILOT_PAPER_PROMPT_SET
     full_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == FULL_PAPER_RUN_NAME
     return {
@@ -824,6 +828,7 @@ def build_pilot_paper_common_protocol_summary(
         "paper_run_claim_ready": paper_run_claim_ready,
         "paper_run_supports_superiority_claim": paper_run_claim_ready,
         "paper_claim_ready": paper_run_claim_ready,
+        "probe_paper_claim_ready": probe_paper_claim_ready,
         "full_paper_claim_ready": full_paper_claim_ready,
         "supports_paper_claim": paper_run_claim_ready,
     }

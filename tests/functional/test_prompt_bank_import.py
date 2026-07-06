@@ -34,18 +34,20 @@ def write_prompt_bank_zip(path: Path) -> None:
 
 @pytest.mark.quick
 def test_prompt_bank_import_writes_sanitized_configs(tmp_path: Path) -> None:
-    """导入逻辑应写出三组配置, 并替换受限过程词。"""
+    """导入逻辑应写出四组配置, 并替换受限过程词。"""
     source_archive = tmp_path / "prompt_bank.zip"
     config_dir = tmp_path / "configs"
     write_prompt_bank_zip(source_archive)
 
     summary = import_prompt_bank_configs(source_archive=source_archive, config_dir=config_dir)
     pilot_paper_text = (config_dir / "paper_main_pilot_paper_prompts.txt").read_text(encoding="utf-8")
+    probe_paper_text = (config_dir / "paper_main_probe_paper_prompts.txt").read_text(encoding="utf-8")
     full_paper_text = (config_dir / "paper_main_full_paper_prompts.txt").read_text(encoding="utf-8")
     probe_text = (config_dir / "paper_main_probe_prompts.txt").read_text(encoding="utf-8")
 
-    assert summary["prompt_counts"] == {"probe": 2, "pilot_paper": 2, "full_paper": 2}
-    assert summary["sanitized_prompt_counts"] == {"probe": 1, "pilot_paper": 1, "full_paper": 1}
+    assert summary["prompt_counts"] == {"probe": 2, "probe_paper": 2, "pilot_paper": 2, "full_paper": 2}
+    assert summary["sanitized_prompt_counts"] == {"probe": 1, "probe_paper": 1, "pilot_paper": 1, "full_paper": 1}
+    assert "concert platform" in probe_paper_text
     assert "concert platform" in pilot_paper_text
     assert "concert platform" in full_paper_text
     assert "concert platform" in probe_text
