@@ -223,14 +223,21 @@ def test_writer_switches_common_protocol_to_probe_paper_without_logic_fork(
     assert summary["paper_claim_scale"] == "probe_paper"
     assert summary["result_protocol_name"] == "probe_paper_fixed_fpr_common_protocol"
     assert summary["result_claim_scope"] == "probe_paper_paper_claim"
+    assert summary["pilot_paper_common_protocol_ready"] is True
+    assert summary["paper_run_allows_paper_claim"] is False
+    assert summary["probe_paper_workflow_validation_ready"] is False
     assert summary["probe_paper_claim_ready"] is False
     assert prompt_summary["prompt_set"] == "probe_paper"
     assert prompt_summary["pilot_paper_prompt_count"] == 60
     assert prompt_summary["target_fpr"] == 0.1
+    assert prompt_summary["pilot_paper_negative_count_minimum_required"] == 10
+    assert prompt_summary["prompt_split_ready"] is True
     assert prompt_summary["prompt_protocol_name"] == "paper_main_probe_paper_prompt_protocol"
     assert schema["paper_claim_scale"] == "probe_paper"
     assert schema["prompt_set"] == "probe_paper"
     assert schema["target_fpr"] == 0.1
+    assert schema["minimum_result_positive_count"] == 10
+    assert schema["paper_run_allows_paper_claim"] is False
     assert schema["prompt_protocol_name"] == "paper_main_probe_paper_prompt_protocol"
     assert schema["result_protocol_name"] == "probe_paper_fixed_fpr_common_protocol"
     assert all(row["paper_claim_scale"] == "probe_paper" for row in template_rows)

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from experiments.baselines import PRIMARY_BASELINE_IDS, build_primary_baseline_execution_plans
+from paper_experiments.baselines import PRIMARY_BASELINE_IDS, build_primary_baseline_execution_plans
 from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
 from scripts.write_primary_baseline_reproduction_plan import write_primary_baseline_reproduction_plan
 
@@ -126,3 +126,4 @@ def test_primary_reproduction_writer_outputs_plan_and_result_templates(tmp_path:
     assert report["baseline_results_ready"] is False
     assert report["supports_paper_claim"] is False
     assert {row["comparable_operating_point"] for row in template_rows} == {"fixed_fpr_0.01"}
+

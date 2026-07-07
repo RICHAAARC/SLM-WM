@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from paper_workflow.colab_utils.t2smark_full_main_reproduction import (
+from paper_experiments.runners.t2smark_full_main_reproduction import (
     T2SMarkFullMainReproductionConfig,
     build_t2smark_full_main_image_pairs,
     output_paths,
@@ -39,6 +39,33 @@ def test_full_main_prompt_inputs_use_pilot_paper_prompt_file(tmp_path: Path) -> 
     assert report["full_main_prompt_protocol_ready"] is True
     assert dataset["annotations"][0]["caption"] == "a pilot_paper prompt 0"
     assert prompt_plan[0]["prompt_set"] == "pilot_paper"
+
+
+@pytest.mark.quick
+def test_probe_paper_prompt_inputs_use_probe_gate_count(tmp_path: Path) -> None:
+    """probe_paper 的 T2SMark 官方参考入口应使用较小门禁验证 Colab 拆分链路。"""
+
+    prompt_file = tmp_path / "configs" / "paper_main_probe_paper_prompts.txt"
+    prompt_file.parent.mkdir(parents=True)
+    prompt_file.write_text(
+        "\n".join(f"a probe_paper prompt {index}" for index in range(60)) + "\n",
+        encoding="utf-8",
+    )
+    config = T2SMarkFullMainReproductionConfig(
+        prompt_set="probe_paper",
+        prompt_file="configs/paper_main_probe_paper_prompts.txt",
+        prompt_limit=60,
+        minimum_prompt_protocol_count=10,
+        require_cuda=False,
+    )
+    paths = output_paths(tmp_path, config)
+
+    report = write_full_main_prompt_inputs(tmp_path, config, paths)
+
+    assert report["selected_prompt_count"] == 60
+    assert report["minimum_prompt_protocol_count"] == 10
+    assert report["full_main_prompt_protocol_ready"] is True
+    assert report["paper_claim_scale"] == "probe_paper"
 
 
 @pytest.mark.quick
@@ -124,7 +151,7 @@ def test_full_main_reproduction_reuses_existing_results_and_writes_candidate_rec
         )
         return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.t2smark_full_main_reproduction.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.t2smark_full_main_reproduction.run_command", fake_run_command)
 
     summary = write_t2smark_full_main_reproduction_outputs(config=config, root=tmp_path)
     validation_report = json.loads(paths["validation_report"].read_text(encoding="utf-8"))
@@ -136,3 +163,4 @@ def test_full_main_reproduction_reuses_existing_results_and_writes_candidate_rec
     assert validation_report["accepted_formal_import_count"] == 0
     assert paths["candidate_records"].is_file()
     assert paths["manifest"].is_file()
+

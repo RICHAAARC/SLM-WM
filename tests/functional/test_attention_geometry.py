@@ -10,7 +10,7 @@ import pytest
 
 from experiments.runtime.diffusion.attention_capture import build_qk_attention_capture_record
 from main.methods.geometry import attention_from_query_key, build_attention_graph_record, build_geometry_evidence_record
-from scripts.write_attention_geometry_outputs import write_attention_geometry_outputs
+from experiments.artifacts.attention_geometry_outputs import write_attention_geometry_outputs
 
 
 @pytest.mark.quick

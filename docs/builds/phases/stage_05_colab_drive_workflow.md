@@ -48,7 +48,7 @@ python tools/harness/inspect_repository.py .
 
 1. 在 `paper_workflow/colab_utils/` 中实现 `mount_drive.py`、`runtime_setup.py`、`drive_paths.py`、`manifest_io.py`、`dependency_check.py`。
 2. 在 `scripts/` 中实现 `colab_stage_entry.py`、`write_stage_manifest.py`、`verify_drive_artifacts.py`、`sync_local_stages_to_drive.py`。
-3. 创建单一 Notebook：`paper_workflow/colab_drive_cold_start_smoke.ipynb`, 同时覆盖 Colab 冷启动、Drive 镜像、工作流清单写入与 reload 校验。
+3. 创建单一 Notebook：`paper_workflow/notebooks/colab_drive_cold_start_smoke.ipynb`, 同时覆盖 Colab 冷启动、Drive 镜像、工作流清单写入与 reload 校验。
 4. 登记 Google Drive 中已有的前序真实运行产物, 同时在本地存在 outputs 产物时将其同步到 Google Drive, 并生成 `local_output_sync_report.json`。
 5. 实现 Drive manifest 校验，确保后续阶段只能读取 manifest 登记文件, 且空 manifest 不得被误判为有效 reload 证据。
 

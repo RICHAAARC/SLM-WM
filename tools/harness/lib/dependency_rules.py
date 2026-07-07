@@ -11,6 +11,8 @@ FORBIDDEN_IMPORT_PREFIXES_BY_ROOT = {
         "main.analysis",
         "main.cli",
         "experiments",
+        "paper_experiments",
+        "external_baseline",
         "scripts",
         "tests",
         "tools",
@@ -20,6 +22,8 @@ FORBIDDEN_IMPORT_PREFIXES_BY_ROOT = {
         "main.analysis",
         "main.cli",
         "experiments",
+        "paper_experiments",
+        "external_baseline",
         "scripts",
         "tests",
         "tools",
@@ -29,6 +33,8 @@ FORBIDDEN_IMPORT_PREFIXES_BY_ROOT = {
         "main.analysis",
         "main.cli",
         "experiments",
+        "paper_experiments",
+        "external_baseline",
         "scripts",
         "tests",
         "tools",
@@ -36,6 +42,8 @@ FORBIDDEN_IMPORT_PREFIXES_BY_ROOT = {
     ),
     "main/analysis": (
         "experiments",
+        "paper_experiments",
+        "external_baseline",
         "scripts",
         "tests",
         "tools",
@@ -43,6 +51,22 @@ FORBIDDEN_IMPORT_PREFIXES_BY_ROOT = {
     ),
     "main/cli": (
         "experiments",
+        "paper_experiments",
+        "external_baseline",
+        "scripts",
+        "tests",
+        "tools",
+        "paper_workflow",
+    ),
+    "experiments": (
+        "paper_experiments",
+        "external_baseline",
+        "scripts",
+        "tests",
+        "tools",
+        "paper_workflow",
+    ),
+    "paper_experiments": (
         "scripts",
         "tests",
         "tools",
@@ -53,7 +77,7 @@ FORBIDDEN_IMPORT_PREFIXES_BY_ROOT = {
 
 def extract_imported_modules(path: Path) -> list[str]:
     """从 Python 文件中提取顶层导入模块名。"""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
     modules: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):

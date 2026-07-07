@@ -16,7 +16,7 @@ from external_baseline.primary.sd35_method_faithful_common import (
     standard_geometric_formal_image_attack_names,
     supported_formal_image_attack_names,
 )
-from paper_workflow.colab_utils.external_baseline_method_faithful import (
+from paper_experiments.runners.external_baseline_method_faithful import (
     DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
     DEFAULT_T2SMARK_INVERSION_ENTRY,
     DEFAULT_T2SMARK_SOURCE_ENTRY,
@@ -76,7 +76,7 @@ def test_external_baseline_notebooks_use_default_formal_attack_matrix() -> None:
         "t2smark": "external_baseline_t2smark_run.ipynb",
     }
     for method_id, notebook_name in notebook_by_method.items():
-        notebook_path = repo_root / "paper_workflow" / notebook_name
+        notebook_path = repo_root / "paper_workflow" / "notebooks" / notebook_name
         notebook_payload = json.loads(notebook_path.read_text(encoding="utf-8"))
         notebook_text = "\n".join(
             "".join(cell.get("source", "")) for cell in notebook_payload.get("cells", [])
@@ -293,7 +293,7 @@ def test_primary_baseline_adapter_plan_includes_four_methods(tmp_path: Path, mon
                 )
         return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.external_baseline_method_faithful.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.external_baseline_method_faithful.run_command", fake_run_command)
 
     report = build_and_run_primary_baseline_adapters(tmp_path, config, paths)
 
@@ -350,7 +350,7 @@ def test_primary_baseline_adapter_plan_can_select_single_method(tmp_path: Path, 
             manifest_path.write_text('{"baseline_id":"tree_ring","attacked_image_count":4}\n', encoding="utf-8")
         return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.external_baseline_method_faithful.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.external_baseline_method_faithful.run_command", fake_run_command)
 
     report = build_and_run_primary_baseline_adapters(tmp_path, config, paths)
 
@@ -404,7 +404,7 @@ def test_primary_baseline_adapter_report_keeps_partial_counts_on_runner_failure(
             return {"command": command, "return_code": 1, "stdout": "", "stderr": ""}
         return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.external_baseline_method_faithful.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.external_baseline_method_faithful.run_command", fake_run_command)
 
     report = build_and_run_primary_baseline_adapters(tmp_path, config, paths)
 
@@ -415,3 +415,4 @@ def test_primary_baseline_adapter_report_keeps_partial_counts_on_runner_failure(
     assert report["primary_baseline_observation_count"] == 6
     assert report["ready_primary_baseline_ids"] == ["tree_ring", "gaussian_shading", "shallow_diffuse"]
     assert report["attacked_image_count_by_baseline"]["t2smark"] == 0
+

@@ -15,7 +15,7 @@ from main.methods.carrier import (
     derive_lf_content_carrier,
 )
 from main.methods.detection import compute_unified_content_score
-from scripts.write_content_carrier_outputs import write_content_carrier_outputs
+from experiments.artifacts.content_carrier_outputs import write_content_carrier_outputs
 
 
 SELECTED_INDICES = (0, 2, 5, 7)

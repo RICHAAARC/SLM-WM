@@ -8,13 +8,13 @@ from zipfile import ZipFile
 
 import pytest
 
-from experiments.baselines import (
+from paper_experiments.baselines import (
     TREE_RING_OFFICIAL_REFERENCE_PROTOCOL_NAME,
     build_tree_ring_official_reference_record,
     build_tree_ring_official_reference_schema,
     validate_tree_ring_official_reference_records,
 )
-from paper_workflow.colab_utils.tree_ring_official_reference import (
+from paper_experiments.runners.tree_ring_official_reference import (
     TreeRingOfficialReferenceConfig,
     build_default_config,
     build_official_command,
@@ -64,7 +64,7 @@ def test_tree_ring_official_reference_prepares_local_model_repository(
         )
         return str(local_dir)
 
-    monkeypatch.setattr("paper_workflow.colab_utils.tree_ring_official_reference.download_hf_snapshot", fake_download_hf_snapshot)
+    monkeypatch.setattr("paper_experiments.runners.tree_ring_official_reference.download_hf_snapshot", fake_download_hf_snapshot)
 
     report = prepare_tree_ring_model_repository(tmp_path, config, paths)
     patched_index = json.loads((local_model_dir / "model_index.json").read_text(encoding="utf-8"))
@@ -147,8 +147,8 @@ def test_tree_ring_official_reference_prepares_isolated_legacy_environment(
             legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
         return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.tree_ring_official_reference.run_shell_command", fake_run_shell_command)
-    monkeypatch.setattr("paper_workflow.colab_utils.tree_ring_official_reference.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.tree_ring_official_reference.run_shell_command", fake_run_shell_command)
+    monkeypatch.setattr("paper_experiments.runners.tree_ring_official_reference.run_command", fake_run_command)
 
     report = prepare_tree_ring_legacy_environment(tmp_path, config, paths)
     saved_report = json.loads(paths["legacy_environment_prepare_result"].read_text(encoding="utf-8"))
@@ -421,7 +421,7 @@ def test_tree_ring_official_reference_cold_start_clones_source(
             (source_dir / "requirements.txt").write_text("diffusers==0.11.1\n", encoding="utf-8")
         return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.tree_ring_official_reference.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.tree_ring_official_reference.run_command", fake_run_command)
 
     report = ensure_tree_ring_source_available(tmp_path, config, paths)
 
@@ -453,3 +453,5 @@ def test_tree_ring_official_reference_parses_metric_text_and_custom_python(tmp_p
     assert command[0] == "/opt/tree-ring-legacy/bin/python"
     assert "--start" in command
     assert command[command.index("--end") + 1] == "5"
+
+

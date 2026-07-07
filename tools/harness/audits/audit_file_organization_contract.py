@@ -13,7 +13,11 @@ from tools.harness.lib.json_report import build_report, exit_with_report
 
 REQUIRED_PATHS = [
     ".codex/project_contract.md",
+    ".codex/skills/release_layer_boundary.skill.md",
     "docs/file_organization.md",
+    "docs/release_layer_boundary.md",
+    "paper_experiments",
+    "paper_workflow/notebooks",
     "tools/harness/run_all_audits.py",
     "tests/constraints",
 ]

@@ -8,13 +8,13 @@ from zipfile import ZipFile
 
 import pytest
 
-from experiments.baselines import (
+from paper_experiments.baselines import (
     GAUSSIAN_SHADING_OFFICIAL_REFERENCE_PROTOCOL_NAME,
     build_gaussian_shading_official_reference_record,
     build_gaussian_shading_official_reference_schema,
     validate_gaussian_shading_official_reference_records,
 )
-from paper_workflow.colab_utils.gaussian_shading_official_reference import (
+from paper_experiments.runners.gaussian_shading_official_reference import (
     GaussianShadingOfficialReferenceConfig,
     build_default_config,
     build_official_command,
@@ -178,7 +178,7 @@ def test_gaussian_shading_official_reference_prepares_local_model_repository(
         return str(local_dir)
 
     monkeypatch.setattr(
-        "paper_workflow.colab_utils.gaussian_shading_official_reference.download_hf_snapshot",
+        "paper_experiments.runners.gaussian_shading_official_reference.download_hf_snapshot",
         fake_download_hf_snapshot,
     )
 
@@ -227,8 +227,8 @@ def test_gaussian_shading_official_reference_prepares_isolated_legacy_environmen
             legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
         return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
-    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
+    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_command", fake_run_command)
 
     report = prepare_gaussian_shading_legacy_environment(tmp_path, config, paths)
     saved_report = json.loads(paths["legacy_environment_prepare_result"].read_text(encoding="utf-8"))
@@ -279,8 +279,8 @@ def test_gaussian_shading_official_reference_prefers_strict_official_requirement
             legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
         return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
-    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
+    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_command", fake_run_command)
 
     report = prepare_gaussian_shading_legacy_environment(tmp_path, config, paths)
 
@@ -333,8 +333,8 @@ def test_gaussian_shading_official_reference_falls_back_after_strict_dependency_
             return {"command": command, "return_code": 1, "stdout": "", "stderr": "ResolutionImpossible"}
         return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
-    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
+    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_command", fake_run_command)
 
     report = prepare_gaussian_shading_legacy_environment(tmp_path, config, paths)
 
@@ -496,7 +496,7 @@ def test_gaussian_shading_official_reference_cold_start_clones_source(
             (source_dir / "requirements.txt").write_text("diffusers==0.11.1\n", encoding="utf-8")
         return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.gaussian_shading_official_reference.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_command", fake_run_command)
 
     report = ensure_gaussian_shading_source_available(tmp_path, config, paths)
 
@@ -568,3 +568,5 @@ def test_gaussian_shading_official_reference_default_config_reads_legacy_environ
     assert config.prepare_local_model_repository is True
     assert config.local_model_repository_dir == "/content/gaussian_shading_model_repository/stable_diffusion_2_1_base"
     assert config.patch_model_index_for_legacy_transformers is True
+
+

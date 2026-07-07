@@ -20,7 +20,7 @@
 - `primary/shallow_diffuse/`: Shallow Diffuse, 需要 SD3.5 shallow latent update 适配。
 - `primary/t2smark/`: T2SMark, 官方源码包含 SD3.5 入口, 当前 adapter 负责结果转写。
 
-当前主表 baseline 由 `paper_workflow/external_baseline_tree_ring_run.ipynb`、`paper_workflow/external_baseline_gaussian_shading_run.ipynb`、`paper_workflow/external_baseline_shallow_diffuse_run.ipynb` 和 `paper_workflow/external_baseline_t2smark_run.ipynb` 分别运行。每个入口只调度一个 baseline, 并写出可合并的 `split_observations` 产物, 避免单次 Colab 会话串行运行四个 baseline 导致超时。
+当前主表 baseline 由 `paper_workflow/notebooks/external_baseline_tree_ring_run.ipynb`、`paper_workflow/notebooks/external_baseline_gaussian_shading_run.ipynb`、`paper_workflow/notebooks/external_baseline_shallow_diffuse_run.ipynb` 和 `paper_workflow/notebooks/external_baseline_t2smark_run.ipynb` 分别运行。每个入口只调度一个 baseline, 并写出可合并的 `split_observations` 产物, 避免单次 Colab 会话串行运行四个 baseline 导致超时。
 
 运行产物统一落盘到 `outputs/external_baseline_method_faithful/`, 并镜像到当前论文运行层级的 Google Drive 子目录 `external_baseline_method_faithful/`。该命名表示主表外部 baseline 的 SD3.5 method-faithful 适配证据, 不再使用早期链路诊断命名。
 

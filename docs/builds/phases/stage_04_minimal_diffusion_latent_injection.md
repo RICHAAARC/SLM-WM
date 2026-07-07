@@ -71,9 +71,9 @@ python tools/harness/inspect_repository.py .
 
 本阶段应产出或更新以下内容：
 
-1. `paper_workflow/runtime_method_precheck_run.ipynb`
+1. `paper_workflow/notebooks/runtime_method_precheck_run.ipynb`
 2. `paper_workflow/colab_utils/sd_runtime_cold_start.py`
-3. `paper_workflow/runtime_method_precheck_run.ipynb`
+3. `paper_workflow/notebooks/runtime_method_precheck_run.ipynb`
 4. `paper_workflow/colab_utils/minimal_latent_injection.py`
 5. `outputs/real_sd_runtime_probe/*_generation_record.json`
 6. `outputs/real_sd_runtime_probe/*_latent_trajectory_records.jsonl`

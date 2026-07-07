@@ -12,14 +12,12 @@ import os
 from typing import Any
 
 from experiments.protocol.paper_run_config import (
-    DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT,
-    DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT,
     PILOT_PAPER_RUN_NAME,
     RUN_DEFAULTS,
     build_paper_run_config,
     normalize_paper_run_name,
 )
-from paper_workflow.colab_utils.notebook_runtime import mark_notebook_runtime_start
+from paper_workflow.notebook_utils.notebook_runtime import mark_notebook_runtime_start
 
 FORMAL_IMAGE_ATTACK_FAMILIES = (
     "jpeg_compression,gaussian_noise,gaussian_blur,rotation,resize,crop,crop_resize,"
@@ -89,14 +87,6 @@ def _configure_common_paper_run_environment() -> tuple[Any, str, str]:
     paper_run_name = _resolve_paper_run_name()
     defaults = RUN_DEFAULTS[paper_run_name]
     sample_count_token = os.environ.get("SLM_WM_PAPER_RUN_SAMPLE_COUNT", "all")
-    minimum_clean_negative_count = os.environ.get(
-        "SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT",
-        str(DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT),
-    )
-    dataset_quality_minimum_count = os.environ.get(
-        "SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT",
-        str(DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT),
-    )
 
     # 这些字段必须从当前运行层级重新派生, 避免 Colab 同一内核重跑时沿用旧值。
     _set_env("SLM_WM_PAPER_RUN_NAME", paper_run_name)
@@ -104,9 +94,9 @@ def _configure_common_paper_run_environment() -> tuple[Any, str, str]:
     _set_env("SLM_WM_PROMPT_FILE", defaults["prompt_file"])
     _set_env("SLM_WM_DRIVE_RESULT_ROOT", defaults["drive_result_root"])
     _set_env("SLM_WM_PAPER_RUN_SAMPLE_COUNT", sample_count_token)
-    _set_env("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", minimum_clean_negative_count)
-    _set_env("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", dataset_quality_minimum_count)
     _set_env("SLM_WM_PAPER_RUN_TARGET_FPR", defaults["target_fpr"])
+    os.environ.pop("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", None)
+    os.environ.pop("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", None)
 
     paper_run = build_paper_run_config(".")
     target_fpr_text = _target_fpr_text(paper_run.target_fpr)
@@ -114,6 +104,8 @@ def _configure_common_paper_run_environment() -> tuple[Any, str, str]:
     _set_env("SLM_WM_PAPER_RUN_TARGET_FPR", target_fpr_text)
     _set_env("SLM_WM_PROTOCOL_PROFILE", profile)
     _set_env("SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT", paper_run.sample_count)
+    _set_env("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", paper_run.minimum_clean_negative_count)
+    _set_env("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", paper_run.dataset_level_quality_minimum_count)
     return paper_run, sample_count_token, target_fpr_text
 
 
@@ -420,3 +412,4 @@ def configure_paper_run_environment(
         selected_baseline_id=baseline_id,
         configured_environment_keys=tracked_keys,
     ).to_dict()
+

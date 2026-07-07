@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from experiments.baselines import PRIMARY_BASELINE_ADAPTERS, default_baseline_specs
+from paper_experiments.baselines import PRIMARY_BASELINE_ADAPTERS, default_baseline_specs
 from tools.harness.lib.file_scanner import should_skip_path
 
 
@@ -67,3 +67,4 @@ def test_external_baseline_source_registry_matches_adapter_specs_when_present() 
             }
         else:
             assert item["adapter_status"] == "source_registered_adapter_not_planned"
+

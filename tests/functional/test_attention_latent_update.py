@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 
 from main.methods.carrier.attention import derive_attention_relative_carrier, simulate_attention_update_strengths
-from scripts.write_attention_latent_update_outputs import write_attention_latent_update_outputs
+from experiments.artifacts.attention_latent_update_outputs import write_attention_latent_update_outputs
 
 
 def sample_attention_graph() -> dict[str, object]:

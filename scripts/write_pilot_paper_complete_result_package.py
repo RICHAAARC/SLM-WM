@@ -277,6 +277,7 @@ def build_readiness_summary(
     existing_dirs = [relative_dir for relative_dir in REQUIRED_OUTPUT_DIRS if (root_path / relative_dir).exists()]
     missing_dirs = [relative_dir for relative_dir in REQUIRED_OUTPUT_DIRS if not (root_path / relative_dir).exists()]
     entry_list = tuple(entries)
+    package_ready = len(missing_dirs) == 0 and bool(entry_list)
     return {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -289,7 +290,9 @@ def build_readiness_summary(
         "archive_entry_count": len(entry_list),
         "archive_entry_digest": build_stable_digest([relative_or_absolute(path, root_path) for path in entry_list]),
         "materialization_report": materialization_report,
-        "pilot_paper_complete_result_package_ready": len(missing_dirs) == 0 and bool(entry_list),
+        "paper_run_complete_result_package_ready": package_ready,
+        "probe_paper_complete_result_package_ready": paper_claim_scale == "probe_paper" and package_ready,
+        "pilot_paper_complete_result_package_ready": package_ready,
         "supports_paper_claim": False,
     }
 

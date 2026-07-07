@@ -8,7 +8,7 @@ from zipfile import ZipFile
 
 import pytest
 
-from experiments.baselines import (
+from paper_experiments.baselines import (
     METHOD_FAITHFUL_ADAPTER_BOUNDARY,
     build_method_faithful_adapter_status_records,
     build_method_faithful_adapter_summary,
@@ -162,3 +162,4 @@ def test_method_faithful_adapter_writer_can_read_method_faithful_package(tmp_pat
     assert summary["formal_import_candidate_allowed_ids"] == ["tree_ring"]
     assert summary["method_faithful_package_path"] == "outputs/external_baseline_method_faithful_package.zip"
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])
+

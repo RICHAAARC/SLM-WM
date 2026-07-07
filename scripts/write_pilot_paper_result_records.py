@@ -25,7 +25,6 @@ if str(ROOT) not in sys.path:
 
 from experiments.protocol.attacks import default_attack_configs
 from experiments.protocol.pilot_paper_fixed_fpr import (
-    PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT,
     PilotPaperFixedFprConfig,
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
@@ -579,14 +578,17 @@ def finalize_result_record(
     metric_status: str,
     source_kind: str,
     claim_ready: bool = True,
+    minimum_claim_count: int = 1,
+    paper_run_allows_paper_claim: bool = True,
 ) -> dict[str, Any]:
     """补齐稳定标识、摘要和 claim 边界字段。"""
 
     supports_claim = (
         claim_ready
+        and paper_run_allows_paper_claim
         and metric_status in CLAIM_SUPPORTED_METHOD_STATUSES
-        and int(payload.get("positive_count", 0)) >= PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT
-        and int(payload.get("negative_count", 0)) >= PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT
+        and int(payload.get("positive_count", 0)) >= minimum_claim_count
+        and int(payload.get("negative_count", 0)) >= minimum_claim_count
         and int(payload.get("supported_record_count", 0)) > 0
         and bool(payload.get("evidence_paths"))
     )
@@ -630,6 +632,8 @@ def build_slm_wm_result_records(
     rows = read_csv_rows(attack_family_metrics_path)
     if not rows:
         return []
+    minimum_claim_count = int(schema.get("minimum_result_positive_count", 1))
+    paper_run_allows_paper_claim = bool(schema.get("paper_run_allows_paper_claim", True))
     evidence_paths = evidence_paths_for_existing(
         (
             attack_family_metrics_path,
@@ -680,7 +684,15 @@ def build_slm_wm_result_records(
             score_retention_mean=_float_field(row, "score_retention_mean"),
             confidence_level=float(schema["confidence_level"]),
         )
-        records.append(finalize_result_record(payload, metric_status=metric_status, source_kind="slm_wm_attack_matrix"))
+        records.append(
+            finalize_result_record(
+                payload,
+                metric_status=metric_status,
+                source_kind="slm_wm_attack_matrix",
+                minimum_claim_count=minimum_claim_count,
+                paper_run_allows_paper_claim=paper_run_allows_paper_claim,
+            )
+        )
     return records
 
 
@@ -699,6 +711,8 @@ def build_baseline_result_records(
     validation_report = read_json(baseline_validation_report_path)
     accepted_keys = baseline_accepted_record_keys(validation_report)
     source_digest = file_digest(baseline_records_path) if baseline_records_path.is_file() else build_stable_digest(rows)
+    minimum_claim_count = int(schema.get("minimum_result_positive_count", 1))
+    paper_run_allows_paper_claim = bool(schema.get("paper_run_allows_paper_claim", True))
     records: list[dict[str, Any]] = []
     for row in rows:
         method_id = _str_field(row, "baseline_id")
@@ -755,6 +769,8 @@ def build_baseline_result_records(
                 metric_status=_str_field(row, "metric_status", "measured"),
                 source_kind="external_baseline_result",
                 claim_ready=record_key in accepted_keys,
+                minimum_claim_count=minimum_claim_count,
+                paper_run_allows_paper_claim=paper_run_allows_paper_claim,
             )
         )
     return records

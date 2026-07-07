@@ -23,8 +23,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol.paper_run_config import RUN_DEFAULTS, build_paper_run_config, normalize_paper_run_name
-from paper_workflow.colab_utils.notebook_entrypoint import build_workflow_archive_name
-from paper_workflow.colab_utils.paper_run_environment import FORMAL_IMAGE_ATTACK_FAMILIES
+from experiments.runtime.archive_naming import build_workflow_archive_name
+from paper_experiments.runners.external_baseline_method_faithful import DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES
 
 WorkflowRunner = Callable[[str | Path], dict[str, Any]]
 WorkflowPackager = Callable[..., Any]
@@ -171,17 +171,16 @@ def configure_common_server_environment(
     set_env("SLM_WM_DRIVE_RESULT_ROOT", resolved_result_root.as_posix())
     set_env("SLM_WM_PAPER_RUN_SAMPLE_COUNT", sample_count_token)
     set_env("SLM_WM_PAPER_RUN_TARGET_FPR", target_fpr_override or defaults["target_fpr"])
-    set_env("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", os.environ.get("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", "100"))
-    set_env(
-        "SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT",
-        os.environ.get("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", "100"),
-    )
+    os.environ.pop("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", None)
+    os.environ.pop("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", None)
 
     paper_run = build_paper_run_config(root_path)
     resolved_target_fpr = target_fpr_text(paper_run.target_fpr)
     set_env("SLM_WM_PAPER_RUN_TARGET_FPR", resolved_target_fpr)
     set_env("SLM_WM_PROTOCOL_PROFILE", f"{paper_run.run_name}_fixed_fpr_{resolved_target_fpr.replace('.', '_')}")
     set_env("SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT", paper_run.sample_count)
+    set_env("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", paper_run.minimum_clean_negative_count)
+    set_env("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", paper_run.dataset_level_quality_minimum_count)
     return {
         "root": root_path.as_posix(),
         "paper_run": paper_run.to_dict(),
@@ -243,9 +242,9 @@ def configure_external_baseline_environment(baseline_id: str, result_root: Path,
     set_default_env("SLM_WM_TREE_RING_ADAPTER_MODE", "method_faithful_sd35")
     set_default_env("SLM_WM_GAUSSIAN_SHADING_ADAPTER_MODE", "method_faithful_sd35")
     set_default_env("SLM_WM_SHALLOW_DIFFUSE_ADAPTER_MODE", "method_faithful_sd35")
-    set_default_env("SLM_WM_TREE_RING_ATTACK_FAMILIES", FORMAL_IMAGE_ATTACK_FAMILIES)
-    set_default_env("SLM_WM_GAUSSIAN_SHADING_ATTACK_FAMILIES", FORMAL_IMAGE_ATTACK_FAMILIES)
-    set_default_env("SLM_WM_SHALLOW_DIFFUSE_ATTACK_FAMILIES", FORMAL_IMAGE_ATTACK_FAMILIES)
+    set_default_env("SLM_WM_TREE_RING_ATTACK_FAMILIES", DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES)
+    set_default_env("SLM_WM_GAUSSIAN_SHADING_ATTACK_FAMILIES", DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES)
+    set_default_env("SLM_WM_SHALLOW_DIFFUSE_ATTACK_FAMILIES", DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES)
 
 
 def configure_official_reference_environment(workflow_name: str, result_root: Path, sample_count_token: str) -> None:
@@ -307,39 +306,39 @@ def load_workflow_runner(workflow_name: str) -> WorkflowRunner:
     """延迟导入运行函数, 避免服务器入口加载无关重依赖。"""
 
     if workflow_name == "attention_geometry":
-        from paper_workflow.colab_utils.attention_geometry_capture import run_default_attention_geometry_plan
+        from experiments.runners.attention_geometry_capture import run_default_attention_geometry_plan
 
         return run_default_attention_geometry_plan
     if workflow_name == "attention_latent_injection":
-        from paper_workflow.colab_utils.attention_latent_injection import run_default_attention_latent_injection_plan
+        from experiments.runners.attention_latent_injection import run_default_attention_latent_injection_plan
 
         return run_default_attention_latent_injection_plan
     if workflow_name == "aligned_rescoring":
-        from paper_workflow.colab_utils.aligned_rescoring import run_default_aligned_rescoring_plan
+        from experiments.runners.aligned_rescoring import run_default_aligned_rescoring_plan
 
         return run_default_aligned_rescoring_plan
     if workflow_name == "external_baseline_method_faithful":
-        from paper_workflow.colab_utils.external_baseline_method_faithful import run_default_external_baseline_method_faithful_plan
+        from paper_experiments.runners.external_baseline_method_faithful import run_default_external_baseline_method_faithful_plan
 
         return run_default_external_baseline_method_faithful_plan
     if workflow_name == "official_reference_tree_ring":
-        from paper_workflow.colab_utils.tree_ring_official_reference import run_default_tree_ring_official_reference_plan
+        from paper_experiments.runners.tree_ring_official_reference import run_default_tree_ring_official_reference_plan
 
         return run_default_tree_ring_official_reference_plan
     if workflow_name == "official_reference_gaussian_shading":
-        from paper_workflow.colab_utils.gaussian_shading_official_reference import (
+        from paper_experiments.runners.gaussian_shading_official_reference import (
             run_default_gaussian_shading_official_reference_plan,
         )
 
         return run_default_gaussian_shading_official_reference_plan
     if workflow_name == "official_reference_shallow_diffuse":
-        from paper_workflow.colab_utils.shallow_diffuse_official_reference import (
+        from paper_experiments.runners.shallow_diffuse_official_reference import (
             run_default_shallow_diffuse_official_reference_plan,
         )
 
         return run_default_shallow_diffuse_official_reference_plan
     if workflow_name == "official_reference_t2smark":
-        from paper_workflow.colab_utils.t2smark_full_main_reproduction import (
+        from paper_experiments.runners.t2smark_full_main_reproduction import (
             run_default_t2smark_full_main_reproduction_plan,
         )
 
@@ -351,53 +350,53 @@ def load_workflow_packager(workflow_name: str) -> WorkflowPackager:
     """延迟导入打包函数, 使服务器入口不依赖 Notebook。"""
 
     if workflow_name == "attention_geometry":
-        from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
+        from experiments.runners.attention_geometry_capture import package_attention_geometry_outputs
 
         return package_attention_geometry_outputs
     if workflow_name == "attention_latent_injection":
-        from paper_workflow.colab_utils.attention_latent_injection import package_attention_latent_injection_outputs
+        from experiments.runners.attention_latent_injection import package_attention_latent_injection_outputs
 
         return package_attention_latent_injection_outputs
     if workflow_name == "aligned_rescoring":
-        from paper_workflow.colab_utils.aligned_rescoring import package_aligned_rescoring_outputs
+        from experiments.runners.aligned_rescoring import package_aligned_rescoring_outputs
 
         return package_aligned_rescoring_outputs
     if workflow_name == "threshold_calibration":
-        from paper_workflow.colab_utils.threshold_calibration import package_threshold_calibration_outputs
+        from experiments.runners.threshold_calibration import package_threshold_calibration_outputs
 
         return package_threshold_calibration_outputs
     if workflow_name == "real_attack_evaluation":
-        from paper_workflow.colab_utils.real_attack_evaluation import package_real_attack_evaluation_outputs
+        from experiments.runners.real_attack_evaluation import package_real_attack_evaluation_outputs
 
         return package_real_attack_evaluation_outputs
     if workflow_name == "conventional_geometric_attack_evaluation":
-        from paper_workflow.colab_utils.conventional_geometric_attack_evaluation import (
+        from experiments.runners.conventional_geometric_attack_evaluation import (
             package_conventional_geometric_attack_evaluation_outputs,
         )
 
         return package_conventional_geometric_attack_evaluation_outputs
     if workflow_name == "dataset_level_quality":
-        from paper_workflow.colab_utils.dataset_level_quality import package_dataset_level_quality_outputs
+        from experiments.runners.dataset_level_quality import package_dataset_level_quality_outputs
 
         return package_dataset_level_quality_outputs
     if workflow_name == "external_baseline_method_faithful":
-        from paper_workflow.colab_utils.external_baseline_method_faithful import package_external_baseline_method_faithful_outputs
+        from paper_experiments.runners.external_baseline_method_faithful import package_external_baseline_method_faithful_outputs
 
         return package_external_baseline_method_faithful_outputs
     if workflow_name == "official_reference_tree_ring":
-        from paper_workflow.colab_utils.tree_ring_official_reference import package_tree_ring_official_reference_outputs
+        from paper_experiments.runners.tree_ring_official_reference import package_tree_ring_official_reference_outputs
 
         return package_tree_ring_official_reference_outputs
     if workflow_name == "official_reference_gaussian_shading":
-        from paper_workflow.colab_utils.gaussian_shading_official_reference import package_gaussian_shading_official_reference_outputs
+        from paper_experiments.runners.gaussian_shading_official_reference import package_gaussian_shading_official_reference_outputs
 
         return package_gaussian_shading_official_reference_outputs
     if workflow_name == "official_reference_shallow_diffuse":
-        from paper_workflow.colab_utils.shallow_diffuse_official_reference import package_shallow_diffuse_official_reference_outputs
+        from paper_experiments.runners.shallow_diffuse_official_reference import package_shallow_diffuse_official_reference_outputs
 
         return package_shallow_diffuse_official_reference_outputs
     if workflow_name == "official_reference_t2smark":
-        from paper_workflow.colab_utils.t2smark_full_main_reproduction import package_t2smark_full_main_reproduction_outputs
+        from paper_experiments.runners.t2smark_full_main_reproduction import package_t2smark_full_main_reproduction_outputs
 
         return package_t2smark_full_main_reproduction_outputs
     raise ValueError(f"未知服务器 workflow: {workflow_name}")
@@ -407,7 +406,7 @@ def run_workflow_with_local_inputs(workflow_name: str, root: Path, result_root: 
     """运行需要从本地结果根目录读取前序包的 workflow。"""
 
     if workflow_name == "threshold_calibration":
-        from paper_workflow.colab_utils.threshold_calibration import run_default_threshold_calibration_from_drive_plan
+        from experiments.runners.threshold_calibration import run_default_threshold_calibration_from_drive_plan
 
         return run_default_threshold_calibration_from_drive_plan(
             root=root,
@@ -415,10 +414,10 @@ def run_workflow_with_local_inputs(workflow_name: str, root: Path, result_root: 
             aligned_rescoring_drive_dir=(result_root / "aligned_rescoring").as_posix(),
             target_fpr=float(os.environ["SLM_WM_PAPER_RUN_TARGET_FPR"]),
             max_content_records="all",
-            minimum_clean_negative_count=os.environ.get("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", "100"),
+            minimum_clean_negative_count=os.environ.get("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT"),
         )
     if workflow_name == "real_attack_evaluation":
-        from paper_workflow.colab_utils.real_attack_evaluation import run_default_real_attack_evaluation_from_drive_plan
+        from experiments.runners.real_attack_evaluation import run_default_real_attack_evaluation_from_drive_plan
 
         return run_default_real_attack_evaluation_from_drive_plan(
             root=root,
@@ -427,7 +426,7 @@ def run_workflow_with_local_inputs(workflow_name: str, root: Path, result_root: 
             require_threshold_package=True,
         )
     if workflow_name == "conventional_geometric_attack_evaluation":
-        from paper_workflow.colab_utils.conventional_geometric_attack_evaluation import (
+        from experiments.runners.conventional_geometric_attack_evaluation import (
             run_default_conventional_geometric_attack_evaluation_from_drive_plan,
         )
 
@@ -438,7 +437,7 @@ def run_workflow_with_local_inputs(workflow_name: str, root: Path, result_root: 
             require_threshold_package=True,
         )
     if workflow_name == "dataset_level_quality":
-        from paper_workflow.colab_utils.dataset_level_quality import run_default_dataset_level_quality_from_drive_plan
+        from experiments.runners.dataset_level_quality import run_default_dataset_level_quality_from_drive_plan
 
         return run_default_dataset_level_quality_from_drive_plan(
             root=root,
@@ -609,3 +608,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+
+

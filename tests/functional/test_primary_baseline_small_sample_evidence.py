@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from experiments.baselines import (
+from paper_experiments.baselines import (
     EXCLUDED_OPERATING_POINTS,
     SMALL_SAMPLE_OPERATING_POINT,
     build_primary_baseline_small_sample_evidence_records,
@@ -163,3 +163,4 @@ def test_small_sample_evidence_writer_outputs_rebuildable_artifacts(tmp_path: Pa
     assert summary["supports_paper_claim"] is False
     assert all(row["supports_paper_claim"] == "False" for row in table_rows)
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])
+

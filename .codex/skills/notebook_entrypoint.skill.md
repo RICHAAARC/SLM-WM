@@ -24,6 +24,7 @@ notebook_entrypoint
 
 ## Blocking Rules
 
+- Notebook 文件必须集中放在 `paper_workflow/notebooks/`。
 - Notebook 不得直接写正式 records、tables、figures 或 reports。
 - 核心协议逻辑不得只存在于 Notebook cell 中。
 

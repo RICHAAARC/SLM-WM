@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from experiments.baselines import (
+from paper_experiments.baselines import (
     build_primary_baseline_formal_evidence_collection_rows,
     build_primary_baseline_formal_evidence_collection_summary,
     build_primary_baseline_formal_import_schema,
@@ -400,3 +400,4 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
     assert collection_summary["missing_formal_evidence_collection_task_count"] == 4
     assert summary["primary_baseline_formal_ready"] is False
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])
+

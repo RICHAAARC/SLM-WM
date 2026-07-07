@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from experiments.baselines.command_plan import (
+from paper_experiments.baselines.command_plan import (
     PRIMARY_BASELINE_ADAPTERS,
     build_baseline_command_plan_manifest,
     load_baseline_command_plan,
@@ -282,3 +282,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

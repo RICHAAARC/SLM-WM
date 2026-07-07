@@ -31,6 +31,7 @@ PILOT_PAPER_RESULT_PROTOCOL_NAME = "pilot_paper_fixed_fpr_common_protocol"
 PILOT_PAPER_RESULT_SCOPE = "pilot_paper_common_protocol"
 PILOT_PAPER_CLAIM_BOUNDARY = "pilot_paper_paper_claim"
 FULL_PAPER_CLAIM_BOUNDARY = "full_paper_claim_requires_full_paper_sample_scale"
+PROBE_PAPER_WORKFLOW_BOUNDARY = "probe_paper_validates_colab_workflow_split_not_paper_claim"
 PROBE_PAPER_FIXED_FPR = 0.1
 PILOT_PAPER_FIXED_FPR = 0.01
 FULL_PAPER_FIXED_FPR = 0.001
@@ -422,6 +423,8 @@ def build_pilot_paper_result_import_schema(
         "required_rate_fields": list(PILOT_PAPER_RATE_FIELDS),
         "ci_field_groups": [list(group) for group in PILOT_PAPER_CI_FIELD_GROUPS],
         "supports_paper_claim": True,
+        "paper_run_allows_paper_claim": resolved_config.prompt_set != PROBE_PAPER_RUN_NAME,
+        "probe_paper_workflow_boundary": PROBE_PAPER_WORKFLOW_BOUNDARY,
         "paper_claim_scale": resolved_config.prompt_set,
         "full_paper_claim_boundary": FULL_PAPER_CLAIM_BOUNDARY,
     }
@@ -765,9 +768,13 @@ def build_pilot_paper_common_protocol_summary(
     method_ids = {str(row["method_id"]) for row in materialized_method_rows}
     accepted_records = tuple(dict(row) for row in import_validation_report.get("accepted_records", ()))
     accepted_claim_record_count = sum(1 for row in accepted_records if _bool_field(row, "supports_paper_claim"))
-    claim_coverage_ready = (
+    import_ready = bool(import_validation_report.get("pilot_paper_result_import_ready", False))
+    template_import_coverage_ready = (
         bool(materialized_template_rows)
         and len(accepted_records) >= len(materialized_template_rows)
+    )
+    claim_coverage_ready = (
+        template_import_coverage_ready
         and accepted_claim_record_count == len(accepted_records)
     )
     superiority_gate = build_superiority_gate_summary(accepted_records, resolved_config)
@@ -779,13 +786,19 @@ def build_pilot_paper_common_protocol_summary(
         and len(materialized_template_rows) == len(materialized_attack_rows) * len(materialized_method_rows)
         and math.isclose(float(resolved_config.target_fpr), expected_target_fpr, rel_tol=0.0, abs_tol=1e-12)
     )
+    paper_run_allows_claim = resolved_config.prompt_set != PROBE_PAPER_RUN_NAME
+    paper_run_workflow_validation_ready = ready and import_ready and template_import_coverage_ready
     paper_run_claim_ready = (
         ready
-        and bool(import_validation_report.get("pilot_paper_result_import_ready", False))
+        and paper_run_allows_claim
+        and import_ready
         and claim_coverage_ready
         and superiority_gate["superiority_gate_ready"]
     )
-    probe_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == PROBE_PAPER_RUN_NAME
+    probe_paper_claim_ready = False
+    probe_paper_workflow_validation_ready = (
+        resolved_config.prompt_set == PROBE_PAPER_RUN_NAME and paper_run_workflow_validation_ready
+    )
     pilot_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == PILOT_PAPER_PROMPT_SET
     full_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == FULL_PAPER_RUN_NAME
     return {
@@ -795,7 +808,11 @@ def build_pilot_paper_common_protocol_summary(
         "result_claim_scope": resolved_config.result_claim_scope,
         "paper_claim_scale": resolved_config.prompt_set,
         "full_paper_claim_boundary": FULL_PAPER_CLAIM_BOUNDARY,
+        "probe_paper_workflow_boundary": PROBE_PAPER_WORKFLOW_BOUNDARY,
+        "paper_run_allows_paper_claim": paper_run_allows_claim,
         "pilot_paper_common_protocol_ready": ready,
+        "paper_run_workflow_validation_ready": paper_run_workflow_validation_ready,
+        "probe_paper_workflow_validation_ready": probe_paper_workflow_validation_ready,
         "pilot_paper_prompt_count": prompt_summary.get("pilot_paper_prompt_count", 0),
         "paper_prompt_count": prompt_summary.get("pilot_paper_prompt_count", 0),
         "pilot_paper_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
@@ -809,10 +826,11 @@ def build_pilot_paper_common_protocol_summary(
         "pilot_paper_attack_count": len(materialized_attack_rows),
         "pilot_paper_method_count": len(materialized_method_rows),
         "pilot_paper_import_template_count": len(materialized_template_rows),
-        "pilot_paper_result_import_ready": bool(import_validation_report.get("pilot_paper_result_import_ready", False)),
+        "pilot_paper_result_import_ready": import_ready,
         "accepted_pilot_paper_import_count": int(import_validation_report.get("accepted_pilot_paper_import_count", 0)),
         "accepted_pilot_paper_claim_record_count": accepted_claim_record_count,
         "pilot_paper_claim_record_ready": claim_coverage_ready,
+        "paper_run_result_import_coverage_ready": template_import_coverage_ready,
         "pilot_paper_evidence_coverage_ready": claim_coverage_ready,
         "pilot_paper_effectiveness_gate_ready": superiority_gate["superiority_gate_ready"],
         "pilot_paper_effectiveness_gate_reason": superiority_gate["superiority_gate_reason"],

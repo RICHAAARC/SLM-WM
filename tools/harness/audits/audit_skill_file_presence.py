@@ -19,6 +19,7 @@ REQUIRED_SKILLS = {
     "artifact_rebuild.skill.md",
     "claim_audit.skill.md",
     "placeholder_random_field_governance.skill.md",
+    "release_layer_boundary.skill.md",
 }
 REQUIRED_SECTIONS = ["## Purpose", "## Scope", "## Blocking Rules", "## Forbidden Changes"]
 

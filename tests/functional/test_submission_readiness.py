@@ -128,6 +128,7 @@ def write_minimal_repository_files(tmp_path: Path) -> None:
         "main/analysis",
         "configs",
         "experiments/protocol",
+        "paper_experiments/baselines",
         "scripts",
         "tests/functional",
         "docs",
@@ -141,6 +142,8 @@ def write_minimal_repository_files(tmp_path: Path) -> None:
         "main/analysis/__init__.py",
         "configs/model_sd35.yaml",
         "experiments/protocol/__init__.py",
+        "paper_experiments/__init__.py",
+        "paper_experiments/baselines/__init__.py",
         "scripts/write_placeholder.py",
         "tests/functional/test_placeholder.py",
         "README.md",
@@ -149,6 +152,7 @@ def write_minimal_repository_files(tmp_path: Path) -> None:
         "docs/field_registry.md",
         "docs/file_organization.md",
         "docs/release_boundary.md",
+        "docs/release_layer_boundary.md",
         "docs/extraction_profiles.md",
         "docs/intermediate_state_governance.md",
     ]:
@@ -191,5 +195,9 @@ def test_submission_readiness_outputs_are_rebuildable_and_claim_safe(tmp_path: P
     assert report["formal_full_paper_run_permitted"] is False
     assert report["excluded_operating_points"] == ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"]
     assert {row["required_input_id"] for row in required_rows} == {"gap_real_attacked_image_closed_loop", "gap_baseline_results"}
-    assert {row["release_profile_name"] for row in release_rows} == {"minimal_method_package", "paper_artifact_rebuild_package"}
+    assert {row["release_profile_name"] for row in release_rows} == {
+        "full_experiment_execution_package",
+        "minimal_method_package",
+        "paper_artifact_rebuild_package",
+    }
     assert all(row["supports_paper_claim"] == "False" for row in required_rows + release_rows)

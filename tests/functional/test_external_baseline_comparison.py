@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from experiments.baselines import default_baseline_specs
+from paper_experiments.baselines import default_baseline_specs
 from scripts.write_external_baseline_comparison_outputs import write_external_baseline_comparison_outputs
 
 
@@ -498,3 +498,4 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
     assert runtime_report["formal_evidence_path_resolution_ready"] is True
     assert runtime_report["evidence_search_roots"] == [mirror_root.resolve().as_posix()]
     assert evidence_path_report["resolved_formal_evidence_paths"] == [mirror_evidence_path.resolve().as_posix()]
+

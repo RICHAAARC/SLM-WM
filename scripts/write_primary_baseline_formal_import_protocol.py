@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from experiments.baselines import (
+from paper_experiments.baselines import (
     build_primary_baseline_formal_evidence_collection_rows,
     build_primary_baseline_formal_evidence_collection_summary,
     build_primary_baseline_formal_import_readiness_rows,
@@ -344,3 +344,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

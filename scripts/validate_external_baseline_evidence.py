@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from experiments.baselines.evidence_validator import validate_external_baseline_evidence
+from paper_experiments.baselines.evidence_validator import validate_external_baseline_evidence
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,3 +44,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

@@ -1,4 +1,4 @@
-"""审计核心方法层是否依赖外层治理或产物生成层。"""
+"""审计仓库三层结构的导入方向。"""
 
 from __future__ import annotations
 
@@ -20,26 +20,28 @@ from tools.harness.lib.json_report import build_report, exit_with_report
 
 
 def run_audit(root: str | Path) -> dict:
-    """检查 `main/` 内部的导入方向是否允许最小方法包抽离。"""
+    """检查受治理目录的导入方向是否满足发布层边界。"""
     root_path = Path(root)
     violations = []
     checked_paths = []
-    main_root = root_path / "main"
-    if not main_root.exists():
+    required_roots = sorted({boundary_root.split("/", 1)[0] for boundary_root in FORBIDDEN_IMPORT_PREFIXES_BY_ROOT})
+    missing_roots = [name for name in required_roots if not (root_path / name).exists()]
+    if missing_roots:
         return build_report(
             "audit_dependency_boundaries",
             "fail",
-            [{"path": "main", "reason": "missing_main_package"}],
-            ["main"],
+            [{"path": name, "reason": "missing_boundary_root"} for name in missing_roots],
+            required_roots,
         )
-    for path in main_root.rglob("*.py"):
+
+    for path in root_path.rglob("*.py"):
         relative = path.relative_to(root_path)
         if should_skip_path(relative):
             continue
-        checked_paths.append(str(relative))
         boundary_root = get_boundary_root(relative)
         if boundary_root is None:
             continue
+        checked_paths.append(str(relative))
         forbidden_prefixes = FORBIDDEN_IMPORT_PREFIXES_BY_ROOT[boundary_root]
         for module_name in extract_imported_modules(path):
             if is_forbidden_import(module_name, forbidden_prefixes):

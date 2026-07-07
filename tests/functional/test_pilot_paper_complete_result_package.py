@@ -8,7 +8,7 @@ from zipfile import ZIP_STORED, ZipFile
 
 import pytest
 
-from paper_workflow.colab_utils.paper_result_closure import build_paper_result_closure_preflight_report
+from paper_experiments.runners.paper_result_closure import build_paper_result_closure_preflight_report
 from scripts.write_pilot_paper_complete_result_package import (
     REQUIRED_OUTPUT_DIRS,
     write_pilot_paper_complete_result_package_outputs,

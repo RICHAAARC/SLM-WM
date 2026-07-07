@@ -19,7 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol.paper_run_config import RUN_DEFAULTS, build_paper_run_config, normalize_paper_run_name
-from paper_workflow.colab_utils.paper_result_closure import (
+from paper_experiments.runners.paper_result_closure import (
     build_paper_result_closure_preflight_report,
     run_paper_result_closure_commands,
 )
@@ -64,16 +64,15 @@ def configure_closure_environment(
     set_env("SLM_WM_DRIVE_RESULT_ROOT", resolved_package_root.as_posix())
     set_env("SLM_WM_PAPER_RUN_SAMPLE_COUNT", "all")
     set_env("SLM_WM_PAPER_RUN_TARGET_FPR", target_fpr_override or defaults["target_fpr"])
-    set_env("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", os.environ.get("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", "100"))
-    set_env(
-        "SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT",
-        os.environ.get("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", "100"),
-    )
+    os.environ.pop("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", None)
+    os.environ.pop("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", None)
     paper_run = build_paper_run_config(root_path)
     resolved_target_fpr = target_fpr_text(paper_run.target_fpr)
     set_env("SLM_WM_PAPER_RUN_TARGET_FPR", resolved_target_fpr)
     set_env("SLM_WM_PROTOCOL_PROFILE", f"{paper_run.run_name}_fixed_fpr_{resolved_target_fpr.replace('.', '_')}")
     set_env("SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT", paper_run.sample_count)
+    set_env("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", paper_run.minimum_clean_negative_count)
+    set_env("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", paper_run.dataset_level_quality_minimum_count)
     return {
         "root": root_path.as_posix(),
         "paper_run": paper_run.to_dict(),

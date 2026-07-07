@@ -8,15 +8,15 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from paper_workflow.colab_utils import minimal_latent_injection as injection_helper
-from paper_workflow.colab_utils.minimal_latent_injection import (
+from experiments.runners import minimal_latent_injection as injection_helper
+from experiments.runners.minimal_latent_injection import (
     InjectionRunConfig,
     build_default_configs,
     build_injection_id,
     compute_image_quality_metrics,
     derive_core_carrier_values,
 )
-from paper_workflow.colab_utils.sd_runtime_cold_start import (
+from experiments.runners.sd_runtime_cold_start import (
     COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND,
     build_runtime_environment_report,
     flatten_environment_versions,

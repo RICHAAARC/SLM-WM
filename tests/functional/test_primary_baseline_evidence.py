@@ -8,7 +8,7 @@ from zipfile import ZipFile
 
 import pytest
 
-from experiments.baselines import build_primary_baseline_evidence_records, build_primary_baseline_evidence_summary
+from paper_experiments.baselines import build_primary_baseline_evidence_records, build_primary_baseline_evidence_summary
 from scripts.write_primary_baseline_evidence_outputs import write_primary_baseline_evidence_outputs
 
 
@@ -211,3 +211,4 @@ def test_primary_baseline_evidence_writer_can_read_method_faithful_package(tmp_p
     )
     assert summary["adapter_run_ready_count"] == 4
     assert summary["method_faithful_package_path"] == "outputs/external_baseline_method_faithful_package.zip"
+

@@ -11,7 +11,7 @@ import zipfile
 from PIL import Image
 import pytest
 
-import scripts.write_dataset_level_quality_outputs as dataset_quality_writer
+import experiments.artifacts.dataset_level_quality_outputs as dataset_quality_writer
 from experiments.protocol import (
     FORMAL_FEATURE_BACKEND,
     FORMAL_FID_KID_BLOCKER,
@@ -21,8 +21,8 @@ from experiments.protocol import (
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
 )
-from scripts.write_dataset_level_quality_outputs import write_dataset_level_quality_outputs
-from paper_workflow.colab_utils.dataset_level_quality import (
+from experiments.artifacts.dataset_level_quality_outputs import write_dataset_level_quality_outputs
+from experiments.runners.dataset_level_quality import (
     dataset_level_quality_claim_boundary,
     run_default_dataset_level_quality_from_drive_plan,
 )

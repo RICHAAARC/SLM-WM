@@ -23,14 +23,25 @@
 ## Core Directory Rules
 
 1. `main/` 保存论文方法、核心协议、核心评估、表格重建和 CLI 复现能力。
-2. `experiments/` 保存递进式实验 runner、ablation、baseline 或 paper protocol。
-3. `paper_workflow/` 保存 Notebook / Colab workflow 入口和 session helper。
-4. `scripts/` 保存数据准备、结果检查、结果打包和 release 辅助命令。
-5. `tools/harness/` 保存外层治理审计, 不得被 `main/` 反向依赖。
-6. `.codex/` 和 `docs/` 保存协作契约与人类可读治理规则。
-7. `tests/` 按运行成本和验证目标分层。
-8. `outputs/` 是统一的本地持久化输出根目录, 默认不提交。
-9. harness 审计报告必须写入 `outputs/audit_reports/`, 不得写入仓库根目录下的 `audit_reports/`。
+2. `experiments/` 保存 SLM 项目自身的实验协议、运行时配置、内部消融和主方法 runner, 不保存外部 baseline 适配工程。
+3. `paper_experiments/` 保存完整论文实验产出能力, 包括外部 baseline 的受治理导入、method-faithful 适配、官方参考复现编排和论文级对比证据生成。
+4. `paper_workflow/` 保存 Notebook / Colab workflow 入口和 session helper, Notebook 文件应位于 `paper_workflow/notebooks/`。
+5. `scripts/` 保存数据准备、结果检查、结果打包和 release 辅助命令。
+6. `tools/harness/` 保存外层治理审计, 不得被 `main/` 反向依赖。
+7. `.codex/` 和 `docs/` 保存协作契约与人类可读治理规则。
+8. `tests/` 按运行成本和验证目标分层。
+9. `outputs/` 是统一的本地持久化输出根目录, 默认不提交。
+10. harness 审计报告必须写入 `outputs/audit_reports/`, 不得写入仓库根目录下的 `audit_reports/`。
+
+## Repository Layer Boundary Governance
+
+本仓库采用三层结构, 依赖方向必须保持为 `paper_workflow/ -> paper_experiments/ -> main/ 与 experiments/`。
+
+1. 核心方法复现层: `main/`、`experiments/`、`configs/` 中与 SLM 主方法、主实验攻击、内部消融和服务器 runner 直接相关的代码。该层不得依赖 Notebook、外部 baseline 源码或 baseline 适配工程。
+2. 完整论文实验层: `paper_experiments/` 中与外部 baseline、公平对比、官方参考复现、受治理导入和论文证据闭合相关的代码。该层可以调用核心方法复现层, 但不得依赖 `paper_workflow/`。
+3. Colab 运行层: `paper_workflow/` 中的 Notebook 入口、Drive 同步、Colab session helper 和远程运行包装。该层可以调用完整论文实验层与核心方法复现层, 但不得承载唯一正式实现。
+4. `external_baseline/` 只作为外部源码缓存和来源登记目录, 不属于核心方法复现层, 也不进入最小方法发布包。
+5. 最小方法发布包默认只包含核心方法复现层; 完整论文实验发布包可包含 `paper_experiments/`, 但仍应排除 `paper_workflow/` 与未受治理的第三方源码缓存。
 
 ## Output File Governance
 
@@ -44,9 +55,10 @@
 
 1. Notebook 是论文实验的入口和远程执行包装, 不是正式协议逻辑的唯一实现。
 2. Notebook 不得直接手写正式 records、thresholds、tables、figures 或 reports。
-3. Notebook 应调用 `main/`、`experiments/` 或 `scripts/` 中的 repository modules。
-4. Notebook 专用 helper 放在 `paper_workflow/notebook_utils/`。
-5. 跨 Notebook 共享的 Colab 或 session helper 放在 `paper_workflow/colab_utils/`。
+3. Notebook 应调用 `main/`、`experiments/`、`paper_experiments/` 或 `scripts/` 中的 repository modules。
+4. Notebook 文件统一放在 `paper_workflow/notebooks/`, 避免入口文件与 helper 模块混放。
+5. Notebook 专用 helper 放在 `paper_workflow/notebook_utils/`。
+6. 跨 Notebook 共享的 Colab 或 session helper 放在 `paper_workflow/colab_utils/`。
 
 ## Paper Artifact Governance
 

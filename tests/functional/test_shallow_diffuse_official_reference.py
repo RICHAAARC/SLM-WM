@@ -8,13 +8,13 @@ from zipfile import ZipFile
 
 import pytest
 
-from experiments.baselines import (
+from paper_experiments.baselines import (
     SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_PROTOCOL_NAME,
     build_shallow_diffuse_official_reference_record,
     build_shallow_diffuse_official_reference_schema,
     validate_shallow_diffuse_official_reference_records,
 )
-from paper_workflow.colab_utils.shallow_diffuse_official_reference import (
+from paper_experiments.runners.shallow_diffuse_official_reference import (
     ShallowDiffuseOfficialReferenceConfig,
     build_default_config,
     build_official_command,
@@ -228,7 +228,7 @@ def test_shallow_diffuse_official_reference_prepares_local_model_repository(
         return str(local_dir)
 
     monkeypatch.setattr(
-        "paper_workflow.colab_utils.shallow_diffuse_official_reference.download_hf_snapshot",
+        "paper_experiments.runners.shallow_diffuse_official_reference.download_hf_snapshot",
         fake_download_hf_snapshot,
     )
 
@@ -274,8 +274,8 @@ def test_shallow_diffuse_official_reference_prepares_isolated_legacy_environment
             legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
         return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.shallow_diffuse_official_reference.run_shell_command", fake_run_shell_command)
-    monkeypatch.setattr("paper_workflow.colab_utils.shallow_diffuse_official_reference.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.shallow_diffuse_official_reference.run_shell_command", fake_run_shell_command)
+    monkeypatch.setattr("paper_experiments.runners.shallow_diffuse_official_reference.run_command", fake_run_command)
 
     report = prepare_shallow_diffuse_legacy_environment(tmp_path, config, paths)
 
@@ -444,7 +444,7 @@ def test_shallow_diffuse_official_reference_cold_start_clones_source(
             (source_dir / "README.md").write_text("# Shallow Diffuse\n", encoding="utf-8")
         return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
 
-    monkeypatch.setattr("paper_workflow.colab_utils.shallow_diffuse_official_reference.run_command", fake_run_command)
+    monkeypatch.setattr("paper_experiments.runners.shallow_diffuse_official_reference.run_command", fake_run_command)
 
     report = ensure_shallow_diffuse_source_available(tmp_path, config, paths)
 
@@ -482,3 +482,5 @@ def test_shallow_diffuse_official_reference_default_config_reads_runtime_paramet
     assert config.official_model_id == "Manojb/stable-diffusion-2-1-base"
     assert config.reference_model == "ViT-g-14"
     assert config.reference_model_pretrain == "laion2b_s12b_b42k"
+
+

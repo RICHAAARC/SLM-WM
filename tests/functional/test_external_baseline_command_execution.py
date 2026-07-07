@@ -9,12 +9,12 @@ import sys
 
 import pytest
 
-from experiments.baselines import (
+from paper_experiments.baselines import (
     BaselineCommandSpec,
     build_baseline_execution_manifest,
     run_baseline_commands,
 )
-from experiments.baselines.command_plan import build_baseline_command_plan_manifest, load_baseline_command_plan
+from paper_experiments.baselines.command_plan import build_baseline_command_plan_manifest, load_baseline_command_plan
 from scripts.build_external_baseline_command_plan import build_parser as build_external_plan_parser
 from scripts.build_external_baseline_command_plan import build_plan as build_external_plan
 
@@ -251,3 +251,4 @@ def test_primary_diffusion_adapter_writes_method_faithful_observations(tmp_path:
     assert clean_row["detection_decision"] is False
     assert positive_row["detection_decision"] is True
     assert artifact_root.exists()
+

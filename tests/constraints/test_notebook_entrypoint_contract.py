@@ -9,44 +9,44 @@ from zipfile import ZipFile
 
 import pytest
 
-from paper_workflow.colab_utils.minimal_latent_injection import package_injection_outputs
-from paper_workflow.colab_utils.notebook_entrypoint import package_workflow_outputs
-from paper_workflow.colab_utils.notebook_runtime import mark_notebook_runtime_start
+from experiments.runners.minimal_latent_injection import package_injection_outputs
+from paper_workflow.notebook_utils.notebook_entrypoint import package_workflow_outputs
+from paper_workflow.notebook_utils.notebook_runtime import mark_notebook_runtime_start
 from paper_workflow.colab_utils.aligned_rescoring import package_aligned_rescoring_outputs
 from paper_workflow.colab_utils.attention_latent_injection import package_attention_latent_injection_outputs
 from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
 from paper_workflow.colab_utils.external_baseline_method_faithful import package_external_baseline_method_faithful_outputs
-from paper_workflow.colab_utils.real_attack_evaluation import package_real_attack_evaluation_outputs
-from paper_workflow.colab_utils.conventional_geometric_attack_evaluation import (
+from experiments.runners.real_attack_evaluation import package_real_attack_evaluation_outputs
+from experiments.runners.conventional_geometric_attack_evaluation import (
     package_conventional_geometric_attack_evaluation_outputs,
 )
-from paper_workflow.colab_utils.dataset_level_quality import package_dataset_level_quality_outputs
+from experiments.runners.dataset_level_quality import package_dataset_level_quality_outputs
 from paper_workflow.colab_utils.paper_run_environment import FORMAL_IMAGE_ATTACK_FAMILIES, configure_paper_run_environment
 from paper_workflow.colab_utils.threshold_calibration import package_threshold_calibration_outputs
-from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outputs
+from experiments.runners.sd_runtime_cold_start import package_probe_outputs
 from tools.harness.lib.naming_rules import is_allowed_file_name
 
 
-RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH = Path("paper_workflow/runtime_method_precheck_run.ipynb")
-DRIVE_COLD_START_NOTEBOOK_PATH = Path("paper_workflow/colab_drive_cold_start_smoke.ipynb")
-ATTENTION_GEOMETRY_NOTEBOOK_PATH = Path("paper_workflow/attention_geometry_capture_run.ipynb")
-ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH = Path("paper_workflow/attention_latent_injection_run.ipynb")
-ALIGNED_RESCORING_NOTEBOOK_PATH = Path("paper_workflow/aligned_rescoring_run.ipynb")
-THRESHOLD_CALIBRATION_NOTEBOOK_PATH = Path("paper_workflow/threshold_calibration_run.ipynb")
-REAL_ATTACK_EVALUATION_NOTEBOOK_PATH = Path("paper_workflow/real_attack_evaluation_run.ipynb")
+RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH = Path("paper_workflow/notebooks/runtime_method_precheck_run.ipynb")
+DRIVE_COLD_START_NOTEBOOK_PATH = Path("paper_workflow/notebooks/colab_drive_cold_start_smoke.ipynb")
+ATTENTION_GEOMETRY_NOTEBOOK_PATH = Path("paper_workflow/notebooks/attention_geometry_capture_run.ipynb")
+ATTENTION_LATENT_INJECTION_NOTEBOOK_PATH = Path("paper_workflow/notebooks/attention_latent_injection_run.ipynb")
+ALIGNED_RESCORING_NOTEBOOK_PATH = Path("paper_workflow/notebooks/aligned_rescoring_run.ipynb")
+THRESHOLD_CALIBRATION_NOTEBOOK_PATH = Path("paper_workflow/notebooks/threshold_calibration_run.ipynb")
+REAL_ATTACK_EVALUATION_NOTEBOOK_PATH = Path("paper_workflow/notebooks/real_attack_evaluation_run.ipynb")
 CONVENTIONAL_GEOMETRIC_ATTACK_EVALUATION_NOTEBOOK_PATH = Path(
-    "paper_workflow/conventional_geometric_attack_evaluation_run.ipynb"
+    "paper_workflow/notebooks/conventional_geometric_attack_evaluation_run.ipynb"
 )
-EXTERNAL_BASELINE_TREE_RING_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_tree_ring_run.ipynb")
-EXTERNAL_BASELINE_GAUSSIAN_SHADING_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_gaussian_shading_run.ipynb")
-EXTERNAL_BASELINE_SHALLOW_DIFFUSE_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_shallow_diffuse_run.ipynb")
-EXTERNAL_BASELINE_T2SMARK_NOTEBOOK_PATH = Path("paper_workflow/external_baseline_t2smark_run.ipynb")
-DATASET_LEVEL_QUALITY_NOTEBOOK_PATH = Path("paper_workflow/dataset_level_quality_run.ipynb")
-T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH = Path("paper_workflow/official_reference_t2smark_run.ipynb")
-TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/official_reference_tree_ring_run.ipynb")
-GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/official_reference_gaussian_shading_run.ipynb")
-SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/official_reference_shallow_diffuse_run.ipynb")
-PILOT_PAPER_RESULT_CLOSURE_NOTEBOOK_PATH = Path("paper_workflow/pilot_paper_result_closure_run.ipynb")
+EXTERNAL_BASELINE_TREE_RING_NOTEBOOK_PATH = Path("paper_workflow/notebooks/external_baseline_tree_ring_run.ipynb")
+EXTERNAL_BASELINE_GAUSSIAN_SHADING_NOTEBOOK_PATH = Path("paper_workflow/notebooks/external_baseline_gaussian_shading_run.ipynb")
+EXTERNAL_BASELINE_SHALLOW_DIFFUSE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/external_baseline_shallow_diffuse_run.ipynb")
+EXTERNAL_BASELINE_T2SMARK_NOTEBOOK_PATH = Path("paper_workflow/notebooks/external_baseline_t2smark_run.ipynb")
+DATASET_LEVEL_QUALITY_NOTEBOOK_PATH = Path("paper_workflow/notebooks/dataset_level_quality_run.ipynb")
+T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH = Path("paper_workflow/notebooks/official_reference_t2smark_run.ipynb")
+TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/official_reference_tree_ring_run.ipynb")
+GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/official_reference_gaussian_shading_run.ipynb")
+SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/official_reference_shallow_diffuse_run.ipynb")
+PILOT_PAPER_RESULT_CLOSURE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/pilot_paper_result_closure_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH,
     DRIVE_COLD_START_NOTEBOOK_PATH,
@@ -122,7 +122,7 @@ def assert_uses_unified_dependency_report(joined_source: str, dependency_profile
 def assert_uses_unified_archive_entrypoint(joined_source: str, workflow_name: str) -> None:
     """Notebook 应通过统一 archive 打包入口落盘。"""
 
-    assert "paper_workflow.colab_utils.notebook_entrypoint" in joined_source
+    assert "paper_workflow.notebook_utils.notebook_entrypoint" in joined_source
     assert "package_workflow_outputs" in joined_source
     assert f'workflow_name="{workflow_name}"' in joined_source
     assert "def resolve_short_commit" not in joined_source
@@ -172,9 +172,50 @@ def test_paper_run_environment_helper_preserves_drive_paths(monkeypatch: pytest.
 
 
 @pytest.mark.constraint
+def test_paper_run_environment_helper_resets_probe_paper_gate_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """切换到 probe_paper 时, Colab helper 不应沿用 pilot_paper 的最小样本门禁。"""
+
+    for key in tuple(os_key for os_key in os.environ if os_key.startswith("SLM_WM_")):
+        monkeypatch.delenv(key, raising=False)
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+    pilot_env = configure_paper_run_environment("threshold_calibration")
+    assert pilot_env["minimum_clean_negative_count"] == "100"
+    assert os.environ["SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT"] == "100"
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    probe_env = configure_paper_run_environment("threshold_calibration")
+    assert probe_env["drive_result_root"] == "/content/drive/MyDrive/SLM/probe_paper_results"
+    assert probe_env["target_fpr"] == "0.1"
+    assert probe_env["minimum_clean_negative_count"] == "10"
+    assert os.environ["SLM_WM_THRESHOLD_MINIMUM_CLEAN_NEGATIVE_COUNT"] == "10"
+
+
+@pytest.mark.constraint
 def test_ipynb_names_are_allowed_when_semantic() -> None:
     """语义化 Notebook 文件名应被命名治理接受."""
     assert all(is_allowed_file_name(notebook_path.name) for notebook_path in NOTEBOOK_PATHS)
+
+
+@pytest.mark.constraint
+def test_colab_notebook_files_are_grouped_under_notebooks_directory() -> None:
+    """Colab Notebook 文件必须集中放在 notebooks 子目录下。"""
+    assert not list(Path("paper_workflow").glob("*.ipynb"))
+    assert all(notebook_path.parent == Path("paper_workflow/notebooks") for notebook_path in NOTEBOOK_PATHS)
+
+
+@pytest.mark.constraint
+def test_generic_notebook_helpers_live_under_notebook_utils() -> None:
+    """Notebook 通用 helper 的正式实现必须位于 notebook_utils。"""
+    helper_names = ("notebook_entrypoint", "notebook_runtime", "progress")
+    for helper_name in helper_names:
+        formal_path = Path("paper_workflow/notebook_utils") / f"{helper_name}.py"
+        compatibility_path = Path("paper_workflow/colab_utils") / f"{helper_name}.py"
+        compatibility_text = compatibility_path.read_text(encoding="utf-8")
+
+        assert formal_path.is_file()
+        assert "兼容旧导入路径" in compatibility_text
+        assert f"from paper_workflow.notebook_utils.{helper_name} import *" in compatibility_text
 
 
 @pytest.mark.constraint
@@ -236,7 +277,7 @@ def test_colab_notebook_delegates_runtime_and_method_precheck_logic_to_helpers()
     assert "run_default_model_plan" in joined_source
     assert "paper_workflow.colab_utils.minimal_latent_injection" in joined_source
     assert "run_default_injection_plan" in joined_source
-    assert "paper_workflow.colab_utils.notebook_entrypoint" in joined_source
+    assert "paper_workflow.notebook_utils.notebook_entrypoint" in joined_source
     assert "package_runtime_method_precheck_outputs" in joined_source
     assert_uses_unified_dependency_report(joined_source, "sd35_runtime")
     assert "SLM_WM_RUNTIME_MODEL_SELECTION', 'auto'" in joined_source
@@ -1047,3 +1088,4 @@ def test_dataset_level_quality_outputs_can_be_packaged_and_mirrored(tmp_path: Pa
         assert embedded_summary["metadata"]["archive_payload_digest"] == input_manifest["entry_payload_digest"]
         assert embedded_summary["metadata"]["archive_digest_scope"] == "external_sidecar_after_archive_write"
         assert embedded_summary["metadata"]["final_archive_digest_available_in_sidecar"] is True
+

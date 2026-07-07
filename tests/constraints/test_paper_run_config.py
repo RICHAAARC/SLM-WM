@@ -11,6 +11,8 @@ from experiments.protocol.paper_run_config import (
     DEFAULT_CONTENT_VECTOR_WIDTH,
     DEFAULT_DRIVE_ROOT,
     build_paper_run_config,
+    derive_dataset_level_quality_minimum_count,
+    derive_minimum_clean_negative_count,
     parse_record_limit,
     resolve_count_from_environment,
     shared_method_settings,
@@ -81,7 +83,7 @@ def test_paper_run_config_switches_to_full_paper_without_notebook_rewrite(
 def test_paper_run_config_resolves_probe_paper_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """probe_paper 应使用完整论文入口, 但采用较小 prompt 数量和较宽 fixed-FPR。"""
 
-    write_prompt_file(tmp_path / "configs" / "paper_main_probe_paper_prompts.txt", 5)
+    write_prompt_file(tmp_path / "configs" / "paper_main_probe_paper_prompts.txt", 60)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
     monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
     monkeypatch.delenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", raising=False)
@@ -92,23 +94,25 @@ def test_paper_run_config_resolves_probe_paper_defaults(tmp_path: Path, monkeypa
 
     assert config.run_name == "probe_paper"
     assert config.prompt_set == "probe_paper"
-    assert config.prompt_count == 5
-    assert config.sample_count == 5
+    assert config.prompt_count == 60
+    assert config.sample_count == 60
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/probe_paper_results"
     assert config.protocol_profile == "probe_paper_fixed_fpr_0_1"
     assert config.target_fpr == 0.1
+    assert config.minimum_clean_negative_count == 10
+    assert config.dataset_level_quality_minimum_count == 60
     assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
     assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
     assert config.drive_dir("aligned_rescoring").endswith("/probe_paper_results/aligned_rescoring")
 
 
 @pytest.mark.constraint
-def test_paper_run_levels_share_method_settings_except_claim_fpr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """三类论文运行层级共享方法参数, 但使用不同样本规模和 fixed-FPR。"""
+def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """三类论文运行层级共享方法参数, 门禁规模只能由样本规模和 fixed-FPR 派生。"""
 
-    write_prompt_file(tmp_path / "configs" / "paper_main_probe_paper_prompts.txt", 5)
-    write_prompt_file(tmp_path / "configs" / "paper_main_pilot_paper_prompts.txt", 7)
-    write_prompt_file(tmp_path / "configs" / "paper_main_full_paper_prompts.txt", 11)
+    write_prompt_file(tmp_path / "configs" / "paper_main_probe_paper_prompts.txt", 60)
+    write_prompt_file(tmp_path / "configs" / "paper_main_pilot_paper_prompts.txt", 600)
+    write_prompt_file(tmp_path / "configs" / "paper_main_full_paper_prompts.txt", 6000)
     monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
@@ -126,8 +130,26 @@ def test_paper_run_levels_share_method_settings_except_claim_fpr(tmp_path: Path,
     assert probe_config.target_fpr == 0.1
     assert pilot_config.target_fpr == 0.01
     assert full_config.target_fpr == 0.001
-    assert {probe_config.sample_count, pilot_config.sample_count, full_config.sample_count} == {5, 7, 11}
+    assert probe_config.minimum_clean_negative_count == 10
+    assert pilot_config.minimum_clean_negative_count == 100
+    assert full_config.minimum_clean_negative_count == 1000
+    assert probe_config.dataset_level_quality_minimum_count == 60
+    assert pilot_config.dataset_level_quality_minimum_count == 100
+    assert full_config.dataset_level_quality_minimum_count == 100
+    assert {probe_config.sample_count, pilot_config.sample_count, full_config.sample_count} == {60, 600, 6000}
     assert len({probe_config.prompt_file, pilot_config.prompt_file, full_config.prompt_file}) == 3
+
+
+@pytest.mark.constraint
+def test_paper_run_gate_counts_are_derived_from_scale_and_fixed_fpr() -> None:
+    """门禁计数应由样本规模和 fixed-FPR 标准派生, 不应成为独立协议分叉。"""
+
+    assert derive_minimum_clean_negative_count(60, 0.1) == 10
+    assert derive_minimum_clean_negative_count(600, 0.01) == 100
+    assert derive_minimum_clean_negative_count(6000, 0.001) == 1000
+    assert derive_dataset_level_quality_minimum_count(60) == 60
+    assert derive_dataset_level_quality_minimum_count(600) == 100
+    assert derive_dataset_level_quality_minimum_count(6000) == 100
 
 
 @pytest.mark.constraint

@@ -16,7 +16,7 @@ from experiments.protocol.splits import (
     build_group_split_counts,
     group_prompt_ids_by_split,
 )
-from scripts.write_prompt_event_protocol import write_prompt_event_protocol_outputs
+from experiments.artifacts.prompt_event_protocol_outputs import write_prompt_event_protocol_outputs
 
 
 @pytest.mark.quick

@@ -12,11 +12,12 @@ from zipfile import ZipFile
 import pytest
 from PIL import Image
 
-from paper_workflow.colab_utils import conventional_geometric_attack_evaluation, real_attack_evaluation
+from experiments.runners import real_attack_evaluation
+from experiments.runners import conventional_geometric_attack_evaluation
 from experiments.protocol.attacks import default_attack_configs
 from external_baseline.primary.sd35_method_faithful_common import supported_formal_image_attack_names
-from paper_workflow.colab_utils.conventional_geometric_attack_evaluation import conventional_attack_configs
-from paper_workflow.colab_utils.real_attack_evaluation import (
+from experiments.runners.conventional_geometric_attack_evaluation import conventional_attack_configs
+from experiments.runners.real_attack_evaluation import (
     PRIMARY_MODEL_FAMILY,
     PRIMARY_MODEL_ID,
     RealAttackEvaluationConfig,

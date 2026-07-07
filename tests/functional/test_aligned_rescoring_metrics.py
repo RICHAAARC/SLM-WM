@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from paper_workflow.colab_utils import aligned_rescoring as helper
-from paper_workflow.colab_utils import attention_latent_injection as attention_helper
+from experiments.runners import aligned_rescoring as helper
+from experiments.runners import attention_latent_injection as attention_helper
 
 
 def make_config(**overrides: Any) -> helper.AlignedRescoringConfig:

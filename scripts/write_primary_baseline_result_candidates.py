@@ -17,14 +17,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from experiments.baselines import (
+from paper_experiments.baselines import (
     build_method_faithful_baseline_candidate_records,
     build_primary_baseline_formal_import_readiness_rows,
     build_primary_baseline_formal_import_readiness_summary,
     validate_primary_baseline_formal_import_rows,
 )
 from experiments.protocol.attacks import default_attack_configs
-from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
+from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR, prompt_protocol_name_for_run
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -159,6 +160,18 @@ def read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+
+
+def str_field(row: Mapping[str, Any], field_name: str) -> str:
+    """读取字符串字段, 缺失时返回空字符串。"""
+
+    return str(row.get(field_name, "") or "")
+
+
+def int_field(row: Mapping[str, Any], field_name: str) -> int:
+    """读取整数字段, 缺失时返回 0。"""
+
+    return int(float(row.get(field_name, 0) or 0))
 
 
 def read_text_from_package(package_path: Path, entry_name: str) -> str:
@@ -343,10 +356,18 @@ def normalize_t2smark_candidate_rows(
 
     row_values = [dict(row) for row in rows]
     normalized: list[dict[str, Any]] = []
+    paper_run = build_paper_run_config(root_path)
+    expected_prompt_protocol_name = prompt_protocol_name_for_run(paper_run.run_name)
     source_digest = digest_for_source(source_path, row_values)
     evidence_paths = evidence_path_for_source(source_path, local_candidate_records_path, root_path)
     for row in row_values:
         record = dict(row)
+        if (
+            str_field(record, "prompt_protocol_name") == expected_prompt_protocol_name
+            and int_field(record, "positive_count") >= paper_run.minimum_clean_negative_count
+            and int_field(record, "negative_count") >= paper_run.minimum_clean_negative_count
+        ):
+            record["full_main_prompt_protocol_ready"] = True
         if evidence_paths:
             record["baseline_result_source"] = evidence_paths[0]
             record["baseline_result_source_digest"] = source_digest
@@ -723,3 +744,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

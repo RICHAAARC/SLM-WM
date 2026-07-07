@@ -13,6 +13,7 @@ from tools.harness.lib.json_report import build_report, exit_with_report
 
 REQUIRED_PROFILE_NAMES = [
     "development_repository",
+    "full_experiment_execution_package",
     "paper_artifact_rebuild_package",
     "minimal_method_package",
 ]

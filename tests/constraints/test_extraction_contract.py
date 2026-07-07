@@ -35,4 +35,35 @@ def test_minimal_method_package_dry_run_excludes_governance_layer(tmp_path: Path
     assert all(not path.startswith("tools/") for path in copied_files)
     assert all(not path.startswith("tests/") for path in copied_files)
     assert all(not path.startswith("experiments/") for path in copied_files)
+    assert all(not path.startswith("paper_experiments/") for path in copied_files)
     assert all(not path.startswith("paper_workflow/") for path in copied_files)
+
+
+@pytest.mark.constraint
+def test_paper_artifact_rebuild_package_includes_full_experiment_layer(tmp_path: Path) -> None:
+    """论文产物重建包必须包含完整论文实验层, 但不包含 Colab 运行层。"""
+    manifest = extract_profile(
+        Path.cwd(),
+        tmp_path / "paper_artifact_rebuild_package",
+        "paper_artifact_rebuild_package",
+        dry_run=True,
+    )
+    copied_files = manifest["copied_files"]
+    assert any(path.startswith("paper_experiments/") for path in copied_files)
+    assert all(not path.startswith("paper_workflow/") for path in copied_files)
+
+
+@pytest.mark.constraint
+def test_full_experiment_execution_package_excludes_colab_layer(tmp_path: Path) -> None:
+    """服务器完整实验包必须包含完整论文实验层, 但排除 Colab 运行层。"""
+    manifest = extract_profile(
+        Path.cwd(),
+        tmp_path / "full_experiment_execution_package",
+        "full_experiment_execution_package",
+        dry_run=True,
+    )
+    copied_files = manifest["copied_files"]
+    assert any(path.startswith("paper_experiments/") for path in copied_files)
+    assert any(path.startswith("experiments/") for path in copied_files)
+    assert all(not path.startswith("paper_workflow/") for path in copied_files)
+    assert all(not path.startswith("external_baseline/") for path in copied_files)

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from experiments.baselines.small_sample_evidence import (
+from paper_experiments.baselines.small_sample_evidence import (
     build_primary_baseline_small_sample_comparison_rows,
     build_primary_baseline_small_sample_evidence_records,
     build_primary_baseline_small_sample_evidence_summary,
@@ -237,3 +237,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

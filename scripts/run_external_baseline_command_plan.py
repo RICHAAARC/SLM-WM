@@ -11,9 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from experiments.baselines.command_adapter import run_baseline_commands
-from experiments.baselines.command_plan import build_baseline_command_plan_manifest, load_baseline_command_plan
-from experiments.baselines.observation_io import build_baseline_execution_manifest
+from paper_experiments.baselines.command_adapter import run_baseline_commands
+from paper_experiments.baselines.command_plan import build_baseline_command_plan_manifest, load_baseline_command_plan
+from paper_experiments.baselines.observation_io import build_baseline_execution_manifest
 
 DEFAULT_OUTPUT_DIR = Path("outputs/external_baseline_execution")
 
@@ -126,3 +126,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

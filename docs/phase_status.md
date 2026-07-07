@@ -1,4 +1,4 @@
-﻿# 闃舵鐘舵€?
+# 闃舵鐘舵€?
 
 ## 鏂囨。瀹氫綅
 
@@ -149,7 +149,7 @@
 | execution_date | `2026-06-20` |
 | input_manifest | `outputs/sd_runtime_adapter/manifest.local.json`; `outputs/core_method_synthetic_smoke/manifest.local.json` |
 | expected_output_manifest | `outputs/minimal_diffusion_latent_injection/manifest.local.json` |
-| expected_outputs | `paper_workflow/runtime_method_precheck_run.ipynb`; `paper_workflow/colab_utils/sd_runtime_cold_start.py`; `paper_workflow/colab_utils/minimal_latent_injection.py`; `outputs/real_sd_runtime_probe/*_manifest.local.json`; `outputs/real_sd_runtime_probe/*_environment_report.json`; `outputs/real_sd_runtime_probe_package_<utc>_<short_commit>.zip`; `GoogleDrive/SLM/runtime_method_precheck/real_sd_runtime_probe/real_sd_runtime_probe_package_<utc>_<short_commit>.zip`; `outputs/minimal_diffusion_latent_injection/*_injection_result.json`; `outputs/minimal_diffusion_latent_injection/*_latent_update_records.jsonl`; `outputs/minimal_diffusion_latent_injection/*_paired_quality_metrics.csv`; `outputs/minimal_diffusion_latent_injection/*_environment_report.json`; `outputs/minimal_diffusion_latent_injection/*_manifest.local.json`; `outputs/minimal_latent_injection_package_<utc>_<short_commit>.zip`; `GoogleDrive/SLM/runtime_method_precheck/minimal_diffusion_latent_injection/minimal_latent_injection_package_<utc>_<short_commit>.zip` |
+| expected_outputs | `paper_workflow/notebooks/runtime_method_precheck_run.ipynb`; `paper_workflow/colab_utils/sd_runtime_cold_start.py`; `paper_workflow/colab_utils/minimal_latent_injection.py`; `outputs/real_sd_runtime_probe/*_manifest.local.json`; `outputs/real_sd_runtime_probe/*_environment_report.json`; `outputs/real_sd_runtime_probe_package_<utc>_<short_commit>.zip`; `GoogleDrive/SLM/runtime_method_precheck/real_sd_runtime_probe/real_sd_runtime_probe_package_<utc>_<short_commit>.zip`; `outputs/minimal_diffusion_latent_injection/*_injection_result.json`; `outputs/minimal_diffusion_latent_injection/*_latent_update_records.jsonl`; `outputs/minimal_diffusion_latent_injection/*_paired_quality_metrics.csv`; `outputs/minimal_diffusion_latent_injection/*_environment_report.json`; `outputs/minimal_diffusion_latent_injection/*_manifest.local.json`; `outputs/minimal_latent_injection_package_<utc>_<short_commit>.zip`; `GoogleDrive/SLM/runtime_method_precheck/minimal_diffusion_latent_injection/minimal_latent_injection_package_<utc>_<short_commit>.zip` |
 | blocking_items | 鏃犮€?|
 | fallback_path | SD3.5 Medium 鏄富绾? 鑻ヤ富妯″瀷鍦?Colab 涓嶅彲鐢? 杩愯 SD3 Medium 鍏煎 fallback 骞跺啓鍑?`unsupported_reason`; fallback 浜х墿涓嶅緱鏀寔姝ｅ紡璁烘枃 claim銆?|
 | invariants | Notebook 鍙綔涓哄叆鍙? runtime 閫昏緫浣嶄簬 repository helper; `main/` 涓嶄緷璧?Colab銆丏rive銆乨iffusers銆乼ransformers 鎴栨ā鍨嬫潈閲嶃€?|
@@ -157,12 +157,12 @@
 
 ### stage04 宸插畬鎴愬唴瀹?
 
-1. `paper_workflow/runtime_method_precheck_run.ipynb` 合并运行时诊断与最小机制预检, 支持拉取代码、安装依赖、登录 Hugging Face、挂载 Google Drive、运行 SD3.5 Medium 主模型、捕获真实 latent trajectory 并执行最小 latent injection 闭环。
+1. `paper_workflow/notebooks/runtime_method_precheck_run.ipynb` 合并运行时诊断与最小机制预检, 支持拉取代码、安装依赖、登录 Hugging Face、挂载 Google Drive、运行 SD3.5 Medium 主模型、捕获真实 latent trajectory 并执行最小 latent injection 闭环。
 2. `paper_workflow/colab_utils/sd_runtime_cold_start.py` 鎵胯浇鐪熷疄 SD runtime 璋冪敤銆乴atent callback 鎹曡幏銆佸浘鍍忔憳瑕併€乼rajectory records銆乪nvironment report銆乻ummary銆乵anifest銆亃ip 鎵撳寘鍜?Google Drive 闀滃儚閫昏緫銆?
 3. 宸插璁?`outputs/real_sd_runtime_probe_package_20260620t10451781952321z_b2be25c.zip`; 璇ュ寘瀵瑰簲鎻愪氦 `b2be25c`, ZIP 瀹屾暣鎬ч€氳繃, SHA-256 涓?`be6e4373edf81311209e0eb220ac189fd43e046128e2ba05815a0775dd9fceb7`銆?
 4. runtime probe 缁撴灉涓? SD3.5 Medium 涓绘ā鍨?`stabilityai/stable-diffusion-3.5-medium` 涓?SD3 Medium fallback `stabilityai/stable-diffusion-3-medium-diffusers` 鍧囧畬鎴愮湡瀹炴帹鐞? 鍧囨崟鑾?28 鏉＄湡瀹?latent trajectory records, latent shape 鍧囦负 `[1, 16, 64, 64]`銆?
 5. runtime probe 鐜蹇収宸茶褰?Colab L4銆丆UDA 12.8銆丳ython 3.12.13銆乼orch 2.11.0+cu128銆乨iffusers 0.38.0銆乼ransformers 5.12.1銆乤ccelerate 1.14.0 鍜?huggingface_hub 1.20.1銆?
-6. 合并后的 `paper_workflow/runtime_method_precheck_run.ipynb` 默认使用 `SLM_WM_RUNTIME_MODEL_SELECTION=auto` 与 `SLM_WM_INJECTION_MODEL_SELECTION=auto`, 仅作为诊断和机制预检入口, 不参与 pilot_paper 或 full_paper 正式统计。
+6. 合并后的 `paper_workflow/notebooks/runtime_method_precheck_run.ipynb` 默认使用 `SLM_WM_RUNTIME_MODEL_SELECTION=auto` 与 `SLM_WM_INJECTION_MODEL_SELECTION=auto`, 仅作为诊断和机制预检入口, 不参与 pilot_paper 或 full_paper 正式统计。
 7. `paper_workflow/colab_utils/minimal_latent_injection.py` 鎵胯浇 clean / watermarked paired image 鐢熸垚銆乴atent callback 娉ㄥ叆銆乴atent update records銆乸aired quality metrics銆乪nvironment report銆乵anifest銆亃ip 鎵撳寘鍜?Google Drive 闀滃儚閫昏緫銆?
 8. 宸插璁?`outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip`; 璇ュ寘瀵瑰簲鎻愪氦 `b2be25c`, ZIP 瀹屾暣鎬ч€氳繃, SHA-256 涓?`bff5f14c7e57e669dc6e9e371bb999fa663581bf4033ba771ab6595ff5d0ec0c`銆?
 9. minimal latent injection 缁撴灉涓? SD3.5 Medium 鐢熸垚 clean / watermarked paired images銆? 鏉?latent update records銆乸aired quality metrics銆乵anifest 鍜?environment report; 璐ㄩ噺鎸囨爣璁板綍鍖呮嫭 PSNR `37.86754851645436`銆丼SIM `0.9987065282916542`銆丮SE `0.00016339740250259638` 鍜?mean_abs_error `0.00732430862262845`銆?
@@ -197,7 +197,7 @@
 | execution_date | `2026-06-20` |
 | input_manifest | `outputs/core_package_boundary_freeze/manifest.local.json`; `outputs/algorithm_primitives/manifest.local.json`; `outputs/core_method_synthetic_smoke/manifest.local.json`; `outputs/sd_runtime_adapter/manifest.local.json`; `outputs/real_sd_runtime_probe_package_20260620t10451781952321z_b2be25c.zip`; `outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip` |
 | expected_output_manifest | `outputs/colab_drive_workflow/manifest.local.json`; `GoogleDrive/SLM/colab_drive_workflow/manifest.json`; `outputs/colab_drive_workflow-20260620T114217Z-3-001.zip` |
-| expected_outputs | `paper_workflow/colab_drive_cold_start_smoke.ipynb`; `paper_workflow/colab_utils/drive_paths.py`; `paper_workflow/colab_utils/dependency_check.py`; `paper_workflow/colab_utils/mount_drive.py`; `paper_workflow/colab_utils/runtime_setup.py`; `paper_workflow/colab_utils/manifest_io.py`; `paper_workflow/colab_utils/drive_workflow.py`; `scripts/colab_drive_entry.py`; `scripts/sync_local_outputs_to_drive.py`; `scripts/write_workflow_manifest.py`; `scripts/verify_drive_artifacts.py`; `outputs/colab_drive_workflow/colab_env_report.json`; `outputs/colab_drive_workflow/drive_mount_report.json`; `outputs/colab_drive_workflow/cold_start_smoke_record.jsonl`; `outputs/colab_drive_workflow/reload_smoke_record.jsonl`; `outputs/colab_drive_workflow/local_output_sync_report.json`; `outputs/colab_drive_workflow/manifest.local.json` |
+| expected_outputs | `paper_workflow/notebooks/colab_drive_cold_start_smoke.ipynb`; `paper_workflow/colab_utils/drive_paths.py`; `paper_workflow/colab_utils/dependency_check.py`; `paper_workflow/colab_utils/mount_drive.py`; `paper_workflow/colab_utils/runtime_setup.py`; `paper_workflow/colab_utils/manifest_io.py`; `paper_workflow/colab_utils/drive_workflow.py`; `scripts/colab_drive_entry.py`; `scripts/sync_local_outputs_to_drive.py`; `scripts/write_workflow_manifest.py`; `scripts/verify_drive_artifacts.py`; `outputs/colab_drive_workflow/colab_env_report.json`; `outputs/colab_drive_workflow/drive_mount_report.json`; `outputs/colab_drive_workflow/cold_start_smoke_record.jsonl`; `outputs/colab_drive_workflow/reload_smoke_record.jsonl`; `outputs/colab_drive_workflow/local_output_sync_report.json`; `outputs/colab_drive_workflow/manifest.local.json` |
 | blocking_items | 鏃犮€?|
 | fallback_path | 鑻?Colab 鏃犳硶鎸傝浇 Drive, 鏈湴鍛戒护浠呭啓鍏?`outputs/colab_drive_workflow/drive_mirror/` 闀滃儚鐩綍骞惰褰?`unsupported_reason`; 璇ラ暅鍍忎笉寰楁敮鎸佹寮忚鏂?claim銆?|
 | invariants | Notebook 鍙綔涓哄叆鍙? Drive manifest銆侀暅鍍忎笌閲嶈浇鏍￠獙閫昏緫浣嶄簬 repository helper 鍜?scripts; `main/` 涓嶄緷璧?Colab銆丏rive 鎴?Notebook銆?|
@@ -207,7 +207,7 @@
 
 1. 鏂板 Colab Drive workflow helper, 灏嗚矾寰勮В鏋愩€佷緷璧栧揩鐓с€丏rive 鎸傝浇鎶ュ憡銆乵anifest 璇诲啓銆佹湰鍦?outputs 闀滃儚鍜?reload 鏍￠獙鍒嗙鍒?`paper_workflow/colab_utils/` 涓嬬殑璇箟鍖栨ā鍧椼€?
 2. 鏂板 `scripts/colab_drive_entry.py`銆乣scripts/sync_local_outputs_to_drive.py`銆乣scripts/write_workflow_manifest.py` 鍜?`scripts/verify_drive_artifacts.py`, 浣滀负 Notebook 鍙皟鐢ㄧ殑浠撳簱鍏ュ彛銆?
-3. 保留 `paper_workflow/colab_drive_cold_start_smoke.ipynb` 作为 Drive 持久化诊断单入口, 该 Notebook 同时覆盖冷启动镜像、工作流清单写入与 reload 校验, 不保存执行输出, 且只调用 repository helper。
+3. 保留 `paper_workflow/notebooks/colab_drive_cold_start_smoke.ipynb` 作为 Drive 持久化诊断单入口, 该 Notebook 同时覆盖冷启动镜像、工作流清单写入与 reload 校验, 不保存执行输出, 且只调用 repository helper。
 4. 鏂板杞婚噺娴嬭瘯瑕嗙洊鏈湴 outputs 闀滃儚銆乵anifest 鍐欏叆銆乺eload 鏍￠獙銆佹湰鍦拌緭鍑虹洰褰曠害鏉熴€丏rive 鎸傝浇璺宠繃鎶ュ憡鍜屼緷璧栧揩鐓ч潪 claim 杈圭晫銆?
 5. 鏈湴鎵ц `python scripts/colab_drive_entry.py` 宸插湪 `outputs/colab_drive_workflow/` 鐢熸垚鍙璁?smoke 浜х墿, 骞堕獙璇佹湰鍦伴暅鍍?reload 閫氳繃銆?
 6. 宸蹭慨姝?Colab 鍐峰惎鍔ㄨ緭鍏ヨ竟鐣? 鑻?clone 鍚庢湰鍦?`outputs/` 涓虹┖, workflow 浼氱櫥璁?Google Drive 涓凡鏈夌殑 `SLM/runtime_method_precheck/real_sd_runtime_probe/` 涓?`SLM/runtime_method_precheck/minimal_diffusion_latent_injection/` 鐪熷疄杩愯浜х墿, 鑰屼笉鏄妸绌?manifest 璇垽涓烘湁鏁堣瘉鎹€?
@@ -386,7 +386,7 @@
 | execution_date | `2026-06-20` |
 | input_manifest | `outputs/content_carriers/manifest.local.json`; `outputs/content_carriers/content_carrier_summary.json`; `outputs/sd_runtime_adapter/manifest.local.json`; `outputs/sd_runtime_adapter/attention_capture_records.jsonl`; Colab 杩愯鍚庡彲鏇挎崲涓?`outputs/real_attention_geometry/real_attention_capture_records.jsonl` |
 | expected_output_manifest | `outputs/attention_geometry/manifest.local.json`; `outputs/real_attention_geometry/real_attention_manifest.local.json`; `outputs/real_attention_geometry/attention_geometry_archive_manifest.local.json` |
-| expected_outputs | `paper_workflow/attention_geometry_capture_run.ipynb`; `paper_workflow/colab_utils/attention_geometry_capture.py`; `outputs/real_attention_geometry/real_attention_capture_records.jsonl`; `outputs/real_attention_geometry/real_attention_capture_summary.json`; `outputs/real_attention_geometry/real_attention_environment_report.json`; `outputs/attention_geometry/attention_graph_records.jsonl`; `outputs/attention_geometry/geometry_evidence_records.jsonl`; `outputs/attention_geometry/attention_relation_consistency.csv`; `outputs/attention_geometry/geometry_evidence_summary.json`; `outputs/attention_geometry/manifest.local.json`; `outputs/real_attention_geometry/attention_geometry_package_<utc>_<short_commit>.zip`; `GoogleDrive/SLM/attention_geometry/attention_geometry_package_<utc>_<short_commit>.zip` |
+| expected_outputs | `paper_workflow/notebooks/attention_geometry_capture_run.ipynb`; `paper_workflow/colab_utils/attention_geometry_capture.py`; `outputs/real_attention_geometry/real_attention_capture_records.jsonl`; `outputs/real_attention_geometry/real_attention_capture_summary.json`; `outputs/real_attention_geometry/real_attention_environment_report.json`; `outputs/attention_geometry/attention_graph_records.jsonl`; `outputs/attention_geometry/geometry_evidence_records.jsonl`; `outputs/attention_geometry/attention_relation_consistency.csv`; `outputs/attention_geometry/geometry_evidence_summary.json`; `outputs/attention_geometry/manifest.local.json`; `outputs/real_attention_geometry/attention_geometry_package_<utc>_<short_commit>.zip`; `GoogleDrive/SLM/attention_geometry/attention_geometry_package_<utc>_<short_commit>.zip` |
 | blocking_items | 鏈湴鐜鏃?GPU 鍜岀湡瀹?SD3.5 Medium 鏉冮噸, 鍥犳鏈湴榛樿浜х墿浠嶆潵鑷墠搴?synthetic attention capture; 鐪熷疄 `attention_geometry_ready=true` 闇€瑕佽繍琛?Colab Notebook 骞跺洖浼犵粨鏋滃寘瀹¤銆?|
 | fallback_path | 鑻ョ湡瀹?attention hook 涓嶅彲鐢? Notebook 浼氳 `attention_geometry_ready` 鏂█澶辫触, 骞朵繚鐣欏け璐?summary; 涓嶅厑璁告妸 synthetic attention capture 鏀瑰啓涓虹湡瀹?capture銆?|
 | invariants | 鍑犱綍璇佹嵁鍙褰曞彲闈犳€х粺璁? `direct_positive_decision=false`; 鍙湁鎵€鏈?capture records 鍧囦负鐪熷疄鍙璁¤褰曘€乣real_attention_capture_count>0` 涓?`unsupported_capture_count=0` 鏃? `attention_geometry_ready` 鎵嶈兘涓?true銆?|
@@ -399,7 +399,7 @@
 3. 鏇存柊 `experiments/runtime/diffusion/attention_capture.py`, 澧炲姞浠?Q/K 鍚戦噺鏋勯€犲彲瀹¤ attention capture record 鐨勭函鍑芥暟鍏ュ彛, 淇濇寔鐪熷疄 runtime hook 涓庢牳蹇冩柟娉曞眰瑙ｈ€︺€?
 4. 鏇存柊 `scripts/write_attention_geometry_outputs.py`, 鏀寔閫氳繃 `--attention-records-path` 鎸囧悜鐪熷疄 Colab capture records; 鍙湁 records 鍏ㄩ儴鏃?`unsupported_reason`銆乣metadata.capture_is_synthetic=false`銆佸寘鍚湁鐣?`attention_matrix_preview`, 涓?`real_attention_capture_count>0`, summary 涓?`attention_geometry_ready` 鎵嶈兘涓?true銆?
 5. 鏂板 `paper_workflow/colab_utils/attention_geometry_capture.py`, 鍦ㄧ湡瀹?SD3.5 Medium pipeline 鐨?transformer attention 妯″潡涓婃敞鍐?hook, 浠庣湡瀹?hidden states 鏋勯€犳湁鐣屽彲瀹¤ attention map, 鍐欏嚭鐪熷疄 capture records, 骞惰皟鐢ㄥ嚑浣曢噸寤鸿剼鏈埛鏂?`outputs/attention_geometry/`銆?
-6. 鏂板 `paper_workflow/attention_geometry_capture_run.ipynb`, 鏀寔 Colab 鍐峰惎鍔? 鎸傝浇 Google Drive銆佹媺鍙栦唬鐮併€佸畨瑁呬緷璧栥€佽鍙?`HF_TOKEN`銆佸姞杞?SD3.5 Medium銆佹墽琛岀湡瀹?attention capture銆佹柇瑷€ `attention_geometry_ready=true`, 骞舵墦鍖呴暅鍍忓埌 `GoogleDrive/SLM/attention_geometry/`銆?
+6. 鏂板 `paper_workflow/notebooks/attention_geometry_capture_run.ipynb`, 鏀寔 Colab 鍐峰惎鍔? 鎸傝浇 Google Drive銆佹媺鍙栦唬鐮併€佸畨瑁呬緷璧栥€佽鍙?`HF_TOKEN`銆佸姞杞?SD3.5 Medium銆佹墽琛岀湡瀹?attention capture銆佹柇瑷€ `attention_geometry_ready=true`, 骞舵墦鍖呴暅鍍忓埌 `GoogleDrive/SLM/attention_geometry/`銆?
 7. 鎵撳寘閫昏緫浼氭妸鐪熷疄 capture records銆佺湡瀹?capture summary銆佽繍琛岀幆澧冩姤鍛娿€乤ttention geometry records銆乻ummary銆乵anifest銆佽緭鍏ユ牳瀵?manifest 绛夋枃浠剁撼鍏?zip, 閬垮厤鍙笂浼犲崟涓€ summary銆?
 8. 鏂板鍜屾洿鏂版祴璇曡鐩?Q/K 娉ㄦ剰鍔涘叕寮忋€佺湡瀹?preview 鐭╅樀 ready gate銆丯otebook 鍏ュ彛濂戠害銆佹墦鍖呴暅鍍忓绾﹀拰 outputs 鐩綍绾︽潫銆?
 9. `docs/field_registry.md` 宸茬櫥璁扮湡瀹?attention map preview銆乤ttention records path銆佹崟鑾?tensor 褰㈢姸銆佸嚑浣?manifest / summary 璺緞鍜屽帇缂╁寘杈撳叆 manifest 鐩稿叧瀛楁銆?
@@ -433,7 +433,7 @@
 | execution_date | `2026-06-20` |
 | input_manifest | `outputs/attention_geometry_package_20260620t13511781963497z_b237bb3.zip`; `outputs/semantic_subspace/manifest.local.json`; `outputs/content_carriers/manifest.local.json` |
 | expected_output_manifest | `outputs/attention_latent_update/manifest.local.json`; Colab 杩愯鍚庝负 `outputs/attention_latent_injection/attention_latent_injection_manifest.local.json` |
-| expected_outputs | `outputs/attention_latent_update/attention_carrier_records.jsonl`; `outputs/attention_latent_update/attention_update_stability.csv`; `outputs/attention_latent_update/attention_update_quality_metrics.csv`; `outputs/attention_latent_update/attention_update_summary.json`; `outputs/attention_latent_update/manifest.local.json`; `paper_workflow/attention_latent_injection_run.ipynb`; `paper_workflow/colab_utils/attention_latent_injection.py`; Colab 杩愯鍚庝负 `outputs/attention_latent_injection/attention_latent_injection_result.json`; `outputs/attention_latent_injection/attention_latent_update_records.jsonl`; `outputs/attention_latent_injection/attention_paired_quality_metrics.csv`; `outputs/attention_latent_injection/attention_injection_environment_report.json`; `outputs/attention_latent_injection/attention_latent_injection_manifest.local.json`; `GoogleDrive/SLM/attention_latent_injection/attention_latent_injection_package_<utc>_<short_commit>.zip` |
+| expected_outputs | `outputs/attention_latent_update/attention_carrier_records.jsonl`; `outputs/attention_latent_update/attention_update_stability.csv`; `outputs/attention_latent_update/attention_update_quality_metrics.csv`; `outputs/attention_latent_update/attention_update_summary.json`; `outputs/attention_latent_update/manifest.local.json`; `paper_workflow/notebooks/attention_latent_injection_run.ipynb`; `paper_workflow/colab_utils/attention_latent_injection.py`; Colab 杩愯鍚庝负 `outputs/attention_latent_injection/attention_latent_injection_result.json`; `outputs/attention_latent_injection/attention_latent_update_records.jsonl`; `outputs/attention_latent_injection/attention_paired_quality_metrics.csv`; `outputs/attention_latent_injection/attention_injection_environment_report.json`; `outputs/attention_latent_injection/attention_latent_injection_manifest.local.json`; `GoogleDrive/SLM/attention_latent_injection/attention_latent_injection_package_<utc>_<short_commit>.zip` |
 | blocking_items | 鐪熷疄 Colab GPU 缁撴灉鍖呭凡鍥炰紶骞跺畬鎴愭湰鍦板璁? `image_quality_metrics_ready=true`; 浣?`full_method_claim_ready=false`, 鍥犱负 fixed-FPR 涓?rescue 缁熻杈圭晫灏氭湭鍐荤粨銆?|
 | fallback_path | 鑻ュ嚑浣曡瘉鎹笉鍙潬鎴?update 绋冲畾鎬ц竟鐣屼笉婊¤冻, carrier 鑷姩闄嶇骇涓?`evidence_only`, 鍙繚鐣欏嚑浣曡瘉鎹? 涓嶅啓鍏?Full 鏂规硶涓诲紶銆?|
 | invariants | 鍑犱綍閾句笉鐩存帴 positive; attention update 鍙湪 `attention_geometry_ready=true` 涓斿嚑浣曡瘉鎹彲闈犳椂 active; 鏈湴璐ㄩ噺浠呬负 proxy, 涓嶆浛浠ｇ湡瀹?paired image 璐ㄩ噺鎸囨爣銆?|
@@ -447,7 +447,7 @@
 4. 鏂板 `tests/functional/test_attention_latent_update.py`, 瑕嗙洊鍙潬鍑犱綍璇佹嵁瑙﹀彂 active update銆佷笉鍙潬鍑犱綍璇佹嵁闄嶇骇涓?`evidence_only`, 浠ュ強鑴氭湰浠?ready geometry 鍖呴噸寤哄彈娌荤悊浜х墿銆?
 5. `docs/field_registry.md` 宸茬櫥璁?attention-relative carrier銆佸叧绯绘崯澶便€佸己搴︾ǔ瀹氭€с€佽川閲忎唬鐞嗗拰 Full 鏂规硶 claim 杈圭晫鐩稿叧瀛楁銆?
 6. 鏂板 `paper_workflow/colab_utils/attention_latent_injection.py`, 鏀寔浠?Google Drive 璇诲彇鏈€鏂?ready attention geometry 鍖? 閲嶅缓 prompt / semantic / content / attention update 杈撳叆閾? 閫夋嫨 active carrier, 骞跺湪鐪熷疄 SD3.5 latent callback 涓墽琛?attention-relative update銆?
-7. 鏂板 `paper_workflow/attention_latent_injection_run.ipynb`, 鏀寔 Colab 鍐峰惎鍔ㄣ€佹寕杞?Drive銆佽鍙?`HF_TOKEN`銆佹鏌?GPU銆佹墽琛岀湡瀹?attention latent injection銆佸己鏂█鐪熷疄 latent update 涓庤川閲忔寚鏍囧瓨鍦? 骞舵墦鍖呴暅鍍忓埌 `GoogleDrive/SLM/attention_latent_injection/`銆?
+7. 鏂板 `paper_workflow/notebooks/attention_latent_injection_run.ipynb`, 鏀寔 Colab 鍐峰惎鍔ㄣ€佹寕杞?Drive銆佽鍙?`HF_TOKEN`銆佹鏌?GPU銆佹墽琛岀湡瀹?attention latent injection銆佸己鏂█鐪熷疄 latent update 涓庤川閲忔寚鏍囧瓨鍦? 骞舵墦鍖呴暅鍍忓埌 `GoogleDrive/SLM/attention_latent_injection/`銆?
 8. 鏇存柊 `tests/constraints/test_notebook_entrypoint_contract.py`, 瑕嗙洊鏂?Notebook 鍏ュ彛濮旀墭銆佹棤鎵ц杈撳嚭鍜岀湡瀹?injection 浜х墿鎵撳寘闀滃儚銆?
 
 ### stage10 褰撳墠浜х墿鎽樿
@@ -607,7 +607,7 @@
 
 ### stage14 当前完成内容
 
-1. `experiments/baselines/formal_import.py` 已提供主表 external baseline 正式导入 schema、候选记录 validator 和 per-baseline readiness 聚合。
+1. `paper_experiments/baselines/formal_import.py` 已提供主表 external baseline 正式导入 schema、候选记录 validator 和 per-baseline readiness 聚合。
 2. `scripts/write_primary_baseline_result_candidates.py` 已写出 `baseline_result_records.jsonl`、`baseline_result_candidate_validation_report.json`、`baseline_formal_import_readiness.csv` 与 `baseline_formal_import_readiness_summary.json`。
 3. `scripts/write_external_baseline_comparison_outputs.py` 已读取正式导入 readiness 摘要, 并将 `formal_result_ready_count`、`blocked_primary_baseline_ids` 和主要阻断原因透传到 `baseline_runtime_report.json`。
 4. 当前主表候选来源为 Google Drive 中的小样本 method-faithful 链路包; T2SMark 在缺少 full-main 包时也可从 method-faithful observations 构造小样本候选, 候选可以审计, 但不能升级为正式论文结果。
@@ -688,7 +688,7 @@
 1. 论文产物证据审计已经消费最新 threshold、attack matrix、external baseline、小样本 baseline、dataset-level quality 和 internal ablation 产物。
 2. `submission_blocker_report.json` 已将缺口收敛到3项, 并移除了已完成的真实 attacked image 与再扩散 GPU 验证阻断项。
 3. `artifact_builder_readiness_report.json` 保持 artifact builder 可重建, 但 paper-ready artifact 数量仍为0。
-4. 已新增 `paper_workflow/dataset_level_quality_run.ipynb` 与 `paper_workflow/colab_utils/dataset_level_quality.py`, 用于从 Google Drive 中的真实攻击包和 aligned rescoring 包生成 Inception 特征 JSONL, 再调用正式数据集级质量脚本重建 FID / KID 治理产物。
+4. 已新增 `paper_workflow/notebooks/dataset_level_quality_run.ipynb` 与 `paper_workflow/colab_utils/dataset_level_quality.py`, 用于从 Google Drive 中的真实攻击包和 aligned rescoring 包生成 Inception 特征 JSONL, 再调用正式数据集级质量脚本重建 FID / KID 治理产物。
 
 ### stage16 当前产物摘要
 
@@ -754,7 +754,7 @@
 | execution_date | `2026-06-21` |
 | input_manifest | `outputs/attention_geometry/manifest.local.json`; `outputs/content_carriers/manifest.local.json`; `outputs/attention_latent_update/manifest.local.json` |
 | expected_output_manifest | `outputs/aligned_rescoring/aligned_rescoring_manifest.local.json` |
-| expected_outputs | `paper_workflow/aligned_rescoring_run.ipynb`; `paper_workflow/colab_utils/aligned_rescoring.py`; `outputs/aligned_rescoring/aligned_rescoring_records.jsonl`; `outputs/aligned_rescoring/aligned_rescoring_result.json`; `outputs/aligned_rescoring/aligned_rescoring_quality_metrics.csv`; `outputs/aligned_rescoring/aligned_rescoring_environment_report.json`; `outputs/aligned_rescoring/aligned_rescoring_manifest.local.json`; `GoogleDrive/SLM/aligned_rescoring/aligned_rescoring_package_<utc>_<short_commit>.zip` |
+| expected_outputs | `paper_workflow/notebooks/aligned_rescoring_run.ipynb`; `paper_workflow/colab_utils/aligned_rescoring.py`; `outputs/aligned_rescoring/aligned_rescoring_records.jsonl`; `outputs/aligned_rescoring/aligned_rescoring_result.json`; `outputs/aligned_rescoring/aligned_rescoring_quality_metrics.csv`; `outputs/aligned_rescoring/aligned_rescoring_environment_report.json`; `outputs/aligned_rescoring/aligned_rescoring_manifest.local.json`; `GoogleDrive/SLM/aligned_rescoring/aligned_rescoring_package_<utc>_<short_commit>.zip` |
 | blocking_items | 鏈湴鐜鏃?GPU 鍜岀湡瀹?SD3.5 Medium 鏉冮噸, 鍥犳鏈瀹屾垚 Colab workflow 涓?repository helper 鐨?LPIPS / CLIP pair-level 鎸囨爣鎺ュ叆; LPIPS / CLIP 榛樿鍦?CPU 涓婅绠椾互閬垮紑 SD3.5 pipeline 鍗犵敤 GPU 鍚庣殑鏄惧瓨鍘嬪姏, 鏂扮湡瀹炰骇鐗╅渶瑕佸湪 Colab GPU 涓噸鏂拌繍琛?notebook 鍚庡洖浼犲璁°€?|
 | fallback_path | 鑻ユ病鏈?ready attention geometry 鍖呫€丠F_TOKEN銆丟PU runtime銆佺湡瀹?latent callback 鎴?required pair-level perceptual metrics, helper 浼氬啓鍑?fail result 鍜?unsupported reason, 涓嶄細浼€?real aligned score 鎴栨劅鐭ユ寚鏍囥€?|
 | invariants | Notebook 鍙綔涓哄叆鍙? 姝ｅ紡閫昏緫浣嶄簬 `paper_workflow/colab_utils/aligned_rescoring.py`; 杈撳嚭浠嶄繚鎸?`supports_paper_claim=false` 鍜?`full_method_claim_ready=false`, 鐩村埌閲嶆柊杩愯 geometric rescue 涓?threshold calibration 骞跺璁?FPR銆?|
@@ -763,7 +763,7 @@
 ### aligned rescoring workflow 宸插畬鎴愬唴瀹?
 
 1. 鏂板 `paper_workflow/colab_utils/aligned_rescoring.py`, 鏀寔璇诲彇 ready attention geometry 鍖呫€侀噸寤?prompt / semantic / content / attention update 杈撳叆閾? 閫夋嫨 active attention carrier, 鍦ㄧ湡瀹?SD3.5 Medium latent callback 涓幏鍙栧榻愬墠鍚?latent 鎶曞奖骞堕噸鏂拌绠?LF/HF 鍐呭鍒嗘暟銆?
-2. 鏂板骞舵洿鏂?`paper_workflow/aligned_rescoring_run.ipynb`, 鏀寔 Colab 鍐峰惎鍔? 鎸傝浇 Google Drive銆佸畨瑁呭綋鍓?Colab 鍙繍琛屼緷璧栫粍鍚堝拰 LPIPS 鍙€変緷璧栥€佹媺鍙栦粨搴撱€佽鍙?`HF_TOKEN`銆佹鏌?GPU銆佹墽琛岀湡瀹?aligned rescoring, 璁＄畻 LPIPS 涓?CLIP pair-level 鎸囨爣, 骞跺皢缁撴灉鍖呬繚瀛樺埌 `GoogleDrive/SLM/aligned_rescoring/`銆?
+2. 鏂板骞舵洿鏂?`paper_workflow/notebooks/aligned_rescoring_run.ipynb`, 鏀寔 Colab 鍐峰惎鍔? 鎸傝浇 Google Drive銆佸畨瑁呭綋鍓?Colab 鍙繍琛屼緷璧栫粍鍚堝拰 LPIPS 鍙€変緷璧栥€佹媺鍙栦粨搴撱€佽鍙?`HF_TOKEN`銆佹鏌?GPU銆佹墽琛岀湡瀹?aligned rescoring, 璁＄畻 LPIPS 涓?CLIP pair-level 鎸囨爣, 骞跺皢缁撴灉鍖呬繚瀛樺埌 `GoogleDrive/SLM/aligned_rescoring/`銆?
 3. 鏂板鎵撳寘鍑芥暟 `package_aligned_rescoring_outputs`, 浼氭妸 aligned rescoring records銆乺esult銆乹uality metrics銆乪nvironment report銆乵anifest銆乤ttention update 鏂规硶鏂囦欢鍜?package input manifest 绾冲叆 zip銆?
 4. 鏇存柊 `tests/constraints/test_notebook_entrypoint_contract.py`, 瑕嗙洊鏂?Notebook 鍏ュ彛濮旀墭銆佹棤鎵ц杈撳嚭銆丏rive 闀滃儚璺緞鍜屾墦鍖呬骇鐗╂牳瀵广€?
 5. 鏇存柊 `docs/field_registry.md`, 鐧昏鐪熷疄 aligned rescoring銆乴atent projection銆丩PIPS / FID / KID / CLIP 鐘舵€併€乧lean / aligned CLIP score銆丆LIP delta 鍜岃川閲忔寚鏍囩浉鍏冲瓧娈点€?
@@ -805,7 +805,7 @@
 | execution_date | `2026-06-23` |
 | input_manifest | `outputs/aligned_rescoring/aligned_rescoring_manifest.local.json`; `outputs/attack_matrix/manifest.local.json`; `outputs/threshold_calibration/manifest.local.json` |
 | expected_output_manifest | `outputs/real_attack_evaluation/real_attack_manifest.local.json` |
-| expected_outputs | `paper_workflow/real_attack_evaluation_run.ipynb`; `paper_workflow/colab_utils/real_attack_evaluation.py`; `outputs/real_attack_evaluation/attacked_images/*.png`; `outputs/real_attack_evaluation/real_attack_detection_records.jsonl`; `outputs/real_attack_evaluation/formal_attack_detection_records.jsonl`; `outputs/real_attack_evaluation/real_attacked_image_registry.jsonl`; `outputs/real_attack_evaluation/real_attack_family_metrics.csv`; `outputs/real_attack_evaluation/real_attack_environment_report.json`; `outputs/real_attack_evaluation/real_attack_manifest.local.json`; `GoogleDrive/SLM/real_attack_evaluation/real_attack_evaluation_package_<utc>_<short_commit>.zip` |
+| expected_outputs | `paper_workflow/notebooks/real_attack_evaluation_run.ipynb`; `paper_workflow/colab_utils/real_attack_evaluation.py`; `outputs/real_attack_evaluation/attacked_images/*.png`; `outputs/real_attack_evaluation/real_attack_detection_records.jsonl`; `outputs/real_attack_evaluation/formal_attack_detection_records.jsonl`; `outputs/real_attack_evaluation/real_attacked_image_registry.jsonl`; `outputs/real_attack_evaluation/real_attack_family_metrics.csv`; `outputs/real_attack_evaluation/real_attack_environment_report.json`; `outputs/real_attack_evaluation/real_attack_manifest.local.json`; `GoogleDrive/SLM/real_attack_evaluation/real_attack_evaluation_package_<utc>_<short_commit>.zip` |
 | blocking_items | 小样本真实 GPU 链路已跑通; 当前不再阻断 attack matrix 重建。论文级 robustness 仍需要 full-main 样本规模和后续 evidence audit。 |
 | fallback_path | 若后续 Colab 结果包缺失、模型不可用或 DDIM inversion 后端失败, helper 必须写出 `run_decision=fail` 与 `unsupported_reason`, 不得伪造 attacked image 或 formal detection records。 |
 | invariants | Notebook 只作为远程入口; 正式逻辑位于 `paper_workflow/colab_utils/real_attack_evaluation.py`; 产物保持 `supports_paper_claim=false`, 直到 full-main 统计和证据审计通过。 |
@@ -888,7 +888,7 @@
 
 ### primary baseline 推进内容
 
-1. 新增 `experiments/baselines/primary_reproduction.py`, 冻结 Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark 的官方入口命令、依赖画像、模型对齐状态和结果适配器名称。
+1. 新增 `paper_experiments/baselines/primary_reproduction.py`, 冻结 Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark 的官方入口命令、依赖画像、模型对齐状态和结果适配器名称。
 2. 新增 `scripts/write_primary_baseline_reproduction_plan.py`, 从源码登记文件与攻击矩阵读取输入, 写出主表 baseline 官方复现计划和共同协议结果导入模板。
 3. 新增 `tests/functional/test_primary_baseline_reproduction_plan.py`, 验证 4 个主表 baseline 均进入计划, T2SMark 被标记为 SD3.5 Medium 原生入口, 其他旧版 SD 系 baseline 标记为需要协议适配。
 4. 当前计划将 Tree-Ring、Gaussian Shading、Shallow Diffuse 归入 `legacy_stable_diffusion_requires_protocol_adapter`, 将 T2SMark 归入 `sd35_medium_native_entrypoint`。
@@ -903,7 +903,7 @@
 
 | command | result |
 | --- | --- |
-| `python -m py_compile experiments/baselines/primary_reproduction.py scripts/write_primary_baseline_reproduction_plan.py tests/functional/test_primary_baseline_reproduction_plan.py` | pass |
+| `python -m py_compile paper_experiments/baselines/primary_reproduction.py scripts/write_primary_baseline_reproduction_plan.py tests/functional/test_primary_baseline_reproduction_plan.py` | pass |
 | `python scripts/write_primary_baseline_reproduction_plan.py` | pass, `primary_baseline_count=4`, `result_record_template_count=56` |
 | `pytest -q` | pass, 109 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
@@ -929,7 +929,7 @@
 
 1. 根 `.gitignore` 不再忽略整个 `external_baseline/`, 改由 `external_baseline/.gitignore` 仅忽略第三方 `source/` 与 adapter 临时 `artifacts/` 子树。
 2. `tools/harness/lib/file_scanner.py` 已改为扫描 `external_baseline/` 中的 adapter、README 和登记文件, 但跳过第三方源码快照。
-3. 新增 `experiments/baselines/command_adapter.py`、`command_plan.py`、`observation_io.py` 和 `evidence_validator.py`, 形成 command plan、execution、observation 和 evidence 的统一入口。
+3. 新增 `paper_experiments/baselines/command_adapter.py`、`command_plan.py`、`observation_io.py` 和 `evidence_validator.py`, 形成 command plan、execution、observation 和 evidence 的统一入口。
 4. 新增 `scripts/build_external_baseline_command_plan.py`、`scripts/run_external_baseline_command_plan.py` 和 `scripts/validate_external_baseline_evidence.py`, 所有仓库命令输出默认写入 `outputs/`。
 5. 主表 baseline 已新增项目维护 adapter 路径。T2SMark adapter 可读取官方 `results.json`; Tree-Ring、Gaussian Shading 和 Shallow Diffuse 当前提供 SD3.5 latent 级 method-faithful adapter, 正式指标仍需补齐官方完整复现或受治理导入路径。
 6. `external_baseline/source_registry.json` 已补充 `adapter_path`、`adapter_status`、`model_alignment_status` 和 `official_source_tracked` 字段。
@@ -958,7 +958,7 @@
 
 ### external baseline method-faithful 入口内容
 
-1. 新增 `paper_workflow/external_baseline_tree_ring_run.ipynb`、`paper_workflow/external_baseline_gaussian_shading_run.ipynb`、`paper_workflow/external_baseline_shallow_diffuse_run.ipynb` 与 `paper_workflow/external_baseline_t2smark_run.ipynb`, 支持 Colab 冷启动挂载 Google Drive、拉取仓库、读取 `HF_TOKEN`、检查 CUDA, 并将四个主表 external baseline 拆分为单 baseline 入口运行。
+1. 新增 `paper_workflow/notebooks/external_baseline_tree_ring_run.ipynb`、`paper_workflow/notebooks/external_baseline_gaussian_shading_run.ipynb`、`paper_workflow/notebooks/external_baseline_shallow_diffuse_run.ipynb` 与 `paper_workflow/notebooks/external_baseline_t2smark_run.ipynb`, 支持 Colab 冷启动挂载 Google Drive、拉取仓库、读取 `HF_TOKEN`、检查 CUDA, 并将四个主表 external baseline 拆分为单 baseline 入口运行。
 2. 新增 `paper_workflow/colab_utils/external_baseline_method_faithful.py`, 将历史包复用、官方源码缓存补齐、官方 `results.json` 生成、image pair 构造、主表 baseline adapter 命令计划执行和 zip 打包收敛到 helper。
 3. 前序结果判断边界为: 优先查找 Google Drive `external_baseline_method_faithful_package_*.zip`, 仅解出 `outputs/external_baseline_method_faithful/` 下可复用文件; 若 `results.json` 存在且允许复用, 不重新运行官方推理; 否则执行真实 GPU 生成。
 4. 当前产物显式设置 `supports_paper_claim=false`, 只能证明外部 baseline 链路可运行, 不能替代 full-main prompt split、样本量冻结、固定 FPR 与 baseline 主表统计。
@@ -978,12 +978,12 @@
 
 1. 已发现历史失败包复用时 `t2smark_image_pairs.json` 可能保留空的 `generated_image_path` 与 `generated_image_digest`, 但新的官方图像已经生成。
 2. 修正策略是将 image pair 构造改为以当前 `t2smark_official/.../images/` 目录为准: 若已有 image pair 与当前图像路径或 digest 不一致, helper 会自动重写 `t2smark_image_pairs.json`。
-3. 重新生成或刷新方式为重新运行 `paper_workflow/external_baseline_t2smark_run.ipynb`; helper 会在官方推理或结果复用后自动执行刷新, 不需要手工编辑 JSON。
+3. 重新生成或刷新方式为重新运行 `paper_workflow/notebooks/external_baseline_t2smark_run.ipynb`; helper 会在官方推理或结果复用后自动执行刷新, 不需要手工编辑 JSON。
 
 
 ### external baseline 主表证据边界推进
 
-1. 新增 `experiments/baselines/primary_evidence.py`, 将四个主表 baseline 的 adapter method-faithful 链路状态与正式共同协议结果边界分开记录。
+1. 新增 `paper_experiments/baselines/primary_evidence.py`, 将四个主表 baseline 的 adapter method-faithful 链路状态与正式共同协议结果边界分开记录。
 2. 新增 `scripts/write_primary_baseline_evidence_outputs.py`, 可读取 `external_baseline_method_faithful` 的 command results 与 observations, 也可直接读取 method-faithful zip 包, 写出 `outputs/primary_baseline_evidence/primary_baseline_evidence_records.jsonl`、summary 和 manifest。
 3. 该证据边界明确记录: Tree-Ring、Gaussian Shading 和 Shallow Diffuse 虽已具备 SD3.5 method-faithful 链路, 但仍缺方法忠实 SD3.5 adapter、full-main prompt 协议、fixed-FPR 校准、攻击矩阵检测和正式证据路径。
 4. 该推进不改变 `supports_paper_claim=false`; 作用是防止 method-faithful observation 被误升级为论文级主表 external baseline 指标。
@@ -992,9 +992,9 @@
 
 ### 主表 baseline 正式导入协议与 T2SMark full-main 路径补充
 
-1. 新增 `experiments/baselines/formal_import.py`, 将主表 external baseline 的正式结果导入边界集中到 schema validator 中, 下游 `external_baseline_comparison` 只消费 `accepted_records`, 不再把 method-faithful observation 或缺少 fixed-FPR / full-main / attack matrix 边界的记录纳入正式比较。
+1. 新增 `paper_experiments/baselines/formal_import.py`, 将主表 external baseline 的正式结果导入边界集中到 schema validator 中, 下游 `external_baseline_comparison` 只消费 `accepted_records`, 不再把 method-faithful observation 或缺少 fixed-FPR / full-main / attack matrix 边界的记录纳入正式比较。
 2. 新增 `scripts/write_primary_baseline_formal_import_protocol.py`, 可写出正式导入 schema、主表结果模板、正式模板覆盖、证据收集计划、候选记录校验报告和 manifest。该脚本只生成治理产物, 不手工填充论文结果。
-3. 新增 `paper_workflow/colab_utils/t2smark_full_main_reproduction.py` 与 `paper_workflow/official_reference_t2smark_run.ipynb`, 支持 Colab 冷启动下读取当前论文运行层级的 prompt 文件, 运行 T2SMark SD3.5 Medium full-main 官方入口, 生成 image_pairs、统一 adapter observations、正式导入候选记录、validator 报告, 并打包镜像到当前论文运行层级 Google Drive 的 `external_baseline_official_reference/` 目录。
+3. 新增 `paper_workflow/colab_utils/t2smark_full_main_reproduction.py` 与 `paper_workflow/notebooks/official_reference_t2smark_run.ipynb`, 支持 Colab 冷启动下读取当前论文运行层级的 prompt 文件, 运行 T2SMark SD3.5 Medium full-main 官方入口, 生成 image_pairs、统一 adapter observations、正式导入候选记录、validator 报告, 并打包镜像到当前论文运行层级 Google Drive 的 `external_baseline_official_reference/` 目录。
 4. 当前 T2SMark full-main 路径默认 `supports_paper_claim=false`。若 fixed-FPR 校准和攻击矩阵检测未闭合, validator 会保留 `formal_import_validation_ready=false`, 防止 raw full-main 官方结果被误声明为论文级主表 robustness 结论。
 
 ### dataset-level quality 打包自描述修正
@@ -1038,7 +1038,7 @@
 
 ### paper workflow pilot_paper 默认入口更新
 
-1. `paper_workflow/runtime_method_precheck_run.ipynb` 合并运行时诊断与最小机制预检, 替代原独立运行时诊断入口和最小 latent injection 入口。该入口默认写入 `GoogleDrive/SLM/runtime_method_precheck/`, 只用于 Colab 环境与机制闭环预检。
+1. `paper_workflow/notebooks/runtime_method_precheck_run.ipynb` 合并运行时诊断与最小机制预检, 替代原独立运行时诊断入口和最小 latent injection 入口。该入口默认写入 `GoogleDrive/SLM/runtime_method_precheck/`, 只用于 Colab 环境与机制闭环预检。
 2. 方法主流程 Notebook 当前默认使用 `SLM_WM_PROTOCOL_PROFILE=pilot_paper_fixed_fpr_0_01`, `SLM_WM_PROMPT_SET=pilot_paper`, `SLM_WM_PROMPT_FILE=configs/paper_main_pilot_paper_prompts.txt`。
 3. 方法主流程和主表 baseline 默认写入 `GoogleDrive/SLM/pilot_paper_results/` 下的对应子目录, 便于与历史链路测试和后续 full_paper 结果隔离。
 4. 当前 `pilot_paper` 默认已切换为 pilot_paper 论文配置: aligned rescoring carrier 上限为120, 真实攻击 source image 上限为120, external baseline 共享样本数为120, dataset-level 质量入口的正式特征最小样本阈值为100。其结果只能支撑 `pilot_paper` 样本规模内的论文主张, 不得被提升为 `full_paper` 论文主张。
@@ -1051,4 +1051,5 @@
 4. 已在 `paper_workflow/README.md` 中补充 Colab pilot_paper 重跑顺序和收尾命令: 先通过 `--materialize-only` 从 `/content/drive/MyDrive/SLM/pilot_paper_results` 物化上游包, 再重建 attack matrix、baseline candidates、pilot_paper result records 和 fixed-FPR common protocol。
 5. 当前仍不触发 full_paper 样本规模运行; 结果是否可支撑 pilot_paper 主张由 `pilot_paper_result_import_ready`、`pilot_paper_template_coverage_ready` 和 `pilot_paper_claim_ready` 共同决定。
 6. `pilot_paper_result_import_schema` 已新增 `minimum_result_positive_count=100` 与 `minimum_result_negative_count=100`, 低于该边界的链路测试记录会被导入 validator 拒绝, 不能误入 pilot_paper 主张边界。
+
 

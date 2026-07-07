@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pytest
 
 from main.methods.detection import RESCUE_ABLATION_MODES
-from paper_workflow.colab_utils.threshold_calibration import (
+from experiments.runners.threshold_calibration import (
     package_threshold_calibration_outputs,
     parse_optional_record_limit,
     run_default_threshold_calibration_from_drive_plan,

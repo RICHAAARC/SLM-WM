@@ -26,7 +26,7 @@ from paper_workflow.colab_utils.manifest_io import (
     write_manifest_bundle,
 )
 from paper_workflow.colab_utils.mount_drive import build_drive_mount_report
-from paper_workflow.colab_utils.notebook_runtime import mark_notebook_runtime_start, write_notebook_runtime_report
+from paper_workflow.notebook_utils.notebook_runtime import mark_notebook_runtime_start, write_notebook_runtime_report
 from paper_workflow.colab_utils.runtime_setup import build_runtime_setup_report
 
 
@@ -162,3 +162,4 @@ def run_colab_drive_workflow(
 def workflow_summary_text(summary: dict[str, Any]) -> str:
     """返回便于 Notebook 或 CLI 打印的稳定 JSON 摘要。"""
     return stable_json_text(summary)
+

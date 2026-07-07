@@ -10,7 +10,7 @@ import pytest
 
 from main.methods.semantic import build_risk_field, build_semantic_route, project_mask_to_latent
 from main.methods.subspace import build_safe_basis_plan, build_trajectory_features, estimate_approximate_jvp
-from scripts.write_semantic_subspace_outputs import (
+from experiments.artifacts.semantic_subspace_outputs import (
     RUNTIME_PROBE_ARCHIVE,
     load_latent_reference,
     write_semantic_subspace_outputs,
