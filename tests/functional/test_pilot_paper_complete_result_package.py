@@ -10,6 +10,7 @@ import pytest
 
 from paper_experiments.runners.paper_result_closure import build_paper_result_closure_preflight_report
 from scripts.write_pilot_paper_complete_result_package import (
+    PACKAGE_EXTRA_PATHS,
     REQUIRED_OUTPUT_DIRS,
     write_pilot_paper_complete_result_package_outputs,
 )
@@ -54,12 +55,22 @@ def test_complete_result_package_collects_required_pilot_outputs(tmp_path: Path)
         compression_types = {entry.compress_type for entry in archive.infolist()}
     result_index = REQUIRED_OUTPUT_DIRS.index("outputs/pilot_paper_fixed_fpr_results")
     protocol_index = REQUIRED_OUTPUT_DIRS.index("outputs/pilot_paper_fixed_fpr_common_protocol")
+    comparison_index = REQUIRED_OUTPUT_DIRS.index("outputs/external_baseline_comparison")
     assert f"outputs/pilot_paper_fixed_fpr_results/sample_{result_index}.json" in names
     assert f"outputs/pilot_paper_fixed_fpr_common_protocol/sample_{protocol_index}.json" in names
+    assert f"outputs/external_baseline_comparison/sample_{comparison_index}.json" in names
     assert "configs/paper_main_probe_paper_prompts.txt" in names
     assert "configs/paper_main_pilot_paper_prompts.txt" in names
     assert "configs/paper_main_full_paper_prompts.txt" in names
     assert compression_types == {ZIP_STORED}
+
+
+@pytest.mark.quick
+def test_complete_result_package_requires_external_baseline_comparison_artifacts() -> None:
+    """完整结果包必须显式覆盖 external baseline 对比证据与重建脚本。"""
+
+    assert "outputs/external_baseline_comparison" in REQUIRED_OUTPUT_DIRS
+    assert "scripts/write_external_baseline_comparison_outputs.py" in PACKAGE_EXTRA_PATHS
 
 
 @pytest.mark.quick

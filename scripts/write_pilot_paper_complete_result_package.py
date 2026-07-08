@@ -56,6 +56,7 @@ REQUIRED_OUTPUT_DIRS = (
     "outputs/t2smark_full_main_reproduction",
     "outputs/external_baseline_results",
     "outputs/primary_baseline_formal_import",
+    "outputs/external_baseline_comparison",
     "outputs/internal_ablation_evidence",
     "outputs/pilot_paper_fixed_fpr_results",
     "outputs/pilot_paper_fixed_fpr_common_protocol",
@@ -70,6 +71,7 @@ PACKAGE_EXTRA_PATHS = (
     "scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py",
     "scripts/write_primary_baseline_result_candidates.py",
     "scripts/write_primary_baseline_formal_import_protocol.py",
+    "scripts/write_external_baseline_comparison_outputs.py",
     "scripts/write_internal_ablation_outputs.py",
 )
 
