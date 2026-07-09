@@ -85,6 +85,39 @@ def write_json(path: str | Path, payload: Any) -> Path:
     return output_path
 
 
+def emit_adapter_progress(
+    *,
+    baseline_id: str,
+    operation: str,
+    completed: int,
+    total: int,
+    profile: str = "",
+    **metadata: Any,
+) -> None:
+    """向外层 runner 回传 method-faithful adapter 细粒度进度。
+
+    该函数属于项目通用工程写法: adapter 仍然只负责真实生成、攻击和检测,
+    进度事件通过环境变量指定的 JSONL 文件传给父进程。Notebook 只显示父进程
+    合并后的低噪声单行进度, 不直接承载任何正式实验逻辑。
+    """
+
+    try:
+        from experiments.runtime.progress import progress_event_path_from_environment, write_progress_event
+
+        write_progress_event(
+            progress_event_path_from_environment(),
+            desc="method-faithful adapter",
+            completed=completed,
+            total=total,
+            profile=profile or f"operation={operation}",
+            baseline_id=baseline_id,
+            operation=operation,
+            **metadata,
+        )
+    except Exception:
+        return
+
+
 def file_digest(path: str | Path) -> str:
     """计算文件 SHA-256 摘要, 用于图像 provenance 与 governed import。"""
 

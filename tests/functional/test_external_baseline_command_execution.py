@@ -71,6 +71,45 @@ print("toy adapter done")
 
 
 @pytest.mark.quick
+def test_external_baseline_command_runner_writes_progress_events(tmp_path: Path) -> None:
+    """命令 runner 应把子进程细粒度进度写入同一个 JSONL 事件文件。"""
+
+    adapter_path = tmp_path / "toy_progress_adapter.py"
+    output_path = tmp_path / "baseline_observations.json"
+    progress_path = tmp_path / "progress_events.jsonl"
+    adapter_path.write_text(
+        """
+import json
+import os
+import sys
+from pathlib import Path
+progress_path = os.environ.get("SLM_WM_PROGRESS_EVENT_PATH")
+if progress_path:
+    with Path(progress_path).open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"desc": "toy adapter", "completed": 1, "total": 2, "profile": "operation=toy"}, ensure_ascii=False) + "\\n")
+rows = [{"event_id": "event_001", "baseline_id": "toy", "score": 0.8, "threshold": 0.5}]
+Path(sys.argv[1]).write_text(json.dumps(rows), encoding="utf-8")
+""",
+        encoding="utf-8",
+    )
+    spec = BaselineCommandSpec(
+        baseline_id="toy",
+        command=(sys.executable, str(adapter_path), str(output_path)),
+        output_path=str(output_path),
+        working_directory=str(tmp_path),
+        timeout_seconds=30,
+    )
+
+    results, rows = run_baseline_commands([spec], progress_event_path=progress_path)
+
+    assert results[0].return_code == 0
+    assert rows[0]["event_id"] == "event_001"
+    events = [json.loads(line) for line in progress_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert any(event.get("baseline_id") == "toy" and "baseline_command" in str(event.get("profile")) for event in events)
+    assert any(event.get("desc") == "toy adapter" for event in events)
+
+
+@pytest.mark.quick
 def test_external_baseline_command_plan_loader_accepts_json_list(tmp_path: Path) -> None:
     """命令计划 loader 应把 JSON 中的 command 列表转为不可变 argv 元组。"""
 

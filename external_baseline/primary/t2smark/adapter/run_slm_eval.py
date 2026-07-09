@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from external_baseline.primary.sd35_diffusion_baseline_common import require_cuda_if_requested, write_contract_manifest, write_json
+from experiments.runtime.progress import progress_event_path_from_environment, write_progress_event
 from main.core.digest import build_stable_digest
 
 BASELINE_ID = "t2smark"
@@ -204,10 +205,30 @@ def build_t2smark_observations(
 
     observations: list[dict[str, Any]] = []
     missing_indices: list[int] = []
+    progress_path = progress_event_path_from_environment()
+    progress_total = max(1, len(image_pairs))
+    write_progress_event(
+        progress_path,
+        desc="method-faithful adapter",
+        completed=0,
+        total=progress_total,
+        profile=f"operation=t2smark_observation_conversion samples={len(image_pairs)}",
+        baseline_id=BASELINE_ID,
+        operation="t2smark_observation_conversion",
+    )
     for index, row in enumerate(image_pairs):
         result = results_by_index.get(index)
         if result is None:
             missing_indices.append(index)
+            write_progress_event(
+                progress_path,
+                desc="method-faithful adapter",
+                completed=index + 1,
+                total=progress_total,
+                profile=f"operation=t2smark_observation_conversion sample={index + 1}/{len(image_pairs)} missing=true",
+                baseline_id=BASELINE_ID,
+                operation="t2smark_observation_conversion",
+            )
             continue
         robustness = _robustness(result, result_index=index)
         image_id = _image_id(row, index + 1)
@@ -285,6 +306,16 @@ def build_t2smark_observations(
                         image_digest=attacked_image_digest,
                     )
                 )
+
+        write_progress_event(
+            progress_path,
+            desc="method-faithful adapter",
+            completed=index + 1,
+            total=progress_total,
+            profile=f"operation=t2smark_observation_conversion sample={index + 1}/{len(image_pairs)}",
+            baseline_id=BASELINE_ID,
+            operation="t2smark_observation_conversion",
+        )
 
     if attacked_image_manifest:
         lookup = _source_index_lookup(image_pairs)

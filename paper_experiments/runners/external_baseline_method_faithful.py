@@ -23,6 +23,7 @@ from experiments.protocol.splits import apply_split_assignments
 from main.analysis.artifact_manifest import build_artifact_manifest
 from paper_experiments.baselines.t2smark_pair_quality import write_t2smark_strict_pair_quality_outputs
 from experiments.runtime.progress import (
+    PROGRESS_EVENT_ENV_NAME,
     call_runner_with_progress_status,
     emit_progress_status,
     progress_bar,
@@ -360,6 +361,7 @@ def output_paths(root_path: Path, config: ExternalBaselineMethodFaithfulConfig) 
         "command_results": execution_output_dir / "baseline_command_results.json",
         "baseline_observations": execution_output_dir / "baseline_observations.json",
         "split_observation_dir": output_dir / "split_observations",
+        "progress_events": output_dir / "external_baseline_method_faithful_progress_events.jsonl",
         "environment_report": output_dir / "external_baseline_method_faithful_environment_report.json",
         "summary": output_dir / "external_baseline_method_faithful_summary.json",
         "manifest": output_dir / "external_baseline_method_faithful_manifest.local.json",
@@ -604,15 +606,23 @@ def run_command(
     timeout_seconds: int,
     progress: object | None = None,
     progress_profile: str = "",
+    child_progress_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """执行显式 argv 命令并返回可落盘诊断。"""
 
+    command_env = None
+    if child_progress_path is not None:
+        command_env = dict(os.environ)
+        command_env[PROGRESS_EVENT_ENV_NAME] = str(child_progress_path)
     completed = run_quiet_subprocess_with_progress(
         command,
         cwd=cwd,
         timeout_seconds=timeout_seconds,
         progress=progress,
         progress_profile=progress_profile or "operation=argv_command",
+        env=command_env,
+        heartbeat_seconds=15.0,
+        child_progress_path=child_progress_path,
     )
     return {
         "command": command,
@@ -629,6 +639,7 @@ def run_command_with_progress_status(
     timeout_seconds: int,
     progress: object | None = None,
     progress_profile: str = "",
+    child_progress_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """兼容带进度和无进度的命令 runner。
 
@@ -637,14 +648,29 @@ def run_command_with_progress_status(
     单元测试中的命令替身最小化。
     """
 
-    return call_runner_with_progress_status(
-        run_command,
-        command,
-        cwd=cwd,
-        timeout_seconds=timeout_seconds,
-        progress=progress,
-        progress_profile=progress_profile,
-    )
+    if child_progress_path is None:
+        return call_runner_with_progress_status(
+            run_command,
+            command,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            progress=progress,
+            progress_profile=progress_profile,
+        )
+    try:
+        return run_command(
+            command,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            progress=progress,
+            progress_profile=progress_profile,
+            child_progress_path=child_progress_path,
+        )
+    except TypeError as error:
+        message = str(error)
+        if "child_progress_path" not in message and "progress" not in message and "progress_profile" not in message:
+            raise
+        return run_command(command, cwd=cwd, timeout_seconds=timeout_seconds)
 
 
 def load_baseline_registry_item(root_path: Path, baseline_id: str) -> dict[str, Any]:
@@ -1272,6 +1298,7 @@ def build_and_run_primary_baseline_adapters(
         timeout_seconds=config.timeout_seconds,
         progress=progress,
         progress_profile=f"operation=run_primary_baseline_adapters baselines={len(selected_methods)}",
+        child_progress_path=paths["progress_events"],
     )
     write_json(paths["output_dir"] / "baseline_command_plan_runner_result.json", execution_result)
     if execution_result["return_code"] != 0:
@@ -1349,6 +1376,7 @@ def write_failure_outputs(
         "baseline_observations_path": relative_or_absolute(paths["baseline_observations"], root_path),
         "baseline_command_results_path": relative_or_absolute(paths["command_results"], root_path),
         "baseline_command_plan_path": relative_or_absolute(paths["command_plan"], root_path),
+        "progress_events_path": relative_or_absolute(paths["progress_events"], root_path) if paths["progress_events"].exists() else "",
     }
     write_json(paths["summary"], summary)
     manifest = build_artifact_manifest(
@@ -1523,6 +1551,7 @@ def write_external_baseline_method_faithful_outputs(
         "baseline_command_results_path": relative_or_absolute(paths["command_results"], root_path),
         "baseline_command_plan_path": relative_or_absolute(paths["command_plan"], root_path),
         "split_observation_dir": relative_or_absolute(paths["split_observation_dir"], root_path),
+        "progress_events_path": relative_or_absolute(paths["progress_events"], root_path) if paths["progress_events"].exists() else "",
         "metadata": {
             **official_report,
             **adapter_report,
@@ -1551,6 +1580,7 @@ def write_external_baseline_method_faithful_outputs(
         paths["command_plan"],
         paths["t2smark_pair_quality_metrics"],
         paths["t2smark_pair_quality_summary"],
+        paths["progress_events"],
     ):
         if optional_path.exists():
             output_paths_for_manifest.append(relative_or_absolute(optional_path, root_path))

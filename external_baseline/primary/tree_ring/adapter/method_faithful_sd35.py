@@ -29,6 +29,7 @@ from external_baseline.primary.sd35_method_faithful_common import (
     apply_formal_image_attack,
     canonical_attack_family,
     canonical_attack_name,
+    emit_adapter_progress,
 )
 
 BASELINE_ID = "tree_ring"
@@ -403,11 +404,29 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
     prompt_rows = load_prompt_rows(args.prompt_plan)
     if args.max_samples is not None:
         prompt_rows = prompt_rows[: max(0, int(args.max_samples))]
+    attack_families = [item.strip() for item in str(args.attack_families or "").split(",") if item.strip()]
+    progress_total = max(1, 1 + len(prompt_rows) + len(attack_families) * len(prompt_rows) * 2)
+    progress_completed = 0
+    emit_adapter_progress(
+        baseline_id=BASELINE_ID,
+        operation="load_sd3_pipeline",
+        completed=progress_completed,
+        total=progress_total,
+        profile=f"operation=load_sd3_pipeline prompts={len(prompt_rows)} attacks={len(attack_families)}",
+    )
     device = "cuda" if torch.cuda.is_available() and not args.force_cpu else "cpu"
     if args.require_cuda and device != "cuda":
         raise RuntimeError("tree_ring_method_faithful_sd35_requires_cuda")
 
     pipe = load_sd3_pipeline(model_id=args.model_id, device=device, torch_dtype_name=args.torch_dtype)
+    progress_completed += 1
+    emit_adapter_progress(
+        baseline_id=BASELINE_ID,
+        operation="source_pair_generation",
+        completed=progress_completed,
+        total=progress_total,
+        profile=f"operation=source_pair_generation prompt=0/{len(prompt_rows)}",
+    )
     artifact_root = Path(args.artifact_root) if args.artifact_root else Path(args.out).resolve().parent / "artifacts"
     clean_dir = artifact_root / "images" / "clean"
     watermarked_dir = artifact_root / "images" / "watermarked"
@@ -540,6 +559,14 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         )
         if device == "cuda":
             torch.cuda.empty_cache()
+        progress_completed += 1
+        emit_adapter_progress(
+            baseline_id=BASELINE_ID,
+            operation="source_pair_generation",
+            completed=progress_completed,
+            total=progress_total,
+            profile=f"operation=source_pair_generation prompt={index}/{len(prompt_rows)} image_id={image_id}",
+        )
 
     threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold)
     observations: list[dict[str, Any]] = []
@@ -553,7 +580,6 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         observations.append(updated)
 
     attacked_records: list[dict[str, Any]] = []
-    attack_families = [item.strip() for item in str(args.attack_families or "").split(",") if item.strip()]
     for attack_family in attack_families:
         attack_matrix_family = canonical_attack_family(attack_family)
         attack_matrix_name = canonical_attack_name(attack_family)
@@ -626,6 +652,19 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 )
                 if device == "cuda":
                     torch.cuda.empty_cache()
+                progress_completed += 1
+                emit_adapter_progress(
+                    baseline_id=BASELINE_ID,
+                    operation="formal_image_attack",
+                    completed=progress_completed,
+                    total=progress_total,
+                    profile=(
+                        "operation=formal_image_attack "
+                        f"attack={attack_matrix_name} pair={pair_index}/{len(image_pairs)} role={role_name}"
+                    ),
+                    attack_name=attack_matrix_name,
+                    image_id=image_id,
+                )
 
     image_pairs_path = write_json(artifact_root / "tree_ring_image_pairs.json", image_pairs)
     attacked_manifest_path = write_json(
@@ -661,6 +700,13 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         "supports_paper_claim": False,
     }
     manifest["adapter_digest"] = build_stable_digest(manifest)
+    emit_adapter_progress(
+        baseline_id=BASELINE_ID,
+        operation="write_outputs",
+        completed=progress_total,
+        total=progress_total,
+        profile=f"operation=write_outputs observations={len(observations)} attacked_images={len(attacked_records)}",
+    )
     return observations, manifest
 
 

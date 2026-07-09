@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import sys
 
@@ -77,7 +78,10 @@ def main() -> None:
     evidence_paths = _resolve_evidence_paths(args.evidence_path)
     _validate_formal_evidence(formal_result_claim=args.formal_result_claim, evidence_paths=evidence_paths)
 
-    results, rows = run_baseline_commands(specs)
+    results, rows = run_baseline_commands(
+        specs,
+        progress_event_path=os.environ.get("SLM_WM_PROGRESS_EVENT_PATH"),
+    )
     output_dir = _ensure_output_dir(args.out)
     command_results_path = output_dir / "baseline_command_results.json"
     observations_path = output_dir / "baseline_observations.json"

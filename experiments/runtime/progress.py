@@ -5,13 +5,18 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+import os
 from os import PathLike
+from pathlib import Path
 import subprocess
 import sys
 import time
 from typing import Any, Callable, TypeVar
 
 T = TypeVar("T")
+PROGRESS_EVENT_ENV_NAME = "SLM_WM_PROGRESS_EVENT_PATH"
 
 
 @dataclass
@@ -139,6 +144,109 @@ def progress_task_items(items: Iterable[T], *, total: int, desc: str, enabled: b
     yield from maybe_tqdm(items, total=total, desc=desc, enabled=enabled)
 
 
+def progress_event_path_from_environment(env: dict[str, str] | None = None) -> Path | None:
+    """从环境变量读取子进程进度事件文件路径。
+
+    该函数属于通用工程写法: Notebook 输出层只读取一个 JSONL 事件文件,
+    真实样本循环仍由各 runner 或 adapter 自己执行。这样可以在保持低噪声
+    的同时把长耗时子进程内部的 prompt、attack 或命令进度回传给外层进度条。
+    """
+
+    source = env if env is not None else os.environ
+    value = str(source.get(PROGRESS_EVENT_ENV_NAME, "")).strip()
+    if not value:
+        return None
+    return Path(value)
+
+
+def write_progress_event(
+    path: str | PathLike[str] | None,
+    *,
+    desc: str,
+    completed: int,
+    total: int,
+    profile: str = "",
+    **metadata: Any,
+) -> None:
+    """向 JSONL 文件追加一条低噪声进度事件。
+
+    写入失败不应中断真实实验流程, 因为进度事件只用于可观察性。正式结果仍由
+    records、manifests 和结果包决定。
+    """
+
+    if path is None:
+        return
+    try:
+        event_path = Path(path)
+        event_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "desc": str(desc),
+            "completed": max(0, int(completed)),
+            "total": max(0, int(total)),
+            "profile": str(profile or "none"),
+        }
+        payload.update(metadata)
+        with event_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+    except Exception:
+        return
+
+
+def read_latest_progress_event(path: str | PathLike[str] | None) -> dict[str, Any] | None:
+    """读取 JSONL 进度事件文件中的最后一条有效事件。"""
+
+    if path is None:
+        return None
+    event_path = Path(path)
+    if not event_path.is_file():
+        return None
+    try:
+        with event_path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - 65536))
+            text = handle.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+    for line in reversed([item.strip() for item in text.splitlines() if item.strip()]):
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def format_progress_event(event: dict[str, Any] | None) -> str:
+    """把子进程进度事件压缩为单行 profile 片段。"""
+
+    if not event:
+        return ""
+    desc = str(event.get("desc") or "child")
+    try:
+        completed = max(0, int(event.get("completed", 0) or 0))
+        total = max(0, int(event.get("total", 0) or 0))
+    except (TypeError, ValueError):
+        completed = 0
+        total = 0
+    percent = (completed / total * 100.0) if total else 100.0
+    profile = str(event.get("profile") or "none")
+    baseline_id = str(event.get("baseline_id") or "").strip()
+    baseline_text = f" baseline={baseline_id}" if baseline_id else ""
+    return f"child={desc}{baseline_text} {completed}/{total} ({percent:.1f}%) {profile}"
+
+
+def merge_child_progress_profile(base_profile: str, child_progress_path: str | PathLike[str] | None) -> str:
+    """把父进程状态和最新子进程事件合并为一个可读 profile。"""
+
+    child_profile = format_progress_event(read_latest_progress_event(child_progress_path))
+    if not child_profile:
+        return base_profile
+    return f"{base_profile} {child_profile}"
+
+
 @contextmanager
 def progress_bar(total: int, *, desc: str, enabled: bool = True) -> Iterator[object | None]:
     """创建可手动更新的总体进度条。
@@ -197,7 +305,8 @@ def run_quiet_subprocess_with_progress(
     env: dict[str, str] | None = None,
     progress: object | None = None,
     progress_profile: str = "",
-    heartbeat_seconds: float = 60.0,
+    heartbeat_seconds: float = 30.0,
+    child_progress_path: str | PathLike[str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """执行子进程并用单行心跳显示长耗时状态。
 
@@ -210,7 +319,7 @@ def run_quiet_subprocess_with_progress(
     started_at = time.monotonic()
     heartbeat_seconds = max(1.0, float(heartbeat_seconds))
     base_profile = progress_profile or "operation=subprocess"
-    emit_progress_status(progress, profile=f"{base_profile} status=running")
+    emit_progress_status(progress, profile=merge_child_progress_profile(f"{base_profile} status=running", child_progress_path))
     process = subprocess.Popen(
         command,
         cwd=cwd,
@@ -232,16 +341,34 @@ def run_quiet_subprocess_with_progress(
             if timeout_seconds is not None and elapsed_seconds >= float(timeout_seconds):
                 process.kill()
                 stdout, stderr = process.communicate()
-                emit_progress_status(progress, profile=f"{base_profile} status=timeout elapsed={elapsed_minutes:.1f}min")
+                emit_progress_status(
+                    progress,
+                    profile=merge_child_progress_profile(
+                        f"{base_profile} status=timeout elapsed={elapsed_minutes:.1f}min",
+                        child_progress_path,
+                    ),
+                )
                 raise subprocess.TimeoutExpired(
                     cmd=command,
                     timeout=timeout_seconds,
                     output=stdout,
                     stderr=stderr,
                 ) from timeout_error
-            emit_progress_status(progress, profile=f"{base_profile} status=running elapsed={elapsed_minutes:.1f}min")
+            emit_progress_status(
+                progress,
+                profile=merge_child_progress_profile(
+                    f"{base_profile} status=running elapsed={elapsed_minutes:.1f}min",
+                    child_progress_path,
+                ),
+            )
     elapsed_minutes = (time.monotonic() - started_at) / 60.0
-    emit_progress_status(progress, profile=f"{base_profile} status=completed return_code={process.returncode} elapsed={elapsed_minutes:.1f}min")
+    emit_progress_status(
+        progress,
+        profile=merge_child_progress_profile(
+            f"{base_profile} status=completed return_code={process.returncode} elapsed={elapsed_minutes:.1f}min",
+            child_progress_path,
+        ),
+    )
     return subprocess.CompletedProcess(command, int(process.returncode or 0), stdout, stderr)
 
 

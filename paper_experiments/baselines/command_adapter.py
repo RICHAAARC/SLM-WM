@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
+import os
 import subprocess
 from typing import Any, Sequence
 
+from experiments.runtime.progress import PROGRESS_EVENT_ENV_NAME, write_progress_event
 from paper_experiments.baselines.observation_io import load_baseline_observation_rows
 
 
@@ -64,13 +66,31 @@ def _read_rows_when_success(spec: BaselineCommandSpec) -> list[dict[str, Any]]:
     return load_baseline_observation_rows(output_path)
 
 
-def run_baseline_command(spec: BaselineCommandSpec) -> tuple[BaselineCommandResult, list[dict[str, Any]]]:
+def run_baseline_command(
+    spec: BaselineCommandSpec,
+    *,
+    progress_event_path: str | Path | None = None,
+    command_index: int = 1,
+    command_count: int = 1,
+) -> tuple[BaselineCommandResult, list[dict[str, Any]]]:
     """执行一个外部 baseline 命令并读取其 observation 输出。
 
     通用工程写法: 命令必须以显式 argv 列表传入, 不通过 shell 字符串拼接执行。这样可以避免
     Windows、Colab 和 Linux shell 对引号与空格的不同解释。
     """
 
+    write_progress_event(
+        progress_event_path,
+        desc="baseline command execution",
+        completed=max(0, command_index - 1),
+        total=max(1, command_count),
+        profile=f"operation=baseline_command status=running command={command_index}/{command_count}",
+        baseline_id=spec.baseline_id,
+        command_output_path=spec.output_path,
+    )
+    child_env = dict(os.environ)
+    if progress_event_path is not None:
+        child_env[PROGRESS_EVENT_ENV_NAME] = str(progress_event_path)
     completed = subprocess.run(
         list(spec.command),
         cwd=spec.working_directory,
@@ -78,6 +98,7 @@ def run_baseline_command(spec: BaselineCommandSpec) -> tuple[BaselineCommandResu
         check=False,
         text=True,
         capture_output=True,
+        env=child_env,
     )
     rows: list[dict[str, Any]] = []
     if completed.returncode == 0:
@@ -90,19 +111,54 @@ def run_baseline_command(spec: BaselineCommandSpec) -> tuple[BaselineCommandResu
         stdout=completed.stdout,
         stderr=completed.stderr,
     )
+    write_progress_event(
+        progress_event_path,
+        desc="baseline command execution",
+        completed=command_index,
+        total=max(1, command_count),
+        profile=(
+            "operation=baseline_command "
+            f"status=completed return_code={completed.returncode} "
+            f"observations={len(rows)} command={command_index}/{command_count}"
+        ),
+        baseline_id=spec.baseline_id,
+        command_output_path=spec.output_path,
+    )
     return result, rows
 
 
 def run_baseline_commands(
     specs: Sequence[BaselineCommandSpec],
+    *,
+    progress_event_path: str | Path | None = None,
 ) -> tuple[list[BaselineCommandResult], list[dict[str, Any]]]:
     """按顺序执行多个外部 baseline 命令并合并 observation rows。"""
 
     results: list[BaselineCommandResult] = []
     all_rows: list[dict[str, Any]] = []
-    for spec in specs:
-        result, rows = run_baseline_command(spec)
+    command_count = len(specs)
+    write_progress_event(
+        progress_event_path,
+        desc="baseline command execution",
+        completed=0,
+        total=command_count,
+        profile=f"operation=baseline_command_plan status=running commands={command_count}",
+    )
+    for command_index, spec in enumerate(specs, start=1):
+        result, rows = run_baseline_command(
+            spec,
+            progress_event_path=progress_event_path,
+            command_index=command_index,
+            command_count=command_count,
+        )
         results.append(result)
         all_rows.extend(rows)
+    write_progress_event(
+        progress_event_path,
+        desc="baseline command execution",
+        completed=command_count,
+        total=command_count,
+        profile=f"operation=baseline_command_plan status=completed observations={len(all_rows)}",
+    )
     return results, all_rows
 
