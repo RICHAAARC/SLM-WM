@@ -56,9 +56,11 @@ def test_complete_result_package_collects_required_pilot_outputs(tmp_path: Path)
     result_index = REQUIRED_OUTPUT_DIRS.index("outputs/pilot_paper_fixed_fpr_results")
     protocol_index = REQUIRED_OUTPUT_DIRS.index("outputs/pilot_paper_fixed_fpr_common_protocol")
     comparison_index = REQUIRED_OUTPUT_DIRS.index("outputs/external_baseline_comparison")
+    analysis_index = REQUIRED_OUTPUT_DIRS.index("outputs/pilot_paper_result_analysis")
     assert f"outputs/pilot_paper_fixed_fpr_results/sample_{result_index}.json" in names
     assert f"outputs/pilot_paper_fixed_fpr_common_protocol/sample_{protocol_index}.json" in names
     assert f"outputs/external_baseline_comparison/sample_{comparison_index}.json" in names
+    assert f"outputs/pilot_paper_result_analysis/sample_{analysis_index}.json" in names
     assert "configs/paper_main_probe_paper_prompts.txt" in names
     assert "configs/paper_main_pilot_paper_prompts.txt" in names
     assert "configs/paper_main_full_paper_prompts.txt" in names
@@ -71,6 +73,8 @@ def test_complete_result_package_requires_external_baseline_comparison_artifacts
 
     assert "outputs/external_baseline_comparison" in REQUIRED_OUTPUT_DIRS
     assert "scripts/write_external_baseline_comparison_outputs.py" in PACKAGE_EXTRA_PATHS
+    assert "outputs/pilot_paper_result_analysis" in REQUIRED_OUTPUT_DIRS
+    assert "scripts/write_pilot_paper_result_analysis_outputs.py" in PACKAGE_EXTRA_PATHS
 
 
 @pytest.mark.quick

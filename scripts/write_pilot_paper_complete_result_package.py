@@ -60,6 +60,7 @@ REQUIRED_OUTPUT_DIRS = (
     "outputs/internal_ablation_evidence",
     "outputs/pilot_paper_fixed_fpr_results",
     "outputs/pilot_paper_fixed_fpr_common_protocol",
+    "outputs/pilot_paper_result_analysis",
 )
 PACKAGE_EXTRA_PATHS = (
     "configs/paper_main_probe_paper_prompts.txt",
@@ -73,6 +74,7 @@ PACKAGE_EXTRA_PATHS = (
     "scripts/write_primary_baseline_formal_import_protocol.py",
     "scripts/write_external_baseline_comparison_outputs.py",
     "scripts/write_internal_ablation_outputs.py",
+    "scripts/write_pilot_paper_result_analysis_outputs.py",
 )
 
 

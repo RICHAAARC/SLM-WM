@@ -7,6 +7,7 @@ from collections.abc import Iterator
 import pytest
 
 from scripts.run_gpu_server_result_closure import configure_closure_environment
+from paper_experiments.runners.paper_result_closure import build_paper_result_closure_commands
 from scripts.run_gpu_server_workflow import (
     configure_common_server_environment,
     resolve_workflow_selection,
@@ -113,3 +114,20 @@ def test_gpu_server_result_closure_does_not_depend_on_colab_layer() -> None:
 
     assert "paper_experiments.runners.paper_result_closure" in script_text
     assert "paper_workflow.colab_utils.paper_result_closure" not in script_text
+
+
+def test_result_closure_runs_analysis_before_complete_package(tmp_path: Path) -> None:
+    """结果闭合应在完整包打包前重建论文分析表和失败案例图。"""
+
+    commands = build_paper_result_closure_commands(
+        package_search_root=tmp_path.as_posix(),
+        complete_drive_output_dir=(tmp_path / "complete").as_posix(),
+        target_fpr="0.01",
+        paper_run_name="pilot_paper",
+    )
+    command_names = [command[1] for command in commands]
+
+    assert "scripts/write_pilot_paper_result_analysis_outputs.py" in command_names
+    assert command_names.index("scripts/write_pilot_paper_result_analysis_outputs.py") < command_names.index(
+        "scripts/write_pilot_paper_complete_result_package.py"
+    )

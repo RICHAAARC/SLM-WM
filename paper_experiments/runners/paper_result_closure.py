@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
 import json
 from pathlib import Path
 import subprocess
 import sys
 from typing import Any
+
+from experiments.runtime.archive_naming import utc_archive_token
 
 REQUIRED_CLOSURE_PACKAGE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("attention_geometry", "attention_geometry_package_*.zip"),
@@ -46,8 +47,7 @@ def _short_commit() -> str:
 def _complete_archive_name(paper_run_name: str) -> str:
     """根据当前论文运行层级生成完整结果包名称。"""
 
-    utc_suffix = datetime.now(timezone.utc).strftime("%Y%m%dt%H%M%sz")
-    return f"{paper_run_name}_complete_result_package_{utc_suffix}_{_short_commit()}.zip"
+    return f"{paper_run_name}_complete_result_package_{utc_archive_token()}_{_short_commit()}.zip"
 
 
 def build_paper_result_closure_preflight_report(package_search_root: str) -> dict[str, Any]:
@@ -123,6 +123,7 @@ def build_paper_result_closure_commands(
             "outputs/pilot_paper_fixed_fpr_results/pilot_paper_result_records.jsonl",
             "--require-existing-evidence",
         ],
+        [sys.executable, "scripts/write_pilot_paper_result_analysis_outputs.py"],
         [
             sys.executable,
             "scripts/write_pilot_paper_complete_result_package.py",
