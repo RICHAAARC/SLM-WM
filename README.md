@@ -1,24 +1,26 @@
 # SLM-WM
 
-本仓库用于实现“语义条件化的潜空间流形水印-SLM”。项目目标是形成可审计、可重跑、可用于论文投稿材料的水印方法机制、真实模型运行链路、共同攻击协议、外部 baseline 对比、内部消融和结果图表重建流程。
+本仓库用于实现“语义条件化的潜空间流形水印-SLM”。项目目标是形成可审计、可重跑、可用于论文投稿材料的方法机制、真实模型运行链路、共同攻击协议、外部 baseline 对比、内部消融和结果图表重建流程。
 
 ## 项目定位
 
-SLM-WM 的核心思路是在扩散模型潜空间中构造语义条件化的内容载体, 并通过 attention-relative latent update 将载体写入生成过程。检测侧在固定误报率协议下校准阈值, 再对干净样本、攻击后样本、外部 baseline 和内部消融进行统一统计。
+SLM-WM 的核心思路是在扩散模型潜空间中构造语义条件化的内容载体, 并通过 attention-relative latent update 将载体写入生成过程。检测侧在 fixed-FPR 协议下校准阈值, 再对干净样本、攻击后样本、外部 baseline 和内部消融进行统一统计。
 
-当前主线运行模型为 `stabilityai/stable-diffusion-3.5-medium`。`stabilityai/stable-diffusion-3-medium` 可作为兼容或对照路径, 但不作为默认主线。
+当前主线运行模型为 `stabilityai/stable-diffusion-3.5-medium`。`stabilityai/stable-diffusion-3-medium` 只作为兼容或对照路径, 不作为默认主线。
 
 ## 运行层级
 
-项目使用同一批 repository modules 和 Notebook 入口支撑不同论文运行层级。三类运行层级在方法参数、攻击协议、baseline 入口、bootstrap 设置、随机种子和结果闭合逻辑上必须保持一致; 运行语义只允许 prompt 数量与目标 FPR 不同。Google Drive 结果根目录仅用于隔离落盘, 不构成实验协议差异。
+项目使用同一批 repository modules、服务器命令和 Notebook 入口支撑三类论文运行层级。三类运行层级在方法参数、攻击协议、baseline 入口、bootstrap 设置、随机种子、证据门禁和结果闭合逻辑上必须保持一致; 运行语义只允许 prompt 数量与目标 FPR 不同。
 
-| 运行层级 | prompt 数量 | 目标 FPR | Google Drive 结果根目录 | 说明 |
-| --- | ---: | ---: | --- | --- |
-| `probe_paper` | 60 | 0.1 | `/content/drive/MyDrive/SLM/probe_paper_results` | 用于在服务器上先做论文流程对齐验证, 检查依赖、GPU、落盘、打包和闭合链路。 |
-| `pilot_paper` | 600 | 0.01 | `/content/drive/MyDrive/SLM/pilot_paper_results` | 用于形成 pilot 论文结果, 可检查共同协议下的方法有效性和 baseline 差距。 |
-| `full_paper` | 6000 | 0.001 | `/content/drive/MyDrive/SLM/full_paper_results` | 用于正式论文主张, 需要完整样本规模和更低误报率边界。 |
+| 运行层级 | prompt 数量 | 目标 FPR | 支持主张 | Google Drive 结果根目录 | 说明 |
+| --- | ---: | ---: | --- | --- | --- |
+| `probe_paper` | 60 | 0.1 | `probe_claim` | `/content/drive/MyDrive/SLM/probe_paper_results` | 小规模正式结果包, 用于在真实运行环境中验证完整流程、依赖、落盘、打包和闭合能力。 |
+| `pilot_paper` | 600 | 0.01 | `pilot_claim` | `/content/drive/MyDrive/SLM/pilot_paper_results` | 中等规模正式结果包, 用于形成 fixed-FPR=0.01 的论文证据与 baseline 差距判断。 |
+| `full_paper` | 6000 | 0.001 | `full_claim` | `/content/drive/MyDrive/SLM/full_paper_results` | 全规模正式结果包, 用于 fixed-FPR=0.001 的最终论文主张。 |
 
 fixed-FPR clean negative 门禁由 prompt 数量与目标 FPR 统一派生: `probe_paper=10`、`pilot_paper=100`、`full_paper=1000`。该门禁不是独立配置分叉; 若只切换 `SLM_WM_PAPER_RUN_NAME`, Colab 入口和服务器入口应自动得到对应值。
+
+三类正式结果包均拒绝 proxy、placeholder、fallback、synthetic 和 formal-null 证据进入共同协议结果记录。诊断入口可以产生环境检查报告, 但诊断报告不能支持三类论文主张。
 
 在 Colab 中切换运行层级时, 只应修改 Notebook 顶部的入口变量:
 
@@ -28,53 +30,64 @@ SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 
 运行层级、prompt 文件、样本数、目标 FPR、fixed-FPR 门禁、Google Drive 子目录和常用环境变量由 `paper_workflow/colab_utils/paper_run_environment.py` 统一派生。Notebook 不应维护重复配置表。
 
-## 目录职责
+## 三层代码边界
 
 ```text
-main/                   论文方法、检测打分、核心协议、分析和 CLI 能力
-configs/                配置模板和参数说明
-experiments/            实验协议、样本划分、阈值校准和 runner
-paper_experiments/      完整论文实验、外部 baseline 适配、受治理导入和公平对比
-paper_workflow/         Colab Notebook 入口和共享 session helper
-paper_workflow/notebooks/ Colab Notebook 文件
-scripts/                结果重建、记录生成、检查和打包命令
-external_baseline/      外部 baseline 源码缓存和来源登记
-docs/                   方法设计、构建流程、字段登记和治理说明
-tools/harness/          可执行治理审计
-tests/                  分层测试目录
-.codex/                 Agent 协作契约与 skill 文件
-outputs/                统一本地持久化输出根目录, 默认不提交
-outputs/audit_reports/  harness 审计输出, 默认不提交
+main/                       论文方法、检测打分、核心协议、分析和 CLI 能力
+configs/                    prompt 配置、运行配置说明和 Colab 依赖约束记录
+experiments/                SLM 主方法实验协议、主实验攻击、内部消融和服务器 runner
+paper_experiments/          完整论文实验、外部 baseline 适配、受治理导入和公平对比
+paper_workflow/             Colab Notebook 入口、Drive 包装和 session helper
+paper_workflow/notebooks/   Colab Notebook 文件
+scripts/                    服务器入口、结果重建、记录生成、检查和打包命令
+external_baseline/          外部 baseline 源码缓存、来源登记和项目维护 adapter
+ui/                         可选查看与展示代码
+visualization/              结果图表辅助代码
+docs/                       方法设计、构建流程、字段登记和治理说明
+tools/harness/              可执行治理审计
+tests/                      分层测试目录
+.codex/                     Agent 协作契约与 skill 文件
+outputs/                    统一本地持久化输出根目录, 默认不提交
+outputs/audit_reports/      harness 审计输出, 默认不提交
 ```
 
-## Notebook 入口边界
+依赖方向必须保持为 `paper_workflow/ -> paper_experiments/ -> main/ 与 experiments/`。`external_baseline/` 是外部源码缓存与 adapter 边界, 不进入最小方法发布包。
+
+## Notebook 与服务器入口
 
 Notebook 只负责挂载 Google Drive、拉取仓库、选择运行层级、调用 repository modules 和保存结果包。正式 records、thresholds、tables、figures、reports 和 manifests 的生成逻辑必须位于 `main/`、`experiments/`、`paper_experiments/` 或 `scripts/` 中。
 
-后续修复 bug 时, 优先修改脚本、协议模块、完整论文实验模块或 Colab helper, 不应把正式逻辑写回 Notebook cell。当前 Notebook 使用说明见 `paper_workflow/README.md`。
+- Colab 入口说明见 `paper_workflow/notebooks/README.md`。
+- 服务器命令入口说明见 `scripts/README.md`。
+- 完整论文实验层说明见 `paper_experiments/README.md`。
+
+后续修复 bug 时, 优先修改脚本、协议模块、完整论文实验模块或 Colab helper, 不应把正式逻辑写回 Notebook cell。
 
 ## 论文产物治理
 
 1. records 是论文结果事实来源。
 2. tables、figures 和 reports 必须可由 records 与 manifests 重建。
-3. supported claims 必须绑定到受治理记录、表格、图、报告或 manifest。
+3. supported claims 必须绑定到受治理 records、tables、figures、reports 或 manifests。
 4. 本地持久化输出必须写入 `outputs/`。
-5. Colab 结果包应写入当前运行层级对应的 Google Drive 目录, 本地 `outputs/` 中的下载副本只能用于审计, 不应作为 Colab 工作流的上游输入。
+5. Colab 结果包应写入当前运行层级对应的 Google Drive 目录; 本地 `outputs/` 中的下载副本只能用于审计, 不应作为 Colab 流程的上游输入。
+6. 三类论文运行层级均使用真实图像、真实攻击、真实检测重打分和受治理 baseline 导入; 非正式证据只能用于诊断, 不能进入 claim-ready 统计。
 
-## 主要 Colab 流程
+## 推荐运行入口
 
-推荐按 `paper_workflow/README.md` 中的顺序运行。典型 `pilot_paper` 重跑路径包括:
+典型 `pilot_paper` 或 `full_paper` 重跑路径包括:
 
 1. attention geometry 捕获。
 2. attention-relative latent update。
 3. aligned rescoring。
 4. fixed-FPR 阈值校准与 rescue 边界记录。
-5. 再扩散真实攻击闭环。
-6. 常规失真与几何变换攻击闭环。
+5. 再扩散与语义编辑攻击闭环。
+6. 常规失真、几何变换与 photometric 攻击闭环。
 7. dataset-level 图像质量指标。
 8. 四个 method-faithful 外部 baseline。
 9. 四个 official reference 外部 baseline。
 10. 结果闭合与完整结果包重建。
+
+各 Notebook 的前后依赖、并行要求和 GPU / CPU 需求见 `paper_workflow/notebooks/README.md`。
 
 ## 必需检查
 
