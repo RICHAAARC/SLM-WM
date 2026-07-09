@@ -27,6 +27,7 @@ from paper_experiments.runners.external_baseline_method_faithful import (
     build_and_run_primary_baseline_adapters,
     build_t2smark_image_pairs,
     count_t2smark_result_items,
+    count_t2smark_pair_quality_items,
     output_paths,
     patch_t2smark_formal_attack_compatibility,
     patch_t2smark_inversion_compatibility,
@@ -131,6 +132,8 @@ def test_t2smark_formal_attack_patch_adds_common_attack_outputs(tmp_path: Path) 
         "    return {'norm1_no_w': 0.0, 'norm1_w': 1.0}\n\n"
         "pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)\n"
         "results = {}\n"
+        "        if args.save_image:\n"
+        "            generated_image.save(os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png'))\n"
         "            results[prompt_id][\"robustness\"] = decode_result\n",
         encoding="utf-8",
     )
@@ -153,11 +156,14 @@ def test_t2smark_formal_attack_patch_adds_common_attack_outputs(tmp_path: Path) 
     assert second_report["formal_attack_patch_applied"] is False
     assert T2SMARK_FORMAL_ATTACK_COMPAT_MARKER in patched_source
     assert "slm_attack_families" in patched_option
+    assert "slm_save_clean_pair" in patched_option
     assert "formal_attacks" in patched_source
     assert "apply_formal_image_attack" in patched_source
     assert "from PIL import Image" in patched_source
     assert "prepare_t2smark_decode_image" in patched_source
     assert "resize((512, 512), Image.Resampling.BICUBIC)" in patched_source
+    assert "generate_clean_pair_image" in patched_source
+    assert "strict_clean_watermarked_pair" in patched_source
 
 
 @pytest.mark.quick
@@ -170,6 +176,7 @@ def test_t2smark_result_reuse_does_not_require_source_cache(tmp_path: Path) -> N
         force_generate=False,
         robust_test_num=1,
         t2smark_formal_attack_families="",
+        save_clean_pair=False,
     )
     paths = output_paths(tmp_path, config)
     paths["official_results"].parent.mkdir(parents=True)
@@ -205,6 +212,28 @@ def test_t2smark_result_reuse_requires_configured_sample_count(tmp_path: Path) -
 
 
 @pytest.mark.quick
+def test_t2smark_result_reuse_requires_strict_pair_quality(tmp_path: Path) -> None:
+    """启用严格 pair-level 质量时, 旧 T2SMark 结果缺少 clean pair 应触发重跑。"""
+
+    config = ExternalBaselineMethodFaithfulConfig(
+        require_cuda=False,
+        reuse_existing=True,
+        robust_test_num=1,
+        t2smark_formal_attack_families="",
+        save_clean_pair=True,
+    )
+    paths = output_paths(tmp_path, config)
+    paths["official_results"].parent.mkdir(parents=True)
+    paths["official_results"].write_text('{"0":{"robustness":{"norm1_no_w":0.1,"norm1_w":0.9}}}\n', encoding="utf-8")
+
+    should_run, reason = should_run_t2smark_official(config, paths["official_results"])
+
+    assert count_t2smark_pair_quality_items(paths["official_results"]) == 0
+    assert should_run is True
+    assert reason == "existing_results_pair_quality_count_insufficient"
+
+
+@pytest.mark.quick
 def test_shared_prompt_inputs_default_to_pilot_paper_samples(tmp_path: Path) -> None:
     """T2SMark 与主表 adapter 应共享 pilot_paper 规模 prompt 计划。"""
 
@@ -235,9 +264,12 @@ def test_t2smark_image_pairs_refreshes_stale_image_provenance(tmp_path: Path) ->
     )
     paths = output_paths(tmp_path, config)
     paths["official_images"].mkdir(parents=True)
+    clean_dir = paths["official_run_dir"] / "quality_pairs" / "clean"
+    clean_dir.mkdir(parents=True)
     for index in range(5):
         image_path = paths["official_images"] / f"{index:05d}.png"
         image_path.write_bytes(f"fake_png_bytes_for_t2smark_method_faithful_{index}".encode("utf-8"))
+        (clean_dir / f"{index:05d}.png").write_bytes(f"fake_clean_png_bytes_for_t2smark_method_faithful_{index}".encode("utf-8"))
     paths["image_pairs"].parent.mkdir(parents=True, exist_ok=True)
     paths["image_pairs"].write_text(
         '[{"image_id":"t2smark_00000","generated_image_path":"","generated_image_digest":""}]\n',
@@ -249,6 +281,9 @@ def test_t2smark_image_pairs_refreshes_stale_image_provenance(tmp_path: Path) ->
     assert len(rows) == 5
     assert rows[0]["generated_image_path"] == "outputs/external_baseline_method_faithful/t2smark_official/t2smark_sd35_medium_method_faithful/images/00000.png"
     assert rows[0]["generated_image_digest"]
+    assert rows[0]["clean_image_path"].endswith("quality_pairs/clean/00000.png")
+    assert rows[0]["clean_image_digest"]
+    assert rows[0]["strict_pair_quality_ready"] is True
     assert '"generated_image_digest": ""' not in paths["image_pairs"].read_text(encoding="utf-8")
 
 

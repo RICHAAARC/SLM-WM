@@ -165,6 +165,12 @@ def _observation(
         "image_id": image_id,
         "image_path": image_path,
         "image_digest": image_digest,
+        "clean_image_path": str(row.get("clean_image_path") or ""),
+        "clean_image_digest": str(row.get("clean_image_digest") or ""),
+        "watermarked_image_path": str(row.get("watermarked_image_path") or row.get("generated_image_path") or ""),
+        "watermarked_image_digest": str(row.get("watermarked_image_digest") or row.get("generated_image_digest") or ""),
+        "pair_quality_protocol": str(row.get("pair_quality_protocol") or ""),
+        "strict_pair_quality_ready": bool(row.get("strict_pair_quality_ready", False)),
         "t2smark_result_index": result_index,
         "threshold_source": threshold_source,
         "bit_accuracy": robustness.get("acc_msg"),
@@ -319,6 +325,7 @@ def build_t2smark_observations(
             for attack_name in result["formal_attacks"].keys()
         }
     )
+    strict_pair_quality_count = sum(1 for row in image_pairs if bool(row.get("strict_pair_quality_ready", False)))
     manifest = {
         "artifact_name": "t2smark_slm_adapter_manifest.json",
         "producer_id": "t2smark_slm_observation_adapter",
@@ -328,6 +335,8 @@ def build_t2smark_observations(
         "image_pair_count": len(image_pairs),
         "t2smark_result_count": len(results_by_index),
         "observation_count": len(observations),
+        "strict_pair_quality_count": strict_pair_quality_count,
+        "strict_pair_quality_ready": bool(image_pairs) and strict_pair_quality_count == len(image_pairs),
         "formal_attack_names": formal_attack_names,
         "formal_attack_observation_count": sum(1 for row in observations if str(row.get("sample_role", "")).startswith("attacked_")),
         "missing_result_indices": missing_indices,

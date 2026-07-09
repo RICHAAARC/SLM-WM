@@ -19,6 +19,7 @@ from paper_experiments.baselines import (
     resolve_full_main_prompt_protocol_name,
     validate_primary_baseline_formal_import_rows,
 )
+from paper_experiments.baselines.t2smark_pair_quality import write_t2smark_strict_pair_quality_outputs
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_FIXED_FPR,
 )
@@ -49,9 +50,12 @@ DEFAULT_TARGET_FPR = PILOT_PAPER_FIXED_FPR
 DEFAULT_PROMPT_LIMIT = 600
 PACKAGE_EXTRA_PATHS = (
     "paper_experiments/runners/t2smark_full_main_reproduction.py",
+    "paper_experiments/baselines/t2smark_pair_quality.py",
     "paper_experiments/baselines/formal_import.py",
     "scripts/write_primary_baseline_formal_import_protocol.py",
     "external_baseline/primary/t2smark/adapter/run_slm_eval.py",
+    "external_baseline/primary/t2smark/source/run_sd35.py",
+    "external_baseline/primary/t2smark/source/option.py",
 )
 
 
@@ -80,6 +84,7 @@ class T2SMarkFullMainReproductionConfig:
     reuse_existing: bool = True
     force_generate: bool = False
     save_image: bool = True
+    save_clean_pair: bool = True
     require_cuda: bool = True
     timeout_seconds: int = 86400
     enable_workflow_progress_bar: bool = True
@@ -209,6 +214,8 @@ def output_paths(root_path: Path, config: T2SMarkFullMainReproductionConfig) -> 
         "prompt_dataset": output_dir / "t2smark_full_main_prompt_dataset.json",
         "prompt_plan": output_dir / "t2smark_full_main_prompt_plan.json",
         "image_pairs": output_dir / "t2smark_full_main_image_pairs.json",
+        "pair_quality_metrics": output_dir / "t2smark_full_main_strict_pair_quality_metrics.csv",
+        "pair_quality_summary": output_dir / "t2smark_full_main_strict_pair_quality_summary.json",
         "adapter_observations": adapter_dir / "baseline_observations.json",
         "adapter_manifest": adapter_dir / "t2smark_slm_adapter_manifest.json",
         "candidate_records": output_dir / "t2smark_full_main_formal_import_candidate_records.jsonl",
@@ -304,8 +311,44 @@ def should_run_official(config: T2SMarkFullMainReproductionConfig, results_path:
     if config.force_generate:
         return True, "force_generate_requested"
     if config.reuse_existing and results_path.is_file():
+        if config.save_clean_pair and count_t2smark_pair_quality_items(results_path) < max(1, int(config.prompt_limit)):
+            return True, "existing_results_pair_quality_count_insufficient"
         return False, "existing_results_found"
     return True, "results_missing"
+
+
+def count_t2smark_pair_quality_items(results_path: Path) -> int:
+    """统计 T2SMark full-main 结果中严格 pair-level 质量证据数量。"""
+
+    if not results_path.is_file():
+        return 0
+    try:
+        payload = read_json(results_path)
+    except Exception:
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    count = 0
+    for key, value in payload.items():
+        if not str(key).isdigit() or not isinstance(value, dict):
+            continue
+        pair_quality = value.get("pair_quality")
+        if not isinstance(pair_quality, dict):
+            continue
+        sample_name = f"{int(key):05d}.png"
+        clean_path = Path(str(pair_quality.get("clean_image_path") or ""))
+        watermarked_path = Path(str(pair_quality.get("watermarked_image_path") or ""))
+        clean_exists = clean_path.is_file() or (results_path.parent / "quality_pairs" / "clean" / sample_name).is_file()
+        watermarked_exists = watermarked_path.is_file() or (results_path.parent / "images" / sample_name).is_file()
+        if (
+            pair_quality.get("pair_quality_protocol") == "strict_clean_watermarked_pair"
+            and pair_quality.get("clean_image_digest")
+            and pair_quality.get("watermarked_image_digest")
+            and clean_exists
+            and watermarked_exists
+        ):
+            count += 1
+    return count
 
 
 def run_t2smark_official_if_needed(
@@ -358,6 +401,14 @@ def run_t2smark_official_if_needed(
         "--fix_key",
         "--SDv35M",
     ]
+    if config.save_clean_pair:
+        command.extend(
+            [
+                "--slm_save_clean_pair",
+                "--slm_pair_image_dir",
+                str(paths["official_run_dir"] / "quality_pairs"),
+            ]
+        )
     if config.save_image:
         command.append("--save_image")
     result = run_command_with_progress_status(
@@ -389,7 +440,10 @@ def build_t2smark_full_main_image_pairs(
     rows: list[dict[str, Any]] = []
     for index, prompt_row in enumerate(prompt_rows):
         image_path = paths["official_images"] / f"{index:05d}.png"
+        clean_image_path = paths["official_run_dir"] / "quality_pairs" / "clean" / f"{index:05d}.png"
         image_id = f"t2smark_full_main_{index:05d}"
+        watermarked_image_digest = file_digest(image_path) if image_path.is_file() else ""
+        clean_image_digest = file_digest(clean_image_path) if clean_image_path.is_file() else ""
         rows.append(
             {
                 "image_id": image_id,
@@ -400,7 +454,13 @@ def build_t2smark_full_main_image_pairs(
                 "split": str(prompt_row.get("split", "test")),
                 "baseline_id": "t2smark",
                 "generated_image_path": relative_or_absolute(image_path, root_path) if image_path.is_file() else "",
-                "generated_image_digest": file_digest(image_path) if image_path.is_file() else "",
+                "generated_image_digest": watermarked_image_digest,
+                "clean_image_path": relative_or_absolute(clean_image_path, root_path) if clean_image_path.is_file() else "",
+                "clean_image_digest": clean_image_digest,
+                "watermarked_image_path": relative_or_absolute(image_path, root_path) if image_path.is_file() else "",
+                "watermarked_image_digest": watermarked_image_digest,
+                "pair_quality_protocol": "strict_clean_watermarked_pair",
+                "strict_pair_quality_ready": bool(clean_image_digest and watermarked_image_digest),
             }
         )
     write_json(paths["image_pairs"], rows)
@@ -537,7 +597,7 @@ def write_t2smark_full_main_reproduction_outputs(
     paths = output_paths(root_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
     try:
-        with progress_bar(7, desc="t2smark full main reproduction", enabled=config.enable_workflow_progress_bar) as run_progress:
+        with progress_bar(8, desc="t2smark full main reproduction", enabled=config.enable_workflow_progress_bar) as run_progress:
             emit_progress_status(run_progress, profile="operation=ensure_cuda status=running")
             device_report = ensure_cuda_if_requested(config.require_cuda)
             update_progress(run_progress, profile="operation=ensure_cuda")
@@ -550,6 +610,20 @@ def write_t2smark_full_main_reproduction_outputs(
             emit_progress_status(run_progress, profile="operation=build_image_pairs status=running")
             image_pairs = build_t2smark_full_main_image_pairs(root_path, paths, prompt_rows)
             update_progress(run_progress, profile=f"operation=build_image_pairs pairs={len(image_pairs)}")
+            emit_progress_status(run_progress, profile="operation=t2smark_pair_quality status=running")
+            pair_quality_report = write_t2smark_strict_pair_quality_outputs(
+                root_path=root_path,
+                image_pairs_path=paths["image_pairs"],
+                metrics_path=paths["pair_quality_metrics"],
+                summary_path=paths["pair_quality_summary"],
+            )
+            update_progress(
+                run_progress,
+                profile=(
+                    "operation=t2smark_pair_quality "
+                    f"measured={pair_quality_report['measured_strict_pair_quality_count']}"
+                ),
+            )
             adapter_report = run_t2smark_adapter(root_path, config, paths, progress=run_progress)
             update_progress(run_progress, profile="operation=t2smark_full_main_adapter")
             emit_progress_status(run_progress, profile="operation=build_candidate_records status=running")
@@ -564,7 +638,13 @@ def write_t2smark_full_main_reproduction_outputs(
 
     official_ready = paths["official_results"].is_file() and official_report.get("official_return_code") == 0
     adapter_ready = paths["adapter_observations"].is_file() and adapter_report.get("adapter_return_code") == 0
-    run_ready = bool(official_ready and adapter_ready and prompt_report["selected_prompt_count"] > 0)
+    pair_quality_ready = bool(pair_quality_report.get("strict_pair_quality_ready", False))
+    run_ready = bool(
+        official_ready
+        and adapter_ready
+        and prompt_report["selected_prompt_count"] > 0
+        and (not config.save_clean_pair or pair_quality_ready)
+    )
     validation_report = candidate_report["validation_report"]
     summary = {
         "run_decision": "pass" if run_ready else "fail",
@@ -578,6 +658,10 @@ def write_t2smark_full_main_reproduction_outputs(
         "full_main_prompt_protocol_ready": bool(prompt_report["full_main_prompt_protocol_ready"]),
         "pilot_paper_prompt_protocol_ready": bool(prompt_report["pilot_paper_prompt_protocol_ready"]),
         "image_pair_count": len(image_pairs),
+        "t2smark_strict_pair_quality_ready": pair_quality_ready,
+        "t2smark_strict_pair_quality_count": int(pair_quality_report.get("measured_strict_pair_quality_count", 0)),
+        "t2smark_strict_pair_quality_metrics_path": relative_or_absolute(paths["pair_quality_metrics"], root_path),
+        "t2smark_strict_pair_quality_summary_path": relative_or_absolute(paths["pair_quality_summary"], root_path),
         "formal_import_candidate_record_count": int(candidate_report["candidate_record_count"]),
         "accepted_formal_import_count": int(validation_report.get("accepted_formal_import_count", 0)),
         "rejected_formal_import_count": int(validation_report.get("rejected_formal_import_count", 0)),
@@ -597,6 +681,7 @@ def write_t2smark_full_main_reproduction_outputs(
             "prompt_report": prompt_report,
             "official_report": official_report,
             "adapter_report": adapter_report,
+            "t2smark_pair_quality_report": pair_quality_report,
             "claim_boundary": "pilot_paper_raw_reproduction_requires_formal_import_validation_and_attack_matrix_closure",
         },
     }
@@ -607,6 +692,8 @@ def write_t2smark_full_main_reproduction_outputs(
         relative_or_absolute(paths["image_pairs"], root_path),
         relative_or_absolute(paths["candidate_records"], root_path),
         relative_or_absolute(paths["validation_report"], root_path),
+        relative_or_absolute(paths["pair_quality_metrics"], root_path),
+        relative_or_absolute(paths["pair_quality_summary"], root_path),
     ]
     if paths["adapter_observations"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["adapter_observations"], root_path))
@@ -622,6 +709,8 @@ def write_t2smark_full_main_reproduction_outputs(
             "run_decision": summary["run_decision"],
             "t2smark_full_main_reproduction_ready": run_ready,
             "formal_import_validation_ready": summary["formal_import_validation_ready"],
+            "t2smark_strict_pair_quality_ready": pair_quality_ready,
+            "t2smark_strict_pair_quality_count": summary["t2smark_strict_pair_quality_count"],
             "supports_paper_claim": False,
         },
     ).to_dict()
@@ -659,6 +748,7 @@ def build_default_config() -> T2SMarkFullMainReproductionConfig:
         reuse_existing=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_REUSE_EXISTING", "1") != "0",
         force_generate=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_FORCE_GENERATE", "0") == "1",
         save_image=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_SAVE_IMAGE", "1") != "0",
+        save_clean_pair=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_SAVE_CLEAN_PAIR", "1") != "0",
         require_cuda=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_REQUIRE_CUDA", "1") != "0",
         timeout_seconds=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_TIMEOUT_SECONDS", "86400")),
         enable_workflow_progress_bar=os.environ.get("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1") != "0",

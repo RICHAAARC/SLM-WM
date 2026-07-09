@@ -21,6 +21,7 @@ from experiments.protocol.paper_run_config import build_paper_run_config, resolv
 from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
 from experiments.protocol.splits import apply_split_assignments
 from main.analysis.artifact_manifest import build_artifact_manifest
+from paper_experiments.baselines.t2smark_pair_quality import write_t2smark_strict_pair_quality_outputs
 from experiments.runtime.progress import (
     call_runner_with_progress_status,
     emit_progress_status,
@@ -56,6 +57,7 @@ SHARED_PROMPT_TEXTS = (
 )
 T2SMARK_INVERSION_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为新版 Diffusers 显式补齐注解依赖。"
 T2SMARK_FORMAL_ATTACK_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为共同攻击簇补齐正式攻击输出。"
+T2SMARK_PAIR_QUALITY_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为 T2SMark 补齐严格成对质量图像。"
 T2SMARK_INVERSION_COMPAT_BLOCK = f"""{T2SMARK_INVERSION_COMPAT_MARKER}
 import torch
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -146,6 +148,43 @@ T2SMARK_FORMAL_ATTACK_LOOP_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_COMPAT_MARKER}
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
 """
+T2SMARK_PAIR_QUALITY_HELPER_BLOCK = f"""{T2SMARK_PAIR_QUALITY_COMPAT_MARKER}
+def generate_clean_pair_image(prompt, prompt_id):
+    \"\"\"生成与 T2SMark 水印图像同 prompt 和同随机种子对齐的 clean 参照图像。\"\"\"
+
+    clean_generator = torch.Generator(device=device).manual_seed(args.seed + prompt_id)
+    return pipe(
+        prompt,
+        guidance_scale=args.guidance_scale,
+        num_inference_steps=args.num_inference_steps,
+        height=512,
+        width=512,
+        generator=clean_generator,
+    ).images[0]
+
+"""
+T2SMARK_PAIR_QUALITY_DIR_BLOCK = f"""{T2SMARK_PAIR_QUALITY_COMPAT_MARKER}
+pair_quality_clean_image_dir = None
+if args.save_image and args.slm_save_clean_pair:
+    pair_quality_image_dir = args.slm_pair_image_dir
+    if pair_quality_image_dir is None:
+        pair_quality_image_dir = os.path.join(args.output_dir, args.name, "quality_pairs")
+    pair_quality_clean_image_dir = os.path.join(pair_quality_image_dir, "clean")
+    os.makedirs(pair_quality_clean_image_dir, exist_ok=True)
+"""
+T2SMARK_PAIR_QUALITY_SAVE_BLOCK = f"""{T2SMARK_PAIR_QUALITY_COMPAT_MARKER}
+        if args.save_image and args.slm_save_clean_pair and pair_quality_clean_image_dir:
+            clean_pair_image = generate_clean_pair_image(prompt, prompt_id)
+            clean_pair_path = os.path.join(pair_quality_clean_image_dir, f'{{str(prompt_id).zfill(5)}}.png')
+            clean_pair_image.save(clean_pair_path)
+            results[prompt_id]["pair_quality"] = {{
+                "pair_quality_protocol": "strict_clean_watermarked_pair",
+                "clean_image_path": clean_pair_path,
+                "clean_image_digest": file_digest(clean_pair_path),
+                "watermarked_image_path": generated_image_path,
+                "watermarked_image_digest": file_digest(generated_image_path) if generated_image_path else "",
+            }}
+"""
 BASE_PRIOR_PREFIXES = ("outputs/external_baseline_method_faithful/split_observations/",)
 T2SMARK_PRIOR_PREFIXES = (
     "outputs/external_baseline_method_faithful/t2smark_official/",
@@ -154,6 +193,7 @@ T2SMARK_PRIOR_PREFIXES = (
 )
 PACKAGE_EXTRA_PATHS = (
     "paper_experiments/runners/external_baseline_method_faithful.py",
+    "paper_experiments/baselines/t2smark_pair_quality.py",
     "external_baseline/README.md",
     "external_baseline/source_registry.json",
     "external_baseline/adaptation_notes/sd35_medium_external_baseline_adaptation.md",
@@ -210,6 +250,7 @@ class ExternalBaselineMethodFaithfulConfig:
     reuse_prior_drive_package: bool = True
     force_generate: bool = False
     save_image: bool = True
+    save_clean_pair: bool = True
     require_cuda: bool = True
     timeout_seconds: int = 86400
     enable_workflow_progress_bar: bool = True
@@ -304,6 +345,8 @@ def output_paths(root_path: Path, config: ExternalBaselineMethodFaithfulConfig) 
         "t2smark_prompts": output_dir / "t2smark_method_faithful_prompts.json",
         "primary_prompt_plan": output_dir / "primary_baseline_method_faithful_prompt_plan.json",
         "image_pairs": output_dir / "t2smark_image_pairs.json",
+        "t2smark_pair_quality_metrics": output_dir / "t2smark_strict_pair_quality_metrics.csv",
+        "t2smark_pair_quality_summary": output_dir / "t2smark_strict_pair_quality_summary.json",
         "command_plan": output_dir / "baseline_command_plan.json",
         "adapter_output_root": adapter_output_root,
         "execution_output_dir": execution_output_dir,
@@ -435,6 +478,40 @@ def count_t2smark_formal_attack_items(results_path: Path, attack_names: tuple[st
     return count
 
 
+def count_t2smark_pair_quality_items(results_path: Path) -> int:
+    """统计 T2SMark 结果中已经具备严格 clean/watermarked pair 证据的样本数。"""
+
+    if not results_path.is_file():
+        return 0
+    try:
+        payload = read_json(results_path)
+    except Exception:
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    count = 0
+    for key, value in payload.items():
+        if not str(key).isdigit() or not isinstance(value, dict):
+            continue
+        pair_quality = value.get("pair_quality")
+        if not isinstance(pair_quality, dict):
+            continue
+        sample_name = f"{int(key):05d}.png"
+        clean_path = Path(str(pair_quality.get("clean_image_path") or ""))
+        watermarked_path = Path(str(pair_quality.get("watermarked_image_path") or ""))
+        clean_exists = clean_path.is_file() or (results_path.parent / "quality_pairs" / "clean" / sample_name).is_file()
+        watermarked_exists = watermarked_path.is_file() or (results_path.parent / "images" / sample_name).is_file()
+        if (
+            pair_quality.get("pair_quality_protocol") == "strict_clean_watermarked_pair"
+            and pair_quality.get("clean_image_digest")
+            and pair_quality.get("watermarked_image_digest")
+            and clean_exists
+            and watermarked_exists
+        ):
+            count += 1
+    return count
+
+
 def should_run_t2smark_official(config: ExternalBaselineMethodFaithfulConfig, results_path: Path) -> tuple[bool, str]:
     """判断 T2SMark 官方 SD3.5 运行是否需要本次生成。"""
 
@@ -448,6 +525,8 @@ def should_run_t2smark_official(config: ExternalBaselineMethodFaithfulConfig, re
         attack_names = configured_attack_names(config.t2smark_formal_attack_families)
         if attack_names and count_t2smark_formal_attack_items(results_path, attack_names) < required_count:
             return True, "existing_results_formal_attack_count_insufficient"
+        if config.save_clean_pair and count_t2smark_pair_quality_items(results_path) < required_count:
+            return True, "existing_results_pair_quality_count_insufficient"
         return False, "existing_results_found"
     return True, "results_missing"
 
@@ -632,6 +711,22 @@ def patch_t2smark_formal_attack_compatibility(root_path: Path, paths: dict[str, 
         )
         option_path.write_text(option_text, encoding="utf-8")
         option_patch_applied = True
+    option_text = option_path.read_text(encoding="utf-8")
+    if "slm_save_clean_pair" not in option_text:
+        pair_option_anchor = '    parser.add_argument("--slm_attack_image_dir", type=str, default=None)\n'
+        if pair_option_anchor not in option_text:
+            pair_option_anchor = '    parser.add_argument("--SDv35M", action="store_true", default=False)\n'
+        if pair_option_anchor not in option_text:
+            raise RuntimeError("t2smark_pair_quality_option_patch_anchor_missing")
+        option_text = option_text.replace(
+            pair_option_anchor,
+            pair_option_anchor
+            + '    parser.add_argument("--slm_save_clean_pair", action="store_true", default=False)\n'
+            + '    parser.add_argument("--slm_pair_image_dir", type=str, default=None)\n',
+            1,
+        )
+        option_path.write_text(option_text, encoding="utf-8")
+        option_patch_applied = True
 
     source_text = source_path.read_text(encoding="utf-8")
     source_patch_applied = False
@@ -676,6 +771,42 @@ def patch_t2smark_formal_attack_compatibility(root_path: Path, paths: dict[str, 
             "    image_tensor = utils.to_tensor(prepare_t2smark_decode_image(attacked_image)).to(device).half()\n",
             1,
         )
+        source_path.write_text(source_text, encoding="utf-8")
+        source_patch_applied = True
+    source_text = source_path.read_text(encoding="utf-8")
+    if T2SMARK_PAIR_QUALITY_COMPAT_MARKER not in source_text:
+        helper_anchor = "pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)\n"
+        dir_anchor = "results = {}\n"
+        save_anchor = (
+            "        if args.save_image:\n"
+            "            generated_image.save(os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png'))\n"
+        )
+        if save_anchor not in source_text:
+            save_anchor = (
+                "        generated_image_path = \"\"\n"
+                "        if args.save_image:\n"
+                "            generated_image_path = os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png')\n"
+                "            generated_image.save(generated_image_path)\n"
+            )
+        for anchor_name, anchor in (
+            ("t2smark_pair_quality_helper_anchor_missing", helper_anchor),
+            ("t2smark_pair_quality_dir_anchor_missing", dir_anchor),
+            ("t2smark_pair_quality_save_anchor_missing", save_anchor),
+        ):
+            if anchor not in source_text:
+                raise RuntimeError(anchor_name)
+        source_text = source_text.replace(helper_anchor, T2SMARK_PAIR_QUALITY_HELPER_BLOCK + "\n" + helper_anchor, 1)
+        source_text = source_text.replace(dir_anchor, T2SMARK_PAIR_QUALITY_DIR_BLOCK + "\n" + dir_anchor, 1)
+        if "generated_image_path = \"\"" not in save_anchor:
+            replacement = (
+                "        generated_image_path = \"\"\n"
+                "        if args.save_image:\n"
+                "            generated_image_path = os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png')\n"
+                "            generated_image.save(generated_image_path)\n"
+            )
+        else:
+            replacement = save_anchor
+        source_text = source_text.replace(save_anchor, replacement + T2SMARK_PAIR_QUALITY_SAVE_BLOCK + "\n", 1)
         source_path.write_text(source_text, encoding="utf-8")
         source_patch_applied = True
 
@@ -824,6 +955,14 @@ def run_t2smark_official_if_needed(
                 str(paths["official_run_dir"] / "formal_attacks"),
             ]
         )
+    if config.save_clean_pair:
+        command.extend(
+            [
+                "--slm_save_clean_pair",
+                "--slm_pair_image_dir",
+                str(paths["official_run_dir"] / "quality_pairs"),
+            ]
+        )
     if config.save_image:
         command.append("--save_image")
     result = run_command_with_progress_status(
@@ -869,8 +1008,11 @@ def build_current_t2smark_image_pairs(
     rows: list[dict[str, Any]] = []
     for index in range(config.robust_test_num):
         image_path = image_dir / f"{index:05d}.png"
+        clean_image_path = paths["official_run_dir"] / "quality_pairs" / "clean" / f"{index:05d}.png"
         image_id = f"t2smark_{index:05d}"
         prompt_row = prompt_rows[index]
+        watermarked_image_digest = file_digest(image_path) if image_path.is_file() else ""
+        clean_image_digest = file_digest(clean_image_path) if clean_image_path.is_file() else ""
         row = {
             "image_id": image_id,
             "event_id": image_id,
@@ -881,7 +1023,13 @@ def build_current_t2smark_image_pairs(
             "prompt_text": str(prompt_row["prompt_text"]),
             "baseline_id": "t2smark",
             "generated_image_path": relative_or_absolute(image_path, root_path) if image_path.is_file() else "",
-            "generated_image_digest": file_digest(image_path) if image_path.is_file() else "",
+            "generated_image_digest": watermarked_image_digest,
+            "clean_image_path": relative_or_absolute(clean_image_path, root_path) if clean_image_path.is_file() else "",
+            "clean_image_digest": clean_image_digest,
+            "watermarked_image_path": relative_or_absolute(image_path, root_path) if image_path.is_file() else "",
+            "watermarked_image_digest": watermarked_image_digest,
+            "pair_quality_protocol": "strict_clean_watermarked_pair",
+            "strict_pair_quality_ready": bool(clean_image_digest and watermarked_image_digest),
         }
         rows.append(row)
     return rows
@@ -901,6 +1049,10 @@ def t2smark_image_pairs_are_current(
         if current_row.get("generated_image_digest") and old_row.get("generated_image_digest") != current_row.get("generated_image_digest"):
             return False
         if current_row.get("generated_image_path") and old_row.get("generated_image_path") != current_row.get("generated_image_path"):
+            return False
+        if current_row.get("clean_image_digest") and old_row.get("clean_image_digest") != current_row.get("clean_image_digest"):
+            return False
+        if current_row.get("watermarked_image_digest") and old_row.get("watermarked_image_digest") != current_row.get("watermarked_image_digest"):
             return False
     return True
 
@@ -1219,7 +1371,7 @@ def write_external_baseline_method_faithful_outputs(
     selected_methods = selected_primary_baseline_methods(config)
     official_required = "t2smark" in selected_methods
     try:
-        with progress_bar(6, desc="external baseline method-faithful", enabled=config.enable_workflow_progress_bar) as run_progress:
+        with progress_bar(7, desc="external baseline method-faithful", enabled=config.enable_workflow_progress_bar) as run_progress:
             emit_progress_status(run_progress, profile="operation=materialize_prior_outputs status=running")
             prior_manifest = materialize_prior_outputs(root_path, config, paths)
             update_progress(run_progress, profile="operation=materialize_prior_outputs")
@@ -1232,6 +1384,20 @@ def write_external_baseline_method_faithful_outputs(
                 emit_progress_status(run_progress, profile="operation=build_image_pairs status=running")
                 image_pairs = build_t2smark_image_pairs(root_path, config, paths)
                 update_progress(run_progress, profile=f"operation=build_image_pairs pairs={len(image_pairs)}")
+                emit_progress_status(run_progress, profile="operation=t2smark_pair_quality status=running")
+                pair_quality_report = write_t2smark_strict_pair_quality_outputs(
+                    root_path=root_path,
+                    image_pairs_path=paths["image_pairs"],
+                    metrics_path=paths["t2smark_pair_quality_metrics"],
+                    summary_path=paths["t2smark_pair_quality_summary"],
+                )
+                update_progress(
+                    run_progress,
+                    profile=(
+                        "operation=t2smark_pair_quality "
+                        f"measured={pair_quality_report['measured_strict_pair_quality_count']}"
+                    ),
+                )
             else:
                 official_report = {
                     "official_result_generated": False,
@@ -1243,8 +1409,14 @@ def write_external_baseline_method_faithful_outputs(
                     "source_report": {"source_available": False, "source_downloaded": False, "source_prepare_skipped": True},
                 }
                 image_pairs = []
+                pair_quality_report = {
+                    "strict_pair_quality_ready": False,
+                    "strict_pair_quality_record_count": 0,
+                    "measured_strict_pair_quality_count": 0,
+                }
                 update_progress(run_progress, profile="operation=t2smark_official_reference skipped=true")
                 update_progress(run_progress, profile="operation=build_image_pairs skipped=true")
+                update_progress(run_progress, profile="operation=t2smark_pair_quality skipped=true")
             adapter_report = build_and_run_primary_baseline_adapters(root_path, config, paths, progress=run_progress)
             update_progress(run_progress, profile=f"operation=primary_baseline_adapters baselines={len(selected_methods)}")
             emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
@@ -1261,6 +1433,7 @@ def write_external_baseline_method_faithful_outputs(
         paths["official_results"],
         t2smark_formal_attack_names,
     )
+    t2smark_pair_quality_result_count = count_t2smark_pair_quality_items(paths["official_results"])
     expected_sample_count = max(1, int(config.robust_test_num))
     official_ready = (
         True
@@ -1270,6 +1443,7 @@ def write_external_baseline_method_faithful_outputs(
             and official_report.get("official_return_code") == 0
             and t2smark_result_count >= expected_sample_count
             and (not t2smark_formal_attack_names or t2smark_formal_attack_result_count >= expected_sample_count)
+            and (not config.save_clean_pair or t2smark_pair_quality_result_count >= expected_sample_count)
         )
     )
     adapter_ready = bool(adapter_report.get("adapter_execution_ready"))
@@ -1305,6 +1479,14 @@ def write_external_baseline_method_faithful_outputs(
         "t2smark_result_count": t2smark_result_count,
         "t2smark_formal_attack_families": list(t2smark_formal_attack_names),
         "t2smark_formal_attack_result_count": t2smark_formal_attack_result_count,
+        "t2smark_strict_pair_quality_count": t2smark_pair_quality_result_count,
+        "t2smark_strict_pair_quality_ready": bool(pair_quality_report.get("strict_pair_quality_ready", False)),
+        "t2smark_strict_pair_quality_metrics_path": relative_or_absolute(paths["t2smark_pair_quality_metrics"], root_path)
+        if paths["t2smark_pair_quality_metrics"].exists()
+        else "",
+        "t2smark_strict_pair_quality_summary_path": relative_or_absolute(paths["t2smark_pair_quality_summary"], root_path)
+        if paths["t2smark_pair_quality_summary"].exists()
+        else "",
         "prior_package_reused": bool(prior_manifest.get("prior_package_reused")),
         "image_pair_count": len(image_pairs),
         "adapter_execution_ready": adapter_ready,
@@ -1334,6 +1516,7 @@ def write_external_baseline_method_faithful_outputs(
         "metadata": {
             **official_report,
             **adapter_report,
+            "t2smark_pair_quality_report": pair_quality_report,
             "prior_manifest": prior_manifest,
             "claim_boundary": "method_faithful_not_full_external_baseline_comparison",
         },
@@ -1351,7 +1534,14 @@ def write_external_baseline_method_faithful_outputs(
         relative_or_absolute(paths["summary"], root_path),
         relative_or_absolute(paths["environment_report"], root_path),
     ]
-    for optional_path in (paths["execution_manifest"], paths["baseline_observations"], paths["command_results"], paths["command_plan"]):
+    for optional_path in (
+        paths["execution_manifest"],
+        paths["baseline_observations"],
+        paths["command_results"],
+        paths["command_plan"],
+        paths["t2smark_pair_quality_metrics"],
+        paths["t2smark_pair_quality_summary"],
+    ):
         if optional_path.exists():
             output_paths_for_manifest.append(relative_or_absolute(optional_path, root_path))
     if paths["split_observation_dir"].exists():
@@ -1375,6 +1565,8 @@ def write_external_baseline_method_faithful_outputs(
             "primary_baseline_adapter_ready": primary_ready,
             "primary_baseline_observation_count": primary_observation_count,
             "primary_baseline_attacked_image_count": int(adapter_report.get("primary_baseline_attacked_image_count", 0)),
+            "t2smark_strict_pair_quality_ready": summary["t2smark_strict_pair_quality_ready"],
+            "t2smark_strict_pair_quality_count": summary["t2smark_strict_pair_quality_count"],
             "supports_paper_claim": False,
         },
     ).to_dict()
@@ -1437,6 +1629,7 @@ def build_default_config() -> ExternalBaselineMethodFaithfulConfig:
         reuse_prior_drive_package=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REUSE_DRIVE", "1") != "0",
         force_generate=os.environ.get("SLM_WM_EXTERNAL_BASELINE_FORCE_GENERATE", "0") == "1",
         save_image=os.environ.get("SLM_WM_T2SMARK_SAVE_IMAGE", "1") != "0",
+        save_clean_pair=os.environ.get("SLM_WM_T2SMARK_SAVE_CLEAN_PAIR", "1") != "0",
         require_cuda=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REQUIRE_CUDA", "1") != "0",
         timeout_seconds=int(os.environ.get("SLM_WM_EXTERNAL_BASELINE_TIMEOUT_SECONDS", "86400")),
         enable_workflow_progress_bar=os.environ.get("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1") != "0",

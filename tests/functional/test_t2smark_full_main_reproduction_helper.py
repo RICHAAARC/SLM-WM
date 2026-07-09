@@ -75,13 +75,19 @@ def test_full_main_image_pairs_record_image_digest(tmp_path: Path) -> None:
     config = T2SMarkFullMainReproductionConfig(require_cuda=False)
     paths = output_paths(tmp_path, config)
     paths["official_images"].mkdir(parents=True)
+    clean_dir = paths["official_run_dir"] / "quality_pairs" / "clean"
+    clean_dir.mkdir(parents=True)
     (paths["official_images"] / "00000.png").write_bytes(b"fake_image")
+    (clean_dir / "00000.png").write_bytes(b"fake_clean_image")
     prompt_rows = [{"prompt_id": "prompt_alpha", "prompt_index": 0, "split": "test"}]
 
     rows = build_t2smark_full_main_image_pairs(tmp_path, paths, prompt_rows)
 
     assert rows[0]["generated_image_path"].endswith("images/00000.png")
     assert rows[0]["generated_image_digest"]
+    assert rows[0]["clean_image_path"].endswith("quality_pairs/clean/00000.png")
+    assert rows[0]["clean_image_digest"]
+    assert rows[0]["strict_pair_quality_ready"] is True
     assert json.loads(paths["image_pairs"].read_text(encoding="utf-8"))[0]["prompt_id"] == "prompt_alpha"
 
 
@@ -129,6 +135,7 @@ def test_full_main_reproduction_reuses_existing_results_and_writes_candidate_rec
         require_cuda=False,
         reuse_existing=True,
         force_generate=False,
+        save_clean_pair=False,
     )
     paths = output_paths(tmp_path, config)
     paths["official_results"].parent.mkdir(parents=True)

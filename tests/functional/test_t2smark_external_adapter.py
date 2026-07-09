@@ -40,6 +40,11 @@ def test_t2smark_adapter_maps_formal_attack_results_to_common_observations() -> 
             "prompt_text": "a ceramic fox",
             "generated_image_path": "outputs/t2smark/images/00000.png",
             "generated_image_digest": "source_digest",
+            "clean_image_path": "outputs/t2smark/quality_pairs/clean/00000.png",
+            "clean_image_digest": "clean_digest",
+            "watermarked_image_path": "outputs/t2smark/images/00000.png",
+            "watermarked_image_digest": "source_digest",
+            "strict_pair_quality_ready": True,
         }
     ]
     results = {
@@ -69,6 +74,8 @@ def test_t2smark_adapter_maps_formal_attack_results_to_common_observations() -> 
     assert all(row["attack_family"] == "regeneration_attack" for row in attacked_rows)
     assert manifest["formal_attack_names"] == ["img2img_regeneration"]
     assert manifest["formal_attack_observation_count"] == 2
+    assert manifest["strict_pair_quality_ready"] is True
+    assert all(row["clean_image_digest"] == "clean_digest" for row in observations)
 
 
 @pytest.mark.quick
