@@ -1,4 +1,4 @@
-"""写出 pilot_paper 级 fixed-FPR=0.01 共同协议产物。"""
+"""写出当前论文运行层级的 fixed-FPR 共同协议产物。"""
 
 from __future__ import annotations
 
@@ -140,7 +140,7 @@ def write_pilot_paper_fixed_fpr_common_protocol_outputs(
     candidate_records_path: str | Path = DEFAULT_CANDIDATE_RECORDS_PATH,
     require_existing_evidence: bool = False,
 ) -> dict[str, Any]:
-    """写出 pilot_paper fixed-FPR=0.01 共同协议的运行前治理产物。"""
+    """写出当前论文运行层级 fixed-FPR 共同协议的运行前治理产物。"""
 
     root_path = Path(root).resolve()
     output_path = ensure_output_dir_under_outputs(root_path, output_dir)
@@ -282,7 +282,7 @@ def write_pilot_paper_fixed_fpr_common_protocol_outputs(
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
 
-    parser = argparse.ArgumentParser(description="写出 pilot_paper 级 fixed-FPR=0.01 共同协议产物。")
+    parser = argparse.ArgumentParser(description="写出当前论文运行层级 fixed-FPR 共同协议产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument(

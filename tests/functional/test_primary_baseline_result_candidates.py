@@ -31,8 +31,8 @@ def method_observations() -> list[dict[str, object]]:
                     "detection_decision": False,
                     "prompt_id": "prompt_000",
                     "prompt_text": "a ceramic fox on a wooden desk",
-                    "quality_score_proxy": 1.0,
-                    "score_retention_proxy": 1.0,
+                    "quality_score": 1.0,
+                    "score_retention": 1.0,
                 },
                 {
                     "baseline_id": baseline_id,
@@ -42,8 +42,8 @@ def method_observations() -> list[dict[str, object]]:
                     "detection_decision": True,
                     "prompt_id": "prompt_000",
                     "prompt_text": "a ceramic fox on a wooden desk",
-                    "quality_score_proxy": 1.0,
-                    "score_retention_proxy": 1.0,
+                    "quality_score": 1.0,
+                    "score_retention": 1.0,
                 },
             ]
         )
@@ -87,8 +87,8 @@ def t2smark_attack_method_faithful_observations() -> list[dict[str, object]]:
             "detection_decision": False,
             "prompt_id": "prompt_000",
             "prompt_text": "a ceramic fox on a wooden desk",
-            "quality_score_proxy": 0.9,
-            "score_retention_proxy": 0.8,
+            "quality_score": 0.9,
+            "score_retention": 0.8,
         },
         {
             "baseline_id": "t2smark",
@@ -98,8 +98,8 @@ def t2smark_attack_method_faithful_observations() -> list[dict[str, object]]:
             "detection_decision": True,
             "prompt_id": "prompt_000",
             "prompt_text": "a ceramic fox on a wooden desk",
-            "quality_score_proxy": 0.9,
-            "score_retention_proxy": 0.8,
+            "quality_score": 0.9,
+            "score_retention": 0.8,
         },
     ]
 
@@ -117,8 +117,8 @@ def regeneration_observations() -> list[dict[str, object]]:
             "detection_decision": False,
             "prompt_id": "prompt_000",
             "prompt_text": "a ceramic fox on a wooden desk",
-            "quality_score_proxy": 1.0,
-            "score_retention_proxy": 0.8,
+            "quality_score": 1.0,
+            "score_retention": 0.8,
         },
         {
             "baseline_id": "tree_ring",
@@ -129,8 +129,8 @@ def regeneration_observations() -> list[dict[str, object]]:
             "detection_decision": True,
             "prompt_id": "prompt_000",
             "prompt_text": "a ceramic fox on a wooden desk",
-            "quality_score_proxy": 1.0,
-            "score_retention_proxy": 0.8,
+            "quality_score": 1.0,
+            "score_retention": 0.8,
         },
     ]
 
@@ -161,7 +161,7 @@ def t2smark_candidate_record() -> dict[str, object]:
         "positive_count": 5,
         "prompt_protocol_digest": "prompt_digest",
         "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
-        "quality_score_proxy_mean": 1.0,
+        "quality_score_mean": 1.0,
         "resource_profile": "full_main",
         "result_protocol_name": "primary_baseline_formal_import_protocol",
         "result_source_type": "official_reproduction",

@@ -291,8 +291,8 @@ def shared_method_settings(config: PaperRunConfig) -> dict[str, Any]:
     """返回应在各论文运行层级间保持一致的方法级设置。
 
     fixed-FPR 门禁需要的最小样本数属于协议规模约束, 不属于方法机制本身。
-    probe_paper 使用较小 prompt 集验证 Colab 入口拆分是否正确, 因此不能把
-    该门禁计数纳入方法级共享设置。
+    probe_paper、pilot_paper 与 full_paper 均使用同一方法设置; 三者只通过
+    prompt 数量和 fixed-FPR 目标表达不同统计强度。
     """
 
     payload = config.to_dict()

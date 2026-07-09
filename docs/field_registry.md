@@ -1367,6 +1367,18 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_supports_superiority_claim | governance | none | false | false | false | pilot_paper 结果是否允许在 pilot_paper 样本规模边界内支撑方法优越性主张。|
 | full_paper_claim_ready | governance | none | false | false | false | full_paper 规模论文主张是否已具备证据闭合。pilot_paper 共同协议中必须为 false。|
 | paper_claim_scale | governance | none | false | false | false | 当前结果或协议允许支撑的论文主张规模, 例如 pilot_paper 或 full_paper。|
+| paper_run_claim_type | governance | none | false | false | false | 当前论文运行层级对应的正式主张类型, probe_paper、pilot_paper 与 full_paper 分别对应 probe_claim、pilot_claim 与 full_claim。|
+| probe_claim_ready | governance | none | false | false | false | probe_paper 小规模正式流程主张是否已经通过同一协议门禁。|
+| pilot_claim_ready | governance | none | false | false | false | pilot_paper 中规模正式流程主张是否已经通过同一协议门禁。|
+| full_claim_ready | governance | none | false | false | false | full_paper 全规模正式流程主张是否已经通过同一协议门禁。|
+| strict_formal_evidence_required | governance | none | false | false | false | 当前共同协议是否要求结果记录只能来自正式真实测量证据。|
+| strict_formal_result_ready | governance | none | true | false | false | 单条共同协议结果记录是否已经通过正式真实测量证据门禁。|
+| nonformal_evidence_rejection_policy | governance | none | false | false | false | 非正式证据进入共同协议结果导入时的拒绝策略。|
+| paper_run_complete_result_package_ready | governance | none | false | false | false | 当前论文运行层级完整结果包是否已经覆盖所有必需输出目录并完成归档。|
+| probe_paper_complete_result_package_ready | governance | none | false | false | false | probe_paper 完整结果包是否已经覆盖所有必需输出目录并完成归档。|
+| pilot_paper_complete_result_package_ready | governance | none | false | false | false | pilot_paper 完整结果包是否已经覆盖所有必需输出目录并完成归档。|
+| full_paper_complete_result_package_ready | governance | none | false | false | false | full_paper 完整结果包是否已经覆盖所有必需输出目录并完成归档。|
+| paper_run_claim_ready | governance | none | false | false | false | 当前论文运行层级的正式主张是否已经通过共同协议、证据覆盖和优势性门禁。|
 | full_paper_claim_boundary | governance | none | false | false | false | pilot_paper 结果与 full_paper 规模论文主张之间的样本规模边界说明。|
 | prompt_split_digest | artifact | none | false | false | false | 共同协议使用的 prompt split 稳定摘要。|
 | attack_matrix_digest | artifact | none | false | false | false | 共同协议使用的攻击矩阵稳定摘要。|
@@ -1391,6 +1403,7 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_result_record_digest | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定摘要。|
 | pilot_paper_result_record_id | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定标识。|
 | result_source_kind | governance | none | true | false | false | pilot_paper 结果记录来源类型, 区分 SLM-WM 攻击矩阵与外部 baseline 结果。|
+| dataset_quality_formal_metric_ready | governance | none | true | false | false | 数据集级正式 FID / KID 指标是否可以支撑共同协议结果记录。|
 | attacked_image_latent_rescore | method | none | true | false | false | attacked image 经过 VAE latent 投影后的直接水印重检测摘要对象。|
 | attacked_image_rescore_count | metric | none | true | false | false | 已完成 attacked image 直接水印重检测的记录数量。|
 | attacked_image_rescore_ready | governance | none | true | false | false | attacked image 直接水印重检测是否覆盖当前闭环内全部真实 attacked image。|

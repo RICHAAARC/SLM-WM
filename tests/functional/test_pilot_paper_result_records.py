@@ -83,6 +83,7 @@ def write_attack_matrix_inputs(repo_root: Path) -> None:
                 "false_positive_rate": 0.0,
                 "clean_false_positive_rate": 0.0,
                 "attacked_false_positive_rate": 0.0,
+                "quality_score_mean": 0.92,
                 "quality_score_proxy_mean": 0.92,
                 "score_retention_mean": 0.81,
                 "lf_score_retention_mean": 0.80,
@@ -107,6 +108,7 @@ def write_attack_matrix_inputs(repo_root: Path) -> None:
             "false_positive_rate",
             "clean_false_positive_rate",
             "attacked_false_positive_rate",
+            "quality_score_mean",
             "quality_score_proxy_mean",
             "score_retention_mean",
             "lf_score_retention_mean",
@@ -125,17 +127,19 @@ def write_attack_matrix_inputs(repo_root: Path) -> None:
     )
     write_csv_rows(
         quality_dir / "dataset_quality_metrics.csv",
-        [{"quality_metric_name": "fid_pixel_feature_proxy", "metric_status": "measured_small_sample_proxy"}],
+        [
+            {"quality_metric_name": "fid", "metric_status": "measured"},
+            {"quality_metric_name": "kid", "metric_status": "measured"},
+        ],
         ["quality_metric_name", "metric_status"],
     )
     (quality_dir / "dataset_quality_summary.json").write_text(
         json.dumps(
             {
-                "formal_fid_kid_metric_names_ready": False,
-                "formal_fid_kid_claim_gate_ready": False,
-                "formal_fid_kid_claim_blocker": "requires_inception_feature_backend",
-                "dataset_quality_proxy_only": True,
-                "dataset_quality_claim_boundary": "formal_feature_backend_missing_for_dataset_quality_claim",
+                "formal_fid_kid_metric_names_ready": True,
+                "formal_fid_kid_claim_gate_ready": True,
+                "formal_fid_kid_claim_blocker": "",
+                "dataset_quality_claim_boundary": "formal_fid_kid_measured",
             },
             ensure_ascii=False,
         )
@@ -175,7 +179,7 @@ def baseline_candidate_row() -> dict[str, object]:
         "false_positive_rate": 0.0,
         "clean_false_positive_rate": 0.0,
         "attacked_false_positive_rate": 0.0,
-        "quality_score_proxy_mean": 0.88,
+        "quality_score_mean": 0.88,
         "score_retention_mean": 0.70,
         "baseline_result_record_id": "primary_baseline_formal_result_test",
         "baseline_result_digest": "baseline_result_digest",
@@ -284,10 +288,10 @@ def test_pilot_paper_result_writer_materializes_slm_and_governed_baseline_record
     assert slm_record["detector_input_access_mode"] == "generation_latent_trace_required"
     assert slm_record["blind_image_detector"] is False
     assert slm_record["baseline_fairness_boundary"] == "external_baseline_comparison_requires_matching_detector_access"
-    assert slm_record["formal_fid_kid_claim_gate_ready"] is False
-    assert slm_record["formal_fid_kid_claim_blocker"] == "requires_inception_feature_backend"
-    assert slm_record["dataset_quality_proxy_only"] is True
-    assert slm_record["dataset_quality_claim_boundary"] == "formal_feature_backend_missing_for_dataset_quality_claim"
+    assert slm_record["formal_fid_kid_claim_gate_ready"] is True
+    assert slm_record["formal_fid_kid_claim_blocker"] == ""
+    assert slm_record["dataset_quality_formal_metric_ready"] is True
+    assert slm_record["dataset_quality_claim_boundary"] == "formal_fid_kid_measured"
     assert "outputs/dataset_level_quality/dataset_quality_summary.json" in slm_record["evidence_paths"]
     assert baseline_record["detector_input_access_mode"] == "method_native_or_final_image"
     assert validation["pilot_paper_result_import_ready"] is True
@@ -356,7 +360,7 @@ def test_result_writer_switches_records_to_full_paper_claim_scale(
 
     assert {row["method_id"] for row in records} == {"slm_wm_current", "tree_ring"}
     assert all(row["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol" for row in records)
-    assert all(row["result_claim_scope"] == "full_paper_paper_claim" for row in records)
+    assert all(row["result_claim_scope"] == "full_claim" for row in records)
     assert all(row["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol" for row in records)
     assert all(row["paper_claim_scale"] == "full_paper" for row in records)
     assert summary["paper_claim_scale"] == "full_paper"
@@ -388,10 +392,9 @@ def test_result_writer_blocks_retention_proxy_from_claim_boundary(tmp_path: Path
         for line in (output_dir / "pilot_paper_result_records.jsonl").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    slm_record = next(row for row in records if row["method_id"] == "slm_wm_current")
     baseline_record = next(row for row in records if row["method_id"] == "tree_ring")
 
-    assert slm_record["supports_paper_claim"] is False
+    assert {row["method_id"] for row in records} == {"tree_ring"}
     assert baseline_record["supports_paper_claim"] is True
 
 
@@ -415,13 +418,10 @@ def test_pilot_paper_result_writer_keeps_unaccepted_baseline_out_of_claim_bounda
     validation = json.loads(
         (output_dir / "pilot_paper_result_import_validation_report.json").read_text(encoding="utf-8")
     )
-    tree_ring_record = next(row for row in records if row["method_id"] == "tree_ring")
-
-    assert tree_ring_record["baseline_formal_import_record_accepted"] is False
-    assert tree_ring_record["supports_paper_claim"] is False
+    assert {row["method_id"] for row in records} == {"slm_wm_current"}
     assert validation["pilot_paper_result_import_ready"] is True
     assert validation["accepted_pilot_paper_claim_record_count"] == 1
-    assert validation["pilot_paper_claim_record_ready"] is False
+    assert validation["pilot_paper_claim_record_ready"] is True
 
 
 @pytest.mark.quick

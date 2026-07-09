@@ -539,6 +539,23 @@ def _mean(records: Iterable[dict[str, Any]], field_name: str) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
+def _mean_optional(records: Iterable[dict[str, Any]], field_name: str) -> float:
+    """计算可选记录字段均值, 字段不存在时返回 0。"""
+
+    values = [float(record[field_name]) for record in records if field_name in record]
+    return sum(values) / len(values) if values else 0.0
+
+
+def _mean_quality_score(records: Iterable[dict[str, Any]]) -> float:
+    """计算图像质量均值, 优先使用正式质量字段。"""
+
+    rows = list(records)
+    formal_values = [float(record["quality_score"]) for record in rows if "quality_score" in record]
+    if formal_values:
+        return sum(formal_values) / len(formal_values)
+    return _mean(rows, "quality_score_proxy")
+
+
 def _rate(records: Iterable[dict[str, Any]], field_name: str) -> float:
     """计算布尔字段触发率。"""
     rows = list(records)
@@ -597,7 +614,8 @@ def _rates_for_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         "false_positive_rate": _rate(negatives, "evidence_decision"),
         "clean_false_positive_rate": _rate(clean_negatives, "evidence_decision"),
         "attacked_false_positive_rate": _rate(attacked_negatives, "evidence_decision"),
-        "quality_score_proxy_mean": _mean(supported, "quality_score_proxy"),
+        "quality_score_mean": _mean_quality_score(supported),
+        "quality_score_proxy_mean": _mean_optional(supported, "quality_score_proxy"),
         "score_retention_mean": _mean(supported, "score_retention"),
         "lf_score_retention_mean": _mean(supported, "lf_score_retention"),
         "hf_score_retention_mean": _mean(supported, "hf_score_retention"),
@@ -643,6 +661,7 @@ def strength_curve(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
                 "true_positive_rate": rates["true_positive_rate"],
                 "false_positive_rate": rates["false_positive_rate"],
                 "score_retention_mean": rates["score_retention_mean"],
+                "quality_score_mean": rates["quality_score_mean"],
                 "quality_score_proxy_mean": rates["quality_score_proxy_mean"],
                 "supports_paper_claim": False,
             }

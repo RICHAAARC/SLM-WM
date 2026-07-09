@@ -6,9 +6,11 @@
 
 | 配置文件 | prompt 数量 | 用途 |
 | --- | ---: | --- |
-| `paper_main_probe_paper_prompts.txt` | 60 | 使用完整论文 workflow 的小规模服务器流程对齐验证。 |
-| `paper_main_pilot_paper_prompts.txt` | 600 | pilot 论文结果运行。 |
-| `paper_main_full_paper_prompts.txt` | 6000 | 完整论文结果运行。 |
+| `paper_main_probe_paper_prompts.txt` | 60 | 小规模正式论文流程结果包, 固定 FPR 为 0.1, 支持 `probe_claim`。 |
+| `paper_main_pilot_paper_prompts.txt` | 600 | 中等规模正式论文流程结果包, 固定 FPR 为 0.01, 支持 `pilot_claim`。 |
+| `paper_main_full_paper_prompts.txt` | 6000 | 全规模正式论文流程结果包, 固定 FPR 为 0.001, 支持 `full_claim`。 |
+
+三组配置只允许样本数量和 fixed-FPR 标准不同; 共同协议结果记录必须拒绝 proxy、placeholder、fallback、synthetic 和 formal-null 证据。
 
 ## Colab 运行环境约束记录
 

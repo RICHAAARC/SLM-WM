@@ -45,7 +45,7 @@ REQUIRED_METRIC_FIELDS = (
     "false_positive_rate",
     "clean_false_positive_rate",
     "attacked_false_positive_rate",
-    "quality_score_proxy_mean",
+    "quality_score_mean",
     "score_retention_mean",
 )
 REQUIRED_SOURCE_FIELDS = (
@@ -373,7 +373,7 @@ def _validate_metric_fields(row: Mapping[str, Any], row_index: int) -> list[Form
         "false_positive_rate",
         "clean_false_positive_rate",
         "attacked_false_positive_rate",
-        "quality_score_proxy_mean",
+        "quality_score_mean",
         "score_retention_mean",
     ):
         value = _float_field(row, field_name)
@@ -860,7 +860,7 @@ def build_t2smark_full_main_candidate_records(
             "false_positive_rate": false_positive / negative_count if negative_count else 0.0,
             "clean_false_positive_rate": clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0,
             "attacked_false_positive_rate": attacked_false_positive / len(attacked_negative_rows) if attacked_negative_rows else 0.0,
-            "quality_score_proxy_mean": 1.0,
+            "quality_score_mean": 1.0,
             "score_retention_mean": 1.0,
         }
         ready_flags = {
@@ -956,8 +956,8 @@ def build_method_faithful_baseline_candidate_records(
             "false_positive_rate": false_positive / negative_count if negative_count else 0.0,
             "clean_false_positive_rate": clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0,
             "attacked_false_positive_rate": attacked_false_positive / len(attacked_negative_rows) if attacked_negative_rows else 0.0,
-            "quality_score_proxy_mean": _mean_optional_rate(group, "quality_score_proxy", 1.0),
-            "score_retention_mean": _mean_optional_rate(group, "score_retention_proxy", 1.0),
+            "quality_score_mean": _mean_optional_rate(group, "quality_score", 1.0),
+            "score_retention_mean": _mean_optional_rate(group, "score_retention", 1.0),
         }
         ready_flags = {
             "method_faithful_adapter_ready": True,

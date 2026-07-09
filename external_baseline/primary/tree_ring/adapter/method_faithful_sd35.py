@@ -358,8 +358,8 @@ def build_observation(
         "generation_model_id": model_id,
         "latent_shape": list(latent_shape),
         "execution_device": execution_device,
-        "quality_score_proxy": 1.0,
-        "score_retention_proxy": 1.0,
+        "quality_score": 1.0,
+        "score_retention": 1.0,
     }
     payload["baseline_observation_digest"] = build_stable_digest(payload)
     return payload

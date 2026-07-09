@@ -48,8 +48,6 @@ REAL_ATTACK_RETENTION_PROXY_METRIC_STATUS = "measured_from_real_attacked_image_r
 LEGACY_REAL_ATTACK_METRIC_STATUS = "measured_from_real_attacked_image_formal_protocol"
 REAL_ATTACK_METRIC_STATUSES = (
     REAL_ATTACK_WATERMARK_RESCORE_METRIC_STATUS,
-    REAL_ATTACK_RETENTION_PROXY_METRIC_STATUS,
-    LEGACY_REAL_ATTACK_METRIC_STATUS,
 )
 FORMAL_PROXY_REPLACEMENT_SAMPLE_ROLES = ("positive_source", "clean_negative")
 
@@ -593,6 +591,7 @@ def write_attack_matrix_outputs(
             "false_positive_rate",
             "clean_false_positive_rate",
             "attacked_false_positive_rate",
+            "quality_score_mean",
             "quality_score_proxy_mean",
             "score_retention_mean",
             "lf_score_retention_mean",
@@ -617,6 +616,7 @@ def write_attack_matrix_outputs(
             "true_positive_rate",
             "false_positive_rate",
             "score_retention_mean",
+            "quality_score_mean",
             "quality_score_proxy_mean",
             "supports_paper_claim",
         ],

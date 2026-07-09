@@ -14,9 +14,9 @@
 
 | run_name | prompt_file | prompt_count | target_fpr | 用途 |
 | --- | --- | ---: | ---: | --- |
-| `probe_paper` | `configs/paper_main_probe_paper_prompts.txt` | 60 | 0.1 | 小规模论文流程等价验证, 用于确认服务器、Colab 入口、打包和结果闭合流程可跑通。 |
-| `pilot_paper` | `configs/paper_main_pilot_paper_prompts.txt` | 600 | 0.01 | 中等规模论文结果验证, 用于检查方法有效性、外部 baseline 差距和共同协议闭合。 |
-| `full_paper` | `configs/paper_main_full_paper_prompts.txt` | 6000 | 0.001 | 正式论文主张运行层级, 需要完整样本规模、完整攻击矩阵和完整 baseline 证据。 |
+| `probe_paper` | `configs/paper_main_probe_paper_prompts.txt` | 60 | 0.1 | 小规模正式论文流程结果包, 支持 `probe_claim`, 用于确认同一正式协议在服务器或 Colab 上可闭合。 |
+| `pilot_paper` | `configs/paper_main_pilot_paper_prompts.txt` | 600 | 0.01 | 中等规模正式论文流程结果包, 支持 `pilot_claim`, 用于检查方法有效性、外部 baseline 差距和共同协议闭合。 |
+| `full_paper` | `configs/paper_main_full_paper_prompts.txt` | 6000 | 0.001 | 全规模正式论文流程结果包, 支持 `full_claim`, 需要完整样本规模、完整攻击矩阵和完整 baseline 证据。 |
 
 旧的非论文 probe prompt 文件已移除, 防止与 `probe_paper` 混淆。
 
@@ -46,11 +46,12 @@
 ## 关键协议边界
 
 1. `probe_paper`、`pilot_paper` 与 `full_paper` 必须共享同一批 repository modules、Notebook 入口、服务器 runner、攻击矩阵、baseline 入口、bootstrap 设置、随机种子和结果闭合逻辑。三者只允许 prompt 数量与目标 FPR 不同。
-2. `diagnostic / smoke` 只用于预检, 不得进入 fixed-FPR 正式统计表、baseline comparison 表或论文 claim audit。
-3. fixed-FPR 阈值校准只使用 clean negative 边界; rescue 结果必须单独标记, 不得把 rescue 侧通过率混入 clean-side fixed-FPR 阈值估计。
-4. 外部 baseline 当前采用方法忠实比较: 各方法使用自己的生成、嵌入和检测流程, 但共享 prompt split、攻击矩阵、目标 fixed-FPR 和受治理导入 schema。当前不是“同一批 clean images 后处理嵌入水印”的比较方式。
-5. dataset-level FID / KID 必须在成组图像集合上计算; pair-level LPIPS / CLIP score 只能作为成对质量补充, 不替代集合级指标。
-6. `outputs/` 是本地持久化输出根目录, 但 Colab 正式运行的上游应来自对应 Google Drive 结果目录或服务器交换目录, 不应依赖人工下载到本地 `outputs/` 的副本。
+2. `probe_paper`、`pilot_paper` 与 `full_paper` 都是正式流程结果包, 任何 proxy、placeholder、fallback、synthetic 或 formal-null 记录都不得进入其共同协议结果记录、正式对比表或 claim-ready 统计。
+3. `diagnostic / smoke` 只用于预检, 不得进入 fixed-FPR 正式统计表、baseline comparison 表或论文 claim audit。
+4. fixed-FPR 阈值校准只使用 clean negative 边界; rescue 结果必须单独标记, 不得把 rescue 侧通过率混入 clean-side fixed-FPR 阈值估计。
+5. 外部 baseline 当前采用方法忠实比较: 各方法使用自己的生成、嵌入和检测流程, 但共享 prompt split、攻击矩阵、目标 fixed-FPR 和受治理导入 schema。当前不是“同一批 clean images 后处理嵌入水印”的比较方式。
+6. dataset-level FID / KID 必须在成组图像集合上计算; pair-level LPIPS / CLIP score 只能作为成对质量补充, 不替代集合级指标。
+7. `outputs/` 是本地持久化输出根目录, 但 Colab 正式运行的上游应来自对应 Google Drive 结果目录或服务器交换目录, 不应依赖人工下载到本地 `outputs/` 的副本。
 
 ## 当前 Notebook 与服务器入口边界
 
@@ -68,7 +69,7 @@
 | 外部 baseline 闭合 | 四个主表 method-faithful baseline 与 official reference 结果包均存在, 候选记录通过 formal import validator, comparison table 支持当前运行层级主张。 |
 | 内部消融闭合 | 消融 records、summary、表格和 manifest 可重建, 且不把 unsupported / proxy 记录提升为正式 claim。 |
 | 质量指标闭合 | pair-level LPIPS / CLIP 与 dataset-level FID / KID 边界清晰, dataset-level 指标来自成组图像集合。 |
-| 论文结果闭合 | `paper_result_closure_run.ipynb` 或服务器 result closure runner 完成, 生成当前运行层级完整结果包, 且 evidence audit 无 critical 缺口。 |
+| 论文结果闭合 | `paper_result_closure_run.ipynb` 或服务器 result closure runner 完成, 生成当前运行层级完整结果包, 且共同协议记录只含严格正式证据, evidence audit 无 critical 缺口。 |
 
 ## 当前需持续关注的缺口
 

@@ -43,7 +43,7 @@ def formal_tree_ring_row(evidence_path: str) -> dict[str, object]:
         "false_positive_rate": 0.05,
         "clean_false_positive_rate": 0.0,
         "attacked_false_positive_rate": 0.1,
-        "quality_score_proxy_mean": 0.88,
+        "quality_score_mean": 0.88,
         "score_retention_mean": 0.77,
         "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
         "prompt_protocol_digest": "prompt_digest",
@@ -168,8 +168,8 @@ def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_p
             "attack_condition": "clean_none",
             "sample_role": "clean_negative",
             "detection_decision": False,
-            "quality_score_proxy": 1.0,
-            "score_retention_proxy": 1.0,
+            "quality_score": 1.0,
+            "score_retention": 1.0,
         },
         {
             "baseline_id": "tree_ring",
@@ -177,8 +177,8 @@ def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_p
             "attack_condition": "clean_none",
             "sample_role": "positive_source",
             "detection_decision": True,
-            "quality_score_proxy": 1.0,
-            "score_retention_proxy": 1.0,
+            "quality_score": 1.0,
+            "score_retention": 1.0,
         },
     ]
 

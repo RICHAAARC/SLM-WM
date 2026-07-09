@@ -222,8 +222,8 @@ def build_observation(
             "latent_shape": list(latent_shape),
             "execution_device": execution_device,
             "shallow_injection_mode": injection_mode,
-            "quality_score_proxy": 1.0,
-            "score_retention_proxy": 1.0,
+            "quality_score": 1.0,
+            "score_retention": 1.0,
         }
     )
 

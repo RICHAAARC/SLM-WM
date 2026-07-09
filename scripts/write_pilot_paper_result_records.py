@@ -1,8 +1,9 @@
-"""写出 pilot_paper fixed-FPR 共同协议结果记录。
+"""写出当前论文运行层级 fixed-FPR 共同协议结果记录。
 
 该脚本的作用是把方法主流程和外部 baseline 的受治理产物转换为统一
 `pilot_paper_result_records.jsonl`。Notebook 只负责在 Colab 中生成上游包,
 本脚本负责结果物化、模板覆盖检查、schema 校验和 manifest 写出。
+probe_paper、pilot_paper 与 full_paper 都只接受严格正式证据记录。
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol.attacks import default_attack_configs
+from experiments.protocol.formal_evidence import contains_nonformal_marker
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PilotPaperFixedFprConfig,
     build_attack_matrix_digest,
@@ -52,9 +54,10 @@ DEFAULT_BASELINE_VALIDATION_REPORT_PATH = Path(
 )
 DEFAULT_DATASET_QUALITY_METRICS_PATH = Path("outputs/dataset_level_quality/dataset_quality_metrics.csv")
 DEFAULT_DATASET_QUALITY_SUMMARY_NAME = "dataset_quality_summary.json"
+STRICT_FORMAL_SLM_METRIC_STATUS = "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
 CLAIM_SUPPORTED_METHOD_STATUSES = {
     "measured",
-    "measured_from_real_attacked_image_watermark_rescore_formal_protocol",
+    STRICT_FORMAL_SLM_METRIC_STATUS,
 }
 DIAGNOSTIC_ONLY_METHOD_STATUSES = {
     "measured_from_local_proxy",
@@ -449,12 +452,6 @@ def dataset_quality_claim_gate_fields(dataset_quality_metrics_path: Path, root_p
     }
     metric_names_ready = bool(summary.get("formal_fid_kid_metric_names_ready", measured_formal_names == {"fid", "kid"}))
     claim_gate_ready = bool(summary.get("formal_fid_kid_claim_gate_ready", metric_names_ready))
-    proxy_ready = bool(
-        summary.get(
-            "dataset_level_quality_proxy_ready",
-            any(_str_field(row, "metric_status") == "measured_small_sample_proxy" for row in metric_rows),
-        )
-    )
     blocker = _str_field(summary, "formal_fid_kid_claim_blocker")
     if not blocker and not claim_gate_ready:
         blocker = "formal_fid_kid_not_measured"
@@ -463,13 +460,15 @@ def dataset_quality_claim_gate_fields(dataset_quality_metrics_path: Path, root_p
         boundary = (
             "formal_fid_kid_measured_but_paper_claim_requires_evidence_closure"
             if claim_gate_ready
-            else "dataset_quality_proxy_only_formal_fid_kid_blocked"
+            else "dataset_quality_formal_fid_kid_not_ready"
         )
+    elif contains_nonformal_marker(boundary):
+        boundary = "dataset_quality_formal_fid_kid_not_ready"
     return {
         "formal_fid_kid_metric_names_ready": metric_names_ready,
         "formal_fid_kid_claim_gate_ready": claim_gate_ready,
         "formal_fid_kid_claim_blocker": blocker,
-        "dataset_quality_proxy_only": bool(summary.get("dataset_quality_proxy_only", proxy_ready and not claim_gate_ready)),
+        "dataset_quality_formal_metric_ready": claim_gate_ready,
         "dataset_quality_claim_boundary": boundary,
         "dataset_quality_summary_path": (
             relative_or_absolute(dataset_quality_summary_path, root_path) if dataset_quality_summary_path.is_file() else ""
@@ -509,6 +508,8 @@ def build_common_result_fields(
         "baseline_result_source_digest": baseline_result_source_digest,
         "evidence_paths": evidence_paths,
         "paper_claim_scale": schema.get("paper_claim_scale", "pilot_paper"),
+        "paper_run_claim_type": schema.get("paper_run_claim_type", schema["result_claim_scope"]),
+        "strict_formal_evidence_required": bool(schema.get("strict_formal_evidence_required", True)),
     }
 
 
@@ -583,9 +584,19 @@ def finalize_result_record(
 ) -> dict[str, Any]:
     """补齐稳定标识、摘要和 claim 边界字段。"""
 
+    evidence_values = payload.get("evidence_paths", ())
+    formal_marker_ready = not contains_nonformal_marker(
+        (
+            metric_status,
+            payload.get("result_source_kind", ""),
+            payload.get("baseline_result_source", ""),
+            evidence_values,
+        )
+    )
     supports_claim = (
         claim_ready
         and paper_run_allows_paper_claim
+        and formal_marker_ready
         and metric_status in CLAIM_SUPPORTED_METHOD_STATUSES
         and int(payload.get("positive_count", 0)) >= minimum_claim_count
         and int(payload.get("negative_count", 0)) >= minimum_claim_count
@@ -594,6 +605,7 @@ def finalize_result_record(
     )
     payload["metric_status"] = metric_status
     payload["result_source_kind"] = source_kind
+    payload["strict_formal_result_ready"] = supports_claim
     payload["supports_paper_claim"] = supports_claim
     digest = build_stable_digest(payload)
     payload["pilot_paper_result_record_digest"] = digest
@@ -646,11 +658,12 @@ def build_slm_wm_result_records(
         root_path,
     )
     dataset_quality_gate_fields = dataset_quality_claim_gate_fields(dataset_quality_metrics_path, root_path)
+    dataset_quality_ready = bool(dataset_quality_gate_fields.get("formal_fid_kid_claim_gate_ready"))
     source_digest = file_digest(attack_family_metrics_path) if attack_family_metrics_path.is_file() else build_stable_digest(rows)
     records: list[dict[str, Any]] = []
     for row in rows:
         metric_status = _str_field(row, "metric_status")
-        if metric_status == "unsupported":
+        if metric_status != STRICT_FORMAL_SLM_METRIC_STATUS:
             continue
         payload = build_common_result_fields(
             schema=schema,
@@ -670,6 +683,7 @@ def build_slm_wm_result_records(
                 **dataset_quality_gate_fields,
             }
         )
+        slm_formal_quality_ready = "quality_score_mean" in row and not contains_nonformal_marker(row.get("quality_score_mean"))
         attach_metric_fields(
             payload,
             positive_count=_int_field(row, "positive_count"),
@@ -680,7 +694,7 @@ def build_slm_wm_result_records(
             false_positive_rate=_float_field(row, "false_positive_rate"),
             clean_false_positive_rate=_float_field(row, "clean_false_positive_rate"),
             attacked_false_positive_rate=_float_field(row, "attacked_false_positive_rate"),
-            quality_score_mean=_float_field(row, "quality_score_proxy_mean"),
+            quality_score_mean=_float_field(row, "quality_score_mean"),
             score_retention_mean=_float_field(row, "score_retention_mean"),
             confidence_level=float(schema["confidence_level"]),
         )
@@ -689,6 +703,7 @@ def build_slm_wm_result_records(
                 payload,
                 metric_status=metric_status,
                 source_kind="slm_wm_attack_matrix",
+                claim_ready=dataset_quality_ready and slm_formal_quality_ready,
                 minimum_claim_count=minimum_claim_count,
                 paper_run_allows_paper_claim=paper_run_allows_paper_claim,
             )
@@ -758,17 +773,18 @@ def build_baseline_result_records(
             false_positive_rate=_float_field(row, "false_positive_rate"),
             clean_false_positive_rate=_float_field(row, "clean_false_positive_rate"),
             attacked_false_positive_rate=_float_field(row, "attacked_false_positive_rate"),
-            quality_score_mean=_float_field(row, "quality_score_proxy_mean", _float_field(row, "quality_score_mean")),
+            quality_score_mean=_float_field(row, "quality_score_mean"),
             score_retention_mean=_float_field(row, "score_retention_mean"),
             confidence_level=float(schema["confidence_level"]),
         )
         payload["baseline_formal_import_record_accepted"] = record_key in accepted_keys
+        baseline_formal_quality_ready = "quality_score_mean" in row and not contains_nonformal_marker(row.get("quality_score_mean"))
         records.append(
             finalize_result_record(
                 payload,
                 metric_status=_str_field(row, "metric_status", "measured"),
                 source_kind="external_baseline_result",
-                claim_ready=record_key in accepted_keys,
+                claim_ready=record_key in accepted_keys and baseline_formal_quality_ready,
                 minimum_claim_count=minimum_claim_count,
                 paper_run_allows_paper_claim=paper_run_allows_paper_claim,
             )
@@ -849,6 +865,7 @@ def filter_records_to_template(
             _str_field(record, "resource_profile"),
         )
         in allowed_keys
+        and bool(record.get("strict_formal_result_ready"))
     ]
 
 

@@ -1,8 +1,8 @@
-"""构建 pilot_paper 级 fixed-FPR 共同协议。
+"""构建论文运行级 fixed-FPR 共同协议。
 
-该模块只描述 pilot_paper 共同验证协议的受治理输入、阈值边界、攻击矩阵、
-baseline 导入模板和声明边界。它不执行 GPU 推理。pilot_paper 与 full_paper 共用方法协议,
-二者仅通过 prompt 规模、样本量和运行资源规模区分。
+该模块描述 probe_paper、pilot_paper 与 full_paper 共用的正式验证协议,
+包括受治理输入、阈值边界、攻击矩阵、baseline 导入模板和声明边界。
+它不执行 GPU 推理。三个论文运行层级仅通过 prompt 规模和 fixed-FPR 目标区分。
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from experiments.protocol.attacks import AttackConfig, attack_config_digest
+from experiments.protocol.formal_evidence import contains_nonformal_marker
 from experiments.protocol.paper_run_config import (
     FULL_PAPER_RUN_NAME,
     PROBE_PAPER_RUN_NAME,
@@ -29,9 +30,14 @@ PILOT_PAPER_PROMPT_FILE = "configs/paper_main_pilot_paper_prompts.txt"
 PILOT_PAPER_PROMPT_PROTOCOL_NAME = "paper_main_pilot_paper_prompt_protocol"
 PILOT_PAPER_RESULT_PROTOCOL_NAME = "pilot_paper_fixed_fpr_common_protocol"
 PILOT_PAPER_RESULT_SCOPE = "pilot_paper_common_protocol"
-PILOT_PAPER_CLAIM_BOUNDARY = "pilot_paper_paper_claim"
+PILOT_PAPER_CLAIM_BOUNDARY = "pilot_claim"
 FULL_PAPER_CLAIM_BOUNDARY = "full_paper_claim_requires_full_paper_sample_scale"
-PROBE_PAPER_WORKFLOW_BOUNDARY = "probe_paper_validates_colab_workflow_split_not_paper_claim"
+PROBE_PAPER_WORKFLOW_BOUNDARY = "probe_paper_uses_same_formal_protocol_with_smaller_sample_and_fpr"
+PAPER_RUN_CLAIM_SCOPES = {
+    PROBE_PAPER_RUN_NAME: "probe_claim",
+    PILOT_PAPER_PROMPT_SET: "pilot_claim",
+    FULL_PAPER_RUN_NAME: "full_claim",
+}
 PROBE_PAPER_FIXED_FPR = 0.1
 PILOT_PAPER_FIXED_FPR = 0.01
 FULL_PAPER_FIXED_FPR = 0.001
@@ -124,7 +130,7 @@ def result_scope_for_run(run_name: str) -> str:
 def result_claim_scope_for_run(run_name: str) -> str:
     """根据论文运行层级生成论文主张边界名称。"""
 
-    return f"{run_name}_paper_claim"
+    return PAPER_RUN_CLAIM_SCOPES[run_name]
 
 
 def _default_paper_run_value(field_name: str) -> Any:
@@ -423,7 +429,10 @@ def build_pilot_paper_result_import_schema(
         "required_rate_fields": list(PILOT_PAPER_RATE_FIELDS),
         "ci_field_groups": [list(group) for group in PILOT_PAPER_CI_FIELD_GROUPS],
         "supports_paper_claim": True,
-        "paper_run_allows_paper_claim": resolved_config.prompt_set != PROBE_PAPER_RUN_NAME,
+        "paper_run_allows_paper_claim": True,
+        "paper_run_claim_type": resolved_config.result_claim_scope,
+        "strict_formal_evidence_required": True,
+        "nonformal_evidence_rejection_policy": "reject_nonformal_records",
         "probe_paper_workflow_boundary": PROBE_PAPER_WORKFLOW_BOUNDARY,
         "paper_claim_scale": resolved_config.prompt_set,
         "full_paper_claim_boundary": FULL_PAPER_CLAIM_BOUNDARY,
@@ -605,6 +614,19 @@ def _validate_protocol_fields(row: Mapping[str, Any], row_index: int, schema: Ma
             else "paper_claim_scale_mismatch"
         )
         issues.append(_issue(row_index, row, "paper_claim_scale", reason))
+    if bool(schema.get("strict_formal_evidence_required", True)):
+        if not _bool_field(row, "supports_paper_claim"):
+            issues.append(_issue(row_index, row, "supports_paper_claim", "strict_formal_claim_record_required"))
+        if not _bool_field(row, "strict_formal_result_ready"):
+            issues.append(_issue(row_index, row, "strict_formal_result_ready", "strict_formal_result_required"))
+        inspected_values = (
+            row.get("metric_status", ""),
+            row.get("result_source_kind", ""),
+            row.get("baseline_result_source", ""),
+            row.get("evidence_paths", ()),
+        )
+        if contains_nonformal_marker(inspected_values):
+            issues.append(_issue(row_index, row, "metric_status", "nonformal_result_marker_rejected"))
     return issues
 
 
@@ -786,7 +808,7 @@ def build_pilot_paper_common_protocol_summary(
         and len(materialized_template_rows) == len(materialized_attack_rows) * len(materialized_method_rows)
         and math.isclose(float(resolved_config.target_fpr), expected_target_fpr, rel_tol=0.0, abs_tol=1e-12)
     )
-    paper_run_allows_claim = resolved_config.prompt_set != PROBE_PAPER_RUN_NAME
+    paper_run_allows_claim = True
     paper_run_workflow_validation_ready = ready and import_ready and template_import_coverage_ready
     paper_run_claim_ready = (
         ready
@@ -795,7 +817,7 @@ def build_pilot_paper_common_protocol_summary(
         and claim_coverage_ready
         and superiority_gate["superiority_gate_ready"]
     )
-    probe_paper_claim_ready = False
+    probe_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == PROBE_PAPER_RUN_NAME
     probe_paper_workflow_validation_ready = (
         resolved_config.prompt_set == PROBE_PAPER_RUN_NAME and paper_run_workflow_validation_ready
     )
@@ -807,9 +829,11 @@ def build_pilot_paper_common_protocol_summary(
         "result_scope": resolved_config.result_scope,
         "result_claim_scope": resolved_config.result_claim_scope,
         "paper_claim_scale": resolved_config.prompt_set,
+        "paper_run_claim_type": resolved_config.result_claim_scope,
         "full_paper_claim_boundary": FULL_PAPER_CLAIM_BOUNDARY,
         "probe_paper_workflow_boundary": PROBE_PAPER_WORKFLOW_BOUNDARY,
         "paper_run_allows_paper_claim": paper_run_allows_claim,
+        "strict_formal_evidence_required": True,
         "pilot_paper_common_protocol_ready": ready,
         "paper_run_workflow_validation_ready": paper_run_workflow_validation_ready,
         "probe_paper_workflow_validation_ready": probe_paper_workflow_validation_ready,
@@ -847,7 +871,10 @@ def build_pilot_paper_common_protocol_summary(
         "paper_run_supports_superiority_claim": paper_run_claim_ready,
         "paper_claim_ready": paper_run_claim_ready,
         "probe_paper_claim_ready": probe_paper_claim_ready,
+        "probe_claim_ready": probe_paper_claim_ready,
         "full_paper_claim_ready": full_paper_claim_ready,
+        "pilot_claim_ready": pilot_paper_claim_ready,
+        "full_claim_ready": full_paper_claim_ready,
         "supports_paper_claim": paper_run_claim_ready,
     }
 

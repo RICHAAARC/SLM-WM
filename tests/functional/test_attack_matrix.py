@@ -81,13 +81,13 @@ def formal_real_attack_record(
         "lf_score_retention": 0.60,
         "hf_score_retention": 0.62,
         "score_retention": 0.61,
-        "quality_score_proxy": 0.82,
+        "quality_score": 0.82,
         "attention_consistency_proxy": 0.57,
         "geometry_reliable": True,
         "rescue_eligible": False,
         "rescue_applied": False,
         "evidence_decision": evidence_decision,
-        "metric_status": "measured_from_real_attacked_image_retention_proxy_formal_protocol",
+        "metric_status": "measured_from_real_attacked_image_watermark_rescore_formal_protocol",
         "unsupported_reason": "",
         "supports_paper_claim": False,
         "metadata": {
@@ -330,7 +330,7 @@ def test_attack_matrix_ingests_real_attack_formal_records(tmp_path: Path) -> Non
     }
     assert regeneration_rows
     assert all(
-        row["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+        row["metric_status"] == "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
         for row in regeneration_rows
     )
 
@@ -416,8 +416,8 @@ def test_attack_matrix_prefers_formal_image_attack_records_over_local_proxy(tmp_
     assert evidence_records_path.exists()
     assert len(evidence_records_path.read_text(encoding="utf-8").splitlines()) == 1
     assert len(jpeg_full_main_records) == 1
-    assert jpeg_full_main_records[0]["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
-    assert jpeg_full_main_rows[0]["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+    assert jpeg_full_main_records[0]["metric_status"] == "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
+    assert jpeg_full_main_rows[0]["metric_status"] == "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
     assert jpeg_full_main_rows[0]["attack_record_count"] == "1"
     assert attack_manifest["formal_real_attack_record_count"] == 1
     assert attack_manifest["formal_proxy_replacement_complete_count"] == 1
@@ -612,7 +612,7 @@ def test_attack_matrix_formal_claim_roles_replace_proxy_even_with_attacked_negat
 
     assert len(jpeg_full_main_records) == 2
     assert {record["sample_role"] for record in jpeg_full_main_records} == {"positive_source", "clean_negative"}
-    assert jpeg_full_main_rows[0]["metric_status"] == "measured_from_real_attacked_image_retention_proxy_formal_protocol"
+    assert jpeg_full_main_rows[0]["metric_status"] == "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
     assert jpeg_full_main_rows[0]["attack_record_count"] == "2"
     assert jpeg_full_main_rows[0]["positive_count"] == "1"
     assert jpeg_full_main_rows[0]["negative_count"] == "1"

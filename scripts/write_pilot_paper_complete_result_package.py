@@ -30,6 +30,9 @@ from scripts.write_pilot_paper_result_records import WorkProgress, expand_packag
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_complete_result_package"
 DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_complete_result_package")
+DEFAULT_COMMON_PROTOCOL_SUMMARY_PATH = Path(
+    "outputs/pilot_paper_fixed_fpr_common_protocol/pilot_paper_common_protocol_summary.json"
+)
 DEFAULT_DRIVE_OUTPUT_DIR = ""
 DEFAULT_PACKAGE_SEARCH_ROOT = ""
 ZIP_COMPRESSION_METHODS = {
@@ -76,6 +79,14 @@ PACKAGE_EXTRA_PATHS = (
     "scripts/write_internal_ablation_outputs.py",
     "scripts/write_pilot_paper_result_analysis_outputs.py",
 )
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    """读取 JSON 文件, 文件不存在时返回空字典。"""
+
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 @dataclass(frozen=True)
@@ -278,10 +289,15 @@ def build_readiness_summary(
 ) -> dict[str, Any]:
     """汇总完整结果包覆盖状态。"""
 
+    common_protocol_summary = read_json(root_path / DEFAULT_COMMON_PROTOCOL_SUMMARY_PATH)
     existing_dirs = [relative_dir for relative_dir in REQUIRED_OUTPUT_DIRS if (root_path / relative_dir).exists()]
     missing_dirs = [relative_dir for relative_dir in REQUIRED_OUTPUT_DIRS if not (root_path / relative_dir).exists()]
     entry_list = tuple(entries)
     package_ready = len(missing_dirs) == 0 and bool(entry_list)
+    run_claim_ready = bool(common_protocol_summary.get("paper_run_claim_ready", False))
+    probe_claim_ready = bool(common_protocol_summary.get("probe_claim_ready", False))
+    pilot_claim_ready = bool(common_protocol_summary.get("pilot_claim_ready", False))
+    full_claim_ready = bool(common_protocol_summary.get("full_claim_ready", False))
     return {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -295,9 +311,15 @@ def build_readiness_summary(
         "archive_entry_digest": build_stable_digest([relative_or_absolute(path, root_path) for path in entry_list]),
         "materialization_report": materialization_report,
         "paper_run_complete_result_package_ready": package_ready,
+        "paper_run_claim_ready": run_claim_ready,
+        "paper_run_claim_type": common_protocol_summary.get("paper_run_claim_type", ""),
         "probe_paper_complete_result_package_ready": paper_claim_scale == "probe_paper" and package_ready,
-        "pilot_paper_complete_result_package_ready": package_ready,
-        "supports_paper_claim": False,
+        "pilot_paper_complete_result_package_ready": paper_claim_scale == "pilot_paper" and package_ready,
+        "full_paper_complete_result_package_ready": paper_claim_scale == "full_paper" and package_ready,
+        "probe_claim_ready": probe_claim_ready,
+        "pilot_claim_ready": pilot_claim_ready,
+        "full_claim_ready": full_claim_ready,
+        "supports_paper_claim": package_ready and run_claim_ready,
     }
 
 

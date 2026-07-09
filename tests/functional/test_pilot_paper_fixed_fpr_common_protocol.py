@@ -106,7 +106,7 @@ def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_p
     assert {row["attack_matrix_digest"] for row in method_rows} == {schema["attack_matrix_digest"]}
     assert {row["fixed_fpr_protocol_digest"] for row in method_rows} == {schema["fixed_fpr_protocol_digest"]}
     assert all(row["target_fpr"] == 0.01 for row in template_rows)
-    assert all(row["result_claim_scope"] == "pilot_paper_paper_claim" for row in template_rows)
+    assert all(row["result_claim_scope"] == "pilot_claim" for row in template_rows)
     assert all("true_positive_rate_ci_low" in row["required_metric_fields"] for row in template_rows)
     assert all(path.startswith("outputs/") for path in manifest["output_paths"])
 
@@ -185,7 +185,7 @@ def test_writer_switches_common_protocol_to_full_paper_without_logic_fork(
 
     assert summary["paper_claim_scale"] == "full_paper"
     assert summary["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol"
-    assert summary["result_claim_scope"] == "full_paper_paper_claim"
+    assert summary["result_claim_scope"] == "full_claim"
     assert summary["full_paper_claim_ready"] is False
     assert prompt_summary["prompt_set"] == "full_paper"
     assert prompt_summary["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol"
@@ -194,7 +194,7 @@ def test_writer_switches_common_protocol_to_full_paper_without_logic_fork(
     assert schema["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol"
     assert schema["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol"
     assert all(row["paper_claim_scale"] == "full_paper" for row in template_rows)
-    assert all(row["result_claim_scope"] == "full_paper_paper_claim" for row in template_rows)
+    assert all(row["result_claim_scope"] == "full_claim" for row in template_rows)
 
 
 @pytest.mark.quick
@@ -222,11 +222,12 @@ def test_writer_switches_common_protocol_to_probe_paper_without_logic_fork(
 
     assert summary["paper_claim_scale"] == "probe_paper"
     assert summary["result_protocol_name"] == "probe_paper_fixed_fpr_common_protocol"
-    assert summary["result_claim_scope"] == "probe_paper_paper_claim"
+    assert summary["result_claim_scope"] == "probe_claim"
     assert summary["pilot_paper_common_protocol_ready"] is True
-    assert summary["paper_run_allows_paper_claim"] is False
+    assert summary["paper_run_allows_paper_claim"] is True
     assert summary["probe_paper_workflow_validation_ready"] is False
     assert summary["probe_paper_claim_ready"] is False
+    assert summary["probe_claim_ready"] is False
     assert prompt_summary["prompt_set"] == "probe_paper"
     assert prompt_summary["pilot_paper_prompt_count"] == 60
     assert prompt_summary["target_fpr"] == 0.1
@@ -237,12 +238,13 @@ def test_writer_switches_common_protocol_to_probe_paper_without_logic_fork(
     assert schema["prompt_set"] == "probe_paper"
     assert schema["target_fpr"] == 0.1
     assert schema["minimum_result_positive_count"] == 10
-    assert schema["paper_run_allows_paper_claim"] is False
+    assert schema["paper_run_allows_paper_claim"] is True
+    assert schema["paper_run_claim_type"] == "probe_claim"
     assert schema["prompt_protocol_name"] == "paper_main_probe_paper_prompt_protocol"
     assert schema["result_protocol_name"] == "probe_paper_fixed_fpr_common_protocol"
     assert all(row["paper_claim_scale"] == "probe_paper" for row in template_rows)
     assert all(row["target_fpr"] == 0.1 for row in template_rows)
-    assert all(row["result_claim_scope"] == "probe_paper_paper_claim" for row in template_rows)
+    assert all(row["result_claim_scope"] == "probe_claim" for row in template_rows)
 
 
 def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dict[str, object]:
@@ -288,6 +290,7 @@ def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dic
         "score_retention_mean": 0.76,
         "score_retention_ci_low": 0.70,
         "score_retention_ci_high": 0.82,
+        "strict_formal_result_ready": True,
         "supports_paper_claim": True,
         "paper_claim_scale": "pilot_paper",
     }
@@ -347,7 +350,7 @@ def test_pilot_paper_import_validator_rejects_full_paper_claim_boundary(tmp_path
         config=config,
     )
     row = pilot_paper_result_row(schema, "outputs/pilot_paper_fixed_fpr_results/tree_ring_metrics.json")
-    row["result_claim_scope"] = "full_paper_paper_claim"
+    row["result_claim_scope"] = "full_claim"
     row["paper_claim_scale"] = "full_paper"
 
     report = validate_pilot_paper_result_import_rows([row], schema, evidence_root=tmp_path)
@@ -384,3 +387,30 @@ def test_pilot_paper_import_validator_rejects_small_sample_result_records(tmp_pa
 
     assert report["accepted_pilot_paper_import_count"] == 0
     assert "pilot_paper_minimum_sample_count_required" in reasons
+
+
+@pytest.mark.quick
+def test_paper_import_validator_rejects_nonformal_marked_result_records(tmp_path: Path) -> None:
+    """三层正式论文结果导入都必须拒绝诊断性证据标记。"""
+
+    config = PilotPaperFixedFprConfig()
+    prompt_records = build_prompt_records(
+        "pilot_paper",
+        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(250)),
+    )
+    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
+    schema = build_pilot_paper_result_import_schema(
+        prompt_split_digest=prompt_summary["prompt_split_digest"],
+        attack_matrix_digest=build_attack_matrix_digest(attack_rows),
+        fixed_fpr_protocol_digest=build_fixed_fpr_protocol_digest(config),
+        config=config,
+    )
+    row = pilot_paper_result_row(schema, "outputs/pilot_paper_fixed_fpr_results/tree_ring_metrics.json")
+    row["metric_status"] = "measured_from_local_proxy"
+
+    report = validate_pilot_paper_result_import_rows([row], schema, evidence_root=tmp_path)
+    reasons = {issue["reason"] for issue in report["issues"]}
+
+    assert report["accepted_pilot_paper_import_count"] == 0
+    assert "nonformal_result_marker_rejected" in reasons
