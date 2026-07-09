@@ -54,5 +54,7 @@ def test_t2smark_strict_pair_quality_outputs_measure_pixel_metrics(tmp_path: Pat
     metrics_text = (output_dir / "t2smark_strict_pair_quality_metrics.csv").read_text(encoding="utf-8")
     assert summary["strict_pair_quality_ready"] is True
     assert summary["measured_strict_pair_quality_count"] == 1
+    assert summary["lpips_status_values"] == ["disabled"]
+    assert summary["clip_score_status_values"] == ["disabled"]
     assert "strict_clean_watermarked_pair" in metrics_text
     assert "measured" in metrics_text

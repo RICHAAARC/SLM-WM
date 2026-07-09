@@ -43,6 +43,8 @@ DEFAULT_T2SMARK_SOURCE_ENTRY = "external_baseline/primary/t2smark/source/run_sd3
 DEFAULT_T2SMARK_INVERSION_ENTRY = "external_baseline/primary/t2smark/source/src/inversion/inverse_diffusion3.py"
 DEFAULT_SOURCE_REGISTRY_PATH = "external_baseline/source_registry.json"
 DEFAULT_T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
+DEFAULT_T2SMARK_CLIP_MODEL_ID = "openai/clip-vit-base-patch32"
+DEFAULT_T2SMARK_LPIPS_NETWORK = "alex"
 DEFAULT_PROMPT_FILE = "configs/paper_main_pilot_paper_prompts.txt"
 DEFAULT_PACKAGE_PATTERN = "external_baseline_method_faithful_package_*.zip"
 DEFAULT_SHARED_SAMPLE_COUNT = 600
@@ -251,6 +253,10 @@ class ExternalBaselineMethodFaithfulConfig:
     force_generate: bool = False
     save_image: bool = True
     save_clean_pair: bool = True
+    enable_t2smark_pair_perceptual_metrics: bool = True
+    t2smark_pair_clip_model_id: str = DEFAULT_T2SMARK_CLIP_MODEL_ID
+    t2smark_pair_lpips_network: str = DEFAULT_T2SMARK_LPIPS_NETWORK
+    t2smark_pair_perceptual_metric_device_name: str = "cpu"
     require_cuda: bool = True
     timeout_seconds: int = 86400
     enable_workflow_progress_bar: bool = True
@@ -1390,6 +1396,10 @@ def write_external_baseline_method_faithful_outputs(
                     image_pairs_path=paths["image_pairs"],
                     metrics_path=paths["t2smark_pair_quality_metrics"],
                     summary_path=paths["t2smark_pair_quality_summary"],
+                    enable_pair_perceptual_metrics=config.enable_t2smark_pair_perceptual_metrics,
+                    clip_model_id=config.t2smark_pair_clip_model_id,
+                    lpips_network=config.t2smark_pair_lpips_network,
+                    perceptual_metric_device_name=config.t2smark_pair_perceptual_metric_device_name,
                 )
                 update_progress(
                     run_progress,
@@ -1630,6 +1640,13 @@ def build_default_config() -> ExternalBaselineMethodFaithfulConfig:
         force_generate=os.environ.get("SLM_WM_EXTERNAL_BASELINE_FORCE_GENERATE", "0") == "1",
         save_image=os.environ.get("SLM_WM_T2SMARK_SAVE_IMAGE", "1") != "0",
         save_clean_pair=os.environ.get("SLM_WM_T2SMARK_SAVE_CLEAN_PAIR", "1") != "0",
+        enable_t2smark_pair_perceptual_metrics=os.environ.get("SLM_WM_T2SMARK_PAIR_PERCEPTUAL_METRICS", "1") != "0",
+        t2smark_pair_clip_model_id=os.environ.get("SLM_WM_T2SMARK_PAIR_CLIP_MODEL_ID", DEFAULT_T2SMARK_CLIP_MODEL_ID),
+        t2smark_pair_lpips_network=os.environ.get("SLM_WM_T2SMARK_PAIR_LPIPS_NETWORK", DEFAULT_T2SMARK_LPIPS_NETWORK),
+        t2smark_pair_perceptual_metric_device_name=os.environ.get(
+            "SLM_WM_T2SMARK_PAIR_PERCEPTUAL_DEVICE",
+            "cpu",
+        ),
         require_cuda=os.environ.get("SLM_WM_EXTERNAL_BASELINE_REQUIRE_CUDA", "1") != "0",
         timeout_seconds=int(os.environ.get("SLM_WM_EXTERNAL_BASELINE_TIMEOUT_SECONDS", "86400")),
         enable_workflow_progress_bar=os.environ.get("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1") != "0",
