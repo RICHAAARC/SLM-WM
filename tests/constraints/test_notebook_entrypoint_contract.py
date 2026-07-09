@@ -46,7 +46,7 @@ T2SMARK_OFFICIAL_REPRODUCTION_NOTEBOOK_PATH = Path("paper_workflow/notebooks/off
 TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/official_reference_tree_ring_run.ipynb")
 GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/official_reference_gaussian_shading_run.ipynb")
 SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/official_reference_shallow_diffuse_run.ipynb")
-PILOT_PAPER_RESULT_CLOSURE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/pilot_paper_result_closure_run.ipynb")
+PAPER_RESULT_CLOSURE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/paper_result_closure_run.ipynb")
 NOTEBOOK_PATHS = (
     RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH,
     DRIVE_COLD_START_NOTEBOOK_PATH,
@@ -65,7 +65,7 @@ NOTEBOOK_PATHS = (
     TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
     GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
     SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH,
-    PILOT_PAPER_RESULT_CLOSURE_NOTEBOOK_PATH,
+    PAPER_RESULT_CLOSURE_NOTEBOOK_PATH,
 )
 PAPER_RUN_NOTEBOOK_PATHS = NOTEBOOK_PATHS
 COLAB_RUNTIME_CONSTRAINTS_PATH = Path("configs/colab_sd35_runtime_constraints.txt")
@@ -574,9 +574,9 @@ def test_official_baseline_notebooks_use_paper_run_configuration() -> None:
 
 
 @pytest.mark.constraint
-def test_pilot_paper_result_closure_notebook_delegates_to_repository_commands() -> None:
-    """pilot_paper 结果闭合入口必须只调度 repository commands, 不直接拼写正式产物。"""
-    payload = json.loads(PILOT_PAPER_RESULT_CLOSURE_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+def test_paper_result_closure_notebook_delegates_to_repository_commands() -> None:
+    """论文结果闭合入口必须只调度 repository commands, 不直接拼写正式产物。"""
+    payload = json.loads(PAPER_RESULT_CLOSURE_NOTEBOOK_PATH.read_text(encoding="utf-8"))
     joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
     first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
     first_code_source = "".join(first_code_cell.get("source", []))

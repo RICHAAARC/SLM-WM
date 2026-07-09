@@ -65,7 +65,7 @@ method-faithful 入口统一把压缩包镜像到当前论文运行层级的 Goo
 
 ### 结果闭合入口
 
-- `pilot_paper_result_closure_run.ipynb`: 在前序结果包已经写入 Google Drive 后, 从当前论文运行层级的 Drive 根目录物化上游包, 依次重建 attack matrix、external baseline formal import、internal ablation、fixed-FPR 共同协议记录和完整结果包。该入口不需要 GPU, 正式命令计划位于 `paper_experiments/runners/paper_result_closure.py`, Colab 包装位于 `paper_workflow/colab_utils/paper_result_closure.py`, 不直接手写正式 records、tables、figures 或 reports。
+- `paper_result_closure_run.ipynb`: 在前序结果包已经写入 Google Drive 后, 从当前论文运行层级的 Drive 根目录物化上游包, 依次重建 attack matrix、external baseline formal import、internal ablation、fixed-FPR 共同协议记录和完整结果包。该入口不需要 GPU, 正式命令计划位于 `paper_experiments/runners/paper_result_closure.py`, Colab 包装位于 `paper_workflow/colab_utils/paper_result_closure.py`, 不直接手写正式 records、tables、figures 或 reports。
 
 ## `probe_paper`、`pilot_paper` 与 `full_paper` 运行原则
 
@@ -174,7 +174,7 @@ zip 包, 避免读取半上传文件。
 | `official_reference_tree_ring_run.ipynb` | 建议使用 GPU | 无; 共享当前 prompt 与配置 | 可与其他 official reference 入口并行 | 生成 Tree-Ring 官方原始环境参考记录。 |
 | `official_reference_gaussian_shading_run.ipynb` | 建议使用 GPU | 无; 共享当前 prompt 与配置 | 可与其他 official reference 入口并行 | 生成 Gaussian Shading 官方原始环境参考记录。 |
 | `official_reference_shallow_diffuse_run.ipynb` | 建议使用 GPU | 无; 共享当前 prompt 与配置 | 可与其他 official reference 入口并行 | 生成 Shallow Diffuse 官方原始环境参考记录。 |
-| `pilot_paper_result_closure_run.ipynb` | 不需要 | 所有需要纳入完整结果包的前序结果包 | 必须最后运行 | 物化 Drive 结果包, 重建 attack matrix、baseline import、ablation、fixed-FPR common protocol 和完整结果包。 |
+| `paper_result_closure_run.ipynb` | 不需要 | 所有需要纳入完整结果包的前序结果包 | 必须最后运行 | 物化 Drive 结果包, 重建 attack matrix、baseline import、ablation、fixed-FPR common protocol 和完整结果包。 |
 
 
 ## Colab `pilot_paper` 重跑顺序
@@ -191,7 +191,7 @@ zip 包, 避免读取半上传文件。
 8. 数据集级质量: `dataset_level_quality_run.ipynb`, 必须等待两个攻击闭环入口都完成。
 9. method-faithful external baseline 并行批次: `external_baseline_tree_ring_run.ipynb`、`external_baseline_gaussian_shading_run.ipynb`、`external_baseline_shallow_diffuse_run.ipynb`、`external_baseline_t2smark_run.ipynb` 可分别在独立 Colab 会话中并行运行。
 10. official reference 并行批次: `official_reference_t2smark_run.ipynb`、`official_reference_tree_ring_run.ipynb`、`official_reference_gaussian_shading_run.ipynb`、`official_reference_shallow_diffuse_run.ipynb` 可分别在独立 Colab 会话中并行运行。
-11. 结果闭合: `pilot_paper_result_closure_run.ipynb`, 必须等待本次要纳入完整结果包的所有前序结果包写入 Drive 后再运行。
+11. 结果闭合: `paper_result_closure_run.ipynb`, 必须等待本次要纳入完整结果包的所有前序结果包写入 Drive 后再运行。
 
 ## 结果闭合等价命令
 
