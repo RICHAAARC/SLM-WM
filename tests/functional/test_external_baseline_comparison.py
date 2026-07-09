@@ -9,7 +9,11 @@ from pathlib import Path
 import pytest
 
 from paper_experiments.baselines import default_baseline_specs
-from scripts.write_external_baseline_comparison_outputs import write_external_baseline_comparison_outputs
+from scripts.write_external_baseline_comparison_outputs import (
+    align_comparison_table_claim_scope,
+    build_runtime_report,
+    write_external_baseline_comparison_outputs,
+)
 
 
 @pytest.mark.quick
@@ -416,6 +420,181 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     assert tree_comparison_row["comparison_scope"] == "common_protocol_governed_result"
     assert tree_comparison_row["attacked_false_positive_rate"] == "0.1"
     assert tree_comparison_row["supports_paper_claim"] == "False"
+
+
+@pytest.mark.quick
+def test_external_baseline_primary_comparison_rows_share_common_claim_scope() -> None:
+    """主表 baseline 全部完成时, 对比表应与共同协议使用同一 claim 标记口径。"""
+
+    baseline_rows = [
+        {
+            "baseline_id": baseline_id,
+            "baseline_family": "diffusion_watermark",
+            "baseline_name": baseline_id,
+            "comparison_group": "primary",
+            "baseline_adapter_ready": True,
+            "baseline_official_code_ready": False,
+            "baseline_reproduced_result_ready": False,
+            "baseline_imported_result_ready": True,
+            "baseline_result_source": f"outputs/external_baseline_results/{baseline_id}.csv",
+            "baseline_protocol_compatible": True,
+            "baseline_requires_gpu": True,
+            "baseline_requires_training": False,
+            "baseline_observation_count": 18,
+            "baseline_result_ready_count": 17,
+            "unsupported_record_count": 1,
+            "metric_status": "measured",
+            "true_positive_rate": 0.7,
+            "false_positive_rate": 0.01,
+            "clean_false_positive_rate": 0.0,
+            "attacked_false_positive_rate": 0.02,
+            "quality_score_proxy_mean": 0.9,
+            "score_retention_mean": 0.8,
+            "unsupported_reason": "",
+            "supports_paper_claim": False,
+        }
+        for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+    ]
+    baseline_rows.append(
+        {
+            "baseline_id": "stable_signature",
+            "baseline_family": "decoder_signature_watermark",
+            "baseline_name": "Stable Signature",
+            "comparison_group": "supplemental",
+            "baseline_adapter_ready": True,
+            "baseline_official_code_ready": False,
+            "baseline_reproduced_result_ready": False,
+            "baseline_imported_result_ready": False,
+            "baseline_result_source": "not_available",
+            "baseline_protocol_compatible": True,
+            "baseline_requires_gpu": True,
+            "baseline_requires_training": False,
+            "baseline_observation_count": 18,
+            "baseline_result_ready_count": 0,
+            "unsupported_record_count": 18,
+            "metric_status": "unsupported",
+            "true_positive_rate": "unsupported",
+            "false_positive_rate": "unsupported",
+            "clean_false_positive_rate": "unsupported",
+            "attacked_false_positive_rate": "unsupported",
+            "quality_score_proxy_mean": "unsupported",
+            "score_retention_mean": "unsupported",
+            "unsupported_reason": "external_baseline_result_missing",
+            "supports_paper_claim": False,
+        }
+    )
+    comparison_rows = [
+        {
+            "method_id": "slm_wm_current",
+            "method_role": "proposed_method_local_proxy",
+            "comparison_scope": "attack_matrix_local_proxy",
+            "common_prompt_protocol_ready": True,
+            "common_attack_protocol_ready": True,
+            "common_threshold_protocol_ready": True,
+            "metric_status": "measured_from_local_proxy",
+            "true_positive_rate": 0.84,
+            "false_positive_rate": 0.01,
+            "clean_false_positive_rate": 0.0,
+            "attacked_false_positive_rate": 0.02,
+            "quality_score_proxy_mean": 0.9,
+            "score_retention_mean": 0.8,
+            "supports_paper_claim": False,
+        },
+        *[
+            {
+                "method_id": row["baseline_id"],
+                "method_role": f"external_baseline_{row['comparison_group']}",
+                "comparison_scope": "common_protocol_governed_result"
+                if row["metric_status"] != "unsupported"
+                else "common_protocol_result_missing",
+                "common_prompt_protocol_ready": True,
+                "common_attack_protocol_ready": True,
+                "common_threshold_protocol_ready": True,
+                "metric_status": row["metric_status"],
+                "true_positive_rate": row["true_positive_rate"],
+                "false_positive_rate": row["false_positive_rate"],
+                "clean_false_positive_rate": row["clean_false_positive_rate"],
+                "attacked_false_positive_rate": row["attacked_false_positive_rate"],
+                "quality_score_proxy_mean": row["quality_score_proxy_mean"],
+                "score_retention_mean": row["score_retention_mean"],
+                "supports_paper_claim": False,
+            }
+            for row in baseline_rows
+        ],
+    ]
+    runtime_report = build_runtime_report(
+        {"attack_metrics_ready": True, "evaluation_boundary": {"target_fpr": 0.01}},
+        {"threshold_degenerate": False},
+        baseline_rows,
+        tuple(),
+        {"baseline_sources": [{"baseline_id": "tree_ring"}]},
+        imported_result_count=72,
+        formal_import_validation={
+            "formal_import_validation_ready": True,
+            "input_record_count": 72,
+            "accepted_formal_import_count": 72,
+            "rejected_formal_import_count": 0,
+            "formal_import_issue_count": 0,
+        },
+        formal_import_readiness_summary={
+            "primary_baseline_formal_ready": True,
+            "formal_result_ready_count": 4,
+            "blocked_primary_baseline_ids": [],
+        },
+        formal_import_readiness_summary_path="outputs/external_baseline_results/baseline_formal_import_readiness_summary.json",
+        formal_template_coverage_summary={
+            "primary_baseline_formal_template_coverage_ready": True,
+            "formal_template_record_count": 36,
+            "candidate_template_match_count": 36,
+            "accepted_template_match_count": 36,
+            "formal_template_coverage_ready_count": 4,
+            "missing_candidate_template_count": 0,
+            "missing_formal_template_count": 0,
+        },
+        formal_template_coverage_summary_path=(
+            "outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage_summary.json"
+        ),
+        formal_evidence_collection_summary={
+            "formal_evidence_collection_task_count": 36,
+            "ready_formal_evidence_collection_task_count": 36,
+            "missing_formal_evidence_collection_task_count": 0,
+            "primary_baseline_formal_evidence_collection_ready": True,
+        },
+        formal_evidence_collection_summary_path=(
+            "outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_summary.json"
+        ),
+        baseline_small_sample_summary={},
+        baseline_small_sample_summary_path="",
+        formal_evidence_path_summary={
+            "formal_evidence_path_reference_count": 72,
+            "existing_formal_evidence_path_count": 72,
+            "direct_formal_evidence_path_count": 72,
+            "search_resolved_formal_evidence_path_count": 0,
+            "missing_formal_evidence_path_count": 0,
+            "formal_evidence_path_resolution_ready": True,
+            "evidence_search_roots": [],
+            "formal_evidence_path_missing_baseline_ids": [],
+        },
+        formal_evidence_path_summary_path="outputs/external_baseline_comparison/baseline_formal_evidence_path_resolution_report.json",
+    )
+
+    align_comparison_table_claim_scope(baseline_rows, comparison_rows, runtime_report)
+
+    slm_row = next(row for row in comparison_rows if row["method_id"] == "slm_wm_current")
+    primary_rows = [row for row in comparison_rows if row["method_role"] == "external_baseline_primary"]
+    supplemental_row = next(row for row in comparison_rows if row["method_id"] == "stable_signature")
+
+    assert runtime_report["primary_baseline_results_ready"] is True
+    assert runtime_report["baseline_results_ready"] is False
+    assert runtime_report["comparison_table_supports_paper_claim"] is True
+    assert runtime_report["supports_paper_claim"] is True
+    assert slm_row["method_role"] == "proposed_method_governed_result"
+    assert slm_row["comparison_scope"] == "common_protocol_governed_result"
+    assert slm_row["metric_status"] == "measured_from_attack_matrix_formal_records"
+    assert slm_row["supports_paper_claim"] is True
+    assert all(row["supports_paper_claim"] is True for row in primary_rows)
+    assert all(row["supports_paper_claim"] is True for row in baseline_rows if row["comparison_group"] == "primary")
+    assert supplemental_row["supports_paper_claim"] is False
 
 
 @pytest.mark.quick

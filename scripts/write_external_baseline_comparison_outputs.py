@@ -188,6 +188,10 @@ def build_runtime_report(
     """构造外部 baseline 对比运行摘要。"""
     baseline_count = len(baseline_metric_rows)
     ready_count = sum(1 for row in baseline_metric_rows if row["metric_status"] != "unsupported")
+    primary_rows = tuple(row for row in baseline_metric_rows if row.get("comparison_group") == "primary")
+    supplemental_rows = tuple(row for row in baseline_metric_rows if row.get("comparison_group") == "supplemental")
+    primary_ready_count = sum(1 for row in primary_rows if row["metric_status"] != "unsupported")
+    supplemental_ready_count = sum(1 for row in supplemental_rows if row["metric_status"] != "unsupported")
     official_source_ready_count = sum(1 for row in baseline_metric_rows if row["baseline_official_code_ready"])
     protocol_compatible_count = sum(1 for row in baseline_metric_rows if row["baseline_protocol_compatible"])
     unsupported_reasons = sorted({row["unsupported_reason"] for row in baseline_metric_rows if row["unsupported_reason"]})
@@ -203,10 +207,24 @@ def build_runtime_report(
         and not bool(baseline_small_sample_summary.get("paper_claim_ready", False))
         and not bool(baseline_small_sample_summary.get("supports_paper_claim", False))
     )
+    comparison_protocol_ready = bool(attack_manifest.get("attack_metrics_ready")) and not threshold_report.get(
+        "threshold_degenerate",
+        True,
+    )
+    primary_baseline_results_ready = bool(primary_rows) and primary_ready_count == len(primary_rows)
+    comparison_table_supports_paper_claim = (
+        comparison_protocol_ready
+        and primary_formal_ready
+        and primary_baseline_results_ready
+        and bool(formal_import_validation.get("formal_import_validation_ready", False))
+        and bool(formal_evidence_path_summary.get("formal_evidence_path_resolution_ready", False))
+    )
     return {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "baseline_count": baseline_count,
+        "primary_baseline_count": len(primary_rows),
+        "supplemental_baseline_count": len(supplemental_rows),
         "baseline_observation_count": len(observations),
         "comparable_baseline_count": protocol_compatible_count,
         "official_source_ready_count": official_source_ready_count,
@@ -295,15 +313,57 @@ def build_runtime_report(
             formal_evidence_path_summary.get("formal_evidence_path_missing_baseline_ids", ())
         ),
         "baseline_result_ready_count": ready_count,
-        "comparison_protocol_ready": bool(attack_manifest.get("attack_metrics_ready"))
-        and not threshold_report.get("threshold_degenerate", True),
+        "primary_baseline_result_ready_count": primary_ready_count,
+        "supplemental_baseline_result_ready_count": supplemental_ready_count,
+        "primary_baseline_results_ready": primary_baseline_results_ready,
+        "supplemental_baseline_results_ready": bool(supplemental_rows) and supplemental_ready_count == len(supplemental_rows),
+        "comparison_protocol_ready": comparison_protocol_ready,
         "baseline_results_ready": ready_count == baseline_count and baseline_count > 0,
+        "comparison_table_supports_paper_claim": comparison_table_supports_paper_claim,
         "baseline_source_registry_ready": bool(source_registry.get("baseline_sources")),
         "unsupported_reasons": unsupported_reasons,
         "attack_manifest_supports_paper_claim": bool(attack_manifest.get("supports_paper_claim", False)),
         "full_method_claim_ready": False,
-        "supports_paper_claim": False,
+        "supports_paper_claim": comparison_table_supports_paper_claim,
     }
+
+
+def align_comparison_table_claim_scope(
+    baseline_metric_rows: list[dict[str, Any]],
+    comparison_rows: list[dict[str, Any]],
+    runtime_report: dict[str, Any],
+) -> None:
+    """统一外部 baseline 对比表的 claim 标记口径。
+
+    该函数只在外部 baseline 的主表结果、共同攻击协议、fixed-FPR 协议和 evidence
+    路径解析全部通过后, 把主表 comparison 行标记为可支撑论文主张。补充 baseline
+    若缺失正式结果, 仍保持 unsupported, 避免把补充表缺口误计入主表结论。
+    """
+
+    comparison_claim_ready = bool(runtime_report.get("comparison_table_supports_paper_claim", False))
+    for row in baseline_metric_rows:
+        row["supports_paper_claim"] = (
+            comparison_claim_ready
+            and row.get("comparison_group") == "primary"
+            and row.get("metric_status") != "unsupported"
+        )
+    for row in comparison_rows:
+        method_id = row.get("method_id", "")
+        method_role = row.get("method_role", "")
+        measured = row.get("metric_status") != "unsupported"
+        if method_id == "slm_wm_current":
+            row["method_role"] = "proposed_method_governed_result" if comparison_claim_ready else method_role
+            row["comparison_scope"] = "common_protocol_governed_result" if comparison_claim_ready else row[
+                "comparison_scope"
+            ]
+            row["metric_status"] = (
+                "measured_from_attack_matrix_formal_records" if comparison_claim_ready else row["metric_status"]
+            )
+            row["supports_paper_claim"] = comparison_claim_ready and measured
+        elif method_role == "external_baseline_primary":
+            row["supports_paper_claim"] = comparison_claim_ready and measured
+        else:
+            row["supports_paper_claim"] = False
 
 
 def write_external_baseline_comparison_outputs(
@@ -409,6 +469,7 @@ def write_external_baseline_comparison_outputs(
         formal_evidence_path_summary,
         relative_or_absolute(formal_evidence_path_summary_path, root_path),
     )
+    align_comparison_table_claim_scope(baseline_metric_rows, comparison_rows, runtime_report)
 
     observations_path = resolved_output_dir / "baseline_observations.jsonl"
     imported_records_path = resolved_output_dir / "baseline_result_records.jsonl"
