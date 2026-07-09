@@ -85,7 +85,6 @@ def test_protocol_writer_creates_governed_outputs(tmp_path: Path) -> None:
     """协议写出脚本应只在 outputs 下生成受治理产物。"""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    write_prompt_config(repo_root, "probe", ("a city street with lamps", "a calm lake at sunrise"))
     write_prompt_config(repo_root, "probe_paper", ("a small server validation prompt",))
     write_prompt_config(repo_root, "pilot_paper", ("a ceramic teapot on a table",))
     write_prompt_config(repo_root, "full_paper", ("a quiet library reading room",))
@@ -110,8 +109,8 @@ def test_protocol_writer_creates_governed_outputs(tmp_path: Path) -> None:
     assert prompt_manifest["protocol_decision"] == "pass"
     assert event_manifest["protocol_decision"] == "pass"
     assert {record["split"] for record in prompt_manifest["prompt_records"]} <= {"dev", "calibration", "test"}
-    assert statistics["prompt_count"] == 5
-    assert statistics["event_count"] == 5 * len(SAMPLE_ROLES)
+    assert statistics["prompt_count"] == 3
+    assert statistics["event_count"] == 3 * len(SAMPLE_ROLES)
     assert statistics["calibration_test_disjoint"] is True
 
 

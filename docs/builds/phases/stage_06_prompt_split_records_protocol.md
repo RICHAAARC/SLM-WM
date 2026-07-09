@@ -2,7 +2,7 @@
 
 ## 一、阶段定位
 
-建立 paper probe、pilot_paper、full 所需 prompt set、split、sample role 和 event protocol，为后续正式实验提供稳定事实索引。
+建立 probe_paper、pilot_paper、full_paper 所需 prompt set、split、sample role 和 event protocol，为后续正式实验提供稳定事实索引。
 
 本阶段属于 SLM-WM 项目分阶段构建流程的一部分。整体流程遵循 `core-first -> runtime-second -> workflow-third -> paper-artifact-final`。本阶段不得跳过前序 artifact 审计，不得绕过 harness，不得将临时结果伪装为正式论文证据。
 
@@ -47,7 +47,7 @@ python tools/harness/inspect_repository.py .
 
 本阶段需要实现或更新以下功能：
 
-1. 构建 `paper_main_probe_prompts.txt`、`paper_main_pilot_paper_prompts.txt`、`paper_main_full_paper_prompts.txt`。
+1. 构建 `paper_main_probe_paper_prompts.txt`、`paper_main_pilot_paper_prompts.txt`、`paper_main_full_paper_prompts.txt`。
 2. 定义 split：`dev`、`calibration`、`test`。
 3. 定义 sample role：`positive_source`、`clean_negative`、`attacked_negative`。
 4. 在 `experiments/protocol/` 中实现 `prompts.py`、`splits.py`、`events.py`、`records.py`、`calibration.py`。

@@ -6,7 +6,6 @@
 
 | 配置文件 | prompt 数量 | 用途 |
 | --- | ---: | --- |
-| `paper_main_probe_prompts.txt` | 10 | 仅用于诊断入口, 不进入正式统计。 |
 | `paper_main_probe_paper_prompts.txt` | 60 | 使用完整论文 workflow 的小规模服务器流程对齐验证。 |
 | `paper_main_pilot_paper_prompts.txt` | 600 | pilot 论文结果运行。 |
 | `paper_main_full_paper_prompts.txt` | 6000 | 完整论文结果运行。 |

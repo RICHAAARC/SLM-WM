@@ -375,7 +375,7 @@ Notebook 与 repository module 的跨边界数据
 | missing_input_paths | artifact | none | true | false | false | 重载校验中缺失的登记文件路径集合。 |
 | digest_mismatch_count | artifact | none | true | false | false | 重载校验中摘要不一致的文件数量。 |
 | prompt_id | protocol | none | true | false | false | prompt 协议记录的稳定标识。 |
-| prompt_set | protocol | none | true | false | false | prompt 所属集合, 例如 probe、pilot_paper 或 full_paper。 |
+| prompt_set | protocol | none | true | false | false | prompt 所属集合, 例如 probe_paper、pilot_paper 或 full_paper。 |
 | prompt_index | protocol | none | true | false | false | prompt 在所属集合中的稳定序号。 |
 | prompt_text | protocol | none | true | false | false | 规范化后的 prompt 文本。 |
 | risk_profile | method | none | true | false | false | 由 prompt 语义标签派生的轻量风险配置名称。 |

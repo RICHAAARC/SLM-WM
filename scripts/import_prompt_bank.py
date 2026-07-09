@@ -13,12 +13,10 @@ from typing import Iterable
 DEFAULT_SOURCE_ARCHIVE = Path("outputs/prompts.zip")
 DEFAULT_CONFIG_DIR = Path("configs")
 PROMPT_SOURCE_ENTRIES = {
-    "probe": "prompts/prompt_plans/paper_main_probe_prompt_plan.json",
     "pilot_paper": "prompts/sources/paper_main_pilot_paper_prompts.txt",
     "full_paper": "prompts/sources/paper_main_full_paper_prompts.txt",
 }
 PROMPT_CONFIG_NAMES = {
-    "probe": "paper_main_probe_prompts.txt",
     "probe_paper": "paper_main_probe_paper_prompts.txt",
     "pilot_paper": "paper_main_pilot_paper_prompts.txt",
     "full_paper": "paper_main_full_paper_prompts.txt",
@@ -70,12 +68,6 @@ def unique_normalized_prompts(prompts: Iterable[str]) -> tuple[tuple[str, ...], 
     return tuple(unique_prompts), sanitized_count
 
 
-def read_probe_prompts(archive: zipfile.ZipFile) -> tuple[str, ...]:
-    """读取探针用 prompt plan 中已经抽取出的 prompt 文本。"""
-    plan = json.loads(archive.read(PROMPT_SOURCE_ENTRIES["probe"]).decode("utf-8"))
-    return tuple(item["prompt_text"] for item in plan["prompts"])
-
-
 def read_source_prompts(archive: zipfile.ZipFile, entry_name: str) -> tuple[str, ...]:
     """读取 prompt source 文本文件。"""
     text = archive.read(entry_name).decode("utf-8")
@@ -87,7 +79,6 @@ def load_prompt_bank(source_archive: Path) -> dict[str, tuple[tuple[str, ...], i
     with zipfile.ZipFile(source_archive) as archive:
         pilot_source_prompts = read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["pilot_paper"])
         raw_prompts = {
-            "probe": read_probe_prompts(archive),
             "probe_paper": pilot_source_prompts[:60],
             "pilot_paper": pilot_source_prompts,
             "full_paper": read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["full_paper"]),
