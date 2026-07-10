@@ -81,7 +81,7 @@ paper_workflow/notebooks/
 3. 新增服务器运行入口应优先调用核心方法复现层或完整论文实验层, 不应依赖 Notebook helper。
 4. 若保留旧路径兼容层, 必须说明其兼容目的, 并由测试覆盖迁移后的正式路径。
 
-- `experiments/runners/dataset_level_quality.py`: 数据集级质量证据 runner, 供服务器命令与 Colab 入口共同调用。
+- `experiments/artifacts/dataset_level_quality_outputs.py`: 数据集级正式 Inception FID / KID 产物构建器, 由独立执行层直接调用。
 - `experiments/artifacts/dataset_level_quality_outputs.py`: 数据集级质量 records、metrics、summary 与 manifest 构建实现。
 
 - `experiments/runners/real_attack_evaluation.py`: 真实再扩散与语义编辑攻击闭环 runner, 供服务器命令与 Colab 入口共同调用。

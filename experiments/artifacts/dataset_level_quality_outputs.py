@@ -21,7 +21,6 @@ if str(ROOT) not in sys.path:
 
 from experiments.protocol import (
     FORMAL_FEATURE_BACKEND,
-    build_dataset_quality_diagnostic_metric_rows,
     build_dataset_quality_image_records,
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
@@ -38,7 +37,7 @@ FORMAL_FEATURE_EXTRACTOR_ID = "torch_fidelity_0_4_0_inception_v3_compat_2048"
 
 
 def dataset_quality_io_progress_enabled() -> bool:
-    """判断是否输出数据集级质量 I/O 与 proxy 进度."""
+    """判断是否输出数据集级质量 I/O 与正式特征进度。"""
 
     value = os.environ.get("SLM_WM_DATASET_QUALITY_IO_PROGRESS", "1").strip().lower()
     return value not in {"0", "false", "no", "off"}
@@ -558,11 +557,10 @@ def write_dataset_level_quality_outputs(
     inception_device_name: str | None = None,
     inception_batch_size: int = 32,
 ) -> dict[str, Any]:
-    """写出数据集级质量 records、metrics、summary 和 manifest。
+    """写出正式 Inception FID / KID records、metrics、summary 和 manifest。
 
-    `dataset_quality_metrics.csv` 只保存正式 FID / KID 行。pixel histogram
-    proxy 诊断指标单独写入 `dataset_quality_diagnostic_metrics.csv`,
-    防止正式质量表被误读为 proxy 实现。
+    该入口只接受真实图像对和正式 Inception 特征。特征、样本规模或数值
+    后端不满足协议时, 产物保留明确阻断状态而不生成替代指标。
     """
 
     root_path = Path(root).resolve()
@@ -622,23 +620,18 @@ def write_dataset_level_quality_outputs(
         formal_comparison_features=formal_feature_payload["comparison_features"],
         formal_min_sample_count=formal_min_sample_count,
     )
-    diagnostic_metric_rows = build_dataset_quality_diagnostic_metric_rows(
-        records,
-        root_path,
-        image_search_roots=all_image_search_roots,
-    )
+
 
     records_path = resolved_output_dir / "dataset_quality_image_records.jsonl"
     image_resolution_records_path = resolved_output_dir / "dataset_quality_image_resolution_records.jsonl"
     formal_feature_import_report_path = resolved_output_dir / "dataset_quality_formal_feature_import_report.json"
     metrics_path = resolved_output_dir / "dataset_quality_metrics.csv"
-    diagnostic_metrics_path = resolved_output_dir / "dataset_quality_diagnostic_metrics.csv"
     summary_path = resolved_output_dir / "dataset_quality_summary.json"
     manifest_path = resolved_output_dir / "manifest.local.json"
     resolved_image_file_count = sum(1 for record in image_resolution_records if record["resolution_status"] != "image_file_missing")
     materialized_image_input_count = sum(1 for record in image_resolution_records if record["materialized_image_input"])
 
-    base_summary = build_dataset_quality_summary(records, metric_rows, diagnostic_metric_rows)
+    base_summary = build_dataset_quality_summary(records, metric_rows)
     formal_feature_extractor_ids = sorted(
         {
             str(row.get("feature_extractor_id"))
@@ -657,7 +650,6 @@ def write_dataset_level_quality_outputs(
         "real_attack_registry_path": relative_or_absolute(resolved_registry_path, root_path),
         "dataset_quality_metrics_path": relative_or_absolute(metrics_path, root_path),
         "dataset_quality_formal_metrics_path": relative_or_absolute(metrics_path, root_path),
-        "dataset_quality_diagnostic_metrics_path": relative_or_absolute(diagnostic_metrics_path, root_path),
         "dataset_quality_image_resolution_records_path": relative_or_absolute(image_resolution_records_path, root_path),
         "dataset_quality_formal_feature_import_report_path": relative_or_absolute(
             formal_feature_import_report_path,
@@ -714,21 +706,6 @@ def write_dataset_level_quality_outputs(
             "supports_paper_claim",
         ],
     )
-    write_csv(
-        diagnostic_metrics_path,
-        diagnostic_metric_rows,
-        [
-            "quality_metric_name",
-            "quality_metric_value",
-            "metric_status",
-            "paper_metric_name",
-            "feature_backend",
-            "source_image_count",
-            "comparison_image_count",
-            "sample_pair_count",
-            "supports_paper_claim",
-        ],
-    )
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
     input_paths = [relative_or_absolute(resolved_registry_path, root_path)] if resolved_registry_path.exists() else []
@@ -747,7 +724,6 @@ def write_dataset_level_quality_outputs(
             image_resolution_records_path,
             formal_feature_import_report_path,
             metrics_path,
-            diagnostic_metrics_path,
             summary_path,
             *((resolved_formal_feature_records_path,) if formal_features_generated else ()),
             *materialized_image_paths,
@@ -764,7 +740,6 @@ def write_dataset_level_quality_outputs(
             "image_resolution_records_digest": build_stable_digest(image_resolution_records),
             "formal_feature_import_report_digest": build_stable_digest(formal_feature_payload["report"]),
             "metric_rows_digest": build_stable_digest(metric_rows),
-            "diagnostic_metric_rows_digest": build_stable_digest(diagnostic_metric_rows),
             "summary_digest": build_stable_digest(summary),
             "auto_extract_formal_features": auto_extract_formal_features,
             "formal_features_generated": formal_features_generated,

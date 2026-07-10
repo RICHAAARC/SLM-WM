@@ -9,11 +9,8 @@ import time
 from typing import Any, Iterable, Mapping
 
 import numpy as np
-from PIL import Image
-
 from main.core.digest import build_stable_digest
 
-PIXEL_FEATURE_BACKEND = "pixel_histogram_feature_proxy"
 FORMAL_FEATURE_BACKEND = "inception_feature_backend"
 FORMAL_FID_KID_BLOCKER = "requires_inception_feature_backend"
 FORMAL_FID_KID_SAMPLE_BLOCKER = "requires_full_main_sample_scale"
@@ -79,61 +76,8 @@ def _row_digest(row: Mapping[str, Any], field_name: str, path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _resolve_existing_image_path(
-    image_path_text: str,
-    root_path: Path,
-    image_search_roots: Iterable[Path] = (),
-) -> Path:
-    """在仓库根目录和补充图像根目录中解析图像路径。
-
-    该函数属于通用工程写法: 记录层保留原始相对路径, 度量层只在需要读取图像时解析实际文件位置。
-    这样可以复用同一批 records, 同时允许前序 Colab 产物从 Google Drive ZIP 中解包到受治理的 outputs 子目录后参与计算。
-    """
-
-    raw_path = Path(image_path_text)
-    if raw_path.is_absolute():
-        return raw_path.resolve()
-    candidates = [(root_path / raw_path).resolve()]
-    candidates.extend((Path(search_root) / raw_path).resolve() for search_root in image_search_roots)
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate
-    return candidates[0]
-
-
-def extract_pixel_histogram_feature(image_path: Path, image_size: int = 32, hist_bins: int = 8) -> np.ndarray:
-    """从图像中提取轻量 RGB 统计特征。
-
-    该函数不是 Inception 特征提取器, 只用于诊断表。正式 FID / KID 必须来自 Inception
-    或论文约定的视觉特征后端。
-    """
-
-    with Image.open(image_path) as image:
-        image_rgb = image.convert("RGB").resize((image_size, image_size))
-    array = np.asarray(image_rgb, dtype=np.float64) / 255.0
-    channel_mean = array.mean(axis=(0, 1))
-    channel_std = array.std(axis=(0, 1))
-    histogram_parts = []
-    for channel_index in range(3):
-        hist, _ = np.histogram(array[:, :, channel_index], bins=hist_bins, range=(0.0, 1.0), density=True)
-        histogram_parts.append(hist / max(float(hist.sum()), 1.0))
-    return np.concatenate([channel_mean, channel_std, *histogram_parts]).astype(np.float64)
-
-
-def _diagonal_gaussian_fid(source_features: np.ndarray, comparison_features: np.ndarray) -> float:
-    """计算对角协方差近似 FID proxy, 避免引入重型线性代数依赖。"""
-
-    source_mean = source_features.mean(axis=0)
-    comparison_mean = comparison_features.mean(axis=0)
-    source_var = source_features.var(axis=0)
-    comparison_var = comparison_features.var(axis=0)
-    mean_term = np.sum((source_mean - comparison_mean) ** 2)
-    covariance_term = np.sum(source_var + comparison_var - 2.0 * np.sqrt(np.maximum(source_var * comparison_var, 0.0)))
-    return float(max(mean_term + covariance_term, 0.0))
-
-
 def _polynomial_kernel(values_a: np.ndarray, values_b: np.ndarray) -> np.ndarray:
-    """计算 KID proxy 使用的三阶多项式核矩阵。"""
+    """计算正式 KID 使用的三阶多项式核矩阵。"""
 
     feature_dim = max(int(values_a.shape[1]), 1)
     operation_count = int(values_a.shape[0]) * int(values_b.shape[0]) * feature_dim
@@ -144,33 +88,11 @@ def _polynomial_kernel(values_a: np.ndarray, values_b: np.ndarray) -> np.ndarray
     return (dot_products / feature_dim + 1.0) ** 3
 
 
-def _biased_polynomial_mmd(source_features: np.ndarray, comparison_features: np.ndarray) -> float:
-    """计算有偏 MMD 形式的 KID proxy, 使极小样本也有稳定可审计输出。"""
-
-    source_kernel = _polynomial_kernel(source_features, source_features).mean()
-    comparison_kernel = _polynomial_kernel(comparison_features, comparison_features).mean()
-    cross_kernel = _polynomial_kernel(source_features, comparison_features).mean()
-    return float(max(source_kernel + comparison_kernel - 2.0 * cross_kernel, 0.0))
-
-
 def _metric_progress_enabled() -> bool:
     """判断是否输出数据集级质量指标重建进度。"""
 
     value = os.environ.get("SLM_WM_DATASET_QUALITY_METRIC_PROGRESS", "1").strip().lower()
     return value not in {"0", "false", "no", "off"}
-
-
-def _metric_progress_interval_items() -> int:
-    """读取图像级 proxy 进度刷新间隔."""
-
-    return max(1, int(os.environ.get("SLM_WM_DATASET_QUALITY_PROGRESS_INTERVAL_ITEMS", "50")))
-
-
-def _should_emit_metric_item_progress(completed: int, total: int) -> bool:
-    """判断图像级 proxy 进度是否需要刷新."""
-
-    interval = _metric_progress_interval_items()
-    return completed in {0, total} or completed % interval == 0
 
 
 def _emit_metric_progress(
@@ -319,10 +241,9 @@ def _exact_gaussian_fid(
 ) -> float | None:
     """使用完整协方差矩阵计算 FID。
 
-    此处设计的主要考虑在于: 正式 FID 必须基于视觉特征分布的均值与协方差,
-    不能复用轻量 pixel proxy 的对角近似。实现优先使用 CUDA 上的对称
-    特征分解; 在无 GPU 且特征维度过高时返回 numeric blocker, 防止
-    repository runner 或 Notebook 长时间卡死。
+    正式 FID 基于 Inception 特征分布的均值与完整协方差。实现优先使用
+    CUDA 上的对称特征分解; 在无 GPU 且特征维度过高时返回明确的数值后端
+    阻断状态, 防止运行入口长时间无界阻塞。
     """
 
     torch_value = _torch_gaussian_fid(source_features, comparison_features, progress=progress)
@@ -579,7 +500,7 @@ def build_dataset_quality_image_records(
             "source_image_digest": source_digest,
             "comparison_image_path": _as_relative_or_absolute(comparison_path, root_path),
             "comparison_image_digest": comparison_digest,
-            "feature_backend": PIXEL_FEATURE_BACKEND,
+            "feature_backend": FORMAL_FEATURE_BACKEND,
             "supports_paper_claim": False,
         }
         digest = build_stable_digest(payload)
@@ -593,7 +514,7 @@ def build_dataset_quality_image_records(
                 source_image_digest=source_digest,
                 comparison_image_path=payload["comparison_image_path"],
                 comparison_image_digest=comparison_digest,
-                feature_backend=PIXEL_FEATURE_BACKEND,
+                feature_backend=FORMAL_FEATURE_BACKEND,
                 supports_paper_claim=False,
             )
         )
@@ -610,9 +531,8 @@ def build_dataset_quality_metric_rows(
 ) -> list[dict[str, Any]]:
     """构造数据集级正式质量指标表。
 
-    该函数只返回可进入正式质量表的 FID / KID 行。pixel histogram proxy
-    诊断指标由 `build_dataset_quality_diagnostic_metric_rows` 单独写出,
-    避免审稿或审计时把 proxy 诊断行误读为正式 FID / KID 结果。
+    该函数只返回由正式 Inception 特征计算的 FID / KID 行。
+    特征缺失、样本规模不足或数值后端不可用时返回明确阻断状态。
     """
 
     record_values = tuple(records)
@@ -624,142 +544,39 @@ def build_dataset_quality_metric_rows(
     )
 
 
-def build_dataset_quality_diagnostic_metric_rows(
-    records: Iterable[DatasetQualityImageRecord],
-    root_path: Path,
-    image_search_roots: Iterable[Path] = (),
-) -> list[dict[str, Any]]:
-    """构造数据集级质量诊断指标表。
-
-    该函数保存 pixel histogram proxy 指标, 只用于定位图像集合是否存在
-    明显分布异常。它不返回正式 FID / KID 行, 也不允许直接支撑论文 claim。
-    """
-
-    record_values = tuple(records)
-    image_root_values = tuple(Path(path).resolve() for path in image_search_roots)
-    source_paths = tuple(
-        _resolve_existing_image_path(record.source_image_path, root_path, image_root_values)
-        for record in record_values
-    )
-    comparison_paths = tuple(
-        _resolve_existing_image_path(record.comparison_image_path, root_path, image_root_values)
-        for record in record_values
-    )
-    missing_image_file_count = sum(1 for path in source_paths + comparison_paths if not path.is_file())
-    source_count = len(source_paths)
-    comparison_count = len(comparison_paths)
-    pixel_metric_context = {
-        "feature_backend": PIXEL_FEATURE_BACKEND,
-        "source_image_count": source_count,
-        "comparison_image_count": comparison_count,
-        "sample_pair_count": len(record_values),
-        "supports_paper_claim": False,
-    }
-    if not record_values:
-        return []
-    if missing_image_file_count:
-        return [
-            {
-                "quality_metric_name": "fid_pixel_feature_proxy",
-                "quality_metric_value": "unsupported",
-                "metric_status": "image_file_missing",
-                "paper_metric_name": "fid",
-                **pixel_metric_context,
-            },
-            {
-                "quality_metric_name": "kid_pixel_feature_proxy",
-                "quality_metric_value": "unsupported",
-                "metric_status": "image_file_missing",
-                "paper_metric_name": "kid",
-                **pixel_metric_context,
-            },
-        ]
-    pixel_started_at = time.monotonic()
-    pixel_total = len(source_paths) + len(comparison_paths)
-    _emit_metric_progress(
-        started_at=pixel_started_at,
-        completed=0,
-        total=pixel_total,
-        profile="pixel_proxy_start",
-    )
-    source_features = []
-    for source_index, path in enumerate(source_paths, start=1):
-        source_features.append(extract_pixel_histogram_feature(path))
-        completed = source_index
-        if _should_emit_metric_item_progress(completed, pixel_total):
-            _emit_metric_progress(
-                started_at=pixel_started_at,
-                completed=completed,
-                total=pixel_total,
-                profile=f"pixel_proxy_source={source_index}/{len(source_paths)}",
-            )
-    comparison_features = []
-    for comparison_index, path in enumerate(comparison_paths, start=1):
-        comparison_features.append(extract_pixel_histogram_feature(path))
-        completed = len(source_paths) + comparison_index
-        if _should_emit_metric_item_progress(completed, pixel_total):
-            _emit_metric_progress(
-                started_at=pixel_started_at,
-                completed=completed,
-                total=pixel_total,
-                profile=f"pixel_proxy_comparison={comparison_index}/{len(comparison_paths)}",
-            )
-    source_array = np.vstack(source_features)
-    comparison_array = np.vstack(comparison_features)
-    return [
-        {
-            "quality_metric_name": "fid_pixel_feature_proxy",
-            "quality_metric_value": _diagonal_gaussian_fid(source_array, comparison_array),
-            "metric_status": "measured_small_sample_proxy",
-            "paper_metric_name": "fid",
-            **pixel_metric_context,
-        },
-        {
-            "quality_metric_name": "kid_pixel_feature_proxy",
-            "quality_metric_value": _biased_polynomial_mmd(source_array, comparison_array),
-            "metric_status": "measured_small_sample_proxy",
-            "paper_metric_name": "kid",
-            **pixel_metric_context,
-        },
-    ]
-
-
 def build_dataset_quality_summary(
     records: Iterable[DatasetQualityImageRecord],
     metric_rows: Iterable[Mapping[str, Any]],
-    diagnostic_metric_rows: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    """聚合数据集级质量证据摘要。"""
+    """聚合正式 Inception FID / KID 证据摘要。"""
 
     record_values = tuple(records)
     rows = tuple(metric_rows)
-    diagnostic_rows = tuple(diagnostic_metric_rows)
-    proxy_ready = any(str(row.get("metric_status")) == "measured_small_sample_proxy" for row in diagnostic_rows)
     measured_formal_metric_names = {
         str(row.get("quality_metric_name"))
         for row in rows
-        if str(row.get("quality_metric_name")) in {"fid", "kid"} and str(row.get("metric_status")) == "measured"
+        if str(row.get("quality_metric_name")) in {"fid", "kid"}
+        and str(row.get("metric_status")) == "measured"
     }
     formal_ready = measured_formal_metric_names == {"fid", "kid"}
-    summary_feature_backend = FORMAL_FEATURE_BACKEND if formal_ready else PIXEL_FEATURE_BACKEND
     formal_status_values = tuple(
         str(row.get("metric_status"))
         for row in rows
-        if str(row.get("quality_metric_name")) in {"fid", "kid"} and str(row.get("metric_status"))
+        if str(row.get("quality_metric_name")) in {"fid", "kid"}
+        and str(row.get("metric_status"))
     )
     if formal_ready:
-        formal_fid_kid_claim_blocker = ""
-        dataset_quality_claim_boundary = "formal_fid_kid_measured_but_paper_claim_requires_evidence_closure"
+        blocker = ""
+        claim_boundary = "formal_fid_kid_measured_but_paper_claim_requires_evidence_closure"
     elif not formal_status_values:
-        formal_fid_kid_claim_blocker = "formal_fid_kid_metric_rows_missing"
-        dataset_quality_claim_boundary = "formal_feature_backend_missing_for_dataset_quality_claim"
+        blocker = "formal_fid_kid_metric_rows_missing"
+        claim_boundary = "formal_feature_backend_missing_for_dataset_quality_claim"
     else:
-        formal_fid_kid_claim_blocker = next(
+        blocker = next(
             (
                 status
                 for status in formal_status_values
-                if status
-                in {
+                if status in {
                     FORMAL_FID_KID_BLOCKER,
                     FORMAL_FID_KID_SAMPLE_BLOCKER,
                     FORMAL_FID_KID_NUMERIC_BLOCKER,
@@ -767,31 +584,27 @@ def build_dataset_quality_summary(
             ),
             next((status for status in formal_status_values if status != "measured"), "formal_fid_kid_not_measured"),
         )
-        dataset_quality_claim_boundary = (
+        claim_boundary = (
             "formal_feature_backend_missing_for_dataset_quality_claim"
-            if formal_fid_kid_claim_blocker == FORMAL_FID_KID_BLOCKER
+            if blocker == FORMAL_FID_KID_BLOCKER
             else "formal_feature_backend_ready_but_formal_fid_kid_blocked"
         )
     return {
         "construction_unit_name": "dataset_level_quality_evidence",
         "dataset_quality_record_count": len(record_values),
         "formal_quality_metric_count": len(rows),
-        "diagnostic_quality_metric_count": len(diagnostic_rows),
         "source_image_count": len(record_values),
         "comparison_image_count": len(record_values),
         "sample_pair_count": len(record_values),
-        "feature_backend": summary_feature_backend,
+        "feature_backend": FORMAL_FEATURE_BACKEND,
         "formal_feature_backend": FORMAL_FEATURE_BACKEND,
-        "pixel_proxy_feature_backend": PIXEL_FEATURE_BACKEND,
-        "primary_metric_backend": summary_feature_backend,
-        "dataset_level_quality_proxy_ready": proxy_ready,
+        "primary_metric_backend": FORMAL_FEATURE_BACKEND,
         "formal_fid_kid_ready": formal_ready,
         "formal_fid_kid_metric_names_ready": formal_ready,
         "formal_fid_kid_claim_gate_ready": formal_ready,
-        "formal_fid_kid_claim_blocker": formal_fid_kid_claim_blocker,
-        "dataset_quality_proxy_only": proxy_ready and not formal_ready,
-        "dataset_quality_claim_boundary": dataset_quality_claim_boundary,
+        "formal_fid_kid_claim_blocker": blocker,
+        "dataset_quality_claim_boundary": claim_boundary,
         "paper_claim_ready": False,
-        "unsupported_reason": formal_fid_kid_claim_blocker if not formal_ready else "",
+        "unsupported_reason": blocker if not formal_ready else "",
         "supports_paper_claim": False,
     }

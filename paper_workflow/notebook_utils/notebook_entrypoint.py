@@ -20,7 +20,6 @@ from experiments.runtime.archive_naming import (
 from paper_workflow.notebook_utils.notebook_runtime import write_notebook_runtime_report
 
 WORKFLOW_DRIVE_OUTPUT_ENV_KEYS = {
-    "dataset_level_quality": "SLM_WM_DATASET_QUALITY_DRIVE_DIR",
     "external_baseline_method_faithful": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
     "official_reference_tree_ring": "SLM_WM_TREE_RING_OFFICIAL_DRIVE_OUTPUT_DIR",
     "official_reference_gaussian_shading": "SLM_WM_GAUSSIAN_SHADING_OFFICIAL_DRIVE_OUTPUT_DIR",
@@ -28,7 +27,6 @@ WORKFLOW_DRIVE_OUTPUT_ENV_KEYS = {
     "official_reference_t2smark": "SLM_WM_T2SMARK_FULL_MAIN_DRIVE_OUTPUT_DIR",
 }
 WORKFLOW_LOCAL_OUTPUT_DIRS = {
-    "dataset_level_quality": "outputs/dataset_level_quality",
     "external_baseline_method_faithful": "outputs/external_baseline_method_faithful",
     "official_reference_tree_ring": "outputs/tree_ring_official_reference",
     "official_reference_gaussian_shading": "outputs/gaussian_shading_official_reference",
@@ -50,10 +48,6 @@ def resolve_drive_output_dir(workflow_name: str, drive_output_dir: str | None = 
 def _package_function_for_workflow(workflow_name: str) -> Callable[..., Any]:
     """延迟导入 workflow 打包函数, 避免 Notebook 入口加载无关重依赖。"""
 
-    if workflow_name == "dataset_level_quality":
-        from paper_workflow.colab_utils.dataset_level_quality import package_dataset_level_quality_outputs
-
-        return package_dataset_level_quality_outputs
     if workflow_name == "external_baseline_method_faithful":
         from paper_workflow.colab_utils.external_baseline_method_faithful import (
             package_external_baseline_method_faithful_outputs,

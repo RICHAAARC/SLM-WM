@@ -1,8 +1,7 @@
 """运行真实语义安全子空间嵌入和仅图像检测闭环。
 
-该 runner 属于核心方法复现层。正式路径不读取历史 semantic proxy、one-hot
-基底或生成轨迹检测记录, 而是在真实 SD3/SD3.5 latent 上计算分支风险、真实
-JVP/SVD、安全投影、真实 Q/K 注意力梯度和最终图像盲检。
+该 runner 属于核心方法复现层, 在真实 SD3/SD3.5 latent 上计算分支风险、
+JVP/SVD 低响应子空间、安全投影、真实 Q/K 注意力梯度和最终图像盲检。
 """
 
 from __future__ import annotations

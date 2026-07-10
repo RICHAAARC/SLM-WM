@@ -4,10 +4,9 @@
 
 ## 正式入口
 
-- `semantic_watermark_image_only_run.ipynb`: 主方法、仅图像检测、共同攻击与正式消融入口。
+- `semantic_watermark_image_only_run.ipynb`: 主方法、仅图像检测、共同攻击、正式 Inception FID / KID 与正式消融入口。
 - `external_baseline_*_run.ipynb`: 四个主表 baseline 的方法忠实 SD3.5 入口。
 - `official_reference_*_run.ipynb`: 外部方法官方环境补充证据入口。
-- `dataset_level_quality_run.ipynb`: 正式 FID/KID 入口。
 - `paper_result_closure_run.ipynb`: CPU 结果闭合入口。
 - `colab_drive_cold_start_smoke.ipynb`: 仅检查 Colab 与 Drive 环境。
 

@@ -59,7 +59,6 @@ RUN_DEFAULTS: dict[str, dict[str, Any]] = {
     PROBE_PAPER_RUN_NAME: {
         "prompt_set": PROBE_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[PROBE_PAPER_RUN_NAME].as_posix(),
-        "fallback_prompt_count": 70,
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/probe_paper_results",
         "protocol_profile": "probe_paper_fixed_fpr_0_1",
         "target_fpr": 0.1,
@@ -68,7 +67,6 @@ RUN_DEFAULTS: dict[str, dict[str, Any]] = {
     PILOT_PAPER_RUN_NAME: {
         "prompt_set": PILOT_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[PILOT_PAPER_RUN_NAME].as_posix(),
-        "fallback_prompt_count": 700,
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results",
         "protocol_profile": "pilot_paper_fixed_fpr_0_01",
         "target_fpr": 0.01,
@@ -77,7 +75,6 @@ RUN_DEFAULTS: dict[str, dict[str, Any]] = {
     FULL_PAPER_RUN_NAME: {
         "prompt_set": FULL_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[FULL_PAPER_RUN_NAME].as_posix(),
-        "fallback_prompt_count": 7000,
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/full_paper_results",
         "protocol_profile": "full_paper_fixed_fpr_0_001",
         "target_fpr": 0.001,
@@ -156,16 +153,15 @@ def normalize_paper_run_name(value: str | None) -> str:
     return resolved
 
 
-def _read_prompt_count(prompt_file: str | Path, fallback_prompt_count: int, root: str | Path = ".") -> int:
-    """读取 prompt 数量; 文件不可用时使用配置中的兜底数量。"""
+def _read_prompt_count(prompt_file: str | Path, root: str | Path = ".") -> int:
+    """从受治理 Prompt 文件读取实际数量。"""
 
     path = Path(prompt_file)
     if not path.is_absolute():
-        path = Path(root) / path
-    try:
-        return len(read_prompt_file(path))
-    except FileNotFoundError:
-        return int(fallback_prompt_count)
+        requested_path = (Path(root) / path).resolve()
+        package_resource_path = (Path(__file__).resolve().parents[2] / path).resolve()
+        path = requested_path if requested_path.is_file() else package_resource_path
+    return len(read_prompt_file(path))
 
 
 def parse_record_limit(value: str | int | None, *, prompt_count: int, default_value: str | int | None = "all") -> int:
@@ -253,7 +249,7 @@ def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
     expected_prompt_file_name = Path(str(defaults["prompt_file"])).name
     if Path(prompt_file).name != expected_prompt_file_name:
         raise ValueError("SLM_WM_PROMPT_FILE 必须使用当前论文运行层级对应的 prompt 文件")
-    prompt_count = _read_prompt_count(prompt_file, int(defaults["fallback_prompt_count"]), root)
+    prompt_count = _read_prompt_count(prompt_file, root)
     sample_count = parse_record_limit(
         os.environ.get("SLM_WM_PAPER_RUN_SAMPLE_COUNT", str(defaults["sample_count"])),
         prompt_count=prompt_count,

@@ -196,15 +196,6 @@ def _configure_conventional_geometric_attack_evaluation(
     _set_default_env("SLM_WM_ENABLE_ATTACK_PROGRESS_BAR", "1")
 
 
-def _configure_dataset_level_quality(paper_run: Any, sample_count_token: str, target_fpr_text: str) -> None:
-    _set_env("SLM_WM_DATASET_QUALITY_DRIVE_DIR", paper_run.drive_dir("dataset_level_quality"))
-    _set_env("SLM_WM_REAL_ATTACK_EVALUATION_DRIVE_DIR", paper_run.drive_dir("real_attack_evaluation"))
-    _set_env("SLM_WM_ALIGNED_RESCORING_DRIVE_DIR", paper_run.drive_dir("aligned_rescoring"))
-    _set_env("SLM_WM_FORMAL_MIN_SAMPLE_COUNT", paper_run.dataset_level_quality_minimum_count)
-    _set_default_env("SLM_WM_REAL_ATTACK_EVALUATION_PACKAGE_PATTERN", "real_attack_evaluation_package_*.zip")
-    _set_default_env("SLM_WM_ALIGNED_RESCORING_PACKAGE_PATTERN", "aligned_rescoring_package_*.zip")
-
-
 def _configure_external_baseline_method_faithful(
     paper_run: Any,
     sample_count_token: str,
@@ -380,7 +371,6 @@ WORKFLOW_CONFIGURERS = {
     "threshold_calibration": _configure_threshold_calibration,
     "real_attack_evaluation": _configure_real_attack_evaluation,
     "conventional_geometric_attack_evaluation": _configure_conventional_geometric_attack_evaluation,
-    "dataset_level_quality": _configure_dataset_level_quality,
     "official_reference_tree_ring": _configure_official_reference_tree_ring,
     "official_reference_gaussian_shading": _configure_official_reference_gaussian_shading,
     "official_reference_shallow_diffuse": _configure_official_reference_shallow_diffuse,

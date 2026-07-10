@@ -9,7 +9,7 @@
 - `runners/semantic_watermark_runtime.py`: 完整执行分支风险、16维语义与视觉条件 Jacobian、20候选方向的4维 Null Space、LF、Gaussian 幅值尾部截断、真实多层 Q/K 几何更新和仅图像盲检。
 - `runners/image_only_dataset_runtime.py`: 运行完整 Prompt 集, 在 calibration split 独立冻结检测协议, 只在 test split 形成论文统计。
 - `ablations/runtime_rerun.py`: 每个消融配置重新生成、攻击、检测并独立校准, 不读取或变换完整方法分数。
-- `runners/dataset_level_quality.py`: 构建正式 FID/KID 质量证据。
+- `artifacts/dataset_level_quality_outputs.py`: 从真实图像对提取正式 Inception 特征并构建 FID / KID 质量证据。
 - `artifacts/`: 只保留通用 manifest schema 和正式质量产物构建器。
 
 ## 正式方法边界

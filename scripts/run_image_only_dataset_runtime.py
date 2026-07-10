@@ -66,11 +66,9 @@ def main() -> None:
         max_new_prompts_per_session=int(os.environ.get("SLM_WM_MAX_NEW_PROMPTS_PER_SESSION", "0")),
     )
     if summary.get("protocol_decision") == "resume_required":
-        clear_strict_ddim_inversion_runtime_cache()
         print(json.dumps({"summary": summary}, ensure_ascii=False, sort_keys=True))
         return
     # 主方法上下文已经离开作用域; 先释放模型引用和 CUDA 缓存, 再加载正式 Inception。
-    clear_strict_ddim_inversion_runtime_cache()
     gc.collect()
     try:
         import torch

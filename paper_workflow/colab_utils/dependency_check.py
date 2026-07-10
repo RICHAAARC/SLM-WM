@@ -44,12 +44,6 @@ NOTEBOOK_DEPENDENCY_PROFILES = {
         "scipy",
         "torchvision",
     ),
-    "dataset_level_quality": (
-        "torch",
-        "torchvision",
-        "scipy",
-        "pillow",
-    ),
     "external_baseline_method_faithful": WORKFLOW_DEPENDENCIES
     + (
         "open_clip_torch",

@@ -11,7 +11,6 @@ NOTEBOOK_DIR = Path("paper_workflow/notebooks")
 REQUIRED_NOTEBOOKS = {
     "semantic_watermark_image_only_run.ipynb",
     "paper_result_closure_run.ipynb",
-    "dataset_level_quality_run.ipynb",
     "external_baseline_tree_ring_run.ipynb",
     "external_baseline_gaussian_shading_run.ipynb",
     "external_baseline_shallow_diffuse_run.ipynb",
@@ -25,6 +24,7 @@ REMOVED_DIAGNOSTIC_NOTEBOOKS = {
     "real_attack_evaluation_run.ipynb",
     "runtime_method_precheck_run.ipynb",
     "threshold_calibration_run.ipynb",
+    "dataset_level_quality_run.ipynb",
 }
 
 
