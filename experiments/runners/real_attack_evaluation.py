@@ -1739,7 +1739,7 @@ def build_formal_attack_record(real_record: dict[str, Any], source_context: dict
         "aligned_content_score_before": aligned_before,
         "aligned_content_score_after": aligned_after,
         "lf_score_retention": score_retention,
-        "hf_score_retention": score_retention,
+        "tail_score_retention": score_retention,
         "score_retention": score_retention,
         "quality_score_proxy": real_record["metadata"].get("image_quality_metrics", {}).get("ssim", quality_proxy_default),
         "attention_consistency_proxy": float(

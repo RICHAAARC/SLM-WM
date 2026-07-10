@@ -174,8 +174,8 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
 
 
 @pytest.mark.quick
-def test_tail_robust_template_is_not_labelled_as_spatial_high_frequency() -> None:
-    """尾部截断应改变稀疏率, 检测元数据不得再把它称为空间高频。"""
+def test_tail_robust_template_records_amplitude_tail_semantics() -> None:
+    """尾部截断应改变稀疏率, 并记录幅值尾部语义。"""
 
     latent = torch.zeros(1, 2, 8, 8)
     lf_template = build_low_frequency_template(latent, "key", "model")
@@ -185,7 +185,7 @@ def test_tail_robust_template_is_not_labelled_as_spatial_high_frequency() -> Non
 
     assert 0.15 <= retained_fraction <= 0.25
     assert score.content_score > 0.5
-    assert score.metadata["tail_branch_semantics"] == "gaussian_amplitude_tail_not_spatial_high_frequency"
+    assert score.metadata["tail_branch_semantics"] == "gaussian_amplitude_tail_truncation"
 
 
 class _ToyAttention(torch.nn.Module):

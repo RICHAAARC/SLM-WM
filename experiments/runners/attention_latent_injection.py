@@ -225,7 +225,7 @@ def load_content_records_by_prompt(root_path: Path) -> dict[str, tuple[dict[str,
 
 
 def build_content_update_lookup(root_path: Path, content_records: tuple[dict[str, Any], ...]) -> dict[str, Any]:
-    """为真实 latent 写入和重打分重建对应的 LF/HF 内容 update。"""
+    """为旧诊断链重建 LF 与高斯幅值尾部截断内容 update。"""
     subspace_records = read_jsonl(root_path / "outputs" / "semantic_subspace" / "subspace_plan_records.jsonl")
     route_records = read_jsonl(root_path / "outputs" / "semantic_subspace" / "semantic_route_records.jsonl")
     subspace_by_prompt = {record["prompt_id"]: record for record in subspace_records}
@@ -374,16 +374,16 @@ def runtime_content_carrier_tensor(
     content_update: Any,
     content_record: dict[str, Any] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
-    """把 LF/HF content update 写成与真实 latent 同形状的 carrier tensor。"""
+    """把 LF/尾部截断 content update 写成与真实 latent 同形状的 carrier tensor。"""
     update_values = tuple(float(value) for value in content_update.combined_update_values)
     carrier = normalized_tiled_latent_tensor(latents, update_values)
     metadata = {
-        "content_carrier_source": "lf_hf_content_chain",
+        "content_carrier_source": "lf_tail_content_chain",
         "content_update_digest": content_update.content_update_digest,
         "content_chain_digest": content_update.content_chain_digest,
         "content_mode": content_update.content_mode,
         "lf_enabled": content_update.lf_enabled,
-        "hf_enabled": content_update.hf_enabled,
+        "tail_enabled": content_update.tail_enabled,
         "tail_truncation_enabled": content_update.tail_truncation_enabled,
     }
     if content_record is not None:

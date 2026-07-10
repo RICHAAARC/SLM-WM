@@ -15,18 +15,18 @@ class ContentScore:
     """内容载体检测分数。
 
     content_score 是正式 fixed-FPR 检测使用的分数。真实 latent 写入仍使用
-    LF/HF 合成后的 combined_update_values, 但正式检测必须同时约束 LF 与 HF
+    LF/高斯幅值尾部截断合成后的 combined_update_values, 但正式检测必须同时约束 LF 与尾部截断
     两条证据链的一致性, 以降低 wrong-key 或 wrong-message carrier 在单一
     combined 方向上偶然高相关造成的 clean negative 高尾。
     """
 
     lf_score: float
-    hf_score: float
+    tail_score: float
     combined_score: float
-    lf_hf_fusion_score: float
+    lf_tail_fusion_score: float
     content_score: float
     lambda_lf: float
-    lambda_hf: float
+    lambda_tail: float
     used_independent_branch_vote: bool
     fixed_fpr_ready: bool
     score_digest: str
@@ -35,10 +35,10 @@ class ContentScore:
 
     def __post_init__(self) -> None:
         """校验融合权重边界。"""
-        if not math.isclose(self.lambda_lf + self.lambda_hf, 1.0, rel_tol=1e-9, abs_tol=1e-9):
-            raise ValueError("lambda_lf 与 lambda_hf 之和必须为 1")
-        if self.lambda_lf <= self.lambda_hf:
-            raise ValueError("lambda_lf 必须大于 lambda_hf")
+        if not math.isclose(self.lambda_lf + self.lambda_tail, 1.0, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError("lambda_lf 与 lambda_tail 之和必须为 1")
+        if self.lambda_lf <= self.lambda_tail:
+            raise ValueError("lambda_lf 必须大于 lambda_tail")
 
     def to_dict(self) -> dict[str, Any]:
         """转为可写入 JSON 的字典。"""
@@ -64,49 +64,49 @@ def compute_unified_content_score(
     observed_values: tuple[float, ...],
     content_update: ContentUpdate,
     lambda_lf: float = 0.70,
-    lambda_hf: float = 0.30,
+    lambda_tail: float = 0.30,
 ) -> ContentScore:
-    """计算带 LF/HF 一致性约束的统一内容分数。
+    """计算带 LF/高斯幅值尾部截断一致性约束的统一内容分数。
 
     该函数属于项目特定方法逻辑: runtime 写入的水印方向是
     `combined_update_values`, 但论文级 fixed-FPR 检测不能只看单一 combined
-    相关性。正式分数取 combined 相关性与 LF/HF 加权一致性分数的较小值,
-    这样只有 combined 方向和 LF/HF 分支同时支持同一个 content carrier 时,
+    相关性。正式分数取 combined 相关性与 LF/尾部截断加权一致性分数的较小值,
+    这样只有 combined 方向和 LF/尾部截断分支同时支持同一个 content carrier 时,
     样本才会获得高分。该设计属于项目特定写法, 主要用于压低 clean negative
     的 wrong-key 高分尾部, 为 full_paper 的 FPR=0.001 边界保留统计余量。
     """
     lf_score = correlation(observed_values, content_update.lf_update_values)
-    hf_score = correlation(observed_values, content_update.hf_update_values)
+    tail_score = correlation(observed_values, content_update.tail_update_values)
     combined_score = correlation(observed_values, content_update.combined_update_values)
-    lf_hf_fusion_score = lambda_lf * lf_score + lambda_hf * hf_score
-    content_score = min(combined_score, lf_hf_fusion_score)
+    lf_tail_fusion_score = lambda_lf * lf_score + lambda_tail * tail_score
+    content_score = min(combined_score, lf_tail_fusion_score)
     payload = {
         "content_update_digest": content_update.content_update_digest,
         "lf_score": round(lf_score, 12),
-        "hf_score": round(hf_score, 12),
+        "tail_score": round(tail_score, 12),
         "combined_score": round(combined_score, 12),
-        "lf_hf_fusion_score": round(lf_hf_fusion_score, 12),
+        "lf_tail_fusion_score": round(lf_tail_fusion_score, 12),
         "content_score": round(content_score, 12),
         "lambda_lf": lambda_lf,
-        "lambda_hf": lambda_hf,
-        "formal_score_source": "lf_hf_consistency_guarded_combined_correlation",
+        "lambda_tail": lambda_tail,
+        "formal_score_source": "lf_tail_consistency_guarded_combined_correlation",
     }
     return ContentScore(
         lf_score=lf_score,
-        hf_score=hf_score,
+        tail_score=tail_score,
         combined_score=combined_score,
-        lf_hf_fusion_score=lf_hf_fusion_score,
+        lf_tail_fusion_score=lf_tail_fusion_score,
         content_score=content_score,
         lambda_lf=lambda_lf,
-        lambda_hf=lambda_hf,
+        lambda_tail=lambda_tail,
         used_independent_branch_vote=False,
         fixed_fpr_ready=True,
         score_digest=build_stable_digest(payload),
         supports_paper_claim=False,
         metadata={
-            "score_name": "lf_hf_consistency_guarded_content_score",
+            "score_name": "lf_tail_consistency_guarded_content_score",
             "combined_score_name": "diagnostic_combined_update_correlation",
-            "lf_hf_fusion_score_name": "lf_hf_weighted_consistency_score",
-            "formal_score_source": "lf_hf_consistency_guarded_combined_correlation",
+            "lf_tail_fusion_score_name": "lf_tail_weighted_consistency_score",
+            "formal_score_source": "lf_tail_consistency_guarded_combined_correlation",
         },
     )

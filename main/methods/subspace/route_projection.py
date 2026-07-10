@@ -1,4 +1,4 @@
-"""将安全基底投影到 LF、HF 和 attention 路由。"""
+"""将安全基底投影到 LF、尾部截断和 attention 路由。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class RouteBasisProjection:
     """安全基底的路由投影结果。"""
 
     lf_basis: tuple[tuple[float, ...], ...]
-    hf_basis: tuple[tuple[float, ...], ...]
+    tail_basis: tuple[tuple[float, ...], ...]
     attention_basis: tuple[tuple[float, ...], ...]
     route_projection_digest: str
     supports_paper_claim: bool
@@ -41,24 +41,24 @@ def _filter_rows(rows: tuple[tuple[float, ...], ...], allowed_indices: tuple[int
 def project_basis_by_route(safe_basis: SafeBasisPlan, semantic_route: SemanticRoute) -> RouteBasisProjection:
     """将安全基底投影到各路由分量。"""
     lf_basis = _filter_rows(safe_basis.safe_basis, semantic_route.lf_indices)
-    hf_basis = _filter_rows(safe_basis.safe_basis, semantic_route.hf_indices)
+    tail_basis = _filter_rows(safe_basis.safe_basis, semantic_route.tail_indices)
     attention_basis = _filter_rows(safe_basis.safe_basis, semantic_route.attention_indices)
     payload = {
         "basis_digest": safe_basis.basis_digest,
         "route_digest": semantic_route.route_digest,
         "lf_basis": lf_basis,
-        "hf_basis": hf_basis,
+        "tail_basis": tail_basis,
         "attention_basis": attention_basis,
     }
     return RouteBasisProjection(
         lf_basis=lf_basis,
-        hf_basis=hf_basis,
+        tail_basis=tail_basis,
         attention_basis=attention_basis,
         route_projection_digest=build_stable_digest(payload),
         supports_paper_claim=False,
         metadata={
             "lf_basis_count": len(lf_basis),
-            "hf_basis_count": len(hf_basis),
+            "tail_basis_count": len(tail_basis),
             "attention_basis_count": len(attention_basis),
         },
     )

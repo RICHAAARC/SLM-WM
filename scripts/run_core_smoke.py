@@ -27,7 +27,7 @@ from main.methods.algorithm_primitives import (
     compute_content_score,
     decide_evidence_and_final,
     derive_attention_carrier_stub,
-    derive_hf_carrier,
+    derive_tail_carrier,
     derive_lf_carrier,
     estimate_safe_basis,
     evaluate_geometry_reliability,
@@ -105,25 +105,25 @@ def build_synthetic_primitive_bundle() -> dict[str, Any]:
         {"construction_unit_name": ALGORITHM_PRIMITIVES_UNIT_NAME, "event_name": "synthetic_unit_event"}
     )
     lf_carrier = derive_lf_carrier(safe_basis, key="correct_key", event_digest=event_digest)
-    hf_carrier = derive_hf_carrier(safe_basis, risk_field, key="correct_key", event_digest=event_digest)
+    tail_carrier = derive_tail_carrier(safe_basis, risk_field, key="correct_key", event_digest=event_digest)
     attention_carrier = derive_attention_carrier_stub(safe_basis, key="correct_key", event_digest=event_digest)
-    composed_update = compose_latent_update(lf_carrier, hf_carrier, attention_carrier)
+    composed_update = compose_latent_update(lf_carrier, tail_carrier, attention_carrier)
 
-    correct_score = compute_content_score(composed_update.combined_update_values, lf_carrier, hf_carrier)
+    correct_score = compute_content_score(composed_update.combined_update_values, lf_carrier, tail_carrier)
     wrong_lf_carrier = derive_lf_carrier(safe_basis, key="wrong_key", event_digest=event_digest)
-    wrong_hf_carrier = derive_hf_carrier(safe_basis, risk_field, key="wrong_key", event_digest=event_digest)
-    wrong_score = compute_content_score(composed_update.combined_update_values, wrong_lf_carrier, wrong_hf_carrier)
+    wrong_tail_carrier = derive_tail_carrier(safe_basis, risk_field, key="wrong_key", event_digest=event_digest)
+    wrong_score = compute_content_score(composed_update.combined_update_values, wrong_lf_carrier, wrong_tail_carrier)
 
-    full_hf_carrier = derive_hf_carrier(
+    full_tail_carrier = derive_tail_carrier(
         safe_basis,
         risk_field,
         key="correct_key",
         event_digest=event_digest,
         tail_fraction=1.0,
     )
-    truncated_hf_score = compute_content_score(hf_carrier.update_values, lf_carrier, hf_carrier)
-    full_hf_score = compute_content_score(hf_carrier.update_values, lf_carrier, full_hf_carrier)
-    hf_tail_truncation_delta = abs(truncated_hf_score.hf_score - full_hf_score.hf_score)
+    truncated_tail_score = compute_content_score(tail_carrier.update_values, lf_carrier, tail_carrier)
+    full_tail_score = compute_content_score(tail_carrier.update_values, lf_carrier, full_tail_carrier)
+    tail_truncation_delta = abs(truncated_tail_score.tail_score - full_tail_score.tail_score)
 
     geometry = evaluate_geometry_reliability(
         registration_confidence=0.9,
@@ -154,7 +154,7 @@ def build_synthetic_primitive_bundle() -> dict[str, Any]:
         "projection": projection,
         "safe_basis": safe_basis,
         "lf_carrier": lf_carrier,
-        "hf_carrier": hf_carrier,
+        "tail_carrier": tail_carrier,
         "attention_carrier": attention_carrier,
         "composed_update": composed_update,
         "correct_score": correct_score,
@@ -162,7 +162,7 @@ def build_synthetic_primitive_bundle() -> dict[str, Any]:
         "geometry": geometry,
         "rescued_decision": rescued_decision,
         "unattested_decision": unattested_decision,
-        "hf_tail_truncation_delta": hf_tail_truncation_delta,
+        "tail_truncation_delta": tail_truncation_delta,
     }
 
 
@@ -190,12 +190,12 @@ def build_records(bundle: dict[str, Any]) -> list[ExperimentRecord]:
             metadata=unit_metadata,
         ),
         ExperimentRecord(
-            record_id="algorithm_primitives_hf_tail_truncation_delta",
+            record_id="algorithm_primitives_tail_truncation_delta",
             run_id=run_id,
             split="synthetic",
             method_name="slm_wm_algorithm_primitives",
-            metric_name="hf_tail_truncation_delta",
-            metric_value=bundle["hf_tail_truncation_delta"],
+            metric_name="tail_truncation_delta",
+            metric_value=bundle["tail_truncation_delta"],
             metadata=unit_metadata,
         ),
         ExperimentRecord(
@@ -234,7 +234,7 @@ def build_summary(bundle: dict[str, Any], records: list[ExperimentRecord]) -> di
         "artifact_type": "local_summary",
         "decision": "pass"
         if correct_score > wrong_score
-        and bundle["hf_tail_truncation_delta"] > 0.0
+        and bundle["tail_truncation_delta"] > 0.0
         and bundle["geometry"].direct_positive_decision is False
         and bundle["rescued_decision"].rescue_applied
         and bundle["unattested_decision"].evidence_level
@@ -245,7 +245,7 @@ def build_summary(bundle: dict[str, Any], records: list[ExperimentRecord]) -> di
             "latent_mask_projection": "implemented",
             "safe_basis_estimate": "implemented",
             "lf_carrier": "implemented",
-            "hf_carrier": "implemented",
+            "tail_carrier": "implemented",
             "attention_carrier_stub": "synthetic_stub",
             "latent_update_composition": "implemented",
             "content_score": "implemented",
@@ -255,7 +255,7 @@ def build_summary(bundle: dict[str, Any], records: list[ExperimentRecord]) -> di
         "metrics": {
             "correct_key_score": correct_score,
             "wrong_key_score": wrong_score,
-            "hf_tail_truncation_delta": bundle["hf_tail_truncation_delta"],
+            "tail_truncation_delta": bundle["tail_truncation_delta"],
             "rescue_applied": bundle["rescued_decision"].rescue_applied,
             "attestation_layering_pass": (
                 bundle["unattested_decision"].evidence_level and not bundle["unattested_decision"].final_level

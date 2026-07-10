@@ -12,13 +12,13 @@ from main.methods.semantic.risk_field import RiskFieldResult, ensure_equal_lengt
 
 @dataclass(frozen=True)
 class SemanticRoute:
-    """LF、HF 和 attention 候选轴路由。"""
+    """LF、尾部截断和 attention 候选轴路由。"""
 
     route_id: str
     route_label: str
     risk_profile: str
     lf_indices: tuple[int, ...]
-    hf_indices: tuple[int, ...]
+    tail_indices: tuple[int, ...]
     attention_indices: tuple[int, ...]
     route_digest: str
     supports_paper_claim: bool
@@ -51,23 +51,23 @@ def build_semantic_route(
         }
     )
     lf_scores = []
-    hf_scores = []
+    tail_scores = []
     attention_scores = []
     for index in range(length):
         low_risk = 1.0 - risk_field.risk_values[index]
         mask_value = latent_mask.latent_mask_values[index]
         budget = risk_field.budget_values[index]
         lf_scores.append((risk_field.risk_values[index] + abs(mask_value - 0.65), index))
-        hf_scores.append((-(budget + mask_value * low_risk), index))
+        tail_scores.append((-(budget + mask_value * low_risk), index))
         attention_scores.append((abs(mask_value - low_risk), index))
     lf_indices = _indices_by_score(lf_scores, route_width)
-    hf_indices = _indices_by_score(hf_scores, route_width)
+    tail_indices = _indices_by_score(tail_scores, route_width)
     attention_indices = _indices_by_score(attention_scores, route_width)
     route_payload = {
         "prompt_id": prompt_id,
         "risk_profile": risk_profile,
         "lf_indices": lf_indices,
-        "hf_indices": hf_indices,
+        "tail_indices": tail_indices,
         "attention_indices": attention_indices,
         "risk_field_digest": risk_field.risk_field_digest,
         "latent_mask_digest": latent_mask.latent_mask_digest,
@@ -78,7 +78,7 @@ def build_semantic_route(
         route_label="semantic_conditioned_route",
         risk_profile=risk_profile,
         lf_indices=lf_indices,
-        hf_indices=hf_indices,
+        tail_indices=tail_indices,
         attention_indices=attention_indices,
         route_digest=route_digest,
         supports_paper_claim=False,

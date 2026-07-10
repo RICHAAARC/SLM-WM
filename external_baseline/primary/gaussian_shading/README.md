@@ -9,6 +9,8 @@
 
 已提供 `method_faithful_sd35` adapter, 将 truncated Gaussian message、key 解码和 voting 机制适配到 SD3.5 Medium 16-channel latent。该路径会真实生成 clean / watermarked 图像并写出图像 digest, 用于主表 common-backbone 对比。
 
+Gaussian Shading 是独立 baseline, 不等同于 SLM-WM 的 `tail_robust` 分支。后者只对密钥高斯模板做元素绝对幅值尾部截断, 没有空间频带定义, 也不复用 Gaussian Shading 的消息编码与 voting 检测协议。
+
 ## official reference 边界
 
 official reference 入口用于补充表方法忠实度审计, 不替代 SD3.5 Medium common-backbone 主表对比。该入口会尝试在独立 legacy 环境中运行 `source/run_gaussian_shading.py`, 并把官方命令、stdout、stderr、`Identity.txt` 指标、schema、validation report、环境报告和压缩包写入 `outputs/gaussian_shading_official_reference/` 及当前论文运行层级 Google Drive 根目录下的 `external_baseline_official_reference/` 目录。

@@ -29,12 +29,12 @@ class ContentDetectionRecord:
     split: str
     content_mode: str
     lf_enabled: bool
-    hf_enabled: bool
+    tail_enabled: bool
     tail_truncation_enabled: bool
     lf_score: float
-    hf_score: float
+    tail_score: float
     combined_score: float
-    lf_hf_fusion_score: float
+    lf_tail_fusion_score: float
     content_score: float
     fixed_fpr_ready: bool
     content_update_digest: str
@@ -70,12 +70,12 @@ def build_content_detection_record(
         split=split,
         content_mode=content_update.content_mode,
         lf_enabled=content_update.lf_enabled,
-        hf_enabled=content_update.hf_enabled,
+        tail_enabled=content_update.tail_enabled,
         tail_truncation_enabled=content_update.tail_truncation_enabled,
         lf_score=score.lf_score,
-        hf_score=score.hf_score,
+        tail_score=score.tail_score,
         combined_score=score.combined_score,
-        lf_hf_fusion_score=score.lf_hf_fusion_score,
+        lf_tail_fusion_score=score.lf_tail_fusion_score,
         content_score=score.content_score,
         fixed_fpr_ready=score.fixed_fpr_ready,
         content_update_digest=content_update.content_update_digest,

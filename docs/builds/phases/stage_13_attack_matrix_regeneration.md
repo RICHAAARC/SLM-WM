@@ -49,7 +49,7 @@ python tools/harness/inspect_repository.py .
 2. 实现再扩散攻击：img2img regeneration、DDIM inversion + regeneration、SDEdit regeneration、diffusion purification。
 3. 采用资源档位：probe 检查 runner，pilot_paper 确定攻击强度，full-main 常规攻击全量，full-extra 再扩散代表子集。
 4. 为每个 attacked image 写入 attack config、attack digest、source image digest。
-5. 运行检测并统计 TPR、FPR、quality、LF/HF score retention、attention consistency、geometry reliable rate、rescue rate。
+5. 运行检测并统计 TPR、FPR、quality、LF/尾部截断 score retention、attention consistency、geometry reliable rate、rescue rate。
 
 ## 六、禁止事项与边界
 

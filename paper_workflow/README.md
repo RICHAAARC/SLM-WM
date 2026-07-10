@@ -25,7 +25,7 @@ SLM_WM_PRIMARY_BASELINE_METHODS = "tree_ring"
 ```text
 notebooks/       Colab Notebook 入口文件
 notebook_utils/  Notebook 专用轻量 helper, 例如仓库拉取和显示辅助
-colab_utils/     Colab session、Drive、进度显示和旧导入路径兼容 helper
+colab_utils/     Colab session、Drive、进度显示和正式 runner 包装 helper
 ```
 
 `colab_utils/` 中若存在同名包装模块, 其职责是把 Notebook 调用转发到 `experiments/` 或 `paper_experiments/` 的正式 runner, 并补充 Colab 进度显示、Drive 路径和压缩包镜像。正式 records、tables、figures、reports 或 manifests 不能只在该目录实现。
@@ -33,23 +33,26 @@ colab_utils/     Colab session、Drive、进度显示和旧导入路径兼容 he
 ## Notebook 入口分类
 
 - 诊断入口: `colab_drive_cold_start_smoke.ipynb`、`runtime_method_precheck_run.ipynb`。
-- SLM 主方法入口: `attention_geometry_capture_run.ipynb`、`attention_latent_injection_run.ipynb`、`aligned_rescoring_run.ipynb`、`threshold_calibration_run.ipynb`。
-- SLM 攻击与质量入口: `real_attack_evaluation_run.ipynb`、`conventional_geometric_attack_evaluation_run.ipynb`、`dataset_level_quality_run.ipynb`。
+- 当前 SLM 正式入口: `semantic_watermark_image_only_run.ipynb`, 统一运行真实科学算子、仅图像检测、攻击、质量和正式消融。
+- 独立 SLM 诊断入口: `attention_geometry_capture_run.ipynb`、`attention_latent_injection_run.ipynb`、`aligned_rescoring_run.ipynb`、`threshold_calibration_run.ipynb`、`real_attack_evaluation_run.ipynb`、`conventional_geometric_attack_evaluation_run.ipynb`、`dataset_level_quality_run.ipynb`。
 - method-faithful baseline 入口: `external_baseline_tree_ring_run.ipynb`、`external_baseline_gaussian_shading_run.ipynb`、`external_baseline_shallow_diffuse_run.ipynb`、`external_baseline_t2smark_run.ipynb`。
 - official reference 入口: `official_reference_tree_ring_run.ipynb`、`official_reference_gaussian_shading_run.ipynb`、`official_reference_shallow_diffuse_run.ipynb`、`official_reference_t2smark_run.ipynb`。
 - 结果闭合入口: `paper_result_closure_run.ipynb`。
 
 各入口的前后依赖、并行要求和 GPU / CPU 需求见 `paper_workflow/notebooks/README.md`。
 
+当前正式入口中的内容载体由空间低通 LF 和高斯幅值尾部截断分支组成。后者使用 `tail_robust` 标识, 不具有空间频带定义。
+
 ## Colab 与服务器入口关系
 
 Colab 入口和服务器命令使用同一批正式 runner。若不使用 Notebook, 可直接调用服务器命令:
 
 ```bash
-python scripts/run_gpu_server_workflow.py \
-  --workflow attention_geometry \
-  --paper-run-name pilot_paper \
-  --result-root outputs/gpu_server_results/pilot_paper
+SLM_WM_PAPER_RUN_NAME=pilot_paper \
+  python scripts/run_image_only_dataset_runtime.py
+
+SLM_WM_PAPER_RUN_NAME=pilot_paper \
+  python scripts/run_runtime_rerun_ablations.py
 
 python scripts/run_gpu_server_result_closure.py \
   --paper-run-name pilot_paper \
@@ -57,7 +60,7 @@ python scripts/run_gpu_server_result_closure.py \
   --complete-output-dir outputs/gpu_server_results/pilot_paper/complete_result_package
 ```
 
-服务器命令不挂载 Google Drive, 默认把结果写入 `outputs/gpu_server_results/<run_name>/`。Colab Notebook 仍保持 `/content/drive/MyDrive/SLM/<run_name>_results/` 落盘约定。
+前两个命令需要可用 GPU。当前远程服务器 `8.216.54.104` 不具备 GPU, 只能承担 CPU 结果闭合、审计与打包, 不能生成主方法正式图像证据。Colab Notebook 保持 `/content/drive/MyDrive/SLM/<run_name>_results/` 落盘约定。
 
 ## 结果闭合等价命令
 

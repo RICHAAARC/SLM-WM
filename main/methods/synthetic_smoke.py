@@ -20,7 +20,7 @@ from main.methods.algorithm_primitives import (
     compute_content_score,
     decide_evidence_and_final,
     derive_attention_carrier_stub,
-    derive_hf_carrier,
+    derive_tail_carrier,
     derive_lf_carrier,
     estimate_safe_basis,
     evaluate_geometry_reliability,
@@ -29,7 +29,7 @@ from main.methods.algorithm_primitives import (
 
 
 SMOKE_UNIT_NAME = "core_method_synthetic_smoke"
-CONTENT_THRESHOLD = 0.61
+CONTENT_THRESHOLD = 0.50
 RESCUE_MARGIN_LOW = -0.05
 
 
@@ -98,19 +98,19 @@ def _build_base_carriers() -> dict[str, Any]:
         {"construction_unit_name": SMOKE_UNIT_NAME, "event_name": "synthetic_smoke_event"}
     )
     lf_carrier = derive_lf_carrier(safe_basis, key="correct_key", event_digest=event_digest)
-    hf_carrier = derive_hf_carrier(safe_basis, risk_field, key="correct_key", event_digest=event_digest)
+    tail_carrier = derive_tail_carrier(safe_basis, risk_field, key="correct_key", event_digest=event_digest)
     attention_carrier = derive_attention_carrier_stub(safe_basis, key="correct_key", event_digest=event_digest)
     wrong_lf_carrier = derive_lf_carrier(safe_basis, key="wrong_key", event_digest=event_digest)
-    wrong_hf_carrier = derive_hf_carrier(safe_basis, risk_field, key="wrong_key", event_digest=event_digest)
-    update = compose_latent_update(lf_carrier, hf_carrier, attention_carrier)
-    wrong_update = compose_latent_update(wrong_lf_carrier, wrong_hf_carrier, attention_carrier)
+    wrong_tail_carrier = derive_tail_carrier(safe_basis, risk_field, key="wrong_key", event_digest=event_digest)
+    update = compose_latent_update(lf_carrier, tail_carrier, attention_carrier)
+    wrong_update = compose_latent_update(wrong_lf_carrier, wrong_tail_carrier, attention_carrier)
     return {
         "latent_values": latent_values,
         "lf_carrier": lf_carrier,
-        "hf_carrier": hf_carrier,
+        "tail_carrier": tail_carrier,
         "attention_carrier": attention_carrier,
         "wrong_lf_carrier": wrong_lf_carrier,
-        "wrong_hf_carrier": wrong_hf_carrier,
+        "wrong_tail_carrier": wrong_tail_carrier,
         "watermarked_values": update.combined_update_values,
         "wrong_key_values": wrong_update.combined_update_values,
         "event_digest": event_digest,
@@ -120,23 +120,23 @@ def _build_base_carriers() -> dict[str, Any]:
 def _score_observed(
     observed_values: tuple[float, ...],
     lf_carrier: CarrierPrimitive,
-    hf_carrier: CarrierPrimitive,
+    tail_carrier: CarrierPrimitive,
 ) -> ContentScoreResult:
     """计算 smoke 使用的内容分数。"""
-    return compute_content_score(observed_values, lf_carrier, hf_carrier)
+    return compute_content_score(observed_values, lf_carrier, tail_carrier)
 
 
 def _build_boundary_shifted_values(
     watermarked_values: tuple[float, ...],
     low_reference_values: tuple[float, ...],
     lf_carrier: CarrierPrimitive,
-    hf_carrier: CarrierPrimitive,
+    tail_carrier: CarrierPrimitive,
     target_score: float | None = None,
 ) -> tuple[float, ...]:
     """构造落在 rescue 边界窗口内的 synthetic 几何失配向量。"""
     target = CONTENT_THRESHOLD - 0.02 if target_score is None else target_score
-    low_score = _score_observed(low_reference_values, lf_carrier, hf_carrier).content_score
-    high_score = _score_observed(watermarked_values, lf_carrier, hf_carrier).content_score
+    low_score = _score_observed(low_reference_values, lf_carrier, tail_carrier).content_score
+    high_score = _score_observed(watermarked_values, lf_carrier, tail_carrier).content_score
     lower_bound = min(low_score, high_score) + 1e-6
     upper_bound = max(low_score, high_score) - 1e-6
     bounded_target = min(max(target, lower_bound), upper_bound)
@@ -145,7 +145,7 @@ def _build_boundary_shifted_values(
     for _ in range(40):
         middle = (low + high) / 2.0
         candidate = _interpolate_vectors(low_reference_values, watermarked_values, middle)
-        score = _score_observed(candidate, lf_carrier, hf_carrier).content_score
+        score = _score_observed(candidate, lf_carrier, tail_carrier).content_score
         if score < bounded_target:
             low = middle
         else:
@@ -159,15 +159,15 @@ def _make_scenario(
     observed_values: tuple[float, ...],
     aligned_values: tuple[float, ...],
     lf_carrier: CarrierPrimitive,
-    hf_carrier: CarrierPrimitive,
+    tail_carrier: CarrierPrimitive,
     geometry: GeometryReliabilityResult,
     fail_reason: str,
     attestation_pass: bool,
     metadata: dict[str, Any] | None = None,
 ) -> CoreSmokeScenario:
     """根据 synthetic latent 和统一决策规则构造场景结果。"""
-    raw_score = _score_observed(observed_values, lf_carrier, hf_carrier)
-    aligned_score = _score_observed(aligned_values, lf_carrier, hf_carrier)
+    raw_score = _score_observed(observed_values, lf_carrier, tail_carrier)
+    aligned_score = _score_observed(aligned_values, lf_carrier, tail_carrier)
     decision = decide_evidence_and_final(
         raw_content_score=raw_score.content_score,
         aligned_content_score=aligned_score.content_score,
@@ -203,10 +203,10 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
     watermarked_values = carrier_bundle["watermarked_values"]
     wrong_key_values = carrier_bundle["wrong_key_values"]
     lf_carrier = carrier_bundle["lf_carrier"]
-    hf_carrier = carrier_bundle["hf_carrier"]
+    tail_carrier = carrier_bundle["tail_carrier"]
     wrong_lf_carrier = carrier_bundle["wrong_lf_carrier"]
-    wrong_hf_carrier = carrier_bundle["wrong_hf_carrier"]
-    shifted_values = _build_boundary_shifted_values(watermarked_values, latent_values, lf_carrier, hf_carrier)
+    wrong_tail_carrier = carrier_bundle["wrong_tail_carrier"]
+    shifted_values = _build_boundary_shifted_values(watermarked_values, latent_values, lf_carrier, tail_carrier)
 
     reliable_geometry = evaluate_geometry_reliability(
         registration_confidence=0.9,
@@ -228,7 +228,7 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
             latent_values,
             latent_values,
             lf_carrier,
-            hf_carrier,
+            tail_carrier,
             unreliable_geometry,
             "none",
             False,
@@ -239,7 +239,7 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
             watermarked_values,
             watermarked_values,
             lf_carrier,
-            hf_carrier,
+            tail_carrier,
             reliable_geometry,
             "none",
             True,
@@ -250,7 +250,7 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
             watermarked_values,
             watermarked_values,
             wrong_lf_carrier,
-            wrong_hf_carrier,
+            wrong_tail_carrier,
             reliable_geometry,
             "none",
             True,
@@ -261,7 +261,7 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
             shifted_values,
             shifted_values,
             lf_carrier,
-            hf_carrier,
+            tail_carrier,
             reliable_geometry,
             "geometry_suspected",
             True,
@@ -272,7 +272,7 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
             shifted_values,
             watermarked_values,
             lf_carrier,
-            hf_carrier,
+            tail_carrier,
             reliable_geometry,
             "geometry_suspected",
             True,
@@ -283,7 +283,7 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
             shifted_values,
             watermarked_values,
             lf_carrier,
-            hf_carrier,
+            tail_carrier,
             unreliable_geometry,
             "geometry_suspected",
             True,
@@ -294,7 +294,7 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
             watermarked_values,
             watermarked_values,
             lf_carrier,
-            hf_carrier,
+            tail_carrier,
             reliable_geometry,
             "none",
             False,
@@ -305,7 +305,7 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
             watermarked_values,
             watermarked_values,
             lf_carrier,
-            hf_carrier,
+            tail_carrier,
             reliable_geometry,
             "none",
             True,
@@ -341,7 +341,7 @@ def build_core_method_smoke_bundle() -> CoreSmokeBundle:
         metrics=metrics,
         carrier_digests={
             "lf_carrier_digest": lf_carrier.carrier_digest,
-            "hf_carrier_digest": hf_carrier.carrier_digest,
+            "tail_carrier_digest": tail_carrier.carrier_digest,
             "attention_carrier_digest": carrier_bundle["attention_carrier"].carrier_digest,
             "event_digest": carrier_bundle["event_digest"],
         },

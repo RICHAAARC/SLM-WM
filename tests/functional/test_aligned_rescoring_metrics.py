@@ -136,7 +136,7 @@ def test_runtime_watermark_tensor_reports_component_audit(monkeypatch: pytest.Mo
         content_chain_digest = "content_chain_digest"
         content_mode = "full_content_chain"
         lf_enabled = True
-        hf_enabled = True
+        tail_enabled = True
         tail_truncation_enabled = False
 
     latents = torch.zeros((1, 1, 4, 4), dtype=torch.float32)
@@ -229,12 +229,12 @@ def make_aligned_record(record_id: str, sample_role: str, aligned_score: float, 
         real_rescoring_score_gain=aligned_score - raw_score,
         real_lf_score_before=raw_score,
         real_lf_score_after=aligned_score,
-        real_hf_score_before=raw_score / 2.0,
-        real_hf_score_after=aligned_score / 2.0,
+        real_tail_score_before=raw_score / 2.0,
+        real_tail_score_after=aligned_score / 2.0,
         real_combined_score_before=raw_score,
         real_combined_score_after=aligned_score,
-        real_lf_hf_fusion_score_before=raw_score,
-        real_lf_hf_fusion_score_after=aligned_score,
+        real_lf_tail_fusion_score_before=raw_score,
+        real_lf_tail_fusion_score_after=aligned_score,
         latent_digest_before="latent_before",
         latent_digest_after="latent_after",
         latent_projection_digest_before="projection_before",
@@ -250,7 +250,7 @@ def make_aligned_record(record_id: str, sample_role: str, aligned_score: float, 
             "content_basis_rank": 64,
             "latent_projection_boundary_before": "first_clean_latent_before_any_injection",
             "latent_projection_boundary_after": "final_aligned_latent_after_all_injections",
-            "formal_score_source": "lf_hf_consistency_guarded_combined_correlation",
+            "formal_score_source": "lf_tail_consistency_guarded_combined_correlation",
         },
     )
 

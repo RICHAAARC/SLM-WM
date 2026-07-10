@@ -1,4 +1,4 @@
-"""兼容历史记录的高斯幅值尾部截断鲁棒载体。"""
+"""高斯幅值尾部截断鲁棒载体。"""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from main.methods.carrier.lf import stable_signed_template, update_from_indices
 
 
 @dataclass(frozen=True)
-class HfContentCarrier:
-    """历史字段名保持 HF, 正式语义为尾部截断鲁棒载体。"""
+class TailContentCarrier:
+    """保存高斯幅值尾部截断模板、更新向量和稳定摘要。"""
 
     carrier_id: str
     basis_digest: str
@@ -23,12 +23,12 @@ class HfContentCarrier:
     tail_threshold: float | None
     retained_fraction: float
     tail_truncation_enabled: bool
-    hf_content_carrier_digest: str
+    tail_content_carrier_digest: str
     supports_paper_claim: bool
     metadata: dict[str, Any]
 
     def __post_init__(self) -> None:
-        """校验 HF 模板边界。"""
+        """校验高斯幅值尾部截断模板边界。"""
         if not self.template_values:
             raise ValueError("template_values 不得为空")
         if not self.update_values:
@@ -42,7 +42,7 @@ class HfContentCarrier:
 
 
 def tail_threshold_for(scores: tuple[float, ...], tail_fraction: float) -> float:
-    """计算 HF tail truncation 阈值。"""
+    """计算高斯元素绝对幅值的尾部截断阈值。"""
     ordered = sorted(scores)
     bounded = min(max(tail_fraction, 0.0), 1.0)
     if bounded >= 1.0:
@@ -54,7 +54,7 @@ def tail_threshold_for(scores: tuple[float, ...], tail_fraction: float) -> float
 
 
 def apply_tail_truncation(template: tuple[float, ...], tail_fraction: float) -> tuple[tuple[float, ...], float, float]:
-    """保留 HF 模板尾部强响应。"""
+    """保留模板绝对幅值分布的尾部元素, 不进行空间频率筛选。"""
     scores = tuple(abs(value) for value in template)
     threshold = tail_threshold_for(scores, tail_fraction)
     truncated = tuple(value if score >= threshold else 0.0 for value, score in zip(template, scores))
@@ -66,7 +66,7 @@ def apply_tail_truncation(template: tuple[float, ...], tail_fraction: float) -> 
     return truncated, threshold, retained_count / len(template)
 
 
-def derive_hf_content_carrier(
+def derive_tail_content_carrier(
     selected_indices: tuple[int, ...],
     basis_digest: str,
     route_digest: str,
@@ -76,9 +76,12 @@ def derive_hf_content_carrier(
     embedding_strength: float = 0.12,
     tail_fraction: float = 0.50,
     tail_truncation_enabled: bool = True,
-) -> HfContentCarrier:
-    """从安全基底和语义路由导出 HF 内容载体。"""
-    template = stable_signed_template((key_material, event_digest, basis_digest, route_digest, "hf"), len(selected_indices))
+) -> TailContentCarrier:
+    """从安全基底和语义路由导出高斯幅值尾部截断内容载体。"""
+    template = stable_signed_template(
+        (key_material, event_digest, basis_digest, route_digest, "tail_robust"),
+        len(selected_indices),
+    )
     if tail_truncation_enabled:
         encoded_template, threshold, retained_fraction = apply_tail_truncation(template, tail_fraction)
     else:
@@ -94,8 +97,8 @@ def derive_hf_content_carrier(
         "tail_threshold": None if threshold is None else round(threshold, 12),
     }
     carrier_digest = build_stable_digest(payload)
-    return HfContentCarrier(
-        carrier_id=f"hf_content_{carrier_digest[:16]}",
+    return TailContentCarrier(
+        carrier_id=f"tail_content_{carrier_digest[:16]}",
         basis_digest=basis_digest,
         route_digest=route_digest,
         template_values=encoded_template,
@@ -105,11 +108,10 @@ def derive_hf_content_carrier(
         tail_threshold=threshold,
         retained_fraction=retained_fraction,
         tail_truncation_enabled=tail_truncation_enabled,
-        hf_content_carrier_digest=carrier_digest,
+        tail_content_carrier_digest=carrier_digest,
         supports_paper_claim=False,
         metadata={
             "carrier_family": "gaussian_tail_robust",
-            "branch_semantics": "amplitude_tail_not_spatial_high_frequency",
-            "legacy_field_prefix": "hf",
+            "branch_semantics": "gaussian_amplitude_tail_truncation",
         },
     )

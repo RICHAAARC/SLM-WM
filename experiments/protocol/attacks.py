@@ -108,7 +108,7 @@ class AttackDetectionRecord:
     aligned_content_score_before: float
     aligned_content_score_after: float
     lf_score_retention: float
-    hf_score_retention: float
+    tail_score_retention: float
     score_retention: float
     quality_score_proxy: float
     attention_consistency_proxy: float
@@ -326,23 +326,23 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
 
 
 _ATTACK_EFFECTS: dict[str, dict[str, float]] = {
-    "jpeg_compression": {"lf": 0.30, "hf": 0.58, "quality": 0.42, "attention": 0.18},
-    "gaussian_noise": {"lf": 0.20, "hf": 0.72, "quality": 0.55, "attention": 0.24},
-    "gaussian_blur": {"lf": 0.38, "hf": 0.62, "quality": 0.46, "attention": 0.26},
-    "resize": {"lf": 0.28, "hf": 0.36, "quality": 0.32, "attention": 0.34},
-    "crop": {"lf": 0.42, "hf": 0.40, "quality": 0.40, "attention": 0.48},
-    "rotation": {"lf": 0.34, "hf": 0.35, "quality": 0.36, "attention": 0.52},
-    "crop_resize": {"lf": 0.48, "hf": 0.46, "quality": 0.44, "attention": 0.56},
-    "composite_geometric_attacks": {"lf": 0.55, "hf": 0.50, "quality": 0.52, "attention": 0.70},
-    "img2img_regeneration": {"lf": 0.62, "hf": 0.70, "quality": 0.64, "attention": 0.78},
-    "ddim_inversion_regeneration": {"lf": 0.66, "hf": 0.74, "quality": 0.68, "attention": 0.80},
-    "sdedit_regeneration": {"lf": 0.72, "hf": 0.78, "quality": 0.72, "attention": 0.84},
-    "diffusion_purification": {"lf": 0.58, "hf": 0.68, "quality": 0.60, "attention": 0.76},
-    "photometric_distortion_attack": {"lf": 0.18, "hf": 0.34, "quality": 0.36, "attention": 0.22},
-    "global_editing_attack": {"lf": 0.76, "hf": 0.82, "quality": 0.80, "attention": 0.88},
-    "local_editing_attack": {"lf": 0.60, "hf": 0.72, "quality": 0.66, "attention": 0.86},
-    "visual_paraphrase_attack": {"lf": 0.84, "hf": 0.88, "quality": 0.86, "attention": 0.92},
-    "adversarial_removal_attack": {"lf": 0.70, "hf": 0.84, "quality": 0.74, "attention": 0.82},
+    "jpeg_compression": {"lf": 0.30, "tail": 0.58, "quality": 0.42, "attention": 0.18},
+    "gaussian_noise": {"lf": 0.20, "tail": 0.72, "quality": 0.55, "attention": 0.24},
+    "gaussian_blur": {"lf": 0.38, "tail": 0.62, "quality": 0.46, "attention": 0.26},
+    "resize": {"lf": 0.28, "tail": 0.36, "quality": 0.32, "attention": 0.34},
+    "crop": {"lf": 0.42, "tail": 0.40, "quality": 0.40, "attention": 0.48},
+    "rotation": {"lf": 0.34, "tail": 0.35, "quality": 0.36, "attention": 0.52},
+    "crop_resize": {"lf": 0.48, "tail": 0.46, "quality": 0.44, "attention": 0.56},
+    "composite_geometric_attacks": {"lf": 0.55, "tail": 0.50, "quality": 0.52, "attention": 0.70},
+    "img2img_regeneration": {"lf": 0.62, "tail": 0.70, "quality": 0.64, "attention": 0.78},
+    "ddim_inversion_regeneration": {"lf": 0.66, "tail": 0.74, "quality": 0.68, "attention": 0.80},
+    "sdedit_regeneration": {"lf": 0.72, "tail": 0.78, "quality": 0.72, "attention": 0.84},
+    "diffusion_purification": {"lf": 0.58, "tail": 0.68, "quality": 0.60, "attention": 0.76},
+    "photometric_distortion_attack": {"lf": 0.18, "tail": 0.34, "quality": 0.36, "attention": 0.22},
+    "global_editing_attack": {"lf": 0.76, "tail": 0.82, "quality": 0.80, "attention": 0.88},
+    "local_editing_attack": {"lf": 0.60, "tail": 0.72, "quality": 0.66, "attention": 0.86},
+    "visual_paraphrase_attack": {"lf": 0.84, "tail": 0.88, "quality": 0.86, "attention": 0.92},
+    "adversarial_removal_attack": {"lf": 0.70, "tail": 0.84, "quality": 0.74, "attention": 0.82},
 }
 
 
@@ -384,13 +384,13 @@ def deterministic_attack_effect(source_record: dict[str, Any], config: AttackCon
     source_id = str(_field_value(source_record, "aligned_detection_record_id", ""))
     variation = 0.92 + 0.16 * _deterministic_unit(source_id, config.attack_id, "variation")
     lf_loss = _clamp01(config.attack_strength * effects["lf"] * variation)
-    hf_loss = _clamp01(config.attack_strength * effects["hf"] * (1.02 - 0.04 * variation))
-    score_loss = _clamp01(0.62 * lf_loss + 0.38 * hf_loss)
+    tail_loss = _clamp01(config.attack_strength * effects["tail"] * (1.02 - 0.04 * variation))
+    score_loss = _clamp01(0.62 * lf_loss + 0.38 * tail_loss)
     quality_loss = _clamp01(config.attack_strength * effects["quality"] * (0.95 + 0.10 * variation))
     attention_loss = _clamp01(config.attack_strength * effects["attention"] * (0.90 + 0.15 * variation))
     return {
         "lf_score_retention": _clamp01(1.0 - lf_loss),
-        "hf_score_retention": _clamp01(1.0 - hf_loss),
+        "tail_score_retention": _clamp01(1.0 - tail_loss),
         "score_retention": _clamp01(1.0 - score_loss),
         "quality_score_proxy": _clamp01(1.0 - quality_loss),
         "attention_consistency_proxy": _clamp01(1.0 - attention_loss),
@@ -422,7 +422,7 @@ def build_attack_detection_record(
         ] >= 0.55
         aligned_after = _clamp01(raw_after + retained_gain if geometry_reliable else raw_after)
         lf_retention = effect["lf_score_retention"]
-        hf_retention = effect["hf_score_retention"]
+        tail_retention = effect["tail_score_retention"]
         score_retention = effect["score_retention"]
         quality_score_proxy = effect["quality_score_proxy"]
         attention_consistency_proxy = effect["attention_consistency_proxy"]
@@ -431,7 +431,7 @@ def build_attack_detection_record(
         aligned_after = aligned_before
         geometry_reliable = bool(_field_value(source_record, "geometry_reliable", False))
         lf_retention = 1.0
-        hf_retention = 1.0
+        tail_retention = 1.0
         score_retention = 1.0
         quality_score_proxy = 1.0
         attention_consistency_proxy = 1.0
@@ -496,7 +496,7 @@ def build_attack_detection_record(
         aligned_content_score_before=aligned_before,
         aligned_content_score_after=aligned_after,
         lf_score_retention=lf_retention,
-        hf_score_retention=hf_retention,
+        tail_score_retention=tail_retention,
         score_retention=score_retention,
         quality_score_proxy=quality_score_proxy,
         attention_consistency_proxy=attention_consistency_proxy,
@@ -618,7 +618,7 @@ def _rates_for_group(records: list[dict[str, Any]]) -> dict[str, Any]:
         "quality_score_proxy_mean": _mean_optional(supported, "quality_score_proxy"),
         "score_retention_mean": _mean(supported, "score_retention"),
         "lf_score_retention_mean": _mean(supported, "lf_score_retention"),
-        "hf_score_retention_mean": _mean(supported, "hf_score_retention"),
+        "tail_score_retention_mean": _mean(supported, "tail_score_retention"),
         "attention_consistency_proxy_mean": _mean(supported, "attention_consistency_proxy"),
         "geometry_reliable_rate": _rate(supported, "geometry_reliable"),
         "rescue_rate": _rate(supported, "rescue_applied"),
@@ -690,7 +690,7 @@ def score_retention_rows(records: Iterable[dict[str, Any]]) -> list[dict[str, An
                 "score_retention_min": min(score_values) if score_values else 0.0,
                 "score_retention_max": max(score_values) if score_values else 0.0,
                 "lf_score_retention_mean": _mean(supported, "lf_score_retention"),
-                "hf_score_retention_mean": _mean(supported, "hf_score_retention"),
+                "tail_score_retention_mean": _mean(supported, "tail_score_retention"),
                 "supports_paper_claim": False,
             }
         )

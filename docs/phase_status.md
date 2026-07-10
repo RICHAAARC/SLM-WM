@@ -32,7 +32,7 @@
 | `stage_05_colab_drive_workflow` | completed | Colab / Google Drive 结果包镜像、manifest 和 reload smoke 链路已建立。 |
 | `stage_06_prompt_split_records_protocol` | completed | 当前只保留 `probe_paper`、`pilot_paper`、`full_paper` 三组论文运行 prompt 配置。 |
 | `stage_07_semantic_mask_risk_field_safe_subspace` | completed | 语义 mask、risk field 与 safe subspace 机制已进入核心方法链路。 |
-| `stage_08_lf_hf_content_carriers` | completed | LF / HF 内容载体与内容分数检测链路已建立, 载体维度由统一论文运行配置控制。 |
+| `stage_08_lf_tail_content_carriers` | completed | LF / 尾部截断内容载体与内容分数检测链路已建立, 载体维度由统一论文运行配置控制。 |
 | `stage_09_self_attention_graph_geometry` | completed | 真实 attention 几何捕获与 attention geometry 产物已纳入 GPU workflow。 |
 | `stage_10_attention_relative_latent_update` | completed | attention-relative latent update 已实现, 当前主方法真实写入链路以 SD3.5 Medium 为主线。 |
 | `stage_11_same_threshold_geometric_rescue` | completed | same-threshold geometric rescue 机制已建立, rescue 与 fixed-FPR 统计边界必须分离记录。 |
@@ -142,9 +142,9 @@
 
 ### stage01 已完成内容
 
-1. `main/methods/algorithm_primitives.py` 实现纯算法原语闭环, 包括语义风险场、latent mask 投影、安全基底估计、LF/HF carrier、attention synthetic stub、latent update 合成、内容分数、几何可靠性和 evidence/final 判定。
+1. `main/methods/algorithm_primitives.py` 实现纯算法原语闭环, 包括语义风险场、latent mask 投影、安全基底估计、LF/尾部截断carrier、attention synthetic stub、latent update 合成、内容分数、几何可靠性和 evidence/final 判定。
 2. `scripts/run_core_smoke.py` 根据 typed objects 生成 stage01 本地 summary、synthetic records 和 manifest, 且所有输出均写入 `outputs/algorithm_primitives/`。
-3. `tests/functional/test_algorithm_primitives.py` 覆盖正确 key、错误 key、HF tail truncation、rescue 边界和 attestation 分层。
+3. `tests/functional/test_algorithm_primitives.py` 覆盖正确 key、错误 key、高斯幅值尾部截断、rescue 边界和 attestation 分层。
 4. `docs/field_registry.md` 已登记 stage01 新增字段。
 
 ### stage01 验证结果
@@ -385,13 +385,13 @@
 | blocking_items | 无。 |
 | fallback_path | 若真实 latent trace 摘要包不可用, 使用确定性 lightweight latent reference 继续验证语义掩码影响 feature operator 与 basis, 且保持 `supports_paper_claim=false`。 |
 | invariants | saliency、segmentation 和 SD attention capture 不进入 `main/`; `main/` 只接收标准化 mask、latent mask 和 feature tensor; 无语义掩码路径只作为消融或诊断路径。 |
-| next_stage_entry | semantic route、mask projection、approximate JVP 和 safe basis 均有 digest, 且语义掩码会改变 basis; 可进入 `stage_08_lf_hf_content_carriers`。 |
+| next_stage_entry | semantic route、mask projection、approximate JVP 和 safe basis 均有 digest, 且语义掩码会改变 basis; 可进入 `stage_08_lf_tail_content_carriers`。 |
 
 ### stage07 已完成内容
 
 1. 新增 `main/methods/semantic/risk_field.py`, 实现标准化语义、纹理、稳定性和显著性向量到风险场与承载预算的映射。
 2. 新增 `main/methods/semantic/latent_mask.py`, 实现 `M_z = Pi_{x->z}(M_x)` 的轻量投影和 `M_z * z_t` 掩码作用。
-3. 新增 `main/methods/semantic/routing.py`, 根据风险场与 latent mask 生成 LF、HF 和 attention 候选轴路由。
+3. 新增 `main/methods/semantic/routing.py`, 根据风险场与 latent mask 生成 LF、尾部截断 和 attention 候选轴路由。
 4. 新增 `main/methods/subspace/trajectory_features.py`, 实现 `P^T vec(Norm(M_z * z_t))` 的轻量 feature operator。
 5. 新增 `main/methods/subspace/jvp_estimator.py`, 用相邻差分实现可审计 approximate JVP 摘要。
 6. 新增 `main/methods/subspace/safe_basis.py` 和 `main/methods/subspace/route_projection.py`, 实现 semantic safe basis、no semantic mask、global nullspace 和 diagnostic basis 四种可运行基底策略, 并生成 route projection digest。
@@ -406,7 +406,7 @@
 1. 本阶段完成的是核心方法层的标准化 semantic mask、risk field、feature operator、approximate JVP 和 semantic safe basis, 不是正式 SD attention capture 或论文主实验统计。
 2. runtime 层仍负责 saliency、segmentation、predicted x0 与 attention capture; core 方法层不加载模型权重。
 3. `no_semantic_mask`、`global_nullspace` 和 `diagnostic_basis` 仅作为消融或诊断路径, 不得伪装成 SLM-WM 主方法。
-4. 后续 LF/HF carrier 构建应读取 `subspace_plan_records.jsonl` 与 `basis_digests.json`, 并保留 calibration/test split 边界。
+4. 后续 LF/尾部截断carrier 构建应读取 `subspace_plan_records.jsonl` 与 `basis_digests.json`, 并保留 calibration/test split 边界。
 
 ### stage07 验证结果
 
@@ -417,39 +417,39 @@
 | `pytest -q` | pass, 54 passed |
 | `python tools/harness/run_all_audits.py` | pass, 8/8 audits passed |
 
-## stage_08_lf_hf_content_carriers
+## stage_08_lf_tail_content_carriers
 
 | item | value |
 | --- | --- |
-| construction_unit_name | `stage_08_lf_hf_content_carriers` |
+| construction_unit_name | `stage_08_lf_tail_content_carriers` |
 | phase_status | `completed` |
 | executor | `codex_agent` |
 | execution_date | `2026-06-20` |
 | input_manifest | `outputs/semantic_subspace/manifest.local.json`; `outputs/semantic_subspace/subspace_plan_records.jsonl`; `outputs/semantic_subspace/semantic_route_records.jsonl`; `outputs/minimal_latent_injection_package_20260620t10181781950721z_b2be25c.zip` |
 | expected_output_manifest | `outputs/content_carriers/manifest.local.json` |
-| expected_outputs | `outputs/content_carriers/content_detection_records.jsonl`; `outputs/content_carriers/lf_hf_score_table.csv`; `outputs/content_carriers/paired_quality_metrics.csv`; `outputs/content_carriers/content_score_distribution.csv`; `outputs/content_carriers/content_carrier_summary.json`; `outputs/content_carriers/manifest.local.json` |
+| expected_outputs | `outputs/content_carriers/content_detection_records.jsonl`; `outputs/content_carriers/lf_tail_score_table.csv`; `outputs/content_carriers/paired_quality_metrics.csv`; `outputs/content_carriers/content_score_distribution.csv`; `outputs/content_carriers/content_carrier_summary.json`; `outputs/content_carriers/manifest.local.json` |
 | blocking_items | 无。 |
 | fallback_path | 若语义子空间 records 或真实最小注入质量包不可用, 停止推进并修复前序输入; 不允许用手工阈值投票或未登记文件替代内容分数链路。 |
-| invariants | LF 为内容主证据, HF 仅为补充证据; 不为 LF/HF 分别设置独立正判阈值后投票; 当前产物保持 `supports_paper_claim=false`, 不能直接作为论文 fixed-FPR 或 robustness 结论。 |
+| invariants | LF 为内容主证据, 尾部截断分支仅为补充证据; 不为 LF/尾部截断分别设置独立正判阈值后投票; 当前产物保持 `supports_paper_claim=false`, 不能直接作为论文 fixed-FPR 或 robustness 结论。 |
 | next_stage_entry | 内容载体 records、统一内容分数、机制开关摘要与 manifest 均可重建, 可进入 `stage_09_self_attention_graph_geometry`。 |
 
 ### stage08 已完成内容
 
 1. 新增 `main/methods/carrier/lf.py`, 实现稳定 LF 内容模板、低频平滑和 latent update 派生。
-2. 新增 `main/methods/carrier/hf.py`, 实现稳定 HF 内容模板、tail truncation 和关闭 tail truncation 的机制路径。
-3. 新增 `main/methods/carrier/compose.py`, 统一组合 `full_content_chain`、`lf_only`、`hf_only`、`no_hf`、`no_tail_truncation` 和 `no_lf` 六类内容机制开关。
-4. 新增 `main/methods/detection/scores.py` 和 `main/methods/detection/fusion.py`, 实现 `s_c = lambda_LF s_LF + lambda_HF s_HF`, 且 `lambda_LF > lambda_HF`, `used_independent_branch_vote=false`。
-5. 新增 `scripts/write_content_carrier_outputs.py`, 从语义子空间 records 与最小 latent injection 质量包重建内容检测 records、LF/HF score table、paired quality metrics、score distribution、summary 和 manifest。
+2. 新增 `main/methods/carrier/tail.py`, 实现稳定高斯幅值尾部截断内容模板、tail truncation 和关闭 tail truncation 的机制路径。
+3. 新增 `main/methods/carrier/compose.py`, 统一组合 `full_content_chain`、`lf_only`、`tail_only`、`no_tail`、`no_tail_truncation` 和 `no_lf` 六类内容机制开关。
+4. 新增 `main/methods/detection/scores.py` 和 `main/methods/detection/fusion.py`, 实现 `s_c = lambda_LF s_LF + lambda_tail s_tail`, 且 `lambda_LF > lambda_tail`, `used_independent_branch_vote=false`。
+5. 新增 `scripts/write_content_carrier_outputs.py`, 从语义子空间 records 与最小 latent injection 质量包重建内容检测 records、LF/尾部截断score table、paired quality metrics、score distribution、summary 和 manifest。
 6. 当前 `outputs/content_carriers/content_carrier_summary.json` 显示 `content_detection_record_count=19830`, `score_count=19830`, `fixed_fpr_ready=true`, `used_independent_branch_vote=false`, `protocol_decision=pass`, `supports_paper_claim=false`。
-7. 新增 `tests/functional/test_content_carriers.py`, 覆盖 LF/HF 载体摘要稳定性、机制开关真实改变 update、统一内容分数 fixed-FPR 边界、写出脚本 manifest 和 outputs 目录约束。
+7. 新增 `tests/functional/test_content_carriers.py`, 覆盖 LF/尾部截断载体摘要稳定性、机制开关真实改变 update、统一内容分数 fixed-FPR 边界、写出脚本 manifest 和 outputs 目录约束。
 8. `docs/field_registry.md` 已登记内容载体、内容分数、机制开关、score distribution 和 summary 相关字段。
 
 ### stage08 完成边界
 
-1. 本阶段完成的是核心方法层 LF/HF 内容载体和统一内容分数机制, 不是最终论文阈值校准、attack matrix 或正式固定 FPR 实验结论。
+1. 本阶段完成的是核心方法层 LF/尾部截断内容载体和统一内容分数机制, 不是最终论文阈值校准、attack matrix 或正式固定 FPR 实验结论。
 2. `fixed_fpr_ready=true` 仅表示内容分数记录保留了可进入后续 fixed-FPR calibration 的统计形态; 真实阈值冻结必须继续使用 calibration split, 并且不能与 test split 混用。
 3. `rescue` 不在本阶段触发正判, 后续几何 rescue 必须在同一 fixed-FPR 统计边界内审计, 不能新增独立阳性通道。
-4. LF-only、HF-only、No-HF、No-tail-truncation 和 No-LF 均作为机制诊断或消融路径, 不得伪装为 SLM-WM 主方法。
+4. LF-only、Tail-only、No-Tail、No-tail-truncation 和 No-LF 均作为机制诊断或消融路径, 不得伪装为 SLM-WM 主方法。
 
 ### stage08 验证结果
 
@@ -668,7 +668,7 @@
 ### stage13 当前产物摘要
 
 1. `outputs/attack_matrix/attack_manifest.json` 显示 `attack_config_count=14`, `attack_family_count=3`, `attack_record_count=1344`, `performed_attack_record_count=960`, `gpu_attack_unsupported_count=384`, `attack_metrics_ready=true`。
-2. `outputs/attack_matrix/attack_family_metrics.csv` 已包含常规攻击的 `true_positive_rate`、`false_positive_rate`、`clean_false_positive_rate`、`attacked_false_positive_rate`、`quality_score_proxy_mean`、`score_retention_mean`、`lf_score_retention_mean`、`hf_score_retention_mean`、`attention_consistency_proxy_mean`、`geometry_reliable_rate` 和 `rescue_rate`。
+2. `outputs/attack_matrix/attack_family_metrics.csv` 已包含常规攻击的 `true_positive_rate`、`false_positive_rate`、`clean_false_positive_rate`、`attacked_false_positive_rate`、`quality_score_proxy_mean`、`score_retention_mean`、`lf_score_retention_mean`、`tail_score_retention_mean`、`attention_consistency_proxy_mean`、`geometry_reliable_rate` 和 `rescue_rate`。
 3. 再扩散攻击行保留配置与 digest, 但 `metric_status=unsupported`, `supported_record_count=0`, 不支持论文 robustness 主张。
 4. `outputs/attack_matrix/attacked_images/` 当前为空目录, 表示本地未生成真实 attacked image 文件; `attacked_image_registry.jsonl` 只登记受治理代理摘要。
 5. `outputs/attack_matrix/attack_manifest.json` 与 `outputs/attack_matrix/manifest.local.json` 已继承最新真实 aligned rescoring 包路径、SHA256 摘要、`aligned_rescoring_quality_metrics_ready=true`、`perceptual_metrics_ready=true` 与 `real_aligned_rescore_count=3`。
@@ -759,8 +759,8 @@
 
 1. 新增 `experiments/ablations/mechanisms.py`, 定义 `AblationSpec`、默认内部消融清单、消融 records 构造、机制表聚合、按攻击族聚合、pairwise delta 和 claim summary 构造。
 2. 新增 `scripts/write_internal_ablation_outputs.py`, 从攻击矩阵、阈值校准和外部 baseline 对比 manifest 读取受治理输入, 重建内部消融 records、机制表、pairwise delta、attack-family 表、claim summary 和 manifest。
-3. 默认登记 17 个内部消融: Full SLM-WM、Global Null Space、No Semantic Mask、No Semantic JVP、No Risk Weight、Random Basis、LF-only、HF-only、No-HF、No-LF、No Tail Truncation、FFT-sync-only、Image-registration-only、No Attention Anchor、No Rescue、No Attestation 和 Geo-direct-positive audit。
-4. `full_slm_wm` 保持上游攻击记录的完整方法判定; 其他消融通过 LF/HF retention、aligned gain、attention consistency、geometry reliability、rescue gate、attestation gate 或 content gate 反例路径产生实际字段变化。
+3. 默认登记 17 个内部消融: Full SLM-WM、Global Null Space、No Semantic Mask、No Semantic JVP、No Risk Weight、Random Basis、LF-only、Tail-only、No-Tail、No-LF、No Tail Truncation、FFT-sync-only、Image-registration-only、No Attention Anchor、No Rescue、No Attestation 和 Geo-direct-positive audit。
+4. `full_slm_wm` 保持上游攻击记录的完整方法判定; 其他消融通过 LF/尾部截断retention、aligned gain、attention consistency、geometry reliability、rescue gate、attestation gate 或 content gate 反例路径产生实际字段变化。
 5. 新增 `tests/functional/test_internal_ablation_evidence.py`, 覆盖消融清单完整性、关键机制实际变化、输出目录约束、claim 安全边界和表格可重建性。
 6. `docs/field_registry.md` 已登记内部消融 records、机制表、pairwise delta、claim summary 和 manifest 相关字段。
 
@@ -902,7 +902,7 @@
 
 ### aligned rescoring workflow 已完成内容
 
-1. 新增 `paper_workflow/colab_utils/aligned_rescoring.py`, 支持读取 ready attention geometry 包、重建 prompt / semantic / content / attention update 输入链, 选择 active attention carrier, 在真实 SD3.5 Medium latent callback 中获取对齐前后 latent 投影并重新计算 LF/HF 内容分数。
+1. 新增 `paper_workflow/colab_utils/aligned_rescoring.py`, 支持读取 ready attention geometry 包、重建 prompt / semantic / content / attention update 输入链, 选择 active attention carrier, 在真实 SD3.5 Medium latent callback 中获取对齐前后 latent 投影并重新计算 LF/尾部截断内容分数。
 2. 新增并更新 `paper_workflow/aligned_rescoring_run.ipynb`, 支持 Colab 冷启动: 挂载 Google Drive、安装当前 Colab 可运行依赖组合和 LPIPS 可选依赖、拉取仓库、读取 `HF_TOKEN`、检查 GPU、执行真实 aligned rescoring, 计算 LPIPS 与 CLIP pair-level 指标, 并将结果包保存到 `GoogleDrive/SLM/aligned_rescoring/`。
 3. 新增打包函数 `package_aligned_rescoring_outputs`, 会把 aligned rescoring records、result、quality metrics、environment report、manifest、attention update 方法文件和 package input manifest 纳入 zip。
 4. 更新 `tests/constraints/test_notebook_entrypoint_contract.py`, 覆盖新 Notebook 入口委托、无执行输出、Drive 镜像路径和打包产物核对。

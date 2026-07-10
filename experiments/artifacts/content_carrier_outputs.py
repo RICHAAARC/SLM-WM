@@ -1,4 +1,4 @@
-"""写出 LF/HF 内容载体与内容分数产物。"""
+"""写出 LF 与高斯幅值尾部截断内容载体诊断产物。"""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ if str(ROOT) not in sys.path:
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from experiments.protocol.paper_run_config import DEFAULT_CONTENT_VECTOR_WIDTH, build_paper_run_config
-from main.methods.carrier import CONTENT_MODES, compose_content_update, derive_hf_content_carrier, derive_lf_content_carrier
+from main.methods.carrier import CONTENT_MODES, compose_content_update, derive_tail_content_carrier, derive_lf_content_carrier
 from main.methods.detection import build_content_detection_record, compute_unified_content_score
 
 CONSTRUCTION_UNIT_NAME = "content_carriers"
@@ -131,7 +131,7 @@ def build_carrier_bundle(
     sample_role: str,
     vector_width: int = VECTOR_WIDTH,
 ) -> dict[str, Any]:
-    """构造 LF/HF 载体、机制开关和内容分数。"""
+    """构造 LF/尾部截断载体、机制开关和内容分数。"""
     selected_indices = tuple(int(value) for value in subspace_record["selected_indices"])
     event_digest = event_digest_for(subspace_record, route_record, sample_role)
     lf_carrier = derive_lf_content_carrier(
@@ -142,7 +142,7 @@ def build_carrier_bundle(
         key_material=KEY_MATERIAL,
         vector_width=vector_width,
     )
-    hf_carrier = derive_hf_content_carrier(
+    tail_carrier = derive_tail_content_carrier(
         selected_indices=selected_indices,
         basis_digest=subspace_record["basis_digest"],
         route_digest=route_record["route_digest"],
@@ -150,7 +150,7 @@ def build_carrier_bundle(
         key_material=KEY_MATERIAL,
         vector_width=vector_width,
     )
-    hf_no_tail = derive_hf_content_carrier(
+    tail_without_truncation = derive_tail_content_carrier(
         selected_indices=selected_indices,
         basis_digest=subspace_record["basis_digest"],
         route_digest=route_record["route_digest"],
@@ -159,21 +159,21 @@ def build_carrier_bundle(
         vector_width=vector_width,
         tail_truncation_enabled=False,
     )
-    full_update = compose_content_update(lf_carrier, hf_carrier, "full_content_chain")
+    full_update = compose_content_update(lf_carrier, tail_carrier, "full_content_chain")
     observed_values = build_observed_values(subspace_record["prompt_id"], sample_role, full_update.combined_update_values)
     updates = {
         "full_content_chain": full_update,
-        "lf_only": compose_content_update(lf_carrier, hf_carrier, "lf_only"),
-        "hf_only": compose_content_update(lf_carrier, hf_carrier, "hf_only"),
-        "no_hf": compose_content_update(lf_carrier, hf_carrier, "no_hf"),
-        "no_tail_truncation": compose_content_update(lf_carrier, hf_no_tail, "no_tail_truncation"),
-        "no_lf": compose_content_update(lf_carrier, hf_carrier, "no_lf"),
+        "lf_only": compose_content_update(lf_carrier, tail_carrier, "lf_only"),
+        "tail_only": compose_content_update(lf_carrier, tail_carrier, "tail_only"),
+        "no_tail": compose_content_update(lf_carrier, tail_carrier, "no_tail"),
+        "no_tail_truncation": compose_content_update(lf_carrier, tail_without_truncation, "no_tail_truncation"),
+        "no_lf": compose_content_update(lf_carrier, tail_carrier, "no_lf"),
     }
     scores = {name: compute_unified_content_score(observed_values, update) for name, update in updates.items()}
     return {
         "lf_carrier": lf_carrier,
-        "hf_carrier": hf_carrier,
-        "hf_no_tail": hf_no_tail,
+        "tail_carrier": tail_carrier,
+        "tail_without_truncation": tail_without_truncation,
         "observed_values": observed_values,
         "updates": updates,
         "scores": scores,
@@ -203,7 +203,7 @@ def build_records(
                 metadata={
                     "sample_role": sample_role,
                     "lf_content_carrier_digest": bundle["lf_carrier"].lf_content_carrier_digest,
-                    "hf_content_carrier_digest": bundle["hf_carrier"].hf_content_carrier_digest,
+                    "tail_content_carrier_digest": bundle["tail_carrier"].tail_content_carrier_digest,
                     "mechanism_scores": mechanism_scores,
                     "used_independent_branch_vote": False,
                     "content_vector_width": vector_width,
@@ -218,12 +218,12 @@ def build_records(
                     "sample_role": sample_role,
                     "content_mode": full_update.content_mode,
                     "lf_score": full_score.lf_score,
-                    "hf_score": full_score.hf_score,
+                    "tail_score": full_score.tail_score,
                     "combined_score": full_score.combined_score,
-                    "lf_hf_fusion_score": full_score.lf_hf_fusion_score,
+                    "lf_tail_fusion_score": full_score.lf_tail_fusion_score,
                     "content_score": full_score.content_score,
                     "lf_enabled": full_update.lf_enabled,
-                    "hf_enabled": full_update.hf_enabled,
+                    "tail_enabled": full_update.tail_enabled,
                     "tail_truncation_enabled": full_update.tail_truncation_enabled,
                     "fixed_fpr_ready": full_score.fixed_fpr_ready,
                     "content_chain_digest": full_update.content_chain_digest,
@@ -292,7 +292,7 @@ def write_content_carrier_outputs(
     max_records: int | None = None,
     vector_width: int | None = None,
 ) -> dict[str, Any]:
-    """写出 LF/HF 内容载体产物。"""
+    """写出 LF/尾部截断内容载体诊断产物。"""
     root_path = Path(root).resolve()
     resolved_vector_width = int(vector_width or build_paper_run_config(root_path).content_vector_width)
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
@@ -306,7 +306,7 @@ def write_content_carrier_outputs(
     distribution_rows = score_distribution_rows(score_rows)
 
     detection_records_path = resolved_output_dir / "content_detection_records.jsonl"
-    score_table_path = resolved_output_dir / "lf_hf_score_table.csv"
+    score_table_path = resolved_output_dir / "lf_tail_score_table.csv"
     quality_metrics_path = resolved_output_dir / "paired_quality_metrics.csv"
     distribution_path = resolved_output_dir / "content_score_distribution.csv"
     summary_path = resolved_output_dir / "content_carrier_summary.json"
@@ -322,12 +322,12 @@ def write_content_carrier_outputs(
             "sample_role",
             "content_mode",
             "lf_score",
-            "hf_score",
+            "tail_score",
             "combined_score",
-            "lf_hf_fusion_score",
+            "lf_tail_fusion_score",
             "content_score",
             "lf_enabled",
-            "hf_enabled",
+            "tail_enabled",
             "tail_truncation_enabled",
             "fixed_fpr_ready",
             "content_chain_digest",
@@ -398,7 +398,7 @@ def write_content_carrier_outputs(
 
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
-    parser = argparse.ArgumentParser(description="写出 LF/HF 内容载体产物。")
+    parser = argparse.ArgumentParser(description="写出 LF/高斯幅值尾部截断内容载体诊断产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument("--max-records", type=int, default=None, help="调试时限制处理记录数量。")

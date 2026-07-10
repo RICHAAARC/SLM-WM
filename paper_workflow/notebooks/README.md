@@ -4,6 +4,8 @@
 
 正式逻辑应位于 `main/`、`experiments/`、`paper_experiments/` 或 `scripts/`。
 
+正式方法术语固定为“空间低通 LF 主证据 + 高斯幅值尾部截断鲁棒补充 + Q/K attention geometry”。`tail_robust` 只按高斯元素绝对幅值分位点截断, 不使用 FFT、DCT 或频带 mask, 因而不具有空间频带定义。
+
 ## 运行层级切换
 
 每个正式 Notebook 顶部应保留独立可见的运行层级变量:
@@ -27,12 +29,12 @@ SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 | Drive 冷启动诊断 | `colab_drive_cold_start_smoke.ipynb` | CPU 即可 | 无 | 可独立运行 | Drive 挂载、仓库拉取、输出镜像和 reload 清单。 |
 | 运行时与机制预检 | `runtime_method_precheck_run.ipynb` | 需要 GPU | 无 | 可独立运行 | SD3.5 加载、latent trajectory 和最小 latent injection 诊断包; 不进入正式 claim-ready 统计。 |
 | 当前主方法正式入口 | `semantic_watermark_image_only_run.ipynb` | 需要显存不低于 24GB 的 Colab GPU | 无 | 同一运行层级串行续跑 | 分支风险、真实 JVP/SVD、LF、幅值尾部、Q/K 几何、仅图像盲检、攻击闭环、正式 FID/KID 和真实机制消融结果包。 |
-| 历史 attention geometry 诊断 | `attention_geometry_capture_run.ipynb` | 需要 GPU | 无 | 可独立诊断 | 旧链路的 attention 捕获诊断包; 不替代当前主方法正式入口。 |
-| 历史 latent 写入诊断 | `attention_latent_injection_run.ipynb` | 需要 GPU | `attention_geometry` | 仅用于旧链路诊断 | 旧链路 latent 写入诊断包; 不作为当前仅图像检测证据。 |
-| 历史 aligned rescoring 诊断 | `aligned_rescoring_run.ipynb` | 需要 GPU | 旧 geometry 与 injection 包 | 仅用于旧链路诊断 | 旧链路重打分诊断包; 检测器访问制度不等同于当前仅图像盲检。 |
-| 历史 fixed-FPR 诊断 | `threshold_calibration_run.ipynb` | CPU 通常即可 | 旧 injection 与 rescoring 包 | 仅用于旧链路诊断 | 旧链路阈值诊断包; 不替代当前完整 evidence 决策校准。 |
-| 历史再扩散攻击诊断 | `real_attack_evaluation_run.ipynb` | 需要 GPU | 旧 rescoring 与 threshold 包 | 仅用于旧链路诊断 | 旧链路真实攻击诊断包。 |
-| 历史常规攻击诊断 | `conventional_geometric_attack_evaluation_run.ipynb` | 需要 GPU | 旧 rescoring 与 threshold 包 | 仅用于旧链路诊断 | 旧链路常规失真与几何攻击诊断包。 |
+| attention geometry 诊断 | `attention_geometry_capture_run.ipynb` | 需要 GPU | 无 | 可独立诊断 | attention 捕获诊断包; 不替代主方法正式入口。 |
+| latent 写入诊断 | `attention_latent_injection_run.ipynb` | 需要 GPU | `attention_geometry` | 仅用于分量诊断 | latent 写入诊断包; 不作为仅图像检测证据。 |
+| aligned rescoring 诊断 | `aligned_rescoring_run.ipynb` | 需要 GPU | geometry 与 injection 诊断包 | 仅用于分量诊断 | 重打分诊断包; 检测器访问制度不等同于仅图像盲检。 |
+| fixed-FPR 诊断 | `threshold_calibration_run.ipynb` | CPU 通常即可 | injection 与 rescoring 诊断包 | 仅用于分量诊断 | 阈值诊断包; 不替代完整 evidence 决策校准。 |
+| 再扩散攻击诊断 | `real_attack_evaluation_run.ipynb` | 需要 GPU | rescoring 与 threshold 诊断包 | 仅用于分量诊断 | 真实攻击诊断包。 |
+| 常规攻击诊断 | `conventional_geometric_attack_evaluation_run.ipynb` | 需要 GPU | rescoring 与 threshold 诊断包 | 仅用于分量诊断 | 常规失真与几何攻击诊断包。 |
 | 独立质量导入诊断 | `dataset_level_quality_run.ipynb` | 建议 GPU | 外部图像 registry 与正式特征 | 可独立复核 | 独立质量复核入口; 当前主方法入口会直接从真实图像提取 torch-fidelity 兼容 Inception 特征。 |
 | Tree-Ring method-faithful | `external_baseline_tree_ring_run.ipynb` | 需要 GPU | 无; 共享当前 prompt 配置 | 可与其他 baseline 入口并行 | `external_baseline_method_faithful` 结果包中的 Tree-Ring SD3.5 观测记录。 |
 | Gaussian Shading method-faithful | `external_baseline_gaussian_shading_run.ipynb` | 需要 GPU | 无; 共享当前 prompt 配置 | 可与其他 baseline 入口并行 | `external_baseline_method_faithful` 结果包中的 Gaussian Shading SD3.5 观测记录。 |

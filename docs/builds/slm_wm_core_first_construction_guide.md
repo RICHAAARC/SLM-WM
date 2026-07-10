@@ -32,7 +32,7 @@ $$
 \rightarrow
 \text{semantic-conditioned safe null-space}
 \rightarrow
-\text{latent LF/HF/attention carrier decomposition}
+\text{latent LF/尾部截断/attention carrier decomposition}
 \rightarrow
 \text{fixed-FPR robust detection}
 \rightarrow
@@ -45,7 +45,7 @@ $$
 
 1. 在 diffusion latent trajectory 内部嵌入水印，而不是在生成后图像域叠加水印；
 2. 根据语义显著性、纹理复杂度和轨迹稳定性自适应选择水印方向；
-3. 从 semantic-conditioned safe null-space 导出 LF、HF 和 Self-Attention geometry 三类证据方向；
+3. 从 semantic-conditioned safe null-space 导出 LF、尾部截断 和 Self-Attention geometry 三类证据方向；
 4. 使用固定 calibration 协议控制 raw content decision 与 rescue 后 evidence-level decision 的整体误报；
 5. 在几何恢复后复用同一内容阈值重判，禁止几何链直接判 positive；
 6. 通过 governed records、tables、figures、reports 和 manifests 支撑论文 claims；
@@ -86,7 +86,7 @@ $$
 2. SD3 / SD3.5 或可审计 runtime fallback 的 latent injection；
 3. semantic mask 到 latent mask 的真实接入；
 4. semantic-conditioned safe null-space 或明确标注的可审计近似；
-5. LF / HF 内容载体与统一内容分数；
+5. LF / 尾部截断内容载体与统一内容分数；
 6. fixed-FPR calibration；
 7. 常规攻击矩阵；
 8. 主表 external baseline；
@@ -137,7 +137,7 @@ stage00 至 stage17 的推进不得绕过这些语义阶段，也不得在 `proj
 | stage05 | Notebook / Colab 重启后无法只凭 manifest 重载前序产物 |
 | stage06 | calibration 与 test split 不独立，或 event / prompt 标识不稳定 |
 | stage07 | semantic mask 未真实影响 latent feature operator 或 basis |
-| stage08 | LF / HF 使用独立阈值投票作为主判 |
+| stage08 | LF / 尾部截断使用独立阈值投票作为主判 |
 | stage09 | attention graph 无法稳定提取，且 unsupported reason 未记录 |
 | stage10 | attention-relative update 不稳定但仍被写入 Full 主方法 |
 | stage11 | 几何链直接判 positive，或恢复后未使用同一内容阈值 |
@@ -160,7 +160,7 @@ stage00 至 stage17 的推进不得绕过这些语义阶段，也不得在 `proj
 
 ### stage01：纯算法原语实现
 
-目标是在 `main/methods/` 和 `main/protocol/` 中实现 synthetic / tensor 级别的 SLM-WM 原语，包括 semantic risk、safe basis、LF / HF carrier、attention stub、content score、geometry reliability、evidence / final decision。
+目标是在 `main/methods/` 和 `main/protocol/` 中实现 synthetic / tensor 级别的 SLM-WM 原语，包括 semantic risk、safe basis、LF / 尾部截断carrier、attention stub、content score、geometry reliability、evidence / final decision。
 
 attention 在本阶段只允许 synthetic stub，不接入真实 SD attention。
 
@@ -192,9 +192,9 @@ smoke records 必须由 `scripts/` 或测试 harness 根据 `main/` 返回对象
 
 目标是让 semantic mask 真实进入 latent trajectory feature operator，并让 semantic route 改变 safe basis。若使用全 mask，只能作为 fallback 或消融。
 
-### stage08：LF / HF 内容载体与内容检测统计
+### stage08：LF / 尾部截断内容载体与内容检测统计
 
-目标是实现 LF 主证据、HF 鲁棒补充和统一内容分数。LF / HF 不得分别设置独立主判阈值后投票。
+目标是实现 LF 主证据、高斯幅值尾部截断鲁棒补充和统一内容分数。LF / 尾部截断不得分别设置独立主判阈值后投票。
 
 ### stage09：Self-Attention graph extraction 与几何证据
 

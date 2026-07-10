@@ -47,11 +47,11 @@ python tools/harness/inspect_repository.py .
 本阶段需要实现或更新以下功能：
 
 1. 实现 `build_semantic_risk_field(...)`、`project_latent_mask(...)`、`estimate_safe_basis(...)` 的 synthetic / tensor 版本。
-2. 实现 `derive_lf_carrier(...)`、`derive_hf_carrier(...)` 与 `derive_attention_carrier_stub(...)`。注意 attention 仅允许 synthetic stub，不接入真实 SD attention。
-3. 实现 `compose_latent_update(...)`，返回 `Delta z_t = Delta z_t^LF + Delta z_t^HF + Delta z_t^A` 的 typed object。
-4. 实现 `compute_content_score(...)`，内容分数固定为 `s_c = lambda_lf * s_lf + lambda_hf * s_hf`，不得使用 LF/HF 独立阈值投票作为主判。
+2. 实现 `derive_lf_carrier(...)`、`derive_tail_carrier(...)` 与 `derive_attention_carrier_stub(...)`。注意 attention 仅允许 synthetic stub，不接入真实 SD attention。
+3. 实现 `compose_latent_update(...)`，返回 `Delta z_t = Delta z_t^LF + Delta z_t^tail + Delta z_t^A` 的 typed object。
+4. 实现 `compute_content_score(...)`，内容分数固定为 `s_c = lambda_lf * s_lf + lambda_tail * s_tail`，不得使用 LF/尾部截断独立阈值投票作为主判。
 5. 实现 `evaluate_geometry_reliability(...)` 与 `decide_evidence_and_final(...)`，确保几何链不直接判 positive，attestation 不改变 evidence-level。
-6. 新增核心单元测试，覆盖正确 key、错误 key、HF tail truncation、rescue 边界、attestation 分层。
+6. 新增核心单元测试，覆盖正确 key、错误 key、高斯幅值尾部截断、rescue 边界、attestation 分层。
 
 ## 六、禁止事项与边界
 
@@ -80,8 +80,8 @@ python tools/harness/inspect_repository.py .
 
 本阶段至少应完成以下验证：
 
-1. 正确 key 的 LF / HF score 高于错误 key。
-2. HF tail truncation 改变 HF score 分布。
+1. 正确 key 的 LF / 尾部截断score 高于错误 key。
+2. 高斯幅值尾部截断 改变 tail score 分布。
 3. 几何链不直接判 positive。
 4. Attestation 不改变 evidence-level。
 5. `pytest tests/functional -q`、`pytest tests/constraints -q`、`pytest -q`、harness 全部通过。

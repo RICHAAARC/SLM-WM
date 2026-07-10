@@ -93,7 +93,7 @@ Notebook 与 repository module 的跨边界数据
 | attention_runtime | method | none | false | false | false | attention 原语是否接入真实运行时的状态说明。 |
 | event_name | method | none | false | false | false | synthetic 阶段事件名称。 |
 | event_digest | method | none | false | false | false | 事件声明或 synthetic 事件的稳定摘要。 |
-| branch | method | none | false | false | false | 载体派生分支名称, 例如 LF、HF 或 attention。 |
+| branch | method | none | false | false | false | 载体派生分支名称, 例如 LF、`tail_robust` 或 attention。 |
 | field_length | method | none | false | false | false | synthetic 风险场或向量字段长度。 |
 | eta_saliency | method | none | false | false | false | 语义风险场中 saliency 权重。 |
 | eta_semantic | method | none | false | false | false | 语义风险场中 semantic 权重。 |
@@ -102,14 +102,14 @@ Notebook 与 repository module 的跨边界数据
 | budget_min | method | none | false | false | false | 语义承载预算下界。 |
 | budget_max | method | none | false | false | false | 语义承载预算上界。 |
 | budget_gain | method | none | false | false | false | 由低风险区域提升承载预算的增益。 |
-| texture_threshold | method | none | false | false | false | LF/HF 路由的纹理阈值。 |
+| texture_threshold | method | none | false | false | false | LF/高斯幅值尾部截断路由的纹理阈值。 |
 | risk_threshold | method | none | false | false | false | LF 路由的风险阈值。 |
-| stability_threshold | method | none | false | false | false | HF 与 attention 路由的稳定性阈值。 |
+| stability_threshold | method | none | false | false | false | 高斯幅值尾部截断与 attention 路由的稳定性阈值。 |
 | attention_threshold | method | none | false | false | false | attention synthetic stub 路由阈值。 |
 | risk_values | method | none | false | false | false | 语义风险场逐位置风险值。 |
 | budget_values | method | none | false | false | false | 语义承载预算逐位置数值。 |
 | lf_mask | method | none | false | false | false | LF 主证据候选区域 mask。 |
-| hf_mask | method | none | false | false | false | HF 补充证据候选区域 mask。 |
+| tail_mask | method | none | false | false | false | 高斯幅值尾部截断补充证据候选区域 mask。 |
 | attention_mask | method | none | false | false | false | attention 几何候选区域 mask。 |
 | mask_values | method | none | false | false | false | 投影到 latent 长度后的 mask 数值。 |
 | masked_latent_values | method | none | false | false | false | 应用 mask 后的 latent 数值。 |
@@ -118,7 +118,7 @@ Notebook 与 repository module 的跨边界数据
 | projection_digest | method | none | false | false | false | latent mask 投影结果摘要。 |
 | safe_basis | method | none | false | false | false | 语义条件安全子空间 synthetic 基底。 |
 | lf_basis | method | none | false | false | false | LF 路由投影后的子基底。 |
-| hf_basis | method | none | false | false | false | HF 路由投影后的子基底。 |
+| tail_basis | method | none | false | false | false | 高斯幅值尾部截断路由投影后的子基底。 |
 | attention_basis | method | none | false | false | false | attention 路由投影后的子基底。 |
 | selected_indices | method | none | false | false | false | synthetic 安全基底选中的 latent 位置。 |
 | basis_rank | method | none | false | false | false | synthetic 安全基底最大秩。 |
@@ -134,28 +134,28 @@ Notebook 与 repository module 的跨边界数据
 | safe_axes | method | none | false | false | false | 可用于水印承载的安全轴集合。 |
 | carrier_id | method | none | false | false | false | 水印载体对象的稳定标识。 |
 | carrier_family | method | none | false | false | false | 水印载体所属机制族。 |
-| frequency_band | method | none | false | false | false | 水印载体使用的频带名称。 |
+| frequency_band | method | none | false | false | false | 水印载体使用的频带名称或明确的频带不适用标识。 |
 | key_digest | method | none | false | false | false | 载体派生时使用的密钥材料摘要。 |
 | watermark_key_digest | method | none | true | false | false | 最小 latent injection 使用的水印密钥材料摘要, 不记录原始密钥。 |
-| template_values | method | none | false | false | false | LF/HF/attention synthetic carrier 模板数值。 |
+| template_values | method | none | false | false | false | LF/高斯幅值尾部截断/attention synthetic carrier 模板数值。 |
 | update_values | method | none | false | false | false | 单个 carrier 生成的 latent update 数值。 |
 | carrier_digest | method | none | true | false | false | 单个 carrier 的稳定摘要。 |
 | carrier_source | method | none | true | false | false | 最小 latent injection 中 carrier 的来源机制。 |
 | carrier_width | method | none | true | false | false | 从核心算法原语导出的 carrier 基础宽度。 |
 | lf_carrier_digest | method | none | true | false | false | LF carrier 的稳定摘要。 |
-| hf_carrier_digest | method | none | true | false | false | HF carrier 的稳定摘要。 |
+| tail_carrier_digest | method | none | true | false | false | 高斯幅值尾部截断 carrier 的稳定摘要。 |
 | attention_carrier_digest | method | none | true | false | false | attention synthetic stub carrier 的稳定摘要。 |
-| core_update_digest | method | none | true | false | false | LF/HF/attention carrier 合成后的核心 update 摘要。 |
-| tail_threshold | method | none | false | false | false | HF tail truncation 使用的截断阈值。 |
-| retained_fraction | method | none | false | false | false | HF tail truncation 后保留的模板比例。 |
+| core_update_digest | method | none | true | false | false | LF/高斯幅值尾部截断/attention carrier 合成后的核心 update 摘要。 |
+| tail_threshold | method | none | false | false | false | 高斯幅值尾部截断使用的幅值分位点阈值, 不表示频率截止值。 |
+| retained_fraction | method | none | false | false | false | 高斯幅值尾部截断后实际保留的模板元素比例。 |
 | synthetic_stub | method | none | false | false | false | 标记 attention carrier 是否仅为 synthetic stub。 |
-| tail_fraction | method | none | false | false | false | HF tail truncation 的目标尾部保留比例。 |
+| tail_fraction | method | none | false | false | false | 高斯幅值尾部截断的目标元素保留比例, 不定义空间频带。 |
 | embedding_strength | method | none | false | false | false | 水印嵌入强度。 |
 | anchor_id | method | none | false | false | false | 注意力几何锚点对象的稳定标识。 |
 | attention_layer | method | none | false | false | false | 注意力锚点对应的层或模块名称。 |
 | anchor_digest | method | none | false | false | false | 注意力锚点的稳定摘要。 |
 | lf_update_values | method | none | false | false | false | LF 分量 latent update 数值。 |
-| hf_update_values | method | none | false | false | false | HF 分量 latent update 数值。 |
+| tail_update_values | method | none | false | false | false | 高斯幅值尾部截断分量的 latent update 数值。 |
 | attention_update_values | method | none | false | false | false | attention synthetic stub 分量 latent update 数值。 |
 | combined_update_values | method | none | false | false | false | 三个分量相加后的 latent update 数值。 |
 | update_digest | method | none | false | false | false | 组合 latent update 摘要。 |
@@ -164,13 +164,13 @@ Notebook 与 repository module 的跨边界数据
 | score_name | method | none | true | false | false | 检测证据分数名称。 |
 | score_value | method | none | true | false | false | 检测证据分数值。 |
 | lf_score | method | none | true | false | false | LF 分支归一化相关分数。 |
-| hf_score | method | none | true | false | false | HF 分支截断相关分数。 |
+| tail_score | method | none | true | false | false | 高斯幅值尾部截断分支的相关分数。 |
 | combined_score | method | none | true | false | false | 观测向量与实际 runtime 写入的 combined_update_values 方向之间的归一化相关分数。 |
-| lf_hf_fusion_score | method | none | true | false | false | LF/HF 按固定权重融合后的诊断分数, 不作为正式 fixed-FPR 分数空间。 |
+| lf_tail_fusion_score | method | none | true | false | false | LF/高斯幅值尾部截断按固定权重融合后的诊断分数, 不作为正式 fixed-FPR 分数空间。 |
 | content_score | method | none | true | false | false | fixed-FPR 正式内容分数, 当前对齐 combined_update_values 写入方向。 |
 | lambda_lf | method | none | true | false | false | 内容分数中 LF 分支权重。 |
-| lambda_hf | method | none | true | false | false | 内容分数中 HF 分支权重。 |
-| used_independent_branch_vote | method | none | true | false | false | 是否使用 LF/HF 独立阈值投票。正式方法应为 false。 |
+| lambda_tail | method | none | true | false | false | 内容分数中的高斯幅值尾部截断分支权重。 |
+| used_independent_branch_vote | method | none | true | false | false | 是否使用 LF/高斯幅值尾部截断独立阈值投票。正式方法应为 false。 |
 | registration_confidence | method | none | true | false | false | 几何恢复的注册置信度。 |
 | anchor_inlier_ratio | method | none | true | false | false | attention anchor 内点比例。 |
 | recovered_sync_consistency | method | none | true | false | false | 恢复后相对关系同步一致性。 |
@@ -221,7 +221,7 @@ Notebook 与 repository module 的跨边界数据
 | geometry_unreliable_rescue_blocked | method | none | true | false | false | 几何可靠性不足时 rescue 是否被阻断。 |
 | final_positive_count | method | none | true | false | false | smoke 场景 final positive 数量。 |
 | evidence_positive_count | method | none | true | false | false | smoke 场景 evidence positive 数量。 |
-| hf_tail_truncation_delta | method | none | true | false | false | HF tail truncation 前后分数差异。 |
+| tail_truncation_delta | method | none | true | false | false | 高斯幅值尾部截断前后的分数差异。 |
 | attestation_layering_pass | method | none | true | false | false | attestation 是否只影响 final-level 的检查结果。 |
 | model_family | runtime | none | true | false | false | SD runtime adapter 使用的模型族。 |
 | model_id | runtime | none | true | false | false | SD runtime adapter 使用的模型标识。 |
@@ -434,18 +434,18 @@ Notebook 与 repository module 的跨边界数据
 | jvp_value_count | method | none | false | false | false | 近似 JVP 数值数量。 |
 | plan_digest | method | none | false | false | false | 安全子空间 plan payload 的稳定摘要。 |
 | lf_basis_count | method | none | false | false | false | LF 路由投影后的基底行数。 |
-| hf_basis_count | method | none | false | false | false | HF 路由投影后的基底行数。 |
+| tail_basis_count | method | none | false | false | false | 高斯幅值尾部截断路由投影后的基底行数。 |
 | attention_basis_count | method | none | false | false | false | attention 路由投影后的基底行数。 |
 | content_detection_record_id | method | none | true | false | false | 内容检测 record 的稳定标识。 |
-| content_mode | method | none | true | false | false | LF/HF 内容载体机制开关名称。 |
+| content_mode | method | none | true | false | false | LF/高斯幅值尾部截断内容载体机制开关名称。 |
 | mechanism_scores | method | none | true | false | false | 同一观测样本在各内容机制开关下的统一内容分数集合。 |
 | lf_enabled | method | none | true | false | false | 内容 update 组合时是否启用 LF 主证据分量。 |
-| hf_enabled | method | none | true | false | false | 内容 update 组合时是否启用 HF 补充分量。 |
-| tail_truncation_enabled | method | none | true | false | false | HF 内容载体是否启用 tail truncation。 |
-| content_update_digest | method | none | true | false | false | LF/HF 内容 update 组合 payload 的稳定摘要。 |
+| tail_enabled | method | none | true | false | false | 内容 update 组合时是否启用高斯幅值尾部截断补充分量。 |
+| tail_truncation_enabled | method | none | true | false | false | 高斯幅值尾部截断内容载体是否启用截断。 |
+| content_update_digest | method | none | true | false | false | LF/高斯幅值尾部截断内容 update 组合 payload 的稳定摘要。 |
 | content_chain_digest | method | none | true | false | false | 内容载体链路组合后的稳定摘要。 |
 | lf_content_carrier_digest | method | none | true | false | false | LF 内容载体 payload 的稳定摘要。 |
-| hf_content_carrier_digest | method | none | true | false | false | HF 内容载体 payload 的稳定摘要。 |
+| tail_content_carrier_digest | method | none | true | false | false | 高斯幅值尾部截断内容载体 payload 的稳定摘要。 |
 | score_digest | method | none | true | false | false | 统一内容分数 payload 的稳定摘要。 |
 | fixed_fpr_ready | method | none | true | false | false | 内容分数是否已保持可进入 fixed-FPR 校准的统计边界。 |
 | content_detection_record_count | method | none | false | false | false | 内容检测 records 数量。 |
@@ -650,7 +650,7 @@ Notebook 与 repository module 的跨边界数据
 | aligned_content_score_before | metric | none | true | false | false | 攻击前 aligned content score。 |
 | aligned_content_score_after | metric | none | true | false | false | 攻击后 aligned content score。 |
 | lf_score_retention | metric | none | true | false | false | LF 内容分数在攻击后的保持率。 |
-| hf_score_retention | metric | none | true | false | false | HF 内容分数在攻击后的保持率。 |
+| tail_score_retention | metric | none | true | false | false | 高斯幅值尾部截断内容分数在攻击后的保持率。 |
 | score_retention | metric | none | true | false | false | 统一内容分数在攻击后的保持率。 |
 | quality_score_proxy | metric | none | true | false | false | 本地攻击代理估计的质量保持分数。 |
 | attention_consistency_proxy | metric | none | true | false | false | 本地攻击代理估计的 attention 一致性保持分数。 |
@@ -693,7 +693,7 @@ Notebook 与 repository module 的跨边界数据
 | score_retention_min | metric | none | false | false | false | 攻击分组内 score retention 最小值。 |
 | score_retention_max | metric | none | false | false | false | 攻击分组内 score retention 最大值。 |
 | lf_score_retention_mean | metric | none | false | false | false | 攻击分组内 LF score retention 均值。 |
-| hf_score_retention_mean | metric | none | false | false | false | 攻击分组内 HF score retention 均值。 |
+| tail_score_retention_mean | metric | none | false | false | false | 攻击分组内高斯幅值尾部截断 score retention 均值。 |
 | positive_count | metric | none | false | false | false | 攻击矩阵分组内 positive source 记录数量。 |
 | negative_count | metric | none | false | false | false | 攻击矩阵分组内非 positive source 记录数量。 |
 | baseline_id | protocol | none | true | false | false | 外部 baseline 的稳定语义标识。 |
@@ -741,8 +741,8 @@ Notebook 与 repository module 的跨边界数据
 | ablated_score_retention | metric | none | true | false | false | 消融后重新计算的 score retention。 |
 | baseline_lf_score_retention | metric | none | true | false | false | 完整方法代理记录中的 LF score retention。 |
 | ablated_lf_score_retention | metric | none | true | false | false | 消融后重新计算的 LF score retention。 |
-| baseline_hf_score_retention | metric | none | true | false | false | 完整方法代理记录中的 HF score retention。 |
-| ablated_hf_score_retention | metric | none | true | false | false | 消融后重新计算的 HF score retention。 |
+| baseline_tail_score_retention | metric | none | true | false | false | 完整方法代理记录中的高斯幅值尾部截断 score retention。 |
+| ablated_tail_score_retention | metric | none | true | false | false | 消融后重新计算的高斯幅值尾部截断 score retention。 |
 | baseline_quality_score_proxy | metric | none | true | false | false | 完整方法代理记录中的质量保持代理分数。 |
 | ablated_quality_score_proxy | metric | none | true | false | false | 消融后重新计算的质量保持代理分数。 |
 | baseline_attention_consistency_proxy | metric | none | true | false | false | 完整方法代理记录中的 attention 一致性代理分数。 |
@@ -829,12 +829,12 @@ Notebook 与 repository module 的跨边界数据
 | proxy_aligned_content_score | metric | none | true | false | false | 真实分数校准记录中保留的原 proxy aligned content score。 |
 | real_lf_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 LF 内容分数。 |
 | real_lf_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 LF 内容分数。 |
-| real_hf_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 HF 内容分数。 |
-| real_hf_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 HF 内容分数。 |
+| real_tail_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的高斯幅值尾部截断内容分数。 |
+| real_tail_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的高斯幅值尾部截断内容分数。 |
 | real_combined_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 combined 内容分数。 |
 | real_combined_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 combined 内容分数。 |
-| real_lf_hf_fusion_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 LF/HF 加权诊断分数。 |
-| real_lf_hf_fusion_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 LF/HF 加权诊断分数。 |
+| real_lf_tail_fusion_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 LF/高斯幅值尾部截断加权诊断分数。 |
+| real_lf_tail_fusion_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 LF/高斯幅值尾部截断加权诊断分数。 |
 | latent_projection_digest_before | artifact | none | true | false | false | 对齐前真实 latent 投影向量的稳定摘要。 |
 | latent_projection_digest_after | artifact | none | true | false | false | 对齐后真实 latent 投影向量的稳定摘要。 |
 | latent_projection_values_before | method | none | true | false | false | 对齐前真实 latent 投影到内容检测维度后的有界向量。 |

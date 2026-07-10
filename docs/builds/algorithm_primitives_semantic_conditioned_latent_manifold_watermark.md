@@ -268,7 +268,9 @@ $$
 
 ### （一）角色定义
 
-尾部截断分支负责纹理区域和 harder regime 下的鲁棒补充，尤其面向压缩、噪声、重采样、裁剪重缩放和再扩散后仍可能保留的残余证据。该分支不声称属于空间高频, 也不单独承担主判定。
+尾部截断分支负责纹理区域和困难攻击条件下的鲁棒补充，尤其面向压缩、噪声、重采样、裁剪重缩放和再扩散后仍可能保留的残余证据。该分支不单独承担主判定。
+
+该分支的正式标识为 `tail_robust`。“尾部”指标准高斯随机变量绝对幅值分布的尾部, 与二维空间频谱无关。
 
 ### （二）高斯幅值尾部截断
 
@@ -288,6 +290,8 @@ $$
 \nu_{\mathrm{tail},i}
 \mathbb{I}(|\nu_{\mathrm{tail},i}|\ge q_{1-\gamma}).
 $$
+
+该选择发生在元素幅值域，不对元素执行 Fourier 变换、余弦变换、带通滤波或按空间波数排序。截断后的模板具有由随机样本决定的宽频谱。`tail_fraction` 是概率分布尾部保留比例，不是频率截止值，也不定义空间频带。
 
 尾部载体同样先投影到分支安全子空间：
 
@@ -533,7 +537,7 @@ SLM-WM 必须满足以下不变量：
 | 分支语义风险场 | 解码图像、CLIP patch token、纹理和稳定性图 | $\rho_{\mathrm{LF/tail/A}}$、$b_{\mathrm{LF/tail/A}}$ | 内容自适应理论基础 | branch risk builder |
 | 语义安全子空间 | 真实 JVP、分支风险预算、密钥候选方向 | $B_{\mathrm{LF}}$、$B_{\mathrm{tail}}$、$B_{\mathrm{A}}$ | semantic subspace optimization | Jacobian Null Space solver |
 | LF 载体 | $B_{\mathrm{LF}}$、$K_{\mathrm{LF}}$ | $\Delta z_t^{\mathrm{LF}}$、$s_{\mathrm{LF}}$ | clean precision 主证据 | LF coder / detector |
-| 尾部截断载体 | $B_{\mathrm{tail}}$、$K_{\mathrm{tail}}$、tail fraction | $\Delta z_t^{\mathrm{tail}}$、$s_{\mathrm{tail}}$ | harder regime 补充证据 | tail robust embedder / detector |
+| 尾部截断载体 | $B_{\mathrm{tail}}$、$K_{\mathrm{tail}}$、tail fraction | $\Delta z_t^{\mathrm{tail}}$、$s_{\mathrm{tail}}$ | 困难攻击条件下的补充证据 | tail robust embedder / detector |
 | Attention 几何锚点 | Self-Attention maps、稳定 token | $\Delta z_t^{\mathrm{A}}$、$r_{\mathrm{sync}}$ | 几何同步创新 | attention anchor module |
 | 仅图像鲁棒检测 | 待检图像、密钥、公开模型、$s_{\mathrm{LF}}$、$s_{\mathrm{tail}}$、geometry stats | $y_{\mathrm{evidence}}$ | fixed-FPR 主判 | image-only decision module |
 

@@ -9,6 +9,8 @@
 
 T2SMark 官方源码包含 SD3.5 Medium 入口。本项目 adapter 负责读取官方或适配运行输出, 转写为统一 observation、图像 digest、攻击矩阵记录和 governed import 候选记录。
 
+T2SMark 与 SLM-WM 的空间 LF、高斯幅值尾部截断和 Q/K attention geometry 分支分别保留自身方法定义。adapter 只负责共同协议转写, 不把某个 baseline 的算子解释为 SLM-WM 内部机制。
+
 ## method-faithful 与 official reference
 
 - `paper_workflow/notebooks/external_baseline_t2smark_run.ipynb`: 运行主表 method-faithful SD3.5 对比路径, 输出到 `outputs/external_baseline_method_faithful/` 并镜像到 `external_baseline_method_faithful/`。

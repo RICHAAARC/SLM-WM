@@ -24,8 +24,8 @@ CORE_ABLATION_CLAIM_IDS = (
     "no_risk_weight",
     "random_basis",
     "lf_only",
-    "hf_only",
-    "no_hf",
+    "tail_only",
+    "no_tail",
     "no_lf",
     "no_tail_truncation",
     "fft_sync_only",
@@ -50,7 +50,7 @@ class AblationSpec:
     ablated_mechanism: str
     mechanism_change: str
     lf_multiplier: float = 1.0
-    hf_multiplier: float = 1.0
+    tail_multiplier: float = 1.0
     score_multiplier: float = 1.0
     quality_multiplier: float = 1.0
     attention_multiplier: float = 1.0
@@ -76,7 +76,7 @@ class AblationSpec:
             raise ValueError("attestation_mode 不属于受支持取值")
         for field_name in (
             "lf_multiplier",
-            "hf_multiplier",
+            "tail_multiplier",
             "score_multiplier",
             "quality_multiplier",
             "attention_multiplier",
@@ -99,7 +99,7 @@ def default_ablation_specs() -> tuple[AblationSpec, ...]:
             mechanism_group="complete_method",
             ablated_mechanism="none",
             mechanism_change="keep_all_mechanisms",
-            mechanism_explanation="完整方法保留语义路由、安全子空间、LF/HF 载体、几何恢复和 attestation。",
+            mechanism_explanation="诊断完整配置保留语义路由、安全子空间、LF/尾部截断载体、几何恢复和 attestation。",
             expected_failure_mode="reference_row",
         ),
         AblationSpec(
@@ -109,7 +109,7 @@ def default_ablation_specs() -> tuple[AblationSpec, ...]:
             ablated_mechanism="semantic_conditioned_subspace",
             mechanism_change="replace_conditioned_basis_with_global_basis",
             lf_multiplier=0.86,
-            hf_multiplier=0.84,
+            tail_multiplier=0.84,
             score_multiplier=0.86,
             quality_multiplier=0.95,
             attention_multiplier=0.92,
@@ -126,7 +126,7 @@ def default_ablation_specs() -> tuple[AblationSpec, ...]:
             ablated_mechanism="semantic_mask",
             mechanism_change="disable_prompt_conditioned_mask",
             lf_multiplier=0.90,
-            hf_multiplier=0.88,
+            tail_multiplier=0.88,
             score_multiplier=0.88,
             quality_multiplier=0.96,
             attention_multiplier=0.94,
@@ -143,7 +143,7 @@ def default_ablation_specs() -> tuple[AblationSpec, ...]:
             ablated_mechanism="semantic_jvp_basis",
             mechanism_change="disable_jvp_local_basis_estimator",
             lf_multiplier=0.92,
-            hf_multiplier=0.92,
+            tail_multiplier=0.92,
             score_multiplier=0.92,
             quality_multiplier=0.97,
             attention_multiplier=0.94,
@@ -159,7 +159,7 @@ def default_ablation_specs() -> tuple[AblationSpec, ...]:
             ablated_mechanism="risk_field_weighting",
             mechanism_change="use_uniform_semantic_weight",
             lf_multiplier=0.94,
-            hf_multiplier=0.92,
+            tail_multiplier=0.92,
             score_multiplier=0.92,
             quality_multiplier=0.94,
             attention_multiplier=0.94,
@@ -175,7 +175,7 @@ def default_ablation_specs() -> tuple[AblationSpec, ...]:
             ablated_mechanism="safe_basis",
             mechanism_change="replace_safe_basis_with_deterministic_random_basis",
             lf_multiplier=0.72,
-            hf_multiplier=0.72,
+            tail_multiplier=0.72,
             score_multiplier=0.75,
             quality_multiplier=0.90,
             attention_multiplier=0.86,
@@ -189,43 +189,43 @@ def default_ablation_specs() -> tuple[AblationSpec, ...]:
             ablation_id="lf_only",
             ablation_name="LF-only",
             mechanism_group="content_carrier",
-            ablated_mechanism="hf_carrier_branch",
+            ablated_mechanism="tail_carrier_branch",
             mechanism_change="use_lf_branch_as_only_content_carrier",
-            hf_multiplier=0.30,
+            tail_multiplier=0.30,
             score_multiplier=0.86,
             quality_multiplier=0.96,
             attention_multiplier=0.96,
             positive_score_bias=-0.08,
-            mechanism_explanation="只保留 LF 载体时, 对高频扰动和压缩类攻击的互补证据减少。",
-            expected_failure_mode="hf_vulnerability",
+            mechanism_explanation="只保留 LF 载体时, 高斯幅值尾部截断分支提供的互补证据被移除。",
+            expected_failure_mode="tail_vulnerability",
         ),
         AblationSpec(
-            ablation_id="hf_only",
-            ablation_name="HF-only",
+            ablation_id="tail_only",
+            ablation_name="Tail-only",
             mechanism_group="content_carrier",
             ablated_mechanism="lf_carrier_branch",
-            mechanism_change="use_hf_branch_as_only_content_carrier",
+            mechanism_change="use_tail_branch_as_only_content_carrier",
             lf_multiplier=0.30,
             score_multiplier=0.82,
             quality_multiplier=0.92,
             attention_multiplier=0.94,
             positive_score_bias=-0.10,
             negative_score_bias=0.04,
-            mechanism_explanation="只保留 HF 载体时, 低频语义结构对齐不足, 几何与模糊攻击下退化更明显。",
+            mechanism_explanation="只保留高斯幅值尾部截断载体时, LF 空间低通主证据被移除。",
             expected_failure_mode="lf_structure_missing",
         ),
         AblationSpec(
-            ablation_id="no_hf",
-            ablation_name="No-HF",
+            ablation_id="no_tail",
+            ablation_name="No-Tail",
             mechanism_group="content_carrier",
-            ablated_mechanism="hf_carrier_branch",
-            mechanism_change="remove_hf_branch_from_fusion",
-            hf_multiplier=0.55,
+            ablated_mechanism="tail_carrier_branch",
+            mechanism_change="remove_tail_branch_from_fusion",
+            tail_multiplier=0.55,
             score_multiplier=0.90,
             quality_multiplier=0.97,
             attention_multiplier=0.96,
             positive_score_bias=-0.05,
-            mechanism_explanation="移除 HF 分支会降低纹理细节上的水印证据, 但仍保留 LF 主路径。",
+            mechanism_explanation="移除高斯幅值尾部截断分支后仍保留 LF 主路径, 其攻击影响需由真实重跑验证。",
             expected_failure_mode="reduced_texture_evidence",
         ),
         AblationSpec(
@@ -247,15 +247,15 @@ def default_ablation_specs() -> tuple[AblationSpec, ...]:
             ablation_id="no_tail_truncation",
             ablation_name="No Tail Truncation",
             mechanism_group="content_carrier",
-            ablated_mechanism="hf_tail_control",
-            mechanism_change="disable_hf_tail_energy_truncation",
+            ablated_mechanism="tail_truncation_control",
+            mechanism_change="disable_tail_energy_truncation",
             lf_multiplier=0.98,
-            hf_multiplier=0.92,
+            tail_multiplier=0.92,
             score_multiplier=0.92,
             quality_multiplier=0.88,
             attention_multiplier=0.94,
             negative_score_bias=0.10,
-            mechanism_explanation="不截断 HF tail 会引入额外不稳定能量, 误报边界和质量代理同时退化。",
+            mechanism_explanation="不执行高斯幅值尾部截断会改变模板稀疏性与能量分布, 影响需由真实重跑验证。",
             expected_failure_mode="tail_energy_leakage",
         ),
         AblationSpec(
@@ -504,7 +504,7 @@ def _ablate_supported_record(record: dict[str, Any], spec: AblationSpec, thresho
         attestation_available = True
         return {
             "ablated_lf_score_retention": _as_float(record, "lf_score_retention"),
-            "ablated_hf_score_retention": _as_float(record, "hf_score_retention"),
+            "ablated_tail_score_retention": _as_float(record, "tail_score_retention"),
             "ablated_score_retention": _as_float(record, "score_retention"),
             "ablated_quality_score_proxy": _as_float(record, "quality_score_proxy"),
             "ablated_attention_consistency_proxy": _as_float(record, "attention_consistency_proxy"),
@@ -518,10 +518,10 @@ def _ablate_supported_record(record: dict[str, Any], spec: AblationSpec, thresho
             "claim_status": formal_claim_status if source_formal else local_claim_status,
         }
     baseline_lf = _as_float(record, "lf_score_retention")
-    baseline_hf = _as_float(record, "hf_score_retention")
+    baseline_tail = _as_float(record, "tail_score_retention")
     ablated_lf = _clamp01(baseline_lf * spec.lf_multiplier)
-    ablated_hf = _clamp01(baseline_hf * spec.hf_multiplier)
-    ablated_score_retention = _clamp01((0.56 * ablated_lf + 0.44 * ablated_hf) * spec.score_multiplier)
+    ablated_tail = _clamp01(baseline_tail * spec.tail_multiplier)
+    ablated_score_retention = _clamp01((0.56 * ablated_lf + 0.44 * ablated_tail) * spec.score_multiplier)
     ablated_quality = _clamp01(_as_float(record, "quality_score_proxy") * spec.quality_multiplier)
     ablated_attention = _clamp01(_as_float(record, "attention_consistency_proxy") * spec.attention_multiplier)
     raw_before = _as_float(record, "raw_content_score_before")
@@ -544,7 +544,7 @@ def _ablate_supported_record(record: dict[str, Any], spec: AblationSpec, thresho
     claim_status = formal_claim_status if source_formal else local_claim_status
     return {
         "ablated_lf_score_retention": ablated_lf,
-        "ablated_hf_score_retention": ablated_hf,
+        "ablated_tail_score_retention": ablated_tail,
         "ablated_score_retention": ablated_score_retention,
         "ablated_quality_score_proxy": ablated_quality,
         "ablated_attention_consistency_proxy": ablated_attention,
@@ -581,7 +581,7 @@ def build_ablation_records(
             if unsupported:
                 ablated = {
                     "ablated_lf_score_retention": 0.0,
-                    "ablated_hf_score_retention": 0.0,
+                    "ablated_tail_score_retention": 0.0,
                     "ablated_score_retention": 0.0,
                     "ablated_quality_score_proxy": 0.0,
                     "ablated_attention_consistency_proxy": 0.0,
@@ -621,8 +621,8 @@ def build_ablation_records(
                     "ablated_score_retention": ablated["ablated_score_retention"],
                     "baseline_lf_score_retention": _as_float(record, "lf_score_retention"),
                     "ablated_lf_score_retention": ablated["ablated_lf_score_retention"],
-                    "baseline_hf_score_retention": _as_float(record, "hf_score_retention"),
-                    "ablated_hf_score_retention": ablated["ablated_hf_score_retention"],
+                    "baseline_tail_score_retention": _as_float(record, "tail_score_retention"),
+                    "ablated_tail_score_retention": ablated["ablated_tail_score_retention"],
                     "baseline_quality_score_proxy": _as_float(record, "quality_score_proxy"),
                     "ablated_quality_score_proxy": ablated["ablated_quality_score_proxy"],
                     "baseline_attention_consistency_proxy": _as_float(record, "attention_consistency_proxy"),

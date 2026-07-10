@@ -63,7 +63,7 @@ def test_core_method_objects_are_serializable_without_runtime_state() -> None:
         subspace_id="subspace_unit",
         basis_digest="basis_digest_unit",
         manifold_dimension=4,
-        safe_axes=("axis_low_frequency", "axis_high_frequency"),
+        safe_axes=("axis_low_frequency", "axis_amplitude_tail"),
         metadata={},
     )
     carrier = WatermarkCarrierSpec(

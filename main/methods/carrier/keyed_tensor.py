@@ -77,7 +77,7 @@ def build_tail_robust_template(
 ) -> tuple[Any, float, float]:
     """构造高斯幅值尾部截断的鲁棒载体模板。
 
-    该分支只声称使用分布尾部, 不再把大幅值高斯样本称为空间高频。
+    该分支只定义分布尾部筛选, 不定义空间频带。
     """
 
     torch = _torch()
@@ -214,6 +214,6 @@ def compute_blind_content_score(
         score_digest=build_stable_digest(payload),
         metadata={
             "detector_access": "image_key_and_public_model_only",
-            "tail_branch_semantics": "gaussian_amplitude_tail_not_spatial_high_frequency",
+            "tail_branch_semantics": "gaussian_amplitude_tail_truncation",
         },
     )

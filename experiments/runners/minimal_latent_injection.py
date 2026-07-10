@@ -20,7 +20,7 @@ from main.methods.algorithm_primitives import (
     build_semantic_risk_field,
     compose_latent_update,
     derive_attention_carrier_stub,
-    derive_hf_carrier,
+    derive_tail_carrier,
     derive_lf_carrier,
     estimate_safe_basis,
     project_latent_mask,
@@ -278,18 +278,18 @@ def derive_core_carrier_values(
         }
     )
     lf_carrier = derive_lf_carrier(safe_basis, key=config.watermark_key_digest, event_digest=event_digest)
-    hf_carrier = derive_hf_carrier(safe_basis, risk_field, key=config.watermark_key_digest, event_digest=event_digest)
+    tail_carrier = derive_tail_carrier(safe_basis, risk_field, key=config.watermark_key_digest, event_digest=event_digest)
     attention_carrier = derive_attention_carrier_stub(
         safe_basis,
         key=config.watermark_key_digest,
         event_digest=event_digest,
     )
-    composition = compose_latent_update(lf_carrier, hf_carrier, attention_carrier)
+    composition = compose_latent_update(lf_carrier, tail_carrier, attention_carrier)
     metadata = {
         "carrier_source": "core_algorithm_primitives",
         "carrier_width": carrier_width,
         "lf_carrier_digest": lf_carrier.carrier_digest,
-        "hf_carrier_digest": hf_carrier.carrier_digest,
+        "tail_carrier_digest": tail_carrier.carrier_digest,
         "attention_carrier_digest": attention_carrier.carrier_digest,
         "core_update_digest": composition.update_digest,
     }

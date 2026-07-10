@@ -45,10 +45,10 @@ python tools/harness/inspect_repository.py .
 
 本阶段需要实现或更新以下功能：
 
-1. 实现并运行 Full SLM-WM、Global Null Space、No Semantic Mask、No Semantic JVP、No Risk Weight、Random Basis、LF-only、HF-only、No-HF、No-LF、No Tail Truncation、FFT-sync-only、Image-registration-only、No Attention Anchor、No Rescue、No Attestation、Geo-direct-positive audit。
+1. 实现并运行 Full SLM-WM、Global Null Space、No Semantic Mask、No Semantic JVP、No Risk Weight、Random Basis、LF-only、Tail-only、No-Tail、No-LF、No Tail Truncation、FFT-sync-only、Image-registration-only、No Attention Anchor、No Rescue、No Attestation、Geo-direct-positive audit。
 2. 每个消融必须真实改变对应机制，而不是只改 `method_name`。
 3. 统计 mechanism ablation table、pairwise delta、ablation by attack family 和 ablation claim summary。
-4. 将消融结果映射到反工程组合论证：语义路由、safe subspace、LF/HF、geometry rescue、attestation 的必要性。
+4. 将消融结果映射到反工程组合论证：语义路由、safe subspace、LF/尾部截断、geometry rescue、attestation 的必要性。
 
 ## 六、禁止事项与边界
 

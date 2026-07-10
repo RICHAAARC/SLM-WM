@@ -16,6 +16,8 @@
 | 正式 FID/KID | `experiments/artifacts/dataset_level_quality_outputs.py` | 使用 torch-fidelity 0.4.0 的 TensorFlow 兼容 Inception v3 2048 维特征生成可审计质量记录 |
 | Colab 续跑 | `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb` | 在 Drive 持久化工作区分批运行主方法、质量评估与正式消融 |
 
+高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对标准高斯模板按元素绝对幅值分位点截断, 不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。轻量内容载体实现位于 `main/methods/carrier/tail.py`。
+
 ## 二、检测访问边界
 
 正式检测接口为：

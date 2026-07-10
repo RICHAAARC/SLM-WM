@@ -17,6 +17,18 @@
 
 当前统一方法参数位于 `configs/model_sd35.yaml`。其中 `jacobian_candidate_count=12`、`null_space_rank=4`、`maximum_relative_response_residual=0.75` 和 `minimum_projection_energy_retention=0.01` 共同约束语义条件低响应子空间: 前两项定义候选与保留秩, 后两项阻止高响应方向或近零盲检投影进入正式记录。
 
+## 方法配置语义
+
+正式运行使用三个分支标识:
+
+| 分支标识 | 数学角色 | 配置含义 |
+| --- | --- | --- |
+| `lf_content` | 空间低通 LF 主证据 | 密钥高斯模板经空间平均池化形成低通模板, 再投影到 LF 安全子空间。 |
+| `tail_robust` | 高斯幅值尾部截断补充证据 | 按元素绝对幅值分位点保留高斯分布尾部, 不定义空间频带。 |
+| `attention_geometry` | Q/K 相对关系几何锚点 | 使用真实 attention 目标梯度、子空间投影与单调回溯更新。 |
+
+`tail_fraction` 只定义高斯模板的幅值尾部保留比例。它不是频率截止值, 也不能解释为空间频带比例。正式运行记录统一使用 `tail_robust`、`tail_score` 和 `lambda_tail` 语义。
+
 ## prompt 划分口径
 
 当前三类运行层级共用 3:33:34 的固定划分比例, 即 dev、calibration、test

@@ -1,0 +1,18 @@
+# Docs
+
+`docs/` 保存方法机制、算法原语、实验构建记录、字段治理、产物重建规则和发布边界。该目录中的文档用于解释代码与论文证据之间的映射, 不能替代可执行测试或真实实验记录。
+
+## 当前方法文档
+
+- `builds/algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md`: 算法原语的规范来源, 定义分支风险、真实 Jacobian Null Space、空间 LF、高斯幅值尾部截断、Q/K attention geometry 和仅图像 fixed-FPR 检测。
+- `builds/method_section_semantic_conditioned_latent_manifold_watermark.md`: 与当前实现一致的论文方法章节草稿。
+- `builds/real_scientific_operator_implementation.md`: 科学算子到代码文件、实验入口和论文主张门禁的映射。
+- `field_registry.md`: records、manifests、tables、reports 与跨进程数据字段登记表。
+
+## 术语规范
+
+高斯幅值尾部截断鲁棒补充分支的正式标识为 `tail_robust`。只有 LF 分支通过空间平均池化具有明确的低通构造; 尾部截断分支不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。
+
+## 证据边界
+
+方法设计文档只能说明算子应如何工作。论文有效性仍需由 Colab GPU 真实运行得到的受治理 records、tables、figures、reports 和 manifests 支撑。远程 CPU 服务器上的代码检查、跳过记录或空结果包不能替代真实图像证据。

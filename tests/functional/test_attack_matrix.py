@@ -79,7 +79,7 @@ def formal_real_attack_record(
         "aligned_content_score_before": 0.72,
         "aligned_content_score_after": score_after,
         "lf_score_retention": 0.60,
-        "hf_score_retention": 0.62,
+        "tail_score_retention": 0.62,
         "score_retention": 0.61,
         "quality_score": 0.82,
         "attention_consistency_proxy": 0.57,

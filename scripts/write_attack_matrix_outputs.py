@@ -595,7 +595,7 @@ def write_attack_matrix_outputs(
             "quality_score_proxy_mean",
             "score_retention_mean",
             "lf_score_retention_mean",
-            "hf_score_retention_mean",
+            "tail_score_retention_mean",
             "attention_consistency_proxy_mean",
             "geometry_reliable_rate",
             "rescue_rate",
@@ -636,7 +636,7 @@ def write_attack_matrix_outputs(
             "score_retention_min",
             "score_retention_max",
             "lf_score_retention_mean",
-            "hf_score_retention_mean",
+            "tail_score_retention_mean",
             "supports_paper_claim",
         ],
     )

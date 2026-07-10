@@ -81,7 +81,7 @@ def build_safe_basis_plan(
         scores = [(_stable_score(semantic_route.route_digest, index), index) for index in range(length)]
         weights = tuple(1.0 for _ in range(length))
     else:
-        semantic_bonus = set(semantic_route.lf_indices) | set(semantic_route.hf_indices) | set(semantic_route.attention_indices)
+        semantic_bonus = set(semantic_route.lf_indices) | set(semantic_route.tail_indices) | set(semantic_route.attention_indices)
         scores = []
         weights = []
         for index in range(length):

@@ -9,6 +9,8 @@
 
 已提供 `method_faithful_sd35` adapter, 将 shallow latent 局部注入、mask / patch 检测和 masked distance 分数适配到 SD3.5 Medium 16-channel latent。该路径会真实生成 clean / watermarked 图像并写出图像 digest, 用于主表 common-backbone 对比。
 
+该 baseline 的 shallow latent 局部注入与 SLM-WM 的高斯幅值尾部截断是不同机制。共同协议只统一 Prompt、模型主线、攻击和 fixed-FPR 统计边界, 不改写各方法的载体定义。
+
 ## official reference 边界
 
 official reference 入口用于补充表方法忠实度审计, 不替代 SD3.5 Medium common-backbone 主表对比。该入口会尝试在独立 legacy 环境中运行 `source/run_shallow_diffuse_t2i.py`, 并把官方命令、stdout、stderr、`overall_scores.txt`、`clip_scores.txt`、schema、validation report、环境报告和压缩包写入 `outputs/shallow_diffuse_official_reference/` 及当前论文运行层级 Google Drive 根目录下的 `external_baseline_official_reference/` 目录。

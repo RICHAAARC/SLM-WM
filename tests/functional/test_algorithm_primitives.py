@@ -10,7 +10,7 @@ from main.methods.algorithm_primitives import (
     compute_content_score,
     decide_evidence_and_final,
     derive_attention_carrier_stub,
-    derive_hf_carrier,
+    derive_tail_carrier,
     derive_lf_carrier,
     estimate_safe_basis,
     evaluate_geometry_reliability,
@@ -35,34 +35,34 @@ def _build_synthetic_basis():
 
 @pytest.mark.quick
 def test_correct_key_content_score_is_higher_than_wrong_key() -> None:
-    """正确 key 的 LF/HF 融合分数必须高于错误 key。"""
+    """正确 key 的 LF/尾部截断融合分数必须高于错误 key。"""
     _, risk_field, basis = _build_synthetic_basis()
     lf_carrier = derive_lf_carrier(basis, key="correct_key", event_digest="event_unit")
-    hf_carrier = derive_hf_carrier(basis, risk_field, key="correct_key", event_digest="event_unit")
+    tail_carrier = derive_tail_carrier(basis, risk_field, key="correct_key", event_digest="event_unit")
     attention_carrier = derive_attention_carrier_stub(basis, key="correct_key", event_digest="event_unit")
-    update = compose_latent_update(lf_carrier, hf_carrier, attention_carrier)
+    update = compose_latent_update(lf_carrier, tail_carrier, attention_carrier)
 
-    correct_score = compute_content_score(update.combined_update_values, lf_carrier, hf_carrier)
+    correct_score = compute_content_score(update.combined_update_values, lf_carrier, tail_carrier)
     wrong_lf_carrier = derive_lf_carrier(basis, key="wrong_key", event_digest="event_unit")
-    wrong_hf_carrier = derive_hf_carrier(basis, risk_field, key="wrong_key", event_digest="event_unit")
-    wrong_score = compute_content_score(update.combined_update_values, wrong_lf_carrier, wrong_hf_carrier)
+    wrong_tail_carrier = derive_tail_carrier(basis, risk_field, key="wrong_key", event_digest="event_unit")
+    wrong_score = compute_content_score(update.combined_update_values, wrong_lf_carrier, wrong_tail_carrier)
 
     assert correct_score.content_score > wrong_score.content_score
     assert correct_score.used_independent_branch_vote is False
 
 
 @pytest.mark.quick
-def test_hf_tail_truncation_changes_hf_score_distribution() -> None:
-    """HF tail truncation 必须改变 HF 分支的分数行为。"""
+def test_tail_truncation_changes_tail_score_distribution() -> None:
+    """幅值尾部截断必须改变尾部分支的分数行为。"""
     _, risk_field, basis = _build_synthetic_basis()
-    truncated_hf = derive_hf_carrier(
+    truncated_tail = derive_tail_carrier(
         basis,
         risk_field,
         key="correct_key",
         event_digest="event_unit",
         tail_fraction=0.5,
     )
-    full_hf = derive_hf_carrier(
+    full_tail = derive_tail_carrier(
         basis,
         risk_field,
         key="correct_key",
@@ -70,11 +70,11 @@ def test_hf_tail_truncation_changes_hf_score_distribution() -> None:
         tail_fraction=1.0,
     )
     lf_carrier = derive_lf_carrier(basis, key="correct_key", event_digest="event_unit")
-    truncated_score = compute_content_score(truncated_hf.update_values, lf_carrier, truncated_hf)
-    full_score = compute_content_score(truncated_hf.update_values, lf_carrier, full_hf)
+    truncated_score = compute_content_score(truncated_tail.update_values, lf_carrier, truncated_tail)
+    full_score = compute_content_score(truncated_tail.update_values, lf_carrier, full_tail)
 
-    assert truncated_hf.retained_fraction < full_hf.retained_fraction
-    assert abs(truncated_score.hf_score - full_score.hf_score) > 1e-6
+    assert truncated_tail.retained_fraction < full_tail.retained_fraction
+    assert abs(truncated_score.tail_score - full_score.tail_score) > 1e-6
 
 
 @pytest.mark.quick

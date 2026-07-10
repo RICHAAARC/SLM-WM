@@ -143,12 +143,12 @@ class AlignedRescoringRecord:
     real_rescoring_score_gain: float
     real_lf_score_before: float
     real_lf_score_after: float
-    real_hf_score_before: float
-    real_hf_score_after: float
+    real_tail_score_before: float
+    real_tail_score_after: float
     real_combined_score_before: float
     real_combined_score_after: float
-    real_lf_hf_fusion_score_before: float
-    real_lf_hf_fusion_score_after: float
+    real_lf_tail_fusion_score_before: float
+    real_lf_tail_fusion_score_after: float
     latent_digest_before: str
     latent_digest_after: str
     latent_projection_digest_before: str
@@ -412,12 +412,12 @@ def build_rescoring_records(
                 real_rescoring_score_gain=score_after.content_score - score_before.content_score,
                 real_lf_score_before=score_before.lf_score,
                 real_lf_score_after=score_after.lf_score,
-                real_hf_score_before=score_before.hf_score,
-                real_hf_score_after=score_after.hf_score,
+                real_tail_score_before=score_before.tail_score,
+                real_tail_score_after=score_after.tail_score,
                 real_combined_score_before=score_before.combined_score,
                 real_combined_score_after=score_after.combined_score,
-                real_lf_hf_fusion_score_before=score_before.lf_hf_fusion_score,
-                real_lf_hf_fusion_score_after=score_after.lf_hf_fusion_score,
+                real_lf_tail_fusion_score_before=score_before.lf_tail_fusion_score,
+                real_lf_tail_fusion_score_after=score_after.lf_tail_fusion_score,
                 latent_digest_before=tensor_digest(latent_before.detach().float().cpu()),
                 latent_digest_after=tensor_digest(latent_after.detach().float().cpu()),
                 latent_projection_digest_before=digest_before,
@@ -445,7 +445,7 @@ def build_rescoring_records(
                     "content_basis_rank": config.content_basis_rank,
                     "formal_score_source": score_after.metadata.get(
                         "formal_score_source",
-                        "lf_hf_consistency_guarded_combined_correlation",
+                        "lf_tail_consistency_guarded_combined_correlation",
                     ),
                     "runtime_content_update_digest": ""
                     if runtime_content_update is None
@@ -1009,10 +1009,10 @@ def write_csv_rows(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]
 
 
 def aligned_component_audit_rows(records: list[AlignedRescoringRecord]) -> list[dict[str, Any]]:
-    """构造逐记录 LF/HF/combined 分量审计表。
+    """构造逐记录 LF/尾部截断/combined 分量审计表。
 
     该表属于诊断与论文解释层: 正式 fixed-FPR 判定仍使用
-    `real_aligned_content_score`, 但该表显式展示 LF、HF 和融合分数如何变化,
+    `real_aligned_content_score`, 但该表显式展示 LF、尾部截断和融合分数如何变化,
     便于定位 clean negative 高尾或 positive 低尾样本。
     """
 
@@ -1033,16 +1033,16 @@ def aligned_component_audit_rows(records: list[AlignedRescoringRecord]) -> list[
                 "real_lf_score_before": record.real_lf_score_before,
                 "real_lf_score_after": record.real_lf_score_after,
                 "real_lf_score_gain": record.real_lf_score_after - record.real_lf_score_before,
-                "real_hf_score_before": record.real_hf_score_before,
-                "real_hf_score_after": record.real_hf_score_after,
-                "real_hf_score_gain": record.real_hf_score_after - record.real_hf_score_before,
+                "real_tail_score_before": record.real_tail_score_before,
+                "real_tail_score_after": record.real_tail_score_after,
+                "real_tail_score_gain": record.real_tail_score_after - record.real_tail_score_before,
                 "real_combined_score_before": record.real_combined_score_before,
                 "real_combined_score_after": record.real_combined_score_after,
                 "real_combined_score_gain": record.real_combined_score_after - record.real_combined_score_before,
-                "real_lf_hf_fusion_score_before": record.real_lf_hf_fusion_score_before,
-                "real_lf_hf_fusion_score_after": record.real_lf_hf_fusion_score_after,
-                "real_lf_hf_fusion_score_gain": (
-                    record.real_lf_hf_fusion_score_after - record.real_lf_hf_fusion_score_before
+                "real_lf_tail_fusion_score_before": record.real_lf_tail_fusion_score_before,
+                "real_lf_tail_fusion_score_after": record.real_lf_tail_fusion_score_after,
+                "real_lf_tail_fusion_score_gain": (
+                    record.real_lf_tail_fusion_score_after - record.real_lf_tail_fusion_score_before
                 ),
                 "content_vector_width": metadata.get("content_vector_width", ""),
                 "content_basis_rank": metadata.get("content_basis_rank", ""),
@@ -1072,12 +1072,12 @@ def aligned_component_summary_rows(component_rows: list[dict[str, Any]]) -> list
         "real_rescoring_score_gain",
         "real_lf_score_before",
         "real_lf_score_after",
-        "real_hf_score_before",
-        "real_hf_score_after",
+        "real_tail_score_before",
+        "real_tail_score_after",
         "real_combined_score_before",
         "real_combined_score_after",
-        "real_lf_hf_fusion_score_before",
-        "real_lf_hf_fusion_score_after",
+        "real_lf_tail_fusion_score_before",
+        "real_lf_tail_fusion_score_after",
     )
     rows: list[dict[str, Any]] = []
     means_by_role: dict[str, dict[str, float]] = {}
@@ -1141,7 +1141,7 @@ def aligned_tail_audit_rows(records: list[AlignedRescoringRecord], tail_count: i
                     "real_raw_content_score": record.real_raw_content_score,
                     "real_aligned_content_score": record.real_aligned_content_score,
                     "real_rescoring_score_gain": record.real_rescoring_score_gain,
-                    "real_lf_hf_fusion_score_after": record.real_lf_hf_fusion_score_after,
+                    "real_lf_tail_fusion_score_after": record.real_lf_tail_fusion_score_after,
                     "latent_projection_digest_before": record.latent_projection_digest_before,
                     "latent_projection_digest_after": record.latent_projection_digest_after,
                     "metric_status": record.metric_status,
@@ -1293,15 +1293,15 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
         "real_lf_score_before",
         "real_lf_score_after",
         "real_lf_score_gain",
-        "real_hf_score_before",
-        "real_hf_score_after",
-        "real_hf_score_gain",
+        "real_tail_score_before",
+        "real_tail_score_after",
+        "real_tail_score_gain",
         "real_combined_score_before",
         "real_combined_score_after",
         "real_combined_score_gain",
-        "real_lf_hf_fusion_score_before",
-        "real_lf_hf_fusion_score_after",
-        "real_lf_hf_fusion_score_gain",
+        "real_lf_tail_fusion_score_before",
+        "real_lf_tail_fusion_score_after",
+        "real_lf_tail_fusion_score_gain",
         "content_vector_width",
         "content_basis_rank",
         "latent_projection_boundary_before",
@@ -1319,12 +1319,12 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
             "real_rescoring_score_gain",
             "real_lf_score_before",
             "real_lf_score_after",
-            "real_hf_score_before",
-            "real_hf_score_after",
+            "real_tail_score_before",
+            "real_tail_score_after",
             "real_combined_score_before",
             "real_combined_score_after",
-            "real_lf_hf_fusion_score_before",
-            "real_lf_hf_fusion_score_after",
+            "real_lf_tail_fusion_score_before",
+            "real_lf_tail_fusion_score_after",
         )],
         "supports_paper_claim",
     ]
@@ -1340,7 +1340,7 @@ def write_aligned_rescoring_outputs(config: AlignedRescoringConfig, root: str | 
         "real_raw_content_score",
         "real_aligned_content_score",
         "real_rescoring_score_gain",
-        "real_lf_hf_fusion_score_after",
+        "real_lf_tail_fusion_score_after",
         "latent_projection_digest_before",
         "latent_projection_digest_after",
         "metric_status",

@@ -1,8 +1,8 @@
-# 阶段8：LF / HF 内容载体与内容检测统计
+# 阶段8：LF / 尾部截断内容载体与内容检测统计
 
 ## 一、阶段定位
 
-实现 LF 主证据与 HF 鲁棒补充，并形成统一内容分数，支撑 fixed-FPR calibration。
+实现 LF 主证据与高斯幅值尾部截断鲁棒补充，并形成统一内容分数，支撑 fixed-FPR calibration。
 
 本阶段属于 SLM-WM 项目分阶段构建流程的一部分。整体流程遵循 `core-first -> runtime-second -> workflow-third -> paper-artifact-final`。本阶段不得跳过前序 artifact 审计，不得绕过 harness，不得将临时结果伪装为正式论文证据。
 
@@ -37,7 +37,7 @@ python tools/harness/inspect_repository.py .
 本阶段开始时应确认以下输入存在、可读取、digest 可校验，并且已经登记到本地或 Drive manifest：
 
 1. stage07 semantic subspace manifest。
-2. safe basis、LF / HF route projection、event digest 与 key 配置。
+2. safe basis、LF / 尾部截断route projection、event digest 与 key 配置。
 
 若任一输入缺失，应先写入阻断报告，不得通过手工补文件或临时路径继续执行。
 
@@ -45,27 +45,27 @@ python tools/harness/inspect_repository.py .
 
 本阶段需要实现或更新以下功能：
 
-1. 在 `main/methods/carrier/` 中实现 `lf.py`、`hf.py`、`compose.py`。
+1. 在 `main/methods/carrier/` 中实现 `lf.py`、`tail.py`、`compose.py`。
 2. 在 `main/methods/detection/` 中实现 `scores.py`、`fusion.py`。
 3. 实现 LF update：`Delta z_t^LF = alpha_t^LF B_LF C_LF(PRG(K_LF,d_e,d_B,d_R))`。
-4. 实现 HF update：`Delta z_t^HF = alpha_t^HF B_HF Trunc_gamma(nu_HF)`。
-5. 实现内容分数：`s_c = lambda_LF s_LF + lambda_HF s_HF`，且 `lambda_LF > lambda_HF`。
-6. 实现 LF-only、HF-only、No-HF、No-tail-truncation、No-LF 的机制开关。
+4. 实现高斯幅值尾部截断 update：`Delta z_t^tail = alpha_t^tail B_tail Trunc_gamma(nu_tail)`。
+5. 实现内容分数：`s_c = lambda_LF s_LF + lambda_tail s_tail`，且 `lambda_LF > lambda_tail`。
+6. 实现 LF-only、Tail-only、No-Tail、No-tail-truncation、No-LF 的机制开关。
 
 ## 六、禁止事项与边界
 
 本阶段不得执行以下操作：
 
-1. 不得为 LF 和 HF 分别设置独立正判阈值后再投票作为主判。
-2. 不得让 HF 单独替代 LF 主证据。
+1. 不得为 LF 和尾部截断分支 分别设置独立正判阈值后再投票作为主判。
+2. 不得让尾部截断分支单独替代 LF 主证据。
 3. 不得把 bit-level agreement 或 payload probe 直接替代内容分数。
 
 ## 七、产物与项目信息更新
 
 本阶段应产出或更新以下内容：
 
-1. `GoogleDrive/SLM-WM/runs/stage08_lf_hf_content_chain/content_detection_records.jsonl`
-2. `lf_hf_score_table.csv`
+1. `GoogleDrive/SLM-WM/runs/stage08_lf_tail_content_chain/content_detection_records.jsonl`
+2. `lf_tail_score_table.csv`
 3. `paired_quality_metrics.csv`
 4. `content_score_distribution.csv`
 5. `manifest.json`
@@ -81,14 +81,14 @@ python tools/harness/inspect_repository.py .
 
 本阶段至少应完成以下验证：
 
-1. LF-only、HF-only、No-HF、No-tail-truncation、No-LF 均可运行。
-2. LF 在 clean 条件下提供主证据，HF 仅作补充。
+1. LF-only、Tail-only、No-Tail、No-tail-truncation、No-LF 均可运行。
+2. LF 在 clean 条件下提供主证据，尾部截断分支仅作补充。
 3. 内容分数支持 fixed-FPR calibration。
 4. score distribution 不出现未解释塌底。
 
 本阶段通过标准为：
 
-统一内容链可产出稳定 `s_c`；LF/HF 机制开关真实改变对应载体。
+统一内容链可产出稳定 `s_c`；LF/尾部截断机制开关真实改变对应载体。
 
 ## 九、统一门禁与完成命令
 

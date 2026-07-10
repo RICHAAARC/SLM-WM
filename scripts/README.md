@@ -32,10 +32,12 @@ python scripts/run_gpu_server_result_closure.py \
 - `write_pilot_paper_complete_result_package.py`: 生成完整结果包。
 - `write_attack_matrix_outputs.py`: 重建攻击矩阵表和 manifest。
 - `write_external_baseline_comparison_outputs.py`: 重建外部 baseline 对比表。
-- `write_internal_ablation_outputs.py`: 仅保留历史诊断兼容; 正式论文机制消融必须来自 `run_runtime_rerun_ablations.py`。
+- `write_internal_ablation_outputs.py`: 生成轻量诊断性消融摘要; 正式论文机制消融必须来自 `run_runtime_rerun_ablations.py`。
 - `write_dataset_level_quality_outputs.py`: 重建 dataset-level 质量证据摘要; 传入 `--auto-extract-formal-features` 时直接运行 torch-fidelity 0.4.0 的 TensorFlow 兼容 Inception v3 2048 维特征, 正式表只输出 FID / KID, pixel 指标单独输出为诊断表。
 
 上述命令必须读取受治理 records、manifests 或结果包, 不得手工拼接正式论文结论。
+
+其中“幅值尾部载体”的正式名称是高斯幅值尾部截断分支 `tail_robust`。相关记录字段统一使用 `tail_score`、`tail_score_retention` 和 `tail_truncation_delta`; 该分支不具有空间频带定义。
 
 ## baseline 与辅助命令
 

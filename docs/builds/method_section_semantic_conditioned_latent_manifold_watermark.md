@@ -2,42 +2,46 @@
 
 ## 3.1 问题定义
 
-本文研究文本到图像扩散模型中的鲁棒水印归因问题。给定文本提示 $p$、扩散生成模型 $G_\theta$、采样更新算子 $S_\theta$、随机种子与初始噪声 $\xi$，无水印生成过程表示为
+本文研究文本到图像扩散模型中的鲁棒图像水印检测问题。给定文本提示 $p$、扩散生成模型 $G_\theta$、采样更新算子 $S_\theta$、随机种子与初始噪声 $\xi$，无水印生成过程表示为
 
 $$
 z_{t-1}=S_\theta(z_t,p,t),\qquad x=D(z_0),
 $$
 
-其中，$z_t$ 为第 $t$ 步潜变量，$D$ 表示 VAE decoder 或最终图像解码算子。本文目标是在扩散采样过程中嵌入不可见且鲁棒的水印证据，使生成图像在常规失真、几何攻击和再扩散类攻击后仍可被可靠归因。
-
-与生成后图像域水印不同，本文将水印嵌入定义为采样轨迹中的受约束 latent update：
+其中，$z_t$ 为第 $t$ 步潜变量，$D$ 表示 VAE 解码器。SLM-WM 在扩散采样过程中施加受约束的潜变量更新：
 
 $$
-\tilde{z}_t=z_t+\Delta z_t,\qquad
-z_{t-1}=S_\theta(\tilde{z}_t,p,t).
+\widetilde z_t=z_t+\Delta z_t,\qquad
+z_{t-1}=S_\theta(\widetilde z_t,p,t).
 $$
 
-因此，核心问题不是如何在像素域叠加扰动，而是如何在不破坏语义内容与视觉质量的前提下，选择当前样本最稳定、最隐蔽、最可恢复的潜空间水印方向。为此，本文提出语义条件潜流形水印方法（Semantic-conditioned Latent Manifold Watermarking，SLM-WM）。该方法将内容自适应区域划分、语义条件子空间优化、LF/HF 互补载体、Self-Attention 相对关系几何锚点和鲁棒统计判定统一到同一个潜流形水印框架中。
+嵌入目标是在不显著改变语义内容和视觉质量的前提下，提高最终图像在常规失真、几何变换和再扩散攻击后的可检测性。正式检测器遵循仅图像盲检制度：
 
-本文输出三类判定结果：evidence-level 判定用于回答 watermark 主证据是否成立；attestation-level 判定用于回答主证据成立后事件级归因是否一致；final-level 判定用于回答 watermark 主证据与事件约束是否同时成立。Payload probe 仅用于 bit-level agreement 与 codeword consistency 诊断，不进入正式主判定。
+$$
+\widehat y=\operatorname{Detect}(x',K,M),
+$$
+
+其中 $x'$ 为待检图像，$K$ 为水印密钥，$M$ 为公开模型配置。检测器不得读取生成 Prompt、初始噪声、源 latent、生成轨迹、未攻击原图或样本级安全子空间。
 
 ---
 
-## 3.2 方法总览
+## 3.2 方法总览与术语边界
 
-SLM-WM 的基本思想是：首先根据当前样本的语义显著性、纹理复杂度和扩散轨迹稳定性构造语义条件潜流形；随后在该流形内估计语义安全 Null Space；最后将同一潜变量扰动分解为 LF 主证据、HF 鲁棒补充和 Self-Attention 几何锚点三个互补分量：
+SLM-WM 先从当前样本构造分支风险场，再通过真实 Jacobian-Vector Product（JVP）和奇异值分解（SVD）求解语义条件低响应子空间，最后把同一潜变量更新分解为三个互补分量：
 
 $$
 \Delta z_t
 =
 \Delta z_t^{\mathrm{LF}}
 +
-\Delta z_t^{\mathrm{HF}}
+\Delta z_t^{\mathrm{tail}}
 +
 \Delta z_t^{\mathrm{A}}.
 $$
 
-其中，$\Delta z_t^{\mathrm{LF}}$ 负责低频稳定主证据，$\Delta z_t^{\mathrm{HF}}$ 负责纹理区域和 harder regime 下的鲁棒补充，$\Delta z_t^{\mathrm{A}}$ 负责基于 Self-Attention 相对关系的几何同步。
+$\Delta z_t^{\mathrm{LF}}$ 是具有明确空间低通构造的内容主证据；$\Delta z_t^{\mathrm{tail}}$ 是高斯幅值尾部截断鲁棒补充证据；$\Delta z_t^{\mathrm{A}}$ 是基于真实 Q/K Self-Attention 相对关系的几何锚点。
+
+高斯幅值尾部截断分支只比较高斯模板元素的绝对幅值与分位点，不执行 FFT、DCT、带通滤波或空间频带选择。该分支不具有空间频率语义。正式分支标识为 `tail_robust`，论文公式使用下标 $\mathrm{tail}$。
 
 该设计由以下统一目标刻画：
 
@@ -58,22 +62,22 @@ $$
 
 $$
 \Delta z_t\in
-\mathcal{N}_{\mathrm{sem}}(z_t,p)
+\mathcal{N}_{\mathrm{sem}}(z_t)
 \cap
 \mathcal{M}_{\mathrm{route}}(z_t,p)
 \cap
 \mathcal{B}_{\epsilon}.
 $$
 
-其中，$\mathcal{N}_{\mathrm{sem}}$ 表示语义条件安全子空间，$\mathcal{M}_{\mathrm{route}}$ 表示样本条件路由流形，$\mathcal{B}_{\epsilon}$ 表示扰动强度预算。该公式说明 LF、HF 与几何锚点并非独立拼接模块，而是同一个受约束水印优化问题在不同证据方向上的分解。
+这里的三个分量共享同一个受约束优化目标，但使用各自的风险预算和候选方向。该实现属于项目特定设计；JVP、SVD、投影残差和固定 FPR 校准属于可迁移的通用方法。
 
 ---
 
-## 3.3 语义条件潜流形构造
+## 3.3 分支语义风险场
 
 ### 3.3.1 内容属性建模
 
-对采样过程中潜空间位置 $u$，定义内容属性向量：
+对潜空间位置 $u$ 定义内容属性向量：
 
 $$
 \phi(u)=
@@ -81,331 +85,285 @@ $$
 \phi_{\mathrm{sem}}(u),
 \phi_{\mathrm{tex}}(u),
 \phi_{\mathrm{stab}}(u),
-\phi_{\mathrm{sal}}(u)
-],
+\phi_{\mathrm{sal}}(u),
+\phi_{\mathrm{attn\_stab}}(u)
+].
 $$
 
-其中，$\phi_{\mathrm{sem}}$ 表示语义显著性，$\phi_{\mathrm{tex}}$ 表示纹理复杂度，$\phi_{\mathrm{stab}}$ 表示跨采样步稳定性，$\phi_{\mathrm{sal}}$ 表示视觉显著性风险。若语义掩码由图像域 saliency model、预测干净图像 $\hat{x}_0^t$ 或分割模型得到，则通过映射 $\Pi_{x\rightarrow z}$ 得到 latent mask：
+$\phi_{\mathrm{sem}}$ 表示语义显著性，$\phi_{\mathrm{tex}}$ 表示纹理复杂度，$\phi_{\mathrm{stab}}$ 表示跨采样步稳定性，$\phi_{\mathrm{sal}}$ 表示视觉显著性风险，$\phi_{\mathrm{attn\_stab}}$ 表示注意力关系稳定性。图像域语义掩码必须映射到 latent 分辨率并实际参与候选方向构造：
 
 $$
 M_z=\Pi_{x\rightarrow z}(M_x).
 $$
 
-$M_z$ 用于约束轨迹特征提取和子空间规划，而不是仅作为记录字段。
+### 3.3.2 分支风险与硬资格集合
 
-### 3.3.2 语义风险场
-
-定义嵌入风险场：
+三个分支对纹理和注意力稳定性的偏好不同，因而不能复用一个风险标量。对分支 $b\in\{\mathrm{LF},\mathrm{tail},\mathrm{A}\}$ 定义
 
 $$
-\rho(u)=
-\eta_s\phi_{\mathrm{sal}}(u)
-+
-\eta_m\phi_{\mathrm{sem}}(u)
--
-\eta_t\phi_{\mathrm{tex}}(u)
--
-\eta_r\phi_{\mathrm{stab}}(u).
+\rho_b(u)=
+\frac{1}{Z_b}
+\left[
+\eta_s^b\phi_{\mathrm{sal}}(u)
++\eta_m^b\phi_{\mathrm{sem}}(u)
++\eta_t^b\psi_b(\phi_{\mathrm{tex}}(u))
++\eta_i^b(1-\phi_{\mathrm{stab}}(u))
++\eta_A^b(1-\phi_{\mathrm{attn\_stab}}(u))
+\right].
 $$
 
-风险越低，区域越适合承载水印。承载预算为
+LF 使用 $\psi_{\mathrm{LF}}(q)=q$，从而降低高纹理位置的优先级；尾部截断分支使用 $\psi_{\mathrm{tail}}(q)=1-q$，从而偏好稳定纹理位置；注意力几何分支主要受注意力稳定性控制。承载预算为
 
 $$
-b(u)=\operatorname{clip}\left(b_{\min}+\kappa(1-\rho(u)),b_{\min},b_{\max}\right).
+b_b(u)=\operatorname{clip}
+\left(b_{\min}+\kappa_b(1-\rho_b(u)),b_{\min},b_{\max}\right).
 $$
 
-基于风险场与承载预算，构造三类候选区域：
+每个分支通过独立阈值得到资格集合
 
 $$
-\Omega_{\mathrm{LF}}=\{u:\phi_{\mathrm{tex}}(u)<\tau_{\mathrm{tex}},\ \rho(u)<\tau_{\rho}\},
+\Omega_b=\{u:\rho_b(u)<\tau_b\}.
 $$
 
-$$
-\Omega_{\mathrm{HF}}=\{u:\phi_{\mathrm{tex}}(u)\ge\tau_{\mathrm{tex}},\ \phi_{\mathrm{stab}}(u)\ge\tau_{\mathrm{stab}}\},
-$$
-
-$$
-\Omega_{\mathrm{A}}=\{u:\operatorname{AttnStable}(u)\ge\tau_A,\ \phi_{\mathrm{stab}}(u)\ge\tau_{\mathrm{stab}}\}.
-$$
-
-$\Omega_{\mathrm{LF}}$ 偏向平滑稳定区域，适合承载低感知主证据；$\Omega_{\mathrm{HF}}$ 偏向纹理复杂区域，适合承载高频鲁棒补充；$\Omega_{\mathrm{A}}$ 由 attention 稳定性和局部结构稳定性共同决定，用于几何同步锚点。
+当 $u\notin\Omega_b$ 时，正式候选矩阵中的对应预算被置为 0；只有资格集合内部保留连续预算。该硬门控确保风险场会真实改变后续子空间，而不是仅作为日志字段。
 
 ---
 
-## 3.4 语义条件安全子空间优化
+## 3.4 语义条件 Jacobian Null Space
 
-### 3.4.1 语义条件 Null Space
+### 3.4.1 低响应子空间定义
 
-固定统计子空间难以区分不同内容区域的视觉风险。本文将其推广为语义条件安全子空间：
+SLM-WM 将安全方向定义为同时对语义特征和视觉特征低响应的局部方向：
 
 $$
-\mathcal{N}_{\mathrm{sem}}(z_t,p)
+\mathcal{N}_{\mathrm{sem}}(z_t)
 =
-\{v:
-\|W_{\mathrm{sem}}J_{\mathrm{sem}}(z_t,p)v\|_2\le\epsilon_s,
-\|W_{\mathrm{vis}}J_{\mathrm{vis}}(z_t,p)v\|_2\le\epsilon_v
-\}.
+\left\{
+v:
+\|J_{\mathrm{sem}}(z_t)v\|_2\le\epsilon_s,
+\|J_{\mathrm{vis}}(z_t)v\|_2\le\epsilon_v
+\right\}.
 $$
 
-其中，$J_{\mathrm{sem}}$ 表示语义特征映射的 Jacobian，$J_{\mathrm{vis}}$ 表示视觉质量相关映射的 Jacobian，$W_{\mathrm{sem}}$ 和 $W_{\mathrm{vis}}$ 由语义风险场 $\rho(u)$ 与承载预算 $b(u)$ 构造。
+$J_{\mathrm{sem}}$ 对应 VAE 可微解码与冻结 CLIP 图像编码器组成的特征映射；$J_{\mathrm{vis}}$ 对应亮度、对比度、边缘和多尺度结构特征映射。模型参数冻结，但输出到 $z_t$ 的梯度保持可用。
 
-### 3.4.2 JVP 估计与轨迹特征
+### 3.4.2 精确 JVP 与候选方向
 
-对候选方向 $v_i$，通过 JVP 估计局部响应：
-
-$$
-\psi_i^{\mathrm{sem}}=J_{\mathrm{sem}}(z_t,p)v_i,\qquad
-\psi_i^{\mathrm{vis}}=J_{\mathrm{vis}}(z_t,p)v_i.
-$$
-
-同时，从采样轨迹中提取 latent feature：
+对候选方向 $v_i^b$ 计算
 
 $$
-\varphi_t=P^\top\operatorname{vec}\left(\operatorname{Norm}(M_z\odot z_t)\right).
+\psi_{i,b}^{\mathrm{sem}}=J_{\mathrm{sem}}(z_t)v_i^b,
+\qquad
+\psi_{i,b}^{\mathrm{vis}}=J_{\mathrm{vis}}(z_t)v_i^b.
 $$
 
-其中，$P$ 表示随机投影或低维特征投影矩阵，$M_z$ 为 latent semantic mask。该定义保证子空间规划受语义显著性显式约束。
+正式实现优先通过 `torch.func.linearize` 在同一 latent 点复用精确线性算子。若底层等价算子不支持 forward AD，则使用 `torch.autograd.functional.jvp` 逐方向计算。两条路径都属于精确自动微分 JVP；有限差分或轨迹线性近似只能用于诊断。
 
-### 3.4.3 安全基底求解
-
-构造加权响应矩阵：
+分支候选矩阵为
 
 $$
-D=
+C_b=[v_1^b,\ldots,v_m^b]\in\mathbb{R}^{n\times m},
+\qquad C_b^\top C_b=I.
+$$
+
+每个候选方向在正交化前乘入分支资格 mask 和风险预算。LF 与尾部截断分支分别把固定盲检模板作为优先候选；注意力分支把真实 Q/K 目标梯度作为优先候选；其余列由密钥化随机方向补齐。该设计避免低秩纯随机候选完全错过待嵌入方向。
+
+### 3.4.3 SVD 求解与门禁
+
+构造联合响应矩阵
+
+$$
+R_b=
 \begin{bmatrix}
-W_{\mathrm{sem}}J_{\mathrm{sem}}v_1 & \cdots & W_{\mathrm{sem}}J_{\mathrm{sem}}v_m\\
-W_{\mathrm{vis}}J_{\mathrm{vis}}v_1 & \cdots & W_{\mathrm{vis}}J_{\mathrm{vis}}v_m
-\end{bmatrix}^{\top}.
+J_{\mathrm{sem}}C_b\\
+\sqrt{\lambda_v}J_{\mathrm{vis}}C_b
+\end{bmatrix}
+\in\mathbb{R}^{q\times m}.
 $$
 
-对 $D$ 执行 SVD：
+对其执行 SVD：
 
 $$
-D=U\Sigma V^\top.
+R_b=U\Sigma Q^\top.
 $$
 
-取小奇异值方向构成安全基底：
+选择最小奇异值对应的右奇异向量 $Q_0$，再映射回 latent 空间：
 
 $$
-B_{\mathrm{safe}}=V_{[:,r+1:m]}.
+B_b=\operatorname{orth}(C_bQ_0).
 $$
 
-再根据语义路由得到
-
-$$
-B_{\mathrm{LF}}=\operatorname{Proj}_{\Omega_{\mathrm{LF}}}(B_{\mathrm{safe}}),
-$$
-
-$$
-B_{\mathrm{HF}}=\operatorname{Proj}_{\Omega_{\mathrm{HF}}}(B_{\mathrm{safe}}),
-$$
-
-$$
-B_{\mathrm{A}}=\operatorname{Proj}_{\Omega_{\mathrm{A}}}(B_{\mathrm{safe}}).
-$$
+$Q_0$ 只位于候选系数空间，不能直接当作 latent 基底。正式记录必须保存绝对响应残差 $\|R_bQ_0\|_F$、相对平均响应残差和正交误差 $\|B_b^\top B_b-I\|_F$。当前协议要求选中方向的平均响应不超过全部候选平均响应的 0.75，固定模板投影后的能量保留比例不低于 0.01。门禁失败时直接停止运行，不能使用 one-hot、周期平铺或近零投影归一化作为替代。
 
 ---
 
-## 3.5 LF/HF 互补内容载体
+## 3.5 LF 与高斯幅值尾部截断内容载体
 
-### 3.5.1 LF 主证据分支
+### 3.5.1 空间低通 LF 主证据
 
-给定 LF 密钥 $K_{\mathrm{LF}}$、事件摘要 $d_e$、子空间摘要 $d_B$ 和路由摘要 $d_R$，生成密钥化低频模板：
-
-$$
-\nu_{\mathrm{LF}}=\operatorname{PRG}(K_{\mathrm{LF}},d_e,d_B,d_R).
-$$
-
-经编码函数 $C_{\mathrm{LF}}$ 得到低频编码模板：
+给定密钥 $K_{\mathrm{LF}}$、公开模型标识和 latent 形状，生成固定标准高斯模板并执行空间平均池化：
 
 $$
-\nu_{\mathrm{LF}}^c=C_{\mathrm{LF}}(\nu_{\mathrm{LF}}).
+\nu_{\mathrm{LF}}
+=
+\operatorname{Norm}
+\left(
+\operatorname{AvgPool}_{k\times k}
+(\operatorname{PRG}_{\mathcal N}(K_{\mathrm{LF}},M,shape))
+\right).
 $$
 
-LF latent update 为
+平均池化在 latent 的二维空间轴上抑制快速空间变化，因此 LF 分支具有明确的空间低通定义。嵌入端把固定模板投影到分支安全子空间：
+
+$$
+\overline\nu_{\mathrm{LF}}
+=B_{\mathrm{LF}}B_{\mathrm{LF}}^\top\nu_{\mathrm{LF}},
+$$
+
+并构造
 
 $$
 \Delta z_t^{\mathrm{LF}}
 =
-\alpha_t^{\mathrm{LF}}B_{\mathrm{LF}}\nu_{\mathrm{LF}}^c.
+\alpha_t^{\mathrm{LF}}
+\frac{\overline\nu_{\mathrm{LF}}}{\|\overline\nu_{\mathrm{LF}}\|_2}.
 $$
 
-LF 分支借鉴伪随机编码水印的隐蔽性思想，但其 carrier 被限制在语义条件安全子空间中，因此不等同于独立的图像域编码水印。
+### 3.5.2 高斯幅值尾部截断补充证据
 
-### 3.5.2 HF 鲁棒补充分支
-
-给定 HF 密钥 $K_{\mathrm{HF}}$，生成候选模板：
+给定密钥 $K_{\mathrm{tail}}$、公开模型标识和 latent 形状，生成固定标准高斯模板：
 
 $$
-\nu_{\mathrm{HF}}=\operatorname{PRG}(K_{\mathrm{HF}},d_e,d_B,d_R).
-$$
-
-对其执行 tail truncation：
-
-$$
-\widetilde{\nu}_{\mathrm{HF},i}
+\nu_{\mathrm{tail}}
 =
-\nu_{\mathrm{HF},i}\cdot
-\mathbb{I}\left(|\nu_{\mathrm{HF},i}|w_i\ge q_{\gamma}\right),
+\operatorname{PRG}_{\mathcal N}(K_{\mathrm{tail}},M,shape).
 $$
 
-其中，$w_i$ 由纹理复杂度、局部稳定性和攻击敏感性共同决定，$q_\gamma$ 为分位数阈值。HF latent update 为
+对冻结的尾部比例 $\gamma$，计算绝对幅值的 $1-\gamma$ 分位点，并仅保留大幅值元素：
 
 $$
-\Delta z_t^{\mathrm{HF}}
+q_{1-\gamma}
 =
-\alpha_t^{\mathrm{HF}}B_{\mathrm{HF}}\widetilde{\nu}_{\mathrm{HF}}.
+\operatorname{Quantile}_{1-\gamma}(|\nu_{\mathrm{tail}}|),
 $$
 
-### 3.5.3 内容分数
-
-检测端分别计算 LF 与 HF 分数：
-
 $$
-s_{\mathrm{LF}}
+\widetilde\nu_{\mathrm{tail},i}
 =
-\frac{\langle \hat{c}_{\mathrm{LF}},\nu_{\mathrm{LF}}^c\rangle}
-{\|\hat{c}_{\mathrm{LF}}\|_2\|\nu_{\mathrm{LF}}^c\|_2},
+\nu_{\mathrm{tail},i}
+\mathbb{I}
+\left(|\nu_{\mathrm{tail},i}|\ge q_{1-\gamma}\right).
 $$
 
+嵌入更新为
+
 $$
-s_{\mathrm{HF}}
+\Delta z_t^{\mathrm{tail}}
 =
-\operatorname{Corr}(\hat{c}_{\mathrm{HF}},\widetilde{\nu}_{\mathrm{HF}})
-\cdot
-\operatorname{Stab}(\hat{c}_{\mathrm{HF}};\Omega_{\mathrm{HF}}).
+\alpha_t^{\mathrm{tail}}
+\operatorname{Norm}
+\left(
+B_{\mathrm{tail}}B_{\mathrm{tail}}^\top
+\widetilde\nu_{\mathrm{tail}}
+\right).
 $$
 
-最终内容分数为
+该算子定义的是**概率分布幅值域的稀疏尾部选择**。元素索引没有按空间频率排序，保留集合也不是 Fourier 或余弦基上的频带。截断后的模板可能包含宽频谱成分，因此不能把“幅值大”解释为“空间频率高”。其鲁棒性是需要通过压缩、噪声、重采样和再扩散实验检验的假设，不能由“高频”名称先验推出。
+
+### 3.5.3 仅图像内容分数
+
+检测端从待检图像通过 VAE 编码得到 $\widehat z$，并使用密钥和公开配置重建两个固定模板：
+
+$$
+s_{\mathrm{LF}}=\operatorname{Corr}(\widehat z,\nu_{\mathrm{LF}}),
+\qquad
+s_{\mathrm{tail}}=\operatorname{Corr}(\widehat z,\widetilde\nu_{\mathrm{tail}}).
+$$
+
+统一内容分数为
 
 $$
 s_c
 =
 \lambda_{\mathrm{LF}}s_{\mathrm{LF}}
 +
-\lambda_{\mathrm{HF}}s_{\mathrm{HF}},
+\lambda_{\mathrm{tail}}s_{\mathrm{tail}},
 \qquad
-\lambda_{\mathrm{LF}}>\lambda_{\mathrm{HF}},
+\lambda_{\mathrm{LF}}>\lambda_{\mathrm{tail}},
 \qquad
-\lambda_{\mathrm{LF}}+\lambda_{\mathrm{HF}}=1.
+\lambda_{\mathrm{LF}}+\lambda_{\mathrm{tail}}=1.
 $$
+
+两个分支不分别设置独立正判阈值后投票。安全子空间只在嵌入端控制失真；检测端不恢复样本级 $B_{\mathrm{LF}}$ 或 $B_{\mathrm{tail}}$。
 
 ---
 
 ## 3.6 Self-Attention 相对关系几何锚点
 
-### 3.6.1 Attention graph
+### 3.6.1 真实 Q/K 关系图
 
-对第 $t$ 步、第 $\ell$ 层 transformer block，Self-Attention 为
+对第 $t$ 步、第 $\ell$ 层 Transformer block，Self-Attention 为
 
 $$
 A_t^{(\ell)}
 =
-\operatorname{softmax}\left(
-\frac{Q_t^{(\ell)}{K_t^{(\ell)\top}}}{\sqrt{d}}
+\operatorname{softmax}
+\left(
+\frac{Q_t^{(\ell)}K_t^{(\ell)\top}}{\sqrt d}
 \right).
 $$
 
-选择稳定 attention token：
+正式实现直接调用模型的 `to_q` 与 `to_k` 投影，不使用合成 attention map。密钥确定 token 对与目标关系符号，形成注意力目标损失 $\mathcal L_A$。通过 autograd 得到
 
 $$
-\mathcal{V}_A=
-\{i:\operatorname{Stab}(A_{\cdot,i}^{(\ell)})\ge\tau_A,
-\operatorname{Sal}(i)\ge\tau_s\}.
+g_A=\nabla_{z_t}\mathcal L_A.
 $$
 
-构造相对关系：
+### 3.6.2 安全投影与单调回溯
+
+注意力候选方向进入其独立分支的 Jacobian Null Space 求解器，得到 $B_{\mathrm A}$。投影梯度为
 
 $$
-r_{ij}=
-[
-A_{ij},
-\operatorname{rank}_j(A_{ij}),
-A_{ij}/\sum_k A_{ik},
-\operatorname{dist}_{\mathrm{rel}}(i,j)
-].
+\overline g_A=B_{\mathrm A}B_{\mathrm A}^\top g_A.
 $$
 
-得到 attention-relative graph：
+以 $-\overline g_A$ 为更新方向执行回溯搜索，仅接受同时满足强度预算且使目标损失单调下降的步长：
 
 $$
-\mathcal{G}_A=(\mathcal{V}_A,\mathcal{E}_A,\{r_{ij}\}).
+\mathcal L_A(z_t+\Delta z_t^{\mathrm A})
+<
+\mathcal L_A(z_t).
 $$
 
-### 3.6.2 几何锚点嵌入
+若所有候选步长都不能降低损失，运行必须报告失败，不能写入未验证的 attention 更新。
 
-将几何锚点绑定在 attention 相对关系上。给定目标关系扰动 $r_{ij}^{\star}$，定义
+### 3.6.3 几何恢复
 
-$$
-\mathcal{L}_A
-=
-\sum_{(i,j)\in\mathcal{E}_A}
-\|r_{ij}(z_t+\Delta z_t)-r_{ij}^{\star}\|_2^2.
-$$
-
-几何 latent update 为
-
-$$
-\Delta z_t^{\mathrm{A}}
-=
--\alpha_t^{\mathrm{A}}
-\operatorname{Proj}_{\mathcal{N}_{\mathrm{sem}}}
-(\nabla_{z_t}\mathcal{L}_A).
-$$
-
-检测端通过 attention relation graph 估计参考系恢复参数 $\hat{T}$，并输出 `registration_confidence`、`anchor_inlier_ratio`、`recovered_sync_consistency` 和 `alignment_residual` 等统计量。
+检测端只从待检图像提取公开视觉模型的 token 关系和密钥关系签名，通过匹配、三点 RANSAC 与仿射估计得到参考系变换 $\widehat T$。几何链输出注册置信度、锚点内点比例、同步一致性和对齐残差。它只负责参考系恢复，不直接产生 positive 判定。
 
 ---
 
-## 3.7 鲁棒检测与几何救回
+## 3.7 完整 fixed-FPR 判定
 
-### 3.7.1 Fixed-FPR 内容判定
+### 3.7.1 内容主判
 
-给定 calibration split 中的 clean negative 分数分布，内容阈值由固定 FPR 原则确定：
-
-$$
-\tau_c=Q_{1-\alpha}(s_c\mid\mathcal{D}_0^{\mathrm{cal}}).
-$$
-
-对待检图像 $y$，原始内容分数为
+给定 calibration split 中的 clean negative 分数分布和目标误报率 $\alpha$，内容阈值为
 
 $$
-s_c^{\mathrm{raw}}
-=
-\lambda_{\mathrm{LF}}s_{\mathrm{LF}}^{\mathrm{raw}}
-+
-\lambda_{\mathrm{HF}}s_{\mathrm{HF}}^{\mathrm{raw}}.
+\tau_c=Q_{1-\alpha}(s_c\mid\mathcal D_0^{\mathrm{cal}}).
 $$
 
-原始内容边界余量为
+原始内容余量与正判为
 
 $$
-m_c^{\mathrm{raw}}=s_c^{\mathrm{raw}}-\tau_c.
+m_c^{\mathrm{raw}}=s_c^{\mathrm{raw}}-\tau_c,
+\qquad
+positive\_by\_content=\mathbb I(m_c^{\mathrm{raw}}\ge0).
 $$
 
-原始内容正判为
+### 3.7.2 同阈值几何救回
 
-$$
-positive\_by\_content=\mathbb{I}(m_c^{\mathrm{raw}}\ge0).
-$$
-
-### 3.7.2 几何可靠性
-
-几何恢复可信条件为
-
-$$
-geometry\_reliable
-=
-(r_{\mathrm{reg}}\ge\tau_{\mathrm{reg}})
-\land
-(r_{\mathrm{inlier}}\ge\tau_{\mathrm{inlier}})
-\land
-(r_{\mathrm{sync}}\ge\tau_{\mathrm{sync}}).
-$$
-
-### 3.7.3 Rescue 规则
-
-只对边界失败样本开放 rescue：
+只有原始内容分数位于冻结的边界失败窗口，且失败原因和几何可靠性满足冻结条件时，才允许对齐：
 
 $$
 rescue\_eligible
@@ -415,33 +373,17 @@ rescue\_eligible
 \land fail\_reason\in\{geometry\_suspected,low\_confidence\}.
 $$
 
-对恢复后表示 $y^{\mathrm{align}}$ 重新提取内容分数：
-
-$$
-s_c^{\mathrm{align}}
-=
-\lambda_{\mathrm{LF}}s_{\mathrm{LF}}^{\mathrm{align}}
-+
-\lambda_{\mathrm{HF}}s_{\mathrm{HF}}^{\mathrm{align}}.
-$$
-
-恢复后内容边界余量为
-
-$$
-m_c^{\mathrm{align}}=s_c^{\mathrm{align}}-\tau_c.
-$$
-
-几何救回成立为
+对齐后重新从图像计算 $s_c^{\mathrm{align}}$，并复用同一个 $\tau_c$：
 
 $$
 rescue\_applied
 =
 rescue\_eligible
 \land
-\mathbb{I}(m_c^{\mathrm{align}}\ge0).
+\mathbb I(s_c^{\mathrm{align}}-\tau_c\ge0).
 $$
 
-Evidence-level 判定为
+最终水印证据判定为
 
 $$
 y_{\mathrm{evidence}}
@@ -451,50 +393,32 @@ positive\_by\_content
 rescue\_applied.
 $$
 
-几何链只负责参考系恢复，最终仍由内容链在相同阈值下重判。
+### 3.7.3 完整协议冻结
 
-### 3.7.4 fixed-FPR 与 rescue 的完整统计边界
+fixed-FPR 约束的是包含 rescue 的完整 evidence 判定，而不是只冻结内容阈值后任意增加第二条判定路径。内容阈值、几何可靠性阈值、rescue window 和失败原因 gate 均在 calibration 或预注册协议中冻结。test split 只能应用冻结协议并报告 clean negative 的二项分布置信上界，不参与任何参数选择。
 
-本文中的 fixed-FPR 不是只固定 $\tau_c$ 后再任意追加 rescue 分支。正式 operating point 必须对应一个在 calibration split 上冻结的完整 evidence-level 判定协议。具体要求如下：
+当前三类运行配置为：
 
-1. 内容阈值 $\tau_c$ 由 clean negative calibration 分布确定；
-2. 几何可靠性阈值、rescue window 与 fail reason gate 在 calibration 或预注册协议中冻结；
-3. test split 只用于报告，不用于选择 $\tau_c$、$\delta_{\mathrm{low}}$ 或几何 gate；
-4. rescue 后的整体 evidence-level FPR 必须在 clean negative 和 attacked negative 上分别报告；
-5. 若 raw content decision 满足目标 FPR，但 rescue 后整体 FPR 超过目标 operating point，则只能声称 raw content 分支满足该 FPR，不能声称完整 SLM-WM evidence decision 满足该 FPR；
-6. `Geo-direct-positive` 只能作为反例审计，用于展示几何直接判正的 FPR 风险，不能进入正式方法。
-
-该边界使几何 rescue 成为“同阈值内容重判”的辅助恢复机制，而不是独立第二检测器。
+| Prompt 数量 | dev | calibration | test | 目标 FPR |
+| ---: | ---: | ---: | ---: | ---: |
+| 70 | 3 | 33 | 34 | 0.1 |
+| 700 | 30 | 330 | 340 | 0.01 |
+| 7000 | 300 | 3300 | 3400 | 0.001 |
 
 ---
 
-## 3.8 事件 attestation 与最终归因
+## 3.8 正式机制消融
 
-仅凭 watermark evidence 成立，并不足以证明图像来自某次可核验生成事件。本文进一步引入事件级 attestation。设事件声明为 $e$，事件摘要为 $d_e$，签名为 $\sigma(e)$，则
+正式消融必须对改变后的机制配置重新生成图像、重新执行攻击并重新运行仅图像检测。禁止通过修改历史分数或保留率模拟机制被移除后的结果。与本文核心算子直接对应的消融至少包括：
 
-$$
-attestation\_pass
-=
-\mathbb{I}[\operatorname{Verify}_K(d_e,\sigma(e))=1].
-$$
-
-Final-level 判定为
-
-$$
-y_{\mathrm{final}}
-=
-y_{\mathrm{evidence}}
-\land
-attestation\_pass.
-$$
-
-最终输出包括三类状态：
-
-1. `evidence_negative`：watermark 主证据未成立；
-2. `evidence_positive_but_unattested`：watermark 主证据成立，但事件级归因未确认；
-3. `final_positive`：watermark 主证据与事件级归因同时成立。
-
-Attestation 不改变内容阈值，不替代几何恢复，也不进入 evidence-level 判定。Payload probe 仅作为诊断字段记录，不参与正式决策。
+1. 共享全局风险对比分支风险；
+2. 移除语义 JVP 或以随机基底替代 Jacobian Null Space；
+3. LF-only；
+4. Tail-only；
+5. No-Tail；
+6. No-Tail-Truncation；
+7. 移除 Q/K attention anchor；
+8. 移除同阈值几何救回。
 
 ---
 
@@ -502,24 +426,27 @@ Attestation 不改变内容阈值，不替代几何恢复，也不进入 evidenc
 
 嵌入端执行以下步骤：
 
-1. 采集中间 latent、预测图像和 Self-Attention maps；
-2. 构造 semantic latent mask 与内容风险场；
-3. 估计语义条件安全子空间 $B_{\mathrm{safe}}$；
-4. 得到 $B_{\mathrm{LF}}$、$B_{\mathrm{HF}}$、$B_{\mathrm{A}}$ 和 attention anchor graph；
-5. 生成 LF、HF 与 attention geometry carrier；
-6. 在选定采样步执行 latent update；
-7. 输出 watermarked 图像、event statement 和证据摘要。
+1. 在选定采样步提取 latent、可微语义/视觉特征和真实 Q/K attention；
+2. 构造 `lf_content`、`tail_robust` 和 `attention_geometry` 三个分支风险场；
+3. 为每个分支构造包含优先载体方向的候选矩阵；
+4. 通过精确 JVP、联合响应矩阵和 SVD 求解三个低响应子空间；
+5. 构造空间 LF、高斯幅值尾部截断和 attention 几何更新；
+6. 对 attention 更新执行单调回溯，对内容投影执行能量门禁；
+7. 生成最终图像并记录算子摘要、残差、投影能量和环境信息。
 
 检测端执行以下步骤：
 
-1. 从待检图像的 VAE 编码、反演 latent 或重采样轨迹中估计 LF / HF 内容证据；
-2. 提取 attention relation graph 并估计几何恢复参数；
-3. 计算 $s_c^{\mathrm{raw}}$ 和 $s_c^{\mathrm{align}}$；
-4. 根据 fixed-FPR 阈值执行 evidence-level 判定；
-5. 验证 attestation 并输出 final-level 判定。
+1. 只读取待检图像、密钥和公开模型配置；
+2. 通过 VAE 编码重建图像 latent，并重建固定 LF 与尾部截断模板；
+3. 计算原始统一内容分数；
+4. 必要时从图像 attention 关系估计几何变换并重新计算对齐分数；
+5. 应用 calibration split 冻结的完整 evidence 协议；
+6. 输出水印证据判定和可审计统计量。
 
 ---
 
 ## 3.10 方法边界
 
-本文方法的主贡献是扩散采样内部的语义条件潜流形水印，不以 payload 消息恢复为主要目标。Payload probe、attestation、evidence manifest 和 result audit 服务于诊断与归因治理，不应被表述为水印载体创新。所有主张必须由 fixed-FPR calibration、clean negative、attacked negative、几何 rescue 消融、再扩散攻击和外部 baseline 对比共同支撑。
+SLM-WM 的科学方法终止于仅图像 $y_{\mathrm{evidence}}$ 判定。事件签名、payload probe、证据 manifest 和结果审计可以用于数据来源治理或失败诊断，但不能作为图像水印检测能力的一部分。
+
+方法实现存在不等于论文结论成立。空间 LF 的有效性、高斯幅值尾部截断的攻击鲁棒性、Q/K 几何恢复的增益和完整 fixed-FPR 均必须由真实 GPU 生成、clean negative、真实攻击、正式机制重跑消融、外部 baseline 和受治理结果包共同支撑。
