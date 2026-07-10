@@ -440,7 +440,12 @@ def evidence_paths_for_existing(paths: Iterable[Path], root_path: Path) -> list[
 
 
 def dataset_quality_claim_gate_fields(dataset_quality_metrics_path: Path, root_path: Path) -> dict[str, Any]:
-    """读取数据集级质量主张门禁字段, 防止 proxy FID / KID 被误解为正式指标。"""
+    """读取数据集级正式质量主张门禁字段。
+
+    `dataset_quality_metrics.csv` 在当前协议中只允许包含正式 FID / KID 行。
+    pixel proxy 诊断指标必须来自单独的 diagnostic metrics 文件, 避免下游
+    共同协议把诊断指标误认为正式论文质量证据。
+    """
 
     dataset_quality_summary_path = dataset_quality_metrics_path.with_name(DEFAULT_DATASET_QUALITY_SUMMARY_NAME)
     summary = read_json(dataset_quality_summary_path)

@@ -30,7 +30,7 @@ class DatasetQualityImageRecord:
     """记录一组 source / comparison 图像对进入数据集级质量协议的事实。
 
     该对象属于通用工程写法: 它只记录图像路径、摘要、配对角色和特征后端, 不在记录层直接声明正式
-    FID / KID 结论。正式论文级 FID / KID 需要后续替换为 Inception 特征后端和足够样本规模。
+    FID / KID 结论。正式论文级 FID / KID 由后续 Inception 特征导入和样本规模门禁决定。
     """
 
     dataset_quality_record_id: str
@@ -104,8 +104,8 @@ def _resolve_existing_image_path(
 def extract_pixel_histogram_feature(image_path: Path, image_size: int = 32, hist_bins: int = 8) -> np.ndarray:
     """从图像中提取轻量 RGB 统计特征。
 
-    该函数不是 Inception 特征提取器, 只用于本地小样本治理入口和链路测试。后续如果要支撑正式 FID / KID,
-    应在相同记录协议下替换为 Inception 或论文约定的视觉特征后端。
+    该函数不是 Inception 特征提取器, 只用于诊断表。正式 FID / KID 必须来自 Inception
+    或论文约定的视觉特征后端。
     """
 
     with Image.open(image_path) as image:
@@ -608,9 +608,31 @@ def build_dataset_quality_metric_rows(
     formal_comparison_features: Any = None,
     formal_min_sample_count: int = 50,
 ) -> list[dict[str, Any]]:
-    """构造数据集级质量指标表。
+    """构造数据集级正式质量指标表。
 
-    表中同时保留正式 FID / KID 的 unsupported 行和小样本 proxy 行, 用于明确统计边界。
+    该函数只返回可进入正式质量表的 FID / KID 行。pixel histogram proxy
+    诊断指标由 `build_dataset_quality_diagnostic_metric_rows` 单独写出,
+    避免审稿或审计时把 proxy 诊断行误读为正式 FID / KID 结果。
+    """
+
+    record_values = tuple(records)
+    return _formal_metric_rows(
+        formal_source_features,
+        formal_comparison_features,
+        sample_pair_count=len(record_values),
+        formal_min_sample_count=formal_min_sample_count,
+    )
+
+
+def build_dataset_quality_diagnostic_metric_rows(
+    records: Iterable[DatasetQualityImageRecord],
+    root_path: Path,
+    image_search_roots: Iterable[Path] = (),
+) -> list[dict[str, Any]]:
+    """构造数据集级质量诊断指标表。
+
+    该函数保存 pixel histogram proxy 指标, 只用于定位图像集合是否存在
+    明显分布异常。它不返回正式 FID / KID 行, 也不允许直接支撑论文 claim。
     """
 
     record_values = tuple(records)
@@ -633,34 +655,25 @@ def build_dataset_quality_metric_rows(
         "sample_pair_count": len(record_values),
         "supports_paper_claim": False,
     }
-    rows = _formal_metric_rows(
-        formal_source_features,
-        formal_comparison_features,
-        sample_pair_count=len(record_values),
-        formal_min_sample_count=formal_min_sample_count,
-    )
     if not record_values:
-        return rows
+        return []
     if missing_image_file_count:
-        rows.extend(
-            [
-                {
-                    "quality_metric_name": "fid_pixel_feature_proxy",
-                    "quality_metric_value": "unsupported",
-                    "metric_status": "image_file_missing",
-                    "paper_metric_name": "fid",
-                    **pixel_metric_context,
-                },
-                {
-                    "quality_metric_name": "kid_pixel_feature_proxy",
-                    "quality_metric_value": "unsupported",
-                    "metric_status": "image_file_missing",
-                    "paper_metric_name": "kid",
-                    **pixel_metric_context,
-                },
-            ]
-        )
-        return rows
+        return [
+            {
+                "quality_metric_name": "fid_pixel_feature_proxy",
+                "quality_metric_value": "unsupported",
+                "metric_status": "image_file_missing",
+                "paper_metric_name": "fid",
+                **pixel_metric_context,
+            },
+            {
+                "quality_metric_name": "kid_pixel_feature_proxy",
+                "quality_metric_value": "unsupported",
+                "metric_status": "image_file_missing",
+                "paper_metric_name": "kid",
+                **pixel_metric_context,
+            },
+        ]
     pixel_started_at = time.monotonic()
     pixel_total = len(source_paths) + len(comparison_paths)
     _emit_metric_progress(
@@ -693,36 +706,35 @@ def build_dataset_quality_metric_rows(
             )
     source_array = np.vstack(source_features)
     comparison_array = np.vstack(comparison_features)
-    rows.extend(
-        [
-            {
-                "quality_metric_name": "fid_pixel_feature_proxy",
-                "quality_metric_value": _diagonal_gaussian_fid(source_array, comparison_array),
-                "metric_status": "measured_small_sample_proxy",
-                "paper_metric_name": "fid",
-                **pixel_metric_context,
-            },
-            {
-                "quality_metric_name": "kid_pixel_feature_proxy",
-                "quality_metric_value": _biased_polynomial_mmd(source_array, comparison_array),
-                "metric_status": "measured_small_sample_proxy",
-                "paper_metric_name": "kid",
-                **pixel_metric_context,
-            },
-        ]
-    )
-    return rows
+    return [
+        {
+            "quality_metric_name": "fid_pixel_feature_proxy",
+            "quality_metric_value": _diagonal_gaussian_fid(source_array, comparison_array),
+            "metric_status": "measured_small_sample_proxy",
+            "paper_metric_name": "fid",
+            **pixel_metric_context,
+        },
+        {
+            "quality_metric_name": "kid_pixel_feature_proxy",
+            "quality_metric_value": _biased_polynomial_mmd(source_array, comparison_array),
+            "metric_status": "measured_small_sample_proxy",
+            "paper_metric_name": "kid",
+            **pixel_metric_context,
+        },
+    ]
 
 
 def build_dataset_quality_summary(
     records: Iterable[DatasetQualityImageRecord],
     metric_rows: Iterable[Mapping[str, Any]],
+    diagnostic_metric_rows: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """聚合数据集级质量证据摘要。"""
 
     record_values = tuple(records)
     rows = tuple(metric_rows)
-    proxy_ready = any(str(row.get("metric_status")) == "measured_small_sample_proxy" for row in rows)
+    diagnostic_rows = tuple(diagnostic_metric_rows)
+    proxy_ready = any(str(row.get("metric_status")) == "measured_small_sample_proxy" for row in diagnostic_rows)
     measured_formal_metric_names = {
         str(row.get("quality_metric_name"))
         for row in rows
@@ -763,6 +775,8 @@ def build_dataset_quality_summary(
     return {
         "construction_unit_name": "dataset_level_quality_evidence",
         "dataset_quality_record_count": len(record_values),
+        "formal_quality_metric_count": len(rows),
+        "diagnostic_quality_metric_count": len(diagnostic_rows),
         "source_image_count": len(record_values),
         "comparison_image_count": len(record_values),
         "sample_pair_count": len(record_values),

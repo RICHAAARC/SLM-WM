@@ -19,7 +19,7 @@
 - `experiments/runners/threshold_calibration.py`: fixed-FPR 阈值校准、clean negative 边界和 geometric rescue 边界记录。
 - `experiments/runners/real_attack_evaluation.py`: 再扩散、再生成、语义编辑和自适应去水印类真实攻击闭环。
 - `experiments/runners/conventional_geometric_attack_evaluation.py`: 常规失真、几何变换与 photometric 攻击闭环。
-- `experiments/runners/dataset_level_quality.py`: dataset-level FID / KID 质量证据导入、特征提取与打包。
+- `experiments/runners/dataset_level_quality.py`: dataset-level FID / KID 质量证据导入、特征提取与打包。正式质量表 `dataset_quality_metrics.csv` 只包含 Inception feature backend 的 FID / KID; pixel proxy 只写入诊断表 `dataset_quality_diagnostic_metrics.csv`。
 - `experiments/runners/sd_runtime_cold_start.py`: 真实 SD runtime 诊断, 包括模型加载、latent trajectory 和环境报告。
 - `experiments/runners/minimal_latent_injection.py`: 最小 diffusion latent injection 机制预检。
 

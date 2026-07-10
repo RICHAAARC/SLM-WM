@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 
 from experiments.protocol import (
     FORMAL_FEATURE_BACKEND,
+    build_dataset_quality_diagnostic_metric_rows,
     build_dataset_quality_image_records,
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
@@ -474,7 +475,9 @@ def write_dataset_level_quality_outputs(
 ) -> dict[str, Any]:
     """写出数据集级质量 records、metrics、summary 和 manifest。
 
-    当前实现只生成小样本 pixel feature proxy, 明确保持正式 FID / KID 为 unsupported。
+    `dataset_quality_metrics.csv` 只保存正式 FID / KID 行。pixel histogram
+    proxy 诊断指标单独写入 `dataset_quality_diagnostic_metrics.csv`,
+    防止正式质量表被误读为 proxy 实现。
     """
 
     root_path = Path(root).resolve()
@@ -522,21 +525,29 @@ def write_dataset_level_quality_outputs(
         formal_comparison_features=formal_feature_payload["comparison_features"],
         formal_min_sample_count=formal_min_sample_count,
     )
+    diagnostic_metric_rows = build_dataset_quality_diagnostic_metric_rows(
+        records,
+        root_path,
+        image_search_roots=all_image_search_roots,
+    )
 
     records_path = resolved_output_dir / "dataset_quality_image_records.jsonl"
     image_resolution_records_path = resolved_output_dir / "dataset_quality_image_resolution_records.jsonl"
     formal_feature_import_report_path = resolved_output_dir / "dataset_quality_formal_feature_import_report.json"
     metrics_path = resolved_output_dir / "dataset_quality_metrics.csv"
+    diagnostic_metrics_path = resolved_output_dir / "dataset_quality_diagnostic_metrics.csv"
     summary_path = resolved_output_dir / "dataset_quality_summary.json"
     manifest_path = resolved_output_dir / "manifest.local.json"
     resolved_image_file_count = sum(1 for record in image_resolution_records if record["resolution_status"] != "image_file_missing")
     materialized_image_input_count = sum(1 for record in image_resolution_records if record["materialized_image_input"])
 
     summary = {
-        **build_dataset_quality_summary(records, metric_rows),
+        **build_dataset_quality_summary(records, metric_rows, diagnostic_metric_rows),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "real_attack_registry_path": relative_or_absolute(resolved_registry_path, root_path),
         "dataset_quality_metrics_path": relative_or_absolute(metrics_path, root_path),
+        "dataset_quality_formal_metrics_path": relative_or_absolute(metrics_path, root_path),
+        "dataset_quality_diagnostic_metrics_path": relative_or_absolute(diagnostic_metrics_path, root_path),
         "dataset_quality_image_resolution_records_path": relative_or_absolute(image_resolution_records_path, root_path),
         "dataset_quality_formal_feature_import_report_path": relative_or_absolute(
             formal_feature_import_report_path,
@@ -576,6 +587,21 @@ def write_dataset_level_quality_outputs(
             "supports_paper_claim",
         ],
     )
+    write_csv(
+        diagnostic_metrics_path,
+        diagnostic_metric_rows,
+        [
+            "quality_metric_name",
+            "quality_metric_value",
+            "metric_status",
+            "paper_metric_name",
+            "feature_backend",
+            "source_image_count",
+            "comparison_image_count",
+            "sample_pair_count",
+            "supports_paper_claim",
+        ],
+    )
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
     input_paths = [relative_or_absolute(resolved_registry_path, root_path)] if resolved_registry_path.exists() else []
@@ -594,6 +620,7 @@ def write_dataset_level_quality_outputs(
             image_resolution_records_path,
             formal_feature_import_report_path,
             metrics_path,
+            diagnostic_metrics_path,
             summary_path,
             *materialized_image_paths,
             manifest_path,
@@ -609,6 +636,7 @@ def write_dataset_level_quality_outputs(
             "image_resolution_records_digest": build_stable_digest(image_resolution_records),
             "formal_feature_import_report_digest": build_stable_digest(formal_feature_payload["report"]),
             "metric_rows_digest": build_stable_digest(metric_rows),
+            "diagnostic_metric_rows_digest": build_stable_digest(diagnostic_metric_rows),
             "summary_digest": build_stable_digest(summary),
         },
         code_version=resolve_code_version(root_path),

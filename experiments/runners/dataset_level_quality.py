@@ -471,7 +471,7 @@ def run_default_dataset_level_quality_from_drive_plan(
             input_manifest["real_attack_evaluation_input_package_path"],
             input_manifest["aligned_rescoring_input_package_path"],
         )
-        emit_dataset_level_quality_status("生成初始图像记录与 pixel proxy")
+        emit_dataset_level_quality_status("生成初始图像记录与诊断质量表")
         write_dataset_level_quality_outputs(root=root_path, input_package_paths=input_packages)
         emit_dataset_level_quality_status("提取 Inception 特征")
         feature_payload = write_formal_feature_records(
@@ -517,6 +517,11 @@ def run_default_dataset_level_quality_from_drive_plan(
         "supports_paper_claim": False,
         "unsupported_reason": summary["unsupported_reason"],
         "dataset_quality_metrics_path": summary["dataset_quality_metrics_path"],
+        "dataset_quality_formal_metrics_path": summary.get(
+            "dataset_quality_formal_metrics_path",
+            summary["dataset_quality_metrics_path"],
+        ),
+        "dataset_quality_diagnostic_metrics_path": summary.get("dataset_quality_diagnostic_metrics_path", ""),
         "dataset_quality_formal_feature_import_report_path": summary[
             "dataset_quality_formal_feature_import_report_path"
         ],

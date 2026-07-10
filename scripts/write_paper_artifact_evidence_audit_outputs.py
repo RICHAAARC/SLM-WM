@@ -149,6 +149,7 @@ def build_input_bundle(
             "quality_metrics_summary": "outputs/threshold_calibration/quality_metrics_summary.csv",
             "dataset_quality_summary": "outputs/dataset_level_quality/dataset_quality_summary.json",
             "dataset_quality_metrics": "outputs/dataset_level_quality/dataset_quality_metrics.csv",
+            "dataset_quality_diagnostic_metrics": "outputs/dataset_level_quality/dataset_quality_diagnostic_metrics.csv",
             "score_distribution_table": "outputs/threshold_calibration/score_distribution_table.csv",
             "roc_curve_points": "outputs/threshold_calibration/roc_curve_points.csv",
             "det_curve_points": "outputs/threshold_calibration/det_curve_points.csv",

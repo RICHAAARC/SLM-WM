@@ -17,6 +17,7 @@ from experiments.protocol import (
     FORMAL_FID_KID_BLOCKER,
     FORMAL_FID_KID_SAMPLE_BLOCKER,
     PIXEL_FEATURE_BACKEND,
+    build_dataset_quality_diagnostic_metric_rows,
     build_dataset_quality_image_records,
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
@@ -73,14 +74,16 @@ def test_dataset_quality_protocol_keeps_formal_fid_kid_unsupported(tmp_path: Pat
     rows = registry_rows(tmp_path)
     records = build_dataset_quality_image_records(rows, tmp_path)
     metric_rows = build_dataset_quality_metric_rows(records, tmp_path)
-    summary = build_dataset_quality_summary(records, metric_rows)
+    diagnostic_metric_rows = build_dataset_quality_diagnostic_metric_rows(records, tmp_path)
+    summary = build_dataset_quality_summary(records, metric_rows, diagnostic_metric_rows)
     rows_by_name = {row["quality_metric_name"]: row for row in metric_rows}
+    diagnostic_rows_by_name = {row["quality_metric_name"]: row for row in diagnostic_metric_rows}
 
     assert len(records) == 2
     assert rows_by_name["fid"]["metric_status"] == FORMAL_FID_KID_BLOCKER
     assert rows_by_name["kid"]["metric_status"] == FORMAL_FID_KID_BLOCKER
-    assert rows_by_name["fid_pixel_feature_proxy"]["metric_status"] == "measured_small_sample_proxy"
-    assert rows_by_name["kid_pixel_feature_proxy"]["metric_status"] == "measured_small_sample_proxy"
+    assert diagnostic_rows_by_name["fid_pixel_feature_proxy"]["metric_status"] == "measured_small_sample_proxy"
+    assert diagnostic_rows_by_name["kid_pixel_feature_proxy"]["metric_status"] == "measured_small_sample_proxy"
     assert summary["feature_backend"] == PIXEL_FEATURE_BACKEND
     assert summary["formal_feature_backend"] == FORMAL_FEATURE_BACKEND
     assert summary["pixel_proxy_feature_backend"] == PIXEL_FEATURE_BACKEND
@@ -107,15 +110,22 @@ def test_dataset_quality_writer_outputs_rebuildable_artifacts(tmp_path: Path) ->
     manifest = write_dataset_level_quality_outputs(root=tmp_path)
     output_dir = tmp_path / "outputs" / "dataset_level_quality"
     metric_rows = list(csv.DictReader((output_dir / "dataset_quality_metrics.csv").open(encoding="utf-8")))
+    diagnostic_metric_rows = list(
+        csv.DictReader((output_dir / "dataset_quality_diagnostic_metrics.csv").open(encoding="utf-8"))
+    )
     summary = json.loads((output_dir / "dataset_quality_summary.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "dataset_level_quality_manifest"
-    assert {row["quality_metric_name"] for row in metric_rows} == {
-        "fid",
-        "kid",
+    assert {row["quality_metric_name"] for row in metric_rows} == {"fid", "kid"}
+    assert {row["quality_metric_name"] for row in diagnostic_metric_rows} == {
         "fid_pixel_feature_proxy",
         "kid_pixel_feature_proxy",
     }
+    assert summary["dataset_quality_formal_metrics_path"] == "outputs/dataset_level_quality/dataset_quality_metrics.csv"
+    assert (
+        summary["dataset_quality_diagnostic_metrics_path"]
+        == "outputs/dataset_level_quality/dataset_quality_diagnostic_metrics.csv"
+    )
     assert summary["dataset_level_quality_proxy_ready"] is True
     assert summary["formal_fid_kid_ready"] is False
     assert summary["formal_fid_kid_claim_gate_ready"] is False
@@ -304,7 +314,8 @@ def test_dataset_quality_formal_feature_import_measures_when_scale_is_ready(tmp_
         formal_comparison_features=formal_comparison_features,
         formal_min_sample_count=2,
     )
-    summary = build_dataset_quality_summary(records, metric_rows)
+    diagnostic_metric_rows = build_dataset_quality_diagnostic_metric_rows(records, tmp_path)
+    summary = build_dataset_quality_summary(records, metric_rows, diagnostic_metric_rows)
     rows_by_name = {row["quality_metric_name"]: row for row in metric_rows}
 
     assert rows_by_name["fid"]["metric_status"] == "measured"

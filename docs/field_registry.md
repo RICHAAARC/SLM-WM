@@ -893,6 +893,8 @@ Notebook 与 repository module 的跨边界数据
 | source_image_count | metric | none | false | false | false | 数据集级质量输入中的 source 图像数量。 |
 | comparison_image_count | metric | none | false | false | false | 数据集级质量输入中的 comparison 图像数量。 |
 | sample_pair_count | metric | none | false | false | false | 数据集级质量输入中的图像配对数量。 |
+| formal_quality_metric_count | metric | none | false | false | false | 数据集级正式质量指标表中的指标行数量, 正式表只包含 FID / KID。 |
+| diagnostic_quality_metric_count | metric | none | false | false | false | 数据集级诊断质量指标表中的指标行数量, 用于记录不支撑 claim 的 proxy 指标。 |
 | dataset_level_quality_proxy_ready | governance | none | false | false | false | 数据集级质量 proxy 是否已完成并可审计。 |
 | formal_fid_kid_ready | governance | none | false | false | false | 正式 FID / KID 是否已由论文约定特征后端完成。 |
 | formal_fid_kid_metric_names_ready | governance | none | false | false | false | 正式 FID 与 KID 两个指标是否均已测量, 防止单个指标被误判为完整质量结论。 |
@@ -901,6 +903,8 @@ Notebook 与 repository module 的跨边界数据
 | dataset_quality_proxy_only | governance | none | false | false | false | 数据集级质量当前是否只有 pixel feature proxy 可用。 |
 | dataset_quality_claim_boundary | governance | none | false | false | false | 数据集级质量证据能够支撑的论文主张边界。 |
 | dataset_quality_summary_path | artifact | none | false | false | false | 数据集级质量摘要 JSON 路径。 |
+| dataset_quality_formal_metrics_path | artifact | none | false | false | false | 只包含正式 FID / KID 行的数据集级质量指标表路径。 |
+| dataset_quality_diagnostic_metrics_path | artifact | none | false | false | false | 单独保存 pixel proxy 诊断指标的数据集级质量指标表路径。 |
 | dataset_quality_formal_feature_import_report_path | artifact | none | false | false | false | 数据集级质量正式特征导入报告路径。 |
 | dataset_quality_image_role | protocol | none | true | false | false | 数据集级质量正式特征记录对应 source 或 comparison 图像角色。 |
 | feature_vector | artifact | none | true | false | false | 由 Inception 或论文约定视觉特征后端导出的单张图像特征向量。 |
@@ -915,7 +919,7 @@ Notebook 与 repository module 的跨边界数据
 | formal_feature_records_path | artifact | none | false | false | false | 数据集级质量正式视觉特征 JSONL 记录路径。 |
 | feature_model_name | runtime | none | false | false | false | 数据集级质量正式视觉特征提取所使用的模型名称。 |
 | feature_device_name | runtime | none | false | false | false | 数据集级质量正式视觉特征提取所使用的运行设备。 |
-| dataset_quality_metrics_path | artifact | none | false | false | false | 数据集级质量指标表路径。 |
+| dataset_quality_metrics_path | artifact | none | false | false | false | 数据集级正式质量指标表路径, 与 dataset_quality_formal_metrics_path 等价, 不包含 proxy 诊断行。 |
 | real_attack_registry_path | artifact | none | false | false | false | 数据集级质量脚本读取的真实攻击图像 registry 路径。 |
 | dataset_quality_image_resolution_records_path | artifact | none | false | false | false | 数据集级质量图像解析记录 JSONL 路径。 |
 | image_resolution_record_id | artifact | none | true | false | false | 单个数据集级质量图像解析记录的稳定标识。 |
@@ -939,7 +943,8 @@ Notebook 与 repository module 的跨边界数据
 | real_attack_extracted_entry_count | metric | none | false | false | false | 从真实攻击闭环前序包中解出的 registry 与 attacked image 文件数量。 |
 | real_attack_extracted_entries | artifact | none | false | false | false | 从真实攻击闭环前序包中解出的 registry 与 attacked image 文件路径集合。 |
 | dataset_quality_summary | artifact | none | false | false | false | 论文证据审计中数据集级质量摘要的逻辑路径键。 |
-| dataset_quality_metrics | artifact | none | false | false | false | 论文证据审计中数据集级质量指标表的逻辑路径键。 |
+| dataset_quality_metrics | artifact | none | false | false | false | 论文证据审计中数据集级正式质量指标表的逻辑路径键。 |
+| dataset_quality_diagnostic_metrics | artifact | none | false | false | false | 论文证据审计中数据集级诊断质量指标表的逻辑路径键, 不支撑 claim。 |
 | audit_item_id | governance | none | false | false | false | 论文证据审计表中单个可重建产物检查项的稳定标识。 |
 | artifact_kind | artifact | none | false | false | false | 论文证据审计中产物类型, 例如 table 或 figure_data。 |
 | artifact_name | artifact | none | false | false | false | 论文证据审计中产物的人类可读名称。 |

@@ -29,7 +29,7 @@ python scripts/run_gpu_server_result_closure.py \
 - `write_attack_matrix_outputs.py`: 重建攻击矩阵表和 manifest。
 - `write_external_baseline_comparison_outputs.py`: 重建外部 baseline 对比表。
 - `write_internal_ablation_outputs.py`: 重建内部消融证据。
-- `write_dataset_level_quality_outputs.py`: 重建 dataset-level 质量证据摘要。
+- `write_dataset_level_quality_outputs.py`: 重建 dataset-level 质量证据摘要; 正式表只输出 Inception FID / KID, proxy 指标单独输出为诊断表。
 
 上述命令必须读取受治理 records、manifests 或结果包, 不得手工拼接正式论文结论。
 

@@ -1034,6 +1034,10 @@ def test_dataset_level_quality_outputs_can_be_packaged_and_mirrored(tmp_path: Pa
         encoding="utf-8",
     )
     (quality_dir / "dataset_quality_metrics.csv").write_text("quality_metric_name,metric_status\nfid,unsupported\n", encoding="utf-8")
+    (quality_dir / "dataset_quality_diagnostic_metrics.csv").write_text(
+        "quality_metric_name,metric_status\nfid_pixel_feature_proxy,measured_small_sample_proxy\n",
+        encoding="utf-8",
+    )
     (quality_dir / "dataset_quality_summary.json").write_text('{"formal_fid_kid_ready":false}\n', encoding="utf-8")
     (quality_dir / "dataset_level_quality_environment_report.json").write_text('{"cuda_available":true}\n', encoding="utf-8")
     (quality_dir / "manifest.local.json").write_text('{"artifact_id":"dataset_level_quality_manifest"}\n', encoding="utf-8")
@@ -1068,6 +1072,7 @@ def test_dataset_level_quality_outputs_can_be_packaged_and_mirrored(tmp_path: Pa
         assert "outputs/dataset_level_quality/dataset_quality_formal_feature_records.jsonl" in names
         assert "outputs/dataset_level_quality/dataset_quality_formal_feature_import_report.json" in names
         assert "outputs/dataset_level_quality/dataset_quality_metrics.csv" in names
+        assert "outputs/dataset_level_quality/dataset_quality_diagnostic_metrics.csv" in names
         assert "outputs/dataset_level_quality/dataset_quality_summary.json" in names
         assert "outputs/dataset_level_quality/dataset_level_quality_environment_report.json" in names
         assert "outputs/dataset_level_quality/manifest.local.json" in names
