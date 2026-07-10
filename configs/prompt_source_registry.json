@@ -1,0 +1,104 @@
+{
+  "license": "Apache-2.0",
+  "normalization_policy": "unicode_preserved_lowercase_whitespace_for_deduplication",
+  "prompt_sets": {
+    "full_paper": {
+      "added_count": 1000,
+      "category_counts": {
+        "Abstract": 34,
+        "Animals": 196,
+        "Artifacts": 171,
+        "Arts": 44,
+        "Food & Beverage": 44,
+        "Illustrations": 65,
+        "Indoor Scenes": 24,
+        "Outdoor Scenes": 80,
+        "People": 115,
+        "Produce & Plants": 32,
+        "Vehicles": 65,
+        "World Knowledge": 130
+      },
+      "challenge_counts": {
+        "Basic": 177,
+        "Complex": 61,
+        "Fine-grained Detail": 194,
+        "Imagination": 87,
+        "Linguistic Structures": 38,
+        "Perspective": 46,
+        "Properties & Positioning": 10,
+        "Quantity": 51,
+        "Simple Detail": 147,
+        "Style & Format": 134,
+        "Writing & Symbols": 55
+      },
+      "original_count": 6000,
+      "result_count": 7000,
+      "selected_prompt_digest": "ac984b0ec88c04fbc7ee6530dc7ab53b66ac3ece1086073c474dfd3ab5559ada"
+    },
+    "pilot_paper": {
+      "added_count": 100,
+      "category_counts": {
+        "Abstract": 3,
+        "Animals": 20,
+        "Artifacts": 17,
+        "Arts": 4,
+        "Food & Beverage": 4,
+        "Illustrations": 7,
+        "Indoor Scenes": 2,
+        "Outdoor Scenes": 8,
+        "People": 12,
+        "Produce & Plants": 3,
+        "Vehicles": 7,
+        "World Knowledge": 13
+      },
+      "challenge_counts": {
+        "Basic": 21,
+        "Complex": 5,
+        "Fine-grained Detail": 16,
+        "Imagination": 13,
+        "Linguistic Structures": 5,
+        "Perspective": 1,
+        "Properties & Positioning": 1,
+        "Quantity": 11,
+        "Simple Detail": 9,
+        "Style & Format": 11,
+        "Writing & Symbols": 7
+      },
+      "original_count": 600,
+      "result_count": 700,
+      "selected_prompt_digest": "0cb84b288fe65033bf3d1a39a608324f952f287f926d42831b66e7141bf1a4de"
+    },
+    "probe_paper": {
+      "added_count": 10,
+      "category_counts": {
+        "Animals": 2,
+        "Artifacts": 2,
+        "Food & Beverage": 1,
+        "Illustrations": 1,
+        "Outdoor Scenes": 1,
+        "People": 1,
+        "Vehicles": 1,
+        "World Knowledge": 1
+      },
+      "challenge_counts": {
+        "Basic": 1,
+        "Fine-grained Detail": 1,
+        "Imagination": 2,
+        "Simple Detail": 3,
+        "Style & Format": 1,
+        "Writing & Symbols": 2
+      },
+      "original_count": 60,
+      "result_count": 70,
+      "selected_prompt_digest": "2975e260b6c168c71be59b889a8e8000370adfdb512700d993f0a48572e89e21"
+    }
+  },
+  "selection_policy": "category_proportional_sha256_without_cross_set_reuse",
+  "source_data_url": "https://github.com/google-research/parti/blob/5a657978134374ce28973948331b319adef164bd/PartiPrompts.tsv",
+  "source_exclusion_policy": "exclude_repository_reserved_progress_markers_before_sha256_selection",
+  "source_file_sha256": "66b9d693fe1231fe2a9e7541c85a2a5814317a92f9fa183b770653b78e328f82",
+  "source_id": "google_research_parti_prompts",
+  "source_record_count": 1632,
+  "source_revision": "5a657978134374ce28973948331b319adef164bd",
+  "source_url": "https://github.com/google-research/parti"
+}

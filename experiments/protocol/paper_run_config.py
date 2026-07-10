@@ -29,6 +29,14 @@ DEFAULT_INFERENCE_STEPS = 20
 DEFAULT_GUIDANCE_SCALE = 4.5
 DEFAULT_ATTENTION_RUNTIME_STRENGTH = 0.025
 DEFAULT_ATTENTION_INJECTION_STEPS = (6, 10, 14)
+DEFAULT_JACOBIAN_CANDIDATE_COUNT = 12
+DEFAULT_NULL_SPACE_RANK = 4
+DEFAULT_LF_RELATIVE_STRENGTH = 0.0025
+DEFAULT_TAIL_RELATIVE_STRENGTH = 0.0015
+DEFAULT_ATTENTION_RELATIVE_STRENGTH = 0.0010
+DEFAULT_TAIL_FRACTION = 0.20
+DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION = 0.01
+DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL = 0.75
 UNBOUNDED_LIMIT_TOKENS = {"", "all", "none", "unlimited"}
 SHARED_METHOD_SETTING_FIELDS = (
     "content_vector_width",
@@ -37,13 +45,21 @@ SHARED_METHOD_SETTING_FIELDS = (
     "guidance_scale",
     "attention_runtime_strength",
     "attention_injection_steps",
+    "jacobian_candidate_count",
+    "null_space_rank",
+    "lf_relative_strength",
+    "tail_relative_strength",
+    "attention_relative_strength",
+    "tail_fraction",
+    "minimum_projection_energy_retention",
+    "maximum_relative_response_residual",
 )
 
 RUN_DEFAULTS: dict[str, dict[str, Any]] = {
     PROBE_PAPER_RUN_NAME: {
         "prompt_set": PROBE_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[PROBE_PAPER_RUN_NAME].as_posix(),
-        "fallback_prompt_count": 60,
+        "fallback_prompt_count": 70,
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/probe_paper_results",
         "protocol_profile": "probe_paper_fixed_fpr_0_1",
         "target_fpr": 0.1,
@@ -52,7 +68,7 @@ RUN_DEFAULTS: dict[str, dict[str, Any]] = {
     PILOT_PAPER_RUN_NAME: {
         "prompt_set": PILOT_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[PILOT_PAPER_RUN_NAME].as_posix(),
-        "fallback_prompt_count": 600,
+        "fallback_prompt_count": 700,
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results",
         "protocol_profile": "pilot_paper_fixed_fpr_0_01",
         "target_fpr": 0.01,
@@ -61,7 +77,7 @@ RUN_DEFAULTS: dict[str, dict[str, Any]] = {
     FULL_PAPER_RUN_NAME: {
         "prompt_set": FULL_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[FULL_PAPER_RUN_NAME].as_posix(),
-        "fallback_prompt_count": 6000,
+        "fallback_prompt_count": 7000,
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/full_paper_results",
         "protocol_profile": "full_paper_fixed_fpr_0_001",
         "target_fpr": 0.001,
@@ -90,6 +106,14 @@ class PaperRunConfig:
     guidance_scale: float = DEFAULT_GUIDANCE_SCALE
     attention_runtime_strength: float = DEFAULT_ATTENTION_RUNTIME_STRENGTH
     attention_injection_steps: tuple[int, ...] = DEFAULT_ATTENTION_INJECTION_STEPS
+    jacobian_candidate_count: int = DEFAULT_JACOBIAN_CANDIDATE_COUNT
+    null_space_rank: int = DEFAULT_NULL_SPACE_RANK
+    lf_relative_strength: float = DEFAULT_LF_RELATIVE_STRENGTH
+    tail_relative_strength: float = DEFAULT_TAIL_RELATIVE_STRENGTH
+    attention_relative_strength: float = DEFAULT_ATTENTION_RELATIVE_STRENGTH
+    tail_fraction: float = DEFAULT_TAIL_FRACTION
+    minimum_projection_energy_retention: float = DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION
+    maximum_relative_response_residual: float = DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL
 
     def __post_init__(self) -> None:
         """集中校验内容载体维度边界。
@@ -103,6 +127,14 @@ class PaperRunConfig:
             raise ValueError("content_basis_rank 必须为正整数")
         if self.content_basis_rank > self.content_vector_width:
             raise ValueError("content_basis_rank 不得大于 content_vector_width")
+        if self.jacobian_candidate_count < self.null_space_rank or self.null_space_rank <= 0:
+            raise ValueError("jacobian_candidate_count 必须不小于正的 null_space_rank")
+        if not 0.0 < self.tail_fraction <= 1.0:
+            raise ValueError("tail_fraction 必须位于 (0, 1]")
+        if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
+            raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
+        if not 0.0 < self.maximum_relative_response_residual <= 1.0:
+            raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 兼容字典, 便于写入 manifest 或 Notebook 日志。"""
@@ -202,11 +234,11 @@ def derive_minimum_clean_negative_count(prompt_count: int, target_fpr: float) ->
 
 
 def derive_dataset_level_quality_minimum_count(prompt_count: int) -> int:
-    """从样本规模派生数据集级质量最小样本门禁。"""
+    """要求正式 FID/KID 覆盖当前运行层级的全部 Prompt 图像对。"""
 
     if prompt_count <= 0:
         raise ValueError("prompt_count 必须为正整数")
-    return max(1, min(DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT, int(prompt_count)))
+    return int(prompt_count)
 
 
 def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
@@ -267,6 +299,36 @@ def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
         attention_injection_steps=parse_non_negative_int_tuple(
             os.environ.get("SLM_WM_ATTENTION_INJECTION_STEPS"),
             DEFAULT_ATTENTION_INJECTION_STEPS,
+        ),
+        jacobian_candidate_count=parse_positive_int(
+            os.environ.get("SLM_WM_JACOBIAN_CANDIDATE_COUNT"),
+            DEFAULT_JACOBIAN_CANDIDATE_COUNT,
+        ),
+        null_space_rank=parse_positive_int(
+            os.environ.get("SLM_WM_NULL_SPACE_RANK"),
+            DEFAULT_NULL_SPACE_RANK,
+        ),
+        lf_relative_strength=float(
+            os.environ.get("SLM_WM_LF_RELATIVE_STRENGTH", str(DEFAULT_LF_RELATIVE_STRENGTH))
+        ),
+        tail_relative_strength=float(
+            os.environ.get("SLM_WM_TAIL_RELATIVE_STRENGTH", str(DEFAULT_TAIL_RELATIVE_STRENGTH))
+        ),
+        attention_relative_strength=float(
+            os.environ.get("SLM_WM_ATTENTION_RELATIVE_STRENGTH", str(DEFAULT_ATTENTION_RELATIVE_STRENGTH))
+        ),
+        tail_fraction=float(os.environ.get("SLM_WM_TAIL_FRACTION", str(DEFAULT_TAIL_FRACTION))),
+        minimum_projection_energy_retention=float(
+            os.environ.get(
+                "SLM_WM_MINIMUM_PROJECTION_ENERGY_RETENTION",
+                str(DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION),
+            )
+        ),
+        maximum_relative_response_residual=float(
+            os.environ.get(
+                "SLM_WM_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL",
+                str(DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL),
+            )
         ),
     )
 

@@ -12,16 +12,17 @@ from experiments.protocol.prompts import PromptProtocolRecord
 SPLIT_NAMES = ("dev", "calibration", "test")
 SAMPLE_ROLES = ("positive_source", "clean_negative", "attacked_negative")
 UNASSIGNED_SPLIT = "unassigned"
-DEV_RATIO = 0.05
-CALIBRATION_RATIO = 0.55
+# 70 / 700 / 7000 三级规模共享 3:33:34 比例, 分别得到
+# dev 3/30/300、calibration 33/330/3300 和 test 34/340/3400。
+DEV_RATIO = 3.0 / 70.0
+CALIBRATION_RATIO = 33.0 / 70.0
 
 
 def dev_ratio_for_prompt_count(prompt_count: int) -> float:
     """返回统一 dev 占比。
 
-    pilot_paper 与 full_paper 使用同一 split 比例, 避免两类论文运行层级
-    出现不同的样本划分语义。dev 只用于开发检查, fixed-FPR 阈值由
-    calibration clean negative 控制, 因此这里把更多样本留给 calibration。
+    三类论文运行层级使用同一 3:33:34 比例, 避免不同运行规模出现不同的
+    样本划分语义。calibration 负责冻结阈值, test 提供独立固定 FPR 置信上界。
     """
 
     return DEV_RATIO

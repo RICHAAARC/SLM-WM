@@ -138,6 +138,7 @@ def write_attack_matrix_inputs(repo_root: Path) -> None:
             {
                 "formal_fid_kid_metric_names_ready": True,
                 "formal_fid_kid_claim_gate_ready": True,
+                "canonical_formal_feature_extractor_ready": True,
                 "formal_fid_kid_claim_blocker": "",
                 "dataset_quality_claim_boundary": "formal_fid_kid_measured",
             },
@@ -278,26 +279,17 @@ def test_pilot_paper_result_writer_materializes_slm_and_governed_baseline_record
     summary = json.loads((output_dir / "pilot_paper_result_record_summary.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "pilot_paper_fixed_fpr_result_records_manifest"
-    assert {row["method_id"] for row in records} == {"slm_wm_current", "tree_ring"}
+    assert {row["method_id"] for row in records} == {"tree_ring"}
     assert all(row["result_protocol_name"] == "pilot_paper_fixed_fpr_common_protocol" for row in records)
     assert all(row["target_fpr"] == 0.01 for row in records)
     assert all(row["paper_claim_scale"] == "pilot_paper" for row in records)
     assert all(row["evidence_paths"] for row in records)
-    slm_record = next(row for row in records if row["method_id"] == "slm_wm_current")
     baseline_record = next(row for row in records if row["method_id"] == "tree_ring")
-    assert slm_record["detector_input_access_mode"] == "generation_latent_trace_required"
-    assert slm_record["blind_image_detector"] is False
-    assert slm_record["baseline_fairness_boundary"] == "external_baseline_comparison_requires_matching_detector_access"
-    assert slm_record["formal_fid_kid_claim_gate_ready"] is True
-    assert slm_record["formal_fid_kid_claim_blocker"] == ""
-    assert slm_record["dataset_quality_formal_metric_ready"] is True
-    assert slm_record["dataset_quality_claim_boundary"] == "formal_fid_kid_measured"
-    assert "outputs/dataset_level_quality/dataset_quality_summary.json" in slm_record["evidence_paths"]
     assert baseline_record["detector_input_access_mode"] == "method_native_or_final_image"
     assert validation["pilot_paper_result_import_ready"] is True
-    assert validation["accepted_pilot_paper_import_count"] == 2
-    assert validation["accepted_pilot_paper_claim_record_count"] == 2
-    assert summary["pilot_paper_result_record_count"] == 2
+    assert validation["accepted_pilot_paper_import_count"] == 1
+    assert validation["accepted_pilot_paper_claim_record_count"] == 1
+    assert summary["pilot_paper_result_record_count"] == 1
     assert summary["pilot_paper_template_coverage_ready"] is False
     assert summary["pilot_paper_template_missing_count"] > 0
     assert any(row["template_covered"] == "True" for row in coverage_rows)
@@ -326,13 +318,13 @@ def test_pilot_paper_result_writer_excludes_diagnostic_records_outside_template(
         (output_dir / "pilot_paper_result_import_validation_report.json").read_text(encoding="utf-8")
     )
 
-    assert len(records) == 2
-    assert {row["method_id"] for row in records} == {"slm_wm_current", "tree_ring"}
+    assert len(records) == 1
+    assert {row["method_id"] for row in records} == {"tree_ring"}
     assert {row["attack_name"] for row in records} == {"jpeg_compression"}
     assert {row["resource_profile"] for row in records} == {"full_main"}
     assert all(row["supports_paper_claim"] is True for row in records)
-    assert validation["accepted_pilot_paper_import_count"] == 2
-    assert validation["accepted_pilot_paper_claim_record_count"] == 2
+    assert validation["accepted_pilot_paper_import_count"] == 1
+    assert validation["accepted_pilot_paper_claim_record_count"] == 1
 
 
 @pytest.mark.quick
@@ -358,7 +350,7 @@ def test_result_writer_switches_records_to_full_paper_claim_scale(
     ]
     summary = json.loads((output_dir / "pilot_paper_result_record_summary.json").read_text(encoding="utf-8"))
 
-    assert {row["method_id"] for row in records} == {"slm_wm_current", "tree_ring"}
+    assert {row["method_id"] for row in records} == {"tree_ring"}
     assert all(row["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol" for row in records)
     assert all(row["result_claim_scope"] == "full_claim" for row in records)
     assert all(row["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol" for row in records)
@@ -399,6 +391,108 @@ def test_result_writer_blocks_retention_proxy_from_claim_boundary(tmp_path: Path
 
 
 @pytest.mark.quick
+def test_result_writer_accepts_image_only_method_records(tmp_path: Path) -> None:
+    """仅图像检测结果应替代生成轨迹检测记录进入方法主张边界。"""
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    write_pilot_prompt_file(repo_root)
+    write_attack_matrix_inputs(repo_root)
+    write_baseline_inputs(repo_root, accepted=False)
+    runtime_dir = repo_root / "outputs" / "image_only_dataset_runtime" / "pilot_paper"
+    runtime_dir.mkdir(parents=True)
+    metric_rows = [
+        {
+            "attack_family": "clean",
+            "attack_name": "none",
+            "resource_profile": "clean",
+            "sample_role": "clean_negative",
+            "record_count": 340,
+            "positive_count": 0,
+            "positive_rate": 0.0,
+            "positive_rate_upper_95": 0.009,
+            "content_score_mean": 0.01,
+            "fixed_fpr_upper_bound_ready": True,
+        },
+        {
+            "attack_family": "clean",
+            "attack_name": "none",
+            "resource_profile": "clean",
+            "sample_role": "positive_source",
+            "record_count": 340,
+            "positive_count": 330,
+            "positive_rate": 330 / 340,
+            "positive_rate_upper_95": 0.99,
+            "content_score_mean": 0.80,
+            "fixed_fpr_upper_bound_ready": False,
+        },
+        {
+            "attack_family": "standard_distortion",
+            "attack_name": "jpeg_compression",
+            "resource_profile": "full_main",
+            "sample_role": "clean_negative",
+            "record_count": 340,
+            "positive_count": 1,
+            "positive_rate": 1 / 340,
+            "positive_rate_upper_95": 0.02,
+            "content_score_mean": 0.02,
+            "fixed_fpr_upper_bound_ready": False,
+        },
+        {
+            "attack_family": "standard_distortion",
+            "attack_name": "jpeg_compression",
+            "resource_profile": "full_main",
+            "sample_role": "positive_source",
+            "record_count": 340,
+            "positive_count": 300,
+            "positive_rate": 300 / 340,
+            "positive_rate_upper_95": 0.92,
+            "content_score_mean": 0.60,
+            "fixed_fpr_upper_bound_ready": False,
+        },
+    ]
+    metrics_path = runtime_dir / "test_detection_metrics.csv"
+    with metrics_path.open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(metric_rows[0]))
+        writer.writeheader()
+        writer.writerows(metric_rows)
+    (runtime_dir / "dataset_runtime_summary.json").write_text(
+        json.dumps(
+            {
+                "protocol_decision": "pass",
+                "supports_paper_claim": True,
+                "clean_test_fixed_fpr_upper_bound_ready": True,
+                "wrong_key_test_fixed_fpr_upper_bound_ready": True,
+                "scientific_operator_gate_ready": True,
+                "attack_record_coverage_ready": True,
+                "attacked_image_evidence_chain_ready": True,
+                "real_gpu_attack_validation_ready": True,
+                "paired_ssim_mean": 0.99,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (runtime_dir / "image_only_detection_records.jsonl").write_text("{}\n", encoding="utf-8")
+    (runtime_dir / "manifest.local.json").write_text("{}\n", encoding="utf-8")
+
+    write_pilot_paper_result_record_outputs(root=repo_root, require_existing_evidence=True)
+    records = [
+        json.loads(line)
+        for line in (
+            repo_root / "outputs" / "pilot_paper_fixed_fpr_results" / "pilot_paper_result_records.jsonl"
+        ).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert {record["method_id"] for record in records} == {"slm_wm_current"}
+    assert records[0]["detector_input_access_mode"] == "image_key_public_model_only"
+    assert records[0]["blind_image_detector"] is True
+    assert records[0]["generation_latent_trace_required"] is False
+    assert records[0]["supports_paper_claim"] is True
+
+
+@pytest.mark.quick
 def test_pilot_paper_result_writer_keeps_unaccepted_baseline_out_of_claim_boundary(tmp_path: Path) -> None:
     """baseline 候选未被受治理导入报告接受时, 转换后的记录不得支撑 pilot_paper 主张。"""
 
@@ -418,10 +512,10 @@ def test_pilot_paper_result_writer_keeps_unaccepted_baseline_out_of_claim_bounda
     validation = json.loads(
         (output_dir / "pilot_paper_result_import_validation_report.json").read_text(encoding="utf-8")
     )
-    assert {row["method_id"] for row in records} == {"slm_wm_current"}
-    assert validation["pilot_paper_result_import_ready"] is True
-    assert validation["accepted_pilot_paper_claim_record_count"] == 1
-    assert validation["pilot_paper_claim_record_ready"] is True
+    assert records == []
+    assert validation["pilot_paper_result_import_ready"] is False
+    assert validation["accepted_pilot_paper_claim_record_count"] == 0
+    assert validation["pilot_paper_claim_record_ready"] is False
 
 
 @pytest.mark.quick

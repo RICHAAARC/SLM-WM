@@ -12,12 +12,8 @@ from typing import Any
 from experiments.runtime.archive_naming import utc_archive_token
 
 REQUIRED_CLOSURE_PACKAGE_PATTERNS: tuple[tuple[str, str], ...] = (
-    ("attention_geometry", "attention_geometry_package_*.zip"),
-    ("attention_latent_injection", "attention_latent_injection_package_*.zip"),
-    ("aligned_rescoring", "aligned_rescoring_package_*.zip"),
-    ("threshold_calibration", "threshold_calibration_package_*.zip"),
-    ("real_attack_evaluation", "real_attack_evaluation_package_*.zip"),
-    ("conventional_geometric_attack_evaluation", "conventional_geometric_attack_evaluation_package_*.zip"),
+    ("image_only_dataset_runtime", "image_only_dataset_runtime_package_*.zip"),
+    ("runtime_rerun_ablation", "runtime_rerun_ablation_package_*.zip"),
     ("dataset_level_quality", "dataset_level_quality_package_*.zip"),
     ("method_faithful_tree_ring", "external_baseline_method_faithful_package_tree_ring_*.zip"),
     ("method_faithful_gaussian_shading", "external_baseline_method_faithful_package_gaussian_shading_*.zip"),
@@ -110,11 +106,9 @@ def build_paper_result_closure_commands(
     complete_archive_name = _complete_archive_name(paper_run_name)
     return [
         [sys.executable, "scripts/write_pilot_paper_result_records.py", "--package-search-root", package_search_root, "--materialize-only"],
-        [sys.executable, "scripts/write_attack_matrix_outputs.py"],
         [sys.executable, "scripts/write_primary_baseline_result_candidates.py", "--target-fpr-override", target_fpr],
         [sys.executable, "scripts/write_primary_baseline_formal_import_protocol.py"],
         [sys.executable, "scripts/write_external_baseline_comparison_outputs.py"],
-        [sys.executable, "scripts/write_internal_ablation_outputs.py"],
         [sys.executable, "scripts/write_pilot_paper_result_records.py", "--require-existing-evidence"],
         [
             sys.executable,

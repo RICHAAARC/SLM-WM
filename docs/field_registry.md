@@ -1454,3 +1454,82 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_result_method_ids | protocol | none | true | false | false | pilot_paper 结果记录实际覆盖的方法 id 集合。|
 | pilot_paper_result_record_count | metric | none | true | false | false | pilot_paper 共同协议结果记录物化后的记录数量。|
 | prompt_split_ready | governance | none | false | false | false | prompt split 是否满足共同协议使用条件。|
+| branch_name | method | none | true | false | false | 分支风险场、Null Space 或载体所属的机制分支。 |
+| bundle_digest | method | none | true | false | false | 三个分支风险场组合后的稳定摘要。 |
+| eligible_indices | method | none | true | false | false | 分支风险阈值允许承载的位置索引。 |
+| jvp_mode | method | none | true | false | false | Jacobian 方向导数的实现方式, 正式值为 torch_func_linearize_exact_jvp、torch_autograd_exact_jvp 或 torch_autograd_exact_jvp_compatibility。 |
+| solver_digest | method | none | true | false | false | 真实 JVP/SVD 子空间求解记录摘要。 |
+| response_residual | metric | none | true | true | false | 小奇异值系数在联合响应矩阵上的残差范数。 |
+| orthogonality_error | metric | none | true | true | false | latent 安全基底相对单位矩阵的正交误差。 |
+| projection_energy_retention | metric | none | true | true | false | 固定检测模板投影到安全子空间后保留的能量比例。 |
+| tail_robust_score | metric | none | true | true | false | 高斯幅值尾部截断载体的图像盲检相关分数。 |
+| attention_geometry_score | metric | none | true | true | false | 真实 Q/K attention 与密钥关系签名的一致性分数。 |
+| formal_evidence_positive | metric | none | true | true | false | 冻结完整 evidence 协议后的正式布尔判定。 |
+| frozen_content_threshold | protocol | none | true | true | false | calibration clean negative 冻结的内容阈值。 |
+| threshold_digest | protocol | none | true | true | false | 完整 evidence 阈值与 rescue 配置摘要。 |
+| jacobian_candidate_count | method | none | true | false | false | 每个分支参与真实 JVP 的候选方向数量。 |
+| null_space_rank | method | none | true | false | false | 每个分支保留的小响应 latent 基底秩。 |
+| lf_relative_strength | method | none | true | false | false | LF 更新相对当前 latent 范数的强度。 |
+| tail_relative_strength | method | none | true | false | false | 尾部截断载体相对当前 latent 范数的强度。 |
+| attention_relative_strength | method | none | true | false | false | 注意力几何更新相对当前 latent 范数的强度。 |
+| tail_fraction | method | none | true | false | false | 标准高斯模板保留的幅值尾部比例。 |
+| source_id | provenance | none | true | false | false | 外部 Prompt 数据来源稳定标识。 |
+| source_url | provenance | none | true | false | false | 外部 Prompt 项目主页。 |
+| source_data_url | provenance | none | true | false | false | 固定 revision 的原始 Prompt 文件地址。 |
+| source_revision | provenance | none | true | false | false | 外部 Prompt 数据固定 Git revision。 |
+| source_file_sha256 | provenance | none | true | false | false | 外部 Prompt 原始文件 SHA-256。 |
+| source_record_count | provenance | none | true | false | false | 外部 Prompt 原始文件记录数量。 |
+| license | provenance | none | true | false | false | 外部 Prompt 数据随来源仓库登记的许可证。 |
+| selection_policy | provenance | none | true | false | false | Prompt 补充数据的确定性分层选择规则。 |
+| normalization_policy | provenance | none | true | false | false | Prompt 去重使用的文本规范化规则。 |
+| prompt_sets | provenance | none | true | false | false | 各 Prompt 集新增数量、类别分布和摘要。 |
+| original_count | provenance | none | true | false | false | Prompt 集补充前数量。 |
+| added_count | provenance | none | true | false | false | Prompt 集从登记来源新增的数量。 |
+| result_count | provenance | none | true | false | false | Prompt 集补充后的数量。 |
+| category_counts | provenance | none | true | false | false | 新增 Prompt 的来源类别分布。 |
+| challenge_counts | provenance | none | true | false | false | 新增 Prompt 的来源挑战类型分布。 |
+| selected_prompt_digest | provenance | none | true | false | false | 确定性选择后 Prompt 文本集合摘要。 |
+| attacked_negative_count | metric | none | true | true | false | 攻击后负样本数量, 与 clean negative 数量分开统计。 |
+| generation_rerun | protocol | none | true | true | false | 消融配置是否重新执行真实图像生成。 |
+| counterfactual_score_transform_used | protocol | none | true | true | false | 消融是否使用禁止替代正式实验的分数变换。 |
+| jvp_modes | method | none | true | false | false | 同一注入时刻各载体分支实际使用的精确 JVP 实现模式集合。 |
+| content_failure_reason | method | none | true | true | false | 单次图像盲检在当前检测配置下的内容主判失败分类。 |
+| formal_content_failure_reason | protocol | none | true | true | false | 应用 calibration 冻结阈值后重新计算的内容主判失败分类。 |
+| attention_applied_update_strength | metric | none | true | true | false | 注意力几何单调回溯搜索最终接受的 latent 更新二范数。 |
+| attention_backtracking_step_count | metric | none | true | true | false | 注意力几何单调回溯搜索为获得真实 Q/K 分数提升所执行的缩减次数。 |
+| completed_prompt_count | metric | none | true | false | false | Colab 数据集续跑中已经通过 manifest 校验的 Prompt 数量。 |
+| remaining_prompt_count | metric | none | true | false | false | Colab 数据集续跑中尚未完成的 Prompt 数量。 |
+| resumed_prompt_count | metric | none | true | false | false | 当前会话从已完成缓存复用的 Prompt 数量。 |
+| new_prompt_count | metric | none | true | false | false | 当前会话新增完成的 Prompt 数量。 |
+| completed_run_count | metric | none | true | false | false | 正式消融续跑中已经通过 manifest 校验的配置运行数量。 |
+| remaining_run_count | metric | none | true | false | false | 正式消融续跑中尚未完成的配置运行数量。 |
+| resumed_run_count | metric | none | true | false | false | 当前会话从缓存复用的正式消融配置运行数量。 |
+| new_run_count | metric | none | true | false | false | 当前会话新增完成的正式消融配置运行数量。 |
+| active_workflow | governance | none | true | false | false | Colab 续跑当前正在推进的数据集主流程或正式消融流程。 |
+| formal_ablation_requested | governance | none | true | false | false | 当前 Colab 会话是否被显式要求推进真实机制消融。 |
+| mirrored_archives | artifact | none | true | false | false | 已从持久化工作区镜像到论文运行目录的正式结果包路径映射。 |
+| formal_feature_origin | provenance | none | true | false | false | 正式 FID/KID 特征来自直接兼容 Inception 提取还是受治理特征记录导入。 |
+| feature_extractor_id | provenance | none | true | false | false | 单张图像正式特征所使用的精确提取器、版本与特征层标识。 |
+| max_new_prompts_per_session | protocol | none | true | false | false | Colab 单次会话允许新增完成的最大 Prompt 数量, 0 表示不限制。 |
+| max_new_runs_per_session | protocol | none | true | false | false | Colab 单次会话允许新增完成的最大正式消融配置运行数量, 0 表示不限制。 |
+| completed_prompt_digest | artifact | none | true | false | false | 已完成 Prompt 标识集合的稳定摘要, 用于续跑状态核对。 |
+| preferred_direction_count | method | none | true | false | false | Jacobian 候选矩阵中显式纳入的固定载体或注意力梯度方向数量。 |
+| preferred_direction_role | method | none | true | false | false | 优先候选方向在当前分支中承担的固定载体或注意力梯度角色。 |
+| minimum_projection_energy_retention | protocol | none | true | false | false | 固定盲检模板投影到语义安全子空间后必须保留的最小能量比例。 |
+| relative_response_residual | metric | none | true | true | false | 选中子空间平均响应相对全部候选平均响应的归一化残差。 |
+| maximum_relative_response_residual | protocol | none | true | false | false | 语义条件低响应子空间允许的最大归一化响应残差。 |
+| scientific_update_record_count | metric | none | true | false | false | 数据集正式运行实际生成的关键科学算子注入记录数量。 |
+| expected_scientific_update_record_count | metric | none | true | false | false | Prompt 数量乘以冻结注入时刻数量得到的预期科学算子记录数。 |
+| scientific_operator_failure_count | metric | none | true | false | false | 未通过精确 JVP、残差、正交性、载体能量或 Q/K 单调提升检查的注入记录数。 |
+| scientific_operator_gate_ready | governance | none | true | false | false | 全部注入记录是否通过真实关键科学算子门禁。 |
+| formal_feature_extractor_ids | provenance | none | true | false | false | 正式质量记录实际出现的特征提取器标识集合。 |
+| canonical_formal_feature_extractor_ready | governance | none | true | false | false | 正式质量记录是否全部来自冻结的 torch-fidelity 0.4.0 兼容 Inception 提取器。 |
+| branch_risk_records | method | none | true | true | false | 单次注入中三个分支风险场的摘要映射。 |
+| risk_value_mean | metric | none | true | true | false | 单个分支空间风险值的均值。 |
+| budget_value_mean | metric | none | true | true | false | 单个分支进入硬资格边界前的承载预算均值。 |
+| eligible_position_count | metric | none | true | true | false | 单个分支通过风险资格阈值的 latent 空间位置数量。 |
+| risk_field_position_count | metric | none | true | true | false | 单个分支风险场覆盖的 latent 空间位置总数。 |
+| scientific_autograd_compatibility | environment | none | true | false | false | 为精确 forward AD 与 latent 输入梯度固定的模型注意力实现摘要。 |
+| clip_attention_implementation | environment | none | true | false | false | CLIP 视觉编码器使用的注意力实现, 当前正式值为 eager。 |
+| vae_attention_processor | environment | none | true | false | false | VAE 可微解码使用的 Diffusers attention processor。 |
+| cpu_offload_enabled | environment | none | true | false | false | legacy DDIM 攻击模型是否启用 Diffusers CPU offload 以避免与 SD3.5 争用显存。 |

@@ -1,4 +1,4 @@
-"""HF 内容载体。"""
+"""兼容历史记录的高斯幅值尾部截断鲁棒载体。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from main.methods.carrier.lf import stable_signed_template, update_from_indices
 
 @dataclass(frozen=True)
 class HfContentCarrier:
-    """HF 鲁棒补充载体。"""
+    """历史字段名保持 HF, 正式语义为尾部截断鲁棒载体。"""
 
     carrier_id: str
     basis_digest: str
@@ -107,5 +107,9 @@ def derive_hf_content_carrier(
         tail_truncation_enabled=tail_truncation_enabled,
         hf_content_carrier_digest=carrier_digest,
         supports_paper_claim=False,
-        metadata={"carrier_family": "latent_frequency", "frequency_band": "high_frequency"},
+        metadata={
+            "carrier_family": "gaussian_tail_robust",
+            "branch_semantics": "amplitude_tail_not_spatial_high_frequency",
+            "legacy_field_prefix": "hf",
+        },
     )

@@ -67,7 +67,7 @@ class AttentionLatentInjectionConfig:
     method_output_dir: str = DEFAULT_METHOD_OUTPUT_DIR
     geometry_drive_dir: str = field(default_factory=lambda: build_paper_run_config(".").drive_dir("attention_geometry"))
     attention_geometry_package_path: str = ""
-    max_subspace_records: int = 600
+    max_subspace_records: int = 700
     content_vector_width: int = DEFAULT_CONTENT_VECTOR_WIDTH
     content_basis_rank: int = DEFAULT_CONTENT_BASIS_RANK
     attention_carrier_index: int = 0

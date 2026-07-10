@@ -55,9 +55,11 @@ DEFAULT_BASELINE_VALIDATION_REPORT_PATH = Path(
 DEFAULT_DATASET_QUALITY_METRICS_PATH = Path("outputs/dataset_level_quality/dataset_quality_metrics.csv")
 DEFAULT_DATASET_QUALITY_SUMMARY_NAME = "dataset_quality_summary.json"
 STRICT_FORMAL_SLM_METRIC_STATUS = "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
+IMAGE_ONLY_FORMAL_SLM_METRIC_STATUS = "measured_image_only_detection_formal_protocol"
 CLAIM_SUPPORTED_METHOD_STATUSES = {
     "measured",
     STRICT_FORMAL_SLM_METRIC_STATUS,
+    IMAGE_ONLY_FORMAL_SLM_METRIC_STATUS,
 }
 DIAGNOSTIC_ONLY_METHOD_STATUSES = {
     "measured_from_local_proxy",
@@ -456,7 +458,11 @@ def dataset_quality_claim_gate_fields(dataset_quality_metrics_path: Path, root_p
         if _str_field(row, "quality_metric_name") in {"fid", "kid"} and _str_field(row, "metric_status") == "measured"
     }
     metric_names_ready = bool(summary.get("formal_fid_kid_metric_names_ready", measured_formal_names == {"fid", "kid"}))
-    claim_gate_ready = bool(summary.get("formal_fid_kid_claim_gate_ready", metric_names_ready))
+    canonical_extractor_ready = bool(summary.get("canonical_formal_feature_extractor_ready", False))
+    claim_gate_ready = bool(
+        summary.get("formal_fid_kid_claim_gate_ready", metric_names_ready)
+        and canonical_extractor_ready
+    )
     blocker = _str_field(summary, "formal_fid_kid_claim_blocker")
     if not blocker and not claim_gate_ready:
         blocker = "formal_fid_kid_not_measured"
@@ -472,6 +478,7 @@ def dataset_quality_claim_gate_fields(dataset_quality_metrics_path: Path, root_p
     return {
         "formal_fid_kid_metric_names_ready": metric_names_ready,
         "formal_fid_kid_claim_gate_ready": claim_gate_ready,
+        "canonical_formal_feature_extractor_ready": canonical_extractor_ready,
         "formal_fid_kid_claim_blocker": blocker,
         "dataset_quality_formal_metric_ready": claim_gate_ready,
         "dataset_quality_claim_boundary": boundary,
@@ -708,7 +715,172 @@ def build_slm_wm_result_records(
                 payload,
                 metric_status=metric_status,
                 source_kind="slm_wm_attack_matrix",
-                claim_ready=dataset_quality_ready and slm_formal_quality_ready,
+                claim_ready=False,
+                minimum_claim_count=minimum_claim_count,
+                paper_run_allows_paper_claim=paper_run_allows_paper_claim,
+            )
+        )
+    return records
+
+
+def build_image_only_slm_wm_result_records(
+    *,
+    root_path: Path,
+    schema: Mapping[str, Any],
+    metrics_path: Path,
+    summary_path: Path,
+    detection_records_path: Path,
+    runtime_manifest_path: Path,
+    dataset_quality_metrics_path: Path,
+) -> list[dict[str, Any]]:
+    """从仅图像检测数据集运行结果构造 SLM-WM 正式记录。"""
+
+    rows = read_csv_rows(metrics_path)
+    if not rows:
+        return []
+    summary = read_json(summary_path)
+    row_lookup = {
+        (
+            _str_field(row, "attack_family"),
+            _str_field(row, "attack_name"),
+            _str_field(row, "resource_profile"),
+            _str_field(row, "sample_role"),
+        ): row
+        for row in rows
+    }
+    clean_negative_row = next(
+        (
+            row
+            for row in rows
+            if _str_field(row, "attack_name") == "none"
+            and _str_field(row, "sample_role") == "clean_negative"
+        ),
+        None,
+    )
+    clean_positive_row = next(
+        (
+            row
+            for row in rows
+            if _str_field(row, "attack_name") == "none"
+            and _str_field(row, "sample_role") == "positive_source"
+        ),
+        None,
+    )
+    if clean_negative_row is None or clean_positive_row is None:
+        return []
+    evidence_paths = evidence_paths_for_existing(
+        (
+            metrics_path,
+            summary_path,
+            detection_records_path,
+            runtime_manifest_path,
+            dataset_quality_metrics_path,
+            dataset_quality_metrics_path.with_name(DEFAULT_DATASET_QUALITY_SUMMARY_NAME),
+        ),
+        root_path,
+    )
+    dataset_quality_gate_fields = dataset_quality_claim_gate_fields(dataset_quality_metrics_path, root_path)
+    minimum_claim_count = int(schema.get("minimum_result_positive_count", 1))
+    paper_run_allows_paper_claim = bool(schema.get("paper_run_allows_paper_claim", True))
+    source_digest = file_digest(metrics_path)
+    clean_false_positive_rate = _float_field(clean_negative_row, "positive_rate")
+    clean_positive_score = _float_field(clean_positive_row, "content_score_mean")
+    quality_score_mean = float(summary.get("paired_ssim_mean") or 0.0)
+    records = []
+    for positive_row in rows:
+        if _str_field(positive_row, "sample_role") != "positive_source":
+            continue
+        attack_name = _str_field(positive_row, "attack_name")
+        if attack_name == "none":
+            continue
+        key = (
+            _str_field(positive_row, "attack_family"),
+            attack_name,
+            _str_field(positive_row, "resource_profile"),
+            "clean_negative",
+        )
+        negative_row = row_lookup.get(key)
+        if negative_row is None:
+            continue
+        payload = build_common_result_fields(
+            schema=schema,
+            method_id="slm_wm_current",
+            attack_family=key[0],
+            attack_name=attack_name,
+            resource_profile=key[2],
+            baseline_result_source=relative_or_absolute(metrics_path, root_path),
+            baseline_result_source_digest=source_digest,
+            evidence_paths=evidence_paths,
+        )
+        payload.update(
+            {
+                "detector_input_access_mode": "image_key_public_model_only",
+                "blind_image_detector": True,
+                "generation_latent_trace_required": False,
+                "baseline_fairness_boundary": "all_methods_receive_attacked_image_and_method_key_only",
+                "clean_test_fixed_fpr_upper_bound_ready": bool(
+                    summary.get("clean_test_fixed_fpr_upper_bound_ready", False)
+                ),
+                "wrong_key_test_fixed_fpr_upper_bound_ready": bool(
+                    summary.get("wrong_key_test_fixed_fpr_upper_bound_ready", False)
+                ),
+                "scientific_operator_gate_ready": bool(
+                    summary.get("scientific_operator_gate_ready", False)
+                ),
+                "attack_record_coverage_ready": bool(summary.get("attack_record_coverage_ready", False)),
+                "attacked_image_evidence_chain_ready": bool(
+                    summary.get("attacked_image_evidence_chain_ready", False)
+                ),
+                "real_gpu_attack_validation_ready": bool(
+                    summary.get("real_gpu_attack_validation_ready", False)
+                ),
+                **dataset_quality_gate_fields,
+            }
+        )
+        attacked_score = _float_field(positive_row, "content_score_mean")
+        score_retention = attacked_score / clean_positive_score if abs(clean_positive_score) > 1e-12 else 0.0
+        attach_metric_fields(
+            payload,
+            positive_count=_int_field(positive_row, "record_count"),
+            negative_count=_int_field(clean_negative_row, "record_count"),
+            attack_record_count=_int_field(positive_row, "record_count") + _int_field(negative_row, "record_count"),
+            supported_record_count=_int_field(positive_row, "record_count"),
+            true_positive_rate=_float_field(positive_row, "positive_rate"),
+            false_positive_rate=clean_false_positive_rate,
+            clean_false_positive_rate=clean_false_positive_rate,
+            attacked_false_positive_rate=_float_field(negative_row, "positive_rate"),
+            quality_score_mean=quality_score_mean,
+            score_retention_mean=score_retention,
+            confidence_level=float(schema["confidence_level"]),
+        )
+        attacked_negative_count = _int_field(negative_row, "record_count")
+        attacked_ci_low, attacked_ci_high = bounded_confidence_interval(
+            _float_field(negative_row, "positive_rate"),
+            attacked_negative_count,
+            float(schema["confidence_level"]),
+        )
+        payload["attacked_negative_count"] = attacked_negative_count
+        payload["attacked_false_positive_rate_ci_low"] = attacked_ci_low
+        payload["attacked_false_positive_rate_ci_high"] = attacked_ci_high
+        claim_ready = (
+            summary.get("protocol_decision") == "pass"
+            and bool(summary.get("supports_paper_claim", False))
+            and bool(summary.get("clean_test_fixed_fpr_upper_bound_ready", False))
+            and bool(summary.get("wrong_key_test_fixed_fpr_upper_bound_ready", False))
+            and bool(summary.get("scientific_operator_gate_ready", False))
+            and bool(summary.get("attack_record_coverage_ready", False))
+            and bool(summary.get("attacked_image_evidence_chain_ready", False))
+            and bool(summary.get("real_gpu_attack_validation_ready", False))
+            and bool(dataset_quality_gate_fields.get("formal_fid_kid_claim_gate_ready", False))
+            and _int_field(positive_row, "record_count") >= minimum_claim_count
+            and _int_field(clean_negative_row, "record_count") >= minimum_claim_count
+        )
+        records.append(
+            finalize_result_record(
+                payload,
+                metric_status=IMAGE_ONLY_FORMAL_SLM_METRIC_STATUS,
+                source_kind="slm_wm_image_only_dataset_runtime",
+                claim_ready=claim_ready,
                 minimum_claim_count=minimum_claim_count,
                 paper_run_allows_paper_claim=paper_run_allows_paper_claim,
             )
@@ -918,6 +1090,7 @@ def write_pilot_paper_result_record_outputs(
     baseline_records_path: str | Path = DEFAULT_BASELINE_RECORDS_PATH,
     baseline_validation_report_path: str | Path = DEFAULT_BASELINE_VALIDATION_REPORT_PATH,
     dataset_quality_metrics_path: str | Path = DEFAULT_DATASET_QUALITY_METRICS_PATH,
+    image_only_runtime_dir: str | Path | None = None,
     package_paths: Iterable[str | Path] = (),
     package_search_roots: Iterable[str | Path] = (),
     require_existing_evidence: bool = False,
@@ -961,6 +1134,11 @@ def write_pilot_paper_result_record_outputs(
     context = build_protocol_context(root_path, config)
     schema = context["schema"]
     template_rows = context["template_rows"]
+    resolved_image_only_runtime_dir = resolve_path(
+        root_path,
+        image_only_runtime_dir
+        or Path("outputs/image_only_dataset_runtime") / str(schema.get("paper_claim_scale", "pilot_paper")),
+    )
 
     resolved_attack_family_metrics_path = resolve_path(root_path, attack_family_metrics_path)
     resolved_attack_manifest_path = resolve_path(root_path, attack_manifest_path)
@@ -968,12 +1146,62 @@ def write_pilot_paper_result_record_outputs(
     resolved_real_attack_records_path = resolve_path(root_path, real_attack_records_path)
     resolved_baseline_records_path = resolve_path(root_path, baseline_records_path)
     resolved_baseline_validation_report_path = resolve_path(root_path, baseline_validation_report_path)
-    resolved_dataset_quality_metrics_path = resolve_path(root_path, dataset_quality_metrics_path)
+    paper_claim_scale = str(schema.get("paper_claim_scale", "pilot_paper"))
+    per_run_quality_metrics_path = (
+        root_path / "outputs" / "dataset_level_quality" / paper_claim_scale / "dataset_quality_metrics.csv"
+    )
+    resolved_dataset_quality_metrics_path = (
+        per_run_quality_metrics_path
+        if Path(dataset_quality_metrics_path) == DEFAULT_DATASET_QUALITY_METRICS_PATH
+        and per_run_quality_metrics_path.is_file()
+        else resolve_path(root_path, dataset_quality_metrics_path)
+    )
+    image_only_metrics_path = (
+        resolved_image_only_runtime_dir / "test_detection_metrics.csv"
+        if resolved_image_only_runtime_dir is not None
+        else None
+    )
+    image_only_summary_path = (
+        resolved_image_only_runtime_dir / "dataset_runtime_summary.json"
+        if resolved_image_only_runtime_dir is not None
+        else None
+    )
+    image_only_detection_path = (
+        resolved_image_only_runtime_dir / "image_only_detection_records.jsonl"
+        if resolved_image_only_runtime_dir is not None
+        else None
+    )
+    image_only_manifest_path = (
+        resolved_image_only_runtime_dir / "manifest.local.json"
+        if resolved_image_only_runtime_dir is not None
+        else None
+    )
+    image_only_ready = all(
+        path is not None and path.is_file()
+        for path in (
+            image_only_metrics_path,
+            image_only_summary_path,
+            image_only_detection_path,
+            image_only_manifest_path,
+        )
+    )
+    method_evidence_paths = (
+        (
+            image_only_metrics_path,
+            image_only_summary_path,
+            image_only_detection_path,
+            image_only_manifest_path,
+        )
+        if image_only_ready
+        else (
+            resolved_attack_family_metrics_path,
+            resolved_attack_manifest_path,
+            resolved_attack_records_path,
+            resolved_real_attack_records_path,
+        )
+    )
     required_paths = (
-        resolved_attack_family_metrics_path,
-        resolved_attack_manifest_path,
-        resolved_attack_records_path,
-        resolved_real_attack_records_path,
+        *method_evidence_paths,
         resolved_baseline_records_path,
         resolved_baseline_validation_report_path,
         resolved_dataset_quality_metrics_path,
@@ -981,15 +1209,26 @@ def write_pilot_paper_result_record_outputs(
     if any(path is None for path in required_paths):
         raise ValueError("pilot_paper 结果记录输入路径不能为空")
 
-    slm_wm_records = build_slm_wm_result_records(
-        root_path=root_path,
-        schema=schema,
-        attack_family_metrics_path=resolved_attack_family_metrics_path,  # type: ignore[arg-type]
-        attack_manifest_path=resolved_attack_manifest_path,  # type: ignore[arg-type]
-        attack_records_path=resolved_attack_records_path,  # type: ignore[arg-type]
-        real_attack_records_path=resolved_real_attack_records_path,  # type: ignore[arg-type]
-        dataset_quality_metrics_path=resolved_dataset_quality_metrics_path,  # type: ignore[arg-type]
-    )
+    if image_only_ready:
+        slm_wm_records = build_image_only_slm_wm_result_records(
+            root_path=root_path,
+            schema=schema,
+            metrics_path=image_only_metrics_path,  # type: ignore[arg-type]
+            summary_path=image_only_summary_path,  # type: ignore[arg-type]
+            detection_records_path=image_only_detection_path,  # type: ignore[arg-type]
+            runtime_manifest_path=image_only_manifest_path,  # type: ignore[arg-type]
+            dataset_quality_metrics_path=resolved_dataset_quality_metrics_path,  # type: ignore[arg-type]
+        )
+    else:
+        slm_wm_records = build_slm_wm_result_records(
+            root_path=root_path,
+            schema=schema,
+            attack_family_metrics_path=resolved_attack_family_metrics_path,  # type: ignore[arg-type]
+            attack_manifest_path=resolved_attack_manifest_path,  # type: ignore[arg-type]
+            attack_records_path=resolved_attack_records_path,  # type: ignore[arg-type]
+            real_attack_records_path=resolved_real_attack_records_path,  # type: ignore[arg-type]
+            dataset_quality_metrics_path=resolved_dataset_quality_metrics_path,  # type: ignore[arg-type]
+        )
     baseline_records = build_baseline_result_records(
         root_path=root_path,
         schema=schema,
@@ -1056,6 +1295,7 @@ def write_pilot_paper_result_record_outputs(
             "template_coverage_digest": build_stable_digest(coverage_rows),
             "summary_digest": build_stable_digest(summary),
             "require_existing_evidence": require_existing_evidence,
+            "image_only_runtime_used": image_only_ready,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_pilot_paper_result_records.py",
@@ -1078,6 +1318,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--baseline-records-path", default=str(DEFAULT_BASELINE_RECORDS_PATH))
     parser.add_argument("--baseline-validation-report-path", default=str(DEFAULT_BASELINE_VALIDATION_REPORT_PATH))
     parser.add_argument("--dataset-quality-metrics-path", default=str(DEFAULT_DATASET_QUALITY_METRICS_PATH))
+    parser.add_argument("--image-only-runtime-dir", default=None)
     parser.add_argument("--package-path", action="append", default=[], help="可重复传入的前序结果 zip 包。")
     parser.add_argument("--package-search-root", action="append", default=[], help="递归查找 zip 包的 Google Drive 镜像根目录。")
     parser.add_argument("--require-existing-evidence", action="store_true", help="校验 result records 中 evidence_paths 指向的文件存在。")
@@ -1099,6 +1340,7 @@ def main() -> None:
         baseline_records_path=args.baseline_records_path,
         baseline_validation_report_path=args.baseline_validation_report_path,
         dataset_quality_metrics_path=args.dataset_quality_metrics_path,
+        image_only_runtime_dir=args.image_only_runtime_dir,
         package_paths=args.package_path,
         package_search_roots=args.package_search_root,
         require_existing_evidence=args.require_existing_evidence,

@@ -115,6 +115,26 @@ def _configure_attention_geometry(paper_run: Any, sample_count_token: str, targe
     _set_default_env("SLM_WM_ATTENTION_TOKEN_COUNT", "32")
 
 
+def _configure_semantic_watermark_image_only(
+    paper_run: Any,
+    sample_count_token: str,
+    target_fpr_text: str,
+) -> None:
+    """配置真实科学算子、仅图像检测和正式消融的 Colab 续跑入口。"""
+
+    image_only_drive_dir = paper_run.drive_dir("image_only_dataset_runtime")
+    _set_env("SLM_WM_DRIVE_OUTPUT_DIR", image_only_drive_dir)
+    _set_env("SLM_WM_IMAGE_ONLY_RUNTIME_DRIVE_DIR", image_only_drive_dir)
+    _set_env("SLM_WM_DATASET_QUALITY_DRIVE_DIR", paper_run.drive_dir("dataset_level_quality"))
+    _set_env("SLM_WM_RUNTIME_RERUN_ABLATION_DRIVE_DIR", paper_run.drive_dir("runtime_rerun_ablation"))
+    _set_default_env("SLM_WM_MAX_NEW_PROMPTS_PER_SESSION", "5")
+    _set_default_env("SLM_WM_ABLATION_PROMPT_COUNT", "100")
+    _set_default_env("SLM_WM_MAX_NEW_ABLATION_RUNS_PER_SESSION", "5")
+    _set_default_env("SLM_WM_INCEPTION_BATCH_SIZE", "32")
+    _set_default_env("SLM_WM_ENABLE_DIFFUSION_ATTACKS", "1")
+    _set_default_env("SLM_WM_DDIM_MODEL_CPU_OFFLOAD", "1")
+
+
 def _configure_attention_latent_injection(paper_run: Any, sample_count_token: str, target_fpr_text: str) -> None:
     _set_env("SLM_WM_DRIVE_OUTPUT_DIR", paper_run.drive_dir("attention_latent_injection"))
     _set_env("SLM_WM_ATTENTION_GEOMETRY_DRIVE_DIR", paper_run.drive_dir("attention_geometry"))
@@ -353,6 +373,7 @@ def _configure_result_closure(paper_run: Any, sample_count_token: str, target_fp
 
 
 WORKFLOW_CONFIGURERS = {
+    "semantic_watermark_image_only": _configure_semantic_watermark_image_only,
     "attention_geometry": _configure_attention_geometry,
     "attention_latent_injection": _configure_attention_latent_injection,
     "aligned_rescoring": _configure_aligned_rescoring,

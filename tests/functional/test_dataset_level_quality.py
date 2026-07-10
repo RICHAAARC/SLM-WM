@@ -260,6 +260,7 @@ def test_dataset_quality_formal_feature_import_keeps_small_sample_blocked(tmp_pa
                         "dataset_quality_record_id": record.dataset_quality_record_id,
                         "dataset_quality_image_role": image_role,
                         "feature_backend": FORMAL_FEATURE_BACKEND,
+                        "feature_extractor_id": dataset_quality_writer.FORMAL_FEATURE_EXTRACTOR_ID,
                         "feature_vector": vector,
                     },
                     ensure_ascii=False,
@@ -285,6 +286,7 @@ def test_dataset_quality_formal_feature_import_keeps_small_sample_blocked(tmp_pa
     assert import_report["formal_sample_scale_ready"] is False
     assert summary["formal_fid_kid_ready"] is False
     assert summary["formal_feature_backend_ready"] is True
+    assert summary["canonical_formal_feature_extractor_ready"] is True
     assert summary["formal_sample_scale_ready"] is False
     assert summary["formal_fid_kid_claim_gate_ready"] is False
     assert summary["formal_fid_kid_claim_blocker"] == FORMAL_FID_KID_SAMPLE_BLOCKER

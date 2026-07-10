@@ -79,7 +79,7 @@ def load_prompt_bank(source_archive: Path) -> dict[str, tuple[tuple[str, ...], i
     with zipfile.ZipFile(source_archive) as archive:
         pilot_source_prompts = read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["pilot_paper"])
         raw_prompts = {
-            "probe_paper": pilot_source_prompts[:60],
+        "probe_paper": pilot_source_prompts[:70],
             "pilot_paper": pilot_source_prompts,
             "full_paper": read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["full_paper"]),
         }

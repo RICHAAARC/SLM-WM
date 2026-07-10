@@ -75,6 +75,9 @@ def test_complete_result_package_requires_external_baseline_comparison_artifacts
     assert "scripts/write_external_baseline_comparison_outputs.py" in PACKAGE_EXTRA_PATHS
     assert "outputs/pilot_paper_result_analysis" in REQUIRED_OUTPUT_DIRS
     assert "scripts/write_pilot_paper_result_analysis_outputs.py" in PACKAGE_EXTRA_PATHS
+    assert "paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb" in PACKAGE_EXTRA_PATHS
+    assert "paper_workflow/colab_utils/semantic_watermark_image_only.py" in PACKAGE_EXTRA_PATHS
+    assert "docs/builds/real_scientific_operator_implementation.md" in PACKAGE_EXTRA_PATHS
 
 
 @pytest.mark.quick
@@ -115,5 +118,5 @@ def test_paper_result_closure_preflight_reports_missing_drive_packages(tmp_path:
     report = build_paper_result_closure_preflight_report(str(tmp_path))
 
     assert report["closure_preflight_ready"] is False
-    assert "real_attack_evaluation" in report["missing_package_families"]
+    assert "image_only_dataset_runtime" in report["missing_package_families"]
     assert report["missing_package_family_count"] > 0

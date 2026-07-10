@@ -47,7 +47,11 @@ TREE_RING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/offi
 GAUSSIAN_SHADING_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/official_reference_gaussian_shading_run.ipynb")
 SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/official_reference_shallow_diffuse_run.ipynb")
 PAPER_RESULT_CLOSURE_NOTEBOOK_PATH = Path("paper_workflow/notebooks/paper_result_closure_run.ipynb")
+SEMANTIC_WATERMARK_IMAGE_ONLY_NOTEBOOK_PATH = Path(
+    "paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb"
+)
 NOTEBOOK_PATHS = (
+    SEMANTIC_WATERMARK_IMAGE_ONLY_NOTEBOOK_PATH,
     RUNTIME_METHOD_PRECHECK_NOTEBOOK_PATH,
     DRIVE_COLD_START_NOTEBOOK_PATH,
     ATTENTION_GEOMETRY_NOTEBOOK_PATH,
@@ -162,6 +166,18 @@ def test_paper_run_environment_helper_preserves_drive_paths(monkeypatch: pytest.
         "/content/drive/MyDrive/SLM/pilot_paper_results/external_baseline_official_reference"
     )
 
+    image_only_env = configure_paper_run_environment("semantic_watermark_image_only")
+    assert image_only_env["drive_result_root"] == "/content/drive/MyDrive/SLM/pilot_paper_results"
+    assert os.environ["SLM_WM_IMAGE_ONLY_RUNTIME_DRIVE_DIR"] == (
+        "/content/drive/MyDrive/SLM/pilot_paper_results/image_only_dataset_runtime"
+    )
+    assert os.environ["SLM_WM_DATASET_QUALITY_DRIVE_DIR"] == (
+        "/content/drive/MyDrive/SLM/pilot_paper_results/dataset_level_quality"
+    )
+    assert os.environ["SLM_WM_RUNTIME_RERUN_ABLATION_DRIVE_DIR"] == (
+        "/content/drive/MyDrive/SLM/pilot_paper_results/runtime_rerun_ablation"
+    )
+
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
     full_env = configure_paper_run_environment("threshold_calibration")
     assert full_env["drive_result_root"] == "/content/drive/MyDrive/SLM/full_paper_results"
@@ -231,6 +247,32 @@ def test_colab_notebooks_have_no_stored_outputs() -> None:
 
 
 @pytest.mark.constraint
+def test_semantic_watermark_image_only_notebook_delegates_formal_runtime() -> None:
+    """主方法 Notebook 应只配置 Colab 并调度可续跑的 repository helper。"""
+
+    payload = json.loads(SEMANTIC_WATERMARK_IMAGE_ONLY_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+    joined_source = "\n".join("".join(cell.get("source", [])) for cell in payload["cells"])
+    first_code_cell = next(cell for cell in payload["cells"] if cell["cell_type"] == "code")
+    first_code_source = "".join(first_code_cell.get("source", []))
+
+    assert "drive.mount('/content/drive')" in first_code_source
+    assert "/content/drive/MyDrive/SLM/workspaces/slm_wm_repository" in joined_source
+    assert "configs/colab_sd35_runtime_constraints.txt" in joined_source
+    assert_uses_paper_run_environment_helper(joined_source, "semantic_watermark_image_only")
+    assert_uses_unified_dependency_report(joined_source, "semantic_watermark_image_only")
+    assert "paper_workflow.colab_utils.semantic_watermark_image_only" in joined_source
+    assert "run_semantic_watermark_image_only_session" in joined_source
+    assert "SLM_WM_MAX_NEW_PROMPTS_PER_SESSION" in joined_source
+    assert "SLM_WM_MAX_NEW_ABLATION_RUNS_PER_SESSION" in joined_source
+    assert "SLM_WM_RUN_FORMAL_ABLATION" in joined_source
+    assert "workflow_decision" in joined_source
+    assert "dataset_runtime_progress.json" in joined_source
+    assert "runtime_rerun_progress.json" in joined_source
+    assert "scripts/run_image_only_dataset_runtime.py" not in joined_source
+    assert "scripts/run_runtime_rerun_ablations.py" not in joined_source
+
+
+@pytest.mark.constraint
 def test_paper_run_notebooks_keep_run_name_as_first_line() -> None:
     """正式运行入口应只通过第一行切换 pilot_paper / full_paper。"""
 
@@ -262,6 +304,7 @@ def test_colab_runtime_constraints_document_known_working_environment() -> None:
     assert "accelerate==1.14.0" in requirement_lines
     assert "huggingface_hub==1.20.1" in requirement_lines
     assert "numpy==2.0.2" in requirement_lines
+    assert "torch-fidelity==0.4.0" in requirement_lines
     assert all(not line.startswith("torch==") for line in requirement_lines)
 
 

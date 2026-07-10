@@ -20,6 +20,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.runtime.diffusion.attention_capture import AttentionCaptureRecord
+from main.methods.geometry.differentiable_attention import qk_self_attention
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from experiments.artifacts.attention_geometry_outputs import write_attention_geometry_outputs
@@ -346,7 +347,7 @@ def matrix_entropy(matrix: tuple[tuple[float, ...], ...]) -> float:
 
 
 def attention_module_names(pipeline: Any, limit: int) -> tuple[str, ...]:
-    """选择可挂钩的 attention 模块名称。"""
+    """选择同时公开真实 Q/K 投影的 attention 模块名称。"""
     transformer = getattr(pipeline, "transformer", None)
     if transformer is None:
         return ()
@@ -355,7 +356,7 @@ def attention_module_names(pipeline: Any, limit: int) -> tuple[str, ...]:
         lowered_name = name.lower()
         class_name = type(module).__name__.lower()
         if "attn" in lowered_name or "attention" in class_name:
-            if hasattr(module, "register_forward_hook"):
+            if hasattr(module, "register_forward_hook") and hasattr(module, "to_q") and hasattr(module, "to_k"):
                 candidates.append(name)
     unique_names = []
     for name in candidates:
@@ -376,12 +377,18 @@ def register_attention_hooks(pipeline: Any, config: AttentionGeometryRunConfig, 
         def hook(module: Any, inputs: tuple[Any, ...], output: Any) -> None:
             if len(capture_records) >= config.max_capture_count:
                 return
-            tensor = first_tensor(inputs)
-            if tensor is None:
-                tensor = first_tensor(output)
-            if tensor is None:
+            hidden_states = first_tensor(inputs)
+            if hidden_states is None or getattr(hidden_states, "ndim", 0) != 3:
                 return
-            matrix, token_indices = attention_matrix_from_tensor(tensor, config.max_attention_tokens)
+            attention_tensor, token_indices = qk_self_attention(
+                module,
+                hidden_states,
+                max_tokens=config.max_attention_tokens,
+            )
+            matrix = tuple(
+                tuple(round(float(value), 12) for value in row)
+                for row in attention_tensor.detach().float().mean(dim=0).cpu().tolist()
+            )
             flattened = [value for row in matrix for value in row]
             digest = build_stable_digest([[round(value, 12) for value in row] for row in matrix])
             capture_records.append(
@@ -395,14 +402,15 @@ def register_attention_hooks(pipeline: Any, config: AttentionGeometryRunConfig, 
                     attention_shape=(len(matrix), len(matrix[0]) if matrix else 0),
                     attention_mean=sum(flattened) / len(flattened),
                     attention_entropy=matrix_entropy(matrix),
-                    capture_backend="auditable_hidden_state_attention_map",
+                    capture_backend="real_qk_self_attention",
                     unsupported_reason="",
                     metadata={
                         "capture_is_synthetic": False,
                         "supports_paper_claim": False,
                         "attention_matrix_preview": matrix,
                         "attention_token_indices": token_indices,
-                        "capture_tensor_shape": tuple(int(value) for value in tensor.shape),
+                        "capture_tensor_shape": tuple(int(value) for value in hidden_states.shape),
+                        "attention_source": "module_to_q_to_k_projection",
                     },
                 )
             )

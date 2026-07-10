@@ -73,7 +73,7 @@ THRESHOLD_PACKAGE_PREFIXES = (
     "outputs/geometric_rescue/",
     "outputs/attack_matrix/",
 )
-STRICT_DDIM_RUNTIME_CACHE: dict[tuple[str, str, str, bool], dict[str, Any]] = {}
+STRICT_DDIM_RUNTIME_CACHE: dict[tuple[str, str, str, bool, bool], dict[str, Any]] = {}
 REAL_ATTACK_WATERMARK_RESCORE_STATUS = "measured_from_real_attacked_image_watermark_rescore"
 FORMAL_WATERMARK_RESCORE_STATUS = "measured_from_real_attacked_image_watermark_rescore_formal_protocol"
 FORMAL_RETENTION_PROXY_STATUS = "measured_from_real_attacked_image_retention_proxy_formal_protocol"
@@ -94,7 +94,7 @@ class RealAttackEvaluationConfig:
     guidance_scale: float
     output_dir: str = DEFAULT_OUTPUT_DIR
     source_image_dir: str = DEFAULT_SOURCE_IMAGE_DIR
-    max_source_images: int = 600
+    max_source_images: int = 700
     device_name: str = "cuda"
     torch_dtype: str = "float16"
     hf_token_env: str = "HF_TOKEN"
@@ -989,7 +989,7 @@ def predict_ddim_noise(
     return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
 
-def strict_ddim_runtime_cache_key(config: RealAttackEvaluationConfig) -> tuple[str, str, str, bool]:
+def strict_ddim_runtime_cache_key(config: RealAttackEvaluationConfig) -> tuple[str, str, str, bool, bool]:
     """构造 DDIM inversion 运行时缓存键.
 
     该键只包含会影响 pipeline 加载结果的配置项。prompt、seed 和 attack 参数属于单样本执行参数,
@@ -1001,6 +1001,7 @@ def strict_ddim_runtime_cache_key(config: RealAttackEvaluationConfig) -> tuple[s
         str(config.device_name),
         str(config.torch_dtype),
         bool(config.enable_pipeline_progress_bar),
+        os.environ.get("SLM_WM_DDIM_MODEL_CPU_OFFLOAD", "0") == "1",
     )
 
 
@@ -1031,7 +1032,14 @@ def load_strict_ddim_inversion_runtime(config: RealAttackEvaluationConfig) -> di
         safety_checker=None,
         requires_safety_checker=False,
     )
-    pipe = pipe.to(config.device_name)
+    cpu_offload_enabled = (
+        config.device_name == "cuda"
+        and os.environ.get("SLM_WM_DDIM_MODEL_CPU_OFFLOAD", "0") == "1"
+    )
+    if cpu_offload_enabled:
+        pipe.enable_model_cpu_offload()
+    else:
+        pipe = pipe.to(config.device_name)
     pipe.torch = torch
     if hasattr(pipe, "set_progress_bar_config"):
         pipe.set_progress_bar_config(disable=not config.enable_pipeline_progress_bar)
@@ -1043,6 +1051,7 @@ def load_strict_ddim_inversion_runtime(config: RealAttackEvaluationConfig) -> di
         "scheduler_class": scheduler_class,
         "inverse_scheduler_class": inverse_scheduler_class,
         "scheduler_config": scheduler_config,
+        "cpu_offload_enabled": cpu_offload_enabled,
     }
 
 

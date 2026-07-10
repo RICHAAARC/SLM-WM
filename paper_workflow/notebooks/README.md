@@ -16,9 +16,9 @@ SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 
 | 运行层级 | prompt 数量 | 目标 FPR | 支持主张 |
 | --- | ---: | ---: | --- |
-| `probe_paper` | 60 | 0.1 | `probe_claim` |
-| `pilot_paper` | 600 | 0.01 | `pilot_claim` |
-| `full_paper` | 6000 | 0.001 | `full_claim` |
+| `probe_paper` | 70 | 0.1 | `probe_claim` |
+| `pilot_paper` | 700 | 0.01 | `pilot_claim` |
+| `full_paper` | 7000 | 0.001 | `full_claim` |
 
 ## Notebook 前后依赖、并行要求与资源需求
 
@@ -26,13 +26,14 @@ SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 | --- | --- | --- | --- | --- | --- |
 | Drive 冷启动诊断 | `colab_drive_cold_start_smoke.ipynb` | CPU 即可 | 无 | 可独立运行 | Drive 挂载、仓库拉取、输出镜像和 reload 清单。 |
 | 运行时与机制预检 | `runtime_method_precheck_run.ipynb` | 需要 GPU | 无 | 可独立运行 | SD3.5 加载、latent trajectory 和最小 latent injection 诊断包; 不进入正式 claim-ready 统计。 |
-| attention geometry 捕获 | `attention_geometry_capture_run.ipynb` | 需要 GPU | 无 | 主方法串行起点 | `attention_geometry` 结果包, 包含真实 attention 载体或可审计 attention map。 |
-| latent 写入 | `attention_latent_injection_run.ipynb` | 需要 GPU | `attention_geometry` | 必须等待 geometry 完成 | `attention_latent_injection` 结果包, 包含注入记录、图像 digest 和配对质量记录。 |
-| aligned rescoring | `aligned_rescoring_run.ipynb` | 需要 GPU | `attention_geometry`, `attention_latent_injection` | 必须等待 latent 写入完成 | `aligned_rescoring` 结果包, 包含真实重打分、分数组件审计和配对质量指标。 |
-| fixed-FPR 校准 | `threshold_calibration_run.ipynb` | CPU 通常即可; GPU 非必需 | `attention_latent_injection`, `aligned_rescoring` | 必须等待 aligned rescoring 完成 | `threshold_calibration` 与 `geometric_rescue` 结果包, 包含阈值、clean negative 边界和 rescue 边界。 |
-| 再扩散与语义编辑攻击 | `real_attack_evaluation_run.ipynb` | 需要 GPU | `aligned_rescoring`, `threshold_calibration` | 可与常规失真和几何变换攻击并行 | `real_attack_evaluation` 与 `image_attack_evidence` 结果包, 覆盖再扩散、再生成、语义编辑和自适应去水印攻击。 |
-| 常规失真和几何变换攻击 | `conventional_geometric_attack_evaluation_run.ipynb` | 需要 GPU | `aligned_rescoring`, `threshold_calibration` | 可与再扩散与语义编辑攻击并行 | `conventional_geometric_attack_evaluation` 与 `image_attack_evidence` 结果包; 图像算子多为 CPU/PIL, 但正式检测重打分需要 SD3.5 detector / VAE 路径。 |
-| dataset-level 质量 | `dataset_level_quality_run.ipynb` | 建议 GPU; CPU 可运行但较慢 | `aligned_rescoring`, `real_attack_evaluation`, `conventional_geometric_attack_evaluation` | 必须等待攻击结果齐备 | `dataset_level_quality` 结果包, `dataset_quality_metrics.csv` 只包含正式 FID / KID, pixel proxy 仅进入诊断表。 |
+| 当前主方法正式入口 | `semantic_watermark_image_only_run.ipynb` | 需要显存不低于 24GB 的 Colab GPU | 无 | 同一运行层级串行续跑 | 分支风险、真实 JVP/SVD、LF、幅值尾部、Q/K 几何、仅图像盲检、攻击闭环、正式 FID/KID 和真实机制消融结果包。 |
+| 历史 attention geometry 诊断 | `attention_geometry_capture_run.ipynb` | 需要 GPU | 无 | 可独立诊断 | 旧链路的 attention 捕获诊断包; 不替代当前主方法正式入口。 |
+| 历史 latent 写入诊断 | `attention_latent_injection_run.ipynb` | 需要 GPU | `attention_geometry` | 仅用于旧链路诊断 | 旧链路 latent 写入诊断包; 不作为当前仅图像检测证据。 |
+| 历史 aligned rescoring 诊断 | `aligned_rescoring_run.ipynb` | 需要 GPU | 旧 geometry 与 injection 包 | 仅用于旧链路诊断 | 旧链路重打分诊断包; 检测器访问制度不等同于当前仅图像盲检。 |
+| 历史 fixed-FPR 诊断 | `threshold_calibration_run.ipynb` | CPU 通常即可 | 旧 injection 与 rescoring 包 | 仅用于旧链路诊断 | 旧链路阈值诊断包; 不替代当前完整 evidence 决策校准。 |
+| 历史再扩散攻击诊断 | `real_attack_evaluation_run.ipynb` | 需要 GPU | 旧 rescoring 与 threshold 包 | 仅用于旧链路诊断 | 旧链路真实攻击诊断包。 |
+| 历史常规攻击诊断 | `conventional_geometric_attack_evaluation_run.ipynb` | 需要 GPU | 旧 rescoring 与 threshold 包 | 仅用于旧链路诊断 | 旧链路常规失真与几何攻击诊断包。 |
+| 独立质量导入诊断 | `dataset_level_quality_run.ipynb` | 建议 GPU | 外部图像 registry 与正式特征 | 可独立复核 | 独立质量复核入口; 当前主方法入口会直接从真实图像提取 torch-fidelity 兼容 Inception 特征。 |
 | Tree-Ring method-faithful | `external_baseline_tree_ring_run.ipynb` | 需要 GPU | 无; 共享当前 prompt 配置 | 可与其他 baseline 入口并行 | `external_baseline_method_faithful` 结果包中的 Tree-Ring SD3.5 观测记录。 |
 | Gaussian Shading method-faithful | `external_baseline_gaussian_shading_run.ipynb` | 需要 GPU | 无; 共享当前 prompt 配置 | 可与其他 baseline 入口并行 | `external_baseline_method_faithful` 结果包中的 Gaussian Shading SD3.5 观测记录。 |
 | Shallow Diffuse method-faithful | `external_baseline_shallow_diffuse_run.ipynb` | 需要 GPU | 无; 共享当前 prompt 配置 | 可与其他 baseline 入口并行 | `external_baseline_method_faithful` 结果包中的 Shallow Diffuse SD3.5 观测记录。 |
@@ -47,12 +48,25 @@ SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 
 1. 可选诊断: `colab_drive_cold_start_smoke.ipynb`。
 2. 可选预检: `runtime_method_precheck_run.ipynb`。
-3. 主方法串行链路: `attention_geometry_capture_run.ipynb` -> `attention_latent_injection_run.ipynb` -> `aligned_rescoring_run.ipynb` -> `threshold_calibration_run.ipynb`。
-4. 攻击闭环并行批次: `real_attack_evaluation_run.ipynb` 与 `conventional_geometric_attack_evaluation_run.ipynb` 可在两个 Colab 会话中并行运行。
-5. 数据集级质量: `dataset_level_quality_run.ipynb`, 必须等待两个攻击闭环入口都完成。
-6. method-faithful baseline 并行批次: 四个 `external_baseline_*_run.ipynb` 可分别在独立 Colab 会话中并行运行。
-7. official reference 并行批次: 四个 `official_reference_*_run.ipynb` 可分别在独立 Colab 会话中并行运行。
-8. 结果闭合: `paper_result_closure_run.ipynb`, 必须等待本次要纳入完整结果包的所有结果包写入 Drive 后再运行。
+3. 当前主方法: 把 `semantic_watermark_image_only_run.ipynb` 的第一行改为 `probe_paper`, 重复执行直至数据集主流程完成; 然后打开正式消融开关并继续到消融完成。
+4. 规模递增: `probe_paper` 的真实 GPU 证据通过后, 依次运行 `pilot_paper` 与 `full_paper`。不同运行层级使用独立输出目录, 不共享阈值或统计结果。
+5. method-faithful baseline 并行批次: 四个 `external_baseline_*_run.ipynb` 可分别在独立 Colab 会话中并行运行。
+6. official reference 并行批次: 四个 `official_reference_*_run.ipynb` 可分别在独立 Colab 会话中并行运行。
+7. 结果闭合: `paper_result_closure_run.ipynb`, 必须等待当前主方法、正式质量、真实消融与全部 baseline 结果包写入 Drive 后再运行。
+
+## Colab 跨会话续跑
+
+当前主方法入口默认把 repository 工作区保存在:
+
+```text
+/content/drive/MyDrive/SLM/workspaces/slm_wm_repository
+```
+
+因此 `outputs/image_only_dataset_runtime/<run_name>/runs/` 中的图像、检测记录和 manifest 会在 Colab 断开后保留。每次重连后重新执行全部单元格即可。缓存复用同时要求完整配置摘要、Git 代码版本和 manifest 输出文件一致; 仅有目录或半写入 JSON 不会被复用。
+
+`SLM_WM_MAX_NEW_PROMPTS_PER_SESSION` 和 `SLM_WM_MAX_NEW_ABLATION_RUNS_PER_SESSION` 控制单次会话新增工作量。值越大, 单次会话利用率越高, 但越容易超过 Colab 时间限制。首次应使用默认小批量验证显存峰值, 再依据真实耗时逐步增加。
+
+正式包保存 clean、watermarked 和攻击后 PNG, 且打包时会暂时同时存在原始 `outputs/` 与 zip。运行 `pilot_paper` 或 `full_paper` 前必须检查 Drive 剩余空间; 空间不足时应扩容或把已经完成并校验摘要的旧运行层级归档到其他存储, 不能删除当前运行仍由 manifest 引用的图像。
 
 ## 落盘约定
 
@@ -62,4 +76,4 @@ Colab 入口统一把结果镜像到当前运行层级的 Google Drive 根目录
 /content/drive/MyDrive/SLM/<run_name>_results/
 ```
 
-其中 `<run_name>` 为 `probe_paper`、`pilot_paper` 或 `full_paper`。本地 `outputs/` 只用于当前会话工作区和审计副本, 不应作为 Colab 上游输入路径。
+其中 `<run_name>` 为 `probe_paper`、`pilot_paper` 或 `full_paper`。当前主方法的 `outputs/` 位于 Drive 持久化 repository 工作区, 完成后的 zip 还会镜像到上述论文运行目录, 供结果闭合入口递归发现。未完成的续跑目录不能作为论文上游输入。

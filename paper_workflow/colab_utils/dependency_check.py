@@ -23,8 +23,17 @@ DEPENDENCY_IMPORT_NAMES = {
     "pillow": "PIL",
     "open_clip_torch": "open_clip",
     "scikit-learn": "sklearn",
+    "torch-fidelity": "torch_fidelity",
 }
 NOTEBOOK_DEPENDENCY_PROFILES = {
+    "semantic_watermark_image_only": WORKFLOW_DEPENDENCIES
+    + (
+        "numpy",
+        "pillow",
+        "scipy",
+        "torchvision",
+        "torch-fidelity",
+    ),
     "sd35_runtime": WORKFLOW_DEPENDENCIES
     + (
         "numpy",

@@ -4,6 +4,8 @@
 
 ## 服务器运行入口
 
+当前远程服务器 `8.216.54.104` 不具备 GPU, 因而不得在该节点运行真实 SD3.5 主方法或 GPU 攻击。当前正式 GPU 入口是 `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb`。服务器入口保留给未来 GPU 节点或用于 CPU 结果闭合, 不能把无 GPU 的失败或跳过记录登记为正式实验结果。
+
 - `run_gpu_server_workflow.py`: 不依赖 Notebook 或 Google Drive 的单流程服务器入口。可运行主方法、攻击、质量、method-faithful baseline 和 official reference。
 - `run_gpu_server_result_closure.py`: 汇总服务器结果闭合入口。它从本地交换目录读取各计算服务器上传的结果包, 并生成完整结果包。
 
@@ -23,13 +25,15 @@ python scripts/run_gpu_server_result_closure.py \
 
 ## 结果重建与论文证据命令
 
+- `run_image_only_dataset_runtime.py`: 执行真实分支风险、Jacobian Null Space、空间 LF、幅值尾部载体、Q/K 注意力几何、仅图像检测、真实攻击和正式 Inception FID/KID。默认同时生成方法运行包与质量证据包。
+- `run_runtime_rerun_ablations.py`: 复用已冻结的完整检测协议, 对全部机制开关重新执行生成、攻击和仅图像检测; 不允许通过历史分数变换生成消融结果。
 - `write_pilot_paper_result_records.py`: 从结果包物化 records, 并生成当前运行层级的正式结果记录。
 - `write_pilot_paper_fixed_fpr_common_protocol_outputs.py`: 重建 fixed-FPR common protocol、bootstrap CI 和 claim readiness。
 - `write_pilot_paper_complete_result_package.py`: 生成完整结果包。
 - `write_attack_matrix_outputs.py`: 重建攻击矩阵表和 manifest。
 - `write_external_baseline_comparison_outputs.py`: 重建外部 baseline 对比表。
-- `write_internal_ablation_outputs.py`: 重建内部消融证据。
-- `write_dataset_level_quality_outputs.py`: 重建 dataset-level 质量证据摘要; 正式表只输出 Inception FID / KID, proxy 指标单独输出为诊断表。
+- `write_internal_ablation_outputs.py`: 仅保留历史诊断兼容; 正式论文机制消融必须来自 `run_runtime_rerun_ablations.py`。
+- `write_dataset_level_quality_outputs.py`: 重建 dataset-level 质量证据摘要; 传入 `--auto-extract-formal-features` 时直接运行 torch-fidelity 0.4.0 的 TensorFlow 兼容 Inception v3 2048 维特征, 正式表只输出 FID / KID, pixel 指标单独输出为诊断表。
 
 上述命令必须读取受治理 records、manifests 或结果包, 不得手工拼接正式论文结论。
 

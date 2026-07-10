@@ -28,11 +28,13 @@ from experiments.protocol import (
 )
 from main.analysis.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
+from experiments.runtime.archive_naming import utc_archive_token
 
 DEFAULT_OUTPUT_DIR = Path("outputs/dataset_level_quality")
 DEFAULT_REAL_ATTACK_REGISTRY_PATH = Path("outputs/real_attack_evaluation/real_attacked_image_registry.jsonl")
 DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 100
 DEFAULT_PROGRESS_INTERVAL_ITEMS = 50
+FORMAL_FEATURE_EXTRACTOR_ID = "torch_fidelity_0_4_0_inception_v3_compat_2048"
 
 
 def dataset_quality_io_progress_enabled() -> bool:
@@ -393,6 +395,86 @@ def resolve_existing_image_path(
     return candidates[0]
 
 
+def extract_formal_inception_feature_rows(
+    *,
+    records: Any,
+    root_path: Path,
+    image_search_roots: tuple[Path, ...],
+    output_path: Path,
+    device_name: str | None = None,
+    batch_size: int = 32,
+) -> list[dict[str, Any]]:
+    """直接从受治理图像提取 torch-fidelity Inception v3 兼容特征。
+
+    该函数实现正式 FID / KID 所需的真实特征算子。它使用 torch-fidelity
+    的 `inception-v3-compat` 和 2048 维特征层; 该实现使用从官方
+    TensorFlow 权重转换的参数、TensorFlow 兼容双线性缩放和 uint8 输入。
+    它不读取 pixel histogram 诊断特征, 生成的逐图像记录可单独审计和复算。
+    """
+
+    if batch_size <= 0:
+        raise ValueError("Inception 特征 batch_size 必须为正整数")
+    import torch
+    from PIL import Image
+    from torch_fidelity.feature_extractor_inceptionv3 import FeatureExtractorInceptionV3
+
+    resolved_device = device_name or os.environ.get(
+        "SLM_WM_INCEPTION_DEVICE",
+        "cuda" if torch.cuda.is_available() else "cpu",
+    )
+    if resolved_device.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("正式 Inception 特征提取要求的 CUDA 设备不可用")
+    model = FeatureExtractorInceptionV3(
+        "inception-v3-compat",
+        ["2048"],
+        verbose=True,
+    ).to(resolved_device).eval()
+    items: list[tuple[Any, str, Path, str]] = []
+    for record in records:
+        for image_role, path_text, image_digest in (
+            ("source", record.source_image_path, record.source_image_digest),
+            ("comparison", record.comparison_image_path, record.comparison_image_digest),
+        ):
+            resolved_path = resolve_existing_image_path(path_text, root_path, image_search_roots)
+            if not resolved_path.is_file():
+                raise FileNotFoundError(f"正式 Inception 特征缺少图像文件: {path_text}")
+            items.append((record, image_role, resolved_path, image_digest))
+    rows: list[dict[str, Any]] = []
+    with torch.inference_mode():
+        for start in range(0, len(items), batch_size):
+            batch_items = items[start : start + batch_size]
+            tensors = []
+            for _, _, image_path, _ in batch_items:
+                with Image.open(image_path) as image:
+                    rgb = image.convert("RGB")
+                    width, height = rgb.size
+                    tensor = torch.frombuffer(bytearray(rgb.tobytes()), dtype=torch.uint8)
+                    tensors.append(tensor.reshape(height, width, 3).permute(2, 0, 1))
+            batch_shapes = {tuple(tensor.shape) for tensor in tensors}
+            if len(batch_shapes) != 1:
+                raise ValueError("同一 Inception batch 中的图像尺寸必须一致")
+            features = model(torch.stack(tensors).to(resolved_device))[0].float().cpu()
+            if features.ndim != 2:
+                features = features.reshape(features.shape[0], -1)
+            for (record, image_role, image_path, image_digest), feature in zip(batch_items, features):
+                rows.append(
+                    {
+                        "dataset_quality_record_id": record.dataset_quality_record_id,
+                        "dataset_quality_image_role": image_role,
+                        "feature_backend": FORMAL_FEATURE_BACKEND,
+                        "feature_extractor_id": FORMAL_FEATURE_EXTRACTOR_ID,
+                        "feature_dimension": int(feature.numel()),
+                        "image_path": relative_or_absolute(image_path, root_path),
+                        "image_digest": image_digest or path_digest(image_path),
+                        "feature_vector": [float(value) for value in feature.tolist()],
+                        "supports_paper_claim": False,
+                    }
+                )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("".join(json_line(row) for row in rows), encoding="utf-8")
+    return rows
+
+
 def build_image_resolution_records(
     *,
     records: Any,
@@ -472,6 +554,9 @@ def write_dataset_level_quality_outputs(
     input_package_paths: Any = (),
     formal_feature_records_path: str | Path | None = None,
     formal_min_sample_count: int = DEFAULT_FORMAL_MIN_SAMPLE_COUNT,
+    auto_extract_formal_features: bool = False,
+    inception_device_name: str | None = None,
+    inception_batch_size: int = 32,
 ) -> dict[str, Any]:
     """写出数据集级质量 records、metrics、summary 和 manifest。
 
@@ -510,9 +595,21 @@ def write_dataset_level_quality_outputs(
         materialized_root=materialized_root,
         materialized_records=materialized_records,
     )
+    formal_feature_rows = read_formal_feature_rows(resolved_formal_feature_records_path)
+    formal_features_generated = False
+    if auto_extract_formal_features and not formal_feature_rows:
+        formal_feature_rows = extract_formal_inception_feature_rows(
+            records=records,
+            root_path=root_path,
+            image_search_roots=all_image_search_roots,
+            output_path=resolved_formal_feature_records_path,
+            device_name=inception_device_name,
+            batch_size=inception_batch_size,
+        )
+        formal_features_generated = True
     formal_feature_payload = build_formal_feature_import_payload(
         records=records,
-        feature_rows=read_formal_feature_rows(resolved_formal_feature_records_path),
+        feature_rows=formal_feature_rows,
         formal_feature_records_path=resolved_formal_feature_records_path,
         root_path=root_path,
         formal_min_sample_count=formal_min_sample_count,
@@ -541,8 +638,21 @@ def write_dataset_level_quality_outputs(
     resolved_image_file_count = sum(1 for record in image_resolution_records if record["resolution_status"] != "image_file_missing")
     materialized_image_input_count = sum(1 for record in image_resolution_records if record["materialized_image_input"])
 
+    base_summary = build_dataset_quality_summary(records, metric_rows, diagnostic_metric_rows)
+    formal_feature_extractor_ids = sorted(
+        {
+            str(row.get("feature_extractor_id"))
+            for row in formal_feature_rows
+            if row.get("feature_extractor_id")
+        }
+    )
+    canonical_formal_feature_extractor_ready = formal_feature_extractor_ids == [FORMAL_FEATURE_EXTRACTOR_ID]
+    formal_claim_gate_ready = bool(
+        base_summary.get("formal_fid_kid_claim_gate_ready", False)
+        and canonical_formal_feature_extractor_ready
+    )
     summary = {
-        **build_dataset_quality_summary(records, metric_rows, diagnostic_metric_rows),
+        **base_summary,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "real_attack_registry_path": relative_or_absolute(resolved_registry_path, root_path),
         "dataset_quality_metrics_path": relative_or_absolute(metrics_path, root_path),
@@ -561,6 +671,23 @@ def write_dataset_level_quality_outputs(
         "formal_feature_backend_ready": formal_feature_payload["report"]["formal_feature_backend_ready"],
         "formal_sample_scale_ready": formal_feature_payload["report"]["formal_sample_scale_ready"],
         "formal_min_sample_count": formal_min_sample_count,
+        "formal_feature_origin": (
+            "direct_torch_fidelity_inception_v3_compat_extraction"
+            if formal_features_generated
+            else "governed_feature_record_import"
+        ),
+        "formal_feature_extractor_ids": formal_feature_extractor_ids,
+        "canonical_formal_feature_extractor_ready": canonical_formal_feature_extractor_ready,
+        "formal_fid_kid_claim_gate_ready": formal_claim_gate_ready,
+        "formal_fid_kid_claim_blocker": (
+            ""
+            if formal_claim_gate_ready
+            else (
+                "requires_canonical_inception_feature_extractor"
+                if base_summary.get("formal_fid_kid_ready", False)
+                else base_summary.get("formal_fid_kid_claim_blocker", "formal_fid_kid_not_measured")
+            )
+        ),
     }
 
     records_path.write_text("".join(json_line(record.to_dict()) for record in records), encoding="utf-8")
@@ -606,7 +733,7 @@ def write_dataset_level_quality_outputs(
 
     input_paths = [relative_or_absolute(resolved_registry_path, root_path)] if resolved_registry_path.exists() else []
     input_paths.extend(relative_or_absolute(path, root_path) for path in resolved_input_package_paths)
-    if resolved_formal_feature_records_path.exists():
+    if resolved_formal_feature_records_path.exists() and not formal_features_generated:
         input_paths.append(relative_or_absolute(resolved_formal_feature_records_path, root_path))
     materialized_image_paths = tuple(
         resolve_path(root_path, record["resolved_image_path"])
@@ -622,6 +749,7 @@ def write_dataset_level_quality_outputs(
             metrics_path,
             diagnostic_metrics_path,
             summary_path,
+            *((resolved_formal_feature_records_path,) if formal_features_generated else ()),
             *materialized_image_paths,
             manifest_path,
         )
@@ -638,6 +766,8 @@ def write_dataset_level_quality_outputs(
             "metric_rows_digest": build_stable_digest(metric_rows),
             "diagnostic_metric_rows_digest": build_stable_digest(diagnostic_metric_rows),
             "summary_digest": build_stable_digest(summary),
+            "auto_extract_formal_features": auto_extract_formal_features,
+            "formal_features_generated": formal_features_generated,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_dataset_level_quality_outputs.py",
@@ -645,6 +775,27 @@ def write_dataset_level_quality_outputs(
     ).to_dict()
     manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
     return manifest
+
+
+def package_dataset_level_quality_outputs(
+    paper_run_name: str,
+    root: str | Path = ".",
+) -> Path:
+    """打包当前论文运行层级的正式 FID / KID 证据。"""
+
+    root_path = Path(root).resolve()
+    source_dir = root_path / "outputs" / "dataset_level_quality" / paper_run_name
+    if not source_dir.is_dir():
+        raise FileNotFoundError("缺少当前论文运行层级的数据集级质量输出")
+    code_version = resolve_code_version(root_path).replace("-dirty", "")
+    archive_path = source_dir / f"dataset_level_quality_package_{utc_archive_token()}_{code_version}.zip"
+    entries = tuple(
+        path for path in sorted(source_dir.rglob("*")) if path.is_file() and path.suffix.lower() != ".zip"
+    )
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
+        for path in entries:
+            archive.write(path, path.relative_to(root_path).as_posix())
+    return archive_path
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -677,6 +828,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_FORMAL_MIN_SAMPLE_COUNT,
         help="正式 FID / KID 所需的最小图像对数量, 默认不适配小样本。",
     )
+    parser.add_argument(
+        "--auto-extract-formal-features",
+        action="store_true",
+        help="特征记录缺失时直接运行 torch-fidelity Inception v3 兼容特征提取。",
+    )
+    parser.add_argument("--inception-device-name", default=None, help="正式 Inception 特征提取设备。")
+    parser.add_argument("--inception-batch-size", type=int, default=32, help="正式 Inception 特征 batch 大小。")
     return parser
 
 
@@ -692,6 +850,9 @@ def main() -> None:
         input_package_paths=args.input_package_path,
         formal_feature_records_path=args.formal_feature_records_path,
         formal_min_sample_count=args.formal_min_sample_count,
+        auto_extract_formal_features=args.auto_extract_formal_features,
+        inception_device_name=args.inception_device_name,
+        inception_batch_size=args.inception_batch_size,
     )
     print(stable_json_text(manifest), end="")
 

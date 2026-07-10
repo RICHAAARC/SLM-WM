@@ -103,5 +103,9 @@ def derive_lf_content_carrier(
         embedding_strength=embedding_strength,
         lf_content_carrier_digest=carrier_digest,
         supports_paper_claim=False,
-        metadata={"carrier_family": "latent_frequency", "frequency_band": "low_frequency"},
+        metadata={
+            "carrier_family": "legacy_vector_low_pass",
+            "frequency_band": "diagnostic_vector_index_low_pass",
+            "formal_runtime_implementation": "main.methods.carrier.keyed_tensor.build_low_frequency_template",
+        },
     )

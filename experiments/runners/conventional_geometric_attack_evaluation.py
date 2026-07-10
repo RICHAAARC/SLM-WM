@@ -79,7 +79,7 @@ class ConventionalGeometricAttackEvaluationConfig:
     model_id: str = PRIMARY_MODEL_ID
     output_dir: str = DEFAULT_OUTPUT_DIR
     source_image_dir: str = DEFAULT_SOURCE_IMAGE_DIR
-    max_source_images: int = 600
+    max_source_images: int = 700
     detection_threshold: float = 0.50
     device_name: str = "cuda"
     torch_dtype: str = "float16"

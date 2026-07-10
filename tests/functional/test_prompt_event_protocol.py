@@ -9,7 +9,13 @@ import pytest
 
 from experiments.protocol.calibration import binomial_rate_upper_confidence_bound
 from experiments.protocol.events import build_event_records
-from experiments.protocol.prompts import PROMPT_FILES, build_prompt_record, build_prompt_records, read_prompt_file
+from experiments.protocol.prompts import (
+    PROMPT_FILES,
+    build_prompt_record,
+    build_prompt_records,
+    read_prompt_file,
+    validate_governed_prompt_bank,
+)
 from experiments.protocol.splits import (
     SAMPLE_ROLES,
     assert_disjoint_calibration_and_test,
@@ -52,12 +58,12 @@ def test_calibration_and_test_prompt_ids_are_disjoint() -> None:
 
 
 @pytest.mark.quick
-def test_paper_prompt_split_uses_shared_calibration_heavy_ratio() -> None:
-    """三类论文运行层级应共享 dev 5%、calibration 55%、test 40% 的目标比例。"""
+def test_paper_prompt_split_uses_independent_fixed_fpr_test_counts() -> None:
+    """三级规模应得到 3/33/34 的整数倍划分。"""
 
-    assert build_group_split_counts(60) == {"dev": 3, "calibration": 33, "test": 24}
-    assert build_group_split_counts(600) == {"dev": 30, "calibration": 330, "test": 240}
-    assert build_group_split_counts(6000) == {"dev": 300, "calibration": 3300, "test": 2400}
+    assert build_group_split_counts(70) == {"dev": 3, "calibration": 33, "test": 34}
+    assert build_group_split_counts(700) == {"dev": 30, "calibration": 330, "test": 340}
+    assert build_group_split_counts(7000) == {"dev": 300, "calibration": 3300, "test": 3400}
 
 
 @pytest.mark.quick
@@ -70,7 +76,19 @@ def test_full_paper_calibration_split_supports_low_fpr_confidence_boundary() -> 
     split_groups = group_prompt_ids_by_split(prompt_records)
 
     assert binomial_rate_upper_confidence_bound(0, len(split_groups["calibration"]), 0.95) <= 0.001
-    assert len(split_groups["test"]) >= 0.40 * len(prompt_records) - 1
+    assert binomial_rate_upper_confidence_bound(0, len(split_groups["test"]), 0.95) <= 0.001
+
+
+@pytest.mark.quick
+def test_governed_prompt_bank_has_expected_counts_and_source() -> None:
+    """联网补充后的 Prompt 文件必须满足数量、去重和来源登记。"""
+
+    report = validate_governed_prompt_bank()
+
+    assert report["prompt_counts"] == {"probe_paper": 70, "pilot_paper": 700, "full_paper": 7000}
+    assert report["count_contract_ready"] is True
+    assert report["deduplication_ready"] is True
+    assert report["source_registry_ready"] is True
 
 
 def write_prompt_config(repo_root: Path, prompt_set: str, lines: tuple[str, ...]) -> None:

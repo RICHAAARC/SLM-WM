@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import json
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,12 @@ PROMPT_FILES = {
     "probe_paper": Path("configs/paper_main_probe_paper_prompts.txt"),
     "pilot_paper": Path("configs/paper_main_pilot_paper_prompts.txt"),
     "full_paper": Path("configs/paper_main_full_paper_prompts.txt"),
+}
+PROMPT_SOURCE_REGISTRY = Path("configs/prompt_source_registry.json")
+EXPECTED_PROMPT_COUNTS = {
+    "probe_paper": 70,
+    "pilot_paper": 700,
+    "full_paper": 7000,
 }
 
 
@@ -157,3 +164,36 @@ def load_prompt_records(prompt_files: dict[str, Path] | None = None) -> tuple[Pr
     for prompt_set, path in sorted(files.items()):
         records.extend(build_prompt_records(prompt_set, read_prompt_file(path)))
     return tuple(records)
+
+
+def load_prompt_source_registry(path: str | Path = PROMPT_SOURCE_REGISTRY) -> dict[str, Any]:
+    """读取联网补充 Prompt 的固定来源和选择摘要。"""
+
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def validate_governed_prompt_bank(
+    prompt_files: dict[str, Path] | None = None,
+    registry_path: str | Path = PROMPT_SOURCE_REGISTRY,
+) -> dict[str, Any]:
+    """验证三级 Prompt 数量、集合内去重和来源登记。"""
+
+    files = prompt_files or PROMPT_FILES
+    counts = {}
+    duplicate_counts = {}
+    for prompt_set, path in files.items():
+        prompts = read_prompt_file(path)
+        normalized = tuple(normalize_prompt_text(prompt).lower() for prompt in prompts)
+        counts[prompt_set] = len(prompts)
+        duplicate_counts[prompt_set] = len(prompts) - len(set(normalized))
+    registry = load_prompt_source_registry(registry_path)
+    return {
+        "prompt_counts": counts,
+        "expected_prompt_counts": EXPECTED_PROMPT_COUNTS,
+        "duplicate_counts": duplicate_counts,
+        "count_contract_ready": counts == EXPECTED_PROMPT_COUNTS,
+        "deduplication_ready": all(value == 0 for value in duplicate_counts.values()),
+        "source_revision": registry.get("source_revision", ""),
+        "source_file_sha256": registry.get("source_file_sha256", ""),
+        "source_registry_ready": bool(registry.get("source_revision") and registry.get("source_file_sha256")),
+    }

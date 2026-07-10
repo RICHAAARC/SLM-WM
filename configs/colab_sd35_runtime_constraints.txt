@@ -11,6 +11,7 @@
 # CUDA: 12.8
 # GPU: NVIDIA L4
 # torch: 2.11.0+cu128 由 Colab runtime 提供, 不在此处强制安装。
+# 正式 FID / KID 使用 torch-fidelity 的 TensorFlow 兼容 Inception v3 2048 维特征。
 
 diffusers==0.38.0
 transformers==5.12.1
@@ -22,3 +23,4 @@ sentencepiece==0.2.1
 protobuf==7.35.1
 numpy==2.0.2
 pillow==11.3.0
+torch-fidelity==0.4.0

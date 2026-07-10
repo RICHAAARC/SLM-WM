@@ -47,7 +47,7 @@ def write_full_paper_prompts(repo_root: Path, prompt_count: int = 250) -> Path:
     return prompt_path
 
 
-def write_probe_paper_prompts(repo_root: Path, prompt_count: int = 60) -> Path:
+def write_probe_paper_prompts(repo_root: Path, prompt_count: int = 70) -> Path:
     """写入测试用 probe_paper prompt 配置。"""
 
     config_dir = repo_root / "configs"
@@ -229,7 +229,7 @@ def test_writer_switches_common_protocol_to_probe_paper_without_logic_fork(
     assert summary["probe_paper_claim_ready"] is False
     assert summary["probe_claim_ready"] is False
     assert prompt_summary["prompt_set"] == "probe_paper"
-    assert prompt_summary["pilot_paper_prompt_count"] == 60
+    assert prompt_summary["pilot_paper_prompt_count"] == 70
     assert prompt_summary["target_fpr"] == 0.1
     assert prompt_summary["pilot_paper_negative_count_minimum_required"] == 10
     assert prompt_summary["prompt_split_ready"] is True

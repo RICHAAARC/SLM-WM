@@ -6,10 +6,13 @@
 
 ## Current Construction Unit
 
-- `project_unit`: `project_bootstrap`
-- `target_construction_unit`: `core_method_runtime_construction`
-- 当前推进单元只允许建立目录、文档、skill、harness、测试分层和最小 `main/` 核心包骨架。
-- 当前推进单元不应引入真实大规模数据、正式实验输出、论文最终图表或发布包。
+- `project_unit`: `core_method_runtime_construction`
+- `target_construction_unit`: `experiment_protocol_validation`
+- 当前推进单元允许实现真实方法算子、真实模型运行时接口、仅图像检测接口和对应轻量测试。
+- 当前推进单元不得把 synthetic、proxy、counterfactual 或未完成的大规模运行结果登记为正式论文证据。
+- 进入 `experiment_protocol_validation` 前, 真实分支风险场、Jacobian Null Space、尾部截断鲁棒载体、注意力几何和仅图像检测必须形成可执行闭环并通过 harness gates。
+- 当前远程服务器没有 GPU。真实 SD3.5 生成、精确 JVP、Q/K 梯度、再扩散攻击和正式 Inception 特征提取只能由 Colab GPU 入口执行; 远程服务器只承担结果包保存、CPU 审计、记录物化和论文结果闭合。
+- 在 Colab GPU 结果包尚未生成并通过门禁前, 项目保持在当前构建单元, 不得把代码可执行性写成已经完成的论文实验结果。
 
 ## Ordered Semantic Construction Units
 

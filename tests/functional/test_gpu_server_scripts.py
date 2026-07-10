@@ -64,14 +64,14 @@ def test_gpu_server_workflow_configures_probe_paper_without_notebook_logic_fork(
     assert report["paper_run"]["run_name"] == "probe_paper"
     assert report["paper_run"]["prompt_set"] == "probe_paper"
     assert report["paper_run"]["prompt_file"].endswith("configs/paper_main_probe_paper_prompts.txt")
-    assert report["paper_run"]["sample_count"] == 60
+    assert report["paper_run"]["sample_count"] == 70
     assert report["paper_run"]["target_fpr"] == 0.1
     assert report["paper_run"]["minimum_clean_negative_count"] == 10
-    assert report["paper_run"]["dataset_level_quality_minimum_count"] == 60
+    assert report["paper_run"]["dataset_level_quality_minimum_count"] == 70
     assert report["paper_run"]["protocol_profile"] == "probe_paper_fixed_fpr_0_1"
     assert report["paper_run"]["drive_result_root"] == result_root.as_posix()
     assert os.environ["SLM_WM_PAPER_RUN_NAME"] == "probe_paper"
-    assert os.environ["SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT"] == "60"
+    assert os.environ["SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT"] == "70"
     assert os.environ["SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT"] == "10"
 
 

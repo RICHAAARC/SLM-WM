@@ -48,13 +48,13 @@ def test_probe_paper_prompt_inputs_use_probe_gate_count(tmp_path: Path) -> None:
     prompt_file = tmp_path / "configs" / "paper_main_probe_paper_prompts.txt"
     prompt_file.parent.mkdir(parents=True)
     prompt_file.write_text(
-        "\n".join(f"a probe_paper prompt {index}" for index in range(60)) + "\n",
+        "\n".join(f"a probe_paper prompt {index}" for index in range(70)) + "\n",
         encoding="utf-8",
     )
     config = T2SMarkFullMainReproductionConfig(
         prompt_set="probe_paper",
         prompt_file="configs/paper_main_probe_paper_prompts.txt",
-        prompt_limit=60,
+        prompt_limit=70,
         minimum_prompt_protocol_count=10,
         require_cuda=False,
     )
@@ -62,7 +62,7 @@ def test_probe_paper_prompt_inputs_use_probe_gate_count(tmp_path: Path) -> None:
 
     report = write_full_main_prompt_inputs(tmp_path, config, paths)
 
-    assert report["selected_prompt_count"] == 60
+    assert report["selected_prompt_count"] == 70
     assert report["minimum_prompt_protocol_count"] == 10
     assert report["full_main_prompt_protocol_ready"] is True
     assert report["paper_claim_scale"] == "probe_paper"
