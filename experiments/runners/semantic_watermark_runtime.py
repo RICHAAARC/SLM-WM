@@ -7,8 +7,8 @@ JVP/SVD、安全投影、真实 Q/K 注意力梯度和最终图像盲检。
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 from dataclasses import asdict, dataclass
+import hashlib
 import json
 from pathlib import Path
 import time
@@ -19,12 +19,14 @@ from experiments.runtime.diffusion.semantic_features import (
     load_clip_vision_model,
 )
 from experiments.protocol.attacks import default_attack_configs
-from experiments.runners.real_attack_evaluation import default_attack_specs
-from experiments.runtime.diffusion.regeneration_attacks import DiffusionAttackRuntime
+from experiments.runtime.diffusion.regeneration_attacks import (
+    DiffusionAttackRuntime,
+    default_diffusion_attack_specs,
+)
 from experiments.runtime.image_attacks import apply_standard_image_attack
 from experiments.runtime.diffusion.sd3_pipeline_runtime import compute_image_quality_metrics, load_pipeline, tensor_norm
 from experiments.runtime.repository_environment import file_digest, resolve_code_version
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from main.methods.carrier import (
     build_low_frequency_template,
@@ -34,6 +36,7 @@ from main.methods.carrier import (
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
     DifferentiableAttentionRecorder,
+    attention_relation_stability_map,
     compute_attention_geometry_gradient,
     optimize_attention_geometry_update,
 )
@@ -68,14 +71,14 @@ class SemanticWatermarkRuntimeConfig:
     inference_steps: int = 28
     guidance_scale: float = 4.5
     injection_step_indices: tuple[int, ...] = (8, 14, 20)
-    candidate_count: int = 12
+    candidate_count: int = 20
     null_rank: int = 4
     lf_relative_strength: float = 0.0025
     tail_relative_strength: float = 0.0015
     attention_relative_strength: float = 0.0010
     tail_fraction: float = 0.20
     minimum_projection_energy_retention: float = 0.01
-    maximum_relative_response_residual: float = 0.75
+    maximum_relative_response_residual: float = 1e-4
     max_attention_tokens: int = 64
     attention_module_count: int = 2
     semantic_routing_enabled: bool = True
@@ -109,6 +112,10 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
         if not self.lf_enabled and not self.tail_robust_enabled:
             raise ValueError("正式内容检测至少需要启用一个内容载体分支")
+        if self.attention_module_count < 2:
+            raise ValueError("真实注意力关系稳定度至少需要两个 Q/K 注意力层")
+        if self.max_attention_tokens < 4:
+            raise ValueError("max_attention_tokens 至少为 4")
         if self.split not in {"dev", "calibration", "test"}:
             raise ValueError("split 必须为 dev、calibration 或 test")
 
@@ -268,8 +275,8 @@ def _attention_modules(pipeline: Any, limit: int) -> tuple[tuple[str, Any], ...]
     for name, module in pipeline.transformer.named_modules():
         if hasattr(module, "to_q") and hasattr(module, "to_k") and hasattr(module, "heads"):
             candidates.append((name, module))
-    if not candidates:
-        raise RuntimeError("模型中没有可用于真实 Q/K 几何的注意力模块")
+    if len(candidates) < limit:
+        raise RuntimeError("模型中的真实 Q/K 注意力模块数量不足")
     if limit == 1:
         return (candidates[len(candidates) // 2],)
     selected = []
@@ -277,6 +284,8 @@ def _attention_modules(pipeline: Any, limit: int) -> tuple[tuple[str, Any], ...]
         selected_index = round(index * (len(candidates) - 1) / (limit - 1))
         if candidates[selected_index] not in selected:
             selected.append(candidates[selected_index])
+    if len(selected) != limit:
+        raise RuntimeError("无法选择足够数量且互不重复的真实 Q/K 注意力模块")
     return tuple(selected)
 
 
@@ -353,7 +362,7 @@ def _solve_branch_subspace(
     null_rank: int,
     joint_feature_linearization: ExactJVPLinearization,
     preferred_directions: tuple[Any, ...] = (),
-    maximum_relative_response_residual: float = 0.75,
+    maximum_relative_response_residual: float = 1e-4,
 ) -> Any:
     """为一个载体分支运行真实 JVP 和 SVD。"""
 
@@ -367,13 +376,13 @@ def _solve_branch_subspace(
     )
     result = solve_jacobian_null_space(
         latent=latent.float(),
-        semantic_feature_function=feature_runtime.semantic_features,
-        visual_feature_function=feature_runtime.visual_features,
+        semantic_feature_function=feature_runtime.semantic_condition_features,
+        visual_feature_function=feature_runtime.visual_condition_features,
         candidate_matrix=candidates,
         null_rank=null_rank,
         visual_response_weight=1.0,
         branch_name=branch_name,
-        joint_feature_function=feature_runtime.joint_features,
+        joint_feature_function=feature_runtime.joint_condition_features,
         joint_feature_linearization=joint_feature_linearization,
     )
     result.metadata["preferred_direction_count"] = len(preferred_directions)
@@ -410,6 +419,17 @@ def _encode_image_latent(pipeline: Any, image: Any) -> Any:
     return (encoded - shift_factor) * scaling_factor
 
 
+def _public_detection_noise_seed(config: SemanticWatermarkRuntimeConfig) -> int:
+    """由公开模型和检测协议派生与生成样本无关的固定噪声种子。"""
+
+    detection_index = config.injection_step_indices[0]
+    payload = (
+        f"slm_wm_image_only_attention|{config.model_id}|{config.width}x{config.height}|"
+        f"{config.inference_steps}|{detection_index}"
+    ).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big") % (2**63 - 1)
+
+
 def _image_attention_extractor(
     pipeline: Any,
     config: SemanticWatermarkRuntimeConfig,
@@ -424,17 +444,20 @@ def _image_attention_extractor(
     pipeline.scheduler.set_timesteps(config.inference_steps, device=pipeline._execution_device)
     detection_index = config.injection_step_indices[0]
     timestep = pipeline.scheduler.timesteps[detection_index]
+    public_detection_seed = _public_detection_noise_seed(config)
 
-    def extract(image: Any) -> tuple[str, Any]:
+    def extract(image: Any) -> tuple[tuple[str, Any, tuple[int, ...]], ...]:
+        """从任意待检图像提取全部冻结层的公开固定噪声 Q/K 关系。"""
+
         latent = _encode_image_latent(pipeline, image)
-        generator = torch.Generator(device=latent.device.type).manual_seed(config.seed + 9109)
+        generator = torch.Generator(device=latent.device.type).manual_seed(public_detection_seed)
         noise = torch.randn(latent.shape, generator=generator, device=latent.device, dtype=latent.dtype)
         if hasattr(pipeline.scheduler, "scale_noise"):
             noisy_latent = pipeline.scheduler.scale_noise(latent, timestep, noise)
         else:
             sigma = float(detection_index + 1) / float(config.inference_steps)
             noisy_latent = (1.0 - sigma) * latent + sigma * noise
-        with DifferentiableAttentionRecorder(modules[:1], max_tokens=config.max_attention_tokens) as recorder:
+        with DifferentiableAttentionRecorder(modules, max_tokens=config.max_attention_tokens) as recorder:
             with torch.no_grad():
                 _transformer_forward_function(
                     pipeline,
@@ -444,8 +467,11 @@ def _image_attention_extractor(
                 )(noisy_latent)
             if not recorder.records:
                 raise RuntimeError("图像盲检没有捕获到真实 Q/K attention")
-            layer_name, attention, _ = recorder.records[0]
-        return layer_name, attention.detach()
+            records = tuple(
+                (layer_name, attention.detach(), token_indices)
+                for layer_name, attention, token_indices in recorder.records
+            )
+        return records
 
     return extract
 
@@ -518,18 +544,6 @@ def run_semantic_watermark_runtime(
             return callback_kwargs
         with torch.enable_grad():
             signals = feature_runtime.branch_signal_maps(latent.float(), previous_injection_latent)
-            risk_bundle = build_branch_risk_fields(
-                semantic_values=signals["semantic"].mean(dim=0).reshape(-1).cpu().tolist(),
-                texture_values=signals["texture"].mean(dim=0).reshape(-1).cpu().tolist(),
-                stability_values=signals["stability"].mean(dim=0).reshape(-1).cpu().tolist(),
-                saliency_values=signals["saliency"].mean(dim=0).reshape(-1).cpu().tolist(),
-                attention_stability_values=signals["attention_stability"].mean(dim=0).reshape(-1).cpu().tolist(),
-            )
-            branch_fields = {
-                "lf_content": risk_bundle.lf_content,
-                "tail_robust": risk_bundle.tail_robust,
-                "attention_geometry": risk_bundle.attention_geometry,
-            }
             lf_template = build_low_frequency_template(latent, config.key_material, config.model_id)
             tail_template, tail_threshold, retained_fraction = build_tail_robust_template(
                 latent,
@@ -543,15 +557,10 @@ def run_semantic_watermark_runtime(
                 unconditional_prompt,
                 unconditional_pooled,
             )
-            attention_context = (
-                DifferentiableAttentionRecorder(
-                    attention_modules,
-                    max_tokens=config.max_attention_tokens,
-                )
-                if config.attention_geometry_enabled
-                else nullcontext(None)
-            )
-            with attention_context as recorder:
+            with DifferentiableAttentionRecorder(
+                attention_modules,
+                max_tokens=config.max_attention_tokens,
+            ) as recorder:
                 attention_gradient = (
                     compute_attention_geometry_gradient(
                         latent,
@@ -559,9 +568,29 @@ def run_semantic_watermark_runtime(
                         recorder,
                         config.key_material,
                     )
-                    if recorder is not None
+                    if config.attention_geometry_enabled
                     else None
                 )
+                if attention_gradient is None:
+                    recorder.clear()
+                    with torch.no_grad():
+                        transformer_forward(latent.detach().float())
+                attention_stability = attention_relation_stability_map(
+                    recorder.records,
+                    tuple(int(value) for value in latent.shape[-2:]),
+                ).detach()
+                risk_bundle = build_branch_risk_fields(
+                    semantic_values=signals["semantic"].mean(dim=0).reshape(-1).cpu().tolist(),
+                    texture_values=signals["texture"].mean(dim=0).reshape(-1).cpu().tolist(),
+                    stability_values=signals["stability"].mean(dim=0).reshape(-1).cpu().tolist(),
+                    saliency_values=signals["saliency"].mean(dim=0).reshape(-1).cpu().tolist(),
+                    attention_stability_values=attention_stability.mean(dim=0).reshape(-1).cpu().tolist(),
+                )
+                branch_fields = {
+                    "lf_content": risk_bundle.lf_content,
+                    "tail_robust": risk_bundle.tail_robust,
+                    "attention_geometry": risk_bundle.attention_geometry,
+                }
                 active_branch_fields = {
                     branch_name: branch_field
                     for branch_name, branch_field in branch_fields.items()
@@ -581,7 +610,7 @@ def run_semantic_watermark_runtime(
                 if config.null_space_enabled:
                     linearized_latent = latent.float()
                     joint_feature_linearization = build_exact_jvp_linearization(
-                        feature_runtime.joint_features,
+                        feature_runtime.joint_condition_features,
                         linearized_latent,
                     )
                     subspaces = {
@@ -647,7 +676,7 @@ def run_semantic_watermark_runtime(
                     if tail_carrier is not None
                     else torch.zeros_like(latent)
                 )
-                if recorder is not None and attention_gradient is not None:
+                if attention_gradient is not None:
                     attention_update = optimize_attention_geometry_update(
                         latent=latent,
                         transformer_forward=transformer_forward,
@@ -757,6 +786,25 @@ def run_semantic_watermark_runtime(
         unconditional_prompt,
         unconditional_pooled,
     )
+
+    def adversarial_detection_score(candidate: Any) -> float:
+        """返回与最终内容主判和几何对齐救回一致的连续攻击目标。"""
+
+        evaluated = detect_image_only_watermark(
+            image=candidate,
+            key_material=config.key_material,
+            config=detector_config,
+            image_latent_encoder=lambda image: _encode_image_latent(pipeline, image),
+            image_attention_extractor=(
+                attention_extractor if config.attention_geometry_enabled else None
+            ),
+            image_aligner=_align_image if config.image_alignment_enabled else None,
+        )
+        scores = [evaluated.content.content_score]
+        if evaluated.geometry_reliable and evaluated.aligned_content_score is not None:
+            scores.append(evaluated.aligned_content_score)
+        return max(scores)
+
     detections = []
     for sample_role, image, detection_key in (
         ("clean_negative", clean_image, config.key_material),
@@ -836,12 +884,13 @@ def run_semantic_watermark_runtime(
         if diffusion_attack_runtime is None:
             raise RuntimeError("diffusion_attacks_enabled 要求共享再扩散攻击运行时")
         for sample_role, source_image in (("clean_negative", clean_image), ("positive_source", watermarked_image)):
-            for attack_index, attack_spec in enumerate(default_attack_specs()):
+            for attack_index, attack_spec in enumerate(default_diffusion_attack_specs()):
                 attacked_image = diffusion_attack_runtime.apply(
                     source_image,
                     attack_spec,
                     seed=config.seed + 20000 + attack_index + (0 if sample_role == "clean_negative" else 10000),
                     prompt_text=config.prompt,
+                    detection_score=adversarial_detection_score,
                 )
                 image_key = f"{sample_role}_{attack_spec.attack_id}"
                 attacked_images[image_key] = attacked_image

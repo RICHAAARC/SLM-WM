@@ -25,11 +25,11 @@
 
 ## Core Directory Rules
 
-1. `main/` 保存论文方法、核心协议、核心评估、表格重建和 CLI 复现能力。
-2. `experiments/` 保存 SLM 项目自身的实验协议、运行时配置、内部消融和主方法 runner, 不保存外部 baseline 适配工程。
-3. `paper_experiments/` 保存完整论文实验产出能力, 包括外部 baseline 的受治理导入、method-faithful 适配、官方参考复现编排和论文级对比证据生成。
-4. `paper_workflow/` 保存 Notebook / Colab workflow 入口和 session helper, Notebook 文件应位于 `paper_workflow/notebooks/`。
-5. `scripts/` 保存数据准备、结果检查、结果打包和 release 辅助命令。
+1. `main/` 只保存 SLM-WM 论文核心方法及其最小数学工具, 不保存实验协议、结果分析、表格重建、CLI、Notebook、baseline 或产物治理能力。
+2. `experiments/` 保存 SLM 项目自身的实验协议、运行时配置、真实攻击、正式消融、主方法 runner 和实验产物 schema, 不保存外部 baseline 适配工程。
+3. `paper_experiments/` 保存完整论文实验产出能力, 包括外部 baseline 的受治理导入、方法忠实度验证、官方参考复现编排、论文级对比、证据审计和投稿就绪分析。
+4. `scripts/` 保存可脱离 Notebook 运行的服务器 CLI、数据准备、结果检查、结果打包和 release 辅助命令。
+5. `paper_workflow/` 保存最外层 Notebook / Colab workflow 入口和 session helper, Notebook 文件应位于 `paper_workflow/notebooks/`。
 6. `tools/harness/` 保存外层治理审计, 不得被 `main/` 反向依赖。
 7. `.codex/` 和 `docs/` 保存协作契约与人类可读治理规则。
 8. `tests/` 按运行成本和验证目标分层。
@@ -38,13 +38,16 @@
 
 ## Repository Layer Boundary Governance
 
-本仓库采用三层结构, 依赖方向必须保持为 `paper_workflow/ -> paper_experiments/ -> main/ 与 experiments/`。
+本仓库采用由内向外的五层结构, 依赖方向必须保持为
+`paper_workflow/ -> scripts/ -> paper_experiments/ -> experiments/ -> main/`。
 
-1. 核心方法复现层: `main/`、`experiments/`、`configs/` 中与 SLM 主方法、主实验攻击、内部消融和服务器 runner 直接相关的代码。该层不得依赖 Notebook、外部 baseline 源码或 baseline 适配工程。
-2. 完整论文实验层: `paper_experiments/` 中与外部 baseline、公平对比、官方参考复现、受治理导入和论文证据闭合相关的代码。该层可以调用核心方法复现层, 但不得依赖 `paper_workflow/`。
-3. Colab 运行层: `paper_workflow/` 中的 Notebook 入口、Drive 同步、Colab session helper 和远程运行包装。该层可以调用完整论文实验层与核心方法复现层, 但不得承载唯一正式实现。
-4. `external_baseline/` 只作为外部源码缓存和来源登记目录, 不属于核心方法复现层, 也不进入最小方法发布包。
-5. 最小方法发布包默认只包含核心方法复现层; 完整论文实验发布包可包含 `paper_experiments/`, 但仍应排除 `paper_workflow/` 与未受治理的第三方源码缓存。
+1. 核心方法层: `main/` 只包含风险场、语义条件 Jacobian 低响应子空间、内容载体、注意力几何和仅图像检测等论文方法实现。该层只能依赖通用第三方库和自身模块。
+2. 主方法实验层: `experiments/` 负责数据划分、fixed-FPR、模型运行、攻击、正式消融和实验产物。该层可以依赖 `main/`, 不得依赖 `paper_experiments/`、`scripts/`、`paper_workflow/` 或外部 baseline 工程。
+3. 完整论文实验层: `paper_experiments/` 负责外部 baseline、公平对比、官方参考复现、受治理导入、论文证据审计和投稿就绪分析。该层可以依赖 `main/` 与 `experiments/`, 不得依赖 `scripts/` 或 `paper_workflow/`。
+4. 独立执行层: `scripts/` 提供可在 GPU 服务器或 CPU 汇总服务器直接执行的 CLI。该层可以依赖前三层, 不得依赖 `paper_workflow/`。
+5. Colab 运行层: `paper_workflow/` 只负责 Notebook 入口、Drive 同步、Colab session helper 和远程运行包装。正式实现必须能够脱离该层运行。
+6. `external_baseline/` 只作为外部源码缓存、来源登记和经审计的适配实现目录, 不属于核心方法层, 也不进入最小方法发布包。
+7. 最小方法发布包只包含 `main/` 和方法所需的最小配置; 完整论文实验发布包可以包含 `experiments/`、`paper_experiments/` 与 `scripts/`, 但必须排除 `paper_workflow/` 和未受治理的第三方源码缓存。
 
 ## Output File Governance
 
@@ -58,7 +61,7 @@
 
 1. Notebook 是论文实验的入口和远程执行包装, 不是正式协议逻辑的唯一实现。
 2. Notebook 不得直接手写正式 records、thresholds、tables、figures 或 reports。
-3. Notebook 应调用 `main/`、`experiments/`、`paper_experiments/` 或 `scripts/` 中的 repository modules。
+3. Notebook 应调用 `paper_workflow/` 薄包装, 薄包装再调用 `scripts/` 或更内层 repository modules; Notebook 不得直接维护第二套正式逻辑。
 4. Notebook 文件统一放在 `paper_workflow/notebooks/`, 避免入口文件与 helper 模块混放。
 5. Notebook 专用 helper 放在 `paper_workflow/notebook_utils/`。
 6. 跨 Notebook 共享的 Colab 或 session helper 放在 `paper_workflow/colab_utils/`。

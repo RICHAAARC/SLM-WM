@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
 from main.core.digest import build_stable_digest
-from main.methods.semantic.risk_field import NumberLike, VectorInput, as_float_vector, clip_unit, ensure_equal_length
+from main.methods.semantic.vector_values import NumberLike, VectorInput, as_float_vector, clip_unit, ensure_equal_length
 
 BRANCH_NAMES = ("lf_content", "tail_robust", "attention_geometry")
 
@@ -220,8 +220,8 @@ def build_branch_risk_fields(
 ) -> BranchRiskFieldBundle:
     """构造三个语义不同且宽度一致的分支风险场。
 
-    该函数是正式方法路径使用的风险入口。旧的 `build_risk_field` 继续保留给历史
-    记录重建, 但不再作为真实载体路由的共同风险定义。
+    该函数是正式方法路径唯一使用的风险入口。三个分支必须分别构造风险语义,
+    不能通过单一共享标量或仅用于日志的路由记录替代。
     """
 
     semantic = tuple(clip_unit(value) for value in as_float_vector(semantic_values, "semantic_values"))

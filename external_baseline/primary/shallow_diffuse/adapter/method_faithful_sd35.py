@@ -2,12 +2,12 @@
 
 该模块位于 external baseline 适配层。它保留 Shallow Diffuse 的核心机制:
 在扩散采样的浅层 latent 中按照局部 mask 写入 watermark patch, 生成图像后通过
-图像编码和近似反演恢复 latent, 再以 masked patch 距离作为检测分数。
+图像编码和流匹配反向 Euler 积分恢复 latent, 再以 masked patch 距离作为检测分数。
 
 项目特定写法:
 - SD3.5 Medium 使用 16-channel latent, 因此 mask 和 patch 均按可配置通道数构造。
 - 优先使用 Diffusers 的 callback_on_step_end 在中间 denoising 位置注入; 若运行环境
-  缺少该 callback 能力, 会显式记录 fallback, 但仍不直接声明论文主张。
+  缺少该 callback 能力, 会显式记录 替代环境, 但仍不直接声明论文主张。
 """
 
 from __future__ import annotations
@@ -30,6 +30,8 @@ from external_baseline.primary.sd35_method_faithful_common import (
     file_digest,
     load_prompt_rows,
     load_sd3_pipeline,
+    measured_image_ssim,
+    measured_score_retention,
     observation_digest,
     prompt_text,
     row_id,
@@ -189,6 +191,8 @@ def build_observation(
     execution_device: str,
     model_id: str,
     injection_mode: str,
+    quality_score: float,
+    score_retention: float,
 ) -> dict[str, Any]:
     """构造统一 baseline observation。"""
 
@@ -223,8 +227,8 @@ def build_observation(
             "latent_shape": list(latent_shape),
             "execution_device": execution_device,
             "shallow_injection_mode": injection_mode,
-            "quality_score": 1.0,
-            "score_retention": 1.0,
+            "quality_score": float(quality_score),
+            "score_retention": float(score_retention),
         }
     )
 
@@ -255,32 +259,19 @@ def generate_watermarked_image(
             injected_flag["value"] = True
         return callback_kwargs
 
-    try:
-        image = pipe(
-            prompt,
-            guidance_scale=float(args.guidance_scale),
-            num_inference_steps=int(args.num_inference_steps),
-            height=int(args.height),
-            width=int(args.width),
-            latents=latents.clone(),
-            callback_on_step_end=callback_on_step_end,
-            callback_on_step_end_tensor_inputs=["latents"],
-        ).images[0]
-        if injected_flag["value"]:
-            return image, injection_mode
-    except TypeError:
-        pass
-
-    injected_latents = inject_watermark(latents.clone(), mask, patch, injection=str(args.w_injection))
     image = pipe(
         prompt,
         guidance_scale=float(args.guidance_scale),
         num_inference_steps=int(args.num_inference_steps),
         height=int(args.height),
         width=int(args.width),
-        latents=injected_latents,
+        latents=latents.clone(),
+        callback_on_step_end=callback_on_step_end,
+        callback_on_step_end_tensor_inputs=["latents"],
     ).images[0]
-    return image, "initial_latent_fallback"
+    if not injected_flag["value"]:
+        raise RuntimeError("Shallow Diffuse 正式适配要求浅层 callback 实际执行")
+    return image, injection_mode
 
 
 def score_image(pipe: Any, image: Any, *, size: int, device: str, mask: Any, patch: Any, measurement: str, num_inversion_steps: int) -> float:
@@ -408,8 +399,17 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
             measurement=str(args.w_measurement),
             num_inversion_steps=int(args.num_inversion_steps),
         )
+        pair_quality = measured_image_ssim(clean_image, watermarked_image)
 
-        runtime_keys[image_id] = {"mask": mask, "patch": patch, "row": row, "row_index": index, "injection_mode": injection_mode}
+        runtime_keys[image_id] = {
+            "mask": mask,
+            "patch": patch,
+            "row": row,
+            "row_index": index,
+            "injection_mode": injection_mode,
+            "clean_score": clean_score,
+            "watermarked_score": watermarked_score,
+        }
         image_pairs.append(
             {
                 "event_id": image_id,
@@ -445,6 +445,8 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                 execution_device=device,
                 model_id=args.model_id,
                 injection_mode=injection_mode,
+                quality_score=1.0,
+                score_retention=1.0,
             )
         )
         observations_without_threshold.append(
@@ -465,6 +467,8 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                 execution_device=device,
                 model_id=args.model_id,
                 injection_mode=injection_mode,
+                quality_score=pair_quality,
+                score_retention=1.0,
             )
         )
         if device == "cuda":
@@ -478,7 +482,7 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
             profile=f"operation=source_pair_generation prompt={index}/{len(prompt_rows)} image_id={image_id}",
         )
 
-    threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold)
+    threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold, args.target_fpr)
     observations: list[dict[str, Any]] = []
     for row in observations_without_threshold:
         updated = dict(row)
@@ -510,7 +514,18 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                         size=int(args.height),
                         device=device,
                         num_inference_steps=int(args.num_inference_steps),
+                        detection_score=lambda candidate: score_image(
+                            pipe,
+                            candidate,
+                            size=int(args.height),
+                            device=device,
+                            mask=runtime["mask"],
+                            patch=runtime["patch"],
+                            measurement=str(args.w_measurement),
+                            num_inversion_steps=int(args.num_inversion_steps),
+                        ),
                     )
+                    attack_quality = measured_image_ssim(source_image, attacked_image)
                 attacked_stem = safe_file_stem(f"{image_id}_{role_name}_{attack_matrix_name}", f"attacked_{pair_index:05d}")
                 attacked_path = attacked_dir / f"{attacked_stem}.png"
                 attacked_image.save(attacked_path)
@@ -544,6 +559,11 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                         execution_device=device,
                         model_id=args.model_id,
                         injection_mode=str(runtime["injection_mode"]),
+                        quality_score=attack_quality,
+                        score_retention=measured_score_retention(
+                            float(runtime[f"{role_name}_score"]),
+                            score,
+                        ),
                     )
                 )
                 attacked_records.append(
@@ -654,6 +674,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--w-measurement", default="l1_complex")
     parser.add_argument("--edit-fraction", type=float, default=0.2)
     parser.add_argument("--threshold", type=float, default=None)
+    parser.add_argument("--target-fpr", type=float, required=True)
     parser.add_argument("--attack-families", default="")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--force-cpu", action="store_true")

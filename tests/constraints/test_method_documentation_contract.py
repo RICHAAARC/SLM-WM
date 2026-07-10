@@ -10,7 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 METHOD_DOCUMENT = ROOT / "docs" / "builds" / "method_section_semantic_conditioned_latent_manifold_watermark.md"
 PRIMITIVE_DOCUMENT = ROOT / "docs" / "builds" / "algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md"
-LEGACY_PRIMITIVE_SOURCE = ROOT / "main" / "methods" / "algorithm_primitives.py"
+TAIL_CARRIER_SOURCE = ROOT / "main" / "methods" / "carrier" / "keyed_tensor.py"
 
 
 @pytest.mark.constraint
@@ -41,8 +41,8 @@ def test_algorithm_primitive_defines_amplitude_tail_without_frequency_band() -> 
 def test_tail_primitive_metadata_uses_amplitude_domain_semantics() -> None:
     """尾部载体元数据必须登记幅值域语义和频带不适用标识。"""
 
-    text = LEGACY_PRIMITIVE_SOURCE.read_text(encoding="utf-8")
+    text = TAIL_CARRIER_SOURCE.read_text(encoding="utf-8")
 
-    assert '"carrier_family": "gaussian_tail_robust"' in text
-    assert '"frequency_band": "not_applicable_amplitude_tail"' in text
-    assert '"branch_semantics": "gaussian_amplitude_tail_truncation"' in text
+    assert '"tail_branch_semantics": "gaussian_amplitude_tail_truncation"' in text
+    assert "quantile" in text
+    assert "abs()" in text

@@ -30,7 +30,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     validate_pilot_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 
 DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_fixed_fpr_common_protocol")
 DEFAULT_CANDIDATE_RECORDS_PATH = Path("outputs/pilot_paper_fixed_fpr_results/pilot_paper_result_records.jsonl")
@@ -225,7 +225,7 @@ def write_pilot_paper_fixed_fpr_common_protocol_outputs(
             "attack_matrix_digest",
             "fixed_fpr_protocol_digest",
             "target_fpr",
-            "bootstrap_iteration_count",
+            "confidence_interval_method",
             "confidence_level",
             "result_protocol_name",
             "result_scope",

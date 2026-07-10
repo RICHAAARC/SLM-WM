@@ -46,7 +46,7 @@ PAPER_RUN_FIXED_FPR = {
     PILOT_PAPER_PROMPT_SET: PILOT_PAPER_FIXED_FPR,
     FULL_PAPER_RUN_NAME: FULL_PAPER_FIXED_FPR,
 }
-PILOT_PAPER_BOOTSTRAP_ITERATION_COUNT = 1000
+PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD = "bounded_hoeffding"
 PILOT_PAPER_CONFIDENCE_LEVEL = 0.95
 PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT = 100
 PILOT_PAPER_METHOD_IDS = ("slm_wm_current", "tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
@@ -143,7 +143,7 @@ def _default_paper_run_value(field_name: str) -> Any:
 class PilotPaperFixedFprConfig:
     """集中描述论文运行级 fixed-FPR 共同协议配置。
 
-    该对象属于通用工程写法: 把 prompt set、固定 FPR、bootstrap 次数和
+    该对象属于通用工程写法: 把 prompt set、固定 FPR、置信区间方法和
     论文声明边界集中在 dataclass 构造层, 业务函数只消费已经归一化的配置。
     """
 
@@ -159,7 +159,7 @@ class PilotPaperFixedFprConfig:
     result_scope: str = field(default_factory=lambda: result_scope_for_run(_default_paper_run_value("run_name")))
     result_claim_scope: str = field(default_factory=lambda: result_claim_scope_for_run(_default_paper_run_value("run_name")))
     target_fpr: float = field(default_factory=lambda: float(_default_paper_run_value("target_fpr")))
-    bootstrap_iteration_count: int = PILOT_PAPER_BOOTSTRAP_ITERATION_COUNT
+    confidence_interval_method: str = PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD
     confidence_level: float = PILOT_PAPER_CONFIDENCE_LEVEL
     minimum_clean_negative_count: int = field(
         default_factory=lambda: int(_default_paper_run_value("minimum_clean_negative_count"))
@@ -177,8 +177,8 @@ class PilotPaperFixedFprConfig:
             raise ValueError("prompt_file 不得为空")
         if not 0.0 < self.target_fpr < 1.0:
             raise ValueError("target_fpr 必须位于 (0, 1)")
-        if self.bootstrap_iteration_count <= 0:
-            raise ValueError("bootstrap_iteration_count 必须为正整数")
+        if self.confidence_interval_method != PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD:
+            raise ValueError("confidence_interval_method 必须为 bounded_hoeffding")
         if not 0.0 < self.confidence_level < 1.0:
             raise ValueError("confidence_level 必须位于 (0, 1)")
         if self.minimum_clean_negative_count <= 0:
@@ -390,7 +390,7 @@ def build_fixed_fpr_protocol_digest(config: PilotPaperFixedFprConfig | None = No
         "calibration_split": "calibration",
         "test_split": "test",
         "calibration_role": "clean_negative",
-        "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
+        "confidence_interval_method": resolved_config.confidence_interval_method,
         "confidence_level": resolved_config.confidence_level,
         "minimum_clean_negative_count": resolved_config.minimum_clean_negative_count,
         "result_claim_scope": resolved_config.result_claim_scope,
@@ -418,7 +418,7 @@ def build_pilot_paper_result_import_schema(
         "attack_matrix_digest": attack_matrix_digest,
         "fixed_fpr_protocol_digest": fixed_fpr_protocol_digest,
         "target_fpr": resolved_config.target_fpr,
-        "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
+        "confidence_interval_method": resolved_config.confidence_interval_method,
         "confidence_level": resolved_config.confidence_level,
         "minimum_result_positive_count": resolved_config.minimum_clean_negative_count,
         "minimum_result_negative_count": resolved_config.minimum_clean_negative_count,
@@ -471,7 +471,7 @@ def build_pilot_paper_method_registry_rows(
                 "attack_matrix_digest": attack_matrix_digest,
                 "fixed_fpr_protocol_digest": fixed_fpr_protocol_digest,
                 "target_fpr": resolved_config.target_fpr,
-                "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
+                "confidence_interval_method": resolved_config.confidence_interval_method,
                 "confidence_level": resolved_config.confidence_level,
                 "result_protocol_name": resolved_config.result_protocol_name,
                 "result_scope": resolved_config.result_scope,
@@ -516,7 +516,7 @@ def build_pilot_paper_result_import_template_rows(
                 "prompt_split_digest": _str_field(method_row, "prompt_split_digest"),
                 "attack_matrix_digest": _str_field(method_row, "attack_matrix_digest"),
                 "fixed_fpr_protocol_digest": _str_field(method_row, "fixed_fpr_protocol_digest"),
-                "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
+                "confidence_interval_method": resolved_config.confidence_interval_method,
                 "confidence_level": resolved_config.confidence_level,
                 "required_metric_fields": list(PILOT_PAPER_REQUIRED_METRIC_FIELDS),
                 "required_source_fields": list(PILOT_PAPER_REQUIRED_SOURCE_FIELDS),
@@ -596,8 +596,8 @@ def _validate_protocol_fields(row: Mapping[str, Any], row_index: int, schema: Ma
         issues.append(_issue(row_index, row, "method_id", "pilot_paper_method_id_required"))
     if not math.isclose(_float_field(row, "target_fpr"), float(schema["target_fpr"]), rel_tol=0.0, abs_tol=1e-12):
         issues.append(_issue(row_index, row, "target_fpr", "target_fpr_mismatch"))
-    if _int_field(row, "bootstrap_iteration_count") < int(schema["bootstrap_iteration_count"]):
-        issues.append(_issue(row_index, row, "bootstrap_iteration_count", "bootstrap_iteration_count_too_small"))
+    if _str_field(row, "confidence_interval_method") != str(schema["confidence_interval_method"]):
+        issues.append(_issue(row_index, row, "confidence_interval_method", "confidence_interval_method_mismatch"))
     if not math.isclose(
         _float_field(row, "confidence_level"),
         float(schema["confidence_level"]),
@@ -864,7 +864,7 @@ def build_pilot_paper_common_protocol_summary(
         "best_baseline_method_id": superiority_gate["best_baseline_method_id"],
         "slm_wm_fixed_fpr_boundary_ready": superiority_gate["slm_wm_fixed_fpr_boundary_ready"],
         "pilot_paper_claim_ready": pilot_paper_claim_ready,
-        "bootstrap_iteration_count": resolved_config.bootstrap_iteration_count,
+        "confidence_interval_method": resolved_config.confidence_interval_method,
         "confidence_level": resolved_config.confidence_level,
         "pilot_paper_supports_superiority_claim": pilot_paper_claim_ready,
         "paper_run_claim_ready": paper_run_claim_ready,

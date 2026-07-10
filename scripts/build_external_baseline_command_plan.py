@@ -59,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--t2smark-results", default=None, help="T2SMark 官方运行产生的 results.json。")
     parser.add_argument("--attacked-image-manifest", default=None, help="可选 attacked image manifest。")
     parser.add_argument("--threshold", type=float, default=None, help="可选显式检测阈值。")
-    parser.add_argument("--contract-only", action="store_true", help="只检查 adapter 契约并写出不可支撑论文主张的诊断产物。")
+    parser.add_argument("--target-fpr", type=float, default=None, help="calibration clean negative 的目标 FPR。")
     parser.add_argument("--require-cuda", action="store_true", help="adapter 运行前要求 CUDA 可用。")
     parser.add_argument("--timeout-seconds", type=int, default=86400, help="单个 baseline 命令超时时间。")
     parser.add_argument("--model-id", default="stabilityai/stable-diffusion-3.5-medium")
@@ -74,21 +74,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument(
         "--tree-ring-adapter-mode",
-        default="method_faithful",
-        choices=("method_faithful", "method_faithful_sd35"),
-        help="Tree-Ring adapter 运行模式。默认保留轻量链路检查, 真实 GPU 运行应使用 method_faithful_sd35。",
+        default="method_faithful_sd35",
+        choices=("method_faithful_sd35",),
+        help="Tree-Ring SD3.5 方法忠实运行模式。",
     )
     parser.add_argument(
         "--gaussian-shading-adapter-mode",
-        default="method_faithful",
-        choices=("method_faithful", "method_faithful_sd35"),
-        help="Gaussian Shading adapter 运行模式。默认保留轻量链路检查, 真实 GPU 运行应使用 method_faithful_sd35。",
+        default="method_faithful_sd35",
+        choices=("method_faithful_sd35",),
+        help="Gaussian Shading SD3.5 方法忠实运行模式。",
     )
     parser.add_argument(
         "--shallow-diffuse-adapter-mode",
-        default="method_faithful",
-        choices=("method_faithful", "method_faithful_sd35"),
-        help="Shallow Diffuse adapter 运行模式。默认保留轻量链路检查, 真实 GPU 运行应使用 method_faithful_sd35。",
+        default="method_faithful_sd35",
+        choices=("method_faithful_sd35",),
+        help="Shallow Diffuse SD3.5 方法忠实运行模式。",
     )
     parser.add_argument("--tree-ring-watermark-seed", type=int, default=999999, help="Tree-Ring key 随机种子。")
     parser.add_argument("--tree-ring-w-channel", type=int, default=0, help="Tree-Ring 写入通道, -1 表示全部通道。")
@@ -142,6 +142,8 @@ def _append_common_model_args(command: list[str], args: argparse.Namespace) -> N
             str(args.seed),
         ]
     )
+    if args.target_fpr is not None:
+        command.extend(["--target-fpr", str(args.target_fpr)])
     if args.max_samples is not None:
         command.extend(["--max-samples", str(args.max_samples)])
 
@@ -153,9 +155,12 @@ def build_plan(args: argparse.Namespace) -> list[dict[str, Any]]:
     output_root = _ensure_under_outputs(root, _resolve(root, args.output_root))
     output_root.mkdir(parents=True, exist_ok=True)
     selected = selected_primary_baselines(args.methods)
-    if not args.contract_only and any(method != "t2smark" for method in selected) and not args.prompt_plan:
-        raise ValueError("运行扩散类 SD3.5 adapter 时必须提供 --prompt-plan, 或使用 --contract-only。")
-    if not args.contract_only and "t2smark" in selected and (not args.image_pairs or not args.t2smark_results):
+    if any(method != "t2smark" for method in selected) and not args.prompt_plan:
+        raise ValueError("运行扩散类 SD3.5 adapter 时必须提供 --prompt-plan")
+    if any(method != "t2smark" for method in selected):
+        if args.target_fpr is None or not 0.0 < float(args.target_fpr) < 1.0:
+            raise ValueError("扩散 baseline 正式运行必须提供位于 (0, 1) 的 --target-fpr")
+    if "t2smark" in selected and (not args.image_pairs or not args.t2smark_results):
         raise ValueError("运行 T2SMark 结果适配时必须提供 --image-pairs 与 --t2smark-results。")
 
     rows: list[dict[str, Any]] = []
@@ -174,11 +179,13 @@ def build_plan(args: argparse.Namespace) -> list[dict[str, Any]]:
             "--artifact-root",
             str(artifact_root),
         ]
-        if args.contract_only:
-            command.append("--contract-only")
         if args.require_cuda:
             command.append("--require-cuda")
         if baseline_id == "t2smark":
+            if (
+                args.target_fpr is None or not 0.0 < float(args.target_fpr) < 1.0
+            ):
+                raise ValueError("T2SMark 正式运行必须提供位于 (0, 1) 的 --target-fpr")
             if args.image_pairs:
                 command.extend(["--image-pairs", str(_resolve(root, args.image_pairs))])
             if args.t2smark_results:
@@ -187,6 +194,8 @@ def build_plan(args: argparse.Namespace) -> list[dict[str, Any]]:
                 command.extend(["--attacked-image-manifest", str(_resolve(root, args.attacked_image_manifest))])
             if args.threshold is not None:
                 command.extend(["--threshold", str(args.threshold)])
+            if args.target_fpr is not None:
+                command.extend(["--target-fpr", str(args.target_fpr)])
         else:
             if args.prompt_plan:
                 command.extend(["--prompt-plan", str(_resolve(root, args.prompt_plan))])

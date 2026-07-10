@@ -142,6 +142,33 @@ class DifferentiableSemanticFeatureRuntime:
         return self._semantic_features_from_image(image), self._visual_features_from_image(image)
 
     @staticmethod
+    def _condition_blocks(features: Any, block_count: int = 8) -> Any:
+        """把真实特征向量汇总为固定数量的可微语义条件。"""
+
+        import torch
+
+        flattened = features.reshape(-1)
+        if flattened.numel() < block_count:
+            raise ValueError("特征宽度不足以构造语义条件分块")
+        return torch.stack(tuple(block.mean() for block in torch.tensor_split(flattened, block_count)))
+
+    def semantic_condition_features(self, latent: Any) -> Any:
+        """返回 8 个 CLIP 嵌入分块均值, 作为显式语义保持条件。"""
+
+        return self._condition_blocks(self.semantic_features(latent))
+
+    def visual_condition_features(self, latent: Any) -> Any:
+        """返回 8 个真实视觉统计分块均值, 作为质量保持条件。"""
+
+        return self._condition_blocks(self.visual_features(latent))
+
+    def joint_condition_features(self, latent: Any) -> tuple[Any, Any]:
+        """一次 VAE 解码返回语义与视觉条件, 供精确 JVP 复用。"""
+
+        semantic, visual = self.joint_features(latent)
+        return self._condition_blocks(semantic), self._condition_blocks(visual)
+
+    @staticmethod
     def _normalize_map(values: Any) -> Any:
         """逐样本把空间图归一化到 [0, 1]。"""
 
@@ -219,12 +246,9 @@ class DifferentiableSemanticFeatureRuntime:
                 align_corners=False,
             )[:, 0]
             stability_map = 1.0 - self._normalize_map(instability_map)
-        attention_stability_map = 1.0 - (semantic_map - semantic_map.mean(dim=(-1, -2), keepdim=True)).abs()
-        attention_stability_map = attention_stability_map.clamp(0.0, 1.0)
         return {
             "semantic": semantic_map.detach(),
             "texture": texture_map.detach(),
             "stability": stability_map.detach(),
             "saliency": saliency_map.detach(),
-            "attention_stability": attention_stability_map.detach(),
         }

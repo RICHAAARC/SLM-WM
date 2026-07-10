@@ -15,8 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from main.analysis.artifact_manifest import build_artifact_manifest
-from main.analysis.evidence_closure_entry_review import (
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from paper_experiments.analysis.evidence_closure_entry_review import (
     EvidenceClosureEntryInput,
     build_evidence_closure_entry_checklist,
     build_evidence_closure_entry_review_report,

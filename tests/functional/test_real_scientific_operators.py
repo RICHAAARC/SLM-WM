@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
 
@@ -18,6 +18,7 @@ from main.methods.carrier import (
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
     DifferentiableAttentionRecorder,
+    attention_relation_stability_map,
     optimize_attention_geometry_update,
     qk_self_attention,
 )
@@ -37,12 +38,26 @@ from experiments.runners.image_only_dataset_runtime import (
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
+    _public_detection_noise_seed,
     build_semantic_watermark_run_id,
     load_completed_semantic_watermark_runtime_result,
 )
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 from paper_workflow.colab_utils import semantic_watermark_image_only as colab_image_only
+
+
+@pytest.mark.quick
+def test_image_only_attention_noise_seed_does_not_depend_on_generation_seed_or_prompt() -> None:
+    """盲检公开噪声不得依赖生成种子、Prompt 或样本序号。"""
+
+    base = SemanticWatermarkRuntimeConfig()
+    changed_sample = replace(base, seed=base.seed + 999, prompt="完全不同的生成条件", prompt_id="other")
+
+    assert _public_detection_noise_seed(base) == _public_detection_noise_seed(changed_sample)
+    assert _public_detection_noise_seed(base) != _public_detection_noise_seed(
+        replace(base, model_id="different-public-model")
+    )
 
 
 @pytest.mark.quick
@@ -138,12 +153,33 @@ def test_candidate_matrix_preserves_preferred_carrier_direction() -> None:
 
 
 @pytest.mark.quick
+def test_semantic_condition_solver_returns_algebraic_null_space() -> None:
+    """20个候选与16个独立条件必须产生近零响应的4维 Null Space。"""
+
+    latent = torch.zeros(1, 1, 5, 5)
+    candidates = torch.eye(25)[:, :20]
+
+    result = solve_jacobian_null_space(
+        latent=latent,
+        semantic_feature_function=lambda value: value.reshape(-1)[:8],
+        visual_feature_function=lambda value: value.reshape(-1)[8:16],
+        candidate_matrix=candidates,
+        null_rank=4,
+        branch_name="lf_content",
+    )
+
+    assert result.basis_rank == 4
+    assert result.relative_response_residual <= 1e-6
+    assert result.orthogonality_error <= 1e-6
+
+
+@pytest.mark.quick
 def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     """关键算子门禁必须同时检查 JVP、残差、载体能量和 Q/K 提升。"""
 
     subspace = {
         "response_residual": 0.1,
-        "relative_response_residual": 0.5,
+        "relative_response_residual": 1e-6,
         "orthogonality_error": 1e-6,
         "metadata": {
             "jvp_mode": "torch_func_linearize_exact_jvp",
@@ -203,6 +239,34 @@ class _ToyAttention(torch.nn.Module):
         """返回输入, Q/K 由正式记录钩子直接读取。"""
 
         return hidden_states
+
+
+@pytest.mark.quick
+def test_qk_sampling_preserves_two_dimensional_token_grid() -> None:
+    """有界 Q/K 抽样必须沿二维行列轴取点, 不能等距抽一维序号。"""
+
+    module = _ToyAttention(4)
+    hidden_states = torch.randn(1, 16, 4)
+
+    _, indices = qk_self_attention(module, hidden_states, max_tokens=4)
+
+    assert indices == (0, 3, 12, 15)
+
+
+@pytest.mark.quick
+def test_attention_stability_comes_from_multiple_real_qk_layers() -> None:
+    """相同 Q/K 关系层应产生接近 1 的真实关系稳定图。"""
+
+    attention = torch.softmax(torch.randn(1, 4, 4), dim=-1)
+    records = (
+        ("layer_a", attention, (0, 3, 12, 15)),
+        ("layer_b", attention.clone(), (0, 3, 12, 15)),
+    )
+
+    stability = attention_relation_stability_map(records, (4, 4))
+
+    assert stability.shape == (1, 4, 4)
+    assert float(stability.min()) == pytest.approx(1.0, abs=1e-6)
 
 
 def _identity_null_space(latent: torch.Tensor) -> JacobianNullSpaceResult:
@@ -304,7 +368,6 @@ def test_complete_evidence_calibration_includes_geometry_rescue() -> None:
         calibration_records,
         target_fpr=0.1,
         rescue_margin_low=-0.05,
-        geometry_score_threshold=0.0,
     )
     formal_records = apply_frozen_evidence_protocol(calibration_records, protocol)
 
@@ -321,6 +384,8 @@ def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None
         content_threshold=0.5,
         rescue_margin_low=-0.2,
         geometry_score_threshold=0.0,
+        geometry_calibration_negative_count=10,
+        geometry_calibration_exceedance_count=0,
         calibration_negative_count=10,
         calibration_false_positive_count=0,
         calibration_false_positive_rate=0.0,

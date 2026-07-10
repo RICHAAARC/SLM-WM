@@ -25,8 +25,9 @@ from paper_experiments.baselines import (
 )
 from experiments.protocol.attacks import default_attack_configs
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.splits import build_group_split_counts
 from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR, prompt_protocol_name_for_run
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "primary_baseline_result_candidate_import"
@@ -377,6 +378,65 @@ def normalize_t2smark_candidate_rows(
     return normalized
 
 
+def _measured_baseline_readiness(
+    rows: Iterable[Mapping[str, Any]],
+    root_path: Path,
+    target_fpr: float,
+) -> dict[str, bool]:
+    """仅根据 observation 实体记录计算 baseline 三项正式就绪条件。"""
+
+    observations = tuple(dict(row) for row in rows)
+    paper_run = build_paper_run_config(root_path)
+    expected_splits = build_group_split_counts(paper_run.prompt_count)
+    clean_rows = tuple(
+        row
+        for row in observations
+        if row.get("sample_role") == "clean_negative" and row.get("attack_family") == "clean"
+    )
+    positive_rows = tuple(
+        row
+        for row in observations
+        if row.get("sample_role") == "positive_source" and row.get("attack_family") == "clean"
+    )
+    clean_prompt_ids = {str(row.get("prompt_id")) for row in clean_rows}
+    positive_prompt_ids = {str(row.get("prompt_id")) for row in positive_rows}
+    actual_splits = {
+        split: sum(row.get("split") == split for row in clean_rows)
+        for split in ("dev", "calibration", "test")
+    }
+    prompt_protocol_ready = (
+        len(clean_prompt_ids) == paper_run.prompt_count
+        and clean_prompt_ids == positive_prompt_ids
+        and actual_splits == expected_splits
+    )
+    calibration_rows = tuple(row for row in clean_rows if row.get("split") == "calibration")
+    thresholds = {float(row["threshold"]) for row in observations if "threshold" in row}
+    threshold_sources = {str(row.get("threshold_source", "")) for row in observations}
+    false_positive_count = sum(bool(row.get("detection_decision")) for row in calibration_rows)
+    fixed_fpr_ready = (
+        len(calibration_rows) == expected_splits["calibration"]
+        and len(thresholds) == 1
+        and threshold_sources == {"calibration_clean_negative_conformal"}
+        and false_positive_count / len(calibration_rows) <= target_fpr
+    )
+    required_attack_names = {
+        config.attack_name
+        for config in default_attack_configs()
+        if config.enabled and config.resource_profile in {"full_main", "full_extra"}
+    }
+    actual_attack_names = {
+        str(row.get("attack_name") or row.get("attack_condition"))
+        for row in observations
+        if str(row.get("sample_role", "")).startswith("attacked_")
+    }
+    attack_matrix_ready = actual_attack_names == required_attack_names
+    return {
+        "prompt_protocol_ready": prompt_protocol_ready,
+        "fixed_fpr_ready": fixed_fpr_ready,
+        "attack_matrix_ready": attack_matrix_ready,
+    }
+
+
 def build_method_candidate_rows(
     *,
     observations: Iterable[Mapping[str, Any]],
@@ -385,9 +445,6 @@ def build_method_candidate_rows(
     root_path: Path,
     target_fpr: float,
     resource_profile: str,
-    full_main_prompt_protocol_ready: bool,
-    fixed_fpr_baseline_calibration_ready: bool,
-    attack_matrix_baseline_detection_ready: bool,
 ) -> list[dict[str, Any]]:
     """把方法忠实 SD3.5 adapter observation 聚合为共同协议候选记录。"""
 
@@ -404,6 +461,7 @@ def build_method_candidate_rows(
     for baseline_id, baseline_rows in group_method_observations(observation_rows).items():
         if not baseline_rows:
             continue
+        readiness = _measured_baseline_readiness(baseline_rows, root_path, target_fpr)
         for attack_key, attack_rows in group_observations_by_attack(baseline_rows).items():
             records.extend(
                 build_method_faithful_baseline_candidate_records(
@@ -414,9 +472,9 @@ def build_method_candidate_rows(
                     baseline_result_source_digest=source_digest,
                     evidence_paths=evidence_paths,
                     prompt_protocol_digest=prompt_protocol_digest,
-                    full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
-                    fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
-                    attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
+                    full_main_prompt_protocol_ready=readiness["prompt_protocol_ready"],
+                    fixed_fpr_baseline_calibration_ready=readiness["fixed_fpr_ready"],
+                    attack_matrix_baseline_detection_ready=readiness["attack_matrix_ready"],
                     resource_profile=attack_profile_lookup.get(attack_key, resource_profile),
                 )
             )
@@ -431,9 +489,6 @@ def build_t2smark_method_faithful_candidate_rows(
     root_path: Path,
     target_fpr: float,
     resource_profile: str,
-    full_main_prompt_protocol_ready: bool,
-    fixed_fpr_baseline_calibration_ready: bool,
-    attack_matrix_baseline_detection_ready: bool,
 ) -> list[dict[str, Any]]:
     """把 T2SMark method-faithful observation 映射为小样本候选记录, 不提升为正式论文结论。"""
 
@@ -449,6 +504,7 @@ def build_t2smark_method_faithful_candidate_rows(
     prompt_protocol_digest = build_prompt_protocol_digest(observation_rows)
     records: list[dict[str, Any]] = []
     attack_profile_lookup = build_attack_resource_profile_lookup()
+    readiness = _measured_baseline_readiness(observation_rows, root_path, target_fpr)
     for attack_key, attack_rows in group_observations_by_attack(observation_rows).items():
         records.extend(
             build_method_faithful_baseline_candidate_records(
@@ -459,9 +515,9 @@ def build_t2smark_method_faithful_candidate_rows(
                 baseline_result_source_digest=source_digest,
                 evidence_paths=evidence_paths,
                 prompt_protocol_digest=prompt_protocol_digest,
-                full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
-                fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
-                attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
+                full_main_prompt_protocol_ready=readiness["prompt_protocol_ready"],
+                fixed_fpr_baseline_calibration_ready=readiness["fixed_fpr_ready"],
+                attack_matrix_baseline_detection_ready=readiness["attack_matrix_ready"],
                 result_source_type="official_reproduction",
                 adapter_boundary="sd35_medium_native_official_reproduction",
                 resource_profile=attack_profile_lookup.get(attack_key, resource_profile),
@@ -509,9 +565,6 @@ def write_primary_baseline_result_candidate_outputs(
     external_method_faithful_package_path: str | Path | None = None,
     t2smark_full_main_package_path: str | Path | None = None,
     method_resource_profile: str = "full_main",
-    method_full_main_prompt_protocol_ready: bool = True,
-    method_fixed_fpr_baseline_calibration_ready: bool = True,
-    method_attack_matrix_baseline_detection_ready: bool = True,
     target_fpr_override: float | None = None,
 ) -> dict[str, Any]:
     """写出候选记录、候选校验报告、摘要和 manifest。"""
@@ -549,9 +602,6 @@ def write_primary_baseline_result_candidate_outputs(
         root_path=root_path,
         target_fpr=target_fpr,
         resource_profile=method_resource_profile,
-        full_main_prompt_protocol_ready=method_full_main_prompt_protocol_ready,
-        fixed_fpr_baseline_calibration_ready=method_fixed_fpr_baseline_calibration_ready,
-        attack_matrix_baseline_detection_ready=method_attack_matrix_baseline_detection_ready,
     )
     normalized_t2smark_rows = normalize_t2smark_candidate_rows(
         rows=t2smark_rows,
@@ -566,9 +616,6 @@ def write_primary_baseline_result_candidate_outputs(
         root_path=root_path,
         target_fpr=target_fpr,
         resource_profile=method_resource_profile,
-        full_main_prompt_protocol_ready=method_full_main_prompt_protocol_ready,
-        fixed_fpr_baseline_calibration_ready=method_fixed_fpr_baseline_calibration_ready,
-        attack_matrix_baseline_detection_ready=method_attack_matrix_baseline_detection_ready,
     )
     merged_t2smark_rows = merge_t2smark_candidate_rows(normalized_t2smark_rows, t2smark_method_faithful_rows)
     candidate_rows = method_candidate_rows + merged_t2smark_rows
@@ -700,24 +747,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--t2smark-full-main-package-path", default=None, help="可选 T2SMark full-main 结果 zip 包。")
     parser.add_argument("--method-resource-profile", default="full_main", help="方法忠实 adapter 候选记录的资源配置名称。")
     parser.add_argument("--target-fpr-override", type=float, default=None, help="可选 fixed-FPR 目标值覆盖。")
-    parser.add_argument(
-        "--method-full-main-prompt-protocol-ready",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="标记方法忠实 adapter 候选已覆盖 pilot_paper prompt 协议。",
-    )
-    parser.add_argument(
-        "--method-fixed-fpr-baseline-calibration-ready",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="标记方法忠实 adapter 候选已完成 fixed-FPR 校准。",
-    )
-    parser.add_argument(
-        "--method-attack-matrix-baseline-detection-ready",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="标记方法忠实 adapter 候选已接入共同攻击矩阵检测。",
-    )
     return parser
 
 
@@ -734,9 +763,6 @@ def main() -> None:
         external_method_faithful_package_path=args.external_method_faithful_package_path,
         t2smark_full_main_package_path=args.t2smark_full_main_package_path,
         method_resource_profile=args.method_resource_profile,
-        method_full_main_prompt_protocol_ready=args.method_full_main_prompt_protocol_ready,
-        method_fixed_fpr_baseline_calibration_ready=args.method_fixed_fpr_baseline_calibration_ready,
-        method_attack_matrix_baseline_detection_ready=args.method_attack_matrix_baseline_detection_ready,
         target_fpr_override=args.target_fpr_override,
     )
     print(stable_json_text(manifest), end="")

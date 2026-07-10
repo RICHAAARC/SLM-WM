@@ -2,7 +2,7 @@
 
 该模块只位于 external baseline 适配层, 不属于 SLM-WM 主方法实现。它参考
 Tree-Ring 官方源码的核心机制: 在扩散初始 latent 的傅里叶域中心环形区域写入 key,
-生成图像后通过图像到 latent 的反演近似恢复初始噪声, 再用 key 距离进行检测。
+生成图像后通过图像到 latent 的流匹配反向 Euler 积分恢复初始噪声, 再用 key 距离进行检测。
 
 通用工程写法:
 - Notebook 或命令计划只调用本模块入口, 不直接手写 records。
@@ -30,6 +30,8 @@ from external_baseline.primary.sd35_method_faithful_common import (
     canonical_attack_family,
     canonical_attack_name,
     emit_adapter_progress,
+    measured_image_ssim,
+    measured_score_retention,
 )
 
 BASELINE_ID = "tree_ring"
@@ -223,7 +225,7 @@ def image_to_tensor(image: Any, *, size: int, device: str, dtype: Any) -> Any:
 
 
 class InversionStableDiffusion3PipelineMixin:
-    """为 StableDiffusion3Pipeline 增加 Tree-Ring 检测所需的轻量反演方法。"""
+    """为 StableDiffusion3Pipeline 增加 Tree-Ring 检测所需的真实流匹配反演方法。"""
 
     def get_image_latents(self, image: Any, *, sample: bool = False) -> Any:
         """通过 VAE 编码图像得到 latent。"""
@@ -237,7 +239,7 @@ class InversionStableDiffusion3PipelineMixin:
             scaling_factor = float(getattr(self.vae.config, "scaling_factor", 1.0) or 1.0)
             return (encoding - shift_factor) * scaling_factor
 
-    def approximate_forward_diffusion(
+    def invert_flow_matching_latent(
         self,
         latents: Any,
         *,
@@ -245,9 +247,9 @@ class InversionStableDiffusion3PipelineMixin:
         num_inference_steps: int = 5,
         guidance_scale: float = 1.0,
     ) -> Any:
-        """使用 SD3 scheduler 近似执行从图像 latent 到初始噪声 latent 的反演。
+        """使用 SD3 scheduler 迭代执行从图像 latent 到初始噪声 latent 的反演。
 
-        该函数是适配器内的工程近似, 主要用于让 Tree-Ring 的检测路径在 SD3.5 Medium 上可审计。
+        该函数是适配器内的数值积分, 主要用于让 Tree-Ring 的检测路径在 SD3.5 Medium 上可审计。
         官方原始环境仍通过 legacy DDIM inversion 作为补充表忠实度参考。
         """
 
@@ -264,7 +266,9 @@ class InversionStableDiffusion3PipelineMixin:
                 do_classifier_free_guidance=do_classifier_free_guidance,
             )
             timesteps = self.scheduler.timesteps
-            for index, timestep in enumerate(reversed(timesteps)):
+            sigmas = self.scheduler.sigmas
+            for schedule_index in range(len(timesteps) - 1, -1, -1):
+                timestep = timesteps[schedule_index]
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 timestep_tensor = timestep.expand(latent_model_input.shape[0])
                 noise_pred = self.transformer(
@@ -277,7 +281,15 @@ class InversionStableDiffusion3PipelineMixin:
                 if do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + float(guidance_scale) * (noise_pred_text - noise_pred_uncond)
-                latents = latents - (self.scheduler.sigmas[index + 1] - self.scheduler.sigmas[index]) * noise_pred
+                sigma_current = sigmas[schedule_index + 1].to(
+                    device=latents.device,
+                    dtype=latents.dtype,
+                )
+                sigma_next = sigmas[schedule_index].to(
+                    device=latents.device,
+                    dtype=latents.dtype,
+                )
+                latents = latents + (sigma_next - sigma_current) * noise_pred
                 del noise_pred, latent_model_input, timestep_tensor
             return latents
 
@@ -327,6 +339,8 @@ def build_observation(
     latent_shape: tuple[int, int, int, int],
     execution_device: str,
     model_id: str,
+    quality_score: float,
+    score_retention: float,
 ) -> dict[str, Any]:
     """构造统一 baseline observation。"""
 
@@ -359,25 +373,40 @@ def build_observation(
         "generation_model_id": model_id,
         "latent_shape": list(latent_shape),
         "execution_device": execution_device,
-        "quality_score": 1.0,
-        "score_retention": 1.0,
+        "quality_score": float(quality_score),
+        "score_retention": float(score_retention),
     }
     payload["baseline_observation_digest"] = build_stable_digest(payload)
     return payload
 
 
-def derive_threshold(observations: Iterable[dict[str, Any]], explicit_threshold: float | None) -> tuple[float, str]:
-    """从 calibration split 或当前 clean 样本派生阈值。"""
+def derive_threshold(
+    observations: Iterable[dict[str, Any]],
+    explicit_threshold: float | None,
+    target_fpr: float,
+) -> tuple[float, str]:
+    """仅从 calibration clean negative 分数冻结 fixed-FPR 阈值。"""
 
     if explicit_threshold is not None:
-        return float(explicit_threshold), "cli_threshold"
+        return float(explicit_threshold), "pre_registered_threshold"
+    if not 0.0 < target_fpr < 1.0:
+        raise ValueError("target_fpr 必须位于 (0, 1)")
     rows = list(observations)
-    calibration_rows = [row for row in rows if row.get("split") == "calibration"] or rows
-    negative_scores = [float(row["score"]) for row in calibration_rows if row.get("sample_role") == "clean_negative"]
-    positive_scores = [float(row["score"]) for row in calibration_rows if row.get("sample_role") == "positive_source"]
-    if negative_scores and positive_scores:
-        return (max(negative_scores) + min(positive_scores)) / 2.0, "midpoint_between_negative_max_and_positive_min"
-    return 0.0, "fallback_zero_insufficient_calibration_pairs"
+    negative_scores = [
+        float(row["score"])
+        for row in rows
+        if row.get("split") == "calibration" and row.get("sample_role") == "clean_negative"
+    ]
+    if not negative_scores:
+        raise ValueError("fixed-FPR 阈值要求非空 calibration clean negative 分数")
+    allowed_false_positives = max(
+        0,
+        math.floor(target_fpr * (len(negative_scores) + 1)) - 1,
+    )
+    for threshold in sorted({math.nextafter(score, math.inf) for score in negative_scores}):
+        if sum(score >= threshold for score in negative_scores) <= allowed_false_positives:
+            return threshold, "calibration_clean_negative_conformal"
+    raise RuntimeError("无法从 calibration clean negative 冻结 fixed-FPR 阈值")
 
 
 
@@ -386,7 +415,7 @@ def score_image(pipe: Any, image: Any, *, size: int, device: str, mask: Any, key
 
     tensor = image_to_tensor(image, size=int(size), device=device, dtype=pipe.vae.dtype)
     image_latents = pipe.get_image_latents(tensor, sample=False)
-    reversed_latents = pipe.approximate_forward_diffusion(
+    reversed_latents = pipe.invert_flow_matching_latent(
         image_latents,
         prompt="",
         num_inference_steps=int(num_inversion_steps),
@@ -501,8 +530,16 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
             key=key,
             num_inversion_steps=int(args.num_inversion_steps),
         )
+        pair_quality = measured_image_ssim(clean_image, watermarked_image)
 
-        runtime_keys[image_id] = {"mask": mask, "key": key, "row": row, "row_index": index}
+        runtime_keys[image_id] = {
+            "mask": mask,
+            "key": key,
+            "row": row,
+            "row_index": index,
+            "clean_score": clean_score,
+            "watermarked_score": watermarked_score,
+        }
         image_pairs.append(
             {
                 "event_id": image_id,
@@ -536,6 +573,8 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 latent_shape=latent_shape,
                 execution_device=device,
                 model_id=args.model_id,
+                quality_score=1.0,
+                score_retention=1.0,
             )
         )
         observations_without_threshold.append(
@@ -555,6 +594,8 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 latent_shape=latent_shape,
                 execution_device=device,
                 model_id=args.model_id,
+                quality_score=pair_quality,
+                score_retention=1.0,
             )
         )
         if device == "cuda":
@@ -568,7 +609,7 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
             profile=f"operation=source_pair_generation prompt={index}/{len(prompt_rows)} image_id={image_id}",
         )
 
-    threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold)
+    threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold, args.target_fpr)
     observations: list[dict[str, Any]] = []
     for row in observations_without_threshold:
         updated = dict(row)
@@ -600,7 +641,17 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                         size=int(args.height),
                         device=device,
                         num_inference_steps=int(args.num_inference_steps),
+                        detection_score=lambda candidate: score_image(
+                            pipe,
+                            candidate,
+                            size=int(args.height),
+                            device=device,
+                            mask=runtime["mask"],
+                            key=runtime["key"],
+                            num_inversion_steps=int(args.num_inversion_steps),
+                        ),
                     )
+                    attack_quality = measured_image_ssim(source_image, attacked_image)
                 attacked_stem = safe_file_stem(f"{image_id}_{role_name}_{attack_matrix_name}", f"attacked_{pair_index:05d}")
                 attacked_path = attacked_dir / f"{attacked_stem}.png"
                 attacked_image.save(attacked_path)
@@ -632,6 +683,11 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                         latent_shape=latent_shape,
                         execution_device=device,
                         model_id=args.model_id,
+                        quality_score=attack_quality,
+                        score_retention=measured_score_retention(
+                            float(runtime[f"{role_name}_score"]),
+                            score,
+                        ),
                     )
                 )
                 attacked_records.append(
@@ -731,6 +787,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--w-radius", type=int, default=10)
     parser.add_argument("--w-pattern", default="ring", choices=("ring", "rand", "zeros"))
     parser.add_argument("--threshold", type=float, default=None)
+    parser.add_argument("--target-fpr", type=float, required=True)
     parser.add_argument("--attack-families", default="")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--force-cpu", action="store_true")

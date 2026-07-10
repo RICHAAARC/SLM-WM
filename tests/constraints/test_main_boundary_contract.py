@@ -30,8 +30,17 @@ def test_main_package_contains_core_minimal_layout() -> None:
     required_paths = (
         Path("main/core"),
         Path("main/methods"),
-        Path("main/protocol"),
-        Path("main/analysis"),
-        Path("main/cli"),
     )
     assert all(path.is_dir() for path in required_paths)
+
+
+@pytest.mark.constraint
+def test_main_package_excludes_experiment_and_governance_subpackages() -> None:
+    """核心方法包不得继续保存实验协议、论文分析或 CLI 子包。"""
+
+    forbidden_paths = (
+        Path("main/analysis"),
+        Path("main/cli"),
+        Path("main/protocol"),
+    )
+    assert all(not path.exists() for path in forbidden_paths)

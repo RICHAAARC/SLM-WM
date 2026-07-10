@@ -1,8 +1,5 @@
-"""内容载体方法子包。"""
+"""可由仅图像检测器重建的正式内容载体。"""
 
-from main.methods.carrier.attention import AttentionRelativeCarrier, derive_attention_relative_carrier, simulate_attention_update_strengths
-from main.methods.carrier.compose import CONTENT_MODES, ContentUpdate, compose_content_update
-from main.methods.carrier.tail import TailContentCarrier, derive_tail_content_carrier
 from main.methods.carrier.keyed_tensor import (
     BlindContentScore,
     KeyedTensorCarrier,
@@ -11,23 +8,12 @@ from main.methods.carrier.keyed_tensor import (
     compute_blind_content_score,
     project_canonical_template,
 )
-from main.methods.carrier.lf import LfContentCarrier, derive_lf_content_carrier
 
 __all__ = [
-    "CONTENT_MODES",
-    "AttentionRelativeCarrier",
     "BlindContentScore",
-    "ContentUpdate",
-    "TailContentCarrier",
     "KeyedTensorCarrier",
-    "LfContentCarrier",
     "build_low_frequency_template",
     "build_tail_robust_template",
-    "compose_content_update",
     "compute_blind_content_score",
-    "derive_attention_relative_carrier",
-    "derive_tail_content_carrier",
-    "derive_lf_content_carrier",
     "project_canonical_template",
-    "simulate_attention_update_strengths",
 ]

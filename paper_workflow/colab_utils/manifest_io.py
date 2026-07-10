@@ -10,11 +10,11 @@ from pathlib import Path
 import shutil
 from typing import Any, Iterable
 
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
-from main.core.manifests import validate_manifest
+from experiments.artifacts.manifest_schema import validate_manifest
 from paper_workflow.colab_utils.drive_paths import DriveWorkflowPaths
-from paper_workflow.colab_utils.sd_runtime_cold_start import resolve_code_version
+from experiments.runtime.repository_environment import resolve_code_version
 
 WORKFLOW_UNIT_NAME = "colab_drive_workflow"
 LOCAL_ARTIFACT_DIRECTORIES = (

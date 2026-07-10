@@ -70,7 +70,7 @@ $$
 实现存在不等于论文结果成立。下列条件全部满足后, 结果记录才允许进入主张门禁：
 
 1. 运行记录的 `jvp_mode` 为 `torch_func_linearize_exact_jvp`、`torch_autograd_exact_jvp` 或 `torch_autograd_exact_jvp_compatibility`, 且不得使用有限差分；
-2. 基底记录包含响应残差、归一化相对响应残差和正交误差, 且相对响应不超过 0.75；
+2. 基底记录包含响应残差、归一化相对响应残差和正交误差, 且相对响应不超过 0.0001；
 3. attention 来源为真实 Q/K 投影和 autograd；
 4. 检测访问模式为 `image_key_public_model_only`；
 5. test clean negative 的 95% 误报率上界不超过目标 FPR；

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from main.analysis.submission_readiness import (
+from paper_experiments.analysis.submission_readiness import (
     SubmissionReadinessInput,
     build_release_profile_rows,
     build_required_evidence_rows,

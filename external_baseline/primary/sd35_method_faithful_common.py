@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from main.core.digest import build_stable_digest
 
@@ -126,6 +127,46 @@ def file_digest(path: str | Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def measured_image_ssim(reference_image: Any, candidate_image: Any) -> float:
+    """使用标准高斯窗口 SSIM 测量两幅 RGB 图像的感知一致性。"""
+
+    import numpy as np
+    import torch
+    import torch.nn.functional as functional
+
+    reference = np.asarray(reference_image.convert("RGB"), dtype="float32") / 255.0
+    candidate = np.asarray(
+        candidate_image.convert("RGB").resize(reference_image.size),
+        dtype="float32",
+    ) / 255.0
+    left = torch.from_numpy(reference).permute(2, 0, 1).unsqueeze(0)
+    right = torch.from_numpy(candidate).permute(2, 0, 1).unsqueeze(0)
+    axis = torch.arange(11, dtype=torch.float32) - 5.0
+    kernel_1d = torch.exp(-(axis.square()) / (2.0 * 1.5**2))
+    kernel_1d = kernel_1d / kernel_1d.sum()
+    kernel_2d = (kernel_1d[:, None] @ kernel_1d[None, :]).expand(3, 1, 11, 11)
+    mu_left = functional.conv2d(left, kernel_2d, padding=5, groups=3)
+    mu_right = functional.conv2d(right, kernel_2d, padding=5, groups=3)
+    variance_left = functional.conv2d(left.square(), kernel_2d, padding=5, groups=3) - mu_left.square()
+    variance_right = functional.conv2d(right.square(), kernel_2d, padding=5, groups=3) - mu_right.square()
+    covariance = functional.conv2d(left * right, kernel_2d, padding=5, groups=3) - mu_left * mu_right
+    c1 = 0.01**2
+    c2 = 0.03**2
+    ssim = (
+        (2.0 * mu_left * mu_right + c1)
+        * (2.0 * covariance + c2)
+        / ((mu_left.square() + mu_right.square() + c1) * (variance_left + variance_right + c2))
+    )
+    return float(ssim.mean().clamp(0.0, 1.0).item())
+
+
+def measured_score_retention(source_score: float, evaluated_score: float) -> float:
+    """把攻击前后真实检测分数变化映射为 [0, 1] 保持率。"""
+
+    scale = max(abs(float(source_score)), 1e-6)
+    return math.exp(-abs(float(evaluated_score) - float(source_score)) / scale)
 
 
 def as_text(value: Any, default: str = "") -> str:
@@ -279,7 +320,7 @@ def formal_image_attack_resource_profile(attack_family: str) -> str:
 
 
 class InversionStableDiffusion3PipelineMixin:
-    """为 StableDiffusion3Pipeline 增加外部 baseline 检测所需的轻量反演方法。"""
+    """为 StableDiffusion3Pipeline 增加外部 baseline 检测所需的真实流匹配反演方法。"""
 
     def get_image_latents(self, image: Any, *, sample: bool = False) -> Any:
         """通过 VAE 编码图像得到 latent。"""
@@ -293,7 +334,7 @@ class InversionStableDiffusion3PipelineMixin:
             scaling_factor = float(getattr(self.vae.config, "scaling_factor", 1.0) or 1.0)
             return (encoding - shift_factor) * scaling_factor
 
-    def approximate_forward_diffusion(
+    def invert_flow_matching_latent(
         self,
         latents: Any,
         *,
@@ -301,7 +342,7 @@ class InversionStableDiffusion3PipelineMixin:
         num_inference_steps: int = 5,
         guidance_scale: float = 1.0,
     ) -> Any:
-        """使用 SD3 scheduler 近似执行从图像 latent 到噪声 latent 的反演。"""
+        """使用 SD3 scheduler 迭代执行从图像 latent 到噪声 latent 的反演。"""
 
         import torch
 
@@ -316,7 +357,9 @@ class InversionStableDiffusion3PipelineMixin:
                 do_classifier_free_guidance=do_classifier_free_guidance,
             )
             timesteps = self.scheduler.timesteps
-            for index, timestep in enumerate(reversed(timesteps)):
+            sigmas = self.scheduler.sigmas
+            for schedule_index in range(len(timesteps) - 1, -1, -1):
+                timestep = timesteps[schedule_index]
                 latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
                 timestep_tensor = timestep.expand(latent_model_input.shape[0])
                 noise_pred = self.transformer(
@@ -329,7 +372,15 @@ class InversionStableDiffusion3PipelineMixin:
                 if do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + float(guidance_scale) * (noise_pred_text - noise_pred_uncond)
-                latents = latents - (self.scheduler.sigmas[index + 1] - self.scheduler.sigmas[index]) * noise_pred
+                sigma_current = sigmas[schedule_index + 1].to(
+                    device=latents.device,
+                    dtype=latents.dtype,
+                )
+                sigma_next = sigmas[schedule_index].to(
+                    device=latents.device,
+                    dtype=latents.dtype,
+                )
+                latents = latents + (sigma_next - sigma_current) * noise_pred
                 del noise_pred, latent_model_input, timestep_tensor
             return latents
 
@@ -373,11 +424,11 @@ def image_to_tensor(image: Any, *, size: int, device: str, dtype: Any) -> Any:
 
 
 def score_image_latents(pipe: Any, image: Any, *, size: int, device: str, num_inversion_steps: int) -> Any:
-    """把图像重新编码并近似反演为检测 latent。"""
+    """把图像重新编码并流匹配反向 Euler 积分为检测 latent。"""
 
     tensor = image_to_tensor(image, size=int(size), device=device, dtype=pipe.vae.dtype)
     image_latents = pipe.get_image_latents(tensor, sample=False)
-    return pipe.approximate_forward_diffusion(
+    return pipe.invert_flow_matching_latent(
         image_latents,
         prompt="",
         num_inference_steps=int(num_inversion_steps),
@@ -385,83 +436,57 @@ def score_image_latents(pipe: Any, image: Any, *, size: int, device: str, num_in
     )
 
 
-def derive_threshold(observations: Iterable[dict[str, Any]], explicit_threshold: float | None) -> tuple[float, str]:
-    """从 calibration split 或当前 clean 样本派生阈值。"""
+def derive_threshold(
+    observations: Iterable[dict[str, Any]],
+    explicit_threshold: float | None,
+    target_fpr: float,
+) -> tuple[float, str]:
+    """仅从 calibration clean negative 分数冻结 fixed-FPR 阈值。"""
 
     if explicit_threshold is not None:
-        return float(explicit_threshold), "cli_threshold"
+        return float(explicit_threshold), "pre_registered_threshold"
+    if not 0.0 < target_fpr < 1.0:
+        raise ValueError("target_fpr 必须位于 (0, 1)")
     rows = list(observations)
-    calibration_rows = [row for row in rows if row.get("split") == "calibration"] or rows
-    negative_scores = [float(row["score"]) for row in calibration_rows if row.get("sample_role") == "clean_negative"]
-    positive_scores = [float(row["score"]) for row in calibration_rows if row.get("sample_role") == "positive_source"]
-    if negative_scores and positive_scores:
-        return (max(negative_scores) + min(positive_scores)) / 2.0, "midpoint_between_negative_max_and_positive_min"
-    return 0.0, "fallback_zero_insufficient_calibration_pairs"
+    negative_scores = [
+        float(row["score"])
+        for row in rows
+        if row.get("split") == "calibration" and row.get("sample_role") == "clean_negative"
+    ]
+    if not negative_scores:
+        raise ValueError("fixed-FPR 阈值要求非空 calibration clean negative 分数")
+    allowed_false_positives = max(
+        0,
+        math.floor(target_fpr * (len(negative_scores) + 1)) - 1,
+    )
+    for threshold in sorted({math.nextafter(score, math.inf) for score in negative_scores}):
+        if sum(score >= threshold for score in negative_scores) <= allowed_false_positives:
+            return threshold, "calibration_clean_negative_conformal"
+    raise RuntimeError("无法从 calibration clean negative 冻结 fixed-FPR 阈值")
 
 
 def apply_standard_geometric_image_attack(image: Any, *, attack_family: str, seed: int) -> tuple[Any, str]:
-    """对 PIL 图像执行不依赖扩散模型的常规失真或几何攻击。"""
+    """复用项目共同攻击配置执行完全相同的标准图像攻击。"""
 
-    from io import BytesIO
-    import random
-    import numpy as np
-    from PIL import Image, ImageFilter
+    from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+    from experiments.runtime.image_attacks import apply_standard_image_attack
 
-    family = normalize_attack_request(attack_family)
-    if family in DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES:
+    attack_name = normalize_attack_request(attack_family)
+    if attack_name in DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES:
         raise ValueError(f"regeneration_attack_requires_pipeline:{attack_family}")
-    rng = random.Random(int(seed))
-    source = image.convert("RGB")
-    width, height = source.size
-
-    def center_crop(fraction: float) -> Any:
-        crop_width = max(1, int(width * float(fraction)))
-        crop_height = max(1, int(height * float(fraction)))
-        left = max(0, (width - crop_width) // 2)
-        upper = max(0, (height - crop_height) // 2)
-        return source.crop((left, upper, left + crop_width, upper + crop_height))
-
-    if family == "jpeg_compression":
-        buffer = BytesIO()
-        source.save(buffer, format="JPEG", quality=75)
-        buffer.seek(0)
-        return Image.open(buffer).convert("RGB"), "jpeg_quality_75"
-    if family == "gaussian_noise":
-        array = np.asarray(source).astype("float32")
-        noise_rng = np.random.default_rng(int(seed))
-        noisy = np.clip(array + noise_rng.normal(0.0, 8.0, size=array.shape), 0, 255).astype("uint8")
-        return Image.fromarray(noisy, mode="RGB"), "gaussian_noise_sigma_8"
-    if family == "gaussian_blur":
-        return source.filter(ImageFilter.GaussianBlur(radius=1.0)), "gaussian_blur_radius_1"
-    if family == "photometric_distortion_attack":
-        from PIL import ImageEnhance
-
-        adjusted = ImageEnhance.Brightness(source).enhance(1.12)
-        adjusted = ImageEnhance.Contrast(adjusted).enhance(1.10)
-        adjusted = ImageEnhance.Color(adjusted).enhance(0.88)
-        lookup = [max(0, min(255, int(((value / 255.0) ** 0.92) * 255.0 + 0.5))) for value in range(256)]
-        return adjusted.point(lookup * 3), "photometric_brightness_contrast_saturation_gamma"
-    if family == "rotation":
-        angle = 5.0 if rng.random() >= 0.5 else -5.0
-        return source.rotate(angle, resample=Image.Resampling.BICUBIC), f"rotation_{angle:g}_degree"
-    if family == "resize":
-        resized = source.resize((max(1, int(width * 0.75)), max(1, int(height * 0.75))), Image.Resampling.BICUBIC)
-        return resized.resize((width, height), Image.Resampling.BICUBIC), "resize_downscale_0.75_restore"
-    if family == "crop":
-        return center_crop(0.90), "center_crop_0.90"
-    if family == "crop_resize":
-        return center_crop(0.85).resize((width, height), Image.Resampling.BICUBIC), "center_crop_0.85_resize"
-    if family == "composite_geometric_attacks":
-        angle = 5.0 if rng.random() >= 0.5 else -5.0
-        rotated = source.rotate(angle, resample=Image.Resampling.BICUBIC)
-        crop_width = max(1, int(width * 0.90))
-        crop_height = max(1, int(height * 0.90))
-        left = max(0, (width - crop_width) // 2)
-        upper = max(0, (height - crop_height) // 2)
-        cropped = rotated.crop((left, upper, left + crop_width, upper + crop_height))
-        return cropped.resize((width, height), Image.Resampling.BICUBIC), f"rotation_{angle:g}_degree_crop_resize"
-    raise ValueError(f"unsupported_sd35_adapter_attack:{attack_family}")
-
+    candidates = tuple(
+        config
+        for config in default_attack_configs()
+        if config.enabled
+        and not config.requires_gpu
+        and config.resource_profile == "full_main"
+        and config.attack_name == attack_name
+    )
+    if len(candidates) != 1:
+        raise RuntimeError(f"共同攻击协议没有唯一配置: {attack_name}")
+    config = candidates[0]
+    attacked = apply_standard_image_attack(image, config, seed)
+    return attacked, f"shared_attack_protocol:{attack_config_digest(config)}"
 
 def _encode_image_latents(pipe: Any, image: Any, *, size: int, device: str) -> Any:
     """把图像编码到当前 pipeline 的 VAE latent 空间。"""
@@ -473,19 +498,17 @@ def _encode_image_latents(pipe: Any, image: Any, *, size: int, device: str) -> A
     return pipe.get_image_latents(tensor, sample=False)
 
 
-def _approximate_inversion_latents(pipe: Any, latents: Any, *, prompt: str, num_inference_steps: int) -> Any:
-    """复用当前 pipeline 可用的近似反演接口。"""
+def _invert_flow_matching_latents(pipe: Any, latents: Any, *, prompt: str, num_inference_steps: int) -> Any:
+    """调用当前 pipeline 的真实流匹配反演积分器。"""
 
-    if hasattr(pipe, "approximate_forward_diffusion"):
-        return pipe.approximate_forward_diffusion(
+    if hasattr(pipe, "invert_flow_matching_latent"):
+        return pipe.invert_flow_matching_latent(
             latents,
             prompt=prompt,
             num_inference_steps=int(num_inference_steps),
             guidance_scale=1.0,
         )
-    if hasattr(pipe, "naive_forward_diffusion"):
-        return pipe.naive_forward_diffusion(latents=latents, num_inference_steps=int(num_inference_steps))
-    return latents
+    raise RuntimeError("SD3.5 正式再生成攻击要求真实流匹配反演积分器")
 
 
 def apply_regeneration_image_attack(
@@ -498,11 +521,12 @@ def apply_regeneration_image_attack(
     size: int,
     device: str,
     num_inference_steps: int,
+    detection_score: Callable[[Any], float] | None = None,
 ) -> tuple[Any, str]:
     """使用 SD3.5 adapter 的可审计 latent 再生成路径执行再扩散类攻击。
 
     该实现属于项目特定的 method-faithful adapter 工程路径: 它把输入图像编码到
-    SD3.5 latent, 再按攻击名称执行不同强度的 latent 扰动或近似反演, 最后调用同一
+    SD3.5 latent, 再按攻击名称执行不同强度的 latent 扰动或流匹配反向 Euler 积分, 最后调用同一
     pipeline 重新生成图像。它用于共同攻击簇对齐, 不伪装为外部方法官方 legacy 结果。
     """
 
@@ -526,14 +550,14 @@ def apply_regeneration_image_attack(
     }
     strength = float(strength_by_attack[family])
     if family == "ddim_inversion_regeneration":
-        inverted_latents = _approximate_inversion_latents(
+        inverted_latents = _invert_flow_matching_latents(
             pipe,
             base_latents,
             prompt=prompt,
             num_inference_steps=max(1, int(num_inference_steps)),
         )
         attack_latents = (1.0 - strength) * inverted_latents + strength * noise
-        transform_name = "sd35_adapter_approximate_ddim_inversion_regeneration"
+        transform_name = "sd35_flow_matching_inversion_regeneration"
     elif family == "sdedit_regeneration":
         attack_latents = base_latents + strength * noise
         transform_name = "sd35_adapter_sdedit_latent_noise_regeneration"
@@ -558,8 +582,31 @@ def apply_regeneration_image_attack(
         prompt = f"{prompt}, redrawn with the same semantics but different visual composition"
         transform_name = "sd35_adapter_visual_paraphrase_attack"
     elif family == "adversarial_removal_attack":
-        attack_latents = (1.0 - strength) * base_latents + strength * torch.sign(noise) * 0.50
-        transform_name = "sd35_adapter_adversarial_removal_attack"
+        if detection_score is None:
+            raise ValueError("对抗去水印攻击必须接收实际 baseline 检测分数函数")
+        from diffusers import StableDiffusion3Img2ImgPipeline
+
+        img2img = StableDiffusion3Img2ImgPipeline.from_pipe(pipe).to(device)
+        best_image = image.convert("RGB")
+        best_score = float(detection_score(best_image))
+        query_count = 8
+        for query_index in range(query_count):
+            query_generator = torch.Generator(device=device).manual_seed(int(seed) + query_index)
+            query_strength = 0.25 + 0.30 * query_index / (query_count - 1)
+            with torch.inference_mode():
+                candidate = img2img(
+                    prompt=prompt,
+                    image=image,
+                    strength=query_strength,
+                    guidance_scale=1.0,
+                    num_inference_steps=max(1, int(num_inference_steps)),
+                    generator=query_generator,
+                ).images[0]
+            candidate_score = float(detection_score(candidate))
+            if candidate_score < best_score:
+                best_image = candidate
+                best_score = candidate_score
+        return best_image.convert("RGB"), "detector_guided_black_box_img2img_search"
     else:
         attack_latents = (1.0 - strength) * base_latents + strength * noise
         transform_name = "sd35_adapter_img2img_latent_regeneration"
@@ -586,6 +633,7 @@ def apply_formal_image_attack(
     size: int = 512,
     device: str = "cuda",
     num_inference_steps: int = 8,
+    detection_score: Callable[[Any], float] | None = None,
 ) -> tuple[Any, str]:
     """执行共同攻击矩阵中的图像级攻击, 并对再生成攻击显式要求 pipeline。"""
 
@@ -601,6 +649,7 @@ def apply_formal_image_attack(
             size=int(size),
             device=device,
             num_inference_steps=int(num_inference_steps),
+            detection_score=detection_score,
         )
     return apply_standard_geometric_image_attack(image, attack_family=attack_family, seed=int(seed))
 

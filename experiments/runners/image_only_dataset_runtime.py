@@ -16,7 +16,7 @@ from experiments.protocol.paper_run_config import PaperRunConfig, build_paper_ru
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from experiments.protocol.attacks import default_attack_configs
-from experiments.runners.real_attack_evaluation import default_attack_specs
+from experiments.runtime.diffusion.regeneration_attacks import default_diffusion_attack_specs
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     load_completed_semantic_watermark_runtime_result,
@@ -25,7 +25,7 @@ from experiments.runners.semantic_watermark_runtime import (
 )
 from experiments.runtime.repository_environment import file_digest, resolve_code_version
 from experiments.runtime.archive_naming import utc_archive_token
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 
@@ -36,6 +36,8 @@ class FrozenEvidenceProtocol:
     content_threshold: float
     rescue_margin_low: float
     geometry_score_threshold: float
+    geometry_calibration_negative_count: int
+    geometry_calibration_exceedance_count: int
     calibration_negative_count: int
     calibration_false_positive_count: int
     calibration_false_positive_rate: float
@@ -99,7 +101,6 @@ def calibrate_complete_evidence_protocol(
     calibration_records: Iterable[dict[str, Any]],
     target_fpr: float,
     rescue_margin_low: float,
-    geometry_score_threshold: float,
 ) -> FrozenEvidenceProtocol:
     """在 clean negative 上冻结包含 rescue 的完整判定协议。
 
@@ -110,7 +111,29 @@ def calibrate_complete_evidence_protocol(
     records = tuple(calibration_records)
     if not records:
         raise ValueError("calibration clean negative 记录不得为空")
+    if not 0.0 < target_fpr < 1.0:
+        raise ValueError("target_fpr 必须位于 (0, 1)")
     allowed_false_positives = max(0, math.floor(target_fpr * (len(records) + 1)) - 1)
+    reliable_geometry_scores = tuple(
+        float(record["attention_geometry_score"])
+        for record in records
+        if bool(record.get("geometry_reliable", False))
+        and isinstance(record.get("attention_geometry_score"), (int, float))
+        and math.isfinite(float(record["attention_geometry_score"]))
+    )
+    geometry_score_threshold = 0.0
+    geometry_exceedance_count = 0
+    if reliable_geometry_scores:
+        geometry_candidates = sorted(
+            {math.nextafter(value, math.inf) for value in reliable_geometry_scores}
+        )
+        geometry_score_threshold = geometry_candidates[-1]
+        for candidate in geometry_candidates:
+            exceedance_count = sum(value >= candidate for value in reliable_geometry_scores)
+            if exceedance_count <= allowed_false_positives:
+                geometry_score_threshold = candidate
+                geometry_exceedance_count = exceedance_count
+                break
     score_candidates = []
     for record in records:
         score_candidates.append(float(record["content_score"]))
@@ -132,6 +155,8 @@ def calibrate_complete_evidence_protocol(
         "content_threshold": selected_threshold,
         "rescue_margin_low": rescue_margin_low,
         "geometry_score_threshold": geometry_score_threshold,
+        "geometry_calibration_negative_count": len(reliable_geometry_scores),
+        "geometry_calibration_exceedance_count": geometry_exceedance_count,
         "calibration_negative_count": len(records),
         "calibration_false_positive_count": selected_false_positives,
         "target_fpr": target_fpr,
@@ -141,6 +166,8 @@ def calibrate_complete_evidence_protocol(
         content_threshold=selected_threshold,
         rescue_margin_low=rescue_margin_low,
         geometry_score_threshold=geometry_score_threshold,
+        geometry_calibration_negative_count=len(reliable_geometry_scores),
+        geometry_calibration_exceedance_count=geometry_exceedance_count,
         calibration_negative_count=len(records),
         calibration_false_positive_count=selected_false_positives,
         calibration_false_positive_rate=selected_false_positives / len(records),
@@ -408,7 +435,6 @@ def run_image_only_dataset_runtime(
         calibration_negatives,
         resolved_paper_run.target_fpr,
         base_method_config.rescue_margin_low,
-        base_method_config.geometry_score_threshold,
     )
     formal_records = apply_frozen_evidence_protocol(detection_records, protocol)
     metric_rows = _aggregate_test_metrics(formal_records, resolved_paper_run.target_fpr)
@@ -509,7 +535,7 @@ def run_image_only_dataset_runtime(
         and attack.resource_profile in set(base_method_config.standard_attack_profiles)
     }
     diffusion_attack_ids = {
-        attack.attack_id for attack in default_attack_specs()
+        attack.attack_id for attack in default_diffusion_attack_specs()
     } if base_method_config.diffusion_attacks_enabled else set()
     expected_attack_ids = standard_attack_ids | diffusion_attack_ids
     actual_attack_ids = {str(record.get("attack_id")) for record in attacked_records}

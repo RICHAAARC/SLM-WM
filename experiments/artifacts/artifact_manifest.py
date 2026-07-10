@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from main.core.digest import build_stable_digest
-from main.core.manifests import ArtifactManifest
+from experiments.artifacts.manifest_schema import ArtifactManifest
 
 
 def build_artifact_manifest(

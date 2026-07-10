@@ -13,6 +13,7 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -39,7 +40,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     validate_pilot_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_fixed_fpr_result_records"
@@ -292,16 +293,14 @@ def clamp01(value: float) -> float:
 
 
 def bounded_confidence_interval(value: float, count: int, confidence_level: float) -> tuple[float, float]:
-    """基于聚合计数构造确定性置信区间。
-
-    上游结果当前多为聚合行, 不包含逐样本 bootstrap 原始向量。因此这里使用
-    二项比例近似为重跑前治理提供稳定区间; 当后续记录包含逐样本向量时, 可在同一字段上替换为真实 bootstrap 区间。
-    """
+    """对 [0, 1] 独立观测均值计算分布无关 Hoeffding 置信区间。"""
 
     normalized = clamp01(value)
     sample_count = max(1, int(count))
-    z_value = 1.959963984540054 if confidence_level >= 0.95 else 1.6448536269514722
-    margin = z_value * ((normalized * (1.0 - normalized) / sample_count) ** 0.5)
+    alpha = 1.0 - float(confidence_level)
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("confidence_level 必须位于 (0, 1)")
+    margin = math.sqrt(math.log(2.0 / alpha) / (2.0 * sample_count))
     return clamp01(normalized - margin), clamp01(normalized + margin)
 
 
@@ -331,7 +330,8 @@ def materialize_output_entries(root_path: Path, package_paths: Iterable[Path]) -
     outputs_root = (root_path / "outputs").resolve()
     materialized_entries: list[str] = []
     skipped_entries: list[str] = []
-    planned_items: list[tuple[Path, Any, Path]] = []
+    planned_by_destination: dict[Path, tuple[Path, Any, Path]] = {}
+    duplicate_identical_entries: list[str] = []
     for package_path in package_path_values:
         with ZipFile(package_path) as archive:
             for entry_info in archive.infolist():
@@ -342,7 +342,23 @@ def materialize_output_entries(root_path: Path, package_paths: Iterable[Path]) -
                 if not is_safe or destination is None:
                     skipped_entries.append(entry)
                     continue
-                planned_items.append((package_path, entry_info, destination))
+                existing = planned_by_destination.get(destination)
+                if existing is not None:
+                    existing_package, existing_info, _ = existing
+                    same_payload = (
+                        int(existing_info.file_size) == int(entry_info.file_size)
+                        and int(existing_info.CRC) == int(entry_info.CRC)
+                    )
+                    if not same_payload:
+                        raise RuntimeError(
+                            "结果包包含同路径不同内容, 拒绝跨运行覆盖: "
+                            f"{entry} 来自 {existing_package.name} 与 {package_path.name}"
+                        )
+                    duplicate_identical_entries.append(entry)
+                    continue
+                planned_by_destination[destination] = (package_path, entry_info, destination)
+
+    planned_items = list(planned_by_destination.values())
 
     total_bytes = sum(int(entry_info.file_size) for _, entry_info, _ in planned_items)
     progress = WorkProgress(
@@ -397,6 +413,7 @@ def materialize_output_entries(root_path: Path, package_paths: Iterable[Path]) -
         "materialized_output_entry_count": len(materialized_entries),
         "materialized_output_total_bytes": copied_bytes,
         "skipped_output_entry_count": len(skipped_entries),
+        "duplicate_identical_entry_count": len(duplicate_identical_entries),
         "materialized_output_entries_digest": build_stable_digest(sorted(materialized_entries)),
         "skipped_output_entries": sorted(skipped_entries),
     }
@@ -514,7 +531,7 @@ def build_common_result_fields(
         "attack_matrix_digest": schema["attack_matrix_digest"],
         "fixed_fpr_protocol_digest": schema["fixed_fpr_protocol_digest"],
         "target_fpr": schema["target_fpr"],
-        "bootstrap_iteration_count": schema["bootstrap_iteration_count"],
+        "confidence_interval_method": schema["confidence_interval_method"],
         "confidence_level": schema["confidence_level"],
         "baseline_result_source": baseline_result_source,
         "baseline_result_source_digest": baseline_result_source_digest,

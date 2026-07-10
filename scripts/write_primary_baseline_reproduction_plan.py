@@ -21,7 +21,7 @@ from paper_experiments.baselines import (
     build_primary_result_templates,
     load_baseline_source_registry,
 )
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 DEFAULT_OUTPUT_DIR = Path("outputs/primary_baseline_reproduction")

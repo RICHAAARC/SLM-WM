@@ -7,7 +7,10 @@ from importlib import metadata as importlib_metadata
 from importlib.util import find_spec
 from typing import Any
 
-from paper_workflow.colab_utils.sd_runtime_cold_start import COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND
+COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
+    "%pip install -q --upgrade diffusers transformers accelerate safetensors "
+    "sentencepiece protobuf huggingface_hub"
+)
 
 WORKFLOW_DEPENDENCIES = (
     "diffusers",
@@ -40,27 +43,6 @@ NOTEBOOK_DEPENDENCY_PROFILES = {
         "tokenizers",
         "scipy",
         "torchvision",
-    ),
-    "aligned_rescoring": WORKFLOW_DEPENDENCIES
-    + (
-        "numpy",
-        "tokenizers",
-        "lpips",
-        "torchvision",
-        "scipy",
-    ),
-    "threshold_calibration": WORKFLOW_DEPENDENCIES
-    + (
-        "pillow",
-    ),
-    "real_attack_evaluation": WORKFLOW_DEPENDENCIES
-    + (
-        "pillow",
-    ),
-    "conventional_geometric_attack": (
-        "pillow",
-        "numpy",
-        "tqdm",
     ),
     "dataset_level_quality": (
         "torch",

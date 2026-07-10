@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol.paper_run_config import build_paper_run_config
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from scripts.write_pilot_paper_result_records import WorkProgress, expand_package_paths, materialize_output_entries
 
@@ -303,9 +303,19 @@ def build_readiness_summary(
     common_protocol_summary = read_json(root_path / DEFAULT_COMMON_PROTOCOL_SUMMARY_PATH)
     existing_dirs = [relative_dir for relative_dir in REQUIRED_OUTPUT_DIRS if (root_path / relative_dir).exists()]
     missing_dirs = [relative_dir for relative_dir in REQUIRED_OUTPUT_DIRS if not (root_path / relative_dir).exists()]
+    manifestless_dirs = [
+        relative_dir
+        for relative_dir in existing_dirs
+        if not any((root_path / relative_dir).rglob("*manifest*.json"))
+    ]
     entry_list = tuple(entries)
-    package_ready = len(missing_dirs) == 0 and bool(entry_list)
     run_claim_ready = bool(common_protocol_summary.get("paper_run_claim_ready", False))
+    package_ready = (
+        len(missing_dirs) == 0
+        and len(manifestless_dirs) == 0
+        and bool(entry_list)
+        and run_claim_ready
+    )
     probe_claim_ready = bool(common_protocol_summary.get("probe_claim_ready", False))
     pilot_claim_ready = bool(common_protocol_summary.get("pilot_claim_ready", False))
     full_claim_ready = bool(common_protocol_summary.get("full_claim_ready", False))
@@ -318,6 +328,8 @@ def build_readiness_summary(
         "missing_required_output_dir_count": len(missing_dirs),
         "existing_required_output_dirs": existing_dirs,
         "missing_required_output_dirs": missing_dirs,
+        "manifestless_required_output_dir_count": len(manifestless_dirs),
+        "manifestless_required_output_dirs": manifestless_dirs,
         "archive_entry_count": len(entry_list),
         "archive_entry_digest": build_stable_digest([relative_or_absolute(path, root_path) for path in entry_list]),
         "materialization_report": materialization_report,

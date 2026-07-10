@@ -4,7 +4,7 @@ release_layer_boundary
 
 ## Purpose
 
-约束 SLM-WM 仓库的三层结构与发布抽离边界, 保证核心方法、完整论文实验和 Colab 运行入口职责清晰。
+约束 SLM-WM 仓库的五层结构与发布抽离边界, 保证核心方法、主方法实验、完整论文实验、独立 CLI 和 Colab 入口职责清晰。
 
 ## Scope
 
@@ -24,12 +24,14 @@ release_layer_boundary
 
 ## Blocking Rules
 
-1. 核心方法复现层不得导入 `paper_experiments/`、`paper_workflow/` 或 `external_baseline/`。
-2. 完整论文实验层不得导入 `paper_workflow/`。
-3. Colab 运行层不得成为正式 records、tables、figures、reports 或 manifests 的唯一实现位置。
-4. Notebook 文件必须集中放在 `paper_workflow/notebooks/`, 不得与 helper 模块平铺混放。
-5. 外部 baseline 源码缓存不得进入最小方法发布包。
-6. baseline 适配、官方参考复现和受治理导入不应放入 `experiments/`。
+1. `main/` 不得导入 `experiments/`、`paper_experiments/`、`scripts/`、`paper_workflow/` 或 `external_baseline/`。
+2. `experiments/` 不得导入 `paper_experiments/`、`scripts/`、`paper_workflow/` 或 `external_baseline/`。
+3. `paper_experiments/` 不得导入 `scripts/` 或 `paper_workflow/`。
+4. `scripts/` 不得导入 `paper_workflow/`。
+5. Colab 运行层不得成为正式 records、tables、figures、reports 或 manifests 的唯一实现位置。
+6. Notebook 文件必须集中放在 `paper_workflow/notebooks/`, 不得与 helper 模块平铺混放。
+7. 外部 baseline 源码缓存不得进入最小方法发布包。
+8. baseline 适配、官方参考复现和受治理导入不应放入 `experiments/`。
 
 ## Allowed Changes
 

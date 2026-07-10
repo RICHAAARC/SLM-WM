@@ -24,7 +24,7 @@ from paper_experiments.baselines import (
     build_gaussian_shading_official_reference_schema,
     validate_gaussian_shading_official_reference_records,
 )
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from paper_experiments.runners.external_baseline_method_faithful import (
     ensure_cuda_if_requested,
     load_baseline_registry_item,

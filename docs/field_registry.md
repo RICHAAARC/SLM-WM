@@ -1388,7 +1388,7 @@ Notebook 与 repository module 的跨边界数据
 | prompt_split_digest | artifact | none | false | false | false | 共同协议使用的 prompt split 稳定摘要。|
 | attack_matrix_digest | artifact | none | false | false | false | 共同协议使用的攻击矩阵稳定摘要。|
 | fixed_fpr_protocol_digest | artifact | none | false | false | false | fixed-FPR 校准协议的稳定摘要。|
-| bootstrap_iteration_count | protocol | none | false | false | false | 结果置信区间 bootstrap 采样次数。|
+| confidence_interval_method | protocol | none | false | false | false | `[0, 1]` 样本均值使用的分布无关置信区间方法, 当前固定为 `bounded_hoeffding`。|
 | confidence_level | protocol | none | false | false | false | 置信区间使用的置信水平。|
 | result_scope | protocol | none | false | false | false | 结果记录所属的共同协议范围。|
 | result_claim_scope | governance | none | false | false | false | 结果记录允许支撑的声明范围。|

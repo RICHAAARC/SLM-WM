@@ -316,11 +316,11 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             attack_id="adversarial_removal_extra",
             attack_family="adversarial_removal_attack",
             attack_name="adversarial_removal_attack",
-            attack_strength=0.38,
+            attack_strength=0.55,
             resource_profile="full_extra",
             requires_gpu=True,
             enabled=True,
-            attack_parameters={"denoise_strength": 0.38, "pre_noise_level": 0.035, "anti_watermark_bias": 0.20},
+            attack_parameters={"query_count": 8, "strength_min": 0.25, "strength_max": 0.55},
         ),
     )
 

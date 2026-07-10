@@ -20,14 +20,6 @@ from experiments.runtime.archive_naming import (
 from paper_workflow.notebook_utils.notebook_runtime import write_notebook_runtime_report
 
 WORKFLOW_DRIVE_OUTPUT_ENV_KEYS = {
-    "real_sd_runtime_probe": "SLM_WM_RUNTIME_DRIVE_OUTPUT_DIR",
-    "minimal_diffusion_latent_injection": "SLM_WM_INJECTION_DRIVE_OUTPUT_DIR",
-    "attention_geometry": "SLM_WM_DRIVE_OUTPUT_DIR",
-    "attention_latent_injection": "SLM_WM_DRIVE_OUTPUT_DIR",
-    "aligned_rescoring": "SLM_WM_DRIVE_OUTPUT_DIR",
-    "threshold_calibration": "SLM_WM_THRESHOLD_CALIBRATION_DRIVE_DIR",
-    "real_attack_evaluation": "SLM_WM_DRIVE_OUTPUT_DIR",
-    "conventional_geometric_attack_evaluation": "SLM_WM_CONVENTIONAL_GEOMETRIC_ATTACK_DRIVE_DIR",
     "dataset_level_quality": "SLM_WM_DATASET_QUALITY_DRIVE_DIR",
     "external_baseline_method_faithful": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
     "official_reference_tree_ring": "SLM_WM_TREE_RING_OFFICIAL_DRIVE_OUTPUT_DIR",
@@ -36,14 +28,6 @@ WORKFLOW_DRIVE_OUTPUT_ENV_KEYS = {
     "official_reference_t2smark": "SLM_WM_T2SMARK_FULL_MAIN_DRIVE_OUTPUT_DIR",
 }
 WORKFLOW_LOCAL_OUTPUT_DIRS = {
-    "real_sd_runtime_probe": "outputs/real_sd_runtime_probe",
-    "minimal_diffusion_latent_injection": "outputs/minimal_diffusion_latent_injection",
-    "attention_geometry": "outputs/real_attention_geometry",
-    "attention_latent_injection": "outputs/attention_latent_injection",
-    "aligned_rescoring": "outputs/aligned_rescoring",
-    "threshold_calibration": "outputs/threshold_calibration",
-    "real_attack_evaluation": "outputs/real_attack_evaluation",
-    "conventional_geometric_attack_evaluation": "outputs/conventional_geometric_attack_evaluation",
     "dataset_level_quality": "outputs/dataset_level_quality",
     "external_baseline_method_faithful": "outputs/external_baseline_method_faithful",
     "official_reference_tree_ring": "outputs/tree_ring_official_reference",
@@ -51,7 +35,6 @@ WORKFLOW_LOCAL_OUTPUT_DIRS = {
     "official_reference_shallow_diffuse": "outputs/shallow_diffuse_official_reference",
     "official_reference_t2smark": "outputs/t2smark_full_main_reproduction",
 }
-
 
 def resolve_drive_output_dir(workflow_name: str, drive_output_dir: str | None = None) -> str | None:
     """从显式参数或约定环境变量解析 Drive 输出目录。"""
@@ -67,40 +50,6 @@ def resolve_drive_output_dir(workflow_name: str, drive_output_dir: str | None = 
 def _package_function_for_workflow(workflow_name: str) -> Callable[..., Any]:
     """延迟导入 workflow 打包函数, 避免 Notebook 入口加载无关重依赖。"""
 
-    if workflow_name == "real_sd_runtime_probe":
-        from paper_workflow.colab_utils.sd_runtime_cold_start import package_probe_outputs
-
-        return package_probe_outputs
-    if workflow_name == "minimal_diffusion_latent_injection":
-        from paper_workflow.colab_utils.minimal_latent_injection import package_injection_outputs
-
-        return package_injection_outputs
-    if workflow_name == "attention_geometry":
-        from paper_workflow.colab_utils.attention_geometry_capture import package_attention_geometry_outputs
-
-        return package_attention_geometry_outputs
-    if workflow_name == "attention_latent_injection":
-        from paper_workflow.colab_utils.attention_latent_injection import package_attention_latent_injection_outputs
-
-        return package_attention_latent_injection_outputs
-    if workflow_name == "aligned_rescoring":
-        from paper_workflow.colab_utils.aligned_rescoring import package_aligned_rescoring_outputs
-
-        return package_aligned_rescoring_outputs
-    if workflow_name == "threshold_calibration":
-        from paper_workflow.colab_utils.threshold_calibration import package_threshold_calibration_outputs
-
-        return package_threshold_calibration_outputs
-    if workflow_name == "real_attack_evaluation":
-        from paper_workflow.colab_utils.real_attack_evaluation import package_real_attack_evaluation_outputs
-
-        return package_real_attack_evaluation_outputs
-    if workflow_name == "conventional_geometric_attack_evaluation":
-        from paper_workflow.colab_utils.conventional_geometric_attack_evaluation import (
-            package_conventional_geometric_attack_evaluation_outputs,
-        )
-
-        return package_conventional_geometric_attack_evaluation_outputs
     if workflow_name == "dataset_level_quality":
         from paper_workflow.colab_utils.dataset_level_quality import package_dataset_level_quality_outputs
 

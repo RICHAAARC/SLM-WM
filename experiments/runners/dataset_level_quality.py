@@ -16,7 +16,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from experiments.protocol import FORMAL_FEATURE_BACKEND
 from experiments.protocol.paper_run_config import build_paper_run_config
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from experiments.runtime.progress import progress_bar, update_progress
 from experiments.runtime.repository_environment import (

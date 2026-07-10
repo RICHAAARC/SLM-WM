@@ -10,12 +10,12 @@ inference_steps: 20
 guidance_scale: 4.5
 latent_width: 128
 detector_input_access_mode: image_key_public_model_only
-jacobian_candidate_count: 12
+jacobian_candidate_count: 20
 null_space_rank: 4
 lf_relative_strength: 0.0025
 tail_relative_strength: 0.0015
 attention_relative_strength: 0.0010
 tail_fraction: 0.20
 minimum_projection_energy_retention: 0.01
-maximum_relative_response_residual: 0.75
+maximum_relative_response_residual: 0.0001
 injection_step_indices: [6, 10, 14]

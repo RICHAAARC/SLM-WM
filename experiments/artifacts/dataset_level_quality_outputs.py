@@ -26,7 +26,7 @@ from experiments.protocol import (
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
 )
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from experiments.runtime.archive_naming import utc_archive_token
 

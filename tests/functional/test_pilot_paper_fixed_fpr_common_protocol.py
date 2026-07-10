@@ -263,7 +263,7 @@ def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dic
         "prompt_split_digest": schema["prompt_split_digest"],
         "attack_matrix_digest": schema["attack_matrix_digest"],
         "fixed_fpr_protocol_digest": schema["fixed_fpr_protocol_digest"],
-        "bootstrap_iteration_count": schema["bootstrap_iteration_count"],
+        "confidence_interval_method": schema["confidence_interval_method"],
         "confidence_level": schema["confidence_level"],
         "baseline_result_source": evidence_path,
         "baseline_result_source_digest": "digest",

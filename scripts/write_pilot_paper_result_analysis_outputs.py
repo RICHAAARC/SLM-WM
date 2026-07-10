@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol.paper_run_config import build_paper_run_config
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_result_analysis"
@@ -180,7 +180,7 @@ def build_bootstrap_ci_rows(result_records: Iterable[dict[str, Any]]) -> list[di
                 "attacked_false_positive_rate_ci_high": record.get("attacked_false_positive_rate_ci_high", ""),
                 "positive_count": record.get("positive_count", ""),
                 "negative_count": record.get("negative_count", ""),
-                "bootstrap_iteration_count": record.get("bootstrap_iteration_count", ""),
+                "confidence_interval_method": record.get("confidence_interval_method", ""),
                 "confidence_level": record.get("confidence_level", ""),
                 "supports_paper_claim": record.get("supports_paper_claim", False),
             }
@@ -401,7 +401,7 @@ def write_pilot_paper_result_analysis_outputs(
             "attacked_false_positive_rate_ci_high",
             "positive_count",
             "negative_count",
-            "bootstrap_iteration_count",
+            "confidence_interval_method",
             "confidence_level",
             "supports_paper_claim",
         ],

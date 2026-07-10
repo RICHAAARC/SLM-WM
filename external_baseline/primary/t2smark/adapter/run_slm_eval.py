@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import sys
 from typing import Any, Iterable
@@ -12,12 +13,37 @@ ROOT = Path(__file__).resolve().parents[4]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from external_baseline.primary.sd35_diffusion_baseline_common import require_cuda_if_requested, write_contract_manifest, write_json
 from experiments.runtime.progress import progress_event_path_from_environment, write_progress_event
 from main.core.digest import build_stable_digest
+from external_baseline.primary.sd35_method_faithful_common import (
+    measured_image_ssim,
+    measured_score_retention,
+)
 
 BASELINE_ID = "t2smark"
 DEFAULT_SCORE_NAME = "t2smark_norm1_detection_score"
+
+
+def _write_json(path: str | Path, payload: Any) -> Path:
+    """写出稳定 JSON 文件。"""
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return output_path
+
+
+def _require_cuda_if_requested(required: bool) -> None:
+    """在正式 GPU 运行入口验证 CUDA 可用性。"""
+
+    if required:
+        import torch
+
+        if not torch.cuda.is_available():
+            raise RuntimeError("T2SMark 正式适配运行要求 CUDA")
 
 
 def _load_json(path: str | Path) -> Any:
@@ -96,6 +122,19 @@ def _prompt_id(row: dict[str, Any], image_id: str) -> str:
     return str(row.get("prompt_id") or f"prompt_for_{image_id}")
 
 
+def _measured_pair_quality(reference_path: str, candidate_path: str) -> float:
+    """从实际落盘图像计算 SSIM, 缺少图像时拒绝生成正式 observation。"""
+
+    from PIL import Image
+
+    reference = Path(reference_path)
+    candidate = Path(candidate_path)
+    if not reference.is_file() or not candidate.is_file():
+        raise FileNotFoundError("T2SMark observation 缺少质量测量所需图像")
+    with Image.open(reference) as left, Image.open(candidate) as right:
+        return measured_image_ssim(left, right)
+
+
 def _source_index_lookup(image_pairs: list[dict[str, Any]]) -> dict[str, int]:
     """构建 source image id 到 T2SMark 数字结果索引的映射。"""
 
@@ -109,24 +148,33 @@ def _source_index_lookup(image_pairs: list[dict[str, Any]]) -> dict[str, int]:
     return lookup
 
 
-def _auto_threshold(results_by_index: dict[int, dict[str, Any]], selected_indices: Iterable[int]) -> tuple[float, str]:
-    """从 T2SMark 正负检测分数中派生轻量阈值。
+def _auto_threshold(
+    results_by_index: dict[int, dict[str, Any]],
+    image_pairs: list[dict[str, Any]],
+    target_fpr: float,
+) -> tuple[float, str]:
+    """仅从 calibration clean negative 分数冻结 fixed-FPR 阈值。"""
 
-    该阈值只用于把外部结果转成统一 observation 契约。论文级阈值仍应由共同 calibration
-    协议或外部方法官方阈值说明提供。
-    """
-
-    positive_scores: list[float] = []
+    if not 0.0 < target_fpr < 1.0:
+        raise ValueError("target_fpr 必须位于 (0, 1)")
     negative_scores: list[float] = []
-    for index in selected_indices:
+    for index, row in enumerate(image_pairs):
+        if _split(row) != "calibration":
+            continue
         if index not in results_by_index:
             continue
         robustness = _robustness(results_by_index[index], result_index=index)
-        positive_scores.append(_finite_score(robustness.get("norm1_w"), field_name="norm1_w"))
         negative_scores.append(_finite_score(robustness.get("norm1_no_w"), field_name="norm1_no_w"))
-    if not positive_scores or not negative_scores:
-        return 0.0, "fallback_zero_no_score_pair"
-    return (min(positive_scores) + max(negative_scores)) / 2.0, "midpoint_between_min_positive_and_max_negative"
+    if not negative_scores:
+        raise ValueError("T2SMark fixed-FPR 阈值要求 calibration clean negative 分数")
+    allowed_false_positives = max(
+        0,
+        math.floor(target_fpr * (len(negative_scores) + 1)) - 1,
+    )
+    for threshold in sorted({math.nextafter(score, math.inf) for score in negative_scores}):
+        if sum(score >= threshold for score in negative_scores) <= allowed_false_positives:
+            return threshold, "calibration_clean_negative_conformal"
+    raise RuntimeError("无法冻结 T2SMark fixed-FPR 阈值")
 
 
 def _observation(
@@ -143,6 +191,8 @@ def _observation(
     robustness: dict[str, Any],
     image_path: str = "",
     image_digest: str = "",
+    quality_score: float,
+    score_retention: float,
 ) -> dict[str, Any]:
     """构造一条 SLM baseline observation row。"""
 
@@ -180,6 +230,8 @@ def _observation(
         "producer_role": "external_baseline_result_adapter",
         "formal_result_claim": False,
         "supports_paper_claim": False,
+        "quality_score": float(quality_score),
+        "score_retention": float(score_retention),
     }
     payload["baseline_observation_digest"] = build_stable_digest(payload)
     return payload
@@ -191,15 +243,15 @@ def build_t2smark_observations(
     t2smark_results: dict[str, Any],
     attacked_image_manifest: dict[str, Any] | None = None,
     threshold: float | None = None,
+    target_fpr: float = 0.1,
     attack_family: str = "clean",
     attack_condition: str = "clean_none",
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """把 T2SMark results.json 映射为 baseline observations。"""
 
     results_by_index = _result_items(t2smark_results)
-    selected_indices = range(len(image_pairs))
     if threshold is None:
-        threshold_value, threshold_source = _auto_threshold(results_by_index, selected_indices)
+        threshold_value, threshold_source = _auto_threshold(results_by_index, image_pairs, target_fpr)
     else:
         threshold_value, threshold_source = float(threshold), "cli_threshold"
 
@@ -232,10 +284,17 @@ def build_t2smark_observations(
             continue
         robustness = _robustness(result, result_index=index)
         image_id = _image_id(row, index + 1)
+        clean_path = str(row.get("clean_image_path") or "")
+        watermarked_path = str(
+            row.get("watermarked_image_path") or row.get("generated_image_path") or ""
+        )
+        pair_quality = _measured_pair_quality(clean_path, watermarked_path)
+        clean_score = _finite_score(robustness.get("norm1_no_w"), field_name="norm1_no_w")
+        watermarked_score = _finite_score(robustness.get("norm1_w"), field_name="norm1_w")
         observations.append(
             _observation(
                 event_id=f"{image_id}__clean_negative",
-                score=_finite_score(robustness.get("norm1_no_w"), field_name="norm1_no_w"),
+                score=clean_score,
                 threshold=threshold_value,
                 row=row,
                 sample_role="clean_negative",
@@ -244,14 +303,16 @@ def build_t2smark_observations(
                 result_index=index,
                 threshold_source=threshold_source,
                 robustness=robustness,
-                image_path=str(row.get("generated_image_path") or ""),
-                image_digest=str(row.get("generated_image_digest") or ""),
+                image_path=clean_path,
+                image_digest=str(row.get("clean_image_digest") or ""),
+                quality_score=1.0,
+                score_retention=1.0,
             )
         )
         observations.append(
             _observation(
                 event_id=f"{image_id}__positive_source",
-                score=_finite_score(robustness.get("norm1_w"), field_name="norm1_w"),
+                score=watermarked_score,
                 threshold=threshold_value,
                 row=row,
                 sample_role="positive_source",
@@ -260,8 +321,12 @@ def build_t2smark_observations(
                 result_index=index,
                 threshold_source=threshold_source,
                 robustness=robustness,
-                image_path=str(row.get("generated_image_path") or ""),
-                image_digest=str(row.get("generated_image_digest") or ""),
+                image_path=watermarked_path,
+                image_digest=str(
+                    row.get("watermarked_image_digest") or row.get("generated_image_digest") or ""
+                ),
+                quality_score=pair_quality,
+                score_retention=1.0,
             )
         )
         formal_attacks = result.get("formal_attacks")
@@ -274,10 +339,23 @@ def build_t2smark_observations(
                 attack_condition = str(attack_payload.get("attack_condition") or attack_name)
                 attacked_image_path = str(attack_payload.get("attacked_image_path") or "")
                 attacked_image_digest = str(attack_payload.get("attacked_image_digest") or "")
+                attacked_quality_from_clean = _measured_pair_quality(clean_path, attacked_image_path)
+                attacked_quality_from_watermarked = _measured_pair_quality(
+                    watermarked_path,
+                    attacked_image_path,
+                )
+                attacked_negative_score = _finite_score(
+                    attack_payload.get("norm1_no_w"),
+                    field_name="formal_attacks.norm1_no_w",
+                )
+                attacked_positive_score = _finite_score(
+                    attack_payload.get("norm1_w"),
+                    field_name="formal_attacks.norm1_w",
+                )
                 observations.append(
                     _observation(
                         event_id=f"{image_id}__attacked_negative__{attack_name}",
-                        score=_finite_score(attack_payload.get("norm1_no_w"), field_name="formal_attacks.norm1_no_w"),
+                        score=attacked_negative_score,
                         threshold=threshold_value,
                         row=row,
                         sample_role="attacked_negative",
@@ -288,12 +366,14 @@ def build_t2smark_observations(
                         robustness=attack_payload,
                         image_path=attacked_image_path,
                         image_digest=attacked_image_digest,
+                        quality_score=attacked_quality_from_clean,
+                        score_retention=measured_score_retention(clean_score, attacked_negative_score),
                     )
                 )
                 observations.append(
                     _observation(
                         event_id=f"{image_id}__attacked_positive__{attack_name}",
-                        score=_finite_score(attack_payload.get("norm1_w"), field_name="formal_attacks.norm1_w"),
+                        score=attacked_positive_score,
                         threshold=threshold_value,
                         row=row,
                         sample_role="attacked_positive",
@@ -304,6 +384,11 @@ def build_t2smark_observations(
                         robustness=attack_payload,
                         image_path=attacked_image_path,
                         image_digest=attacked_image_digest,
+                        quality_score=attacked_quality_from_watermarked,
+                        score_retention=measured_score_retention(
+                            watermarked_score,
+                            attacked_positive_score,
+                        ),
                     )
                 )
 
@@ -333,10 +418,21 @@ def build_t2smark_observations(
             row = image_pairs[result_index]
             is_watermarked = _bool_from_any(record.get("is_watermarked"), default=True)
             score_field = "norm1_w" if is_watermarked else "norm1_no_w"
+            attacked_path = str(record.get("attacked_image_path") or "")
+            source_path = str(
+                row.get("watermarked_image_path") or row.get("generated_image_path") or ""
+                if is_watermarked
+                else row.get("clean_image_path") or ""
+            )
+            source_score = _finite_score(robustness.get(score_field), field_name=score_field)
+            attacked_score = _finite_score(
+                record.get("detection_score"),
+                field_name="detection_score",
+            )
             observations.append(
                 _observation(
                     event_id=str(record.get("attacked_image_id") or f"attacked_{attack_index:04d}"),
-                    score=_finite_score(robustness.get(score_field), field_name=score_field),
+                    score=attacked_score,
                     threshold=threshold_value,
                     row=row,
                     sample_role="attacked_positive" if is_watermarked else "attacked_negative",
@@ -345,6 +441,10 @@ def build_t2smark_observations(
                     result_index=result_index,
                     threshold_source=threshold_source,
                     robustness=robustness,
+                    image_path=attacked_path,
+                    image_digest=str(record.get("attacked_image_digest") or ""),
+                    quality_score=_measured_pair_quality(source_path, attacked_path),
+                    score_retention=measured_score_retention(source_score, attacked_score),
                 )
             )
 
@@ -390,9 +490,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--artifact-root", default=None, help="adapter 诊断产物目录。")
     parser.add_argument("--attacked-image-manifest", default=None, help="可选 attacked_image_manifest.json。")
     parser.add_argument("--threshold", type=float, default=None, help="显式检测阈值。")
+    parser.add_argument("--target-fpr", type=float, required=True, help="calibration clean negative 的目标 FPR。")
     parser.add_argument("--attack-family", default="clean", help="无 attack manifest 时使用的攻击族标签。")
     parser.add_argument("--attack-condition", default="clean_none", help="无 attack manifest 时使用的攻击条件标签。")
-    parser.add_argument("--contract-only", action="store_true", help="只写出 adapter 契约诊断, 不声明正式结果。")
     parser.add_argument("--require-cuda", action="store_true", help="运行前要求 CUDA 可用。")
     parser.add_argument("--model-id", default="stabilityai/stable-diffusion-3.5-medium")
     parser.add_argument("--torch-dtype", default="float16")
@@ -410,19 +510,7 @@ def main() -> None:
     """CLI 入口。"""
 
     args = build_parser().parse_args()
-    require_cuda_if_requested(bool(args.require_cuda))
-    if args.contract_only:
-        write_json(args.out, [])
-        manifest = write_contract_manifest(
-            baseline_id=BASELINE_ID,
-            args=args,
-            adapter_status="sd35_native_result_adapter_ready",
-            model_alignment_status="sd35_medium_native_entrypoint",
-            observation_count=0,
-            unsupported_reason="contract_only_no_t2smark_results",
-        )
-        print(json.dumps(manifest, ensure_ascii=False, indent=2))
-        return
+    _require_cuda_if_requested(bool(args.require_cuda))
     if not args.image_pairs or not args.t2smark_results:
         raise SystemExit("T2SMark adapter 运行必须提供 --image-pairs 与 --t2smark-results。")
     image_pairs = _as_rows(_load_json(args.image_pairs))
@@ -433,17 +521,18 @@ def main() -> None:
         t2smark_results=t2smark_results,
         attacked_image_manifest=attacked_manifest,
         threshold=args.threshold,
+        target_fpr=args.target_fpr,
         attack_family=args.attack_family,
         attack_condition=args.attack_condition,
     )
-    output_path = write_json(args.out, observations)
+    output_path = _write_json(args.out, observations)
     manifest["baseline_observations_path"] = str(output_path)
     manifest["image_pairs_path"] = str(Path(args.image_pairs))
     manifest["t2smark_results_path"] = str(Path(args.t2smark_results))
     manifest_path = output_path.with_name("t2smark_slm_adapter_manifest.json")
-    write_json(manifest_path, manifest)
+    _write_json(manifest_path, manifest)
     if args.artifact_root:
-        write_json(Path(args.artifact_root) / "t2smark_slm_adapter_manifest.json", manifest)
+        _write_json(Path(args.artifact_root) / "t2smark_slm_adapter_manifest.json", manifest)
     print(json.dumps(manifest, ensure_ascii=False, indent=2))
 
 

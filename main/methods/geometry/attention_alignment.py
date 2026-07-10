@@ -19,16 +19,23 @@ def _torch() -> Any:
     return torch
 
 
-def _grid_coordinates(token_count: int, device: Any) -> Any:
-    """把 token 索引转换成归一化二维网格坐标。"""
+def _grid_coordinates(token_indices: tuple[int, ...], device: Any) -> Any:
+    """把原始图像 token 索引转换成归一化二维网格坐标。"""
 
     torch = _torch()
-    side = int(round(math.sqrt(token_count)))
-    if side * side != token_count:
-        raise ValueError("几何恢复要求抽样 token 数量构成方形网格")
-    axis = torch.linspace(-1.0, 1.0, side, device=device)
-    yy, xx = torch.meshgrid(axis, axis, indexing="ij")
-    return torch.stack((xx.reshape(-1), yy.reshape(-1)), dim=1)
+    if len(token_indices) < 4 or len(set(token_indices)) != len(token_indices):
+        raise ValueError("几何恢复要求至少 4 个不重复的原始 token 索引")
+    source_token_count = max(token_indices) + 1
+    source_side = int(round(math.sqrt(source_token_count)))
+    if source_side * source_side != source_token_count:
+        raise ValueError("原始 token 索引无法还原为方形图像网格")
+    coordinates = []
+    for token_index in token_indices:
+        row, column = divmod(token_index, source_side)
+        x = -1.0 + 2.0 * column / (source_side - 1)
+        y = -1.0 + 2.0 * row / (source_side - 1)
+        coordinates.append((x, y))
+    return torch.tensor(coordinates, device=device, dtype=torch.float32)
 
 
 def _fit_affine(source: Any, target: Any) -> Any:
@@ -109,6 +116,7 @@ def recover_attention_affine_alignment(
     attention: Any,
     key_material: str,
     layer_name: str,
+    token_indices: tuple[int, ...],
     anchor_count: int = 12,
     residual_threshold: float = 0.20,
     minimum_inlier_ratio: float = 0.50,
@@ -120,7 +128,9 @@ def recover_attention_affine_alignment(
     if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
         raise ValueError("attention 必须是方形矩阵或带 batch 维的方形矩阵")
     token_count = int(matrix.shape[0])
-    coordinates = _grid_coordinates(token_count, matrix.device)
+    if len(token_indices) != token_count:
+        raise ValueError("token_indices 数量必须与 attention 宽度一致")
+    coordinates = _grid_coordinates(token_indices, matrix.device)
     expected_indices = _anchor_indices(token_count, anchor_count)
     relation_signs = keyed_relation_signs(matrix, key_material, layer_name)
     reference_rows = relation_signs[list(expected_indices)]
@@ -162,6 +172,7 @@ def recover_attention_affine_alignment(
     )
     payload = {
         "layer_name": layer_name,
+        "token_indices": token_indices,
         "expected_anchor_indices": expected_indices,
         "observed_anchor_indices": observed_indices,
         "inlier_mask": [bool(value) for value in best_inliers.detach().cpu().tolist()],
@@ -183,5 +194,6 @@ def recover_attention_affine_alignment(
             "matcher": "keyed_relation_row_cosine_assignment",
             "transform_family": "affine",
             "robust_estimator": "deterministic_three_point_ransac",
+            "coordinate_source": "original_image_token_grid",
         },
     )

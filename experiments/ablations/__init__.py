@@ -1,29 +1,15 @@
-"""内部消融证据构建工具。"""
+"""真实机制重运行消融。"""
 
-from experiments.ablations.mechanisms import (
-    AblationSpec,
-    CORE_ABLATION_CLAIM_IDS,
-    FORMAL_ABLATION_METRIC_STATUS,
-    aggregate_ablation_by_attack_family,
-    aggregate_mechanism_ablation_table,
-    build_ablation_claim_input_report,
-    build_ablation_claim_summary,
-    build_ablation_records,
-    build_pairwise_delta_rows,
-    default_ablation_specs,
-    filter_ablation_claim_input_records,
+from experiments.ablations.runtime_rerun import (
+    RuntimeRerunAblationSpec,
+    default_runtime_rerun_ablation_specs,
+    package_runtime_rerun_ablations,
+    run_runtime_rerun_ablations,
 )
 
 __all__ = [
-    "AblationSpec",
-    "CORE_ABLATION_CLAIM_IDS",
-    "FORMAL_ABLATION_METRIC_STATUS",
-    "aggregate_ablation_by_attack_family",
-    "aggregate_mechanism_ablation_table",
-    "build_ablation_claim_input_report",
-    "build_ablation_claim_summary",
-    "build_ablation_records",
-    "build_pairwise_delta_rows",
-    "default_ablation_specs",
-    "filter_ablation_claim_input_records",
+    "RuntimeRerunAblationSpec",
+    "default_runtime_rerun_ablation_specs",
+    "package_runtime_rerun_ablations",
+    "run_runtime_rerun_ablations",
 ]

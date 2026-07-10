@@ -2,7 +2,7 @@
 
 该模块位于 external baseline 适配层。它保留 Gaussian Shading 的核心机制:
 使用二值 message 控制 latent noise 的正负截断 Gaussian 采样, 生成图像后通过
-图像编码和近似反演恢复 noise sign, 再经 key 解码与 block voting 得到检测分数。
+图像编码和流匹配反向 Euler 积分恢复 noise sign, 再经 key 解码与 block voting 得到检测分数。
 
 项目特定写法:
 - SD3.5 Medium 使用 16-channel latent, 因此 message 与 watermark 的重复映射从
@@ -29,6 +29,8 @@ from external_baseline.primary.sd35_method_faithful_common import (
     file_digest,
     load_prompt_rows,
     load_sd3_pipeline,
+    measured_image_ssim,
+    measured_score_retention,
     observation_digest,
     prompt_text,
     row_id,
@@ -143,6 +145,8 @@ def build_observation(
     latent_shape: tuple[int, int, int, int],
     execution_device: str,
     model_id: str,
+    quality_score: float,
+    score_retention: float,
 ) -> dict[str, Any]:
     """构造统一 baseline observation。"""
 
@@ -176,8 +180,8 @@ def build_observation(
             "generation_model_id": model_id,
             "latent_shape": list(latent_shape),
             "execution_device": execution_device,
-            "quality_score": 1.0,
-            "score_retention": 1.0,
+            "quality_score": float(quality_score),
+            "score_retention": float(score_retention),
         }
     )
 
@@ -295,8 +299,15 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
             watermark=watermark,
             num_inversion_steps=int(args.num_inversion_steps),
         )
+        pair_quality = measured_image_ssim(clean_image, watermarked_image)
 
-        runtime_keys[image_id] = {"watermark": watermark, "row": row, "row_index": index}
+        runtime_keys[image_id] = {
+            "watermark": watermark,
+            "row": row,
+            "row_index": index,
+            "clean_score": clean_score,
+            "watermarked_score": watermarked_score,
+        }
         image_pairs.append(
             {
                 "event_id": image_id,
@@ -330,6 +341,8 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                 latent_shape=latent_shape,
                 execution_device=device,
                 model_id=args.model_id,
+                quality_score=1.0,
+                score_retention=1.0,
             )
         )
         observations_without_threshold.append(
@@ -349,6 +362,8 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                 latent_shape=latent_shape,
                 execution_device=device,
                 model_id=args.model_id,
+                quality_score=pair_quality,
+                score_retention=1.0,
             )
         )
         if device == "cuda":
@@ -362,7 +377,7 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
             profile=f"operation=source_pair_generation prompt={index}/{len(prompt_rows)} image_id={image_id}",
         )
 
-    threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold)
+    threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold, args.target_fpr)
     observations: list[dict[str, Any]] = []
     for row in observations_without_threshold:
         updated = dict(row)
@@ -394,7 +409,16 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                         size=int(args.height),
                         device=device,
                         num_inference_steps=int(args.num_inference_steps),
+                        detection_score=lambda candidate: score_image(
+                            pipe,
+                            candidate,
+                            size=int(args.height),
+                            device=device,
+                            watermark=runtime["watermark"],
+                            num_inversion_steps=int(args.num_inversion_steps),
+                        ),
                     )
+                    attack_quality = measured_image_ssim(source_image, attacked_image)
                 attacked_stem = safe_file_stem(f"{image_id}_{role_name}_{attack_matrix_name}", f"attacked_{pair_index:05d}")
                 attacked_path = attacked_dir / f"{attacked_stem}.png"
                 attacked_image.save(attacked_path)
@@ -425,6 +449,11 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                         latent_shape=latent_shape,
                         execution_device=device,
                         model_id=args.model_id,
+                        quality_score=attack_quality,
+                        score_retention=measured_score_retention(
+                            float(runtime[f"{role_name}_score"]),
+                            score,
+                        ),
                     )
                 )
                 attacked_records.append(
@@ -523,6 +552,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--channel-copy", type=int, default=1)
     parser.add_argument("--hw-copy", type=int, default=8)
     parser.add_argument("--threshold", type=float, default=None)
+    parser.add_argument("--target-fpr", type=float, required=True)
     parser.add_argument("--attack-families", default="")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--force-cpu", action="store_true")

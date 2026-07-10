@@ -11,7 +11,7 @@ Tree-Ring 的主表公平对比采用 `method_faithful_sd35` adapter:
 
 1. 在 SD3.5 Medium 初始 latent 的傅里叶域写入 ring key。
 2. 使用同一 prompt 和同一 SD3.5 Medium pipeline 生成 clean / watermarked 图像。
-3. 将图像重新编码到 latent, 并通过 SD3 scheduler 近似反演回初始噪声空间。
+3. 将图像重新编码到 latent, 并通过 SD3 scheduler 流匹配反向 Euler 积分回初始噪声空间。
 4. 使用 key 区域距离构造 `negative_tree_ring_fft_key_distance` 分数。
 5. 产出统一 `baseline_observations.json`、图像文件、图像 digest、manifest 和可导入候选记录。
 

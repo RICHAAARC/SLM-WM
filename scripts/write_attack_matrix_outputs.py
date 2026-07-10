@@ -27,7 +27,7 @@ from experiments.protocol.attacks import (
     strength_curve,
 )
 from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "attack_matrix"

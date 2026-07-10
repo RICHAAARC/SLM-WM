@@ -1,21 +1,5 @@
-"""核心记录、manifest、schema、digest 与方法 typed object 能力。"""
+"""核心方法使用的稳定摘要工具。"""
 
-from main.core.method_objects import (
-    CORE_METHOD_OBJECT_NAMES,
-    AttentionAnchorSpec,
-    DetectionEvidenceSpec,
-    FusionDecisionSpec,
-    LatentSubspaceSpec,
-    SemanticConditionSpec,
-    WatermarkCarrierSpec,
-)
+from main.core.digest import build_stable_digest
 
-__all__ = [
-    "CORE_METHOD_OBJECT_NAMES",
-    "AttentionAnchorSpec",
-    "DetectionEvidenceSpec",
-    "FusionDecisionSpec",
-    "LatentSubspaceSpec",
-    "SemanticConditionSpec",
-    "WatermarkCarrierSpec",
-]
+__all__ = ["build_stable_digest"]

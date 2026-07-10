@@ -45,7 +45,7 @@
 
 ## 关键协议边界
 
-1. `probe_paper`、`pilot_paper` 与 `full_paper` 必须共享同一批 repository modules、Notebook 入口、服务器 runner、攻击矩阵、baseline 入口、bootstrap 设置、随机种子和结果闭合逻辑。三者只允许 prompt 数量与目标 FPR 不同。
+1. `probe_paper`、`pilot_paper` 与 `full_paper` 必须共享同一批 repository modules、Notebook 入口、服务器 runner、攻击矩阵、baseline 入口、Hoeffding 置信区间、随机种子和结果闭合逻辑。三者只允许 prompt 数量与目标 FPR 不同。
 2. `probe_paper`、`pilot_paper` 与 `full_paper` 都是正式流程结果包, 任何 proxy、placeholder、fallback、synthetic 或 formal-null 记录都不得进入其共同协议结果记录、正式对比表或 claim-ready 统计。
 3. `diagnostic / smoke` 只用于预检, 不得进入 fixed-FPR 正式统计表、baseline comparison 表或论文 claim audit。
 4. fixed-FPR 阈值校准只使用 clean negative 边界; rescue 结果必须单独标记, 不得把 rescue 侧通过率混入 clean-side fixed-FPR 阈值估计。

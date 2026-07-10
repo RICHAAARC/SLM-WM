@@ -23,10 +23,18 @@ def test_complete_result_package_collects_required_pilot_outputs(tmp_path: Path)
     for index, relative_dir in enumerate(REQUIRED_OUTPUT_DIRS):
         output_dir = tmp_path / relative_dir
         output_dir.mkdir(parents=True)
-        (output_dir / f"sample_{index}.json").write_text(
+        (output_dir / f"sample_manifest_{index}.json").write_text(
             json.dumps({"paper_claim_scale": "pilot_paper", "index": index}, ensure_ascii=False),
             encoding="utf-8",
         )
+    common_summary = (
+        tmp_path
+        / "outputs/pilot_paper_fixed_fpr_common_protocol/pilot_paper_common_protocol_summary.json"
+    )
+    common_summary.write_text(
+        json.dumps({"paper_run_claim_ready": True, "pilot_claim_ready": True}),
+        encoding="utf-8",
+    )
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
     (config_dir / "paper_main_probe_paper_prompts.txt").write_text("a probe paper prompt\n", encoding="utf-8")
@@ -57,10 +65,10 @@ def test_complete_result_package_collects_required_pilot_outputs(tmp_path: Path)
     protocol_index = REQUIRED_OUTPUT_DIRS.index("outputs/pilot_paper_fixed_fpr_common_protocol")
     comparison_index = REQUIRED_OUTPUT_DIRS.index("outputs/external_baseline_comparison")
     analysis_index = REQUIRED_OUTPUT_DIRS.index("outputs/pilot_paper_result_analysis")
-    assert f"outputs/pilot_paper_fixed_fpr_results/sample_{result_index}.json" in names
-    assert f"outputs/pilot_paper_fixed_fpr_common_protocol/sample_{protocol_index}.json" in names
-    assert f"outputs/external_baseline_comparison/sample_{comparison_index}.json" in names
-    assert f"outputs/pilot_paper_result_analysis/sample_{analysis_index}.json" in names
+    assert f"outputs/pilot_paper_fixed_fpr_results/sample_manifest_{result_index}.json" in names
+    assert f"outputs/pilot_paper_fixed_fpr_common_protocol/sample_manifest_{protocol_index}.json" in names
+    assert f"outputs/external_baseline_comparison/sample_manifest_{comparison_index}.json" in names
+    assert f"outputs/pilot_paper_result_analysis/sample_manifest_{analysis_index}.json" in names
     assert "configs/paper_main_probe_paper_prompts.txt" in names
     assert "configs/paper_main_pilot_paper_prompts.txt" in names
     assert "configs/paper_main_full_paper_prompts.txt" in names

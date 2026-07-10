@@ -860,8 +860,8 @@ def build_t2smark_full_main_candidate_records(
             "false_positive_rate": false_positive / negative_count if negative_count else 0.0,
             "clean_false_positive_rate": clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0,
             "attacked_false_positive_rate": attacked_false_positive / len(attacked_negative_rows) if attacked_negative_rows else 0.0,
-            "quality_score_mean": 1.0,
-            "score_retention_mean": 1.0,
+            "quality_score_mean": _mean_measured_rate(group, "quality_score"),
+            "score_retention_mean": _mean_measured_rate(group, "score_retention"),
         }
         ready_flags = {
             "method_faithful_adapter_ready": True,
@@ -898,15 +898,12 @@ def _decision_field(row: Mapping[str, Any]) -> bool:
     return _bool_field(row, "final_decision")
 
 
-def _mean_optional_rate(rows: Iterable[Mapping[str, Any]], field_name: str, default: float) -> float:
-    """读取可选 rate 字段并求均值, 缺失时使用默认值。"""
+def _mean_measured_rate(rows: Iterable[Mapping[str, Any]], field_name: str) -> float:
+    """读取每条 observation 的实测 rate 字段并求均值。"""
 
-    values: list[float] = []
-    for row in rows:
-        if field_name in row:
-            values.append(_float_field(row, field_name))
+    values = [_float_field(row, field_name) for row in rows]
     if not values:
-        return float(default)
+        raise ValueError(f"{field_name} 要求至少一条实测 observation")
     return sum(values) / len(values)
 
 
@@ -956,8 +953,8 @@ def build_method_faithful_baseline_candidate_records(
             "false_positive_rate": false_positive / negative_count if negative_count else 0.0,
             "clean_false_positive_rate": clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0,
             "attacked_false_positive_rate": attacked_false_positive / len(attacked_negative_rows) if attacked_negative_rows else 0.0,
-            "quality_score_mean": _mean_optional_rate(group, "quality_score", 1.0),
-            "score_retention_mean": _mean_optional_rate(group, "score_retention", 1.0),
+            "quality_score_mean": _mean_measured_rate(group, "quality_score"),
+            "score_retention_mean": _mean_measured_rate(group, "score_retention"),
         }
         ready_flags = {
             "method_faithful_adapter_ready": True,

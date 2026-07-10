@@ -20,7 +20,7 @@ from paper_experiments.baselines.primary_evidence import (
     build_primary_baseline_evidence_summary,
     load_optional_json,
 )
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 DEFAULT_OUTPUT_DIR = Path("outputs/primary_baseline_evidence")

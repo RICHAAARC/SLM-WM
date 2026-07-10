@@ -16,7 +16,8 @@ from main.methods.geometry.attention_alignment import AttentionAlignmentResult, 
 from main.methods.geometry.differentiable_attention import attention_geometry_score
 
 ImageLatentEncoder = Callable[[Any], Any]
-ImageAttentionExtractor = Callable[[Any], tuple[str, Any]]
+AttentionRecord = tuple[str, Any, tuple[int, ...]]
+ImageAttentionExtractor = Callable[[Any], tuple[AttentionRecord, ...]]
 ImageAligner = Callable[[Any, AttentionAlignmentResult], Any]
 
 
@@ -124,16 +125,26 @@ def detect_image_only_watermark(
     alignment: AttentionAlignmentResult | None = None
     geometry_reliable = False
     if image_attention_extractor is not None:
-        layer_name, attention = image_attention_extractor(image)
-        score_tensor = attention_geometry_score(((layer_name, attention, tuple(range(attention.shape[-1]))),), key_material)
+        attention_records = image_attention_extractor(image)
+        if not attention_records:
+            raise RuntimeError("图像盲检没有返回真实 Q/K attention")
+        score_tensor = attention_geometry_score(attention_records, key_material)
         geometry_score = float(score_tensor.detach().item())
-        alignment = recover_attention_affine_alignment(
-            attention,
-            key_material,
-            layer_name,
-            anchor_count=config.attention_anchor_count,
-            residual_threshold=config.attention_residual_threshold,
-            minimum_inlier_ratio=config.attention_minimum_inlier_ratio,
+        alignment_candidates = tuple(
+            recover_attention_affine_alignment(
+                attention,
+                key_material,
+                layer_name,
+                token_indices,
+                anchor_count=config.attention_anchor_count,
+                residual_threshold=config.attention_residual_threshold,
+                minimum_inlier_ratio=config.attention_minimum_inlier_ratio,
+            )
+            for layer_name, attention, token_indices in attention_records
+        )
+        alignment = max(
+            alignment_candidates,
+            key=lambda candidate: candidate.registration_confidence,
         )
         geometry_reliable = (
             alignment.geometry_reliable and geometry_score >= config.geometry_score_threshold

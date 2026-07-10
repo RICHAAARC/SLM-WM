@@ -20,7 +20,7 @@ from paper_experiments.baselines.small_sample_evidence import (
     build_primary_baseline_small_sample_evidence_records,
     build_primary_baseline_small_sample_evidence_summary,
 )
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 DEFAULT_OUTPUT_DIR = Path("outputs/primary_baseline_small_sample_evidence")

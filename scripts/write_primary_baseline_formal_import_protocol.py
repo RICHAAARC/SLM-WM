@@ -29,7 +29,7 @@ from paper_experiments.baselines import (
     validate_primary_baseline_formal_import_rows,
 )
 from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 DEFAULT_OUTPUT_DIR = Path("outputs/primary_baseline_formal_import")

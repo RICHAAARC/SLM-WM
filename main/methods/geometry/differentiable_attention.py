@@ -44,7 +44,13 @@ def _first_tensor(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any | None:
 
 
 def qk_self_attention(module: Any, hidden_states: Any, max_tokens: int = 256) -> tuple[Any, tuple[int, ...]]:
-    """使用模块真实 Q/K 投影计算有界自注意力矩阵。"""
+    """在真实二维图像 token 网格上抽样并计算 Q/K 自注意力矩阵。
+
+    抽样沿原始网格的两个空间轴分别等距进行, 不把一维序号等距抽样误解释为
+    二维网格。返回的 `token_indices` 始终指向原始图像 token 网格, 供检测端恢复
+    真实空间坐标。该结构可以复用于任何公开 `to_q`、`to_k` 和 `heads` 的
+    Transformer 注意力模块。
+    """
 
     torch = _torch()
     if not hasattr(module, "to_q") or not hasattr(module, "to_k"):
@@ -52,26 +58,90 @@ def qk_self_attention(module: Any, hidden_states: Any, max_tokens: int = 256) ->
     if hidden_states.ndim != 3:
         raise ValueError("hidden_states 必须具有 [batch, token, channel] 形状")
     token_count = int(hidden_states.shape[1])
-    bounded_count = max(2, min(max_tokens, token_count))
-    if bounded_count == token_count:
-        token_indices = tuple(range(token_count))
-    else:
-        token_indices = tuple(
-            round(index * (token_count - 1) / (bounded_count - 1)) for index in range(bounded_count)
-        )
+    source_side = int(round(math.sqrt(token_count)))
+    if source_side * source_side != token_count:
+        raise ValueError("真实注意力几何要求图像 token 构成方形二维网格")
+    if max_tokens < 4:
+        raise ValueError("max_tokens 至少为 4, 以保留二维几何结构")
+    sampled_side = min(source_side, int(math.sqrt(max_tokens)))
+    axis_indices = tuple(
+        round(index * (source_side - 1) / (sampled_side - 1))
+        for index in range(sampled_side)
+    )
+    token_indices = tuple(
+        row * source_side + column
+        for row in axis_indices
+        for column in axis_indices
+    )
+    bounded_count = len(token_indices)
     index_tensor = torch.tensor(token_indices, device=hidden_states.device)
-    selected = hidden_states.index_select(1, index_tensor)
-    query = module.to_q(selected)
-    key = module.to_k(selected)
+    query = module.to_q(hidden_states)
+    key = module.to_k(hidden_states)
     heads = int(getattr(module, "heads", 1))
     if query.shape[-1] % heads != 0:
         raise ValueError("Q 投影宽度必须能被注意力头数整除")
     head_width = int(query.shape[-1] // heads)
-    query = query.reshape(query.shape[0], bounded_count, heads, head_width).transpose(1, 2)
-    key = key.reshape(key.shape[0], bounded_count, heads, head_width).transpose(1, 2)
+    query = query.reshape(query.shape[0], token_count, heads, head_width).transpose(1, 2)
+    key = key.reshape(key.shape[0], token_count, heads, head_width).transpose(1, 2)
+    norm_q = getattr(module, "norm_q", None)
+    norm_k = getattr(module, "norm_k", None)
+    if norm_q is not None:
+        query = norm_q(query)
+    if norm_k is not None:
+        key = norm_k(key)
+    query = query.index_select(2, index_tensor)
+    key = key.index_select(2, index_tensor)
     logits = query.float() @ key.float().transpose(-1, -2) / math.sqrt(head_width)
     attention = torch.softmax(logits, dim=-1).mean(dim=1)
     return attention, token_indices
+
+
+def attention_relation_stability_map(
+    records: Iterable[tuple[str, Any, tuple[int, ...]]],
+    spatial_size: tuple[int, int],
+) -> Any:
+    """由多个真实 Q/K 层的一致性构造注意力关系稳定图。
+
+    每个空间位置的稳定度定义为不同层中对应注意力关系行的平均余弦相似度。
+    该值来自模型实际 Q/K 关系, 不是语义图、纹理图或隐藏状态相似度的替代量。
+    """
+
+    import torch.nn.functional as functional
+
+    torch = _torch()
+    resolved_records = tuple(records)
+    if len(resolved_records) < 2:
+        raise ValueError("注意力关系稳定图至少需要两个真实 Q/K 层")
+    reference_indices = resolved_records[0][2]
+    if any(token_indices != reference_indices for _, _, token_indices in resolved_records[1:]):
+        raise ValueError("用于稳定度计算的 Q/K 层必须共享同一二维 token 抽样网格")
+    sampled_side = int(round(math.sqrt(len(reference_indices))))
+    if sampled_side * sampled_side != len(reference_indices):
+        raise ValueError("注意力稳定度要求抽样 token 构成方形二维网格")
+    normalized_rows = []
+    for _, attention, _ in resolved_records:
+        matrix = attention.float()
+        centered = matrix - matrix.mean(dim=-1, keepdim=True)
+        normalized_rows.append(functional.normalize(centered, dim=-1, eps=1e-12))
+    pair_scores = []
+    for left_index in range(len(normalized_rows) - 1):
+        for right_index in range(left_index + 1, len(normalized_rows)):
+            pair_scores.append(
+                (normalized_rows[left_index] * normalized_rows[right_index]).sum(dim=-1)
+            )
+    stability = (torch.stack(pair_scores).mean(dim=0) + 1.0) * 0.5
+    sampled_map = stability.clamp(0.0, 1.0).reshape(
+        stability.shape[0],
+        1,
+        sampled_side,
+        sampled_side,
+    )
+    return functional.interpolate(
+        sampled_map,
+        size=spatial_size,
+        mode="bilinear",
+        align_corners=False,
+    )[:, 0]
 
 
 class DifferentiableAttentionRecorder:

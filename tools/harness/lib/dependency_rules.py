@@ -8,8 +8,6 @@ from pathlib import Path
 
 FORBIDDEN_IMPORT_PREFIXES_BY_ROOT = {
     "main/core": (
-        "main.analysis",
-        "main.cli",
         "experiments",
         "paper_experiments",
         "external_baseline",
@@ -19,37 +17,6 @@ FORBIDDEN_IMPORT_PREFIXES_BY_ROOT = {
         "paper_workflow",
     ),
     "main/methods": (
-        "main.analysis",
-        "main.cli",
-        "experiments",
-        "paper_experiments",
-        "external_baseline",
-        "scripts",
-        "tests",
-        "tools",
-        "paper_workflow",
-    ),
-    "main/protocol": (
-        "main.analysis",
-        "main.cli",
-        "experiments",
-        "paper_experiments",
-        "external_baseline",
-        "scripts",
-        "tests",
-        "tools",
-        "paper_workflow",
-    ),
-    "main/analysis": (
-        "experiments",
-        "paper_experiments",
-        "external_baseline",
-        "scripts",
-        "tests",
-        "tools",
-        "paper_workflow",
-    ),
-    "main/cli": (
         "experiments",
         "paper_experiments",
         "external_baseline",
@@ -70,6 +37,9 @@ FORBIDDEN_IMPORT_PREFIXES_BY_ROOT = {
         "scripts",
         "tests",
         "tools",
+        "paper_workflow",
+    ),
+    "scripts": (
         "paper_workflow",
     ),
 }

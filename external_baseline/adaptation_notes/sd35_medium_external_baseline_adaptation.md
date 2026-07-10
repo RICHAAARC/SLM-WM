@@ -12,24 +12,24 @@
 
 当前项目采用双轨证据:
 
-1. 主表使用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium latent 傅里叶域写入 ring key, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 近似反演得到检测分数。该路径用于 common-backbone 公平对比。
+1. 主表使用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium latent 傅里叶域写入 ring key, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 流匹配反向 Euler 积分得到检测分数。该路径用于 common-backbone 公平对比。
 2. 补充表保留官方原始环境复现。该路径运行 `source/run_tree_ring_watermark.py` 的 legacy Stable Diffusion / DDIM inversion 协议, 通过 governed import 记录官方源码 commit、依赖环境、运行命令和指标摘要。该路径用于审计方法忠实度, 不替代主表 SD3.5 对比。
 
 ### Gaussian Shading
 
 原方法依赖 latent noise message、truncated Gaussian sampling 和 bit voting。SD3.5 Medium 的 latent channel 与 pipeline 组件不同, 因此需要重新定义 message 到 16-channel latent 的映射和可审计阈值边界。
 
-当前项目采用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium latent 中用二值 message 控制正负截断 Gaussian noise, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 近似反演恢复 noise sign, 最后经 key 解码与 block voting 计算 bit accuracy 分数。该路径用于 common-backbone 公平对比候选, 但仍需后续 full-main prompt、fixed-FPR 与共同攻击矩阵闭合后才能进入主表正式结果。
+当前项目采用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium latent 中用二值 message 控制正负截断 Gaussian noise, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 流匹配反向 Euler 积分恢复 noise sign, 最后经 key 解码与 block voting 计算 bit accuracy 分数。该路径用于 common-backbone 公平对比候选, 但仍需后续 full-main prompt、fixed-FPR 与共同攻击矩阵闭合后才能进入主表正式结果。
 
 补充表同时提供 `official_reference_gaussian_shading_run.ipynb`。该入口运行官方 `run_gaussian_shading.py` 的 legacy Stable Diffusion / truncated Gaussian message 协议, 并通过 governed import 记录官方源码 commit、依赖环境、运行命令、`Identity.txt` 指标和诊断日志。该路径用于审计 SD3.5 adapter 的方法忠实度, 不替代主表 SD3.5 对比。
 
-该官方参考入口的环境策略分为两层: 先创建 Python 3.8 的 `official_requirements_strict` 环境并安装官方 `requirements.txt`; 若该官方声明在 Colab 当前包索引中因旧版 `diffusers` 与较新版 `transformers` / `datasets` 组合冲突而失败, 再创建 `colab_compatible_fallback` 环境。fallback 仍固定 legacy `diffusers==0.11.1`、`torch==1.13.0+cu117`、legacy `transformers` 和 legacy `huggingface_hub`, 其作用是让官方运行链路可审计地继续尝试, 而不是把依赖调整伪装成官方原始声明。
+该官方参考入口的环境策略分为两层: 先创建 Python 3.8 的 `official_requirements_strict` 环境并安装官方 `requirements.txt`; 若该官方声明在 Colab 当前包索引中因旧版 `diffusers` 与较新版 `transformers` / `datasets` 组合冲突而失败, 再创建 `colab_compatible_替代环境` 环境。替代环境 仍固定 legacy `diffusers==0.11.1`、`torch==1.13.0+cu117`、legacy `transformers` 和 legacy `huggingface_hub`, 其作用是让官方运行链路可审计地继续尝试, 而不是把依赖调整伪装成官方原始声明。
 
 ### Shallow Diffuse
 
 原方法依赖 shallow latent subspace 和局部注入掩码。SD3.5 Medium 需要重新对齐 latent 分辨率、通道布局和再扩散攻击路径。
 
-当前项目采用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium denoising 过程中使用 callback 在浅层 latent 位置写入局部 watermark patch, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 近似反演恢复 latent, 最后以 masked patch 距离作为检测分数。若运行环境缺少中间 callback 能力, adapter 会显式记录 fallback, 不把该运行伪装为论文主表结果。
+当前项目采用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium denoising 过程中使用 callback 在浅层 latent 位置写入局部 watermark patch, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 流匹配反向 Euler 积分恢复 latent, 最后以 masked patch 距离作为检测分数。若运行环境缺少中间 callback 能力, adapter 会显式记录 替代环境, 不把该运行伪装为论文主表结果。
 
 补充表同时提供 `official_reference_shallow_diffuse_run.ipynb`。该入口运行官方 `run_shallow_diffuse_t2i.py` 的 legacy Stable Diffusion / shallow latent subspace 协议, 并通过 governed import 记录官方源码 commit、legacy 依赖环境、运行命令、`overall_scores.txt`、`clip_scores.txt` 和诊断日志。该路径用于审计 SD3.5 adapter 的方法忠实度, 不替代主表 SD3.5 对比。当前默认攻击器集合为 `none`, 目的是先关闭官方原始环境参考复现链路; 后续若需要官方攻击参考, 应在同一入口中显式扩展 `SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_ATTACKER_NAMES` 和运行预算。
 

@@ -22,6 +22,21 @@ def json_line(value: dict[str, object]) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n"
 
 
+@pytest.mark.quick
+def test_materialization_rejects_cross_run_path_overwrite(tmp_path: Path) -> None:
+    """两个结果包对同一 outputs 路径给出不同内容时必须停止闭合。"""
+
+    packages = []
+    for index, content in enumerate(("run-a", "run-b")):
+        package = tmp_path / f"package-{index}.zip"
+        with ZipFile(package, "w") as archive:
+            archive.writestr("outputs/shared/result.json", content)
+        packages.append(package)
+
+    with pytest.raises(RuntimeError, match="跨运行覆盖"):
+        materialize_output_entries(tmp_path, packages)
+
+
 def write_pilot_prompt_file(repo_root: Path, prompt_count: int = 240) -> None:
     """写入满足 pilot_paper fixed-FPR 最小 clean negative 数量的 prompt 文件。"""
 

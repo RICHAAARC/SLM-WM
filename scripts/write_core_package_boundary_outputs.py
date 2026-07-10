@@ -1,7 +1,7 @@
 """写出核心包边界的本地审计产物。
 
 该脚本属于仓库辅助命令, 不属于 `main/` 核心方法包。它只读取源码和文档,
-并把本地治理输出写入 `outputs/core_package_boundary_freeze/`。
+并把本地治理输出写入 `outputs/core_method_boundary/`。
 """
 
 from __future__ import annotations
@@ -20,18 +20,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 
-CONSTRUCTION_UNIT_NAME = "core_package_boundary_freeze"
-DEFAULT_OUTPUT_DIR = Path("outputs/core_package_boundary_freeze")
+CONSTRUCTION_UNIT_NAME = "core_method_boundary"
+DEFAULT_OUTPUT_DIR = Path("outputs/core_method_boundary")
 REQUIRED_PACKAGE_DIRS = (
     "main/core",
     "main/methods",
-    "main/protocol",
-    "main/analysis",
-    "main/cli",
 )
 FORBIDDEN_IMPORT_PREFIXES = (
     "google.colab",

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from main.analysis.paper_evidence_audit import (
+from paper_experiments.analysis.paper_evidence_audit import (
     AuditInputBundle,
     build_builder_readiness_report,
     build_claim_audit_rows,

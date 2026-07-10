@@ -20,7 +20,7 @@ from external_baseline.primary.sd35_method_faithful_common import (
 from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
 from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
 from experiments.protocol.splits import apply_split_assignments
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from paper_experiments.baselines.t2smark_pair_quality import write_t2smark_strict_pair_quality_outputs
 from experiments.runtime.progress import (
     PROGRESS_EVENT_ENV_NAME,
@@ -200,7 +200,6 @@ PACKAGE_EXTRA_PATHS = (
     "external_baseline/README.md",
     "external_baseline/source_registry.json",
     "external_baseline/adaptation_notes/sd35_medium_external_baseline_adaptation.md",
-    "external_baseline/primary/sd35_diffusion_baseline_common.py",
     "external_baseline/primary/sd35_method_faithful_common.py",
     "external_baseline/primary/t2smark/README.md",
     "external_baseline/primary/t2smark/adapter/run_slm_eval.py",
@@ -1795,5 +1794,3 @@ def package_external_baseline_method_faithful_outputs(
     archive_manifest.setdefault("metadata", {})["drive_archive_digest"] = record.drive_archive_digest
     write_json(manifest_path, archive_manifest)
     return record
-
-

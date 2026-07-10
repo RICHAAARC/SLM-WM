@@ -22,7 +22,6 @@ from experiments.runners.image_only_dataset_runtime import (
     run_image_only_dataset_runtime,
 )
 from experiments.runners.semantic_watermark_runtime import SemanticWatermarkRuntimeConfig
-from experiments.runners.real_attack_evaluation import clear_strict_ddim_inversion_runtime_cache
 
 
 def build_method_config(root: str | Path = ".") -> SemanticWatermarkRuntimeConfig:

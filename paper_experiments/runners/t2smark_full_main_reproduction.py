@@ -26,7 +26,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
 from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
 from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
 from experiments.protocol.splits import apply_split_assignments
-from main.analysis.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from paper_experiments.runners.external_baseline_method_faithful import (
     DEFAULT_T2SMARK_MODEL_ID,
@@ -80,9 +80,7 @@ class T2SMarkFullMainReproductionConfig:
     num_inversion_steps: int = 28
     guidance_scale: float = 4.0
     target_fpr: float = DEFAULT_TARGET_FPR
-    minimum_prompt_protocol_count: int = 100
-    fixed_fpr_baseline_calibration_ready: bool = False
-    attack_matrix_baseline_detection_ready: bool = False
+    minimum_prompt_protocol_count: int = DEFAULT_PROMPT_LIMIT
     reuse_existing: bool = True
     force_generate: bool = False
     save_image: bool = True
@@ -390,6 +388,8 @@ def run_t2smark_official_if_needed(
         str(paths["official_root"]),
         "--seed",
         str(config.seed),
+        "--target-fpr",
+        str(config.target_fpr),
         "--robust_test_num",
         str(prompt_report["selected_prompt_count"]),
         "--clip_test_num",
@@ -524,6 +524,33 @@ def build_candidate_records_and_validation(
     """从 T2SMark full-main observations 构造正式导入候选并运行 schema 校验。"""
 
     observations = read_json(paths["adapter_observations"]) if paths["adapter_observations"].is_file() else []
+    calibration_negatives = tuple(
+        row
+        for row in observations
+        if row.get("split") == "calibration" and row.get("sample_role") == "clean_negative"
+    )
+    thresholds = {float(row["threshold"]) for row in observations if "threshold" in row}
+    fixed_fpr_ready = (
+        bool(calibration_negatives)
+        and len(thresholds) == 1
+        and {str(row.get("threshold_source", "")) for row in observations}
+        == {"calibration_clean_negative_conformal"}
+        and sum(bool(row.get("detection_decision")) for row in calibration_negatives)
+        / len(calibration_negatives)
+        <= config.target_fpr
+    )
+    from experiments.protocol.attacks import default_attack_configs
+
+    required_attack_names = {
+        attack.attack_name
+        for attack in default_attack_configs()
+        if attack.enabled and attack.resource_profile in {"full_main", "full_extra"}
+    }
+    actual_attack_names = {
+        str(row.get("attack_name") or row.get("attack_condition"))
+        for row in observations
+        if str(row.get("sample_role", "")).startswith("attacked_")
+    }
     evidence_paths = [
         relative_or_absolute(paths["official_results"], root_path),
         relative_or_absolute(paths["image_pairs"], root_path),
@@ -539,8 +566,8 @@ def build_candidate_records_and_validation(
         evidence_paths=evidence_paths,
         prompt_protocol_digest=str(prompt_report["prompt_protocol_digest"]),
         full_main_prompt_protocol_ready=bool(prompt_report["full_main_prompt_protocol_ready"]),
-        fixed_fpr_baseline_calibration_ready=bool(config.fixed_fpr_baseline_calibration_ready),
-        attack_matrix_baseline_detection_ready=bool(config.attack_matrix_baseline_detection_ready),
+        fixed_fpr_baseline_calibration_ready=fixed_fpr_ready,
+        attack_matrix_baseline_detection_ready=actual_attack_names == required_attack_names,
     )
     paths["candidate_records"].write_text("".join(json_line(row) for row in candidate_records), encoding="utf-8")
     validation_report = validate_primary_baseline_formal_import_rows(
@@ -752,9 +779,7 @@ def build_default_config() -> T2SMarkFullMainReproductionConfig:
         num_inversion_steps=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_NUM_INVERSION_STEPS", "28")),
         guidance_scale=float(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_GUIDANCE_SCALE", "4.0")),
         target_fpr=float(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR", str(paper_run.target_fpr))),
-        minimum_prompt_protocol_count=paper_run.minimum_clean_negative_count,
-        fixed_fpr_baseline_calibration_ready=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_FIXED_FPR_READY", "0") == "1",
-        attack_matrix_baseline_detection_ready=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_ATTACK_MATRIX_READY", "0") == "1",
+        minimum_prompt_protocol_count=paper_run.prompt_count,
         reuse_existing=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_REUSE_EXISTING", "1") != "0",
         force_generate=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_FORCE_GENERATE", "0") == "1",
         save_image=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_SAVE_IMAGE", "1") != "0",

@@ -15,7 +15,7 @@
 
 三组配置只允许样本数量和 fixed-FPR 标准不同; 方法参数、攻击协议、baseline 入口、bootstrap 设置、随机种子和结果闭合逻辑必须保持一致。共同协议结果记录必须拒绝 proxy、placeholder、fallback、synthetic 和 formal-null 证据。
 
-当前统一方法参数位于 `configs/model_sd35.yaml`。其中 `jacobian_candidate_count=12`、`null_space_rank=4`、`maximum_relative_response_residual=0.75` 和 `minimum_projection_energy_retention=0.01` 共同约束语义条件低响应子空间: 前两项定义候选与保留秩, 后两项阻止高响应方向或近零盲检投影进入正式记录。
+当前统一方法参数位于 `configs/model_sd35.yaml`。其中 `jacobian_candidate_count=20`、`null_space_rank=4`、`maximum_relative_response_residual=0.0001` 和 `minimum_projection_energy_retention=0.01` 共同约束语义条件低响应子空间: 前两项定义候选与保留秩, 后两项阻止高响应方向或近零盲检投影进入正式记录。
 
 ## 方法配置语义
 

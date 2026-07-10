@@ -48,7 +48,7 @@ def _result_record(method_id: str, attack_name: str, tpr: float, ci_low: float, 
         "attacked_false_positive_rate_ci_high": 0.0,
         "positive_count": 10,
         "negative_count": 10,
-        "bootstrap_iteration_count": 1000,
+        "confidence_interval_method": "bounded_hoeffding",
         "confidence_level": 0.95,
         "supports_paper_claim": True,
     }
