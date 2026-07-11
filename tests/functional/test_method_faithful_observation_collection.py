@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 
 from paper_experiments.baselines.method_faithful_observation_collection import (
+    FORMAL_MODEL_REVISION,
     METHOD_FAITHFUL_BASELINE_IDS,
+    MethodFaithfulCollectionProtocol,
     file_sha256,
     load_method_faithful_observation_collection,
     observation_relative_path,
@@ -57,6 +59,12 @@ def test_collection_loads_exact_baselines_in_canonical_order(tmp_path: Path) -> 
     assert all(source.prompt_plan_path.is_file() for source in sources)
     assert all(source.adapter_manifest_path.is_file() for source in sources)
     assert all(source.execution_manifest_path.is_file() for source in sources)
+    assert all(source.model_revision == FORMAL_MODEL_REVISION for source in sources)
+    assert all(
+        row["generation_model_revision"] == FORMAL_MODEL_REVISION
+        for source in sources
+        for row in source.rows
+    )
 
 
 def test_collection_rejects_missing_or_unexpected_observation_file(tmp_path: Path) -> None:
@@ -220,6 +228,49 @@ def test_collection_rejects_budget_and_bound_digest_mismatch(tmp_path: Path) -> 
 
     with pytest.raises(ValueError, match="method_faithful_transfer_bound_digest_mismatch"):
         load_method_faithful_observation_collection(collection_root, protocol=protocol)
+
+
+def test_collection_rejects_model_revision_drift(tmp_path: Path) -> None:
+    """transfer、adapter 和 observation 任一层漂移模型 commit 都必须阻断。"""
+
+    collection_root = tmp_path / "collection"
+    prompts, protocol = complete_inputs(collection_root)
+    manifest_path = collection_root / Path(*transfer_manifest_relative_path("tree_ring").parts)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["model_revision"] = "a" * 40
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="method_faithful_transfer_model_revision_mismatch"):
+        load_method_faithful_observation_collection(collection_root, protocol=protocol)
+
+    complete_inputs(collection_root)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    adapter_path = collection_root / Path(manifest["adapter_manifest_path"])
+    adapter = json.loads(adapter_path.read_text(encoding="utf-8"))
+    adapter["model_revision"] = "a" * 40
+    adapter_path.write_text(json.dumps(adapter), encoding="utf-8")
+    manifest["adapter_manifest_sha256"] = file_sha256(adapter_path)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="method_faithful_adapter_manifest_model_revision_mismatch"):
+        load_method_faithful_observation_collection(collection_root, protocol=protocol)
+
+    rows = formal_observation_rows("tree_ring", prompts, protocol)
+    rows[0]["generation_model_revision"] = "a" * 40
+    write_collection_source(collection_root, "tree_ring", rows, prompts, protocol)
+
+    with pytest.raises(ValueError, match="method_faithful_observation_model_revision_mismatch"):
+        load_method_faithful_observation_collection(collection_root, protocol=protocol)
+
+    with pytest.raises(ValueError, match="method_faithful_collection_model_source_mismatch"):
+        MethodFaithfulCollectionProtocol(
+            paper_run_name="probe_paper",
+            prompt_set="probe_paper",
+            prompt_count=2,
+            prompt_protocol_digest="0" * 64,
+            target_fpr=0.1,
+            model_revision="a" * 40,
+        )
 
 
 def test_collection_rejects_noncanonical_prompt_digest(tmp_path: Path) -> None:

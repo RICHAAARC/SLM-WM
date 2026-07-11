@@ -56,5 +56,6 @@ def test_t2smark_strict_pair_quality_outputs_measure_pixel_metrics(tmp_path: Pat
     assert summary["measured_strict_pair_quality_count"] == 1
     assert summary["lpips_status_values"] == ["disabled"]
     assert summary["clip_score_status_values"] == ["disabled"]
+    assert summary["clip_model_revision"] == "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268"
     assert "strict_clean_watermarked_pair" in metrics_text
     assert "measured" in metrics_text

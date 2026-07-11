@@ -6,6 +6,7 @@ import inspect
 from dataclasses import asdict, replace
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -53,11 +54,19 @@ def test_image_only_attention_noise_seed_does_not_depend_on_generation_seed_or_p
 
     base = SemanticWatermarkRuntimeConfig()
     changed_sample = replace(base, seed=base.seed + 999, prompt="完全不同的生成条件", prompt_id="other")
+    changed_model = SimpleNamespace(
+        injection_step_indices=base.injection_step_indices,
+        carrier_model_reference=(
+            "Manojb/stable-diffusion-2-1-base@"
+            "0094d483a120f3f33dafbd187ea4aa60d10de75c"
+        ),
+        width=base.width,
+        height=base.height,
+        inference_steps=base.inference_steps,
+    )
 
     assert _public_detection_noise_seed(base) == _public_detection_noise_seed(changed_sample)
-    assert _public_detection_noise_seed(base) != _public_detection_noise_seed(
-        replace(base, model_id="different-public-model")
-    )
+    assert _public_detection_noise_seed(base) != _public_detection_noise_seed(changed_model)
 
 
 @pytest.mark.quick

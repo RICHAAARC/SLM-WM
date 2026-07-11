@@ -181,6 +181,8 @@ $$
 
 $F_{\mathrm{sem}}$ 由 VAE 可微解码与冻结 CLIP 图像编码器组成；$F_{\mathrm{vis}}$ 包含亮度、对比度、边缘和多尺度结构特征。模型参数冻结, 但从输出到 $z_t$ 的输入梯度保持可用。
 
+在正式算法中, $F_{\mathrm{sem}}$ 不只由 CLIP 架构名称定义, 还由 `openai/clip-vit-base-patch32@3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268` 的精确权重函数定义。同理, 潜空间变量、VAE 解码器和扩散 Transformer 来自 `stabilityai/stable-diffusion-3.5-medium@b940f670f0eda2d07fbb75229e779da1ad11eb80`。仓库分支漂移会改变 Jacobian 与 Null Space, 因此精确 revision 属于科学算子定义, 而不是可选的工程元数据。
+
 ### （三）安全基底求解
 
 构造响应矩阵：

@@ -10,7 +10,7 @@ python scripts/extract_minimal_paper_package.py --profile <profile_name> --outpu
 
 用途: 提交最小论文方法代码。
 
-包含 `main/`、`configs/model_sd35.yaml`、`README.md` 与 `pyproject.toml`。
+包含 `main/`、`configs/model_sd35.yaml`、`configs/model_source_registry.json`、`README.md` 与 `pyproject.toml`。
 
 ## `paper_artifact_rebuild_package`
 

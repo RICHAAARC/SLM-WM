@@ -21,6 +21,11 @@ from experiments.protocol.paper_run_config import (
 from experiments.runtime.repository_environment import (
     require_published_formal_execution_lock,
 )
+from experiments.runtime.model_sources import get_model_source
+from paper_experiments.runners.model_snapshot_runtime import (
+    DEFAULT_SHARED_HUGGING_FACE_SNAPSHOT_ROOT,
+    build_shared_hugging_face_snapshot_dir,
+)
 from paper_workflow.notebook_utils.notebook_runtime import mark_notebook_runtime_start
 
 FORMAL_IMAGE_ATTACK_FAMILIES = (
@@ -28,6 +33,13 @@ FORMAL_IMAGE_ATTACK_FAMILIES = (
     "composite_geometric_attacks,photometric_distortion_attack,img2img_regeneration,"
     "flow_matching_inversion_regeneration,sdedit_regeneration,diffusion_purification,"
     "global_editing_attack,local_editing_attack,visual_paraphrase_attack,adversarial_removal_attack"
+)
+_SD35_MODEL_SOURCE = get_model_source("stabilityai_stable_diffusion_3_5_medium")
+_LEGACY_DIFFUSION_MODEL_SOURCE = get_model_source("manojb_stable_diffusion_2_1_base")
+_CLIP_MODEL_SOURCE = get_model_source("openai_clip_vit_base_patch32")
+_LEGACY_DIFFUSION_SNAPSHOT_DIR = build_shared_hugging_face_snapshot_dir(
+    _LEGACY_DIFFUSION_MODEL_SOURCE.repository_id,
+    _LEGACY_DIFFUSION_MODEL_SOURCE.revision,
 )
 
 
@@ -157,7 +169,8 @@ def _configure_aligned_rescoring(paper_run: Any, sample_count_token: str, target
     _set_default_env("SLM_WM_ATTENTION_RUNTIME_STRENGTH", "0.025")
     _set_default_env("SLM_WM_ENABLE_PAIR_PERCEPTUAL_METRICS", "1")
     _set_default_env("SLM_WM_REQUIRE_PAIR_PERCEPTUAL_METRICS", "1")
-    _set_default_env("SLM_WM_CLIP_MODEL_ID", "openai/clip-vit-base-patch32")
+    _set_env("SLM_WM_CLIP_MODEL_ID", _CLIP_MODEL_SOURCE.repository_id)
+    _set_env("SLM_WM_CLIP_MODEL_REVISION", _CLIP_MODEL_SOURCE.revision)
     _set_default_env("SLM_WM_LPIPS_NETWORK", "alex")
     _set_default_env("SLM_WM_PERCEPTUAL_METRIC_DEVICE", "cpu")
     _set_default_env("SLM_WM_ENABLE_PIPELINE_PROGRESS_BAR", "0")
@@ -211,7 +224,8 @@ def _configure_external_baseline_method_faithful(
     _set_env("SLM_WM_PRIMARY_BASELINE_ID", baseline_id)
     _set_env("SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR", paper_run.drive_dir("external_baseline_method_faithful"))
     _set_env("SLM_WM_EXTERNAL_BASELINE_TARGET_FPR", target_fpr_text)
-    _set_env("SLM_WM_EXTERNAL_BASELINE_MODEL_ID", "stabilityai/stable-diffusion-3.5-medium")
+    _set_env("SLM_WM_EXTERNAL_BASELINE_MODEL_ID", _SD35_MODEL_SOURCE.repository_id)
+    _set_env("SLM_WM_EXTERNAL_BASELINE_MODEL_REVISION", _SD35_MODEL_SOURCE.revision)
     _set_env("SLM_WM_EXTERNAL_BASELINE_NUM_INFERENCE_STEPS", str(paper_run.inference_steps))
     _set_env("SLM_WM_EXTERNAL_BASELINE_NUM_INVERSION_STEPS", str(paper_run.inference_steps))
     _set_env("SLM_WM_EXTERNAL_BASELINE_GUIDANCE_SCALE", str(paper_run.guidance_scale))
@@ -231,9 +245,8 @@ def _configure_official_reference_common(paper_run: Any, prefix: str, sample_cou
     _set_env(f"SLM_WM_{prefix}_OFFICIAL_SAMPLE_COUNT", sample_count_token)
     _set_default_env(f"SLM_WM_{prefix}_OFFICIAL_RUN_COMMAND", "1")
     _set_default_env(f"SLM_WM_{prefix}_OFFICIAL_REQUIRE_CUDA", "1")
-    _set_default_env(f"SLM_WM_{prefix}_OFFICIAL_SUMMARY_IMPORT_PATH", "")
-    _set_default_env(f"SLM_WM_{prefix}_OFFICIAL_LOG_IMPORT_PATH", "")
     _set_default_env(f"SLM_WM_{prefix}_OFFICIAL_TIMEOUT_SECONDS", "86400")
+    _set_env("SLM_WM_OPENCLIP_CACHE_ROOT", DEFAULT_SHARED_HUGGING_FACE_SNAPSHOT_ROOT)
     _set_default_env("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1")
     _set_default_env("WANDB_MODE", "disabled")
 
@@ -244,11 +257,12 @@ def _configure_official_reference_tree_ring(paper_run: Any, sample_count_token: 
     _set_default_env("SLM_WM_TREE_RING_OFFICIAL_SOURCE_DIR", "external_baseline/primary/tree_ring/source")
     _set_default_env("SLM_WM_TREE_RING_OFFICIAL_RUN_NAME", "tree_ring_official_legacy_reference")
     _set_default_env("SLM_WM_TREE_RING_OFFICIAL_START_INDEX", "0")
-    _set_default_env("SLM_WM_TREE_RING_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
+    _set_env("SLM_WM_TREE_RING_OFFICIAL_MODEL_ID", _LEGACY_DIFFUSION_MODEL_SOURCE.repository_id)
+    _set_env("SLM_WM_TREE_RING_OFFICIAL_MODEL_REVISION", _LEGACY_DIFFUSION_MODEL_SOURCE.revision)
     _set_default_env("SLM_WM_TREE_RING_UPSTREAM_OFFICIAL_MODEL_ID", "stabilityai/stable-diffusion-2-1-base")
     _set_default_env("SLM_WM_TREE_RING_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
     _set_default_env("SLM_WM_TREE_RING_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
-    _set_default_env("SLM_WM_TREE_RING_LOCAL_MODEL_REPOSITORY_DIR", "/content/tree_ring_model_repository/stable_diffusion_2_1_base")
+    _set_env("SLM_WM_TREE_RING_LOCAL_MODEL_REPOSITORY_DIR", _LEGACY_DIFFUSION_SNAPSHOT_DIR)
     _set_default_env("SLM_WM_TREE_RING_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1")
     _set_default_env("SLM_WM_TREE_RING_OFFICIAL_PYTHON_EXECUTABLE", "")
     _set_default_env("SLM_WM_TREE_RING_PREPARE_LEGACY_ENV", "1")
@@ -269,13 +283,14 @@ def _configure_official_reference_gaussian_shading(paper_run: Any, sample_count_
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_OUTPUT_DIR", "outputs/gaussian_shading_official_reference")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_SOURCE_DIR", "external_baseline/primary/gaussian_shading/source")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_RUN_NAME", "gaussian_shading_official_legacy_reference")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
+    _set_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_MODEL_ID", _LEGACY_DIFFUSION_MODEL_SOURCE.repository_id)
+    _set_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_MODEL_REVISION", _LEGACY_DIFFUSION_MODEL_SOURCE.revision)
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_UPSTREAM_OFFICIAL_MODEL_ID", "stabilityai/stable-diffusion-2-1-base")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
     _set_default_env(
         "SLM_WM_GAUSSIAN_SHADING_LOCAL_MODEL_REPOSITORY_DIR",
-        "/content/gaussian_shading_model_repository/stable_diffusion_2_1_base",
+        _LEGACY_DIFFUSION_SNAPSHOT_DIR,
     )
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_PYTHON_EXECUTABLE", "")
@@ -294,7 +309,8 @@ def _configure_official_reference_shallow_diffuse(paper_run: Any, sample_count_t
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SOURCE_DIR", "external_baseline/primary/shallow_diffuse/source")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_RUN_NAME", "shallow_diffuse_official_legacy_reference")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_START_INDEX", "0")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
+    _set_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_ID", _LEGACY_DIFFUSION_MODEL_SOURCE.repository_id)
+    _set_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_REVISION", _LEGACY_DIFFUSION_MODEL_SOURCE.revision)
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_UPSTREAM_OFFICIAL_MODEL_ID", "stabilityai/stable-diffusion-2-1-base")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_DATASET", "Gustavosta/Stable-Diffusion-Prompts")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_IMAGE_LENGTH", "512")
@@ -308,14 +324,12 @@ def _configure_official_reference_shallow_diffuse(paper_run: Any, sample_count_t
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_W_RADIUS", "10")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_W_MEASUREMENT", "l1_complex2")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_W_INJECTION", "complex2")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_REFERENCE_MODEL", "ViT-g-14")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_REFERENCE_MODEL_PRETRAIN", "laion2b_s12b_b42k")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_ATTACKER_NAMES", "none")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
     _set_default_env(
         "SLM_WM_SHALLOW_DIFFUSE_LOCAL_MODEL_REPOSITORY_DIR",
-        "/content/shallow_diffuse_model_repository/stable_diffusion_2_1_base",
+        _LEGACY_DIFFUSION_SNAPSHOT_DIR,
     )
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_PYTHON_EXECUTABLE", "")
@@ -338,7 +352,10 @@ def _configure_official_reference_shallow_diffuse(paper_run: Any, sample_count_t
 def _configure_official_reference_t2smark(paper_run: Any, sample_count_token: str, target_fpr_text: str) -> None:
     _set_env("SLM_WM_T2SMARK_FORMAL_PROMPT_FILE", paper_run.prompt_file)
     _set_env("SLM_WM_T2SMARK_FORMAL_DRIVE_OUTPUT_DIR", paper_run.drive_dir("external_baseline_official_reference"))
-    _set_default_env("SLM_WM_T2SMARK_MODEL_ID", "stabilityai/stable-diffusion-3.5-medium")
+    _set_env("SLM_WM_T2SMARK_MODEL_ID", _SD35_MODEL_SOURCE.repository_id)
+    _set_env("SLM_WM_T2SMARK_MODEL_REVISION", _SD35_MODEL_SOURCE.revision)
+    _set_env("SLM_WM_T2SMARK_FORMAL_PAIR_CLIP_MODEL_ID", _CLIP_MODEL_SOURCE.repository_id)
+    _set_env("SLM_WM_T2SMARK_FORMAL_PAIR_CLIP_MODEL_REVISION", _CLIP_MODEL_SOURCE.revision)
     _set_env("SLM_WM_T2SMARK_FORMAL_RUN_NAME", f"t2smark_sd35_medium_{paper_run.run_name}")
     _set_env("SLM_WM_T2SMARK_FORMAL_PROMPT_LIMIT", sample_count_token)
     _set_env("SLM_WM_T2SMARK_FORMAL_TARGET_FPR", target_fpr_text)

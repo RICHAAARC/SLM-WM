@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import re
 from typing import Any, Callable, Iterable
 
 from experiments.protocol.attacks import (
@@ -13,9 +14,17 @@ from experiments.protocol.attacks import (
     attack_config_digest,
     resolve_formal_attack_config,
 )
+from experiments.runtime.model_sources import (
+    get_model_source,
+    require_registered_model_reference,
+)
 from main.core.digest import build_stable_digest
 
 METHOD_FAITHFUL_ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
+_COMMON_BACKBONE_SOURCE = get_model_source("stabilityai_stable_diffusion_3_5_medium")
+DEFAULT_SD35_MODEL_ID = _COMMON_BACKBONE_SOURCE.repository_id
+DEFAULT_SD35_MODEL_REVISION = _COMMON_BACKBONE_SOURCE.revision
+MODEL_REVISION_PATTERN = re.compile(r"[0-9a-f]{40}")
 STANDARD_GEOMETRIC_FORMAL_IMAGE_ATTACK_NAMES = (
     "jpeg_compression",
     "gaussian_noise",
@@ -405,7 +414,25 @@ class InversionStableDiffusion3PipelineMixin:
             return latents
 
 
-def load_sd3_pipeline(*, model_id: str, device: str, torch_dtype_name: str, adapter_class_name: str) -> Any:
+def validate_model_revision(model_revision: str) -> str:
+    """要求 common-backbone revision 精确等于来源登记表中的不可变提交。"""
+
+    revision = str(model_revision)
+    if MODEL_REVISION_PATTERN.fullmatch(revision) is None:
+        raise ValueError("model_revision 必须是40位小写十六进制 Git commit")
+    if revision != DEFAULT_SD35_MODEL_REVISION:
+        raise ValueError("model_revision 必须等于 common-backbone 登记提交")
+    return revision
+
+
+def load_sd3_pipeline(
+    *,
+    model_id: str,
+    model_revision: str,
+    device: str,
+    torch_dtype_name: str,
+    adapter_class_name: str,
+) -> Any:
     """加载 SD3.5 pipeline 并动态组合反演 mixin。"""
 
     import torch
@@ -421,7 +448,17 @@ def load_sd3_pipeline(*, model_id: str, device: str, torch_dtype_name: str, adap
     }
     torch_dtype = dtype_lookup.get(str(torch_dtype_name).lower(), torch.float16)
     pipeline_class = type(adapter_class_name, (InversionStableDiffusion3PipelineMixin, StableDiffusion3Pipeline), {})
-    pipe = pipeline_class.from_pretrained(model_id, torch_dtype=torch_dtype)
+    exact_revision = validate_model_revision(model_revision)
+    require_registered_model_reference(
+        model_id,
+        exact_revision,
+        required_usage_role="common_backbone_baseline_model",
+    )
+    pipe = pipeline_class.from_pretrained(
+        model_id,
+        revision=exact_revision,
+        torch_dtype=torch_dtype,
+    )
     pipe = pipe.to(device)
     pipe.transformer.eval()
     pipe.vae.eval()

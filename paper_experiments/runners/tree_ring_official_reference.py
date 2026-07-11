@@ -20,6 +20,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
 from experiments.runtime import repository_environment
+from experiments.runtime.model_sources import get_model_source
 from paper_experiments.baselines import (
     build_tree_ring_official_reference_record,
     build_tree_ring_official_reference_schema,
@@ -27,9 +28,11 @@ from paper_experiments.baselines import (
 )
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from paper_experiments.runners.external_source_runtime import (
+    build_registered_source_patch_evidence,
     ensure_cuda_if_requested,
     load_baseline_registry_item,
     normalize_repository_url,
+    prepare_registered_source_checkout,
     run_command,
 )
 from experiments.runtime.progress import (
@@ -44,19 +47,51 @@ from experiments.runtime.repository_environment import (
     build_runtime_environment_report,
     file_digest,
 )
+from paper_experiments.runners.model_snapshot_runtime import (
+    DEFAULT_SHARED_HUGGING_FACE_SNAPSHOT_ROOT,
+    DIFFUSERS_PIPELINE_ALLOW_PATTERNS,
+    build_model_snapshot_content,
+    build_shared_hugging_face_snapshot_dir,
+    ensure_hugging_face_snapshot_files,
+    validate_frozen_model_source,
+)
+from paper_experiments.runners.openclip_checkpoint_runtime import (
+    DEFAULT_OPENCLIP_CHECKPOINT_PATH,
+    OPENCLIP_CHECKPOINT_FILENAME,
+    OPENCLIP_CHECKPOINT_SHA256,
+    OPENCLIP_CHECKPOINT_SIZE_BYTES,
+    OPENCLIP_MODEL_NAME,
+    OPENCLIP_REPOSITORY_ID,
+    OPENCLIP_REVISION,
+    write_openclip_checkpoint_report,
+)
 
 DEFAULT_OUTPUT_DIR = "outputs/tree_ring_official_reference"
 DEFAULT_DRIVE_OUTPUT_DIR = ""
 DEFAULT_SOURCE_DIR = "external_baseline/primary/tree_ring/source"
+EXPECTED_PATCHED_SOURCE_PATHS = (
+    "optim_utils.py",
+    "run_tree_ring_watermark.py",
+)
 DEFAULT_RUN_NAME = "tree_ring_official_legacy_reference"
 DEFAULT_SAMPLE_COUNT = 700
+_OFFICIAL_MODEL_SOURCE = get_model_source("manojb_stable_diffusion_2_1_base")
+_PROMPT_DATASET_SOURCE = get_model_source("gustavosta_stable_diffusion_prompts")
 DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID = "stabilityai/stable-diffusion-2-1-base"
-DEFAULT_OFFICIAL_MODEL_ID = "Manojb/stable-diffusion-2-1-base"
+DEFAULT_OFFICIAL_MODEL_ID = _OFFICIAL_MODEL_SOURCE.repository_id
+DEFAULT_OFFICIAL_MODEL_REVISION = _OFFICIAL_MODEL_SOURCE.revision
+DEFAULT_PROMPT_DATASET_ID = _PROMPT_DATASET_SOURCE.repository_id
+DEFAULT_PROMPT_DATASET_REVISION = _PROMPT_DATASET_SOURCE.revision
 DEFAULT_MODEL_SOURCE_NOTE = (
     "官方 Tree-Ring 使用的 stabilityai/stable-diffusion-2-1-base 当前不可直接访问; "
     "默认改用 Hugging Face 上标记为 cloned from stabilityai/stable-diffusion-2-1-base 的公开镜像。"
 )
-DEFAULT_LOCAL_MODEL_REPOSITORY_DIR = "/content/tree_ring_model_repository/stable_diffusion_2_1_base"
+DEFAULT_LOCAL_MODEL_REPOSITORY_DIR = str(
+    build_shared_hugging_face_snapshot_dir(
+        DEFAULT_OFFICIAL_MODEL_ID,
+        DEFAULT_OFFICIAL_MODEL_REVISION,
+    )
+)
 DEFAULT_LEGACY_ENV_PREFIX = "/content/tree_ring_legacy_env"
 DEFAULT_MICROMAMBA_PATH = "/content/bin/micromamba"
 DEFAULT_LEGACY_PYTHON_VERSION = "3.9"
@@ -76,7 +111,13 @@ class TreeRingOfficialReferenceConfig:
     run_name: str = DEFAULT_RUN_NAME
     sample_count: int = DEFAULT_SAMPLE_COUNT
     start_index: int = 0
+    dataset: str = DEFAULT_PROMPT_DATASET_ID
+    dataset_revision: str = DEFAULT_PROMPT_DATASET_REVISION
+    reference_model: str = OPENCLIP_MODEL_NAME
+    reference_model_checkpoint_path: str = DEFAULT_OPENCLIP_CHECKPOINT_PATH
+    openclip_cache_root: str = DEFAULT_SHARED_HUGGING_FACE_SNAPSHOT_ROOT
     official_model_id: str = DEFAULT_OFFICIAL_MODEL_ID
+    official_model_revision: str = DEFAULT_OFFICIAL_MODEL_REVISION
     upstream_official_model_id: str = DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID
     model_source_note: str = DEFAULT_MODEL_SOURCE_NOTE
     patch_model_repository_layout: bool = True
@@ -92,11 +133,24 @@ class TreeRingOfficialReferenceConfig:
     legacy_pytorch_index_url: str = DEFAULT_LEGACY_PYTORCH_INDEX_URL
     legacy_package_specs: str = DEFAULT_LEGACY_PACKAGE_SPECS
     run_official_command: bool = True
-    summary_import_path: str = ""
-    log_import_path: str = ""
     require_cuda: bool = True
     timeout_seconds: int = 86400
     enable_workflow_progress_bar: bool = True
+
+    def __post_init__(self) -> None:
+        """确保正式参考路径只消费登记的不可变 Prompt 数据集。"""
+
+        if (
+            self.dataset != DEFAULT_PROMPT_DATASET_ID
+            or self.dataset_revision != DEFAULT_PROMPT_DATASET_REVISION
+        ):
+            raise ValueError("Tree-Ring 正式参考必须使用登记的精确 Prompt 数据集 revision")
+        if self.reference_model != OPENCLIP_MODEL_NAME:
+            raise ValueError("Tree-Ring 正式参考必须使用登记的 ViT-g-14 OpenCLIP 编码器")
+        if Path(self.reference_model_checkpoint_path).name != OPENCLIP_CHECKPOINT_FILENAME:
+            raise ValueError("Tree-Ring OpenCLIP 预训练参数必须指向登记的本地 checkpoint")
+        if int(self.sample_count) <= 0:
+            raise ValueError("Tree-Ring 正式参考 sample_count 必须为正整数")
 
 
 @dataclass(frozen=True)
@@ -269,6 +323,7 @@ def output_paths(root_path: Path, config: TreeRingOfficialReferenceConfig) -> di
         "source_prepare_result": output_dir / "tree_ring_official_source_prepare_result.json",
         "source_patch_result": output_dir / "tree_ring_official_source_patch_result.json",
         "model_repository_prepare_result": output_dir / "tree_ring_model_repository_prepare_result.json",
+        "openclip_checkpoint_prepare_result": output_dir / "tree_ring_openclip_checkpoint_prepare_result.json",
         "legacy_environment_prepare_result": output_dir / "tree_ring_legacy_environment_prepare_result.json",
         "official_stdout": output_dir / "tree_ring_official_stdout.txt",
         "official_stderr": output_dir / "tree_ring_official_stderr.txt",
@@ -520,86 +575,84 @@ def patch_tree_ring_model_repository_layout(
     config: TreeRingOfficialReferenceConfig,
     paths: dict[str, Path],
 ) -> dict[str, Any]:
-    """为公开镜像缺少 fp16 分支的情况应用最小源码入口补丁。"""
+    """应用模型镜像兼容补丁并锁定官方 Prompt 数据集 revision。"""
 
     source_dir = (root_path / config.source_dir).resolve()
     entrypoint = source_dir / "run_tree_ring_watermark.py"
+    optim_utils_path = source_dir / "optim_utils.py"
     report = {
         "patch_requested": bool(config.patch_model_repository_layout),
         "patch_applied": False,
         "patch_skipped": False,
         "official_entrypoint": relative_or_absolute(entrypoint, root_path),
+        "optim_utils_path": relative_or_absolute(optim_utils_path, root_path),
         "official_model_id": config.official_model_id,
+        "official_model_revision": config.official_model_revision,
         "upstream_official_model_id": config.upstream_official_model_id,
         "model_source_note": config.model_source_note,
-        "patch_reason": "mirror_has_fp16_weights_on_main_without_fp16_branch",
+        "prompt_dataset_source": _PROMPT_DATASET_SOURCE.to_dict(),
+        "prompt_dataset_repository_id": config.dataset,
+        "prompt_dataset_revision": config.dataset_revision,
+        "patch_reason": "mirror_model_layout_and_exact_prompt_dataset_revision",
+        "patch_items": [],
     }
     if not config.patch_model_repository_layout:
         report.update({"patch_skipped": True, "patch_skip_reason": "patch_model_repository_layout_disabled"})
         write_json(paths["source_patch_result"], report)
         return report
-    if not entrypoint.is_file():
-        report.update({"patch_skipped": True, "patch_skip_reason": "official_entrypoint_missing"})
+    if not entrypoint.is_file() or not optim_utils_path.is_file():
+        report.update({"patch_skipped": True, "patch_skip_reason": "official_source_file_missing"})
         write_json(paths["source_patch_result"], report)
         return report
 
     source_text = entrypoint.read_text(encoding="utf-8")
+    optim_text = optim_utils_path.read_text(encoding="utf-8")
     before_digest = file_digest(entrypoint)
+    optim_before_digest = file_digest(optim_utils_path)
+    patched_source_text = source_text
+    patched_optim_text = optim_text
     marker = "# SLM-WM: 公开镜像没有 fp16 分支, 因此从 main 分支加载模型权重。"
     target = "        revision='fp16',\n"
-    if marker in source_text:
+    if marker not in patched_source_text and target in patched_source_text:
+        patched_source_text = patched_source_text.replace(target, f"        {marker}\n")
+        report["patch_items"].append("remove_fp16_revision_branch")
+
+    dataset_target = "load_dataset(args.dataset)"
+    dataset_replacement = (
+        f"load_dataset(args.dataset, revision='{config.dataset_revision}')"
+    )
+    if dataset_target in patched_optim_text:
+        patched_optim_text = patched_optim_text.replace(dataset_target, dataset_replacement)
+        report["patch_items"].append("pin_prompt_dataset_revision")
+
+    if patched_source_text == source_text and patched_optim_text == optim_text:
         report.update(
             {
                 "patch_skipped": True,
-                "patch_skip_reason": "model_repository_layout_patch_already_present",
+                "patch_skip_reason": "source_runtime_patch_already_present_or_targets_missing",
                 "entrypoint_digest_before": before_digest,
                 "entrypoint_digest_after": before_digest,
+                "optim_utils_digest_before": optim_before_digest,
+                "optim_utils_digest_after": optim_before_digest,
             }
         )
         write_json(paths["source_patch_result"], report)
         return report
-    patched_text = source_text.replace(target, f"        {marker}\n")
-    if patched_text == source_text:
-        report.update(
-            {
-                "patch_skipped": True,
-                "patch_skip_reason": "fp16_revision_line_not_found",
-                "entrypoint_digest_before": before_digest,
-                "entrypoint_digest_after": before_digest,
-            }
-        )
-        write_json(paths["source_patch_result"], report)
-        return report
-    entrypoint.write_text(patched_text, encoding="utf-8")
+    if patched_source_text != source_text:
+        entrypoint.write_text(patched_source_text, encoding="utf-8", newline="\n")
+    if patched_optim_text != optim_text:
+        optim_utils_path.write_text(patched_optim_text, encoding="utf-8", newline="\n")
     report.update(
         {
             "patch_applied": True,
             "entrypoint_digest_before": before_digest,
             "entrypoint_digest_after": file_digest(entrypoint),
+            "optim_utils_digest_before": optim_before_digest,
+            "optim_utils_digest_after": file_digest(optim_utils_path),
         }
     )
     write_json(paths["source_patch_result"], report)
     return report
-
-
-def download_hf_snapshot(
-    repo_id: str,
-    *,
-    local_dir: Path,
-    token: str | None,
-) -> str:
-    """下载 Hugging Face 模型快照到受控运行缓存目录。"""
-
-    from huggingface_hub import snapshot_download
-
-    return str(
-        snapshot_download(
-            repo_id=repo_id,
-            local_dir=str(local_dir),
-            local_dir_use_symlinks=False,
-            token=token or None,
-        )
-    )
 
 
 def prepare_tree_ring_model_repository(
@@ -610,6 +663,13 @@ def prepare_tree_ring_model_repository(
 ) -> dict[str, Any]:
     """准备本地模型目录并补齐 legacy transformers 所需的 model_index 兼容项。"""
 
+    validate_frozen_model_source(
+        config.official_model_id,
+        config.official_model_revision,
+        expected_repository_id=DEFAULT_OFFICIAL_MODEL_ID,
+        expected_revision=DEFAULT_OFFICIAL_MODEL_REVISION,
+    )
+
     local_model_path = Path(config.local_model_repository_dir).expanduser()
     model_index_path = local_model_path / "model_index.json"
     report: dict[str, Any] = {
@@ -617,6 +677,7 @@ def prepare_tree_ring_model_repository(
         "local_model_repository_ready": False,
         "local_model_repository_path": str(local_model_path),
         "official_model_id": config.official_model_id,
+        "official_model_revision": config.official_model_revision,
         "upstream_official_model_id": config.upstream_official_model_id,
         "effective_official_model_id": config.official_model_id,
         "model_index_patch_requested": bool(config.patch_model_index_for_legacy_transformers),
@@ -628,26 +689,31 @@ def prepare_tree_ring_model_repository(
         write_json(paths["model_repository_prepare_result"], report)
         return report
 
-    download_result: dict[str, Any] = {"download_requested": not model_index_path.is_file()}
-    if not model_index_path.is_file():
-        try:
-            emit_progress_status(progress, profile=f"operation=tree_ring_model_snapshot_download model={config.official_model_id}")
-            local_model_path.mkdir(parents=True, exist_ok=True)
-            snapshot_path = download_hf_snapshot(
-                config.official_model_id,
-                local_dir=local_model_path,
-                token=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None,
-            )
-            download_result.update({"return_code": 0, "snapshot_path": snapshot_path})
-        except Exception as error:
-            download_result.update({"return_code": 98, "error": f"{type(error).__name__}:{error}"})
-            report["download_result"] = download_result
-            write_json(paths["model_repository_prepare_result"], report)
-            return report
-    else:
-        download_result.update({"return_code": 0, "snapshot_path": str(local_model_path), "download_skipped_reason": "model_index_already_exists"})
+    try:
+        emit_progress_status(
+            progress,
+            profile=f"operation=tree_ring_model_snapshot_materialize model={config.official_model_id}",
+        )
+        snapshot_materialization = ensure_hugging_face_snapshot_files(
+            local_model_path,
+            report_path=paths["model_repository_prepare_result"],
+            repository_id=config.official_model_id,
+            revision=config.official_model_revision,
+            allow_patterns=DIFFUSERS_PIPELINE_ALLOW_PATTERNS,
+            token=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None,
+        )
+    except Exception as error:
+        report.update(
+            {
+                "failure_reason": "model_snapshot_materialization_failed",
+                "snapshot_validation_error": f"{type(error).__name__}:{error}",
+            }
+        )
+        write_json(paths["model_repository_prepare_result"], report)
+        return report
 
-    report["download_result"] = download_result
+    report["download_result"] = {**snapshot_materialization, "return_code": 0}
+    report["model_snapshot_allow_patterns"] = list(DIFFUSERS_PIPELINE_ALLOW_PATTERNS)
     if not model_index_path.is_file():
         report.update({"local_model_repository_ready": False, "failure_reason": "model_index_missing_after_download"})
         write_json(paths["model_repository_prepare_result"], report)
@@ -679,6 +745,12 @@ def prepare_tree_ring_model_repository(
             "model_index_feature_extractor": read_json(model_index_path).get("feature_extractor"),
             "local_model_repository_ready": True,
             "effective_official_model_id": str(local_model_path),
+            "model_snapshot_content": build_model_snapshot_content(
+                local_model_path,
+                repository_id=config.official_model_id,
+                revision=config.official_model_revision,
+                allow_patterns=DIFFUSERS_PIPELINE_ALLOW_PATTERNS,
+            ),
         }
     )
     write_json(paths["model_repository_prepare_result"], report)
@@ -699,6 +771,8 @@ def build_official_command(root_path: Path, config: TreeRingOfficialReferenceCon
         str(config.run_name),
         "--model_id",
         str(config.official_model_id),
+        "--dataset",
+        str(config.dataset),
         "--w_channel",
         "3",
         "--w_pattern",
@@ -707,6 +781,10 @@ def build_official_command(root_path: Path, config: TreeRingOfficialReferenceCon
         str(config.start_index),
         "--end",
         str(end_index),
+        "--reference_model",
+        config.reference_model,
+        "--reference_model_pretrain",
+        config.reference_model_checkpoint_path,
         "--with_tracking",
     ]
 
@@ -734,48 +812,160 @@ def parse_metric_text(text: str, sample_count: int) -> dict[str, Any]:
 
 
 def normalize_metric_summary(payload: dict[str, Any], sample_count: int) -> dict[str, Any]:
-    """把外部 summary 或日志解析结果规范化为 reference schema 指标。"""
+    """规范化本次官方命令指标, 不为缺失科学指标补写 0。"""
 
-    defaults = {
+    normalized: dict[str, Any] = {
         "sample_count": int(sample_count),
         "positive_count": int(sample_count),
         "negative_count": int(sample_count),
-        "auc": 0.0,
-        "accuracy": 0.0,
-        "true_positive_rate_at_one_percent_fpr": 0.0,
-        "clip_score_mean": 0.0,
-        "watermarked_clip_score_mean": 0.0,
     }
     aliases = {
         "acc": "accuracy",
         "TPR@1%FPR": "true_positive_rate_at_one_percent_fpr",
         "w_clip_score_mean": "watermarked_clip_score_mean",
     }
-    normalized = dict(defaults)
     for key, value in payload.items():
         target_key = aliases.get(str(key), str(key))
-        if target_key in normalized:
+        if target_key in {
+            "auc",
+            "accuracy",
+            "true_positive_rate_at_one_percent_fpr",
+            "clip_score_mean",
+            "watermarked_clip_score_mean",
+        }:
             normalized[target_key] = value
     return normalized
 
 
-def load_imported_metric_summary(root_path: Path, config: TreeRingOfficialReferenceConfig) -> tuple[dict[str, Any], list[str]]:
-    """从用户提供的 summary 或日志路径导入官方复现指标。"""
+TREE_RING_SCIENTIFIC_METRIC_FIELDS = (
+    "auc",
+    "accuracy",
+    "true_positive_rate_at_one_percent_fpr",
+    "clip_score_mean",
+    "watermarked_clip_score_mean",
+)
 
-    evidence_paths: list[str] = []
-    if config.summary_import_path:
-        summary_path = Path(config.summary_import_path)
-        summary_path = summary_path if summary_path.is_absolute() else root_path / summary_path
-        if summary_path.is_file():
-            evidence_paths.append(relative_or_absolute(summary_path, root_path))
-            return normalize_metric_summary(read_json(summary_path), config.sample_count), evidence_paths
-    if config.log_import_path:
-        log_path = Path(config.log_import_path)
-        log_path = log_path if log_path.is_absolute() else root_path / log_path
-        if log_path.is_file():
-            evidence_paths.append(relative_or_absolute(log_path, root_path))
-            return normalize_metric_summary(parse_metric_text(log_path.read_text(encoding="utf-8", errors="ignore"), config.sample_count), config.sample_count), evidence_paths
-    return {}, evidence_paths
+
+def validate_tree_ring_metric_summary(
+    metric_summary: dict[str, Any],
+    sample_count: int,
+) -> dict[str, Any]:
+    """验证本次官方命令是否真实产生全部检测与 CLIP 指标。"""
+
+    required_fields = (
+        "sample_count",
+        "positive_count",
+        "negative_count",
+        *TREE_RING_SCIENTIFIC_METRIC_FIELDS,
+    )
+    missing_fields = [field_name for field_name in required_fields if field_name not in metric_summary]
+    invalid_fields: list[str] = []
+    for field_name in required_fields:
+        if field_name in missing_fields:
+            continue
+        try:
+            value = float(metric_summary[field_name])
+        except (TypeError, ValueError):
+            invalid_fields.append(field_name)
+            continue
+        if value != value or value in {float("inf"), float("-inf")}:
+            invalid_fields.append(field_name)
+        elif field_name.endswith("count") and value != float(sample_count):
+            invalid_fields.append(field_name)
+        elif field_name in {
+            "auc",
+            "accuracy",
+            "true_positive_rate_at_one_percent_fpr",
+        } and not 0.0 <= value <= 1.0:
+            invalid_fields.append(field_name)
+        elif field_name in {
+            "clip_score_mean",
+            "watermarked_clip_score_mean",
+        } and not -1.0 <= value <= 1.0:
+            invalid_fields.append(field_name)
+    return {
+        "required_metric_fields": list(required_fields),
+        "missing_required_metric_fields": missing_fields,
+        "invalid_required_metric_fields": invalid_fields,
+        "required_metrics_ready": not missing_fields and not invalid_fields,
+    }
+
+
+def _official_execution_ready(official_report: dict[str, Any]) -> bool:
+    """要求指标来自本次成功完成的官方命令。"""
+
+    return all(
+        (
+            official_report.get("official_command_requested") is True,
+            int(official_report.get("return_code", -1)) == 0,
+        )
+    )
+
+
+def _model_source_ready(model_repository_report: dict[str, Any]) -> bool:
+    """验证 Stable Diffusion 模型快照的精确来源与组件范围。"""
+
+    snapshot_content = model_repository_report.get("model_snapshot_content")
+    return isinstance(snapshot_content, dict) and all(
+        (
+            model_repository_report.get("local_model_repository_ready") is True,
+            model_repository_report.get("official_model_id") == DEFAULT_OFFICIAL_MODEL_ID,
+            model_repository_report.get("official_model_revision") == DEFAULT_OFFICIAL_MODEL_REVISION,
+            snapshot_content.get("repository_id") == DEFAULT_OFFICIAL_MODEL_ID,
+            snapshot_content.get("revision") == DEFAULT_OFFICIAL_MODEL_REVISION,
+            snapshot_content.get("allow_patterns") == sorted(DIFFUSERS_PIPELINE_ALLOW_PATTERNS),
+            len(str(snapshot_content.get("snapshot_content_digest", ""))) == 64,
+        )
+    )
+
+
+def _source_revision_ready(source_status: dict[str, Any]) -> bool:
+    """验证官方源码、运行补丁和 Prompt 数据集均为登记身份。"""
+
+    return all(
+        (
+            source_status.get("official_entrypoint_ready") is True,
+            source_status.get("source_identity_ready") is True,
+            source_status.get("source_worktree_exact") is True,
+            len(str(source_status.get("official_repository_commit", ""))) == 40,
+            len(str(source_status.get("source_patch_sha256", ""))) == 64,
+            len(str(source_status.get("source_worktree_digest", ""))) == 64,
+            source_status.get("prompt_dataset_repository_id") == DEFAULT_PROMPT_DATASET_ID,
+            source_status.get("prompt_dataset_revision") == DEFAULT_PROMPT_DATASET_REVISION,
+        )
+    )
+
+
+def _openclip_source_ready(openclip_report: dict[str, Any]) -> bool:
+    """验证 OpenCLIP checkpoint 顶层身份和逐文件快照证据。"""
+
+    snapshot_content = openclip_report.get("model_snapshot_content")
+    expected_files = [
+        {
+            "path": OPENCLIP_CHECKPOINT_FILENAME,
+            "size_bytes": OPENCLIP_CHECKPOINT_SIZE_BYTES,
+            "sha256": OPENCLIP_CHECKPOINT_SHA256,
+        }
+    ]
+    return isinstance(snapshot_content, dict) and all(
+        (
+            openclip_report.get("openclip_checkpoint_ready") is True,
+            openclip_report.get("openclip_model_name") == OPENCLIP_MODEL_NAME,
+            openclip_report.get("openclip_repository_id") == OPENCLIP_REPOSITORY_ID,
+            openclip_report.get("openclip_revision") == OPENCLIP_REVISION,
+            openclip_report.get("openclip_checkpoint_filename") == OPENCLIP_CHECKPOINT_FILENAME,
+            openclip_report.get("openclip_checkpoint_sha256") == OPENCLIP_CHECKPOINT_SHA256,
+            openclip_report.get("openclip_checkpoint_size_bytes") == OPENCLIP_CHECKPOINT_SIZE_BYTES,
+            snapshot_content.get("repository_id") == OPENCLIP_REPOSITORY_ID,
+            snapshot_content.get("revision") == OPENCLIP_REVISION,
+            snapshot_content.get("allow_patterns") == [OPENCLIP_CHECKPOINT_FILENAME],
+            snapshot_content.get("file_count") == 1,
+            snapshot_content.get("files") == expected_files,
+            snapshot_content.get("snapshot_content_digest")
+            == openclip_report.get("openclip_snapshot_content_digest"),
+            len(str(openclip_report.get("openclip_snapshot_content_digest", ""))) == 64,
+        )
+    )
 
 
 def run_official_command_if_requested(
@@ -891,46 +1081,99 @@ def build_reference_record_report(
     config: TreeRingOfficialReferenceConfig,
     paths: dict[str, Path],
     metric_summary: dict[str, Any],
-    evidence_paths: list[str],
     official_report: dict[str, Any],
     source_status: dict[str, Any],
+    model_repository_report: dict[str, Any],
+    openclip_report: dict[str, Any],
 ) -> dict[str, Any]:
     """构造 governed import 记录并写出 schema、records 与 validation report。"""
 
     schema = build_tree_ring_official_reference_schema()
     write_json(paths["reference_schema"], schema)
-    if not metric_summary:
+    metric_validation = validate_tree_ring_metric_summary(metric_summary, config.sample_count)
+    record_gate = {
+        "official_execution_ready": _official_execution_ready(official_report),
+        "required_metrics_ready": metric_validation["required_metrics_ready"],
+        "source_revision_ready": _source_revision_ready(source_status),
+        "model_source_ready": _model_source_ready(model_repository_report),
+        "openclip_source_ready": _openclip_source_ready(openclip_report),
+        "metric_validation": metric_validation,
+    }
+    record_gate["record_ready"] = all(
+        value is True
+        for field_name, value in record_gate.items()
+        if field_name != "metric_validation"
+    )
+    if not record_gate["record_ready"]:
+        if paths["official_metric_summary"].exists():
+            paths["official_metric_summary"].unlink()
         validation = validate_tree_ring_official_reference_records([])
+        validation["record_gate"] = record_gate
         paths["reference_records"].write_text("", encoding="utf-8")
         write_json(paths["reference_validation"], validation)
-        return {"record_count": 0, "validation": validation}
+        return {"record_count": 0, "validation": validation, "record_gate": record_gate}
 
     write_json(paths["official_metric_summary"], metric_summary)
-    local_evidence_paths = list(evidence_paths)
-    for candidate in (paths["official_metric_summary"], paths["official_command_result"], paths["official_stdout"], paths["official_stderr"]):
+    local_evidence_paths: list[str] = []
+    for candidate in (
+        paths["official_metric_summary"],
+        paths["official_command_result"],
+        paths["official_stdout"],
+        paths["official_stderr"],
+        paths["source_prepare_result"],
+        paths["source_patch_result"],
+        paths["model_repository_prepare_result"],
+        paths["openclip_checkpoint_prepare_result"],
+    ):
         if candidate.is_file():
             local_evidence_paths.append(relative_or_absolute(candidate, root_path))
     result_source = relative_or_absolute(paths["official_metric_summary"], root_path)
     result_digest = file_digest(paths["official_metric_summary"])
     record = build_tree_ring_official_reference_record(
         official_entrypoint=str(source_status.get("official_entrypoint", "")),
-        official_repository_commit="3015283d9cf82e90b628f02ad2121bd37408ca9a",
+        official_repository_commit=str(source_status.get("official_repository_commit", "")),
         official_environment_profile="legacy_tree_ring_official_environment",
         baseline_result_source=result_source,
         baseline_result_source_digest=result_digest,
         evidence_paths=sorted(set(local_evidence_paths)),
+        source_provenance={
+            **source_status,
+            "official_model_repository_id": model_repository_report.get("official_model_id", ""),
+            "official_model_revision": model_repository_report.get("official_model_revision", ""),
+            "model_snapshot_content_digest": (
+                model_repository_report.get("model_snapshot_content", {}).get(
+                    "snapshot_content_digest",
+                    "",
+                )
+                if isinstance(model_repository_report.get("model_snapshot_content"), dict)
+                else ""
+            ),
+            **openclip_report,
+        },
         metric_values=metric_summary,
         ready_flags={
-            "official_source_ready": bool(source_status.get("official_entrypoint_ready")),
+            "official_source_ready": record_gate["source_revision_ready"],
+            "source_identity_ready": source_status.get("source_identity_ready") is True,
+            "source_worktree_exact": source_status.get("source_worktree_exact") is True,
             "official_environment_report_ready": True,
-            "official_result_summary_ready": bool(metric_summary),
-            "governed_import_ready": True,
+            "official_execution_ready": record_gate["official_execution_ready"],
+            "required_metrics_ready": record_gate["required_metrics_ready"],
+            "model_source_ready": record_gate["model_source_ready"],
+            "openclip_source_ready": record_gate["openclip_source_ready"],
+            "official_result_summary_ready": record_gate["required_metrics_ready"],
+            "governed_import_ready": record_gate["record_ready"],
         },
     )
     paths["reference_records"].write_text(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
     validation = validate_tree_ring_official_reference_records([record])
+    validation["record_gate"] = record_gate
     write_json(paths["reference_validation"], validation)
-    return {"record_count": 1, "validation": validation, "record_digest": record["reference_record_digest"]}
+    return {
+        "record_count": 1,
+        "validation": validation,
+        "record_digest": record["reference_record_digest"],
+        "record_gate": record_gate,
+    }
 
 
 def write_tree_ring_official_reference_outputs(
@@ -945,7 +1188,7 @@ def write_tree_ring_official_reference_outputs(
     )
     paths = output_paths(root_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
-    with progress_bar(10, desc="tree ring official reference", enabled=config.enable_workflow_progress_bar) as run_progress:
+    with progress_bar(9, desc="tree ring official reference", enabled=config.enable_workflow_progress_bar) as run_progress:
         emit_progress_status(run_progress, profile="operation=prepare_tree_ring_legacy_environment status=running")
         legacy_environment_report = prepare_tree_ring_legacy_environment(root_path, config, paths, progress=run_progress)
         update_progress(run_progress, profile="operation=prepare_tree_ring_legacy_environment")
@@ -960,9 +1203,33 @@ def write_tree_ring_official_reference_outputs(
             device_report = {"cuda_available": False, "device_error": f"{type(error).__name__}:{error}"}
         update_progress(run_progress, profile="operation=ensure_cuda")
         source_status = ensure_tree_ring_source_available(root_path, effective_config, paths, progress=run_progress)
+        source_identity_report = prepare_registered_source_checkout(
+            root_path,
+            "tree_ring",
+            (root_path / effective_config.source_dir).resolve(),
+        )
+        source_status.update(source_identity_report)
+        write_json(paths["source_prepare_result"], source_status)
         update_progress(run_progress, profile="operation=ensure_tree_ring_source")
         emit_progress_status(run_progress, profile="operation=patch_tree_ring_source status=running")
         source_patch_report = patch_tree_ring_model_repository_layout(root_path, effective_config, paths)
+        source_patch_evidence = build_registered_source_patch_evidence(
+            root_path,
+            "tree_ring",
+            (root_path / effective_config.source_dir).resolve(),
+            EXPECTED_PATCHED_SOURCE_PATHS,
+        )
+        source_patch_report.update(source_patch_evidence)
+        source_status.update(source_patch_evidence)
+        source_status.update(
+            {
+                "prompt_dataset_source": _PROMPT_DATASET_SOURCE.to_dict(),
+                "prompt_dataset_repository_id": effective_config.dataset,
+                "prompt_dataset_revision": effective_config.dataset_revision,
+            }
+        )
+        write_json(paths["source_patch_result"], source_patch_report)
+        write_json(paths["source_prepare_result"], source_status)
         update_progress(run_progress, profile="operation=patch_tree_ring_source")
         should_prepare_model_repository = effective_config.run_official_command and not (
             effective_config.prepare_legacy_environment and not legacy_environment_report.get("legacy_environment_ready")
@@ -972,9 +1239,20 @@ def write_tree_ring_official_reference_outputs(
         update_progress(run_progress, profile="operation=prepare_tree_ring_model_repository")
         if model_repository_report.get("local_model_repository_ready"):
             effective_config = replace(effective_config, official_model_id=str(model_repository_report["effective_official_model_id"]))
-        emit_progress_status(run_progress, profile="operation=load_imported_metric_summary status=running")
-        imported_metrics, imported_evidence = load_imported_metric_summary(root_path, effective_config)
-        update_progress(run_progress, profile="operation=load_imported_metric_summary")
+        openclip_report = write_openclip_checkpoint_report(
+            paths["openclip_checkpoint_prepare_result"],
+            requested=(
+                should_prepare_model_repository
+                and model_repository_report.get("local_model_repository_ready") is True
+            ),
+            cache_root=effective_config.openclip_cache_root,
+            token=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None,
+        )
+        if openclip_report.get("openclip_checkpoint_ready"):
+            effective_config = replace(
+                effective_config,
+                reference_model_checkpoint_path=str(openclip_report["openclip_checkpoint_path"]),
+            )
         if (
             effective_config.run_official_command
             and effective_config.prepare_legacy_environment
@@ -986,15 +1264,29 @@ def write_tree_ring_official_reference_outputs(
                 return_code=95,
                 reason="tree_ring_legacy_environment_prepare_failed",
             )
+        elif effective_config.run_official_command and not model_repository_report.get("local_model_repository_ready"):
+            official_report = write_official_command_skip_result(
+                root_path,
+                paths,
+                return_code=94,
+                reason="tree_ring_model_snapshot_prepare_failed",
+            )
+        elif effective_config.run_official_command and not openclip_report.get("openclip_checkpoint_ready"):
+            official_report = write_official_command_skip_result(
+                root_path,
+                paths,
+                return_code=93,
+                reason="tree_ring_openclip_checkpoint_prepare_failed",
+            )
         else:
             official_report = run_official_command_if_requested(root_path, effective_config, paths, progress=run_progress)
         update_progress(run_progress, profile="operation=tree_ring_official_command")
         emit_progress_status(run_progress, profile="operation=parse_tree_ring_metrics status=running")
-        if official_report.get("return_code") == 0 and paths["official_stdout"].is_file():
+        if _official_execution_ready(official_report) and paths["official_stdout"].is_file():
             command_metrics = parse_metric_text(paths["official_stdout"].read_text(encoding="utf-8", errors="ignore"), effective_config.sample_count)
-            metric_summary = normalize_metric_summary({**imported_metrics, **command_metrics}, effective_config.sample_count)
+            metric_summary = normalize_metric_summary(command_metrics, effective_config.sample_count)
         else:
-            metric_summary = imported_metrics
+            metric_summary = {}
         update_progress(run_progress, profile="operation=parse_tree_ring_metrics")
         emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
         environment_report = build_runtime_environment_report(
@@ -1004,6 +1296,7 @@ def write_tree_ring_official_reference_outputs(
         environment_report["tree_ring_official_reference_source_report"] = source_status
         environment_report["tree_ring_official_reference_source_patch_report"] = source_patch_report
         environment_report["tree_ring_official_reference_model_repository_report"] = model_repository_report
+        environment_report["tree_ring_official_reference_openclip_checkpoint_report"] = openclip_report
         environment_report["tree_ring_official_reference_legacy_environment_report"] = legacy_environment_report
         write_json(paths["environment_report"], environment_report)
         update_progress(run_progress, profile="operation=write_environment_report")
@@ -1013,16 +1306,51 @@ def write_tree_ring_official_reference_outputs(
             effective_config,
             paths,
             metric_summary,
-            imported_evidence,
             official_report,
             source_status,
+            model_repository_report,
+            openclip_report,
         )
         update_progress(run_progress, profile=f"operation=build_reference_record records={record_report.get('record_count', 0)}")
     validation = record_report["validation"]
-    run_ready = bool(validation.get("reference_import_ready"))
+    model_snapshot_content = model_repository_report.get("model_snapshot_content")
+    model_snapshot_digest = (
+        str(model_snapshot_content.get("snapshot_content_digest", ""))
+        if isinstance(model_snapshot_content, dict)
+        else ""
+    )
+    model_snapshot_scope_ready = isinstance(model_snapshot_content, dict) and all(
+        (
+            model_snapshot_content.get("repository_id") == DEFAULT_OFFICIAL_MODEL_ID,
+            model_snapshot_content.get("revision") == DEFAULT_OFFICIAL_MODEL_REVISION,
+            model_snapshot_content.get("allow_patterns")
+            == sorted(DIFFUSERS_PIPELINE_ALLOW_PATTERNS),
+        )
+    )
+    model_source_ready = _model_source_ready(model_repository_report)
+    source_revision_ready = _source_revision_ready(source_status)
+    openclip_source_ready = _openclip_source_ready(openclip_report)
+    official_execution_ready = _official_execution_ready(official_report)
+    metric_validation = validate_tree_ring_metric_summary(
+        metric_summary,
+        effective_config.sample_count,
+    )
+    required_metrics_ready = bool(metric_validation["required_metrics_ready"])
+    run_ready = (
+        bool(validation.get("reference_import_ready"))
+        and model_source_ready
+        and source_revision_ready
+        and openclip_source_ready
+        and official_execution_ready
+        and required_metrics_ready
+    )
     unsupported_reason = "" if run_ready else "tree_ring_official_reference_result_missing_or_invalid"
-    if official_report.get("official_command_requested") and int(official_report.get("return_code", 1)) != 0:
+    if official_report.get("official_command_requested") is not True:
+        unsupported_reason = "current_official_command_required"
+    elif int(official_report.get("return_code", 1)) != 0:
         unsupported_reason = "official_command_failed_formal_archive_blocked"
+    elif not required_metrics_ready:
+        unsupported_reason = "required_official_detection_or_clip_metrics_missing"
     paper_run = build_paper_run_config(root_path)
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -1031,13 +1359,35 @@ def write_tree_ring_official_reference_outputs(
         "tree_ring_official_reference_ready": run_ready,
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
+        "official_execution_ready": official_execution_ready,
+        "required_metrics_ready": required_metrics_ready,
+        "missing_required_metric_fields": metric_validation["missing_required_metric_fields"],
+        "invalid_required_metric_fields": metric_validation["invalid_required_metric_fields"],
         "sample_count": int(effective_config.sample_count),
         "paper_claim_scale": paper_run.run_name,
         "target_fpr": paper_run.target_fpr,
         "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
         "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
         "source_patch_applied": bool(source_patch_report.get("patch_applied")),
+        "source_revision_ready": source_revision_ready,
+        "official_repository_commit": str(source_status.get("official_repository_commit", "")),
+        "source_patch_sha256": str(source_status.get("source_patch_sha256", "")),
+        "source_worktree_digest": str(source_status.get("source_worktree_digest", "")),
+        "prompt_dataset_repository_id": str(source_status.get("prompt_dataset_repository_id", "")),
+        "prompt_dataset_revision": str(source_status.get("prompt_dataset_revision", "")),
         "local_model_repository_ready": bool(model_repository_report.get("local_model_repository_ready")),
+        "model_source_ready": model_source_ready,
+        "model_source_repository_id": str(model_repository_report.get("official_model_id", "")),
+        "model_source_revision": str(model_repository_report.get("official_model_revision", "")),
+        "model_snapshot_content_digest": model_snapshot_digest,
+        "model_snapshot_scope_ready": model_snapshot_scope_ready,
+        "openclip_source_ready": openclip_source_ready,
+        "openclip_repository_id": str(openclip_report.get("openclip_repository_id", "")),
+        "openclip_revision": str(openclip_report.get("openclip_revision", "")),
+        "openclip_checkpoint_filename": str(openclip_report.get("openclip_checkpoint_filename", "")),
+        "openclip_checkpoint_sha256": str(openclip_report.get("openclip_checkpoint_sha256", "")),
+        "openclip_checkpoint_size_bytes": int(openclip_report.get("openclip_checkpoint_size_bytes", 0)),
+        "openclip_snapshot_content_digest": str(openclip_report.get("openclip_snapshot_content_digest", "")),
         "model_index_patch_applied": bool(model_repository_report.get("model_index_patch_applied")),
         "official_model_id": effective_config.official_model_id,
         "upstream_official_model_id": effective_config.upstream_official_model_id,
@@ -1054,9 +1404,11 @@ def write_tree_ring_official_reference_outputs(
             "source_report": source_status,
             "source_patch_report": source_patch_report,
             "model_repository_report": model_repository_report,
+            "openclip_checkpoint_report": openclip_report,
             "legacy_environment_report": legacy_environment_report,
             "official_report": official_report,
             "validation": validation,
+            "metric_validation": metric_validation,
         },
     }
     write_json(paths["summary"], summary)
@@ -1076,6 +1428,8 @@ def write_tree_ring_official_reference_outputs(
         output_paths_for_manifest.append(relative_or_absolute(paths["source_patch_result"], root_path))
     if paths["model_repository_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["model_repository_prepare_result"], root_path))
+    if paths["openclip_checkpoint_prepare_result"].exists():
+        output_paths_for_manifest.append(relative_or_absolute(paths["openclip_checkpoint_prepare_result"], root_path))
     if paths["legacy_environment_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["legacy_environment_prepare_result"], root_path))
     formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
@@ -1114,7 +1468,17 @@ def build_default_config() -> TreeRingOfficialReferenceConfig:
         run_name=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_RUN_NAME", DEFAULT_RUN_NAME),
         sample_count=resolve_count_from_environment("SLM_WM_TREE_RING_OFFICIAL_SAMPLE_COUNT", default_value=paper_run.sample_count),
         start_index=int(os.environ.get("SLM_WM_TREE_RING_OFFICIAL_START_INDEX", "0")),
+        openclip_cache_root=os.environ.get(
+            "SLM_WM_OPENCLIP_CACHE_ROOT",
+            DEFAULT_SHARED_HUGGING_FACE_SNAPSHOT_ROOT,
+        ),
+        dataset=DEFAULT_PROMPT_DATASET_ID,
+        dataset_revision=DEFAULT_PROMPT_DATASET_REVISION,
         official_model_id=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_MODEL_ID", DEFAULT_OFFICIAL_MODEL_ID),
+        official_model_revision=os.environ.get(
+            "SLM_WM_TREE_RING_OFFICIAL_MODEL_REVISION",
+            DEFAULT_OFFICIAL_MODEL_REVISION,
+        ),
         upstream_official_model_id=os.environ.get("SLM_WM_TREE_RING_UPSTREAM_OFFICIAL_MODEL_ID", DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID),
         model_source_note=os.environ.get("SLM_WM_TREE_RING_MODEL_SOURCE_NOTE", DEFAULT_MODEL_SOURCE_NOTE),
         patch_model_repository_layout=os.environ.get("SLM_WM_TREE_RING_PATCH_MODEL_REPOSITORY_LAYOUT", "1") != "0",
@@ -1130,8 +1494,6 @@ def build_default_config() -> TreeRingOfficialReferenceConfig:
         legacy_pytorch_index_url=os.environ.get("SLM_WM_TREE_RING_LEGACY_PYTORCH_INDEX_URL", DEFAULT_LEGACY_PYTORCH_INDEX_URL),
         legacy_package_specs=os.environ.get("SLM_WM_TREE_RING_LEGACY_PACKAGE_SPECS", DEFAULT_LEGACY_PACKAGE_SPECS),
         run_official_command=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_RUN_COMMAND", "1") != "0",
-        summary_import_path=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_SUMMARY_IMPORT_PATH", ""),
-        log_import_path=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_LOG_IMPORT_PATH", ""),
         require_cuda=os.environ.get("SLM_WM_TREE_RING_OFFICIAL_REQUIRE_CUDA", "1") != "0",
         timeout_seconds=int(os.environ.get("SLM_WM_TREE_RING_OFFICIAL_TIMEOUT_SECONDS", "86400")),
         enable_workflow_progress_bar=os.environ.get("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1") != "0",
@@ -1199,7 +1561,23 @@ def package_tree_ring_official_reference_outputs(
             run_summary.get("run_decision") == "pass",
             run_summary.get("tree_ring_official_reference_ready") is True,
             run_summary.get("reference_import_ready") is True,
+            run_summary.get("official_execution_ready") is True,
+            run_summary.get("required_metrics_ready") is True,
+            run_summary.get("official_command_requested") is True,
+            int(run_summary.get("official_command_return_code", -1)) == 0,
             run_summary.get("baseline_id") == "tree_ring",
+            run_summary.get("model_source_ready") is True,
+            run_summary.get("model_snapshot_scope_ready") is True,
+            run_summary.get("openclip_source_ready") is True,
+            run_summary.get("openclip_repository_id") == OPENCLIP_REPOSITORY_ID,
+            run_summary.get("openclip_revision") == OPENCLIP_REVISION,
+            run_summary.get("openclip_checkpoint_filename") == OPENCLIP_CHECKPOINT_FILENAME,
+            run_summary.get("openclip_checkpoint_sha256") == OPENCLIP_CHECKPOINT_SHA256,
+            run_summary.get("openclip_checkpoint_size_bytes") == OPENCLIP_CHECKPOINT_SIZE_BYTES,
+            len(str(run_summary.get("openclip_snapshot_content_digest", ""))) == 64,
+            run_summary.get("model_source_repository_id") == DEFAULT_OFFICIAL_MODEL_ID,
+            run_summary.get("model_source_revision") == DEFAULT_OFFICIAL_MODEL_REVISION,
+            len(str(run_summary.get("model_snapshot_content_digest", ""))) == 64,
             run_summary.get("paper_claim_scale") == paper_run.run_name,
             float(run_summary.get("target_fpr", -1.0)) == paper_run.target_fpr,
         )

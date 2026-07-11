@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
 
 from experiments.runtime.image_metrics import compute_image_quality_metrics, measured_image_ssim
 from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
-from external_baseline.primary.sd35_method_faithful_common import derive_threshold
+from external_baseline.primary.sd35_method_faithful_common import (
+    DEFAULT_SD35_MODEL_REVISION,
+    derive_threshold,
+    load_sd3_pipeline as load_common_sd3_pipeline,
+)
 from external_baseline.primary.gaussian_shading.adapter.method_faithful_sd35 import (
     build_observation as build_gaussian_shading_observation,
 )
@@ -22,6 +28,7 @@ from external_baseline.primary.t2smark.adapter.run_slm_eval import (
 )
 from external_baseline.primary.tree_ring.adapter.method_faithful_sd35 import (
     build_observation as build_tree_ring_observation,
+    load_sd3_pipeline as load_tree_ring_sd3_pipeline,
 )
 from scripts.build_external_baseline_command_plan import build_parser, build_plan
 
@@ -48,6 +55,72 @@ def test_method_faithful_threshold_uses_calibration_negatives_only() -> None:
     assert first == second
     assert source == "calibration_clean_negative_conformal"
     assert sum(row["score"] >= first for row in negatives) == 0
+
+
+@pytest.mark.quick
+def test_common_backbone_loaders_pass_exact_model_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """共享 loader 与 Tree-Ring loader 都必须把不可变 commit 传给 Diffusers。"""
+
+    captured: list[dict[str, object]] = []
+
+    class Component:
+        def eval(self) -> None:
+            """模拟 Diffusers 子模块的推理模式切换。"""
+
+    class FakePipeline:
+        transformer = Component()
+        vae = Component()
+
+        @classmethod
+        def from_pretrained(cls, model_id: str, **kwargs: object) -> "FakePipeline":
+            """记录模型来源参数并返回无需权重的测试 pipeline。"""
+
+            captured.append({"model_id": model_id, **kwargs})
+            return cls()
+
+        def to(self, _device: str) -> "FakePipeline":
+            """模拟设备迁移并保持对象身份。"""
+
+            return self
+
+        def set_progress_bar_config(self, **_kwargs: object) -> None:
+            """模拟关闭 Diffusers 进度条。"""
+
+    monkeypatch.setitem(
+        sys.modules,
+        "diffusers",
+        SimpleNamespace(StableDiffusion3Pipeline=FakePipeline),
+    )
+    common_pipe = load_common_sd3_pipeline(
+        model_id="stabilityai/stable-diffusion-3.5-medium",
+        model_revision=DEFAULT_SD35_MODEL_REVISION,
+        device="cpu",
+        torch_dtype_name="float32",
+        adapter_class_name="TestCommonPipeline",
+    )
+    tree_pipe = load_tree_ring_sd3_pipeline(
+        model_id="stabilityai/stable-diffusion-3.5-medium",
+        model_revision=DEFAULT_SD35_MODEL_REVISION,
+        device="cpu",
+        torch_dtype_name="float32",
+    )
+
+    assert common_pipe is not None
+    assert tree_pipe is not None
+    assert [row["revision"] for row in captured] == [
+        DEFAULT_SD35_MODEL_REVISION,
+        DEFAULT_SD35_MODEL_REVISION,
+    ]
+    with pytest.raises(ValueError, match="40位小写十六进制"):
+        load_common_sd3_pipeline(
+            model_id="stabilityai/stable-diffusion-3.5-medium",
+            model_revision="main",
+            device="cpu",
+            torch_dtype_name="float32",
+            adapter_class_name="InvalidRevisionPipeline",
+        )
 
 
 @pytest.mark.parametrize(
@@ -84,6 +157,7 @@ def test_common_backbone_producers_bind_formal_attack_identity(
         "latent_shape": (1, 16, 64, 64),
         "execution_device": "cuda",
         "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        "model_revision": DEFAULT_SD35_MODEL_REVISION,
         "quality_score": 0.9,
         "score_retention": 0.8,
         "attack_id": attack_config.attack_id,
@@ -97,6 +171,7 @@ def test_common_backbone_producers_bind_formal_attack_identity(
     assert row["attack_id"] == attack_config.attack_id
     assert row["resource_profile"] == attack_config.resource_profile
     assert row["attack_config_digest"] == attack_config_digest(attack_config)
+    assert row["generation_model_revision"] == DEFAULT_SD35_MODEL_REVISION
 
     kwargs["attack_config_digest_value"] = "0" * 64
     with pytest.raises(ValueError, match="AttackConfig"):
@@ -271,6 +346,7 @@ def test_external_baseline_plan_requires_target_fpr_and_real_mode(tmp_path: Path
     command = plan[0]["command"]
     assert command[command.index("--adapter-mode") + 1] == "method_faithful_sd35"
     assert command[command.index("--target-fpr") + 1] == "0.1"
+    assert command[command.index("--model-revision") + 1] == DEFAULT_SD35_MODEL_REVISION
 
 
 @pytest.mark.quick

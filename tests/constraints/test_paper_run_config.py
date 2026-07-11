@@ -7,8 +7,6 @@ from pathlib import Path
 import pytest
 
 from experiments.protocol.paper_run_config import (
-    DEFAULT_CONTENT_BASIS_RANK,
-    DEFAULT_CONTENT_VECTOR_WIDTH,
     DEFAULT_DRIVE_ROOT,
     build_paper_run_config,
     derive_dataset_level_quality_minimum_count,
@@ -65,8 +63,6 @@ def test_paper_run_config_resolves_probe_paper_defaults(
     assert config.target_fpr == 0.1
     assert config.minimum_clean_negative_count == 34
     assert config.dataset_level_quality_minimum_count == 70
-    assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
-    assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
     assert config.drive_dir("aligned_rescoring").endswith("/probe_paper_results/aligned_rescoring")
 
 
@@ -95,8 +91,6 @@ def test_paper_run_config_switches_to_full_paper_without_notebook_rewrite(
     assert config.target_fpr == 0.001
     assert config.minimum_clean_negative_count == 3400
     assert config.dataset_level_quality_minimum_count == 7000
-    assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
-    assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
     assert config.drive_dir("threshold_calibration").endswith("/full_paper_results/threshold_calibration")
 
 
@@ -125,8 +119,6 @@ def test_paper_run_config_switches_to_pilot_paper_with_explicit_input(
     assert config.target_fpr == 0.01
     assert config.minimum_clean_negative_count == 340
     assert config.dataset_level_quality_minimum_count == 700
-    assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
-    assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
     assert config.drive_dir("aligned_rescoring").endswith("/pilot_paper_results/aligned_rescoring")
 
 

@@ -570,6 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--attack-condition", default="clean_none", help="无 attack manifest 时使用的攻击条件标签。")
     parser.add_argument("--require-cuda", action="store_true", help="运行前要求 CUDA 可用。")
     parser.add_argument("--model-id", default="stabilityai/stable-diffusion-3.5-medium")
+    parser.add_argument("--model-revision", required=True)
     parser.add_argument("--torch-dtype", default="float16")
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)
@@ -600,10 +601,24 @@ def main() -> None:
         attack_family=args.attack_family,
         attack_condition=args.attack_condition,
     )
-    output_path = _write_json(args.out, observations)
+    output_path = Path(args.out)
+    manifest.pop("adapter_digest", None)
     manifest["baseline_observations_path"] = str(output_path)
     manifest["image_pairs_path"] = str(Path(args.image_pairs))
     manifest["t2smark_results_path"] = str(Path(args.t2smark_results))
+    manifest["generation_protocol"] = {
+        "model_id": args.model_id,
+        "model_revision": args.model_revision,
+        "num_inference_steps": int(args.num_inference_steps),
+        "guidance_scale": float(args.guidance_scale),
+    }
+    manifest["detection_protocol"] = {
+        "input_access_mode": "image_only",
+        "num_inversion_steps": int(args.num_inversion_steps),
+        "target_fpr": float(args.target_fpr),
+    }
+    manifest["adapter_digest"] = build_stable_digest(manifest)
+    output_path = _write_json(output_path, observations)
     manifest_path = output_path.with_name("t2smark_slm_adapter_manifest.json")
     _write_json(manifest_path, manifest)
     if args.artifact_root:

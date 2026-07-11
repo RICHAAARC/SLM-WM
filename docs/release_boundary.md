@@ -6,6 +6,7 @@
 
 - `main/`
 - `configs/model_sd35.yaml`
+- `configs/model_source_registry.json`
 - 根目录 `README.md`
 - `pyproject.toml`
 

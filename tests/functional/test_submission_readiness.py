@@ -146,7 +146,6 @@ def write_minimal_repository_files(tmp_path: Path) -> None:
         "main/__init__.py",
         "main/core/__init__.py",
         "main/methods/__init__.py",
-        "configs/model_sd35.yaml",
         "experiments/protocol/__init__.py",
         "paper_experiments/__init__.py",
         "paper_experiments/baselines/__init__.py",
@@ -166,6 +165,10 @@ def write_minimal_repository_files(tmp_path: Path) -> None:
         "docs/intermediate_state_governance.md",
     ]:
         (tmp_path / file_path).write_text("# fixture\n", encoding="utf-8")
+    repository_root = Path(__file__).resolve().parents[2]
+    for config_name in ("model_sd35.yaml", "model_source_registry.json"):
+        source_path = repository_root / "configs" / config_name
+        (tmp_path / "configs" / config_name).write_bytes(source_path.read_bytes())
 
 
 def write_upstream_audit_outputs(tmp_path: Path) -> None:

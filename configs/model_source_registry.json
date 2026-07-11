@@ -1,0 +1,78 @@
+{
+  "registry_schema": "immutable_hugging_face_source_registry",
+  "schema_version": 1,
+  "sources": {
+    "gustavosta_stable_diffusion_prompts": {
+      "access_policy": "public",
+      "provider": "hugging_face_hub",
+      "repository_id": "Gustavosta/Stable-Diffusion-Prompts",
+      "repository_type": "dataset",
+      "revision": "d816d4a05cb89bde39dd99284c459801e1e7e69a",
+      "revision_url": "https://huggingface.co/datasets/Gustavosta/Stable-Diffusion-Prompts/tree/d816d4a05cb89bde39dd99284c459801e1e7e69a",
+      "source_url": "https://huggingface.co/datasets/Gustavosta/Stable-Diffusion-Prompts",
+      "usage_roles": [
+        "legacy_baseline_prompt_dataset"
+      ]
+    },
+    "laion_clip_vit_g14": {
+      "access_policy": "public",
+      "provider": "hugging_face_hub",
+      "repository_id": "laion/CLIP-ViT-g-14-laion2B-s12B-b42K",
+      "repository_type": "model",
+      "required_files": [
+        {
+          "path": "open_clip_pytorch_model.bin",
+          "sha256": "6aac683f899159946bc4ca15228bb7016f3cbb1a2c51f365cba0b23923f344da",
+          "size_bytes": 5467006745
+        }
+      ],
+      "revision": "4b0305adc6802b2632e11cbe6606a9bdd43d35c9",
+      "revision_url": "https://huggingface.co/laion/CLIP-ViT-g-14-laion2B-s12B-b42K/tree/4b0305adc6802b2632e11cbe6606a9bdd43d35c9",
+      "source_url": "https://huggingface.co/laion/CLIP-ViT-g-14-laion2B-s12B-b42K",
+      "usage_roles": [
+        "official_reference_openclip_encoder"
+      ]
+    },
+    "manojb_stable_diffusion_2_1_base": {
+      "access_policy": "public",
+      "provider": "hugging_face_hub",
+      "repository_id": "Manojb/stable-diffusion-2-1-base",
+      "repository_type": "model",
+      "revision": "0094d483a120f3f33dafbd187ea4aa60d10de75c",
+      "revision_url": "https://huggingface.co/Manojb/stable-diffusion-2-1-base/tree/0094d483a120f3f33dafbd187ea4aa60d10de75c",
+      "source_url": "https://huggingface.co/Manojb/stable-diffusion-2-1-base",
+      "upstream_access_status": "unavailable",
+      "upstream_repository_id": "stabilityai/stable-diffusion-2-1-base",
+      "usage_roles": [
+        "official_reference_diffusion_model"
+      ]
+    },
+    "openai_clip_vit_base_patch32": {
+      "access_policy": "public",
+      "provider": "hugging_face_hub",
+      "repository_id": "openai/clip-vit-base-patch32",
+      "repository_type": "model",
+      "revision": "3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268",
+      "revision_url": "https://huggingface.co/openai/clip-vit-base-patch32/tree/3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268",
+      "source_url": "https://huggingface.co/openai/clip-vit-base-patch32",
+      "usage_roles": [
+        "semantic_condition_encoder",
+        "t2smark_pair_quality_encoder"
+      ]
+    },
+    "stabilityai_stable_diffusion_3_5_medium": {
+      "access_policy": "gated",
+      "provider": "hugging_face_hub",
+      "repository_id": "stabilityai/stable-diffusion-3.5-medium",
+      "repository_type": "model",
+      "revision": "b940f670f0eda2d07fbb75229e779da1ad11eb80",
+      "revision_url": "https://huggingface.co/stabilityai/stable-diffusion-3.5-medium/tree/b940f670f0eda2d07fbb75229e779da1ad11eb80",
+      "source_url": "https://huggingface.co/stabilityai/stable-diffusion-3.5-medium",
+      "usage_roles": [
+        "primary_diffusion_model",
+        "common_backbone_baseline_model",
+        "t2smark_diffusion_model"
+      ]
+    }
+  }
+}

@@ -19,7 +19,15 @@
 
 高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对标准高斯模板按元素绝对幅值分位点截断, 不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。内容模板与安全投影实现位于 `main/methods/carrier/keyed_tensor.py`。
 
-## 二、检测访问边界
+## 二、不可变模型输入
+
+正式科学算子不把模型仓库名当作完整输入。`configs/model_source_registry.json` 同时固定仓库标识和40位不可变 revision。当前主方法与 common-backbone baseline 共用 `stabilityai/stable-diffusion-3.5-medium@b940f670f0eda2d07fbb75229e779da1ad11eb80`, 语义条件与成对质量评估使用 `openai/clip-vit-base-patch32@3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268`。
+
+Tree-Ring、Gaussian Shading 和 Shallow Diffuse 的 official-reference 模型使用 `Manojb/stable-diffusion-2-1-base@0094d483a120f3f33dafbd187ea4aa60d10de75c` 公开镜像。运行报告明确区分该有效镜像与当前不可访问的上游仓库, 并对本地快照的每个 loader 可见文件记录 SHA-256。既有目录只有在仓库、revision 和逐文件摘要全部一致时才可复用。
+
+三套 official-reference 的语义质量指标统一由 `ViT-g-14` 和 `laion/CLIP-ViT-g-14-laion2B-s12B-b42K@4b0305adc6802b2632e11cbe6606a9bdd43d35c9` 中的 `open_clip_pytorch_model.bin` 计算。checkpoint 文件固定为5467006745字节, SHA-256 为 `6aac683f899159946bc4ca15228bb7016f3cbb1a2c51f365cba0b23923f344da`。runner 只向官方命令传入通过本地逐文件核验的 checkpoint 路径, 不使用可漂移的远程 pretrained tag。
+
+## 三、检测访问边界
 
 正式检测接口为：
 
@@ -36,7 +44,7 @@ detect_image_only_watermark(
 
 该接口没有原始 latent、生成轨迹、原始图像、Prompt 或样本级安全基底参数。数据集运行器只允许通过该接口生成正式检测记录。
 
-## 三、固定模板与安全投影的盲检闭合
+## 四、固定模板与安全投影的盲检闭合
 
 检测模板由密钥、公开模型标识和 latent 形状确定。嵌入端求得安全基底 $B$ 后执行：
 
@@ -51,7 +59,7 @@ $$
 3. $\nu^\top BB^\top\nu\ge0$, 投影保留的模板能量可以作为运行记录审计；
 4. 投影能量过低时运行必须失败, 不能退回 one-hot 或周期平铺代理。
 
-## 四、完整实验链
+## 五、完整实验链
 
 1. `scripts/run_image_only_dataset_runtime.py` 读取当前 `paper_run` Prompt 文件；
 2. 复用一次加载的 SD3.5 Medium、VAE 和 CLIP 运行时；
@@ -66,7 +74,7 @@ $$
 
 8类 GPU 扩散攻击共享同一个受治理实现。`img2img_regeneration`、`sdedit_regeneration`、`diffusion_purification`、`global_editing_attack` 和 `visual_paraphrase_attack` 通过 `StableDiffusion3Img2ImgPipeline` 的 `image + strength` 路径执行；`flow_matching_inversion_regeneration` 通过 SD3 scheduler 的反向 Euler 积分恢复高噪声 latent 后重建；`local_editing_attack` 通过 inpainting pipeline 和面积受控 mask 执行，并在输出端严格保留 mask 外源像素；`adversarial_removal_attack` 在冻结候选查询预算内逐一调用对应方法的真实仅图像连续检测分数并选择最低分候选。攻击参数、随机种子、mask 摘要和查询轨迹写入 `attack_execution`，外部 baseline 不维护第二套 latent 混合攻击。
 
-## 五、主张边界
+## 六、主张边界
 
 实现存在不等于论文结果成立。下列条件全部满足后, 结果记录才允许进入主张门禁：
 

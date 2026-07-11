@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from experiments.runtime import repository_environment
+from experiments.runtime.model_sources import require_registered_model_reference
 from experiments.runtime.repository_environment import (
     build_runtime_environment_report,
     flatten_environment_versions,
@@ -31,20 +32,30 @@ def import_runtime_dependencies() -> tuple[Any, Any, Any, Any]:
 def load_pipeline(config: Any) -> tuple[Any, dict[str, Any]]:
     """加载真实 SD3 系列 pipeline 并移动到目标设备。
 
-    `config` 只要求提供 `device_name`、`torch_dtype`、`hf_token_env` 和
-    `model_id` 字段, 因而可被最小机制预检 runner 与正式 latent injection
-    runner 共同复用。
+    `config` 只要求提供 `device_name`、`torch_dtype`、`hf_token_env`、
+    `model_id` 和 `model_revision` 字段, 因而可被最小机制预检 runner 与
+    正式 latent injection runner 共同复用。
     """
 
     formal_execution_lock = (
         repository_environment.require_published_formal_execution_lock(Path.cwd())
+    )
+    model_source = require_registered_model_reference(
+        config.model_id,
+        config.model_revision,
+        required_usage_role="primary_diffusion_model",
     )
     _, torch, _, pipeline_class = import_runtime_dependencies()
     if config.device_name == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("gpu_unavailable")
     dtype = getattr(torch, config.torch_dtype)
     token = os.environ.get(config.hf_token_env) or None
-    pipeline = pipeline_class.from_pretrained(config.model_id, torch_dtype=dtype, token=token)
+    pipeline = pipeline_class.from_pretrained(
+        config.model_id,
+        revision=config.model_revision,
+        torch_dtype=dtype,
+        token=token,
+    )
     pipeline = pipeline.to(config.device_name)
     pipeline.set_progress_bar_config(disable=False)
     environment_report = build_runtime_environment_report(
@@ -54,6 +65,7 @@ def load_pipeline(config: Any) -> tuple[Any, dict[str, Any]]:
     runtime_versions = {
         **flatten_environment_versions(environment_report),
         "runtime_environment": environment_report,
+        "diffusion_model_source": model_source.to_dict(),
     }
     return pipeline, runtime_versions
 

@@ -22,6 +22,7 @@ from experiments.protocol.attacks import (
     resolve_formal_attack_config,
 )
 from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_observation_threshold
+from experiments.runtime.model_sources import get_model_source, require_registered_model_reference
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments
 from main.core.digest import build_stable_digest
@@ -35,7 +36,9 @@ METHOD_FAITHFUL_BASELINE_IDS = (
 DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT = Path("outputs/external_baseline_method_faithful")
 SPLIT_OBSERVATION_DIR_NAME = "split_observations"
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
-FORMAL_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
+_COMMON_BACKBONE_SOURCE = get_model_source("stabilityai_stable_diffusion_3_5_medium")
+FORMAL_MODEL_ID = _COMMON_BACKBONE_SOURCE.repository_id
+FORMAL_MODEL_REVISION = _COMMON_BACKBONE_SOURCE.revision
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,8 @@ class MethodFaithfulObservationSource:
     prompt_plan_path: Path
     adapter_manifest_path: Path
     execution_manifest_path: Path
+    model_id: str
+    model_revision: str
     rows: tuple[dict[str, Any], ...]
     transfer_manifest: dict[str, Any]
 
@@ -63,9 +68,21 @@ class MethodFaithfulCollectionProtocol:
     prompt_protocol_digest: str
     target_fpr: float
     model_id: str = FORMAL_MODEL_ID
+    model_revision: str = FORMAL_MODEL_REVISION
     num_inference_steps: int = DEFAULT_INFERENCE_STEPS
     num_inversion_steps: int = DEFAULT_INFERENCE_STEPS
     guidance_scale: float = DEFAULT_GUIDANCE_SCALE
+
+    def __post_init__(self) -> None:
+        """将正式 collection 固定到预注册的模型仓库与不可变 commit。"""
+
+        if self.model_id != FORMAL_MODEL_ID or self.model_revision != FORMAL_MODEL_REVISION:
+            raise ValueError("method_faithful_collection_model_source_mismatch")
+        require_registered_model_reference(
+            self.model_id,
+            self.model_revision,
+            required_usage_role="common_backbone_baseline_model",
+        )
 
 
 def canonical_prompt_protocol_digest(rows: Iterable[Mapping[str, Any]]) -> str:
@@ -243,6 +260,8 @@ def _validate_transfer_manifest(
         "paper_run_name",
         "prompt_set",
         "prompt_count",
+        "model_id",
+        "model_revision",
         "target_fpr",
         "generation_protocol",
         "detection_protocol",
@@ -286,6 +305,10 @@ def _validate_transfer_manifest(
         raise ValueError(f"method_faithful_transfer_prompt_set_mismatch:{baseline_id}")
     if int(manifest["prompt_count"]) != protocol.prompt_count:
         raise ValueError(f"method_faithful_transfer_prompt_count_mismatch:{baseline_id}")
+    if str(manifest["model_id"]) != protocol.model_id:
+        raise ValueError(f"method_faithful_transfer_model_id_mismatch:{baseline_id}")
+    if str(manifest["model_revision"]) != protocol.model_revision:
+        raise ValueError(f"method_faithful_transfer_model_revision_mismatch:{baseline_id}")
     try:
         target_fpr = float(manifest["target_fpr"])
     except (TypeError, ValueError) as exc:
@@ -338,6 +361,10 @@ def _validate_transfer_manifest(
         raise ValueError(f"method_faithful_adapter_manifest_status_invalid:{baseline_id}")
     if str(adapter_manifest.get("adapter_boundary", "")) != "method_faithful_sd35_adapter_reproduction":
         raise ValueError(f"method_faithful_adapter_manifest_boundary_invalid:{baseline_id}")
+    if str(adapter_manifest.get("model_id", "")) != protocol.model_id:
+        raise ValueError(f"method_faithful_adapter_manifest_model_id_mismatch:{baseline_id}")
+    if str(adapter_manifest.get("model_revision", "")) != protocol.model_revision:
+        raise ValueError(f"method_faithful_adapter_manifest_model_revision_mismatch:{baseline_id}")
     if int(adapter_manifest.get("observation_count", -1)) != raw_count:
         raise ValueError(f"method_faithful_adapter_manifest_count_mismatch:{baseline_id}")
     adapter_generation = adapter_manifest.get("generation_protocol")
@@ -485,6 +512,7 @@ def _validate_runtime_budget(
         ) from exc
     ready = (
         str(generation.get("model_id", "")) == protocol.model_id
+        and str(generation.get("model_revision", "")) == protocol.model_revision
         and generation_steps == protocol.num_inference_steps
         and inversion_steps == protocol.num_inversion_steps
         and math.isclose(guidance_scale, protocol.guidance_scale, rel_tol=0.0, abs_tol=1e-12)
@@ -596,6 +624,15 @@ def load_method_faithful_observation_collection(
                     "method_faithful_observation_baseline_mismatch:"
                     f"{baseline_id}:{row_index}:{row_baseline_id}"
                 )
+            if (
+                str(row.get("generation_model_id", "")) != resolved_protocol.model_id
+                or str(row.get("generation_model_revision", ""))
+                != resolved_protocol.model_revision
+            ):
+                raise ValueError(
+                    "method_faithful_observation_model_revision_mismatch:"
+                    f"{baseline_id}:{row_index}"
+                )
             event_id = str(row.get("event_id", "")).strip()
             if not event_id:
                 raise ValueError(f"method_faithful_observation_event_id_empty:{baseline_id}:{row_index}")
@@ -614,6 +651,8 @@ def load_method_faithful_observation_collection(
                 prompt_plan_path=prompt_plan_path,
                 adapter_manifest_path=adapter_manifest_path,
                 execution_manifest_path=execution_manifest_path,
+                model_id=resolved_protocol.model_id,
+                model_revision=resolved_protocol.model_revision,
                 rows=tuple(normalized_rows),
                 transfer_manifest=manifest,
             )

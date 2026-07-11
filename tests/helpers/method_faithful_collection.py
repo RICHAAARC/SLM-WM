@@ -16,6 +16,7 @@ from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments
 from paper_experiments.baselines.method_faithful_observation_collection import (
     FORMAL_MODEL_ID,
+    FORMAL_MODEL_REVISION,
     METHOD_FAITHFUL_BASELINE_IDS,
     MethodFaithfulCollectionProtocol,
     build_method_faithful_collection_protocol,
@@ -138,6 +139,8 @@ def formal_observation_rows(
                     "threshold_source": "calibration_clean_negative_conformal",
                     "detection_decision": score >= threshold,
                     "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
+                    "generation_model_id": protocol.model_id,
+                    "generation_model_revision": protocol.model_revision,
                     "execution_device": "cuda",
                     "latent_shape": [1, 16, 64, 64],
                     "image_id": f"{baseline_id}_{prompt['prompt_id']}_{sample_role}",
@@ -174,6 +177,8 @@ def formal_observation_rows(
                         "threshold_source": "calibration_clean_negative_conformal",
                         "detection_decision": score >= threshold,
                         "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
+                        "generation_model_id": protocol.model_id,
+                        "generation_model_revision": protocol.model_revision,
                         "execution_device": "cuda",
                         "latent_shape": [1, 16, 64, 64],
                         "image_id": f"{baseline_id}_{prompt['prompt_id']}_{attack.attack_name}_{sample_role}",
@@ -221,6 +226,7 @@ def write_collection_source(
     write_json(prompt_path, prompts)
     generation_protocol = {
         "model_id": FORMAL_MODEL_ID,
+        "model_revision": FORMAL_MODEL_REVISION,
         "num_inference_steps": protocol.num_inference_steps,
         "guidance_scale": protocol.guidance_scale,
         "height": 512,
@@ -243,6 +249,8 @@ def write_collection_source(
             "baseline_id": baseline_id,
             "adapter_status": "method_faithful_sd35_adapter_ready",
             "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
+            "model_id": FORMAL_MODEL_ID,
+            "model_revision": FORMAL_MODEL_REVISION,
             "observation_count": len(observations),
             "generation_protocol": generation_protocol,
             "detection_protocol": detection_protocol,
@@ -276,6 +284,8 @@ def write_collection_source(
         "paper_run_name": protocol.paper_run_name,
         "prompt_set": protocol.prompt_set,
         "prompt_count": protocol.prompt_count,
+        "model_id": FORMAL_MODEL_ID,
+        "model_revision": FORMAL_MODEL_REVISION,
         "target_fpr": protocol.target_fpr,
         "generation_protocol": generation_protocol,
         "detection_protocol": detection_protocol,

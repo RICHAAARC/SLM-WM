@@ -12,7 +12,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.method_runtime_config import (
+    load_formal_method_runtime_config,
+    require_formal_method_environment_consistency,
+)
+from experiments.protocol.paper_run_config import build_paper_run_config, shared_method_settings
 from experiments.artifacts.dataset_level_quality_outputs import (
     package_dataset_level_quality_outputs,
     write_dataset_level_quality_outputs,
@@ -25,33 +29,42 @@ from experiments.runners.semantic_watermark_runtime import SemanticWatermarkRunt
 
 
 def build_method_config(root: str | Path = ".") -> SemanticWatermarkRuntimeConfig:
-    """从统一论文配置和环境变量构造真实方法配置。"""
+    """从唯一方法 YAML 与运行环境控制项构造真实方法配置。"""
 
+    method = load_formal_method_runtime_config(root)
+    require_formal_method_environment_consistency(method)
     paper_run = build_paper_run_config(root)
+    if shared_method_settings(paper_run) != method.paper_method_settings():
+        raise RuntimeError("论文运行配置没有完整继承 configs/model_sd35.yaml")
     return SemanticWatermarkRuntimeConfig(
-        model_family=os.environ.get("SLM_WM_MODEL_FAMILY", "sd35"),
-        model_id=os.environ.get("SLM_WM_MODEL_ID", "stabilityai/stable-diffusion-3.5-medium"),
-        vision_model_id=os.environ.get("SLM_WM_VISION_MODEL_ID", "openai/clip-vit-base-patch32"),
+        model_family=method.model_family,
+        model_id=method.model_id,
+        model_revision=method.model_revision,
+        vision_model_id=method.vision_model_id,
+        vision_model_revision=method.vision_model_revision,
         device_name=os.environ.get("SLM_WM_DEVICE", "cuda"),
         torch_dtype=os.environ.get("SLM_WM_TORCH_DTYPE", "float16"),
         vision_torch_dtype=os.environ.get("SLM_WM_VISION_TORCH_DTYPE", "float32"),
+        prompt=method.prompt,
+        negative_prompt=method.negative_prompt,
         key_material=os.environ.get("SLM_WM_KEY_MATERIAL", "slm_wm_paper_key"),
-        seed=int(os.environ.get("SLM_WM_SEED", "1703")),
-        width=int(os.environ.get("SLM_WM_IMAGE_WIDTH", "512")),
-        height=int(os.environ.get("SLM_WM_IMAGE_HEIGHT", "512")),
-        inference_steps=paper_run.inference_steps,
-        guidance_scale=paper_run.guidance_scale,
-        injection_step_indices=paper_run.attention_injection_steps,
-        candidate_count=paper_run.jacobian_candidate_count,
-        null_rank=paper_run.null_space_rank,
-        lf_relative_strength=paper_run.lf_relative_strength,
-        tail_relative_strength=paper_run.tail_relative_strength,
-        attention_relative_strength=paper_run.attention_relative_strength,
-        tail_fraction=paper_run.tail_fraction,
-        minimum_projection_energy_retention=paper_run.minimum_projection_energy_retention,
-        maximum_relative_response_residual=paper_run.maximum_relative_response_residual,
-        max_attention_tokens=int(os.environ.get("SLM_WM_MAX_ATTENTION_TOKENS", "64")),
-        diffusion_attacks_enabled=os.environ.get("SLM_WM_ENABLE_DIFFUSION_ATTACKS", "1") != "0",
+        seed=method.seed,
+        width=method.width,
+        height=method.height,
+        inference_steps=method.inference_steps,
+        guidance_scale=method.guidance_scale,
+        injection_step_indices=method.injection_step_indices,
+        candidate_count=method.jacobian_candidate_count,
+        null_rank=method.null_space_rank,
+        lf_relative_strength=method.lf_relative_strength,
+        tail_relative_strength=method.tail_relative_strength,
+        attention_relative_strength=method.attention_relative_strength,
+        tail_fraction=method.tail_fraction,
+        minimum_projection_energy_retention=method.minimum_projection_energy_retention,
+        maximum_relative_response_residual=method.maximum_relative_response_residual,
+        max_attention_tokens=method.max_attention_tokens,
+        attention_module_count=method.attention_module_count,
+        diffusion_attacks_enabled=method.diffusion_attacks_enabled,
     )
 
 

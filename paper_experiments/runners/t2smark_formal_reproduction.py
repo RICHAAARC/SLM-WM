@@ -19,7 +19,10 @@ from paper_experiments.baselines import (
     resolve_paper_run_prompt_protocol_name,
     validate_primary_baseline_formal_import_rows,
 )
-from paper_experiments.baselines.t2smark_pair_quality import write_t2smark_strict_pair_quality_outputs
+from paper_experiments.baselines.t2smark_pair_quality import (
+    DEFAULT_CLIP_MODEL_REVISION,
+    write_t2smark_strict_pair_quality_outputs,
+)
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_FIXED_FPR,
 )
@@ -29,6 +32,7 @@ from experiments.protocol.paper_run_config import (
     resolve_count_from_environment,
 )
 from experiments.runtime import repository_environment
+from experiments.runtime.model_sources import require_registered_model_reference
 from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_observation_threshold
 from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
 from experiments.protocol.splits import apply_split_assignments
@@ -38,6 +42,7 @@ from external_baseline.primary.sd35_method_faithful_common import supported_form
 from paper_experiments.runners.external_source_runtime import ensure_cuda_if_requested, run_command
 from paper_experiments.runners.t2smark_source_runtime import (
     DEFAULT_T2SMARK_MODEL_ID,
+    DEFAULT_T2SMARK_MODEL_REVISION,
     DEFAULT_T2SMARK_SOURCE_ENTRY,
     configured_attack_names,
     count_t2smark_formal_attack_items,
@@ -77,6 +82,7 @@ class T2SMarkFormalReproductionConfig:
     prompt_file: str = DEFAULT_PROMPT_FILE
     t2smark_run_name: str = DEFAULT_RUN_NAME
     model_id: str = DEFAULT_T2SMARK_MODEL_ID
+    model_revision: str = DEFAULT_T2SMARK_MODEL_REVISION
     seed: int = 20260621
     prompt_limit: int = DEFAULT_PROMPT_LIMIT
     clip_test_num: int = 0
@@ -92,6 +98,7 @@ class T2SMarkFormalReproductionConfig:
     formal_attack_families: str = DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES
     enable_pair_perceptual_metrics: bool = True
     pair_clip_model_id: str = DEFAULT_T2SMARK_CLIP_MODEL_ID
+    pair_clip_model_revision: str = DEFAULT_CLIP_MODEL_REVISION
     pair_lpips_network: str = DEFAULT_T2SMARK_LPIPS_NETWORK
     pair_perceptual_metric_device_name: str = "cpu"
     require_cuda: bool = True
@@ -338,6 +345,8 @@ def validate_t2smark_formal_protocol_config(
 ) -> Any:
     """要求 T2SMark 使用当前论文级别的完整 Prompt 与冻结公平预算。"""
 
+    if int(config.clip_test_num) != 0:
+        raise ValueError("T2SMark formal 必须禁用官方源码中未受治理的 OpenCLIP 测试分支")
     paper_run = build_paper_run_config(root_path)
     expected_attacks = tuple(supported_formal_image_attack_names())
     actual_attacks = configured_attack_names(config.formal_attack_families)
@@ -351,6 +360,17 @@ def validate_t2smark_formal_protocol_config(
         raise ValueError("T2SMark 最小 Prompt 协议计数必须等于完整 Prompt 数量")
     if config.model_id != DEFAULT_T2SMARK_MODEL_ID:
         raise ValueError("T2SMark formal 必须使用冻结的 SD3.5 Medium backbone")
+    if config.model_revision != DEFAULT_T2SMARK_MODEL_REVISION:
+        raise ValueError("T2SMark formal 必须使用冻结的 SD3.5 Medium revision")
+    require_registered_model_reference(
+        config.model_id,
+        config.model_revision,
+        required_usage_role="t2smark_diffusion_model",
+    )
+    if config.pair_clip_model_id != DEFAULT_T2SMARK_CLIP_MODEL_ID:
+        raise ValueError("T2SMark formal 必须使用冻结的 CLIP 质量模型")
+    if config.pair_clip_model_revision != DEFAULT_CLIP_MODEL_REVISION:
+        raise ValueError("T2SMark formal 必须使用冻结的 CLIP revision")
     if int(config.num_inference_steps) != FORMAL_T2SMARK_NUM_INFERENCE_STEPS:
         raise ValueError("T2SMark formal 生成步数必须为20")
     if int(config.num_inversion_steps) != FORMAL_T2SMARK_NUM_INVERSION_STEPS:
@@ -391,10 +411,12 @@ def build_t2smark_formal_protocol_binding(
         "canonical_prompt_digest": str(prompt_report["prompt_protocol_digest"]),
         "selected_prompt_count": int(prompt_report["selected_prompt_count"]),
         "model_id": config.model_id,
+        "model_revision": config.model_revision,
         "seed": int(config.seed),
         "num_inference_steps": int(config.num_inference_steps),
         "num_inversion_steps": int(config.num_inversion_steps),
         "guidance_scale": float(config.guidance_scale),
+        "clip_test_num": int(config.clip_test_num),
         "height": FORMAL_T2SMARK_IMAGE_SIZE,
         "width": FORMAL_T2SMARK_IMAGE_SIZE,
         "formal_attack_names": list(configured_attack_names(config.formal_attack_families)),
@@ -607,6 +629,8 @@ def run_t2smark_official_if_needed(
         str(paths["prompt_dataset"]),
         "--model_key",
         config.model_id,
+        "--model_revision",
+        config.model_revision,
         "--guidance_scale",
         str(config.guidance_scale),
         "--num_inference_steps",
@@ -724,6 +748,8 @@ def run_t2smark_adapter(
         str(paths["adapter_observations"].parent / "artifacts"),
         "--model-id",
         config.model_id,
+        "--model-revision",
+        config.model_revision,
         "--seed",
         str(config.seed),
         "--target-fpr",
@@ -915,6 +941,7 @@ def write_t2smark_formal_reproduction_outputs(
                 summary_path=paths["pair_quality_summary"],
                 enable_pair_perceptual_metrics=config.enable_pair_perceptual_metrics,
                 clip_model_id=config.pair_clip_model_id,
+                clip_model_revision=config.pair_clip_model_revision,
                 lpips_network=config.pair_lpips_network,
                 perceptual_metric_device_name=config.pair_perceptual_metric_device_name,
             )
@@ -1070,12 +1097,13 @@ def build_default_config() -> T2SMarkFormalReproductionConfig:
         prompt_file=os.environ.get("SLM_WM_T2SMARK_FORMAL_PROMPT_FILE", paper_run.prompt_file),
         t2smark_run_name=os.environ.get("SLM_WM_T2SMARK_FORMAL_RUN_NAME", DEFAULT_RUN_NAME),
         model_id=os.environ.get("SLM_WM_T2SMARK_MODEL_ID", DEFAULT_T2SMARK_MODEL_ID),
+        model_revision=os.environ.get("SLM_WM_T2SMARK_MODEL_REVISION", DEFAULT_T2SMARK_MODEL_REVISION),
         seed=int(os.environ.get("SLM_WM_T2SMARK_FORMAL_SEED", "20260621")),
         prompt_limit=resolve_count_from_environment(
             "SLM_WM_T2SMARK_FORMAL_PROMPT_LIMIT",
             default_value=paper_run.sample_count,
         ),
-        clip_test_num=int(os.environ.get("SLM_WM_T2SMARK_FORMAL_CLIP_TEST_NUM", "0")),
+        clip_test_num=0,
         num_inference_steps=int(
             os.environ.get("SLM_WM_T2SMARK_FORMAL_NUM_INFERENCE_STEPS", str(paper_run.inference_steps))
         ),
@@ -1097,6 +1125,10 @@ def build_default_config() -> T2SMarkFormalReproductionConfig:
         ),
         enable_pair_perceptual_metrics=os.environ.get("SLM_WM_T2SMARK_FORMAL_PAIR_PERCEPTUAL_METRICS", "1") != "0",
         pair_clip_model_id=os.environ.get("SLM_WM_T2SMARK_FORMAL_PAIR_CLIP_MODEL_ID", DEFAULT_T2SMARK_CLIP_MODEL_ID),
+        pair_clip_model_revision=os.environ.get(
+            "SLM_WM_T2SMARK_FORMAL_PAIR_CLIP_MODEL_REVISION",
+            DEFAULT_CLIP_MODEL_REVISION,
+        ),
         pair_lpips_network=os.environ.get("SLM_WM_T2SMARK_FORMAL_PAIR_LPIPS_NETWORK", DEFAULT_T2SMARK_LPIPS_NETWORK),
         pair_perceptual_metric_device_name=os.environ.get("SLM_WM_T2SMARK_FORMAL_PAIR_PERCEPTUAL_DEVICE", "cpu"),
         require_cuda=os.environ.get("SLM_WM_T2SMARK_FORMAL_REQUIRE_CUDA", "1") != "0",

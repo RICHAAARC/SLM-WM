@@ -6,16 +6,29 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
+from experiments.runtime.model_sources import require_registered_model_reference
 
-def load_clip_vision_model(model_id: str, device_name: str, torch_dtype: str = "float32") -> Any:
+
+def load_clip_vision_model(
+    model_id: str,
+    model_revision: str,
+    device_name: str,
+    torch_dtype: str = "float32",
+) -> Any:
     """加载冻结的 CLIP 图像编码器, 用作真实语义特征映射。"""
 
     import torch
     from transformers import CLIPVisionModelWithProjection
 
+    require_registered_model_reference(
+        model_id,
+        model_revision,
+        required_usage_role="semantic_condition_encoder",
+    )
     dtype = getattr(torch, torch_dtype)
     model = CLIPVisionModelWithProjection.from_pretrained(
         model_id,
+        revision=model_revision,
         torch_dtype=dtype,
         attn_implementation="eager",
     )
@@ -108,9 +121,6 @@ class DifferentiableSemanticFeatureRuntime:
     def visual_features(self, latent: Any) -> Any:
         """返回亮度、对比度、边缘和多尺度结构特征。"""
 
-        import torch
-        import torch.nn.functional as functional
-
         image = self.decode_latent(latent)
         return self._visual_features_from_image(image)
 
@@ -185,7 +195,6 @@ class DifferentiableSemanticFeatureRuntime:
         一致性作为可复现的首时刻稳定性定义。
         """
 
-        import torch
         import torch.nn.functional as functional
 
         image = self.decode_latent(latent)

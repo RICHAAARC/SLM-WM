@@ -25,6 +25,7 @@ PROFILES = {
         include_paths=(
             "main",
             "configs/model_sd35.yaml",
+            "configs/model_source_registry.json",
             "README.md",
             "pyproject.toml",
         ),

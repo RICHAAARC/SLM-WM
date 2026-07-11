@@ -221,6 +221,13 @@ Notebook 与 repository module 的跨边界数据
 | attestation_layering_pass | method | none | true | false | false | attestation 是否只影响 final-level 的检查结果。 |
 | model_family | runtime | none | true | false | false | SD runtime adapter 使用的模型族。 |
 | model_id | runtime | none | true | false | false | SD runtime adapter 使用的模型标识。 |
+| model_revision | runtime | none | true | false | false | 模型 loader 实际使用的40位不可变 Hugging Face 仓库提交。 |
+| vision_model_revision | runtime | none | true | false | false | 语义条件 CLIP 图像编码器实际使用的40位不可变提交。 |
+| generation_model_revision | runtime | none | true | false | false | 外部 baseline observation 实际生成图像时使用的模型提交。 |
+| official_model_revision | runtime | none | false | false | false | official-reference 公开镜像快照的40位不可变提交。 |
+| clip_model_revision | runtime | none | false | false | false | 成对感知质量评估使用的 CLIP 模型提交。 |
+| pair_clip_model_revision | runtime | none | false | false | false | T2SMark 严格图像对质量配置使用的 CLIP 模型提交。 |
+| diffusion_model_source | provenance | none | false | false | false | 运行环境报告中绑定仓库、revision 和用途的扩散模型来源记录。 |
 | backend_name | runtime | none | true | false | false | 实际执行 generation probe 的后端名称。 |
 | backend_mode | runtime | none | true | false | false | 配置中要求的 runtime 后端模式。 |
 | runtime_dependency_mode | runtime | none | true | false | false | runtime adapter 实际依赖模式。 |
@@ -499,7 +506,6 @@ Notebook 与 repository module 的跨边界数据
 | selected_attention_carrier_id | method | none | true | false | false | 真实 attention latent injection 中选用的 active carrier 标识。 |
 | attention_geometry_package_path | artifact | none | true | false | false | 真实 attention latent injection 使用的 geometry 输入包路径。 |
 | method_manifest_path | artifact | none | true | false | false | 真实运行引用的 attention latent update 方法 manifest 路径。 |
-| attention_runtime_strength | method | none | true | false | false | 真实 latent callback 中应用于 attention carrier tensor 的运行时强度。 |
 | attention_latent_injection_package_path | artifact | none | false | false | false | 真实 attention latent injection 打包产物路径。 |
 | attention_latent_injection_package_digest | artifact | none | false | false | false | 真实 attention latent injection 打包产物 SHA256 摘要。 |
 | aligned_detection_record_id | method | none | false | false | false | 几何恢复后内容重判记录的稳定标识。 |
@@ -1268,8 +1274,6 @@ Notebook 与 repository module 的跨边界数据
 | source_prepare_skipped | governance | none | false | false | false | 已有外部官方结果可复用时是否跳过源码缓存准备。|
 
 | prompt_file | protocol | none | false | false | false | prompt 协议使用的配置文件路径。|
-| content_vector_width | protocol | none | false | false | false | pilot_paper 与 full_paper 共享的内容载体向量宽度, 只能通过统一论文运行配置或显式实验覆盖修改。|
-| content_basis_rank | protocol | none | false | false | false | pilot_paper 与 full_paper 共享的内容载体有效基底秩, 用于控制 fixed-FPR 统计空间的有效自由度。|
 | risk_profile_counts | protocol | none | false | false | false | 按 risk_profile 聚合的 prompt 数量。|
 | calibration_clean_negative_count | metric | none | false | false | false | fixed-FPR 校准 split 中 clean negative 样本数量。|
 | test_clean_negative_count | metric | none | false | false | false | fixed-FPR 测试 split 中 clean negative 样本数量。|
@@ -1444,6 +1448,49 @@ Notebook 与 repository module 的跨边界数据
 | tail_fraction | method | none | true | false | false | 标准高斯模板保留的幅值尾部比例。 |
 | source_id | provenance | none | true | false | false | 外部 Prompt 数据来源稳定标识。 |
 | source_url | provenance | none | true | false | false | 外部 Prompt 项目主页。 |
+| revision_url | provenance | none | false | false | false | 直接指向资源登记40位提交树的 Hugging Face URL。 |
+| upstream_repository_id | provenance | none | false | false | false | 公开镜像对应的原始上游仓库标识。 |
+| upstream_access_status | provenance | none | false | false | false | 审计时原始上游仓库的可访问状态。 |
+| registry_schema | provenance | none | false | false | false | 不可变模型与数据来源登记表的 schema 名称。 |
+| schema_version | provenance | none | false | false | false | 外部资源登记表的结构版本。 |
+| source_name | provenance | none | false | false | false | 模型或数据资源在登记表中的稳定语义名称。 |
+| provider | provenance | none | false | false | false | 资源实际获取服务提供方。 |
+| repository_id | provenance | none | false | false | false | Hugging Face 资源的 owner/name 仓库标识。 |
+| repository_type | provenance | none | false | false | false | 资源仓库是 model 还是 dataset。 |
+| revision | provenance | none | false | false | false | 资源登记表中的40位小写十六进制不可变提交。 |
+| access_policy | provenance | none | false | false | false | 资源的公开或受限访问策略。 |
+| usage_roles | provenance | none | false | false | false | 资源在正式实验中允许的明确职责集合。 |
+| sources | provenance | none | false | false | false | 不可变模型与数据来源登记表中的资源身份映射。 |
+| required_files | provenance | none | false | false | false | 单个模型来源必须逐文件满足的相对路径、SHA-256 和字节大小约束。 |
+| vision_model_source | provenance | none | false | false | false | 运行环境报告中绑定仓库、revision 和用途的 CLIP 语义编码器来源记录。 |
+| model_snapshot_content | provenance | none | false | false | false | official-reference 本地模型目录的逐文件路径、大小和 SHA-256 记录。 |
+| reused_model_snapshot_content | provenance | none | false | false | false | 复用前从已有报告与本地文件重算一致的模型快照记录。 |
+| snapshot_content_digest | provenance | none | false | false | false | 本地模型快照仓库、revision 与逐文件记录的稳定摘要。 |
+| allow_patterns | provenance | none | false | false | false | 模型快照唯一允许物化并进入逐文件摘要的仓库相对匹配模式集合。 |
+| model_source_ready | governance | none | true | false | false | official-reference 是否同时绑定登记仓库、精确 revision 和文件级快照摘要。 |
+| model_source_repository_id | provenance | none | true | false | false | official-reference summary 绑定的公开镜像仓库标识。 |
+| model_source_revision | provenance | none | true | false | false | official-reference summary 绑定的40位不可变模型提交。 |
+| model_snapshot_content_digest | provenance | none | true | false | false | official-reference summary 绑定的本地模型逐文件快照摘要。 |
+| model_snapshot_allow_patterns | provenance | none | true | false | false | official-reference summary 绑定的受治理模型组件选择器集合。 |
+| model_snapshot_scope_ready | governance | none | true | false | false | 本地模型快照是否只包含正式 loader 所需组件且选择器与登记契约一致。 |
+| openclip_checkpoint_requested | protocol | none | false | false | false | 当前 official-reference 是否请求物化精确 OpenCLIP checkpoint。 |
+| openclip_checkpoint_ready | governance | none | false | false | false | OpenCLIP checkpoint 是否通过登记仓库、revision、文件大小与 SHA-256 核验。 |
+| openclip_source_name | provenance | none | false | false | false | OpenCLIP checkpoint 在不可变模型来源登记表中的稳定名称。 |
+| openclip_usage_role | protocol | none | false | false | false | OpenCLIP checkpoint 在 official-reference 中承担的受治理编码器职责。 |
+| openclip_model_name | protocol | none | true | false | false | official-reference 实际构造的 OpenCLIP 模型架构名称。 |
+| openclip_repository_id | provenance | none | true | false | false | official-reference 实际使用的 OpenCLIP checkpoint 仓库标识。 |
+| openclip_revision | provenance | none | true | false | false | official-reference 实际使用的 OpenCLIP checkpoint 40位不可变提交。 |
+| openclip_snapshot_dir | provenance | none | false | false | false | 由仓库标识与精确 revision 共同确定的共享 OpenCLIP 快照目录。 |
+| openclip_checkpoint_filename | provenance | none | true | false | false | official-reference 传给 OpenCLIP loader 的固定 checkpoint 文件名。 |
+| openclip_checkpoint_path | provenance | none | false | false | false | official-reference 传给 OpenCLIP loader 的本地普通文件路径。 |
+| openclip_checkpoint_sha256 | provenance | none | true | false | false | OpenCLIP checkpoint 文件内容的登记 SHA-256。 |
+| openclip_checkpoint_size_bytes | provenance | none | false | false | false | OpenCLIP checkpoint 文件的登记字节大小。 |
+| openclip_snapshot_content_digest | provenance | none | true | false | false | OpenCLIP 共享快照逐文件证据的稳定摘要。 |
+| openclip_source_ready | governance | none | true | false | false | official-reference 是否绑定精确 OpenCLIP 架构、仓库、revision、checkpoint 哈希与快照摘要。 |
+| snapshot_validation_error | governance | none | false | false | false | 既有本地模型快照无法通过文件级复用校验时的阻断原因。 |
+| file_count | provenance | none | false | false | false | 模型快照文件记录数量。 |
+| files | provenance | none | false | false | false | 模型快照中受摘要绑定的逐文件记录。 |
+| size_bytes | provenance | none | false | false | false | 模型快照单个文件的字节大小。 |
 | source_data_url | provenance | none | true | false | false | 固定 revision 的原始 Prompt 文件地址。 |
 | source_revision | provenance | none | true | false | false | 外部 Prompt 数据固定 Git revision。 |
 | source_file_sha256 | provenance | none | true | false | false | 外部 Prompt 原始文件 SHA-256。 |
@@ -1676,6 +1723,31 @@ Notebook 与 repository module 的跨边界数据
 | artifact_data_validation_digest | provenance | none | true | false | false | 对实际表图数据验证报告执行规范序列化得到的稳定摘要。 |
 | official_reference_fidelity_record_id | protocol | none | true | false | false | 单个 official-reference 方法忠实度证据记录的稳定标识。 |
 | official_reference_fidelity_record_digest | provenance | none | true | false | false | 单个 official-reference 方法忠实度证据记录核心内容的稳定摘要。 |
+| reference_record_id | protocol | none | true | false | false | 单次 official-reference 复现记录的稳定标识。 |
+| reference_record_digest | provenance | none | true | false | false | 单次 official-reference 复现记录全部受治理字段的稳定摘要。 |
+| reference_protocol_name | protocol | none | true | false | false | official-reference 记录采用的固定补充证据协议名称。 |
+| official_environment_profile | protocol | none | true | false | false | 官方原始实现实际运行所用的隔离 Python 与依赖环境身份。 |
+| official_source_ready | governance | none | true | false | false | 官方源码入口、精确 Git 身份、确定性补丁与数据来源是否共同通过。 |
+| official_environment_report_ready | governance | none | true | false | false | official-reference 是否写出并绑定当前运行环境报告。 |
+| official_execution_ready | governance | none | true | false | false | 当前 official-reference 命令是否被请求并以返回码0完成。 |
+| official_command_requested | protocol | none | true | false | false | 当前运行是否真实请求 official-reference 命令。 |
+| official_command_return_code | runtime | none | true | false | false | 当前 official-reference 子进程的实际返回码。 |
+| official_command_succeeded | governance | none | true | false | false | 当前 official-reference 命令是否真实执行且返回码为0。 |
+| required_metrics_ready | governance | none | true | false | false | 当前命令是否显式产生全部必需科学指标且数值域合法。 |
+| official_result_summary_ready | governance | none | true | false | false | 当前命令的规范科学指标摘要是否完整并通过校验。 |
+| governed_import_ready | governance | none | true | false | false | 当前 official-reference 记录是否通过补充证据 schema 校验。 |
+| official_model_repository_id | provenance | none | true | false | false | official-reference 记录绑定的登记扩散模型仓库标识。 |
+| auc | metric | none | true | false | false | official-reference 检测分数的 ROC 曲线下面积。 |
+| accuracy | metric | none | true | false | false | official-reference 在其冻结判别规则下报告的分类准确率。 |
+| true_positive_rate_at_one_percent_fpr | metric | none | true | false | false | official-reference 在 FPR=0.01 工作点报告的真正率。 |
+| clip_score_mean | metric | none | true | false | false | Tree-Ring 或 Shallow Diffuse clean 图像与 Prompt 的平均 OpenCLIP 余弦相似度。 |
+| watermarked_clip_score_mean | metric | none | true | false | false | Tree-Ring 或 Shallow Diffuse 水印图像与 Prompt 的平均 OpenCLIP 余弦相似度。 |
+| detection_true_positive_rate | metric | none | true | false | false | Gaussian Shading official-reference 的水印检测真正率。 |
+| traceability_true_positive_rate | metric | none | true | false | false | Gaussian Shading official-reference 的消息追踪真正率。 |
+| mean_bit_accuracy | metric | none | true | false | false | Gaussian Shading official-reference 恢复消息 bit accuracy 的均值。 |
+| std_bit_accuracy | metric | none | true | false | false | Gaussian Shading official-reference 恢复消息 bit accuracy 的标准差。 |
+| mean_clip_score | metric | none | true | false | false | Gaussian Shading 生成图像与 Prompt 的平均 OpenCLIP 余弦相似度。 |
+| std_clip_score | metric | none | true | false | false | Gaussian Shading 生成图像与 Prompt 的 OpenCLIP 余弦相似度标准差。 |
 | supplemental_table_role | protocol | none | true | false | false | 官方原始环境复现记录的补充表职责; 当前方法忠实度证据固定为 supplemental_method_fidelity_reference。 |
 | reference_import_ready | governance | none | true | false | false | 官方参考 governed import 是否接受全部输入记录且没有 schema issue。 |
 | governed_reference_record_count | metric | none | true | false | false | 单个官方参考运行写出的受治理补充记录数量。 |
@@ -1790,3 +1862,15 @@ Notebook 与 repository module 的跨边界数据
 | clean_true_positive_rate_delta | metric | none | true | true | false | 消融配置相对完整方法的 clean true positive rate 配对差值。 |
 | attacked_true_positive_rate_delta | metric | none | true | true | false | 消融配置相对完整方法的 attacked true positive rate 配对差值。 |
 | paired_ssim_delta | metric | none | true | true | false | 消融配置相对完整方法的逐 Prompt 配对 SSIM 差值。 |
+| source_head_commit | provenance | none | true | false | false | 外部官方源码 checkout 实际核验得到的 HEAD 提交。 |
+| source_remote_url | provenance | none | true | false | false | 外部官方源码 checkout 实际核验并归一化后的 origin 地址。 |
+| source_base_worktree_clean | governance | none | true | false | false | 应用受治理补丁前的外部源码工作树是否恰好处于登记 clean commit。 |
+| source_identity_ready | governance | none | true | false | false | 外部源码远端身份、HEAD 提交和基础工作树是否共同通过核验。 |
+| source_modified_paths | provenance | none | true | false | false | 登记 commit 上应用确定性补丁后实际修改的相对文件路径集合。 |
+| source_patch_sha256 | provenance | none | true | false | false | 相对登记 commit 的二进制 Git diff SHA-256。 |
+| prompt_dataset_source | provenance | none | true | false | false | official-reference Prompt 数据集的登记来源完整记录。 |
+| prompt_dataset_repository_id | provenance | none | true | false | false | official-reference 实际消费的 Prompt 数据集仓库标识。 |
+| prompt_dataset_revision | provenance | none | true | false | false | official-reference 实际消费的 Prompt 数据集40位不可变提交。 |
+| required_source_provenance_fields | protocol | none | true | false | false | official-reference governed record 必须包含的源码和 Prompt 数据来源字段集合。 |
+| optim_utils_path | provenance | none | true | false | false | official-reference 数据加载与数学工具源码文件的受治理路径。 |
+| dataset_revision | protocol | none | true | false | false | official-reference 配置绑定的 Prompt 数据集40位不可变提交。 |

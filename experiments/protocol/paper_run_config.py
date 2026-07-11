@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
 from experiments.protocol.prompts import PROMPT_FILES, read_prompt_file
 from experiments.protocol.splits import build_group_split_counts
 
@@ -23,27 +24,22 @@ DEFAULT_TARGET_FPR = 0.01
 DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT = 100
 DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT = 100
 DEFAULT_DRIVE_ROOT = "/content/drive/MyDrive/SLM"
-DEFAULT_CONTENT_VECTOR_WIDTH = 128
-DEFAULT_CONTENT_BASIS_RANK = 64
-DEFAULT_INFERENCE_STEPS = 20
-DEFAULT_GUIDANCE_SCALE = 4.5
-DEFAULT_ATTENTION_RUNTIME_STRENGTH = 0.025
-DEFAULT_ATTENTION_INJECTION_STEPS = (6, 10, 14)
-DEFAULT_JACOBIAN_CANDIDATE_COUNT = 20
-DEFAULT_NULL_SPACE_RANK = 4
-DEFAULT_LF_RELATIVE_STRENGTH = 0.0025
-DEFAULT_TAIL_RELATIVE_STRENGTH = 0.0015
-DEFAULT_ATTENTION_RELATIVE_STRENGTH = 0.0010
-DEFAULT_TAIL_FRACTION = 0.20
-DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION = 0.01
-DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL = 1e-4
+_FORMAL_METHOD_DEFAULTS = load_formal_method_runtime_config(".")
+DEFAULT_INFERENCE_STEPS = _FORMAL_METHOD_DEFAULTS.inference_steps
+DEFAULT_GUIDANCE_SCALE = _FORMAL_METHOD_DEFAULTS.guidance_scale
+DEFAULT_ATTENTION_INJECTION_STEPS = _FORMAL_METHOD_DEFAULTS.injection_step_indices
+DEFAULT_JACOBIAN_CANDIDATE_COUNT = _FORMAL_METHOD_DEFAULTS.jacobian_candidate_count
+DEFAULT_NULL_SPACE_RANK = _FORMAL_METHOD_DEFAULTS.null_space_rank
+DEFAULT_LF_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.lf_relative_strength
+DEFAULT_TAIL_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.tail_relative_strength
+DEFAULT_ATTENTION_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.attention_relative_strength
+DEFAULT_TAIL_FRACTION = _FORMAL_METHOD_DEFAULTS.tail_fraction
+DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION = _FORMAL_METHOD_DEFAULTS.minimum_projection_energy_retention
+DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL = _FORMAL_METHOD_DEFAULTS.maximum_relative_response_residual
 UNBOUNDED_LIMIT_TOKENS = {"", "all", "none", "unlimited"}
 SHARED_METHOD_SETTING_FIELDS = (
-    "content_vector_width",
-    "content_basis_rank",
     "inference_steps",
     "guidance_scale",
-    "attention_runtime_strength",
     "attention_injection_steps",
     "jacobian_candidate_count",
     "null_space_rank",
@@ -102,11 +98,8 @@ class PaperRunConfig:
     target_fpr: float = DEFAULT_TARGET_FPR
     minimum_clean_negative_count: int = DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT
     dataset_level_quality_minimum_count: int = DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT
-    content_vector_width: int = DEFAULT_CONTENT_VECTOR_WIDTH
-    content_basis_rank: int = DEFAULT_CONTENT_BASIS_RANK
     inference_steps: int = DEFAULT_INFERENCE_STEPS
     guidance_scale: float = DEFAULT_GUIDANCE_SCALE
-    attention_runtime_strength: float = DEFAULT_ATTENTION_RUNTIME_STRENGTH
     attention_injection_steps: tuple[int, ...] = DEFAULT_ATTENTION_INJECTION_STEPS
     jacobian_candidate_count: int = DEFAULT_JACOBIAN_CANDIDATE_COUNT
     null_space_rank: int = DEFAULT_NULL_SPACE_RANK
@@ -125,10 +118,6 @@ class PaperRunConfig:
         fixed-FPR 阈值, 造成真实 positive 难以越过阈值。
         """
 
-        if self.content_basis_rank <= 0:
-            raise ValueError("content_basis_rank 必须为正整数")
-        if self.content_basis_rank > self.content_vector_width:
-            raise ValueError("content_basis_rank 不得大于 content_vector_width")
         if self.jacobian_candidate_count < self.null_space_rank or self.null_space_rank <= 0:
             raise ValueError("jacobian_candidate_count 必须不小于正的 null_space_rank")
         if not 0.0 < self.tail_fraction <= 1.0:
@@ -189,34 +178,6 @@ def parse_record_limit(value: str | int | None, *, prompt_count: int, default_va
     return resolved
 
 
-def parse_positive_int(value: str | int | None, default_value: int) -> int:
-    """解析正整数配置。
-
-    该函数属于配置解析层, 用于让 method 级运行设置在 probe_paper、
-    pilot_paper 与 full_paper 之间保持同一套默认值, 业务路径只消费已经归一化后的数值。
-    """
-
-    raw_value = default_value if value is None else value
-    resolved = int(str(raw_value).strip()) if isinstance(raw_value, str) else int(raw_value)
-    if resolved <= 0:
-        raise ValueError("正整数配置必须大于 0")
-    return resolved
-
-
-def parse_non_negative_int_tuple(value: str | tuple[int, ...] | None, default_value: tuple[int, ...]) -> tuple[int, ...]:
-    """解析逗号分隔的非负整数元组配置。"""
-
-    if value is None:
-        resolved = default_value
-    elif isinstance(value, tuple):
-        resolved = tuple(int(item) for item in value)
-    else:
-        resolved = tuple(int(item.strip()) for item in value.split(",") if item.strip())
-    if not resolved or any(item < 0 for item in resolved):
-        raise ValueError("整数元组配置必须包含非负整数")
-    return resolved
-
-
 def derive_minimum_clean_negative_count(prompt_count: int, target_fpr: float) -> int:
     """从 Prompt 总量派生完整 test split 的 clean negative 门禁。
 
@@ -243,10 +204,11 @@ def derive_dataset_level_quality_minimum_count(prompt_count: int) -> int:
 
 
 def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
-    """从环境变量构建当前论文运行配置。"""
+    """从运行规模环境变量和唯一方法 YAML 构建论文配置。"""
 
     run_name = normalize_paper_run_name(os.environ.get("SLM_WM_PAPER_RUN_NAME"))
     defaults = RUN_DEFAULTS[run_name]
+    method_settings = load_formal_method_runtime_config(root).paper_method_settings()
     prompt_set = os.environ.get("SLM_WM_PROMPT_SET", str(defaults["prompt_set"]))
     prompt_file = os.environ.get("SLM_WM_PROMPT_FILE", str(defaults["prompt_file"]))
     if prompt_set != str(defaults["prompt_set"]):
@@ -275,53 +237,7 @@ def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
         target_fpr=target_fpr,
         minimum_clean_negative_count=derived_minimum_clean_negative_count,
         dataset_level_quality_minimum_count=derived_dataset_level_quality_minimum_count,
-        content_vector_width=parse_positive_int(
-            os.environ.get("SLM_WM_CONTENT_VECTOR_WIDTH"),
-            DEFAULT_CONTENT_VECTOR_WIDTH,
-        ),
-        content_basis_rank=parse_positive_int(
-            os.environ.get("SLM_WM_CONTENT_BASIS_RANK"),
-            DEFAULT_CONTENT_BASIS_RANK,
-        ),
-        inference_steps=parse_positive_int(os.environ.get("SLM_WM_INFERENCE_STEPS"), DEFAULT_INFERENCE_STEPS),
-        guidance_scale=float(os.environ.get("SLM_WM_GUIDANCE_SCALE", str(DEFAULT_GUIDANCE_SCALE))),
-        attention_runtime_strength=float(
-            os.environ.get("SLM_WM_ATTENTION_RUNTIME_STRENGTH", str(DEFAULT_ATTENTION_RUNTIME_STRENGTH))
-        ),
-        attention_injection_steps=parse_non_negative_int_tuple(
-            os.environ.get("SLM_WM_ATTENTION_INJECTION_STEPS"),
-            DEFAULT_ATTENTION_INJECTION_STEPS,
-        ),
-        jacobian_candidate_count=parse_positive_int(
-            os.environ.get("SLM_WM_JACOBIAN_CANDIDATE_COUNT"),
-            DEFAULT_JACOBIAN_CANDIDATE_COUNT,
-        ),
-        null_space_rank=parse_positive_int(
-            os.environ.get("SLM_WM_NULL_SPACE_RANK"),
-            DEFAULT_NULL_SPACE_RANK,
-        ),
-        lf_relative_strength=float(
-            os.environ.get("SLM_WM_LF_RELATIVE_STRENGTH", str(DEFAULT_LF_RELATIVE_STRENGTH))
-        ),
-        tail_relative_strength=float(
-            os.environ.get("SLM_WM_TAIL_RELATIVE_STRENGTH", str(DEFAULT_TAIL_RELATIVE_STRENGTH))
-        ),
-        attention_relative_strength=float(
-            os.environ.get("SLM_WM_ATTENTION_RELATIVE_STRENGTH", str(DEFAULT_ATTENTION_RELATIVE_STRENGTH))
-        ),
-        tail_fraction=float(os.environ.get("SLM_WM_TAIL_FRACTION", str(DEFAULT_TAIL_FRACTION))),
-        minimum_projection_energy_retention=float(
-            os.environ.get(
-                "SLM_WM_MINIMUM_PROJECTION_ENERGY_RETENTION",
-                str(DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION),
-            )
-        ),
-        maximum_relative_response_residual=float(
-            os.environ.get(
-                "SLM_WM_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL",
-                str(DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL),
-            )
-        ),
+        **method_settings,
     )
 
 

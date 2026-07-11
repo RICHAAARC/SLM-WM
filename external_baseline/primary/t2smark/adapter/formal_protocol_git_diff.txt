@@ -2,7 +2,7 @@ diff --git a/option.py b/option.py
 index ac9a041..42da855 100644
 --- a/option.py
 +++ b/option.py
-@@ -13,6 +13,10 @@ def parse_args():
+@@ -13,7 +13,12 @@ def parse_args():
      parser.add_argument("--clip_test_num", type=int, default=0) # actually the end idx
      parser.add_argument("--start_idx", type=int, default=0)
      parser.add_argument("--SDv35M", action="store_true", default=False)
@@ -13,6 +13,8 @@ index ac9a041..42da855 100644
  
      # diffusion model settings
      parser.add_argument("--model_key", type=str, default="stabilityai/stable-diffusion-2-1") # stabilityai/stable-diffusion-3.5-medium
++    parser.add_argument("--model_revision", type=str, required=True)
+     parser.add_argument("--guidance_scale", type=float, default=7.5) # 4.0 for SDv35M diversity and image quality
 diff --git a/run_sd35.py b/run_sd35.py
 index 39c07d7..003aba7 100644
 --- a/run_sd35.py
@@ -42,7 +44,7 @@ index 39c07d7..003aba7 100644
  args.key_channel_idx = (0, 1, 2, 3)
  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
  msg_channel_idx = [i for i in range(16) if i not in args.key_channel_idx]
-@@ -45,6 +58,48 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
+@@ -45,6 +58,52 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
          "acc_msg": acc_msg.item()
      }
  
@@ -88,7 +90,12 @@ index 39c07d7..003aba7 100644
 +    ).images[0]
 +
 +
- pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)
+-pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)
++pipe = InversionDiffusion3Pipeline.from_pretrained(
++    args.model_key,
++    revision=args.model_revision,
++    torch_dtype=torch.float16,
++).to(device)
  pipe.set_progress_bar_config(disable=True)
  
 @@ -66,6 +121,20 @@ with open(os.path.join(args.output_dir, args.name, "settings.json"), "w") as f:
@@ -228,8 +235,3 @@ index 39c07d7..003aba7 100644
  
          prompt_id += 1
          pbar.update(1)
-@@ -166,3 +334,4 @@ with open(os.path.join(args.output_dir, args.name, "results.json"), "w") as f:
-     json.dump(results, f, indent=4)
- 
- 
-+

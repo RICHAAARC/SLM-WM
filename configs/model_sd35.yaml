@@ -1,5 +1,8 @@
 model_family: sd35
 model_id: stabilityai/stable-diffusion-3.5-medium
+model_revision: b940f670f0eda2d07fbb75229e779da1ad11eb80
+vision_model_id: openai/clip-vit-base-patch32
+vision_model_revision: 3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268
 backend_mode: real_diffusion
 prompt: a high quality photograph of a glass sphere on a wooden table
 negative_prompt: low quality, blurry
@@ -8,7 +11,6 @@ width: 512
 height: 512
 inference_steps: 20
 guidance_scale: 4.5
-latent_width: 128
 detector_input_access_mode: image_key_public_model_only
 jacobian_candidate_count: 20
 null_space_rank: 4
@@ -19,3 +21,6 @@ tail_fraction: 0.20
 minimum_projection_energy_retention: 0.01
 maximum_relative_response_residual: 0.0001
 injection_step_indices: [6, 10, 14]
+max_attention_tokens: 64
+attention_module_count: 2
+diffusion_attacks_enabled: true

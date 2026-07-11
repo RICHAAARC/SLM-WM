@@ -17,16 +17,27 @@ from paper_experiments.baselines import (
 )
 from paper_experiments.runners.shallow_diffuse_official_reference import (
     ShallowDiffuseOfficialReferenceConfig,
+    build_reference_record_report,
     build_default_config,
     build_official_command,
     ensure_shallow_diffuse_source_available,
     output_paths,
     package_shallow_diffuse_official_reference_outputs,
+    normalize_metric_summary,
     parse_metric_text,
     patch_shallow_diffuse_model_repository_layout,
     prepare_shallow_diffuse_legacy_environment,
     prepare_shallow_diffuse_model_repository,
     write_shallow_diffuse_official_reference_outputs,
+)
+from paper_experiments.runners.openclip_checkpoint_runtime import (
+    DEFAULT_OPENCLIP_CHECKPOINT_PATH,
+    OPENCLIP_CHECKPOINT_FILENAME,
+    OPENCLIP_CHECKPOINT_SHA256,
+    OPENCLIP_CHECKPOINT_SIZE_BYTES,
+    OPENCLIP_MODEL_NAME,
+    OPENCLIP_REPOSITORY_ID,
+    OPENCLIP_REVISION,
 )
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
@@ -36,6 +47,72 @@ from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+SOURCE_PROVENANCE = {
+    "source_worktree_digest": "a" * 64,
+    "source_patch_sha256": "b" * 64,
+    "prompt_dataset_repository_id": "Gustavosta/Stable-Diffusion-Prompts",
+    "prompt_dataset_revision": "d816d4a05cb89bde39dd99284c459801e1e7e69a",
+    "official_model_repository_id": "Manojb/stable-diffusion-2-1-base",
+    "official_model_revision": "0094d483a120f3f33dafbd187ea4aa60d10de75c",
+    "model_snapshot_content_digest": "d" * 64,
+    "openclip_model_name": OPENCLIP_MODEL_NAME,
+    "openclip_repository_id": OPENCLIP_REPOSITORY_ID,
+    "openclip_revision": OPENCLIP_REVISION,
+    "openclip_checkpoint_filename": OPENCLIP_CHECKPOINT_FILENAME,
+    "openclip_checkpoint_sha256": OPENCLIP_CHECKPOINT_SHA256,
+    "openclip_checkpoint_size_bytes": OPENCLIP_CHECKPOINT_SIZE_BYTES,
+    "openclip_snapshot_content_digest": "c" * 64,
+}
+READY_FLAGS = {
+    "official_source_ready": True,
+    "source_identity_ready": True,
+    "source_worktree_exact": True,
+    "official_environment_report_ready": True,
+    "official_execution_ready": True,
+    "required_metrics_ready": True,
+    "model_source_ready": True,
+    "openclip_source_ready": True,
+    "official_result_summary_ready": True,
+    "governed_import_ready": True,
+}
+MODEL_REPOSITORY_REPORT = {
+    "local_model_repository_ready": True,
+    "official_model_id": "Manojb/stable-diffusion-2-1-base",
+    "official_model_revision": "0094d483a120f3f33dafbd187ea4aa60d10de75c",
+    "model_snapshot_content": {
+        "repository_id": "Manojb/stable-diffusion-2-1-base",
+        "revision": "0094d483a120f3f33dafbd187ea4aa60d10de75c",
+        "allow_patterns": [
+            "feature_extractor/*",
+            "model_index.json",
+            "safety_checker/*",
+            "scheduler/*",
+            "text_encoder/*",
+            "tokenizer/*",
+            "unet/*",
+            "vae/*",
+        ],
+        "snapshot_content_digest": "d" * 64,
+    },
+}
+OPENCLIP_REPORT = {
+    "openclip_checkpoint_ready": True,
+    **{key: value for key, value in SOURCE_PROVENANCE.items() if key.startswith("openclip_")},
+    "model_snapshot_content": {
+        "repository_id": OPENCLIP_REPOSITORY_ID,
+        "revision": OPENCLIP_REVISION,
+        "allow_patterns": [OPENCLIP_CHECKPOINT_FILENAME],
+        "file_count": 1,
+        "files": [
+            {
+                "path": OPENCLIP_CHECKPOINT_FILENAME,
+                "size_bytes": OPENCLIP_CHECKPOINT_SIZE_BYTES,
+                "sha256": OPENCLIP_CHECKPOINT_SHA256,
+            }
+        ],
+        "snapshot_content_digest": "c" * 64,
+    },
+}
 
 
 @pytest.fixture(autouse=True)
@@ -61,6 +138,7 @@ def test_shallow_diffuse_official_reference_record_validates_when_all_boundaries
         baseline_result_source="outputs/shallow_diffuse_official_reference/summary.json",
         baseline_result_source_digest="digest",
         evidence_paths=["outputs/shallow_diffuse_official_reference/summary.json"],
+        source_provenance=SOURCE_PROVENANCE,
         metric_values={
             "sample_count": 5,
             "positive_count": 5,
@@ -68,15 +146,10 @@ def test_shallow_diffuse_official_reference_record_validates_when_all_boundaries
             "auc": 0.9,
             "accuracy": 0.8,
             "true_positive_rate_at_one_percent_fpr": 0.7,
-            "clip_score_mean": 0.0,
-            "watermarked_clip_score_mean": 0.0,
+            "clip_score_mean": -0.1,
+            "watermarked_clip_score_mean": -0.2,
         },
-        ready_flags={
-            "official_source_ready": True,
-            "official_environment_report_ready": True,
-            "official_result_summary_ready": True,
-            "governed_import_ready": True,
-        },
+        ready_flags=READY_FLAGS,
     )
 
     report = validate_shallow_diffuse_official_reference_records([record])
@@ -87,6 +160,15 @@ def test_shallow_diffuse_official_reference_record_validates_when_all_boundaries
     assert record["main_table_eligible"] is False
     assert report["reference_import_ready"] is True
     assert report["accepted_reference_record_count"] == 1
+
+    incomplete_record = dict(record)
+    incomplete_record.pop("watermarked_clip_score_mean")
+    incomplete_report = validate_shallow_diffuse_official_reference_records([incomplete_record])
+    assert incomplete_report["reference_import_ready"] is False
+    assert any(
+        issue["reason"] == "watermarked_clip_score_mean_required"
+        for issue in incomplete_report["issues"]
+    )
 
 
 @pytest.mark.quick
@@ -100,6 +182,7 @@ def test_shallow_diffuse_official_reference_rejects_main_table_eligibility() -> 
         baseline_result_source="outputs/shallow_diffuse_official_reference/summary.json",
         baseline_result_source_digest="digest",
         evidence_paths=["outputs/shallow_diffuse_official_reference/summary.json"],
+        source_provenance=SOURCE_PROVENANCE,
         metric_values={
             "sample_count": 5,
             "positive_count": 5,
@@ -110,12 +193,7 @@ def test_shallow_diffuse_official_reference_rejects_main_table_eligibility() -> 
             "clip_score_mean": 0.0,
             "watermarked_clip_score_mean": 0.0,
         },
-        ready_flags={
-            "official_source_ready": True,
-            "official_environment_report_ready": True,
-            "official_result_summary_ready": True,
-            "governed_import_ready": True,
-        },
+        ready_flags=READY_FLAGS,
     )
     record["main_table_eligible"] = True
 
@@ -169,6 +247,9 @@ def test_shallow_diffuse_official_reference_patches_source_runtime_boundaries(tm
     optim_utils.write_text(
         "import torch\n"
         "import torch.nn.functional as F\n"
+        "from datasets import load_dataset\n"
+        "def get_dataset(args):\n"
+        "    return load_dataset(args.dataset)['test']\n"
         "def get_watermarking_pattern(pipe, args, device):\n"
         "    gt_init = pipe.get_random_latents()\n"
         "    gt_patch = torch.fft.fft2(gt_init)\n"
@@ -211,6 +292,47 @@ def test_shallow_diffuse_official_reference_patches_source_runtime_boundaries(tm
     assert "init_latents_w_fft = slm_wm_fft2_float32(init_latents_w)" in patched_optim_utils
     assert "slm_wm_init_latents_dtype = init_latents_w.dtype" in patched_optim_utils
     assert "torch.fft.ifft2(init_latents_w_fft).real.to(slm_wm_init_latents_dtype)" in patched_optim_utils
+    assert "revision='d816d4a05cb89bde39dd99284c459801e1e7e69a'" in patched_optim_utils
+    assert "pin_prompt_dataset_revision" in report["patch_items"]
+    assert report["prompt_dataset_revision"] == "d816d4a05cb89bde39dd99284c459801e1e7e69a"
+    assert report["similarity_variable_ready"] is True
+    assert report["prompt_dataset_revision_ready"] is True
+    assert report["source_patch_postcondition_ready"] is True
+
+
+@pytest.mark.quick
+def test_shallow_diffuse_source_patch_rejects_missing_similarity_postcondition(
+    tmp_path: Path,
+) -> None:
+    """动态补丁未形成正确 sims 读取语句时必须立即阻断。"""
+
+    source_dir = tmp_path / "external_baseline" / "primary" / "shallow_diffuse" / "source"
+    source_dir.mkdir(parents=True)
+    (source_dir / "run_shallow_diffuse_t2i.py").write_text(
+        "print('missing similarity assignment')\n",
+        encoding="utf-8",
+    )
+    (source_dir / "attackers.py").write_text("def initialize_attackers(args, device):\n    pass\n", encoding="utf-8")
+    (source_dir / "optim_utils.py").write_text(
+        "from datasets import load_dataset\n"
+        "def get_dataset(args):\n"
+        "    return load_dataset(args.dataset)['test']\n",
+        encoding="utf-8",
+    )
+    config = ShallowDiffuseOfficialReferenceConfig(
+        source_dir="external_baseline/primary/shallow_diffuse/source",
+        require_cuda=False,
+    )
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True, exist_ok=True)
+
+    with pytest.raises(RuntimeError, match="必需源码补丁后置条件未满足"):
+        patch_shallow_diffuse_model_repository_layout(tmp_path, config, paths)
+
+    report = json.loads(paths["source_patch_result"].read_text(encoding="utf-8"))
+    assert report["similarity_variable_ready"] is False
+    assert report["prompt_dataset_revision_ready"] is True
+    assert report["source_patch_postcondition_ready"] is False
 
 
 @pytest.mark.quick
@@ -233,7 +355,19 @@ def test_shallow_diffuse_official_reference_prepares_local_model_repository(
     paths = output_paths(tmp_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
 
-    def fake_download_hf_snapshot(repo_id: str, *, local_dir: Path, token: str | None) -> str:
+    def fake_ensure_hugging_face_snapshot_files(
+        repository_dir: str | Path,
+        *,
+        report_path: str | Path,
+        repository_id: str,
+        revision: str,
+        allow_patterns: tuple[str, ...],
+        token: str | None,
+    ) -> dict[str, object]:
+        assert repository_id == "Manojb/stable-diffusion-2-1-base"
+        assert revision == "0094d483a120f3f33dafbd187ea4aa60d10de75c"
+        assert "model_index.json" in allow_patterns
+        local_dir = Path(repository_dir)
         local_dir.mkdir(parents=True, exist_ok=True)
         (local_dir / "model_index.json").write_text(
             json.dumps(
@@ -246,17 +380,19 @@ def test_shallow_diffuse_official_reference_prepares_local_model_repository(
             ),
             encoding="utf-8",
         )
-        return str(local_dir)
+        return {"download_requested": True, "snapshot_path": str(local_dir)}
 
     monkeypatch.setattr(
-        "paper_experiments.runners.shallow_diffuse_official_reference.download_hf_snapshot",
-        fake_download_hf_snapshot,
+        "paper_experiments.runners.shallow_diffuse_official_reference.ensure_hugging_face_snapshot_files",
+        fake_ensure_hugging_face_snapshot_files,
     )
 
     report = prepare_shallow_diffuse_model_repository(tmp_path, config, paths)
     patched_index = json.loads((local_model_dir / "model_index.json").read_text(encoding="utf-8"))
 
     assert report["local_model_repository_ready"] is True
+    assert report["official_model_revision"] == "0094d483a120f3f33dafbd187ea4aa60d10de75c"
+    assert len(report["model_snapshot_content"]["snapshot_content_digest"]) == 64
     assert report["model_index_patch_applied"] is True
     assert report["effective_official_model_id"] == str(local_model_dir)
     assert patched_index["feature_extractor"] == ["transformers", "CLIPFeatureExtractor"]
@@ -333,57 +469,121 @@ def test_shallow_diffuse_official_reference_parses_metric_text_and_custom_python
     assert metrics["watermarked_clip_score_mean"] == 0.3972677767276764
     assert metrics["auc"] == 0.95
     assert command[0] == "/opt/shallow-diffuse-legacy/bin/python"
+    assert command[command.index("--dataset") + 1] == "Gustavosta/Stable-Diffusion-Prompts"
     assert "--edit_time_list" in command
     assert command[command.index("--reference_model") + 1] == "ViT-g-14"
-    assert command[command.index("--reference_model_pretrain") + 1] == "laion2b_s12b_b42k"
+    assert Path(command[command.index("--reference_model_pretrain") + 1]).name == OPENCLIP_CHECKPOINT_FILENAME
     assert command[command.index("--end") + 1] == "5"
 
 
 @pytest.mark.quick
-def test_shallow_diffuse_official_reference_helper_imports_governed_summary(tmp_path: Path) -> None:
-    """专用 helper 应能把外部官方复现 summary 转换为 governed import 记录。"""
+def test_shallow_diffuse_metric_summary_requires_all_scientific_metrics() -> None:
+    """缺失任一官方科学指标时不得用 0 补齐正式摘要。"""
+
+    incomplete = normalize_metric_summary(
+        {
+            "auc": 0.95,
+            "accuracy": 0.84,
+            "true_positive_rate_at_one_percent_fpr": 0.72,
+            "clip_score_mean": 0.39,
+        },
+        sample_count=5,
+    )
+    complete = normalize_metric_summary(
+        {
+            "auc": 0.95,
+            "accuracy": 0.84,
+            "true_positive_rate_at_one_percent_fpr": 0.72,
+            "clip_score_mean": 0.39,
+            "watermarked_clip_score_mean": 0.38,
+        },
+        sample_count=5,
+    )
+
+    assert incomplete == {}
+    assert complete["sample_count"] == 5
+    assert complete["watermarked_clip_score_mean"] == 0.38
+
+
+@pytest.mark.quick
+def test_shallow_diffuse_record_requires_successful_current_official_command(
+    tmp_path: Path,
+) -> None:
+    """历史指标字典不能绕过本次官方命令成功门禁生成记录。"""
+
+    config = ShallowDiffuseOfficialReferenceConfig(
+        output_dir="outputs/shallow_diffuse_official_reference",
+        source_dir="external_baseline/primary/shallow_diffuse/source",
+        sample_count=5,
+        require_cuda=False,
+    )
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True, exist_ok=True)
+    metric_summary = normalize_metric_summary(
+        {
+            "auc": 0.95,
+            "accuracy": 0.84,
+            "true_positive_rate_at_one_percent_fpr": 0.72,
+            "clip_score_mean": 0.39,
+            "watermarked_clip_score_mean": 0.38,
+        },
+        sample_count=5,
+    )
+    source_status = {
+        "official_entrypoint": "external_baseline/primary/shallow_diffuse/source/run_shallow_diffuse_t2i.py",
+        "official_entrypoint_ready": True,
+        "official_repository_commit": "c80c553fdf66fda8db735d77a9d56538b7a0ade8",
+        "source_identity_ready": True,
+        "source_worktree_exact": True,
+        **{key: value for key, value in SOURCE_PROVENANCE.items() if not key.startswith("openclip_")},
+    }
+    openclip_report = OPENCLIP_REPORT
+
+    failed = build_reference_record_report(
+        tmp_path,
+        config,
+        paths,
+        metric_summary,
+        {"official_command_requested": True, "return_code": 1},
+        source_status,
+        MODEL_REPOSITORY_REPORT,
+        openclip_report,
+    )
+    succeeded = build_reference_record_report(
+        tmp_path,
+        config,
+        paths,
+        metric_summary,
+        {"official_command_requested": True, "return_code": 0},
+        source_status,
+        MODEL_REPOSITORY_REPORT,
+        openclip_report,
+    )
+
+    assert failed["record_count"] == 0
+    assert succeeded["record_count"] == 1
+    assert succeeded["validation"]["reference_import_ready"] is True
+
+
+@pytest.mark.quick
+def test_shallow_diffuse_official_reference_rejects_non_git_source_cache(tmp_path: Path) -> None:
+    """正式导入不得接受无法核验提交身份的普通源码目录。"""
 
     source_dir = tmp_path / "external_baseline" / "primary" / "shallow_diffuse" / "source"
     source_dir.mkdir(parents=True)
     (source_dir / "run_shallow_diffuse_t2i.py").write_text("print('shallow diffuse official entry')\n", encoding="utf-8")
     (source_dir / "attackers.py").write_text("print('attackers')\n", encoding="utf-8")
-    imported_summary = tmp_path / "outputs" / "shallow_diffuse_official_reference" / "imported_summary.json"
-    imported_summary.parent.mkdir(parents=True)
-    imported_summary.write_text(
-        json.dumps(
-            {
-                "sample_count": 5,
-                "positive_count": 5,
-                "negative_count": 5,
-                "auc": 0.91,
-                "accuracy": 0.82,
-                "true_positive_rate_at_one_percent_fpr": 0.73,
-                "clip_score_mean": 0.0,
-                "watermarked_clip_score_mean": 0.0,
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
     config = ShallowDiffuseOfficialReferenceConfig(
         output_dir="outputs/shallow_diffuse_official_reference",
         drive_output_dir=str(tmp_path / "drive"),
         source_dir="external_baseline/primary/shallow_diffuse/source",
         sample_count=5,
         run_official_command=False,
-        summary_import_path=str(imported_summary),
         require_cuda=False,
     )
 
-    summary = write_shallow_diffuse_official_reference_outputs(config, root=tmp_path)
-    records_path = tmp_path / summary["reference_records_path"]
-    validation_path = tmp_path / summary["reference_validation_path"]
-
-    assert summary["run_decision"] == "pass"
-    assert summary["sample_count"] == 5
-    assert summary["governed_reference_record_count"] == 1
-    assert records_path.read_text(encoding="utf-8").strip()
-    assert json.loads(validation_path.read_text(encoding="utf-8"))["reference_import_ready"] is True
+    with pytest.raises(RuntimeError, match="不是可验证的 Git checkout"):
+        write_shallow_diffuse_official_reference_outputs(config, root=tmp_path)
 
 
 @pytest.mark.quick
@@ -405,6 +605,24 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
                 "run_decision": "pass",
                 "shallow_diffuse_official_reference_ready": True,
                 "reference_import_ready": True,
+                "model_source_ready": True,
+                "model_snapshot_scope_ready": True,
+                "model_source_repository_id": "Manojb/stable-diffusion-2-1-base",
+                "model_source_revision": "0094d483a120f3f33dafbd187ea4aa60d10de75c",
+                "model_snapshot_content_digest": "4" * 64,
+                "openclip_source_ready": True,
+                "openclip_repository_id": OPENCLIP_REPOSITORY_ID,
+                "openclip_revision": OPENCLIP_REVISION,
+                "openclip_checkpoint_filename": OPENCLIP_CHECKPOINT_FILENAME,
+                "openclip_checkpoint_sha256": OPENCLIP_CHECKPOINT_SHA256,
+                "openclip_checkpoint_size_bytes": OPENCLIP_CHECKPOINT_SIZE_BYTES,
+                "openclip_snapshot_content_digest": "5" * 64,
+                "official_command_requested": True,
+                "official_command_return_code": 0,
+                "official_execution_ready": True,
+                "required_metrics_ready": True,
+                "official_command_result_ready": True,
+                "governed_reference_record_count": 1,
             },
             ensure_ascii=False,
         ),
@@ -534,8 +752,6 @@ def test_shallow_diffuse_official_reference_default_config_reads_runtime_paramet
     monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_W_PATTERN", "complex2_ring")
     monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_W_MEASUREMENT", "l1_complex2")
     monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
-    monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_REFERENCE_MODEL", "ViT-g-14")
-    monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_REFERENCE_MODEL_PRETRAIN", "laion2b_s12b_b42k")
 
     config = build_default_config()
 
@@ -546,7 +762,18 @@ def test_shallow_diffuse_official_reference_default_config_reads_runtime_paramet
     assert config.w_pattern == "complex2_ring"
     assert config.w_measurement == "l1_complex2"
     assert config.official_model_id == "Manojb/stable-diffusion-2-1-base"
+    assert config.dataset == "Gustavosta/Stable-Diffusion-Prompts"
+    assert config.dataset_revision == "d816d4a05cb89bde39dd99284c459801e1e7e69a"
     assert config.reference_model == "ViT-g-14"
-    assert config.reference_model_pretrain == "laion2b_s12b_b42k"
+    assert config.reference_model_checkpoint_path == DEFAULT_OPENCLIP_CHECKPOINT_PATH
+    assert Path(config.reference_model_checkpoint_path).name == OPENCLIP_CHECKPOINT_FILENAME
+
+
+@pytest.mark.quick
+def test_shallow_diffuse_official_reference_rejects_unregistered_prompt_dataset() -> None:
+    """正式配置不得把精确 Gustavosta 数据来源替换为其他仓库。"""
+
+    with pytest.raises(ValueError, match="精确 Prompt 数据集 revision"):
+        ShallowDiffuseOfficialReferenceConfig(dataset="example/mutable-prompts")
 
 

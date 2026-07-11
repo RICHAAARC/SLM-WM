@@ -245,6 +245,9 @@ def _official_reference_spec(baseline_id: str) -> ClosurePackageFamilySpec:
             _require(summary, "run_decision", "pass"),
             _require(summary, f"{baseline_id}_official_reference_ready", True),
             _require(summary, "reference_import_ready", True),
+            _require(summary, "model_source_ready", True),
+            _require(summary, "model_snapshot_scope_ready", True),
+            _require(summary, "openclip_source_ready", True),
             JsonValueRequirement(
                 source=_source(run_manifest, "metadata", "run_decision"),
                 expected_value="pass",

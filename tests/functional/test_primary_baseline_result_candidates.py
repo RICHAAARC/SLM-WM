@@ -11,6 +11,8 @@ import pytest
 from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
 from paper_experiments.baselines import build_t2smark_formal_candidate_records
 from paper_experiments.baselines.method_faithful_observation_collection import (
+    FORMAL_MODEL_ID,
+    FORMAL_MODEL_REVISION,
     MethodFaithfulObservationSource,
     file_sha256,
 )
@@ -310,6 +312,8 @@ def test_method_candidate_statistics_use_test_split_only(
         prompt_plan_path=source_path,
         adapter_manifest_path=transfer_manifest_path,
         execution_manifest_path=transfer_manifest_path,
+        model_id=FORMAL_MODEL_ID,
+        model_revision=FORMAL_MODEL_REVISION,
         rows=tuple(dict(row) for row in observations),
         transfer_manifest={"baseline_id": baseline_id},
     )

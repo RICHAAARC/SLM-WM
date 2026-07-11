@@ -13,11 +13,14 @@ from typing import Any, Iterable
 from PIL import Image
 
 from experiments.runtime.image_metrics import compute_image_quality_metrics
+from experiments.runtime.model_sources import get_model_source, require_registered_model_reference
 from main.core.digest import build_stable_digest
 
 
 STRICT_PAIR_PROTOCOL = "strict_clean_watermarked_pair"
-DEFAULT_CLIP_MODEL_ID = "openai/clip-vit-base-patch32"
+_CLIP_MODEL_SOURCE = get_model_source("openai_clip_vit_base_patch32")
+DEFAULT_CLIP_MODEL_ID = _CLIP_MODEL_SOURCE.repository_id
+DEFAULT_CLIP_MODEL_REVISION = _CLIP_MODEL_SOURCE.revision
 DEFAULT_LPIPS_NETWORK = "alex"
 
 
@@ -27,6 +30,7 @@ class T2SMarkPairPerceptualConfig:
 
     enable_pair_perceptual_metrics: bool = True
     clip_model_id: str = DEFAULT_CLIP_MODEL_ID
+    clip_model_revision: str = DEFAULT_CLIP_MODEL_REVISION
     lpips_network: str = DEFAULT_LPIPS_NETWORK
     perceptual_metric_device_name: str = "cpu"
     hf_token_env: str = "HF_TOKEN"
@@ -38,6 +42,15 @@ class T2SMarkPairPerceptualConfig:
             raise ValueError("lpips_network 必须为 alex、vgg 或 squeeze")
         if not self.clip_model_id.strip():
             raise ValueError("clip_model_id 不能为空")
+        if len(self.clip_model_revision) != 40 or any(
+            character not in "0123456789abcdef" for character in self.clip_model_revision
+        ):
+            raise ValueError("clip_model_revision 必须是40位小写十六进制提交")
+        require_registered_model_reference(
+            self.clip_model_id,
+            self.clip_model_revision,
+            required_usage_role="t2smark_pair_quality_encoder",
+        )
 
 
 def stable_json_text(value: Any) -> str:
@@ -185,14 +198,26 @@ def clip_scores_from_features(image_features: Any, text_features: Any) -> tuple[
 
 
 @lru_cache(maxsize=4)
-def load_clip_metric_objects(clip_model_id: str, device_name: str, hf_token: str) -> tuple[Any, Any]:
+def load_clip_metric_objects(
+    clip_model_id: str,
+    clip_model_revision: str,
+    device_name: str,
+    hf_token: str,
+) -> tuple[Any, Any]:
     """加载并缓存 CLIP processor / model。"""
 
     import torch
     from transformers import CLIPModel, CLIPProcessor
 
     device = torch.device(device_name)
-    model_kwargs = {"token": hf_token} if hf_token else {}
+    require_registered_model_reference(
+        clip_model_id,
+        clip_model_revision,
+        required_usage_role="t2smark_pair_quality_encoder",
+    )
+    model_kwargs = {"revision": clip_model_revision}
+    if hf_token:
+        model_kwargs["token"] = hf_token
     processor = CLIPProcessor.from_pretrained(clip_model_id, **model_kwargs)
     model = CLIPModel.from_pretrained(clip_model_id, **model_kwargs).to(device)
     model.eval()
@@ -221,7 +246,12 @@ def compute_clip_pair_metrics(
         if device.type == "cuda" and not torch.cuda.is_available():
             return unsupported_clip_metric("gpu_unavailable")
         token = os.environ.get(config.hf_token_env) or ""
-        processor, model = load_clip_metric_objects(config.clip_model_id, config.perceptual_metric_device_name, token)
+        processor, model = load_clip_metric_objects(
+            config.clip_model_id,
+            config.clip_model_revision,
+            config.perceptual_metric_device_name,
+            token,
+        )
         image_inputs = processor(
             images=[clean_image.convert("RGB"), watermarked_image.convert("RGB")],
             return_tensors="pt",
@@ -463,6 +493,7 @@ def write_t2smark_strict_pair_quality_outputs(
     summary_path: Path,
     enable_pair_perceptual_metrics: bool = False,
     clip_model_id: str = DEFAULT_CLIP_MODEL_ID,
+    clip_model_revision: str = DEFAULT_CLIP_MODEL_REVISION,
     lpips_network: str = DEFAULT_LPIPS_NETWORK,
     perceptual_metric_device_name: str = "cpu",
     hf_token_env: str = "HF_TOKEN",
@@ -473,6 +504,7 @@ def write_t2smark_strict_pair_quality_outputs(
     perceptual_config = T2SMarkPairPerceptualConfig(
         enable_pair_perceptual_metrics=enable_pair_perceptual_metrics,
         clip_model_id=clip_model_id,
+        clip_model_revision=clip_model_revision,
         lpips_network=lpips_network,
         perceptual_metric_device_name=perceptual_metric_device_name,
         hf_token_env=hf_token_env,
@@ -487,6 +519,7 @@ def write_t2smark_strict_pair_quality_outputs(
     summary["pair_quality_metrics_path"] = relative_or_absolute(metrics_path, root_path)
     summary["enable_pair_perceptual_metrics"] = enable_pair_perceptual_metrics
     summary["clip_model_id"] = clip_model_id
+    summary["clip_model_revision"] = clip_model_revision
     summary["lpips_network"] = lpips_network
     summary["perceptual_metric_device_name"] = perceptual_metric_device_name
     summary["pair_quality_rows_digest"] = build_stable_digest(rows)

@@ -12,6 +12,7 @@ import tempfile
 from typing import Any
 
 from experiments.protocol.attacks import attack_config_digest
+from experiments.runtime.model_sources import get_model_source
 from external_baseline.primary.sd35_method_faithful_common import formal_image_attack_config
 from paper_experiments.runners.external_source_runtime import (
     load_baseline_registry_item,
@@ -20,7 +21,9 @@ from paper_experiments.runners.external_source_runtime import (
 )
 
 
-DEFAULT_T2SMARK_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
+_T2SMARK_MODEL_SOURCE = get_model_source("stabilityai_stable_diffusion_3_5_medium")
+DEFAULT_T2SMARK_MODEL_ID = _T2SMARK_MODEL_SOURCE.repository_id
+DEFAULT_T2SMARK_MODEL_REVISION = _T2SMARK_MODEL_SOURCE.revision
 DEFAULT_T2SMARK_SOURCE_ENTRY = "external_baseline/primary/t2smark/source/run_sd35.py"
 DEFAULT_T2SMARK_PROTOCOL_PATCH = "external_baseline/primary/t2smark/adapter/formal_protocol_git_diff.txt"
 T2SMARK_PATCHED_SOURCE_PATHS = ("option.py", "run_sd35.py")
@@ -202,24 +205,44 @@ def verify_exact_t2smark_protocol_worktree(source_dir: Path, patch_path: Path) -
             "T2SMark 源码包含固定补丁之外的未跟踪文件: " + ",".join(untracked_paths)
         )
 
+    tracked_change_result = _run_git_checked(
+        ["git", "diff", "--name-only", "HEAD", "--"],
+        cwd=resolved_source,
+    )
+    tracked_changes = {
+        line.strip().replace("\\", "/")
+        for line in tracked_change_result.stdout.splitlines()
+        if line.strip()
+    }
+    unexpected_tracked_changes = tracked_changes.difference(T2SMARK_PATCHED_SOURCE_PATHS)
+    if unexpected_tracked_changes:
+        raise RuntimeError(
+            "T2SMark 源码包含固定补丁之外的 tracked 修改: "
+            + ",".join(sorted(unexpected_tracked_changes))
+        )
+
     with tempfile.TemporaryDirectory(prefix="slm_wm_t2smark_index_") as temporary_dir:
         index_path = Path(temporary_dir) / "expected.index"
         environment = dict(os.environ)
         environment["GIT_INDEX_FILE"] = str(index_path)
         _run_git_checked(["git", "read-tree", "HEAD"], cwd=resolved_source, env=environment)
         _run_git_checked(
-            ["git", "apply", "--cached", str(resolved_patch)],
+            ["git", "apply", "--ignore-space-change", "--cached", str(resolved_patch)],
             cwd=resolved_source,
             env=environment,
         )
-        comparison = subprocess.run(
-            ["git", "diff", "--quiet"],
-            cwd=resolved_source,
-            env=environment,
-            check=False,
-        )
-        if comparison.returncode != 0:
-            raise RuntimeError("T2SMark 源码工作树不等于固定 revision 加固定协议补丁")
+        for relative_path in T2SMARK_PATCHED_SOURCE_PATHS:
+            expected_blob = _run_git_checked(
+                ["git", "rev-parse", f":{relative_path}"],
+                cwd=resolved_source,
+                env=environment,
+            ).stdout.strip()
+            actual_blob = _run_git_checked(
+                ["git", "hash-object", f"--path={relative_path}", relative_path],
+                cwd=resolved_source,
+            ).stdout.strip()
+            if actual_blob != expected_blob:
+                raise RuntimeError("T2SMark 源码工作树不等于固定 revision 加固定协议补丁")
 
     source_hashes = {
         relative_path: _sha256(resolved_source / relative_path)
@@ -252,7 +275,7 @@ def _apply_protocol_patch(
     """应用固定补丁，已应用时通过 reverse-check 精确识别。"""
 
     check_result = _run_git(
-        ["git", "apply", "--check", str(patch_path)],
+        ["git", "apply", "--ignore-space-change", "--check", str(patch_path)],
         cwd=source_dir,
         timeout_seconds=300,
         progress=progress,
@@ -261,7 +284,7 @@ def _apply_protocol_patch(
     patch_applied = False
     if int(check_result["return_code"]) == 0:
         apply_result = _run_git(
-            ["git", "apply", str(patch_path)],
+            ["git", "apply", "--ignore-space-change", str(patch_path)],
             cwd=source_dir,
             timeout_seconds=300,
             progress=progress,
@@ -272,7 +295,7 @@ def _apply_protocol_patch(
         patch_applied = True
     else:
         reverse_result = _run_git(
-            ["git", "apply", "--reverse", "--check", str(patch_path)],
+            ["git", "apply", "--ignore-space-change", "--reverse", "--check", str(patch_path)],
             cwd=source_dir,
             timeout_seconds=300,
             progress=progress,

@@ -21,6 +21,7 @@ from paper_experiments.runners.t2smark_formal_reproduction import (
     build_t2smark_formal_run_readiness,
     package_t2smark_formal_reproduction_outputs,
     should_run_official,
+    validate_t2smark_formal_protocol_config,
     write_t2smark_formal_protocol_binding,
 )
 from paper_experiments.runners.t2smark_source_runtime import (
@@ -123,6 +124,28 @@ def _paper_run(prompt_count: int) -> SimpleNamespace:
     )
 
 
+def test_t2smark_formal_rejects_unlocked_openclip_source_branch(tmp_path: Path) -> None:
+    """正式入口不得激活官方源码中按可变标签下载 OpenCLIP 的分支。"""
+
+    config = T2SMarkFormalReproductionConfig(clip_test_num=1)
+
+    with pytest.raises(ValueError, match="未受治理的 OpenCLIP"):
+        validate_t2smark_formal_protocol_config(config, root_path=tmp_path)
+
+
+def test_t2smark_protocol_binding_records_disabled_source_clip_branch() -> None:
+    """复用协议必须显式绑定官方源码 OpenCLIP 分支处于禁用状态。"""
+
+    binding = build_t2smark_formal_protocol_binding(
+        T2SMarkFormalReproductionConfig(prompt_limit=1),
+        paper_run=_paper_run(1),
+        prompt_report=_prompt_report(1),
+        source_report=_source_report(),
+    )
+
+    assert binding["clip_test_num"] == 0
+
+
 def _write_reuse_binding(
     tmp_path: Path,
     config: T2SMarkFormalReproductionConfig,
@@ -209,6 +232,7 @@ def test_t2smark_reuse_rejects_incomplete_formal_attack_matrix(tmp_path: Path) -
     (
         ("prompt_digest", "9" * 64),
         ("seed", 20260711),
+        ("model_revision", "8" * 40),
         ("num_inference_steps", 21),
         ("num_inversion_steps", 21),
         ("guidance_scale", 5.0),
@@ -332,6 +356,18 @@ def test_t2smark_source_worktree_must_equal_fixed_patch(tmp_path: Path) -> None:
     (source_dir / "run_sd35.py").write_text("def run():\n    return 3\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="不等于固定 revision"):
         verify_exact_t2smark_protocol_worktree(source_dir, patch_path)
+
+
+def test_t2smark_fixed_patch_passes_exact_model_revision() -> None:
+    """T2SMark 固定源码补丁必须把40位模型 revision 传入 loader。"""
+
+    root = Path(__file__).resolve().parents[2]
+    patch_text = (
+        root / "external_baseline/primary/t2smark/adapter/formal_protocol_git_diff.txt"
+    ).read_text(encoding="utf-8")
+
+    assert '+    parser.add_argument("--model_revision", type=str, required=True)' in patch_text
+    assert "+    revision=args.model_revision" in patch_text
 
 
 def _write_package_fixture(

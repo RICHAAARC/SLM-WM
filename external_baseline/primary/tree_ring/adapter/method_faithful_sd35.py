@@ -25,13 +25,17 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from experiments.runtime.image_metrics import measured_image_ssim, measured_score_retention
+from experiments.runtime.model_sources import require_registered_model_reference
 from main.core.digest import build_stable_digest
 from external_baseline.primary.sd35_method_faithful_common import (
+    DEFAULT_SD35_MODEL_ID,
+    DEFAULT_SD35_MODEL_REVISION,
     apply_formal_image_attack,
     canonical_attack_family,
     canonical_attack_name,
     emit_adapter_progress,
     formal_image_attack_config,
+    validate_model_revision,
     validated_observation_attack_identity,
 )
 from experiments.protocol.attacks import attack_config_digest
@@ -296,7 +300,13 @@ class InversionStableDiffusion3PipelineMixin:
             return latents
 
 
-def load_sd3_pipeline(*, model_id: str, device: str, torch_dtype_name: str) -> Any:
+def load_sd3_pipeline(
+    *,
+    model_id: str,
+    model_revision: str,
+    device: str,
+    torch_dtype_name: str,
+) -> Any:
     """加载 SD3.5 pipeline 并动态组合反演 mixin。"""
 
     import torch
@@ -316,7 +326,17 @@ def load_sd3_pipeline(*, model_id: str, device: str, torch_dtype_name: str) -> A
         (InversionStableDiffusion3PipelineMixin, StableDiffusion3Pipeline),
         {},
     )
-    pipe = pipeline_class.from_pretrained(model_id, torch_dtype=torch_dtype)
+    exact_revision = validate_model_revision(model_revision)
+    require_registered_model_reference(
+        model_id,
+        exact_revision,
+        required_usage_role="common_backbone_baseline_model",
+    )
+    pipe = pipeline_class.from_pretrained(
+        model_id,
+        revision=exact_revision,
+        torch_dtype=torch_dtype,
+    )
     pipe = pipe.to(device)
     pipe.transformer.eval()
     pipe.vae.eval()
@@ -341,6 +361,7 @@ def build_observation(
     latent_shape: tuple[int, int, int, int],
     execution_device: str,
     model_id: str,
+    model_revision: str,
     quality_score: float,
     score_retention: float,
     attack_id: str = "",
@@ -385,6 +406,7 @@ def build_observation(
         "formal_result_claim": False,
         "supports_paper_claim": False,
         "generation_model_id": model_id,
+        "generation_model_revision": validate_model_revision(model_revision),
         "latent_shape": list(latent_shape),
         "execution_device": execution_device,
         "quality_score": float(quality_score),
@@ -461,7 +483,12 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
     if args.require_cuda and device != "cuda":
         raise RuntimeError("tree_ring_method_faithful_sd35_requires_cuda")
 
-    pipe = load_sd3_pipeline(model_id=args.model_id, device=device, torch_dtype_name=args.torch_dtype)
+    pipe = load_sd3_pipeline(
+        model_id=args.model_id,
+        model_revision=args.model_revision,
+        device=device,
+        torch_dtype_name=args.torch_dtype,
+    )
     progress_completed += 1
     emit_adapter_progress(
         baseline_id=BASELINE_ID,
@@ -567,6 +594,7 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 "watermarked_image_digest": watermarked_digest,
                 "baseline_id": BASELINE_ID,
                 "generation_model_id": args.model_id,
+                "generation_model_revision": args.model_revision,
                 "latent_shape": list(latent_shape),
             }
         )
@@ -587,6 +615,7 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 latent_shape=latent_shape,
                 execution_device=device,
                 model_id=args.model_id,
+                model_revision=args.model_revision,
                 quality_score=1.0,
                 score_retention=1.0,
             )
@@ -608,6 +637,7 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 latent_shape=latent_shape,
                 execution_device=device,
                 model_id=args.model_id,
+                model_revision=args.model_revision,
                 quality_score=pair_quality,
                 score_retention=1.0,
             )
@@ -698,6 +728,7 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                         latent_shape=latent_shape,
                         execution_device=device,
                         model_id=args.model_id,
+                        model_revision=args.model_revision,
                         quality_score=attack_quality,
                         score_retention=measured_score_retention(
                             float(runtime[f"{role_name}_score"]),
@@ -726,6 +757,8 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                         "attack_config_digest": formal_attack_digest,
                         "attack_transform_name": attack_transform_name,
                         "attack_execution": attack_execution,
+                        "generation_model_id": args.model_id,
+                        "generation_model_revision": args.model_revision,
                     }
                 )
                 if device == "cuda":
@@ -747,7 +780,12 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
     image_pairs_path = write_json(artifact_root / "tree_ring_image_pairs.json", image_pairs)
     attacked_manifest_path = write_json(
         artifact_root / "attacked_image_manifest.json",
-        {"attacked_images": attacked_records, "attacked_image_count": len(attacked_records)},
+        {
+            "model_id": args.model_id,
+            "model_revision": args.model_revision,
+            "attacked_images": attacked_records,
+            "attacked_image_count": len(attacked_records),
+        },
     )
     manifest = {
         "artifact_name": "tree_ring_method_faithful_sd35_adapter_manifest.json",
@@ -756,6 +794,7 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         "adapter_boundary": ADAPTER_BOUNDARY,
         "adapter_status": "method_faithful_sd35_adapter_ready",
         "model_id": args.model_id,
+        "model_revision": args.model_revision,
         "prompt_plan_path": str(Path(args.prompt_plan)),
         "baseline_observations_path": str(Path(args.out)),
         "artifact_root": str(artifact_root),
@@ -768,6 +807,7 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         "execution_device": device,
         "generation_protocol": {
             "model_id": args.model_id,
+            "model_revision": args.model_revision,
             "num_inference_steps": int(args.num_inference_steps),
             "guidance_scale": float(args.guidance_scale),
             "height": int(args.height),
@@ -807,7 +847,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-plan", required=True, help="共同 prompt 计划 JSON 路径")
     parser.add_argument("--out", required=True, help="baseline observations JSON 输出路径")
     parser.add_argument("--artifact-root", default=None, help="图像、攻击结果和 manifest 输出目录")
-    parser.add_argument("--model-id", default="stabilityai/stable-diffusion-3.5-medium")
+    parser.add_argument("--model-id", default=DEFAULT_SD35_MODEL_ID)
+    parser.add_argument("--model-revision", default=DEFAULT_SD35_MODEL_REVISION)
     parser.add_argument("--torch-dtype", default="float16")
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)

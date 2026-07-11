@@ -27,6 +27,15 @@ from paper_experiments.analysis.paper_artifact_data_validation import (
 from paper_experiments.baselines.primary_evidence import (
     PrimaryBaselineEvidenceRecord,
 )
+from paper_experiments.baselines.gaussian_shading_official_reference import (
+    GaussianShadingOfficialReferenceRecord,
+)
+from paper_experiments.baselines.shallow_diffuse_official_reference import (
+    ShallowDiffuseOfficialReferenceRecord,
+)
+from paper_experiments.baselines.tree_ring_official_reference import (
+    TreeRingOfficialReferenceRecord,
+)
 
 
 pytestmark = pytest.mark.quick
@@ -90,6 +99,20 @@ def test_primary_baseline_evidence_fields_are_registered() -> None:
         "adapter_smoke_sample_roles",
         "adapter_smoke_latent_shapes",
     } & registered
+
+
+def test_official_reference_record_fields_are_registered() -> None:
+    """三套官方参考受治理记录不得持久化未登记字段。"""
+
+    persisted = set().union(
+        *(set(field.name for field in fields(record_type)) for record_type in (
+            TreeRingOfficialReferenceRecord,
+            GaussianShadingOfficialReferenceRecord,
+            ShallowDiffuseOfficialReferenceRecord,
+        ))
+    )
+
+    assert persisted <= _registered_fields()
 
 
 def test_artifact_data_check_fields_are_registered() -> None:

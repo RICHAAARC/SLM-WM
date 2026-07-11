@@ -38,6 +38,7 @@ def test_minimal_method_package_dry_run_excludes_governance_layer(tmp_path: Path
     assert all(not path.startswith("paper_experiments/") for path in copied_files)
     assert all(not path.startswith("paper_workflow/") for path in copied_files)
     assert "configs/model_sd35.yaml" in copied_files
+    assert "configs/model_source_registry.json" in copied_files
     assert all("_prompts.txt" not in path for path in copied_files)
 
 

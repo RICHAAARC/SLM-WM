@@ -13,6 +13,7 @@ from pathlib import Path
 import time
 from typing import Any
 
+from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
 from experiments.runtime.diffusion.semantic_features import (
     DifferentiableSemanticFeatureRuntime,
     load_clip_vision_model,
@@ -25,6 +26,9 @@ from experiments.runtime.diffusion.regeneration_attacks import (
 from experiments.runtime.image_attacks import apply_standard_image_attack
 from experiments.runtime.diffusion.sd3_pipeline_runtime import load_pipeline, tensor_norm
 from experiments.runtime.image_metrics import compute_image_quality_metrics
+from experiments.runtime.model_sources import (
+    require_registered_model_reference,
+)
 from experiments.runtime.repository_environment import file_digest, resolve_code_version
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -49,38 +53,43 @@ from main.methods.subspace import (
 )
 
 
+_FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(".")
+
+
 @dataclass(frozen=True)
 class SemanticWatermarkRuntimeConfig:
     """定义一次真实方法嵌入和仅图像检测运行。"""
 
-    model_family: str = "sd35"
-    model_id: str = "stabilityai/stable-diffusion-3.5-medium"
-    vision_model_id: str = "openai/clip-vit-base-patch32"
+    model_family: str = _FORMAL_METHOD_CONFIG.model_family
+    model_id: str = _FORMAL_METHOD_CONFIG.model_id
+    model_revision: str = _FORMAL_METHOD_CONFIG.model_revision
+    vision_model_id: str = _FORMAL_METHOD_CONFIG.vision_model_id
+    vision_model_revision: str = _FORMAL_METHOD_CONFIG.vision_model_revision
     device_name: str = "cuda"
     torch_dtype: str = "float16"
     vision_torch_dtype: str = "float32"
     hf_token_env: str = "HF_TOKEN"
-    prompt: str = "a high quality photograph of a glass sphere on a wooden table"
+    prompt: str = _FORMAL_METHOD_CONFIG.prompt
     prompt_id: str = "runtime_prompt"
     split: str = "dev"
-    negative_prompt: str = "low quality, blurry"
+    negative_prompt: str = _FORMAL_METHOD_CONFIG.negative_prompt
     key_material: str = "slm_wm_runtime_key"
-    seed: int = 1703
-    width: int = 512
-    height: int = 512
-    inference_steps: int = 28
-    guidance_scale: float = 4.5
-    injection_step_indices: tuple[int, ...] = (8, 14, 20)
-    candidate_count: int = 20
-    null_rank: int = 4
-    lf_relative_strength: float = 0.0025
-    tail_relative_strength: float = 0.0015
-    attention_relative_strength: float = 0.0010
-    tail_fraction: float = 0.20
-    minimum_projection_energy_retention: float = 0.01
-    maximum_relative_response_residual: float = 1e-4
-    max_attention_tokens: int = 64
-    attention_module_count: int = 2
+    seed: int = _FORMAL_METHOD_CONFIG.seed
+    width: int = _FORMAL_METHOD_CONFIG.width
+    height: int = _FORMAL_METHOD_CONFIG.height
+    inference_steps: int = _FORMAL_METHOD_CONFIG.inference_steps
+    guidance_scale: float = _FORMAL_METHOD_CONFIG.guidance_scale
+    injection_step_indices: tuple[int, ...] = _FORMAL_METHOD_CONFIG.injection_step_indices
+    candidate_count: int = _FORMAL_METHOD_CONFIG.jacobian_candidate_count
+    null_rank: int = _FORMAL_METHOD_CONFIG.null_space_rank
+    lf_relative_strength: float = _FORMAL_METHOD_CONFIG.lf_relative_strength
+    tail_relative_strength: float = _FORMAL_METHOD_CONFIG.tail_relative_strength
+    attention_relative_strength: float = _FORMAL_METHOD_CONFIG.attention_relative_strength
+    tail_fraction: float = _FORMAL_METHOD_CONFIG.tail_fraction
+    minimum_projection_energy_retention: float = _FORMAL_METHOD_CONFIG.minimum_projection_energy_retention
+    maximum_relative_response_residual: float = _FORMAL_METHOD_CONFIG.maximum_relative_response_residual
+    max_attention_tokens: int = _FORMAL_METHOD_CONFIG.max_attention_tokens
+    attention_module_count: int = _FORMAL_METHOD_CONFIG.attention_module_count
     semantic_routing_enabled: bool = True
     null_space_enabled: bool = True
     lf_enabled: bool = True
@@ -89,7 +98,7 @@ class SemanticWatermarkRuntimeConfig:
     attention_geometry_enabled: bool = True
     image_alignment_enabled: bool = True
     standard_attack_profiles: tuple[str, ...] = ("full_main",)
-    diffusion_attacks_enabled: bool = True
+    diffusion_attacks_enabled: bool = _FORMAL_METHOD_CONFIG.diffusion_attacks_enabled
     content_threshold: float = 0.0
     geometry_score_threshold: float = 0.0
     rescue_margin_low: float = -0.05
@@ -98,6 +107,16 @@ class SemanticWatermarkRuntimeConfig:
     def __post_init__(self) -> None:
         """集中校验重型运行配置。"""
 
+        require_registered_model_reference(
+            self.model_id,
+            self.model_revision,
+            required_usage_role="primary_diffusion_model",
+        )
+        require_registered_model_reference(
+            self.vision_model_id,
+            self.vision_model_revision,
+            required_usage_role="semantic_condition_encoder",
+        )
         if self.device_name != "cuda":
             raise ValueError("正式真实方法运行要求 CUDA 设备")
         if self.candidate_count < self.null_rank or self.null_rank <= 0:
@@ -118,6 +137,12 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError("max_attention_tokens 至少为 4")
         if self.split not in {"dev", "calibration", "test"}:
             raise ValueError("split 必须为 dev、calibration 或 test")
+
+    @property
+    def carrier_model_reference(self) -> str:
+        """返回同时绑定仓库和精确 revision 的公开载体标识."""
+
+        return f"{self.model_id}@{self.model_revision}"
 
 
 @dataclass(frozen=True)
@@ -172,9 +197,15 @@ def load_semantic_watermark_runtime_context(
     }
     vision_model = load_clip_vision_model(
         config.vision_model_id,
+        config.vision_model_revision,
         config.device_name,
         config.vision_torch_dtype,
     )
+    runtime_versions["vision_model_source"] = require_registered_model_reference(
+        config.vision_model_id,
+        config.vision_model_revision,
+        required_usage_role="semantic_condition_encoder",
+    ).to_dict()
     feature_runtime = DifferentiableSemanticFeatureRuntime(pipeline.vae, vision_model)
     for parameter in pipeline.transformer.parameters():
         parameter.requires_grad_(False)
@@ -424,7 +455,7 @@ def _public_detection_noise_seed(config: SemanticWatermarkRuntimeConfig) -> int:
 
     detection_index = config.injection_step_indices[0]
     payload = (
-        f"slm_wm_image_only_attention|{config.model_id}|{config.width}x{config.height}|"
+        f"slm_wm_image_only_attention|{config.carrier_model_reference}|{config.width}x{config.height}|"
         f"{config.inference_steps}|{detection_index}"
     ).encode("utf-8")
     return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big") % (2**63 - 1)
@@ -544,11 +575,15 @@ def run_semantic_watermark_runtime(
             return callback_kwargs
         with torch.enable_grad():
             signals = feature_runtime.branch_signal_maps(latent.float(), previous_injection_latent)
-            lf_template = build_low_frequency_template(latent, config.key_material, config.model_id)
+            lf_template = build_low_frequency_template(
+                latent,
+                config.key_material,
+                config.carrier_model_reference,
+            )
             tail_template, tail_threshold, retained_fraction = build_tail_robust_template(
                 latent,
                 config.key_material,
-                config.model_id,
+                config.carrier_model_reference,
                 config.tail_fraction if config.tail_truncation_enabled else 1.0,
             )
             transformer_forward = _transformer_forward_function(
@@ -771,7 +806,7 @@ def run_semantic_watermark_runtime(
     lf_weight = 0.70 if config.lf_enabled and config.tail_robust_enabled else (1.0 if config.lf_enabled else 0.0)
     tail_weight = 1.0 - lf_weight
     detector_config = ImageOnlyDetectionConfig(
-        model_id=config.model_id,
+        model_id=config.carrier_model_reference,
         content_threshold=config.content_threshold,
         geometry_score_threshold=config.geometry_score_threshold,
         rescue_margin_low=config.rescue_margin_low,

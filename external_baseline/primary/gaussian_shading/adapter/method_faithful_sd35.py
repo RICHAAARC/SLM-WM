@@ -22,6 +22,8 @@ from experiments.protocol.attacks import attack_config_digest
 from main.core.digest import build_stable_digest
 
 from external_baseline.primary.sd35_method_faithful_common import (
+    DEFAULT_SD35_MODEL_ID,
+    DEFAULT_SD35_MODEL_REVISION,
     METHOD_FAITHFUL_ADAPTER_BOUNDARY,
     apply_formal_image_attack,
     canonical_attack_family,
@@ -39,6 +41,7 @@ from external_baseline.primary.sd35_method_faithful_common import (
     score_image_latents,
     select_prompt_rows,
     split_name,
+    validate_model_revision,
     validated_observation_attack_identity,
     write_json,
 )
@@ -147,6 +150,7 @@ def build_observation(
     latent_shape: tuple[int, int, int, int],
     execution_device: str,
     model_id: str,
+    model_revision: str,
     quality_score: float,
     score_retention: float,
     attack_id: str = "",
@@ -192,6 +196,7 @@ def build_observation(
             "formal_result_claim": False,
             "supports_paper_claim": False,
             "generation_model_id": model_id,
+            "generation_model_revision": validate_model_revision(model_revision),
             "latent_shape": list(latent_shape),
             "execution_device": execution_device,
             "quality_score": float(quality_score),
@@ -230,6 +235,7 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
 
     pipe = load_sd3_pipeline(
         model_id=args.model_id,
+        model_revision=args.model_revision,
         device=device,
         torch_dtype_name=args.torch_dtype,
         adapter_class_name="GaussianShadingInversionStableDiffusion3Pipeline",
@@ -335,6 +341,7 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                 "watermarked_image_digest": watermarked_digest,
                 "baseline_id": BASELINE_ID,
                 "generation_model_id": args.model_id,
+                "generation_model_revision": args.model_revision,
                 "latent_shape": list(latent_shape),
             }
         )
@@ -355,6 +362,7 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                 latent_shape=latent_shape,
                 execution_device=device,
                 model_id=args.model_id,
+                model_revision=args.model_revision,
                 quality_score=1.0,
                 score_retention=1.0,
             )
@@ -376,6 +384,7 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                 latent_shape=latent_shape,
                 execution_device=device,
                 model_id=args.model_id,
+                model_revision=args.model_revision,
                 quality_score=pair_quality,
                 score_retention=1.0,
             )
@@ -464,6 +473,7 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                         latent_shape=latent_shape,
                         execution_device=device,
                         model_id=args.model_id,
+                        model_revision=args.model_revision,
                         quality_score=attack_quality,
                         score_retention=measured_score_retention(
                             float(runtime[f"{role_name}_score"]),
@@ -492,6 +502,8 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                         "attack_config_digest": formal_attack_digest,
                         "attack_transform_name": attack_transform_name,
                         "attack_execution": attack_execution,
+                        "generation_model_id": args.model_id,
+                        "generation_model_revision": args.model_revision,
                     }
                 )
                 if device == "cuda":
@@ -513,7 +525,12 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
     image_pairs_path = write_json(artifact_root / "gaussian_shading_image_pairs.json", image_pairs)
     attacked_manifest_path = write_json(
         artifact_root / "attacked_image_manifest.json",
-        {"attacked_images": attacked_records, "attacked_image_count": len(attacked_records)},
+        {
+            "model_id": args.model_id,
+            "model_revision": args.model_revision,
+            "attacked_images": attacked_records,
+            "attacked_image_count": len(attacked_records),
+        },
     )
     manifest = {
         "artifact_name": "gaussian_shading_method_faithful_sd35_adapter_manifest.json",
@@ -522,6 +539,7 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
         "adapter_boundary": METHOD_FAITHFUL_ADAPTER_BOUNDARY,
         "adapter_status": "method_faithful_sd35_adapter_ready",
         "model_id": args.model_id,
+        "model_revision": args.model_revision,
         "prompt_plan_path": str(Path(args.prompt_plan)),
         "baseline_observations_path": str(Path(args.out)),
         "artifact_root": str(artifact_root),
@@ -534,6 +552,7 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
         "execution_device": device,
         "generation_protocol": {
             "model_id": args.model_id,
+            "model_revision": args.model_revision,
             "num_inference_steps": int(args.num_inference_steps),
             "guidance_scale": float(args.guidance_scale),
             "height": int(args.height),
@@ -573,7 +592,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-plan", required=True, help="共同 prompt 计划 JSON 路径")
     parser.add_argument("--out", required=True, help="baseline observations JSON 输出路径")
     parser.add_argument("--artifact-root", default=None, help="图像、攻击结果和 manifest 输出目录")
-    parser.add_argument("--model-id", default="stabilityai/stable-diffusion-3.5-medium")
+    parser.add_argument("--model-id", default=DEFAULT_SD35_MODEL_ID)
+    parser.add_argument("--model-revision", default=DEFAULT_SD35_MODEL_REVISION)
     parser.add_argument("--torch-dtype", default="float16")
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)

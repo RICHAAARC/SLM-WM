@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import sys
 from typing import Any
 
@@ -22,9 +23,14 @@ from paper_experiments.baselines.command_plan import (
     load_baseline_command_plan,
     selected_primary_baselines,
 )
+from experiments.runtime.model_sources import get_model_source, require_registered_model_reference
 
 DEFAULT_PLAN_PATH = Path("outputs/external_baseline_command_plan/baseline_command_plan.json")
 DEFAULT_ADAPTER_OUTPUT_ROOT = Path("outputs/external_baseline_execution/adapter_outputs")
+_COMMON_BACKBONE_SOURCE = get_model_source("stabilityai_stable_diffusion_3_5_medium")
+DEFAULT_MODEL_ID = _COMMON_BACKBONE_SOURCE.repository_id
+DEFAULT_MODEL_REVISION = _COMMON_BACKBONE_SOURCE.revision
+MODEL_REVISION_PATTERN = re.compile(r"[0-9a-f]{40}")
 
 
 def _resolve(root: Path, path: str | Path) -> Path:
@@ -58,7 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-fpr", type=float, default=None, help="calibration clean negative 的目标 FPR。")
     parser.add_argument("--require-cuda", action="store_true", help="adapter 运行前要求 CUDA 可用。")
     parser.add_argument("--timeout-seconds", type=int, default=86400, help="单个 baseline 命令超时时间。")
-    parser.add_argument("--model-id", default="stabilityai/stable-diffusion-3.5-medium")
+    parser.add_argument("--model-id", default=DEFAULT_MODEL_ID)
+    parser.add_argument("--model-revision", default=DEFAULT_MODEL_REVISION)
     parser.add_argument("--torch-dtype", default="float16")
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)
@@ -120,6 +127,8 @@ def _append_common_model_args(command: list[str], args: argparse.Namespace) -> N
         [
             "--model-id",
             str(args.model_id),
+            "--model-revision",
+            str(args.model_revision),
             "--torch-dtype",
             str(args.torch_dtype),
             "--height",
@@ -148,6 +157,11 @@ def build_plan(args: argparse.Namespace) -> list[dict[str, Any]]:
     """构建外部 baseline adapter 命令计划。"""
 
     root = _resolve(Path.cwd(), args.root)
+    require_registered_model_reference(
+        str(args.model_id),
+        str(args.model_revision),
+        required_usage_role="common_backbone_baseline_model",
+    )
     output_root = _ensure_under_outputs(root, _resolve(root, args.output_root))
     output_root.mkdir(parents=True, exist_ok=True)
     selected = selected_primary_baselines(args.methods)
@@ -155,6 +169,8 @@ def build_plan(args: argparse.Namespace) -> list[dict[str, Any]]:
         raise ValueError("运行扩散类 SD3.5 adapter 时必须提供 --prompt-plan")
     if args.target_fpr is None or not 0.0 < float(args.target_fpr) < 1.0:
         raise ValueError("扩散 baseline 正式运行必须提供位于 (0, 1) 的 --target-fpr")
+    if MODEL_REVISION_PATTERN.fullmatch(str(args.model_revision)) is None:
+        raise ValueError("扩散 baseline 必须提供40位小写十六进制 --model-revision")
 
     rows: list[dict[str, Any]] = []
     for baseline_id in selected:

@@ -24,6 +24,8 @@ from paper_experiments.runners.closure_package_selection import (
 )
 from paper_experiments.runners.external_baseline_method_faithful import (
     DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
+    DEFAULT_MODEL_ID,
+    DEFAULT_MODEL_REVISION,
     METHOD_FAITHFUL_BASELINE_IDS,
     ExternalBaselineMethodFaithfulConfig,
     _build_command_plan_command,
@@ -88,6 +90,8 @@ def thresholded_row(
         "threshold": threshold,
         "threshold_source": "calibration_clean_negative_conformal",
         "detection_decision": score >= threshold,
+        "generation_model_id": DEFAULT_MODEL_ID,
+        "generation_model_revision": DEFAULT_MODEL_REVISION,
     }
     if sample_role in {"attacked_negative", "attacked_positive"}:
         attack_config = resolve_formal_attack_config(
@@ -172,7 +176,11 @@ def prepare_transfer_inputs(
         {
             "baseline_id": baseline_id,
             "observation_count": declared_count,
+            "model_id": config.model_id,
+            "model_revision": config.model_revision,
             "generation_protocol": {
+                "model_id": config.model_id,
+                "model_revision": config.model_revision,
                 "num_inference_steps": config.num_inference_steps,
                 "guidance_scale": config.guidance_scale,
             },
@@ -227,6 +235,7 @@ def test_command_plan_uses_fixed_fpr_and_shared_generation_budget(tmp_path: Path
 
     assert command[command.index("--methods") + 1] == "tree_ring"
     assert command[command.index("--target-fpr") + 1] == "0.1"
+    assert command[command.index("--model-revision") + 1] == DEFAULT_MODEL_REVISION
     assert command[command.index("--num-inference-steps") + 1] == "20"
     assert command[command.index("--num-inversion-steps") + 1] == "20"
     assert command[command.index("--guidance-scale") + 1] == "4.5"
@@ -254,6 +263,27 @@ def test_formal_runner_rejects_generation_budget_override(
         validate_formal_run_config(root_path, invalid)
 
 
+def test_formal_runner_rejects_model_revision_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正式 common-backbone baseline 不得切换到未登记的模型 commit。"""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    with pytest.raises(ValueError, match="未登记"):
+        ExternalBaselineMethodFaithfulConfig(
+            prompt_set="probe_paper",
+            prompt_file="configs/paper_main_probe_paper_prompts.txt",
+            primary_baseline_id="tree_ring",
+            model_revision="a" * 40,
+            target_fpr=0.1,
+            primary_baseline_max_samples=70,
+            require_cuda=True,
+        )
+
+    with pytest.raises(ValueError, match="40位小写十六进制"):
+        ExternalBaselineMethodFaithfulConfig(model_revision="main")
+
+
 def test_transfer_manifest_binds_actual_observations_and_threshold(tmp_path: Path) -> None:
     """transfer manifest 必须绑定真实 observation 数量、摘要和冻结阈值。"""
 
@@ -273,6 +303,7 @@ def test_transfer_manifest_binds_actual_observations_and_threshold(tmp_path: Pat
     assert len(manifest["baseline_observations_sha256"]) == 64
     assert len(manifest["threshold_digest"]) == 64
     assert manifest["generation_protocol"]["num_inference_steps"] == 20
+    assert manifest["model_revision"] == DEFAULT_MODEL_REVISION
     assert manifest["detection_protocol"]["input_access_mode"] == "image_only"
     assert paths["split_observations"].is_file()
     assert paths["transfer_manifest"].is_file()
@@ -337,6 +368,10 @@ def prepare_package_source(root: Path, baseline_id: str, *, run_decision: str = 
             "primary_baseline_id": baseline_id,
             "paper_run_name": "pilot_paper",
             "target_fpr": 0.01,
+            "generation_protocol": {
+                "model_id": DEFAULT_MODEL_ID,
+                "model_revision": DEFAULT_MODEL_REVISION,
+            },
         },
     )
     code_version = PACKAGE_TEST_CODE_VERSION
@@ -349,6 +384,8 @@ def prepare_package_source(root: Path, baseline_id: str, *, run_decision: str = 
                 "prompt_set": "pilot_paper",
                 "target_fpr": 0.01,
                 "primary_baseline_id": baseline_id,
+                "model_id": DEFAULT_MODEL_ID,
+                "model_revision": DEFAULT_MODEL_REVISION,
             },
         },
     )
@@ -360,6 +397,12 @@ def prepare_package_source(root: Path, baseline_id: str, *, run_decision: str = 
             "baseline_id": baseline_id,
             "paper_run_name": "pilot_paper",
             "target_fpr": 0.01,
+            "model_id": DEFAULT_MODEL_ID,
+            "model_revision": DEFAULT_MODEL_REVISION,
+            "generation_protocol": {
+                "model_id": DEFAULT_MODEL_ID,
+                "model_revision": DEFAULT_MODEL_REVISION,
+            },
             "code_version": code_version,
             "transfer_ready": True,
         },

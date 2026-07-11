@@ -13,6 +13,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 from typing import Any, Mapping
@@ -20,6 +21,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.runtime import repository_environment
+from experiments.runtime.model_sources import get_model_source, require_registered_model_reference
 from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_observation_threshold
 from experiments.protocol.paper_run_config import (
     DEFAULT_GUIDANCE_SCALE,
@@ -53,7 +55,10 @@ from paper_experiments.baselines.observation_io import load_baseline_observation
 
 
 DEFAULT_OUTPUT_DIR = "outputs/external_baseline_method_faithful"
-DEFAULT_MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
+_COMMON_BACKBONE_SOURCE = get_model_source("stabilityai_stable_diffusion_3_5_medium")
+DEFAULT_MODEL_ID = _COMMON_BACKBONE_SOURCE.repository_id
+DEFAULT_MODEL_REVISION = _COMMON_BACKBONE_SOURCE.revision
+MODEL_REVISION_PATTERN = re.compile(r"[0-9a-f]{40}")
 DEFAULT_BASELINE_SEED = 20260621
 DEFAULT_PACKAGE_PATTERN = "external_baseline_method_faithful_package_*.zip"
 METHOD_FAITHFUL_BASELINE_IDS = (
@@ -76,6 +81,7 @@ class ExternalBaselineMethodFaithfulConfig:
     prompt_file: str = "configs/paper_main_pilot_paper_prompts.txt"
     primary_baseline_id: str = "tree_ring"
     model_id: str = DEFAULT_MODEL_ID
+    model_revision: str = DEFAULT_MODEL_REVISION
     seed: int = DEFAULT_BASELINE_SEED
     target_fpr: float = DEFAULT_TARGET_FPR
     num_inference_steps: int = DEFAULT_INFERENCE_STEPS
@@ -104,6 +110,13 @@ class ExternalBaselineMethodFaithfulConfig:
             raise ValueError("guidance_scale 不得小于 0")
         if self.primary_baseline_max_samples <= 0:
             raise ValueError("primary_baseline_max_samples 必须为正整数")
+        if MODEL_REVISION_PATTERN.fullmatch(self.model_revision) is None:
+            raise ValueError("model_revision 必须是40位小写十六进制 Git commit")
+        require_registered_model_reference(
+            self.model_id,
+            self.model_revision,
+            required_usage_role="common_backbone_baseline_model",
+        )
 
 
 @dataclass(frozen=True)
@@ -151,6 +164,7 @@ def validate_formal_run_config(
             Path(config.prompt_file).name == Path(paper_run.prompt_file).name,
             config.primary_baseline_max_samples == paper_run.prompt_count,
             config.model_id == DEFAULT_MODEL_ID,
+            config.model_revision == DEFAULT_MODEL_REVISION,
             config.seed == DEFAULT_BASELINE_SEED,
             math.isclose(config.target_fpr, paper_run.target_fpr, rel_tol=0.0, abs_tol=1e-12),
             config.num_inference_steps == paper_run.inference_steps,
@@ -443,6 +457,8 @@ def _build_command_plan_command(
         str(config.timeout_seconds),
         "--model-id",
         config.model_id,
+        "--model-revision",
+        config.model_revision,
         "--torch-dtype",
         "float16",
         "--height",
@@ -507,6 +523,12 @@ def write_baseline_transfer_files(
         raise ValueError("baseline observation 不得为空")
     if any(str(row.get("baseline_id", "")) != baseline_id for row in observations):
         raise ValueError("observation 中存在其他 baseline 记录")
+    if any(
+        str(row.get("generation_model_id", "")) != config.model_id
+        or str(row.get("generation_model_revision", "")) != config.model_revision
+        for row in observations
+    ):
+        raise ValueError("observation 未绑定当前正式模型 id 与 revision")
     event_ids = [str(row.get("event_id", "")).strip() for row in observations]
     if any(not event_id for event_id in event_ids) or len(event_ids) != len(set(event_ids)):
         raise ValueError("observation event_id 必须非空且唯一")
@@ -521,6 +543,16 @@ def write_baseline_transfer_files(
     adapter_manifest = read_json(adapter_manifest_path)
     if str(adapter_manifest.get("baseline_id", "")) != baseline_id:
         raise ValueError("adapter manifest 的 baseline_id 与当前运行不一致")
+    adapter_generation = adapter_manifest.get("generation_protocol")
+    if not isinstance(adapter_generation, Mapping) or not all(
+        (
+            str(adapter_manifest.get("model_id", "")) == config.model_id,
+            str(adapter_manifest.get("model_revision", "")) == config.model_revision,
+            str(adapter_generation.get("model_id", "")) == config.model_id,
+            str(adapter_generation.get("model_revision", "")) == config.model_revision,
+        )
+    ):
+        raise ValueError("adapter manifest 未绑定当前正式模型 id 与 revision")
     declared_counts.add(int(adapter_manifest.get("observation_count", -1)))
     if declared_counts != {actual_count}:
         raise ValueError(
@@ -581,11 +613,14 @@ def write_baseline_transfer_files(
         "paper_run_name": config.prompt_set,
         "prompt_set": config.prompt_set,
         "prompt_count": len(prompt_rows),
+        "model_id": config.model_id,
+        "model_revision": config.model_revision,
         "target_fpr": float(config.target_fpr),
         "threshold": threshold_audit.frozen_threshold,
         "threshold_digest": threshold_audit.threshold_digest,
         "generation_protocol": {
             "model_id": config.model_id,
+            "model_revision": config.model_revision,
             "num_inference_steps": int(config.num_inference_steps),
             "guidance_scale": float(config.guidance_scale),
             "height": 512,
@@ -765,6 +800,7 @@ def write_external_baseline_method_faithful_outputs(
         "target_fpr": float(config.target_fpr),
         "generation_protocol": {
             "model_id": config.model_id,
+            "model_revision": config.model_revision,
             "num_inference_steps": int(config.num_inference_steps),
             "guidance_scale": float(config.guidance_scale),
         },
@@ -826,6 +862,10 @@ def build_default_config() -> ExternalBaselineMethodFaithfulConfig:
         prompt_file=os.environ.get("SLM_WM_PROMPT_FILE", paper_run.prompt_file),
         primary_baseline_id=os.environ.get("SLM_WM_PRIMARY_BASELINE_ID", ""),
         model_id=os.environ.get("SLM_WM_EXTERNAL_BASELINE_MODEL_ID", DEFAULT_MODEL_ID),
+        model_revision=os.environ.get(
+            "SLM_WM_EXTERNAL_BASELINE_MODEL_REVISION",
+            DEFAULT_MODEL_REVISION,
+        ),
         seed=int(os.environ.get("SLM_WM_EXTERNAL_BASELINE_SEED", "20260621")),
         target_fpr=float(
             os.environ.get("SLM_WM_EXTERNAL_BASELINE_TARGET_FPR", str(paper_run.target_fpr))
@@ -926,6 +966,10 @@ def package_external_baseline_method_faithful_outputs(
         raise FileNotFoundError(f"baseline 运行摘要不存在: {summary_path}")
     run_summary = read_json(summary_path)
     run_manifest = read_json(run_manifest_path)
+    run_generation = run_summary.get("generation_protocol")
+    run_config = run_manifest.get("config")
+    if not isinstance(run_generation, Mapping) or not isinstance(run_config, Mapping):
+        raise RuntimeError("baseline 运行摘要或 manifest 未绑定正式模型协议")
     formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
         run_manifest.get("formal_execution_run_lock"),
         formal_execution_package_lock,
@@ -938,6 +982,10 @@ def package_external_baseline_method_faithful_outputs(
             run_summary.get("primary_baseline_adapter_ready") is True,
             run_summary.get("primary_baseline_id") == resolved_baseline_id,
             run_summary.get("paper_run_name") == paper_run.run_name,
+            run_generation.get("model_id") == DEFAULT_MODEL_ID,
+            run_generation.get("model_revision") == DEFAULT_MODEL_REVISION,
+            run_config.get("model_id") == DEFAULT_MODEL_ID,
+            run_config.get("model_revision") == DEFAULT_MODEL_REVISION,
             math.isclose(
                 float(run_summary.get("target_fpr", -1.0)),
                 paper_run.target_fpr,
@@ -953,6 +1001,9 @@ def package_external_baseline_method_faithful_outputs(
         / f"{resolved_baseline_id}_baseline_transfer_manifest.json"
     )
     transfer_manifest = read_json(transfer_manifest_path)
+    transfer_generation = transfer_manifest.get("generation_protocol")
+    if not isinstance(transfer_generation, Mapping):
+        raise RuntimeError("baseline transfer manifest 未绑定正式生成协议")
     repository_environment.verify_formal_execution_lock_code_version(
         formal_execution_run_lock,
         transfer_manifest.get("code_version"),
@@ -962,6 +1013,10 @@ def package_external_baseline_method_faithful_outputs(
             transfer_manifest.get("baseline_id") == resolved_baseline_id,
             transfer_manifest.get("transfer_ready") is True,
             transfer_manifest.get("paper_run_name") == paper_run.run_name,
+            transfer_manifest.get("model_id") == DEFAULT_MODEL_ID,
+            transfer_manifest.get("model_revision") == DEFAULT_MODEL_REVISION,
+            transfer_generation.get("model_id") == DEFAULT_MODEL_ID,
+            transfer_generation.get("model_revision") == DEFAULT_MODEL_REVISION,
             math.isclose(
                 float(transfer_manifest.get("target_fpr", -1.0)),
                 paper_run.target_fpr,
@@ -1015,6 +1070,8 @@ def package_external_baseline_method_faithful_outputs(
             "paper_run_name": paper_run.run_name,
             "target_fpr": paper_run.target_fpr,
             "baseline_id": resolved_baseline_id,
+            "model_id": DEFAULT_MODEL_ID,
+            "model_revision": DEFAULT_MODEL_REVISION,
             "formal_execution_run_lock": formal_execution_run_lock,
             "formal_execution_package_lock": formal_execution_package_lock,
             "entry_paths": [entry.relative_to(root_path).as_posix() for entry in entries],
@@ -1035,6 +1092,8 @@ def package_external_baseline_method_faithful_outputs(
         metadata={
             "construction_unit_name": "external_baseline_method_faithful",
             "baseline_id": resolved_baseline_id,
+            "model_id": DEFAULT_MODEL_ID,
+            "model_revision": DEFAULT_MODEL_REVISION,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
     )
@@ -1049,6 +1108,8 @@ def package_external_baseline_method_faithful_outputs(
             "baseline_id": resolved_baseline_id,
             "paper_run_name": paper_run.run_name,
             "target_fpr": paper_run.target_fpr,
+            "model_id": DEFAULT_MODEL_ID,
+            "model_revision": DEFAULT_MODEL_REVISION,
             "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
         },
         code_version=formal_execution_package_lock["formal_execution_commit"],
@@ -1057,6 +1118,8 @@ def package_external_baseline_method_faithful_outputs(
             "baseline_id": resolved_baseline_id,
             "paper_run_name": paper_run.run_name,
             "target_fpr": paper_run.target_fpr,
+            "model_id": DEFAULT_MODEL_ID,
+            "model_revision": DEFAULT_MODEL_REVISION,
             "run_decision": "pass",
         },
     ).to_dict()
@@ -1098,6 +1161,8 @@ def package_external_baseline_method_faithful_outputs(
         metadata={
             "construction_unit_name": "external_baseline_method_faithful",
             "baseline_id": resolved_baseline_id,
+            "model_id": DEFAULT_MODEL_ID,
+            "model_revision": DEFAULT_MODEL_REVISION,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
     )

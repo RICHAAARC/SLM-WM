@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -20,6 +21,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
 from experiments.runtime import repository_environment
+from experiments.runtime.model_sources import get_model_source
 from paper_experiments.baselines import (
     build_shallow_diffuse_official_reference_record,
     build_shallow_diffuse_official_reference_schema,
@@ -27,9 +29,11 @@ from paper_experiments.baselines import (
 )
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from paper_experiments.runners.external_source_runtime import (
+    build_registered_source_patch_evidence,
     ensure_cuda_if_requested,
     load_baseline_registry_item,
     normalize_repository_url,
+    prepare_registered_source_checkout,
     run_command,
 )
 from experiments.runtime.progress import (
@@ -44,19 +48,52 @@ from experiments.runtime.repository_environment import (
     build_runtime_environment_report,
     file_digest,
 )
+from paper_experiments.runners.model_snapshot_runtime import (
+    DEFAULT_SHARED_HUGGING_FACE_SNAPSHOT_ROOT,
+    DIFFUSERS_PIPELINE_ALLOW_PATTERNS,
+    build_model_snapshot_content,
+    build_shared_hugging_face_snapshot_dir,
+    ensure_hugging_face_snapshot_files,
+    validate_frozen_model_source,
+)
+from paper_experiments.runners.openclip_checkpoint_runtime import (
+    DEFAULT_OPENCLIP_CHECKPOINT_PATH,
+    OPENCLIP_CHECKPOINT_FILENAME,
+    OPENCLIP_CHECKPOINT_SHA256,
+    OPENCLIP_CHECKPOINT_SIZE_BYTES,
+    OPENCLIP_MODEL_NAME,
+    OPENCLIP_REPOSITORY_ID,
+    OPENCLIP_REVISION,
+    write_openclip_checkpoint_report,
+)
 
 DEFAULT_OUTPUT_DIR = "outputs/shallow_diffuse_official_reference"
 DEFAULT_DRIVE_OUTPUT_DIR = ""
 DEFAULT_SOURCE_DIR = "external_baseline/primary/shallow_diffuse/source"
+EXPECTED_PATCHED_SOURCE_PATHS = (
+    "attackers.py",
+    "optim_utils.py",
+    "run_shallow_diffuse_t2i.py",
+)
 DEFAULT_RUN_NAME = "shallow_diffuse_official_legacy_reference"
 DEFAULT_SAMPLE_COUNT = 700
+_OFFICIAL_MODEL_SOURCE = get_model_source("manojb_stable_diffusion_2_1_base")
+_PROMPT_DATASET_SOURCE = get_model_source("gustavosta_stable_diffusion_prompts")
 DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID = "stabilityai/stable-diffusion-2-1-base"
-DEFAULT_OFFICIAL_MODEL_ID = "Manojb/stable-diffusion-2-1-base"
+DEFAULT_OFFICIAL_MODEL_ID = _OFFICIAL_MODEL_SOURCE.repository_id
+DEFAULT_OFFICIAL_MODEL_REVISION = _OFFICIAL_MODEL_SOURCE.revision
+DEFAULT_PROMPT_DATASET_ID = _PROMPT_DATASET_SOURCE.repository_id
+DEFAULT_PROMPT_DATASET_REVISION = _PROMPT_DATASET_SOURCE.revision
 DEFAULT_MODEL_SOURCE_NOTE = (
     "Shallow Diffuse 官方 README 默认使用 stabilityai/stable-diffusion-2-1-base; "
     "当该模型不可直接访问时, 默认改用公开镜像并保留该模型来源说明。"
 )
-DEFAULT_LOCAL_MODEL_REPOSITORY_DIR = "/content/shallow_diffuse_model_repository/stable_diffusion_2_1_base"
+DEFAULT_LOCAL_MODEL_REPOSITORY_DIR = str(
+    build_shared_hugging_face_snapshot_dir(
+        DEFAULT_OFFICIAL_MODEL_ID,
+        DEFAULT_OFFICIAL_MODEL_REVISION,
+    )
+)
 DEFAULT_LEGACY_ENV_PREFIX = "/content/shallow_diffuse_legacy_env"
 DEFAULT_MICROMAMBA_PATH = "/content/bin/micromamba"
 DEFAULT_LEGACY_PYTHON_VERSION = "3.9"
@@ -72,8 +109,13 @@ DEFAULT_LEGACY_PACKAGE_SPECS = (
 )
 DEFAULT_EDIT_TIME_LIST = "0.3"
 DEFAULT_ATTACKER_NAMES = "none"
-DEFAULT_REFERENCE_MODEL = "ViT-g-14"
-DEFAULT_REFERENCE_MODEL_PRETRAIN = "laion2b_s12b_b42k"
+REQUIRED_SCIENTIFIC_METRIC_FIELDS = (
+    "auc",
+    "accuracy",
+    "true_positive_rate_at_one_percent_fpr",
+    "clip_score_mean",
+    "watermarked_clip_score_mean",
+)
 @dataclass(frozen=True)
 class ShallowDiffuseOfficialReferenceConfig:
     """描述 Shallow Diffuse 官方原始环境复现与导入所需配置。"""
@@ -85,9 +127,11 @@ class ShallowDiffuseOfficialReferenceConfig:
     sample_count: int = DEFAULT_SAMPLE_COUNT
     start_index: int = 0
     official_model_id: str = DEFAULT_OFFICIAL_MODEL_ID
+    official_model_revision: str = DEFAULT_OFFICIAL_MODEL_REVISION
     upstream_official_model_id: str = DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID
     model_source_note: str = DEFAULT_MODEL_SOURCE_NOTE
-    dataset: str = "Gustavosta/Stable-Diffusion-Prompts"
+    dataset: str = DEFAULT_PROMPT_DATASET_ID
+    dataset_revision: str = DEFAULT_PROMPT_DATASET_REVISION
     image_length: int = 512
     guidance_scale: float = 7.5
     num_inference_steps: int = 50
@@ -99,8 +143,9 @@ class ShallowDiffuseOfficialReferenceConfig:
     w_radius: int = 10
     w_measurement: str = "l1_complex2"
     w_injection: str = "complex2"
-    reference_model: str = DEFAULT_REFERENCE_MODEL
-    reference_model_pretrain: str = DEFAULT_REFERENCE_MODEL_PRETRAIN
+    reference_model: str = OPENCLIP_MODEL_NAME
+    reference_model_checkpoint_path: str = DEFAULT_OPENCLIP_CHECKPOINT_PATH
+    openclip_cache_root: str = DEFAULT_SHARED_HUGGING_FACE_SNAPSHOT_ROOT
     attacker_names: str = DEFAULT_ATTACKER_NAMES
     patch_model_repository_layout: bool = True
     prepare_local_model_repository: bool = True
@@ -115,11 +160,24 @@ class ShallowDiffuseOfficialReferenceConfig:
     legacy_pytorch_index_url: str = DEFAULT_LEGACY_PYTORCH_INDEX_URL
     legacy_package_specs: str = DEFAULT_LEGACY_PACKAGE_SPECS
     run_official_command: bool = True
-    summary_import_path: str = ""
-    log_import_path: str = ""
     require_cuda: bool = True
     timeout_seconds: int = 86400
     enable_workflow_progress_bar: bool = True
+
+    def __post_init__(self) -> None:
+        """确保正式参考路径只消费登记的不可变 Prompt 数据集。"""
+
+        if (
+            self.dataset != DEFAULT_PROMPT_DATASET_ID
+            or self.dataset_revision != DEFAULT_PROMPT_DATASET_REVISION
+        ):
+            raise ValueError("Shallow Diffuse 正式参考必须使用登记的精确 Prompt 数据集 revision")
+        if self.reference_model != OPENCLIP_MODEL_NAME:
+            raise ValueError("Shallow Diffuse 正式参考必须使用登记的 ViT-g-14 OpenCLIP 编码器")
+        if Path(self.reference_model_checkpoint_path).name != OPENCLIP_CHECKPOINT_FILENAME:
+            raise ValueError("Shallow Diffuse OpenCLIP 预训练参数必须指向登记的本地 checkpoint")
+        if self.attacker_names != DEFAULT_ATTACKER_NAMES:
+            raise ValueError("Shallow Diffuse 官方参考只生成原始方法结果, 共同攻击由外层正式协议执行")
 
 
 @dataclass(frozen=True)
@@ -312,6 +370,7 @@ def output_paths(root_path: Path, config: ShallowDiffuseOfficialReferenceConfig)
         "source_prepare_result": output_dir / "shallow_diffuse_official_source_prepare_result.json",
         "source_patch_result": output_dir / "shallow_diffuse_official_source_patch_result.json",
         "model_repository_prepare_result": output_dir / "shallow_diffuse_model_repository_prepare_result.json",
+        "openclip_checkpoint_prepare_result": output_dir / "shallow_diffuse_openclip_checkpoint_prepare_result.json",
         "legacy_environment_prepare_result": output_dir / "shallow_diffuse_legacy_environment_prepare_result.json",
         "official_stdout": output_dir / "shallow_diffuse_official_stdout.txt",
         "official_stderr": output_dir / "shallow_diffuse_official_stderr.txt",
@@ -578,8 +637,12 @@ def patch_shallow_diffuse_model_repository_layout(
         "attackers_path": relative_or_absolute(attackers_path, root_path),
         "optim_utils_path": relative_or_absolute(optim_utils_path, root_path),
         "official_model_id": config.official_model_id,
+        "official_model_revision": config.official_model_revision,
         "upstream_official_model_id": config.upstream_official_model_id,
         "model_source_note": config.model_source_note,
+        "prompt_dataset_source": _PROMPT_DATASET_SOURCE.to_dict(),
+        "prompt_dataset_repository_id": config.dataset,
+        "prompt_dataset_revision": config.dataset_revision,
         "patch_reason": "mirror_model_layout_and_official_attack_runtime_compatibility",
         "patch_items": [],
     }
@@ -587,8 +650,8 @@ def patch_shallow_diffuse_model_repository_layout(
         report.update({"patch_skipped": True, "patch_skip_reason": "patch_model_repository_layout_disabled"})
         write_json(paths["source_patch_result"], report)
         return report
-    if not entrypoint.is_file() or not attackers_path.is_file():
-        report.update({"patch_skipped": True, "patch_skip_reason": "official_entrypoint_missing"})
+    if not entrypoint.is_file() or not attackers_path.is_file() or not optim_utils_path.is_file():
+        report.update({"patch_skipped": True, "patch_skip_reason": "official_source_file_missing"})
         write_json(paths["source_patch_result"], report)
         return report
 
@@ -738,6 +801,41 @@ def patch_shallow_diffuse_model_repository_layout(
         )
         report["patch_items"].append("preserve_latent_dtype_after_fft_injection")
 
+    dataset_target = "load_dataset(args.dataset)"
+    dataset_replacement = (
+        f"load_dataset(args.dataset, revision='{config.dataset_revision}')"
+    )
+    if dataset_target in patched_optim_text:
+        patched_optim_text = patched_optim_text.replace(dataset_target, dataset_replacement)
+        report["patch_items"].append("pin_prompt_dataset_revision")
+
+    similarity_variable_ready = bool(
+        re.search(r"\bw_no_sim\s*=\s*sims\[0\]\.item\(\)", patched_text)
+    ) and not bool(re.search(r"\bw_no_sim\s*=\s*sim\[0\]\.item\(\)", patched_text))
+    prompt_dataset_revision_ready = (
+        dataset_replacement in patched_optim_text
+        and re.search(r"load_dataset\(\s*args\.dataset\s*\)", patched_optim_text) is None
+    )
+    source_patch_postcondition_ready = (
+        similarity_variable_ready and prompt_dataset_revision_ready
+    )
+    report.update(
+        {
+            "similarity_variable_ready": similarity_variable_ready,
+            "prompt_dataset_revision_ready": prompt_dataset_revision_ready,
+            "source_patch_postcondition_ready": source_patch_postcondition_ready,
+        }
+    )
+    if not source_patch_postcondition_ready:
+        report.update(
+            {
+                "patch_skipped": True,
+                "patch_skip_reason": "required_source_patch_postcondition_failed",
+            }
+        )
+        write_json(paths["source_patch_result"], report)
+        raise RuntimeError("Shallow Diffuse 必需源码补丁后置条件未满足")
+
     if patched_text == source_text and patched_attackers_text == attackers_text and patched_optim_text == optim_text:
         report.update(
             {
@@ -754,11 +852,11 @@ def patch_shallow_diffuse_model_repository_layout(
         write_json(paths["source_patch_result"], report)
         return report
     if patched_text != source_text:
-        entrypoint.write_text(patched_text, encoding="utf-8")
+        entrypoint.write_text(patched_text, encoding="utf-8", newline="\n")
     if patched_attackers_text != attackers_text:
-        attackers_path.write_text(patched_attackers_text, encoding="utf-8")
+        attackers_path.write_text(patched_attackers_text, encoding="utf-8", newline="\n")
     if patched_optim_text != optim_text and optim_utils_path.is_file():
-        optim_utils_path.write_text(patched_optim_text, encoding="utf-8")
+        optim_utils_path.write_text(patched_optim_text, encoding="utf-8", newline="\n")
     report.update(
         {
             "patch_applied": True,
@@ -774,26 +872,6 @@ def patch_shallow_diffuse_model_repository_layout(
     return report
 
 
-def download_hf_snapshot(
-    repo_id: str,
-    *,
-    local_dir: Path,
-    token: str | None,
-) -> str:
-    """下载 Hugging Face 模型快照到受控运行缓存目录。"""
-
-    from huggingface_hub import snapshot_download
-
-    return str(
-        snapshot_download(
-            repo_id=repo_id,
-            local_dir=str(local_dir),
-            local_dir_use_symlinks=False,
-            token=token or None,
-        )
-    )
-
-
 def prepare_shallow_diffuse_model_repository(
     root_path: Path,
     config: ShallowDiffuseOfficialReferenceConfig,
@@ -802,6 +880,13 @@ def prepare_shallow_diffuse_model_repository(
 ) -> dict[str, Any]:
     """准备本地模型目录并补齐 legacy transformers 所需的 model_index 兼容项。"""
 
+    validate_frozen_model_source(
+        config.official_model_id,
+        config.official_model_revision,
+        expected_repository_id=DEFAULT_OFFICIAL_MODEL_ID,
+        expected_revision=DEFAULT_OFFICIAL_MODEL_REVISION,
+    )
+
     local_model_path = Path(config.local_model_repository_dir).expanduser()
     model_index_path = local_model_path / "model_index.json"
     report: dict[str, Any] = {
@@ -809,6 +894,7 @@ def prepare_shallow_diffuse_model_repository(
         "local_model_repository_ready": False,
         "local_model_repository_path": str(local_model_path),
         "official_model_id": config.official_model_id,
+        "official_model_revision": config.official_model_revision,
         "upstream_official_model_id": config.upstream_official_model_id,
         "effective_official_model_id": config.official_model_id,
         "model_index_patch_requested": bool(config.patch_model_index_for_legacy_transformers),
@@ -820,26 +906,31 @@ def prepare_shallow_diffuse_model_repository(
         write_json(paths["model_repository_prepare_result"], report)
         return report
 
-    download_result: dict[str, Any] = {"download_requested": not model_index_path.is_file()}
-    if not model_index_path.is_file():
-        try:
-            emit_progress_status(progress, profile=f"operation=shallow_diffuse_model_snapshot_download model={config.official_model_id}")
-            local_model_path.mkdir(parents=True, exist_ok=True)
-            snapshot_path = download_hf_snapshot(
-                config.official_model_id,
-                local_dir=local_model_path,
-                token=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None,
-            )
-            download_result.update({"return_code": 0, "snapshot_path": snapshot_path})
-        except Exception as error:
-            download_result.update({"return_code": 98, "error": f"{type(error).__name__}:{error}"})
-            report["download_result"] = download_result
-            write_json(paths["model_repository_prepare_result"], report)
-            return report
-    else:
-        download_result.update({"return_code": 0, "snapshot_path": str(local_model_path), "download_skipped_reason": "model_index_already_exists"})
+    try:
+        emit_progress_status(
+            progress,
+            profile=f"operation=shallow_diffuse_model_snapshot_materialize model={config.official_model_id}",
+        )
+        snapshot_materialization = ensure_hugging_face_snapshot_files(
+            local_model_path,
+            report_path=paths["model_repository_prepare_result"],
+            repository_id=config.official_model_id,
+            revision=config.official_model_revision,
+            allow_patterns=DIFFUSERS_PIPELINE_ALLOW_PATTERNS,
+            token=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None,
+        )
+    except Exception as error:
+        report.update(
+            {
+                "failure_reason": "model_snapshot_materialization_failed",
+                "snapshot_validation_error": f"{type(error).__name__}:{error}",
+            }
+        )
+        write_json(paths["model_repository_prepare_result"], report)
+        return report
 
-    report["download_result"] = download_result
+    report["download_result"] = {**snapshot_materialization, "return_code": 0}
+    report["model_snapshot_allow_patterns"] = list(DIFFUSERS_PIPELINE_ALLOW_PATTERNS)
     if not model_index_path.is_file():
         report.update({"local_model_repository_ready": False, "failure_reason": "model_index_missing_after_download"})
         write_json(paths["model_repository_prepare_result"], report)
@@ -871,6 +962,12 @@ def prepare_shallow_diffuse_model_repository(
             "model_index_feature_extractor": read_json(model_index_path).get("feature_extractor"),
             "local_model_repository_ready": True,
             "effective_official_model_id": str(local_model_path),
+            "model_snapshot_content": build_model_snapshot_content(
+                local_model_path,
+                repository_id=config.official_model_id,
+                revision=config.official_model_revision,
+                allow_patterns=DIFFUSERS_PIPELINE_ALLOW_PATTERNS,
+            ),
         }
     )
     write_json(paths["model_repository_prepare_result"], report)
@@ -916,7 +1013,7 @@ def build_official_command(root_path: Path, config: ShallowDiffuseOfficialRefere
         "--reference_model",
         str(config.reference_model),
         "--reference_model_pretrain",
-        str(config.reference_model_pretrain),
+        str(config.reference_model_checkpoint_path),
         "--edit_time_list",
         str(config.edit_time_list),
         "--start",
@@ -949,49 +1046,177 @@ def parse_metric_text(text: str, sample_count: int) -> dict[str, Any]:
 
 
 def normalize_metric_summary(payload: dict[str, Any], sample_count: int) -> dict[str, Any]:
-    """把外部 summary 或日志解析结果规范化为 reference schema 指标。"""
+    """仅在官方输出包含全部科学指标时构造规范化摘要。"""
 
-    defaults = {
-        "sample_count": int(sample_count),
-        "positive_count": int(sample_count),
-        "negative_count": int(sample_count),
-        "auc": 0.0,
-        "accuracy": 0.0,
-        "true_positive_rate_at_one_percent_fpr": 0.0,
-        "clip_score_mean": 0.0,
-        "watermarked_clip_score_mean": 0.0,
-    }
     aliases = {
         "acc": "accuracy",
         "TPR@1%FPR": "true_positive_rate_at_one_percent_fpr",
         "w_clip_score_mean": "watermarked_clip_score_mean",
         "avg_clip_score_mean": "watermarked_clip_score_mean",
     }
-    normalized = dict(defaults)
+    scientific_values: dict[str, float] = {}
     for key, value in payload.items():
         target_key = aliases.get(str(key), str(key))
-        if target_key in normalized:
-            normalized[target_key] = value
-    return normalized
+        if target_key not in REQUIRED_SCIENTIFIC_METRIC_FIELDS:
+            continue
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return {}
+        if not math.isfinite(numeric_value):
+            return {}
+        if target_key in {
+            "auc",
+            "accuracy",
+            "true_positive_rate_at_one_percent_fpr",
+        } and not 0.0 <= numeric_value <= 1.0:
+            return {}
+        if target_key in {
+            "clip_score_mean",
+            "watermarked_clip_score_mean",
+        } and not -1.0 <= numeric_value <= 1.0:
+            return {}
+        scientific_values[target_key] = numeric_value
+    if any(field_name not in scientific_values for field_name in REQUIRED_SCIENTIFIC_METRIC_FIELDS):
+        return {}
+    exact_sample_count = int(sample_count)
+    if exact_sample_count <= 0:
+        return {}
+    return {
+        "sample_count": exact_sample_count,
+        "positive_count": exact_sample_count,
+        "negative_count": exact_sample_count,
+        **scientific_values,
+    }
 
 
-def load_imported_metric_summary(root_path: Path, config: ShallowDiffuseOfficialReferenceConfig) -> tuple[dict[str, Any], list[str]]:
-    """从用户提供的 summary 或日志路径导入官方复现指标。"""
+SHALLOW_DIFFUSE_SCIENTIFIC_METRIC_FIELDS = (
+    "auc",
+    "accuracy",
+    "true_positive_rate_at_one_percent_fpr",
+    "clip_score_mean",
+    "watermarked_clip_score_mean",
+)
 
-    evidence_paths: list[str] = []
-    if config.summary_import_path:
-        summary_path = Path(config.summary_import_path)
-        summary_path = summary_path if summary_path.is_absolute() else root_path / summary_path
-        if summary_path.is_file():
-            evidence_paths.append(relative_or_absolute(summary_path, root_path))
-            return normalize_metric_summary(read_json(summary_path), config.sample_count), evidence_paths
-    if config.log_import_path:
-        log_path = Path(config.log_import_path)
-        log_path = log_path if log_path.is_absolute() else root_path / log_path
-        if log_path.is_file():
-            evidence_paths.append(relative_or_absolute(log_path, root_path))
-            return normalize_metric_summary(parse_metric_text(log_path.read_text(encoding="utf-8", errors="ignore"), config.sample_count), config.sample_count), evidence_paths
-    return {}, evidence_paths
+
+def validate_shallow_diffuse_metric_summary(
+    metric_summary: dict[str, Any],
+    sample_count: int,
+) -> dict[str, Any]:
+    """验证当前官方命令是否真实产生全部检测与 CLIP 指标。"""
+
+    required_fields = (
+        "sample_count",
+        "positive_count",
+        "negative_count",
+        *SHALLOW_DIFFUSE_SCIENTIFIC_METRIC_FIELDS,
+    )
+    missing_fields = [field_name for field_name in required_fields if field_name not in metric_summary]
+    invalid_fields: list[str] = []
+    for field_name in required_fields:
+        if field_name in missing_fields:
+            continue
+        try:
+            value = float(metric_summary[field_name])
+        except (TypeError, ValueError):
+            invalid_fields.append(field_name)
+            continue
+        if not math.isfinite(value):
+            invalid_fields.append(field_name)
+        elif field_name.endswith("count") and value != float(sample_count):
+            invalid_fields.append(field_name)
+        elif field_name in {
+            "auc",
+            "accuracy",
+            "true_positive_rate_at_one_percent_fpr",
+        } and not 0.0 <= value <= 1.0:
+            invalid_fields.append(field_name)
+        elif field_name in {
+            "clip_score_mean",
+            "watermarked_clip_score_mean",
+        } and not -1.0 <= value <= 1.0:
+            invalid_fields.append(field_name)
+    return {
+        "required_metric_fields": list(required_fields),
+        "missing_required_metric_fields": missing_fields,
+        "invalid_required_metric_fields": invalid_fields,
+        "required_metrics_ready": not missing_fields and not invalid_fields,
+    }
+
+
+def _official_execution_ready(official_report: dict[str, Any]) -> bool:
+    """要求指标来自当前成功完成的官方命令。"""
+
+    return (
+        official_report.get("official_command_requested") is True
+        and int(official_report.get("return_code", -1)) == 0
+    )
+
+
+def _source_revision_ready(source_status: dict[str, Any]) -> bool:
+    """要求官方源码、确定性补丁与 Prompt 数据 revision 全部精确。"""
+
+    return all(
+        (
+            source_status.get("official_entrypoint_ready") is True,
+            source_status.get("source_identity_ready") is True,
+            source_status.get("source_worktree_exact") is True,
+            len(str(source_status.get("official_repository_commit", ""))) == 40,
+            len(str(source_status.get("source_patch_sha256", ""))) == 64,
+            len(str(source_status.get("source_worktree_digest", ""))) == 64,
+            source_status.get("prompt_dataset_repository_id") == DEFAULT_PROMPT_DATASET_ID,
+            source_status.get("prompt_dataset_revision") == DEFAULT_PROMPT_DATASET_REVISION,
+        )
+    )
+
+
+def _model_source_ready(model_repository_report: dict[str, Any]) -> bool:
+    """要求扩散模型共享快照绑定登记仓库、revision 与组件范围。"""
+
+    snapshot_content = model_repository_report.get("model_snapshot_content")
+    return isinstance(snapshot_content, dict) and all(
+        (
+            model_repository_report.get("local_model_repository_ready") is True,
+            model_repository_report.get("official_model_id") == DEFAULT_OFFICIAL_MODEL_ID,
+            model_repository_report.get("official_model_revision") == DEFAULT_OFFICIAL_MODEL_REVISION,
+            snapshot_content.get("repository_id") == DEFAULT_OFFICIAL_MODEL_ID,
+            snapshot_content.get("revision") == DEFAULT_OFFICIAL_MODEL_REVISION,
+            snapshot_content.get("allow_patterns") == sorted(DIFFUSERS_PIPELINE_ALLOW_PATTERNS),
+            len(str(snapshot_content.get("snapshot_content_digest", ""))) == 64,
+        )
+    )
+
+
+def _openclip_source_ready(openclip_report: dict[str, Any]) -> bool:
+    """要求 OpenCLIP 架构、精确来源与 checkpoint 文件身份全部匹配。"""
+
+    snapshot_content = openclip_report.get("model_snapshot_content")
+    expected_files = [
+        {
+            "path": OPENCLIP_CHECKPOINT_FILENAME,
+            "size_bytes": OPENCLIP_CHECKPOINT_SIZE_BYTES,
+            "sha256": OPENCLIP_CHECKPOINT_SHA256,
+        }
+    ]
+    return isinstance(snapshot_content, dict) and all(
+        (
+            openclip_report.get("openclip_checkpoint_ready") is True,
+            openclip_report.get("openclip_model_name") == OPENCLIP_MODEL_NAME,
+            openclip_report.get("openclip_repository_id") == OPENCLIP_REPOSITORY_ID,
+            openclip_report.get("openclip_revision") == OPENCLIP_REVISION,
+            openclip_report.get("openclip_checkpoint_filename") == OPENCLIP_CHECKPOINT_FILENAME,
+            openclip_report.get("openclip_checkpoint_sha256") == OPENCLIP_CHECKPOINT_SHA256,
+            openclip_report.get("openclip_checkpoint_size_bytes") == OPENCLIP_CHECKPOINT_SIZE_BYTES,
+            snapshot_content.get("repository_id") == OPENCLIP_REPOSITORY_ID,
+            snapshot_content.get("revision") == OPENCLIP_REVISION,
+            snapshot_content.get("allow_patterns") == [OPENCLIP_CHECKPOINT_FILENAME],
+            snapshot_content.get("file_count") == 1,
+            snapshot_content.get("files") == expected_files,
+            snapshot_content.get("snapshot_content_digest")
+            == openclip_report.get("openclip_snapshot_content_digest"),
+            len(str(openclip_report.get("openclip_snapshot_content_digest", ""))) == 64,
+        )
+    )
 
 
 def run_official_command_if_requested(
@@ -1113,22 +1338,45 @@ def build_reference_record_report(
     config: ShallowDiffuseOfficialReferenceConfig,
     paths: dict[str, Path],
     metric_summary: dict[str, Any],
-    evidence_paths: list[str],
     official_report: dict[str, Any],
     source_status: dict[str, Any],
+    model_repository_report: dict[str, Any],
+    openclip_report: dict[str, Any],
 ) -> dict[str, Any]:
     """构造 governed import 记录并写出 schema、records 与 validation report。"""
 
     schema = build_shallow_diffuse_official_reference_schema()
     write_json(paths["reference_schema"], schema)
-    if not metric_summary:
+    complete_metric_summary = normalize_metric_summary(metric_summary, config.sample_count)
+    metric_validation = validate_shallow_diffuse_metric_summary(
+        complete_metric_summary,
+        config.sample_count,
+    )
+    record_gate = {
+        "official_execution_ready": _official_execution_ready(official_report),
+        "required_metrics_ready": metric_validation["required_metrics_ready"],
+        "source_revision_ready": _source_revision_ready(source_status),
+        "model_source_ready": _model_source_ready(model_repository_report),
+        "openclip_source_ready": _openclip_source_ready(openclip_report),
+        "metric_validation": metric_validation,
+    }
+    record_gate["record_ready"] = all(
+        value is True
+        for field_name, value in record_gate.items()
+        if field_name != "metric_validation"
+    )
+    if not record_gate["record_ready"]:
+        if paths["official_metric_summary"].exists():
+            paths["official_metric_summary"].unlink()
         validation = validate_shallow_diffuse_official_reference_records([])
+        validation["record_gate"] = record_gate
         paths["reference_records"].write_text("", encoding="utf-8")
         write_json(paths["reference_validation"], validation)
-        return {"record_count": 0, "validation": validation}
+        return {"record_count": 0, "validation": validation, "record_gate": record_gate}
 
+    metric_summary = complete_metric_summary
     write_json(paths["official_metric_summary"], metric_summary)
-    local_evidence_paths = list(evidence_paths)
+    local_evidence_paths: list[str] = []
     for candidate in (
         paths["official_metric_summary"],
         paths["official_command_result"],
@@ -1137,6 +1385,10 @@ def build_reference_record_report(
         paths["official_overall_scores"],
         paths["official_clip_scores"],
         paths["official_config_log"],
+        paths["source_prepare_result"],
+        paths["source_patch_result"],
+        paths["model_repository_prepare_result"],
+        paths["openclip_checkpoint_prepare_result"],
     ):
         if candidate.is_file():
             local_evidence_paths.append(relative_or_absolute(candidate, root_path))
@@ -1144,23 +1396,49 @@ def build_reference_record_report(
     result_digest = file_digest(paths["official_metric_summary"])
     record = build_shallow_diffuse_official_reference_record(
         official_entrypoint=str(source_status.get("official_entrypoint", "")),
-        official_repository_commit="c80c553fdf66fda8db735d77a9d56538b7a0ade8",
+        official_repository_commit=str(source_status.get("official_repository_commit", "")),
         official_environment_profile="legacy_shallow_diffuse_official_environment",
         baseline_result_source=result_source,
         baseline_result_source_digest=result_digest,
         evidence_paths=sorted(set(local_evidence_paths)),
+        source_provenance={
+            **source_status,
+            "official_model_repository_id": model_repository_report.get("official_model_id", ""),
+            "official_model_revision": model_repository_report.get("official_model_revision", ""),
+            "model_snapshot_content_digest": (
+                model_repository_report.get("model_snapshot_content", {}).get(
+                    "snapshot_content_digest",
+                    "",
+                )
+                if isinstance(model_repository_report.get("model_snapshot_content"), dict)
+                else ""
+            ),
+            **openclip_report,
+        },
         metric_values=metric_summary,
         ready_flags={
-            "official_source_ready": bool(source_status.get("official_entrypoint_ready")),
+            "official_source_ready": record_gate["source_revision_ready"],
+            "source_identity_ready": source_status.get("source_identity_ready") is True,
+            "source_worktree_exact": source_status.get("source_worktree_exact") is True,
             "official_environment_report_ready": True,
-            "official_result_summary_ready": bool(metric_summary),
-            "governed_import_ready": True,
+            "official_execution_ready": record_gate["official_execution_ready"],
+            "required_metrics_ready": record_gate["required_metrics_ready"],
+            "model_source_ready": record_gate["model_source_ready"],
+            "openclip_source_ready": record_gate["openclip_source_ready"],
+            "official_result_summary_ready": record_gate["required_metrics_ready"],
+            "governed_import_ready": record_gate["record_ready"],
         },
     )
     paths["reference_records"].write_text(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
     validation = validate_shallow_diffuse_official_reference_records([record])
+    validation["record_gate"] = record_gate
     write_json(paths["reference_validation"], validation)
-    return {"record_count": 1, "validation": validation, "record_digest": record["reference_record_digest"]}
+    return {
+        "record_count": 1,
+        "validation": validation,
+        "record_digest": record["reference_record_digest"],
+        "record_gate": record_gate,
+    }
 
 
 def write_shallow_diffuse_official_reference_outputs(
@@ -1190,9 +1468,33 @@ def write_shallow_diffuse_official_reference_outputs(
             device_report = {"cuda_available": False, "device_error": f"{type(error).__name__}:{error}"}
         update_progress(run_progress, profile="operation=ensure_cuda")
         source_status = ensure_shallow_diffuse_source_available(root_path, effective_config, paths, progress=run_progress)
+        source_identity_report = prepare_registered_source_checkout(
+            root_path,
+            "shallow_diffuse",
+            (root_path / effective_config.source_dir).resolve(),
+        )
+        source_status.update(source_identity_report)
+        write_json(paths["source_prepare_result"], source_status)
         update_progress(run_progress, profile="operation=ensure_shallow_diffuse_source")
         emit_progress_status(run_progress, profile="operation=patch_shallow_diffuse_source status=running")
         source_patch_report = patch_shallow_diffuse_model_repository_layout(root_path, effective_config, paths)
+        source_patch_evidence = build_registered_source_patch_evidence(
+            root_path,
+            "shallow_diffuse",
+            (root_path / effective_config.source_dir).resolve(),
+            EXPECTED_PATCHED_SOURCE_PATHS,
+        )
+        source_patch_report.update(source_patch_evidence)
+        source_status.update(source_patch_evidence)
+        source_status.update(
+            {
+                "prompt_dataset_source": _PROMPT_DATASET_SOURCE.to_dict(),
+                "prompt_dataset_repository_id": effective_config.dataset,
+                "prompt_dataset_revision": effective_config.dataset_revision,
+            }
+        )
+        write_json(paths["source_patch_result"], source_patch_report)
+        write_json(paths["source_prepare_result"], source_status)
         update_progress(run_progress, profile="operation=patch_shallow_diffuse_source")
         should_prepare_model_repository = effective_config.run_official_command and not (
             effective_config.prepare_legacy_environment and not legacy_environment_report.get("legacy_environment_ready")
@@ -1202,9 +1504,20 @@ def write_shallow_diffuse_official_reference_outputs(
         update_progress(run_progress, profile="operation=prepare_shallow_diffuse_model_repository")
         if model_repository_report.get("local_model_repository_ready"):
             effective_config = replace(effective_config, official_model_id=str(model_repository_report["effective_official_model_id"]))
-        emit_progress_status(run_progress, profile="operation=load_imported_metric_summary status=running")
-        imported_metrics, imported_evidence = load_imported_metric_summary(root_path, effective_config)
-        update_progress(run_progress, profile="operation=load_imported_metric_summary")
+        openclip_report = write_openclip_checkpoint_report(
+            paths["openclip_checkpoint_prepare_result"],
+            requested=(
+                should_prepare_model_repository
+                and model_repository_report.get("local_model_repository_ready") is True
+            ),
+            cache_root=effective_config.openclip_cache_root,
+            token=os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or None,
+        )
+        if openclip_report.get("openclip_checkpoint_ready"):
+            effective_config = replace(
+                effective_config,
+                reference_model_checkpoint_path=str(openclip_report["openclip_checkpoint_path"]),
+            )
         if (
             effective_config.run_official_command
             and effective_config.prepare_legacy_environment
@@ -1215,6 +1528,20 @@ def write_shallow_diffuse_official_reference_outputs(
                 paths,
                 return_code=95,
                 reason="shallow_diffuse_legacy_environment_prepare_failed",
+            )
+        elif effective_config.run_official_command and not model_repository_report.get("local_model_repository_ready"):
+            official_report = write_official_command_skip_result(
+                root_path,
+                paths,
+                return_code=94,
+                reason="shallow_diffuse_model_snapshot_prepare_failed",
+            )
+        elif effective_config.run_official_command and not openclip_report.get("openclip_checkpoint_ready"):
+            official_report = write_official_command_skip_result(
+                root_path,
+                paths,
+                return_code=93,
+                reason="shallow_diffuse_openclip_checkpoint_prepare_failed",
             )
         else:
             official_report = run_official_command_if_requested(root_path, effective_config, paths, progress=run_progress)
@@ -1228,9 +1555,11 @@ def write_shallow_diffuse_official_reference_outputs(
                     metric_text_parts.append(metric_path.read_text(encoding="utf-8", errors="ignore"))
             if metric_text_parts:
                 command_metrics = parse_metric_text("\n".join(metric_text_parts), effective_config.sample_count)
-        metric_summary = normalize_metric_summary({**imported_metrics, **command_metrics}, effective_config.sample_count) if (
-            imported_metrics or command_metrics
-        ) else {}
+        metric_summary = (
+            normalize_metric_summary(command_metrics, effective_config.sample_count)
+            if command_metrics
+            else {}
+        )
         update_progress(run_progress, profile="operation=parse_shallow_diffuse_metrics")
         emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
         environment_report = build_runtime_environment_report(
@@ -1240,6 +1569,7 @@ def write_shallow_diffuse_official_reference_outputs(
         environment_report["shallow_diffuse_official_reference_source_report"] = source_status
         environment_report["shallow_diffuse_official_reference_source_patch_report"] = source_patch_report
         environment_report["shallow_diffuse_official_reference_model_repository_report"] = model_repository_report
+        environment_report["shallow_diffuse_official_reference_openclip_checkpoint_report"] = openclip_report
         environment_report["shallow_diffuse_official_reference_legacy_environment_report"] = legacy_environment_report
         write_json(paths["environment_report"], environment_report)
         update_progress(run_progress, profile="operation=write_environment_report")
@@ -1249,16 +1579,51 @@ def write_shallow_diffuse_official_reference_outputs(
             effective_config,
             paths,
             metric_summary,
-            imported_evidence,
             official_report,
             source_status,
+            model_repository_report,
+            openclip_report,
         )
         update_progress(run_progress, profile=f"operation=build_reference_record records={record_report.get('record_count', 0)}")
     validation = record_report["validation"]
-    run_ready = bool(validation.get("reference_import_ready"))
+    model_snapshot_content = model_repository_report.get("model_snapshot_content")
+    model_snapshot_digest = (
+        str(model_snapshot_content.get("snapshot_content_digest", ""))
+        if isinstance(model_snapshot_content, dict)
+        else ""
+    )
+    model_snapshot_scope_ready = isinstance(model_snapshot_content, dict) and all(
+        (
+            model_snapshot_content.get("repository_id") == DEFAULT_OFFICIAL_MODEL_ID,
+            model_snapshot_content.get("revision") == DEFAULT_OFFICIAL_MODEL_REVISION,
+            model_snapshot_content.get("allow_patterns")
+            == sorted(DIFFUSERS_PIPELINE_ALLOW_PATTERNS),
+        )
+    )
+    model_source_ready = _model_source_ready(model_repository_report)
+    source_revision_ready = _source_revision_ready(source_status)
+    openclip_source_ready = _openclip_source_ready(openclip_report)
+    official_execution_ready = _official_execution_ready(official_report)
+    metric_validation = validate_shallow_diffuse_metric_summary(
+        metric_summary,
+        effective_config.sample_count,
+    )
+    required_metrics_ready = bool(metric_validation["required_metrics_ready"])
+    official_command_result_ready = official_execution_ready and required_metrics_ready
+    run_ready = (
+        bool(validation.get("reference_import_ready"))
+        and model_source_ready
+        and source_revision_ready
+        and openclip_source_ready
+        and official_command_result_ready
+    )
     unsupported_reason = "" if run_ready else "shallow_diffuse_official_reference_result_missing_or_invalid"
-    if official_report.get("official_command_requested") and int(official_report.get("return_code", 1)) != 0:
+    if official_report.get("official_command_requested") is not True:
+        unsupported_reason = "official_command_required_for_formal_reference"
+    elif int(official_report.get("return_code", 1)) != 0:
         unsupported_reason = "official_command_failed_formal_archive_blocked"
+    elif not required_metrics_ready:
+        unsupported_reason = "official_command_scientific_metrics_incomplete"
     paper_run = build_paper_run_config(root_path)
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -1267,6 +1632,11 @@ def write_shallow_diffuse_official_reference_outputs(
         "shallow_diffuse_official_reference_ready": run_ready,
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
+        "official_execution_ready": official_execution_ready,
+        "required_metrics_ready": required_metrics_ready,
+        "missing_required_metric_fields": metric_validation["missing_required_metric_fields"],
+        "invalid_required_metric_fields": metric_validation["invalid_required_metric_fields"],
+        "official_command_result_ready": official_command_result_ready,
         "sample_count": int(effective_config.sample_count),
         "paper_claim_scale": paper_run.run_name,
         "target_fpr": paper_run.target_fpr,
@@ -1274,11 +1644,29 @@ def write_shallow_diffuse_official_reference_outputs(
         "primary_edit_timestep": primary_edit_timestep(effective_config),
         "attacker_names": effective_config.attacker_names,
         "reference_model": effective_config.reference_model,
-        "reference_model_pretrain": effective_config.reference_model_pretrain,
+        "reference_model_checkpoint_path": effective_config.reference_model_checkpoint_path,
         "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
         "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
         "source_patch_applied": bool(source_patch_report.get("patch_applied")),
+        "source_revision_ready": source_revision_ready,
+        "official_repository_commit": str(source_status.get("official_repository_commit", "")),
+        "source_patch_sha256": str(source_status.get("source_patch_sha256", "")),
+        "source_worktree_digest": str(source_status.get("source_worktree_digest", "")),
+        "prompt_dataset_repository_id": str(source_status.get("prompt_dataset_repository_id", "")),
+        "prompt_dataset_revision": str(source_status.get("prompt_dataset_revision", "")),
         "local_model_repository_ready": bool(model_repository_report.get("local_model_repository_ready")),
+        "model_source_ready": model_source_ready,
+        "model_source_repository_id": str(model_repository_report.get("official_model_id", "")),
+        "model_source_revision": str(model_repository_report.get("official_model_revision", "")),
+        "model_snapshot_content_digest": model_snapshot_digest,
+        "model_snapshot_scope_ready": model_snapshot_scope_ready,
+        "openclip_source_ready": openclip_source_ready,
+        "openclip_repository_id": str(openclip_report.get("openclip_repository_id", "")),
+        "openclip_revision": str(openclip_report.get("openclip_revision", "")),
+        "openclip_checkpoint_filename": str(openclip_report.get("openclip_checkpoint_filename", "")),
+        "openclip_checkpoint_sha256": str(openclip_report.get("openclip_checkpoint_sha256", "")),
+        "openclip_checkpoint_size_bytes": int(openclip_report.get("openclip_checkpoint_size_bytes", 0)),
+        "openclip_snapshot_content_digest": str(openclip_report.get("openclip_snapshot_content_digest", "")),
         "model_index_patch_applied": bool(model_repository_report.get("model_index_patch_applied")),
         "official_model_id": effective_config.official_model_id,
         "upstream_official_model_id": effective_config.upstream_official_model_id,
@@ -1297,9 +1685,11 @@ def write_shallow_diffuse_official_reference_outputs(
             "source_report": source_status,
             "source_patch_report": source_patch_report,
             "model_repository_report": model_repository_report,
+            "openclip_checkpoint_report": openclip_report,
             "legacy_environment_report": legacy_environment_report,
             "official_report": official_report,
             "validation": validation,
+            "metric_validation": metric_validation,
         },
     }
     write_json(paths["summary"], summary)
@@ -1327,6 +1717,8 @@ def write_shallow_diffuse_official_reference_outputs(
         output_paths_for_manifest.append(relative_or_absolute(paths["source_patch_result"], root_path))
     if paths["model_repository_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["model_repository_prepare_result"], root_path))
+    if paths["openclip_checkpoint_prepare_result"].exists():
+        output_paths_for_manifest.append(relative_or_absolute(paths["openclip_checkpoint_prepare_result"], root_path))
     if paths["legacy_environment_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["legacy_environment_prepare_result"], root_path))
     formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
@@ -1366,9 +1758,14 @@ def build_default_config() -> ShallowDiffuseOfficialReferenceConfig:
         sample_count=resolve_count_from_environment("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SAMPLE_COUNT", default_value=paper_run.sample_count),
         start_index=int(os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_START_INDEX", "0")),
         official_model_id=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_ID", DEFAULT_OFFICIAL_MODEL_ID),
+        official_model_revision=os.environ.get(
+            "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_REVISION",
+            DEFAULT_OFFICIAL_MODEL_REVISION,
+        ),
         upstream_official_model_id=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_UPSTREAM_OFFICIAL_MODEL_ID", DEFAULT_UPSTREAM_OFFICIAL_MODEL_ID),
         model_source_note=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_MODEL_SOURCE_NOTE", DEFAULT_MODEL_SOURCE_NOTE),
-        dataset=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_DATASET", "Gustavosta/Stable-Diffusion-Prompts"),
+        dataset=DEFAULT_PROMPT_DATASET_ID,
+        dataset_revision=DEFAULT_PROMPT_DATASET_REVISION,
         image_length=int(os.environ.get("SLM_WM_SHALLOW_DIFFUSE_IMAGE_LENGTH", "512")),
         guidance_scale=float(os.environ.get("SLM_WM_SHALLOW_DIFFUSE_GUIDANCE_SCALE", "7.5")),
         num_inference_steps=int(os.environ.get("SLM_WM_SHALLOW_DIFFUSE_NUM_INFERENCE_STEPS", "50")),
@@ -1380,8 +1777,12 @@ def build_default_config() -> ShallowDiffuseOfficialReferenceConfig:
         w_radius=int(os.environ.get("SLM_WM_SHALLOW_DIFFUSE_W_RADIUS", "10")),
         w_measurement=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_W_MEASUREMENT", "l1_complex2"),
         w_injection=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_W_INJECTION", "complex2"),
-        reference_model=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_REFERENCE_MODEL", DEFAULT_REFERENCE_MODEL),
-        reference_model_pretrain=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_REFERENCE_MODEL_PRETRAIN", DEFAULT_REFERENCE_MODEL_PRETRAIN),
+        reference_model=OPENCLIP_MODEL_NAME,
+        reference_model_checkpoint_path=DEFAULT_OPENCLIP_CHECKPOINT_PATH,
+        openclip_cache_root=os.environ.get(
+            "SLM_WM_SHARED_HUGGING_FACE_SNAPSHOT_ROOT",
+            DEFAULT_SHARED_HUGGING_FACE_SNAPSHOT_ROOT,
+        ),
         attacker_names=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_ATTACKER_NAMES", DEFAULT_ATTACKER_NAMES),
         patch_model_repository_layout=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_PATCH_MODEL_REPOSITORY_LAYOUT", "1") != "0",
         prepare_local_model_repository=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_PREPARE_LOCAL_MODEL_REPOSITORY", "1") != "0",
@@ -1396,8 +1797,6 @@ def build_default_config() -> ShallowDiffuseOfficialReferenceConfig:
         legacy_pytorch_index_url=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_LEGACY_PYTORCH_INDEX_URL", DEFAULT_LEGACY_PYTORCH_INDEX_URL),
         legacy_package_specs=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_LEGACY_PACKAGE_SPECS", DEFAULT_LEGACY_PACKAGE_SPECS),
         run_official_command=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_RUN_COMMAND", "1") != "0",
-        summary_import_path=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SUMMARY_IMPORT_PATH", ""),
-        log_import_path=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_LOG_IMPORT_PATH", ""),
         require_cuda=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_REQUIRE_CUDA", "1") != "0",
         timeout_seconds=int(os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_TIMEOUT_SECONDS", "86400")),
         enable_workflow_progress_bar=os.environ.get("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1") != "0",
@@ -1466,6 +1865,24 @@ def package_shallow_diffuse_official_reference_outputs(
             run_summary.get("shallow_diffuse_official_reference_ready") is True,
             run_summary.get("reference_import_ready") is True,
             run_summary.get("baseline_id") == "shallow_diffuse",
+            run_summary.get("model_source_ready") is True,
+            run_summary.get("model_snapshot_scope_ready") is True,
+            run_summary.get("model_source_repository_id") == DEFAULT_OFFICIAL_MODEL_ID,
+            run_summary.get("model_source_revision") == DEFAULT_OFFICIAL_MODEL_REVISION,
+            len(str(run_summary.get("model_snapshot_content_digest", ""))) == 64,
+            run_summary.get("openclip_source_ready") is True,
+            run_summary.get("openclip_repository_id") == OPENCLIP_REPOSITORY_ID,
+            run_summary.get("openclip_revision") == OPENCLIP_REVISION,
+            run_summary.get("openclip_checkpoint_filename") == OPENCLIP_CHECKPOINT_FILENAME,
+            run_summary.get("openclip_checkpoint_sha256") == OPENCLIP_CHECKPOINT_SHA256,
+            run_summary.get("openclip_checkpoint_size_bytes") == OPENCLIP_CHECKPOINT_SIZE_BYTES,
+            len(str(run_summary.get("openclip_snapshot_content_digest", ""))) == 64,
+            run_summary.get("official_command_requested") is True,
+            int(run_summary.get("official_command_return_code", -1)) == 0,
+            run_summary.get("official_execution_ready") is True,
+            run_summary.get("required_metrics_ready") is True,
+            run_summary.get("official_command_result_ready") is True,
+            int(run_summary.get("governed_reference_record_count", 0)) == 1,
             run_summary.get("paper_claim_scale") == paper_run.run_name,
             float(run_summary.get("target_fpr", -1.0)) == paper_run.target_fpr,
         )
