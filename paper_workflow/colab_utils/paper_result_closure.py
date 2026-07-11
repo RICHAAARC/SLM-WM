@@ -1,8 +1,8 @@
-"""Colab 论文结果闭合包装 helper。
+"""Colab 论文结果闭合包装 helper.
 
 正式命令计划和服务器可复用执行逻辑位于
-`paper_experiments.runners.paper_result_closure`。本模块只追加 Colab 进度显示
-和 Notebook runtime 报告, 使 Notebook 仅承担 Colab 启动职责。
+`scripts.paper_result_closure`. 本模块只追加 Colab 进度显示
+和 Notebook runtime 报告, 使 Notebook 仅承担 Colab 启动职责.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Any
 
 from experiments.protocol.paper_run_config import build_paper_run_config, normalize_paper_run_name
 from experiments.runtime.progress import progress_bar, update_progress
-from paper_experiments.runners.paper_result_closure import (
+from scripts.paper_result_closure import (
     PAPER_RESULT_CLOSURE_COMMAND_COUNT,
     run_paper_result_closure_commands as run_repository_paper_result_closure_commands,
 )

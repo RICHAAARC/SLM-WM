@@ -12,6 +12,7 @@ from typing import Any, Mapping, Sequence
 import pytest
 
 from experiments.runtime import isolated_scientific_execution as execution
+from experiments.runtime import repository_environment
 from experiments.runtime.dependency_profiles import DependencyProfile, get_dependency_profile
 
 
@@ -453,3 +454,9 @@ def test_execution_module_is_python38_parseable_and_has_no_outer_imports() -> No
             imported_roots.add(node.module.split(".")[0])
     assert "scripts" not in imported_roots
     assert "paper_workflow" not in imported_roots
+    assert execution.DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY == (
+        repository_environment.ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY
+    )
+    assert execution.DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY == (
+        repository_environment.ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY
+    )

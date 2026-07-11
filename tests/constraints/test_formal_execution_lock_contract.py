@@ -108,7 +108,7 @@ def test_cpu_closure_and_complete_package_revalidate_execution_lock() -> None:
     """CPU 闭合编排与最终结果包也必须保留起止执行锁."""
 
     closure_function = _function_node(
-        "paper_experiments/runners/paper_result_closure.py",
+        "scripts/paper_result_closure.py",
         "run_paper_result_closure_commands",
     )
     package_function = _function_node(

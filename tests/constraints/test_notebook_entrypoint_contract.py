@@ -20,13 +20,16 @@ REQUIRED_NOTEBOOKS = {
     "official_reference_tree_ring_run.ipynb",
     "official_reference_gaussian_shading_run.ipynb",
     "official_reference_shallow_diffuse_run.ipynb",
+    "official_reference_tree_ring_run.ipynb",
+    "official_reference_gaussian_shading_run.ipynb",
+    "official_reference_shallow_diffuse_run.ipynb",
 }
 NOTEBOOK_DEPENDENCY_PROFILES = {
-    "semantic_watermark_image_only_run.ipynb": "sd35_method_runtime_gpu",
-    "external_baseline_tree_ring_run.ipynb": "sd35_method_runtime_gpu",
-    "external_baseline_gaussian_shading_run.ipynb": "sd35_method_runtime_gpu",
-    "external_baseline_shallow_diffuse_run.ipynb": "sd35_method_runtime_gpu",
-    "official_reference_t2smark_run.ipynb": "t2smark_sd35_gpu",
+    "semantic_watermark_image_only_run.ipynb": "workflow_orchestrator",
+    "external_baseline_tree_ring_run.ipynb": "workflow_orchestrator",
+    "external_baseline_gaussian_shading_run.ipynb": "workflow_orchestrator",
+    "external_baseline_shallow_diffuse_run.ipynb": "workflow_orchestrator",
+    "official_reference_t2smark_run.ipynb": "workflow_orchestrator",
     "official_reference_tree_ring_run.ipynb": "workflow_orchestrator",
     "official_reference_gaussian_shading_run.ipynb": "workflow_orchestrator",
     "official_reference_shallow_diffuse_run.ipynb": "workflow_orchestrator",
@@ -49,6 +52,12 @@ PAPER_RUN_DEFAULT_PATTERN = re.compile(
 )
 FORMAL_NOTEBOOK_PATHS = tuple(
     NOTEBOOK_DIR / notebook_name for notebook_name in sorted(REQUIRED_NOTEBOOKS)
+)
+ISOLATED_SCIENTIFIC_NOTEBOOKS = (
+    "external_baseline_tree_ring_run.ipynb",
+    "external_baseline_gaussian_shading_run.ipynb",
+    "external_baseline_shallow_diffuse_run.ipynb",
+    "official_reference_t2smark_run.ipynb",
 )
 
 
@@ -233,6 +242,33 @@ def test_notebooks_contain_no_local_dependency_install_logic(notebook_path: Path
 
 
 @pytest.mark.quick
+@pytest.mark.parametrize("notebook_name", ISOLATED_SCIENTIFIC_NOTEBOOKS)
+def test_scientific_notebooks_prepare_cpu_orchestrator_only(notebook_name: str) -> None:
+    """method-faithful 与 T2SMark Notebook 不得在父解释器准备科学 profile."""
+
+    source = _code_source(NOTEBOOK_DIR / notebook_name)
+
+    assert 'DEPENDENCY_PROFILE_ID = "workflow_orchestrator"' in source
+    assert 'DEPENDENCY_PROFILE_ID = "sd35_method_runtime_gpu"' not in source
+    assert 'DEPENDENCY_PROFILE_ID = "t2smark_sd35_gpu"' not in source
+    assert "import torch" not in source
+    assert "from huggingface_hub import login" not in source
+
+
+@pytest.mark.quick
+def test_notebook_entrypoint_routes_two_workflows_through_shared_isolated_dispatch() -> None:
+    """最外层入口只选择共享 dispatch, 不直接导入两个科学 runner."""
+
+    source = Path("paper_workflow/notebook_utils/notebook_entrypoint.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "run_isolated_scientific_workflow" in source
+    assert "run_default_external_baseline_method_faithful_plan" not in source
+    assert "run_default_t2smark_formal_reproduction_plan" not in source
+
+
+@pytest.mark.quick
 @pytest.mark.parametrize("notebook_name", sorted(REQUIRED_NOTEBOOKS))
 def test_notebook_contains_no_method_or_experiment_definition(notebook_name: str) -> None:
     """Notebook 不得定义函数、类或直接实现水印与实验算法。"""
@@ -243,6 +279,7 @@ def test_notebook_contains_no_method_or_experiment_definition(notebook_name: str
     assert "from main." not in source
     assert "from experiments." not in source
     assert "from paper_experiments." not in source
+    assert "import torch" not in source
     assert "torch.autograd" not in source
     assert "pipeline(" not in source
 
@@ -253,3 +290,7 @@ def test_semantic_watermark_notebook_delegates_to_workflow_helper() -> None:
 
     source = _code_source(NOTEBOOK_DIR / "semantic_watermark_image_only_run.ipynb")
     assert "paper_workflow.colab_utils.semantic_watermark_image_only" in source
+    assert 'DEPENDENCY_PROFILE_ID = "workflow_orchestrator"' in source
+    assert "sd35_method_runtime_gpu" not in source
+    assert "import torch" not in source
+    assert "nvidia-smi" in source

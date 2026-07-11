@@ -15,6 +15,8 @@ T2SMark 与 SLM-WM 的空间 LF、高斯幅值尾部截断和 Q/K attention geom
 
 - `paper_workflow/notebooks/official_reference_t2smark_run.ipynb`: 运行 T2SMark 官方 SD3.5 主表正式路径, 对完整 Prompt split 执行 fixed-FPR 校准与完整攻击矩阵, 输出到 `outputs/t2smark_formal_reproduction/<paper_run_name>/`。
 
+Notebook 只准备 CPU `workflow_orchestrator`; 完整 T2SMark runner 由 repository dispatch 在 `t2smark_sd35_gpu` 隔离子解释器中运行. 当前运行资格由该 profile 在匹配 Colab 或 Linux CUDA 环境完成目标完整哈希锁审查的门禁决定.
+
 `t2smark_formal_reproduction` 是 T2SMark 主表结果的唯一生成路径。runner 按登记 commit 克隆源码, 要求工作树精确等于 `HEAD + formal_protocol_git_diff.txt`, 再验证仅图像 clean/positive 分数、成对质量图像和完整攻击对。已有官方结果只有在论文层级、完整 Prompt 摘要、模型、随机种子、20/20/4.5 预算、攻击集合、源码 commit、补丁摘要、工作树摘要和事实文件 SHA-256 全部匹配时才可被当前运行采用。最终结果必须通过 受治理导入校验器 与完整模板覆盖门禁。
 
 ## 当前可用入口

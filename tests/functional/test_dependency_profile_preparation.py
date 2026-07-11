@@ -202,6 +202,7 @@ def test_ready_profile_uses_committed_hash_lock_and_records_exact_command(
         "compatibility_check_required": False,
         "attempted": False,
         "command": [],
+        "working_directory": str(tmp_path.resolve()),
         "return_code": None,
         "stdout": "",
         "stderr": "",
@@ -286,6 +287,7 @@ def test_missing_complete_hash_lock_fails_before_install_and_writes_report(
     assert report["installation"] == {
         "attempted": False,
         "command": [],
+        "working_directory": str(tmp_path.resolve()),
         "return_code": None,
         "stdout": "",
         "stderr": "",

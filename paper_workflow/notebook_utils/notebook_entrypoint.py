@@ -27,12 +27,6 @@ WORKFLOW_DRIVE_OUTPUT_ENV_KEYS = {
 def _run_function_for_workflow(workflow_name: str) -> Callable[..., Any]:
     """延迟解析正式 workflow runner, 使 Notebook 只调用统一入口。"""
 
-    if workflow_name == "external_baseline_method_faithful":
-        from paper_experiments.runners.external_baseline_method_faithful import (
-            run_default_external_baseline_method_faithful_plan,
-        )
-
-        return run_default_external_baseline_method_faithful_plan
     if workflow_name == "official_reference_tree_ring":
         from paper_experiments.runners.tree_ring_official_reference import run_default_tree_ring_official_reference_plan
 
@@ -49,18 +43,24 @@ def _run_function_for_workflow(workflow_name: str) -> Callable[..., Any]:
         )
 
         return run_default_shallow_diffuse_official_reference_plan
-    if workflow_name == "official_reference_t2smark":
-        from paper_experiments.runners.t2smark_formal_reproduction import (
-            run_default_t2smark_formal_reproduction_plan,
-        )
-
-        return run_default_t2smark_formal_reproduction_plan
     raise ValueError(f"unknown_notebook_workflow:{workflow_name}")
 
 
 def run_workflow(*, root: str | Path = ".", workflow_name: str) -> Any:
     """通过统一薄入口运行正式 repository workflow。"""
 
+    if workflow_name in {
+        "external_baseline_method_faithful",
+        "official_reference_t2smark",
+    }:
+        from paper_experiments.runners.isolated_scientific_workflow import (
+            run_isolated_scientific_workflow,
+        )
+
+        return run_isolated_scientific_workflow(
+            root=root,
+            workflow_name=workflow_name,
+        )
     return _run_function_for_workflow(workflow_name)(root=root)
 
 
@@ -100,12 +100,6 @@ def _package_function_for_workflow(workflow_name: str) -> Callable[..., Any]:
         )
 
         return package_shallow_diffuse_official_reference_outputs
-    if workflow_name == "official_reference_t2smark":
-        from paper_experiments.runners.t2smark_formal_reproduction import (
-            package_t2smark_formal_reproduction_outputs,
-        )
-
-        return package_t2smark_formal_reproduction_outputs
     raise ValueError(f"unknown_notebook_workflow:{workflow_name}")
 
 
@@ -118,7 +112,6 @@ def package_workflow_outputs(
 ) -> Any:
     """统一执行单一 workflow 的 archive 打包与 Drive 镜像。"""
 
-    package_function = _package_function_for_workflow(workflow_name)
     archive_name = build_workflow_archive_name(workflow_name, root=root, baseline_id=baseline_id)
     resolved_drive_output_dir = resolve_drive_output_dir(workflow_name, drive_output_dir)
     resolved_baseline_id = baseline_id or os.environ.get("SLM_WM_PRIMARY_BASELINE_ID", "")
@@ -143,5 +136,19 @@ def package_workflow_outputs(
         package_kwargs["drive_output_dir"] = resolved_drive_output_dir
     if workflow_name == "external_baseline_method_faithful":
         package_kwargs["baseline_id"] = resolved_baseline_id
+    if workflow_name == "official_reference_t2smark":
+        if resolved_drive_output_dir is None:
+            raise ValueError("T2SMark 隔离打包必须提供 Drive 输出目录")
+        from paper_experiments.runners.isolated_scientific_workflow import (
+            package_isolated_scientific_workflow_outputs,
+        )
+
+        return package_isolated_scientific_workflow_outputs(
+            root=root,
+            workflow_name=workflow_name,
+            drive_output_dir=resolved_drive_output_dir,
+            archive_name=archive_name,
+        )
+    package_function = _package_function_for_workflow(workflow_name)
     return package_function(**package_kwargs)
 

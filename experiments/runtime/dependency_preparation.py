@@ -98,9 +98,10 @@ def _write_report(report_path: Path, report: dict[str, Any]) -> None:
     """以稳定 JSON 排版写入报告, 供后续 runner 和证据审计复用."""
 
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    report_path.write_bytes(
+        (
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
     )
 
 
@@ -174,6 +175,7 @@ _INTERPRETER_PLATFORM_MISMATCHES = frozenset(
 def _build_report(
     profile: DependencyProfile,
     profile_summary: dict[str, Any],
+    working_directory: Path,
 ) -> dict[str, Any]:
     """构造依赖准备报告骨架, 失败路径与成功路径共享同一 schema."""
 
@@ -183,6 +185,7 @@ def _build_report(
         "profile_id": profile.profile_name,
         "execution_role": profile.execution_role,
         "python_executable": sys.executable,
+        "working_directory": str(working_directory),
         "profile_digest": profile.profile_digest,
         "profile_summary_digest": profile_summary["summary_digest"],
         "direct_requirements_path": profile.direct_requirements_path,
@@ -190,6 +193,7 @@ def _build_report(
         "complete_hash_lock_path": profile.complete_hash_lock_path,
         "complete_hash_lock_digest": profile.complete_hash_lock_digest,
         "complete_hash_lock_dependency_count": profile.complete_hash_lock_dependency_count,
+        "pytorch_index_url": profile.pytorch_index_url,
         "formal_ready": profile.formal_ready,
         "readiness_blockers": list(profile.readiness_blockers),
         "formal_execution_lock": {},
@@ -203,6 +207,7 @@ def _build_report(
         "installation": {
             "attempted": False,
             "command": [],
+            "working_directory": str(working_directory),
             "return_code": None,
             "stdout": "",
             "stderr": "",
@@ -213,6 +218,7 @@ def _build_report(
             ),
             "attempted": False,
             "command": [],
+            "working_directory": str(working_directory),
             "return_code": None,
             "stdout": "",
             "stderr": "",
@@ -245,7 +251,7 @@ def prepare_dependency_profile(
     registry_path = root / "configs/dependency_profile_registry.json"
     profile = get_dependency_profile(profile_id, registry_path)
     profile_summary = build_dependency_profile_summary(profile_id, registry_path)
-    report = _build_report(profile, profile_summary)
+    report = _build_report(profile, profile_summary, root)
     report_path = _report_path(root, profile.profile_name)
     try:
         formal_execution_lock = require_published_formal_execution_lock(root)
@@ -319,6 +325,7 @@ def prepare_dependency_profile(
     report["installation"] = {
         "attempted": True,
         "command": install_command,
+        "working_directory": str(root),
         **installation_result,
     }
     if installation_result["return_code"] != 0:
@@ -335,6 +342,7 @@ def prepare_dependency_profile(
             "compatibility_check_required": True,
             "attempted": True,
             "command": pip_check_command,
+            "working_directory": str(root),
             **pip_check_result,
             "decision": "pass" if pip_check_result["return_code"] == 0 else "fail",
         }

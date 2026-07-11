@@ -5,21 +5,41 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 from zipfile import ZIP_STORED, ZipFile
 
 import pytest
 
 from experiments.runtime import repository_environment
 from main.core.digest import build_stable_digest
-from paper_experiments.runners.closure_package_selection import CLOSURE_PACKAGE_FAMILY_SPECS
+from paper_experiments.runners.closure_package_selection import (
+    CLOSURE_PACKAGE_FAMILY_SPECS,
+    ClosurePackageSelectionError,
+    validate_closure_input_lock_payloads,
+)
 from scripts.write_pilot_paper_complete_result_package import (
     PACKAGE_EXTRA_PATHS,
     REQUIRED_OUTPUT_DIR_NAMES,
+    build_closure_input_lock_status,
+    build_dependency_lock_status,
     build_parser,
     build_required_output_dirs,
+    write_archive_with_progress,
     write_pilot_paper_complete_result_package_outputs,
 )
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
+
+
+class _ClosureCandidate:
+    """为完整包测试返回与输入锁逐字段相等的动态候选记录."""
+
+    def __init__(self, record: dict[str, Any]) -> None:
+        self._record = dict(record)
+
+    def to_lock_record(self) -> dict[str, Any]:
+        """返回未硬编码候选字段集合的测试锁记录."""
+
+        return dict(self._record)
 
 
 def write_json(path: Path, value: object) -> None:
@@ -27,6 +47,50 @@ def write_json(path: Path, value: object) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+
+
+def build_test_lock_record(
+    package_path: Path,
+    *,
+    package_family: str,
+    paper_run_name: str,
+    target_fpr: float,
+) -> dict[str, Any]:
+    """从实际测试 ZIP 构造 selector 候选会返回的精确记录."""
+
+    family_index = next(
+        index
+        for index, spec in enumerate(CLOSURE_PACKAGE_FAMILY_SPECS)
+        if spec.package_family == package_family
+    )
+    return {
+        "package_family": package_family,
+        "package_path": package_path.resolve().as_posix(),
+        "package_sha256": hashlib.sha256(package_path.read_bytes()).hexdigest(),
+        "paper_run_name": paper_run_name,
+        "target_fpr": target_fpr,
+        "code_version": "a" * 40,
+        "generated_at": f"2026-01-01T00:00:{family_index:02d}+00:00",
+    }
+
+
+def inspect_test_closure_package(
+    package_path: Path,
+    *,
+    spec: Any,
+    paper_run_name: str,
+    target_fpr: float,
+) -> _ClosureCandidate:
+    """模拟已由 selector 深度检查并返回动态锁字段的候选包."""
+
+    return _ClosureCandidate(
+        build_test_lock_record(
+            Path(package_path),
+            package_family=spec.package_family,
+            paper_run_name=paper_run_name,
+            target_fpr=target_fpr,
+        )
+    )
 
 
 def configure_paper_run(monkeypatch: pytest.MonkeyPatch, root: Path, paper_run_name: str) -> Path:
@@ -49,6 +113,33 @@ def configure_paper_run(monkeypatch: pytest.MonkeyPatch, root: Path, paper_run_n
         "require_published_formal_execution_lock",
         lambda _root: dict(execution_lock),
     )
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package.build_dependency_lock_status",
+        lambda _root, *, archive_entries: {
+            "dependency_profile_count": 6,
+            "dependency_profile_records": [],
+            "dependency_hash_lock_count": 6,
+            "dependency_hash_lock_archive_entries_ready": True,
+            "dependency_profile_inputs_archive_entries_ready": True,
+            "dependency_hash_locks_ready": True,
+            "dependency_hash_lock_failure_reason": "",
+        },
+    )
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package.validate_closure_input_lock_payloads",
+        lambda _lock, _manifest, *, paper_run_name, target_fpr: {
+            "paper_run_name": paper_run_name,
+            "target_fpr": target_fpr,
+        },
+    )
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package.inspect_closure_package",
+        inspect_test_closure_package,
+    )
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package._validate_candidate_repository_profile",
+        lambda _candidate, *, root_path: None,
+    )
     return prompt_path
 
 
@@ -63,15 +154,18 @@ def create_required_outputs(
     """创建带 manifest 的当前运行层级输出目录。"""
 
     required_dirs = build_required_output_dirs(paper_run_name)
+    governed_source_paths: list[Path] = []
     for index, relative_dir in enumerate(required_dirs):
         if relative_dir.endswith(f"/{omitted_directory_name}/{paper_run_name}"):
             continue
         output_dir = root / relative_dir
         output_dir.mkdir(parents=True)
+        sample_manifest_path = output_dir / f"sample_manifest_{index}.json"
         write_json(
-            output_dir / f"sample_manifest_{index}.json",
+            sample_manifest_path,
             {"paper_claim_scale": paper_run_name, "index": index},
         )
+        governed_source_paths.append(sample_manifest_path)
     common_summary = (
         root
         / "outputs"
@@ -99,9 +193,11 @@ def create_required_outputs(
         }[paper_run_name]
         gate_report_path = gate_dir / "result_closure_gate_report.json"
         gate_manifest_path = gate_dir / "manifest.local.json"
-        source_path = common_summary.relative_to(root).as_posix()
         closure_source_file_sha256 = {
-            source_path: hashlib.sha256(common_summary.read_bytes()).hexdigest()
+            path.relative_to(root).as_posix(): hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+            for path in [common_summary, *governed_source_paths]
         }
         closure_source_file_digest = build_stable_digest(closure_source_file_sha256)
         expected_counts = {
@@ -144,7 +240,7 @@ def create_required_outputs(
             {
                 "artifact_id": f"{paper_run_name}_result_closure_gate_manifest",
                 "artifact_type": "local_manifest",
-                "input_paths": [source_path],
+                "input_paths": sorted(closure_source_file_sha256),
                 "output_paths": [
                     gate_report_path.relative_to(root).as_posix(),
                     gate_manifest_path.relative_to(root).as_posix(),
@@ -182,25 +278,35 @@ def create_closure_input_lock(root: Path, paper_run_name: str) -> tuple[Path, ..
     package_root.mkdir(parents=True, exist_ok=True)
     package_paths: list[Path] = []
     lock_records: list[dict[str, object]] = []
-    for index, spec in enumerate(CLOSURE_PACKAGE_FAMILY_SPECS):
+    for spec in CLOSURE_PACKAGE_FAMILY_SPECS:
         package_path = package_root / f"{spec.package_family}.zip"
+        output_prefix = spec.allowed_output_prefix_templates[0].format(
+            paper_run=paper_run_name,
+            baseline=spec.baseline_id or "",
+        )
+        source_marker_name = output_prefix + "locked_source_marker.json"
+        source_marker_payload = json.dumps(
+            {"package_family": spec.package_family},
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
         with ZipFile(package_path, "w") as archive:
             archive.writestr(
                 f"governance/{spec.package_family}.json",
                 json.dumps({"package_family": spec.package_family}),
             )
-        package_digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
+            archive.writestr(source_marker_name, source_marker_payload)
+        source_marker_path = root / source_marker_name
+        source_marker_path.parent.mkdir(parents=True, exist_ok=True)
+        source_marker_path.write_bytes(source_marker_payload)
         package_paths.append(package_path)
         lock_records.append(
-            {
-                "package_family": spec.package_family,
-                "package_path": package_path.resolve().as_posix(),
-                "package_sha256": package_digest,
-                "paper_run_name": paper_run_name,
-                "target_fpr": target_fpr,
-                "code_version": "a" * 40,
-                "generated_at": f"2026-01-01T00:00:{index:02d}+00:00",
-            }
+            build_test_lock_record(
+                package_path,
+                package_family=spec.package_family,
+                paper_run_name=paper_run_name,
+                target_fpr=target_fpr,
+            )
         )
     lock_payload: dict[str, object] = {
         "paper_run_name": paper_run_name,
@@ -257,6 +363,14 @@ def test_complete_result_package_collects_only_current_paper_run_outputs(
     prompt_path = configure_paper_run(monkeypatch, tmp_path, paper_run_name)
     required_dirs = create_required_outputs(tmp_path, paper_run_name)
     package_paths = create_closure_input_lock(tmp_path, paper_run_name)
+    stale_same_run_path = (
+        tmp_path
+        / "outputs"
+        / "attack_matrix"
+        / paper_run_name
+        / "stale_same_run.json"
+    )
+    stale_same_run_path.write_text("{}\n", encoding="utf-8")
     for other_run_name in ("probe_paper", "full_paper"):
         other_prompt_path = tmp_path / "configs" / f"paper_main_{other_run_name}_prompts.txt"
         other_prompt_path.write_text(f"a {other_run_name} prompt\n", encoding="utf-8")
@@ -286,6 +400,17 @@ def test_complete_result_package_collects_only_current_paper_run_outputs(
     with ZipFile(archive_path) as archive:
         names = set(archive.namelist())
         compression_types = {entry.compress_type for entry in archive.infolist()}
+        source_provenance_name = (
+            "outputs/pilot_paper_complete_result_package/"
+            "pilot_paper_complete_package_source_provenance.json"
+        )
+        source_provenance = json.loads(archive.read(source_provenance_name))
+        archived_source_digests = {
+            package_record["archived_source_path"]: hashlib.sha256(
+                archive.read(package_record["archived_source_path"])
+            ).hexdigest()
+            for package_record in source_provenance["input_packages"]
+        }
     attack_dir = f"outputs/attack_matrix/{paper_run_name}"
     attack_index = required_dirs.index(attack_dir)
     assert f"{attack_dir}/sample_manifest_{attack_index}.json" in names
@@ -297,6 +422,24 @@ def test_complete_result_package_collects_only_current_paper_run_outputs(
     assert f"outputs/paper_result_closure/{paper_run_name}" in "\n".join(names)
     assert f"outputs/result_closure_gate/{paper_run_name}" in "\n".join(names)
     assert prompt_path.relative_to(tmp_path).as_posix() in names
+    assert stale_same_run_path.relative_to(tmp_path).as_posix() not in names
+    assert source_provenance["decision"] == "pass"
+    assert source_provenance["input_package_count"] == len(
+        CLOSURE_PACKAGE_FAMILY_SPECS
+    )
+    assert len(source_provenance["input_packages"]) == len(
+        CLOSURE_PACKAGE_FAMILY_SPECS
+    )
+    for package_record in source_provenance["input_packages"]:
+        archived_source_path = package_record["archived_source_path"]
+        assert archived_source_path in names
+        assert archived_source_digests[archived_source_path] == (
+            package_record["source_package_sha256"]
+        )
+        assert package_record["archived_source_sha256"] == package_record[
+            "source_package_sha256"
+        ]
+        assert package_record["member_count"] == 2
     assert "configs/paper_main_probe_paper_prompts.txt" not in names
     assert "configs/paper_main_full_paper_prompts.txt" not in names
     assert not any("/probe_paper/" in name or "/full_paper/" in name for name in names)
@@ -335,6 +478,99 @@ def test_complete_result_package_internal_metadata_is_not_overwritten_after_arch
     assert hashlib.sha256(archive_path.read_bytes()).hexdigest() == receipt["archive_digest"]
     assert receipt["metadata"]["archive_digest_scope"] == "final_zip_bytes_external_sidecar"
     assert receipt["metadata"]["final_archive_digest_available_in_sidecar"] is True
+
+
+@pytest.mark.quick
+def test_complete_result_package_rejects_written_zip_member_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ZIP 写后成员集合偏离冻结清单时必须删除归档并失败."""
+
+    configure_paper_run(monkeypatch, tmp_path, "probe_paper")
+    create_required_outputs(tmp_path, "probe_paper")
+    package_paths = create_closure_input_lock(tmp_path, "probe_paper")
+
+    def write_with_unexpected_member(
+        root_path: Path,
+        archive_path: Path,
+        entries: Any,
+        compression_method: int,
+    ) -> None:
+        write_archive_with_progress(
+            root_path,
+            archive_path,
+            entries,
+            compression_method,
+        )
+        with ZipFile(archive_path, "a") as archive:
+            archive.writestr("outputs/unexpected.json", "{}\n")
+
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package.write_archive_with_progress",
+        write_with_unexpected_member,
+    )
+
+    with pytest.raises(RuntimeError, match="写后成员路径集合"):
+        write_pilot_paper_complete_result_package_outputs(
+            root=tmp_path,
+            drive_output_dir="",
+            package_paths=package_paths,
+            materialize_packages=False,
+        )
+
+    assert not (
+        tmp_path
+        / "outputs"
+        / "pilot_paper_complete_result_package"
+        / "probe_paper_complete_result_package.zip"
+    ).exists()
+
+
+@pytest.mark.quick
+def test_complete_result_package_rechecks_locked_package_hashes_after_zip_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ZIP 写入期间输入包发生漂移时最终摘要重验必须阻止交付."""
+
+    configure_paper_run(monkeypatch, tmp_path, "probe_paper")
+    create_required_outputs(tmp_path, "probe_paper")
+    package_paths = create_closure_input_lock(tmp_path, "probe_paper")
+
+    def write_then_mutate_input(
+        root_path: Path,
+        archive_path: Path,
+        entries: Any,
+        compression_method: int,
+    ) -> None:
+        write_archive_with_progress(
+            root_path,
+            archive_path,
+            entries,
+            compression_method,
+        )
+        package_paths[0].write_bytes(b"changed after readiness")
+
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package.write_archive_with_progress",
+        write_then_mutate_input,
+    )
+
+    with pytest.raises(RuntimeError, match="闭合输入包路径或摘要发生漂移"):
+        write_pilot_paper_complete_result_package_outputs(
+            root=tmp_path,
+            drive_output_dir="",
+            package_paths=package_paths,
+            materialize_packages=False,
+        )
+
+    assert not (
+        tmp_path
+        / "outputs"
+        / "pilot_paper_complete_result_package"
+        / "probe_paper_complete_result_package.zip"
+    ).exists()
 
 
 @pytest.mark.quick
@@ -424,6 +660,154 @@ def test_complete_result_package_requires_exact_locked_explicit_packages(
             package_paths=package_paths,
             materialize_packages=False,
         )
+
+
+@pytest.mark.quick
+def test_closure_input_status_revalidates_semantics_packages_and_profiles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """完整包状态必须重新调用语义,逐包和仓库 profile 三层校验."""
+
+    configure_paper_run(monkeypatch, tmp_path, "probe_paper")
+    package_paths = create_closure_input_lock(tmp_path, "probe_paper")
+    calls = {"semantic": 0, "inspection": 0, "profile": 0}
+
+    def semantic_validator(
+        _lock: dict[str, Any],
+        _manifest: dict[str, Any],
+        *,
+        paper_run_name: str,
+        target_fpr: float,
+    ) -> dict[str, Any]:
+        calls["semantic"] += 1
+        return {
+            "paper_run_name": paper_run_name,
+            "target_fpr": target_fpr,
+        }
+
+    def package_inspector(
+        package_path: Path,
+        *,
+        spec: Any,
+        paper_run_name: str,
+        target_fpr: float,
+    ) -> _ClosureCandidate:
+        calls["inspection"] += 1
+        return inspect_test_closure_package(
+            package_path,
+            spec=spec,
+            paper_run_name=paper_run_name,
+            target_fpr=target_fpr,
+        )
+
+    def profile_validator(_candidate: Any, *, root_path: Path) -> None:
+        assert root_path == tmp_path.resolve()
+        calls["profile"] += 1
+
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package.validate_closure_input_lock_payloads",
+        semantic_validator,
+    )
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package.inspect_closure_package",
+        package_inspector,
+    )
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package._validate_candidate_repository_profile",
+        profile_validator,
+    )
+
+    status = build_closure_input_lock_status(
+        tmp_path.resolve(),
+        paper_run_name="probe_paper",
+        target_fpr=0.1,
+        explicit_packages=package_paths,
+    )
+
+    assert status["closure_input_lock_ready"] is True
+    assert status["closure_input_lock_semantic_validation_ready"] is True
+    assert status["closure_input_package_inspection_ready"] is True
+    assert status["closure_input_repository_profiles_ready"] is True
+    assert status["failure_reasons"] == []
+    assert calls == {"semantic": 1, "inspection": 10, "profile": 10}
+
+
+@pytest.mark.quick
+def test_closure_input_status_rejects_semantically_incomplete_lock_without_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """自摘要正确但缺少科学字段的旧式锁必须返回非 ready 状态."""
+
+    configure_paper_run(monkeypatch, tmp_path, "probe_paper")
+    package_paths = create_closure_input_lock(tmp_path, "probe_paper")
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package.validate_closure_input_lock_payloads",
+        validate_closure_input_lock_payloads,
+    )
+
+    status = build_closure_input_lock_status(
+        tmp_path.resolve(),
+        paper_run_name="probe_paper",
+        target_fpr=0.1,
+        explicit_packages=package_paths,
+    )
+
+    assert status["closure_input_lock_semantic_validation_ready"] is False
+    assert status["closure_input_package_inspection_ready"] is True
+    assert status["closure_input_lock_ready"] is False
+    assert any(
+        reason.startswith("closure_input_lock_semantic_validation_failed:")
+        for reason in status["failure_reasons"]
+    )
+
+
+@pytest.mark.quick
+def test_closure_input_status_rejects_package_inspection_failure_without_crash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """任一 family 深度检查失败时状态 API 应 fail-closed 而不是抛出异常."""
+
+    configure_paper_run(monkeypatch, tmp_path, "probe_paper")
+    package_paths = create_closure_input_lock(tmp_path, "probe_paper")
+
+    def rejecting_inspector(
+        package_path: Path,
+        *,
+        spec: Any,
+        paper_run_name: str,
+        target_fpr: float,
+    ) -> _ClosureCandidate:
+        if spec.package_family == CLOSURE_PACKAGE_FAMILY_SPECS[0].package_family:
+            raise ClosurePackageSelectionError("测试包检查失败")
+        return inspect_test_closure_package(
+            package_path,
+            spec=spec,
+            paper_run_name=paper_run_name,
+            target_fpr=target_fpr,
+        )
+
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package.inspect_closure_package",
+        rejecting_inspector,
+    )
+
+    status = build_closure_input_lock_status(
+        tmp_path.resolve(),
+        paper_run_name="probe_paper",
+        target_fpr=0.1,
+        explicit_packages=package_paths,
+    )
+
+    assert status["closure_input_package_inspection_ready"] is False
+    assert status["closure_input_repository_profiles_ready"] is False
+    assert status["closure_input_lock_ready"] is False
+    assert any(
+        reason.startswith("closure_input_package_inspection_failed:")
+        for reason in status["failure_reasons"]
+    )
 
 
 @pytest.mark.quick
@@ -606,6 +990,47 @@ def test_complete_result_package_rejects_missing_required_evidence_directory(
 
 
 @pytest.mark.quick
+def test_complete_result_package_rejects_missing_dependency_hash_locks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """六套完整依赖锁缺失时不得生成任何论文完整结果归档."""
+
+    paper_run_name = "probe_paper"
+    configure_paper_run(monkeypatch, tmp_path, paper_run_name)
+    create_required_outputs(tmp_path, paper_run_name)
+    package_paths = create_closure_input_lock(tmp_path, paper_run_name)
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_complete_result_package.build_dependency_lock_status",
+        build_dependency_lock_status,
+    )
+
+    with pytest.raises(RuntimeError, match="dependency_hash_locks_ready=False"):
+        write_pilot_paper_complete_result_package_outputs(
+            root=tmp_path,
+            drive_output_dir="",
+            package_paths=package_paths,
+        )
+
+    summary_path = (
+        tmp_path
+        / "outputs"
+        / "pilot_paper_complete_result_package"
+        / "probe_paper_complete_package_readiness_summary.json"
+    )
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    assert summary["dependency_hash_locks_ready"] is False
+    assert summary["dependency_hash_lock_count"] == 0
+    assert summary["paper_run_complete_result_package_ready"] is False
+    assert not (
+        tmp_path
+        / "outputs"
+        / "pilot_paper_complete_result_package"
+        / "probe_paper_complete_result_package.zip"
+    ).exists()
+
+
+@pytest.mark.quick
 def test_complete_result_package_uses_only_explicit_package_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -665,7 +1090,24 @@ def test_complete_result_package_required_directories_cover_evidence_closure_cha
     assert "experiments/runtime/dependency_preparation.py" in PACKAGE_EXTRA_PATHS
     assert "experiments/runtime/isolated_dependency_environment.py" in PACKAGE_EXTRA_PATHS
     assert "experiments/runtime/isolated_scientific_execution.py" in PACKAGE_EXTRA_PATHS
+    assert "experiments/runtime/scientific_execution_binding.py" in PACKAGE_EXTRA_PATHS
+    assert (
+        "experiments/runtime/semantic_watermark_scientific_session.py"
+        in PACKAGE_EXTRA_PATHS
+    )
     assert "experiments/runtime/repository_environment.py" in PACKAGE_EXTRA_PATHS
+    assert "experiments/runners/image_only_dataset_workload.py" in PACKAGE_EXTRA_PATHS
+    assert "experiments/ablations/mechanism_ablation_workload.py" in PACKAGE_EXTRA_PATHS
+    assert "scripts/paper_result_closure.py" in PACKAGE_EXTRA_PATHS
+    assert "scripts/semantic_watermark_scientific_workflow.py" in PACKAGE_EXTRA_PATHS
+    assert "scripts/run_semantic_watermark_scientific_session.py" in PACKAGE_EXTRA_PATHS
+    assert (
+        "paper_experiments/runners/isolated_scientific_workflow.py"
+        in PACKAGE_EXTRA_PATHS
+    )
+    assert "paper_experiments/baselines/command_plan_builder.py" in PACKAGE_EXTRA_PATHS
+    assert "paper_experiments/baselines/command_plan_execution.py" in PACKAGE_EXTRA_PATHS
+    assert "paper_experiments/baselines/evidence_validation_cli.py" in PACKAGE_EXTRA_PATHS
     assert (
         "paper_experiments/runners/official_reference_dependency_environment.py"
         in PACKAGE_EXTRA_PATHS
@@ -675,4 +1117,5 @@ def test_complete_result_package_required_directories_cover_evidence_closure_cha
         "paper_experiments/runners/external_baseline_method_faithful.py"
         in PACKAGE_EXTRA_PATHS
     )
+    assert not any(path.startswith("paper_workflow/") for path in PACKAGE_EXTRA_PATHS)
     assert build_required_output_dirs("probe_paper") != build_required_output_dirs("pilot_paper")

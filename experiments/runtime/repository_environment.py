@@ -20,6 +20,8 @@ from typing import Any
 
 from main.core.digest import build_stable_digest
 from experiments.runtime.dependency_profiles import (
+    REQUIRED_DEPENDENCY_PROFILE_NAMES,
+    WORKFLOW_ORCHESTRATOR_PROFILE_ID,
     build_dependency_profile_summary,
     inspect_dependency_profile_environment,
 )
@@ -30,6 +32,24 @@ FORMAL_EXECUTION_LOCK_SCHEMA = "clean_detached_git_commit_v1"
 FORMAL_EXECUTION_COMMIT_ENVIRONMENT_KEY = "SLM_WM_FORMAL_EXECUTION_COMMIT"
 FORMAL_EXECUTION_LOCK_DIGEST_ENVIRONMENT_KEY = (
     "SLM_WM_FORMAL_EXECUTION_LOCK_DIGEST"
+)
+ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY = (
+    "SLM_WM_ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH"
+)
+ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY = (
+    "SLM_WM_ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST"
+)
+ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_SCHEMA = (
+    "isolated_dependency_environment_preparation_report"
+)
+ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_SCHEMA_VERSION = 1
+ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_FILE_NAME = (
+    "isolated_dependency_environment_report.json"
+)
+SCIENTIFIC_DEPENDENCY_PROFILE_IDS = frozenset(
+    profile_id
+    for profile_id in REQUIRED_DEPENDENCY_PROFILE_NAMES
+    if profile_id != WORKFLOW_ORCHESTRATOR_PROFILE_ID
 )
 FORMAL_EXECUTION_LOCK_FIELDS = frozenset(
     {
@@ -302,6 +322,318 @@ def file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _is_sha256(value: Any) -> bool:
+    """判断一个值是否为规范小写 SHA-256 文本."""
+
+    return (
+        isinstance(value, str)
+        and FORMAL_EXECUTION_LOCK_DIGEST_PATTERN.fullmatch(value) is not None
+    )
+
+
+def _isolated_context_report_skeleton(
+    dependency_profile_id: str,
+    *,
+    required: bool,
+) -> dict[str, Any]:
+    """构造科学子解释器上下文检查的稳定报告骨架."""
+
+    return {
+        "required": required,
+        "profile_id": dependency_profile_id,
+        "dependency_environment_report_path": "",
+        "dependency_environment_report_digest": "",
+        "dependency_environment_report_actual_digest": "",
+        "reported_profile_digest": "",
+        "reported_complete_hash_lock_digest": "",
+        "reported_formal_execution_lock_digest": "",
+        "reported_python_executable": "",
+        "reported_python_executable_sha256": "",
+        "current_python_executable": str(Path(sys.executable).absolute()),
+        "current_python_executable_sha256": "",
+        "blockers": [],
+        "decision": "blocked" if required else "not_required",
+        "ready": not required,
+    }
+
+
+def _append_context_blocker(context: dict[str, Any], blocker: str) -> None:
+    """按首次出现顺序加入稳定 blocker, 避免重复诊断."""
+
+    if blocker not in context["blockers"]:
+        context["blockers"].append(blocker)
+
+
+def _load_isolated_environment_report(
+    context: dict[str, Any],
+    *,
+    repository_root: Path,
+    dependency_profile_id: str,
+) -> dict[str, Any] | None:
+    """读取并校验注入报告的路径、文件摘要和 JSON 外形."""
+
+    path_value = os.environ.get(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY,
+        "",
+    )
+    digest_value = os.environ.get(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY,
+        "",
+    )
+    context["dependency_environment_report_path"] = path_value
+    context["dependency_environment_report_digest"] = digest_value
+    if not path_value or path_value != path_value.strip():
+        _append_context_blocker(
+            context,
+            "isolated_context_environment_report_path_missing",
+        )
+        return None
+    if not _is_sha256(digest_value):
+        _append_context_blocker(
+            context,
+            "isolated_context_environment_report_digest_invalid",
+        )
+        return None
+
+    report_path = Path(path_value)
+    expected_path = (
+        repository_root
+        / "outputs"
+        / "dependency_profiles"
+        / dependency_profile_id
+        / ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_FILE_NAME
+    ).absolute()
+    if not report_path.is_absolute() or report_path.absolute() != expected_path:
+        _append_context_blocker(
+            context,
+            "isolated_context_environment_report_path_mismatch",
+        )
+        return None
+    if not report_path.is_file():
+        _append_context_blocker(
+            context,
+            "isolated_context_environment_report_missing",
+        )
+        return None
+    actual_digest = file_digest(report_path)
+    context["dependency_environment_report_actual_digest"] = actual_digest
+    if actual_digest != digest_value:
+        _append_context_blocker(
+            context,
+            "isolated_context_environment_report_digest_mismatch",
+        )
+        return None
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        _append_context_blocker(
+            context,
+            "isolated_context_environment_report_invalid_json",
+        )
+        return None
+    if not isinstance(report, dict):
+        _append_context_blocker(
+            context,
+            "isolated_context_environment_report_not_object",
+        )
+        return None
+    return report
+
+
+def _inspect_isolated_scientific_context(
+    dependency_profile_id: str,
+    *,
+    profile_summary: Mapping[str, Any],
+    validated_execution_lock: Mapping[str, Any] | None,
+    repository_root: Path,
+) -> dict[str, Any]:
+    """严格核验科学进程继承的隔离环境、解释器和执行锁身份."""
+
+    required = dependency_profile_id in SCIENTIFIC_DEPENDENCY_PROFILE_IDS
+    context = _isolated_context_report_skeleton(
+        dependency_profile_id,
+        required=required,
+    )
+    if not required:
+        return context
+
+    report = _load_isolated_environment_report(
+        context,
+        repository_root=repository_root,
+        dependency_profile_id=dependency_profile_id,
+    )
+    if report is None:
+        return context
+
+    context["reported_profile_digest"] = str(report.get("profile_digest", ""))
+    context["reported_complete_hash_lock_digest"] = str(
+        report.get("complete_hash_lock_digest", "")
+    )
+    context["reported_formal_execution_lock_digest"] = str(
+        report.get("formal_execution_lock_digest", "")
+    )
+    context["reported_python_executable"] = str(
+        report.get("python_executable_path", "")
+    )
+    context["reported_python_executable_sha256"] = str(
+        report.get("python_executable_sha256", "")
+    )
+
+    report_contract = {
+        "report_schema": ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_SCHEMA,
+        "schema_version": ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_SCHEMA_VERSION,
+        "operation_kind": "formal_dependency_environment_preparation",
+        "profile_id": dependency_profile_id,
+        "profile_digest": profile_summary["profile_digest"],
+        "direct_requirements_digest": profile_summary["direct_requirements_digest"],
+        "complete_hash_lock_digest": profile_summary["complete_hash_lock_digest"],
+        "complete_hash_lock_dependency_count": profile_summary[
+            "complete_hash_lock_dependency_count"
+        ],
+        "provisioned": True,
+        "formal_preparation_completed": True,
+        "formal_ready": True,
+        "decision": "pass",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+    }
+    schema_fields = {
+        "report_schema",
+        "schema_version",
+        "operation_kind",
+        "provisioned",
+        "formal_preparation_completed",
+        "formal_ready",
+        "decision",
+        "failure_reasons",
+        "supports_paper_claim",
+    }
+    if any(report.get(field) != report_contract[field] for field in schema_fields):
+        _append_context_blocker(
+            context,
+            "isolated_context_environment_report_not_ready",
+        )
+    profile_fields = {
+        "profile_id",
+        "profile_digest",
+        "direct_requirements_digest",
+    }
+    if any(report.get(field) != report_contract[field] for field in profile_fields):
+        _append_context_blocker(
+            context,
+            "isolated_context_profile_identity_mismatch",
+        )
+    lock_fields = {
+        "complete_hash_lock_digest",
+        "complete_hash_lock_dependency_count",
+    }
+    if (
+        profile_summary.get("complete_hash_lock_present") is not True
+        or profile_summary.get("formal_ready") is not True
+        or not _is_sha256(profile_summary.get("complete_hash_lock_digest"))
+        or any(report.get(field) != report_contract[field] for field in lock_fields)
+    ):
+        _append_context_blocker(
+            context,
+            "isolated_context_complete_hash_lock_mismatch",
+        )
+
+    if validated_execution_lock is None:
+        _append_context_blocker(
+            context,
+            "isolated_context_formal_execution_lock_missing",
+        )
+    else:
+        expected_execution_lock = dict(validated_execution_lock)
+        if (
+            report.get("formal_execution_lock") != expected_execution_lock
+            or report.get("formal_execution_commit")
+            != expected_execution_lock["formal_execution_commit"]
+            or report.get("formal_execution_lock_digest")
+            != expected_execution_lock["formal_execution_lock_digest"]
+            or report.get("formal_execution_lock_ready") is not True
+        ):
+            _append_context_blocker(
+                context,
+                "isolated_context_formal_execution_lock_mismatch",
+            )
+
+    current_python = Path(sys.executable).absolute()
+    reported_python_value = report.get("python_executable_path")
+    reported_python = (
+        Path(reported_python_value).absolute()
+        if isinstance(reported_python_value, str) and reported_python_value
+        else None
+    )
+    if reported_python is None or reported_python != current_python:
+        _append_context_blocker(
+            context,
+            "isolated_context_python_executable_mismatch",
+        )
+    if not current_python.is_file():
+        _append_context_blocker(
+            context,
+            "isolated_context_python_executable_missing",
+        )
+    else:
+        current_python_digest = file_digest(current_python)
+        context["current_python_executable_sha256"] = current_python_digest
+        reported_python_digest = report.get("python_executable_sha256")
+        if (
+            not _is_sha256(reported_python_digest)
+            or report.get("python_executable_sha256_after_preparation")
+            != reported_python_digest
+            or current_python_digest != reported_python_digest
+        ):
+            _append_context_blocker(
+                context,
+                "isolated_context_python_executable_digest_mismatch",
+            )
+
+    dependency_preparation_report = report.get("dependency_preparation_report")
+    if not isinstance(dependency_preparation_report, dict):
+        _append_context_blocker(
+            context,
+            "isolated_context_dependency_preparation_report_invalid",
+        )
+    else:
+        nested_contract = {
+            "profile_id": dependency_profile_id,
+            "profile_digest": profile_summary["profile_digest"],
+            "direct_requirements_digest": profile_summary[
+                "direct_requirements_digest"
+            ],
+            "complete_hash_lock_digest": profile_summary[
+                "complete_hash_lock_digest"
+            ],
+            "complete_hash_lock_dependency_count": profile_summary[
+                "complete_hash_lock_dependency_count"
+            ],
+            "python_executable": str(current_python),
+            "formal_execution_lock": (
+                dict(validated_execution_lock)
+                if validated_execution_lock is not None
+                else None
+            ),
+            "formal_ready": True,
+            "decision": "pass",
+            "failure_reasons": [],
+            "supports_paper_claim": False,
+        }
+        if any(
+            dependency_preparation_report.get(field) != expected_value
+            for field, expected_value in nested_contract.items()
+        ):
+            _append_context_blocker(
+                context,
+                "isolated_context_dependency_preparation_report_mismatch",
+            )
+
+    context["ready"] = not context["blockers"]
+    context["decision"] = "pass" if context["ready"] else "blocked"
+    return context
+
+
 def tensor_digest(tensor: Any) -> str:
     """根据 tensor 数值生成稳定摘要。
 
@@ -319,6 +651,7 @@ def build_runtime_environment_report(
     torch_module: Any | None = None,
     *,
     verified_formal_execution_lock: Mapping[str, Any] | None = None,
+    repository_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """构造绑定完整哈希锁 profile 的真实运行环境快照.
 
@@ -351,6 +684,29 @@ def build_runtime_environment_report(
         if verified_formal_execution_lock is not None
         else None
     )
+    resolved_repository_root = (
+        Path(repository_root).resolve()
+        if repository_root is not None
+        else Path(__file__).resolve().parents[2]
+    )
+    isolated_scientific_context = _inspect_isolated_scientific_context(
+        dependency_profile_id,
+        profile_summary=profile_summary,
+        validated_execution_lock=validated_execution_lock,
+        repository_root=resolved_repository_root,
+    )
+    dependency_readiness_blockers = list(
+        dict.fromkeys(
+            (
+                *dependency_inspection["readiness_blockers"],
+                *isolated_scientific_context["blockers"],
+            )
+        )
+    )
+    dependency_environment_ready = (
+        dependency_inspection["decision"] == "pass"
+        and isolated_scientific_context["ready"] is True
+    )
     formal_execution_commit = (
         validated_execution_lock["formal_execution_commit"]
         if validated_execution_lock is not None
@@ -375,11 +731,14 @@ def build_runtime_environment_report(
             "complete_hash_lock_dependency_count"
         ],
         "dependency_profile_formal_ready": profile_summary["formal_ready"],
-        "dependency_environment_ready": dependency_inspection["decision"] == "pass",
-        "dependency_readiness_blockers": dependency_inspection[
-            "readiness_blockers"
-        ],
+        "dependency_environment_ready": dependency_environment_ready,
+        "dependency_readiness_blockers": dependency_readiness_blockers,
         "dependency_environment_inspection": dependency_inspection,
+        "isolated_scientific_context_required": isolated_scientific_context[
+            "required"
+        ],
+        "isolated_scientific_context_ready": isolated_scientific_context["ready"],
+        "isolated_scientific_context": isolated_scientific_context,
         "python_version": observed_environment["python_version"],
         "python_executable": sys.executable,
         "platform": platform.platform(),

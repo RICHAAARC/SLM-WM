@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from zipfile import ZipFile
@@ -9,6 +10,9 @@ from zipfile import ZipFile
 import pytest
 
 from experiments.runtime import repository_environment
+from experiments.runtime.package_input_manifest import (
+    validate_exact_package_archive,
+)
 from experiments.ablations.runtime_rerun import (
     FORMAL_RUNTIME_RERUN_ABLATION_IDS,
     FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
@@ -26,9 +30,13 @@ from experiments.runners.image_only_dataset_runtime import (
 )
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
+    ClosurePackageSelectionError,
     inspect_closure_package,
 )
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
+from tests.helpers.scientific_execution_binding import (
+    write_test_scientific_execution_binding,
+)
 
 
 PAPER_RUN_NAME = "pilot_paper"
@@ -104,6 +112,21 @@ def _prepare_image_runtime(root: Path) -> Path:
             "artifact_type": "local_manifest",
             "code_version": "b" * 40,
             "formal_execution_run_lock": FORMAL_EXECUTION_LOCK,
+            "output_paths": [
+                (directory / filename).relative_to(root).as_posix()
+                for filename in (
+                    "runtime_results.jsonl",
+                    "image_only_detection_records.jsonl",
+                    "watermark_quality_image_registry.jsonl",
+                    "frozen_evidence_protocol.json",
+                    "test_detection_metrics.csv",
+                    "score_distribution_table.csv",
+                    "roc_curve_points.csv",
+                    "det_curve_points.csv",
+                    "dataset_runtime_summary.json",
+                    "manifest.local.json",
+                )
+            ],
             "config": {
                 "paper_run": {
                     "run_name": PAPER_RUN_NAME,
@@ -111,6 +134,17 @@ def _prepare_image_runtime(root: Path) -> Path:
                 }
             },
         },
+    )
+    write_test_scientific_execution_binding(
+        repository_root=root,
+        artifact_dir=directory,
+        artifact_role="image_only_dataset_runtime",
+        paper_run_name=PAPER_RUN_NAME,
+        profile_id="sd35_method_runtime_gpu",
+        summary_file_name="dataset_runtime_summary.json",
+        manifest_file_name="manifest.local.json",
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+        execution_route="semantic_watermark_session",
     )
     return package_image_only_dataset_runtime(PAPER_RUN_NAME, root=root)
 
@@ -161,9 +195,32 @@ def _prepare_ablation(root: Path) -> Path:
             "artifact_type": "local_manifest",
             "code_version": "b" * 40,
             "formal_execution_run_lock": FORMAL_EXECUTION_LOCK,
+            "output_paths": [
+                (directory / filename).relative_to(root).as_posix()
+                for filename in (
+                    "runtime_rerun_records.jsonl",
+                    "formal_detection_records.jsonl",
+                    "per_ablation_frozen_protocols.json",
+                    "mechanism_ablation_metrics.csv",
+                    "mechanism_pairwise_delta.csv",
+                    "ablation_claim_summary.json",
+                    "manifest.local.json",
+                )
+            ],
             "config": {"target_fpr": TARGET_FPR, **ablation_contract},
             "metadata": ablation_contract,
         },
+    )
+    write_test_scientific_execution_binding(
+        repository_root=root,
+        artifact_dir=directory,
+        artifact_role="runtime_rerun_ablation",
+        paper_run_name=PAPER_RUN_NAME,
+        profile_id="sd35_method_runtime_gpu",
+        summary_file_name="ablation_claim_summary.json",
+        manifest_file_name="manifest.local.json",
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+        execution_route="semantic_watermark_ablation_session",
     )
     return package_runtime_rerun_ablations(PAPER_RUN_NAME, root=root)
 
@@ -236,6 +293,18 @@ def _prepare_dataset_quality(root: Path) -> Path:
             "artifact_type": "local_manifest",
             "code_version": "b" * 40,
             "formal_execution_run_lock": FORMAL_EXECUTION_LOCK,
+            "output_paths": [
+                (directory / filename).relative_to(root).as_posix()
+                for filename in (
+                    "dataset_quality_image_records.jsonl",
+                    "dataset_quality_image_resolution_records.jsonl",
+                    "dataset_quality_formal_feature_records.jsonl",
+                    "dataset_quality_formal_feature_import_report.json",
+                    "dataset_quality_metrics.csv",
+                    "dataset_quality_summary.json",
+                    "manifest.local.json",
+                )
+            ],
             "metadata": {
                 "paper_run_name": PAPER_RUN_NAME,
                 "target_fpr": TARGET_FPR,
@@ -243,6 +312,17 @@ def _prepare_dataset_quality(root: Path) -> Path:
             },
             "config": coverage,
         },
+    )
+    write_test_scientific_execution_binding(
+        repository_root=root,
+        artifact_dir=directory,
+        artifact_role="dataset_level_quality",
+        paper_run_name=PAPER_RUN_NAME,
+        profile_id="sd35_method_runtime_gpu",
+        summary_file_name="dataset_quality_summary.json",
+        manifest_file_name="manifest.local.json",
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+        execution_route="semantic_watermark_session",
     )
     return package_dataset_level_quality_outputs(PAPER_RUN_NAME, root=root)
 
@@ -273,12 +353,76 @@ def test_primary_gpu_package_producers_pass_strict_closure_contract(
         )
         assert candidate.package_family == spec.package_family
         with ZipFile(archive_path) as archive:
-            assert archive.namelist()
+            archive_names = set(archive.namelist())
+            assert archive_names
             assert all(
                 name.startswith("outputs/") and f"/{PAPER_RUN_NAME}/" in name
-                for name in archive.namelist()
+                for name in archive_names
             )
-            assert sentinel.name not in archive.namelist()
+            assert sentinel.name not in archive_names
+            assert spec.package_input_manifest_template is not None
+            package_input_member = spec.package_input_manifest_template.format(
+                paper_run=PAPER_RUN_NAME,
+                baseline=spec.baseline_id or "",
+            )
+            package_input = json.loads(archive.read(package_input_member))
+            declared_paths = package_input["entry_paths"]
+            assert package_input["entry_count"] == len(declared_paths)
+            assert set(declared_paths) == archive_names - {package_input_member}
+            assert package_input["entry_sha256"] == {
+                member_name: hashlib.sha256(archive.read(member_name)).hexdigest()
+                for member_name in declared_paths
+            }
+
+
+@pytest.mark.quick
+def test_primary_package_ignores_stale_file_and_selector_rejects_undeclared_extra(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """打包器不得吸收遗留文件, 选择器也必须拒绝归档后追加的同前缀成员."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
+    archive_path = _prepare_image_runtime(tmp_path)
+    archive_path.unlink()
+    output_dir = (
+        tmp_path
+        / "outputs"
+        / "image_only_dataset_runtime"
+        / PAPER_RUN_NAME
+    )
+    stale_path = output_dir / "stale_same_prefix.json"
+    stale_path.write_text("{}\n", encoding="utf-8")
+
+    archive_path = package_image_only_dataset_runtime(PAPER_RUN_NAME, root=tmp_path)
+    spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
+    with ZipFile(archive_path) as archive:
+        assert stale_path.relative_to(tmp_path).as_posix() not in archive.namelist()
+
+    undeclared_member = (
+        f"outputs/image_only_dataset_runtime/{PAPER_RUN_NAME}/"
+        "undeclared_same_prefix.json"
+    )
+    with ZipFile(archive_path, "a") as archive:
+        archive.writestr(undeclared_member, b"{}\n")
+    assert spec.package_input_manifest_template is not None
+    package_input_path = tmp_path / spec.package_input_manifest_template.format(
+        paper_run=PAPER_RUN_NAME,
+        baseline=spec.baseline_id or "",
+    )
+    with pytest.raises(RuntimeError, match="写后成员集合"):
+        validate_exact_package_archive(
+            archive_path,
+            repository_root=tmp_path,
+            package_input_manifest_path=package_input_path,
+        )
+    with pytest.raises(ClosurePackageSelectionError, match="精确成员集合不一致"):
+        inspect_closure_package(
+            archive_path,
+            spec=spec,
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+        )
 
 
 @pytest.mark.quick

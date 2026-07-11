@@ -42,6 +42,7 @@ from paper_experiments.runners.openclip_checkpoint_runtime import (
 )
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
+    ClosurePackageSelectionError,
     inspect_closure_package,
 )
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
@@ -850,13 +851,13 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
         for item in CLOSURE_PACKAGE_FAMILY_SPECS
         if item.package_family == "official_reference_shallow_diffuse"
     )
-    candidate = inspect_closure_package(
-        archive_path,
-        spec=spec,
-        paper_run_name="pilot_paper",
-        target_fpr=0.01,
-    )
-    assert candidate.package_family == "official_reference_shallow_diffuse"
+    with pytest.raises(ClosurePackageSelectionError, match="缺少必要成员"):
+        inspect_closure_package(
+            archive_path,
+            spec=spec,
+            paper_run_name="pilot_paper",
+            target_fpr=0.01,
+        )
 
 
 @pytest.mark.quick

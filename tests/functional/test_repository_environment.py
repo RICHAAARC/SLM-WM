@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import subprocess
+from typing import Any
 
 import pytest
 
+from experiments.runtime import repository_environment
 from experiments.runtime.repository_environment import (
     FORMAL_EXECUTION_COMMIT_ENVIRONMENT_KEY,
     FORMAL_EXECUTION_LOCK_DIGEST_ENVIRONMENT_KEY,
     FORMAL_EXECUTION_LOCK_SCHEMA,
+    ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY,
+    ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_FILE_NAME,
+    ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY,
     FormalExecutionLockError,
     build_formal_execution_lock,
     build_runtime_environment_report,
@@ -29,6 +35,29 @@ from paper_workflow.colab_utils.paper_run_environment import (
 
 
 pytestmark = pytest.mark.quick
+
+
+class _CudaRuntime:
+    """提供运行环境报告所需的最小 CUDA 查询接口."""
+
+    @staticmethod
+    def device_count() -> int:
+        """返回单个测试设备."""
+
+        return 1
+
+    @staticmethod
+    def get_device_name(index: int) -> str:
+        """返回稳定测试设备名."""
+
+        assert index == 0
+        return "test-gpu"
+
+
+class _TorchRuntime:
+    """提供运行环境报告所需的最小 torch 外形."""
+
+    cuda = _CudaRuntime()
 
 
 def _git(repository: Path, *arguments: str) -> str:
@@ -61,6 +90,150 @@ def _build_repository(root: Path) -> tuple[str, str]:
     _git(root, "commit", "-m", "第二次提交")
     second_commit = _git(root, "rev-parse", "--verify", "HEAD^{commit}")
     return first_commit, second_commit
+
+
+def _runtime_formal_execution_lock(commit_character: str = "a") -> dict[str, Any]:
+    """构造无需临时 Git 仓库即可验证的规范执行锁."""
+
+    payload = {
+        "formal_execution_lock_schema": FORMAL_EXECUTION_LOCK_SCHEMA,
+        "formal_execution_commit": commit_character * 40,
+        "formal_execution_head_detached": True,
+        "formal_execution_worktree_clean": True,
+        "formal_execution_lock_ready": True,
+    }
+    return {
+        **payload,
+        "formal_execution_lock_digest": build_stable_digest(payload),
+    }
+
+
+def _ready_runtime_profile_summary(
+    profile_id: str = "sd35_method_runtime_gpu",
+) -> dict[str, Any]:
+    """构造具有完整锁的运行环境 profile 摘要."""
+
+    return {
+        "profile_name": profile_id,
+        "profile_digest": "1" * 64,
+        "summary_digest": "2" * 64,
+        "direct_requirements_path": (
+            "configs/dependency_profiles/{0}_direct.txt".format(profile_id)
+        ),
+        "direct_requirements_digest": "3" * 64,
+        "complete_hash_lock_path": (
+            "configs/dependency_profiles/{0}_lock.txt".format(profile_id)
+        ),
+        "complete_hash_lock_digest": "4" * 64,
+        "complete_hash_lock_present": True,
+        "complete_hash_lock_dependency_count": 37,
+        "formal_ready": True,
+    }
+
+
+def _matching_runtime_inspection(profile_id: str) -> dict[str, Any]:
+    """构造当前解释器依赖与 CUDA identity 全部匹配的 inspection."""
+
+    return {
+        "profile_name": profile_id,
+        "observed_environment": {
+            "python_version": "3.12.13",
+            "direct_dependencies": {},
+            "cuda_available": True,
+            "torch_cuda_version": "12.8",
+        },
+        "decision": "pass",
+        "readiness_blockers": [],
+    }
+
+
+def _bind_runtime_profile(
+    monkeypatch: pytest.MonkeyPatch,
+    profile_summary: dict[str, Any],
+) -> None:
+    """把运行环境构造器绑定到同一组 profile 与 inspection 测试事实."""
+
+    monkeypatch.setattr(
+        repository_environment,
+        "build_dependency_profile_summary",
+        lambda profile_id: profile_summary,
+    )
+    monkeypatch.setattr(
+        repository_environment,
+        "inspect_dependency_profile_environment",
+        lambda profile_id, torch_module=None: _matching_runtime_inspection(profile_id),
+    )
+
+
+def _write_isolated_environment_context(
+    repository_root: Path,
+    profile_summary: dict[str, Any],
+    python_executable: Path,
+    formal_execution_lock: dict[str, Any],
+) -> tuple[dict[str, Any], Path, str]:
+    """写出科学子进程必须继承的隔离环境报告."""
+
+    python_digest = repository_environment.file_digest(python_executable)
+    nested_report = {
+        "profile_id": profile_summary["profile_name"],
+        "profile_digest": profile_summary["profile_digest"],
+        "direct_requirements_digest": profile_summary["direct_requirements_digest"],
+        "complete_hash_lock_digest": profile_summary["complete_hash_lock_digest"],
+        "complete_hash_lock_dependency_count": profile_summary[
+            "complete_hash_lock_dependency_count"
+        ],
+        "python_executable": str(python_executable),
+        "formal_execution_lock": formal_execution_lock,
+        "formal_ready": True,
+        "decision": "pass",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+    }
+    report = {
+        "report_schema": (
+            repository_environment.ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_SCHEMA
+        ),
+        "schema_version": (
+            repository_environment.ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_SCHEMA_VERSION
+        ),
+        "operation_kind": "formal_dependency_environment_preparation",
+        "profile_id": profile_summary["profile_name"],
+        "profile_digest": profile_summary["profile_digest"],
+        "direct_requirements_digest": profile_summary["direct_requirements_digest"],
+        "complete_hash_lock_digest": profile_summary["complete_hash_lock_digest"],
+        "complete_hash_lock_dependency_count": profile_summary[
+            "complete_hash_lock_dependency_count"
+        ],
+        "formal_execution_lock": formal_execution_lock,
+        "formal_execution_commit": formal_execution_lock["formal_execution_commit"],
+        "formal_execution_lock_digest": formal_execution_lock[
+            "formal_execution_lock_digest"
+        ],
+        "formal_execution_lock_ready": True,
+        "provisioned": True,
+        "formal_preparation_completed": True,
+        "formal_ready": True,
+        "decision": "pass",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+        "python_executable_path": str(python_executable),
+        "python_executable_sha256": python_digest,
+        "python_executable_sha256_after_preparation": python_digest,
+        "dependency_preparation_report": nested_report,
+    }
+    report_path = (
+        repository_root
+        / "outputs"
+        / "dependency_profiles"
+        / profile_summary["profile_name"]
+        / ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_FILE_NAME
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return report, report_path, repository_environment.file_digest(report_path)
 
 
 @pytest.mark.parametrize("invalid_commit", ("main", "abc1234", "A" * 40))
@@ -211,6 +384,251 @@ def test_runtime_environment_report_accepts_validated_record(
         "formal_execution_lock_digest"
     ]
     assert report["formal_execution_lock_ready"] is True
+
+
+def test_scientific_runtime_requires_injected_isolated_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """科学 profile 缺少父执行原语注入时必须关闭环境 readiness."""
+
+    profile_summary = _ready_runtime_profile_summary()
+    _bind_runtime_profile(monkeypatch, profile_summary)
+    monkeypatch.delenv(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY,
+        raising=False,
+    )
+    monkeypatch.delenv(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY,
+        raising=False,
+    )
+
+    report = build_runtime_environment_report(
+        profile_summary["profile_name"],
+        torch_module=_TorchRuntime(),
+        verified_formal_execution_lock=_runtime_formal_execution_lock(),
+        repository_root=tmp_path,
+    )
+
+    assert report["dependency_environment_ready"] is False
+    assert report["isolated_scientific_context_required"] is True
+    assert report["isolated_scientific_context_ready"] is False
+    assert report["dependency_readiness_blockers"] == [
+        "isolated_context_environment_report_path_missing"
+    ]
+
+
+def test_scientific_runtime_accepts_strict_isolated_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """环境、解释器、完整锁和执行锁一致时科学上下文通过."""
+
+    profile_summary = _ready_runtime_profile_summary()
+    formal_execution_lock = _runtime_formal_execution_lock()
+    python_executable = tmp_path / "dependency_envs" / "bin" / "python"
+    python_executable.parent.mkdir(parents=True)
+    python_executable.write_bytes(b"isolated-runtime-python")
+    _, report_path, report_digest = _write_isolated_environment_context(
+        tmp_path,
+        profile_summary,
+        python_executable,
+        formal_execution_lock,
+    )
+    _bind_runtime_profile(monkeypatch, profile_summary)
+    monkeypatch.setattr(repository_environment.sys, "executable", str(python_executable))
+    monkeypatch.setenv(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY,
+        str(report_path.absolute()),
+    )
+    monkeypatch.setenv(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY,
+        report_digest,
+    )
+
+    report = build_runtime_environment_report(
+        profile_summary["profile_name"],
+        torch_module=_TorchRuntime(),
+        verified_formal_execution_lock=formal_execution_lock,
+        repository_root=tmp_path,
+    )
+
+    assert report["dependency_environment_ready"] is True
+    assert report["dependency_readiness_blockers"] == []
+    assert report["isolated_scientific_context_required"] is True
+    assert report["isolated_scientific_context_ready"] is True
+    context = report["isolated_scientific_context"]
+    assert context["decision"] == "pass"
+    assert context["dependency_environment_report_digest"] == report_digest
+    assert context["dependency_environment_report_actual_digest"] == report_digest
+    assert context["reported_profile_digest"] == profile_summary["profile_digest"]
+    assert context["reported_complete_hash_lock_digest"] == profile_summary[
+        "complete_hash_lock_digest"
+    ]
+    assert context["reported_formal_execution_lock_digest"] == formal_execution_lock[
+        "formal_execution_lock_digest"
+    ]
+    assert context["current_python_executable"] == str(python_executable)
+    assert context["current_python_executable_sha256"] == (
+        repository_environment.file_digest(python_executable)
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_blocker"),
+    (
+        (
+            "profile",
+            "isolated_context_profile_identity_mismatch",
+        ),
+        (
+            "lock",
+            "isolated_context_complete_hash_lock_mismatch",
+        ),
+        (
+            "formal_execution_lock",
+            "isolated_context_formal_execution_lock_mismatch",
+        ),
+        (
+            "python_path",
+            "isolated_context_python_executable_mismatch",
+        ),
+        (
+            "python_digest",
+            "isolated_context_python_executable_digest_mismatch",
+        ),
+    ),
+)
+def test_scientific_runtime_rejects_context_identity_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    expected_blocker: str,
+) -> None:
+    """任一隔离身份字段漂移都必须形成稳定 blocker."""
+
+    profile_summary = _ready_runtime_profile_summary()
+    formal_execution_lock = _runtime_formal_execution_lock()
+    python_executable = tmp_path / "dependency_envs" / "bin" / "python"
+    python_executable.parent.mkdir(parents=True)
+    python_executable.write_bytes(b"isolated-runtime-python")
+    environment_report, report_path, _ = _write_isolated_environment_context(
+        tmp_path,
+        profile_summary,
+        python_executable,
+        formal_execution_lock,
+    )
+    if mutation == "profile":
+        environment_report["profile_digest"] = "5" * 64
+    elif mutation == "lock":
+        environment_report["complete_hash_lock_digest"] = "5" * 64
+    elif mutation == "formal_execution_lock":
+        environment_report["formal_execution_lock"] = (
+            _runtime_formal_execution_lock("b")
+        )
+    elif mutation == "python_path":
+        environment_report["python_executable_path"] = str(
+            tmp_path / "different" / "python"
+        )
+    elif mutation == "python_digest":
+        environment_report["python_executable_sha256"] = "5" * 64
+        environment_report["python_executable_sha256_after_preparation"] = "5" * 64
+    report_path.write_text(
+        json.dumps(environment_report, ensure_ascii=False, indent=2, sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+    _bind_runtime_profile(monkeypatch, profile_summary)
+    monkeypatch.setattr(repository_environment.sys, "executable", str(python_executable))
+    monkeypatch.setenv(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY,
+        str(report_path.absolute()),
+    )
+    monkeypatch.setenv(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY,
+        repository_environment.file_digest(report_path),
+    )
+
+    report = build_runtime_environment_report(
+        profile_summary["profile_name"],
+        torch_module=_TorchRuntime(),
+        verified_formal_execution_lock=formal_execution_lock,
+        repository_root=tmp_path,
+    )
+
+    assert report["dependency_environment_ready"] is False
+    assert expected_blocker in report["dependency_readiness_blockers"]
+
+
+def test_scientific_runtime_rejects_injected_report_digest_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """注入摘要与环境报告文件不一致时不得读取其中身份."""
+
+    profile_summary = _ready_runtime_profile_summary()
+    formal_execution_lock = _runtime_formal_execution_lock()
+    python_executable = tmp_path / "dependency_envs" / "bin" / "python"
+    python_executable.parent.mkdir(parents=True)
+    python_executable.write_bytes(b"isolated-runtime-python")
+    _, report_path, _ = _write_isolated_environment_context(
+        tmp_path,
+        profile_summary,
+        python_executable,
+        formal_execution_lock,
+    )
+    _bind_runtime_profile(monkeypatch, profile_summary)
+    monkeypatch.setattr(repository_environment.sys, "executable", str(python_executable))
+    monkeypatch.setenv(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY,
+        str(report_path.absolute()),
+    )
+    monkeypatch.setenv(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY,
+        "0" * 64,
+    )
+
+    report = build_runtime_environment_report(
+        profile_summary["profile_name"],
+        torch_module=_TorchRuntime(),
+        verified_formal_execution_lock=formal_execution_lock,
+        repository_root=tmp_path,
+    )
+
+    assert report["dependency_environment_ready"] is False
+    assert report["dependency_readiness_blockers"] == [
+        "isolated_context_environment_report_digest_mismatch"
+    ]
+
+
+def test_workflow_orchestrator_does_not_require_isolated_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """父编排 profile 保持当前解释器运行, 不消费科学上下文环境键."""
+
+    profile_summary = _ready_runtime_profile_summary("workflow_orchestrator")
+    _bind_runtime_profile(monkeypatch, profile_summary)
+    monkeypatch.delenv(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY,
+        raising=False,
+    )
+    monkeypatch.delenv(
+        ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY,
+        raising=False,
+    )
+
+    report = build_runtime_environment_report(
+        "workflow_orchestrator",
+        torch_module=_TorchRuntime(),
+        repository_root=tmp_path,
+    )
+
+    assert report["dependency_environment_ready"] is True
+    assert report["isolated_scientific_context_required"] is False
+    assert report["isolated_scientific_context_ready"] is True
+    assert report["isolated_scientific_context"]["decision"] == "not_required"
+    assert report["dependency_readiness_blockers"] == []
 
 
 def test_formal_execution_lock_code_version_and_pair_are_strict(

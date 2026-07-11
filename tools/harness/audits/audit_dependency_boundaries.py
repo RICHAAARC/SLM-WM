@@ -11,6 +11,8 @@ if str(ROOT) not in sys.path:
 
 from tools.harness.lib.dependency_rules import (
     FORBIDDEN_IMPORT_PREFIXES_BY_ROOT,
+    STRICT_LITERAL_BOUNDARY_ROOTS,
+    extract_dynamic_dependency_references,
     extract_imported_modules,
     get_boundary_root,
     is_forbidden_import,
@@ -41,18 +43,32 @@ def run_audit(root: str | Path) -> dict:
         boundary_root = get_boundary_root(relative)
         if boundary_root is None:
             continue
-        checked_paths.append(str(relative))
+        relative_path = relative.as_posix()
+        checked_paths.append(relative_path)
         forbidden_prefixes = FORBIDDEN_IMPORT_PREFIXES_BY_ROOT[boundary_root]
         for module_name in extract_imported_modules(path):
             if is_forbidden_import(module_name, forbidden_prefixes):
                 violations.append(
                     {
-                        "path": str(relative),
+                        "path": relative_path,
                         "reason": "forbidden_import_for_extraction_boundary",
                         "imported_module": module_name,
                         "boundary_root": boundary_root,
                     }
                 )
+        for reference in extract_dynamic_dependency_references(
+            path,
+            forbidden_prefixes,
+            strict_literals=boundary_root in STRICT_LITERAL_BOUNDARY_ROOTS,
+        ):
+            violations.append(
+                {
+                    "path": relative_path,
+                    "reason": "forbidden_dynamic_dependency_for_extraction_boundary",
+                    "boundary_root": boundary_root,
+                    **reference,
+                }
+            )
     return build_report("audit_dependency_boundaries", "fail" if violations else "pass", violations, checked_paths)
 
 

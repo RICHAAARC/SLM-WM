@@ -55,6 +55,9 @@ from experiments.runtime.repository_environment import (
     file_digest,
     resolve_code_version,
 )
+from experiments.runtime.scientific_execution_binding import (
+    validate_scientific_execution_binding,
+)
 
 DEFAULT_OUTPUT_DIR = "outputs/t2smark_formal_reproduction"
 DEFAULT_DRIVE_OUTPUT_DIR = ""
@@ -1315,6 +1318,11 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
         paths["source_prepare_result"],
         paths["official_command_result"],
         paths["adapter_command_result"],
+        output_dir / "scientific_execution" / "scientific_workflow_result_envelope.json",
+        output_dir / "isolated_scientific_execution_report.json",
+        output_dir / "isolated_dependency_environment_report.json",
+        output_dir / "scientific_command_dispatch_report.json",
+        output_dir / "scientific_execution_binding.json",
     }
     required_entries.update(_expected_indexed_pngs(paths["official_images"], prompt_count))
     required_entries.update(
@@ -1329,6 +1337,12 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
             "T2SMark 结果目录缺少白名单文件: "
             + ",".join(path.relative_to(output_dir).as_posix() for path in missing_entries[:20])
         )
+    validate_scientific_execution_binding(
+        output_dir / "scientific_execution_binding.json",
+        expected_artifact_role="t2smark_formal_reproduction",
+        expected_paper_run_name=output_dir.name,
+        repository_root=root_path,
+    )
 
     actual_output_entries = {
         path

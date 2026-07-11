@@ -45,7 +45,7 @@ from experiments.runners.semantic_watermark_runtime import (
 )
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
-from paper_workflow.colab_utils import semantic_watermark_image_only as colab_image_only
+from scripts import semantic_watermark_scientific_workflow as scientific_workflow
 
 
 @pytest.mark.quick
@@ -489,10 +489,34 @@ def test_colab_image_only_session_reports_persistent_resume(
         encoding="utf-8",
     )
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
-    monkeypatch.setattr(colab_image_only, "_run_repository_script", lambda root, script: None)
+    execution_path = tmp_path / "outputs" / "scientific_execution.json"
+    execution_path.write_text("{}", encoding="utf-8")
+    execution_report = {
+        "decision": "pass",
+        "failure_reasons": [],
+        "profile_id": "sd35_method_runtime_gpu",
+        "profile_digest": "1" * 64,
+        "complete_hash_lock_digest": "2" * 64,
+        "dependency_environment_report_path": str(execution_path),
+        "dependency_environment_report_digest": "3" * 64,
+    }
+    execution_calls = []
 
-    summary = colab_image_only.run_semantic_watermark_image_only_session(tmp_path)
+    def execute_once(*args: object, **kwargs: object) -> tuple[dict[str, object], Path]:
+        execution_calls.append((args, kwargs))
+        return execution_report, execution_path
 
+    monkeypatch.setattr(scientific_workflow, "execute_isolated_scientific_command", execute_once)
+    monkeypatch.setattr(
+        scientific_workflow,
+        "validate_scientific_execution_report",
+        lambda *args, **kwargs: execution_report,
+    )
+
+    summary = scientific_workflow.run_semantic_watermark_image_only_session(tmp_path)
+
+    assert len(execution_calls) == 1
+    assert execution_calls[0][0][0] == "sd35_method_runtime_gpu"
     assert summary["workflow_decision"] == "resume_required"
     assert summary["active_workflow"] == "image_only_dataset_runtime"
     assert summary["runtime_progress"]["remaining_prompt_count"] == 65
@@ -532,10 +556,188 @@ def test_colab_image_only_session_mirrors_completed_formal_packages(
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
     monkeypatch.setenv("SLM_WM_IMAGE_ONLY_RUNTIME_DRIVE_DIR", str(runtime_drive_dir))
     monkeypatch.setenv("SLM_WM_DATASET_QUALITY_DRIVE_DIR", str(quality_drive_dir))
-    monkeypatch.setattr(colab_image_only, "_run_repository_script", lambda root, script: None)
+    execution_path = tmp_path / "outputs" / "scientific_execution.json"
+    execution_path.write_text("{}", encoding="utf-8")
+    execution_report = {
+        "decision": "pass",
+        "failure_reasons": [],
+        "profile_id": "sd35_method_runtime_gpu",
+        "profile_digest": "1" * 64,
+        "complete_hash_lock_digest": "2" * 64,
+        "dependency_environment_report_path": str(execution_path),
+        "dependency_environment_report_digest": "3" * 64,
+    }
+    execution_calls = []
 
-    summary = colab_image_only.run_semantic_watermark_image_only_session(tmp_path)
+    def execute_once(*args: object, **kwargs: object) -> tuple[dict[str, object], Path]:
+        execution_calls.append((args, kwargs))
+        return execution_report, execution_path
 
+    monkeypatch.setattr(scientific_workflow, "execute_isolated_scientific_command", execute_once)
+    monkeypatch.setattr(
+        scientific_workflow,
+        "validate_scientific_execution_report",
+        lambda *args, **kwargs: execution_report,
+    )
+    monkeypatch.setattr(scientific_workflow, "_write_bindings", lambda **kwargs: {})
+    monkeypatch.setattr(scientific_workflow, "_run_bound_packaging", lambda **kwargs: {})
+    monkeypatch.setattr(
+        scientific_workflow,
+        "_archive_paths_from_packaging",
+        lambda *args, **kwargs: {
+            "image_only_dataset_runtime": runtime_dir
+            / "image_only_dataset_runtime_package_fixture.zip",
+            "dataset_level_quality": quality_dir
+            / "dataset_level_quality_package_fixture.zip",
+        },
+    )
+
+    summary = scientific_workflow.run_semantic_watermark_image_only_session(
+        tmp_path,
+        archive_destination_dirs={
+            "image_only_dataset_runtime": runtime_drive_dir,
+            "dataset_level_quality": quality_drive_dir,
+        },
+    )
+
+    assert len(execution_calls) == 1
     assert summary["workflow_decision"] == "dataset_complete"
     assert (runtime_drive_dir / "image_only_dataset_runtime_package_fixture.zip").read_bytes() == b"runtime"
     assert (quality_drive_dir / "dataset_level_quality_package_fixture.zip").read_bytes() == b"quality"
+
+
+@pytest.mark.quick
+def test_formal_ablation_resume_skips_binding_and_packaging(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正式消融仍有 progress 时不得重复生成主运行与质量归档."""
+
+    run_name = "probe_paper"
+    runtime_dir = tmp_path / "outputs" / "image_only_dataset_runtime" / run_name
+    quality_dir = tmp_path / "outputs" / "dataset_level_quality" / run_name
+    ablation_dir = tmp_path / "outputs" / "formal_mechanism_ablation" / run_name
+    for output_dir in (runtime_dir, quality_dir, ablation_dir):
+        output_dir.mkdir(parents=True)
+    (runtime_dir / "dataset_runtime_summary.json").write_text(
+        json.dumps({"protocol_decision": "pass"}),
+        encoding="utf-8",
+    )
+    (quality_dir / "dataset_quality_summary.json").write_text(
+        json.dumps({"formal_fid_kid_claim_gate_ready": True}),
+        encoding="utf-8",
+    )
+    (ablation_dir / "runtime_rerun_progress.json").write_text(
+        json.dumps(
+            {
+                "protocol_decision": "resume_required",
+                "remaining_run_count": 555,
+            }
+        ),
+        encoding="utf-8",
+    )
+    execution_path = tmp_path / "outputs" / "scientific_execution.json"
+    execution_path.write_text("{}", encoding="utf-8")
+    execution_report = {
+        "decision": "pass",
+        "failure_reasons": [],
+        "profile_id": "sd35_method_runtime_gpu",
+        "profile_digest": "1" * 64,
+        "complete_hash_lock_digest": "2" * 64,
+        "dependency_environment_report_path": str(execution_path),
+        "dependency_environment_report_digest": "3" * 64,
+    }
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
+    monkeypatch.setattr(
+        scientific_workflow,
+        "execute_isolated_scientific_command",
+        lambda *args, **kwargs: (execution_report, execution_path),
+    )
+    monkeypatch.setattr(
+        scientific_workflow,
+        "validate_scientific_execution_report",
+        lambda *args, **kwargs: execution_report,
+    )
+
+    def reject_packaging(**kwargs: object) -> object:
+        raise AssertionError("消融续跑状态不得写 binding 或执行打包")
+
+    monkeypatch.setattr(scientific_workflow, "_write_bindings", reject_packaging)
+    monkeypatch.setattr(scientific_workflow, "_run_bound_packaging", reject_packaging)
+
+    summary = scientific_workflow.run_semantic_watermark_image_only_session(
+        tmp_path,
+        run_formal_ablation=True,
+    )
+
+    assert summary["workflow_decision"] == "resume_required"
+    assert summary["active_workflow"] == "runtime_rerun_ablation"
+    assert summary["ablation_progress"]["remaining_run_count"] == 555
+    assert "local_archives" not in summary
+    assert "scientific_execution_bindings" not in summary
+
+
+@pytest.mark.quick
+def test_bound_packaging_archive_roles_must_match_exact_requested_set(
+    tmp_path: Path,
+) -> None:
+    """绑定打包结果必须无重复且精确覆盖当前请求的产物角色."""
+
+    runtime_archive = tmp_path / "outputs" / "runtime.zip"
+    quality_archive = tmp_path / "outputs" / "quality.zip"
+    runtime_archive.parent.mkdir(parents=True)
+    runtime_archive.write_bytes(b"runtime")
+    quality_archive.write_bytes(b"quality")
+
+    def record(role: str, path: Path) -> dict[str, object]:
+        return {
+            "artifact_role": role,
+            "archive_path": path.relative_to(tmp_path).as_posix(),
+            "archive_sha256": scientific_workflow.file_sha256(path),
+        }
+
+    expected_roles = {
+        "image_only_dataset_runtime",
+        "dataset_level_quality",
+    }
+    valid_execution = {
+        "packaging_result": {
+            "archives": [
+                record("image_only_dataset_runtime", runtime_archive),
+                record("dataset_level_quality", quality_archive),
+            ]
+        }
+    }
+    resolved = scientific_workflow._archive_paths_from_packaging(
+        tmp_path,
+        valid_execution,
+        expected_roles=expected_roles,
+    )
+    assert set(resolved) == expected_roles
+
+    missing_execution = {
+        "packaging_result": {
+            "archives": [record("image_only_dataset_runtime", runtime_archive)]
+        }
+    }
+    with pytest.raises(RuntimeError, match="角色集合不一致"):
+        scientific_workflow._archive_paths_from_packaging(
+            tmp_path,
+            missing_execution,
+            expected_roles=expected_roles,
+        )
+
+    duplicate_execution = {
+        "packaging_result": {
+            "archives": [
+                record("image_only_dataset_runtime", runtime_archive),
+                record("image_only_dataset_runtime", runtime_archive),
+            ]
+        }
+    }
+    with pytest.raises(RuntimeError, match="重复角色"):
+        scientific_workflow._archive_paths_from_packaging(
+            tmp_path,
+            duplicate_execution,
+            expected_roles=expected_roles,
+        )

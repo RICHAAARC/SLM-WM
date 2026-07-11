@@ -22,7 +22,7 @@ from experiments.runtime.repository_environment import (
     build_formal_execution_lock,
     publish_formal_execution_lock,
 )
-from paper_experiments.runners.paper_result_closure import (
+from scripts.paper_result_closure import (
     run_paper_result_closure_commands,
 )
 from paper_experiments.runners.closure_package_selection import (

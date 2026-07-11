@@ -28,6 +28,8 @@ from experiments.runtime.isolated_dependency_environment import (
 from experiments.runtime.repository_environment import (
     FORMAL_EXECUTION_COMMIT_ENVIRONMENT_KEY,
     FORMAL_EXECUTION_LOCK_DIGEST_ENVIRONMENT_KEY,
+    ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY,
+    ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY,
     require_published_formal_execution_lock,
 )
 
@@ -36,10 +38,10 @@ ROOT = Path(__file__).resolve().parents[2]
 REPORT_SCHEMA = "isolated_scientific_execution_report"
 REPORT_SCHEMA_VERSION = 1
 DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY = (
-    "SLM_WM_ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH"
+    ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY
 )
 DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY = (
-    "SLM_WM_ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST"
+    ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY
 )
 
 PathLike = Union[str, Path]
@@ -155,12 +157,14 @@ def _report_skeleton(
         "report_schema": REPORT_SCHEMA,
         "schema_version": REPORT_SCHEMA_VERSION,
         "operation_kind": "isolated_scientific_execution",
+        "repository_root": str(repository_root),
         "profile_id": profile_id,
         "profile_digest": None,
         "direct_requirements_digest": None,
         "complete_hash_lock_digest": None,
         "complete_hash_lock_dependency_count": 0,
         "dependency_environment_report_path": None,
+        "source_dependency_environment_report_path": None,
         "dependency_environment_report_digest": None,
         "dependency_environment_report_valid": False,
         "dependency_environment_validation_errors": [],
@@ -421,6 +425,9 @@ def execute_isolated_scientific_command(
 
     resolved_dependency_report_path = Path(dependency_environment_report_path).resolve()
     report["dependency_environment_report_path"] = str(
+        resolved_dependency_report_path
+    )
+    report["source_dependency_environment_report_path"] = str(
         resolved_dependency_report_path
     )
     if (

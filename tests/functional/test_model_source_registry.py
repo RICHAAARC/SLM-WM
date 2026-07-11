@@ -16,7 +16,7 @@ from experiments.runtime.model_sources import (
     load_model_source_registry,
     require_registered_model_reference,
 )
-from scripts import run_image_only_dataset_runtime
+from experiments.runners import image_only_dataset_workload
 
 
 @pytest.mark.quick
@@ -65,7 +65,7 @@ def test_dataset_runtime_entrypoint_uses_registered_revision_defaults(
     ):
         monkeypatch.delenv(variable_name, raising=False)
 
-    config = run_image_only_dataset_runtime.build_method_config(".")
+    config = image_only_dataset_workload.build_method_config(".")
 
     assert config.model_revision == get_model_source(
         "stabilityai_stable_diffusion_3_5_medium"
@@ -85,7 +85,7 @@ def test_dataset_runtime_rejects_method_environment_drift(
     monkeypatch.setenv("SLM_WM_MODEL_REVISION", "0" * 40)
 
     with pytest.raises(ValueError, match="model_sd35.yaml 不一致"):
-        run_image_only_dataset_runtime.build_method_config(".")
+        image_only_dataset_workload.build_method_config(".")
 
 
 @pytest.mark.quick

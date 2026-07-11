@@ -1,15 +1,15 @@
-"""按当前论文运行层级执行 CPU 结果闭合。"""
+"""按当前论文运行层级执行 CPU 结果闭合."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 import json
 import math
 from pathlib import Path
 import shutil
 import subprocess
 import sys
-from typing import Any
+from typing import Any, Callable, List
 
 from experiments.protocol.paper_run_config import build_paper_run_config, normalize_paper_run_name
 from experiments.runtime import repository_environment
@@ -24,13 +24,13 @@ from paper_experiments.runners.closure_package_selection import (
 )
 
 
-CommandHook = Callable[[list[str]], None]
+CommandHook = Callable[[List[str]], None]
 ProgressHook = Callable[[int, int, str], None]
 PAPER_RESULT_CLOSURE_COMMAND_COUNT = 18
 
 
-# 这些目录由当前闭合运行独占。正式执行会在物化锁定包前清理相同 run 的
-# 内容, 从而使后续 builder 只能看到本次锁定输入, 而不会消费历史运行残留。
+# 这些目录由当前闭合运行独占.正式执行会在物化锁定包前清理相同 run 的
+# 内容, 从而使后续 builder 只能看到本次锁定输入, 而不会消费历史运行残留.
 CLOSURE_RAW_OUTPUT_DIR_TEMPLATES: tuple[str, ...] = (
     "outputs/image_only_dataset_runtime/{paper_run_name}",
     "outputs/formal_mechanism_ablation/{paper_run_name}",
@@ -67,14 +67,14 @@ def _short_commit(root: str | Path = ".") -> str:
     """从完整提交身份显式截取7位归档名称摘要."""
 
     code_version = resolve_code_version(Path(root).resolve())
-    commit = code_version.removesuffix("-dirty")
+    commit = code_version[:-6] if code_version.endswith("-dirty") else code_version
     if FORMAL_GIT_COMMIT_PATTERN.fullmatch(commit) is None:
         raise RuntimeError("无法从完整 Git 提交身份构造归档名称")
     return commit[:7]
 
 
 def _complete_archive_name(paper_run_name: str, *, root: str | Path = ".") -> str:
-    """根据运行层级、UTC 时间和代码提交构造唯一归档名称。"""
+    """根据运行层级,UTC 时间和代码提交构造唯一归档名称."""
 
     return (
         f"{paper_run_name}_complete_result_package_"
@@ -83,13 +83,13 @@ def _complete_archive_name(paper_run_name: str, *, root: str | Path = ".") -> st
 
 
 def _path_argument(path: str | Path) -> str:
-    """把命令参数路径转换为跨平台稳定文本。"""
+    """把命令参数路径转换为跨平台稳定文本."""
 
     return Path(path).as_posix()
 
 
 def _command(script_name: str, *arguments: str) -> list[str]:
-    """构造一个可脱离 Notebook 执行的 repository command。"""
+    """构造一个可脱离 Notebook 执行的 repository command."""
 
     return [sys.executable, f"scripts/{script_name}", *arguments]
 
@@ -100,7 +100,7 @@ def _package_record_map(
     paper_run_name: str,
     target_fpr: float,
 ) -> dict[str, dict[str, Any]]:
-    """校验并索引恰好10个已锁定输入包记录。"""
+    """校验并索引恰好10个已锁定输入包记录."""
 
     records = [dict(record) for record in closure_input_packages]
     expected_families = tuple(
@@ -130,7 +130,7 @@ def _package_record_map(
 
 
 def _ordered_package_paths(package_records: Mapping[str, Mapping[str, Any]]) -> tuple[str, ...]:
-    """按受治理 family 顺序返回显式包路径。"""
+    """按受治理 family 顺序返回显式包路径."""
 
     return tuple(
         str(package_records[specification.package_family]["package_path"])
@@ -139,7 +139,7 @@ def _ordered_package_paths(package_records: Mapping[str, Mapping[str, Any]]) -> 
 
 
 def _repeat_argument(name: str, values: Iterable[str | Path]) -> list[str]:
-    """把可重复命令参数展开为平坦列表。"""
+    """把可重复命令参数展开为平坦列表."""
 
     arguments: list[str] = []
     for value in values:
@@ -148,7 +148,7 @@ def _repeat_argument(name: str, values: Iterable[str | Path]) -> list[str]:
 
 
 def _run_output_path(artifact_root: str, paper_run_name: str, file_name: str = "") -> str:
-    """构造当前论文运行层级的受治理输出路径。"""
+    """构造当前论文运行层级的受治理输出路径."""
 
     path = Path("outputs") / artifact_root / paper_run_name
     return (path / file_name).as_posix() if file_name else path.as_posix()
@@ -160,10 +160,10 @@ def clean_paper_result_closure_outputs(
     paper_run_name: str,
     selected_package_paths: Iterable[str | Path],
 ) -> tuple[str, ...]:
-    """清理当前 run 的受管输入物化目录和派生目录。
+    """清理当前 run 的受管输入物化目录和派生目录.
 
-    输入锁目录不在清理集合中。若锁定 zip 位于待清理目录内, 函数会拒绝继续,
-    避免先冻结输入后又删除输入文件。其他论文运行层级和非受管输出不受影响。
+    输入锁目录不在清理集合中.若锁定 zip 位于待清理目录内, 函数会拒绝继续,
+    避免先冻结输入后又删除输入文件.其他论文运行层级和非受管输出不受影响.
     """
 
     root_path = Path(root).resolve()
@@ -207,7 +207,7 @@ def build_paper_result_closure_commands(
     archive_name: str,
     root: str | Path = ".",
 ) -> list[list[str]]:
-    """构造只消费本次锁定输入的 run-scoped CPU 闭合 DAG。"""
+    """构造只消费本次锁定输入的 run-scoped CPU 闭合 DAG."""
 
     normalized_run_name = normalize_paper_run_name(paper_run_name)
     root_path = Path(root).resolve()
@@ -624,7 +624,7 @@ def run_paper_result_closure_commands(
     before_command: CommandHook | None = None,
     progress_hook: ProgressHook | None = None,
 ) -> dict[str, Any]:
-    """锁定输入、清理当前 run、执行闭合 DAG 并返回精确归档路径。"""
+    """锁定输入,清理当前 run,执行闭合 DAG 并返回精确归档路径."""
 
     root_path = Path(root).resolve()
     formal_execution_run_lock = (
@@ -712,6 +712,6 @@ def run_paper_result_closure_commands(
 
 
 def stable_json_text(value: Any) -> str:
-    """把 JSON 兼容对象转换为稳定文本。"""
+    """把 JSON 兼容对象转换为稳定文本."""
 
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"

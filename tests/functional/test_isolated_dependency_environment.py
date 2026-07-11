@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import base64
+from copy import deepcopy
 from dataclasses import replace
 import hashlib
 import json
@@ -63,24 +64,52 @@ def _formal_execution_lock() -> dict[str, Any]:
 def _dependency_preparation_report(
     profile: DependencyProfile,
     python_executable: Path,
+    repository_root: Path,
 ) -> dict[str, Any]:
     """构造内层 dependency preparation 的严格通过报告."""
 
+    lock_path = (
+        repository_root / PurePosixPath(profile.complete_hash_lock_path)
+    ).resolve()
+    install_command = [
+        str(python_executable),
+        "-m",
+        "pip",
+        "install",
+        "--require-hashes",
+        "--only-binary=:all:",
+    ]
+    if profile.pytorch_index_url is not None:
+        install_command.extend(
+            ["--extra-index-url", profile.pytorch_index_url]
+        )
+    install_command.extend(["-r", str(lock_path)])
     return {
         "report_schema": "dependency_profile_preparation_report",
         "schema_version": 1,
         "profile_id": profile.profile_name,
         "python_executable": str(python_executable),
+        "working_directory": str(repository_root.resolve()),
         "profile_digest": profile.profile_digest,
         "direct_requirements_digest": profile.direct_requirements_digest,
         "complete_hash_lock_digest": profile.complete_hash_lock_digest,
         "complete_hash_lock_dependency_count": profile.complete_hash_lock_dependency_count,
+        "complete_hash_lock_path": profile.complete_hash_lock_path,
+        "pytorch_index_url": profile.pytorch_index_url,
         "formal_ready": True,
+        "readiness_blockers": [],
         "repository_commit_state": {"all_committed": True},
-        "installation": {"attempted": True, "return_code": 0},
+        "installation": {
+            "attempted": True,
+            "command": install_command,
+            "working_directory": str(repository_root.resolve()),
+            "return_code": 0,
+        },
         "pip_check": {
             "compatibility_check_required": True,
             "attempted": True,
+            "command": [str(python_executable), "-m", "pip", "check"],
+            "working_directory": str(repository_root.resolve()),
             "return_code": 0,
             "decision": "pass",
         },
@@ -329,13 +358,20 @@ def test_formal_prepare_requires_target_lock_and_validates_child_report(
                 / "dependency_profile_report.json"
             )
             dependency_report_path.parent.mkdir(parents=True, exist_ok=True)
-            dependency_report_path.write_text(
-                json.dumps(
-                    _dependency_preparation_report(target_profile, python_executable),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
+            dependency_report_path.write_bytes(
+                (
+                    json.dumps(
+                        _dependency_preparation_report(
+                            target_profile,
+                            python_executable,
+                            tmp_path,
+                        ),
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                    )
+                        + "\n"
+                ).encode("utf-8")
             )
             return {"return_code": 0, "stdout": "", "stderr": ""}
         return base_runner(normalized, working_directory, environment_overrides)
@@ -357,7 +393,7 @@ def test_formal_prepare_requires_target_lock_and_validates_child_report(
         target_profile.profile_name,
     ]
     assert commands[-1][0] == expected_prepare_argv
-    assert report["decision"] == "pass"
+    assert report["decision"] == "pass", report["failure_reasons"]
     assert report["provisioned"] is True
     assert report["formal_preparation_completed"] is True
     assert report["formal_ready"] is True
@@ -369,6 +405,66 @@ def test_formal_prepare_requires_target_lock_and_validates_child_report(
         "python_executable_sha256"
     ]
     assert json.loads(report_path.read_text(encoding="utf-8")) == report
+
+    tampered_outer = deepcopy(report)
+    tampered_outer["dependency_preparation_command"]["argv"][2] = (
+        "experiments.runtime.repository_environment"
+    )
+    tampered_outer["command_results"][-1] = tampered_outer[
+        "dependency_preparation_command"
+    ]
+    outer_errors = isolated.validate_formal_dependency_environment_report(
+        tampered_outer,
+        expected_profile_id=target_profile.profile_name,
+        expected_profile_digest=target_profile.profile_digest,
+        expected_direct_requirements_digest=target_profile.direct_requirements_digest,
+        expected_complete_hash_lock_path=target_profile.complete_hash_lock_path,
+        expected_complete_hash_lock_digest=str(
+            target_profile.complete_hash_lock_digest
+        ),
+        expected_complete_hash_lock_dependency_count=(
+            target_profile.complete_hash_lock_dependency_count
+        ),
+        expected_pytorch_index_url=target_profile.pytorch_index_url,
+        expected_python_executable_path=python_executable,
+        expected_python_executable_digest=report[
+            "python_executable_sha256"
+        ],
+        expected_formal_execution_lock=_formal_execution_lock(),
+        expected_working_directory=tmp_path,
+    )
+    assert "dependency_preparation_outer_command_invalid" in outer_errors
+
+    tampered_install = deepcopy(report)
+    tampered_install["dependency_preparation_report"]["installation"][
+        "command"
+    ][3] = "download"
+    tampered_install["dependency_preparation_report_digest"] = (
+        isolated._stable_json_digest(
+            tampered_install["dependency_preparation_report"]
+        )
+    )
+    install_errors = isolated.validate_formal_dependency_environment_report(
+        tampered_install,
+        expected_profile_id=target_profile.profile_name,
+        expected_profile_digest=target_profile.profile_digest,
+        expected_direct_requirements_digest=target_profile.direct_requirements_digest,
+        expected_complete_hash_lock_path=target_profile.complete_hash_lock_path,
+        expected_complete_hash_lock_digest=str(
+            target_profile.complete_hash_lock_digest
+        ),
+        expected_complete_hash_lock_dependency_count=(
+            target_profile.complete_hash_lock_dependency_count
+        ),
+        expected_pytorch_index_url=target_profile.pytorch_index_url,
+        expected_python_executable_path=python_executable,
+        expected_python_executable_digest=report[
+            "python_executable_sha256"
+        ],
+        expected_formal_execution_lock=_formal_execution_lock(),
+        expected_working_directory=tmp_path,
+    )
+    assert "dependency_preparation_installation_command_invalid" in install_errors
 
 
 @pytest.mark.quick

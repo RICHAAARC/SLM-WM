@@ -21,6 +21,8 @@ def _copy_governance_fixture(tmp_path: Path) -> Path:
         "experiments/runtime/dependency_profiles.py",
         "experiments/runtime/dependency_preparation.py",
         "experiments/runtime/isolated_dependency_environment.py",
+        "experiments/runtime/isolated_scientific_execution.py",
+        "experiments/runtime/repository_environment.py",
         "scripts/prepare_dependency_profile.py",
         "scripts/prepare_isolated_dependency_environment.py",
         "scripts/materialize_dependency_lock_candidate.py",
@@ -191,6 +193,28 @@ def test_non_exact_direct_dependency_is_rejected(tmp_path: Path) -> None:
 
     assert report["decision"] == "fail"
     assert "dependency_profile_registry_invalid" in {
+        violation["reason"] for violation in report["violations"]
+    }
+
+
+@pytest.mark.constraint
+def test_scientific_context_gate_cannot_be_removed(tmp_path: Path) -> None:
+    """运行环境层不得移除科学子解释器上下文 blocker 门禁."""
+
+    fixture_root = _copy_governance_fixture(tmp_path)
+    environment_path = fixture_root / "experiments/runtime/repository_environment.py"
+    environment_path.write_text(
+        environment_path.read_text(encoding="utf-8").replace(
+            '"isolated_context_environment_report_path_missing"',
+            '"scientific_context_check_removed"',
+        ),
+        encoding="utf-8",
+    )
+
+    report = run_audit(fixture_root)
+
+    assert report["decision"] == "fail"
+    assert "isolated_scientific_context_contract_missing" in {
         violation["reason"] for violation in report["violations"]
     }
 

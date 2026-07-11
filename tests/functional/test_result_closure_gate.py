@@ -85,14 +85,13 @@ from paper_experiments.analysis.paper_evidence_audit import (
     build_evidence_audit_manifest_config,
     build_evidence_audit_materialization,
 )
-from paper_experiments.runners.closure_package_selection import (
-    CLOSURE_PACKAGE_FAMILY_SPECS,
-)
 from scripts.write_result_closure_gate_outputs import main, write_result_closure_gate_outputs
 from scripts.write_paper_artifact_evidence_audit_outputs import (
     write_paper_artifact_evidence_audit_outputs,
 )
-from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
+from tests.helpers.closure_input_lock import (
+    build_test_closure_input_lock_payloads,
+)
 
 
 SCALE = "probe_paper"
@@ -1061,56 +1060,11 @@ def primary_evidence_record(baseline_id: str) -> dict[str, object]:
 def closure_input_lock() -> tuple[dict[str, object], dict[str, object]]:
     """构造精确10类输入包的当前 run 锁及独立 manifest."""
 
-    execution_lock = build_test_formal_execution_lock(COMMON_CODE_VERSION)
-    execution_lock_digest = execution_lock["formal_execution_lock_digest"]
-    records = [
-        {
-            "package_family": spec.package_family,
-            "package_path": f"D:/drive/{spec.package_family}.zip",
-            "package_sha256": f"{index + 1:x}" * 64,
-            "paper_run_name": SCALE,
-            "target_fpr": TARGET_FPR,
-            "code_version": COMMON_CODE_VERSION,
-            "formal_execution_run_lock_digest": execution_lock_digest,
-            "formal_execution_package_lock_digest": execution_lock_digest,
-            "generated_at": "2026-07-11T00:00:00+00:00",
-        }
-        for index, spec in enumerate(CLOSURE_PACKAGE_FAMILY_SPECS)
-    ]
-    payload: dict[str, object] = {
-        "paper_run_name": SCALE,
-        "target_fpr": TARGET_FPR,
-        "common_code_version": COMMON_CODE_VERSION,
-        "closure_input_package_count": len(records),
-        "closure_input_packages": records,
-        "formal_execution_run_lock_digests": {
-            record["package_family"]: record["formal_execution_run_lock_digest"]
-            for record in records
-        },
-        "formal_execution_package_lock_digests": {
-            record["package_family"]: record["formal_execution_package_lock_digest"]
-            for record in records
-        },
-    }
-    payload["closure_input_lock_digest"] = build_stable_digest(payload)
-    metadata = {
-        "closure_input_lock_ready": True,
-        "closure_input_package_count": len(records),
-        "closure_input_packages": records,
-        "closure_input_lock_digest": payload["closure_input_lock_digest"],
-        "paper_run_name": SCALE,
-        "target_fpr": TARGET_FPR,
-        "common_code_version": COMMON_CODE_VERSION,
-    }
-    lock_manifest = manifest(
-        f"{SCALE}_closure_input_lock_manifest",
-        (
-            f"outputs/paper_result_closure/{SCALE}/closure_input_lock.json",
-            f"outputs/paper_result_closure/{SCALE}/input_lock_manifest.local.json",
-        ),
-        metadata,
+    return build_test_closure_input_lock_payloads(
+        paper_run_name=SCALE,
+        target_fpr=TARGET_FPR,
+        common_code_version=COMMON_CODE_VERSION,
     )
-    return payload, lock_manifest
 
 
 def ready_bundle() -> ResultClosureGateInput:

@@ -11,7 +11,7 @@ from experiments.runtime import repository_environment
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
 )
-from paper_experiments.runners import paper_result_closure as closure
+from scripts import paper_result_closure as closure
 from scripts import run_gpu_server_result_closure as server_closure
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 

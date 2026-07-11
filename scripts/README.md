@@ -13,14 +13,17 @@
 
 ## GPU 入口
 
-- `run_image_only_dataset_runtime.py`: 执行当前论文级别的完整主方法、仅图像检测和共同攻击。
-- `run_runtime_rerun_ablations.py`: 对同一完整 Prompt 集执行真实机制消融, 每个变体使用自己的 calibration split 冻结阈值。
-- `build_external_baseline_command_plan.py`: 为单个 Tree-Ring、Gaussian Shading 或 Shallow Diffuse common-backbone 运行构建真实 SD3.5 命令。必须显式传入当前论文级别的 `--target-fpr`。
-- `run_external_baseline_command_plan.py`: 执行 baseline 命令计划并汇总 observation。
+- `run_gpu_server_workflow.py`: 可脱离 Notebook 使用的 CPU 父入口. 公开9个正式路由: `image_only_dataset`、`mechanism_ablation`、`external_baseline_tree_ring`、`external_baseline_gaussian_shading`、`external_baseline_shallow_diffuse`、`official_reference_t2smark`、`official_reference_tree_ring`、`official_reference_gaussian_shading` 和 `official_reference_shallow_diffuse`。父解释器必须先通过已提交的 `workflow_orchestrator` 完整锁与当前环境检查, 再发布正式执行锁和运行身份并进行路由编排; 主方法与消融进入 `sd35_method_runtime_gpu`, method-faithful 与 T2SMark 使用共享隔离 workflow, 三个官方参考路由进入各自独立科学 profile, 宿主环境不安装或执行科学依赖。9个路由均返回同一 `gpu_server_workflow_result` schema, 并绑定父编排依赖证据、正式执行锁、内层工作流摘要和可选归档记录。
+- `run_image_only_dataset_runtime.py`: `experiments.runners.image_only_dataset_workload` 的薄 CLI。内层工作负载执行当前论文级别的完整主方法、仅图像检测、共同攻击和正式数据集质量评估。
+- `run_runtime_rerun_ablations.py`: `experiments.ablations.mechanism_ablation_workload` 的薄 CLI。内层工作负载对同一完整 Prompt 集执行真实机制消融, 每个变体使用自己的 calibration split 冻结阈值。
+- `semantic_watermark_scientific_workflow.py`: 主方法的可脱离 Notebook 父编排实现。它创建一次隔离科学执行, 写入产物级执行绑定, 复用同一受验证子解释器完成绑定打包, 并按调用者显式提供的目标目录镜像本次归档。
+- `run_semantic_watermark_scientific_session.py`: 仅转发到 `experiments.runtime.semantic_watermark_scientific_session` 的薄命令入口。科学 session 实现在同一 `sd35_method_runtime_gpu` 子解释器中顺序运行主方法、质量评估和按需消融, 或在互斥的绑定打包模式中验证产物后重新归档。
+- `build_external_baseline_command_plan.py`、`run_external_baseline_command_plan.py` 与 `validate_external_baseline_evidence.py`: 完整论文实验层相应模块的薄 CLI。可复用实现位于 `paper_experiments/baselines/command_plan_builder.py`、`command_plan_execution.py` 与 `evidence_validation_cli.py`。
 
 ## CPU 闭合入口
 
-- `run_gpu_server_result_closure.py`: 在 CPU 汇总服务器对已回传结果包执行包内身份 dry-run, 正式运行时冻结精确10包输入锁并执行18步论文证据闭合。
+- `paper_result_closure.py`: 对精确10包输入执行 current-run 清理、显式物化、18步 run-scoped 证据 DAG、语义闭合门禁和最终打包, 返回本次唯一归档路径。
+- `run_gpu_server_result_closure.py`: `paper_result_closure.py` 的 CPU 服务器 CLI, 先对已回传结果包执行包内身份 dry-run, 正式运行时冻结输入锁并执行完整闭合。
 - `write_pilot_paper_result_records.py`: 物化受治理 records。
 - `write_fixed_fpr_threshold_audit_outputs.py`: 从主方法与四个外部 baseline 的原始 observation 独立重算 calibration clean negative 冻结阈值、阈值摘要和逐条判定, 不接受仅由上游声明的 ready 状态。
 - `write_primary_baseline_result_candidates.py`: 从三个 method-faithful transfer manifest 的 exact-set collection 与 T2SMark 正式候选生成共同协议记录。
@@ -58,5 +61,9 @@
 逐攻击结果表属于完整披露证据。主表总体 superiority claim 只由第5步的 Prompt 聚类配对统计及第17步的跨产物语义门禁决定; official-reference 忠实度证据不进入主表。
 
 当前 `8.216.54.104` 没有 GPU, 只能执行 CPU 闭合、审计和打包。GPU 主方法、消融和 baseline 必须在 Colab 或其他 CUDA 服务器运行。
+
+五个 CUDA profile 的 repository 隔离子执行路径均已定义. 当前唯一外部阻断类别是完整哈希锁资格审查尚未闭合; 五个科学锁必须在匹配各自 CPython、CUDA 与 PyTorch index 的 Colab 或 Linux CUDA 环境完成审查, 不得由 CPU 服务器或 Notebook 临时安装替代.
+
+完整结果包的共享代码白名单只归档 `scripts/` 及更内层的可执行实现, 不归档 `paper_workflow/`、Notebook 或 Colab / Drive 包装。该边界使 CPU 服务器能够仅凭结果包中的内层实现复核输入锁、科学执行绑定和18步证据闭合。
 
 所有持久化输出必须位于 `outputs/`; harness 报告必须位于 `outputs/audit_reports/`。

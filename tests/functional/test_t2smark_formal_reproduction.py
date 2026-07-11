@@ -6,6 +6,7 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -33,10 +34,49 @@ from paper_experiments.runners.closure_package_selection import (
     inspect_closure_package,
 )
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
+from tests.helpers.scientific_execution_binding import (
+    write_test_scientific_execution_binding,
+)
 
 
 pytestmark = pytest.mark.quick
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+
+
+def test_t2smark_packaging_module_imports_without_scientific_dependencies() -> None:
+    """CPU 父打包路径不得因导入模块而加载 PIL, torch 或指标模型依赖."""
+
+    program = """
+import builtins
+
+blocked_roots = {
+    "PIL",
+    "diffusers",
+    "lpips",
+    "open_clip",
+    "torch",
+    "torchvision",
+    "transformers",
+}
+original_import = builtins.__import__
+
+def guarded_import(name, *args, **kwargs):
+    if name.split(".", 1)[0] in blocked_roots:
+        raise ModuleNotFoundError("blocked scientific dependency: " + name)
+    return original_import(name, *args, **kwargs)
+
+builtins.__import__ = guarded_import
+import paper_experiments.runners.t2smark_formal_reproduction
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=Path(__file__).resolve().parents[2],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 @pytest.fixture(autouse=True)
@@ -550,6 +590,17 @@ def _write_package_fixture(
         "metadata": {"run_decision": "pass", "formal_import_validation_ready": True},
     }
     t2smark_runtime.write_json(paths["manifest"], run_manifest)
+    write_test_scientific_execution_binding(
+        repository_root=root_path,
+        artifact_dir=paths["output_dir"],
+        artifact_role="t2smark_formal_reproduction",
+        paper_run_name="probe_paper",
+        profile_id="t2smark_sd35_gpu",
+        summary_file_name=paths["summary"].name,
+        manifest_file_name=paths["manifest"].name,
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+        execution_route="isolated_t2smark_workflow",
+    )
     return paths["output_dir"], root_path / "drive"
 
 

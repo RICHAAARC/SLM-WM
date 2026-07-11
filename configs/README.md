@@ -39,6 +39,8 @@ Prompt bank 中受外部来源登记约束的子集来自 Google Research PartiP
 
 `workflow_orchestrator` inspection 只核验 CPU 平台与完整锁包集合, 不导入 torch, 也不执行 CUDA 门禁。`experiments.runtime.dependency_preparation` 对五个科学 profile 额外执行 `sys.executable -m pip check`; 父编排 profile 仍核验全部锁包, 但将该兼容性命令标记为不适用。`experiments.runtime.isolated_dependency_environment` 使用固定 `uv==0.11.28` 内置的冻结可下载 Python distribution 列表和完整 CPython patch 创建科学子环境, 并要求实际 `uv` executable 同时通过当前解释器 distribution `RECORD` 的路径与 SHA-256 核验, 防止 PATH 中同版本伪造文件。详细证据契约见 `docs/builds/formal_dependency_environment.md`。
 
+五个 CUDA profile 均由 repository 隔离执行路径选择并在各自子解释器中运行, Notebook 父解释器不直接导入科学实现. 当前唯一外部阻断类别是完整哈希锁资格审查: CPU 父锁需要在匹配的 Linux x86_64 环境完成审查, 五个科学锁需要在匹配各自 CPython、CUDA 与 PyTorch index 的 Colab 或 Linux CUDA 环境完成审查并提交. 在此之前全部 profile 保持 fail-closed, 不形成正式 GPU 结果.
+
 ## 方法配置语义
 
 正式运行使用三个分支标识:

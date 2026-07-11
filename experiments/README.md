@@ -5,14 +5,18 @@
 ## 当前职责
 
 - `protocol/`: 论文级 Prompt 分层、fixed-FPR、共同攻击、正式证据和运行规模配置。
-- `runtime/`: SD3.5 模型加载、真实图像攻击、语义特征、进度、仓库环境与正式依赖环境实现。`dependency_profiles.py` 解析一个 CPU 父编排 profile 与五个 CUDA 科学 profile, 并核验完整锁中的全部直接和传递包; `dependency_preparation.py` 执行当前解释器的 hash-locked 安装与适用的兼容性检查; `isolated_dependency_environment.py` 使用固定且经 distribution `RECORD` 验证的 `uv` 为五个科学 profile 创建独立 CPython 子环境。
+- `runtime/`: SD3.5 模型加载、真实图像攻击、语义特征、进度、仓库环境与正式依赖环境实现. `dependency_profiles.py` 解析一个 CPU 父编排 profile 与五个 CUDA 科学 profile, 并核验完整锁中的全部直接和传递包; `dependency_preparation.py` 执行当前解释器的 hash-locked 安装与适用的兼容性检查; `isolated_dependency_environment.py` 使用固定且经 distribution `RECORD` 验证的 `uv` 为五个科学 profile 创建独立 CPython 子环境; `isolated_scientific_execution.py` 在执行前后复验子解释器、依赖报告与正式执行锁; `semantic_watermark_scientific_session.py` 在单个主方法科学子解释器中调度运行与绑定打包两种互斥模式; `scientific_execution_binding.py` 保存可脱离临时 venv 审计的产物内证据快照.
 - `runners/semantic_watermark_runtime.py`: 完整执行分支风险、16维语义与视觉条件 Jacobian、20候选方向的4维 Null Space、LF、Gaussian 幅值尾部截断、真实多层 Q/K 几何更新和仅图像盲检。
+- `runners/image_only_dataset_workload.py`: 从唯一方法 YAML 和论文运行配置构造完整主方法工作负载, 执行主运行与正式 Inception FID / KID, 并根据科学 session 的打包边界返回续跑或完成状态。`scripts/run_image_only_dataset_runtime.py` 只转发到该模块。
 - `runners/image_only_dataset_runtime.py`: 运行完整 Prompt 集, 在 calibration split 独立冻结检测协议, 只在 test split 形成论文统计; 同时从每条仅图像检测记录的真实连续分数生成分数分布、ROC 与 DET 数据。
+- `ablations/mechanism_ablation_workload.py`: 构造当前论文规模的全部消融配置, 调用正式重运行消融并执行受治理打包。`scripts/run_runtime_rerun_ablations.py` 只转发到该模块。
 - `ablations/runtime_rerun.py`: 每个消融配置重新生成、攻击、检测并独立校准, 不读取或变换完整方法分数。
 - `artifacts/dataset_level_quality_outputs.py`: 从真实图像对提取正式 Inception 特征并构建 FID / KID 质量证据。
 - `artifacts/detection_score_curves.py`: 将内容主判与冻结几何救回转换为判定等价连续分数, 使用 `positive_source` 与 clean negative / wrong-key negative 的记录级真实标签, 对 test overall 与每个同时含正负样本的攻击条件枚举正负无穷端点和全部唯一观测分数, 输出可复用的完整 threshold sweep。
 - `artifacts/`: 保存通用 manifest schema、连续检测统计与正式质量产物构建器。
 - 正式攻击记录必须由运行端直接写入 `attack_id`、`attack_family`、`attack_name`、`resource_profile`、`attack_config_digest` 与 `attack_parameters`; 攻击矩阵只验证并传播该身份, 不根据名称后贴配置摘要。
+
+主方法、method-faithful baseline、T2SMark 与三套 official-reference runner 均通过登记的隔离子解释器执行. 当前代码路径不保留父解释器直接执行科学实现的分支. 当前唯一外部阻断类别是六个目标完整哈希锁尚未在匹配环境完成资格审查, 其中五个 CUDA profile 必须在对应 Colab 或 Linux CUDA 环境完成审查.
 
 三个主方法 GPU 上游 family 均使用 `outputs/<artifact>/<paper_run_name>/...`:
 

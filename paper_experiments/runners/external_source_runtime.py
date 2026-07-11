@@ -18,6 +18,139 @@ from main.core.digest import build_stable_digest
 
 
 DEFAULT_SOURCE_REGISTRY_PATH = "external_baseline/source_registry.json"
+CUDA_INSPECTION_PROGRAM = """\
+import json
+import sys
+
+payload = {
+    "python_executable": sys.executable,
+    "torch_available": False,
+    "cuda_available": False,
+    "device": "cpu",
+    "torch_version": "",
+    "torch_cuda_version": "",
+    "device_count": 0,
+    "gpu_name": "",
+}
+exit_code = 0
+try:
+    import torch
+except Exception as error:
+    sys.stderr.write(type(error).__name__ + ":" + str(error))
+    exit_code = 2
+else:
+    cuda_available = bool(torch.cuda.is_available())
+    device_count = int(torch.cuda.device_count()) if cuda_available else 0
+    payload.update(
+        {
+            "torch_available": True,
+            "cuda_available": cuda_available,
+            "device": "cuda" if cuda_available else "cpu",
+            "torch_version": str(torch.__version__),
+            "torch_cuda_version": str(torch.version.cuda or ""),
+            "device_count": device_count,
+            "gpu_name": (
+                str(torch.cuda.get_device_name(0))
+                if cuda_available and device_count > 0
+                else ""
+            ),
+        }
+    )
+    if sys.argv[1] == "1" and not cuda_available:
+        exit_code = 3
+print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+raise SystemExit(exit_code)
+"""
+
+
+def stable_json_payload_digest(value: Any) -> str:
+    """计算跨报告引用使用的规范 JSON SHA-256."""
+
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def bind_successful_official_command_execution_evidence(
+    result: dict[str, Any],
+    *,
+    baseline_id: str,
+    command: list[str],
+    working_directory: str | Path,
+    dependency_python_executable: str | Path,
+    cuda_inspection_report: dict[str, Any],
+) -> dict[str, Any]:
+    """把成功官方命令绑定到隔离解释器, 工作目录与 CUDA 核验.
+
+    该函数属于通用跨进程证据写法.官方 runner 仍负责构造各自 argv, 此处只
+    统一证明实际命令的第一个参数, CUDA 探针解释器和依赖解释器完全一致.
+    """
+
+    resolved_working_directory = Path(working_directory).expanduser().absolute()
+    requested_python = Path(str(dependency_python_executable)).expanduser()
+    if not requested_python.is_absolute():
+        requested_python = resolved_working_directory / requested_python
+    requested_python = requested_python.absolute()
+    reported_python = Path(
+        str(cuda_inspection_report.get("python_executable", ""))
+    ).expanduser()
+    command_python = Path(str(command[0])).expanduser() if command else Path("")
+    evidence_ready = all(
+        (
+            baseline_id in {"tree_ring", "gaussian_shading", "shallow_diffuse"},
+            result.get("official_command_requested") is True,
+            result.get("return_code") == 0,
+            result.get("official_command") == command,
+            bool(command),
+            command_python.is_absolute(),
+            command_python.absolute() == requested_python,
+            reported_python.is_absolute(),
+            reported_python.absolute() == requested_python,
+            cuda_inspection_report.get("decision") == "pass",
+            cuda_inspection_report.get("failure_reasons") == [],
+            cuda_inspection_report.get("return_code") == 0,
+            cuda_inspection_report.get("torch_available") is True,
+            cuda_inspection_report.get("cuda_available") is True,
+            cuda_inspection_report.get("device") == "cuda",
+            cuda_inspection_report.get("supports_paper_claim") is False,
+        )
+    )
+    device_count = cuda_inspection_report.get("device_count")
+    evidence_ready = evidence_ready and (
+        isinstance(device_count, int)
+        and not isinstance(device_count, bool)
+        and device_count > 0
+        and bool(str(cuda_inspection_report.get("gpu_name", "")).strip())
+        and bool(str(cuda_inspection_report.get("torch_version", "")).strip())
+    )
+    if not evidence_ready:
+        raise RuntimeError("官方命令无法绑定到已通过的隔离 CUDA 解释器")
+    bound = dict(result)
+    bound.update(
+        {
+            "report_schema": "official_reference_command_execution_report",
+            "schema_version": 1,
+            "baseline_id": baseline_id,
+            "official_command_working_directory": str(
+                resolved_working_directory
+            ),
+            "dependency_python_executable": str(requested_python),
+            "dependency_python_executable_sha256": str(
+                cuda_inspection_report.get("python_executable_sha256", "")
+            ),
+            "cuda_inspection_report_digest": stable_json_payload_digest(
+                cuda_inspection_report
+            ),
+            "official_command_execution_evidence_ready": True,
+            "failure_reasons": [],
+            "supports_paper_claim": False,
+        }
+    )
+    return bound
 
 
 def load_baseline_registry_item(root_path: Path, baseline_id: str) -> dict[str, Any]:
@@ -223,6 +356,125 @@ def run_command(
         "stdout": completed.stdout,
         "stderr": completed.stderr,
     }
+
+
+def inspect_cuda_with_python_executable(
+    python_executable: str | Path,
+    *,
+    require_cuda: bool,
+    cwd: Path,
+    timeout_seconds: int = 60,
+    command_runner: Any | None = None,
+) -> dict[str, Any]:
+    """用指定隔离 Python 子进程核验 torch 与 CUDA 并保存完整进程证据.
+
+    该函数属于通用父子进程隔离写法.父编排解释器只构造 argv 和解析 JSON,
+    不导入 torch; official-reference runner 因而只依赖其已验证科学解释器.
+    """
+
+    requested_python = Path(str(python_executable)).expanduser()
+    resolved_python = (
+        requested_python.absolute()
+        if requested_python.is_absolute()
+        else (cwd / requested_python).absolute()
+    ) if str(python_executable) else None
+    command = (
+        [
+            str(resolved_python),
+            "-c",
+            CUDA_INSPECTION_PROGRAM,
+            "1" if require_cuda else "0",
+        ]
+        if resolved_python is not None
+        else []
+    )
+    report: dict[str, Any] = {
+        "command": command,
+        "working_directory": str(cwd.expanduser().absolute()),
+        "return_code": None,
+        "stdout": "",
+        "stderr": "",
+        "python_executable": "" if resolved_python is None else str(resolved_python),
+        "python_executable_sha256": "",
+        "torch_available": False,
+        "cuda_available": False,
+        "device": "cpu",
+        "torch_version": "",
+        "torch_cuda_version": "",
+        "device_count": 0,
+        "gpu_name": "",
+        "decision": "fail",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+    }
+    if resolved_python is None or not resolved_python.is_file():
+        report["failure_reasons"] = ["isolated_python_executable_missing"]
+        return report
+    report["python_executable_sha256"] = _file_sha256(resolved_python)
+
+    runner = command_runner or run_command
+    try:
+        result = runner(
+            command,
+            cwd=cwd,
+            timeout_seconds=int(timeout_seconds),
+        )
+    except Exception as error:
+        report["stderr"] = f"{type(error).__name__}:{error}"
+        report["failure_reasons"] = ["cuda_inspection_command_failed"]
+        return report
+    report.update(
+        {
+            "return_code": int(result.get("return_code", -1)),
+            "stdout": str(result.get("stdout") or ""),
+            "stderr": str(result.get("stderr") or ""),
+        }
+    )
+    output_lines = [line for line in report["stdout"].splitlines() if line.strip()]
+    if not output_lines:
+        report["failure_reasons"] = ["cuda_inspection_output_missing"]
+        return report
+    try:
+        payload = json.loads(output_lines[-1])
+    except json.JSONDecodeError:
+        report["failure_reasons"] = ["cuda_inspection_output_invalid"]
+        return report
+    if not isinstance(payload, dict):
+        report["failure_reasons"] = ["cuda_inspection_output_invalid"]
+        return report
+    reported_python = Path(str(payload.get("python_executable", "")))
+    if (
+        not reported_python.is_absolute()
+        or reported_python.absolute() != resolved_python
+    ):
+        report["failure_reasons"] = ["cuda_inspection_python_identity_mismatch"]
+        return report
+    runtime_fields = (
+        "torch_available",
+        "cuda_available",
+        "device",
+        "torch_version",
+        "torch_cuda_version",
+        "device_count",
+        "gpu_name",
+    )
+    report.update({field_name: payload.get(field_name) for field_name in runtime_fields})
+    if report["return_code"] != 0:
+        report["failure_reasons"] = [
+            "cuda_required_but_unavailable"
+            if require_cuda and report.get("torch_available") is True
+            else "torch_runtime_unavailable"
+        ]
+        return report
+    if report.get("torch_available") is not True:
+        report["failure_reasons"] = ["torch_runtime_unavailable"]
+        return report
+    if require_cuda and report.get("cuda_available") is not True:
+        report["failure_reasons"] = ["cuda_required_but_unavailable"]
+        return report
+    report["decision"] = "pass"
+    report["failure_reasons"] = []
+    return report
 
 
 def run_command_with_progress_status(

@@ -26,8 +26,9 @@ from paper_experiments.baselines import (
 )
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from paper_experiments.runners.external_source_runtime import (
+    bind_successful_official_command_execution_evidence,
     build_registered_source_patch_evidence,
-    ensure_cuda_if_requested,
+    inspect_cuda_with_python_executable,
     load_baseline_registry_item,
     normalize_repository_url,
     prepare_registered_source_checkout,
@@ -746,6 +747,7 @@ def run_official_command_if_requested(
     paths: dict[str, Path],
     dependency_python_executable: str | Path,
     progress: object | None = None,
+    device_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """根据配置执行 Tree-Ring 官方命令, 并保存 stdout / stderr。"""
 
@@ -757,22 +759,28 @@ def run_official_command_if_requested(
             "stdout_path": "",
             "stderr_path": "",
         }
-    if config.require_cuda:
-        try:
-            ensure_cuda_if_requested(True)
-        except Exception as error:
-            paths["official_stdout"].write_text("", encoding="utf-8")
-            paths["official_stderr"].write_text(f"{type(error).__name__}:{error}", encoding="utf-8")
-            result = {
-                "official_command_requested": True,
-                "official_command": [],
-                "return_code": 97,
-                "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
-                "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
-                "error": f"{type(error).__name__}:{error}",
-            }
-            write_json(paths["official_command_result"], result)
-            return result
+    resolved_device_report = device_report or inspect_cuda_with_python_executable(
+        dependency_python_executable,
+        require_cuda=config.require_cuda,
+        cwd=root_path,
+    )
+    if config.require_cuda and resolved_device_report.get("decision") != "pass":
+        error_text = ",".join(
+            str(reason)
+            for reason in resolved_device_report.get("failure_reasons", ())
+        ) or "isolated_cuda_inspection_failed"
+        paths["official_stdout"].write_text("", encoding="utf-8")
+        paths["official_stderr"].write_text(error_text, encoding="utf-8")
+        result = {
+            "official_command_requested": True,
+            "official_command": [],
+            "return_code": 97,
+            "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
+            "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
+            "error": error_text,
+        }
+        write_json(paths["official_command_result"], result)
+        return result
     source_status = source_report(root_path, config)
     if not source_status["official_entrypoint_ready"]:
         paths["official_stdout"].write_text("", encoding="utf-8")
@@ -830,6 +838,14 @@ def run_official_command_if_requested(
         "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
         "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
     }
+    result = bind_successful_official_command_execution_evidence(
+        result,
+        baseline_id="tree_ring",
+        command=command,
+        working_directory=source_dir,
+        dependency_python_executable=dependency_python_executable,
+        cuda_inspection_report=resolved_device_report,
+    )
     write_json(paths["official_command_result"], result)
     return result
 
@@ -979,12 +995,12 @@ def write_tree_ring_official_reference_outputs(
         dependency_environment_report = prepare_tree_ring_dependency_environment(root_path, config, paths, progress=run_progress)
         update_progress(run_progress, profile="operation=prepare_tree_ring_dependency_environment")
         effective_config = config
-        device_report: dict[str, Any]
         emit_progress_status(run_progress, profile="operation=ensure_cuda status=running")
-        try:
-            device_report = ensure_cuda_if_requested(effective_config.require_cuda)
-        except Exception as error:
-            device_report = {"cuda_available": False, "device_error": f"{type(error).__name__}:{error}"}
+        device_report = inspect_cuda_with_python_executable(
+            str(dependency_environment_report.get("dependency_python_executable", "")),
+            require_cuda=effective_config.require_cuda,
+            cwd=root_path,
+        )
         update_progress(run_progress, profile="operation=ensure_cuda")
         source_status = ensure_tree_ring_source_available(root_path, effective_config, paths, progress=run_progress)
         source_identity_report = prepare_registered_source_checkout(
@@ -1069,6 +1085,7 @@ def write_tree_ring_official_reference_outputs(
                 paths,
                 dependency_environment_report["dependency_python_executable"],
                 progress=run_progress,
+                device_report=device_report,
             )
         update_progress(run_progress, profile="operation=tree_ring_official_command")
         emit_progress_status(run_progress, profile="operation=parse_tree_ring_metrics status=running")

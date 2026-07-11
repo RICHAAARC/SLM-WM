@@ -37,6 +37,9 @@ from paper_experiments.runners.external_baseline_method_faithful import (
     write_baseline_transfer_files,
 )
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
+from tests.helpers.scientific_execution_binding import (
+    write_test_scientific_execution_binding,
+)
 
 
 PACKAGE_TEST_CODE_VERSION = "b" * 40
@@ -406,6 +409,18 @@ def prepare_package_source(root: Path, baseline_id: str, *, run_decision: str = 
             "code_version": code_version,
             "transfer_ready": True,
         },
+    )
+    write_test_scientific_execution_binding(
+        repository_root=root,
+        artifact_dir=run_dir,
+        artifact_role="external_baseline_method_faithful",
+        paper_run_name="pilot_paper",
+        profile_id="sd35_method_runtime_gpu",
+        summary_file_name=f"{baseline_id}_summary.json",
+        manifest_file_name=f"{baseline_id}_manifest.local.json",
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+        execution_route="isolated_method_faithful_workflow",
+        baseline_id=baseline_id,
     )
 
 

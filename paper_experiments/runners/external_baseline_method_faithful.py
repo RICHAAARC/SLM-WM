@@ -46,6 +46,9 @@ from experiments.runtime.repository_environment import (
     file_digest,
     resolve_code_version,
 )
+from experiments.runtime.scientific_execution_binding import (
+    validate_scientific_execution_binding,
+)
 from external_baseline.primary.sd35_method_faithful_common import supported_formal_image_attack_names
 from paper_experiments.baselines.method_faithful_observation_collection import (
     canonical_prompt_protocol_digest,
@@ -440,7 +443,8 @@ def _build_command_plan_command(
     baseline_id = resolve_primary_baseline_id(config.primary_baseline_id)
     command = [
         sys.executable,
-        "scripts/build_external_baseline_command_plan.py",
+        "-m",
+        "paper_experiments.baselines.command_plan_builder",
         "--root",
         str(root_path),
         "--methods",
@@ -663,7 +667,8 @@ def build_and_run_primary_baseline_adapter(
 
     execution_command = [
         sys.executable,
-        "scripts/run_external_baseline_command_plan.py",
+        "-m",
+        "paper_experiments.baselines.command_plan_execution",
         "--plan",
         str(paths["command_plan"]),
         "--out",
@@ -684,7 +689,8 @@ def build_and_run_primary_baseline_adapter(
 
     validation_command = [
         sys.executable,
-        "scripts/validate_external_baseline_evidence.py",
+        "-m",
+        "paper_experiments.baselines.evidence_validation_cli",
         "--baseline-execution-manifest",
         str(paths["execution_manifest"]),
         "--require-pass",
@@ -940,7 +946,35 @@ def collect_package_entries(
     resolved_baseline_id = resolve_primary_baseline_id(baseline_id)
     run_dir = output_dir / "run_records" / resolved_baseline_id
     split_dir = output_dir / "split_observations"
-    entries: list[Path] = []
+    required_scientific_entries = (
+        run_dir / "scientific_execution" / "scientific_workflow_result_envelope.json",
+        run_dir / "isolated_scientific_execution_report.json",
+        run_dir / "isolated_dependency_environment_report.json",
+        run_dir / "scientific_command_dispatch_report.json",
+        run_dir / "scientific_execution_binding.json",
+    )
+    transient_source_report = (
+        run_dir
+        / "scientific_execution"
+        / "source_isolated_scientific_execution_report.json"
+    )
+    if transient_source_report.exists():
+        raise RuntimeError("method-faithful 隔离科学执行证据尚未完成本地绑定")
+    missing_scientific_entries = tuple(
+        path for path in required_scientific_entries if not path.is_file()
+    )
+    if missing_scientific_entries:
+        raise FileNotFoundError(
+            "method-faithful 打包缺少隔离科学执行证据: "
+            + ",".join(path.name for path in missing_scientific_entries)
+        )
+    validate_scientific_execution_binding(
+        run_dir / "scientific_execution_binding.json",
+        expected_artifact_role="external_baseline_method_faithful",
+        expected_paper_run_name=output_dir.name,
+        repository_root=root_path,
+    )
+    entries: list[Path] = list(required_scientific_entries)
     for path in sorted(run_dir.rglob("*")) if run_dir.exists() else ():
         if path.is_file() and path.resolve() != archive_path.resolve() and path.suffix.lower() != ".zip":
             entries.append(path)

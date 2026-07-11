@@ -30,7 +30,7 @@ from external_baseline.primary.tree_ring.adapter.method_faithful_sd35 import (
     build_observation as build_tree_ring_observation,
     load_sd3_pipeline as load_tree_ring_sd3_pipeline,
 )
-from scripts.build_external_baseline_command_plan import build_parser, build_plan
+from paper_experiments.baselines.command_plan_builder import build_parser, build_plan
 
 
 @pytest.mark.quick

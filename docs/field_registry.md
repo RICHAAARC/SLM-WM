@@ -379,6 +379,82 @@ Notebook 与 repository module 的跨边界数据
 | dependency_preparation_report_digest | provenance | none | true | false | false | 目标子解释器 dependency preparation 报告文件 SHA-256。 |
 | dependency_preparation_report | provenance | none | true | false | false | 正式隔离环境报告内嵌并严格复核的子解释器 preparation 记录。 |
 | formal_preparation_completed | governance | none | true | false | false | 目标完整锁安装、兼容性核验、完整 inspection 与解释器摘要复核是否全部完成。 |
+| dependency_environment_report_path | artifact | none | true | false | false | 科学子解释器继承且经过路径约束的正式隔离依赖环境报告绝对路径。 |
+| dependency_environment_report_digest | provenance | none | true | false | false | 父执行原语注入的正式隔离依赖环境报告 SHA-256。 |
+| dependency_environment_report_actual_digest | provenance | none | true | false | false | 科学子解释器实时复算的正式隔离依赖环境报告 SHA-256。 |
+| dependency_environment_report_valid | governance | none | true | false | false | 隔离科学执行原语是否已严格验证依赖环境报告及解释器身份。 |
+| dependency_environment_validation_errors | governance | none | true | false | false | 隔离依赖环境报告未通过执行前验证时的稳定错误列表。 |
+| python_executable_revalidated_before_child | governance | none | true | false | false | 启动科学子命令前是否再次确认解释器文件 SHA-256 未漂移。 |
+| python_executable_revalidated_after_child | governance | none | true | false | false | 科学子命令结束后是否再次确认解释器文件 SHA-256 未漂移。 |
+| dependency_environment_report_revalidated_before_child | governance | none | true | false | false | 启动科学子命令前是否再次确认隔离环境报告摘要未漂移。 |
+| dependency_environment_report_revalidated_after_child | governance | none | true | false | false | 科学子命令结束后是否再次确认隔离环境报告摘要未漂移。 |
+| formal_execution_lock_revalidated_before_child | governance | none | true | false | false | 启动科学子命令前是否实时复验同一正式执行锁。 |
+| formal_execution_lock_revalidated_after_child | governance | none | true | false | false | 科学子命令结束后是否实时复验同一正式执行锁。 |
+| child_argv_tail | runtime | none | true | false | false | 由调用方提供且不包含 Python executable 的科学子命令参数尾部。 |
+| execution_report_path | artifact | none | true | false | false | 隔离科学执行原语在 `outputs/` 下写出的 JSON 报告路径。 |
+| execution_completed | governance | none | true | false | false | 科学子命令是否以返回码0完成且全部执行后身份复核通过。 |
+| scientific_execution_report | provenance | none | true | false | false | 外层 session 返回的完整隔离科学执行报告。 |
+| scientific_execution_report_path | artifact | none | true | false | false | 产物内本地化隔离科学执行报告或其会话源报告路径。 |
+| scientific_execution_report_digest | provenance | none | true | false | false | 本地化隔离科学执行报告的文件 SHA-256。 |
+| source_dependency_environment_report_path | provenance | none | true | false | false | 科学子进程启动时使用的隔离依赖环境报告绝对源路径, 用于离线复验仓库根、工作目录与环境覆盖的一致性。 |
+| scientific_profile_id | protocol | none | true | false | false | 外层 session 实际选择的唯一科学依赖 profile。 |
+| scientific_profile_digest | provenance | none | true | false | false | 外层 session 绑定的科学 profile 稳定摘要。 |
+| scientific_direct_requirements_digest | provenance | none | true | false | false | CPU 闭合输入锁传播的科学 profile 直接依赖输入 SHA-256。 |
+| scientific_complete_hash_lock_digest | provenance | none | true | false | false | 外层 session 绑定的科学 profile 完整哈希锁摘要。 |
+| scientific_complete_hash_lock_dependency_count | metric | none | true | false | false | CPU 闭合输入锁传播的完整哈希锁直接与传递依赖总数。 |
+| scientific_python_executable_digest | provenance | none | true | false | false | CPU 闭合输入锁传播的实际科学解释器文件 SHA-256。 |
+| scientific_execution_binding_digest | provenance | none | true | false | false | CPU 闭合输入锁记录的产物级科学执行绑定文件 SHA-256; official-reference 包不使用该字段。 |
+| scientific_dependency_evidence_digest | provenance | none | true | false | false | CPU 闭合输入锁记录的包内隔离依赖环境证据文件 SHA-256。 |
+| scientific_command_sequence_digest | provenance | none | true | false | false | 主方法三个结果包共同传播的实际科学子命令序列 SHA-256, 不包含 stdout 与 stderr。 |
+| dependency_profile_count | metric | none | true | false | false | 完整论文结果包要求并复验的依赖 profile 总数。 |
+| dependency_profile_records | provenance | none | true | false | false | 完整结果包逐 profile 保存的直接依赖、完整锁、摘要与归档成员复验记录。 |
+| dependency_hash_lock_count | metric | none | true | false | false | 已通过完整哈希锁复验的依赖 profile 数量。 |
+| dependency_hash_lock_archive_entries_ready | governance | none | true | false | false | 六份完整哈希锁是否全部作为精确成员进入完整论文结果包。 |
+| dependency_profile_inputs_archive_entries_ready | governance | none | true | false | false | 依赖 registry 与六份直接依赖输入是否全部进入完整论文结果包。 |
+| dependency_hash_locks_ready | governance | none | true | false | false | 六个依赖 profile 的锁内容、摘要、计数、正式门禁与归档成员是否全部闭合。 |
+| dependency_hash_lock_failure_reason | governance | none | true | false | false | 完整依赖锁门禁未通过时的稳定阻断原因。 |
+| scientific_execution_bindings | provenance | none | true | false | false | 已闭合产物角色到独立科学执行绑定记录的映射。 |
+| binding_path | artifact | none | true | false | false | 单个科学执行绑定文件的路径。 |
+| binding_digest | provenance | none | true | false | false | 单个科学执行绑定文件的 SHA-256。 |
+| binding | provenance | none | true | false | false | 外层 session 返回的完整科学执行绑定对象。 |
+| artifact_role | protocol | none | true | false | false | 科学执行绑定或重新打包记录对应的正式产物职责。 |
+| scientific_command_dispatch_report_path | artifact | none | true | false | false | 产物内逐科学命令调度报告的路径。 |
+| scientific_command_dispatch_report_digest | provenance | none | true | false | false | 产物内逐科学命令调度报告的 SHA-256。 |
+| bound_summary_path | artifact | none | true | false | false | 科学执行绑定所约束的正式摘要路径。 |
+| bound_summary_digest | provenance | none | true | false | false | 科学执行绑定所约束正式摘要的 SHA-256。 |
+| bound_manifest_path | artifact | none | true | false | false | 科学执行绑定所约束的科学 runner manifest 路径. |
+| bound_manifest_scientific_digest | provenance | none | true | false | false | 排除唯一打包边界锁字段后, 科学 runner manifest 的规范 JSON SHA-256。 |
+| bound_manifest_digest_scope | protocol | none | true | false | false | 科学 manifest 摘要明确排除 `formal_execution_package_lock` 的固定范围标识。 |
+| commands | runtime | none | true | false | false | 科学命令调度报告按实际顺序保存的独立命令证据列表。 |
+| command_role | protocol | none | true | false | false | 单条科学子命令在当前 session 中的稳定职责。 |
+| artifact_records | provenance | none | true | false | false | 当前科学会话逐角色保存的 summary、manifest、执行锁与摘要记录。 |
+| artifact_validation_mode | protocol | none | true | false | false | 当前科学会话对已完成或续跑产物执行同会话复验的固定模式。 |
+| summary_sha256 | provenance | none | true | false | false | 科学会话确认的角色化 summary 文件 SHA-256。 |
+| manifest_sha256_at_session | provenance | none | true | false | false | 补充打包边界锁之前, 科学会话确认的 manifest 文件 SHA-256。 |
+| manifest_scientific_digest | provenance | none | true | false | false | 排除唯一打包边界锁后的角色化 manifest 规范 JSON SHA-256。 |
+| summary_protocol_decision | governance | none | true | false | false | 科学会话对角色化 summary 协议闭合状态的复验结论。 |
+| artifact_state | governance | none | true | false | false | 科学命令结束后主方法、质量和消融的完成或续跑状态。 |
+| runtime_progress_present | governance | none | true | false | false | 主方法续跑状态文件是否仍存在。 |
+| ablation_progress_present | governance | none | true | false | false | 正式消融续跑状态文件是否仍存在。 |
+| include_formal_ablation | protocol | none | true | false | false | 当前绑定重新打包是否包含已经闭合的正式消融。 |
+| packaging_deferred | protocol | none | true | false | false | 科学命令阶段是否把归档推迟到外层执行绑定写入并复验之后。 |
+| archives | artifact | none | true | false | false | 本次绑定重新打包产生的角色化结果包记录列表。 |
+| archive_sha256 | provenance | none | true | false | false | 本次重新生成结果包的文件 SHA-256。 |
+| bound_packaging_execution | provenance | none | true | false | false | 外层 session 复用科学解释器执行绑定打包的完整进程记录。 |
+| packaging_result | artifact | none | true | false | false | 绑定打包命令返回的角色化结果包对象。 |
+| isolated_scientific_context_required | governance | none | true | false | false | 当前依赖 profile 是否必须由隔离科学执行原语启动并注入环境上下文。 |
+| isolated_scientific_context_ready | governance | none | true | false | false | 当前科学进程的报告、profile、锁、执行锁与解释器身份是否全部一致。 |
+| isolated_scientific_context | runtime | none | true | false | false | `build_runtime_environment_report` 生成的隔离科学上下文严格核验记录。 |
+| required | governance | none | true | false | false | 单条隔离科学上下文是否必须通过后才能形成依赖环境 readiness。 |
+| ready | governance | none | true | false | false | 单条隔离科学上下文是否没有任何稳定 blocker。 |
+| blockers | governance | none | true | false | false | 隔离科学上下文检测出的稳定阻断原因列表。 |
+| reported_profile_digest | provenance | none | true | false | false | 注入隔离环境报告声明的依赖 profile 稳定摘要。 |
+| reported_complete_hash_lock_digest | provenance | none | true | false | false | 注入隔离环境报告声明的完整 wheel 哈希锁摘要。 |
+| reported_formal_execution_lock_digest | provenance | none | true | false | false | 注入隔离环境报告声明的正式执行锁摘要。 |
+| reported_python_executable | provenance | none | true | false | false | 注入隔离环境报告声明的科学 Python executable 路径。 |
+| reported_python_executable_sha256 | provenance | none | true | false | false | 注入隔离环境报告声明的科学 Python executable SHA-256。 |
+| current_python_executable | runtime | none | true | false | false | 科学子进程实时读取的当前 `sys.executable` 绝对路径。 |
+| current_python_executable_sha256 | provenance | none | true | false | false | 科学子进程实时计算的当前 `sys.executable` SHA-256。 |
 | pip_version | provenance | none | true | false | false | 候选完整锁解析实际使用且由 pip report 自报的 pip distribution 版本。 |
 | resolver_command | runtime | none | true | false | false | 候选完整锁物化使用的完整 pip resolver argv。 |
 | resolver_return_code | runtime | none | true | false | false | 候选完整锁 pip resolver 进程返回码。 |
@@ -398,7 +474,7 @@ Notebook 与 repository module 的跨边界数据
 | candidate_materialization | provenance | none | true | false | false | 候选锁物化器在父解释器或科学子解释器中的完整执行记录。 |
 | diagnostic_message | runtime | none | false | false | false | 候选锁资格化或审查包写入失败时保存的诊断信息。 |
 | python_version | runtime | none | false | false | false | Colab runtime 中的 Python 版本。 |
-| python_executable | runtime | none | false | false | false | Colab runtime 中执行 Notebook 的 Python 解释器路径。 |
+| python_executable | runtime | none | false | false | false | 当前进程或科学会话实际使用的 Python 解释器路径。 |
 | platform | runtime | none | false | false | false | Colab runtime 的平台摘要。 |
 | package_versions | runtime | none | false | false | false | Colab runtime 中关键 Python 包版本快照。 |
 | cuda_available | runtime | none | false | false | false | Colab runtime 是否可用 CUDA。 |
@@ -1979,3 +2055,9 @@ Notebook 与 repository module 的跨边界数据
 | required_source_provenance_fields | protocol | none | true | false | false | official-reference governed record 必须包含的源码和 Prompt 数据来源字段集合。 |
 | optim_utils_path | provenance | none | true | false | false | official-reference 数据加载与数学工具源码文件的受治理路径。 |
 | dataset_revision | protocol | none | true | false | false | official-reference 配置绑定的 Prompt 数据集40位不可变提交。 |
+| route_kind | runtime | none | true | false | false | GPU 服务器公开工作流进入科学会话、共享隔离工作流或官方参考编排器的稳定路由类别。 |
+| shared_isolated_workflow_name | provenance | none | true | false | false | GPU 服务器路由调用的共享隔离科学工作流名称; 非共享路由为 null。 |
+| official_reference_runner_name | provenance | none | true | false | false | GPU 服务器路由调用的官方参考编排器名称; 非官方参考路由为 null。 |
+| workflow_summary | runtime | none | true | false | false | GPU 服务器内层隔离工作流返回的原始受治理摘要。 |
+| archive_record | provenance | none | true | false | false | GPU 服务器共享或官方参考路由生成的结果包记录; 主方法会话为 null。 |
+| orchestrator_dependency_environment | provenance | none | true | false | false | GPU 服务器 CPU 父解释器绑定的 workflow_orchestrator profile、完整锁和环境 inspection 证据。 |

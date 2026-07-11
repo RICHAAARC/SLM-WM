@@ -10,9 +10,6 @@ import os
 from pathlib import Path
 from typing import Any, Iterable
 
-from PIL import Image
-
-from experiments.runtime.image_metrics import compute_image_quality_metrics
 from experiments.runtime.model_sources import get_model_source, require_registered_model_reference
 from main.core.digest import build_stable_digest
 
@@ -337,6 +334,11 @@ def build_t2smark_strict_pair_quality_rows(
         metrics: dict[str, Any]
         status: str
         if ready:
+            # 图像与 tensor 依赖仅属于科学质量计算, 归档父进程导入本模块时不得加载.
+            from PIL import Image
+
+            from experiments.runtime.image_metrics import compute_image_quality_metrics
+
             with Image.open(clean_path) as clean_image, Image.open(watermarked_path) as watermarked_image:
                 metrics = compute_image_quality_metrics(clean_image, watermarked_image)
                 perceptual_metrics = compute_pair_perceptual_metrics(

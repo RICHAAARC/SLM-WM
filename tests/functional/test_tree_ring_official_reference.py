@@ -41,6 +41,7 @@ from paper_experiments.runners.tree_ring_official_reference import (
 )
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
+    ClosurePackageSelectionError,
     inspect_closure_package,
 )
 from paper_experiments.runners.model_snapshot_runtime import DIFFUSERS_PIPELINE_ALLOW_PATTERNS
@@ -829,13 +830,13 @@ def test_tree_ring_official_reference_package_embeds_archive_self_description(
         for item in CLOSURE_PACKAGE_FAMILY_SPECS
         if item.package_family == "official_reference_tree_ring"
     )
-    candidate = inspect_closure_package(
-        archive_path,
-        spec=spec,
-        paper_run_name="pilot_paper",
-        target_fpr=0.01,
-    )
-    assert candidate.package_family == "official_reference_tree_ring"
+    with pytest.raises(ClosurePackageSelectionError, match="缺少必要成员"):
+        inspect_closure_package(
+            archive_path,
+            spec=spec,
+            paper_run_name="pilot_paper",
+            target_fpr=0.01,
+        )
 
 
 @pytest.mark.quick

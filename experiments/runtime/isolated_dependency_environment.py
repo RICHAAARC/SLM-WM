@@ -14,7 +14,7 @@ import hashlib
 import importlib.metadata as importlib_metadata
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import shutil
 import subprocess
 import sys
@@ -125,6 +125,7 @@ def _execute_command(
     return {
         "operation": operation,
         "argv": normalized_argv,
+        "working_directory": str(repository_root.resolve()),
         "environment_overrides": dict(sorted(environment_overrides.items())),
         **result,
     }
@@ -150,7 +151,7 @@ def _write_report(path: Path, report: dict[str, Any]) -> None:
     """把报告持久化到受治理 outputs 路径."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(_stable_json_text(report), encoding="utf-8")
+    path.write_bytes(_stable_json_text(report).encode("utf-8"))
 
 
 def _profile_output_dir(repository_root: Path, profile_id: str) -> Path:
@@ -319,6 +320,7 @@ def _provision_report_skeleton(
         "target_complete_hash_lock_ready": profile.formal_ready,
         "environment_root": str(environment_root),
         "managed_python_root": str(managed_python_root),
+        "working_directory": str(repository_root.resolve()),
         "isolated_environment_path": str(environment_root / profile.profile_name),
         "uv_distribution_version": None,
         "uv_distribution_record_path": None,
@@ -549,6 +551,7 @@ def _formal_report_skeleton(
         "direct_requirements_digest": profile.direct_requirements_digest,
         "complete_hash_lock_digest": profile.complete_hash_lock_digest,
         "complete_hash_lock_dependency_count": profile.complete_hash_lock_dependency_count,
+        "working_directory": str(repository_root.resolve()),
         "provision_report_path": None,
         "provision_report_digest": None,
         "provision_report": None,
@@ -582,69 +585,465 @@ def _formal_report_skeleton(
     return report, report_path
 
 
-def _validate_dependency_preparation_report(
+def _stable_json_digest(payload: Any) -> str:
+    """计算与正式 JSON 报告文件一致的稳定 SHA-256."""
+
+    return hashlib.sha256(_stable_json_text(payload).encode("utf-8")).hexdigest()
+
+
+def _normalize_absolute_path_text(value: Any) -> str:
+    """规范化 POSIX 或 Windows 绝对路径, 供跨主机离线比较."""
+
+    text = str(value or "").strip()
+    windows_path = PureWindowsPath(text)
+    if windows_path.is_absolute() and ".." not in windows_path.parts:
+        return windows_path.as_posix().rstrip("/").casefold()
+    posix_path = PurePosixPath(text)
+    if posix_path.is_absolute() and ".." not in posix_path.parts:
+        return posix_path.as_posix().rstrip("/")
+    raise ValueError("依赖环境命令路径必须是无父目录跳转的绝对路径")
+
+
+def _repository_lock_path(
+    working_directory: Any,
+    complete_hash_lock_path: Any,
+) -> str:
+    """把仓库相对完整锁路径绑定到命令工作目录."""
+
+    root = _normalize_absolute_path_text(working_directory)
+    relative = PurePosixPath(str(complete_hash_lock_path or ""))
+    if (
+        relative.is_absolute()
+        or not relative.parts
+        or ".." in relative.parts
+        or relative.as_posix() != str(complete_hash_lock_path)
+    ):
+        raise ValueError("完整哈希锁必须使用仓库内 POSIX 相对路径")
+    return root + "/" + relative.as_posix()
+
+
+def _command_record_matches(
+    record: Any,
+    *,
+    expected_operation: str,
+    expected_argv: Sequence[str],
+    expected_working_directory: str,
+    expected_environment_overrides: Mapping[str, str],
+    path_argument_indices: Sequence[int],
+) -> bool:
+    """核验一条 provision 命令的 operation,argv,目录和环境."""
+
+    if not isinstance(record, Mapping):
+        return False
+    argv = record.get("argv")
+    if not isinstance(argv, list) or len(argv) != len(expected_argv):
+        return False
+    path_indices = frozenset(path_argument_indices)
+    for index, expected_token in enumerate(expected_argv):
+        observed_token = argv[index]
+        if index in path_indices:
+            try:
+                if _normalize_absolute_path_text(observed_token) != _normalize_absolute_path_text(
+                    expected_token
+                ):
+                    return False
+            except ValueError:
+                return False
+        elif observed_token != expected_token:
+            return False
+    try:
+        working_directory_matches = (
+            _normalize_absolute_path_text(record.get("working_directory"))
+            == _normalize_absolute_path_text(expected_working_directory)
+        )
+    except ValueError:
+        return False
+    return all(
+        (
+            record.get("operation") == expected_operation,
+            working_directory_matches,
+            record.get("environment_overrides")
+            == dict(sorted(expected_environment_overrides.items())),
+            record.get("return_code") == 0,
+        )
+    )
+
+
+def validate_formal_dependency_environment_report(
     report: Any,
     *,
-    profile: DependencyProfile,
-    python_executable: Path,
-    formal_execution_lock: dict[str, Any],
+    expected_profile_id: str,
+    expected_profile_digest: str,
+    expected_direct_requirements_digest: str,
+    expected_complete_hash_lock_path: str,
+    expected_complete_hash_lock_digest: str,
+    expected_complete_hash_lock_dependency_count: int,
+    expected_pytorch_index_url: str | None,
+    expected_python_executable_path: str | Path,
+    expected_python_executable_digest: str,
+    expected_formal_execution_lock: Mapping[str, Any],
+    expected_working_directory: str | Path,
 ) -> list[str]:
-    """严格验证子解释器 dependency preparation 的身份与通过结论."""
+    """集中复验正式依赖环境报告的身份,数量和全部真实 argv."""
 
-    if not isinstance(report, dict):
-        return ["dependency_preparation_report_not_object"]
-    expected_values = {
-        "report_schema": DEPENDENCY_PREPARATION_REPORT_SCHEMA,
-        "schema_version": DEPENDENCY_PREPARATION_REPORT_SCHEMA_VERSION,
-        "profile_id": profile.profile_name,
-        "python_executable": str(python_executable),
-        "profile_digest": profile.profile_digest,
-        "direct_requirements_digest": profile.direct_requirements_digest,
-        "complete_hash_lock_digest": profile.complete_hash_lock_digest,
-        "complete_hash_lock_dependency_count": profile.complete_hash_lock_dependency_count,
+    if not isinstance(report, Mapping):
+        return ["formal_dependency_environment_report_not_object"]
+    errors: list[str] = []
+    expected_count = expected_complete_hash_lock_dependency_count
+    if isinstance(expected_count, bool) or not isinstance(expected_count, int) or expected_count <= 0:
+        return ["complete_hash_lock_dependency_count_invalid"]
+    try:
+        normalized_working_directory = _normalize_absolute_path_text(
+            expected_working_directory
+        )
+        normalized_python_executable = _normalize_absolute_path_text(
+            expected_python_executable_path
+        )
+        normalized_lock_path = _repository_lock_path(
+            expected_working_directory,
+            expected_complete_hash_lock_path,
+        )
+    except ValueError:
+        return ["formal_dependency_environment_expected_path_invalid"]
+
+    formal_lock = dict(expected_formal_execution_lock)
+    top_expected = {
+        "report_schema": FORMAL_REPORT_SCHEMA,
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "operation_kind": "formal_dependency_environment_preparation",
+        "profile_id": expected_profile_id,
+        "profile_digest": expected_profile_digest,
+        "direct_requirements_digest": expected_direct_requirements_digest,
+        "complete_hash_lock_digest": expected_complete_hash_lock_digest,
+        "complete_hash_lock_dependency_count": expected_count,
+        "python_executable_sha256": expected_python_executable_digest,
+        "python_executable_sha256_after_preparation": expected_python_executable_digest,
+        "formal_execution_lock": formal_lock,
+        "formal_execution_commit": formal_lock.get("formal_execution_commit"),
+        "formal_execution_lock_digest": formal_lock.get(
+            "formal_execution_lock_digest"
+        ),
+        "formal_execution_lock_ready": True,
+        "provisioned": True,
+        "formal_preparation_completed": True,
         "formal_ready": True,
         "decision": "pass",
         "failure_reasons": [],
         "supports_paper_claim": False,
-        "formal_execution_lock": formal_execution_lock,
-        "formal_execution_commit": formal_execution_lock["formal_execution_commit"],
-        "formal_execution_lock_digest": formal_execution_lock[
-            "formal_execution_lock_digest"
-        ],
-        "formal_execution_lock_ready": True,
     }
-    errors = [
-        f"dependency_preparation_{field_name}_mismatch"
-        for field_name, expected_value in expected_values.items()
+    errors.extend(
+        "formal_dependency_environment_{0}_mismatch".format(field_name)
+        for field_name, expected_value in top_expected.items()
         if report.get(field_name) != expected_value
-    ]
-    repository_commit_state = report.get("repository_commit_state")
-    if not isinstance(repository_commit_state, dict) or repository_commit_state.get("all_committed") is not True:
+    )
+    try:
+        if (
+            _normalize_absolute_path_text(report.get("working_directory"))
+            != normalized_working_directory
+        ):
+            errors.append("formal_dependency_environment_working_directory_mismatch")
+        if (
+            _normalize_absolute_path_text(report.get("python_executable_path"))
+            != normalized_python_executable
+        ):
+            errors.append("formal_dependency_environment_python_path_mismatch")
+    except ValueError:
+        errors.append("formal_dependency_environment_path_invalid")
+
+    dependency_preparation = report.get("dependency_preparation_report")
+    provision_report = report.get("provision_report")
+    if not isinstance(dependency_preparation, Mapping):
+        errors.append("dependency_preparation_report_not_object")
+        return errors
+    if not isinstance(provision_report, Mapping):
+        errors.append("isolated_python_provision_report_not_object")
+        return errors
+    if report.get("dependency_preparation_report_digest") != _stable_json_digest(
+        dependency_preparation
+    ):
+        errors.append("dependency_preparation_report_digest_mismatch")
+    if report.get("provision_report_digest") != _stable_json_digest(provision_report):
+        errors.append("isolated_python_provision_report_digest_mismatch")
+
+    dependency_expected = {
+        "report_schema": DEPENDENCY_PREPARATION_REPORT_SCHEMA,
+        "schema_version": DEPENDENCY_PREPARATION_REPORT_SCHEMA_VERSION,
+        "profile_id": expected_profile_id,
+        "profile_digest": expected_profile_digest,
+        "direct_requirements_digest": expected_direct_requirements_digest,
+        "complete_hash_lock_path": expected_complete_hash_lock_path,
+        "complete_hash_lock_digest": expected_complete_hash_lock_digest,
+        "complete_hash_lock_dependency_count": expected_count,
+        "pytorch_index_url": expected_pytorch_index_url,
+        "formal_ready": True,
+        "readiness_blockers": [],
+        "formal_execution_lock": formal_lock,
+        "formal_execution_commit": formal_lock.get("formal_execution_commit"),
+        "formal_execution_lock_digest": formal_lock.get(
+            "formal_execution_lock_digest"
+        ),
+        "formal_execution_lock_ready": True,
+        "decision": "pass",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+    }
+    errors.extend(
+        "dependency_preparation_{0}_mismatch".format(field_name)
+        for field_name, expected_value in dependency_expected.items()
+        if dependency_preparation.get(field_name) != expected_value
+    )
+    try:
+        if (
+            _normalize_absolute_path_text(
+                dependency_preparation.get("python_executable")
+            )
+            != normalized_python_executable
+        ):
+            errors.append("dependency_preparation_python_executable_mismatch")
+        if (
+            _normalize_absolute_path_text(
+                dependency_preparation.get("working_directory")
+            )
+            != normalized_working_directory
+        ):
+            errors.append("dependency_preparation_working_directory_mismatch")
+    except ValueError:
+        errors.append("dependency_preparation_path_invalid")
+    repository_commit_state = dependency_preparation.get("repository_commit_state")
+    if not isinstance(repository_commit_state, Mapping) or repository_commit_state.get(
+        "all_committed"
+    ) is not True:
         errors.append("dependency_preparation_inputs_not_committed")
-    installation = report.get("installation")
-    if (
-        not isinstance(installation, dict)
-        or installation.get("attempted") is not True
-        or installation.get("return_code") != 0
-    ):
-        errors.append("dependency_preparation_installation_invalid")
-    pip_check = report.get("pip_check")
-    if (
-        not isinstance(pip_check, dict)
-        or pip_check.get("compatibility_check_required") is not True
-        or pip_check.get("attempted") is not True
-        or pip_check.get("return_code") != 0
-        or pip_check.get("decision") != "pass"
-    ):
-        errors.append("dependency_preparation_pip_check_invalid")
-    runtime_comparison = report.get("runtime_comparison")
-    if (
-        not isinstance(runtime_comparison, dict)
-        or runtime_comparison.get("decision") != "pass"
-        or runtime_comparison.get("profile_digest") != profile.profile_digest
-        or runtime_comparison.get("complete_hash_lock_digest") != profile.complete_hash_lock_digest
+
+    install_command = [
+        str(expected_python_executable_path),
+        "-m",
+        "pip",
+        "install",
+        "--require-hashes",
+        "--only-binary=:all:",
+    ]
+    if expected_pytorch_index_url is not None:
+        install_command.extend(
+            ["--extra-index-url", expected_pytorch_index_url]
+        )
+    install_command.extend(["-r", normalized_lock_path])
+    installation = dependency_preparation.get("installation")
+    installation_ready = isinstance(installation, Mapping)
+    if installation_ready:
+        observed_install_command = installation.get("command")
+        installation_ready = (
+            installation.get("attempted") is True
+            and installation.get("return_code") == 0
+            and isinstance(observed_install_command, list)
+            and len(observed_install_command) == len(install_command)
+        )
+        if installation_ready:
+            for index, expected_token in enumerate(install_command):
+                observed_token = observed_install_command[index]
+                if index in {0, len(install_command) - 1}:
+                    try:
+                        if _normalize_absolute_path_text(
+                            observed_token
+                        ) != _normalize_absolute_path_text(expected_token):
+                            installation_ready = False
+                    except ValueError:
+                        installation_ready = False
+                elif observed_token != expected_token:
+                    installation_ready = False
+        try:
+            installation_ready = installation_ready and (
+                _normalize_absolute_path_text(
+                    installation.get("working_directory")
+                )
+                == normalized_working_directory
+            )
+        except ValueError:
+            installation_ready = False
+    if not installation_ready:
+        errors.append("dependency_preparation_installation_command_invalid")
+
+    pip_check = dependency_preparation.get("pip_check")
+    pip_check_ready = isinstance(pip_check, Mapping)
+    if pip_check_ready:
+        observed_pip_check_command = pip_check.get("command")
+        pip_check_ready = all(
+            (
+                pip_check.get("compatibility_check_required") is True,
+                pip_check.get("attempted") is True,
+                pip_check.get("return_code") == 0,
+                pip_check.get("decision") == "pass",
+                isinstance(observed_pip_check_command, list),
+                len(observed_pip_check_command) == 4
+                if isinstance(observed_pip_check_command, list)
+                else False,
+            )
+        )
+        if pip_check_ready:
+            try:
+                pip_check_ready = (
+                    _normalize_absolute_path_text(observed_pip_check_command[0])
+                    == normalized_python_executable
+                    and observed_pip_check_command[1:] == ["-m", "pip", "check"]
+                    and _normalize_absolute_path_text(
+                        pip_check.get("working_directory")
+                    )
+                    == normalized_working_directory
+                )
+            except ValueError:
+                pip_check_ready = False
+    if not pip_check_ready:
+        errors.append("dependency_preparation_pip_check_command_invalid")
+    runtime_comparison = dependency_preparation.get("runtime_comparison")
+    if not isinstance(runtime_comparison, Mapping) or not all(
+        (
+            runtime_comparison.get("decision") == "pass",
+            runtime_comparison.get("profile_digest") == expected_profile_digest,
+            runtime_comparison.get("complete_hash_lock_digest")
+            == expected_complete_hash_lock_digest,
+        )
     ):
         errors.append("dependency_preparation_runtime_comparison_invalid")
+
+    provision_expected = {
+        "report_schema": PROVISION_REPORT_SCHEMA,
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "operation_kind": "isolated_python_provision",
+        "profile_id": expected_profile_id,
+        "profile_digest": expected_profile_digest,
+        "target_complete_hash_lock_ready": True,
+        "python_executable_sha256": expected_python_executable_digest,
+        "formal_execution_lock": formal_lock,
+        "formal_execution_commit": formal_lock.get("formal_execution_commit"),
+        "formal_execution_lock_digest": formal_lock.get(
+            "formal_execution_lock_digest"
+        ),
+        "formal_execution_lock_ready": True,
+        "provisioned": True,
+        "formal_ready": False,
+        "decision": "provisioned",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+    }
+    errors.extend(
+        "isolated_python_provision_{0}_mismatch".format(field_name)
+        for field_name, expected_value in provision_expected.items()
+        if provision_report.get(field_name) != expected_value
+    )
+    try:
+        if (
+            _normalize_absolute_path_text(provision_report.get("working_directory"))
+            != normalized_working_directory
+            or _normalize_absolute_path_text(
+                provision_report.get("python_executable_path")
+            )
+            != normalized_python_executable
+        ):
+            errors.append("isolated_python_provision_path_mismatch")
+    except ValueError:
+        errors.append("isolated_python_provision_path_invalid")
+
+    uv_executable = str(provision_report.get("uv_executable_path") or "")
+    python_version = str(provision_report.get("python_version") or "")
+    managed_python_root = str(provision_report.get("managed_python_root") or "")
+    isolated_environment_path = str(
+        provision_report.get("isolated_environment_path") or ""
+    )
+    command_environment = {UV_PYTHON_INSTALL_DIR_ENV_NAME: managed_python_root}
+    provision_plan = (
+        ("uv_version", [uv_executable, "--version"], (0,)),
+        (
+            "uv_python_install",
+            [
+                uv_executable,
+                "python",
+                "install",
+                python_version,
+                "--install-dir",
+                managed_python_root,
+            ],
+            (0, 5),
+        ),
+        (
+            "uv_venv",
+            [
+                uv_executable,
+                "venv",
+                "--clear",
+                "--python",
+                python_version,
+                "--managed-python",
+                isolated_environment_path,
+            ],
+            (0, 6),
+        ),
+        (
+            "python_ensurepip",
+            [str(expected_python_executable_path), "-m", "ensurepip"],
+            (0,),
+        ),
+        (
+            "python_patch_inspection",
+            [
+                str(expected_python_executable_path),
+                "-c",
+                "import platform; print(platform.python_version())",
+            ],
+            (0,),
+        ),
+    )
+    command_results = provision_report.get("command_results")
+    uv_commands = provision_report.get("uv_commands")
+    provision_commands_ready = (
+        isinstance(command_results, list)
+        and len(command_results) == len(provision_plan)
+        and isinstance(uv_commands, list)
+        and uv_commands == command_results[:3]
+    )
+    if provision_commands_ready:
+        provision_commands_ready = all(
+            _command_record_matches(
+                command_results[index],
+                expected_operation=operation,
+                expected_argv=argv,
+                expected_working_directory=str(expected_working_directory),
+                expected_environment_overrides=command_environment,
+                path_argument_indices=path_indices,
+            )
+            for index, (operation, argv, path_indices) in enumerate(provision_plan)
+        )
+    if not provision_commands_ready:
+        errors.append("isolated_python_provision_command_plan_invalid")
+
+    expected_prepare_argv = [
+        str(expected_python_executable_path),
+        "-m",
+        "experiments.runtime.dependency_preparation",
+        "--profile",
+        expected_profile_id,
+    ]
+    outer_command = report.get("dependency_preparation_command")
+    outer_command_ready = _command_record_matches(
+        outer_command,
+        expected_operation="dependency_profile_preparation",
+        expected_argv=expected_prepare_argv,
+        expected_working_directory=str(expected_working_directory),
+        expected_environment_overrides=command_environment,
+        path_argument_indices=(0,),
+    )
+    if not outer_command_ready:
+        errors.append("dependency_preparation_outer_command_invalid")
+    expected_top_command_results = (
+        [*command_results, outer_command]
+        if isinstance(command_results, list)
+        else None
+    )
+    if (
+        report.get("uv_commands") != uv_commands
+        or not isinstance(report.get("command_results"), list)
+        or report.get("command_results") != expected_top_command_results
+    ):
+        errors.append("formal_dependency_environment_command_results_invalid")
     return errors
 
 
@@ -768,18 +1167,6 @@ def prepare_isolated_dependency_environment(
         return _fail_report(report, report_path, "dependency_preparation_report_invalid")
     report["dependency_preparation_report"] = dependency_report
     report["dependency_preparation_report_digest"] = _file_sha256(dependency_report_path)
-    validation_errors = _validate_dependency_preparation_report(
-        dependency_report,
-        profile=ready_profile,
-        python_executable=python_executable,
-        formal_execution_lock=formal_execution_lock,
-    )
-    if validation_errors:
-        report["failure_reasons"] = validation_errors
-        report["decision"] = "fail"
-        _write_report(report_path, report)
-        return report, report_path
-
     python_digest_after = _file_sha256(python_executable)
     report["python_executable_sha256_after_preparation"] = python_digest_after
     if python_digest_after != report["python_executable_sha256"]:
@@ -788,6 +1175,29 @@ def prepare_isolated_dependency_environment(
     report["formal_ready"] = True
     report["decision"] = "pass"
     report["failure_reasons"] = []
+    validation_errors = validate_formal_dependency_environment_report(
+        report,
+        expected_profile_id=ready_profile.profile_name,
+        expected_profile_digest=ready_profile.profile_digest,
+        expected_direct_requirements_digest=ready_profile.direct_requirements_digest,
+        expected_complete_hash_lock_path=ready_profile.complete_hash_lock_path,
+        expected_complete_hash_lock_digest=str(
+            ready_profile.complete_hash_lock_digest
+        ),
+        expected_complete_hash_lock_dependency_count=(
+            ready_profile.complete_hash_lock_dependency_count
+        ),
+        expected_pytorch_index_url=ready_profile.pytorch_index_url,
+        expected_python_executable_path=python_executable,
+        expected_python_executable_digest=python_digest_after,
+        expected_formal_execution_lock=formal_execution_lock,
+        expected_working_directory=root,
+    )
+    if validation_errors:
+        report["formal_preparation_completed"] = False
+        report["formal_ready"] = False
+        report["decision"] = "fail"
+        report["failure_reasons"] = validation_errors
     _write_report(report_path, report)
     return report, report_path
 

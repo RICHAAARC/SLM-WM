@@ -20,6 +20,14 @@ from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from experiments.protocol.attacks import default_attack_configs
 from experiments.runtime import repository_environment
+from experiments.runtime.scientific_execution_binding import (
+    validate_scientific_execution_binding,
+)
+from experiments.runtime.package_input_manifest import (
+    collect_exact_package_entries,
+    validate_exact_package_archive,
+    write_exact_package_input_manifest,
+)
 from experiments.runtime.diffusion.regeneration_attacks import default_diffusion_attack_specs
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -38,6 +46,9 @@ from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
 from main.core.digest import build_stable_digest
+
+
+PACKAGE_INPUT_MANIFEST_FILE_NAME = "image_only_dataset_package_input_manifest.json"
 
 
 @dataclass(frozen=True)
@@ -698,7 +709,7 @@ def package_image_only_dataset_runtime(
         raise FileNotFoundError("仅图像数据集运行输出不完整, 不得打包")
     summary = json.loads((source_dir / "dataset_runtime_summary.json").read_text(encoding="utf-8-sig"))
     manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
-    repository_environment.validate_formal_execution_lock_pair(
+    formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
         manifest.get("formal_execution_run_lock"),
         formal_execution_package_lock,
         manifest.get("code_version"),
@@ -727,19 +738,46 @@ def package_image_only_dataset_runtime(
         json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
     )
+    validate_scientific_execution_binding(
+        source_dir / "scientific_execution_binding.json",
+        expected_artifact_role="image_only_dataset_runtime",
+        expected_paper_run_name=resolved_paper_run_name,
+        repository_root=root_path,
+    )
     code_version = formal_execution_package_lock["formal_execution_commit"]
     archive_path = source_dir / (
         f"image_only_dataset_runtime_package_{utc_archive_token()}_{code_version[:7]}.zip"
     )
-    entries = tuple(
-        path
-        for path in sorted(source_dir.rglob("*"))
-        if path.is_file() and path.suffix.lower() != ".zip"
+    package_input_manifest_path = source_dir / PACKAGE_INPUT_MANIFEST_FILE_NAME
+    package_input_manifest_path.unlink(missing_ok=True)
+    entries = collect_exact_package_entries(
+        repository_root=root_path,
+        source_dir=source_dir,
+        artifact_manifest=manifest,
+        scientific_binding_path=source_dir / "scientific_execution_binding.json",
     )
+    if not set(required_paths).issubset(entries):
+        raise RuntimeError("artifact manifest 未精确声明全部仅图像运行必要产物")
+    write_exact_package_input_manifest(
+        package_input_manifest_path,
+        repository_root=root_path,
+        package_family="image_only_dataset_runtime",
+        paper_run_name=resolved_paper_run_name,
+        target_fpr=paper_run.target_fpr,
+        entries=entries,
+        formal_execution_run_lock=formal_execution_run_lock,
+        formal_execution_package_lock=formal_execution_package_lock,
+    )
+    entries = (*entries, package_input_manifest_path)
     with ZipFile(archive_path, "w", compression=ZIP_STORED, allowZip64=True) as archive:
         for path in entries:
             archive.write(path, path.relative_to(root_path).as_posix())
     try:
+        validate_exact_package_archive(
+            archive_path,
+            repository_root=root_path,
+            package_input_manifest_path=package_input_manifest_path,
+        )
         final_package_lock = (
             repository_environment.require_published_formal_execution_lock(root_path)
         )

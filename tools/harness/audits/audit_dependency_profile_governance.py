@@ -26,6 +26,8 @@ REQUIRED_PATHS = (
     "experiments/runtime/dependency_profiles.py",
     "experiments/runtime/dependency_preparation.py",
     "experiments/runtime/isolated_dependency_environment.py",
+    "experiments/runtime/isolated_scientific_execution.py",
+    "experiments/runtime/repository_environment.py",
     "scripts/prepare_dependency_profile.py",
     "scripts/prepare_isolated_dependency_environment.py",
     "scripts/materialize_dependency_lock_candidate.py",
@@ -112,6 +114,30 @@ REQUIRED_FIELD_NAMES = frozenset(
         "dependency_preparation_report_digest",
         "dependency_preparation_report",
         "formal_preparation_completed",
+        "dependency_environment_report_path",
+        "dependency_environment_report_digest",
+        "dependency_environment_report_actual_digest",
+        "dependency_environment_report_valid",
+        "dependency_environment_validation_errors",
+        "python_executable_revalidated_before_child",
+        "python_executable_revalidated_after_child",
+        "dependency_environment_report_revalidated_before_child",
+        "dependency_environment_report_revalidated_after_child",
+        "formal_execution_lock_revalidated_before_child",
+        "formal_execution_lock_revalidated_after_child",
+        "child_argv_tail",
+        "execution_report_path",
+        "execution_completed",
+        "isolated_scientific_context_required",
+        "isolated_scientific_context_ready",
+        "isolated_scientific_context",
+        "reported_profile_digest",
+        "reported_complete_hash_lock_digest",
+        "reported_formal_execution_lock_digest",
+        "reported_python_executable",
+        "reported_python_executable_sha256",
+        "current_python_executable",
+        "current_python_executable_sha256",
         "pip_resolver_report_path",
         "candidate_lock_path",
         "candidate_lock_logical_digest",
@@ -150,6 +176,18 @@ REQUIRED_ISOLATED_PREPARATION_TOKENS = (
     '"python_executable_sha256_after_preparation"',
     '"experiments.runtime.dependency_preparation"',
     "Path(tempfile.gettempdir())",
+)
+REQUIRED_ISOLATED_SCIENTIFIC_CONTEXT_TOKENS = (
+    "ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_PATH_ENVIRONMENT_KEY",
+    "ISOLATED_DEPENDENCY_ENVIRONMENT_REPORT_DIGEST_ENVIRONMENT_KEY",
+    "SCIENTIFIC_DEPENDENCY_PROFILE_IDS",
+    "_inspect_isolated_scientific_context",
+    '"isolated_scientific_context_required"',
+    '"isolated_scientific_context_ready"',
+    '"isolated_context_environment_report_path_missing"',
+    '"isolated_context_complete_hash_lock_mismatch"',
+    '"isolated_context_formal_execution_lock_mismatch"',
+    '"isolated_context_python_executable_digest_mismatch"',
 )
 THIN_SCRIPT_IMPORTS = {
     "scripts/prepare_dependency_profile.py": (
@@ -452,7 +490,12 @@ def run_audit(root: str | Path) -> dict[str, Any]:
         try:
             registered_fields = _field_names(field_registry_path)
         except UnicodeDecodeError:
-            violations.append({"path": "docs/field_registry.md", "reason": "field_registry_not_utf8"})
+            violations.append(
+                {
+                    "path": "docs/field_registry.md",
+                    "reason": "field_registry_not_utf8",
+                }
+            )
         else:
             missing_fields = sorted(REQUIRED_FIELD_NAMES - registered_fields)
             forbidden_fields = sorted(FORBIDDEN_FIELD_NAMES & registered_fields)
@@ -553,6 +596,23 @@ def run_audit(root: str | Path) -> dict[str, Any]:
                     {
                         "path": "scripts/materialize_dependency_lock_candidate.py",
                         "reason": "dependency_lock_materializer_contract_missing",
+                        "token": token,
+                    }
+                )
+
+    repository_environment_path = (
+        root_path / "experiments/runtime/repository_environment.py"
+    )
+    if repository_environment_path.is_file():
+        repository_environment_text = repository_environment_path.read_text(
+            encoding="utf-8-sig"
+        )
+        for token in REQUIRED_ISOLATED_SCIENTIFIC_CONTEXT_TOKENS:
+            if token not in repository_environment_text:
+                violations.append(
+                    {
+                        "path": "experiments/runtime/repository_environment.py",
+                        "reason": "isolated_scientific_context_contract_missing",
                         "token": token,
                     }
                 )

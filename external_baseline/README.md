@@ -23,6 +23,10 @@
 
 Tree-Ring、Gaussian Shading 和 Shallow Diffuse 分别由三个 `external_baseline_*_run.ipynb` 入口运行。每个入口只调度一个 baseline, 使用与主方法一致的 SD3.5 生成预算、当前论文层级 fixed-FPR 和完整攻击矩阵。T2SMark 只由 `official_reference_t2smark_run.ipynb` 的正式复现链生成主表候选。
 
+四个 Notebook 都只准备 CPU `workflow_orchestrator`. repository 的共享隔离调度分别在 `sd35_method_runtime_gpu` 与 `t2smark_sd35_gpu` 子解释器中运行完整 baseline workflow, 并用独立 `scientific_execution_binding.json` 绑定科学 runner 输出的 summary、manifest、profile / 锁摘要、执行报告和依赖报告快照. 该绑定是打包白名单必需项, 不能用父解释器直接执行结果或仅有环境检查替代.
+
+三套 official-reference runner 分别使用 `tree_ring_official_py39_cu117`、`gaussian_shading_official_py38_cu117` 与 `shallow_diffuse_official_py39_cu117` 隔离子解释器. 五个 CUDA profile 的执行入口均由 repository 管理; 当前唯一外部阻断类别是对应完整哈希锁尚未在匹配的 Colab 或 Linux CUDA 环境完成资格审查.
+
 运行产物写入 `outputs/external_baseline_method_faithful/<paper_run_name>/run_records/<baseline_id>/`, 跨包交换文件写入同一论文层级下的 `split_observations/`。每个压缩包只包含当前论文层级和当前 baseline 的独占路径, 多包物化不会覆盖其他方法。
 
 ## official reference
