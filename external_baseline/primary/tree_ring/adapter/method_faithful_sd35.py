@@ -632,7 +632,7 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 ("watermarked", "watermarked_image_path", "watermarked_image_digest", "attacked_positive"),
             ):
                 with Image.open(pair[source_path_field]) as source_image:
-                    attacked_image, attack_transform_name = apply_formal_image_attack(
+                    attacked_image, attack_transform_name, attack_execution = apply_formal_image_attack(
                         source_image,
                         attack_family=attack_family,
                         seed=int(args.seed) + pair_index,
@@ -640,7 +640,6 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                         prompt=str(pair["prompt_text"]),
                         size=int(args.height),
                         device=device,
-                        num_inference_steps=int(args.num_inference_steps),
                         detection_score=lambda candidate: score_image(
                             pipe,
                             candidate,
@@ -704,6 +703,7 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                         "attack_name": attack_matrix_name,
                         "attack_condition": attack_matrix_name,
                         "attack_transform_name": attack_transform_name,
+                        "attack_execution": attack_execution,
                     }
                 )
                 if device == "cuda":

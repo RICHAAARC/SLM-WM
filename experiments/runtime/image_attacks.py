@@ -53,7 +53,15 @@ def apply_standard_image_attack(image: Any, config: AttackConfig, seed: int) -> 
         return rgb.rotate(float(parameters["degrees"]), resample=Image.Resampling.BICUBIC, expand=False)
     if config.attack_name == "crop_resize":
         cropped = _center_crop(rgb, float(parameters["crop_ratio"]))
-        return cropped.resize((width, height), Image.Resampling.BICUBIC)
+        resize_scale = float(parameters["resize_scale"])
+        resized = cropped.resize(
+            (
+                max(1, round(width * resize_scale)),
+                max(1, round(height * resize_scale)),
+            ),
+            Image.Resampling.BICUBIC,
+        )
+        return resized.resize((width, height), Image.Resampling.BICUBIC)
     if config.attack_name == "composite_geometric_attacks":
         cropped = _center_crop(rgb, float(parameters["crop_ratio"]))
         rotated = cropped.rotate(float(parameters["degrees"]), resample=Image.Resampling.BICUBIC, expand=False)

@@ -26,8 +26,16 @@ def _write_results(path: Path, *, sample_count: int, missing_attack_name: str = 
     attack_names = configured_attack_names(DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES)
     payload = {
         str(index): {
+            "image_only_detection": {
+                "clean_score": 0.1,
+                "watermarked_score": 0.9,
+            },
             "formal_attacks": {
-                attack_name: {"attack_name": attack_name}
+                attack_name: {
+                    "attack_name": attack_name,
+                    "attacked_negative": {"detection_score": 0.1},
+                    "attacked_positive": {"detection_score": 0.9},
+                }
                 for attack_name in attack_names
                 if attack_name != missing_attack_name
             }

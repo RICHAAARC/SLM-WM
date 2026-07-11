@@ -58,10 +58,10 @@ SHARED_PROMPT_TEXTS = (
     "a miniature lighthouse on a rocky beach at sunrise",
     "a blue robot gardener watering tulips in a greenhouse",
 )
-T2SMARK_INVERSION_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为新版 Diffusers 显式补齐注解依赖。"
-T2SMARK_FORMAL_ATTACK_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为共同攻击簇补齐正式攻击输出。"
-T2SMARK_PAIR_QUALITY_COMPAT_MARKER = "# SLM-WM 兼容补丁: 为 T2SMark 补齐严格成对质量图像。"
-T2SMARK_INVERSION_COMPAT_BLOCK = f"""{T2SMARK_INVERSION_COMPAT_MARKER}
+T2SMARK_INVERSION_SOURCE_PATCH_MARKER = "# SLM-WM 源码适配: 为新版 Diffusers 显式补齐注解依赖."
+T2SMARK_FORMAL_ATTACK_SOURCE_PATCH_MARKER = "# SLM-WM 源码适配: 为共同攻击簇补齐正式攻击输出."
+T2SMARK_PAIR_QUALITY_SOURCE_PATCH_MARKER = "# SLM-WM 源码适配: 为 T2SMark 补齐严格成对质量图像."
+T2SMARK_INVERSION_SOURCE_PATCH_BLOCK = f"""{T2SMARK_INVERSION_SOURCE_PATCH_MARKER}
 import torch
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -70,7 +70,7 @@ try:
 except Exception:
     PipelineImageInput = Any
 """
-T2SMARK_FORMAL_ATTACK_IMPORT_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_COMPAT_MARKER}
+T2SMARK_FORMAL_ATTACK_IMPORT_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_SOURCE_PATCH_MARKER}
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -83,7 +83,7 @@ from external_baseline.primary.sd35_method_faithful_common import (
 )
 from PIL import Image
 """
-T2SMARK_FORMAL_ATTACK_HELPER_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_COMPAT_MARKER}
+T2SMARK_FORMAL_ATTACK_HELPER_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_SOURCE_PATCH_MARKER}
 def configured_formal_attack_names():
     return [item.strip() for item in str(args.slm_attack_families or "").split(",") if item.strip()]
 
@@ -102,8 +102,16 @@ def decode_attacked_image(attacked_image, master_key, key, fake_key, msg):
     )
     return decode(reversed_latents, master_key, key, fake_key, msg)
 
+
+def score_image_with_master_key(candidate_image, master_key, key, fake_key, msg):
+    # 使用正式检测密钥返回仅图像连续检测分数.
+
+    return float(
+        decode_attacked_image(candidate_image, master_key, key, fake_key, msg)["norm1_w"]
+    )
+
 """
-T2SMARK_FORMAL_ATTACK_DIR_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_COMPAT_MARKER}
+T2SMARK_FORMAL_ATTACK_DIR_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_SOURCE_PATCH_MARKER}
 formal_attack_names = configured_formal_attack_names()
 formal_attack_image_dir = args.slm_attack_image_dir
 if args.save_image and formal_attack_names:
@@ -111,47 +119,86 @@ if args.save_image and formal_attack_names:
         formal_attack_image_dir = os.path.join(args.output_dir, args.name, "formal_attacks")
     os.makedirs(formal_attack_image_dir, exist_ok=True)
 """
-T2SMARK_FORMAL_ATTACK_LOOP_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_COMPAT_MARKER}
+T2SMARK_FORMAL_ATTACK_LOOP_BLOCK = f"""{T2SMARK_FORMAL_ATTACK_SOURCE_PATCH_MARKER}
             if formal_attack_names:
+                if clean_pair_image is None:
+                    raise RuntimeError("正式攻击要求同 Prompt、同种子的 clean negative 图像")
+                clean_detection = decode_attacked_image(
+                    clean_pair_image,
+                    master_key,
+                    key,
+                    fake_key,
+                    msg,
+                )
+                watermarked_detection = decode_attacked_image(
+                    generated_image,
+                    master_key,
+                    key,
+                    fake_key,
+                    msg,
+                )
+                results[prompt_id]["image_only_detection"] = {{
+                    "clean_score": float(clean_detection["norm1_w"]),
+                    "watermarked_score": float(watermarked_detection["norm1_w"]),
+                }}
                 results[prompt_id]["formal_attacks"] = {{}}
                 for formal_attack_name in formal_attack_names:
                     attack_matrix_family = canonical_attack_family(formal_attack_name)
                     attack_matrix_name = canonical_attack_name(formal_attack_name)
-                    attacked_image, attack_transform_name = apply_formal_image_attack(
-                        generated_image,
-                        attack_family=formal_attack_name,
-                        seed=args.seed + prompt_id,
-                        pipe=pipe,
-                        prompt=prompt,
-                        size=512,
-                        device=str(device),
-                        num_inference_steps=args.num_inference_steps,
-                    )
-                    attacked_path = ""
-                    attacked_digest = ""
-                    if args.save_image and formal_attack_image_dir:
-                        attacked_path = os.path.join(
-                            formal_attack_image_dir,
-                            f"{{str(prompt_id).zfill(5)}}_{{attack_matrix_name}}.png",
+                    attack_result = {{
+                        "attack_family": attack_matrix_family,
+                        "attack_name": attack_matrix_name,
+                        "attack_condition": attack_matrix_name,
+                    }}
+                    for source_role, source_image in (
+                        ("attacked_negative", clean_pair_image),
+                        ("attacked_positive", generated_image),
+                    ):
+                        attacked_image, attack_transform_name, attack_execution = apply_formal_image_attack(
+                            source_image,
+                            attack_family=formal_attack_name,
+                            seed=args.seed + prompt_id,
+                            pipe=pipe,
+                            prompt=prompt,
+                            size=512,
+                            device=str(device),
+                            detection_score=lambda candidate: score_image_with_master_key(
+                                candidate,
+                                master_key,
+                                key,
+                                fake_key,
+                                msg,
+                            ),
                         )
-                        attacked_image.save(attacked_path)
-                        attacked_digest = file_digest(attacked_path)
-                    formal_decode_result = decode_attacked_image(attacked_image, master_key, key, fake_key, msg)
-                    formal_decode_result.update(
-                        {{
-                            "attack_family": attack_matrix_family,
-                            "attack_name": attack_matrix_name,
-                            "attack_condition": attack_matrix_name,
+                        attacked_path = ""
+                        attacked_digest = ""
+                        if args.save_image and formal_attack_image_dir:
+                            attacked_path = os.path.join(
+                                formal_attack_image_dir,
+                                f"{{str(prompt_id).zfill(5)}}_{{attack_matrix_name}}_{{source_role}}.png",
+                            )
+                            attacked_image.save(attacked_path)
+                            attacked_digest = file_digest(attacked_path)
+                        formal_decode_result = decode_attacked_image(
+                            attacked_image,
+                            master_key,
+                            key,
+                            fake_key,
+                            msg,
+                        )
+                        attack_result[source_role] = {{
+                            **formal_decode_result,
+                            "detection_score": float(formal_decode_result["norm1_w"]),
                             "attack_transform_name": attack_transform_name,
+                            "attack_execution": attack_execution,
                             "attacked_image_path": attacked_path,
                             "attacked_image_digest": attacked_digest,
                         }}
-                    )
-                    results[prompt_id]["formal_attacks"][attack_matrix_name] = formal_decode_result
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    results[prompt_id]["formal_attacks"][attack_matrix_name] = attack_result
 """
-T2SMARK_PAIR_QUALITY_HELPER_BLOCK = f"""{T2SMARK_PAIR_QUALITY_COMPAT_MARKER}
+T2SMARK_PAIR_QUALITY_HELPER_BLOCK = f"""{T2SMARK_PAIR_QUALITY_SOURCE_PATCH_MARKER}
 def generate_clean_pair_image(prompt, prompt_id):
     \"\"\"生成与 T2SMark 水印图像同 prompt 和同随机种子对齐的 clean 参照图像。\"\"\"
 
@@ -166,7 +213,7 @@ def generate_clean_pair_image(prompt, prompt_id):
     ).images[0]
 
 """
-T2SMARK_PAIR_QUALITY_DIR_BLOCK = f"""{T2SMARK_PAIR_QUALITY_COMPAT_MARKER}
+T2SMARK_PAIR_QUALITY_DIR_BLOCK = f"""{T2SMARK_PAIR_QUALITY_SOURCE_PATCH_MARKER}
 pair_quality_clean_image_dir = None
 if args.save_image and args.slm_save_clean_pair:
     pair_quality_image_dir = args.slm_pair_image_dir
@@ -175,9 +222,11 @@ if args.save_image and args.slm_save_clean_pair:
     pair_quality_clean_image_dir = os.path.join(pair_quality_image_dir, "clean")
     os.makedirs(pair_quality_clean_image_dir, exist_ok=True)
 """
-T2SMARK_PAIR_QUALITY_SAVE_BLOCK = f"""{T2SMARK_PAIR_QUALITY_COMPAT_MARKER}
-        if args.save_image and args.slm_save_clean_pair and pair_quality_clean_image_dir:
+T2SMARK_PAIR_QUALITY_SAVE_BLOCK = f"""{T2SMARK_PAIR_QUALITY_SOURCE_PATCH_MARKER}
+        clean_pair_image = None
+        if formal_attack_names or args.slm_save_clean_pair:
             clean_pair_image = generate_clean_pair_image(prompt, prompt_id)
+        if args.save_image and args.slm_save_clean_pair and pair_quality_clean_image_dir:
             clean_pair_path = os.path.join(pair_quality_clean_image_dir, f'{{str(prompt_id).zfill(5)}}.png')
             clean_pair_image.save(clean_pair_path)
             results[prompt_id]["pair_quality"] = {{
@@ -480,7 +529,20 @@ def count_t2smark_formal_attack_items(results_path: Path, attack_names: tuple[st
         if not str(key).isdigit() or not isinstance(value, dict):
             continue
         formal_attacks = value.get("formal_attacks")
-        if isinstance(formal_attacks, dict) and all(name in formal_attacks for name in attack_names):
+        image_only_detection = value.get("image_only_detection")
+        complete_detection = isinstance(image_only_detection, dict) and all(
+            field_name in image_only_detection
+            for field_name in ("clean_score", "watermarked_score")
+        )
+        complete_attacks = isinstance(formal_attacks, dict) and all(
+            isinstance(formal_attacks.get(name), dict)
+            and isinstance(formal_attacks[name].get("attacked_negative"), dict)
+            and isinstance(formal_attacks[name].get("attacked_positive"), dict)
+            and "detection_score" in formal_attacks[name]["attacked_negative"]
+            and "detection_score" in formal_attacks[name]["attacked_positive"]
+            for name in attack_names
+        )
+        if complete_detection and complete_attacks:
             count += 1
     return count
 
@@ -691,7 +753,7 @@ def normalize_repository_url(repository_url: str) -> str:
     return repository_url
 
 
-def patch_t2smark_inversion_compatibility(root_path: Path, paths: dict[str, Path]) -> dict[str, Any]:
+def patch_t2smark_inversion_source(root_path: Path, paths: dict[str, Path]) -> dict[str, Any]:
     """为 T2SMark 官方 SD3.5 inversion 入口补齐新版环境所需导入。"""
 
     inversion_path = root_path / DEFAULT_T2SMARK_INVERSION_ENTRY
@@ -699,12 +761,12 @@ def patch_t2smark_inversion_compatibility(root_path: Path, paths: dict[str, Path
         raise FileNotFoundError(f"t2smark_inversion_entry_missing:{inversion_path}")
     source_text = inversion_path.read_text(encoding="utf-8")
     patch_applied = False
-    if T2SMARK_INVERSION_COMPAT_MARKER not in source_text:
+    if T2SMARK_INVERSION_SOURCE_PATCH_MARKER not in source_text:
         import_line = "from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import *\n"
         if import_line in source_text:
-            source_text = source_text.replace(import_line, import_line + "\n" + T2SMARK_INVERSION_COMPAT_BLOCK + "\n", 1)
+            source_text = source_text.replace(import_line, import_line + "\n" + T2SMARK_INVERSION_SOURCE_PATCH_BLOCK + "\n", 1)
         else:
-            source_text = T2SMARK_INVERSION_COMPAT_BLOCK + "\n" + source_text
+            source_text = T2SMARK_INVERSION_SOURCE_PATCH_BLOCK + "\n" + source_text
         inversion_path.write_text(source_text, encoding="utf-8")
         patch_applied = True
     report = {
@@ -713,11 +775,11 @@ def patch_t2smark_inversion_compatibility(root_path: Path, paths: dict[str, Path
         "source_patch_path": relative_or_absolute(inversion_path, root_path),
         "source_patch_reason": "typing_names_required_by_sd35_inversion_entry",
     }
-    write_json(paths["output_dir"] / "t2smark_source_compatibility_patch.json", report)
+    write_json(paths["output_dir"] / "t2smark_source_runtime_patch.json", report)
     return report
 
 
-def patch_t2smark_formal_attack_compatibility(root_path: Path, paths: dict[str, Path]) -> dict[str, Any]:
+def patch_t2smark_formal_attack_source(root_path: Path, paths: dict[str, Path]) -> dict[str, Any]:
     """为 T2SMark 官方 SD3.5 入口补齐共同攻击簇输出能力。"""
 
     source_path = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
@@ -805,7 +867,7 @@ def patch_t2smark_formal_attack_compatibility(root_path: Path, paths: dict[str, 
         source_path.write_text(source_text, encoding="utf-8")
         source_patch_applied = True
     source_text = source_path.read_text(encoding="utf-8")
-    if T2SMARK_PAIR_QUALITY_COMPAT_MARKER not in source_text:
+    if T2SMARK_PAIR_QUALITY_SOURCE_PATCH_MARKER not in source_text:
         helper_anchor = "pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)\n"
         dir_anchor = "results = {}\n"
         save_anchor = (
@@ -863,8 +925,8 @@ def ensure_t2smark_source_available(
 
     source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
     if source_entry.is_file():
-        patch_report = patch_t2smark_inversion_compatibility(root_path, paths)
-        patch_report["formal_attack_patch_report"] = patch_t2smark_formal_attack_compatibility(root_path, paths)
+        patch_report = patch_t2smark_inversion_source(root_path, paths)
+        patch_report["formal_attack_patch_report"] = patch_t2smark_formal_attack_source(root_path, paths)
         return {
             "source_available": True,
             "source_downloaded": False,
@@ -911,8 +973,8 @@ def ensure_t2smark_source_available(
     )
     if not source_report["source_available"]:
         raise FileNotFoundError(f"t2smark_source_entry_missing_after_source_prepare:{source_entry}")
-    source_report["source_patch_report"] = patch_t2smark_inversion_compatibility(root_path, paths)
-    source_report["source_patch_report"]["formal_attack_patch_report"] = patch_t2smark_formal_attack_compatibility(
+    source_report["source_patch_report"] = patch_t2smark_inversion_source(root_path, paths)
+    source_report["source_patch_report"]["formal_attack_patch_report"] = patch_t2smark_formal_attack_source(
         root_path,
         paths,
     )

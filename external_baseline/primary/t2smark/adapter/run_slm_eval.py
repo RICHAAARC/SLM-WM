@@ -7,7 +7,7 @@ import json
 import math
 from pathlib import Path
 import sys
-from typing import Any, Iterable
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[4]
 if str(ROOT) not in sys.path:
@@ -76,6 +76,15 @@ def _robustness(result: dict[str, Any], *, result_index: int) -> dict[str, Any]:
     node = result.get("robustness")
     if not isinstance(node, dict):
         raise ValueError(f"t2smark result {result_index} 缺少 robustness 对象")
+    return dict(node)
+
+
+def _image_only_detection(result: dict[str, Any], *, result_index: int) -> dict[str, Any]:
+    """读取同密钥 clean/watermarked 仅图像检测分数。"""
+
+    node = result.get("image_only_detection")
+    if not isinstance(node, dict):
+        raise ValueError(f"t2smark result {result_index} 缺少 image_only_detection 对象")
     return dict(node)
 
 
@@ -163,8 +172,13 @@ def _auto_threshold(
             continue
         if index not in results_by_index:
             continue
-        robustness = _robustness(results_by_index[index], result_index=index)
-        negative_scores.append(_finite_score(robustness.get("norm1_no_w"), field_name="norm1_no_w"))
+        detection = _image_only_detection(results_by_index[index], result_index=index)
+        negative_scores.append(
+            _finite_score(
+                detection.get("clean_score"),
+                field_name="image_only_detection.clean_score",
+            )
+        )
     if not negative_scores:
         raise ValueError("T2SMark fixed-FPR 阈值要求 calibration clean negative 分数")
     allowed_false_positives = max(
@@ -283,14 +297,21 @@ def build_t2smark_observations(
             )
             continue
         robustness = _robustness(result, result_index=index)
+        detection = _image_only_detection(result, result_index=index)
         image_id = _image_id(row, index + 1)
         clean_path = str(row.get("clean_image_path") or "")
         watermarked_path = str(
             row.get("watermarked_image_path") or row.get("generated_image_path") or ""
         )
         pair_quality = _measured_pair_quality(clean_path, watermarked_path)
-        clean_score = _finite_score(robustness.get("norm1_no_w"), field_name="norm1_no_w")
-        watermarked_score = _finite_score(robustness.get("norm1_w"), field_name="norm1_w")
+        clean_score = _finite_score(
+            detection.get("clean_score"),
+            field_name="image_only_detection.clean_score",
+        )
+        watermarked_score = _finite_score(
+            detection.get("watermarked_score"),
+            field_name="image_only_detection.watermarked_score",
+        )
         observations.append(
             _observation(
                 event_id=f"{image_id}__clean_negative",
@@ -337,60 +358,45 @@ def build_t2smark_observations(
                 attack_name = str(attack_payload.get("attack_name") or attack_key)
                 attack_family_name = str(attack_payload.get("attack_family") or "regeneration_attack")
                 attack_condition = str(attack_payload.get("attack_condition") or attack_name)
-                attacked_image_path = str(attack_payload.get("attacked_image_path") or "")
-                attacked_image_digest = str(attack_payload.get("attacked_image_digest") or "")
-                attacked_quality_from_clean = _measured_pair_quality(clean_path, attacked_image_path)
-                attacked_quality_from_watermarked = _measured_pair_quality(
-                    watermarked_path,
-                    attacked_image_path,
-                )
-                attacked_negative_score = _finite_score(
-                    attack_payload.get("norm1_no_w"),
-                    field_name="formal_attacks.norm1_no_w",
-                )
-                attacked_positive_score = _finite_score(
-                    attack_payload.get("norm1_w"),
-                    field_name="formal_attacks.norm1_w",
-                )
-                observations.append(
-                    _observation(
-                        event_id=f"{image_id}__attacked_negative__{attack_name}",
-                        score=attacked_negative_score,
-                        threshold=threshold_value,
-                        row=row,
-                        sample_role="attacked_negative",
-                        attack_family=attack_family_name,
-                        attack_condition=attack_condition,
-                        result_index=index,
-                        threshold_source=threshold_source,
-                        robustness=attack_payload,
-                        image_path=attacked_image_path,
-                        image_digest=attacked_image_digest,
-                        quality_score=attacked_quality_from_clean,
-                        score_retention=measured_score_retention(clean_score, attacked_negative_score),
+                for sample_role, source_path, source_score in (
+                    ("attacked_negative", clean_path, clean_score),
+                    ("attacked_positive", watermarked_path, watermarked_score),
+                ):
+                    role_payload = attack_payload.get(sample_role)
+                    if not isinstance(role_payload, dict):
+                        raise ValueError(
+                            f"formal_attacks.{attack_name} 缺少 {sample_role} 对象"
+                        )
+                    attacked_image_path = str(role_payload.get("attacked_image_path") or "")
+                    attacked_image_digest = str(role_payload.get("attacked_image_digest") or "")
+                    attacked_score = _finite_score(
+                        role_payload.get("detection_score"),
+                        field_name=f"formal_attacks.{attack_name}.{sample_role}.detection_score",
                     )
-                )
-                observations.append(
-                    _observation(
-                        event_id=f"{image_id}__attacked_positive__{attack_name}",
-                        score=attacked_positive_score,
-                        threshold=threshold_value,
-                        row=row,
-                        sample_role="attacked_positive",
-                        attack_family=attack_family_name,
-                        attack_condition=attack_condition,
-                        result_index=index,
-                        threshold_source=threshold_source,
-                        robustness=attack_payload,
-                        image_path=attacked_image_path,
-                        image_digest=attacked_image_digest,
-                        quality_score=attacked_quality_from_watermarked,
-                        score_retention=measured_score_retention(
-                            watermarked_score,
-                            attacked_positive_score,
-                        ),
+                    observations.append(
+                        _observation(
+                            event_id=f"{image_id}__{sample_role}__{attack_name}",
+                            score=attacked_score,
+                            threshold=threshold_value,
+                            row=row,
+                            sample_role=sample_role,
+                            attack_family=attack_family_name,
+                            attack_condition=attack_condition,
+                            result_index=index,
+                            threshold_source=threshold_source,
+                            robustness=role_payload,
+                            image_path=attacked_image_path,
+                            image_digest=attacked_image_digest,
+                            quality_score=_measured_pair_quality(
+                                source_path,
+                                attacked_image_path,
+                            ),
+                            score_retention=measured_score_retention(
+                                source_score,
+                                attacked_score,
+                            ),
+                        )
                     )
-                )
 
         write_progress_event(
             progress_path,

@@ -588,9 +588,9 @@ Notebook 与 repository module 的跨边界数据
 | attack_config_digest | artifact | none | true | false | false | 攻击配置 payload 的稳定摘要。 |
 | attack_record_digest | artifact | none | true | false | false | 攻击检测 record payload 的稳定摘要。 |
 | source_record_id | protocol | none | true | false | false | 攻击记录引用的源检测 record 标识。 |
-| source_image_digest | artifact | none | true | false | false | 源图像或源记录代理的稳定摘要。 |
+| source_image_digest | artifact | none | true | false | false | 真实源图像文件的稳定摘要。 |
 | source_image_digest_source | artifact | none | true | false | false | source image digest 的来源说明。 |
-| attacked_image_digest | artifact | none | true | false | false | 攻击后图像或本地代理攻击结果的稳定摘要。 |
+| attacked_image_digest | artifact | none | true | false | false | 真实攻击后图像文件的稳定摘要。 |
 | attacked_image_digest_source | artifact | none | true | false | false | attacked image digest 的来源说明。 |
 | attacked_image_available | artifact | none | true | false | false | 是否存在真实可读取的攻击后图像文件。 |
 | attack_performed | protocol | none | true | false | false | 当前记录是否实际执行了本地可用攻击路径。 |
@@ -599,6 +599,17 @@ Notebook 与 repository module 的跨边界数据
 | source_image_path | artifact | none | true | false | false | 真实 source image 文件的受治理路径。 |
 | attacked_image_path | artifact | none | true | false | false | 真实 attacked image 文件的受治理路径。 |
 | attack_implementation | protocol | none | true | false | false | 真实图像级攻击运行使用的具体 pipeline 或算子机制。 |
+| attack_execution | protocol | none | true | false | false | 单次攻击的冻结参数、随机种子、mask 与检测器查询轨迹。 |
+| attack_seed_random | random | none | true | false | false | 生成单次随机攻击变换的可复现种子。 |
+| effective_parameters | protocol | none | true | false | false | 单次攻击实际消费的冻结参数集合。 |
+| local_edit_mask_digest | artifact | none | true | false | false | 局部 inpainting 白色编辑 mask 的 SHA-256 摘要。 |
+| local_edit_mask_area_ratio | metric | none | true | false | false | 局部 inpainting 白色编辑区域占整幅图像的实际面积比例。 |
+| detector_query_trace | protocol | none | true | false | false | 检测器引导去水印中源图像与全部候选的强度、种子和实测分数序列。 |
+| candidate_seed_random | random | none | true | false | false | 检测器引导去水印单个候选使用的可复现种子。 |
+| image_only_detection | metric | none | true | false | false | T2SMark 对真实 clean/watermarked 图像使用同一正式密钥得到的仅图像检测分数对象。 |
+| clean_score | metric | none | true | false | false | 真实 clean negative 图像在正式检测密钥下的连续分数。 |
+| watermarked_score | metric | none | true | false | false | 真实 watermarked positive 图像在正式检测密钥下的连续分数。 |
+| detection_score | metric | none | true | false | false | 单幅候选或攻击后图像由对应方法真实检测器计算的连续分数。 |
 | detection_method | method | none | true | false | false | 攻击后重跑检测时使用的受治理检测方法名称。 |
 | detection_threshold | protocol | none | true | false | false | 攻击后重跑检测使用的检测阈值。 |
 | attacked_image_registry_path | artifact | none | false | false | false | 真实 attacked image 注册表 JSONL 文件路径。 |
@@ -606,16 +617,13 @@ Notebook 与 repository module 的跨边界数据
 | real_attack_record_count | metric | none | false | false | false | 真实图像级攻击检测记录数量。 |
 | real_attacked_image_count | metric | none | false | false | false | 已生成并登记 digest 的真实 attacked image 文件数量。 |
 | regeneration_attack_record_count | metric | none | false | false | false | 再扩散类攻击检测记录数量。 |
-| required_regeneration_attack_count | metric | none | false | false | false | 向后兼容字段, 当前表示证据门禁要求的真实 GPU 攻击类型数量。 |
-| measured_regeneration_attack_count | metric | none | false | false | false | 向后兼容字段, 当前表示已在真实 GPU workflow 中完成测量的攻击类型数量。 |
+| required_regeneration_attack_count | metric | none | false | false | false | 证据门禁要求的真实 GPU 攻击类型数量。 |
+| measured_regeneration_attack_count | metric | none | false | false | false | 已在真实 GPU workflow 中完成测量的攻击类型数量。 |
 | real_attacked_image_closed_loop_ready | metric | none | false | false | false | 真实 source / attacked image 文件、路径和 digest 是否完成闭环。 |
-| regeneration_attack_gpu_validation_ready | metric | none | false | false | false | img2img、DDIM inversion、SDEdit 和 diffusion purification 是否已由真实 GPU workflow 生成并测量。 |
+| regeneration_attack_gpu_validation_ready | metric | none | false | false | false | img2img、flow-matching inversion、SDEdit 和 diffusion purification 是否已由真实 GPU workflow 生成并测量。 |
 | attack_detection_rerun_ready | metric | none | false | false | false | 真实 attacked image 生成后是否已重跑攻击后检测记录。 |
 | formal_attack_detection_ready | metric | none | false | false | false | 真实 attacked image 是否已经转换为 attack matrix 兼容正式检测记录。 |
 | formal_records_path | artifact | none | false | false | false | 真实攻击闭环写出的 attack matrix 兼容检测记录 JSONL 路径。 |
-| ddim_attack_model_id | runtime | none | false | false | false | 严格 DDIM inversion 攻击使用的 diffusion attacker 模型标识。 |
-| ddim_inversion_steps | runtime | none | false | false | false | DDIMInverseScheduler inversion 循环步数。 |
-| ddim_reconstruction_steps | runtime | none | false | false | false | DDIM inversion 后再生成循环步数。 |
 | aligned_rescoring_drive_dir | artifact | none | false | false | false | Colab workflow 查找前序 aligned rescoring 结果包的 Google Drive 目录。 |
 | threshold_calibration_drive_dir | artifact | none | false | false | false | Colab workflow 查找 fixed-FPR 阈值校准结果包的 Google Drive 目录。 |
 | threshold_calibration_package_path | artifact | none | false | false | false | 被解包为正式检测边界输入的 threshold calibration 结果包路径。 |

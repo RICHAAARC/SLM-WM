@@ -60,12 +60,10 @@ def main() -> None:
         ),
     )
     if summary.get("protocol_decision") == "resume_required":
-        clear_strict_ddim_inversion_runtime_cache()
         print(json.dumps({"summary": summary}, ensure_ascii=False, sort_keys=True))
         return
     if summary.get("protocol_decision") != "pass":
         raise RuntimeError("真实机制消融未通过完整证据门禁")
-    clear_strict_ddim_inversion_runtime_cache()
     archive_path = package_runtime_rerun_ablations(root=ROOT, output_dir=output_dir)
     print(
         json.dumps(

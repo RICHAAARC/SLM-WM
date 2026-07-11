@@ -11,6 +11,7 @@
 | 几何恢复 | `main/methods/geometry/attention_alignment.py` | 执行密钥关系匹配、三点 RANSAC 和仿射估计 |
 | 仅图像检测 | `main/methods/detection/image_only.py` | 只接收图像、密钥和公开模型配置, 完成内容主判与同阈值救回 |
 | 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | 在 SD3.5 Medium 采样过程中执行全部真实嵌入算子 |
+| 共同攻击算子 | `experiments/runtime/diffusion/regeneration_attacks.py` | 为主方法与全部 baseline 统一执行 SD3.5 img2img、flow-matching 反向 Euler 积分、inpainting 和检测器引导搜索 |
 | 数据集协议 | `experiments/runners/image_only_dataset_runtime.py` | 运行 Prompt 数据集、冻结完整 evidence 协议并生成 test 记录 |
 | 正式消融 | `experiments/ablations/runtime_rerun.py` | 对每个机制配置重新生成、重新攻击和重新检测 |
 | 正式 FID/KID | `experiments/artifacts/dataset_level_quality_outputs.py` | 使用 torch-fidelity 0.4.0 的 TensorFlow 兼容 Inception v3 2048 维特征生成可审计质量记录 |
@@ -55,13 +56,15 @@ $$
 1. `scripts/run_image_only_dataset_runtime.py` 读取当前 `paper_run` Prompt 文件；
 2. 复用一次加载的 SD3.5 Medium、VAE 和 CLIP 运行时；
 3. 对每个 Prompt 生成 clean 与 watermarked 图像；
-4. 对选定 test Prompt 执行标准图像攻击和真实再扩散攻击；
+4. 对选定 test Prompt 执行9类标准图像攻击和8类真实 GPU 扩散攻击；
 5. 所有样本只从最终图像重新编码并检测；
 6. calibration clean negative 冻结包含 rescue 的完整判定协议；
 7. test split 只应用冻结协议并报告置信上界；
 8. `scripts/run_runtime_rerun_ablations.py` 重新运行全部机制消融；
 9. 结果 records 和 manifest 进入论文共同协议 builder；
 10. 生成轨迹检测、proxy 分数和 counterfactual 分数变换不能支持论文主张。
+
+8类 GPU 扩散攻击共享同一个受治理实现。`img2img_regeneration`、`sdedit_regeneration`、`diffusion_purification`、`global_editing_attack` 和 `visual_paraphrase_attack` 通过 `StableDiffusion3Img2ImgPipeline` 的 `image + strength` 路径执行；`flow_matching_inversion_regeneration` 通过 SD3 scheduler 的反向 Euler 积分恢复高噪声 latent 后重建；`local_editing_attack` 通过 inpainting pipeline 和面积受控 mask 执行，并在输出端严格保留 mask 外源像素；`adversarial_removal_attack` 在冻结候选查询预算内逐一调用对应方法的真实仅图像连续检测分数并选择最低分候选。攻击参数、随机种子、mask 摘要和查询轨迹写入 `attack_execution`，外部 baseline 不维护第二套 latent 混合攻击。
 
 ## 五、主张边界
 

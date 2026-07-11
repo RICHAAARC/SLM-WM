@@ -22,7 +22,7 @@ from paper_workflow.notebook_utils.notebook_runtime import mark_notebook_runtime
 FORMAL_IMAGE_ATTACK_FAMILIES = (
     "jpeg_compression,gaussian_noise,gaussian_blur,rotation,resize,crop,crop_resize,"
     "composite_geometric_attacks,photometric_distortion_attack,img2img_regeneration,"
-    "ddim_inversion_regeneration,sdedit_regeneration,diffusion_purification,"
+    "flow_matching_inversion_regeneration,sdedit_regeneration,diffusion_purification,"
     "global_editing_attack,local_editing_attack,visual_paraphrase_attack,adversarial_removal_attack"
 )
 
@@ -174,7 +174,6 @@ def _configure_real_attack_evaluation(paper_run: Any, sample_count_token: str, t
     _set_default_env("SLM_WM_REAL_ATTACK_SOURCE_IMAGE_DIR", "outputs/aligned_rescoring/aligned_images")
     _set_env("SLM_WM_REAL_ATTACK_SOURCE_COUNT", sample_count_token)
     _set_default_env("SLM_WM_REQUIRE_ALL_REGEN_ATTACKS", "1")
-    _set_default_env("SLM_WM_DDIM_ATTACK_MODEL_ID", "runwayml/stable-diffusion-v1-5")
     _set_default_env("SLM_WM_ENABLE_PIPELINE_PROGRESS_BAR", "0")
     _set_default_env("SLM_WM_ENABLE_ATTACK_PROGRESS_BAR", "1")
 

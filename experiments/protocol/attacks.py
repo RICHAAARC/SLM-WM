@@ -8,6 +8,11 @@ from typing import Any
 from main.core.digest import build_stable_digest
 
 
+DIFFUSION_ATTACK_INFERENCE_STEPS = 28
+DIFFUSION_ATTACK_GUIDANCE_SCALE = 4.5
+DIFFUSION_ATTACK_NEGATIVE_PROMPT = "low quality, blurry"
+
+
 @dataclass(frozen=True)
 class AttackConfig:
     """描述单个攻击配置。
@@ -155,17 +160,27 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             resource_profile="full_extra",
             requires_gpu=True,
             enabled=True,
-            attack_parameters={"denoise_strength": 0.35},
+            attack_parameters={
+                "denoise_strength": 0.35,
+                "inference_steps": DIFFUSION_ATTACK_INFERENCE_STEPS,
+                "guidance_scale": DIFFUSION_ATTACK_GUIDANCE_SCALE,
+                "negative_prompt": DIFFUSION_ATTACK_NEGATIVE_PROMPT,
+            },
         ),
         AttackConfig(
-            attack_id="ddim_inversion_regeneration_extra",
+            attack_id="flow_matching_inversion_regeneration_extra",
             attack_family="regeneration_attack",
-            attack_name="ddim_inversion_regeneration",
+            attack_name="flow_matching_inversion_regeneration",
             attack_strength=0.40,
             resource_profile="full_extra",
             requires_gpu=True,
             enabled=True,
-            attack_parameters={"inversion_steps": 30, "denoise_strength": 0.40},
+            attack_parameters={
+                "inversion_steps": 30,
+                "reconstruction_steps": 30,
+                "guidance_scale": DIFFUSION_ATTACK_GUIDANCE_SCALE,
+                "negative_prompt": DIFFUSION_ATTACK_NEGATIVE_PROMPT,
+            },
         ),
         AttackConfig(
             attack_id="sdedit_regeneration_extra",
@@ -175,7 +190,12 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             resource_profile="full_extra",
             requires_gpu=True,
             enabled=True,
-            attack_parameters={"noise_level": 0.45},
+            attack_parameters={
+                "noise_level": 0.45,
+                "inference_steps": DIFFUSION_ATTACK_INFERENCE_STEPS,
+                "guidance_scale": DIFFUSION_ATTACK_GUIDANCE_SCALE,
+                "negative_prompt": DIFFUSION_ATTACK_NEGATIVE_PROMPT,
+            },
         ),
         AttackConfig(
             attack_id="diffusion_purification_extra",
@@ -185,7 +205,12 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             resource_profile="full_extra",
             requires_gpu=True,
             enabled=True,
-            attack_parameters={"purification_steps": 20, "noise_level": 0.32},
+            attack_parameters={
+                "purification_steps": 20,
+                "noise_level": 0.32,
+                "guidance_scale": 1.0,
+                "negative_prompt": "",
+            },
         ),
         AttackConfig(
             attack_id="global_editing_extra",
@@ -195,7 +220,13 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             resource_profile="full_extra",
             requires_gpu=True,
             enabled=True,
-            attack_parameters={"denoise_strength": 0.48, "edit_prompt_suffix": "with a changed global style and lighting"},
+            attack_parameters={
+                "denoise_strength": 0.48,
+                "edit_prompt_suffix": "with a changed global style and lighting",
+                "inference_steps": DIFFUSION_ATTACK_INFERENCE_STEPS,
+                "guidance_scale": DIFFUSION_ATTACK_GUIDANCE_SCALE,
+                "negative_prompt": DIFFUSION_ATTACK_NEGATIVE_PROMPT,
+            },
         ),
         AttackConfig(
             attack_id="local_editing_extra",
@@ -205,7 +236,14 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             resource_profile="full_extra",
             requires_gpu=True,
             enabled=True,
-            attack_parameters={"denoise_strength": 0.42, "local_mask_ratio": 0.36},
+            attack_parameters={
+                "denoise_strength": 0.42,
+                "local_mask_ratio": 0.36,
+                "edit_prompt_suffix": "with the central subject locally changed while the surrounding scene remains unchanged",
+                "inference_steps": DIFFUSION_ATTACK_INFERENCE_STEPS,
+                "guidance_scale": DIFFUSION_ATTACK_GUIDANCE_SCALE,
+                "negative_prompt": DIFFUSION_ATTACK_NEGATIVE_PROMPT,
+            },
         ),
         AttackConfig(
             attack_id="visual_paraphrase_extra",
@@ -215,7 +253,13 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             resource_profile="full_extra",
             requires_gpu=True,
             enabled=True,
-            attack_parameters={"denoise_strength": 0.55, "paraphrase_prompt_suffix": "redrawn with the same semantics but different visual composition"},
+            attack_parameters={
+                "denoise_strength": 0.55,
+                "paraphrase_prompt_suffix": "redrawn with the same semantics but different visual composition",
+                "inference_steps": DIFFUSION_ATTACK_INFERENCE_STEPS,
+                "guidance_scale": DIFFUSION_ATTACK_GUIDANCE_SCALE,
+                "negative_prompt": DIFFUSION_ATTACK_NEGATIVE_PROMPT,
+            },
         ),
         AttackConfig(
             attack_id="adversarial_removal_extra",
@@ -225,6 +269,13 @@ def default_attack_configs() -> tuple[AttackConfig, ...]:
             resource_profile="full_extra",
             requires_gpu=True,
             enabled=True,
-            attack_parameters={"query_count": 8, "strength_min": 0.25, "strength_max": 0.55},
+            attack_parameters={
+                "candidate_query_count": 8,
+                "strength_min": 0.25,
+                "strength_max": 0.55,
+                "inference_steps": DIFFUSION_ATTACK_INFERENCE_STEPS,
+                "guidance_scale": DIFFUSION_ATTACK_GUIDANCE_SCALE,
+                "negative_prompt": DIFFUSION_ATTACK_NEGATIVE_PROMPT,
+            },
         ),
     )

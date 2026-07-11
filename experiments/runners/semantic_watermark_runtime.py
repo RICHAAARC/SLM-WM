@@ -843,7 +843,7 @@ def run_semantic_watermark_runtime(
             attacked_image = apply_standard_image_attack(
                 source_image,
                 attack_config,
-                seed=config.seed + attack_index + (0 if sample_role == "clean_negative" else 10000),
+                seed=config.seed + attack_index,
             )
             image_key = f"{sample_role}_{attack_config.attack_id}"
             attacked_images[image_key] = attacked_image
@@ -884,13 +884,14 @@ def run_semantic_watermark_runtime(
             raise RuntimeError("diffusion_attacks_enabled 要求共享再扩散攻击运行时")
         for sample_role, source_image in (("clean_negative", clean_image), ("positive_source", watermarked_image)):
             for attack_index, attack_spec in enumerate(default_diffusion_attack_specs()):
-                attacked_image = diffusion_attack_runtime.apply(
+                attack_execution = diffusion_attack_runtime.apply(
                     source_image,
                     attack_spec,
-                    seed=config.seed + 20000 + attack_index + (0 if sample_role == "clean_negative" else 10000),
+                    seed=config.seed + 20000 + attack_index,
                     prompt_text=config.prompt,
                     detection_score=adversarial_detection_score,
                 )
+                attacked_image = attack_execution.image
                 image_key = f"{sample_role}_{attack_spec.attack_id}"
                 attacked_images[image_key] = attacked_image
                 detection = detect_image_only_watermark(
@@ -914,6 +915,7 @@ def run_semantic_watermark_runtime(
                         "resource_profile": "full_extra",
                         "attack_parameters": attack_spec.attack_parameters,
                         "attack_implementation": attack_spec.attack_implementation,
+                        "attack_execution": attack_execution.to_record(),
                         "attack_performed": True,
                         "attacked_image_key": image_key,
                     }

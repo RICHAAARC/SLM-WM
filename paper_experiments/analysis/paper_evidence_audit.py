@@ -508,7 +508,7 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "gap_id": "gap_regeneration_attack_gpu_validation",
                 "gap_area": "attack_matrix",
                 "blocker_severity": "critical",
-                "required_action": "在真实 GPU 环境补齐 img2img、DDIM inversion、SDEdit 和 diffusion purification 攻击。",
+            "required_action": "在真实 GPU 环境补齐 img2img、flow-matching inversion、SDEdit 和 diffusion purification 攻击。",
                 "related_artifacts": _source(
                     bundle,
                     "attack_family_metrics",

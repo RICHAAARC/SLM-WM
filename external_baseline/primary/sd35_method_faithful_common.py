@@ -24,7 +24,7 @@ STANDARD_GEOMETRIC_FORMAL_IMAGE_ATTACK_NAMES = (
 )
 REGENERATION_FORMAL_IMAGE_ATTACK_NAMES = (
     "img2img_regeneration",
-    "ddim_inversion_regeneration",
+    "flow_matching_inversion_regeneration",
     "sdedit_regeneration",
     "diffusion_purification",
 )
@@ -37,36 +37,25 @@ ADVANCED_GPU_FORMAL_IMAGE_ATTACK_NAMES = (
 DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES = REGENERATION_FORMAL_IMAGE_ATTACK_NAMES + ADVANCED_GPU_FORMAL_IMAGE_ATTACK_NAMES
 FORMAL_IMAGE_ATTACK_NAMES = STANDARD_GEOMETRIC_FORMAL_IMAGE_ATTACK_NAMES + DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES
 FORMAL_IMAGE_ATTACK_SPECS = {
-    "jpeg": ("standard_distortion", "jpeg_compression"),
     "jpeg_compression": ("standard_distortion", "jpeg_compression"),
     "gaussian_noise": ("standard_distortion", "gaussian_noise"),
-    "noise": ("standard_distortion", "gaussian_noise"),
     "gaussian_blur": ("standard_distortion", "gaussian_blur"),
-    "blur": ("standard_distortion", "gaussian_blur"),
     "rotation": ("geometric_transform", "rotation"),
-    "rotate": ("geometric_transform", "rotation"),
     "resize": ("geometric_transform", "resize"),
     "crop": ("geometric_transform", "crop"),
     "crop_resize": ("geometric_transform", "crop_resize"),
     "composite_geometric_attacks": ("geometric_transform", "composite_geometric_attacks"),
-    "photometric": ("photometric_distortion_attack", "photometric_distortion_attack"),
-    "photometric_distortion": ("photometric_distortion_attack", "photometric_distortion_attack"),
     "photometric_distortion_attack": ("photometric_distortion_attack", "photometric_distortion_attack"),
-    "img2img": ("regeneration_attack", "img2img_regeneration"),
     "img2img_regeneration": ("regeneration_attack", "img2img_regeneration"),
-    "ddim_inversion": ("regeneration_attack", "ddim_inversion_regeneration"),
-    "ddim_inversion_regeneration": ("regeneration_attack", "ddim_inversion_regeneration"),
-    "sdedit": ("regeneration_attack", "sdedit_regeneration"),
+    "flow_matching_inversion_regeneration": (
+        "regeneration_attack",
+        "flow_matching_inversion_regeneration",
+    ),
     "sdedit_regeneration": ("regeneration_attack", "sdedit_regeneration"),
     "diffusion_purification": ("regeneration_attack", "diffusion_purification"),
-    "purification": ("regeneration_attack", "diffusion_purification"),
-    "global_editing": ("global_editing_attack", "global_editing_attack"),
     "global_editing_attack": ("global_editing_attack", "global_editing_attack"),
-    "local_editing": ("local_editing_attack", "local_editing_attack"),
     "local_editing_attack": ("local_editing_attack", "local_editing_attack"),
-    "visual_paraphrase": ("visual_paraphrase_attack", "visual_paraphrase_attack"),
     "visual_paraphrase_attack": ("visual_paraphrase_attack", "visual_paraphrase_attack"),
-    "adversarial_removal": ("adversarial_removal_attack", "adversarial_removal_attack"),
     "adversarial_removal_attack": ("adversarial_removal_attack", "adversarial_removal_attack"),
 }
 
@@ -465,7 +454,12 @@ def derive_threshold(
     raise RuntimeError("无法从 calibration clean negative 冻结 fixed-FPR 阈值")
 
 
-def apply_standard_geometric_image_attack(image: Any, *, attack_family: str, seed: int) -> tuple[Any, str]:
+def apply_standard_geometric_image_attack(
+    image: Any,
+    *,
+    attack_family: str,
+    seed: int,
+) -> tuple[Any, str, dict[str, Any]]:
     """复用项目共同攻击配置执行完全相同的标准图像攻击。"""
 
     from experiments.protocol.attacks import attack_config_digest, default_attack_configs
@@ -486,29 +480,39 @@ def apply_standard_geometric_image_attack(image: Any, *, attack_family: str, see
         raise RuntimeError(f"共同攻击协议没有唯一配置: {attack_name}")
     config = candidates[0]
     attacked = apply_standard_image_attack(image, config, seed)
-    return attacked, f"shared_attack_protocol:{attack_config_digest(config)}"
+    implementation = f"shared_attack_protocol:{attack_config_digest(config)}"
+    trace = {
+        "attack_name": config.attack_name,
+        "attack_implementation": implementation,
+        "attack_seed_random": int(seed),
+        "effective_parameters": dict(config.attack_parameters),
+    }
+    return attacked, implementation, trace
 
-def _encode_image_latents(pipe: Any, image: Any, *, size: int, device: str) -> Any:
-    """把图像编码到当前 pipeline 的 VAE latent 空间。"""
-
-    import torch
-
-    dtype = getattr(pipe.vae, "dtype", torch.float16)
-    tensor = image_to_tensor(image, size=int(size), device=device, dtype=dtype)
-    return pipe.get_image_latents(tensor, sample=False)
+_DIFFUSION_ATTACK_RUNTIME_CACHE_ATTRIBUTE = "_slm_wm_diffusion_attack_runtime_cache"
 
 
-def _invert_flow_matching_latents(pipe: Any, latents: Any, *, prompt: str, num_inference_steps: int) -> Any:
-    """调用当前 pipeline 的真实流匹配反演积分器。"""
+def _shared_diffusion_attack_runtime(pipe: Any, *, size: int, device: str) -> Any:
+    """为同一 SD3.5 pipeline 复用唯一共同扩散攻击运行时。"""
 
-    if hasattr(pipe, "invert_flow_matching_latent"):
-        return pipe.invert_flow_matching_latent(
-            latents,
-            prompt=prompt,
-            num_inference_steps=int(num_inference_steps),
-            guidance_scale=1.0,
+    from experiments.runtime.diffusion.regeneration_attacks import (
+        DiffusionAttackRuntime,
+        DiffusionAttackRuntimeConfig,
+    )
+
+    cache = getattr(pipe, _DIFFUSION_ATTACK_RUNTIME_CACHE_ATTRIBUTE, None)
+    if cache is None:
+        cache = {}
+        setattr(pipe, _DIFFUSION_ATTACK_RUNTIME_CACHE_ATTRIBUTE, cache)
+    cache_key = (str(device), int(size))
+    if cache_key not in cache:
+        config = DiffusionAttackRuntimeConfig(
+            device_name=str(device),
+            height=int(size),
+            width=int(size),
         )
-    raise RuntimeError("SD3.5 正式再生成攻击要求真实流匹配反演积分器")
+        cache[cache_key] = DiffusionAttackRuntime.from_text_to_image_pipeline(pipe, config)
+    return cache[cache_key]
 
 
 def apply_regeneration_image_attack(
@@ -520,107 +524,29 @@ def apply_regeneration_image_attack(
     prompt: str,
     size: int,
     device: str,
-    num_inference_steps: int,
     detection_score: Callable[[Any], float] | None = None,
-) -> tuple[Any, str]:
-    """使用 SD3.5 adapter 的可审计 latent 再生成路径执行再扩散类攻击。
+) -> tuple[Any, str, dict[str, Any]]:
+    """委托项目唯一共同运行时执行真实 SD3.5 扩散攻击。"""
 
-    该实现属于项目特定的 method-faithful adapter 工程路径: 它把输入图像编码到
-    SD3.5 latent, 再按攻击名称执行不同强度的 latent 扰动或流匹配反向 Euler 积分, 最后调用同一
-    pipeline 重新生成图像。它用于共同攻击簇对齐, 不伪装为外部方法官方 legacy 结果。
-    """
-
-    import torch
+    from experiments.runtime.diffusion.regeneration_attacks import diffusion_attack_spec
 
     family = normalize_attack_request(attack_family)
     if family not in DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES:
         raise ValueError(f"regeneration_attack_name_required:{attack_family}")
-    base_latents = _encode_image_latents(pipe, image.convert("RGB"), size=int(size), device=device)
-    generator = torch.Generator(device=device).manual_seed(int(seed))
-    noise = torch.randn(base_latents.shape, generator=generator, device=device, dtype=base_latents.dtype)
-    strength_by_attack = {
-        "img2img_regeneration": 0.35,
-        "ddim_inversion_regeneration": 0.40,
-        "sdedit_regeneration": 0.45,
-        "diffusion_purification": 0.32,
-        "global_editing_attack": 0.48,
-        "local_editing_attack": 0.42,
-        "visual_paraphrase_attack": 0.55,
-        "adversarial_removal_attack": 0.38,
-    }
-    strength = float(strength_by_attack[family])
-    if family == "ddim_inversion_regeneration":
-        inverted_latents = _invert_flow_matching_latents(
-            pipe,
-            base_latents,
-            prompt=prompt,
-            num_inference_steps=max(1, int(num_inference_steps)),
-        )
-        attack_latents = (1.0 - strength) * inverted_latents + strength * noise
-        transform_name = "sd35_flow_matching_inversion_regeneration"
-    elif family == "sdedit_regeneration":
-        attack_latents = base_latents + strength * noise
-        transform_name = "sd35_adapter_sdedit_latent_noise_regeneration"
-    elif family == "diffusion_purification":
-        attack_latents = (1.0 - strength) * base_latents + strength * noise
-        transform_name = "sd35_adapter_diffusion_purification_regeneration"
-    elif family == "global_editing_attack":
-        attack_latents = (1.0 - strength) * base_latents + strength * noise
-        prompt = f"{prompt}, with a changed global style and lighting"
-        transform_name = "sd35_adapter_global_editing_attack"
-    elif family == "local_editing_attack":
-        local_mask = torch.zeros_like(base_latents)
-        height_start = local_mask.shape[-2] // 4
-        height_end = height_start + max(1, local_mask.shape[-2] // 2)
-        width_start = local_mask.shape[-1] // 4
-        width_end = width_start + max(1, local_mask.shape[-1] // 2)
-        local_mask[..., height_start:height_end, width_start:width_end] = 1.0
-        attack_latents = base_latents + strength * noise * local_mask
-        transform_name = "sd35_adapter_local_editing_attack"
-    elif family == "visual_paraphrase_attack":
-        attack_latents = (1.0 - strength) * base_latents + strength * noise
-        prompt = f"{prompt}, redrawn with the same semantics but different visual composition"
-        transform_name = "sd35_adapter_visual_paraphrase_attack"
-    elif family == "adversarial_removal_attack":
-        if detection_score is None:
-            raise ValueError("对抗去水印攻击必须接收实际 baseline 检测分数函数")
-        from diffusers import StableDiffusion3Img2ImgPipeline
-
-        img2img = StableDiffusion3Img2ImgPipeline.from_pipe(pipe).to(device)
-        best_image = image.convert("RGB")
-        best_score = float(detection_score(best_image))
-        query_count = 8
-        for query_index in range(query_count):
-            query_generator = torch.Generator(device=device).manual_seed(int(seed) + query_index)
-            query_strength = 0.25 + 0.30 * query_index / (query_count - 1)
-            with torch.inference_mode():
-                candidate = img2img(
-                    prompt=prompt,
-                    image=image,
-                    strength=query_strength,
-                    guidance_scale=1.0,
-                    num_inference_steps=max(1, int(num_inference_steps)),
-                    generator=query_generator,
-                ).images[0]
-            candidate_score = float(detection_score(candidate))
-            if candidate_score < best_score:
-                best_image = candidate
-                best_score = candidate_score
-        return best_image.convert("RGB"), "detector_guided_black_box_img2img_search"
-    else:
-        attack_latents = (1.0 - strength) * base_latents + strength * noise
-        transform_name = "sd35_adapter_img2img_latent_regeneration"
-    with torch.inference_mode():
-        generated = pipe(
-            prompt,
-            guidance_scale=1.0,
-            num_inference_steps=max(1, int(num_inference_steps)),
-            height=int(size),
-            width=int(size),
-            latents=attack_latents.to(dtype=getattr(getattr(pipe, "transformer", None), "dtype", attack_latents.dtype)),
-            generator=generator,
-        ).images[0]
-    return generated.convert("RGB"), transform_name
+    spec = diffusion_attack_spec(family)
+    runtime = _shared_diffusion_attack_runtime(pipe, size=int(size), device=device)
+    execution = runtime.apply(
+        image.convert("RGB"),
+        spec,
+        seed=int(seed),
+        prompt_text=prompt,
+        detection_score=detection_score,
+    )
+    return (
+        execution.image.convert("RGB"),
+        spec.attack_implementation,
+        execution.to_record(),
+    )
 
 
 def apply_formal_image_attack(
@@ -632,9 +558,8 @@ def apply_formal_image_attack(
     prompt: str = "",
     size: int = 512,
     device: str = "cuda",
-    num_inference_steps: int = 8,
     detection_score: Callable[[Any], float] | None = None,
-) -> tuple[Any, str]:
+) -> tuple[Any, str, dict[str, Any]]:
     """执行共同攻击矩阵中的图像级攻击, 并对再生成攻击显式要求 pipeline。"""
 
     if is_regeneration_attack(attack_family):
@@ -648,16 +573,9 @@ def apply_formal_image_attack(
             prompt=prompt,
             size=int(size),
             device=device,
-            num_inference_steps=int(num_inference_steps),
             detection_score=detection_score,
         )
     return apply_standard_geometric_image_attack(image, attack_family=attack_family, seed=int(seed))
-
-
-def apply_image_attack(image: Any, *, attack_family: str, seed: int) -> tuple[Any, str]:
-    """兼容旧调用名称, 仅用于不需要扩散 pipeline 的图像攻击。"""
-
-    return apply_formal_image_attack(image, attack_family=attack_family, seed=int(seed))
 
 
 def observation_digest(payload: dict[str, Any]) -> dict[str, Any]:

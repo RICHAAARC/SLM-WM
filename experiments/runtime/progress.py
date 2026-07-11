@@ -252,8 +252,8 @@ def progress_bar(total: int, *, desc: str, enabled: bool = True) -> Iterator[obj
     """创建可手动更新的总体进度条。
 
     该函数用于一个 workflow 内部存在多个资源环节的情况。例如先用
-    SD3.5 img2img pipeline 处理一部分攻击, 再释放显存并加载 DDIM
-    inversion 后端处理另一部分攻击。两个资源环节共享同一个总体进度条,
+    SD3.5 img2img pipeline 处理全图攻击, 再按需调用 flow-matching
+    inversion 与 inpainting 后端。多个资源环节共享同一个总体进度条,
     用户看到的是整体任务完成度, 而不是每个样本内部 diffusion step。
     """
 

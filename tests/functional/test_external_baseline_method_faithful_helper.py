@@ -1,4 +1,4 @@
-"""验证外部 baseline method-faithful helper 的冷启动兼容能力。"""
+"""验证外部 baseline method-faithful helper 的冷启动源码适配能力。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 from PIL import Image
 
 from external_baseline.primary.sd35_method_faithful_common import (
-    apply_image_attack,
+    apply_formal_image_attack,
     canonical_attack_family,
     canonical_attack_name,
     regeneration_formal_image_attack_names,
@@ -20,17 +20,17 @@ from paper_experiments.runners.external_baseline_method_faithful import (
     DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
     DEFAULT_T2SMARK_INVERSION_ENTRY,
     DEFAULT_T2SMARK_SOURCE_ENTRY,
-    T2SMARK_FORMAL_ATTACK_COMPAT_MARKER,
+    T2SMARK_FORMAL_ATTACK_SOURCE_PATCH_MARKER,
     PRIMARY_BASELINE_METHODS,
-    T2SMARK_INVERSION_COMPAT_MARKER,
+    T2SMARK_INVERSION_SOURCE_PATCH_MARKER,
     ExternalBaselineMethodFaithfulConfig,
     build_and_run_primary_baseline_adapters,
     build_t2smark_image_pairs,
     count_t2smark_result_items,
     count_t2smark_pair_quality_items,
     output_paths,
-    patch_t2smark_formal_attack_compatibility,
-    patch_t2smark_inversion_compatibility,
+    patch_t2smark_formal_attack_source,
+    patch_t2smark_inversion_source,
     run_t2smark_official_if_needed,
     should_run_t2smark_official,
     write_primary_baseline_prompt_plan,
@@ -47,19 +47,24 @@ def test_formal_image_attack_taxonomy_matches_attack_matrix_names() -> None:
 
     assert set(supported_formal_image_attack_names()) == expected_names
     assert canonical_attack_family("jpeg_compression") == "standard_distortion"
-    assert canonical_attack_name("rotate") == "rotation"
+    assert canonical_attack_name("rotation") == "rotation"
     assert canonical_attack_family("crop_resize") == "geometric_transform"
-    assert canonical_attack_family("ddim_inversion") == "regeneration_attack"
-    assert canonical_attack_name("purification") == "diffusion_purification"
-    assert canonical_attack_family("photometric") == "photometric_distortion_attack"
-    assert canonical_attack_name("global_editing") == "global_editing_attack"
-    assert canonical_attack_family("visual_paraphrase") == "visual_paraphrase_attack"
-    assert canonical_attack_family("adversarial_removal") == "adversarial_removal_attack"
+    assert canonical_attack_family("flow_matching_inversion_regeneration") == "regeneration_attack"
+    assert canonical_attack_name("diffusion_purification") == "diffusion_purification"
+    assert canonical_attack_family("photometric_distortion_attack") == "photometric_distortion_attack"
+    assert canonical_attack_name("global_editing_attack") == "global_editing_attack"
+    assert canonical_attack_family("visual_paraphrase_attack") == "visual_paraphrase_attack"
+    assert canonical_attack_family("adversarial_removal_attack") == "adversarial_removal_attack"
     assert set(regeneration_formal_image_attack_names()).issubset(expected_names)
     for attack_name in standard_geometric_formal_image_attack_names():
-        attacked_image, transform_name = apply_image_attack(image, attack_family=attack_name, seed=17)
+        attacked_image, transform_name, attack_execution = apply_formal_image_attack(
+            image,
+            attack_family=attack_name,
+            seed=17,
+        )
         assert attacked_image.mode == "RGB"
         assert transform_name
+        assert attack_execution["attack_seed_random"] == 17
 
 
 @pytest.mark.quick
@@ -90,7 +95,7 @@ def test_external_baseline_notebooks_use_default_formal_attack_matrix() -> None:
 
 
 @pytest.mark.quick
-def test_t2smark_inversion_import_patch_is_idempotent(tmp_path: Path) -> None:
+def test_t2smark_inversion_source_patch_is_idempotent(tmp_path: Path) -> None:
     """T2SMark 官方 inversion 入口缺少 typing 导入时应被 helper 自动补齐。"""
 
     inversion_path = tmp_path / DEFAULT_T2SMARK_INVERSION_ENTRY
@@ -104,20 +109,20 @@ def test_t2smark_inversion_import_patch_is_idempotent(tmp_path: Path) -> None:
     )
     paths = {"output_dir": tmp_path / "outputs" / "external_baseline_method_faithful"}
 
-    first_report = patch_t2smark_inversion_compatibility(tmp_path, paths)
-    second_report = patch_t2smark_inversion_compatibility(tmp_path, paths)
+    first_report = patch_t2smark_inversion_source(tmp_path, paths)
+    second_report = patch_t2smark_inversion_source(tmp_path, paths)
     patched_text = inversion_path.read_text(encoding="utf-8")
 
     assert first_report["source_patch_applied"] is True
     assert second_report["source_patch_applied"] is False
-    assert patched_text.count(T2SMARK_INVERSION_COMPAT_MARKER) == 1
+    assert patched_text.count(T2SMARK_INVERSION_SOURCE_PATCH_MARKER) == 1
     assert "from typing import Any, Callable, Dict, List, Optional, Union" in patched_text
     assert "from diffusers.image_processor import PipelineImageInput" in patched_text
     compile(patched_text, str(inversion_path), "exec")
 
 
 @pytest.mark.quick
-def test_t2smark_formal_attack_patch_adds_common_attack_outputs(tmp_path: Path) -> None:
+def test_t2smark_formal_attack_source_patch_adds_common_attack_outputs(tmp_path: Path) -> None:
     """T2SMark 官方入口应在冷启动时被补齐共同攻击簇输出参数与逻辑。"""
 
     source_path = tmp_path / DEFAULT_T2SMARK_SOURCE_ENTRY
@@ -147,14 +152,14 @@ def test_t2smark_formal_attack_patch_adds_common_attack_outputs(tmp_path: Path) 
     )
     paths = {"output_dir": tmp_path / "outputs" / "external_baseline_method_faithful"}
 
-    first_report = patch_t2smark_formal_attack_compatibility(tmp_path, paths)
-    second_report = patch_t2smark_formal_attack_compatibility(tmp_path, paths)
+    first_report = patch_t2smark_formal_attack_source(tmp_path, paths)
+    second_report = patch_t2smark_formal_attack_source(tmp_path, paths)
     patched_source = source_path.read_text(encoding="utf-8")
     patched_option = option_path.read_text(encoding="utf-8")
 
     assert first_report["formal_attack_patch_applied"] is True
     assert second_report["formal_attack_patch_applied"] is False
-    assert T2SMARK_FORMAL_ATTACK_COMPAT_MARKER in patched_source
+    assert T2SMARK_FORMAL_ATTACK_SOURCE_PATCH_MARKER in patched_source
     assert "slm_attack_families" in patched_option
     assert "slm_save_clean_pair" in patched_option
     assert "formal_attacks" in patched_source
@@ -164,6 +169,10 @@ def test_t2smark_formal_attack_patch_adds_common_attack_outputs(tmp_path: Path) 
     assert "resize((512, 512), Image.Resampling.BICUBIC)" in patched_source
     assert "generate_clean_pair_image" in patched_source
     assert "strict_clean_watermarked_pair" in patched_source
+    assert "score_image_with_master_key" in patched_source
+    assert '"attacked_negative"' in patched_source
+    assert '"attacked_positive"' in patched_source
+    assert '"detection_score"' in patched_source
 
 
 @pytest.mark.quick
