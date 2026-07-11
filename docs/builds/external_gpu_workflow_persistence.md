@@ -79,6 +79,33 @@ runner 返回后必须同时满足以下条件, 才能发布完成 workflow chec
 
 因此, 损坏的 Drive checkpoint 不会在验证前删除本地有效结果; 有效 checkpoint 恢复时也不会把本地 stale 文件混入正式打包输入.
 
+## 跨会话科学来源聚合
+
+主方法逐 Prompt、正式机制消融逐运行和正式 Inception feature batch 都把
+`scientific_unit_provenance` 写入实际完成单元, 而不是由最后一次 Colab 会话
+统一补写环境.每条记录同时绑定:
+
+```text
+完成单元精确配置摘要
+clean detached Git commit 与正式执行锁摘要
+科学 dependency profile、直接依赖和完整哈希锁摘要
+隔离 Python executable 与依赖环境报告摘要
+实际 PyTorch 版本与 PyTorch CUDA build
+实际 CUDA device index、GPU 名称和 compute capability
+生成、检测、标准攻击、再扩散攻击或无随机生成器模式的随机性身份
+```
+
+最终 summary 保存全部 `scientific_unit_id`、配置摘要、环境摘要、GPU 名称和
+随机性摘要集合.同一完成单元出现不同来源内容时立即失败.因此, T4 会话完成的
+Prompt 与 L4 会话完成的 Prompt 可以共同进入同一次正式汇总, 但最终记录会准确
+保留两种真实设备, 不会把全部样本错误归因到最后一个会话.
+
+打包器不会只信任 summary.主方法打包会重新验证每条 result 的完整配置、run id、
+Prompt 身份和正式机制开关; 消融打包会重新绑定逐条机制规范、Prompt 摘要与输出
+职责; 数据集质量打包会按 feature batch 分组, 从组内图像路径和摘要重新计算配置
+摘要, 并再次把特征图像摘要与正式质量 records 对齐.重新聚合结果必须与 summary
+逐字段一致, 才能进入精确 package input manifest.
+
 ## 论文证据边界
 
 所有定时快照和完成 checkpoint 均固定满足:

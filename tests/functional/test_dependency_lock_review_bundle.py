@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
+from io import BytesIO
 import json
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
+import zipfile
 
 import pytest
 
@@ -34,6 +37,43 @@ def _sha256(path: Path) -> str:
     """独立计算测试断言使用的文件 SHA-256."""
 
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _qualification_wheel_bytes() -> bytes:
+    """构造可由真实 ZIP 提取门禁识别的确定性 uv wheel fixture."""
+
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
+        member = zipfile.ZipInfo("uv/uv", date_time=(2024, 1, 1, 0, 0, 0))
+        member.external_attr = 0o100755 << 16
+        archive.writestr(member, b"qualification uv executable")
+    return buffer.getvalue()
+
+
+def _write_qualification_tool_lock(repository_root: Path) -> Any:
+    """写入匹配 fixture wheel 的固定 URL 工具锁并返回离线 downloader."""
+
+    _, wheel_url, _ = review_bundle._read_qualification_tool_lock(
+        review_bundle.ROOT / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
+    )
+    wheel_bytes = _qualification_wheel_bytes()
+    wheel_digest = hashlib.sha256(wheel_bytes).hexdigest()
+    tool_lock_path = repository_root / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
+    tool_lock_path.parent.mkdir(parents=True, exist_ok=True)
+    tool_lock_path.write_text(
+        (
+            f"uv=={review_bundle.UV_DISTRIBUTION_VERSION} "
+            f"--wheel-url={wheel_url} --hash=sha256:{wheel_digest}\n"
+        ),
+        encoding="utf-8",
+    )
+
+    def download(requested_url: str, destination: Path) -> None:
+        assert requested_url == wheel_url
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(wheel_bytes)
+
+    return download
 
 
 def _wheel_item(package_name: str, version: str) -> dict[str, Any]:
@@ -251,15 +291,6 @@ def _qualification_command_runner(
             "environment_overrides": dict(environment_overrides),
         }
         records.append(record)
-        if command[1:4] == ["-m", "venv", "--clear"]:
-            python_path = Path(command[-1]) / "bin/python"
-            python_path.parent.mkdir(parents=True, exist_ok=True)
-            python_path.write_bytes(b"qualification tool python")
-            return {"return_code": 0, "stdout": "", "stderr": ""}
-        if command[1:4] == ["-m", "pip", "install"]:
-            uv_path = Path(command[0]).parent / "uv"
-            uv_path.write_bytes(b"qualification uv executable")
-            return {"return_code": 0, "stdout": "", "stderr": ""}
         if command[-1:] == ["--version"]:
             return {
                 "return_code": 0,
@@ -281,7 +312,8 @@ def _qualification_command_runner(
                 "stdout": _profile("workflow_orchestrator").python_version + "\n",
                 "stderr": "",
             }
-        assert Path(command[1]).name == "write_dependency_lock_review_bundle.py"
+        assert command[1] == "-I"
+        assert Path(command[2]).name == "write_dependency_lock_review_bundle.py"
         assert environment_overrides[
             review_bundle.QUALIFICATION_CHILD_ENVIRONMENT_KEY
         ] == "1"
@@ -306,11 +338,27 @@ def test_fresh_linux_host_launches_every_profile_from_exact_orchestrator_python(
     """六个候选入口都必须先创建精确 orchestrator 子解释器."""
 
     profile = _profile(profile_id)
-    monkeypatch.setattr(
-        review_bundle,
-        "get_dependency_profile",
-        lambda requested_profile_id, path: _profile(requested_profile_id),
+    ready_orchestrator = replace(
+        _profile("workflow_orchestrator"),
+        complete_hash_lock_present=True,
+        complete_hash_lock_digest="c" * 64,
+        complete_hash_lock_dependency_count=1,
+        locked_requirements=(
+            "uv==0.11.28 --hash=sha256:" + "d" * 64,
+        ),
+        formal_ready=True,
+        readiness_blockers=(),
     )
+
+    def get_profile(requested_profile_id: str, path: Path) -> DependencyProfile:
+        if (
+            profile.profile_name in review_bundle.ISOLATED_PYTHON_PROFILE_IDS
+            and requested_profile_id == review_bundle.WORKFLOW_ORCHESTRATOR_PROFILE_ID
+        ):
+            return ready_orchestrator
+        return _profile(requested_profile_id)
+
+    monkeypatch.setattr(review_bundle, "get_dependency_profile", get_profile)
     monkeypatch.setattr(
         review_bundle.repository_environment,
         "require_published_formal_execution_lock",
@@ -319,14 +367,7 @@ def test_fresh_linux_host_launches_every_profile_from_exact_orchestrator_python(
     monkeypatch.setattr(review_bundle.platform, "system", lambda: "Linux")
     monkeypatch.setattr(review_bundle.platform, "machine", lambda: "x86_64")
     tool_lock_path = tmp_path / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
-    tool_lock_path.parent.mkdir(parents=True, exist_ok=True)
-    tool_lock_path.write_text(
-        (
-            review_bundle.ROOT
-            / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
-        ).read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
+    tool_downloader = _write_qualification_tool_lock(tmp_path)
     command_runner, command_records = _qualification_command_runner(
         tmp_path,
         profile,
@@ -338,6 +379,7 @@ def test_fresh_linux_host_launches_every_profile_from_exact_orchestrator_python(
         repository_root=tmp_path,
         qualification_runtime_root=tmp_path / "qualification_runtime",
         command_runner=command_runner,
+        tool_downloader=tool_downloader,
     )
 
     assert report["decision"] == review_bundle.QUALIFICATION_SUCCESS_DECISION
@@ -346,17 +388,17 @@ def test_fresh_linux_host_launches_every_profile_from_exact_orchestrator_python(
     assert report["manifest_path"].endswith(
         f"/{profile.profile_name}/{review_bundle.BUNDLE_MANIFEST_FILE_NAME}"
     )
-    assert len(report["command_results"]) == 8
+    assert len(report["command_results"]) == 6
     assert report_path.is_file()
     assert json.loads(report_path.read_text(encoding="utf-8")) == report
-    pip_install_command = command_records[1]["command"]
-    assert "--require-hashes" in pip_install_command
-    assert "--only-binary=:all:" in pip_install_command
-    assert "--no-deps" in pip_install_command
-    assert str(tool_lock_path.resolve()) in pip_install_command
-    assert command_records[3]["command"][2] == "install"
-    assert "3.12.13" in command_records[3]["command"]
-    assert command_records[4]["command"][1] == "venv"
+    assert report["qualification_tool_wheel_sha256"] is not None
+    assert report["qualification_tool_wheel_member"] == "uv/uv"
+    assert report["qualification_tool_lock_path"].endswith(tool_lock_path.name)
+    assert command_records[0]["command"][-1] == "--version"
+    assert command_records[1]["command"][2] == "install"
+    assert "3.12.13" in command_records[1]["command"]
+    assert command_records[2]["command"][1] == "venv"
+    assert all("pip" not in record["command"][1:3] for record in command_records)
     child_record = command_records[-1]
     assert child_record["command"][-2:] == ["--profile", profile.profile_name]
     child_python = Path(child_record["command"][0])
@@ -389,15 +431,7 @@ def test_host_launcher_rejects_zero_exit_without_review_bundle(
     )
     monkeypatch.setattr(review_bundle.platform, "system", lambda: "Linux")
     monkeypatch.setattr(review_bundle.platform, "machine", lambda: "x86_64")
-    tool_lock_path = tmp_path / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
-    tool_lock_path.parent.mkdir(parents=True, exist_ok=True)
-    tool_lock_path.write_text(
-        (
-            review_bundle.ROOT
-            / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
-        ).read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
+    tool_downloader = _write_qualification_tool_lock(tmp_path)
     command_runner, _ = _qualification_command_runner(
         tmp_path,
         profile,
@@ -409,6 +443,7 @@ def test_host_launcher_rejects_zero_exit_without_review_bundle(
         repository_root=tmp_path,
         qualification_runtime_root=tmp_path / "qualification_runtime",
         command_runner=command_runner,
+        tool_downloader=tool_downloader,
     )
 
     assert report["decision"] == "fail"
@@ -452,6 +487,145 @@ def test_host_launcher_rejects_unhashed_qualification_tool_input(
 
     assert report["decision"] == "fail"
     assert report["failure_reasons"] == ["qualification_tool_lock_invalid"]
+
+
+@pytest.mark.quick
+def test_scientific_profile_rejects_before_download_when_orchestrator_lock_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """科学 profile 不得在父编排完整锁提交前下载或创建任何环境."""
+
+    profile = _profile("sd35_method_runtime_gpu")
+    monkeypatch.setattr(
+        review_bundle,
+        "get_dependency_profile",
+        lambda requested_profile_id, path: _profile(requested_profile_id),
+    )
+    monkeypatch.setattr(
+        review_bundle.repository_environment,
+        "require_published_formal_execution_lock",
+        lambda root: dict(FORMAL_EXECUTION_LOCK),
+    )
+
+    report, _ = review_bundle.launch_dependency_lock_qualification(
+        profile.profile_name,
+        repository_root=tmp_path,
+        qualification_runtime_root=tmp_path / "qualification_runtime",
+        command_runner=lambda *args: (_ for _ in ()).throw(
+            AssertionError("父编排锁缺失后不得执行资格化命令")
+        ),
+        tool_downloader=lambda *args: (_ for _ in ()).throw(
+            AssertionError("父编排锁缺失后不得下载资格化 wheel")
+        ),
+    )
+
+    assert report["decision"] == "fail"
+    assert report["failure_reasons"] == [
+        "qualification_orchestrator_lock_unavailable"
+    ]
+    assert report["command_results"] == []
+
+
+@pytest.mark.quick
+def test_host_launcher_rejects_downloaded_uv_wheel_digest_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """URL 下载成功但 wheel 字节不匹配时不得执行 uv 或创建 Python."""
+
+    profile = _profile("workflow_orchestrator")
+    _bind_common_apis(monkeypatch, profile)
+    monkeypatch.setattr(review_bundle.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(review_bundle.platform, "machine", lambda: "x86_64")
+    tool_downloader = _write_qualification_tool_lock(tmp_path)
+
+    def tampered_download(url: str, destination: Path) -> None:
+        tool_downloader(url, destination)
+        destination.write_bytes(destination.read_bytes() + b"tampered")
+
+    report, _ = review_bundle.launch_dependency_lock_qualification(
+        profile.profile_name,
+        repository_root=tmp_path,
+        qualification_runtime_root=tmp_path / "qualification_runtime",
+        command_runner=lambda *args: (_ for _ in ()).throw(
+            AssertionError("wheel 摘要不匹配后不得执行命令")
+        ),
+        tool_downloader=tampered_download,
+    )
+
+    assert report["decision"] == "fail"
+    assert report["failure_reasons"] == [
+        "qualification_tool_wheel_materialization_failed"
+    ]
+    assert report["command_results"] == []
+
+
+@pytest.mark.quick
+def test_default_qualification_runner_sanitizes_host_python_pip_and_uv_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """默认 runner 必须移除会改变解释器、索引和 uv 行为的宿主变量."""
+
+    observed_environment: dict[str, str] = {}
+    for key, value in {
+        "CONDA_PREFIX": "/host/conda",
+        "PIP_INDEX_URL": "https://mirror.example.test/simple",
+        "PYTHONPATH": "/host/pythonpath",
+        "UV_OFFLINE": "1",
+        "VIRTUAL_ENV": "/host/venv",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+    def run(command: list[str], **kwargs: Any) -> Any:
+        observed_environment.update(kwargs["env"])
+        return review_bundle.subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="ok\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(review_bundle.subprocess, "run", run)
+    result = review_bundle._run_qualification_command(
+        ["tool", "--version"],
+        tmp_path,
+        {"UV_PYTHON_INSTALL_DIR": "/qualified/python"},
+    )
+
+    assert result["return_code"] == 0
+    assert observed_environment["UV_PYTHON_INSTALL_DIR"] == "/qualified/python"
+    assert observed_environment["UV_NO_CONFIG"] == "1"
+    assert observed_environment["PIP_CONFIG_FILE"] == review_bundle.os.devnull
+    for key in (
+        "CONDA_PREFIX",
+        "PIP_INDEX_URL",
+        "PYTHONPATH",
+        "UV_OFFLINE",
+        "VIRTUAL_ENV",
+    ):
+        assert key not in observed_environment
+
+
+@pytest.mark.quick
+def test_host_cli_requires_python_isolated_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """普通 CLI 未使用 ``python -I`` 时必须在任何网络或环境操作前失败."""
+
+    monkeypatch.delenv(
+        review_bundle.QUALIFICATION_CHILD_ENVIRONMENT_KEY,
+        raising=False,
+    )
+    assert review_bundle.sys.flags.isolated == 0
+
+    exit_code = review_bundle.main(["--profile", "workflow_orchestrator"])
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["failure_reasons"] == ["qualification_host_python_not_isolated"]
 
 
 @pytest.mark.quick
@@ -661,6 +835,60 @@ def test_explicit_drive_root_receives_profile_bundle_and_manifest(
         assert _sha256(drive_path) == record["sha256"]
     drive_manifest = drive_bundle_dir / review_bundle.BUNDLE_MANIFEST_FILE_NAME
     assert drive_manifest.read_bytes() == manifest_path.read_bytes()
+    validated_manifest, validated_manifest_path = (
+        review_bundle._validate_written_review_bundle(
+            profile,
+            repository_root=tmp_path,
+            formal_execution_lock=FORMAL_EXECUTION_LOCK,
+            drive_output_dir=drive_root,
+        )
+    )
+    assert validated_manifest == manifest
+    assert validated_manifest_path == manifest_path
+
+    first_drive_file = drive_bundle_dir / manifest["files"][0]["file_name"]
+    first_drive_file.write_bytes(first_drive_file.read_bytes() + b"tampered")
+    with pytest.raises(ValueError, match="摘要或大小"):
+        review_bundle._validate_written_review_bundle(
+            profile,
+            repository_root=tmp_path,
+            formal_execution_lock=FORMAL_EXECUTION_LOCK,
+            drive_output_dir=drive_root,
+        )
+
+
+@pytest.mark.quick
+def test_drive_profile_directory_rejects_unregistered_stale_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Drive 同 profile 目录存在协议外文件时不得生成可接收 manifest."""
+
+    profile = _profile("workflow_orchestrator")
+    _bind_common_apis(monkeypatch, profile)
+    monkeypatch.setattr(
+        review_bundle.candidate_materializer,
+        "materialize_dependency_lock_candidate",
+        lambda profile_id, repository_root: _write_candidate_artifacts(
+            Path(repository_root), profile
+        ),
+    )
+    drive_root = tmp_path / "mounted_drive/dependency_lock_review_bundles"
+    drive_bundle_dir = drive_root / profile.profile_name
+    drive_bundle_dir.mkdir(parents=True)
+    stale_path = drive_bundle_dir / "unregistered.txt"
+    stale_path.write_text("不得删除的协议外文件\n", encoding="utf-8")
+
+    manifest, _ = review_bundle.write_dependency_lock_review_bundle(
+        profile.profile_name,
+        repository_root=tmp_path,
+        drive_output_dir=drive_root,
+    )
+
+    assert manifest["decision"] == "fail"
+    assert manifest["failure_reasons"] == ["drive_bundle_copy_failed"]
+    assert stale_path.is_file()
+    assert not (drive_bundle_dir / review_bundle.BUNDLE_MANIFEST_FILE_NAME).exists()
 
 
 @pytest.mark.quick
@@ -718,6 +946,7 @@ def test_isolated_python_profile_prepares_orchestrator_then_runs_child_materiali
         operations.append("run_child_materializer")
         assert list(command) == [
             str(python_executable),
+            "-I",
             str(tmp_path.resolve() / "scripts/materialize_dependency_lock_candidate.py"),
             "--profile",
             profile.profile_name,

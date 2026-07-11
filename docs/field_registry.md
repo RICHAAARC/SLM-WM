@@ -482,6 +482,44 @@ Notebook 与 repository module 的跨边界数据
 | device_count | runtime | none | false | false | false | Colab runtime 中可见 GPU 设备数量。 |
 | gpu_name | runtime | none | false | false | false | Colab runtime 中首个 GPU 设备名称。 |
 | runtime_environment | runtime | none | false | false | false | 真实 runtime 结果 metadata 中嵌入的环境快照。 |
+| scientific_unit_provenance | provenance | none | true | false | false | 单个 Prompt、正式消融运行或 Inception feature batch 在实际完成进程中写出的代码锁、依赖锁、设备和随机性来源记录。 |
+| scientific_unit_id | provenance | none | true | false | false | 由完成单元精确配置或 batch 图像身份派生的稳定标识。 |
+| scientific_unit_config | protocol | none | true | false | false | 单个语义水印完成单元隐藏密钥原文后的完整科学运行配置。 |
+| scientific_unit_config_digest | provenance | none | true | false | false | 单个完成单元精确科学配置的稳定 SHA-256 摘要。 |
+| scientific_execution_environment | runtime | none | true | false | false | 单个完成单元实际使用的依赖 profile、完整哈希锁、代码锁、Python、PyTorch、CUDA 与 GPU 身份。 |
+| scientific_execution_environment_digest | provenance | none | true | false | false | 单个完成单元实际执行环境记录的稳定 SHA-256 摘要。 |
+| scientific_random_identity_random | random | _random | true | false | false | 单个完成单元实际使用的生成种子、检测种子、攻击种子或明确无随机生成器模式。 |
+| scientific_random_identity_digest_random | random | _digest_random | true | false | false | 单个完成单元随机性身份的稳定 SHA-256 摘要。 |
+| generation_seed_random | random | _random | true | false | false | 单个 Prompt 生成 clean 与 watermarked 配对图像使用的确定性种子。 |
+| public_detection_seed_random | random | _random | true | false | false | 仅图像检测的公开反演噪声使用的确定性种子。 |
+| key_material_digest_random | random | _digest_random | true | false | false | 驱动 keyed carrier、候选方向与注意力目标随机轨迹的密钥材料摘要。 |
+| standard_attack_seeds_random | random | _random | true | false | false | 单个完成单元按标准图像攻击标识保存的实际攻击种子映射。 |
+| diffusion_attack_seeds_random | random | _random | true | false | false | 单个完成单元按再扩散攻击标识保存的实际攻击种子映射。 |
+| feature_extraction_seed_random | random | _random | true | false | false | Inception eval 特征完成单元声明未使用随机生成器的固定随机性模式。 |
+| scientific_unit_provenance_digest | provenance | none | true | false | false | 排除自指字段后单个科学完成单元来源记录的稳定 SHA-256 摘要。 |
+| execution_device_name | runtime | none | true | false | false | 科学 tensor 实际执行的 CUDA 设备字符串, 包括可用时的设备索引。 |
+| visible_cuda_device_count | runtime | none | true | false | false | 完成单元进程实际可见的 CUDA 设备数量。 |
+| cuda_device_index | runtime | none | true | false | false | 科学 tensor 实际绑定且经过范围校验的 CUDA 设备索引。 |
+| cuda_device_name | runtime | none | true | false | false | 按实际 CUDA 设备索引读取的 GPU 名称。 |
+| cuda_device_capability | runtime | none | true | false | false | 实际 CUDA 设备的 major/minor compute capability。 |
+| scientific_unit_provenance_reference_count | metric | none | true | false | false | 最终 records 或 feature rows 对完成单元来源记录的引用数量。 |
+| scientific_unit_provenance_record_count | metric | none | true | false | false | 按 scientific_unit_id 去重后的真实完成单元来源记录数量。 |
+| scientific_unit_provenance_records_digest | provenance | none | true | false | false | 按 scientific_unit_id 排序的全部去重来源记录稳定摘要。 |
+| scientific_unit_ids | provenance | none | true | false | false | 最终汇总实际覆盖的全部科学完成单元标识集合。 |
+| scientific_unit_config_digests | provenance | none | true | false | false | 最终汇总实际覆盖的全部完成单元配置摘要集合。 |
+| scientific_execution_environment_digests | provenance | none | true | false | false | 跨 Colab 会话实际出现的执行环境摘要集合。 |
+| scientific_dependency_profile_ids | provenance | none | true | false | false | 跨完成单元实际使用的依赖 profile 标识集合。 |
+| scientific_dependency_profile_digests | provenance | none | true | false | false | 跨完成单元实际使用的依赖 profile 摘要集合。 |
+| scientific_complete_hash_lock_digests | provenance | none | true | false | false | 跨完成单元实际使用的完整依赖哈希锁摘要集合。 |
+| scientific_formal_execution_commits | provenance | none | true | false | false | 跨完成单元实际使用的40位正式 Git commit 集合。 |
+| scientific_formal_execution_lock_digests | provenance | none | true | false | false | 跨完成单元实际使用的正式代码执行锁摘要集合。 |
+| scientific_torch_versions | runtime | none | true | false | false | 跨完成单元实际加载的 PyTorch 版本集合。 |
+| scientific_torch_cuda_versions | runtime | none | true | false | false | 跨完成单元实际加载的 PyTorch CUDA build 版本集合。 |
+| scientific_execution_device_names | runtime | none | true | false | false | 跨完成单元实际使用的 CUDA device 字符串集合。 |
+| scientific_cuda_device_names | runtime | none | true | false | false | 跨完成单元实际使用的 GPU 型号名称集合。 |
+| scientific_random_identity_digests_random | random | _random | true | false | false | 跨完成单元实际随机性身份摘要集合。 |
+| scientific_unit_provenance_ready | governance | none | true | false | false | 所有引用是否存在有效来源记录且同一 scientific_unit_id 不含冲突内容。 |
+| scientific_unit_provenance_identity_ready | governance | none | true | false | false | Inception 特征来源是否同时绑定当前代码锁和 `sd35_method_runtime_gpu` 完整依赖锁。 |
 | environment_report_path | artifact | none | true | false | false | 指向完整 runtime environment report JSON 的受治理路径。 |
 | geometry_manifest_digest | artifact | none | true | false | false | 真实 attention 捕获运行引用的几何 manifest 稳定摘要。 |
 | elapsed_seconds | runtime | none | true | false | false | 真实推理耗时秒数。 |
@@ -1265,6 +1303,7 @@ Notebook 与 repository module 的跨边界数据
 | t2smark_result_index | protocol | none | false | false | false | T2SMark 官方 results.json 中的样本索引。 |
 | image_pair_count | metric | none | false | false | false | T2SMark adapter 输入 image pair 数量。 |
 | t2smark_result_count | metric | none | false | false | false | T2SMark 官方 results.json 中可读取的样本数量。 |
+| t2smark_run_name | protocol | none | true | false | false | T2SMark 正式运行、复用和打包路径绑定的论文运行层级名称。 |
 | missing_result_indices | metric | none | true | false | false | T2SMark 输入 image pair 中缺少官方结果的索引集合。 |
 | adapter_digest | artifact | none | true | false | false | 外部 baseline adapter manifest 的稳定摘要。 |
 | generation_model_id | runtime | none | true | false | false | 生成外部 baseline 图像所使用的模型标识。|
@@ -2096,6 +2135,10 @@ Notebook 与 repository module 的跨边界数据
 | local_archives | artifact | none | true | false | false | 全角色恢复成功后原子复制到当前仓库 outputs 的闭合包路径映射。 |
 | closed_archive_records | provenance | none | true | false | false | 已校验闭合包的角色、外部路径、本地路径、摘要和生成时间记录。 |
 | all_expected_roles_recovered | governance | none | true | false | false | 本次请求要求的角色集合是否被有效闭合包精确覆盖。 |
-| qualification_tool_lock_path | artifact | none | true | false | false | fresh Linux host 创建精确 orchestrator Python 前消费的固定 uv 单 wheel 哈希锁路径。 |
+| qualification_tool_lock_path | artifact | none | true | false | false | fresh Linux host 创建精确 orchestrator Python 前消费的固定 uv 单 wheel URL 与哈希锁路径。 |
 | qualification_tool_lock_digest | provenance | none | true | false | false | host 资格化工具锁文件的实际 SHA-256; 该输入不属于六个运行 profile 完整锁。 |
+| qualification_tool_wheel_url | provenance | none | true | false | false | 工具锁固定且实际下载的 PyPI Linux x86_64 uv wheel URL。 |
+| qualification_tool_wheel_path | artifact | none | true | false | false | fresh-host 临时根目录中通过摘要门禁的 uv wheel 路径。 |
+| qualification_tool_wheel_sha256 | provenance | none | true | false | false | 下载后重新计算并与工具锁比较的 uv wheel SHA-256。 |
+| qualification_tool_wheel_member | provenance | none | true | false | false | 固定 wheel 内唯一被提取为资格化工具的 uv executable 成员路径。 |
 | qualification_report_path | artifact | none | true | false | false | host launcher 写入 `outputs/dependency_lock_qualification/` 的资格化命令与 child 身份报告路径。 |

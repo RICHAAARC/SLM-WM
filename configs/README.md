@@ -37,7 +37,7 @@ Prompt bank 中受外部来源登记约束的子集来自 Google Research PartiP
 
 直接输入不等于完整 Python wheel 闭包。每个 profile 必须在登记的 Linux x86_64 与完整 CPython patch 中解析并生成 `dependency_profiles/<profile>_lock.txt`; 五个科学 profile 还必须向各自登记的 PyTorch wheel index 解析固定 `torch` / `torchvision` identity。候选生成使用 `pip --dry-run` 且不导入 torch 或执行 CUDA, 因而可以在无 GPU Linux x86_64 host 完成。锁中的直接依赖和传递依赖都必须固定版本并携带实际候选 wheel 的 SHA-256。完整锁需要从实际 resolver report 重建、人工审查、通过回传接收器复验并提交, 不允许人工编造 wheel 摘要。只有锁文件存在、格式有效、逐项带 SHA-256 且覆盖全部直接输入时, 对应 profile 才能达到 `formal_ready=True`。
 
-`dependency_profiles/dependency_qualification_uv_linux_x86_64_lock.txt` 只服务于 fresh host 的资格化工具引导。该文件固定 `uv==0.11.28` 的 Linux manylinux x86_64 wheel SHA-256, 不属于六个运行 profile 的完整依赖锁, 也不支持论文 claim。host launcher 使用该输入创建精确 orchestrator CPython; 正式运行仍只能消费六个 registry profile 各自已提交的完整哈希锁。
+`dependency_profiles/dependency_qualification_uv_linux_x86_64_lock.txt` 只服务于 fresh host 的资格化工具引导。该文件同时固定 `uv==0.11.28` 的 PyPI Linux manylinux x86_64 wheel URL、平台文件名和 SHA-256, 不属于六个运行 profile 的完整依赖锁, 也不支持论文 claim。host launcher 固定由 `python -I` 启动, 仅使用宿主 Python 标准库下载、复验和提取该 wheel, 不调用宿主 `venv`、`pip` 或 `ensurepip`; 随后才由固定 `uv` 创建精确 orchestrator CPython。正式运行仍只能消费六个 registry profile 各自已提交的完整哈希锁。
 
 `workflow_orchestrator` inspection 只核验 CPU 平台与完整锁包集合, 不导入 torch, 也不执行 CUDA 门禁。`experiments.runtime.dependency_preparation` 对五个科学 profile 额外执行 `sys.executable -m pip check`; 父编排 profile 仍核验全部锁包, 但将该兼容性命令标记为不适用。`experiments.runtime.isolated_dependency_environment` 使用固定 `uv==0.11.28` 内置的冻结可下载 Python distribution 列表和完整 CPython patch 创建科学子环境, 并要求实际 `uv` executable 同时通过当前解释器 distribution `RECORD` 的路径与 SHA-256 核验, 防止 PATH 中同版本伪造文件。详细证据契约见 `docs/builds/formal_dependency_environment.md`。
 

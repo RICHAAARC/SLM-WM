@@ -151,6 +151,10 @@ REQUIRED_FIELD_NAMES = frozenset(
         "candidate_materialization",
         "qualification_tool_lock_path",
         "qualification_tool_lock_digest",
+        "qualification_tool_wheel_url",
+        "qualification_tool_wheel_path",
+        "qualification_tool_wheel_sha256",
+        "qualification_tool_wheel_member",
         "qualification_report_path",
     }
 )
@@ -218,8 +222,11 @@ REQUIRED_LOCK_REVIEW_TOKENS = (
     "candidate_materializer.candidate_lock_text",
     "candidate_materializer.candidate_lock_logical_digest",
     "launch_dependency_lock_qualification",
-    '"--require-hashes"',
-    '"--only-binary=:all:"',
+    "_download_qualification_tool_wheel",
+    "_materialize_qualification_uv_tool",
+    "zipfile.ZipFile",
+    '"UV_NO_CONFIG"',
+    "qualification_orchestrator_lock_unavailable",
     "_require_qualification_child_interpreter",
     "_validate_written_review_bundle",
 )
@@ -230,10 +237,15 @@ REQUIRED_LOCK_ACCEPTANCE_TOKENS = (
     "candidate_materializer.candidate_lock_logical_digest",
     'target_path.open("xb")',
     "complete_hash_lock_already_present",
+    "repository_state_changed_before_lock_write",
+    "receiver_code_root_mismatch",
     "lock_written_for_commit",
 )
 QUALIFICATION_TOOL_LOCK_TEXT = (
     "uv==0.11.28 "
+    "--wheel-url=https://files.pythonhosted.org/packages/75/2e/"
+    "62273ee6c9fbebccd8248c153b44870f81ebf5267c31edf4c095d78537fb/"
+    "uv-0.11.28-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl "
     "--hash=sha256:49fe42df9f42056037473f3876adec1615709b57d3470ed39178ff420f3afb9f"
 )
 REQUIRED_CANDIDATE_MATERIALIZER_TOKENS = (

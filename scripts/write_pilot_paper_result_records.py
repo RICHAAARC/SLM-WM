@@ -124,6 +124,16 @@ def file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+def archive_member_digest(archive: ZipFile, entry_info: Any) -> str:
+    """流式计算 ZIP 成员的 SHA-256, 用于跨包同路径内容判等."""
+
+    digest = hashlib.sha256()
+    with archive.open(entry_info, "r") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 class WorkProgress:
     """按文件数与字节数输出低噪声工作量进度。
 
@@ -301,10 +311,17 @@ def materialize_output_entries(root_path: Path, package_paths: Iterable[Path]) -
                 existing = planned_by_destination.get(destination)
                 if existing is not None:
                     existing_package, existing_info, _ = existing
-                    same_payload = (
-                        int(existing_info.file_size) == int(entry_info.file_size)
-                        and int(existing_info.CRC) == int(entry_info.CRC)
+                    same_size = int(existing_info.file_size) == int(
+                        entry_info.file_size
                     )
+                    if same_size:
+                        with ZipFile(existing_package) as existing_archive:
+                            same_payload = archive_member_digest(
+                                existing_archive,
+                                existing_info,
+                            ) == archive_member_digest(archive, entry_info)
+                    else:
+                        same_payload = False
                     if not same_payload:
                         raise RuntimeError(
                             "结果包包含同路径不同内容, 拒绝跨运行覆盖: "

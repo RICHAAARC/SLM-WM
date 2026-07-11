@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import sys
 import time
+from types import SimpleNamespace
 from typing import Any
 import zipfile
 
@@ -44,6 +45,15 @@ from experiments.runtime.resume_checkpoint import (
     persist_checkpoint_files,
     persist_progress_checkpoint,
     restore_role_checkpoints,
+)
+from experiments.runtime.dependency_profiles import (
+    require_dependency_profile_ready,
+)
+from experiments.runtime.scientific_unit_provenance import (
+    SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS,
+    aggregate_scientific_unit_provenance,
+    build_scientific_unit_provenance,
+    validate_scientific_unit_provenance,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
@@ -154,6 +164,99 @@ def _numeric_vector(value: Any) -> list[float]:
     return vector
 
 
+def _inception_batch_config_digest(
+    item_identity: list[dict[str, Any]],
+) -> str:
+    """绑定一个 Inception batch 实际消费的图像身份与算子配置."""
+
+    return build_stable_digest(
+        {
+            "feature_backend": FORMAL_FEATURE_BACKEND,
+            "feature_extractor_id": FORMAL_FEATURE_EXTRACTOR_ID,
+            "item_identity": item_identity,
+        }
+    )
+
+
+def _empty_scientific_unit_provenance_summary() -> dict[str, Any]:
+    """返回缺少逐完成单元来源时的明确阻断摘要."""
+
+    return {
+        "scientific_unit_provenance_reference_count": 0,
+        "scientific_unit_provenance_record_count": 0,
+        "scientific_unit_provenance_records_digest": "",
+        "scientific_unit_ids": [],
+        "scientific_unit_config_digests": [],
+        "scientific_execution_environment_digests": [],
+        "scientific_dependency_profile_ids": [],
+        "scientific_dependency_profile_digests": [],
+        "scientific_complete_hash_lock_digests": [],
+        "scientific_formal_execution_commits": [],
+        "scientific_formal_execution_lock_digests": [],
+        "scientific_torch_versions": [],
+        "scientific_torch_cuda_versions": [],
+        "scientific_execution_device_names": [],
+        "scientific_cuda_device_names": [],
+        "scientific_random_identity_digests_random": [],
+        "scientific_unit_provenance_ready": False,
+    }
+
+
+def validate_inception_feature_provenance_groups(
+    feature_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """把每个 feature batch 的来源配置绑定到组内精确图像集合."""
+
+    grouped_rows: dict[str, list[dict[str, Any]]] = {}
+    for row in feature_rows:
+        provenance = row.get("scientific_unit_provenance")
+        if not isinstance(provenance, dict):
+            raise TypeError("Inception 特征行缺少科学完成单元来源")
+        unit_id = str(provenance.get("scientific_unit_id", ""))
+        grouped_rows.setdefault(unit_id, []).append(row)
+
+    validated_references: list[dict[str, Any]] = []
+    for unit_id, rows in grouped_rows.items():
+        item_identity = [
+            {
+                "dataset_quality_record_id": row[
+                    "dataset_quality_record_id"
+                ],
+                "dataset_quality_image_role": row[
+                    "dataset_quality_image_role"
+                ],
+                "image_path": row["image_path"],
+                "image_digest": row["image_digest"],
+            }
+            for row in rows
+        ]
+        batch_identity_digest = build_stable_digest(
+            [
+                (
+                    identity["dataset_quality_record_id"],
+                    identity["dataset_quality_image_role"],
+                )
+                for identity in item_identity
+            ]
+        )
+        expected_unit_id = f"feature_batch_{batch_identity_digest[:16]}"
+        if unit_id != expected_unit_id:
+            raise ValueError("Inception feature batch 标识与组内图像身份不一致")
+        expected_config_digest = _inception_batch_config_digest(item_identity)
+        group_provenance = [
+            validate_scientific_unit_provenance(
+                row["scientific_unit_provenance"],
+                expected_unit_id=expected_unit_id,
+                expected_config_digest=expected_config_digest,
+            )
+            for row in rows
+        ]
+        if any(record != group_provenance[0] for record in group_provenance[1:]):
+            raise ValueError("同一 Inception feature batch 包含冲突来源")
+        validated_references.extend(group_provenance)
+    return validated_references
+
+
 def build_formal_feature_import_payload(
     *,
     records: Any,
@@ -170,14 +273,59 @@ def build_formal_feature_import_payload(
 
     record_ids = [record.dataset_quality_record_id for record in records]
     expected_pairs = {(record_id, role) for record_id in record_ids for role in ("source", "comparison")}
+    expected_image_identity = {
+        (record.dataset_quality_record_id, "source"): (
+            record.source_image_path,
+            record.source_image_digest,
+        )
+        for record in records
+    }
+    expected_image_identity.update(
+        {
+            (record.dataset_quality_record_id, "comparison"): (
+                record.comparison_image_path,
+                record.comparison_image_digest,
+            )
+            for record in records
+        }
+    )
     vectors_by_key: dict[tuple[str, str], list[float]] = {}
     issues: list[dict[str, Any]] = []
+    try:
+        provenance_references = validate_inception_feature_provenance_groups(
+            feature_rows
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        provenance_references = []
+        issues.append(
+            {
+                "row_index": -1,
+                "field_name": "scientific_unit_provenance",
+                "reason": f"scientific_unit_provenance_group_invalid:{error}",
+            }
+        )
     for row_index, row in enumerate(feature_rows):
         record_id = str(row.get("dataset_quality_record_id", "") or "")
         image_role = str(row.get("dataset_quality_image_role", "") or "")
         feature_backend = str(row.get("feature_backend", "") or "")
         feature_vector = _numeric_vector(row.get("feature_vector"))
         key = (record_id, image_role)
+        _, expected_digest = expected_image_identity.get(
+            key,
+            ("", ""),
+        )
+        if (
+            not str(row.get("image_path", "")).strip()
+            or row.get("image_digest") != expected_digest
+        ):
+            issues.append(
+                {
+                    "row_index": row_index,
+                    "field_name": "image_digest",
+                    "reason": "feature_image_identity_mismatch",
+                }
+            )
+            continue
         if key not in expected_pairs:
             issues.append({"row_index": row_index, "field_name": "dataset_quality_record_id", "reason": "record_role_not_expected"})
             continue
@@ -221,10 +369,25 @@ def build_formal_feature_import_payload(
         comparison_vectors = []
     accepted_pair_count = min(len(source_vectors), len(comparison_vectors))
     expected_pair_count = len(record_ids)
+    try:
+        provenance_summary = aggregate_scientific_unit_provenance(
+            provenance_references,
+            expected_reference_count=len(feature_rows),
+        )
+    except (TypeError, ValueError) as error:
+        issues.append(
+            {
+                "row_index": -1,
+                "field_name": "scientific_unit_provenance",
+                "reason": f"scientific_unit_provenance_aggregate_invalid:{error}",
+            }
+        )
+        provenance_summary = _empty_scientific_unit_provenance_summary()
     formal_feature_backend_ready = (
         accepted_pair_count == expected_pair_count
         and missing_feature_count == 0
         and len(feature_rows) == expected_pair_count * 2
+        and provenance_summary["scientific_unit_provenance_ready"]
         and not issues
     )
     formal_sample_scale_ready = (
@@ -254,6 +417,7 @@ def build_formal_feature_import_payload(
         "formal_sample_scale_ready": formal_sample_scale_ready,
         "unsupported_reason": unsupported_reason,
         "issues": issues,
+        **provenance_summary,
         "supports_paper_claim": False,
     }
     return {
@@ -590,10 +754,13 @@ def extract_formal_inception_feature_rows(
     }
     rows_by_key: dict[tuple[str, str], dict[str, Any]] = {}
     for shard_path in sorted(checkpoint_dir.glob("feature_batch_*.jsonl")):
-        for line in shard_path.read_text(encoding="utf-8-sig").splitlines():
-            if not line.strip():
-                continue
-            row = json.loads(line)
+        shard_rows = [
+            json.loads(line)
+            for line in shard_path.read_text(encoding="utf-8-sig").splitlines()
+            if line.strip()
+        ]
+        shard_item_identity: list[dict[str, Any]] = []
+        for row in shard_rows:
             if not isinstance(row, dict):
                 raise TypeError("正式 Inception 特征检查点行必须是 JSON object")
             key = (
@@ -613,6 +780,7 @@ def extract_formal_inception_feature_rows(
                 and len(normalized_feature_vector) == 2048
                 and row.get("image_path") == expected["image_path"]
                 and row.get("image_digest") == expected["image_digest"]
+                and isinstance(row.get("scientific_unit_provenance"), dict)
                 and row.get("supports_paper_claim") is False
             )
             if not ready:
@@ -621,6 +789,38 @@ def extract_formal_inception_feature_rows(
             if existing is not None and existing != row:
                 raise RuntimeError("正式 Inception 特征检查点包含冲突记录")
             rows_by_key[key] = row
+            shard_item_identity.append(
+                {
+                    "dataset_quality_record_id": row[
+                        "dataset_quality_record_id"
+                    ],
+                    "dataset_quality_image_role": row[
+                        "dataset_quality_image_role"
+                    ],
+                    "image_path": row["image_path"],
+                    "image_digest": row["image_digest"],
+                }
+            )
+        expected_batch_config_digest = _inception_batch_config_digest(
+            shard_item_identity
+        )
+        expected_unit_id = shard_path.stem
+        validated_provenance_records = [
+            validate_scientific_unit_provenance(
+                row["scientific_unit_provenance"],
+                expected_unit_id=expected_unit_id,
+                expected_config_digest=expected_batch_config_digest,
+            )
+            for row in shard_rows
+        ]
+        if (
+            not validated_provenance_records
+            or any(
+                record != validated_provenance_records[0]
+                for record in validated_provenance_records[1:]
+            )
+        ):
+            raise RuntimeError("正式 Inception batch 来源记录不唯一")
 
     remaining_items = [
         item
@@ -644,6 +844,25 @@ def extract_formal_inception_feature_rows(
         )
         if resolved_device.startswith("cuda") and not torch.cuda.is_available():
             raise RuntimeError("正式 Inception 特征提取要求的 CUDA 设备不可用")
+        if not resolved_device.startswith("cuda"):
+            raise RuntimeError("正式 Inception 特征提取必须在 CUDA 设备执行")
+        feature_runtime_environment = (
+            repository_environment.build_runtime_environment_report(
+                "sd35_method_runtime_gpu",
+                torch_module=torch,
+                verified_formal_execution_lock=context[
+                    "formal_execution_lock"
+                ],
+                repository_root=root_path,
+            )
+        )
+        if feature_runtime_environment["dependency_environment_ready"] is not True:
+            blockers = ",".join(
+                feature_runtime_environment["dependency_readiness_blockers"]
+            )
+            raise RuntimeError(
+                f"正式 Inception 特征依赖环境未通过门禁:{blockers}"
+            )
         model = FeatureExtractorInceptionV3(
             "inception-v3-compat",
             ["2048"],
@@ -668,6 +887,41 @@ def extract_formal_inception_feature_rows(
                 if features.ndim != 2:
                     features = features.reshape(features.shape[0], -1)
                 batch_rows = []
+                batch_item_identity = [
+                    {
+                        "dataset_quality_record_id": record.dataset_quality_record_id,
+                        "dataset_quality_image_role": image_role,
+                        "image_path": relative_or_absolute(image_path, root_path),
+                        "image_digest": image_digest,
+                    }
+                    for record, image_role, image_path, image_digest in batch_items
+                ]
+                batch_identity_digest = build_stable_digest(
+                    [
+                        (
+                            identity["dataset_quality_record_id"],
+                            identity["dataset_quality_image_role"],
+                        )
+                        for identity in batch_item_identity
+                    ]
+                )
+                scientific_unit_id = (
+                    f"feature_batch_{batch_identity_digest[:16]}"
+                )
+                scientific_unit_provenance = build_scientific_unit_provenance(
+                    scientific_unit_id=scientific_unit_id,
+                    scientific_unit_config_digest=_inception_batch_config_digest(
+                        batch_item_identity
+                    ),
+                    runtime_environment=feature_runtime_environment,
+                    execution_device_name=resolved_device,
+                    torch_module=torch,
+                    random_identity_random={
+                        "feature_extraction_seed_random": (
+                            "not_used_deterministic_eval"
+                        )
+                    },
+                )
                 for (record, image_role, image_path, image_digest), feature in zip(
                     batch_items,
                     features,
@@ -681,21 +935,13 @@ def extract_formal_inception_feature_rows(
                         "image_path": relative_or_absolute(image_path, root_path),
                         "image_digest": image_digest,
                         "feature_vector": [float(value) for value in feature.tolist()],
+                        "scientific_unit_provenance": scientific_unit_provenance,
                         "supports_paper_claim": False,
                     }
                     batch_rows.append(row)
                     rows_by_key[
                         (record.dataset_quality_record_id, image_role)
                     ] = row
-                batch_identity_digest = build_stable_digest(
-                    [
-                        (
-                            row["dataset_quality_record_id"],
-                            row["dataset_quality_image_role"],
-                        )
-                        for row in batch_rows
-                    ]
-                )
                 shard_path = (
                     checkpoint_dir
                     / f"feature_batch_{batch_identity_digest[:16]}.jsonl"
@@ -960,6 +1206,49 @@ def write_dataset_level_quality_outputs(
             ],
         }
     )
+    scientific_unit_provenance_identity_ready = False
+    if formal_feature_payload["report"].get(
+        "scientific_unit_provenance_ready"
+    ) is True:
+        scientific_profile = require_dependency_profile_ready(
+            "sd35_method_runtime_gpu",
+            root_path / "configs" / "dependency_profile_registry.json",
+        )
+        scientific_unit_provenance_identity_ready = all(
+            (
+                formal_feature_payload["report"].get(
+                    "scientific_dependency_profile_ids"
+                )
+                == ["sd35_method_runtime_gpu"],
+                formal_feature_payload["report"].get(
+                    "scientific_dependency_profile_digests"
+                )
+                == [scientific_profile.profile_digest],
+                formal_feature_payload["report"].get(
+                    "scientific_complete_hash_lock_digests"
+                )
+                == [scientific_profile.complete_hash_lock_digest],
+                formal_feature_payload["report"].get(
+                    "scientific_formal_execution_commits"
+                )
+                == [formal_execution_run_lock["formal_execution_commit"]],
+                formal_feature_payload["report"].get(
+                    "scientific_formal_execution_lock_digests"
+                )
+                == [formal_execution_run_lock["formal_execution_lock_digest"]],
+            )
+        )
+    formal_feature_payload["report"][
+        "scientific_unit_provenance_identity_ready"
+    ] = scientific_unit_provenance_identity_ready
+    if not scientific_unit_provenance_identity_ready:
+        formal_feature_payload["source_features"] = None
+        formal_feature_payload["comparison_features"] = None
+        formal_feature_payload["report"]["formal_feature_backend_ready"] = False
+        formal_feature_payload["report"]["formal_sample_scale_ready"] = False
+        formal_feature_payload["report"][
+            "unsupported_reason"
+        ] = "scientific_unit_provenance_identity_invalid"
     metric_rows = build_dataset_quality_metric_rows(
         records,
         root_path,
@@ -992,6 +1281,7 @@ def write_dataset_level_quality_outputs(
         base_summary.get("formal_fid_kid_claim_gate_ready", False)
         and canonical_formal_feature_extractor_ready
         and prompt_contract["prompt_registry_exact_set_ready"]
+        and scientific_unit_provenance_identity_ready
         and formal_feature_payload["report"]["accepted_feature_pair_count"]
         == expected_prompt_count
         and formal_feature_payload["report"]["missing_feature_pair_count"] == 0
@@ -1043,6 +1333,13 @@ def write_dataset_level_quality_outputs(
         ),
         "formal_feature_extractor_ids": formal_feature_extractor_ids,
         "canonical_formal_feature_extractor_ready": canonical_formal_feature_extractor_ready,
+        "scientific_unit_provenance_identity_ready": (
+            scientific_unit_provenance_identity_ready
+        ),
+        **{
+            field_name: formal_feature_payload["report"][field_name]
+            for field_name in SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS
+        },
         "formal_fid_kid_claim_gate_ready": formal_claim_gate_ready,
         "formal_fid_kid_claim_blocker": (
             ""
@@ -1198,6 +1495,36 @@ def package_dataset_level_quality_outputs(
     expected_prompt_digest = build_stable_digest(sorted(expected_prompt_ids))
     feature_records_path = source_dir / "dataset_quality_formal_feature_records.jsonl"
     feature_records_sha256 = path_digest(feature_records_path)
+    packaged_feature_rows = read_formal_feature_rows(feature_records_path)
+    validate_inception_feature_provenance_groups(packaged_feature_rows)
+    packaged_quality_records = tuple(
+        SimpleNamespace(**row)
+        for row in read_jsonl_rows(
+            source_dir / "dataset_quality_image_records.jsonl"
+        )
+    )
+    revalidated_feature_payload = build_formal_feature_import_payload(
+        records=packaged_quality_records,
+        feature_rows=packaged_feature_rows,
+        formal_feature_records_path=feature_records_path,
+        root_path=root_path,
+        formal_min_sample_count=expected_prompt_count,
+        formal_feature_records_sha256=feature_records_sha256,
+    )
+    packaged_scientific_unit_provenance = aggregate_scientific_unit_provenance(
+        (
+            row["scientific_unit_provenance"]
+            for row in packaged_feature_rows
+        ),
+        expected_reference_count=expected_prompt_count * 2,
+    )
+    scientific_unit_provenance_summary_bound = all(
+        summary.get(field_name)
+        == packaged_scientific_unit_provenance[field_name]
+        and feature_report.get(field_name)
+        == packaged_scientific_unit_provenance[field_name]
+        for field_name in SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS
+    )
     manifest_config = manifest.get("config", {})
     metric_contract_ready = (
         len(metric_rows) == 2
@@ -1252,6 +1579,20 @@ def package_dataset_level_quality_outputs(
             summary.get("formal_feature_backend_ready") is True,
             summary.get("formal_sample_scale_ready") is True,
             summary.get("canonical_formal_feature_extractor_ready") is True,
+            summary.get("scientific_unit_provenance_ready") is True,
+            summary.get("scientific_unit_provenance_identity_ready") is True,
+            summary.get("scientific_unit_provenance_reference_count")
+            == paper_run.prompt_count * 2,
+            bool(summary.get("scientific_unit_provenance_records_digest")),
+            scientific_unit_provenance_summary_bound,
+            revalidated_feature_payload["report"][
+                "formal_feature_backend_ready"
+            ]
+            is True,
+            revalidated_feature_payload["report"][
+                "formal_sample_scale_ready"
+            ]
+            is True,
             summary.get("formal_fid_kid_claim_gate_ready") is True,
             manifest.get("artifact_id") == "dataset_level_quality_manifest",
             feature_contract_ready,

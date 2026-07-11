@@ -11,7 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, Mapping
 
 from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
 from experiments.runtime.diffusion.semantic_features import (
@@ -32,6 +32,10 @@ from experiments.runtime.model_sources import (
 from experiments.runtime.repository_environment import file_digest, resolve_code_version
 from experiments.runtime.resume_checkpoint import (
     persist_completed_unit_from_manifest,
+)
+from experiments.runtime.scientific_unit_provenance import (
+    build_scientific_unit_provenance,
+    validate_scientific_unit_provenance,
 )
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -253,12 +257,65 @@ def _tensor_digest(tensor: Any) -> str:
     )
 
 
-def build_semantic_watermark_run_id(config: SemanticWatermarkRuntimeConfig) -> str:
-    """根据完整运行配置生成稳定标识。"""
+def semantic_watermark_runtime_config_payload(
+    config: SemanticWatermarkRuntimeConfig,
+) -> dict[str, Any]:
+    """返回隐藏密钥原文但保留精确科学身份的运行配置."""
 
     payload = asdict(config)
     payload["key_material"] = build_stable_digest({"key_material": config.key_material})
-    return f"semantic_watermark_{build_stable_digest(payload)[:16]}"
+    payload["injection_step_indices"] = list(config.injection_step_indices)
+    payload["standard_attack_profiles"] = list(config.standard_attack_profiles)
+    return payload
+
+
+def semantic_watermark_runtime_config_digest(
+    config: SemanticWatermarkRuntimeConfig,
+) -> str:
+    """计算单个 Prompt 或消融完成单元的配置摘要."""
+
+    return build_stable_digest(semantic_watermark_runtime_config_payload(config))
+
+
+def build_semantic_watermark_run_id(config: SemanticWatermarkRuntimeConfig) -> str:
+    """根据完整运行配置生成稳定标识."""
+
+    return f"semantic_watermark_{semantic_watermark_runtime_config_digest(config)[:16]}"
+
+
+def validate_semantic_watermark_runtime_result_provenance(
+    result_payload: Mapping[str, Any],
+    *,
+    expected_config: SemanticWatermarkRuntimeConfig | None = None,
+) -> dict[str, Any]:
+    """把持久化结果的配置、run id 与科学完成单元来源精确绑定."""
+
+    payload = dict(result_payload)
+    run_id = str(payload.get("run_id", ""))
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise TypeError("语义水印完成结果缺少 metadata")
+    unit_config = metadata.get("scientific_unit_config")
+    if not isinstance(unit_config, Mapping):
+        raise TypeError("语义水印完成结果缺少逐单元配置")
+    resolved_unit_config = dict(unit_config)
+    config_digest = build_stable_digest(resolved_unit_config)
+    if run_id != f"semantic_watermark_{config_digest[:16]}":
+        raise ValueError("语义水印 run id 与逐单元配置摘要不一致")
+    if (
+        expected_config is not None
+        and resolved_unit_config
+        != semantic_watermark_runtime_config_payload(expected_config)
+    ):
+        raise ValueError("语义水印逐单元配置与当前请求不一致")
+    provenance = metadata.get("scientific_unit_provenance")
+    if not isinstance(provenance, Mapping):
+        raise TypeError("语义水印完成结果缺少科学运行来源记录")
+    return validate_scientific_unit_provenance(
+        provenance,
+        expected_unit_id=run_id,
+        expected_config_digest=config_digest,
+    )
 
 
 def load_completed_semantic_watermark_runtime_result(
@@ -285,13 +342,19 @@ def load_completed_semantic_watermark_runtime_result(
         result_payload = json.loads(result_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
-    config_payload = {**asdict(config), "key_material": build_stable_digest({"key_material": config.key_material})}
-    expected_config_digest = build_stable_digest(config_payload)
+    expected_config_digest = semantic_watermark_runtime_config_digest(config)
     if manifest.get("config_digest") != expected_config_digest:
         return None
     if manifest.get("code_version") != resolve_code_version(root_path):
         return None
     if result_payload.get("run_decision") != "pass":
+        return None
+    try:
+        validate_semantic_watermark_runtime_result_provenance(
+            result_payload,
+            expected_config=config,
+        )
+    except (TypeError, ValueError):
         return None
     output_paths = tuple(str(path) for path in manifest.get("output_paths", ()))
     if not output_paths or not all((root_path / path).is_file() for path in output_paths):
@@ -975,6 +1038,31 @@ def run_semantic_watermark_runtime(
                 detections.append(record)
 
     elapsed_seconds = time.time() - started_at
+    random_identity_random = {
+        "generation_seed_random": int(config.seed),
+        "public_detection_seed_random": int(_public_detection_noise_seed(config)),
+        "key_material_digest_random": build_stable_digest(
+            {"key_material": config.key_material}
+        ),
+        "standard_attack_seeds_random": {
+            attack.attack_id: int(config.seed + attack_index)
+            for attack_index, attack in enumerate(attack_configs)
+        },
+        "diffusion_attack_seeds_random": {
+            attack.attack_id: int(config.seed + 20000 + attack_index)
+            for attack_index, attack in enumerate(default_diffusion_attack_specs())
+        }
+        if config.diffusion_attacks_enabled
+        else {},
+    }
+    scientific_unit_provenance = build_scientific_unit_provenance(
+        scientific_unit_id=run_id,
+        scientific_unit_config_digest=semantic_watermark_runtime_config_digest(config),
+        runtime_environment=runtime_versions["runtime_environment"],
+        execution_device_name=str(pipeline._execution_device),
+        torch_module=torch,
+        random_identity_random=random_identity_random,
+    )
     result = SemanticWatermarkRuntimeResult(
         run_id=run_id,
         run_decision="pass" if update_records else "fail",
@@ -993,6 +1081,10 @@ def run_semantic_watermark_runtime(
             "detector_input_access_mode": "image_key_public_model_only",
             "supports_paper_claim": False,
             "paired_quality": paired_quality,
+            "scientific_unit_config": semantic_watermark_runtime_config_payload(
+                config
+            ),
+            "scientific_unit_provenance": scientific_unit_provenance,
         },
     )
     return result, tuple(update_records), tuple(detections), clean_image, watermarked_image, attacked_images
@@ -1088,10 +1180,7 @@ def write_semantic_watermark_runtime_outputs(
             manifest_path.relative_to(root_path).as_posix(),
             *attacked_image_paths,
         ),
-        config={
-            **asdict(config),
-            "key_material": build_stable_digest({"key_material": config.key_material}),
-        },
+        config=semantic_watermark_runtime_config_payload(config),
         code_version=resolve_code_version(root_path),
         rebuild_command="调用 experiments.runners.semantic_watermark_runtime.write_semantic_watermark_runtime_outputs",
         metadata={

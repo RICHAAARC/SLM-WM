@@ -438,6 +438,21 @@ def write_reviewed_dependency_hash_lock(
     report["formal_execution_lock_digest"] = formal_execution_lock[
         "formal_execution_lock_digest"
     ]
+    try:
+        pre_write_head = _read_clean_repository_head(
+            root,
+            git_command_runner=git_command_runner,
+            report=report,
+        )
+        if pre_write_head != current_head:
+            raise ValueError("审查复验期间仓库 HEAD 已发生变化")
+    except (OSError, TypeError, ValueError) as exc:
+        return _write_failure(
+            report,
+            report_path,
+            "repository_state_changed_before_lock_write",
+            str(exc),
+        )
     target_path = (root / profile.complete_hash_lock_path).resolve()
     try:
         target_path.relative_to(root)
@@ -508,12 +523,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     """运行锁接收并用退出码表达是否已形成可提交锁."""
 
     arguments = build_parser().parse_args(argv)
+    requested_root = Path(arguments.root).resolve()
+    if requested_root != ROOT.resolve():
+        print(
+            json.dumps(
+                {
+                    "profile_id": arguments.profile,
+                    "decision": "fail",
+                    "failure_reasons": ["receiver_code_root_mismatch"],
+                    "diagnostic_message": (
+                        "锁接收 CLI 必须由目标仓库 checkout 内的同一份脚本执行."
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            file=sys.stderr,
+        )
+        return 2
     try:
         report, report_path = write_reviewed_dependency_hash_lock(
             arguments.profile,
             arguments.review_bundle_dir,
             arguments.approve_profile,
-            repository_root=arguments.root,
+            repository_root=requested_root,
         )
     except (FileNotFoundError, KeyError, TypeError, ValueError) as exc:
         print(

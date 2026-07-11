@@ -80,8 +80,8 @@ class ExternalBaselineMethodFaithfulConfig:
     drive_output_dir: str = field(
         default_factory=lambda: build_paper_run_config(".").drive_dir("external_baseline_method_faithful")
     )
-    prompt_set: str = "pilot_paper"
-    prompt_file: str = "configs/paper_main_pilot_paper_prompts.txt"
+    prompt_set: str = "probe_paper"
+    prompt_file: str = "configs/paper_main_probe_paper_prompts.txt"
     primary_baseline_id: str = "tree_ring"
     model_id: str = DEFAULT_MODEL_ID
     model_revision: str = DEFAULT_MODEL_REVISION
@@ -90,7 +90,7 @@ class ExternalBaselineMethodFaithfulConfig:
     num_inference_steps: int = DEFAULT_INFERENCE_STEPS
     num_inversion_steps: int = DEFAULT_INFERENCE_STEPS
     guidance_scale: float = DEFAULT_GUIDANCE_SCALE
-    primary_baseline_max_samples: int = 700
+    primary_baseline_max_samples: int = 70
     tree_ring_adapter_mode: str = "method_faithful_sd35"
     gaussian_shading_adapter_mode: str = "method_faithful_sd35"
     shallow_diffuse_adapter_mode: str = "method_faithful_sd35"

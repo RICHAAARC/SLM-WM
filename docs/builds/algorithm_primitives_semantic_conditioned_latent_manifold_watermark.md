@@ -505,6 +505,12 @@ $$
 
 正式 FID/KID 使用 torch-fidelity 0.4.0 的 `inception-v3-compat` 2048 维特征。三个运行层级必须分别覆盖 70/700/7000 对 clean/watermarked 图像, 不允许以小规模像素直方图或前100对样本替代完整运行层级质量统计。
 
+长耗时运行允许跨多个 Colab 会话完成, 但科学身份以完成单元而不是汇总会话为
+边界.每个 Prompt、每个正式消融运行和每个 Inception feature batch 都保存实际
+GPU、PyTorch/CUDA build、完整依赖锁、代码锁、精确配置摘要与随机性身份.最终
+manifest 聚合全部完成单元的来源集合, 不得用最后一次会话的环境字段代表此前已
+完成样本.Inception batch 还必须把来源配置摘要绑定到组内实际图像路径与摘要.
+
 该边界保证几何链仍是参考系恢复机制，而不是绕过内容阈值的第二条 positive 判定路径。
 
 ---

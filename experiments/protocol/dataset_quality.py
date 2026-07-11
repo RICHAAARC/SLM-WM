@@ -304,7 +304,9 @@ def _unbiased_polynomial_mmd_exact(source_features: np.ndarray, comparison_featu
         1,
     )
     cross_term = cross_kernel.mean()
-    return float(max(source_term + comparison_term - 2.0 * cross_term, 0.0))
+    # 无偏 KID 是有限样本 U-statistic, 合法估计值可能略小于0.
+    # 此处不得截断, 否则会把正式估计量改成有偏的非标准指标.
+    return float(source_term + comparison_term - 2.0 * cross_term)
 
 
 def _torch_unbiased_polynomial_mmd_exact(
@@ -336,7 +338,9 @@ def _torch_unbiased_polynomial_mmd_exact(
                 1,
             )
             cross_term = cross_kernel.mean()
-            value = torch.clamp(source_term + comparison_term - 2.0 * cross_term, min=0.0).detach().cpu().item()
+            value = (
+                source_term + comparison_term - 2.0 * cross_term
+            ).detach().cpu().item()
     except Exception:
         return None
     return float(value)
@@ -374,7 +378,7 @@ def _deterministic_subset_polynomial_mmd(source_features: np.ndarray, comparison
                 comparison_features[comparison_indices],
             )
         )
-    return float(max(np.mean(values), 0.0))
+    return float(np.mean(values))
 
 
 def _unbiased_polynomial_mmd(source_features: np.ndarray, comparison_features: np.ndarray) -> float:

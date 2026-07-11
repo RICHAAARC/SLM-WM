@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import hashlib
 import json
 from pathlib import Path
@@ -16,17 +17,38 @@ from experiments.runtime.package_input_manifest import (
 from experiments.ablations.runtime_rerun import (
     FORMAL_RUNTIME_RERUN_ABLATION_IDS,
     FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
+    default_runtime_rerun_ablation_specs,
     package_runtime_rerun_ablations,
 )
 from experiments.artifacts.dataset_level_quality_outputs import (
+    FORMAL_FEATURE_BACKEND,
+    FORMAL_FEATURE_EXTRACTOR_ID,
+    _inception_batch_config_digest,
     canonical_prompt_ids_for_paper_run,
     package_dataset_level_quality_outputs,
     path_digest,
 )
-from experiments.protocol.prompts import PROMPT_FILES
+from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.prompts import (
+    PROMPT_FILES,
+    build_prompt_records,
+    read_prompt_file,
+)
+from experiments.protocol.splits import (
+    apply_split_assignments,
+    group_prompt_ids_by_split,
+)
+from experiments.runtime.scientific_unit_provenance import (
+    aggregate_scientific_unit_provenance,
+)
 from main.core.digest import build_stable_digest
 from experiments.runners.image_only_dataset_runtime import (
     package_image_only_dataset_runtime,
+)
+from experiments.runners.semantic_watermark_runtime import (
+    SemanticWatermarkRuntimeConfig,
+    build_semantic_watermark_run_id,
+    semantic_watermark_runtime_config_payload,
 )
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
@@ -37,11 +59,14 @@ from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 from tests.helpers.scientific_execution_binding import (
     write_test_scientific_execution_binding,
 )
+from tests.helpers.scientific_unit_provenance import (
+    build_test_scientific_unit_provenance,
+)
 
 
-PAPER_RUN_NAME = "pilot_paper"
-TARGET_FPR = 0.01
-PROMPT_COUNT = 700
+PAPER_RUN_NAME = "probe_paper"
+TARGET_FPR = 0.1
+PROMPT_COUNT = 70
 GENERATED_AT = "2026-07-11T00:00:00+00:00"
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
 
@@ -67,6 +92,85 @@ def _write_json(path: Path, payload: object) -> None:
     )
 
 
+def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
+    """写出保持输入顺序的 JSONL 测试记录."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+            for row in rows
+        ),
+        encoding="utf-8",
+    )
+
+
+def _canonical_prompt_records(root: Path) -> tuple[object, ...]:
+    """读取当前测试论文层级的完整规范 Prompt 与 split."""
+
+    paper_run = build_paper_run_config(root)
+    source_prompt_path = (
+        Path(__file__).resolve().parents[2] / paper_run.prompt_file
+    )
+    prompt_path = root / paper_run.prompt_file
+    prompt_path.parent.mkdir(parents=True, exist_ok=True)
+    if not prompt_path.is_file():
+        prompt_path.write_bytes(source_prompt_path.read_bytes())
+    return apply_split_assignments(
+        build_prompt_records(
+            paper_run.prompt_set,
+            read_prompt_file(prompt_path),
+        )
+    )
+
+
+def _runtime_result_payload(
+    config: SemanticWatermarkRuntimeConfig,
+    *,
+    seed: int,
+) -> dict[str, object]:
+    """构造配置、run id 与来源自摘要一致的最小完成结果."""
+
+    unit_config = semantic_watermark_runtime_config_payload(config)
+    config_digest = build_stable_digest(unit_config)
+    run_id = build_semantic_watermark_run_id(config)
+    return {
+        "run_id": run_id,
+        "run_decision": "pass",
+        "metadata": {
+            "scientific_unit_config": unit_config,
+            "scientific_unit_provenance": (
+                build_test_scientific_unit_provenance(
+                    run_id,
+                    config_digest,
+                    seed=seed,
+                    formal_execution_lock=FORMAL_EXECUTION_LOCK,
+                )
+            ),
+        },
+    }
+
+
+def _base_runtime_config(
+    prompt_record: object,
+    paper_run: object,
+) -> SemanticWatermarkRuntimeConfig:
+    """按正式论文配置构造一个 Prompt 的完整主方法运行身份."""
+
+    return SemanticWatermarkRuntimeConfig(
+        prompt=prompt_record.prompt_text,
+        prompt_id=prompt_record.prompt_id,
+        split=prompt_record.split,
+        seed=20260711 + prompt_record.prompt_index,
+        inference_steps=paper_run.inference_steps,
+        guidance_scale=paper_run.guidance_scale,
+        injection_step_indices=paper_run.attention_injection_steps,
+        output_dir=(
+            f"outputs/image_only_dataset_runtime/{PAPER_RUN_NAME}/runs"
+        ),
+    )
+
+
 def _write_required_files(directory: Path, filenames: tuple[str, ...]) -> None:
     """写出不承担字段身份的必要文件。"""
 
@@ -80,10 +184,19 @@ def _prepare_image_runtime(root: Path) -> Path:
     """构造仅图像运行打包门禁所需的最小正式形状。"""
 
     directory = root / "outputs" / "image_only_dataset_runtime" / PAPER_RUN_NAME
+    paper_run = build_paper_run_config(root)
+    prompt_records = _canonical_prompt_records(root)
+    runtime_results = [
+        _runtime_result_payload(
+            _base_runtime_config(prompt_record, paper_run),
+            seed=20260711 + prompt_record.prompt_index,
+        )
+        for prompt_record in prompt_records
+    ]
+    _write_jsonl(directory / "runtime_results.jsonl", runtime_results)
     _write_required_files(
         directory,
         (
-            "runtime_results.jsonl",
             "image_only_detection_records.jsonl",
             "watermark_quality_image_registry.jsonl",
             "frozen_evidence_protocol.json",
@@ -92,6 +205,13 @@ def _prepare_image_runtime(root: Path) -> Path:
             "roc_curve_points.csv",
             "det_curve_points.csv",
         ),
+    )
+    provenance_summary = aggregate_scientific_unit_provenance(
+        (
+            result["metadata"]["scientific_unit_provenance"]
+            for result in runtime_results
+        ),
+        expected_reference_count=PROMPT_COUNT,
     )
     _write_json(
         directory / "dataset_runtime_summary.json",
@@ -102,6 +222,7 @@ def _prepare_image_runtime(root: Path) -> Path:
             "protocol_decision": "pass",
             "full_method_claim_ready": True,
             "detection_curve_data_ready": True,
+            **provenance_summary,
             "supports_paper_claim": True,
         },
     )
@@ -153,10 +274,39 @@ def _prepare_ablation(root: Path) -> Path:
     """构造正式重运行消融打包门禁所需的最小正式形状。"""
 
     directory = root / "outputs" / "formal_mechanism_ablation" / PAPER_RUN_NAME
+    paper_run = build_paper_run_config(root)
+    prompt_records = _canonical_prompt_records(root)
+    specs = default_runtime_rerun_ablation_specs()
+    ablation_records: list[dict[str, object]] = []
+    for spec in specs:
+        for prompt_record in prompt_records:
+            base_config = _base_runtime_config(prompt_record, paper_run)
+            run_config = spec.apply(
+                base_config,
+                f"outputs/formal_mechanism_ablation/{PAPER_RUN_NAME}",
+            )
+            ablation_records.append(
+                {
+                    "prompt_id": prompt_record.prompt_id,
+                    "prompt_digest": build_stable_digest(
+                        {"prompt": prompt_record.prompt_text}
+                    ),
+                    "split": prompt_record.split,
+                    "ablation_id": spec.ablation_id,
+                    "runtime_config": asdict(spec),
+                    "runtime_result": _runtime_result_payload(
+                        run_config,
+                        seed=run_config.seed,
+                    ),
+                }
+            )
+    _write_jsonl(
+        directory / "runtime_rerun_records.jsonl",
+        ablation_records,
+    )
     _write_required_files(
         directory,
         (
-            "runtime_rerun_records.jsonl",
             "formal_detection_records.jsonl",
             "mechanism_pairwise_delta.csv",
         ),
@@ -176,6 +326,29 @@ def _prepare_ablation(root: Path) -> Path:
         "ablation_spec_digest": FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
         "ablation_exact_set_ready": True,
     }
+    split_prompt_ids = group_prompt_ids_by_split(prompt_records)
+    prompt_contract = {
+        "prompt_id_digest": build_stable_digest(
+            sorted(record.prompt_id for record in prompt_records)
+        ),
+        "calibration_prompt_id_digest": build_stable_digest(
+            sorted(split_prompt_ids["calibration"])
+        ),
+        "test_prompt_id_digest": build_stable_digest(
+            sorted(split_prompt_ids["test"])
+        ),
+        "prompt_protocol_exact_set_ready": True,
+    }
+    provenance_summary = aggregate_scientific_unit_provenance(
+        (
+            record["runtime_result"]["metadata"][
+                "scientific_unit_provenance"
+            ]
+            for record in ablation_records
+        ),
+        expected_reference_count=len(ablation_records),
+    )
+    expected_attacked_run_count = len(split_prompt_ids["test"]) * len(specs)
     _write_json(
         directory / "ablation_claim_summary.json",
         {
@@ -183,6 +356,15 @@ def _prepare_ablation(root: Path) -> Path:
             "paper_run_name": PAPER_RUN_NAME,
             "target_fpr": TARGET_FPR,
             **ablation_contract,
+            **prompt_contract,
+            "record_count": len(ablation_records),
+            "expected_attack_and_detection_rerun_count": (
+                expected_attacked_run_count
+            ),
+            "attack_and_detection_rerun_count": expected_attacked_run_count,
+            "formal_attack_coverage_ready_count": len(ablation_records),
+            "formal_attack_coverage_ready": True,
+            **provenance_summary,
             "protocol_decision": "pass",
             "ablation_claim_gate_ready": True,
             "supports_paper_claim": True,
@@ -207,8 +389,12 @@ def _prepare_ablation(root: Path) -> Path:
                     "manifest.local.json",
                 )
             ],
-            "config": {"target_fpr": TARGET_FPR, **ablation_contract},
-            "metadata": ablation_contract,
+            "config": {
+                "target_fpr": TARGET_FPR,
+                **ablation_contract,
+                **prompt_contract,
+            },
+            "metadata": {**ablation_contract, **prompt_contract},
         },
     )
     write_test_scientific_execution_binding(
@@ -229,22 +415,103 @@ def _prepare_dataset_quality(root: Path) -> Path:
     """构造正式 FID/KID 打包门禁所需的最小正式形状。"""
 
     directory = root / "outputs" / "dataset_level_quality" / PAPER_RUN_NAME
-    _write_required_files(
-        directory,
-        (
-            "dataset_quality_image_records.jsonl",
-            "dataset_quality_image_resolution_records.jsonl",
-        ),
-    )
-    feature_records_path = directory / "dataset_quality_formal_feature_records.jsonl"
-    feature_records_path.write_bytes(b"{}\n")
-    feature_sha256 = path_digest(feature_records_path)
+    _canonical_prompt_records(root)
     canonical_ids = canonical_prompt_ids_for_paper_run(
         root_path=root,
         prompt_set=PAPER_RUN_NAME,
         prompt_file=PROMPT_FILES[PAPER_RUN_NAME],
     )
+    quality_records: list[dict[str, object]] = []
+    feature_rows: list[dict[str, object]] = []
+    item_identity: list[dict[str, object]] = []
+    for index, prompt_id in enumerate(canonical_ids):
+        record_id = f"dataset_quality_record_{index:05d}"
+        source_path = f"outputs/fixture_images/{record_id}_source.png"
+        comparison_path = (
+            f"outputs/fixture_images/{record_id}_comparison.png"
+        )
+        source_digest = hashlib.sha256(source_path.encode("utf-8")).hexdigest()
+        comparison_digest = hashlib.sha256(
+            comparison_path.encode("utf-8")
+        ).hexdigest()
+        quality_records.append(
+            {
+                "dataset_quality_record_id": record_id,
+                "prompt_id": prompt_id,
+                "source_image_path": source_path,
+                "source_image_digest": source_digest,
+                "comparison_image_path": comparison_path,
+                "comparison_image_digest": comparison_digest,
+            }
+        )
+        for role, image_path, image_digest, value in (
+            ("source", source_path, source_digest, float(index)),
+            (
+                "comparison",
+                comparison_path,
+                comparison_digest,
+                float(index) + 0.25,
+            ),
+        ):
+            item_identity.append(
+                {
+                    "dataset_quality_record_id": record_id,
+                    "dataset_quality_image_role": role,
+                    "image_path": image_path,
+                    "image_digest": image_digest,
+                }
+            )
+            feature_rows.append(
+                {
+                    "dataset_quality_record_id": record_id,
+                    "dataset_quality_image_role": role,
+                    "feature_backend": FORMAL_FEATURE_BACKEND,
+                    "feature_extractor_id": FORMAL_FEATURE_EXTRACTOR_ID,
+                    "feature_dimension": 2048,
+                    "image_path": image_path,
+                    "image_digest": image_digest,
+                    "feature_vector": [value] * 2048,
+                    "supports_paper_claim": False,
+                }
+            )
+    batch_identity_digest = build_stable_digest(
+        [
+            (
+                identity["dataset_quality_record_id"],
+                identity["dataset_quality_image_role"],
+            )
+            for identity in item_identity
+        ]
+    )
+    scientific_unit_id = f"feature_batch_{batch_identity_digest[:16]}"
+    batch_provenance = build_test_scientific_unit_provenance(
+        scientific_unit_id,
+        _inception_batch_config_digest(item_identity),
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+    )
+    for row in feature_rows:
+        row["scientific_unit_provenance"] = batch_provenance
+    _write_jsonl(
+        directory / "dataset_quality_image_records.jsonl",
+        quality_records,
+    )
+    _write_jsonl(
+        directory / "dataset_quality_formal_feature_records.jsonl",
+        feature_rows,
+    )
+    _write_required_files(
+        directory,
+        (
+            "dataset_quality_image_resolution_records.jsonl",
+        ),
+    )
+    feature_records_path = directory / "dataset_quality_formal_feature_records.jsonl"
+    feature_sha256 = path_digest(feature_records_path)
     prompt_digest = build_stable_digest(sorted(canonical_ids))
+    provenance_summary = aggregate_scientific_unit_provenance(
+        (row["scientific_unit_provenance"] for row in feature_rows),
+        expected_reference_count=PROMPT_COUNT * 2,
+    )
     coverage = {
         "canonical_prompt_id_digest": prompt_digest,
         "registry_prompt_id_digest": prompt_digest,
@@ -254,6 +521,7 @@ def _prepare_dataset_quality(root: Path) -> Path:
         "feature_issue_count": 0,
         "formal_feature_record_count": PROMPT_COUNT * 2,
         "formal_feature_records_sha256": feature_sha256,
+        **provenance_summary,
     }
     _write_json(
         directory / "dataset_quality_formal_feature_import_report.json",
@@ -283,6 +551,7 @@ def _prepare_dataset_quality(root: Path) -> Path:
             "formal_feature_backend_ready": True,
             "formal_sample_scale_ready": True,
             "canonical_formal_feature_extractor_ready": True,
+            "scientific_unit_provenance_identity_ready": True,
             "formal_fid_kid_claim_gate_ready": True,
         },
     )

@@ -492,12 +492,12 @@ def run_semantic_watermark_image_only_session(
     """执行一次可中断, 可恢复且只准备一个科学子环境的 GPU 会话."""
 
     root_path = Path(root).resolve()
-    paper_run_name = os.environ.get("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+    paper_run = build_paper_run_config(root_path)
+    paper_run_name = paper_run.run_name
     if resume_checkpoint_dir is not None:
         os.environ["SLM_WM_RESUME_CHECKPOINT_DIR"] = str(
             Path(resume_checkpoint_dir).expanduser().resolve()
         )
-    paper_run = build_paper_run_config(root_path)
     expected_archive_roles = {
         "image_only_dataset_runtime",
         "dataset_level_quality",

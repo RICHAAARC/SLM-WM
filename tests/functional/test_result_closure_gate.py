@@ -1529,8 +1529,17 @@ def ready_bundle() -> ResultClosureGateInput:
         "ablation_count": len(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
         "per_ablation_calibration_count": len(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
         "generation_rerun_count": PROMPT_COUNT * len(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
-        "attack_and_detection_rerun_count": PROMPT_COUNT
+        "prompt_protocol_exact_set_ready": True,
+        "prompt_id_digest": PROMPT_ID_DIGEST,
+        "calibration_prompt_id_digest": CALIBRATION_PROMPT_ID_DIGEST,
+        "test_prompt_id_digest": TEST_PROMPT_ID_DIGEST,
+        "expected_attack_and_detection_rerun_count": TEST_COUNT
         * len(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
+        "attack_and_detection_rerun_count": TEST_COUNT
+        * len(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
+        "formal_attack_coverage_ready_count": PROMPT_COUNT
+        * len(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
+        "formal_attack_coverage_ready": True,
         "expected_ablation_ids": list(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
         "actual_ablation_ids": list(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
         "ablation_spec_digest": FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
@@ -1912,6 +1921,11 @@ def ready_bundle() -> ResultClosureGateInput:
                 "actual_ablation_ids": list(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
                 "ablation_spec_digest": FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
                 "ablation_exact_set_ready": True,
+                "prompt_protocol_exact_set_ready": True,
+                "prompt_id_digest": PROMPT_ID_DIGEST,
+                "calibration_prompt_id_digest": CALIBRATION_PROMPT_ID_DIGEST,
+                "test_prompt_id_digest": TEST_PROMPT_ID_DIGEST,
+                "formal_attack_coverage_ready": True,
                 "generation_rerun_required": True,
                 "per_ablation_calibration_required": True,
                 "supports_paper_claim": True,
@@ -3293,12 +3307,57 @@ def test_result_closure_gate_rejects_six_item_ablation_summary() -> None:
         "ablation_count": 6,
         "per_ablation_calibration_count": 6,
         "generation_rerun_count": PROMPT_COUNT * 6,
-        "attack_and_detection_rerun_count": PROMPT_COUNT * 6,
+        "expected_attack_and_detection_rerun_count": TEST_COUNT * 6,
+        "attack_and_detection_rerun_count": TEST_COUNT * 6,
+        "formal_attack_coverage_ready_count": PROMPT_COUNT * 6,
         "actual_ablation_ids": six_ids,
         "ablation_spec_digest": build_stable_digest(six_ids),
         "ablation_exact_set_ready": True,
     }
     blocked_bundle = replace(bundle, ablation_summary=six_item_summary)
+
+    report = build_result_closure_gate_report(
+        blocked_bundle,
+        build_result_closure_gate_checks(blocked_bundle),
+    )
+
+    assert report["result_closure_ready"] is False
+    assert "formal_ablation_ready" in report["blocked_check_ids"]
+
+
+@pytest.mark.quick
+def test_result_closure_gate_rejects_ablation_attack_count_from_all_splits() -> None:
+    """正式消融只允许 test split 执行攻击, 不得伪报为全部 Prompt 已攻击."""
+
+    bundle = ready_bundle()
+    invalid_summary = {
+        **bundle.ablation_summary,
+        "attack_and_detection_rerun_count": PROMPT_COUNT
+        * len(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
+    }
+    blocked_bundle = replace(bundle, ablation_summary=invalid_summary)
+
+    report = build_result_closure_gate_report(
+        blocked_bundle,
+        build_result_closure_gate_checks(blocked_bundle),
+    )
+
+    assert report["result_closure_ready"] is False
+    assert "formal_ablation_ready" in report["blocked_check_ids"]
+
+
+@pytest.mark.quick
+def test_result_closure_gate_rejects_ablation_prompt_identity_drift() -> None:
+    """消融数量正确但 Prompt 集摘要漂移时仍必须阻断论文闭合."""
+
+    bundle = ready_bundle()
+    blocked_bundle = replace(
+        bundle,
+        ablation_summary={
+            **bundle.ablation_summary,
+            "test_prompt_id_digest": "f" * 64,
+        },
+    )
 
     report = build_result_closure_gate_report(
         blocked_bundle,

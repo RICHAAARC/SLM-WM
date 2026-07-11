@@ -14,6 +14,9 @@ import pytest
 
 import experiments.artifacts.dataset_level_quality_outputs as dataset_quality_writer
 from experiments.runtime import repository_environment
+from experiments.runtime.scientific_unit_provenance import (
+    build_scientific_unit_provenance,
+)
 from experiments.artifacts.dataset_level_quality_outputs import write_dataset_level_quality_outputs
 from experiments.protocol import (
     FORMAL_FEATURE_BACKEND,
@@ -29,6 +32,78 @@ PAPER_RUN_NAME = "probe_paper"
 TARGET_FPR = 0.1
 PROMPT_COUNT = 70
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+TEST_PROFILE_DIGEST = "1" * 64
+TEST_COMPLETE_HASH_LOCK_DIGEST = "3" * 64
+
+
+class _FakeCuda:
+    """提供正式特征来源夹具需要的最小 CUDA 接口."""
+
+    def is_available(self) -> bool:
+        return True
+
+    def current_device(self) -> int:
+        return 0
+
+    def device_count(self) -> int:
+        return 1
+
+    def get_device_name(self, index: int) -> str:
+        assert index == 0
+        return "NVIDIA T4"
+
+    def get_device_capability(self, index: int) -> tuple[int, int]:
+        assert index == 0
+        return (7, 5)
+
+
+class _FakeTorch:
+    """固定测试 PyTorch 和 CUDA build 身份."""
+
+    __version__ = "2.7.1+cu128"
+    version = SimpleNamespace(cuda="12.8")
+    cuda = _FakeCuda()
+
+
+def build_feature_provenance(
+    unit_id: str,
+    config_digest: str,
+) -> dict[str, object]:
+    """构造字段完整的 GPU 特征完成单元来源记录."""
+
+    return build_scientific_unit_provenance(
+        scientific_unit_id=unit_id,
+        scientific_unit_config_digest=config_digest,
+        runtime_environment={
+            "dependency_environment_ready": True,
+            "formal_execution_lock_ready": True,
+            "isolated_scientific_context_ready": True,
+            "dependency_profile_id": "sd35_method_runtime_gpu",
+            "dependency_profile_digest": TEST_PROFILE_DIGEST,
+            "direct_requirements_digest": "2" * 64,
+            "complete_hash_lock_digest": TEST_COMPLETE_HASH_LOCK_DIGEST,
+            "formal_execution_commit": FORMAL_EXECUTION_LOCK[
+                "formal_execution_commit"
+            ],
+            "formal_execution_lock_digest": FORMAL_EXECUTION_LOCK[
+                "formal_execution_lock_digest"
+            ],
+            "python_version": "3.12.11",
+            "package_versions": {"torch": "2.7.1+cu128"},
+            "cuda_version": "12.8",
+            "device_count": 1,
+            "gpu_name": "NVIDIA T4",
+            "isolated_scientific_context": {
+                "dependency_environment_report_actual_digest": "6" * 64,
+                "current_python_executable_sha256": "7" * 64,
+            },
+        },
+        execution_device_name="cuda:0",
+        torch_module=_FakeTorch(),
+        random_identity_random={
+            "feature_extraction_seed_random": "not_used_deterministic_eval"
+        },
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +118,14 @@ def configure_probe_paper_run(monkeypatch: pytest.MonkeyPatch) -> None:
         repository_environment,
         "require_published_formal_execution_lock",
         lambda _root: dict(FORMAL_EXECUTION_LOCK),
+    )
+    monkeypatch.setattr(
+        dataset_quality_writer,
+        "require_dependency_profile_ready",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            profile_digest=TEST_PROFILE_DIGEST,
+            complete_hash_lock_digest=TEST_COMPLETE_HASH_LOCK_DIGEST,
+        ),
     )
 
 
@@ -200,7 +283,24 @@ def write_inception_checkpoint_fixture(
         }
         for index, identity in enumerate(identities)
     ]
-    (checkpoint_dir / "feature_batch_complete.jsonl").write_text(
+    shard_unit_id = "feature_batch_" + dataset_quality_writer.build_stable_digest(
+        [
+            (
+                identity["dataset_quality_record_id"],
+                identity["dataset_quality_image_role"],
+            )
+            for identity in identities
+        ]
+    )[:16]
+    shard_provenance = build_feature_provenance(
+        shard_unit_id,
+        dataset_quality_writer._inception_batch_config_digest(identities),
+    )
+    rows = [
+        {**row, "scientific_unit_provenance": shard_provenance}
+        for row in rows
+    ]
+    (checkpoint_dir / f"{shard_unit_id}.jsonl").write_text(
         "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
         encoding="utf-8",
     )
@@ -259,7 +359,35 @@ def test_inception_checkpoint_rejects_conflicting_shards(tmp_path: Path) -> None
     )
     conflicting_row = dict(rows[0])
     conflicting_row["feature_vector"] = [9.0] * 2048
-    (context_path.parent / "feature_batch_conflict.jsonl").write_text(
+    conflicting_identity = [
+        {
+            field_name: conflicting_row[field_name]
+            for field_name in (
+                "dataset_quality_record_id",
+                "dataset_quality_image_role",
+                "image_path",
+                "image_digest",
+            )
+        }
+    ]
+    conflicting_unit_id = (
+        "feature_batch_"
+        + dataset_quality_writer.build_stable_digest(
+            [
+                (
+                    conflicting_identity[0]["dataset_quality_record_id"],
+                    conflicting_identity[0]["dataset_quality_image_role"],
+                )
+            ]
+        )[:16]
+    )
+    conflicting_row["scientific_unit_provenance"] = build_feature_provenance(
+        conflicting_unit_id,
+        dataset_quality_writer._inception_batch_config_digest(
+            conflicting_identity
+        ),
+    )
+    (context_path.parent / f"{conflicting_unit_id}.jsonl").write_text(
         json.dumps(conflicting_row, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
@@ -432,9 +560,49 @@ def test_dataset_quality_writer_copies_external_features_and_binds_exact_coverag
             "feature_backend": FORMAL_FEATURE_BACKEND,
             "feature_extractor_id": dataset_quality_writer.FORMAL_FEATURE_EXTRACTOR_ID,
             "feature_vector": [float(index), role_offset, 1.0],
+            "image_path": (
+                record.source_image_path
+                if role == "source"
+                else record.comparison_image_path
+            ),
+            "image_digest": (
+                record.source_image_digest
+                if role == "source"
+                else record.comparison_image_digest
+            ),
         }
         for index, record in enumerate(records)
         for role, role_offset in (("source", 0.0), ("comparison", 0.1))
+    ]
+    feature_rows = [
+        {
+            **row,
+            "scientific_unit_provenance": build_feature_provenance(
+                "feature_batch_"
+                + dataset_quality_writer.build_stable_digest(
+                    [
+                        (
+                            row["dataset_quality_record_id"],
+                            row["dataset_quality_image_role"],
+                        )
+                    ]
+                )[:16],
+                dataset_quality_writer._inception_batch_config_digest(
+                    [
+                        {
+                            field_name: row[field_name]
+                            for field_name in (
+                                "dataset_quality_record_id",
+                                "dataset_quality_image_role",
+                                "image_path",
+                                "image_digest",
+                            )
+                        }
+                    ]
+                ),
+            ),
+        }
+        for row in feature_rows
     ]
     external_feature_path.write_text(
         "".join(json.dumps(row) + "\n" for row in feature_rows),
@@ -610,8 +778,9 @@ def test_dataset_quality_formal_feature_import_keeps_incomplete_coverage_blocked
     assert summary["formal_feature_backend_ready"] is False
     assert summary["formal_sample_scale_ready"] is False
     assert summary["formal_fid_kid_claim_gate_ready"] is False
-    assert summary["accepted_feature_pair_count"] == 2
-    assert summary["missing_feature_pair_count"] == PROMPT_COUNT - 2
+    assert summary["accepted_feature_pair_count"] == 0
+    assert summary["missing_feature_pair_count"] == PROMPT_COUNT
+    assert summary["feature_issue_count"] == 5
 
 
 @pytest.mark.quick

@@ -25,10 +25,17 @@ from experiments.runtime.resume_checkpoint import (
     persist_progress_checkpoint,
     restore_role_checkpoints,
 )
+from experiments.runtime.scientific_unit_provenance import (
+    SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS,
+    aggregate_scientific_unit_provenance,
+)
 from experiments.protocol.paper_run_config import (
     build_paper_run_config,
     normalize_paper_run_name,
 )
+from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.protocol.prompts import build_prompt_records, read_prompt_file
+from experiments.protocol.splits import apply_split_assignments, group_prompt_ids_by_split
 from experiments.runners.image_only_dataset_runtime import (
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
@@ -37,6 +44,7 @@ from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     load_completed_semantic_watermark_runtime_result,
     load_semantic_watermark_runtime_context,
+    validate_semantic_watermark_runtime_result_provenance,
     write_semantic_watermark_runtime_outputs,
 )
 from experiments.runtime.archive_naming import utc_archive_token
@@ -177,6 +185,98 @@ def runtime_rerun_ablation_contract(
     }
 
 
+def _canonical_prompt_contract(
+    root_path: Path,
+    paper_run: Any,
+    base_configs: tuple[SemanticWatermarkRuntimeConfig, ...],
+) -> dict[str, Any]:
+    """核验消融配置精确覆盖当前论文运行的规范 Prompt 与 split.
+
+    此处设计的主要考虑在于: 仅比较 Prompt 数量无法发现重复 Prompt、跨层级
+    Prompt 或 split 漂移. 该校验把正式消融直接绑定到受治理 Prompt 文件, 并把
+    三个 split 的身份摘要写入最终摘要, 供最外层论文门禁复验.
+    """
+
+    canonical_records = apply_split_assignments(
+        build_prompt_records(
+            paper_run.prompt_set,
+            read_prompt_file(root_path / paper_run.prompt_file),
+        )
+    )
+    expected_by_id = {
+        record.prompt_id: (record.prompt_text, record.split)
+        for record in canonical_records
+    }
+    actual_ids = [config.prompt_id for config in base_configs]
+    actual_by_id = {
+        config.prompt_id: (config.prompt, config.split)
+        for config in base_configs
+    }
+    exact_set_ready = bool(
+        len(canonical_records) == paper_run.prompt_count
+        and len(base_configs) == paper_run.prompt_count
+        and len(set(actual_ids)) == len(actual_ids)
+        and actual_by_id == expected_by_id
+    )
+    if not exact_set_ready:
+        raise ValueError("正式消融必须精确覆盖当前论文运行的规范 Prompt 与 split")
+    split_prompt_ids = group_prompt_ids_by_split(canonical_records)
+    return {
+        "prompt_id_digest": build_stable_digest(sorted(expected_by_id)),
+        "calibration_prompt_id_digest": build_stable_digest(
+            sorted(split_prompt_ids["calibration"])
+        ),
+        "test_prompt_id_digest": build_stable_digest(
+            sorted(split_prompt_ids["test"])
+        ),
+        "prompt_protocol_exact_set_ready": True,
+    }
+
+
+def _formal_attack_coverage_ready(
+    detections: tuple[dict[str, Any], ...],
+    *,
+    split: str,
+) -> bool:
+    """核验单个消融运行只在 test split 精确执行完整正式攻击集."""
+
+    attacked_records = tuple(record for record in detections if record.get("attack_id"))
+    if split != "test":
+        return not attacked_records
+    formal_configs = tuple(
+        config
+        for config in default_attack_configs()
+        if config.enabled and config.resource_profile in {"full_main", "full_extra"}
+    )
+    expected_by_key = {
+        (config.attack_id, sample_role): config
+        for config in formal_configs
+        for sample_role in ("clean_negative", "positive_source")
+    }
+    actual_by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for record in attacked_records:
+        key = (str(record.get("attack_id", "")), str(record.get("sample_role", "")))
+        actual_by_key.setdefault(key, []).append(record)
+    if set(actual_by_key) != set(expected_by_key) or any(
+        len(rows) != 1 for rows in actual_by_key.values()
+    ):
+        return False
+    for key, config in expected_by_key.items():
+        record = actual_by_key[key][0]
+        if not all(
+            (
+                record.get("attack_family") == config.attack_family,
+                record.get("attack_name") == config.attack_name,
+                record.get("resource_profile") == config.resource_profile,
+                record.get("attack_config_digest") == attack_config_digest(config),
+                record.get("attack_parameters") == config.attack_parameters,
+                record.get("attack_performed") is True,
+            )
+        ):
+            return False
+    return True
+
+
 def _run_entry(
     prompt_index: int,
     base_config: SemanticWatermarkRuntimeConfig,
@@ -310,6 +410,11 @@ def run_runtime_rerun_ablations(
     resolved_base_configs = tuple(base_configs)
     if not resolved_base_configs:
         raise ValueError("真实重运行消融至少需要一个 Prompt 配置")
+    prompt_contract = _canonical_prompt_contract(
+        root_path,
+        paper_run,
+        resolved_base_configs,
+    )
     split_counts = {
         split: sum(config.split == split for config in resolved_base_configs)
         for split in ("dev", "calibration", "test")
@@ -375,6 +480,11 @@ def run_runtime_rerun_ablations(
                 )
                 new_run_count += 1
                 generated_now = True
+            result_payload = result.to_dict()
+            validate_semantic_watermark_runtime_result_provenance(
+                result_payload,
+                expected_config=run_config,
+            )
             detections = _read_jsonl(root_path / result.detection_record_path)
             run_entries.append(_run_entry(prompt_index, base_config, spec, result, detections))
             if generated_now and len(run_entries) < expected_run_count:
@@ -411,13 +521,20 @@ def run_runtime_rerun_ablations(
         protocols[spec.ablation_id] = protocol
         for entry in spec_entries:
             detections = apply_frozen_evidence_protocol(entry["detections"], protocol)
+            formal_attack_coverage_ready = _formal_attack_coverage_ready(
+                detections,
+                split=str(entry["split"]),
+            )
             formal_records.append(
-                _formal_record(
-                    entry,
-                    detections,
-                    protocol.threshold_digest,
-                    protocol.content_threshold,
-                )
+                {
+                    **_formal_record(
+                        entry,
+                        detections,
+                        protocol.threshold_digest,
+                        protocol.content_threshold,
+                    ),
+                    "formal_attack_coverage_ready": formal_attack_coverage_ready,
+                }
             )
             formal_detection_records.extend(
                 {
@@ -513,11 +630,31 @@ def run_runtime_rerun_ablations(
     _write_csv(metrics_path, metric_rows)
     _write_csv(delta_path, delta_rows)
 
+    scientific_unit_provenance = aggregate_scientific_unit_provenance(
+        (
+            record["runtime_result"]["metadata"]["scientific_unit_provenance"]
+            for record in formal_records
+        ),
+        expected_reference_count=expected_run_count,
+    )
+    expected_attack_and_detection_rerun_count = (
+        split_counts["test"] * len(resolved_specs)
+    )
+    attack_and_detection_rerun_count = sum(
+        bool(record["attack_and_detection_rerun"]) for record in formal_records
+    )
     ablation_claim_gate_ready = (
         ablation_contract["ablation_exact_set_ready"]
+        and prompt_contract["prompt_protocol_exact_set_ready"]
         and len(formal_records) == expected_run_count
         and all(record["runtime_result"]["run_decision"] == "pass" for record in formal_records)
+        and all(record["formal_attack_coverage_ready"] for record in formal_records)
+        and attack_and_detection_rerun_count
+        == expected_attack_and_detection_rerun_count
         and len(protocols) == len(resolved_specs)
+        and scientific_unit_provenance["scientific_unit_provenance_ready"]
+        and scientific_unit_provenance["scientific_unit_provenance_record_count"]
+        == expected_run_count
         and all(
             protocol.calibration_negative_count == split_counts["calibration"]
             for protocol in protocols.values()
@@ -531,6 +668,7 @@ def run_runtime_rerun_ablations(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "paper_run_name": resolved_paper_run_name,
         **ablation_contract,
+        **prompt_contract,
         "record_count": len(formal_records),
         "resumed_run_count": resumed_run_count,
         "new_run_count": new_run_count,
@@ -540,9 +678,18 @@ def run_runtime_rerun_ablations(
         "per_ablation_calibration_count": len(protocols),
         "target_fpr": target_fpr,
         "generation_rerun_count": len(formal_records),
-        "attack_and_detection_rerun_count": sum(
-            bool(record["attack_and_detection_rerun"]) for record in formal_records
+        "expected_attack_and_detection_rerun_count": (
+            expected_attack_and_detection_rerun_count
         ),
+        "attack_and_detection_rerun_count": attack_and_detection_rerun_count,
+        "formal_attack_coverage_ready_count": sum(
+            bool(record["formal_attack_coverage_ready"])
+            for record in formal_records
+        ),
+        "formal_attack_coverage_ready": all(
+            record["formal_attack_coverage_ready"] for record in formal_records
+        ),
+        **scientific_unit_provenance,
         "ablation_claim_gate_ready": ablation_claim_gate_ready,
         "protocol_decision": "pass" if ablation_claim_gate_ready else "fail",
         "supports_paper_claim": ablation_claim_gate_ready,
@@ -572,6 +719,7 @@ def run_runtime_rerun_ablations(
         config={
             "specs": [asdict(spec) for spec in resolved_specs],
             **ablation_contract,
+            **prompt_contract,
             "prompt_count": len(resolved_base_configs),
             "split_counts": split_counts,
             "target_fpr": target_fpr,
@@ -582,8 +730,18 @@ def run_runtime_rerun_ablations(
         metadata={
             "protocol_decision": summary["protocol_decision"],
             **ablation_contract,
+            **prompt_contract,
             "generation_rerun_required": True,
             "per_ablation_calibration_required": True,
+            "formal_attack_coverage_ready": summary[
+                "formal_attack_coverage_ready"
+            ],
+            "scientific_unit_provenance_ready": summary[
+                "scientific_unit_provenance_ready"
+            ],
+            "scientific_unit_provenance_records_digest": summary[
+                "scientific_unit_provenance_records_digest"
+            ],
             "supports_paper_claim": summary["supports_paper_claim"],
         },
     ).to_dict()
@@ -628,6 +786,63 @@ def package_runtime_rerun_ablations(
         raise FileNotFoundError("真实重运行消融输出不完整, 不得打包")
     summary = json.loads((source_dir / "ablation_claim_summary.json").read_text(encoding="utf-8-sig"))
     manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
+    packaged_records = _read_jsonl(source_dir / "runtime_rerun_records.jsonl")
+    for record in packaged_records:
+        validate_semantic_watermark_runtime_result_provenance(
+            record["runtime_result"]
+        )
+    packaged_unit_config_contract_ready = all(
+        record["runtime_result"]["metadata"]["scientific_unit_config"].get(
+            field_name
+        )
+        == record["runtime_config"][field_name]
+        for record in packaged_records
+        for field_name in (
+            "semantic_routing_enabled",
+            "null_space_enabled",
+            "lf_enabled",
+            "tail_robust_enabled",
+            "tail_truncation_enabled",
+            "attention_geometry_enabled",
+            "image_alignment_enabled",
+        )
+    ) and all(
+        record["runtime_result"]["metadata"]["scientific_unit_config"].get(
+            field_name
+        )
+        == record[field_name]
+        for record in packaged_records
+        for field_name in ("prompt_id", "split")
+    ) and all(
+        build_stable_digest(
+            {
+                "prompt": record["runtime_result"]["metadata"][
+                    "scientific_unit_config"
+                ]["prompt"]
+            }
+        )
+        == record["prompt_digest"]
+        and record["runtime_result"]["metadata"]["scientific_unit_config"].get(
+            "output_dir"
+        )
+        == (
+            f"outputs/formal_mechanism_ablation/"
+            f"{resolved_paper_run_name}/runs/{record['ablation_id']}"
+        )
+        for record in packaged_records
+    )
+    packaged_scientific_unit_provenance = aggregate_scientific_unit_provenance(
+        (
+            record["runtime_result"]["metadata"]["scientific_unit_provenance"]
+            for record in packaged_records
+        ),
+        expected_reference_count=len(packaged_records),
+    )
+    scientific_unit_provenance_summary_bound = all(
+        summary.get(field_name)
+        == packaged_scientific_unit_provenance[field_name]
+        for field_name in SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS
+    )
     formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
         manifest.get("formal_execution_run_lock"),
         formal_execution_package_lock,
@@ -677,6 +892,12 @@ def package_runtime_rerun_ablations(
             bool(summary.get("generated_at")),
             summary.get("protocol_decision") == "pass",
             summary.get("ablation_claim_gate_ready") is True,
+            summary.get("scientific_unit_provenance_ready") is True,
+            summary.get("scientific_unit_provenance_record_count")
+            == int(summary.get("record_count", -1)),
+            bool(summary.get("scientific_unit_provenance_records_digest")),
+            scientific_unit_provenance_summary_bound,
+            packaged_unit_config_contract_ready,
             summary.get("supports_paper_claim") is True,
             manifest.get("artifact_id") == "formal_mechanism_ablation_manifest",
             exact_set_ready,

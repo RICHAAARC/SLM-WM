@@ -30,6 +30,7 @@ from experiments.runtime.scientific_execution_binding import (
     scientific_manifest_payload_digest,
     validate_scientific_execution_binding,
 )
+from experiments.protocol.paper_run_config import build_paper_run_config
 
 
 DISPATCH_REPORT_SCHEMA = "scientific_command_dispatch_report"
@@ -170,7 +171,7 @@ def _closed_artifact_record(
 def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
     """顺序运行主方法, 并仅在主证据闭合后运行正式消融."""
 
-    paper_run_name = os.environ.get("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+    paper_run_name = build_paper_run_config(ROOT).run_name
     report_path = (
         ROOT
         / "outputs"
@@ -281,7 +282,7 @@ def package_bound_outputs(*, include_formal_ablation: bool) -> dict[str, Any]:
         package_image_only_dataset_runtime,
     )
 
-    paper_run_name = os.environ.get("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+    paper_run_name = build_paper_run_config(ROOT).run_name
     specifications = [
         (
             "image_only_dataset_runtime",

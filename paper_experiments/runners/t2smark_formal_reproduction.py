@@ -23,10 +23,8 @@ from paper_experiments.baselines.t2smark_pair_quality import (
     DEFAULT_CLIP_MODEL_REVISION,
     write_t2smark_strict_pair_quality_outputs,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import (
-    PILOT_PAPER_FIXED_FPR,
-)
 from experiments.protocol.paper_run_config import (
+    DEFAULT_TARGET_FPR as DEFAULT_PAPER_RUN_TARGET_FPR,
     build_paper_run_config,
     normalize_paper_run_name,
     resolve_count_from_environment,
@@ -61,10 +59,10 @@ from experiments.runtime.scientific_execution_binding import (
 
 DEFAULT_OUTPUT_DIR = "outputs/t2smark_formal_reproduction"
 DEFAULT_DRIVE_OUTPUT_DIR = ""
-DEFAULT_PROMPT_FILE = "configs/paper_main_pilot_paper_prompts.txt"
-DEFAULT_RUN_NAME = "t2smark_sd35_medium_pilot_paper"
-DEFAULT_TARGET_FPR = PILOT_PAPER_FIXED_FPR
-DEFAULT_PROMPT_LIMIT = 700
+DEFAULT_PROMPT_FILE = "configs/paper_main_probe_paper_prompts.txt"
+DEFAULT_RUN_NAME = "t2smark_sd35_medium_probe_paper"
+DEFAULT_TARGET_FPR = DEFAULT_PAPER_RUN_TARGET_FPR
+DEFAULT_PROMPT_LIMIT = 70
 DEFAULT_T2SMARK_CLIP_MODEL_ID = "openai/clip-vit-base-patch32"
 DEFAULT_T2SMARK_LPIPS_NETWORK = "alex"
 FORMAL_T2SMARK_NUM_INFERENCE_STEPS = 20
@@ -81,7 +79,7 @@ class T2SMarkFormalReproductionConfig:
     drive_output_dir: str = field(
         default_factory=lambda: build_paper_run_config(".").drive_dir("external_baseline_official_reference")
     )
-    prompt_set: str = "pilot_paper"
+    prompt_set: str = "probe_paper"
     prompt_file: str = DEFAULT_PROMPT_FILE
     t2smark_run_name: str = DEFAULT_RUN_NAME
     model_id: str = DEFAULT_T2SMARK_MODEL_ID
@@ -357,6 +355,9 @@ def validate_t2smark_formal_protocol_config(
     actual_attacks = configured_attack_names(config.formal_attack_families)
     if config.prompt_set != paper_run.prompt_set:
         raise ValueError("T2SMark prompt_set 必须与当前论文运行层级一致")
+    expected_run_name = f"t2smark_sd35_medium_{paper_run.run_name}"
+    if config.t2smark_run_name != expected_run_name:
+        raise ValueError("T2SMark run name 必须与当前论文运行层级一致")
     if Path(config.prompt_file).name != Path(paper_run.prompt_file).name:
         raise ValueError("T2SMark Prompt 文件必须使用当前论文运行层级的受治理文件")
     if int(config.prompt_limit) != int(paper_run.prompt_count):
@@ -410,6 +411,7 @@ def build_t2smark_formal_protocol_binding(
     payload = {
         "protocol_binding_name": T2SMARK_FORMAL_PROTOCOL_BINDING_NAME,
         "paper_run_name": paper_run.run_name,
+        "t2smark_run_name": config.t2smark_run_name,
         "protocol_profile": paper_run.protocol_profile,
         "prompt_set": config.prompt_set,
         "prompt_protocol_name": str(prompt_report["prompt_protocol_name"]),
@@ -1114,6 +1116,7 @@ def build_default_config() -> T2SMarkFormalReproductionConfig:
     """从环境变量构造默认 Colab 运行配置。"""
 
     paper_run = build_paper_run_config(".")
+    default_run_name = f"t2smark_sd35_medium_{paper_run.run_name}"
     return T2SMarkFormalReproductionConfig(
         output_dir=os.environ.get("SLM_WM_T2SMARK_FORMAL_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         drive_output_dir=os.environ.get(
@@ -1122,7 +1125,10 @@ def build_default_config() -> T2SMarkFormalReproductionConfig:
         ),
         prompt_set=os.environ.get("SLM_WM_PROMPT_SET", paper_run.prompt_set),
         prompt_file=os.environ.get("SLM_WM_T2SMARK_FORMAL_PROMPT_FILE", paper_run.prompt_file),
-        t2smark_run_name=os.environ.get("SLM_WM_T2SMARK_FORMAL_RUN_NAME", DEFAULT_RUN_NAME),
+        t2smark_run_name=os.environ.get(
+            "SLM_WM_T2SMARK_FORMAL_RUN_NAME",
+            default_run_name,
+        ),
         model_id=os.environ.get("SLM_WM_T2SMARK_MODEL_ID", DEFAULT_T2SMARK_MODEL_ID),
         model_revision=os.environ.get("SLM_WM_T2SMARK_MODEL_REVISION", DEFAULT_T2SMARK_MODEL_REVISION),
         seed=int(os.environ.get("SLM_WM_T2SMARK_FORMAL_SEED", "20260621")),

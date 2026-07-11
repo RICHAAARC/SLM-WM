@@ -319,3 +319,70 @@ def test_reviewed_bundle_rejects_head_different_from_candidate_commit(
 
     assert report["decision"] == "fail"
     assert report["failure_reasons"] == ["review_bundle_validation_failed"]
+
+
+@pytest.mark.quick
+def test_reviewed_bundle_rechecks_clean_head_immediately_before_lock_write(
+    tmp_path: Path,
+) -> None:
+    """审查复验期间 HEAD 漂移时不得把候选写入新的仓库状态."""
+
+    _copy_dependency_configs(tmp_path)
+    profile_id = "workflow_orchestrator"
+    bundle_dir = _write_valid_review_bundle(tmp_path, profile_id)
+    rev_parse_calls = 0
+
+    def changing_git_runner(
+        command: list[str],
+        repository_root: Path,
+    ) -> dict[str, Any]:
+        nonlocal rev_parse_calls
+        if command[1] == "rev-parse":
+            rev_parse_calls += 1
+            commit = COMMIT if rev_parse_calls == 1 else "c" * 40
+            return {"return_code": 0, "stdout": commit + "\n", "stderr": ""}
+        return {"return_code": 0, "stdout": "", "stderr": ""}
+
+    profile = get_dependency_profile(
+        profile_id,
+        tmp_path / "configs/dependency_profile_registry.json",
+    )
+    report, _ = lock_writer.write_reviewed_dependency_hash_lock(
+        profile_id,
+        bundle_dir,
+        profile_id,
+        repository_root=tmp_path,
+        git_command_runner=changing_git_runner,
+    )
+
+    assert rev_parse_calls == 2
+    assert report["decision"] == "fail"
+    assert report["failure_reasons"] == [
+        "repository_state_changed_before_lock_write"
+    ]
+    assert not (tmp_path / profile.complete_hash_lock_path).exists()
+
+
+@pytest.mark.quick
+def test_receiver_cli_rejects_code_loaded_from_a_different_checkout(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CLI 不得用当前 checkout 的实现修改另一个 --root 仓库."""
+
+    exit_code = lock_writer.main(
+        [
+            "--profile",
+            "workflow_orchestrator",
+            "--review-bundle-dir",
+            str(tmp_path / "bundle"),
+            "--approve-profile",
+            "workflow_orchestrator",
+            "--root",
+            str(tmp_path),
+        ]
+    )
+
+    assert exit_code == 2
+    payload = json.loads(capsys.readouterr().err)
+    assert payload["failure_reasons"] == ["receiver_code_root_mismatch"]

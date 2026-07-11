@@ -7,8 +7,8 @@
 - `prepare_dependency_profile.py`: 薄转发入口, 在当前解释器中调用 `experiments.runtime.dependency_preparation`; 仅消费已提交且 ready 的完整哈希锁。
 - `prepare_isolated_dependency_environment.py`: 薄转发入口, 使用固定 `uv==0.11.28` 为五个科学 profile 创建并正式准备独立 CPython 子环境。
 - `materialize_dependency_lock_candidate.py`: 在与目标 profile 精确匹配的解释器中解析完整 wheel 闭包候选, 只写 `outputs/`, 不直接修改 `configs/`。
-- `write_dependency_lock_review_bundle.py`: fresh Linux x86_64 host 资格化入口。脚本先通过 `dependency_qualification_uv_linux_x86_64_lock.txt` 的单 wheel SHA-256 安装固定 `uv`, 创建精确 `workflow_orchestrator` CPython 3.12.13 子解释器, 再由该 child 运行唯一审查包实现。`workflow_orchestrator` 候选不要求自身完整锁; 五个科学 profile 必须先由已提交 orchestrator 完整锁准备父环境, 再创建目标 CPython 子解释器并使用登记的 PyTorch index 解析 wheel 闭包。父 launcher 会重新读取 child manifest 和三个候选文件, 不能用退出码0代替受治理审查包。
-- `write_reviewed_dependency_hash_lock.py`: 在人工批准后离线复验 Drive 回传审查包、候选生成代码锁、当前 clean Git HEAD、三个文件摘要和 pip resolver 闭包, 然后把规范候选写入 registry 登记且仍缺失的完整锁路径。该入口不覆盖已有锁、不提交 Git, 写入结论固定不支持论文 claim。
+- `write_dependency_lock_review_bundle.py`: fresh Linux x86_64 host 资格化入口, CLI 必须使用 `python -I`。脚本使用宿主 Python 标准库下载工具锁固定的 PyPI Linux x86_64 `uv` wheel, 复验 URL、平台文件名和 SHA-256 后直接提取唯一 executable, 不依赖宿主 `venv`、`pip` 或 `ensurepip`。固定 `uv` 创建精确 `workflow_orchestrator` CPython 3.12.13 子解释器, 再由该 child 运行唯一审查包实现。`workflow_orchestrator` 候选不要求自身完整锁; 五个科学 profile 在 orchestrator 锁尚未提交时会在下载前失败, 通过顺序门禁后才准备父环境、创建目标 CPython 子解释器并使用登记的 PyTorch index 解析 wheel 闭包。父 launcher 会重新读取本地与 Drive 的 manifest、精确文件集合、路径、大小和摘要, 不能用退出码0代替受治理审查包。
+- `write_reviewed_dependency_hash_lock.py`: 在人工批准后离线复验 Drive 回传审查包、候选生成代码锁、当前 clean Git HEAD、三个文件摘要和 pip resolver 闭包, 并在实际写锁前再次核验 HEAD 与 clean 状态, 然后把规范候选写入 registry 登记且仍缺失的完整锁路径。CLI 只允许由目标 checkout 内同一份脚本修改该 checkout, 不允许从另一代码版本通过 `--root` 写入。该入口不覆盖已有锁、不提交 Git, 写入结论固定不支持论文 claim。
 
 两个 prepare 脚本不保存依赖列表、安装逻辑或环境判断。可复用实现位于 `experiments/runtime/`, 因而普通 Linux GPU 服务器与 Colab 使用同一内层 API。
 

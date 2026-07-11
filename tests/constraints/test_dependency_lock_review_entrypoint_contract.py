@@ -86,8 +86,8 @@ def test_review_notebook_publishes_exact_code_lock_before_single_script() -> Non
         "scripts/write_dependency_lock_review_bundle.py"
     )
     assert "五个科学 profile" in source
-    assert "单 wheel SHA-256 锁安装固定 `uv`" in source
-    assert "不依赖 Colab 系统 Python patch" in source
+    assert "Python 标准库下载工具锁固定的 PyPI Linux x86_64 `uv` wheel" in source
+    assert "不调用宿主 `venv`、`pip` 或 `ensurepip`" in source
     assert "CUDA profile 候选解析不导入或执行 CUDA" in source
     assert "scripts/write_reviewed_dependency_hash_lock.py" in source
 
@@ -156,10 +156,12 @@ def test_review_bundle_script_is_real_host_launcher_with_exact_child_gate() -> N
     source = SCRIPT_PATH.read_text(encoding="utf-8")
     required_tokens = (
         "dependency_qualification_uv_linux_x86_64_lock.txt",
-        '"--require-hashes"',
-        '"--only-binary=:all:"',
-        '"--no-deps"',
+        "_download_qualification_tool_wheel",
+        "_materialize_qualification_uv_tool",
+        "qualification_tool_wheel_sha256",
+        '"UV_NO_CONFIG"',
         '"qualification_orchestrator_venv"',
+        '"qualification_orchestrator_ensurepip"',
         "orchestrator.python_version",
         "QUALIFICATION_PYTHON_DIGEST_ENVIRONMENT_KEY",
         '"PATH":',

@@ -62,6 +62,11 @@ def _ready_repository_dependency_profiles(
         "require_dependency_profile_ready",
         ready_profile,
     )
+    monkeypatch.setattr(
+        selection_module,
+        "resolve_code_version",
+        lambda root: CODE_VERSION,
+    )
 
 
 def _render(template: str, spec: ClosurePackageFamilySpec, paper_run_name: str) -> str:
@@ -2136,6 +2141,29 @@ def test_selection_rejects_package_profile_not_anchored_to_repository_lock(
         mismatched_profile,
     )
     with pytest.raises(ClosurePackageSelectionError, match="仓库正式 profile 不一致"):
+        build_closure_input_selection_report(
+            package_root,
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+            root=tmp_path,
+        )
+
+
+def test_selection_rejects_packages_from_another_repository_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """10类包即使彼此一致, 只要不是当前提交就必须在闭合入口立即阻断."""
+
+    package_root = tmp_path / "drive"
+    _write_all_family_packages(package_root)
+    monkeypatch.setattr(
+        selection_module,
+        "resolve_code_version",
+        lambda root: "b" * 40,
+    )
+
+    with pytest.raises(ClosurePackageSelectionError, match="当前 clean 仓库提交"):
         build_closure_input_selection_report(
             package_root,
             paper_run_name=PAPER_RUN_NAME,

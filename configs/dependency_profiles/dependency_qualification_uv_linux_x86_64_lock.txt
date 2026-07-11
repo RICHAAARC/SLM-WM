@@ -1,1 +1,1 @@
-uv==0.11.28 --hash=sha256:49fe42df9f42056037473f3876adec1615709b57d3470ed39178ff420f3afb9f
+uv==0.11.28 --wheel-url=https://files.pythonhosted.org/packages/75/2e/62273ee6c9fbebccd8248c153b44870f81ebf5267c31edf4c095d78537fb/uv-0.11.28-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl --hash=sha256:49fe42df9f42056037473f3876adec1615709b57d3470ed39178ff420f3afb9f

@@ -33,11 +33,16 @@ from experiments.runtime.resume_checkpoint import (
     persist_progress_checkpoint,
     restore_role_checkpoints,
 )
+from experiments.runtime.scientific_unit_provenance import (
+    SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS,
+    aggregate_scientific_unit_provenance,
+)
 from experiments.runtime.diffusion.regeneration_attacks import default_diffusion_attack_specs
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     load_completed_semantic_watermark_runtime_result,
     load_semantic_watermark_runtime_context,
+    validate_semantic_watermark_runtime_result_provenance,
     write_semantic_watermark_runtime_outputs,
 )
 from experiments.runtime.repository_environment import file_digest
@@ -430,7 +435,12 @@ def run_image_only_dataset_runtime(
             )
             new_prompt_count += 1
             generated_now = True
-        runtime_results.append(result.to_dict())
+        result_payload = result.to_dict()
+        validate_semantic_watermark_runtime_result_provenance(
+            result_payload,
+            expected_config=run_config,
+        )
+        runtime_results.append(result_payload)
         detection_records.extend(_read_jsonl(root_path / result.detection_record_path))
         scientific_update_records.extend(_read_jsonl(root_path / result.update_record_path))
         completed_prompt_ids.append(prompt_record.prompt_id)
@@ -548,6 +558,13 @@ def run_image_only_dataset_runtime(
         len(scientific_update_records) == expected_scientific_update_count
         and scientific_operator_failure_count == 0
     )
+    scientific_unit_provenance = aggregate_scientific_unit_provenance(
+        (
+            result["metadata"]["scientific_unit_provenance"]
+            for result in runtime_results
+        ),
+        expected_reference_count=len(prompt_records),
+    )
     protocol_decision = (
         "pass"
         if len(prompt_records) == resolved_paper_run.prompt_count
@@ -555,6 +572,9 @@ def run_image_only_dataset_runtime(
         and split_counts == expected_split_counts
         and all(result.get("run_decision") == "pass" for result in runtime_results)
         and scientific_operator_gate_ready
+        and scientific_unit_provenance["scientific_unit_provenance_ready"]
+        and scientific_unit_provenance["scientific_unit_provenance_record_count"]
+        == len(prompt_records)
         else "fail"
     )
     attacked_records = tuple(record for record in formal_records if record.get("attack_id"))
@@ -604,6 +624,7 @@ def run_image_only_dataset_runtime(
         and wrong_key_fixed_fpr_ready
         and image_only_protocol_ready
         and scientific_operator_gate_ready
+        and scientific_unit_provenance["scientific_unit_provenance_ready"]
     )
     required_real_gpu_attack_count = len(diffusion_attack_ids)
     measured_real_gpu_attack_count = len(
@@ -636,6 +657,7 @@ def run_image_only_dataset_runtime(
         "expected_scientific_update_record_count": expected_scientific_update_count,
         "scientific_operator_failure_count": scientific_operator_failure_count,
         "scientific_operator_gate_ready": scientific_operator_gate_ready,
+        **scientific_unit_provenance,
         "frozen_threshold_digest": protocol.threshold_digest,
         "target_fpr": resolved_paper_run.target_fpr,
         "clean_test_fixed_fpr_upper_bound_ready": clean_fixed_fpr_ready,
@@ -704,6 +726,12 @@ def run_image_only_dataset_runtime(
             "attack_record_coverage_ready": summary["attack_record_coverage_ready"],
             "attacked_image_evidence_chain_ready": summary["attacked_image_evidence_chain_ready"],
             "scientific_operator_gate_ready": summary["scientific_operator_gate_ready"],
+            "scientific_unit_provenance_ready": summary[
+                "scientific_unit_provenance_ready"
+            ],
+            "scientific_unit_provenance_records_digest": summary[
+                "scientific_unit_provenance_records_digest"
+            ],
             "supports_paper_claim": summary["supports_paper_claim"],
         },
     ).to_dict()
@@ -748,6 +776,80 @@ def package_image_only_dataset_runtime(
         raise FileNotFoundError("仅图像数据集运行输出不完整, 不得打包")
     summary = json.loads((source_dir / "dataset_runtime_summary.json").read_text(encoding="utf-8-sig"))
     manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
+    packaged_runtime_results = _read_jsonl(source_dir / "runtime_results.jsonl")
+    for result in packaged_runtime_results:
+        validate_semantic_watermark_runtime_result_provenance(result)
+    packaged_prompt_records = apply_split_assignments(
+        build_prompt_records(
+            paper_run.prompt_set,
+            read_prompt_file(root_path / paper_run.prompt_file),
+        )
+    )[: paper_run.sample_count]
+    packaged_unit_configs = [
+        result["metadata"]["scientific_unit_config"]
+        for result in packaged_runtime_results
+    ]
+    packaged_unit_config_contract_ready = (
+        len(packaged_unit_configs) == len(packaged_prompt_records)
+        and len(
+            {
+                int(config["seed"]) - prompt.prompt_index
+                for config, prompt in zip(
+                    packaged_unit_configs,
+                    packaged_prompt_records,
+                )
+            }
+        )
+        == 1
+        and all(
+            config.get("prompt_id") == prompt.prompt_id
+            and config.get("prompt") == prompt.prompt_text
+            and config.get("split") == prompt.split
+            and int(config.get("inference_steps", -1))
+            == paper_run.inference_steps
+            and math.isclose(
+                float(config.get("guidance_scale", -1.0)),
+                paper_run.guidance_scale,
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            )
+            and tuple(config.get("injection_step_indices", ()))
+            == paper_run.attention_injection_steps
+            and config.get("output_dir")
+            == (
+                f"outputs/image_only_dataset_runtime/"
+                f"{resolved_paper_run_name}/runs"
+            )
+            and all(
+                config.get(field_name) is True
+                for field_name in (
+                    "semantic_routing_enabled",
+                    "null_space_enabled",
+                    "lf_enabled",
+                    "tail_robust_enabled",
+                    "tail_truncation_enabled",
+                    "attention_geometry_enabled",
+                    "image_alignment_enabled",
+                )
+            )
+            for config, prompt in zip(
+                packaged_unit_configs,
+                packaged_prompt_records,
+            )
+        )
+    )
+    packaged_scientific_unit_provenance = aggregate_scientific_unit_provenance(
+        (
+            result["metadata"]["scientific_unit_provenance"]
+            for result in packaged_runtime_results
+        ),
+        expected_reference_count=paper_run.prompt_count,
+    )
+    scientific_unit_provenance_summary_bound = all(
+        summary.get(field_name)
+        == packaged_scientific_unit_provenance[field_name]
+        for field_name in SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS
+    )
     formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
         manifest.get("formal_execution_run_lock"),
         formal_execution_package_lock,
@@ -765,6 +867,12 @@ def package_image_only_dataset_runtime(
             bool(summary.get("generated_at")),
             summary.get("protocol_decision") == "pass",
             summary.get("full_method_claim_ready") is True,
+            summary.get("scientific_unit_provenance_ready") is True,
+            summary.get("scientific_unit_provenance_record_count")
+            == paper_run.prompt_count,
+            bool(summary.get("scientific_unit_provenance_records_digest")),
+            scientific_unit_provenance_summary_bound,
+            packaged_unit_config_contract_ready,
             summary.get("detection_curve_data_ready") is True,
             summary.get("supports_paper_claim") is True,
             manifest.get("artifact_id")

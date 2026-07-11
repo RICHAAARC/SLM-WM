@@ -3030,7 +3030,34 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
         and record_count == bundle.expected_prompt_count * ablation_count
         and _int_value(bundle.ablation_summary.get("per_ablation_calibration_count")) == ablation_count
         and _int_value(bundle.ablation_summary.get("generation_rerun_count")) == record_count
-        and _int_value(bundle.ablation_summary.get("attack_and_detection_rerun_count")) == record_count
+        and _strict_bool(
+            bundle.ablation_summary.get("prompt_protocol_exact_set_ready")
+        )
+        and str(bundle.ablation_summary.get("prompt_id_digest", ""))
+        == bundle.expected_prompt_id_digest
+        and str(
+            bundle.ablation_summary.get("calibration_prompt_id_digest", "")
+        )
+        == bundle.expected_calibration_prompt_id_digest
+        and str(bundle.ablation_summary.get("test_prompt_id_digest", ""))
+        == bundle.expected_test_prompt_id_digest
+        and _int_value(
+            bundle.ablation_summary.get(
+                "expected_attack_and_detection_rerun_count"
+            )
+        )
+        == bundle.expected_test_count * ablation_count
+        and _int_value(
+            bundle.ablation_summary.get("attack_and_detection_rerun_count")
+        )
+        == bundle.expected_test_count * ablation_count
+        and _strict_bool(
+            bundle.ablation_summary.get("formal_attack_coverage_ready")
+        )
+        and _int_value(
+            bundle.ablation_summary.get("formal_attack_coverage_ready_count")
+        )
+        == record_count
         and _manifest_ready(
             bundle.ablation_manifest,
             artifact_id="formal_mechanism_ablation_manifest",
@@ -3050,6 +3077,8 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
                 "actual_ablation_ids",
                 "ablation_spec_digest",
                 "ablation_exact_set_ready",
+                "prompt_protocol_exact_set_ready",
+                "formal_attack_coverage_ready",
                 "supports_paper_claim",
             ),
         )

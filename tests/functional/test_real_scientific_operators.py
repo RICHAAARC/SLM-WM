@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from dataclasses import asdict, replace
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -44,10 +44,14 @@ from experiments.runners.semantic_watermark_runtime import (
     _public_detection_noise_seed,
     build_semantic_watermark_run_id,
     load_completed_semantic_watermark_runtime_result,
+    semantic_watermark_runtime_config_payload,
 )
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 from scripts import semantic_watermark_scientific_workflow as scientific_workflow
+from tests.helpers.scientific_unit_provenance import (
+    build_test_scientific_unit_provenance,
+)
 
 
 def write_recovery_candidate(
@@ -479,6 +483,8 @@ def test_completed_runtime_cache_requires_matching_config_and_files(tmp_path: Pa
         path.write_bytes(b"fixture")
     manifest_path = run_dir / "manifest.local.json"
     result_path = run_dir / "runtime_result.json"
+    config_payload = semantic_watermark_runtime_config_payload(config)
+    config_digest = build_stable_digest(config_payload)
     result_payload = {
         "run_id": run_id,
         "run_decision": "pass",
@@ -488,16 +494,23 @@ def test_completed_runtime_cache_requires_matching_config_and_files(tmp_path: Pa
         "clean_detection_positive": False,
         "watermarked_detection_positive": True,
         "elapsed_seconds": 1.0,
-        "metadata": {},
+        "metadata": {
+            "scientific_unit_config": config_payload,
+            "scientific_unit_provenance": (
+                build_test_scientific_unit_provenance(
+                    run_id,
+                    config_digest,
+                )
+            ),
+        },
     }
     result_path.write_text(json.dumps(result_payload), encoding="utf-8")
-    config_payload = {**asdict(config), "key_material": build_stable_digest({"key_material": config.key_material})}
     output_paths = [path.relative_to(tmp_path).as_posix() for path in files.values()]
     output_paths.extend((result_path.relative_to(tmp_path).as_posix(), manifest_path.relative_to(tmp_path).as_posix()))
     manifest_path.write_text(
         json.dumps(
             {
-                "config_digest": build_stable_digest(config_payload),
+                "config_digest": config_digest,
                 "code_version": resolve_code_version(tmp_path),
                 "output_paths": output_paths,
             }

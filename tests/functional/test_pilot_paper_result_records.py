@@ -395,6 +395,20 @@ def test_materialization_rejects_cross_run_path_overwrite(tmp_path: Path) -> Non
         materialize_output_entries(tmp_path, packages)
 
 
+def test_materialization_rejects_crc32_collision_payloads(tmp_path: Path) -> None:
+    """同大小且 CRC32 碰撞的不同内容仍必须由 SHA-256 判定为冲突."""
+
+    packages = []
+    for index, content in enumerate(("plumless", "buckeroo")):
+        package = tmp_path / f"crc32-collision-{index}.zip"
+        with ZipFile(package, "w") as archive:
+            archive.writestr("outputs/shared/result.bin", content)
+        packages.append(package)
+
+    with pytest.raises(RuntimeError, match="跨运行覆盖"):
+        materialize_output_entries(tmp_path, packages)
+
+
 def test_result_writer_rejects_missing_explicit_package(tmp_path: Path) -> None:
     """显式结果包不存在时必须停止物化。"""
 

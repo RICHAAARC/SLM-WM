@@ -482,6 +482,11 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
         value_requirements=(
             _require(IMAGE_RUNTIME_SUMMARY, "protocol_decision", "pass"),
             _require(IMAGE_RUNTIME_SUMMARY, "full_method_claim_ready", True),
+            _require(
+                IMAGE_RUNTIME_SUMMARY,
+                "scientific_unit_provenance_ready",
+                True,
+            ),
             _require(IMAGE_RUNTIME_SUMMARY, "supports_paper_claim", True),
             _require(
                 IMAGE_RUNTIME_PACKAGE_INPUT,
@@ -543,6 +548,11 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
         value_requirements=(
             _require(ABLATION_SUMMARY, "protocol_decision", "pass"),
             _require(ABLATION_SUMMARY, "ablation_claim_gate_ready", True),
+            _require(
+                ABLATION_SUMMARY,
+                "scientific_unit_provenance_ready",
+                True,
+            ),
             _require(ABLATION_SUMMARY, "supports_paper_claim", True),
             _require(
                 ABLATION_PACKAGE_INPUT,
@@ -606,6 +616,16 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
             _require(QUALITY_SUMMARY, "formal_feature_backend_ready", True),
             _require(QUALITY_SUMMARY, "formal_sample_scale_ready", True),
             _require(QUALITY_SUMMARY, "canonical_formal_feature_extractor_ready", True),
+            _require(
+                QUALITY_SUMMARY,
+                "scientific_unit_provenance_ready",
+                True,
+            ),
+            _require(
+                QUALITY_SUMMARY,
+                "scientific_unit_provenance_identity_ready",
+                True,
+            ),
             _require(QUALITY_SUMMARY, "formal_fid_kid_claim_gate_ready", True),
             _require(
                 QUALITY_PACKAGE_INPUT,
@@ -3004,6 +3024,13 @@ def build_closure_input_selection_report(
     if len(common_code_versions) != 1:
         raise ClosurePackageSelectionError("10个闭合输入包必须共享同一 clean Git code_version")
     common_code_version = next(iter(common_code_versions))
+    repository_code_version = normalize_clean_code_version(
+        resolve_code_version(repository_root)
+    )
+    if common_code_version != repository_code_version:
+        raise ClosurePackageSelectionError(
+            "10个闭合输入包的 code_version 必须匹配当前 clean 仓库提交"
+        )
     lock_records = [candidate.to_lock_record() for candidate in selected_candidates]
     formal_execution_run_lock_digests = {
         candidate.package_family: candidate.formal_execution_run_lock_digest

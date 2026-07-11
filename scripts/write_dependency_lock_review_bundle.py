@@ -14,10 +14,14 @@ import platform
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 from typing import Any, Callable, Mapping, Sequence
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,7 +51,7 @@ BUNDLE_MANIFEST_SCHEMA = "dependency_lock_review_bundle_manifest"
 BUNDLE_MANIFEST_SCHEMA_VERSION = 1
 SUCCESS_DECISION = "review_bundle_written"
 QUALIFICATION_REPORT_SCHEMA = "dependency_lock_qualification_launcher_report"
-QUALIFICATION_REPORT_SCHEMA_VERSION = 1
+QUALIFICATION_REPORT_SCHEMA_VERSION = 2
 QUALIFICATION_SUCCESS_DECISION = "qualification_complete"
 QUALIFICATION_TOOL_LOCK_RELATIVE_PATH = Path(
     "configs/dependency_profiles/dependency_qualification_uv_linux_x86_64_lock.txt"
@@ -69,7 +73,23 @@ QUALIFICATION_PYTHON_DIGEST_ENVIRONMENT_KEY = (
 )
 _QUALIFICATION_TOOL_LOCK_PATTERN = re.compile(
     r"^uv==(?P<version>[0-9]+\.[0-9]+\.[0-9]+) "
+    r"--wheel-url=(?P<wheel_url>https://[^ ]+) "
     r"--hash=sha256:(?P<digest>[0-9a-f]{64})$"
+)
+_QUALIFICATION_UV_WHEEL_NAME_TEMPLATE = (
+    "uv-{version}-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl"
+)
+_QUALIFICATION_SANITIZED_ENVIRONMENT_NAMES = frozenset(
+    {
+        "CONDA_DEFAULT_ENV",
+        "CONDA_PREFIX",
+        "PIP_CONFIG_FILE",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "VIRTUAL_ENV",
+        "VIRTUAL_ENV_DISABLE_PROMPT",
+        "_CONDA_ROOT",
+    }
 )
 
 CURRENT_INTERPRETER_PROFILE_ID = WORKFLOW_ORCHESTRATOR_PROFILE_ID
@@ -84,6 +104,7 @@ QualificationCommandRunner = Callable[
     [Sequence[str], Path, Mapping[str, str]],
     Any,
 ]
+QualificationToolDownloader = Callable[[str, Path], None]
 
 
 def _run_child_command(command: Sequence[str], working_directory: Path) -> dict[str, Any]:
@@ -112,9 +133,29 @@ def _run_qualification_command(
     working_directory: Path,
     environment_overrides: Mapping[str, str],
 ) -> dict[str, Any]:
-    """执行 host 资格化命令, 并让精确子解释器继承正式代码锁."""
+    """在去除宿主 Python/依赖工具状态后执行资格化命令.
 
-    environment = dict(os.environ)
+    该清理属于通用的可复现构建边界. 宿主的 ``PYTHONPATH``、激活环境、
+    ``PIP_*`` 和 ``UV_*`` 都可能改变解释器发现、索引或下载源, 因而不得
+    隐式进入候选锁资格化子进程. 网络代理和证书变量仍保留, 以支持 Colab
+    及受管服务器的正常 HTTPS 访问.
+    """
+
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _QUALIFICATION_SANITIZED_ENVIRONMENT_NAMES
+        and not key.startswith("PIP_")
+        and not key.startswith("UV_")
+    }
+    environment.update(
+        {
+            "PIP_CONFIG_FILE": os.devnull,
+            "PYTHONNOUSERSITE": "1",
+            "UV_NO_CONFIG": "1",
+            "UV_NO_SYSTEM_CONFIG": "1",
+        }
+    )
     environment.update(environment_overrides)
     completed = subprocess.run(
         list(command),
@@ -134,6 +175,27 @@ def _run_qualification_command(
         "stdout": completed.stdout,
         "stderr": completed.stderr,
     }
+
+
+def _download_qualification_tool_wheel(url: str, destination: Path) -> None:
+    """使用宿主 Python 标准库下载已固定 URL 的资格化 wheel.
+
+    下载函数不依赖宿主 ``pip``、``venv`` 或 ``ensurepip``. SHA-256 校验在
+    下载完成后由调用方执行, 因而网络传输结果不能仅凭 HTTP 成功即被信任.
+    测试可注入同签名 downloader, 复用完整的摘要与 ZIP 成员门禁.
+    """
+
+    request = Request(
+        url,
+        headers={"User-Agent": "SLM-WM-dependency-qualification/1"},
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with urlopen(request, timeout=120) as response, destination.open("xb") as handle:
+        while True:
+            chunk = response.read(1024 * 1024)
+            if not chunk:
+                break
+            handle.write(chunk)
 
 
 def _normalize_child_result(result: Any) -> dict[str, Any]:
@@ -351,6 +413,10 @@ def _qualification_report_skeleton(
             qualification_tool_lock_path,
         ),
         "qualification_tool_lock_digest": None,
+        "qualification_tool_wheel_url": None,
+        "qualification_tool_wheel_path": None,
+        "qualification_tool_wheel_sha256": None,
+        "qualification_tool_wheel_member": None,
         "environment_root": str(qualification_runtime_root),
         "managed_python_root": str(
             qualification_runtime_root / "managed_pythons"
@@ -388,8 +454,8 @@ def _write_qualification_failure(
     return report, report_path
 
 
-def _read_qualification_tool_lock(path: Path) -> tuple[str, str]:
-    """读取只允许固定 uv wheel 哈希的 host 工具锁."""
+def _read_qualification_tool_lock(path: Path) -> tuple[str, str, str]:
+    """读取同时固定 URL、版本、平台文件名与摘要的 host 工具锁."""
 
     try:
         lines = [
@@ -403,8 +469,77 @@ def _read_qualification_tool_lock(path: Path) -> tuple[str, str]:
         raise ValueError("依赖资格化工具锁必须只包含一个 uv wheel 规格")
     match = _QUALIFICATION_TOOL_LOCK_PATTERN.fullmatch(lines[0])
     if match is None or match.group("version") != UV_DISTRIBUTION_VERSION:
-        raise ValueError("依赖资格化工具锁必须匹配固定 uv 版本和 SHA-256")
-    return match.group("version"), match.group("digest")
+        raise ValueError("依赖资格化工具锁必须匹配固定 uv 版本、URL 和 SHA-256")
+    wheel_url = match.group("wheel_url")
+    parsed_url = urlparse(wheel_url)
+    expected_wheel_name = _QUALIFICATION_UV_WHEEL_NAME_TEMPLATE.format(
+        version=UV_DISTRIBUTION_VERSION
+    )
+    if (
+        parsed_url.scheme != "https"
+        or parsed_url.hostname != "files.pythonhosted.org"
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+        or parsed_url.port is not None
+        or parsed_url.query
+        or parsed_url.fragment
+        or Path(parsed_url.path).name != expected_wheel_name
+    ):
+        raise ValueError("依赖资格化工具锁必须固定 PyPI Linux x86_64 wheel URL")
+    return match.group("version"), wheel_url, match.group("digest")
+
+
+def _materialize_qualification_uv_tool(
+    *,
+    wheel_url: str,
+    expected_wheel_digest: str,
+    runtime_root: Path,
+    downloader: QualificationToolDownloader,
+) -> tuple[Path, Path, str]:
+    """下载、复验并直接提取固定 uv wheel 内的 Linux executable.
+
+    该实现是项目 fresh-host 引导的特定写法. wheel 已由 URL、文件名和
+    SHA-256 三重固定; 提取时仍要求归档中恰好存在一个名为 ``uv`` 的普通
+    文件, 避免依赖宿主 ``pip`` 生成入口脚本或解析其他发行文件.
+    """
+
+    wheel_name = Path(urlparse(wheel_url).path).name
+    wheel_path = runtime_root / "tool_downloads" / wheel_name
+    downloader(wheel_url, wheel_path)
+    if not wheel_path.is_file() or wheel_path.is_symlink():
+        raise ValueError("固定 uv wheel 下载结果不是普通文件")
+    actual_wheel_digest = _sha256(wheel_path)
+    if actual_wheel_digest != expected_wheel_digest:
+        raise ValueError("固定 uv wheel SHA-256 与工具锁不一致")
+
+    uv_executable = runtime_root / "uv_tool" / "bin" / "uv"
+    uv_executable.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(wheel_path) as archive:
+            candidates = [
+                member
+                for member in archive.infolist()
+                if not member.is_dir()
+                and Path(member.filename).name == "uv"
+                and not (member.flag_bits & 0x1)
+                and not stat.S_ISLNK(member.external_attr >> 16)
+            ]
+            if len(candidates) != 1:
+                raise ValueError("固定 uv wheel 必须恰好包含一个 uv executable")
+            member = candidates[0]
+            with archive.open(member, "r") as source, uv_executable.open("xb") as target:
+                shutil.copyfileobj(source, target, length=1024 * 1024)
+    except zipfile.BadZipFile as exc:
+        raise ValueError("固定 uv wheel 不是有效 ZIP 归档") from exc
+    if not uv_executable.is_file() or uv_executable.stat().st_size == 0:
+        raise ValueError("固定 uv wheel 未生成有效 uv executable")
+    uv_executable.chmod(
+        uv_executable.stat().st_mode
+        | stat.S_IXUSR
+        | stat.S_IXGRP
+        | stat.S_IXOTH
+    )
+    return wheel_path, uv_executable, member.filename
 
 
 def _execute_qualification_operation(
@@ -532,6 +667,7 @@ def _validate_written_review_bundle(
             resolved_bundle_path.parent != local_bundle_dir
             or resolved_bundle_path.name != file_name
             or not resolved_bundle_path.is_file()
+            or resolved_bundle_path.is_symlink()
         ):
             raise ValueError("资格化 child 审查包文件路径无效")
         if (
@@ -542,6 +678,47 @@ def _validate_written_review_bundle(
         observed_file_names.add(file_name)
     if observed_file_names != expected_file_names:
         raise ValueError("资格化 child 审查包文件集合不一致")
+    if expected_drive_bundle_dir is not None:
+        drive_bundle_dir = expected_drive_bundle_dir.resolve()
+        drive_manifest_path = drive_bundle_dir / BUNDLE_MANIFEST_FILE_NAME
+        try:
+            drive_entries = tuple(drive_bundle_dir.iterdir())
+        except OSError as exc:
+            raise ValueError("资格化 child Drive 审查包目录无法读取") from exc
+        if any(not path.is_file() or path.is_symlink() for path in drive_entries):
+            raise ValueError("资格化 child Drive 审查包包含目录或符号链接")
+        if {path.name for path in drive_entries} != {
+            *expected_file_names,
+            BUNDLE_MANIFEST_FILE_NAME,
+        }:
+            raise ValueError("资格化 child Drive 审查包文件集合不一致")
+        try:
+            drive_manifest_bytes = drive_manifest_path.read_bytes()
+            local_manifest_bytes = manifest_path.read_bytes()
+        except OSError as exc:
+            raise ValueError("资格化 child Drive manifest 无法读取") from exc
+        if drive_manifest_bytes != local_manifest_bytes:
+            raise ValueError("资格化 child Drive manifest 与本地 manifest 不一致")
+        for record in files:
+            file_name = str(record["file_name"])
+            expected_drive_path = (drive_bundle_dir / file_name).resolve()
+            recorded_drive_path = Path(str(record.get("drive_path", ""))).resolve()
+            if (
+                recorded_drive_path != expected_drive_path
+                or expected_drive_path.parent != drive_bundle_dir
+                or not expected_drive_path.is_file()
+                or expected_drive_path.is_symlink()
+            ):
+                raise ValueError("资格化 child Drive 审查包文件路径无效")
+            try:
+                drive_digest = _sha256(expected_drive_path)
+                drive_size = expected_drive_path.stat().st_size
+            except OSError as exc:
+                raise ValueError("资格化 child Drive 审查包文件无法读取") from exc
+            if drive_digest != record.get("sha256") or drive_size != record.get(
+                "size_bytes"
+            ):
+                raise ValueError("资格化 child Drive 审查包摘要或大小不一致")
     return manifest, manifest_path
 
 
@@ -552,12 +729,14 @@ def launch_dependency_lock_qualification(
     drive_output_dir: str | Path | None = None,
     qualification_runtime_root: str | Path = DEFAULT_QUALIFICATION_RUNTIME_ROOT,
     command_runner: QualificationCommandRunner = _run_qualification_command,
+    tool_downloader: QualificationToolDownloader = _download_qualification_tool_wheel,
 ) -> tuple[dict[str, Any], Path]:
-    """从任意 Linux host 创建精确 orchestrator 并启动唯一审查脚本.
+    """从 fresh Linux host 创建精确 orchestrator 并启动唯一审查脚本.
 
-    host 只安装受单 wheel SHA-256 约束的固定 ``uv`` 工具. 候选解析始终在
-    registry 登记的 CPython 3.12.13 子解释器中运行; 五个科学 profile 仍由
-    该子解释器内的正式 orchestrator 锁门禁创建各自隔离解释器.
+    host 只用 Python 标准库下载并提取受 URL、文件名和 SHA-256 约束的固定
+    ``uv`` wheel, 不依赖 host ``venv``、``pip`` 或 ``ensurepip``. 候选解析
+    始终在 registry 登记的 CPython 3.12.13 子解释器中运行; 五个科学
+    profile 只能在已提交 orchestrator 完整锁之后按顺序资格化.
     """
 
     root = Path(repository_root).resolve()
@@ -589,6 +768,21 @@ def launch_dependency_lock_qualification(
         )
     report["formal_execution_lock"] = formal_execution_lock
 
+    if profile.profile_name in ISOLATED_PYTHON_PROFILE_IDS and not orchestrator.formal_ready:
+        return _write_qualification_failure(
+            report,
+            report_path,
+            "qualification_orchestrator_lock_unavailable",
+            "科学 profile 资格化前必须先生成、审查、接收并提交 workflow_orchestrator 完整锁.",
+        )
+    if profile.complete_hash_lock_present or profile.formal_ready:
+        return _write_qualification_failure(
+            report,
+            report_path,
+            "qualification_target_lock_already_present",
+            "目标 profile 已有完整哈希锁, 资格化入口不允许生成可覆盖候选.",
+        )
+
     host_identity = {
         "operating_system": platform.system().strip().lower(),
         "machine": _normalize_machine(platform.machine()),
@@ -604,7 +798,9 @@ def launch_dependency_lock_qualification(
             "资格化 host 必须匹配登记的 Linux x86_64 平台.",
         )
     try:
-        _read_qualification_tool_lock(tool_lock_path)
+        _, wheel_url, expected_wheel_digest = _read_qualification_tool_lock(
+            tool_lock_path
+        )
     except ValueError as exc:
         return _write_qualification_failure(
             report,
@@ -613,6 +809,7 @@ def launch_dependency_lock_qualification(
             str(exc),
         )
     report["qualification_tool_lock_digest"] = _sha256(tool_lock_path)
+    report["qualification_tool_wheel_url"] = wheel_url
 
     try:
         _remove_qualification_runtime_root(runtime_root)
@@ -624,47 +821,42 @@ def launch_dependency_lock_qualification(
             str(exc),
         )
 
-    bootstrap_environment = runtime_root / "uv_tool_environment"
-    bootstrap_python = bootstrap_environment / "bin" / "python"
-    uv_executable = bootstrap_environment / "bin" / "uv"
     managed_python_root = runtime_root / "managed_pythons"
     orchestrator_environment = runtime_root / WORKFLOW_ORCHESTRATOR_PROFILE_ID
     orchestrator_python = orchestrator_environment / "bin" / "python"
-    uv_environment = {"UV_PYTHON_INSTALL_DIR": str(managed_python_root)}
+    qualification_cache_root = runtime_root / "cache"
+    uv_environment = {
+        "UV_CACHE_DIR": str(qualification_cache_root / "uv"),
+        "UV_NO_CONFIG": "1",
+        "UV_NO_SYSTEM_CONFIG": "1",
+        "UV_PYTHON_INSTALL_DIR": str(managed_python_root),
+    }
+
+    try:
+        wheel_path, uv_executable, wheel_member = _materialize_qualification_uv_tool(
+            wheel_url=wheel_url,
+            expected_wheel_digest=expected_wheel_digest,
+            runtime_root=runtime_root,
+            downloader=tool_downloader,
+        )
+    except (OSError, TypeError, ValueError, zipfile.BadZipFile) as exc:
+        return _write_qualification_failure(
+            report,
+            report_path,
+            "qualification_tool_wheel_materialization_failed",
+            str(exc),
+        )
+    report["qualification_tool_wheel_path"] = str(wheel_path)
+    report["qualification_tool_wheel_sha256"] = _sha256(wheel_path)
+    report["qualification_tool_wheel_member"] = wheel_member
+    report["uv_executable_path"] = str(uv_executable)
+    report["uv_executable_sha256"] = _sha256(uv_executable)
 
     command_plan = (
         (
-            "qualification_tool_environment_create",
-            [
-                sys.executable,
-                "-m",
-                "venv",
-                "--clear",
-                str(bootstrap_environment),
-            ],
-            {},
-        ),
-        (
-            "qualification_tool_lock_install",
-            [
-                str(bootstrap_python),
-                "-m",
-                "pip",
-                "install",
-                "--disable-pip-version-check",
-                "--no-input",
-                "--require-hashes",
-                "--only-binary=:all:",
-                "--no-deps",
-                "-r",
-                str(tool_lock_path),
-            ],
-            {},
-        ),
-        (
             "qualification_uv_version",
             [str(uv_executable), "--version"],
-            {},
+            uv_environment,
         ),
         (
             "qualification_python_install",
@@ -730,25 +922,7 @@ def launch_dependency_lock_qualification(
                 f"{operation}_failed",
                 "资格化命令返回非零退出码.",
             )
-        if operation == "qualification_tool_environment_create":
-            if not bootstrap_python.is_file():
-                return _write_qualification_failure(
-                    report,
-                    report_path,
-                    "qualification_tool_python_missing",
-                    "host 工具环境未生成 Python executable.",
-                )
-        elif operation == "qualification_tool_lock_install":
-            if not uv_executable.is_file():
-                return _write_qualification_failure(
-                    report,
-                    report_path,
-                    "qualification_uv_executable_missing",
-                    "固定哈希工具锁未生成 uv executable.",
-                )
-            report["uv_executable_path"] = str(uv_executable)
-            report["uv_executable_sha256"] = _sha256(uv_executable)
-        elif operation == "qualification_uv_version":
+        if operation == "qualification_uv_version":
             if record["stdout"].strip() != f"uv {UV_DISTRIBUTION_VERSION}":
                 return _write_qualification_failure(
                     report,
@@ -787,6 +961,10 @@ def launch_dependency_lock_qualification(
         QUALIFICATION_CHILD_ENVIRONMENT_KEY: "1",
         QUALIFICATION_PYTHON_ENVIRONMENT_KEY: str(orchestrator_python),
         QUALIFICATION_PYTHON_DIGEST_ENVIRONMENT_KEY: orchestrator_python_digest,
+        "PIP_CACHE_DIR": str(qualification_cache_root / "pip"),
+        "PIP_CONFIG_FILE": os.devnull,
+        "PYTHONNOUSERSITE": "1",
+        **uv_environment,
         "PATH": (
             str(orchestrator_environment / "bin")
             + os.pathsep
@@ -795,6 +973,7 @@ def launch_dependency_lock_qualification(
     }
     review_command = [
         str(orchestrator_python),
+        "-I",
         str(root / "scripts/write_dependency_lock_review_bundle.py"),
         "--profile",
         profile.profile_name,
@@ -1059,6 +1238,7 @@ def _run_isolated_python_materializer(
 
     command = [
         str(python_executable),
+        "-I",
         str(repository_root / "scripts/materialize_dependency_lock_candidate.py"),
         "--profile",
         profile.profile_name,
@@ -1239,6 +1419,22 @@ def write_dependency_lock_review_bundle(
     if drive_bundle_dir is not None:
         try:
             drive_bundle_dir.mkdir(parents=True, exist_ok=True)
+            allowed_drive_file_names = {
+                *(record["file_name"] for record in file_records),
+                BUNDLE_MANIFEST_FILE_NAME,
+            }
+            existing_drive_entries = tuple(drive_bundle_dir.iterdir())
+            if any(
+                entry.name not in allowed_drive_file_names
+                or not entry.is_file()
+                or entry.is_symlink()
+                for entry in existing_drive_entries
+            ):
+                raise RuntimeError(
+                    "Drive profile 目录只能包含本协议登记的三个候选文件和 manifest"
+                )
+            for entry in existing_drive_entries:
+                entry.unlink()
             for record in file_records:
                 local_path = local_bundle_dir / record["file_name"]
                 drive_path = drive_bundle_dir / record["file_name"]
@@ -1308,6 +1504,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     is_qualification_child = (
         os.environ.get(QUALIFICATION_CHILD_ENVIRONMENT_KEY) == "1"
     )
+    if not is_qualification_child and sys.flags.isolated != 1:
+        print(
+            json.dumps(
+                {
+                    "profile_id": arguments.profile,
+                    "decision": "fail",
+                    "failure_reasons": ["qualification_host_python_not_isolated"],
+                    "diagnostic_message": (
+                        "fresh-host 资格化入口必须使用 python -I 启动, "
+                        "以排除宿主 PYTHONPATH 和用户 site-packages."
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            file=sys.stderr,
+        )
+        return 2
     try:
         if is_qualification_child:
             _require_qualification_child_interpreter(ROOT)
