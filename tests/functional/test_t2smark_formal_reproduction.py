@@ -24,6 +24,10 @@ from paper_experiments.runners.t2smark_source_runtime import (
     configured_attack_names,
     verify_exact_t2smark_protocol_worktree,
 )
+from paper_experiments.runners.closure_package_selection import (
+    CLOSURE_PACKAGE_FAMILY_SPECS,
+    inspect_closure_package,
+)
 
 
 pytestmark = pytest.mark.quick
@@ -83,6 +87,7 @@ def _paper_run(prompt_count: int) -> SimpleNamespace:
         run_name="probe_paper",
         protocol_profile="probe_paper_fixed_fpr_0_1",
         prompt_count=prompt_count,
+        target_fpr=0.1,
     )
 
 
@@ -303,12 +308,14 @@ def _write_package_fixture(
 ) -> tuple[Path, Path]:
     """写出一个 Prompt 的完整 T2SMark 精确白名单打包 fixture。"""
 
-    output_dir = root_path / "outputs" / "t2smark_fixture"
+    code_version = "b370425"
+    monkeypatch.setattr(t2smark_runtime, "resolve_code_version", lambda _root: code_version)
     config = T2SMarkFormalReproductionConfig(
-        output_dir="outputs/t2smark_fixture",
+        output_dir="outputs/t2smark_formal_reproduction",
         drive_output_dir=str(root_path / "drive"),
         prompt_set="probe_paper",
         prompt_file="configs/paper_main_probe_paper_prompts.txt",
+        t2smark_run_name="t",
         prompt_limit=1,
         minimum_prompt_protocol_count=1,
         target_fpr=0.1,
@@ -319,7 +326,7 @@ def _write_package_fixture(
         "validate_t2smark_formal_protocol_config",
         lambda _config, *, root_path: paper_run,
     )
-    monkeypatch.setattr(t2smark_runtime, "PACKAGE_EXTRA_PATHS", ())
+    monkeypatch.setattr(t2smark_runtime, "build_paper_run_config", lambda _root: paper_run)
     paths = t2smark_runtime.output_paths(root_path, config)
     attack_names = configured_attack_names(config.formal_attack_families)
     source_report = _source_report()
@@ -409,7 +416,10 @@ def _write_package_fixture(
         t2smark_runtime.write_json(path, {})
     candidate_count = len(attack_names)
     paths["candidate_records"].write_text(
-        "".join(json.dumps({"attack_name": name}) + "\n" for name in attack_names),
+        "".join(
+            json.dumps({"attack_name": name, "baseline_id": "t2smark"}) + "\n"
+            for name in attack_names
+        ),
         encoding="utf-8",
     )
     validation = {
@@ -420,8 +430,14 @@ def _write_package_fixture(
     }
     t2smark_runtime.write_json(paths["validation_report"], validation)
     summary = {
+        "generated_at": "2026-07-11T00:00:00+00:00",
+        "baseline_id": "t2smark",
+        "paper_claim_scale": "probe_paper",
+        "target_fpr": 0.1,
         "run_decision": "pass",
         "t2smark_formal_reproduction_ready": True,
+        "t2smark_formal_attack_ready": True,
+        "t2smark_strict_pair_quality_ready": True,
         "formal_import_validation_ready": True,
         "selected_prompt_count": 1,
         "formal_import_candidate_record_count": candidate_count,
@@ -436,11 +452,12 @@ def _write_package_fixture(
     }
     t2smark_runtime.write_json(paths["summary"], summary)
     run_manifest = {
+        "code_version": code_version,
         "config": asdict(config),
         "metadata": {"run_decision": "pass", "formal_import_validation_ready": True},
     }
     t2smark_runtime.write_json(paths["manifest"], run_manifest)
-    return output_dir, root_path / "drive"
+    return paths["output_dir"], root_path / "drive"
 
 
 def test_t2smark_package_requires_pass_validation_and_exact_whitelist(
@@ -452,19 +469,39 @@ def test_t2smark_package_requires_pass_validation_and_exact_whitelist(
     output_dir, drive_dir = _write_package_fixture(tmp_path, monkeypatch)
     record = package_t2smark_formal_reproduction_outputs(
         root=tmp_path,
-        output_dir="outputs/t2smark_fixture",
+        output_dir="outputs/t2smark_formal_reproduction",
         drive_output_dir=str(drive_dir),
-        archive_name="t2smark_fixture.zip",
+        archive_name="external_baseline_official_reference_package_t2smark_test.zip",
     )
     assert (tmp_path / record.archive_path).is_file()
+    spec = next(
+        item
+        for item in CLOSURE_PACKAGE_FAMILY_SPECS
+        if item.package_family == "official_reference_t2smark"
+    )
+    candidate = inspect_closure_package(
+        tmp_path / record.archive_path,
+        spec=spec,
+        paper_run_name="probe_paper",
+        target_fpr=0.1,
+    )
+    assert candidate.package_family == "official_reference_t2smark"
+    old_archive_path = output_dir / "external_baseline_official_reference_package_t2smark_old.zip"
+    old_archive_path.write_bytes(b"old archive is not a package member")
+    package_t2smark_formal_reproduction_outputs(
+        root=tmp_path,
+        output_dir="outputs/t2smark_formal_reproduction",
+        drive_output_dir=str(drive_dir),
+        archive_name="external_baseline_official_reference_package_t2smark_test.zip",
+    )
     stale_path = output_dir / "stale_previous_run.json"
     stale_path.write_text("{}\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="旧运行或非白名单"):
         package_t2smark_formal_reproduction_outputs(
             root=tmp_path,
-            output_dir="outputs/t2smark_fixture",
+            output_dir="outputs/t2smark_formal_reproduction",
             drive_output_dir=str(drive_dir),
-            archive_name="t2smark_fixture.zip",
+            archive_name="external_baseline_official_reference_package_t2smark_test.zip",
         )
     stale_path.unlink()
     validation_path = output_dir / "t2smark_formal_import_validation_report.json"
@@ -474,7 +511,7 @@ def test_t2smark_package_requires_pass_validation_and_exact_whitelist(
     with pytest.raises(RuntimeError, match="formal import validation"):
         package_t2smark_formal_reproduction_outputs(
             root=tmp_path,
-            output_dir="outputs/t2smark_fixture",
+            output_dir="outputs/t2smark_formal_reproduction",
             drive_output_dir=str(drive_dir),
-            archive_name="t2smark_fixture.zip",
+            archive_name="external_baseline_official_reference_package_t2smark_test.zip",
         )

@@ -27,6 +27,10 @@ from paper_experiments.runners.gaussian_shading_official_reference import (
     prepare_gaussian_shading_model_repository,
     write_gaussian_shading_official_reference_outputs,
 )
+from paper_experiments.runners.closure_package_selection import (
+    CLOSURE_PACKAGE_FAMILY_SPECS,
+    inspect_closure_package,
+)
 
 
 @pytest.mark.quick
@@ -389,13 +393,49 @@ def test_gaussian_shading_official_reference_helper_imports_governed_summary(tmp
 
 
 @pytest.mark.quick
-def test_gaussian_shading_official_reference_package_embeds_archive_self_description(tmp_path: Path) -> None:
+def test_gaussian_shading_official_reference_package_embeds_archive_self_description(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """打包结果应包含归档摘要、归档 manifest 和输入清单。"""
 
-    output_dir = tmp_path / "outputs" / "gaussian_shading_official_reference"
+    code_version = "b370425"
+    monkeypatch.setattr(
+        "paper_experiments.runners.gaussian_shading_official_reference.resolve_code_version",
+        lambda _root: code_version,
+    )
+    output_dir = tmp_path / "outputs" / "gaussian_shading_official_reference" / "pilot_paper"
     output_dir.mkdir(parents=True)
     (output_dir / "gaussian_shading_official_reference_summary.json").write_text(
-        json.dumps({"run_decision": "pass"}, ensure_ascii=False),
+        json.dumps(
+            {
+                "baseline_id": "gaussian_shading",
+                "paper_claim_scale": "pilot_paper",
+                "target_fpr": 0.01,
+                "run_decision": "pass",
+                "gaussian_shading_official_reference_ready": True,
+                "reference_import_ready": True,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "manifest.local.json").write_text(
+        json.dumps(
+            {
+                "code_version": code_version,
+                "metadata": {"run_decision": "pass"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "gaussian_shading_official_reference_records.jsonl").write_text(
+        json.dumps({"baseline_id": "gaussian_shading"}) + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "gaussian_shading_official_reference_validation_report.json").write_text(
+        json.dumps({"reference_import_ready": True}) + "\n",
         encoding="utf-8",
     )
 
@@ -403,31 +443,31 @@ def test_gaussian_shading_official_reference_package_embeds_archive_self_descrip
         root=tmp_path,
         output_dir="outputs/gaussian_shading_official_reference",
         drive_output_dir=str(tmp_path / "drive" / "SLM" / "external_baseline_official_reference"),
-        archive_name="external_baseline_official_reference_package_gaussian_shading.zip",
+        archive_name="external_baseline_official_reference_package_gaussian_shading_test.zip",
     )
 
     archive_path = tmp_path / record.archive_path
     expected_entries = {
-        "outputs/gaussian_shading_official_reference/gaussian_shading_official_reference_summary.json",
-        "outputs/gaussian_shading_official_reference/gaussian_shading_official_reference_package_input_manifest.json",
-        "outputs/gaussian_shading_official_reference/gaussian_shading_official_reference_archive_summary.json",
-        "outputs/gaussian_shading_official_reference/gaussian_shading_official_reference_archive_manifest.local.json",
+        "outputs/gaussian_shading_official_reference/pilot_paper/gaussian_shading_official_reference_summary.json",
+        "outputs/gaussian_shading_official_reference/pilot_paper/gaussian_shading_official_reference_package_input_manifest.json",
+        "outputs/gaussian_shading_official_reference/pilot_paper/gaussian_shading_official_reference_archive_summary.json",
+        "outputs/gaussian_shading_official_reference/pilot_paper/gaussian_shading_official_reference_archive_manifest.local.json",
     }
     with ZipFile(archive_path) as archive:
         names = set(archive.namelist())
         package_manifest = json.loads(
             archive.read(
-                "outputs/gaussian_shading_official_reference/gaussian_shading_official_reference_package_input_manifest.json"
+                "outputs/gaussian_shading_official_reference/pilot_paper/gaussian_shading_official_reference_package_input_manifest.json"
             ).decode("utf-8")
         )
         embedded_summary = json.loads(
             archive.read(
-                "outputs/gaussian_shading_official_reference/gaussian_shading_official_reference_archive_summary.json"
+                "outputs/gaussian_shading_official_reference/pilot_paper/gaussian_shading_official_reference_archive_summary.json"
             ).decode("utf-8")
         )
         embedded_manifest = json.loads(
             archive.read(
-                "outputs/gaussian_shading_official_reference/gaussian_shading_official_reference_archive_manifest.local.json"
+                "outputs/gaussian_shading_official_reference/pilot_paper/gaussian_shading_official_reference_archive_manifest.local.json"
             ).decode("utf-8")
         )
 
@@ -447,6 +487,18 @@ def test_gaussian_shading_official_reference_package_embeds_archive_self_descrip
     assert local_summary["drive_archive_digest"] == record.drive_archive_digest
     assert local_manifest["metadata"]["archive_digest"] == record.archive_digest
     assert local_manifest["metadata"]["drive_archive_digest"] == record.drive_archive_digest
+    spec = next(
+        item
+        for item in CLOSURE_PACKAGE_FAMILY_SPECS
+        if item.package_family == "official_reference_gaussian_shading"
+    )
+    candidate = inspect_closure_package(
+        archive_path,
+        spec=spec,
+        paper_run_name="pilot_paper",
+        target_fpr=0.01,
+    )
+    assert candidate.package_family == "official_reference_gaussian_shading"
 
 
 @pytest.mark.quick

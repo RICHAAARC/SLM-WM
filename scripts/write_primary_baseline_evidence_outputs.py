@@ -38,10 +38,10 @@ from paper_experiments.baselines.primary_evidence import (
 )
 
 
-DEFAULT_OUTPUT_DIR = Path("outputs/primary_baseline_evidence")
+DEFAULT_OUTPUT_ROOT = Path("outputs/primary_baseline_evidence")
 DEFAULT_SOURCE_REGISTRY_PATH = Path("external_baseline/source_registry.json")
 DEFAULT_COLLECTION_ROOT = DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT
-DEFAULT_T2SMARK_FORMAL_OUTPUT_DIR = Path("outputs/t2smark_formal_reproduction")
+DEFAULT_T2SMARK_FORMAL_OUTPUT_ROOT = Path("outputs/t2smark_formal_reproduction")
 
 
 @dataclass(frozen=True)
@@ -434,19 +434,28 @@ def load_command_results_from_sources(
 def write_primary_baseline_evidence_outputs(
     *,
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
+    output_dir: str | Path | None = None,
     source_registry_path: str | Path = DEFAULT_SOURCE_REGISTRY_PATH,
-    collection_root: str | Path = DEFAULT_COLLECTION_ROOT,
-    t2smark_formal_output_dir: str | Path = DEFAULT_T2SMARK_FORMAL_OUTPUT_DIR,
+    collection_root: str | Path | None = None,
+    t2smark_formal_output_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """从三个 exact-set source 和独立 T2SMark formal source 写出证据记录。"""
 
     root_path = Path(root).resolve()
-    resolved_output_dir = ensure_output_dir_under_outputs(root_path, output_dir)
-    resolved_source_registry_path = resolve_path(root_path, source_registry_path)
-    resolved_collection_root = resolve_path(root_path, collection_root)
-    resolved_t2smark_output_dir = resolve_path(root_path, t2smark_formal_output_dir)
     paper_run = build_paper_run_config(root_path)
+    resolved_output_dir = ensure_output_dir_under_outputs(
+        root_path,
+        output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name,
+    )
+    resolved_source_registry_path = resolve_path(root_path, source_registry_path)
+    resolved_collection_root = resolve_path(
+        root_path,
+        collection_root or DEFAULT_COLLECTION_ROOT / paper_run.run_name,
+    )
+    resolved_t2smark_output_dir = resolve_path(
+        root_path,
+        t2smark_formal_output_dir or DEFAULT_T2SMARK_FORMAL_OUTPUT_ROOT / paper_run.run_name,
+    )
     source_registry = load_optional_json(resolved_source_registry_path) or {}
     sources = load_method_faithful_observation_collection(
         resolved_collection_root,
@@ -492,6 +501,8 @@ def write_primary_baseline_evidence_outputs(
     summary.update(
         {
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "paper_claim_scale": paper_run.run_name,
+            "target_fpr": paper_run.target_fpr,
             "source_registry_path": relative_or_absolute(resolved_source_registry_path, root_path),
             "collection_root": relative_or_absolute(resolved_collection_root, root_path),
             "input_baseline_ids": [source.baseline_id for source in sources] + ["t2smark"],
@@ -548,10 +559,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="写出主表 external baseline 证据边界审计产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="输出目录; 默认写入当前论文运行子目录, 且必须位于 outputs/ 下。",
+    )
     parser.add_argument("--source-registry-path", default=str(DEFAULT_SOURCE_REGISTRY_PATH))
-    parser.add_argument("--collection-root", default=str(DEFAULT_COLLECTION_ROOT))
-    parser.add_argument("--t2smark-formal-output-dir", default=str(DEFAULT_T2SMARK_FORMAL_OUTPUT_DIR))
+    parser.add_argument(
+        "--collection-root",
+        default=None,
+        help="方法忠实 baseline 物化根目录; 默认读取当前论文运行子目录。",
+    )
+    parser.add_argument(
+        "--t2smark-formal-output-dir",
+        default=None,
+        help="T2SMark formal 输出目录; 默认读取当前论文运行子目录。",
+    )
     return parser
 
 

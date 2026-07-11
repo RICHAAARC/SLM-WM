@@ -27,6 +27,10 @@ from paper_experiments.runners.shallow_diffuse_official_reference import (
     prepare_shallow_diffuse_model_repository,
     write_shallow_diffuse_official_reference_outputs,
 )
+from paper_experiments.runners.closure_package_selection import (
+    CLOSURE_PACKAGE_FAMILY_SPECS,
+    inspect_closure_package,
+)
 
 
 @pytest.mark.quick
@@ -366,13 +370,49 @@ def test_shallow_diffuse_official_reference_helper_imports_governed_summary(tmp_
 
 
 @pytest.mark.quick
-def test_shallow_diffuse_official_reference_package_embeds_archive_self_description(tmp_path: Path) -> None:
+def test_shallow_diffuse_official_reference_package_embeds_archive_self_description(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """打包结果应包含归档摘要、归档 manifest 和输入清单。"""
 
-    output_dir = tmp_path / "outputs" / "shallow_diffuse_official_reference"
+    code_version = "b370425"
+    monkeypatch.setattr(
+        "paper_experiments.runners.shallow_diffuse_official_reference.resolve_code_version",
+        lambda _root: code_version,
+    )
+    output_dir = tmp_path / "outputs" / "shallow_diffuse_official_reference" / "pilot_paper"
     output_dir.mkdir(parents=True)
     (output_dir / "shallow_diffuse_official_reference_summary.json").write_text(
-        json.dumps({"run_decision": "pass"}, ensure_ascii=False),
+        json.dumps(
+            {
+                "baseline_id": "shallow_diffuse",
+                "paper_claim_scale": "pilot_paper",
+                "target_fpr": 0.01,
+                "run_decision": "pass",
+                "shallow_diffuse_official_reference_ready": True,
+                "reference_import_ready": True,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (output_dir / "manifest.local.json").write_text(
+        json.dumps(
+            {
+                "code_version": code_version,
+                "metadata": {"run_decision": "pass"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "shallow_diffuse_official_reference_records.jsonl").write_text(
+        json.dumps({"baseline_id": "shallow_diffuse"}) + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "shallow_diffuse_official_reference_validation_report.json").write_text(
+        json.dumps({"reference_import_ready": True}) + "\n",
         encoding="utf-8",
     )
 
@@ -380,21 +420,21 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
         root=tmp_path,
         output_dir="outputs/shallow_diffuse_official_reference",
         drive_output_dir=str(tmp_path / "drive" / "SLM" / "external_baseline_official_reference"),
-        archive_name="external_baseline_official_reference_package_shallow_diffuse.zip",
+        archive_name="external_baseline_official_reference_package_shallow_diffuse_test.zip",
     )
 
     archive_path = tmp_path / record.archive_path
     expected_entries = {
-        "outputs/shallow_diffuse_official_reference/shallow_diffuse_official_reference_summary.json",
-        "outputs/shallow_diffuse_official_reference/shallow_diffuse_official_reference_package_input_manifest.json",
-        "outputs/shallow_diffuse_official_reference/shallow_diffuse_official_reference_archive_summary.json",
-        "outputs/shallow_diffuse_official_reference/shallow_diffuse_official_reference_archive_manifest.local.json",
+        "outputs/shallow_diffuse_official_reference/pilot_paper/shallow_diffuse_official_reference_summary.json",
+        "outputs/shallow_diffuse_official_reference/pilot_paper/shallow_diffuse_official_reference_package_input_manifest.json",
+        "outputs/shallow_diffuse_official_reference/pilot_paper/shallow_diffuse_official_reference_archive_summary.json",
+        "outputs/shallow_diffuse_official_reference/pilot_paper/shallow_diffuse_official_reference_archive_manifest.local.json",
     }
     with ZipFile(archive_path) as archive:
         names = set(archive.namelist())
         package_manifest = json.loads(
             archive.read(
-                "outputs/shallow_diffuse_official_reference/shallow_diffuse_official_reference_package_input_manifest.json"
+                "outputs/shallow_diffuse_official_reference/pilot_paper/shallow_diffuse_official_reference_package_input_manifest.json"
             ).decode("utf-8")
         )
 
@@ -402,6 +442,18 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
     assert package_manifest["entry_count"] == len(names)
     assert record.archive_digest
     assert record.drive_archive_digest
+    spec = next(
+        item
+        for item in CLOSURE_PACKAGE_FAMILY_SPECS
+        if item.package_family == "official_reference_shallow_diffuse"
+    )
+    candidate = inspect_closure_package(
+        archive_path,
+        spec=spec,
+        paper_run_name="pilot_paper",
+        target_fpr=0.01,
+    )
+    assert candidate.package_family == "official_reference_shallow_diffuse"
 
 
 @pytest.mark.quick

@@ -6,6 +6,7 @@ import base64
 import csv
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -108,20 +109,14 @@ def test_pilot_paper_result_analysis_rebuilds_tables_and_failure_figure(tmp_path
             }
         ],
     )
-    conventional_records_path = (
-        tmp_path / "outputs" / "conventional_geometric_attack_evaluation" / "formal_attack_detection_records.jsonl"
-    )
-    _write_jsonl(conventional_records_path, [])
-
     manifest = write_pilot_paper_result_analysis_outputs(
         root=tmp_path,
         result_records_path=result_records_path,
-        real_attack_formal_records_path=real_records_path,
-        conventional_attack_formal_records_path=conventional_records_path,
+        attack_detection_records_path=real_records_path,
         failure_case_limit=4,
     )
 
-    output_dir = tmp_path / "outputs" / "pilot_paper_result_analysis"
+    output_dir = tmp_path / "outputs" / "pilot_paper_result_analysis" / "pilot_paper"
     confidence_interval_rows = list(
         csv.DictReader((output_dir / "confidence_interval_table.csv").open(encoding="utf-8"))
     )
@@ -175,20 +170,32 @@ def test_result_analysis_rejects_failure_record_without_attacked_image(tmp_path:
             }
         ],
     )
-    conventional_records_path = tmp_path / "outputs" / "geometric" / "formal_detection_records.jsonl"
-    _write_jsonl(conventional_records_path, [])
-
     with pytest.raises(FileNotFoundError, match="失败案例攻击图像不存在"):
         write_pilot_paper_result_analysis_outputs(
             root=tmp_path,
             result_records_path=result_records_path,
-            real_attack_formal_records_path=real_records_path,
-            conventional_attack_formal_records_path=conventional_records_path,
+            attack_detection_records_path=real_records_path,
         )
 
 
-def test_result_analysis_blocks_superiority_claim_when_margin_is_not_positive(tmp_path: Path) -> None:
-    """方法置信区间未优于 baseline 时不得支持优势性主张。"""
+def test_result_analysis_discloses_nonwinning_attack_without_blocking_complete_analysis(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """逐攻击未显著胜出时应如实披露, 但完整分析证据仍可支持论文使用。"""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+    monkeypatch.setattr(
+        "scripts.write_pilot_paper_result_analysis_outputs.default_attack_configs",
+        lambda: (
+            SimpleNamespace(
+                enabled=True,
+                resource_profile="full_main",
+                attack_family="standard_distortion",
+                attack_name="jpeg_compression",
+            ),
+        ),
+    )
 
     result_records_path = tmp_path / "outputs" / "fixed_fpr" / "result_records.jsonl"
     _write_jsonl(
@@ -196,27 +203,36 @@ def test_result_analysis_blocks_superiority_claim_when_margin_is_not_positive(tm
         [
             _result_record("slm_wm_current", "jpeg_compression", 0.6, 0.50, 0.70),
             _result_record("tree_ring", "jpeg_compression", 0.7, 0.60, 0.78),
+            _result_record("gaussian_shading", "jpeg_compression", 0.55, 0.45, 0.65),
+            _result_record("shallow_diffuse", "jpeg_compression", 0.65, 0.55, 0.75),
+            _result_record("t2smark", "jpeg_compression", 0.5, 0.40, 0.60),
         ],
     )
     real_records_path = tmp_path / "outputs" / "attacks" / "formal_detection_records.jsonl"
-    conventional_records_path = tmp_path / "outputs" / "geometric" / "formal_detection_records.jsonl"
     _write_jsonl(real_records_path, [])
-    _write_jsonl(conventional_records_path, [])
 
     write_pilot_paper_result_analysis_outputs(
         root=tmp_path,
         result_records_path=result_records_path,
-        real_attack_formal_records_path=real_records_path,
-        conventional_attack_formal_records_path=conventional_records_path,
+        attack_detection_records_path=real_records_path,
     )
     summary = json.loads(
-        (tmp_path / "outputs" / "pilot_paper_result_analysis" / "result_analysis_summary.json").read_text(
+        (
+            tmp_path
+            / "outputs"
+            / "pilot_paper_result_analysis"
+            / "pilot_paper"
+            / "result_analysis_summary.json"
+        ).read_text(
             encoding="utf-8"
         )
     )
 
     assert summary["superiority_claim_ready_count"] == 0
-    assert summary["supports_paper_claim"] is False
+    assert summary["per_attack_ci_coverage_ready"] is True
+    assert summary["per_attack_superiority_evaluation_ready"] is True
+    assert summary["universal_per_attack_superiority_claim_ready"] is False
+    assert summary["supports_paper_claim"] is True
 
 
 def test_result_template_coverage_counts_duplicate_keys() -> None:

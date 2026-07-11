@@ -1227,13 +1227,19 @@ def build_primary_baseline_formal_evidence_collection_rows(
     template_rows: Iterable[Mapping[str, Any]],
     candidate_rows: Iterable[Mapping[str, Any]],
     validation_report: Mapping[str, Any],
+    *,
+    paper_run_name: str,
 ) -> list[dict[str, Any]]:
     """构造主表 baseline 正式证据收集计划行。
 
     该函数属于项目特定写法: 它不生成或伪造 baseline 结果, 只把缺失的正式模板
-    转换为可执行的证据收集任务, 便于后续 Colab 或受治理导入流程逐项补齐。
+    转换为当前 paper run 独占的证据收集任务, 便于后续 Colab 或受治理导入流程
+    逐项补齐且避免跨层级结果混用。
     """
 
+    normalized_paper_run_name = str(paper_run_name).strip()
+    if not normalized_paper_run_name:
+        raise ValueError("paper_run_name 不能为空")
     candidates = [dict(row) for row in candidate_rows]
     accepted_records = [dict(row) for row in validation_report.get("accepted_records", ())]
     candidate_keys = [_formal_template_key(row) for row in candidates]
@@ -1269,7 +1275,10 @@ def build_primary_baseline_formal_evidence_collection_rows(
             "required_collection_actions": actions,
             "required_metric_fields": list(template.get("required_metric_fields", ())),
             "required_source_fields": list(template.get("required_source_fields", ())),
-            "required_result_record_path": "outputs/external_baseline_results/baseline_result_records.jsonl",
+            "required_result_record_path": (
+                "outputs/external_baseline_results/"
+                f"{normalized_paper_run_name}/baseline_result_records.jsonl"
+            ),
             "supports_paper_claim": False,
         }
         digest = build_stable_digest(payload)

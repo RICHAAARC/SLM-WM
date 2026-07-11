@@ -547,12 +547,20 @@ def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path)
     ]
     report = validate_primary_baseline_formal_import_rows([accepted_row], evidence_root=tmp_path, target_fpr=0.01)
 
-    collection_rows = build_primary_baseline_formal_evidence_collection_rows(template_rows, [accepted_row], report)
+    collection_rows = build_primary_baseline_formal_evidence_collection_rows(
+        template_rows,
+        [accepted_row],
+        report,
+        paper_run_name="pilot_paper",
+    )
     collection_summary = build_primary_baseline_formal_evidence_collection_summary(collection_rows)
     missing_row = next(row for row in collection_rows if row["attack_name"] == "gaussian_noise")
 
     assert len(collection_rows) == 2
     assert missing_row["formal_evidence_collection_ready"] is False
+    assert missing_row["required_result_record_path"] == (
+        "outputs/external_baseline_results/pilot_paper/baseline_result_records.jsonl"
+    )
     assert "generate_pilot_paper_baseline_result_record" in missing_row["required_collection_actions"]
     assert collection_summary["formal_evidence_collection_task_count"] == 2
     assert collection_summary["missing_formal_evidence_collection_task_count"] == 1
@@ -614,7 +622,7 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
         attack_family_metrics_path=attack_metrics_path,
         candidate_records_path=candidate_records_path,
     )
-    output_dir = tmp_path / "outputs" / "primary_baseline_formal_import"
+    output_dir = tmp_path / "outputs" / "primary_baseline_formal_import" / "pilot_paper"
     schema = json.loads((output_dir / "primary_baseline_formal_import_schema.json").read_text(encoding="utf-8"))
     validation = json.loads((output_dir / "primary_baseline_formal_import_validation_report.json").read_text(encoding="utf-8"))
     template_rows = [

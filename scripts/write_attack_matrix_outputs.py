@@ -26,8 +26,9 @@ from experiments.runtime.repository_environment import file_digest
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "attack_matrix"
-DEFAULT_OUTPUT_DIR = Path("outputs/attack_matrix")
-DEFAULT_IMAGE_ATTACK_EVIDENCE_RECORDS_PATH = Path("outputs/image_attack_evidence/formal_attack_detection_records.jsonl")
+DEFAULT_OUTPUT_ROOT = Path("outputs/attack_matrix")
+DEFAULT_IMAGE_ATTACK_EVIDENCE_ROOT = Path("outputs/image_attack_evidence")
+IMAGE_ATTACK_EVIDENCE_RECORDS_NAME = "formal_attack_detection_records.jsonl"
 FORMAL_METRIC_STATUS = "measured_real_attacked_image_image_only_detection"
 
 
@@ -444,8 +445,8 @@ def write_attack_matrix_outputs(
     root: str | Path = ".",
     paper_run_name: str | None = None,
     dataset_runtime_dir: str | Path | None = None,
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    image_attack_evidence_records_path: str | Path = DEFAULT_IMAGE_ATTACK_EVIDENCE_RECORDS_PATH,
+    output_dir: str | Path | None = None,
+    image_attack_evidence_records_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """从当前论文层级的真实数据集运行结果写出攻击矩阵。"""
 
@@ -456,8 +457,15 @@ def write_attack_matrix_outputs(
         root_path,
         dataset_runtime_dir or Path("outputs/image_only_dataset_runtime") / resolved_run_name,
     )
-    resolved_output_dir = ensure_output_path(root_path, output_dir)
-    evidence_records_path = ensure_output_path(root_path, image_attack_evidence_records_path)
+    resolved_output_dir = ensure_output_path(
+        root_path,
+        output_dir or DEFAULT_OUTPUT_ROOT / resolved_run_name,
+    )
+    evidence_records_path = ensure_output_path(
+        root_path,
+        image_attack_evidence_records_path
+        or DEFAULT_IMAGE_ATTACK_EVIDENCE_ROOT / resolved_run_name / IMAGE_ATTACK_EVIDENCE_RECORDS_NAME,
+    )
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
     evidence_records_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -561,6 +569,9 @@ def write_attack_matrix_outputs(
         "real_attacked_image_closed_loop_ready": evidence_chain_ready,
         "formal_attack_detection_ready": attack_metrics_ready,
         "attack_metrics_ready": attack_metrics_ready,
+        "detector_input_access_mode": "image_key_public_model_only",
+        "blind_image_detector": True,
+        "generation_latent_trace_required": False,
         "required_real_gpu_attack_count": len(required_gpu_ids),
         "measured_real_gpu_attack_count": len(measured_gpu_ids),
         "real_gpu_attack_validation_ready": measured_gpu_ids == required_gpu_ids,
@@ -632,11 +643,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--paper-run-name", default=None, help="论文运行层级, 默认读取统一环境配置。")
     parser.add_argument("--dataset-runtime-dir", default=None, help="真实数据集运行目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="攻击矩阵输出目录。")
+    parser.add_argument("--output-dir", default=None, help="攻击矩阵输出目录; 默认写入当前论文运行子目录。")
     parser.add_argument(
         "--image-attack-evidence-records-path",
-        default=str(DEFAULT_IMAGE_ATTACK_EVIDENCE_RECORDS_PATH),
-        help="正式真实图像攻击记录合并路径。",
+        default=None,
+        help="正式真实图像攻击记录合并路径; 默认写入当前论文运行子目录。",
     )
     return parser
 

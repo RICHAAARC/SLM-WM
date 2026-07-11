@@ -14,6 +14,7 @@ from typing import Any, Callable
 from experiments.runtime.archive_naming import (
     build_workflow_archive_name,
 )
+from experiments.protocol.paper_run_config import build_paper_run_config
 from paper_workflow.notebook_utils.notebook_runtime import write_notebook_runtime_report
 
 WORKFLOW_DRIVE_OUTPUT_ENV_KEYS = {
@@ -23,15 +24,6 @@ WORKFLOW_DRIVE_OUTPUT_ENV_KEYS = {
     "official_reference_shallow_diffuse": "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_DRIVE_OUTPUT_DIR",
     "official_reference_t2smark": "SLM_WM_T2SMARK_FORMAL_DRIVE_OUTPUT_DIR",
 }
-WORKFLOW_LOCAL_OUTPUT_DIRS = {
-    "external_baseline_method_faithful": "outputs/external_baseline_method_faithful",
-    "official_reference_tree_ring": "outputs/tree_ring_official_reference",
-    "official_reference_gaussian_shading": "outputs/gaussian_shading_official_reference",
-    "official_reference_shallow_diffuse": "outputs/shallow_diffuse_official_reference",
-    "official_reference_t2smark": "outputs/t2smark_formal_reproduction",
-}
-
-
 def _run_function_for_workflow(workflow_name: str) -> Callable[..., Any]:
     """延迟解析正式 workflow runner, 使 Notebook 只调用统一入口。"""
 
@@ -130,11 +122,14 @@ def package_workflow_outputs(
     archive_name = build_workflow_archive_name(workflow_name, root=root, baseline_id=baseline_id)
     resolved_drive_output_dir = resolve_drive_output_dir(workflow_name, drive_output_dir)
     resolved_baseline_id = baseline_id or os.environ.get("SLM_WM_PRIMARY_BASELINE_ID", "")
-    runtime_output_dir = WORKFLOW_LOCAL_OUTPUT_DIRS[workflow_name]
-    if workflow_name == "external_baseline_method_faithful":
-        if not resolved_baseline_id:
-            raise ValueError("external_baseline_method_faithful 打包必须提供单一 baseline_id")
-        runtime_output_dir = f"{runtime_output_dir}/run_records/{resolved_baseline_id}"
+    if workflow_name == "external_baseline_method_faithful" and not resolved_baseline_id:
+        raise ValueError("external_baseline_method_faithful 打包必须提供单一 baseline_id")
+    paper_run = build_paper_run_config(root)
+    runtime_output_dir = (
+        f"outputs/notebook_runtime_observation/{paper_run.run_name}/{workflow_name}"
+    )
+    if resolved_baseline_id:
+        runtime_output_dir = f"{runtime_output_dir}/{resolved_baseline_id}"
     write_notebook_runtime_report(
         root=root,
         workflow_name=workflow_name,

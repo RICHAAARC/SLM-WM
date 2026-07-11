@@ -93,7 +93,7 @@ def test_evidence_closure_entry_review_blocks_before_formal_evidence_is_ready(tm
     write_json(
         baseline_report,
         {
-            "baseline_results_ready": False,
+                "primary_baseline_results_ready": False,
             "formal_import_validation_ready": False,
             "accepted_formal_import_count": 0,
             "formal_evidence_path_resolution_ready": True,
@@ -118,7 +118,7 @@ def test_evidence_closure_entry_review_blocks_before_formal_evidence_is_ready(tm
         dataset_quality_summary_path=dataset_quality,
     )
 
-    output_dir = tmp_path / "outputs" / "evidence_closure_entry_review"
+    output_dir = tmp_path / "outputs" / "evidence_closure_entry_review" / "pilot_paper"
     report = json.loads((output_dir / "entry_review_report.json").read_text(encoding="utf-8"))
     rows = list(csv.DictReader((output_dir / "entry_review_checklist.csv").open(encoding="utf-8")))
 

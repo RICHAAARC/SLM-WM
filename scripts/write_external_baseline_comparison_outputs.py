@@ -6,6 +6,7 @@ import argparse
 import csv
 from datetime import datetime, timezone
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -36,17 +37,15 @@ from paper_experiments.baselines import (
     overlay_specs_with_source_registry,
     validate_primary_baseline_formal_import_rows,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
+from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "external_baseline_comparison"
-DEFAULT_OUTPUT_DIR = Path("outputs/external_baseline_comparison")
-DEFAULT_ATTACK_MANIFEST_PATH = Path("outputs/attack_matrix/attack_manifest.json")
-DEFAULT_ATTACK_FAMILY_METRICS_PATH = Path("outputs/attack_matrix/attack_family_metrics.csv")
-DEFAULT_ATTACK_MATRIX_MANIFEST_PATH = Path("outputs/attack_matrix/manifest.local.json")
-DEFAULT_THRESHOLD_REPORT_PATH = Path("outputs/threshold_calibration/threshold_degeneracy_report.json")
-DEFAULT_BASELINE_RESULT_RECORDS_PATH = Path("outputs/external_baseline_results/baseline_result_records.jsonl")
+DEFAULT_OUTPUT_ROOT = Path("outputs/external_baseline_comparison")
+DEFAULT_ATTACK_MATRIX_ROOT = Path("outputs/attack_matrix")
+DEFAULT_THRESHOLD_AUDIT_ROOT = Path("outputs/fixed_fpr_threshold_audit")
+DEFAULT_BASELINE_RESULT_ROOT = Path("outputs/external_baseline_results")
 DEFAULT_BASELINE_SOURCE_REGISTRY_PATH = Path("external_baseline/source_registry.json")
 DEFAULT_EVIDENCE_SEARCH_ROOTS_ENV = "SLM_WM_EVIDENCE_SEARCH_ROOTS"
 
@@ -183,10 +182,24 @@ def build_runtime_report(
         and bool(formal_template_coverage_summary.get("primary_baseline_formal_template_coverage_ready", False))
         and bool(formal_evidence_collection_summary.get("primary_baseline_formal_evidence_collection_ready", False))
     )
+    boundary = attack_manifest.get("evaluation_boundary", {})
+    target_fpr = boundary.get("target_fpr") if isinstance(boundary, dict) else None
+    threshold_audit_ready = (
+        threshold_report.get("fixed_fpr_threshold_audit_ready") is True
+        and threshold_report.get("all_method_thresholds_ready") is True
+        and threshold_report.get("supports_paper_claim") is True
+        and target_fpr is not None
+        and math.isclose(
+            float(threshold_report.get("target_fpr", math.nan)),
+            float(target_fpr),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+    )
     comparison_protocol_ready = (
         bool(attack_manifest.get("attack_metrics_ready"))
         and bool(attack_manifest.get("supports_paper_claim", False))
-        and not threshold_report.get("threshold_degenerate", True)
+        and threshold_audit_ready
     )
     primary_baseline_results_ready = bool(primary_rows) and all(
         row["metric_status"] != "unsupported"
@@ -203,6 +216,8 @@ def build_runtime_report(
     return {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "paper_claim_scale": str(attack_manifest.get("paper_run_name", "")),
+        "target_fpr": target_fpr,
         "baseline_count": baseline_count,
         "primary_baseline_count": len(primary_rows),
         "supplemental_baseline_count": len(supplemental_rows),
@@ -287,6 +302,7 @@ def build_runtime_report(
         "primary_baseline_results_ready": primary_baseline_results_ready,
         "supplemental_baseline_results_ready": bool(supplemental_rows) and supplemental_ready_count == len(supplemental_rows),
         "comparison_protocol_ready": comparison_protocol_ready,
+        "fixed_fpr_threshold_audit_ready": threshold_audit_ready,
         "baseline_results_ready": ready_count == baseline_count and baseline_count > 0,
         "comparison_table_supports_paper_claim": comparison_table_supports_paper_claim,
         "baseline_source_registry_ready": bool(source_registry.get("baseline_sources")),
@@ -337,25 +353,47 @@ def align_comparison_table_claim_scope(
 
 def write_external_baseline_comparison_outputs(
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    attack_manifest_path: str | Path = DEFAULT_ATTACK_MANIFEST_PATH,
-    attack_family_metrics_path: str | Path = DEFAULT_ATTACK_FAMILY_METRICS_PATH,
-    attack_matrix_manifest_path: str | Path = DEFAULT_ATTACK_MATRIX_MANIFEST_PATH,
-    threshold_report_path: str | Path = DEFAULT_THRESHOLD_REPORT_PATH,
-    baseline_result_records_path: str | Path = DEFAULT_BASELINE_RESULT_RECORDS_PATH,
+    output_dir: str | Path | None = None,
+    attack_manifest_path: str | Path | None = None,
+    attack_family_metrics_path: str | Path | None = None,
+    attack_matrix_manifest_path: str | Path | None = None,
+    threshold_report_path: str | Path | None = None,
+    baseline_result_records_path: str | Path | None = None,
     baseline_source_registry_path: str | Path = DEFAULT_BASELINE_SOURCE_REGISTRY_PATH,
     evidence_search_roots: Iterable[str | Path] | None = None,
 ) -> dict[str, Any]:
     """写出外部 baseline 对比 records, 表格, 运行报告与 manifest。"""
     root_path = Path(root).resolve()
-    resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
+    paper_run = build_paper_run_config(root_path)
+    resolved_output_dir = ensure_output_dir_under_outputs(
+        root_path,
+        Path(output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name),
+    )
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved_attack_manifest_path = resolve_input_path(root_path, attack_manifest_path)
-    resolved_attack_family_metrics_path = resolve_input_path(root_path, attack_family_metrics_path)
-    resolved_attack_matrix_manifest_path = resolve_input_path(root_path, attack_matrix_manifest_path)
-    resolved_threshold_report_path = resolve_input_path(root_path, threshold_report_path)
-    resolved_baseline_result_records_path = resolve_input_path(root_path, baseline_result_records_path)
+    resolved_attack_manifest_path = resolve_input_path(
+        root_path,
+        attack_manifest_path or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "attack_manifest.json",
+    )
+    resolved_attack_family_metrics_path = resolve_input_path(
+        root_path,
+        attack_family_metrics_path
+        or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "attack_family_metrics.csv",
+    )
+    resolved_attack_matrix_manifest_path = resolve_input_path(
+        root_path,
+        attack_matrix_manifest_path or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "manifest.local.json",
+    )
+    resolved_threshold_report_path = resolve_input_path(
+        root_path,
+        threshold_report_path
+        or DEFAULT_THRESHOLD_AUDIT_ROOT / paper_run.run_name / "threshold_audit_report.json",
+    )
+    resolved_baseline_result_records_path = resolve_input_path(
+        root_path,
+        baseline_result_records_path
+        or DEFAULT_BASELINE_RESULT_ROOT / paper_run.run_name / "baseline_result_records.jsonl",
+    )
     resolved_baseline_source_registry_path = resolve_input_path(root_path, baseline_source_registry_path)
     resolved_evidence_search_roots = parse_evidence_search_roots(evidence_search_roots)
 
@@ -371,7 +409,9 @@ def write_external_baseline_comparison_outputs(
     )
     baseline_result_rows = read_jsonl_rows(resolved_baseline_result_records_path)
     boundary = attack_manifest.get("evaluation_boundary", {})
-    target_fpr = float(boundary.get("target_fpr", PILOT_PAPER_FIXED_FPR))
+    if "target_fpr" not in boundary:
+        raise ValueError("攻击矩阵缺少当前论文运行的 target_fpr")
+    target_fpr = float(boundary["target_fpr"])
     formal_import_validation = validate_primary_baseline_formal_import_rows(
         baseline_result_rows,
         evidence_root=root_path,
@@ -404,6 +444,7 @@ def write_external_baseline_comparison_outputs(
         formal_template_rows,
         baseline_result_rows,
         formal_import_validation,
+        paper_run_name=paper_run.run_name,
     )
     formal_evidence_collection_summary = build_primary_baseline_formal_evidence_collection_summary(
         formal_evidence_collection_rows
@@ -573,23 +614,35 @@ def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
     parser = argparse.ArgumentParser(description="写出外部 baseline 共同协议对比产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
-    parser.add_argument("--attack-manifest-path", default=str(DEFAULT_ATTACK_MANIFEST_PATH), help="攻击矩阵 manifest 路径。")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="输出目录; 默认写入当前论文运行子目录, 且必须位于 outputs/ 下。",
+    )
+    parser.add_argument(
+        "--attack-manifest-path",
+        default=None,
+        help="攻击矩阵 manifest 路径; 默认读取当前论文运行子目录。",
+    )
     parser.add_argument(
         "--attack-family-metrics-path",
-        default=str(DEFAULT_ATTACK_FAMILY_METRICS_PATH),
-        help="攻击矩阵 family metrics 表路径。",
+        default=None,
+        help="攻击矩阵 family metrics 表路径; 默认读取当前论文运行子目录。",
     )
     parser.add_argument(
         "--attack-matrix-manifest-path",
-        default=str(DEFAULT_ATTACK_MATRIX_MANIFEST_PATH),
-        help="攻击矩阵产物 manifest 路径。",
+        default=None,
+        help="攻击矩阵产物 manifest 路径; 默认读取当前论文运行子目录。",
     )
-    parser.add_argument("--threshold-report-path", default=str(DEFAULT_THRESHOLD_REPORT_PATH), help="fixed-FPR 边界报告路径。")
+    parser.add_argument(
+        "--threshold-report-path",
+        default=None,
+        help="五方法统一 fixed-FPR 阈值审计报告; 默认读取当前论文运行子目录。",
+    )
     parser.add_argument(
         "--baseline-result-records-path",
-        default=str(DEFAULT_BASELINE_RESULT_RECORDS_PATH),
-        help="受治理外部 baseline 结果 JSONL 路径; 缺失时保持 unsupported 状态。",
+        default=None,
+        help="受治理外部 baseline 结果 JSONL 路径; 默认读取当前论文运行子目录。",
     )
     parser.add_argument(
         "--baseline-source-registry-path",

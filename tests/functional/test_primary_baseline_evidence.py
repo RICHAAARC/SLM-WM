@@ -307,7 +307,7 @@ def test_primary_baseline_evidence_writer_outputs_records_summary_and_manifest(
         t2smark_formal_output_dir=t2smark_output_dir,
     )
 
-    output_dir = tmp_path / "outputs" / "primary_baseline_evidence"
+    output_dir = tmp_path / "outputs" / "primary_baseline_evidence" / "probe_paper"
     records = [
         json.loads(line)
         for line in (output_dir / "primary_baseline_evidence_records.jsonl").read_text(encoding="utf-8").splitlines()

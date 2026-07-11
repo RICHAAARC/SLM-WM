@@ -523,7 +523,10 @@ def build_pilot_paper_result_import_template_rows(
                 "confidence_level": resolved_config.confidence_level,
                 "required_metric_fields": list(PILOT_PAPER_REQUIRED_METRIC_FIELDS),
                 "required_source_fields": list(PILOT_PAPER_REQUIRED_SOURCE_FIELDS),
-                "required_result_record_path": "outputs/pilot_paper_fixed_fpr_results/pilot_paper_result_records.jsonl",
+                "required_result_record_path": (
+                    "outputs/pilot_paper_fixed_fpr_results/"
+                    f"{resolved_config.paper_run_name}/pilot_paper_result_records.jsonl"
+                ),
                 "supports_paper_claim": False,
                 "paper_claim_scale": resolved_config.prompt_set,
             }

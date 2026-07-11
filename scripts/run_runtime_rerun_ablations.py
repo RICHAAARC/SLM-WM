@@ -49,12 +49,11 @@ def main() -> None:
         )
         for record in records
     )
-    output_dir = f"outputs/formal_mechanism_ablation/{paper_run.run_name}"
     summary = run_runtime_rerun_ablations(
         configs,
         target_fpr=paper_run.target_fpr,
+        paper_run_name=paper_run.run_name,
         root=ROOT,
-        output_dir=output_dir,
         max_new_runs_per_session=int(
             os.environ.get("SLM_WM_MAX_NEW_ABLATION_RUNS_PER_SESSION", "0")
         ),
@@ -64,7 +63,7 @@ def main() -> None:
         return
     if summary.get("protocol_decision") != "pass":
         raise RuntimeError("真实机制消融未通过完整证据门禁")
-    archive_path = package_runtime_rerun_ablations(root=ROOT, output_dir=output_dir)
+    archive_path = package_runtime_rerun_ablations(paper_run.run_name, root=ROOT)
     print(
         json.dumps(
             {"summary": summary, "archive_path": str(archive_path)},

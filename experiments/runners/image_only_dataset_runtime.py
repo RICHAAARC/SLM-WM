@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import asdict, dataclass, replace
 import csv
+from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
@@ -12,7 +13,11 @@ from typing import Any, Iterable
 from zipfile import ZIP_STORED, ZipFile
 
 from experiments.protocol.calibration import binomial_rate_upper_confidence_bound
-from experiments.protocol.paper_run_config import PaperRunConfig, build_paper_run_config
+from experiments.protocol.paper_run_config import (
+    PaperRunConfig,
+    build_paper_run_config,
+    normalize_paper_run_name,
+)
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from experiments.protocol.attacks import default_attack_configs
@@ -603,6 +608,7 @@ def run_image_only_dataset_runtime(
         or measured_real_gpu_attack_count >= required_real_gpu_attack_count
     )
     summary = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "paper_run_name": resolved_paper_run.run_name,
         "prompt_count": len(prompt_records),
         "split_counts": split_counts,
@@ -690,9 +696,47 @@ def package_image_only_dataset_runtime(
     """把真实运行 records、图像、阈值和 manifest 打包为受治理输入包。"""
 
     root_path = Path(root).resolve()
-    source_dir = root_path / "outputs" / "image_only_dataset_runtime" / paper_run_name
-    if not source_dir.is_dir():
-        raise FileNotFoundError("缺少仅图像数据集运行输出目录")
+    resolved_paper_run_name = normalize_paper_run_name(paper_run_name)
+    paper_run = build_paper_run_config(root_path)
+    if paper_run.run_name != resolved_paper_run_name:
+        raise ValueError("仅图像运行打包层级必须与当前论文配置一致")
+    source_dir = (
+        root_path / "outputs" / "image_only_dataset_runtime" / resolved_paper_run_name
+    )
+    required_paths = tuple(
+        source_dir / filename
+        for filename in (
+            "runtime_results.jsonl",
+            "image_only_detection_records.jsonl",
+            "watermark_quality_image_registry.jsonl",
+            "frozen_evidence_protocol.json",
+            "test_detection_metrics.csv",
+            "dataset_runtime_summary.json",
+            "manifest.local.json",
+        )
+    )
+    if any(not path.is_file() for path in required_paths):
+        raise FileNotFoundError("仅图像数据集运行输出不完整, 不得打包")
+    summary = json.loads((source_dir / "dataset_runtime_summary.json").read_text(encoding="utf-8-sig"))
+    manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
+    if not all(
+        (
+            summary.get("paper_run_name") == resolved_paper_run_name,
+            math.isclose(
+                float(summary.get("target_fpr", -1.0)),
+                paper_run.target_fpr,
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            ),
+            bool(summary.get("generated_at")),
+            summary.get("protocol_decision") == "pass",
+            summary.get("full_method_claim_ready") is True,
+            summary.get("supports_paper_claim") is True,
+            manifest.get("artifact_id")
+            == f"{resolved_paper_run_name}_image_only_dataset_runtime_manifest",
+        )
+    ):
+        raise RuntimeError("仅图像数据集运行身份或 ready 门禁未通过")
     code_version = resolve_code_version(root_path).replace("-dirty", "")
     archive_path = source_dir / f"image_only_dataset_runtime_package_{utc_archive_token()}_{code_version}.zip"
     entries = tuple(

@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.protocol.paper_run_config import build_paper_run_config
 from paper_experiments.analysis.submission_readiness import (
     SubmissionReadinessInput,
     build_release_profile_rows,
@@ -26,11 +27,8 @@ from main.core.digest import build_stable_digest
 from scripts.extract_minimal_paper_package import PROFILES, extract_profile
 
 CONSTRUCTION_UNIT_NAME = "submission_readiness_gate"
-DEFAULT_OUTPUT_DIR = Path("outputs/submission_readiness")
-DEFAULT_EVIDENCE_MANIFEST_PATH = Path("outputs/paper_artifact_evidence_audit/manifest.local.json")
-DEFAULT_BUILDER_REPORT_PATH = Path("outputs/paper_artifact_evidence_audit/artifact_builder_readiness_report.json")
-DEFAULT_BLOCKER_REPORT_PATH = Path("outputs/paper_artifact_evidence_audit/submission_blocker_report.json")
-DEFAULT_GAP_LIST_PATH = Path("outputs/paper_artifact_evidence_audit/evidence_gap_list.csv")
+DEFAULT_OUTPUT_ROOT = Path("outputs/submission_readiness")
+DEFAULT_EVIDENCE_AUDIT_ROOT = Path("outputs/paper_artifact_evidence_audit")
 
 
 def stable_json_text(value: Any) -> str:
@@ -144,21 +142,38 @@ def build_input_bundle(
 
 def write_submission_readiness_outputs(
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    evidence_manifest_path: str | Path = DEFAULT_EVIDENCE_MANIFEST_PATH,
-    builder_report_path: str | Path = DEFAULT_BUILDER_REPORT_PATH,
-    blocker_report_path: str | Path = DEFAULT_BLOCKER_REPORT_PATH,
-    gap_list_path: str | Path = DEFAULT_GAP_LIST_PATH,
+    output_dir: str | Path | None = None,
+    evidence_manifest_path: str | Path | None = None,
+    builder_report_path: str | Path | None = None,
+    blocker_report_path: str | Path | None = None,
+    gap_list_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """写出投稿就绪阻断报告、所需输入清单、release dry-run 表和 manifest。"""
     root_path = Path(root).resolve()
-    resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
+    paper_run = build_paper_run_config(root_path)
+    resolved_output_dir = ensure_output_dir_under_outputs(
+        root_path,
+        Path(output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name),
+    )
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved_evidence_manifest_path = resolve_input_path(root_path, evidence_manifest_path)
-    resolved_builder_report_path = resolve_input_path(root_path, builder_report_path)
-    resolved_blocker_report_path = resolve_input_path(root_path, blocker_report_path)
-    resolved_gap_list_path = resolve_input_path(root_path, gap_list_path)
+    evidence_audit_dir = DEFAULT_EVIDENCE_AUDIT_ROOT / paper_run.run_name
+    resolved_evidence_manifest_path = resolve_input_path(
+        root_path,
+        evidence_manifest_path or evidence_audit_dir / "manifest.local.json",
+    )
+    resolved_builder_report_path = resolve_input_path(
+        root_path,
+        builder_report_path or evidence_audit_dir / "artifact_builder_readiness_report.json",
+    )
+    resolved_blocker_report_path = resolve_input_path(
+        root_path,
+        blocker_report_path or evidence_audit_dir / "submission_blocker_report.json",
+    )
+    resolved_gap_list_path = resolve_input_path(
+        root_path,
+        gap_list_path or evidence_audit_dir / "evidence_gap_list.csv",
+    )
 
     bundle = build_input_bundle(
         root_path,
@@ -257,11 +272,15 @@ def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
     parser = argparse.ArgumentParser(description="写出投稿就绪门禁本地审计产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
-    parser.add_argument("--evidence-manifest-path", default=str(DEFAULT_EVIDENCE_MANIFEST_PATH), help="证据审计 manifest 路径。")
-    parser.add_argument("--builder-report-path", default=str(DEFAULT_BUILDER_REPORT_PATH), help="产物构建器 readiness report 路径。")
-    parser.add_argument("--blocker-report-path", default=str(DEFAULT_BLOCKER_REPORT_PATH), help="投稿阻断 report 路径。")
-    parser.add_argument("--gap-list-path", default=str(DEFAULT_GAP_LIST_PATH), help="证据缺口列表路径。")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="输出目录; 默认写入当前论文运行子目录, 且必须位于 outputs/ 下。",
+    )
+    parser.add_argument("--evidence-manifest-path", default=None, help="证据审计 manifest; 默认读取当前论文运行子目录。")
+    parser.add_argument("--builder-report-path", default=None, help="产物构建器 readiness report; 默认读取当前论文运行子目录。")
+    parser.add_argument("--blocker-report-path", default=None, help="投稿阻断 report; 默认读取当前论文运行子目录。")
+    parser.add_argument("--gap-list-path", default=None, help="证据缺口列表; 默认读取当前论文运行子目录。")
     return parser
 
 

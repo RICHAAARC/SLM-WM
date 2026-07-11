@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -40,17 +41,15 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     validate_pilot_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
+from experiments.protocol.paper_run_config import normalize_paper_run_name
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.runtime.image_metrics import measured_score_retention
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_fixed_fpr_result_records"
-DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_fixed_fpr_results")
-DEFAULT_BASELINE_RECORDS_PATH = Path("outputs/external_baseline_results/baseline_result_records.jsonl")
-DEFAULT_BASELINE_VALIDATION_REPORT_PATH = Path(
-    "outputs/external_baseline_results/baseline_result_candidate_validation_report.json"
-)
-DEFAULT_DATASET_QUALITY_METRICS_PATH = Path("outputs/dataset_level_quality/dataset_quality_metrics.csv")
+DEFAULT_OUTPUT_ROOT = Path("outputs/pilot_paper_fixed_fpr_results")
+DEFAULT_BASELINE_RESULTS_ROOT = Path("outputs/external_baseline_results")
+DEFAULT_DATASET_QUALITY_ROOT = Path("outputs/dataset_level_quality")
 DEFAULT_DATASET_QUALITY_SUMMARY_NAME = "dataset_quality_summary.json"
 IMAGE_ONLY_FORMAL_SLM_METRIC_STATUS = "measured_image_only_detection_formal_protocol"
 CLAIM_SUPPORTED_METHOD_STATUSES = {
@@ -1009,10 +1008,10 @@ def build_result_summary(
 def write_pilot_paper_result_record_outputs(
     *,
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    baseline_records_path: str | Path = DEFAULT_BASELINE_RECORDS_PATH,
-    baseline_validation_report_path: str | Path = DEFAULT_BASELINE_VALIDATION_REPORT_PATH,
-    dataset_quality_metrics_path: str | Path = DEFAULT_DATASET_QUALITY_METRICS_PATH,
+    output_dir: str | Path | None = None,
+    baseline_records_path: str | Path | None = None,
+    baseline_validation_report_path: str | Path | None = None,
+    dataset_quality_metrics_path: str | Path | None = None,
     image_only_runtime_dir: str | Path | None = None,
     package_paths: Iterable[str | Path] = (),
     package_search_roots: Iterable[str | Path] = (),
@@ -1022,7 +1021,11 @@ def write_pilot_paper_result_record_outputs(
     """写出 pilot_paper 共同协议结果记录和校验报告。"""
 
     root_path = Path(root).resolve()
-    output_path = ensure_output_dir_under_outputs(root_path, output_dir)
+    resolved_run_name = normalize_paper_run_name(os.environ.get("SLM_WM_PAPER_RUN_NAME"))
+    output_path = ensure_output_dir_under_outputs(
+        root_path,
+        output_dir or DEFAULT_OUTPUT_ROOT / resolved_run_name,
+    )
     packages = expand_package_paths(root_path, package_paths, package_search_roots)
     materialization_report = materialize_output_entries(root_path, packages) if packages else {
         "input_package_count": 0,
@@ -1060,19 +1063,25 @@ def write_pilot_paper_result_record_outputs(
     resolved_image_only_runtime_dir = resolve_path(
         root_path,
         image_only_runtime_dir
-        or Path("outputs/image_only_dataset_runtime") / str(schema.get("paper_claim_scale", "pilot_paper")),
+        or Path("outputs/image_only_dataset_runtime") / config.paper_run_name,
     )
 
-    resolved_baseline_records_path = resolve_path(root_path, baseline_records_path)
-    resolved_baseline_validation_report_path = resolve_path(root_path, baseline_validation_report_path)
-    paper_claim_scale = str(schema.get("paper_claim_scale", "pilot_paper"))
-    per_run_quality_metrics_path = (
-        root_path / "outputs" / "dataset_level_quality" / paper_claim_scale / "dataset_quality_metrics.csv"
+    resolved_baseline_records_path = resolve_path(
+        root_path,
+        baseline_records_path
+        or DEFAULT_BASELINE_RESULTS_ROOT / config.paper_run_name / "baseline_result_records.jsonl",
     )
-    resolved_dataset_quality_metrics_path = (
-        per_run_quality_metrics_path
-        if Path(dataset_quality_metrics_path) == DEFAULT_DATASET_QUALITY_METRICS_PATH
-        else resolve_path(root_path, dataset_quality_metrics_path)
+    resolved_baseline_validation_report_path = resolve_path(
+        root_path,
+        baseline_validation_report_path
+        or DEFAULT_BASELINE_RESULTS_ROOT
+        / config.paper_run_name
+        / "baseline_result_candidate_validation_report.json",
+    )
+    resolved_dataset_quality_metrics_path = resolve_path(
+        root_path,
+        dataset_quality_metrics_path
+        or DEFAULT_DATASET_QUALITY_ROOT / config.paper_run_name / "dataset_quality_metrics.csv",
     )
     image_only_metrics_path = resolved_image_only_runtime_dir / "test_detection_metrics.csv"
     image_only_summary_path = resolved_image_only_runtime_dir / "dataset_runtime_summary.json"
@@ -1210,10 +1219,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="写出 pilot_paper fixed-FPR 共同协议结果记录。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
-    parser.add_argument("--baseline-records-path", default=str(DEFAULT_BASELINE_RECORDS_PATH))
-    parser.add_argument("--baseline-validation-report-path", default=str(DEFAULT_BASELINE_VALIDATION_REPORT_PATH))
-    parser.add_argument("--dataset-quality-metrics-path", default=str(DEFAULT_DATASET_QUALITY_METRICS_PATH))
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="输出目录; 默认写入当前论文运行子目录, 且必须位于 outputs/ 下。",
+    )
+    parser.add_argument(
+        "--baseline-records-path",
+        default=None,
+        help="baseline 候选结果路径; 默认读取当前论文运行子目录。",
+    )
+    parser.add_argument(
+        "--baseline-validation-report-path",
+        default=None,
+        help="baseline 候选校验报告路径; 默认读取当前论文运行子目录。",
+    )
+    parser.add_argument(
+        "--dataset-quality-metrics-path",
+        default=None,
+        help="数据集质量指标路径; 默认读取当前论文运行子目录。",
+    )
     parser.add_argument("--image-only-runtime-dir", default=None)
     parser.add_argument("--package-path", action="append", default=[], help="可重复传入的前序结果 zip 包。")
     parser.add_argument("--package-search-root", action="append", default=[], help="递归查找 zip 包的 Google Drive 镜像根目录。")

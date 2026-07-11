@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.protocol.paper_run_config import build_paper_run_config
 from main.core.digest import build_stable_digest
 from paper_experiments.baselines import (
     build_method_faithful_adapter_status_records,
@@ -27,7 +28,7 @@ from paper_experiments.baselines.method_faithful_observation_collection import (
 )
 
 
-DEFAULT_OUTPUT_DIR = Path("outputs/primary_baseline_method_faithful_adapter_protocol")
+DEFAULT_OUTPUT_ROOT = Path("outputs/primary_baseline_method_faithful_adapter_protocol")
 DEFAULT_COLLECTION_ROOT = DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT
 
 
@@ -90,14 +91,21 @@ def resolve_code_version(root_path: Path) -> str:
 def write_primary_baseline_method_faithful_adapter_protocol_outputs(
     *,
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    collection_root: str | Path = DEFAULT_COLLECTION_ROOT,
+    output_dir: str | Path | None = None,
+    collection_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """从 exact-set collection 写出 adapter schema、状态记录与摘要。"""
 
     root_path = Path(root).resolve()
-    resolved_output_dir = ensure_output_dir_under_outputs(root_path, output_dir)
-    resolved_collection_root = resolve_path(root_path, collection_root)
+    paper_run = build_paper_run_config(root_path)
+    resolved_output_dir = ensure_output_dir_under_outputs(
+        root_path,
+        output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name,
+    )
+    resolved_collection_root = resolve_path(
+        root_path,
+        collection_root or DEFAULT_COLLECTION_ROOT / paper_run.run_name,
+    )
     sources = load_method_faithful_observation_collection(
         resolved_collection_root,
         project_root=root_path,
@@ -164,11 +172,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="写出主表 external baseline 方法忠实 SD3.5 适配协议产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="输出目录; 默认写入当前论文运行子目录, 且必须位于 outputs/ 下。",
+    )
     parser.add_argument(
         "--collection-root",
-        default=str(DEFAULT_COLLECTION_ROOT),
-        help="三个 method-faithful baseline 的 exact-set 物化根目录。",
+        default=None,
+        help="三个 method-faithful baseline 的 exact-set 物化根目录; 默认读取当前论文运行子目录。",
     )
     return parser
 

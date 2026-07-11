@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.protocol.paper_run_config import build_paper_run_config
 from paper_experiments.analysis.evidence_closure_entry_review import (
     EvidenceClosureEntryInput,
     build_evidence_closure_entry_checklist,
@@ -24,12 +25,11 @@ from paper_experiments.analysis.evidence_closure_entry_review import (
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "evidence_closure_entry_review"
-DEFAULT_OUTPUT_DIR = Path("outputs/evidence_closure_entry_review")
-DEFAULT_SUBMISSION_READINESS_REPORT_PATH = Path("outputs/submission_readiness/readiness_blocker_report.json")
-DEFAULT_REQUIRED_EVIDENCE_INPUTS_PATH = Path("outputs/submission_readiness/required_evidence_inputs.csv")
-DEFAULT_PAPER_BLOCKER_REPORT_PATH = Path("outputs/paper_artifact_evidence_audit/submission_blocker_report.json")
-DEFAULT_BASELINE_RUNTIME_REPORT_PATH = Path("outputs/external_baseline_comparison/baseline_runtime_report.json")
-DEFAULT_DATASET_QUALITY_SUMMARY_PATH = Path("outputs/dataset_level_quality/dataset_quality_summary.json")
+DEFAULT_OUTPUT_ROOT = Path("outputs/evidence_closure_entry_review")
+DEFAULT_SUBMISSION_READINESS_ROOT = Path("outputs/submission_readiness")
+DEFAULT_EVIDENCE_AUDIT_ROOT = Path("outputs/paper_artifact_evidence_audit")
+DEFAULT_BASELINE_COMPARISON_ROOT = Path("outputs/external_baseline_comparison")
+DEFAULT_DATASET_QUALITY_ROOT = Path("outputs/dataset_level_quality")
 
 
 def stable_json_text(value: Any) -> str:
@@ -135,24 +135,47 @@ def build_input_bundle(
 
 def write_evidence_closure_entry_review_outputs(
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    submission_readiness_report_path: str | Path = DEFAULT_SUBMISSION_READINESS_REPORT_PATH,
-    required_evidence_inputs_path: str | Path = DEFAULT_REQUIRED_EVIDENCE_INPUTS_PATH,
-    paper_blocker_report_path: str | Path = DEFAULT_PAPER_BLOCKER_REPORT_PATH,
-    baseline_runtime_report_path: str | Path = DEFAULT_BASELINE_RUNTIME_REPORT_PATH,
-    dataset_quality_summary_path: str | Path = DEFAULT_DATASET_QUALITY_SUMMARY_PATH,
+    output_dir: str | Path | None = None,
+    submission_readiness_report_path: str | Path | None = None,
+    required_evidence_inputs_path: str | Path | None = None,
+    paper_blocker_report_path: str | Path | None = None,
+    baseline_runtime_report_path: str | Path | None = None,
+    dataset_quality_summary_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """写出证据闭合入口审计报告、审计清单和 manifest。"""
 
     root_path = Path(root).resolve()
-    resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
+    paper_run = build_paper_run_config(root_path)
+    resolved_output_dir = ensure_output_dir_under_outputs(
+        root_path,
+        Path(output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name),
+    )
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved_submission_readiness_report_path = resolve_input_path(root_path, submission_readiness_report_path)
-    resolved_required_evidence_inputs_path = resolve_input_path(root_path, required_evidence_inputs_path)
-    resolved_paper_blocker_report_path = resolve_input_path(root_path, paper_blocker_report_path)
-    resolved_baseline_runtime_report_path = resolve_input_path(root_path, baseline_runtime_report_path)
-    resolved_dataset_quality_summary_path = resolve_input_path(root_path, dataset_quality_summary_path)
+    submission_readiness_dir = DEFAULT_SUBMISSION_READINESS_ROOT / paper_run.run_name
+    evidence_audit_dir = DEFAULT_EVIDENCE_AUDIT_ROOT / paper_run.run_name
+    baseline_comparison_dir = DEFAULT_BASELINE_COMPARISON_ROOT / paper_run.run_name
+    dataset_quality_dir = DEFAULT_DATASET_QUALITY_ROOT / paper_run.run_name
+    resolved_submission_readiness_report_path = resolve_input_path(
+        root_path,
+        submission_readiness_report_path or submission_readiness_dir / "readiness_blocker_report.json",
+    )
+    resolved_required_evidence_inputs_path = resolve_input_path(
+        root_path,
+        required_evidence_inputs_path or submission_readiness_dir / "required_evidence_inputs.csv",
+    )
+    resolved_paper_blocker_report_path = resolve_input_path(
+        root_path,
+        paper_blocker_report_path or evidence_audit_dir / "submission_blocker_report.json",
+    )
+    resolved_baseline_runtime_report_path = resolve_input_path(
+        root_path,
+        baseline_runtime_report_path or baseline_comparison_dir / "baseline_runtime_report.json",
+    )
+    resolved_dataset_quality_summary_path = resolve_input_path(
+        root_path,
+        dataset_quality_summary_path or dataset_quality_dir / "dataset_quality_summary.json",
+    )
 
     bundle = build_input_bundle(
         resolved_submission_readiness_report_path,
@@ -224,31 +247,35 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="写出论文投稿级证据闭合入口审计产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="输出目录; 默认写入当前论文运行子目录, 且必须位于 outputs/ 下。",
+    )
     parser.add_argument(
         "--submission-readiness-report-path",
-        default=str(DEFAULT_SUBMISSION_READINESS_REPORT_PATH),
-        help="投稿就绪门禁报告路径。",
+        default=None,
+        help="投稿就绪门禁报告路径; 默认读取当前论文运行子目录。",
     )
     parser.add_argument(
         "--required-evidence-inputs-path",
-        default=str(DEFAULT_REQUIRED_EVIDENCE_INPUTS_PATH),
-        help="仍需补齐的证据输入清单路径。",
+        default=None,
+        help="仍需补齐的证据输入清单路径; 默认读取当前论文运行子目录。",
     )
     parser.add_argument(
         "--paper-blocker-report-path",
-        default=str(DEFAULT_PAPER_BLOCKER_REPORT_PATH),
-        help="论文产物证据审计阻断报告路径。",
+        default=None,
+        help="论文产物证据审计阻断报告路径; 默认读取当前论文运行子目录。",
     )
     parser.add_argument(
         "--baseline-runtime-report-path",
-        default=str(DEFAULT_BASELINE_RUNTIME_REPORT_PATH),
-        help="外部 baseline 运行报告路径。",
+        default=None,
+        help="外部 baseline 运行报告路径; 默认读取当前论文运行子目录。",
     )
     parser.add_argument(
         "--dataset-quality-summary-path",
-        default=str(DEFAULT_DATASET_QUALITY_SUMMARY_PATH),
-        help="数据集级质量摘要路径。",
+        default=None,
+        help="数据集级质量摘要路径; 默认读取当前论文运行子目录。",
     )
     return parser
 

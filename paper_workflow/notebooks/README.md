@@ -13,3 +13,5 @@
 协议, 不存在第二套结果导入或质量计算路径。
 
 主方法和 baseline 可在独立 Colab 会话并行运行, 结果闭合必须等待全部受治理结果包到达。同一 Notebook 通过 `SLM_WM_PAPER_RUN_NAME` 切换 `probe_paper`、`pilot_paper` 与 `full_paper`, 不允许改变方法机制或实验门禁。
+
+Notebook 的状态展示路径必须从 `SLM_WM_PAPER_RUN_NAME` 构造, 不读取 artifact 全局目录。Notebook runtime 报告独立写入 `outputs/notebook_runtime_observation/<paper_run_name>/...`, 不进入10类正式 GPU 输入包。正式运行未通过 ready 门禁时保留诊断文件, 但不会生成可供 CPU 闭合选择的 ZIP。

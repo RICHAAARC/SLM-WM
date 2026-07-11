@@ -33,11 +33,10 @@ from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
-DEFAULT_OUTPUT_DIR = Path("outputs/primary_baseline_formal_import")
+DEFAULT_OUTPUT_ROOT = Path("outputs/primary_baseline_formal_import")
 DEFAULT_SOURCE_REGISTRY_PATH = Path("external_baseline/source_registry.json")
-DEFAULT_ATTACK_MANIFEST_PATH = Path("outputs/attack_matrix/attack_manifest.json")
-DEFAULT_ATTACK_FAMILY_METRICS_PATH = Path("outputs/attack_matrix/attack_family_metrics.csv")
-DEFAULT_CANDIDATE_RECORDS_PATH = Path("outputs/external_baseline_results/baseline_result_records.jsonl")
+DEFAULT_ATTACK_MATRIX_ROOT = Path("outputs/attack_matrix")
+DEFAULT_CANDIDATE_RESULTS_ROOT = Path("outputs/external_baseline_results")
 
 
 def stable_json_text(value: Any) -> str:
@@ -139,22 +138,38 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
 
 def write_primary_baseline_formal_import_protocol_outputs(
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
+    output_dir: str | Path | None = None,
     source_registry_path: str | Path = DEFAULT_SOURCE_REGISTRY_PATH,
-    attack_manifest_path: str | Path = DEFAULT_ATTACK_MANIFEST_PATH,
-    attack_family_metrics_path: str | Path = DEFAULT_ATTACK_FAMILY_METRICS_PATH,
-    candidate_records_path: str | Path = DEFAULT_CANDIDATE_RECORDS_PATH,
+    attack_manifest_path: str | Path | None = None,
+    attack_family_metrics_path: str | Path | None = None,
+    candidate_records_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """写出正式导入 schema、模板、候选记录校验报告和 manifest。"""
 
     root_path = Path(root).resolve()
-    resolved_output_dir = ensure_output_dir_under_outputs(root_path, Path(output_dir))
+    paper_run = build_paper_run_config(root_path)
+    resolved_output_dir = ensure_output_dir_under_outputs(
+        root_path,
+        Path(output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name),
+    )
     resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
     resolved_source_registry_path = resolve_input_path(root_path, source_registry_path)
-    resolved_attack_manifest_path = resolve_input_path(root_path, attack_manifest_path)
-    resolved_attack_family_metrics_path = resolve_input_path(root_path, attack_family_metrics_path)
-    resolved_candidate_records_path = resolve_input_path(root_path, candidate_records_path)
+    resolved_attack_manifest_path = resolve_input_path(
+        root_path,
+        attack_manifest_path
+        or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "attack_manifest.json",
+    )
+    resolved_attack_family_metrics_path = resolve_input_path(
+        root_path,
+        attack_family_metrics_path
+        or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "attack_family_metrics.csv",
+    )
+    resolved_candidate_records_path = resolve_input_path(
+        root_path,
+        candidate_records_path
+        or DEFAULT_CANDIDATE_RESULTS_ROOT / paper_run.run_name / "baseline_result_records.jsonl",
+    )
 
     required_input_paths = (
         resolved_source_registry_path,
@@ -170,7 +185,6 @@ def write_primary_baseline_formal_import_protocol_outputs(
     source_registry = load_baseline_source_registry(resolved_source_registry_path)
     attack_manifest = read_json(resolved_attack_manifest_path)
     attack_rows = read_csv_rows(resolved_attack_family_metrics_path)
-    paper_run = build_paper_run_config(root_path)
     target_fpr = paper_run.target_fpr
     manifest_target_fpr = attack_manifest.get("evaluation_boundary", {}).get("target_fpr")
     if manifest_target_fpr is None or not math.isclose(
@@ -201,6 +215,7 @@ def write_primary_baseline_formal_import_protocol_outputs(
         template_rows,
         candidate_rows,
         validation_report,
+        paper_run_name=paper_run.run_name,
     )
     collection_summary = build_primary_baseline_formal_evidence_collection_summary(collection_rows)
     summary = {
@@ -343,11 +358,27 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="写出主表 external baseline 正式结果导入协议产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="输出目录; 默认写入当前论文运行子目录, 且必须位于 outputs/ 下。",
+    )
     parser.add_argument("--source-registry-path", default=str(DEFAULT_SOURCE_REGISTRY_PATH), help="外部 baseline 源码登记路径。")
-    parser.add_argument("--attack-manifest-path", default=str(DEFAULT_ATTACK_MANIFEST_PATH), help="攻击矩阵 manifest 路径。")
-    parser.add_argument("--attack-family-metrics-path", default=str(DEFAULT_ATTACK_FAMILY_METRICS_PATH), help="攻击矩阵 family metrics 表路径。")
-    parser.add_argument("--candidate-records-path", default=str(DEFAULT_CANDIDATE_RECORDS_PATH), help="待校验 baseline 结果 JSONL 路径。")
+    parser.add_argument(
+        "--attack-manifest-path",
+        default=None,
+        help="攻击矩阵 manifest 路径; 默认读取当前论文运行子目录。",
+    )
+    parser.add_argument(
+        "--attack-family-metrics-path",
+        default=None,
+        help="攻击矩阵 family metrics 表路径; 默认读取当前论文运行子目录。",
+    )
+    parser.add_argument(
+        "--candidate-records-path",
+        default=None,
+        help="待校验 baseline 结果 JSONL 路径; 默认读取当前论文运行子目录。",
+    )
     return parser
 
 

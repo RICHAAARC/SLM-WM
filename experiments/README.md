@@ -12,6 +12,14 @@
 - `artifacts/dataset_level_quality_outputs.py`: 从真实图像对提取正式 Inception 特征并构建 FID / KID 质量证据。
 - `artifacts/`: 只保留通用 manifest schema 和正式质量产物构建器。
 
+三个主方法 GPU 上游 family 均使用 `outputs/<artifact>/<paper_run_name>/...`:
+
+- `outputs/image_only_dataset_runtime/<paper_run_name>/`
+- `outputs/formal_mechanism_ablation/<paper_run_name>/`
+- `outputs/dataset_level_quality/<paper_run_name>/`
+
+summary 必须同时记录带时区的 `generated_at`、`paper_run_name` 与 `target_fpr`。只有当前论文层级身份一致且正式 ready 门禁通过时才允许生成 ZIP; ZIP 只包含所属 run-scoped `outputs/` family, 不收集仓库源码或其他运行层级文件。
+
 ## 正式方法边界
 
 内容载体为 `lf_content` 与 `tail_robust`。`tail_robust` 仅按 Gaussian 元素绝对幅值执行分位点尾部截断, 不具有空间频带含义。注意力稳定度来自至少两个真实 Q/K 层对应关系行的余弦一致性。

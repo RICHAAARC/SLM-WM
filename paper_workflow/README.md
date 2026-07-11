@@ -20,3 +20,5 @@
 | `full_paper` | 7000 | 3400 | 0.001 |
 
 不使用 Notebook 时可直接运行 `scripts/run_image_only_dataset_runtime.py` 和 `scripts/run_runtime_rerun_ablations.py`。当前 `8.216.54.104` 无 GPU, 不得用于生成正式模型结果。
+
+各 GPU workflow 只在 `outputs/<artifact>/<paper_run_name>/` 写入正式产物并从该目录生成归档。Notebook 运行时间观测使用独立的 `outputs/notebook_runtime_observation/<paper_run_name>/` 路径, 因而不参与方法证据或结果包选择。

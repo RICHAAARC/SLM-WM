@@ -25,7 +25,7 @@ from paper_experiments.baselines import (
     validate_primary_baseline_formal_import_rows,
 )
 from paper_experiments.baselines.method_faithful_observation_collection import (
-    DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT,
+    DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT as METHOD_FAITHFUL_COLLECTION_ROOT,
     MethodFaithfulObservationSource,
     load_method_faithful_observation_collection,
 )
@@ -42,15 +42,18 @@ from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "primary_baseline_result_candidate_import"
-DEFAULT_OUTPUT_DIR = Path("outputs/external_baseline_results")
-DEFAULT_ATTACK_MANIFEST_PATH = Path("outputs/attack_matrix/attack_manifest.json")
-DEFAULT_METHOD_FAITHFUL_COLLECTION_PATH = DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT
-DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH = Path(
-    "outputs/t2smark_formal_reproduction/t2smark_formal_import_candidate_records.jsonl"
-)
-T2SMARK_CANDIDATE_RECORDS_ENTRY = (
-    "outputs/t2smark_formal_reproduction/t2smark_formal_import_candidate_records.jsonl"
-)
+DEFAULT_OUTPUT_ROOT = Path("outputs/external_baseline_results")
+DEFAULT_ATTACK_MATRIX_ROOT = Path("outputs/attack_matrix")
+DEFAULT_T2SMARK_FORMAL_ROOT = Path("outputs/t2smark_formal_reproduction")
+T2SMARK_CANDIDATE_RECORDS_NAME = "t2smark_formal_import_candidate_records.jsonl"
+
+
+def t2smark_candidate_records_entry(paper_run_name: str) -> str:
+    """返回当前论文运行在 T2SMark 结果包中的候选记录成员路径。"""
+
+    return (
+        DEFAULT_T2SMARK_FORMAL_ROOT / paper_run_name / T2SMARK_CANDIDATE_RECORDS_NAME
+    ).as_posix()
 
 
 def stable_json_text(value: Any) -> str:
@@ -204,14 +207,15 @@ def load_t2smark_candidate_rows(
     *,
     candidate_records_path: Path,
     package_path: Path | None,
+    package_entry_name: str,
 ) -> list[dict[str, Any]]:
     """从唯一显式来源读取 T2SMark formal 正式导入候选记录。"""
 
     if package_path is not None:
         if not package_path.is_file():
             raise FileNotFoundError(f"T2SMark 正式结果包不存在: {package_path.as_posix()}")
-        rows = read_jsonl_rows_from_package(package_path, T2SMARK_CANDIDATE_RECORDS_ENTRY)
-        source_description = f"{package_path.as_posix()}::{T2SMARK_CANDIDATE_RECORDS_ENTRY}"
+        rows = read_jsonl_rows_from_package(package_path, package_entry_name)
+        source_description = f"{package_path.as_posix()}::{package_entry_name}"
     else:
         if not candidate_records_path.is_file():
             raise FileNotFoundError(f"T2SMark 正式候选记录不存在: {candidate_records_path.as_posix()}")
@@ -446,20 +450,36 @@ def build_method_candidate_rows(
 def write_primary_baseline_result_candidate_outputs(
     *,
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    attack_manifest_path: str | Path = DEFAULT_ATTACK_MANIFEST_PATH,
-    method_faithful_collection_path: str | Path = DEFAULT_METHOD_FAITHFUL_COLLECTION_PATH,
-    t2smark_candidate_records_path: str | Path = DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH,
+    output_dir: str | Path | None = None,
+    attack_manifest_path: str | Path | None = None,
+    method_faithful_collection_path: str | Path | None = None,
+    t2smark_candidate_records_path: str | Path | None = None,
     t2smark_formal_package_path: str | Path | None = None,
     method_resource_profile: str = "full_main",
 ) -> dict[str, Any]:
     """写出候选记录、候选校验报告、摘要和 manifest。"""
 
     root_path = Path(root).resolve()
-    resolved_output_dir = ensure_output_dir_under_outputs(root_path, output_dir)
-    resolved_attack_manifest_path = resolve_path(root_path, attack_manifest_path)
-    resolved_method_faithful_collection_path = resolve_path(root_path, method_faithful_collection_path)
-    resolved_t2smark_candidate_records_path = resolve_path(root_path, t2smark_candidate_records_path)
+    paper_run = build_paper_run_config(root_path)
+    resolved_output_dir = ensure_output_dir_under_outputs(
+        root_path,
+        output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name,
+    )
+    resolved_attack_manifest_path = resolve_path(
+        root_path,
+        attack_manifest_path
+        or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "attack_manifest.json",
+    )
+    resolved_method_faithful_collection_path = resolve_path(
+        root_path,
+        method_faithful_collection_path
+        or METHOD_FAITHFUL_COLLECTION_ROOT / paper_run.run_name,
+    )
+    resolved_t2smark_candidate_records_path = resolve_path(
+        root_path,
+        t2smark_candidate_records_path
+        or DEFAULT_T2SMARK_FORMAL_ROOT / paper_run.run_name / T2SMARK_CANDIDATE_RECORDS_NAME,
+    )
     resolved_t2smark_formal_package_path = resolve_path(root_path, t2smark_formal_package_path)
     if resolved_attack_manifest_path is None or resolved_method_faithful_collection_path is None:
         raise ValueError("必要输入路径不能为空。")
@@ -469,7 +489,6 @@ def write_primary_baseline_result_candidate_outputs(
     if not resolved_attack_manifest_path.is_file():
         raise FileNotFoundError(f"攻击矩阵 manifest 不存在: {resolved_attack_manifest_path.as_posix()}")
     attack_manifest = read_json(resolved_attack_manifest_path)
-    paper_run = build_paper_run_config(root_path)
     target_fpr = paper_run.target_fpr
     manifest_target_fpr = attack_manifest.get("evaluation_boundary", {}).get("target_fpr")
     if manifest_target_fpr is None or not math.isclose(
@@ -483,6 +502,7 @@ def write_primary_baseline_result_candidate_outputs(
     t2smark_rows = load_t2smark_candidate_rows(
         candidate_records_path=resolved_t2smark_candidate_records_path,
         package_path=resolved_t2smark_formal_package_path,
+        package_entry_name=t2smark_candidate_records_entry(paper_run.run_name),
     )
     t2smark_source_path = (
         resolved_t2smark_formal_package_path
@@ -604,17 +624,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="写出主表 external baseline 共同协议候选结果记录。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
-    parser.add_argument("--attack-manifest-path", default=str(DEFAULT_ATTACK_MANIFEST_PATH), help="攻击矩阵 manifest 路径。")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="输出目录; 默认写入当前论文运行子目录, 且必须位于 outputs/ 下。",
+    )
+    parser.add_argument(
+        "--attack-manifest-path",
+        default=None,
+        help="攻击矩阵 manifest 路径; 默认读取当前论文运行子目录。",
+    )
     parser.add_argument(
         "--method-faithful-collection-path",
-        default=str(DEFAULT_METHOD_FAITHFUL_COLLECTION_PATH),
-        help="三个方法忠实 SD3.5 baseline 的 exact-set 物化根目录。",
+        default=None,
+        help="三个方法忠实 SD3.5 baseline 的 exact-set 物化根目录; 默认读取当前论文运行子目录。",
     )
     parser.add_argument(
         "--t2smark-candidate-records-path",
-        default=str(DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH),
-        help="T2SMark formal 候选 JSONL 路径。",
+        default=None,
+        help="T2SMark formal 候选 JSONL 路径; 默认读取当前论文运行子目录。",
     )
     parser.add_argument("--t2smark-formal-package-path", default=None, help="可选 T2SMark formal 结果 zip 包。")
     parser.add_argument("--method-resource-profile", default="full_main", help="方法忠实 adapter 候选记录的资源配置名称。")

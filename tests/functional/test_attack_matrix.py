@@ -157,7 +157,7 @@ def test_attack_matrix_aggregates_only_measured_image_records(tmp_path: Path) ->
         paper_run_name="probe_paper",
         dataset_runtime_dir=runtime_dir,
     )
-    output_dir = tmp_path / "outputs" / "attack_matrix"
+    output_dir = tmp_path / "outputs" / "attack_matrix" / "probe_paper"
     attack_manifest = json.loads((output_dir / "attack_manifest.json").read_text(encoding="utf-8"))
     records = [
         json.loads(line)
@@ -173,6 +173,9 @@ def test_attack_matrix_aggregates_only_measured_image_records(tmp_path: Path) ->
     assert attack_manifest["attack_record_coverage_ready"] is True
     assert attack_manifest["formal_attack_detection_ready"] is True
     assert attack_manifest["full_method_claim_ready"] is True
+    assert attack_manifest["detector_input_access_mode"] == "image_key_public_model_only"
+    assert attack_manifest["blind_image_detector"] is True
+    assert attack_manifest["generation_latent_trace_required"] is False
     assert all(record["attacked_image_available"] for record in records)
     assert all(record["metric_status"] == "measured_real_attacked_image_image_only_detection" for record in records)
     assert all(record["quality_ssim"] > 0.0 for record in records)
@@ -194,7 +197,9 @@ def test_attack_matrix_blocks_incomplete_split_role_coverage(tmp_path: Path) -> 
         dataset_runtime_dir=runtime_dir,
     )
     attack_manifest = json.loads(
-        (tmp_path / "outputs" / "attack_matrix" / "attack_manifest.json").read_text(encoding="utf-8")
+        (tmp_path / "outputs" / "attack_matrix" / "probe_paper" / "attack_manifest.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert attack_manifest["attack_record_coverage_ready"] is False
     assert attack_manifest["supports_paper_claim"] is False

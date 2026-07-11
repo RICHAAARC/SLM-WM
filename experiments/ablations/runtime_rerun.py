@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
 import csv
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any, Iterable
 from zipfile import ZIP_STORED, ZipFile
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.protocol.paper_run_config import (
+    build_paper_run_config,
+    normalize_paper_run_name,
+)
 from experiments.runners.image_only_dataset_runtime import (
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
@@ -88,40 +93,72 @@ class RuntimeRerunAblationSpec:
         )
 
 
-def default_runtime_rerun_ablation_specs() -> tuple[RuntimeRerunAblationSpec, ...]:
-    """返回逐一移除关键机制的正式重运行消融集合。"""
+FORMAL_RUNTIME_RERUN_ABLATION_SPECS = (
+    RuntimeRerunAblationSpec("complete_method"),
+    RuntimeRerunAblationSpec(
+        "without_branch_risk_routing",
+        semantic_routing_enabled=False,
+    ),
+    RuntimeRerunAblationSpec(
+        "without_jacobian_null_space",
+        null_space_enabled=False,
+    ),
+    RuntimeRerunAblationSpec(
+        "without_lf_content_carrier",
+        lf_enabled=False,
+    ),
+    RuntimeRerunAblationSpec(
+        "without_tail_robust_carrier",
+        tail_robust_enabled=False,
+    ),
+    RuntimeRerunAblationSpec(
+        "without_tail_amplitude_truncation",
+        tail_truncation_enabled=False,
+    ),
+    RuntimeRerunAblationSpec(
+        "without_attention_geometry",
+        attention_geometry_enabled=False,
+    ),
+    RuntimeRerunAblationSpec(
+        "without_image_alignment",
+        image_alignment_enabled=False,
+    ),
+)
+FORMAL_RUNTIME_RERUN_ABLATION_IDS = tuple(
+    spec.ablation_id for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS
+)
+FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST = build_stable_digest(
+    [asdict(spec) for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS]
+)
 
-    return (
-        RuntimeRerunAblationSpec("complete_method"),
-        RuntimeRerunAblationSpec(
-            "without_branch_risk_routing",
-            semantic_routing_enabled=False,
+
+def default_runtime_rerun_ablation_specs() -> tuple[RuntimeRerunAblationSpec, ...]:
+    """返回论文协议唯一允许的8项正式重运行消融规范。"""
+
+    return FORMAL_RUNTIME_RERUN_ABLATION_SPECS
+
+
+def runtime_rerun_ablation_contract(
+    specs: Iterable[RuntimeRerunAblationSpec],
+) -> dict[str, Any]:
+    """把实际消融规范与唯一正式规范进行精确比较。
+
+    该函数属于可复用的协议校验写法: 运行器、打包器和最外层论文门禁
+    共用同一组标识和摘要, 避免各层分别维护容易漂移的消融清单。
+    """
+
+    actual_specs = tuple(specs)
+    actual_ids = tuple(spec.ablation_id for spec in actual_specs)
+    actual_digest = build_stable_digest([asdict(spec) for spec in actual_specs])
+    return {
+        "expected_ablation_ids": list(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
+        "actual_ablation_ids": list(actual_ids),
+        "ablation_spec_digest": actual_digest,
+        "ablation_exact_set_ready": (
+            actual_ids == FORMAL_RUNTIME_RERUN_ABLATION_IDS
+            and actual_digest == FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST
         ),
-        RuntimeRerunAblationSpec(
-            "without_jacobian_null_space",
-            null_space_enabled=False,
-        ),
-        RuntimeRerunAblationSpec(
-            "without_lf_content_carrier",
-            lf_enabled=False,
-        ),
-        RuntimeRerunAblationSpec(
-            "without_tail_robust_carrier",
-            tail_robust_enabled=False,
-        ),
-        RuntimeRerunAblationSpec(
-            "without_tail_amplitude_truncation",
-            tail_truncation_enabled=False,
-        ),
-        RuntimeRerunAblationSpec(
-            "without_attention_geometry",
-            attention_geometry_enabled=False,
-        ),
-        RuntimeRerunAblationSpec(
-            "without_image_alignment",
-            image_alignment_enabled=False,
-        ),
-    )
+    }
 
 
 def _run_entry(
@@ -212,9 +249,9 @@ def _formal_record(
 def run_runtime_rerun_ablations(
     base_configs: Iterable[SemanticWatermarkRuntimeConfig],
     target_fpr: float,
+    paper_run_name: str,
     root: str | Path = ".",
     specs: tuple[RuntimeRerunAblationSpec, ...] | None = None,
-    output_dir: str = "outputs/formal_mechanism_ablation",
     max_new_runs_per_session: int = 0,
 ) -> dict[str, Any]:
     """在完整 Prompt 集上重运行每个机制配置并分别冻结检测阈值。
@@ -225,10 +262,14 @@ def run_runtime_rerun_ablations(
     """
 
     root_path = Path(root).resolve()
+    resolved_paper_run_name = normalize_paper_run_name(paper_run_name)
+    paper_run = build_paper_run_config(root_path)
+    if paper_run.run_name != resolved_paper_run_name or abs(
+        float(target_fpr) - paper_run.target_fpr
+    ) > 1e-12:
+        raise ValueError("正式消融身份必须与当前论文运行配置一致")
+    output_dir = f"outputs/formal_mechanism_ablation/{resolved_paper_run_name}"
     resolved_output = (root_path / output_dir).resolve()
-    outputs_root = (root_path / "outputs").resolve()
-    if resolved_output != outputs_root and outputs_root not in resolved_output.parents:
-        raise ValueError("消融输出必须位于 outputs 目录")
     if not 0.0 < target_fpr < 1.0:
         raise ValueError("target_fpr 必须位于 (0, 1)")
     if max_new_runs_per_session < 0:
@@ -236,6 +277,9 @@ def run_runtime_rerun_ablations(
     resolved_output.mkdir(parents=True, exist_ok=True)
     progress_path = resolved_output / "runtime_rerun_progress.json"
     resolved_specs = specs or default_runtime_rerun_ablation_specs()
+    ablation_contract = runtime_rerun_ablation_contract(resolved_specs)
+    if not ablation_contract["ablation_exact_set_ready"]:
+        raise ValueError("正式消融必须精确使用受治理的8项机制规范")
     resolved_base_configs = tuple(base_configs)
     if not resolved_base_configs:
         raise ValueError("真实重运行消融至少需要一个 Prompt 配置")
@@ -273,6 +317,8 @@ def run_runtime_rerun_ablations(
 
     if len(run_entries) != expected_run_count:
         progress = {
+            "paper_run_name": resolved_paper_run_name,
+            **ablation_contract,
             "expected_run_count": expected_run_count,
             "completed_run_count": len(run_entries),
             "remaining_run_count": expected_run_count - len(run_entries),
@@ -417,7 +463,8 @@ def run_runtime_rerun_ablations(
     _write_csv(delta_path, delta_rows)
 
     ablation_claim_gate_ready = (
-        len(formal_records) == expected_run_count
+        ablation_contract["ablation_exact_set_ready"]
+        and len(formal_records) == expected_run_count
         and all(record["runtime_result"]["run_decision"] == "pass" for record in formal_records)
         and len(protocols) == len(resolved_specs)
         and all(
@@ -430,6 +477,9 @@ def run_runtime_rerun_ablations(
         )
     )
     summary = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "paper_run_name": resolved_paper_run_name,
+        **ablation_contract,
         "record_count": len(formal_records),
         "resumed_run_count": resumed_run_count,
         "new_run_count": new_run_count,
@@ -465,6 +515,7 @@ def run_runtime_rerun_ablations(
         ),
         config={
             "specs": [asdict(spec) for spec in resolved_specs],
+            **ablation_contract,
             "prompt_count": len(resolved_base_configs),
             "split_counts": split_counts,
             "target_fpr": target_fpr,
@@ -474,6 +525,7 @@ def run_runtime_rerun_ablations(
         rebuild_command="调用 experiments.ablations.runtime_rerun.run_runtime_rerun_ablations",
         metadata={
             "protocol_decision": summary["protocol_decision"],
+            **ablation_contract,
             "generation_rerun_required": True,
             "per_ablation_calibration_required": True,
             "supports_paper_claim": summary["supports_paper_claim"],
@@ -487,18 +539,85 @@ def run_runtime_rerun_ablations(
 
 
 def package_runtime_rerun_ablations(
+    paper_run_name: str,
     root: str | Path = ".",
-    output_dir: str = "outputs/formal_mechanism_ablation",
 ) -> Path:
     """打包真实重运行消融记录和逐配置运行证据。"""
 
     root_path = Path(root).resolve()
-    source_dir = (root_path / output_dir).resolve()
-    outputs_root = (root_path / "outputs").resolve()
-    if source_dir != outputs_root and outputs_root not in source_dir.parents:
-        raise ValueError("消融打包目录必须位于 outputs 目录")
-    if not source_dir.is_dir():
-        raise FileNotFoundError("缺少真实重运行消融输出目录")
+    resolved_paper_run_name = normalize_paper_run_name(paper_run_name)
+    paper_run = build_paper_run_config(root_path)
+    if paper_run.run_name != resolved_paper_run_name:
+        raise ValueError("正式消融打包层级必须与当前论文配置一致")
+    source_dir = (
+        root_path / "outputs" / "formal_mechanism_ablation" / resolved_paper_run_name
+    ).resolve()
+    required_paths = tuple(
+        source_dir / filename
+        for filename in (
+            "runtime_rerun_records.jsonl",
+            "formal_detection_records.jsonl",
+            "per_ablation_frozen_protocols.json",
+            "mechanism_ablation_metrics.csv",
+            "mechanism_pairwise_delta.csv",
+            "ablation_claim_summary.json",
+            "manifest.local.json",
+        )
+    )
+    if any(not path.is_file() for path in required_paths):
+        raise FileNotFoundError("真实重运行消融输出不完整, 不得打包")
+    summary = json.loads((source_dir / "ablation_claim_summary.json").read_text(encoding="utf-8-sig"))
+    manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
+    expected_ids = list(FORMAL_RUNTIME_RERUN_ABLATION_IDS)
+    manifest_config = manifest.get("config", {})
+    manifest_metadata = manifest.get("metadata", {})
+    with (source_dir / "mechanism_ablation_metrics.csv").open(
+        encoding="utf-8-sig",
+        newline="",
+    ) as stream:
+        metric_ids = [str(row.get("ablation_id", "")) for row in csv.DictReader(stream)]
+    protocol_ids = list(
+        json.loads(
+            (source_dir / "per_ablation_frozen_protocols.json").read_text(
+                encoding="utf-8-sig"
+            )
+        )
+    )
+    exact_set_ready = all(
+        (
+            summary.get("expected_ablation_ids") == expected_ids,
+            summary.get("actual_ablation_ids") == expected_ids,
+            summary.get("ablation_spec_digest")
+            == FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
+            summary.get("ablation_exact_set_ready") is True,
+            manifest_config.get("expected_ablation_ids") == expected_ids,
+            manifest_config.get("actual_ablation_ids") == expected_ids,
+            manifest_config.get("ablation_spec_digest")
+            == FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
+            manifest_config.get("ablation_exact_set_ready") is True,
+            manifest_metadata.get("expected_ablation_ids") == expected_ids,
+            manifest_metadata.get("actual_ablation_ids") == expected_ids,
+            manifest_metadata.get("ablation_spec_digest")
+            == FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
+            manifest_metadata.get("ablation_exact_set_ready") is True,
+            metric_ids == expected_ids,
+            len(protocol_ids) == len(expected_ids),
+            set(protocol_ids) == set(expected_ids),
+        )
+    )
+    if not all(
+        (
+            summary.get("paper_run_name") == resolved_paper_run_name,
+            abs(float(summary.get("target_fpr", -1.0)) - paper_run.target_fpr) <= 1e-12,
+            bool(summary.get("generated_at")),
+            summary.get("protocol_decision") == "pass",
+            summary.get("ablation_claim_gate_ready") is True,
+            summary.get("supports_paper_claim") is True,
+            manifest.get("artifact_id") == "formal_mechanism_ablation_manifest",
+            exact_set_ready,
+        )
+    ):
+        raise RuntimeError("真实重运行消融身份、精确8项规范或 ready 门禁未通过")
     code_version = resolve_code_version(root_path).replace("-dirty", "")
     archive_path = source_dir / f"runtime_rerun_ablation_package_{utc_archive_token()}_{code_version}.zip"
     entries = tuple(

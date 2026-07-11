@@ -25,6 +25,7 @@ from experiments.protocol.paper_run_config import (
     DEFAULT_INFERENCE_STEPS,
     DEFAULT_TARGET_FPR,
     build_paper_run_config,
+    normalize_paper_run_name,
     resolve_count_from_environment,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
@@ -36,6 +37,7 @@ from experiments.runtime.progress import (
     run_quiet_subprocess_with_progress,
     update_progress,
 )
+from experiments.runtime.archive_naming import utc_archive_token
 from experiments.runtime.repository_environment import (
     build_runtime_environment_report,
     file_digest,
@@ -202,7 +204,12 @@ def output_paths(root_path: Path, config: ExternalBaselineMethodFaithfulConfig) 
     """构造单 baseline 独占运行路径与共享 transfer 路径。"""
 
     baseline_id = resolve_primary_baseline_id(config.primary_baseline_id)
-    output_dir = (root_path / config.output_dir).resolve()
+    paper_run_name = normalize_paper_run_name(config.prompt_set)
+    configured_output_root = (root_path / config.output_dir).resolve()
+    expected_output_root = (root_path / DEFAULT_OUTPUT_DIR).resolve()
+    if configured_output_root != expected_output_root:
+        raise ValueError("method-faithful 输出根目录必须使用正式 outputs family")
+    output_dir = expected_output_root / paper_run_name
     run_dir = output_dir / "run_records" / baseline_id
     execution_dir = run_dir / "execution"
     adapter_output_root = run_dir / "adapter_outputs"
@@ -733,6 +740,8 @@ def write_external_baseline_method_faithful_outputs(
         return write_failure_outputs(root_path, config, paths, error)
 
     summary = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "paper_run_name": config.prompt_set,
         "run_decision": "pass",
         "external_baseline_method_faithful_ready": True,
         "primary_baseline_id": config.primary_baseline_id,
@@ -873,7 +882,7 @@ def package_external_baseline_method_faithful_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
     drive_output_dir: str | None = None,
-    archive_name: str = "external_baseline_method_faithful_package.zip",
+    archive_name: str | None = None,
     baseline_id: str | None = None,
 ) -> ExternalBaselineMethodFaithfulArchiveRecord:
     """仅在单 baseline 运行通过后打包独占结果并镜像到 Drive。"""
@@ -882,14 +891,31 @@ def package_external_baseline_method_faithful_outputs(
     resolved_baseline_id = resolve_primary_baseline_id(
         baseline_id or os.environ.get("SLM_WM_PRIMARY_BASELINE_ID", "")
     )
-    source_dir = (root_path / output_dir).resolve()
+    paper_run = build_paper_run_config(root_path)
+    configured_output_root = (root_path / output_dir).resolve()
+    expected_output_root = (root_path / DEFAULT_OUTPUT_DIR).resolve()
+    if configured_output_root != expected_output_root:
+        raise ValueError("method-faithful 打包根目录必须使用正式 outputs family")
+    source_dir = expected_output_root / paper_run.run_name
     run_dir = source_dir / "run_records" / resolved_baseline_id
     summary_path = run_dir / f"{resolved_baseline_id}_summary.json"
     if not summary_path.is_file():
         raise FileNotFoundError(f"baseline 运行摘要不存在: {summary_path}")
     run_summary = read_json(summary_path)
-    if run_summary.get("run_decision") != "pass" or not bool(
-        run_summary.get("external_baseline_method_faithful_ready")
+    if not all(
+        (
+            run_summary.get("run_decision") == "pass",
+            run_summary.get("external_baseline_method_faithful_ready") is True,
+            run_summary.get("primary_baseline_adapter_ready") is True,
+            run_summary.get("primary_baseline_id") == resolved_baseline_id,
+            run_summary.get("paper_run_name") == paper_run.run_name,
+            math.isclose(
+                float(run_summary.get("target_fpr", -1.0)),
+                paper_run.target_fpr,
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            ),
+        )
     ):
         raise RuntimeError("失败或不完整的 baseline 运行不得生成正式结果包")
     transfer_manifest_path = (
@@ -898,12 +924,35 @@ def package_external_baseline_method_faithful_outputs(
         / f"{resolved_baseline_id}_baseline_transfer_manifest.json"
     )
     transfer_manifest = read_json(transfer_manifest_path)
-    if transfer_manifest.get("baseline_id") != resolved_baseline_id or not bool(
-        transfer_manifest.get("transfer_ready")
+    if not all(
+        (
+            transfer_manifest.get("baseline_id") == resolved_baseline_id,
+            transfer_manifest.get("transfer_ready") is True,
+            transfer_manifest.get("paper_run_name") == paper_run.run_name,
+            math.isclose(
+                float(transfer_manifest.get("target_fpr", -1.0)),
+                paper_run.target_fpr,
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            ),
+        )
     ):
         raise RuntimeError("baseline transfer manifest 未通过")
 
-    archive_path = source_dir / archive_name
+    resolved_archive_name = archive_name or (
+        f"external_baseline_method_faithful_package_{resolved_baseline_id}_"
+        f"{utc_archive_token()}_{resolve_code_version(root_path).replace('-dirty', '')}.zip"
+    )
+    expected_archive_prefix = (
+        f"external_baseline_method_faithful_package_{resolved_baseline_id}_"
+    )
+    if (
+        Path(resolved_archive_name).name != resolved_archive_name
+        or not resolved_archive_name.startswith(expected_archive_prefix)
+        or Path(resolved_archive_name).suffix.lower() != ".zip"
+    ):
+        raise ValueError("method-faithful archive_name 未匹配当前 baseline 正式命名")
+    archive_path = source_dir / resolved_archive_name
     package_record_dir = run_dir / "package_records"
     package_record_dir.mkdir(parents=True, exist_ok=True)
     package_input_manifest_path = package_record_dir / f"{resolved_baseline_id}_package_input_manifest.json"
@@ -930,6 +979,8 @@ def package_external_baseline_method_faithful_outputs(
         package_input_manifest_path,
         {
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "paper_run_name": paper_run.run_name,
+            "target_fpr": paper_run.target_fpr,
             "baseline_id": resolved_baseline_id,
             "entry_paths": [entry.relative_to(root_path).as_posix() for entry in entries],
             "entry_sha256": {
@@ -944,7 +995,7 @@ def package_external_baseline_method_faithful_outputs(
         archive_path=relative_or_absolute(archive_path, root_path),
         archive_digest="",
         archive_entry_count=len(entries) + 3,
-        drive_archive_path=str(Path(resolved_drive_output_dir).expanduser() / archive_name),
+        drive_archive_path=str(Path(resolved_drive_output_dir).expanduser() / resolved_archive_name),
         drive_archive_digest="",
         metadata={
             "construction_unit_name": "external_baseline_method_faithful",
@@ -959,13 +1010,20 @@ def package_external_baseline_method_faithful_outputs(
         input_paths=tuple(entry.relative_to(root_path).as_posix() for entry in entries),
         output_paths=(archive_path.relative_to(root_path).as_posix(),),
         config={
-            "archive_name": archive_name,
+            "archive_name": resolved_archive_name,
             "baseline_id": resolved_baseline_id,
+            "paper_run_name": paper_run.run_name,
+            "target_fpr": paper_run.target_fpr,
             "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="调用 paper_experiments.runners.external_baseline_method_faithful",
-        metadata={"baseline_id": resolved_baseline_id, "run_decision": "pass"},
+        metadata={
+            "baseline_id": resolved_baseline_id,
+            "paper_run_name": paper_run.run_name,
+            "target_fpr": paper_run.target_fpr,
+            "run_decision": "pass",
+        },
     ).to_dict()
     write_json(archive_manifest_path, archive_manifest)
 
@@ -980,7 +1038,7 @@ def package_external_baseline_method_faithful_outputs(
             archive.write(entry, entry.relative_to(root_path).as_posix())
     drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
-    mirrored_path = drive_dir / archive_name
+    mirrored_path = drive_dir / resolved_archive_name
     shutil.copy2(archive_path, mirrored_path)
     record = ExternalBaselineMethodFaithfulArchiveRecord(
         archive_path=relative_or_absolute(archive_path, root_path),

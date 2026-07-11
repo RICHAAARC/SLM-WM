@@ -25,13 +25,16 @@ from experiments.protocol import (
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
 )
+from experiments.protocol.paper_run_config import (
+    RUN_EXPECTED_PROMPT_COUNTS,
+    build_paper_run_config,
+    normalize_paper_run_name,
+)
+from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from experiments.runtime.archive_naming import utc_archive_token
 
-DEFAULT_OUTPUT_DIR = Path("outputs/dataset_level_quality")
-DEFAULT_REAL_ATTACK_REGISTRY_PATH = Path("outputs/real_attack_evaluation/real_attacked_image_registry.jsonl")
-DEFAULT_FORMAL_MIN_SAMPLE_COUNT = 100
 DEFAULT_PROGRESS_INTERVAL_ITEMS = 50
 FORMAL_FEATURE_EXTRACTOR_ID = "torch_fidelity_0_4_0_inception_v3_compat_2048"
 
@@ -140,6 +143,7 @@ def build_formal_feature_import_payload(
     formal_feature_records_path: Path,
     root_path: Path,
     formal_min_sample_count: int,
+    formal_feature_records_sha256: str,
 ) -> dict[str, Any]:
     """把外部 Inception 特征记录解析为正式 FID / KID 可消费的矩阵和导入报告。
 
@@ -165,6 +169,15 @@ def build_formal_feature_import_payload(
         if not feature_vector:
             issues.append({"row_index": row_index, "field_name": "feature_vector", "reason": "numeric_feature_vector_required"})
             continue
+        if key in vectors_by_key:
+            issues.append(
+                {
+                    "row_index": row_index,
+                    "field_name": "dataset_quality_record_id",
+                    "reason": "duplicate_record_role_feature",
+                }
+            )
+            continue
         vectors_by_key[key] = feature_vector
 
     source_vectors: list[list[float]] = []
@@ -189,8 +202,17 @@ def build_formal_feature_import_payload(
         source_vectors = []
         comparison_vectors = []
     accepted_pair_count = min(len(source_vectors), len(comparison_vectors))
-    formal_feature_backend_ready = accepted_pair_count > 0 and not issues
-    formal_sample_scale_ready = formal_feature_backend_ready and accepted_pair_count >= formal_min_sample_count
+    expected_pair_count = len(record_ids)
+    formal_feature_backend_ready = (
+        accepted_pair_count == expected_pair_count
+        and missing_feature_count == 0
+        and len(feature_rows) == expected_pair_count * 2
+        and not issues
+    )
+    formal_sample_scale_ready = (
+        formal_feature_backend_ready
+        and accepted_pair_count == formal_min_sample_count
+    )
     if not feature_rows:
         unsupported_reason = "inception_feature_records_missing"
     elif not formal_feature_backend_ready:
@@ -201,11 +223,13 @@ def build_formal_feature_import_payload(
         unsupported_reason = ""
     report = {
         "formal_feature_records_path": relative_or_absolute(formal_feature_records_path, root_path),
+        "formal_feature_records_sha256": formal_feature_records_sha256,
         "feature_backend": FORMAL_FEATURE_BACKEND,
-        "input_feature_record_count": len(feature_rows),
+        "formal_feature_record_count": len(feature_rows),
+        "expected_feature_pair_count": expected_pair_count,
         "accepted_feature_pair_count": accepted_pair_count,
         "missing_feature_pair_count": missing_feature_count,
-        "formal_feature_issue_count": len(issues),
+        "feature_issue_count": len(issues),
         "feature_dimension": feature_dimension_values[0] if dimension_consistent and feature_dimension_values else 0,
         "formal_min_sample_count": formal_min_sample_count,
         "formal_feature_backend_ready": formal_feature_backend_ready,
@@ -255,6 +279,65 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
         return path.resolve().relative_to(root_path).as_posix()
     except ValueError:
         return path.resolve().as_posix()
+
+
+def canonical_prompt_ids_for_paper_run(
+    *,
+    root_path: Path,
+    prompt_set: str,
+    prompt_file: str | Path,
+) -> tuple[str, ...]:
+    """从当前论文配置读取唯一受治理 Prompt 标识集合。"""
+
+    requested_path = resolve_path(root_path, prompt_file)
+    packaged_path = (ROOT / prompt_file).resolve()
+    resolved_path = requested_path if requested_path.is_file() else packaged_path
+    prompt_texts = read_prompt_file(resolved_path)
+    return tuple(
+        record.prompt_id for record in build_prompt_records(prompt_set, prompt_texts)
+    )
+
+
+def dataset_quality_prompt_contract(
+    registry_rows: list[dict[str, Any]],
+    canonical_prompt_ids: tuple[str, ...],
+) -> dict[str, Any]:
+    """核验质量 registry 对当前 Prompt 集的一对一精确覆盖。"""
+
+    actual_prompt_ids = tuple(str(row.get("prompt_id", "") or "") for row in registry_rows)
+    canonical_set = set(canonical_prompt_ids)
+    actual_set = set(actual_prompt_ids)
+    duplicate_count = len(actual_prompt_ids) - len(actual_set)
+    missing_ids = sorted(canonical_set - actual_set)
+    unexpected_ids = sorted(actual_set - canonical_set)
+    exact_ready = (
+        len(actual_prompt_ids) == len(canonical_prompt_ids)
+        and duplicate_count == 0
+        and not missing_ids
+        and not unexpected_ids
+        and "" not in actual_set
+    )
+    return {
+        "expected_prompt_count": len(canonical_prompt_ids),
+        "registry_prompt_count": len(actual_prompt_ids),
+        "duplicate_registry_prompt_id_count": duplicate_count,
+        "missing_registry_prompt_id_count": len(missing_ids),
+        "unexpected_registry_prompt_id_count": len(unexpected_ids),
+        "canonical_prompt_id_digest": build_stable_digest(sorted(canonical_prompt_ids)),
+        "registry_prompt_id_digest": build_stable_digest(sorted(actual_prompt_ids)),
+        "prompt_registry_exact_set_ready": exact_ready,
+    }
+
+
+def write_canonical_formal_feature_records(
+    path: Path,
+    rows: list[dict[str, Any]],
+) -> str:
+    """把提取或导入的特征统一写入当前 run 的规范 JSONL 文件。"""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json_line(row) for row in rows), encoding="utf-8")
+    return path_digest(path)
 
 
 def ensure_output_dir_under_outputs(root_path: Path, output_dir: str | Path) -> Path:
@@ -546,13 +629,14 @@ def resolve_code_version(root_path: Path) -> str:
 
 def write_dataset_level_quality_outputs(
     *,
+    paper_run_name: str,
+    target_fpr: float,
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    real_attack_registry_path: str | Path = DEFAULT_REAL_ATTACK_REGISTRY_PATH,
+    real_attack_registry_path: str | Path | None = None,
     image_search_roots: Any = (),
     input_package_paths: Any = (),
     formal_feature_records_path: str | Path | None = None,
-    formal_min_sample_count: int = DEFAULT_FORMAL_MIN_SAMPLE_COUNT,
+    formal_min_sample_count: int | None = None,
     auto_extract_formal_features: bool = False,
     inception_device_name: str | None = None,
     inception_batch_size: int = 32,
@@ -564,20 +648,65 @@ def write_dataset_level_quality_outputs(
     """
 
     root_path = Path(root).resolve()
-    resolved_output_dir = ensure_output_dir_under_outputs(root_path, output_dir)
-    resolved_registry_path = resolve_path(root_path, real_attack_registry_path)
-    resolved_formal_feature_records_path = (
+    resolved_paper_run_name = normalize_paper_run_name(paper_run_name)
+    resolved_target_fpr = float(target_fpr)
+    if not 0.0 < resolved_target_fpr < 1.0:
+        raise ValueError("target_fpr 必须位于 (0, 1)")
+    paper_run = build_paper_run_config(root_path)
+    if paper_run.run_name != resolved_paper_run_name or abs(
+        resolved_target_fpr - paper_run.target_fpr
+    ) > 1e-12:
+        raise ValueError("数据集级质量身份必须与当前论文运行配置一致")
+    expected_prompt_count = RUN_EXPECTED_PROMPT_COUNTS[resolved_paper_run_name]
+    if paper_run.prompt_count != expected_prompt_count:
+        raise ValueError("当前论文运行 Prompt 文件数量不符合70/700/7000精确协议")
+    required_formal_sample_count = paper_run.dataset_level_quality_minimum_count
+    resolved_formal_min_sample_count = (
+        required_formal_sample_count
+        if formal_min_sample_count is None
+        else int(formal_min_sample_count)
+    )
+    if resolved_formal_min_sample_count != required_formal_sample_count:
+        raise ValueError("formal_min_sample_count 必须等于当前论文层级完整 Prompt 数量")
+    resolved_output_dir = ensure_output_dir_under_outputs(
+        root_path,
+        Path("outputs") / "dataset_level_quality" / resolved_paper_run_name,
+    )
+    registry_path = real_attack_registry_path or (
+        Path("outputs")
+        / "image_only_dataset_runtime"
+        / resolved_paper_run_name
+        / "watermark_quality_image_registry.jsonl"
+    )
+    resolved_registry_path = resolve_path(root_path, registry_path)
+    formal_feature_source_path = (
         resolve_path(root_path, formal_feature_records_path)
         if formal_feature_records_path
         else resolved_output_dir / "dataset_quality_formal_feature_records.jsonl"
+    )
+    resolved_formal_feature_records_path = (
+        resolved_output_dir / "dataset_quality_formal_feature_records.jsonl"
     )
     resolved_input_package_paths = expand_input_package_paths(root_path, input_package_paths)
     explicit_image_search_roots = tuple(
         resolve_path(root_path, path) for path in normalize_path_values(image_search_roots)
     )
     registry_rows = read_jsonl_rows(resolved_registry_path)
+    canonical_prompt_ids = canonical_prompt_ids_for_paper_run(
+        root_path=root_path,
+        prompt_set=paper_run.prompt_set,
+        prompt_file=paper_run.prompt_file,
+    )
+    prompt_contract = dataset_quality_prompt_contract(
+        registry_rows,
+        canonical_prompt_ids,
+    )
+    if not prompt_contract["prompt_registry_exact_set_ready"]:
+        raise ValueError("数据集级质量 registry 必须一对一精确覆盖当前受治理 Prompt 集")
 
     records = build_dataset_quality_image_records(registry_rows, root_path)
+    if len(records) != expected_prompt_count:
+        raise ValueError("数据集级质量 records 数量必须恰好等于当前 Prompt 数量")
     materialized_root = resolved_output_dir / "materialized_image_inputs"
     materialized_records = materialize_images_from_input_packages(
         records=records,
@@ -593,7 +722,7 @@ def write_dataset_level_quality_outputs(
         materialized_root=materialized_root,
         materialized_records=materialized_records,
     )
-    formal_feature_rows = read_formal_feature_rows(resolved_formal_feature_records_path)
+    formal_feature_rows = read_formal_feature_rows(formal_feature_source_path)
     formal_features_generated = False
     if auto_extract_formal_features and not formal_feature_rows:
         formal_feature_rows = extract_formal_inception_feature_rows(
@@ -605,12 +734,32 @@ def write_dataset_level_quality_outputs(
             batch_size=inception_batch_size,
         )
         formal_features_generated = True
+    formal_feature_records_sha256 = write_canonical_formal_feature_records(
+        resolved_formal_feature_records_path,
+        formal_feature_rows,
+    )
     formal_feature_payload = build_formal_feature_import_payload(
         records=records,
         feature_rows=formal_feature_rows,
         formal_feature_records_path=resolved_formal_feature_records_path,
         root_path=root_path,
-        formal_min_sample_count=formal_min_sample_count,
+        formal_min_sample_count=resolved_formal_min_sample_count,
+        formal_feature_records_sha256=formal_feature_records_sha256,
+    )
+    formal_feature_payload["report"].update(
+        {
+            "paper_run_name": resolved_paper_run_name,
+            "target_fpr": resolved_target_fpr,
+            "canonical_prompt_id_digest": prompt_contract[
+                "canonical_prompt_id_digest"
+            ],
+            "registry_prompt_id_digest": prompt_contract[
+                "registry_prompt_id_digest"
+            ],
+            "prompt_registry_exact_set_ready": prompt_contract[
+                "prompt_registry_exact_set_ready"
+            ],
+        }
     )
     metric_rows = build_dataset_quality_metric_rows(
         records,
@@ -618,7 +767,7 @@ def write_dataset_level_quality_outputs(
         image_search_roots=all_image_search_roots,
         formal_source_features=formal_feature_payload["source_features"],
         formal_comparison_features=formal_feature_payload["comparison_features"],
-        formal_min_sample_count=formal_min_sample_count,
+        formal_min_sample_count=resolved_formal_min_sample_count,
     )
 
 
@@ -643,16 +792,41 @@ def write_dataset_level_quality_outputs(
     formal_claim_gate_ready = bool(
         base_summary.get("formal_fid_kid_claim_gate_ready", False)
         and canonical_formal_feature_extractor_ready
+        and prompt_contract["prompt_registry_exact_set_ready"]
+        and formal_feature_payload["report"]["accepted_feature_pair_count"]
+        == expected_prompt_count
+        and formal_feature_payload["report"]["missing_feature_pair_count"] == 0
+        and formal_feature_payload["report"]["feature_issue_count"] == 0
+        and formal_feature_payload["report"]["formal_feature_record_count"]
+        == expected_prompt_count * 2
     )
     summary = {
         **base_summary,
+        **prompt_contract,
+        **{
+            field_name: formal_feature_payload["report"][field_name]
+            for field_name in (
+                "formal_feature_record_count",
+                "expected_feature_pair_count",
+                "accepted_feature_pair_count",
+                "missing_feature_pair_count",
+                "feature_issue_count",
+                "formal_feature_records_sha256",
+            )
+        },
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "paper_run_name": resolved_paper_run_name,
+        "target_fpr": resolved_target_fpr,
         "real_attack_registry_path": relative_or_absolute(resolved_registry_path, root_path),
         "dataset_quality_metrics_path": relative_or_absolute(metrics_path, root_path),
         "dataset_quality_formal_metrics_path": relative_or_absolute(metrics_path, root_path),
         "dataset_quality_image_resolution_records_path": relative_or_absolute(image_resolution_records_path, root_path),
         "dataset_quality_formal_feature_import_report_path": relative_or_absolute(
             formal_feature_import_report_path,
+            root_path,
+        ),
+        "dataset_quality_formal_feature_records_path": relative_or_absolute(
+            resolved_formal_feature_records_path,
             root_path,
         ),
         "image_resolution_record_count": len(image_resolution_records),
@@ -662,7 +836,7 @@ def write_dataset_level_quality_outputs(
         "input_package_count": len(resolved_input_package_paths),
         "formal_feature_backend_ready": formal_feature_payload["report"]["formal_feature_backend_ready"],
         "formal_sample_scale_ready": formal_feature_payload["report"]["formal_sample_scale_ready"],
-        "formal_min_sample_count": formal_min_sample_count,
+        "formal_min_sample_count": resolved_formal_min_sample_count,
         "formal_feature_origin": (
             "direct_torch_fidelity_inception_v3_compat_extraction"
             if formal_features_generated
@@ -710,8 +884,8 @@ def write_dataset_level_quality_outputs(
 
     input_paths = [relative_or_absolute(resolved_registry_path, root_path)] if resolved_registry_path.exists() else []
     input_paths.extend(relative_or_absolute(path, root_path) for path in resolved_input_package_paths)
-    if resolved_formal_feature_records_path.exists() and not formal_features_generated:
-        input_paths.append(relative_or_absolute(resolved_formal_feature_records_path, root_path))
+    if formal_feature_source_path.exists() and formal_feature_source_path != resolved_formal_feature_records_path:
+        input_paths.append(relative_or_absolute(formal_feature_source_path, root_path))
     materialized_image_paths = tuple(
         resolve_path(root_path, record["resolved_image_path"])
         for record in image_resolution_records
@@ -723,9 +897,9 @@ def write_dataset_level_quality_outputs(
             records_path,
             image_resolution_records_path,
             formal_feature_import_report_path,
+            resolved_formal_feature_records_path,
             metrics_path,
             summary_path,
-            *((resolved_formal_feature_records_path,) if formal_features_generated else ()),
             *materialized_image_paths,
             manifest_path,
         )
@@ -736,11 +910,19 @@ def write_dataset_level_quality_outputs(
         input_paths=tuple(input_paths),
         output_paths=output_paths,
         config={
+            "paper_run_name": resolved_paper_run_name,
+            "target_fpr": resolved_target_fpr,
             "records_digest": build_stable_digest([record.to_dict() for record in records]),
             "image_resolution_records_digest": build_stable_digest(image_resolution_records),
             "formal_feature_import_report_digest": build_stable_digest(formal_feature_payload["report"]),
+            "formal_feature_records_sha256": formal_feature_records_sha256,
             "metric_rows_digest": build_stable_digest(metric_rows),
             "summary_digest": build_stable_digest(summary),
+            **prompt_contract,
+            "accepted_feature_pair_count": formal_feature_payload["report"]["accepted_feature_pair_count"],
+            "missing_feature_pair_count": formal_feature_payload["report"]["missing_feature_pair_count"],
+            "feature_issue_count": formal_feature_payload["report"]["feature_issue_count"],
+            "formal_feature_record_count": formal_feature_payload["report"]["formal_feature_record_count"],
             "auto_extract_formal_features": auto_extract_formal_features,
             "formal_features_generated": formal_features_generated,
         },
@@ -759,9 +941,108 @@ def package_dataset_level_quality_outputs(
     """打包当前论文运行层级的正式 FID / KID 证据。"""
 
     root_path = Path(root).resolve()
-    source_dir = root_path / "outputs" / "dataset_level_quality" / paper_run_name
-    if not source_dir.is_dir():
-        raise FileNotFoundError("缺少当前论文运行层级的数据集级质量输出")
+    resolved_paper_run_name = normalize_paper_run_name(paper_run_name)
+    paper_run = build_paper_run_config(root_path)
+    if paper_run.run_name != resolved_paper_run_name:
+        raise ValueError("数据集级质量打包层级必须与当前论文配置一致")
+    source_dir = (
+        root_path / "outputs" / "dataset_level_quality" / resolved_paper_run_name
+    )
+    required_paths = tuple(
+        source_dir / filename
+        for filename in (
+            "dataset_quality_image_records.jsonl",
+            "dataset_quality_image_resolution_records.jsonl",
+            "dataset_quality_formal_feature_records.jsonl",
+            "dataset_quality_formal_feature_import_report.json",
+            "dataset_quality_metrics.csv",
+            "dataset_quality_summary.json",
+            "manifest.local.json",
+        )
+    )
+    if any(not path.is_file() for path in required_paths):
+        raise FileNotFoundError("当前论文运行层级的数据集级质量输出不完整, 不得打包")
+    summary = json.loads((source_dir / "dataset_quality_summary.json").read_text(encoding="utf-8-sig"))
+    feature_report = json.loads(
+        (source_dir / "dataset_quality_formal_feature_import_report.json").read_text(
+            encoding="utf-8-sig"
+        )
+    )
+    manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
+    with (source_dir / "dataset_quality_metrics.csv").open(
+        encoding="utf-8-sig",
+        newline="",
+    ) as stream:
+        metric_rows = list(csv.DictReader(stream))
+    expected_prompt_ids = canonical_prompt_ids_for_paper_run(
+        root_path=root_path,
+        prompt_set=paper_run.prompt_set,
+        prompt_file=paper_run.prompt_file,
+    )
+    expected_prompt_count = RUN_EXPECTED_PROMPT_COUNTS[resolved_paper_run_name]
+    expected_prompt_digest = build_stable_digest(sorted(expected_prompt_ids))
+    feature_records_path = source_dir / "dataset_quality_formal_feature_records.jsonl"
+    feature_records_sha256 = path_digest(feature_records_path)
+    manifest_config = manifest.get("config", {})
+    metric_contract_ready = (
+        len(metric_rows) == 2
+        and [row.get("quality_metric_name") for row in metric_rows] == ["fid", "kid"]
+        and all(row.get("metric_status") == "measured" for row in metric_rows)
+        and all(
+            int(row.get(field_name, -1)) == expected_prompt_count
+            for row in metric_rows
+            for field_name in (
+                "source_image_count",
+                "comparison_image_count",
+                "sample_pair_count",
+            )
+        )
+    )
+    feature_contract_ready = all(
+        (
+            paper_run.prompt_count == expected_prompt_count,
+            summary.get("prompt_registry_exact_set_ready") is True,
+            summary.get("canonical_prompt_id_digest") == expected_prompt_digest,
+            summary.get("registry_prompt_id_digest") == expected_prompt_digest,
+            int(summary.get("expected_prompt_count", -1)) == expected_prompt_count,
+            int(summary.get("registry_prompt_count", -1)) == expected_prompt_count,
+            int(summary.get("sample_pair_count", -1)) == expected_prompt_count,
+            int(summary.get("accepted_feature_pair_count", -1)) == expected_prompt_count,
+            int(summary.get("missing_feature_pair_count", -1)) == 0,
+            int(summary.get("feature_issue_count", -1)) == 0,
+            int(summary.get("formal_feature_record_count", -1)) == expected_prompt_count * 2,
+            summary.get("formal_feature_records_sha256") == feature_records_sha256,
+            feature_report.get("paper_run_name") == resolved_paper_run_name,
+            feature_report.get("prompt_registry_exact_set_ready") is True,
+            feature_report.get("canonical_prompt_id_digest") == expected_prompt_digest,
+            feature_report.get("registry_prompt_id_digest") == expected_prompt_digest,
+            int(feature_report.get("expected_feature_pair_count", -1)) == expected_prompt_count,
+            int(feature_report.get("accepted_feature_pair_count", -1)) == expected_prompt_count,
+            int(feature_report.get("missing_feature_pair_count", -1)) == 0,
+            int(feature_report.get("feature_issue_count", -1)) == 0,
+            int(feature_report.get("formal_feature_record_count", -1)) == expected_prompt_count * 2,
+            feature_report.get("formal_feature_records_sha256") == feature_records_sha256,
+            manifest_config.get("canonical_prompt_id_digest") == expected_prompt_digest,
+            manifest_config.get("registry_prompt_id_digest") == expected_prompt_digest,
+            manifest_config.get("prompt_registry_exact_set_ready") is True,
+            manifest_config.get("formal_feature_records_sha256") == feature_records_sha256,
+            metric_contract_ready,
+        )
+    )
+    if not all(
+        (
+            summary.get("paper_run_name") == resolved_paper_run_name,
+            abs(float(summary.get("target_fpr", -1.0)) - paper_run.target_fpr) <= 1e-12,
+            bool(summary.get("generated_at")),
+            summary.get("formal_feature_backend_ready") is True,
+            summary.get("formal_sample_scale_ready") is True,
+            summary.get("canonical_formal_feature_extractor_ready") is True,
+            summary.get("formal_fid_kid_claim_gate_ready") is True,
+            manifest.get("artifact_id") == "dataset_level_quality_manifest",
+            feature_contract_ready,
+        )
+    ):
+        raise RuntimeError("数据集级质量身份、精确 Prompt/特征覆盖或 ready 门禁未通过")
     code_version = resolve_code_version(root_path).replace("-dirty", "")
     archive_path = source_dir / f"dataset_level_quality_package_{utc_archive_token()}_{code_version}.zip"
     entries = tuple(
@@ -778,8 +1059,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="写出数据集级质量证据产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
-    parser.add_argument("--real-attack-registry-path", default=str(DEFAULT_REAL_ATTACK_REGISTRY_PATH), help="真实攻击图像 registry 路径。")
+    parser.add_argument(
+        "--real-attack-registry-path",
+        default=None,
+        help="真实攻击图像 registry 路径; 默认读取当前论文层级主方法 registry。",
+    )
     parser.add_argument(
         "--image-search-root",
         action="append",
@@ -800,8 +1084,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--formal-min-sample-count",
         type=int,
-        default=DEFAULT_FORMAL_MIN_SAMPLE_COUNT,
-        help="正式 FID / KID 所需的最小图像对数量, 默认不适配小样本。",
+        default=None,
+        help="正式 FID / KID 所需最小图像对数量; 默认等于当前论文层级完整 Prompt 数量, 显式值不得更低。",
     )
     parser.add_argument(
         "--auto-extract-formal-features",
@@ -817,9 +1101,11 @@ def main() -> None:
     """命令行入口。"""
 
     args = build_parser().parse_args()
+    paper_run = build_paper_run_config(args.root)
     manifest = write_dataset_level_quality_outputs(
+        paper_run_name=paper_run.run_name,
+        target_fpr=paper_run.target_fpr,
         root=args.root,
-        output_dir=args.output_dir,
         real_attack_registry_path=args.real_attack_registry_path,
         image_search_roots=args.image_search_root,
         input_package_paths=args.input_package_path,

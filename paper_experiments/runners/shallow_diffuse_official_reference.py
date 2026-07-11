@@ -38,6 +38,7 @@ from experiments.runtime.progress import (
     run_quiet_subprocess_with_progress,
     update_progress,
 )
+from experiments.runtime.archive_naming import utc_archive_token
 from experiments.runtime.repository_environment import (
     build_runtime_environment_report,
     file_digest,
@@ -73,15 +74,6 @@ DEFAULT_EDIT_TIME_LIST = "0.3"
 DEFAULT_ATTACKER_NAMES = "none"
 DEFAULT_REFERENCE_MODEL = "ViT-g-14"
 DEFAULT_REFERENCE_MODEL_PRETRAIN = "laion2b_s12b_b42k"
-PACKAGE_EXTRA_PATHS = (
-    "paper_experiments/runners/shallow_diffuse_official_reference.py",
-    "paper_experiments/baselines/shallow_diffuse_official_reference.py",
-    "external_baseline/primary/shallow_diffuse/README.md",
-    "external_baseline/primary/shallow_diffuse/source/README.md",
-    "external_baseline/source_registry.json",
-)
-
-
 @dataclass(frozen=True)
 class ShallowDiffuseOfficialReferenceConfig:
     """描述 Shallow Diffuse 官方原始环境复现与导入所需配置。"""
@@ -301,7 +293,12 @@ def run_command_with_progress_status(
 def output_paths(root_path: Path, config: ShallowDiffuseOfficialReferenceConfig) -> dict[str, Path]:
     """集中构造 Shallow Diffuse 官方参考 workflow 的输出路径。"""
 
-    output_dir = (root_path / config.output_dir).resolve()
+    paper_run = build_paper_run_config(root_path)
+    configured_output_root = (root_path / config.output_dir).resolve()
+    expected_output_root = (root_path / DEFAULT_OUTPUT_DIR).resolve()
+    if configured_output_root != expected_output_root:
+        raise ValueError("Shallow Diffuse 官方参考输出根目录必须使用正式 outputs family")
+    output_dir = expected_output_root / paper_run.run_name
     official_run_root = output_dir / "output" / config.run_name
     official_timestep_dir = official_run_root / f"timestep{primary_edit_timestep(config)}"
     return {
@@ -1256,14 +1253,18 @@ def write_shallow_diffuse_official_reference_outputs(
     run_ready = bool(validation.get("reference_import_ready"))
     unsupported_reason = "" if run_ready else "shallow_diffuse_official_reference_result_missing_or_invalid"
     if official_report.get("official_command_requested") and int(official_report.get("return_code", 1)) != 0:
-        unsupported_reason = "official_command_failed_governed_diagnostics_packaged"
+        unsupported_reason = "official_command_failed_formal_archive_blocked"
+    paper_run = build_paper_run_config(root_path)
     summary = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "baseline_id": "shallow_diffuse",
         "run_decision": "pass" if run_ready else "fail",
         "shallow_diffuse_official_reference_ready": run_ready,
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
         "sample_count": int(effective_config.sample_count),
-        "paper_claim_scale": build_paper_run_config(root_path).run_name,
+        "paper_claim_scale": paper_run.run_name,
+        "target_fpr": paper_run.target_fpr,
         "edit_time_list": effective_config.edit_time_list,
         "primary_edit_timestep": primary_edit_timestep(effective_config),
         "attacker_names": effective_config.attacker_names,
@@ -1399,17 +1400,13 @@ def run_default_shallow_diffuse_official_reference_plan(root: str | Path = ".") 
 
 
 def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Path) -> tuple[Path, ...]:
-    """收集需要进入压缩包的核对文件。"""
+    """仅收集当前论文层级的 Shallow Diffuse outputs family 文件。"""
 
     entries: list[Path] = []
     if output_dir.exists():
         for path in sorted(output_dir.rglob("*")):
             if path.is_file() and path.resolve() != archive_path.resolve() and path.suffix.lower() != ".zip":
                 entries.append(path)
-    for relative_path in PACKAGE_EXTRA_PATHS:
-        path = root_path / relative_path
-        if path.exists():
-            entries.append(path)
     unique_entries: list[Path] = []
     for entry in entries:
         if entry not in unique_entries:
@@ -1421,15 +1418,52 @@ def package_shallow_diffuse_official_reference_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
     drive_output_dir: str | None = None,
-    archive_name: str = "external_baseline_official_reference_package_shallow_diffuse.zip",
+    archive_name: str | None = None,
 ) -> ShallowDiffuseOfficialReferenceArchiveRecord:
     """打包 Shallow Diffuse 官方参考产物并镜像到 Google Drive。"""
 
     root_path = Path(root).resolve()
-    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir("external_baseline_official_reference")
-    source_dir = (root_path / output_dir).resolve()
-    source_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = source_dir / archive_name
+    paper_run = build_paper_run_config(root_path)
+    resolved_drive_output_dir = drive_output_dir or paper_run.drive_dir("external_baseline_official_reference")
+    configured_output_root = (root_path / output_dir).resolve()
+    expected_output_root = (root_path / DEFAULT_OUTPUT_DIR).resolve()
+    if configured_output_root != expected_output_root:
+        raise ValueError("Shallow Diffuse 官方参考打包根目录必须使用正式 outputs family")
+    source_dir = expected_output_root / paper_run.run_name
+    required_runtime_paths = (
+        source_dir / "shallow_diffuse_official_reference_summary.json",
+        source_dir / "manifest.local.json",
+        source_dir / "shallow_diffuse_official_reference_records.jsonl",
+        source_dir / "shallow_diffuse_official_reference_validation_report.json",
+    )
+    missing_runtime_paths = [path for path in required_runtime_paths if not path.is_file()]
+    if missing_runtime_paths:
+        raise FileNotFoundError("Shallow Diffuse 正式参考输出不完整, 不得打包")
+    run_summary = read_json(required_runtime_paths[0])
+    if not all(
+        (
+            run_summary.get("run_decision") == "pass",
+            run_summary.get("shallow_diffuse_official_reference_ready") is True,
+            run_summary.get("reference_import_ready") is True,
+            run_summary.get("baseline_id") == "shallow_diffuse",
+            run_summary.get("paper_claim_scale") == paper_run.run_name,
+            float(run_summary.get("target_fpr", -1.0)) == paper_run.target_fpr,
+        )
+    ):
+        raise RuntimeError("Shallow Diffuse 正式参考身份或 ready 门禁未通过")
+    resolved_archive_name = archive_name or (
+        "external_baseline_official_reference_package_shallow_diffuse_"
+        f"{utc_archive_token()}_{resolve_code_version(root_path).replace('-dirty', '')}.zip"
+    )
+    if (
+        Path(resolved_archive_name).name != resolved_archive_name
+        or not resolved_archive_name.startswith(
+            "external_baseline_official_reference_package_shallow_diffuse_"
+        )
+        or Path(resolved_archive_name).suffix.lower() != ".zip"
+    ):
+        raise ValueError("Shallow Diffuse archive_name 未匹配正式命名")
+    archive_path = source_dir / resolved_archive_name
     package_manifest_path = source_dir / "shallow_diffuse_official_reference_package_input_manifest.json"
     summary_path = source_dir / "shallow_diffuse_official_reference_archive_summary.json"
     manifest_path = source_dir / "shallow_diffuse_official_reference_archive_manifest.local.json"
@@ -1440,7 +1474,14 @@ def package_shallow_diffuse_official_reference_outputs(
     entries = tuple((*content_entries, package_manifest_path, summary_path, manifest_path))
     package_manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "entry_paths": [entry.relative_to(root_path).as_posix() for entry in entries],
+        "paper_run_name": paper_run.run_name,
+        "target_fpr": paper_run.target_fpr,
+        "baseline_id": "shallow_diffuse",
+        "entry_paths": [entry.relative_to(root_path).as_posix() for entry in content_entries],
+        "entry_sha256": {
+            entry.relative_to(root_path).as_posix(): file_digest(entry)
+            for entry in content_entries
+        },
         "entry_count": len(entries),
         "embedded_digest_scope": "external_summary_records_final_archive_digest",
     }
@@ -1449,7 +1490,7 @@ def package_shallow_diffuse_official_reference_outputs(
         archive_path=relative_or_absolute(archive_path, root_path),
         archive_digest="",
         archive_entry_count=len(entries),
-        drive_archive_path=str(Path(resolved_drive_output_dir).expanduser() / archive_name),
+        drive_archive_path=str(Path(resolved_drive_output_dir).expanduser() / resolved_archive_name),
         drive_archive_digest="",
         metadata={
             "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
@@ -1467,12 +1508,20 @@ def package_shallow_diffuse_official_reference_outputs(
             summary_path.relative_to(root_path).as_posix(),
             manifest_path.relative_to(root_path).as_posix(),
         ),
-        config={"archive_name": archive_name, "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser())},
+        config={
+            "archive_name": resolved_archive_name,
+            "paper_run_name": paper_run.run_name,
+            "target_fpr": paper_run.target_fpr,
+            "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
+        },
         code_version=resolve_code_version(root_path),
         rebuild_command="调用 paper_experiments.runners.shallow_diffuse_official_reference",
         metadata={
             "embedded_digest_scope": "external_summary_records_final_archive_digest",
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "paper_run_name": paper_run.run_name,
+            "target_fpr": paper_run.target_fpr,
+            "baseline_id": "shallow_diffuse",
             "main_table_eligible": False,
         },
     ).to_dict()
@@ -1482,7 +1531,7 @@ def package_shallow_diffuse_official_reference_outputs(
             archive.write(entry, entry.relative_to(root_path).as_posix())
     drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
-    mirrored_path = drive_dir / archive_name
+    mirrored_path = drive_dir / resolved_archive_name
     shutil.copy2(archive_path, mirrored_path)
     record = ShallowDiffuseOfficialReferenceArchiveRecord(
         archive_path=relative_or_absolute(archive_path, root_path),

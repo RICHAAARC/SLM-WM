@@ -82,8 +82,9 @@ def main() -> None:
     quality_archive_path = None
     if os.environ.get("SLM_WM_SKIP_DATASET_QUALITY", "0") != "1":
         quality_manifest = write_dataset_level_quality_outputs(
+            paper_run_name=paper_run.run_name,
+            target_fpr=paper_run.target_fpr,
             root=ROOT,
-            output_dir=f"outputs/dataset_level_quality/{paper_run.run_name}",
             real_attack_registry_path=(
                 f"outputs/image_only_dataset_runtime/{paper_run.run_name}/watermark_quality_image_registry.jsonl"
             ),

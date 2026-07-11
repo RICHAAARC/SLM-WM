@@ -14,13 +14,13 @@ from paper_experiments.baselines.method_faithful_observation_collection import (
     file_sha256,
 )
 from scripts.write_primary_baseline_result_candidates import (
-    T2SMARK_CANDIDATE_RECORDS_ENTRY,
     _measured_baseline_readiness,
     build_method_candidate_rows,
     evidence_path_for_source,
     load_t2smark_candidate_rows,
     load_canonical_prompt_protocol,
     normalize_t2smark_candidate_rows,
+    t2smark_candidate_records_entry,
 )
 from experiments.protocol.fixed_fpr_observation_audit import (
     conformal_threshold_from_clean_negative_scores,
@@ -28,6 +28,15 @@ from experiments.protocol.fixed_fpr_observation_audit import (
 
 
 pytestmark = pytest.mark.quick
+
+
+def test_t2smark_package_entry_is_scoped_by_paper_run() -> None:
+    """T2SMark 包直读路径必须包含当前论文运行层级, 不得读取全局旧布局。"""
+
+    assert t2smark_candidate_records_entry("full_paper") == (
+        "outputs/t2smark_formal_reproduction/full_paper/"
+        "t2smark_formal_import_candidate_records.jsonl"
+    )
 
 
 def probe_observations(*, baseline_id: str = "tree_ring") -> list[dict[str, object]]:
@@ -87,22 +96,28 @@ def test_t2smark_package_must_contain_canonical_entry(tmp_path: Path) -> None:
         archive.writestr("outputs/unrelated.jsonl", "{}\n")
 
     with pytest.raises(ValueError, match="T2SMark 正式候选记录为空"):
-        load_t2smark_candidate_rows(candidate_records_path=local_path, package_path=package_path)
+        load_t2smark_candidate_rows(
+            candidate_records_path=local_path,
+            package_path=package_path,
+            package_entry_name=t2smark_candidate_records_entry("probe_paper"),
+        )
 
 
 def test_t2smark_package_supplies_canonical_candidate_records(tmp_path: Path) -> None:
     """T2SMark 专用结果包的规范条目应成为候选记录来源。"""
 
     t2smark_package = tmp_path / "t2smark_results.zip"
+    entry_name = t2smark_candidate_records_entry("probe_paper")
     with ZipFile(t2smark_package, "w") as archive:
         archive.writestr(
-            T2SMARK_CANDIDATE_RECORDS_ENTRY,
+            entry_name,
             json.dumps({"baseline_id": "t2smark", "attack_name": "jpeg_compression"}) + "\n",
         )
 
     t2smark_rows = load_t2smark_candidate_rows(
         candidate_records_path=tmp_path / "missing_t2smark.jsonl",
         package_path=t2smark_package,
+        package_entry_name=entry_name,
     )
 
     assert t2smark_rows == [{"baseline_id": "t2smark", "attack_name": "jpeg_compression"}]

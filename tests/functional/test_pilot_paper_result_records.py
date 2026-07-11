@@ -197,13 +197,17 @@ def baseline_candidate_row(paper_claim_scale: str) -> dict[str, object]:
         "comparable_operating_point": f"fixed_fpr_{target_fpr}",
         "result_protocol_name": "primary_baseline_formal_import_protocol",
         "result_source_type": "governed_import",
-        "baseline_result_source": "outputs/external_baseline_results/baseline_result_records.jsonl",
+        "baseline_result_source": (
+            f"outputs/external_baseline_results/{paper_claim_scale}/baseline_result_records.jsonl"
+        ),
         "baseline_result_source_digest": "baseline_source_digest",
         "metric_status": "measured",
         "prompt_protocol_name": f"paper_main_{paper_claim_scale}_prompt_protocol",
         "prompt_protocol_digest": f"{paper_claim_scale}_prompt_digest",
         "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
-        "evidence_paths": ["outputs/external_baseline_results/baseline_result_records.jsonl"],
+        "evidence_paths": [
+            f"outputs/external_baseline_results/{paper_claim_scale}/baseline_result_records.jsonl"
+        ],
         "method_faithful_adapter_ready": True,
         "paper_run_prompt_protocol_ready": True,
         "fixed_fpr_baseline_calibration_ready": True,
@@ -229,7 +233,7 @@ def baseline_candidate_row(paper_claim_scale: str) -> dict[str, object]:
 def write_baseline_inputs(repo_root: Path, paper_claim_scale: str, *, accepted: bool) -> None:
     """写出外部 baseline 候选记录和受治理导入校验报告。"""
 
-    baseline_dir = repo_root / "outputs" / "external_baseline_results"
+    baseline_dir = repo_root / "outputs" / "external_baseline_results" / paper_claim_scale
     baseline_dir.mkdir(parents=True, exist_ok=True)
     row = baseline_candidate_row(paper_claim_scale)
     (baseline_dir / "baseline_result_records.jsonl").write_text(json_line(row), encoding="utf-8")
@@ -255,17 +259,23 @@ def write_formal_inputs(repo_root: Path, paper_claim_scale: str, *, baseline_acc
     write_baseline_inputs(repo_root, paper_claim_scale, accepted=baseline_accepted)
 
 
-def read_result_records(repo_root: Path) -> list[dict[str, object]]:
+def read_result_records(repo_root: Path, paper_claim_scale: str = "pilot_paper") -> list[dict[str, object]]:
     """读取结果物化脚本写出的共同协议记录。"""
 
-    path = repo_root / "outputs" / "pilot_paper_fixed_fpr_results" / "pilot_paper_result_records.jsonl"
+    path = (
+        repo_root
+        / "outputs"
+        / "pilot_paper_fixed_fpr_results"
+        / paper_claim_scale
+        / "pilot_paper_result_records.jsonl"
+    )
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def append_clean_baseline_record(repo_root: Path) -> None:
     """追加不属于正式攻击比较模板的 clean baseline 记录。"""
 
-    baseline_dir = repo_root / "outputs" / "external_baseline_results"
+    baseline_dir = repo_root / "outputs" / "external_baseline_results" / "pilot_paper"
     records_path = baseline_dir / "baseline_result_records.jsonl"
     rows = [json.loads(line) for line in records_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     clean_row = dict(rows[0])
@@ -318,7 +328,7 @@ def test_result_writer_materializes_method_and_governed_baseline_records(tmp_pat
     write_formal_inputs(repo_root, "pilot_paper", baseline_accepted=True)
 
     manifest = write_pilot_paper_result_record_outputs(root=repo_root, require_existing_evidence=True)
-    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_results"
+    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_results" / "pilot_paper"
     records = read_result_records(repo_root)
     validation = json.loads((output_dir / "pilot_paper_result_import_validation_report.json").read_text(encoding="utf-8"))
     coverage_rows = list(csv.DictReader((output_dir / "pilot_paper_result_template_coverage.csv").open(encoding="utf-8")))
@@ -368,7 +378,7 @@ def test_result_writer_switches_records_to_full_paper_claim_scale(
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
 
     write_pilot_paper_result_record_outputs(root=repo_root, require_existing_evidence=True)
-    records = read_result_records(repo_root)
+    records = read_result_records(repo_root, "full_paper")
 
     assert {row["method_id"] for row in records} == {"slm_wm_current", "tree_ring"}
     assert all(row["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol" for row in records)
@@ -437,7 +447,7 @@ def test_writer_materialize_only_does_not_require_prompt_config(tmp_path: Path) 
         package_paths=(package_path,),
         materialize_only=True,
     )
-    output_dir = tmp_path / "outputs" / "pilot_paper_fixed_fpr_results"
+    output_dir = tmp_path / "outputs" / "pilot_paper_fixed_fpr_results" / "pilot_paper"
     report = json.loads((output_dir / "pilot_paper_materialization_report.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "pilot_paper_result_record_materialization_manifest"

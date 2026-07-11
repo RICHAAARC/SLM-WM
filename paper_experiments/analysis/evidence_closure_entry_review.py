@@ -98,7 +98,7 @@ def build_evidence_closure_entry_checklist(bundle: EvidenceClosureEntryInput) ->
             "upstream_audit_rebuildable",
             "artifact_rebuild",
             _bool_value(readiness.get("artifact_builder_ready")) and _bool_value(readiness.get("release_dry_run_ready")),
-            "outputs/submission_readiness/readiness_blocker_report.json",
+            "submission_readiness_report",
             "upstream_audit_or_release_dry_run_not_ready",
             "确认审计报告与 release dry-run 已可重建。",
         ),
@@ -115,7 +115,7 @@ def build_evidence_closure_entry_checklist(bundle: EvidenceClosureEntryInput) ->
             "paper_run_sample_scale_ready",
             "statistical_power",
             "gap_paper_run_sample_scale" not in required_ids,
-            "outputs/submission_readiness/required_evidence_inputs.csv",
+            "required_evidence_inputs",
             "paper_run_sample_scale_missing",
             "确认当前论文运行层级的 Prompt split、样本量和随机种子已冻结并重建统计。",
         ),
@@ -123,7 +123,7 @@ def build_evidence_closure_entry_checklist(bundle: EvidenceClosureEntryInput) ->
             "fixed_fpr_recalibration_ready",
             "threshold_calibration",
             "gap_full_method_fixed_fpr_recalibration" not in required_ids,
-            "outputs/submission_readiness/required_evidence_inputs.csv",
+            "required_evidence_inputs",
             "fixed_fpr_recalibration_missing",
             "确认 fixed-FPR 与 rescue 边界已在正式证据上重新校准。",
         ),
@@ -133,7 +133,7 @@ def build_evidence_closure_entry_checklist(bundle: EvidenceClosureEntryInput) ->
             _bool_value(dataset_quality.get("formal_fid_kid_ready"))
             and _bool_value(dataset_quality.get("formal_sample_scale_ready"))
             and _bool_value(dataset_quality.get("formal_feature_backend_ready")),
-            "outputs/dataset_level_quality/dataset_quality_summary.json",
+            "dataset_quality_summary",
             "dataset_level_fid_kid_missing",
             "确认 FID / KID 使用正式特征后端和足够样本量计算。",
         ),
@@ -141,7 +141,7 @@ def build_evidence_closure_entry_checklist(bundle: EvidenceClosureEntryInput) ->
             "submission_readiness_ready",
             "submission_readiness",
             _bool_value(readiness.get("submission_ready")) and str(readiness.get("readiness_decision", "")) == "ready",
-            "outputs/submission_readiness/readiness_blocker_report.json",
+            "submission_readiness_report",
             "submission_readiness_blocked",
             "确认投稿就绪门禁已经给出 ready 判定。",
         ),
@@ -178,7 +178,9 @@ def build_evidence_closure_entry_review_report(
         "critical_required_input_count": int(readiness.get("critical_required_input_count", 0)),
         "blocking_claim_count": int(paper_blocker.get("blocking_claim_count", 0)),
         "primary_blockers": list(readiness.get("primary_blockers", ())),
-        "baseline_results_ready": _bool_value(baseline.get("baseline_results_ready")),
+        "primary_baseline_results_ready": _bool_value(
+            baseline.get("primary_baseline_results_ready")
+        ),
         "formal_import_validation_ready": _bool_value(baseline.get("formal_import_validation_ready")),
         "accepted_formal_import_count": int(baseline.get("accepted_formal_import_count", 0)),
         "formal_evidence_path_resolution_ready": _bool_value(

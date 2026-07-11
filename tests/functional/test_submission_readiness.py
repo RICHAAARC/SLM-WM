@@ -170,7 +170,7 @@ def write_minimal_repository_files(tmp_path: Path) -> None:
 
 def write_upstream_audit_outputs(tmp_path: Path) -> None:
     """写入投稿就绪脚本所需的上游审计产物。"""
-    audit_dir = tmp_path / "outputs" / "paper_artifact_evidence_audit"
+    audit_dir = tmp_path / "outputs" / "paper_artifact_evidence_audit" / "pilot_paper"
     write_json(audit_dir / "manifest.local.json", {"artifact_id": "paper_artifact_evidence_audit_manifest"})
     write_json(audit_dir / "artifact_builder_readiness_report.json", {"artifact_builder_ready": True, "paper_ready_artifact_count": 0})
     write_json(
@@ -187,7 +187,7 @@ def test_submission_readiness_outputs_are_rebuildable_and_claim_safe(tmp_path: P
     write_upstream_audit_outputs(tmp_path)
 
     manifest = write_submission_readiness_outputs(root=tmp_path)
-    output_dir = tmp_path / "outputs" / "submission_readiness"
+    output_dir = tmp_path / "outputs" / "submission_readiness" / "pilot_paper"
     required_rows = list(csv.DictReader((output_dir / "required_evidence_inputs.csv").open(encoding="utf-8")))
     release_rows = list(csv.DictReader((output_dir / "release_profile_dry_run.csv").open(encoding="utf-8")))
     report = json.loads((output_dir / "readiness_blocker_report.json").read_text(encoding="utf-8"))

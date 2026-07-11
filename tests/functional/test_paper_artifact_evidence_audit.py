@@ -38,6 +38,16 @@ def make_audit_input_bundle() -> AuditInputBundle:
             "supports_paper_claim": False,
         },
         threshold_manifest={"artifact_id": "pilot_runtime_manifest", "supports_paper_claim": False},
+        threshold_audit_report={
+            "method_identity_ready": False,
+            "all_method_thresholds_ready": False,
+            "fixed_fpr_threshold_audit_ready": False,
+            "supports_paper_claim": False,
+        },
+        threshold_audit_manifest={
+            "artifact_id": "fixed_fpr_threshold_audit_manifest",
+            "supports_paper_claim": False,
+        },
         attack_manifest={
             "full_method_claim_ready": False,
             "real_attacked_image_closed_loop_ready": False,
@@ -58,9 +68,10 @@ def make_audit_input_bundle() -> AuditInputBundle:
         ablation_claim_summary={"mechanism_coverage_ready": True, "supports_paper_claim": False},
         source_path_map={
             "threshold_report": "outputs/image_only_dataset_runtime/pilot_paper/dataset_runtime_summary.json",
-            "attack_manifest": "outputs/image_only_dataset_runtime/pilot_paper/dataset_runtime_summary.json",
-            "baseline_runtime_report": "outputs/external_baseline_comparison/baseline_runtime_report.json",
-            "baseline_comparison_table": "outputs/external_baseline_comparison/baseline_comparison_table.csv",
+            "threshold_audit_report": "outputs/fixed_fpr_threshold_audit/pilot_paper/threshold_audit_report.json",
+            "attack_manifest": "outputs/attack_matrix/pilot_paper/attack_manifest.json",
+            "baseline_runtime_report": "outputs/external_baseline_comparison/pilot_paper/baseline_runtime_report.json",
+            "baseline_comparison_table": "outputs/external_baseline_comparison/pilot_paper/baseline_comparison_table.csv",
             "dataset_quality_summary": "outputs/dataset_level_quality/pilot_paper/dataset_quality_summary.json",
             "dataset_quality_metrics": "outputs/dataset_level_quality/pilot_paper/dataset_quality_metrics.csv",
             "ablation_claim_summary": "outputs/formal_mechanism_ablation/pilot_paper/ablation_claim_summary.json",
@@ -97,7 +108,18 @@ def make_boundary_ready_bundle() -> AuditInputBundle:
         "fixed_fpr_boundary_ready": True,
         "rescue_boundary_ready": True,
     }
-    return replace(bundle, threshold_report=threshold)
+    threshold_audit = {
+        **bundle.threshold_audit_report,
+        "method_identity_ready": True,
+        "all_method_thresholds_ready": True,
+        "fixed_fpr_threshold_audit_ready": True,
+        "supports_paper_claim": True,
+    }
+    return replace(
+        bundle,
+        threshold_report=threshold,
+        threshold_audit_report=threshold_audit,
+    )
 
 
 def make_ablation_claim_ready_bundle() -> AuditInputBundle:
@@ -236,15 +258,23 @@ def write_minimal_upstream_artifacts(tmp_path: Path) -> None:
     runtime_dir = tmp_path / "outputs" / "image_only_dataset_runtime" / "pilot_paper"
     quality_dir = tmp_path / "outputs" / "dataset_level_quality" / "pilot_paper"
     ablation_dir = tmp_path / "outputs" / "formal_mechanism_ablation" / "pilot_paper"
+    threshold_audit_dir = tmp_path / "outputs" / "fixed_fpr_threshold_audit" / "pilot_paper"
+    attack_dir = tmp_path / "outputs" / "attack_matrix" / "pilot_paper"
+    baseline_dir = tmp_path / "outputs" / "external_baseline_comparison" / "pilot_paper"
+    bundle = make_audit_input_bundle()
     write_json(runtime_dir / "dataset_runtime_summary.json", make_audit_input_bundle().threshold_report)
     write_json(runtime_dir / "manifest.local.json", {"artifact_id": "pilot_runtime_manifest"})
+    write_json(threshold_audit_dir / "threshold_audit_report.json", bundle.threshold_audit_report)
+    write_json(threshold_audit_dir / "manifest.local.json", bundle.threshold_audit_manifest)
+    write_json(attack_dir / "attack_manifest.json", bundle.attack_manifest)
+    write_json(attack_dir / "manifest.local.json", bundle.attack_matrix_manifest)
     write_json(
-        tmp_path / "outputs" / "external_baseline_comparison" / "manifest.local.json",
+        baseline_dir / "manifest.local.json",
         {"artifact_id": "external_baseline_comparison_manifest", "supports_paper_claim": False},
     )
     write_json(
-        tmp_path / "outputs" / "external_baseline_comparison" / "baseline_runtime_report.json",
-        {"baseline_results_ready": False, "supports_paper_claim": False},
+        baseline_dir / "baseline_runtime_report.json",
+        {"primary_baseline_results_ready": False, "supports_paper_claim": False},
     )
     write_json(quality_dir / "manifest.local.json", {"artifact_id": "dataset_level_quality_manifest"})
     write_json(quality_dir / "dataset_quality_summary.json", make_audit_input_bundle().dataset_quality_summary)
@@ -258,7 +288,7 @@ def test_paper_artifact_evidence_outputs_are_rebuildable_and_claim_safe(tmp_path
     write_minimal_upstream_artifacts(tmp_path)
 
     manifest = write_paper_artifact_evidence_audit_outputs(root=tmp_path)
-    output_dir = tmp_path / "outputs" / "paper_artifact_evidence_audit"
+    output_dir = tmp_path / "outputs" / "paper_artifact_evidence_audit" / "pilot_paper"
     expected_files = {
         "claim_audit_table.csv",
         "paper_table_readiness.csv",

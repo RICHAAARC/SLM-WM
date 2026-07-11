@@ -169,7 +169,12 @@ def test_method_faithful_adapter_writer_reads_exact_collection(
         collection_root=collection_root,
     )
 
-    output_dir = tmp_path / "outputs" / "primary_baseline_method_faithful_adapter_protocol"
+    output_dir = (
+        tmp_path
+        / "outputs"
+        / "primary_baseline_method_faithful_adapter_protocol"
+        / "probe_paper"
+    )
     records = [
         json.loads(line)
         for line in (output_dir / "primary_baseline_method_faithful_adapter_status_records.jsonl")

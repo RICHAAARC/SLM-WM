@@ -260,7 +260,7 @@ def test_external_baseline_outputs_are_rebuildable_and_claim_safe(tmp_path: Path
         attack_matrix_manifest_path=attack_matrix_manifest_path,
         threshold_report_path=threshold_report_path,
     )
-    output_dir = tmp_path / "outputs" / "external_baseline_comparison"
+    output_dir = tmp_path / "outputs" / "external_baseline_comparison" / "pilot_paper"
     observations = [
         json.loads(line)
         for line in (output_dir / "baseline_observations.jsonl").read_text(encoding="utf-8").splitlines()
@@ -406,7 +406,7 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
         baseline_source_registry_path=source_registry_path,
     )
 
-    output_dir = tmp_path / "outputs" / "external_baseline_comparison"
+    output_dir = tmp_path / "outputs" / "external_baseline_comparison" / "pilot_paper"
     baseline_rows = list(csv.DictReader((output_dir / "baseline_metrics.csv").open(encoding="utf-8")))
     comparison_rows = list(csv.DictReader((output_dir / "baseline_comparison_table.csv").open(encoding="utf-8")))
     runtime_report = json.loads((output_dir / "baseline_runtime_report.json").read_text(encoding="utf-8"))
@@ -561,7 +561,12 @@ def test_external_baseline_primary_comparison_rows_share_common_claim_scope() ->
             "supports_paper_claim": True,
             "evaluation_boundary": {"target_fpr": 0.01},
         },
-        {"threshold_degenerate": False},
+            {
+                "target_fpr": 0.01,
+                "fixed_fpr_threshold_audit_ready": True,
+                "all_method_thresholds_ready": True,
+                "supports_paper_claim": True,
+            },
         baseline_rows,
         tuple(),
         {"baseline_sources": [{"baseline_id": "tree_ring"}]},
@@ -700,7 +705,7 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
         evidence_search_roots=(mirror_root,),
     )
 
-    output_dir = tmp_path / "outputs" / "external_baseline_comparison"
+    output_dir = tmp_path / "outputs" / "external_baseline_comparison" / "pilot_paper"
     runtime_report = json.loads((output_dir / "baseline_runtime_report.json").read_text(encoding="utf-8"))
     validation_report = json.loads((output_dir / "baseline_formal_import_validation_report.json").read_text(encoding="utf-8"))
     evidence_path_report = json.loads(

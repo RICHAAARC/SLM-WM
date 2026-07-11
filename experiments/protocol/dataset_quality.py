@@ -32,6 +32,7 @@ class DatasetQualityImageRecord:
 
     dataset_quality_record_id: str
     dataset_quality_record_digest: str
+    prompt_id: str
     image_pair_index: int
     image_pair_role: str
     source_image_path: str
@@ -493,7 +494,9 @@ def build_dataset_quality_image_records(
         source_digest = _row_digest(row, "source_image_digest", source_path)
         comparison_digest = _row_digest(row, "attacked_image_digest", comparison_path)
         image_pair_role = str(row.get("attack_name", "") or "comparison_image")
+        prompt_id = str(row.get("prompt_id", "") or "")
         payload = {
+            "prompt_id": prompt_id,
             "image_pair_index": index,
             "image_pair_role": image_pair_role,
             "source_image_path": _as_relative_or_absolute(source_path, root_path),
@@ -508,6 +511,7 @@ def build_dataset_quality_image_records(
             DatasetQualityImageRecord(
                 dataset_quality_record_id=f"dataset_quality_record_{digest[:16]}",
                 dataset_quality_record_digest=digest,
+                prompt_id=prompt_id,
                 image_pair_index=index,
                 image_pair_role=image_pair_role,
                 source_image_path=payload["source_image_path"],

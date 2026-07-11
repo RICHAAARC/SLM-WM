@@ -23,7 +23,11 @@ from paper_experiments.baselines.t2smark_pair_quality import write_t2smark_stric
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_FIXED_FPR,
 )
-from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
+from experiments.protocol.paper_run_config import (
+    build_paper_run_config,
+    normalize_paper_run_name,
+    resolve_count_from_environment,
+)
 from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_observation_threshold
 from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
 from experiments.protocol.splits import apply_split_assignments
@@ -39,6 +43,7 @@ from paper_experiments.runners.t2smark_source_runtime import (
     ensure_t2smark_source_available,
 )
 from experiments.runtime.progress import call_runner_with_progress_status, emit_progress_status, progress_bar, update_progress
+from experiments.runtime.archive_naming import utc_archive_token
 from experiments.runtime.repository_environment import (
     build_runtime_environment_report,
     file_digest,
@@ -59,20 +64,6 @@ FORMAL_T2SMARK_GUIDANCE_SCALE = 4.5
 FORMAL_T2SMARK_IMAGE_SIZE = 512
 T2SMARK_FORMAL_PROTOCOL_BINDING_NAME = "t2smark_formal_protocol_binding"
 DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES = ",".join(supported_formal_image_attack_names())
-PACKAGE_EXTRA_PATHS = (
-    "paper_experiments/runners/t2smark_formal_reproduction.py",
-    "paper_experiments/runners/t2smark_source_runtime.py",
-    "paper_experiments/runners/external_source_runtime.py",
-    "paper_experiments/baselines/t2smark_pair_quality.py",
-    "paper_experiments/baselines/formal_import.py",
-    "scripts/write_primary_baseline_formal_import_protocol.py",
-    "external_baseline/primary/t2smark/adapter/run_slm_eval.py",
-    "external_baseline/primary/t2smark/adapter/formal_protocol_git_diff.txt",
-    "external_baseline/primary/t2smark/source/run_sd35.py",
-    "external_baseline/primary/t2smark/source/option.py",
-)
-
-
 @dataclass(frozen=True)
 class T2SMarkFormalReproductionConfig:
     """描述 T2SMark formal 真实复现所需的最小配置。"""
@@ -217,7 +208,11 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
 def output_paths(root_path: Path, config: T2SMarkFormalReproductionConfig) -> dict[str, Path]:
     """集中构造 T2SMark formal 复现所需路径。"""
 
-    output_dir = (root_path / config.output_dir).resolve()
+    configured_output_root = (root_path / config.output_dir).resolve()
+    expected_output_root = (root_path / DEFAULT_OUTPUT_DIR).resolve()
+    if configured_output_root != expected_output_root:
+        raise ValueError("T2SMark 输出根目录必须使用正式 outputs family")
+    output_dir = expected_output_root / normalize_paper_run_name(config.prompt_set)
     official_root = output_dir / "t2smark_official"
     official_run_dir = official_root / config.t2smark_run_name
     adapter_dir = output_dir / "t2smark_adapter"
@@ -819,7 +814,7 @@ def write_failure_outputs(
     paths: dict[str, Path],
     error: Exception,
 ) -> dict[str, Any]:
-    """在 formal 复现失败时写出可打包诊断产物。"""
+    """在 formal 复现失败时保留诊断产物并阻断正式归档。"""
 
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
     environment_report = build_runtime_environment_report()
@@ -954,6 +949,8 @@ def write_t2smark_formal_reproduction_outputs(
     )
     protocol_binding = dict(official_report.get("official_protocol_binding", {}))
     summary = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "baseline_id": "t2smark",
         "run_decision": "pass" if run_ready else "fail",
         "t2smark_formal_reproduction_ready": run_ready,
         "t2smark_official_result_generated": bool(official_report.get("official_result_generated")),
@@ -1258,7 +1255,9 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
     actual_output_entries = {
         path
         for path in output_dir.rglob("*")
-        if path.is_file() and path.resolve() != archive_path.resolve()
+        if path.is_file()
+        and path.resolve() != archive_path.resolve()
+        and path.suffix.lower() != ".zip"
     }
     unexpected_entries = sorted(actual_output_entries - required_entries)
     if unexpected_entries:
@@ -1267,32 +1266,40 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
             + ",".join(path.relative_to(output_dir).as_posix() for path in unexpected_entries[:20])
         )
 
-    extra_entries: set[Path] = set()
-    for relative_path in PACKAGE_EXTRA_PATHS:
-        path = root_path / relative_path
-        if not path.is_file():
-            raise FileNotFoundError(f"T2SMark 打包缺少固定代码证据: {relative_path}")
-        extra_entries.add(path)
-    return tuple(sorted(required_entries | extra_entries, key=lambda path: path.as_posix()))
+    return tuple(sorted(required_entries, key=lambda path: path.as_posix()))
 
 
 def package_t2smark_formal_reproduction_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
     drive_output_dir: str | None = None,
-    archive_name: str = "external_baseline_official_reference_package_t2smark.zip",
+    archive_name: str | None = None,
 ) -> T2SMarkFormalArchiveRecord:
     """仅打包通过 formal validation 且目录精确匹配白名单的 T2SMark 结果。"""
 
     root_path = Path(root).resolve()
-    if Path(archive_name).name != archive_name or Path(archive_name).suffix.lower() != ".zip":
-        raise ValueError("T2SMark archive_name 必须是单层 zip 文件名")
-    resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir(
+    paper_run = build_paper_run_config(root_path)
+    resolved_drive_output_dir = drive_output_dir or paper_run.drive_dir(
         "external_baseline_official_reference"
     )
-    source_dir = (root_path / output_dir).resolve()
-    source_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = source_dir / archive_name
+    configured_output_root = (root_path / output_dir).resolve()
+    expected_output_root = (root_path / DEFAULT_OUTPUT_DIR).resolve()
+    if configured_output_root != expected_output_root:
+        raise ValueError("T2SMark 打包根目录必须使用正式 outputs family")
+    source_dir = expected_output_root / paper_run.run_name
+    resolved_archive_name = archive_name or (
+        "external_baseline_official_reference_package_t2smark_"
+        f"{utc_archive_token()}_{resolve_code_version(root_path).replace('-dirty', '')}.zip"
+    )
+    if (
+        Path(resolved_archive_name).name != resolved_archive_name
+        or not resolved_archive_name.startswith(
+            "external_baseline_official_reference_package_t2smark_"
+        )
+        or Path(resolved_archive_name).suffix.lower() != ".zip"
+    ):
+        raise ValueError("T2SMark archive_name 未匹配正式命名")
+    archive_path = source_dir / resolved_archive_name
     package_manifest_path = source_dir / "t2smark_formal_package_input_manifest.json"
     summary_path = source_dir / "t2smark_formal_archive_summary.json"
     manifest_path = source_dir / "t2smark_formal_archive_manifest.local.json"
@@ -1302,6 +1309,9 @@ def package_t2smark_formal_reproduction_outputs(
     entries = collect_package_entries(root_path, source_dir, archive_path)
     package_manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "paper_run_name": paper_run.run_name,
+        "target_fpr": paper_run.target_fpr,
+        "baseline_id": "t2smark",
         "entry_paths": [entry.relative_to(root_path).as_posix() for entry in entries],
         "entry_count": len(entries),
         "entry_sha256": {
@@ -1318,17 +1328,28 @@ def package_t2smark_formal_reproduction_outputs(
             summary_path.relative_to(root_path).as_posix(),
             manifest_path.relative_to(root_path).as_posix(),
         ),
-        config={"archive_name": archive_name, "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser())},
+        config={
+            "archive_name": resolved_archive_name,
+            "paper_run_name": paper_run.run_name,
+            "target_fpr": paper_run.target_fpr,
+            "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
+        },
         code_version=resolve_code_version(root_path),
         rebuild_command="调用 paper_experiments.runners.t2smark_formal_reproduction",
-        metadata={"construction_unit_name": "t2smark_formal_reproduction", "generated_at": datetime.now(timezone.utc).isoformat()},
+        metadata={
+            "construction_unit_name": "t2smark_formal_reproduction",
+            "paper_run_name": paper_run.run_name,
+            "target_fpr": paper_run.target_fpr,
+            "baseline_id": "t2smark",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        },
     ).to_dict()
     write_json(manifest_path, archive_manifest)
     preliminary_record = T2SMarkFormalArchiveRecord(
         archive_path=relative_or_absolute(archive_path, root_path),
         archive_digest="",
         archive_entry_count=len(entries) + 3,
-        drive_archive_path=str(Path(resolved_drive_output_dir).expanduser() / archive_name),
+        drive_archive_path=str(Path(resolved_drive_output_dir).expanduser() / resolved_archive_name),
         drive_archive_digest="",
         metadata={
             "construction_unit_name": "t2smark_formal_reproduction",
@@ -1342,7 +1363,7 @@ def package_t2smark_formal_reproduction_outputs(
             archive.write(entry, entry.relative_to(root_path).as_posix())
     drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
-    mirrored_path = drive_dir / archive_name
+    mirrored_path = drive_dir / resolved_archive_name
     shutil.copy2(archive_path, mirrored_path)
     record = T2SMarkFormalArchiveRecord(
         archive_path=relative_or_absolute(archive_path, root_path),

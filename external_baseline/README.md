@@ -23,7 +23,7 @@
 
 Tree-Ring、Gaussian Shading 和 Shallow Diffuse 分别由三个 `external_baseline_*_run.ipynb` 入口运行。每个入口只调度一个 baseline, 使用与主方法一致的 SD3.5 生成预算、当前论文层级 fixed-FPR 和完整攻击矩阵。T2SMark 只由 `official_reference_t2smark_run.ipynb` 的正式复现链生成主表候选。
 
-运行产物写入 `outputs/external_baseline_method_faithful/run_records/<baseline_id>/`, 跨包交换文件写入 `split_observations/`。每个压缩包只包含当前 baseline 的独占路径, 多包物化不会覆盖其他方法。
+运行产物写入 `outputs/external_baseline_method_faithful/<paper_run_name>/run_records/<baseline_id>/`, 跨包交换文件写入同一论文层级下的 `split_observations/`。每个压缩包只包含当前论文层级和当前 baseline 的独占路径, 多包物化不会覆盖其他方法。
 
 ## official reference
 

@@ -12,6 +12,7 @@ import csv
 from datetime import datetime, timezone
 import html
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -28,12 +29,9 @@ from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_result_analysis"
-DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_result_analysis")
-DEFAULT_RESULT_RECORDS_PATH = Path("outputs/pilot_paper_fixed_fpr_results/pilot_paper_result_records.jsonl")
-DEFAULT_REAL_ATTACK_FORMAL_RECORDS_PATH = Path("outputs/real_attack_evaluation/formal_attack_detection_records.jsonl")
-DEFAULT_CONVENTIONAL_ATTACK_FORMAL_RECORDS_PATH = Path(
-    "outputs/conventional_geometric_attack_evaluation/formal_attack_detection_records.jsonl"
-)
+DEFAULT_OUTPUT_ROOT = Path("outputs/pilot_paper_result_analysis")
+DEFAULT_RESULT_RECORDS_ROOT = Path("outputs/pilot_paper_fixed_fpr_results")
+DEFAULT_ATTACK_MATRIX_ROOT = Path("outputs/attack_matrix")
 PRIMARY_BASELINE_METHOD_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 PROPOSED_METHOD_ID = "slm_wm_current"
 FORMAL_METHOD_IDS = (PROPOSED_METHOD_ID, *PRIMARY_BASELINE_METHOD_IDS)
@@ -188,6 +186,82 @@ def build_confidence_interval_rows(result_records: Iterable[dict[str, Any]]) -> 
             }
         )
     return sorted(rows, key=lambda row: (row["attack_name"], row["method_id"]))
+
+
+def _finite_float(row: dict[str, Any], field_name: str) -> float | None:
+    """读取有限浮点数; 缺失或非法值用于阻断完整统计披露门禁。"""
+
+    try:
+        value = float(row[field_name])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _confidence_interval_row_ready(row: dict[str, Any]) -> bool:
+    """核验单条正式 CI 表行具有完整且自洽的检测统计。"""
+
+    interval_groups = (
+        ("true_positive_rate_ci_low", "true_positive_rate", "true_positive_rate_ci_high"),
+        ("false_positive_rate_ci_low", "false_positive_rate", "false_positive_rate_ci_high"),
+        (
+            "clean_false_positive_rate_ci_low",
+            "clean_false_positive_rate",
+            "clean_false_positive_rate_ci_high",
+        ),
+        (
+            "attacked_false_positive_rate_ci_low",
+            "attacked_false_positive_rate",
+            "attacked_false_positive_rate_ci_high",
+        ),
+    )
+    interval_ready = True
+    for low_name, value_name, high_name in interval_groups:
+        low = _finite_float(row, low_name)
+        value = _finite_float(row, value_name)
+        high = _finite_float(row, high_name)
+        interval_ready = interval_ready and (
+            low is not None
+            and value is not None
+            and high is not None
+            and 0.0 <= low <= value <= high <= 1.0
+        )
+    positive_count = _finite_float(row, "positive_count")
+    negative_count = _finite_float(row, "negative_count")
+    confidence_level = _finite_float(row, "confidence_level")
+    return bool(
+        interval_ready
+        and positive_count is not None
+        and positive_count > 0
+        and negative_count is not None
+        and negative_count > 0
+        and confidence_level is not None
+        and 0.0 < confidence_level < 1.0
+        and str(row.get("confidence_interval_method", "")).strip()
+        and bool(row.get("supports_paper_claim", False))
+    )
+
+
+def _superiority_evaluation_row_ready(row: dict[str, Any]) -> bool:
+    """核验逐攻击比较行可审计, 但不把显著胜出当作完整披露前提。"""
+
+    numeric_fields = (
+        "slm_true_positive_rate",
+        "slm_true_positive_rate_ci_low",
+        "slm_true_positive_rate_ci_high",
+        "best_baseline_true_positive_rate",
+        "best_baseline_true_positive_rate_ci_low",
+        "best_baseline_true_positive_rate_ci_high",
+        "slm_minus_best_baseline_tpr",
+        "conservative_ci_margin",
+    )
+    return bool(
+        str(row.get("attack_family", "")).strip()
+        and str(row.get("attack_name", "")).strip()
+        and str(row.get("best_baseline_id", "")) in PRIMARY_BASELINE_METHOD_IDS
+        and all(_finite_float(row, field_name) is not None for field_name in numeric_fields)
+        and bool(row.get("supports_paper_claim", False))
+    )
 
 
 def build_per_attack_superiority_rows(result_records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -396,23 +470,32 @@ def build_failure_case_svg(root_path: Path, output_dir: Path, failure_cases: lis
 def write_pilot_paper_result_analysis_outputs(
     *,
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    result_records_path: str | Path = DEFAULT_RESULT_RECORDS_PATH,
-    real_attack_formal_records_path: str | Path = DEFAULT_REAL_ATTACK_FORMAL_RECORDS_PATH,
-    conventional_attack_formal_records_path: str | Path = DEFAULT_CONVENTIONAL_ATTACK_FORMAL_RECORDS_PATH,
+    output_dir: str | Path | None = None,
+    result_records_path: str | Path | None = None,
+    attack_detection_records_path: str | Path | None = None,
     failure_case_limit: int = 12,
 ) -> dict[str, Any]:
     """写出 pilot_paper 结果分析表和失败案例图。"""
 
     root_path = Path(root).resolve()
     paper_run = build_paper_run_config(root_path)
-    output_path = ensure_output_dir_under_outputs(root_path, output_dir)
-    resolved_result_records_path = resolve_input_path(root_path, result_records_path)
-    resolved_real_attack_path = resolve_input_path(root_path, real_attack_formal_records_path)
-    resolved_conventional_attack_path = resolve_input_path(root_path, conventional_attack_formal_records_path)
+    output_path = ensure_output_dir_under_outputs(
+        root_path,
+        output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name,
+    )
+    resolved_result_records_path = resolve_input_path(
+        root_path,
+        result_records_path
+        or DEFAULT_RESULT_RECORDS_ROOT / paper_run.run_name / "pilot_paper_result_records.jsonl",
+    )
+    resolved_attack_records_path = resolve_input_path(
+        root_path,
+        attack_detection_records_path
+        or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "attack_detection_records.jsonl",
+    )
 
     result_records = read_jsonl_rows(resolved_result_records_path)
-    formal_detection_records = read_jsonl_rows(resolved_real_attack_path) + read_jsonl_rows(resolved_conventional_attack_path)
+    formal_detection_records = read_jsonl_rows(resolved_attack_records_path)
     confidence_interval_rows = build_confidence_interval_rows(result_records)
     superiority_rows = build_per_attack_superiority_rows(result_records)
     template_coverage = build_result_template_coverage(result_records)
@@ -475,6 +558,22 @@ def write_pilot_paper_result_analysis_outputs(
     write_jsonl(failure_records_path, failure_rows)
     failure_figure_path.write_text(build_failure_case_svg(root_path, output_path, failure_rows), encoding="utf-8")
 
+    per_attack_ci_coverage_ready = bool(confidence_interval_rows) and bool(
+        template_coverage["result_template_coverage_ready"]
+        and len(confidence_interval_rows) == template_coverage["expected_result_record_count"]
+        and all(_confidence_interval_row_ready(row) for row in confidence_interval_rows)
+    )
+    per_attack_superiority_evaluation_ready = bool(superiority_rows) and bool(
+        template_coverage["result_template_coverage_ready"]
+        and len(superiority_rows) == template_coverage["expected_superiority_row_count"]
+        and all(_superiority_evaluation_row_ready(row) for row in superiority_rows)
+    )
+    superiority_claim_ready_count = sum(1 for row in superiority_rows if row["superiority_claim_ready"])
+    universal_per_attack_superiority_claim_ready = bool(
+        per_attack_superiority_evaluation_ready
+        and superiority_claim_ready_count == len(superiority_rows)
+    )
+
     summary = {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -483,14 +582,15 @@ def write_pilot_paper_result_analysis_outputs(
         "result_record_count": len(result_records),
         "confidence_interval_row_count": len(confidence_interval_rows),
         "per_attack_superiority_row_count": len(superiority_rows),
-        "superiority_claim_ready_count": sum(1 for row in superiority_rows if row["superiority_claim_ready"]),
+        "superiority_claim_ready_count": superiority_claim_ready_count,
+        "per_attack_ci_coverage_ready": per_attack_ci_coverage_ready,
+        "per_attack_superiority_evaluation_ready": per_attack_superiority_evaluation_ready,
+        "universal_per_attack_superiority_claim_ready": universal_per_attack_superiority_claim_ready,
         "failure_case_record_count": len(failure_rows),
         "failure_case_figure_ready": failure_figure_path.is_file(),
         **template_coverage,
-        "supports_paper_claim": bool(superiority_rows)
-        and template_coverage["result_template_coverage_ready"]
-        and len(superiority_rows) == template_coverage["expected_superiority_row_count"]
-        and all(row["superiority_claim_ready"] for row in superiority_rows),
+        "supports_paper_claim": per_attack_ci_coverage_ready
+        and per_attack_superiority_evaluation_ready,
     }
     write_json(summary_path, summary)
     manifest = build_artifact_manifest(
@@ -498,8 +598,7 @@ def write_pilot_paper_result_analysis_outputs(
         artifact_type="local_manifest",
         input_paths=(
             relative_or_absolute(resolved_result_records_path, root_path),
-            relative_or_absolute(resolved_real_attack_path, root_path),
-            relative_or_absolute(resolved_conventional_attack_path, root_path),
+            relative_or_absolute(resolved_attack_records_path, root_path),
         ),
         output_paths=(
             relative_or_absolute(confidence_interval_path, root_path),
@@ -527,17 +626,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="重建 pilot_paper 论文结果分析表与失败案例图。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
-    parser.add_argument("--result-records-path", default=str(DEFAULT_RESULT_RECORDS_PATH), help="pilot_paper 结果记录 JSONL。")
     parser.add_argument(
-        "--real-attack-formal-records-path",
-        default=str(DEFAULT_REAL_ATTACK_FORMAL_RECORDS_PATH),
-        help="真实再扩散攻击正式检测记录 JSONL。",
+        "--output-dir",
+        default=None,
+        help="输出目录; 默认写入 outputs/pilot_paper_result_analysis/<paper_run_name>。",
     )
     parser.add_argument(
-        "--conventional-attack-formal-records-path",
-        default=str(DEFAULT_CONVENTIONAL_ATTACK_FORMAL_RECORDS_PATH),
-        help="常规失真与几何攻击正式检测记录 JSONL。",
+        "--result-records-path",
+        default=None,
+        help="当前论文运行的受治理结果记录 JSONL。",
+    )
+    parser.add_argument(
+        "--attack-detection-records-path",
+        default=None,
+        help="当前论文运行攻击矩阵中的统一真实检测记录 JSONL。",
     )
     parser.add_argument("--failure-case-limit", type=int, default=12, help="失败案例图最多展示的样本数。")
     return parser
@@ -551,8 +653,7 @@ def main() -> None:
         root=args.root,
         output_dir=args.output_dir,
         result_records_path=args.result_records_path,
-        real_attack_formal_records_path=args.real_attack_formal_records_path,
-        conventional_attack_formal_records_path=args.conventional_attack_formal_records_path,
+        attack_detection_records_path=args.attack_detection_records_path,
         failure_case_limit=args.failure_case_limit,
     )
     print(stable_json_text(manifest), end="")

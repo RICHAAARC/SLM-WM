@@ -67,7 +67,7 @@ def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_p
     write_pilot_paper_prompts(repo_root)
 
     manifest = write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
-    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_common_protocol"
+    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_common_protocol" / "pilot_paper"
     summary = json.loads((output_dir / "pilot_paper_common_protocol_summary.json").read_text(encoding="utf-8"))
     prompt_summary = json.loads((output_dir / "pilot_paper_prompt_split_summary.json").read_text(encoding="utf-8"))
     schema = json.loads((output_dir / "pilot_paper_result_import_schema.json").read_text(encoding="utf-8"))
@@ -107,6 +107,11 @@ def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_p
     assert {row["fixed_fpr_protocol_digest"] for row in method_rows} == {schema["fixed_fpr_protocol_digest"]}
     assert all(row["target_fpr"] == 0.01 for row in template_rows)
     assert all(row["result_claim_scope"] == "pilot_claim" for row in template_rows)
+    assert all(
+        row["required_result_record_path"]
+        == "outputs/pilot_paper_fixed_fpr_results/pilot_paper/pilot_paper_result_records.jsonl"
+        for row in template_rows
+    )
     assert all("true_positive_rate_ci_low" in row["required_metric_fields"] for row in template_rows)
     assert all(path.startswith("outputs/") for path in manifest["output_paths"])
 
@@ -218,7 +223,7 @@ def test_writer_switches_common_protocol_to_full_paper_without_logic_fork(
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
 
     write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
-    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_common_protocol"
+    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_common_protocol" / "full_paper"
     summary = json.loads((output_dir / "pilot_paper_common_protocol_summary.json").read_text(encoding="utf-8"))
     prompt_summary = json.loads((output_dir / "pilot_paper_prompt_split_summary.json").read_text(encoding="utf-8"))
     schema = json.loads((output_dir / "pilot_paper_result_import_schema.json").read_text(encoding="utf-8"))
@@ -255,7 +260,7 @@ def test_writer_switches_common_protocol_to_probe_paper_without_logic_fork(
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
 
     write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
-    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_common_protocol"
+    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_common_protocol" / "probe_paper"
     summary = json.loads((output_dir / "pilot_paper_common_protocol_summary.json").read_text(encoding="utf-8"))
     prompt_summary = json.loads((output_dir / "pilot_paper_prompt_split_summary.json").read_text(encoding="utf-8"))
     schema = json.loads((output_dir / "pilot_paper_result_import_schema.json").read_text(encoding="utf-8"))

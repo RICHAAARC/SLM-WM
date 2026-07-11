@@ -16,6 +16,8 @@ class AuditInputBundle:
 
     threshold_report: dict[str, Any]
     threshold_manifest: dict[str, Any]
+    threshold_audit_report: dict[str, Any]
+    threshold_audit_manifest: dict[str, Any]
     attack_manifest: dict[str, Any]
     attack_matrix_manifest: dict[str, Any]
     baseline_manifest: dict[str, Any]
@@ -131,6 +133,18 @@ def _fixed_fpr_and_rescue_boundary_ready(threshold_report: dict[str, Any], attac
     )
 
 
+def _threshold_audit_ready(bundle: AuditInputBundle) -> bool:
+    """判断主方法与四个 baseline 是否全部通过独立 fixed-FPR 重算。"""
+
+    report = bundle.threshold_audit_report
+    return (
+        report.get("method_identity_ready") is True
+        and report.get("all_method_thresholds_ready") is True
+        and report.get("fixed_fpr_threshold_audit_ready") is True
+        and report.get("supports_paper_claim") is True
+    )
+
+
 def _dataset_level_quality_blockers(dataset_quality_summary: dict[str, Any]) -> list[str]:
     """生成数据集级质量指标的当前阻断项。"""
 
@@ -193,6 +207,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     ablation = bundle.ablation_claim_summary
     full_ready = (
         _yes(threshold.get("full_method_claim_ready"))
+        and _threshold_audit_ready(bundle)
         and _yes(attack.get("full_method_claim_ready"))
         and _image_only_detector_ready(threshold)
         and _scientific_operator_ready(threshold)
@@ -221,7 +236,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "method_metric",
             "raw content 分支具备 fixed-FPR 校准边界。",
             "engineering_supported_not_paper_final",
-            _source(bundle, "threshold_report", "outputs/threshold_calibration/threshold_degeneracy_report.json"),
+            _source(bundle, "threshold_report", "threshold_report"),
             [] if _yes(threshold.get("raw_content_claim_ready")) else ["raw_content_claim_not_ready"],
         ),
         _row(
@@ -229,7 +244,11 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "method_metric",
             "完整 SLM-WM 方法满足 fixed-FPR 统计边界。",
             "paper_supported" if full_ready else "unsupported",
-            _source(bundle, "threshold_report", "outputs/threshold_calibration/threshold_degeneracy_report.json"),
+            _source(
+                bundle,
+                "threshold_audit_report",
+                "threshold_audit_report",
+            ),
             [] if full_ready else ["full_method_claim_ready_false", "image_only_detector_boundary_not_ready"],
             paper_claim_supported=full_ready,
         ),
@@ -238,7 +257,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "robustness",
             "SLM-WM 在共同攻击矩阵下具有稳健检测表现。",
             "paper_supported" if attack_ready else "preview_only",
-            _source(bundle, "attack_manifest", "outputs/attack_matrix/attack_manifest.json"),
+            _source(bundle, "attack_manifest", "attack_manifest"),
             attack_blockers,
             paper_claim_supported=attack_ready,
         ),
@@ -256,7 +275,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "ablation",
             "语义路由、Jacobian Null Space、空间 LF、幅值尾部稳健载体和注意力几何均为必要机制。",
             "paper_supported" if ablation_claim_ready else "preview_only",
-            _source(bundle, "ablation_claim_summary", "outputs/internal_ablation_evidence/ablation_claim_summary.json"),
+            _source(bundle, "ablation_claim_summary", "ablation_claim_summary"),
             [] if ablation_claim_ready else ["ablation_claim_gate_not_ready"],
             paper_claim_supported=ablation_claim_ready,
         ),
@@ -265,7 +284,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "quality",
             "真实 clean/watermarked 图像对的 pair-level 质量指标可被下游审计。",
             "engineering_supported_not_paper_final",
-            _source(bundle, "quality_metrics_summary", "outputs/threshold_calibration/quality_metrics_summary.csv"),
+            _source(bundle, "quality_metrics_summary", "quality_metrics_summary"),
             [] if _yes(threshold.get("perceptual_metrics_ready")) else ["perceptual_metrics_missing"],
         ),
         _row(
@@ -273,7 +292,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "quality",
             "数据集级 FID / KID 由正式特征后端和完整成组图像集合计算。",
             "paper_supported" if dataset_quality_ready else "engineering_supported_not_paper_final",
-            _source(bundle, "dataset_quality_summary", "outputs/dataset_level_quality/dataset_quality_summary.json"),
+            _source(bundle, "dataset_quality_summary", "dataset_quality_summary"),
             _dataset_level_quality_blockers(dataset_quality),
             paper_claim_supported=dataset_quality_ready,
         ),
@@ -282,7 +301,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             "submission_readiness",
             "当前仓库已具备投稿冻结所需的完整证据。",
             "paper_supported" if submission_core_ready else "unsupported",
-            "outputs/paper_artifact_evidence_audit/submission_blocker_report.json",
+            "submission_blocker_report",
             []
             if submission_core_ready
             else [
@@ -331,6 +350,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
     ablation = bundle.ablation_claim_summary
     full_ready = (
         _yes(threshold.get("full_method_claim_ready"))
+        and _threshold_audit_ready(bundle)
         and _image_only_detector_ready(threshold)
         and _scientific_operator_ready(threshold)
         and _runtime_sample_scale_ready(threshold)
@@ -349,8 +369,12 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             "table",
             "fixed-FPR operating point 表",
             [
-                _source(bundle, "fixed_fpr_operating_points", "outputs/threshold_calibration/fixed_fpr_operating_points.csv"),
-                _source(bundle, "threshold_report", "outputs/threshold_calibration/threshold_degeneracy_report.json"),
+                _source(bundle, "fixed_fpr_operating_points", "fixed_fpr_operating_points"),
+                _source(
+                    bundle,
+                    "threshold_audit_report",
+                    "threshold_audit_report",
+                ),
             ],
             "rebuildable_paper_claim" if full_ready else "rebuildable_preview",
             full_ready,
@@ -360,7 +384,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             "table_main_method_metrics",
             "table",
             "主方法检测指标表",
-            [_source(bundle, "standard_watermark_metrics", "outputs/threshold_calibration/standard_watermark_metrics.csv")],
+            [_source(bundle, "standard_watermark_metrics", "standard_watermark_metrics")],
             "rebuildable_paper_claim" if full_ready else "rebuildable_preview",
             full_ready,
             [] if full_ready else ["full_method_claim_ready_false"],
@@ -369,7 +393,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             "table_attack_robustness",
             "table",
             "攻击鲁棒性表",
-            [_source(bundle, "attack_family_metrics", "outputs/attack_matrix/attack_family_metrics.csv")],
+            [_source(bundle, "attack_family_metrics", "attack_family_metrics")],
             "rebuildable_paper_claim" if attack_ready else "rebuildable_preview",
             attack_ready,
             attack_blockers,
@@ -387,7 +411,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             "table_internal_ablation",
             "table",
             "内部机制消融表",
-            [_source(bundle, "mechanism_ablation_table", "outputs/internal_ablation_evidence/mechanism_ablation_table.csv")],
+            [_source(bundle, "mechanism_ablation_table", "mechanism_ablation_table")],
             "rebuildable_paper_claim" if ablation_claim_ready else "rebuildable_preview",
             ablation_claim_ready,
             [] if ablation_claim_ready else ["ablation_claim_gate_not_ready"],
@@ -397,8 +421,8 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             "table",
             "图像质量与感知指标表",
             [
-                _source(bundle, "quality_metrics_summary", "outputs/threshold_calibration/quality_metrics_summary.csv"),
-                _source(bundle, "dataset_quality_metrics", "outputs/dataset_level_quality/dataset_quality_metrics.csv"),
+                _source(bundle, "quality_metrics_summary", "quality_metrics_summary"),
+                _source(bundle, "dataset_quality_metrics", "dataset_quality_metrics"),
             ],
             "rebuildable_paper_claim" if dataset_quality_ready else "rebuildable_preview",
             dataset_quality_ready,
@@ -415,6 +439,7 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
     ablation = bundle.ablation_claim_summary
     full_ready = (
         _yes(threshold.get("full_method_claim_ready"))
+        and _threshold_audit_ready(bundle)
         and _image_only_detector_ready(threshold)
         and _scientific_operator_ready(threshold)
         and _runtime_sample_scale_ready(threshold)
@@ -427,7 +452,7 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
             "figure_score_distribution",
             "figure_data",
             "score distribution 图数据",
-            [_source(bundle, "score_distribution_table", "outputs/threshold_calibration/score_distribution_table.csv")],
+            [_source(bundle, "score_distribution_table", "score_distribution_table")],
             "rebuildable_paper_claim" if full_ready else "rebuildable_preview",
             full_ready,
             [] if full_ready else ["formal_image_only_runtime_not_ready"],
@@ -437,8 +462,8 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
             "figure_data",
             "ROC / DET 图数据",
             [
-                _source(bundle, "roc_curve_points", "outputs/threshold_calibration/roc_curve_points.csv"),
-                _source(bundle, "det_curve_points", "outputs/threshold_calibration/det_curve_points.csv"),
+                _source(bundle, "roc_curve_points", "roc_curve_points"),
+                _source(bundle, "det_curve_points", "det_curve_points"),
             ],
             "rebuildable_paper_claim" if full_ready else "rebuildable_preview",
             full_ready,
@@ -449,8 +474,8 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
             "figure_data",
             "攻击鲁棒性图数据",
             [
-                _source(bundle, "attack_strength_curve", "outputs/attack_matrix/attack_strength_curve.csv"),
-                _source(bundle, "attack_family_metrics", "outputs/attack_matrix/attack_family_metrics.csv"),
+                _source(bundle, "attack_strength_curve", "attack_strength_curve"),
+                _source(bundle, "attack_family_metrics", "attack_family_metrics"),
             ],
             "rebuildable_paper_claim" if attack_ready else "rebuildable_preview",
             attack_ready,
@@ -460,7 +485,7 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
             "figure_ablation_delta",
             "figure_data",
             "内部消融 delta 图数据",
-            [_source(bundle, "method_pairwise_delta_table", "outputs/internal_ablation_evidence/method_pairwise_delta_table.csv")],
+            [_source(bundle, "method_pairwise_delta_table", "method_pairwise_delta_table")],
             "rebuildable_paper_claim" if ablation_claim_ready else "rebuildable_preview",
             ablation_claim_ready,
             [] if ablation_claim_ready else ["ablation_claim_gate_not_ready"],
@@ -495,7 +520,7 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "related_artifacts": _source(
                     bundle,
                     "attacked_image_registry",
-                    "outputs/image_only_dataset_runtime/pilot_paper/image_only_detection_records.jsonl",
+                    "attacked_image_registry",
                 ),
                 "closes_claim_ids": "claim_attack_robustness_under_common_matrix",
                 "recommended_order": 1,
@@ -512,7 +537,7 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "related_artifacts": _source(
                     bundle,
                     "attack_family_metrics",
-                    "outputs/image_only_dataset_runtime/pilot_paper/test_detection_metrics.csv",
+                    "attack_family_metrics",
                 ),
                 "closes_claim_ids": "claim_attack_robustness_under_common_matrix",
                 "recommended_order": 2,
@@ -539,13 +564,16 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "gap_area": "statistical_power",
                 "blocker_severity": "critical",
                 "required_action": "按当前运行层级完整执行 70/700/7000 Prompt, 并保持 34/340/3400 个 test Prompt 的冻结划分。",
-                "related_artifacts": "outputs/image_only_dataset_runtime;outputs/formal_mechanism_ablation",
+                "related_artifacts": "image_only_dataset_runtime;formal_mechanism_ablation",
                 "closes_claim_ids": "claim_full_method_fixed_fpr_boundary;claim_submission_ready_package",
                 "recommended_order": 4,
                 "supports_paper_claim": False,
             }
         )
-    if not _fixed_fpr_and_rescue_boundary_ready(threshold, attack):
+    if not (
+        _fixed_fpr_and_rescue_boundary_ready(threshold, attack)
+        and _threshold_audit_ready(bundle)
+    ):
         rows.append(
             {
                 "gap_id": "gap_full_method_fixed_fpr_recalibration",
@@ -554,8 +582,8 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "required_action": "在仅图像检测和真实攻击闭环上重新冻结包含几何救回的完整 fixed-FPR 判定。",
                 "related_artifacts": _source(
                     bundle,
-                    "threshold_report",
-                    "outputs/image_only_dataset_runtime/pilot_paper/dataset_runtime_summary.json",
+                    "threshold_audit_report",
+                    "threshold_audit_report",
                 ),
                 "closes_claim_ids": "claim_full_method_fixed_fpr_boundary",
                 "recommended_order": 5,
@@ -575,7 +603,7 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "related_artifacts": _source(
                     bundle,
                     "ablation_claim_summary",
-                    "outputs/formal_mechanism_ablation/ablation_claim_summary.json",
+                    "ablation_claim_summary",
                 ),
                 "closes_claim_ids": "claim_internal_mechanism_necessity;claim_submission_ready_package",
                 "recommended_order": 6,
@@ -589,7 +617,7 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "gap_area": "quality_metrics",
                 "blocker_severity": "major",
                 "required_action": "在完整 clean/watermarked 图像集合上使用正式 Inception 特征后端计算 FID / KID。",
-                "related_artifacts": _source(bundle, "dataset_quality_metrics", "outputs/dataset_level_quality/dataset_quality_metrics.csv"),
+                "related_artifacts": _source(bundle, "dataset_quality_metrics", "dataset_quality_metrics"),
                 "closes_claim_ids": "claim_dataset_level_quality_boundary;claim_quality_preservation_pair_metrics",
                 "recommended_order": 7,
                 "supports_paper_claim": False,

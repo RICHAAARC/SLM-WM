@@ -16,6 +16,10 @@ from external_baseline.primary.sd35_method_faithful_common import (
     canonical_attack_name,
     supported_formal_image_attack_names,
 )
+from paper_experiments.runners.closure_package_selection import (
+    CLOSURE_PACKAGE_FAMILY_SPECS,
+    inspect_closure_package,
+)
 from paper_experiments.runners.external_baseline_method_faithful import (
     DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
     METHOD_FAITHFUL_BASELINE_IDS,
@@ -28,6 +32,9 @@ from paper_experiments.runners.external_baseline_method_faithful import (
     validate_formal_run_config,
     write_baseline_transfer_files,
 )
+
+
+PACKAGE_TEST_CODE_VERSION = "b370425"
 
 
 pytestmark = pytest.mark.quick
@@ -289,7 +296,7 @@ def test_run_directory_preparation_removes_only_selected_baseline_state(tmp_path
 def prepare_package_source(root: Path, baseline_id: str, *, run_decision: str = "pass") -> None:
     """写出白名单打包所需的单 baseline 最小产物。"""
 
-    output_root = root / "outputs" / "external_baseline_method_faithful"
+    output_root = root / "outputs" / "external_baseline_method_faithful" / "pilot_paper"
     run_dir = output_root / "run_records" / baseline_id
     split_dir = output_root / "split_observations"
     write_json(
@@ -297,25 +304,58 @@ def prepare_package_source(root: Path, baseline_id: str, *, run_decision: str = 
         {
             "run_decision": run_decision,
             "external_baseline_method_faithful_ready": run_decision == "pass",
+            "primary_baseline_adapter_ready": run_decision == "pass",
+            "primary_baseline_id": baseline_id,
+            "paper_run_name": "pilot_paper",
+            "target_fpr": 0.01,
         },
     )
-    write_json(run_dir / f"{baseline_id}_manifest.local.json", {"baseline_id": baseline_id})
+    code_version = PACKAGE_TEST_CODE_VERSION
+    write_json(
+        run_dir / f"{baseline_id}_manifest.local.json",
+        {
+            "code_version": code_version,
+            "config": {
+                "prompt_set": "pilot_paper",
+                "target_fpr": 0.01,
+                "primary_baseline_id": baseline_id,
+            },
+        },
+    )
     write_json(split_dir / f"{baseline_id}_baseline_observations.json", [{"baseline_id": baseline_id}])
     write_json(split_dir / f"{baseline_id}_baseline_command_results.json", [{"baseline_id": baseline_id}])
     write_json(
         split_dir / f"{baseline_id}_baseline_transfer_manifest.json",
-        {"baseline_id": baseline_id, "transfer_ready": True},
+        {
+            "baseline_id": baseline_id,
+            "paper_run_name": "pilot_paper",
+            "target_fpr": 0.01,
+            "code_version": code_version,
+            "transfer_ready": True,
+        },
     )
 
 
-def test_packages_are_baseline_isolated_and_failure_is_not_packaged(tmp_path: Path) -> None:
+def test_packages_are_baseline_isolated_and_failure_is_not_packaged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """不同 baseline 包不得包含同名业务产物，失败运行不得打包。"""
 
+    monkeypatch.setattr(
+        "paper_experiments.runners.external_baseline_method_faithful.resolve_code_version",
+        lambda _root: PACKAGE_TEST_CODE_VERSION,
+    )
     drive_dir = tmp_path / "drive"
     archive_entries: list[set[str]] = []
-    for baseline_id in ("tree_ring", "gaussian_shading"):
+    specs = {
+        spec.baseline_id: spec
+        for spec in CLOSURE_PACKAGE_FAMILY_SPECS
+        if spec.package_family.startswith("method_faithful_")
+    }
+    for baseline_id in METHOD_FAITHFUL_BASELINE_IDS:
         prepare_package_source(tmp_path, baseline_id)
-        archive_name = f"external_baseline_method_faithful_package_{baseline_id}.zip"
+        archive_name = f"external_baseline_method_faithful_package_{baseline_id}_test.zip"
         record = package_external_baseline_method_faithful_outputs(
             root=tmp_path,
             drive_output_dir=str(drive_dir),
@@ -324,14 +364,25 @@ def test_packages_are_baseline_isolated_and_failure_is_not_packaged(tmp_path: Pa
         )
         with ZipFile(tmp_path / record.archive_path) as archive:
             archive_entries.append(set(archive.namelist()))
-    assert archive_entries[0].isdisjoint(archive_entries[1])
+        candidate = inspect_closure_package(
+            tmp_path / record.archive_path,
+            spec=specs[baseline_id],
+            paper_run_name="pilot_paper",
+            target_fpr=0.01,
+        )
+        assert candidate.package_family == f"method_faithful_{baseline_id}"
+    assert all(
+        left.isdisjoint(right)
+        for index, left in enumerate(archive_entries)
+        for right in archive_entries[index + 1 :]
+    )
 
     prepare_package_source(tmp_path, "shallow_diffuse", run_decision="fail")
     with pytest.raises(RuntimeError, match="不得生成正式结果包"):
         package_external_baseline_method_faithful_outputs(
             root=tmp_path,
             drive_output_dir=str(drive_dir),
-            archive_name="external_baseline_method_faithful_package_shallow_diffuse.zip",
+            archive_name="external_baseline_method_faithful_package_shallow_diffuse_test.zip",
             baseline_id="shallow_diffuse",
         )
 

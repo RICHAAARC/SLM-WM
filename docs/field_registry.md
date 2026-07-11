@@ -874,12 +874,15 @@ Notebook 与 repository module 的跨边界数据
 | dataset_quality_summary_path | artifact | none | false | false | false | 数据集级质量摘要 JSON 路径。 |
 | dataset_quality_formal_metrics_path | artifact | none | false | false | false | 只包含正式 FID / KID 行的数据集级质量指标表路径。 |
 | dataset_quality_formal_feature_import_report_path | artifact | none | false | false | false | 数据集级质量正式特征导入报告路径。 |
+| dataset_quality_formal_feature_records_path | artifact | none | false | false | false | 当前论文运行目录内规范化保存的正式 Inception 特征 JSONL 路径。 |
 | dataset_quality_image_role | protocol | none | true | false | false | 数据集级质量正式特征记录对应 source 或 comparison 图像角色。 |
 | feature_vector | artifact | none | true | false | false | 由 Inception 或论文约定视觉特征后端导出的单张图像特征向量。 |
-| input_feature_record_count | metric | none | false | false | false | 数据集级质量正式特征导入记录输入数量。 |
+| formal_feature_record_count | metric | none | false | false | false | 规范正式特征 JSONL 的记录数量, 必须等于当前 Prompt 数量的2倍。 |
+| expected_feature_pair_count | metric | none | false | false | false | 当前论文运行层级要求完整覆盖的 source / comparison 特征配对数量。 |
 | accepted_feature_pair_count | metric | none | false | false | false | 可用于正式 FID / KID 协议的 source / comparison 特征配对数量。 |
 | missing_feature_pair_count | metric | none | false | false | false | 正式特征导入中缺失 source 或 comparison 特征的图像对数量。 |
-| formal_feature_issue_count | metric | none | false | false | false | 正式特征导入 schema 检查发现的问题数量。 |
+| feature_issue_count | metric | none | false | false | false | 正式特征导入 schema 检查发现的问题数量。 |
+| formal_feature_records_sha256 | provenance | none | false | false | false | 当前 run 规范正式特征 JSONL 文件的字节级 SHA-256。 |
 | feature_dimension | metric | none | false | false | false | 正式特征记录中的视觉特征维度。 |
 | formal_feature_backend_ready | governance | none | false | false | false | 数据集级质量正式视觉特征后端是否已导入并通过 schema 检查。 |
 | formal_sample_scale_ready | governance | none | false | false | false | 数据集级质量正式 FID / KID 是否具备足够样本规模。 |
@@ -1245,7 +1248,7 @@ Notebook 与 repository module 的跨边界数据
 | missing_formal_evidence_collection_task_count | metric | none | false | false | false | 仍需补齐正式证据记录的主表 external baseline 任务数量。 |
 | primary_baseline_formal_evidence_collection_ready | governance | none | false | false | false | 四个主表 external baseline 是否全部完成正式证据收集。 |
 | required_collection_actions | protocol | none | false | false | false | 正式证据收集计划中对缺失模板给出的后续补证动作集合。 |
-| required_result_record_path | artifact | none | false | false | false | 正式证据收集计划要求写入或导入的 baseline 结果记录路径。 |
+| required_result_record_path | artifact | none | false | false | false | 正式模板或证据收集计划要求写入或导入的当前 `paper_run_name` 独占结果记录路径。 |
 | formal_evidence_collection_plan_digest | artifact | none | false | false | false | 主表 external baseline 正式证据收集计划的稳定摘要。 |
 | formal_evidence_collection_summary_digest | artifact | none | false | false | false | 主表 external baseline 正式证据收集摘要的稳定摘要。 |
 | adapter_boundary | governance | none | false | false | false | adapter observation 或 manifest 对工程 smoke 与正式论文证据边界的说明。|
@@ -1279,6 +1282,17 @@ Notebook 与 repository module 的跨边界数据
 | risk_profile_counts | protocol | none | false | false | false | 按 risk_profile 聚合的 prompt 数量。|
 | calibration_clean_negative_count | metric | none | false | false | false | fixed-FPR 校准 split 中 clean negative 样本数量。|
 | test_clean_negative_count | metric | none | false | false | false | fixed-FPR 测试 split 中 clean negative 样本数量。|
+| protocol_target_ready | governance | none | true | false | false | 单方法阈值审计中的目标 FPR 是否与当前论文运行协议完全一致。 |
+| protocol_value_ready | governance | none | true | false | false | 单方法阈值及其摘要是否与从 calibration clean negative 独立重算的结果完全一致。 |
+| detection_decision_ready | governance | none | true | false | false | observation 的逐条检测判定是否与独立重算的冻结阈值判定完全一致。 |
+| split_count_ready | governance | none | true | false | false | 单方法 calibration 与 test clean negative 数量是否与当前论文层级的固定划分完全一致。 |
+| fixed_fpr_threshold_ready | governance | none | true | false | false | 单方法是否通过目标值、阈值重算、逐条判定与样本数量联合门禁。 |
+| expected_method_ids | protocol | none | false | false | false | 统一 fixed-FPR 阈值审计必须覆盖的精确方法标识集合。 |
+| audited_method_ids | protocol | none | false | false | false | 统一 fixed-FPR 阈值审计实际覆盖的方法标识序列。 |
+| audited_method_count | metric | none | false | false | false | 统一 fixed-FPR 阈值审计实际核验的方法数量。 |
+| method_identity_ready | governance | none | false | false | false | 实际方法标识是否无重复且与受治理方法集合完全相等。 |
+| all_method_thresholds_ready | governance | none | false | false | false | 主方法与四个外部 baseline 是否全部通过各自的独立阈值重算门禁。 |
+| fixed_fpr_threshold_audit_ready | governance | none | false | false | false | 五个方法的身份、目标 FPR、冻结阈值和逐条判定是否共同完成正式证据审计。 |
 | pilot_paper_common_protocol_ready | governance | none | false | false | false | pilot_paper 级 fixed-FPR 共同协议是否完成运行前治理冻结。|
 | pilot_paper_prompt_count | metric | none | false | false | false | pilot_paper prompt split 中的 prompt 数量。|
 | pilot_paper_prompt_split_ready | governance | none | false | false | false | pilot_paper prompt split 是否可供共同协议使用。|
@@ -1403,6 +1417,14 @@ Notebook 与 repository module 的跨边界数据
 | missing_result_record_count | metric | none | true | false | false | 五种方法的正式 method × attack 模板中缺失的记录数。|
 | unexpected_result_record_count | metric | none | true | false | false | 不属于当前正式 method × attack 模板的记录键数。|
 | result_template_coverage_ready | governance | none | true | false | false | 结果记录是否无缺失、无额外且无重复地覆盖正式 method × attack 模板。|
+| confidence_interval_row_count | metric | none | true | false | false | 结果分析表中完成披露的 method × attack 置信区间行数。|
+| per_attack_superiority_row_count | metric | none | true | false | false | 逐攻击表中 SLM-WM 与当前攻击下最强主表 baseline 的比较行数。|
+| superiority_claim_ready_count | metric | none | true | false | false | 逐攻击比较中保守置信区间下达到显著优势的披露行数, 不作为完整分析闭合的必要条件。|
+| per_attack_ci_coverage_ready | governance | none | true | false | false | 所有正式结果记录是否均形成完整、自洽且可审计的逐攻击置信区间行。|
+| per_attack_superiority_evaluation_ready | governance | none | true | false | false | 每个正式攻击是否均形成可审计的 SLM-WM 与最强主表 baseline 比较行。|
+| universal_per_attack_superiority_claim_ready | governance | none | true | false | false | 是否每个正式攻击的保守置信区间均支持 SLM-WM 显著胜出; 该字段只限定全攻击普遍优势主张。|
+| failure_case_record_count | metric | none | true | false | false | 失败案例图绑定的真实攻击检测失败记录数量。|
+| failure_case_figure_ready | governance | none | true | false | false | 失败案例图是否已由受治理攻击记录和实际攻击图像重建。|
 | missing_result_record_examples | governance | none | true | false | false | 结果模板覆盖报告中的缺失键示例。|
 | unexpected_result_record_examples | governance | none | true | false | false | 结果模板覆盖报告中的额外键示例。|
 | prompt_split_ready | governance | none | false | false | false | prompt split 是否满足共同协议使用条件。|
@@ -1526,3 +1548,83 @@ Notebook 与 repository module 的跨边界数据
 | source_to_evaluated_ssim_mean | metric | none | true | true | false | 同一攻击与角色下 source-to-evaluated SSIM 均值。 |
 | source_to_evaluated_psnr_mean | metric | none | true | true | false | 同一攻击与角色下有限 PSNR 均值。 |
 | attacked_positive_source_to_attacked_ssim_mean | metric | none | true | true | false | 攻击后 watermarked positive 相对其未攻击 source 的 SSIM 均值。 |
+| package_family | provenance | none | true | false | false | CPU 论文闭合输入锁中记录的唯一上游结果包职责族。 |
+| package_path | artifact | none | true | false | false | CPU 论文闭合选择后冻结的上游 ZIP 显式绝对路径。 |
+| package_sha256 | provenance | none | true | false | false | CPU 论文闭合选择后冻结的上游 ZIP 文件 SHA-256。 |
+| closure_input_package_count | metric | none | true | false | false | CPU 论文闭合输入锁覆盖的互异结果包 family 数量, 正式值为10。 |
+| closure_input_packages | artifact | none | true | false | false | CPU 论文闭合输入锁冻结的 family、路径、摘要、论文层级、FPR、代码版本和生成时间记录集合。 |
+| closure_input_lock_digest | provenance | none | true | false | false | 对论文闭合输入锁核心内容执行规范序列化后得到的 SHA-256。 |
+| selected_package_paths | artifact | none | false | false | false | CPU 论文闭合 dry-run 报告返回的10个显式上游 ZIP 路径。 |
+| closure_input_lock_path | artifact | none | false | false | false | 当前论文运行层级的 CPU 闭合输入锁输出路径。 |
+| closure_input_lock_manifest_path | artifact | none | false | false | false | 当前论文运行层级输入锁独立 manifest 的输出路径。 |
+| closure_input_lock_written | governance | none | false | false | false | 当前选择调用是否请求并成功写出输入锁及其独立 manifest。 |
+| closure_input_selection_ready | governance | none | false | false | false | 10个结果包 family 是否均通过包内身份、白名单、CRC 和 ready 门禁。 |
+| closure_input_lock_ready | governance | none | false | false | false | 输入锁 manifest 是否绑定10个精确结果包及当前论文运行协议。 |
+| closure_input_lock_present | governance | none | false | false | false | 完整结果包生成前是否在当前论文运行层级目录发现 closure input lock。 |
+| closure_input_lock_manifest_ready | governance | none | false | false | false | 完整结果包复核是否确认 input lock manifest 的身份、输出路径、层级、FPR、数量和锁摘要完全一致。 |
+| closure_input_lock_digest_ready | governance | none | false | false | false | 完整结果包复算的 closure input lock 规范摘要是否等于锁中声明值。 |
+| closure_input_family_ready | governance | none | false | false | false | Closure input lock 是否恰好覆盖受治理的10个互异结果包 family。 |
+| closure_input_scope_ready | governance | none | false | false | false | Closure input lock 顶层与逐包记录的论文运行层级和目标 FPR 是否完全一致。 |
+| closure_input_explicit_paths_ready | governance | none | false | false | false | 完整结果包收到的显式 package paths 是否与 closure input lock 中的路径集合完全相等。 |
+| closure_input_package_digests_ready | governance | none | false | false | false | 完整结果包生成前重新计算的10个 ZIP 文件摘要是否与 closure input lock 完全一致。 |
+| closure_input_package_metadata_ready | governance | none | false | false | false | Closure input lock 的每个结果包是否都提供非空代码版本和生成时间。 |
+| result_closure_gate_report_path | artifact | none | false | false | false | 完整结果包绑定的当前论文运行层级 result closure gate 报告路径。 |
+| result_closure_gate_report_present | governance | none | false | false | false | 完整结果包生成前是否发现当前论文运行层级的 result closure gate 报告。 |
+| result_closure_gate_manifest_path | artifact | none | false | false | false | 完整结果包绑定的当前论文运行层级 result closure gate manifest 路径。 |
+| result_closure_gate_manifest_ready | governance | none | false | false | false | Result closure gate manifest 身份与报告、自身输出路径是否完全绑定。 |
+| payload_entry_paths | artifact | none | false | false | false | 完整结果包中除内部 package metadata 外的当前论文运行层级受治理文件路径集合。 |
+| payload_entry_count | metric | none | false | false | false | 完整结果包中除内部 package metadata 外的受治理文件数量。 |
+| entry_paths_digest | provenance | none | false | false | false | 完整结果包全部归档成员路径列表的稳定摘要。 |
+| archive_entry_digest | provenance | none | false | false | false | 完整结果包 readiness 中全部归档成员路径列表的稳定摘要。 |
+| explicit_package_paths | artifact | none | false | false | false | 完整结果包实际复核并物化的显式上游 ZIP 路径集合。 |
+| materialization_skipped | governance | none | false | false | false | 调用者是否显式要求复用已物化 outputs 并跳过 ZIP 条目提取。 |
+| closure_check_count | metric | none | false | false | false | 当前运行层级结果闭合语义门禁执行的检查总数。 |
+| blocked_check_count | metric | none | false | false | false | 结果闭合语义门禁中未通过的检查数量。 |
+| blocked_check_ids | governance | none | false | false | false | 结果闭合语义门禁中未通过检查的稳定标识集合。 |
+| checks | governance | none | false | false | false | 结果闭合报告保存的逐项语义门禁记录集合。 |
+| source_artifact_digests | provenance | none | false | false | false | 结果闭合报告对各类正式输入证据计算的稳定摘要映射。 |
+| result_closure_ready | governance | none | false | false | false | 当前运行层级的攻击、阈值、baseline、结果、消融、质量与投稿证据是否全部闭合。 |
+| closure_decision | governance | none | false | false | false | 结果闭合语义门禁的最终判定, 仅允许 pass 或 blocked。 |
+| expected_prompt_count | metric | none | false | false | false | 当前论文运行层级按冻结协议要求的完整 Prompt 数量。 |
+| expected_test_count | metric | none | false | false | false | 当前论文运行层级按冻结划分要求的完整 test Prompt 数量。 |
+| check_id | governance | none | true | false | false | 单项结果闭合语义检查的稳定标识。 |
+| check_area | governance | none | true | false | false | 单项结果闭合语义检查所属的证据领域。 |
+| check_status | governance | none | true | false | false | 单项结果闭合语义检查的 pass 或 blocked 状态。 |
+| source_artifacts | artifact | none | true | false | false | 单项结果闭合检查实际消费的受治理证据对象集合。 |
+| threshold_audit_digest | provenance | none | false | false | false | 五方法统一 fixed-FPR 阈值审计输入的稳定摘要。 |
+| baseline_comparison_digest | provenance | none | false | false | false | 外部 baseline 正式比较报告与 manifest 的稳定摘要。 |
+| result_records_digest | provenance | none | false | false | false | 当前运行层级正式结果 records 的稳定摘要。 |
+| common_protocol_digest | provenance | none | false | false | false | 当前运行层级共同协议 summary 与 schema 的稳定摘要。 |
+| result_analysis_digest | provenance | none | false | false | false | 当前运行层级论文结果分析 summary 的稳定摘要。 |
+| formal_ablation_digest | provenance | none | false | false | false | 当前运行层级正式重运行消融 summary 的稳定摘要。 |
+| formal_fid_kid_digest | provenance | none | false | false | false | 当前运行层级正式 FID/KID summary 的稳定摘要。 |
+| paper_evidence_audit_digest | provenance | none | false | false | false | 论文 claim 证据审计 builder 与 blocker 报告的稳定摘要。 |
+| submission_readiness_digest | provenance | none | false | false | false | 投稿就绪报告的稳定摘要。 |
+| entry_review_digest | provenance | none | false | false | false | 论文证据闭合入口审查报告的稳定摘要。 |
+| generation_latent_trace_required | protocol | none | true | false | false | 正式检测是否依赖生成 latent 轨迹; 仅图像盲检正式路径必须为 false。 |
+| expected_ablation_ids | protocol | none | false | false | false | 正式机制消融唯一允许的8项受治理标识序列。 |
+| actual_ablation_ids | protocol | none | false | false | false | 当前正式消融实际运行并汇总的机制标识序列。 |
+| ablation_spec_digest | provenance | none | false | false | false | 对实际消融配置完整字段序列计算的稳定摘要。 |
+| ablation_exact_set_ready | governance | none | false | false | false | 实际消融标识、顺序和配置摘要是否与唯一8项正式规范完全一致。 |
+| registry_prompt_count | metric | none | false | false | false | 数据集质量图像 registry 中实际出现的 Prompt 记录数量。 |
+| duplicate_registry_prompt_id_count | metric | none | false | false | false | 数据集质量 registry 中重复 Prompt 标识的数量。 |
+| missing_registry_prompt_id_count | metric | none | false | false | false | 当前受治理 Prompt 集中未被质量 registry 覆盖的标识数量。 |
+| unexpected_registry_prompt_id_count | metric | none | false | false | false | 质量 registry 中不属于当前受治理 Prompt 集的标识数量。 |
+| canonical_prompt_id_digest | provenance | none | false | false | false | 当前论文运行精确 Prompt 标识集合的稳定摘要。 |
+| registry_prompt_id_digest | provenance | none | false | false | false | 数据集质量 registry 实际 Prompt 标识集合的稳定摘要。 |
+| prompt_registry_exact_set_ready | governance | none | false | false | false | 质量 registry 是否无缺失、无额外、无重复地一对一覆盖当前 Prompt 集。 |
+| expected_prompt_id_digest | provenance | none | false | false | false | 结果闭合门禁从当前受治理 Prompt 文件独立重算的标识集合摘要。 |
+| dataset_quality_feature_records_sha256 | provenance | none | false | false | false | 结果闭合门禁对规范正式特征 JSONL 文件独立计算的字节摘要。 |
+| common_code_version | provenance | none | true | false | false | CPU 结果闭合输入锁中10个上游结果包共享的规范化 clean Git 提交标识。 |
+| closure_input_common_code_version_ready | governance | none | false | false | false | 完整结果打包前逐包代码版本是否均为同一规范化 clean Git 提交。 |
+| closure_source_file_sha256 | provenance | none | false | false | false | 结果闭合门禁全部实际读取文件的规范路径到文件字节 SHA-256 映射。 |
+| closure_source_file_digest | provenance | none | false | false | false | 对结果闭合门禁输入文件字节摘要映射执行规范序列化后得到的 SHA-256。 |
+| result_closure_gate_report_digest | provenance | none | false | false | false | 完整结果打包前从 gate manifest 读取并对 gate 报告重算的稳定摘要。 |
+| result_closure_gate_report_digest_ready | governance | none | false | false | false | Gate 报告当前内容的稳定摘要是否仍等于 gate manifest 绑定值。 |
+| result_closure_gate_source_file_digest | provenance | none | false | false | false | 完整结果打包前复核的 gate 全部输入文件字节摘要映射稳定摘要。 |
+| result_closure_gate_source_file_digest_ready | governance | none | false | false | false | Gate 报告声明的输入文件摘要映射 digest 是否可由映射本身重建。 |
+| result_closure_gate_source_files_ready | governance | none | false | false | false | 完整结果打包前重新读取的全部 gate 输入文件 SHA-256 是否与门禁时完全一致。 |
+| result_closure_gate_manifest_config_ready | governance | none | false | false | false | Gate manifest 的 config digest 是否绑定运行层级、FPR、样本规模、报告和输入文件摘要。 |
+| result_closure_gate_code_version_ready | governance | none | false | false | false | Gate manifest 代码版本是否为输入锁绑定的同一 clean Git 提交。 |
+| current_repository_code_version | provenance | none | false | false | false | 完整结果打包当下仓库的规范化 clean Git 提交标识。 |
+| current_repository_code_version_ready | governance | none | false | false | false | 完整结果打包当下仓库是否仍为输入锁绑定的同一 clean Git 提交且工作区无修改。 |

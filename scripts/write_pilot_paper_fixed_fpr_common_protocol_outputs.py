@@ -32,8 +32,8 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 
-DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_fixed_fpr_common_protocol")
-DEFAULT_CANDIDATE_RECORDS_PATH = Path("outputs/pilot_paper_fixed_fpr_results/pilot_paper_result_records.jsonl")
+DEFAULT_OUTPUT_ROOT = Path("outputs/pilot_paper_fixed_fpr_common_protocol")
+DEFAULT_RESULT_RECORD_ROOT = Path("outputs/pilot_paper_fixed_fpr_results")
 
 
 def stable_json_text(value: Any) -> str:
@@ -136,17 +136,24 @@ def serializable_attack_rows(rows: tuple[dict[str, Any], ...]) -> list[dict[str,
 def write_pilot_paper_fixed_fpr_common_protocol_outputs(
     *,
     root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    candidate_records_path: str | Path = DEFAULT_CANDIDATE_RECORDS_PATH,
+    output_dir: str | Path | None = None,
+    candidate_records_path: str | Path | None = None,
     require_existing_evidence: bool = False,
 ) -> dict[str, Any]:
     """写出当前论文运行层级 fixed-FPR 共同协议的运行前治理产物。"""
 
     root_path = Path(root).resolve()
-    output_path = ensure_output_dir_under_outputs(root_path, output_dir)
     config = build_paper_fixed_fpr_config(root_path)
+    output_path = ensure_output_dir_under_outputs(
+        root_path,
+        output_dir or DEFAULT_OUTPUT_ROOT / config.paper_run_name,
+    )
     prompt_path = resolve_input_path(root_path, config.prompt_file)
-    candidate_path = resolve_input_path(root_path, candidate_records_path)
+    candidate_path = resolve_input_path(
+        root_path,
+        candidate_records_path
+        or DEFAULT_RESULT_RECORD_ROOT / config.paper_run_name / "pilot_paper_result_records.jsonl",
+    )
 
     prompt_records = build_prompt_records(config.prompt_set, read_prompt_file(prompt_path))
     prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
@@ -284,11 +291,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="写出当前论文运行层级 fixed-FPR 共同协议产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="输出目录; 默认写入当前论文运行子目录, 且必须位于 outputs/ 下。",
+    )
     parser.add_argument(
         "--candidate-records-path",
-        default=str(DEFAULT_CANDIDATE_RECORDS_PATH),
-        help="待导入 pilot_paper 结果 JSONL 路径。",
+        default=None,
+        help="待导入论文结果 JSONL 路径; 默认读取当前论文运行子目录。",
     )
     parser.add_argument("--require-existing-evidence", action="store_true", help="校验 evidence_paths 指向的文件存在。")
     return parser

@@ -1,8 +1,7 @@
-"""在汇总服务器执行论文结果闭合。
+"""在 CPU 汇总服务器执行当前论文运行层级的结果闭合。
 
-该脚本面向独立 GPU 服务器体系: 计算服务器把各自结果包上传到本地交换目录,
-汇总服务器从该目录递归物化结果包并运行既有 result closure 命令。脚本不挂载
-Google Drive, 也不修改 Colab Notebook 的落盘路径。
+GPU 运行入口只负责产生受治理结果包。本脚本在汇总服务器校验并选择精确的
+10类输入包, 冻结输入锁, 再执行可脱离 Notebook 的论文证据闭合命令。
 """
 
 from __future__ import annotations
@@ -20,8 +19,10 @@ if str(ROOT) not in sys.path:
 
 from experiments.protocol.paper_run_config import RUN_DEFAULTS, build_paper_run_config, normalize_paper_run_name
 from paper_experiments.runners.paper_result_closure import (
-    build_paper_result_closure_preflight_report,
     run_paper_result_closure_commands,
+)
+from paper_experiments.runners.closure_package_selection import (
+    build_closure_input_selection_report,
 )
 
 
@@ -91,7 +92,6 @@ def execute_server_result_closure(
     """执行汇总服务器结果闭合。"""
 
     root_path = Path(root).resolve()
-    os.chdir(root_path)
     environment_report = configure_closure_environment(
         root=root_path,
         paper_run_name=paper_run_name,
@@ -100,23 +100,35 @@ def execute_server_result_closure(
     resolved_complete_output_dir = Path(complete_output_dir).expanduser()
     if not resolved_complete_output_dir.is_absolute():
         resolved_complete_output_dir = (Path(root).resolve() / resolved_complete_output_dir).resolve()
-    preflight_report = build_paper_result_closure_preflight_report(environment_report["package_search_root"])
-    plan = {
-        "server_result_closure_plan_ready": bool(preflight_report["closure_preflight_ready"]),
-        "environment_report": environment_report,
-        "complete_output_dir": resolved_complete_output_dir.as_posix(),
-        "preflight_report": preflight_report,
-        "dry_run": dry_run,
-    }
     if dry_run:
-        return plan
+        selection_report = build_closure_input_selection_report(
+            environment_report["package_search_root"],
+            paper_run_name=environment_report["paper_run"]["run_name"],
+            target_fpr=float(environment_report["target_fpr"]),
+            root=root_path,
+            write_lock=False,
+        )
+        return {
+            "server_result_closure_plan_ready": bool(
+                selection_report["closure_input_selection_ready"]
+            ),
+            "environment_report": environment_report,
+            "complete_output_dir": resolved_complete_output_dir.as_posix(),
+            "closure_input_selection_report": selection_report,
+            "dry_run": True,
+        }
     closure_result = run_paper_result_closure_commands(
         package_search_root=environment_report["package_search_root"],
         complete_drive_output_dir=resolved_complete_output_dir.as_posix(),
-        paper_run_name=paper_run_name,
+        paper_run_name=environment_report["paper_run"]["run_name"],
+        target_fpr=float(environment_report["target_fpr"]),
+        root=root_path,
     )
     return {
-        **plan,
+        "server_result_closure_plan_ready": True,
+        "environment_report": environment_report,
+        "complete_output_dir": resolved_complete_output_dir.as_posix(),
+        "dry_run": False,
         "closure_result": closure_result,
     }
 
@@ -126,10 +138,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="在汇总服务器执行论文结果闭合。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
-    parser.add_argument("--paper-run-name", default="full_paper", choices=sorted(RUN_DEFAULTS), help="论文运行层级。")
-    parser.add_argument("--package-search-root", required=True, help="三台计算服务器上传结果包后的本地交换目录。")
+    parser.add_argument(
+        "--paper-run-name",
+        required=True,
+        choices=sorted(RUN_DEFAULTS),
+        help="必须显式指定论文运行层级, 避免误用其他统计规模。",
+    )
+    parser.add_argument("--package-search-root", required=True, help="GPU 入口上传10类结果包后的本地交换目录。")
     parser.add_argument("--complete-output-dir", required=True, help="完整结果包输出目录, 推荐位于交换目录下。")
-    parser.add_argument("--dry-run", action="store_true", help="只检查输入包覆盖情况, 不执行闭合命令。")
+    parser.add_argument("--dry-run", action="store_true", help="精确校验并选择10类输入包, 但不写锁或执行闭合命令。")
     return parser
 
 
