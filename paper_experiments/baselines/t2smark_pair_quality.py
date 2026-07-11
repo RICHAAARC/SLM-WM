@@ -12,7 +12,7 @@ from typing import Any, Iterable
 
 from PIL import Image
 
-from experiments.runtime.diffusion.sd3_pipeline_runtime import compute_image_quality_metrics
+from experiments.runtime.image_metrics import compute_image_quality_metrics
 from main.core.digest import build_stable_digest
 
 

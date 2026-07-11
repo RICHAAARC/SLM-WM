@@ -107,7 +107,7 @@
 
 1. 配置当前 `SLM_WM_PAPER_RUN_NAME`。
 2. 运行 `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb` 生成主方法、真实攻击、正式消融和数据集质量结果。
-3. 分别运行四个主表 baseline Notebook。
+3. 分别运行 Tree-Ring、Gaussian Shading、Shallow Diffuse 三个 common-backbone 单方法 Notebook, 再运行 T2SMark 独立正式复现 Notebook。
 4. 运行 Tree-Ring、Gaussian Shading、Shallow Diffuse 与 T2SMark 的官方复现 Notebook。
 5. 将所有结果包保存到当前运行层级的 Drive 目录。
 6. 运行 `paper_workflow/notebooks/paper_result_closure_run.ipynb` 或独立服务器闭合命令。

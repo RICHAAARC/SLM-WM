@@ -10,8 +10,7 @@
 | `paper_main_pilot_paper_prompts.txt` | 700 | 0.01 | `pilot_claim` | 中等规模正式结果包, test 包含340个独立 Prompt。 |
 | `paper_main_full_paper_prompts.txt` | 7000 | 0.001 | `full_claim` | 全规模正式结果包, test 包含3400个独立 Prompt。 |
 
-新增 Prompt 来自 Google Research PartiPrompts。固定来源版本、许可证、文件摘要和
-分层选择摘要见 `configs/prompt_source_registry.json`。
+Prompt bank 中受外部来源登记约束的子集来自 Google Research PartiPrompts。固定来源版本、许可证、文件摘要和分层选择摘要见 `configs/prompt_source_registry.json`。
 
 三组配置只允许样本数量和 fixed-FPR 标准不同; 方法参数、攻击协议、baseline 入口、Wilson 单侧 FPR 上界、Hoeffding 结果区间、随机种子和结果闭合逻辑必须保持一致。共同协议结果记录必须拒绝 proxy、placeholder、fallback、synthetic 和 formal-null 证据。
 

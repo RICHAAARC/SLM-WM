@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from zipfile import ZipFile
 
 import pytest
 
@@ -16,6 +15,14 @@ from paper_experiments.baselines import (
 )
 from scripts.write_primary_baseline_method_faithful_adapter_protocol import (
     write_primary_baseline_method_faithful_adapter_protocol_outputs,
+)
+from paper_experiments.baselines.method_faithful_observation_collection import (
+    METHOD_FAITHFUL_BASELINE_IDS,
+)
+from tests.helpers.method_faithful_collection import (
+    formal_observation_rows,
+    write_complete_collection,
+    write_current_paper_protocol,
 )
 
 
@@ -127,21 +134,39 @@ def test_method_faithful_adapter_records_reject_incomplete_adapter_boundary() ->
     assert summary["supports_paper_claim"] is False
 
 
-@pytest.mark.quick
-def test_method_faithful_adapter_writer_can_read_method_faithful_package(tmp_path: Path) -> None:
-    """协议写出脚本应可从 method-faithful zip 包读取 observation 并写出治理产物。"""
+def write_exact_collection(
+    collection_root: Path,
+    prompts: list[dict[str, object]],
+    protocol: object,
+) -> None:
+    """写出三个 baseline 的 exact-set observation collection。"""
 
-    observations_path = tmp_path / "outputs" / "external_baseline_method_faithful" / "execution" / "baseline_observations.json"
-    observations_path.parent.mkdir(parents=True)
-    observations_path.write_text(json.dumps(mixed_observations(), ensure_ascii=False), encoding="utf-8")
-    package_path = tmp_path / "outputs" / "external_baseline_method_faithful_package.zip"
-    with ZipFile(package_path, "w") as archive:
-        archive.write(observations_path, "outputs/external_baseline_method_faithful/execution/baseline_observations.json")
-    observations_path.unlink()
+    write_complete_collection(
+        collection_root,
+        {
+            baseline_id: formal_observation_rows(baseline_id, prompts, protocol)
+            for baseline_id in METHOD_FAITHFUL_BASELINE_IDS
+        },
+        prompts,
+        protocol,
+    )
+
+
+@pytest.mark.quick
+def test_method_faithful_adapter_writer_reads_exact_collection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """协议写出脚本必须从三个 baseline 的 exact-set collection 读取。"""
+
+    collection_root = tmp_path / "outputs" / "external_baseline_method_faithful"
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    prompts, protocol = write_current_paper_protocol(tmp_path)
+    write_exact_collection(collection_root, prompts, protocol)
 
     manifest = write_primary_baseline_method_faithful_adapter_protocol_outputs(
         root=tmp_path,
-        method_faithful_package_path=package_path,
+        collection_root=collection_root,
     )
 
     output_dir = tmp_path / "outputs" / "primary_baseline_method_faithful_adapter_protocol"
@@ -158,8 +183,8 @@ def test_method_faithful_adapter_writer_can_read_method_faithful_package(tmp_pat
 
     assert manifest["artifact_id"] == "primary_baseline_method_faithful_adapter_protocol_manifest"
     assert len(records) == 4
-    assert summary["input_observation_count"] == 6
-    assert summary["formal_import_candidate_allowed_ids"] == ["tree_ring"]
-    assert summary["method_faithful_package_path"] == "outputs/external_baseline_method_faithful_package.zip"
+    assert summary["input_observation_count"] > 6
+    assert summary["formal_import_candidate_allowed_ids"] == list(METHOD_FAITHFUL_BASELINE_IDS)
+    assert summary["input_baseline_ids"] == list(METHOD_FAITHFUL_BASELINE_IDS)
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])
 

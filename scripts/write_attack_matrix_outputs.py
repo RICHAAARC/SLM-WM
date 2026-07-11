@@ -21,7 +21,7 @@ from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.protocol.attacks import AttackConfig, attack_config_digest, default_attack_configs
 from experiments.protocol.calibration import binomial_rate_upper_confidence_bound
 from experiments.protocol.paper_run_config import build_paper_run_config
-from experiments.runtime.diffusion.sd3_pipeline_runtime import compute_image_quality_metrics
+from experiments.runtime.image_metrics import compute_image_quality_metrics, measured_score_retention
 from experiments.runtime.repository_environment import file_digest
 from main.core.digest import build_stable_digest
 
@@ -124,15 +124,15 @@ def _record_key(record: dict[str, Any]) -> tuple[str, str, str]:
 
 
 def _ratio(after: Any, before: Any) -> float | None:
-    """计算真实分数保持率, 分母为零时返回空值。"""
+    """计算统一真实分数保持率, 缺失值返回空值。"""
 
     if not isinstance(after, (int, float)) or not isinstance(before, (int, float)):
         return None
-    denominator = float(before)
-    if not math.isfinite(denominator) or abs(denominator) <= 1e-12:
+    source = float(before)
+    evaluated = float(after)
+    if not math.isfinite(source) or not math.isfinite(evaluated):
         return None
-    value = float(after) / denominator
-    return value if math.isfinite(value) else None
+    return measured_score_retention(source, evaluated)
 
 
 def _mean(values: Iterable[Any]) -> float | None:
@@ -309,9 +309,12 @@ def build_family_metrics(
                 "false_positive_rate_upper_95": false_positive_upper,
                 "target_fpr": target_fpr,
                 "fixed_fpr_upper_bound_ready": false_positive_upper <= target_fpr,
-                "quality_score_mean": _mean(row.get("quality_score") for row in group),
-                "quality_ssim_mean": _mean(row.get("quality_ssim") for row in group),
-                "quality_psnr_mean": _mean(row.get("quality_psnr") for row in group),
+                "quality_score_mean": _mean(row.get("quality_score") for row in positives),
+                "quality_ssim_mean": _mean(row.get("quality_ssim") for row in positives),
+                "quality_psnr_mean": _mean(row.get("quality_psnr") for row in positives),
+                "attacked_positive_source_to_attacked_ssim_mean": _mean(
+                    row.get("quality_ssim") for row in positives
+                ),
                 "score_retention_mean": _mean(row.get("score_retention") for row in positives),
                 "lf_score_retention_mean": _mean(row.get("lf_score_retention") for row in positives),
                 "tail_score_retention_mean": _mean(row.get("tail_score_retention") for row in positives),
@@ -334,7 +337,7 @@ def build_strength_rows(family_rows: Iterable[dict[str, Any]], config_by_key: di
 
 
 def build_retention_rows(strength_rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """提取真实水印分数保持率表。"""
+    """提取同一检测器内部的分数稳定性诊断表。"""
 
     fields = (
         "attack_family",
@@ -349,7 +352,14 @@ def build_retention_rows(strength_rows: Iterable[dict[str, Any]]) -> list[dict[s
         "tail_score_retention_mean",
         "supports_paper_claim",
     )
-    return [{field: row[field] for field in fields} for row in strength_rows]
+    return [
+        {
+            **{field: row[field] for field in fields},
+            "metric_status": "diagnostic_method_internal_score_stability",
+            "supports_paper_claim": False,
+        }
+        for row in strength_rows
+    ]
 
 
 def build_rescue_rows(strength_rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:

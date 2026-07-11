@@ -97,6 +97,7 @@ def write_image_only_runtime_inputs(repo_root: Path, paper_claim_scale: str) -> 
             "positive_rate": 0.0,
             "positive_rate_upper_95": float(PAPER_SCALE[paper_claim_scale]["target_fpr"]) * 0.9,
             "content_score_mean": 0.01,
+            "source_to_evaluated_ssim_mean": 1.0,
             "fixed_fpr_upper_bound_ready": True,
         },
         {
@@ -109,6 +110,7 @@ def write_image_only_runtime_inputs(repo_root: Path, paper_claim_scale: str) -> 
             "positive_rate": (test_count - 1) / test_count,
             "positive_rate_upper_95": 1.0,
             "content_score_mean": 0.80,
+            "source_to_evaluated_ssim_mean": 1.0,
             "fixed_fpr_upper_bound_ready": False,
         },
         {
@@ -121,6 +123,7 @@ def write_image_only_runtime_inputs(repo_root: Path, paper_claim_scale: str) -> 
             "positive_rate": 0.0,
             "positive_rate_upper_95": float(PAPER_SCALE[paper_claim_scale]["target_fpr"]) * 0.9,
             "content_score_mean": 0.02,
+            "source_to_evaluated_ssim_mean": 0.95,
             "fixed_fpr_upper_bound_ready": True,
         },
         {
@@ -133,6 +136,7 @@ def write_image_only_runtime_inputs(repo_root: Path, paper_claim_scale: str) -> 
             "positive_rate": (test_count - 2) / test_count,
             "positive_rate_upper_95": 1.0,
             "content_score_mean": 0.60,
+            "source_to_evaluated_ssim_mean": 0.88,
             "fixed_fpr_upper_bound_ready": False,
         },
     ]

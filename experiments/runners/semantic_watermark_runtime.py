@@ -23,7 +23,8 @@ from experiments.runtime.diffusion.regeneration_attacks import (
     default_diffusion_attack_specs,
 )
 from experiments.runtime.image_attacks import apply_standard_image_attack
-from experiments.runtime.diffusion.sd3_pipeline_runtime import compute_image_quality_metrics, load_pipeline, tensor_norm
+from experiments.runtime.diffusion.sd3_pipeline_runtime import load_pipeline, tensor_norm
+from experiments.runtime.image_metrics import compute_image_quality_metrics
 from experiments.runtime.repository_environment import file_digest, resolve_code_version
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -993,8 +994,11 @@ def write_semantic_watermark_runtime_outputs(
         record = dict(detection)
         sample_role = str(record.get("sample_role", ""))
         source_path = clean_image_path if sample_role == "clean_negative" else watermarked_image_path
+        source_image = clean_image if sample_role == "clean_negative" else watermarked_image
         attacked_image_key = str(record.get("attacked_image_key", ""))
         evaluated_path = attacked_image_path_by_key.get(attacked_image_key, source_path)
+        evaluated_image = attacked_images.get(attacked_image_key, source_image)
+        source_to_evaluated_quality = compute_image_quality_metrics(source_image, evaluated_image)
         record.update(
             {
                 "run_id": result.run_id,
@@ -1006,6 +1010,9 @@ def write_semantic_watermark_runtime_outputs(
                     evaluated_path.relative_to(root_path).as_posix() if attacked_image_key else ""
                 ),
                 "attacked_image_digest": file_digest(evaluated_path) if attacked_image_key else "",
+                "source_to_evaluated_ssim": float(source_to_evaluated_quality["ssim"]),
+                "source_to_evaluated_psnr": source_to_evaluated_quality["psnr"],
+                "source_to_evaluated_mse": float(source_to_evaluated_quality["mse"]),
             }
         )
         governed_detections.append(record)

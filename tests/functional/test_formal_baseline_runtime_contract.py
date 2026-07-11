@@ -7,10 +7,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from external_baseline.primary.sd35_method_faithful_common import (
-    derive_threshold,
-    measured_image_ssim,
-)
+from experiments.runtime.image_metrics import compute_image_quality_metrics, measured_image_ssim
+from external_baseline.primary.sd35_method_faithful_common import derive_threshold
 from external_baseline.primary.t2smark.adapter.run_slm_eval import (
     _auto_threshold,
     build_t2smark_observations,
@@ -142,6 +140,17 @@ def test_measured_ssim_reads_image_content() -> None:
 
 
 @pytest.mark.quick
+def test_paired_image_metrics_reject_implicit_resize() -> None:
+    """正式成对质量统计不得在指标函数内部静默改变候选图像尺寸。"""
+
+    reference = Image.new("RGB", (32, 32), (255, 255, 255))
+    different_size = Image.new("RGB", (16, 16), (255, 255, 255))
+
+    with pytest.raises(ValueError, match="相同尺寸"):
+        compute_image_quality_metrics(reference, different_size)
+
+
+@pytest.mark.quick
 def test_external_baseline_plan_requires_target_fpr_and_real_mode(tmp_path: Path) -> None:
     """命令计划必须显式传递论文级 FPR 并选择唯一真实模式。"""
 
@@ -164,3 +173,28 @@ def test_external_baseline_plan_requires_target_fpr_and_real_mode(tmp_path: Path
     command = plan[0]["command"]
     assert command[command.index("--adapter-mode") + 1] == "method_faithful_sd35"
     assert command[command.index("--target-fpr") + 1] == "0.1"
+
+
+@pytest.mark.quick
+def test_generic_command_plan_rejects_t2smark_duplicate_formal_entry(tmp_path: Path) -> None:
+    """T2SMark 只能由独立 formal runner 启动，不能进入 generic command plan。"""
+
+    prompt_plan = tmp_path / "prompt_plan.json"
+    prompt_plan.write_text('[{"prompt_text":"a fox","split":"calibration"}]\n', encoding="utf-8")
+    args = build_parser().parse_args(
+        [
+            "--root",
+            str(tmp_path),
+            "--methods",
+            "t2smark",
+            "--output-root",
+            str(tmp_path / "outputs/baselines"),
+            "--prompt-plan",
+            str(prompt_plan),
+            "--target-fpr",
+            "0.1",
+        ]
+    )
+
+    with pytest.raises(ValueError, match="未登记的 primary baseline adapter"):
+        build_plan(args)

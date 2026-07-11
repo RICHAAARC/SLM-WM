@@ -1,0 +1,227 @@
+diff --git a/option.py b/option.py
+index ac9a041..42da855 100644
+--- a/option.py
++++ b/option.py
+@@ -13,6 +13,10 @@ def parse_args():
+     parser.add_argument("--clip_test_num", type=int, default=0) # actually the end idx
+     parser.add_argument("--start_idx", type=int, default=0)
+     parser.add_argument("--SDv35M", action="store_true", default=False)
++    parser.add_argument("--slm_attack_families", type=str, default="")
++    parser.add_argument("--slm_attack_image_dir", type=str, default=None)
++    parser.add_argument("--slm_save_clean_pair", action="store_true", default=False)
++    parser.add_argument("--slm_pair_image_dir", type=str, default=None)
+ 
+     # diffusion model settings
+     parser.add_argument("--model_key", type=str, default="stabilityai/stable-diffusion-2-1") # stabilityai/stable-diffusion-3.5-medium
+diff --git a/run_sd35.py b/run_sd35.py
+index 39c07d7..d350d33 100644
+--- a/run_sd35.py
++++ b/run_sd35.py
+@@ -1,4 +1,5 @@
+ import os
++import sys
+ import json
+ import torch
+ import open_clip
+@@ -13,6 +14,17 @@ from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
+ 
+ from option import args
+ 
++ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
++if ROOT not in sys.path:
++    sys.path.insert(0, ROOT)
++
++from external_baseline.primary.sd35_method_faithful_common import (
++    apply_formal_image_attack,
++    canonical_attack_family,
++    canonical_attack_name,
++    file_digest,
++)
++
+ args.key_channel_idx = (0, 1, 2, 3)
+ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+ msg_channel_idx = [i for i in range(16) if i not in args.key_channel_idx]
+@@ -45,6 +57,48 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
+         "acc_msg": acc_msg.item()
+     }
+ 
++
++def configured_formal_attack_names():
++    """解析 SLM-WM 共同协议要求的攻击名称。"""
++
++    return [item.strip() for item in str(args.slm_attack_families or "").split(",") if item.strip()]
++
++
++def decode_attacked_image(attacked_image, master_key, key, fake_key, msg):
++    """对攻击后图像执行 T2SMark 官方检测解码。"""
++
++    image_tensor = utils.to_tensor(attacked_image).to(device).half()
++    latents = pipe.get_image_latents(image_tensor, sample=False)
++    reversed_latents = pipe.naive_forward_diffusion(
++        latents=latents,
++        num_inference_steps=args.num_inversion_steps
++    )
++    return decode(reversed_latents, master_key, key, fake_key, msg)
++
++
++def score_image_with_master_key(candidate_image, master_key, key, fake_key, msg):
++    """使用正式检测密钥返回仅图像连续检测分数。"""
++
++    return float(
++        decode_attacked_image(candidate_image, master_key, key, fake_key, msg)["norm1_w"]
++    )
++
++
++# SLM-WM 正式协议: 输出严格成对质量图像。
++def generate_clean_pair_image(prompt, prompt_id):
++    """生成与 T2SMark 水印图像同 prompt 和同随机种子对齐的 clean 参照图像。"""
++
++    clean_generator = torch.Generator(device=device).manual_seed(args.seed + prompt_id)
++    return pipe(
++        prompt,
++        guidance_scale=args.guidance_scale,
++        num_inference_steps=args.num_inference_steps,
++        height=512,
++        width=512,
++        generator=clean_generator,
++    ).images[0]
++
++
+ pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)
+ pipe.set_progress_bar_config(disable=True)
+ 
+@@ -66,6 +120,20 @@ with open(os.path.join(args.output_dir, args.name, "settings.json"), "w") as f:
+ if args.save_image:
+     image_path = os.path.join(args.output_dir, args.name, f'images')
+     os.makedirs(image_path, exist_ok=True)
++formal_attack_names = configured_formal_attack_names()
++formal_attack_image_dir = args.slm_attack_image_dir
++if args.save_image and formal_attack_names:
++    if formal_attack_image_dir is None:
++        formal_attack_image_dir = os.path.join(args.output_dir, args.name, "formal_attacks")
++    os.makedirs(formal_attack_image_dir, exist_ok=True)
++# SLM-WM 正式协议: 输出严格成对质量图像。
++pair_quality_clean_image_dir = None
++if args.save_image and args.slm_save_clean_pair:
++    pair_quality_image_dir = args.slm_pair_image_dir
++    if pair_quality_image_dir is None:
++        pair_quality_image_dir = os.path.join(args.output_dir, args.name, "quality_pairs")
++    pair_quality_clean_image_dir = os.path.join(pair_quality_image_dir, "clean")
++    os.makedirs(pair_quality_clean_image_dir, exist_ok=True)
+ 
+ results = {}
+ if args.clip_test_num > 0: clip_score_fn = setup_clip_measure_function()
+@@ -114,8 +182,23 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+         if prompt_id < args.clip_test_num:
+             clip_score = clip_score_fn(generated_image, prompt).item()
+             results[prompt_id]["clip_score"] = clip_score
++        generated_image_path = ""
+         if args.save_image:
+-            generated_image.save(os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png'))
++            generated_image_path = os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png')
++            generated_image.save(generated_image_path)
++        clean_pair_image = None
++        if formal_attack_names or args.slm_save_clean_pair:
++            clean_pair_image = generate_clean_pair_image(prompt, prompt_id)
++        if args.save_image and args.slm_save_clean_pair and pair_quality_clean_image_dir:
++            clean_pair_path = os.path.join(pair_quality_clean_image_dir, f'{str(prompt_id).zfill(5)}.png')
++            clean_pair_image.save(clean_pair_path)
++            results[prompt_id]["pair_quality"] = {
++                "pair_quality_protocol": "strict_clean_watermarked_pair",
++                "clean_image_path": clean_pair_path,
++                "clean_image_digest": file_digest(clean_pair_path),
++                "watermarked_image_path": generated_image_path,
++                "watermarked_image_digest": file_digest(generated_image_path) if generated_image_path else "",
++            }
+         
+         if prompt_id < args.robust_test_num:
+             noised_image = utils.image_distortion(generated_image, args.seed + prompt_id, args)
+@@ -129,6 +212,83 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+             
+             decode_result = decode(reversed_latents, master_key, key, fake_key, msg)
+             results[prompt_id]["robustness"] = decode_result
++            if formal_attack_names:
++                if clean_pair_image is None:
++                    raise RuntimeError("正式攻击要求同 Prompt、同种子的 clean negative 图像")
++                clean_detection = decode_attacked_image(
++                    clean_pair_image,
++                    master_key,
++                    key,
++                    fake_key,
++                    msg,
++                )
++                watermarked_detection = decode_attacked_image(
++                    generated_image,
++                    master_key,
++                    key,
++                    fake_key,
++                    msg,
++                )
++                results[prompt_id]["image_only_detection"] = {
++                    "clean_score": float(clean_detection["norm1_w"]),
++                    "watermarked_score": float(watermarked_detection["norm1_w"]),
++                }
++                results[prompt_id]["formal_attacks"] = {}
++                for formal_attack_name in formal_attack_names:
++                    attack_matrix_family = canonical_attack_family(formal_attack_name)
++                    attack_matrix_name = canonical_attack_name(formal_attack_name)
++                    attack_result = {
++                        "attack_family": attack_matrix_family,
++                        "attack_name": attack_matrix_name,
++                        "attack_condition": attack_matrix_name,
++                    }
++                    for source_role, source_image in (
++                        ("attacked_negative", clean_pair_image),
++                        ("attacked_positive", generated_image),
++                    ):
++                        attacked_image, attack_transform_name, attack_execution = apply_formal_image_attack(
++                            source_image,
++                            attack_family=formal_attack_name,
++                            seed=args.seed + prompt_id,
++                            pipe=pipe,
++                            prompt=prompt,
++                            size=512,
++                            device=str(device),
++                            detection_score=lambda candidate: score_image_with_master_key(
++                                candidate,
++                                master_key,
++                                key,
++                                fake_key,
++                                msg,
++                            ),
++                        )
++                        attacked_path = ""
++                        attacked_digest = ""
++                        if args.save_image and formal_attack_image_dir:
++                            attacked_path = os.path.join(
++                                formal_attack_image_dir,
++                                f"{str(prompt_id).zfill(5)}_{attack_matrix_name}_{source_role}.png",
++                            )
++                            attacked_image.save(attacked_path)
++                            attacked_digest = file_digest(attacked_path)
++                        formal_decode_result = decode_attacked_image(
++                            attacked_image,
++                            master_key,
++                            key,
++                            fake_key,
++                            msg,
++                        )
++                        attack_result[source_role] = {
++                            **formal_decode_result,
++                            "detection_score": float(formal_decode_result["norm1_w"]),
++                            "attack_transform_name": attack_transform_name,
++                            "attack_execution": attack_execution,
++                            "attacked_image_path": attacked_path,
++                            "attacked_image_digest": attacked_digest,
++                        }
++                        if torch.cuda.is_available():
++                            torch.cuda.empty_cache()
++                    results[prompt_id]["formal_attacks"][attack_matrix_name] = attack_result
+ 
+         prompt_id += 1
+         pbar.update(1)
+@@ -166,3 +326,4 @@ with open(os.path.join(args.output_dir, args.name, "results.json"), "w") as f:
+     json.dump(results, f, indent=4)
+ 
+ 
++

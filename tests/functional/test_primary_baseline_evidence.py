@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from zipfile import ZipFile
 
 import pytest
 
 from paper_experiments.baselines import build_primary_baseline_evidence_records, build_primary_baseline_evidence_summary
 from scripts.write_primary_baseline_evidence_outputs import write_primary_baseline_evidence_outputs
+from paper_experiments.baselines.method_faithful_observation_collection import (
+    METHOD_FAITHFUL_BASELINE_IDS,
+    canonical_prompt_protocol_digest,
+)
+from tests.helpers.method_faithful_collection import (
+    formal_observation_rows,
+    write_complete_collection,
+    write_current_paper_protocol,
+)
 
 
 def write_source_registry(tmp_path: Path) -> Path:
@@ -69,6 +77,138 @@ def write_method_faithful_outputs(tmp_path: Path) -> tuple[Path, Path]:
     command_results_path.write_text(json.dumps(command_results, ensure_ascii=False), encoding="utf-8")
     observations_path.write_text(json.dumps(observations, ensure_ascii=False), encoding="utf-8")
     return command_results_path, observations_path
+
+
+def write_evidence_collection(
+    tmp_path: Path,
+    prompts: list[dict[str, object]],
+    protocol: object,
+) -> Path:
+    """写出三个 method-faithful baseline 的 exact-set transfer 集合。"""
+
+    collection_root = tmp_path / "outputs" / "external_baseline_method_faithful"
+    write_complete_collection(
+        collection_root,
+        {
+            baseline_id: formal_observation_rows(baseline_id, prompts, protocol)
+            for baseline_id in METHOD_FAITHFUL_BASELINE_IDS
+        },
+        prompts,
+        protocol,
+    )
+    return collection_root
+
+
+def write_t2smark_formal_evidence(
+    tmp_path: Path,
+    prompts: list[dict[str, object]],
+    protocol: object,
+) -> Path:
+    """写出独立 T2SMark formal runner 的完整受治理测试证据。"""
+
+    output_dir = tmp_path / "outputs" / "t2smark_formal_reproduction"
+    official_results = (
+        output_dir
+        / "t2smark_official"
+        / "t2smark_sd35_medium_probe_paper"
+        / "results.json"
+    )
+    adapter_dir = output_dir / "t2smark_adapter"
+    observations_path = adapter_dir / "baseline_observations.json"
+    adapter_manifest_path = adapter_dir / "t2smark_slm_adapter_manifest.json"
+    prompt_plan_path = output_dir / "t2smark_formal_prompt_plan.json"
+    rows = formal_observation_rows("t2smark", prompts, protocol)
+    required_attacks = sorted(
+        {
+            str(row["attack_name"])
+            for row in rows
+            if str(row["sample_role"]).startswith("attacked_")
+        }
+    )
+    for path, payload in (
+        (official_results, {"formal_results": True}),
+        (prompt_plan_path, prompts),
+        (output_dir / "t2smark_formal_image_pairs.json", [{"strict_pair_quality_ready": True}]),
+        (observations_path, rows),
+        (
+            adapter_manifest_path,
+            {
+                "artifact_name": "t2smark_slm_adapter_manifest.json",
+                "baseline_id": "t2smark",
+                "adapter_status": "sd35_native_result_adapter_ready",
+                "observation_count": len(rows),
+                "strict_pair_quality_ready": True,
+                "missing_result_indices": [],
+                "formal_attack_names": required_attacks,
+                "threshold_source": "calibration_clean_negative_conformal",
+            },
+        ),
+        (
+            output_dir / "t2smark_formal_adapter_command_result.json",
+            {
+                "command": [
+                    "python",
+                    "external_baseline/primary/t2smark/adapter/run_slm_eval.py",
+                    "--num-inference-steps",
+                    "20",
+                    "--num-inversion-steps",
+                    "20",
+                    "--guidance-scale",
+                    "4.5",
+                    "--target-fpr",
+                    "0.1",
+                ],
+                "return_code": 0,
+            },
+        ),
+        (
+            output_dir / "t2smark_formal_import_validation_report.json",
+            {"formal_import_validation_ready": True},
+        ),
+        (
+            output_dir / "t2smark_formal_strict_pair_quality_summary.json",
+            {"strict_pair_quality_ready": True},
+        ),
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    prompt_digest = canonical_prompt_protocol_digest(prompts)
+    summary = {
+        "run_decision": "pass",
+        "t2smark_formal_reproduction_ready": True,
+        "paper_run_prompt_protocol_ready": True,
+        "t2smark_formal_attack_ready": True,
+        "t2smark_strict_pair_quality_ready": True,
+        "formal_import_validation_ready": True,
+        "paper_claim_scale": "probe_paper",
+        "selected_prompt_count": len(prompts),
+        "target_fpr": 0.1,
+        "metadata": {"prompt_report": {"prompt_protocol_digest": prompt_digest}},
+    }
+    manifest = {
+        "artifact_id": "t2smark_formal_reproduction_manifest",
+        "metadata": {
+            "run_decision": "pass",
+            "t2smark_formal_reproduction_ready": True,
+        },
+        "config": {
+            "prompt_set": "probe_paper",
+            "model_id": "stabilityai/stable-diffusion-3.5-medium",
+            "num_inference_steps": 20,
+            "num_inversion_steps": 20,
+            "guidance_scale": 4.5,
+            "target_fpr": 0.1,
+        },
+    }
+    (output_dir / "t2smark_formal_reproduction_summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (output_dir / "t2smark_formal_reproduction_manifest.local.json").write_text(
+        json.dumps(manifest, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return output_dir
 
 
 @pytest.mark.quick
@@ -148,17 +288,23 @@ def test_primary_baseline_evidence_accepts_tree_ring_method_faithful_boundary(tm
 
 
 @pytest.mark.quick
-def test_primary_baseline_evidence_writer_outputs_records_summary_and_manifest(tmp_path: Path) -> None:
+def test_primary_baseline_evidence_writer_outputs_records_summary_and_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """证据边界脚本应写出 records、summary 和 manifest, 且所有输出位于 outputs/。"""
 
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
     registry_path = write_source_registry(tmp_path)
-    command_results_path, observations_path = write_method_faithful_outputs(tmp_path)
+    prompts, protocol = write_current_paper_protocol(tmp_path)
+    collection_root = write_evidence_collection(tmp_path, prompts, protocol)
+    t2smark_output_dir = write_t2smark_formal_evidence(tmp_path, prompts, protocol)
 
     manifest = write_primary_baseline_evidence_outputs(
         root=tmp_path,
         source_registry_path=registry_path,
-        command_results_path=command_results_path,
-        observations_path=observations_path,
+        collection_root=collection_root,
+        t2smark_formal_output_dir=t2smark_output_dir,
     )
 
     output_dir = tmp_path / "outputs" / "primary_baseline_evidence"
@@ -172,43 +318,54 @@ def test_primary_baseline_evidence_writer_outputs_records_summary_and_manifest(t
     assert manifest["artifact_id"] == "primary_baseline_evidence_manifest"
     assert len(records) == 4
     assert summary["adapter_run_ready_count"] == 4
-    assert summary["primary_baseline_formal_ready"] is False
+    assert summary["formal_result_ready_count"] == 4
+    assert summary["primary_baseline_formal_ready"] is True
+    assert summary["input_baseline_ids"] == [*METHOD_FAITHFUL_BASELINE_IDS, "t2smark"]
+    assert summary["t2smark_formal_evidence_digest"]
     assert summary["supports_paper_claim"] is False
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])
 
 
 @pytest.mark.quick
-def test_primary_baseline_evidence_writer_can_read_method_faithful_package(tmp_path: Path) -> None:
-    """证据边界脚本应可直接读取 method-faithful zip 包中的命令结果和 observation。"""
+def test_primary_baseline_evidence_writer_rejects_command_digest_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """transfer manifest 绑定的 command result 被修改后必须停止证据审计。"""
 
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
     registry_path = write_source_registry(tmp_path)
-    command_results_path, observations_path = write_method_faithful_outputs(tmp_path)
-    package_path = tmp_path / "outputs" / "external_baseline_method_faithful_package.zip"
-    package_path.parent.mkdir(parents=True, exist_ok=True)
-    with ZipFile(package_path, "w") as archive:
-        archive.write(registry_path, "external_baseline/source_registry.json")
-        archive.write(
-            command_results_path,
-            "outputs/external_baseline_method_faithful/execution/baseline_command_results.json",
-        )
-        archive.write(
-            observations_path,
-            "outputs/external_baseline_method_faithful/execution/baseline_observations.json",
-        )
-    command_results_path.unlink()
-    observations_path.unlink()
+    prompts, protocol = write_current_paper_protocol(tmp_path)
+    collection_root = write_evidence_collection(tmp_path, prompts, protocol)
+    t2smark_output_dir = write_t2smark_formal_evidence(tmp_path, prompts, protocol)
+    command_path = collection_root / "split_observations" / "tree_ring_baseline_command_results.json"
+    command_path.write_text("[]\n", encoding="utf-8")
 
-    write_primary_baseline_evidence_outputs(
-        root=tmp_path,
-        source_registry_path=tmp_path / "missing_registry.json",
-        method_faithful_package_path=package_path,
-    )
-
-    summary = json.loads(
-        (tmp_path / "outputs" / "primary_baseline_evidence" / "primary_baseline_evidence_summary.json").read_text(
-            encoding="utf-8"
+    with pytest.raises(ValueError, match="摘要与 transfer manifest 不一致"):
+        write_primary_baseline_evidence_outputs(
+            root=tmp_path,
+            source_registry_path=registry_path,
+            collection_root=collection_root,
+            t2smark_formal_output_dir=t2smark_output_dir,
         )
-    )
-    assert summary["adapter_run_ready_count"] == 4
-    assert summary["method_faithful_package_path"] == "outputs/external_baseline_method_faithful_package.zip"
+
+
+@pytest.mark.quick
+def test_primary_baseline_evidence_writer_requires_independent_t2smark_formal_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """三个 method-faithful source 不得替代独立 T2SMark formal evidence。"""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    registry_path = write_source_registry(tmp_path)
+    prompts, protocol = write_current_paper_protocol(tmp_path)
+    collection_root = write_evidence_collection(tmp_path, prompts, protocol)
+
+    with pytest.raises(FileNotFoundError, match="T2SMark formal evidence 缺少文件"):
+        write_primary_baseline_evidence_outputs(
+            root=tmp_path,
+            source_registry_path=registry_path,
+            collection_root=collection_root,
+        )
 

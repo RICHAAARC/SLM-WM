@@ -241,7 +241,6 @@ def build_primary_result_templates(
         "clean_false_positive_rate",
         "attacked_false_positive_rate",
         "quality_score_mean",
-        "score_retention_mean",
     )
     source_fields = (
         "baseline_result_source",

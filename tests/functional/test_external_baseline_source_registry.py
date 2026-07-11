@@ -57,7 +57,11 @@ def test_external_baseline_source_registry_matches_adapter_specs_when_present() 
         assert item["paper_claim_support"] is False
         assert item["official_source_tracked"] is False
         if item["comparison_group"] == "primary":
-            assert item["adapter_path"] == PRIMARY_BASELINE_ADAPTERS[item["baseline_id"]]
+            if item["baseline_id"] == "t2smark":
+                assert item["adapter_path"] == "external_baseline/primary/t2smark/adapter/run_slm_eval.py"
+                assert item["baseline_id"] not in PRIMARY_BASELINE_ADAPTERS
+            else:
+                assert item["adapter_path"] == PRIMARY_BASELINE_ADAPTERS[item["baseline_id"]]
             assert Path(item["adapter_path"]).is_file()
             assert item["adapter_status"] in {
                 "adapter_contract_ready",

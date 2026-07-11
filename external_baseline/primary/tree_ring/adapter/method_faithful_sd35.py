@@ -24,14 +24,13 @@ import math
 from pathlib import Path
 from typing import Any, Iterable
 
+from experiments.runtime.image_metrics import measured_image_ssim, measured_score_retention
 from main.core.digest import build_stable_digest
 from external_baseline.primary.sd35_method_faithful_common import (
     apply_formal_image_attack,
     canonical_attack_family,
     canonical_attack_name,
     emit_adapter_progress,
-    measured_image_ssim,
-    measured_score_retention,
 )
 
 BASELINE_ID = "tree_ring"
@@ -744,6 +743,18 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         "observation_count": len(observations),
         "latent_shape": list(latent_shape),
         "execution_device": device,
+        "generation_protocol": {
+            "model_id": args.model_id,
+            "num_inference_steps": int(args.num_inference_steps),
+            "guidance_scale": float(args.guidance_scale),
+            "height": int(args.height),
+            "width": int(args.width),
+        },
+        "detection_protocol": {
+            "input_access_mode": "image_only",
+            "num_inversion_steps": int(args.num_inversion_steps),
+            "target_fpr": float(args.target_fpr),
+        },
         "watermark_parameters": {
             "w_channel": int(args.w_channel),
             "w_radius": int(args.w_radius),
@@ -778,9 +789,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--latent-channels", type=int, default=16)
-    parser.add_argument("--num-inference-steps", type=int, default=28)
-    parser.add_argument("--num-inversion-steps", type=int, default=28)
-    parser.add_argument("--guidance-scale", type=float, default=7.0)
+    parser.add_argument("--num-inference-steps", type=int, default=20)
+    parser.add_argument("--num-inversion-steps", type=int, default=20)
+    parser.add_argument("--guidance-scale", type=float, default=4.5)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--watermark-seed", type=int, default=999999)
     parser.add_argument("--w-channel", type=int, default=0)

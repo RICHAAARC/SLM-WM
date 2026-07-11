@@ -15,7 +15,6 @@ PRIMARY_BASELINE_ADAPTERS = {
     "tree_ring": "external_baseline/primary/tree_ring/adapter/run_slm_eval.py",
     "gaussian_shading": "external_baseline/primary/gaussian_shading/adapter/run_slm_eval.py",
     "shallow_diffuse": "external_baseline/primary/shallow_diffuse/adapter/run_slm_eval.py",
-    "t2smark": "external_baseline/primary/t2smark/adapter/run_slm_eval.py",
 }
 
 
@@ -90,7 +89,7 @@ def build_baseline_command_plan_manifest(specs: list[BaselineCommandSpec]) -> di
 
 
 def selected_primary_baselines(value: str) -> list[str]:
-    """解析主表 baseline 列表并限制在已登记 adapter 范围内。"""
+    """解析 common-backbone baseline 列表并拒绝 T2SMark 重复正式入口。"""
 
     baseline_ids = [item.strip() for item in value.split(",") if item.strip()]
     unknown = [item for item in baseline_ids if item not in PRIMARY_BASELINE_ADAPTERS]

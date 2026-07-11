@@ -14,7 +14,7 @@ REQUIRED_NOTEBOOKS = {
     "external_baseline_tree_ring_run.ipynb",
     "external_baseline_gaussian_shading_run.ipynb",
     "external_baseline_shallow_diffuse_run.ipynb",
-    "external_baseline_t2smark_run.ipynb",
+    "official_reference_t2smark_run.ipynb",
 }
 FORBIDDEN_COMPONENT_NOTEBOOKS = {
     "aligned_rescoring_run.ipynb",

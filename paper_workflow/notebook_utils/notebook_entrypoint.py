@@ -12,10 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from experiments.runtime.archive_naming import (
-    WORKFLOW_ARCHIVE_PREFIXES,
     build_workflow_archive_name,
-    resolve_short_commit,
-    utc_archive_token,
 )
 from paper_workflow.notebook_utils.notebook_runtime import write_notebook_runtime_report
 
@@ -132,16 +129,24 @@ def package_workflow_outputs(
     package_function = _package_function_for_workflow(workflow_name)
     archive_name = build_workflow_archive_name(workflow_name, root=root, baseline_id=baseline_id)
     resolved_drive_output_dir = resolve_drive_output_dir(workflow_name, drive_output_dir)
+    resolved_baseline_id = baseline_id or os.environ.get("SLM_WM_PRIMARY_BASELINE_ID", "")
+    runtime_output_dir = WORKFLOW_LOCAL_OUTPUT_DIRS[workflow_name]
+    if workflow_name == "external_baseline_method_faithful":
+        if not resolved_baseline_id:
+            raise ValueError("external_baseline_method_faithful 打包必须提供单一 baseline_id")
+        runtime_output_dir = f"{runtime_output_dir}/run_records/{resolved_baseline_id}"
     write_notebook_runtime_report(
         root=root,
         workflow_name=workflow_name,
-        output_dir=WORKFLOW_LOCAL_OUTPUT_DIRS[workflow_name],
-        baseline_id=baseline_id or os.environ.get("SLM_WM_PRIMARY_BASELINE_METHODS", ""),
+        output_dir=runtime_output_dir,
+        baseline_id=resolved_baseline_id,
         drive_output_dir=resolved_drive_output_dir,
         archive_name=archive_name,
     )
     package_kwargs: dict[str, Any] = {"root": root, "archive_name": archive_name}
     if resolved_drive_output_dir is not None:
         package_kwargs["drive_output_dir"] = resolved_drive_output_dir
+    if workflow_name == "external_baseline_method_faithful":
+        package_kwargs["baseline_id"] = resolved_baseline_id
     return package_function(**package_kwargs)
 

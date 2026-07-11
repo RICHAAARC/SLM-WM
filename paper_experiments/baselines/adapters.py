@@ -490,9 +490,6 @@ def aggregate_baseline_metrics(observations: Iterable[Mapping[str, Any]]) -> lis
                 )
                 if ready_rows
                 else "unsupported",
-                "score_retention_mean": _weighted_mean(ready_rows, "score_retention_mean", "supported_record_count")
-                if ready_rows
-                else "unsupported",
                 "unsupported_reason": "" if ready_count else first["unsupported_reason"],
                 "supports_paper_claim": bool(ready_rows) and all(bool(item["supports_paper_claim"]) for item in ready_rows),
             }
@@ -521,7 +518,6 @@ def aggregate_slm_metrics(attack_metric_rows: Iterable[Mapping[str, Any]]) -> di
             "negative_count",
         ),
         "quality_score_mean": _weighted_mean(supported_rows, "quality_score_mean", "supported_record_count"),
-        "score_retention_mean": _weighted_mean(supported_rows, "score_retention_mean", "supported_record_count"),
         "supports_paper_claim": bool(supported_rows) and all(bool(row.get("supports_paper_claim")) for row in supported_rows),
     }
 
@@ -548,7 +544,6 @@ def build_comparison_rows(
                 "clean_false_positive_rate": baseline_row["clean_false_positive_rate"] if measured else "unsupported",
                 "attacked_false_positive_rate": baseline_row["attacked_false_positive_rate"] if measured else "unsupported",
                 "quality_score_mean": baseline_row["quality_score_mean"] if measured else "unsupported",
-                "score_retention_mean": baseline_row["score_retention_mean"] if measured else "unsupported",
                 "supports_paper_claim": bool(baseline_row.get("supports_paper_claim", False)) if measured else False,
             }
         )

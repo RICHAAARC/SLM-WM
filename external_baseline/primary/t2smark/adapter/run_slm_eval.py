@@ -14,11 +14,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.runtime.progress import progress_event_path_from_environment, write_progress_event
+from experiments.runtime.image_metrics import measured_image_ssim, measured_score_retention
 from main.core.digest import build_stable_digest
-from external_baseline.primary.sd35_method_faithful_common import (
-    measured_image_ssim,
-    measured_score_retention,
-)
 
 BASELINE_ID = "t2smark"
 DEFAULT_SCORE_NAME = "t2smark_norm1_detection_score"
@@ -505,9 +502,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--latent-channels", type=int, default=16)
-    parser.add_argument("--num-inference-steps", type=int, default=28)
-    parser.add_argument("--num-inversion-steps", type=int, default=28)
-    parser.add_argument("--guidance-scale", type=float, default=7.0)
+    parser.add_argument("--num-inference-steps", type=int, default=20)
+    parser.add_argument("--num-inversion-steps", type=int, default=20)
+    parser.add_argument("--guidance-scale", type=float, default=4.5)
     parser.add_argument("--seed", type=int, default=0)
     return parser
 

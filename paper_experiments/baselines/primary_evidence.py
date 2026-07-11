@@ -175,6 +175,7 @@ def build_primary_baseline_evidence_records(
     fixed_fpr_baseline_calibration_ready: bool = False,
     attack_matrix_baseline_detection_ready: bool = False,
     formal_evidence_paths_ready: bool = False,
+    protocol_readiness_by_baseline: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """构造主表 baseline 证据边界记录。
 
@@ -185,6 +186,10 @@ def build_primary_baseline_evidence_records(
     source_items = _source_by_baseline(source_registry)
     results_by_id = _command_result_by_baseline(command_results)
     rows_by_id = _observation_rows_by_baseline(observation_rows)
+    readiness_by_id = {
+        str(baseline_id): dict(values)
+        for baseline_id, values in (protocol_readiness_by_baseline or {}).items()
+    }
     records: list[dict[str, Any]] = []
     for baseline_id in PRIMARY_BASELINE_IDS:
         source = source_items.get(baseline_id, {})
@@ -192,14 +197,27 @@ def build_primary_baseline_evidence_records(
         command_result = results_by_id.get(baseline_id)
         adapter_ready = _adapter_run_ready(command_result, rows)
         method_ready = _method_faithful_adapter_ready(baseline_id, adapter_ready, rows)
+        readiness = readiness_by_id.get(baseline_id, {})
+        prompt_ready = bool(
+            readiness.get("paper_run_prompt_protocol_ready", paper_run_prompt_protocol_ready)
+        )
+        fixed_fpr_ready = bool(
+            readiness.get("fixed_fpr_baseline_calibration_ready", fixed_fpr_baseline_calibration_ready)
+        )
+        attack_ready = bool(
+            readiness.get("attack_matrix_baseline_detection_ready", attack_matrix_baseline_detection_ready)
+        )
+        evidence_paths_ready = bool(
+            readiness.get("formal_evidence_paths_ready", formal_evidence_paths_ready)
+        )
         reasons = _blocking_reasons(
             baseline_id=baseline_id,
             adapter_run_ready=adapter_ready,
             method_faithful_adapter_ready=method_ready,
-            paper_run_prompt_protocol_ready=paper_run_prompt_protocol_ready,
-            fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
-            attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
-            formal_evidence_paths_ready=formal_evidence_paths_ready,
+            paper_run_prompt_protocol_ready=prompt_ready,
+            fixed_fpr_baseline_calibration_ready=fixed_fpr_ready,
+            attack_matrix_baseline_detection_ready=attack_ready,
+            formal_evidence_paths_ready=evidence_paths_ready,
         )
         formal_ready = not reasons
         payload = {
@@ -229,10 +247,10 @@ def build_primary_baseline_evidence_records(
             adapter_run_sample_roles=_unique_strings(row.get("sample_role", "") for row in rows),
             adapter_run_latent_shapes=_unique_shapes(row.get("latent_shape", []) for row in rows),
             method_faithful_adapter_ready=method_ready,
-            paper_run_prompt_protocol_ready=paper_run_prompt_protocol_ready,
-            fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
-            attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
-            formal_evidence_paths_ready=formal_evidence_paths_ready,
+            paper_run_prompt_protocol_ready=prompt_ready,
+            fixed_fpr_baseline_calibration_ready=fixed_fpr_ready,
+            attack_matrix_baseline_detection_ready=attack_ready,
+            formal_evidence_paths_ready=evidence_paths_ready,
             formal_result_ready=formal_ready,
             blocking_reasons=reasons,
             supports_paper_claim=False,

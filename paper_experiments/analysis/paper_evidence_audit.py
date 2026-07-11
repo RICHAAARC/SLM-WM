@@ -450,7 +450,7 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
             "攻击鲁棒性图数据",
             [
                 _source(bundle, "attack_strength_curve", "outputs/attack_matrix/attack_strength_curve.csv"),
-                _source(bundle, "score_retention_by_attack", "outputs/attack_matrix/score_retention_by_attack.csv"),
+                _source(bundle, "attack_family_metrics", "outputs/attack_matrix/attack_family_metrics.csv"),
             ],
             "rebuildable_paper_claim" if attack_ready else "rebuildable_preview",
             attack_ready,

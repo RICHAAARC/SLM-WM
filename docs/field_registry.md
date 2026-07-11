@@ -224,7 +224,7 @@ Notebook 与 repository module 的跨边界数据
 | latent_digest | runtime | none | true | false | false | latent 向量或最终 latent 的稳定摘要。 |
 | image_digest | runtime | none | true | false | false | 真实生成或攻击图像的稳定摘要。 |
 | image_shape | runtime | none | true | false | false | generation record 记录的图像形状。 |
-| quality_score | runtime | none | true | false | false | runtime probe 的轻量质量分数。 |
+| quality_score | metric | none | true | false | false | source 与 evaluated 图像之间按共享高斯窗口实现计算的实测 SSIM。 |
 | unsupported_reason | runtime | none | true | false | false | 真实后端不可用或能力降级的原因。 |
 | unsupported_reasons | runtime | none | false | false | false | runtime summary 中聚合的 unsupported_reason 集合。 |
 | trajectory_index | runtime | none | true | false | false | latent trace 在采样序列中的索引。 |
@@ -535,6 +535,7 @@ Notebook 与 repository module 的跨边界数据
 | threshold_tie_count | metric | none | false | false | false | 与冻结阈值数值相同的样本数量。 |
 | threshold_degenerate | metric | none | false | false | false | 阈值是否存在退化或并列导致的 FPR 风险。 |
 | threshold_source | protocol | none | false | false | false | 阈值来源, 正式协议应为 calibration clean negative。 |
+| evaluation_split | protocol | none | false | false | false | 正式结果指标所属的数据划分, 论文比较记录必须为 test, 不得混入 calibration 或 dev。 |
 | rescue_window_frozen | protocol | none | false | false | false | rescue window 是否已冻结。 |
 | fail_reason_gate_frozen | protocol | none | false | false | false | fail reason gate 是否已冻结。 |
 | evidence_fpr_exceeds_target | metric | none | false | false | false | 测试 clean negative evidence-level FPR 是否超过目标 operating point, 不包含 attacked negative 诊断分母; 该字段用于经验诊断, 不直接阻断阈值冻结 workflow。 |
@@ -648,7 +649,7 @@ Notebook 与 repository module 的跨边界数据
 | attack_metrics_ready | artifact | none | false | false | false | 攻击矩阵常规攻击本地统计是否可重建。 |
 | clean_false_positive_rate | metric | none | false | false | false | clean negative 在攻击矩阵统计中的 false positive rate。 |
 | attacked_false_positive_rate | metric | none | false | false | false | attacked negative 在攻击矩阵统计中的 false positive rate。 |
-| score_retention_mean | metric | none | false | false | false | 攻击分组内 score retention 均值。 |
+| score_retention_mean | metric | none | false | false | false | 单一检测器内部的攻击前后分数稳定性诊断均值, 不用于跨方法正式比较。 |
 | geometry_reliable_rate | metric | none | false | false | false | 攻击分组内几何可靠记录比例。 |
 | rescue_rate | metric | none | false | false | false | 攻击分组内 rescue_applied 比例。 |
 | input_manifests | artifact | none | false | false | false | 攻击矩阵或重建 manifest 引用的输入 manifest 集合。 |
@@ -1051,7 +1052,7 @@ Notebook 与 repository module 的跨边界数据
 | adapter_status | runtime | none | true | false | false | 外部 baseline adapter 当前可执行或需补齐的状态。 |
 | official_source_tracked | governance | none | false | false | false | 第三方官方源码是否由本项目 git 跟踪。 |
 | baseline_command_plan_manifest_path | artifact | none | false | false | false | 外部 baseline 命令计划 manifest 路径。 |
-| baseline_command_results_path | artifact | none | false | false | false | 外部 baseline 命令执行结果 JSON 路径。 |
+| baseline_command_results_path | artifact | none | true | false | false | 单 baseline transfer manifest 绑定的 command result 相对路径。 |
 | baseline_observations_path | artifact | none | false | false | false | 外部 baseline observation 输出路径。 |
 | baseline_command_id | protocol | none | true | false | false | 外部 baseline 命令计划中单条命令的稳定标识。 |
 | baseline_command_digest | artifact | none | true | false | false | 外部 baseline 命令计划 payload 的稳定摘要。 |
@@ -1067,7 +1068,6 @@ Notebook 与 repository module 的跨边界数据
 | command_results_path | artifact | none | false | false | false | 外部 baseline 命令结果文件路径。 |
 | observations_path | artifact | none | false | false | false | 主表 baseline 证据边界读取的 observation 输入路径。 |
 | source_registry_path | artifact | none | false | false | false | 主表 baseline 证据边界读取的源码登记输入路径。 |
-| method_faithful_package_path | artifact | none | false | false | false | 主表 baseline 证据边界读取的 external baseline method-faithful zip 包路径。 |
 | execution_digest | artifact | none | true | false | false | 外部 baseline 执行 manifest 的稳定摘要。 |
 | evidence_paths | artifact | none | true | false | false | 外部 baseline 正式结果所绑定的证据文件路径集合。 |
 | formal_result_claim | claim | none | false | false | false | 外部 baseline 结果是否声明可作为正式论文对比证据。 |
@@ -1170,20 +1170,11 @@ Notebook 与 repository module 的跨边界数据
 | source_available | artifact | none | false | false | false | 外部源码缓存入口文件是否存在且可用于后续命令。|
 | source_downloaded | artifact | none | false | false | false | 外部源码缓存是否由本次命令补齐。|
 | source_entry_path | artifact | none | false | false | false | 外部源码缓存入口脚本路径。|
-| prior_package_reused | artifact | none | false | false | false | Google Drive 同协议结果包是否被本次 workflow 复用。|
-| prior_package_path | artifact | none | false | false | false | 被复用的同协议 Google Drive 结果包路径。|
-| prior_package_digest | artifact | none | false | false | false | 被复用的同协议 Google Drive 结果包 SHA256 摘要。|
-| extracted_entry_count | metric | none | false | false | false | 从同协议结果包中解出的可复用文件数量。|
-| extracted_entries | artifact | none | false | false | false | 从同协议结果包中解出的可复用文件路径集合。|
 | adapter_execution_ready | artifact | none | false | false | false | 外部 baseline adapter 命令计划是否执行并通过证据边界校验。|
 | adapter_observation_count | metric | none | false | false | false | 外部 baseline adapter 输出的 observation 数量。|
-| primary_baseline_adapter_ready | artifact | none | false | false | false | 四个主表 external baseline adapter 在同一 method-faithful 命令计划中是否全部跑通。|
-| primary_baseline_adapter_count | metric | none | false | false | false | 本次 method-faithful 命令计划覆盖的主表 external baseline adapter 数量。|
-| primary_baseline_observation_count | metric | none | false | false | false | 本次 method-faithful 命令计划中主表 external baseline adapter 输出的 observation 总数。|
-| primary_baseline_ids | protocol | none | false | false | false | 本次 method-faithful 命令计划覆盖的主表 external baseline id 集合。|
-| ready_primary_baseline_ids | protocol | none | false | false | false | 本次 method-faithful 命令计划中已经成功输出 observation 的主表 external baseline id 集合。|
-| primary_baseline_observation_count_by_id | metric | none | false | false | false | 按主表 external baseline id 聚合的 observation 数量。|
-| primary_baseline_prompt_plan_path | artifact | none | false | false | false | 三类 method-faithful adapter 读取的最小 prompt 计划路径。|
+| primary_baseline_adapter_ready | artifact | none | false | false | false | 当前单个 common-backbone external baseline adapter 是否完成真实运行并通过证据边界校验。|
+| primary_baseline_observation_count | metric | none | false | false | false | 当前单个 common-backbone external baseline adapter 输出的 observation 数量。|
+| primary_baseline_prompt_plan_path | artifact | none | false | false | false | 当前单个 common-backbone method-faithful adapter 读取的完整受治理 Prompt 计划路径。|
 | primary_baseline_evidence_id | artifact | none | true | false | false | 主表 external baseline 证据边界记录的稳定标识。|
 | primary_baseline_evidence_digest | artifact | none | true | false | false | 主表 external baseline 证据边界记录的稳定摘要。|
 | adapter_smoke_ready | artifact | none | false | false | false | 单个主表 external baseline 的 adapter smoke 命令是否成功并产生 observation。|
@@ -1355,7 +1346,7 @@ Notebook 与 repository module 的跨边界数据
 | ci_field_groups | protocol | none | false | false | false | 导入 schema 中 metric 与置信区间上下界的字段组合。|
 | pilot_paper_result_template_id | artifact | none | true | false | false | pilot_paper 共同协议结果导入模板行的稳定标识。|
 | pilot_paper_result_template_digest | artifact | none | true | false | false | pilot_paper 共同协议结果导入模板行的稳定摘要。|
-| quality_score_mean | metric | none | true | false | false | pilot_paper 共同协议中的图像质量分数均值。|
+| quality_score_mean | metric | none | true | false | false | 当前论文运行层级共同协议中 attacked positive 的实测 SSIM 均值, 合法范围为 [-1, 1]。|
 | quality_score_ci_low | metric | none | true | false | false | pilot_paper 图像质量分数置信区间下界。|
 | quality_score_ci_high | metric | none | true | false | false | pilot_paper 图像质量分数置信区间上界。|
 | score_retention_ci_low | metric | none | true | false | false | pilot_paper 攻击后分数保持率置信区间下界。|
@@ -1427,7 +1418,7 @@ Notebook 与 repository module 的跨边界数据
 | attention_geometry_score | metric | none | true | true | false | 真实 Q/K attention 与密钥关系签名的一致性分数。 |
 | formal_evidence_positive | metric | none | true | true | false | 冻结完整 evidence 协议后的正式布尔判定。 |
 | frozen_content_threshold | protocol | none | true | true | false | calibration clean negative 冻结的内容阈值。 |
-| threshold_digest | protocol | none | true | true | false | 完整 evidence 阈值与 rescue 配置摘要。 |
+| threshold_digest | protocol | none | true | true | false | calibration 分数集合、冻结阈值、阈值来源和相关 evidence 配置的稳定摘要。 |
 | jacobian_candidate_count | method | none | true | false | false | 每个分支参与真实 JVP 的候选方向数量。 |
 | null_space_rank | method | none | true | false | false | 每个分支保留的小响应 latent 基底秩。 |
 | lf_relative_strength | method | none | true | false | false | LF 更新相对当前 latent 范数的强度。 |
@@ -1493,3 +1484,45 @@ Notebook 与 repository module 的跨边界数据
 | scientific_autograd_compatibility | environment | none | true | false | false | 为精确 forward AD 与 latent 输入梯度固定的模型注意力实现摘要。 |
 | clip_attention_implementation | environment | none | true | false | false | CLIP 视觉编码器使用的注意力实现, 当前正式值为 eager。 |
 | vae_attention_processor | environment | none | true | false | false | VAE 可微解码使用的 Diffusers attention processor。 |
+| baseline_observations_sha256 | provenance | none | true | false | false | 单 baseline transfer manifest 绑定的 observation 文件 SHA-256。 |
+| baseline_command_results_sha256 | provenance | none | true | false | false | 单 baseline command result 文件 SHA-256。 |
+| prompt_plan_path | artifact | none | true | false | false | 单 baseline transfer manifest 绑定的完整受治理 Prompt 计划路径。 |
+| prompt_plan_sha256 | provenance | none | true | false | false | 当前 baseline 完整 Prompt 计划文件 SHA-256。 |
+| adapter_manifest_path | artifact | none | true | false | false | 单 baseline transfer manifest 绑定的 adapter manifest 路径。 |
+| adapter_manifest_sha256 | provenance | none | true | false | false | 当前 baseline adapter manifest 文件 SHA-256。 |
+| execution_manifest_path | artifact | none | true | false | false | 单 baseline transfer manifest 绑定的 execution manifest 路径。 |
+| execution_manifest_sha256 | provenance | none | true | false | false | 当前 baseline execution manifest 文件 SHA-256。 |
+| paper_run_name | protocol | none | true | false | false | 产物所属的唯一论文运行层级, 取值为 probe_paper、pilot_paper 或 full_paper。 |
+| formal_attack_names | protocol | none | true | false | false | 当前正式运行实际要求完整覆盖的受治理攻击名称集合。 |
+| threshold | protocol | none | true | false | false | observation 及其 transfer 记录共享的 calibration clean negative 冻结阈值。 |
+| generation_protocol | protocol | none | true | false | false | common-backbone 模型、采样步数、guidance 和图像尺寸的结构化配置。 |
+| detection_protocol | protocol | none | true | false | false | 仅图像访问边界、反演步数与目标 FPR 的结构化配置。 |
+| transfer_ready | governance | none | true | false | false | 单 baseline transfer 交换面是否通过身份、计数、阈值与攻击集合校验。 |
+| fixed_fpr_observation_evidence_path | artifact | none | true | false | false | 正式导入记录绑定的 observation JSON 或 JSONL 路径, 必须同时出现在 evidence_paths 中。 |
+| fixed_fpr_observation_evidence_digest | provenance | none | true | false | false | 对正式导入 observation 列表执行规范序列化后得到的 SHA-256 摘要。 |
+| required_threshold_fields | protocol | none | true | false | false | 主表 baseline 正式导入 schema 要求完整提供的 fixed-FPR 阈值 provenance 字段集合。 |
+| protocol_patch_path | artifact | none | true | false | false | T2SMark 正式协议 Git diff 的受治理路径。 |
+| protocol_patch_sha256 | provenance | none | true | false | false | T2SMark 正式协议 Git diff 文件的 SHA-256。 |
+| protocol_patch_applied | governance | none | true | false | false | T2SMark 正式协议 Git diff 是否由本次源码准备流程应用。 |
+| protocol_patch_ready | governance | none | true | false | false | T2SMark 正式协议 Git diff 是否已应用且通过反向校验。 |
+| patched_source_sha256 | provenance | none | true | false | false | T2SMark 正式协议涉及源码文件的相对路径到 SHA-256 映射。 |
+| source_worktree_exact | governance | none | true | false | false | 外部源码工作树是否恰好等于登记 commit 加受治理协议 Git diff, 不含额外修改。 |
+| source_worktree_digest | provenance | none | true | false | false | 外部源码登记 commit、固定 diff 与受影响文件摘要组成的稳定摘要。 |
+| source_revision_ready | governance | none | true | false | false | 外部源码 commit、工作树和正式协议补丁是否共同通过版本门禁。 |
+| protocol_binding_name | protocol | none | true | false | false | T2SMark 官方结果复用必须匹配的正式协议绑定名称。 |
+| canonical_prompt_digest | provenance | none | true | false | false | 当前论文层级完整受治理 Prompt 集合的规范摘要。 |
+| protocol_binding_digest | provenance | none | true | false | false | T2SMark Prompt、预算、攻击、源码和随机种子协议绑定对象的稳定摘要。 |
+| protocol_evidence_digest | provenance | none | true | false | false | T2SMark 协议绑定对象与官方结果、设置文件摘要共同形成的证据摘要。 |
+| official_results_sha256 | provenance | none | true | false | false | T2SMark 官方 `results.json` 文件的 SHA-256。 |
+| official_settings_sha256 | provenance | none | true | false | false | T2SMark 官方运行设置文件的 SHA-256。 |
+| official_protocol_binding_ready | governance | none | true | false | false | T2SMark 官方结果是否完整匹配当前正式协议绑定和证据摘要。 |
+| official_protocol_binding_digest | provenance | none | true | false | false | 已核验 T2SMark 官方结果所绑定正式协议对象的稳定摘要。 |
+| official_protocol_evidence_digest | provenance | none | true | false | false | 已核验 T2SMark 官方结果协议与事实文件共同形成的证据摘要。 |
+| official_protocol_binding_path | artifact | none | true | false | false | T2SMark 官方结果旁路保存的正式协议绑定记录路径。 |
+| entry_sha256 | provenance | none | true | false | false | 精确结果包白名单中每个归档成员路径到 SHA-256 的映射。 |
+| source_to_evaluated_ssim | metric | none | true | true | false | 单条检测记录从 source 图像到实际 evaluated 图像的高斯窗口 SSIM。 |
+| source_to_evaluated_psnr | metric | none | true | true | false | 单条检测记录从 source 图像到实际 evaluated 图像的 PSNR。 |
+| source_to_evaluated_mse | metric | none | true | true | false | 单条检测记录从 source 图像到实际 evaluated 图像的均方误差。 |
+| source_to_evaluated_ssim_mean | metric | none | true | true | false | 同一攻击与角色下 source-to-evaluated SSIM 均值。 |
+| source_to_evaluated_psnr_mean | metric | none | true | true | false | 同一攻击与角色下有限 PSNR 均值。 |
+| attacked_positive_source_to_attacked_ssim_mean | metric | none | true | true | false | 攻击后 watermarked positive 相对其未攻击 source 的 SSIM 均值。 |

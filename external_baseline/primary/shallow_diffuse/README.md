@@ -13,7 +13,7 @@
 
 ## official reference 边界
 
-official reference 入口用于补充表方法忠实度审计, 不替代 SD3.5 Medium common-backbone 主表对比。该入口会尝试在独立 legacy 环境中运行 `source/run_shallow_diffuse_t2i.py`, 并把官方命令、stdout、stderr、`overall_scores.txt`、`clip_scores.txt`、schema、validation report、环境报告和压缩包写入 `outputs/shallow_diffuse_official_reference/` 及当前论文运行层级 Google Drive 根目录下的 `external_baseline_official_reference/` 目录。
+official reference 入口用于补充表方法忠实度审计, 不替代 SD3.5 Medium common-backbone 主表对比。该入口在隔离的官方依赖环境中运行 `source/run_shallow_diffuse_t2i.py`, 并把官方命令、stdout、stderr、`overall_scores.txt`、`clip_scores.txt`、schema、validation report、环境报告和压缩包写入 `outputs/shallow_diffuse_official_reference/` 及当前论文运行层级 Google Drive 根目录下的 `external_baseline_official_reference/` 目录。
 
 Shallow Diffuse 官方源码默认把运行结果写到相对路径 `output/{run_name}`。本项目 helper 会在 `outputs/shallow_diffuse_official_reference` 作为运行目录调用官方脚本, 因此官方相对输出仍位于项目统一 `outputs/` 边界内。
 

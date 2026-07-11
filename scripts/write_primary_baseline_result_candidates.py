@@ -24,24 +24,33 @@ from paper_experiments.baselines import (
     build_primary_baseline_formal_import_readiness_summary,
     validate_primary_baseline_formal_import_rows,
 )
+from paper_experiments.baselines.method_faithful_observation_collection import (
+    DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT,
+    MethodFaithfulObservationSource,
+    load_method_faithful_observation_collection,
+)
 from experiments.protocol.attacks import default_attack_configs
+from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_observation_threshold
 from experiments.protocol.paper_run_config import build_paper_run_config
-from experiments.protocol.splits import build_group_split_counts
+from experiments.protocol.prompts import (
+    build_prompt_records,
+    normalize_prompt_text,
+    read_prompt_file,
+)
+from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "primary_baseline_result_candidate_import"
 DEFAULT_OUTPUT_DIR = Path("outputs/external_baseline_results")
 DEFAULT_ATTACK_MANIFEST_PATH = Path("outputs/attack_matrix/attack_manifest.json")
-DEFAULT_METHOD_FAITHFUL_OBSERVATIONS_PATH = Path("outputs/external_baseline_method_faithful/execution/baseline_observations.json")
+DEFAULT_METHOD_FAITHFUL_COLLECTION_PATH = DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT
 DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH = Path(
     "outputs/t2smark_formal_reproduction/t2smark_formal_import_candidate_records.jsonl"
 )
-METHOD_FAITHFUL_OBSERVATIONS_ENTRY = "outputs/external_baseline_method_faithful/execution/baseline_observations.json"
 T2SMARK_CANDIDATE_RECORDS_ENTRY = (
     "outputs/t2smark_formal_reproduction/t2smark_formal_import_candidate_records.jsonl"
 )
-METHOD_FAITHFUL_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse")
 
 
 def stable_json_text(value: Any) -> str:
@@ -191,36 +200,6 @@ def read_jsonl_rows_from_package(package_path: Path, entry_name: str) -> list[di
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
-def load_method_faithful_observations(
-    *,
-    observations_path: Path,
-    package_path: Path | None,
-) -> list[dict[str, Any]]:
-    """从唯一显式来源读取方法忠实 SD3.5 adapter observation。"""
-
-    if package_path is not None:
-        if not package_path.is_file():
-            raise FileNotFoundError(f"方法忠实 baseline 结果包不存在: {package_path.as_posix()}")
-        rows = read_json_array_from_package(package_path, METHOD_FAITHFUL_OBSERVATIONS_ENTRY)
-        source_description = f"{package_path.as_posix()}::{METHOD_FAITHFUL_OBSERVATIONS_ENTRY}"
-    else:
-        if not observations_path.is_file():
-            raise FileNotFoundError(f"方法忠实 baseline observation 不存在: {observations_path.as_posix()}")
-        rows = read_json_array(observations_path)
-        source_description = observations_path.as_posix()
-    if not rows:
-        raise ValueError(f"方法忠实 baseline observation 为空: {source_description}")
-    deduplicated: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for row in rows:
-        digest = build_stable_digest(row)
-        if digest in seen:
-            continue
-        seen.add(digest)
-        deduplicated.append(dict(row))
-    return deduplicated
-
-
 def load_t2smark_candidate_rows(
     *,
     candidate_records_path: Path,
@@ -243,48 +222,35 @@ def load_t2smark_candidate_rows(
     return rows
 
 
-def build_prompt_protocol_digest(rows: Iterable[Mapping[str, Any]]) -> str:
-    """用 observation 中的 prompt id 与文本生成可追溯摘要。"""
+def load_canonical_prompt_protocol(
+    root_path: Path,
+) -> tuple[dict[str, dict[str, str]], str]:
+    """读取当前论文层级的受治理 Prompt 身份、split 和统一摘要。
 
-    prompts = sorted(
-        {
-            (
-                str(row.get("prompt_id", "")),
-                str(row.get("prompt_text", "")),
-            )
-            for row in rows
-            if row.get("prompt_id") or row.get("prompt_text")
-        }
+    该函数属于通用证据绑定写法: 正式 baseline 必须复用仓库冻结的 Prompt，
+    不能只提交数量相同但文本或 split 不同的自定义集合。
+    """
+
+    paper_run = build_paper_run_config(root_path)
+    configured_path = Path(paper_run.prompt_file)
+    requested_path = configured_path if configured_path.is_absolute() else (root_path / configured_path).resolve()
+    repository_path = configured_path if configured_path.is_absolute() else (ROOT / configured_path).resolve()
+    prompt_path = requested_path if requested_path.is_file() else repository_path
+    records = apply_split_assignments(
+        build_prompt_records(paper_run.prompt_set, read_prompt_file(prompt_path))
     )
-    return build_stable_digest(prompts)
-
-
-def group_method_observations(rows: Iterable[Mapping[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    """按 baseline id 拆分方法忠实 adapter observation。"""
-
-    grouped = {baseline_id: [] for baseline_id in METHOD_FAITHFUL_BASELINE_IDS}
-    for row in rows:
-        baseline_id = str(row.get("baseline_id", ""))
-        if baseline_id in grouped:
-            grouped[baseline_id].append(dict(row))
-    return grouped
-
-
-def observation_attack_key(row: Mapping[str, Any]) -> tuple[str, str]:
-    """读取 observation 对应的攻击族与攻击名称。"""
-
-    attack_family = str(row.get("attack_family") or "clean")
-    attack_name = str(row.get("attack_name") or row.get("attack_condition") or "clean_none")
-    return attack_family, attack_name
-
-
-def group_observations_by_attack(rows: Iterable[Mapping[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
-    """按攻击族与攻击名称拆分 observation, 便于绑定攻击矩阵资源档位。"""
-
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for row in rows:
-        grouped.setdefault(observation_attack_key(row), []).append(dict(row))
-    return grouped
+    if len(records) != paper_run.prompt_count:
+        raise ValueError("受治理 Prompt 记录数量与当前论文运行配置不一致")
+    identities = {
+        record.prompt_id: {
+            "prompt_text": record.prompt_text,
+            "prompt_digest": record.prompt_digest,
+            "split": record.split,
+        }
+        for record in records
+    }
+    protocol_digest = build_stable_digest([record.prompt_digest for record in records])
+    return identities, protocol_digest
 
 
 def build_attack_resource_profile_lookup() -> dict[tuple[str, str], str]:
@@ -332,14 +298,27 @@ def normalize_t2smark_candidate_rows(
 
     row_values = [dict(row) for row in rows]
     normalized: list[dict[str, Any]] = []
+    _, canonical_prompt_protocol_digest = load_canonical_prompt_protocol(root_path)
     source_digest = digest_for_source(source_path)
     evidence_paths = evidence_path_for_source(source_path, root_path)
     for row in row_values:
         record = dict(row)
+        if str(record.get("prompt_protocol_digest", "")) != canonical_prompt_protocol_digest:
+            raise ValueError("T2SMark 候选记录未绑定当前受治理 Prompt 协议摘要")
         if evidence_paths:
             record["baseline_result_source"] = evidence_paths[0]
             record["baseline_result_source_digest"] = source_digest
-            record["evidence_paths"] = list(evidence_paths)
+            threshold_evidence_path = str(
+                record.get("fixed_fpr_observation_evidence_path", "")
+            ).strip()
+            record["evidence_paths"] = list(
+                dict.fromkeys(
+                    (
+                        *evidence_paths,
+                        *([threshold_evidence_path] if threshold_evidence_path else []),
+                    )
+                )
+            )
             record["formal_evidence_paths_ready"] = True
         normalized.append(record)
     return normalized
@@ -355,6 +334,8 @@ def _measured_baseline_readiness(
     observations = tuple(dict(row) for row in rows)
     paper_run = build_paper_run_config(root_path)
     expected_splits = build_group_split_counts(paper_run.prompt_count)
+    canonical_prompts, _ = load_canonical_prompt_protocol(root_path)
+    expected_prompt_ids = set(canonical_prompts)
     clean_rows = tuple(
         row
         for row in observations
@@ -365,26 +346,41 @@ def _measured_baseline_readiness(
         for row in observations
         if row.get("sample_role") == "positive_source" and row.get("attack_family") == "clean"
     )
-    clean_prompt_ids = {str(row.get("prompt_id")) for row in clean_rows}
-    positive_prompt_ids = {str(row.get("prompt_id")) for row in positive_rows}
+    clean_prompt_ids = [str(row.get("prompt_id", "")) for row in clean_rows]
+    positive_prompt_ids = [str(row.get("prompt_id", "")) for row in positive_rows]
     actual_splits = {
         split: sum(row.get("split") == split for row in clean_rows)
         for split in ("dev", "calibration", "test")
     }
-    prompt_protocol_ready = (
-        len(clean_prompt_ids) == paper_run.prompt_count
-        and clean_prompt_ids == positive_prompt_ids
-        and actual_splits == expected_splits
+    observation_prompt_identity_ready = all(
+        str(row.get("prompt_id", "")) in canonical_prompts
+        and normalize_prompt_text(str(row.get("prompt_text", "")))
+        == canonical_prompts[str(row.get("prompt_id", ""))]["prompt_text"]
+        and str(row.get("split", ""))
+        == canonical_prompts[str(row.get("prompt_id", ""))]["split"]
+        and (
+            not str(row.get("prompt_digest", ""))
+            or str(row.get("prompt_digest", ""))
+            == canonical_prompts[str(row.get("prompt_id", ""))]["prompt_digest"]
+        )
+        for row in observations
     )
-    calibration_rows = tuple(row for row in clean_rows if row.get("split") == "calibration")
-    thresholds = {float(row["threshold"]) for row in observations if "threshold" in row}
-    threshold_sources = {str(row.get("threshold_source", "")) for row in observations}
-    false_positive_count = sum(bool(row.get("detection_decision")) for row in calibration_rows)
-    fixed_fpr_ready = (
-        len(calibration_rows) == expected_splits["calibration"]
-        and len(thresholds) == 1
-        and threshold_sources == {"calibration_clean_negative_conformal"}
-        and false_positive_count / len(calibration_rows) <= target_fpr
+    prompt_protocol_ready = all(
+        (
+            len(clean_prompt_ids) == paper_run.prompt_count,
+            len(positive_prompt_ids) == paper_run.prompt_count,
+            set(clean_prompt_ids) == expected_prompt_ids,
+            set(positive_prompt_ids) == expected_prompt_ids,
+            len(set(clean_prompt_ids)) == len(clean_prompt_ids),
+            len(set(positive_prompt_ids)) == len(positive_prompt_ids),
+            actual_splits == expected_splits,
+            observation_prompt_identity_ready,
+        )
+    )
+    threshold_audit = audit_fixed_fpr_observation_threshold(
+        observations,
+        target_fpr=target_fpr,
+        expected_calibration_negative_count=expected_splits["calibration"],
     )
     required_attack_names = {
         config.attack_name
@@ -399,48 +395,51 @@ def _measured_baseline_readiness(
     attack_matrix_ready = actual_attack_names == required_attack_names
     return {
         "prompt_protocol_ready": prompt_protocol_ready,
-        "fixed_fpr_ready": fixed_fpr_ready,
+        "fixed_fpr_ready": threshold_audit.fixed_fpr_ready,
         "attack_matrix_ready": attack_matrix_ready,
     }
 
 
 def build_method_candidate_rows(
     *,
-    observations: Iterable[Mapping[str, Any]],
-    source_path: Path,
+    sources: Iterable[MethodFaithfulObservationSource],
     root_path: Path,
     target_fpr: float,
     resource_profile: str,
 ) -> list[dict[str, Any]]:
-    """把方法忠实 SD3.5 adapter observation 聚合为共同协议候选记录。"""
+    """把三个 exact-set observation source 分别聚合为共同协议候选记录。"""
 
-    observation_rows = [dict(row) for row in observations]
-    evidence_paths = evidence_path_for_source(source_path, root_path)
-    baseline_result_source = relative_or_absolute(source_path, root_path)
-    source_digest = digest_for_source(source_path)
-    prompt_protocol_digest = build_prompt_protocol_digest(observation_rows)
     records: list[dict[str, Any]] = []
     attack_profile_lookup = build_attack_resource_profile_lookup()
-    for baseline_id, baseline_rows in group_method_observations(observation_rows).items():
-        if not baseline_rows:
-            continue
+    for source in sources:
+        baseline_rows = [dict(row) for row in source.rows]
+        evidence_paths = (
+            relative_or_absolute(source.observations_path, root_path),
+            relative_or_absolute(source.transfer_manifest_path, root_path),
+            relative_or_absolute(source.prompt_plan_path, root_path),
+            relative_or_absolute(source.adapter_manifest_path, root_path),
+            relative_or_absolute(source.execution_manifest_path, root_path),
+        )
+        baseline_result_source = evidence_paths[0]
+        source_digest = source.observations_sha256
+        _, prompt_protocol_digest = load_canonical_prompt_protocol(root_path)
         readiness = _measured_baseline_readiness(baseline_rows, root_path, target_fpr)
-        for attack_key, attack_rows in group_observations_by_attack(baseline_rows).items():
-            records.extend(
-                build_method_faithful_baseline_candidate_records(
-                    baseline_id=baseline_id,
-                    observation_rows=attack_rows,
-                    target_fpr=target_fpr,
-                    baseline_result_source=baseline_result_source,
-                    baseline_result_source_digest=source_digest,
-                    evidence_paths=evidence_paths,
-                    prompt_protocol_digest=prompt_protocol_digest,
-                    paper_run_prompt_protocol_ready=readiness["prompt_protocol_ready"],
-                    fixed_fpr_baseline_calibration_ready=readiness["fixed_fpr_ready"],
-                    attack_matrix_baseline_detection_ready=readiness["attack_matrix_ready"],
-                    resource_profile=attack_profile_lookup.get(attack_key, resource_profile),
-                )
+        records.extend(
+            build_method_faithful_baseline_candidate_records(
+                baseline_id=source.baseline_id,
+                observation_rows=baseline_rows,
+                target_fpr=target_fpr,
+                baseline_result_source=baseline_result_source,
+                baseline_result_source_digest=source_digest,
+                evidence_paths=evidence_paths,
+                prompt_protocol_digest=prompt_protocol_digest,
+                paper_run_prompt_protocol_ready=readiness["prompt_protocol_ready"],
+                fixed_fpr_baseline_calibration_ready=readiness["fixed_fpr_ready"],
+                attack_matrix_baseline_detection_ready=readiness["attack_matrix_ready"],
+                resource_profile=resource_profile,
+                resource_profile_by_attack=attack_profile_lookup,
             )
+        )
     return records
 
 
@@ -449,9 +448,8 @@ def write_primary_baseline_result_candidate_outputs(
     root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
     attack_manifest_path: str | Path = DEFAULT_ATTACK_MANIFEST_PATH,
-    method_faithful_observations_path: str | Path = DEFAULT_METHOD_FAITHFUL_OBSERVATIONS_PATH,
+    method_faithful_collection_path: str | Path = DEFAULT_METHOD_FAITHFUL_COLLECTION_PATH,
     t2smark_candidate_records_path: str | Path = DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH,
-    external_method_faithful_package_path: str | Path | None = None,
     t2smark_formal_package_path: str | Path | None = None,
     method_resource_profile: str = "full_main",
 ) -> dict[str, Any]:
@@ -460,11 +458,10 @@ def write_primary_baseline_result_candidate_outputs(
     root_path = Path(root).resolve()
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, output_dir)
     resolved_attack_manifest_path = resolve_path(root_path, attack_manifest_path)
-    resolved_method_faithful_observations_path = resolve_path(root_path, method_faithful_observations_path)
+    resolved_method_faithful_collection_path = resolve_path(root_path, method_faithful_collection_path)
     resolved_t2smark_candidate_records_path = resolve_path(root_path, t2smark_candidate_records_path)
-    resolved_external_method_faithful_package_path = resolve_path(root_path, external_method_faithful_package_path)
     resolved_t2smark_formal_package_path = resolve_path(root_path, t2smark_formal_package_path)
-    if resolved_attack_manifest_path is None or resolved_method_faithful_observations_path is None:
+    if resolved_attack_manifest_path is None or resolved_method_faithful_collection_path is None:
         raise ValueError("必要输入路径不能为空。")
     if resolved_t2smark_candidate_records_path is None:
         raise ValueError("T2SMark 候选记录路径不能为空。")
@@ -479,18 +476,13 @@ def write_primary_baseline_result_candidate_outputs(
         float(manifest_target_fpr), target_fpr, rel_tol=0.0, abs_tol=1e-12
     ):
         raise ValueError("攻击矩阵 target_fpr 必须与当前论文运行层级一致")
-    method_faithful_observations = load_method_faithful_observations(
-        observations_path=resolved_method_faithful_observations_path,
-        package_path=resolved_external_method_faithful_package_path,
+    method_faithful_sources = load_method_faithful_observation_collection(
+        resolved_method_faithful_collection_path,
+        project_root=root_path,
     )
     t2smark_rows = load_t2smark_candidate_rows(
         candidate_records_path=resolved_t2smark_candidate_records_path,
         package_path=resolved_t2smark_formal_package_path,
-    )
-    method_faithful_source_path = (
-        resolved_external_method_faithful_package_path
-        if resolved_external_method_faithful_package_path is not None
-        else resolved_method_faithful_observations_path
     )
     t2smark_source_path = (
         resolved_t2smark_formal_package_path
@@ -498,8 +490,7 @@ def write_primary_baseline_result_candidate_outputs(
         else resolved_t2smark_candidate_records_path
     )
     method_candidate_rows = build_method_candidate_rows(
-        observations=method_faithful_observations,
-        source_path=method_faithful_source_path,
+        sources=method_faithful_sources,
         root_path=root_path,
         target_fpr=target_fpr,
         resource_profile=method_resource_profile,
@@ -569,7 +560,12 @@ def write_primary_baseline_result_candidate_outputs(
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
     input_paths = []
-    for path in (resolved_attack_manifest_path, method_faithful_source_path, t2smark_source_path):
+    method_source_paths = [
+        path
+        for source in method_faithful_sources
+        for path in (source.observations_path, source.transfer_manifest_path)
+    ]
+    for path in (resolved_attack_manifest_path, *method_source_paths, t2smark_source_path):
         input_paths.append(relative_or_absolute(path, root_path))
     output_paths = tuple(
         relative_or_absolute(path, root_path)
@@ -611,16 +607,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
     parser.add_argument("--attack-manifest-path", default=str(DEFAULT_ATTACK_MANIFEST_PATH), help="攻击矩阵 manifest 路径。")
     parser.add_argument(
-        "--method-faithful-observations-path",
-        default=str(DEFAULT_METHOD_FAITHFUL_OBSERVATIONS_PATH),
-        help="方法忠实 SD3.5 adapter observation JSON 路径。",
+        "--method-faithful-collection-path",
+        default=str(DEFAULT_METHOD_FAITHFUL_COLLECTION_PATH),
+        help="三个方法忠实 SD3.5 baseline 的 exact-set 物化根目录。",
     )
     parser.add_argument(
         "--t2smark-candidate-records-path",
         default=str(DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH),
         help="T2SMark formal 候选 JSONL 路径。",
     )
-    parser.add_argument("--external-method-faithful-package-path", default=None, help="可选 external baseline method-faithful 结果 zip 包。")
     parser.add_argument("--t2smark-formal-package-path", default=None, help="可选 T2SMark formal 结果 zip 包。")
     parser.add_argument("--method-resource-profile", default="full_main", help="方法忠实 adapter 候选记录的资源配置名称。")
     return parser
@@ -634,9 +629,8 @@ def main() -> None:
         root=args.root,
         output_dir=args.output_dir,
         attack_manifest_path=args.attack_manifest_path,
-        method_faithful_observations_path=args.method_faithful_observations_path,
+        method_faithful_collection_path=args.method_faithful_collection_path,
         t2smark_candidate_records_path=args.t2smark_candidate_records_path,
-        external_method_faithful_package_path=args.external_method_faithful_package_path,
         t2smark_formal_package_path=args.t2smark_formal_package_path,
         method_resource_profile=args.method_resource_profile,
     )

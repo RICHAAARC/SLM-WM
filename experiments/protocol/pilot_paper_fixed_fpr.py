@@ -76,9 +76,6 @@ PILOT_PAPER_REQUIRED_METRIC_FIELDS = (
     "quality_score_mean",
     "quality_score_ci_low",
     "quality_score_ci_high",
-    "score_retention_mean",
-    "score_retention_ci_low",
-    "score_retention_ci_high",
 )
 PILOT_PAPER_REQUIRED_SOURCE_FIELDS = (
     "result_protocol_name",
@@ -99,7 +96,6 @@ PILOT_PAPER_RATE_FIELDS = (
     "clean_false_positive_rate",
     "attacked_false_positive_rate",
     "quality_score_mean",
-    "score_retention_mean",
 )
 PILOT_PAPER_CI_FIELD_GROUPS = (
     ("true_positive_rate_ci_low", "true_positive_rate", "true_positive_rate_ci_high"),
@@ -107,7 +103,6 @@ PILOT_PAPER_CI_FIELD_GROUPS = (
     ("clean_false_positive_rate_ci_low", "clean_false_positive_rate", "clean_false_positive_rate_ci_high"),
     ("attacked_false_positive_rate_ci_low", "attacked_false_positive_rate", "attacked_false_positive_rate_ci_high"),
     ("quality_score_ci_low", "quality_score_mean", "quality_score_ci_high"),
-    ("score_retention_ci_low", "score_retention_mean", "score_retention_ci_high"),
 )
 
 

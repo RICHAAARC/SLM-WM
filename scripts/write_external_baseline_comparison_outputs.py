@@ -475,7 +475,6 @@ def write_external_baseline_comparison_outputs(
             "clean_false_positive_rate",
             "attacked_false_positive_rate",
             "quality_score_mean",
-            "score_retention_mean",
             "unsupported_reason",
             "supports_paper_claim",
         ],
@@ -496,7 +495,6 @@ def write_external_baseline_comparison_outputs(
             "clean_false_positive_rate",
             "attacked_false_positive_rate",
             "quality_score_mean",
-            "score_retention_mean",
             "supports_paper_claim",
         ],
     )

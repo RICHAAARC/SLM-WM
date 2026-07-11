@@ -3,17 +3,133 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
+from experiments.protocol.fixed_fpr_observation_audit import (
+    FORMAL_THRESHOLD_SOURCE,
+    audit_fixed_fpr_observation_threshold,
+    conformal_threshold_from_clean_negative_scores,
+)
+from main.core.digest import build_stable_digest
 from paper_experiments.baselines import default_baseline_specs
 from scripts.write_external_baseline_comparison_outputs import (
     align_comparison_table_claim_scope,
     build_runtime_report,
     write_external_baseline_comparison_outputs,
 )
+
+
+def write_pilot_threshold_observation_evidence(
+    path: Path,
+    *,
+    evidence_path: str,
+) -> dict[str, object]:
+    """写出可重算阈值且逐 Prompt 覆盖的 pilot_paper observation evidence。"""
+
+    calibration_scores = [index / 330.0 for index in range(330)]
+    threshold = conformal_threshold_from_clean_negative_scores(calibration_scores, target_fpr=0.01)
+
+    def observation(
+        *,
+        split: str,
+        prompt_id: str,
+        event_id: str,
+        attack_family: str,
+        attack_condition: str,
+        sample_role: str,
+        score: float,
+        quality_score: float | None = None,
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "baseline_id": "tree_ring",
+            "split": split,
+            "prompt_id": prompt_id,
+            "event_id": event_id,
+            "attack_family": attack_family,
+            "attack_condition": attack_condition,
+            "sample_role": sample_role,
+            "score": score,
+            "threshold": threshold,
+            "threshold_source": FORMAL_THRESHOLD_SOURCE,
+            "detection_decision": score >= threshold,
+        }
+        if quality_score is not None:
+            row["quality_score"] = quality_score
+        return row
+
+    observations = [
+        *[
+            observation(
+                split="calibration",
+                prompt_id=f"calibration_{index:03d}",
+                event_id=f"calibration_clean_negative_{index:03d}",
+                attack_family="clean",
+                attack_condition="clean_none",
+                sample_role="clean_negative",
+                score=score,
+            )
+            for index, score in enumerate(calibration_scores)
+        ],
+        *[
+            observation(
+                split="test",
+                prompt_id=f"test_{index:03d}",
+                event_id=f"test_clean_negative_{index:03d}",
+                attack_family="clean",
+                attack_condition="clean_none",
+                sample_role="clean_negative",
+                score=threshold - 1.0,
+            )
+            for index in range(340)
+        ],
+        *[
+            observation(
+                split="test",
+                prompt_id=f"test_{index:03d}",
+                event_id=f"test_attacked_positive_{index:03d}",
+                attack_family="standard_distortion",
+                attack_condition="jpeg_compression",
+                sample_role="attacked_positive",
+                score=threshold + 1.0 if index < 238 else threshold - 1.0,
+                quality_score=0.88,
+            )
+            for index in range(340)
+        ],
+        *[
+            observation(
+                split="test",
+                prompt_id=f"test_{index:03d}",
+                event_id=f"test_attacked_negative_{index:03d}",
+                attack_family="standard_distortion",
+                attack_condition="jpeg_compression",
+                sample_role="attacked_negative",
+                score=threshold + 1.0 if index < 34 else threshold - 1.0,
+                quality_score=0.88,
+            )
+            for index in range(340)
+        ],
+    ]
+    path.write_text(json.dumps(observations, ensure_ascii=False), encoding="utf-8")
+    audit = audit_fixed_fpr_observation_threshold(
+        observations,
+        target_fpr=0.01,
+        expected_calibration_negative_count=330,
+    )
+    assert audit.fixed_fpr_ready is True
+    return {
+        "evaluation_split": "test",
+        "calibrated_detection_threshold": threshold,
+        "threshold_source": FORMAL_THRESHOLD_SOURCE,
+        "calibration_clean_negative_count": 330,
+        "test_clean_negative_count": 340,
+        "threshold_digest": audit.threshold_digest,
+        "fixed_fpr_observation_evidence_path": evidence_path,
+        "fixed_fpr_observation_evidence_digest": build_stable_digest(observations),
+    }
 
 
 @pytest.mark.quick
@@ -230,6 +346,12 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     result_dir.mkdir(parents=True)
     evidence_path = result_dir / "tree_ring_metrics.csv"
     evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
+    observation_evidence_relative_path = "outputs/external_baseline_results/tree_ring_observations.json"
+    observation_evidence_path = tmp_path / observation_evidence_relative_path
+    threshold_provenance = write_pilot_threshold_observation_evidence(
+        observation_evidence_path,
+        evidence_path=observation_evidence_relative_path,
+    )
     result_records_path = result_dir / "baseline_result_records.jsonl"
     result_records_path.write_text(
         json.dumps(
@@ -242,13 +364,13 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
                 "result_protocol_name": "primary_baseline_formal_import_protocol",
                 "result_source_type": "governed_import",
                 "baseline_result_source": "outputs/external_baseline_results/tree_ring_metrics.csv",
-                "baseline_result_source_digest": "tree_ring_digest",
+                "baseline_result_source_digest": hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
                 "metric_status": "measured",
                 "positive_count": 340,
                 "negative_count": 340,
                 "attacked_negative_count": 340,
-                "attack_record_count": 680,
-                "supported_record_count": 680,
+                "attack_record_count": 1020,
+                "supported_record_count": 1020,
                 "true_positive_rate": 0.7,
                 "false_positive_rate": 0.0,
                 "clean_false_positive_rate": 0.0,
@@ -258,7 +380,11 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
                 "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
                 "prompt_protocol_digest": "prompt_digest",
                 "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
-                "evidence_paths": ["outputs/external_baseline_results/tree_ring_metrics.csv"],
+                **threshold_provenance,
+                "evidence_paths": [
+                    "outputs/external_baseline_results/tree_ring_metrics.csv",
+                    observation_evidence_relative_path,
+                ],
                 "method_faithful_adapter_ready": True,
                 "paper_run_prompt_protocol_ready": True,
                 "fixed_fpr_baseline_calibration_ready": True,
@@ -308,15 +434,15 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     assert runtime_report["ready_formal_evidence_collection_task_count"] == 1
     assert runtime_report["missing_formal_evidence_collection_task_count"] == 7
     assert runtime_report["primary_baseline_formal_evidence_collection_ready"] is False
-    assert runtime_report["formal_evidence_path_reference_count"] == 1
-    assert runtime_report["existing_formal_evidence_path_count"] == 1
-    assert runtime_report["direct_formal_evidence_path_count"] == 1
+    assert runtime_report["formal_evidence_path_reference_count"] == 2
+    assert runtime_report["existing_formal_evidence_path_count"] == 2
+    assert runtime_report["direct_formal_evidence_path_count"] == 2
     assert runtime_report["search_resolved_formal_evidence_path_count"] == 0
     assert runtime_report["missing_formal_evidence_path_count"] == 0
     assert runtime_report["formal_evidence_path_resolution_ready"] is True
     assert runtime_report["evidence_search_roots"] == []
     assert runtime_report["formal_evidence_path_missing_baseline_ids"] == []
-    assert evidence_path_report["formal_evidence_path_reference_count"] == 1
+    assert evidence_path_report["formal_evidence_path_reference_count"] == 2
     assert evidence_path_report["formal_evidence_path_resolution_ready"] is True
     assert runtime_report["baseline_result_ready_count"] == 1
     assert runtime_report["baseline_results_ready"] is False
@@ -513,6 +639,12 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
     mirror_evidence_dir.mkdir(parents=True)
     mirror_evidence_path = mirror_evidence_dir / "tree_ring_metrics.csv"
     mirror_evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
+    observation_evidence_relative_path = "outputs/external_baseline_results/tree_ring_observations.json"
+    mirror_observation_evidence_path = mirror_evidence_dir / "tree_ring_observations.json"
+    threshold_provenance = write_pilot_threshold_observation_evidence(
+        mirror_observation_evidence_path,
+        evidence_path=observation_evidence_relative_path,
+    )
     result_records_path = result_dir / "baseline_result_records.jsonl"
     result_records_path.write_text(
         json.dumps(
@@ -525,13 +657,13 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
                 "result_protocol_name": "primary_baseline_formal_import_protocol",
                 "result_source_type": "governed_import",
                 "baseline_result_source": "outputs/external_baseline_results/tree_ring_metrics.csv",
-                "baseline_result_source_digest": "tree_ring_digest",
+                "baseline_result_source_digest": hashlib.sha256(mirror_evidence_path.read_bytes()).hexdigest(),
                 "metric_status": "measured",
                 "positive_count": 340,
                 "negative_count": 340,
                 "attacked_negative_count": 340,
-                "attack_record_count": 680,
-                "supported_record_count": 680,
+                "attack_record_count": 1020,
+                "supported_record_count": 1020,
                 "true_positive_rate": 0.7,
                 "false_positive_rate": 0.0,
                 "clean_false_positive_rate": 0.0,
@@ -541,7 +673,11 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
                 "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
                 "prompt_protocol_digest": "prompt_digest",
                 "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
-                "evidence_paths": ["outputs/external_baseline_results/tree_ring_metrics.csv"],
+                **threshold_provenance,
+                "evidence_paths": [
+                    "outputs/external_baseline_results/tree_ring_metrics.csv",
+                    observation_evidence_relative_path,
+                ],
                 "method_faithful_adapter_ready": True,
                 "paper_run_prompt_protocol_ready": True,
                 "fixed_fpr_baseline_calibration_ready": True,
@@ -572,12 +708,17 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
     )
 
     assert validation_report["formal_import_validation_ready"] is True
-    assert runtime_report["formal_evidence_path_reference_count"] == 1
-    assert runtime_report["existing_formal_evidence_path_count"] == 1
+    assert runtime_report["formal_evidence_path_reference_count"] == 2
+    assert runtime_report["existing_formal_evidence_path_count"] == 2
     assert runtime_report["direct_formal_evidence_path_count"] == 0
-    assert runtime_report["search_resolved_formal_evidence_path_count"] == 1
+    assert runtime_report["search_resolved_formal_evidence_path_count"] == 2
     assert runtime_report["missing_formal_evidence_path_count"] == 0
     assert runtime_report["formal_evidence_path_resolution_ready"] is True
     assert runtime_report["evidence_search_roots"] == [mirror_root.resolve().as_posix()]
-    assert evidence_path_report["resolved_formal_evidence_paths"] == [mirror_evidence_path.resolve().as_posix()]
+    assert evidence_path_report["resolved_formal_evidence_paths"] == sorted(
+        [
+            mirror_evidence_path.resolve().as_posix(),
+            mirror_observation_evidence_path.resolve().as_posix(),
+        ]
+    )
 

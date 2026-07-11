@@ -231,6 +231,16 @@ def _aggregate_test_metrics(
         positive_count = sum(bool(record["formal_evidence_positive"]) for record in group_records)
         rate = positive_count / len(group_records)
         upper = binomial_rate_upper_confidence_bound(positive_count, len(group_records), 0.95)
+        quality_ssim_values = [
+            float(record["source_to_evaluated_ssim"])
+            for record in group_records
+            if isinstance(record.get("source_to_evaluated_ssim"), (int, float))
+        ]
+        quality_psnr_values = [
+            float(record["source_to_evaluated_psnr"])
+            for record in group_records
+            if isinstance(record.get("source_to_evaluated_psnr"), (int, float))
+        ]
         rows.append(
             {
                 "attack_family": attack_family,
@@ -241,6 +251,12 @@ def _aggregate_test_metrics(
                 "positive_count": positive_count,
                 "positive_rate": rate,
                 "content_score_mean": sum(float(record["content_score"]) for record in group_records) / len(group_records),
+                "source_to_evaluated_ssim_mean": (
+                    sum(quality_ssim_values) / len(quality_ssim_values) if quality_ssim_values else None
+                ),
+                "source_to_evaluated_psnr_mean": (
+                    sum(quality_psnr_values) / len(quality_psnr_values) if quality_psnr_values else None
+                ),
                 "positive_rate_upper_95": upper,
                 "target_fpr": target_fpr,
                 "fixed_fpr_upper_bound_ready": (

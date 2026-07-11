@@ -55,10 +55,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--out", default=str(DEFAULT_PLAN_PATH), help="命令计划 JSON 输出路径, 必须位于 outputs/ 下。")
     parser.add_argument("--output-root", default=str(DEFAULT_ADAPTER_OUTPUT_ROOT), help="adapter 输出根目录, 必须位于 outputs/ 下。")
     parser.add_argument("--prompt-plan", default=None, help="扩散类 baseline 使用的 prompt 计划 JSON。")
-    parser.add_argument("--image-pairs", default=None, help="T2SMark 结果适配使用的 image_pairs JSON。")
-    parser.add_argument("--t2smark-results", default=None, help="T2SMark 官方运行产生的 results.json。")
-    parser.add_argument("--attacked-image-manifest", default=None, help="可选 attacked image manifest。")
-    parser.add_argument("--threshold", type=float, default=None, help="可选显式检测阈值。")
     parser.add_argument("--target-fpr", type=float, default=None, help="calibration clean negative 的目标 FPR。")
     parser.add_argument("--require-cuda", action="store_true", help="adapter 运行前要求 CUDA 可用。")
     parser.add_argument("--timeout-seconds", type=int, default=86400, help="单个 baseline 命令超时时间。")
@@ -67,9 +63,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--latent-channels", type=int, default=16)
-    parser.add_argument("--num-inference-steps", type=int, default=28)
-    parser.add_argument("--num-inversion-steps", type=int, default=28)
-    parser.add_argument("--guidance-scale", type=float, default=7.0)
+    parser.add_argument("--num-inference-steps", type=int, default=20)
+    parser.add_argument("--num-inversion-steps", type=int, default=20)
+    parser.add_argument("--guidance-scale", type=float, default=4.5)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument(
@@ -155,13 +151,10 @@ def build_plan(args: argparse.Namespace) -> list[dict[str, Any]]:
     output_root = _ensure_under_outputs(root, _resolve(root, args.output_root))
     output_root.mkdir(parents=True, exist_ok=True)
     selected = selected_primary_baselines(args.methods)
-    if any(method != "t2smark" for method in selected) and not args.prompt_plan:
+    if not args.prompt_plan:
         raise ValueError("运行扩散类 SD3.5 adapter 时必须提供 --prompt-plan")
-    if any(method != "t2smark" for method in selected):
-        if args.target_fpr is None or not 0.0 < float(args.target_fpr) < 1.0:
-            raise ValueError("扩散 baseline 正式运行必须提供位于 (0, 1) 的 --target-fpr")
-    if "t2smark" in selected and (not args.image_pairs or not args.t2smark_results):
-        raise ValueError("运行 T2SMark 结果适配时必须提供 --image-pairs 与 --t2smark-results。")
+    if args.target_fpr is None or not 0.0 < float(args.target_fpr) < 1.0:
+        raise ValueError("扩散 baseline 正式运行必须提供位于 (0, 1) 的 --target-fpr")
 
     rows: list[dict[str, Any]] = []
     for baseline_id in selected:
@@ -181,84 +174,64 @@ def build_plan(args: argparse.Namespace) -> list[dict[str, Any]]:
         ]
         if args.require_cuda:
             command.append("--require-cuda")
-        if baseline_id == "t2smark":
-            if (
-                args.target_fpr is None or not 0.0 < float(args.target_fpr) < 1.0
-            ):
-                raise ValueError("T2SMark 正式运行必须提供位于 (0, 1) 的 --target-fpr")
-            if args.image_pairs:
-                command.extend(["--image-pairs", str(_resolve(root, args.image_pairs))])
-            if args.t2smark_results:
-                command.extend(["--t2smark-results", str(_resolve(root, args.t2smark_results))])
-            if args.attacked_image_manifest:
-                command.extend(["--attacked-image-manifest", str(_resolve(root, args.attacked_image_manifest))])
-            if args.threshold is not None:
-                command.extend(["--threshold", str(args.threshold)])
-            if args.target_fpr is not None:
-                command.extend(["--target-fpr", str(args.target_fpr)])
-        else:
-            if args.prompt_plan:
-                command.extend(["--prompt-plan", str(_resolve(root, args.prompt_plan))])
-            _append_common_model_args(command, args)
-            if baseline_id == "tree_ring":
-                command.extend(["--adapter-mode", str(args.tree_ring_adapter_mode)])
-                if args.tree_ring_adapter_mode == "method_faithful_sd35":
-                    command.extend(
-                        [
-                            "--watermark-seed",
-                            str(args.tree_ring_watermark_seed),
-                            "--w-channel",
-                            str(args.tree_ring_w_channel),
-                            "--w-radius",
-                            str(args.tree_ring_w_radius),
-                            "--w-pattern",
-                            str(args.tree_ring_w_pattern),
-                        ]
-                    )
-                if args.tree_ring_adapter_mode == "method_faithful_sd35" and str(args.tree_ring_attack_families).strip():
-                    command.extend(["--attack-families", str(args.tree_ring_attack_families)])
-            elif baseline_id == "gaussian_shading":
-                command.extend(["--adapter-mode", str(args.gaussian_shading_adapter_mode)])
-                if args.gaussian_shading_adapter_mode == "method_faithful_sd35":
-                    command.extend(
-                        [
-                            "--watermark-seed",
-                            str(args.gaussian_shading_watermark_seed),
-                            "--channel-copy",
-                            str(args.gaussian_shading_channel_copy),
-                            "--hw-copy",
-                            str(args.gaussian_shading_hw_copy),
-                        ]
-                    )
-                if args.gaussian_shading_adapter_mode == "method_faithful_sd35" and str(args.gaussian_shading_attack_families).strip():
-                    command.extend(["--attack-families", str(args.gaussian_shading_attack_families)])
-            elif baseline_id == "shallow_diffuse":
-                command.extend(["--adapter-mode", str(args.shallow_diffuse_adapter_mode)])
-                if args.shallow_diffuse_adapter_mode == "method_faithful_sd35":
-                    command.extend(
-                        [
-                            "--watermark-seed",
-                            str(args.shallow_diffuse_watermark_seed),
-                            "--w-channel",
-                            str(args.shallow_diffuse_w_channel),
-                            "--w-radius",
-                            str(args.shallow_diffuse_w_radius),
-                            "--w-inner-radius",
-                            str(args.shallow_diffuse_w_inner_radius),
-                            "--w-mask-shape",
-                            str(args.shallow_diffuse_w_mask_shape),
-                            "--w-pattern",
-                            str(args.shallow_diffuse_w_pattern),
-                            "--w-injection",
-                            str(args.shallow_diffuse_w_injection),
-                            "--w-measurement",
-                            str(args.shallow_diffuse_w_measurement),
-                            "--edit-fraction",
-                            str(args.shallow_diffuse_edit_fraction),
-                        ]
-                    )
-                if args.shallow_diffuse_adapter_mode == "method_faithful_sd35" and str(args.shallow_diffuse_attack_families).strip():
-                    command.extend(["--attack-families", str(args.shallow_diffuse_attack_families)])
+        command.extend(["--prompt-plan", str(_resolve(root, args.prompt_plan))])
+        _append_common_model_args(command, args)
+        if baseline_id == "tree_ring":
+            command.extend(["--adapter-mode", str(args.tree_ring_adapter_mode)])
+            command.extend(
+                [
+                    "--watermark-seed",
+                    str(args.tree_ring_watermark_seed),
+                    "--w-channel",
+                    str(args.tree_ring_w_channel),
+                    "--w-radius",
+                    str(args.tree_ring_w_radius),
+                    "--w-pattern",
+                    str(args.tree_ring_w_pattern),
+                ]
+            )
+            if str(args.tree_ring_attack_families).strip():
+                command.extend(["--attack-families", str(args.tree_ring_attack_families)])
+        elif baseline_id == "gaussian_shading":
+            command.extend(["--adapter-mode", str(args.gaussian_shading_adapter_mode)])
+            command.extend(
+                [
+                    "--watermark-seed",
+                    str(args.gaussian_shading_watermark_seed),
+                    "--channel-copy",
+                    str(args.gaussian_shading_channel_copy),
+                    "--hw-copy",
+                    str(args.gaussian_shading_hw_copy),
+                ]
+            )
+            if str(args.gaussian_shading_attack_families).strip():
+                command.extend(["--attack-families", str(args.gaussian_shading_attack_families)])
+        elif baseline_id == "shallow_diffuse":
+            command.extend(["--adapter-mode", str(args.shallow_diffuse_adapter_mode)])
+            command.extend(
+                [
+                    "--watermark-seed",
+                    str(args.shallow_diffuse_watermark_seed),
+                    "--w-channel",
+                    str(args.shallow_diffuse_w_channel),
+                    "--w-radius",
+                    str(args.shallow_diffuse_w_radius),
+                    "--w-inner-radius",
+                    str(args.shallow_diffuse_w_inner_radius),
+                    "--w-mask-shape",
+                    str(args.shallow_diffuse_w_mask_shape),
+                    "--w-pattern",
+                    str(args.shallow_diffuse_w_pattern),
+                    "--w-injection",
+                    str(args.shallow_diffuse_w_injection),
+                    "--w-measurement",
+                    str(args.shallow_diffuse_w_measurement),
+                    "--edit-fraction",
+                    str(args.shallow_diffuse_edit_fraction),
+                ]
+            )
+            if str(args.shallow_diffuse_attack_families).strip():
+                command.extend(["--attack-families", str(args.shallow_diffuse_attack_families)])
         rows.append(
             {
                 "baseline_id": baseline_id,

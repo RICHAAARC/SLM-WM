@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass
 from functools import lru_cache
+import hashlib
+import json
 import math
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -16,6 +18,11 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     prompt_protocol_name_for_run,
 )
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.fixed_fpr_observation_audit import (
+    FORMAL_THRESHOLD_SOURCE,
+    audit_fixed_fpr_observation_threshold,
+)
+from experiments.protocol.splits import build_group_split_counts
 from experiments.protocol.calibration import binomial_rate_upper_confidence_bound
 from main.core.digest import build_stable_digest
 
@@ -50,7 +57,6 @@ REQUIRED_METRIC_FIELDS = (
     "clean_false_positive_rate",
     "attacked_false_positive_rate",
     "quality_score_mean",
-    "score_retention_mean",
 )
 REQUIRED_SOURCE_FIELDS = (
     "baseline_result_source",
@@ -61,6 +67,16 @@ REQUIRED_SOURCE_FIELDS = (
     "evidence_paths",
     "prompt_protocol_name",
     "prompt_protocol_digest",
+)
+REQUIRED_THRESHOLD_FIELDS = (
+    "evaluation_split",
+    "calibrated_detection_threshold",
+    "threshold_source",
+    "calibration_clean_negative_count",
+    "test_clean_negative_count",
+    "threshold_digest",
+    "fixed_fpr_observation_evidence_path",
+    "fixed_fpr_observation_evidence_digest",
 )
 METHOD_FAITHFUL_ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
 FORMAL_READINESS_BLOCKING_FLAG_GROUPS = {
@@ -288,6 +304,7 @@ def build_primary_baseline_formal_import_schema(
         "required_ready_flags": list(REQUIRED_READY_FLAGS),
         "required_metric_fields": list(REQUIRED_METRIC_FIELDS),
         "required_source_fields": list(REQUIRED_SOURCE_FIELDS),
+        "required_threshold_fields": list(REQUIRED_THRESHOLD_FIELDS),
         "allowed_result_source_types": list(ALLOWED_RESULT_SOURCE_TYPES),
         "allowed_adapter_boundaries": list(ALLOWED_ADAPTER_BOUNDARIES),
         "allowed_resource_profiles": list(PILOT_PAPER_ATTACK_RESOURCE_PROFILES),
@@ -363,10 +380,10 @@ def _validate_metric_fields(
     row: Mapping[str, Any],
     row_index: int,
     *,
-    minimum_sample_count: int,
+    expected_test_count: int,
     target_fpr: float,
 ) -> list[FormalImportIssue]:
-    """校验正式导入记录中的计数和率值边界。"""
+    """校验正式导入记录中的完整 test 计数和率值边界。"""
 
     issues: list[FormalImportIssue] = []
     positive_count = _int_field(row, "positive_count")
@@ -374,11 +391,11 @@ def _validate_metric_fields(
     attacked_negative_count = _int_field(row, "attacked_negative_count")
     supported_count = _int_field(row, "supported_record_count")
     attack_count = _int_field(row, "attack_record_count")
-    if positive_count < minimum_sample_count:
+    if positive_count != expected_test_count:
         issues.append(_issue(row_index, row, "positive_count", "complete_test_positive_count_required"))
-    if negative_count < minimum_sample_count:
+    if negative_count != expected_test_count:
         issues.append(_issue(row_index, row, "negative_count", "complete_test_negative_count_required"))
-    if attacked_negative_count < minimum_sample_count:
+    if attacked_negative_count != expected_test_count:
         issues.append(
             _issue(
                 row_index,
@@ -387,21 +404,32 @@ def _validate_metric_fields(
                 "complete_test_attacked_negative_count_required",
             )
         )
-    if supported_count <= 0:
-        issues.append(_issue(row_index, row, "supported_record_count", "supported_record_count_required"))
-    if attack_count < supported_count:
-        issues.append(_issue(row_index, row, "attack_record_count", "attack_record_count_must_cover_supported_count"))
+    expected_evidence_count = 3 * expected_test_count
+    if supported_count != expected_evidence_count:
+        issues.append(
+            _issue(row_index, row, "supported_record_count", "complete_test_supported_record_count_required")
+        )
+    if attack_count != expected_evidence_count:
+        issues.append(_issue(row_index, row, "attack_record_count", "complete_test_attack_record_count_required"))
     for field_name in (
         "true_positive_rate",
         "false_positive_rate",
         "clean_false_positive_rate",
         "attacked_false_positive_rate",
-        "quality_score_mean",
-        "score_retention_mean",
     ):
         value = _float_field(row, field_name)
         if not 0.0 <= value <= 1.0:
             issues.append(_issue(row_index, row, field_name, "metric_rate_must_be_in_unit_interval"))
+    quality_value = _float_field(row, "quality_score_mean")
+    if not -1.0 <= quality_value <= 1.0:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "quality_score_mean",
+                "ssim_quality_must_be_in_signed_unit_interval",
+            )
+        )
     clean_fpr = _float_field(row, "clean_false_positive_rate")
     clean_false_positive_value = clean_fpr * negative_count
     clean_false_positive_count = round(clean_false_positive_value)
@@ -427,6 +455,343 @@ def _validate_metric_fields(
     return issues
 
 
+def _read_fixed_fpr_observation_evidence(path: Path) -> tuple[dict[str, Any], ...]:
+    """读取绑定的 observation evidence，并拒绝非结构化或非逐条记录输入。"""
+
+    if path.suffix.lower() == ".jsonl":
+        payload: Any = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    else:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(payload, Mapping):
+        payload = payload.get("observations")
+    if not isinstance(payload, list) or not payload or not all(isinstance(item, Mapping) for item in payload):
+        raise ValueError("fixed-FPR observation evidence 必须是非空 observation 列表")
+    return tuple(dict(item) for item in payload)
+
+
+def _observation_evidence_digest(rows: Iterable[Mapping[str, Any]]) -> str:
+    """计算 observation 列表的规范摘要，使文件排版不影响 provenance。"""
+
+    return build_stable_digest([dict(row) for row in rows])
+
+
+def _observation_attack_name(row: Mapping[str, Any]) -> str:
+    """统一读取 observation 使用的攻击名称字段。"""
+
+    return _str_field(row, "attack_name") or _str_field(row, "attack_condition") or "clean_none"
+
+
+def _validate_exact_prompt_coverage(
+    row: Mapping[str, Any],
+    row_index: int,
+    *,
+    observation_rows: tuple[dict[str, Any], ...],
+    expected_test_count: int,
+) -> list[FormalImportIssue]:
+    """校验单个正式攻击的正负样本是否一一覆盖独立 test Prompt。"""
+
+    issues: list[FormalImportIssue] = []
+    clean_negative_rows = tuple(
+        observation
+        for observation in observation_rows
+        if _str_field(observation, "split") == "test"
+        and _str_field(observation, "attack_family") == "clean"
+        and _str_field(observation, "sample_role") == "clean_negative"
+    )
+    clean_prompt_ids = tuple(_str_field(observation, "prompt_id") for observation in clean_negative_rows)
+    if len(clean_negative_rows) != expected_test_count:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "fixed_fpr_observation_evidence_path",
+                "complete_test_clean_negative_observations_required",
+            )
+        )
+    if any(not prompt_id for prompt_id in clean_prompt_ids) or len(set(clean_prompt_ids)) != len(clean_prompt_ids):
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "fixed_fpr_observation_evidence_path",
+                "unique_test_clean_negative_prompt_coverage_required",
+            )
+        )
+
+    attack_family = _str_field(row, "attack_family")
+    attack_name = _str_field(row, "attack_name")
+    attack_rows = tuple(
+        observation
+        for observation in observation_rows
+        if _str_field(observation, "split") == "test"
+        and _str_field(observation, "attack_family") == attack_family
+        and _observation_attack_name(observation) == attack_name
+    )
+    if attack_family != "clean" and any(
+        _str_field(observation, "sample_role") == "positive_source" for observation in attack_rows
+    ):
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "positive_count",
+                "non_clean_attack_requires_attacked_positive_role",
+            )
+        )
+
+    expected_prompt_set = set(clean_prompt_ids)
+    for sample_role, field_name in (
+        ("attacked_positive", "positive_count"),
+        ("attacked_negative", "attacked_negative_count"),
+    ):
+        role_rows = tuple(
+            observation for observation in attack_rows if _str_field(observation, "sample_role") == sample_role
+        )
+        prompt_ids = tuple(_str_field(observation, "prompt_id") for observation in role_rows)
+        if len(role_rows) != expected_test_count:
+            issues.append(_issue(row_index, row, field_name, f"complete_test_{sample_role}_observations_required"))
+        if (
+            any(not prompt_id for prompt_id in prompt_ids)
+            or len(set(prompt_ids)) != len(prompt_ids)
+            or set(prompt_ids) != expected_prompt_set
+        ):
+            issues.append(_issue(row_index, row, field_name, f"exact_test_prompt_coverage_required_for_{sample_role}"))
+    return issues
+
+
+def _validate_observation_derived_metrics(
+    row: Mapping[str, Any],
+    row_index: int,
+    *,
+    observation_rows: tuple[dict[str, Any], ...],
+) -> list[FormalImportIssue]:
+    """从同一 observation evidence 重算正式计数、率值和 SSIM 均值。"""
+
+    try:
+        attack_family = _str_field(row, "attack_family")
+        attack_name = _str_field(row, "attack_name")
+        attack_rows = tuple(
+            observation
+            for observation in observation_rows
+            if _str_field(observation, "attack_family") == attack_family
+            and _observation_attack_name(observation) == attack_name
+        )
+        expected_values = _build_baseline_metric_values(
+            all_observations=observation_rows,
+            attack_rows=attack_rows,
+            attack_family=attack_family,
+        )
+    except (TypeError, ValueError, ZeroDivisionError):
+        return [
+            _issue(
+                row_index,
+                row,
+                "fixed_fpr_observation_evidence_path",
+                "formal_metrics_cannot_be_recomputed_from_observations",
+            )
+        ]
+    issues: list[FormalImportIssue] = []
+    for field_name in (
+        "positive_count",
+        "negative_count",
+        "attacked_negative_count",
+        "attack_record_count",
+        "supported_record_count",
+    ):
+        if _int_field(row, field_name) != int(expected_values[field_name]):
+            issues.append(
+                _issue(
+                    row_index,
+                    row,
+                    field_name,
+                    "formal_metric_must_match_governed_observations",
+                )
+            )
+    for field_name in (
+        "true_positive_rate",
+        "false_positive_rate",
+        "clean_false_positive_rate",
+        "attacked_false_positive_rate",
+        "quality_score_mean",
+    ):
+        if not math.isclose(
+            _float_field(row, field_name),
+            float(expected_values[field_name]),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            issues.append(
+                _issue(
+                    row_index,
+                    row,
+                    field_name,
+                    "formal_metric_must_match_governed_observations",
+                )
+            )
+    return issues
+
+
+def _validate_threshold_provenance(
+    row: Mapping[str, Any],
+    row_index: int,
+    *,
+    expected_calibration_count: int,
+    expected_test_count: int,
+    target_fpr: float,
+    evidence_root: Path,
+    evidence_search_roots: Iterable[str | Path],
+    observation_evidence_cache: dict[Path, tuple[tuple[dict[str, Any], ...], str]],
+) -> list[FormalImportIssue]:
+    """从绑定 observation evidence 重算 fixed-FPR 阈值和 Prompt 覆盖。"""
+
+    issues: list[FormalImportIssue] = []
+    missing = [field for field in REQUIRED_THRESHOLD_FIELDS if field not in row]
+    for field_name in missing:
+        issues.append(_issue(row_index, row, field_name, "threshold_provenance_field_required"))
+    if missing:
+        return issues
+    if _str_field(row, "evaluation_split") != "test":
+        issues.append(_issue(row_index, row, "evaluation_split", "formal_metrics_must_use_test_split"))
+    try:
+        threshold = float(row["calibrated_detection_threshold"])
+    except (TypeError, ValueError):
+        threshold = math.nan
+    if not math.isfinite(threshold):
+        issues.append(_issue(row_index, row, "calibrated_detection_threshold", "finite_threshold_required"))
+    if _str_field(row, "threshold_source") != FORMAL_THRESHOLD_SOURCE:
+        issues.append(_issue(row_index, row, "threshold_source", "calibration_conformal_source_required"))
+    if _int_field(row, "calibration_clean_negative_count") != expected_calibration_count:
+        issues.append(_issue(row_index, row, "calibration_clean_negative_count", "complete_calibration_count_required"))
+    if _int_field(row, "test_clean_negative_count") != expected_test_count:
+        issues.append(_issue(row_index, row, "test_clean_negative_count", "complete_test_count_required"))
+    if _int_field(row, "test_clean_negative_count") != _int_field(row, "negative_count"):
+        issues.append(_issue(row_index, row, "test_clean_negative_count", "test_count_must_equal_negative_count"))
+
+    evidence_path_value = _str_field(row, "fixed_fpr_observation_evidence_path")
+    evidence_digest = _str_field(row, "fixed_fpr_observation_evidence_digest")
+    if not evidence_path_value:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "fixed_fpr_observation_evidence_path",
+                "governed_threshold_observation_evidence_path_required",
+            )
+        )
+        return issues
+    if evidence_path_value not in _list_field(row, "evidence_paths"):
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "fixed_fpr_observation_evidence_path",
+                "threshold_observation_evidence_must_be_bound",
+            )
+        )
+    resolved_path = _resolve_evidence_path(evidence_root, evidence_path_value, evidence_search_roots)
+    if not resolved_path.is_file():
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "fixed_fpr_observation_evidence_path",
+                "threshold_observation_evidence_missing",
+            )
+        )
+        return issues
+    try:
+        if resolved_path not in observation_evidence_cache:
+            observations = _read_fixed_fpr_observation_evidence(resolved_path)
+            observation_evidence_cache[resolved_path] = (
+                observations,
+                _observation_evidence_digest(observations),
+            )
+        observations, actual_evidence_digest = observation_evidence_cache[resolved_path]
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError):
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "fixed_fpr_observation_evidence_path",
+                "threshold_observation_evidence_invalid",
+            )
+        )
+        return issues
+    if len(evidence_digest) != 64 or evidence_digest != actual_evidence_digest:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "fixed_fpr_observation_evidence_digest",
+                "threshold_observation_evidence_digest_mismatch",
+            )
+        )
+    baseline_id = _str_field(row, "baseline_id")
+    if any(_str_field(observation, "baseline_id") != baseline_id for observation in observations):
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "fixed_fpr_observation_evidence_path",
+                "threshold_observation_baseline_mismatch",
+            )
+        )
+
+    threshold_audit = audit_fixed_fpr_observation_threshold(
+        observations,
+        target_fpr=target_fpr,
+        expected_calibration_negative_count=expected_calibration_count,
+    )
+    if not threshold_audit.fixed_fpr_ready:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "fixed_fpr_observation_evidence_path",
+                "governed_threshold_observation_audit_required",
+            )
+        )
+    if threshold_audit.frozen_threshold is None or not math.isclose(
+        threshold,
+        threshold_audit.frozen_threshold,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "calibrated_detection_threshold",
+                "calibrated_threshold_must_match_governed_observations",
+            )
+        )
+    if _str_field(row, "threshold_digest") != threshold_audit.threshold_digest:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "threshold_digest",
+                "threshold_digest_must_match_governed_observations",
+            )
+        )
+    issues.extend(
+        _validate_exact_prompt_coverage(
+            row,
+            row_index,
+            observation_rows=observations,
+            expected_test_count=expected_test_count,
+        )
+    )
+    issues.extend(
+        _validate_observation_derived_metrics(
+            row,
+            row_index,
+            observation_rows=observations,
+        )
+    )
+    return issues
+
+
 def _validate_evidence_paths(
     row: Mapping[str, Any],
     row_index: int,
@@ -444,6 +809,59 @@ def _validate_evidence_paths(
         for evidence_path in evidence_paths:
             if not _resolve_evidence_path(evidence_root, evidence_path, evidence_search_roots).is_file():
                 issues.append(_issue(row_index, row, "evidence_paths", "evidence_path_missing"))
+    return issues
+
+
+def _validate_result_source_digest(
+    row: Mapping[str, Any],
+    row_index: int,
+    evidence_root: Path,
+    evidence_search_roots: Iterable[str | Path],
+) -> list[FormalImportIssue]:
+    """校验正式结果事实来源属于 evidence 集合且摘要匹配实际文件。"""
+
+    source_value = _str_field(row, "baseline_result_source")
+    source_digest = _str_field(row, "baseline_result_source_digest")
+    issues: list[FormalImportIssue] = []
+    if source_value not in _list_field(row, "evidence_paths"):
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "baseline_result_source",
+                "baseline_result_source_must_be_bound_to_evidence_paths",
+            )
+        )
+    if len(source_digest) != 64:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "baseline_result_source_digest",
+                "baseline_result_source_sha256_required",
+            )
+        )
+        return issues
+    resolved_path = _resolve_evidence_path(
+        evidence_root,
+        source_value,
+        evidence_search_roots,
+    )
+    if resolved_path.is_file():
+        digest = hashlib.sha256()
+        with resolved_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        actual_digest = digest.hexdigest()
+        if actual_digest != source_digest:
+            issues.append(
+                _issue(
+                    row_index,
+                    row,
+                    "baseline_result_source_digest",
+                    "baseline_result_source_sha256_mismatch",
+                )
+            )
     return issues
 
 
@@ -469,6 +887,7 @@ def validate_primary_baseline_formal_import_rows(
     search_roots = _normalized_search_roots(evidence_root_path, evidence_search_roots)
     expected_operating_point = build_fixed_fpr_operating_point(target_fpr)
     expected_prompt_protocol_name = prompt_protocol_name or resolve_paper_run_prompt_protocol_name(evidence_root_path)
+    expected_split_counts = build_group_split_counts(paper_run.prompt_count)
     resource_profiles = tuple(str(value) for value in allowed_resource_profiles if str(value).strip())
     resource_profile_issue_reason = (
         "full_main_resource_profile_required"
@@ -479,6 +898,7 @@ def validate_primary_baseline_formal_import_rows(
     issues: list[FormalImportIssue] = []
     materialized_rows = [dict(row) for row in rows]
     seen_template_keys: set[tuple[str, str, str, str, str]] = set()
+    observation_evidence_cache: dict[Path, tuple[tuple[dict[str, Any], ...], str]] = {}
     for row_index, row in enumerate(materialized_rows):
         row_issues: list[FormalImportIssue] = []
         template_key = _formal_template_key(row)
@@ -519,12 +939,32 @@ def validate_primary_baseline_formal_import_rows(
             _validate_metric_fields(
                 row,
                 row_index,
-                minimum_sample_count=paper_run.minimum_clean_negative_count,
+                expected_test_count=expected_split_counts["test"],
                 target_fpr=target_fpr,
             )
         )
         row_issues.extend(
+            _validate_threshold_provenance(
+                row,
+                row_index,
+                expected_calibration_count=expected_split_counts["calibration"],
+                expected_test_count=expected_split_counts["test"],
+                target_fpr=target_fpr,
+                evidence_root=evidence_root_path,
+                evidence_search_roots=search_roots,
+                observation_evidence_cache=observation_evidence_cache,
+            )
+        )
+        row_issues.extend(
             _validate_evidence_paths(row, row_index, evidence_root_path, require_existing_evidence, search_roots)
+        )
+        row_issues.extend(
+            _validate_result_source_digest(
+                row,
+                row_index,
+                evidence_root_path,
+                search_roots,
+            )
         )
         if row_issues:
             issues.extend(row_issues)
@@ -883,6 +1323,7 @@ def build_primary_baseline_formal_result_record(
     adapter_boundary: str,
     metric_values: Mapping[str, Any],
     ready_flags: Mapping[str, bool],
+    threshold_values: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """构造一条稳定的主表 baseline 正式导入候选记录。"""
 
@@ -904,11 +1345,78 @@ def build_primary_baseline_formal_result_record(
         "supports_paper_claim": False,
         **{field_name: bool(ready_flags.get(field_name, False)) for field_name in REQUIRED_READY_FLAGS},
         **{field_name: metric_values[field_name] for field_name in REQUIRED_METRIC_FIELDS},
+        **dict(threshold_values or {}),
     }
     digest = build_stable_digest(payload)
     payload["baseline_result_record_id"] = f"primary_baseline_formal_result_{digest[:16]}"
     payload["baseline_result_digest"] = digest
     return payload
+
+
+def _select_fixed_fpr_observation_evidence_path(
+    baseline_result_source: str,
+    evidence_paths: Iterable[str],
+) -> str:
+    """从显式 evidence 集合中选择 observation 级 fixed-FPR 事实来源。"""
+
+    candidates = (baseline_result_source, *tuple(evidence_paths))
+    for candidate in dict.fromkeys(str(value) for value in candidates if str(value).strip()):
+        path = Path(candidate)
+        if "observation" in path.stem.lower() and path.suffix.lower() in {".json", ".jsonl"}:
+            return candidate
+    return ""
+
+
+def _threshold_provenance_values(
+    observations: tuple[dict[str, Any], ...],
+    target_fpr: float,
+    *,
+    observation_evidence_path: str,
+) -> dict[str, Any]:
+    """从 observation 重算并绑定 fixed-FPR 阈值来源。"""
+
+    calibration_count = sum(
+        row.get("split") == "calibration"
+        and row.get("sample_role") == "clean_negative"
+        and row.get("attack_family") == "clean"
+        for row in observations
+    )
+    test_count = sum(
+        row.get("split") == "test"
+        and row.get("sample_role") == "clean_negative"
+        and row.get("attack_family") == "clean"
+        for row in observations
+    )
+    if calibration_count <= 0:
+        return {
+            "evaluation_split": "test",
+            "calibrated_detection_threshold": None,
+            "threshold_source": "",
+            "calibration_clean_negative_count": 0,
+            "test_clean_negative_count": test_count,
+            "threshold_digest": "",
+            "fixed_fpr_observation_evidence_path": observation_evidence_path,
+            "fixed_fpr_observation_evidence_digest": (
+                _observation_evidence_digest(observations) if observation_evidence_path else ""
+            ),
+        }
+    audit = audit_fixed_fpr_observation_threshold(
+        observations,
+        target_fpr=target_fpr,
+        expected_calibration_negative_count=calibration_count,
+    )
+    return {
+        "evaluation_split": "test",
+        "calibrated_detection_threshold": audit.frozen_threshold,
+        "threshold_source": FORMAL_THRESHOLD_SOURCE if audit.threshold_source_ready else "",
+        "calibration_clean_negative_count": calibration_count,
+        "test_clean_negative_count": test_count,
+        "threshold_digest": audit.threshold_digest,
+        "fixed_fpr_observation_evidence_path": observation_evidence_path,
+        "fixed_fpr_observation_evidence_digest": (
+            _observation_evidence_digest(observations) if observation_evidence_path else ""
+        ),
+    }
 
 
 def build_t2smark_formal_candidate_records(
@@ -935,6 +1443,15 @@ def build_t2smark_formal_candidate_records(
         if config.enabled and config.resource_profile in PILOT_PAPER_ATTACK_RESOURCE_PROFILES
     }
     evidence_path_values = tuple(evidence_paths)
+    observation_evidence_path = _select_fixed_fpr_observation_evidence_path(
+        baseline_result_source,
+        evidence_path_values,
+    )
+    threshold_values = _threshold_provenance_values(
+        materialized_observations,
+        target_fpr,
+        observation_evidence_path=observation_evidence_path,
+    )
     records: list[dict[str, Any]] = []
     for (attack_family, attack_name), group in _group_observations_by_attack(materialized_observations).items():
         if attack_family == "clean":
@@ -969,6 +1486,7 @@ def build_t2smark_formal_candidate_records(
                 adapter_boundary="sd35_medium_native_official_reproduction",
                 metric_values=metric_values,
                 ready_flags=ready_flags,
+                threshold_values=threshold_values,
             )
         )
     return tuple(records)
@@ -999,17 +1517,17 @@ def _build_baseline_metric_values(
 ) -> dict[str, Any]:
     """按冻结 clean negative operating point 聚合单个攻击设置的指标。"""
 
-    all_rows = tuple(all_observations)
-    group = tuple(attack_rows)
+    all_rows = tuple(
+        row for row in all_observations if _str_field(row, "split") == "test"
+    )
+    group = tuple(row for row in attack_rows if _str_field(row, "split") == "test")
     clean_negative_rows = tuple(
         row
         for row in all_rows
         if _str_field(row, "sample_role") == "clean_negative"
         and _str_field(row, "attack_family") == "clean"
     )
-    positive_rows = tuple(
-        row for row in group if _str_field(row, "sample_role") in {"positive_source", "attacked_positive"}
-    )
+    positive_rows = tuple(row for row in group if _str_field(row, "sample_role") == "attacked_positive")
     attacked_negative_rows = tuple(
         row for row in group if _str_field(row, "sample_role") == "attacked_negative"
     )
@@ -1031,8 +1549,7 @@ def _build_baseline_metric_values(
         "attacked_false_positive_rate": (
             attacked_false_positive / len(attacked_negative_rows) if attacked_negative_rows else 0.0
         ),
-        "quality_score_mean": _mean_measured_rate(group, "quality_score"),
-        "score_retention_mean": _mean_measured_rate(group, "score_retention"),
+        "quality_score_mean": _mean_measured_rate(positive_rows, "quality_score"),
     }
 
 
@@ -1051,6 +1568,7 @@ def build_method_faithful_baseline_candidate_records(
     result_source_type: str = "governed_import",
     adapter_boundary: str = METHOD_FAITHFUL_ADAPTER_BOUNDARY,
     resource_profile: str = "full_main",
+    resource_profile_by_attack: Mapping[tuple[str, str], str] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """把方法忠实 SD3.5 baseline observations 聚合为正式导入候选记录。
 
@@ -1062,6 +1580,16 @@ def build_method_faithful_baseline_candidate_records(
     materialized_observations = tuple(dict(row) for row in observation_rows)
     records: list[dict[str, Any]] = []
     evidence_path_values = tuple(evidence_paths)
+    profile_lookup = dict(resource_profile_by_attack or {})
+    observation_evidence_path = _select_fixed_fpr_observation_evidence_path(
+        baseline_result_source,
+        evidence_path_values,
+    )
+    threshold_values = _threshold_provenance_values(
+        materialized_observations,
+        target_fpr,
+        observation_evidence_path=observation_evidence_path,
+    )
     for (attack_family, attack_name), group in _group_observations_by_attack(materialized_observations).items():
         if attack_family == "clean":
             continue
@@ -1082,7 +1610,10 @@ def build_method_faithful_baseline_candidate_records(
                 baseline_id=baseline_id,
                 attack_family=attack_family,
                 attack_name=attack_name,
-                resource_profile=resource_profile,
+                resource_profile=profile_lookup.get(
+                    (attack_family, attack_name),
+                    resource_profile,
+                ),
                 target_fpr=target_fpr,
                 result_source_type=result_source_type,
                 baseline_result_source=baseline_result_source,
@@ -1092,6 +1623,7 @@ def build_method_faithful_baseline_candidate_records(
                 adapter_boundary=adapter_boundary,
                 metric_values=metric_values,
                 ready_flags=ready_flags,
+                threshold_values=threshold_values,
             )
         )
     return tuple(records)

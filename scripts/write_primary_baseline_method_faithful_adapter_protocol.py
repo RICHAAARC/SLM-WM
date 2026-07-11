@@ -1,4 +1,4 @@
-"""写出主表 external baseline 方法忠实 SD3.5 适配协议产物。"""
+"""写出主表 method-faithful SD3.5 adapter 协议产物。"""
 
 from __future__ import annotations
 
@@ -9,25 +9,26 @@ from pathlib import Path
 import subprocess
 import sys
 from typing import Any
-from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from main.core.digest import build_stable_digest
 from paper_experiments.baselines import (
     build_method_faithful_adapter_status_records,
     build_method_faithful_adapter_summary,
     build_primary_baseline_method_faithful_adapter_schema,
 )
-from experiments.artifacts.artifact_manifest import build_artifact_manifest
-from main.core.digest import build_stable_digest
+from paper_experiments.baselines.method_faithful_observation_collection import (
+    DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT,
+    load_method_faithful_observation_collection,
+)
+
 
 DEFAULT_OUTPUT_DIR = Path("outputs/primary_baseline_method_faithful_adapter_protocol")
-DEFAULT_OBSERVATIONS_PATH = Path("outputs/external_baseline_method_faithful/execution/baseline_observations.json")
-DEFAULT_SPLIT_OBSERVATIONS_DIR = Path("outputs/external_baseline_method_faithful/split_observations")
-PACKAGE_OBSERVATIONS_ENTRY = "outputs/external_baseline_method_faithful/execution/baseline_observations.json"
-PACKAGE_SPLIT_OBSERVATIONS_ENTRY_PREFIX = "outputs/external_baseline_method_faithful/split_observations/"
+DEFAULT_COLLECTION_ROOT = DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT
 
 
 def stable_json_text(value: Any) -> str:
@@ -53,9 +54,8 @@ def ensure_output_dir_under_outputs(root_path: Path, output_dir: str | Path) -> 
     """确保协议产物输出目录位于 outputs/ 下。"""
 
     resolved = resolve_path(root_path, output_dir)
-    outputs_root = (root_path / "outputs").resolve()
     try:
-        resolved.relative_to(outputs_root)
+        resolved.relative_to((root_path / "outputs").resolve())
     except ValueError as exc:
         raise ValueError(f"方法忠实适配协议输出目录必须位于 outputs/ 下: {resolved}") from exc
     resolved.mkdir(parents=True, exist_ok=True)
@@ -87,125 +87,64 @@ def resolve_code_version(root_path: Path) -> str:
     return result.stdout.strip() or "git_version_unavailable"
 
 
-def load_optional_json(path: Path) -> Any:
-    """读取可选 JSON 文件, 缺失时返回空列表。"""
-
-    if not path.is_file():
-        return []
-    return json.loads(path.read_text(encoding="utf-8-sig"))
-
-
-def load_json_from_package(package_path: Path, entry_name: str) -> Any:
-    """从结果 zip 包中读取 JSON 文件, 缺失时返回空列表。"""
-
-    if not package_path.is_file():
-        return []
-    with ZipFile(package_path) as archive:
-        if entry_name not in archive.namelist():
-            return []
-        with archive.open(entry_name) as handle:
-            return json.loads(handle.read().decode("utf-8-sig"))
-
-
-def load_split_json_from_package(package_path: Path, entry_prefix: str) -> list[dict[str, Any]]:
-    """从结果包读取单 baseline 拆分 observation。"""
-
-    if not package_path.is_file():
-        return []
-    rows: list[dict[str, Any]] = []
-    with ZipFile(package_path) as archive:
-        for entry_name in sorted(archive.namelist()):
-            normalized_name = entry_name.replace("\\", "/")
-            if not normalized_name.startswith(entry_prefix) or not normalized_name.endswith("_baseline_observations.json"):
-                continue
-            with archive.open(entry_name) as handle:
-                payload = json.loads(handle.read().decode("utf-8-sig"))
-            if isinstance(payload, list):
-                rows.extend(dict(row) for row in payload)
-    return rows
-
-
-def load_observation_rows(
-    *,
-    observations_path: Path,
-    method_faithful_package_path: Path | None = None,
-) -> list[dict[str, Any]]:
-    """读取 observation 行, 并兼容单 baseline 拆分文件。"""
-
-    rows = []
-    if method_faithful_package_path:
-        package_rows = load_json_from_package(method_faithful_package_path, PACKAGE_OBSERVATIONS_ENTRY)
-        rows.extend(package_rows if isinstance(package_rows, list) else [])
-        rows.extend(load_split_json_from_package(method_faithful_package_path, PACKAGE_SPLIT_OBSERVATIONS_ENTRY_PREFIX))
-    if not rows:
-        local_rows = load_optional_json(observations_path)
-        rows.extend(local_rows if isinstance(local_rows, list) else [])
-    split_dir = observations_path.parent.parent / DEFAULT_SPLIT_OBSERVATIONS_DIR.name
-    if split_dir.is_dir():
-        for path in sorted(split_dir.glob("*_baseline_observations.json")):
-            payload = load_optional_json(path)
-            if isinstance(payload, list):
-                rows.extend(dict(row) for row in payload)
-    deduplicated: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for row in rows:
-        digest = build_stable_digest(row)
-        if digest in seen:
-            continue
-        seen.add(digest)
-        deduplicated.append(dict(row))
-    return deduplicated
-
-
 def write_primary_baseline_method_faithful_adapter_protocol_outputs(
     *,
     root: str | Path = ".",
     output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    observations_path: str | Path = DEFAULT_OBSERVATIONS_PATH,
-    method_faithful_package_path: str | Path | None = None,
+    collection_root: str | Path = DEFAULT_COLLECTION_ROOT,
 ) -> dict[str, Any]:
-    """写出方法忠实 adapter schema、状态记录、摘要和 manifest。"""
+    """从 exact-set collection 写出 adapter schema、状态记录与摘要。"""
 
     root_path = Path(root).resolve()
     resolved_output_dir = ensure_output_dir_under_outputs(root_path, output_dir)
-    resolved_observations_path = resolve_path(root_path, observations_path)
-    resolved_method_faithful_package_path = resolve_path(root_path, method_faithful_package_path) if method_faithful_package_path else None
-
-    observation_rows = load_observation_rows(
-        observations_path=resolved_observations_path,
-        method_faithful_package_path=resolved_method_faithful_package_path,
+    resolved_collection_root = resolve_path(root_path, collection_root)
+    sources = load_method_faithful_observation_collection(
+        resolved_collection_root,
+        project_root=root_path,
     )
+    observation_rows = [dict(row) for source in sources for row in source.rows]
     schema = build_primary_baseline_method_faithful_adapter_schema()
     records = build_method_faithful_adapter_status_records(observation_rows)
     summary = build_method_faithful_adapter_summary(records)
-    summary["generated_at"] = datetime.now(timezone.utc).isoformat()
-    summary["observations_path"] = relative_or_absolute(resolved_observations_path, root_path)
-    summary["method_faithful_package_path"] = (
-        relative_or_absolute(resolved_method_faithful_package_path, root_path) if resolved_method_faithful_package_path else ""
+    summary.update(
+        {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "collection_root": relative_or_absolute(resolved_collection_root, root_path),
+            "input_baseline_ids": [source.baseline_id for source in sources],
+            "input_observation_count": len(observation_rows),
+            "source_manifest_digest": build_stable_digest(
+                [source.transfer_manifest for source in sources]
+            ),
+        }
     )
-    summary["input_observation_count"] = len(observation_rows)
 
     schema_path = resolved_output_dir / "primary_baseline_method_faithful_adapter_schema.json"
     records_path = resolved_output_dir / "primary_baseline_method_faithful_adapter_status_records.jsonl"
     summary_path = resolved_output_dir / "primary_baseline_method_faithful_adapter_summary.json"
     manifest_path = resolved_output_dir / "manifest.local.json"
-
     schema_path.write_text(stable_json_text(schema), encoding="utf-8")
     records_path.write_text("".join(json_line(row) for row in records), encoding="utf-8")
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
-    input_paths = []
-    if resolved_observations_path.exists():
-        input_paths.append(relative_or_absolute(resolved_observations_path, root_path))
-    if resolved_method_faithful_package_path and resolved_method_faithful_package_path.exists():
-        input_paths.append(relative_or_absolute(resolved_method_faithful_package_path, root_path))
+    input_paths = tuple(
+        relative_or_absolute(path, root_path)
+        for source in sources
+        for path in (
+            source.observations_path,
+            source.transfer_manifest_path,
+            source.prompt_plan_path,
+            source.adapter_manifest_path,
+            source.execution_manifest_path,
+        )
+    )
     output_paths = tuple(
-        relative_or_absolute(path, root_path) for path in (schema_path, records_path, summary_path, manifest_path)
+        relative_or_absolute(path, root_path)
+        for path in (schema_path, records_path, summary_path, manifest_path)
     )
     manifest = build_artifact_manifest(
         artifact_id="primary_baseline_method_faithful_adapter_protocol_manifest",
         artifact_type="local_manifest",
-        input_paths=tuple(input_paths),
+        input_paths=input_paths,
         output_paths=output_paths,
         config={
             "schema_digest": build_stable_digest(schema),
@@ -226,8 +165,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="写出主表 external baseline 方法忠实 SD3.5 适配协议产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR), help="输出目录, 必须位于 outputs/ 下。")
-    parser.add_argument("--observations-path", default=str(DEFAULT_OBSERVATIONS_PATH), help="baseline observation JSON 路径。")
-    parser.add_argument("--method-faithful-package-path", default=None, help="可选 external baseline method-faithful 结果 zip 包。")
+    parser.add_argument(
+        "--collection-root",
+        default=str(DEFAULT_COLLECTION_ROOT),
+        help="三个 method-faithful baseline 的 exact-set 物化根目录。",
+    )
     return parser
 
 
@@ -238,12 +180,10 @@ def main() -> None:
     manifest = write_primary_baseline_method_faithful_adapter_protocol_outputs(
         root=args.root,
         output_dir=args.output_dir,
-        observations_path=args.observations_path,
-        method_faithful_package_path=args.method_faithful_package_path,
+        collection_root=args.collection_root,
     )
     print(stable_json_text(manifest), end="")
 
 
 if __name__ == "__main__":
     main()
-

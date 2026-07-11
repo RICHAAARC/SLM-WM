@@ -15,13 +15,13 @@ Tree-Ring 的主表公平对比采用 `method_faithful_sd35` adapter:
 4. 使用 key 区域距离构造 `negative_tree_ring_fft_key_distance` 分数。
 5. 产出统一 `baseline_observations.json`、图像文件、图像 digest、manifest 和可导入候选记录。
 
-该适配属于方法忠实 SD3.5 adapter, 不是 SLM-WM 的方法创新点。它解决 Tree-Ring 官方 legacy Stable Diffusion 实现无法直接运行在 SD3.5 Medium 上的问题, 用于主表 common-backbone 对比。
+该适配属于方法忠实 SD3.5 adapter, 不是 SLM-WM 的方法创新点。它在保留 Tree-Ring 初始 latent 频域密钥与反演检测机制的同时统一到 SD3.5 Medium, 用于主表 common-backbone 对比。
 
 Tree-Ring 的 Fourier ring key 属于该 baseline 的频域机制。SLM-WM 的 `tail_robust` 分支只执行高斯元素幅值筛选, 不执行 Fourier 频带选择。
 
 ## official reference 边界
 
-补充表保留官方原始环境复现边界: `source/` 中的 `run_tree_ring_watermark.py` 是官方 legacy 入口, 推荐在隔离 Python 3.8 / legacy diffusers 环境中复现, 再通过 governed import 记录源码 commit、运行命令、环境报告和结果摘要。该补充表结果用于方法忠实度审计, 不替代主表 SD3.5 common-backbone 对比。
+补充表使用官方参考环境复现边界: `source/` 中的 `run_tree_ring_watermark.py` 在隔离的 Python 3.8 与官方固定 diffusers 依赖中运行, 再通过 governed import 记录源码 commit、运行命令、环境报告和结果摘要。该补充表结果用于方法忠实度审计, 不替代主表 SD3.5 common-backbone 对比。
 
 ## 当前可用入口
 

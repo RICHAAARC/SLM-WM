@@ -41,6 +41,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.runtime.image_metrics import measured_score_retention
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_fixed_fpr_result_records"
@@ -707,7 +708,6 @@ def build_image_only_slm_wm_result_records(
     source_digest = file_digest(metrics_path)
     clean_false_positive_rate = _float_field(clean_negative_row, "positive_rate")
     clean_positive_score = _float_field(clean_positive_row, "content_score_mean")
-    quality_score_mean = float(summary.get("paired_ssim_mean") or 0.0)
     records = []
     for positive_row in rows:
         if _str_field(positive_row, "sample_role") != "positive_source":
@@ -724,6 +724,10 @@ def build_image_only_slm_wm_result_records(
         negative_row = row_lookup.get(key)
         if negative_row is None:
             continue
+        if "source_to_evaluated_ssim_mean" not in positive_row:
+            raise ValueError(
+                f"主方法攻击记录缺少 source-to-attacked SSIM: {key[0]}/{attack_name}/{key[2]}"
+            )
         payload = build_common_result_fields(
             schema=schema,
             method_id="slm_wm_current",
@@ -760,7 +764,7 @@ def build_image_only_slm_wm_result_records(
             }
         )
         attacked_score = _float_field(positive_row, "content_score_mean")
-        score_retention = attacked_score / clean_positive_score if abs(clean_positive_score) > 1e-12 else 0.0
+        score_retention = measured_score_retention(clean_positive_score, attacked_score)
         attach_metric_fields(
             payload,
             positive_count=_int_field(positive_row, "record_count"),
@@ -771,7 +775,7 @@ def build_image_only_slm_wm_result_records(
             false_positive_rate=clean_false_positive_rate,
             clean_false_positive_rate=clean_false_positive_rate,
             attacked_false_positive_rate=_float_field(negative_row, "positive_rate"),
-            quality_score_mean=quality_score_mean,
+            quality_score_mean=_float_field(positive_row, "source_to_evaluated_ssim_mean"),
             score_retention_mean=score_retention,
             confidence_level=float(schema["confidence_level"]),
         )

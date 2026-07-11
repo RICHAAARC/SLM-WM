@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import math
 import os
 from typing import Any
 
@@ -52,36 +51,3 @@ def tensor_norm(tensor: Any) -> float:
     """计算 tensor 的二范数。"""
 
     return float(tensor.detach().float().norm().item())
-
-
-def compute_image_quality_metrics(clean_image: Any, watermarked_image: Any) -> dict[str, float | str]:
-    """计算 paired image 的轻量质量指标。"""
-
-    import torch
-
-    def _image_tensor(image: Any) -> Any:
-        """将 PIL 图像转成 HWC float tensor, 避免质量指标路径依赖 NumPy。"""
-
-        rgb_image = image.convert("RGB")
-        width, height = rgb_image.size
-        image_bytes = bytearray(rgb_image.tobytes())
-        return torch.frombuffer(image_bytes, dtype=torch.uint8).reshape(height, width, 3).float() / 255.0
-
-    clean = _image_tensor(clean_image)
-    watermarked = _image_tensor(watermarked_image)
-    diff = clean - watermarked
-    mse = float((diff * diff).mean().item())
-    mean_abs_error = float(diff.abs().mean().item())
-    psnr: float | str = "inf" if mse == 0.0 else float(20.0 * math.log10(1.0 / math.sqrt(mse)))
-    clean_mean = float(clean.mean().item())
-    watermarked_mean = float(watermarked.mean().item())
-    clean_var = float(clean.var(unbiased=False).item())
-    watermarked_var = float(watermarked.var(unbiased=False).item())
-    covariance = float(((clean - clean_mean) * (watermarked - watermarked_mean)).mean().item())
-    c1 = 0.01**2
-    c2 = 0.03**2
-    ssim = float(
-        ((2 * clean_mean * watermarked_mean + c1) * (2 * covariance + c2))
-        / ((clean_mean**2 + watermarked_mean**2 + c1) * (clean_var + watermarked_var + c2))
-    )
-    return {"psnr": psnr, "ssim": ssim, "mse": mse, "mean_abs_error": mean_abs_error}

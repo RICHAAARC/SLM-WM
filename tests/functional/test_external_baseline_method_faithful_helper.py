@@ -1,9 +1,11 @@
-"""验证外部 baseline method-faithful helper 的冷启动源码适配能力。"""
+"""验证单 baseline method-faithful 正式运行与 transfer 边界。"""
 
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
 from PIL import Image
@@ -12,451 +14,336 @@ from external_baseline.primary.sd35_method_faithful_common import (
     apply_formal_image_attack,
     canonical_attack_family,
     canonical_attack_name,
-    regeneration_formal_image_attack_names,
-    standard_geometric_formal_image_attack_names,
     supported_formal_image_attack_names,
 )
 from paper_experiments.runners.external_baseline_method_faithful import (
     DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
-    DEFAULT_T2SMARK_INVERSION_ENTRY,
-    DEFAULT_T2SMARK_SOURCE_ENTRY,
-    T2SMARK_FORMAL_ATTACK_SOURCE_PATCH_MARKER,
-    PRIMARY_BASELINE_METHODS,
-    T2SMARK_INVERSION_SOURCE_PATCH_MARKER,
+    METHOD_FAITHFUL_BASELINE_IDS,
     ExternalBaselineMethodFaithfulConfig,
-    build_and_run_primary_baseline_adapters,
-    build_t2smark_image_pairs,
-    count_t2smark_result_items,
-    count_t2smark_pair_quality_items,
+    _build_command_plan_command,
     output_paths,
-    patch_t2smark_formal_attack_source,
-    patch_t2smark_inversion_source,
-    run_t2smark_official_if_needed,
-    should_run_t2smark_official,
-    write_primary_baseline_prompt_plan,
-    write_t2smark_prompt_input,
+    package_external_baseline_method_faithful_outputs,
+    prepare_single_baseline_run_directory,
+    resolve_primary_baseline_id,
+    validate_formal_run_config,
+    write_baseline_transfer_files,
 )
 
 
-@pytest.mark.quick
+pytestmark = pytest.mark.quick
+
+
+def write_json(path: Path, payload: object) -> None:
+    """写出测试使用的稳定 JSON。"""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def thresholded_row(
+    *,
+    baseline_id: str,
+    event_id: str,
+    score: float,
+    threshold: float,
+    sample_role: str,
+    attack_family: str,
+    attack_name: str,
+) -> dict[str, object]:
+    """构造带真实阈值判定关系的最小 observation。"""
+
+    return {
+        "event_id": event_id,
+        "baseline_id": baseline_id,
+        "prompt_id": "prompt_000001",
+        "prompt_text": "a ceramic fox",
+        "split": "calibration",
+        "sample_role": sample_role,
+        "attack_family": attack_family,
+        "attack_name": attack_name,
+        "score": score,
+        "threshold": threshold,
+        "threshold_source": "calibration_clean_negative_conformal",
+        "detection_decision": score >= threshold,
+    }
+
+
+def prepare_transfer_inputs(
+    root: Path,
+    config: ExternalBaselineMethodFaithfulConfig,
+    *,
+    declared_count_delta: int = 0,
+) -> dict[str, Path]:
+    """写出 transfer writer 所需的最小真实执行边界文件。"""
+
+    paths = output_paths(root, config)
+    baseline_id = config.primary_baseline_id
+    clean_score = 0.1
+    threshold = math.nextafter(clean_score, math.inf)
+    rows = [
+        thresholded_row(
+            baseline_id=baseline_id,
+            event_id="clean_negative",
+            score=clean_score,
+            threshold=threshold,
+            sample_role="clean_negative",
+            attack_family="clean",
+            attack_name="clean_none",
+        ),
+        thresholded_row(
+            baseline_id=baseline_id,
+            event_id="positive_source",
+            score=0.9,
+            threshold=threshold,
+            sample_role="positive_source",
+            attack_family="clean",
+            attack_name="clean_none",
+        ),
+        thresholded_row(
+            baseline_id=baseline_id,
+            event_id="attacked_positive",
+            score=0.8,
+            threshold=threshold,
+            sample_role="attacked_positive",
+            attack_family="standard_distortion",
+            attack_name="jpeg_compression",
+        ),
+    ]
+    declared_count = len(rows) + declared_count_delta
+    write_json(paths["baseline_observations"], rows)
+    write_json(
+        paths["command_results"],
+        [{"baseline_id": baseline_id, "return_code": 0, "observation_count": declared_count}],
+    )
+    write_json(paths["execution_manifest"], {"observation_count": declared_count})
+    write_json(
+        paths["primary_prompt_plan"],
+        [
+            {
+                "prompt_id": "prompt_000001",
+                "prompt_index": 0,
+                "prompt_set": config.prompt_set,
+                "prompt_text": "a ceramic fox",
+                "prompt_digest": "1" * 64,
+                "split": "calibration",
+            }
+        ],
+    )
+    write_json(
+        paths["adapter_output_root"]
+        / baseline_id
+        / f"{baseline_id}_method_faithful_sd35_adapter_manifest.json",
+        {
+            "baseline_id": baseline_id,
+            "observation_count": declared_count,
+            "generation_protocol": {
+                "num_inference_steps": config.num_inference_steps,
+                "guidance_scale": config.guidance_scale,
+            },
+        },
+    )
+    return paths
+
+
 def test_formal_image_attack_taxonomy_matches_attack_matrix_names() -> None:
-    """method-faithful adapter 应把图像攻击名称映射到攻击矩阵共同协议。"""
+    """baseline 应复用项目统一的17类真实攻击名称。"""
 
     image = Image.new("RGB", (16, 16), color=(128, 128, 128))
     expected_names = set(DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES.split(","))
-
     assert set(supported_formal_image_attack_names()) == expected_names
-    assert canonical_attack_family("jpeg_compression") == "standard_distortion"
-    assert canonical_attack_name("rotation") == "rotation"
-    assert canonical_attack_family("crop_resize") == "geometric_transform"
+    assert len(expected_names) == 17
     assert canonical_attack_family("flow_matching_inversion_regeneration") == "regeneration_attack"
     assert canonical_attack_name("diffusion_purification") == "diffusion_purification"
-    assert canonical_attack_family("photometric_distortion_attack") == "photometric_distortion_attack"
-    assert canonical_attack_name("global_editing_attack") == "global_editing_attack"
-    assert canonical_attack_family("visual_paraphrase_attack") == "visual_paraphrase_attack"
-    assert canonical_attack_family("adversarial_removal_attack") == "adversarial_removal_attack"
-    assert set(regeneration_formal_image_attack_names()).issubset(expected_names)
-    for attack_name in standard_geometric_formal_image_attack_names():
-        attacked_image, transform_name, attack_execution = apply_formal_image_attack(
-            image,
-            attack_family=attack_name,
-            seed=17,
-        )
-        assert attacked_image.mode == "RGB"
-        assert transform_name
-        assert attack_execution["attack_seed_random"] == 17
-
-
-@pytest.mark.quick
-def test_external_baseline_notebooks_use_default_formal_attack_matrix() -> None:
-    """四个 method-faithful baseline 入口应默认使用同一 17 类正式攻击矩阵。"""
-
-    repo_root = Path(__file__).resolve().parents[2]
-    expected_attack_names = set(supported_formal_image_attack_names())
-    assert expected_attack_names == set(DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES.split(","))
-    assert len(expected_attack_names) == 17
-    notebook_by_method = {
-        "tree_ring": "external_baseline_tree_ring_run.ipynb",
-        "gaussian_shading": "external_baseline_gaussian_shading_run.ipynb",
-        "shallow_diffuse": "external_baseline_shallow_diffuse_run.ipynb",
-        "t2smark": "external_baseline_t2smark_run.ipynb",
-    }
-    for method_id, notebook_name in notebook_by_method.items():
-        notebook_path = repo_root / "paper_workflow" / "notebooks" / notebook_name
-        notebook_payload = json.loads(notebook_path.read_text(encoding="utf-8"))
-        notebook_text = "\n".join(
-            "".join(cell.get("source", "")) for cell in notebook_payload.get("cells", [])
-        )
-        assert f'SLM_WM_PRIMARY_BASELINE_METHODS = "{method_id}"' in notebook_text
-        assert 'os.environ["SLM_WM_TREE_RING_ATTACK_FAMILIES"] =' not in notebook_text
-        assert 'os.environ["SLM_WM_GAUSSIAN_SHADING_ATTACK_FAMILIES"] =' not in notebook_text
-        assert 'os.environ["SLM_WM_SHALLOW_DIFFUSE_ATTACK_FAMILIES"] =' not in notebook_text
-        assert 'os.environ["SLM_WM_T2SMARK_FORMAL_ATTACK_FAMILIES"] =' not in notebook_text
-
-
-@pytest.mark.quick
-def test_t2smark_inversion_source_patch_is_idempotent(tmp_path: Path) -> None:
-    """T2SMark 官方 inversion 入口缺少 typing 导入时应被 helper 自动补齐。"""
-
-    inversion_path = tmp_path / DEFAULT_T2SMARK_INVERSION_ENTRY
-    inversion_path.parent.mkdir(parents=True)
-    inversion_path.write_text(
-        "from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3 import *\n\n"
-        "class InversionDiffusion3Pipeline(StableDiffusion3Pipeline):\n"
-        "    def sample(self, prompt: Union[str, List[str]] = None) -> Optional[str]:\n"
-        "        return prompt\n",
-        encoding="utf-8",
+    attacked_image, transform_name, execution = apply_formal_image_attack(
+        image,
+        attack_family="jpeg_compression",
+        seed=17,
     )
-    paths = {"output_dir": tmp_path / "outputs" / "external_baseline_method_faithful"}
-
-    first_report = patch_t2smark_inversion_source(tmp_path, paths)
-    second_report = patch_t2smark_inversion_source(tmp_path, paths)
-    patched_text = inversion_path.read_text(encoding="utf-8")
-
-    assert first_report["source_patch_applied"] is True
-    assert second_report["source_patch_applied"] is False
-    assert patched_text.count(T2SMARK_INVERSION_SOURCE_PATCH_MARKER) == 1
-    assert "from typing import Any, Callable, Dict, List, Optional, Union" in patched_text
-    assert "from diffusers.image_processor import PipelineImageInput" in patched_text
-    compile(patched_text, str(inversion_path), "exec")
+    assert attacked_image.mode == "RGB"
+    assert transform_name
+    assert execution["attack_seed_random"] == 17
 
 
-@pytest.mark.quick
-def test_t2smark_formal_attack_source_patch_adds_common_attack_outputs(tmp_path: Path) -> None:
-    """T2SMark 官方入口应在冷启动时被补齐共同攻击簇输出参数与逻辑。"""
+def test_method_faithful_runner_accepts_exactly_one_registered_baseline() -> None:
+    """正式 runner 不得接受集合、通配符或 T2SMark 重复入口。"""
 
-    source_path = tmp_path / DEFAULT_T2SMARK_SOURCE_ENTRY
-    option_path = source_path.with_name("option.py")
-    source_path.parent.mkdir(parents=True)
-    source_path.write_text(
-        "import os\n"
-        "import json\n"
-        "import torch\n"
-        "from option import args\n\n"
-        "def decode(post_reversed_latents, master_key, key, fake_key, msg):\n"
-        "    return {'norm1_no_w': 0.0, 'norm1_w': 1.0}\n\n"
-        "pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)\n"
-        "results = {}\n"
-        "        if args.save_image:\n"
-        "            generated_image.save(os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png'))\n"
-        "            results[prompt_id][\"robustness\"] = decode_result\n",
-        encoding="utf-8",
-    )
-    option_path.write_text(
-        "import argparse\n\n"
-        "def parse_args():\n"
-        "    parser = argparse.ArgumentParser()\n"
-        "    parser.add_argument(\"--SDv35M\", action=\"store_true\", default=False)\n"
-        "    return parser.parse_args()\n",
-        encoding="utf-8",
-    )
-    paths = {"output_dir": tmp_path / "outputs" / "external_baseline_method_faithful"}
-
-    first_report = patch_t2smark_formal_attack_source(tmp_path, paths)
-    second_report = patch_t2smark_formal_attack_source(tmp_path, paths)
-    patched_source = source_path.read_text(encoding="utf-8")
-    patched_option = option_path.read_text(encoding="utf-8")
-
-    assert first_report["formal_attack_patch_applied"] is True
-    assert second_report["formal_attack_patch_applied"] is False
-    assert T2SMARK_FORMAL_ATTACK_SOURCE_PATCH_MARKER in patched_source
-    assert "slm_attack_families" in patched_option
-    assert "slm_save_clean_pair" in patched_option
-    assert "formal_attacks" in patched_source
-    assert "apply_formal_image_attack" in patched_source
-    assert "from PIL import Image" in patched_source
-    assert "prepare_t2smark_decode_image" in patched_source
-    assert "resize((512, 512), Image.Resampling.BICUBIC)" in patched_source
-    assert "generate_clean_pair_image" in patched_source
-    assert "strict_clean_watermarked_pair" in patched_source
-    assert "score_image_with_master_key" in patched_source
-    assert '"attacked_negative"' in patched_source
-    assert '"attacked_positive"' in patched_source
-    assert '"detection_score"' in patched_source
+    assert tuple(resolve_primary_baseline_id(item) for item in METHOD_FAITHFUL_BASELINE_IDS) == METHOD_FAITHFUL_BASELINE_IDS
+    for invalid in ("", "all", "*", "tree_ring,gaussian_shading", "t2smark"):
+        with pytest.raises(ValueError, match="不支持的 method-faithful baseline id"):
+            resolve_primary_baseline_id(invalid)
 
 
-@pytest.mark.quick
-def test_t2smark_result_reuse_does_not_require_source_cache(tmp_path: Path) -> None:
-    """已有官方结果可复用时, helper 不应要求重新下载或修补 T2SMark 源码。"""
+def test_command_plan_uses_fixed_fpr_and_shared_generation_budget(tmp_path: Path) -> None:
+    """单 baseline 命令必须显式传入当前 FPR 和与主方法一致的生成预算。"""
 
     config = ExternalBaselineMethodFaithfulConfig(
-        require_cuda=False,
-        reuse_existing=True,
-        force_generate=False,
-        robust_test_num=1,
-        t2smark_formal_attack_families="",
-        save_clean_pair=False,
-    )
-    paths = output_paths(tmp_path, config)
-    paths["official_results"].parent.mkdir(parents=True)
-    paths["official_results"].write_text('{"0":{"robustness":{"norm1_no_w":0.1,"norm1_w":0.9}}}\n', encoding="utf-8")
-
-    report = run_t2smark_official_if_needed(tmp_path, config, paths)
-
-    assert report["official_result_reused"] is True
-    assert report["official_return_code"] == 0
-    assert report["source_report"]["source_prepare_skipped"] is True
-    assert not (tmp_path / DEFAULT_T2SMARK_SOURCE_ENTRY).exists()
-
-
-@pytest.mark.quick
-def test_t2smark_result_reuse_requires_configured_sample_count(tmp_path: Path) -> None:
-    """历史 T2SMark 结果样本数不足时, helper 应重新运行而不是复用旧包。"""
-
-    config = ExternalBaselineMethodFaithfulConfig(
-        require_cuda=False,
-        reuse_existing=True,
-        robust_test_num=5,
-        t2smark_formal_attack_families="",
-    )
-    results_path = tmp_path / "outputs" / "external_baseline_method_faithful" / "results.json"
-    results_path.parent.mkdir(parents=True)
-    results_path.write_text('{"0":{"robustness":{}},"metadata":{"note":"old method-faithful"}}\n', encoding="utf-8")
-
-    should_run, reason = should_run_t2smark_official(config, results_path)
-
-    assert count_t2smark_result_items(results_path) == 1
-    assert should_run is True
-    assert reason == "existing_results_sample_count_insufficient"
-
-
-@pytest.mark.quick
-def test_t2smark_result_reuse_requires_strict_pair_quality(tmp_path: Path) -> None:
-    """启用严格 pair-level 质量时, 旧 T2SMark 结果缺少 clean pair 应触发重跑。"""
-
-    config = ExternalBaselineMethodFaithfulConfig(
-        require_cuda=False,
-        reuse_existing=True,
-        robust_test_num=1,
-        t2smark_formal_attack_families="",
-        save_clean_pair=True,
-    )
-    paths = output_paths(tmp_path, config)
-    paths["official_results"].parent.mkdir(parents=True)
-    paths["official_results"].write_text('{"0":{"robustness":{"norm1_no_w":0.1,"norm1_w":0.9}}}\n', encoding="utf-8")
-
-    should_run, reason = should_run_t2smark_official(config, paths["official_results"])
-
-    assert count_t2smark_pair_quality_items(paths["official_results"]) == 0
-    assert should_run is True
-    assert reason == "existing_results_pair_quality_count_insufficient"
-
-
-@pytest.mark.quick
-def test_shared_prompt_inputs_default_to_pilot_paper_samples(tmp_path: Path) -> None:
-    """T2SMark 与主表 adapter 应共享 pilot_paper 规模 prompt 计划。"""
-
-    config = ExternalBaselineMethodFaithfulConfig(require_cuda=False)
-    paths = output_paths(tmp_path, config)
-
-    t2smark_prompt_path = write_t2smark_prompt_input(tmp_path, paths, config)
-    primary_prompt_path = write_primary_baseline_prompt_plan(tmp_path, paths, config)
-
-    t2smark_payload = json.loads(t2smark_prompt_path.read_text(encoding="utf-8"))
-    primary_rows = json.loads(primary_prompt_path.read_text(encoding="utf-8"))
-    assert len(t2smark_payload["annotations"]) == 600
-    assert len(primary_rows) == 600
-    assert primary_rows[0]["prompt_text"] == t2smark_payload["annotations"][0]["caption"]
-    assert primary_rows[0]["prompt_set"] == "pilot_paper"
-
-
-@pytest.mark.quick
-def test_t2smark_image_pairs_refreshes_stale_image_provenance(tmp_path: Path) -> None:
-    """已有 image_pairs 缺少图像路径与 digest 时, helper 应按当前图像目录刷新。"""
-
-    config = ExternalBaselineMethodFaithfulConfig(
-        require_cuda=False,
-        reuse_existing=True,
-        force_generate=False,
-        robust_test_num=5,
-        t2smark_formal_attack_families="",
-    )
-    paths = output_paths(tmp_path, config)
-    paths["official_images"].mkdir(parents=True)
-    clean_dir = paths["official_run_dir"] / "quality_pairs" / "clean"
-    clean_dir.mkdir(parents=True)
-    for index in range(5):
-        image_path = paths["official_images"] / f"{index:05d}.png"
-        image_path.write_bytes(f"fake_png_bytes_for_t2smark_method_faithful_{index}".encode("utf-8"))
-        (clean_dir / f"{index:05d}.png").write_bytes(f"fake_clean_png_bytes_for_t2smark_method_faithful_{index}".encode("utf-8"))
-    paths["image_pairs"].parent.mkdir(parents=True, exist_ok=True)
-    paths["image_pairs"].write_text(
-        '[{"image_id":"t2smark_00000","generated_image_path":"","generated_image_digest":""}]\n',
-        encoding="utf-8",
-    )
-
-    rows = build_t2smark_image_pairs(tmp_path, config, paths)
-
-    assert len(rows) == 5
-    assert rows[0]["generated_image_path"] == "outputs/external_baseline_method_faithful/t2smark_official/t2smark_sd35_medium_method_faithful/images/00000.png"
-    assert rows[0]["generated_image_digest"]
-    assert rows[0]["clean_image_path"].endswith("quality_pairs/clean/00000.png")
-    assert rows[0]["clean_image_digest"]
-    assert rows[0]["strict_pair_quality_ready"] is True
-    assert '"generated_image_digest": ""' not in paths["image_pairs"].read_text(encoding="utf-8")
-
-
-@pytest.mark.quick
-def test_primary_baseline_adapter_plan_includes_four_methods(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """method-faithful helper 应把四个主表 baseline 并入同一个命令计划。"""
-
-    config = ExternalBaselineMethodFaithfulConfig(
-        output_dir="outputs/external_baseline_method_faithful",
+        primary_baseline_id="tree_ring",
+        target_fpr=0.1,
+        num_inference_steps=20,
+        num_inversion_steps=20,
+        guidance_scale=4.5,
+        primary_baseline_max_samples=70,
+        tree_ring_attack_families="jpeg_compression",
         require_cuda=True,
-        primary_baseline_max_samples=1,
-        tree_ring_attack_families="jpeg_compression,rotation",
-        gaussian_shading_attack_families="jpeg_compression,rotation",
-        shallow_diffuse_attack_families="jpeg_compression,rotation",
     )
     paths = output_paths(tmp_path, config)
-    paths["output_dir"].mkdir(parents=True)
-    captured_commands: list[list[str]] = []
+    command = _build_command_plan_command(tmp_path, config, paths, paths["primary_prompt_plan"])
 
-    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        captured_commands.append(command)
-        command_text = " ".join(command)
-        if "run_external_baseline_command_plan.py" in command_text:
-            paths["execution_manifest"].parent.mkdir(parents=True, exist_ok=True)
-            paths["execution_manifest"].write_text('{"observation_count":8}\n', encoding="utf-8")
-            paths["baseline_observations"].write_text("[]\n", encoding="utf-8")
-            paths["command_results"].write_text(
-                "["
-                + ",".join(
-                    f'{{"baseline_id":"{baseline_id}","return_code":0,"observation_count":2}}'
-                    for baseline_id in PRIMARY_BASELINE_METHODS
-                )
-                + "]\n",
-                encoding="utf-8",
-            )
-            for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse"):
-                manifest_path = paths["adapter_output_root"] / baseline_id / f"{baseline_id}_method_faithful_sd35_adapter_manifest.json"
-                manifest_path.parent.mkdir(parents=True, exist_ok=True)
-                manifest_path.write_text(
-                    json.dumps({"baseline_id": baseline_id, "attacked_image_count": 4}, ensure_ascii=False),
-                    encoding="utf-8",
-                )
-        return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
-
-    monkeypatch.setattr("paper_experiments.runners.external_baseline_method_faithful.run_command", fake_run_command)
-
-    report = build_and_run_primary_baseline_adapters(tmp_path, config, paths)
-
-    build_command = captured_commands[0]
-    assert "--methods" in build_command
-    assert build_command[build_command.index("--methods") + 1] == ",".join(PRIMARY_BASELINE_METHODS)
-    assert "--prompt-plan" in build_command
-    assert "--require-cuda" in build_command
-    assert build_command[build_command.index("--tree-ring-adapter-mode") + 1] == "method_faithful_sd35"
-    assert build_command[build_command.index("--gaussian-shading-adapter-mode") + 1] == "method_faithful_sd35"
-    assert build_command[build_command.index("--shallow-diffuse-adapter-mode") + 1] == "method_faithful_sd35"
-    assert build_command[build_command.index("--tree-ring-attack-families") + 1] == "jpeg_compression,rotation"
-    assert build_command[build_command.index("--gaussian-shading-attack-families") + 1] == "jpeg_compression,rotation"
-    assert build_command[build_command.index("--shallow-diffuse-attack-families") + 1] == "jpeg_compression,rotation"
-    assert paths["primary_prompt_plan"].is_file()
-    assert report["primary_baseline_adapter_ready"] is True
-    assert report["primary_baseline_adapter_count"] == 4
-    assert report["primary_baseline_observation_count"] == 8
-    assert report["primary_baseline_attacked_image_count"] == 12
+    assert command[command.index("--methods") + 1] == "tree_ring"
+    assert command[command.index("--target-fpr") + 1] == "0.1"
+    assert command[command.index("--num-inference-steps") + 1] == "20"
+    assert command[command.index("--num-inversion-steps") + 1] == "20"
+    assert command[command.index("--guidance-scale") + 1] == "4.5"
+    assert "--require-cuda" in command
 
 
-@pytest.mark.quick
-def test_primary_baseline_adapter_plan_can_select_single_method(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """单 baseline Notebook 应只生成当前 baseline 的命令计划与拆分 observation。"""
-
-    config = ExternalBaselineMethodFaithfulConfig(
-        output_dir="outputs/external_baseline_method_faithful",
-        require_cuda=True,
-        primary_baseline_max_samples=1,
-        primary_baseline_methods="tree_ring",
-        tree_ring_attack_families="jpeg_compression,rotation",
-    )
-    paths = output_paths(tmp_path, config)
-    paths["output_dir"].mkdir(parents=True)
-    captured_commands: list[list[str]] = []
-
-    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        captured_commands.append(command)
-        command_text = " ".join(command)
-        if "run_external_baseline_command_plan.py" in command_text:
-            paths["execution_manifest"].parent.mkdir(parents=True, exist_ok=True)
-            paths["execution_manifest"].write_text('{"observation_count":2}\n', encoding="utf-8")
-            paths["baseline_observations"].write_text(
-                '[{"baseline_id":"tree_ring","sample_role":"clean_negative"},'
-                '{"baseline_id":"tree_ring","sample_role":"positive_source"}]\n',
-                encoding="utf-8",
-            )
-            paths["command_results"].write_text(
-                '[{"baseline_id":"tree_ring","return_code":0,"observation_count":2}]\n',
-                encoding="utf-8",
-            )
-            manifest_path = paths["adapter_output_root"] / "tree_ring" / "tree_ring_method_faithful_sd35_adapter_manifest.json"
-            manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            manifest_path.write_text('{"baseline_id":"tree_ring","attacked_image_count":4}\n', encoding="utf-8")
-        return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
-
-    monkeypatch.setattr("paper_experiments.runners.external_baseline_method_faithful.run_command", fake_run_command)
-
-    report = build_and_run_primary_baseline_adapters(tmp_path, config, paths)
-
-    build_command = captured_commands[0]
-    assert build_command[build_command.index("--methods") + 1] == "tree_ring"
-    assert report["primary_baseline_adapter_ready"] is True
-    assert report["primary_baseline_adapter_count"] == 1
-    assert report["primary_baseline_ids"] == ["tree_ring"]
-    assert report["ready_primary_baseline_ids"] == ["tree_ring"]
-    assert report["primary_baseline_observation_count"] == 2
-    assert (paths["split_observation_dir"] / "tree_ring_baseline_observations.json").is_file()
-
-
-@pytest.mark.quick
-def test_primary_baseline_adapter_report_keeps_partial_counts_on_runner_failure(
-    tmp_path: Path,
+def test_formal_runner_rejects_generation_budget_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """命令计划中单个 baseline 失败时, helper 仍应汇总已完成 baseline 的诊断计数。"""
+    """正式 GPU 入口不得用环境覆盖生成预算后仍产出可导入结果。"""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    root_path = Path(__file__).resolve().parents[2]
+    invalid = ExternalBaselineMethodFaithfulConfig(
+        prompt_set="probe_paper",
+        prompt_file="configs/paper_main_probe_paper_prompts.txt",
+        primary_baseline_id="tree_ring",
+        target_fpr=0.1,
+        guidance_scale=7.0,
+        primary_baseline_max_samples=70,
+        require_cuda=True,
+    )
+
+    with pytest.raises(ValueError, match="公平预算"):
+        validate_formal_run_config(root_path, invalid)
+
+
+def test_transfer_manifest_binds_actual_observations_and_threshold(tmp_path: Path) -> None:
+    """transfer manifest 必须绑定真实 observation 数量、摘要和冻结阈值。"""
 
     config = ExternalBaselineMethodFaithfulConfig(
-        output_dir="outputs/external_baseline_method_faithful",
-        require_cuda=True,
+        primary_baseline_id="tree_ring",
+        target_fpr=0.1,
         primary_baseline_max_samples=1,
+        tree_ring_attack_families="jpeg_compression",
+        require_cuda=False,
+    )
+    paths = prepare_transfer_inputs(tmp_path, config)
+
+    manifest = write_baseline_transfer_files(tmp_path, config, paths)
+
+    assert manifest["baseline_id"] == "tree_ring"
+    assert manifest["baseline_observation_count"] == 3
+    assert len(manifest["baseline_observations_sha256"]) == 64
+    assert len(manifest["threshold_digest"]) == 64
+    assert manifest["generation_protocol"]["num_inference_steps"] == 20
+    assert manifest["detection_protocol"]["input_access_mode"] == "image_only"
+    assert paths["split_observations"].is_file()
+    assert paths["transfer_manifest"].is_file()
+
+
+def test_transfer_manifest_rejects_declared_observation_count_mismatch(tmp_path: Path) -> None:
+    """命令结果、执行 manifest 或 adapter manifest 不得虚报 observation 数量。"""
+
+    config = ExternalBaselineMethodFaithfulConfig(
+        primary_baseline_id="tree_ring",
+        target_fpr=0.1,
+        primary_baseline_max_samples=1,
+        tree_ring_attack_families="jpeg_compression",
+        require_cuda=False,
+    )
+    paths = prepare_transfer_inputs(tmp_path, config, declared_count_delta=1)
+    with pytest.raises(ValueError, match="声明计数与实际计数不一致"):
+        write_baseline_transfer_files(tmp_path, config, paths)
+
+
+def test_run_directory_preparation_removes_only_selected_baseline_state(tmp_path: Path) -> None:
+    """重跑必须清除当前 baseline 遗留状态，同时保留其他 baseline 的 transfer 文件。"""
+
+    config = ExternalBaselineMethodFaithfulConfig(
+        primary_baseline_id="tree_ring",
+        target_fpr=0.1,
+        primary_baseline_max_samples=1,
+        require_cuda=False,
     )
     paths = output_paths(tmp_path, config)
-    paths["output_dir"].mkdir(parents=True)
+    stale_run_file = paths["run_dir"] / "stale_probe_image.png"
+    stale_run_file.parent.mkdir(parents=True, exist_ok=True)
+    stale_run_file.write_bytes(b"stale")
+    for field_name in ("split_observations", "split_command_results", "transfer_manifest"):
+        write_json(paths[field_name], {"baseline_id": "tree_ring", "stale": True})
+    other_transfer = paths["split_observation_dir"] / "gaussian_shading_baseline_observations.json"
+    write_json(other_transfer, [{"baseline_id": "gaussian_shading"}])
 
-    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        command_text = " ".join(command)
-        if "run_external_baseline_command_plan.py" in command_text:
-            paths["execution_manifest"].parent.mkdir(parents=True, exist_ok=True)
-            paths["execution_manifest"].write_text('{"observation_count":6}\n', encoding="utf-8")
-            paths["baseline_observations"].write_text("[]\n", encoding="utf-8")
-            paths["command_results"].write_text(
-                "["
-                '{"baseline_id":"tree_ring","return_code":0,"observation_count":2},'
-                '{"baseline_id":"gaussian_shading","return_code":0,"observation_count":2},'
-                '{"baseline_id":"shallow_diffuse","return_code":0,"observation_count":2},'
-                '{"baseline_id":"t2smark","return_code":1,"observation_count":0}'
-                "]\n",
-                encoding="utf-8",
-            )
-            for baseline_id in ("tree_ring", "gaussian_shading", "shallow_diffuse"):
-                manifest_path = paths["adapter_output_root"] / baseline_id / f"{baseline_id}_method_faithful_sd35_adapter_manifest.json"
-                manifest_path.parent.mkdir(parents=True, exist_ok=True)
-                manifest_path.write_text(
-                    json.dumps({"baseline_id": baseline_id, "attacked_image_count": 4}, ensure_ascii=False),
-                    encoding="utf-8",
-                )
-            return {"command": command, "return_code": 1, "stdout": "", "stderr": ""}
-        return {"command": command, "return_code": 0, "stdout": "", "stderr": ""}
+    prepare_single_baseline_run_directory(paths)
 
-    monkeypatch.setattr("paper_experiments.runners.external_baseline_method_faithful.run_command", fake_run_command)
+    assert paths["run_dir"].is_dir()
+    assert not stale_run_file.exists()
+    assert all(
+        not paths[field_name].exists()
+        for field_name in ("split_observations", "split_command_results", "transfer_manifest")
+    )
+    assert other_transfer.is_file()
 
-    report = build_and_run_primary_baseline_adapters(tmp_path, config, paths)
 
-    assert report["adapter_execution_ready"] is False
-    assert report["adapter_unsupported_reason"] == "command_plan_runner_failed"
-    assert report["adapter_observation_count"] == 6
-    assert report["primary_baseline_adapter_ready"] is False
-    assert report["primary_baseline_observation_count"] == 6
-    assert report["ready_primary_baseline_ids"] == ["tree_ring", "gaussian_shading", "shallow_diffuse"]
-    assert report["attacked_image_count_by_baseline"]["t2smark"] == 0
+def prepare_package_source(root: Path, baseline_id: str, *, run_decision: str = "pass") -> None:
+    """写出白名单打包所需的单 baseline 最小产物。"""
 
+    output_root = root / "outputs" / "external_baseline_method_faithful"
+    run_dir = output_root / "run_records" / baseline_id
+    split_dir = output_root / "split_observations"
+    write_json(
+        run_dir / f"{baseline_id}_summary.json",
+        {
+            "run_decision": run_decision,
+            "external_baseline_method_faithful_ready": run_decision == "pass",
+        },
+    )
+    write_json(run_dir / f"{baseline_id}_manifest.local.json", {"baseline_id": baseline_id})
+    write_json(split_dir / f"{baseline_id}_baseline_observations.json", [{"baseline_id": baseline_id}])
+    write_json(split_dir / f"{baseline_id}_baseline_command_results.json", [{"baseline_id": baseline_id}])
+    write_json(
+        split_dir / f"{baseline_id}_baseline_transfer_manifest.json",
+        {"baseline_id": baseline_id, "transfer_ready": True},
+    )
+
+
+def test_packages_are_baseline_isolated_and_failure_is_not_packaged(tmp_path: Path) -> None:
+    """不同 baseline 包不得包含同名业务产物，失败运行不得打包。"""
+
+    drive_dir = tmp_path / "drive"
+    archive_entries: list[set[str]] = []
+    for baseline_id in ("tree_ring", "gaussian_shading"):
+        prepare_package_source(tmp_path, baseline_id)
+        archive_name = f"external_baseline_method_faithful_package_{baseline_id}.zip"
+        record = package_external_baseline_method_faithful_outputs(
+            root=tmp_path,
+            drive_output_dir=str(drive_dir),
+            archive_name=archive_name,
+            baseline_id=baseline_id,
+        )
+        with ZipFile(tmp_path / record.archive_path) as archive:
+            archive_entries.append(set(archive.namelist()))
+    assert archive_entries[0].isdisjoint(archive_entries[1])
+
+    prepare_package_source(tmp_path, "shallow_diffuse", run_decision="fail")
+    with pytest.raises(RuntimeError, match="不得生成正式结果包"):
+        package_external_baseline_method_faithful_outputs(
+            root=tmp_path,
+            drive_output_dir=str(drive_dir),
+            archive_name="external_baseline_method_faithful_package_shallow_diffuse.zip",
+            baseline_id="shallow_diffuse",
+        )
+
+
+def test_notebooks_expose_three_single_baseline_entries() -> None:
+    """Colab 层只保留三个 common-backbone 入口，T2SMark 使用专用正式入口。"""
+
+    notebook_root = Path(__file__).resolve().parents[2] / "paper_workflow" / "notebooks"
+    for baseline_id in METHOD_FAITHFUL_BASELINE_IDS:
+        path = notebook_root / f"external_baseline_{baseline_id}_run.ipynb"
+        text = path.read_text(encoding="utf-8")
+        assert f'SLM_WM_PRIMARY_BASELINE_ID = \\"{baseline_id}\\"' in text
+        assert "SLM_WM_PRIMARY_BASELINE_METHODS" not in text
+    assert not (notebook_root / "external_baseline_t2smark_run.ipynb").exists()
+    assert (notebook_root / "official_reference_t2smark_run.ipynb").is_file()

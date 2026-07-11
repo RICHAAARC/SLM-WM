@@ -5,7 +5,7 @@
 正式运行顺序:
 
 1. `semantic_watermark_image_only_run.ipynb`。
-2. 四个 `external_baseline_*_run.ipynb` 和需要的 `official_reference_*_run.ipynb`。
+2. 三个 `external_baseline_*_run.ipynb`、`official_reference_t2smark_run.ipynb` 和补充方法忠实度所需的其他 `official_reference_*_run.ipynb`。
 3. `paper_result_closure_run.ipynb`。
 
 主方法入口在完成全部 Prompt 后释放生成模型显存, 随即从真实 clean / watermarked

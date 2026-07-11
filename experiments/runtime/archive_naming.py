@@ -60,8 +60,8 @@ def build_workflow_archive_name(
         raise ValueError(f"unknown_notebook_workflow:{workflow_name}")
     prefix = WORKFLOW_ARCHIVE_PREFIXES[workflow_name]
     if workflow_name == "external_baseline_method_faithful":
-        selected_baseline = baseline_id or os.environ.get("SLM_WM_PRIMARY_BASELINE_METHODS", "")
-        normalized_baseline = selected_baseline.replace(",", "_").strip("_")
-        if normalized_baseline:
-            prefix = f"{prefix}_{normalized_baseline}"
+        normalized_baseline = (baseline_id or os.environ.get("SLM_WM_PRIMARY_BASELINE_ID", "")).strip()
+        if normalized_baseline not in {"tree_ring", "gaussian_shading", "shallow_diffuse"}:
+            raise ValueError("external_baseline_method_faithful 归档必须指定唯一受支持 baseline_id")
+        prefix = f"{prefix}_{normalized_baseline}"
     return f"{prefix}_{utc_archive_token()}_{resolve_short_commit(root)}.zip"

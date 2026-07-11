@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
+from experiments.protocol.fixed_fpr_observation_audit import (
+    FORMAL_THRESHOLD_SOURCE,
+    conformal_threshold_from_clean_negative_scores,
+)
+from main.core.digest import build_stable_digest
 from paper_experiments.baselines import (
     build_primary_baseline_formal_evidence_collection_rows,
     build_primary_baseline_formal_evidence_collection_summary,
@@ -21,51 +27,143 @@ from paper_experiments.baselines import (
 from scripts.write_primary_baseline_formal_import_protocol import write_primary_baseline_formal_import_protocol_outputs
 
 
-def formal_tree_ring_row(evidence_path: str) -> dict[str, object]:
-    """构造一条满足正式导入 schema 的最小主表 baseline 记录。"""
+PAPER_RUN_PARAMETERS = {
+    "probe_paper": {"calibration": 33, "test": 34, "target_fpr": 0.1},
+    "pilot_paper": {"calibration": 330, "test": 340, "target_fpr": 0.01},
+    "full_paper": {"calibration": 3300, "test": 3400, "target_fpr": 0.001},
+}
 
-    return {
-        "baseline_id": "tree_ring",
-        "attack_family": "standard_distortion",
-        "attack_name": "jpeg_compression",
-        "resource_profile": "full_main",
-        "comparable_operating_point": "fixed_fpr_0.01",
-        "result_protocol_name": "primary_baseline_formal_import_protocol",
-        "result_source_type": "governed_import",
-        "baseline_result_source": evidence_path,
-        "baseline_result_source_digest": "digest",
-        "metric_status": "measured",
-        "positive_count": 340,
-        "negative_count": 340,
-        "attacked_negative_count": 340,
-        "attack_record_count": 680,
-        "supported_record_count": 680,
-        "true_positive_rate": 0.7,
-        "false_positive_rate": 0.0,
-        "clean_false_positive_rate": 0.0,
-        "attacked_false_positive_rate": 0.1,
-        "quality_score_mean": 0.88,
-        "score_retention_mean": 0.77,
-        "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
-        "prompt_protocol_digest": "prompt_digest",
-        "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
-        "evidence_paths": [evidence_path],
-        "method_faithful_adapter_ready": True,
-        "paper_run_prompt_protocol_ready": True,
-        "fixed_fpr_baseline_calibration_ready": True,
-        "attack_matrix_baseline_detection_ready": True,
-        "formal_evidence_paths_ready": True,
-    }
+
+def build_formal_tree_ring_observations(
+    *,
+    paper_run_name: str = "pilot_paper",
+) -> list[dict[str, object]]:
+    """构造共享冻结阈值且逐 Prompt 一一覆盖的 Tree-Ring observations。"""
+
+    parameters = PAPER_RUN_PARAMETERS[paper_run_name]
+    calibration_count = int(parameters["calibration"])
+    test_count = int(parameters["test"])
+    target_fpr = float(parameters["target_fpr"])
+    calibration_scores = [index / calibration_count for index in range(calibration_count)]
+    threshold = conformal_threshold_from_clean_negative_scores(calibration_scores, target_fpr=target_fpr)
+
+    def observation(
+        *,
+        split: str,
+        prompt_id: str,
+        event_id: str,
+        attack_family: str,
+        attack_condition: str,
+        sample_role: str,
+        score: float,
+        quality_score: float | None = None,
+    ) -> dict[str, object]:
+        row: dict[str, object] = {
+            "baseline_id": "tree_ring",
+            "split": split,
+            "prompt_id": prompt_id,
+            "event_id": event_id,
+            "attack_family": attack_family,
+            "attack_condition": attack_condition,
+            "sample_role": sample_role,
+            "score": score,
+            "threshold": threshold,
+            "threshold_source": FORMAL_THRESHOLD_SOURCE,
+            "detection_decision": score >= threshold,
+        }
+        if quality_score is not None:
+            row["quality_score"] = quality_score
+            row["score_retention"] = quality_score
+        return row
+
+    rows = [
+        *[
+            observation(
+                split="calibration",
+                prompt_id=f"calibration_{index:05d}",
+                event_id=f"calibration_clean_negative_{index:05d}",
+                attack_family="clean",
+                attack_condition="clean_none",
+                sample_role="clean_negative",
+                score=score,
+            )
+            for index, score in enumerate(calibration_scores)
+        ],
+        *[
+            observation(
+                split="test",
+                prompt_id=f"test_{index:05d}",
+                event_id=f"test_clean_negative_{index:05d}",
+                attack_family="clean",
+                attack_condition="clean_none",
+                sample_role="clean_negative",
+                score=threshold - 1.0,
+            )
+            for index in range(test_count)
+        ],
+        *[
+            observation(
+                split="test",
+                prompt_id=f"test_{index:05d}",
+                event_id=f"test_attacked_positive_{index:05d}",
+                attack_family="standard_distortion",
+                attack_condition="jpeg_compression",
+                sample_role="attacked_positive",
+                score=threshold + 1.0,
+                quality_score=0.88,
+            )
+            for index in range(test_count)
+        ],
+        *[
+            observation(
+                split="test",
+                prompt_id=f"test_{index:05d}",
+                event_id=f"test_attacked_negative_{index:05d}",
+                attack_family="standard_distortion",
+                attack_condition="jpeg_compression",
+                sample_role="attacked_negative",
+                score=threshold - 1.0,
+                quality_score=0.88,
+            )
+            for index in range(test_count)
+        ],
+    ]
+    return rows
+
+
+def write_formal_tree_ring_row(
+    tmp_path: Path,
+    *,
+    paper_run_name: str = "pilot_paper",
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    """写出受治理 observation evidence，并构造一条可验证的正式候选。"""
+
+    observations = build_formal_tree_ring_observations(paper_run_name=paper_run_name)
+    evidence_relative_path = "outputs/external_baseline_results/tree_ring_observations.json"
+    evidence_path = tmp_path / evidence_relative_path
+    evidence_path.parent.mkdir(parents=True, exist_ok=True)
+    evidence_path.write_text(json.dumps(observations, ensure_ascii=False), encoding="utf-8")
+    parameters = PAPER_RUN_PARAMETERS[paper_run_name]
+    records = build_tree_ring_method_faithful_candidate_records(
+        observation_rows=observations,
+        target_fpr=float(parameters["target_fpr"]),
+        baseline_result_source=evidence_relative_path,
+        baseline_result_source_digest=hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
+        evidence_paths=[evidence_relative_path],
+        prompt_protocol_digest="prompt_digest",
+        paper_run_prompt_protocol_ready=True,
+        fixed_fpr_baseline_calibration_ready=True,
+        attack_matrix_baseline_detection_ready=True,
+    )
+    assert len(records) == 1
+    return records[0], observations
 
 
 @pytest.mark.quick
 def test_formal_import_validator_accepts_governed_full_main_record(tmp_path: Path) -> None:
     """完整边界均满足时, validator 应接受主表正式导入记录。"""
 
-    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
-    evidence_path.parent.mkdir(parents=True)
-    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
-    row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    row, _ = write_formal_tree_ring_row(tmp_path)
 
     report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.01)
 
@@ -76,13 +174,56 @@ def test_formal_import_validator_accepts_governed_full_main_record(tmp_path: Pat
 
 
 @pytest.mark.quick
+def test_formal_import_validator_recomputes_reported_metrics_from_observations(
+    tmp_path: Path,
+) -> None:
+    """候选记录不得用真实 observation 路径配合伪造的 TPR 或质量均值。"""
+
+    row, _ = write_formal_tree_ring_row(tmp_path)
+    row["true_positive_rate"] = 0.5
+    row["quality_score_mean"] = 0.5
+
+    report = validate_primary_baseline_formal_import_rows(
+        [row],
+        evidence_root=tmp_path,
+        target_fpr=0.01,
+    )
+
+    issue_fields = {
+        issue["field_name"]
+        for issue in report["issues"]
+        if issue["reason"] == "formal_metric_must_match_governed_observations"
+    }
+    assert issue_fields == {"true_positive_rate", "quality_score_mean"}
+    assert report["accepted_formal_import_count"] == 0
+
+
+@pytest.mark.quick
+def test_formal_import_validator_rejects_forged_result_source_digest(
+    tmp_path: Path,
+) -> None:
+    """正式结果来源摘要必须等于 evidence 文件的真实 SHA-256。"""
+
+    row, _ = write_formal_tree_ring_row(tmp_path)
+    row["baseline_result_source_digest"] = "f" * 64
+
+    report = validate_primary_baseline_formal_import_rows(
+        [row],
+        evidence_root=tmp_path,
+        target_fpr=0.01,
+    )
+
+    assert "baseline_result_source_sha256_mismatch" in {
+        issue["reason"] for issue in report["issues"]
+    }
+    assert report["accepted_formal_import_count"] == 0
+
+
+@pytest.mark.quick
 def test_formal_import_validator_rejects_duplicate_formal_template_key(tmp_path: Path) -> None:
     """baseline 正式导入不得包含重复的 baseline × attack 模板键。"""
 
-    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
-    evidence_path.parent.mkdir(parents=True)
-    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
-    row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    row, _ = write_formal_tree_ring_row(tmp_path)
 
     report = validate_primary_baseline_formal_import_rows(
         [row, dict(row)],
@@ -99,12 +240,11 @@ def test_formal_import_validator_rejects_duplicate_formal_template_key(tmp_path:
 def test_formal_import_validator_requires_complete_scale_and_fixed_fpr_confidence(tmp_path: Path) -> None:
     """baseline 必须覆盖完整 test split 且 clean FPR 置信上界不超过目标。"""
 
-    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
-    evidence_path.parent.mkdir(parents=True)
-    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
-    incomplete_row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
-    incomplete_row["positive_count"] = 100
-    high_upper_bound_row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    complete_row, _ = write_formal_tree_ring_row(tmp_path)
+    incomplete_row = dict(complete_row)
+    incomplete_row["positive_count"] = 341
+    incomplete_row["attack_record_count"] = 1021
+    high_upper_bound_row = dict(complete_row)
     high_upper_bound_row["false_positive_rate"] = 1 / 340
     high_upper_bound_row["clean_false_positive_rate"] = 1 / 340
 
@@ -118,9 +258,58 @@ def test_formal_import_validator_requires_complete_scale_and_fixed_fpr_confidenc
     assert "complete_test_positive_count_required" in {
         issue["reason"] for issue in incomplete_report["issues"]
     }
+    assert "complete_test_attack_record_count_required" in {
+        issue["reason"] for issue in incomplete_report["issues"]
+    }
     assert "clean_fpr_confidence_upper_bound_exceeds_target" in {
         issue["reason"] for issue in upper_bound_report["issues"]
     }
+
+
+@pytest.mark.quick
+def test_formal_import_validator_recomputes_threshold_from_bound_observations(tmp_path: Path) -> None:
+    """长度合法但与 observation 不一致的阈值摘要和数值不得通过正式门禁。"""
+
+    row, _ = write_formal_tree_ring_row(tmp_path)
+    row["calibrated_detection_threshold"] = float(row["calibrated_detection_threshold"]) + 0.1
+    row["threshold_digest"] = "f" * 64
+    row["fixed_fpr_observation_evidence_digest"] = "e" * 64
+
+    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.01)
+    reasons = {issue["reason"] for issue in report["issues"]}
+
+    assert report["accepted_formal_import_count"] == 0
+    assert "calibrated_threshold_must_match_governed_observations" in reasons
+    assert "threshold_digest_must_match_governed_observations" in reasons
+    assert "threshold_observation_evidence_digest_mismatch" in reasons
+
+
+@pytest.mark.quick
+def test_formal_import_validator_requires_exact_attack_prompt_coverage(tmp_path: Path) -> None:
+    """非 clean 攻击不得替换样本角色，也不得重复或遗漏 test Prompt。"""
+
+    row, observations = write_formal_tree_ring_row(tmp_path)
+    attacked_positive_rows = [
+        observation for observation in observations if observation["sample_role"] == "attacked_positive"
+    ]
+    attacked_negative_rows = [
+        observation for observation in observations if observation["sample_role"] == "attacked_negative"
+    ]
+    attacked_positive_rows[0]["sample_role"] = "positive_source"
+    attacked_positive_rows[1]["prompt_id"] = attacked_positive_rows[2]["prompt_id"]
+    attacked_negative_rows[0]["prompt_id"] = attacked_negative_rows[1]["prompt_id"]
+    evidence_path = tmp_path / str(row["fixed_fpr_observation_evidence_path"])
+    evidence_path.write_text(json.dumps(observations, ensure_ascii=False), encoding="utf-8")
+    row["fixed_fpr_observation_evidence_digest"] = build_stable_digest(observations)
+
+    report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.01)
+    reasons = {issue["reason"] for issue in report["issues"]}
+
+    assert report["accepted_formal_import_count"] == 0
+    assert "non_clean_attack_requires_attacked_positive_role" in reasons
+    assert "complete_test_attacked_positive_observations_required" in reasons
+    assert "exact_test_prompt_coverage_required_for_attacked_positive" in reasons
+    assert "exact_test_prompt_coverage_required_for_attacked_negative" in reasons
 
 
 @pytest.mark.quick
@@ -132,19 +321,12 @@ def test_formal_import_protocol_switches_prompt_schema_to_full_paper(
 
     config_dir = tmp_path / "configs"
     config_dir.mkdir(parents=True)
-    (config_dir / "paper_main_full_paper_prompts.txt").write_text("a full paper prompt\n", encoding="utf-8")
-    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
-    evidence_path.parent.mkdir(parents=True)
-    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
+    (config_dir / "paper_main_full_paper_prompts.txt").write_text(
+        "".join(f"a full paper prompt {index}\n" for index in range(7000)),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
-    row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
-    row["prompt_protocol_name"] = "paper_main_full_paper_prompt_protocol"
-    row["comparable_operating_point"] = "fixed_fpr_0.001"
-    row["positive_count"] = 3400
-    row["negative_count"] = 3400
-    row["attacked_negative_count"] = 3400
-    row["attack_record_count"] = 6800
-    row["supported_record_count"] = 6800
+    row, _ = write_formal_tree_ring_row(tmp_path, paper_run_name="full_paper")
 
     schema = build_primary_baseline_formal_import_schema(target_fpr=0.001, root=tmp_path)
     report = validate_primary_baseline_formal_import_rows([row], evidence_root=tmp_path, target_fpr=0.001)
@@ -160,10 +342,7 @@ def test_formal_import_protocol_switches_prompt_schema_to_full_paper(
 def test_formal_import_validator_rejects_incomplete_adapter_boundary_and_missing_readiness(tmp_path: Path) -> None:
     """method-faithful adapter observation 不得被升级为主表正式结果。"""
 
-    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
-    evidence_path.parent.mkdir(parents=True)
-    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
-    row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    row, _ = write_formal_tree_ring_row(tmp_path)
     row["adapter_boundary"] = "sd35_method_faithful_adapter_not_formal_external_baseline_evidence"
     row["fixed_fpr_baseline_calibration_ready"] = False
 
@@ -184,18 +363,18 @@ def test_t2smark_candidate_records_remain_rejected_until_attack_and_threshold_re
     evidence_path.parent.mkdir(parents=True)
     evidence_path.write_text('{"0":{"robustness":{"norm1_no_w":0.1,"norm1_w":0.9}}}\n', encoding="utf-8")
     observations = [
-        {"baseline_id": "t2smark", "attack_family": "clean", "attack_condition": "clean_none", "sample_role": "clean_negative", "detection_decision": False},
-        {"baseline_id": "t2smark", "attack_family": "standard_distortion", "attack_condition": "jpeg_compression", "sample_role": "attacked_positive", "detection_decision": True, "quality_score": 1.0, "score_retention": 1.0},
-        {"baseline_id": "t2smark", "attack_family": "standard_distortion", "attack_condition": "jpeg_compression", "sample_role": "attacked_negative", "detection_decision": False, "quality_score": 1.0, "score_retention": 1.0},
-        {"baseline_id": "t2smark", "attack_family": "regeneration_attack", "attack_condition": "img2img_regeneration", "sample_role": "attacked_positive", "detection_decision": True, "quality_score": 0.9, "score_retention": 0.8},
-        {"baseline_id": "t2smark", "attack_family": "regeneration_attack", "attack_condition": "img2img_regeneration", "sample_role": "attacked_negative", "detection_decision": False, "quality_score": 0.9, "score_retention": 0.8},
+        {"baseline_id": "t2smark", "split": "test", "attack_family": "clean", "attack_condition": "clean_none", "sample_role": "clean_negative", "detection_decision": False},
+        {"baseline_id": "t2smark", "split": "test", "attack_family": "standard_distortion", "attack_condition": "jpeg_compression", "sample_role": "attacked_positive", "detection_decision": True, "quality_score": 1.0, "score_retention": 1.0},
+        {"baseline_id": "t2smark", "split": "test", "attack_family": "standard_distortion", "attack_condition": "jpeg_compression", "sample_role": "attacked_negative", "detection_decision": False, "quality_score": 1.0, "score_retention": 1.0},
+        {"baseline_id": "t2smark", "split": "test", "attack_family": "regeneration_attack", "attack_condition": "img2img_regeneration", "sample_role": "attacked_positive", "detection_decision": True, "quality_score": 0.9, "score_retention": 0.8},
+        {"baseline_id": "t2smark", "split": "test", "attack_family": "regeneration_attack", "attack_condition": "img2img_regeneration", "sample_role": "attacked_negative", "detection_decision": False, "quality_score": 0.9, "score_retention": 0.8},
     ]
 
     records = build_t2smark_formal_candidate_records(
         observation_rows=observations,
         target_fpr=0.01,
         baseline_result_source="outputs/t2smark_formal_reproduction/results.json",
-        baseline_result_source_digest="digest",
+        baseline_result_source_digest=hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
         evidence_paths=["outputs/t2smark_formal_reproduction/results.json"],
         prompt_protocol_digest="prompt_digest",
         paper_run_prompt_protocol_ready=True,
@@ -219,51 +398,14 @@ def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_p
 
     evidence_path = tmp_path / "outputs" / "tree_ring_method_faithful" / "baseline_observations.json"
     evidence_path.parent.mkdir(parents=True)
-    evidence_path.write_text("[]\n", encoding="utf-8")
-    observations = [
-        *[
-            {
-                "baseline_id": "tree_ring",
-                "attack_family": "clean",
-                "attack_condition": "clean_none",
-                "sample_role": "clean_negative",
-                "detection_decision": False,
-                "quality_score": 1.0,
-                "score_retention": 1.0,
-            }
-            for _ in range(340)
-        ],
-        *[
-            {
-                "baseline_id": "tree_ring",
-                "attack_family": "standard_distortion",
-                "attack_condition": "jpeg_compression",
-                "sample_role": "attacked_positive",
-                "detection_decision": True,
-                "quality_score": 1.0,
-                "score_retention": 1.0,
-            }
-            for _ in range(340)
-        ],
-        *[
-            {
-                "baseline_id": "tree_ring",
-                "attack_family": "standard_distortion",
-                "attack_condition": "jpeg_compression",
-                "sample_role": "attacked_negative",
-                "detection_decision": False,
-                "quality_score": 1.0,
-                "score_retention": 1.0,
-            }
-            for _ in range(340)
-        ],
-    ]
+    observations = build_formal_tree_ring_observations()
+    evidence_path.write_text(json.dumps(observations, ensure_ascii=False), encoding="utf-8")
 
     records = build_tree_ring_method_faithful_candidate_records(
         observation_rows=observations,
         target_fpr=0.01,
         baseline_result_source="outputs/tree_ring_method_faithful/baseline_observations.json",
-        baseline_result_source_digest="digest",
+        baseline_result_source_digest=hashlib.sha256(evidence_path.read_bytes()).hexdigest(),
         evidence_paths=["outputs/tree_ring_method_faithful/baseline_observations.json"],
         prompt_protocol_digest="prompt_digest",
         paper_run_prompt_protocol_ready=True,
@@ -283,10 +425,7 @@ def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_p
 def test_formal_template_coverage_requires_matching_formal_attack_records(tmp_path: Path) -> None:
     """正式模板覆盖应检查候选记录是否覆盖共同协议要求的攻击模板。"""
 
-    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
-    evidence_path.parent.mkdir(parents=True)
-    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
-    accepted_row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    accepted_row, _ = write_formal_tree_ring_row(tmp_path)
     missing_template = {
         "baseline_id": "tree_ring",
         "attack_family": "standard_distortion",
@@ -356,10 +495,7 @@ def test_formal_template_coverage_rejects_unexpected_and_duplicate_accepted_reco
 def test_formal_template_coverage_separates_candidate_and_accepted_matches(tmp_path: Path) -> None:
     """已有候选但未通过 validator 时, 摘要应保留候选覆盖进度并继续阻断正式结论。"""
 
-    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
-    evidence_path.parent.mkdir(parents=True)
-    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
-    candidate_row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    candidate_row, _ = write_formal_tree_ring_row(tmp_path)
     candidate_row["fixed_fpr_baseline_calibration_ready"] = False
     template_rows = [
         {
@@ -387,10 +523,7 @@ def test_formal_template_coverage_separates_candidate_and_accepted_matches(tmp_p
 def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path) -> None:
     """正式证据收集计划应把未通过正式导入的模板转换为可执行补证任务。"""
 
-    evidence_path = tmp_path / "outputs" / "external_baseline_results" / "tree_ring_metrics.csv"
-    evidence_path.parent.mkdir(parents=True)
-    evidence_path.write_text("baseline_id,true_positive_rate\ntree_ring,0.7\n", encoding="utf-8")
-    accepted_row = formal_tree_ring_row("outputs/external_baseline_results/tree_ring_metrics.csv")
+    accepted_row, _ = write_formal_tree_ring_row(tmp_path)
     missing_template = {
         "baseline_id": "tree_ring",
         "attack_family": "standard_distortion",
@@ -512,6 +645,16 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
 
     assert manifest["artifact_id"] == "primary_baseline_formal_import_protocol_manifest"
     assert schema == build_primary_baseline_formal_import_schema(target_fpr=0.01)
+    assert schema["required_threshold_fields"] == [
+        "evaluation_split",
+        "calibrated_detection_threshold",
+        "threshold_source",
+        "calibration_clean_negative_count",
+        "test_clean_negative_count",
+        "threshold_digest",
+        "fixed_fpr_observation_evidence_path",
+        "fixed_fpr_observation_evidence_digest",
+    ]
     assert len(template_rows) == 8
     assert {row["resource_profile"] for row in template_rows} == {"full_main", "full_extra"}
     assert validation["input_record_count"] == 0

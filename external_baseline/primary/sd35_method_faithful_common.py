@@ -118,46 +118,6 @@ def file_digest(path: str | Path) -> str:
     return digest.hexdigest()
 
 
-def measured_image_ssim(reference_image: Any, candidate_image: Any) -> float:
-    """使用标准高斯窗口 SSIM 测量两幅 RGB 图像的感知一致性。"""
-
-    import numpy as np
-    import torch
-    import torch.nn.functional as functional
-
-    reference = np.asarray(reference_image.convert("RGB"), dtype="float32") / 255.0
-    candidate = np.asarray(
-        candidate_image.convert("RGB").resize(reference_image.size),
-        dtype="float32",
-    ) / 255.0
-    left = torch.from_numpy(reference).permute(2, 0, 1).unsqueeze(0)
-    right = torch.from_numpy(candidate).permute(2, 0, 1).unsqueeze(0)
-    axis = torch.arange(11, dtype=torch.float32) - 5.0
-    kernel_1d = torch.exp(-(axis.square()) / (2.0 * 1.5**2))
-    kernel_1d = kernel_1d / kernel_1d.sum()
-    kernel_2d = (kernel_1d[:, None] @ kernel_1d[None, :]).expand(3, 1, 11, 11)
-    mu_left = functional.conv2d(left, kernel_2d, padding=5, groups=3)
-    mu_right = functional.conv2d(right, kernel_2d, padding=5, groups=3)
-    variance_left = functional.conv2d(left.square(), kernel_2d, padding=5, groups=3) - mu_left.square()
-    variance_right = functional.conv2d(right.square(), kernel_2d, padding=5, groups=3) - mu_right.square()
-    covariance = functional.conv2d(left * right, kernel_2d, padding=5, groups=3) - mu_left * mu_right
-    c1 = 0.01**2
-    c2 = 0.03**2
-    ssim = (
-        (2.0 * mu_left * mu_right + c1)
-        * (2.0 * covariance + c2)
-        / ((mu_left.square() + mu_right.square() + c1) * (variance_left + variance_right + c2))
-    )
-    return float(ssim.mean().clamp(0.0, 1.0).item())
-
-
-def measured_score_retention(source_score: float, evaluated_score: float) -> float:
-    """把攻击前后真实检测分数变化映射为 [0, 1] 保持率。"""
-
-    scale = max(abs(float(source_score)), 1e-6)
-    return math.exp(-abs(float(evaluated_score) - float(source_score)) / scale)
-
-
 def as_text(value: Any, default: str = "") -> str:
     """把可选字段规范化为非空字符串。"""
 
