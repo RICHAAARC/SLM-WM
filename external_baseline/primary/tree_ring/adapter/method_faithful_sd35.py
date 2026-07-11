@@ -61,7 +61,7 @@ def write_json(path: str | Path, payload: Any) -> Path:
 
 
 def file_digest(path: str | Path) -> str:
-    """计算文件 SHA256 摘要, 用于图像 provenance 与 governed import。"""
+    """计算文件 SHA256 摘要, 用于图像 provenance 与 受治理导入。"""
 
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:
@@ -256,7 +256,7 @@ class InversionStableDiffusion3PipelineMixin:
         """使用 SD3 scheduler 迭代执行从图像 latent 到初始噪声 latent 的反演。
 
         该函数是适配器内的数值积分, 主要用于让 Tree-Ring 的检测路径在 SD3.5 Medium 上可审计。
-        官方原始环境仍通过 legacy DDIM inversion 作为补充表忠实度参考。
+        官方参考环境使用固定的 DDIM inversion 协议生成补充表忠实度证据。
         """
 
         import torch

@@ -129,10 +129,13 @@ def test_mount_report_can_skip_drive_action() -> None:
 
 @pytest.mark.quick
 def test_dependency_report_is_not_claim_evidence() -> None:
-    """依赖快照只能作为工程 provenance, 不能支持论文 claim。"""
-    report = build_dependency_report(("json",))
+    """受治理依赖报告是必要 provenance, 但不能单独支持论文 claim。"""
+    report = build_dependency_report("workflow_orchestrator")
 
-    assert report["dependency_count"] == 1
-    assert report["missing_dependency_count"] == 0
+    assert report["dependency_count"] > 0
+    assert report["dependency_decision"] == "blocked"
+    assert report["dependency_profile_formal_ready"] is False
+    assert "complete_hash_lock_missing" in report["unsupported_reasons"]
     assert report["supports_paper_claim"] is False
-    assert "json" in report["package_versions"]
+    assert "packaging" in report["package_versions"]
+    assert "torch" not in report["package_versions"]

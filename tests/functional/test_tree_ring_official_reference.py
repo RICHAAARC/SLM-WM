@@ -1,9 +1,10 @@
-"""验证 Tree-Ring 官方原始环境补充表 governed import 协议。"""
+"""验证 Tree-Ring 官方参考环境补充表 受治理导入 协议。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
@@ -33,7 +34,7 @@ from paper_experiments.runners.tree_ring_official_reference import (
     package_tree_ring_official_reference_outputs,
     parse_metric_text,
     patch_tree_ring_model_repository_layout,
-    prepare_tree_ring_legacy_environment,
+    prepare_tree_ring_dependency_environment,
     prepare_tree_ring_model_repository,
     validate_tree_ring_metric_summary,
     write_tree_ring_official_reference_outputs,
@@ -47,6 +48,7 @@ from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+DEPENDENCY_PROFILE_ID = "tree_ring_official_py39_cu117"
 SOURCE_PROVENANCE = {
     "source_worktree_digest": "a" * 64,
     "source_patch_sha256": "b" * 64,
@@ -78,6 +80,107 @@ READY_FLAGS = {
 }
 
 
+class _DependencyProfileFixture(SimpleNamespace):
+    """提供 runner 所需的最小不可变依赖身份接口。"""
+
+    def to_dict(self) -> dict[str, object]:
+        """返回可写入环境报告的 profile 记录。"""
+
+        return dict(vars(self))
+
+
+def _dependency_profile(*, ready: bool) -> _DependencyProfileFixture:
+    """构造不依赖仓库 registry 当前状态的固定 profile 夹具。"""
+
+    return _DependencyProfileFixture(
+        profile_name=DEPENDENCY_PROFILE_ID,
+        profile_digest="f" * 64,
+        direct_requirements_digest="d" * 64,
+        complete_hash_lock_path=(
+            f"configs/dependency_profiles/{DEPENDENCY_PROFILE_ID}_lock.txt"
+        ),
+        complete_hash_lock_present=ready,
+        complete_hash_lock_digest="e" * 64 if ready else None,
+        complete_hash_lock_dependency_count=24 if ready else 0,
+        formal_ready=ready,
+        readiness_blockers=() if ready else ("complete_hash_lock_missing",),
+    )
+
+
+def _ready_dependency_profile() -> _DependencyProfileFixture:
+    """返回具有完整哈希锁的 Tree-Ring 固定依赖 profile 夹具。"""
+
+    return _dependency_profile(ready=True)
+
+
+def _write_isolated_dependency_environment_report(
+    root: Path,
+    python_executable: Path,
+    profile: _DependencyProfileFixture,
+    *,
+    lock_digest: str | None = None,
+) -> tuple[dict[str, object], Path]:
+    """写出隔离环境 API 的最小成功报告。"""
+
+    resolved_lock_digest = lock_digest or profile.complete_hash_lock_digest
+    dependency_preparation_report = {
+        "profile_id": DEPENDENCY_PROFILE_ID,
+        "profile_digest": profile.profile_digest,
+        "complete_hash_lock_digest": resolved_lock_digest,
+        "decision": "pass",
+        "failure_reasons": [],
+        "repository_commit_state": {"all_committed": True},
+        "installation": {"attempted": True, "return_code": 0},
+        "runtime_comparison": {
+            "decision": "pass",
+            "environment_match": True,
+            "mismatches": [],
+        },
+    }
+    report: dict[str, object] = {
+        "report_schema": "isolated_dependency_environment_preparation_report",
+        "schema_version": 1,
+        "profile_id": DEPENDENCY_PROFILE_ID,
+        "profile_digest": profile.profile_digest,
+        "direct_requirements_digest": profile.direct_requirements_digest,
+        "complete_hash_lock_digest": resolved_lock_digest,
+        "complete_hash_lock_dependency_count": profile.complete_hash_lock_dependency_count,
+        "provisioned": True,
+        "formal_preparation_completed": True,
+        "formal_ready": True,
+        "decision": "pass",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+        "python_executable_path": str(python_executable),
+        "python_executable_sha256": "a" * 64,
+        "python_executable_sha256_after_preparation": "a" * 64,
+        "dependency_preparation_report_digest": "b" * 64,
+        "dependency_preparation_report": dependency_preparation_report,
+        "provision_report": {
+            "decision": "provisioned",
+            "provisioned": True,
+            "profile_digest": profile.profile_digest,
+        },
+        "command_results": [
+            {
+                "operation": "dependency_profile_preparation",
+                "return_code": 0,
+            }
+        ],
+    }
+    report_path = (
+        root
+        / "outputs"
+        / "dependency_profiles"
+        / DEPENDENCY_PROFILE_ID
+        / "isolated_dependency_environment_report.json"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return report, report_path
 def _complete_metric_values(sample_count: int = 10) -> dict[str, float | int]:
     """返回显式包含全部检测与 CLIP 字段的正式指标夹具。"""
 
@@ -150,7 +253,7 @@ def test_tree_ring_official_reference_prepares_local_model_repository(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """本地模型目录应补齐 legacy transformers 需要的 model_index 兼容项。"""
+    """本地模型目录应补齐固定 transformers 版本需要的 model_index 项。"""
 
     local_model_dir = tmp_path / "runtime_model" / "stable_diffusion_2_1_base"
     config = TreeRingOfficialReferenceConfig(
@@ -159,7 +262,7 @@ def test_tree_ring_official_reference_prepares_local_model_repository(
         official_model_id="Manojb/stable-diffusion-2-1-base",
         local_model_repository_dir=str(local_model_dir),
         prepare_local_model_repository=True,
-        patch_model_index_for_legacy_transformers=True,
+        patch_model_index_for_pinned_transformers=True,
         require_cuda=False,
     )
     paths = output_paths(tmp_path, config)
@@ -259,70 +362,120 @@ def test_tree_ring_official_reference_patches_model_repository_layout(tmp_path: 
 
 
 @pytest.mark.quick
-def test_tree_ring_official_reference_prepares_isolated_legacy_environment(
+def test_tree_ring_official_reference_prepares_fixed_dependency_profile(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Colab 独立会话应能把官方 legacy 依赖准备过程收敛为可审计报告。"""
+    """只有隔离环境 API 报告与固定 profile 身份完全一致时才允许运行。"""
 
+    dependency_python = tmp_path / "tree_ring_env" / "bin" / "python"
+    dependency_python.parent.mkdir(parents=True)
+    dependency_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    profile = _ready_dependency_profile()
     config = TreeRingOfficialReferenceConfig(
         output_dir="outputs/tree_ring_official_reference",
         source_dir="external_baseline/primary/tree_ring/source",
         require_cuda=False,
-        prepare_legacy_environment=True,
-        legacy_environment_prefix=str(tmp_path / "legacy_env"),
-        micromamba_path=str(tmp_path / "bin" / "micromamba"),
-        legacy_torch_specs="torch==1.13.0+cu117 torchvision==0.14.0+cu117",
-        legacy_package_specs="transformers==4.23.1 diffusers==0.11.1",
     )
     paths = output_paths(tmp_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
 
-    def fake_run_shell_command(command: str, *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        micromamba_path = Path(config.micromamba_path)
-        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
-        micromamba_path.write_text("#!/bin/sh\n", encoding="utf-8")
-        return {"command": command, "return_code": 0, "stdout": "micromamba ready", "stderr": ""}
+    def fake_prepare_environment(
+        profile_id: str,
+        *,
+        repository_root: Path,
+    ) -> tuple[dict[str, object], Path]:
+        assert profile_id == DEPENDENCY_PROFILE_ID
+        assert repository_root == tmp_path
+        return _write_isolated_dependency_environment_report(
+            tmp_path,
+            dependency_python,
+            profile,
+        )
 
-    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        if command[:2] == [config.micromamba_path, "create"]:
-            legacy_python = Path(config.legacy_environment_prefix) / "bin" / "python"
-            legacy_python.parent.mkdir(parents=True, exist_ok=True)
-            legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
-        return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.get_dependency_profile",
+        lambda _profile_id, _registry_path: profile,
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.require_dependency_profile_ready",
+        lambda _profile_id, _registry_path: profile,
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.prepare_isolated_dependency_environment",
+        fake_prepare_environment,
+    )
 
-    monkeypatch.setattr("paper_experiments.runners.tree_ring_official_reference.run_shell_command", fake_run_shell_command)
-    monkeypatch.setattr("paper_experiments.runners.tree_ring_official_reference.run_command", fake_run_command)
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.validate_official_reference_dependency_environment_report",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            validation_errors=(),
+            dependency_python_executable=str(dependency_python),
+            dependency_installation_performed=True,
+            isolated_dependency_environment_report_digest="f" * 64,
+            passed=True,
+        ),
+    )
 
-    report = prepare_tree_ring_legacy_environment(tmp_path, config, paths)
-    saved_report = json.loads(paths["legacy_environment_prepare_result"].read_text(encoding="utf-8"))
+    report = prepare_tree_ring_dependency_environment(tmp_path, config, paths)
+    saved_report = json.loads(paths["dependency_environment_prepare_result"].read_text(encoding="utf-8"))
 
-    assert report["legacy_environment_requested"] is True
-    assert report["legacy_environment_ready"] is True
-    assert saved_report["legacy_python_executable"].replace("\\", "/").endswith("legacy_env/bin/python")
-    assert len(saved_report["command_results"]) >= 4
+    assert report["dependency_environment_requested"] is True
+    assert report["dependency_environment_ready"] is True
+    assert report["dependency_profile_id"] == DEPENDENCY_PROFILE_ID
+    assert report["dependency_environment_report_valid"] is True
+    assert report["dependency_environment_materialized"] is True
+    assert saved_report["dependency_lock_digest"] == "e" * 64
+    assert len(saved_report["command_results"]) == 1
 
 
 @pytest.mark.quick
-def test_tree_ring_official_reference_default_config_reads_legacy_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Notebook 参数层应能显式开启 Tree-Ring 官方 legacy 环境准备。"""
+def test_tree_ring_dependency_profile_missing_lock_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """固定 profile 缺少完整哈希锁时不得调用隔离环境 API。"""
 
-    monkeypatch.setenv("SLM_WM_TREE_RING_PREPARE_LEGACY_ENV", "1")
-    monkeypatch.setenv("SLM_WM_TREE_RING_LEGACY_ENV_PREFIX", "/content/tree_ring_legacy_env")
-    monkeypatch.setenv("SLM_WM_TREE_RING_LEGACY_TORCH_SPECS", "torch==1.13.0+cu117")
-    monkeypatch.setenv("SLM_WM_TREE_RING_LEGACY_PACKAGE_SPECS", "transformers==4.23.1 diffusers==0.11.1")
+    profile = _dependency_profile(ready=False)
+    config = TreeRingOfficialReferenceConfig(require_cuda=False)
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True, exist_ok=True)
+
+    def reject_profile(_profile_id: str, _registry_path: Path) -> object:
+        raise RuntimeError("完整哈希锁缺失")
+
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.get_dependency_profile",
+        lambda _profile_id, _registry_path: profile,
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.require_dependency_profile_ready",
+        reject_profile,
+    )
+
+    report = prepare_tree_ring_dependency_environment(tmp_path, config, paths)
+
+    assert report["dependency_environment_ready"] is False
+    assert report["dependency_profile_ready"] is False
+    assert report["dependency_lock_ready"] is False
+    assert report["dependency_environment_failure_reason"] == "dependency_hash_lock_not_ready"
+    assert report["command_results"] == []
+
+
+@pytest.mark.quick
+def test_tree_ring_official_reference_default_config_uses_fixed_dependency_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Notebook 参数层不能覆盖隔离解释器或固定依赖身份。"""
+
     monkeypatch.setenv("SLM_WM_TREE_RING_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
     monkeypatch.setenv("SLM_WM_TREE_RING_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
     monkeypatch.setenv("SLM_WM_TREE_RING_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
     monkeypatch.setenv("SLM_WM_TREE_RING_LOCAL_MODEL_REPOSITORY_DIR", "/content/tree_ring_model_repository/stable_diffusion_2_1_base")
-    monkeypatch.setenv("SLM_WM_TREE_RING_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1")
+    monkeypatch.setenv("SLM_WM_TREE_RING_PATCH_MODEL_INDEX_FOR_PINNED_TRANSFORMERS", "1")
 
     config = build_default_config()
 
-    assert config.prepare_legacy_environment is True
-    assert config.legacy_environment_prefix == "/content/tree_ring_legacy_env"
-    assert config.legacy_torch_specs == "torch==1.13.0+cu117"
-    assert config.legacy_package_specs == "transformers==4.23.1 diffusers==0.11.1"
+    assert "official_python_executable" not in config.__dataclass_fields__
+    assert config.dependency_profile_id == DEPENDENCY_PROFILE_ID
     assert config.official_model_id == "Manojb/stable-diffusion-2-1-base"
     assert config.dataset == "Gustavosta/Stable-Diffusion-Prompts"
     assert config.dataset_revision == "d816d4a05cb89bde39dd99284c459801e1e7e69a"
@@ -330,17 +483,15 @@ def test_tree_ring_official_reference_default_config_reads_legacy_environment(mo
     assert config.patch_model_repository_layout is True
     assert config.prepare_local_model_repository is True
     assert config.local_model_repository_dir == "/content/tree_ring_model_repository/stable_diffusion_2_1_base"
-    assert config.patch_model_index_for_legacy_transformers is True
+    assert config.patch_model_index_for_pinned_transformers is True
 
 
 @pytest.mark.quick
-def test_tree_ring_official_reference_default_legacy_dependency_specs_pin_dataset_filesystem() -> None:
-    """默认 legacy 依赖应固定 datasets 与 fsspec 的兼容组合。"""
+def test_tree_ring_official_reference_rejects_alternate_dependency_profile() -> None:
+    """正式参考不得由调用方替换固定依赖 profile。"""
 
-    config = TreeRingOfficialReferenceConfig()
-
-    assert "datasets==2.6.1" in config.legacy_package_specs
-    assert "fsspec==2022.10.0" in config.legacy_package_specs
+    with pytest.raises(ValueError, match="固定依赖 profile"):
+        TreeRingOfficialReferenceConfig(dependency_profile_id="workflow_orchestrator")
 
 
 @pytest.mark.quick
@@ -353,12 +504,12 @@ def test_tree_ring_official_reference_rejects_unregistered_prompt_dataset() -> N
 
 @pytest.mark.quick
 def test_tree_ring_official_reference_record_validates_when_all_boundaries_ready() -> None:
-    """官方 legacy 复现记录满足证据边界时应通过补充表导入校验。"""
+    """官方固定 profile 复现记录满足证据边界时应通过补充表导入校验。"""
 
     record = build_tree_ring_official_reference_record(
         official_entrypoint="external_baseline/primary/tree_ring/source/run_tree_ring_watermark.py",
         official_repository_commit="3015283d9cf82e90b628f02ad2121bd37408ca9a",
-        official_environment_profile="python3.8_diffusers0.11.1_legacy_ddim",
+        official_environment_profile=DEPENDENCY_PROFILE_ID,
         baseline_result_source="outputs/tree_ring_official_reference/summary.json",
         baseline_result_source_digest="digest",
         evidence_paths=["outputs/tree_ring_official_reference/summary.json"],
@@ -397,7 +548,7 @@ def test_tree_ring_record_builder_rejects_missing_scientific_metric() -> None:
         build_tree_ring_official_reference_record(
             official_entrypoint="external_baseline/primary/tree_ring/source/run_tree_ring_watermark.py",
             official_repository_commit="3015283d9cf82e90b628f02ad2121bd37408ca9a",
-            official_environment_profile="python3.8_diffusers0.11.1_legacy_ddim",
+            official_environment_profile=DEPENDENCY_PROFILE_ID,
             baseline_result_source="outputs/tree_ring_official_reference/summary.json",
             baseline_result_source_digest="digest",
             evidence_paths=["outputs/tree_ring_official_reference/summary.json"],
@@ -414,7 +565,7 @@ def test_tree_ring_record_validator_rejects_openclip_checkpoint_drift() -> None:
     record = build_tree_ring_official_reference_record(
         official_entrypoint="external_baseline/primary/tree_ring/source/run_tree_ring_watermark.py",
         official_repository_commit="3015283d9cf82e90b628f02ad2121bd37408ca9a",
-        official_environment_profile="python3.8_diffusers0.11.1_legacy_ddim",
+        official_environment_profile=DEPENDENCY_PROFILE_ID,
         baseline_result_source="outputs/tree_ring_official_reference/summary.json",
         baseline_result_source_digest="digest",
         evidence_paths=["outputs/tree_ring_official_reference/summary.json"],
@@ -462,6 +613,7 @@ def test_tree_ring_record_report_requires_current_command_and_complete_metrics(t
         _complete_metric_values(),
         {"official_command_requested": False, "return_code": -1},
         source_status,
+        {"dependency_environment_ready": True, "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID},
         model_report,
         openclip_report,
     )
@@ -477,6 +629,7 @@ def test_tree_ring_record_report_requires_current_command_and_complete_metrics(t
         incomplete_metrics,
         {"official_command_requested": True, "return_code": 0},
         source_status,
+        {"dependency_environment_ready": True, "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID},
         model_report,
         openclip_report,
     )
@@ -493,6 +646,7 @@ def test_tree_ring_record_report_requires_current_command_and_complete_metrics(t
         _complete_metric_values(),
         {"official_command_requested": True, "return_code": 0},
         source_status,
+        {"dependency_environment_ready": True, "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID},
         model_report,
         openclip_report,
     )
@@ -502,12 +656,12 @@ def test_tree_ring_record_report_requires_current_command_and_complete_metrics(t
 
 @pytest.mark.quick
 def test_tree_ring_official_reference_rejects_main_table_eligibility() -> None:
-    """官方 legacy 参考记录不得伪装为主表同协议结果。"""
+    """官方固定 profile 参考记录不得伪装为主表同协议结果。"""
 
     record = build_tree_ring_official_reference_record(
         official_entrypoint="external_baseline/primary/tree_ring/source/run_tree_ring_watermark.py",
         official_repository_commit="3015283d9cf82e90b628f02ad2121bd37408ca9a",
-        official_environment_profile="python3.8_diffusers0.11.1_legacy_ddim",
+        official_environment_profile=DEPENDENCY_PROFILE_ID,
         baseline_result_source="outputs/tree_ring_official_reference/summary.json",
         baseline_result_source_digest="digest",
         evidence_paths=["outputs/tree_ring_official_reference/summary.json"],
@@ -530,7 +684,7 @@ def test_tree_ring_official_reference_rejects_main_table_eligibility() -> None:
     reasons = {issue["reason"] for issue in report["issues"]}
 
     assert report["reference_import_ready"] is False
-    assert "legacy_reference_must_not_enter_main_table" in reasons
+    assert "official_reference_must_not_enter_main_table" in reasons
 
 
 @pytest.mark.quick
@@ -577,6 +731,14 @@ def test_tree_ring_official_reference_package_embeds_archive_self_description(
                 "official_command_return_code": 0,
                 "official_execution_ready": True,
                 "required_metrics_ready": True,
+                "dependency_profile_id": DEPENDENCY_PROFILE_ID,
+                "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID,
+                "dependency_profile_ready": True,
+                "dependency_lock_ready": True,
+                "dependency_environment_materialized": True,
+                "dependency_environment_report_valid": True,
+                "dependency_profile_digest": "f" * 64,
+                "dependency_lock_digest": "e" * 64,
                 "model_source_ready": True,
                 "model_snapshot_scope_ready": True,
                 "openclip_source_ready": True,
@@ -729,11 +891,10 @@ def test_tree_ring_official_reference_cold_start_clones_source(
 
 @pytest.mark.quick
 def test_tree_ring_official_reference_parses_metric_text_and_custom_python(tmp_path: Path) -> None:
-    """官方日志解析与 legacy Python 可执行文件配置应保持可审计。"""
+    """官方日志解析与固定 profile Python 可执行文件配置应保持可审计。"""
 
     config = TreeRingOfficialReferenceConfig(
         source_dir="external_baseline/primary/tree_ring/source",
-        official_python_executable="/opt/tree-ring-legacy/bin/python",
         sample_count=5,
     )
 
@@ -741,7 +902,11 @@ def test_tree_ring_official_reference_parses_metric_text_and_custom_python(tmp_p
         "clip_score_mean: 0.33\nw_clip_score_mean: 0.32\nauc: 0.95\nacc: 0.84\nTPR@1%FPR: 0.72\n",
         sample_count=5,
     )
-    command = build_official_command(tmp_path, config)
+    command = build_official_command(
+        tmp_path,
+        config,
+        "/opt/tree-ring-profile/bin/python",
+    )
     incomplete_metrics = parse_metric_text("auc: 0.95\n", sample_count=5)
     incomplete_validation = validate_tree_ring_metric_summary(incomplete_metrics, sample_count=5)
 
@@ -750,7 +915,7 @@ def test_tree_ring_official_reference_parses_metric_text_and_custom_python(tmp_p
     assert "clip_score_mean" not in incomplete_metrics
     assert incomplete_validation["required_metrics_ready"] is False
     assert "clip_score_mean" in incomplete_validation["missing_required_metric_fields"]
-    assert command[0] == "/opt/tree-ring-legacy/bin/python"
+    assert command[0] == "/opt/tree-ring-profile/bin/python"
     assert command[command.index("--dataset") + 1] == "Gustavosta/Stable-Diffusion-Prompts"
     assert command[command.index("--reference_model") + 1] == OPENCLIP_MODEL_NAME
     assert command[command.index("--reference_model_pretrain") + 1].replace("\\", "/").endswith(

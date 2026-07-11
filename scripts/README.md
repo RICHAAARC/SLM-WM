@@ -2,6 +2,15 @@
 
 `scripts/` 提供可脱离 Notebook 运行的命令行入口, 不承载方法数学实现。
 
+## 正式依赖入口
+
+- `prepare_dependency_profile.py`: 薄转发入口, 在当前解释器中调用 `experiments.runtime.dependency_preparation`; 仅消费已提交且 ready 的完整哈希锁。
+- `prepare_isolated_dependency_environment.py`: 薄转发入口, 使用固定 `uv==0.11.28` 为五个科学 profile 创建并正式准备独立 CPython 子环境。
+- `materialize_dependency_lock_candidate.py`: 在与目标 profile 精确匹配的解释器中解析完整 wheel 闭包候选, 只写 `outputs/`, 不直接修改 `configs/`。
+- `write_dependency_lock_review_bundle.py`: 仅允许 CPU `workflow_orchestrator` 在当前解释器物化候选且不传 PyTorch index; 其余五个 CUDA 科学 profile 必须先准备父编排环境, 再 provision 独立子解释器并在子解释器中运行同一物化器。脚本会从实际 pip report 重建规范候选锁并与候选文件及 provenance 逐项核对。
+
+两个 prepare 脚本不保存依赖列表、安装逻辑或环境判断。可复用实现位于 `experiments/runtime/`, 因而普通 Linux GPU 服务器与 Colab 使用同一内层 API。
+
 ## GPU 入口
 
 - `run_image_only_dataset_runtime.py`: 执行当前论文级别的完整主方法、仅图像检测和共同攻击。

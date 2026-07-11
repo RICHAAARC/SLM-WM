@@ -722,7 +722,7 @@ def write_failure_outputs(
     """写出失败诊断，但不生成可被正式闭合选择的结果包。"""
 
     paths["run_dir"].mkdir(parents=True, exist_ok=True)
-    environment_report = build_runtime_environment_report()
+    environment_report = build_runtime_environment_report("sd35_method_runtime_gpu")
     write_json(paths["environment_report"], environment_report)
     summary = {
         "run_decision": "fail",
@@ -771,6 +771,20 @@ def write_external_baseline_method_faithful_outputs(
         ) as run_progress:
             device_report = ensure_cuda_if_requested(config.require_cuda)
             update_progress(run_progress, profile="operation=ensure_cuda")
+            environment_report = build_runtime_environment_report(
+                "sd35_method_runtime_gpu",
+                verified_formal_execution_lock=formal_execution_run_lock,
+            )
+            environment_report["external_baseline_device_report"] = device_report
+            write_json(paths["environment_report"], environment_report)
+            if environment_report["dependency_environment_ready"] is not True:
+                blockers = ",".join(
+                    environment_report["dependency_readiness_blockers"]
+                )
+                raise RuntimeError(
+                    f"dependency_profile_environment_not_ready:{blockers}"
+                )
+            update_progress(run_progress, profile="operation=write_environment_report")
             adapter_report = build_and_run_primary_baseline_adapter(
                 root_path,
                 config,
@@ -778,12 +792,6 @@ def write_external_baseline_method_faithful_outputs(
                 progress=run_progress,
             )
             update_progress(run_progress, profile="operation=run_baseline_adapter")
-            environment_report = build_runtime_environment_report(
-                verified_formal_execution_lock=formal_execution_run_lock,
-            )
-            environment_report["external_baseline_device_report"] = device_report
-            write_json(paths["environment_report"], environment_report)
-            update_progress(run_progress, profile="operation=write_environment_report")
     except Exception as error:
         return write_failure_outputs(root_path, config, paths, error)
 
@@ -811,6 +819,16 @@ def write_external_baseline_method_faithful_outputs(
         "transfer_manifest_path": adapter_report["transfer_manifest_path"],
         "threshold_digest": adapter_report["threshold_digest"],
         "environment_report_path": relative_or_absolute(paths["environment_report"], root_path),
+        "dependency_profile_id": environment_report["dependency_profile_id"],
+        "dependency_profile_digest": environment_report[
+            "dependency_profile_digest"
+        ],
+        "dependency_lock_digest": environment_report[
+            "complete_hash_lock_digest"
+        ],
+        "dependency_environment_ready": environment_report[
+            "dependency_environment_ready"
+        ],
         "supports_paper_claim": False,
         "unsupported_reason": "formal_import_and_comparison_required",
     }

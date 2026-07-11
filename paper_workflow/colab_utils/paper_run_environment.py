@@ -35,11 +35,11 @@ FORMAL_IMAGE_ATTACK_FAMILIES = (
     "global_editing_attack,local_editing_attack,visual_paraphrase_attack,adversarial_removal_attack"
 )
 _SD35_MODEL_SOURCE = get_model_source("stabilityai_stable_diffusion_3_5_medium")
-_LEGACY_DIFFUSION_MODEL_SOURCE = get_model_source("manojb_stable_diffusion_2_1_base")
+_OFFICIAL_REFERENCE_DIFFUSION_MODEL_SOURCE = get_model_source("manojb_stable_diffusion_2_1_base")
 _CLIP_MODEL_SOURCE = get_model_source("openai_clip_vit_base_patch32")
-_LEGACY_DIFFUSION_SNAPSHOT_DIR = build_shared_hugging_face_snapshot_dir(
-    _LEGACY_DIFFUSION_MODEL_SOURCE.repository_id,
-    _LEGACY_DIFFUSION_MODEL_SOURCE.revision,
+_OFFICIAL_REFERENCE_DIFFUSION_SNAPSHOT_DIR = build_shared_hugging_face_snapshot_dir(
+    _OFFICIAL_REFERENCE_DIFFUSION_MODEL_SOURCE.repository_id,
+    _OFFICIAL_REFERENCE_DIFFUSION_MODEL_SOURCE.revision,
 )
 
 
@@ -255,49 +255,32 @@ def _configure_official_reference_tree_ring(paper_run: Any, sample_count_token: 
     _configure_official_reference_common(paper_run, "TREE_RING", sample_count_token)
     _set_default_env("SLM_WM_TREE_RING_OFFICIAL_OUTPUT_DIR", "outputs/tree_ring_official_reference")
     _set_default_env("SLM_WM_TREE_RING_OFFICIAL_SOURCE_DIR", "external_baseline/primary/tree_ring/source")
-    _set_default_env("SLM_WM_TREE_RING_OFFICIAL_RUN_NAME", "tree_ring_official_legacy_reference")
+    _set_default_env("SLM_WM_TREE_RING_OFFICIAL_RUN_NAME", "tree_ring_official_reference")
     _set_default_env("SLM_WM_TREE_RING_OFFICIAL_START_INDEX", "0")
-    _set_env("SLM_WM_TREE_RING_OFFICIAL_MODEL_ID", _LEGACY_DIFFUSION_MODEL_SOURCE.repository_id)
-    _set_env("SLM_WM_TREE_RING_OFFICIAL_MODEL_REVISION", _LEGACY_DIFFUSION_MODEL_SOURCE.revision)
+    _set_env("SLM_WM_TREE_RING_OFFICIAL_MODEL_ID", _OFFICIAL_REFERENCE_DIFFUSION_MODEL_SOURCE.repository_id)
+    _set_env("SLM_WM_TREE_RING_OFFICIAL_MODEL_REVISION", _OFFICIAL_REFERENCE_DIFFUSION_MODEL_SOURCE.revision)
     _set_default_env("SLM_WM_TREE_RING_UPSTREAM_OFFICIAL_MODEL_ID", "stabilityai/stable-diffusion-2-1-base")
     _set_default_env("SLM_WM_TREE_RING_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
     _set_default_env("SLM_WM_TREE_RING_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
-    _set_env("SLM_WM_TREE_RING_LOCAL_MODEL_REPOSITORY_DIR", _LEGACY_DIFFUSION_SNAPSHOT_DIR)
-    _set_default_env("SLM_WM_TREE_RING_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1")
-    _set_default_env("SLM_WM_TREE_RING_OFFICIAL_PYTHON_EXECUTABLE", "")
-    _set_default_env("SLM_WM_TREE_RING_PREPARE_LEGACY_ENV", "1")
-    _set_default_env("SLM_WM_TREE_RING_LEGACY_ENV_PREFIX", "/content/tree_ring_legacy_env")
-    _set_default_env("SLM_WM_TREE_RING_MICROMAMBA_PATH", "/content/bin/micromamba")
-    _set_default_env("SLM_WM_TREE_RING_LEGACY_PYTHON_VERSION", "3.9")
-    _set_default_env("SLM_WM_TREE_RING_LEGACY_TORCH_SPECS", "torch==1.13.0+cu117 torchvision==0.14.0+cu117")
-    _set_default_env("SLM_WM_TREE_RING_LEGACY_PYTORCH_INDEX_URL", "https://download.pytorch.org/whl/cu117")
-    _set_default_env(
-        "SLM_WM_TREE_RING_LEGACY_PACKAGE_SPECS",
-        "transformers==4.23.1 diffusers==0.11.1 huggingface_hub==0.10.1 datasets==2.6.1 "
-        "pyarrow<13 fsspec==2022.10.0 numpy<2 scikit-learn scipy tqdm wandb open_clip_torch==2.7.0 ftfy regex",
-    )
+    _set_env("SLM_WM_TREE_RING_LOCAL_MODEL_REPOSITORY_DIR", _OFFICIAL_REFERENCE_DIFFUSION_SNAPSHOT_DIR)
+    _set_default_env("SLM_WM_TREE_RING_PATCH_MODEL_INDEX_FOR_PINNED_TRANSFORMERS", "1")
 
 
 def _configure_official_reference_gaussian_shading(paper_run: Any, sample_count_token: str, target_fpr_text: str) -> None:
     _configure_official_reference_common(paper_run, "GAUSSIAN_SHADING", sample_count_token)
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_OUTPUT_DIR", "outputs/gaussian_shading_official_reference")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_SOURCE_DIR", "external_baseline/primary/gaussian_shading/source")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_RUN_NAME", "gaussian_shading_official_legacy_reference")
-    _set_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_MODEL_ID", _LEGACY_DIFFUSION_MODEL_SOURCE.repository_id)
-    _set_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_MODEL_REVISION", _LEGACY_DIFFUSION_MODEL_SOURCE.revision)
+    _set_default_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_RUN_NAME", "gaussian_shading_official_reference")
+    _set_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_MODEL_ID", _OFFICIAL_REFERENCE_DIFFUSION_MODEL_SOURCE.repository_id)
+    _set_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_MODEL_REVISION", _OFFICIAL_REFERENCE_DIFFUSION_MODEL_SOURCE.revision)
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_UPSTREAM_OFFICIAL_MODEL_ID", "stabilityai/stable-diffusion-2-1-base")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
     _set_default_env(
         "SLM_WM_GAUSSIAN_SHADING_LOCAL_MODEL_REPOSITORY_DIR",
-        _LEGACY_DIFFUSION_SNAPSHOT_DIR,
+        _OFFICIAL_REFERENCE_DIFFUSION_SNAPSHOT_DIR,
     )
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_PYTHON_EXECUTABLE", "")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_PREPARE_LEGACY_ENV", "1")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_LEGACY_ENV_PREFIX", "/content/gaussian_shading_legacy_env")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_MICROMAMBA_PATH", "/content/bin/micromamba")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_LEGACY_PYTHON_VERSION", "3.8")
+    _set_default_env("SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_INDEX_FOR_PINNED_TRANSFORMERS", "1")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_NUM_INFERENCE_STEPS", "50")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_NUM_INVERSION_STEPS", "50")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_USE_CHACHA", "1")
@@ -307,10 +290,10 @@ def _configure_official_reference_shallow_diffuse(paper_run: Any, sample_count_t
     _configure_official_reference_common(paper_run, "SHALLOW_DIFFUSE", sample_count_token)
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_OUTPUT_DIR", "outputs/shallow_diffuse_official_reference")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_SOURCE_DIR", "external_baseline/primary/shallow_diffuse/source")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_RUN_NAME", "shallow_diffuse_official_legacy_reference")
+    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_RUN_NAME", "shallow_diffuse_official_reference")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_START_INDEX", "0")
-    _set_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_ID", _LEGACY_DIFFUSION_MODEL_SOURCE.repository_id)
-    _set_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_REVISION", _LEGACY_DIFFUSION_MODEL_SOURCE.revision)
+    _set_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_ID", _OFFICIAL_REFERENCE_DIFFUSION_MODEL_SOURCE.repository_id)
+    _set_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_MODEL_REVISION", _OFFICIAL_REFERENCE_DIFFUSION_MODEL_SOURCE.revision)
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_UPSTREAM_OFFICIAL_MODEL_ID", "stabilityai/stable-diffusion-2-1-base")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_DATASET", "Gustavosta/Stable-Diffusion-Prompts")
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_IMAGE_LENGTH", "512")
@@ -329,24 +312,9 @@ def _configure_official_reference_shallow_diffuse(paper_run: Any, sample_count_t
     _set_default_env("SLM_WM_SHALLOW_DIFFUSE_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
     _set_default_env(
         "SLM_WM_SHALLOW_DIFFUSE_LOCAL_MODEL_REPOSITORY_DIR",
-        _LEGACY_DIFFUSION_SNAPSHOT_DIR,
+        _OFFICIAL_REFERENCE_DIFFUSION_SNAPSHOT_DIR,
     )
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_PYTHON_EXECUTABLE", "")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_PREPARE_LEGACY_ENV", "1")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_LEGACY_ENV_PREFIX", "/content/shallow_diffuse_legacy_env")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_MICROMAMBA_PATH", "/content/bin/micromamba")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_LEGACY_PYTHON_VERSION", "3.9")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_LEGACY_TORCH_SPECS", "torch==1.13.0+cu117 torchvision==0.14.0+cu117")
-    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_LEGACY_PYTORCH_INDEX_URL", "https://download.pytorch.org/whl/cu117")
-    _set_default_env(
-        "SLM_WM_SHALLOW_DIFFUSE_LEGACY_PACKAGE_SPECS",
-        "transformers==4.23.1 diffusers==0.11.1 huggingface_hub==0.10.1 datasets==2.6.1 "
-        "pyarrow<13 fsspec==2022.10.0 numpy==1.24.4 scipy==1.10.1 Pillow==9.5.0 tqdm==4.66.2 "
-        "scikit-learn==1.3.2 wandb==0.16.6 open_clip_torch==2.7.0 ftfy==6.2.0 regex==2023.12.25 "
-        "Requests==2.31.0 omegaconf==2.3.0 einops==0.4.1 matplotlib==3.7.5 timm==0.5.4 "
-        "opencv-python-headless==4.9.0.80",
-    )
+    _set_default_env("SLM_WM_SHALLOW_DIFFUSE_PATCH_MODEL_INDEX_FOR_PINNED_TRANSFORMERS", "1")
 
 
 def _configure_official_reference_t2smark(paper_run: Any, sample_count_token: str, target_fpr_text: str) -> None:

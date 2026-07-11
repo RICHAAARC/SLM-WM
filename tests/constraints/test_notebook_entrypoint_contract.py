@@ -10,12 +10,28 @@ import pytest
 
 NOTEBOOK_DIR = Path("paper_workflow/notebooks")
 REQUIRED_NOTEBOOKS = {
+    "colab_drive_cold_start_smoke.ipynb",
     "semantic_watermark_image_only_run.ipynb",
     "paper_result_closure_run.ipynb",
     "external_baseline_tree_ring_run.ipynb",
     "external_baseline_gaussian_shading_run.ipynb",
     "external_baseline_shallow_diffuse_run.ipynb",
     "official_reference_t2smark_run.ipynb",
+    "official_reference_tree_ring_run.ipynb",
+    "official_reference_gaussian_shading_run.ipynb",
+    "official_reference_shallow_diffuse_run.ipynb",
+}
+NOTEBOOK_DEPENDENCY_PROFILES = {
+    "semantic_watermark_image_only_run.ipynb": "sd35_method_runtime_gpu",
+    "external_baseline_tree_ring_run.ipynb": "sd35_method_runtime_gpu",
+    "external_baseline_gaussian_shading_run.ipynb": "sd35_method_runtime_gpu",
+    "external_baseline_shallow_diffuse_run.ipynb": "sd35_method_runtime_gpu",
+    "official_reference_t2smark_run.ipynb": "t2smark_sd35_gpu",
+    "official_reference_tree_ring_run.ipynb": "workflow_orchestrator",
+    "official_reference_gaussian_shading_run.ipynb": "workflow_orchestrator",
+    "official_reference_shallow_diffuse_run.ipynb": "workflow_orchestrator",
+    "paper_result_closure_run.ipynb": "workflow_orchestrator",
+    "colab_drive_cold_start_smoke.ipynb": "workflow_orchestrator",
 }
 FORBIDDEN_COMPONENT_NOTEBOOKS = {
     "aligned_rescoring_run.ipynb",
@@ -31,6 +47,9 @@ PAPER_RUN_DEFAULT_PATTERN = re.compile(
     r'^\s*SLM_WM_PAPER_RUN_NAME\s*=\s*["\']([^"\']+)["\']\s*$',
     re.MULTILINE,
 )
+FORMAL_NOTEBOOK_PATHS = tuple(
+    NOTEBOOK_DIR / notebook_name for notebook_name in sorted(REQUIRED_NOTEBOOKS)
+)
 
 
 def _code_source(path: Path) -> str:
@@ -42,6 +61,13 @@ def _code_source(path: Path) -> str:
         for cell in payload.get("cells", ())
         if cell.get("cell_type") == "code"
     )
+
+
+def _all_cell_source(path: Path) -> str:
+    """连接 Notebook 的全部单元格, 防止在 Markdown 中隐藏依赖命令。"""
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return "\n".join("".join(cell.get("source", ())) for cell in payload.get("cells", ()))
 
 
 def _paper_run_defaults(path: Path) -> tuple[str, ...]:
@@ -62,7 +88,7 @@ def test_current_notebook_set_contains_formal_entrypoints_only() -> None:
 @pytest.mark.quick
 @pytest.mark.parametrize(
     "notebook_path",
-    tuple(sorted(NOTEBOOK_DIR.glob("*.ipynb"))),
+    FORMAL_NOTEBOOK_PATHS,
     ids=lambda path: path.name,
 )
 def test_all_notebook_entrypoints_have_one_probe_paper_default(
@@ -101,13 +127,13 @@ def test_all_notebooks_require_clean_detached_full_commit(
 @pytest.mark.quick
 @pytest.mark.parametrize(
     "notebook_path",
-    tuple(sorted(NOTEBOOK_DIR.glob("*.ipynb"))),
+    FORMAL_NOTEBOOK_PATHS,
     ids=lambda path: path.name,
 )
-def test_notebooks_lock_repository_before_dependency_install(
+def test_notebooks_lock_repository_before_dependency_profile_preparation(
     notebook_path: Path,
 ) -> None:
-    """Notebook 必须先验证代码身份, 再安装会改变正式运行环境的依赖."""
+    """Notebook 必须先验证代码身份, 再调用仓库统一依赖 profile CLI。"""
 
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
     code_cells = [
@@ -120,32 +146,90 @@ def test_notebooks_lock_repository_before_dependency_install(
         for index, source in enumerate(code_cells)
         if "verify_and_publish_formal_execution" in source
     )
-    install_cell_indexes = [
+    profile_cell_indexes = [
         index
         for index, source in enumerate(code_cells)
-        if "%pip install" in source
+        if "scripts/prepare_dependency_profile.py" in source
     ]
 
-    assert all(lock_cell_index < install_index for install_index in install_cell_indexes)
-    if install_cell_indexes:
-        configure_cell_index = next(
-            index
-            for index, source in enumerate(code_cells)
-            if "configure_paper_run_environment" in source
-        )
-        dependency_report_cell_index = next(
-            index
-            for index, source in enumerate(code_cells)
-            if "build_notebook_dependency_report" in source
-        )
-        assert all(
-            install_index < configure_cell_index
-            for install_index in install_cell_indexes
-        )
-        assert all(
-            install_index < dependency_report_cell_index
-            for install_index in install_cell_indexes
-        )
+    assert len(profile_cell_indexes) == 1
+    profile_cell_index = profile_cell_indexes[0]
+    assert lock_cell_index < profile_cell_index
+    configure_cell_indexes = [
+        index
+        for index, source in enumerate(code_cells)
+        if "configure_paper_run_environment" in source
+    ]
+    assert all(profile_cell_index < index for index in configure_cell_indexes)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("notebook_name", "expected_profile"),
+    tuple(sorted(NOTEBOOK_DEPENDENCY_PROFILES.items())),
+)
+def test_notebooks_only_select_registered_dependency_profile(
+    notebook_name: str,
+    expected_profile: str,
+) -> None:
+    """每个正式 Notebook 只能选择一个 profile, 不得维护第二套安装协议。"""
+
+    source = _code_source(NOTEBOOK_DIR / notebook_name)
+    profile_pattern = re.compile(r'^DEPENDENCY_PROFILE_ID = "([a-z0-9_]+)"$', re.MULTILINE)
+
+    assert tuple(profile_pattern.findall(source)) == (expected_profile,)
+    assert source.count("scripts/prepare_dependency_profile.py") == 1
+    assert source.count("build_notebook_dependency_report(") == 1
+    assert "dependency_report = build_notebook_dependency_report(DEPENDENCY_PROFILE_ID)" in source
+    assert (
+        '["python", "scripts/prepare_dependency_profile.py", "--profile", DEPENDENCY_PROFILE_ID]'
+        in source
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "notebook_path",
+    tuple(sorted(NOTEBOOK_DIR.glob("*.ipynb"))),
+    ids=lambda path: path.name,
+)
+def test_notebooks_contain_no_local_dependency_install_logic(notebook_path: Path) -> None:
+    """依赖求解、包清单和浮动下载必须全部收敛到 repository CLI。"""
+
+    source = _all_cell_source(notebook_path).lower()
+    forbidden_snippets = (
+        "%pip",
+        "pip install",
+        "python -m pip",
+        "conda install",
+        "mamba install",
+        "uv pip",
+        "poetry add",
+        "--upgrade",
+        "micromamba",
+        "requirements.txt",
+        "colab_sd35_runtime_constraints.txt",
+        "diffusers transformers accelerate",
+        "packaging huggingface_hub",
+    )
+
+    assert all(snippet not in source for snippet in forbidden_snippets)
+    assert re.search(r'["\']pip["\']\s*,\s*["\']install["\']', source) is None
+    package_names = (
+        "torch",
+        "torchvision",
+        "diffusers",
+        "transformers",
+        "accelerate",
+        "safetensors",
+        "huggingface_hub",
+        "open_clip_torch",
+        "scikit-learn",
+        "datasets",
+    )
+    for line in source.splitlines():
+        listed_names = [name for name in package_names if name in line]
+        assert len(listed_names) <= 1, f"Notebook 包清单未收敛: {line}"
 
 
 @pytest.mark.quick

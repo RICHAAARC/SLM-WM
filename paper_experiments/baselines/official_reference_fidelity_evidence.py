@@ -1,6 +1,6 @@
 """核验三个官方参考复现 family 的方法忠实度证据边界.
 
-该模块只审计 Tree-Ring,Gaussian Shading 和 Shallow Diffuse 的官方原始环境复现.
+该模块只审计 Tree-Ring,Gaussian Shading 和 Shallow Diffuse 的官方参考环境复现.
 这些结果用于补充方法忠实度证据, 不进入 SD3.5 common-backbone 主表优势比较.
 """
 

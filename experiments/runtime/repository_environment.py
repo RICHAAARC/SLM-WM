@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.metadata as importlib_metadata
 import json
 import os
 import platform
@@ -20,25 +19,11 @@ from collections.abc import Mapping
 from typing import Any
 
 from main.core.digest import build_stable_digest
+from experiments.runtime.dependency_profiles import (
+    build_dependency_profile_summary,
+    inspect_dependency_profile_environment,
+)
 
-COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
-    "%pip install -q --upgrade diffusers transformers accelerate safetensors sentencepiece protobuf huggingface_hub"
-)
-RUNTIME_ENVIRONMENT_PACKAGES = (
-    "torch",
-    "diffusers",
-    "transformers",
-    "accelerate",
-    "huggingface_hub",
-    "tokenizers",
-    "safetensors",
-    "sentencepiece",
-    "protobuf",
-    "numpy",
-    "pillow",
-    "lpips",
-    "torchvision",
-)
 FORMAL_GIT_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 FORMAL_EXECUTION_LOCK_DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 FORMAL_EXECUTION_LOCK_SCHEMA = "clean_detached_git_commit_v1"
@@ -329,36 +314,36 @@ def tensor_digest(tensor: Any) -> str:
     return build_stable_digest(rounded_values)
 
 
-def read_package_version(package_name: str) -> str:
-    """读取已安装 Python 包版本, 未安装时返回稳定的审计值。"""
-
-    try:
-        return importlib_metadata.version(package_name)
-    except importlib_metadata.PackageNotFoundError:
-        return "not_installed"
-
-
 def build_runtime_environment_report(
+    dependency_profile_id: str,
     torch_module: Any | None = None,
-    install_command: str = COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND,
     *,
     verified_formal_execution_lock: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """构造真实运行环境快照, 用于复现依赖组合与 GPU 条件。
+    """构造绑定完整哈希锁 profile 的真实运行环境快照.
 
-    `install_command` 默认保持 Colab 动态升级命令, 但服务器 runner 可以传入
-    自身的环境准备命令, 因而该函数不再绑定到 Colab helper。
+    该函数不会安装依赖. 调用方必须显式声明运行职责对应的 profile, 从而避免
+    主方法、T2SMark 与 official-reference 环境被隐式合并为一套依赖组合.
     """
 
-    package_versions = {package_name: read_package_version(package_name) for package_name in RUNTIME_ENVIRONMENT_PACKAGES}
-    cuda_available = None
-    cuda_version = None
+    if torch_module is None:
+        try:
+            import torch as imported_torch_module
+        except Exception:
+            imported_torch_module = None
+        torch_module = imported_torch_module
+    profile_summary = build_dependency_profile_summary(dependency_profile_id)
+    dependency_inspection = inspect_dependency_profile_environment(
+        dependency_profile_id,
+        torch_module=torch_module,
+    )
+    observed_environment = dependency_inspection["observed_environment"]
+    package_versions = observed_environment["direct_dependencies"]
+    cuda_available = bool(observed_environment["cuda_available"])
+    cuda_version = observed_environment["torch_cuda_version"]
     gpu_name = ""
     device_count = 0
     if torch_module is not None:
-        package_versions["torch"] = str(getattr(torch_module, "__version__", package_versions["torch"]))
-        cuda_available = bool(torch_module.cuda.is_available())
-        cuda_version = getattr(torch_module.version, "cuda", None)
         device_count = int(torch_module.cuda.device_count()) if cuda_available else 0
         gpu_name = torch_module.cuda.get_device_name(0) if cuda_available and device_count else ""
     validated_execution_lock = (
@@ -377,10 +362,25 @@ def build_runtime_environment_report(
         else ""
     )
     return {
-        "dependency_mode": "colab_dynamic_upgrade",
-        "manual_version_pins": False,
-        "pip_install_command": install_command,
-        "python_version": sys.version.split()[0],
+        "dependency_mode": "committed_complete_hash_lock",
+        "dependency_profile_id": dependency_profile_id,
+        "dependency_profile_digest": profile_summary["profile_digest"],
+        "dependency_profile_summary_digest": profile_summary["summary_digest"],
+        "direct_requirements_path": profile_summary["direct_requirements_path"],
+        "direct_requirements_digest": profile_summary["direct_requirements_digest"],
+        "complete_hash_lock_path": profile_summary["complete_hash_lock_path"],
+        "complete_hash_lock_digest": profile_summary["complete_hash_lock_digest"],
+        "complete_hash_lock_present": profile_summary["complete_hash_lock_present"],
+        "complete_hash_lock_dependency_count": profile_summary[
+            "complete_hash_lock_dependency_count"
+        ],
+        "dependency_profile_formal_ready": profile_summary["formal_ready"],
+        "dependency_environment_ready": dependency_inspection["decision"] == "pass",
+        "dependency_readiness_blockers": dependency_inspection[
+            "readiness_blockers"
+        ],
+        "dependency_environment_inspection": dependency_inspection,
+        "python_version": observed_environment["python_version"],
         "python_executable": sys.executable,
         "platform": platform.platform(),
         "package_versions": package_versions,

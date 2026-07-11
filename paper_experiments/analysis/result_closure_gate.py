@@ -2302,7 +2302,7 @@ def _threshold_audit_ready(bundle: ResultClosureGateInput) -> bool:
 
 
 def _official_reference_fidelity_ready(bundle: ResultClosureGateInput) -> bool:
-    """核验三个官方原始环境复现仅作为补充方法忠实度证据."""
+    """核验三个官方参考环境复现仅作为补充方法忠实度证据."""
 
     expected_ids = {"tree_ring", "gaussian_shading", "shallow_diffuse"}
     records = tuple(bundle.official_reference_fidelity_records)

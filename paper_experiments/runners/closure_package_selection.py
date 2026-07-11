@@ -207,7 +207,7 @@ def _method_faithful_spec(baseline_id: str) -> ClosurePackageFamilySpec:
 
 
 def _official_reference_spec(baseline_id: str) -> ClosurePackageFamilySpec:
-    """构造一个官方原始环境补充参考包的身份契约."""
+    """构造一个官方参考环境补充参考包的身份契约."""
 
     prefix = f"outputs/{baseline_id}_official_reference/{{paper_run}}/"
     summary = prefix + f"{baseline_id}_official_reference_summary.json"

@@ -1,0 +1,156 @@
+{
+  "complete_hash_lock_contract": {
+    "artifact_role": "target_runtime_complete_wheel_hash_lock",
+    "formal_readiness_requires_valid_lock": true,
+    "materialization_environment": "registered_linux_x86_64_profile",
+    "repository_commit_required": true,
+    "requirement_format": "name==version --hash=sha256:<digest>"
+  },
+  "direct_dependency_input_contract": {
+    "artifact_role": "committed_exact_direct_dependency_input",
+    "exact_operator": "==",
+    "requirement_format": "name==version"
+  },
+  "profiles": {
+    "gaussian_shading_official_py38_cu117": {
+      "accelerator": {
+        "cuda_version": "11.7",
+        "runtime": "cuda"
+      },
+      "complete_hash_lock_path": "configs/dependency_profiles/gaussian_shading_official_py38_cu117_lock.txt",
+      "direct_requirements_digest": "b0e8b29120b2d38609934864b47f8bf34452a8769c8f11b5e17a5079c08d3daa",
+      "direct_requirements_path": "configs/dependency_profiles/gaussian_shading_official_py38_cu117_direct.txt",
+      "execution_role": "gaussian_shading_official_reference_execution",
+      "platform": {
+        "machine": "x86_64",
+        "operating_system": "linux"
+      },
+      "python": {
+        "implementation": "CPython",
+        "version": "3.8.20"
+      },
+      "pytorch": {
+        "index_url": "https://download.pytorch.org/whl/cu117",
+        "torch_version": "1.13.0+cu117",
+        "torchvision_version": "0.14.0+cu117"
+      }
+    },
+    "sd35_method_runtime_gpu": {
+      "accelerator": {
+        "cuda_version": "12.8",
+        "runtime": "cuda"
+      },
+      "complete_hash_lock_path": "configs/dependency_profiles/sd35_method_runtime_gpu_lock.txt",
+      "direct_requirements_digest": "6ee05fe5cba42acf8da79e4dad62e599455f34bf1ac53e8f503d9c354889fb56",
+      "direct_requirements_path": "configs/dependency_profiles/sd35_method_runtime_gpu_direct.txt",
+      "execution_role": "slm_wm_sd35_method_execution",
+      "platform": {
+        "machine": "x86_64",
+        "operating_system": "linux"
+      },
+      "python": {
+        "implementation": "CPython",
+        "version": "3.12.13"
+      },
+      "pytorch": {
+        "index_url": "https://download.pytorch.org/whl/cu128",
+        "torch_version": "2.11.0+cu128",
+        "torchvision_version": "0.26.0+cu128"
+      }
+    },
+    "shallow_diffuse_official_py39_cu117": {
+      "accelerator": {
+        "cuda_version": "11.7",
+        "runtime": "cuda"
+      },
+      "complete_hash_lock_path": "configs/dependency_profiles/shallow_diffuse_official_py39_cu117_lock.txt",
+      "direct_requirements_digest": "0fce6cab21e4d20e38c63e2ea99f2e983f5394d70617999b91888c12c153ad34",
+      "direct_requirements_path": "configs/dependency_profiles/shallow_diffuse_official_py39_cu117_direct.txt",
+      "execution_role": "shallow_diffuse_official_reference_execution",
+      "platform": {
+        "machine": "x86_64",
+        "operating_system": "linux"
+      },
+      "python": {
+        "implementation": "CPython",
+        "version": "3.9.19"
+      },
+      "pytorch": {
+        "index_url": "https://download.pytorch.org/whl/cu117",
+        "torch_version": "1.13.0+cu117",
+        "torchvision_version": "0.14.0+cu117"
+      }
+    },
+    "t2smark_sd35_gpu": {
+      "accelerator": {
+        "cuda_version": "12.4",
+        "runtime": "cuda"
+      },
+      "complete_hash_lock_path": "configs/dependency_profiles/t2smark_sd35_gpu_lock.txt",
+      "direct_requirements_digest": "60d19c9f1562703f54f1ac918a0946273196966c2852e750ce7f0cb3baaf9930",
+      "direct_requirements_path": "configs/dependency_profiles/t2smark_sd35_gpu_direct.txt",
+      "execution_role": "t2smark_sd35_official_execution",
+      "platform": {
+        "machine": "x86_64",
+        "operating_system": "linux"
+      },
+      "python": {
+        "implementation": "CPython",
+        "version": "3.12.13"
+      },
+      "pytorch": {
+        "index_url": "https://download.pytorch.org/whl/cu124",
+        "torch_version": "2.5.0+cu124",
+        "torchvision_version": "0.20.0+cu124"
+      }
+    },
+    "tree_ring_official_py39_cu117": {
+      "accelerator": {
+        "cuda_version": "11.7",
+        "runtime": "cuda"
+      },
+      "complete_hash_lock_path": "configs/dependency_profiles/tree_ring_official_py39_cu117_lock.txt",
+      "direct_requirements_digest": "3e1c82c679b703867dfd421784fd03c793e910f46ff0346ce2d1b8bd8a9e831e",
+      "direct_requirements_path": "configs/dependency_profiles/tree_ring_official_py39_cu117_direct.txt",
+      "execution_role": "tree_ring_official_reference_execution",
+      "platform": {
+        "machine": "x86_64",
+        "operating_system": "linux"
+      },
+      "python": {
+        "implementation": "CPython",
+        "version": "3.9.19"
+      },
+      "pytorch": {
+        "index_url": "https://download.pytorch.org/whl/cu117",
+        "torch_version": "1.13.0+cu117",
+        "torchvision_version": "0.14.0+cu117"
+      }
+    },
+    "workflow_orchestrator": {
+      "accelerator": {
+        "cuda_version": null,
+        "runtime": "cpu"
+      },
+      "complete_hash_lock_path": "configs/dependency_profiles/workflow_orchestrator_lock.txt",
+      "direct_requirements_digest": "f688f80a9f1622a40865451ae150d697facec073747794eb876f31a7b26e1c9f",
+      "direct_requirements_path": "configs/dependency_profiles/workflow_orchestrator_direct.txt",
+      "execution_role": "workflow_orchestration",
+      "platform": {
+        "machine": "x86_64",
+        "operating_system": "linux"
+      },
+      "python": {
+        "implementation": "CPython",
+        "version": "3.12.13"
+      },
+      "pytorch": {
+        "index_url": null,
+        "torch_version": null,
+        "torchvision_version": null
+      }
+    }
+  },
+  "registry_schema": "isolated_dependency_profile_registry",
+  "schema_version": 1
+}

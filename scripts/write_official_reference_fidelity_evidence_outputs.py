@@ -167,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数."""
 
     parser = argparse.ArgumentParser(
-        description="核验三个官方原始环境复现并写出独立方法忠实度证据."
+        description="核验三个官方参考环境复现并写出独立方法忠实度证据."
     )
     parser.add_argument("--root", default=".", help="仓库根目录.")
     parser.add_argument(

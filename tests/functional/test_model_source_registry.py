@@ -104,17 +104,17 @@ def test_model_source_registry_rejects_mutable_or_unregistered_revisions(tmp_pat
             "openai/clip-vit-base-patch32",
             "0" * 40,
         )
-    legacy_source = get_model_source("manojb_stable_diffusion_2_1_base")
+    reference_source = get_model_source("manojb_stable_diffusion_2_1_base")
     with pytest.raises(ValueError, match="用途组合未登记"):
         require_registered_model_reference(
-            legacy_source.repository_id,
-            legacy_source.revision,
+            reference_source.repository_id,
+            reference_source.revision,
             required_usage_role="primary_diffusion_model",
         )
 
 
 @pytest.mark.quick
-def test_legacy_mirror_records_unavailable_upstream_separately() -> None:
+def test_official_reference_mirror_records_unavailable_upstream_separately() -> None:
     """公开镜像不得被描述为原始上游仓库。"""
 
     source = get_model_source("manojb_stable_diffusion_2_1_base")
@@ -211,7 +211,10 @@ def test_sd35_pipeline_forwards_registered_revision(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         sd3_pipeline_runtime,
         "build_runtime_environment_report",
-        lambda **kwargs: {"environment_decision": "pass"},
+        lambda profile_id, **kwargs: {
+            "dependency_environment_ready": True,
+            "dependency_readiness_blockers": [],
+        },
     )
     monkeypatch.setattr(sd3_pipeline_runtime, "flatten_environment_versions", lambda report: {})
 

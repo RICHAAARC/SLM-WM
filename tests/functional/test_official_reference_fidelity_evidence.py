@@ -70,7 +70,7 @@ def _write_official_reference_family(root: Path, baseline_id: str) -> Path:
         "reference_record_id": f"{baseline_id}_reference_record",
         "reference_record_digest": f"{baseline_id}_digest",
         "baseline_id": baseline_id,
-        "reference_protocol_name": f"{baseline_id}_official_legacy_reference_protocol",
+        "reference_protocol_name": f"{baseline_id}_official_reference_protocol",
         "supplemental_table_role": "supplemental_method_fidelity_reference",
         "main_table_eligible": False,
         "supports_paper_claim": False,

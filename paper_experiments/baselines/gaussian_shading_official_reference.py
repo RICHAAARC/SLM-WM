@@ -1,7 +1,7 @@
-"""Gaussian Shading 官方原始环境复现的补充表 governed import 协议。
+"""Gaussian Shading 官方参考环境复现的补充表 受治理导入 协议。
 
 该模块服务方法忠实度审计。Gaussian Shading 官方实现面向 Stable Diffusion 1.x/2.x
-的 4-channel latent、truncated Gaussian message 与 DDIM inversion, 因此官方原始环境结果
+的 4-channel latent、truncated Gaussian message 与 DDIM inversion, 因此官方参考环境结果
 必须与 SD3.5 Medium common-backbone 主表结果分开记录。
 """
 
@@ -15,7 +15,7 @@ from typing import Any, Iterable, Mapping
 from experiments.runtime.model_sources import get_model_source
 from main.core.digest import build_stable_digest
 
-GAUSSIAN_SHADING_OFFICIAL_REFERENCE_PROTOCOL_NAME = "gaussian_shading_official_legacy_reference_protocol"
+GAUSSIAN_SHADING_OFFICIAL_REFERENCE_PROTOCOL_NAME = "gaussian_shading_official_reference_protocol"
 GAUSSIAN_SHADING_SUPPLEMENTAL_TABLE_ROLE = "supplemental_method_fidelity_reference"
 REQUIRED_READY_FLAGS = (
     "official_command_succeeded",
@@ -93,7 +93,7 @@ class GaussianShadingOfficialReferenceIssue:
 
 @dataclass(frozen=True)
 class GaussianShadingOfficialReferenceRecord:
-    """记录 Gaussian Shading 官方 legacy 复现结果的补充表候选记录。"""
+    """记录 Gaussian Shading 官方固定 profile 复现结果的补充表候选记录。"""
 
     reference_record_id: str
     reference_record_digest: str
@@ -234,9 +234,9 @@ def build_gaussian_shading_official_reference_record(
     metric_values: Mapping[str, Any],
     ready_flags: Mapping[str, bool],
 ) -> dict[str, Any]:
-    """构造 Gaussian Shading 官方 legacy 复现的补充表 governed import 记录。
+    """构造 Gaussian Shading 官方固定 profile 复现的补充表 受治理导入 记录。
 
-    该记录只表达补充表方法忠实度参考。由于 legacy backbone 与 SD3.5 主线不同,
+    该记录只表达补充表方法忠实度参考。由于 Stable Diffusion 2.1 backbone 与 SD3.5 主线不同,
     该记录不得进入主表正式对比。
     """
 
@@ -299,7 +299,7 @@ def build_gaussian_shading_official_reference_record(
 
 
 def validate_gaussian_shading_official_reference_records(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """校验 Gaussian Shading 官方 legacy 参考记录是否满足补充表 governed import 协议。"""
+    """校验 Gaussian Shading 官方固定 profile 参考记录是否满足补充表 受治理导入 协议。"""
 
     materialized_rows = [dict(row) for row in rows]
     issues: list[GaussianShadingOfficialReferenceIssue] = []
@@ -346,7 +346,7 @@ def validate_gaussian_shading_official_reference_records(rows: Iterable[Mapping[
         if _bool_field(row, "main_table_eligible"):
             row_issues.append(
                 GaussianShadingOfficialReferenceIssue(
-                    row_index, "main_table_eligible", "legacy_reference_must_not_enter_main_table"
+                row_index, "main_table_eligible", "official_reference_must_not_enter_main_table"
                 )
             )
         for flag_name in REQUIRED_READY_FLAGS:

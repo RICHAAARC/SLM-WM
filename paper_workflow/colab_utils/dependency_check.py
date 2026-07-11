@@ -1,135 +1,84 @@
-"""记录 Colab workflow 所需的轻量依赖状态。"""
+"""生成 Colab Notebook 可读取的正式依赖 profile 报告."""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from importlib import metadata as importlib_metadata
-from importlib.util import find_spec
+from pathlib import Path
 from typing import Any
 
-COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND = (
-    "%pip install -q --upgrade diffusers transformers accelerate safetensors "
-    "sentencepiece protobuf huggingface_hub"
+from experiments.runtime.dependency_profiles import (
+    build_dependency_profile_summary,
+    inspect_dependency_profile_environment,
 )
 
-WORKFLOW_DEPENDENCIES = (
-    "diffusers",
-    "transformers",
-    "accelerate",
-    "safetensors",
-    "sentencepiece",
-    "protobuf",
-    "huggingface_hub",
-)
-DEPENDENCY_IMPORT_NAMES = {
-    "protobuf": "google.protobuf",
-    "pillow": "PIL",
-    "open_clip_torch": "open_clip",
-    "scikit-learn": "sklearn",
-    "torch-fidelity": "torch_fidelity",
-}
-NOTEBOOK_DEPENDENCY_PROFILES = {
-    "semantic_watermark_image_only": WORKFLOW_DEPENDENCIES
-    + (
-        "numpy",
-        "pillow",
-        "scipy",
-        "torchvision",
-        "torch-fidelity",
-    ),
-    "sd35_runtime": WORKFLOW_DEPENDENCIES
-    + (
-        "numpy",
-        "tokenizers",
-        "scipy",
-        "torchvision",
-    ),
-    "external_baseline_method_faithful": WORKFLOW_DEPENDENCIES
-    + (
-        "open_clip_torch",
-        "scikit-learn",
-        "scipy",
-        "pandas",
-        "datasets",
-        "tqdm",
-    ),
-    "official_reference_light": (
-        "packaging",
-        "huggingface_hub",
-        "torch",
-    ),
-    "official_reference_t2smark": WORKFLOW_DEPENDENCIES
-    + (
-        "open_clip_torch",
-        "torch",
-    ),
-}
+
+DEPENDENCY_PREPARATION_REPORT_ROOT = Path("outputs/dependency_profiles")
+DEPENDENCY_PREPARATION_REPORT_NAME = "dependency_profile_report.json"
+DEFAULT_WORKFLOW_DEPENDENCY_PROFILE_ID = "workflow_orchestrator"
 
 
-@dataclass(frozen=True)
-class DependencyStatus:
-    """描述一个 Python 依赖是否可导入以及当前版本。"""
+def dependency_preparation_report_path(profile_id: str) -> str:
+    """返回统一 CLI 为指定 profile 写出的仓库相对报告路径."""
 
-    dependency_name: str
-    module_available: bool
-    installed_version: str
-
-    def to_dict(self) -> dict[str, Any]:
-        """转为可写入 JSON 的依赖记录。"""
-        return asdict(self)
-
-
-def read_dependency_version(dependency_name: str) -> str:
-    """读取依赖版本; 若当前环境没有该包则返回 unavailable。"""
-    try:
-        return importlib_metadata.version(dependency_name)
-    except importlib_metadata.PackageNotFoundError:
-        return "unavailable"
-
-
-def inspect_dependency(dependency_name: str) -> DependencyStatus:
-    """检查单个依赖是否存在。"""
-    import_name = DEPENDENCY_IMPORT_NAMES.get(dependency_name, dependency_name)
-    return DependencyStatus(
-        dependency_name=dependency_name,
-        module_available=find_spec(import_name) is not None,
-        installed_version=read_dependency_version(dependency_name),
-    )
+    return (
+        DEPENDENCY_PREPARATION_REPORT_ROOT
+        / profile_id
+        / DEPENDENCY_PREPARATION_REPORT_NAME
+    ).as_posix()
 
 
 def build_dependency_report(
-    dependency_names: tuple[str, ...] = WORKFLOW_DEPENDENCIES,
+    profile_id: str = DEFAULT_WORKFLOW_DEPENDENCY_PROFILE_ID,
+    *,
+    torch_module: Any | None = None,
 ) -> dict[str, Any]:
-    """生成 Colab workflow 依赖快照, 仅记录状态, 不主动安装。"""
-    statuses = tuple(inspect_dependency(name) for name in dependency_names)
-    missing = tuple(status.dependency_name for status in statuses if not status.module_available)
+    """核验当前解释器是否精确满足一个受治理依赖 profile.
+
+    该函数只读取 registry、完整哈希锁和当前环境状态. 依赖安装必须先由
+    ``scripts/prepare_dependency_profile.py`` 完成, Notebook 不保存或拼装
+    任何包规格与安装命令.
+    """
+
+    profile_summary = build_dependency_profile_summary(profile_id)
+    inspection = inspect_dependency_profile_environment(
+        profile_id,
+        torch_module=torch_module,
+    )
+    observed_packages = inspection["observed_environment"]["direct_dependencies"]
+    missing_packages = sorted(
+        package_name
+        for package_name, installed_version in observed_packages.items()
+        if installed_version is None
+    )
+    decision = "pass" if inspection["decision"] == "pass" else "blocked"
     return {
-        "dependency_decision": "pass" if not missing else "unsupported",
-        "dependency_mode": "colab_dynamic_upgrade",
-        "dependency_count": len(statuses),
-        "missing_dependency_count": len(missing),
-        "unsupported_reasons": [f"missing:{name}" for name in missing],
-        "pip_install_command": COLAB_DYNAMIC_DEPENDENCY_INSTALL_COMMAND,
-        "package_versions": {
-            status.dependency_name: status.installed_version for status in statuses
-        },
-        "dependencies": [status.to_dict() for status in statuses],
+        "dependency_decision": decision,
+        "dependency_mode": "committed_complete_hash_lock",
+        "dependency_profile_id": profile_id,
+        "dependency_profile_digest": profile_summary["profile_digest"],
+        "dependency_profile_summary_digest": profile_summary["summary_digest"],
+        "direct_requirements_path": profile_summary["direct_requirements_path"],
+        "direct_requirements_digest": profile_summary["direct_requirements_digest"],
+        "complete_hash_lock_path": profile_summary["complete_hash_lock_path"],
+        "complete_hash_lock_digest": profile_summary["complete_hash_lock_digest"],
+        "complete_hash_lock_present": profile_summary["complete_hash_lock_present"],
+        "complete_hash_lock_dependency_count": profile_summary[
+            "complete_hash_lock_dependency_count"
+        ],
+        "dependency_profile_formal_ready": profile_summary["formal_ready"],
+        "dependency_preparation_report_path": dependency_preparation_report_path(
+            profile_id
+        ),
+        "dependency_count": len(observed_packages),
+        "missing_dependency_count": len(missing_packages),
+        "missing_dependencies": missing_packages,
+        "package_versions": observed_packages,
+        "environment_inspection": inspection,
+        "unsupported_reasons": list(inspection["readiness_blockers"]),
         "supports_paper_claim": False,
     }
 
 
-def build_notebook_dependency_report(profile_name: str) -> dict[str, Any]:
-    """按 Notebook 入口职责生成统一依赖诊断报告。
+def build_notebook_dependency_report(profile_id: str) -> dict[str, Any]:
+    """按 Notebook 声明的固定 profile 标识生成依赖报告."""
 
-    Notebook 只传入语义化 profile 名称, 具体依赖清单集中维护在本模块。
-    这样后续依赖增删只需修改 repository helper, 不需要同步修改多个
-    Colab Notebook 入口。
-    """
-
-    if profile_name not in NOTEBOOK_DEPENDENCY_PROFILES:
-        raise ValueError(f"unknown_notebook_dependency_profile:{profile_name}")
-    report = build_dependency_report(NOTEBOOK_DEPENDENCY_PROFILES[profile_name])
-    return {
-        **report,
-        "dependency_profile_name": profile_name,
-    }
+    return build_dependency_report(profile_id)

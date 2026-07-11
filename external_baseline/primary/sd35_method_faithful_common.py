@@ -123,7 +123,7 @@ def emit_adapter_progress(
 
 
 def file_digest(path: str | Path) -> str:
-    """计算文件 SHA-256 摘要, 用于图像 provenance 与 governed import。"""
+    """计算文件 SHA-256 摘要, 用于图像 provenance 与 受治理导入。"""
 
     digest = hashlib.sha256()
     with Path(path).open("rb") as handle:

@@ -304,6 +304,7 @@ def test_t2smark_run_readiness_requires_formal_import_validation() -> None:
     """其他运行条件全部通过时, formal import 失败仍必须使运行失败。"""
 
     assert build_t2smark_formal_run_readiness(
+        dependency_environment_ready=True,
         official_ready=True,
         adapter_ready=True,
         prompt_ready=True,
@@ -312,6 +313,7 @@ def test_t2smark_run_readiness_requires_formal_import_validation() -> None:
         formal_import_validation_ready=False,
     ) is False
     assert build_t2smark_formal_run_readiness(
+        dependency_environment_ready=True,
         official_ready=True,
         adapter_ready=True,
         prompt_ready=True,
@@ -319,6 +321,15 @@ def test_t2smark_run_readiness_requires_formal_import_validation() -> None:
         formal_attack_ready=True,
         formal_import_validation_ready=True,
     ) is True
+    assert build_t2smark_formal_run_readiness(
+        dependency_environment_ready=False,
+        official_ready=True,
+        adapter_ready=True,
+        prompt_ready=True,
+        pair_quality_ready=True,
+        formal_attack_ready=True,
+        formal_import_validation_ready=True,
+    ) is False
 
 
 def test_t2smark_source_worktree_must_equal_fixed_patch(tmp_path: Path) -> None:

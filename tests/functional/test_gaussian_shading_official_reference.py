@@ -1,9 +1,10 @@
-"""验证 Gaussian Shading 官方原始环境补充表 governed import 协议。"""
+"""验证 Gaussian Shading 官方参考环境补充表 受治理导入 协议。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
@@ -28,7 +29,7 @@ from paper_experiments.runners.gaussian_shading_official_reference import (
     package_gaussian_shading_official_reference_outputs,
     parse_metric_text,
     patch_gaussian_shading_model_repository_layout,
-    prepare_gaussian_shading_legacy_environment,
+    prepare_gaussian_shading_dependency_environment,
     prepare_gaussian_shading_model_repository,
     write_gaussian_shading_official_reference_outputs,
 )
@@ -52,6 +53,7 @@ from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+DEPENDENCY_PROFILE_ID = "gaussian_shading_official_py38_cu117"
 SOURCE_PROVENANCE = {
     "source_worktree_digest": "a" * 64,
     "source_patch_sha256": "b" * 64,
@@ -72,6 +74,107 @@ SOURCE_PROVENANCE = {
 }
 
 
+class _DependencyProfileFixture(SimpleNamespace):
+    """提供 runner 所需的最小不可变依赖身份接口。"""
+
+    def to_dict(self) -> dict[str, object]:
+        """返回可写入环境报告的 profile 记录。"""
+
+        return dict(vars(self))
+
+
+def _dependency_profile(*, ready: bool) -> _DependencyProfileFixture:
+    """构造不依赖仓库 registry 当前状态的固定 profile 夹具。"""
+
+    return _DependencyProfileFixture(
+        profile_name=DEPENDENCY_PROFILE_ID,
+        profile_digest="f" * 64,
+        direct_requirements_digest="d" * 64,
+        complete_hash_lock_path=(
+            f"configs/dependency_profiles/{DEPENDENCY_PROFILE_ID}_lock.txt"
+        ),
+        complete_hash_lock_present=ready,
+        complete_hash_lock_digest="e" * 64 if ready else None,
+        complete_hash_lock_dependency_count=24 if ready else 0,
+        formal_ready=ready,
+        readiness_blockers=() if ready else ("complete_hash_lock_missing",),
+    )
+
+
+def _ready_dependency_profile() -> _DependencyProfileFixture:
+    """返回具有完整哈希锁的 Gaussian Shading 固定依赖 profile 夹具。"""
+
+    return _dependency_profile(ready=True)
+
+
+def _write_isolated_dependency_environment_report(
+    root: Path,
+    python_executable: Path,
+    profile: _DependencyProfileFixture,
+    *,
+    lock_digest: str | None = None,
+) -> tuple[dict[str, object], Path]:
+    """写出隔离环境 API 的最小成功报告。"""
+
+    resolved_lock_digest = lock_digest or profile.complete_hash_lock_digest
+    dependency_preparation_report = {
+        "profile_id": DEPENDENCY_PROFILE_ID,
+        "profile_digest": profile.profile_digest,
+        "complete_hash_lock_digest": resolved_lock_digest,
+        "decision": "pass",
+        "failure_reasons": [],
+        "repository_commit_state": {"all_committed": True},
+        "installation": {"attempted": True, "return_code": 0},
+        "runtime_comparison": {
+            "decision": "pass",
+            "environment_match": True,
+            "mismatches": [],
+        },
+    }
+    report: dict[str, object] = {
+        "report_schema": "isolated_dependency_environment_preparation_report",
+        "schema_version": 1,
+        "profile_id": DEPENDENCY_PROFILE_ID,
+        "profile_digest": profile.profile_digest,
+        "direct_requirements_digest": profile.direct_requirements_digest,
+        "complete_hash_lock_digest": resolved_lock_digest,
+        "complete_hash_lock_dependency_count": profile.complete_hash_lock_dependency_count,
+        "provisioned": True,
+        "formal_preparation_completed": True,
+        "formal_ready": True,
+        "decision": "pass",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+        "python_executable_path": str(python_executable),
+        "python_executable_sha256": "a" * 64,
+        "python_executable_sha256_after_preparation": "a" * 64,
+        "dependency_preparation_report_digest": "b" * 64,
+        "dependency_preparation_report": dependency_preparation_report,
+        "provision_report": {
+            "decision": "provisioned",
+            "provisioned": True,
+            "profile_digest": profile.profile_digest,
+        },
+        "command_results": [
+            {
+                "operation": "dependency_profile_preparation",
+                "return_code": 0,
+            }
+        ],
+    }
+    report_path = (
+        root
+        / "outputs"
+        / "dependency_profiles"
+        / DEPENDENCY_PROFILE_ID
+        / "isolated_dependency_environment_report.json"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return report, report_path
 @pytest.fixture(autouse=True)
 def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
     """本模块的官方参考归档夹具固定使用 pilot_paper."""
@@ -86,14 +189,14 @@ def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.quick
 def test_gaussian_shading_official_reference_record_validates_when_all_boundaries_ready() -> None:
-    """官方 legacy 复现记录满足证据边界时应通过补充表导入校验。"""
+    """官方固定 profile 复现记录满足证据边界时应通过补充表导入校验。"""
 
     record = build_gaussian_shading_official_reference_record(
         official_command_requested=True,
         official_command_return_code=0,
         official_entrypoint="external_baseline/primary/gaussian_shading/source/run_gaussian_shading.py",
         official_repository_commit="09c678fadc7545acf7be12647ddf2a5e66f6a9dc",
-        official_environment_profile="python3.9_diffusers0.11.1_legacy_gaussian_shading",
+        official_environment_profile=DEPENDENCY_PROFILE_ID,
         baseline_result_source="outputs/gaussian_shading_official_reference/summary.json",
         baseline_result_source_digest="e" * 64,
         evidence_paths=["outputs/gaussian_shading_official_reference/summary.json"],
@@ -137,14 +240,14 @@ def test_gaussian_shading_official_reference_record_validates_when_all_boundarie
 
 @pytest.mark.quick
 def test_gaussian_shading_official_reference_rejects_main_table_eligibility() -> None:
-    """官方 legacy 参考记录不得伪装为主表同协议结果。"""
+    """官方固定 profile 参考记录不得伪装为主表同协议结果。"""
 
     record = build_gaussian_shading_official_reference_record(
         official_command_requested=True,
         official_command_return_code=0,
         official_entrypoint="external_baseline/primary/gaussian_shading/source/run_gaussian_shading.py",
         official_repository_commit="09c678fadc7545acf7be12647ddf2a5e66f6a9dc",
-        official_environment_profile="python3.9_diffusers0.11.1_legacy_gaussian_shading",
+        official_environment_profile=DEPENDENCY_PROFILE_ID,
         baseline_result_source="outputs/gaussian_shading_official_reference/summary.json",
         baseline_result_source_digest="e" * 64,
         evidence_paths=["outputs/gaussian_shading_official_reference/summary.json"],
@@ -177,12 +280,12 @@ def test_gaussian_shading_official_reference_rejects_main_table_eligibility() ->
     reasons = {issue["reason"] for issue in report["issues"]}
 
     assert report["reference_import_ready"] is False
-    assert "legacy_reference_must_not_enter_main_table" in reasons
+    assert "official_reference_must_not_enter_main_table" in reasons
 
 
 @pytest.mark.quick
 def test_gaussian_shading_official_reference_rejects_openclip_provenance_drift() -> None:
-    """OpenCLIP checkpoint 任一来源字段漂移都必须阻断 governed import."""
+    """OpenCLIP checkpoint 任一来源字段漂移都必须阻断 受治理导入."""
 
     provenance = dict(SOURCE_PROVENANCE)
     provenance["openclip_checkpoint_sha256"] = "0" * 64
@@ -191,7 +294,7 @@ def test_gaussian_shading_official_reference_rejects_openclip_provenance_drift()
         official_command_return_code=0,
         official_entrypoint="external_baseline/primary/gaussian_shading/source/run_gaussian_shading.py",
         official_repository_commit="09c678fadc7545acf7be12647ddf2a5e66f6a9dc",
-        official_environment_profile="official_requirements_strict",
+        official_environment_profile=DEPENDENCY_PROFILE_ID,
         baseline_result_source="outputs/gaussian_shading_official_reference/metric_summary.json",
         baseline_result_source_digest="e" * 64,
         evidence_paths=["outputs/gaussian_shading_official_reference/metric_summary.json"],
@@ -282,7 +385,7 @@ def test_gaussian_shading_official_reference_prepares_local_model_repository(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """本地模型目录应补齐 legacy diffusers 需要的 model_index 兼容项。"""
+    """本地模型目录应补齐固定 diffusers 版本需要的 model_index 项。"""
 
     local_model_dir = tmp_path / "runtime_model" / "stable_diffusion_2_1_base"
     config = GaussianShadingOfficialReferenceConfig(
@@ -291,7 +394,7 @@ def test_gaussian_shading_official_reference_prepares_local_model_repository(
         official_model_id="Manojb/stable-diffusion-2-1-base",
         local_model_repository_dir=str(local_model_dir),
         prepare_local_model_repository=True,
-        patch_model_index_for_legacy_transformers=True,
+        patch_model_index_for_pinned_transformers=True,
         require_cuda=False,
     )
     paths = output_paths(tmp_path, config)
@@ -343,151 +446,151 @@ def test_gaussian_shading_official_reference_prepares_local_model_repository(
 
 
 @pytest.mark.quick
-def test_gaussian_shading_official_reference_blocks_missing_official_requirements(
+def test_gaussian_shading_dependency_profile_missing_lock_fails_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """缺少官方 requirements.txt 时必须阻断官方参考运行。"""
+    """固定 profile 缺少完整哈希锁时不得调用隔离环境 API。"""
 
-    config = GaussianShadingOfficialReferenceConfig(
-        output_dir="outputs/gaussian_shading_official_reference",
-        source_dir="external_baseline/primary/gaussian_shading/source",
-        require_cuda=False,
-        prepare_legacy_environment=True,
-        legacy_environment_prefix=str(tmp_path / "legacy_env"),
-        micromamba_path=str(tmp_path / "bin" / "micromamba"),
-    )
+    profile = _dependency_profile(ready=False)
+    config = GaussianShadingOfficialReferenceConfig(require_cuda=False)
     paths = output_paths(tmp_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
 
-    def fake_run_shell_command(command: str, *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        micromamba_path = Path(config.micromamba_path)
-        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
-        micromamba_path.write_text("#!/bin/sh\n", encoding="utf-8")
-        return {"command": command, "return_code": 0, "stdout": "micromamba ready", "stderr": ""}
+    def reject_profile(_profile_id: str, _registry_path: Path) -> object:
+        raise RuntimeError("完整哈希锁缺失")
 
-    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        if command[:2] == [config.micromamba_path, "create"]:
-            environment_prefix = Path(command[command.index("-p") + 1])
-            legacy_python = environment_prefix / "bin" / "python"
-            legacy_python.parent.mkdir(parents=True, exist_ok=True)
-            legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
-        return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
-
-    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
-    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_command", fake_run_command)
-
-    report = prepare_gaussian_shading_legacy_environment(tmp_path, config, paths)
-    saved_report = json.loads(paths["legacy_environment_prepare_result"].read_text(encoding="utf-8"))
-
-    assert report["legacy_environment_requested"] is True
-    assert report["legacy_environment_ready"] is False
-    assert saved_report["legacy_environment_profile"] == "none"
-    assert saved_report["strict_official_environment_ready"] is False
-    assert saved_report["legacy_python_executable"].replace("\\", "/").endswith(
-        "legacy_env/official_requirements_strict/bin/python"
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.get_dependency_profile",
+        lambda _profile_id, _registry_path: profile,
     )
-    assert any(result["return_code"] == 96 for result in saved_report["command_results"])
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.require_dependency_profile_ready",
+        reject_profile,
+    )
+
+    report = prepare_gaussian_shading_dependency_environment(tmp_path, config, paths)
+
+    assert report["dependency_environment_ready"] is False
+    assert report["dependency_profile_ready"] is False
+    assert report["dependency_lock_ready"] is False
+    assert report["dependency_environment_failure_reason"] == "dependency_hash_lock_not_ready"
+    assert report["command_results"] == []
 
 
 @pytest.mark.quick
-def test_gaussian_shading_official_reference_prefers_strict_official_requirements(
+def test_gaussian_shading_dependency_profile_requires_valid_isolated_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """官方 requirements 可安装时, helper 应优先使用严格官方环境。"""
+    """隔离环境 API 报告身份闭合时才能标记环境已就绪。"""
 
-    source_dir = tmp_path / "external_baseline" / "primary" / "gaussian_shading" / "source"
-    source_dir.mkdir(parents=True)
-    (source_dir / "requirements.txt").write_text("diffusers==0.11.1\n", encoding="utf-8")
+    dependency_python = tmp_path / "gaussian_env" / "bin" / "python"
+    dependency_python.parent.mkdir(parents=True)
+    dependency_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    profile = _ready_dependency_profile()
     config = GaussianShadingOfficialReferenceConfig(
-        output_dir="outputs/gaussian_shading_official_reference",
-        source_dir="external_baseline/primary/gaussian_shading/source",
         require_cuda=False,
-        prepare_legacy_environment=True,
-        legacy_environment_prefix=str(tmp_path / "legacy_env"),
-        micromamba_path=str(tmp_path / "bin" / "micromamba"),
     )
     paths = output_paths(tmp_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
 
-    def fake_run_shell_command(command: str, *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        micromamba_path = Path(config.micromamba_path)
-        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
-        micromamba_path.write_text("#!/bin/sh\n", encoding="utf-8")
-        return {"command": command, "return_code": 0, "stdout": "micromamba ready", "stderr": ""}
+    def fake_prepare_environment(
+        profile_id: str,
+        *,
+        repository_root: Path,
+    ) -> tuple[dict[str, object], Path]:
+        assert profile_id == DEPENDENCY_PROFILE_ID
+        assert repository_root == tmp_path
+        return _write_isolated_dependency_environment_report(
+            tmp_path,
+            dependency_python,
+            profile,
+        )
 
-    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        if command[:2] == [config.micromamba_path, "create"]:
-            environment_prefix = Path(command[command.index("-p") + 1])
-            legacy_python = environment_prefix / "bin" / "python"
-            legacy_python.parent.mkdir(parents=True, exist_ok=True)
-            legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
-        return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
-
-    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
-    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_command", fake_run_command)
-
-    report = prepare_gaussian_shading_legacy_environment(tmp_path, config, paths)
-
-    assert report["legacy_environment_ready"] is True
-    assert report["legacy_environment_profile"] == "official_requirements_strict"
-    assert report["strict_official_environment_ready"] is True
-    assert report["legacy_python_executable"].replace("\\", "/").endswith(
-        "legacy_env/official_requirements_strict/bin/python"
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.get_dependency_profile",
+        lambda _profile_id, _registry_path: profile,
     )
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.require_dependency_profile_ready",
+        lambda _profile_id, _registry_path: profile,
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.prepare_isolated_dependency_environment",
+        fake_prepare_environment,
+    )
+
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.validate_official_reference_dependency_environment_report",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            validation_errors=(),
+            dependency_python_executable=str(dependency_python),
+            dependency_installation_performed=True,
+            isolated_dependency_environment_report_digest="f" * 64,
+            passed=True,
+        ),
+    )
+
+    report = prepare_gaussian_shading_dependency_environment(tmp_path, config, paths)
+
+    assert report["dependency_environment_ready"] is True
+    assert report["dependency_environment_materialized"] is True
+    assert report["dependency_environment_report_valid"] is True
+    assert report["dependency_environment_profile_id"] == DEPENDENCY_PROFILE_ID
+    assert len(report["command_results"]) == 1
 
 
 @pytest.mark.quick
-def test_gaussian_shading_official_reference_blocks_strict_dependency_conflict(
+def test_gaussian_shading_dependency_profile_rejects_report_lock_drift(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """官方 requirements 依赖冲突时必须保留失败报告并阻断运行。"""
+    """隔离环境报告中的哈希锁摘要漂移时必须保留诊断并阻断运行。"""
 
-    source_dir = tmp_path / "external_baseline" / "primary" / "gaussian_shading" / "source"
-    source_dir.mkdir(parents=True)
-    (source_dir / "requirements.txt").write_text("transformers==4.34.0\ndiffusers==0.11.1\n", encoding="utf-8")
+    dependency_python = tmp_path / "gaussian_env" / "bin" / "python"
+    dependency_python.parent.mkdir(parents=True)
+    dependency_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    profile = _ready_dependency_profile()
     config = GaussianShadingOfficialReferenceConfig(
-        output_dir="outputs/gaussian_shading_official_reference",
-        source_dir="external_baseline/primary/gaussian_shading/source",
         require_cuda=False,
-        prepare_legacy_environment=True,
-        legacy_environment_prefix=str(tmp_path / "legacy_env"),
-        micromamba_path=str(tmp_path / "bin" / "micromamba"),
     )
     paths = output_paths(tmp_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
 
-    def fake_run_shell_command(command: str, *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        micromamba_path = Path(config.micromamba_path)
-        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
-        micromamba_path.write_text("#!/bin/sh\n", encoding="utf-8")
-        return {"command": command, "return_code": 0, "stdout": "micromamba ready", "stderr": ""}
+    def fake_prepare_environment(
+        profile_id: str,
+        *,
+        repository_root: Path,
+    ) -> tuple[dict[str, object], Path]:
+        assert profile_id == DEPENDENCY_PROFILE_ID
+        assert repository_root == tmp_path
+        return _write_isolated_dependency_environment_report(
+            tmp_path,
+            dependency_python,
+            profile,
+            lock_digest="0" * 64,
+        )
 
-    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        if command[:2] == [config.micromamba_path, "create"]:
-            environment_prefix = Path(command[command.index("-p") + 1])
-            legacy_python = environment_prefix / "bin" / "python"
-            legacy_python.parent.mkdir(parents=True, exist_ok=True)
-            legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
-        is_strict_pip_install = "-r" in command and "official_requirements_strict" in str(command[0])
-        if is_strict_pip_install:
-            return {"command": command, "return_code": 1, "stdout": "", "stderr": "ResolutionImpossible"}
-        return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
-
-    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_shell_command", fake_run_shell_command)
-    monkeypatch.setattr("paper_experiments.runners.gaussian_shading_official_reference.run_command", fake_run_command)
-
-    report = prepare_gaussian_shading_legacy_environment(tmp_path, config, paths)
-
-    assert report["legacy_environment_ready"] is False
-    assert report["legacy_environment_profile"] == "none"
-    assert report["strict_official_environment_ready"] is False
-    assert any(
-        item["environment_profile"] == "official_requirements_strict" and not item["environment_ready"]
-        for item in report["environment_profile_reports"]
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.get_dependency_profile",
+        lambda _profile_id, _registry_path: profile,
     )
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.require_dependency_profile_ready",
+        lambda _profile_id, _registry_path: profile,
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.prepare_isolated_dependency_environment",
+        fake_prepare_environment,
+    )
+
+    report = prepare_gaussian_shading_dependency_environment(tmp_path, config, paths)
+
+    assert report["dependency_environment_ready"] is False
+    assert report["dependency_environment_report_valid"] is False
+    assert report["dependency_environment_failure_reason"] == "isolated_dependency_environment_report_invalid"
+    assert "complete_hash_lock_digest_mismatch" in report["dependency_environment_validation_errors"]
 
 
 @pytest.mark.quick
@@ -503,8 +606,6 @@ def test_gaussian_shading_official_reference_rejects_non_git_source_cache(tmp_pa
         drive_output_dir=str(tmp_path / "drive"),
         source_dir="external_baseline/primary/gaussian_shading/source",
         sample_count=5,
-        official_python_executable="/opt/gaussian-shading-legacy/bin/python",
-        prepare_legacy_environment=False,
         require_cuda=False,
     )
 
@@ -535,6 +636,14 @@ def test_gaussian_shading_official_reference_package_embeds_archive_self_descrip
                 "official_command_return_code": 0,
                 "official_command_succeeded": True,
                 "scientific_metrics_complete": True,
+                "dependency_profile_id": DEPENDENCY_PROFILE_ID,
+                "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID,
+                "dependency_profile_ready": True,
+                "dependency_lock_ready": True,
+                "dependency_environment_materialized": True,
+                "dependency_environment_report_valid": True,
+                "dependency_profile_digest": "f" * 64,
+                "dependency_lock_digest": "e" * 64,
                 "model_source_ready": True,
                 "model_snapshot_scope_ready": True,
                 "model_source_repository_id": "Manojb/stable-diffusion-2-1-base",
@@ -690,11 +799,10 @@ def test_gaussian_shading_official_reference_cold_start_clones_source(
 
 @pytest.mark.quick
 def test_gaussian_shading_official_reference_parses_metric_text_and_custom_python(tmp_path: Path) -> None:
-    """官方日志解析与 legacy Python 可执行文件配置应保持可审计。"""
+    """官方日志解析与固定 profile Python 可执行文件配置应保持可审计。"""
 
     config = GaussianShadingOfficialReferenceConfig(
         source_dir="external_baseline/primary/gaussian_shading/source",
-        official_python_executable="/opt/gaussian-shading-legacy/bin/python",
         sample_count=5,
         official_model_id="/content/model",
     )
@@ -705,12 +813,17 @@ def test_gaussian_shading_official_reference_parses_metric_text_and_custom_pytho
         "mean_clip_score:0.25      std_clip_score:0.03\n",
         sample_count=5,
     )
-    command = build_official_command(tmp_path, config, paths)
+    command = build_official_command(
+        tmp_path,
+        config,
+        paths,
+        "/opt/gaussian-shading-profile/bin/python",
+    )
 
     assert metrics["sample_count"] == 5
     assert metrics["detection_true_positive_rate"] == 0.8
     assert metrics["mean_bit_accuracy"] == 0.9
-    assert command[0] == "/opt/gaussian-shading-legacy/bin/python"
+    assert command[0] == "/opt/gaussian-shading-profile/bin/python"
     assert command[command.index("--dataset_path") + 1] == "Gustavosta/Stable-Diffusion-Prompts"
     assert command[command.index("--reference_model") + 1] == OPENCLIP_MODEL_NAME
     assert Path(command[command.index("--reference_model_pretrain") + 1]).name == OPENCLIP_CHECKPOINT_FILENAME
@@ -737,8 +850,6 @@ def test_gaussian_shading_record_requires_current_successful_official_command(tm
 
     config = GaussianShadingOfficialReferenceConfig(
         sample_count=5,
-        official_python_executable="/opt/gaussian-shading-legacy/bin/python",
-        prepare_legacy_environment=False,
         require_cuda=False,
     )
     paths = output_paths(tmp_path, config)
@@ -806,7 +917,7 @@ def test_gaussian_shading_record_requires_current_successful_official_command(tm
         paths,
         metrics,
         source_status,
-        {"legacy_environment_ready": True, "legacy_environment_profile": "official_requirements_strict"},
+        {"dependency_environment_ready": True, "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID},
         model_report,
         openclip_report,
         {"official_command_requested": False, "return_code": 0},
@@ -823,12 +934,9 @@ def test_gaussian_shading_record_requires_current_successful_official_command(tm
 
 
 @pytest.mark.quick
-def test_gaussian_shading_official_reference_default_config_reads_legacy_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Notebook 参数层应能显式开启 Gaussian Shading 官方 legacy 环境准备。"""
+def test_gaussian_shading_official_reference_default_config_uses_fixed_dependency_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Notebook 参数层不能覆盖隔离解释器或固定依赖身份。"""
 
-    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PREPARE_LEGACY_ENV", "1")
-    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_ENV_PREFIX", "/content/gaussian_shading_legacy_env")
-    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_PYTHON_VERSION", "3.8")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
@@ -836,13 +944,12 @@ def test_gaussian_shading_official_reference_default_config_reads_legacy_environ
         "SLM_WM_GAUSSIAN_SHADING_LOCAL_MODEL_REPOSITORY_DIR",
         "/content/gaussian_shading_model_repository/stable_diffusion_2_1_base",
     )
-    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1")
+    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_INDEX_FOR_PINNED_TRANSFORMERS", "1")
 
     config = build_default_config()
 
-    assert config.prepare_legacy_environment is True
-    assert config.legacy_environment_prefix == "/content/gaussian_shading_legacy_env"
-    assert config.legacy_python_version == "3.8"
+    assert "official_python_executable" not in config.__dataclass_fields__
+    assert config.dependency_profile_id == DEPENDENCY_PROFILE_ID
     assert config.official_model_id == "Manojb/stable-diffusion-2-1-base"
     assert config.dataset_path == "Gustavosta/Stable-Diffusion-Prompts"
     assert config.dataset_revision == "d816d4a05cb89bde39dd99284c459801e1e7e69a"
@@ -850,10 +957,18 @@ def test_gaussian_shading_official_reference_default_config_reads_legacy_environ
     assert config.patch_model_repository_layout is True
     assert config.prepare_local_model_repository is True
     assert config.local_model_repository_dir == "/content/gaussian_shading_model_repository/stable_diffusion_2_1_base"
-    assert config.patch_model_index_for_legacy_transformers is True
+    assert config.patch_model_index_for_pinned_transformers is True
     assert "summary_import_path" not in config.__dataclass_fields__
     assert "log_import_path" not in config.__dataclass_fields__
     assert "run_official_command" not in config.__dataclass_fields__
+
+
+@pytest.mark.quick
+def test_gaussian_shading_official_reference_rejects_alternate_dependency_profile() -> None:
+    """正式参考不得由调用方替换固定依赖 profile。"""
+
+    with pytest.raises(ValueError, match="固定依赖 profile"):
+        GaussianShadingOfficialReferenceConfig(dependency_profile_id="workflow_orchestrator")
 
 
 @pytest.mark.quick

@@ -203,10 +203,12 @@ def build_t2smark_formal_environment_report(
         import torch
     except Exception:  # pragma: no cover - 本地轻量测试不强制安装 torch
         environment_report = build_runtime_environment_report(
+            "t2smark_sd35_gpu",
             verified_formal_execution_lock=verified_formal_execution_lock,
         )
     else:
         environment_report = build_runtime_environment_report(
+            "t2smark_sd35_gpu",
             torch_module=torch,
             verified_formal_execution_lock=verified_formal_execution_lock,
         )
@@ -853,7 +855,7 @@ def write_failure_outputs(
     """在 formal 复现失败时保留诊断产物并阻断正式归档。"""
 
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
-    environment_report = build_runtime_environment_report()
+    environment_report = build_runtime_environment_report("t2smark_sd35_gpu")
     write_json(paths["environment_report"], environment_report)
     summary = {
         "run_decision": "fail",
@@ -862,6 +864,16 @@ def write_failure_outputs(
         "unsupported_reason": f"{type(error).__name__}:{error}",
         "supports_paper_claim": False,
         "environment_report_path": relative_or_absolute(paths["environment_report"], root_path),
+        "dependency_profile_id": environment_report["dependency_profile_id"],
+        "dependency_profile_digest": environment_report[
+            "dependency_profile_digest"
+        ],
+        "dependency_lock_digest": environment_report[
+            "complete_hash_lock_digest"
+        ],
+        "dependency_environment_ready": environment_report[
+            "dependency_environment_ready"
+        ],
         "manifest_path": relative_or_absolute(paths["manifest"], root_path),
     }
     write_json(paths["summary"], summary)
@@ -881,6 +893,7 @@ def write_failure_outputs(
 
 def build_t2smark_formal_run_readiness(
     *,
+    dependency_environment_ready: bool,
     official_ready: bool,
     adapter_ready: bool,
     prompt_ready: bool,
@@ -892,6 +905,7 @@ def build_t2smark_formal_run_readiness(
 
     return all(
         (
+            dependency_environment_ready,
             official_ready,
             adapter_ready,
             prompt_ready,
@@ -920,6 +934,20 @@ def write_t2smark_formal_reproduction_outputs(
             emit_progress_status(run_progress, profile="operation=ensure_cuda status=running")
             device_report = ensure_cuda_if_requested(config.require_cuda)
             update_progress(run_progress, profile="operation=ensure_cuda")
+            emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
+            environment_report = build_t2smark_formal_environment_report(
+                device_report,
+                verified_formal_execution_lock=formal_execution_run_lock,
+            )
+            write_json(paths["environment_report"], environment_report)
+            if environment_report["dependency_environment_ready"] is not True:
+                blockers = ",".join(
+                    environment_report["dependency_readiness_blockers"]
+                )
+                raise RuntimeError(
+                    f"dependency_profile_environment_not_ready:{blockers}"
+                )
+            update_progress(run_progress, profile="operation=write_environment_report")
             emit_progress_status(run_progress, profile="operation=write_prompt_inputs status=running")
             prompt_report = write_paper_run_prompt_inputs(root_path, config, paths)
             if not bool(prompt_report["paper_run_prompt_protocol_ready"]) or int(
@@ -957,13 +985,6 @@ def write_t2smark_formal_reproduction_outputs(
             emit_progress_status(run_progress, profile="operation=build_candidate_records status=running")
             candidate_report = build_candidate_records_and_validation(root_path, config, paths, prompt_report)
             update_progress(run_progress, profile=f"operation=build_candidate_records records={candidate_report['candidate_record_count']}")
-            emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
-            environment_report = build_t2smark_formal_environment_report(
-                device_report,
-                verified_formal_execution_lock=formal_execution_run_lock,
-            )
-            write_json(paths["environment_report"], environment_report)
-            update_progress(run_progress, profile="operation=write_environment_report")
     except Exception as error:
         return write_failure_outputs(root_path, config, paths, error)
 
@@ -983,6 +1004,9 @@ def write_t2smark_formal_reproduction_outputs(
         prompt_report["selected_prompt_count"]
     )
     run_ready = build_t2smark_formal_run_readiness(
+        dependency_environment_ready=bool(
+            environment_report.get("dependency_environment_ready")
+        ),
         official_ready=official_ready,
         adapter_ready=adapter_ready,
         prompt_ready=prompt_report["selected_prompt_count"] > 0,

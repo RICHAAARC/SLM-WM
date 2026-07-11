@@ -40,7 +40,7 @@ SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 
 ```text
 main/                       论文核心方法与最小数学工具
-configs/                    prompt 配置、运行配置说明和 Colab 依赖约束记录
+configs/                    prompt、模型来源与正式依赖 profile 登记
 experiments/                SLM 主方法实验协议、主实验攻击、内部消融和服务器 runner
 paper_experiments/          完整论文实验、外部 baseline 适配、受治理导入和公平对比
 paper_workflow/             Colab Notebook 入口、Drive 包装和 session helper

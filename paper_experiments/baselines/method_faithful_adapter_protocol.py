@@ -9,8 +9,8 @@ observation 字段、图像 provenance、分数方向、阈值语义和正式导
 - 不在每个 adapter 业务路径中重复构造大量错误信息。
 
 项目特定写法:
-- T2SMark 属于 SD3.5 native official reproduction, 不需要 method-faithful adapter。
-- Tree-Ring、Gaussian Shading 和 Shallow Diffuse 属于 legacy diffusion watermark,
+- T2SMark 属于 SD3.5 原生官方复现, 不需要 method-faithful adapter。
+- Tree-Ring、Gaussian Shading 和 Shallow Diffuse 属于基于 Stable Diffusion 2.1 的官方参考水印方法,
   必须先达到 method-faithful SD3.5 adapter 边界, 才能进入正式导入候选。
 """
 

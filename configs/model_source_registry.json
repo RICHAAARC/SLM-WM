@@ -11,7 +11,7 @@
       "revision_url": "https://huggingface.co/datasets/Gustavosta/Stable-Diffusion-Prompts/tree/d816d4a05cb89bde39dd99284c459801e1e7e69a",
       "source_url": "https://huggingface.co/datasets/Gustavosta/Stable-Diffusion-Prompts",
       "usage_roles": [
-        "legacy_baseline_prompt_dataset"
+        "sd21_official_reference_prompt_dataset"
       ]
     },
     "laion_clip_vit_g14": {

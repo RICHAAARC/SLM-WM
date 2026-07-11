@@ -48,6 +48,14 @@ def load_pipeline(config: Any) -> tuple[Any, dict[str, Any]]:
     _, torch, _, pipeline_class = import_runtime_dependencies()
     if config.device_name == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("gpu_unavailable")
+    environment_report = build_runtime_environment_report(
+        "sd35_method_runtime_gpu",
+        torch_module=torch,
+        verified_formal_execution_lock=formal_execution_lock,
+    )
+    if environment_report["dependency_environment_ready"] is not True:
+        blockers = ",".join(environment_report["dependency_readiness_blockers"])
+        raise RuntimeError(f"dependency_profile_environment_not_ready:{blockers}")
     dtype = getattr(torch, config.torch_dtype)
     token = os.environ.get(config.hf_token_env) or None
     pipeline = pipeline_class.from_pretrained(
@@ -58,10 +66,6 @@ def load_pipeline(config: Any) -> tuple[Any, dict[str, Any]]:
     )
     pipeline = pipeline.to(config.device_name)
     pipeline.set_progress_bar_config(disable=False)
-    environment_report = build_runtime_environment_report(
-        torch_module=torch,
-        verified_formal_execution_lock=formal_execution_lock,
-    )
     runtime_versions = {
         **flatten_environment_versions(environment_report),
         "runtime_environment": environment_report,

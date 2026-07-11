@@ -1,9 +1,10 @@
-"""验证 Shallow Diffuse 官方原始环境补充表 governed import 协议。"""
+"""验证 Shallow Diffuse 官方参考环境补充表 受治理导入 协议。"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
@@ -26,7 +27,7 @@ from paper_experiments.runners.shallow_diffuse_official_reference import (
     normalize_metric_summary,
     parse_metric_text,
     patch_shallow_diffuse_model_repository_layout,
-    prepare_shallow_diffuse_legacy_environment,
+    prepare_shallow_diffuse_dependency_environment,
     prepare_shallow_diffuse_model_repository,
     write_shallow_diffuse_official_reference_outputs,
 )
@@ -47,6 +48,7 @@ from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+DEPENDENCY_PROFILE_ID = "shallow_diffuse_official_py39_cu117"
 SOURCE_PROVENANCE = {
     "source_worktree_digest": "a" * 64,
     "source_patch_sha256": "b" * 64,
@@ -115,6 +117,107 @@ OPENCLIP_REPORT = {
 }
 
 
+class _DependencyProfileFixture(SimpleNamespace):
+    """提供 runner 所需的最小不可变依赖身份接口。"""
+
+    def to_dict(self) -> dict[str, object]:
+        """返回可写入环境报告的 profile 记录。"""
+
+        return dict(vars(self))
+
+
+def _dependency_profile(*, ready: bool) -> _DependencyProfileFixture:
+    """构造不依赖仓库 registry 当前状态的固定 profile 夹具。"""
+
+    return _DependencyProfileFixture(
+        profile_name=DEPENDENCY_PROFILE_ID,
+        profile_digest="f" * 64,
+        direct_requirements_digest="d" * 64,
+        complete_hash_lock_path=(
+            f"configs/dependency_profiles/{DEPENDENCY_PROFILE_ID}_lock.txt"
+        ),
+        complete_hash_lock_present=ready,
+        complete_hash_lock_digest="e" * 64 if ready else None,
+        complete_hash_lock_dependency_count=24 if ready else 0,
+        formal_ready=ready,
+        readiness_blockers=() if ready else ("complete_hash_lock_missing",),
+    )
+
+
+def _ready_dependency_profile() -> _DependencyProfileFixture:
+    """返回具有完整哈希锁的 Shallow Diffuse 固定依赖 profile 夹具。"""
+
+    return _dependency_profile(ready=True)
+
+
+def _write_isolated_dependency_environment_report(
+    root: Path,
+    python_executable: Path,
+    profile: _DependencyProfileFixture,
+    *,
+    lock_digest: str | None = None,
+) -> tuple[dict[str, object], Path]:
+    """写出隔离环境 API 的最小成功报告。"""
+
+    resolved_lock_digest = lock_digest or profile.complete_hash_lock_digest
+    dependency_preparation_report = {
+        "profile_id": DEPENDENCY_PROFILE_ID,
+        "profile_digest": profile.profile_digest,
+        "complete_hash_lock_digest": resolved_lock_digest,
+        "decision": "pass",
+        "failure_reasons": [],
+        "repository_commit_state": {"all_committed": True},
+        "installation": {"attempted": True, "return_code": 0},
+        "runtime_comparison": {
+            "decision": "pass",
+            "environment_match": True,
+            "mismatches": [],
+        },
+    }
+    report: dict[str, object] = {
+        "report_schema": "isolated_dependency_environment_preparation_report",
+        "schema_version": 1,
+        "profile_id": DEPENDENCY_PROFILE_ID,
+        "profile_digest": profile.profile_digest,
+        "direct_requirements_digest": profile.direct_requirements_digest,
+        "complete_hash_lock_digest": resolved_lock_digest,
+        "complete_hash_lock_dependency_count": profile.complete_hash_lock_dependency_count,
+        "provisioned": True,
+        "formal_preparation_completed": True,
+        "formal_ready": True,
+        "decision": "pass",
+        "failure_reasons": [],
+        "supports_paper_claim": False,
+        "python_executable_path": str(python_executable),
+        "python_executable_sha256": "a" * 64,
+        "python_executable_sha256_after_preparation": "a" * 64,
+        "dependency_preparation_report_digest": "b" * 64,
+        "dependency_preparation_report": dependency_preparation_report,
+        "provision_report": {
+            "decision": "provisioned",
+            "provisioned": True,
+            "profile_digest": profile.profile_digest,
+        },
+        "command_results": [
+            {
+                "operation": "dependency_profile_preparation",
+                "return_code": 0,
+            }
+        ],
+    }
+    report_path = (
+        root
+        / "outputs"
+        / "dependency_profiles"
+        / DEPENDENCY_PROFILE_ID
+        / "isolated_dependency_environment_report.json"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return report, report_path
 @pytest.fixture(autouse=True)
 def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
     """本模块的官方参考归档夹具固定使用 pilot_paper."""
@@ -129,12 +232,12 @@ def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.quick
 def test_shallow_diffuse_official_reference_record_validates_when_all_boundaries_ready() -> None:
-    """官方 legacy 复现记录满足证据边界时应通过补充表导入校验。"""
+    """官方固定 profile 复现记录满足证据边界时应通过补充表导入校验。"""
 
     record = build_shallow_diffuse_official_reference_record(
         official_entrypoint="external_baseline/primary/shallow_diffuse/source/run_shallow_diffuse_t2i.py",
         official_repository_commit="c80c553fdf66fda8db735d77a9d56538b7a0ade8",
-        official_environment_profile="python3.9_diffusers0.11.1_shallow_diffuse",
+        official_environment_profile=DEPENDENCY_PROFILE_ID,
         baseline_result_source="outputs/shallow_diffuse_official_reference/summary.json",
         baseline_result_source_digest="digest",
         evidence_paths=["outputs/shallow_diffuse_official_reference/summary.json"],
@@ -173,12 +276,12 @@ def test_shallow_diffuse_official_reference_record_validates_when_all_boundaries
 
 @pytest.mark.quick
 def test_shallow_diffuse_official_reference_rejects_main_table_eligibility() -> None:
-    """官方 legacy 参考记录不得伪装为主表同协议结果。"""
+    """官方固定 profile 参考记录不得伪装为主表同协议结果。"""
 
     record = build_shallow_diffuse_official_reference_record(
         official_entrypoint="external_baseline/primary/shallow_diffuse/source/run_shallow_diffuse_t2i.py",
         official_repository_commit="c80c553fdf66fda8db735d77a9d56538b7a0ade8",
-        official_environment_profile="python3.9_diffusers0.11.1_shallow_diffuse",
+        official_environment_profile=DEPENDENCY_PROFILE_ID,
         baseline_result_source="outputs/shallow_diffuse_official_reference/summary.json",
         baseline_result_source_digest="digest",
         evidence_paths=["outputs/shallow_diffuse_official_reference/summary.json"],
@@ -201,7 +304,7 @@ def test_shallow_diffuse_official_reference_rejects_main_table_eligibility() -> 
     reasons = {issue["reason"] for issue in report["issues"]}
 
     assert report["reference_import_ready"] is False
-    assert "legacy_reference_must_not_enter_main_table" in reasons
+    assert "official_reference_must_not_enter_main_table" in reasons
 
 
 @pytest.mark.quick
@@ -280,7 +383,7 @@ def test_shallow_diffuse_official_reference_patches_source_runtime_boundaries(tm
     assert "environment_controlled_attacker_suffixes" in report["patch_items"]
     assert "fix_reference_similarity_variable" in report["patch_items"]
     assert "lazy_heavy_attacker_initialization" in report["patch_items"]
-    assert "float32_fft_for_legacy_cuda" in report["patch_items"]
+    assert "float32_fft_for_profile_cuda" in report["patch_items"]
     assert "preserve_latent_dtype_after_fft_injection" in report["patch_items"]
     assert "revision='fp16'" not in patched_entrypoint
     assert "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_ATTACKER_NAMES" in patched_entrypoint
@@ -340,7 +443,7 @@ def test_shallow_diffuse_official_reference_prepares_local_model_repository(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """本地模型目录应补齐 legacy transformers 需要的 model_index 兼容项。"""
+    """本地模型目录应补齐固定 transformers 版本需要的 model_index 项。"""
 
     local_model_dir = tmp_path / "runtime_model" / "stable_diffusion_2_1_base"
     config = ShallowDiffuseOfficialReferenceConfig(
@@ -349,7 +452,7 @@ def test_shallow_diffuse_official_reference_prepares_local_model_repository(
         official_model_id="Manojb/stable-diffusion-2-1-base",
         local_model_repository_dir=str(local_model_dir),
         prepare_local_model_repository=True,
-        patch_model_index_for_legacy_transformers=True,
+        patch_model_index_for_pinned_transformers=True,
         require_cuda=False,
     )
     paths = output_paths(tmp_path, config)
@@ -399,56 +502,110 @@ def test_shallow_diffuse_official_reference_prepares_local_model_repository(
 
 
 @pytest.mark.quick
-def test_shallow_diffuse_official_reference_prepares_isolated_legacy_environment(
+def test_shallow_diffuse_official_reference_prepares_fixed_dependency_profile(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Colab 独立会话应能把官方 legacy 依赖准备过程收敛为可审计报告。"""
+    """只有隔离环境 API 报告与固定 profile 身份完全一致时才允许运行。"""
 
+    dependency_python = tmp_path / "shallow_env" / "bin" / "python"
+    dependency_python.parent.mkdir(parents=True)
+    dependency_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    profile = _ready_dependency_profile()
     config = ShallowDiffuseOfficialReferenceConfig(
         output_dir="outputs/shallow_diffuse_official_reference",
         source_dir="external_baseline/primary/shallow_diffuse/source",
         require_cuda=False,
-        prepare_legacy_environment=True,
-        legacy_environment_prefix=str(tmp_path / "legacy_env"),
-        micromamba_path=str(tmp_path / "bin" / "micromamba"),
-        legacy_torch_specs="torch==1.13.0+cu117 torchvision==0.14.0+cu117",
-        legacy_package_specs="transformers==4.23.1 diffusers==0.11.1 datasets==2.6.1",
     )
     paths = output_paths(tmp_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
 
-    def fake_run_shell_command(command: str, *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        micromamba_path = Path(config.micromamba_path)
-        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
-        micromamba_path.write_text("#!/bin/sh\n", encoding="utf-8")
-        return {"command": command, "return_code": 0, "stdout": "micromamba ready", "stderr": ""}
+    def fake_prepare_environment(
+        profile_id: str,
+        *,
+        repository_root: Path,
+    ) -> tuple[dict[str, object], Path]:
+        assert profile_id == DEPENDENCY_PROFILE_ID
+        assert repository_root == tmp_path
+        return _write_isolated_dependency_environment_report(
+            tmp_path,
+            dependency_python,
+            profile,
+        )
 
-    def fake_run_command(command: list[str], *, cwd: Path, timeout_seconds: int) -> dict[str, object]:
-        if command[:2] == [config.micromamba_path, "create"]:
-            legacy_python = Path(config.legacy_environment_prefix) / "bin" / "python"
-            legacy_python.parent.mkdir(parents=True, exist_ok=True)
-            legacy_python.write_text("#!/bin/sh\n", encoding="utf-8")
-        return {"command": command, "return_code": 0, "stdout": "{}", "stderr": ""}
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.get_dependency_profile",
+        lambda _profile_id, _registry_path: profile,
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.require_dependency_profile_ready",
+        lambda _profile_id, _registry_path: profile,
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.prepare_isolated_dependency_environment",
+        fake_prepare_environment,
+    )
 
-    monkeypatch.setattr("paper_experiments.runners.shallow_diffuse_official_reference.run_shell_command", fake_run_shell_command)
-    monkeypatch.setattr("paper_experiments.runners.shallow_diffuse_official_reference.run_command", fake_run_command)
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.validate_official_reference_dependency_environment_report",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            validation_errors=(),
+            dependency_python_executable=str(dependency_python),
+            dependency_installation_performed=True,
+            isolated_dependency_environment_report_digest="f" * 64,
+            passed=True,
+        ),
+    )
 
-    report = prepare_shallow_diffuse_legacy_environment(tmp_path, config, paths)
+    report = prepare_shallow_diffuse_dependency_environment(tmp_path, config, paths)
 
-    assert report["legacy_environment_requested"] is True
-    assert report["legacy_environment_ready"] is True
-    assert report["legacy_python_executable"].replace("\\", "/").endswith("legacy_env/bin/python")
-    assert len(report["command_results"]) >= 4
+    assert report["dependency_environment_requested"] is True
+    assert report["dependency_environment_ready"] is True
+    assert report["dependency_profile_id"] == DEPENDENCY_PROFILE_ID
+    assert report["dependency_environment_report_valid"] is True
+    assert report["dependency_environment_materialized"] is True
+    assert len(report["command_results"]) == 1
+
+
+@pytest.mark.quick
+def test_shallow_diffuse_dependency_profile_missing_lock_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """固定 profile 缺少完整哈希锁时不得调用隔离环境 API。"""
+
+    profile = _dependency_profile(ready=False)
+    config = ShallowDiffuseOfficialReferenceConfig(require_cuda=False)
+    paths = output_paths(tmp_path, config)
+    paths["output_dir"].mkdir(parents=True, exist_ok=True)
+
+    def reject_profile(_profile_id: str, _registry_path: Path) -> object:
+        raise RuntimeError("完整哈希锁缺失")
+
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.get_dependency_profile",
+        lambda _profile_id, _registry_path: profile,
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.official_reference_dependency_environment.require_dependency_profile_ready",
+        reject_profile,
+    )
+
+    report = prepare_shallow_diffuse_dependency_environment(tmp_path, config, paths)
+
+    assert report["dependency_environment_ready"] is False
+    assert report["dependency_profile_ready"] is False
+    assert report["dependency_lock_ready"] is False
+    assert report["dependency_environment_failure_reason"] == "dependency_hash_lock_not_ready"
+    assert report["command_results"] == []
 
 
 @pytest.mark.quick
 def test_shallow_diffuse_official_reference_parses_metric_text_and_custom_python(tmp_path: Path) -> None:
-    """官方日志解析与 legacy Python 可执行文件配置应保持可审计。"""
+    """官方日志解析与固定 profile Python 可执行文件配置应保持可审计。"""
 
     config = ShallowDiffuseOfficialReferenceConfig(
         source_dir="external_baseline/primary/shallow_diffuse/source",
-        official_python_executable="/opt/shallow-diffuse-legacy/bin/python",
         sample_count=5,
         edit_time_list="0.3",
         num_inference_steps=50,
@@ -462,13 +619,17 @@ def test_shallow_diffuse_official_reference_parses_metric_text_and_custom_python
         "auc: 0.95, acc: 0.84, TPR@1%FPR: 0.72\n",
         sample_count=5,
     )
-    command = build_official_command(tmp_path, config)
+    command = build_official_command(
+        tmp_path,
+        config,
+        "/opt/shallow-diffuse-profile/bin/python",
+    )
 
     assert metrics["sample_count"] == 5
     assert metrics["clip_score_mean"] == 0.39522719383239746
     assert metrics["watermarked_clip_score_mean"] == 0.3972677767276764
     assert metrics["auc"] == 0.95
-    assert command[0] == "/opt/shallow-diffuse-legacy/bin/python"
+    assert command[0] == "/opt/shallow-diffuse-profile/bin/python"
     assert command[command.index("--dataset") + 1] == "Gustavosta/Stable-Diffusion-Prompts"
     assert "--edit_time_list" in command
     assert command[command.index("--reference_model") + 1] == "ViT-g-14"
@@ -546,6 +707,7 @@ def test_shallow_diffuse_record_requires_successful_current_official_command(
         metric_summary,
         {"official_command_requested": True, "return_code": 1},
         source_status,
+        {"dependency_environment_ready": True, "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID},
         MODEL_REPOSITORY_REPORT,
         openclip_report,
     )
@@ -556,6 +718,7 @@ def test_shallow_diffuse_record_requires_successful_current_official_command(
         metric_summary,
         {"official_command_requested": True, "return_code": 0},
         source_status,
+        {"dependency_environment_ready": True, "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID},
         MODEL_REPOSITORY_REPORT,
         openclip_report,
     )
@@ -605,6 +768,14 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
                 "run_decision": "pass",
                 "shallow_diffuse_official_reference_ready": True,
                 "reference_import_ready": True,
+                "dependency_profile_id": DEPENDENCY_PROFILE_ID,
+                "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID,
+                "dependency_profile_ready": True,
+                "dependency_lock_ready": True,
+                "dependency_environment_materialized": True,
+                "dependency_environment_report_valid": True,
+                "dependency_profile_digest": "f" * 64,
+                "dependency_lock_digest": "e" * 64,
                 "model_source_ready": True,
                 "model_snapshot_scope_ready": True,
                 "model_source_repository_id": "Manojb/stable-diffusion-2-1-base",
@@ -743,10 +914,8 @@ def test_shallow_diffuse_official_reference_cold_start_clones_source(
 def test_shallow_diffuse_official_reference_default_config_reads_runtime_parameters(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Notebook 参数层应能显式传递 Shallow Diffuse 官方运行参数。"""
+    """Notebook 参数层可传运行参数, 但依赖身份必须保持固定。"""
 
-    monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_PREPARE_LEGACY_ENV", "1")
-    monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_LEGACY_ENV_PREFIX", "/content/shallow_diffuse_legacy_env")
     monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_EDIT_TIME_LIST", "0.3")
     monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_ATTACKER_NAMES", "none")
     monkeypatch.setenv("SLM_WM_SHALLOW_DIFFUSE_W_PATTERN", "complex2_ring")
@@ -755,8 +924,8 @@ def test_shallow_diffuse_official_reference_default_config_reads_runtime_paramet
 
     config = build_default_config()
 
-    assert config.prepare_legacy_environment is True
-    assert config.legacy_environment_prefix == "/content/shallow_diffuse_legacy_env"
+    assert "official_python_executable" not in config.__dataclass_fields__
+    assert config.dependency_profile_id == DEPENDENCY_PROFILE_ID
     assert config.edit_time_list == "0.3"
     assert config.attacker_names == "none"
     assert config.w_pattern == "complex2_ring"
@@ -767,6 +936,14 @@ def test_shallow_diffuse_official_reference_default_config_reads_runtime_paramet
     assert config.reference_model == "ViT-g-14"
     assert config.reference_model_checkpoint_path == DEFAULT_OPENCLIP_CHECKPOINT_PATH
     assert Path(config.reference_model_checkpoint_path).name == OPENCLIP_CHECKPOINT_FILENAME
+
+
+@pytest.mark.quick
+def test_shallow_diffuse_official_reference_rejects_alternate_dependency_profile() -> None:
+    """正式参考不得由调用方替换固定依赖 profile。"""
+
+    with pytest.raises(ValueError, match="固定依赖 profile"):
+        ShallowDiffuseOfficialReferenceConfig(dependency_profile_id="workflow_orchestrator")
 
 
 @pytest.mark.quick

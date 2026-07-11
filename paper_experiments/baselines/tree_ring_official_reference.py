@@ -1,7 +1,7 @@
-"""Tree-Ring 官方原始环境复现的补充表 governed import 协议。
+"""Tree-Ring 官方参考环境复现的补充表 受治理导入 协议。
 
-该模块服务补充表忠实度审计, 不参与主表 SD3.5 common-backbone 对比。官方原始环境通常使用
-legacy Stable Diffusion、旧版 diffusers 和 DDIM inversion, 因此其结果必须和 SD3.5 方法忠实
+该模块服务补充表忠实度审计, 不参与主表 SD3.5 common-backbone 对比。官方参考环境通常使用
+固定 Stable Diffusion 2.1 profile、对应 diffusers 和 DDIM inversion, 因此其结果必须和 SD3.5 方法忠实
 adapter 主表结果分开记录。
 """
 
@@ -14,7 +14,7 @@ from typing import Any, Iterable, Mapping
 from experiments.runtime.model_sources import get_model_source
 from main.core.digest import build_stable_digest
 
-TREE_RING_OFFICIAL_REFERENCE_PROTOCOL_NAME = "tree_ring_official_legacy_reference_protocol"
+TREE_RING_OFFICIAL_REFERENCE_PROTOCOL_NAME = "tree_ring_official_reference_protocol"
 TREE_RING_SUPPLEMENTAL_TABLE_ROLE = "supplemental_method_fidelity_reference"
 _OFFICIAL_MODEL_SOURCE = get_model_source("manojb_stable_diffusion_2_1_base")
 _PROMPT_DATASET_SOURCE = get_model_source("gustavosta_stable_diffusion_prompts")
@@ -78,7 +78,7 @@ class TreeRingOfficialReferenceIssue:
 
 @dataclass(frozen=True)
 class TreeRingOfficialReferenceRecord:
-    """记录 Tree-Ring 官方 legacy 复现结果的补充表候选记录。"""
+    """记录 Tree-Ring 官方固定 profile 复现结果的补充表候选记录。"""
 
     reference_record_id: str
     reference_record_digest: str
@@ -199,9 +199,9 @@ def build_tree_ring_official_reference_record(
     metric_values: Mapping[str, Any],
     ready_flags: Mapping[str, bool],
 ) -> dict[str, Any]:
-    """构造 Tree-Ring 官方 legacy 复现的补充表 governed import 记录。
+    """构造 Tree-Ring 官方固定 profile 复现的补充表 受治理导入 记录。
 
-    该记录只表达补充表忠实度参考, 因 legacy backbone 与 SD3.5 主线不同, 不允许进入主表正式对比。
+    该记录只表达补充表忠实度参考, 因 Stable Diffusion 2.1 backbone 与 SD3.5 主线不同, 不允许进入主表正式对比。
     """
 
     payload = {
@@ -260,7 +260,7 @@ def build_tree_ring_official_reference_record(
 
 
 def validate_tree_ring_official_reference_records(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """校验 Tree-Ring 官方 legacy 参考记录是否满足补充表 governed import 协议。"""
+    """校验 Tree-Ring 官方固定 profile 参考记录是否满足补充表 受治理导入 协议。"""
 
     materialized_rows = [dict(row) for row in rows]
     issues: list[TreeRingOfficialReferenceIssue] = []
@@ -274,7 +274,7 @@ def validate_tree_ring_official_reference_records(rows: Iterable[Mapping[str, An
         if _str_field(row, "supplemental_table_role") != TREE_RING_SUPPLEMENTAL_TABLE_ROLE:
             row_issues.append(TreeRingOfficialReferenceIssue(row_index, "supplemental_table_role", "supplemental_table_role_required"))
         if _bool_field(row, "main_table_eligible"):
-            row_issues.append(TreeRingOfficialReferenceIssue(row_index, "main_table_eligible", "legacy_reference_must_not_enter_main_table"))
+            row_issues.append(TreeRingOfficialReferenceIssue(row_index, "main_table_eligible", "official_reference_must_not_enter_main_table"))
         for flag_name in REQUIRED_READY_FLAGS:
             if not _bool_field(row, flag_name):
                 row_issues.append(TreeRingOfficialReferenceIssue(row_index, flag_name, f"{flag_name}_required"))

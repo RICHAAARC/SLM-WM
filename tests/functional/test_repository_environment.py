@@ -184,7 +184,7 @@ def test_runtime_environment_report_does_not_trust_environment_strings(
     monkeypatch.setenv(FORMAL_EXECUTION_COMMIT_ENVIRONMENT_KEY, "a" * 40)
     monkeypatch.setenv(FORMAL_EXECUTION_LOCK_DIGEST_ENVIRONMENT_KEY, "b" * 64)
 
-    report = build_runtime_environment_report()
+    report = build_runtime_environment_report("sd35_method_runtime_gpu")
 
     assert report["formal_execution_commit"] == ""
     assert report["formal_execution_lock_digest"] == ""
@@ -202,6 +202,7 @@ def test_runtime_environment_report_accepts_validated_record(
     record = build_formal_execution_lock(repository, commit)
 
     report = build_runtime_environment_report(
+        "sd35_method_runtime_gpu",
         verified_formal_execution_lock=record,
     )
 

@@ -1,7 +1,7 @@
-"""Gaussian Shading 官方原始环境复现与 governed import 的 Colab 辅助函数。
+"""Gaussian Shading 官方参考环境复现与受治理导入的 Colab 辅助函数。
 
-该 helper 服务补充表方法忠实度审计。它不把 legacy Stable Diffusion 结果混入 SD3.5 主表,
-而是把官方命令、运行日志、环境报告、指标摘要和 governed import 记录统一写入 outputs/。
+该辅助模块服务补充表方法忠实度审计。它不把固定 Stable Diffusion 2.1 profile 结果混入 SD3.5 主表,
+而是把官方命令、运行日志、环境报告、指标摘要和受治理导入记录统一写入 outputs/。
 """
 
 from __future__ import annotations
@@ -14,8 +14,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import subprocess
-import sys
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -57,6 +55,9 @@ from paper_experiments.runners.model_snapshot_runtime import (
     ensure_hugging_face_snapshot_files,
     validate_frozen_model_source,
 )
+from paper_experiments.runners.official_reference_dependency_environment import (
+    prepare_official_reference_dependency_environment,
+)
 from paper_experiments.runners.openclip_checkpoint_runtime import (
     DEFAULT_OPENCLIP_CHECKPOINT_PATH,
     OPENCLIP_CHECKPOINT_FILENAME,
@@ -78,7 +79,7 @@ EXPECTED_PATCHED_SOURCE_PATHS = (
     "optim_utils.py",
     "run_gaussian_shading.py",
 )
-DEFAULT_RUN_NAME = "gaussian_shading_official_legacy_reference"
+DEFAULT_RUN_NAME = "gaussian_shading_official_reference"
 DEFAULT_SAMPLE_COUNT = 700
 DEFAULT_OUTPUT_SUBDIR = "official_output"
 _OFFICIAL_MODEL_SOURCE = get_model_source("manojb_stable_diffusion_2_1_base")
@@ -98,12 +99,10 @@ DEFAULT_LOCAL_MODEL_REPOSITORY_DIR = str(
         DEFAULT_OFFICIAL_MODEL_REVISION,
     )
 )
-DEFAULT_LEGACY_ENV_PREFIX = "/content/gaussian_shading_legacy_env"
-DEFAULT_MICROMAMBA_PATH = "/content/bin/micromamba"
-DEFAULT_LEGACY_PYTHON_VERSION = "3.8"
+DEFAULT_DEPENDENCY_PROFILE_ID = "gaussian_shading_official_py38_cu117"
 @dataclass(frozen=True)
 class GaussianShadingOfficialReferenceConfig:
-    """描述 Gaussian Shading 官方原始环境复现与导入所需配置。"""
+    """描述 Gaussian Shading 官方参考环境复现与导入所需配置。"""
 
     output_dir: str = DEFAULT_OUTPUT_DIR
     drive_output_dir: str = field(default_factory=lambda: build_paper_run_config(".").drive_dir("external_baseline_official_reference"))
@@ -133,12 +132,8 @@ class GaussianShadingOfficialReferenceConfig:
     patch_model_repository_layout: bool = True
     prepare_local_model_repository: bool = True
     local_model_repository_dir: str = DEFAULT_LOCAL_MODEL_REPOSITORY_DIR
-    patch_model_index_for_legacy_transformers: bool = True
-    official_python_executable: str = ""
-    prepare_legacy_environment: bool = True
-    legacy_environment_prefix: str = DEFAULT_LEGACY_ENV_PREFIX
-    micromamba_path: str = DEFAULT_MICROMAMBA_PATH
-    legacy_python_version: str = DEFAULT_LEGACY_PYTHON_VERSION
+    patch_model_index_for_pinned_transformers: bool = True
+    dependency_profile_id: str = DEFAULT_DEPENDENCY_PROFILE_ID
     require_cuda: bool = True
     timeout_seconds: int = 86400
     enable_workflow_progress_bar: bool = True
@@ -146,8 +141,6 @@ class GaussianShadingOfficialReferenceConfig:
     def __post_init__(self) -> None:
         """集中校验官方命令的严格环境边界。"""
 
-        if not self.prepare_legacy_environment and not self.official_python_executable:
-            raise ValueError("运行 Gaussian Shading 官方命令必须准备官方 requirements 环境")
         if (
             self.dataset_path != DEFAULT_PROMPT_DATASET_ID
             or self.dataset_revision != DEFAULT_PROMPT_DATASET_REVISION
@@ -157,6 +150,8 @@ class GaussianShadingOfficialReferenceConfig:
             raise ValueError("Gaussian Shading 正式参考必须使用登记的 ViT-g-14 OpenCLIP 编码器")
         if Path(self.reference_model_checkpoint_path).name != OPENCLIP_CHECKPOINT_FILENAME:
             raise ValueError("Gaussian Shading OpenCLIP 预训练参数必须指向登记的本地 checkpoint")
+        if self.dependency_profile_id != DEFAULT_DEPENDENCY_PROFILE_ID:
+            raise ValueError("Gaussian Shading 正式参考必须使用固定依赖 profile")
 
 
 @dataclass(frozen=True)
@@ -204,90 +199,6 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
         return path.resolve().as_posix()
 
 
-def command_exception_result(command: Any, error: Exception) -> dict[str, Any]:
-    """把环境准备异常转换为可落盘命令诊断。"""
-
-    return_code = 124 if isinstance(error, subprocess.TimeoutExpired) else 98
-    return {
-        "command": command,
-        "return_code": return_code,
-        "stdout": str(getattr(error, "stdout", "") or ""),
-        "stderr": f"{type(error).__name__}:{error}",
-    }
-
-
-def run_shell_command(
-    command: str,
-    *,
-    cwd: Path,
-    timeout_seconds: int,
-    progress: object | None = None,
-    progress_profile: str = "",
-) -> dict[str, Any]:
-    """执行 shell 命令并返回可落盘诊断。"""
-
-    try:
-        completed = run_quiet_subprocess_with_progress(
-            command,
-            cwd=cwd,
-            shell=True,
-            timeout_seconds=timeout_seconds,
-            progress=progress,
-            progress_profile=progress_profile or "operation=shell_command",
-        )
-    except Exception as error:
-        return command_exception_result(command, error)
-    return {
-        "command": command,
-        "return_code": completed.returncode,
-        "stdout": completed.stdout,
-        "stderr": completed.stderr,
-    }
-
-
-def run_argv_command(
-    command: list[str],
-    *,
-    cwd: Path,
-    timeout_seconds: int,
-    progress: object | None = None,
-    progress_profile: str = "",
-) -> dict[str, Any]:
-    """执行 argv 命令并把失败收敛为可审计诊断。"""
-
-    try:
-        return call_runner_with_progress_status(
-            run_command,
-            command,
-            cwd=cwd,
-            timeout_seconds=timeout_seconds,
-            progress=progress,
-            progress_profile=progress_profile or "operation=argv_command",
-        )
-    except Exception as error:
-        return command_exception_result(command, error)
-
-
-def run_shell_command_with_progress_status(
-    command: str,
-    *,
-    cwd: Path,
-    timeout_seconds: int,
-    progress: object | None = None,
-    progress_profile: str = "",
-) -> dict[str, Any]:
-    """调用可替换 shell runner, 并兼容测试中的轻量 fake。"""
-
-    return call_runner_with_progress_status(
-        run_shell_command,
-        command,
-        cwd=cwd,
-        timeout_seconds=timeout_seconds,
-        progress=progress,
-        progress_profile=progress_profile,
-    )
-
-
 def run_command_with_progress_status(
     command: list[str],
     *,
@@ -327,7 +238,7 @@ def output_paths(root_path: Path, config: GaussianShadingOfficialReferenceConfig
         "source_patch_result": output_dir / "gaussian_shading_official_source_patch_result.json",
         "model_repository_prepare_result": output_dir / "gaussian_shading_model_repository_prepare_result.json",
         "openclip_checkpoint_prepare_result": output_dir / "gaussian_shading_openclip_checkpoint_prepare_result.json",
-        "legacy_environment_prepare_result": output_dir / "gaussian_shading_legacy_environment_prepare_result.json",
+        "dependency_environment_prepare_result": output_dir / "gaussian_shading_dependency_environment_prepare_result.json",
         "official_stdout": output_dir / "gaussian_shading_official_stdout.txt",
         "official_stderr": output_dir / "gaussian_shading_official_stderr.txt",
         "official_metric_summary": output_dir / "gaussian_shading_official_metric_summary.json",
@@ -340,192 +251,20 @@ def output_paths(root_path: Path, config: GaussianShadingOfficialReferenceConfig
     }
 
 
-def ensure_micromamba_available(
-    root_path: Path,
-    config: GaussianShadingOfficialReferenceConfig,
-    progress: object | None = None,
-) -> tuple[Path, list[dict[str, Any]]]:
-    """确保 micromamba 可用, 作为 Colab 隔离环境创建工具。"""
-
-    micromamba_path = Path(config.micromamba_path)
-    command_results: list[dict[str, Any]] = []
-    if not micromamba_path.is_file():
-        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
-        command_results.append(
-            run_shell_command_with_progress_status(
-                f"curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C {micromamba_path.parent.parent} bin/micromamba",
-                cwd=root_path,
-                timeout_seconds=600,
-                progress=progress,
-                progress_profile="operation=gaussian_shading_fetch_micromamba",
-            )
-        )
-    return micromamba_path, command_results
-
-
-def create_python_environment(
-    root_path: Path,
-    *,
-    micromamba_path: Path,
-    environment_prefix: Path,
-    python_version: str,
-    progress: object | None = None,
-    progress_profile: str = "",
-) -> list[dict[str, Any]]:
-    """创建指定 Python 版本的隔离环境, 已存在时保持可复用。"""
-
-    legacy_python = environment_prefix / "bin" / "python"
-    if legacy_python.is_file():
-        return []
-    return [
-        run_argv_command(
-            [
-                str(micromamba_path),
-                "create",
-                "-y",
-                "-p",
-                str(environment_prefix),
-                f"python={python_version}",
-                "pip",
-            ],
-            cwd=root_path,
-            timeout_seconds=900,
-            progress=progress,
-            progress_profile=progress_profile or "operation=gaussian_shading_create_python_environment",
-        )
-    ]
-
-
-def verify_legacy_imports(root_path: Path, legacy_python: Path, progress: object | None = None) -> dict[str, Any]:
-    """验证官方脚本所需核心包是否能在 legacy 环境中导入。"""
-
-    verify_command = [
-        str(legacy_python),
-        "-c",
-        "import torch, diffusers, transformers, datasets, open_clip; "
-        "print({'torch': torch.__version__, 'diffusers': diffusers.__version__, "
-        "'transformers': transformers.__version__, 'datasets': datasets.__version__})",
-    ]
-    return run_argv_command(
-        verify_command,
-        cwd=root_path,
-        timeout_seconds=300,
-        progress=progress,
-        progress_profile="operation=gaussian_shading_verify_legacy_imports",
-    )
-
-
-def prepare_strict_official_environment_profile(
-    root_path: Path,
-    config: GaussianShadingOfficialReferenceConfig,
-    *,
-    micromamba_path: Path,
-    progress: object | None = None,
-) -> dict[str, Any]:
-    """按官方 README 语义尝试 Python 3.8 + requirements.txt 严格环境。"""
-
-    strict_prefix = Path(config.legacy_environment_prefix) / "official_requirements_strict"
-    strict_python = strict_prefix / "bin" / "python"
-    requirements_path = (root_path / config.source_dir / "requirements.txt").resolve()
-    command_results = create_python_environment(
-        root_path,
-        micromamba_path=micromamba_path,
-        environment_prefix=strict_prefix,
-        python_version=config.legacy_python_version,
-        progress=progress,
-        progress_profile="operation=gaussian_shading_create_strict_environment",
-    )
-    if requirements_path.is_file():
-        command_results.append(
-            run_argv_command(
-                [str(strict_python), "-m", "pip", "install", "-r", str(requirements_path)],
-                cwd=root_path,
-                timeout_seconds=3600,
-                progress=progress,
-                progress_profile="operation=gaussian_shading_install_strict_requirements",
-            )
-        )
-    else:
-        command_results.append(
-            {
-                "command": [str(strict_python), "-m", "pip", "install", "-r", str(requirements_path)],
-                "return_code": 96,
-                "stdout": "",
-                "stderr": "official_requirements_txt_missing",
-            }
-        )
-    command_results.append(verify_legacy_imports(root_path, strict_python, progress=progress))
-    ready = strict_python.is_file() and all(int(result.get("return_code", 1)) == 0 for result in command_results)
-    return {
-        "environment_profile": "official_requirements_strict",
-        "environment_prefix": str(strict_prefix),
-        "legacy_python_executable": str(strict_python),
-        "requirements_path": relative_or_absolute(requirements_path, root_path),
-        "environment_ready": ready,
-        "command_results": command_results,
-    }
-
-
-def prepare_gaussian_shading_legacy_environment(
+def prepare_gaussian_shading_dependency_environment(
     root_path: Path,
     config: GaussianShadingOfficialReferenceConfig,
     paths: dict[str, Path],
     progress: object | None = None,
 ) -> dict[str, Any]:
-    """准备 Gaussian Shading 官方参考所需 legacy Python 环境。"""
+    """使用共享协议准备并核验固定依赖 profile。"""
 
-    if not config.prepare_legacy_environment:
-        report = {
-            "legacy_environment_requested": False,
-            "legacy_environment_ready": False,
-            "legacy_environment_skipped": True,
-            "legacy_environment_skip_reason": "prepare_legacy_environment_disabled",
-            "legacy_python_executable": config.official_python_executable or sys.executable,
-            "legacy_environment_profile": "ambient_python",
-        }
-        write_json(paths["legacy_environment_prepare_result"], report)
-        return report
-    if config.official_python_executable:
-        report = {
-            "legacy_environment_requested": True,
-            "legacy_environment_ready": True,
-            "legacy_environment_skipped": True,
-            "legacy_environment_skip_reason": "explicit_official_python_executable_provided",
-            "legacy_python_executable": config.official_python_executable,
-            "legacy_environment_profile": "external_python_executable",
-        }
-        write_json(paths["legacy_environment_prepare_result"], report)
-        return report
-
-    micromamba_path, micromamba_results = ensure_micromamba_available(root_path, config, progress=progress)
-    strict_report = prepare_strict_official_environment_profile(
+    return prepare_official_reference_dependency_environment(
         root_path,
-        config,
-        micromamba_path=micromamba_path,
+        config.dependency_profile_id,
+        paths["dependency_environment_prepare_result"],
         progress=progress,
     )
-    ready = bool(strict_report.get("environment_ready"))
-    selected_profile_name = "official_requirements_strict" if ready else "none"
-    selected_python = str(
-        strict_report.get("legacy_python_executable")
-        or Path(config.legacy_environment_prefix) / "official_requirements_strict" / "bin" / "python"
-    )
-    report = {
-        "legacy_environment_requested": True,
-        "legacy_environment_ready": ready,
-        "legacy_python_executable": selected_python,
-        "legacy_environment_prefix": str(Path(config.legacy_environment_prefix)),
-        "legacy_environment_profile": selected_profile_name,
-        "legacy_python_version": config.legacy_python_version,
-        "strict_official_environment_ready": ready,
-        "micromamba_command_results": micromamba_results,
-        "environment_profile_reports": [strict_report],
-        "command_results": [*micromamba_results, *strict_report.get("command_results", [])],
-    }
-    write_json(paths["legacy_environment_prepare_result"], report)
-    return report
-
-
 def source_report(root_path: Path, config: GaussianShadingOfficialReferenceConfig) -> dict[str, Any]:
     """检查官方 Gaussian Shading 源码快照和 requirements 是否存在。"""
 
@@ -540,7 +279,6 @@ def source_report(root_path: Path, config: GaussianShadingOfficialReferenceConfi
         "official_entrypoint_ready": entrypoint.is_file(),
         "requirements_ready": requirements.is_file(),
         "requirements_text": requirements.read_text(encoding="utf-8") if requirements.is_file() else "",
-        "official_python_executable": config.official_python_executable or sys.executable,
     }
 
 
@@ -710,7 +448,7 @@ def prepare_gaussian_shading_model_repository(
     paths: dict[str, Path],
     progress: object | None = None,
 ) -> dict[str, Any]:
-    """准备本地模型目录并补齐 legacy diffusers 所需的 model_index 兼容项。"""
+    """准备本地模型目录并补齐固定 diffusers 版本所需的 model_index 项。"""
 
     validate_frozen_model_source(
         config.official_model_id,
@@ -729,7 +467,7 @@ def prepare_gaussian_shading_model_repository(
         "official_model_revision": config.official_model_revision,
         "upstream_official_model_id": config.upstream_official_model_id,
         "effective_official_model_id": config.official_model_id,
-        "model_index_patch_requested": bool(config.patch_model_index_for_legacy_transformers),
+        "model_index_patch_requested": bool(config.patch_model_index_for_pinned_transformers),
         "model_index_patch_applied": False,
         "model_source_note": config.model_source_note,
     }
@@ -773,7 +511,7 @@ def prepare_gaussian_shading_model_repository(
     report["model_index_digest_before"] = before_digest
     feature_extractor = model_index.get("feature_extractor")
     if (
-        config.patch_model_index_for_legacy_transformers
+        config.patch_model_index_for_pinned_transformers
         and isinstance(feature_extractor, list)
         and len(feature_extractor) >= 2
         and feature_extractor[0] == "transformers"
@@ -782,9 +520,9 @@ def prepare_gaussian_shading_model_repository(
         feature_extractor[1] = "CLIPFeatureExtractor"
         write_json(model_index_path, model_index)
         report["model_index_patch_applied"] = True
-        report["model_index_patch_reason"] = "legacy_diffusers_0_11_1_uses_clip_feature_extractor"
-    elif not config.patch_model_index_for_legacy_transformers:
-        report["model_index_patch_skip_reason"] = "patch_model_index_for_legacy_transformers_disabled"
+        report["model_index_patch_reason"] = "pinned_diffusers_uses_clip_feature_extractor"
+    elif not config.patch_model_index_for_pinned_transformers:
+        report["model_index_patch_skip_reason"] = "patch_model_index_for_pinned_transformers_disabled"
     else:
         report["model_index_patch_skip_reason"] = "model_index_feature_extractor_already_compatible"
 
@@ -806,12 +544,19 @@ def prepare_gaussian_shading_model_repository(
     return report
 
 
-def build_official_command(root_path: Path, config: GaussianShadingOfficialReferenceConfig, paths: dict[str, Path]) -> list[str]:
-    """构造 Gaussian Shading 官方 legacy 入口命令。"""
+def build_official_command(
+    root_path: Path,
+    config: GaussianShadingOfficialReferenceConfig,
+    paths: dict[str, Path],
+    dependency_python_executable: str | Path,
+) -> list[str]:
+    """构造 Gaussian Shading 官方固定依赖 profile 入口命令。"""
 
     source_dir = (root_path / config.source_dir).resolve()
     entrypoint = source_dir / "run_gaussian_shading.py"
-    python_executable = config.official_python_executable or sys.executable
+    python_executable = str(dependency_python_executable).strip()
+    if not python_executable:
+        raise ValueError("Gaussian Shading 官方命令必须使用已核验的隔离 Python 解释器")
     output_path = str(paths["official_output_dir"]) + os.sep
     command = [
         python_executable,
@@ -940,6 +685,7 @@ def run_official_command(
     root_path: Path,
     config: GaussianShadingOfficialReferenceConfig,
     paths: dict[str, Path],
+    dependency_python_executable: str | Path,
     progress: object | None = None,
 ) -> dict[str, Any]:
     """执行本次 Gaussian Shading 官方命令并保存独立运行证据."""
@@ -967,7 +713,12 @@ def run_official_command(
         paths["official_stderr"].write_text("gaussian_shading_official_source_entrypoint_missing", encoding="utf-8")
         result = {
             "official_command_requested": True,
-            "official_command": build_official_command(root_path, config, paths),
+            "official_command": build_official_command(
+                root_path,
+                config,
+                paths,
+                dependency_python_executable,
+            ),
             "return_code": 96,
             "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
             "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
@@ -976,7 +727,12 @@ def run_official_command(
         write_json(paths["official_command_result"], result)
         return result
     paths["official_output_dir"].mkdir(parents=True, exist_ok=True)
-    command = build_official_command(root_path, config, paths)
+    command = build_official_command(
+        root_path,
+        config,
+        paths,
+        dependency_python_executable,
+    )
     source_dir = (root_path / config.source_dir).resolve()
     env = os.environ.copy()
     env.setdefault("WANDB_MODE", "disabled")
@@ -1097,7 +853,7 @@ def build_reference_record_report(
     paths: dict[str, Path],
     metric_summary: dict[str, Any],
     source_status: dict[str, Any],
-    legacy_environment_report: dict[str, Any],
+    dependency_environment_report: dict[str, Any],
     model_repository_report: dict[str, Any],
     openclip_report: dict[str, Any],
     official_report: dict[str, Any],
@@ -1128,7 +884,7 @@ def build_reference_record_report(
             source_status.get("prompt_dataset_revision") == DEFAULT_PROMPT_DATASET_REVISION,
         )
     )
-    environment_ready = legacy_environment_report.get("legacy_environment_ready") is True
+    environment_ready = dependency_environment_report.get("dependency_environment_ready") is True
     model_source_ready = model_repository_source_is_exact(model_repository_report)
     openclip_source_ready = openclip_checkpoint_source_is_exact(openclip_report)
     governed_import_ready = all(
@@ -1167,7 +923,7 @@ def build_reference_record_report(
         paths["source_patch_result"],
         paths["model_repository_prepare_result"],
         paths["openclip_checkpoint_prepare_result"],
-        paths["legacy_environment_prepare_result"],
+        paths["dependency_environment_prepare_result"],
         paths["environment_report"],
     ):
         if candidate.is_file():
@@ -1181,8 +937,7 @@ def build_reference_record_report(
         official_entrypoint=str(source_status.get("official_entrypoint", "")),
         official_repository_commit=str(source_status.get("official_repository_commit", "")),
         official_environment_profile=str(
-            legacy_environment_report.get("legacy_environment_profile")
-            or "legacy_gaussian_shading_official_environment"
+            dependency_environment_report.get("dependency_environment_profile_id", "")
         ),
         baseline_result_source=result_source,
         baseline_result_source_digest=result_digest,
@@ -1227,7 +982,7 @@ def write_gaussian_shading_official_reference_outputs(
     config: GaussianShadingOfficialReferenceConfig,
     root: str | Path = ".",
 ) -> dict[str, Any]:
-    """执行 Gaussian Shading 官方参考 workflow 并写出 summary、manifest 和 governed import 记录。"""
+    """执行 Gaussian Shading 官方参考 workflow 并写出摘要、清单和受治理导入记录。"""
 
     root_path = Path(root).resolve()
     formal_execution_run_lock = (
@@ -1267,23 +1022,21 @@ def write_gaussian_shading_official_reference_outputs(
         write_json(paths["source_patch_result"], source_patch_report)
         write_json(paths["source_prepare_result"], source_status)
         update_progress(run_progress, profile="operation=patch_gaussian_shading_source")
-        legacy_environment_report = prepare_gaussian_shading_legacy_environment(
+        dependency_environment_report = prepare_gaussian_shading_dependency_environment(
             root_path,
             config,
             paths,
             progress=run_progress,
         )
-        update_progress(run_progress, profile="operation=prepare_gaussian_shading_legacy_environment")
-        if config.prepare_legacy_environment and legacy_environment_report.get("legacy_environment_ready"):
-            effective_config = replace(config, official_python_executable=str(legacy_environment_report["legacy_python_executable"]))
+        update_progress(run_progress, profile="operation=prepare_gaussian_shading_dependency_environment")
         emit_progress_status(run_progress, profile="operation=ensure_cuda status=running")
         try:
             device_report = ensure_cuda_if_requested(effective_config.require_cuda)
         except Exception as error:
             device_report = {"cuda_available": False, "device_error": f"{type(error).__name__}:{error}"}
         update_progress(run_progress, profile="operation=ensure_cuda")
-        should_prepare_model_repository = not (
-            effective_config.prepare_legacy_environment and not legacy_environment_report.get("legacy_environment_ready")
+        should_prepare_model_repository = (
+            dependency_environment_report.get("dependency_environment_ready") is True
         )
         model_repository_config = effective_config if should_prepare_model_repository else replace(effective_config, prepare_local_model_repository=False)
         model_repository_report = prepare_gaussian_shading_model_repository(root_path, model_repository_config, paths, progress=run_progress)
@@ -1304,15 +1057,12 @@ def write_gaussian_shading_official_reference_outputs(
                 effective_config,
                 reference_model_checkpoint_path=str(openclip_report["openclip_checkpoint_path"]),
             )
-        if (
-            effective_config.prepare_legacy_environment
-            and not legacy_environment_report.get("legacy_environment_ready")
-        ):
+        if not dependency_environment_report.get("dependency_environment_ready"):
             official_report = write_official_command_skip_result(
                 root_path,
                 paths,
                 return_code=95,
-                reason="gaussian_shading_legacy_environment_prepare_failed",
+                reason="gaussian_shading_dependency_environment_prepare_failed",
             )
         elif not model_repository_report.get("local_model_repository_ready"):
             official_report = write_official_command_skip_result(
@@ -1329,7 +1079,13 @@ def write_gaussian_shading_official_reference_outputs(
                 reason="gaussian_shading_openclip_checkpoint_prepare_failed",
             )
         else:
-            official_report = run_official_command(root_path, effective_config, paths, progress=run_progress)
+            official_report = run_official_command(
+                root_path,
+                effective_config,
+                paths,
+                dependency_environment_report["dependency_python_executable"],
+                progress=run_progress,
+            )
         update_progress(run_progress, profile="operation=gaussian_shading_official_command")
         emit_progress_status(run_progress, profile="operation=parse_gaussian_shading_metrics status=running")
         command_metrics: dict[str, Any] = {}
@@ -1346,6 +1102,7 @@ def write_gaussian_shading_official_reference_outputs(
         update_progress(run_progress, profile="operation=parse_gaussian_shading_metrics")
         emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
         environment_report = build_runtime_environment_report(
+            "workflow_orchestrator",
             verified_formal_execution_lock=formal_execution_run_lock,
         )
         environment_report["gaussian_shading_official_reference_device_report"] = device_report
@@ -1353,7 +1110,7 @@ def write_gaussian_shading_official_reference_outputs(
         environment_report["gaussian_shading_official_reference_source_patch_report"] = source_patch_report
         environment_report["gaussian_shading_official_reference_model_repository_report"] = model_repository_report
         environment_report["gaussian_shading_official_reference_openclip_checkpoint_report"] = openclip_report
-        environment_report["gaussian_shading_official_reference_legacy_environment_report"] = legacy_environment_report
+        environment_report["gaussian_shading_official_reference_dependency_environment_report"] = dependency_environment_report
         write_json(paths["environment_report"], environment_report)
         update_progress(run_progress, profile="operation=write_environment_report")
         emit_progress_status(run_progress, profile="operation=build_reference_record status=running")
@@ -1363,7 +1120,7 @@ def write_gaussian_shading_official_reference_outputs(
             paths,
             metric_summary,
             source_status,
-            legacy_environment_report,
+            dependency_environment_report,
             model_repository_report,
             openclip_report,
             official_report,
@@ -1412,14 +1169,16 @@ def write_gaussian_shading_official_reference_outputs(
             validation.get("reference_import_ready") is True,
             official_command_succeeded,
             scientific_metrics_complete,
-            legacy_environment_report.get("legacy_environment_ready") is True,
+        dependency_environment_report.get("dependency_environment_ready") is True,
             model_source_ready,
             source_revision_ready,
             openclip_source_ready,
         )
     )
     unsupported_reason = "" if run_ready else "gaussian_shading_official_reference_result_missing_or_invalid"
-    if not official_command_succeeded:
+    if dependency_environment_report.get("dependency_environment_ready") is not True:
+        unsupported_reason = "dependency_profile_environment_not_ready"
+    elif not official_command_succeeded:
         unsupported_reason = "official_command_failed_formal_archive_blocked"
     elif not scientific_metrics_complete:
         unsupported_reason = "official_command_scientific_metrics_incomplete"
@@ -1437,10 +1196,16 @@ def write_gaussian_shading_official_reference_outputs(
         "sample_count": int(effective_config.sample_count),
         "paper_claim_scale": paper_run.run_name,
         "target_fpr": paper_run.target_fpr,
-        "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
-        "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
-        "legacy_environment_profile": str(legacy_environment_report.get("legacy_environment_profile", "")),
-        "strict_official_environment_ready": bool(legacy_environment_report.get("strict_official_environment_ready")),
+        "dependency_environment_requested": bool(dependency_environment_report.get("dependency_environment_requested")),
+        "dependency_environment_ready": bool(dependency_environment_report.get("dependency_environment_ready")),
+        "dependency_environment_profile_id": str(dependency_environment_report.get("dependency_environment_profile_id", "")),
+        "dependency_profile_ready": bool(dependency_environment_report.get("dependency_profile_ready")),
+        "dependency_profile_id": str(dependency_environment_report.get("dependency_profile_id", "")),
+        "dependency_lock_ready": bool(dependency_environment_report.get("dependency_lock_ready")),
+        "dependency_environment_materialized": bool(dependency_environment_report.get("dependency_environment_materialized")),
+        "dependency_environment_report_valid": bool(dependency_environment_report.get("dependency_environment_report_valid")),
+        "dependency_profile_digest": str(dependency_environment_report.get("dependency_profile_digest", "")),
+        "dependency_lock_digest": str(dependency_environment_report.get("dependency_lock_digest", "")),
         "source_patch_applied": bool(source_patch_report.get("patch_applied")),
         "source_revision_ready": source_revision_ready,
         "official_repository_commit": str(source_status.get("official_repository_commit", "")),
@@ -1482,7 +1247,7 @@ def write_gaussian_shading_official_reference_outputs(
             "source_patch_report": source_patch_report,
             "model_repository_report": model_repository_report,
             "openclip_checkpoint_report": openclip_report,
-            "legacy_environment_report": legacy_environment_report,
+            "dependency_environment_report": dependency_environment_report,
             "official_report": official_report,
             "validation": validation,
         },
@@ -1505,7 +1270,7 @@ def write_gaussian_shading_official_reference_outputs(
         paths["source_patch_result"],
         paths["model_repository_prepare_result"],
         paths["openclip_checkpoint_prepare_result"],
-        paths["legacy_environment_prepare_result"],
+        paths["dependency_environment_prepare_result"],
     ):
         if optional_path.exists():
             output_paths_for_manifest.append(relative_or_absolute(optional_path, root_path))
@@ -1577,15 +1342,11 @@ def build_default_config() -> GaussianShadingOfficialReferenceConfig:
         local_model_repository_dir=os.environ.get(
             "SLM_WM_GAUSSIAN_SHADING_LOCAL_MODEL_REPOSITORY_DIR", DEFAULT_LOCAL_MODEL_REPOSITORY_DIR
         ),
-        patch_model_index_for_legacy_transformers=os.environ.get(
-            "SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1"
+        patch_model_index_for_pinned_transformers=os.environ.get(
+            "SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_INDEX_FOR_PINNED_TRANSFORMERS", "1"
         )
         != "0",
-        official_python_executable=os.environ.get("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_PYTHON_EXECUTABLE", ""),
-        prepare_legacy_environment=os.environ.get("SLM_WM_GAUSSIAN_SHADING_PREPARE_LEGACY_ENV", "1") == "1",
-        legacy_environment_prefix=os.environ.get("SLM_WM_GAUSSIAN_SHADING_LEGACY_ENV_PREFIX", DEFAULT_LEGACY_ENV_PREFIX),
-        micromamba_path=os.environ.get("SLM_WM_GAUSSIAN_SHADING_MICROMAMBA_PATH", DEFAULT_MICROMAMBA_PATH),
-        legacy_python_version=os.environ.get("SLM_WM_GAUSSIAN_SHADING_LEGACY_PYTHON_VERSION", DEFAULT_LEGACY_PYTHON_VERSION),
+        dependency_profile_id=DEFAULT_DEPENDENCY_PROFILE_ID,
         require_cuda=os.environ.get("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_REQUIRE_CUDA", "1") != "0",
         timeout_seconds=int(os.environ.get("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_TIMEOUT_SECONDS", "86400")),
         enable_workflow_progress_bar=os.environ.get("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1") != "0",
@@ -1658,6 +1419,14 @@ def package_gaussian_shading_official_reference_outputs(
             run_summary.get("official_command_succeeded") is True,
             run_summary.get("scientific_metrics_complete") is True,
             run_summary.get("baseline_id") == "gaussian_shading",
+            run_summary.get("dependency_environment_profile_id") == DEFAULT_DEPENDENCY_PROFILE_ID,
+            run_summary.get("dependency_profile_id") == DEFAULT_DEPENDENCY_PROFILE_ID,
+            run_summary.get("dependency_profile_ready") is True,
+            run_summary.get("dependency_lock_ready") is True,
+            run_summary.get("dependency_environment_materialized") is True,
+            run_summary.get("dependency_environment_report_valid") is True,
+            re.fullmatch(r"[0-9a-f]{64}", str(run_summary.get("dependency_profile_digest", ""))) is not None,
+            re.fullmatch(r"[0-9a-f]{64}", str(run_summary.get("dependency_lock_digest", ""))) is not None,
             run_summary.get("model_source_ready") is True,
             run_summary.get("model_snapshot_scope_ready") is True,
             run_summary.get("openclip_source_ready") is True,
@@ -1792,7 +1561,3 @@ def package_gaussian_shading_official_reference_outputs(
     archive_manifest.setdefault("metadata", {})["drive_archive_digest"] = record.drive_archive_digest
     write_json(manifest_path, archive_manifest)
     return record
-
-
-
-

@@ -21,7 +21,7 @@ Tree-Ring 的 Fourier ring key 属于该 baseline 的频域机制。SLM-WM 的 `
 
 ## official reference 边界
 
-补充表使用官方参考环境复现边界: `source/` 中的 `run_tree_ring_watermark.py` 在隔离的 Python 3.8 与官方固定 diffusers 依赖中运行, 再通过 governed import 记录源码 commit、运行命令、环境报告和结果摘要。该补充表结果用于方法忠实度审计, 不替代主表 SD3.5 common-backbone 对比。
+补充表使用官方参考环境复现边界: `source/` 中的 `run_tree_ring_watermark.py` 在隔离的 Python 3.8 与官方固定 diffusers 依赖中运行, 再通过 受治理导入 记录源码 commit、运行命令、环境报告和结果摘要。该补充表结果用于方法忠实度审计, 不替代主表 SD3.5 common-backbone 对比。
 
 ## 当前可用入口
 

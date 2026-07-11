@@ -256,10 +256,6 @@ Notebook 与 repository module 的跨边界数据
 | latent_max | runtime | none | true | false | false | latent trace 中 latent 数值最大值。 |
 | trace_source | runtime | none | false | false | false | latent trace 的来源后端。 |
 | capture_id | runtime | none | true | false | false | attention capture record 的稳定标识。 |
-| attention_map_digest | runtime | none | true | false | false | attention map 或降级摘要 map 的稳定摘要。 |
-| attention_shape | runtime | none | true | false | false | attention map 或降级摘要 map 的形状。 |
-| attention_mean | runtime | none | true | false | false | attention map 或降级摘要 map 的均值。 |
-| attention_entropy | runtime | none | true | false | false | attention map 或降级摘要 map 的平均熵。 |
 | capture_backend | runtime | none | true | false | false | attention capture record 的捕获后端。 |
 | supports_paper_claim | governance | none | true | false | false | 记录或摘要是否允许支持正式论文 claim。 |
 | config_digests | artifact | none | false | false | false | runtime manifest 中记录的配置摘要集合。 |
@@ -287,9 +283,120 @@ Notebook 与 repository module 的跨边界数据
 | protobuf_version | runtime | none | false | false | false | Colab runtime 中的 protobuf 版本。 |
 | numpy_version | runtime | none | false | false | false | Colab runtime 中的 numpy 版本。 |
 | pillow_version | runtime | none | false | false | false | Colab runtime 中的 pillow 版本。 |
-| dependency_mode | runtime | none | false | false | false | Colab runtime 依赖安装与解析模式。 |
-| manual_version_pins | runtime | none | false | false | false | 记录 Notebook 是否手工 pin 具体依赖版本。 |
-| pip_install_command | runtime | none | false | false | false | Colab runtime 中用于形成依赖组合的 pip 安装命令。 |
+| dependency_mode | runtime | none | false | false | false | 当前运行是否使用已提交完整哈希锁的固定依赖模式。 |
+| profile_id | governance | none | true | false | false | 依赖准备 CLI 选择的受治理 profile 标识。 |
+| execution_role | governance | none | true | false | false | 依赖 profile 对应的运行职责。 |
+| profile_digest | artifact | none | true | false | false | Python、平台、CUDA、PyTorch pair 与直接输入身份的稳定摘要。 |
+| profile_summary_digest | artifact | none | true | false | false | 依赖准备报告引用的 profile summary 稳定摘要。 |
+| direct_dependency_input_contract | governance | none | false | false | false | registry 中区分精确直接依赖输入的契约。 |
+| complete_hash_lock_contract | governance | none | false | false | false | registry 中区分目标 Linux x86_64 runtime 完整 wheel 哈希锁的契约。 |
+| artifact_role | governance | none | false | false | false | 依赖输入或完整锁在正式环境中的证据职责。 |
+| requirement_format | governance | none | false | false | false | 直接输入或完整锁条目的受治理文本格式。 |
+| exact_operator | governance | none | false | false | false | 直接依赖输入唯一允许的精确版本运算符。 |
+| materialization_environment | runtime | none | false | false | false | 完整 wheel 哈希锁必须被解析和物化的目标环境。 |
+| repository_commit_required | governance | none | false | false | false | 完整锁是否必须提交后才能进入正式准备路径。 |
+| formal_readiness_requires_valid_lock | governance | none | false | false | false | 正式 readiness 是否强制依赖有效完整哈希锁。 |
+| profiles | governance | none | false | false | false | dependency registry 中按稳定名称索引的隔离 profile 集合。 |
+| python | runtime | none | false | false | false | profile 中精确 CPython 身份的结构化记录。 |
+| implementation | runtime | none | false | false | false | profile 登记的 Python 实现名称。 |
+| accelerator | runtime | none | false | false | false | profile 登记的加速器运行时与 CUDA 版本。 |
+| pytorch | runtime | none | false | false | false | profile 登记的 torch、torchvision 和 wheel index 组合。 |
+| operating_system | runtime | none | true | false | false | profile 期望或 inspection 实测的操作系统名称。 |
+| machine | runtime | none | true | false | false | profile 期望或 inspection 实测的机器架构。 |
+| accelerator_runtime | runtime | none | true | false | false | profile 要求的运行时类型; 父编排为 `cpu`, 五个科学 profile 为 `cuda`。 |
+| torchvision_version | runtime | none | true | false | false | profile 要求的精确 torchvision local version。 |
+| index_url | runtime | none | false | false | false | registry 中 PyTorch CUDA wheel index。 |
+| pytorch_index_url | runtime | none | true | false | false | CUDA profile summary 中展开的 PyTorch wheel index; CPU 父编排 profile 为 null。 |
+| direct_requirements_path | artifact | none | true | false | false | 已提交精确直接依赖输入文件的仓库相对路径。 |
+| direct_requirements | runtime | none | true | false | false | profile 中全部 `name==version` 直接依赖集合。 |
+| direct_requirements_digest | artifact | none | true | false | false | 精确直接依赖集合的稳定语义摘要。 |
+| locked_requirements | runtime | none | true | false | false | 完整哈希锁中全部直接与传递依赖的规范化 `name==version` 集合。 |
+| complete_hash_lock_path | artifact | none | true | false | false | 目标环境完整 wheel 哈希锁的仓库相对路径。 |
+| complete_hash_lock_present | runtime | none | true | false | false | profile 查询时完整哈希锁是否存在。 |
+| complete_hash_lock_digest | artifact | none | true | false | false | 完整哈希锁条目与真实 wheel SHA-256 集合的稳定摘要。 |
+| complete_hash_lock_dependency_count | metric | none | true | false | false | 完整哈希锁覆盖的直接和传递依赖数量。 |
+| formal_ready | governance | none | true | false | false | profile 是否已具备可进入正式环境准备的完整锁。 |
+| readiness_blockers | governance | none | true | false | false | 阻断 profile 正式准备的稳定原因列表。 |
+| profile_formal_ready | governance | none | true | false | false | inspection 报告引用的 profile 完整锁 readiness。 |
+| expected_environment | runtime | none | true | false | false | inspection 从 profile 展开的精确期望环境。 |
+| observed_environment | runtime | none | true | false | false | inspection 从当前解释器与 torch 读取的实测环境。 |
+| environment_match | governance | none | true | false | false | 当前解释器、平台、完整锁包与适用的 CUDA identity 是否精确匹配。 |
+| mismatches | governance | none | true | false | false | inspection 检出的稳定环境不一致原因列表。 |
+| inspection_digest | artifact | none | true | false | false | 不含时间戳和绝对路径的环境 inspection 稳定摘要。 |
+| torch_module_available | runtime | none | true | false | false | CUDA 科学解释器能否加载 torch 模块; CPU 父编排 profile 为 null。 |
+| torch_module_version | runtime | none | true | false | false | 当前解释器实际加载的 torch 模块版本。 |
+| torch_cuda_version | runtime | none | true | false | false | 当前 torch build 报告的 CUDA 版本。 |
+| direct_dependencies | runtime | none | true | false | false | inspection 中规范化包名到期望或实测版本的映射。 |
+| locked_dependencies | runtime | none | true | false | false | inspection 中完整锁全部直接与传递包名到期望或实测版本的映射。 |
+| report_schema | provenance | none | true | false | false | 依赖准备报告的 schema 名称。 |
+| repository_commit_state | provenance | none | true | false | false | registry、直接输入和完整锁的 Git 提交状态集合。 |
+| registry | provenance | none | false | false | false | 依赖准备报告中 registry 文件的提交状态记录。 |
+| complete_hash_lock | provenance | none | false | false | false | 依赖准备报告中完整锁文件的提交状态记录。 |
+| path | artifact | none | false | false | false | 单个受治理依赖输入的仓库相对路径。 |
+| working_tree_file_present | provenance | none | false | false | false | 当前工作树中是否存在指定受治理依赖输入。 |
+| head_contains_file | provenance | none | false | false | false | 当前 Git `HEAD` 是否包含受治理依赖输入。 |
+| worktree_matches_head | provenance | none | false | false | false | 受治理依赖输入的工作树内容是否与 `HEAD` 一致。 |
+| is_committed | provenance | none | false | false | false | 单个依赖输入是否同时存在于 `HEAD` 且无工作树漂移。 |
+| all_committed | provenance | none | true | false | false | registry、直接输入和完整锁是否全部已提交且无漂移。 |
+| installation | runtime | none | true | false | false | 依赖准备报告中的 hash-locked pip 执行记录。 |
+| attempted | runtime | none | false | false | false | 依赖准备 CLI 是否已尝试执行完整锁安装。 |
+| pip_check | runtime | none | true | false | false | 当前解释器执行依赖兼容性核验的完整 argv、返回码、标准输出、标准错误与结论。 |
+| compatibility_check_required | governance | none | true | false | false | 当前 profile 是否必须执行 `sys.executable -m pip check`; 五个科学 profile 为 true, 父编排 profile 为 false。 |
+| runtime_comparison | runtime | none | true | false | false | 安装后共享 inspection API 生成的精确环境比较记录。 |
+| failure_reasons | governance | none | true | false | false | 依赖准备失败或被阻断的稳定原因列表。 |
+| report_path | artifact | none | false | false | false | 依赖准备 CLI 写入 `outputs/` 的报告路径。 |
+| error | runtime | none | false | false | false | registry 解析失败时 CLI 输出的诊断文本。 |
+| operation_kind | protocol | none | true | false | false | 隔离依赖报告区分解释器 provision 与正式环境 preparation 的稳定操作类型。 |
+| target_complete_hash_lock_ready | governance | none | true | false | false | provision 时目标科学 profile 是否已具备完整锁; 该值不改变 provision 的非正式性质。 |
+| environment_root | runtime | none | true | false | false | 五个科学子环境所在的可覆盖跨服务器根目录。 |
+| managed_python_root | runtime | none | true | false | false | 固定 `uv` 保存受管 CPython distribution 的可覆盖根目录。 |
+| isolated_environment_path | runtime | none | true | false | false | 当前科学 profile 独立 venv 的绝对路径。 |
+| uv_distribution_version | provenance | none | true | false | false | 父编排解释器中安装的受治理 `uv` distribution 精确版本。 |
+| uv_distribution_record_path | provenance | none | true | false | false | 当前解释器所安装 `uv` distribution 的实际 `RECORD` 文件路径。 |
+| uv_distribution_record_sha256 | provenance | none | true | false | false | 当前解释器所安装 `uv` distribution 的 `RECORD` 文件 SHA-256。 |
+| uv_distribution_executable_record_path | provenance | none | true | false | false | `uv` executable 在当前解释器 distribution `RECORD` 中登记的路径。 |
+| uv_distribution_executable_record_sha256 | provenance | none | true | false | false | 按 distribution `RECORD` 验证通过的 `uv` executable SHA-256。 |
+| uv_executable_path | provenance | none | true | false | false | 实际执行的 `uv` executable 绝对路径。 |
+| uv_executable_sha256 | provenance | none | true | false | false | 实际执行的 `uv` executable 文件 SHA-256。 |
+| uv_reported_version | provenance | none | true | false | false | 实际 `uv --version` 进程报告的精确版本。 |
+| python_executable_path | provenance | none | true | false | false | `uv` 创建的目标科学子解释器绝对路径。 |
+| python_executable_sha256 | provenance | none | true | false | false | 正式依赖安装前目标科学子解释器文件 SHA-256。 |
+| python_executable_sha256_after_preparation | provenance | none | true | false | false | 正式依赖安装后再次计算的目标科学子解释器文件 SHA-256。 |
+| operation | protocol | none | false | false | false | 单条隔离环境命令的稳定职责标识。 |
+| argv | runtime | none | true | false | false | 单条隔离环境命令未经 shell 解释的完整参数向量。 |
+| environment_overrides | runtime | none | true | false | false | 单条隔离环境命令显式传入的环境变量覆盖映射。 |
+| command_results | runtime | none | true | false | false | 隔离环境流程按执行顺序保存的全部命令进程证据。 |
+| uv_commands | provenance | none | true | false | false | `command_results` 中实际由固定 `uv` executable 执行的命令子集。 |
+| orchestrator_profile_digest | provenance | none | true | false | false | provision 绑定的父编排 profile 稳定摘要。 |
+| orchestrator_complete_hash_lock_digest | provenance | none | true | false | false | provision 绑定的父编排完整哈希锁摘要。 |
+| orchestrator_inspection | runtime | none | true | false | false | provision 前父编排解释器的完整锁环境实测报告。 |
+| provisioned | governance | none | true | false | false | 精确 CPython 与隔离 venv 是否创建并通过 patch 核验; 该字段不表示正式依赖环境 ready。 |
+| provision_report_path | artifact | none | true | false | false | 正式隔离环境报告绑定的 Python provision 报告路径。 |
+| provision_report_digest | provenance | none | true | false | false | 正式隔离环境报告绑定的 Python provision 报告文件 SHA-256。 |
+| provision_report | provenance | none | true | false | false | 正式隔离环境报告内嵌的完整 Python provision 记录。 |
+| dependency_preparation_command | runtime | none | true | false | false | 目标子解释器调用内层 dependency preparation 的完整进程证据。 |
+| dependency_preparation_report_path | artifact | none | true | false | false | 目标子解释器写出的 dependency preparation 报告路径。 |
+| dependency_preparation_report_digest | provenance | none | true | false | false | 目标子解释器 dependency preparation 报告文件 SHA-256。 |
+| dependency_preparation_report | provenance | none | true | false | false | 正式隔离环境报告内嵌并严格复核的子解释器 preparation 记录。 |
+| formal_preparation_completed | governance | none | true | false | false | 目标完整锁安装、兼容性核验、完整 inspection 与解释器摘要复核是否全部完成。 |
+| pip_version | provenance | none | true | false | false | 候选完整锁解析实际使用且由 pip report 自报的 pip distribution 版本。 |
+| resolver_command | runtime | none | true | false | false | 候选完整锁物化使用的完整 pip resolver argv。 |
+| resolver_return_code | runtime | none | true | false | false | 候选完整锁 pip resolver 进程返回码。 |
+| resolver_stdout | runtime | none | false | false | false | 候选完整锁 pip resolver 的标准输出。 |
+| resolver_stderr | runtime | none | false | false | false | 候选完整锁 pip resolver 的标准错误。 |
+| pip_resolver_report_path | artifact | none | true | false | false | 候选物化器实际解析并由审查包重新验证的 pip report 路径。 |
+| candidate_lock_path | artifact | none | true | false | false | 仅供人工审查的规范完整哈希锁候选路径。 |
+| candidate_lock_logical_digest | provenance | none | true | false | false | 从实际 pip report 重建的规范 wheel 记录集合稳定摘要。 |
+| candidate_lock_dependency_count | metric | none | true | false | false | 从实际 pip report 重建并写入候选锁的直接与传递依赖数量。 |
+| candidate_hash_source | provenance | none | true | false | false | 候选 wheel SHA-256 在 pip report 中的唯一来源字段路径。 |
+| review_execution_mode | protocol | none | true | false | false | 候选锁审查包区分父编排当前解释器与科学隔离子解释器的执行模式。 |
+| local_bundle_dir | artifact | none | true | false | false | 单个依赖 profile 候选锁审查包在 `outputs/` 下的目录。 |
+| drive_bundle_dir | artifact | none | true | false | false | 显式请求镜像时单个依赖 profile 的外部 Drive 目录。 |
+| drive_copy_performed | governance | none | true | false | false | 审查包是否已经按显式请求复制并逐文件复核到 Drive。 |
+| orchestrator_preparation | provenance | none | true | false | false | 科学 profile 候选锁物化前父编排环境 preparation 的报告路径、摘要与结论。 |
+| isolated_python_provision | provenance | none | true | false | false | 科学 profile 候选锁物化使用的隔离 CPython provision 身份与结论。 |
+| candidate_materialization | provenance | none | true | false | false | 候选锁物化器在父解释器或科学子解释器中的完整执行记录。 |
+| diagnostic_message | runtime | none | false | false | false | 候选锁资格化或审查包写入失败时保存的诊断信息。 |
 | python_version | runtime | none | false | false | false | Colab runtime 中的 Python 版本。 |
 | python_executable | runtime | none | false | false | false | Colab runtime 中执行 Notebook 的 Python 解释器路径。 |
 | platform | runtime | none | false | false | false | Colab runtime 的平台摘要。 |
@@ -848,7 +955,6 @@ Notebook 与 repository module 的跨边界数据
 | clip_model_id | runtime | none | false | false | false | aligned rescoring 中用于计算 CLIP score 的模型标识。 |
 | enable_pair_perceptual_metrics | runtime | none | false | false | false | 是否在真实 aligned rescoring workflow 中尝试计算 LPIPS 与 CLIP pair-level 指标。 |
 | require_pair_perceptual_metrics | runtime | none | false | false | false | 是否要求 LPIPS 与 CLIP pair-level 指标完成后才允许 aligned rescoring run_decision 为 pass。 |
-| pair_perceptual_dependency_install_command | runtime | none | false | false | false | Colab 中安装 LPIPS 可选依赖的命令记录。 |
 | perceptual_metric_device_name | runtime | none | false | false | false | LPIPS 与 CLIP pair-level 指标计算使用的设备名称。 |
 | fid | metric | none | false | false | false | Fréchet Inception Distance 指标值或 unsupported 状态。 |
 | fid_status | metric | none | false | false | false | FID 指标计算状态。 |
@@ -963,7 +1069,7 @@ Notebook 与 repository module 的跨边界数据
 | required_input_area | governance | none | false | false | false | 投稿就绪门禁中待补齐输入所属的证据区域。 |
 | required_input_severity | governance | none | false | false | false | 投稿就绪门禁中待补齐输入的阻断严重程度。 |
 | input_ready | governance | none | false | false | false | 单个待补齐输入是否已经满足投稿冻结条件。 |
-| profile_name | governance | none | false | false | false | release 抽取配置的稳定名称。 |
+| profile_name | governance | none | false | false | false | release 抽取配置或正式依赖 profile 的稳定名称。 |
 | root_path | governance | none | false | false | false | release 抽取 dry-run 使用的仓库根路径。 |
 | output_path | artifact | none | false | false | false | release 抽取 dry-run 指定的输出路径。 |
 | copied_files | artifact | none | false | false | false | release 抽取 dry-run 将会复制的文件清单。 |
@@ -1031,8 +1137,7 @@ Notebook 与 repository module 的跨边界数据
 | baseline_execution_id | protocol | none | true | false | false | 主表外部 baseline 官方复现计划记录的稳定标识。 |
 | baseline_execution_digest | artifact | none | true | false | false | 主表外部 baseline 官方复现计划 payload 的稳定摘要。 |
 | command_profile_name | protocol | none | false | false | false | 外部 baseline 官方运行入口的命令画像名称。 |
-| dependency_profile | runtime | none | true | false | false | 外部 baseline 官方源码复现所需的依赖环境画像。 |
-| recommended_python | runtime | none | true | false | false | 外部 baseline 官方源码建议使用的 Python 版本。 |
+| dependency_profile | runtime | none | true | false | false | 外部 baseline runner 引用的完整受治理依赖 profile 记录。 |
 | official_entrypoint | artifact | none | true | false | false | 外部 baseline 官方源码中的运行入口脚本。 |
 | reproduction_command | runtime | none | true | false | false | 外部 baseline 官方复现建议命令模板。 |
 | expected_result_adapter | protocol | none | true | false | false | 官方输出转换为共同协议结果记录时需要使用的适配器名称。 |
@@ -1451,8 +1556,8 @@ Notebook 与 repository module 的跨边界数据
 | revision_url | provenance | none | false | false | false | 直接指向资源登记40位提交树的 Hugging Face URL。 |
 | upstream_repository_id | provenance | none | false | false | false | 公开镜像对应的原始上游仓库标识。 |
 | upstream_access_status | provenance | none | false | false | false | 审计时原始上游仓库的可访问状态。 |
-| registry_schema | provenance | none | false | false | false | 不可变模型与数据来源登记表的 schema 名称。 |
-| schema_version | provenance | none | false | false | false | 外部资源登记表的结构版本。 |
+| registry_schema | provenance | none | false | false | false | 不可变资源或正式依赖 profile 登记表的 schema 名称。 |
+| schema_version | provenance | none | false | false | false | 受治理登记表或报告的结构版本。 |
 | source_name | provenance | none | false | false | false | 模型或数据资源在登记表中的稳定语义名称。 |
 | provider | provenance | none | false | false | false | 资源实际获取服务提供方。 |
 | repository_id | provenance | none | false | false | false | Hugging Face 资源的 owner/name 仓库标识。 |
@@ -1748,11 +1853,11 @@ Notebook 与 repository module 的跨边界数据
 | std_bit_accuracy | metric | none | true | false | false | Gaussian Shading official-reference 恢复消息 bit accuracy 的标准差。 |
 | mean_clip_score | metric | none | true | false | false | Gaussian Shading 生成图像与 Prompt 的平均 OpenCLIP 余弦相似度。 |
 | std_clip_score | metric | none | true | false | false | Gaussian Shading 生成图像与 Prompt 的 OpenCLIP 余弦相似度标准差。 |
-| supplemental_table_role | protocol | none | true | false | false | 官方原始环境复现记录的补充表职责; 当前方法忠实度证据固定为 supplemental_method_fidelity_reference。 |
-| reference_import_ready | governance | none | true | false | false | 官方参考 governed import 是否接受全部输入记录且没有 schema issue。 |
+| supplemental_table_role | protocol | none | true | false | false | 官方参考环境复现记录的补充表职责; 当前方法忠实度证据固定为 supplemental_method_fidelity_reference。 |
+| reference_import_ready | governance | none | true | false | false | 官方参考 受治理导入 是否接受全部输入记录且没有 schema issue。 |
 | governed_reference_record_count | metric | none | true | false | false | 单个官方参考运行写出的受治理补充记录数量。 |
 | main_table_eligible | governance | none | true | false | false | 当前记录或证据是否允许进入 common-backbone 主表; official-reference 忠实度证据必须为 false。 |
-| official_reference_ready | governance | none | true | false | false | 当前官方原始环境复现 summary 是否通过方法自身 ready 门禁。 |
+| official_reference_ready | governance | none | true | false | false | 当前官方参考环境复现 summary 是否通过方法自身 ready 门禁。 |
 | records_nonempty_ready | governance | none | true | false | false | 当前 official-reference JSONL 是否包含至少一条有效 object 记录。 |
 | records_baseline_identity_ready | governance | none | true | false | false | 当前 official-reference JSONL 的全部记录是否绑定同一预期 baseline 身份。 |
 | validation_zero_rejection_ready | governance | none | true | false | false | 当前 official-reference validation 是否没有拒绝记录或 schema issue, 且 accepted records 与实际 JSONL 一致。 |

@@ -1,7 +1,7 @@
-"""Shallow Diffuse 官方原始环境复现与 governed import 的 Colab 辅助函数。
+"""Shallow Diffuse 官方参考环境复现与受治理导入的 Colab 辅助函数。
 
-该 helper 服务补充表方法忠实度审计。它不把 legacy Stable Diffusion 结果混入 SD3.5 主表,
-而是把官方命令、运行日志、环境报告、指标摘要和 governed import 记录统一写入 outputs/。
+该辅助模块服务补充表方法忠实度审计。它不把固定 Stable Diffusion 2.1 profile 结果混入 SD3.5 主表,
+而是把官方命令、运行日志、环境报告、指标摘要和受治理导入记录统一写入 outputs/。
 """
 
 from __future__ import annotations
@@ -14,8 +14,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import subprocess
-import sys
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -56,6 +54,9 @@ from paper_experiments.runners.model_snapshot_runtime import (
     ensure_hugging_face_snapshot_files,
     validate_frozen_model_source,
 )
+from paper_experiments.runners.official_reference_dependency_environment import (
+    prepare_official_reference_dependency_environment,
+)
 from paper_experiments.runners.openclip_checkpoint_runtime import (
     DEFAULT_OPENCLIP_CHECKPOINT_PATH,
     OPENCLIP_CHECKPOINT_FILENAME,
@@ -75,7 +76,7 @@ EXPECTED_PATCHED_SOURCE_PATHS = (
     "optim_utils.py",
     "run_shallow_diffuse_t2i.py",
 )
-DEFAULT_RUN_NAME = "shallow_diffuse_official_legacy_reference"
+DEFAULT_RUN_NAME = "shallow_diffuse_official_reference"
 DEFAULT_SAMPLE_COUNT = 700
 _OFFICIAL_MODEL_SOURCE = get_model_source("manojb_stable_diffusion_2_1_base")
 _PROMPT_DATASET_SOURCE = get_model_source("gustavosta_stable_diffusion_prompts")
@@ -94,19 +95,7 @@ DEFAULT_LOCAL_MODEL_REPOSITORY_DIR = str(
         DEFAULT_OFFICIAL_MODEL_REVISION,
     )
 )
-DEFAULT_LEGACY_ENV_PREFIX = "/content/shallow_diffuse_legacy_env"
-DEFAULT_MICROMAMBA_PATH = "/content/bin/micromamba"
-DEFAULT_LEGACY_PYTHON_VERSION = "3.9"
-DEFAULT_LEGACY_TORCH_SPECS = "torch==1.13.0+cu117 torchvision==0.14.0+cu117"
-DEFAULT_LEGACY_PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu117"
-DEFAULT_LEGACY_PACKAGE_SPECS = (
-    "transformers==4.23.1 diffusers==0.11.1 huggingface_hub==0.10.1 "
-    "datasets==2.6.1 pyarrow<13 fsspec==2022.10.0 numpy==1.24.4 scipy==1.10.1 "
-    "Pillow==9.5.0 tqdm==4.66.2 scikit-learn==1.3.2 wandb==0.16.6 "
-    "open_clip_torch==2.7.0 ftfy==6.2.0 regex==2023.12.25 Requests==2.31.0 "
-    "omegaconf==2.3.0 einops==0.4.1 matplotlib==3.7.5 timm==0.5.4 "
-    "opencv-python-headless==4.9.0.80"
-)
+DEFAULT_DEPENDENCY_PROFILE_ID = "shallow_diffuse_official_py39_cu117"
 DEFAULT_EDIT_TIME_LIST = "0.3"
 DEFAULT_ATTACKER_NAMES = "none"
 REQUIRED_SCIENTIFIC_METRIC_FIELDS = (
@@ -118,7 +107,7 @@ REQUIRED_SCIENTIFIC_METRIC_FIELDS = (
 )
 @dataclass(frozen=True)
 class ShallowDiffuseOfficialReferenceConfig:
-    """描述 Shallow Diffuse 官方原始环境复现与导入所需配置。"""
+    """描述 Shallow Diffuse 官方参考环境复现与导入所需配置。"""
 
     output_dir: str = DEFAULT_OUTPUT_DIR
     drive_output_dir: str = field(default_factory=lambda: build_paper_run_config(".").drive_dir("external_baseline_official_reference"))
@@ -150,15 +139,8 @@ class ShallowDiffuseOfficialReferenceConfig:
     patch_model_repository_layout: bool = True
     prepare_local_model_repository: bool = True
     local_model_repository_dir: str = DEFAULT_LOCAL_MODEL_REPOSITORY_DIR
-    patch_model_index_for_legacy_transformers: bool = True
-    official_python_executable: str = ""
-    prepare_legacy_environment: bool = False
-    legacy_environment_prefix: str = DEFAULT_LEGACY_ENV_PREFIX
-    micromamba_path: str = DEFAULT_MICROMAMBA_PATH
-    legacy_python_version: str = DEFAULT_LEGACY_PYTHON_VERSION
-    legacy_torch_specs: str = DEFAULT_LEGACY_TORCH_SPECS
-    legacy_pytorch_index_url: str = DEFAULT_LEGACY_PYTORCH_INDEX_URL
-    legacy_package_specs: str = DEFAULT_LEGACY_PACKAGE_SPECS
+    patch_model_index_for_pinned_transformers: bool = True
+    dependency_profile_id: str = DEFAULT_DEPENDENCY_PROFILE_ID
     run_official_command: bool = True
     require_cuda: bool = True
     timeout_seconds: int = 86400
@@ -178,6 +160,8 @@ class ShallowDiffuseOfficialReferenceConfig:
             raise ValueError("Shallow Diffuse OpenCLIP 预训练参数必须指向登记的本地 checkpoint")
         if self.attacker_names != DEFAULT_ATTACKER_NAMES:
             raise ValueError("Shallow Diffuse 官方参考只生成原始方法结果, 共同攻击由外层正式协议执行")
+        if self.dependency_profile_id != DEFAULT_DEPENDENCY_PROFILE_ID:
+            raise ValueError("Shallow Diffuse 正式参考必须使用固定依赖 profile")
 
 
 @dataclass(frozen=True)
@@ -225,12 +209,6 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
         return path.resolve().as_posix()
 
 
-def split_package_specs(package_specs: str) -> list[str]:
-    """解析以空白分隔的 pip package spec 列表。"""
-
-    return [item.strip() for item in str(package_specs).split() if item.strip()]
-
-
 def parse_edit_time_values(edit_time_list: str) -> list[float]:
     """解析官方脚本使用的逗号分隔 watermark 注入时间比例。"""
 
@@ -242,90 +220,6 @@ def primary_edit_timestep(config: ShallowDiffuseOfficialReferenceConfig) -> int:
     """计算默认核对文件所在的官方 timestep 目录。"""
 
     return int(parse_edit_time_values(config.edit_time_list)[0] * int(config.num_inference_steps))
-
-
-def command_exception_result(command: Any, error: Exception) -> dict[str, Any]:
-    """把环境准备异常转换为可落盘命令诊断, 避免 Notebook 直接中断。"""
-
-    return_code = 124 if isinstance(error, subprocess.TimeoutExpired) else 98
-    return {
-        "command": command,
-        "return_code": return_code,
-        "stdout": str(getattr(error, "stdout", "") or ""),
-        "stderr": f"{type(error).__name__}:{error}",
-    }
-
-
-def run_shell_command(
-    command: str,
-    *,
-    cwd: Path,
-    timeout_seconds: int,
-    progress: object | None = None,
-    progress_profile: str = "",
-) -> dict[str, Any]:
-    """执行 shell 命令并返回可落盘诊断。"""
-
-    try:
-        completed = run_quiet_subprocess_with_progress(
-            command,
-            cwd=cwd,
-            shell=True,
-            timeout_seconds=timeout_seconds,
-            progress=progress,
-            progress_profile=progress_profile or "operation=shell_command",
-        )
-    except Exception as error:
-        return command_exception_result(command, error)
-    return {
-        "command": command,
-        "return_code": completed.returncode,
-        "stdout": completed.stdout,
-        "stderr": completed.stderr,
-    }
-
-
-def run_argv_command(
-    command: list[str],
-    *,
-    cwd: Path,
-    timeout_seconds: int,
-    progress: object | None = None,
-    progress_profile: str = "",
-) -> dict[str, Any]:
-    """执行 argv 命令并把失败收敛为可审计诊断。"""
-
-    try:
-        return call_runner_with_progress_status(
-            run_command,
-            command,
-            cwd=cwd,
-            timeout_seconds=timeout_seconds,
-            progress=progress,
-            progress_profile=progress_profile or "operation=argv_command",
-        )
-    except Exception as error:
-        return command_exception_result(command, error)
-
-
-def run_shell_command_with_progress_status(
-    command: str,
-    *,
-    cwd: Path,
-    timeout_seconds: int,
-    progress: object | None = None,
-    progress_profile: str = "",
-) -> dict[str, Any]:
-    """调用可替换 shell runner, 并兼容测试中的轻量 fake。"""
-
-    return call_runner_with_progress_status(
-        run_shell_command,
-        command,
-        cwd=cwd,
-        timeout_seconds=timeout_seconds,
-        progress=progress,
-        progress_profile=progress_profile,
-    )
 
 
 def run_command_with_progress_status(
@@ -371,7 +265,7 @@ def output_paths(root_path: Path, config: ShallowDiffuseOfficialReferenceConfig)
         "source_patch_result": output_dir / "shallow_diffuse_official_source_patch_result.json",
         "model_repository_prepare_result": output_dir / "shallow_diffuse_model_repository_prepare_result.json",
         "openclip_checkpoint_prepare_result": output_dir / "shallow_diffuse_openclip_checkpoint_prepare_result.json",
-        "legacy_environment_prepare_result": output_dir / "shallow_diffuse_legacy_environment_prepare_result.json",
+        "dependency_environment_prepare_result": output_dir / "shallow_diffuse_dependency_environment_prepare_result.json",
         "official_stdout": output_dir / "shallow_diffuse_official_stdout.txt",
         "official_stderr": output_dir / "shallow_diffuse_official_stderr.txt",
         "official_metric_summary": output_dir / "shallow_diffuse_official_metric_summary.json",
@@ -384,152 +278,20 @@ def output_paths(root_path: Path, config: ShallowDiffuseOfficialReferenceConfig)
     }
 
 
-def prepare_shallow_diffuse_legacy_environment(
+def prepare_shallow_diffuse_dependency_environment(
     root_path: Path,
     config: ShallowDiffuseOfficialReferenceConfig,
     paths: dict[str, Path],
     progress: object | None = None,
 ) -> dict[str, Any]:
-    """在独立 Colab 会话中准备 Shallow Diffuse 官方 legacy Python 环境。"""
+    """使用共享协议准备并核验固定依赖 profile。"""
 
-    if not config.prepare_legacy_environment:
-        report = {
-            "legacy_environment_requested": False,
-            "legacy_environment_ready": False,
-            "legacy_environment_skipped": True,
-            "legacy_environment_skip_reason": "prepare_legacy_environment_disabled",
-            "legacy_python_executable": config.official_python_executable or sys.executable,
-        }
-        write_json(paths["legacy_environment_prepare_result"], report)
-        return report
-    if config.official_python_executable:
-        report = {
-            "legacy_environment_requested": True,
-            "legacy_environment_ready": True,
-            "legacy_environment_skipped": True,
-            "legacy_environment_skip_reason": "explicit_official_python_executable_provided",
-            "legacy_python_executable": config.official_python_executable,
-        }
-        write_json(paths["legacy_environment_prepare_result"], report)
-        return report
-
-    micromamba_path = Path(config.micromamba_path)
-    legacy_env_prefix = Path(config.legacy_environment_prefix)
-    legacy_python = legacy_env_prefix / "bin" / "python"
-    command_results: list[dict[str, Any]] = []
-    if not micromamba_path.is_file():
-        micromamba_path.parent.mkdir(parents=True, exist_ok=True)
-        command_results.append(
-            run_shell_command_with_progress_status(
-                f"curl -Ls https://micro.mamba.pm/api/micromamba/linux-64/latest | tar -xvj -C {micromamba_path.parent.parent} bin/micromamba",
-                cwd=root_path,
-                timeout_seconds=600,
-                progress=progress,
-                progress_profile="operation=shallow_diffuse_fetch_micromamba",
-            )
-        )
-    if not legacy_python.is_file():
-        if micromamba_path.is_file():
-            command_results.append(
-                run_argv_command(
-                    [
-                        str(micromamba_path),
-                        "create",
-                        "-y",
-                        "-p",
-                        str(legacy_env_prefix),
-                        "-c",
-                        "conda-forge",
-                        f"python={config.legacy_python_version}",
-                        "pip",
-                    ],
-                    cwd=root_path,
-                    timeout_seconds=1800,
-                    progress=progress,
-                    progress_profile="operation=shallow_diffuse_create_legacy_environment",
-                )
-            )
-    if legacy_python.is_file():
-        command_results.append(
-            run_argv_command(
-                [str(legacy_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"],
-                cwd=root_path,
-                timeout_seconds=900,
-                progress=progress,
-                progress_profile="operation=shallow_diffuse_upgrade_legacy_pip",
-            )
-        )
-        torch_specs = split_package_specs(config.legacy_torch_specs)
-        if torch_specs:
-            torch_command = [str(legacy_python), "-m", "pip", "install"]
-            if config.legacy_pytorch_index_url:
-                torch_command.extend(["--extra-index-url", str(config.legacy_pytorch_index_url)])
-            torch_command.extend(torch_specs)
-            command_results.append(
-                run_argv_command(
-                    torch_command,
-                    cwd=root_path,
-                    timeout_seconds=1800,
-                    progress=progress,
-                    progress_profile="operation=shallow_diffuse_install_legacy_torch",
-                )
-            )
-        package_specs = split_package_specs(config.legacy_package_specs)
-        if package_specs:
-            command_results.append(
-                run_argv_command(
-                    [str(legacy_python), "-m", "pip", "install", *package_specs],
-                    cwd=root_path,
-                    timeout_seconds=1800,
-                    progress=progress,
-                    progress_profile="operation=shallow_diffuse_install_legacy_packages",
-                )
-            )
-    verify_command = [
-        str(legacy_python),
-        "-c",
-        (
-            "import json, torch, transformers, diffusers, datasets, open_clip, sklearn, wandb; "
-            "from transformers import CLIPFeatureExtractor; "
-            "print(json.dumps({"
-            "'torch': torch.__version__, "
-            "'cuda_available': bool(torch.cuda.is_available()), "
-            "'transformers': transformers.__version__, "
-            "'diffusers': diffusers.__version__, "
-            "'datasets': datasets.__version__"
-            "}))"
-        ),
-    ]
-    verify_result = (
-        run_argv_command(
-            verify_command,
-            cwd=root_path,
-            timeout_seconds=300,
-            progress=progress,
-            progress_profile="operation=shallow_diffuse_verify_legacy_environment",
-        )
-        if legacy_python.is_file()
-        else {"command": verify_command, "return_code": 127, "stdout": "", "stderr": "legacy_python_missing"}
+    return prepare_official_reference_dependency_environment(
+        root_path,
+        config.dependency_profile_id,
+        paths["dependency_environment_prepare_result"],
+        progress=progress,
     )
-    command_results.append(verify_result)
-    report = {
-        "legacy_environment_requested": True,
-        "legacy_environment_ready": legacy_python.is_file() and verify_result["return_code"] == 0,
-        "legacy_environment_skipped": False,
-        "legacy_environment_prefix": str(legacy_env_prefix),
-        "micromamba_path": str(micromamba_path),
-        "legacy_python_executable": str(legacy_python),
-        "legacy_python_version": config.legacy_python_version,
-        "legacy_torch_specs": split_package_specs(config.legacy_torch_specs),
-        "legacy_package_specs": split_package_specs(config.legacy_package_specs),
-        "legacy_pytorch_index_url": config.legacy_pytorch_index_url,
-        "command_results": command_results,
-        "verify_result": verify_result,
-    }
-    write_json(paths["legacy_environment_prepare_result"], report)
-    return report
-
-
 def source_report(root_path: Path, config: ShallowDiffuseOfficialReferenceConfig) -> dict[str, Any]:
     """检查官方 Shallow Diffuse 源码快照是否存在。"""
 
@@ -544,7 +306,6 @@ def source_report(root_path: Path, config: ShallowDiffuseOfficialReferenceConfig
         "official_entrypoint_ready": entrypoint.is_file(),
         "requirements_ready": requirements.is_file(),
         "requirements_text": requirements.read_text(encoding="utf-8") if requirements.is_file() else "",
-        "official_python_executable": config.official_python_executable or sys.executable,
     }
 
 
@@ -756,9 +517,10 @@ def patch_shallow_diffuse_model_repository_layout(
         )
         report["patch_items"].append("lazy_heavy_attacker_initialization")
 
-    fft_marker = "# SLM-WM: legacy CUDA half precision FFT 在部分 Colab GPU 上不稳定, 统一用 float32 执行频域变换。"
+    fft_marker = "# SLM-WM: 固定 CUDA profile 的 half precision FFT 在部分 Colab GPU 上不稳定, 统一用 float32 执行频域变换。"
     fft_target = "torch.fft.fft2("
     fft_replacement = "slm_wm_fft2_float32("
+    fft_helper_signature = "def slm_wm_fft2_float32(tensor):"
     fft_helper_anchor = "import torch.nn.functional as F\n"
     fft_helper = (
         f"\n{fft_marker}\n"
@@ -769,13 +531,17 @@ def patch_shallow_diffuse_model_repository_layout(
         "        return torch.fft.fft2(tensor.to(torch.complex64))\n"
         "    return torch.fft.fft2(tensor)\n"
     )
-    if optim_text and fft_marker not in patched_optim_text and fft_target in patched_optim_text:
+    if (
+        optim_text
+        and fft_helper_signature not in patched_optim_text
+        and fft_target in patched_optim_text
+    ):
         patched_optim_text = patched_optim_text.replace(fft_target, fft_replacement)
         if fft_helper_anchor in patched_optim_text:
             patched_optim_text = patched_optim_text.replace(fft_helper_anchor, fft_helper_anchor + fft_helper, 1)
         else:
             patched_optim_text = fft_helper + "\n" + patched_optim_text
-        report["patch_items"].append("float32_fft_for_legacy_cuda")
+        report["patch_items"].append("float32_fft_for_profile_cuda")
 
     latent_dtype_marker = (
         "# SLM-WM: 频域注入完成后恢复 latent dtype, 保持与官方 fp16 pipeline 的输入契约一致。"
@@ -878,7 +644,7 @@ def prepare_shallow_diffuse_model_repository(
     paths: dict[str, Path],
     progress: object | None = None,
 ) -> dict[str, Any]:
-    """准备本地模型目录并补齐 legacy transformers 所需的 model_index 兼容项。"""
+    """准备本地模型目录并补齐固定 transformers 版本所需的 model_index 项。"""
 
     validate_frozen_model_source(
         config.official_model_id,
@@ -897,7 +663,7 @@ def prepare_shallow_diffuse_model_repository(
         "official_model_revision": config.official_model_revision,
         "upstream_official_model_id": config.upstream_official_model_id,
         "effective_official_model_id": config.official_model_id,
-        "model_index_patch_requested": bool(config.patch_model_index_for_legacy_transformers),
+        "model_index_patch_requested": bool(config.patch_model_index_for_pinned_transformers),
         "model_index_patch_applied": False,
         "model_source_note": config.model_source_note,
     }
@@ -941,7 +707,7 @@ def prepare_shallow_diffuse_model_repository(
     report["model_index_digest_before"] = before_digest
     feature_extractor = model_index.get("feature_extractor")
     if (
-        config.patch_model_index_for_legacy_transformers
+        config.patch_model_index_for_pinned_transformers
         and isinstance(feature_extractor, list)
         and len(feature_extractor) >= 2
         and feature_extractor[0] == "transformers"
@@ -950,9 +716,9 @@ def prepare_shallow_diffuse_model_repository(
         feature_extractor[1] = "CLIPFeatureExtractor"
         write_json(model_index_path, model_index)
         report["model_index_patch_applied"] = True
-        report["model_index_patch_reason"] = "legacy_transformers_4_23_1_requires_clip_feature_extractor"
-    elif not config.patch_model_index_for_legacy_transformers:
-        report["model_index_patch_skip_reason"] = "patch_model_index_for_legacy_transformers_disabled"
+        report["model_index_patch_reason"] = "pinned_transformers_requires_clip_feature_extractor"
+    elif not config.patch_model_index_for_pinned_transformers:
+        report["model_index_patch_skip_reason"] = "patch_model_index_for_pinned_transformers_disabled"
     else:
         report["model_index_patch_skip_reason"] = "model_index_feature_extractor_already_compatible"
 
@@ -974,13 +740,19 @@ def prepare_shallow_diffuse_model_repository(
     return report
 
 
-def build_official_command(root_path: Path, config: ShallowDiffuseOfficialReferenceConfig) -> list[str]:
-    """构造 Shallow Diffuse 官方 legacy 入口命令。"""
+def build_official_command(
+    root_path: Path,
+    config: ShallowDiffuseOfficialReferenceConfig,
+    dependency_python_executable: str | Path,
+) -> list[str]:
+    """构造 Shallow Diffuse 官方固定依赖 profile 入口命令。"""
 
     source_dir = (root_path / config.source_dir).resolve()
     entrypoint = source_dir / "run_shallow_diffuse_t2i.py"
     end_index = int(config.start_index) + max(1, int(config.sample_count))
-    python_executable = config.official_python_executable or sys.executable
+    python_executable = str(dependency_python_executable).strip()
+    if not python_executable:
+        raise ValueError("Shallow Diffuse 官方命令必须使用已核验的隔离 Python 解释器")
     return [
         python_executable,
         str(entrypoint),
@@ -1223,6 +995,7 @@ def run_official_command_if_requested(
     root_path: Path,
     config: ShallowDiffuseOfficialReferenceConfig,
     paths: dict[str, Path],
+    dependency_python_executable: str | Path,
     progress: object | None = None,
 ) -> dict[str, Any]:
     """根据配置执行 Shallow Diffuse 官方命令, 并保存 stdout / stderr。"""
@@ -1257,7 +1030,11 @@ def run_official_command_if_requested(
         paths["official_stderr"].write_text("shallow_diffuse_official_source_entrypoint_missing", encoding="utf-8")
         result = {
             "official_command_requested": True,
-            "official_command": build_official_command(root_path, config),
+            "official_command": build_official_command(
+                root_path,
+                config,
+                dependency_python_executable,
+            ),
             "return_code": 96,
             "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
             "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
@@ -1265,7 +1042,11 @@ def run_official_command_if_requested(
         }
         write_json(paths["official_command_result"], result)
         return result
-    command = build_official_command(root_path, config)
+    command = build_official_command(
+        root_path,
+        config,
+        dependency_python_executable,
+    )
     run_dir = paths["output_dir"]
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "scratch").mkdir(parents=True, exist_ok=True)
@@ -1340,10 +1121,11 @@ def build_reference_record_report(
     metric_summary: dict[str, Any],
     official_report: dict[str, Any],
     source_status: dict[str, Any],
+    dependency_environment_report: dict[str, Any],
     model_repository_report: dict[str, Any],
     openclip_report: dict[str, Any],
 ) -> dict[str, Any]:
-    """构造 governed import 记录并写出 schema、records 与 validation report。"""
+    """构造受治理导入记录并写出 schema、记录与校验报告。"""
 
     schema = build_shallow_diffuse_official_reference_schema()
     write_json(paths["reference_schema"], schema)
@@ -1356,6 +1138,7 @@ def build_reference_record_report(
         "official_execution_ready": _official_execution_ready(official_report),
         "required_metrics_ready": metric_validation["required_metrics_ready"],
         "source_revision_ready": _source_revision_ready(source_status),
+        "dependency_environment_ready": dependency_environment_report.get("dependency_environment_ready") is True,
         "model_source_ready": _model_source_ready(model_repository_report),
         "openclip_source_ready": _openclip_source_ready(openclip_report),
         "metric_validation": metric_validation,
@@ -1389,6 +1172,7 @@ def build_reference_record_report(
         paths["source_patch_result"],
         paths["model_repository_prepare_result"],
         paths["openclip_checkpoint_prepare_result"],
+        paths["dependency_environment_prepare_result"],
     ):
         if candidate.is_file():
             local_evidence_paths.append(relative_or_absolute(candidate, root_path))
@@ -1397,7 +1181,9 @@ def build_reference_record_report(
     record = build_shallow_diffuse_official_reference_record(
         official_entrypoint=str(source_status.get("official_entrypoint", "")),
         official_repository_commit=str(source_status.get("official_repository_commit", "")),
-        official_environment_profile="legacy_shallow_diffuse_official_environment",
+        official_environment_profile=str(
+            dependency_environment_report.get("dependency_environment_profile_id", "")
+        ),
         baseline_result_source=result_source,
         baseline_result_source_digest=result_digest,
         evidence_paths=sorted(set(local_evidence_paths)),
@@ -1420,7 +1206,7 @@ def build_reference_record_report(
             "official_source_ready": record_gate["source_revision_ready"],
             "source_identity_ready": source_status.get("source_identity_ready") is True,
             "source_worktree_exact": source_status.get("source_worktree_exact") is True,
-            "official_environment_report_ready": True,
+            "official_environment_report_ready": record_gate["dependency_environment_ready"],
             "official_execution_ready": record_gate["official_execution_ready"],
             "required_metrics_ready": record_gate["required_metrics_ready"],
             "model_source_ready": record_gate["model_source_ready"],
@@ -1445,7 +1231,7 @@ def write_shallow_diffuse_official_reference_outputs(
     config: ShallowDiffuseOfficialReferenceConfig,
     root: str | Path = ".",
 ) -> dict[str, Any]:
-    """执行 Shallow Diffuse 官方参考 workflow 并写出 summary、manifest 和 governed import 记录。"""
+    """执行 Shallow Diffuse 官方参考 workflow 并写出摘要、清单和受治理导入记录。"""
 
     root_path = Path(root).resolve()
     formal_execution_run_lock = (
@@ -1454,12 +1240,10 @@ def write_shallow_diffuse_official_reference_outputs(
     paths = output_paths(root_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
     with progress_bar(10, desc="shallow diffuse official reference", enabled=config.enable_workflow_progress_bar) as run_progress:
-        emit_progress_status(run_progress, profile="operation=prepare_shallow_diffuse_legacy_environment status=running")
-        legacy_environment_report = prepare_shallow_diffuse_legacy_environment(root_path, config, paths, progress=run_progress)
-        update_progress(run_progress, profile="operation=prepare_shallow_diffuse_legacy_environment")
+        emit_progress_status(run_progress, profile="operation=prepare_shallow_diffuse_dependency_environment status=running")
+        dependency_environment_report = prepare_shallow_diffuse_dependency_environment(root_path, config, paths, progress=run_progress)
+        update_progress(run_progress, profile="operation=prepare_shallow_diffuse_dependency_environment")
         effective_config = config
-        if config.prepare_legacy_environment and legacy_environment_report.get("legacy_environment_ready"):
-            effective_config = replace(config, official_python_executable=str(legacy_environment_report["legacy_python_executable"]))
         device_report: dict[str, Any]
         emit_progress_status(run_progress, profile="operation=ensure_cuda status=running")
         try:
@@ -1496,8 +1280,9 @@ def write_shallow_diffuse_official_reference_outputs(
         write_json(paths["source_patch_result"], source_patch_report)
         write_json(paths["source_prepare_result"], source_status)
         update_progress(run_progress, profile="operation=patch_shallow_diffuse_source")
-        should_prepare_model_repository = effective_config.run_official_command and not (
-            effective_config.prepare_legacy_environment and not legacy_environment_report.get("legacy_environment_ready")
+        should_prepare_model_repository = (
+            effective_config.run_official_command
+            and dependency_environment_report.get("dependency_environment_ready") is True
         )
         model_repository_config = effective_config if should_prepare_model_repository else replace(effective_config, prepare_local_model_repository=False)
         model_repository_report = prepare_shallow_diffuse_model_repository(root_path, model_repository_config, paths, progress=run_progress)
@@ -1520,14 +1305,13 @@ def write_shallow_diffuse_official_reference_outputs(
             )
         if (
             effective_config.run_official_command
-            and effective_config.prepare_legacy_environment
-            and not legacy_environment_report.get("legacy_environment_ready")
+            and not dependency_environment_report.get("dependency_environment_ready")
         ):
             official_report = write_official_command_skip_result(
                 root_path,
                 paths,
                 return_code=95,
-                reason="shallow_diffuse_legacy_environment_prepare_failed",
+                reason="shallow_diffuse_dependency_environment_prepare_failed",
             )
         elif effective_config.run_official_command and not model_repository_report.get("local_model_repository_ready"):
             official_report = write_official_command_skip_result(
@@ -1544,7 +1328,13 @@ def write_shallow_diffuse_official_reference_outputs(
                 reason="shallow_diffuse_openclip_checkpoint_prepare_failed",
             )
         else:
-            official_report = run_official_command_if_requested(root_path, effective_config, paths, progress=run_progress)
+            official_report = run_official_command_if_requested(
+                root_path,
+                effective_config,
+                paths,
+                dependency_environment_report["dependency_python_executable"],
+                progress=run_progress,
+            )
         update_progress(run_progress, profile="operation=shallow_diffuse_official_command")
         emit_progress_status(run_progress, profile="operation=parse_shallow_diffuse_metrics status=running")
         command_metrics: dict[str, Any] = {}
@@ -1563,6 +1353,7 @@ def write_shallow_diffuse_official_reference_outputs(
         update_progress(run_progress, profile="operation=parse_shallow_diffuse_metrics")
         emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
         environment_report = build_runtime_environment_report(
+            "workflow_orchestrator",
             verified_formal_execution_lock=formal_execution_run_lock,
         )
         environment_report["shallow_diffuse_official_reference_device_report"] = device_report
@@ -1570,7 +1361,7 @@ def write_shallow_diffuse_official_reference_outputs(
         environment_report["shallow_diffuse_official_reference_source_patch_report"] = source_patch_report
         environment_report["shallow_diffuse_official_reference_model_repository_report"] = model_repository_report
         environment_report["shallow_diffuse_official_reference_openclip_checkpoint_report"] = openclip_report
-        environment_report["shallow_diffuse_official_reference_legacy_environment_report"] = legacy_environment_report
+        environment_report["shallow_diffuse_official_reference_dependency_environment_report"] = dependency_environment_report
         write_json(paths["environment_report"], environment_report)
         update_progress(run_progress, profile="operation=write_environment_report")
         emit_progress_status(run_progress, profile="operation=build_reference_record status=running")
@@ -1581,6 +1372,7 @@ def write_shallow_diffuse_official_reference_outputs(
             metric_summary,
             official_report,
             source_status,
+            dependency_environment_report,
             model_repository_report,
             openclip_report,
         )
@@ -1616,9 +1408,12 @@ def write_shallow_diffuse_official_reference_outputs(
         and source_revision_ready
         and openclip_source_ready
         and official_command_result_ready
+        and dependency_environment_report.get("dependency_environment_ready") is True
     )
     unsupported_reason = "" if run_ready else "shallow_diffuse_official_reference_result_missing_or_invalid"
-    if official_report.get("official_command_requested") is not True:
+    if dependency_environment_report.get("dependency_environment_ready") is not True:
+        unsupported_reason = "dependency_profile_environment_not_ready"
+    elif official_report.get("official_command_requested") is not True:
         unsupported_reason = "official_command_required_for_formal_reference"
     elif int(official_report.get("return_code", 1)) != 0:
         unsupported_reason = "official_command_failed_formal_archive_blocked"
@@ -1645,8 +1440,16 @@ def write_shallow_diffuse_official_reference_outputs(
         "attacker_names": effective_config.attacker_names,
         "reference_model": effective_config.reference_model,
         "reference_model_checkpoint_path": effective_config.reference_model_checkpoint_path,
-        "legacy_environment_requested": bool(legacy_environment_report.get("legacy_environment_requested")),
-        "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
+        "dependency_environment_requested": bool(dependency_environment_report.get("dependency_environment_requested")),
+        "dependency_environment_ready": bool(dependency_environment_report.get("dependency_environment_ready")),
+        "dependency_environment_profile_id": str(dependency_environment_report.get("dependency_environment_profile_id", "")),
+        "dependency_profile_id": str(dependency_environment_report.get("dependency_profile_id", "")),
+        "dependency_profile_ready": bool(dependency_environment_report.get("dependency_profile_ready")),
+        "dependency_lock_ready": bool(dependency_environment_report.get("dependency_lock_ready")),
+        "dependency_environment_materialized": bool(dependency_environment_report.get("dependency_environment_materialized")),
+        "dependency_environment_report_valid": bool(dependency_environment_report.get("dependency_environment_report_valid")),
+        "dependency_profile_digest": str(dependency_environment_report.get("dependency_profile_digest", "")),
+        "dependency_lock_digest": str(dependency_environment_report.get("dependency_lock_digest", "")),
         "source_patch_applied": bool(source_patch_report.get("patch_applied")),
         "source_revision_ready": source_revision_ready,
         "official_repository_commit": str(source_status.get("official_repository_commit", "")),
@@ -1686,7 +1489,7 @@ def write_shallow_diffuse_official_reference_outputs(
             "source_patch_report": source_patch_report,
             "model_repository_report": model_repository_report,
             "openclip_checkpoint_report": openclip_report,
-            "legacy_environment_report": legacy_environment_report,
+            "dependency_environment_report": dependency_environment_report,
             "official_report": official_report,
             "validation": validation,
             "metric_validation": metric_validation,
@@ -1719,8 +1522,8 @@ def write_shallow_diffuse_official_reference_outputs(
         output_paths_for_manifest.append(relative_or_absolute(paths["model_repository_prepare_result"], root_path))
     if paths["openclip_checkpoint_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["openclip_checkpoint_prepare_result"], root_path))
-    if paths["legacy_environment_prepare_result"].exists():
-        output_paths_for_manifest.append(relative_or_absolute(paths["legacy_environment_prepare_result"], root_path))
+    if paths["dependency_environment_prepare_result"].exists():
+        output_paths_for_manifest.append(relative_or_absolute(paths["dependency_environment_prepare_result"], root_path))
     formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
         formal_execution_run_lock,
         repository_environment.require_published_formal_execution_lock(root_path),
@@ -1787,15 +1590,8 @@ def build_default_config() -> ShallowDiffuseOfficialReferenceConfig:
         patch_model_repository_layout=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_PATCH_MODEL_REPOSITORY_LAYOUT", "1") != "0",
         prepare_local_model_repository=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_PREPARE_LOCAL_MODEL_REPOSITORY", "1") != "0",
         local_model_repository_dir=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_LOCAL_MODEL_REPOSITORY_DIR", DEFAULT_LOCAL_MODEL_REPOSITORY_DIR),
-        patch_model_index_for_legacy_transformers=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_PATCH_MODEL_INDEX_FOR_LEGACY_TRANSFORMERS", "1") != "0",
-        official_python_executable=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_PYTHON_EXECUTABLE", ""),
-        prepare_legacy_environment=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_PREPARE_LEGACY_ENV", "0") == "1",
-        legacy_environment_prefix=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_LEGACY_ENV_PREFIX", DEFAULT_LEGACY_ENV_PREFIX),
-        micromamba_path=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_MICROMAMBA_PATH", DEFAULT_MICROMAMBA_PATH),
-        legacy_python_version=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_LEGACY_PYTHON_VERSION", DEFAULT_LEGACY_PYTHON_VERSION),
-        legacy_torch_specs=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_LEGACY_TORCH_SPECS", DEFAULT_LEGACY_TORCH_SPECS),
-        legacy_pytorch_index_url=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_LEGACY_PYTORCH_INDEX_URL", DEFAULT_LEGACY_PYTORCH_INDEX_URL),
-        legacy_package_specs=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_LEGACY_PACKAGE_SPECS", DEFAULT_LEGACY_PACKAGE_SPECS),
+        patch_model_index_for_pinned_transformers=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_PATCH_MODEL_INDEX_FOR_PINNED_TRANSFORMERS", "1") != "0",
+        dependency_profile_id=DEFAULT_DEPENDENCY_PROFILE_ID,
         run_official_command=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_RUN_COMMAND", "1") != "0",
         require_cuda=os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_REQUIRE_CUDA", "1") != "0",
         timeout_seconds=int(os.environ.get("SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_TIMEOUT_SECONDS", "86400")),
@@ -1865,6 +1661,14 @@ def package_shallow_diffuse_official_reference_outputs(
             run_summary.get("shallow_diffuse_official_reference_ready") is True,
             run_summary.get("reference_import_ready") is True,
             run_summary.get("baseline_id") == "shallow_diffuse",
+            run_summary.get("dependency_environment_profile_id") == DEFAULT_DEPENDENCY_PROFILE_ID,
+            run_summary.get("dependency_profile_id") == DEFAULT_DEPENDENCY_PROFILE_ID,
+            run_summary.get("dependency_profile_ready") is True,
+            run_summary.get("dependency_lock_ready") is True,
+            run_summary.get("dependency_environment_materialized") is True,
+            run_summary.get("dependency_environment_report_valid") is True,
+            re.fullmatch(r"[0-9a-f]{64}", str(run_summary.get("dependency_profile_digest", ""))) is not None,
+            re.fullmatch(r"[0-9a-f]{64}", str(run_summary.get("dependency_lock_digest", ""))) is not None,
             run_summary.get("model_source_ready") is True,
             run_summary.get("model_snapshot_scope_ready") is True,
             run_summary.get("model_source_repository_id") == DEFAULT_OFFICIAL_MODEL_ID,
@@ -1999,7 +1803,3 @@ def package_shallow_diffuse_official_reference_outputs(
     archive_manifest.setdefault("metadata", {})["drive_archive_digest"] = record.drive_archive_digest
     write_json(manifest_path, archive_manifest)
     return record
-
-
-
-

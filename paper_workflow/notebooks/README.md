@@ -2,6 +2,48 @@
 
 本目录仅保存 Colab 入口。Notebook 不得定义函数、类或直接导入 `main` 与 `experiments` 实现方法。
 
+## 依赖准备边界
+
+每个正式 Notebook 在完成 detached commit 与 clean worktree 校验后, 只能调用仓库统一依赖入口:
+
+```bash
+python scripts/prepare_dependency_profile.py --profile <profile_id>
+```
+
+Notebook 只声明 `profile_id`, 不保存包名、版本约束、`pip` 安装命令、`micromamba` 下载逻辑或依赖诊断实现。依赖解析与安装由 repository CLI 负责; 安装后的报告调用必须继续传递同一个 `profile_id`, 不得维护第二套报告 profile 名称。
+
+| Notebook 职责 | 父解释器 `profile_id` | 科学子解释器 `profile_id` |
+|---|---|---|
+| 主方法图像盲检运行 | `workflow_orchestrator` | `sd35_method_runtime_gpu` |
+| Tree-Ring、Gaussian Shading、Shallow Diffuse 的 SD3.5 method-faithful 运行 | `workflow_orchestrator` | `sd35_method_runtime_gpu` |
+| T2SMark SD3.5 正式复现 | `workflow_orchestrator` | `t2smark_sd35_gpu` |
+| Tree-Ring 官方原环境补充运行 | `workflow_orchestrator` | `tree_ring_official_py39_cu117` |
+| Gaussian Shading 官方原环境补充运行 | `workflow_orchestrator` | `gaussian_shading_official_py38_cu117` |
+| Shallow Diffuse 官方原环境补充运行 | `workflow_orchestrator` | `shallow_diffuse_official_py39_cu117` |
+| 论文结果闭合与 Drive cold-start | `workflow_orchestrator` | 不适用 |
+
+五个科学执行环境均由 repository runner 通过 `experiments.runtime.isolated_dependency_environment` 创建, Notebook 不维护其包清单。一次正式 session 只准备父 `workflow_orchestrator` 与当前 workflow 的一个科学子 profile, 不得在父解释器内直接安装或执行科学 profile。
+
+## 依赖锁资格化入口
+
+`dependency_lock_review_run.ipynb` 是候选完整锁的薄入口。该 Notebook 只挂载 Drive、检出精确40位 detached commit、发布 clean worktree 正式执行锁、设置一个 `PROFILE_ID`, 然后调用:
+
+```bash
+python scripts/write_dependency_lock_review_bundle.py \
+  --profile <profile_id> \
+  --drive-output-dir /content/drive/MyDrive/SLM/dependency_lock_review_bundles
+```
+
+脚本始终在 `outputs/dependency_lock_review_bundles/<profile_id>/` 生成本地审查包。仅在显式提供 `--drive-output-dir` 时才复制到 Drive; 脱离 Notebook 的 GPU 服务器可以省略该参数。审查包包含候选锁、原始 `pip` resolver report、候选 provenance 和逐文件 SHA-256 manifest, 全部固定 `supports_paper_claim=false`。候选物化过程不写 `configs/`, `candidate_ready_for_review` 只表示文件可进入人工审查。
+
+依赖锁的构建顺序如下:
+
+1. 在与 CPU `workflow_orchestrator` 的 CPython patch 和 Linux x86_64 身份精确匹配的解释器中生成候选; 该路径不要求 CUDA、torch 或 PyTorch index。人工审查通过后, 将候选完整锁保存为 `configs/dependency_profiles/workflow_orchestrator_lock.txt` 并提交 Git。
+2. 重新检出包含 orchestrator 完整锁的新精确提交。此后五个科学 profile 才能生成候选。审查包脚本先按已提交锁准备 orchestrator 环境, 再调用 `provision_isolated_dependency_python` 创建目标完整 CPython patch 的独立子环境, 最后由目标子解释器运行同一候选物化器。
+3. `sd35_method_runtime_gpu`、`t2smark_sd35_gpu` 与三个 official-reference profile 使用相同的隔离协议, 但各自保留独立 Python、CUDA、PyTorch index 和直接依赖身份。只有 `workflow_orchestrator` 候选允许在 Notebook 当前解释器中物化。
+
+候选锁经人工审查并提交后才具备仓库输入身份。候选审查包本身不属于论文 records、tables、figures 或支持性证据。
+
 正式运行顺序:
 
 1. `semantic_watermark_image_only_run.ipynb`。

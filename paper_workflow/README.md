@@ -1,6 +1,6 @@
 # Paper Workflow
 
-`paper_workflow/` 是最外层 Colab 入口与运行环境包装层。Notebook 只设置论文级别、安装依赖并调用仓库 helper, 不定义方法、攻击、baseline 或统计代码。
+`paper_workflow/` 是最外层 Colab 入口与运行环境包装层。Notebook 只设置论文级别、调用统一依赖 profile 准备 CLI 并启动仓库 workflow, 不定义方法、攻击、baseline、依赖解析或统计代码。
 
 ## 正式入口
 
@@ -19,7 +19,7 @@
 | `pilot_paper` | 700 | 340 | 0.01 |
 | `full_paper` | 7000 | 3400 | 0.001 |
 
-每个 Notebook 在拉取仓库前必须由 `SLM_WM_REPOSITORY_COMMIT` 提供精确40位小写 Git SHA。入口先执行 detached checkout 和 clean worktree 校验, 再安装依赖。正式运行函数在业务执行开始与运行 manifest 写出前实时复验同一锁, 打包函数在归档开始与 ZIP 写出后再次复验。运行 manifest 与归档 manifest 分别保存完整 `formal_execution_run_lock` 和 `formal_execution_package_lock`; 任一分支名、短 SHA、attached HEAD、dirty 工作树或锁摘要漂移都会阻断正式归档。
+每个 Notebook 在拉取仓库前必须由 `SLM_WM_REPOSITORY_COMMIT` 提供精确40位小写 Git SHA。入口先执行 detached checkout 和 clean worktree 校验, 再由 `scripts/prepare_dependency_profile.py` 资格化 CPU 父 `workflow_orchestrator`。GPU workflow 随后通过 repository runtime API 准备且只准备当前职责对应的一个 CUDA 科学子 profile; 五个科学 profile 均不得安装到 Notebook 父解释器。两个 CLI 都只消费已经提交且逐项携带 SHA-256 的完整依赖锁, Notebook 不拼装包名、版本或安装命令。正式运行函数在业务执行开始与运行 manifest 写出前实时复验同一 Git 锁, 打包函数在归档开始与 ZIP 写出后再次复验。运行 manifest 与归档 manifest 分别保存完整 `formal_execution_run_lock` 和 `formal_execution_package_lock`; 任一分支名、短 SHA、attached HEAD、dirty 工作树、依赖锁缺失、科学子解释器证据缺失或锁摘要漂移都会阻断正式归档。依赖实现与当前执行接线状态见 `docs/builds/formal_dependency_environment.md`。
 
 不使用 Notebook 时, 应通过 `scripts/run_gpu_server_workflow.py --repository-commit <40位提交>` 启动 GPU 工作流, 由服务器入口向子进程发布同一正式执行锁。底层脚本不会把缺少实时锁复验的直接调用升级为正式结果。当前 `8.216.54.104` 无 GPU, 不得用于生成正式模型结果。
 

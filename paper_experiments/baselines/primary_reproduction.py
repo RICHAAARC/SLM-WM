@@ -101,39 +101,39 @@ def default_primary_command_profiles() -> dict[str, PrimaryBaselineCommandProfil
         "tree_ring": PrimaryBaselineCommandProfile(
             baseline_id="tree_ring",
             command_profile_name="tree_ring_official_text_to_image",
-            dependency_profile="legacy_diffusers_ddim_inversion",
-            recommended_python="3.8",
+            dependency_profile="tree_ring_official_py39_cu117",
+            recommended_python="3.9.19",
             official_entrypoint="run_tree_ring_watermark.py",
             reproduction_command=(
                 "python run_tree_ring_watermark.py --run_name slm_common_protocol "
                 "--w_channel 3 --w_pattern ring --start 0 --end {sample_count} --with_tracking"
             ),
             expected_result_adapter="tree_ring_detection_metrics_adapter",
-            model_alignment_status="sd35_method_faithful_adapter_plus_legacy_official_reference",
+            model_alignment_status="sd35_method_faithful_adapter_plus_official_reference",
             notes=(
                 "主表使用 method_faithful_sd35 adapter 在 SD3.5 Medium 上重建 ring key 注入与检测; "
-                "补充表使用官方 legacy 入口隔离复现, 再以 governed import 记录忠实度参考。"
+                "补充表使用官方固定 profile 入口隔离复现, 再以 受治理导入 记录忠实度参考。"
             ),
         ),
         "gaussian_shading": PrimaryBaselineCommandProfile(
             baseline_id="gaussian_shading",
             command_profile_name="gaussian_shading_official_text_to_image",
-            dependency_profile="legacy_diffusers_ddim_inversion",
-            recommended_python="3.8",
+            dependency_profile="gaussian_shading_official_py38_cu117",
+            recommended_python="3.8.20",
             official_entrypoint="run_gaussian_shading.py",
             reproduction_command=(
                 "python run_gaussian_shading.py --fpr {target_fpr} --channel_copy 1 --hw_copy 8 "
                 "--chacha --num {sample_count}"
             ),
             expected_result_adapter="gaussian_shading_detection_metrics_adapter",
-            model_alignment_status="legacy_stable_diffusion_requires_protocol_adapter",
+            model_alignment_status="stable_diffusion_2_1_official_reference_protocol_boundary",
             notes="官方入口使用 Stable Diffusion 2.x latent 尺寸, 需记录与 SD3.5 主线的模型边界。",
         ),
         "shallow_diffuse": PrimaryBaselineCommandProfile(
             baseline_id="shallow_diffuse",
             command_profile_name="shallow_diffuse_official_text_to_image",
-            dependency_profile="legacy_diffusers_ddim_inversion",
-            recommended_python="3.8",
+            dependency_profile="shallow_diffuse_official_py39_cu117",
+            recommended_python="3.9.19",
             official_entrypoint="run_shallow_diffuse_t2i.py",
             reproduction_command=(
                 "python run_shallow_diffuse_t2i.py --run_name slm_common_protocol --w_pattern complex2_ring "
@@ -141,7 +141,7 @@ def default_primary_command_profiles() -> dict[str, PrimaryBaselineCommandProfil
                 "--w_radius 10 --w_measurement l1_complex2 --w_injection complex2 --edit_time_list 0.3"
             ),
             expected_result_adapter="shallow_diffuse_detection_metrics_adapter",
-            model_alignment_status="legacy_stable_diffusion_requires_protocol_adapter",
+            model_alignment_status="stable_diffusion_2_1_official_reference_protocol_boundary",
             notes="官方入口与 Tree-Ring 共享 Stable Diffusion 2.x 依赖边界, 需用共同 Prompt 和攻击矩阵重跑。",
         ),
         "t2smark": PrimaryBaselineCommandProfile(

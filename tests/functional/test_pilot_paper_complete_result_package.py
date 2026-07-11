@@ -661,4 +661,18 @@ def test_complete_result_package_required_directories_cover_evidence_closure_cha
     assert "paper_experiments/analysis/result_closure_gate.py" in PACKAGE_EXTRA_PATHS
     assert "scripts/write_submission_readiness_outputs.py" in PACKAGE_EXTRA_PATHS
     assert "scripts/write_evidence_closure_entry_review_outputs.py" in PACKAGE_EXTRA_PATHS
+    assert "configs/dependency_profiles/workflow_orchestrator_lock.txt" in PACKAGE_EXTRA_PATHS
+    assert "experiments/runtime/dependency_preparation.py" in PACKAGE_EXTRA_PATHS
+    assert "experiments/runtime/isolated_dependency_environment.py" in PACKAGE_EXTRA_PATHS
+    assert "experiments/runtime/isolated_scientific_execution.py" in PACKAGE_EXTRA_PATHS
+    assert "experiments/runtime/repository_environment.py" in PACKAGE_EXTRA_PATHS
+    assert (
+        "paper_experiments/runners/official_reference_dependency_environment.py"
+        in PACKAGE_EXTRA_PATHS
+    )
+    assert "paper_experiments/runners/t2smark_formal_reproduction.py" in PACKAGE_EXTRA_PATHS
+    assert (
+        "paper_experiments/runners/external_baseline_method_faithful.py"
+        in PACKAGE_EXTRA_PATHS
+    )
     assert build_required_output_dirs("probe_paper") != build_required_output_dirs("pilot_paper")
