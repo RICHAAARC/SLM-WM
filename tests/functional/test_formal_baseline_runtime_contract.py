@@ -8,10 +8,20 @@ import pytest
 from PIL import Image
 
 from experiments.runtime.image_metrics import compute_image_quality_metrics, measured_image_ssim
+from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
 from external_baseline.primary.sd35_method_faithful_common import derive_threshold
+from external_baseline.primary.gaussian_shading.adapter.method_faithful_sd35 import (
+    build_observation as build_gaussian_shading_observation,
+)
+from external_baseline.primary.shallow_diffuse.adapter.method_faithful_sd35 import (
+    build_observation as build_shallow_diffuse_observation,
+)
 from external_baseline.primary.t2smark.adapter.run_slm_eval import (
     _auto_threshold,
     build_t2smark_observations,
+)
+from external_baseline.primary.tree_ring.adapter.method_faithful_sd35 import (
+    build_observation as build_tree_ring_observation,
 )
 from scripts.build_external_baseline_command_plan import build_parser, build_plan
 
@@ -38,6 +48,59 @@ def test_method_faithful_threshold_uses_calibration_negatives_only() -> None:
     assert first == second
     assert source == "calibration_clean_negative_conformal"
     assert sum(row["score"] >= first for row in negatives) == 0
+
+
+@pytest.mark.parametrize(
+    ("builder", "extra_fields"),
+    (
+        (build_tree_ring_observation, {}),
+        (build_gaussian_shading_observation, {}),
+        (build_shallow_diffuse_observation, {"injection_mode": "complex"}),
+    ),
+)
+def test_common_backbone_producers_bind_formal_attack_identity(
+    builder: object,
+    extra_fields: dict[str, object],
+) -> None:
+    """三个 common-backbone producer 都必须在写行前校验攻击身份."""
+
+    attack_config = resolve_formal_attack_config(
+        attack_family="standard_distortion",
+        attack_name="jpeg_compression",
+    )
+    kwargs = {
+        "event_id": "event_0001",
+        "score": 0.9,
+        "threshold": 0.5,
+        "threshold_source": "calibration_clean_negative_conformal",
+        "row": {"split": "test", "prompt_id": "prompt_0001"},
+        "index": 1,
+        "sample_role": "attacked_positive",
+        "attack_family": attack_config.attack_family,
+        "attack_condition": attack_config.attack_name,
+        "image_id": "image_0001",
+        "image_path": "outputs/test/image_0001.png",
+        "image_digest": "1" * 64,
+        "latent_shape": (1, 16, 64, 64),
+        "execution_device": "cuda",
+        "model_id": "stabilityai/stable-diffusion-3.5-medium",
+        "quality_score": 0.9,
+        "score_retention": 0.8,
+        "attack_id": attack_config.attack_id,
+        "resource_profile": attack_config.resource_profile,
+        "attack_config_digest_value": attack_config_digest(attack_config),
+        **extra_fields,
+    }
+
+    row = builder(**kwargs)  # type: ignore[operator]
+
+    assert row["attack_id"] == attack_config.attack_id
+    assert row["resource_profile"] == attack_config.resource_profile
+    assert row["attack_config_digest"] == attack_config_digest(attack_config)
+
+    kwargs["attack_config_digest_value"] = "0" * 64
+    with pytest.raises(ValueError, match="AttackConfig"):
+        builder(**kwargs)  # type: ignore[operator]
 
 
 @pytest.mark.quick
@@ -94,15 +157,39 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
             "image_only_detection": {"clean_score": 0.1, "watermarked_score": 0.9},
             "formal_attacks": {
                 "jpeg_compression": {
+                    "attack_id": "jpeg_compression_main",
                     "attack_family": "standard_distortion",
                     "attack_name": "jpeg_compression",
                     "attack_condition": "jpeg_compression",
+                    "resource_profile": "full_main",
+                    "attack_config_digest": attack_config_digest(
+                        resolve_formal_attack_config(
+                            attack_family="standard_distortion",
+                            attack_name="jpeg_compression",
+                        )
+                    ),
                     "attacked_negative": {
+                        "attack_id": "jpeg_compression_main",
+                        "resource_profile": "full_main",
+                        "attack_config_digest": attack_config_digest(
+                            resolve_formal_attack_config(
+                                attack_family="standard_distortion",
+                                attack_name="jpeg_compression",
+                            )
+                        ),
                         "detection_score": 0.12,
                         "attacked_image_path": str(attacked_negative_path),
                         "attacked_image_digest": "attacked_negative_digest",
                     },
                     "attacked_positive": {
+                        "attack_id": "jpeg_compression_main",
+                        "resource_profile": "full_main",
+                        "attack_config_digest": attack_config_digest(
+                            resolve_formal_attack_config(
+                                attack_family="standard_distortion",
+                                attack_name="jpeg_compression",
+                            )
+                        ),
                         "detection_score": 0.75,
                         "attacked_image_path": str(attacked_positive_path),
                         "attacked_image_digest": "attacked_positive_digest",
@@ -126,6 +213,17 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
     assert by_role["attacked_positive"]["image_path"] == str(attacked_positive_path)
     assert by_role["attacked_negative"]["score"] == pytest.approx(0.12)
     assert by_role["attacked_positive"]["score"] == pytest.approx(0.75)
+
+    del results["0"]["formal_attacks"]["jpeg_compression"]["attacked_positive"][
+        "attack_config_digest"
+    ]
+    with pytest.raises(ValueError, match="AttackConfig"):
+        build_t2smark_observations(
+            image_pairs=rows,
+            t2smark_results=results,
+            threshold=0.5,
+            target_fpr=0.1,
+        )
 
 
 @pytest.mark.quick

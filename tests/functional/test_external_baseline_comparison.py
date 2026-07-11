@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
 from experiments.protocol.fixed_fpr_observation_audit import (
     FORMAL_THRESHOLD_SOURCE,
     audit_fixed_fpr_observation_threshold,
@@ -21,6 +22,26 @@ from scripts.write_external_baseline_comparison_outputs import (
     build_runtime_report,
     write_external_baseline_comparison_outputs,
 )
+
+
+_JPEG_CONFIG = resolve_formal_attack_config(
+    attack_family="standard_distortion",
+    attack_name="jpeg_compression",
+)
+FORMAL_JPEG_IDENTITY = {
+    "attack_id": _JPEG_CONFIG.attack_id,
+    "resource_profile": _JPEG_CONFIG.resource_profile,
+    "attack_config_digest": attack_config_digest(_JPEG_CONFIG),
+}
+_REGENERATION_CONFIG = resolve_formal_attack_config(
+    attack_family="regeneration_attack",
+    attack_name="img2img_regeneration",
+    resource_profile="full_extra",
+)
+FORMAL_REGENERATION_IDENTITY = {
+    "attack_id": _REGENERATION_CONFIG.attack_id,
+    "attack_config_digest": attack_config_digest(_REGENERATION_CONFIG),
+}
 
 
 def write_pilot_threshold_observation_evidence(
@@ -59,6 +80,8 @@ def write_pilot_threshold_observation_evidence(
         }
         if quality_score is not None:
             row["quality_score"] = quality_score
+        if sample_role in {"attacked_negative", "attacked_positive"}:
+            row.update(FORMAL_JPEG_IDENTITY)
         return row
 
     observations = [
@@ -176,9 +199,11 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         writer = csv.DictWriter(
             handle,
             fieldnames=[
+                "attack_id",
                 "attack_family",
                 "attack_name",
                 "resource_profile",
+                "attack_config_digest",
                 "metric_status",
                 "attack_record_count",
                 "supported_record_count",
@@ -197,9 +222,9 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         writer.writeheader()
         writer.writerow(
             {
+                **FORMAL_JPEG_IDENTITY,
                 "attack_family": "standard_distortion",
                 "attack_name": "jpeg_compression",
-                "resource_profile": "full_main",
                 "metric_status": "measured_real_attacked_image_image_only_detection",
                 "attack_record_count": 6,
                 "supported_record_count": 6,
@@ -217,6 +242,7 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
         )
         writer.writerow(
             {
+                **FORMAL_REGENERATION_IDENTITY,
                 "attack_family": "regeneration_attack",
                 "attack_name": "img2img_regeneration",
                 "resource_profile": "full_extra",
@@ -357,6 +383,7 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
         json.dumps(
             {
                 "baseline_id": "tree_ring",
+                **FORMAL_JPEG_IDENTITY,
                 "attack_family": "standard_distortion",
                 "attack_name": "jpeg_compression",
                 "resource_profile": "full_main",
@@ -369,8 +396,8 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
                 "positive_count": 340,
                 "negative_count": 340,
                 "attacked_negative_count": 340,
-                "attack_record_count": 1020,
-                "supported_record_count": 1020,
+                "attack_record_count": 680,
+                "supported_record_count": 340,
                 "true_positive_rate": 0.7,
                 "false_positive_rate": 0.0,
                 "clean_false_positive_rate": 0.0,
@@ -655,6 +682,7 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
         json.dumps(
             {
                 "baseline_id": "tree_ring",
+                **FORMAL_JPEG_IDENTITY,
                 "attack_family": "standard_distortion",
                 "attack_name": "jpeg_compression",
                 "resource_profile": "full_main",
@@ -667,8 +695,8 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
                 "positive_count": 340,
                 "negative_count": 340,
                 "attacked_negative_count": 340,
-                "attack_record_count": 1020,
-                "supported_record_count": 1020,
+                "attack_record_count": 680,
+                "supported_record_count": 340,
                 "true_positive_rate": 0.7,
                 "false_positive_rate": 0.0,
                 "clean_false_positive_rate": 0.0,

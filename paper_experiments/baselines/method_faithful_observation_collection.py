@@ -16,7 +16,11 @@ from experiments.protocol.paper_run_config import (
     PaperRunConfig,
     build_paper_run_config,
 )
-from experiments.protocol.attacks import default_attack_configs
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+    resolve_formal_attack_config,
+)
 from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_observation_threshold
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments
@@ -378,6 +382,54 @@ def _read_json_object(path: Path, role: str) -> dict[str, Any]:
     return dict(payload)
 
 
+def validate_formal_attack_observation_identities(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    baseline_id: str,
+) -> None:
+    """校验执行端 observation 绑定唯一正式攻击配置.
+
+    该校验属于项目特定的 producer schema 边界. 它要求攻击身份直接存在于
+    每条 attacked observation, 不允许 collection 或结果 writer 根据名称后贴标签.
+    """
+
+    attacked_count = 0
+    attacked_positive_count = 0
+    for row_index, source_row in enumerate(rows):
+        row = dict(source_row)
+        sample_role = str(row.get("sample_role", ""))
+        if sample_role not in {"attacked_negative", "attacked_positive"}:
+            continue
+        attacked_count += 1
+        attacked_positive_count += int(sample_role == "attacked_positive")
+        attack_family = str(row.get("attack_family", ""))
+        attack_name = str(row.get("attack_name") or row.get("attack_condition") or "")
+        try:
+            config = resolve_formal_attack_config(
+                attack_family=attack_family,
+                attack_name=attack_name,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"method_faithful_observation_attack_unregistered:{baseline_id}:{row_index}"
+            ) from exc
+        expected = {
+            "attack_id": config.attack_id,
+            "resource_profile": config.resource_profile,
+            "attack_config_digest": attack_config_digest(config),
+        }
+        for field_name, expected_value in expected.items():
+            if str(row.get(field_name, "")) != expected_value:
+                raise ValueError(
+                    "method_faithful_observation_attack_identity_mismatch:"
+                    f"{baseline_id}:{row_index}:{field_name}"
+                )
+    if attacked_count <= 0 or attacked_positive_count <= 0:
+        raise ValueError(
+            f"method_faithful_observation_attacked_positive_missing:{baseline_id}"
+        )
+
+
 def _read_json_array(path: Path, role: str) -> list[dict[str, Any]]:
     """读取被 transfer manifest 摘要绑定的 JSON 数组。"""
 
@@ -535,6 +587,7 @@ def load_method_faithful_observation_collection(
         }
         if observed_attack_names != required_attack_names:
             raise ValueError(f"method_faithful_observation_formal_attack_names_mismatch:{baseline_id}")
+        validate_formal_attack_observation_identities(rows, baseline_id=baseline_id)
         normalized_rows: list[dict[str, Any]] = []
         for row_index, row in enumerate(rows):
             row_baseline_id = str(row.get("baseline_id", ""))

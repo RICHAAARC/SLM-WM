@@ -18,14 +18,12 @@ if str(ROOT) not in sys.path:
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from paper_experiments.analysis.paper_evidence_audit import (
     AuditInputBundle,
-    build_builder_readiness_report,
-    build_claim_audit_rows,
-    build_evidence_gap_rows,
-    build_figure_readiness_rows,
-    build_submission_blocker_report,
-    build_table_readiness_rows,
+    build_evidence_audit_manifest_config,
+    build_evidence_audit_materialization,
 )
-from main.core.digest import build_stable_digest
+from paper_experiments.analysis.paper_artifact_data_validation import (
+    validate_paper_artifact_source_data,
+)
 from experiments.protocol.paper_run_config import build_paper_run_config
 
 CONSTRUCTION_UNIT_NAME = "paper_artifact_evidence_audit"
@@ -135,19 +133,56 @@ def build_input_bundle(
 
         return relative_or_absolute(path, root_path)
 
+    threshold_report = read_json(threshold_report_path)
+    threshold_manifest = read_json(threshold_manifest_path)
+    threshold_audit_report = read_json(threshold_audit_report_path)
+    threshold_audit_manifest = read_json(threshold_audit_manifest_path)
+    attack_manifest = read_json(attack_manifest_path)
+    attack_matrix_manifest = read_json(attack_matrix_manifest_path)
+    baseline_manifest = read_json(baseline_manifest_path)
+    baseline_runtime_report = read_json(baseline_runtime_report_path)
+    dataset_quality_manifest = read_json(dataset_quality_manifest_path)
+    dataset_quality_summary = read_json(dataset_quality_summary_path)
+    ablation_manifest = read_json(ablation_manifest_path)
+    ablation_claim_summary = read_json(ablation_claim_summary_path)
+    source_data_paths = {
+        "frozen_evidence_protocol_ready": runtime_dir / "frozen_evidence_protocol.json",
+        "raw_image_only_detection_records_ready": (
+            runtime_dir / "image_only_detection_records.jsonl"
+        ),
+        "test_detection_metrics_ready": runtime_dir / "test_detection_metrics.csv",
+        "score_distribution_table_ready": runtime_dir / "score_distribution_table.csv",
+        "roc_curve_points_ready": runtime_dir / "roc_curve_points.csv",
+        "det_curve_points_ready": runtime_dir / "det_curve_points.csv",
+        "attack_family_metrics_ready": attack_dir / "attack_family_metrics.csv",
+        "baseline_comparison_table_ready": baseline_dir / "baseline_comparison_table.csv",
+        "mechanism_ablation_metrics_ready": ablation_dir / "mechanism_ablation_metrics.csv",
+        "mechanism_pairwise_delta_ready": ablation_dir / "mechanism_pairwise_delta.csv",
+        "dataset_quality_metrics_ready": dataset_quality_dir / "dataset_quality_metrics.csv",
+    }
+    artifact_data_validation = validate_paper_artifact_source_data(
+        root_path=root_path,
+        source_paths=source_data_paths,
+        threshold_report=threshold_report,
+        attack_manifest=attack_manifest,
+        baseline_runtime_report=baseline_runtime_report,
+        dataset_quality_summary=dataset_quality_summary,
+        ablation_claim_summary=ablation_claim_summary,
+    )
+
     return AuditInputBundle(
-        threshold_report=read_json(threshold_report_path),
-        threshold_manifest=read_json(threshold_manifest_path),
-        threshold_audit_report=read_json(threshold_audit_report_path),
-        threshold_audit_manifest=read_json(threshold_audit_manifest_path),
-        attack_manifest=read_json(attack_manifest_path),
-        attack_matrix_manifest=read_json(attack_matrix_manifest_path),
-        baseline_manifest=read_json(baseline_manifest_path),
-        baseline_runtime_report=read_json(baseline_runtime_report_path),
-        dataset_quality_manifest=read_json(dataset_quality_manifest_path),
-        dataset_quality_summary=read_json(dataset_quality_summary_path),
-        ablation_manifest=read_json(ablation_manifest_path),
-        ablation_claim_summary=read_json(ablation_claim_summary_path),
+        threshold_report=threshold_report,
+        threshold_manifest=threshold_manifest,
+        threshold_audit_report=threshold_audit_report,
+        threshold_audit_manifest=threshold_audit_manifest,
+        attack_manifest=attack_manifest,
+        attack_matrix_manifest=attack_matrix_manifest,
+        baseline_manifest=baseline_manifest,
+        baseline_runtime_report=baseline_runtime_report,
+        dataset_quality_manifest=dataset_quality_manifest,
+        dataset_quality_summary=dataset_quality_summary,
+        ablation_manifest=ablation_manifest,
+        ablation_claim_summary=ablation_claim_summary,
         source_path_map={
             "threshold_report": governed_path(threshold_report_path),
             "threshold_audit_report": governed_path(threshold_audit_report_path),
@@ -155,11 +190,14 @@ def build_input_bundle(
             "fixed_fpr_operating_points": governed_path(runtime_dir / "frozen_evidence_protocol.json"),
             "standard_watermark_metrics": governed_path(runtime_dir / "test_detection_metrics.csv"),
             "quality_metrics_summary": governed_path(runtime_dir / "runtime_results.jsonl"),
+            "raw_image_only_detection_records": governed_path(
+                runtime_dir / "image_only_detection_records.jsonl"
+            ),
             "dataset_quality_summary": governed_path(dataset_quality_summary_path),
             "dataset_quality_metrics": governed_path(dataset_quality_dir / "dataset_quality_metrics.csv"),
-            "score_distribution_table": governed_path(runtime_dir / "image_only_detection_records.jsonl"),
-            "roc_curve_points": governed_path(runtime_dir / "test_detection_metrics.csv"),
-            "det_curve_points": governed_path(runtime_dir / "test_detection_metrics.csv"),
+            "score_distribution_table": governed_path(runtime_dir / "score_distribution_table.csv"),
+            "roc_curve_points": governed_path(runtime_dir / "roc_curve_points.csv"),
+            "det_curve_points": governed_path(runtime_dir / "det_curve_points.csv"),
             "attack_manifest": governed_path(attack_manifest_path),
             "attack_family_metrics": governed_path(attack_dir / "attack_family_metrics.csv"),
             "attack_strength_curve": governed_path(attack_dir / "attack_strength_curve.csv"),
@@ -172,6 +210,7 @@ def build_input_bundle(
             "mechanism_ablation_table": governed_path(ablation_dir / "mechanism_ablation_metrics.csv"),
             "method_pairwise_delta_table": governed_path(ablation_dir / "mechanism_pairwise_delta.csv"),
         },
+        artifact_data_validation=artifact_data_validation,
     )
 
 
@@ -253,16 +292,22 @@ def write_paper_artifact_evidence_audit_outputs(
         resolved_ablation_manifest_path,
         resolved_ablation_claim_summary_path,
     )
-    claim_rows = build_claim_audit_rows(bundle)
-    table_rows = build_table_readiness_rows(bundle)
-    figure_rows = build_figure_readiness_rows(bundle)
-    gap_rows = build_evidence_gap_rows(bundle)
-    builder_report = build_builder_readiness_report(claim_rows, table_rows, figure_rows)
-    blocker_report = build_submission_blocker_report(claim_rows, gap_rows, builder_report)
+    materialization = build_evidence_audit_materialization(bundle)
+    claim_rows = materialization["claim_rows"]
+    table_rows = materialization["table_rows"]
+    figure_rows = materialization["figure_rows"]
+    gap_rows = materialization["gap_rows"]
+    builder_report = materialization["builder_report"]
+    blocker_report = materialization["blocker_report"]
     dry_run_report = {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "dry_run_decision": "pass" if builder_report["artifact_builder_ready"] else "fail",
+        "dry_run_decision": (
+            "pass"
+            if builder_report["artifact_builder_ready"]
+            and bundle.artifact_data_validation["artifact_data_validation_ready"]
+            else "fail"
+        ),
         "artifact_builder_readiness_report": builder_report,
         "submission_blocker_report": blocker_report,
         "supports_paper_claim": False,
@@ -275,6 +320,7 @@ def write_paper_artifact_evidence_audit_outputs(
     builder_report_path = resolved_output_dir / "artifact_builder_readiness_report.json"
     dry_run_report_path = resolved_output_dir / "evidence_audit_dry_run.json"
     blocker_report_path = resolved_output_dir / "submission_blocker_report.json"
+    artifact_data_validation_path = resolved_output_dir / "artifact_data_validation_report.json"
     manifest_path = resolved_output_dir / "manifest.local.json"
 
     write_csv(
@@ -310,8 +356,12 @@ def write_paper_artifact_evidence_audit_outputs(
     builder_report_path.write_text(stable_json_text(builder_report), encoding="utf-8")
     dry_run_report_path.write_text(stable_json_text(dry_run_report), encoding="utf-8")
     blocker_report_path.write_text(stable_json_text(blocker_report), encoding="utf-8")
+    artifact_data_validation_path.write_text(
+        stable_json_text(bundle.artifact_data_validation),
+        encoding="utf-8",
+    )
 
-    input_paths = tuple(
+    primary_input_paths = tuple(
         relative_or_absolute(path, root_path)
         for path in (
             resolved_threshold_report_path,
@@ -328,6 +378,14 @@ def write_paper_artifact_evidence_audit_outputs(
             resolved_ablation_claim_summary_path,
         )
     )
+    input_paths = tuple(
+        dict.fromkeys(
+            (
+                *primary_input_paths,
+                *bundle.artifact_data_validation["source_paths"].values(),
+            )
+        )
+    )
     output_paths = tuple(
         relative_or_absolute(path, root_path)
         for path in (
@@ -338,30 +396,35 @@ def write_paper_artifact_evidence_audit_outputs(
             builder_report_path,
             dry_run_report_path,
             blocker_report_path,
+            artifact_data_validation_path,
             manifest_path,
         )
     )
-    summary = {
-        "claim_rows": claim_rows,
-        "table_rows": table_rows,
-        "figure_rows": figure_rows,
-        "gap_rows": gap_rows,
-        "builder_report": builder_report,
-        "blocker_report": blocker_report,
-    }
     manifest = build_artifact_manifest(
         artifact_id="paper_artifact_evidence_audit_manifest",
         artifact_type="local_manifest",
         input_paths=input_paths,
         output_paths=output_paths,
-        config={
-            "summary_digest": build_stable_digest(summary),
-            "input_bundle_digest": build_stable_digest(bundle.to_dict()),
-        },
+        config=build_evidence_audit_manifest_config(bundle, materialization),
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_paper_artifact_evidence_audit_outputs.py",
         metadata={
             **blocker_report,
+            "artifact_data_validation_ready": bundle.artifact_data_validation[
+                "artifact_data_validation_ready"
+            ],
+            "blocked_artifact_data_ids": bundle.artifact_data_validation[
+                "blocked_artifact_data_ids"
+            ],
+            "evidence_source_file_sha256": bundle.artifact_data_validation[
+                "evidence_source_file_sha256"
+            ],
+            "raw_image_only_detection_records_ready": bundle.artifact_data_validation[
+                "raw_image_only_detection_records_ready"
+            ],
+            "raw_image_only_detection_records_sha256": bundle.artifact_data_validation[
+                "raw_image_only_detection_records_sha256"
+            ],
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
     ).to_dict()

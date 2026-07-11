@@ -64,7 +64,7 @@ def _check_row(
     ready: bool,
     source_artifact: str,
     blocker_reason: str,
-    user_audit_note: str,
+    audit_note: str,
 ) -> dict[str, Any]:
     """构造入口审计清单行。
 
@@ -77,7 +77,7 @@ def _check_row(
         "review_status": "ready" if ready else "blocked",
         "source_artifact": source_artifact,
         "blocker_reason": "" if ready else blocker_reason,
-        "user_audit_note": user_audit_note,
+        "audit_note": audit_note,
         "supports_paper_claim": False,
     }
 
@@ -152,10 +152,10 @@ def build_evidence_closure_entry_review_report(
     bundle: EvidenceClosureEntryInput,
     checklist_rows: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """构造证据闭合入口审计报告。
+    """构造证据闭合入口审计报告.
 
-    这一实现属于项目特定写法: 它显式把“可供用户审计”和“允许进入论文投稿级证据闭合”分开。
-    当前如果仍存在关键缺口, 报告会到达可审计状态, 但不会允许进入证据闭合。
+    这一实现属于项目特定写法: 它根据受治理上游报告和全部检查项自动作出确定性判定.
+    如果仍存在任一关键缺口, 报告会保留完整阻断信息, 且不允许进入证据闭合.
     """
 
     checklist = [dict(row) for row in checklist_rows]
@@ -168,9 +168,10 @@ def build_evidence_closure_entry_review_report(
     return {
         "construction_unit_name": "evidence_closure_entry_review",
         "entry_review_ready": True,
-        "user_audit_required": True,
         "evidence_closure_allowed": evidence_closure_allowed,
-        "entry_review_decision": "ready_for_user_audit" if evidence_closure_allowed else "blocked_before_evidence_closure",
+        "entry_review_decision": (
+            "ready_for_evidence_closure" if evidence_closure_allowed else "blocked_before_evidence_closure"
+        ),
         "review_item_count": len(checklist),
         "blocked_review_item_count": len(blocked_rows),
         "blocked_review_item_ids": [str(row.get("review_item_id", "")) for row in blocked_rows],
@@ -190,6 +191,5 @@ def build_evidence_closure_entry_review_report(
         "formal_sample_scale_ready": _bool_value(dataset_quality.get("formal_sample_scale_ready")),
         "formal_feature_backend_ready": _bool_value(dataset_quality.get("formal_feature_backend_ready")),
         "recommended_next_action": readiness.get("recommended_next_action", ""),
-        "user_audit_question": "是否允许进入论文投稿级证据闭合, 需要由用户在审计本报告后决定。",
         "supports_paper_claim": False,
     }

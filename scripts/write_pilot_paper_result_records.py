@@ -13,7 +13,6 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import subprocess
@@ -26,9 +25,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from experiments.protocol.attacks import default_attack_configs
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+    resolve_formal_attack_config,
+)
 from experiments.protocol.formal_evidence import contains_nonformal_marker
 from experiments.protocol.pilot_paper_fixed_fpr import (
+    PILOT_PAPER_METRIC_BOUNDS,
     PilotPaperFixedFprConfig,
     build_attack_matrix_digest,
     build_fixed_fpr_protocol_digest,
@@ -36,8 +40,13 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     build_pilot_paper_attack_matrix_rows,
     build_pilot_paper_method_registry_rows,
     build_pilot_paper_prompt_split_summary,
+    build_pilot_paper_result_record_set_digest,
+    build_pilot_paper_result_records_manifest_config,
     build_pilot_paper_result_import_schema,
     build_pilot_paper_result_import_template_rows,
+    bounded_hoeffding_confidence_interval,
+    bounded_metric_value,
+    clamp_unit_interval,
     validate_pilot_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
@@ -45,6 +54,9 @@ from experiments.protocol.paper_run_config import normalize_paper_run_name
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.runtime.image_metrics import measured_score_retention
 from main.core.digest import build_stable_digest
+from paper_experiments.runners.closure_package_selection import (
+    load_validated_closure_input_lock,
+)
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_fixed_fpr_result_records"
 DEFAULT_OUTPUT_ROOT = Path("outputs/pilot_paper_fixed_fpr_results")
@@ -272,24 +284,6 @@ def _list_field(row: Mapping[str, Any], field_name: str) -> list[str]:
     return []
 
 
-def clamp01(value: float) -> float:
-    """把指标值裁剪到 [0, 1] 区间。"""
-
-    return min(1.0, max(0.0, float(value)))
-
-
-def bounded_confidence_interval(value: float, count: int, confidence_level: float) -> tuple[float, float]:
-    """对 [0, 1] 独立观测均值计算分布无关 Hoeffding 置信区间。"""
-
-    normalized = clamp01(value)
-    sample_count = max(1, int(count))
-    alpha = 1.0 - float(confidence_level)
-    if not 0.0 < alpha < 1.0:
-        raise ValueError("confidence_level 必须位于 (0, 1)")
-    margin = math.sqrt(math.log(2.0 / alpha) / (2.0 * sample_count))
-    return clamp01(normalized - margin), clamp01(normalized + margin)
-
-
 def expand_package_paths(root_path: Path, package_paths: Iterable[str | Path], package_search_roots: Iterable[str | Path]) -> tuple[Path, ...]:
     """解析显式 zip 与镜像目录中的 zip 包路径。"""
 
@@ -496,11 +490,14 @@ def build_common_result_fields(
     *,
     schema: Mapping[str, Any],
     method_id: str,
+    attack_id: str,
     attack_family: str,
     attack_name: str,
     resource_profile: str,
+    attack_config_digest_value: str,
     baseline_result_source: str,
     baseline_result_source_digest: str,
+    method_threshold_digest: str,
     evidence_paths: list[str],
 ) -> dict[str, Any]:
     """构造所有方法共享的 pilot_paper schema 字段。"""
@@ -510,13 +507,16 @@ def build_common_result_fields(
         "result_scope": schema["result_scope"],
         "result_claim_scope": schema["result_claim_scope"],
         "method_id": method_id,
+        "attack_id": attack_id,
         "attack_family": attack_family,
         "attack_name": attack_name,
         "resource_profile": resource_profile,
+        "attack_config_digest": attack_config_digest_value,
         "prompt_protocol_name": schema["prompt_protocol_name"],
         "prompt_split_digest": schema["prompt_split_digest"],
         "attack_matrix_digest": schema["attack_matrix_digest"],
         "fixed_fpr_protocol_digest": schema["fixed_fpr_protocol_digest"],
+        "method_threshold_digest": method_threshold_digest,
         "target_fpr": schema["target_fpr"],
         "confidence_interval_method": schema["confidence_interval_method"],
         "confidence_level": schema["confidence_level"],
@@ -546,43 +546,70 @@ def attach_metric_fields(
 ) -> dict[str, Any]:
     """补齐指标字段和确定性置信区间字段。"""
 
+    quality_lower, quality_upper = PILOT_PAPER_METRIC_BOUNDS[
+        "quality_score_mean"
+    ]
     metric_payload = {
         "positive_count": max(0, int(positive_count)),
         "negative_count": max(0, int(negative_count)),
         "attack_record_count": max(0, int(attack_record_count)),
         "supported_record_count": max(0, int(supported_record_count)),
-        "true_positive_rate": clamp01(true_positive_rate),
-        "false_positive_rate": clamp01(false_positive_rate),
-        "clean_false_positive_rate": clamp01(clean_false_positive_rate),
-        "attacked_false_positive_rate": clamp01(attacked_false_positive_rate),
-        "quality_score_mean": clamp01(quality_score_mean),
-        "score_retention_mean": clamp01(score_retention_mean),
+        "true_positive_rate": clamp_unit_interval(true_positive_rate),
+        "false_positive_rate": clamp_unit_interval(false_positive_rate),
+        "clean_false_positive_rate": clamp_unit_interval(clean_false_positive_rate),
+        "attacked_false_positive_rate": clamp_unit_interval(attacked_false_positive_rate),
+        "quality_score_mean": bounded_metric_value(
+            quality_score_mean,
+            lower_bound=quality_lower,
+            upper_bound=quality_upper,
+        ),
+        "score_retention_mean": clamp_unit_interval(score_retention_mean),
     }
     ci_inputs = (
-        ("true_positive_rate", metric_payload["positive_count"], "true_positive_rate_ci_low", "true_positive_rate_ci_high"),
-        ("false_positive_rate", metric_payload["negative_count"], "false_positive_rate_ci_low", "false_positive_rate_ci_high"),
+        ("true_positive_rate", metric_payload["positive_count"], "true_positive_rate_ci_low", "true_positive_rate_ci_high", 0.0, 1.0),
+        ("false_positive_rate", metric_payload["negative_count"], "false_positive_rate_ci_low", "false_positive_rate_ci_high", 0.0, 1.0),
         (
             "clean_false_positive_rate",
             metric_payload["negative_count"],
             "clean_false_positive_rate_ci_low",
             "clean_false_positive_rate_ci_high",
+            0.0,
+            1.0,
         ),
         (
             "attacked_false_positive_rate",
             metric_payload["negative_count"],
             "attacked_false_positive_rate_ci_low",
             "attacked_false_positive_rate_ci_high",
+            0.0,
+            1.0,
         ),
-        ("quality_score_mean", metric_payload["supported_record_count"], "quality_score_ci_low", "quality_score_ci_high"),
+        # 质量与分数保持均值都来自 attacked positive, 因而分母必须是 positive_count.
+        ("quality_score_mean", metric_payload["positive_count"], "quality_score_ci_low", "quality_score_ci_high", quality_lower, quality_upper),
         (
             "score_retention_mean",
-            metric_payload["supported_record_count"],
+            metric_payload["positive_count"],
             "score_retention_ci_low",
             "score_retention_ci_high",
+            0.0,
+            1.0,
         ),
     )
-    for metric_name, sample_count, low_name, high_name in ci_inputs:
-        low, high = bounded_confidence_interval(metric_payload[metric_name], sample_count, confidence_level)
+    for (
+        metric_name,
+        sample_count,
+        low_name,
+        high_name,
+        lower_bound,
+        upper_bound,
+    ) in ci_inputs:
+        low, high = bounded_hoeffding_confidence_interval(
+            metric_payload[metric_name],
+            sample_count,
+            confidence_level,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+        )
         metric_payload[low_name] = low
         metric_payload[high_name] = high
     payload.update(metric_payload)
@@ -629,17 +656,67 @@ def finalize_result_record(
     return payload
 
 
-def baseline_accepted_record_keys(validation_report: Mapping[str, Any]) -> set[tuple[str, str, str, str]]:
+def detection_attack_identity_lookup(
+    detection_records_path: Path,
+) -> dict[tuple[str, str, str], dict[str, str]]:
+    """从主方法执行端检测记录提取正式攻击身份."""
+
+    identities: dict[tuple[str, str, str], dict[str, str]] = {}
+    for row_index, row in enumerate(read_jsonl_rows(detection_records_path)):
+        attack_id = _str_field(row, "attack_id")
+        attack_family = _str_field(row, "attack_family")
+        attack_name = _str_field(row, "attack_name")
+        resource_profile = _str_field(row, "resource_profile")
+        attacked_row = (
+            attack_family != "clean"
+            and attack_name not in {"", "none", "clean_none"}
+        )
+        if not attacked_row:
+            continue
+        if not attack_id:
+            raise ValueError(f"主方法攻击检测记录缺少 attack_id: {row_index}")
+        try:
+            config = resolve_formal_attack_config(
+                attack_family=attack_family,
+                attack_name=attack_name,
+                resource_profile=resource_profile,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"主方法检测记录包含未注册攻击身份: {row_index}"
+            ) from exc
+        identity = {
+            "attack_id": config.attack_id,
+            "resource_profile": config.resource_profile,
+            "attack_config_digest": attack_config_digest(config),
+        }
+        for field_name, expected_value in identity.items():
+            if _str_field(row, field_name) != expected_value:
+                raise ValueError(
+                    f"主方法检测记录攻击身份不一致: {row_index}/{field_name}"
+                )
+        key = (attack_family, attack_name, resource_profile)
+        if key in identities and identities[key] != identity:
+            raise ValueError(f"主方法检测记录攻击身份不唯一: {key}")
+        identities[key] = identity
+    return identities
+
+
+def baseline_accepted_record_keys(
+    validation_report: Mapping[str, Any],
+) -> set[tuple[str, str, str, str, str, str]]:
     """从主表 baseline 受治理导入报告中提取已接受记录键。"""
 
-    keys: set[tuple[str, str, str, str]] = set()
+    keys: set[tuple[str, str, str, str, str, str]] = set()
     for row in validation_report.get("accepted_records", ()):
         keys.add(
             (
                 _str_field(row, "baseline_id"),
+                _str_field(row, "attack_id"),
                 _str_field(row, "attack_family"),
                 _str_field(row, "attack_name"),
                 _str_field(row, "resource_profile"),
+                _str_field(row, "attack_config_digest"),
             )
         )
     return keys
@@ -660,6 +737,7 @@ def build_image_only_slm_wm_result_records(
     rows = read_csv_rows(metrics_path)
     if not rows:
         return []
+    attack_identities = detection_attack_identity_lookup(detection_records_path)
     summary = read_json(summary_path)
     row_lookup = {
         (
@@ -723,6 +801,12 @@ def build_image_only_slm_wm_result_records(
         negative_row = row_lookup.get(key)
         if negative_row is None:
             continue
+        attack_identity = attack_identities.get(key[:3])
+        if attack_identity is None:
+            raise ValueError(
+                "主方法正式指标缺少执行端攻击身份: "
+                f"{key[0]}/{attack_name}/{key[2]}"
+            )
         if "source_to_evaluated_ssim_mean" not in positive_row:
             raise ValueError(
                 f"主方法攻击记录缺少 source-to-attacked SSIM: {key[0]}/{attack_name}/{key[2]}"
@@ -730,11 +814,16 @@ def build_image_only_slm_wm_result_records(
         payload = build_common_result_fields(
             schema=schema,
             method_id="slm_wm_current",
+            attack_id=attack_identity["attack_id"],
             attack_family=key[0],
             attack_name=attack_name,
             resource_profile=key[2],
+            attack_config_digest_value=attack_identity[
+                "attack_config_digest"
+            ],
             baseline_result_source=relative_or_absolute(metrics_path, root_path),
             baseline_result_source_digest=source_digest,
+            method_threshold_digest=_str_field(summary, "frozen_threshold_digest"),
             evidence_paths=evidence_paths,
         )
         payload.update(
@@ -779,7 +868,7 @@ def build_image_only_slm_wm_result_records(
             confidence_level=float(schema["confidence_level"]),
         )
         attacked_negative_count = _int_field(negative_row, "record_count")
-        attacked_ci_low, attacked_ci_high = bounded_confidence_interval(
+        attacked_ci_low, attacked_ci_high = bounded_hoeffding_confidence_interval(
             _float_field(negative_row, "positive_rate"),
             attacked_negative_count,
             float(schema["confidence_level"]),
@@ -837,9 +926,11 @@ def build_baseline_result_records(
             continue
         record_key = (
             method_id,
+            _str_field(row, "attack_id"),
             _str_field(row, "attack_family"),
             _str_field(row, "attack_name"),
             _str_field(row, "resource_profile", "full_main"),
+            _str_field(row, "attack_config_digest"),
         )
         evidence_paths = _list_field(row, "evidence_paths")
         if not evidence_paths and baseline_records_path.is_file():
@@ -847,11 +938,17 @@ def build_baseline_result_records(
         payload = build_common_result_fields(
             schema=schema,
             method_id=method_id,
+            attack_id=_str_field(row, "attack_id"),
             attack_family=_str_field(row, "attack_family"),
             attack_name=_str_field(row, "attack_name"),
             resource_profile=_str_field(row, "resource_profile", "full_main"),
+            attack_config_digest_value=_str_field(
+                row,
+                "attack_config_digest",
+            ),
             baseline_result_source=_str_field(row, "baseline_result_source", relative_or_absolute(baseline_records_path, root_path)),
             baseline_result_source_digest=_str_field(row, "baseline_result_source_digest", source_digest),
+            method_threshold_digest=_str_field(row, "threshold_digest"),
             evidence_paths=evidence_paths,
         )
         payload.update(
@@ -905,9 +1002,11 @@ def build_template_coverage_rows(
     record_keys = {
         (
             _str_field(row, "method_id"),
+            _str_field(row, "attack_id"),
             _str_field(row, "attack_family"),
             _str_field(row, "attack_name"),
             _str_field(row, "resource_profile"),
+            _str_field(row, "attack_config_digest"),
         )
         for row in result_records
     }
@@ -915,16 +1014,20 @@ def build_template_coverage_rows(
     for template in template_rows:
         key = (
             _str_field(template, "method_id"),
+            _str_field(template, "attack_id"),
             _str_field(template, "attack_family"),
             _str_field(template, "attack_name"),
             _str_field(template, "resource_profile"),
+            _str_field(template, "attack_config_digest"),
         )
         rows.append(
             {
                 "method_id": key[0],
-                "attack_family": key[1],
-                "attack_name": key[2],
-                "resource_profile": key[3],
+                "attack_id": key[1],
+                "attack_family": key[2],
+                "attack_name": key[3],
+                "resource_profile": key[4],
+                "attack_config_digest": key[5],
                 "template_covered": key in record_keys,
                 "supports_paper_claim": False,
             }
@@ -932,15 +1035,19 @@ def build_template_coverage_rows(
     return rows
 
 
-def template_record_keys(template_rows: Iterable[Mapping[str, Any]]) -> set[tuple[str, str, str, str]]:
+def template_record_keys(
+    template_rows: Iterable[Mapping[str, Any]],
+) -> set[tuple[str, str, str, str, str, str]]:
     """提取 pilot_paper 共同协议允许进入 claim 比较的模板键。"""
 
     return {
         (
             _str_field(row, "method_id"),
+            _str_field(row, "attack_id"),
             _str_field(row, "attack_family"),
             _str_field(row, "attack_name"),
             _str_field(row, "resource_profile"),
+            _str_field(row, "attack_config_digest"),
         )
         for row in template_rows
     }
@@ -963,9 +1070,11 @@ def filter_records_to_template(
         for record in records
         if (
             _str_field(record, "method_id"),
+            _str_field(record, "attack_id"),
             _str_field(record, "attack_family"),
             _str_field(record, "attack_name"),
             _str_field(record, "resource_profile"),
+            _str_field(record, "attack_config_digest"),
         )
         in allowed_keys
         and bool(record.get("strict_formal_result_ready"))
@@ -979,6 +1088,10 @@ def build_result_summary(
     validation_report: Mapping[str, Any],
     materialization_report: Mapping[str, Any],
     schema: Mapping[str, Any],
+    result_record_set_digest: str,
+    method_threshold_digest_map: Mapping[str, str],
+    closure_input_lock_digest: str,
+    common_code_version: str,
 ) -> dict[str, Any]:
     """汇总 pilot_paper 结果记录物化状态。"""
 
@@ -1001,6 +1114,10 @@ def build_result_summary(
         "missing_template_examples": missing_rows[:20],
         "materialization_report": dict(materialization_report),
         "paper_claim_scale": str(schema.get("paper_claim_scale", "pilot_paper")),
+        "result_record_set_digest": result_record_set_digest,
+        "method_threshold_digest_map": dict(sorted(method_threshold_digest_map.items())),
+        "closure_input_lock_digest": closure_input_lock_digest,
+        "common_code_version": common_code_version,
         "supports_paper_claim": bool(validation_report.get("supports_paper_claim", False)) and not missing_rows,
     }
 
@@ -1057,6 +1174,11 @@ def write_pilot_paper_result_record_outputs(
         return manifest
 
     config = build_paper_fixed_fpr_config(root_path)
+    closure_input_provenance = load_validated_closure_input_lock(
+        root_path,
+        paper_run_name=config.paper_run_name,
+        target_fpr=config.target_fpr,
+    )
     context = build_protocol_context(root_path, config)
     schema = context["schema"]
     template_rows = context["template_rows"]
@@ -1132,9 +1254,11 @@ def write_pilot_paper_result_record_outputs(
     candidate_result_keys = [
         (
             _str_field(record, "method_id"),
+            _str_field(record, "attack_id"),
             _str_field(record, "attack_family"),
             _str_field(record, "attack_name"),
             _str_field(record, "resource_profile"),
+            _str_field(record, "attack_config_digest"),
         )
         for record in candidate_result_records
     ]
@@ -1160,13 +1284,36 @@ def write_pilot_paper_result_record_outputs(
         require_existing_evidence=require_existing_evidence,
     )
     coverage_rows = build_template_coverage_rows(template_rows=template_rows, result_records=result_records)
+    threshold_values_by_method: dict[str, set[str]] = {}
+    for record in result_records:
+        threshold_values_by_method.setdefault(_str_field(record, "method_id"), set()).add(
+            _str_field(record, "method_threshold_digest")
+        )
+    expected_method_ids = set(str(value) for value in schema["method_ids"])
+    if set(threshold_values_by_method) != expected_method_ids or any(
+        len(values) != 1 or len(next(iter(values))) != 64
+        for values in threshold_values_by_method.values()
+    ):
+        raise ValueError("正式结果记录必须为每个方法绑定唯一 SHA-256 阈值摘要")
+    method_threshold_digest_map = {
+        method_id: next(iter(values))
+        for method_id, values in sorted(threshold_values_by_method.items())
+    }
+    result_record_set_digest = build_pilot_paper_result_record_set_digest(result_records)
     summary = build_result_summary(
         records=result_records,
         coverage_rows=coverage_rows,
         validation_report=validation_report,
         materialization_report=materialization_report,
         schema=schema,
+        result_record_set_digest=result_record_set_digest,
+        method_threshold_digest_map=method_threshold_digest_map,
+        closure_input_lock_digest=str(
+            closure_input_provenance["closure_input_lock_digest"]
+        ),
+        common_code_version=str(closure_input_provenance["common_code_version"]),
     )
+    summary["require_existing_evidence"] = bool(require_existing_evidence)
 
     records_path = output_path / "pilot_paper_result_records.jsonl"
     validation_path = output_path / "pilot_paper_result_import_validation_report.json"
@@ -1179,7 +1326,16 @@ def write_pilot_paper_result_record_outputs(
     write_csv(
         coverage_path,
         coverage_rows,
-        ["method_id", "attack_family", "attack_name", "resource_profile", "template_covered", "supports_paper_claim"],
+        [
+            "method_id",
+            "attack_id",
+            "attack_family",
+            "attack_name",
+            "resource_profile",
+            "attack_config_digest",
+            "template_covered",
+            "supports_paper_claim",
+        ],
     )
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
@@ -1189,6 +1345,32 @@ def write_pilot_paper_result_record_outputs(
         if path is not None and path.exists()
     ]
     input_paths.extend(relative_or_absolute(path, root_path) for path in packages)
+    input_paths.extend(
+        relative_or_absolute(closure_input_provenance[field_name], root_path)
+        for field_name in (
+            "closure_input_lock_path",
+            "closure_input_lock_manifest_path",
+        )
+    )
+    flattened_record_evidence_paths = tuple(
+        dict.fromkeys(
+            path_value
+            for record in result_records
+            for path_value in (
+                _str_field(record, "baseline_result_source"),
+                *_list_field(record, "evidence_paths"),
+            )
+            if path_value
+        )
+    )
+    for path_value in flattened_record_evidence_paths:
+        evidence_path = resolve_path(root_path, path_value)
+        if evidence_path is None or not evidence_path.is_file():
+            raise FileNotFoundError(
+                f"正式 result record 证据文件不存在: {path_value}"
+            )
+        input_paths.append(relative_or_absolute(evidence_path, root_path))
+    input_paths = list(dict.fromkeys(input_paths))
     output_paths = tuple(
         relative_or_absolute(path, root_path)
         for path in (records_path, validation_path, coverage_path, summary_path, manifest_path)
@@ -1198,14 +1380,16 @@ def write_pilot_paper_result_record_outputs(
         artifact_type="local_manifest",
         input_paths=tuple(input_paths),
         output_paths=output_paths,
-        config={
-            "result_record_digest": build_stable_digest(result_records),
-            "validation_report_digest": build_stable_digest(validation_report),
-            "template_coverage_digest": build_stable_digest(coverage_rows),
-            "summary_digest": build_stable_digest(summary),
-            "require_existing_evidence": require_existing_evidence,
-            "image_only_runtime_used": True,
-        },
+        config=build_pilot_paper_result_records_manifest_config(
+            result_records=result_records,
+            method_threshold_digest_map=method_threshold_digest_map,
+            closure_input_lock_digest=summary["closure_input_lock_digest"],
+            common_code_version=summary["common_code_version"],
+            validation_report=validation_report,
+            template_coverage_rows=coverage_rows,
+            summary=summary,
+            require_existing_evidence=require_existing_evidence,
+        ),
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_pilot_paper_result_records.py",
         metadata=summary,

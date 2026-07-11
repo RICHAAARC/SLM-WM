@@ -3,7 +3,9 @@
 from experiments.protocol.attacks import (
     AttackConfig,
     attack_config_digest,
+    build_attack_record_digest,
     default_attack_configs,
+    resolve_formal_attack_config,
 )
 from experiments.protocol.calibration import (
     FixedFprCalibrationConfig,
@@ -38,6 +40,7 @@ __all__ = [
     "SAMPLE_ROLES",
     "SPLIT_NAMES",
     "attack_config_digest",
+    "build_attack_record_digest",
     "build_dataset_quality_image_records",
     "build_dataset_quality_metric_rows",
     "build_dataset_quality_summary",
@@ -48,4 +51,5 @@ __all__ = [
     "empirical_threshold_at_fpr",
     "load_prompt_records",
     "operating_point_metrics",
+    "resolve_formal_attack_config",
 ]

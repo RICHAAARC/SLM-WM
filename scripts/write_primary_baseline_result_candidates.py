@@ -22,6 +22,7 @@ from paper_experiments.baselines import (
     build_method_faithful_baseline_candidate_records,
     build_primary_baseline_formal_import_readiness_rows,
     build_primary_baseline_formal_import_readiness_summary,
+    build_primary_baseline_method_threshold_digest_map,
     validate_primary_baseline_formal_import_rows,
 )
 from paper_experiments.baselines.method_faithful_observation_collection import (
@@ -409,12 +410,10 @@ def build_method_candidate_rows(
     sources: Iterable[MethodFaithfulObservationSource],
     root_path: Path,
     target_fpr: float,
-    resource_profile: str,
 ) -> list[dict[str, Any]]:
     """把三个 exact-set observation source 分别聚合为共同协议候选记录。"""
 
     records: list[dict[str, Any]] = []
-    attack_profile_lookup = build_attack_resource_profile_lookup()
     for source in sources:
         baseline_rows = [dict(row) for row in source.rows]
         evidence_paths = (
@@ -440,8 +439,6 @@ def build_method_candidate_rows(
                 paper_run_prompt_protocol_ready=readiness["prompt_protocol_ready"],
                 fixed_fpr_baseline_calibration_ready=readiness["fixed_fpr_ready"],
                 attack_matrix_baseline_detection_ready=readiness["attack_matrix_ready"],
-                resource_profile=resource_profile,
-                resource_profile_by_attack=attack_profile_lookup,
             )
         )
     return records
@@ -455,7 +452,6 @@ def write_primary_baseline_result_candidate_outputs(
     method_faithful_collection_path: str | Path | None = None,
     t2smark_candidate_records_path: str | Path | None = None,
     t2smark_formal_package_path: str | Path | None = None,
-    method_resource_profile: str = "full_main",
 ) -> dict[str, Any]:
     """写出候选记录、候选校验报告、摘要和 manifest。"""
 
@@ -513,7 +509,6 @@ def write_primary_baseline_result_candidate_outputs(
         sources=method_faithful_sources,
         root_path=root_path,
         target_fpr=target_fpr,
-        resource_profile=method_resource_profile,
     )
     normalized_t2smark_rows = normalize_t2smark_candidate_rows(
         rows=t2smark_rows,
@@ -531,6 +526,9 @@ def write_primary_baseline_result_candidate_outputs(
     )
     readiness_rows = build_primary_baseline_formal_import_readiness_rows(candidate_rows, validation_report)
     readiness_summary = build_primary_baseline_formal_import_readiness_summary(readiness_rows)
+    method_threshold_digest_map = build_primary_baseline_method_threshold_digest_map(
+        candidate_rows
+    )
     summary = {
         "construction_unit_name": CONSTRUCTION_UNIT_NAME,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -543,6 +541,7 @@ def write_primary_baseline_result_candidate_outputs(
         "formal_result_ready_count": readiness_summary["formal_result_ready_count"],
         "blocked_primary_baseline_ids": readiness_summary["blocked_primary_baseline_ids"],
         "primary_baseline_formal_ready": readiness_summary["primary_baseline_formal_ready"],
+        "method_threshold_digest_map": method_threshold_digest_map,
         "dominant_blocking_reasons": readiness_summary["dominant_blocking_reasons"],
         "supports_paper_claim": False,
     }
@@ -609,7 +608,7 @@ def write_primary_baseline_result_candidate_outputs(
             "formal_import_readiness_digest": build_stable_digest(readiness_rows),
             "formal_import_readiness_summary_digest": build_stable_digest(readiness_summary),
             "summary_digest": build_stable_digest(summary),
-            "method_resource_profile": method_resource_profile,
+            "method_threshold_digest_map": method_threshold_digest_map,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_primary_baseline_result_candidates.py",
@@ -645,7 +644,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="T2SMark formal 候选 JSONL 路径; 默认读取当前论文运行子目录。",
     )
     parser.add_argument("--t2smark-formal-package-path", default=None, help="可选 T2SMark formal 结果 zip 包。")
-    parser.add_argument("--method-resource-profile", default="full_main", help="方法忠实 adapter 候选记录的资源配置名称。")
     return parser
 
 
@@ -660,7 +658,6 @@ def main() -> None:
         method_faithful_collection_path=args.method_faithful_collection_path,
         t2smark_candidate_records_path=args.t2smark_candidate_records_path,
         t2smark_formal_package_path=args.t2smark_formal_package_path,
-        method_resource_profile=args.method_resource_profile,
     )
     print(stable_json_text(manifest), end="")
 

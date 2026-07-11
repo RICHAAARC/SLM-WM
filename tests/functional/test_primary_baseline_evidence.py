@@ -322,6 +322,11 @@ def test_primary_baseline_evidence_writer_outputs_records_summary_and_manifest(
     assert summary["primary_baseline_formal_ready"] is True
     assert summary["input_baseline_ids"] == [*METHOD_FAITHFUL_BASELINE_IDS, "t2smark"]
     assert summary["t2smark_formal_evidence_digest"]
+    assert len(summary["primary_baseline_evidence_records_digest"]) == 64
+    assert manifest["metadata"]["primary_baseline_evidence_records_digest"] == summary[
+        "primary_baseline_evidence_records_digest"
+    ]
+    assert all(row["formal_evidence_paths"] for row in records)
     assert summary["supports_paper_claim"] is False
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])
 

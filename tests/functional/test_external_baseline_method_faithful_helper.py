@@ -10,6 +10,7 @@ from zipfile import ZipFile
 import pytest
 from PIL import Image
 
+from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
 from external_baseline.primary.sd35_method_faithful_common import (
     apply_formal_image_attack,
     canonical_attack_family,
@@ -59,7 +60,7 @@ def thresholded_row(
 ) -> dict[str, object]:
     """构造带真实阈值判定关系的最小 observation。"""
 
-    return {
+    row: dict[str, object] = {
         "event_id": event_id,
         "baseline_id": baseline_id,
         "prompt_id": "prompt_000001",
@@ -73,6 +74,19 @@ def thresholded_row(
         "threshold_source": "calibration_clean_negative_conformal",
         "detection_decision": score >= threshold,
     }
+    if sample_role in {"attacked_negative", "attacked_positive"}:
+        attack_config = resolve_formal_attack_config(
+            attack_family=attack_family,
+            attack_name=attack_name,
+        )
+        row.update(
+            {
+                "attack_id": attack_config.attack_id,
+                "resource_profile": attack_config.resource_profile,
+                "attack_config_digest": attack_config_digest(attack_config),
+            }
+        )
+    return row
 
 
 def prepare_transfer_inputs(

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
 import csv
 from datetime import datetime, timezone
 import json
@@ -18,12 +17,20 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
-from experiments.protocol.attacks import AttackConfig, attack_config_digest, default_attack_configs
-from experiments.protocol.calibration import binomial_rate_upper_confidence_bound
+from experiments.artifacts.attack_family_metrics import (
+    ATTACK_FAMILY_METRIC_FIELDS,
+    build_attack_family_metrics,
+)
+from experiments.protocol.attacks import (
+    AttackConfig,
+    attack_config_digest,
+    build_attack_record_digest,
+    build_attack_matrix_manifest_config,
+    default_attack_configs,
+)
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.runtime.image_metrics import compute_image_quality_metrics, measured_score_retention
 from experiments.runtime.repository_environment import file_digest
-from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "attack_matrix"
 DEFAULT_OUTPUT_ROOT = Path("outputs/attack_matrix")
@@ -136,20 +143,6 @@ def _ratio(after: Any, before: Any) -> float | None:
     return measured_score_retention(source, evaluated)
 
 
-def _mean(values: Iterable[Any]) -> float | None:
-    """计算有限数值均值。"""
-
-    resolved = [float(value) for value in values if isinstance(value, (int, float)) and math.isfinite(float(value))]
-    return None if not resolved else sum(resolved) / len(resolved)
-
-
-def _rate(records: Iterable[dict[str, Any]], field_name: str) -> float:
-    """计算布尔字段比例。"""
-
-    rows = tuple(records)
-    return 0.0 if not rows else sum(bool(row.get(field_name)) for row in rows) / len(rows)
-
-
 def _verify_image_record(root_path: Path, record: dict[str, Any]) -> tuple[Path, Path]:
     """验证真实攻击记录中的源图像与攻击图像证据链。"""
 
@@ -160,6 +153,8 @@ def _verify_image_record(root_path: Path, record: dict[str, Any]) -> tuple[Path,
         "attack_family",
         "attack_name",
         "resource_profile",
+        "attack_config_digest",
+        "attack_parameters",
         "source_image_path",
         "source_image_digest",
         "attacked_image_path",
@@ -167,7 +162,11 @@ def _verify_image_record(root_path: Path, record: dict[str, Any]) -> tuple[Path,
         "content_score",
         "formal_evidence_positive",
     )
-    missing = [field for field in required_fields if record.get(field) in {None, ""}]
+    missing = [
+        field
+        for field in required_fields
+        if record.get(field) is None or record.get(field) == ""
+    ]
     if missing:
         raise ValueError(f"真实攻击记录缺少字段: {','.join(missing)}")
     if record.get("split") != "test":
@@ -219,6 +218,20 @@ def build_measured_attack_records(
         config = config_by_id.get(attack_id)
         if config is None:
             raise ValueError(f"检测记录包含未登记攻击: {attack_id}")
+        expected_identity = {
+            "attack_id": config.attack_id,
+            "attack_family": config.attack_family,
+            "attack_name": config.attack_name,
+            "resource_profile": config.resource_profile,
+            "attack_config_digest": attack_config_digest(config),
+            "attack_parameters": config.attack_parameters,
+        }
+        actual_identity = {
+            field_name: record.get(field_name)
+            for field_name in expected_identity
+        }
+        if actual_identity != expected_identity:
+            raise ValueError(f"检测记录攻击身份与正式配置不一致: {attack_id}")
         source_record = source_records.get(_record_key(record))
         if source_record is None:
             raise ValueError(f"攻击记录缺少同运行同角色的未攻击检测记录: {attack_id}")
@@ -227,15 +240,7 @@ def build_measured_attack_records(
 
         with Image.open(source_path) as source_image, Image.open(attacked_path) as attacked_image:
             quality = compute_image_quality_metrics(source_image, attacked_image)
-        record_digest = build_stable_digest(
-            {
-                "detector_digest": record.get("detector_digest"),
-                "attack_config_digest": attack_config_digest(config),
-                "source_image_digest": record["source_image_digest"],
-                "attacked_image_digest": record["attacked_image_digest"],
-                "frozen_threshold_digest": record.get("frozen_threshold_digest"),
-            }
-        )
+        record_digest = build_attack_record_digest(record)
         measured.append(
             {
                 **record,
@@ -269,64 +274,6 @@ def build_measured_attack_records(
     return tuple(measured)
 
 
-def _group_records(records: Iterable[dict[str, Any]]) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
-    """按攻击族、名称与资源档位分组。"""
-
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
-    for record in records:
-        grouped[(str(record["attack_family"]), str(record["attack_name"]), str(record["resource_profile"]))].append(record)
-    return grouped
-
-
-def build_family_metrics(
-    records: Iterable[dict[str, Any]],
-    target_fpr: float,
-    supports_paper_claim: bool,
-) -> list[dict[str, Any]]:
-    """从真实攻击图像检测记录构造攻击级 TPR、FPR、质量和保持率。"""
-
-    rows: list[dict[str, Any]] = []
-    for (family, name, profile), group in sorted(_group_records(records).items()):
-        positives = [row for row in group if row["sample_role"] == "positive_source"]
-        negatives = [row for row in group if row["sample_role"] == "clean_negative"]
-        true_positive_count = sum(bool(row["formal_evidence_positive"]) for row in positives)
-        false_positive_count = sum(bool(row["formal_evidence_positive"]) for row in negatives)
-        false_positive_upper = binomial_rate_upper_confidence_bound(false_positive_count, len(negatives), 0.95)
-        rows.append(
-            {
-                "attack_family": family,
-                "attack_name": name,
-                "resource_profile": profile,
-                "metric_status": FORMAL_METRIC_STATUS,
-                "attack_record_count": len(group),
-                "supported_record_count": len(group) if supports_paper_claim else 0,
-                "unsupported_record_count": 0 if supports_paper_claim else len(group),
-                "positive_count": len(positives),
-                "negative_count": len(negatives),
-                "true_positive_rate": true_positive_count / len(positives),
-                "false_positive_rate": false_positive_count / len(negatives),
-                "clean_false_positive_rate": false_positive_count / len(negatives),
-                "attacked_false_positive_rate": false_positive_count / len(negatives),
-                "false_positive_rate_upper_95": false_positive_upper,
-                "target_fpr": target_fpr,
-                "fixed_fpr_upper_bound_ready": false_positive_upper <= target_fpr,
-                "quality_score_mean": _mean(row.get("quality_score") for row in positives),
-                "quality_ssim_mean": _mean(row.get("quality_ssim") for row in positives),
-                "quality_psnr_mean": _mean(row.get("quality_psnr") for row in positives),
-                "attacked_positive_source_to_attacked_ssim_mean": _mean(
-                    row.get("quality_ssim") for row in positives
-                ),
-                "score_retention_mean": _mean(row.get("score_retention") for row in positives),
-                "lf_score_retention_mean": _mean(row.get("lf_score_retention") for row in positives),
-                "tail_score_retention_mean": _mean(row.get("tail_score_retention") for row in positives),
-                "geometry_reliable_rate": _rate(group, "geometry_reliable"),
-                "rescue_rate": _rate(group, "formal_rescue_applied"),
-                "supports_paper_claim": supports_paper_claim,
-            }
-        )
-    return rows
-
-
 def build_strength_rows(family_rows: Iterable[dict[str, Any]], config_by_key: dict[tuple[str, str, str], AttackConfig]) -> list[dict[str, Any]]:
     """为真实攻击聚合行补充协议强度。"""
 
@@ -341,10 +288,12 @@ def build_retention_rows(strength_rows: Iterable[dict[str, Any]]) -> list[dict[s
     """提取同一检测器内部的分数稳定性诊断表。"""
 
     fields = (
+        "attack_id",
         "attack_family",
         "attack_name",
         "attack_strength",
         "resource_profile",
+        "attack_config_digest",
         "metric_status",
         "attack_record_count",
         "supported_record_count",
@@ -367,10 +316,12 @@ def build_rescue_rows(strength_rows: Iterable[dict[str, Any]]) -> list[dict[str,
     """提取真实注意力几何救回统计表。"""
 
     fields = (
+        "attack_id",
         "attack_family",
         "attack_name",
         "attack_strength",
         "resource_profile",
+        "attack_config_digest",
         "metric_status",
         "attack_record_count",
         "supported_record_count",
@@ -510,7 +461,13 @@ def write_attack_matrix_outputs(
     )
 
     target_fpr = float(frozen_protocol["target_fpr"])
-    family_rows = build_family_metrics(attack_records, target_fpr, supports_paper_claim)
+    family_rows = list(
+        build_attack_family_metrics(
+            attack_records,
+            target_fpr,
+            supports_paper_claim,
+        )
+    )
     config_by_key = {
         (config.attack_family, config.attack_name, config.resource_profile): config
         for config in attack_configs
@@ -586,11 +543,14 @@ def write_attack_matrix_outputs(
     }
     attack_manifest_path.write_text(stable_json_text(attack_manifest), encoding="utf-8")
 
-    family_fields = tuple(family_rows[0])
     strength_fields = tuple(strength_rows[0])
     retention_fields = tuple(retention_rows[0])
     rescue_fields = tuple(rescue_rows[0])
-    write_csv(family_metrics_path, family_rows, family_fields)
+    write_csv(
+        family_metrics_path,
+        family_rows,
+        ATTACK_FAMILY_METRIC_FIELDS,
+    )
     write_csv(strength_curve_path, strength_rows, strength_fields)
     write_csv(retention_path, retention_rows, retention_fields)
     write_csv(rescue_path, rescue_rows, rescue_fields)
@@ -617,12 +577,12 @@ def write_attack_matrix_outputs(
             for path in (detection_records_path, runtime_summary_path, frozen_protocol_path, runtime_manifest_path)
         ),
         output_paths=output_paths,
-        config={
-            "paper_run_name": resolved_run_name,
-            "evaluation_boundary": evaluation_boundary,
-            "attack_config_digest": build_stable_digest([config.to_dict() for config in config_by_key.values()]),
-            "attack_record_digest": build_stable_digest(attack_records),
-        },
+        config=build_attack_matrix_manifest_config(
+            paper_run_name=resolved_run_name,
+            evaluation_boundary=evaluation_boundary,
+            attack_configs=config_by_key.values(),
+            attack_records=attack_records,
+        ),
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_attack_matrix_outputs.py",
         metadata={

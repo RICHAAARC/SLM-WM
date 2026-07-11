@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable
 
-from experiments.protocol.attacks import default_attack_configs
+from experiments.protocol.attacks import attack_config_digest, default_attack_configs
 from experiments.protocol.fixed_fpr_observation_audit import (
     audit_fixed_fpr_observation_threshold,
     conformal_threshold_from_clean_negative_scores,
@@ -163,6 +163,9 @@ def formal_observation_rows(
                         "attack_family": attack.attack_family,
                         "attack_name": attack.attack_name,
                         "attack_condition": attack.attack_name,
+                        "attack_id": attack.attack_id,
+                        "resource_profile": attack.resource_profile,
+                        "attack_config_digest": attack_config_digest(attack),
                         "sample_role": sample_role,
                         "score": score,
                         "threshold": threshold,

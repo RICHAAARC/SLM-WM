@@ -8,6 +8,11 @@ import math
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+from experiments.protocol.attacks import (
+    AttackConfig,
+    attack_config_digest,
+    resolve_formal_attack_config,
+)
 from main.core.digest import build_stable_digest
 
 METHOD_FAITHFUL_ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
@@ -226,6 +231,72 @@ def canonical_attack_name(attack_family: str) -> str:
     return FORMAL_IMAGE_ATTACK_SPECS[normalize_attack_request(attack_family)][1]
 
 
+def formal_image_attack_config(attack_family: str) -> AttackConfig:
+    """返回当前请求对应的唯一正式 AttackConfig."""
+
+    attack_name = canonical_attack_name(attack_family)
+    attack_matrix_family = canonical_attack_family(attack_family)
+    return resolve_formal_attack_config(
+        attack_family=attack_matrix_family,
+        attack_name=attack_name,
+    )
+
+
+def formal_image_attack_identity(attack_family: str) -> dict[str, str]:
+    """构造执行端必须写入 observation 的正式攻击身份."""
+
+    config = formal_image_attack_config(attack_family)
+    return {
+        "attack_id": config.attack_id,
+        "attack_family": config.attack_family,
+        "attack_name": config.attack_name,
+        "resource_profile": config.resource_profile,
+        "attack_config_digest": attack_config_digest(config),
+    }
+
+
+def validated_observation_attack_identity(
+    *,
+    sample_role: str,
+    attack_family: str,
+    attack_name: str,
+    attack_id: str,
+    resource_profile: str,
+    attack_config_digest_value: str,
+) -> dict[str, str]:
+    """校验并返回单条 observation 的执行端攻击身份字段."""
+
+    if sample_role not in {"attacked_negative", "attacked_positive"}:
+        if any((attack_id, resource_profile, attack_config_digest_value)):
+            raise ValueError("非攻击 observation 不得声明正式攻击身份")
+        return {
+            "attack_id": "",
+            "resource_profile": "",
+            "attack_config_digest": "",
+        }
+    config = resolve_formal_attack_config(
+        attack_family=attack_family,
+        attack_name=attack_name,
+        resource_profile=resource_profile,
+    )
+    expected = {
+        "attack_id": config.attack_id,
+        "resource_profile": config.resource_profile,
+        "attack_config_digest": attack_config_digest(config),
+    }
+    actual = {
+        "attack_id": str(attack_id),
+        "resource_profile": str(resource_profile),
+        "attack_config_digest": str(attack_config_digest_value),
+    }
+    if actual != expected:
+        raise ValueError(
+            "observation 攻击身份与正式 AttackConfig 不一致: "
+            f"{attack_family}/{attack_name}"
+        )
+    return expected
+
+
 def supported_formal_image_attack_names() -> tuple[str, ...]:
     """返回当前 method-faithful adapter 可生成的正式图像级攻击名称集合。"""
 
@@ -265,7 +336,7 @@ def is_regeneration_attack(attack_family: str) -> bool:
 def formal_image_attack_resource_profile(attack_family: str) -> str:
     """返回攻击矩阵中该攻击默认对应的资源档位。"""
 
-    return "full_extra" if is_regeneration_attack(attack_family) else "full_main"
+    return formal_image_attack_config(attack_family).resource_profile
 
 
 class InversionStableDiffusion3PipelineMixin:
@@ -422,27 +493,21 @@ def apply_standard_geometric_image_attack(
 ) -> tuple[Any, str, dict[str, Any]]:
     """复用项目共同攻击配置执行完全相同的标准图像攻击。"""
 
-    from experiments.protocol.attacks import attack_config_digest, default_attack_configs
     from experiments.runtime.image_attacks import apply_standard_image_attack
 
     attack_name = normalize_attack_request(attack_family)
     if attack_name in DIFFUSION_FORMAL_IMAGE_ATTACK_NAMES:
         raise ValueError(f"regeneration_attack_requires_pipeline:{attack_family}")
-    candidates = tuple(
-        config
-        for config in default_attack_configs()
-        if config.enabled
-        and not config.requires_gpu
-        and config.resource_profile == "full_main"
-        and config.attack_name == attack_name
-    )
-    if len(candidates) != 1:
-        raise RuntimeError(f"共同攻击协议没有唯一配置: {attack_name}")
-    config = candidates[0]
+    config = formal_image_attack_config(attack_name)
+    if config.requires_gpu:
+        raise RuntimeError(f"常规攻击不得使用 GPU 配置: {attack_name}")
     attacked = apply_standard_image_attack(image, config, seed)
     implementation = f"shared_attack_protocol:{attack_config_digest(config)}"
     trace = {
         "attack_name": config.attack_name,
+        "attack_id": config.attack_id,
+        "resource_profile": config.resource_profile,
+        "attack_config_digest": attack_config_digest(config),
         "attack_implementation": implementation,
         "attack_seed_random": int(seed),
         "effective_parameters": dict(config.attack_parameters),
@@ -502,10 +567,11 @@ def apply_regeneration_image_attack(
         prompt_text=prompt,
         detection_score=detection_score,
     )
+    identity = formal_image_attack_identity(family)
     return (
         execution.image.convert("RGB"),
         spec.attack_implementation,
-        execution.to_record(),
+        {**execution.to_record(), **identity},
     )
 
 

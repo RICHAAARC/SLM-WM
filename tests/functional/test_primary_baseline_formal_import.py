@@ -13,11 +13,13 @@ from experiments.protocol.fixed_fpr_observation_audit import (
     FORMAL_THRESHOLD_SOURCE,
     conformal_threshold_from_clean_negative_scores,
 )
+from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
 from main.core.digest import build_stable_digest
 from paper_experiments.baselines import (
     build_primary_baseline_formal_evidence_collection_rows,
     build_primary_baseline_formal_evidence_collection_summary,
     build_primary_baseline_formal_import_schema,
+    build_primary_baseline_method_threshold_digest_map,
     build_primary_baseline_formal_template_coverage_rows,
     build_primary_baseline_formal_template_coverage_summary,
     build_t2smark_formal_candidate_records,
@@ -32,6 +34,27 @@ PAPER_RUN_PARAMETERS = {
     "pilot_paper": {"calibration": 330, "test": 340, "target_fpr": 0.01},
     "full_paper": {"calibration": 3300, "test": 3400, "target_fpr": 0.001},
 }
+
+
+def formal_attack_descriptor(
+    attack_family: str,
+    attack_name: str,
+    resource_profile: str | None = None,
+) -> dict[str, str]:
+    """从唯一攻击注册表构造测试模板使用的完整正式身份."""
+
+    config = resolve_formal_attack_config(
+        attack_family=attack_family,
+        attack_name=attack_name,
+        resource_profile=resource_profile,
+    )
+    return {
+        "attack_id": config.attack_id,
+        "attack_family": config.attack_family,
+        "attack_name": config.attack_name,
+        "resource_profile": config.resource_profile,
+        "attack_config_digest": attack_config_digest(config),
+    }
 
 
 def build_formal_tree_ring_observations(
@@ -74,6 +97,18 @@ def build_formal_tree_ring_observations(
         if quality_score is not None:
             row["quality_score"] = quality_score
             row["score_retention"] = quality_score
+        if sample_role in {"attacked_negative", "attacked_positive"}:
+            attack_config = resolve_formal_attack_config(
+                attack_family=attack_family,
+                attack_name=attack_condition,
+            )
+            row.update(
+                {
+                    "attack_id": attack_config.attack_id,
+                    "resource_profile": attack_config.resource_profile,
+                    "attack_config_digest": attack_config_digest(attack_config),
+                }
+            )
         return row
 
     rows = [
@@ -362,12 +397,30 @@ def test_t2smark_candidate_records_remain_rejected_until_attack_and_threshold_re
     evidence_path = tmp_path / "outputs" / "t2smark_formal_reproduction" / "results.json"
     evidence_path.parent.mkdir(parents=True)
     evidence_path.write_text('{"0":{"robustness":{"norm1_no_w":0.1,"norm1_w":0.9}}}\n', encoding="utf-8")
+    jpeg_config = resolve_formal_attack_config(
+        attack_family="standard_distortion",
+        attack_name="jpeg_compression",
+    )
+    regeneration_config = resolve_formal_attack_config(
+        attack_family="regeneration_attack",
+        attack_name="img2img_regeneration",
+    )
+    jpeg_identity = {
+        "attack_id": jpeg_config.attack_id,
+        "resource_profile": jpeg_config.resource_profile,
+        "attack_config_digest": attack_config_digest(jpeg_config),
+    }
+    regeneration_identity = {
+        "attack_id": regeneration_config.attack_id,
+        "resource_profile": regeneration_config.resource_profile,
+        "attack_config_digest": attack_config_digest(regeneration_config),
+    }
     observations = [
         {"baseline_id": "t2smark", "split": "test", "attack_family": "clean", "attack_condition": "clean_none", "sample_role": "clean_negative", "detection_decision": False},
-        {"baseline_id": "t2smark", "split": "test", "attack_family": "standard_distortion", "attack_condition": "jpeg_compression", "sample_role": "attacked_positive", "detection_decision": True, "quality_score": 1.0, "score_retention": 1.0},
-        {"baseline_id": "t2smark", "split": "test", "attack_family": "standard_distortion", "attack_condition": "jpeg_compression", "sample_role": "attacked_negative", "detection_decision": False, "quality_score": 1.0, "score_retention": 1.0},
-        {"baseline_id": "t2smark", "split": "test", "attack_family": "regeneration_attack", "attack_condition": "img2img_regeneration", "sample_role": "attacked_positive", "detection_decision": True, "quality_score": 0.9, "score_retention": 0.8},
-        {"baseline_id": "t2smark", "split": "test", "attack_family": "regeneration_attack", "attack_condition": "img2img_regeneration", "sample_role": "attacked_negative", "detection_decision": False, "quality_score": 0.9, "score_retention": 0.8},
+        {"baseline_id": "t2smark", "split": "test", "attack_family": "standard_distortion", "attack_condition": "jpeg_compression", "sample_role": "attacked_positive", "detection_decision": True, "quality_score": 1.0, "score_retention": 1.0, **jpeg_identity},
+        {"baseline_id": "t2smark", "split": "test", "attack_family": "standard_distortion", "attack_condition": "jpeg_compression", "sample_role": "attacked_negative", "detection_decision": False, "quality_score": 1.0, "score_retention": 1.0, **jpeg_identity},
+        {"baseline_id": "t2smark", "split": "test", "attack_family": "regeneration_attack", "attack_condition": "img2img_regeneration", "sample_role": "attacked_positive", "detection_decision": True, "quality_score": 0.9, "score_retention": 0.8, **regeneration_identity},
+        {"baseline_id": "t2smark", "split": "test", "attack_family": "regeneration_attack", "attack_condition": "img2img_regeneration", "sample_role": "attacked_negative", "detection_decision": False, "quality_score": 0.9, "score_retention": 0.8, **regeneration_identity},
     ]
 
     records = build_t2smark_formal_candidate_records(
@@ -418,7 +471,40 @@ def test_tree_ring_method_faithful_candidate_records_are_schema_compatible(tmp_p
     assert records[0]["baseline_id"] == "tree_ring"
     assert records[0]["adapter_boundary"] == "method_faithful_sd35_adapter_reproduction"
     assert records[0]["result_source_type"] == "governed_import"
+    assert records[0]["attack_record_count"] == 2 * PAPER_RUN_PARAMETERS["pilot_paper"]["test"]
+    assert records[0]["supported_record_count"] == PAPER_RUN_PARAMETERS["pilot_paper"]["test"]
     assert report["accepted_formal_import_count"] == 1
+
+
+@pytest.mark.quick
+def test_candidate_builder_rejects_post_labeled_attack_identity(
+    tmp_path: Path,
+) -> None:
+    """候选聚合器不得按攻击名称为缺失身份的 observation 后贴标签."""
+
+    observations = build_formal_tree_ring_observations()
+    attacked_positive = next(
+        row for row in observations if row["sample_role"] == "attacked_positive"
+    )
+    del attacked_positive["attack_id"]
+    evidence_path = tmp_path / "outputs" / "tree_ring" / "observations.json"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text(json.dumps(observations), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="AttackConfig"):
+        build_tree_ring_method_faithful_candidate_records(
+            observation_rows=observations,
+            target_fpr=0.01,
+            baseline_result_source="outputs/tree_ring/observations.json",
+            baseline_result_source_digest=hashlib.sha256(
+                evidence_path.read_bytes()
+            ).hexdigest(),
+            evidence_paths=["outputs/tree_ring/observations.json"],
+            prompt_protocol_digest="prompt_digest",
+            paper_run_prompt_protocol_ready=True,
+            fixed_fpr_baseline_calibration_ready=True,
+            attack_matrix_baseline_detection_ready=True,
+        )
 
 
 @pytest.mark.quick
@@ -428,17 +514,21 @@ def test_formal_template_coverage_requires_matching_formal_attack_records(tmp_pa
     accepted_row, _ = write_formal_tree_ring_row(tmp_path)
     missing_template = {
         "baseline_id": "tree_ring",
-        "attack_family": "standard_distortion",
-        "attack_name": "gaussian_noise",
-        "resource_profile": "full_main",
+        **formal_attack_descriptor(
+            "standard_distortion",
+            "gaussian_noise",
+            "full_main",
+        ),
         "comparable_operating_point": "fixed_fpr_0.01",
     }
     template_rows = [
         {
             "baseline_id": "tree_ring",
-            "attack_family": "standard_distortion",
-            "attack_name": "jpeg_compression",
-            "resource_profile": "full_main",
+            **formal_attack_descriptor(
+                "standard_distortion",
+                "jpeg_compression",
+                "full_main",
+            ),
             "comparable_operating_point": "fixed_fpr_0.01",
         },
         missing_template,
@@ -457,20 +547,58 @@ def test_formal_template_coverage_requires_matching_formal_attack_records(tmp_pa
 
 
 @pytest.mark.quick
+def test_formal_template_coverage_rejects_forged_attack_identity() -> None:
+    """同名攻击的 attack_id 或配置摘要漂移时不得视为模板已覆盖."""
+
+    template = {
+        "baseline_id": "tree_ring",
+        **formal_attack_descriptor(
+            "standard_distortion",
+            "jpeg_compression",
+            "full_main",
+        ),
+        "comparable_operating_point": "fixed_fpr_0.01",
+    }
+    forged_record = {
+        **template,
+        "attack_config_digest": "f" * 64,
+    }
+
+    coverage_rows = build_primary_baseline_formal_template_coverage_rows(
+        [template],
+        [forged_record],
+        {"accepted_records": [forged_record]},
+    )
+    tree_row = next(
+        row for row in coverage_rows if row["baseline_id"] == "tree_ring"
+    )
+
+    assert tree_row["accepted_template_match_count"] == 0
+    assert tree_row["unexpected_accepted_record_count"] == 1
+    assert tree_row["formal_template_coverage_ready"] is False
+
+
+@pytest.mark.quick
 def test_formal_template_coverage_rejects_unexpected_and_duplicate_accepted_records() -> None:
     """正式模板覆盖必须与当前攻击模板严格相等, 不得接受额外或重复记录。"""
 
     template = {
         "baseline_id": "tree_ring",
-        "attack_family": "standard_distortion",
-        "attack_name": "jpeg_compression",
-        "resource_profile": "full_main",
+        **formal_attack_descriptor(
+            "standard_distortion",
+            "jpeg_compression",
+            "full_main",
+        ),
         "comparable_operating_point": "fixed_fpr_0.01",
     }
     unexpected = {
-        **template,
-        "attack_family": "unregistered_attack",
-        "attack_name": "unregistered_attack",
+        "baseline_id": "tree_ring",
+        **formal_attack_descriptor(
+            "standard_distortion",
+            "gaussian_noise",
+            "full_main",
+        ),
+        "comparable_operating_point": "fixed_fpr_0.01",
     }
     accepted_records = [template, dict(template), unexpected]
     report = {"accepted_records": accepted_records}
@@ -500,9 +628,11 @@ def test_formal_template_coverage_separates_candidate_and_accepted_matches(tmp_p
     template_rows = [
         {
             "baseline_id": "tree_ring",
-            "attack_family": "standard_distortion",
-            "attack_name": "jpeg_compression",
-            "resource_profile": "full_main",
+            **formal_attack_descriptor(
+                "standard_distortion",
+                "jpeg_compression",
+                "full_main",
+            ),
             "comparable_operating_point": "fixed_fpr_0.01",
         }
     ]
@@ -526,9 +656,11 @@ def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path)
     accepted_row, _ = write_formal_tree_ring_row(tmp_path)
     missing_template = {
         "baseline_id": "tree_ring",
-        "attack_family": "standard_distortion",
-        "attack_name": "gaussian_noise",
-        "resource_profile": "full_main",
+        **formal_attack_descriptor(
+            "standard_distortion",
+            "gaussian_noise",
+            "full_main",
+        ),
         "comparable_operating_point": "fixed_fpr_0.01",
         "required_metric_fields": ["true_positive_rate"],
         "required_source_fields": ["baseline_result_source"],
@@ -536,9 +668,11 @@ def test_formal_evidence_collection_plan_marks_missing_templates(tmp_path: Path)
     template_rows = [
         {
             "baseline_id": "tree_ring",
-            "attack_family": "standard_distortion",
-            "attack_name": "jpeg_compression",
-            "resource_profile": "full_main",
+            **formal_attack_descriptor(
+                "standard_distortion",
+                "jpeg_compression",
+                "full_main",
+            ),
             "comparable_operating_point": "fixed_fpr_0.01",
             "required_metric_fields": ["true_positive_rate"],
             "required_source_fields": ["baseline_result_source"],
@@ -601,15 +735,30 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
         encoding="utf-8",
     )
     with attack_metrics_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["attack_family", "attack_name", "resource_profile"])
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "attack_id",
+                "attack_family",
+                "attack_name",
+                "resource_profile",
+                "attack_config_digest",
+            ],
+        )
         writer.writeheader()
-        writer.writerow({"attack_family": "standard_distortion", "attack_name": "jpeg_compression", "resource_profile": "full_main"})
         writer.writerow(
-            {
-                "attack_family": "regeneration_attack",
-                "attack_name": "img2img_regeneration",
-                "resource_profile": "full_extra",
-            }
+            formal_attack_descriptor(
+                "standard_distortion",
+                "jpeg_compression",
+                "full_main",
+            )
+        )
+        writer.writerow(
+            formal_attack_descriptor(
+                "regeneration_attack",
+                "img2img_regeneration",
+                "full_extra",
+            )
         )
     candidate_records_path = tmp_path / "outputs" / "external_baseline_results" / "baseline_result_records.jsonl"
     candidate_records_path.parent.mkdir(parents=True)
@@ -674,5 +823,31 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
     assert collection_summary["formal_evidence_collection_task_count"] == 8
     assert collection_summary["missing_formal_evidence_collection_task_count"] == 8
     assert summary["primary_baseline_formal_ready"] is False
+    assert summary["method_threshold_digest_map"] == {}
+    assert summary["method_threshold_digest_map_ready"] is False
     assert all(str(path).startswith("outputs/") for path in manifest["output_paths"])
 
+
+@pytest.mark.quick
+def test_formal_import_threshold_digest_map_requires_exact_unique_primary_set() -> None:
+    """四个主表 baseline 必须逐方法绑定唯一阈值摘要."""
+
+    rows = [
+        {"baseline_id": baseline_id, "threshold_digest": f"{index + 1:x}" * 64}
+        for index, baseline_id in enumerate(
+            ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+        )
+    ]
+
+    digest_map = build_primary_baseline_method_threshold_digest_map(rows)
+
+    assert set(digest_map) == {
+        "tree_ring",
+        "gaussian_shading",
+        "shallow_diffuse",
+        "t2smark",
+    }
+    with pytest.raises(ValueError, match="多个阈值摘要"):
+        build_primary_baseline_method_threshold_digest_map(
+            [*rows, {"baseline_id": "tree_ring", "threshold_digest": "f" * 64}]
+        )

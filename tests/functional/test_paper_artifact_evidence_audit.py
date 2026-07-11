@@ -297,6 +297,7 @@ def test_paper_artifact_evidence_outputs_are_rebuildable_and_claim_safe(tmp_path
         "artifact_builder_readiness_report.json",
         "evidence_audit_dry_run.json",
         "submission_blocker_report.json",
+        "artifact_data_validation_report.json",
         "manifest.local.json",
     }
 
@@ -309,6 +310,9 @@ def test_paper_artifact_evidence_outputs_are_rebuildable_and_claim_safe(tmp_path
     gap_rows = list(csv.DictReader((output_dir / "evidence_gap_list.csv").open(encoding="utf-8")))
     blocker_report = json.loads((output_dir / "submission_blocker_report.json").read_text(encoding="utf-8"))
     dry_run_report = json.loads((output_dir / "evidence_audit_dry_run.json").read_text(encoding="utf-8"))
+    data_validation_report = json.loads(
+        (output_dir / "artifact_data_validation_report.json").read_text(encoding="utf-8")
+    )
 
     assert len(claim_rows) >= 7
     assert any(row["claim_id"] == "claim_baseline_superiority" and row["claim_decision"] == "unsupported" for row in claim_rows)
@@ -317,3 +321,24 @@ def test_paper_artifact_evidence_outputs_are_rebuildable_and_claim_safe(tmp_path
     assert blocker_report["submission_ready"] is False
     assert blocker_report["supports_paper_claim"] is False
     assert dry_run_report["dry_run_decision"] == "fail"
+    assert data_validation_report["artifact_data_validation_ready"] is False
+    assert {
+        "raw_image_only_detection_records_ready",
+        "score_distribution_table_ready",
+        "roc_curve_points_ready",
+        "det_curve_points_ready",
+    }.issubset(data_validation_report["blocked_artifact_data_ids"])
+    assert len(data_validation_report["source_paths"]) == 11
+    raw_detection_path = (
+        "outputs/image_only_dataset_runtime/pilot_paper/"
+        "image_only_detection_records.jsonl"
+    )
+    assert data_validation_report["source_paths"][
+        "raw_image_only_detection_records_ready"
+    ] == raw_detection_path
+    assert manifest["metadata"]["raw_image_only_detection_records_ready"] is False
+    assert manifest["metadata"]["raw_image_only_detection_records_sha256"] == ""
+    assert raw_detection_path in manifest["input_paths"]
+    assert set(data_validation_report["source_paths"].values()).issubset(
+        set(manifest["input_paths"])
+    )

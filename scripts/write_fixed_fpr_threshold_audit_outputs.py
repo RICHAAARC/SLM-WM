@@ -21,8 +21,10 @@ from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     audit_baseline_fixed_fpr,
     audit_main_method_fixed_fpr,
     build_fixed_fpr_threshold_audit_report,
+    build_fixed_fpr_threshold_manifest_config,
 )
 from paper_experiments.baselines.method_faithful_observation_collection import (
+    file_sha256,
     load_method_faithful_observation_collection,
 )
 
@@ -111,6 +113,7 @@ def _write_rows_csv(path: Path, rows: Iterable[dict[str, Any]]) -> None:
         "test_clean_negative_count",
         "calibrated_detection_threshold",
         "threshold_digest",
+        "observation_source_sha256",
         "protocol_target_ready",
         "protocol_value_ready",
         "detection_decision_ready",
@@ -143,6 +146,7 @@ def write_fixed_fpr_threshold_audit_outputs(
         audit_main_method_fixed_fpr(
             _read_jsonl(main_observation_path),
             _read_json(main_protocol_path),
+            observation_source_sha256=file_sha256(main_observation_path),
             target_fpr=paper_run.target_fpr,
             expected_calibration_negative_count=split_counts["calibration"],
             expected_test_negative_count=split_counts["test"],
@@ -166,6 +170,7 @@ def write_fixed_fpr_threshold_audit_outputs(
             audit_baseline_fixed_fpr(
                 source.baseline_id,
                 source.rows,
+                observation_source_sha256=file_sha256(source.observations_path),
                 target_fpr=paper_run.target_fpr,
                 expected_calibration_negative_count=split_counts["calibration"],
                 expected_test_negative_count=split_counts["test"],
@@ -191,6 +196,7 @@ def write_fixed_fpr_threshold_audit_outputs(
         audit_baseline_fixed_fpr(
             "t2smark",
             _read_json_array(t2_observation_path),
+            observation_source_sha256=file_sha256(t2_observation_path),
             target_fpr=paper_run.target_fpr,
             expected_calibration_negative_count=split_counts["calibration"],
             expected_test_negative_count=split_counts["test"],
@@ -218,6 +224,7 @@ def write_fixed_fpr_threshold_audit_outputs(
     manifest_path = resolved_output_dir / "manifest.local.json"
     _write_rows_csv(rows_path, rows)
     _write_json(report_path, report)
+    manifest_config = build_fixed_fpr_threshold_manifest_config(report)
     manifest = build_artifact_manifest(
         artifact_id="fixed_fpr_threshold_audit_manifest",
         artifact_type="local_manifest",
@@ -243,7 +250,7 @@ def write_fixed_fpr_threshold_audit_outputs(
             report_path.relative_to(root_path).as_posix(),
             manifest_path.relative_to(root_path).as_posix(),
         ),
-        config={"paper_run": paper_run.to_dict()},
+        config=manifest_config,
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_fixed_fpr_threshold_audit_outputs.py --require-pass",
         metadata=report,

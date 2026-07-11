@@ -473,6 +473,23 @@ def write_primary_baseline_evidence_outputs(
         resolved_collection_root,
     )
     command_results.append(t2smark_source.command_result)
+    formal_evidence_paths_by_baseline = {
+        source.baseline_id: [
+            relative_or_absolute(path, root_path)
+            for path in (
+                source.observations_path,
+                source.transfer_manifest_path,
+                source.prompt_plan_path,
+                source.adapter_manifest_path,
+                source.execution_manifest_path,
+                command_result_paths[index],
+            )
+        ]
+        for index, source in enumerate(sources)
+    }
+    formal_evidence_paths_by_baseline["t2smark"] = [
+        relative_or_absolute(path, root_path) for path in t2smark_source.evidence_paths
+    ]
     readiness_by_baseline: dict[str, dict[str, bool]] = {}
     for source in sources:
         prompt_rows = read_json_array(source.prompt_plan_path, f"{source.baseline_id} prompt plan")
@@ -496,6 +513,7 @@ def write_primary_baseline_evidence_outputs(
         command_results=command_results,
         observation_rows=observation_rows,
         protocol_readiness_by_baseline=readiness_by_baseline,
+        formal_evidence_paths_by_baseline=formal_evidence_paths_by_baseline,
     )
     summary = build_primary_baseline_evidence_summary(records)
     summary.update(
@@ -543,7 +561,10 @@ def write_primary_baseline_evidence_outputs(
         input_paths=tuple(input_paths),
         output_paths=output_paths,
         config={
-            "records_digest": build_stable_digest(records),
+            "records_digest": summary["primary_baseline_evidence_records_digest"],
+            "primary_baseline_evidence_records_digest": summary[
+                "primary_baseline_evidence_records_digest"
+            ],
             "summary_digest": build_stable_digest(summary),
         },
         code_version=resolve_code_version(root_path),

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from experiments.runtime.image_metrics import measured_image_ssim, measured_score_retention
+from experiments.protocol.attacks import attack_config_digest
 from main.core.digest import build_stable_digest
 
 from external_baseline.primary.sd35_method_faithful_common import (
@@ -28,6 +29,7 @@ from external_baseline.primary.sd35_method_faithful_common import (
     derive_threshold,
     emit_adapter_progress,
     file_digest,
+    formal_image_attack_config,
     load_prompt_rows,
     load_sd3_pipeline,
     observation_digest,
@@ -37,6 +39,7 @@ from external_baseline.primary.sd35_method_faithful_common import (
     score_image_latents,
     select_prompt_rows,
     split_name,
+    validated_observation_attack_identity,
     write_json,
 )
 
@@ -146,10 +149,21 @@ def build_observation(
     model_id: str,
     quality_score: float,
     score_retention: float,
+    attack_id: str = "",
+    resource_profile: str = "",
+    attack_config_digest_value: str = "",
 ) -> dict[str, Any]:
     """构造统一 baseline observation。"""
 
     detection_decision = bool(float(score) >= float(threshold))
+    attack_identity = validated_observation_attack_identity(
+        sample_role=sample_role,
+        attack_family=attack_family,
+        attack_name=attack_condition,
+        attack_id=attack_id,
+        resource_profile=resource_profile,
+        attack_config_digest_value=attack_config_digest_value,
+    )
     return observation_digest(
         {
             "event_id": event_id,
@@ -165,6 +179,7 @@ def build_observation(
             "attack_family": attack_family,
             "attack_name": attack_condition,
             "attack_condition": attack_condition,
+            **attack_identity,
             "prompt_id": row_id(row, index, "prompt_id", "prompt"),
             "prompt_text": prompt_text(row),
             "image_id": image_id,
@@ -389,8 +404,10 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
 
     attacked_records: list[dict[str, Any]] = []
     for attack_family in attack_families:
+        formal_attack_config = formal_image_attack_config(attack_family)
         attack_matrix_family = canonical_attack_family(attack_family)
         attack_matrix_name = canonical_attack_name(attack_family)
+        formal_attack_digest = attack_config_digest(formal_attack_config)
         for pair_index, pair in enumerate(image_pairs, start=1):
             image_id = str(pair["image_id"])
             runtime = runtime_keys[image_id]
@@ -452,6 +469,9 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                             float(runtime[f"{role_name}_score"]),
                             score,
                         ),
+                        attack_id=formal_attack_config.attack_id,
+                        resource_profile=formal_attack_config.resource_profile,
+                        attack_config_digest_value=formal_attack_digest,
                     )
                 )
                 attacked_records.append(
@@ -467,6 +487,9 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                         "attack_family": attack_matrix_family,
                         "attack_name": attack_matrix_name,
                         "attack_condition": attack_matrix_name,
+                        "attack_id": formal_attack_config.attack_id,
+                        "resource_profile": formal_attack_config.resource_profile,
+                        "attack_config_digest": formal_attack_digest,
                         "attack_transform_name": attack_transform_name,
                         "attack_execution": attack_execution,
                     }

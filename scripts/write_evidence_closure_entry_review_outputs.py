@@ -200,7 +200,7 @@ def write_evidence_closure_entry_review_outputs(
             "review_status",
             "source_artifact",
             "blocker_reason",
-            "user_audit_note",
+            "audit_note",
             "supports_paper_claim",
         ],
     )

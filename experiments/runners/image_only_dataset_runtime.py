@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import asdict, dataclass, replace
 import csv
 from datetime import datetime, timezone
@@ -12,7 +11,6 @@ from pathlib import Path
 from typing import Any, Iterable
 from zipfile import ZIP_STORED, ZipFile
 
-from experiments.protocol.calibration import binomial_rate_upper_confidence_bound
 from experiments.protocol.paper_run_config import (
     PaperRunConfig,
     build_paper_run_config,
@@ -31,6 +29,13 @@ from experiments.runners.semantic_watermark_runtime import (
 from experiments.runtime.repository_environment import file_digest, resolve_code_version
 from experiments.runtime.archive_naming import utc_archive_token
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.detection_score_curves import (
+    build_detection_score_tables,
+    write_detection_score_tables,
+)
+from experiments.artifacts.image_only_detection_metrics import (
+    build_image_only_test_metric_rows,
+)
 from main.core.digest import build_stable_digest
 
 
@@ -217,63 +222,6 @@ def apply_frozen_evidence_protocol(
     return tuple(resolved)
 
 
-def _aggregate_test_metrics(
-    records: Iterable[dict[str, Any]],
-    target_fpr: float,
-) -> tuple[dict[str, Any], ...]:
-    """按攻击和 sample role 聚合 test split 的真实检测率。"""
-
-    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
-    for record in records:
-        if record.get("split") != "test":
-            continue
-        attack_family = str(record.get("attack_family", "clean"))
-        attack_name = str(record.get("attack_name", "none"))
-        resource_profile = str(record.get("resource_profile", "clean"))
-        grouped[(attack_family, attack_name, resource_profile, str(record["sample_role"]))].append(record)
-    rows = []
-    for (attack_family, attack_name, resource_profile, sample_role), group_records in sorted(grouped.items()):
-        positive_count = sum(bool(record["formal_evidence_positive"]) for record in group_records)
-        rate = positive_count / len(group_records)
-        upper = binomial_rate_upper_confidence_bound(positive_count, len(group_records), 0.95)
-        quality_ssim_values = [
-            float(record["source_to_evaluated_ssim"])
-            for record in group_records
-            if isinstance(record.get("source_to_evaluated_ssim"), (int, float))
-        ]
-        quality_psnr_values = [
-            float(record["source_to_evaluated_psnr"])
-            for record in group_records
-            if isinstance(record.get("source_to_evaluated_psnr"), (int, float))
-        ]
-        rows.append(
-            {
-                "attack_family": attack_family,
-                "attack_name": attack_name,
-                "resource_profile": resource_profile,
-                "sample_role": sample_role,
-                "record_count": len(group_records),
-                "positive_count": positive_count,
-                "positive_rate": rate,
-                "content_score_mean": sum(float(record["content_score"]) for record in group_records) / len(group_records),
-                "source_to_evaluated_ssim_mean": (
-                    sum(quality_ssim_values) / len(quality_ssim_values) if quality_ssim_values else None
-                ),
-                "source_to_evaluated_psnr_mean": (
-                    sum(quality_psnr_values) / len(quality_psnr_values) if quality_psnr_values else None
-                ),
-                "positive_rate_upper_95": upper,
-                "target_fpr": target_fpr,
-                "fixed_fpr_upper_bound_ready": (
-                    sample_role in {"clean_negative", "wrong_key_negative"} and upper <= target_fpr
-                ),
-                "metric_status": "measured_image_only_detection",
-                "supports_paper_claim": False,
-            }
-        )
-    return tuple(rows)
-
-
 def _write_csv(path: Path, rows: tuple[dict[str, Any], ...]) -> None:
     """写出列集合稳定的 CSV。"""
 
@@ -458,7 +406,11 @@ def run_image_only_dataset_runtime(
         base_method_config.rescue_margin_low,
     )
     formal_records = apply_frozen_evidence_protocol(detection_records, protocol)
-    metric_rows = _aggregate_test_metrics(formal_records, resolved_paper_run.target_fpr)
+    metric_rows = build_image_only_test_metric_rows(
+        formal_records,
+        resolved_paper_run.target_fpr,
+    )
+    detection_score_tables = build_detection_score_tables(formal_records, protocol.to_dict())
 
     runtime_results_path = output_dir / "runtime_results.jsonl"
     detection_records_path = output_dir / "image_only_detection_records.jsonl"
@@ -498,6 +450,10 @@ def run_image_only_dataset_runtime(
     )
     protocol_path.write_text(json.dumps(protocol.to_dict(), ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     _write_csv(metrics_path, metric_rows)
+    detection_score_table_paths = write_detection_score_tables(
+        output_dir,
+        detection_score_tables,
+    )
     split_counts = {
         split: sum(record.split == split for record in prompt_records)
         for split in ("dev", "calibration", "test")
@@ -617,6 +573,10 @@ def run_image_only_dataset_runtime(
         "new_prompt_count": new_prompt_count,
         "attack_prompt_count": len(attack_prompt_ids),
         "detection_record_count": len(formal_records),
+        "score_distribution_row_count": len(detection_score_tables["score_distribution_table"]),
+        "roc_curve_point_count": len(detection_score_tables["roc_curve_points"]),
+        "det_curve_point_count": len(detection_score_tables["det_curve_points"]),
+        "detection_curve_data_ready": all(detection_score_tables.values()),
         "watermark_quality_pair_count": len(quality_registry_rows),
         "scientific_update_record_count": len(scientific_update_records),
         "expected_scientific_update_record_count": expected_scientific_update_count,
@@ -665,6 +625,9 @@ def run_image_only_dataset_runtime(
             quality_registry_path.relative_to(root_path).as_posix(),
             protocol_path.relative_to(root_path).as_posix(),
             metrics_path.relative_to(root_path).as_posix(),
+            detection_score_table_paths["score_distribution_table"].relative_to(root_path).as_posix(),
+            detection_score_table_paths["roc_curve_points"].relative_to(root_path).as_posix(),
+            detection_score_table_paths["det_curve_points"].relative_to(root_path).as_posix(),
             summary_path.relative_to(root_path).as_posix(),
             manifest_path.relative_to(root_path).as_posix(),
         ),
@@ -711,6 +674,9 @@ def package_image_only_dataset_runtime(
             "watermark_quality_image_registry.jsonl",
             "frozen_evidence_protocol.json",
             "test_detection_metrics.csv",
+            "score_distribution_table.csv",
+            "roc_curve_points.csv",
+            "det_curve_points.csv",
             "dataset_runtime_summary.json",
             "manifest.local.json",
         )
@@ -731,6 +697,7 @@ def package_image_only_dataset_runtime(
             bool(summary.get("generated_at")),
             summary.get("protocol_decision") == "pass",
             summary.get("full_method_claim_ready") is True,
+            summary.get("detection_curve_data_ready") is True,
             summary.get("supports_paper_claim") is True,
             manifest.get("artifact_id")
             == f"{resolved_paper_run_name}_image_only_dataset_runtime_manifest",

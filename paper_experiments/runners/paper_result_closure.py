@@ -21,7 +21,7 @@ from paper_experiments.runners.closure_package_selection import (
 
 CommandHook = Callable[[list[str]], None]
 ProgressHook = Callable[[int, int, str], None]
-PAPER_RESULT_CLOSURE_COMMAND_COUNT = 16
+PAPER_RESULT_CLOSURE_COMMAND_COUNT = 18
 
 
 # 这些目录由当前闭合运行独占。正式执行会在物化锁定包前清理相同 run 的
@@ -38,7 +38,9 @@ CLOSURE_RAW_OUTPUT_DIR_TEMPLATES: tuple[str, ...] = (
 )
 
 CLOSURE_DERIVED_OUTPUT_DIR_TEMPLATES: tuple[str, ...] = (
+    "outputs/official_reference_fidelity_evidence/{paper_run_name}",
     "outputs/attack_matrix/{paper_run_name}",
+    "outputs/paired_superiority_analysis/{paper_run_name}",
     "outputs/primary_baseline_method_faithful_adapter_protocol/{paper_run_name}",
     "outputs/external_baseline_results/{paper_run_name}",
     "outputs/primary_baseline_formal_import/{paper_run_name}",
@@ -220,6 +222,12 @@ def build_paper_result_closure_commands(
     )
     t2smark_dir = _run_output_path("t2smark_formal_reproduction", normalized_run_name)
     attack_dir = _run_output_path("attack_matrix", normalized_run_name)
+    official_reference_fidelity_dir = _run_output_path(
+        "official_reference_fidelity_evidence", normalized_run_name
+    )
+    paired_superiority_dir = _run_output_path(
+        "paired_superiority_analysis", normalized_run_name
+    )
     adapter_dir = _run_output_path(
         "primary_baseline_method_faithful_adapter_protocol", normalized_run_name
     )
@@ -252,6 +260,14 @@ def build_paper_result_closure_commands(
         *_repeat_argument("--package-path", package_paths),
         "--materialize-only",
     )
+    official_reference_fidelity_command = _command(
+        "write_official_reference_fidelity_evidence_outputs.py",
+        "--root",
+        root_argument,
+        "--output-dir",
+        official_reference_fidelity_dir,
+        "--require-pass",
+    )
     attack_command = _command(
         "write_attack_matrix_outputs.py",
         "--root",
@@ -277,6 +293,26 @@ def build_paper_result_closure_commands(
         t2smark_dir,
         "--require-pass",
     )
+    paired_superiority_command = _command(
+        "write_paired_superiority_outputs.py",
+        "--root",
+        root_argument,
+        "--output-dir",
+        paired_superiority_dir,
+        "--proposed-records-path",
+        f"{runtime_dir}/image_only_detection_records.jsonl",
+        "--method-faithful-root",
+        method_collection_dir,
+        "--t2smark-observations-path",
+        f"{t2smark_dir}/t2smark_adapter/baseline_observations.json",
+        "--threshold-audit-rows-path",
+        f"{threshold_audit_dir}/threshold_audit_rows.csv",
+        "--threshold-audit-report-path",
+        f"{threshold_audit_dir}/threshold_audit_report.json",
+        "--threshold-audit-manifest-path",
+        f"{threshold_audit_dir}/manifest.local.json",
+        "--require-pass",
+    )
     adapter_command = _command(
         "write_primary_baseline_method_faithful_adapter_protocol.py",
         "--root",
@@ -298,8 +334,6 @@ def build_paper_result_closure_commands(
         method_collection_dir,
         "--t2smark-candidate-records-path",
         f"{t2smark_dir}/t2smark_formal_import_candidate_records.jsonl",
-        "--method-resource-profile",
-        "full_main",
     )
     formal_import_command = _command(
         "write_primary_baseline_formal_import_protocol.py",
@@ -374,6 +408,10 @@ def build_paper_result_closure_commands(
         common_protocol_dir,
         "--candidate-records-path",
         f"{result_dir}/pilot_paper_result_records.jsonl",
+        "--paired-superiority-summary-path",
+        f"{paired_superiority_dir}/paired_superiority_summary.json",
+        "--paired-superiority-manifest-path",
+        f"{paired_superiority_dir}/manifest.local.json",
         "--require-existing-evidence",
     )
     analysis_command = _command(
@@ -386,6 +424,12 @@ def build_paper_result_closure_commands(
         f"{result_dir}/pilot_paper_result_records.jsonl",
         "--attack-detection-records-path",
         f"{attack_dir}/attack_detection_records.jsonl",
+        "--paired-superiority-summary-path",
+        f"{paired_superiority_dir}/paired_superiority_summary.json",
+        "--paired-superiority-table-path",
+        f"{paired_superiority_dir}/paired_superiority_table.csv",
+        "--paired-superiority-manifest-path",
+        f"{paired_superiority_dir}/manifest.local.json",
     )
     evidence_audit_command = _command(
         "write_paper_artifact_evidence_audit_outputs.py",
@@ -490,6 +534,14 @@ def build_paper_result_closure_commands(
         f"{analysis_dir}/result_analysis_summary.json",
         "--result-analysis-manifest-path",
         f"{analysis_dir}/manifest.local.json",
+        "--paired-outcomes-path",
+        f"{paired_superiority_dir}/paired_outcomes.jsonl",
+        "--paired-superiority-rows-path",
+        f"{paired_superiority_dir}/paired_superiority_table.csv",
+        "--paired-superiority-summary-path",
+        f"{paired_superiority_dir}/paired_superiority_summary.json",
+        "--paired-superiority-manifest-path",
+        f"{paired_superiority_dir}/manifest.local.json",
         "--ablation-summary-path",
         f"{ablation_dir}/ablation_claim_summary.json",
         "--ablation-manifest-path",
@@ -508,6 +560,8 @@ def build_paper_result_closure_commands(
         f"{evidence_audit_dir}/artifact_builder_readiness_report.json",
         "--evidence-blocker-report-path",
         f"{evidence_audit_dir}/submission_blocker_report.json",
+        "--artifact-data-validation-report-path",
+        f"{evidence_audit_dir}/artifact_data_validation_report.json",
         "--evidence-audit-manifest-path",
         f"{evidence_audit_dir}/manifest.local.json",
         "--submission-readiness-report-path",
@@ -537,8 +591,10 @@ def build_paper_result_closure_commands(
     )
     return [
         materialize_command,
+        official_reference_fidelity_command,
         attack_command,
         threshold_command,
+        paired_superiority_command,
         adapter_command,
         candidate_command,
         formal_import_command,

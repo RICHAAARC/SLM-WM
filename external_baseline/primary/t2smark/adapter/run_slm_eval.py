@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 
 from experiments.runtime.progress import progress_event_path_from_environment, write_progress_event
 from experiments.runtime.image_metrics import measured_image_ssim, measured_score_retention
+from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
 from main.core.digest import build_stable_digest
 
 BASELINE_ID = "t2smark"
@@ -154,6 +155,32 @@ def _source_index_lookup(image_pairs: list[dict[str, Any]]) -> dict[str, int]:
     return lookup
 
 
+def _validated_attack_identity(
+    payload: dict[str, Any],
+    *,
+    attack_family: str,
+    attack_name: str,
+    field_prefix: str,
+) -> dict[str, str]:
+    """校验 T2SMark 执行端写出的正式攻击身份."""
+
+    config = resolve_formal_attack_config(
+        attack_family=attack_family,
+        attack_name=attack_name,
+    )
+    identity = {
+        "attack_id": config.attack_id,
+        "resource_profile": config.resource_profile,
+        "attack_config_digest": attack_config_digest(config),
+    }
+    for field_name, expected_value in identity.items():
+        if str(payload.get(field_name, "")) != expected_value:
+            raise ValueError(
+                f"{field_prefix}.{field_name} 与正式 AttackConfig 不一致"
+            )
+    return identity
+
+
 def _auto_threshold(
     results_by_index: dict[int, dict[str, Any]],
     image_pairs: list[dict[str, Any]],
@@ -204,6 +231,9 @@ def _observation(
     image_digest: str = "",
     quality_score: float,
     score_retention: float,
+    attack_id: str = "",
+    resource_profile: str = "",
+    attack_config_digest_value: str = "",
 ) -> dict[str, Any]:
     """构造一条 SLM baseline observation row。"""
 
@@ -221,7 +251,11 @@ def _observation(
         "split": _split(row),
         "sample_role": sample_role,
         "attack_family": attack_family,
+        "attack_name": attack_condition,
         "attack_condition": attack_condition,
+        "attack_id": attack_id,
+        "resource_profile": resource_profile,
+        "attack_config_digest": attack_config_digest_value,
         "prompt_id": _prompt_id(row, image_id),
         "prompt_text": str(row.get("prompt_text") or row.get("caption") or ""),
         "image_id": image_id,
@@ -355,6 +389,12 @@ def build_t2smark_observations(
                 attack_name = str(attack_payload.get("attack_name") or attack_key)
                 attack_family_name = str(attack_payload.get("attack_family") or "regeneration_attack")
                 attack_condition = str(attack_payload.get("attack_condition") or attack_name)
+                attack_identity = _validated_attack_identity(
+                    attack_payload,
+                    attack_family=attack_family_name,
+                    attack_name=attack_name,
+                    field_prefix=f"formal_attacks.{attack_name}",
+                )
                 for sample_role, source_path, source_score in (
                     ("attacked_negative", clean_path, clean_score),
                     ("attacked_positive", watermarked_path, watermarked_score),
@@ -363,6 +403,16 @@ def build_t2smark_observations(
                     if not isinstance(role_payload, dict):
                         raise ValueError(
                             f"formal_attacks.{attack_name} 缺少 {sample_role} 对象"
+                        )
+                    role_identity = _validated_attack_identity(
+                        role_payload,
+                        attack_family=attack_family_name,
+                        attack_name=attack_name,
+                        field_prefix=f"formal_attacks.{attack_name}.{sample_role}",
+                    )
+                    if role_identity != attack_identity:
+                        raise ValueError(
+                            f"formal_attacks.{attack_name}.{sample_role} 攻击身份不一致"
                         )
                     attacked_image_path = str(role_payload.get("attacked_image_path") or "")
                     attacked_image_digest = str(role_payload.get("attacked_image_digest") or "")
@@ -392,6 +442,11 @@ def build_t2smark_observations(
                                 source_score,
                                 attacked_score,
                             ),
+                            attack_id=attack_identity["attack_id"],
+                            resource_profile=attack_identity["resource_profile"],
+                            attack_config_digest_value=attack_identity[
+                                "attack_config_digest"
+                            ],
                         )
                     )
 
@@ -432,6 +487,18 @@ def build_t2smark_observations(
                 record.get("detection_score"),
                 field_name="detection_score",
             )
+            attack_family_name = str(record.get("attack_family") or attack_family)
+            attack_name = str(
+                record.get("attack_name")
+                or record.get("attack_condition")
+                or attack_condition
+            )
+            attack_identity = _validated_attack_identity(
+                record,
+                attack_family=attack_family_name,
+                attack_name=attack_name,
+                field_prefix=f"attacked_images[{attack_index}]",
+            )
             observations.append(
                 _observation(
                     event_id=str(record.get("attacked_image_id") or f"attacked_{attack_index:04d}"),
@@ -439,8 +506,8 @@ def build_t2smark_observations(
                     threshold=threshold_value,
                     row=row,
                     sample_role="attacked_positive" if is_watermarked else "attacked_negative",
-                    attack_family=str(record.get("attack_family") or attack_family),
-                    attack_condition=str(record.get("attack_condition") or attack_condition),
+                    attack_family=attack_family_name,
+                    attack_condition=attack_name,
                     result_index=result_index,
                     threshold_source=threshold_source,
                     robustness=robustness,
@@ -448,6 +515,11 @@ def build_t2smark_observations(
                     image_digest=str(record.get("attacked_image_digest") or ""),
                     quality_score=_measured_pair_quality(source_path, attacked_path),
                     score_retention=measured_score_retention(source_score, attacked_score),
+                    attack_id=attack_identity["attack_id"],
+                    resource_profile=attack_identity["resource_profile"],
+                    attack_config_digest_value=attack_identity[
+                        "attack_config_digest"
+                    ],
                 )
             )
 

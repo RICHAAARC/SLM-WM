@@ -29,6 +29,84 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     )
 
 
+def _write_paired_superiority_inputs(root: Path) -> None:
+    """写出结果分析必须绑定的四方法总体配对优势证据."""
+
+    output_dir = root / "outputs" / "paired_superiority_analysis" / "pilot_paper"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    baseline_ids = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+    summary = {
+        "paper_claim_scale": "pilot_paper",
+        "target_fpr": 0.01,
+        "paired_superiority_exact_set_ready": True,
+        "paired_superiority_scale_ready": True,
+        "overall_paired_superiority_ready": True,
+        "paired_outcome_set_digest": "a" * 64,
+        "paired_superiority_rows_digest": "b" * 64,
+        "paired_superiority_protocol_digest": "c" * 64,
+        "paired_test_prompt_count": 340,
+        "paired_test_prompt_id_digest": "d" * 64,
+        "expected_attack_count": 1,
+        "paired_attack_registry_digest": "e" * 64,
+        "threshold_audit_rows_digest": "f" * 64,
+        "claim_p_value_method": "bounded_hoeffding_prompt_cluster_mean",
+        "sharp_null_diagnostic_method": "exact_prompt_cluster_sign_flip_dp",
+        "bootstrap_analysis_schema": "paired_prompt_cluster_bootstrap_v1",
+        "bootstrap_bit_generator": "PCG64",
+        "bootstrap_quantile_method": "linear",
+        "bootstrap_resample_count": 100_000,
+        "confidence_level": 0.95,
+        "method_observation_source_sha256_map": {
+            "slm_wm": "1" * 64,
+            "tree_ring": "2" * 64,
+            "gaussian_shading": "3" * 64,
+            "shallow_diffuse": "4" * 64,
+            "t2smark": "5" * 64,
+        },
+        "method_observation_source_path_map": {
+            method_id: f"outputs/observations/{method_id}.json"
+            for method_id in ("slm_wm", *baseline_ids)
+        },
+        "method_threshold_digest_map": {
+            "slm_wm": "6" * 64,
+            "tree_ring": "7" * 64,
+            "gaussian_shading": "8" * 64,
+            "shallow_diffuse": "9" * 64,
+            "t2smark": "a" * 64,
+        },
+        "supports_paper_claim": True,
+    }
+    (output_dir / "paired_superiority_summary.json").write_text(
+        json.dumps(summary),
+        encoding="utf-8",
+    )
+    with (output_dir / "paired_superiority_table.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=("baseline_id", "paired_superiority_ready", "supports_paper_claim"),
+        )
+        writer.writeheader()
+        writer.writerows(
+            {
+                "baseline_id": baseline_id,
+                "paired_superiority_ready": True,
+                "supports_paper_claim": True,
+            }
+            for baseline_id in baseline_ids
+        )
+    (output_dir / "manifest.local.json").write_text(
+        json.dumps(
+            {
+                "artifact_id": "paired_superiority_analysis_manifest",
+                "metadata": summary,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _result_record(method_id: str, attack_name: str, tpr: float, ci_low: float, ci_high: float) -> dict[str, object]:
     """构造一条最小结果记录。"""
 
@@ -62,6 +140,7 @@ def _result_record(method_id: str, attack_name: str, tpr: float, ci_low: float, 
 def test_pilot_paper_result_analysis_rebuilds_tables_and_failure_figure(tmp_path: Path) -> None:
     """结果分析脚本应从 governed records 重建 CI 表、优势表和失败案例 SVG。"""
 
+    _write_paired_superiority_inputs(tmp_path)
     result_records_path = tmp_path / "outputs" / "pilot_paper_fixed_fpr_results" / "pilot_paper_result_records.jsonl"
     _write_jsonl(
         result_records_path,
@@ -147,6 +226,7 @@ def test_pilot_paper_result_analysis_rebuilds_tables_and_failure_figure(tmp_path
 def test_result_analysis_rejects_failure_record_without_attacked_image(tmp_path: Path) -> None:
     """失败记录缺少实际攻击图像时必须停止生成论文图。"""
 
+    _write_paired_superiority_inputs(tmp_path)
     result_records_path = tmp_path / "outputs" / "fixed_fpr" / "result_records.jsonl"
     _write_jsonl(
         result_records_path,
@@ -185,6 +265,7 @@ def test_result_analysis_discloses_nonwinning_attack_without_blocking_complete_a
     """逐攻击未显著胜出时应如实披露, 但完整分析证据仍可支持论文使用。"""
 
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+    _write_paired_superiority_inputs(tmp_path)
     monkeypatch.setattr(
         "scripts.write_pilot_paper_result_analysis_outputs.default_attack_configs",
         lambda: (

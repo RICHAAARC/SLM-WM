@@ -8,6 +8,7 @@ from zipfile import ZipFile
 
 import pytest
 
+from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
 from paper_experiments.baselines import build_t2smark_formal_candidate_records
 from paper_experiments.baselines.method_faithful_observation_collection import (
     MethodFaithfulObservationSource,
@@ -232,6 +233,15 @@ def test_method_candidate_statistics_use_test_split_only(
     """三类 method-faithful baseline 的正式指标只能统计 test observation。"""
 
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    attack_config = resolve_formal_attack_config(
+        attack_family="standard_distortion",
+        attack_name="jpeg_compression",
+    )
+    attack_identity = {
+        "attack_id": attack_config.attack_id,
+        "resource_profile": attack_config.resource_profile,
+        "attack_config_digest": attack_config_digest(attack_config),
+    }
     observations: list[dict[str, object]] = []
     for split, quality_score in (
         ("dev", 0.1),
@@ -267,6 +277,7 @@ def test_method_candidate_statistics_use_test_split_only(
                 },
                 {
                     **common,
+                    **attack_identity,
                     "attack_family": "standard_distortion",
                     "attack_name": "jpeg_compression",
                     "sample_role": "attacked_negative",
@@ -275,6 +286,7 @@ def test_method_candidate_statistics_use_test_split_only(
                 },
                 {
                     **common,
+                    **attack_identity,
                     "attack_family": "standard_distortion",
                     "attack_name": "jpeg_compression",
                     "sample_role": "attacked_positive",
@@ -306,7 +318,6 @@ def test_method_candidate_statistics_use_test_split_only(
         sources=(source,),
         root_path=Path(__file__).resolve().parents[2],
         target_fpr=0.1,
-        resource_profile="full_main",
     )
 
     assert len(records) == 1
@@ -324,6 +335,15 @@ def test_method_candidate_statistics_use_test_split_only(
 def test_t2smark_candidate_statistics_use_test_split_only() -> None:
     """T2SMark 正式候选必须与三个 method-faithful baseline 共享 test-only 统计边界。"""
 
+    attack_config = resolve_formal_attack_config(
+        attack_family="standard_distortion",
+        attack_name="jpeg_compression",
+    )
+    attack_identity = {
+        "attack_id": attack_config.attack_id,
+        "resource_profile": attack_config.resource_profile,
+        "attack_config_digest": attack_config_digest(attack_config),
+    }
     observations: list[dict[str, object]] = []
     for split, quality_score in (
         ("dev", 0.1),
@@ -347,6 +367,7 @@ def test_t2smark_candidate_statistics_use_test_split_only() -> None:
                 },
                 {
                     **common,
+                    **attack_identity,
                     "attack_family": "standard_distortion",
                     "attack_condition": "jpeg_compression",
                     "sample_role": "attacked_negative",
@@ -354,6 +375,7 @@ def test_t2smark_candidate_statistics_use_test_split_only() -> None:
                 },
                 {
                     **common,
+                    **attack_identity,
                     "attack_family": "standard_distortion",
                     "attack_condition": "jpeg_compression",
                     "sample_role": "attacked_positive",

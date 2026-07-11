@@ -76,9 +76,11 @@ class PrimaryBaselineResultTemplate:
     result_record_template_id: str
     result_record_template_digest: str
     baseline_id: str
+    attack_id: str
     attack_family: str
     attack_name: str
     resource_profile: str
+    attack_config_digest: str
     comparable_operating_point: str
     required_metric_fields: tuple[str, ...]
     required_source_fields: tuple[str, ...]
@@ -255,9 +257,13 @@ def build_primary_result_templates(
         for attack_row in attack_metric_rows:
             payload = {
                 "baseline_id": plan["baseline_id"],
+                "attack_id": str(attack_row.get("attack_id", "")),
                 "attack_family": str(attack_row.get("attack_family", "")),
                 "attack_name": str(attack_row.get("attack_name", "")),
                 "resource_profile": str(attack_row.get("resource_profile", "")),
+                "attack_config_digest": str(
+                    attack_row.get("attack_config_digest", "")
+                ),
                 "comparable_operating_point": operating_point,
             }
             digest = build_stable_digest(payload)
@@ -266,9 +272,11 @@ def build_primary_result_templates(
                     result_record_template_id=f"primary_baseline_result_template_{digest[:16]}",
                     result_record_template_digest=digest,
                     baseline_id=str(plan["baseline_id"]),
+                    attack_id=payload["attack_id"],
                     attack_family=payload["attack_family"],
                     attack_name=payload["attack_name"],
                     resource_profile=payload["resource_profile"],
+                    attack_config_digest=payload["attack_config_digest"],
                     comparable_operating_point=operating_point,
                     required_metric_fields=metric_fields,
                     required_source_fields=source_fields,

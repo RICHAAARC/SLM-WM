@@ -46,6 +46,7 @@ from experiments.runtime.repository_environment import (
 from external_baseline.primary.sd35_method_faithful_common import supported_formal_image_attack_names
 from paper_experiments.baselines.method_faithful_observation_collection import (
     canonical_prompt_protocol_digest,
+    validate_formal_attack_observation_identities,
 )
 from paper_experiments.baselines.observation_io import load_baseline_observation_rows
 
@@ -550,6 +551,10 @@ def write_baseline_transfer_files(
             "baseline observation 攻击集合与正式配置不一致: "
             f"observed={sorted(observed_attacks)} configured={sorted(configured_attacks)}"
         )
+    validate_formal_attack_observation_identities(
+        observations,
+        baseline_id=baseline_id,
+    )
 
     write_json(paths["split_observations"], observations)
     write_json(paths["split_command_results"], command_results)

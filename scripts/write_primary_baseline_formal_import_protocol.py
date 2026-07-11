@@ -21,6 +21,7 @@ from paper_experiments.baselines import (
     build_primary_baseline_formal_evidence_collection_summary,
     build_primary_baseline_formal_import_readiness_rows,
     build_primary_baseline_formal_import_readiness_summary,
+    build_primary_baseline_method_threshold_digest_map,
     build_primary_baseline_formal_import_schema,
     build_primary_baseline_formal_template_coverage_rows,
     build_primary_baseline_formal_template_coverage_summary,
@@ -205,6 +206,10 @@ def write_primary_baseline_formal_import_protocol_outputs(
     )
     readiness_rows = build_primary_baseline_formal_import_readiness_rows(candidate_rows, validation_report)
     readiness_summary = build_primary_baseline_formal_import_readiness_summary(readiness_rows)
+    method_threshold_digest_map = build_primary_baseline_method_threshold_digest_map(
+        candidate_rows,
+        require_exact=False,
+    )
     coverage_rows = build_primary_baseline_formal_template_coverage_rows(
         template_rows,
         candidate_rows,
@@ -244,6 +249,9 @@ def write_primary_baseline_formal_import_protocol_outputs(
         "primary_baseline_formal_ready": readiness_summary["primary_baseline_formal_ready"]
         and coverage_summary["primary_baseline_formal_template_coverage_ready"]
         and collection_summary["primary_baseline_formal_evidence_collection_ready"],
+        "method_threshold_digest_map": method_threshold_digest_map,
+        "method_threshold_digest_map_ready": set(method_threshold_digest_map)
+        == {"tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark"},
         "supports_paper_claim": False,
     }
 
@@ -344,6 +352,7 @@ def write_primary_baseline_formal_import_protocol_outputs(
             "formal_evidence_collection_plan_digest": build_stable_digest(collection_rows),
             "formal_evidence_collection_summary_digest": build_stable_digest(collection_summary),
             "summary_digest": build_stable_digest(summary),
+            "method_threshold_digest_map": method_threshold_digest_map,
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_primary_baseline_formal_import_protocol.py",

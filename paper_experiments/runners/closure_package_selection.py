@@ -264,6 +264,9 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
             IMAGE_RUNTIME_PREFIX + "watermark_quality_image_registry.jsonl",
             IMAGE_RUNTIME_PREFIX + "frozen_evidence_protocol.json",
             IMAGE_RUNTIME_PREFIX + "test_detection_metrics.csv",
+            IMAGE_RUNTIME_PREFIX + "score_distribution_table.csv",
+            IMAGE_RUNTIME_PREFIX + "roc_curve_points.csv",
+            IMAGE_RUNTIME_PREFIX + "det_curve_points.csv",
             IMAGE_RUNTIME_SUMMARY,
             IMAGE_RUNTIME_MANIFEST,
         ),
@@ -911,6 +914,132 @@ def _stable_digest(payload: Any) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def validate_closure_input_lock_payloads(
+    lock_payload: dict[str, Any],
+    lock_manifest: dict[str, Any],
+    *,
+    paper_run_name: str,
+    target_fpr: float,
+) -> dict[str, str]:
+    """复验 CPU 结果闭合输入锁的基本身份与规范摘要.
+
+    该函数属于通用跨产物治理写法.它不重新读取大型 ZIP, 只验证在下游
+    records 与协议产物中必须稳定传播的 run,FPR,精确包集合,代码版本和
+    锁摘要.最终完整打包器仍负责逐包字节摘要复核.
+    """
+
+    resolved_run_name = normalize_paper_run_name(paper_run_name)
+    expected_target_fpr = float(target_fpr)
+    expected_families = {spec.package_family for spec in CLOSURE_PACKAGE_FAMILY_SPECS}
+    records = lock_payload.get("closure_input_packages")
+    if not isinstance(records, list):
+        raise ClosurePackageSelectionError("closure input lock 缺少包记录列表")
+    actual_families = [str(record.get("package_family", "")) for record in records]
+    common_code_version = normalize_clean_code_version(
+        lock_payload.get("common_code_version")
+    )
+    declared_digest = str(lock_payload.get("closure_input_lock_digest", ""))
+    digest_payload = dict(lock_payload)
+    digest_payload.pop("closure_input_lock_digest", None)
+    package_rows_ready = all(
+        isinstance(record, dict)
+        and str(record.get("paper_run_name", "")) == resolved_run_name
+        and math.isclose(
+            float(record.get("target_fpr", float("nan"))),
+            expected_target_fpr,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        and normalize_clean_code_version(record.get("code_version"))
+        == common_code_version
+        and bool(str(record.get("package_path", "")))
+        and bool(re.fullmatch(r"[0-9a-fA-F]{64}", str(record.get("package_sha256", ""))))
+        for record in records
+    )
+    metadata = lock_manifest.get("metadata", {})
+    output_paths = lock_manifest.get("output_paths", ())
+    expected_output_suffixes = (
+        f"{LOCK_OUTPUT_ROOT.as_posix()}/{resolved_run_name}/{LOCK_FILENAME}",
+        f"{LOCK_OUTPUT_ROOT.as_posix()}/{resolved_run_name}/{LOCK_MANIFEST_FILENAME}",
+    )
+    ready = (
+        str(lock_payload.get("paper_run_name", "")) == resolved_run_name
+        and math.isclose(
+            float(lock_payload.get("target_fpr", float("nan"))),
+            expected_target_fpr,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        and int(lock_payload.get("closure_input_package_count", -1))
+        == len(CLOSURE_PACKAGE_FAMILY_SPECS)
+        and len(records) == len(CLOSURE_PACKAGE_FAMILY_SPECS)
+        and len(set(actual_families)) == len(actual_families)
+        and set(actual_families) == expected_families
+        and package_rows_ready
+        and bool(re.fullmatch(r"[0-9a-fA-F]{64}", declared_digest))
+        and _stable_digest(digest_payload) == declared_digest
+        and str(lock_manifest.get("artifact_id", ""))
+        == f"{resolved_run_name}_closure_input_lock_manifest"
+        and isinstance(metadata, dict)
+        and metadata.get("closure_input_lock_ready") is True
+        and int(metadata.get("closure_input_package_count", -1)) == len(records)
+        and metadata.get("closure_input_packages") == records
+        and str(metadata.get("paper_run_name", "")) == resolved_run_name
+        and math.isclose(
+            float(metadata.get("target_fpr", float("nan"))),
+            expected_target_fpr,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        and str(metadata.get("closure_input_lock_digest", "")) == declared_digest
+        and str(metadata.get("common_code_version", "")) == common_code_version
+        and all(
+            any(str(path).replace("\\", "/").endswith(suffix) for path in output_paths)
+            for suffix in expected_output_suffixes
+        )
+    )
+    if not ready:
+        raise ClosurePackageSelectionError("closure input lock 基本身份或摘要复验失败")
+    return {
+        "closure_input_lock_digest": declared_digest,
+        "common_code_version": common_code_version,
+    }
+
+
+def load_validated_closure_input_lock(
+    root: str | Path,
+    *,
+    paper_run_name: str,
+    target_fpr: float,
+) -> dict[str, Any]:
+    """从当前论文运行目录读取并复验 closure input lock."""
+
+    repository_root = Path(root).resolve()
+    resolved_run_name = normalize_paper_run_name(paper_run_name)
+    lock_dir = repository_root / LOCK_OUTPUT_ROOT / resolved_run_name
+    lock_path = lock_dir / LOCK_FILENAME
+    manifest_path = lock_dir / LOCK_MANIFEST_FILENAME
+    if not lock_path.is_file() or not manifest_path.is_file():
+        raise FileNotFoundError("当前论文运行缺少 closure input lock 或独立 manifest")
+    lock_payload = json.loads(lock_path.read_text(encoding="utf-8-sig"))
+    lock_manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(lock_payload, dict) or not isinstance(lock_manifest, dict):
+        raise TypeError("closure input lock 与独立 manifest 必须是 JSON 对象")
+    provenance = validate_closure_input_lock_payloads(
+        lock_payload,
+        lock_manifest,
+        paper_run_name=resolved_run_name,
+        target_fpr=target_fpr,
+    )
+    return {
+        **provenance,
+        "closure_input_lock": lock_payload,
+        "closure_input_lock_manifest": lock_manifest,
+        "closure_input_lock_path": lock_path,
+        "closure_input_lock_manifest_path": manifest_path,
+    }
 
 
 def _write_closure_input_lock(

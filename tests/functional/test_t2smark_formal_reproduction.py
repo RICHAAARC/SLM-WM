@@ -10,6 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from experiments.protocol.attacks import attack_config_digest
+from external_baseline.primary.sd35_method_faithful_common import formal_image_attack_config
 import paper_experiments.runners.t2smark_formal_reproduction as t2smark_runtime
 from paper_experiments.runners.t2smark_formal_reproduction import (
     DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
@@ -37,6 +39,15 @@ def _write_results(path: Path, *, sample_count: int, missing_attack_name: str = 
     """写出只用于复用门禁的 T2SMark results.json。"""
 
     attack_names = configured_attack_names(DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES)
+    attack_identities = {
+        attack_name: {
+            "attack_id": config.attack_id,
+            "resource_profile": config.resource_profile,
+            "attack_config_digest": attack_config_digest(config),
+        }
+        for attack_name in attack_names
+        for config in (formal_image_attack_config(attack_name),)
+    }
     payload = {
         str(index): {
             "image_only_detection": {
@@ -45,9 +56,16 @@ def _write_results(path: Path, *, sample_count: int, missing_attack_name: str = 
             },
             "formal_attacks": {
                 attack_name: {
+                    **attack_identities[attack_name],
                     "attack_name": attack_name,
-                    "attacked_negative": {"detection_score": 0.1},
-                    "attacked_positive": {"detection_score": 0.9},
+                    "attacked_negative": {
+                        **attack_identities[attack_name],
+                        "detection_score": 0.1,
+                    },
+                    "attacked_positive": {
+                        **attack_identities[attack_name],
+                        "detection_score": 0.9,
+                    },
                 }
                 for attack_name in attack_names
                 if attack_name != missing_attack_name
@@ -357,6 +375,12 @@ def _write_package_fixture(
     clean_path.write_bytes(b"clean")
     formal_attacks: dict[str, object] = {}
     for attack_name in attack_names:
+        attack_config = formal_image_attack_config(attack_name)
+        attack_identity = {
+            "attack_id": attack_config.attack_id,
+            "resource_profile": attack_config.resource_profile,
+            "attack_config_digest": attack_config_digest(attack_config),
+        }
         role_rows: dict[str, object] = {}
         for sample_role in ("attacked_negative", "attacked_positive"):
             attack_path = paths["official_run_dir"] / "formal_attacks" / (
@@ -364,8 +388,15 @@ def _write_package_fixture(
             )
             attack_path.parent.mkdir(parents=True, exist_ok=True)
             attack_path.write_bytes(f"{attack_name}:{sample_role}".encode("utf-8"))
-            role_rows[sample_role] = {"detection_score": 0.1}
-        formal_attacks[attack_name] = role_rows
+            role_rows[sample_role] = {
+                **attack_identity,
+                "detection_score": 0.1,
+            }
+        formal_attacks[attack_name] = {
+            **attack_identity,
+            "attack_name": attack_name,
+            **role_rows,
+        }
     official_results = {
         "0": {
             "image_only_detection": {"clean_score": 0.1, "watermarked_score": 0.9},

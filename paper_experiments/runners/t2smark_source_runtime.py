@@ -11,6 +11,8 @@ import subprocess
 import tempfile
 from typing import Any
 
+from experiments.protocol.attacks import attack_config_digest
+from external_baseline.primary.sd35_method_faithful_common import formal_image_attack_config
 from paper_experiments.runners.external_source_runtime import (
     load_baseline_registry_item,
     normalize_repository_url,
@@ -41,6 +43,20 @@ def count_t2smark_formal_attack_items(results_path: Path, attack_names: tuple[st
         return 0
     if not isinstance(payload, dict):
         return 0
+    try:
+        expected_identities = {
+            attack_name: {
+                "attack_id": config.attack_id,
+                "resource_profile": config.resource_profile,
+                "attack_config_digest": attack_config_digest(config),
+            }
+            for attack_name in attack_names
+            for config in (
+                formal_image_attack_config(attack_name),
+            )
+        }
+    except ValueError:
+        return 0
     count = 0
     for key, value in payload.items():
         if not str(key).isdigit() or not isinstance(value, dict):
@@ -52,10 +68,19 @@ def count_t2smark_formal_attack_items(results_path: Path, attack_names: tuple[st
         )
         attacks_ready = isinstance(attacks, dict) and all(
             isinstance(attacks.get(name), dict)
+            and all(
+                str(attacks[name].get(field_name, "")) == expected_value
+                for field_name, expected_value in expected_identities[name].items()
+            )
             and isinstance(attacks[name].get("attacked_negative"), dict)
             and isinstance(attacks[name].get("attacked_positive"), dict)
             and "detection_score" in attacks[name]["attacked_negative"]
             and "detection_score" in attacks[name]["attacked_positive"]
+            and all(
+                str(attacks[name][role].get(field_name, "")) == expected_value
+                for role in ("attacked_negative", "attacked_positive")
+                for field_name, expected_value in expected_identities[name].items()
+            )
             for name in attack_names
         )
         if detection_ready and attacks_ready:
@@ -279,6 +304,9 @@ def _verify_formal_source(source_entry: Path) -> None:
         "score_image_with_master_key",
         "strict_clean_watermarked_pair",
         "attack_execution",
+        "attack_config_digest",
+        "resource_profile",
+        "attack_id",
     )
     required_option_tokens = (
         "slm_attack_families",

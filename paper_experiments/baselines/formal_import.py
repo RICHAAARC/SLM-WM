@@ -11,7 +11,10 @@ import math
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from experiments.protocol.attacks import default_attack_configs
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    resolve_formal_attack_config,
+)
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_ATTACK_RESOURCE_PROFILES,
     PILOT_PAPER_FIXED_FPR,
@@ -59,6 +62,8 @@ REQUIRED_METRIC_FIELDS = (
     "quality_score_mean",
 )
 REQUIRED_SOURCE_FIELDS = (
+    "attack_id",
+    "attack_config_digest",
     "baseline_result_source",
     "baseline_result_source_digest",
     "result_protocol_name",
@@ -404,12 +409,12 @@ def _validate_metric_fields(
                 "complete_test_attacked_negative_count_required",
             )
         )
-    expected_evidence_count = 3 * expected_test_count
-    if supported_count != expected_evidence_count:
+    if supported_count != expected_test_count:
         issues.append(
             _issue(row_index, row, "supported_record_count", "complete_test_supported_record_count_required")
         )
-    if attack_count != expected_evidence_count:
+    expected_attack_count = 2 * expected_test_count
+    if attack_count != expected_attack_count:
         issues.append(_issue(row_index, row, "attack_record_count", "complete_test_attack_record_count_required"))
     for field_name in (
         "true_positive_rate",
@@ -479,6 +484,81 @@ def _observation_attack_name(row: Mapping[str, Any]) -> str:
     """统一读取 observation 使用的攻击名称字段。"""
 
     return _str_field(row, "attack_name") or _str_field(row, "attack_condition") or "clean_none"
+
+
+def _formal_attack_identity_from_observations(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    attack_family: str,
+    attack_name: str,
+) -> dict[str, str]:
+    """从执行端 attacked observations 提取并核验唯一攻击身份."""
+
+    config = resolve_formal_attack_config(
+        attack_family=attack_family,
+        attack_name=attack_name,
+    )
+    expected = {
+        "attack_id": config.attack_id,
+        "resource_profile": config.resource_profile,
+        "attack_config_digest": attack_config_digest(config),
+    }
+    attacked_rows = tuple(
+        row
+        for row in rows
+        if _str_field(row, "sample_role")
+        in {"attacked_negative", "attacked_positive"}
+    )
+    if not attacked_rows:
+        raise ValueError(
+            f"正式攻击缺少 attacked observation: {attack_family}/{attack_name}"
+        )
+    for row in attacked_rows:
+        for field_name, expected_value in expected.items():
+            if _str_field(row, field_name) != expected_value:
+                raise ValueError(
+                    "正式 observation 攻击身份与 AttackConfig 不一致: "
+                    f"{attack_family}/{attack_name}/{field_name}"
+                )
+    return expected
+
+
+def _validate_formal_attack_identity(
+    row: Mapping[str, Any],
+    row_index: int,
+) -> list[FormalImportIssue]:
+    """校验候选记录直接继承的正式攻击身份."""
+
+    try:
+        config = resolve_formal_attack_config(
+            attack_family=_str_field(row, "attack_family"),
+            attack_name=_str_field(row, "attack_name"),
+            resource_profile=_str_field(row, "resource_profile"),
+        )
+    except ValueError:
+        return [
+            _issue(
+                row_index,
+                row,
+                "attack_id",
+                "registered_formal_attack_identity_required",
+            )
+        ]
+    expected = {
+        "attack_id": config.attack_id,
+        "resource_profile": config.resource_profile,
+        "attack_config_digest": attack_config_digest(config),
+    }
+    return [
+        _issue(
+            row_index,
+            row,
+            field_name,
+            "formal_attack_identity_must_match_attack_config",
+        )
+        for field_name, expected_value in expected.items()
+        if _str_field(row, field_name) != expected_value
+    ]
 
 
 def _validate_exact_prompt_coverage(
@@ -576,7 +656,7 @@ def _validate_observation_derived_metrics(
             if _str_field(observation, "attack_family") == attack_family
             and _observation_attack_name(observation) == attack_name
         )
-        expected_values = _build_baseline_metric_values(
+        expected_values = build_primary_baseline_observation_metric_values(
             all_observations=observation_rows,
             attack_rows=attack_rows,
             attack_family=attack_family,
@@ -736,6 +816,39 @@ def _validate_threshold_provenance(
                 "threshold_observation_baseline_mismatch",
             )
         )
+    attack_rows = tuple(
+        observation
+        for observation in observations
+        if _str_field(observation, "attack_family")
+        == _str_field(row, "attack_family")
+        and _observation_attack_name(observation) == _str_field(row, "attack_name")
+    )
+    try:
+        observation_identity = _formal_attack_identity_from_observations(
+            attack_rows,
+            attack_family=_str_field(row, "attack_family"),
+            attack_name=_str_field(row, "attack_name"),
+        )
+    except ValueError:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "attack_config_digest",
+                "observation_attack_identity_required",
+            )
+        )
+    else:
+        for field_name, expected_value in observation_identity.items():
+            if _str_field(row, field_name) != expected_value:
+                issues.append(
+                    _issue(
+                        row_index,
+                        row,
+                        field_name,
+                        "result_attack_identity_must_match_observations",
+                    )
+                )
 
     threshold_audit = audit_fixed_fpr_observation_threshold(
         observations,
@@ -915,6 +1028,7 @@ def validate_primary_baseline_formal_import_rows(
             row_issues.append(_issue(row_index, row, "result_source_type", "allowed_result_source_type_required"))
         if _str_field(row, "resource_profile") not in resource_profiles:
             row_issues.append(_issue(row_index, row, "resource_profile", resource_profile_issue_reason))
+        row_issues.extend(_validate_formal_attack_identity(row, row_index))
         if _str_field(row, "comparable_operating_point") != expected_operating_point:
             row_issues.append(_issue(row_index, row, "comparable_operating_point", "fixed_fpr_operating_point_required"))
         if _str_field(row, "prompt_protocol_name") != expected_prompt_protocol_name:
@@ -1118,14 +1232,18 @@ def build_primary_baseline_formal_import_readiness_summary(
     }
 
 
-def _formal_template_key(row: Mapping[str, Any]) -> tuple[str, str, str, str, str]:
+def _formal_template_key(
+    row: Mapping[str, Any],
+) -> tuple[str, str, str, str, str, str, str]:
     """生成正式共同协议模板覆盖检查使用的稳定键。"""
 
     return (
         _str_field(row, "baseline_id"),
+        _str_field(row, "attack_id"),
         _str_field(row, "attack_family"),
         _str_field(row, "attack_name"),
         _str_field(row, "resource_profile"),
+        _str_field(row, "attack_config_digest"),
         _str_field(row, "comparable_operating_point"),
     )
 
@@ -1265,9 +1383,14 @@ def build_primary_baseline_formal_evidence_collection_rows(
         ready = accepted_match_count > 0
         payload = {
             "baseline_id": _str_field(template, "baseline_id"),
+            "attack_id": _str_field(template, "attack_id"),
             "attack_family": _str_field(template, "attack_family"),
             "attack_name": _str_field(template, "attack_name"),
             "resource_profile": _str_field(template, "resource_profile"),
+            "attack_config_digest": _str_field(
+                template,
+                "attack_config_digest",
+            ),
             "comparable_operating_point": _str_field(template, "comparable_operating_point"),
             "candidate_template_match_count": candidate_match_count,
             "accepted_template_match_count": accepted_match_count,
@@ -1319,9 +1442,11 @@ def _group_observations_by_attack(rows: Iterable[Mapping[str, Any]]) -> dict[tup
 def build_primary_baseline_formal_result_record(
     *,
     baseline_id: str,
+    attack_id: str,
     attack_family: str,
     attack_name: str,
     resource_profile: str,
+    attack_config_digest_value: str,
     target_fpr: float,
     result_source_type: str,
     baseline_result_source: str,
@@ -1338,9 +1463,11 @@ def build_primary_baseline_formal_result_record(
 
     payload = {
         "baseline_id": baseline_id,
+        "attack_id": attack_id,
         "attack_family": attack_family,
         "attack_name": attack_name,
         "resource_profile": resource_profile,
+        "attack_config_digest": attack_config_digest_value,
         "comparable_operating_point": build_fixed_fpr_operating_point(target_fpr),
         "result_protocol_name": PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME,
         "result_source_type": result_source_type,
@@ -1428,6 +1555,41 @@ def _threshold_provenance_values(
     }
 
 
+def build_primary_baseline_method_threshold_digest_map(
+    candidate_rows: Iterable[Mapping[str, Any]],
+    *,
+    require_exact: bool = True,
+) -> dict[str, str]:
+    """构造四个主表 baseline 的精确阈值摘要映射.
+
+    同一方法的逐攻击候选必须绑定同一个冻结阈值摘要.缺少方法,混入额外
+    方法或同一方法出现多个摘要时直接拒绝, 避免 formal import 只报告整体
+    ready 而丢失可交叉核验的阈值来源.
+    """
+
+    values_by_method: dict[str, set[str]] = {}
+    for row in candidate_rows:
+        baseline_id = _str_field(row, "baseline_id")
+        threshold_digest = _str_field(row, "threshold_digest")
+        values_by_method.setdefault(baseline_id, set()).add(threshold_digest)
+    expected_ids = set(PRIMARY_BASELINE_IDS)
+    if not set(values_by_method).issubset(expected_ids):
+        raise ValueError("formal import 阈值摘要包含非主表 baseline")
+    if require_exact and set(values_by_method) != expected_ids:
+        raise ValueError("formal import 阈值摘要必须精确覆盖四个主表 baseline")
+    result: dict[str, str] = {}
+    for baseline_id, digests in sorted(values_by_method.items()):
+        if len(digests) != 1:
+            raise ValueError(f"{baseline_id} formal import 出现多个阈值摘要")
+        digest = next(iter(digests))
+        if len(digest) != 64 or any(
+            character not in "0123456789abcdefABCDEF" for character in digest
+        ):
+            raise ValueError(f"{baseline_id} formal import 缺少 SHA-256 阈值摘要")
+        result[baseline_id] = digest
+    return result
+
+
 def build_t2smark_formal_candidate_records(
     *,
     observation_rows: Iterable[Mapping[str, Any]],
@@ -1446,11 +1608,6 @@ def build_t2smark_formal_candidate_records(
     """
 
     materialized_observations = tuple(dict(row) for row in observation_rows)
-    attack_resource_profiles = {
-        (config.attack_family, config.attack_name): config.resource_profile
-        for config in default_attack_configs()
-        if config.enabled and config.resource_profile in PILOT_PAPER_ATTACK_RESOURCE_PROFILES
-    }
     evidence_path_values = tuple(evidence_paths)
     observation_evidence_path = _select_fixed_fpr_observation_evidence_path(
         baseline_result_source,
@@ -1465,10 +1622,12 @@ def build_t2smark_formal_candidate_records(
     for (attack_family, attack_name), group in _group_observations_by_attack(materialized_observations).items():
         if attack_family == "clean":
             continue
-        attack_key = (attack_family, attack_name)
-        if attack_key not in attack_resource_profiles:
-            raise ValueError(f"T2SMark observation 包含未注册的正式攻击: {attack_family}/{attack_name}")
-        metric_values = _build_baseline_metric_values(
+        attack_identity = _formal_attack_identity_from_observations(
+            group,
+            attack_family=attack_family,
+            attack_name=attack_name,
+        )
+        metric_values = build_primary_baseline_observation_metric_values(
             all_observations=materialized_observations,
             attack_rows=group,
             attack_family=attack_family,
@@ -1483,9 +1642,13 @@ def build_t2smark_formal_candidate_records(
         records.append(
             build_primary_baseline_formal_result_record(
                 baseline_id="t2smark",
+                attack_id=attack_identity["attack_id"],
                 attack_family=attack_family,
                 attack_name=attack_name,
-                resource_profile=attack_resource_profiles[attack_key],
+                resource_profile=attack_identity["resource_profile"],
+                attack_config_digest_value=attack_identity[
+                    "attack_config_digest"
+                ],
                 target_fpr=target_fpr,
                 result_source_type="official_reproduction",
                 baseline_result_source=baseline_result_source,
@@ -1502,23 +1665,37 @@ def build_t2smark_formal_candidate_records(
 
 
 def _decision_field(row: Mapping[str, Any]) -> bool:
-    """读取不同正式 adapter 使用的 detection decision 字段。"""
+    """读取不同正式 adapter 的 JSON 布尔检测判定."""
 
-    if "detection_decision" in row:
-        return _bool_field(row, "detection_decision")
-    return _bool_field(row, "final_decision")
+    field_name = (
+        "detection_decision"
+        if "detection_decision" in row
+        else "final_decision"
+    )
+    value = row.get(field_name)
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} 必须是布尔值")
+    return value
 
 
 def _mean_measured_rate(rows: Iterable[Mapping[str, Any]], field_name: str) -> float:
     """读取每条 observation 的实测 rate 字段并求均值。"""
 
-    values = [_float_field(row, field_name) for row in rows]
-    if not values:
-        raise ValueError(f"{field_name} 要求至少一条实测 observation")
+    materialized = tuple(rows)
+    if not materialized or any(
+        field_name not in row
+        or row.get(field_name) is None
+        or isinstance(row.get(field_name), bool)
+        for row in materialized
+    ):
+        raise ValueError(f"{field_name} 必须覆盖全部正式 observation")
+    values = [float(row[field_name]) for row in materialized]
+    if any(not math.isfinite(value) for value in values):
+        raise ValueError(f"{field_name} 必须覆盖全部 observation 且为有限值")
     return sum(values) / len(values)
 
 
-def _build_baseline_metric_values(
+def build_primary_baseline_observation_metric_values(
     *,
     all_observations: Iterable[Mapping[str, Any]],
     attack_rows: Iterable[Mapping[str, Any]],
@@ -1543,13 +1720,14 @@ def _build_baseline_metric_values(
     true_positive = sum(1 for row in positive_rows if _decision_field(row))
     clean_false_positive = sum(1 for row in clean_negative_rows if _decision_field(row))
     attacked_false_positive = sum(1 for row in attacked_negative_rows if _decision_field(row))
-    evidence_count = len(group) if attack_family == "clean" else len(group) + len(clean_negative_rows)
     return {
         "positive_count": len(positive_rows),
         "negative_count": len(clean_negative_rows),
         "attacked_negative_count": len(attacked_negative_rows),
-        "attack_record_count": evidence_count,
-        "supported_record_count": evidence_count,
+        # attack_record_count 只计入当前攻击实际产生的正、负样本记录.
+        "attack_record_count": len(positive_rows) + len(attacked_negative_rows),
+        # 质量与分数保持统计只由具备实测值的 attacked positive 支持.
+        "supported_record_count": len(positive_rows),
         "true_positive_rate": true_positive / len(positive_rows) if positive_rows else 0.0,
         "false_positive_rate": clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0,
         "clean_false_positive_rate": (
@@ -1576,8 +1754,6 @@ def build_method_faithful_baseline_candidate_records(
     attack_matrix_baseline_detection_ready: bool,
     result_source_type: str = "governed_import",
     adapter_boundary: str = METHOD_FAITHFUL_ADAPTER_BOUNDARY,
-    resource_profile: str = "full_main",
-    resource_profile_by_attack: Mapping[tuple[str, str], str] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """把方法忠实 SD3.5 baseline observations 聚合为正式导入候选记录。
 
@@ -1589,7 +1765,6 @@ def build_method_faithful_baseline_candidate_records(
     materialized_observations = tuple(dict(row) for row in observation_rows)
     records: list[dict[str, Any]] = []
     evidence_path_values = tuple(evidence_paths)
-    profile_lookup = dict(resource_profile_by_attack or {})
     observation_evidence_path = _select_fixed_fpr_observation_evidence_path(
         baseline_result_source,
         evidence_path_values,
@@ -1602,7 +1777,12 @@ def build_method_faithful_baseline_candidate_records(
     for (attack_family, attack_name), group in _group_observations_by_attack(materialized_observations).items():
         if attack_family == "clean":
             continue
-        metric_values = _build_baseline_metric_values(
+        attack_identity = _formal_attack_identity_from_observations(
+            group,
+            attack_family=attack_family,
+            attack_name=attack_name,
+        )
+        metric_values = build_primary_baseline_observation_metric_values(
             all_observations=materialized_observations,
             attack_rows=group,
             attack_family=attack_family,
@@ -1617,12 +1797,13 @@ def build_method_faithful_baseline_candidate_records(
         records.append(
             build_primary_baseline_formal_result_record(
                 baseline_id=baseline_id,
+                attack_id=attack_identity["attack_id"],
                 attack_family=attack_family,
                 attack_name=attack_name,
-                resource_profile=profile_lookup.get(
-                    (attack_family, attack_name),
-                    resource_profile,
-                ),
+                resource_profile=attack_identity["resource_profile"],
+                attack_config_digest_value=attack_identity[
+                    "attack_config_digest"
+                ],
                 target_fpr=target_fpr,
                 result_source_type=result_source_type,
                 baseline_result_source=baseline_result_source,

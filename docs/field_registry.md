@@ -431,11 +431,6 @@ Notebook 与 repository module 的跨边界数据
 | fixed_fpr_ready | method | none | true | false | false | 内容分数是否已保持可进入 fixed-FPR 校准的统计边界。 |
 | content_detection_record_count | method | none | false | false | false | 内容检测 records 数量。 |
 | content_modes | method | none | false | false | false | 当前内容载体产物支持的机制开关集合。 |
-| score_count | method | none | true | false | false | 内容分数表或分布表中登记的分数数量。 |
-| score_min | method | none | true | false | false | 内容分数集合的最小值。 |
-| score_max | method | none | true | false | false | 内容分数集合的最大值。 |
-| score_mean | method | none | true | false | false | 内容分数集合的均值。 |
-| score_distribution_bin | method | none | true | false | false | 内容分数分布表使用的分数区间。 |
 | attention_graph_id | method | none | true | false | false | 注意力锚点图 record 的稳定标识。 |
 | stable_token_indices | method | none | true | false | false | 从 attention graph 中选出的稳定 token 索引集合。 |
 | relative_relation_values | method | none | true | false | false | 稳定 token 集内部的相对注意力关系权重。 |
@@ -468,7 +463,6 @@ Notebook 与 repository module 的跨边界数据
 | entry_count | artifact | none | false | false | false | 压缩包输入 manifest 中登记的入包文件数量。 |
 | attention_geometry_source_path | artifact | none | false | false | false | attention-relative latent update 使用的 ready attention geometry 输入路径。 |
 | attention_carrier_record_count | method | none | false | false | false | attention-relative carrier records 数量。 |
-| subspace_record_count | method | none | false | false | false | 本地重建中用于派生 attention update 的语义安全子空间记录数量。 |
 | active_update_count | method | none | false | false | false | 通过稳定性边界并执行 active update 的 attention carrier 数量。 |
 | evidence_only_count | method | none | false | false | false | 因几何证据不可靠或 update 不稳定而降级为 evidence-only 的 carrier 数量。 |
 | attention_update_stable_count | method | none | false | false | false | carrier 级别满足 attention update 稳定性边界的数量。 |
@@ -485,12 +479,10 @@ Notebook 与 repository module 的跨边界数据
 | attention_update_strength | method | none | true | false | false | attention update 强度曲线中的实际强度值。 |
 | attention_update_stable | method | none | true | false | false | 单条 carrier 或强度行是否满足 update 稳定性边界。 |
 | attention_relative_carrier_digest | method | none | true | false | false | attention-relative carrier 的稳定摘要。 |
-| quality_metric_count | method | none | false | false | false | attention update 质量代理指标数量。 |
-| quality_metric_name | method | none | false | false | false | attention update 质量代理指标名称。 |
-| quality_metric_value | method | none | false | false | false | attention update 质量代理指标数值。 |
-| quality_metric_source | method | none | false | false | false | attention update 质量指标来源。 |
+| quality_metric_name | metric | none | true | true | false | 数据集级正式质量指标名称, 当前精确取 FID 或 KID。 |
+| quality_metric_value | metric | none | true | true | false | 从真实生成图像与真实参考图像特征计算的 FID 或 KID 数值。 |
 | image_quality_metrics_ready | method | none | false | false | false | 是否已经完成真实图像质量指标测量。 |
-| full_method_claim_ready | method | none | false | false | false | 是否允许把 attention-relative update 写入 Full 方法主张。当前本地重建保持 false。 |
+| full_method_claim_ready | governance | none | true | true | false | 主方法真实生成、攻击、仅图像检测和科学算子门禁是否共同支持当前论文层级结论。 |
 | selected_attention_carrier_id | method | none | true | false | false | 真实 attention latent injection 中选用的 active carrier 标识。 |
 | attention_geometry_package_path | artifact | none | true | false | false | 真实 attention latent injection 使用的 geometry 输入包路径。 |
 | method_manifest_path | artifact | none | true | false | false | 真实运行引用的 attention latent update 方法 manifest 路径。 |
@@ -534,7 +526,7 @@ Notebook 与 repository module 的跨边界数据
 | observed_fpr | metric | none | false | false | false | 阈值冻结数据上的实际 FPR。 |
 | threshold_tie_count | metric | none | false | false | false | 与冻结阈值数值相同的样本数量。 |
 | threshold_degenerate | metric | none | false | false | false | 阈值是否存在退化或并列导致的 FPR 风险。 |
-| threshold_source | protocol | none | false | false | false | 阈值来源, 正式协议应为 calibration clean negative。 |
+| threshold_source | protocol | none | false | false | false | 阈值来源。主方法使用 calibration clean negative 联合冻结完整 evidence 协议, 正式 FPR 由独立 test clean negative 经验值及单侧 Wilson 上界支持; 外部 baseline 可使用其受审计的固定 score-map conformal 阈值。 |
 | evaluation_split | protocol | none | false | false | false | 正式结果指标所属的数据划分, 论文比较记录必须为 test, 不得混入 calibration 或 dev。 |
 | rescue_window_frozen | protocol | none | false | false | false | rescue window 是否已冻结。 |
 | fail_reason_gate_frozen | protocol | none | false | false | false | fail reason gate 是否已冻结。 |
@@ -567,10 +559,6 @@ Notebook 与 repository module 的跨边界数据
 | metric_value | metric | none | false | false | false | 常规指标数值。 |
 | metric_source | metric | none | false | false | false | 常规指标来源。 |
 | metric_status | metric | none | false | false | false | 指标状态, 例如 measured 或 unsupported。 |
-| roc_threshold | metric | none | false | false | false | ROC 曲线点对应阈值。 |
-| det_threshold | metric | none | false | false | false | DET 曲线点对应阈值。 |
-| det_false_positive_rate | metric | none | false | false | false | DET 曲线点中的 false positive rate。 |
-| det_false_negative_rate | metric | none | false | false | false | DET 曲线点中的 false negative rate。 |
 | fpr_exceeds_target | metric | none | false | false | false | 某一 FPR 审计口径是否超过目标 FPR。 |
 | decision_scope | metric | none | false | false | false | FPR 审计中的判定范围。 |
 | claim_id | claim | none | false | true | false | claim 审计表中的声明标识。 |
@@ -642,14 +630,14 @@ Notebook 与 repository module 的跨边界数据
 | attack_record_count | metric | none | false | false | false | 攻击矩阵检测 records 数量。 |
 | attack_config_count | metric | none | false | false | false | 攻击矩阵配置数量。 |
 | attack_family_count | metric | none | false | false | false | 攻击矩阵中唯一攻击族数量。 |
-| supported_record_count | metric | none | false | false | false | 已执行本地代理攻击并可进入表格统计的记录数量。 |
+| supported_record_count | metric | none | false | false | false | 具备真实正式证据并可进入当前论文表格统计的记录数量。 |
 | unsupported_record_count | metric | none | false | false | false | 因真实资源或输入缺失而不能进入本地统计的记录数量。 |
 | gpu_attack_unsupported_count | metric | none | false | false | false | 需要真实 GPU 但当前尚未由真实 formal records 覆盖的攻击类型数量。 |
 | attack_manifest_path | artifact | none | true | false | false | 攻击矩阵专用 manifest 路径。 |
-| attack_metrics_ready | artifact | none | false | false | false | 攻击矩阵常规攻击本地统计是否可重建。 |
+| attack_metrics_ready | artifact | none | false | false | false | 完整正式攻击矩阵的真实检测指标是否可从记录重建。 |
 | clean_false_positive_rate | metric | none | false | false | false | clean negative 在攻击矩阵统计中的 false positive rate。 |
 | attacked_false_positive_rate | metric | none | false | false | false | attacked negative 在攻击矩阵统计中的 false positive rate。 |
-| score_retention_mean | metric | none | false | false | false | 单一检测器内部的攻击前后分数稳定性诊断均值, 不用于跨方法正式比较。 |
+| score_retention_mean | metric | none | false | false | false | 单一检测器内部的攻击前后分数稳定性诊断均值, 合法范围为 [0,1], 不用于跨方法正式比较. |
 | geometry_reliable_rate | metric | none | false | false | false | 攻击分组内几何可靠记录比例。 |
 | rescue_rate | metric | none | false | false | false | 攻击分组内 rescue_applied 比例。 |
 | input_manifests | artifact | none | false | false | false | 攻击矩阵或重建 manifest 引用的输入 manifest 集合。 |
@@ -658,8 +646,7 @@ Notebook 与 repository module 的跨边界数据
 | input_threshold_report_path | artifact | none | true | false | false | 攻击矩阵重建读取的阈值边界报告路径。 |
 | real_attack_records_path | artifact | none | false | false | false | 攻击矩阵可选读取的真实 attacked image formal records JSONL 路径。 |
 | formal_real_attack_record_count | metric | none | false | false | false | 已并入攻击矩阵的真实 attacked image formal detection record 数量。 |
-| attacked_images_dir | artifact | none | true | false | false | 攻击后图像或本地攻击代理登记目录。 |
-| performed_attack_record_count | metric | none | false | false | false | 已执行本地攻击代理的记录数量。 |
+| performed_attack_record_count | metric | none | false | false | false | 已由真实攻击图像与真实仅图像检测闭环产生的记录数量。 |
 | gpu_attack_real_measurement_missing_count | metric | none | false | false | false | 默认再扩散攻击清单中尚未由真实 GPU formal records 覆盖的攻击类型数量。 |
 | resource_profiles | protocol | none | false | false | false | 攻击矩阵中出现的资源档位集合。 |
 | conventional_attack_names | protocol | none | false | false | false | 当前攻击矩阵登记的常规攻击名称集合。 |
@@ -706,7 +693,7 @@ Notebook 与 repository module 的跨边界数据
 | comparison_protocol_ready | protocol | none | false | false | false | 外部 baseline 对比所需共同协议边界是否已经可审计。 |
 | attack_manifest_supports_paper_claim | claim | none | false | false | false | 外部 baseline 对比输入的攻击矩阵 manifest 是否支持论文主张。 |
 | method_id | protocol | none | true | false | false | 对比表中的方法标识。 |
-| method_role | protocol | none | true | false | false | 对比表中的方法角色, 例如当前方法本地代理或外部 baseline。 |
+| method_role | protocol | none | true | false | false | 对比表中的方法角色, 精确区分 proposed_method 与 primary_baseline。 |
 | comparison_scope | protocol | none | true | false | false | 对比表行对应的统计或协议范围。 |
 | ablation_record_id | protocol | none | true | false | false | 内部消融 record 的稳定标识。 |
 | ablation_record_digest | artifact | none | true | false | false | 内部消融 record payload 的稳定摘要。 |
@@ -716,18 +703,12 @@ Notebook 与 repository module 的跨边界数据
 | ablated_mechanism | protocol | none | true | false | false | 被关闭或替换的具体机制。 |
 | mechanism_change | protocol | none | true | false | false | 消融配置实际施加的机制改变。 |
 | mechanism_change_digest | artifact | none | true | false | false | 消融机制改变配置的稳定摘要。 |
-| baseline_evidence_decision | metric | none | true | false | false | 完整方法代理记录中的 evidence 判定。 |
 | ablated_evidence_decision | metric | none | true | false | false | 消融后在相同 fixed-FPR 边界下的 evidence 判定。 |
 | ablated_detection_decision | metric | none | true | false | false | 消融后同时考虑 attestation gate 的最终检测判定。 |
-| baseline_score_retention | metric | none | true | false | false | 完整方法代理记录中的 score retention。 |
 | ablated_score_retention | metric | none | true | false | false | 消融后重新计算的 score retention。 |
-| baseline_lf_score_retention | metric | none | true | false | false | 完整方法代理记录中的 LF score retention。 |
 | ablated_lf_score_retention | metric | none | true | false | false | 消融后重新计算的 LF score retention。 |
-| baseline_tail_score_retention | metric | none | true | false | false | 完整方法代理记录中的高斯幅值尾部截断 score retention。 |
 | ablated_tail_score_retention | metric | none | true | false | false | 消融后重新计算的高斯幅值尾部截断 score retention。 |
-| baseline_geometry_reliable | metric | none | true | false | false | 完整方法代理记录中的几何可靠性。 |
 | ablated_geometry_reliable | metric | none | true | false | false | 消融后重新计算的几何可靠性。 |
-| baseline_rescue_applied | metric | none | true | false | false | 完整方法代理记录中的 rescue 触发状态。 |
 | ablated_rescue_applied | metric | none | true | false | false | 消融后重新计算的 rescue 触发状态。 |
 | ablated_raw_content_score_after | metric | none | true | false | false | 消融后攻击后的 raw content score。 |
 | ablated_aligned_content_score_after | metric | none | true | false | false | 消融后攻击后的 aligned content score。 |
@@ -982,8 +963,7 @@ Notebook 与 repository module 的跨边界数据
 | required_input_count | metric | none | false | false | false | 投稿就绪门禁中待补齐输入总数。 |
 | release_profile_count | metric | none | false | false | false | 投稿就绪门禁中审计的 release profile 数量。 |
 | limitations | governance | none | false | false | false | 投稿就绪门禁报告中显式列出的适用边界和限制。 |
-| entry_review_ready | governance | none | false | false | false | 论文投稿级证据闭合入口审计是否已生成可审计判定。 |
-| user_audit_required | governance | none | false | false | false | 是否需要用户审计后再决定是否进入论文投稿级证据闭合。 |
+| entry_review_ready | governance | none | false | false | false | 论文投稿级证据闭合入口审计是否已生成确定性判定。 |
 | evidence_closure_allowed | governance | none | false | false | false | 当前受治理证据是否允许进入论文投稿级证据闭合。 |
 | entry_review_decision | governance | none | false | false | false | 证据闭合入口审计的总体判定。 |
 | review_item_count | metric | none | false | false | false | 证据闭合入口审计清单中的检查项数量。 |
@@ -994,8 +974,7 @@ Notebook 与 repository module 的跨边界数据
 | review_status | governance | none | false | false | false | 证据闭合入口审计清单中单项检查状态。 |
 | source_artifact | artifact | none | false | false | false | 单项入口审计检查依据的受治理产物路径。 |
 | blocker_reason | governance | none | false | false | false | 单项入口审计检查未通过时的阻断原因。 |
-| user_audit_note | governance | none | false | false | false | 提供给用户审计入口检查项时使用的说明。 |
-| user_audit_question | governance | none | false | false | false | 证据闭合入口报告中需要用户审计的问题说明。 |
+| audit_note | governance | none | false | false | false | 解释单项入口审计的检查内容与受治理证据边界。 |
 | threshold_calibration_ready | artifact | none | false | false | false | threshold calibration 结果是否已经生成可供下游读取的阈值与审计产物。 |
 | geometric_rescue_ready | artifact | none | false | false | false | 几何恢复记录是否已经由前序结果包重建并满足下游阈值校准输入要求。 |
 | geometric_rescue_record_count | metric | none | false | false | false | 本次 threshold calibration workflow 重建得到的几何恢复记录数量。 |
@@ -1132,7 +1111,6 @@ Notebook 与 repository module 的跨边界数据
 | validation_report_digest | artifact | none | false | false | false | 主表 external baseline 候选校验报告的稳定摘要。|
 | formal_import_readiness_digest | artifact | none | false | false | false | 主表 external baseline 正式导入 readiness 表的稳定摘要。|
 | formal_import_readiness_summary_digest | artifact | none | false | false | false | 主表 external baseline 正式导入 readiness 摘要的稳定摘要。|
-| method_resource_profile | protocol | none | false | false | false | 方法忠实 adapter 候选记录声明的资源配置名称。|
 | paper_claim_boundary | governance | none | false | false | false | 当前证据与正式论文 claim 之间的边界说明。|
 | covered_primary_baseline_count | metric | none | false | false | false | 小样本证据已覆盖的主表 external baseline 数量。|
 | covered_primary_baseline_ids | protocol | none | false | false | false | 小样本证据已覆盖的主表 external baseline id 集合。|
@@ -1180,13 +1158,13 @@ Notebook 与 repository module 的跨边界数据
 | primary_baseline_prompt_plan_path | artifact | none | false | false | false | 当前单个 common-backbone method-faithful adapter 读取的完整受治理 Prompt 计划路径。|
 | primary_baseline_evidence_id | artifact | none | true | false | false | 主表 external baseline 证据边界记录的稳定标识。|
 | primary_baseline_evidence_digest | artifact | none | true | false | false | 主表 external baseline 证据边界记录的稳定摘要。|
-| adapter_smoke_ready | artifact | none | false | false | false | 单个主表 external baseline 的 adapter smoke 命令是否成功并产生 observation。|
-| adapter_smoke_ready_count | metric | none | false | false | false | adapter smoke 已成功的主表 external baseline 数量。|
-| adapter_smoke_ready_ids | protocol | none | false | false | false | adapter smoke 已成功的主表 external baseline id 集合。|
-| adapter_smoke_observation_count | metric | none | false | false | false | 单个主表 external baseline 在 method-faithful 链路中产生的 observation 数量。|
-| adapter_smoke_execution_devices | runtime | none | false | false | false | 单个主表 external baseline method-faithful observation 中记录的执行设备集合。|
-| adapter_smoke_sample_roles | protocol | none | false | false | false | 单个主表 external baseline method-faithful observation 中记录的样本角色集合。|
-| adapter_smoke_latent_shapes | runtime | none | false | false | false | 单个主表 external baseline method-faithful observation 中记录的 latent shape 集合。|
+| adapter_run_ready | artifact | none | false | false | false | 单个主表 external baseline 的真实 adapter 命令是否成功并产生正式 observation。|
+| adapter_run_ready_count | metric | none | false | false | false | 真实 adapter 运行已成功的主表 external baseline 数量。|
+| adapter_run_ready_ids | protocol | none | false | false | false | 真实 adapter 运行已成功的主表 external baseline id 集合。|
+| adapter_run_observation_count | metric | none | false | false | false | 单个主表 external baseline 在 method-faithful 链路中产生的 observation 数量。|
+| adapter_run_execution_devices | runtime | none | false | false | false | 单个主表 external baseline method-faithful observation 中记录的执行设备集合。|
+| adapter_run_sample_roles | protocol | none | false | false | false | 单个主表 external baseline method-faithful observation 中记录的样本角色集合。|
+| adapter_run_latent_shapes | runtime | none | false | false | false | 单个主表 external baseline method-faithful observation 中记录的 latent shape 集合。|
 | method_faithful_adapter_ready | governance | none | false | false | false | 主表 external baseline 是否已达到方法忠实 SD3.5 适配边界。|
 | method_faithful_adapter_status_id | artifact | none | true | false | false | 主表 external baseline 方法忠实适配协议状态记录的稳定标识。|
 | method_faithful_adapter_status_digest | artifact | none | true | false | false | 主表 external baseline 方法忠实适配协议状态记录的稳定摘要。|
@@ -1287,11 +1265,15 @@ Notebook 与 repository module 的跨边界数据
 | detection_decision_ready | governance | none | true | false | false | observation 的逐条检测判定是否与独立重算的冻结阈值判定完全一致。 |
 | split_count_ready | governance | none | true | false | false | 单方法 calibration 与 test clean negative 数量是否与当前论文层级的固定划分完全一致。 |
 | fixed_fpr_threshold_ready | governance | none | true | false | false | 单方法是否通过目标值、阈值重算、逐条判定与样本数量联合门禁。 |
+| observation_source_sha256 | provenance | none | true | true | false | 单方法 fixed-FPR 阈值审计实际读取的 observation 文件字节 SHA-256。 |
 | expected_method_ids | protocol | none | false | false | false | 统一 fixed-FPR 阈值审计必须覆盖的精确方法标识集合。 |
 | audited_method_ids | protocol | none | false | false | false | 统一 fixed-FPR 阈值审计实际覆盖的方法标识序列。 |
 | audited_method_count | metric | none | false | false | false | 统一 fixed-FPR 阈值审计实际核验的方法数量。 |
 | method_identity_ready | governance | none | false | false | false | 实际方法标识是否无重复且与受治理方法集合完全相等。 |
 | all_method_thresholds_ready | governance | none | false | false | false | 主方法与四个外部 baseline 是否全部通过各自的独立阈值重算门禁。 |
+| method_observation_source_sha256_map | provenance | none | true | true | false | 五方法身份到实际 observation 文件字节 SHA-256 的精确映射。 |
+| threshold_audit_rows_digest | provenance | none | true | true | false | 对按方法身份规范排序的完整 fixed-FPR 阈值审计行计算的稳定 SHA-256 摘要。 |
+| threshold_observation_binding_ready | governance | none | false | false | false | 五方法身份、observation 文件字节摘要与冻结阈值摘要是否形成无缺失且格式有效的精确绑定。 |
 | fixed_fpr_threshold_audit_ready | governance | none | false | false | false | 五个方法的身份、目标 FPR、冻结阈值和逐条判定是否共同完成正式证据审计。 |
 | pilot_paper_common_protocol_ready | governance | none | false | false | false | pilot_paper 级 fixed-FPR 共同协议是否完成运行前治理冻结。|
 | pilot_paper_prompt_count | metric | none | false | false | false | pilot_paper prompt split 中的 prompt 数量。|
@@ -1350,21 +1332,23 @@ Notebook 与 repository module 的跨边界数据
 | prompt_split_digest | artifact | none | false | false | false | 共同协议使用的 prompt split 稳定摘要。|
 | attack_matrix_digest | artifact | none | false | false | false | 共同协议使用的攻击矩阵稳定摘要。|
 | fixed_fpr_protocol_digest | artifact | none | false | false | false | fixed-FPR 校准协议的稳定摘要。|
-| confidence_interval_method | protocol | none | false | false | false | `[0, 1]` 样本均值使用的分布无关置信区间方法, 当前固定为 `bounded_hoeffding`。|
+| confidence_interval_method | protocol | none | false | false | false | 显式有界样本均值使用的分布无关置信区间方法, 当前固定为 `bounded_hoeffding`, 区间宽度由对应指标的上下界决定.|
 | confidence_level | protocol | none | false | false | false | 置信区间使用的置信水平。|
 | result_scope | protocol | none | false | false | false | 结果记录所属的共同协议范围。|
 | result_claim_scope | governance | none | false | false | false | 结果记录允许支撑的声明范围。|
 | governed_import_required | governance | none | false | false | false | 方法结果是否必须通过受治理导入协议进入对比表。|
 | method_ids | protocol | none | false | false | false | 当前共同协议要求覆盖的方法 id 集合。|
 | required_rate_fields | protocol | none | false | false | false | 导入 schema 要求按 [0,1] 率值校验的字段集合。|
-| ci_field_groups | protocol | none | false | false | false | 导入 schema 中 metric 与置信区间上下界的字段组合。|
+| metric_bounds | protocol | none | false | false | false | 导入 schema 为每个正式指标声明数学上下界, 检测率与分数保持率使用 [0,1], SSIM 质量均值使用 [-1,1].|
+| ci_field_groups | protocol | none | false | false | false | 导入 schema 中 metric 与置信区间字段组合, 每组区间必须服从 `metric_bounds` 声明的范围.|
+| ci_count_fields | protocol | none | false | false | false | 导入 schema 为每个置信区间指标声明原始样本计数字段, 用于精确重建 bounded Hoeffding 区间.|
 | pilot_paper_result_template_id | artifact | none | true | false | false | pilot_paper 共同协议结果导入模板行的稳定标识。|
 | pilot_paper_result_template_digest | artifact | none | true | false | false | pilot_paper 共同协议结果导入模板行的稳定摘要。|
-| quality_score_mean | metric | none | true | false | false | 当前论文运行层级共同协议中 attacked positive 的实测 SSIM 均值, 合法范围为 [-1, 1]。|
-| quality_score_ci_low | metric | none | true | false | false | pilot_paper 图像质量分数置信区间下界。|
-| quality_score_ci_high | metric | none | true | false | false | pilot_paper 图像质量分数置信区间上界。|
-| score_retention_ci_low | metric | none | true | false | false | pilot_paper 攻击后分数保持率置信区间下界。|
-| score_retention_ci_high | metric | none | true | false | false | pilot_paper 攻击后分数保持率置信区间上界。|
+| quality_score_mean | metric | none | true | false | false | 当前论文运行层级共同协议中 attacked positive 的实测 SSIM 均值, 合法范围为 [-1,1], 不执行 [0,1] 裁剪.|
+| quality_score_ci_low | metric | none | true | false | false | SSIM 均值 Hoeffding 置信区间下界, 使用 [-1,1] 观测范围和 range_width=2.|
+| quality_score_ci_high | metric | none | true | false | false | SSIM 均值 Hoeffding 置信区间上界, 使用 [-1,1] 观测范围和 range_width=2.|
+| score_retention_ci_low | metric | none | true | false | false | 攻击后分数保持率 Hoeffding 置信区间下界, 使用 [0,1] 观测范围和 range_width=1.|
+| score_retention_ci_high | metric | none | true | false | false | 攻击后分数保持率 Hoeffding 置信区间上界, 使用 [0,1] 观测范围和 range_width=1.|
 | baseline_formal_import_record_accepted | governance | none | true | false | false | 外部 baseline 候选记录是否已经被主表受治理导入报告接受。|
 | template_covered | governance | none | true | false | false | 单个 pilot_paper method × attack 模板是否已被结果记录覆盖。|
 | pilot_paper_result_record_digest | artifact | none | true | false | false | pilot_paper 共同协议结果记录的稳定摘要。|
@@ -1376,8 +1360,6 @@ Notebook 与 repository module 的跨边界数据
 | attacked_image_rescore_ready | governance | none | true | false | false | attacked image 直接水印重检测是否覆盖当前闭环内全部真实 attacked image。|
 | attacked_image_rescore_performed | governance | none | true | false | false | 是否已经对 attacked image 执行直接水印重检测。|
 | attacked_image_rescore_required_for_claim | governance | none | true | false | false | 当前记录若要支撑论文主张是否仍需要 attacked image 直接水印重检测。|
-| detection_score_source | governance | none | true | false | false | 攻击后检测分数的来源, 用于区分真实重检测、latent score 传播或图像质量保持率代理。|
-| retention_source_field | governance | none | true | false | false | 图像质量保持率代理使用的源字段名称。|
 | same_threshold_rescue_source | governance | none | true | false | false | same-threshold 几何恢复重判所使用的分数来源边界。|
 | attacked_latent_projection_digest | artifact | none | true | false | false | attacked image 经 VAE 编码和槽位投影后的稳定摘要。|
 | watermark_coordinate | metric | none | true | false | false | attacked image latent 投影在 source clean-to-aligned 水印方向上的无界坐标。|
@@ -1546,7 +1528,7 @@ Notebook 与 repository module 的跨边界数据
 | source_to_evaluated_psnr | metric | none | true | true | false | 单条检测记录从 source 图像到实际 evaluated 图像的 PSNR。 |
 | source_to_evaluated_mse | metric | none | true | true | false | 单条检测记录从 source 图像到实际 evaluated 图像的均方误差。 |
 | source_to_evaluated_ssim_mean | metric | none | true | true | false | 同一攻击与角色下 source-to-evaluated SSIM 均值。 |
-| source_to_evaluated_psnr_mean | metric | none | true | true | false | 同一攻击与角色下有限 PSNR 均值。 |
+| source_to_evaluated_psnr_mean | metric | none | true | true | false | 同一攻击与角色下全量 PSNR 均值; 全组图像均完全一致且每条 MSE 为0时允许为正无穷, 不允许选择性忽略样本或混合有限值与正无穷。 |
 | attacked_positive_source_to_attacked_ssim_mean | metric | none | true | true | false | 攻击后 watermarked positive 相对其未攻击 source 的 SSIM 均值。 |
 | package_family | provenance | none | true | false | false | CPU 论文闭合输入锁中记录的唯一上游结果包职责族。 |
 | package_path | artifact | none | true | false | false | CPU 论文闭合选择后冻结的上游 ZIP 显式绝对路径。 |
@@ -1614,6 +1596,16 @@ Notebook 与 repository module 的跨边界数据
 | registry_prompt_id_digest | provenance | none | false | false | false | 数据集质量 registry 实际 Prompt 标识集合的稳定摘要。 |
 | prompt_registry_exact_set_ready | governance | none | false | false | false | 质量 registry 是否无缺失、无额外、无重复地一对一覆盖当前 Prompt 集。 |
 | expected_prompt_id_digest | provenance | none | false | false | false | 结果闭合门禁从当前受治理 Prompt 文件独立重算的标识集合摘要。 |
+| expected_prompt_split_digest | provenance | none | false | false | false | 结果闭合门禁从当前 Prompt 文件和规范划分规则独立重算的完整 split 摘要。 |
+| expected_calibration_prompt_id_digest | provenance | none | false | false | false | 结果闭合门禁从当前 Prompt 文件独立重算的 calibration Prompt 标识集合摘要。 |
+| expected_test_prompt_id_digest | provenance | none | false | false | false | 结果闭合门禁从当前受治理 Prompt 文件独立重算的规范 test split 标识集合摘要。 |
+| calibration_prompt_id_digest | provenance | none | true | false | false | 共同协议从当前受治理 Prompt 文件重算的 calibration Prompt 标识集合摘要。 |
+| attack_detection_records | artifact | none | false | false | false | 结果闭合门禁实际读取并逐条复验身份与摘要的正式攻击检测记录集合。 |
+| attacked_image_registry | artifact | none | false | false | false | 结果闭合门禁实际读取并与攻击检测记录精确投影比对的 attacked image registry。 |
+| result_record_validation_report | artifact | none | false | false | false | 正式 result records 的 schema validation 报告, 最终门禁会独立重算并精确比对。 |
+| result_record_template_coverage | artifact | none | false | false | false | 正式 method x attack 六元身份模板覆盖表, 最终门禁会按规范注册表重建。 |
+| require_existing_evidence | protocol | none | false | false | false | result record 构造时是否要求每个 evidence path 已存在, 并进入 manifest 配置摘要。 |
+| test_prompt_id_digest | provenance | none | true | false | false | 共同协议从受治理 Prompt 文件当前 test split 独立重算的标识集合摘要。 |
 | dataset_quality_feature_records_sha256 | provenance | none | false | false | false | 结果闭合门禁对规范正式特征 JSONL 文件独立计算的字节摘要。 |
 | common_code_version | provenance | none | true | false | false | CPU 结果闭合输入锁中10个上游结果包共享的规范化 clean Git 提交标识。 |
 | closure_input_common_code_version_ready | governance | none | false | false | false | 完整结果打包前逐包代码版本是否均为同一规范化 clean Git 提交。 |
@@ -1628,3 +1620,160 @@ Notebook 与 repository module 的跨边界数据
 | result_closure_gate_code_version_ready | governance | none | false | false | false | Gate manifest 代码版本是否为输入锁绑定的同一 clean Git 提交。 |
 | current_repository_code_version | provenance | none | false | false | false | 完整结果打包当下仓库的规范化 clean Git 提交标识。 |
 | current_repository_code_version_ready | governance | none | false | false | false | 完整结果打包当下仓库是否仍为输入锁绑定的同一 clean Git 提交且工作区无修改。 |
+| observation_id | protocol | none | true | false | false | 分数分布表中一条仅图像检测 observation 的稳定标识。 |
+| sample_scope | protocol | none | true | true | false | 连续检测统计所属的 test overall 或单一攻击条件范围。 |
+| binary_label | metric | none | true | true | false | 由正式 sample role 映射得到的二分类真实标签, 阳性为1且阴性为0。 |
+| score | metric | none | true | true | false | 与内容主判及冻结几何救回布尔决策等价的连续检测分数。 |
+| curve_point_index | metric | none | true | true | false | 同一 sample scope 内按阈值从高到低排列的确定性曲线点序号。 |
+| threshold_kind | protocol | none | true | true | false | 曲线阈值是正无穷端点、唯一观测分数还是负无穷端点。 |
+| tp | metric | none | true | true | false | 当前阈值下真实阳性且预测阳性的记录数。 |
+| fp | metric | none | true | true | false | 当前阈值下真实阴性但预测阳性的记录数。 |
+| tn | metric | none | true | true | false | 当前阈值下真实阴性且预测阴性的记录数。 |
+| fn | metric | none | true | true | false | 当前阈值下真实阳性但预测阴性的记录数。 |
+| tpr | metric | none | true | true | false | 当前阈值下由 TP 和 FN 计算的真正率。 |
+| fpr | metric | none | true | true | false | 当前阈值下由 FP 和 TN 计算的假正率。 |
+| fnr | metric | none | true | true | false | 当前阈值下由 FN 和 TP 计算的假负率。 |
+| sample_count | metric | none | true | true | false | 当前曲线 scope 同时参与统计的正负 observation 总数。 |
+| score_distribution_row_count | metric | none | true | false | false | 当前仅图像运行写出的记录级连续分数分布行数。 |
+| roc_curve_point_count | metric | none | true | false | false | 当前仅图像运行由完整唯一分数阈值 sweep 写出的 ROC 点数。 |
+| det_curve_point_count | metric | none | true | false | false | 当前仅图像运行由完整唯一分数阈值 sweep 写出的 DET 点数。 |
+| detection_curve_data_ready | governance | none | true | false | false | 分数分布、ROC 与 DET 三张实际数据表是否均非空生成。 |
+| artifact_data_validation | governance | none | true | false | false | 论文证据 bundle 中实际表图数据验证报告的结构化内容。 |
+| artifact_data_validation_ready | governance | none | true | false | false | 论文审计要求的11类实际数据文件及 ready 一致性是否全部通过。 |
+| raw_image_only_detection_records_ready | governance | none | true | false | false | 仅图像盲检原始 JSONL 是否存在、非空且可作为分数分布、ROC 与 DET 的共同重建来源。 |
+| frozen_evidence_protocol_ready | governance | none | true | false | false | 冻结 evidence protocol 文件是否存在且通过正式内容校验。 |
+| test_detection_metrics_ready | governance | none | true | false | false | test detection metrics 是否可由原始记录重建并通过内容校验。 |
+| score_distribution_table_ready | governance | none | true | false | false | 记录级连续分数分布表是否与原始仅图像检测记录完全一致。 |
+| roc_curve_points_ready | governance | none | true | false | false | ROC 点表是否可由原始连续分数和标签精确重建。 |
+| det_curve_points_ready | governance | none | true | false | false | DET 点表是否可由原始连续分数和标签精确重建。 |
+| attack_family_metrics_ready | governance | none | true | false | false | 攻击族指标表是否存在且通过正式数值与身份校验。 |
+| baseline_comparison_table_ready | governance | none | true | false | false | 主表 baseline 对比表是否存在且通过正式内容校验。 |
+| mechanism_ablation_metrics_ready | governance | none | true | false | false | 机制消融指标表是否存在且通过正式内容校验。 |
+| mechanism_pairwise_delta_ready | governance | none | true | false | false | 机制成对差值表是否存在且通过正式内容校验。 |
+| dataset_quality_metrics_ready | governance | none | true | false | false | 正式 FID/KID 数据集质量表是否存在且通过内容校验。 |
+| raw_image_only_detection_records_sha256 | provenance | none | true | false | false | 论文表图重建实际读取的仅图像盲检原始 JSONL 字节 SHA-256。 |
+| artifact_data_check_count | metric | none | true | false | false | 实际论文表图数据验证执行的文件与跨摘要一致性检查总数。 |
+| blocked_artifact_data_count | metric | none | true | false | false | 未通过实际内容验证的论文表图数据检查数量。 |
+| blocked_artifact_data_ids | governance | none | true | false | false | 未通过实际内容验证的表图数据检查稳定标识集合。 |
+| data_ready | governance | none | true | false | false | 单项实际数据检查是否通过文件、schema、数值和统计约束。 |
+| row_count | metric | none | true | false | false | 单项实际数据检查读取并验证的记录行数。 |
+| issues | governance | none | true | false | false | 单项实际数据检查发现的具体阻断原因集合。 |
+| ready_flag_consistency_ready | governance | none | true | false | false | 上游关键 ready 标记是否均有对应实际数据检查支撑。 |
+| evidence_source_file_sha256 | provenance | none | true | false | false | 论文证据审计实际读取的11类源文件路径到字节级 SHA-256 的映射。 |
+| artifact_data_validation_digest | provenance | none | true | false | false | 对实际表图数据验证报告执行规范序列化得到的稳定摘要。 |
+| official_reference_fidelity_record_id | protocol | none | true | false | false | 单个 official-reference 方法忠实度证据记录的稳定标识。 |
+| official_reference_fidelity_record_digest | provenance | none | true | false | false | 单个 official-reference 方法忠实度证据记录核心内容的稳定摘要。 |
+| supplemental_table_role | protocol | none | true | false | false | 官方原始环境复现记录的补充表职责; 当前方法忠实度证据固定为 supplemental_method_fidelity_reference。 |
+| reference_import_ready | governance | none | true | false | false | 官方参考 governed import 是否接受全部输入记录且没有 schema issue。 |
+| governed_reference_record_count | metric | none | true | false | false | 单个官方参考运行写出的受治理补充记录数量。 |
+| main_table_eligible | governance | none | true | false | false | 当前记录或证据是否允许进入 common-backbone 主表; official-reference 忠实度证据必须为 false。 |
+| official_reference_ready | governance | none | true | false | false | 当前官方原始环境复现 summary 是否通过方法自身 ready 门禁。 |
+| records_nonempty_ready | governance | none | true | false | false | 当前 official-reference JSONL 是否包含至少一条有效 object 记录。 |
+| records_baseline_identity_ready | governance | none | true | false | false | 当前 official-reference JSONL 的全部记录是否绑定同一预期 baseline 身份。 |
+| validation_zero_rejection_ready | governance | none | true | false | false | 当前 official-reference validation 是否没有拒绝记录或 schema issue, 且 accepted records 与实际 JSONL 一致。 |
+| run_manifest_ready | governance | none | true | false | false | 当前运行 manifest 的 artifact 身份、输出绑定、决策和补充证据边界是否通过。 |
+| package_input_exact_set_ready | governance | none | true | false | false | Package input manifest 的动态 entry 是否精确等于当前 run 已物化文件集合, 且排除后写入的三类归档治理文件。 |
+| package_input_digests_ready | governance | none | true | false | false | Package input manifest 的逐文件 SHA-256 是否可由当前已物化文件重算。 |
+| package_governance_semantics_ready | governance | none | true | false | false | Package input、archive summary 与 archive manifest 是否符合 producer 的动态 entry 和后写入治理语义。 |
+| source_code_version_consistent_ready | governance | none | true | false | false | 同一 official-reference family 的运行 manifest 与归档 manifest 是否共享同一 clean Git 提交标识。 |
+| declared_package_entry_count | metric | none | true | false | false | 当前 official-reference package input manifest 声明的动态 entry 数量。 |
+| official_reference_package_entry_digest | provenance | none | true | false | false | 当前 official-reference 动态 entry 路径及其 SHA-256 映射的稳定摘要。 |
+| official_reference_source_paths | artifact | none | true | false | false | 单方法忠实度证据实际读取的 summary、manifest、records、validation 和归档治理路径映射。 |
+| official_reference_source_artifact_digests | provenance | none | true | false | false | 单方法或三方法摘要实际读取的 official-reference 文件字节 SHA-256 映射。 |
+| supports_main_table_superiority_claim | governance | none | true | false | false | 当前证据是否允许支持 common-backbone 主表优势结论; official-reference 忠实度证据必须为 false。 |
+| supplemental_method_fidelity_evidence_ready | governance | none | true | true | false | 精确官方参考证据是否足以支持补充方法忠实度披露, 不表示主表优势。 |
+| official_reference_fidelity_evidence_ready | governance | none | true | true | false | 三个固定 official-reference family 是否共同通过身份、validation、package 摘要、归档治理和 clean 代码版本门禁。 |
+| expected_official_reference_baseline_ids | protocol | none | false | false | false | 方法忠实度审计唯一允许的 Tree-Ring、Gaussian Shading 和 Shallow Diffuse 身份序列。 |
+| actual_official_reference_baseline_ids | protocol | none | false | false | false | 当前方法忠实度审计实际生成证据记录的方法身份序列。 |
+| missing_official_reference_baseline_ids | governance | none | false | false | false | 当前方法忠实度证据相对固定三方法集合缺失的方法身份。 |
+| unexpected_official_reference_baseline_ids | governance | none | false | false | false | 当前方法忠实度证据中不属于固定三方法集合的方法身份。 |
+| duplicate_official_reference_baseline_ids | governance | none | false | false | false | 当前方法忠实度证据中重复出现的方法身份。 |
+| official_reference_exact_set_ready | governance | none | false | false | false | 方法忠实度证据是否无缺失、无额外、无重复地覆盖固定三个 official-reference family。 |
+| official_reference_fidelity_record_count | metric | none | false | false | false | 方法忠实度证据实际写出的逐方法记录数量, 闭合值为3。 |
+| official_reference_fidelity_ready_count | metric | none | false | false | false | 方法忠实度证据中通过全部单方法门禁的记录数量, 闭合值为3。 |
+| common_code_version_ready | governance | none | false | false | false | 三个 official-reference family 是否共享同一规范化 clean Git 提交标识。 |
+| official_reference_fidelity_evidence_digest | provenance | none | false | false | false | 精确三方法忠实度证据记录列表的稳定摘要。 |
+| method_threshold_digest | provenance | none | true | true | false | 单条正式论文结果记录绑定的当前方法冻结 fixed-FPR 阈值 SHA-256 摘要。 |
+| method_threshold_digest_map | provenance | none | true | true | false | 方法身份到唯一冻结阈值摘要的精确映射; 正式结果必须覆盖 SLM-WM 与4个主表 baseline。 |
+| method_threshold_digest_map_ready | governance | none | true | false | false | Formal import 是否为4个主表 baseline 建立无缺失、无额外且逐方法唯一的阈值摘要映射。 |
+| result_record_set_digest | provenance | none | true | true | false | 对按方法、资源配置和攻击身份稳定排序后的完整正式结果记录集合计算的 SHA-256 摘要。 |
+| primary_baseline_evidence_records_digest | provenance | none | true | true | false | 对精确4个 primary baseline 证据记录按方法身份排序后计算的稳定摘要。 |
+| formal_evidence_paths | artifact | none | true | false | false | 单个 primary baseline 证据记录实际绑定的 observation、transfer、Prompt、adapter、execution 与 command 结果路径。 |
+| primary_baseline_ids | protocol | none | true | true | false | Prompt 聚类配对优势统计唯一允许的4个主表 baseline 身份序列。 |
+| proposed_decision | metric | none | true | true | false | 单个 Prompt 与攻击条件配对中 SLM-WM 的正式二元检测判定。 |
+| baseline_decision | metric | none | true | true | false | 单个 Prompt 与攻击条件配对中主表 baseline 的正式二元检测判定。 |
+| paired_difference | metric | none | true | true | false | 同一 Prompt 与攻击条件下 SLM-WM 判定减 baseline 判定的差值, 取值为 -1、0或1。 |
+| paired_outcome_digest | provenance | none | true | true | false | 单条 Prompt x attack 配对结果核心内容的稳定摘要。 |
+| proposed_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中 SLM-WM 实际使用的审计冻结阈值摘要。 |
+| baseline_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中对应主表 baseline 实际使用的审计冻结阈值摘要。 |
+| paired_prompt_count | metric | none | true | true | false | 单个主表 baseline 参与总体配对统计的唯一 test Prompt 数量。 |
+| paired_attack_count | metric | none | true | true | false | 单个主表 baseline 对每个 Prompt 完整覆盖的攻击条件数量。 |
+| paired_observation_count | metric | none | true | true | false | 单个主表 baseline 参与总体统计的 Prompt x attack 配对观测数量。 |
+| mean_paired_true_positive_rate_difference | metric | none | true | true | false | 先在每个 Prompt 内跨攻击求均值, 再跨 Prompt 聚合得到的 SLM-WM 相对 baseline 平均二元检测差值。 |
+| mean_paired_difference_ci_low | metric | none | true | true | false | Prompt-clustered bootstrap 对总体平均配对差值给出的 percentile CI 下界。 |
+| mean_paired_difference_ci_high | metric | none | true | true | false | Prompt-clustered bootstrap 对总体平均配对差值给出的 percentile CI 上界。 |
+| positive_prompt_cluster_count | metric | none | true | true | false | 平均配对差值大于0的 Prompt 聚类数量。 |
+| negative_prompt_cluster_count | metric | none | true | true | false | 平均配对差值小于0的 Prompt 聚类数量。 |
+| tied_prompt_cluster_count | metric | none | true | true | false | 平均配对差值等于0的 Prompt 聚类数量。 |
+| one_sided_bounded_hoeffding_mean_p_value | metric | none | true | true | false | 对取值位于 [-1,1] 的 Prompt 聚类平均差执行单侧 bounded Hoeffding 均值零假设检验得到的 claim p 值。 |
+| one_sided_exact_prompt_cluster_sign_flip_p_value | metric | none | true | true | false | 通过整数动态规划精确计算的 Prompt-cluster sign-flip sharp-null 诊断 p 值。 |
+| exact_prompt_cluster_sign_flip_p_value_is_diagnostic | governance | none | true | false | false | 明确标识 exact sign-flip 仅检验 sharp null, 不用于均值优势 claim 门禁。 |
+| sharp_null_diagnostic_method | protocol | none | true | false | false | sharp-null 诊断方法, 正式值为 exact_prompt_cluster_sign_flip_dp。 |
+| claim_p_value_method | protocol | none | true | false | false | 配对优势 claim 使用的均值检验方法, 正式值为 bounded_hoeffding_prompt_cluster_mean; 结论范围限定于受治理 Prompt benchmark, 向未采样自然 Prompt 总体外推需要额外的独立性或可交换性论证。 |
+| holm_adjusted_p_value | metric | none | true | true | false | 对4个主表 baseline 的单侧 bounded Hoeffding claim p 值执行 Holm 校正后的结果。 |
+| bootstrap_resample_count | protocol | none | true | false | false | Prompt-clustered bootstrap 的重采样次数, 正式闭合固定为100000。 |
+| bootstrap_seed_digest_random | random | _digest_random | true | false | false | 仅由固定分析 schema、baseline、规范 Prompt 集、攻击 registry、outcome 集、置信度和重采样次数确定的 bootstrap 随机源摘要。 |
+| bootstrap_analysis_schema | protocol | none | true | false | false | bootstrap 固定分析规范, 正式值为 paired_prompt_cluster_bootstrap_v1。 |
+| bootstrap_bit_generator | protocol | none | true | false | false | bootstrap 使用的 NumPy bit generator, 正式值为 PCG64。 |
+| bootstrap_quantile_method | protocol | none | true | false | false | percentile CI 的 NumPy quantile 算法, 正式值为 linear。 |
+| paired_attack_registry_digest | provenance | none | true | true | false | 配对 outcome 共同覆盖的正式攻击身份、资源档位与配置摘要 registry 的稳定摘要。 |
+| protocol_digest | provenance | none | true | true | false | 单行配对统计绑定规范 threshold 行、审计报告与审计 manifest 配置摘要的统一 fixed-FPR 协议摘要。 |
+| paired_superiority_ready | governance | none | true | true | false | 单个主表 baseline 是否同时满足正平均差值、正 CI 下界和 Holm 校正后显著性门禁。 |
+| paired_superiority_row_count | metric | none | true | true | false | 配对总体优势表实际包含的主表 baseline 统计行数, 闭合值为4。 |
+| paired_superiority_ready_ids | governance | none | true | true | false | 已通过单方法配对总体优势门禁的主表 baseline 身份序列。 |
+| paired_superiority_exact_set_ready | governance | none | true | true | false | 配对总体优势统计是否无缺失、无额外且无重复地覆盖4个主表 baseline。 |
+| overall_paired_superiority_ready | governance | none | true | true | false | 4个主表 baseline 是否全部通过 Prompt 聚类配对总体优势门禁。 |
+| paired_superiority_rows_digest | provenance | none | true | true | false | 对按主表 baseline 稳定排序的4行总体配对统计计算的稳定摘要。 |
+| paired_prompt_counts | metric | none | true | true | false | 配对优势 summary 中4个主表 baseline 的唯一 Prompt 数量集合。 |
+| paired_attack_counts | metric | none | true | true | false | 配对优势 summary 中4个主表 baseline 的攻击条件数量集合。 |
+| paired_outcome_count | metric | none | true | true | false | 4个主表 baseline 的全部 Prompt x attack 配对结果总数。 |
+| paired_outcome_set_digest | provenance | none | true | true | false | 对全部主表 baseline Prompt x attack 配对结果计算的稳定摘要。 |
+| paired_superiority_protocol_digest | provenance | none | true | true | false | 配对优势 summary、共同协议与结果分析共同绑定的统一 fixed-FPR 协议摘要。 |
+| paired_test_prompt_count | metric | none | true | true | false | 4个主表 baseline 共享的规范 test Prompt 集合大小。 |
+| paired_test_prompt_id_digest | provenance | none | true | true | false | 对4个主表 baseline 共享的规范 test Prompt 身份集合排序后计算的稳定摘要。 |
+| expected_attack_count | protocol | none | true | false | false | 当前论文层级必须完整覆盖的正式攻击配置数量。 |
+| method_observation_source_path_map | provenance | none | true | false | false | 五方法身份到 fixed-FPR 审计和配对统计实际读取的 observation 文件路径映射。 |
+| paired_superiority_scale_ready | governance | none | true | true | false | 配对结果是否覆盖当前论文运行要求的完整 test Prompt 数量与同一非空攻击集合。 |
+| point_estimate_effect_direction_ready | governance | none | true | true | false | 正式结果记录中 SLM-WM 的跨攻击平均 TPR 是否高于最强主表 baseline。 |
+| official_reference_fidelity_digest | provenance | none | false | true | false | 结果闭合门禁对三方法 official-reference records、summary 与 manifest 计算的组合摘要。 |
+| paired_superiority_digest | provenance | none | false | true | false | 结果闭合门禁对配对 outcomes、统计 rows、summary 与 manifest 计算的组合摘要。 |
+| true_positive_rate_ci_low | metric | none | true | true | false | 正式 positive source 真正率置信区间下界。 |
+| true_positive_rate_ci_high | metric | none | true | true | false | 正式 positive source 真正率置信区间上界。 |
+| false_positive_rate_ci_low | metric | none | true | true | false | 正式总体假正率置信区间下界。 |
+| false_positive_rate_ci_high | metric | none | true | true | false | 正式总体假正率置信区间上界。 |
+| clean_false_positive_rate_ci_low | metric | none | true | true | false | clean negative 假正率置信区间下界。 |
+| clean_false_positive_rate_ci_high | metric | none | true | true | false | clean negative 假正率置信区间上界。 |
+| attacked_false_positive_rate_ci_low | metric | none | true | true | false | attacked negative 假正率置信区间下界。 |
+| attacked_false_positive_rate_ci_high | metric | none | true | true | false | attacked negative 假正率置信区间上界。 |
+| geometry_score_threshold | protocol | none | true | false | false | 由 calibration negative 几何分数冻结的几何诊断阈值。 |
+| geometry_calibration_negative_count | metric | none | true | false | false | 参与几何诊断阈值校准的 negative 记录数量。 |
+| geometry_calibration_exceedance_count | metric | none | true | false | false | calibration negative 中超过几何诊断阈值的记录数量。 |
+| calibration_false_positive_count | metric | none | true | false | false | 冻结内容阈值下 calibration negative 的假正例数量。 |
+| calibration_false_positive_rate | metric | none | true | false | false | 冻结内容阈值下 calibration negative 的假正率。 |
+| positive_rate | metric | none | true | true | false | 指定样本角色在冻结阈值下的正判比例。 |
+| content_score_mean | metric | none | true | true | false | 指定样本角色的正式连续内容分数均值。 |
+| positive_rate_upper_95 | metric | none | true | true | false | 指定样本角色正判比例的单侧95%置信上界。 |
+| fixed_fpr_upper_bound_ready | governance | none | true | true | false | negative 样本的假正率单侧95%上界是否不超过目标 FPR。 |
+| false_positive_rate_upper_95 | metric | none | true | true | false | 攻击分组假正率的单侧95%置信上界。 |
+| quality_ssim_mean | metric | none | true | true | false | 攻击分组内 source 与 attacked 图像之间的 SSIM 均值。 |
+| quality_psnr_mean | metric | none | true | true | false | 攻击分组内 source 与 attacked 图像之间的有限 PSNR 均值。 |
+| test_prompt_count | metric | none | true | true | false | 单个正式消融配置完整覆盖的唯一 test Prompt 数量。 |
+| wrong_key_false_positive_rate | metric | none | true | true | false | 单个正式消融配置在 wrong-key negative 上的假正率。 |
+| clean_true_positive_rate | metric | none | true | true | false | 单个正式消融配置在 clean positive 上的真正率。 |
+| attacked_true_positive_rate | metric | none | true | true | false | 单个正式消融配置在 attacked positive 上的真正率。 |
+| positive_content_score_mean | metric | none | true | true | false | 单个正式消融配置在 positive 样本上的连续内容分数均值。 |
+| paired_ssim_mean | metric | none | true | true | false | 单个正式消融配置与完整方法逐 Prompt 配对图像的 SSIM 均值。 |
+| frozen_threshold_digest | provenance | none | true | true | false | 正式消融记录绑定的冻结 fixed-FPR 阈值摘要。 |
+| clean_true_positive_rate_delta | metric | none | true | true | false | 消融配置相对完整方法的 clean true positive rate 配对差值。 |
+| attacked_true_positive_rate_delta | metric | none | true | true | false | 消融配置相对完整方法的 attacked true positive rate 配对差值。 |
+| paired_ssim_delta | metric | none | true | true | false | 消融配置相对完整方法的逐 Prompt 配对 SSIM 差值。 |

@@ -17,7 +17,7 @@ from experiments.runtime.diffusion.semantic_features import (
     DifferentiableSemanticFeatureRuntime,
     load_clip_vision_model,
 )
-from experiments.protocol.attacks import default_attack_configs
+from experiments.protocol.attacks import attack_config_digest, default_attack_configs
 from experiments.runtime.diffusion.regeneration_attacks import (
     DiffusionAttackRuntime,
     default_diffusion_attack_specs,
@@ -867,6 +867,7 @@ def run_semantic_watermark_runtime(
                     "attack_family": attack_config.attack_family,
                     "attack_name": attack_config.attack_name,
                     "resource_profile": attack_config.resource_profile,
+                    "attack_config_digest": attack_config_digest(attack_config),
                     "attack_parameters": attack_config.attack_parameters,
                     "attack_performed": True,
                     "attacked_image_key": image_key,
@@ -883,6 +884,9 @@ def run_semantic_watermark_runtime(
     if config.diffusion_attacks_enabled:
         if diffusion_attack_runtime is None:
             raise RuntimeError("diffusion_attacks_enabled 要求共享再扩散攻击运行时")
+        formal_attack_configs_by_id = {
+            attack.attack_id: attack for attack in default_attack_configs()
+        }
         for sample_role, source_image in (("clean_negative", clean_image), ("positive_source", watermarked_image)):
             for attack_index, attack_spec in enumerate(default_diffusion_attack_specs()):
                 attack_execution = diffusion_attack_runtime.apply(
@@ -914,6 +918,9 @@ def run_semantic_watermark_runtime(
                         "attack_family": attack_spec.attack_family,
                         "attack_name": attack_spec.attack_name,
                         "resource_profile": "full_extra",
+                        "attack_config_digest": attack_config_digest(
+                            formal_attack_configs_by_id[attack_spec.attack_id]
+                        ),
                         "attack_parameters": attack_spec.attack_parameters,
                         "attack_implementation": attack_spec.attack_implementation,
                         "attack_execution": attack_execution.to_record(),

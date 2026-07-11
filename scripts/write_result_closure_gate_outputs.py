@@ -20,7 +20,12 @@ from experiments.artifacts.dataset_level_quality_outputs import (
     canonical_prompt_ids_for_paper_run,
 )
 from experiments.protocol.paper_run_config import build_paper_run_config
-from experiments.protocol.splits import build_group_split_counts
+from experiments.protocol.pilot_paper_fixed_fpr import (
+    build_paper_fixed_fpr_config,
+    build_pilot_paper_prompt_split_summary,
+)
+from experiments.protocol.prompts import build_prompt_records, read_prompt_file
+from experiments.protocol.splits import build_group_split_counts, group_prompt_ids_by_split
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis.result_closure_gate import (
@@ -29,6 +34,10 @@ from paper_experiments.analysis.result_closure_gate import (
     build_result_closure_gate_report,
     build_source_file_sha256_map,
 )
+from paper_experiments.runners.closure_package_selection import (
+    validate_closure_input_lock_payloads,
+)
+from scripts.write_paper_artifact_evidence_audit_outputs import build_input_bundle
 
 
 DEFAULT_OUTPUT_ROOT = Path("outputs/result_closure_gate")
@@ -82,6 +91,21 @@ def _read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
     return tuple(dict(row) for row in rows)
 
 
+def _read_json_array(path: Path) -> tuple[dict[str, Any], ...]:
+    """读取必须存在且非空的 JSON 对象数组."""
+
+    if not path.is_file():
+        raise FileNotFoundError(f"结果闭合门禁缺少 JSON 数组输入: {path.as_posix()}")
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if (
+        not isinstance(payload, list)
+        or not payload
+        or any(not isinstance(row, dict) for row in payload)
+    ):
+        raise ValueError(f"结果闭合门禁要求非空 JSON 对象数组: {path.as_posix()}")
+    return tuple(dict(row) for row in payload)
+
+
 def _read_csv(path: Path) -> tuple[dict[str, Any], ...]:
     """读取必须存在且非空的 CSV 审计行。"""
 
@@ -129,9 +153,18 @@ def write_result_closure_gate_outputs(
     output_root: str | Path = DEFAULT_OUTPUT_ROOT,
     attack_report_path: str | Path | None = None,
     attack_manifest_path: str | Path | None = None,
+    attack_family_metrics_path: str | Path | None = None,
     threshold_audit_report_path: str | Path | None = None,
     threshold_audit_rows_path: str | Path | None = None,
     threshold_audit_manifest_path: str | Path | None = None,
+    dataset_runtime_summary_path: str | Path | None = None,
+    dataset_runtime_manifest_path: str | Path | None = None,
+    closure_input_lock_path: str | Path | None = None,
+    closure_input_lock_manifest_path: str | Path | None = None,
+    official_reference_fidelity_records_path: str | Path | None = None,
+    official_reference_fidelity_summary_path: str | Path | None = None,
+    official_reference_fidelity_manifest_path: str | Path | None = None,
+    primary_baseline_evidence_records_path: str | Path | None = None,
     primary_baseline_evidence_summary_path: str | Path | None = None,
     primary_baseline_evidence_manifest_path: str | Path | None = None,
     baseline_report_path: str | Path | None = None,
@@ -144,6 +177,10 @@ def write_result_closure_gate_outputs(
     common_protocol_manifest_path: str | Path | None = None,
     result_analysis_summary_path: str | Path | None = None,
     result_analysis_manifest_path: str | Path | None = None,
+    paired_outcomes_path: str | Path | None = None,
+    paired_superiority_rows_path: str | Path | None = None,
+    paired_superiority_summary_path: str | Path | None = None,
+    paired_superiority_manifest_path: str | Path | None = None,
     ablation_summary_path: str | Path | None = None,
     ablation_manifest_path: str | Path | None = None,
     dataset_quality_summary_path: str | Path | None = None,
@@ -153,6 +190,7 @@ def write_result_closure_gate_outputs(
     dataset_quality_manifest_path: str | Path | None = None,
     evidence_builder_report_path: str | Path | None = None,
     evidence_blocker_report_path: str | Path | None = None,
+    artifact_data_validation_report_path: str | Path | None = None,
     evidence_audit_manifest_path: str | Path | None = None,
     submission_readiness_report_path: str | Path | None = None,
     submission_readiness_manifest_path: str | Path | None = None,
@@ -187,6 +225,13 @@ def write_result_closure_gate_outputs(
             paper_run_name=paper_run.run_name,
             file_name="manifest.local.json",
         ),
+        "attack_family_metrics": _per_run_path(
+            root_path,
+            attack_family_metrics_path,
+            artifact_root="attack_matrix",
+            paper_run_name=paper_run.run_name,
+            file_name="attack_family_metrics.csv",
+        ),
         "threshold_audit_report": _per_run_path(
             root_path,
             threshold_audit_report_path,
@@ -207,6 +252,76 @@ def write_result_closure_gate_outputs(
             artifact_root="fixed_fpr_threshold_audit",
             paper_run_name=paper_run.run_name,
             file_name="manifest.local.json",
+        ),
+        "dataset_runtime_summary": _per_run_path(
+            root_path,
+            dataset_runtime_summary_path,
+            artifact_root="image_only_dataset_runtime",
+            paper_run_name=paper_run.run_name,
+            file_name="dataset_runtime_summary.json",
+        ),
+        "dataset_runtime_manifest": _per_run_path(
+            root_path,
+            dataset_runtime_manifest_path,
+            artifact_root="image_only_dataset_runtime",
+            paper_run_name=paper_run.run_name,
+            file_name="manifest.local.json",
+        ),
+        "attack_detection_records": _per_run_path(
+            root_path,
+            None,
+            artifact_root="attack_matrix",
+            paper_run_name=paper_run.run_name,
+            file_name="attack_detection_records.jsonl",
+        ),
+        "attacked_image_registry": _per_run_path(
+            root_path,
+            None,
+            artifact_root="attack_matrix",
+            paper_run_name=paper_run.run_name,
+            file_name="attacked_image_registry.jsonl",
+        ),
+        "closure_input_lock": _per_run_path(
+            root_path,
+            closure_input_lock_path,
+            artifact_root="paper_result_closure",
+            paper_run_name=paper_run.run_name,
+            file_name="closure_input_lock.json",
+        ),
+        "closure_input_lock_manifest": _per_run_path(
+            root_path,
+            closure_input_lock_manifest_path,
+            artifact_root="paper_result_closure",
+            paper_run_name=paper_run.run_name,
+            file_name="input_lock_manifest.local.json",
+        ),
+        "official_reference_fidelity_records": _per_run_path(
+            root_path,
+            official_reference_fidelity_records_path,
+            artifact_root="official_reference_fidelity_evidence",
+            paper_run_name=paper_run.run_name,
+            file_name="official_reference_fidelity_evidence_records.jsonl",
+        ),
+        "official_reference_fidelity_summary": _per_run_path(
+            root_path,
+            official_reference_fidelity_summary_path,
+            artifact_root="official_reference_fidelity_evidence",
+            paper_run_name=paper_run.run_name,
+            file_name="official_reference_fidelity_evidence_summary.json",
+        ),
+        "official_reference_fidelity_manifest": _per_run_path(
+            root_path,
+            official_reference_fidelity_manifest_path,
+            artifact_root="official_reference_fidelity_evidence",
+            paper_run_name=paper_run.run_name,
+            file_name="manifest.local.json",
+        ),
+        "primary_baseline_evidence_records": _per_run_path(
+            root_path,
+            primary_baseline_evidence_records_path,
+            artifact_root="primary_baseline_evidence",
+            paper_run_name=paper_run.run_name,
+            file_name="primary_baseline_evidence_records.jsonl",
         ),
         "primary_baseline_evidence_summary": _per_run_path(
             root_path,
@@ -250,6 +365,20 @@ def write_result_closure_gate_outputs(
             paper_run_name=paper_run.run_name,
             file_name="pilot_paper_result_record_summary.json",
         ),
+        "result_record_validation_report": _per_run_path(
+            root_path,
+            None,
+            artifact_root="pilot_paper_fixed_fpr_results",
+            paper_run_name=paper_run.run_name,
+            file_name="pilot_paper_result_import_validation_report.json",
+        ),
+        "result_record_template_coverage": _per_run_path(
+            root_path,
+            None,
+            artifact_root="pilot_paper_fixed_fpr_results",
+            paper_run_name=paper_run.run_name,
+            file_name="pilot_paper_result_template_coverage.csv",
+        ),
         "result_record_manifest": _per_run_path(
             root_path,
             result_record_manifest_path,
@@ -289,6 +418,34 @@ def write_result_closure_gate_outputs(
             root_path,
             result_analysis_manifest_path,
             artifact_root="pilot_paper_result_analysis",
+            paper_run_name=paper_run.run_name,
+            file_name="manifest.local.json",
+        ),
+        "paired_outcomes": _per_run_path(
+            root_path,
+            paired_outcomes_path,
+            artifact_root="paired_superiority_analysis",
+            paper_run_name=paper_run.run_name,
+            file_name="paired_outcomes.jsonl",
+        ),
+        "paired_superiority_rows": _per_run_path(
+            root_path,
+            paired_superiority_rows_path,
+            artifact_root="paired_superiority_analysis",
+            paper_run_name=paper_run.run_name,
+            file_name="paired_superiority_table.csv",
+        ),
+        "paired_superiority_summary": _per_run_path(
+            root_path,
+            paired_superiority_summary_path,
+            artifact_root="paired_superiority_analysis",
+            paper_run_name=paper_run.run_name,
+            file_name="paired_superiority_summary.json",
+        ),
+        "paired_superiority_manifest": _per_run_path(
+            root_path,
+            paired_superiority_manifest_path,
+            artifact_root="paired_superiority_analysis",
             paper_run_name=paper_run.run_name,
             file_name="manifest.local.json",
         ),
@@ -355,6 +512,13 @@ def write_result_closure_gate_outputs(
             paper_run_name=paper_run.run_name,
             file_name="submission_blocker_report.json",
         ),
+        "artifact_data_validation_report": _per_run_path(
+            root_path,
+            artifact_data_validation_report_path,
+            artifact_root="paper_artifact_evidence_audit",
+            paper_run_name=paper_run.run_name,
+            file_name="artifact_data_validation_report.json",
+        ),
         "evidence_audit_manifest": _per_run_path(
             root_path,
             evidence_audit_manifest_path,
@@ -391,6 +555,134 @@ def write_result_closure_gate_outputs(
             file_name="manifest.local.json",
         ),
     }
+    recomputed_evidence_audit_bundle = build_input_bundle(
+        root_path,
+        resolved_paths["dataset_runtime_summary"],
+        resolved_paths["dataset_runtime_manifest"],
+        resolved_paths["threshold_audit_report"],
+        resolved_paths["threshold_audit_manifest"],
+        resolved_paths["attack_report"],
+        resolved_paths["attack_manifest"],
+        resolved_paths["baseline_manifest"],
+        resolved_paths["baseline_report"],
+        resolved_paths["dataset_quality_manifest"],
+        resolved_paths["dataset_quality_summary"],
+        resolved_paths["ablation_manifest"],
+        resolved_paths["ablation_summary"],
+    )
+    recomputed_artifact_data_validation_report = (
+        recomputed_evidence_audit_bundle.artifact_data_validation
+    )
+    official_reference_fidelity_records = _read_jsonl(
+        resolved_paths["official_reference_fidelity_records"]
+    )
+    artifact_data_validation_report = _read_json(
+        resolved_paths["artifact_data_validation_report"]
+    )
+    paired_superiority_manifest = _read_json(
+        resolved_paths["paired_superiority_manifest"]
+    )
+    attack_manifest = _read_json(resolved_paths["attack_manifest"])
+    result_records = _read_jsonl(resolved_paths["result_records"])
+    result_record_manifest = _read_json(resolved_paths["result_record_manifest"])
+    paired_superiority_summary = _read_json(
+        resolved_paths["paired_superiority_summary"]
+    )
+    observation_path_map = paired_superiority_summary.get(
+        "method_observation_source_path_map",
+        {},
+    )
+    if not isinstance(observation_path_map, dict):
+        raise TypeError("配对优势 summary 的 observation path map 必须是 JSON 对象")
+    paired_observation_records_by_method = {
+        str(method_id): (
+            _read_jsonl(_resolve_path(root_path, str(source_path)))
+            if Path(str(source_path)).suffix.lower() == ".jsonl"
+            else _read_json_array(_resolve_path(root_path, str(source_path)))
+        )
+        for method_id, source_path in sorted(observation_path_map.items())
+    }
+    existing_source_paths = {path.resolve() for path in resolved_paths.values()}
+    nested_source_paths: dict[str, Path] = {}
+    artifact_source_paths = recomputed_artifact_data_validation_report.get(
+        "source_paths",
+        {},
+    )
+    if not isinstance(artifact_source_paths, dict):
+        raise TypeError("论文表图数据验证报告的 source_paths 必须是 JSON 对象")
+    for source_id, source_path in sorted(artifact_source_paths.items()):
+        resolved_source = _resolve_path(root_path, str(source_path))
+        if resolved_source.resolve() not in existing_source_paths:
+            nested_source_paths[f"artifact_data_source::{source_id}"] = resolved_source
+            existing_source_paths.add(resolved_source.resolve())
+    for record in official_reference_fidelity_records:
+        baseline_id = str(record.get("baseline_id", ""))
+        declared_paths = record.get("official_reference_source_paths", {})
+        if not isinstance(declared_paths, dict):
+            raise TypeError("官方参考方法忠实度记录的 source paths 必须是 JSON 对象")
+        for source_role, source_path in sorted(declared_paths.items()):
+            resolved_source = _resolve_path(root_path, str(source_path))
+            if resolved_source.resolve() not in existing_source_paths:
+                nested_source_paths[
+                    f"official_reference_source::{baseline_id}::{source_role}"
+                ] = resolved_source
+                existing_source_paths.add(resolved_source.resolve())
+    paired_input_paths = paired_superiority_manifest.get("input_paths", ())
+    if not isinstance(paired_input_paths, list | tuple):
+        raise TypeError("配对优势 manifest 的 input_paths 必须是数组")
+    for source_index, source_path in enumerate(paired_input_paths):
+        resolved_source = _resolve_path(root_path, str(source_path))
+        if resolved_source.resolve() not in existing_source_paths:
+            nested_source_paths[
+                f"paired_superiority_source::{source_index:02d}"
+            ] = resolved_source
+            existing_source_paths.add(resolved_source.resolve())
+    result_record_input_paths = result_record_manifest.get("input_paths", ())
+    if not isinstance(result_record_input_paths, list | tuple):
+        raise TypeError("正式 result records manifest 的 input_paths 必须是数组")
+    result_record_declared_paths = [
+        *result_record_input_paths,
+        *(
+            str(record.get("baseline_result_source", ""))
+            for record in result_records
+        ),
+        *(
+            str(evidence_path)
+            for record in result_records
+            for evidence_path in record.get("evidence_paths", ())
+        ),
+    ]
+    for source_index, source_path in enumerate(result_record_declared_paths):
+        if not str(source_path).strip():
+            raise ValueError("正式 result record 来源路径不得为空")
+        resolved_source = _resolve_path(root_path, str(source_path))
+        if resolved_source.resolve() not in existing_source_paths:
+            nested_source_paths[
+                f"result_record_source::{source_index:04d}"
+            ] = resolved_source
+            existing_source_paths.add(resolved_source.resolve())
+    attack_input_paths = attack_manifest.get("input_paths", ())
+    if not isinstance(attack_input_paths, list | tuple):
+        raise TypeError("攻击矩阵 manifest 的 input_paths 必须是数组")
+    for source_index, source_path in enumerate(attack_input_paths):
+        resolved_source = _resolve_path(root_path, str(source_path))
+        if resolved_source.resolve() not in existing_source_paths:
+            nested_source_paths[
+                f"attack_matrix_source::{source_index:02d}"
+            ] = resolved_source
+            existing_source_paths.add(resolved_source.resolve())
+    resolved_paths.update(nested_source_paths)
+
+    closure_input_lock = _read_json(resolved_paths["closure_input_lock"])
+    closure_input_lock_manifest = _read_json(
+        resolved_paths["closure_input_lock_manifest"]
+    )
+    validate_closure_input_lock_payloads(
+        closure_input_lock,
+        closure_input_lock_manifest,
+        paper_run_name=paper_run.run_name,
+        target_fpr=paper_run.target_fpr,
+    )
     closure_source_file_sha256 = build_source_file_sha256_map(
         resolved_paths.values(),
         root=root_path,
@@ -401,17 +693,63 @@ def write_result_closure_gate_outputs(
         prompt_set=paper_run.prompt_set,
         prompt_file=paper_run.prompt_file,
     )
+    canonical_prompt_records = build_prompt_records(
+        paper_run.prompt_set,
+        read_prompt_file(canonical_prompt_path),
+    )
+    canonical_split_prompt_ids = group_prompt_ids_by_split(
+        canonical_prompt_records
+    )
+    canonical_calibration_prompt_ids = canonical_split_prompt_ids[
+        "calibration"
+    ]
+    canonical_test_prompt_ids = canonical_split_prompt_ids["test"]
+    prompt_split_summary = build_pilot_paper_prompt_split_summary(
+        canonical_prompt_records,
+        build_paper_fixed_fpr_config(root_path),
+    )
     bundle = ResultClosureGateInput(
         expected_paper_claim_scale=paper_run.run_name,
         expected_target_fpr=paper_run.target_fpr,
         expected_prompt_count=paper_run.prompt_count,
         expected_test_count=int(split_counts["test"]),
+        expected_prompt_split_digest=str(
+            prompt_split_summary["prompt_split_digest"]
+        ),
         expected_prompt_id_digest=build_stable_digest(sorted(canonical_prompt_ids)),
+        expected_calibration_prompt_id_digest=build_stable_digest(
+            sorted(canonical_calibration_prompt_ids)
+        ),
+        expected_test_prompt_id_digest=build_stable_digest(
+            sorted(canonical_test_prompt_ids)
+        ),
+        source_file_sha256=closure_source_file_sha256,
         attack_report=_read_json(resolved_paths["attack_report"]),
-        attack_manifest=_read_json(resolved_paths["attack_manifest"]),
+        attack_detection_records=_read_jsonl(
+            resolved_paths["attack_detection_records"]
+        ),
+        attack_family_metrics=_read_csv(
+            resolved_paths["attack_family_metrics"]
+        ),
+        attacked_image_registry=_read_jsonl(
+            resolved_paths["attacked_image_registry"]
+        ),
+        attack_manifest=attack_manifest,
         threshold_audit_report=_read_json(resolved_paths["threshold_audit_report"]),
         threshold_audit_rows=_read_csv(resolved_paths["threshold_audit_rows"]),
         threshold_audit_manifest=_read_json(resolved_paths["threshold_audit_manifest"]),
+        closure_input_lock=closure_input_lock,
+        closure_input_lock_manifest=closure_input_lock_manifest,
+        official_reference_fidelity_records=official_reference_fidelity_records,
+        official_reference_fidelity_summary=_read_json(
+            resolved_paths["official_reference_fidelity_summary"]
+        ),
+        official_reference_fidelity_manifest=_read_json(
+            resolved_paths["official_reference_fidelity_manifest"]
+        ),
+        primary_baseline_evidence_records=_read_jsonl(
+            resolved_paths["primary_baseline_evidence_records"]
+        ),
         primary_baseline_evidence_summary=_read_json(
             resolved_paths["primary_baseline_evidence_summary"]
         ),
@@ -420,14 +758,27 @@ def write_result_closure_gate_outputs(
         ),
         baseline_report=_read_json(resolved_paths["baseline_report"]),
         baseline_manifest=_read_json(resolved_paths["baseline_manifest"]),
-        result_records=_read_jsonl(resolved_paths["result_records"]),
+        result_records=result_records,
+        result_record_validation_report=_read_json(
+            resolved_paths["result_record_validation_report"]
+        ),
+        result_record_template_coverage=_read_csv(
+            resolved_paths["result_record_template_coverage"]
+        ),
         result_record_summary=_read_json(resolved_paths["result_record_summary"]),
-        result_record_manifest=_read_json(resolved_paths["result_record_manifest"]),
+        result_record_manifest=result_record_manifest,
         common_protocol_summary=_read_json(resolved_paths["common_protocol_summary"]),
         common_protocol_schema=_read_json(resolved_paths["common_protocol_schema"]),
         common_protocol_manifest=_read_json(resolved_paths["common_protocol_manifest"]),
         result_analysis_summary=_read_json(resolved_paths["result_analysis_summary"]),
         result_analysis_manifest=_read_json(resolved_paths["result_analysis_manifest"]),
+        paired_observation_records_by_method=(
+            paired_observation_records_by_method
+        ),
+        paired_outcomes=_read_jsonl(resolved_paths["paired_outcomes"]),
+        paired_superiority_rows=_read_csv(resolved_paths["paired_superiority_rows"]),
+        paired_superiority_summary=paired_superiority_summary,
+        paired_superiority_manifest=paired_superiority_manifest,
         ablation_summary=_read_json(resolved_paths["ablation_summary"]),
         ablation_manifest=_read_json(resolved_paths["ablation_manifest"]),
         dataset_quality_summary=_read_json(resolved_paths["dataset_quality_summary"]),
@@ -444,6 +795,19 @@ def write_result_closure_gate_outputs(
         dataset_quality_manifest=_read_json(resolved_paths["dataset_quality_manifest"]),
         evidence_builder_report=_read_json(resolved_paths["evidence_builder_report"]),
         evidence_blocker_report=_read_json(resolved_paths["evidence_blocker_report"]),
+        evidence_audit_runtime_report=(
+            recomputed_evidence_audit_bundle.threshold_report
+        ),
+        evidence_audit_runtime_manifest=(
+            recomputed_evidence_audit_bundle.threshold_manifest
+        ),
+        evidence_audit_source_path_map=dict(
+            recomputed_evidence_audit_bundle.source_path_map
+        ),
+        artifact_data_validation_report=artifact_data_validation_report,
+        recomputed_artifact_data_validation_report=(
+            recomputed_artifact_data_validation_report
+        ),
         evidence_audit_manifest=_read_json(resolved_paths["evidence_audit_manifest"]),
         submission_readiness_report=_read_json(resolved_paths["submission_readiness_report"]),
         submission_readiness_manifest=_read_json(resolved_paths["submission_readiness_manifest"]),
@@ -467,6 +831,7 @@ def write_result_closure_gate_outputs(
         "expected_prompt_count": paper_run.prompt_count,
         "expected_test_count": int(split_counts["test"]),
         "expected_prompt_id_digest": bundle.expected_prompt_id_digest,
+        "expected_test_prompt_id_digest": bundle.expected_test_prompt_id_digest,
         "input_bundle_digest": input_bundle_digest,
         "report_digest": report_digest,
         "source_artifact_digests": report["source_artifact_digests"],
@@ -494,6 +859,9 @@ def write_result_closure_gate_outputs(
             "supports_paper_claim": report["supports_paper_claim"],
             "generated_at": report["generated_at"],
             "expected_prompt_id_digest": report["expected_prompt_id_digest"],
+            "expected_test_prompt_id_digest": report[
+                "expected_test_prompt_id_digest"
+            ],
             "input_bundle_digest": input_bundle_digest,
             "report_digest": report_digest,
             "source_artifact_digests": report["source_artifact_digests"],
@@ -513,9 +881,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
     parser.add_argument("--attack-report-path", default=None)
     parser.add_argument("--attack-manifest-path", default=None)
+    parser.add_argument("--attack-family-metrics-path", default=None)
     parser.add_argument("--threshold-audit-report-path", default=None)
     parser.add_argument("--threshold-audit-rows-path", default=None)
     parser.add_argument("--threshold-audit-manifest-path", default=None)
+    parser.add_argument("--dataset-runtime-summary-path", default=None)
+    parser.add_argument("--dataset-runtime-manifest-path", default=None)
+    parser.add_argument("--closure-input-lock-path", default=None)
+    parser.add_argument("--closure-input-lock-manifest-path", default=None)
+    parser.add_argument("--official-reference-fidelity-records-path", default=None)
+    parser.add_argument("--official-reference-fidelity-summary-path", default=None)
+    parser.add_argument("--official-reference-fidelity-manifest-path", default=None)
+    parser.add_argument("--primary-baseline-evidence-records-path", default=None)
     parser.add_argument("--primary-baseline-evidence-summary-path", default=None)
     parser.add_argument("--primary-baseline-evidence-manifest-path", default=None)
     parser.add_argument("--baseline-report-path", default=None)
@@ -528,6 +905,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--common-protocol-manifest-path", default=None)
     parser.add_argument("--result-analysis-summary-path", default=None)
     parser.add_argument("--result-analysis-manifest-path", default=None)
+    parser.add_argument("--paired-outcomes-path", default=None)
+    parser.add_argument("--paired-superiority-rows-path", default=None)
+    parser.add_argument("--paired-superiority-summary-path", default=None)
+    parser.add_argument("--paired-superiority-manifest-path", default=None)
     parser.add_argument("--ablation-summary-path", default=None)
     parser.add_argument("--ablation-manifest-path", default=None)
     parser.add_argument("--dataset-quality-summary-path", default=None)
@@ -537,6 +918,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset-quality-manifest-path", default=None)
     parser.add_argument("--evidence-builder-report-path", default=None)
     parser.add_argument("--evidence-blocker-report-path", default=None)
+    parser.add_argument("--artifact-data-validation-report-path", default=None)
     parser.add_argument("--evidence-audit-manifest-path", default=None)
     parser.add_argument("--submission-readiness-report-path", default=None)
     parser.add_argument("--submission-readiness-manifest-path", default=None)
@@ -555,9 +937,18 @@ def main() -> None:
         output_root=args.output_root,
         attack_report_path=args.attack_report_path,
         attack_manifest_path=args.attack_manifest_path,
+        attack_family_metrics_path=args.attack_family_metrics_path,
         threshold_audit_report_path=args.threshold_audit_report_path,
         threshold_audit_rows_path=args.threshold_audit_rows_path,
         threshold_audit_manifest_path=args.threshold_audit_manifest_path,
+        dataset_runtime_summary_path=args.dataset_runtime_summary_path,
+        dataset_runtime_manifest_path=args.dataset_runtime_manifest_path,
+        closure_input_lock_path=args.closure_input_lock_path,
+        closure_input_lock_manifest_path=args.closure_input_lock_manifest_path,
+        official_reference_fidelity_records_path=args.official_reference_fidelity_records_path,
+        official_reference_fidelity_summary_path=args.official_reference_fidelity_summary_path,
+        official_reference_fidelity_manifest_path=args.official_reference_fidelity_manifest_path,
+        primary_baseline_evidence_records_path=args.primary_baseline_evidence_records_path,
         primary_baseline_evidence_summary_path=args.primary_baseline_evidence_summary_path,
         primary_baseline_evidence_manifest_path=args.primary_baseline_evidence_manifest_path,
         baseline_report_path=args.baseline_report_path,
@@ -570,6 +961,10 @@ def main() -> None:
         common_protocol_manifest_path=args.common_protocol_manifest_path,
         result_analysis_summary_path=args.result_analysis_summary_path,
         result_analysis_manifest_path=args.result_analysis_manifest_path,
+        paired_outcomes_path=args.paired_outcomes_path,
+        paired_superiority_rows_path=args.paired_superiority_rows_path,
+        paired_superiority_summary_path=args.paired_superiority_summary_path,
+        paired_superiority_manifest_path=args.paired_superiority_manifest_path,
         ablation_summary_path=args.ablation_summary_path,
         ablation_manifest_path=args.ablation_manifest_path,
         dataset_quality_summary_path=args.dataset_quality_summary_path,
@@ -579,6 +974,7 @@ def main() -> None:
         dataset_quality_manifest_path=args.dataset_quality_manifest_path,
         evidence_builder_report_path=args.evidence_builder_report_path,
         evidence_blocker_report_path=args.evidence_blocker_report_path,
+        artifact_data_validation_report_path=args.artifact_data_validation_report_path,
         evidence_audit_manifest_path=args.evidence_audit_manifest_path,
         submission_readiness_report_path=args.submission_readiness_report_path,
         submission_readiness_manifest_path=args.submission_readiness_manifest_path,

@@ -13,7 +13,11 @@ import math
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from experiments.protocol.attacks import AttackConfig, attack_config_digest
+from experiments.protocol.attacks import (
+    AttackConfig,
+    attack_config_digest,
+    resolve_formal_attack_config,
+)
 from experiments.protocol.formal_evidence import contains_nonformal_marker
 from experiments.protocol.paper_run_config import (
     FULL_PAPER_RUN_NAME,
@@ -49,6 +53,14 @@ PAPER_RUN_FIXED_FPR = {
 }
 PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD = "bounded_hoeffding"
 PILOT_PAPER_CONFIDENCE_LEVEL = 0.95
+PILOT_PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT = 100_000
+PILOT_PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA = "paired_prompt_cluster_bootstrap_v1"
+PILOT_PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR = "PCG64"
+PILOT_PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD = "linear"
+PILOT_PAPER_PAIRED_CLAIM_P_VALUE_METHOD = "bounded_hoeffding_prompt_cluster_mean"
+PILOT_PAPER_PAIRED_SHARP_NULL_DIAGNOSTIC_METHOD = (
+    "exact_prompt_cluster_sign_flip_dp"
+)
 PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT = 340
 PILOT_PAPER_METHOD_IDS = ("slm_wm_current", "tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 PILOT_PAPER_PRIMARY_METHOD_ID = "slm_wm_current"
@@ -76,8 +88,13 @@ PILOT_PAPER_REQUIRED_METRIC_FIELDS = (
     "quality_score_mean",
     "quality_score_ci_low",
     "quality_score_ci_high",
+    "score_retention_mean",
+    "score_retention_ci_low",
+    "score_retention_ci_high",
 )
 PILOT_PAPER_REQUIRED_SOURCE_FIELDS = (
+    "attack_id",
+    "attack_config_digest",
     "result_protocol_name",
     "result_scope",
     "result_claim_scope",
@@ -86,6 +103,7 @@ PILOT_PAPER_REQUIRED_SOURCE_FIELDS = (
     "prompt_split_digest",
     "attack_matrix_digest",
     "fixed_fpr_protocol_digest",
+    "method_threshold_digest",
     "baseline_result_source",
     "baseline_result_source_digest",
     "evidence_paths",
@@ -95,15 +113,173 @@ PILOT_PAPER_RATE_FIELDS = (
     "false_positive_rate",
     "clean_false_positive_rate",
     "attacked_false_positive_rate",
-    "quality_score_mean",
 )
+PILOT_PAPER_METRIC_BOUNDS = {
+    **{field_name: (0.0, 1.0) for field_name in PILOT_PAPER_RATE_FIELDS},
+    "quality_score_mean": (-1.0, 1.0),
+    "score_retention_mean": (0.0, 1.0),
+}
 PILOT_PAPER_CI_FIELD_GROUPS = (
     ("true_positive_rate_ci_low", "true_positive_rate", "true_positive_rate_ci_high"),
     ("false_positive_rate_ci_low", "false_positive_rate", "false_positive_rate_ci_high"),
     ("clean_false_positive_rate_ci_low", "clean_false_positive_rate", "clean_false_positive_rate_ci_high"),
     ("attacked_false_positive_rate_ci_low", "attacked_false_positive_rate", "attacked_false_positive_rate_ci_high"),
     ("quality_score_ci_low", "quality_score_mean", "quality_score_ci_high"),
+    (
+        "score_retention_ci_low",
+        "score_retention_mean",
+        "score_retention_ci_high",
+    ),
 )
+PILOT_PAPER_CI_COUNT_FIELDS = {
+    "true_positive_rate": "positive_count",
+    "false_positive_rate": "negative_count",
+    "clean_false_positive_rate": "negative_count",
+    "attacked_false_positive_rate": "attacked_negative_count",
+    "quality_score_mean": "positive_count",
+    "score_retention_mean": "positive_count",
+}
+
+
+def clamp_unit_interval(value: float) -> float:
+    """把有限指标值裁剪到 [0, 1] 区间."""
+
+    resolved = float(value)
+    if not math.isfinite(resolved):
+        raise ValueError("指标值必须是有限数值")
+    return min(1.0, max(0.0, resolved))
+
+
+def bounded_metric_value(
+    value: float,
+    *,
+    lower_bound: float,
+    upper_bound: float,
+) -> float:
+    """读取显式有界的有限指标值, 不对越界观测执行静默裁剪."""
+
+    if any(isinstance(item, bool) for item in (value, lower_bound, upper_bound)):
+        raise ValueError("指标边界和值不得使用布尔值")
+    resolved_value = float(value)
+    resolved_lower = float(lower_bound)
+    resolved_upper = float(upper_bound)
+    if not all(
+        math.isfinite(item)
+        for item in (resolved_value, resolved_lower, resolved_upper)
+    ):
+        raise ValueError("指标边界和值必须是有限数值")
+    if resolved_lower >= resolved_upper:
+        raise ValueError("指标下界必须小于上界")
+    if not resolved_lower <= resolved_value <= resolved_upper:
+        raise ValueError("指标值超出显式有界范围")
+    return resolved_value
+
+
+def bounded_hoeffding_confidence_interval(
+    value: float,
+    count: int,
+    confidence_level: float,
+    *,
+    lower_bound: float = 0.0,
+    upper_bound: float = 1.0,
+) -> tuple[float, float]:
+    """对任意显式有界独立观测均值构造分布无关 Hoeffding 区间."""
+
+    resolved_value = bounded_metric_value(
+        value,
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
+    )
+    resolved_lower = float(lower_bound)
+    resolved_upper = float(upper_bound)
+    sample_count = int(count)
+    if sample_count <= 0:
+        raise ValueError("置信区间样本数必须为正整数")
+    alpha = 1.0 - float(confidence_level)
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("confidence_level 必须位于 (0, 1)")
+    range_width = resolved_upper - resolved_lower
+    margin = range_width * math.sqrt(
+        math.log(2.0 / alpha) / (2.0 * sample_count)
+    )
+    return (
+        max(resolved_lower, resolved_value - margin),
+        min(resolved_upper, resolved_value + margin),
+    )
+
+
+def canonical_pilot_paper_result_records(
+    rows: Iterable[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """把论文结果记录规范化为与输入文件行序无关的稳定顺序.
+
+    这一实现属于通用证据治理写法.排序键先使用论文模板身份, 再使用整行
+    稳定摘要消除同键记录的输入顺序影响; 是否存在重复模板键仍由正式 schema
+    validator 独立判定, 因而摘要计算不会掩盖重复记录.
+    """
+
+    materialized = [dict(row) for row in rows]
+    return tuple(
+        sorted(
+            materialized,
+            key=lambda row: (
+                str(row.get("method_id", "")),
+                str(row.get("resource_profile", "")),
+                str(row.get("attack_family", "")),
+                str(row.get("attack_name", "")),
+                build_stable_digest(row),
+            ),
+        )
+    )
+
+
+def build_pilot_paper_result_record_set_digest(
+    rows: Iterable[Mapping[str, Any]],
+) -> str:
+    """计算正式结果记录稳定有序集合的 SHA-256 摘要."""
+
+    return build_stable_digest(list(canonical_pilot_paper_result_records(rows)))
+
+
+def build_pilot_paper_result_records_manifest_config(
+    *,
+    result_records: Iterable[Mapping[str, Any]],
+    method_threshold_digest_map: Mapping[str, str],
+    closure_input_lock_digest: str,
+    common_code_version: str,
+    validation_report: Mapping[str, Any],
+    template_coverage_rows: Iterable[Mapping[str, Any]],
+    summary: Mapping[str, Any],
+    require_existing_evidence: bool,
+) -> dict[str, Any]:
+    """构造正式 result records manifest 的唯一配置摘要载荷.
+
+    该函数属于通用证据治理写法.生产器与最终门禁共同调用该函数,
+    使 manifest 的 config digest 能由落盘 records、报告和覆盖表精确重建.
+    """
+
+    result_record_set_digest = build_pilot_paper_result_record_set_digest(
+        result_records
+    )
+    return {
+        "result_record_digest": result_record_set_digest,
+        "result_record_set_digest": result_record_set_digest,
+        "method_threshold_digest_map": dict(
+            sorted(
+                (str(method_id), str(digest))
+                for method_id, digest in method_threshold_digest_map.items()
+            )
+        ),
+        "closure_input_lock_digest": str(closure_input_lock_digest),
+        "common_code_version": str(common_code_version),
+        "validation_report_digest": build_stable_digest(dict(validation_report)),
+        "template_coverage_digest": build_stable_digest(
+            [dict(row) for row in template_coverage_rows]
+        ),
+        "summary_digest": build_stable_digest(dict(summary)),
+        "require_existing_evidence": bool(require_existing_evidence),
+        "image_only_runtime_used": True,
+    }
 
 
 def prompt_protocol_name_for_run(run_name: str) -> str:
@@ -322,6 +498,8 @@ def build_pilot_paper_prompt_split_summary(
     expected_split_counts = build_group_split_counts(expected_prompt_count)
     allowed_false_positive_count = math.floor(resolved_config.target_fpr * calibration_clean_negative_count)
     prompt_split_digest = build_stable_digest(split_record_payload)
+    calibration_prompt_id_digest = build_stable_digest(sorted(calibration_ids))
+    test_prompt_id_digest = build_stable_digest(sorted(test_ids))
     minimum_ready = (
         len(assigned_records) == expected_prompt_count
         and calibration_clean_negative_count == expected_split_counts["calibration"]
@@ -344,6 +522,8 @@ def build_pilot_paper_prompt_split_summary(
         "target_fpr": resolved_config.target_fpr,
         "allowed_false_positive_count": allowed_false_positive_count,
         "prompt_split_digest": prompt_split_digest,
+        "calibration_prompt_id_digest": calibration_prompt_id_digest,
+        "test_prompt_id_digest": test_prompt_id_digest,
         "prompt_split_ready": bool(assigned_records) and calibration_ids.isdisjoint(test_ids) and minimum_ready,
         "supports_paper_claim": False,
     }
@@ -430,7 +610,14 @@ def build_pilot_paper_result_import_schema(
         "required_metric_fields": list(PILOT_PAPER_REQUIRED_METRIC_FIELDS),
         "required_source_fields": list(PILOT_PAPER_REQUIRED_SOURCE_FIELDS),
         "required_rate_fields": list(PILOT_PAPER_RATE_FIELDS),
+        "metric_bounds": {
+            field_name: [lower_bound, upper_bound]
+            for field_name, (lower_bound, upper_bound) in (
+                PILOT_PAPER_METRIC_BOUNDS.items()
+            )
+        },
         "ci_field_groups": [list(group) for group in PILOT_PAPER_CI_FIELD_GROUPS],
+        "ci_count_fields": dict(PILOT_PAPER_CI_COUNT_FIELDS),
         "supports_paper_claim": True,
         "paper_run_allows_paper_claim": True,
         "paper_run_claim_type": resolved_config.result_claim_scope,
@@ -507,6 +694,10 @@ def build_pilot_paper_result_import_template_rows(
                 "method_id": _str_field(method_row, "method_id"),
                 "method_role": _str_field(method_row, "method_role"),
                 "attack_id": _str_field(attack_row, "attack_id"),
+                "attack_config_digest": _str_field(
+                    attack_row,
+                    "attack_config_digest",
+                ),
                 "attack_family": _str_field(attack_row, "attack_family"),
                 "attack_name": _str_field(attack_row, "attack_name"),
                 "resource_profile": _str_field(attack_row, "resource_profile"),
@@ -566,20 +757,79 @@ def _validate_counts_and_rates(row: Mapping[str, Any], row_index: int, schema: M
     for field_name, minimum_count in minimum_count_fields.items():
         if _int_field(row, field_name) < minimum_count:
             issues.append(_issue(row_index, row, field_name, "pilot_paper_minimum_sample_count_required"))
-    if _int_field(row, "supported_record_count") <= 0:
+    positive_count = _int_field(row, "positive_count")
+    attacked_negative_count = _int_field(row, "attacked_negative_count")
+    supported_record_count = _int_field(row, "supported_record_count")
+    attack_record_count = _int_field(row, "attack_record_count")
+    if supported_record_count <= 0:
         issues.append(_issue(row_index, row, "supported_record_count", "positive_count_required"))
-    if _int_field(row, "attack_record_count") < _int_field(row, "supported_record_count"):
-        issues.append(_issue(row_index, row, "attack_record_count", "attack_record_count_must_cover_supported_count"))
-    for field_name in schema["required_rate_fields"]:
+    if supported_record_count != positive_count:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "supported_record_count",
+                "supported_record_count_must_equal_attacked_positive_count",
+            )
+        )
+    if attack_record_count != positive_count + attacked_negative_count:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "attack_record_count",
+                "attack_record_count_must_equal_attacked_sample_count",
+            )
+        )
+    metric_bounds = schema["metric_bounds"]
+    if not isinstance(metric_bounds, Mapping):
+        raise ValueError("metric_bounds 必须是字段到有界区间的映射")
+    for field_name, bounds in metric_bounds.items():
+        if not isinstance(bounds, list | tuple) or len(bounds) != 2:
+            raise ValueError(f"{field_name} 的 metric_bounds 必须包含上下界")
+        lower_bound, upper_bound = (float(bounds[0]), float(bounds[1]))
         value = _float_field(row, field_name)
-        if not 0.0 <= value <= 1.0:
-            issues.append(_issue(row_index, row, field_name, "metric_rate_must_be_in_unit_interval"))
+        if not lower_bound <= value <= upper_bound:
+            issues.append(
+                _issue(
+                    row_index,
+                    row,
+                    field_name,
+                    "metric_value_must_be_in_declared_bounds",
+                )
+            )
     for low_name, value_name, high_name in schema["ci_field_groups"]:
         low = _float_field(row, low_name)
         value = _float_field(row, value_name)
         high = _float_field(row, high_name)
-        if not (0.0 <= low <= value <= high <= 1.0):
+        bounds = metric_bounds[value_name]
+        lower_bound, upper_bound = (float(bounds[0]), float(bounds[1]))
+        if not (lower_bound <= low <= value <= high <= upper_bound):
             issues.append(_issue(row_index, row, value_name, "confidence_interval_must_cover_metric"))
+            continue
+        sample_count = _int_field(
+            row,
+            schema["ci_count_fields"][value_name],
+        )
+        expected_low, expected_high = bounded_hoeffding_confidence_interval(
+            value,
+            sample_count,
+            float(schema["confidence_level"]),
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+        )
+        if not (
+            math.isclose(low, expected_low, rel_tol=0.0, abs_tol=1e-12)
+            and math.isclose(high, expected_high, rel_tol=0.0, abs_tol=1e-12)
+        ):
+            issues.append(
+                _issue(
+                    row_index,
+                    row,
+                    value_name,
+                    "confidence_interval_must_match_bounded_hoeffding",
+                )
+            )
     return issues
 
 
@@ -601,6 +851,36 @@ def _validate_protocol_fields(row: Mapping[str, Any], row_index: int, schema: Ma
             issues.append(_issue(row_index, row, field_name, "protocol_value_mismatch"))
     if _str_field(row, "method_id") not in set(schema["method_ids"]):
         issues.append(_issue(row_index, row, "method_id", "pilot_paper_method_id_required"))
+    try:
+        attack_config = resolve_formal_attack_config(
+            attack_family=_str_field(row, "attack_family"),
+            attack_name=_str_field(row, "attack_name"),
+            resource_profile=_str_field(row, "resource_profile"),
+        )
+    except ValueError:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "attack_id",
+                "registered_formal_attack_identity_required",
+            )
+        )
+    else:
+        expected_attack_fields = {
+            "attack_id": attack_config.attack_id,
+            "attack_config_digest": attack_config_digest(attack_config),
+        }
+        for field_name, expected_value in expected_attack_fields.items():
+            if _str_field(row, field_name) != expected_value:
+                issues.append(
+                    _issue(
+                        row_index,
+                        row,
+                        field_name,
+                        "formal_attack_identity_must_match_attack_config",
+                    )
+                )
     if not math.isclose(_float_field(row, "target_fpr"), float(schema["target_fpr"]), rel_tol=0.0, abs_tol=1e-12):
         issues.append(_issue(row_index, row, "target_fpr", "target_fpr_mismatch"))
     if _str_field(row, "confidence_interval_method") != str(schema["confidence_interval_method"]):
@@ -810,6 +1090,7 @@ def build_pilot_paper_common_protocol_summary(
     method_rows: Iterable[Mapping[str, Any]],
     template_rows: Iterable[Mapping[str, Any]],
     import_validation_report: Mapping[str, Any],
+    paired_superiority_summary: Mapping[str, Any],
     config: PilotPaperFixedFprConfig | None = None,
 ) -> dict[str, Any]:
     """汇总 pilot_paper fixed-FPR 共同协议的运行前治理状态。"""
@@ -866,12 +1147,97 @@ def build_pilot_paper_common_protocol_summary(
     )
     paper_run_allows_claim = True
     paper_run_workflow_validation_ready = ready and import_ready and template_import_coverage_ready
+    expected_paired_baseline_ids = set(PILOT_PAPER_PRIMARY_BASELINE_IDS)
+    paired_baseline_ids = {
+        str(value) for value in paired_superiority_summary.get("primary_baseline_ids", ())
+    }
+    paired_ready_ids = {
+        str(value)
+        for value in paired_superiority_summary.get("paired_superiority_ready_ids", ())
+    }
+    paired_attack_counts = {
+        int(value) for value in paired_superiority_summary.get("paired_attack_counts", ())
+    }
+    paired_prompt_counts = {
+        int(value) for value in paired_superiority_summary.get("paired_prompt_counts", ())
+    }
+    paired_observation_sha256_map = paired_superiority_summary.get(
+        "method_observation_source_sha256_map",
+        {},
+    )
+    paired_digest_fields = (
+        "paired_outcome_set_digest",
+        "paired_superiority_rows_digest",
+        "paired_superiority_protocol_digest",
+        "paired_test_prompt_id_digest",
+        "paired_attack_registry_digest",
+        "threshold_audit_rows_digest",
+    )
+    paired_superiority_ready = (
+        paired_superiority_summary.get("paper_claim_scale")
+        == resolved_config.paper_run_name
+        and math.isclose(
+            float(paired_superiority_summary.get("target_fpr", float("nan"))),
+            resolved_config.target_fpr,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        and paired_superiority_summary.get("paired_superiority_exact_set_ready") is True
+        and paired_superiority_summary.get("paired_superiority_scale_ready") is True
+        and paired_superiority_summary.get("overall_paired_superiority_ready") is True
+        and paired_superiority_summary.get("supports_paper_claim") is True
+        and paired_baseline_ids == expected_paired_baseline_ids
+        and paired_ready_ids == expected_paired_baseline_ids
+        and int(paired_superiority_summary.get("paired_superiority_row_count", 0))
+        == len(expected_paired_baseline_ids)
+        and int(paired_superiority_summary.get("expected_test_count", 0))
+        == resolved_config.minimum_clean_negative_count
+        and int(paired_superiority_summary.get("paired_test_prompt_count", 0))
+        == resolved_config.minimum_clean_negative_count
+        and str(paired_superiority_summary.get("paired_test_prompt_id_digest", ""))
+        == str(prompt_summary.get("test_prompt_id_digest", ""))
+        and int(paired_superiority_summary.get("expected_attack_count", 0))
+        == len(materialized_attack_rows)
+        and paired_prompt_counts == {resolved_config.minimum_clean_negative_count}
+        and paired_attack_counts == {len(materialized_attack_rows)}
+        and int(paired_superiority_summary.get("bootstrap_resample_count", 0))
+        == PILOT_PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT
+        and math.isclose(
+            float(paired_superiority_summary.get("confidence_level", math.nan)),
+            PILOT_PAPER_CONFIDENCE_LEVEL,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        and paired_superiority_summary.get("bootstrap_analysis_schema")
+        == PILOT_PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA
+        and paired_superiority_summary.get("bootstrap_bit_generator")
+        == PILOT_PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR
+        and paired_superiority_summary.get("bootstrap_quantile_method")
+        == PILOT_PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD
+        and paired_superiority_summary.get("claim_p_value_method")
+        == PILOT_PAPER_PAIRED_CLAIM_P_VALUE_METHOD
+        and paired_superiority_summary.get("sharp_null_diagnostic_method")
+        == PILOT_PAPER_PAIRED_SHARP_NULL_DIAGNOSTIC_METHOD
+        and isinstance(paired_observation_sha256_map, Mapping)
+        and set(paired_observation_sha256_map)
+        == {"slm_wm", *PILOT_PAPER_PRIMARY_BASELINE_IDS}
+        and all(
+            len(str(value)) == 64
+            for value in paired_observation_sha256_map.values()
+        )
+        and all(
+            len(str(paired_superiority_summary.get(field_name, ""))) == 64
+            for field_name in paired_digest_fields
+        )
+    )
+    effect_direction_ready = superiority_gate["superiority_gate_ready"]
+    effectiveness_ready = effect_direction_ready and paired_superiority_ready
     paper_run_claim_ready = (
         ready
         and paper_run_allows_claim
         and import_ready
         and claim_coverage_ready
-        and superiority_gate["superiority_gate_ready"]
+        and effectiveness_ready
     )
     probe_paper_claim_ready = paper_run_claim_ready and resolved_config.prompt_set == PROBE_PAPER_RUN_NAME
     probe_paper_workflow_validation_ready = (
@@ -897,6 +1263,11 @@ def build_pilot_paper_common_protocol_summary(
         "paper_prompt_count": prompt_summary.get("pilot_paper_prompt_count", 0),
         "pilot_paper_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
         "paper_prompt_split_ready": prompt_summary.get("prompt_split_ready", False),
+        "calibration_prompt_id_digest": prompt_summary.get(
+            "calibration_prompt_id_digest",
+            "",
+        ),
+        "test_prompt_id_digest": prompt_summary.get("test_prompt_id_digest", ""),
         "pilot_paper_target_fpr": resolved_config.target_fpr,
         "paper_target_fpr": resolved_config.target_fpr,
         "expected_target_fpr": expected_target_fpr,
@@ -917,8 +1288,66 @@ def build_pilot_paper_common_protocol_summary(
         "paper_run_result_duplicate_template_count": duplicate_template_count,
         "paper_run_template_registry_unique": template_registry_unique,
         "pilot_paper_evidence_coverage_ready": claim_coverage_ready,
-        "pilot_paper_effectiveness_gate_ready": superiority_gate["superiority_gate_ready"],
-        "pilot_paper_effectiveness_gate_reason": superiority_gate["superiority_gate_reason"],
+        "point_estimate_effect_direction_ready": effect_direction_ready,
+        "pilot_paper_effectiveness_gate_ready": effectiveness_ready,
+        "pilot_paper_effectiveness_gate_reason": (
+            "paired_superiority_with_fixed_fpr_ready"
+            if effectiveness_ready
+            else (
+                superiority_gate["superiority_gate_reason"]
+                if not effect_direction_ready
+                else "paired_superiority_not_ready"
+            )
+        ),
+        "paired_superiority_ready": paired_superiority_ready,
+        "paired_superiority_exact_set_ready": paired_superiority_summary.get(
+            "paired_superiority_exact_set_ready", False
+        ),
+        "overall_paired_superiority_ready": paired_superiority_summary.get(
+            "overall_paired_superiority_ready", False
+        ),
+        "paired_superiority_protocol_digest": paired_superiority_summary.get(
+            "paired_superiority_protocol_digest", ""
+        ),
+        "paired_superiority_rows_digest": paired_superiority_summary.get(
+            "paired_superiority_rows_digest", ""
+        ),
+        "paired_outcome_set_digest": paired_superiority_summary.get(
+            "paired_outcome_set_digest", ""
+        ),
+        "paired_test_prompt_count": paired_superiority_summary.get(
+            "paired_test_prompt_count", 0
+        ),
+        "paired_test_prompt_id_digest": paired_superiority_summary.get(
+            "paired_test_prompt_id_digest", ""
+        ),
+        "paired_attack_registry_digest": paired_superiority_summary.get(
+            "paired_attack_registry_digest", ""
+        ),
+        "method_observation_source_sha256_map": paired_superiority_summary.get(
+            "method_observation_source_sha256_map", {}
+        ),
+        "threshold_audit_rows_digest": paired_superiority_summary.get(
+            "threshold_audit_rows_digest", ""
+        ),
+        "claim_p_value_method": paired_superiority_summary.get(
+            "claim_p_value_method", ""
+        ),
+        "sharp_null_diagnostic_method": paired_superiority_summary.get(
+            "sharp_null_diagnostic_method", ""
+        ),
+        "bootstrap_analysis_schema": paired_superiority_summary.get(
+            "bootstrap_analysis_schema", ""
+        ),
+        "bootstrap_bit_generator": paired_superiority_summary.get(
+            "bootstrap_bit_generator", ""
+        ),
+        "bootstrap_quantile_method": paired_superiority_summary.get(
+            "bootstrap_quantile_method", ""
+        ),
+        "bootstrap_resample_count": paired_superiority_summary.get(
+            "bootstrap_resample_count", 0
+        ),
         "slm_wm_mean_true_positive_rate": superiority_gate["slm_wm_mean_true_positive_rate"],
         "slm_wm_mean_false_positive_rate": superiority_gate["slm_wm_mean_false_positive_rate"],
         "best_baseline_mean_true_positive_rate": superiority_gate["best_baseline_mean_true_positive_rate"],

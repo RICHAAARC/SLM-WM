@@ -31,7 +31,10 @@ from external_baseline.primary.sd35_method_faithful_common import (
     canonical_attack_family,
     canonical_attack_name,
     emit_adapter_progress,
+    formal_image_attack_config,
+    validated_observation_attack_identity,
 )
+from experiments.protocol.attacks import attack_config_digest
 
 BASELINE_ID = "tree_ring"
 ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
@@ -340,10 +343,21 @@ def build_observation(
     model_id: str,
     quality_score: float,
     score_retention: float,
+    attack_id: str = "",
+    resource_profile: str = "",
+    attack_config_digest_value: str = "",
 ) -> dict[str, Any]:
     """构造统一 baseline observation。"""
 
     detection_decision = bool(float(score) >= float(threshold))
+    attack_identity = validated_observation_attack_identity(
+        sample_role=sample_role,
+        attack_family=attack_family,
+        attack_name=attack_condition,
+        attack_id=attack_id,
+        resource_profile=resource_profile,
+        attack_config_digest_value=attack_config_digest_value,
+    )
     payload = {
         "event_id": event_id,
         "baseline_id": BASELINE_ID,
@@ -358,6 +372,7 @@ def build_observation(
         "attack_family": attack_family,
         "attack_name": attack_condition,
         "attack_condition": attack_condition,
+        **attack_identity,
         "prompt_id": row_id(row, index, "prompt_id", "prompt"),
         "prompt_text": prompt_text(row),
         "image_id": image_id,
@@ -621,8 +636,10 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
 
     attacked_records: list[dict[str, Any]] = []
     for attack_family in attack_families:
+        formal_attack_config = formal_image_attack_config(attack_family)
         attack_matrix_family = canonical_attack_family(attack_family)
         attack_matrix_name = canonical_attack_name(attack_family)
+        formal_attack_digest = attack_config_digest(formal_attack_config)
         for pair_index, pair in enumerate(image_pairs, start=1):
             image_id = str(pair["image_id"])
             runtime = runtime_keys[image_id]
@@ -686,6 +703,9 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                             float(runtime[f"{role_name}_score"]),
                             score,
                         ),
+                        attack_id=formal_attack_config.attack_id,
+                        resource_profile=formal_attack_config.resource_profile,
+                        attack_config_digest_value=formal_attack_digest,
                     )
                 )
                 attacked_records.append(
@@ -701,6 +721,9 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                         "attack_family": attack_matrix_family,
                         "attack_name": attack_matrix_name,
                         "attack_condition": attack_matrix_name,
+                        "attack_id": formal_attack_config.attack_id,
+                        "resource_profile": formal_attack_config.resource_profile,
+                        "attack_config_digest": formal_attack_digest,
                         "attack_transform_name": attack_transform_name,
                         "attack_execution": attack_execution,
                     }

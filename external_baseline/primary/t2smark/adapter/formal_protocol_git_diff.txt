@@ -14,7 +14,7 @@ index ac9a041..42da855 100644
      # diffusion model settings
      parser.add_argument("--model_key", type=str, default="stabilityai/stable-diffusion-2-1") # stabilityai/stable-diffusion-3.5-medium
 diff --git a/run_sd35.py b/run_sd35.py
-index 39c07d7..d350d33 100644
+index 39c07d7..003aba7 100644
 --- a/run_sd35.py
 +++ b/run_sd35.py
 @@ -1,4 +1,5 @@
@@ -23,7 +23,7 @@ index 39c07d7..d350d33 100644
  import json
  import torch
  import open_clip
-@@ -13,6 +14,17 @@ from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
+@@ -13,6 +14,18 @@ from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
  
  from option import args
  
@@ -36,12 +36,13 @@ index 39c07d7..d350d33 100644
 +    canonical_attack_family,
 +    canonical_attack_name,
 +    file_digest,
++    formal_image_attack_identity,
 +)
 +
  args.key_channel_idx = (0, 1, 2, 3)
  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
  msg_channel_idx = [i for i in range(16) if i not in args.key_channel_idx]
-@@ -45,6 +57,48 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
+@@ -45,6 +58,48 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
          "acc_msg": acc_msg.item()
      }
  
@@ -90,7 +91,7 @@ index 39c07d7..d350d33 100644
  pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)
  pipe.set_progress_bar_config(disable=True)
  
-@@ -66,6 +120,20 @@ with open(os.path.join(args.output_dir, args.name, "settings.json"), "w") as f:
+@@ -66,6 +121,20 @@ with open(os.path.join(args.output_dir, args.name, "settings.json"), "w") as f:
  if args.save_image:
      image_path = os.path.join(args.output_dir, args.name, f'images')
      os.makedirs(image_path, exist_ok=True)
@@ -111,7 +112,7 @@ index 39c07d7..d350d33 100644
  
  results = {}
  if args.clip_test_num > 0: clip_score_fn = setup_clip_measure_function()
-@@ -114,8 +182,23 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+@@ -114,8 +183,23 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
          if prompt_id < args.clip_test_num:
              clip_score = clip_score_fn(generated_image, prompt).item()
              results[prompt_id]["clip_score"] = clip_score
@@ -136,7 +137,7 @@ index 39c07d7..d350d33 100644
          
          if prompt_id < args.robust_test_num:
              noised_image = utils.image_distortion(generated_image, args.seed + prompt_id, args)
-@@ -129,6 +212,83 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+@@ -129,6 +213,90 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
              
              decode_result = decode(reversed_latents, master_key, key, fake_key, msg)
              results[prompt_id]["robustness"] = decode_result
@@ -165,7 +166,11 @@ index 39c07d7..d350d33 100644
 +                for formal_attack_name in formal_attack_names:
 +                    attack_matrix_family = canonical_attack_family(formal_attack_name)
 +                    attack_matrix_name = canonical_attack_name(formal_attack_name)
++                    attack_identity = formal_image_attack_identity(formal_attack_name)
 +                    attack_result = {
++                        "attack_id": attack_identity["attack_id"],
++                        "resource_profile": attack_identity["resource_profile"],
++                        "attack_config_digest": attack_identity["attack_config_digest"],
 +                        "attack_family": attack_matrix_family,
 +                        "attack_name": attack_matrix_name,
 +                        "attack_condition": attack_matrix_name,
@@ -208,6 +213,9 @@ index 39c07d7..d350d33 100644
 +                        )
 +                        attack_result[source_role] = {
 +                            **formal_decode_result,
++                            "attack_id": attack_identity["attack_id"],
++                            "resource_profile": attack_identity["resource_profile"],
++                            "attack_config_digest": attack_identity["attack_config_digest"],
 +                            "detection_score": float(formal_decode_result["norm1_w"]),
 +                            "attack_transform_name": attack_transform_name,
 +                            "attack_execution": attack_execution,
@@ -220,7 +228,7 @@ index 39c07d7..d350d33 100644
  
          prompt_id += 1
          pbar.update(1)
-@@ -166,3 +326,4 @@ with open(os.path.join(args.output_dir, args.name, "results.json"), "w") as f:
+@@ -166,3 +334,4 @@ with open(os.path.join(args.output_dir, args.name, "results.json"), "w") as f:
      json.dump(results, f, indent=4)
  
  

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from main.core.digest import build_stable_digest
 
@@ -47,6 +47,99 @@ class AttackConfig:
 def attack_config_digest(config: AttackConfig) -> str:
     """生成攻击配置的稳定摘要。"""
     return build_stable_digest(config.to_dict())
+
+
+ATTACK_RECORD_DIGEST_FIELDS = (
+    "run_id",
+    "prompt_id",
+    "split",
+    "sample_role",
+    "attack_id",
+    "attack_family",
+    "attack_name",
+    "resource_profile",
+    "attack_config_digest",
+    "detector_digest",
+    "source_image_digest",
+    "attacked_image_digest",
+    "frozen_threshold_digest",
+    "formal_evidence_positive",
+)
+
+
+def build_attack_record_digest(record: Mapping[str, Any]) -> str:
+    """构造绑定 Prompt、攻击身份、图像与检测结果的正式记录摘要.
+
+    该函数是攻击记录 producer 与最终门禁共用的摘要原语.集中维护字段集合
+    可以避免写出端和复验端分别实现摘要逻辑, 并防止只改 Prompt 或样本角色后
+    沿用旧摘要冒充完整 test 集证据.
+    """
+
+    return build_stable_digest(
+        {
+            field_name: record.get(field_name)
+            for field_name in ATTACK_RECORD_DIGEST_FIELDS
+        }
+    )
+
+
+def build_attack_matrix_manifest_config(
+    *,
+    paper_run_name: str,
+    evaluation_boundary: Mapping[str, Any],
+    attack_configs: Iterable[AttackConfig],
+    attack_records: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """构造攻击矩阵 manifest 的唯一配置摘要载荷."""
+
+    formal_configs = tuple(
+        config
+        for config in attack_configs
+        if config.enabled
+        and config.resource_profile in {"full_main", "full_extra"}
+    )
+    return {
+        "paper_run_name": str(paper_run_name),
+        "evaluation_boundary": dict(evaluation_boundary),
+        "attack_config_digest": build_stable_digest(
+            [config.to_dict() for config in formal_configs]
+        ),
+        "attack_record_digest": build_stable_digest(
+            [dict(record) for record in attack_records]
+        ),
+    }
+
+
+def resolve_formal_attack_config(
+    *,
+    attack_family: str,
+    attack_name: str,
+    resource_profile: str | None = None,
+) -> AttackConfig:
+    """从唯一正式攻击注册表解析完整配置.
+
+    该函数属于通用协议写法: observation producer, 正式导入器和结果 schema
+    共用同一解析入口, 从而避免仅按攻击名称后贴资源档位或配置摘要.
+    """
+
+    candidates = tuple(
+        config
+        for config in default_attack_configs()
+        if config.enabled
+        and config.resource_profile in {"full_main", "full_extra"}
+        and config.attack_family == str(attack_family)
+        and config.attack_name == str(attack_name)
+        and (
+            resource_profile is None
+            or config.resource_profile == str(resource_profile)
+        )
+    )
+    if len(candidates) != 1:
+        raise ValueError(
+            "正式攻击配置必须唯一: "
+            f"{attack_family}/{attack_name}/{resource_profile or '*'}"
+        )
+    return candidates[0]
 
 
 def default_attack_configs() -> tuple[AttackConfig, ...]:

@@ -82,6 +82,7 @@ def _write_runtime_fixture(root: Path, *, attack_prompt_count: int = 1, blind_de
                     "attack_family": config.attack_family,
                     "attack_name": config.attack_name,
                     "resource_profile": config.resource_profile,
+                    "attack_config_digest": attack_config_digest(config),
                     "attack_parameters": config.attack_parameters,
                     "attack_performed": True,
                     "source_image_path": source_path.relative_to(root).as_posix(),
@@ -204,6 +205,31 @@ def test_attack_matrix_blocks_incomplete_split_role_coverage(tmp_path: Path) -> 
     assert attack_manifest["attack_record_coverage_ready"] is False
     assert attack_manifest["supports_paper_claim"] is False
     assert manifest["metadata"]["protocol_decision"] == "fail"
+
+
+@pytest.mark.quick
+def test_attack_matrix_rejects_post_hoc_attack_identity(tmp_path: Path) -> None:
+    """原始检测记录缺少或篡改攻击摘要时不得后贴正式身份."""
+
+    runtime_dir = _write_runtime_fixture(tmp_path)
+    records_path = runtime_dir / "image_only_detection_records.jsonl"
+    rows = [
+        json.loads(line)
+        for line in records_path.read_text(encoding="utf-8").splitlines()
+    ]
+    attacked_row = next(row for row in rows if row.get("attack_id"))
+    attacked_row["attack_config_digest"] = "f" * 64
+    records_path.write_text(
+        "".join(_json_line(row) for row in rows),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="攻击身份与正式配置不一致"):
+        write_attack_matrix_outputs(
+            root=tmp_path,
+            paper_run_name="probe_paper",
+            dataset_runtime_dir=runtime_dir,
+        )
 
 
 @pytest.mark.quick

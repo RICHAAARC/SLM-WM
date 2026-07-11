@@ -637,6 +637,8 @@ def test_complete_result_package_required_directories_cover_evidence_closure_cha
         "fixed_fpr_threshold_audit",
         "primary_baseline_method_faithful_adapter_protocol",
         "primary_baseline_evidence",
+        "official_reference_fidelity_evidence",
+        "paired_superiority_analysis",
         "paper_artifact_evidence_audit",
         "submission_readiness",
         "evidence_closure_entry_review",
@@ -644,7 +646,11 @@ def test_complete_result_package_required_directories_cover_evidence_closure_cha
         "result_closure_gate",
     } <= required_names
     assert "scripts/write_external_baseline_comparison_outputs.py" in PACKAGE_EXTRA_PATHS
+    assert "scripts/write_official_reference_fidelity_evidence_outputs.py" in PACKAGE_EXTRA_PATHS
+    assert "scripts/write_paired_superiority_outputs.py" in PACKAGE_EXTRA_PATHS
     assert "scripts/write_paper_artifact_evidence_audit_outputs.py" in PACKAGE_EXTRA_PATHS
+    assert "scripts/write_result_closure_gate_outputs.py" in PACKAGE_EXTRA_PATHS
+    assert "paper_experiments/analysis/result_closure_gate.py" in PACKAGE_EXTRA_PATHS
     assert "scripts/write_submission_readiness_outputs.py" in PACKAGE_EXTRA_PATHS
     assert "scripts/write_evidence_closure_entry_review_outputs.py" in PACKAGE_EXTRA_PATHS
     assert build_required_output_dirs("probe_paper") != build_required_output_dirs("pilot_paper")

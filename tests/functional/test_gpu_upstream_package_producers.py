@@ -66,6 +66,9 @@ def _prepare_image_runtime(root: Path) -> Path:
             "watermark_quality_image_registry.jsonl",
             "frozen_evidence_protocol.json",
             "test_detection_metrics.csv",
+            "score_distribution_table.csv",
+            "roc_curve_points.csv",
+            "det_curve_points.csv",
         ),
     )
     _write_json(
@@ -76,6 +79,7 @@ def _prepare_image_runtime(root: Path) -> Path:
             "target_fpr": TARGET_FPR,
             "protocol_decision": "pass",
             "full_method_claim_ready": True,
+            "detection_curve_data_ready": True,
             "supports_paper_claim": True,
         },
     )

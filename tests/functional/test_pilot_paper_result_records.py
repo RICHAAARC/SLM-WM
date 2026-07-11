@@ -9,10 +9,16 @@ from zipfile import ZipFile
 
 import pytest
 
+from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
+from experiments.protocol.pilot_paper_fixed_fpr import (
+    bounded_hoeffding_confidence_interval,
+)
 from scripts.write_pilot_paper_result_records import (
+    attach_metric_fields,
     materialize_output_entries,
     write_pilot_paper_result_record_outputs,
 )
+from tests.helpers.closure_input_lock import write_test_closure_input_lock
 
 
 pytestmark = pytest.mark.quick
@@ -23,6 +29,52 @@ PAPER_SCALE = {
     "pilot_paper": {"prompt_count": 700, "test_count": 340, "target_fpr": 0.01},
     "full_paper": {"prompt_count": 7000, "test_count": 3400, "target_fpr": 0.001},
 }
+PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
+BASELINE_THRESHOLD_DIGESTS = {
+    baseline_id: f"{index + 2:x}" * 64
+    for index, baseline_id in enumerate(PRIMARY_BASELINE_IDS)
+}
+
+
+def test_result_metric_writer_preserves_negative_ssim_and_signed_ci() -> None:
+    """负 SSIM 必须原样保留, 且使用范围宽度为2的 Hoeffding 区间."""
+
+    payload = attach_metric_fields(
+        {},
+        positive_count=34,
+        negative_count=34,
+        attack_record_count=68,
+        supported_record_count=34,
+        true_positive_rate=0.8,
+        false_positive_rate=0.05,
+        clean_false_positive_rate=0.05,
+        attacked_false_positive_rate=0.05,
+        quality_score_mean=-0.25,
+        score_retention_mean=0.7,
+        confidence_level=0.95,
+    )
+    expected_quality_ci = bounded_hoeffding_confidence_interval(
+        -0.25,
+        34,
+        0.95,
+        lower_bound=-1.0,
+        upper_bound=1.0,
+    )
+    expected_retention_ci = bounded_hoeffding_confidence_interval(
+        0.7,
+        34,
+        0.95,
+    )
+
+    assert payload["quality_score_mean"] == -0.25
+    assert (
+        payload["quality_score_ci_low"],
+        payload["quality_score_ci_high"],
+    ) == pytest.approx(expected_quality_ci)
+    assert (
+        payload["score_retention_ci_low"],
+        payload["score_retention_ci_high"],
+    ) == pytest.approx(expected_retention_ci)
 
 
 def json_line(value: dict[str, object]) -> str:
@@ -86,6 +138,10 @@ def write_image_only_runtime_inputs(repo_root: Path, paper_claim_scale: str) -> 
     test_count = int(PAPER_SCALE[paper_claim_scale]["test_count"])
     runtime_dir = repo_root / "outputs" / "image_only_dataset_runtime" / paper_claim_scale
     runtime_dir.mkdir(parents=True, exist_ok=True)
+    attack_config = resolve_formal_attack_config(
+        attack_family="standard_distortion",
+        attack_name="jpeg_compression",
+    )
     metric_rows = [
         {
             "attack_family": "clean",
@@ -152,6 +208,7 @@ def write_image_only_runtime_inputs(repo_root: Path, paper_claim_scale: str) -> 
                 "attack_record_coverage_ready": True,
                 "attacked_image_evidence_chain_ready": True,
                 "real_gpu_attack_validation_ready": True,
+                "frozen_threshold_digest": "1" * 64,
                 "paired_ssim_mean": 0.99,
             },
             ensure_ascii=False,
@@ -164,7 +221,11 @@ def write_image_only_runtime_inputs(repo_root: Path, paper_claim_scale: str) -> 
             {
                 "detector_input_access_mode": "image_key_public_model_only",
                 "sample_role": "positive_source",
+                "attack_id": attack_config.attack_id,
+                "attack_family": attack_config.attack_family,
                 "attack_name": "jpeg_compression",
+                "resource_profile": attack_config.resource_profile,
+                "attack_config_digest": attack_config_digest(attack_config),
                 "evidence_decision": True,
                 "supports_paper_claim": True,
             }
@@ -184,16 +245,25 @@ def write_image_only_runtime_inputs(repo_root: Path, paper_claim_scale: str) -> 
     )
 
 
-def baseline_candidate_row(paper_claim_scale: str) -> dict[str, object]:
+def baseline_candidate_row(
+    paper_claim_scale: str,
+    baseline_id: str = "tree_ring",
+) -> dict[str, object]:
     """构造已经通过外部 baseline 受治理导入报告接受的候选记录。"""
 
     test_count = int(PAPER_SCALE[paper_claim_scale]["test_count"])
     target_fpr = float(PAPER_SCALE[paper_claim_scale]["target_fpr"])
+    attack_config = resolve_formal_attack_config(
+        attack_family="standard_distortion",
+        attack_name="jpeg_compression",
+    )
     return {
-        "baseline_id": "tree_ring",
+        "baseline_id": baseline_id,
+        "attack_id": attack_config.attack_id,
         "attack_family": "standard_distortion",
         "attack_name": "jpeg_compression",
         "resource_profile": "full_main",
+        "attack_config_digest": attack_config_digest(attack_config),
         "comparable_operating_point": f"fixed_fpr_{target_fpr}",
         "result_protocol_name": "primary_baseline_formal_import_protocol",
         "result_source_type": "governed_import",
@@ -213,6 +283,7 @@ def baseline_candidate_row(paper_claim_scale: str) -> dict[str, object]:
         "fixed_fpr_baseline_calibration_ready": True,
         "attack_matrix_baseline_detection_ready": True,
         "formal_evidence_paths_ready": True,
+        "threshold_digest": BASELINE_THRESHOLD_DIGESTS[baseline_id],
         "positive_count": test_count,
         "negative_count": test_count,
         "attacked_negative_count": test_count,
@@ -235,12 +306,15 @@ def write_baseline_inputs(repo_root: Path, paper_claim_scale: str, *, accepted: 
 
     baseline_dir = repo_root / "outputs" / "external_baseline_results" / paper_claim_scale
     baseline_dir.mkdir(parents=True, exist_ok=True)
-    row = baseline_candidate_row(paper_claim_scale)
-    (baseline_dir / "baseline_result_records.jsonl").write_text(json_line(row), encoding="utf-8")
+    rows = [baseline_candidate_row(paper_claim_scale, baseline_id) for baseline_id in PRIMARY_BASELINE_IDS]
+    (baseline_dir / "baseline_result_records.jsonl").write_text(
+        "".join(json_line(row) for row in rows),
+        encoding="utf-8",
+    )
     validation_report = {
         "protocol_name": "primary_baseline_formal_import_protocol",
         "target_fpr": PAPER_SCALE[paper_claim_scale]["target_fpr"],
-        "accepted_records": [row] if accepted else [],
+        "accepted_records": rows if accepted else [],
         "formal_import_validation_ready": accepted,
         "supports_paper_claim": accepted,
     }
@@ -257,6 +331,11 @@ def write_formal_inputs(repo_root: Path, paper_claim_scale: str, *, baseline_acc
     write_dataset_quality_inputs(repo_root, paper_claim_scale)
     write_image_only_runtime_inputs(repo_root, paper_claim_scale)
     write_baseline_inputs(repo_root, paper_claim_scale, accepted=baseline_accepted)
+    write_test_closure_input_lock(
+        repo_root,
+        paper_run_name=paper_claim_scale,
+        target_fpr=float(PAPER_SCALE[paper_claim_scale]["target_fpr"]),
+    )
 
 
 def read_result_records(repo_root: Path, paper_claim_scale: str = "pilot_paper") -> list[dict[str, object]]:
@@ -335,20 +414,25 @@ def test_result_writer_materializes_method_and_governed_baseline_records(tmp_pat
     summary = json.loads((output_dir / "pilot_paper_result_record_summary.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "pilot_paper_fixed_fpr_result_records_manifest"
-    assert {row["method_id"] for row in records} == {"slm_wm_current", "tree_ring"}
+    assert {row["method_id"] for row in records} == {"slm_wm_current", *PRIMARY_BASELINE_IDS}
     assert all(row["result_protocol_name"] == "pilot_paper_fixed_fpr_common_protocol" for row in records)
     assert all(row["target_fpr"] == 0.01 for row in records)
     assert all(row["positive_count"] == 340 for row in records)
     assert all(row["negative_count"] == 340 for row in records)
     assert all(row["supports_paper_claim"] is True for row in records)
+    assert all(row["attack_id"] == "jpeg_compression_main" for row in records)
+    assert all(len(row["attack_config_digest"]) == 64 for row in records)
     method_record = next(row for row in records if row["method_id"] == "slm_wm_current")
     assert method_record["detector_input_access_mode"] == "image_key_public_model_only"
     assert method_record["blind_image_detector"] is True
     assert method_record["generation_latent_trace_required"] is False
     assert validation["pilot_paper_result_import_ready"] is True
-    assert validation["accepted_pilot_paper_import_count"] == 2
-    assert validation["accepted_pilot_paper_claim_record_count"] == 2
-    assert summary["pilot_paper_result_record_count"] == 2
+    assert validation["accepted_pilot_paper_import_count"] == 5
+    assert validation["accepted_pilot_paper_claim_record_count"] == 5
+    assert summary["pilot_paper_result_record_count"] == 5
+    assert len(summary["method_threshold_digest_map"]) == 5
+    assert len(summary["result_record_set_digest"]) == 64
+    assert summary["common_code_version"] == "abc1234"
     assert summary["pilot_paper_template_coverage_ready"] is False
     assert any(row["template_covered"] == "True" for row in coverage_rows)
     assert all(path.startswith("outputs/") for path in manifest["output_paths"])
@@ -380,7 +464,7 @@ def test_result_writer_switches_records_to_full_paper_claim_scale(
     write_pilot_paper_result_record_outputs(root=repo_root, require_existing_evidence=True)
     records = read_result_records(repo_root, "full_paper")
 
-    assert {row["method_id"] for row in records} == {"slm_wm_current", "tree_ring"}
+    assert {row["method_id"] for row in records} == {"slm_wm_current", *PRIMARY_BASELINE_IDS}
     assert all(row["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol" for row in records)
     assert all(row["result_claim_scope"] == "full_claim" for row in records)
     assert all(row["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol" for row in records)
@@ -397,6 +481,11 @@ def test_result_writer_rejects_missing_formal_runtime_inputs(tmp_path: Path) -> 
     write_prompt_file(repo_root, "pilot_paper")
     write_dataset_quality_inputs(repo_root, "pilot_paper")
     write_baseline_inputs(repo_root, "pilot_paper", accepted=True)
+    write_test_closure_input_lock(
+        repo_root,
+        paper_run_name="pilot_paper",
+        target_fpr=0.01,
+    )
 
     with pytest.raises(FileNotFoundError, match="论文结果记录缺少正式输入"):
         write_pilot_paper_result_record_outputs(root=repo_root, require_existing_evidence=True)

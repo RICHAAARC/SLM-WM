@@ -40,6 +40,7 @@ class PrimaryBaselineEvidenceRecord:
     paper_run_prompt_protocol_ready: bool
     fixed_fpr_baseline_calibration_ready: bool
     attack_matrix_baseline_detection_ready: bool
+    formal_evidence_paths: tuple[str, ...]
     formal_evidence_paths_ready: bool
     formal_result_ready: bool
     blocking_reasons: tuple[str, ...]
@@ -52,6 +53,7 @@ class PrimaryBaselineEvidenceRecord:
         data["adapter_run_execution_devices"] = list(self.adapter_run_execution_devices)
         data["adapter_run_sample_roles"] = list(self.adapter_run_sample_roles)
         data["adapter_run_latent_shapes"] = [list(shape) for shape in self.adapter_run_latent_shapes]
+        data["formal_evidence_paths"] = list(self.formal_evidence_paths)
         data["blocking_reasons"] = list(self.blocking_reasons)
         return data
 
@@ -176,6 +178,7 @@ def build_primary_baseline_evidence_records(
     attack_matrix_baseline_detection_ready: bool = False,
     formal_evidence_paths_ready: bool = False,
     protocol_readiness_by_baseline: Mapping[str, Mapping[str, Any]] | None = None,
+    formal_evidence_paths_by_baseline: Mapping[str, Iterable[str]] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """构造主表 baseline 证据边界记录。
 
@@ -189,6 +192,10 @@ def build_primary_baseline_evidence_records(
     readiness_by_id = {
         str(baseline_id): dict(values)
         for baseline_id, values in (protocol_readiness_by_baseline or {}).items()
+    }
+    evidence_paths_by_id = {
+        str(baseline_id): _unique_strings(values)
+        for baseline_id, values in (formal_evidence_paths_by_baseline or {}).items()
     }
     records: list[dict[str, Any]] = []
     for baseline_id in PRIMARY_BASELINE_IDS:
@@ -210,6 +217,9 @@ def build_primary_baseline_evidence_records(
         evidence_paths_ready = bool(
             readiness.get("formal_evidence_paths_ready", formal_evidence_paths_ready)
         )
+        formal_evidence_paths = evidence_paths_by_id.get(baseline_id, ())
+        if formal_evidence_paths_by_baseline is not None:
+            evidence_paths_ready = evidence_paths_ready and bool(formal_evidence_paths)
         reasons = _blocking_reasons(
             baseline_id=baseline_id,
             adapter_run_ready=adapter_ready,
@@ -250,6 +260,7 @@ def build_primary_baseline_evidence_records(
             paper_run_prompt_protocol_ready=prompt_ready,
             fixed_fpr_baseline_calibration_ready=fixed_fpr_ready,
             attack_matrix_baseline_detection_ready=attack_ready,
+            formal_evidence_paths=formal_evidence_paths,
             formal_evidence_paths_ready=evidence_paths_ready,
             formal_result_ready=formal_ready,
             blocking_reasons=reasons,
@@ -266,6 +277,7 @@ def build_primary_baseline_evidence_summary(records: Iterable[Mapping[str, Any]]
     adapter_ready_ids = [str(row["baseline_id"]) for row in rows if row.get("adapter_run_ready")]
     formal_ready_ids = [str(row["baseline_id"]) for row in rows if row.get("formal_result_ready")]
     blocking_reasons = sorted({reason for row in rows for reason in row.get("blocking_reasons", [])})
+    canonical_rows = sorted(rows, key=lambda row: str(row.get("baseline_id", "")))
     return {
         "primary_baseline_count": len(rows),
         "adapter_run_ready_count": len(adapter_ready_ids),
@@ -273,6 +285,7 @@ def build_primary_baseline_evidence_summary(records: Iterable[Mapping[str, Any]]
         "formal_result_ready_count": len(formal_ready_ids),
         "formal_result_ready_ids": formal_ready_ids,
         "primary_baseline_formal_ready": len(formal_ready_ids) == len(rows) and bool(rows),
+        "primary_baseline_evidence_records_digest": build_stable_digest(canonical_rows),
         "blocking_reasons": blocking_reasons,
         "supports_paper_claim": False,
     }

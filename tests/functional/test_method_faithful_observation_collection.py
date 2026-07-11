@@ -261,3 +261,31 @@ def test_collection_rejects_threshold_digest_and_formal_attack_mismatch(tmp_path
 
     with pytest.raises(ValueError, match="method_faithful_transfer_formal_attack_names_mismatch"):
         load_method_faithful_observation_collection(collection_root, protocol=protocol)
+
+
+def test_collection_rejects_forged_attacked_positive_identity(tmp_path: Path) -> None:
+    """attacked positive 必须直接绑定执行时使用的正式 AttackConfig."""
+
+    collection_root = tmp_path / "collection"
+    prompts, protocol = complete_inputs(collection_root)
+    rows = formal_observation_rows("tree_ring", prompts, protocol)
+    attacked_positive = next(
+        row for row in rows if row["sample_role"] == "attacked_positive"
+    )
+    attacked_positive["attack_config_digest"] = "0" * 64
+    write_collection_source(
+        collection_root,
+        "tree_ring",
+        rows,
+        prompts,
+        protocol,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="method_faithful_observation_attack_identity_mismatch",
+    ):
+        load_method_faithful_observation_collection(
+            collection_root,
+            protocol=protocol,
+        )

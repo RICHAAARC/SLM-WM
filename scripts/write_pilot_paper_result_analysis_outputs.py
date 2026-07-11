@@ -24,6 +24,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.pilot_paper_fixed_fpr import (
+    PILOT_PAPER_CONFIDENCE_LEVEL,
+    PILOT_PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA,
+    PILOT_PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR,
+    PILOT_PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD,
+    PILOT_PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT,
+    PILOT_PAPER_PAIRED_CLAIM_P_VALUE_METHOD,
+    PILOT_PAPER_PAIRED_SHARP_NULL_DIAGNOSTIC_METHOD,
+    build_pilot_paper_result_record_set_digest,
+)
 from experiments.protocol.attacks import default_attack_configs
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -32,6 +42,7 @@ CONSTRUCTION_UNIT_NAME = "pilot_paper_result_analysis"
 DEFAULT_OUTPUT_ROOT = Path("outputs/pilot_paper_result_analysis")
 DEFAULT_RESULT_RECORDS_ROOT = Path("outputs/pilot_paper_fixed_fpr_results")
 DEFAULT_ATTACK_MATRIX_ROOT = Path("outputs/attack_matrix")
+DEFAULT_PAIRED_SUPERIORITY_ROOT = Path("outputs/paired_superiority_analysis")
 PRIMARY_BASELINE_METHOD_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 PROPOSED_METHOD_ID = "slm_wm_current"
 FORMAL_METHOD_IDS = (PROPOSED_METHOD_ID, *PRIMARY_BASELINE_METHOD_IDS)
@@ -318,6 +329,29 @@ def build_per_attack_superiority_rows(result_records: Iterable[dict[str, Any]]) 
     return rows
 
 
+def read_json_object(path: Path) -> dict[str, Any]:
+    """读取必须存在的 JSON 对象."""
+
+    if not path.is_file():
+        raise FileNotFoundError(f"论文结果分析缺少 JSON 输入: {path.as_posix()}")
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(payload, dict):
+        raise TypeError(f"论文结果分析输入必须是 JSON 对象: {path.as_posix()}")
+    return dict(payload)
+
+
+def read_csv_rows(path: Path) -> list[dict[str, str]]:
+    """读取必须存在且非空的 CSV 统计表."""
+
+    if not path.is_file():
+        raise FileNotFoundError(f"论文结果分析缺少 CSV 输入: {path.as_posix()}")
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if not rows:
+        raise ValueError(f"论文结果分析 CSV 输入不得为空: {path.as_posix()}")
+    return rows
+
+
 def build_result_template_coverage(result_records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """检查五种方法是否完整覆盖正式攻击矩阵。"""
 
@@ -473,6 +507,9 @@ def write_pilot_paper_result_analysis_outputs(
     output_dir: str | Path | None = None,
     result_records_path: str | Path | None = None,
     attack_detection_records_path: str | Path | None = None,
+    paired_superiority_summary_path: str | Path | None = None,
+    paired_superiority_table_path: str | Path | None = None,
+    paired_superiority_manifest_path: str | Path | None = None,
     failure_case_limit: int = 12,
 ) -> dict[str, Any]:
     """写出 pilot_paper 结果分析表和失败案例图。"""
@@ -493,9 +530,123 @@ def write_pilot_paper_result_analysis_outputs(
         attack_detection_records_path
         or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "attack_detection_records.jsonl",
     )
+    paired_root = DEFAULT_PAIRED_SUPERIORITY_ROOT / paper_run.run_name
+    resolved_paired_summary_path = resolve_input_path(
+        root_path,
+        paired_superiority_summary_path
+        or paired_root / "paired_superiority_summary.json",
+    )
+    resolved_paired_table_path = resolve_input_path(
+        root_path,
+        paired_superiority_table_path or paired_root / "paired_superiority_table.csv",
+    )
+    resolved_paired_manifest_path = resolve_input_path(
+        root_path,
+        paired_superiority_manifest_path or paired_root / "manifest.local.json",
+    )
 
     result_records = read_jsonl_rows(resolved_result_records_path)
+    result_record_set_digest = build_pilot_paper_result_record_set_digest(result_records)
     formal_detection_records = read_jsonl_rows(resolved_attack_records_path)
+    paired_summary = read_json_object(resolved_paired_summary_path)
+    paired_rows = read_csv_rows(resolved_paired_table_path)
+    paired_manifest = read_json_object(resolved_paired_manifest_path)
+    paired_metadata = paired_manifest.get("metadata", {})
+    paired_observation_sha256_map = paired_summary.get(
+        "method_observation_source_sha256_map",
+        {},
+    )
+    paired_digest_fields = (
+        "paired_outcome_set_digest",
+        "paired_superiority_rows_digest",
+        "paired_superiority_protocol_digest",
+        "paired_test_prompt_id_digest",
+        "paired_attack_registry_digest",
+        "threshold_audit_rows_digest",
+    )
+    paired_superiority_ready = bool(
+        paired_summary.get("paper_claim_scale") == paper_run.run_name
+        and math.isclose(
+            float(paired_summary.get("target_fpr", float("nan"))),
+            paper_run.target_fpr,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        and paired_summary.get("paired_superiority_exact_set_ready") is True
+        and paired_summary.get("paired_superiority_scale_ready") is True
+        and paired_summary.get("overall_paired_superiority_ready") is True
+        and paired_summary.get("supports_paper_claim") is True
+        and int(paired_summary.get("paired_test_prompt_count", 0)) > 0
+        and int(paired_summary.get("expected_attack_count", 0)) > 0
+        and int(paired_summary.get("bootstrap_resample_count", 0))
+        == PILOT_PAPER_PAIRED_BOOTSTRAP_RESAMPLE_COUNT
+        and math.isclose(
+            float(paired_summary.get("confidence_level", math.nan)),
+            PILOT_PAPER_CONFIDENCE_LEVEL,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        and paired_summary.get("bootstrap_analysis_schema")
+        == PILOT_PAPER_PAIRED_BOOTSTRAP_ANALYSIS_SCHEMA
+        and paired_summary.get("bootstrap_bit_generator")
+        == PILOT_PAPER_PAIRED_BOOTSTRAP_BIT_GENERATOR
+        and paired_summary.get("bootstrap_quantile_method")
+        == PILOT_PAPER_PAIRED_BOOTSTRAP_QUANTILE_METHOD
+        and paired_summary.get("claim_p_value_method")
+        == PILOT_PAPER_PAIRED_CLAIM_P_VALUE_METHOD
+        and paired_summary.get("sharp_null_diagnostic_method")
+        == PILOT_PAPER_PAIRED_SHARP_NULL_DIAGNOSTIC_METHOD
+        and all(
+            len(str(paired_summary.get(field_name, ""))) == 64
+            and all(
+                character in "0123456789abcdef"
+                for character in str(paired_summary.get(field_name, ""))
+            )
+            for field_name in paired_digest_fields
+        )
+        and isinstance(paired_observation_sha256_map, dict)
+        and set(paired_observation_sha256_map)
+        == {"slm_wm", *PRIMARY_BASELINE_METHOD_IDS}
+        and all(
+            len(str(digest)) == 64
+            and all(character in "0123456789abcdef" for character in str(digest))
+            for digest in paired_observation_sha256_map.values()
+        )
+        and len(paired_rows) == len(PRIMARY_BASELINE_METHOD_IDS)
+        and {row.get("baseline_id") for row in paired_rows}
+        == set(PRIMARY_BASELINE_METHOD_IDS)
+        and all(
+            str(row.get("paired_superiority_ready", "")).lower() == "true"
+            and str(row.get("supports_paper_claim", "")).lower() == "true"
+            for row in paired_rows
+        )
+        and paired_manifest.get("artifact_id")
+        == "paired_superiority_analysis_manifest"
+        and isinstance(paired_metadata, dict)
+        and all(
+            paired_metadata.get(field_name) == paired_summary.get(field_name)
+            for field_name in (
+                "paired_outcome_set_digest",
+                "paired_superiority_rows_digest",
+                "paired_superiority_protocol_digest",
+                "paired_test_prompt_count",
+                "paired_test_prompt_id_digest",
+                "paired_attack_registry_digest",
+                "method_observation_source_sha256_map",
+                "method_observation_source_path_map",
+                "method_threshold_digest_map",
+                "threshold_audit_rows_digest",
+                "claim_p_value_method",
+                "sharp_null_diagnostic_method",
+                "bootstrap_analysis_schema",
+                "bootstrap_bit_generator",
+                "bootstrap_quantile_method",
+                "bootstrap_resample_count",
+                "confidence_level",
+                "overall_paired_superiority_ready",
+            )
+        )
+    )
     confidence_interval_rows = build_confidence_interval_rows(result_records)
     superiority_rows = build_per_attack_superiority_rows(result_records)
     template_coverage = build_result_template_coverage(result_records)
@@ -580,17 +731,65 @@ def write_pilot_paper_result_analysis_outputs(
         "paper_claim_scale": paper_run.run_name,
         "target_fpr": paper_run.target_fpr,
         "result_record_count": len(result_records),
+        "result_record_set_digest": result_record_set_digest,
         "confidence_interval_row_count": len(confidence_interval_rows),
         "per_attack_superiority_row_count": len(superiority_rows),
         "superiority_claim_ready_count": superiority_claim_ready_count,
         "per_attack_ci_coverage_ready": per_attack_ci_coverage_ready,
         "per_attack_superiority_evaluation_ready": per_attack_superiority_evaluation_ready,
         "universal_per_attack_superiority_claim_ready": universal_per_attack_superiority_claim_ready,
+        "paired_superiority_row_count": len(paired_rows),
+        "paired_superiority_ready": paired_superiority_ready,
+        "overall_paired_superiority_ready": paired_summary.get(
+            "overall_paired_superiority_ready", False
+        ),
+        "paired_outcome_set_digest": paired_summary.get(
+            "paired_outcome_set_digest", ""
+        ),
+        "paired_superiority_rows_digest": paired_summary.get(
+            "paired_superiority_rows_digest", ""
+        ),
+        "paired_superiority_protocol_digest": paired_summary.get(
+            "paired_superiority_protocol_digest", ""
+        ),
+        "paired_test_prompt_count": paired_summary.get(
+            "paired_test_prompt_count", 0
+        ),
+        "paired_test_prompt_id_digest": paired_summary.get(
+            "paired_test_prompt_id_digest", ""
+        ),
+        "paired_attack_registry_digest": paired_summary.get(
+            "paired_attack_registry_digest", ""
+        ),
+        "method_observation_source_sha256_map": paired_summary.get(
+            "method_observation_source_sha256_map", {}
+        ),
+        "threshold_audit_rows_digest": paired_summary.get(
+            "threshold_audit_rows_digest", ""
+        ),
+        "claim_p_value_method": paired_summary.get("claim_p_value_method", ""),
+        "sharp_null_diagnostic_method": paired_summary.get(
+            "sharp_null_diagnostic_method", ""
+        ),
+        "bootstrap_analysis_schema": paired_summary.get(
+            "bootstrap_analysis_schema", ""
+        ),
+        "bootstrap_bit_generator": paired_summary.get(
+            "bootstrap_bit_generator", ""
+        ),
+        "bootstrap_quantile_method": paired_summary.get(
+            "bootstrap_quantile_method", ""
+        ),
+        "bootstrap_resample_count": paired_summary.get(
+            "bootstrap_resample_count", 0
+        ),
+        "confidence_level": paired_summary.get("confidence_level", 0.0),
         "failure_case_record_count": len(failure_rows),
         "failure_case_figure_ready": failure_figure_path.is_file(),
         **template_coverage,
         "supports_paper_claim": per_attack_ci_coverage_ready
-        and per_attack_superiority_evaluation_ready,
+        and per_attack_superiority_evaluation_ready
+        and paired_superiority_ready,
     }
     write_json(summary_path, summary)
     manifest = build_artifact_manifest(
@@ -599,6 +798,9 @@ def write_pilot_paper_result_analysis_outputs(
         input_paths=(
             relative_or_absolute(resolved_result_records_path, root_path),
             relative_or_absolute(resolved_attack_records_path, root_path),
+            relative_or_absolute(resolved_paired_summary_path, root_path),
+            relative_or_absolute(resolved_paired_table_path, root_path),
+            relative_or_absolute(resolved_paired_manifest_path, root_path),
         ),
         output_paths=(
             relative_or_absolute(confidence_interval_path, root_path),
@@ -612,6 +814,47 @@ def write_pilot_paper_result_analysis_outputs(
             "failure_case_limit": int(failure_case_limit),
             "primary_baseline_method_ids": list(PRIMARY_BASELINE_METHOD_IDS),
             "proposed_method_id": PROPOSED_METHOD_ID,
+            "result_record_set_digest": result_record_set_digest,
+            "paired_superiority_rows_digest": paired_summary.get(
+                "paired_superiority_rows_digest", ""
+            ),
+            "paired_superiority_protocol_digest": paired_summary.get(
+                "paired_superiority_protocol_digest", ""
+            ),
+            "paired_test_prompt_count": paired_summary.get(
+                "paired_test_prompt_count", 0
+            ),
+            "paired_test_prompt_id_digest": paired_summary.get(
+                "paired_test_prompt_id_digest", ""
+            ),
+            "paired_attack_registry_digest": paired_summary.get(
+                "paired_attack_registry_digest", ""
+            ),
+            "method_observation_source_sha256_map": paired_summary.get(
+                "method_observation_source_sha256_map", {}
+            ),
+            "threshold_audit_rows_digest": paired_summary.get(
+                "threshold_audit_rows_digest", ""
+            ),
+            "claim_p_value_method": paired_summary.get(
+                "claim_p_value_method", ""
+            ),
+            "sharp_null_diagnostic_method": paired_summary.get(
+                "sharp_null_diagnostic_method", ""
+            ),
+            "bootstrap_analysis_schema": paired_summary.get(
+                "bootstrap_analysis_schema", ""
+            ),
+            "bootstrap_bit_generator": paired_summary.get(
+                "bootstrap_bit_generator", ""
+            ),
+            "bootstrap_quantile_method": paired_summary.get(
+                "bootstrap_quantile_method", ""
+            ),
+            "bootstrap_resample_count": paired_summary.get(
+                "bootstrap_resample_count", 0
+            ),
+            "confidence_level": paired_summary.get("confidence_level", 0.0),
         },
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_pilot_paper_result_analysis_outputs.py",
@@ -641,6 +884,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="当前论文运行攻击矩阵中的统一真实检测记录 JSONL。",
     )
+    parser.add_argument("--paired-superiority-summary-path", default=None)
+    parser.add_argument("--paired-superiority-table-path", default=None)
+    parser.add_argument("--paired-superiority-manifest-path", default=None)
     parser.add_argument("--failure-case-limit", type=int, default=12, help="失败案例图最多展示的样本数。")
     return parser
 
@@ -654,6 +900,9 @@ def main() -> None:
         output_dir=args.output_dir,
         result_records_path=args.result_records_path,
         attack_detection_records_path=args.attack_detection_records_path,
+        paired_superiority_summary_path=args.paired_superiority_summary_path,
+        paired_superiority_table_path=args.paired_superiority_table_path,
+        paired_superiority_manifest_path=args.paired_superiority_manifest_path,
         failure_case_limit=args.failure_case_limit,
     )
     print(stable_json_text(manifest), end="")

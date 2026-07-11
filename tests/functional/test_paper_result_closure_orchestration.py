@@ -59,8 +59,10 @@ def test_closure_command_plan_is_run_scoped_and_binds_exact_packages(tmp_path: P
     assert len(commands) == closure.PAPER_RESULT_CLOSURE_COMMAND_COUNT
     assert [Path(command[1]).name for command in commands] == [
         "write_pilot_paper_result_records.py",
+        "write_official_reference_fidelity_evidence_outputs.py",
         "write_attack_matrix_outputs.py",
         "write_fixed_fpr_threshold_audit_outputs.py",
+        "write_paired_superiority_outputs.py",
         "write_primary_baseline_method_faithful_adapter_protocol.py",
         "write_primary_baseline_result_candidates.py",
         "write_primary_baseline_formal_import_protocol.py",
@@ -80,12 +82,23 @@ def test_closure_command_plan_is_run_scoped_and_binds_exact_packages(tmp_path: P
     assert commands[-1].count("--package-path") == len(CLOSURE_PACKAGE_FAMILY_SPECS)
     assert "--materialize-only" in commands[0]
     assert "--skip-package-materialization" in commands[-1]
-    assert "--require-pass" in commands[2]
+    assert "--require-pass" in commands[1]
+    assert "--require-pass" in commands[3]
+    assert "--require-pass" in commands[4]
     assert "--require-pass" in commands[-2]
     assert argument_value(commands[1], "--output-dir").endswith(
+        f"official_reference_fidelity_evidence/{PAPER_RUN_NAME}"
+    )
+    assert argument_value(commands[2], "--output-dir").endswith(
         f"attack_matrix/{PAPER_RUN_NAME}"
     )
-    assert argument_value(commands[8], "--baseline-records-path").endswith(
+    assert argument_value(commands[4], "--proposed-records-path").endswith(
+        f"image_only_dataset_runtime/{PAPER_RUN_NAME}/image_only_detection_records.jsonl"
+    )
+    assert argument_value(commands[4], "--threshold-audit-rows-path").endswith(
+        f"fixed_fpr_threshold_audit/{PAPER_RUN_NAME}/threshold_audit_rows.csv"
+    )
+    assert argument_value(commands[10], "--baseline-records-path").endswith(
         f"external_baseline_comparison/{PAPER_RUN_NAME}/baseline_result_records.jsonl"
     )
     assert argument_value(commands[-1], "--output-dir").endswith(
@@ -100,8 +113,8 @@ def test_closure_command_plan_is_run_scoped_and_binds_exact_packages(tmp_path: P
     assert argument_value(commands[-2], "--dataset-quality-metrics-path").endswith(
         f"dataset_level_quality/{PAPER_RUN_NAME}/dataset_quality_metrics.csv"
     )
-    assert "--t2smark-formal-package-path" not in commands[4]
-    assert argument_value(commands[4], "--t2smark-candidate-records-path").endswith(
+    assert "--t2smark-formal-package-path" not in commands[6]
+    assert argument_value(commands[6], "--t2smark-candidate-records-path").endswith(
         f"t2smark_formal_reproduction/{PAPER_RUN_NAME}/t2smark_formal_import_candidate_records.jsonl"
     )
 
