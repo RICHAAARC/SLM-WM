@@ -19,6 +19,7 @@ from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from experiments.protocol.paper_run_config import build_paper_run_config, resolve_count_from_environment
+from experiments.runtime import repository_environment
 from paper_experiments.baselines import (
     build_tree_ring_official_reference_record,
     build_tree_ring_official_reference_schema,
@@ -42,7 +43,6 @@ from experiments.runtime.archive_naming import utc_archive_token
 from experiments.runtime.repository_environment import (
     build_runtime_environment_report,
     file_digest,
-    resolve_code_version,
 )
 
 DEFAULT_OUTPUT_DIR = "outputs/tree_ring_official_reference"
@@ -940,6 +940,9 @@ def write_tree_ring_official_reference_outputs(
     """执行 Tree-Ring 官方参考 workflow 并写出 summary、manifest 和 governed import 记录。"""
 
     root_path = Path(root).resolve()
+    formal_execution_run_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     paths = output_paths(root_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
     with progress_bar(10, desc="tree ring official reference", enabled=config.enable_workflow_progress_bar) as run_progress:
@@ -994,7 +997,9 @@ def write_tree_ring_official_reference_outputs(
             metric_summary = imported_metrics
         update_progress(run_progress, profile="operation=parse_tree_ring_metrics")
         emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
-        environment_report = build_runtime_environment_report()
+        environment_report = build_runtime_environment_report(
+            verified_formal_execution_lock=formal_execution_run_lock,
+        )
         environment_report["tree_ring_official_reference_device_report"] = device_report
         environment_report["tree_ring_official_reference_source_report"] = source_status
         environment_report["tree_ring_official_reference_source_patch_report"] = source_patch_report
@@ -1073,13 +1078,18 @@ def write_tree_ring_official_reference_outputs(
         output_paths_for_manifest.append(relative_or_absolute(paths["model_repository_prepare_result"], root_path))
     if paths["legacy_environment_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["legacy_environment_prepare_result"], root_path))
+    formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
+        formal_execution_run_lock,
+        repository_environment.require_published_formal_execution_lock(root_path),
+        formal_execution_run_lock["formal_execution_commit"],
+    )
     manifest = build_artifact_manifest(
         artifact_id="tree_ring_official_reference_manifest",
         artifact_type="local_manifest",
         input_paths=(relative_or_absolute(root_path / config.source_dir, root_path),),
         output_paths=tuple(output_paths_for_manifest + [relative_or_absolute(paths["manifest"], root_path)]),
         config=asdict(effective_config),
-        code_version=resolve_code_version(root_path),
+        code_version=formal_execution_run_lock["formal_execution_commit"],
         rebuild_command="调用 paper_experiments.runners.tree_ring_official_reference",
         metadata={
             "run_decision": summary["run_decision"],
@@ -1088,6 +1098,7 @@ def write_tree_ring_official_reference_outputs(
             "supports_paper_claim": False,
         },
     ).to_dict()
+    manifest["formal_execution_run_lock"] = formal_execution_run_lock
     write_json(paths["manifest"], manifest)
     return summary
 
@@ -1157,6 +1168,9 @@ def package_tree_ring_official_reference_outputs(
     """打包 Tree-Ring 官方参考产物并镜像到 Google Drive。"""
 
     root_path = Path(root).resolve()
+    formal_execution_package_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     paper_run = build_paper_run_config(root_path)
     resolved_drive_output_dir = drive_output_dir or paper_run.drive_dir("external_baseline_official_reference")
     configured_output_root = (root_path / output_dir).resolve()
@@ -1174,6 +1188,12 @@ def package_tree_ring_official_reference_outputs(
     if missing_runtime_paths:
         raise FileNotFoundError("Tree-Ring 正式参考输出不完整, 不得打包")
     run_summary = read_json(required_runtime_paths[0])
+    run_manifest = read_json(required_runtime_paths[1])
+    formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
+        run_manifest.get("formal_execution_run_lock"),
+        formal_execution_package_lock,
+        run_manifest.get("code_version"),
+    )
     if not all(
         (
             run_summary.get("run_decision") == "pass",
@@ -1187,7 +1207,7 @@ def package_tree_ring_official_reference_outputs(
         raise RuntimeError("Tree-Ring 正式参考身份或 ready 门禁未通过")
     resolved_archive_name = archive_name or (
         "external_baseline_official_reference_package_tree_ring_"
-        f"{utc_archive_token()}_{resolve_code_version(root_path).replace('-dirty', '')}.zip"
+        f"{utc_archive_token()}_{formal_execution_package_lock['formal_execution_commit'][:7]}.zip"
     )
     if (
         Path(resolved_archive_name).name != resolved_archive_name
@@ -1211,6 +1231,8 @@ def package_tree_ring_official_reference_outputs(
         "paper_run_name": paper_run.run_name,
         "target_fpr": paper_run.target_fpr,
         "baseline_id": "tree_ring",
+        "formal_execution_run_lock": formal_execution_run_lock,
+        "formal_execution_package_lock": formal_execution_package_lock,
         "entry_paths": [entry.relative_to(root_path).as_posix() for entry in content_entries],
         "entry_sha256": {
             entry.relative_to(root_path).as_posix(): file_digest(entry)
@@ -1248,7 +1270,7 @@ def package_tree_ring_official_reference_outputs(
             "target_fpr": paper_run.target_fpr,
             "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
         },
-        code_version=resolve_code_version(root_path),
+        code_version=formal_execution_package_lock["formal_execution_commit"],
         rebuild_command="调用 paper_experiments.runners.tree_ring_official_reference",
         metadata={
             "embedded_digest_scope": "external_summary_records_final_archive_digest",
@@ -1259,10 +1281,24 @@ def package_tree_ring_official_reference_outputs(
             "main_table_eligible": False,
         },
     ).to_dict()
+    archive_manifest["formal_execution_run_lock"] = formal_execution_run_lock
+    archive_manifest["formal_execution_package_lock"] = formal_execution_package_lock
     write_json(manifest_path, archive_manifest)
     with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
         for entry in entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
+    try:
+        final_package_lock = (
+            repository_environment.require_published_formal_execution_lock(root_path)
+        )
+        repository_environment.validate_formal_execution_lock_pair(
+            formal_execution_package_lock,
+            final_package_lock,
+            formal_execution_package_lock["formal_execution_commit"],
+        )
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
     drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / resolved_archive_name

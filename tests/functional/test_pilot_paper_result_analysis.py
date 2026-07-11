@@ -19,6 +19,13 @@ from scripts.write_pilot_paper_result_analysis_outputs import (
 pytestmark = pytest.mark.quick
 
 
+@pytest.fixture(autouse=True)
+def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本模块的结果分析夹具固定使用 pilot_paper."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+
+
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     """写出测试用 JSONL。"""
 

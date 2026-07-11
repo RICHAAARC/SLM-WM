@@ -8,6 +8,7 @@ from zipfile import ZipFile
 
 import pytest
 
+from experiments.runtime import repository_environment
 from experiments.ablations.runtime_rerun import (
     FORMAL_RUNTIME_RERUN_ABLATION_IDS,
     FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
@@ -27,12 +28,25 @@ from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
     inspect_closure_package,
 )
+from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 PAPER_RUN_NAME = "pilot_paper"
 TARGET_FPR = 0.01
 PROMPT_COUNT = 700
 GENERATED_AT = "2026-07-11T00:00:00+00:00"
+FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+
+
+@pytest.fixture(autouse=True)
+def _publish_formal_execution_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把临时输出目录绑定到确定性正式执行锁."""
+
+    monkeypatch.setattr(
+        repository_environment,
+        "require_published_formal_execution_lock",
+        lambda _root: dict(FORMAL_EXECUTION_LOCK),
+    )
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -88,7 +102,8 @@ def _prepare_image_runtime(root: Path) -> Path:
         {
             "artifact_id": f"{PAPER_RUN_NAME}_image_only_dataset_runtime_manifest",
             "artifact_type": "local_manifest",
-            "code_version": "b370425",
+            "code_version": "b" * 40,
+            "formal_execution_run_lock": FORMAL_EXECUTION_LOCK,
             "config": {
                 "paper_run": {
                     "run_name": PAPER_RUN_NAME,
@@ -144,7 +159,8 @@ def _prepare_ablation(root: Path) -> Path:
         {
             "artifact_id": "formal_mechanism_ablation_manifest",
             "artifact_type": "local_manifest",
-            "code_version": "b370425",
+            "code_version": "b" * 40,
+            "formal_execution_run_lock": FORMAL_EXECUTION_LOCK,
             "config": {"target_fpr": TARGET_FPR, **ablation_contract},
             "metadata": ablation_contract,
         },
@@ -218,7 +234,8 @@ def _prepare_dataset_quality(root: Path) -> Path:
         {
             "artifact_id": "dataset_level_quality_manifest",
             "artifact_type": "local_manifest",
-            "code_version": "b370425",
+            "code_version": "b" * 40,
+            "formal_execution_run_lock": FORMAL_EXECUTION_LOCK,
             "metadata": {
                 "paper_run_name": PAPER_RUN_NAME,
                 "target_fpr": TARGET_FPR,
@@ -237,7 +254,7 @@ def test_primary_gpu_package_producers_pass_strict_closure_contract(
 ) -> None:
     """三个主方法上游包应为 run-scoped 且可直接通过精确闭合选择器。"""
 
-    monkeypatch.delenv("SLM_WM_PAPER_RUN_NAME", raising=False)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
     sentinel = tmp_path / "outside_family.txt"
@@ -271,7 +288,7 @@ def test_primary_gpu_package_producers_reject_non_ready_summary(
 ) -> None:
     """上游 summary 未通过时不得先生成可被误选的 ZIP。"""
 
-    monkeypatch.delenv("SLM_WM_PAPER_RUN_NAME", raising=False)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
     archive_path = _prepare_image_runtime(tmp_path)
@@ -298,7 +315,7 @@ def test_ablation_and_quality_packages_reject_inexact_scientific_contracts(
 ) -> None:
     """消融非8项或质量特征缺配对时不得生成新的正式 ZIP。"""
 
-    monkeypatch.delenv("SLM_WM_PAPER_RUN_NAME", raising=False)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
     ablation_archive = _prepare_ablation(tmp_path)
     ablation_archive.unlink()
     ablation_summary_path = (
@@ -327,3 +344,28 @@ def test_ablation_and_quality_packages_reject_inexact_scientific_contracts(
     _write_json(quality_report_path, quality_report)
     with pytest.raises(RuntimeError, match="精确 Prompt/特征覆盖"):
         package_dataset_level_quality_outputs(PAPER_RUN_NAME, root=tmp_path)
+
+
+@pytest.mark.quick
+def test_package_removes_archive_when_final_execution_lock_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """归档写出后的 Git 锁漂移必须删除尚未交付的 ZIP."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
+    archive_path = _prepare_image_runtime(tmp_path)
+    archive_path.unlink()
+    changed_lock = build_test_formal_execution_lock("c" * 40)
+    lock_records = iter((FORMAL_EXECUTION_LOCK, changed_lock))
+    monkeypatch.setattr(
+        repository_environment,
+        "require_published_formal_execution_lock",
+        lambda _root: dict(next(lock_records)),
+    )
+
+    with pytest.raises(repository_environment.FormalExecutionLockError):
+        package_image_only_dataset_runtime(PAPER_RUN_NAME, root=tmp_path)
+
+    output_dir = tmp_path / "outputs" / "image_only_dataset_runtime" / PAPER_RUN_NAME
+    assert not tuple(output_dir.glob("image_only_dataset_runtime_package_*.zip"))

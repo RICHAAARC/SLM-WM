@@ -9,7 +9,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import time
 from typing import Any
@@ -30,6 +29,7 @@ from experiments.protocol.paper_run_config import (
     build_paper_run_config,
     normalize_paper_run_name,
 )
+from experiments.runtime import repository_environment
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
@@ -601,32 +601,6 @@ def build_image_resolution_records(
     return tuple(resolution_records)
 
 
-def resolve_code_version(root_path: Path) -> str:
-    """读取当前 Git 短提交标识, 工作区有变更时附加 dirty 标记。"""
-
-    try:
-        commit_result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        status_result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    commit_id = commit_result.stdout.strip()
-    if not commit_id:
-        return "git_version_unavailable"
-    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
-
-
 def write_dataset_level_quality_outputs(
     *,
     paper_run_name: str,
@@ -648,6 +622,9 @@ def write_dataset_level_quality_outputs(
     """
 
     root_path = Path(root).resolve()
+    formal_execution_run_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     resolved_paper_run_name = normalize_paper_run_name(paper_run_name)
     resolved_target_fpr = float(target_fpr)
     if not 0.0 < resolved_target_fpr < 1.0:
@@ -904,6 +881,11 @@ def write_dataset_level_quality_outputs(
             manifest_path,
         )
     )
+    formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
+        formal_execution_run_lock,
+        repository_environment.require_published_formal_execution_lock(root_path),
+        formal_execution_run_lock["formal_execution_commit"],
+    )
     manifest = build_artifact_manifest(
         artifact_id="dataset_level_quality_manifest",
         artifact_type="local_manifest",
@@ -926,10 +908,11 @@ def write_dataset_level_quality_outputs(
             "auto_extract_formal_features": auto_extract_formal_features,
             "formal_features_generated": formal_features_generated,
         },
-        code_version=resolve_code_version(root_path),
+        code_version=formal_execution_run_lock["formal_execution_commit"],
         rebuild_command="python scripts/write_dataset_level_quality_outputs.py",
         metadata=summary,
     ).to_dict()
+    manifest["formal_execution_run_lock"] = formal_execution_run_lock
     manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
     return manifest
 
@@ -941,6 +924,9 @@ def package_dataset_level_quality_outputs(
     """打包当前论文运行层级的正式 FID / KID 证据。"""
 
     root_path = Path(root).resolve()
+    formal_execution_package_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     resolved_paper_run_name = normalize_paper_run_name(paper_run_name)
     paper_run = build_paper_run_config(root_path)
     if paper_run.run_name != resolved_paper_run_name:
@@ -969,6 +955,11 @@ def package_dataset_level_quality_outputs(
         )
     )
     manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
+    repository_environment.validate_formal_execution_lock_pair(
+        manifest.get("formal_execution_run_lock"),
+        formal_execution_package_lock,
+        manifest.get("code_version"),
+    )
     with (source_dir / "dataset_quality_metrics.csv").open(
         encoding="utf-8-sig",
         newline="",
@@ -1043,14 +1034,33 @@ def package_dataset_level_quality_outputs(
         )
     ):
         raise RuntimeError("数据集级质量身份、精确 Prompt/特征覆盖或 ready 门禁未通过")
-    code_version = resolve_code_version(root_path).replace("-dirty", "")
-    archive_path = source_dir / f"dataset_level_quality_package_{utc_archive_token()}_{code_version}.zip"
+    manifest["formal_execution_package_lock"] = formal_execution_package_lock
+    (source_dir / "manifest.local.json").write_text(
+        stable_json_text(manifest),
+        encoding="utf-8",
+    )
+    code_version = formal_execution_package_lock["formal_execution_commit"]
+    archive_path = source_dir / (
+        f"dataset_level_quality_package_{utc_archive_token()}_{code_version[:7]}.zip"
+    )
     entries = tuple(
         path for path in sorted(source_dir.rglob("*")) if path.is_file() and path.suffix.lower() != ".zip"
     )
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as archive:
         for path in entries:
             archive.write(path, path.relative_to(root_path).as_posix())
+    try:
+        final_package_lock = (
+            repository_environment.require_published_formal_execution_lock(root_path)
+        )
+        repository_environment.validate_formal_execution_lock_pair(
+            formal_execution_package_lock,
+            final_package_lock,
+            code_version,
+        )
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
     return archive_path
 
 

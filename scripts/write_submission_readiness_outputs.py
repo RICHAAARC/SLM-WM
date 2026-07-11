@@ -7,7 +7,6 @@ import csv
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any
 
@@ -17,6 +16,7 @@ if str(ROOT) not in sys.path:
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.runtime.repository_environment import resolve_code_version
 from paper_experiments.analysis.submission_readiness import (
     SubmissionReadinessInput,
     build_release_profile_rows,
@@ -54,31 +54,6 @@ def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> 
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取 Git 提交标识, 工作区有变更时附加 dirty 标记。"""
-    try:
-        commit_result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        status_result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    commit_id = commit_result.stdout.strip()
-    if not commit_id:
-        return "git_version_unavailable"
-    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
 
 
 def ensure_output_dir_under_outputs(root_path: Path, output_dir: Path) -> Path:

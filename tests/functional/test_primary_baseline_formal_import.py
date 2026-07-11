@@ -36,6 +36,13 @@ PAPER_RUN_PARAMETERS = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本模块未显式切换层级的导入夹具固定使用 pilot_paper."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+
+
 def formal_attack_descriptor(
     attack_family: str,
     attack_name: str,

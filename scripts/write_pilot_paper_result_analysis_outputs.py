@@ -15,7 +15,6 @@ import json
 import math
 import os
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any, Iterable
 
@@ -36,6 +35,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
 )
 from experiments.protocol.attacks import default_attack_configs
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_result_analysis"
@@ -95,32 +95,6 @@ def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> 
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取 Git 短提交标识。"""
-
-    try:
-        commit_result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        status_result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    commit_id = commit_result.stdout.strip()
-    if not commit_id:
-        return "git_version_unavailable"
-    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
 
 
 def resolve_input_path(root_path: Path, path: str | Path) -> Path:

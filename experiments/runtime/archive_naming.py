@@ -5,7 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import os
 from pathlib import Path
-import subprocess
+
+from experiments.runtime.repository_environment import (
+    FORMAL_GIT_COMMIT_PATTERN,
+    resolve_code_version,
+)
 
 WORKFLOW_ARCHIVE_PREFIXES = {
     "real_sd_runtime_probe": "real_sd_runtime_probe_package",
@@ -26,19 +30,15 @@ WORKFLOW_ARCHIVE_PREFIXES = {
 
 
 def resolve_short_commit(root: str | Path = ".") -> str:
-    """读取当前仓库短提交, 失败时返回稳定占位文本。"""
+    """从完整仓库提交身份显式截取7位归档文件名摘要."""
 
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=Path(root),
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
+    code_version = resolve_code_version(Path(root))
+    dirty = code_version.endswith("-dirty")
+    commit = code_version.removesuffix("-dirty")
+    if FORMAL_GIT_COMMIT_PATTERN.fullmatch(commit) is None:
         return "git_unknown"
-    return result.stdout.strip() or "git_unknown"
+    short_commit = commit[:7]
+    return f"{short_commit}-dirty" if dirty else short_commit
 
 
 def utc_archive_token() -> str:

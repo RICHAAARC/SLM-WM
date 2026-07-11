@@ -7,15 +7,29 @@ from types import SimpleNamespace
 
 import pytest
 
+from experiments.runtime import repository_environment
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
 )
 from paper_experiments.runners import paper_result_closure as closure
 from scripts import run_gpu_server_result_closure as server_closure
+from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 PAPER_RUN_NAME = "probe_paper"
 TARGET_FPR = 0.1
+FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock("a" * 40)
+
+
+@pytest.fixture(autouse=True)
+def _publish_formal_execution_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把 CPU 闭合编排夹具绑定到确定性正式执行锁."""
+
+    monkeypatch.setattr(
+        repository_environment,
+        "require_published_formal_execution_lock",
+        lambda _root: dict(FORMAL_EXECUTION_LOCK),
+    )
 
 
 def build_package_records(package_root: Path) -> list[dict[str, object]]:
@@ -29,7 +43,7 @@ def build_package_records(package_root: Path) -> list[dict[str, object]]:
             "package_sha256": "a" * 64,
             "paper_run_name": PAPER_RUN_NAME,
             "target_fpr": TARGET_FPR,
-            "code_version": "abc1234",
+            "code_version": "a" * 40,
             "generated_at": "2026-07-11T00:00:00+00:00",
         }
         for specification in CLOSURE_PACKAGE_FAMILY_SPECS
@@ -283,6 +297,13 @@ def test_server_dry_run_uses_exact_selection_without_writing_lock(
         "configure_closure_environment",
         lambda **kwargs: environment_report,
     )
+    repository_commit = "a" * 40
+    execution_lock = build_test_formal_execution_lock(repository_commit)
+    monkeypatch.setattr(
+        server_closure,
+        "build_formal_execution_lock",
+        lambda root, expected_commit: dict(execution_lock),
+    )
     selection_calls: list[dict[str, object]] = []
 
     def fake_selection(*args: object, **kwargs: object) -> dict[str, object]:
@@ -298,6 +319,7 @@ def test_server_dry_run_uses_exact_selection_without_writing_lock(
         paper_run_name=PAPER_RUN_NAME,
         package_search_root=package_root,
         complete_output_dir=tmp_path / "complete",
+        repository_commit=repository_commit,
         dry_run=True,
     )
 
@@ -305,3 +327,4 @@ def test_server_dry_run_uses_exact_selection_without_writing_lock(
     assert result["dry_run"] is True
     assert selection_calls[0]["write_lock"] is False
     assert selection_calls[0]["paper_run_name"] == PAPER_RUN_NAME
+    assert result["formal_execution_lock"]["formal_execution_commit"] == repository_commit

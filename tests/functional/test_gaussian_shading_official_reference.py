@@ -8,6 +8,7 @@ from zipfile import ZipFile
 
 import pytest
 
+from experiments.runtime import repository_environment
 from paper_experiments.baselines import (
     GAUSSIAN_SHADING_OFFICIAL_REFERENCE_PROTOCOL_NAME,
     build_gaussian_shading_official_reference_record,
@@ -31,6 +32,22 @@ from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
     inspect_closure_package,
 )
+from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
+
+
+FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+
+
+@pytest.fixture(autouse=True)
+def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本模块的官方参考归档夹具固定使用 pilot_paper."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+    monkeypatch.setattr(
+        repository_environment,
+        "require_published_formal_execution_lock",
+        lambda _root: dict(FORMAL_EXECUTION_LOCK),
+    )
 
 
 @pytest.mark.quick
@@ -399,11 +416,7 @@ def test_gaussian_shading_official_reference_package_embeds_archive_self_descrip
 ) -> None:
     """打包结果应包含归档摘要、归档 manifest 和输入清单。"""
 
-    code_version = "b370425"
-    monkeypatch.setattr(
-        "paper_experiments.runners.gaussian_shading_official_reference.resolve_code_version",
-        lambda _root: code_version,
-    )
+    code_version = "b" * 40
     output_dir = tmp_path / "outputs" / "gaussian_shading_official_reference" / "pilot_paper"
     output_dir.mkdir(parents=True)
     (output_dir / "gaussian_shading_official_reference_summary.json").write_text(
@@ -422,9 +435,10 @@ def test_gaussian_shading_official_reference_package_embeds_archive_self_descrip
     )
     (output_dir / "manifest.local.json").write_text(
         json.dumps(
-            {
-                "code_version": code_version,
-                "metadata": {"run_decision": "pass"},
+                {
+                    "code_version": code_version,
+                    "formal_execution_run_lock": FORMAL_EXECUTION_LOCK,
+                    "metadata": {"run_decision": "pass"},
             }
         )
         + "\n",

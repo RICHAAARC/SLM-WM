@@ -11,6 +11,7 @@ from typing import Any, Iterable
 from zipfile import ZIP_STORED, ZipFile
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.runtime import repository_environment
 from experiments.protocol.paper_run_config import (
     build_paper_run_config,
     normalize_paper_run_name,
@@ -26,7 +27,6 @@ from experiments.runners.semantic_watermark_runtime import (
     write_semantic_watermark_runtime_outputs,
 )
 from experiments.runtime.archive_naming import utc_archive_token
-from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 
 
@@ -262,6 +262,9 @@ def run_runtime_rerun_ablations(
     """
 
     root_path = Path(root).resolve()
+    formal_execution_run_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     resolved_paper_run_name = normalize_paper_run_name(paper_run_name)
     paper_run = build_paper_run_config(root_path)
     if paper_run.run_name != resolved_paper_run_name or abs(
@@ -500,6 +503,11 @@ def run_runtime_rerun_ablations(
         json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
     )
+    formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
+        formal_execution_run_lock,
+        repository_environment.require_published_formal_execution_lock(root_path),
+        formal_execution_run_lock["formal_execution_commit"],
+    )
     manifest = build_artifact_manifest(
         artifact_id="formal_mechanism_ablation_manifest",
         artifact_type="local_manifest",
@@ -521,7 +529,7 @@ def run_runtime_rerun_ablations(
             "target_fpr": target_fpr,
             "record_digest": build_stable_digest(formal_records),
         },
-        code_version=resolve_code_version(root_path),
+        code_version=formal_execution_run_lock["formal_execution_commit"],
         rebuild_command="调用 experiments.ablations.runtime_rerun.run_runtime_rerun_ablations",
         metadata={
             "protocol_decision": summary["protocol_decision"],
@@ -531,6 +539,7 @@ def run_runtime_rerun_ablations(
             "supports_paper_claim": summary["supports_paper_claim"],
         },
     ).to_dict()
+    manifest["formal_execution_run_lock"] = formal_execution_run_lock
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
@@ -545,6 +554,9 @@ def package_runtime_rerun_ablations(
     """打包真实重运行消融记录和逐配置运行证据。"""
 
     root_path = Path(root).resolve()
+    formal_execution_package_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     resolved_paper_run_name = normalize_paper_run_name(paper_run_name)
     paper_run = build_paper_run_config(root_path)
     if paper_run.run_name != resolved_paper_run_name:
@@ -568,6 +580,11 @@ def package_runtime_rerun_ablations(
         raise FileNotFoundError("真实重运行消融输出不完整, 不得打包")
     summary = json.loads((source_dir / "ablation_claim_summary.json").read_text(encoding="utf-8-sig"))
     manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
+    repository_environment.validate_formal_execution_lock_pair(
+        manifest.get("formal_execution_run_lock"),
+        formal_execution_package_lock,
+        manifest.get("code_version"),
+    )
     expected_ids = list(FORMAL_RUNTIME_RERUN_ABLATION_IDS)
     manifest_config = manifest.get("config", {})
     manifest_metadata = manifest.get("metadata", {})
@@ -618,8 +635,15 @@ def package_runtime_rerun_ablations(
         )
     ):
         raise RuntimeError("真实重运行消融身份、精确8项规范或 ready 门禁未通过")
-    code_version = resolve_code_version(root_path).replace("-dirty", "")
-    archive_path = source_dir / f"runtime_rerun_ablation_package_{utc_archive_token()}_{code_version}.zip"
+    manifest["formal_execution_package_lock"] = formal_execution_package_lock
+    (source_dir / "manifest.local.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    code_version = formal_execution_package_lock["formal_execution_commit"]
+    archive_path = source_dir / (
+        f"runtime_rerun_ablation_package_{utc_archive_token()}_{code_version[:7]}.zip"
+    )
     entries = tuple(
         path
         for path in sorted(source_dir.rglob("*"))
@@ -628,4 +652,16 @@ def package_runtime_rerun_ablations(
     with ZipFile(archive_path, "w", compression=ZIP_STORED, allowZip64=True) as archive:
         for path in entries:
             archive.write(path, path.relative_to(root_path).as_posix())
+    try:
+        final_package_lock = (
+            repository_environment.require_published_formal_execution_lock(root_path)
+        )
+        repository_environment.validate_formal_execution_lock_pair(
+            formal_execution_package_lock,
+            final_package_lock,
+            code_version,
+        )
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
     return archive_path

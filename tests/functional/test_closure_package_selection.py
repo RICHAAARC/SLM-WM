@@ -20,6 +20,7 @@ from paper_experiments.runners.closure_package_selection import (
     inspect_closure_package,
     select_and_lock_closure_input_packages,
 )
+from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 pytestmark = pytest.mark.quick
@@ -27,7 +28,7 @@ pytestmark = pytest.mark.quick
 
 PAPER_RUN_NAME = "probe_paper"
 TARGET_FPR = 0.1
-CODE_VERSION = "abc1234"
+CODE_VERSION = "a" * 40
 GENERATED_AT = "2026-07-11T08:00:00+00:00"
 
 
@@ -60,6 +61,25 @@ def _assign_source(
     _assign(payload, source.field_path, value)
 
 
+def _assign_execution_locks(
+    documents: dict[str, dict[str, Any]],
+    spec: ClosurePackageFamilySpec,
+    commit: str,
+    *,
+    paper_run_name: str,
+) -> None:
+    """让测试 manifest 的运行锁和打包锁共同绑定指定 commit."""
+
+    manifest_name = _render(
+        spec.manifest_member_template,
+        spec,
+        paper_run_name,
+    )
+    manifest = documents.setdefault(manifest_name, {})
+    manifest["formal_execution_run_lock"] = build_test_formal_execution_lock(commit)
+    manifest["formal_execution_package_lock"] = build_test_formal_execution_lock(commit)
+
+
 def _valid_member_payloads(
     spec: ClosurePackageFamilySpec,
     *,
@@ -85,6 +105,12 @@ def _valid_member_payloads(
         paper_run_name,
     )
     manifest["artifact_type"] = "local_manifest"
+    _assign_execution_locks(
+        documents,
+        spec,
+        CODE_VERSION,
+        paper_run_name=paper_run_name,
+    )
     for source in spec.paper_run_sources:
         _assign_source(
             documents,
@@ -250,6 +276,19 @@ def test_formal_selection_writes_run_scoped_lock_and_independent_manifest(
         selected_paths
     )
     assert all(len(row["package_sha256"]) == 64 for row in lock_payload["closure_input_packages"])
+    assert all(
+        len(row["formal_execution_run_lock_digest"]) == 64
+        and len(row["formal_execution_package_lock_digest"]) == 64
+        for row in lock_payload["closure_input_packages"]
+    )
+    assert lock_payload["formal_execution_run_lock_digests"] == {
+        row["package_family"]: row["formal_execution_run_lock_digest"]
+        for row in lock_payload["closure_input_packages"]
+    }
+    assert lock_payload["formal_execution_package_lock_digests"] == {
+        row["package_family"]: row["formal_execution_package_lock_digest"]
+        for row in lock_payload["closure_input_packages"]
+    }
     digest_payload = dict(lock_payload)
     stored_digest = digest_payload.pop("closure_input_lock_digest")
     canonical = json.dumps(
@@ -393,14 +432,157 @@ def test_internal_identity_rejects_wrong_run_fpr_baseline_and_ready_flag(
 
 
 @pytest.mark.parametrize(
+    "missing_lock_field",
+    ("formal_execution_run_lock", "formal_execution_package_lock"),
+)
+def test_package_rejects_missing_formal_execution_lock(
+    tmp_path: Path,
+    missing_lock_field: str,
+) -> None:
+    """每个闭合包 manifest 必须同时携带运行锁和打包锁."""
+
+    spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
+
+    def mutate(
+        documents: dict[str, dict[str, Any]],
+        current_spec: ClosurePackageFamilySpec,
+    ) -> None:
+        manifest_name = _render(
+            current_spec.manifest_member_template,
+            current_spec,
+            PAPER_RUN_NAME,
+        )
+        documents[manifest_name].pop(missing_lock_field)
+
+    package_path = _write_family_package(
+        tmp_path,
+        spec,
+        token=f"missing_{missing_lock_field}",
+        mutate=mutate,
+    )
+    with pytest.raises(ClosurePackageSelectionError, match="缺少 formal_execution"):
+        inspect_closure_package(
+            package_path,
+            spec=spec,
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+        )
+
+
+def test_package_rejects_forged_formal_execution_lock_digest(tmp_path: Path) -> None:
+    """任一执行锁摘要被篡改后都不得进入正式闭合."""
+
+    spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
+
+    def mutate(
+        documents: dict[str, dict[str, Any]],
+        current_spec: ClosurePackageFamilySpec,
+    ) -> None:
+        manifest_name = _render(
+            current_spec.manifest_member_template,
+            current_spec,
+            PAPER_RUN_NAME,
+        )
+        package_lock = documents[manifest_name]["formal_execution_package_lock"]
+        assert isinstance(package_lock, dict)
+        package_lock["formal_execution_lock_digest"] = "0" * 64
+
+    package_path = _write_family_package(
+        tmp_path,
+        spec,
+        token="forged_lock_digest",
+        mutate=mutate,
+    )
+    with pytest.raises(ClosurePackageSelectionError, match="严格复验"):
+        inspect_closure_package(
+            package_path,
+            spec=spec,
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+        )
+
+
+def test_package_rejects_run_and_package_lock_commit_drift(tmp_path: Path) -> None:
+    """运行锁与打包锁即使各自有效也必须绑定同一个 commit."""
+
+    spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
+
+    def mutate(
+        documents: dict[str, dict[str, Any]],
+        current_spec: ClosurePackageFamilySpec,
+    ) -> None:
+        manifest_name = _render(
+            current_spec.manifest_member_template,
+            current_spec,
+            PAPER_RUN_NAME,
+        )
+        documents[manifest_name]["formal_execution_package_lock"] = (
+            build_test_formal_execution_lock("b" * 40)
+        )
+
+    package_path = _write_family_package(
+        tmp_path,
+        spec,
+        token="lock_commit_drift",
+        mutate=mutate,
+    )
+    with pytest.raises(ClosurePackageSelectionError, match="运行锁与打包锁 commit 不一致"):
+        inspect_closure_package(
+            package_path,
+            spec=spec,
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+        )
+
+
+def test_package_rejects_execution_lock_and_code_version_drift(tmp_path: Path) -> None:
+    """两个执行锁一致时仍必须与全部 code_version 来源完全一致."""
+
+    spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
+
+    def mutate(
+        documents: dict[str, dict[str, Any]],
+        current_spec: ClosurePackageFamilySpec,
+    ) -> None:
+        manifest_name = _render(
+            current_spec.manifest_member_template,
+            current_spec,
+            PAPER_RUN_NAME,
+        )
+        drifted_lock = build_test_formal_execution_lock("b" * 40)
+        documents[manifest_name]["formal_execution_run_lock"] = drifted_lock
+        documents[manifest_name]["formal_execution_package_lock"] = drifted_lock
+
+    package_path = _write_family_package(
+        tmp_path,
+        spec,
+        token="lock_code_version_drift",
+        mutate=mutate,
+    )
+    with pytest.raises(ClosurePackageSelectionError, match="code_version 来源不一致"):
+        inspect_closure_package(
+            package_path,
+            spec=spec,
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+        )
+
+
+@pytest.mark.parametrize(
     "invalid_code_version",
-    ("abc1234-dirty", "git_version_unavailable", "not-a-commit", "abc123"),
+    (
+        f"{CODE_VERSION}-dirty",
+        "git_version_unavailable",
+        "main",
+        "abc1234",
+        "A" * 40,
+    ),
 )
 def test_package_rejects_non_clean_git_code_version(
     tmp_path: Path,
     invalid_code_version: str,
 ) -> None:
-    """单包必须拒绝 dirty、不可用降级值、自由文本和过短提交标识."""
+    """单包必须拒绝 dirty, 降级值, 分支名, 短 SHA 与大写 SHA."""
 
     spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
 
@@ -438,9 +620,15 @@ def test_selection_requires_one_common_code_version_across_all_families(tmp_path
                 documents,
                 current_spec,
                 source,
-                "def5678",
+                "b" * 40,
                 paper_run_name=PAPER_RUN_NAME,
             )
+        _assign_execution_locks(
+            documents,
+            current_spec,
+            "b" * 40,
+            paper_run_name=PAPER_RUN_NAME,
+        )
 
     _write_family_package(package_root, selected_spec, token="different", mutate=mutate)
     with pytest.raises(ClosurePackageSelectionError, match="共享同一"):
@@ -452,11 +640,11 @@ def test_selection_requires_one_common_code_version_across_all_families(tmp_path
         )
 
 
-def test_full_or_uppercase_clean_commit_is_normalized(tmp_path: Path) -> None:
-    """完整40位和短提交可接受, 锁记录统一使用小写规范形式."""
+def test_full_lowercase_clean_commit_is_accepted(tmp_path: Path) -> None:
+    """精确40位小写 clean 提交可以进入闭合输入候选."""
 
     spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
-    full_commit = "A" * 40
+    full_commit = "b" * 40
 
     def mutate(documents: dict[str, dict[str, Any]], current_spec: ClosurePackageFamilySpec) -> None:
         for source in current_spec.code_version_sources:
@@ -467,6 +655,12 @@ def test_full_or_uppercase_clean_commit_is_normalized(tmp_path: Path) -> None:
                 full_commit,
                 paper_run_name=PAPER_RUN_NAME,
             )
+        _assign_execution_locks(
+            documents,
+            current_spec,
+            full_commit,
+            paper_run_name=PAPER_RUN_NAME,
+        )
 
     package_path = _write_family_package(tmp_path, spec, token="full_commit", mutate=mutate)
     candidate = inspect_closure_package(
@@ -475,11 +669,16 @@ def test_full_or_uppercase_clean_commit_is_normalized(tmp_path: Path) -> None:
         paper_run_name=PAPER_RUN_NAME,
         target_fpr=TARGET_FPR,
     )
-    assert candidate.code_version == full_commit.lower()
+    assert candidate.code_version == full_commit
+    expected_lock_digest = build_test_formal_execution_lock(full_commit)[
+        "formal_execution_lock_digest"
+    ]
+    assert candidate.formal_execution_run_lock_digest == expected_lock_digest
+    assert candidate.formal_execution_package_lock_digest == expected_lock_digest
 
 
-def test_extended_clean_short_commit_is_accepted(tmp_path: Path) -> None:
-    """允许 Git 为避免提交前缀冲突而自动扩展短提交长度."""
+def test_extended_clean_short_commit_is_rejected(tmp_path: Path) -> None:
+    """任何不足40位的 clean 提交前缀都不得进入正式闭合."""
 
     spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
     extended_short_commit = "abc12345"
@@ -495,13 +694,13 @@ def test_extended_clean_short_commit_is_accepted(tmp_path: Path) -> None:
             )
 
     package_path = _write_family_package(tmp_path, spec, token="extended_short", mutate=mutate)
-    candidate = inspect_closure_package(
-        package_path,
-        spec=spec,
-        paper_run_name=PAPER_RUN_NAME,
-        target_fpr=TARGET_FPR,
-    )
-    assert candidate.code_version == extended_short_commit
+    with pytest.raises(ClosurePackageSelectionError, match="code_version"):
+        inspect_closure_package(
+            package_path,
+            spec=spec,
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+        )
 
 
 def test_matching_filename_cannot_replace_internal_family_identity(tmp_path: Path) -> None:

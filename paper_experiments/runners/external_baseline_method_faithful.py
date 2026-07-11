@@ -19,6 +19,7 @@ from typing import Any, Mapping
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.runtime import repository_environment
 from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_observation_threshold
 from experiments.protocol.paper_run_config import (
     DEFAULT_GUIDANCE_SCALE,
@@ -595,7 +596,9 @@ def write_baseline_transfer_files(
             "num_inversion_steps": int(config.num_inversion_steps),
         },
         "formal_attack_names": sorted(configured_attacks),
-        "code_version": resolve_code_version(root_path),
+        "code_version": repository_environment.require_published_formal_execution_lock(
+            root_path
+        )["formal_execution_commit"],
         "transfer_ready": True,
     }
     write_json(paths["transfer_manifest"], transfer_manifest)
@@ -719,6 +722,9 @@ def write_external_baseline_method_faithful_outputs(
     """执行单 baseline 全路径并写出可验证 transfer 产物。"""
 
     root_path = Path(root).resolve()
+    formal_execution_run_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     paths = output_paths(root_path, config)
     validate_formal_run_config(root_path, config)
     prepare_single_baseline_run_directory(paths)
@@ -737,7 +743,9 @@ def write_external_baseline_method_faithful_outputs(
                 progress=run_progress,
             )
             update_progress(run_progress, profile="operation=run_baseline_adapter")
-            environment_report = build_runtime_environment_report()
+            environment_report = build_runtime_environment_report(
+                verified_formal_execution_lock=formal_execution_run_lock,
+            )
             environment_report["external_baseline_device_report"] = device_report
             write_json(paths["environment_report"], environment_report)
             update_progress(run_progress, profile="operation=write_environment_report")
@@ -771,6 +779,11 @@ def write_external_baseline_method_faithful_outputs(
         "unsupported_reason": "formal_import_and_comparison_required",
     }
     write_json(paths["summary"], summary)
+    formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
+        formal_execution_run_lock,
+        repository_environment.require_published_formal_execution_lock(root_path),
+        formal_execution_run_lock["formal_execution_commit"],
+    )
     manifest = build_artifact_manifest(
         artifact_id=f"{config.primary_baseline_id}_method_faithful_manifest",
         artifact_type="local_manifest",
@@ -783,7 +796,7 @@ def write_external_baseline_method_faithful_outputs(
             relative_or_absolute(paths["split_command_results"], root_path),
         ),
         config=asdict(config),
-        code_version=resolve_code_version(root_path),
+        code_version=formal_execution_run_lock["formal_execution_commit"],
         rebuild_command="调用 paper_experiments.runners.external_baseline_method_faithful",
         metadata={
             "run_decision": "pass",
@@ -794,6 +807,7 @@ def write_external_baseline_method_faithful_outputs(
             "supports_paper_claim": False,
         },
     ).to_dict()
+    manifest["formal_execution_run_lock"] = formal_execution_run_lock
     write_json(paths["manifest"], manifest)
     return summary
 
@@ -893,6 +907,9 @@ def package_external_baseline_method_faithful_outputs(
     """仅在单 baseline 运行通过后打包独占结果并镜像到 Drive。"""
 
     root_path = Path(root).resolve()
+    formal_execution_package_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     resolved_baseline_id = resolve_primary_baseline_id(
         baseline_id or os.environ.get("SLM_WM_PRIMARY_BASELINE_ID", "")
     )
@@ -904,9 +921,16 @@ def package_external_baseline_method_faithful_outputs(
     source_dir = expected_output_root / paper_run.run_name
     run_dir = source_dir / "run_records" / resolved_baseline_id
     summary_path = run_dir / f"{resolved_baseline_id}_summary.json"
+    run_manifest_path = run_dir / f"{resolved_baseline_id}_manifest.local.json"
     if not summary_path.is_file():
         raise FileNotFoundError(f"baseline 运行摘要不存在: {summary_path}")
     run_summary = read_json(summary_path)
+    run_manifest = read_json(run_manifest_path)
+    formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
+        run_manifest.get("formal_execution_run_lock"),
+        formal_execution_package_lock,
+        run_manifest.get("code_version"),
+    )
     if not all(
         (
             run_summary.get("run_decision") == "pass",
@@ -929,6 +953,10 @@ def package_external_baseline_method_faithful_outputs(
         / f"{resolved_baseline_id}_baseline_transfer_manifest.json"
     )
     transfer_manifest = read_json(transfer_manifest_path)
+    repository_environment.verify_formal_execution_lock_code_version(
+        formal_execution_run_lock,
+        transfer_manifest.get("code_version"),
+    )
     if not all(
         (
             transfer_manifest.get("baseline_id") == resolved_baseline_id,
@@ -946,7 +974,7 @@ def package_external_baseline_method_faithful_outputs(
 
     resolved_archive_name = archive_name or (
         f"external_baseline_method_faithful_package_{resolved_baseline_id}_"
-        f"{utc_archive_token()}_{resolve_code_version(root_path).replace('-dirty', '')}.zip"
+        f"{utc_archive_token()}_{formal_execution_package_lock['formal_execution_commit'][:7]}.zip"
     )
     expected_archive_prefix = (
         f"external_baseline_method_faithful_package_{resolved_baseline_id}_"
@@ -987,6 +1015,8 @@ def package_external_baseline_method_faithful_outputs(
             "paper_run_name": paper_run.run_name,
             "target_fpr": paper_run.target_fpr,
             "baseline_id": resolved_baseline_id,
+            "formal_execution_run_lock": formal_execution_run_lock,
+            "formal_execution_package_lock": formal_execution_package_lock,
             "entry_paths": [entry.relative_to(root_path).as_posix() for entry in entries],
             "entry_sha256": {
                 entry.relative_to(root_path).as_posix(): file_sha256(entry) for entry in entries
@@ -1021,7 +1051,7 @@ def package_external_baseline_method_faithful_outputs(
             "target_fpr": paper_run.target_fpr,
             "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
         },
-        code_version=resolve_code_version(root_path),
+        code_version=formal_execution_package_lock["formal_execution_commit"],
         rebuild_command="调用 paper_experiments.runners.external_baseline_method_faithful",
         metadata={
             "baseline_id": resolved_baseline_id,
@@ -1030,6 +1060,8 @@ def package_external_baseline_method_faithful_outputs(
             "run_decision": "pass",
         },
     ).to_dict()
+    archive_manifest["formal_execution_run_lock"] = formal_execution_run_lock
+    archive_manifest["formal_execution_package_lock"] = formal_execution_package_lock
     write_json(archive_manifest_path, archive_manifest)
 
     final_entries = collect_package_entries(
@@ -1041,6 +1073,18 @@ def package_external_baseline_method_faithful_outputs(
     with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
         for entry in final_entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
+    try:
+        final_package_lock = (
+            repository_environment.require_published_formal_execution_lock(root_path)
+        )
+        repository_environment.validate_formal_execution_lock_pair(
+            formal_execution_package_lock,
+            final_package_lock,
+            formal_execution_package_lock["formal_execution_commit"],
+        )
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
     drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / resolved_archive_name

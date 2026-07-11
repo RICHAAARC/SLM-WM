@@ -16,6 +16,10 @@ from pathlib import Path, PurePosixPath
 import re
 from typing import Any, Mapping, Sequence
 
+from experiments.runtime.repository_environment import (
+    FormalExecutionLockError,
+    normalize_formal_git_commit,
+)
 from main.core.digest import build_stable_digest
 
 
@@ -26,7 +30,6 @@ OFFICIAL_REFERENCE_BASELINE_IDS = (
 )
 SUPPLEMENTAL_METHOD_FIDELITY_ROLE = "supplemental_method_fidelity_reference"
 ARCHIVE_GOVERNANCE_SCOPE = "external_summary_records_final_archive_digest"
-CLEAN_CODE_VERSION_PATTERN = re.compile(r"^[0-9a-fA-F]{7,40}$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -101,16 +104,14 @@ OFFICIAL_REFERENCE_FAMILY_SPECS = tuple(
 
 
 def normalize_clean_code_version(value: Any) -> str:
-    """规范化 clean Git 提交标识并拒绝 dirty 或不可用文本."""
+    """要求官方参考证据使用精确40位小写 clean Git 提交 SHA."""
 
-    if not isinstance(value, str):
-        raise OfficialReferenceFidelityEvidenceError("code_version 必须是 clean Git 提交标识")
-    normalized = value.strip().lower()
-    if CLEAN_CODE_VERSION_PATTERN.fullmatch(normalized) is None:
+    try:
+        return normalize_formal_git_commit(value)
+    except FormalExecutionLockError as exc:
         raise OfficialReferenceFidelityEvidenceError(
-            "code_version 必须是7至40位纯十六进制 clean Git 提交标识"
-        )
-    return normalized
+            "code_version 必须是精确40位小写 clean Git 提交 SHA"
+        ) from exc
 
 
 def file_sha256(path: Path) -> str:

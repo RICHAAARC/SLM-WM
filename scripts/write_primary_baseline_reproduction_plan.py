@@ -7,7 +7,6 @@ import csv
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any
 
@@ -22,6 +21,7 @@ from paper_experiments.baselines import (
     load_baseline_source_registry,
 )
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 
 DEFAULT_OUTPUT_DIR = Path("outputs/primary_baseline_reproduction")
@@ -49,31 +49,6 @@ def read_csv_rows(path: Path) -> list[dict[str, Any]]:
     """读取 CSV 表格。"""
     with path.open(encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取 Git 提交标识, 工作区有变更时附加 dirty 标记。"""
-    try:
-        commit_result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        status_result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    commit_id = commit_result.stdout.strip()
-    if not commit_id:
-        return "git_version_unavailable"
-    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
 
 
 def ensure_output_dir_under_outputs(root_path: Path, output_dir: Path) -> Path:

@@ -48,7 +48,20 @@ Notebook 与 repository module 的跨边界数据
 | input_paths | artifact | none | false | false | false | 产物重建所需输入路径。 |
 | output_paths | artifact | none | false | false | false | 产物重建生成输出路径。 |
 | config_digest | artifact | none | false | false | false | 产物重建配置摘要。 |
-| code_version | artifact | none | false | false | false | 产物重建所用代码版本。 |
+| code_version | artifact | none | false | false | false | 产物重建所用的精确40位小写 Git 提交 SHA; dirty 状态不得进入正式证据。 |
+| formal_execution_lock_schema | protocol | none | false | false | false | clean detached Git 正式执行锁使用的稳定 schema 名称。 |
+| formal_execution_commit | provenance | none | false | false | false | 正式执行锁绑定且与当前 HEAD 精确一致的40位小写 Git 提交 SHA。 |
+| formal_execution_head_detached | governance | none | false | false | false | 正式执行时 HEAD 是否已脱离所有分支引用。 |
+| formal_execution_worktree_clean | governance | none | false | false | false | 正式执行时 Git porcelain 状态是否为空, 包括未跟踪文件。 |
+| formal_execution_lock_ready | governance | none | false | false | false | 提交身份、detached HEAD 与 clean 工作树是否同时满足正式执行条件。 |
+| formal_execution_lock_digest | provenance | none | false | false | false | 正式执行锁核心记录的稳定 SHA-256 摘要。 |
+| formal_execution_lock | provenance | none | false | false | false | 运行环境报告中经过严格 schema 校验的完整正式执行锁记录。 |
+| formal_execution_run_lock | provenance | none | false | false | false | 正式运行入口与运行 manifest 写出前两次实时复验形成的完整执行锁记录。 |
+| formal_execution_package_lock | provenance | none | false | false | false | 正式归档开始与归档写出后实时复验形成的完整执行锁记录。 |
+| formal_execution_run_lock_digest | provenance | none | false | false | false | 单个正式输入包中运行锁的稳定 SHA-256 摘要。 |
+| formal_execution_package_lock_digest | provenance | none | false | false | false | 单个正式输入包中打包锁的稳定 SHA-256 摘要。 |
+| formal_execution_run_lock_digests | provenance | none | false | false | false | 闭合输入锁中由10类 package family 映射到运行锁摘要的精确字典。 |
+| formal_execution_package_lock_digests | provenance | none | false | false | false | 闭合输入锁中由10类 package family 映射到打包锁摘要的精确字典。 |
 | rebuild_command | artifact | none | false | false | false | 产物重建命令。 |
 | generated_at | governance | none | false | false | false | 本地报告或审计摘要的生成时间。 |
 | construction_unit_name | governance | none | false | false | false | 项目分阶段构建流程中的语义阶段名称。 |
@@ -1607,7 +1620,7 @@ Notebook 与 repository module 的跨边界数据
 | require_existing_evidence | protocol | none | false | false | false | result record 构造时是否要求每个 evidence path 已存在, 并进入 manifest 配置摘要。 |
 | test_prompt_id_digest | provenance | none | true | false | false | 共同协议从受治理 Prompt 文件当前 test split 独立重算的标识集合摘要。 |
 | dataset_quality_feature_records_sha256 | provenance | none | false | false | false | 结果闭合门禁对规范正式特征 JSONL 文件独立计算的字节摘要。 |
-| common_code_version | provenance | none | true | false | false | CPU 结果闭合输入锁中10个上游结果包共享的规范化 clean Git 提交标识。 |
+| common_code_version | provenance | none | true | false | false | CPU 结果闭合输入锁中10个上游结果包共享的精确40位小写 clean Git 提交 SHA。 |
 | closure_input_common_code_version_ready | governance | none | false | false | false | 完整结果打包前逐包代码版本是否均为同一规范化 clean Git 提交。 |
 | closure_source_file_sha256 | provenance | none | false | false | false | 结果闭合门禁全部实际读取文件的规范路径到文件字节 SHA-256 映射。 |
 | closure_source_file_digest | provenance | none | false | false | false | 对结果闭合门禁输入文件字节摘要映射执行规范序列化后得到的 SHA-256。 |
@@ -1618,7 +1631,7 @@ Notebook 与 repository module 的跨边界数据
 | result_closure_gate_source_files_ready | governance | none | false | false | false | 完整结果打包前重新读取的全部 gate 输入文件 SHA-256 是否与门禁时完全一致。 |
 | result_closure_gate_manifest_config_ready | governance | none | false | false | false | Gate manifest 的 config digest 是否绑定运行层级、FPR、样本规模、报告和输入文件摘要。 |
 | result_closure_gate_code_version_ready | governance | none | false | false | false | Gate manifest 代码版本是否为输入锁绑定的同一 clean Git 提交。 |
-| current_repository_code_version | provenance | none | false | false | false | 完整结果打包当下仓库的规范化 clean Git 提交标识。 |
+| current_repository_code_version | provenance | none | false | false | false | 完整结果打包当下仓库的精确40位小写 clean Git 提交 SHA。 |
 | current_repository_code_version_ready | governance | none | false | false | false | 完整结果打包当下仓库是否仍为输入锁绑定的同一 clean Git 提交且工作区无修改。 |
 | observation_id | protocol | none | true | false | false | 分数分布表中一条仅图像检测 observation 的稳定标识。 |
 | sample_scope | protocol | none | true | true | false | 连续检测统计所属的 test overall 或单一攻击条件范围。 |

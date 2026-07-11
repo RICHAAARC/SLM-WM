@@ -19,7 +19,7 @@ from scripts.write_official_reference_fidelity_evidence_outputs import (
 )
 
 
-CODE_VERSION = "8a3379d"
+CODE_VERSION = "8" * 40
 PAPER_RUN_NAME = "probe_paper"
 TARGET_FPR = 0.1
 
@@ -360,7 +360,7 @@ def test_official_reference_fidelity_builder_rejects_dirty_code_version(
 
     with pytest.raises(
         OfficialReferenceFidelityEvidenceError,
-        match="clean Git 提交标识",
+        match="精确40位小写 clean Git 提交 SHA",
     ):
         write_official_reference_fidelity_evidence_outputs(
             root=tmp_path,
@@ -384,5 +384,5 @@ def test_official_reference_fidelity_builder_rejects_repository_version_drift(
     ):
         write_official_reference_fidelity_evidence_outputs(
             root=tmp_path,
-            repository_code_version="8a3379e",
+            repository_code_version="9" * 40,
         )

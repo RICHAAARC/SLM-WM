@@ -269,7 +269,7 @@ def test_threshold_audit_writer_binds_actual_observation_file_bytes(
         lambda prompt_count: {"calibration": 3, "test": 2},
     )
     paper_run.prompt_count = 5
-    monkeypatch.setattr(threshold_writer, "resolve_code_version", lambda root: "test-code")
+    monkeypatch.setattr(threshold_writer, "resolve_code_version", lambda root: "a" * 40)
 
     main_rows, main_protocol = _main_method_rows()
     main_dir = tmp_path / "outputs" / "image_only_dataset_runtime" / run_name

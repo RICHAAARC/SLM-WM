@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from experiments.runtime import repository_environment
 from experiments.protocol.attacks import attack_config_digest
 from external_baseline.primary.sd35_method_faithful_common import formal_image_attack_config
 import paper_experiments.runners.t2smark_formal_reproduction as t2smark_runtime
@@ -30,9 +31,22 @@ from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
     inspect_closure_package,
 )
+from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 pytestmark = pytest.mark.quick
+FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+
+
+@pytest.fixture(autouse=True)
+def _publish_formal_execution_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把 T2SMark 归档夹具绑定到确定性正式执行锁."""
+
+    monkeypatch.setattr(
+        repository_environment,
+        "require_published_formal_execution_lock",
+        lambda _root: dict(FORMAL_EXECUTION_LOCK),
+    )
 
 
 def _write_results(path: Path, *, sample_count: int, missing_attack_name: str = "") -> None:
@@ -326,7 +340,7 @@ def _write_package_fixture(
 ) -> tuple[Path, Path]:
     """写出一个 Prompt 的完整 T2SMark 精确白名单打包 fixture。"""
 
-    code_version = "b370425"
+    code_version = "b" * 40
     monkeypatch.setattr(t2smark_runtime, "resolve_code_version", lambda _root: code_version)
     config = T2SMarkFormalReproductionConfig(
         output_dir="outputs/t2smark_formal_reproduction",
@@ -484,6 +498,7 @@ def _write_package_fixture(
     t2smark_runtime.write_json(paths["summary"], summary)
     run_manifest = {
         "code_version": code_version,
+        "formal_execution_run_lock": FORMAL_EXECUTION_LOCK,
         "config": asdict(config),
         "metadata": {"run_decision": "pass", "formal_import_validation_ready": True},
     }

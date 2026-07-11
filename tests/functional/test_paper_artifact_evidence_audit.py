@@ -283,8 +283,13 @@ def write_minimal_upstream_artifacts(tmp_path: Path) -> None:
 
 
 @pytest.mark.quick
-def test_paper_artifact_evidence_outputs_are_rebuildable_and_claim_safe(tmp_path: Path) -> None:
+def test_paper_artifact_evidence_outputs_are_rebuildable_and_claim_safe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """脚本应从受治理输入重建审计产物, 且不得把当前结果标记为论文级主张。"""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
     write_minimal_upstream_artifacts(tmp_path)
 
     manifest = write_paper_artifact_evidence_audit_outputs(root=tmp_path)

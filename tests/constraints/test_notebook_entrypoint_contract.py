@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 
 import pytest
 
@@ -26,6 +27,10 @@ FORBIDDEN_COMPONENT_NOTEBOOKS = {
     "threshold_calibration_run.ipynb",
     "dataset_level_quality_run.ipynb",
 }
+PAPER_RUN_DEFAULT_PATTERN = re.compile(
+    r'^\s*SLM_WM_PAPER_RUN_NAME\s*=\s*["\']([^"\']+)["\']\s*$',
+    re.MULTILINE,
+)
 
 
 def _code_source(path: Path) -> str:
@@ -39,6 +44,12 @@ def _code_source(path: Path) -> str:
     )
 
 
+def _paper_run_defaults(path: Path) -> tuple[str, ...]:
+    """解析 Notebook 中显式发布给环境 helper 的运行层级默认值."""
+
+    return tuple(PAPER_RUN_DEFAULT_PATTERN.findall(_code_source(path)))
+
+
 @pytest.mark.quick
 def test_current_notebook_set_contains_formal_entrypoints_only() -> None:
     """正式入口必须存在, 已移除的分量诊断入口不得重新出现。"""
@@ -46,6 +57,95 @@ def test_current_notebook_set_contains_formal_entrypoints_only() -> None:
     names = {path.name for path in NOTEBOOK_DIR.glob("*.ipynb")}
     assert REQUIRED_NOTEBOOKS <= names
     assert not (FORBIDDEN_COMPONENT_NOTEBOOKS & names)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "notebook_path",
+    tuple(sorted(NOTEBOOK_DIR.glob("*.ipynb"))),
+    ids=lambda path: path.name,
+)
+def test_all_notebook_entrypoints_have_one_probe_paper_default(
+    notebook_path: Path,
+) -> None:
+    """解析全部 Notebook, 正式入口只允许唯一的 probe_paper 默认值."""
+
+    defaults = _paper_run_defaults(notebook_path)
+
+    assert defaults == ("probe_paper",)
+    assert "pilot_paper" not in defaults
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "notebook_path",
+    tuple(sorted(NOTEBOOK_DIR.glob("*.ipynb"))),
+    ids=lambda path: path.name,
+)
+def test_all_notebooks_require_clean_detached_full_commit(
+    notebook_path: Path,
+) -> None:
+    """全部 Colab 入口必须在运行前锁定完整 detached Git 提交."""
+
+    source = _code_source(notebook_path)
+
+    assert "SLM_WM_REPOSITORY_COMMIT" in source
+    assert "SLM_WM_REPOSITORY_REF" not in source
+    assert "verify_and_publish_formal_execution" in source
+    assert '["git", "checkout", "--detach", repository_commit]' in source
+    assert 'os.environ.get("SLM_WM_REPOSITORY_COMMIT", "").strip()' not in source
+    assert 'repository_commit + "^{commit}"' in source
+    assert 'r"[0-9a-f]{40}"' in source
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "notebook_path",
+    tuple(sorted(NOTEBOOK_DIR.glob("*.ipynb"))),
+    ids=lambda path: path.name,
+)
+def test_notebooks_lock_repository_before_dependency_install(
+    notebook_path: Path,
+) -> None:
+    """Notebook 必须先验证代码身份, 再安装会改变正式运行环境的依赖."""
+
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    code_cells = [
+        "".join(cell.get("source", []))
+        for cell in notebook["cells"]
+        if cell.get("cell_type") == "code"
+    ]
+    lock_cell_index = next(
+        index
+        for index, source in enumerate(code_cells)
+        if "verify_and_publish_formal_execution" in source
+    )
+    install_cell_indexes = [
+        index
+        for index, source in enumerate(code_cells)
+        if "%pip install" in source
+    ]
+
+    assert all(lock_cell_index < install_index for install_index in install_cell_indexes)
+    if install_cell_indexes:
+        configure_cell_index = next(
+            index
+            for index, source in enumerate(code_cells)
+            if "configure_paper_run_environment" in source
+        )
+        dependency_report_cell_index = next(
+            index
+            for index, source in enumerate(code_cells)
+            if "build_notebook_dependency_report" in source
+        )
+        assert all(
+            install_index < configure_cell_index
+            for install_index in install_cell_indexes
+        )
+        assert all(
+            install_index < dependency_report_cell_index
+            for install_index in install_cell_indexes
+        )
 
 
 @pytest.mark.quick

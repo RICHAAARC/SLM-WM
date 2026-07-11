@@ -10,7 +10,6 @@ import argparse
 import ast
 import importlib
 import json
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 
 
@@ -199,31 +199,6 @@ def build_core_package_layout(root: str | Path) -> str:
         suffix = "/" if path.is_dir() else ""
         lines.append(f"{relative_path}{suffix}")
     return "\n".join(lines) + "\n"
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取当前 Git 提交标识, 不可用时返回稳定降级值。"""
-    try:
-        commit_result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        status_result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    commit_id = commit_result.stdout.strip()
-    if not commit_id:
-        return "git_version_unavailable"
-    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
 
 
 def ensure_output_dir_under_outputs(root_path: Path, output_dir: Path) -> Path:

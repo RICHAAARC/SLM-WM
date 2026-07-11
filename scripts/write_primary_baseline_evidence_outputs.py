@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path, PurePosixPath
-import subprocess
 import sys
 from typing import Any
 
@@ -22,6 +21,7 @@ from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_obs
 from experiments.protocol.paper_run_config import PaperRunConfig, build_paper_run_config
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments
+from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 from paper_experiments.baselines.method_faithful_observation_collection import (
     DEFAULT_METHOD_FAITHFUL_COLLECTION_ROOT,
@@ -93,22 +93,6 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
         return path.resolve().relative_to(root_path.resolve()).as_posix()
     except ValueError:
         return path.resolve().as_posix()
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取当前 Git 短提交标识。"""
-
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    return result.stdout.strip() or "git_version_unavailable"
 
 
 def read_json_object(path: Path, role: str) -> dict[str, Any]:

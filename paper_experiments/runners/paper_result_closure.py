@@ -12,7 +12,12 @@ import sys
 from typing import Any
 
 from experiments.protocol.paper_run_config import build_paper_run_config, normalize_paper_run_name
+from experiments.runtime import repository_environment
 from experiments.runtime.archive_naming import utc_archive_token
+from experiments.runtime.repository_environment import (
+    FORMAL_GIT_COMMIT_PATTERN,
+    resolve_code_version,
+)
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
     build_closure_input_selection_report,
@@ -59,15 +64,13 @@ CLOSURE_DERIVED_OUTPUT_DIR_TEMPLATES: tuple[str, ...] = (
 
 
 def _short_commit(root: str | Path = ".") -> str:
-    """读取当前仓库短提交, 用于构造本次唯一归档名称。"""
+    """从完整提交身份显式截取7位归档名称摘要."""
 
-    return subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        cwd=Path(root).resolve(),
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
+    code_version = resolve_code_version(Path(root).resolve())
+    commit = code_version.removesuffix("-dirty")
+    if FORMAL_GIT_COMMIT_PATTERN.fullmatch(commit) is None:
+        raise RuntimeError("无法从完整 Git 提交身份构造归档名称")
+    return commit[:7]
 
 
 def _complete_archive_name(paper_run_name: str, *, root: str | Path = ".") -> str:
@@ -624,6 +627,9 @@ def run_paper_result_closure_commands(
     """锁定输入、清理当前 run、执行闭合 DAG 并返回精确归档路径。"""
 
     root_path = Path(root).resolve()
+    formal_execution_run_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     normalized_run_name = normalize_paper_run_name(paper_run_name)
     paper_run = build_paper_run_config(root_path)
     if paper_run.run_name != normalized_run_name or not math.isclose(
@@ -680,6 +686,14 @@ def run_paper_result_closure_commands(
         raise FileNotFoundError(f"本次完整结果归档未生成: {local_archive_path.as_posix()}")
     if not drive_archive_path.is_file():
         raise FileNotFoundError(f"本次完整结果归档未写回: {drive_archive_path.as_posix()}")
+    formal_execution_package_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
+    repository_environment.validate_formal_execution_lock_pair(
+        formal_execution_run_lock,
+        formal_execution_package_lock,
+        formal_execution_run_lock["formal_execution_commit"],
+    )
     return {
         "complete_archive_path": drive_archive_path.as_posix(),
         "local_complete_archive_path": local_archive_path.as_posix(),
@@ -692,6 +706,8 @@ def run_paper_result_closure_commands(
         "closure_input_lock_digest": selection_report["closure_input_lock_digest"],
         "closure_input_packages": list(closure_input_packages),
         "removed_managed_output_paths": list(removed_paths),
+        "formal_execution_run_lock": formal_execution_run_lock,
+        "formal_execution_package_lock": formal_execution_package_lock,
     }
 
 

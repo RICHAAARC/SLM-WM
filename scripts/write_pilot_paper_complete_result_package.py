@@ -27,6 +27,8 @@ if str(ROOT) not in sys.path:
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.runtime import repository_environment
+from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis.result_closure_gate import build_source_file_sha256_map
 from paper_experiments.runners.closure_package_selection import (
@@ -218,32 +220,6 @@ def copy_file_with_progress(source_path: Path, target_path: Path, label: str) ->
     shutil.copystat(source_path, target_path)
     progress.emit(1, copied_bytes=copied_bytes, profile=f"file={source_path.name} done", force=True)
     return copied_bytes
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取 Git 短提交标识, 工作区有变更时附加 dirty 标记。"""
-
-    try:
-        commit_result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        status_result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    commit_id = commit_result.stdout.strip()
-    if not commit_id:
-        return "git_version_unavailable"
-    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
 
 
 def resolve_path(root_path: Path, path: str | Path | None) -> Path | None:
@@ -897,6 +873,9 @@ def write_pilot_paper_complete_result_package_outputs(
     """写出当前论文运行层级的完整结果包与包外 archive receipt。"""
 
     root_path = Path(root).resolve()
+    formal_execution_run_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     paper_run = build_paper_run_config(root_path)
     resolved_drive_output_dir = (
         paper_run.drive_dir("complete_result_package") if drive_output_dir is None else drive_output_dir
@@ -943,6 +922,14 @@ def write_pilot_paper_complete_result_package_outputs(
         target_fpr=paper_run.target_fpr,
         explicit_packages=packages,
     )
+    formal_execution_package_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
+    repository_environment.validate_formal_execution_lock_pair(
+        formal_execution_run_lock,
+        formal_execution_package_lock,
+        formal_execution_run_lock["formal_execution_commit"],
+    )
     payload_entry_paths = [relative_or_absolute(path, root_path) for path in payload_entries]
     archive_entry_paths = [relative_or_absolute(path, root_path) for path in archive_entries]
     entry_payload_digest = build_entry_payload_digest(root_path, payload_entries)
@@ -955,6 +942,8 @@ def write_pilot_paper_complete_result_package_outputs(
         "entry_count": len(archive_entry_paths),
         "entry_paths_digest": build_stable_digest(archive_entry_paths),
         "entry_payload_digest": entry_payload_digest,
+        "formal_execution_run_lock": formal_execution_run_lock,
+        "formal_execution_package_lock": formal_execution_package_lock,
     }
     write_json(package_manifest_path, package_manifest)
     write_json(summary_path, readiness_summary)
@@ -1000,7 +989,7 @@ def write_pilot_paper_complete_result_package_outputs(
             "materialize_packages": materialize_packages,
             "zip_compression": str(zip_compression),
         },
-        code_version=resolve_code_version(root_path),
+        code_version=formal_execution_package_lock["formal_execution_commit"],
         rebuild_command=subprocess.list2cmdline(rebuild_arguments),
         metadata={
             **readiness_summary,
@@ -1009,11 +998,17 @@ def write_pilot_paper_complete_result_package_outputs(
             "final_archive_digest_available_in_sidecar": True,
         },
     ).to_dict()
+    manifest["formal_execution_run_lock"] = formal_execution_run_lock
+    manifest["formal_execution_package_lock"] = formal_execution_package_lock
     write_json(manifest_path, manifest)
 
     # 门禁必须位于 ZipFile 构造与 Drive 目录创建之前。失败时保留 readiness
     # summary 供审计, 但绝不产生看似可用的归档或远端副本。
     require_complete_package_readiness(readiness_summary)
+    repository_environment.verify_formal_execution_lock_code_version(
+        formal_execution_package_lock,
+        readiness_summary.get("common_code_version"),
+    )
     final_gate_status = build_result_closure_gate_status(
         root_path,
         paper_run_name=paper_run.run_name,
@@ -1023,6 +1018,18 @@ def write_pilot_paper_complete_result_package_outputs(
     if final_gate_status.get("result_closure_ready") is not True:
         raise RuntimeError("归档前结果闭合门禁输入字节绑定已失效, 拒绝创建 zip 或复制 Drive")
     write_archive_with_progress(root_path, archive_path, archive_entries, compression_method)
+    try:
+        final_package_lock = (
+            repository_environment.require_published_formal_execution_lock(root_path)
+        )
+        repository_environment.validate_formal_execution_lock_pair(
+            formal_execution_package_lock,
+            final_package_lock,
+            formal_execution_package_lock["formal_execution_commit"],
+        )
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
     archive_digest = file_digest_with_progress(archive_path, "paper run complete package digest")
 
     drive_archive_path = ""

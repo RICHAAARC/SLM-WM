@@ -44,6 +44,13 @@ FORMAL_REGENERATION_IDENTITY = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本模块使用 pilot_paper 的固定 FPR=0.01 夹具."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+
+
 def write_pilot_threshold_observation_evidence(
     path: Path,
     *,

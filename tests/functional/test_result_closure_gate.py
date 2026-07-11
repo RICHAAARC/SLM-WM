@@ -92,6 +92,7 @@ from scripts.write_result_closure_gate_outputs import main, write_result_closure
 from scripts.write_paper_artifact_evidence_audit_outputs import (
     write_paper_artifact_evidence_audit_outputs,
 )
+from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 SCALE = "probe_paper"
@@ -135,7 +136,7 @@ TEST_PROMPT_ID_DIGEST = build_stable_digest(
 )
 FEATURE_RECORDS_TEXT = "{}\n"
 FEATURE_RECORDS_SHA256 = hashlib.sha256(FEATURE_RECORDS_TEXT.encode("utf-8")).hexdigest()
-COMMON_CODE_VERSION = "abc1234"
+COMMON_CODE_VERSION = "a" * 40
 METHOD_THRESHOLD_DIGEST_MAP = {
     "slm_wm_current": MAIN_THRESHOLD_DIGEST,
     "tree_ring": "3" * 64,
@@ -429,7 +430,7 @@ def manifest(
     *,
     input_paths: tuple[str, ...] = (),
     config: dict[str, object] | None = None,
-    code_version: str = "test-code-version",
+    code_version: str = "a" * 40,
 ) -> dict[str, object]:
     """构造满足通用 provenance schema 的测试 manifest。"""
 
@@ -1060,6 +1061,8 @@ def primary_evidence_record(baseline_id: str) -> dict[str, object]:
 def closure_input_lock() -> tuple[dict[str, object], dict[str, object]]:
     """构造精确10类输入包的当前 run 锁及独立 manifest."""
 
+    execution_lock = build_test_formal_execution_lock(COMMON_CODE_VERSION)
+    execution_lock_digest = execution_lock["formal_execution_lock_digest"]
     records = [
         {
             "package_family": spec.package_family,
@@ -1068,6 +1071,8 @@ def closure_input_lock() -> tuple[dict[str, object], dict[str, object]]:
             "paper_run_name": SCALE,
             "target_fpr": TARGET_FPR,
             "code_version": COMMON_CODE_VERSION,
+            "formal_execution_run_lock_digest": execution_lock_digest,
+            "formal_execution_package_lock_digest": execution_lock_digest,
             "generated_at": "2026-07-11T00:00:00+00:00",
         }
         for index, spec in enumerate(CLOSURE_PACKAGE_FAMILY_SPECS)
@@ -1078,6 +1083,14 @@ def closure_input_lock() -> tuple[dict[str, object], dict[str, object]]:
         "common_code_version": COMMON_CODE_VERSION,
         "closure_input_package_count": len(records),
         "closure_input_packages": records,
+        "formal_execution_run_lock_digests": {
+            record["package_family"]: record["formal_execution_run_lock_digest"]
+            for record in records
+        },
+        "formal_execution_package_lock_digests": {
+            record["package_family"]: record["formal_execution_package_lock_digest"]
+            for record in records
+        },
     }
     payload["closure_input_lock_digest"] = build_stable_digest(payload)
     metadata = {

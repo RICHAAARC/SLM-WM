@@ -7,7 +7,6 @@ import csv
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any
 
@@ -31,6 +30,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     validate_pilot_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
+from experiments.runtime.repository_environment import resolve_code_version
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from paper_experiments.runners.closure_package_selection import (
     load_validated_closure_input_lock,
@@ -51,32 +51,6 @@ def json_line(value: dict[str, Any]) -> str:
     """把单条记录转换为 JSONL 文本行。"""
 
     return json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n"
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取 Git 短提交标识, 工作区有变更时附加 dirty 标记。"""
-
-    try:
-        commit_result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        status_result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    commit_id = commit_result.stdout.strip()
-    if not commit_id:
-        return "git_version_unavailable"
-    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
 
 
 def resolve_input_path(root_path: Path, path: str | Path) -> Path:

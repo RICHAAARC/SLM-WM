@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any
 
@@ -31,6 +30,7 @@ from paper_experiments.baselines import (
     validate_primary_baseline_formal_import_rows,
 )
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.runtime.repository_environment import resolve_code_version
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -81,32 +81,6 @@ def read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取 Git 提交标识, 工作区有变更时追加 dirty 标记。"""
-
-    try:
-        commit_result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        status_result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    commit_id = commit_result.stdout.strip()
-    if not commit_id:
-        return "git_version_unavailable"
-    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
 
 
 def ensure_output_dir_under_outputs(root_path: Path, output_dir: Path) -> Path:

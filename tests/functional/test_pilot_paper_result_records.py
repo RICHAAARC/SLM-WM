@@ -36,6 +36,13 @@ BASELINE_THRESHOLD_DIGESTS = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本模块未显式切换层级的记录夹具固定使用 pilot_paper."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+
+
 def test_result_metric_writer_preserves_negative_ssim_and_signed_ci() -> None:
     """负 SSIM 必须原样保留, 且使用范围宽度为2的 Hoeffding 区间."""
 
@@ -432,7 +439,7 @@ def test_result_writer_materializes_method_and_governed_baseline_records(tmp_pat
     assert summary["pilot_paper_result_record_count"] == 5
     assert len(summary["method_threshold_digest_map"]) == 5
     assert len(summary["result_record_set_digest"]) == 64
-    assert summary["common_code_version"] == "abc1234"
+    assert summary["common_code_version"] == "a" * 40
     assert summary["pilot_paper_template_coverage_ready"] is False
     assert any(row["template_covered"] == "True" for row in coverage_rows)
     assert all(path.startswith("outputs/") for path in manifest["output_paths"])

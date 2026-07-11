@@ -1,8 +1,9 @@
 """集中描述论文运行配置。
 
 该模块的作用是把论文运行层级、prompt 文件、Drive 结果根目录和样本规模收敛到一个配置解析层。
-这样 Notebook 与 Colab helper 不需要各自硬编码 120、128 或固定的 Drive 子目录, 后续从
-pilot_paper 切换到 full_paper 时只需要切换 `SLM_WM_PAPER_RUN_NAME` 或相关环境变量。
+这样 Notebook 与 Colab helper 不需要各自硬编码 120, 128 或固定的 Drive 子目录. 无显式
+输入时统一从 probe_paper 开始, 后续切换到 pilot_paper 或 full_paper 只需要设置
+`SLM_WM_PAPER_RUN_NAME` 或相关环境变量.
 """
 
 from __future__ import annotations
@@ -151,7 +152,7 @@ class PaperRunConfig:
 def normalize_paper_run_name(value: str | None) -> str:
     """解析论文运行层级名称。"""
 
-    resolved = (value or PILOT_PAPER_RUN_NAME).strip()
+    resolved = (value or PROBE_PAPER_RUN_NAME).strip()
     if resolved not in RUN_DEFAULTS:
         raise ValueError(f"未知论文运行层级: {resolved}")
     return resolved

@@ -12,6 +12,7 @@ from paper_experiments.runners.closure_package_selection import (
     LOCK_MANIFEST_FILENAME,
     LOCK_OUTPUT_ROOT,
 )
+from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 def write_test_closure_input_lock(
@@ -19,10 +20,13 @@ def write_test_closure_input_lock(
     *,
     paper_run_name: str,
     target_fpr: float,
-    common_code_version: str = "abc1234",
+    common_code_version: str = "a" * 40,
 ) -> tuple[Path, Path]:
     """写出不读取大型 ZIP,但满足下游身份复验的10类测试锁."""
 
+    execution_lock = build_test_formal_execution_lock(common_code_version)
+    run_lock_digest = execution_lock["formal_execution_lock_digest"]
+    package_lock_digest = execution_lock["formal_execution_lock_digest"]
     records = [
         {
             "package_family": spec.package_family,
@@ -31,6 +35,8 @@ def write_test_closure_input_lock(
             "paper_run_name": paper_run_name,
             "target_fpr": target_fpr,
             "code_version": common_code_version,
+            "formal_execution_run_lock_digest": run_lock_digest,
+            "formal_execution_package_lock_digest": package_lock_digest,
             "generated_at": "2026-07-11T00:00:00+00:00",
         }
         for index, spec in enumerate(CLOSURE_PACKAGE_FAMILY_SPECS)
@@ -41,6 +47,14 @@ def write_test_closure_input_lock(
         "common_code_version": common_code_version,
         "closure_input_package_count": len(records),
         "closure_input_packages": records,
+        "formal_execution_run_lock_digests": {
+            record["package_family"]: record["formal_execution_run_lock_digest"]
+            for record in records
+        },
+        "formal_execution_package_lock_digests": {
+            record["package_family"]: record["formal_execution_package_lock_digest"]
+            for record in records
+        },
     }
     lock_payload["closure_input_lock_digest"] = build_stable_digest(lock_payload)
     output_dir = root / LOCK_OUTPUT_ROOT / paper_run_name

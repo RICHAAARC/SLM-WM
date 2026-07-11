@@ -9,7 +9,6 @@ import hashlib
 import json
 import math
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any, Iterable, Mapping
 from zipfile import ZipFile
@@ -39,6 +38,7 @@ from experiments.protocol.prompts import (
     read_prompt_file,
 )
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
+from experiments.runtime.repository_environment import resolve_code_version
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -110,32 +110,6 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
         return path.resolve().relative_to(root_path).as_posix()
     except ValueError:
         return path.resolve().as_posix()
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取当前 Git 短提交标识, 工作区有变更时附加 dirty 标记。"""
-
-    try:
-        commit_result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        status_result = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    commit_id = commit_result.stdout.strip()
-    if not commit_id:
-        return "git_version_unavailable"
-    return f"{commit_id}-dirty" if status_result.stdout.strip() else commit_id
 
 
 def build_file_digest(path: Path) -> str:

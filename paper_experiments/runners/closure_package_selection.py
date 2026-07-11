@@ -17,14 +17,18 @@ from zipfile import BadZipFile, ZipFile
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.protocol.paper_run_config import normalize_paper_run_name
-from experiments.runtime.repository_environment import resolve_code_version
+from experiments.runtime.repository_environment import (
+    FormalExecutionLockError,
+    normalize_formal_git_commit,
+    resolve_code_version,
+    validate_formal_execution_lock_record,
+)
 
 
 LOCK_OUTPUT_ROOT = Path("outputs/paper_result_closure")
 LOCK_FILENAME = "closure_input_lock.json"
 LOCK_MANIFEST_FILENAME = "input_lock_manifest.local.json"
 MAX_GOVERNANCE_MEMBER_BYTES = 32 * 1024 * 1024
-CLEAN_CODE_VERSION_PATTERN = re.compile(r"^[0-9a-fA-F]{7,40}$")
 
 
 class ClosurePackageSelectionError(ValueError):
@@ -87,6 +91,8 @@ class ClosurePackageCandidate:
     paper_run_name: str
     target_fpr: float
     code_version: str
+    formal_execution_run_lock_digest: str
+    formal_execution_package_lock_digest: str
     generated_at: str
     generated_at_utc: datetime
 
@@ -100,6 +106,12 @@ class ClosurePackageCandidate:
             "paper_run_name": self.paper_run_name,
             "target_fpr": self.target_fpr,
             "code_version": self.code_version,
+            "formal_execution_run_lock_digest": (
+                self.formal_execution_run_lock_digest
+            ),
+            "formal_execution_package_lock_digest": (
+                self.formal_execution_package_lock_digest
+            ),
             "generated_at": self.generated_at,
         }
 
@@ -483,19 +495,74 @@ def _validated_generated_at(value: Any) -> tuple[str, datetime]:
 
 
 def normalize_clean_code_version(value: Any) -> str:
-    """把受治理 Git 提交标识规范化为小写纯十六进制文本.
+    """要求受治理代码版本是精确40位小写 Git 提交 SHA.
 
-    正式结果包只接受7至40位的规范短提交或完整提交标识. 该边界会
-    明确拒绝 ``-dirty``、不可用降级值和任意自由文本, 避免不同代码状态被
-    聚合为同一次论文证据闭合.
+    正式结果包不再兼容短 SHA, 大小写转换, ``-dirty``, 不可用降级值或
+    任意自由文本, 避免不同提交前缀被聚合为同一次论文证据闭合.
     """
 
-    if not isinstance(value, str):
-        raise ClosurePackageSelectionError("code_version 必须是 clean Git 提交标识")
-    normalized = value.strip()
-    if CLEAN_CODE_VERSION_PATTERN.fullmatch(normalized) is None:
-        raise ClosurePackageSelectionError("code_version 必须是7至40位纯十六进制 clean Git 提交标识")
-    return normalized.lower()
+    try:
+        return normalize_formal_git_commit(value)
+    except FormalExecutionLockError as exc:
+        raise ClosurePackageSelectionError(
+            "code_version 必须是精确40位小写 clean Git 提交 SHA"
+        ) from exc
+
+
+def _validate_package_execution_locks(
+    manifest: dict[str, Any],
+    *,
+    package_family: str,
+    code_version: str,
+) -> tuple[str, str]:
+    """逐个复验运行锁与打包锁, 并绑定包内完整代码提交身份.
+
+    两个锁分别证明正式任务启动边界和 ZIP 打包边界的仓库状态. 此处调用
+    统一 validator 严格复验 schema, 摘要和布尔门禁, 再要求两个锁的完整
+    commit 与所有 ``code_version_sources`` 汇总出的提交完全一致.
+    """
+
+    validated_locks: dict[str, dict[str, Any]] = {}
+    for field_name in (
+        "formal_execution_run_lock",
+        "formal_execution_package_lock",
+    ):
+        if field_name not in manifest:
+            raise ClosurePackageSelectionError(
+                f"{package_family} 的 manifest 缺少 {field_name}"
+            )
+        try:
+            validated_lock = validate_formal_execution_lock_record(
+                manifest[field_name]
+            )
+        except FormalExecutionLockError as exc:
+            raise ClosurePackageSelectionError(
+                f"{package_family} 的 {field_name} 未通过严格复验"
+            ) from exc
+        if not isinstance(validated_lock, dict):
+            raise ClosurePackageSelectionError(
+                f"{package_family} 的 {field_name} validator 返回类型非法"
+            )
+        validated_locks[field_name] = validated_lock
+
+    run_lock = validated_locks["formal_execution_run_lock"]
+    package_lock = validated_locks["formal_execution_package_lock"]
+    run_commit = normalize_clean_code_version(run_lock.get("formal_execution_commit"))
+    package_commit = normalize_clean_code_version(
+        package_lock.get("formal_execution_commit")
+    )
+    if run_commit != package_commit:
+        raise ClosurePackageSelectionError(
+            f"{package_family} 的运行锁与打包锁 commit 不一致"
+        )
+    if run_commit != code_version:
+        raise ClosurePackageSelectionError(
+            f"{package_family} 的执行锁 commit 与 code_version 来源不一致"
+        )
+    return (
+        str(run_lock["formal_execution_lock_digest"]),
+        str(package_lock["formal_execution_lock_digest"]),
+    )
 
 
 def _archive_member_sha256(archive: ZipFile, member_name: str) -> str:
@@ -825,6 +892,14 @@ def inspect_closure_package(
                     f"{spec.package_family} 的 code_version 来源不一致"
                 )
             code_version = next(iter(normalized_code_versions))
+            (
+                formal_execution_run_lock_digest,
+                formal_execution_package_lock_digest,
+            ) = _validate_package_execution_locks(
+                manifest,
+                package_family=spec.package_family,
+                code_version=code_version,
+            )
 
             for requirement in spec.value_requirements:
                 actual_value = _read_source_value(
@@ -882,6 +957,8 @@ def inspect_closure_package(
         paper_run_name=resolved_paper_run,
         target_fpr=expected_target_fpr,
         code_version=code_version,
+        formal_execution_run_lock_digest=formal_execution_run_lock_digest,
+        formal_execution_package_lock_digest=formal_execution_package_lock_digest,
         generated_at=generated_at,
         generated_at_utc=generated_at_utc,
     )
@@ -956,8 +1033,34 @@ def validate_closure_input_lock_payloads(
         == common_code_version
         and bool(str(record.get("package_path", "")))
         and bool(re.fullmatch(r"[0-9a-fA-F]{64}", str(record.get("package_sha256", ""))))
+        and bool(
+            re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(record.get("formal_execution_run_lock_digest", "")),
+            )
+        )
+        and bool(
+            re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(record.get("formal_execution_package_lock_digest", "")),
+            )
+        )
         for record in records
     )
+    expected_run_lock_digests = {
+        str(record.get("package_family", "")): str(
+            record.get("formal_execution_run_lock_digest", "")
+        )
+        for record in records
+        if isinstance(record, dict)
+    }
+    expected_package_lock_digests = {
+        str(record.get("package_family", "")): str(
+            record.get("formal_execution_package_lock_digest", "")
+        )
+        for record in records
+        if isinstance(record, dict)
+    }
     metadata = lock_manifest.get("metadata", {})
     output_paths = lock_manifest.get("output_paths", ())
     expected_output_suffixes = (
@@ -978,6 +1081,10 @@ def validate_closure_input_lock_payloads(
         and len(set(actual_families)) == len(actual_families)
         and set(actual_families) == expected_families
         and package_rows_ready
+        and lock_payload.get("formal_execution_run_lock_digests")
+        == expected_run_lock_digests
+        and lock_payload.get("formal_execution_package_lock_digests")
+        == expected_package_lock_digests
         and bool(re.fullmatch(r"[0-9a-fA-F]{64}", declared_digest))
         and _stable_digest(digest_payload) == declared_digest
         and str(lock_manifest.get("artifact_id", ""))
@@ -1171,12 +1278,24 @@ def build_closure_input_selection_report(
         raise ClosurePackageSelectionError("10个闭合输入包必须共享同一 clean Git code_version")
     common_code_version = next(iter(common_code_versions))
     lock_records = [candidate.to_lock_record() for candidate in selected_candidates]
+    formal_execution_run_lock_digests = {
+        candidate.package_family: candidate.formal_execution_run_lock_digest
+        for candidate in selected_candidates
+    }
+    formal_execution_package_lock_digests = {
+        candidate.package_family: candidate.formal_execution_package_lock_digest
+        for candidate in selected_candidates
+    }
     lock_payload: dict[str, Any] = {
         "paper_run_name": resolved_paper_run,
         "target_fpr": expected_target_fpr,
         "common_code_version": common_code_version,
         "closure_input_package_count": len(lock_records),
         "closure_input_packages": lock_records,
+        "formal_execution_run_lock_digests": formal_execution_run_lock_digests,
+        "formal_execution_package_lock_digests": (
+            formal_execution_package_lock_digests
+        ),
     }
     lock_payload["closure_input_lock_digest"] = _stable_digest(lock_payload)
     lock_path = repository_root / LOCK_OUTPUT_ROOT / resolved_paper_run / LOCK_FILENAME

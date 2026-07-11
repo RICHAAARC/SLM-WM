@@ -69,8 +69,13 @@ def write_required_inputs(path: Path, *, include_blockers: bool = True) -> None:
 
 
 @pytest.mark.quick
-def test_evidence_closure_entry_review_blocks_before_formal_evidence_is_ready(tmp_path: Path) -> None:
+def test_evidence_closure_entry_review_blocks_before_formal_evidence_is_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """正式证据仍缺失时, 入口审计应可重建但不允许进入证据闭合."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
 
     submission_report = tmp_path / "outputs" / "submission_readiness" / "readiness_blocker_report.json"
     required_inputs = tmp_path / "outputs" / "submission_readiness" / "required_evidence_inputs.csv"
@@ -137,8 +142,11 @@ def test_evidence_closure_entry_review_blocks_before_formal_evidence_is_ready(tm
 @pytest.mark.quick
 def test_evidence_closure_entry_review_automatically_allows_complete_governed_evidence(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """全部受治理证据通过时, 入口审计应无需人工批准地进入证据闭合."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
 
     submission_report = tmp_path / "outputs" / "submission_readiness" / "readiness_blocker_report.json"
     required_inputs = tmp_path / "outputs" / "submission_readiness" / "required_evidence_inputs.csv"

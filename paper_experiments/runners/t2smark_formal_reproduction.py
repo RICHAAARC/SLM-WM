@@ -28,6 +28,7 @@ from experiments.protocol.paper_run_config import (
     normalize_paper_run_name,
     resolve_count_from_environment,
 )
+from experiments.runtime import repository_environment
 from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_observation_threshold
 from experiments.protocol.prompts import build_prompt_records, normalize_prompt_text
 from experiments.protocol.splits import apply_split_assignments
@@ -184,15 +185,24 @@ def synchronize_environment_report_with_device_report(
     return merged_report
 
 
-def build_t2smark_formal_environment_report(device_report: dict[str, Any]) -> dict[str, Any]:
+def build_t2smark_formal_environment_report(
+    device_report: dict[str, Any],
+    *,
+    verified_formal_execution_lock: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """构造与 T2SMark formal GPU 检查结果一致的环境报告。"""
 
     try:
         import torch
     except Exception:  # pragma: no cover - 本地轻量测试不强制安装 torch
-        environment_report = build_runtime_environment_report()
+        environment_report = build_runtime_environment_report(
+            verified_formal_execution_lock=verified_formal_execution_lock,
+        )
     else:
-        environment_report = build_runtime_environment_report(torch_module=torch)
+        environment_report = build_runtime_environment_report(
+            torch_module=torch,
+            verified_formal_execution_lock=verified_formal_execution_lock,
+        )
     return synchronize_environment_report_with_device_report(environment_report, device_report)
 
 
@@ -873,6 +883,9 @@ def write_t2smark_formal_reproduction_outputs(
     """运行 T2SMark formal 真实复现路径并写出 summary 与 manifest。"""
 
     root_path = Path(root).resolve()
+    formal_execution_run_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     paths = output_paths(root_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
     try:
@@ -918,7 +931,10 @@ def write_t2smark_formal_reproduction_outputs(
             candidate_report = build_candidate_records_and_validation(root_path, config, paths, prompt_report)
             update_progress(run_progress, profile=f"operation=build_candidate_records records={candidate_report['candidate_record_count']}")
             emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
-            environment_report = build_t2smark_formal_environment_report(device_report)
+            environment_report = build_t2smark_formal_environment_report(
+                device_report,
+                verified_formal_execution_lock=formal_execution_run_lock,
+            )
             write_json(paths["environment_report"], environment_report)
             update_progress(run_progress, profile="operation=write_environment_report")
     except Exception as error:
@@ -1013,13 +1029,18 @@ def write_t2smark_formal_reproduction_outputs(
     ]
     if paths["adapter_observations"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["adapter_observations"], root_path))
+    formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
+        formal_execution_run_lock,
+        repository_environment.require_published_formal_execution_lock(root_path),
+        formal_execution_run_lock["formal_execution_commit"],
+    )
     manifest = build_artifact_manifest(
         artifact_id="t2smark_formal_reproduction_manifest",
         artifact_type="local_manifest",
         input_paths=(relative_or_absolute(root_path / config.prompt_file, root_path),),
         output_paths=tuple(output_paths_for_manifest + [relative_or_absolute(paths["manifest"], root_path)]),
         config=asdict(config),
-        code_version=resolve_code_version(root_path),
+        code_version=formal_execution_run_lock["formal_execution_commit"],
         rebuild_command="调用 paper_experiments.runners.t2smark_formal_reproduction",
         metadata={
             "run_decision": summary["run_decision"],
@@ -1030,6 +1051,7 @@ def write_t2smark_formal_reproduction_outputs(
             "supports_paper_claim": False,
         },
     ).to_dict()
+    manifest["formal_execution_run_lock"] = formal_execution_run_lock
     write_json(paths["manifest"], manifest)
     return summary
 
@@ -1278,6 +1300,9 @@ def package_t2smark_formal_reproduction_outputs(
     """仅打包通过 formal validation 且目录精确匹配白名单的 T2SMark 结果。"""
 
     root_path = Path(root).resolve()
+    formal_execution_package_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     paper_run = build_paper_run_config(root_path)
     resolved_drive_output_dir = drive_output_dir or paper_run.drive_dir(
         "external_baseline_official_reference"
@@ -1287,9 +1312,17 @@ def package_t2smark_formal_reproduction_outputs(
     if configured_output_root != expected_output_root:
         raise ValueError("T2SMark 打包根目录必须使用正式 outputs family")
     source_dir = expected_output_root / paper_run.run_name
+    run_manifest = read_json(
+        source_dir / "t2smark_formal_reproduction_manifest.local.json"
+    )
+    formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
+        run_manifest.get("formal_execution_run_lock"),
+        formal_execution_package_lock,
+        run_manifest.get("code_version"),
+    )
     resolved_archive_name = archive_name or (
         "external_baseline_official_reference_package_t2smark_"
-        f"{utc_archive_token()}_{resolve_code_version(root_path).replace('-dirty', '')}.zip"
+        f"{utc_archive_token()}_{formal_execution_package_lock['formal_execution_commit'][:7]}.zip"
     )
     if (
         Path(resolved_archive_name).name != resolved_archive_name
@@ -1312,6 +1345,8 @@ def package_t2smark_formal_reproduction_outputs(
         "paper_run_name": paper_run.run_name,
         "target_fpr": paper_run.target_fpr,
         "baseline_id": "t2smark",
+        "formal_execution_run_lock": formal_execution_run_lock,
+        "formal_execution_package_lock": formal_execution_package_lock,
         "entry_paths": [entry.relative_to(root_path).as_posix() for entry in entries],
         "entry_count": len(entries),
         "entry_sha256": {
@@ -1334,7 +1369,7 @@ def package_t2smark_formal_reproduction_outputs(
             "target_fpr": paper_run.target_fpr,
             "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
         },
-        code_version=resolve_code_version(root_path),
+        code_version=formal_execution_package_lock["formal_execution_commit"],
         rebuild_command="调用 paper_experiments.runners.t2smark_formal_reproduction",
         metadata={
             "construction_unit_name": "t2smark_formal_reproduction",
@@ -1344,6 +1379,8 @@ def package_t2smark_formal_reproduction_outputs(
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },
     ).to_dict()
+    archive_manifest["formal_execution_run_lock"] = formal_execution_run_lock
+    archive_manifest["formal_execution_package_lock"] = formal_execution_package_lock
     write_json(manifest_path, archive_manifest)
     preliminary_record = T2SMarkFormalArchiveRecord(
         archive_path=relative_or_absolute(archive_path, root_path),
@@ -1361,6 +1398,18 @@ def package_t2smark_formal_reproduction_outputs(
     with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as archive:
         for entry in entries:
             archive.write(entry, entry.relative_to(root_path).as_posix())
+    try:
+        final_package_lock = (
+            repository_environment.require_published_formal_execution_lock(root_path)
+        )
+        repository_environment.validate_formal_execution_lock_pair(
+            formal_execution_package_lock,
+            final_package_lock,
+            formal_execution_package_lock["formal_execution_commit"],
+        )
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
     drive_dir = Path(resolved_drive_output_dir).expanduser()
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / resolved_archive_name

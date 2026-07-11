@@ -6,7 +6,6 @@ import argparse
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any
 
@@ -16,6 +15,7 @@ if str(ROOT) not in sys.path:
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 from paper_experiments.baselines import (
     build_method_faithful_adapter_status_records,
@@ -70,22 +70,6 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
         return path.resolve().relative_to(root_path.resolve()).as_posix()
     except ValueError:
         return path.resolve().as_posix()
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取当前 Git 短提交标识。"""
-
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except Exception:
-        return "git_version_unavailable"
-    return result.stdout.strip() or "git_version_unavailable"
 
 
 def write_primary_baseline_method_faithful_adapter_protocol_outputs(

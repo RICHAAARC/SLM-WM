@@ -19,6 +19,7 @@ from experiments.protocol.paper_run_config import (
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from experiments.protocol.attacks import default_attack_configs
+from experiments.runtime import repository_environment
 from experiments.runtime.diffusion.regeneration_attacks import default_diffusion_attack_specs
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -26,7 +27,7 @@ from experiments.runners.semantic_watermark_runtime import (
     load_semantic_watermark_runtime_context,
     write_semantic_watermark_runtime_outputs,
 )
-from experiments.runtime.repository_environment import file_digest, resolve_code_version
+from experiments.runtime.repository_environment import file_digest
 from experiments.runtime.archive_naming import utc_archive_token
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.artifacts.detection_score_curves import (
@@ -309,6 +310,9 @@ def run_image_only_dataset_runtime(
     """运行当前论文规模的全部 Prompt 并生成可校准记录。"""
 
     root_path = Path(root).resolve()
+    formal_execution_run_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     resolved_paper_run = paper_run or build_paper_run_config(root_path)
     prompt_path = (root_path / resolved_paper_run.prompt_file).resolve()
     prompt_records = apply_split_assignments(
@@ -615,6 +619,11 @@ def run_image_only_dataset_runtime(
         ),
     }
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
+        formal_execution_run_lock,
+        repository_environment.require_published_formal_execution_lock(root_path),
+        formal_execution_run_lock["formal_execution_commit"],
+    )
     manifest = build_artifact_manifest(
         artifact_id=f"{resolved_paper_run.run_name}_image_only_dataset_runtime_manifest",
         artifact_type="local_manifest",
@@ -636,7 +645,7 @@ def run_image_only_dataset_runtime(
             "method_config": asdict(base_method_config),
             "method_key_digest": build_stable_digest({"key_material": base_method_config.key_material}),
         },
-        code_version=resolve_code_version(root_path),
+        code_version=formal_execution_run_lock["formal_execution_commit"],
         rebuild_command="调用 experiments.runners.image_only_dataset_runtime.run_image_only_dataset_runtime",
         metadata={
             "protocol_decision": summary["protocol_decision"],
@@ -648,6 +657,7 @@ def run_image_only_dataset_runtime(
             "supports_paper_claim": summary["supports_paper_claim"],
         },
     ).to_dict()
+    manifest["formal_execution_run_lock"] = formal_execution_run_lock
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     return summary
 
@@ -659,6 +669,9 @@ def package_image_only_dataset_runtime(
     """把真实运行 records、图像、阈值和 manifest 打包为受治理输入包。"""
 
     root_path = Path(root).resolve()
+    formal_execution_package_lock = (
+        repository_environment.require_published_formal_execution_lock(root_path)
+    )
     resolved_paper_run_name = normalize_paper_run_name(paper_run_name)
     paper_run = build_paper_run_config(root_path)
     if paper_run.run_name != resolved_paper_run_name:
@@ -685,6 +698,11 @@ def package_image_only_dataset_runtime(
         raise FileNotFoundError("仅图像数据集运行输出不完整, 不得打包")
     summary = json.loads((source_dir / "dataset_runtime_summary.json").read_text(encoding="utf-8-sig"))
     manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
+    repository_environment.validate_formal_execution_lock_pair(
+        manifest.get("formal_execution_run_lock"),
+        formal_execution_package_lock,
+        manifest.get("code_version"),
+    )
     if not all(
         (
             summary.get("paper_run_name") == resolved_paper_run_name,
@@ -704,8 +722,15 @@ def package_image_only_dataset_runtime(
         )
     ):
         raise RuntimeError("仅图像数据集运行身份或 ready 门禁未通过")
-    code_version = resolve_code_version(root_path).replace("-dirty", "")
-    archive_path = source_dir / f"image_only_dataset_runtime_package_{utc_archive_token()}_{code_version}.zip"
+    manifest["formal_execution_package_lock"] = formal_execution_package_lock
+    (source_dir / "manifest.local.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    code_version = formal_execution_package_lock["formal_execution_commit"]
+    archive_path = source_dir / (
+        f"image_only_dataset_runtime_package_{utc_archive_token()}_{code_version[:7]}.zip"
+    )
     entries = tuple(
         path
         for path in sorted(source_dir.rglob("*"))
@@ -714,4 +739,16 @@ def package_image_only_dataset_runtime(
     with ZipFile(archive_path, "w", compression=ZIP_STORED, allowZip64=True) as archive:
         for path in entries:
             archive.write(path, path.relative_to(root_path).as_posix())
+    try:
+        final_package_lock = (
+            repository_environment.require_published_formal_execution_lock(root_path)
+        )
+        repository_environment.validate_formal_execution_lock_pair(
+            formal_execution_package_lock,
+            final_package_lock,
+            code_version,
+        )
+    except Exception:
+        archive_path.unlink(missing_ok=True)
+        raise
     return archive_path

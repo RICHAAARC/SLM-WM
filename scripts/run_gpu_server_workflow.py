@@ -11,6 +11,10 @@ import sys
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from experiments.runtime.repository_environment import build_formal_execution_lock
 
 WORKFLOW_COMMANDS = {
     "image_only_dataset": [sys.executable, "scripts/run_image_only_dataset_runtime.py"],
@@ -21,6 +25,7 @@ WORKFLOW_COMMANDS = {
 def run_workflow(
     workflow_name: str,
     paper_run_name: str,
+    repository_commit: str,
     root: str | Path = ".",
 ) -> dict[str, Any]:
     """执行一个正式 GPU 工作流并返回可序列化进程结果。"""
@@ -28,8 +33,18 @@ def run_workflow(
     if workflow_name not in WORKFLOW_COMMANDS:
         raise ValueError(f"未知正式工作流: {workflow_name}")
     root_path = Path(root).resolve()
+    execution_lock = build_formal_execution_lock(
+        root_path,
+        repository_commit,
+    )
     environment = os.environ.copy()
     environment["SLM_WM_PAPER_RUN_NAME"] = paper_run_name
+    environment["SLM_WM_FORMAL_EXECUTION_COMMIT"] = str(
+        execution_lock["formal_execution_commit"]
+    )
+    environment["SLM_WM_FORMAL_EXECUTION_LOCK_DIGEST"] = str(
+        execution_lock["formal_execution_lock_digest"]
+    )
     completed = subprocess.run(
         WORKFLOW_COMMANDS[workflow_name],
         cwd=root_path,
@@ -41,6 +56,7 @@ def run_workflow(
     result = {
         "workflow_name": workflow_name,
         "paper_run_name": paper_run_name,
+        "formal_execution_lock": execution_lock,
         "command": WORKFLOW_COMMANDS[workflow_name],
         "return_code": completed.returncode,
         "stdout": completed.stdout,
@@ -61,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         choices=("probe_paper", "pilot_paper", "full_paper"),
     )
+    parser.add_argument(
+        "--repository-commit",
+        required=True,
+        help="正式执行使用的精确40位小写 Git SHA.",
+    )
     parser.add_argument("--root", default=".")
     return parser
 
@@ -71,7 +92,12 @@ def main() -> None:
     args = build_parser().parse_args()
     print(
         json.dumps(
-            run_workflow(args.workflow, args.paper_run_name, args.root),
+            run_workflow(
+                args.workflow,
+                args.paper_run_name,
+                args.repository_commit,
+                args.root,
+            ),
             ensure_ascii=False,
             sort_keys=True,
         )

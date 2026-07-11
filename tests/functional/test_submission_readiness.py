@@ -181,8 +181,13 @@ def write_upstream_audit_outputs(tmp_path: Path) -> None:
 
 
 @pytest.mark.quick
-def test_submission_readiness_outputs_are_rebuildable_and_claim_safe(tmp_path: Path) -> None:
+def test_submission_readiness_outputs_are_rebuildable_and_claim_safe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """脚本应从证据审计产物重建投稿就绪门禁报告, 且保持 claim 安全边界。"""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
     write_minimal_repository_files(tmp_path)
     write_upstream_audit_outputs(tmp_path)
 

@@ -10,6 +10,7 @@ from zipfile import ZipFile
 import pytest
 from PIL import Image
 
+from experiments.runtime import repository_environment
 from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
 from external_baseline.primary.sd35_method_faithful_common import (
     apply_formal_image_attack,
@@ -33,12 +34,26 @@ from paper_experiments.runners.external_baseline_method_faithful import (
     validate_formal_run_config,
     write_baseline_transfer_files,
 )
+from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
-PACKAGE_TEST_CODE_VERSION = "b370425"
+PACKAGE_TEST_CODE_VERSION = "b" * 40
+FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock(PACKAGE_TEST_CODE_VERSION)
 
 
 pytestmark = pytest.mark.quick
+
+
+@pytest.fixture(autouse=True)
+def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本模块未显式切换层级的归档夹具固定使用 pilot_paper."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+    monkeypatch.setattr(
+        repository_environment,
+        "require_published_formal_execution_lock",
+        lambda _root: dict(FORMAL_EXECUTION_LOCK),
+    )
 
 
 def write_json(path: Path, payload: object) -> None:
@@ -329,6 +344,7 @@ def prepare_package_source(root: Path, baseline_id: str, *, run_decision: str = 
         run_dir / f"{baseline_id}_manifest.local.json",
         {
             "code_version": code_version,
+            "formal_execution_run_lock": FORMAL_EXECUTION_LOCK,
             "config": {
                 "prompt_set": "pilot_paper",
                 "target_fpr": 0.01,

@@ -9,6 +9,10 @@ import pytest
 from scripts import run_gpu_server_workflow as workflow
 
 
+COMMIT = "a" * 40
+LOCK_DIGEST = "b" * 64
+
+
 @pytest.mark.quick
 def test_server_workflow_maps_only_current_formal_gpu_jobs() -> None:
     """服务器入口不得重新暴露已移除的分量诊断流程。"""
@@ -36,8 +40,25 @@ def test_server_workflow_passes_paper_run_environment(
         return Completed()
 
     monkeypatch.setattr(workflow.subprocess, "run", fake_run)
-    result = workflow.run_workflow("image_only_dataset", "probe_paper", tmp_path)
+    monkeypatch.setattr(
+        workflow,
+        "build_formal_execution_lock",
+        lambda root, expected_commit: {
+            "formal_execution_commit": expected_commit,
+            "formal_execution_lock_digest": LOCK_DIGEST,
+            "formal_execution_lock_ready": True,
+        },
+    )
+    result = workflow.run_workflow(
+        "image_only_dataset",
+        "probe_paper",
+        COMMIT,
+        tmp_path,
+    )
 
     assert result["return_code"] == 0
     assert captured["env"]["SLM_WM_PAPER_RUN_NAME"] == "probe_paper"  # type: ignore[index]
+    assert captured["env"]["SLM_WM_FORMAL_EXECUTION_COMMIT"] == COMMIT  # type: ignore[index]
+    assert captured["env"]["SLM_WM_FORMAL_EXECUTION_LOCK_DIGEST"] == LOCK_DIGEST  # type: ignore[index]
     assert captured["cwd"] == tmp_path.resolve()
+    assert result["formal_execution_lock"]["formal_execution_commit"] == COMMIT

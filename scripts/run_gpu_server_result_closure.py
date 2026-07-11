@@ -18,6 +18,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol.paper_run_config import RUN_DEFAULTS, build_paper_run_config, normalize_paper_run_name
+from experiments.runtime.repository_environment import (
+    build_formal_execution_lock,
+    publish_formal_execution_lock,
+)
 from paper_experiments.runners.paper_result_closure import (
     run_paper_result_closure_commands,
 )
@@ -87,11 +91,18 @@ def execute_server_result_closure(
     paper_run_name: str,
     package_search_root: str | Path,
     complete_output_dir: str | Path,
+    repository_commit: str,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """执行汇总服务器结果闭合。"""
 
     root_path = Path(root).resolve()
+    execution_lock = publish_formal_execution_lock(
+        build_formal_execution_lock(
+            root_path,
+            repository_commit,
+        )
+    )
     environment_report = configure_closure_environment(
         root=root_path,
         paper_run_name=paper_run_name,
@@ -113,6 +124,7 @@ def execute_server_result_closure(
                 selection_report["closure_input_selection_ready"]
             ),
             "environment_report": environment_report,
+            "formal_execution_lock": execution_lock,
             "complete_output_dir": resolved_complete_output_dir.as_posix(),
             "closure_input_selection_report": selection_report,
             "dry_run": True,
@@ -127,6 +139,7 @@ def execute_server_result_closure(
     return {
         "server_result_closure_plan_ready": True,
         "environment_report": environment_report,
+        "formal_execution_lock": execution_lock,
         "complete_output_dir": resolved_complete_output_dir.as_posix(),
         "dry_run": False,
         "closure_result": closure_result,
@@ -138,6 +151,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(description="在汇总服务器执行论文结果闭合。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
+    parser.add_argument(
+        "--repository-commit",
+        required=True,
+        help="汇总执行使用的精确40位小写 Git SHA.",
+    )
     parser.add_argument(
         "--paper-run-name",
         required=True,
@@ -159,6 +177,7 @@ def main() -> None:
         paper_run_name=args.paper_run_name,
         package_search_root=args.package_search_root,
         complete_output_dir=args.complete_output_dir,
+        repository_commit=args.repository_commit,
         dry_run=args.dry_run,
     )
     print(stable_json_text(result), end="")

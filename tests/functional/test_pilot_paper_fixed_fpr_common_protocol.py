@@ -34,6 +34,13 @@ from tests.helpers.closure_input_lock import write_test_closure_input_lock
 PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 
 
+@pytest.fixture(autouse=True)
+def _select_pilot_paper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本模块未显式切换层级的协议夹具固定使用 pilot_paper."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
+
+
 def paired_superiority_summary(
     config: PilotPaperFixedFprConfig,
     *,
@@ -132,7 +139,7 @@ def write_paired_superiority_inputs(
         json.dumps(
             {
                 "artifact_id": "paired_superiority_analysis_manifest",
-                "code_version": "abc1234",
+                "code_version": "a" * 40,
                 "metadata": summary,
             }
         ),

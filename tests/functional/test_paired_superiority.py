@@ -463,7 +463,11 @@ def test_writer_closes_probe_scale_with_exact_raw_pairs(
         "build_paper_fixed_fpr_config",
         lambda _root: fixed_fpr_config,
     )
-    monkeypatch.setattr(paired_writer, "resolve_code_version", lambda _root: "abc1234")
+    monkeypatch.setattr(
+        paired_writer,
+        "resolve_code_version",
+        lambda _root: "a" * 40,
+    )
     attack_registry = canonical_attack_registry_rows(
         build_pilot_paper_attack_matrix_rows(
             default_attack_configs(),

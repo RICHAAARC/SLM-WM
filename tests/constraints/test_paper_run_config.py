@@ -17,6 +17,9 @@ from experiments.protocol.paper_run_config import (
     resolve_count_from_environment,
     shared_method_settings,
 )
+from paper_workflow.colab_utils.paper_run_environment import (
+    _resolve_paper_run_name,
+)
 
 
 def write_prompt_file(path: Path, count: int) -> None:
@@ -27,10 +30,24 @@ def write_prompt_file(path: Path, count: int) -> None:
 
 
 @pytest.mark.constraint
-def test_paper_run_config_resolves_pilot_paper_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """默认论文运行层级应解析为 pilot_paper, 并使用该层级全部 prompt."""
+def test_colab_environment_resolves_probe_paper_without_explicit_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Colab 环境 helper 与协议解析层必须共享 probe_paper 默认值."""
 
-    write_prompt_file(tmp_path / "configs" / "paper_main_pilot_paper_prompts.txt", 7)
+    monkeypatch.delenv("SLM_WM_PAPER_RUN_NAME", raising=False)
+
+    assert _resolve_paper_run_name() == "probe_paper"
+
+
+@pytest.mark.constraint
+def test_paper_run_config_resolves_probe_paper_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """无显式运行层级时应唯一解析为 probe_paper 并使用全部 Prompt."""
+
+    write_prompt_file(tmp_path / "configs" / "paper_main_probe_paper_prompts.txt", 7)
     monkeypatch.delenv("SLM_WM_PAPER_RUN_NAME", raising=False)
     monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
     monkeypatch.delenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", raising=False)
@@ -39,18 +56,18 @@ def test_paper_run_config_resolves_pilot_paper_defaults(tmp_path: Path, monkeypa
 
     config = build_paper_run_config(root=tmp_path)
 
-    assert config.run_name == "pilot_paper"
-    assert config.prompt_set == "pilot_paper"
+    assert config.run_name == "probe_paper"
+    assert config.prompt_set == "probe_paper"
     assert config.prompt_count == 7
     assert config.sample_count == 7
-    assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results"
-    assert config.protocol_profile == "pilot_paper_fixed_fpr_0_01"
-    assert config.target_fpr == 0.01
-    assert config.minimum_clean_negative_count == 340
-    assert config.dataset_level_quality_minimum_count == 700
+    assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/probe_paper_results"
+    assert config.protocol_profile == "probe_paper_fixed_fpr_0_1"
+    assert config.target_fpr == 0.1
+    assert config.minimum_clean_negative_count == 34
+    assert config.dataset_level_quality_minimum_count == 70
     assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
     assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
-    assert config.drive_dir("aligned_rescoring").endswith("/pilot_paper_results/aligned_rescoring")
+    assert config.drive_dir("aligned_rescoring").endswith("/probe_paper_results/aligned_rescoring")
 
 
 @pytest.mark.constraint
@@ -84,11 +101,14 @@ def test_paper_run_config_switches_to_full_paper_without_notebook_rewrite(
 
 
 @pytest.mark.constraint
-def test_paper_run_config_resolves_probe_paper_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """probe_paper 应使用完整论文入口, 但采用较小 prompt 数量和较宽 fixed-FPR。"""
+def test_paper_run_config_switches_to_pilot_paper_with_explicit_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """显式选择 pilot_paper 时应使用其完整 Prompt 协议与统计强度."""
 
-    write_prompt_file(tmp_path / "configs" / "paper_main_probe_paper_prompts.txt", 70)
-    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    write_prompt_file(tmp_path / "configs" / "paper_main_pilot_paper_prompts.txt", 700)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
     monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
     monkeypatch.delenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
@@ -96,18 +116,18 @@ def test_paper_run_config_resolves_probe_paper_defaults(tmp_path: Path, monkeypa
 
     config = build_paper_run_config(root=tmp_path)
 
-    assert config.run_name == "probe_paper"
-    assert config.prompt_set == "probe_paper"
-    assert config.prompt_count == 70
-    assert config.sample_count == 70
-    assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/probe_paper_results"
-    assert config.protocol_profile == "probe_paper_fixed_fpr_0_1"
-    assert config.target_fpr == 0.1
-    assert config.minimum_clean_negative_count == 34
-    assert config.dataset_level_quality_minimum_count == 70
+    assert config.run_name == "pilot_paper"
+    assert config.prompt_set == "pilot_paper"
+    assert config.prompt_count == 700
+    assert config.sample_count == 700
+    assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results"
+    assert config.protocol_profile == "pilot_paper_fixed_fpr_0_01"
+    assert config.target_fpr == 0.01
+    assert config.minimum_clean_negative_count == 340
+    assert config.dataset_level_quality_minimum_count == 700
     assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
     assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
-    assert config.drive_dir("aligned_rescoring").endswith("/probe_paper_results/aligned_rescoring")
+    assert config.drive_dir("aligned_rescoring").endswith("/pilot_paper_results/aligned_rescoring")
 
 
 @pytest.mark.constraint

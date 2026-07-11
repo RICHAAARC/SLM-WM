@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 import json
 import math
 from pathlib import Path
-import subprocess
 import sys
 from typing import Any, Iterable
 
@@ -30,7 +29,7 @@ from experiments.protocol.attacks import (
 )
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.runtime.image_metrics import compute_image_quality_metrics, measured_score_retention
-from experiments.runtime.repository_environment import file_digest
+from experiments.runtime.repository_environment import file_digest, resolve_code_version
 
 CONSTRUCTION_UNIT_NAME = "attack_matrix"
 DEFAULT_OUTPUT_ROOT = Path("outputs/attack_matrix")
@@ -70,29 +69,6 @@ def write_csv(path: Path, rows: Iterable[dict[str, Any]], fieldnames: tuple[str,
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
-
-
-def resolve_code_version(root_path: Path) -> str:
-    """读取 Git 提交标识, 工作区有变更时附加 dirty 标记。"""
-
-    try:
-        commit = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        dirty = subprocess.run(
-            ["git", "status", "--short"],
-            cwd=root_path,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-    except Exception:
-        return "git_version_unavailable"
-    return f"{commit}-dirty" if dirty else commit
 
 
 def resolve_path(root_path: Path, value: str | Path) -> Path:

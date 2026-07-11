@@ -9,13 +9,17 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import os
+from pathlib import Path
 from typing import Any
 
 from experiments.protocol.paper_run_config import (
-    PILOT_PAPER_RUN_NAME,
+    PROBE_PAPER_RUN_NAME,
     RUN_DEFAULTS,
     build_paper_run_config,
     normalize_paper_run_name,
+)
+from experiments.runtime.repository_environment import (
+    require_published_formal_execution_lock,
 )
 from paper_workflow.notebook_utils.notebook_runtime import mark_notebook_runtime_start
 
@@ -43,6 +47,8 @@ class PaperRunEnvironment:
     minimum_clean_negative_count: str
     dataset_quality_minimum_count: str
     selected_baseline_id: str
+    formal_execution_commit: str
+    formal_execution_lock_digest: str
     configured_environment_keys: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,9 +82,11 @@ def _protocol_profile(paper_run_name: str, target_fpr_text: str) -> str:
 
 
 def _resolve_paper_run_name() -> str:
-    """解析 Notebook 传入的论文运行层级, 默认保持 pilot_paper。"""
+    """解析 Notebook 传入的论文运行层级, 无显式输入时使用 probe_paper."""
 
-    return normalize_paper_run_name(os.environ.get("SLM_WM_PAPER_RUN_NAME", PILOT_PAPER_RUN_NAME))
+    return normalize_paper_run_name(
+        os.environ.get("SLM_WM_PAPER_RUN_NAME", PROBE_PAPER_RUN_NAME)
+    )
 
 
 def _configure_common_paper_run_environment() -> tuple[Any, str, str]:
@@ -366,12 +374,21 @@ def configure_paper_run_environment(
     workflow_name: str,
     *,
     baseline_id: str = "",
+    repository_root: str | Path = ".",
 ) -> dict[str, Any]:
     """配置某个 Notebook 入口需要的论文运行环境。
 
     该函数属于 Notebook 入口治理层。它不运行真实模型, 不生成正式结果,
     只把 Notebook 过去重复维护的环境变量写入收敛到一个可测试位置。
     """
+
+    formal_execution_lock = require_published_formal_execution_lock(
+        repository_root
+    )
+    formal_execution_commit = formal_execution_lock["formal_execution_commit"]
+    formal_execution_lock_digest = formal_execution_lock[
+        "formal_execution_lock_digest"
+    ]
 
     mark_notebook_runtime_start(
         workflow_name=workflow_name,
@@ -404,6 +421,8 @@ def configure_paper_run_environment(
         minimum_clean_negative_count=os.environ["SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT"],
         dataset_quality_minimum_count=os.environ["SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT"],
         selected_baseline_id=baseline_id,
+        formal_execution_commit=formal_execution_commit,
+        formal_execution_lock_digest=formal_execution_lock_digest,
         configured_environment_keys=tracked_keys,
     ).to_dict()
 

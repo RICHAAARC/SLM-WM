@@ -9,6 +9,7 @@ from zipfile import ZIP_STORED, ZipFile
 
 import pytest
 
+from experiments.runtime import repository_environment
 from main.core.digest import build_stable_digest
 from paper_experiments.runners.closure_package_selection import CLOSURE_PACKAGE_FAMILY_SPECS
 from scripts.write_pilot_paper_complete_result_package import (
@@ -18,6 +19,7 @@ from scripts.write_pilot_paper_complete_result_package import (
     build_required_output_dirs,
     write_pilot_paper_complete_result_package_outputs,
 )
+from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 def write_json(path: Path, value: object) -> None:
@@ -39,7 +41,13 @@ def configure_paper_run(monkeypatch: pytest.MonkeyPatch, root: Path, paper_run_n
     monkeypatch.setenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", "all")
     monkeypatch.setattr(
         "scripts.write_pilot_paper_complete_result_package.resolve_code_version",
-        lambda _root_path: "abc1234",
+        lambda _root_path: "a" * 40,
+    )
+    execution_lock = build_test_formal_execution_lock("a" * 40)
+    monkeypatch.setattr(
+        repository_environment,
+        "require_published_formal_execution_lock",
+        lambda _root: dict(execution_lock),
     )
     return prompt_path
 
@@ -142,7 +150,7 @@ def create_required_outputs(
                     gate_manifest_path.relative_to(root).as_posix(),
                 ],
                 "config_digest": build_stable_digest(gate_config),
-                "code_version": "abc1234",
+                "code_version": "a" * 40,
                 "metadata": {
                     "paper_claim_scale": paper_run_name,
                     "target_fpr": target_fpr,
@@ -190,14 +198,14 @@ def create_closure_input_lock(root: Path, paper_run_name: str) -> tuple[Path, ..
                 "package_sha256": package_digest,
                 "paper_run_name": paper_run_name,
                 "target_fpr": target_fpr,
-                "code_version": "abc1234",
+                "code_version": "a" * 40,
                 "generated_at": f"2026-01-01T00:00:{index:02d}+00:00",
             }
         )
     lock_payload: dict[str, object] = {
         "paper_run_name": paper_run_name,
         "target_fpr": target_fpr,
-        "common_code_version": "abc1234",
+        "common_code_version": "a" * 40,
         "closure_input_package_count": len(lock_records),
         "closure_input_packages": lock_records,
     }
@@ -210,7 +218,7 @@ def create_closure_input_lock(root: Path, paper_run_name: str) -> tuple[Path, ..
     manifest_config = {
         "paper_run_name": paper_run_name,
         "target_fpr": target_fpr,
-        "common_code_version": "abc1234",
+        "common_code_version": "a" * 40,
         "closure_input_packages": lock_records,
     }
     write_json(
@@ -231,7 +239,7 @@ def create_closure_input_lock(root: Path, paper_run_name: str) -> tuple[Path, ..
                 "closure_input_lock_digest": lock_payload["closure_input_lock_digest"],
                 "paper_run_name": paper_run_name,
                 "target_fpr": target_fpr,
-                "common_code_version": "abc1234",
+                "common_code_version": "a" * 40,
             },
         },
     )
@@ -432,7 +440,7 @@ def test_complete_result_package_rejects_mixed_code_version_even_when_lock_is_re
     lock_path = lock_dir / "closure_input_lock.json"
     manifest_path = lock_dir / "input_lock_manifest.local.json"
     lock_payload = json.loads(lock_path.read_text(encoding="utf-8"))
-    lock_payload["closure_input_packages"][0]["code_version"] = "def5678"
+    lock_payload["closure_input_packages"][0]["code_version"] = "b" * 40
     digest_payload = dict(lock_payload)
     digest_payload.pop("closure_input_lock_digest", None)
     lock_payload["closure_input_lock_digest"] = build_stable_digest(digest_payload)
@@ -448,7 +456,7 @@ def test_complete_result_package_rejects_mixed_code_version_even_when_lock_is_re
         {
             "paper_run_name": "pilot_paper",
             "target_fpr": 0.01,
-            "common_code_version": "abc1234",
+            "common_code_version": "a" * 40,
             "closure_input_packages": lock_payload["closure_input_packages"],
         }
     )
@@ -532,7 +540,7 @@ def test_complete_result_package_rejects_tampered_gate_report_and_code_version(
     write_json(report_path, original_report)
     gate_manifest_path = gate_dir / "manifest.local.json"
     gate_manifest = json.loads(gate_manifest_path.read_text(encoding="utf-8"))
-    gate_manifest["code_version"] = "def5678"
+    gate_manifest["code_version"] = "b" * 40
     write_json(gate_manifest_path, gate_manifest)
     with pytest.raises(RuntimeError, match="result_closure_ready=False"):
         write_pilot_paper_complete_result_package_outputs(

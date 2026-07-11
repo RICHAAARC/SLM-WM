@@ -12,6 +12,7 @@ from PIL import Image
 import pytest
 
 import experiments.artifacts.dataset_level_quality_outputs as dataset_quality_writer
+from experiments.runtime import repository_environment
 from experiments.artifacts.dataset_level_quality_outputs import write_dataset_level_quality_outputs
 from experiments.protocol import (
     FORMAL_FEATURE_BACKEND,
@@ -21,10 +22,12 @@ from experiments.protocol import (
     build_dataset_quality_summary,
 )
 from experiments.protocol.prompts import PROMPT_FILES, build_prompt_records, read_prompt_file
+from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 PAPER_RUN_NAME = "probe_paper"
 TARGET_FPR = 0.1
 PROMPT_COUNT = 70
+FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +37,11 @@ def configure_probe_paper_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+    monkeypatch.setattr(
+        repository_environment,
+        "require_published_formal_execution_lock",
+        lambda _root: dict(FORMAL_EXECUTION_LOCK),
+    )
 
 
 def write_image(path: Path, color: tuple[int, int, int]) -> None:
