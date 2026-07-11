@@ -46,8 +46,31 @@ def _run_function_for_workflow(workflow_name: str) -> Callable[..., Any]:
     raise ValueError(f"unknown_notebook_workflow:{workflow_name}")
 
 
-def run_workflow(*, root: str | Path = ".", workflow_name: str) -> Any:
-    """通过统一薄入口运行正式 repository workflow。"""
+def run_workflow(
+    *,
+    root: str | Path = ".",
+    workflow_name: str,
+    drive_output_dir: str | None = None,
+    baseline_id: str | None = None,
+    checkpoint_interval_seconds: float | None = None,
+) -> Any:
+    """通过统一薄入口运行支持 Drive 恢复的 repository workflow.
+
+    Notebook 只传递入口参数. 文件摘要、执行锁绑定、恢复和重入全部由
+    ``paper_experiments`` 层共享实现完成, 因而同一能力可被 GPU 服务器 CLI
+    直接复用.
+    """
+
+    resolved_baseline_id = (
+        baseline_id or os.environ.get("SLM_WM_PRIMARY_BASELINE_ID", "")
+    ).strip()
+    resolved_drive_output_dir = resolve_drive_output_dir(
+        workflow_name,
+        drive_output_dir,
+    )
+    from paper_experiments.runners.persistent_workflow_session import (
+        run_persistent_workflow,
+    )
 
     if workflow_name in {
         "external_baseline_method_faithful",
@@ -57,11 +80,26 @@ def run_workflow(*, root: str | Path = ".", workflow_name: str) -> Any:
             run_isolated_scientific_workflow,
         )
 
-        return run_isolated_scientific_workflow(
+        return run_persistent_workflow(
             root=root,
             workflow_name=workflow_name,
+            baseline_id=resolved_baseline_id or None,
+            persistent_output_dir=resolved_drive_output_dir,
+            checkpoint_interval_seconds=checkpoint_interval_seconds,
+            runner=lambda: run_isolated_scientific_workflow(
+                root=root,
+                workflow_name=workflow_name,
+            ),
         )
-    return _run_function_for_workflow(workflow_name)(root=root)
+    run_function = _run_function_for_workflow(workflow_name)
+    return run_persistent_workflow(
+        root=root,
+        workflow_name=workflow_name,
+        baseline_id=resolved_baseline_id or None,
+        persistent_output_dir=resolved_drive_output_dir,
+        checkpoint_interval_seconds=checkpoint_interval_seconds,
+        runner=lambda: run_function(root=root),
+    )
 
 
 def resolve_drive_output_dir(workflow_name: str, drive_output_dir: str | None = None) -> str | None:
@@ -130,6 +168,16 @@ def package_workflow_outputs(
         baseline_id=resolved_baseline_id,
         drive_output_dir=resolved_drive_output_dir,
         archive_name=archive_name,
+    )
+    from paper_experiments.runners.persistent_workflow_session import (
+        restore_completed_persistent_workflow,
+    )
+
+    restore_completed_persistent_workflow(
+        root=root,
+        workflow_name=workflow_name,
+        persistent_output_dir=resolved_drive_output_dir,
+        baseline_id=resolved_baseline_id or None,
     )
     package_kwargs: dict[str, Any] = {"root": root, "archive_name": archive_name}
     if resolved_drive_output_dir is not None:

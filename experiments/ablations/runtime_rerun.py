@@ -20,6 +20,11 @@ from experiments.runtime.package_input_manifest import (
     validate_exact_package_archive,
     write_exact_package_input_manifest,
 )
+from experiments.runtime.resume_checkpoint import (
+    clear_progress_checkpoints,
+    persist_progress_checkpoint,
+    restore_role_checkpoints,
+)
 from experiments.protocol.paper_run_config import (
     build_paper_run_config,
     normalize_paper_run_name,
@@ -290,6 +295,14 @@ def run_runtime_rerun_ablations(
         raise ValueError("max_new_runs_per_session 不得为负")
     resolved_output.mkdir(parents=True, exist_ok=True)
     progress_path = resolved_output / "runtime_rerun_progress.json"
+    restore_role_checkpoints(
+        repository_root=root_path,
+        artifact_role="runtime_rerun_ablation",
+        paper_run_name=resolved_paper_run_name,
+        allowed_output_prefix=(
+            f"outputs/formal_mechanism_ablation/{resolved_paper_run_name}"
+        ),
+    )
     resolved_specs = specs or default_runtime_rerun_ablation_specs()
     ablation_contract = runtime_rerun_ablation_contract(resolved_specs)
     if not ablation_contract["ablation_exact_set_ready"]:
@@ -309,10 +322,45 @@ def run_runtime_rerun_ablations(
     resumed_run_count = 0
     new_run_count = 0
     expected_run_count = len(resolved_base_configs) * len(resolved_specs)
+
+    def write_resume_progress() -> dict[str, Any]:
+        """原子保存正式消融进度并同步到外部检查点目录."""
+
+        progress = {
+            "paper_run_name": resolved_paper_run_name,
+            **ablation_contract,
+            "expected_run_count": expected_run_count,
+            "completed_run_count": len(run_entries),
+            "remaining_run_count": expected_run_count - len(run_entries),
+            "resumed_run_count": resumed_run_count,
+            "new_run_count": new_run_count,
+            "max_new_runs_per_session": max_new_runs_per_session,
+            "prompt_count": len(resolved_base_configs),
+            "target_fpr": target_fpr,
+            "protocol_decision": "resume_required",
+            "evidence_eligibility": "intermediate_state_only",
+            "supports_paper_claim": False,
+        }
+        temporary_path = progress_path.with_name(progress_path.name + ".partial")
+        temporary_path.write_text(
+            json.dumps(progress, ensure_ascii=False, sort_keys=True, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
+        temporary_path.replace(progress_path)
+        persist_progress_checkpoint(
+            progress_path,
+            repository_root=root_path,
+            artifact_role="runtime_rerun_ablation",
+            paper_run_name=resolved_paper_run_name,
+        )
+        return progress
+
     for prompt_index, base_config in enumerate(resolved_base_configs):
         for spec in resolved_specs:
             run_config = spec.apply(base_config, output_dir)
             result = load_completed_semantic_watermark_runtime_result(run_config, root=root_path)
+            generated_now = False
             if result is not None:
                 resumed_run_count += 1
             elif max_new_runs_per_session and new_run_count >= max_new_runs_per_session:
@@ -326,30 +374,19 @@ def run_runtime_rerun_ablations(
                     runtime_context=shared_context,
                 )
                 new_run_count += 1
+                generated_now = True
             detections = _read_jsonl(root_path / result.detection_record_path)
             run_entries.append(_run_entry(prompt_index, base_config, spec, result, detections))
+            if generated_now and len(run_entries) < expected_run_count:
+                write_resume_progress()
 
     if len(run_entries) != expected_run_count:
-        progress = {
-            "paper_run_name": resolved_paper_run_name,
-            **ablation_contract,
-            "expected_run_count": expected_run_count,
-            "completed_run_count": len(run_entries),
-            "remaining_run_count": expected_run_count - len(run_entries),
-            "resumed_run_count": resumed_run_count,
-            "new_run_count": new_run_count,
-            "max_new_runs_per_session": max_new_runs_per_session,
-            "prompt_count": len(resolved_base_configs),
-            "target_fpr": target_fpr,
-            "protocol_decision": "resume_required",
-            "supports_paper_claim": False,
-        }
-        progress_path.write_text(
-            json.dumps(progress, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        return progress
+        return write_resume_progress()
     progress_path.unlink(missing_ok=True)
+    clear_progress_checkpoints(
+        artifact_role="runtime_rerun_ablation",
+        paper_run_name=resolved_paper_run_name,
+    )
 
     protocols: dict[str, Any] = {}
     formal_records: list[dict[str, Any]] = []

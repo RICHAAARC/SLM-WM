@@ -156,7 +156,7 @@ def test_t2smark_uses_exact_sd35_compatible_diffusers_candidate() -> None:
 
     assert "diffusers==0.32.0" in profile.direct_requirements
     assert "diffusers==0.21.4" not in profile.direct_requirements
-    assert profile.formal_ready is False
+    assert profile.formal_ready is profile.complete_hash_lock_present
 
 
 @pytest.mark.quick
@@ -184,22 +184,32 @@ def test_gaussian_shading_direct_input_is_inference_minimal_and_python38_compati
 
 
 @pytest.mark.quick
-def test_missing_complete_hash_locks_fail_closed_with_stable_summaries() -> None:
-    """已提交精确直接输入不能替代完整哈希锁, 缺锁时必须阻断正式运行."""
+def test_committed_lock_state_is_adaptive_and_summaries_remain_strict() -> None:
+    """缺失锁保持 fail-closed, 已提交锁必须具有有效摘要与正依赖计数."""
 
     for profile_name in REQUIRED_DEPENDENCY_PROFILE_NAMES:
         first_summary = build_dependency_profile_summary(profile_name)
         second_summary = build_dependency_profile_summary(profile_name)
 
         assert first_summary == second_summary
-        assert first_summary["formal_ready"] is False
-        assert first_summary["complete_hash_lock_present"] is False
-        assert first_summary["complete_hash_lock_digest"] is None
-        assert first_summary["readiness_blockers"] == ["complete_hash_lock_missing"]
         assert len(first_summary["profile_digest"]) == 64
         assert len(first_summary["summary_digest"]) == 64
-        with pytest.raises(RuntimeError, match="complete_hash_lock_missing"):
-            require_dependency_profile_ready(profile_name)
+        if first_summary["complete_hash_lock_present"]:
+            assert first_summary["formal_ready"] is True
+            assert first_summary["readiness_blockers"] == []
+            assert isinstance(first_summary["complete_hash_lock_digest"], str)
+            assert len(first_summary["complete_hash_lock_digest"]) == 64
+            assert first_summary["complete_hash_lock_dependency_count"] > 0
+            assert require_dependency_profile_ready(profile_name).formal_ready is True
+        else:
+            assert first_summary["formal_ready"] is False
+            assert first_summary["complete_hash_lock_digest"] is None
+            assert first_summary["complete_hash_lock_dependency_count"] == 0
+            assert first_summary["readiness_blockers"] == [
+                "complete_hash_lock_missing"
+            ]
+            with pytest.raises(RuntimeError, match="complete_hash_lock_missing"):
+                require_dependency_profile_ready(profile_name)
 
 
 @pytest.mark.quick
@@ -293,11 +303,22 @@ def test_hash_lock_without_all_direct_inputs_is_rejected(tmp_path: Path) -> None
 
 
 @pytest.mark.quick
-def test_environment_inspection_stays_blocked_without_complete_lock() -> None:
+def test_environment_inspection_stays_blocked_without_complete_lock(
+    tmp_path: Path,
+) -> None:
     """即使只执行只读环境检查, 缺少完整锁仍必须出现在稳定 blocker 中."""
 
-    first_report = inspect_dependency_profile_environment("workflow_orchestrator")
-    second_report = inspect_dependency_profile_environment("workflow_orchestrator")
+    registry_path = _copy_dependency_config(tmp_path)
+    profile = get_dependency_profile("workflow_orchestrator", registry_path)
+    (tmp_path / profile.complete_hash_lock_path).unlink(missing_ok=True)
+    first_report = inspect_dependency_profile_environment(
+        "workflow_orchestrator",
+        path=registry_path,
+    )
+    second_report = inspect_dependency_profile_environment(
+        "workflow_orchestrator",
+        path=registry_path,
+    )
 
     assert first_report == second_report
     assert first_report["decision"] == "blocked"

@@ -133,9 +133,16 @@ def test_dependency_report_is_not_claim_evidence() -> None:
     report = build_dependency_report("workflow_orchestrator")
 
     assert report["dependency_count"] > 0
-    assert report["dependency_decision"] == "blocked"
-    assert report["dependency_profile_formal_ready"] is False
-    assert "complete_hash_lock_missing" in report["unsupported_reasons"]
+    assert report["dependency_decision"] in {"pass", "blocked"}
+    assert report["dependency_profile_formal_ready"] is report[
+        "complete_hash_lock_present"
+    ]
+    if report["complete_hash_lock_present"]:
+        assert isinstance(report["complete_hash_lock_digest"], str)
+        assert len(report["complete_hash_lock_digest"]) == 64
+        assert report["complete_hash_lock_dependency_count"] > 0
+    else:
+        assert "complete_hash_lock_missing" in report["unsupported_reasons"]
     assert report["supports_paper_claim"] is False
     assert "packaging" in report["package_versions"]
     assert "torch" not in report["package_versions"]

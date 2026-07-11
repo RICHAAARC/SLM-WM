@@ -139,6 +139,10 @@ def _write_candidate_artifacts(
         "schema_version": review_bundle.candidate_materializer.PROVENANCE_SCHEMA_VERSION,
         "profile_id": profile.profile_name,
         "profile_digest": profile.profile_digest,
+        "cuda_version": profile.cuda_version,
+        "pytorch_index_url": profile.pytorch_index_url,
+        "torch_version": profile.torch_version,
+        "torchvision_version": profile.torchvision_version,
         "direct_requirements_path": profile.direct_requirements_path,
         "direct_requirements_digest": profile.direct_requirements_digest,
         "formal_execution_lock": dict(FORMAL_EXECUTION_LOCK),
@@ -170,6 +174,327 @@ def _write_candidate_artifacts(
         encoding="utf-8",
     )
     return provenance, provenance_path
+
+
+def _write_launcher_review_bundle_fixture(
+    repository_root: Path,
+    profile: DependencyProfile,
+) -> Path:
+    """写出 host launcher 完成后必须重新读取的三文件审查包."""
+
+    bundle_dir = (
+        repository_root
+        / review_bundle.LOCAL_BUNDLE_RELATIVE_ROOT
+        / profile.profile_name
+    ).resolve()
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    file_names = {
+        "candidate_lock": review_bundle.candidate_materializer.CANDIDATE_LOCK_FILE_NAME,
+        "pip_resolver_report": (
+            review_bundle.candidate_materializer.PIP_REPORT_FILE_NAME
+        ),
+        "candidate_provenance": (
+            review_bundle.candidate_materializer.PROVENANCE_FILE_NAME
+        ),
+    }
+    records = []
+    for artifact_role, file_name in file_names.items():
+        path = bundle_dir / file_name
+        path.write_text(f"{artifact_role}:{profile.profile_name}\n", encoding="utf-8")
+        records.append(
+            {
+                "artifact_role": artifact_role,
+                "file_name": file_name,
+                "source_path": f"outputs/source/{file_name}",
+                "bundle_path": path.relative_to(repository_root).as_posix(),
+                "sha256": _sha256(path),
+                "size_bytes": path.stat().st_size,
+            }
+        )
+    manifest = review_bundle._build_manifest(
+        profile,
+        repository_root=repository_root,
+        local_bundle_dir=bundle_dir,
+        drive_bundle_dir=None,
+        formal_execution_lock=dict(FORMAL_EXECUTION_LOCK),
+    )
+    manifest["files"] = records
+    manifest["decision"] = review_bundle.SUCCESS_DECISION
+    manifest["failure_reasons"] = []
+    manifest["diagnostic_message"] = None
+    manifest_path = bundle_dir / review_bundle.BUNDLE_MANIFEST_FILE_NAME
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
+def _qualification_command_runner(
+    repository_root: Path,
+    profile: DependencyProfile,
+    *,
+    write_review_bundle: bool,
+) -> tuple[Any, list[dict[str, Any]]]:
+    """构造不访问网络的精确 Python/uv 资格化命令 runner."""
+
+    records: list[dict[str, Any]] = []
+
+    def run(
+        command: list[str],
+        working_directory: Path,
+        environment_overrides: dict[str, str],
+    ) -> dict[str, Any]:
+        record = {
+            "command": list(command),
+            "working_directory": working_directory,
+            "environment_overrides": dict(environment_overrides),
+        }
+        records.append(record)
+        if command[1:4] == ["-m", "venv", "--clear"]:
+            python_path = Path(command[-1]) / "bin/python"
+            python_path.parent.mkdir(parents=True, exist_ok=True)
+            python_path.write_bytes(b"qualification tool python")
+            return {"return_code": 0, "stdout": "", "stderr": ""}
+        if command[1:4] == ["-m", "pip", "install"]:
+            uv_path = Path(command[0]).parent / "uv"
+            uv_path.write_bytes(b"qualification uv executable")
+            return {"return_code": 0, "stdout": "", "stderr": ""}
+        if command[-1:] == ["--version"]:
+            return {
+                "return_code": 0,
+                "stdout": f"uv {review_bundle.UV_DISTRIBUTION_VERSION}\n",
+                "stderr": "",
+            }
+        if command[1:3] == ["python", "install"]:
+            return {"return_code": 0, "stdout": "", "stderr": ""}
+        if command[1:2] == ["venv"]:
+            python_path = Path(command[-1]) / "bin/python"
+            python_path.parent.mkdir(parents=True, exist_ok=True)
+            python_path.write_bytes(b"exact orchestrator python")
+            return {"return_code": 0, "stdout": "", "stderr": ""}
+        if command[1:3] == ["-m", "ensurepip"]:
+            return {"return_code": 0, "stdout": "", "stderr": ""}
+        if command[1:2] == ["-c"]:
+            return {
+                "return_code": 0,
+                "stdout": _profile("workflow_orchestrator").python_version + "\n",
+                "stderr": "",
+            }
+        assert Path(command[1]).name == "write_dependency_lock_review_bundle.py"
+        assert environment_overrides[
+            review_bundle.QUALIFICATION_CHILD_ENVIRONMENT_KEY
+        ] == "1"
+        assert command[-2:] == ["--profile", profile.profile_name]
+        if write_review_bundle:
+            _write_launcher_review_bundle_fixture(repository_root, profile)
+        return {"return_code": 0, "stdout": "child complete\n", "stderr": ""}
+
+    return run, records
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "profile_id",
+    review_bundle.REQUIRED_DEPENDENCY_PROFILE_NAMES,
+)
+def test_fresh_linux_host_launches_every_profile_from_exact_orchestrator_python(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    profile_id: str,
+) -> None:
+    """六个候选入口都必须先创建精确 orchestrator 子解释器."""
+
+    profile = _profile(profile_id)
+    monkeypatch.setattr(
+        review_bundle,
+        "get_dependency_profile",
+        lambda requested_profile_id, path: _profile(requested_profile_id),
+    )
+    monkeypatch.setattr(
+        review_bundle.repository_environment,
+        "require_published_formal_execution_lock",
+        lambda root: dict(FORMAL_EXECUTION_LOCK),
+    )
+    monkeypatch.setattr(review_bundle.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(review_bundle.platform, "machine", lambda: "x86_64")
+    tool_lock_path = tmp_path / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
+    tool_lock_path.parent.mkdir(parents=True, exist_ok=True)
+    tool_lock_path.write_text(
+        (
+            review_bundle.ROOT
+            / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
+        ).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    command_runner, command_records = _qualification_command_runner(
+        tmp_path,
+        profile,
+        write_review_bundle=True,
+    )
+
+    report, report_path = review_bundle.launch_dependency_lock_qualification(
+        profile.profile_name,
+        repository_root=tmp_path,
+        qualification_runtime_root=tmp_path / "qualification_runtime",
+        command_runner=command_runner,
+    )
+
+    assert report["decision"] == review_bundle.QUALIFICATION_SUCCESS_DECISION
+    assert report["failure_reasons"] == []
+    assert report["supports_paper_claim"] is False
+    assert report["manifest_path"].endswith(
+        f"/{profile.profile_name}/{review_bundle.BUNDLE_MANIFEST_FILE_NAME}"
+    )
+    assert len(report["command_results"]) == 8
+    assert report_path.is_file()
+    assert json.loads(report_path.read_text(encoding="utf-8")) == report
+    pip_install_command = command_records[1]["command"]
+    assert "--require-hashes" in pip_install_command
+    assert "--only-binary=:all:" in pip_install_command
+    assert "--no-deps" in pip_install_command
+    assert str(tool_lock_path.resolve()) in pip_install_command
+    assert command_records[3]["command"][2] == "install"
+    assert "3.12.13" in command_records[3]["command"]
+    assert command_records[4]["command"][1] == "venv"
+    child_record = command_records[-1]
+    assert child_record["command"][-2:] == ["--profile", profile.profile_name]
+    child_python = Path(child_record["command"][0])
+    assert child_python == Path(report["python_executable_path"])
+    assert child_record["environment_overrides"][
+        review_bundle.QUALIFICATION_PYTHON_DIGEST_ENVIRONMENT_KEY
+    ] == report["python_executable_sha256"]
+    assert child_record["environment_overrides"]["PATH"].startswith(
+        str(child_python.parent)
+    )
+
+
+@pytest.mark.quick
+def test_host_launcher_rejects_zero_exit_without_review_bundle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """child 仅返回0但未写受治理审查包时不得形成成功报告."""
+
+    profile = _profile("workflow_orchestrator")
+    monkeypatch.setattr(
+        review_bundle,
+        "get_dependency_profile",
+        lambda requested_profile_id, path: _profile(requested_profile_id),
+    )
+    monkeypatch.setattr(
+        review_bundle.repository_environment,
+        "require_published_formal_execution_lock",
+        lambda root: dict(FORMAL_EXECUTION_LOCK),
+    )
+    monkeypatch.setattr(review_bundle.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(review_bundle.platform, "machine", lambda: "x86_64")
+    tool_lock_path = tmp_path / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
+    tool_lock_path.parent.mkdir(parents=True, exist_ok=True)
+    tool_lock_path.write_text(
+        (
+            review_bundle.ROOT
+            / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
+        ).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    command_runner, _ = _qualification_command_runner(
+        tmp_path,
+        profile,
+        write_review_bundle=False,
+    )
+
+    report, _ = review_bundle.launch_dependency_lock_qualification(
+        profile.profile_name,
+        repository_root=tmp_path,
+        qualification_runtime_root=tmp_path / "qualification_runtime",
+        command_runner=command_runner,
+    )
+
+    assert report["decision"] == "fail"
+    assert report["failure_reasons"] == [
+        "dependency_lock_review_bundle_validation_failed"
+    ]
+
+
+@pytest.mark.quick
+def test_host_launcher_rejects_unhashed_qualification_tool_input(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """host uv 输入缺少单 wheel SHA-256 时不得启动任何安装命令."""
+
+    profile = _profile("workflow_orchestrator")
+    monkeypatch.setattr(
+        review_bundle,
+        "get_dependency_profile",
+        lambda requested_profile_id, path: _profile(requested_profile_id),
+    )
+    monkeypatch.setattr(
+        review_bundle.repository_environment,
+        "require_published_formal_execution_lock",
+        lambda root: dict(FORMAL_EXECUTION_LOCK),
+    )
+    monkeypatch.setattr(review_bundle.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(review_bundle.platform, "machine", lambda: "x86_64")
+    tool_lock_path = tmp_path / review_bundle.QUALIFICATION_TOOL_LOCK_RELATIVE_PATH
+    tool_lock_path.parent.mkdir(parents=True, exist_ok=True)
+    tool_lock_path.write_text("uv==0.11.28\n", encoding="utf-8")
+
+    report, _ = review_bundle.launch_dependency_lock_qualification(
+        profile.profile_name,
+        repository_root=tmp_path,
+        qualification_runtime_root=tmp_path / "qualification_runtime",
+        command_runner=lambda *args: (_ for _ in ()).throw(
+            AssertionError("工具锁失败后不得运行命令")
+        ),
+    )
+
+    assert report["decision"] == "fail"
+    assert report["failure_reasons"] == ["qualification_tool_lock_invalid"]
+
+
+@pytest.mark.quick
+def test_qualification_child_requires_exact_python_path_digest_and_patch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """child 标记必须同时绑定 Python 路径、文件摘要和登记 patch."""
+
+    python_executable = tmp_path / "qualification/bin/python"
+    python_executable.parent.mkdir(parents=True, exist_ok=True)
+    python_executable.write_bytes(b"exact child python")
+    monkeypatch.setattr(review_bundle.sys, "executable", str(python_executable))
+    monkeypatch.setattr(
+        review_bundle,
+        "get_dependency_profile",
+        lambda profile_id, path: _profile("workflow_orchestrator"),
+    )
+    monkeypatch.setattr(
+        review_bundle.platform,
+        "python_implementation",
+        lambda: "CPython",
+    )
+    monkeypatch.setattr(review_bundle.platform, "python_version", lambda: "3.12.13")
+    monkeypatch.setattr(review_bundle.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(review_bundle.platform, "machine", lambda: "x86_64")
+    monkeypatch.setenv(
+        review_bundle.QUALIFICATION_PYTHON_ENVIRONMENT_KEY,
+        str(python_executable),
+    )
+    monkeypatch.setenv(
+        review_bundle.QUALIFICATION_PYTHON_DIGEST_ENVIRONMENT_KEY,
+        _sha256(python_executable),
+    )
+
+    review_bundle._require_qualification_child_interpreter(tmp_path)
+
+    monkeypatch.setenv(
+        review_bundle.QUALIFICATION_PYTHON_DIGEST_ENVIRONMENT_KEY,
+        "0" * 64,
+    )
+    with pytest.raises(RuntimeError, match="解释器门禁"):
+        review_bundle._require_qualification_child_interpreter(tmp_path)
 
 
 @pytest.mark.quick

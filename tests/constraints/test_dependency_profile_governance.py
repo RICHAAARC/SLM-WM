@@ -7,6 +7,9 @@ import shutil
 
 import pytest
 
+from experiments.runtime.dependency_profiles import (
+    load_dependency_profile_registry,
+)
 from tools.harness.audits.audit_dependency_profile_governance import run_audit
 
 
@@ -27,6 +30,7 @@ def _copy_governance_fixture(tmp_path: Path) -> Path:
         "scripts/prepare_isolated_dependency_environment.py",
         "scripts/materialize_dependency_lock_candidate.py",
         "scripts/write_dependency_lock_review_bundle.py",
+        "scripts/write_reviewed_dependency_hash_lock.py",
         "docs/field_registry.md",
         "docs/builds/formal_dependency_environment.md",
     )
@@ -54,25 +58,49 @@ def test_repository_dependency_profile_governance_passes() -> None:
     """当前仓库必须通过正式依赖结构、字段和业务路径审计."""
 
     report = run_audit(REPOSITORY_ROOT)
+    profiles = load_dependency_profile_registry()
+    expected_missing_count = sum(
+        not profile.complete_hash_lock_present for profile in profiles.values()
+    )
+    expected_ready_count = len(profiles) - expected_missing_count
+    expected_direct_count = sum(
+        len(profile.direct_requirements) for profile in profiles.values()
+    )
 
     assert report["decision"] == "pass"
-    assert report["summary"]["profile_count"] == 6
-    assert report["summary"]["direct_dependency_count"] == 111
-    assert report["summary"]["missing_lock_count"] == 6
-    assert report["summary"]["fail_closed_missing_lock_count"] == 6
+    assert report["summary"]["profile_count"] == len(profiles)
+    assert report["summary"]["direct_dependency_count"] == expected_direct_count
+    assert report["summary"]["missing_lock_count"] == expected_missing_count
+    assert report["summary"]["fail_closed_missing_lock_count"] == (
+        expected_missing_count
+    )
+    assert report["summary"]["ready_lock_count"] == expected_ready_count
 
 
 @pytest.mark.constraint
-def test_missing_gpu_hash_locks_are_accepted_only_as_fail_closed(tmp_path: Path) -> None:
-    """完整锁缺失是 GPU qualification blocker, 不是结构审计违规."""
+def test_fixture_hash_lock_counts_follow_actual_registry_state(tmp_path: Path) -> None:
+    """缺失锁必须 fail-closed, 已提交锁必须进入动态 ready 计数."""
 
     fixture_root = _copy_governance_fixture(tmp_path)
     report = run_audit(fixture_root)
+    profiles = load_dependency_profile_registry(
+        fixture_root / "configs/dependency_profile_registry.json"
+    )
+    expected_missing_count = sum(
+        not profile.complete_hash_lock_present for profile in profiles.values()
+    )
+    expected_ready_count = len(profiles) - expected_missing_count
+    expected_direct_count = sum(
+        len(profile.direct_requirements) for profile in profiles.values()
+    )
 
     assert report["decision"] == "pass"
-    assert report["summary"]["direct_dependency_count"] == 111
-    assert report["summary"]["missing_lock_count"] == 6
-    assert report["summary"]["fail_closed_missing_lock_count"] == 6
+    assert report["summary"]["direct_dependency_count"] == expected_direct_count
+    assert report["summary"]["missing_lock_count"] == expected_missing_count
+    assert report["summary"]["fail_closed_missing_lock_count"] == (
+        expected_missing_count
+    )
+    assert report["summary"]["ready_lock_count"] == expected_ready_count
     assert report["violations"] == []
 
 

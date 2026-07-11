@@ -53,6 +53,7 @@ class PaperRunEnvironment:
     prompt_set: str
     prompt_file: str
     drive_result_root: str
+    resume_checkpoint_dir: str
     target_fpr: str
     sample_count_token: str
     expected_sample_count: int
@@ -117,6 +118,7 @@ def _configure_common_paper_run_environment() -> tuple[Any, str, str]:
     _set_env("SLM_WM_PAPER_RUN_TARGET_FPR", defaults["target_fpr"])
     os.environ.pop("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", None)
     os.environ.pop("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", None)
+    os.environ.pop("SLM_WM_RESUME_CHECKPOINT_DIR", None)
 
     paper_run = build_paper_run_config(".")
     target_fpr_text = _target_fpr_text(paper_run.target_fpr)
@@ -147,6 +149,10 @@ def _configure_semantic_watermark_image_only(
     _set_env("SLM_WM_IMAGE_ONLY_RUNTIME_DRIVE_DIR", image_only_drive_dir)
     _set_env("SLM_WM_DATASET_QUALITY_DRIVE_DIR", paper_run.drive_dir("dataset_level_quality"))
     _set_env("SLM_WM_RUNTIME_RERUN_ABLATION_DRIVE_DIR", paper_run.drive_dir("runtime_rerun_ablation"))
+    _set_env(
+        "SLM_WM_RESUME_CHECKPOINT_DIR",
+        paper_run.drive_dir("semantic_watermark_resume_checkpoint"),
+    )
     _set_default_env("SLM_WM_MAX_NEW_PROMPTS_PER_SESSION", "5")
     _set_default_env("SLM_WM_MAX_NEW_ABLATION_RUNS_PER_SESSION", "5")
     _set_default_env("SLM_WM_INCEPTION_BATCH_SIZE", "32")
@@ -400,6 +406,10 @@ def configure_paper_run_environment(
         prompt_set=os.environ["SLM_WM_PROMPT_SET"],
         prompt_file=os.environ["SLM_WM_PROMPT_FILE"],
         drive_result_root=os.environ["SLM_WM_DRIVE_RESULT_ROOT"],
+        resume_checkpoint_dir=os.environ.get(
+            "SLM_WM_RESUME_CHECKPOINT_DIR",
+            "",
+        ),
         target_fpr=os.environ["SLM_WM_PAPER_RUN_TARGET_FPR"],
         sample_count_token=os.environ["SLM_WM_PAPER_RUN_SAMPLE_COUNT"],
         expected_sample_count=int(os.environ["SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT"]),

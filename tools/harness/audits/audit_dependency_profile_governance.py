@@ -32,6 +32,8 @@ REQUIRED_PATHS = (
     "scripts/prepare_isolated_dependency_environment.py",
     "scripts/materialize_dependency_lock_candidate.py",
     "scripts/write_dependency_lock_review_bundle.py",
+    "scripts/write_reviewed_dependency_hash_lock.py",
+    "configs/dependency_profiles/dependency_qualification_uv_linux_x86_64_lock.txt",
     "docs/field_registry.md",
     "docs/builds/formal_dependency_environment.md",
 )
@@ -147,6 +149,9 @@ REQUIRED_FIELD_NAMES = frozenset(
         "orchestrator_preparation",
         "isolated_python_provision",
         "candidate_materialization",
+        "qualification_tool_lock_path",
+        "qualification_tool_lock_digest",
+        "qualification_report_path",
     }
 )
 REQUIRED_PREPARATION_TOKENS = (
@@ -212,6 +217,24 @@ REQUIRED_LOCK_REVIEW_TOKENS = (
     "candidate_materializer.load_resolved_wheels",
     "candidate_materializer.candidate_lock_text",
     "candidate_materializer.candidate_lock_logical_digest",
+    "launch_dependency_lock_qualification",
+    '"--require-hashes"',
+    '"--only-binary=:all:"',
+    "_require_qualification_child_interpreter",
+    "_validate_written_review_bundle",
+)
+REQUIRED_LOCK_ACCEPTANCE_TOKENS = (
+    "validate_formal_execution_lock_record",
+    "candidate_materializer.load_resolved_wheels",
+    "candidate_materializer.candidate_lock_text",
+    "candidate_materializer.candidate_lock_logical_digest",
+    'target_path.open("xb")',
+    "complete_hash_lock_already_present",
+    "lock_written_for_commit",
+)
+QUALIFICATION_TOOL_LOCK_TEXT = (
+    "uv==0.11.28 "
+    "--hash=sha256:49fe42df9f42056037473f3876adec1615709b57d3470ed39178ff420f3afb9f"
 )
 REQUIRED_CANDIDATE_MATERIALIZER_TOKENS = (
     "if profile.pytorch_index_url is not None",
@@ -368,6 +391,7 @@ def _audit_registry(
     direct_dependency_count = 0
     missing_lock_count = 0
     fail_closed_missing_lock_count = 0
+    ready_lock_count = 0
     try:
         profiles = load_dependency_profile_registry(registry_path)
     except (FileNotFoundError, ValueError) as exc:
@@ -383,6 +407,7 @@ def _audit_registry(
             "direct_dependency_count": 0,
             "missing_lock_count": 0,
             "fail_closed_missing_lock_count": 0,
+            "ready_lock_count": 0,
         }
 
     profile_count = len(profiles)
@@ -444,6 +469,28 @@ def _audit_registry(
                         "reason": "valid_hash_lock_not_ready",
                     }
                 )
+            elif (
+                not isinstance(profile.complete_hash_lock_digest, str)
+                or re.fullmatch(
+                    r"[0-9a-f]{64}",
+                    profile.complete_hash_lock_digest,
+                )
+                is None
+                or isinstance(profile.complete_hash_lock_dependency_count, bool)
+                or not isinstance(
+                    profile.complete_hash_lock_dependency_count,
+                    int,
+                )
+                or profile.complete_hash_lock_dependency_count <= 0
+            ):
+                violations.append(
+                    {
+                        "path": profile.complete_hash_lock_path,
+                        "reason": "ready_hash_lock_identity_invalid",
+                    }
+                )
+            else:
+                ready_lock_count += 1
             continue
         missing_lock_count += 1
         if (
@@ -466,6 +513,7 @@ def _audit_registry(
         "direct_dependency_count": direct_dependency_count,
         "missing_lock_count": missing_lock_count,
         "fail_closed_missing_lock_count": fail_closed_missing_lock_count,
+        "ready_lock_count": ready_lock_count,
     }
 
 
@@ -599,6 +647,45 @@ def run_audit(root: str | Path) -> dict[str, Any]:
                         "token": token,
                     }
                 )
+
+    acceptance_path = root_path / "scripts/write_reviewed_dependency_hash_lock.py"
+    if acceptance_path.is_file():
+        acceptance_text = acceptance_path.read_text(encoding="utf-8-sig")
+        for token in REQUIRED_LOCK_ACCEPTANCE_TOKENS:
+            if token not in acceptance_text:
+                violations.append(
+                    {
+                        "path": "scripts/write_reviewed_dependency_hash_lock.py",
+                        "reason": "dependency_lock_acceptance_contract_missing",
+                        "token": token,
+                    }
+                )
+
+    qualification_tool_lock_path = (
+        root_path
+        / (
+            "configs/dependency_profiles/"
+            "dependency_qualification_uv_linux_x86_64_lock.txt"
+        )
+    )
+    if qualification_tool_lock_path.is_file():
+        qualification_tool_lock_lines = [
+            line.strip()
+            for line in qualification_tool_lock_path.read_text(
+                encoding="utf-8-sig"
+            ).splitlines()
+            if line.strip()
+        ]
+        if qualification_tool_lock_lines != [QUALIFICATION_TOOL_LOCK_TEXT]:
+            violations.append(
+                {
+                    "path": (
+                        "configs/dependency_profiles/"
+                        "dependency_qualification_uv_linux_x86_64_lock.txt"
+                    ),
+                    "reason": "dependency_qualification_tool_lock_mismatch",
+                }
+            )
 
     repository_environment_path = (
         root_path / "experiments/runtime/repository_environment.py"

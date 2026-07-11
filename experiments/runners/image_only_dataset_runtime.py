@@ -28,6 +28,11 @@ from experiments.runtime.package_input_manifest import (
     validate_exact_package_archive,
     write_exact_package_input_manifest,
 )
+from experiments.runtime.resume_checkpoint import (
+    clear_progress_checkpoints,
+    persist_progress_checkpoint,
+    restore_role_checkpoints,
+)
 from experiments.runtime.diffusion.regeneration_attacks import default_diffusion_attack_specs
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -335,6 +340,14 @@ def run_image_only_dataset_runtime(
     output_dir = root_path / "outputs" / "image_only_dataset_runtime" / resolved_paper_run.run_name
     output_dir.mkdir(parents=True, exist_ok=True)
     progress_path = output_dir / "dataset_runtime_progress.json"
+    restore_role_checkpoints(
+        repository_root=root_path,
+        artifact_role="image_only_dataset_runtime",
+        paper_run_name=resolved_paper_run.run_name,
+        allowed_output_prefix=(
+            f"outputs/image_only_dataset_runtime/{resolved_paper_run.run_name}"
+        ),
+    )
     if max_new_prompts_per_session < 0:
         raise ValueError("max_new_prompts_per_session 不得为负")
     shared_context = None
@@ -350,6 +363,40 @@ def run_image_only_dataset_runtime(
     completed_prompt_ids: list[str] = []
     resumed_prompt_count = 0
     new_prompt_count = 0
+
+    def write_resume_progress() -> dict[str, Any]:
+        """原子保存当前 Prompt 进度并同步到外部检查点目录."""
+
+        progress = {
+            "paper_run_name": resolved_paper_run.run_name,
+            "prompt_count": len(prompt_records),
+            "completed_prompt_count": len(runtime_results),
+            "remaining_prompt_count": len(prompt_records) - len(runtime_results),
+            "resumed_prompt_count": resumed_prompt_count,
+            "new_prompt_count": new_prompt_count,
+            "max_new_prompts_per_session": max_new_prompts_per_session,
+            "completed_prompt_digest": build_stable_digest(
+                sorted(completed_prompt_ids)
+            ),
+            "protocol_decision": "resume_required",
+            "evidence_eligibility": "intermediate_state_only",
+            "supports_paper_claim": False,
+        }
+        temporary_path = progress_path.with_name(progress_path.name + ".partial")
+        temporary_path.write_text(
+            json.dumps(progress, ensure_ascii=False, sort_keys=True, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
+        temporary_path.replace(progress_path)
+        persist_progress_checkpoint(
+            progress_path,
+            repository_root=root_path,
+            artifact_role="image_only_dataset_runtime",
+            paper_run_name=resolved_paper_run.run_name,
+        )
+        return progress
+
     for prompt_record in prompt_records:
         run_attacks = prompt_record.prompt_id in attack_prompt_ids
         run_config = replace(
@@ -368,6 +415,7 @@ def run_image_only_dataset_runtime(
             ),
         )
         result = load_completed_semantic_watermark_runtime_result(run_config, root=root_path)
+        generated_now = False
         if result is not None:
             resumed_prompt_count += 1
         elif max_new_prompts_per_session and new_prompt_count >= max_new_prompts_per_session:
@@ -381,32 +429,23 @@ def run_image_only_dataset_runtime(
                 runtime_context=shared_context,
             )
             new_prompt_count += 1
+            generated_now = True
         runtime_results.append(result.to_dict())
         detection_records.extend(_read_jsonl(root_path / result.detection_record_path))
         scientific_update_records.extend(_read_jsonl(root_path / result.update_record_path))
         completed_prompt_ids.append(prompt_record.prompt_id)
+        if generated_now and len(runtime_results) < len(prompt_records):
+            write_resume_progress()
 
     if len(runtime_results) != len(prompt_records):
-        progress = {
-            "paper_run_name": resolved_paper_run.run_name,
-            "prompt_count": len(prompt_records),
-            "completed_prompt_count": len(runtime_results),
-            "remaining_prompt_count": len(prompt_records) - len(runtime_results),
-            "resumed_prompt_count": resumed_prompt_count,
-            "new_prompt_count": new_prompt_count,
-            "max_new_prompts_per_session": max_new_prompts_per_session,
-            "completed_prompt_digest": build_stable_digest(sorted(completed_prompt_ids)),
-            "protocol_decision": "resume_required",
-            "supports_paper_claim": False,
-        }
-        progress_path.write_text(
-            json.dumps(progress, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        return progress
+        return write_resume_progress()
 
     # 完整运行到达后删除续跑状态, 避免 Colab 入口把上一次中断记录误判为当前状态。
     progress_path.unlink(missing_ok=True)
+    clear_progress_checkpoints(
+        artifact_role="image_only_dataset_runtime",
+        paper_run_name=resolved_paper_run.run_name,
+    )
 
     calibration_negatives = tuple(
         record

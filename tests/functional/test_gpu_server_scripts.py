@@ -148,6 +148,26 @@ def test_server_cli_maps_every_public_workflow_option(workflow_name: str) -> Non
 
 
 @pytest.mark.quick
+def test_server_cli_accepts_external_persistent_output_directory() -> None:
+    """独立 GPU 服务器必须能够显式选择挂载盘持久化目录."""
+
+    arguments = workflow.build_parser().parse_args(
+        [
+            "--workflow",
+            "official_reference_t2smark",
+            "--paper-run-name",
+            "probe_paper",
+            "--repository-commit",
+            COMMIT,
+            "--persistent-output-dir",
+            "/mnt/persistent/slm_wm/t2smark",
+        ]
+    )
+
+    assert arguments.persistent_output_dir == "/mnt/persistent/slm_wm/t2smark"
+
+
+@pytest.mark.quick
 def test_orchestrator_gate_accepts_exact_ready_cpu_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -499,6 +519,7 @@ def test_baseline_and_t2smark_routes_use_shared_isolated_wrapper(
         root_path: Path,
         workflow_name: str,
         paper_run_name: str,
+        persistent_output_dir: Optional[str | Path] = None,
     ) -> dict[str, Any]:
         captured.update(
             {
@@ -516,6 +537,7 @@ def test_baseline_and_t2smark_routes_use_shared_isolated_wrapper(
                 "formal_digest": os.environ[
                     workflow.FORMAL_EXECUTION_LOCK_DIGEST_ENVIRONMENT_KEY
                 ],
+                "persistent_output_dir": persistent_output_dir,
             }
         )
         return {
@@ -533,6 +555,7 @@ def test_baseline_and_t2smark_routes_use_shared_isolated_wrapper(
         "pilot_paper",
         COMMIT,
         tmp_path,
+        tmp_path / "persistent_delivery",
     )
 
     assert captured["root"] == tmp_path.resolve()
@@ -542,6 +565,7 @@ def test_baseline_and_t2smark_routes_use_shared_isolated_wrapper(
     assert captured["baseline_id"] == expected_baseline
     assert captured["formal_commit"] == COMMIT
     assert captured["formal_digest"] == LOCK_DIGEST
+    assert captured["persistent_output_dir"] == tmp_path / "persistent_delivery"
     assert captured["route"] == workflow.WORKFLOW_ROUTES[workflow_name]
     assert result["scientific_profile_id"] == expected_profile
     assert result["baseline_id"] == expected_baseline

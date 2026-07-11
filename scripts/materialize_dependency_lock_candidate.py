@@ -3,6 +3,8 @@
 该命令不会写入 ``configs/``. 它只把当前目标解释器解析到的单个 wheel
 及 pip 报告提供的 SHA-256 写入 ``outputs/dependency_lock_candidates/``.
 候选仍需人工复核并经过仓库治理流程, 不能直接支持论文结论.
+CUDA profile 仅在登记 Python/Linux x86_64 中向固定 PyTorch index 解析 wheel;
+该命令不导入 torch, 不执行 CUDA, 也不验证 GPU 可用性.
 """
 
 from __future__ import annotations
@@ -391,6 +393,10 @@ def _build_provenance(
         "schema_version": PROVENANCE_SCHEMA_VERSION,
         "profile_id": profile.profile_name,
         "profile_digest": profile.profile_digest,
+        "cuda_version": profile.cuda_version,
+        "pytorch_index_url": profile.pytorch_index_url,
+        "torch_version": profile.torch_version,
+        "torchvision_version": profile.torchvision_version,
         "direct_requirements_path": profile.direct_requirements_path,
         "direct_requirements_digest": profile.direct_requirements_digest,
         "formal_execution_lock": {},

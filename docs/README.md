@@ -7,6 +7,7 @@
 - `builds/algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md`: 算法原语的规范来源, 定义分支风险、真实 Jacobian Null Space、空间 LF、高斯幅值尾部截断、Q/K attention geometry 和仅图像 fixed-FPR 检测。
 - `builds/method_section_semantic_conditioned_latent_manifold_watermark.md`: 与当前实现一致的论文方法章节草稿。
 - `builds/real_scientific_operator_implementation.md`: 科学算子到代码文件、实验入口和论文主张门禁的映射。
+- `builds/external_gpu_workflow_persistence.md`: 7条外部 GPU 路径的共享持久化、formal execution/profile/config 身份绑定、Drive 恢复原子性和 checkpoint 证据边界。
 - `field_registry.md`: records、manifests、tables、reports 与跨进程数据字段登记表。
 
 ## 术语规范

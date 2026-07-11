@@ -35,11 +35,13 @@ Prompt bank 中受外部来源登记约束的子集来自 Google Research PartiP
 
 `dependency_profiles/*_direct.txt` 是已经提交的精确直接依赖输入。当前六个文件共111个条目; 每个有效条目只能采用 `name==version` 形式, 不允许版本范围、可漂移标签、安装升级选项、远程 URL 或未版本化包。五个 CUDA profile 的 `torch` 和 `torchvision` 必须与登记的 CUDA local version 和 PyTorch index 完全一致。父编排 profile 不登记 `torch`、`torchvision`、CUDA 或 PyTorch index, 但固定 `uv==0.11.28` 与 `huggingface_hub==1.20.1`, 用于科学子解释器创建和固定 revision 模型快照下载。五个科学执行 profile 均固定 `pip==24.3.1`、`setuptools==75.3.0` 和 `wheel==0.45.1`。
 
-直接输入不等于完整 Python wheel 闭包。每个 profile 必须在登记的 Linux x86_64 目标环境中解析并生成 `dependency_profiles/<profile>_lock.txt`: 父编排 profile 使用 CPU 环境, 五个科学 profile 使用匹配的 GPU 环境。目标环境可以位于 Colab 或满足同一 profile 的普通 Linux 服务器。锁中的直接依赖和传递依赖都必须固定版本并携带真实 wheel 的 SHA-256。完整锁需要从实际解析结果回填并提交, 不允许人工编造 wheel 摘要。只有锁文件存在、格式有效、逐项带 SHA-256 且覆盖全部直接输入时, 对应 profile 才能达到 `formal_ready=True`。
+直接输入不等于完整 Python wheel 闭包。每个 profile 必须在登记的 Linux x86_64 与完整 CPython patch 中解析并生成 `dependency_profiles/<profile>_lock.txt`; 五个科学 profile 还必须向各自登记的 PyTorch wheel index 解析固定 `torch` / `torchvision` identity。候选生成使用 `pip --dry-run` 且不导入 torch 或执行 CUDA, 因而可以在无 GPU Linux x86_64 host 完成。锁中的直接依赖和传递依赖都必须固定版本并携带实际候选 wheel 的 SHA-256。完整锁需要从实际 resolver report 重建、人工审查、通过回传接收器复验并提交, 不允许人工编造 wheel 摘要。只有锁文件存在、格式有效、逐项带 SHA-256 且覆盖全部直接输入时, 对应 profile 才能达到 `formal_ready=True`。
+
+`dependency_profiles/dependency_qualification_uv_linux_x86_64_lock.txt` 只服务于 fresh host 的资格化工具引导。该文件固定 `uv==0.11.28` 的 Linux manylinux x86_64 wheel SHA-256, 不属于六个运行 profile 的完整依赖锁, 也不支持论文 claim。host launcher 使用该输入创建精确 orchestrator CPython; 正式运行仍只能消费六个 registry profile 各自已提交的完整哈希锁。
 
 `workflow_orchestrator` inspection 只核验 CPU 平台与完整锁包集合, 不导入 torch, 也不执行 CUDA 门禁。`experiments.runtime.dependency_preparation` 对五个科学 profile 额外执行 `sys.executable -m pip check`; 父编排 profile 仍核验全部锁包, 但将该兼容性命令标记为不适用。`experiments.runtime.isolated_dependency_environment` 使用固定 `uv==0.11.28` 内置的冻结可下载 Python distribution 列表和完整 CPython patch 创建科学子环境, 并要求实际 `uv` executable 同时通过当前解释器 distribution `RECORD` 的路径与 SHA-256 核验, 防止 PATH 中同版本伪造文件。详细证据契约见 `docs/builds/formal_dependency_environment.md`。
 
-五个 CUDA profile 均由 repository 隔离执行路径选择并在各自子解释器中运行, Notebook 父解释器不直接导入科学实现. 当前唯一外部阻断类别是完整哈希锁资格审查: CPU 父锁需要在匹配的 Linux x86_64 环境完成审查, 五个科学锁需要在匹配各自 CPython、CUDA 与 PyTorch index 的 Colab 或 Linux CUDA 环境完成审查并提交. 在此之前全部 profile 保持 fail-closed, 不形成正式 GPU 结果.
+五个 CUDA profile 均由 repository 隔离执行路径选择并在各自子解释器中运行, Notebook 父解释器不直接导入科学实现。锁资格化只验证目标 CPython、Linux x86_64、直接与传递 wheel 闭包以及 PyTorch index 身份, 可以在无 GPU host 完成; 正式运行必须在 Colab GPU 中安装已提交锁并通过 `pip check`、torch/CUDA identity、CUDA 可用性与对应科学 smoke。任一缺失锁 profile 都保持 fail-closed, 不形成正式 GPU 结果。
 
 ## 方法配置语义
 

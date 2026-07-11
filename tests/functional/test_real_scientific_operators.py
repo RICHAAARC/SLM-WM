@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import asdict, replace
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from zipfile import ZipFile
 
 import pytest
 import torch
@@ -46,6 +48,47 @@ from experiments.runners.semantic_watermark_runtime import (
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 from scripts import semantic_watermark_scientific_workflow as scientific_workflow
+
+
+def write_recovery_candidate(
+    root_path: Path,
+    role: str,
+    *,
+    suffix: str = "20260712t000000z",
+    generated_at_utc: datetime | None = None,
+) -> SimpleNamespace:
+    """构造闭合包恢复选择测试使用的最小候选对象."""
+
+    destination_dir = root_path / "drive" / role
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    package_path = destination_dir / f"{role}_package_{suffix}.zip"
+    output_role = (
+        "formal_mechanism_ablation"
+        if role == "runtime_rerun_ablation"
+        else role
+    )
+    with ZipFile(package_path, "w") as archive:
+        archive.writestr(
+            f"outputs/{output_role}/probe_paper/recovered_{role}.json",
+            f"{role}:{suffix}",
+        )
+    return SimpleNamespace(
+        package_path=package_path,
+        package_sha256=scientific_workflow.file_sha256(package_path),
+        generated_at_utc=(
+            generated_at_utc
+            or datetime(2026, 7, 12, tzinfo=timezone.utc)
+        ),
+        generated_at="2026-07-12T00:00:00+00:00",
+        code_version="a" * 40,
+        formal_execution_run_lock_digest="b" * 64,
+        formal_execution_package_lock_digest="b" * 64,
+        scientific_profile_id=scientific_workflow.SCIENTIFIC_PROFILE_ID,
+        scientific_profile_digest="c" * 64,
+        scientific_direct_requirements_digest="d" * 64,
+        scientific_complete_hash_lock_digest="e" * 64,
+        scientific_complete_hash_lock_dependency_count=17,
+    )
 
 
 @pytest.mark.quick
@@ -468,6 +511,310 @@ def test_completed_runtime_cache_requires_matching_config_and_files(tmp_path: Pa
 
     files["clean_image_path"].unlink()
     assert load_completed_semantic_watermark_runtime_result(config, root=tmp_path) is None
+
+
+@pytest.mark.quick
+def test_closed_archive_recovery_without_directories_is_empty(
+    tmp_path: Path,
+) -> None:
+    """未配置外部归档目录时恢复路径必须保持无操作."""
+
+    recovered = scientific_workflow._recover_closed_archives(
+        root_path=tmp_path,
+        paper_run_name="probe_paper",
+        target_fpr=0.1,
+        expected_roles={
+            "image_only_dataset_runtime",
+            "dataset_level_quality",
+        },
+        archive_destination_dirs=None,
+    )
+
+    assert recovered["recovered_roles"] == []
+    assert recovered["local_archives"] == {}
+    assert recovered["all_expected_roles_recovered"] is False
+
+
+@pytest.mark.quick
+def test_partial_closed_archive_recovery_neither_extracts_nor_skips_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """只恢复主方法包时不得提取旧结果或跳过当前科学子命令."""
+
+    run_name = "probe_paper"
+    runtime_candidate = write_recovery_candidate(
+        tmp_path,
+        "image_only_dataset_runtime",
+    )
+    quality_dir = tmp_path / "drive" / "dataset_level_quality"
+    quality_dir.mkdir(parents=True)
+    progress_path = (
+        tmp_path
+        / "outputs"
+        / "image_only_dataset_runtime"
+        / run_name
+        / "dataset_runtime_progress.json"
+    )
+    progress_path.parent.mkdir(parents=True)
+    progress_path.write_text(
+        json.dumps(
+            {
+                "protocol_decision": "resume_required",
+                "remaining_prompt_count": 65,
+            }
+        ),
+        encoding="utf-8",
+    )
+    execution_path = tmp_path / "outputs" / "scientific_execution.json"
+    execution_path.write_text("{}", encoding="utf-8")
+    execution_report = {
+        "decision": "pass",
+        "failure_reasons": [],
+        "profile_id": scientific_workflow.SCIENTIFIC_PROFILE_ID,
+        "profile_digest": "1" * 64,
+        "complete_hash_lock_digest": "2" * 64,
+        "dependency_environment_report_path": str(execution_path),
+        "dependency_environment_report_digest": "3" * 64,
+    }
+    execution_calls: list[tuple[object, ...]] = []
+    extraction_calls: list[Path] = []
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", run_name)
+    monkeypatch.setattr(
+        scientific_workflow,
+        "inspect_closure_package",
+        lambda package_path, **_kwargs: runtime_candidate,
+    )
+    monkeypatch.setattr(
+        scientific_workflow,
+        "_candidate_matches_repository",
+        lambda _candidate, _root: True,
+    )
+    monkeypatch.setattr(
+        scientific_workflow,
+        "_extract_validated_archive",
+        lambda package_path, _root: extraction_calls.append(package_path),
+    )
+
+    def execute_once(*args: object, **_kwargs: object) -> tuple[dict[str, object], Path]:
+        """记录部分恢复后仍实际调用隔离科学命令."""
+
+        execution_calls.append(args)
+        return execution_report, execution_path
+
+    monkeypatch.setattr(
+        scientific_workflow,
+        "execute_isolated_scientific_command",
+        execute_once,
+    )
+    monkeypatch.setattr(
+        scientific_workflow,
+        "validate_scientific_execution_report",
+        lambda *_args, **_kwargs: execution_report,
+    )
+
+    summary = scientific_workflow.run_semantic_watermark_image_only_session(
+        tmp_path,
+        archive_destination_dirs={
+            "image_only_dataset_runtime": runtime_candidate.package_path.parent,
+            "dataset_level_quality": quality_dir,
+        },
+    )
+
+    assert len(execution_calls) == 1
+    assert extraction_calls == []
+    assert summary["workflow_decision"] == "resume_required"
+    assert summary["closed_archive_recovery_ready"] is False
+    assert summary["closed_archive_recovery"]["recovered_roles"] == [
+        "image_only_dataset_runtime"
+    ]
+
+
+@pytest.mark.quick
+def test_all_current_closed_archives_restore_without_new_execution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """全部请求角色通过当前身份校验后才允许整体恢复并结束会话."""
+
+    candidates = {
+        role: write_recovery_candidate(tmp_path, role)
+        for role in (
+            "image_only_dataset_runtime",
+            "dataset_level_quality",
+        )
+    }
+    candidate_by_path = {
+        candidate.package_path.resolve(): candidate
+        for candidate in candidates.values()
+    }
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.setattr(
+        scientific_workflow,
+        "inspect_closure_package",
+        lambda package_path, **_kwargs: candidate_by_path[package_path.resolve()],
+    )
+    monkeypatch.setattr(
+        scientific_workflow,
+        "_candidate_matches_repository",
+        lambda _candidate, _root: True,
+    )
+
+    def reject_execution(*_args: object, **_kwargs: object) -> object:
+        """完整恢复后不允许创建伪造的当前科学执行."""
+
+        raise AssertionError("全部闭合包已恢复时不应重新执行科学命令")
+
+    monkeypatch.setattr(
+        scientific_workflow,
+        "execute_isolated_scientific_command",
+        reject_execution,
+    )
+    summary = scientific_workflow.run_semantic_watermark_image_only_session(
+        tmp_path,
+        archive_destination_dirs={
+            role: candidate.package_path.parent
+            for role, candidate in candidates.items()
+        },
+    )
+
+    assert summary["workflow_decision"] == "closed_archives_recovered"
+    assert summary["closed_archive_recovery_ready"] is True
+    assert set(summary["recovered_roles"]) == set(candidates)
+    assert set(summary["local_archives"]) == set(candidates)
+    assert all(
+        Path(path).is_file() for path in summary["local_archives"].values()
+    )
+    assert (
+        tmp_path
+        / "outputs"
+        / "image_only_dataset_runtime"
+        / "probe_paper"
+        / "recovered_image_only_dataset_runtime.json"
+    ).is_file()
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("drift_kind", ["code_version", "dependency_lock"])
+def test_closed_archive_candidate_rejects_repository_identity_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    drift_kind: str,
+) -> None:
+    """旧提交或科学依赖锁漂移的闭合包不得视为当前可恢复结果."""
+
+    candidate = write_recovery_candidate(
+        tmp_path,
+        "image_only_dataset_runtime",
+    )
+    execution_lock = {
+        "formal_execution_commit": candidate.code_version,
+        "formal_execution_lock_digest": (
+            candidate.formal_execution_run_lock_digest
+        ),
+    }
+    profile = SimpleNamespace(
+        profile_name=candidate.scientific_profile_id,
+        profile_digest=candidate.scientific_profile_digest,
+        direct_requirements_digest=(
+            candidate.scientific_direct_requirements_digest
+        ),
+        complete_hash_lock_digest=(
+            candidate.scientific_complete_hash_lock_digest
+        ),
+        complete_hash_lock_dependency_count=(
+            candidate.scientific_complete_hash_lock_dependency_count
+        ),
+        formal_ready=True,
+        readiness_blockers=(),
+    )
+    monkeypatch.setattr(
+        scientific_workflow,
+        "require_published_formal_execution_lock",
+        lambda _root: execution_lock,
+    )
+    monkeypatch.setattr(
+        scientific_workflow,
+        "require_dependency_profile_ready",
+        lambda _profile_id, _registry_path: profile,
+    )
+
+    assert scientific_workflow._candidate_matches_repository(
+        candidate,
+        tmp_path,
+    ) is True
+    if drift_kind == "code_version":
+        candidate.code_version = "f" * 40
+    else:
+        candidate.scientific_complete_hash_lock_digest = "f" * 64
+
+    assert scientific_workflow._candidate_matches_repository(
+        candidate,
+        tmp_path,
+    ) is False
+
+
+@pytest.mark.quick
+def test_closed_archive_recovery_rejects_same_time_different_content(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同一生成时间出现两个不同摘要时不得任意选择一个包."""
+
+    generated_at_utc = datetime(2026, 7, 12, tzinfo=timezone.utc)
+    candidates = [
+        write_recovery_candidate(
+            tmp_path,
+            "image_only_dataset_runtime",
+            suffix=suffix,
+            generated_at_utc=generated_at_utc,
+        )
+        for suffix in ("20260712t000000z_a", "20260712t000000z_b")
+    ]
+    candidate_by_path = {
+        candidate.package_path.resolve(): candidate for candidate in candidates
+    }
+    monkeypatch.setattr(
+        scientific_workflow,
+        "inspect_closure_package",
+        lambda package_path, **_kwargs: candidate_by_path[package_path.resolve()],
+    )
+    monkeypatch.setattr(
+        scientific_workflow,
+        "_candidate_matches_repository",
+        lambda _candidate, _root: True,
+    )
+
+    with pytest.raises(RuntimeError, match="同时间不同内容"):
+        scientific_workflow._recover_closed_archives(
+            root_path=tmp_path,
+            paper_run_name="probe_paper",
+            target_fpr=0.1,
+            expected_roles={"image_only_dataset_runtime"},
+            archive_destination_dirs={
+                "image_only_dataset_runtime": candidates[0].package_path.parent,
+            },
+        )
+
+
+@pytest.mark.quick
+def test_closed_archive_extraction_rejects_path_escape(tmp_path: Path) -> None:
+    """ZIP 成员即使包含父目录跳转也不得写出 outputs 边界."""
+
+    package_path = tmp_path / "outputs" / "malicious.zip"
+    package_path.parent.mkdir(parents=True)
+    with ZipFile(package_path, "w") as archive:
+        archive.writestr("outputs/safe.json", "{}")
+        archive.writestr("outputs/../escaped.json", "{}")
+
+    with pytest.raises(ValueError):
+        scientific_workflow._extract_validated_archive(
+            package_path,
+            tmp_path,
+        )
+    assert not (tmp_path / "escaped.json").exists()
+    assert not (tmp_path / "outputs" / "safe.json").exists()
 
 
 @pytest.mark.quick

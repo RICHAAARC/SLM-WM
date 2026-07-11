@@ -223,7 +223,15 @@ def test_missing_complete_hash_lock_fails_before_install_and_writes_report(
 ) -> None:
     """精确直接输入不能替代完整锁, 缺锁时必须持久化失败并停止安装."""
 
-    profile = get_dependency_profile("workflow_orchestrator")
+    profile = replace(
+        get_dependency_profile("workflow_orchestrator"),
+        complete_hash_lock_present=False,
+        complete_hash_lock_digest=None,
+        complete_hash_lock_dependency_count=0,
+        locked_requirements=(),
+        formal_ready=False,
+        readiness_blockers=("complete_hash_lock_missing",),
+    )
     api_paths: list[Path] = []
 
     def read_profile(profile_id: str, path: Path) -> DependencyProfile:

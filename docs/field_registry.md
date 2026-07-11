@@ -2061,3 +2061,41 @@ Notebook 与 repository module 的跨边界数据
 | workflow_summary | runtime | none | true | false | false | GPU 服务器内层隔离工作流返回的原始受治理摘要。 |
 | archive_record | provenance | none | true | false | false | GPU 服务器共享或官方参考路由生成的结果包记录; 主方法会话为 null。 |
 | orchestrator_dependency_environment | provenance | none | true | false | false | GPU 服务器 CPU 父解释器绑定的 workflow_orchestrator profile、完整锁和环境 inspection 证据。 |
+| route_name | protocol | none | false | false | false | 外部 GPU workflow 持久化协议中的唯一路由名称; 三条 method-faithful 路由包含单 baseline 身份。 |
+| configuration_identity_digest | provenance | none | false | false | false | 对论文运行配置、科学 profile 锁、影响结果的环境配置和正式执行锁计算的稳定摘要。 |
+| configuration_environment_keys_intermediate | runtime | _intermediate | false | false | false | 进入配置身份摘要且不包含值的环境变量名称集合, 仅用于恢复诊断。 |
+| checkpoint_state_intermediate | runtime | _intermediate | false | false | false | 定时 workflow 快照的运行态、中断态或完成态标记; 不表示论文证据资格。 |
+| workflow_completed_intermediate | governance | _intermediate | false | false | false | 当前定时快照是否在 runner 完成后写出; 正式归档与闭合门禁仍需独立执行。 |
+| checkpoint_file_records_intermediate | provenance | _intermediate | false | false | false | 定时快照保存的仓库相对路径、字节数、SHA-256 和扁平 payload 名称记录。 |
+| unstable_files_intermediate | runtime | _intermediate | false | false | false | 定时复制期间仍在变化而未进入本 generation 的文件路径集合。 |
+| checkpoint_digest_intermediate | provenance | _intermediate | false | false | false | 排除自指字段后对定时 checkpoint manifest 计算的稳定摘要。 |
+| checkpoint_generation_intermediate | runtime | _intermediate | false | false | false | 原子 current 指针选中的不可变定时快照 generation 身份。 |
+| payload_name_intermediate | runtime | _intermediate | false | false | false | checkpoint 内用于避免平台长路径问题的扁平 payload 文件名; 原路径仍由 entry record 绑定。 |
+| checkpoint_persistence_configured | governance | none | false | false | false | 当前科学工作负载是否显式配置了服务器磁盘或挂载盘 checkpoint 根目录。 |
+| checkpoint_persisted | governance | none | false | false | false | 摘要绑定的 checkpoint manifest 是否已完成原子发布。 |
+| checkpoint_manifest_path | provenance | none | false | false | false | 已发布 checkpoint manifest 的持久化文件系统路径。 |
+| checkpoint_manifest_digest | provenance | none | false | false | false | checkpoint manifest 排除自指字段后的稳定摘要。 |
+| checkpoint_content_digest | provenance | none | false | false | false | checkpoint 全部 entry records 的稳定组合摘要。 |
+| checkpoint_kind | protocol | none | false | false | false | checkpoint 成员职责, 区分进度记录、特征批次、完成科学单元和完成 workflow。 |
+| checkpoint_id | protocol | none | false | false | false | 同一 artifact role 和 checkpoint kind 下的稳定快照身份。 |
+| checkpoint_decision | governance | none | false | false | false | checkpoint 文件是否已完整发布的门禁结论; 不表示论文结论。 |
+| evidence_eligibility | governance | none | true | false | false | 明确标识持久状态仅可用于续跑或诊断, 或已满足正式证据入口资格。 |
+| entry_records | provenance | none | false | false | false | checkpoint manifest 中逐文件路径、大小、摘要和内部 payload 名称记录。 |
+| restored_manifest_count | metric | none | false | false | false | 本次恢复通过执行锁、角色和摘要验证的 checkpoint manifest 数量。 |
+| restored_file_count | metric | none | false | false | false | 本次恢复完成原子写回的普通文件数量。 |
+| restored_entry_digest | provenance | none | false | false | false | 本次恢复全部仓库相对文件路径的稳定摘要。 |
+| resume_checkpoint_dir | environment | none | false | false | false | 外层运行环境显式注入的 checkpoint 根目录; 未配置时通用服务器路径保持无操作。 |
+| expected_feature_record_count | metric | none | false | false | false | 正式 Inception 特征续跑预期覆盖的 source 与 comparison 图像记录总数。 |
+| completed_feature_record_count | metric | none | false | false | false | 已通过图像身份、提取器身份、维度和有限数值校验的特征记录数量。 |
+| remaining_feature_record_count | metric | none | false | false | false | 尚未形成有效特征 shard 的图像记录数量。 |
+| item_count | metric | none | false | false | false | 特征 checkpoint context 绑定的图像身份记录总数。 |
+| item_identity_digest | provenance | none | false | false | false | 按确定顺序组合图像角色、路径和实际 SHA-256 后得到的稳定身份摘要。 |
+| closed_archive_recovery_ready | governance | none | true | false | false | 当前请求的全部 artifact role 是否均从同一代码锁和科学依赖身份下的闭合包恢复。 |
+| closed_archive_recovery | governance | none | true | false | false | 闭合包恢复诊断摘要; 部分角色命中只用于诊断, 不允许跳过当前科学执行。 |
+| recovered_roles | artifact | none | true | false | false | 通过闭合包结构、代码锁、依赖身份和论文运行身份校验的 artifact role 集合。 |
+| local_archives | artifact | none | true | false | false | 全角色恢复成功后原子复制到当前仓库 outputs 的闭合包路径映射。 |
+| closed_archive_records | provenance | none | true | false | false | 已校验闭合包的角色、外部路径、本地路径、摘要和生成时间记录。 |
+| all_expected_roles_recovered | governance | none | true | false | false | 本次请求要求的角色集合是否被有效闭合包精确覆盖。 |
+| qualification_tool_lock_path | artifact | none | true | false | false | fresh Linux host 创建精确 orchestrator Python 前消费的固定 uv 单 wheel 哈希锁路径。 |
+| qualification_tool_lock_digest | provenance | none | true | false | false | host 资格化工具锁文件的实际 SHA-256; 该输入不属于六个运行 profile 完整锁。 |
+| qualification_report_path | artifact | none | true | false | false | host launcher 写入 `outputs/dependency_lock_qualification/` 的资格化命令与 child 身份报告路径。 |

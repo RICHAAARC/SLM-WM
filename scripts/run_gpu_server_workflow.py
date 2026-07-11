@@ -1,6 +1,6 @@
 """在无 Notebook 的 CUDA 服务器上调度隔离科学工作流.
 
-该脚本只运行 CPU 父编排逻辑.主方法、正式消融、三个 method-faithful
+该脚本只运行 CPU 父编排逻辑. 主方法、正式消融、三个 method-faithful
 baseline 和 T2SMark 都必须进入各自受治理的科学子解释器, 宿主解释器不得
 直接导入或执行科学 runner.
 """
@@ -199,7 +199,7 @@ def _published_workflow_environment(
 ) -> Iterator[None]:
     """临时发布正式执行锁、论文级别和唯一 baseline 身份.
 
-    该上下文属于通用父子进程写法.隔离执行 API 会在启动前后实时复验锁,
+    该上下文属于通用父子进程写法. 隔离执行 API 会在启动前后实时复验锁,
     外部 baseline 包装则通过同一环境继承机制解析唯一 baseline.
     """
 
@@ -272,15 +272,23 @@ def _run_shared_route(
     root_path: Path,
     workflow_name: str,
     paper_run_name: str,
+    persistent_output_dir: Optional[str | Path] = None,
 ) -> Dict[str, Any]:
-    """运行外部科学 workflow 并生成可交付结果包."""
+    """通过共享持久化边界运行外部 workflow 并生成可交付结果包."""
 
     delivery_dir = (
-        root_path
-        / "outputs"
-        / "gpu_server_delivery"
-        / paper_run_name
-        / workflow_name
+        Path(persistent_output_dir).expanduser().resolve()
+        if persistent_output_dir is not None
+        else (
+            root_path
+            / "outputs"
+            / "gpu_server_delivery"
+            / paper_run_name
+            / workflow_name
+        )
+    )
+    from paper_experiments.runners.persistent_workflow_session import (
+        run_persistent_workflow,
     )
 
     if route.official_reference_runner_name is not None:
@@ -291,37 +299,35 @@ def _run_shared_route(
                 run_default_tree_ring_official_reference_plan,
             )
 
-            summary = run_default_tree_ring_official_reference_plan(root=root_path)
-            archive_record = package_tree_ring_official_reference_outputs(
-                root=root_path,
-                drive_output_dir=str(delivery_dir),
-            )
+            run_function = run_default_tree_ring_official_reference_plan
+            package_function = package_tree_ring_official_reference_outputs
         elif runner_name == "gaussian_shading":
             from paper_experiments.runners.gaussian_shading_official_reference import (
                 package_gaussian_shading_official_reference_outputs,
                 run_default_gaussian_shading_official_reference_plan,
             )
 
-            summary = run_default_gaussian_shading_official_reference_plan(
-                root=root_path
-            )
-            archive_record = package_gaussian_shading_official_reference_outputs(
-                root=root_path,
-                drive_output_dir=str(delivery_dir),
-            )
+            run_function = run_default_gaussian_shading_official_reference_plan
+            package_function = package_gaussian_shading_official_reference_outputs
         else:
             from paper_experiments.runners.shallow_diffuse_official_reference import (
                 package_shallow_diffuse_official_reference_outputs,
                 run_default_shallow_diffuse_official_reference_plan,
             )
 
-            summary = run_default_shallow_diffuse_official_reference_plan(
-                root=root_path
-            )
-            archive_record = package_shallow_diffuse_official_reference_outputs(
-                root=root_path,
-                drive_output_dir=str(delivery_dir),
-            )
+            run_function = run_default_shallow_diffuse_official_reference_plan
+            package_function = package_shallow_diffuse_official_reference_outputs
+        summary = run_persistent_workflow(
+            root=root_path,
+            workflow_name=workflow_name,
+            baseline_id=route.baseline_id,
+            persistent_output_dir=delivery_dir,
+            runner=lambda: run_function(root=root_path),
+        )
+        archive_record = package_function(
+            root=root_path,
+            drive_output_dir=str(delivery_dir),
+        )
         return {
             "workflow_summary": dict(summary),
             "archive_record": archive_record.to_dict(),
@@ -333,9 +339,15 @@ def _run_shared_route(
     isolated_workflow_name = route.shared_isolated_workflow_name
     if isolated_workflow_name is None:
         raise RuntimeError("共享隔离工作流路由缺少内部 workflow 名称")
-    summary = _run_shared_isolated_workflow(
+    summary = run_persistent_workflow(
         root=root_path,
         workflow_name=isolated_workflow_name,
+        baseline_id=route.baseline_id,
+        persistent_output_dir=delivery_dir,
+        runner=lambda: _run_shared_isolated_workflow(
+            root=root_path,
+            workflow_name=isolated_workflow_name,
+        ),
     )
     if isolated_workflow_name == SHARED_BASELINE_WORKFLOW_NAME:
         from paper_experiments.runners.external_baseline_method_faithful import (
@@ -428,6 +440,7 @@ def run_workflow(
     paper_run_name: str,
     repository_commit: str,
     root: str | Path = ".",
+    persistent_output_dir: Optional[str | Path] = None,
 ) -> Dict[str, Any]:
     """在 CPU 父入口中发布执行身份并调度一个隔离 GPU 工作流."""
 
@@ -457,6 +470,7 @@ def run_workflow(
                 root_path=root_path,
                 workflow_name=workflow_name,
                 paper_run_name=paper_run_name,
+                persistent_output_dir=persistent_output_dir,
             )
         )
     return _build_workflow_result(
@@ -485,6 +499,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="正式执行使用的精确40位小写 Git SHA.",
     )
     parser.add_argument("--root", default=".")
+    parser.add_argument(
+        "--persistent-output-dir",
+        default=None,
+        help="可选的挂载盘或服务器持久磁盘目录; 同时保存 checkpoint 与正式归档.",
+    )
     return parser
 
 
@@ -499,6 +518,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 args.paper_run_name,
                 args.repository_commit,
                 args.root,
+                args.persistent_output_dir,
             ),
             ensure_ascii=False,
             sort_keys=True,

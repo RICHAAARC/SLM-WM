@@ -30,6 +30,9 @@ from experiments.runtime.model_sources import (
     require_registered_model_reference,
 )
 from experiments.runtime.repository_environment import file_digest, resolve_code_version
+from experiments.runtime.resume_checkpoint import (
+    persist_completed_unit_from_manifest,
+)
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from main.methods.carrier import (
@@ -1099,4 +1102,20 @@ def write_semantic_watermark_runtime_outputs(
         },
     ).to_dict()
     manifest_path.write_text(_stable_json(manifest), encoding="utf-8")
+    output_parts = Path(config.output_dir).parts
+    checkpoint_roles = {
+        "image_only_dataset_runtime": "image_only_dataset_runtime",
+        "formal_mechanism_ablation": "runtime_rerun_ablation",
+    }
+    if (
+        len(output_parts) >= 3
+        and output_parts[0] == "outputs"
+        and output_parts[1] in checkpoint_roles
+    ):
+        persist_completed_unit_from_manifest(
+            manifest_path,
+            repository_root=root_path,
+            artifact_role=checkpoint_roles[output_parts[1]],
+            paper_run_name=output_parts[2],
+        )
     return resolved_result

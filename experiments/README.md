@@ -5,7 +5,7 @@
 ## 当前职责
 
 - `protocol/`: 论文级 Prompt 分层、fixed-FPR、共同攻击、正式证据和运行规模配置。
-- `runtime/`: SD3.5 模型加载、真实图像攻击、语义特征、进度、仓库环境与正式依赖环境实现. `dependency_profiles.py` 解析一个 CPU 父编排 profile 与五个 CUDA 科学 profile, 并核验完整锁中的全部直接和传递包; `dependency_preparation.py` 执行当前解释器的 hash-locked 安装与适用的兼容性检查; `isolated_dependency_environment.py` 使用固定且经 distribution `RECORD` 验证的 `uv` 为五个科学 profile 创建独立 CPython 子环境; `isolated_scientific_execution.py` 在执行前后复验子解释器、依赖报告与正式执行锁; `semantic_watermark_scientific_session.py` 在单个主方法科学子解释器中调度运行与绑定打包两种互斥模式; `scientific_execution_binding.py` 保存可脱离临时 venv 审计的产物内证据快照.
+- `runtime/`: SD3.5 模型加载、真实图像攻击、语义特征、续跑、仓库环境与正式依赖环境实现. `dependency_profiles.py` 解析一个 CPU 父编排 profile 与五个 CUDA 科学 profile, 并核验完整锁中的全部直接和传递包; `dependency_preparation.py` 执行当前解释器的 hash-locked 安装与适用的兼容性检查; `isolated_dependency_environment.py` 使用固定且经 distribution `RECORD` 验证的 `uv` 为五个科学 profile 创建独立 CPython 子环境; `isolated_scientific_execution.py` 在执行前后复验子解释器、依赖报告与正式执行锁; `semantic_watermark_scientific_session.py` 在单个主方法科学子解释器中调度运行与绑定打包两种互斥模式; `scientific_execution_binding.py` 保存可脱离临时 venv 审计的产物内证据快照; `resume_checkpoint.py` 提供不依赖 Colab 或 Drive API 的通用原子 checkpoint 发布与恢复协议.
 - `runners/semantic_watermark_runtime.py`: 完整执行分支风险、16维语义与视觉条件 Jacobian、20候选方向的4维 Null Space、LF、Gaussian 幅值尾部截断、真实多层 Q/K 几何更新和仅图像盲检。
 - `runners/image_only_dataset_workload.py`: 从唯一方法 YAML 和论文运行配置构造完整主方法工作负载, 执行主运行与正式 Inception FID / KID, 并根据科学 session 的打包边界返回续跑或完成状态。`scripts/run_image_only_dataset_runtime.py` 只转发到该模块。
 - `runners/image_only_dataset_runtime.py`: 运行完整 Prompt 集, 在 calibration split 独立冻结检测协议, 只在 test split 形成论文统计; 同时从每条仅图像检测记录的真实连续分数生成分数分布、ROC 与 DET 数据。
@@ -23,6 +23,10 @@
 - `outputs/image_only_dataset_runtime/<paper_run_name>/`
 - `outputs/formal_mechanism_ablation/<paper_run_name>/`
 - `outputs/dataset_level_quality/<paper_run_name>/`
+
+Colab 主方法在 `/content` 本地磁盘执行 clean detached 工作树、科学子解释器和全部 `outputs/` 写入。外层若把 `SLM_WM_RESUME_CHECKPOINT_DIR` 指向 Drive 或服务器持久磁盘, 本层只同步已完成科学单元、正式消融运行、Inception 特征 batch 和进度记录; 未配置该变量时所有 checkpoint 调用保持无操作。每个快照绑定正式执行锁、仓库相对路径、文件大小与 SHA-256, 先验证临时副本, 后原子发布 manifest; 恢复时先完整验证全部 manifest 和 payload, 再写回本地 `outputs/`。
+
+checkpoint 是续跑中间状态, 固定使用 `evidence_eligibility=intermediate_state_only` 与 `supports_paper_claim=false`。progress 文件不能替代 `manifest.local.json`, 也不能进入完成单元或论文统计。正式 Inception feature shard 还绑定精确图像角色、实际图像 SHA-256、提取器身份、2048维有限数值与正式执行锁; 任一身份漂移、冲突 shard 或摘要损坏都会阻断复用。论文证据资格仍只由完整运行 manifest、正式归档与闭合门禁决定。
 
 summary 必须同时记录带时区的 `generated_at`、`paper_run_name` 与 `target_fpr`。只有当前论文层级身份一致且正式 ready 门禁通过时才允许生成 ZIP; ZIP 只包含所属 run-scoped `outputs/` family, 不收集仓库源码或其他运行层级文件。
 

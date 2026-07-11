@@ -16,6 +16,9 @@ NOTEBOOK_PATH = (
 )
 README_PATH = ROOT / "paper_workflow/notebooks/README.md"
 SCRIPT_PATH = ROOT / "scripts/write_dependency_lock_review_bundle.py"
+ACCEPTANCE_SCRIPT_PATH = (
+    ROOT / "scripts/write_reviewed_dependency_hash_lock.py"
+)
 
 
 def _notebook() -> dict[str, object]:
@@ -83,7 +86,10 @@ def test_review_notebook_publishes_exact_code_lock_before_single_script() -> Non
         "scripts/write_dependency_lock_review_bundle.py"
     )
     assert "五个科学 profile" in source
-    assert "只有 `workflow_orchestrator` 候选允许在 Notebook 当前解释器中生成" in source
+    assert "单 wheel SHA-256 锁安装固定 `uv`" in source
+    assert "不依赖 Colab 系统 Python patch" in source
+    assert "CUDA profile 候选解析不导入或执行 CUDA" in source
+    assert "scripts/write_reviewed_dependency_hash_lock.py" in source
 
 
 @pytest.mark.constraint
@@ -108,6 +114,7 @@ def test_review_notebook_contains_no_dependency_or_copy_implementation() -> None
     )
     for token in forbidden_tokens:
         assert token not in code
+    assert "write_reviewed_dependency_hash_lock.py" not in code
     assert re.search(r"^\s*(def|class)\s+", code, flags=re.MULTILINE) is None
     package_names = (
         "torch",
@@ -143,6 +150,56 @@ def test_review_bundle_cli_exposes_only_profile_and_optional_drive_arguments() -
 
 
 @pytest.mark.constraint
+def test_review_bundle_script_is_real_host_launcher_with_exact_child_gate() -> None:
+    """共享脚本必须从 hash-locked uv 创建精确 orchestrator child."""
+
+    source = SCRIPT_PATH.read_text(encoding="utf-8")
+    required_tokens = (
+        "dependency_qualification_uv_linux_x86_64_lock.txt",
+        '"--require-hashes"',
+        '"--only-binary=:all:"',
+        '"--no-deps"',
+        '"qualification_orchestrator_venv"',
+        "orchestrator.python_version",
+        "QUALIFICATION_PYTHON_DIGEST_ENVIRONMENT_KEY",
+        '"PATH":',
+        "_require_qualification_child_interpreter",
+        "_validate_written_review_bundle",
+    )
+    for token in required_tokens:
+        assert token in source
+
+
+@pytest.mark.constraint
+def test_reviewed_lock_writer_requires_explicit_profile_approval() -> None:
+    """回传接收器必须显式重复 profile, 且不得暴露覆盖或提交选项."""
+
+    tree = ast.parse(ACCEPTANCE_SCRIPT_PATH.read_text(encoding="utf-8"))
+    argument_names = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr != "add_argument" or not node.args:
+            continue
+        first_argument = node.args[0]
+        if isinstance(first_argument, ast.Constant) and isinstance(
+            first_argument.value,
+            str,
+        ):
+            argument_names.append(first_argument.value)
+    assert argument_names == [
+        "--profile",
+        "--review-bundle-dir",
+        "--approve-profile",
+        "--root",
+    ]
+    source = ACCEPTANCE_SCRIPT_PATH.read_text(encoding="utf-8")
+    assert 'target_path.open("xb")' in source
+    assert "complete_hash_lock_already_present" in source
+    assert "git commit" not in source.lower()
+
+
+@pytest.mark.constraint
 def test_readme_defines_orchestrator_first_isolated_python_order() -> None:
     """文档必须固定 orchestrator 优先和五个科学子环境顺序."""
 
@@ -162,3 +219,4 @@ def test_readme_defines_orchestrator_first_isolated_python_order() -> None:
     assert "t2smark_sd35_gpu" in readme
     assert "仅在显式提供 `--drive-output-dir` 时才复制到 Drive" in readme
     assert "supports_paper_claim=false" in readme
+    assert "write_reviewed_dependency_hash_lock.py" in readme

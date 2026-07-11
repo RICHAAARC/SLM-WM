@@ -275,6 +275,50 @@ def test_matching_profile_materializes_sorted_candidate_from_pip_report(
 
 
 @pytest.mark.quick
+@pytest.mark.parametrize(
+    "profile_name",
+    (
+        "sd35_method_runtime_gpu",
+        "t2smark_sd35_gpu",
+        "tree_ring_official_py39_cu117",
+        "gaussian_shading_official_py38_cu117",
+        "shallow_diffuse_official_py39_cu117",
+    ),
+)
+def test_scientific_candidate_uses_registered_python_cuda_and_pytorch_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    profile_name: str,
+) -> None:
+    """五个科学候选必须向各自登记 index 解析且不执行 CUDA."""
+
+    profile = get_dependency_profile(profile_name)
+    _bind_profile(monkeypatch, profile)
+    commands: list[list[str]] = []
+    provenance, _ = materialization.materialize_dependency_lock_candidate(
+        profile.profile_name,
+        repository_root=tmp_path,
+        command_runner=_report_writing_runner(
+            _pip_report(profile),
+            commands,
+        ),
+    )
+
+    assert len(commands) == 1
+    command = commands[0]
+    index_position = command.index("--extra-index-url")
+    assert command[index_position + 1] == profile.pytorch_index_url
+    assert "--dry-run" in command
+    assert "--ignore-installed" in command
+    assert "--only-binary=:all:" in command
+    assert provenance["cuda_version"] == profile.cuda_version
+    assert provenance["pytorch_index_url"] == profile.pytorch_index_url
+    assert provenance["torch_version"] == profile.torch_version
+    assert provenance["torchvision_version"] == profile.torchvision_version
+    assert provenance["decision"] == "candidate_ready_for_review"
+
+
+@pytest.mark.quick
 def test_unpublished_execution_lock_blocks_resolver_and_keeps_diagnostic(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

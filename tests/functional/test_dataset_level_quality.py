@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import zipfile
 
 from PIL import Image
@@ -37,6 +38,7 @@ def configure_probe_paper_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+    monkeypatch.delenv("SLM_WM_RESUME_CHECKPOINT_DIR", raising=False)
     monkeypatch.setattr(
         repository_environment,
         "require_published_formal_execution_lock",
@@ -122,6 +124,219 @@ def write_registry(root_path: Path, rows: list[dict[str, object]]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
     return path
+
+
+def write_inception_checkpoint_fixture(
+    root_path: Path,
+) -> tuple[SimpleNamespace, Path, Path, list[dict[str, object]]]:
+    """写出无需加载 GPU 模型即可验证恢复路径的完整特征 shard."""
+
+    source_path = root_path / "outputs" / "images" / "checkpoint_source.png"
+    comparison_path = (
+        root_path / "outputs" / "images" / "checkpoint_comparison.png"
+    )
+    write_image(source_path, (40, 50, 60))
+    write_image(comparison_path, (45, 55, 65))
+    record = SimpleNamespace(
+        dataset_quality_record_id="quality_record_0001",
+        source_image_path=source_path.relative_to(root_path).as_posix(),
+        source_image_digest=file_digest(source_path),
+        comparison_image_path=comparison_path.relative_to(root_path).as_posix(),
+        comparison_image_digest=file_digest(comparison_path),
+    )
+    output_dir = (
+        root_path / "outputs" / "dataset_level_quality" / PAPER_RUN_NAME
+    )
+    checkpoint_dir = output_dir / "inception_feature_checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "dataset_quality_formal_feature_records.jsonl"
+    identities = [
+        {
+            "dataset_quality_record_id": record.dataset_quality_record_id,
+            "dataset_quality_image_role": image_role,
+            "image_path": image_path.relative_to(root_path).as_posix(),
+            "image_digest": image_digest,
+        }
+        for image_role, image_path, image_digest in (
+            ("source", source_path, record.source_image_digest),
+            ("comparison", comparison_path, record.comparison_image_digest),
+        )
+    ]
+    context_path = checkpoint_dir / "feature_checkpoint_context.json"
+    context_path.write_text(
+        json.dumps(
+            {
+                "report_schema": "inception_feature_checkpoint_context",
+                "schema_version": 1,
+                "feature_backend": FORMAL_FEATURE_BACKEND,
+                "feature_extractor_id": (
+                    dataset_quality_writer.FORMAL_FEATURE_EXTRACTOR_ID
+                ),
+                "item_count": len(identities),
+                "item_identity_digest": (
+                    dataset_quality_writer.build_stable_digest(identities)
+                ),
+                "formal_execution_lock": FORMAL_EXECUTION_LOCK,
+                "evidence_eligibility": "intermediate_state_only",
+                "supports_paper_claim": False,
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rows = [
+        {
+            **identity,
+            "feature_backend": FORMAL_FEATURE_BACKEND,
+            "feature_extractor_id": (
+                dataset_quality_writer.FORMAL_FEATURE_EXTRACTOR_ID
+            ),
+            "feature_dimension": 2048,
+            "feature_vector": [float(index)] * 2048,
+            "supports_paper_claim": False,
+        }
+        for index, identity in enumerate(identities)
+    ]
+    (checkpoint_dir / "feature_batch_complete.jsonl").write_text(
+        "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    return record, output_path, context_path, rows
+
+
+@pytest.mark.quick
+def test_inception_checkpoint_rejects_declared_image_digest_drift(
+    tmp_path: Path,
+) -> None:
+    """图像文件字节与记录摘要不一致时不得复用或生成正式特征."""
+
+    record, output_path, _, _ = write_inception_checkpoint_fixture(tmp_path)
+    record.source_image_digest = "0" * 64
+
+    with pytest.raises(RuntimeError, match="图像摘要与实际文件不一致"):
+        dataset_quality_writer.extract_formal_inception_feature_rows(
+            records=(record,),
+            root_path=tmp_path,
+            image_search_roots=(),
+            output_path=output_path,
+        )
+
+
+@pytest.mark.quick
+def test_inception_checkpoint_rejects_context_identity_drift(
+    tmp_path: Path,
+) -> None:
+    """Prompt 图像集合或执行锁身份变化后不得消费旧特征 shard."""
+
+    record, output_path, context_path, _ = write_inception_checkpoint_fixture(
+        tmp_path
+    )
+    context = json.loads(context_path.read_text(encoding="utf-8"))
+    context["item_identity_digest"] = "f" * 64
+    context_path.write_text(
+        json.dumps(context, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="检查点身份与当前运行不一致"):
+        dataset_quality_writer.extract_formal_inception_feature_rows(
+            records=(record,),
+            root_path=tmp_path,
+            image_search_roots=(),
+            output_path=output_path,
+        )
+
+
+@pytest.mark.quick
+def test_inception_checkpoint_rejects_conflicting_shards(tmp_path: Path) -> None:
+    """两个 shard 对同一图像声明不同特征时必须停止而非覆盖."""
+
+    record, output_path, context_path, rows = (
+        write_inception_checkpoint_fixture(tmp_path)
+    )
+    conflicting_row = dict(rows[0])
+    conflicting_row["feature_vector"] = [9.0] * 2048
+    (context_path.parent / "feature_batch_conflict.jsonl").write_text(
+        json.dumps(conflicting_row, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="包含冲突记录"):
+        dataset_quality_writer.extract_formal_inception_feature_rows(
+            records=(record,),
+            root_path=tmp_path,
+            image_search_roots=(),
+            output_path=output_path,
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("invalid_value", ["1.0", True, float("inf")])
+def test_inception_checkpoint_rejects_nonfinite_or_nonnumeric_features(
+    tmp_path: Path,
+    invalid_value: object,
+) -> None:
+    """恢复的2048维特征必须全部是有限数值且不得接受 bool 或字符串."""
+
+    record, output_path, context_path, rows = (
+        write_inception_checkpoint_fixture(tmp_path)
+    )
+    invalid_row = dict(rows[0])
+    invalid_vector = list(invalid_row["feature_vector"])
+    invalid_vector[0] = invalid_value
+    invalid_row["feature_vector"] = invalid_vector
+    shard_path = context_path.parent / "feature_batch_complete.jsonl"
+    shard_path.write_text(
+        json.dumps(invalid_row, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="内容未通过身份校验"):
+        dataset_quality_writer.extract_formal_inception_feature_rows(
+            records=(record,),
+            root_path=tmp_path,
+            image_search_roots=(),
+            output_path=output_path,
+        )
+
+
+@pytest.mark.quick
+def test_inception_checkpoint_completion_writes_canonical_rows_and_clears_progress(
+    tmp_path: Path,
+) -> None:
+    """完整 shard 恢复只生成规范特征文件, 并清除中间 progress 入口."""
+
+    record, output_path, _, expected_rows = write_inception_checkpoint_fixture(
+        tmp_path
+    )
+    progress_path = output_path.parent / "inception_feature_progress.json"
+    progress_path.write_text(
+        json.dumps(
+            {
+                "protocol_decision": "resume_required",
+                "evidence_eligibility": "intermediate_state_only",
+                "supports_paper_claim": False,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rows = dataset_quality_writer.extract_formal_inception_feature_rows(
+        records=(record,),
+        root_path=tmp_path,
+        image_search_roots=(),
+        output_path=output_path,
+    )
+
+    assert rows == expected_rows
+    assert output_path.is_file()
+    assert len(output_path.read_text(encoding="utf-8").splitlines()) == 2
+    assert not progress_path.exists()
+    assert not list(output_path.parent.rglob("*.partial"))
 
 
 @pytest.mark.quick

@@ -34,4 +34,7 @@ def run_semantic_watermark_image_only_session(
         root,
         run_formal_ablation=run_formal_ablation,
         archive_destination_dirs=destinations,
+        resume_checkpoint_dir=os.environ.get(
+            "SLM_WM_RESUME_CHECKPOINT_DIR"
+        ),
     )

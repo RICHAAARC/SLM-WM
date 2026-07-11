@@ -7,6 +7,7 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -37,6 +38,12 @@ from experiments.runtime.package_input_manifest import (
     collect_exact_package_entries,
     validate_exact_package_archive,
     write_exact_package_input_manifest,
+)
+from experiments.runtime.resume_checkpoint import (
+    clear_progress_checkpoints,
+    persist_checkpoint_files,
+    persist_progress_checkpoint,
+    restore_role_checkpoints,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
@@ -138,10 +145,12 @@ def _numeric_vector(value: Any) -> list[float]:
         return []
     vector: list[float] = []
     for item in value:
-        try:
-            vector.append(float(item))
-        except (TypeError, ValueError):
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
             return []
+        normalized_item = float(item)
+        if not math.isfinite(normalized_item):
+            return []
+        vector.append(normalized_item)
     return vector
 
 
@@ -505,22 +514,8 @@ def extract_formal_inception_feature_rows(
 
     if batch_size <= 0:
         raise ValueError("Inception 特征 batch_size 必须为正整数")
-    import torch
-    from PIL import Image
-    from torch_fidelity.feature_extractor_inceptionv3 import FeatureExtractorInceptionV3
-
-    resolved_device = device_name or os.environ.get(
-        "SLM_WM_INCEPTION_DEVICE",
-        "cuda" if torch.cuda.is_available() else "cpu",
-    )
-    if resolved_device.startswith("cuda") and not torch.cuda.is_available():
-        raise RuntimeError("正式 Inception 特征提取要求的 CUDA 设备不可用")
-    model = FeatureExtractorInceptionV3(
-        "inception-v3-compat",
-        ["2048"],
-        verbose=True,
-    ).to(resolved_device).eval()
     items: list[tuple[Any, str, Path, str]] = []
+    image_digest_by_path: dict[Path, str] = {}
     for record in records:
         for image_role, path_text, image_digest in (
             ("source", record.source_image_path, record.source_image_digest),
@@ -529,40 +524,250 @@ def extract_formal_inception_feature_rows(
             resolved_path = resolve_existing_image_path(path_text, root_path, image_search_roots)
             if not resolved_path.is_file():
                 raise FileNotFoundError(f"正式 Inception 特征缺少图像文件: {path_text}")
-            items.append((record, image_role, resolved_path, image_digest))
-    rows: list[dict[str, Any]] = []
-    with torch.inference_mode():
-        for start in range(0, len(items), batch_size):
-            batch_items = items[start : start + batch_size]
-            tensors = []
-            for _, _, image_path, _ in batch_items:
-                with Image.open(image_path) as image:
-                    rgb = image.convert("RGB")
-                    width, height = rgb.size
-                    tensor = torch.frombuffer(bytearray(rgb.tobytes()), dtype=torch.uint8)
-                    tensors.append(tensor.reshape(height, width, 3).permute(2, 0, 1))
-            batch_shapes = {tuple(tensor.shape) for tensor in tensors}
-            if len(batch_shapes) != 1:
-                raise ValueError("同一 Inception batch 中的图像尺寸必须一致")
-            features = model(torch.stack(tensors).to(resolved_device))[0].float().cpu()
-            if features.ndim != 2:
-                features = features.reshape(features.shape[0], -1)
-            for (record, image_role, image_path, image_digest), feature in zip(batch_items, features):
-                rows.append(
-                    {
+            resolved_path = resolved_path.resolve()
+            actual_image_digest = image_digest_by_path.get(resolved_path)
+            if actual_image_digest is None:
+                actual_image_digest = path_digest(resolved_path)
+                image_digest_by_path[resolved_path] = actual_image_digest
+            if image_digest and image_digest != actual_image_digest:
+                raise RuntimeError(
+                    f"正式 Inception 特征图像摘要与实际文件不一致: {path_text}"
+                )
+            items.append(
+                (record, image_role, resolved_path, actual_image_digest)
+            )
+
+    checkpoint_dir = output_path.parent / "inception_feature_checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    progress_path = output_path.parent / "inception_feature_progress.json"
+    item_identity = [
+        {
+            "dataset_quality_record_id": record.dataset_quality_record_id,
+            "dataset_quality_image_role": image_role,
+            "image_path": relative_or_absolute(image_path, root_path),
+            "image_digest": image_digest,
+        }
+        for record, image_role, image_path, image_digest in items
+    ]
+    context_path = checkpoint_dir / "feature_checkpoint_context.json"
+    context = {
+        "report_schema": "inception_feature_checkpoint_context",
+        "schema_version": 1,
+        "feature_backend": FORMAL_FEATURE_BACKEND,
+        "feature_extractor_id": FORMAL_FEATURE_EXTRACTOR_ID,
+        "item_count": len(item_identity),
+        "item_identity_digest": build_stable_digest(item_identity),
+        "formal_execution_lock": (
+            repository_environment.require_published_formal_execution_lock(
+                root_path
+            )
+        ),
+        "evidence_eligibility": "intermediate_state_only",
+        "supports_paper_claim": False,
+    }
+    if context_path.is_file():
+        existing_context = json.loads(
+            context_path.read_text(encoding="utf-8-sig")
+        )
+        if existing_context != context:
+            raise RuntimeError("正式 Inception 特征检查点身份与当前运行不一致")
+    else:
+        temporary_context_path = context_path.with_name(
+            context_path.name + ".partial"
+        )
+        temporary_context_path.write_text(
+            stable_json_text(context),
+            encoding="utf-8",
+        )
+        temporary_context_path.replace(context_path)
+
+    expected_by_key = {
+        (
+            identity["dataset_quality_record_id"],
+            identity["dataset_quality_image_role"],
+        ): identity
+        for identity in item_identity
+    }
+    rows_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for shard_path in sorted(checkpoint_dir.glob("feature_batch_*.jsonl")):
+        for line in shard_path.read_text(encoding="utf-8-sig").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise TypeError("正式 Inception 特征检查点行必须是 JSON object")
+            key = (
+                str(row.get("dataset_quality_record_id", "")),
+                str(row.get("dataset_quality_image_role", "")),
+            )
+            expected = expected_by_key.get(key)
+            feature_vector = row.get("feature_vector")
+            normalized_feature_vector = _numeric_vector(feature_vector)
+            ready = bool(
+                expected
+                and row.get("feature_backend") == FORMAL_FEATURE_BACKEND
+                and row.get("feature_extractor_id")
+                == FORMAL_FEATURE_EXTRACTOR_ID
+                and row.get("feature_dimension") == 2048
+                and isinstance(feature_vector, list)
+                and len(normalized_feature_vector) == 2048
+                and row.get("image_path") == expected["image_path"]
+                and row.get("image_digest") == expected["image_digest"]
+                and row.get("supports_paper_claim") is False
+            )
+            if not ready:
+                raise RuntimeError("正式 Inception 特征检查点内容未通过身份校验")
+            existing = rows_by_key.get(key)
+            if existing is not None and existing != row:
+                raise RuntimeError("正式 Inception 特征检查点包含冲突记录")
+            rows_by_key[key] = row
+
+    remaining_items = [
+        item
+        for item in items
+        if (
+            item[0].dataset_quality_record_id,
+            item[1],
+        )
+        not in rows_by_key
+    ]
+    if remaining_items:
+        import torch
+        from PIL import Image
+        from torch_fidelity.feature_extractor_inceptionv3 import (
+            FeatureExtractorInceptionV3,
+        )
+
+        resolved_device = device_name or os.environ.get(
+            "SLM_WM_INCEPTION_DEVICE",
+            "cuda" if torch.cuda.is_available() else "cpu",
+        )
+        if resolved_device.startswith("cuda") and not torch.cuda.is_available():
+            raise RuntimeError("正式 Inception 特征提取要求的 CUDA 设备不可用")
+        model = FeatureExtractorInceptionV3(
+            "inception-v3-compat",
+            ["2048"],
+            verbose=True,
+        ).to(resolved_device).eval()
+
+    if remaining_items:
+        with torch.inference_mode():
+            for start in range(0, len(remaining_items), batch_size):
+                batch_items = remaining_items[start : start + batch_size]
+                tensors = []
+                for _, _, image_path, _ in batch_items:
+                    with Image.open(image_path) as image:
+                        rgb = image.convert("RGB")
+                        width, height = rgb.size
+                        tensor = torch.frombuffer(bytearray(rgb.tobytes()), dtype=torch.uint8)
+                        tensors.append(tensor.reshape(height, width, 3).permute(2, 0, 1))
+                batch_shapes = {tuple(tensor.shape) for tensor in tensors}
+                if len(batch_shapes) != 1:
+                    raise ValueError("同一 Inception batch 中的图像尺寸必须一致")
+                features = model(torch.stack(tensors).to(resolved_device))[0].float().cpu()
+                if features.ndim != 2:
+                    features = features.reshape(features.shape[0], -1)
+                batch_rows = []
+                for (record, image_role, image_path, image_digest), feature in zip(
+                    batch_items,
+                    features,
+                ):
+                    row = {
                         "dataset_quality_record_id": record.dataset_quality_record_id,
                         "dataset_quality_image_role": image_role,
                         "feature_backend": FORMAL_FEATURE_BACKEND,
                         "feature_extractor_id": FORMAL_FEATURE_EXTRACTOR_ID,
                         "feature_dimension": int(feature.numel()),
                         "image_path": relative_or_absolute(image_path, root_path),
-                        "image_digest": image_digest or path_digest(image_path),
+                        "image_digest": image_digest,
                         "feature_vector": [float(value) for value in feature.tolist()],
                         "supports_paper_claim": False,
                     }
+                    batch_rows.append(row)
+                    rows_by_key[
+                        (record.dataset_quality_record_id, image_role)
+                    ] = row
+                batch_identity_digest = build_stable_digest(
+                    [
+                        (
+                            row["dataset_quality_record_id"],
+                            row["dataset_quality_image_role"],
+                        )
+                        for row in batch_rows
+                    ]
                 )
+                shard_path = (
+                    checkpoint_dir
+                    / f"feature_batch_{batch_identity_digest[:16]}.jsonl"
+                )
+                temporary_shard_path = shard_path.with_name(
+                    shard_path.name + ".partial"
+                )
+                temporary_shard_path.write_text(
+                    "".join(json_line(row) for row in batch_rows),
+                    encoding="utf-8",
+                )
+                temporary_shard_path.replace(shard_path)
+                persist_checkpoint_files(
+                    repository_root=root_path,
+                    artifact_role="dataset_level_quality",
+                    paper_run_name=os.environ.get(
+                        "SLM_WM_PAPER_RUN_NAME",
+                        output_path.parent.name,
+                    ),
+                    checkpoint_kind="feature_batches",
+                    checkpoint_id=shard_path.stem,
+                    paths=(context_path, shard_path),
+                )
+                progress = {
+                    "report_schema": "inception_feature_progress",
+                    "schema_version": 1,
+                    "expected_feature_record_count": len(items),
+                    "completed_feature_record_count": len(rows_by_key),
+                    "remaining_feature_record_count": len(items) - len(rows_by_key),
+                    "protocol_decision": "resume_required",
+                    "evidence_eligibility": "intermediate_state_only",
+                    "supports_paper_claim": False,
+                }
+                temporary_progress_path = progress_path.with_name(
+                    progress_path.name + ".partial"
+                )
+                temporary_progress_path.write_text(
+                    stable_json_text(progress),
+                    encoding="utf-8",
+                )
+                temporary_progress_path.replace(progress_path)
+                persist_progress_checkpoint(
+                    progress_path,
+                    repository_root=root_path,
+                    artifact_role="dataset_level_quality",
+                    paper_run_name=os.environ.get(
+                        "SLM_WM_PAPER_RUN_NAME",
+                        output_path.parent.name,
+                    ),
+                )
+
+    rows = [
+        rows_by_key[
+            (record.dataset_quality_record_id, image_role)
+        ]
+        for record, image_role, _, _ in items
+    ]
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("".join(json_line(row) for row in rows), encoding="utf-8")
+    temporary_output_path = output_path.with_name(output_path.name + ".partial")
+    temporary_output_path.write_text(
+        "".join(json_line(row) for row in rows),
+        encoding="utf-8",
+    )
+    temporary_output_path.replace(output_path)
+    progress_path.unlink(missing_ok=True)
+    clear_progress_checkpoints(
+        artifact_role="dataset_level_quality",
+        paper_run_name=os.environ.get(
+            "SLM_WM_PAPER_RUN_NAME",
+            output_path.parent.name,
+        ),
+    )
     return rows
 
 
@@ -657,6 +862,14 @@ def write_dataset_level_quality_outputs(
     resolved_output_dir = ensure_output_dir_under_outputs(
         root_path,
         Path("outputs") / "dataset_level_quality" / resolved_paper_run_name,
+    )
+    restore_role_checkpoints(
+        repository_root=root_path,
+        artifact_role="dataset_level_quality",
+        paper_run_name=resolved_paper_run_name,
+        allowed_output_prefix=(
+            f"outputs/dataset_level_quality/{resolved_paper_run_name}"
+        ),
     )
     registry_path = real_attack_registry_path or (
         Path("outputs")
