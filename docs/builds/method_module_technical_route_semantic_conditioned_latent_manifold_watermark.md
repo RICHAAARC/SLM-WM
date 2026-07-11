@@ -55,7 +55,7 @@ $$
 | 安全投影 | `main/methods/carrier/keyed_tensor.py` | 固定模板、分支基底和相对强度 | 投影更新和能量保留率 | 对近零投影强制归一化后继续运行 |
 | 注意力几何 | `main/methods/geometry/differentiable_attention.py` | 真实 Transformer Q/K 与 latent | 目标梯度、分数增益和回溯记录 | 使用合成 attention map 支持正式主张 |
 | 图像盲检 | `main/methods/detection/image_only.py` | 待检图像、密钥和公开模型配置 | 内容分数、几何统计和 evidence 判定 | 读取 Prompt、源 latent、轨迹或样本级 Null Space |
-| 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | SD3/SD3.5 pipeline 与方法配置 | clean/watermarked 图像和科学算子记录 | 以 proxy 或 fallback 记录支持正式结果 |
+| 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | SD3.5 Medium pipeline 与方法配置 | clean/watermarked 图像和科学算子记录 | 绕过科学算子门禁写出正式结果 |
 | 数据集协议 | `experiments/runners/image_only_dataset_runtime.py` | Prompt split、攻击配置和目标 FPR | 冻结协议、test records 和质量 registry | 使用 test split 调阈值 |
 | 正式消融 | `experiments/ablations/runtime_rerun.py` | 改变后的机制配置与冻结检测协议 | 重新生成、攻击和检测的消融记录 | 修改历史分数模拟消融 |
 

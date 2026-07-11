@@ -2,7 +2,7 @@
 
 该脚本只读取已经闭合的 records 与 manifests, 不重新运行 GPU 推理, 也不手工
 拼接论文结论。它用于把 fixed-FPR 结果记录转换为可直接进入论文图表的
-bootstrap CI 表、per-attack superiority 表和失败案例 SVG。
+Hoeffding 置信区间表、per-attack superiority 表和失败案例 SVG。
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.attacks import default_attack_configs
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -35,6 +36,7 @@ DEFAULT_CONVENTIONAL_ATTACK_FORMAL_RECORDS_PATH = Path(
 )
 PRIMARY_BASELINE_METHOD_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 PROPOSED_METHOD_ID = "slm_wm_current"
+FORMAL_METHOD_IDS = (PROPOSED_METHOD_ID, *PRIMARY_BASELINE_METHOD_IDS)
 
 
 def stable_json_text(value: Any) -> str:
@@ -50,10 +52,10 @@ def json_line(value: dict[str, Any]) -> str:
 
 
 def read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
-    """读取 JSONL 文件; 文件缺失时返回空集合。"""
+    """读取正式 JSONL 输入; 文件缺失时立即停止结果闭合。"""
 
-    if not path.exists():
-        return []
+    if not path.is_file():
+        raise FileNotFoundError(f"论文结果分析缺少正式 JSONL 输入: {path.as_posix()}")
     rows: list[dict[str, Any]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.strip():
@@ -152,8 +154,8 @@ def _float_value(row: dict[str, Any], field_name: str, default_value: float = 0.
         return float(default_value)
 
 
-def build_bootstrap_ci_rows(result_records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """从结果记录重建 bootstrap CI 表。"""
+def build_confidence_interval_rows(result_records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """从结果记录重建 Hoeffding 置信区间表。"""
 
     rows: list[dict[str, Any]] = []
     for record in result_records:
@@ -242,6 +244,47 @@ def build_per_attack_superiority_rows(result_records: Iterable[dict[str, Any]]) 
     return rows
 
 
+def build_result_template_coverage(result_records: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    """检查五种方法是否完整覆盖正式攻击矩阵。"""
+
+    records = tuple(result_records)
+    attack_keys = {
+        (config.attack_family, config.attack_name, config.resource_profile)
+        for config in default_attack_configs()
+        if config.enabled and config.resource_profile in {"full_main", "full_extra"}
+    }
+    expected_keys = {
+        (method_id, attack_family, attack_name, resource_profile)
+        for method_id in FORMAL_METHOD_IDS
+        for attack_family, attack_name, resource_profile in attack_keys
+    }
+    actual_key_rows = [
+        (
+            str(record.get("method_id", "")),
+            str(record.get("attack_family", "")),
+            str(record.get("attack_name", "")),
+            str(record.get("resource_profile", "")),
+        )
+        for record in records
+    ]
+    actual_keys = set(actual_key_rows)
+    missing_keys = sorted(expected_keys - actual_keys)
+    unexpected_keys = sorted(actual_keys - expected_keys)
+    duplicate_count = len(actual_key_rows) - len(actual_keys)
+    return {
+        "expected_superiority_row_count": len(attack_keys),
+        "expected_result_record_count": len(expected_keys),
+        "actual_result_record_count": len(actual_key_rows),
+        "unique_result_record_key_count": len(actual_keys),
+        "duplicate_result_record_count": duplicate_count,
+        "missing_result_record_count": len(missing_keys),
+        "unexpected_result_record_count": len(unexpected_keys),
+        "result_template_coverage_ready": actual_keys == expected_keys and duplicate_count == 0,
+        "missing_result_record_examples": [list(key) for key in missing_keys[:20]],
+        "unexpected_result_record_examples": [list(key) for key in unexpected_keys[:20]],
+    }
+
+
 def _attacked_image_path(record: dict[str, Any]) -> str:
     """读取攻击后图像路径。"""
 
@@ -289,7 +332,12 @@ def build_failure_case_records(
 
 
 def build_failure_case_svg(root_path: Path, output_dir: Path, failure_cases: list[dict[str, Any]]) -> str:
-    """生成失败案例 SVG 图。"""
+    """从实际攻击图像生成失败案例 SVG 图。
+
+    该图只引用受治理记录给出的真实攻击图像。只要记录声明了失败案例, 对应
+    图像就必须存在; 缺失图像不能通过空白卡片代替, 因为那会破坏论文图与
+    样本证据之间的一一对应关系。
+    """
 
     card_width = 260
     card_height = 250
@@ -300,36 +348,34 @@ def build_failure_case_svg(root_path: Path, output_dir: Path, failure_cases: lis
     svg_parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         '<style>text{font-family:Arial, sans-serif;} .title{font-size:18px;font-weight:700;} '
-        '.label{font-size:11px;} .small{font-size:10px;fill:#333;} .card{fill:#fff;stroke:#bbb;stroke-width:1;} '
-        ".placeholder{fill:#f1f3f5;stroke:#ccd;stroke-width:1;}</style>",
+        '.label{font-size:11px;} .small{font-size:10px;fill:#333;} .card{fill:#fff;stroke:#bbb;stroke-width:1;}</style>',
         '<rect width="100%" height="100%" fill="#ffffff"/>',
         '<text x="20" y="28" class="title">SLM-WM failure cases under fixed-FPR attack protocol</text>',
-        '<text x="20" y="48" class="small">Each panel links to the governed attacked image path when extracted with outputs/.</text>',
+        '<text x="20" y="48" class="small">Each panel renders the attacked image referenced by its governed detection record.</text>',
     ]
+    if not failure_cases:
+        svg_parts.append(
+            '<text x="20" y="82" class="label">No false-negative case was observed in the governed detection records.</text>'
+        )
     for index, item in enumerate(failure_cases):
         column = index % columns
         row = index // columns
         x = 20 + column * card_width
         y = 65 + row * card_height
         image_path_text = str(item.get("attacked_image_path", ""))
-        image_abs_path = root_path / image_path_text if image_path_text else None
-        href = (
-            Path(
-                os.path.relpath(
-                    image_abs_path,
-                    output_dir,
-                )
-            ).as_posix()
-            if image_abs_path is not None
-            else ""
-        )
-        svg_parts.append(f'<rect x="{x}" y="{y}" width="{card_width - 16}" height="{card_height - 14}" class="card"/>')
-        svg_parts.append(f'<rect x="{x + 12}" y="{y + 12}" width="220" height="150" class="placeholder"/>')
-        if href:
-            svg_parts.append(
-                f'<image href="{html.escape(href)}" x="{x + 12}" y="{y + 12}" width="220" height="150" '
-                'preserveAspectRatio="xMidYMid meet"/>'
+        if not image_path_text:
+            raise ValueError(
+                f"失败案例 #{item.get('failure_case_rank', index + 1)} 缺少 attacked_image_path"
             )
+        image_abs_path = resolve_input_path(root_path, image_path_text)
+        if not image_abs_path.is_file():
+            raise FileNotFoundError(f"失败案例攻击图像不存在: {image_abs_path.as_posix()}")
+        href = Path(os.path.relpath(image_abs_path, output_dir)).as_posix()
+        svg_parts.append(f'<rect x="{x}" y="{y}" width="{card_width - 16}" height="{card_height - 14}" class="card"/>')
+        svg_parts.append(
+            f'<image href="{html.escape(href)}" x="{x + 12}" y="{y + 12}" width="220" height="150" '
+            'preserveAspectRatio="xMidYMid meet"/>'
+        )
         svg_parts.append(
             f'<text x="{x + 12}" y="{y + 178}" class="label">#{item["failure_case_rank"]} '
             f'{html.escape(str(item.get("attack_name", "")))}</text>'
@@ -367,11 +413,12 @@ def write_pilot_paper_result_analysis_outputs(
 
     result_records = read_jsonl_rows(resolved_result_records_path)
     formal_detection_records = read_jsonl_rows(resolved_real_attack_path) + read_jsonl_rows(resolved_conventional_attack_path)
-    bootstrap_rows = build_bootstrap_ci_rows(result_records)
+    confidence_interval_rows = build_confidence_interval_rows(result_records)
     superiority_rows = build_per_attack_superiority_rows(result_records)
+    template_coverage = build_result_template_coverage(result_records)
     failure_rows = build_failure_case_records(formal_detection_records, limit=failure_case_limit)
 
-    bootstrap_path = output_path / "bootstrap_ci_table.csv"
+    confidence_interval_path = output_path / "confidence_interval_table.csv"
     superiority_path = output_path / "per_attack_superiority_table.csv"
     failure_records_path = output_path / "failure_case_records.jsonl"
     failure_figure_path = output_path / "failure_case_figure.svg"
@@ -379,8 +426,8 @@ def write_pilot_paper_result_analysis_outputs(
     manifest_path = output_path / "manifest.local.json"
 
     write_csv(
-        bootstrap_path,
-        bootstrap_rows,
+        confidence_interval_path,
+        confidence_interval_rows,
         [
             "paper_claim_scale",
             "method_id",
@@ -434,12 +481,16 @@ def write_pilot_paper_result_analysis_outputs(
         "paper_claim_scale": paper_run.run_name,
         "target_fpr": paper_run.target_fpr,
         "result_record_count": len(result_records),
-        "bootstrap_ci_row_count": len(bootstrap_rows),
+        "confidence_interval_row_count": len(confidence_interval_rows),
         "per_attack_superiority_row_count": len(superiority_rows),
         "superiority_claim_ready_count": sum(1 for row in superiority_rows if row["superiority_claim_ready"]),
         "failure_case_record_count": len(failure_rows),
-        "failure_case_figure_ready": failure_figure_path.exists() and bool(failure_rows),
-        "supports_paper_claim": bool(superiority_rows) and all(row["supports_paper_claim"] for row in superiority_rows),
+        "failure_case_figure_ready": failure_figure_path.is_file(),
+        **template_coverage,
+        "supports_paper_claim": bool(superiority_rows)
+        and template_coverage["result_template_coverage_ready"]
+        and len(superiority_rows) == template_coverage["expected_superiority_row_count"]
+        and all(row["superiority_claim_ready"] for row in superiority_rows),
     }
     write_json(summary_path, summary)
     manifest = build_artifact_manifest(
@@ -451,7 +502,7 @@ def write_pilot_paper_result_analysis_outputs(
             relative_or_absolute(resolved_conventional_attack_path, root_path),
         ),
         output_paths=(
-            relative_or_absolute(bootstrap_path, root_path),
+            relative_or_absolute(confidence_interval_path, root_path),
             relative_or_absolute(superiority_path, root_path),
             relative_or_absolute(failure_records_path, root_path),
             relative_or_absolute(failure_figure_path, root_path),

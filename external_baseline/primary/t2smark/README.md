@@ -13,10 +13,10 @@ T2SMark 与 SLM-WM 的空间 LF、高斯幅值尾部截断和 Q/K attention geom
 
 ## method-faithful 与 official reference
 
-- `paper_workflow/notebooks/external_baseline_t2smark_run.ipynb`: 运行主表 method-faithful SD3.5 对比路径, 输出到 `outputs/external_baseline_method_faithful/` 并镜像到 `external_baseline_method_faithful/`。
-- `paper_workflow/notebooks/official_reference_t2smark_run.ipynb`: 运行官方 SD3.5 参考路径, 输出到 `outputs/t2smark_full_main_reproduction/` 并镜像到 `external_baseline_official_reference/`。
+- `paper_workflow/notebooks/official_reference_t2smark_run.ipynb`: 运行 T2SMark 官方 SD3.5 主表正式路径, 对完整 Prompt split 执行 fixed-FPR 校准与 `full_main` / `full_extra` 攻击矩阵, 输出到 `outputs/t2smark_formal_reproduction/`。
+- `paper_workflow/notebooks/external_baseline_t2smark_run.ipynb`: 在多 baseline 批量调度中运行同一 T2SMark 官方 SD3.5 适配链路, 用于批量运行诊断与证据镜像。
 
-两条路径都必须通过 governed import validator 后才能进入结果闭合。method-faithful 路径用于主表 common-backbone 对比; official reference 路径用于补充表来源审计和方法忠实度说明。
+T2SMark 原生支持 SD3.5 Medium, 因此 `t2smark_formal_reproduction` 是其主表结果的权威生成路径。批量调度输出不得覆盖或合并到该正式候选记录; 最终结果必须通过 governed import validator 与完整模板覆盖门禁。
 
 ## 当前可用入口
 

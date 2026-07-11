@@ -16,7 +16,7 @@ REQUIRED_NOTEBOOKS = {
     "external_baseline_shallow_diffuse_run.ipynb",
     "external_baseline_t2smark_run.ipynb",
 }
-REMOVED_DIAGNOSTIC_NOTEBOOKS = {
+FORBIDDEN_COMPONENT_NOTEBOOKS = {
     "aligned_rescoring_run.ipynb",
     "attention_geometry_capture_run.ipynb",
     "attention_latent_injection_run.ipynb",
@@ -45,7 +45,7 @@ def test_current_notebook_set_contains_formal_entrypoints_only() -> None:
 
     names = {path.name for path in NOTEBOOK_DIR.glob("*.ipynb")}
     assert REQUIRED_NOTEBOOKS <= names
-    assert not (REMOVED_DIAGNOSTIC_NOTEBOOKS & names)
+    assert not (FORBIDDEN_COMPONENT_NOTEBOOKS & names)
 
 
 @pytest.mark.quick
@@ -58,6 +58,7 @@ def test_notebook_contains_no_method_or_experiment_definition(notebook_name: str
     assert "class " not in source
     assert "from main." not in source
     assert "from experiments." not in source
+    assert "from paper_experiments." not in source
     assert "torch.autograd" not in source
     assert "pipeline(" not in source
 

@@ -154,7 +154,7 @@ def write_primary_baseline_evidence_outputs(
     command_results_path: str | Path = DEFAULT_COMMAND_RESULTS_PATH,
     observations_path: str | Path = DEFAULT_OBSERVATIONS_PATH,
     method_faithful_package_path: str | Path | None = None,
-    full_main_prompt_protocol_ready: bool = False,
+    paper_run_prompt_protocol_ready: bool = False,
     fixed_fpr_baseline_calibration_ready: bool = False,
     attack_matrix_baseline_detection_ready: bool = False,
     formal_evidence_paths_ready: bool = False,
@@ -203,7 +203,7 @@ def write_primary_baseline_evidence_outputs(
         source_registry=source_registry,
         command_results=command_results,
         observation_rows=observation_rows,
-        full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
+        paper_run_prompt_protocol_ready=paper_run_prompt_protocol_ready,
         fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
         attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
         formal_evidence_paths_ready=formal_evidence_paths_ready,
@@ -261,7 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--command-results-path", default=str(DEFAULT_COMMAND_RESULTS_PATH))
     parser.add_argument("--observations-path", default=str(DEFAULT_OBSERVATIONS_PATH))
     parser.add_argument("--method-faithful-package-path", default=None, help="可选 external baseline method-faithful 结果 zip 包。")
-    parser.add_argument("--full-main-prompt-protocol-ready", action="store_true")
+    parser.add_argument("--paper-run-prompt-protocol-ready", action="store_true")
     parser.add_argument("--fixed-fpr-baseline-calibration-ready", action="store_true")
     parser.add_argument("--attack-matrix-baseline-detection-ready", action="store_true")
     parser.add_argument("--formal-evidence-paths-ready", action="store_true")
@@ -279,7 +279,7 @@ def main() -> None:
         command_results_path=args.command_results_path,
         observations_path=args.observations_path,
         method_faithful_package_path=args.method_faithful_package_path,
-        full_main_prompt_protocol_ready=args.full_main_prompt_protocol_ready,
+        paper_run_prompt_protocol_ready=args.paper_run_prompt_protocol_ready,
         fixed_fpr_baseline_calibration_ready=args.fixed_fpr_baseline_calibration_ready,
         attack_matrix_baseline_detection_ready=args.attack_matrix_baseline_detection_ready,
         formal_evidence_paths_ready=args.formal_evidence_paths_ready,

@@ -7,6 +7,7 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -26,7 +27,6 @@ from paper_experiments.baselines import (
 from experiments.protocol.attacks import default_attack_configs
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.protocol.splits import build_group_split_counts
-from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR, prompt_protocol_name_for_run
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -34,17 +34,14 @@ CONSTRUCTION_UNIT_NAME = "primary_baseline_result_candidate_import"
 DEFAULT_OUTPUT_DIR = Path("outputs/external_baseline_results")
 DEFAULT_ATTACK_MANIFEST_PATH = Path("outputs/attack_matrix/attack_manifest.json")
 DEFAULT_METHOD_FAITHFUL_OBSERVATIONS_PATH = Path("outputs/external_baseline_method_faithful/execution/baseline_observations.json")
-DEFAULT_METHOD_FAITHFUL_SPLIT_OBSERVATIONS_DIR = Path("outputs/external_baseline_method_faithful/split_observations")
 DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH = Path(
-    "outputs/t2smark_full_main_reproduction/t2smark_full_main_formal_import_candidate_records.jsonl"
+    "outputs/t2smark_formal_reproduction/t2smark_formal_import_candidate_records.jsonl"
 )
 METHOD_FAITHFUL_OBSERVATIONS_ENTRY = "outputs/external_baseline_method_faithful/execution/baseline_observations.json"
-METHOD_FAITHFUL_SPLIT_OBSERVATIONS_ENTRY_PREFIX = "outputs/external_baseline_method_faithful/split_observations/"
 T2SMARK_CANDIDATE_RECORDS_ENTRY = (
-    "outputs/t2smark_full_main_reproduction/t2smark_full_main_formal_import_candidate_records.jsonl"
+    "outputs/t2smark_formal_reproduction/t2smark_formal_import_candidate_records.jsonl"
 )
 METHOD_FAITHFUL_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse")
-T2SMARK_BASELINE_ID = "t2smark"
 
 
 def stable_json_text(value: Any) -> str:
@@ -163,18 +160,6 @@ def read_jsonl_rows(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
 
 
-def str_field(row: Mapping[str, Any], field_name: str) -> str:
-    """读取字符串字段, 缺失时返回空字符串。"""
-
-    return str(row.get(field_name, "") or "")
-
-
-def int_field(row: Mapping[str, Any], field_name: str) -> int:
-    """读取整数字段, 缺失时返回 0。"""
-
-    return int(float(row.get(field_name, 0) or 0))
-
-
 def read_text_from_package(package_path: Path, entry_name: str) -> str:
     """从 zip 结果包中读取文本条目, 条目缺失时返回空字符串。"""
 
@@ -197,24 +182,6 @@ def read_json_array_from_package(package_path: Path, entry_name: str) -> list[di
     return [dict(row) for row in payload] if isinstance(payload, list) else []
 
 
-def read_split_json_arrays_from_package(package_path: Path, entry_prefix: str) -> list[dict[str, Any]]:
-    """从 zip 结果包中读取按 baseline 拆分的 observation JSON 数组。"""
-
-    if not package_path.is_file():
-        return []
-    rows: list[dict[str, Any]] = []
-    with ZipFile(package_path) as archive:
-        for entry_name in sorted(archive.namelist()):
-            normalized_name = entry_name.replace("\\", "/")
-            if not normalized_name.startswith(entry_prefix) or not normalized_name.endswith("_baseline_observations.json"):
-                continue
-            with archive.open(entry_name) as handle:
-                payload = json.loads(handle.read().decode("utf-8-sig"))
-            if isinstance(payload, list):
-                rows.extend(dict(row) for row in payload)
-    return rows
-
-
 def read_jsonl_rows_from_package(package_path: Path, entry_name: str) -> list[dict[str, Any]]:
     """从 zip 结果包中读取 JSONL 条目。"""
 
@@ -229,18 +196,20 @@ def load_method_faithful_observations(
     observations_path: Path,
     package_path: Path | None,
 ) -> list[dict[str, Any]]:
-    """读取方法忠实 SD3.5 adapter observation, 并合并单 baseline 拆分文件。"""
+    """从唯一显式来源读取方法忠实 SD3.5 adapter observation。"""
 
-    rows: list[dict[str, Any]] = []
-    if package_path:
-        rows.extend(read_json_array_from_package(package_path, METHOD_FAITHFUL_OBSERVATIONS_ENTRY))
-        rows.extend(read_split_json_arrays_from_package(package_path, METHOD_FAITHFUL_SPLIT_OBSERVATIONS_ENTRY_PREFIX))
+    if package_path is not None:
+        if not package_path.is_file():
+            raise FileNotFoundError(f"方法忠实 baseline 结果包不存在: {package_path.as_posix()}")
+        rows = read_json_array_from_package(package_path, METHOD_FAITHFUL_OBSERVATIONS_ENTRY)
+        source_description = f"{package_path.as_posix()}::{METHOD_FAITHFUL_OBSERVATIONS_ENTRY}"
+    else:
+        if not observations_path.is_file():
+            raise FileNotFoundError(f"方法忠实 baseline observation 不存在: {observations_path.as_posix()}")
+        rows = read_json_array(observations_path)
+        source_description = observations_path.as_posix()
     if not rows:
-        rows.extend(read_json_array(observations_path))
-    split_dir = observations_path.parent.parent / DEFAULT_METHOD_FAITHFUL_SPLIT_OBSERVATIONS_DIR.name
-    if split_dir.is_dir():
-        for path in sorted(split_dir.glob("*_baseline_observations.json")):
-            rows.extend(read_json_array(path))
+        raise ValueError(f"方法忠实 baseline observation 为空: {source_description}")
     deduplicated: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in rows:
@@ -257,11 +226,20 @@ def load_t2smark_candidate_rows(
     candidate_records_path: Path,
     package_path: Path | None,
 ) -> list[dict[str, Any]]:
-    """读取 T2SMark full-main 正式导入候选记录, 优先使用显式结果包。"""
+    """从唯一显式来源读取 T2SMark formal 正式导入候选记录。"""
 
-    rows = read_jsonl_rows_from_package(package_path, T2SMARK_CANDIDATE_RECORDS_ENTRY) if package_path else []
-    if not rows:
+    if package_path is not None:
+        if not package_path.is_file():
+            raise FileNotFoundError(f"T2SMark 正式结果包不存在: {package_path.as_posix()}")
+        rows = read_jsonl_rows_from_package(package_path, T2SMARK_CANDIDATE_RECORDS_ENTRY)
+        source_description = f"{package_path.as_posix()}::{T2SMARK_CANDIDATE_RECORDS_ENTRY}"
+    else:
+        if not candidate_records_path.is_file():
+            raise FileNotFoundError(f"T2SMark 正式候选记录不存在: {candidate_records_path.as_posix()}")
         rows = read_jsonl_rows(candidate_records_path)
+        source_description = candidate_records_path.as_posix()
+    if not rows:
+        raise ValueError(f"T2SMark 正式候选记录为空: {source_description}")
     return rows
 
 
@@ -328,47 +306,36 @@ def allowed_resource_profiles_from_attack_lookup(lookup: Mapping[tuple[str, str]
     return tuple(sorted(set(lookup.values())))
 
 
-def evidence_path_for_source(source_path: Path | None, fallback_path: Path, root_path: Path) -> tuple[str, ...]:
-    """为候选记录构造可被 validator 解析的证据路径。"""
+def evidence_path_for_source(source_path: Path, root_path: Path) -> tuple[str, ...]:
+    """为候选记录构造唯一且可检查的证据路径。"""
 
-    if source_path and source_path.is_file():
-        return (relative_or_absolute(source_path, root_path),)
-    if fallback_path.is_file():
-        return (relative_or_absolute(fallback_path, root_path),)
-    return ()
+    if not source_path.is_file():
+        raise FileNotFoundError(f"baseline 证据来源不存在: {source_path.as_posix()}")
+    return (relative_or_absolute(source_path, root_path),)
 
 
-def digest_for_source(source_path: Path | None, fallback_rows: Iterable[Mapping[str, Any]]) -> str:
-    """为候选记录构造来源摘要, 优先使用实体文件摘要。"""
+def digest_for_source(source_path: Path) -> str:
+    """从唯一证据文件计算候选记录来源摘要。"""
 
-    if source_path and source_path.is_file():
-        return build_file_digest(source_path)
-    return build_stable_digest(list(fallback_rows))
+    if not source_path.is_file():
+        raise FileNotFoundError(f"baseline 摘要来源不存在: {source_path.as_posix()}")
+    return build_file_digest(source_path)
 
 
 def normalize_t2smark_candidate_rows(
     *,
     rows: Iterable[Mapping[str, Any]],
-    source_path: Path | None,
-    local_candidate_records_path: Path,
+    source_path: Path,
     root_path: Path,
 ) -> list[dict[str, Any]]:
     """把 T2SMark 候选记录绑定到当前可检查的结果包证据。"""
 
     row_values = [dict(row) for row in rows]
     normalized: list[dict[str, Any]] = []
-    paper_run = build_paper_run_config(root_path)
-    expected_prompt_protocol_name = prompt_protocol_name_for_run(paper_run.run_name)
-    source_digest = digest_for_source(source_path, row_values)
-    evidence_paths = evidence_path_for_source(source_path, local_candidate_records_path, root_path)
+    source_digest = digest_for_source(source_path)
+    evidence_paths = evidence_path_for_source(source_path, root_path)
     for row in row_values:
         record = dict(row)
-        if (
-            str_field(record, "prompt_protocol_name") == expected_prompt_protocol_name
-            and int_field(record, "positive_count") >= paper_run.minimum_clean_negative_count
-            and int_field(record, "negative_count") >= paper_run.minimum_clean_negative_count
-        ):
-            record["full_main_prompt_protocol_ready"] = True
         if evidence_paths:
             record["baseline_result_source"] = evidence_paths[0]
             record["baseline_result_source_digest"] = source_digest
@@ -440,8 +407,7 @@ def _measured_baseline_readiness(
 def build_method_candidate_rows(
     *,
     observations: Iterable[Mapping[str, Any]],
-    source_path: Path | None,
-    local_observations_path: Path,
+    source_path: Path,
     root_path: Path,
     target_fpr: float,
     resource_profile: str,
@@ -449,12 +415,9 @@ def build_method_candidate_rows(
     """把方法忠实 SD3.5 adapter observation 聚合为共同协议候选记录。"""
 
     observation_rows = [dict(row) for row in observations]
-    evidence_paths = evidence_path_for_source(source_path, local_observations_path, root_path)
-    if source_path and source_path.is_file():
-        baseline_result_source = relative_or_absolute(source_path, root_path)
-    else:
-        baseline_result_source = relative_or_absolute(local_observations_path, root_path)
-    source_digest = digest_for_source(source_path if source_path and source_path.is_file() else local_observations_path, observation_rows)
+    evidence_paths = evidence_path_for_source(source_path, root_path)
+    baseline_result_source = relative_or_absolute(source_path, root_path)
+    source_digest = digest_for_source(source_path)
     prompt_protocol_digest = build_prompt_protocol_digest(observation_rows)
     records: list[dict[str, Any]] = []
     attack_profile_lookup = build_attack_resource_profile_lookup()
@@ -472,87 +435,13 @@ def build_method_candidate_rows(
                     baseline_result_source_digest=source_digest,
                     evidence_paths=evidence_paths,
                     prompt_protocol_digest=prompt_protocol_digest,
-                    full_main_prompt_protocol_ready=readiness["prompt_protocol_ready"],
+                    paper_run_prompt_protocol_ready=readiness["prompt_protocol_ready"],
                     fixed_fpr_baseline_calibration_ready=readiness["fixed_fpr_ready"],
                     attack_matrix_baseline_detection_ready=readiness["attack_matrix_ready"],
                     resource_profile=attack_profile_lookup.get(attack_key, resource_profile),
                 )
             )
     return records
-
-
-def build_t2smark_method_faithful_candidate_rows(
-    *,
-    observations: Iterable[Mapping[str, Any]],
-    source_path: Path | None,
-    local_observations_path: Path,
-    root_path: Path,
-    target_fpr: float,
-    resource_profile: str,
-) -> list[dict[str, Any]]:
-    """把 T2SMark method-faithful observation 映射为小样本候选记录, 不提升为正式论文结论。"""
-
-    observation_rows = [dict(row) for row in observations if str(row.get("baseline_id", "")) == T2SMARK_BASELINE_ID]
-    if not observation_rows:
-        return []
-    evidence_paths = evidence_path_for_source(source_path, local_observations_path, root_path)
-    if source_path and source_path.is_file():
-        baseline_result_source = relative_or_absolute(source_path, root_path)
-    else:
-        baseline_result_source = relative_or_absolute(local_observations_path, root_path)
-    source_digest = digest_for_source(source_path if source_path and source_path.is_file() else local_observations_path, observation_rows)
-    prompt_protocol_digest = build_prompt_protocol_digest(observation_rows)
-    records: list[dict[str, Any]] = []
-    attack_profile_lookup = build_attack_resource_profile_lookup()
-    readiness = _measured_baseline_readiness(observation_rows, root_path, target_fpr)
-    for attack_key, attack_rows in group_observations_by_attack(observation_rows).items():
-        records.extend(
-            build_method_faithful_baseline_candidate_records(
-                baseline_id=T2SMARK_BASELINE_ID,
-                observation_rows=attack_rows,
-                target_fpr=target_fpr,
-                baseline_result_source=baseline_result_source,
-                baseline_result_source_digest=source_digest,
-                evidence_paths=evidence_paths,
-                prompt_protocol_digest=prompt_protocol_digest,
-                full_main_prompt_protocol_ready=readiness["prompt_protocol_ready"],
-                fixed_fpr_baseline_calibration_ready=readiness["fixed_fpr_ready"],
-                attack_matrix_baseline_detection_ready=readiness["attack_matrix_ready"],
-                result_source_type="official_reproduction",
-                adapter_boundary="sd35_medium_native_official_reproduction",
-                resource_profile=attack_profile_lookup.get(attack_key, resource_profile),
-            )
-        )
-    return records
-
-
-def merge_t2smark_candidate_rows(
-    preferred_rows: Iterable[Mapping[str, Any]],
-    fallback_rows: Iterable[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    """按攻击项合并 T2SMark 正式复现记录与 method-faithful 观测记录。
-
-    该函数的主要考虑在于: T2SMark 专用复现包可能只提供 clean 校准记录,
-    而共同攻击矩阵的非 clean 记录来自同一 method-faithful 工作流中的 adapter observation。
-    合并时优先保留专用复现包中的同键记录, 再用 observation 补齐缺失攻击项,
-    避免因为存在一个 clean 正式记录而丢弃已经生成的攻击矩阵证据。
-    """
-
-    merged_rows: list[dict[str, Any]] = []
-    seen_keys: set[tuple[str, str, str, str]] = set()
-    for row in list(preferred_rows) + list(fallback_rows):
-        record = dict(row)
-        key = (
-            str(record.get("baseline_id", "")),
-            str(record.get("attack_family", "")),
-            str(record.get("attack_name", "")),
-            str(record.get("resource_profile", "full_main") or "full_main"),
-        )
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        merged_rows.append(record)
-    return merged_rows
 
 
 def write_primary_baseline_result_candidate_outputs(
@@ -563,9 +452,8 @@ def write_primary_baseline_result_candidate_outputs(
     method_faithful_observations_path: str | Path = DEFAULT_METHOD_FAITHFUL_OBSERVATIONS_PATH,
     t2smark_candidate_records_path: str | Path = DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH,
     external_method_faithful_package_path: str | Path | None = None,
-    t2smark_full_main_package_path: str | Path | None = None,
+    t2smark_formal_package_path: str | Path | None = None,
     method_resource_profile: str = "full_main",
-    target_fpr_override: float | None = None,
 ) -> dict[str, Any]:
     """写出候选记录、候选校验报告、摘要和 manifest。"""
 
@@ -575,50 +463,53 @@ def write_primary_baseline_result_candidate_outputs(
     resolved_method_faithful_observations_path = resolve_path(root_path, method_faithful_observations_path)
     resolved_t2smark_candidate_records_path = resolve_path(root_path, t2smark_candidate_records_path)
     resolved_external_method_faithful_package_path = resolve_path(root_path, external_method_faithful_package_path)
-    resolved_t2smark_full_main_package_path = resolve_path(root_path, t2smark_full_main_package_path)
+    resolved_t2smark_formal_package_path = resolve_path(root_path, t2smark_formal_package_path)
     if resolved_attack_manifest_path is None or resolved_method_faithful_observations_path is None:
         raise ValueError("必要输入路径不能为空。")
     if resolved_t2smark_candidate_records_path is None:
         raise ValueError("T2SMark 候选记录路径不能为空。")
 
+    if not resolved_attack_manifest_path.is_file():
+        raise FileNotFoundError(f"攻击矩阵 manifest 不存在: {resolved_attack_manifest_path.as_posix()}")
     attack_manifest = read_json(resolved_attack_manifest_path)
-    target_fpr = (
-        float(target_fpr_override)
-        if target_fpr_override is not None
-        else float(attack_manifest.get("evaluation_boundary", {}).get("target_fpr", PILOT_PAPER_FIXED_FPR))
-    )
+    paper_run = build_paper_run_config(root_path)
+    target_fpr = paper_run.target_fpr
+    manifest_target_fpr = attack_manifest.get("evaluation_boundary", {}).get("target_fpr")
+    if manifest_target_fpr is None or not math.isclose(
+        float(manifest_target_fpr), target_fpr, rel_tol=0.0, abs_tol=1e-12
+    ):
+        raise ValueError("攻击矩阵 target_fpr 必须与当前论文运行层级一致")
     method_faithful_observations = load_method_faithful_observations(
         observations_path=resolved_method_faithful_observations_path,
         package_path=resolved_external_method_faithful_package_path,
     )
     t2smark_rows = load_t2smark_candidate_rows(
         candidate_records_path=resolved_t2smark_candidate_records_path,
-        package_path=resolved_t2smark_full_main_package_path,
+        package_path=resolved_t2smark_formal_package_path,
+    )
+    method_faithful_source_path = (
+        resolved_external_method_faithful_package_path
+        if resolved_external_method_faithful_package_path is not None
+        else resolved_method_faithful_observations_path
+    )
+    t2smark_source_path = (
+        resolved_t2smark_formal_package_path
+        if resolved_t2smark_formal_package_path is not None
+        else resolved_t2smark_candidate_records_path
     )
     method_candidate_rows = build_method_candidate_rows(
         observations=method_faithful_observations,
-        source_path=resolved_external_method_faithful_package_path,
-        local_observations_path=resolved_method_faithful_observations_path,
+        source_path=method_faithful_source_path,
         root_path=root_path,
         target_fpr=target_fpr,
         resource_profile=method_resource_profile,
     )
     normalized_t2smark_rows = normalize_t2smark_candidate_rows(
         rows=t2smark_rows,
-        source_path=resolved_t2smark_full_main_package_path,
-        local_candidate_records_path=resolved_t2smark_candidate_records_path,
+        source_path=t2smark_source_path,
         root_path=root_path,
     )
-    t2smark_method_faithful_rows = build_t2smark_method_faithful_candidate_rows(
-        observations=method_faithful_observations,
-        source_path=resolved_external_method_faithful_package_path,
-        local_observations_path=resolved_method_faithful_observations_path,
-        root_path=root_path,
-        target_fpr=target_fpr,
-        resource_profile=method_resource_profile,
-    )
-    merged_t2smark_rows = merge_t2smark_candidate_rows(normalized_t2smark_rows, t2smark_method_faithful_rows)
-    candidate_rows = method_candidate_rows + merged_t2smark_rows
+    candidate_rows = method_candidate_rows + normalized_t2smark_rows
     attack_profile_lookup = build_attack_resource_profile_lookup()
     validation_report = validate_primary_baseline_formal_import_rows(
         candidate_rows,
@@ -666,8 +557,8 @@ def write_primary_baseline_result_candidate_outputs(
             "formal_result_ready",
             "blocking_reason_count",
             "blocking_reasons",
-            "missing_resource_profile_full_main",
-            "missing_full_main_prompt_protocol",
+            "missing_formal_attack_resource_profile",
+            "missing_paper_run_prompt_protocol",
             "missing_fixed_fpr_baseline_calibration",
             "missing_attack_matrix_baseline_detection",
             "formal_evidence_paths_ready",
@@ -678,22 +569,8 @@ def write_primary_baseline_result_candidate_outputs(
     summary_path.write_text(stable_json_text(summary), encoding="utf-8")
 
     input_paths = []
-    for path in (
-        resolved_attack_manifest_path,
-        resolved_method_faithful_observations_path,
-        resolved_t2smark_candidate_records_path,
-        resolved_external_method_faithful_package_path,
-        resolved_t2smark_full_main_package_path,
-    ):
-        if path and path.exists():
-            input_paths.append(relative_or_absolute(path, root_path))
-    split_observation_dir = resolved_method_faithful_observations_path.parent.parent / DEFAULT_METHOD_FAITHFUL_SPLIT_OBSERVATIONS_DIR.name
-    if split_observation_dir.is_dir():
-        input_paths.extend(
-            relative_or_absolute(path, root_path)
-            for path in sorted(split_observation_dir.glob("*_baseline_observations.json"))
-            if path.is_file()
-        )
+    for path in (resolved_attack_manifest_path, method_faithful_source_path, t2smark_source_path):
+        input_paths.append(relative_or_absolute(path, root_path))
     output_paths = tuple(
         relative_or_absolute(path, root_path)
         for path in (
@@ -741,12 +618,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--t2smark-candidate-records-path",
         default=str(DEFAULT_T2SMARK_CANDIDATE_RECORDS_PATH),
-        help="T2SMark full-main 候选 JSONL 路径。",
+        help="T2SMark formal 候选 JSONL 路径。",
     )
     parser.add_argument("--external-method-faithful-package-path", default=None, help="可选 external baseline method-faithful 结果 zip 包。")
-    parser.add_argument("--t2smark-full-main-package-path", default=None, help="可选 T2SMark full-main 结果 zip 包。")
+    parser.add_argument("--t2smark-formal-package-path", default=None, help="可选 T2SMark formal 结果 zip 包。")
     parser.add_argument("--method-resource-profile", default="full_main", help="方法忠实 adapter 候选记录的资源配置名称。")
-    parser.add_argument("--target-fpr-override", type=float, default=None, help="可选 fixed-FPR 目标值覆盖。")
     return parser
 
 
@@ -761,9 +637,8 @@ def main() -> None:
         method_faithful_observations_path=args.method_faithful_observations_path,
         t2smark_candidate_records_path=args.t2smark_candidate_records_path,
         external_method_faithful_package_path=args.external_method_faithful_package_path,
-        t2smark_full_main_package_path=args.t2smark_full_main_package_path,
+        t2smark_formal_package_path=args.t2smark_formal_package_path,
         method_resource_profile=args.method_resource_profile,
-        target_fpr_override=args.target_fpr_override,
     )
     print(stable_json_text(manifest), end="")
 

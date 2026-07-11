@@ -37,7 +37,7 @@ class PrimaryBaselineEvidenceRecord:
     adapter_run_sample_roles: tuple[str, ...]
     adapter_run_latent_shapes: tuple[tuple[int, ...], ...]
     method_faithful_adapter_ready: bool
-    full_main_prompt_protocol_ready: bool
+    paper_run_prompt_protocol_ready: bool
     fixed_fpr_baseline_calibration_ready: bool
     attack_matrix_baseline_detection_ready: bool
     formal_evidence_paths_ready: bool
@@ -143,7 +143,7 @@ def _blocking_reasons(
     baseline_id: str,
     adapter_run_ready: bool,
     method_faithful_adapter_ready: bool,
-    full_main_prompt_protocol_ready: bool,
+    paper_run_prompt_protocol_ready: bool,
     fixed_fpr_baseline_calibration_ready: bool,
     attack_matrix_baseline_detection_ready: bool,
     formal_evidence_paths_ready: bool,
@@ -155,8 +155,8 @@ def _blocking_reasons(
         reasons.append("adapter_run_missing")
     if baseline_id in METHOD_FAITHFUL_ADAPTER_REQUIRED_IDS and not method_faithful_adapter_ready:
         reasons.append("method_faithful_sd35_adapter_required")
-    if not full_main_prompt_protocol_ready:
-        reasons.append("full_main_prompt_protocol_required")
+    if not paper_run_prompt_protocol_ready:
+        reasons.append("paper_run_prompt_protocol_required")
     if not fixed_fpr_baseline_calibration_ready:
         reasons.append("fixed_fpr_baseline_calibration_required")
     if not attack_matrix_baseline_detection_ready:
@@ -171,7 +171,7 @@ def build_primary_baseline_evidence_records(
     source_registry: Mapping[str, Any],
     command_results: Iterable[Mapping[str, Any]] = (),
     observation_rows: Iterable[Mapping[str, Any]] = (),
-    full_main_prompt_protocol_ready: bool = False,
+    paper_run_prompt_protocol_ready: bool = False,
     fixed_fpr_baseline_calibration_ready: bool = False,
     attack_matrix_baseline_detection_ready: bool = False,
     formal_evidence_paths_ready: bool = False,
@@ -196,7 +196,7 @@ def build_primary_baseline_evidence_records(
             baseline_id=baseline_id,
             adapter_run_ready=adapter_ready,
             method_faithful_adapter_ready=method_ready,
-            full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
+            paper_run_prompt_protocol_ready=paper_run_prompt_protocol_ready,
             fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
             attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
             formal_evidence_paths_ready=formal_evidence_paths_ready,
@@ -229,7 +229,7 @@ def build_primary_baseline_evidence_records(
             adapter_run_sample_roles=_unique_strings(row.get("sample_role", "") for row in rows),
             adapter_run_latent_shapes=_unique_shapes(row.get("latent_shape", []) for row in rows),
             method_faithful_adapter_ready=method_ready,
-            full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
+            paper_run_prompt_protocol_ready=paper_run_prompt_protocol_ready,
             fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
             attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
             formal_evidence_paths_ready=formal_evidence_paths_ready,

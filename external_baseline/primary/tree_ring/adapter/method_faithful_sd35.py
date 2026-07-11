@@ -12,7 +12,7 @@ Tree-Ring 官方源码的核心机制: 在扩散初始 latent 的傅里叶域中
 - SD3.5 Medium 使用 16-channel latent, 因此这里把原 Tree-Ring 的 4-channel latent
   显式推广到可配置通道数。
 - 输出 observation 标记为 method-faithful adapter, 但仍默认不声明论文主张。是否能进入
-  主表正式结果由 formal import validator 依据 full-main prompt、fixed-FPR 和攻击矩阵边界决定。
+  主表正式结果由 formal import validator 依据 当前论文运行层级的完整 Prompt、fixed-FPR 和攻击矩阵边界决定。
 """
 
 from __future__ import annotations

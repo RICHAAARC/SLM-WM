@@ -308,7 +308,7 @@ def read_json(path: Path) -> Any:
 
 
 def latest_drive_package(drive_dir: str | Path, pattern: str = DEFAULT_PACKAGE_PATTERN) -> Path | None:
-    """从 Google Drive 目录中选择名称排序最新的历史结果包。"""
+    """从 Google Drive 目录中选择名称排序最新的同协议结果包。"""
 
     candidates = sorted(Path(drive_dir).expanduser().glob(pattern))
     return candidates[-1] if candidates else None
@@ -427,7 +427,7 @@ def materialize_prior_outputs(
     config: ExternalBaselineMethodFaithfulConfig,
     paths: dict[str, Path],
 ) -> dict[str, Any]:
-    """如 Drive 中已有历史结果包, 则选择性解压可复用文件。"""
+    """从同协议 Drive 结果包中选择性解压可复用文件。"""
 
     if not config.reuse_prior_drive_package:
         return {"prior_package_reused": False, "prior_package_path": "", "extracted_entry_count": 0, "extracted_entries": []}
@@ -1333,16 +1333,6 @@ def build_and_run_primary_baseline_adapters(
         execution_return_code=int(execution_result["return_code"]),
         validation_return_code=int(validation_result["return_code"]),
     )
-
-
-def build_and_run_t2smark_adapter(
-    root_path: Path,
-    config: ExternalBaselineMethodFaithfulConfig,
-    paths: dict[str, Path],
-) -> dict[str, Any]:
-    """兼容旧调用名称, 实际运行本次选中的主表 external baseline adapter。"""
-
-    return build_and_run_primary_baseline_adapters(root_path, config, paths)
 
 
 def write_failure_outputs(

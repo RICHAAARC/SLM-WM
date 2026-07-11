@@ -18,7 +18,6 @@ REQUIRED_CLOSURE_PACKAGE_PATTERNS: tuple[tuple[str, str], ...] = (
     ("method_faithful_tree_ring", "external_baseline_method_faithful_package_tree_ring_*.zip"),
     ("method_faithful_gaussian_shading", "external_baseline_method_faithful_package_gaussian_shading_*.zip"),
     ("method_faithful_shallow_diffuse", "external_baseline_method_faithful_package_shallow_diffuse_*.zip"),
-    ("method_faithful_t2smark", "external_baseline_method_faithful_package_t2smark_*.zip"),
     ("official_reference_tree_ring", "external_baseline_official_reference_package_tree_ring_*.zip"),
     ("official_reference_gaussian_shading", "external_baseline_official_reference_package_gaussian_shading_*.zip"),
     ("official_reference_shallow_diffuse", "external_baseline_official_reference_package_shallow_diffuse_*.zip"),
@@ -94,7 +93,6 @@ def build_paper_result_closure_commands(
     *,
     package_search_root: str,
     complete_drive_output_dir: str,
-    target_fpr: str,
     paper_run_name: str,
 ) -> list[list[str]]:
     """构造结果闭合所需 repository command 序列。
@@ -106,7 +104,7 @@ def build_paper_result_closure_commands(
     complete_archive_name = _complete_archive_name(paper_run_name)
     return [
         [sys.executable, "scripts/write_pilot_paper_result_records.py", "--package-search-root", package_search_root, "--materialize-only"],
-        [sys.executable, "scripts/write_primary_baseline_result_candidates.py", "--target-fpr-override", target_fpr],
+        [sys.executable, "scripts/write_primary_baseline_result_candidates.py"],
         [sys.executable, "scripts/write_primary_baseline_formal_import_protocol.py"],
         [sys.executable, "scripts/write_external_baseline_comparison_outputs.py"],
         [sys.executable, "scripts/write_pilot_paper_result_records.py", "--require-existing-evidence"],
@@ -138,7 +136,6 @@ def run_paper_result_closure_commands(
     *,
     package_search_root: str,
     complete_drive_output_dir: str,
-    target_fpr: str,
     paper_run_name: str,
     before_command: CommandHook | None = None,
     progress_hook: ProgressHook | None = None,
@@ -153,7 +150,6 @@ def run_paper_result_closure_commands(
     commands = build_paper_result_closure_commands(
         package_search_root=package_search_root,
         complete_drive_output_dir=complete_drive_output_dir,
-        target_fpr=target_fpr,
         paper_run_name=paper_run_name,
     )
     for command_index, command in enumerate(commands, start=1):

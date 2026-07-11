@@ -1,292 +1,164 @@
-# SLM-WM 总阶段项目构建指引：Core-first 修订版 v3
+# SLM-WM 核心优先构建指南
 
-## 一、文档定位
+## 1. 文档职责
 
-本文档是 SLM-WM 项目的总阶段构建指引。本文档已经按当前项目框架契约修正：正式核心包以 `main/` 为准，不再要求额外顶层 `slm_wm_core/` 或 `slm_wm_runtime/` 作为正式项目边界。若未来确需新增顶层核心包，必须先更新 `.codex/project_contract.md`、目录治理文档和 harness 规则。
+本文档说明如何从最小论文方法实现逐层构建到完整论文实验。方法定义以同目录的算法原语、技术路线和方法章节文档为准; 本文只描述代码分层、执行顺序、正式证据要求和验收方式。
 
-本文档的执行原则为：
+## 2. 构建原则
 
-```text
-core-first -> runtime-second -> workflow-third -> paper-artifact-final
-```
+1. 先实现可独立测试的科学算子, 再接入 SD3.5 runtime。
+2. `main/` 只保存论文核心方法, 不保存实验协议、baseline、CLI 或 Notebook 逻辑。
+3. 正式论文运行只接受真实模型、真实图像、真实攻击和仅图像盲检结果。
+4. probe、pilot 与 full 执行同一代码路径, 仅统计规模和目标 FPR 不同。
+5. records 是结果事实来源, tables、figures 与 reports 必须可重建。
+6. 缺少正式输入时立即停止当前闭合步骤, 不生成替代指标或空白论文图。
 
-其含义是：
+## 3. 五层代码结构
 
-1. 先在 `main/` 内冻结论文方法核心、协议对象和最小复现能力；
-2. 再在 `experiments/` 与 `scripts/` 中接入 SD3 / SD3.5 运行适配、攻击、baseline 和 ablation runner；
-3. 再在 `paper_workflow/` 中接入 Notebook / Colab workflow、session helper 和外部持久化 manifest；
-4. 最后通过 `main/analysis/` 与 `scripts/` 从 governed records 自动重建论文表格、图、报告和 evidence audit。
+依赖方向固定为:
 
-本文档不覆盖项目契约。若本文档与 `.codex/project_contract.md` 冲突，以项目契约为准。
+`paper_workflow/ -> scripts/ -> paper_experiments/ -> experiments/ -> main/`
 
----
+### 3.1 核心方法层 `main/`
 
-## 二、项目总目标
+| 子目录 | 职责 |
+| --- | --- |
+| `main/core/` | 稳定摘要等最小数学与数据工具 |
+| `main/methods/semantic/` | 分支风险场与语义条件向量 |
+| `main/methods/subspace/` | 语义条件 Jacobian 低响应子空间 |
+| `main/methods/carrier/` | 空间 LF、高斯幅值尾部截断与密钥张量载体 |
+| `main/methods/geometry/` | 真实 Q/K attention 几何和可微更新 |
+| `main/methods/detection/` | 最终图像盲检与同阈值证据判定 |
 
-项目最终目标是实现“语义条件化的潜空间流形水印（SLM-WM）”的方法机制，并产出可用于论文投稿的全部表格、图、报告、证据审计和最小发布包。
+该层不得依赖 `experiments/`、`paper_experiments/`、`scripts/`、`paper_workflow/` 或 `tools/`。
 
-方法主线为：
+### 3.2 主方法实验层 `experiments/`
 
-$$
-\text{semantic risk field}
-\rightarrow
-\text{semantic-conditioned safe null-space}
-\rightarrow
-\text{latent LF/尾部截断/attention carrier decomposition}
-\rightarrow
-\text{fixed-FPR robust detection}
-\rightarrow
-\text{same-threshold geometric rescue}
-\rightarrow
-\text{attested final attribution}.
-$$
+| 子目录 | 职责 |
+| --- | --- |
+| `experiments/protocol/` | Prompt、split、fixed-FPR、攻击配置与结果 schema |
+| `experiments/runtime/` | SD3.5 pipeline、语义特征、真实图像攻击和运行环境 |
+| `experiments/runners/` | 主方法生成、攻击和仅图像检测数据集运行 |
+| `experiments/ablations/` | 改变真实机制后重新运行的正式消融 |
+| `experiments/artifacts/` | manifest 与正式质量产物 |
 
-项目完成后应具备以下能力：
+### 3.3 完整论文实验层 `paper_experiments/`
 
-1. 在 diffusion latent trajectory 内部嵌入水印，而不是在生成后图像域叠加水印；
-2. 根据语义显著性、纹理复杂度和轨迹稳定性自适应选择水印方向；
-3. 从 semantic-conditioned safe null-space 导出 LF、尾部截断 和 Self-Attention geometry 三类证据方向；
-4. 使用固定 calibration 协议控制 raw content decision 与 rescue 后 evidence-level decision 的整体误报；
-5. 在几何恢复后复用同一内容阈值重判，禁止几何链直接判 positive；
-6. 通过 governed records、tables、figures、reports 和 manifests 支撑论文 claims；
-7. 导出与当前 release profile 对齐的 `minimal_method_package` 和 `paper_artifact_rebuild_package`。
+该层负责外部 baseline 的方法忠实实现、官方复现、受治理导入、公平对比、论文证据审计和投稿门禁。外部 baseline 不得进入 `main/`。
 
----
+### 3.4 独立执行层 `scripts/`
 
-## 三、项目框架映射
+脚本必须能在 GPU 服务器或 CPU 汇总服务器直接运行。Notebook 只能调用这些脚本或其下层 runner, 不能成为唯一执行入口。
 
-当前项目契约规定的目录职责如下。
+### 3.5 Colab 运行层 `paper_workflow/`
 
-| 目录 | 构建职责 |
-|---|---|
-| `main/core/` | records、manifest、digest、schema、typed objects 等通用核心结构 |
-| `main/methods/` | SLM-WM 方法机制，包括 semantic route、subspace、carrier、geometry、attestation 等 |
-| `main/protocol/` | split、threshold、fixed-FPR decision、runner 协议和输出布局 |
-| `main/analysis/` | 表格、图数据、报告和 claim audit 构建逻辑 |
-| `main/cli/` | 可选 CLI 复现入口 |
-| `experiments/` | 阶段性 runner、SD runtime adapter、attack、baseline、ablation 和 paper protocol |
-| `paper_workflow/` | Notebook / Colab workflow 入口、Drive/session helper 和工作流包装 |
-| `scripts/` | 数据准备、结果检查、阶段运行、结果打包和 release 辅助命令 |
-| `tests/constraints/` | 静态或轻量治理测试，默认执行 |
-| `tests/functional/` | 轻量功能测试，默认执行 |
-| `tests/integration/` | SD、Drive、slow、formal 或端到端测试，默认排除 |
-| `tools/harness/` | 外层治理审计，不得被 `main/` 反向依赖 |
+该层只负责 Colab session 配置、Drive 路径、进度显示、Notebook runtime 报告和打包入口。Notebook 不写正式 records、阈值、表格或论文图。
 
-禁止把正式方法核心放入未登记的顶层核心包，也禁止让 `main/` 反向依赖 `experiments/`、`scripts/`、`paper_workflow/`、`tests/` 或 `tools/harness/`。
+## 4. 核心方法实现顺序
 
----
+### 4.1 分支风险场
 
-## 四、执行路线分级
+1. 从语义条件响应计算 LF、`tail_robust` 与 attention 三个分支的风险。
+2. 保留分支间独立风险, 不把单一位置风险复制到全部载体。
+3. 输出归一化风险、分支权重和稳定摘要。
 
-### （一）最小可发表闭环
+### 4.2 语义条件 Jacobian 低响应子空间
 
-最小可发表闭环用于资源有限或高风险 attention update 不稳定的场景，至少包括：
+1. 在真实 SD3.5 / CLIP 语义响应上构造精确 JVP 或等价 Jacobian 线性算子。
+2. 对候选方向执行奇异值分解或等价低响应求解。
+3. 记录候选秩、保留秩、响应残差和投影能量保留率。
+4. 残差或能量门禁失败时停止该样本写入。
 
-1. `main/` 中的 SLM-WM 方法核心；
-2. SD3 / SD3.5 或可审计 runtime fallback 的 latent injection；
-3. semantic mask 到 latent mask 的真实接入；
-4. semantic-conditioned safe null-space 或明确标注的可审计近似；
-5. LF / 尾部截断内容载体与统一内容分数；
-6. fixed-FPR calibration；
-7. 常规攻击矩阵；
-8. 主表 external baseline；
-9. 内部机制消融；
-10. paper artifacts 与 evidence audit。
+### 4.3 内容载体
 
-若 attention-relative latent update 不稳定，最小闭环允许将其降级为 attention graph geometry evidence 与 no-direct-positive rescue analysis，但不得声称 Self-Attention watermark 是 Full 方法主载体。
+- 空间 LF 分支使用明确的空间低通构造。
+- `tail_robust` 分支按高斯模板绝对幅值的尾部集合截断。
+- 两个分支均按密钥生成符号与置换, 再投影到低响应子空间。
+- `tail_robust` 不执行 FFT、DCT、带通滤波或空间频带 mask。
 
-### （二）高上限完整闭环
+### 4.4 Q/K attention 几何
 
-高上限完整闭环在最小闭环基础上增加：
+1. 从 Transformer attention 模块的 `to_q`、`to_k` 读取真实投影。
+2. 用密钥关系矩阵定义图几何目标。
+3. 对 latent 求真实目标梯度, 并投影到安全方向。
+4. 使用单调回溯验证更新后 Q/K 目标确实提升。
+5. 记录更新强度、梯度范数、回溯次数和前后目标值。
 
-1. 稳定 attention-relative latent update；
-2. attention graph 作为主几何同步约束；
-3. 再扩散攻击闭环；
-4. full-main 常规攻击全量运行；
-5. full-extra 再扩散代表子集或高成本补充实验；
-6. 更完整的 case study、score retention、aligned gain 和 failure analysis。
+### 4.5 仅图像盲检
 
----
+1. 检测输入只包括最终图像、方法密钥与公开模型。
+2. 通过公开 VAE / 视觉编码器恢复检测特征。
+3. 计算内容分支分数与 attention 几何证据。
+4. 阈值只在 calibration clean negative 上冻结。
+5. test split 使用同一阈值评估 positive、clean negative、wrong-key negative 和 attacked image。
+6. fixed-FPR 门禁使用95%单侧 Wilson 上界, 通用有界指标表使用 Hoeffding 区间。
 
-## 五、阶段与项目契约的关系
+## 5. 正式运行层级
 
-本文档中的 stage00 至 stage17 是 SLM-WM 构建工作包，不等同于 `.codex/project_contract.md` 中的 `project_unit`。当前项目契约的语义阶段仍为：
+| run_name | Prompt | dev | calibration | test | target FPR |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `probe_paper` | 70 | 3 | 33 | 34 | 0.1 |
+| `pilot_paper` | 700 | 30 | 330 | 340 | 0.01 |
+| `full_paper` | 7000 | 300 | 3300 | 3400 | 0.001 |
 
-```text
-project_bootstrap
-core_method_runtime_construction
-experiment_protocol_validation
-paper_artifact_rebuild_gate
-submission_readiness_gate
-minimal_release_extraction
-```
+所有层级必须完整执行自己的 test split。probe 的职责是用最小正式规模验证完整论文链路, 不是执行不同机制或较弱检测制度。
 
-stage00 至 stage17 的推进不得绕过这些语义阶段，也不得在 `project_bootstrap` 阶段引入真实大规模数据、正式实验输出、论文最终图表或发布包。
+## 6. Colab GPU 执行顺序
 
----
+1. 配置当前 `SLM_WM_PAPER_RUN_NAME`。
+2. 运行 `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb` 生成主方法、真实攻击、正式消融和数据集质量结果。
+3. 分别运行四个主表 baseline Notebook。
+4. 运行 Tree-Ring、Gaussian Shading、Shallow Diffuse 与 T2SMark 的官方复现 Notebook。
+5. 将所有结果包保存到当前运行层级的 Drive 目录。
+6. 运行 `paper_workflow/notebooks/paper_result_closure_run.ipynb` 或独立服务器闭合命令。
 
-## 六、阶段阻断条件总表
+Colab 中断后允许从同一配置、同一代码版本和通过摘要核对的当前结果继续; 任何复用记录仍必须通过正式 schema 与证据路径校验。
 
-| 阶段 | 不得进入下一阶段的条件 |
-|---|---|
-| stage00 | `main/` 仍反向依赖 Drive、Colab、paper workflow、experiments、scripts、tests 或 harness |
-| stage01 | 方法 typed objects 不稳定，或 `main/` 直接写正式 records / manifests |
-| stage02 | synthetic smoke 无法证明 key 区分、rescue 边界和 attestation 分层 |
-| stage03 | SD runtime adapter 污染 `main/`，或无法记录 unsupported reason |
-| stage04 | latent injection 导致图像崩坏，或强度变化无可解释趋势 |
-| stage05 | Notebook / Colab 重启后无法只凭 manifest 重载前序产物 |
-| stage06 | calibration 与 test split 不独立，或 event / prompt 标识不稳定 |
-| stage07 | semantic mask 未真实影响 latent feature operator 或 basis |
-| stage08 | LF / 尾部截断使用独立阈值投票作为主判 |
-| stage09 | attention graph 无法稳定提取，且 unsupported reason 未记录 |
-| stage10 | attention-relative update 不稳定但仍被写入 Full 主方法 |
-| stage11 | 几何链直接判 positive，或恢复后未使用同一内容阈值 |
-| stage12 | test split 被用于调阈值，或 rescue 后整体 FPR 未审计 |
-| stage13 | 攻击结果未写 attack digest，或再扩散不稳定却作为核心主张 |
-| stage14 | baseline 使用不同 prompt set / attack matrix，或手工填写结果 |
-| stage15 | 消融开关未真实改变对应机制 |
-| stage16 | artifact builder 不能由 records 和 manifests 重建表格、图和报告 |
-| stage17 | full-main 调参、final evidence audit 未通过，或 release profiles 无法验证 |
+## 7. CPU 汇总服务器执行顺序
 
----
+1. 物化所有 `outputs/` 结果包条目。
+2. 校验主方法、攻击、消融、质量与 baseline manifest。
+3. 构造 baseline 正式候选并执行受治理导入。
+4. 写出主方法与 baseline 的共同协议结果记录。
+5. 重建 fixed-FPR 表、优势表与真实失败案例图。
+6. 执行证据审计、投稿就绪审计和完整结果打包。
 
-## 七、阶段总览
+CPU 服务器不承担 SD3.5 GPU 推理, 也不能以代码检查结果替代图像实验。
 
-### stage00：核心包边界冻结
+## 8. 正式消融要求
 
-目标是在 `main/` 内冻结核心包边界，确认 `main/core/`、`main/methods/`、`main/protocol/`、`main/analysis/` 和 `main/cli/` 的职责划分。边界测试应进入 `tests/constraints/`，不得新增重型默认测试。
+至少执行以下变体:
 
-输出以本地阶段 manifest 和边界报告为主，不产生正式论文结果。
+- 去除分支风险调制。
+- 去除 Jacobian 低响应投影。
+- 去除空间 LF 分支。
+- 去除高斯幅值尾部截断分支。
+- 去除 Q/K attention 分支。
+- 去除同阈值几何救援。
 
-### stage01：纯算法原语实现
+每个变体必须重新生成图像、重新攻击并重新盲检。消融结果不能从 Full 分数复制或变换得到。
 
-目标是在 `main/methods/` 和 `main/protocol/` 中实现 synthetic / tensor 级别的 SLM-WM 原语，包括 semantic risk、safe basis、LF / 尾部截断carrier、attention stub、content score、geometry reliability、evidence / final decision。
+## 9. 外部 baseline 要求
 
-attention 在本阶段只允许 synthetic stub，不接入真实 SD attention。
+- Tree-Ring、Gaussian Shading、Shallow Diffuse: 方法忠实 SD3.5 主表适配 + 官方原生环境核对。
+- T2SMark: SD3.5 原生正式复现结果直接进入主表。
+- 每个 baseline 必须覆盖完整 Prompt split 与攻击矩阵。
+- 所有方法使用同一目标 FPR、攻击参数和统计字段。
+- 缺失攻击项不能由另一种实现路径补齐。
 
-### stage02：核心方法最小闭环 smoke test
+## 10. 论文证据门禁
 
-目标是用 synthetic latent tensor 验证核心链路，覆盖 clean、watermarked、wrong-key、geometric shifted、aligned recovered、unattested positive 和 final positive 等场景。
+1. 每条 supported claim 必须映射到受治理记录。
+2. 数据集质量只接受正式 Inception FID/KID。
+3. 失败案例图必须渲染真实攻击图像。
+4. manifest 必须记录输入、输出、配置摘要、代码版本和重建命令。
+5. 投稿就绪要求完整方法 × 攻击模板覆盖, 不能只依赖部分成功记录。
 
-smoke records 必须由 `scripts/` 或测试 harness 根据 `main/` 返回对象生成，不能由 `main/` 直接写正式 records。
-
-### stage03：SD3 / SD3.5 运行适配层
-
-目标是在 `experiments/` 或 `scripts/` 中建立 SD3 / SD3.5 适配、采样回调、latent trace、VAE encode / decode 和 attention capture。该层可以依赖 `diffusers`、`transformers`、`accelerate`、`safetensors` 等运行依赖，但不得让 `main/` 反向依赖这些适配对象。
-
-若模型权重、显存或 API 不可用，必须记录 unsupported reason，并使用 toy / synthetic adapter 完成工程测试。fallback 结果不得支持论文主张。
-
-### stage04：最小 diffusion latent injection
-
-目标是在真实或 fallback diffusion sampling trajectory 中验证 latent update 可注入、强度变化可解释、图像不崩坏。输出仍为本地阶段目录和 manifest，不进入正式论文结果。
-
-### stage05：Colab / Drive 运行层
-
-目标是在 `paper_workflow/` 中建立 Notebook / Colab workflow 入口、外部持久化路径、manifest reload 和冷启动验证。Notebook 只调用 `main/`、`experiments/` 或 `scripts/`，不得直接实现算法逻辑、阈值计算、正式 records、tables、figures 或 reports。
-
-### stage06：Prompt、split、records 与实验协议
-
-目标是在 `experiments/protocol/` 与 `main/protocol/` 中建立 prompt、split、event、sample role、records schema 和 calibration protocol。calibration 与 test 必须独立。
-
-### stage07：semantic mask、risk field 与安全子空间正式实现
-
-目标是让 semantic mask 真实进入 latent trajectory feature operator，并让 semantic route 改变 safe basis。若使用全 mask，只能作为 fallback 或消融。
-
-### stage08：LF / 尾部截断内容载体与内容检测统计
-
-目标是实现 LF 主证据、高斯幅值尾部截断鲁棒补充和统一内容分数。LF / 尾部截断不得分别设置独立主判阈值后投票。
-
-### stage09：Self-Attention graph extraction 与几何证据
-
-目标是捕获或复用 SD3 / SD3.5 attention 信息，构造 attention-relative graph 和 geometry evidence。该阶段只记录几何可靠性统计，不直接判 positive。
-
-### stage10：Attention-relative latent update
-
-目标是在 stage09 稳定后实现 attention-relative latent update。若 update 不稳定，必须降级为 evidence-only 或诊断机制，不能污染 Full 方法主张。
-
-### stage11：同阈值几何救回集成
-
-目标是将几何恢复接入 same-threshold rescue。几何链只恢复参考系；恢复后内容链必须复用 stage12 冻结的同一内容阈值。
-
-### stage12：阈值校准与常规图像水印指标体系
-
-目标是冻结 fixed-FPR calibration，并建立常规水印指标、质量指标、ROC / DET、score distribution 和 threshold degeneracy report。该阶段必须同时审计 raw content decision 与 rescue 后 evidence-level decision 的整体 FPR。
-
-### stage13：攻击矩阵与再扩散攻击闭环
-
-目标是建立常规攻击与再扩散攻击矩阵。再扩散攻击若不稳定，只能进入补充实验或局限性讨论。
-
-### stage14：外部 baseline 对比
-
-目标是在相同 prompt、split、attack matrix、clean negative 和 fixed-FPR 或可比 operating point 下比较 Tree-Ring、Gaussian Shading、Shallow Diffuse、T2SMark 等 baseline。无法运行的 baseline 必须记录 unsupported reason。
-
-### stage15：内部消融与反工程组合证明
-
-目标是通过机制消融证明 SLM-WM 不是工程组件叠加。每个消融必须真实改变对应机制，而不是只改 method name。
-
-### stage16：论文图表、报告与 evidence audit 构建层
-
-stage16 的职责是实现并验证 artifact rebuild 层。该阶段应完成表格、图、报告和 evidence audit 的 builder、schema、provenance 与 dry-run 验证。若已有 governed records，可生成预览或阶段性产物；但 stage16 不负责冻结 full-main 最终论文结果。
-
-stage16 的产物应说明：给定 governed records 与 manifests，是否可以自动重建论文 tables、figures、reports 和 claim evidence audit。
-
-### stage17：PilotPaper、Full 与提交前冻结
-
-stage17 的职责是完成 probe、pilot_paper、full-main 与必要 full-extra，冻结配置和最终 records，然后调用 stage16 已验证的 artifact builders 重新生成最终论文表格、图、报告和 evidence audit。最终发布包在本阶段导出和验证。
-
----
-
-## 八、fixed-FPR 与 rescue 统计边界
-
-正式 fixed-FPR 口径必须作用于完整 evidence-level 判定协议，而不是只固定内容阈值。
-
-1. 内容阈值由 calibration split 的 clean negative 分布确定。
-2. geometry reliability thresholds、rescue window 和 fail-reason gate 也必须在 calibration 或预注册协议中冻结。
-3. test split 只用于报告，不得调阈值、调 rescue window 或调 fail-reason 规则。
-4. rescue 仅允许作用于边界失败样本，不能对远离阈值的 negative 样本开放。
-5. recovery 后必须复用同一内容阈值，不得为 aligned score 单独设置新阈值。
-6. 报告 fixed-FPR 时必须同时给出 raw content FPR、rescue 后 clean negative FPR 和 rescue 后 attacked negative FPR。
-7. 若 rescue 后整体 FPR 超过目标 operating point，不得声称完整系统仍满足该 fixed-FPR 目标，除非重新在 calibration split 中冻结包含 rescue 的完整决策协议。
-
----
-
-## 九、论文产物与发布包要求
-
-正式论文产物必须满足：
-
-1. records 是事实来源；
-2. tables、figures 和 reports 可由 records 与 manifests 重建；
-3. supported claims 绑定到 governed artifacts；
-4. placeholder 字段不得支撑 supported claims；
-5. manifests 记录输入、输出、配置摘要、代码版本和重建命令。
-
-发布包名称与当前项目 release profile 保持一致：
-
-| profile | 作用 | 默认边界 |
-|---|---|---|
-| `minimal_method_package` | 最小论文方法代码附件 | 包含 `main/core/`、`main/methods/`、`main/protocol/` 和最小配置 |
-| `paper_artifact_rebuild_package` | 论文图表和报告重建附件 | 包含 artifact builders、必要 scripts、configs、experiments protocol 和轻量功能测试 |
-
-导出应优先复用当前脚本能力，例如 `scripts/extract_minimal_paper_package.py`。如需新增包装脚本，仍必须遵守 release boundary 文档和 harness 审计。
-
----
-
-## 十、当前最优执行顺序
-
-当前仓库仍处于 `project_bootstrap` 语义阶段。最优执行顺序是：
-
-1. 先保持 `main/` 边界、字段登记、测试分层和 harness 规则稳定；
-2. 再在 `main/methods/` 与 `main/protocol/` 中实现 synthetic / tensor 级方法核心；
-3. 再通过 `tests/functional/` 与 `scripts/` 建立最小 smoke；
-4. 再接入 `experiments/` 中的 SD runtime、attack、baseline 和 ablation runner；
-5. 再接入 `paper_workflow/` 中的 Notebook / Colab workflow；
-6. 最后进入 artifact rebuild、full run、evidence audit 和 release extraction。
-
-每个阶段完成后均需运行：
+## 11. 本地验收
 
 ```bash
 pytest -q
 python tools/harness/run_all_audits.py
 ```
 
-若某阶段包含 integration、smoke、slow 或 formal 测试，应额外显式运行对应命令，但不得把重型测试加入默认 `pytest -q` 路径。
+本地验收只证明代码、轻量算法和治理边界一致。正式论文有效性仍由 Colab GPU 结果包决定。

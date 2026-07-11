@@ -19,7 +19,6 @@ class EvidenceClosureEntryInput:
     paper_blocker_report: dict[str, Any]
     baseline_runtime_report: dict[str, Any]
     dataset_quality_summary: dict[str, Any]
-    baseline_small_sample_summary: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 兼容字典, 便于 manifest 记录稳定摘要。"""
@@ -41,6 +40,22 @@ def _required_input_ids(rows: Iterable[Mapping[str, Any]]) -> set[str]:
     """提取当前仍需补齐的证据输入 id 集合。"""
 
     return {str(row.get("required_input_id", "")) for row in rows if str(row.get("required_input_id", ""))}
+
+
+def _formal_baseline_comparison_ready(report: Mapping[str, Any]) -> bool:
+    """判断主表 baseline 的完整模板、证据路径与 claim 门禁是否同时通过。"""
+
+    required_flags = (
+        "comparison_table_supports_paper_claim",
+        "supports_paper_claim",
+        "primary_baseline_formal_ready",
+        "primary_baseline_results_ready",
+        "primary_baseline_formal_template_coverage_ready",
+        "primary_baseline_formal_evidence_collection_ready",
+        "formal_import_validation_ready",
+        "formal_evidence_path_resolution_ready",
+    )
+    return all(_bool_value(report.get(field_name)) for field_name in required_flags)
 
 
 def _check_row(
@@ -78,7 +93,6 @@ def build_evidence_closure_entry_checklist(bundle: EvidenceClosureEntryInput) ->
     required_ids = _required_input_ids(bundle.required_evidence_rows)
     baseline = bundle.baseline_runtime_report
     dataset_quality = bundle.dataset_quality_summary
-    small_sample = bundle.baseline_small_sample_summary
     return [
         _check_row(
             "upstream_audit_rebuildable",
@@ -89,31 +103,21 @@ def build_evidence_closure_entry_checklist(bundle: EvidenceClosureEntryInput) ->
             "确认审计报告与 release dry-run 已可重建。",
         ),
         _check_row(
-            "small_sample_boundary_preserved",
-            "baseline_boundary",
-            _bool_value(readiness.get("small_sample_baseline_boundary_ready"))
-            and not _bool_value(small_sample.get("paper_claim_ready")),
-            "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json",
-            "small_sample_boundary_not_preserved",
-            "确认当前小样本证据只作为工程链路审计, 不替代正式统计结论。",
-        ),
-        _check_row(
             "formal_comparison_reference_ready",
             "baseline_comparison",
-            _bool_value(baseline.get("baseline_results_ready"))
-            and _bool_value(baseline.get("formal_import_validation_ready"))
+            _formal_baseline_comparison_ready(baseline)
             and int(baseline.get("accepted_formal_import_count", 0)) > 0,
             "baseline_runtime_report",
             "formal_comparison_reference_results_missing",
-            "确认主表对照方法已通过共同协议正式导入, 而不是仅有小样本或 smoke 记录。",
+            "确认四个主表对照方法已通过完整攻击模板、正式导入和证据路径门禁。",
         ),
         _check_row(
-            "full_main_sample_scale_ready",
+            "paper_run_sample_scale_ready",
             "statistical_power",
-            "gap_full_main_sample_scale" not in required_ids,
+            "gap_paper_run_sample_scale" not in required_ids,
             "outputs/submission_readiness/required_evidence_inputs.csv",
-            "full_main_sample_scale_missing",
-            "确认 full-main prompt split、样本量和随机种子已冻结并重建统计。",
+            "paper_run_sample_scale_missing",
+            "确认当前论文运行层级的 Prompt split、样本量和随机种子已冻结并重建统计。",
         ),
         _check_row(
             "fixed_fpr_recalibration_ready",
@@ -160,7 +164,6 @@ def build_evidence_closure_entry_review_report(
     paper_blocker = bundle.paper_blocker_report
     baseline = bundle.baseline_runtime_report
     dataset_quality = bundle.dataset_quality_summary
-    small_sample = bundle.baseline_small_sample_summary
     evidence_closure_allowed = not blocked_rows
     return {
         "construction_unit_name": "evidence_closure_entry_review",
@@ -181,19 +184,9 @@ def build_evidence_closure_entry_review_report(
         "formal_evidence_path_resolution_ready": _bool_value(
             baseline.get("formal_evidence_path_resolution_ready")
         ),
-        "dataset_level_quality_proxy_ready": _bool_value(dataset_quality.get("dataset_level_quality_proxy_ready")),
         "formal_fid_kid_ready": _bool_value(dataset_quality.get("formal_fid_kid_ready")),
         "formal_sample_scale_ready": _bool_value(dataset_quality.get("formal_sample_scale_ready")),
         "formal_feature_backend_ready": _bool_value(dataset_quality.get("formal_feature_backend_ready")),
-        "small_sample_baseline_boundary_ready": _bool_value(
-            readiness.get("small_sample_baseline_boundary_ready")
-        ),
-        "small_sample_baseline_covered_count": int(
-            readiness.get("small_sample_baseline_covered_count", 0)
-        ),
-        "formal_full_paper_run_requested": _bool_value(small_sample.get("formal_full_paper_run_requested")),
-        "formal_full_paper_run_permitted": _bool_value(small_sample.get("formal_full_paper_run_permitted")),
-        "excluded_operating_points": list(small_sample.get("excluded_operating_points", ())),
         "recommended_next_action": readiness.get("recommended_next_action", ""),
         "user_audit_question": "是否允许进入论文投稿级证据闭合, 需要由用户在审计本报告后决定。",
         "supports_paper_claim": False,

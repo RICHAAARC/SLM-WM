@@ -59,7 +59,6 @@ Notebook 与 repository module 的跨边界数据
 | expected_output_manifest | governance | none | false | false | false | 当前阶段预期生成的输出 manifest。 |
 | expected_outputs | governance | none | false | false | false | 当前阶段预期生成的输出文件集合。 |
 | blocking_items | governance | none | false | false | false | 当前阶段尚未解除的阻断项。 |
-| fallback_path | governance | none | false | false | false | 当前阶段失败时采用的降级或停止路径。 |
 | invariants | governance | none | false | false | false | 当前阶段推进时必须保持不变的约束。 |
 | next_stage_entry | governance | none | false | false | false | 当前阶段通过后允许进入的下一阶段入口。 |
 | command | governance | none | false | false | false | 阶段验证表中记录的验证命令。 |
@@ -85,16 +84,11 @@ Notebook 与 repository module 的跨边界数据
 | primitive_name | governance | none | false | false | false | 算法原语对象或阶段记录中的原语名称。 |
 | metrics | governance | none | false | false | false | 阶段 summary 中记录的指标集合。 |
 | record_count | governance | none | false | false | false | 阶段脚本生成的记录数量。 |
-| scenario_count | governance | none | false | false | false | synthetic smoke 场景数量。 |
-| records_are_synthetic | governance | none | false | false | false | 标记本地 records 是否为 synthetic 阶段产物。 |
 | carrier_digests | method | none | false | false | false | smoke metrics 中记录的 carrier 摘要集合。 |
 | minimal_method_dependency | governance | none | false | false | false | minimal smoke 依赖的最小方法包入口。 |
 | writes_persistent_output_by_default | governance | none | false | false | false | 脚本默认是否写出持久化输出。 |
 | attention_runtime | method | none | false | false | false | attention 原语是否接入真实运行时的状态说明。 |
-| event_name | method | none | false | false | false | synthetic 阶段事件名称。 |
-| event_digest | method | none | false | false | false | 事件声明或 synthetic 事件的稳定摘要。 |
 | branch | method | none | false | false | false | 载体派生分支名称, 例如 LF、`tail_robust` 或 attention。 |
-| field_length | method | none | false | false | false | synthetic 风险场或向量字段长度。 |
 | eta_saliency | method | none | false | false | false | 语义风险场中 saliency 权重。 |
 | eta_semantic | method | none | false | false | false | 语义风险场中 semantic 权重。 |
 | eta_texture | method | none | false | false | false | 语义风险场中 texture 权重。 |
@@ -105,7 +99,6 @@ Notebook 与 repository module 的跨边界数据
 | texture_threshold | method | none | false | false | false | LF/高斯幅值尾部截断路由的纹理阈值。 |
 | risk_threshold | method | none | false | false | false | LF 路由的风险阈值。 |
 | stability_threshold | method | none | false | false | false | 高斯幅值尾部截断与 attention 路由的稳定性阈值。 |
-| attention_threshold | method | none | false | false | false | attention synthetic stub 路由阈值。 |
 | risk_values | method | none | false | false | false | 语义风险场逐位置风险值。 |
 | budget_values | method | none | false | false | false | 语义承载预算逐位置数值。 |
 | lf_mask | method | none | false | false | false | LF 主证据候选区域 mask。 |
@@ -116,12 +109,11 @@ Notebook 与 repository module 的跨边界数据
 | source_length | method | none | false | false | false | 投影前 mask 长度。 |
 | target_length | method | none | false | false | false | 投影后目标 latent 长度。 |
 | projection_digest | method | none | false | false | false | latent mask 投影结果摘要。 |
-| safe_basis | method | none | false | false | false | 语义条件安全子空间 synthetic 基底。 |
 | lf_basis | method | none | false | false | false | LF 路由投影后的子基底。 |
 | tail_basis | method | none | false | false | false | 高斯幅值尾部截断路由投影后的子基底。 |
 | attention_basis | method | none | false | false | false | attention 路由投影后的子基底。 |
-| selected_indices | method | none | false | false | false | synthetic 安全基底选中的 latent 位置。 |
-| basis_rank | method | none | false | false | false | synthetic 安全基底最大秩。 |
+| selected_indices | method | none | false | false | false | Jacobian 低响应子空间基底选中的 latent 位置。 |
+| basis_rank | method | none | false | false | false | 语义条件 Jacobian 低响应子空间的实际秩。 |
 | selected_index_count_min | metric | none | false | false | false | 当前语义子空间输出中每条安全基底选中索引数量的最小值。 |
 | selected_index_count_max | metric | none | false | false | false | 当前语义子空间输出中每条安全基底选中索引数量的最大值。 |
 | condition_id | method | none | false | false | false | 语义条件化水印路由对象的稳定标识。 |
@@ -137,18 +129,15 @@ Notebook 与 repository module 的跨边界数据
 | frequency_band | method | none | false | false | false | 水印载体使用的频带名称或明确的频带不适用标识。 |
 | key_digest | method | none | false | false | false | 载体派生时使用的密钥材料摘要。 |
 | watermark_key_digest | method | none | true | false | false | 最小 latent injection 使用的水印密钥材料摘要, 不记录原始密钥。 |
-| template_values | method | none | false | false | false | LF/高斯幅值尾部截断/attention synthetic carrier 模板数值。 |
 | update_values | method | none | false | false | false | 单个 carrier 生成的 latent update 数值。 |
 | carrier_digest | method | none | true | false | false | 单个 carrier 的稳定摘要。 |
 | carrier_source | method | none | true | false | false | 最小 latent injection 中 carrier 的来源机制。 |
 | carrier_width | method | none | true | false | false | 从核心算法原语导出的 carrier 基础宽度。 |
 | lf_carrier_digest | method | none | true | false | false | LF carrier 的稳定摘要。 |
 | tail_carrier_digest | method | none | true | false | false | 高斯幅值尾部截断 carrier 的稳定摘要。 |
-| attention_carrier_digest | method | none | true | false | false | attention synthetic stub carrier 的稳定摘要。 |
 | core_update_digest | method | none | true | false | false | LF/高斯幅值尾部截断/attention carrier 合成后的核心 update 摘要。 |
 | tail_threshold | method | none | false | false | false | 高斯幅值尾部截断使用的幅值分位点阈值, 不表示频率截止值。 |
 | retained_fraction | method | none | false | false | false | 高斯幅值尾部截断后实际保留的模板元素比例。 |
-| synthetic_stub | method | none | false | false | false | 标记 attention carrier 是否仅为 synthetic stub。 |
 | tail_fraction | method | none | false | false | false | 高斯幅值尾部截断的目标元素保留比例, 不定义空间频带。 |
 | embedding_strength | method | none | false | false | false | 水印嵌入强度。 |
 | anchor_id | method | none | false | false | false | 注意力几何锚点对象的稳定标识。 |
@@ -156,7 +145,6 @@ Notebook 与 repository module 的跨边界数据
 | anchor_digest | method | none | false | false | false | 注意力锚点的稳定摘要。 |
 | lf_update_values | method | none | false | false | false | LF 分量 latent update 数值。 |
 | tail_update_values | method | none | false | false | false | 高斯幅值尾部截断分量的 latent update 数值。 |
-| attention_update_values | method | none | false | false | false | attention synthetic stub 分量 latent update 数值。 |
 | combined_update_values | method | none | false | false | false | 三个分量相加后的 latent update 数值。 |
 | update_digest | method | none | false | false | false | 组合 latent update 摘要。 |
 | evidence_id | method | none | true | false | false | 检测证据对象的稳定标识。 |
@@ -193,9 +181,6 @@ Notebook 与 repository module 的跨边界数据
 | formal_detection_score | method | none | true | false | false | fixed-FPR 正式判定使用的分数, 其来源由 threshold_score_field 说明。 |
 | threshold_score_after | method | none | true | false | false | 攻击或质量保持作用后用于 fixed-FPR 判定的正式分数。 |
 | content_threshold | protocol | none | true | false | false | fixed-FPR 内容阈值。 |
-| scenario_id | protocol | none | true | false | false | synthetic smoke 场景标识。 |
-| scenario_role | protocol | none | true | false | false | synthetic smoke 场景角色。 |
-| observed_digest | method | none | true | false | false | synthetic 观测 latent 的稳定摘要。 |
 | score_margin | method | none | true | false | false | 内容分数相对内容阈值的边界余量。 |
 | raw_content_margin | method | none | true | false | false | 原始内容分数相对内容阈值的边界余量。 |
 | aligned_content_margin | method | none | true | false | false | 对齐后内容分数相对内容阈值的边界余量。 |
@@ -212,8 +197,6 @@ Notebook 与 repository module 的跨边界数据
 | final_level | method | none | true | false | false | final-level 判定结果。 |
 | final_decision | method | none | true | false | false | smoke 场景中的 final-level 判定结果。 |
 | final_label | method | none | true | false | false | final-level 判定标签。 |
-| correct_key_score | method | none | true | false | false | synthetic 原语中正确 key 的内容分数。 |
-| wrong_key_score | method | none | true | false | false | synthetic 原语中错误 key 的内容分数。 |
 | key_separation_margin | method | none | true | false | false | 正确 key 与错误 key 内容分数差。 |
 | score_margin_min | method | none | true | false | false | smoke 场景中的最小 score margin。 |
 | rescue_trigger_rate | method | none | true | false | false | smoke 场景中 rescue_applied 的触发比例。 |
@@ -236,10 +219,10 @@ Notebook 与 repository module 的跨边界数据
 | height | runtime | none | true | false | false | generation probe 的目标图像高度。 |
 | inference_steps | runtime | none | true | false | false | runtime adapter 采样步数。 |
 | guidance_scale | runtime | none | true | false | false | runtime adapter guidance scale 配置。 |
-| latent_width | runtime | none | false | false | false | synthetic latent adapter 使用的 latent 向量宽度。 |
+| latent_width | runtime | none | false | false | false | SD3.5 Medium runtime 使用的 latent 向量宽度。 |
 | generation_id | runtime | none | true | false | false | generation record 的稳定标识。 |
 | latent_digest | runtime | none | true | false | false | latent 向量或最终 latent 的稳定摘要。 |
-| image_digest | runtime | none | true | false | false | synthetic 或真实生成图像的稳定摘要。 |
+| image_digest | runtime | none | true | false | false | 真实生成或攻击图像的稳定摘要。 |
 | image_shape | runtime | none | true | false | false | generation record 记录的图像形状。 |
 | quality_score | runtime | none | true | false | false | runtime probe 的轻量质量分数。 |
 | unsupported_reason | runtime | none | true | false | false | 真实后端不可用或能力降级的原因。 |
@@ -258,7 +241,6 @@ Notebook 与 repository module 的跨边界数据
 | attention_mean | runtime | none | true | false | false | attention map 或降级摘要 map 的均值。 |
 | attention_entropy | runtime | none | true | false | false | attention map 或降级摘要 map 的平均熵。 |
 | capture_backend | runtime | none | true | false | false | attention capture record 的捕获后端。 |
-| capture_is_synthetic | runtime | none | false | false | false | 标记 attention capture 是否由 synthetic fallback 构造。 |
 | supports_paper_claim | governance | none | true | false | false | 记录或摘要是否允许支持正式论文 claim。 |
 | config_digests | artifact | none | false | false | false | runtime manifest 中记录的配置摘要集合。 |
 | generation_record_count | runtime | none | false | false | false | runtime summary 中 generation record 数量。 |
@@ -267,7 +249,6 @@ Notebook 与 repository module 的跨边界数据
 | unsupported_reason_count | runtime | none | false | false | false | runtime summary 中 unsupported_reason 数量。 |
 | reproducibility_digest | runtime | none | false | false | false | runtime summary 的复现摘要。 |
 | mean_quality_score | runtime | none | false | false | false | generation records 的平均质量分数。 |
-| model_priority | runtime | none | true | false | false | 真实 runtime 中模型作为主线、对照或兼容 fallback 的角色。 |
 | probe_id | runtime | none | true | false | false | Colab 真实 runtime probe 的稳定标识。 |
 | probe_decision | runtime | none | true | false | false | Colab 真实 runtime probe 的通过状态。 |
 | trajectory_entry_count | runtime | none | true | false | false | 真实 runtime 捕获到的 latent trajectory 记录数量。 |
@@ -466,7 +447,7 @@ Notebook 与 repository module 的跨边界数据
 | attention_capture_record_count | method | none | false | false | false | attention capture records 数量。 |
 | attention_graph_record_count | method | none | false | false | false | 注意力锚点图 records 数量。 |
 | geometry_evidence_record_count | method | none | false | false | false | 几何证据 records 数量。 |
-| real_attention_capture_count | method | none | false | false | false | 无 unsupported reason、metadata.capture_is_synthetic=false 且含有有界 attention_matrix_preview 的真实 attention capture records 数量。 |
+| real_attention_capture_count | method | none | false | false | false | 无 unsupported reason 且含有有界 attention_matrix_preview 的真实 attention capture records 数量。 |
 | unsupported_capture_count | method | none | false | false | false | 带 unsupported reason 的 attention capture records 数量。 |
 | attention_relation_consistency_mean | metric | none | false | false | false | 注意力关系一致性的均值。 |
 | anchor_inlier_ratio_mean | metric | none | false | false | false | anchor inlier ratio 的均值。 |
@@ -501,10 +482,8 @@ Notebook 与 repository module 的跨边界数据
 | relation_consistency_before | method | none | true | false | false | 执行 attention update 前的相对关系一致性。 |
 | relation_consistency_after | method | none | true | false | false | 执行 attention update 后或强度模拟后的相对关系一致性。 |
 | projected_update_norm | method | none | true | false | false | 投影到语义安全轴后的 attention update 二范数。 |
-| quality_proxy_drop | method | none | true | false | false | 本地重建中用于限制图像质量风险的轻量代理退化量。 |
 | attention_update_strength | method | none | true | false | false | attention update 强度曲线中的实际强度值。 |
 | attention_update_stable | method | none | true | false | false | 单条 carrier 或强度行是否满足 update 稳定性边界。 |
-| fallback_mode | method | none | true | false | false | attention carrier 的执行模式, active_update 表示可执行 update, evidence_only 表示仅保留几何证据。 |
 | attention_relative_carrier_digest | method | none | true | false | false | attention-relative carrier 的稳定摘要。 |
 | quality_metric_count | method | none | false | false | false | attention update 质量代理指标数量。 |
 | quality_metric_name | method | none | false | false | false | attention update 质量代理指标名称。 |
@@ -568,7 +547,6 @@ Notebook 与 repository module 的跨边界数据
 | calibration_fpr_exceeds_target | metric | none | false | false | false | calibration clean negative 上冻结阈值的实际 FPR 是否超过目标 FPR, 该字段控制 fixed-FPR 校准门禁。 |
 | test_clean_fpr_exceeds_target | metric | none | false | false | false | 测试 clean negative 上 evidence-level FPR 是否超过目标 FPR, 该字段用于经验泛化诊断。 |
 | formal_detection_test_clean_fpr_exceeds_target | metric | none | false | false | false | 测试 clean negative 上 formal detection score FPR 是否超过目标 FPR, 该字段用于正式判定分数的经验泛化诊断。 |
-| clean_fpr_exceeds_target | metric | none | false | false | false | 兼容旧字段名, 表示测试 clean negative evidence-level FPR 是否超过目标 FPR。 |
 | attacked_fpr_diagnostic_exceeds_target | metric | none | false | false | false | attacked negative evidence-level FPR 是否超过目标 FPR, 该字段只作为攻击鲁棒性诊断。 |
 | fixed_fpr_boundary_ready | metric | none | false | false | false | fixed-FPR 阈值冻结边界是否未退化、calibration FPR 未超标并可被下游检测协议复用。 |
 | rescue_boundary_ready | metric | none | false | false | false | rescue 统计边界是否已冻结且不改变 fixed-FPR 分母; 测试 clean negative FPR 超标仅作为经验诊断。 |
@@ -579,7 +557,7 @@ Notebook 与 repository module 的跨边界数据
 | governs_fixed_fpr | governance | none | false | false | false | FPR 审计表中单行记录是否参与 fixed-FPR 控制边界。 |
 | raw_content_claim_ready | claim | none | false | false | false | raw content 分支是否满足当前 fixed-FPR 口径。 |
 | true_positive_rate | metric | none | false | false | false | positive source 上的 true positive rate。 |
-| false_positive_rate | metric | none | false | false | false | ROC 曲线点中的 false positive rate。 |
+| false_positive_rate | metric | none | false | false | false | 冻结 operating point 下 clean negative 的 false positive rate。 |
 | false_negative_rate | metric | none | false | false | false | DET 曲线点中的 false negative rate。 |
 | raw_score_auc | metric | none | false | false | false | raw content score 对 positive / clean negative 的 AUC。 |
 | aligned_score_auc | metric | none | false | false | false | aligned content score 对 positive / clean negative 的 AUC。 |
@@ -587,7 +565,7 @@ Notebook 与 repository module 的跨边界数据
 | metric_name | metric | none | false | false | false | 常规指标名称。 |
 | metric_value | metric | none | false | false | false | 常规指标数值。 |
 | metric_source | metric | none | false | false | false | 常规指标来源。 |
-| metric_status | metric | none | false | false | false | 指标状态, 例如 measured、proxy 或 unsupported。 |
+| metric_status | metric | none | false | false | false | 指标状态, 例如 measured 或 unsupported。 |
 | roc_threshold | metric | none | false | false | false | ROC 曲线点对应阈值。 |
 | det_threshold | metric | none | false | false | false | DET 曲线点对应阈值。 |
 | det_false_positive_rate | metric | none | false | false | false | DET 曲线点中的 false positive rate。 |
@@ -652,8 +630,6 @@ Notebook 与 repository module 的跨边界数据
 | lf_score_retention | metric | none | true | false | false | LF 内容分数在攻击后的保持率。 |
 | tail_score_retention | metric | none | true | false | false | 高斯幅值尾部截断内容分数在攻击后的保持率。 |
 | score_retention | metric | none | true | false | false | 统一内容分数在攻击后的保持率。 |
-| quality_score_proxy | metric | none | true | false | false | 本地攻击代理估计的质量保持分数。 |
-| attention_consistency_proxy | metric | none | true | false | false | 本地攻击代理估计的 attention 一致性保持分数。 |
 | attack_record_count | metric | none | false | false | false | 攻击矩阵检测 records 数量。 |
 | attack_config_count | metric | none | false | false | false | 攻击矩阵配置数量。 |
 | attack_family_count | metric | none | false | false | false | 攻击矩阵中唯一攻击族数量。 |
@@ -665,8 +641,6 @@ Notebook 与 repository module 的跨边界数据
 | clean_false_positive_rate | metric | none | false | false | false | clean negative 在攻击矩阵统计中的 false positive rate。 |
 | attacked_false_positive_rate | metric | none | false | false | false | attacked negative 在攻击矩阵统计中的 false positive rate。 |
 | score_retention_mean | metric | none | false | false | false | 攻击分组内 score retention 均值。 |
-| quality_score_proxy_mean | metric | none | false | false | false | 攻击分组内 quality score proxy 均值。 |
-| attention_consistency_proxy_mean | metric | none | false | false | false | 攻击分组内 attention consistency proxy 均值。 |
 | geometry_reliable_rate | metric | none | false | false | false | 攻击分组内几何可靠记录比例。 |
 | rescue_rate | metric | none | false | false | false | 攻击分组内 rescue_applied 比例。 |
 | input_manifests | artifact | none | false | false | false | 攻击矩阵或重建 manifest 引用的输入 manifest 集合。 |
@@ -687,15 +661,14 @@ Notebook 与 repository module 的跨边界数据
 | real_gpu_attack_validation_ready | governance | none | true | false | false | 再扩散、高级编辑和自适应去水印等真实 GPU 攻击是否已全部覆盖。|
 | real_gpu_attack_names | protocol | none | true | false | false | 已由真实 GPU attacked image formal records 覆盖的攻击名称集合。|
 | evaluation_boundary | protocol | none | false | false | false | 攻击后检测复用的 fixed-FPR 与 rescue 统计边界。 |
-| local_proxy_boundary | governance | none | false | false | false | 本地攻击矩阵代理实现的能力边界说明。 |
 | regeneration_attack_status | governance | none | false | false | false | 再扩散攻击是否已有真实产物支持的状态说明。 |
 | source_supports_paper_claim | claim | none | true | false | false | 源记录是否支持论文主张的继承状态。 |
 | score_retention_min | metric | none | false | false | false | 攻击分组内 score retention 最小值。 |
 | score_retention_max | metric | none | false | false | false | 攻击分组内 score retention 最大值。 |
 | lf_score_retention_mean | metric | none | false | false | false | 攻击分组内 LF score retention 均值。 |
 | tail_score_retention_mean | metric | none | false | false | false | 攻击分组内高斯幅值尾部截断 score retention 均值。 |
-| positive_count | metric | none | false | false | false | 攻击矩阵分组内 positive source 记录数量。 |
-| negative_count | metric | none | false | false | false | 攻击矩阵分组内非 positive source 记录数量。 |
+| positive_count | metric | none | false | false | false | 当前攻击设置下完整 test split positive 记录数量。 |
+| negative_count | metric | none | false | false | false | 用于固定 FPR 评估的完整 test split clean negative 记录数量。 |
 | baseline_id | protocol | none | true | false | false | 外部 baseline 的稳定语义标识。 |
 | baseline_family | protocol | none | true | false | false | 外部 baseline 所属方法族。 |
 | baseline_name | protocol | none | true | false | false | 外部 baseline 的论文或方法显示名称。 |
@@ -743,10 +716,6 @@ Notebook 与 repository module 的跨边界数据
 | ablated_lf_score_retention | metric | none | true | false | false | 消融后重新计算的 LF score retention。 |
 | baseline_tail_score_retention | metric | none | true | false | false | 完整方法代理记录中的高斯幅值尾部截断 score retention。 |
 | ablated_tail_score_retention | metric | none | true | false | false | 消融后重新计算的高斯幅值尾部截断 score retention。 |
-| baseline_quality_score_proxy | metric | none | true | false | false | 完整方法代理记录中的质量保持代理分数。 |
-| ablated_quality_score_proxy | metric | none | true | false | false | 消融后重新计算的质量保持代理分数。 |
-| baseline_attention_consistency_proxy | metric | none | true | false | false | 完整方法代理记录中的 attention 一致性代理分数。 |
-| ablated_attention_consistency_proxy | metric | none | true | false | false | 消融后重新计算的 attention 一致性代理分数。 |
 | baseline_geometry_reliable | metric | none | true | false | false | 完整方法代理记录中的几何可靠性。 |
 | ablated_geometry_reliable | metric | none | true | false | false | 消融后重新计算的几何可靠性。 |
 | baseline_rescue_applied | metric | none | true | false | false | 完整方法代理记录中的 rescue 触发状态。 |
@@ -764,8 +733,7 @@ Notebook 与 repository module 的跨边界数据
 | ablation_record_count | metric | none | false | false | false | 内部消融 records 数量。 |
 | ablation_claim_input_record_count | metric | none | false | false | false | 进入正式 standalone ablation claim 的 formal attacked image watermark rescore 记录数量。 |
 | ablation_claim_total_source_record_count | metric | none | false | false | false | 内部消融输入筛选前的源攻击 records 数量。 |
-| ablation_claim_excluded_record_count | metric | none | false | false | false | 被正式消融 claim gate 排除的 probe、proxy、unsupported 或非声明 sample role 记录数量。 |
-| ablation_claim_excluded_proxy_record_count | metric | none | false | false | false | 被正式消融 claim gate 排除的 proxy 来源记录数量。 |
+| ablation_claim_excluded_record_count | metric | none | false | false | false | 被正式消融 claim gate 排除的非声明记录数量。 |
 | ablation_claim_excluded_record_examples | governance | none | false | false | false | 被正式消融 claim gate 排除的代表性记录示例。 |
 | ablation_claim_metric_status | governance | none | false | false | false | 正式消融 claim 使用的统一 metric_status 边界。 |
 | ablation_claim_formal_input_ready | governance | none | false | false | false | 内部消融 claim 输入是否全部来自正式 attacked image watermark rescore 记录。 |
@@ -819,14 +787,11 @@ Notebook 与 repository module 的跨边界数据
 | score_space_name | protocol | none | true | false | false | fixed-FPR 校准、攻击检测或结果摘要实际使用的分数空间名称。 |
 | score_space_alignment_ready | governance | none | false | false | false | fixed-FPR 校准分数空间是否已与真实检测分数空间对齐。 |
 | real_score_calibration_ready | governance | none | false | false | false | fixed-FPR 阈值是否基于真实 aligned rescoring 分数记录校准。 |
-| proxy_score_calibration_used | governance | none | false | false | false | fixed-FPR 阈值是否退回使用 proxy content score 校准。 |
 | calibration_records_source | protocol | none | false | false | false | fixed-FPR 校准记录来源, 例如 aligned_rescoring_real_scores。 |
 | calibration_records_source_member | artifact | none | false | false | false | fixed-FPR 校准记录在输入压缩包中的成员路径。 |
 | calibration_record_count | metric | none | false | false | false | fixed-FPR 校准实际消费的记录数量。 |
 | raw_content_score_source_field | protocol | none | true | false | false | 归一化 raw_content_score 时使用的原始字段名。 |
 | aligned_content_score_source_field | protocol | none | true | false | false | 归一化 aligned_content_score 时使用的原始字段名。 |
-| proxy_raw_content_score | metric | none | true | false | false | 真实分数校准记录中保留的原 proxy raw content score。 |
-| proxy_aligned_content_score | metric | none | true | false | false | 真实分数校准记录中保留的原 proxy aligned content score。 |
 | real_lf_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的 LF 内容分数。 |
 | real_lf_score_after | metric | none | true | false | false | 对齐后真实 latent 投影上的 LF 内容分数。 |
 | real_tail_score_before | metric | none | true | false | false | 对齐前真实 latent 投影上的高斯幅值尾部截断内容分数。 |
@@ -880,8 +845,6 @@ Notebook 与 repository module 的跨边界数据
 | fid_status | metric | none | false | false | false | FID 指标计算状态。 |
 | kid | metric | none | false | false | false | Kernel Inception Distance 指标值或 unsupported 状态。 |
 | kid_status | metric | none | false | false | false | KID 指标计算状态。 |
-| fid_pixel_feature_proxy | metric | none | false | false | false | 使用轻量 pixel feature backend 计算的 FID proxy, 不等同于正式 FID。 |
-| kid_pixel_feature_proxy | metric | none | false | false | false | 使用轻量 pixel feature backend 计算的 KID proxy, 不等同于正式 KID。 |
 | dataset_quality_record_id | artifact | none | true | false | false | 数据集级质量图像对记录的稳定标识。 |
 | dataset_quality_record_digest | artifact | none | true | false | false | 数据集级质量图像对记录的稳定摘要。 |
 | image_pair_index | protocol | none | true | false | false | 数据集级质量图像对在 registry 中的序号。 |
@@ -889,22 +852,18 @@ Notebook 与 repository module 的跨边界数据
 | comparison_image_path | artifact | none | true | false | false | 数据集级质量图像对中的 comparison 图像路径。 |
 | comparison_image_digest | artifact | none | true | false | false | 数据集级质量图像对中的 comparison 图像摘要。 |
 | feature_backend | protocol | none | true | false | false | 数据集级质量指标使用的图像特征后端。 |
-| paper_metric_name | metric | none | false | false | false | proxy 指标对应但不能替代的论文指标名称。 |
+| paper_metric_name | metric | none | false | false | false | 正式质量指标在论文中的规范名称。 |
 | source_image_count | metric | none | false | false | false | 数据集级质量输入中的 source 图像数量。 |
 | comparison_image_count | metric | none | false | false | false | 数据集级质量输入中的 comparison 图像数量。 |
 | sample_pair_count | metric | none | false | false | false | 数据集级质量输入中的图像配对数量。 |
 | formal_quality_metric_count | metric | none | false | false | false | 数据集级正式质量指标表中的指标行数量, 正式表只包含 FID / KID。 |
-| diagnostic_quality_metric_count | metric | none | false | false | false | 数据集级诊断质量指标表中的指标行数量, 用于记录不支撑 claim 的 proxy 指标。 |
-| dataset_level_quality_proxy_ready | governance | none | false | false | false | 数据集级质量 proxy 是否已完成并可审计。 |
 | formal_fid_kid_ready | governance | none | false | false | false | 正式 FID / KID 是否已由论文约定特征后端完成。 |
 | formal_fid_kid_metric_names_ready | governance | none | false | false | false | 正式 FID 与 KID 两个指标是否均已测量, 防止单个指标被误判为完整质量结论。 |
 | formal_fid_kid_claim_gate_ready | governance | none | false | false | false | 数据集级正式 FID / KID 是否通过论文质量主张门禁。 |
 | formal_fid_kid_claim_blocker | governance | none | false | false | false | 阻断正式 FID / KID 质量主张的原因。 |
-| dataset_quality_proxy_only | governance | none | false | false | false | 数据集级质量当前是否只有 pixel feature proxy 可用。 |
 | dataset_quality_claim_boundary | governance | none | false | false | false | 数据集级质量证据能够支撑的论文主张边界。 |
 | dataset_quality_summary_path | artifact | none | false | false | false | 数据集级质量摘要 JSON 路径。 |
 | dataset_quality_formal_metrics_path | artifact | none | false | false | false | 只包含正式 FID / KID 行的数据集级质量指标表路径。 |
-| dataset_quality_diagnostic_metrics_path | artifact | none | false | false | false | 单独保存 pixel proxy 诊断指标的数据集级质量指标表路径。 |
 | dataset_quality_formal_feature_import_report_path | artifact | none | false | false | false | 数据集级质量正式特征导入报告路径。 |
 | dataset_quality_image_role | protocol | none | true | false | false | 数据集级质量正式特征记录对应 source 或 comparison 图像角色。 |
 | feature_vector | artifact | none | true | false | false | 由 Inception 或论文约定视觉特征后端导出的单张图像特征向量。 |
@@ -919,7 +878,7 @@ Notebook 与 repository module 的跨边界数据
 | formal_feature_records_path | artifact | none | false | false | false | 数据集级质量正式视觉特征 JSONL 记录路径。 |
 | feature_model_name | runtime | none | false | false | false | 数据集级质量正式视觉特征提取所使用的模型名称。 |
 | feature_device_name | runtime | none | false | false | false | 数据集级质量正式视觉特征提取所使用的运行设备。 |
-| dataset_quality_metrics_path | artifact | none | false | false | false | 数据集级正式质量指标表路径, 与 dataset_quality_formal_metrics_path 等价, 不包含 proxy 诊断行。 |
+| dataset_quality_metrics_path | artifact | none | false | false | false | 数据集级正式质量指标表路径, 与 dataset_quality_formal_metrics_path 等价。 |
 | real_attack_registry_path | artifact | none | false | false | false | 数据集级质量脚本读取的真实攻击图像 registry 路径。 |
 | dataset_quality_image_resolution_records_path | artifact | none | false | false | false | 数据集级质量图像解析记录 JSONL 路径。 |
 | image_resolution_record_id | artifact | none | true | false | false | 单个数据集级质量图像解析记录的稳定标识。 |
@@ -968,7 +927,8 @@ Notebook 与 repository module 的跨边界数据
 | submission_ready | governance | none | false | false | false | 当前证据包是否已经具备投稿冻结条件。 |
 | critical_gap_count | metric | none | false | false | false | 当前审计中严重证据缺口数量。 |
 | blocking_claim_count | metric | none | false | false | false | 当前审计中不可支持或仅预览的 claim 数量。 |
-| artifact_builder_ready | artifact | none | false | false | false | 论文产物构建器是否至少具备可运行审计链路。 |
+| artifact_builder_ready | artifact | none | false | false | false | 所有注册的论文表格与图数据是否均具备可重建的构建路径。 |
+| paper_artifact_claim_ready | governance | none | false | false | false | 所有注册的论文表格与图数据是否均已达到正式论文证据门禁。 |
 | paper_artifact_audit_ready | artifact | none | false | false | false | 论文图表证据审计链路是否已经完成本地可审计输出。 |
 | claim_audit_row_count | metric | none | false | false | false | claim audit 表中的审计行数量。 |
 | table_readiness_row_count | metric | none | false | false | false | 论文表格 readiness 表中的审计行数量。 |
@@ -1117,7 +1077,6 @@ Notebook 与 repository module 的跨边界数据
 | t2smark_result_count | metric | none | false | false | false | T2SMark 官方 results.json 中可读取的样本数量。 |
 | missing_result_indices | metric | none | true | false | false | T2SMark 输入 image pair 中缺少官方结果的索引集合。 |
 | adapter_digest | artifact | none | true | false | false | 外部 baseline adapter manifest 的稳定摘要。 |
-| score_retention_proxy | metric | none | true | false | false | 外部 baseline adapter observation 中记录的分数保持代理值。|
 | generation_model_id | runtime | none | true | false | false | 生成外部 baseline 图像所使用的模型标识。|
 | watermark_parameters | protocol | none | true | false | false | 外部 baseline method-faithful adapter 的水印参数摘要。|
 | message_mapping | protocol | none | true | false | false | Gaussian Shading adapter 中 message 到 latent noise 的映射说明。|
@@ -1163,21 +1122,7 @@ Notebook 与 repository module 的跨边界数据
 | formal_import_readiness_digest | artifact | none | false | false | false | 主表 external baseline 正式导入 readiness 表的稳定摘要。|
 | formal_import_readiness_summary_digest | artifact | none | false | false | false | 主表 external baseline 正式导入 readiness 摘要的稳定摘要。|
 | method_resource_profile | protocol | none | false | false | false | 方法忠实 adapter 候选记录声明的资源配置名称。|
-| small_sample_evidence_id | artifact | none | true | false | false | 主表 external baseline 小样本证据记录的稳定标识。|
-| small_sample_evidence_digest | artifact | none | true | false | false | 主表 external baseline 小样本证据记录的稳定摘要。|
-| small_sample_boundary | protocol | none | true | false | false | 当前 baseline 证据仅允许解释为小样本边界。|
 | paper_claim_boundary | governance | none | false | false | false | 当前证据与正式论文 claim 之间的边界说明。|
-| small_sample_evidence_ready | governance | none | false | false | false | 小样本 evidence paths 与基本样本计数是否就绪。|
-| small_sample_evidence_record_count | metric | none | false | false | false | 主表 external baseline 小样本证据记录数量。|
-| small_sample_evidence_ready_count | metric | none | false | false | false | 小样本证据就绪的主表 external baseline 记录数量。|
-| small_sample_fixed_fpr_boundary_ready | governance | none | true | false | false | 单条小样本 baseline 证据是否绑定 fixed_fpr_0.05 命名边界。|
-| small_sample_attack_detection_ready | governance | none | true | false | false | 单条小样本 baseline 证据是否包含 attack family/name 与检测计数边界。|
-| small_sample_common_protocol_ready | governance | none | false | false | false | 小样本 baseline 证据是否同时具备 evidence、fixed-FPR 命名边界和 attack detection 边界。|
-| small_sample_fixed_fpr_boundary_ready_count | metric | none | false | false | false | 具备 fixed_fpr_0.05 命名边界的小样本 baseline 记录数量。|
-| small_sample_attack_detection_ready_count | metric | none | false | false | false | 具备 attack detection 观测边界的小样本 baseline 记录数量。|
-| small_sample_common_protocol_ready_count | metric | none | false | false | false | 同时具备小样本共同协议边界的 baseline 记录数量。|
-| small_sample_common_protocol_ready_baseline_count | metric | none | false | false | false | 至少有一条记录具备小样本共同协议边界的主表 baseline 数量。|
-| small_sample_common_protocol_ready_ids | protocol | none | false | false | false | 至少有一条记录具备小样本共同协议边界的主表 baseline id 集合。|
 | covered_primary_baseline_count | metric | none | false | false | false | 小样本证据已覆盖的主表 external baseline 数量。|
 | covered_primary_baseline_ids | protocol | none | false | false | false | 小样本证据已覆盖的主表 external baseline id 集合。|
 | missing_primary_baseline_ids | protocol | none | false | false | false | 小样本证据尚未覆盖的主表 external baseline id 集合。|
@@ -1191,23 +1136,19 @@ Notebook 与 repository module 的跨边界数据
 | paper_claim_ready | governance | none | false | false | false | 当前证据是否允许支持论文级 claim。|
 | candidate_records_path | artifact | none | false | false | false | 小样本证据写出脚本读取的候选记录路径。|
 | validation_report_path | artifact | none | false | false | false | 小样本证据写出脚本读取的 validator 报告路径。|
-| small_sample_comparison_table_path | artifact | none | false | false | false | 主表 baseline 小样本共同协议对比表路径。|
-| baseline_small_sample_summary_path | artifact | none | false | false | false | 投稿就绪审计读取的主表 baseline 小样本证据摘要路径。|
-| small_sample_baseline_evidence_ready | governance | none | false | false | false | 投稿就绪审计中主表 baseline 小样本证据是否可审计。|
-| small_sample_baseline_common_protocol_ready | governance | none | false | false | false | 投稿就绪审计中主表 baseline 小样本共同协议是否就绪。|
-| small_sample_baseline_boundary_ready | governance | none | false | false | false | 投稿就绪审计中小样本 baseline 是否仅在受限边界内就绪且未升级为正式论文声明。|
-| small_sample_baseline_covered_count | metric | none | false | false | false | 投稿就绪审计中小样本 baseline 已覆盖的主表方法数量。|
-| small_sample_baseline_formal_import_ready_count | metric | none | false | false | false | 投稿就绪审计中小样本 baseline 已通过正式导入 validator 的记录数量。|
 | prompt_protocol_name | protocol | none | false | false | false | 正式导入结果绑定的 prompt 协议名称。 |
 | prompt_protocol_digest | artifact | none | true | false | false | 正式导入结果绑定的 prompt 协议摘要。 |
 | prompt_set_name | protocol | none | false | false | false | 正式导入或运行计划绑定的 prompt set 名称。 |
 | selected_prompt_count | metric | none | false | false | false | 当前运行实际选择的 prompt 数量。 |
-| prompt_limit | protocol | none | false | false | false | full_paper 运行入口的 prompt 截断上限, 0 表示不截断。 |
-| full_main_prompt_count | metric | none | false | false | false | 兼容既有 baseline 导入字段名, 表示 full_paper prompt 源文件中的 prompt 总数。 |
-| full_main_prompt_source_path | artifact | none | false | false | false | 兼容既有 baseline 导入字段名, 表示 full_paper prompt 源文件路径。 |
-| t2smark_full_main_reproduction_ready | artifact | none | false | false | false | T2SMark SD3.5 Medium full-main 官方运行与 adapter 转换链路是否跑通。 |
-| t2smark_full_main_formal_import_validation_report_path | artifact | none | false | false | false | T2SMark full-main 正式导入候选记录的 validator 报告路径。 |
-| backend_placeholder | placeholder | _placeholder | true | false | true | Bootstrap 阶段的占位 backend 字段。 |
+| prompt_limit | protocol | none | false | false | false | 当前论文运行层级的 Prompt 处理上限。 |
+| paper_run_prompt_count | metric | none | false | false | false | 当前论文运行层级的 Prompt 源文件总数。 |
+| paper_run_prompt_source_path | artifact | none | false | false | false | 当前论文运行层级的 Prompt 源文件路径。 |
+| t2smark_formal_reproduction_ready | artifact | none | false | false | false | T2SMark SD3.5 Medium 正式攻击矩阵运行与 adapter 转换链路是否跑通。 |
+| t2smark_formal_import_validation_report_path | artifact | none | false | false | false | T2SMark formal 正式导入候选记录的 validator 报告路径。 |
+| formal_attack_families | protocol | none | false | false | false | T2SMark formal 运行要求官方入口实际执行的正式攻击名称集合。 |
+| t2smark_formal_attack_names | protocol | none | false | false | false | T2SMark formal 结果必须覆盖的受治理攻击名称集合。 |
+| t2smark_formal_attack_result_count | metric | none | false | false | false | 同时包含全部正式攻击结果的 T2SMark 样本数。 |
+| t2smark_formal_attack_ready | governance | none | false | false | false | T2SMark 每个已选 Prompt 样本是否均完成全部正式攻击。 |
 | example_digest_random | random | _digest_random | true | false | false | 可复现随机轨迹的 digest 字段。 |
 | example_state_intermediate | intermediate | _intermediate | true | false | true | 跨步骤保存的示例中间状态字段, 正式产物生成前需要清理或迁移。 |
 | example_artifact_temporary | temporary | _temporary | false | false | true | 可清理的示例临时产物标记。 |
@@ -1215,17 +1156,17 @@ Notebook 与 repository module 的跨边界数据
 | external_baseline_method_faithful_ready | artifact | none | false | false | false | 外部 baseline 真实 method-faithful 链路是否已跑通并生成可审计结果包。|
 | t2smark_real_method_faithful_ready | artifact | none | false | false | false | T2SMark 官方 SD3.5 Medium 真实 GPU 最小复现是否已生成或复用成功。|
 | t2smark_official_result_generated | artifact | none | false | false | false | T2SMark 官方 results.json 是否由本次运行生成。|
-| t2smark_official_result_reused | artifact | none | false | false | false | T2SMark 官方 results.json 是否来自本地或 Drive 历史结果复用。|
+| t2smark_official_result_reused | artifact | none | false | false | false | T2SMark 官方 results.json 是否来自通过当前配置核对的本地或 Drive 结果。|
 | t2smark_source_available | artifact | none | false | false | false | T2SMark 官方源码入口在当前工作区中是否可用。|
 | t2smark_source_downloaded | artifact | none | false | false | false | T2SMark 官方源码缓存是否由本次冷启动流程下载。|
 | source_available | artifact | none | false | false | false | 外部源码缓存入口文件是否存在且可用于后续命令。|
 | source_downloaded | artifact | none | false | false | false | 外部源码缓存是否由本次命令补齐。|
 | source_entry_path | artifact | none | false | false | false | 外部源码缓存入口脚本路径。|
-| prior_package_reused | artifact | none | false | false | false | Google Drive 历史结果包是否被本次 workflow 复用。|
-| prior_package_path | artifact | none | false | false | false | 被复用的 Google Drive 历史结果包路径。|
-| prior_package_digest | artifact | none | false | false | false | 被复用的 Google Drive 历史结果包 SHA256 摘要。|
-| extracted_entry_count | metric | none | false | false | false | 从历史结果包中解出的可复用文件数量。|
-| extracted_entries | artifact | none | false | false | false | 从历史结果包中解出的可复用文件路径集合。|
+| prior_package_reused | artifact | none | false | false | false | Google Drive 同协议结果包是否被本次 workflow 复用。|
+| prior_package_path | artifact | none | false | false | false | 被复用的同协议 Google Drive 结果包路径。|
+| prior_package_digest | artifact | none | false | false | false | 被复用的同协议 Google Drive 结果包 SHA256 摘要。|
+| extracted_entry_count | metric | none | false | false | false | 从同协议结果包中解出的可复用文件数量。|
+| extracted_entries | artifact | none | false | false | false | 从同协议结果包中解出的可复用文件路径集合。|
 | adapter_execution_ready | artifact | none | false | false | false | 外部 baseline adapter 命令计划是否执行并通过证据边界校验。|
 | adapter_observation_count | metric | none | false | false | false | 外部 baseline adapter 输出的 observation 数量。|
 | primary_baseline_adapter_ready | artifact | none | false | false | false | 四个主表 external baseline adapter 在同一 method-faithful 命令计划中是否全部跑通。|
@@ -1261,10 +1202,10 @@ Notebook 与 repository module 的跨边界数据
 | method_faithful_adapter_ready_ids | protocol | none | false | false | false | 已达到方法忠实 SD3.5 适配边界的主表 baseline id 集合。|
 | missing_method_faithful_adapter_ids | protocol | none | false | false | false | 尚未达到方法忠实 SD3.5 适配边界的主表 baseline id 集合。|
 | native_official_reproduction_ids | protocol | none | false | false | false | 不需要 method-faithful adapter 的 native official reproduction baseline id 集合。|
-| method_faithful_adapter_protocol_ready | governance | none | false | false | false | 主表 legacy diffusion watermark baseline 是否均达到方法忠实 SD3.5 适配协议边界。|
+| method_faithful_adapter_protocol_ready | governance | none | false | false | false | 主表 diffusion watermark baseline 是否均达到方法忠实 SD3.5 适配协议边界。|
 | formal_import_candidate_allowed_ids | protocol | none | false | false | false | 已允许进入正式导入候选的 method-faithful adapter baseline id 集合。|
 | input_observation_count | metric | none | false | false | false | 协议写出脚本读取到的输入 observation 数量。|
-| full_main_prompt_protocol_ready | governance | none | false | false | false | 兼容既有 baseline 导入字段名, 表示主表 external baseline 是否已覆盖 full_paper prompt 协议。|
+| paper_run_prompt_protocol_ready | governance | none | false | false | false | 主表 external baseline 是否已覆盖当前论文运行层级的完整 Prompt 协议。|
 | fixed_fpr_baseline_calibration_ready | governance | none | false | false | false | 主表 external baseline 是否已完成 fixed-FPR 校准。|
 | attack_matrix_baseline_detection_ready | governance | none | false | false | false | 主表 external baseline 是否已完成共同攻击矩阵下的检测。|
 | formal_evidence_paths_ready | governance | none | false | false | false | 主表 external baseline 是否已绑定正式证据路径。|
@@ -1277,24 +1218,26 @@ Notebook 与 repository module 的跨边界数据
 | blocking_reasons | governance | none | false | false | false | 证据边界记录中阻断正式结果声明的原因集合。|
 | dominant_blocking_reasons | governance | none | false | false | false | 主表 baseline 正式导入 readiness 摘要中的主要阻断原因集合。|
 | dominant_formal_import_blocking_reasons | governance | none | false | false | false | 外部 baseline 对比运行报告中透传的正式导入主要阻断原因集合。|
-| missing_resource_profile_full_main | governance | none | false | false | false | 主表 baseline 候选是否缺少 full_main 资源档位边界。|
-| missing_full_main_prompt_protocol | governance | none | false | false | false | 兼容既有 baseline 导入字段名, 表示主表 baseline 候选是否缺少 full_paper prompt 协议边界。|
+| missing_formal_attack_resource_profile | governance | none | false | false | false | 主表 baseline 候选是否缺少当前正式攻击矩阵要求的资源档位边界。|
+| missing_paper_run_prompt_protocol | governance | none | false | false | false | 主表 baseline 候选是否缺少当前论文运行层级的完整 Prompt 协议边界。|
 | missing_fixed_fpr_baseline_calibration | governance | none | false | false | false | 主表 baseline 候选是否缺少 fixed-FPR baseline 校准边界。|
 | missing_attack_matrix_baseline_detection | governance | none | false | false | false | 主表 baseline 候选是否缺少共同攻击矩阵检测边界。|
-| formal_import_readiness_summary_path | artifact | none | false | false | false | 主表 baseline 正式导入 readiness 摘要路径。|
 | expected_formal_template_count | metric | none | false | false | false | 单个主表 baseline 需要覆盖的正式共同协议模板数量。|
 | formal_template_record_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板总数量。|
 | candidate_template_match_count | metric | none | false | false | false | 单个主表 baseline 候选记录中匹配正式模板键的数量。|
 | accepted_template_match_count | metric | none | false | false | false | 单个主表 baseline 已通过 validator 且匹配正式模板键的数量。|
 | missing_candidate_template_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板中尚未出现候选记录匹配的数量。|
 | missing_formal_template_count | metric | none | false | false | false | 主表 baseline 正式共同协议模板仍缺失的数量。|
+| unexpected_candidate_record_count | metric | none | false | false | false | 候选记录中不属于当前正式攻击模板键的记录数量。|
+| unexpected_accepted_record_count | metric | none | false | false | false | 通过行级校验但不属于当前正式攻击模板键的记录数量。|
+| duplicate_candidate_template_count | metric | none | false | false | false | 候选记录中重复的 baseline 与攻击模板键数量。|
+| duplicate_accepted_template_count | metric | none | false | false | false | 已通过行级校验记录中重复的 baseline 与攻击模板键数量。|
 | formal_template_coverage_ready | governance | none | false | false | false | 单个主表 baseline 是否已覆盖所有正式共同协议模板。|
 | formal_template_coverage_ready_count | metric | none | false | false | false | 已覆盖所有正式共同协议模板的主表 baseline 数量。|
 | formal_template_coverage_ready_ids | protocol | none | false | false | false | 已覆盖所有正式共同协议模板的主表 baseline id 集合。|
 | primary_baseline_formal_template_coverage_ready | governance | none | false | false | false | 四个主表 external baseline 是否全部覆盖正式共同协议模板。|
 | formal_template_coverage_digest | artifact | none | false | false | false | 主表 external baseline 正式模板覆盖表的稳定摘要。|
 | formal_template_coverage_summary_digest | artifact | none | false | false | false | 主表 external baseline 正式模板覆盖摘要的稳定摘要。|
-| formal_template_coverage_summary_path | artifact | none | false | false | false | 主表 baseline 正式模板覆盖摘要路径。|
 | formal_evidence_collection_id | artifact | none | false | false | false | 主表 external baseline 正式证据收集计划行的稳定标识。 |
 | formal_evidence_collection_digest | artifact | none | false | false | false | 主表 external baseline 正式证据收集计划行的稳定摘要。 |
 | formal_evidence_collection_ready | governance | none | false | false | false | 单条正式模板是否已经具备可导入的正式证据记录。 |
@@ -1306,7 +1249,6 @@ Notebook 与 repository module 的跨边界数据
 | required_result_record_path | artifact | none | false | false | false | 正式证据收集计划要求写入或导入的 baseline 结果记录路径。 |
 | formal_evidence_collection_plan_digest | artifact | none | false | false | false | 主表 external baseline 正式证据收集计划的稳定摘要。 |
 | formal_evidence_collection_summary_digest | artifact | none | false | false | false | 主表 external baseline 正式证据收集摘要的稳定摘要。 |
-| formal_evidence_collection_summary_path | artifact | none | false | false | false | 主表 external baseline 正式证据收集摘要路径。 |
 | adapter_boundary | governance | none | false | false | false | adapter observation 或 manifest 对工程 smoke 与正式论文证据边界的说明。|
 | execution_device | runtime | none | false | false | false | adapter 张量或诊断分数实际执行设备。|
 | torch_available | runtime | none | false | false | false | adapter 运行环境中是否可导入 torch。|
@@ -1314,7 +1256,7 @@ Notebook 与 repository module 的跨边界数据
 | score_metadata | runtime | none | false | false | false | adapter manifest 中按 prompt 记录的轻量分数计算元数据。|
 | adapter_unsupported_reason | governance | none | false | false | false | 外部 baseline adapter 未能通过 method-faithful 链路时记录的边界原因。|
 | official_result_generated | artifact | none | false | false | false | 外部 baseline 官方结果是否由本次命令生成。|
-| official_result_reused | artifact | none | false | false | false | 外部 baseline 官方结果是否由本地或历史结果复用。|
+| official_result_reused | artifact | none | false | false | false | 外部 baseline 官方结果是否由通过当前配置核对的本地结果复用。|
 | official_generation_reason | governance | none | false | false | false | 外部 baseline 官方结果生成或复用决策的原因。|
 | official_results_path | artifact | none | false | false | false | 外部 baseline 官方结果文件路径。|
 | official_return_code | runtime | none | false | false | false | 外部 baseline 官方入口命令返回码。|
@@ -1345,9 +1287,10 @@ Notebook 与 repository module 的跨边界数据
 | paper_target_fpr | protocol | none | false | false | false | 当前论文运行层级使用的 fixed-FPR 目标值, pilot_paper 默认为 0.01, full_paper 默认为 0.001。|
 | expected_target_fpr | protocol | none | false | false | false | 当前论文运行层级按协议应匹配的 fixed-FPR 目标值。|
 | pilot_paper_negative_count_minimum_required | metric | none | false | false | false | pilot_paper fixed-FPR 校准所要求的最小 clean negative 数量。|
-| minimum_clean_negative_count | metric | none | false | false | false | fixed-FPR 协议配置中要求的最小 clean negative 样本数。|
-| minimum_result_positive_count | metric | none | false | false | false | pilot_paper 结果导入 schema 要求的最小 positive 样本数, 当前与 fixed-FPR clean negative 最小数一致。|
-| minimum_result_negative_count | metric | none | false | false | false | pilot_paper 结果导入 schema 要求的最小 negative 样本数, 用于避免小样本链路结果误入 pilot_paper claim 边界。|
+| minimum_clean_negative_count | metric | none | false | false | false | fixed-FPR 协议要求的完整 test split clean negative 样本数, 三类运行层级分别为34、340、3400。|
+| minimum_result_positive_count | metric | none | false | false | false | 结果导入 schema 要求的完整 test split positive 样本数, 与当前运行层级的 test 数量一致。|
+| minimum_result_negative_count | metric | none | false | false | false | 结果导入 schema 要求的完整 test split negative 样本数, 不允许不完整统计进入论文 claim 边界。|
+| minimum_result_attacked_negative_count | metric | none | false | false | false | 结果导入 schema 要求的每个攻击设置完整 test split attacked negative 样本数。|
 | pilot_paper_negative_count_ready | governance | none | false | false | false | pilot_paper prompt split 中 clean negative 数量是否满足最小要求。|
 | pilot_paper_attack_count | metric | none | false | false | false | pilot_paper 共同协议攻击矩阵中的攻击配置数量。|
 | pilot_paper_method_count | metric | none | false | false | false | pilot_paper 共同协议覆盖的方法数量。|
@@ -1368,6 +1311,12 @@ Notebook 与 repository module 的跨边界数据
 | best_baseline_method_id | protocol | none | false | false | false | 主表 baseline 中平均 true positive rate 最高的方法标识。|
 | missing_baseline_methods | governance | none | false | false | false | 方法效果门禁中缺失结果记录的 baseline 方法集合。|
 | method_attack_templates_aligned | governance | none | false | false | false | SLM-WM 与 baseline 是否在相同攻击模板上进行比较。|
+| method_attack_template_keys_unique | governance | none | false | false | false | 各方法的攻击模板结果键是否均无重复记录。|
+| paper_run_result_import_coverage_ready | governance | none | false | false | false | 当前论文运行的已接受结果是否严格覆盖 method × attack 模板。|
+| paper_run_result_missing_template_count | metric | none | false | false | false | 当前论文运行已接受结果中缺失的 method × attack 模板数。|
+| paper_run_result_unexpected_template_count | metric | none | false | false | false | 当前论文运行已接受结果中额外的 method × attack 模板数。|
+| paper_run_result_duplicate_template_count | metric | none | false | false | false | 当前论文运行已接受结果中重复的 method × attack 模板行数。|
+| paper_run_template_registry_unique | governance | none | false | false | false | 当前论文运行的正式导入模板注册表是否无重复键。|
 | pilot_paper_claim_ready | governance | none | false | false | false | pilot_paper 规模论文主张是否已由同一 prompt split、同一攻击矩阵、fixed-FPR 协议和受治理导入记录闭合。|
 | pilot_paper_supports_superiority_claim | governance | none | false | false | false | pilot_paper 结果是否允许在 pilot_paper 样本规模边界内支撑方法优越性主张。|
 | full_paper_claim_ready | governance | none | false | false | false | full_paper 规模论文主张是否已具备证据闭合。pilot_paper 共同协议中必须为 false。|
@@ -1412,8 +1361,6 @@ Notebook 与 repository module 的跨边界数据
 | attacked_image_latent_rescore | method | none | true | false | false | attacked image 经过 VAE latent 投影后的直接水印重检测摘要对象。|
 | attacked_image_rescore_count | metric | none | true | false | false | 已完成 attacked image 直接水印重检测的记录数量。|
 | attacked_image_rescore_ready | governance | none | true | false | false | attacked image 直接水印重检测是否覆盖当前闭环内全部真实 attacked image。|
-| proxy_formal_record_count | metric | none | true | false | false | 当前 formal 攻击记录中仍使用代理分数边界的记录数量。|
-| formal_detection_proxy | governance | none | true | false | false | 攻击后 formal 记录是否仍使用图像质量保持率代理而非 attacked image 直接水印重检测。|
 | attacked_image_rescore_performed | governance | none | true | false | false | 是否已经对 attacked image 执行直接水印重检测。|
 | attacked_image_rescore_required_for_claim | governance | none | true | false | false | 当前记录若要支撑论文主张是否仍需要 attacked image 直接水印重检测。|
 | detection_score_source | governance | none | true | false | false | 攻击后检测分数的来源, 用于区分真实重检测、latent score 传播或图像质量保持率代理。|
@@ -1422,10 +1369,6 @@ Notebook 与 repository module 的跨边界数据
 | attacked_latent_projection_digest | artifact | none | true | false | false | attacked image 经 VAE 编码和槽位投影后的稳定摘要。|
 | watermark_coordinate | metric | none | true | false | false | attacked image latent 投影在 source clean-to-aligned 水印方向上的无界坐标。|
 | bounded_watermark_coordinate | metric | none | true | false | false | 用于正式分数映射的 bounded watermark coordinate。|
-| formal_proxy_replacement_complete_count | metric | none | true | false | false | 攻击矩阵中真实图像 formal records 完整覆盖并替换同配置 proxy records 的攻击配置数量。|
-| formal_proxy_replacement_incomplete_count | metric | none | true | false | false | 攻击矩阵中存在真实图像 formal records 但未完整覆盖同配置 proxy records 的攻击配置数量。|
-| formal_proxy_replacement_incomplete_examples | governance | none | true | false | false | 真实图像 formal records 覆盖不完整的攻击配置示例。|
-| formal_proxy_replacement_requires_complete_split_role_coverage | governance | none | true | false | false | 是否要求真实图像 formal records 按全部 split 和 sample_role 完整覆盖后才能替换 proxy records。当前 fixed-FPR 论文主张只要求 formal records 覆盖 positive_source 与 clean_negative, attacked_negative 只作为诊断边界。|
 | decision_mode | protocol | none | true | false | false | fixed-FPR 诊断表中的判定模式, 用于区分 raw、aligned 和 rescue 后 evidence。|
 | score_field | metric | none | true | false | false | fixed-FPR 诊断表使用的分数字段或布尔判定字段。|
 | score_mode_operating_points | artifact | none | true | false | false | raw、aligned 和 rescue 后 evidence 三种判定模式的 fixed-FPR operating point 诊断行集合。|
@@ -1453,6 +1396,16 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_template_record_count | metric | none | true | false | false | pilot_paper 共同协议结果导入模板总数量。|
 | pilot_paper_result_method_ids | protocol | none | true | false | false | pilot_paper 结果记录实际覆盖的方法 id 集合。|
 | pilot_paper_result_record_count | metric | none | true | false | false | pilot_paper 共同协议结果记录物化后的记录数量。|
+| expected_superiority_row_count | metric | none | true | false | false | 正式攻击矩阵应产生的逐攻击优越性比较行数。|
+| expected_result_record_count | metric | none | true | false | false | 五种方法与正式攻击矩阵笛卡尔积对应的预期结果记录数。|
+| actual_result_record_count | metric | none | true | false | false | 结果分析实际读取的记录行数, 包含可能的重复键。|
+| unique_result_record_key_count | metric | none | true | false | false | 结果记录中唯一 method × attack 模板键的数量。|
+| duplicate_result_record_count | metric | none | true | false | false | 结果记录中重复 method × attack 模板键的多余行数。|
+| missing_result_record_count | metric | none | true | false | false | 五种方法的正式 method × attack 模板中缺失的记录数。|
+| unexpected_result_record_count | metric | none | true | false | false | 不属于当前正式 method × attack 模板的记录键数。|
+| result_template_coverage_ready | governance | none | true | false | false | 结果记录是否无缺失、无额外且无重复地覆盖正式 method × attack 模板。|
+| missing_result_record_examples | governance | none | true | false | false | 结果模板覆盖报告中的缺失键示例。|
+| unexpected_result_record_examples | governance | none | true | false | false | 结果模板覆盖报告中的额外键示例。|
 | prompt_split_ready | governance | none | false | false | false | prompt split 是否满足共同协议使用条件。|
 | branch_name | method | none | true | false | false | 分支风险场、Null Space 或载体所属的机制分支。 |
 | bundle_digest | method | none | true | false | false | 三个分支风险场组合后的稳定摘要。 |
@@ -1489,7 +1442,7 @@ Notebook 与 repository module 的跨边界数据
 | category_counts | provenance | none | true | false | false | 新增 Prompt 的来源类别分布。 |
 | challenge_counts | provenance | none | true | false | false | 新增 Prompt 的来源挑战类型分布。 |
 | selected_prompt_digest | provenance | none | true | false | false | 确定性选择后 Prompt 文本集合摘要。 |
-| attacked_negative_count | metric | none | true | true | false | 攻击后负样本数量, 与 clean negative 数量分开统计。 |
+| attacked_negative_count | metric | none | false | true | false | 当前攻击设置下完整 test split attacked negative 记录数量, 与 clean negative 数量分开统计。 |
 | generation_rerun | protocol | none | true | true | false | 消融配置是否重新执行真实图像生成。 |
 | counterfactual_score_transform_used | protocol | none | true | true | false | 消融是否使用禁止替代正式实验的分数变换。 |
 | jvp_modes | method | none | true | false | false | 同一注入时刻各载体分支实际使用的精确 JVP 实现模式集合。 |
@@ -1532,4 +1485,3 @@ Notebook 与 repository module 的跨边界数据
 | scientific_autograd_compatibility | environment | none | true | false | false | 为精确 forward AD 与 latent 输入梯度固定的模型注意力实现摘要。 |
 | clip_attention_implementation | environment | none | true | false | false | CLIP 视觉编码器使用的注意力实现, 当前正式值为 eager。 |
 | vae_attention_processor | environment | none | true | false | false | VAE 可微解码使用的 Diffusers attention processor。 |
-| cpu_offload_enabled | environment | none | true | false | false | legacy DDIM 攻击模型是否启用 Diffusers CPU offload 以避免与 SD3.5 争用显存。 |

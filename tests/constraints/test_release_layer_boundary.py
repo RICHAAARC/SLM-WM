@@ -49,10 +49,10 @@ def test_paper_analysis_and_baselines_live_outside_experiments() -> None:
 
 
 @pytest.mark.constraint
-def test_removed_component_diagnostics_do_not_return() -> None:
-    """已由完整方法运行替代的分量级执行模块不得重新进入项目。"""
+def test_formal_experiment_surface_excludes_component_entrypoints() -> None:
+    """正式实验表面不得包含绕过完整方法 runner 的分量级入口。"""
 
-    removed = (
+    forbidden = (
         "experiments/runners/aligned_rescoring.py",
         "experiments/runners/attention_geometry_capture.py",
         "experiments/runners/attention_latent_injection.py",
@@ -61,4 +61,4 @@ def test_removed_component_diagnostics_do_not_return() -> None:
         "scripts/run_core_smoke.py",
         "scripts/write_internal_ablation_outputs.py",
     )
-    assert all(not Path(path).exists() for path in removed)
+    assert all(not Path(path).exists() for path in forbidden)

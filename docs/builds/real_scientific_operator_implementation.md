@@ -10,13 +10,13 @@
 | 真实注意力梯度 | `main/methods/geometry/differentiable_attention.py` | 从 Transformer `to_q`/`to_k` 得到真实 attention, 对 latent 求梯度 |
 | 几何恢复 | `main/methods/geometry/attention_alignment.py` | 执行密钥关系匹配、三点 RANSAC 和仿射估计 |
 | 仅图像检测 | `main/methods/detection/image_only.py` | 只接收图像、密钥和公开模型配置, 完成内容主判与同阈值救回 |
-| 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | 在 SD3/SD3.5 采样过程中执行全部真实嵌入算子 |
+| 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | 在 SD3.5 Medium 采样过程中执行全部真实嵌入算子 |
 | 数据集协议 | `experiments/runners/image_only_dataset_runtime.py` | 运行 Prompt 数据集、冻结完整 evidence 协议并生成 test 记录 |
 | 正式消融 | `experiments/ablations/runtime_rerun.py` | 对每个机制配置重新生成、重新攻击和重新检测 |
 | 正式 FID/KID | `experiments/artifacts/dataset_level_quality_outputs.py` | 使用 torch-fidelity 0.4.0 的 TensorFlow 兼容 Inception v3 2048 维特征生成可审计质量记录 |
 | Colab 续跑 | `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb` | 在 Drive 持久化工作区分批运行主方法、质量评估与正式消融 |
 
-高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对标准高斯模板按元素绝对幅值分位点截断, 不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。轻量内容载体实现位于 `main/methods/carrier/tail.py`。
+高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对标准高斯模板按元素绝对幅值分位点截断, 不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。内容模板与安全投影实现位于 `main/methods/carrier/keyed_tensor.py`。
 
 ## 二、检测访问边界
 
@@ -33,9 +33,7 @@ detect_image_only_watermark(
 )
 ```
 
-该接口没有原始 latent、生成轨迹、原始图像、prompt 或样本级安全基底参数。
-`experiments/runners/aligned_rescoring.py` 中依赖生成轨迹的旧路径只保留为历史诊断,
-其结果不得进入论文主方法记录。
+该接口没有原始 latent、生成轨迹、原始图像、Prompt 或样本级安全基底参数。数据集运行器只允许通过该接口生成正式检测记录。
 
 ## 三、固定模板与安全投影的盲检闭合
 
@@ -55,7 +53,7 @@ $$
 ## 四、完整实验链
 
 1. `scripts/run_image_only_dataset_runtime.py` 读取当前 `paper_run` Prompt 文件；
-2. 复用一次加载的 SD3/SD3.5、VAE 和 CLIP 运行时；
+2. 复用一次加载的 SD3.5 Medium、VAE 和 CLIP 运行时；
 3. 对每个 Prompt 生成 clean 与 watermarked 图像；
 4. 对选定 test Prompt 执行标准图像攻击和真实再扩散攻击；
 5. 所有样本只从最终图像重新编码并检测；

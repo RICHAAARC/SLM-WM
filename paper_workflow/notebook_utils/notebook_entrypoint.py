@@ -24,15 +24,56 @@ WORKFLOW_DRIVE_OUTPUT_ENV_KEYS = {
     "official_reference_tree_ring": "SLM_WM_TREE_RING_OFFICIAL_DRIVE_OUTPUT_DIR",
     "official_reference_gaussian_shading": "SLM_WM_GAUSSIAN_SHADING_OFFICIAL_DRIVE_OUTPUT_DIR",
     "official_reference_shallow_diffuse": "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_DRIVE_OUTPUT_DIR",
-    "official_reference_t2smark": "SLM_WM_T2SMARK_FULL_MAIN_DRIVE_OUTPUT_DIR",
+    "official_reference_t2smark": "SLM_WM_T2SMARK_FORMAL_DRIVE_OUTPUT_DIR",
 }
 WORKFLOW_LOCAL_OUTPUT_DIRS = {
     "external_baseline_method_faithful": "outputs/external_baseline_method_faithful",
     "official_reference_tree_ring": "outputs/tree_ring_official_reference",
     "official_reference_gaussian_shading": "outputs/gaussian_shading_official_reference",
     "official_reference_shallow_diffuse": "outputs/shallow_diffuse_official_reference",
-    "official_reference_t2smark": "outputs/t2smark_full_main_reproduction",
+    "official_reference_t2smark": "outputs/t2smark_formal_reproduction",
 }
+
+
+def _run_function_for_workflow(workflow_name: str) -> Callable[..., Any]:
+    """延迟解析正式 workflow runner, 使 Notebook 只调用统一入口。"""
+
+    if workflow_name == "external_baseline_method_faithful":
+        from paper_experiments.runners.external_baseline_method_faithful import (
+            run_default_external_baseline_method_faithful_plan,
+        )
+
+        return run_default_external_baseline_method_faithful_plan
+    if workflow_name == "official_reference_tree_ring":
+        from paper_experiments.runners.tree_ring_official_reference import run_default_tree_ring_official_reference_plan
+
+        return run_default_tree_ring_official_reference_plan
+    if workflow_name == "official_reference_gaussian_shading":
+        from paper_experiments.runners.gaussian_shading_official_reference import (
+            run_default_gaussian_shading_official_reference_plan,
+        )
+
+        return run_default_gaussian_shading_official_reference_plan
+    if workflow_name == "official_reference_shallow_diffuse":
+        from paper_experiments.runners.shallow_diffuse_official_reference import (
+            run_default_shallow_diffuse_official_reference_plan,
+        )
+
+        return run_default_shallow_diffuse_official_reference_plan
+    if workflow_name == "official_reference_t2smark":
+        from paper_experiments.runners.t2smark_formal_reproduction import (
+            run_default_t2smark_formal_reproduction_plan,
+        )
+
+        return run_default_t2smark_formal_reproduction_plan
+    raise ValueError(f"unknown_notebook_workflow:{workflow_name}")
+
+
+def run_workflow(*, root: str | Path = ".", workflow_name: str) -> Any:
+    """通过统一薄入口运行正式 repository workflow。"""
+
+    return _run_function_for_workflow(workflow_name)(root=root)
+
 
 def resolve_drive_output_dir(workflow_name: str, drive_output_dir: str | None = None) -> str | None:
     """从显式参数或约定环境变量解析 Drive 输出目录。"""
@@ -49,33 +90,33 @@ def _package_function_for_workflow(workflow_name: str) -> Callable[..., Any]:
     """延迟导入 workflow 打包函数, 避免 Notebook 入口加载无关重依赖。"""
 
     if workflow_name == "external_baseline_method_faithful":
-        from paper_workflow.colab_utils.external_baseline_method_faithful import (
+        from paper_experiments.runners.external_baseline_method_faithful import (
             package_external_baseline_method_faithful_outputs,
         )
 
         return package_external_baseline_method_faithful_outputs
     if workflow_name == "official_reference_tree_ring":
-        from paper_workflow.colab_utils.tree_ring_official_reference import package_tree_ring_official_reference_outputs
+        from paper_experiments.runners.tree_ring_official_reference import package_tree_ring_official_reference_outputs
 
         return package_tree_ring_official_reference_outputs
     if workflow_name == "official_reference_gaussian_shading":
-        from paper_workflow.colab_utils.gaussian_shading_official_reference import (
+        from paper_experiments.runners.gaussian_shading_official_reference import (
             package_gaussian_shading_official_reference_outputs,
         )
 
         return package_gaussian_shading_official_reference_outputs
     if workflow_name == "official_reference_shallow_diffuse":
-        from paper_workflow.colab_utils.shallow_diffuse_official_reference import (
+        from paper_experiments.runners.shallow_diffuse_official_reference import (
             package_shallow_diffuse_official_reference_outputs,
         )
 
         return package_shallow_diffuse_official_reference_outputs
     if workflow_name == "official_reference_t2smark":
-        from paper_workflow.colab_utils.t2smark_full_main_reproduction import (
-            package_t2smark_full_main_reproduction_outputs,
+        from paper_experiments.runners.t2smark_formal_reproduction import (
+            package_t2smark_formal_reproduction_outputs,
         )
 
-        return package_t2smark_full_main_reproduction_outputs
+        return package_t2smark_formal_reproduction_outputs
     raise ValueError(f"unknown_notebook_workflow:{workflow_name}")
 
 
@@ -103,15 +144,4 @@ def package_workflow_outputs(
     if resolved_drive_output_dir is not None:
         package_kwargs["drive_output_dir"] = resolved_drive_output_dir
     return package_function(**package_kwargs)
-
-
-def package_runtime_method_precheck_outputs(root: str | Path = ".") -> dict[str, Any]:
-    """统一打包运行时诊断 Notebook 的两个预检产物。"""
-
-    runtime_archive = package_workflow_outputs(root=root, workflow_name="real_sd_runtime_probe")
-    injection_archive = package_workflow_outputs(root=root, workflow_name="minimal_diffusion_latent_injection")
-    return {
-        "runtime_archive": runtime_archive.to_dict(),
-        "injection_archive": injection_archive.to_dict(),
-    }
 

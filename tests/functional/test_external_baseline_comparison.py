@@ -73,7 +73,7 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
                 "false_positive_rate",
                 "clean_false_positive_rate",
                 "attacked_false_positive_rate",
-                "quality_score_proxy_mean",
+                "quality_score_mean",
                 "score_retention_mean",
                 "supports_paper_claim",
             ],
@@ -84,7 +84,7 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
                 "attack_family": "standard_distortion",
                 "attack_name": "jpeg_compression",
                 "resource_profile": "full_main",
-                "metric_status": "measured_from_local_proxy",
+                "metric_status": "measured_real_attacked_image_image_only_detection",
                 "attack_record_count": 6,
                 "supported_record_count": 6,
                 "unsupported_record_count": 0,
@@ -94,7 +94,7 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
                 "false_positive_rate": 0.25,
                 "clean_false_positive_rate": 0.0,
                 "attacked_false_positive_rate": 0.5,
-                "quality_score_proxy_mean": 0.9,
+                "quality_score_mean": 0.9,
                 "score_retention_mean": 0.8,
                 "supports_paper_claim": False,
             }
@@ -114,7 +114,7 @@ def write_input_artifacts(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
                 "false_positive_rate": 0.0,
                 "clean_false_positive_rate": 0.0,
                 "attacked_false_positive_rate": 0.0,
-                "quality_score_proxy_mean": 0.0,
+                "quality_score_mean": 0.0,
                 "score_retention_mean": 0.0,
                 "supports_paper_claim": False,
             }
@@ -166,26 +166,22 @@ def test_external_baseline_outputs_are_rebuildable_and_claim_safe(tmp_path: Path
     assert len(observations) == len(default_baseline_specs()) * 2
     assert imported_records == []
     assert len(baseline_rows) == len(default_baseline_specs())
-    assert runtime_report["comparison_protocol_ready"] is True
+    assert runtime_report["comparison_protocol_ready"] is False
     assert runtime_report["baseline_results_ready"] is False
     assert runtime_report["imported_baseline_result_count"] == 0
-    assert runtime_report["formal_import_readiness_summary_path"] == ""
     assert runtime_report["primary_baseline_formal_ready"] is False
     assert runtime_report["formal_result_ready_count"] == 0
-    assert runtime_report["blocked_primary_baseline_ids"] == []
-    assert runtime_report["formal_template_coverage_summary_path"] == ""
-    assert runtime_report["formal_template_record_count"] == 0
-    assert runtime_report["missing_formal_template_count"] == 0
-    assert runtime_report["formal_evidence_collection_summary_path"] == ""
-    assert runtime_report["formal_evidence_collection_task_count"] == 0
-    assert runtime_report["missing_formal_evidence_collection_task_count"] == 0
+    assert runtime_report["blocked_primary_baseline_ids"] == [
+        "tree_ring",
+        "gaussian_shading",
+        "shallow_diffuse",
+        "t2smark",
+    ]
+    assert runtime_report["formal_template_record_count"] == 8
+    assert runtime_report["missing_formal_template_count"] == 8
+    assert runtime_report["formal_evidence_collection_task_count"] == 8
+    assert runtime_report["missing_formal_evidence_collection_task_count"] == 8
     assert runtime_report["primary_baseline_formal_evidence_collection_ready"] is False
-    assert runtime_report["baseline_small_sample_summary_path"] == ""
-    assert runtime_report["small_sample_baseline_evidence_ready"] is False
-    assert runtime_report["small_sample_baseline_common_protocol_ready"] is False
-    assert runtime_report["small_sample_baseline_boundary_ready"] is False
-    assert runtime_report["small_sample_baseline_covered_count"] == 0
-    assert runtime_report["small_sample_baseline_formal_import_ready_count"] == 0
     assert runtime_report["formal_evidence_path_resolution_report_path"].endswith(
         "baseline_formal_evidence_path_resolution_report.json"
     )
@@ -248,22 +244,23 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
                 "baseline_result_source": "outputs/external_baseline_results/tree_ring_metrics.csv",
                 "baseline_result_source_digest": "tree_ring_digest",
                 "metric_status": "measured",
-                "positive_count": 10,
-                "negative_count": 20,
-                "attack_record_count": 30,
-                "supported_record_count": 30,
+                "positive_count": 340,
+                "negative_count": 340,
+                "attacked_negative_count": 340,
+                "attack_record_count": 680,
+                "supported_record_count": 680,
                 "true_positive_rate": 0.7,
-                "false_positive_rate": 0.05,
+                "false_positive_rate": 0.0,
                 "clean_false_positive_rate": 0.0,
                 "attacked_false_positive_rate": 0.1,
-                "quality_score_proxy_mean": 0.88,
+                "quality_score_mean": 0.88,
                 "score_retention_mean": 0.77,
                 "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
                 "prompt_protocol_digest": "prompt_digest",
                 "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
                 "evidence_paths": ["outputs/external_baseline_results/tree_ring_metrics.csv"],
                 "method_faithful_adapter_ready": True,
-                "full_main_prompt_protocol_ready": True,
+                "paper_run_prompt_protocol_ready": True,
                 "fixed_fpr_baseline_calibration_ready": True,
                 "attack_matrix_baseline_detection_ready": True,
                 "formal_evidence_paths_ready": True,
@@ -273,81 +270,6 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
         + "\n",
         encoding="utf-8",
     )
-    readiness_summary_path = result_dir / "baseline_formal_import_readiness_summary.json"
-    readiness_summary_path.write_text(
-        json.dumps(
-            {
-                "primary_baseline_count": 4,
-                "formal_result_ready_count": 1,
-                "formal_result_ready_ids": ["tree_ring"],
-                "blocked_primary_baseline_ids": ["gaussian_shading", "shallow_diffuse", "t2smark"],
-                "primary_baseline_formal_ready": False,
-                "dominant_blocking_reasons": ["candidate_record_missing"],
-                "formal_import_issue_count": 3,
-                "supports_paper_claim": False,
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    coverage_summary_path = tmp_path / "outputs" / "primary_baseline_formal_import" / (
-        "primary_baseline_formal_template_coverage_summary.json"
-    )
-    coverage_summary_path.parent.mkdir(parents=True)
-    coverage_summary_path.write_text(
-        json.dumps(
-            {
-                "primary_baseline_count": 4,
-                "formal_template_record_count": 32,
-                "formal_template_coverage_ready_count": 1,
-                "formal_template_coverage_ready_ids": ["tree_ring"],
-                "blocked_primary_baseline_ids": ["gaussian_shading", "shallow_diffuse", "t2smark"],
-                "primary_baseline_formal_template_coverage_ready": False,
-                "missing_formal_template_count": 24,
-                "supports_paper_claim": False,
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    collection_summary_path = tmp_path / "outputs" / "primary_baseline_formal_import" / (
-        "primary_baseline_formal_evidence_collection_summary.json"
-    )
-    collection_summary_path.write_text(
-        json.dumps(
-            {
-                "formal_evidence_collection_task_count": 32,
-                "ready_formal_evidence_collection_task_count": 1,
-                "missing_formal_evidence_collection_task_count": 31,
-                "primary_baseline_formal_evidence_collection_ready": False,
-                "supports_paper_claim": False,
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    small_sample_summary_path = tmp_path / "outputs" / "primary_baseline_small_sample_evidence" / (
-        "primary_baseline_small_sample_evidence_summary.json"
-    )
-    small_sample_summary_path.parent.mkdir(parents=True)
-    small_sample_summary_path.write_text(
-        json.dumps(
-            {
-                "small_sample_evidence_ready": True,
-                "small_sample_common_protocol_ready": True,
-                "covered_primary_baseline_count": 4,
-                "formal_import_ready_count": 0,
-                "formal_full_paper_run_requested": False,
-                "formal_full_paper_run_permitted": False,
-                "excluded_operating_points": ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"],
-                "paper_claim_ready": False,
-                "supports_paper_claim": False,
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
     write_external_baseline_comparison_outputs(
         root=tmp_path,
         attack_manifest_path=attack_manifest_path,
@@ -355,10 +277,6 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
         attack_matrix_manifest_path=attack_matrix_manifest_path,
         threshold_report_path=threshold_report_path,
         baseline_result_records_path=result_records_path,
-        formal_import_readiness_summary_path=readiness_summary_path,
-        formal_template_coverage_summary_path=coverage_summary_path,
-        formal_evidence_collection_summary_path=collection_summary_path,
-        baseline_small_sample_summary_path=small_sample_summary_path,
         baseline_source_registry_path=source_registry_path,
     )
 
@@ -382,25 +300,14 @@ def test_external_baseline_imported_records_flow_into_comparison_table(tmp_path:
     assert runtime_report["formal_result_ready_count"] == 1
     assert runtime_report["blocked_primary_baseline_ids"] == ["gaussian_shading", "shallow_diffuse", "t2smark"]
     assert runtime_report["dominant_formal_import_blocking_reasons"] == ["candidate_record_missing"]
-    assert runtime_report["formal_template_record_count"] == 32
-    assert runtime_report["formal_template_coverage_ready_count"] == 1
-    assert runtime_report["missing_formal_template_count"] == 24
+    assert runtime_report["formal_template_record_count"] == 8
+    assert runtime_report["formal_template_coverage_ready_count"] == 0
+    assert runtime_report["missing_formal_template_count"] == 7
     assert runtime_report["primary_baseline_formal_template_coverage_ready"] is False
-    assert runtime_report["formal_evidence_collection_task_count"] == 32
+    assert runtime_report["formal_evidence_collection_task_count"] == 8
     assert runtime_report["ready_formal_evidence_collection_task_count"] == 1
-    assert runtime_report["missing_formal_evidence_collection_task_count"] == 31
+    assert runtime_report["missing_formal_evidence_collection_task_count"] == 7
     assert runtime_report["primary_baseline_formal_evidence_collection_ready"] is False
-    assert runtime_report["baseline_small_sample_summary_path"].endswith(
-        "primary_baseline_small_sample_evidence_summary.json"
-    )
-    assert runtime_report["small_sample_baseline_evidence_ready"] is True
-    assert runtime_report["small_sample_baseline_common_protocol_ready"] is True
-    assert runtime_report["small_sample_baseline_boundary_ready"] is True
-    assert runtime_report["small_sample_baseline_covered_count"] == 4
-    assert runtime_report["small_sample_baseline_formal_import_ready_count"] == 0
-    assert runtime_report["formal_full_paper_run_requested"] is False
-    assert runtime_report["formal_full_paper_run_permitted"] is False
-    assert runtime_report["excluded_operating_points"] == ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"]
     assert runtime_report["formal_evidence_path_reference_count"] == 1
     assert runtime_report["existing_formal_evidence_path_count"] == 1
     assert runtime_report["direct_formal_evidence_path_count"] == 1
@@ -441,14 +348,14 @@ def test_external_baseline_primary_comparison_rows_share_common_claim_scope() ->
             "baseline_requires_gpu": True,
             "baseline_requires_training": False,
             "baseline_observation_count": 18,
-            "baseline_result_ready_count": 17,
-            "unsupported_record_count": 1,
+            "baseline_result_ready_count": 18,
+            "unsupported_record_count": 0,
             "metric_status": "measured",
             "true_positive_rate": 0.7,
             "false_positive_rate": 0.01,
             "clean_false_positive_rate": 0.0,
             "attacked_false_positive_rate": 0.02,
-            "quality_score_proxy_mean": 0.9,
+            "quality_score_mean": 0.9,
             "score_retention_mean": 0.8,
             "unsupported_reason": "",
             "supports_paper_claim": False,
@@ -477,7 +384,7 @@ def test_external_baseline_primary_comparison_rows_share_common_claim_scope() ->
             "false_positive_rate": "unsupported",
             "clean_false_positive_rate": "unsupported",
             "attacked_false_positive_rate": "unsupported",
-            "quality_score_proxy_mean": "unsupported",
+            "quality_score_mean": "unsupported",
             "score_retention_mean": "unsupported",
             "unsupported_reason": "external_baseline_result_missing",
             "supports_paper_claim": False,
@@ -486,17 +393,17 @@ def test_external_baseline_primary_comparison_rows_share_common_claim_scope() ->
     comparison_rows = [
         {
             "method_id": "slm_wm_current",
-            "method_role": "proposed_method_local_proxy",
-            "comparison_scope": "attack_matrix_local_proxy",
+            "method_role": "proposed_method",
+            "comparison_scope": "common_protocol_real_image_detection",
             "common_prompt_protocol_ready": True,
             "common_attack_protocol_ready": True,
             "common_threshold_protocol_ready": True,
-            "metric_status": "measured_from_local_proxy",
+            "metric_status": "measured_real_attacked_image_image_only_detection",
             "true_positive_rate": 0.84,
             "false_positive_rate": 0.01,
             "clean_false_positive_rate": 0.0,
             "attacked_false_positive_rate": 0.02,
-            "quality_score_proxy_mean": 0.9,
+            "quality_score_mean": 0.9,
             "score_retention_mean": 0.8,
             "supports_paper_claim": False,
         },
@@ -515,7 +422,7 @@ def test_external_baseline_primary_comparison_rows_share_common_claim_scope() ->
                 "false_positive_rate": row["false_positive_rate"],
                 "clean_false_positive_rate": row["clean_false_positive_rate"],
                 "attacked_false_positive_rate": row["attacked_false_positive_rate"],
-                "quality_score_proxy_mean": row["quality_score_proxy_mean"],
+                "quality_score_mean": row["quality_score_mean"],
                 "score_retention_mean": row["score_retention_mean"],
                 "supports_paper_claim": False,
             }
@@ -523,7 +430,11 @@ def test_external_baseline_primary_comparison_rows_share_common_claim_scope() ->
         ],
     ]
     runtime_report = build_runtime_report(
-        {"attack_metrics_ready": True, "evaluation_boundary": {"target_fpr": 0.01}},
+        {
+            "attack_metrics_ready": True,
+            "supports_paper_claim": True,
+            "evaluation_boundary": {"target_fpr": 0.01},
+        },
         {"threshold_degenerate": False},
         baseline_rows,
         tuple(),
@@ -541,7 +452,6 @@ def test_external_baseline_primary_comparison_rows_share_common_claim_scope() ->
             "formal_result_ready_count": 4,
             "blocked_primary_baseline_ids": [],
         },
-        formal_import_readiness_summary_path="outputs/external_baseline_results/baseline_formal_import_readiness_summary.json",
         formal_template_coverage_summary={
             "primary_baseline_formal_template_coverage_ready": True,
             "formal_template_record_count": 36,
@@ -551,20 +461,12 @@ def test_external_baseline_primary_comparison_rows_share_common_claim_scope() ->
             "missing_candidate_template_count": 0,
             "missing_formal_template_count": 0,
         },
-        formal_template_coverage_summary_path=(
-            "outputs/primary_baseline_formal_import/primary_baseline_formal_template_coverage_summary.json"
-        ),
         formal_evidence_collection_summary={
             "formal_evidence_collection_task_count": 36,
             "ready_formal_evidence_collection_task_count": 36,
             "missing_formal_evidence_collection_task_count": 0,
             "primary_baseline_formal_evidence_collection_ready": True,
         },
-        formal_evidence_collection_summary_path=(
-            "outputs/primary_baseline_formal_import/primary_baseline_formal_evidence_collection_summary.json"
-        ),
-        baseline_small_sample_summary={},
-        baseline_small_sample_summary_path="",
         formal_evidence_path_summary={
             "formal_evidence_path_reference_count": 72,
             "existing_formal_evidence_path_count": 72,
@@ -625,22 +527,23 @@ def test_external_baseline_evidence_paths_can_resolve_from_explicit_mirror_root(
                 "baseline_result_source": "outputs/external_baseline_results/tree_ring_metrics.csv",
                 "baseline_result_source_digest": "tree_ring_digest",
                 "metric_status": "measured",
-                "positive_count": 10,
-                "negative_count": 20,
-                "attack_record_count": 30,
-                "supported_record_count": 30,
+                "positive_count": 340,
+                "negative_count": 340,
+                "attacked_negative_count": 340,
+                "attack_record_count": 680,
+                "supported_record_count": 680,
                 "true_positive_rate": 0.7,
-                "false_positive_rate": 0.05,
+                "false_positive_rate": 0.0,
                 "clean_false_positive_rate": 0.0,
                 "attacked_false_positive_rate": 0.1,
-                "quality_score_proxy_mean": 0.88,
+                "quality_score_mean": 0.88,
                 "score_retention_mean": 0.77,
                 "prompt_protocol_name": "paper_main_pilot_paper_prompt_protocol",
                 "prompt_protocol_digest": "prompt_digest",
                 "adapter_boundary": "method_faithful_sd35_adapter_reproduction",
                 "evidence_paths": ["outputs/external_baseline_results/tree_ring_metrics.csv"],
                 "method_faithful_adapter_ready": True,
-                "full_main_prompt_protocol_ready": True,
+                "paper_run_prompt_protocol_ready": True,
                 "fixed_fpr_baseline_calibration_ready": True,
                 "attack_matrix_baseline_detection_ready": True,
                 "formal_evidence_paths_ready": True,

@@ -1,17 +1,20 @@
-# Artifact Rebuild Governance
+# 论文产物重建规则
 
-正式 artifacts 必须满足：
+1. records 是数值事实来源。
+2. tables、figures 与 reports 只能从 records、schema 和 manifests 重建。
+3. manifest 必须记录输入路径、输出路径、配置摘要、代码版本和重建命令。
+4. 结果记录缺失时重建命令必须失败或输出明确的未闭合报告, 不得写入替代数值。
+5. 失败案例图必须引用真实 attacked image 文件; 图像缺失时停止构图。
+6. baseline comparison 只消费 formal import 的 accepted records。
+7. 正式消融表只消费重新生成、重新攻击和重新检测的变体 records。
 
-1. records 是事实来源。
-2. tables 由 records 或中间 governed tables 重建。
-3. figures 由 records 或 tables 重建。
-4. reports 由 records、tables、figures 和 manifests 生成。
-5. manifests 记录输入、输出、代码版本、配置摘要和重建命令。
-6. claims 只能引用 governed artifacts。
+主要重建入口:
 
-## 与核心方法的边界
+- `scripts/write_pilot_paper_result_records.py`
+- `scripts/write_pilot_paper_fixed_fpr_common_protocol_outputs.py`
+- `scripts/write_pilot_paper_result_analysis_outputs.py`
+- `scripts/write_external_baseline_comparison_outputs.py`
+- `scripts/write_paper_artifact_evidence_audit_outputs.py`
+- `scripts/write_submission_readiness_outputs.py`
 
-Artifact rebuild 属于论文产物生成层, 不属于最小核心方法层。  
-`main/analysis/` 可以依赖 `main/core/`、`main/methods/` 和 `main/protocol/`, 但 `main/core/`、`main/methods/` 和 `main/protocol/` 不得反向依赖 `main/analysis/`。
-
-这一设计使 `minimal_method_package` 可以排除论文图表重建逻辑, 只保留读者理解和复用方法所需的最小代码。
+全部持久化产物写入 `outputs/`。

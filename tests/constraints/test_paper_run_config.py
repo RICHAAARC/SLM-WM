@@ -46,6 +46,8 @@ def test_paper_run_config_resolves_pilot_paper_defaults(tmp_path: Path, monkeypa
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results"
     assert config.protocol_profile == "pilot_paper_fixed_fpr_0_01"
     assert config.target_fpr == 0.01
+    assert config.minimum_clean_negative_count == 340
+    assert config.dataset_level_quality_minimum_count == 700
     assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
     assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
     assert config.drive_dir("aligned_rescoring").endswith("/pilot_paper_results/aligned_rescoring")
@@ -74,6 +76,8 @@ def test_paper_run_config_switches_to_full_paper_without_notebook_rewrite(
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/full_paper_results"
     assert config.protocol_profile == "full_paper_fixed_fpr_0_001"
     assert config.target_fpr == 0.001
+    assert config.minimum_clean_negative_count == 3400
+    assert config.dataset_level_quality_minimum_count == 7000
     assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
     assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
     assert config.drive_dir("threshold_calibration").endswith("/full_paper_results/threshold_calibration")
@@ -99,7 +103,7 @@ def test_paper_run_config_resolves_probe_paper_defaults(tmp_path: Path, monkeypa
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/probe_paper_results"
     assert config.protocol_profile == "probe_paper_fixed_fpr_0_1"
     assert config.target_fpr == 0.1
-    assert config.minimum_clean_negative_count == 10
+    assert config.minimum_clean_negative_count == 34
     assert config.dataset_level_quality_minimum_count == 70
     assert config.content_vector_width == DEFAULT_CONTENT_VECTOR_WIDTH
     assert config.content_basis_rank == DEFAULT_CONTENT_BASIS_RANK
@@ -130,9 +134,9 @@ def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: 
     assert probe_config.target_fpr == 0.1
     assert pilot_config.target_fpr == 0.01
     assert full_config.target_fpr == 0.001
-    assert probe_config.minimum_clean_negative_count == 10
-    assert pilot_config.minimum_clean_negative_count == 100
-    assert full_config.minimum_clean_negative_count == 1000
+    assert probe_config.minimum_clean_negative_count == 34
+    assert pilot_config.minimum_clean_negative_count == 340
+    assert full_config.minimum_clean_negative_count == 3400
     assert probe_config.dataset_level_quality_minimum_count == 70
     assert pilot_config.dataset_level_quality_minimum_count == 700
     assert full_config.dataset_level_quality_minimum_count == 7000
@@ -144,9 +148,9 @@ def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: 
 def test_paper_run_gate_counts_are_derived_from_scale_and_fixed_fpr() -> None:
     """门禁计数应由样本规模和 fixed-FPR 标准派生, 不应成为独立协议分叉。"""
 
-    assert derive_minimum_clean_negative_count(70, 0.1) == 10
-    assert derive_minimum_clean_negative_count(700, 0.01) == 100
-    assert derive_minimum_clean_negative_count(7000, 0.001) == 1000
+    assert derive_minimum_clean_negative_count(70, 0.1) == 34
+    assert derive_minimum_clean_negative_count(700, 0.01) == 340
+    assert derive_minimum_clean_negative_count(7000, 0.001) == 3400
     assert derive_dataset_level_quality_minimum_count(70) == 70
     assert derive_dataset_level_quality_minimum_count(700) == 700
     assert derive_dataset_level_quality_minimum_count(7000) == 7000

@@ -19,10 +19,11 @@ from experiments.protocol.paper_run_config import (
     FULL_PAPER_RUN_NAME,
     PROBE_PAPER_RUN_NAME,
     RUN_DEFAULTS,
+    RUN_EXPECTED_PROMPT_COUNTS,
     build_paper_run_config,
 )
 from experiments.protocol.prompts import PromptProtocolRecord
-from experiments.protocol.splits import apply_split_assignments
+from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from main.core.digest import build_stable_digest
 
 PILOT_PAPER_PROMPT_SET = "pilot_paper"
@@ -48,7 +49,7 @@ PAPER_RUN_FIXED_FPR = {
 }
 PILOT_PAPER_CONFIDENCE_INTERVAL_METHOD = "bounded_hoeffding"
 PILOT_PAPER_CONFIDENCE_LEVEL = 0.95
-PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT = 100
+PILOT_PAPER_MINIMUM_CLEAN_NEGATIVE_COUNT = 340
 PILOT_PAPER_METHOD_IDS = ("slm_wm_current", "tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 PILOT_PAPER_PRIMARY_METHOD_ID = "slm_wm_current"
 PILOT_PAPER_PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
@@ -57,6 +58,7 @@ PILOT_PAPER_ATTACK_RESOURCE_PROFILES = ("full_main", "full_extra")
 PILOT_PAPER_REQUIRED_METRIC_FIELDS = (
     "positive_count",
     "negative_count",
+    "attacked_negative_count",
     "attack_record_count",
     "supported_record_count",
     "true_positive_rate",
@@ -321,17 +323,22 @@ def build_pilot_paper_prompt_split_summary(
     test_ids = {record.prompt_id for record in assigned_records if record.split == "test"}
     calibration_clean_negative_count = len(calibration_ids)
     test_clean_negative_count = len(test_ids)
+    expected_prompt_count = RUN_EXPECTED_PROMPT_COUNTS[resolved_config.paper_run_name]
+    expected_split_counts = build_group_split_counts(expected_prompt_count)
     allowed_false_positive_count = math.floor(resolved_config.target_fpr * calibration_clean_negative_count)
     prompt_split_digest = build_stable_digest(split_record_payload)
     minimum_ready = (
-        calibration_clean_negative_count >= resolved_config.minimum_clean_negative_count
-        and test_clean_negative_count >= resolved_config.minimum_clean_negative_count
+        len(assigned_records) == expected_prompt_count
+        and calibration_clean_negative_count == expected_split_counts["calibration"]
+        and test_clean_negative_count == expected_split_counts["test"]
+        and resolved_config.minimum_clean_negative_count == expected_split_counts["test"]
     )
     return {
         "prompt_set": resolved_config.prompt_set,
         "prompt_file": resolved_config.prompt_file,
         "prompt_protocol_name": resolved_config.prompt_protocol_name,
         "pilot_paper_prompt_count": len(assigned_records),
+        "expected_prompt_count": expected_prompt_count,
         "split_counts": split_counts,
         "risk_profile_counts": risk_profile_counts,
         "calibration_test_disjoint": calibration_ids.isdisjoint(test_ids),
@@ -422,6 +429,7 @@ def build_pilot_paper_result_import_schema(
         "confidence_level": resolved_config.confidence_level,
         "minimum_result_positive_count": resolved_config.minimum_clean_negative_count,
         "minimum_result_negative_count": resolved_config.minimum_clean_negative_count,
+        "minimum_result_attacked_negative_count": resolved_config.minimum_clean_negative_count,
         "method_ids": list(PILOT_PAPER_METHOD_IDS),
         "primary_baseline_ids": list(PILOT_PAPER_PRIMARY_BASELINE_IDS),
         "required_metric_fields": list(PILOT_PAPER_REQUIRED_METRIC_FIELDS),
@@ -555,6 +563,7 @@ def _validate_counts_and_rates(row: Mapping[str, Any], row_index: int, schema: M
     minimum_count_fields = {
         "positive_count": int(schema.get("minimum_result_positive_count", 1)),
         "negative_count": int(schema.get("minimum_result_negative_count", 1)),
+        "attacked_negative_count": int(schema.get("minimum_result_attacked_negative_count", 1)),
     }
     for field_name, minimum_count in minimum_count_fields.items():
         if _int_field(row, field_name) < minimum_count:
@@ -669,8 +678,19 @@ def validate_pilot_paper_result_import_rows(
     materialized_rows = [dict(row) for row in rows]
     accepted: list[dict[str, Any]] = []
     issues: list[PilotPaperImportIssue] = []
+    seen_template_keys: set[tuple[str, str, str, str]] = set()
     for row_index, row in enumerate(materialized_rows):
         row_issues: list[PilotPaperImportIssue] = []
+        template_key = (
+            _str_field(row, "method_id"),
+            _str_field(row, "attack_family"),
+            _str_field(row, "attack_name"),
+            _str_field(row, "resource_profile"),
+        )
+        if template_key in seen_template_keys:
+            row_issues.append(_issue(row_index, row, "method_id", "duplicate_result_template_key"))
+        else:
+            seen_template_keys.add(template_key)
         row_issues.extend(_validate_required_fields(row, row_index, schema))
         if not row_issues:
             row_issues.extend(_validate_counts_and_rates(row, row_index, schema))
@@ -680,6 +700,9 @@ def validate_pilot_paper_result_import_rows(
             issues.extend(row_issues)
         else:
             accepted.append(row)
+    claim_records_ready = bool(accepted) and not issues and all(
+        _bool_field(row, "supports_paper_claim") for row in accepted
+    )
     return {
         "protocol_name": schema["result_protocol_name"],
         "result_scope": schema["result_scope"],
@@ -692,8 +715,8 @@ def validate_pilot_paper_result_import_rows(
         "accepted_records": accepted,
         "issues": [issue.to_dict() for issue in issues],
         "accepted_pilot_paper_claim_record_count": sum(1 for row in accepted if _bool_field(row, "supports_paper_claim")),
-        "pilot_paper_claim_record_ready": bool(accepted) and all(_bool_field(row, "supports_paper_claim") for row in accepted),
-        "supports_paper_claim": bool(accepted) and all(_bool_field(row, "supports_paper_claim") for row in accepted),
+        "pilot_paper_claim_record_ready": claim_records_ready,
+        "supports_paper_claim": claim_records_ready,
     }
 
 
@@ -728,8 +751,15 @@ def build_superiority_gate_summary(
         for method_id in PILOT_PAPER_PRIMARY_BASELINE_IDS
     }
     slm_keys = {_record_key(row) for row in slm_rows}
+    method_template_keys_unique = len(slm_rows) == len(slm_keys) and all(
+        len(rows) == len({_record_key(row) for row in rows}) for rows in baseline_rows_by_method.values()
+    )
     missing_baseline_methods = tuple(method_id for method_id, rows in baseline_rows_by_method.items() if not rows)
-    template_aligned = bool(slm_rows) and all({_record_key(row) for row in rows} == slm_keys for rows in baseline_rows_by_method.values())
+    template_aligned = (
+        bool(slm_rows)
+        and method_template_keys_unique
+        and all({_record_key(row) for row in rows} == slm_keys for rows in baseline_rows_by_method.values())
+    )
     slm_mean_tpr = _mean_rate(slm_rows, "true_positive_rate")
     slm_mean_fpr = _mean_rate(slm_rows, "false_positive_rate")
     baseline_mean_tprs = {
@@ -752,6 +782,8 @@ def build_superiority_gate_summary(
         reason = "slm_wm_records_missing"
     elif missing_baseline_methods:
         reason = "baseline_records_missing"
+    elif not method_template_keys_unique:
+        reason = "duplicate_method_attack_template_records"
     elif not template_aligned:
         reason = "method_attack_templates_not_aligned"
     elif not fixed_fpr_ready:
@@ -768,6 +800,7 @@ def build_superiority_gate_summary(
         "best_baseline_method_id": best_baseline_method_id,
         "best_baseline_mean_true_positive_rate": best_baseline_mean_tpr,
         "missing_baseline_methods": list(missing_baseline_methods),
+        "method_attack_template_keys_unique": method_template_keys_unique,
         "method_attack_templates_aligned": template_aligned,
     }
 
@@ -791,9 +824,32 @@ def build_pilot_paper_common_protocol_summary(
     accepted_records = tuple(dict(row) for row in import_validation_report.get("accepted_records", ()))
     accepted_claim_record_count = sum(1 for row in accepted_records if _bool_field(row, "supports_paper_claim"))
     import_ready = bool(import_validation_report.get("pilot_paper_result_import_ready", False))
+    expected_template_keys = {
+        (
+            str(row.get("method_id", "")),
+            str(row.get("attack_family", "")),
+            str(row.get("attack_name", "")),
+            str(row.get("resource_profile", "")),
+        )
+        for row in materialized_template_rows
+    }
+    accepted_template_key_rows = [
+        (
+            str(row.get("method_id", "")),
+            str(row.get("attack_family", "")),
+            str(row.get("attack_name", "")),
+            str(row.get("resource_profile", "")),
+        )
+        for row in accepted_records
+    ]
+    accepted_template_keys = set(accepted_template_key_rows)
+    missing_template_count = len(expected_template_keys - accepted_template_keys)
+    unexpected_template_count = len(accepted_template_keys - expected_template_keys)
+    duplicate_template_count = len(accepted_template_key_rows) - len(accepted_template_keys)
     template_import_coverage_ready = (
-        bool(materialized_template_rows)
-        and len(accepted_records) >= len(materialized_template_rows)
+        bool(expected_template_keys)
+        and accepted_template_keys == expected_template_keys
+        and duplicate_template_count == 0
     )
     claim_coverage_ready = (
         template_import_coverage_ready
@@ -801,11 +857,13 @@ def build_pilot_paper_common_protocol_summary(
     )
     superiority_gate = build_superiority_gate_summary(accepted_records, resolved_config)
     expected_target_fpr = PAPER_RUN_FIXED_FPR.get(resolved_config.paper_run_name, PILOT_PAPER_FIXED_FPR)
+    template_registry_unique = len(expected_template_keys) == len(materialized_template_rows)
     ready = (
         bool(prompt_summary.get("prompt_split_ready"))
         and bool(materialized_attack_rows)
         and method_ids == set(PILOT_PAPER_METHOD_IDS)
         and len(materialized_template_rows) == len(materialized_attack_rows) * len(materialized_method_rows)
+        and template_registry_unique
         and math.isclose(float(resolved_config.target_fpr), expected_target_fpr, rel_tol=0.0, abs_tol=1e-12)
     )
     paper_run_allows_claim = True
@@ -847,6 +905,7 @@ def build_pilot_paper_common_protocol_summary(
         "pilot_paper_negative_count_minimum_required": resolved_config.minimum_clean_negative_count,
         "minimum_result_positive_count": resolved_config.minimum_clean_negative_count,
         "minimum_result_negative_count": resolved_config.minimum_clean_negative_count,
+        "minimum_result_attacked_negative_count": resolved_config.minimum_clean_negative_count,
         "pilot_paper_attack_count": len(materialized_attack_rows),
         "pilot_paper_method_count": len(materialized_method_rows),
         "pilot_paper_import_template_count": len(materialized_template_rows),
@@ -855,6 +914,10 @@ def build_pilot_paper_common_protocol_summary(
         "accepted_pilot_paper_claim_record_count": accepted_claim_record_count,
         "pilot_paper_claim_record_ready": claim_coverage_ready,
         "paper_run_result_import_coverage_ready": template_import_coverage_ready,
+        "paper_run_result_missing_template_count": missing_template_count,
+        "paper_run_result_unexpected_template_count": unexpected_template_count,
+        "paper_run_result_duplicate_template_count": duplicate_template_count,
+        "paper_run_template_registry_unique": template_registry_unique,
         "pilot_paper_evidence_coverage_ready": claim_coverage_ready,
         "pilot_paper_effectiveness_gate_ready": superiority_gate["superiority_gate_ready"],
         "pilot_paper_effectiveness_gate_reason": superiority_gate["superiority_gate_reason"],

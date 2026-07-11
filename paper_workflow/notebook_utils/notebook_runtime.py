@@ -55,7 +55,7 @@ def mark_notebook_runtime_start(
 
 
 def ensure_notebook_runtime_start(*, workflow_name: str, baseline_id: str = "") -> dict[str, str]:
-    """在缺少计时起点时补齐起点, 避免打包产物缺少运行时间报告。"""
+    """验证 Notebook 入口已经显式初始化运行计时。"""
 
     if NOTEBOOK_RUNTIME_STARTED_AT_KEY in os.environ:
         return {
@@ -64,12 +64,7 @@ def ensure_notebook_runtime_start(*, workflow_name: str, baseline_id: str = "") 
             "notebook_runtime_workflow_name": os.environ.get(NOTEBOOK_RUNTIME_WORKFLOW_NAME_KEY, workflow_name),
             "notebook_runtime_baseline_id": os.environ.get(NOTEBOOK_RUNTIME_BASELINE_ID_KEY, baseline_id),
         }
-    return mark_notebook_runtime_start(
-        workflow_name=workflow_name,
-        baseline_id=baseline_id,
-        source="archive_packaging_fallback",
-        reset=True,
-    )
+    raise RuntimeError("Notebook 归档前必须通过运行环境入口初始化计时")
 
 
 def _safe_float(text: str) -> float | None:
@@ -91,8 +86,8 @@ def build_notebook_runtime_report(
     """生成当前 Notebook 入口的运行时间报告。
 
     报告只描述入口运行观测边界, 不作为方法有效性或论文结论的证据来源。
-    `elapsed_seconds` 的起点通常由 `configure_paper_run_environment` 写入;
-    若入口未经过该 helper, 则由归档入口兜底写入并在报告中标明。
+    `elapsed_seconds` 的起点必须由 `configure_paper_run_environment` 或对应
+    workflow 入口显式写入。归档函数只消费该记录, 不创建替代计时边界。
     """
 
     ensure_notebook_runtime_start(workflow_name=workflow_name, baseline_id=baseline_id)
@@ -114,8 +109,6 @@ def build_notebook_runtime_report(
         "archive_name": archive_name or "",
         "supports_paper_claim": False,
     }
-    if report["notebook_runtime_start_source"] == "archive_packaging_fallback":
-        report["notebook_runtime_timing_boundary"] = "archive_packaging_fallback_only"
     return report
 
 

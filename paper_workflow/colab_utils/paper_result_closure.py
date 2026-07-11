@@ -2,7 +2,7 @@
 
 正式命令计划和服务器可复用执行逻辑位于
 `paper_experiments.runners.paper_result_closure`。本模块只追加 Colab 进度显示
-和 Notebook runtime 报告, 以保持 Notebook 入口兼容。
+和 Notebook runtime 报告, 使 Notebook 仅承担 Colab 启动职责。
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from paper_experiments.runners.paper_result_closure import (
     run_paper_result_closure_commands as run_repository_paper_result_closure_commands,
 )
 from paper_workflow.notebook_utils.notebook_runtime import write_notebook_runtime_report
-from paper_workflow.notebook_utils.progress import progress_bar, update_progress
+from experiments.runtime.progress import progress_bar, update_progress
 
 
 def _archive_name_from_complete_package_command(command: list[str]) -> str:
@@ -37,7 +37,6 @@ def run_paper_result_closure_commands(
     *,
     package_search_root: str,
     complete_drive_output_dir: str,
-    target_fpr: str,
     paper_run_name: str,
 ) -> dict[str, Any]:
     """运行论文结果闭合命令, 并返回最新 Drive 结果包路径。
@@ -49,7 +48,6 @@ def run_paper_result_closure_commands(
     commands = build_paper_result_closure_commands(
         package_search_root=package_search_root,
         complete_drive_output_dir=complete_drive_output_dir,
-        target_fpr=target_fpr,
         paper_run_name=paper_run_name,
     )
 
@@ -74,7 +72,6 @@ def run_paper_result_closure_commands(
         return run_repository_paper_result_closure_commands(
             package_search_root=package_search_root,
             complete_drive_output_dir=complete_drive_output_dir,
-            target_fpr=target_fpr,
             paper_run_name=paper_run_name,
             before_command=before_command,
             progress_hook=progress_hook,

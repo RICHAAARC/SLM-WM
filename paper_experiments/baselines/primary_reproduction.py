@@ -125,7 +125,7 @@ def default_primary_command_profiles() -> dict[str, PrimaryBaselineCommandProfil
             ),
             expected_result_adapter="gaussian_shading_detection_metrics_adapter",
             model_alignment_status="legacy_stable_diffusion_requires_protocol_adapter",
-            notes="官方入口使用旧版 Stable Diffusion latent 尺寸, 需记录与 SD3.5 主线的模型边界。",
+            notes="官方入口使用 Stable Diffusion 2.x latent 尺寸, 需记录与 SD3.5 主线的模型边界。",
         ),
         "shallow_diffuse": PrimaryBaselineCommandProfile(
             baseline_id="shallow_diffuse",
@@ -140,7 +140,7 @@ def default_primary_command_profiles() -> dict[str, PrimaryBaselineCommandProfil
             ),
             expected_result_adapter="shallow_diffuse_detection_metrics_adapter",
             model_alignment_status="legacy_stable_diffusion_requires_protocol_adapter",
-            notes="官方入口与 Tree-Ring 共享旧版依赖边界, 需用共同 prompt 和攻击矩阵重跑。",
+            notes="官方入口与 Tree-Ring 共享 Stable Diffusion 2.x 依赖边界, 需用共同 Prompt 和攻击矩阵重跑。",
         ),
         "t2smark": PrimaryBaselineCommandProfile(
             baseline_id="t2smark",
@@ -240,7 +240,7 @@ def build_primary_result_templates(
         "false_positive_rate",
         "clean_false_positive_rate",
         "attacked_false_positive_rate",
-        "quality_score_proxy_mean",
+        "quality_score_mean",
         "score_retention_mean",
     )
     source_fields = (

@@ -60,17 +60,6 @@ DEFAULT_LOCAL_MODEL_REPOSITORY_DIR = "/content/gaussian_shading_model_repository
 DEFAULT_LEGACY_ENV_PREFIX = "/content/gaussian_shading_legacy_env"
 DEFAULT_MICROMAMBA_PATH = "/content/bin/micromamba"
 DEFAULT_LEGACY_PYTHON_VERSION = "3.8"
-DEFAULT_LEGACY_TORCH_SPECS = "torch==1.13.0+cu117 torchvision==0.14.0+cu117"
-DEFAULT_LEGACY_PYTORCH_INDEX_URL = "https://download.pytorch.org/whl/cu117"
-DEFAULT_STRICT_OFFICIAL_ENVIRONMENT = True
-DEFAULT_ALLOW_COMPATIBLE_ENVIRONMENT_FALLBACK = True
-DEFAULT_LEGACY_PACKAGE_SPECS = (
-    "transformers==4.23.1 diffusers==0.11.1 huggingface_hub==0.10.1 "
-    "datasets==2.6.1 pyarrow<13 fsspec==2022.10.0 numpy==1.24.4 scipy==1.10.1 "
-    "Pillow==9.5.0 tqdm==4.66.2 pycryptodome==3.20.0 open_clip_torch==2.7.0 "
-    "ftfy==6.2.0 regex==2023.12.25 Requests==2.31.0 omegaconf==2.3.0 "
-    "einops==0.4.1 kornia==0.6.4 matplotlib==3.7.5 timm==0.5.4"
-)
 PACKAGE_EXTRA_PATHS = (
     "paper_experiments/runners/gaussian_shading_official_reference.py",
     "paper_experiments/baselines/gaussian_shading_official_reference.py",
@@ -112,21 +101,22 @@ class GaussianShadingOfficialReferenceConfig:
     local_model_repository_dir: str = DEFAULT_LOCAL_MODEL_REPOSITORY_DIR
     patch_model_index_for_legacy_transformers: bool = True
     official_python_executable: str = ""
-    prepare_legacy_environment: bool = False
+    prepare_legacy_environment: bool = True
     legacy_environment_prefix: str = DEFAULT_LEGACY_ENV_PREFIX
     micromamba_path: str = DEFAULT_MICROMAMBA_PATH
     legacy_python_version: str = DEFAULT_LEGACY_PYTHON_VERSION
-    strict_official_environment: bool = DEFAULT_STRICT_OFFICIAL_ENVIRONMENT
-    allow_compatible_environment_fallback: bool = DEFAULT_ALLOW_COMPATIBLE_ENVIRONMENT_FALLBACK
-    legacy_torch_specs: str = DEFAULT_LEGACY_TORCH_SPECS
-    legacy_pytorch_index_url: str = DEFAULT_LEGACY_PYTORCH_INDEX_URL
-    legacy_package_specs: str = DEFAULT_LEGACY_PACKAGE_SPECS
     run_official_command: bool = True
     summary_import_path: str = ""
     log_import_path: str = ""
     require_cuda: bool = True
     timeout_seconds: int = 86400
     enable_workflow_progress_bar: bool = True
+
+    def __post_init__(self) -> None:
+        """集中校验官方命令的严格环境边界。"""
+
+        if self.run_official_command and not self.prepare_legacy_environment and not self.official_python_executable:
+            raise ValueError("运行 Gaussian Shading 官方命令必须准备官方 requirements 环境")
 
 
 @dataclass(frozen=True)
@@ -172,12 +162,6 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
         return path.resolve().relative_to(root_path.resolve()).as_posix()
     except ValueError:
         return path.resolve().as_posix()
-
-
-def split_package_specs(package_specs: str) -> list[str]:
-    """解析以空白分隔的 pip package spec 列表。"""
-
-    return [item.strip() for item in str(package_specs).split() if item.strip()]
 
 
 def command_exception_result(command: Any, error: Exception) -> dict[str, Any]:
@@ -436,68 +420,6 @@ def prepare_strict_official_environment_profile(
     }
 
 
-def prepare_compatible_environment_profile(
-    root_path: Path,
-    config: GaussianShadingOfficialReferenceConfig,
-    *,
-    micromamba_path: Path,
-    progress: object | None = None,
-) -> dict[str, Any]:
-    """在官方 requirements 冲突时准备受治理的 Colab 兼容 fallback 环境。"""
-
-    fallback_prefix = Path(config.legacy_environment_prefix) / "colab_compatible_fallback"
-    fallback_python = fallback_prefix / "bin" / "python"
-    command_results = create_python_environment(
-        root_path,
-        micromamba_path=micromamba_path,
-        environment_prefix=fallback_prefix,
-        python_version=config.legacy_python_version,
-        progress=progress,
-        progress_profile="operation=gaussian_shading_create_compatible_environment",
-    )
-    torch_specs = split_package_specs(config.legacy_torch_specs)
-    if torch_specs:
-        command_results.append(
-            run_argv_command(
-                [
-                    str(fallback_python),
-                    "-m",
-                    "pip",
-                    "install",
-                    "--extra-index-url",
-                    config.legacy_pytorch_index_url,
-                    *torch_specs,
-                ],
-                cwd=root_path,
-                timeout_seconds=1800,
-                progress=progress,
-                progress_profile="operation=gaussian_shading_install_compatible_torch",
-            )
-        )
-    package_specs = split_package_specs(config.legacy_package_specs)
-    if package_specs:
-        command_results.append(
-            run_argv_command(
-                [str(fallback_python), "-m", "pip", "install", *package_specs],
-                cwd=root_path,
-                timeout_seconds=2400,
-                progress=progress,
-                progress_profile="operation=gaussian_shading_install_compatible_packages",
-            )
-        )
-    command_results.append(verify_legacy_imports(root_path, fallback_python, progress=progress))
-    ready = fallback_python.is_file() and all(int(result.get("return_code", 1)) == 0 for result in command_results)
-    return {
-        "environment_profile": "colab_compatible_fallback",
-        "environment_prefix": str(fallback_prefix),
-        "legacy_python_executable": str(fallback_python),
-        "environment_ready": ready,
-        "legacy_torch_specs": config.legacy_torch_specs,
-        "legacy_package_specs": config.legacy_package_specs,
-        "command_results": command_results,
-    }
-
-
 def prepare_gaussian_shading_legacy_environment(
     root_path: Path,
     config: GaussianShadingOfficialReferenceConfig,
@@ -530,32 +452,18 @@ def prepare_gaussian_shading_legacy_environment(
         return report
 
     micromamba_path, micromamba_results = ensure_micromamba_available(root_path, config, progress=progress)
-    profile_reports: list[dict[str, Any]] = []
-    selected_profile: dict[str, Any] | None = None
-    if config.strict_official_environment:
-        strict_report = prepare_strict_official_environment_profile(
-            root_path,
-            config,
-            micromamba_path=micromamba_path,
-            progress=progress,
-        )
-        profile_reports.append(strict_report)
-        if strict_report.get("environment_ready"):
-            selected_profile = strict_report
-    if selected_profile is None and config.allow_compatible_environment_fallback:
-        fallback_report = prepare_compatible_environment_profile(
-            root_path,
-            config,
-            micromamba_path=micromamba_path,
-            progress=progress,
-        )
-        profile_reports.append(fallback_report)
-        if fallback_report.get("environment_ready"):
-            selected_profile = fallback_report
-
-    ready = selected_profile is not None
-    selected_profile_name = str(selected_profile.get("environment_profile")) if selected_profile else "none"
-    selected_python = str(selected_profile.get("legacy_python_executable")) if selected_profile else str(Path(config.legacy_environment_prefix) / "bin" / "python")
+    strict_report = prepare_strict_official_environment_profile(
+        root_path,
+        config,
+        micromamba_path=micromamba_path,
+        progress=progress,
+    )
+    ready = bool(strict_report.get("environment_ready"))
+    selected_profile_name = "official_requirements_strict" if ready else "none"
+    selected_python = str(
+        strict_report.get("legacy_python_executable")
+        or Path(config.legacy_environment_prefix) / "official_requirements_strict" / "bin" / "python"
+    )
     report = {
         "legacy_environment_requested": True,
         "legacy_environment_ready": ready,
@@ -563,21 +471,10 @@ def prepare_gaussian_shading_legacy_environment(
         "legacy_environment_prefix": str(Path(config.legacy_environment_prefix)),
         "legacy_environment_profile": selected_profile_name,
         "legacy_python_version": config.legacy_python_version,
-        "strict_official_environment_requested": bool(config.strict_official_environment),
-        "strict_official_environment_ready": any(
-            item.get("environment_profile") == "official_requirements_strict" and item.get("environment_ready")
-            for item in profile_reports
-        ),
-        "compatible_environment_fallback_requested": bool(config.allow_compatible_environment_fallback),
-        "compatible_environment_fallback_ready": any(
-            item.get("environment_profile") == "colab_compatible_fallback" and item.get("environment_ready")
-            for item in profile_reports
-        ),
-        "legacy_torch_specs": config.legacy_torch_specs,
-        "legacy_package_specs": config.legacy_package_specs,
+        "strict_official_environment_ready": ready,
         "micromamba_command_results": micromamba_results,
-        "environment_profile_reports": profile_reports,
-        "command_results": [*micromamba_results, *(selected_profile.get("command_results", []) if selected_profile else [])],
+        "environment_profile_reports": [strict_report],
+        "command_results": [*micromamba_results, *strict_report.get("command_results", [])],
     }
     write_json(paths["legacy_environment_prepare_result"], report)
     return report
@@ -1146,7 +1043,13 @@ def write_gaussian_shading_official_reference_outputs(
         emit_progress_status(run_progress, profile="operation=patch_gaussian_shading_source status=running")
         source_patch_report = patch_gaussian_shading_model_repository_layout(root_path, effective_config, paths)
         update_progress(run_progress, profile="operation=patch_gaussian_shading_source")
-        legacy_environment_report = prepare_gaussian_shading_legacy_environment(root_path, config, paths, progress=run_progress)
+        environment_config = config if config.run_official_command else replace(config, prepare_legacy_environment=False)
+        legacy_environment_report = prepare_gaussian_shading_legacy_environment(
+            root_path,
+            environment_config,
+            paths,
+            progress=run_progress,
+        )
         update_progress(run_progress, profile="operation=prepare_gaussian_shading_legacy_environment")
         if config.prepare_legacy_environment and legacy_environment_report.get("legacy_environment_ready"):
             effective_config = replace(config, official_python_executable=str(legacy_environment_report["legacy_python_executable"]))
@@ -1228,7 +1131,6 @@ def write_gaussian_shading_official_reference_outputs(
         "legacy_environment_ready": bool(legacy_environment_report.get("legacy_environment_ready")),
         "legacy_environment_profile": str(legacy_environment_report.get("legacy_environment_profile", "")),
         "strict_official_environment_ready": bool(legacy_environment_report.get("strict_official_environment_ready")),
-        "compatible_environment_fallback_ready": bool(legacy_environment_report.get("compatible_environment_fallback_ready")),
         "source_patch_applied": bool(source_patch_report.get("patch_applied")),
         "local_model_repository_ready": bool(model_repository_report.get("local_model_repository_ready")),
         "model_index_patch_applied": bool(model_repository_report.get("model_index_patch_applied")),
@@ -1332,19 +1234,10 @@ def build_default_config() -> GaussianShadingOfficialReferenceConfig:
         )
         != "0",
         official_python_executable=os.environ.get("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_PYTHON_EXECUTABLE", ""),
-        prepare_legacy_environment=os.environ.get("SLM_WM_GAUSSIAN_SHADING_PREPARE_LEGACY_ENV", "0") == "1",
+        prepare_legacy_environment=os.environ.get("SLM_WM_GAUSSIAN_SHADING_PREPARE_LEGACY_ENV", "1") == "1",
         legacy_environment_prefix=os.environ.get("SLM_WM_GAUSSIAN_SHADING_LEGACY_ENV_PREFIX", DEFAULT_LEGACY_ENV_PREFIX),
         micromamba_path=os.environ.get("SLM_WM_GAUSSIAN_SHADING_MICROMAMBA_PATH", DEFAULT_MICROMAMBA_PATH),
         legacy_python_version=os.environ.get("SLM_WM_GAUSSIAN_SHADING_LEGACY_PYTHON_VERSION", DEFAULT_LEGACY_PYTHON_VERSION),
-        strict_official_environment=os.environ.get("SLM_WM_GAUSSIAN_SHADING_STRICT_OFFICIAL_ENV", "1") != "0",
-        allow_compatible_environment_fallback=os.environ.get(
-            "SLM_WM_GAUSSIAN_SHADING_ALLOW_COMPATIBLE_ENV_FALLBACK", "1"
-        ) != "0",
-        legacy_torch_specs=os.environ.get("SLM_WM_GAUSSIAN_SHADING_LEGACY_TORCH_SPECS", DEFAULT_LEGACY_TORCH_SPECS),
-        legacy_pytorch_index_url=os.environ.get(
-            "SLM_WM_GAUSSIAN_SHADING_LEGACY_PYTORCH_INDEX_URL", DEFAULT_LEGACY_PYTORCH_INDEX_URL
-        ),
-        legacy_package_specs=os.environ.get("SLM_WM_GAUSSIAN_SHADING_LEGACY_PACKAGE_SPECS", DEFAULT_LEGACY_PACKAGE_SPECS),
         run_official_command=os.environ.get("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_RUN_COMMAND", "1") != "0",
         summary_import_path=os.environ.get("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_SUMMARY_IMPORT_PATH", ""),
         log_import_path=os.environ.get("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_LOG_IMPORT_PATH", ""),

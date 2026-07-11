@@ -80,7 +80,7 @@ class BaselineResultRecord:
     false_positive_rate: float
     clean_false_positive_rate: float
     attacked_false_positive_rate: float
-    quality_score_proxy_mean: float
+    quality_score_mean: float
     score_retention_mean: float
     supports_paper_claim: bool = False
 
@@ -130,7 +130,7 @@ class BaselineObservation:
     false_positive_rate: str | float
     clean_false_positive_rate: str | float
     attacked_false_positive_rate: str | float
-    quality_score_proxy_mean: str | float
+    quality_score_mean: str | float
     score_retention_mean: str | float
     supports_paper_claim: bool
 
@@ -328,14 +328,14 @@ def normalize_baseline_result_record(row: Mapping[str, Any]) -> BaselineResultRe
         "false_positive_rate": _float_field(row, "false_positive_rate"),
         "clean_false_positive_rate": _float_field(row, "clean_false_positive_rate"),
         "attacked_false_positive_rate": _float_field(row, "attacked_false_positive_rate"),
-        "quality_score_proxy_mean": _float_field(row, "quality_score_proxy_mean"),
+        "quality_score_mean": _float_field(row, "quality_score_mean"),
         "score_retention_mean": _float_field(row, "score_retention_mean"),
     }
     digest = build_stable_digest(payload)
     return BaselineResultRecord(
         baseline_result_record_id=_str_field(row, "baseline_result_record_id") or f"baseline_result_{digest[:16]}",
         baseline_result_digest=_str_field(row, "baseline_result_digest") or digest,
-        supports_paper_claim=False,
+        supports_paper_claim=bool(row.get("supports_paper_claim", False)),
         **payload,
     )
 
@@ -426,9 +426,9 @@ def build_baseline_observations(
                     false_positive_rate=result_record.false_positive_rate if result_ready else "unsupported",
                     clean_false_positive_rate=result_record.clean_false_positive_rate if result_ready else "unsupported",
                     attacked_false_positive_rate=result_record.attacked_false_positive_rate if result_ready else "unsupported",
-                    quality_score_proxy_mean=result_record.quality_score_proxy_mean if result_ready else "unsupported",
+                    quality_score_mean=result_record.quality_score_mean if result_ready else "unsupported",
                     score_retention_mean=result_record.score_retention_mean if result_ready else "unsupported",
-                    supports_paper_claim=False,
+                    supports_paper_claim=bool(result_record.supports_paper_claim) if result_ready else False,
                 ).to_dict()
             )
     return tuple(rows)
@@ -483,9 +483,9 @@ def aggregate_baseline_metrics(observations: Iterable[Mapping[str, Any]]) -> lis
                 )
                 if ready_rows
                 else "unsupported",
-                "quality_score_proxy_mean": _weighted_mean(
+                "quality_score_mean": _weighted_mean(
                     ready_rows,
-                    "quality_score_proxy_mean",
+                    "quality_score_mean",
                     "supported_record_count",
                 )
                 if ready_rows
@@ -494,24 +494,24 @@ def aggregate_baseline_metrics(observations: Iterable[Mapping[str, Any]]) -> lis
                 if ready_rows
                 else "unsupported",
                 "unsupported_reason": "" if ready_count else first["unsupported_reason"],
-                "supports_paper_claim": False,
+                "supports_paper_claim": bool(ready_rows) and all(bool(item["supports_paper_claim"]) for item in ready_rows),
             }
         )
     return rows
 
 
-def aggregate_slm_proxy_metrics(attack_metric_rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
-    """聚合当前方法在攻击矩阵中的本地代理统计。"""
+def aggregate_slm_metrics(attack_metric_rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """聚合当前方法在共同真实图像攻击矩阵中的正式统计。"""
     rows = tuple(attack_metric_rows)
     supported_rows = tuple(row for row in rows if row.get("metric_status") != "unsupported")
     return {
         "method_id": "slm_wm_current",
-        "method_role": "proposed_method_local_proxy",
-        "comparison_scope": "attack_matrix_local_proxy",
+        "method_role": "proposed_method",
+        "comparison_scope": "common_protocol_real_image_detection",
         "common_prompt_protocol_ready": True,
         "common_attack_protocol_ready": True,
         "common_threshold_protocol_ready": True,
-        "metric_status": "measured_from_local_proxy" if supported_rows else "unsupported",
+        "metric_status": "measured_real_attacked_image_image_only_detection" if supported_rows else "unsupported",
         "true_positive_rate": _weighted_mean(supported_rows, "true_positive_rate", "positive_count"),
         "false_positive_rate": _weighted_mean(supported_rows, "false_positive_rate", "negative_count"),
         "clean_false_positive_rate": _weighted_mean(supported_rows, "clean_false_positive_rate", "negative_count"),
@@ -520,18 +520,18 @@ def aggregate_slm_proxy_metrics(attack_metric_rows: Iterable[Mapping[str, Any]])
             "attacked_false_positive_rate",
             "negative_count",
         ),
-        "quality_score_proxy_mean": _weighted_mean(supported_rows, "quality_score_proxy_mean", "supported_record_count"),
+        "quality_score_mean": _weighted_mean(supported_rows, "quality_score_mean", "supported_record_count"),
         "score_retention_mean": _weighted_mean(supported_rows, "score_retention_mean", "supported_record_count"),
-        "supports_paper_claim": False,
+        "supports_paper_claim": bool(supported_rows) and all(bool(row.get("supports_paper_claim")) for row in supported_rows),
     }
 
 
 def build_comparison_rows(
-    slm_proxy_metrics: Mapping[str, Any],
+    slm_metrics: Mapping[str, Any],
     baseline_metric_rows: Iterable[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """构造 SLM-WM 与外部 baseline 的同协议对比表。"""
-    rows = [dict(slm_proxy_metrics)]
+    rows = [dict(slm_metrics)]
     for baseline_row in baseline_metric_rows:
         measured = baseline_row["metric_status"] != "unsupported"
         rows.append(
@@ -547,9 +547,9 @@ def build_comparison_rows(
                 "false_positive_rate": baseline_row["false_positive_rate"] if measured else "unsupported",
                 "clean_false_positive_rate": baseline_row["clean_false_positive_rate"] if measured else "unsupported",
                 "attacked_false_positive_rate": baseline_row["attacked_false_positive_rate"] if measured else "unsupported",
-                "quality_score_proxy_mean": baseline_row["quality_score_proxy_mean"] if measured else "unsupported",
+                "quality_score_mean": baseline_row["quality_score_mean"] if measured else "unsupported",
                 "score_retention_mean": baseline_row["score_retention_mean"] if measured else "unsupported",
-                "supports_paper_claim": False,
+                "supports_paper_claim": bool(baseline_row.get("supports_paper_claim", False)) if measured else False,
             }
         )
     return rows

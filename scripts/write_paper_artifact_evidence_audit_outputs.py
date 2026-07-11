@@ -36,22 +36,12 @@ DEFAULT_ATTACK_MANIFEST_PATH = Path("outputs/image_only_dataset_runtime/pilot_pa
 DEFAULT_ATTACK_MATRIX_MANIFEST_PATH = Path("outputs/image_only_dataset_runtime/pilot_paper/manifest.local.json")
 DEFAULT_BASELINE_MANIFEST_PATH = Path("outputs/external_baseline_comparison/manifest.local.json")
 DEFAULT_BASELINE_RUNTIME_REPORT_PATH = Path("outputs/external_baseline_comparison/baseline_runtime_report.json")
-DEFAULT_BASELINE_SMALL_SAMPLE_MANIFEST_PATH = Path("outputs/primary_baseline_small_sample_evidence/manifest.local.json")
-DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH = Path(
-    "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json"
-)
 DEFAULT_DATASET_QUALITY_MANIFEST_PATH = Path("outputs/dataset_level_quality/manifest.local.json")
 DEFAULT_DATASET_QUALITY_SUMMARY_PATH = Path("outputs/dataset_level_quality/dataset_quality_summary.json")
 DEFAULT_ABLATION_MANIFEST_PATH = Path("outputs/formal_mechanism_ablation/pilot_paper/manifest.local.json")
 DEFAULT_ABLATION_CLAIM_SUMMARY_PATH = Path(
     "outputs/formal_mechanism_ablation/pilot_paper/ablation_claim_summary.json"
 )
-LEGACY_THRESHOLD_REPORT_PATH = Path("outputs/threshold_calibration/threshold_degeneracy_report.json")
-LEGACY_THRESHOLD_MANIFEST_PATH = Path("outputs/threshold_calibration/manifest.local.json")
-LEGACY_ATTACK_MANIFEST_PATH = Path("outputs/attack_matrix/attack_manifest.json")
-LEGACY_ATTACK_MATRIX_MANIFEST_PATH = Path("outputs/attack_matrix/manifest.local.json")
-LEGACY_ABLATION_MANIFEST_PATH = Path("outputs/internal_ablation_evidence/manifest.local.json")
-LEGACY_ABLATION_CLAIM_SUMMARY_PATH = Path("outputs/internal_ablation_evidence/ablation_claim_summary.json")
 
 
 def stable_json_text(value: Any) -> str:
@@ -115,16 +105,6 @@ def resolve_input_path(root_path: Path, path: str | Path) -> Path:
     return candidate.resolve() if candidate.is_absolute() else (root_path / candidate).resolve()
 
 
-def prefer_existing_input(root_path: Path, primary: str | Path, legacy: str | Path) -> Path:
-    """优先读取真实运行产物, 在其尚未生成时兼容历史审计输入。"""
-
-    resolved_primary = resolve_input_path(root_path, primary)
-    if resolved_primary.is_file():
-        return resolved_primary
-    resolved_legacy = resolve_input_path(root_path, legacy)
-    return resolved_legacy if resolved_legacy.is_file() else resolved_primary
-
-
 def relative_or_absolute(path: Path, root_path: Path) -> str:
     """将路径尽量转为相对仓库根目录的字符串。"""
     try:
@@ -141,8 +121,6 @@ def build_input_bundle(
     attack_matrix_manifest_path: Path,
     baseline_manifest_path: Path,
     baseline_runtime_report_path: Path,
-    baseline_small_sample_manifest_path: Path,
-    baseline_small_sample_summary_path: Path,
     dataset_quality_manifest_path: Path,
     dataset_quality_summary_path: Path,
     ablation_manifest_path: Path,
@@ -165,8 +143,6 @@ def build_input_bundle(
         attack_matrix_manifest=read_json(attack_matrix_manifest_path),
         baseline_manifest=read_json(baseline_manifest_path),
         baseline_runtime_report=read_json(baseline_runtime_report_path),
-        baseline_small_sample_manifest=read_json(baseline_small_sample_manifest_path),
-        baseline_small_sample_summary=read_json(baseline_small_sample_summary_path),
         dataset_quality_manifest=read_json(dataset_quality_manifest_path),
         dataset_quality_summary=read_json(dataset_quality_summary_path),
         ablation_manifest=read_json(ablation_manifest_path),
@@ -178,9 +154,6 @@ def build_input_bundle(
             "quality_metrics_summary": governed_path(runtime_dir / "runtime_results.jsonl"),
             "dataset_quality_summary": governed_path(dataset_quality_summary_path),
             "dataset_quality_metrics": governed_path(dataset_quality_dir / "dataset_quality_metrics.csv"),
-            "dataset_quality_diagnostic_metrics": governed_path(
-                dataset_quality_dir / "dataset_quality_diagnostic_metrics.csv"
-            ),
             "score_distribution_table": governed_path(runtime_dir / "image_only_detection_records.jsonl"),
             "roc_curve_points": governed_path(runtime_dir / "test_detection_metrics.csv"),
             "det_curve_points": governed_path(runtime_dir / "test_detection_metrics.csv"),
@@ -192,9 +165,6 @@ def build_input_bundle(
             "attacked_image_registry": governed_path(runtime_dir / "image_only_detection_records.jsonl"),
             "baseline_runtime_report": "outputs/external_baseline_comparison/baseline_runtime_report.json",
             "baseline_comparison_table": "outputs/external_baseline_comparison/baseline_comparison_table.csv",
-            "baseline_small_sample_summary": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json",
-            "baseline_small_sample_records": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_records.jsonl",
-            "baseline_small_sample_comparison_table": "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_comparison_table.csv",
             "ablation_claim_summary": governed_path(ablation_claim_summary_path),
             "mechanism_ablation_table": governed_path(ablation_dir / "mechanism_ablation_metrics.csv"),
             "method_pairwise_delta_table": governed_path(ablation_dir / "mechanism_pairwise_delta.csv"),
@@ -211,8 +181,6 @@ def write_paper_artifact_evidence_audit_outputs(
     attack_matrix_manifest_path: str | Path = DEFAULT_ATTACK_MATRIX_MANIFEST_PATH,
     baseline_manifest_path: str | Path = DEFAULT_BASELINE_MANIFEST_PATH,
     baseline_runtime_report_path: str | Path = DEFAULT_BASELINE_RUNTIME_REPORT_PATH,
-    baseline_small_sample_manifest_path: str | Path = DEFAULT_BASELINE_SMALL_SAMPLE_MANIFEST_PATH,
-    baseline_small_sample_summary_path: str | Path = DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH,
     dataset_quality_manifest_path: str | Path = DEFAULT_DATASET_QUALITY_MANIFEST_PATH,
     dataset_quality_summary_path: str | Path = DEFAULT_DATASET_QUALITY_SUMMARY_PATH,
     ablation_manifest_path: str | Path = DEFAULT_ABLATION_MANIFEST_PATH,
@@ -248,30 +216,16 @@ def write_paper_artifact_evidence_audit_outputs(
         if per_run_summary.is_file():
             dataset_quality_summary_path = dataset_quality_dir / "dataset_quality_summary.json"
 
-    resolved_threshold_report_path = prefer_existing_input(
-        root_path, threshold_report_path, LEGACY_THRESHOLD_REPORT_PATH
-    )
-    resolved_threshold_manifest_path = prefer_existing_input(
-        root_path, threshold_manifest_path, LEGACY_THRESHOLD_MANIFEST_PATH
-    )
-    resolved_attack_manifest_path = prefer_existing_input(
-        root_path, attack_manifest_path, LEGACY_ATTACK_MANIFEST_PATH
-    )
-    resolved_attack_matrix_manifest_path = prefer_existing_input(
-        root_path, attack_matrix_manifest_path, LEGACY_ATTACK_MATRIX_MANIFEST_PATH
-    )
+    resolved_threshold_report_path = resolve_input_path(root_path, threshold_report_path)
+    resolved_threshold_manifest_path = resolve_input_path(root_path, threshold_manifest_path)
+    resolved_attack_manifest_path = resolve_input_path(root_path, attack_manifest_path)
+    resolved_attack_matrix_manifest_path = resolve_input_path(root_path, attack_matrix_manifest_path)
     resolved_baseline_manifest_path = resolve_input_path(root_path, baseline_manifest_path)
     resolved_baseline_runtime_report_path = resolve_input_path(root_path, baseline_runtime_report_path)
-    resolved_baseline_small_sample_manifest_path = resolve_input_path(root_path, baseline_small_sample_manifest_path)
-    resolved_baseline_small_sample_summary_path = resolve_input_path(root_path, baseline_small_sample_summary_path)
     resolved_dataset_quality_manifest_path = resolve_input_path(root_path, dataset_quality_manifest_path)
     resolved_dataset_quality_summary_path = resolve_input_path(root_path, dataset_quality_summary_path)
-    resolved_ablation_manifest_path = prefer_existing_input(
-        root_path, ablation_manifest_path, LEGACY_ABLATION_MANIFEST_PATH
-    )
-    resolved_ablation_claim_summary_path = prefer_existing_input(
-        root_path, ablation_claim_summary_path, LEGACY_ABLATION_CLAIM_SUMMARY_PATH
-    )
+    resolved_ablation_manifest_path = resolve_input_path(root_path, ablation_manifest_path)
+    resolved_ablation_claim_summary_path = resolve_input_path(root_path, ablation_claim_summary_path)
 
     bundle = build_input_bundle(
         root_path,
@@ -281,8 +235,6 @@ def write_paper_artifact_evidence_audit_outputs(
         resolved_attack_matrix_manifest_path,
         resolved_baseline_manifest_path,
         resolved_baseline_runtime_report_path,
-        resolved_baseline_small_sample_manifest_path,
-        resolved_baseline_small_sample_summary_path,
         resolved_dataset_quality_manifest_path,
         resolved_dataset_quality_summary_path,
         resolved_ablation_manifest_path,
@@ -355,8 +307,6 @@ def write_paper_artifact_evidence_audit_outputs(
             resolved_attack_matrix_manifest_path,
             resolved_baseline_manifest_path,
             resolved_baseline_runtime_report_path,
-            resolved_baseline_small_sample_manifest_path,
-            resolved_baseline_small_sample_summary_path,
             resolved_dataset_quality_manifest_path,
             resolved_dataset_quality_summary_path,
             resolved_ablation_manifest_path,
@@ -415,16 +365,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--attack-matrix-manifest-path", default=str(DEFAULT_ATTACK_MATRIX_MANIFEST_PATH), help="攻击矩阵产物 manifest 路径。")
     parser.add_argument("--baseline-manifest-path", default=str(DEFAULT_BASELINE_MANIFEST_PATH), help="外部 baseline 产物 manifest 路径。")
     parser.add_argument("--baseline-runtime-report-path", default=str(DEFAULT_BASELINE_RUNTIME_REPORT_PATH), help="外部 baseline runtime report 路径。")
-    parser.add_argument(
-        "--baseline-small-sample-manifest-path",
-        default=str(DEFAULT_BASELINE_SMALL_SAMPLE_MANIFEST_PATH),
-        help="外部 baseline 小样本证据 manifest 路径。",
-    )
-    parser.add_argument(
-        "--baseline-small-sample-summary-path",
-        default=str(DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH),
-        help="外部 baseline 小样本证据 summary 路径。",
-    )
     parser.add_argument("--dataset-quality-manifest-path", default=str(DEFAULT_DATASET_QUALITY_MANIFEST_PATH), help="数据集级质量 manifest 路径。")
     parser.add_argument("--dataset-quality-summary-path", default=str(DEFAULT_DATASET_QUALITY_SUMMARY_PATH), help="数据集级质量 summary 路径。")
     parser.add_argument("--ablation-manifest-path", default=str(DEFAULT_ABLATION_MANIFEST_PATH), help="内部消融 manifest 路径。")
@@ -444,8 +384,6 @@ def main() -> None:
         attack_matrix_manifest_path=args.attack_matrix_manifest_path,
         baseline_manifest_path=args.baseline_manifest_path,
         baseline_runtime_report_path=args.baseline_runtime_report_path,
-        baseline_small_sample_manifest_path=args.baseline_small_sample_manifest_path,
-        baseline_small_sample_summary_path=args.baseline_small_sample_summary_path,
         dataset_quality_manifest_path=args.dataset_quality_manifest_path,
         dataset_quality_summary_path=args.dataset_quality_summary_path,
         ablation_manifest_path=args.ablation_manifest_path,

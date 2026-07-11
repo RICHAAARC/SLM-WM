@@ -6,6 +6,7 @@ import argparse
 import csv
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -28,7 +29,7 @@ from paper_experiments.baselines import (
     load_baseline_source_registry,
     validate_primary_baseline_formal_import_rows,
 )
-from experiments.protocol.pilot_paper_fixed_fpr import PILOT_PAPER_FIXED_FPR
+from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 
@@ -155,34 +156,50 @@ def write_primary_baseline_formal_import_protocol_outputs(
     resolved_attack_family_metrics_path = resolve_input_path(root_path, attack_family_metrics_path)
     resolved_candidate_records_path = resolve_input_path(root_path, candidate_records_path)
 
+    required_input_paths = (
+        resolved_source_registry_path,
+        resolved_attack_manifest_path,
+        resolved_attack_family_metrics_path,
+        resolved_candidate_records_path,
+    )
+    missing_input_paths = [path for path in required_input_paths if not path.is_file()]
+    if missing_input_paths:
+        raise FileNotFoundError(
+            "baseline 正式导入缺少输入: " + ", ".join(path.as_posix() for path in missing_input_paths)
+        )
     source_registry = load_baseline_source_registry(resolved_source_registry_path)
     attack_manifest = read_json(resolved_attack_manifest_path)
     attack_rows = read_csv_rows(resolved_attack_family_metrics_path)
-    target_fpr = float(attack_manifest.get("evaluation_boundary", {}).get("target_fpr", PILOT_PAPER_FIXED_FPR))
+    paper_run = build_paper_run_config(root_path)
+    target_fpr = paper_run.target_fpr
+    manifest_target_fpr = attack_manifest.get("evaluation_boundary", {}).get("target_fpr")
+    if manifest_target_fpr is None or not math.isclose(
+        float(manifest_target_fpr), target_fpr, rel_tol=0.0, abs_tol=1e-12
+    ):
+        raise ValueError("攻击矩阵 target_fpr 必须与当前论文运行层级一致")
     execution_plans = build_primary_baseline_execution_plans(source_registry, root=root_path)
     template_rows = build_primary_result_templates(execution_plans, attack_rows, attack_manifest.get("evaluation_boundary", {}))
-    formal_template_rows = [row for row in template_rows if str(row.get("resource_profile", "")) == "full_main"]
     schema = build_primary_baseline_formal_import_schema(target_fpr=target_fpr, root=root_path)
     candidate_rows = read_jsonl_rows(resolved_candidate_records_path)
-    formal_candidate_rows = [row for row in candidate_rows if str(row.get("resource_profile", "")) == "full_main"]
     validation_report = validate_primary_baseline_formal_import_rows(
-        formal_candidate_rows,
+        candidate_rows,
         evidence_root=root_path,
         target_fpr=target_fpr,
         require_existing_evidence=True,
         prompt_protocol_name=str(schema["prompt_protocol_name"]),
+        allowed_resource_profiles=tuple(schema["allowed_resource_profiles"]),
     )
-    readiness_rows = build_primary_baseline_formal_import_readiness_rows(formal_candidate_rows, validation_report)
+    readiness_rows = build_primary_baseline_formal_import_readiness_rows(candidate_rows, validation_report)
     readiness_summary = build_primary_baseline_formal_import_readiness_summary(readiness_rows)
     coverage_rows = build_primary_baseline_formal_template_coverage_rows(
-        formal_template_rows,
-        formal_candidate_rows,
+        template_rows,
+        candidate_rows,
         validation_report,
     )
     coverage_summary = build_primary_baseline_formal_template_coverage_summary(coverage_rows)
     collection_rows = build_primary_baseline_formal_evidence_collection_rows(
-        formal_template_rows,
-        formal_candidate_rows,
+        template_rows,
+        candidate_rows,
         validation_report,
     )
     collection_summary = build_primary_baseline_formal_evidence_collection_summary(collection_rows)
@@ -190,9 +207,8 @@ def write_primary_baseline_formal_import_protocol_outputs(
         "construction_unit_name": "primary_baseline_formal_import_protocol",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "target_fpr": target_fpr,
-        "template_record_count": len(formal_template_rows),
+        "template_record_count": len(template_rows),
         "candidate_record_count": len(candidate_rows),
-        "formal_candidate_record_count": len(formal_candidate_rows),
         "accepted_formal_import_count": validation_report["accepted_formal_import_count"],
         "rejected_formal_import_count": validation_report["rejected_formal_import_count"],
         "formal_import_validation_ready": validation_report["formal_import_validation_ready"],
@@ -202,6 +218,10 @@ def write_primary_baseline_formal_import_protocol_outputs(
         "accepted_template_match_count": coverage_summary["accepted_template_match_count"],
         "missing_candidate_template_count": coverage_summary["missing_candidate_template_count"],
         "missing_formal_template_count": coverage_summary["missing_formal_template_count"],
+        "unexpected_candidate_record_count": coverage_summary["unexpected_candidate_record_count"],
+        "unexpected_accepted_record_count": coverage_summary["unexpected_accepted_record_count"],
+        "duplicate_candidate_template_count": coverage_summary["duplicate_candidate_template_count"],
+        "duplicate_accepted_template_count": coverage_summary["duplicate_accepted_template_count"],
         "formal_evidence_collection_task_count": collection_summary["formal_evidence_collection_task_count"],
         "missing_formal_evidence_collection_task_count": collection_summary[
             "missing_formal_evidence_collection_task_count"
@@ -225,7 +245,7 @@ def write_primary_baseline_formal_import_protocol_outputs(
     manifest_path = resolved_output_dir / "manifest.local.json"
 
     schema_path.write_text(stable_json_text(schema), encoding="utf-8")
-    template_path.write_text("".join(json_line(row) for row in formal_template_rows), encoding="utf-8")
+    template_path.write_text("".join(json_line(row) for row in template_rows), encoding="utf-8")
     validation_path.write_text(stable_json_text(validation_report), encoding="utf-8")
     write_csv(
         readiness_path,
@@ -239,8 +259,8 @@ def write_primary_baseline_formal_import_protocol_outputs(
             "formal_result_ready",
             "blocking_reason_count",
             "blocking_reasons",
-            "missing_resource_profile_full_main",
-            "missing_full_main_prompt_protocol",
+            "missing_formal_attack_resource_profile",
+            "missing_paper_run_prompt_protocol",
             "missing_fixed_fpr_baseline_calibration",
             "missing_attack_matrix_baseline_detection",
             "formal_evidence_paths_ready",
@@ -257,6 +277,10 @@ def write_primary_baseline_formal_import_protocol_outputs(
             "candidate_template_match_count",
             "accepted_template_match_count",
             "missing_formal_template_count",
+            "unexpected_candidate_record_count",
+            "unexpected_accepted_record_count",
+            "duplicate_candidate_template_count",
+            "duplicate_accepted_template_count",
             "formal_template_coverage_ready",
             "supports_paper_claim",
         ],
@@ -296,7 +320,7 @@ def write_primary_baseline_formal_import_protocol_outputs(
         output_paths=output_paths,
         config={
             "schema_digest": build_stable_digest(schema),
-            "template_digest": build_stable_digest(formal_template_rows),
+            "template_digest": build_stable_digest(template_rows),
             "validation_report_digest": build_stable_digest(validation_report),
             "formal_import_readiness_digest": build_stable_digest(readiness_rows),
             "formal_import_readiness_summary_digest": build_stable_digest(readiness_summary),

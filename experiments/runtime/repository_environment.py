@@ -148,7 +148,7 @@ def build_runtime_environment_report(
 
 
 def flatten_environment_versions(environment_report: dict[str, Any]) -> dict[str, str]:
-    """把常用依赖版本提升为摘要字段, 兼容既有 result metadata 读取方式。"""
+    """把常用依赖版本提升为统一摘要字段, 便于 result metadata 直接读取。"""
 
     package_versions = environment_report["package_versions"]
     return {

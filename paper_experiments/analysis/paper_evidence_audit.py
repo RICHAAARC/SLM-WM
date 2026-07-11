@@ -20,8 +20,6 @@ class AuditInputBundle:
     attack_matrix_manifest: dict[str, Any]
     baseline_manifest: dict[str, Any]
     baseline_runtime_report: dict[str, Any]
-    baseline_small_sample_manifest: dict[str, Any]
-    baseline_small_sample_summary: dict[str, Any]
     dataset_quality_manifest: dict[str, Any]
     dataset_quality_summary: dict[str, Any]
     ablation_manifest: dict[str, Any]
@@ -42,9 +40,9 @@ def _yes(value: Any) -> bool:
     return bool(value)
 
 
-def _source(bundle: AuditInputBundle, key: str, fallback: str) -> str:
+def _source(bundle: AuditInputBundle, key: str, default_value: str) -> str:
     """读取脚本层注入的受治理路径, 让核心分析逻辑不绑定外层目录命名。"""
-    return bundle.source_path_map.get(key, fallback)
+    return bundle.source_path_map.get(key, default_value)
 
 
 def _real_attack_closed_loop_ready(attack_manifest: dict[str, Any]) -> bool:
@@ -110,31 +108,6 @@ def _scientific_operator_ready(report: dict[str, Any]) -> bool:
     )
 
 
-def _baseline_small_sample_ready(baseline_small_sample_summary: dict[str, Any]) -> bool:
-    """判断主表 baseline 小样本证据是否已经覆盖当前四个主表方法。
-
-    该判断只用于工程审计可见性, 不会把小样本结果升级为正式论文 claim。
-    """
-
-    return (
-        _yes(baseline_small_sample_summary.get("small_sample_evidence_ready"))
-        and int(baseline_small_sample_summary.get("covered_primary_baseline_count", 0)) >= 4
-        and not _yes(baseline_small_sample_summary.get("paper_claim_ready"))
-    )
-
-
-def _baseline_small_sample_blockers(baseline_small_sample_summary: dict[str, Any]) -> list[str]:
-    """生成主表 baseline 小样本证据的当前阻断项。"""
-
-    blockers = []
-    if not _baseline_small_sample_ready(baseline_small_sample_summary):
-        blockers.append("small_sample_baseline_evidence_missing")
-    if _yes(baseline_small_sample_summary.get("formal_full_paper_run_requested")):
-        blockers.append("formal_full_paper_run_must_remain_disabled")
-    blockers.append("not_full_paper_claim")
-    return blockers
-
-
 def _attack_robustness_blockers(attack_manifest: dict[str, Any]) -> list[str]:
     """生成攻击鲁棒性声明的当前阻断项。"""
     blockers = []
@@ -143,16 +116,12 @@ def _attack_robustness_blockers(attack_manifest: dict[str, Any]) -> list[str]:
     if not _regeneration_attack_gpu_ready(attack_manifest):
         blockers.append("regeneration_attack_real_gpu_missing")
     if not _image_only_detector_ready(attack_manifest):
-        blockers.append("record_level_proxy_boundary")
+        blockers.append("image_only_detector_boundary_not_ready")
     return blockers
 
 
 def _fixed_fpr_and_rescue_boundary_ready(threshold_report: dict[str, Any], attack_manifest: dict[str, Any]) -> bool:
-    """判断 fixed-FPR 与 rescue 边界是否已在当前小样本证据内闭合。
-
-    该函数属于项目特定写法: 它只移除“还需要重新校准边界”的工程缺口, 不会把当前结果升级为
-    正式 full paper 统计声明。正式声明仍由 sample scale、baseline、dataset-level 指标等缺口控制。
-    """
+    """判断 fixed-FPR 与 rescue 是否在同一正式检测协议内闭合。"""
     return (
         _yes(threshold_report.get("fixed_fpr_and_rescue_boundary_ready"))
         and _yes(threshold_report.get("fixed_fpr_boundary_ready"))
@@ -166,8 +135,6 @@ def _dataset_level_quality_blockers(dataset_quality_summary: dict[str, Any]) -> 
     """生成数据集级质量指标的当前阻断项。"""
 
     blockers = []
-    if not _yes(dataset_quality_summary.get("dataset_level_quality_proxy_ready")):
-        blockers.append("dataset_level_quality_proxy_missing")
     if not _yes(dataset_quality_summary.get("formal_fid_kid_ready")):
         blockers.append("fid_kid_dataset_metrics_missing")
     if not _yes(dataset_quality_summary.get("canonical_formal_feature_extractor_ready")):
@@ -175,6 +142,22 @@ def _dataset_level_quality_blockers(dataset_quality_summary: dict[str, Any]) -> 
     if not _yes(dataset_quality_summary.get("formal_fid_kid_claim_gate_ready")):
         blockers.append("formal_fid_kid_claim_gate_not_ready")
     return blockers
+
+
+def _baseline_comparison_ready(report: dict[str, Any]) -> bool:
+    """判断四个主表 baseline 是否在完整攻击模板上形成可支撑论文的比较。"""
+
+    required_flags = (
+        "comparison_table_supports_paper_claim",
+        "supports_paper_claim",
+        "primary_baseline_formal_ready",
+        "primary_baseline_results_ready",
+        "primary_baseline_formal_template_coverage_ready",
+        "primary_baseline_formal_evidence_collection_ready",
+        "formal_import_validation_ready",
+        "formal_evidence_path_resolution_ready",
+    )
+    return all(_yes(report.get(field_name)) for field_name in required_flags)
 
 
 def _row(
@@ -206,7 +189,6 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     threshold = bundle.threshold_report
     attack = bundle.attack_manifest
     baseline = bundle.baseline_runtime_report
-    baseline_small_sample = bundle.baseline_small_sample_summary
     dataset_quality = bundle.dataset_quality_summary
     ablation = bundle.ablation_claim_summary
     full_ready = (
@@ -217,7 +199,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     )
     attack_blockers = _attack_robustness_blockers(attack)
     attack_ready = not attack_blockers
-    baseline_ready = _yes(baseline.get("baseline_results_ready"))
+    baseline_ready = _baseline_comparison_ready(baseline)
     dataset_quality_ready = (
         _yes(dataset_quality.get("formal_fid_kid_ready"))
         and _yes(dataset_quality.get("canonical_formal_feature_extractor_ready"))
@@ -268,18 +250,6 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             _source(bundle, "baseline_runtime_report", "baseline_runtime_report.json"),
             [] if baseline_ready else ["baseline_result_missing"],
             paper_claim_supported=baseline_ready,
-        ),
-        _row(
-            "claim_baseline_small_sample_evidence_boundary",
-            "baseline_comparison",
-            "主表 external baseline 已有小样本受治理证据, 但不支持正式 full paper 结论。",
-            "engineering_supported_not_paper_final",
-            _source(
-                bundle,
-                "baseline_small_sample_summary",
-                "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json",
-            ),
-            _baseline_small_sample_blockers(baseline_small_sample),
         ),
         _row(
             "claim_internal_mechanism_necessity",
@@ -357,7 +327,6 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
     threshold = bundle.threshold_report
     attack = bundle.attack_manifest
     baseline = bundle.baseline_runtime_report
-    baseline_small_sample = bundle.baseline_small_sample_summary
     dataset_quality = bundle.dataset_quality_summary
     ablation = bundle.ablation_claim_summary
     full_ready = (
@@ -410,24 +379,9 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             "table",
             "外部 baseline 对比表",
             [_source(bundle, "baseline_comparison_table", "baseline_comparison_table.csv")],
-            "rebuildable_paper_claim" if _yes(baseline.get("baseline_results_ready")) else "protocol_ready_result_missing",
-            _yes(baseline.get("baseline_results_ready")),
-            [] if _yes(baseline.get("baseline_results_ready")) else ["baseline_result_missing"],
-        ),
-        _artifact_row(
-            "table_baseline_small_sample_evidence",
-            "table",
-            "主表 external baseline 小样本证据边界表",
-            [
-                _source(
-                    bundle,
-                    "baseline_small_sample_comparison_table",
-                    "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_comparison_table.csv",
-                )
-            ],
-            "rebuildable_preview",
-            False,
-            _baseline_small_sample_blockers(baseline_small_sample),
+            "rebuildable_paper_claim" if _baseline_comparison_ready(baseline) else "protocol_ready_result_missing",
+            _baseline_comparison_ready(baseline),
+            [] if _baseline_comparison_ready(baseline) else ["baseline_result_missing"],
         ),
         _artifact_row(
             "table_internal_ablation",
@@ -516,9 +470,9 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
             "figure_data",
             "外部 baseline 对比图数据",
             [_source(bundle, "baseline_comparison_table", "baseline_comparison_table.csv")],
-            "rebuildable_paper_claim" if _yes(baseline.get("baseline_results_ready")) else "blocked",
-            _yes(baseline.get("baseline_results_ready")),
-            [] if _yes(baseline.get("baseline_results_ready")) else ["baseline_result_missing"],
+            "rebuildable_paper_claim" if _baseline_comparison_ready(baseline) else "blocked",
+            _baseline_comparison_ready(baseline),
+            [] if _baseline_comparison_ready(baseline) else ["baseline_result_missing"],
         ),
     ]
 
@@ -565,7 +519,7 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "supports_paper_claim": False,
             }
         )
-    if not _yes(baseline.get("baseline_results_ready")):
+    if not _baseline_comparison_ready(baseline):
         rows.append(
             {
                 "gap_id": "gap_baseline_results",
@@ -581,7 +535,7 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     if not _runtime_sample_scale_ready(threshold):
         rows.append(
             {
-                "gap_id": "gap_full_main_sample_scale",
+                "gap_id": "gap_paper_run_sample_scale",
                 "gap_area": "statistical_power",
                 "blocker_severity": "critical",
                 "required_action": "按当前运行层级完整执行 70/700/7000 Prompt, 并保持 34/340/3400 个 test Prompt 的冻结划分。",
@@ -648,12 +602,12 @@ def _recommended_next_action(gap_rows: Iterable[dict[str, Any]]) -> str:
     """根据剩余缺口生成投稿前推进建议, 避免已经闭合的工程边界继续出现在建议中。"""
     gap_ids = {str(row["gap_id"]) for row in gap_rows}
     if {"gap_real_attacked_image_closed_loop", "gap_regeneration_attack_gpu_validation"} & gap_ids:
-        return "先按 evidence_gap_list.csv 补齐真实攻击闭环、外部 baseline 结果和 full-main 统计, 再进入投稿冻结。"
+        return "先按 evidence_gap_list.csv 补齐真实攻击闭环、外部 baseline 结果和当前运行层级的完整统计, 再进入投稿冻结。"
     actions = []
     if "gap_baseline_results" in gap_ids:
         actions.append("外部 baseline 结果")
-    if "gap_full_main_sample_scale" in gap_ids:
-        actions.append("full-main 统计")
+    if "gap_paper_run_sample_scale" in gap_ids:
+        actions.append("当前运行层级的完整统计")
     if "gap_full_method_fixed_fpr_recalibration" in gap_ids:
         actions.append("完整方法 fixed-FPR 重校准")
     if "gap_formal_mechanism_ablation" in gap_ids:
@@ -674,18 +628,23 @@ def build_builder_readiness_report(
     claims = list(claim_rows)
     tables = list(table_rows)
     figures = list(figure_rows)
-    rebuildable_count = sum(1 for row in tables + figures if row["builder_status"] != "blocked")
-    blocked_count = sum(1 for row in tables + figures if row["builder_status"] == "blocked")
+    artifacts = tables + figures
+    rebuildable_count = sum(1 for row in artifacts if row["builder_status"] != "blocked")
+    blocked_count = sum(1 for row in artifacts if row["builder_status"] == "blocked")
+    paper_ready_count = sum(1 for row in artifacts if _yes(row["paper_ready"]))
+    artifact_builder_ready = bool(artifacts) and blocked_count == 0
+    paper_artifact_claim_ready = bool(artifacts) and paper_ready_count == len(artifacts)
     return {
         "construction_unit_name": "paper_artifact_evidence_audit",
-        "artifact_builder_ready": rebuildable_count > 0,
+        "artifact_builder_ready": artifact_builder_ready,
+        "paper_artifact_claim_ready": paper_artifact_claim_ready,
         "paper_artifact_audit_ready": True,
         "claim_audit_row_count": len(claims),
         "table_readiness_row_count": len(tables),
         "figure_readiness_row_count": len(figures),
         "rebuildable_artifact_count": rebuildable_count,
         "blocked_artifact_count": blocked_count,
-        "paper_ready_artifact_count": sum(1 for row in tables + figures if _yes(row["paper_ready"])),
+        "paper_ready_artifact_count": paper_ready_count,
         "supports_paper_claim": False,
     }
 
@@ -701,7 +660,12 @@ def build_submission_blocker_report(
     critical_gaps = [row for row in gaps if row["blocker_severity"] == "critical"]
     blocking_claims = [row for row in claims if row["claim_decision"] in {"unsupported", "preview_only"}]
     recommended_next_action = _recommended_next_action(gaps)
-    submission_ready = not gaps and not blocking_claims and bool(builder_report.get("artifact_builder_ready"))
+    submission_ready = (
+        not gaps
+        and not blocking_claims
+        and bool(builder_report.get("artifact_builder_ready"))
+        and bool(builder_report.get("paper_artifact_claim_ready"))
+    )
     full_method_claim_ready = any(
         row.get("claim_id") == "claim_full_method_fixed_fpr_boundary"
         and _yes(row.get("paper_claim_supported"))
@@ -711,6 +675,7 @@ def build_submission_blocker_report(
         "construction_unit_name": "paper_artifact_evidence_audit",
         "submission_ready": submission_ready,
         "artifact_builder_ready": bool(builder_report.get("artifact_builder_ready")),
+        "paper_artifact_claim_ready": bool(builder_report.get("paper_artifact_claim_ready")),
         "paper_artifact_audit_ready": True,
         "blocking_claim_count": len(blocking_claims),
         "critical_gap_count": len(critical_gaps),

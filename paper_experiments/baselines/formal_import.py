@@ -2,22 +2,25 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict, dataclass
 from functools import lru_cache
+import math
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from experiments.protocol.attacks import default_attack_configs
 from experiments.protocol.pilot_paper_fixed_fpr import (
+    PILOT_PAPER_ATTACK_RESOURCE_PROFILES,
     PILOT_PAPER_FIXED_FPR,
-    PILOT_PAPER_PROMPT_PROTOCOL_NAME,
     prompt_protocol_name_for_run,
 )
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.calibration import binomial_rate_upper_confidence_bound
 from main.core.digest import build_stable_digest
 
 PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
 PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME = "primary_baseline_formal_import_protocol"
-FULL_MAIN_PROMPT_PROTOCOL_NAME = PILOT_PAPER_PROMPT_PROTOCOL_NAME
 FORMAL_OPERATING_POINT_PREFIX = "fixed_fpr"
 REJECTED_ADAPTER_BOUNDARIES = (
     "method_faithful_not_full_external_baseline_comparison",
@@ -31,7 +34,7 @@ ALLOWED_ADAPTER_BOUNDARIES = (
 ALLOWED_RESULT_SOURCE_TYPES = ("official_reproduction", "governed_import")
 REQUIRED_READY_FLAGS = (
     "method_faithful_adapter_ready",
-    "full_main_prompt_protocol_ready",
+    "paper_run_prompt_protocol_ready",
     "fixed_fpr_baseline_calibration_ready",
     "attack_matrix_baseline_detection_ready",
     "formal_evidence_paths_ready",
@@ -39,6 +42,7 @@ REQUIRED_READY_FLAGS = (
 REQUIRED_METRIC_FIELDS = (
     "positive_count",
     "negative_count",
+    "attacked_negative_count",
     "attack_record_count",
     "supported_record_count",
     "true_positive_rate",
@@ -60,8 +64,8 @@ REQUIRED_SOURCE_FIELDS = (
 )
 METHOD_FAITHFUL_ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
 FORMAL_READINESS_BLOCKING_FLAG_GROUPS = {
-    "missing_resource_profile_full_main": {"resource_profile"},
-    "missing_full_main_prompt_protocol": {"prompt_protocol_name", "full_main_prompt_protocol_ready"},
+    "missing_formal_attack_resource_profile": {"resource_profile"},
+    "missing_paper_run_prompt_protocol": {"prompt_protocol_name", "paper_run_prompt_protocol_ready"},
     "missing_fixed_fpr_baseline_calibration": {"comparable_operating_point", "fixed_fpr_baseline_calibration_ready"},
     "missing_attack_matrix_baseline_detection": {"attack_matrix_baseline_detection_ready"},
     "missing_formal_evidence_paths": {"evidence_paths", "formal_evidence_paths_ready"},
@@ -260,7 +264,7 @@ def _issue(row_index: int, row: Mapping[str, Any], field_name: str, reason: str)
     )
 
 
-def resolve_full_main_prompt_protocol_name(root: str | Path = ".") -> str:
+def resolve_paper_run_prompt_protocol_name(root: str | Path = ".") -> str:
     """解析当前论文运行层级对应的主表 prompt 协议名称。"""
 
     return prompt_protocol_name_for_run(build_paper_run_config(root).run_name)
@@ -274,6 +278,8 @@ def build_primary_baseline_formal_import_schema(
     """构造主表 baseline 正式结果导入 schema 的可落盘描述。"""
 
     paper_run = build_paper_run_config(root)
+    if not math.isclose(float(target_fpr), paper_run.target_fpr, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError("baseline schema target_fpr 必须与当前论文运行层级一致")
     prompt_protocol_name = prompt_protocol_name_for_run(paper_run.run_name)
     return {
         "protocol_name": PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME,
@@ -284,11 +290,12 @@ def build_primary_baseline_formal_import_schema(
         "required_source_fields": list(REQUIRED_SOURCE_FIELDS),
         "allowed_result_source_types": list(ALLOWED_RESULT_SOURCE_TYPES),
         "allowed_adapter_boundaries": list(ALLOWED_ADAPTER_BOUNDARIES),
+        "allowed_resource_profiles": list(PILOT_PAPER_ATTACK_RESOURCE_PROFILES),
         "rejected_adapter_boundaries": list(REJECTED_ADAPTER_BOUNDARIES),
         "prompt_protocol_name": prompt_protocol_name,
-        "full_main_prompt_protocol_name": prompt_protocol_name,
-        "pilot_paper_prompt_protocol_name": PILOT_PAPER_PROMPT_PROTOCOL_NAME,
         "paper_claim_scale": paper_run.run_name,
+        "minimum_result_positive_count": paper_run.minimum_clean_negative_count,
+        "minimum_result_negative_count": paper_run.minimum_clean_negative_count,
         "supports_paper_claim": False,
     }
 
@@ -352,18 +359,34 @@ def build_primary_baseline_formal_evidence_path_summary(
     }
 
 
-def _validate_metric_fields(row: Mapping[str, Any], row_index: int) -> list[FormalImportIssue]:
+def _validate_metric_fields(
+    row: Mapping[str, Any],
+    row_index: int,
+    *,
+    minimum_sample_count: int,
+    target_fpr: float,
+) -> list[FormalImportIssue]:
     """校验正式导入记录中的计数和率值边界。"""
 
     issues: list[FormalImportIssue] = []
     positive_count = _int_field(row, "positive_count")
     negative_count = _int_field(row, "negative_count")
+    attacked_negative_count = _int_field(row, "attacked_negative_count")
     supported_count = _int_field(row, "supported_record_count")
     attack_count = _int_field(row, "attack_record_count")
-    if positive_count <= 0:
-        issues.append(_issue(row_index, row, "positive_count", "positive_count_required"))
-    if negative_count <= 0:
-        issues.append(_issue(row_index, row, "negative_count", "negative_count_required"))
+    if positive_count < minimum_sample_count:
+        issues.append(_issue(row_index, row, "positive_count", "complete_test_positive_count_required"))
+    if negative_count < minimum_sample_count:
+        issues.append(_issue(row_index, row, "negative_count", "complete_test_negative_count_required"))
+    if attacked_negative_count < minimum_sample_count:
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "attacked_negative_count",
+                "complete_test_attacked_negative_count_required",
+            )
+        )
     if supported_count <= 0:
         issues.append(_issue(row_index, row, "supported_record_count", "supported_record_count_required"))
     if attack_count < supported_count:
@@ -379,6 +402,28 @@ def _validate_metric_fields(row: Mapping[str, Any], row_index: int) -> list[Form
         value = _float_field(row, field_name)
         if not 0.0 <= value <= 1.0:
             issues.append(_issue(row_index, row, field_name, "metric_rate_must_be_in_unit_interval"))
+    clean_fpr = _float_field(row, "clean_false_positive_rate")
+    clean_false_positive_value = clean_fpr * negative_count
+    clean_false_positive_count = round(clean_false_positive_value)
+    if not math.isclose(clean_false_positive_value, clean_false_positive_count, rel_tol=0.0, abs_tol=1e-8):
+        issues.append(_issue(row_index, row, "clean_false_positive_rate", "clean_fpr_count_inconsistent"))
+    elif negative_count > 0:
+        upper_bound = binomial_rate_upper_confidence_bound(
+            clean_false_positive_count,
+            negative_count,
+            0.95,
+        )
+        if clean_fpr > target_fpr:
+            issues.append(_issue(row_index, row, "clean_false_positive_rate", "clean_fpr_exceeds_target"))
+        if upper_bound > target_fpr:
+            issues.append(
+                _issue(
+                    row_index,
+                    row,
+                    "clean_false_positive_rate",
+                    "clean_fpr_confidence_upper_bound_exceeds_target",
+                )
+            )
     return issues
 
 
@@ -410,7 +455,7 @@ def validate_primary_baseline_formal_import_rows(
     require_existing_evidence: bool = True,
     evidence_search_roots: Iterable[str | Path] = (),
     prompt_protocol_name: str | None = None,
-    allowed_resource_profiles: Iterable[str] = ("full_main",),
+    allowed_resource_profiles: Iterable[str] = PILOT_PAPER_ATTACK_RESOURCE_PROFILES,
 ) -> dict[str, Any]:
     """校验主表 baseline 正式结果导入记录, 并返回仅包含通过记录的报告。
 
@@ -418,9 +463,12 @@ def validate_primary_baseline_formal_import_rows(
     """
 
     evidence_root_path = Path(evidence_root).resolve()
+    paper_run = build_paper_run_config(evidence_root_path)
+    if not math.isclose(float(target_fpr), paper_run.target_fpr, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError("baseline target_fpr 必须与当前论文运行层级一致")
     search_roots = _normalized_search_roots(evidence_root_path, evidence_search_roots)
     expected_operating_point = build_fixed_fpr_operating_point(target_fpr)
-    expected_prompt_protocol_name = prompt_protocol_name or resolve_full_main_prompt_protocol_name(evidence_root_path)
+    expected_prompt_protocol_name = prompt_protocol_name or resolve_paper_run_prompt_protocol_name(evidence_root_path)
     resource_profiles = tuple(str(value) for value in allowed_resource_profiles if str(value).strip())
     resource_profile_issue_reason = (
         "full_main_resource_profile_required"
@@ -430,8 +478,14 @@ def validate_primary_baseline_formal_import_rows(
     accepted: list[dict[str, Any]] = []
     issues: list[FormalImportIssue] = []
     materialized_rows = [dict(row) for row in rows]
+    seen_template_keys: set[tuple[str, str, str, str, str]] = set()
     for row_index, row in enumerate(materialized_rows):
         row_issues: list[FormalImportIssue] = []
+        template_key = _formal_template_key(row)
+        if template_key in seen_template_keys:
+            row_issues.append(_issue(row_index, row, "baseline_id", "duplicate_formal_template_key"))
+        else:
+            seen_template_keys.add(template_key)
         baseline_id = _str_field(row, "baseline_id")
         if baseline_id not in PRIMARY_BASELINE_IDS:
             row_issues.append(_issue(row_index, row, "baseline_id", "primary_baseline_id_required"))
@@ -444,7 +498,7 @@ def validate_primary_baseline_formal_import_rows(
         if _str_field(row, "comparable_operating_point") != expected_operating_point:
             row_issues.append(_issue(row_index, row, "comparable_operating_point", "fixed_fpr_operating_point_required"))
         if _str_field(row, "prompt_protocol_name") != expected_prompt_protocol_name:
-            row_issues.append(_issue(row_index, row, "prompt_protocol_name", "full_main_prompt_protocol_required"))
+            row_issues.append(_issue(row_index, row, "prompt_protocol_name", "paper_run_prompt_protocol_required"))
         if not _str_field(row, "prompt_protocol_digest"):
             row_issues.append(_issue(row_index, row, "prompt_protocol_digest", "prompt_protocol_digest_required"))
         if not _str_field(row, "baseline_result_source"):
@@ -461,7 +515,14 @@ def validate_primary_baseline_formal_import_rows(
         for flag_name in REQUIRED_READY_FLAGS:
             if not _bool_field(row, flag_name):
                 row_issues.append(_issue(row_index, row, flag_name, f"{flag_name}_required"))
-        row_issues.extend(_validate_metric_fields(row, row_index))
+        row_issues.extend(
+            _validate_metric_fields(
+                row,
+                row_index,
+                minimum_sample_count=paper_run.minimum_clean_negative_count,
+                target_fpr=target_fpr,
+            )
+        )
         row_issues.extend(
             _validate_evidence_paths(row, row_index, evidence_root_path, require_existing_evidence, search_roots)
         )
@@ -558,13 +619,13 @@ def build_primary_baseline_formal_import_readiness_rows(
             "formal_result_ready": formal_result_ready,
             "blocking_reason_count": len(reason_values),
             "blocking_reasons": ";".join(reason_values),
-            "missing_resource_profile_full_main": bool(
+            "missing_formal_attack_resource_profile": bool(
                 candidate_count == 0
-                or field_values & FORMAL_READINESS_BLOCKING_FLAG_GROUPS["missing_resource_profile_full_main"]
+                or field_values & FORMAL_READINESS_BLOCKING_FLAG_GROUPS["missing_formal_attack_resource_profile"]
             ),
-            "missing_full_main_prompt_protocol": bool(
+            "missing_paper_run_prompt_protocol": bool(
                 candidate_count == 0
-                or field_values & FORMAL_READINESS_BLOCKING_FLAG_GROUPS["missing_full_main_prompt_protocol"]
+                or field_values & FORMAL_READINESS_BLOCKING_FLAG_GROUPS["missing_paper_run_prompt_protocol"]
             ),
             "missing_fixed_fpr_baseline_calibration": bool(
                 candidate_count == 0
@@ -643,15 +704,29 @@ def build_primary_baseline_formal_template_coverage_rows(
     templates = [dict(row) for row in template_rows]
     candidates = [dict(row) for row in candidate_rows]
     accepted_records = [dict(row) for row in validation_report.get("accepted_records", ())]
-    candidate_keys = {_formal_template_key(row) for row in candidates}
-    accepted_keys = {_formal_template_key(row) for row in accepted_records}
     rows: list[dict[str, Any]] = []
     for baseline_id in PRIMARY_BASELINE_IDS:
         baseline_templates = [row for row in templates if _str_field(row, "baseline_id") == baseline_id]
         template_keys = {_formal_template_key(row) for row in baseline_templates}
-        candidate_match_count = sum(1 for key in template_keys if key in candidate_keys)
-        accepted_match_count = sum(1 for key in template_keys if key in accepted_keys)
+        candidate_keys = [
+            _formal_template_key(row) for row in candidates if _str_field(row, "baseline_id") == baseline_id
+        ]
+        accepted_keys = [
+            _formal_template_key(row) for row in accepted_records if _str_field(row, "baseline_id") == baseline_id
+        ]
+        candidate_key_counts = Counter(candidate_keys)
+        accepted_key_counts = Counter(accepted_keys)
+        candidate_match_count = sum(1 for key in template_keys if key in candidate_key_counts)
+        accepted_match_count = sum(1 for key in template_keys if key in accepted_key_counts)
         missing_count = max(len(template_keys) - accepted_match_count, 0)
+        unexpected_candidate_count = sum(
+            count for key, count in candidate_key_counts.items() if key not in template_keys
+        )
+        unexpected_accepted_count = sum(
+            count for key, count in accepted_key_counts.items() if key not in template_keys
+        )
+        duplicate_candidate_count = sum(max(count - 1, 0) for count in candidate_key_counts.values())
+        duplicate_accepted_count = sum(max(count - 1, 0) for count in accepted_key_counts.values())
         rows.append(
             {
                 "baseline_id": baseline_id,
@@ -659,7 +734,14 @@ def build_primary_baseline_formal_template_coverage_rows(
                 "candidate_template_match_count": candidate_match_count,
                 "accepted_template_match_count": accepted_match_count,
                 "missing_formal_template_count": missing_count,
-                "formal_template_coverage_ready": bool(template_keys) and missing_count == 0,
+                "unexpected_candidate_record_count": unexpected_candidate_count,
+                "unexpected_accepted_record_count": unexpected_accepted_count,
+                "duplicate_candidate_template_count": duplicate_candidate_count,
+                "duplicate_accepted_template_count": duplicate_accepted_count,
+                "formal_template_coverage_ready": bool(template_keys)
+                and missing_count == 0
+                and unexpected_accepted_count == 0
+                and duplicate_accepted_count == 0,
                 "supports_paper_claim": False,
             }
         )
@@ -677,6 +759,10 @@ def build_primary_baseline_formal_template_coverage_summary(
     formal_template_count = sum(_int_field(row, "expected_formal_template_count") for row in rows)
     candidate_match_count = sum(_int_field(row, "candidate_template_match_count") for row in rows)
     accepted_match_count = sum(_int_field(row, "accepted_template_match_count") for row in rows)
+    unexpected_candidate_count = sum(_int_field(row, "unexpected_candidate_record_count") for row in rows)
+    unexpected_accepted_count = sum(_int_field(row, "unexpected_accepted_record_count") for row in rows)
+    duplicate_candidate_count = sum(_int_field(row, "duplicate_candidate_template_count") for row in rows)
+    duplicate_accepted_count = sum(_int_field(row, "duplicate_accepted_template_count") for row in rows)
     return {
         "primary_baseline_count": len(rows),
         "formal_template_record_count": formal_template_count,
@@ -689,6 +775,10 @@ def build_primary_baseline_formal_template_coverage_summary(
         and len(rows) == len(PRIMARY_BASELINE_IDS),
         "missing_candidate_template_count": max(formal_template_count - candidate_match_count, 0),
         "missing_formal_template_count": sum(_int_field(row, "missing_formal_template_count") for row in rows),
+        "unexpected_candidate_record_count": unexpected_candidate_count,
+        "unexpected_accepted_record_count": unexpected_accepted_count,
+        "duplicate_candidate_template_count": duplicate_candidate_count,
+        "duplicate_accepted_template_count": duplicate_accepted_count,
         "supports_paper_claim": False,
     }
 
@@ -807,7 +897,7 @@ def build_primary_baseline_formal_result_record(
         "baseline_result_source": baseline_result_source,
         "baseline_result_source_digest": baseline_result_source_digest,
         "metric_status": "measured",
-        "prompt_protocol_name": prompt_protocol_name or resolve_full_main_prompt_protocol_name(),
+        "prompt_protocol_name": prompt_protocol_name or resolve_paper_run_prompt_protocol_name(),
         "prompt_protocol_digest": prompt_protocol_digest,
         "adapter_boundary": adapter_boundary,
         "evidence_paths": list(evidence_paths),
@@ -821,7 +911,7 @@ def build_primary_baseline_formal_result_record(
     return payload
 
 
-def build_t2smark_full_main_candidate_records(
+def build_t2smark_formal_candidate_records(
     *,
     observation_rows: Iterable[Mapping[str, Any]],
     target_fpr: float,
@@ -829,58 +919,52 @@ def build_t2smark_full_main_candidate_records(
     baseline_result_source_digest: str,
     evidence_paths: Iterable[str],
     prompt_protocol_digest: str,
-    full_main_prompt_protocol_ready: bool,
+    paper_run_prompt_protocol_ready: bool,
     fixed_fpr_baseline_calibration_ready: bool,
     attack_matrix_baseline_detection_ready: bool,
 ) -> tuple[dict[str, Any], ...]:
-    """把 T2SMark full-main observations 聚合为正式导入候选记录。
+    """把 T2SMark formal observations 聚合为正式导入候选记录。
 
     该函数只负责候选记录聚合。是否可进入正式比较由 validate_primary_baseline_formal_import_rows 决定。
     """
 
+    materialized_observations = tuple(dict(row) for row in observation_rows)
+    attack_resource_profiles = {
+        (config.attack_family, config.attack_name): config.resource_profile
+        for config in default_attack_configs()
+        if config.enabled and config.resource_profile in PILOT_PAPER_ATTACK_RESOURCE_PROFILES
+    }
+    evidence_path_values = tuple(evidence_paths)
     records: list[dict[str, Any]] = []
-    for (attack_family, attack_name), group in _group_observations_by_attack(observation_rows).items():
-        positive_rows = [row for row in group if _str_field(row, "sample_role") in {"positive_source", "attacked_positive"}]
-        negative_rows = [row for row in group if _str_field(row, "sample_role") in {"clean_negative", "attacked_negative"}]
-        supported_count = len(group)
-        positive_count = len(positive_rows)
-        negative_count = len(negative_rows)
-        true_positive = sum(1 for row in positive_rows if _bool_field(row, "detection_decision"))
-        false_positive = sum(1 for row in negative_rows if _bool_field(row, "detection_decision"))
-        clean_negative_rows = [row for row in negative_rows if _str_field(row, "sample_role") == "clean_negative"]
-        attacked_negative_rows = [row for row in negative_rows if _str_field(row, "sample_role") == "attacked_negative"]
-        clean_false_positive = sum(1 for row in clean_negative_rows if _bool_field(row, "detection_decision"))
-        attacked_false_positive = sum(1 for row in attacked_negative_rows if _bool_field(row, "detection_decision"))
-        metric_values = {
-            "positive_count": positive_count,
-            "negative_count": negative_count,
-            "attack_record_count": supported_count,
-            "supported_record_count": supported_count,
-            "true_positive_rate": true_positive / positive_count if positive_count else 0.0,
-            "false_positive_rate": false_positive / negative_count if negative_count else 0.0,
-            "clean_false_positive_rate": clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0,
-            "attacked_false_positive_rate": attacked_false_positive / len(attacked_negative_rows) if attacked_negative_rows else 0.0,
-            "quality_score_mean": _mean_measured_rate(group, "quality_score"),
-            "score_retention_mean": _mean_measured_rate(group, "score_retention"),
-        }
+    for (attack_family, attack_name), group in _group_observations_by_attack(materialized_observations).items():
+        if attack_family == "clean":
+            continue
+        attack_key = (attack_family, attack_name)
+        if attack_key not in attack_resource_profiles:
+            raise ValueError(f"T2SMark observation 包含未注册的正式攻击: {attack_family}/{attack_name}")
+        metric_values = _build_baseline_metric_values(
+            all_observations=materialized_observations,
+            attack_rows=group,
+            attack_family=attack_family,
+        )
         ready_flags = {
             "method_faithful_adapter_ready": True,
-            "full_main_prompt_protocol_ready": full_main_prompt_protocol_ready,
+            "paper_run_prompt_protocol_ready": paper_run_prompt_protocol_ready,
             "fixed_fpr_baseline_calibration_ready": fixed_fpr_baseline_calibration_ready,
             "attack_matrix_baseline_detection_ready": attack_matrix_baseline_detection_ready,
-            "formal_evidence_paths_ready": bool(tuple(evidence_paths)),
+            "formal_evidence_paths_ready": bool(evidence_path_values),
         }
         records.append(
             build_primary_baseline_formal_result_record(
                 baseline_id="t2smark",
                 attack_family=attack_family,
                 attack_name=attack_name,
-                resource_profile="full_main",
+                resource_profile=attack_resource_profiles[attack_key],
                 target_fpr=target_fpr,
                 result_source_type="official_reproduction",
                 baseline_result_source=baseline_result_source,
                 baseline_result_source_digest=baseline_result_source_digest,
-                evidence_paths=evidence_paths,
+                evidence_paths=evidence_path_values,
                 prompt_protocol_digest=prompt_protocol_digest,
                 adapter_boundary="sd35_medium_native_official_reproduction",
                 metric_values=metric_values,
@@ -891,7 +975,7 @@ def build_t2smark_full_main_candidate_records(
 
 
 def _decision_field(row: Mapping[str, Any]) -> bool:
-    """读取 detection decision, 兼容不同 adapter 的字段命名。"""
+    """读取不同正式 adapter 使用的 detection decision 字段。"""
 
     if "detection_decision" in row:
         return _bool_field(row, "detection_decision")
@@ -907,6 +991,51 @@ def _mean_measured_rate(rows: Iterable[Mapping[str, Any]], field_name: str) -> f
     return sum(values) / len(values)
 
 
+def _build_baseline_metric_values(
+    *,
+    all_observations: Iterable[Mapping[str, Any]],
+    attack_rows: Iterable[Mapping[str, Any]],
+    attack_family: str,
+) -> dict[str, Any]:
+    """按冻结 clean negative operating point 聚合单个攻击设置的指标。"""
+
+    all_rows = tuple(all_observations)
+    group = tuple(attack_rows)
+    clean_negative_rows = tuple(
+        row
+        for row in all_rows
+        if _str_field(row, "sample_role") == "clean_negative"
+        and _str_field(row, "attack_family") == "clean"
+    )
+    positive_rows = tuple(
+        row for row in group if _str_field(row, "sample_role") in {"positive_source", "attacked_positive"}
+    )
+    attacked_negative_rows = tuple(
+        row for row in group if _str_field(row, "sample_role") == "attacked_negative"
+    )
+    true_positive = sum(1 for row in positive_rows if _decision_field(row))
+    clean_false_positive = sum(1 for row in clean_negative_rows if _decision_field(row))
+    attacked_false_positive = sum(1 for row in attacked_negative_rows if _decision_field(row))
+    evidence_count = len(group) if attack_family == "clean" else len(group) + len(clean_negative_rows)
+    return {
+        "positive_count": len(positive_rows),
+        "negative_count": len(clean_negative_rows),
+        "attacked_negative_count": len(attacked_negative_rows),
+        "attack_record_count": evidence_count,
+        "supported_record_count": evidence_count,
+        "true_positive_rate": true_positive / len(positive_rows) if positive_rows else 0.0,
+        "false_positive_rate": clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0,
+        "clean_false_positive_rate": (
+            clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0
+        ),
+        "attacked_false_positive_rate": (
+            attacked_false_positive / len(attacked_negative_rows) if attacked_negative_rows else 0.0
+        ),
+        "quality_score_mean": _mean_measured_rate(group, "quality_score"),
+        "score_retention_mean": _mean_measured_rate(group, "score_retention"),
+    }
+
+
 def build_method_faithful_baseline_candidate_records(
     *,
     baseline_id: str,
@@ -916,7 +1045,7 @@ def build_method_faithful_baseline_candidate_records(
     baseline_result_source_digest: str,
     evidence_paths: Iterable[str],
     prompt_protocol_digest: str,
-    full_main_prompt_protocol_ready: bool,
+    paper_run_prompt_protocol_ready: bool,
     fixed_fpr_baseline_calibration_ready: bool,
     attack_matrix_baseline_detection_ready: bool,
     result_source_type: str = "governed_import",
@@ -930,35 +1059,20 @@ def build_method_faithful_baseline_candidate_records(
     validate_primary_baseline_formal_import_rows 统一校验。
     """
 
+    materialized_observations = tuple(dict(row) for row in observation_rows)
     records: list[dict[str, Any]] = []
     evidence_path_values = tuple(evidence_paths)
-    for (attack_family, attack_name), group in _group_observations_by_attack(observation_rows).items():
-        positive_rows = [row for row in group if _str_field(row, "sample_role") in {"positive_source", "attacked_positive"}]
-        negative_rows = [row for row in group if _str_field(row, "sample_role") in {"clean_negative", "attacked_negative"}]
-        supported_count = len(group)
-        positive_count = len(positive_rows)
-        negative_count = len(negative_rows)
-        true_positive = sum(1 for row in positive_rows if _decision_field(row))
-        false_positive = sum(1 for row in negative_rows if _decision_field(row))
-        clean_negative_rows = [row for row in negative_rows if _str_field(row, "sample_role") == "clean_negative"]
-        attacked_negative_rows = [row for row in negative_rows if _str_field(row, "sample_role") == "attacked_negative"]
-        clean_false_positive = sum(1 for row in clean_negative_rows if _decision_field(row))
-        attacked_false_positive = sum(1 for row in attacked_negative_rows if _decision_field(row))
-        metric_values = {
-            "positive_count": positive_count,
-            "negative_count": negative_count,
-            "attack_record_count": supported_count,
-            "supported_record_count": supported_count,
-            "true_positive_rate": true_positive / positive_count if positive_count else 0.0,
-            "false_positive_rate": false_positive / negative_count if negative_count else 0.0,
-            "clean_false_positive_rate": clean_false_positive / len(clean_negative_rows) if clean_negative_rows else 0.0,
-            "attacked_false_positive_rate": attacked_false_positive / len(attacked_negative_rows) if attacked_negative_rows else 0.0,
-            "quality_score_mean": _mean_measured_rate(group, "quality_score"),
-            "score_retention_mean": _mean_measured_rate(group, "score_retention"),
-        }
+    for (attack_family, attack_name), group in _group_observations_by_attack(materialized_observations).items():
+        if attack_family == "clean":
+            continue
+        metric_values = _build_baseline_metric_values(
+            all_observations=materialized_observations,
+            attack_rows=group,
+            attack_family=attack_family,
+        )
         ready_flags = {
             "method_faithful_adapter_ready": True,
-            "full_main_prompt_protocol_ready": full_main_prompt_protocol_ready,
+            "paper_run_prompt_protocol_ready": paper_run_prompt_protocol_ready,
             "fixed_fpr_baseline_calibration_ready": fixed_fpr_baseline_calibration_ready,
             "attack_matrix_baseline_detection_ready": attack_matrix_baseline_detection_ready,
             "formal_evidence_paths_ready": bool(evidence_path_values),
@@ -991,7 +1105,7 @@ def build_tree_ring_method_faithful_candidate_records(
     baseline_result_source_digest: str,
     evidence_paths: Iterable[str],
     prompt_protocol_digest: str,
-    full_main_prompt_protocol_ready: bool,
+    paper_run_prompt_protocol_ready: bool,
     fixed_fpr_baseline_calibration_ready: bool,
     attack_matrix_baseline_detection_ready: bool,
 ) -> tuple[dict[str, Any], ...]:
@@ -1005,7 +1119,7 @@ def build_tree_ring_method_faithful_candidate_records(
         baseline_result_source_digest=baseline_result_source_digest,
         evidence_paths=evidence_paths,
         prompt_protocol_digest=prompt_protocol_digest,
-        full_main_prompt_protocol_ready=full_main_prompt_protocol_ready,
+        paper_run_prompt_protocol_ready=paper_run_prompt_protocol_ready,
         fixed_fpr_baseline_calibration_ready=fixed_fpr_baseline_calibration_ready,
         attack_matrix_baseline_detection_ready=attack_matrix_baseline_detection_ready,
     )

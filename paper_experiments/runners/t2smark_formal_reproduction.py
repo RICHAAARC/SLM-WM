@@ -1,4 +1,4 @@
-"""T2SMark full-main 真实 GPU 复现入口的 Colab 辅助函数。"""
+"""T2SMark formal 真实 GPU 复现入口的 Colab 辅助函数。"""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from paper_experiments.baselines import (
     build_fixed_fpr_operating_point,
-    build_t2smark_full_main_candidate_records,
-    resolve_full_main_prompt_protocol_name,
+    build_t2smark_formal_candidate_records,
+    resolve_paper_run_prompt_protocol_name,
     validate_primary_baseline_formal_import_rows,
 )
 from paper_experiments.baselines.t2smark_pair_quality import write_t2smark_strict_pair_quality_outputs
@@ -29,8 +29,11 @@ from experiments.protocol.splits import apply_split_assignments
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from paper_experiments.runners.external_baseline_method_faithful import (
+    DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
     DEFAULT_T2SMARK_MODEL_ID,
     DEFAULT_T2SMARK_SOURCE_ENTRY,
+    configured_attack_names,
+    count_t2smark_formal_attack_items,
     ensure_cuda_if_requested,
     ensure_t2smark_source_available,
     run_command,
@@ -42,7 +45,7 @@ from experiments.runtime.repository_environment import (
     resolve_code_version,
 )
 
-DEFAULT_OUTPUT_DIR = "outputs/t2smark_full_main_reproduction"
+DEFAULT_OUTPUT_DIR = "outputs/t2smark_formal_reproduction"
 DEFAULT_DRIVE_OUTPUT_DIR = ""
 DEFAULT_PROMPT_FILE = "configs/paper_main_pilot_paper_prompts.txt"
 DEFAULT_RUN_NAME = "t2smark_sd35_medium_pilot_paper"
@@ -51,7 +54,8 @@ DEFAULT_PROMPT_LIMIT = 700
 DEFAULT_T2SMARK_CLIP_MODEL_ID = "openai/clip-vit-base-patch32"
 DEFAULT_T2SMARK_LPIPS_NETWORK = "alex"
 PACKAGE_EXTRA_PATHS = (
-    "paper_experiments/runners/t2smark_full_main_reproduction.py",
+    "paper_experiments/runners/t2smark_formal_reproduction.py",
+    "paper_experiments/runners/external_baseline_method_faithful.py",
     "paper_experiments/baselines/t2smark_pair_quality.py",
     "paper_experiments/baselines/formal_import.py",
     "scripts/write_primary_baseline_formal_import_protocol.py",
@@ -62,8 +66,8 @@ PACKAGE_EXTRA_PATHS = (
 
 
 @dataclass(frozen=True)
-class T2SMarkFullMainReproductionConfig:
-    """描述 T2SMark full-main 真实复现所需的最小配置。"""
+class T2SMarkFormalReproductionConfig:
+    """描述 T2SMark formal 真实复现所需的最小配置。"""
 
     output_dir: str = DEFAULT_OUTPUT_DIR
     drive_output_dir: str = field(
@@ -85,6 +89,7 @@ class T2SMarkFullMainReproductionConfig:
     force_generate: bool = False
     save_image: bool = True
     save_clean_pair: bool = True
+    formal_attack_families: str = DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES
     enable_pair_perceptual_metrics: bool = True
     pair_clip_model_id: str = DEFAULT_T2SMARK_CLIP_MODEL_ID
     pair_lpips_network: str = DEFAULT_T2SMARK_LPIPS_NETWORK
@@ -95,8 +100,8 @@ class T2SMarkFullMainReproductionConfig:
 
 
 @dataclass(frozen=True)
-class T2SMarkFullMainArchiveRecord:
-    """记录 T2SMark full-main 复现压缩包及 Drive 镜像信息。"""
+class T2SMarkFormalArchiveRecord:
+    """记录 T2SMark formal 复现压缩包及 Drive 镜像信息。"""
 
     archive_path: str
     archive_digest: str
@@ -167,7 +172,7 @@ def synchronize_environment_report_with_device_report(
     """
 
     merged_report = dict(environment_report)
-    merged_report["t2smark_full_main_device_report"] = dict(device_report)
+    merged_report["t2smark_formal_device_report"] = dict(device_report)
     if "cuda_available" in device_report:
         merged_report["cuda_available"] = bool(device_report["cuda_available"])
     if "device_count" in device_report:
@@ -180,8 +185,8 @@ def synchronize_environment_report_with_device_report(
     return merged_report
 
 
-def build_t2smark_full_main_environment_report(device_report: dict[str, Any]) -> dict[str, Any]:
-    """构造与 T2SMark full-main GPU 检查结果一致的环境报告。"""
+def build_t2smark_formal_environment_report(device_report: dict[str, Any]) -> dict[str, Any]:
+    """构造与 T2SMark formal GPU 检查结果一致的环境报告。"""
 
     try:
         import torch
@@ -201,8 +206,8 @@ def relative_or_absolute(path: Path, root_path: Path) -> str:
         return path.resolve().as_posix()
 
 
-def output_paths(root_path: Path, config: T2SMarkFullMainReproductionConfig) -> dict[str, Path]:
-    """集中构造 T2SMark full-main 复现所需路径。"""
+def output_paths(root_path: Path, config: T2SMarkFormalReproductionConfig) -> dict[str, Path]:
+    """集中构造 T2SMark formal 复现所需路径。"""
 
     output_dir = (root_path / config.output_dir).resolve()
     official_root = output_dir / "t2smark_official"
@@ -215,18 +220,18 @@ def output_paths(root_path: Path, config: T2SMarkFullMainReproductionConfig) -> 
         "official_results": official_run_dir / "results.json",
         "official_settings": official_run_dir / "settings.json",
         "official_images": official_run_dir / "images",
-        "prompt_dataset": output_dir / "t2smark_full_main_prompt_dataset.json",
-        "prompt_plan": output_dir / "t2smark_full_main_prompt_plan.json",
-        "image_pairs": output_dir / "t2smark_full_main_image_pairs.json",
-        "pair_quality_metrics": output_dir / "t2smark_full_main_strict_pair_quality_metrics.csv",
-        "pair_quality_summary": output_dir / "t2smark_full_main_strict_pair_quality_summary.json",
+        "prompt_dataset": output_dir / "t2smark_formal_prompt_dataset.json",
+        "prompt_plan": output_dir / "t2smark_formal_prompt_plan.json",
+        "image_pairs": output_dir / "t2smark_formal_image_pairs.json",
+        "pair_quality_metrics": output_dir / "t2smark_formal_strict_pair_quality_metrics.csv",
+        "pair_quality_summary": output_dir / "t2smark_formal_strict_pair_quality_summary.json",
         "adapter_observations": adapter_dir / "baseline_observations.json",
         "adapter_manifest": adapter_dir / "t2smark_slm_adapter_manifest.json",
-        "candidate_records": output_dir / "t2smark_full_main_formal_import_candidate_records.jsonl",
-        "validation_report": output_dir / "t2smark_full_main_formal_import_validation_report.json",
-        "environment_report": output_dir / "t2smark_full_main_environment_report.json",
-        "summary": output_dir / "t2smark_full_main_reproduction_summary.json",
-        "manifest": output_dir / "t2smark_full_main_reproduction_manifest.local.json",
+        "candidate_records": output_dir / "t2smark_formal_import_candidate_records.jsonl",
+        "validation_report": output_dir / "t2smark_formal_import_validation_report.json",
+        "environment_report": output_dir / "t2smark_formal_environment_report.json",
+        "summary": output_dir / "t2smark_formal_reproduction_summary.json",
+        "manifest": output_dir / "t2smark_formal_reproduction_manifest.local.json",
     }
 
 
@@ -249,7 +254,7 @@ def selected_prompt_texts(prompt_texts: tuple[str, ...], prompt_limit: int) -> t
     return prompt_texts[: int(prompt_limit)]
 
 
-def build_full_main_prompt_rows(prompt_set: str, prompt_texts: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
+def build_paper_run_prompt_rows(prompt_set: str, prompt_texts: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
     """构造 T2SMark 运行使用的 prompt 计划。"""
 
     rows: list[dict[str, Any]] = []
@@ -268,9 +273,9 @@ def build_full_main_prompt_rows(prompt_set: str, prompt_texts: tuple[str, ...]) 
     return tuple(rows)
 
 
-def write_full_main_prompt_inputs(
+def write_paper_run_prompt_inputs(
     root_path: Path,
-    config: T2SMarkFullMainReproductionConfig,
+    config: T2SMarkFormalReproductionConfig,
     paths: dict[str, Path],
 ) -> dict[str, Any]:
     """写出 T2SMark 官方入口与 adapter 共享的 prompt 输入。"""
@@ -278,7 +283,7 @@ def write_full_main_prompt_inputs(
     prompt_source_path = root_path / config.prompt_file
     all_prompt_texts = read_prompt_texts(prompt_source_path)
     chosen_prompt_texts = selected_prompt_texts(all_prompt_texts, config.prompt_limit)
-    prompt_rows = build_full_main_prompt_rows(config.prompt_set, chosen_prompt_texts)
+    prompt_rows = build_paper_run_prompt_rows(config.prompt_set, chosen_prompt_texts)
     prompt_protocol_ready = bool(prompt_rows) and len(prompt_rows) >= int(config.minimum_prompt_protocol_count)
     dataset_payload = {
         "annotations": [
@@ -293,15 +298,14 @@ def write_full_main_prompt_inputs(
     write_json(paths["prompt_dataset"], dataset_payload)
     write_json(paths["prompt_plan"], list(prompt_rows))
     report = {
-        "full_main_prompt_source_path": relative_or_absolute(prompt_source_path, root_path),
-        "full_main_prompt_count": len(all_prompt_texts),
+        "paper_run_prompt_source_path": relative_or_absolute(prompt_source_path, root_path),
+        "paper_run_prompt_count": len(all_prompt_texts),
         "selected_prompt_count": len(prompt_rows),
         "prompt_limit": int(config.prompt_limit),
         "minimum_prompt_protocol_count": int(config.minimum_prompt_protocol_count),
-        "full_main_prompt_protocol_ready": prompt_protocol_ready,
-        "pilot_paper_prompt_protocol_ready": prompt_protocol_ready,
+        "paper_run_prompt_protocol_ready": prompt_protocol_ready,
         "paper_claim_scale": config.prompt_set,
-        "prompt_protocol_name": resolve_full_main_prompt_protocol_name(root_path),
+        "prompt_protocol_name": resolve_paper_run_prompt_protocol_name(root_path),
         "prompt_protocol_digest": build_stable_digest([row["prompt_digest"] for row in prompt_rows]),
         "prompt_dataset_path": relative_or_absolute(paths["prompt_dataset"], root_path),
         "prompt_plan_path": relative_or_absolute(paths["prompt_plan"], root_path),
@@ -309,12 +313,18 @@ def write_full_main_prompt_inputs(
     return report
 
 
-def should_run_official(config: T2SMarkFullMainReproductionConfig, results_path: Path) -> tuple[bool, str]:
-    """判断官方 T2SMark full-main 运行是否需要本次生成。"""
+def should_run_official(config: T2SMarkFormalReproductionConfig, results_path: Path) -> tuple[bool, str]:
+    """判断官方 T2SMark formal 运行是否需要本次生成。"""
 
     if config.force_generate:
         return True, "force_generate_requested"
     if config.reuse_existing and results_path.is_file():
+        attack_names = configured_attack_names(config.formal_attack_families)
+        if attack_names and count_t2smark_formal_attack_items(results_path, attack_names) < max(
+            1,
+            int(config.prompt_limit),
+        ):
+            return True, "existing_results_formal_attack_count_insufficient"
         if config.save_clean_pair and count_t2smark_pair_quality_items(results_path) < max(1, int(config.prompt_limit)):
             return True, "existing_results_pair_quality_count_insufficient"
         return False, "existing_results_found"
@@ -322,7 +332,7 @@ def should_run_official(config: T2SMarkFullMainReproductionConfig, results_path:
 
 
 def count_t2smark_pair_quality_items(results_path: Path) -> int:
-    """统计 T2SMark full-main 结果中严格 pair-level 质量证据数量。"""
+    """统计 T2SMark formal 结果中严格 pair-level 质量证据数量。"""
 
     if not results_path.is_file():
         return 0
@@ -357,12 +367,12 @@ def count_t2smark_pair_quality_items(results_path: Path) -> int:
 
 def run_t2smark_official_if_needed(
     root_path: Path,
-    config: T2SMarkFullMainReproductionConfig,
+    config: T2SMarkFormalReproductionConfig,
     paths: dict[str, Path],
     prompt_report: dict[str, Any],
     progress: object | None = None,
 ) -> dict[str, Any]:
-    """运行或复用 T2SMark 官方 SD3.5 Medium full-main 结果。"""
+    """运行或复用 T2SMark 官方 SD3.5 Medium formal 结果。"""
 
     paths["official_root"].mkdir(parents=True, exist_ok=True)
     should_run, reason = should_run_official(config, paths["official_results"])
@@ -415,6 +425,15 @@ def run_t2smark_official_if_needed(
                 str(paths["official_run_dir"] / "quality_pairs"),
             ]
         )
+    if str(config.formal_attack_families).strip():
+        command.extend(
+            [
+                "--slm_attack_families",
+                str(config.formal_attack_families),
+                "--slm_attack_image_dir",
+                str(paths["official_run_dir"] / "formal_attacks"),
+            ]
+        )
     if config.save_image:
         command.append("--save_image")
     result = run_command_with_progress_status(
@@ -422,9 +441,9 @@ def run_t2smark_official_if_needed(
         cwd=root_path,
         timeout_seconds=config.timeout_seconds,
         progress=progress,
-        progress_profile=f"operation=t2smark_full_main_official_reference samples={prompt_report['selected_prompt_count']}",
+        progress_profile=f"operation=t2smark_formal_official_reference samples={prompt_report['selected_prompt_count']}",
     )
-    write_json(paths["output_dir"] / "t2smark_full_main_official_command_result.json", result)
+    write_json(paths["output_dir"] / "t2smark_formal_official_command_result.json", result)
     return {
         "official_result_generated": result["return_code"] == 0,
         "official_result_reused": False,
@@ -436,18 +455,18 @@ def run_t2smark_official_if_needed(
     }
 
 
-def build_t2smark_full_main_image_pairs(
+def build_t2smark_formal_image_pairs(
     root_path: Path,
     paths: dict[str, Path],
     prompt_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """按 full-main prompt 计划和官方图像目录生成 image_pairs。"""
+    """按 当前论文运行层级的完整 Prompt 计划和官方图像目录生成 image_pairs。"""
 
     rows: list[dict[str, Any]] = []
     for index, prompt_row in enumerate(prompt_rows):
         image_path = paths["official_images"] / f"{index:05d}.png"
         clean_image_path = paths["official_run_dir"] / "quality_pairs" / "clean" / f"{index:05d}.png"
-        image_id = f"t2smark_full_main_{index:05d}"
+        image_id = f"t2smark_formal_{index:05d}"
         watermarked_image_digest = file_digest(image_path) if image_path.is_file() else ""
         clean_image_digest = file_digest(clean_image_path) if clean_image_path.is_file() else ""
         rows.append(
@@ -475,7 +494,7 @@ def build_t2smark_full_main_image_pairs(
 
 def run_t2smark_adapter(
     root_path: Path,
-    config: T2SMarkFullMainReproductionConfig,
+    config: T2SMarkFormalReproductionConfig,
     paths: dict[str, Path],
     progress: object | None = None,
 ) -> dict[str, Any]:
@@ -505,9 +524,9 @@ def run_t2smark_adapter(
         cwd=root_path,
         timeout_seconds=config.timeout_seconds,
         progress=progress,
-        progress_profile="operation=t2smark_full_main_adapter",
+        progress_profile="operation=t2smark_formal_adapter",
     )
-    write_json(paths["output_dir"] / "t2smark_full_main_adapter_command_result.json", result)
+    write_json(paths["output_dir"] / "t2smark_formal_adapter_command_result.json", result)
     return {
         "adapter_return_code": result["return_code"],
         "adapter_command": command,
@@ -517,11 +536,11 @@ def run_t2smark_adapter(
 
 def build_candidate_records_and_validation(
     root_path: Path,
-    config: T2SMarkFullMainReproductionConfig,
+    config: T2SMarkFormalReproductionConfig,
     paths: dict[str, Path],
     prompt_report: dict[str, Any],
 ) -> dict[str, Any]:
-    """从 T2SMark full-main observations 构造正式导入候选并运行 schema 校验。"""
+    """从 T2SMark formal observations 构造正式导入候选并运行 schema 校验。"""
 
     observations = read_json(paths["adapter_observations"]) if paths["adapter_observations"].is_file() else []
     calibration_negatives = tuple(
@@ -558,14 +577,14 @@ def build_candidate_records_and_validation(
         relative_or_absolute(paths["prompt_dataset"], root_path),
         relative_or_absolute(paths["prompt_plan"], root_path),
     ]
-    candidate_records = build_t2smark_full_main_candidate_records(
+    candidate_records = build_t2smark_formal_candidate_records(
         observation_rows=observations,
         target_fpr=config.target_fpr,
         baseline_result_source=relative_or_absolute(paths["official_results"], root_path),
         baseline_result_source_digest=file_digest(paths["official_results"]) if paths["official_results"].is_file() else "",
         evidence_paths=evidence_paths,
         prompt_protocol_digest=str(prompt_report["prompt_protocol_digest"]),
-        full_main_prompt_protocol_ready=bool(prompt_report["full_main_prompt_protocol_ready"]),
+        paper_run_prompt_protocol_ready=bool(prompt_report["paper_run_prompt_protocol_ready"]),
         fixed_fpr_baseline_calibration_ready=fixed_fpr_ready,
         attack_matrix_baseline_detection_ready=actual_attack_names == required_attack_names,
     )
@@ -587,18 +606,18 @@ def build_candidate_records_and_validation(
 
 def write_failure_outputs(
     root_path: Path,
-    config: T2SMarkFullMainReproductionConfig,
+    config: T2SMarkFormalReproductionConfig,
     paths: dict[str, Path],
     error: Exception,
 ) -> dict[str, Any]:
-    """在 full-main 复现失败时写出可打包诊断产物。"""
+    """在 formal 复现失败时写出可打包诊断产物。"""
 
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
     environment_report = build_runtime_environment_report()
     write_json(paths["environment_report"], environment_report)
     summary = {
         "run_decision": "fail",
-        "t2smark_full_main_reproduction_ready": False,
+        "t2smark_formal_reproduction_ready": False,
         "formal_import_validation_ready": False,
         "unsupported_reason": f"{type(error).__name__}:{error}",
         "supports_paper_claim": False,
@@ -607,41 +626,41 @@ def write_failure_outputs(
     }
     write_json(paths["summary"], summary)
     manifest = build_artifact_manifest(
-        artifact_id="t2smark_full_main_reproduction_manifest",
+        artifact_id="t2smark_formal_reproduction_manifest",
         artifact_type="local_manifest",
         input_paths=(),
         output_paths=(relative_or_absolute(paths["summary"], root_path), relative_or_absolute(paths["environment_report"], root_path)),
         config=asdict(config),
         code_version=resolve_code_version(root_path),
-        rebuild_command="调用 paper_experiments.runners.t2smark_full_main_reproduction",
+        rebuild_command="调用 paper_experiments.runners.t2smark_formal_reproduction",
         metadata={"run_decision": "fail", "supports_paper_claim": False},
     ).to_dict()
     write_json(paths["manifest"], manifest)
     return summary
 
 
-def write_t2smark_full_main_reproduction_outputs(
-    config: T2SMarkFullMainReproductionConfig,
+def write_t2smark_formal_reproduction_outputs(
+    config: T2SMarkFormalReproductionConfig,
     root: str | Path = ".",
 ) -> dict[str, Any]:
-    """运行 T2SMark full-main 真实复现路径并写出 summary 与 manifest。"""
+    """运行 T2SMark formal 真实复现路径并写出 summary 与 manifest。"""
 
     root_path = Path(root).resolve()
     paths = output_paths(root_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
     try:
-        with progress_bar(8, desc="t2smark full main reproduction", enabled=config.enable_workflow_progress_bar) as run_progress:
+        with progress_bar(8, desc="t2smark formal reproduction", enabled=config.enable_workflow_progress_bar) as run_progress:
             emit_progress_status(run_progress, profile="operation=ensure_cuda status=running")
             device_report = ensure_cuda_if_requested(config.require_cuda)
             update_progress(run_progress, profile="operation=ensure_cuda")
             emit_progress_status(run_progress, profile="operation=write_prompt_inputs status=running")
-            prompt_report = write_full_main_prompt_inputs(root_path, config, paths)
+            prompt_report = write_paper_run_prompt_inputs(root_path, config, paths)
             prompt_rows = read_json(paths["prompt_plan"])
             update_progress(run_progress, profile=f"operation=write_prompt_inputs prompts={prompt_report['selected_prompt_count']}")
             official_report = run_t2smark_official_if_needed(root_path, config, paths, prompt_report, progress=run_progress)
-            update_progress(run_progress, profile="operation=t2smark_full_main_official_reference")
+            update_progress(run_progress, profile="operation=t2smark_formal_official_reference")
             emit_progress_status(run_progress, profile="operation=build_image_pairs status=running")
-            image_pairs = build_t2smark_full_main_image_pairs(root_path, paths, prompt_rows)
+            image_pairs = build_t2smark_formal_image_pairs(root_path, paths, prompt_rows)
             update_progress(run_progress, profile=f"operation=build_image_pairs pairs={len(image_pairs)}")
             emit_progress_status(run_progress, profile="operation=t2smark_pair_quality status=running")
             pair_quality_report = write_t2smark_strict_pair_quality_outputs(
@@ -662,12 +681,12 @@ def write_t2smark_full_main_reproduction_outputs(
                 ),
             )
             adapter_report = run_t2smark_adapter(root_path, config, paths, progress=run_progress)
-            update_progress(run_progress, profile="operation=t2smark_full_main_adapter")
+            update_progress(run_progress, profile="operation=t2smark_formal_adapter")
             emit_progress_status(run_progress, profile="operation=build_candidate_records status=running")
             candidate_report = build_candidate_records_and_validation(root_path, config, paths, prompt_report)
             update_progress(run_progress, profile=f"operation=build_candidate_records records={candidate_report['candidate_record_count']}")
             emit_progress_status(run_progress, profile="operation=write_environment_report status=running")
-            environment_report = build_t2smark_full_main_environment_report(device_report)
+            environment_report = build_t2smark_formal_environment_report(device_report)
             write_json(paths["environment_report"], environment_report)
             update_progress(run_progress, profile="operation=write_environment_report")
     except Exception as error:
@@ -676,24 +695,32 @@ def write_t2smark_full_main_reproduction_outputs(
     official_ready = paths["official_results"].is_file() and official_report.get("official_return_code") == 0
     adapter_ready = paths["adapter_observations"].is_file() and adapter_report.get("adapter_return_code") == 0
     pair_quality_ready = bool(pair_quality_report.get("strict_pair_quality_ready", False))
+    formal_attack_names = configured_attack_names(config.formal_attack_families)
+    formal_attack_result_count = count_t2smark_formal_attack_items(paths["official_results"], formal_attack_names)
+    formal_attack_ready = bool(formal_attack_names) and formal_attack_result_count >= int(
+        prompt_report["selected_prompt_count"]
+    )
     run_ready = bool(
         official_ready
         and adapter_ready
         and prompt_report["selected_prompt_count"] > 0
         and (not config.save_clean_pair or pair_quality_ready)
+        and formal_attack_ready
     )
     validation_report = candidate_report["validation_report"]
     summary = {
         "run_decision": "pass" if run_ready else "fail",
-        "t2smark_full_main_reproduction_ready": run_ready,
+        "t2smark_formal_reproduction_ready": run_ready,
         "t2smark_official_result_generated": bool(official_report.get("official_result_generated")),
         "t2smark_official_result_reused": bool(official_report.get("official_result_reused")),
-        "full_main_prompt_count": int(prompt_report["full_main_prompt_count"]),
-        "paper_prompt_count": int(prompt_report["full_main_prompt_count"]),
+        "paper_run_prompt_count": int(prompt_report["paper_run_prompt_count"]),
+        "paper_prompt_count": int(prompt_report["paper_run_prompt_count"]),
         "selected_prompt_count": int(prompt_report["selected_prompt_count"]),
         "prompt_limit": int(config.prompt_limit),
-        "full_main_prompt_protocol_ready": bool(prompt_report["full_main_prompt_protocol_ready"]),
-        "pilot_paper_prompt_protocol_ready": bool(prompt_report["pilot_paper_prompt_protocol_ready"]),
+        "paper_run_prompt_protocol_ready": bool(prompt_report["paper_run_prompt_protocol_ready"]),
+        "t2smark_formal_attack_names": list(formal_attack_names),
+        "t2smark_formal_attack_result_count": formal_attack_result_count,
+        "t2smark_formal_attack_ready": formal_attack_ready,
         "image_pair_count": len(image_pairs),
         "t2smark_strict_pair_quality_ready": pair_quality_ready,
         "t2smark_strict_pair_quality_count": int(pair_quality_report.get("measured_strict_pair_quality_count", 0)),
@@ -712,7 +739,7 @@ def write_t2smark_full_main_reproduction_outputs(
         "environment_report_path": relative_or_absolute(paths["environment_report"], root_path),
         "manifest_path": relative_or_absolute(paths["manifest"], root_path),
         "supports_paper_claim": False,
-        "unsupported_reason": "" if run_ready else "t2smark_full_main_reproduction_incomplete",
+        "unsupported_reason": "" if run_ready else "t2smark_formal_reproduction_incomplete",
         "paper_claim_scale": config.prompt_set,
         "metadata": {
             "prompt_report": prompt_report,
@@ -735,16 +762,16 @@ def write_t2smark_full_main_reproduction_outputs(
     if paths["adapter_observations"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["adapter_observations"], root_path))
     manifest = build_artifact_manifest(
-        artifact_id="t2smark_full_main_reproduction_manifest",
+        artifact_id="t2smark_formal_reproduction_manifest",
         artifact_type="local_manifest",
         input_paths=(relative_or_absolute(root_path / config.prompt_file, root_path),),
         output_paths=tuple(output_paths_for_manifest + [relative_or_absolute(paths["manifest"], root_path)]),
         config=asdict(config),
         code_version=resolve_code_version(root_path),
-        rebuild_command="调用 paper_experiments.runners.t2smark_full_main_reproduction",
+        rebuild_command="调用 paper_experiments.runners.t2smark_formal_reproduction",
         metadata={
             "run_decision": summary["run_decision"],
-            "t2smark_full_main_reproduction_ready": run_ready,
+            "t2smark_formal_reproduction_ready": run_ready,
             "formal_import_validation_ready": summary["formal_import_validation_ready"],
             "t2smark_strict_pair_quality_ready": pair_quality_ready,
             "t2smark_strict_pair_quality_count": summary["t2smark_strict_pair_quality_count"],
@@ -755,49 +782,53 @@ def write_t2smark_full_main_reproduction_outputs(
     return summary
 
 
-def build_default_config() -> T2SMarkFullMainReproductionConfig:
+def build_default_config() -> T2SMarkFormalReproductionConfig:
     """从环境变量构造默认 Colab 运行配置。"""
 
     paper_run = build_paper_run_config(".")
-    return T2SMarkFullMainReproductionConfig(
-        output_dir=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
+    return T2SMarkFormalReproductionConfig(
+        output_dir=os.environ.get("SLM_WM_T2SMARK_FORMAL_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         drive_output_dir=os.environ.get(
-            "SLM_WM_T2SMARK_FULL_MAIN_DRIVE_OUTPUT_DIR",
+            "SLM_WM_T2SMARK_FORMAL_DRIVE_OUTPUT_DIR",
             paper_run.drive_dir("external_baseline_official_reference"),
         ),
         prompt_set=os.environ.get("SLM_WM_PROMPT_SET", paper_run.prompt_set),
-        prompt_file=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PROMPT_FILE", paper_run.prompt_file),
-        t2smark_run_name=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_RUN_NAME", DEFAULT_RUN_NAME),
+        prompt_file=os.environ.get("SLM_WM_T2SMARK_FORMAL_PROMPT_FILE", paper_run.prompt_file),
+        t2smark_run_name=os.environ.get("SLM_WM_T2SMARK_FORMAL_RUN_NAME", DEFAULT_RUN_NAME),
         model_id=os.environ.get("SLM_WM_T2SMARK_MODEL_ID", DEFAULT_T2SMARK_MODEL_ID),
-        seed=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_SEED", "20260621")),
+        seed=int(os.environ.get("SLM_WM_T2SMARK_FORMAL_SEED", "20260621")),
         prompt_limit=resolve_count_from_environment(
-            "SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT",
+            "SLM_WM_T2SMARK_FORMAL_PROMPT_LIMIT",
             default_value=paper_run.sample_count,
         ),
-        clip_test_num=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_CLIP_TEST_NUM", "0")),
-        num_inference_steps=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_NUM_INFERENCE_STEPS", "28")),
-        num_inversion_steps=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_NUM_INVERSION_STEPS", "28")),
-        guidance_scale=float(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_GUIDANCE_SCALE", "4.0")),
-        target_fpr=float(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR", str(paper_run.target_fpr))),
+        clip_test_num=int(os.environ.get("SLM_WM_T2SMARK_FORMAL_CLIP_TEST_NUM", "0")),
+        num_inference_steps=int(os.environ.get("SLM_WM_T2SMARK_FORMAL_NUM_INFERENCE_STEPS", "28")),
+        num_inversion_steps=int(os.environ.get("SLM_WM_T2SMARK_FORMAL_NUM_INVERSION_STEPS", "28")),
+        guidance_scale=float(os.environ.get("SLM_WM_T2SMARK_FORMAL_GUIDANCE_SCALE", "4.0")),
+        target_fpr=float(os.environ.get("SLM_WM_T2SMARK_FORMAL_TARGET_FPR", str(paper_run.target_fpr))),
         minimum_prompt_protocol_count=paper_run.prompt_count,
-        reuse_existing=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_REUSE_EXISTING", "1") != "0",
-        force_generate=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_FORCE_GENERATE", "0") == "1",
-        save_image=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_SAVE_IMAGE", "1") != "0",
-        save_clean_pair=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_SAVE_CLEAN_PAIR", "1") != "0",
-        enable_pair_perceptual_metrics=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PAIR_PERCEPTUAL_METRICS", "1") != "0",
-        pair_clip_model_id=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PAIR_CLIP_MODEL_ID", DEFAULT_T2SMARK_CLIP_MODEL_ID),
-        pair_lpips_network=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PAIR_LPIPS_NETWORK", DEFAULT_T2SMARK_LPIPS_NETWORK),
-        pair_perceptual_metric_device_name=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_PAIR_PERCEPTUAL_DEVICE", "cpu"),
-        require_cuda=os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_REQUIRE_CUDA", "1") != "0",
-        timeout_seconds=int(os.environ.get("SLM_WM_T2SMARK_FULL_MAIN_TIMEOUT_SECONDS", "86400")),
+        reuse_existing=os.environ.get("SLM_WM_T2SMARK_FORMAL_REUSE_EXISTING", "1") != "0",
+        force_generate=os.environ.get("SLM_WM_T2SMARK_FORMAL_FORCE_GENERATE", "0") == "1",
+        save_image=os.environ.get("SLM_WM_T2SMARK_FORMAL_SAVE_IMAGE", "1") != "0",
+        save_clean_pair=os.environ.get("SLM_WM_T2SMARK_FORMAL_SAVE_CLEAN_PAIR", "1") != "0",
+        formal_attack_families=os.environ.get(
+            "SLM_WM_T2SMARK_FORMAL_ATTACK_FAMILIES",
+            DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
+        ),
+        enable_pair_perceptual_metrics=os.environ.get("SLM_WM_T2SMARK_FORMAL_PAIR_PERCEPTUAL_METRICS", "1") != "0",
+        pair_clip_model_id=os.environ.get("SLM_WM_T2SMARK_FORMAL_PAIR_CLIP_MODEL_ID", DEFAULT_T2SMARK_CLIP_MODEL_ID),
+        pair_lpips_network=os.environ.get("SLM_WM_T2SMARK_FORMAL_PAIR_LPIPS_NETWORK", DEFAULT_T2SMARK_LPIPS_NETWORK),
+        pair_perceptual_metric_device_name=os.environ.get("SLM_WM_T2SMARK_FORMAL_PAIR_PERCEPTUAL_DEVICE", "cpu"),
+        require_cuda=os.environ.get("SLM_WM_T2SMARK_FORMAL_REQUIRE_CUDA", "1") != "0",
+        timeout_seconds=int(os.environ.get("SLM_WM_T2SMARK_FORMAL_TIMEOUT_SECONDS", "86400")),
         enable_workflow_progress_bar=os.environ.get("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1") != "0",
     )
 
 
-def run_default_t2smark_full_main_reproduction_plan(root: str | Path = ".") -> dict[str, Any]:
-    """运行默认 T2SMark full-main 真实复现计划。"""
+def run_default_t2smark_formal_reproduction_plan(root: str | Path = ".") -> dict[str, Any]:
+    """运行默认 T2SMark formal 真实复现计划。"""
 
-    return write_t2smark_full_main_reproduction_outputs(config=build_default_config(), root=root)
+    return write_t2smark_formal_reproduction_outputs(config=build_default_config(), root=root)
 
 
 def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Path) -> tuple[Path, ...]:
@@ -819,13 +850,13 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
     return tuple(unique_entries)
 
 
-def package_t2smark_full_main_reproduction_outputs(
+def package_t2smark_formal_reproduction_outputs(
     root: str | Path = ".",
     output_dir: str = DEFAULT_OUTPUT_DIR,
     drive_output_dir: str | None = None,
     archive_name: str = "external_baseline_official_reference_package_t2smark.zip",
-) -> T2SMarkFullMainArchiveRecord:
-    """打包 T2SMark full-main 复现产物并镜像到 Google Drive。"""
+) -> T2SMarkFormalArchiveRecord:
+    """打包 T2SMark formal 复现产物并镜像到 Google Drive。"""
 
     root_path = Path(root).resolve()
     resolved_drive_output_dir = drive_output_dir or build_paper_run_config(root_path).drive_dir(
@@ -834,9 +865,9 @@ def package_t2smark_full_main_reproduction_outputs(
     source_dir = (root_path / output_dir).resolve()
     source_dir.mkdir(parents=True, exist_ok=True)
     archive_path = source_dir / archive_name
-    package_manifest_path = source_dir / "t2smark_full_main_package_input_manifest.json"
-    summary_path = source_dir / "t2smark_full_main_archive_summary.json"
-    manifest_path = source_dir / "t2smark_full_main_archive_manifest.local.json"
+    package_manifest_path = source_dir / "t2smark_formal_package_input_manifest.json"
+    summary_path = source_dir / "t2smark_formal_archive_summary.json"
+    manifest_path = source_dir / "t2smark_formal_archive_manifest.local.json"
     for stale_path in (package_manifest_path, summary_path, manifest_path):
         if stale_path.exists():
             stale_path.unlink()
@@ -848,7 +879,7 @@ def package_t2smark_full_main_reproduction_outputs(
     }
     write_json(package_manifest_path, package_manifest)
     archive_manifest = build_artifact_manifest(
-        artifact_id="t2smark_full_main_archive_manifest",
+        artifact_id="t2smark_formal_archive_manifest",
         artifact_type="local_manifest",
         input_paths=tuple([entry.relative_to(root_path).as_posix() for entry in entries] + [package_manifest_path.relative_to(root_path).as_posix()]),
         output_paths=(
@@ -858,8 +889,8 @@ def package_t2smark_full_main_reproduction_outputs(
         ),
         config={"archive_name": archive_name, "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser())},
         code_version=resolve_code_version(root_path),
-        rebuild_command="调用 paper_experiments.runners.t2smark_full_main_reproduction",
-        metadata={"construction_unit_name": "t2smark_full_main_reproduction", "generated_at": datetime.now(timezone.utc).isoformat()},
+        rebuild_command="调用 paper_experiments.runners.t2smark_formal_reproduction",
+        metadata={"construction_unit_name": "t2smark_formal_reproduction", "generated_at": datetime.now(timezone.utc).isoformat()},
     ).to_dict()
     write_json(manifest_path, archive_manifest)
     entries = collect_package_entries(root_path, source_dir, archive_path)
@@ -870,14 +901,14 @@ def package_t2smark_full_main_reproduction_outputs(
     drive_dir.mkdir(parents=True, exist_ok=True)
     mirrored_path = drive_dir / archive_name
     shutil.copy2(archive_path, mirrored_path)
-    record = T2SMarkFullMainArchiveRecord(
+    record = T2SMarkFormalArchiveRecord(
         archive_path=relative_or_absolute(archive_path, root_path),
         archive_digest=file_digest(archive_path),
         archive_entry_count=len(entries),
         drive_archive_path=str(mirrored_path),
         drive_archive_digest=file_digest(mirrored_path),
         metadata={
-            "construction_unit_name": "t2smark_full_main_reproduction",
+            "construction_unit_name": "t2smark_formal_reproduction",
             "drive_output_dir": str(drive_dir),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },

@@ -128,7 +128,6 @@ def _configure_semantic_watermark_image_only(
     _set_env("SLM_WM_DATASET_QUALITY_DRIVE_DIR", paper_run.drive_dir("dataset_level_quality"))
     _set_env("SLM_WM_RUNTIME_RERUN_ABLATION_DRIVE_DIR", paper_run.drive_dir("runtime_rerun_ablation"))
     _set_default_env("SLM_WM_MAX_NEW_PROMPTS_PER_SESSION", "5")
-    _set_default_env("SLM_WM_ABLATION_PROMPT_COUNT", "100")
     _set_default_env("SLM_WM_MAX_NEW_ABLATION_RUNS_PER_SESSION", "5")
     _set_default_env("SLM_WM_INCEPTION_BATCH_SIZE", "32")
     _set_default_env("SLM_WM_ENABLE_DIFFUSION_ATTACKS", "1")
@@ -282,17 +281,6 @@ def _configure_official_reference_gaussian_shading(paper_run: Any, sample_count_
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_LEGACY_ENV_PREFIX", "/content/gaussian_shading_legacy_env")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_MICROMAMBA_PATH", "/content/bin/micromamba")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_LEGACY_PYTHON_VERSION", "3.8")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_LEGACY_TORCH_SPECS", "torch==1.13.0+cu117 torchvision==0.14.0+cu117")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_STRICT_OFFICIAL_ENV", "1")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_ALLOW_COMPATIBLE_ENV_FALLBACK", "1")
-    _set_default_env("SLM_WM_GAUSSIAN_SHADING_LEGACY_PYTORCH_INDEX_URL", "https://download.pytorch.org/whl/cu117")
-    _set_default_env(
-        "SLM_WM_GAUSSIAN_SHADING_LEGACY_PACKAGE_SPECS",
-        "transformers==4.23.1 diffusers==0.11.1 huggingface_hub==0.10.1 datasets==2.6.1 "
-        "pyarrow<13 fsspec==2022.10.0 numpy==1.24.4 scipy==1.10.1 Pillow==9.5.0 tqdm==4.66.2 "
-        "pycryptodome==3.20.0 open_clip_torch==2.7.0 ftfy==6.2.0 regex==2023.12.25 Requests==2.31.0 "
-        "omegaconf==2.3.0 einops==0.4.1 kornia==0.6.4 matplotlib==3.7.5 timm==0.5.4",
-    )
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_NUM_INFERENCE_STEPS", "50")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_NUM_INVERSION_STEPS", "50")
     _set_default_env("SLM_WM_GAUSSIAN_SHADING_USE_CHACHA", "1")
@@ -346,15 +334,13 @@ def _configure_official_reference_shallow_diffuse(paper_run: Any, sample_count_t
 
 
 def _configure_official_reference_t2smark(paper_run: Any, sample_count_token: str, target_fpr_text: str) -> None:
-    _set_env("SLM_WM_T2SMARK_FULL_MAIN_PROMPT_FILE", paper_run.prompt_file)
-    _set_env("SLM_WM_T2SMARK_FULL_MAIN_DRIVE_OUTPUT_DIR", paper_run.drive_dir("external_baseline_official_reference"))
+    _set_env("SLM_WM_T2SMARK_FORMAL_PROMPT_FILE", paper_run.prompt_file)
+    _set_env("SLM_WM_T2SMARK_FORMAL_DRIVE_OUTPUT_DIR", paper_run.drive_dir("external_baseline_official_reference"))
     _set_default_env("SLM_WM_T2SMARK_MODEL_ID", "stabilityai/stable-diffusion-3.5-medium")
-    _set_env("SLM_WM_T2SMARK_FULL_MAIN_RUN_NAME", f"t2smark_sd35_medium_{paper_run.run_name}")
-    _set_env("SLM_WM_T2SMARK_FULL_MAIN_PROMPT_LIMIT", sample_count_token)
-    _set_env("SLM_WM_T2SMARK_FULL_MAIN_TARGET_FPR", target_fpr_text)
-    _set_env("SLM_WM_T2SMARK_FULL_MAIN_FIXED_FPR_READY", "1")
-    _set_env("SLM_WM_T2SMARK_FULL_MAIN_ATTACK_MATRIX_READY", "1")
-    _set_default_env("SLM_WM_T2SMARK_FULL_MAIN_REQUIRE_CUDA", "1")
+    _set_env("SLM_WM_T2SMARK_FORMAL_RUN_NAME", f"t2smark_sd35_medium_{paper_run.run_name}")
+    _set_env("SLM_WM_T2SMARK_FORMAL_PROMPT_LIMIT", sample_count_token)
+    _set_env("SLM_WM_T2SMARK_FORMAL_TARGET_FPR", target_fpr_text)
+    _set_default_env("SLM_WM_T2SMARK_FORMAL_REQUIRE_CUDA", "1")
     _set_default_env("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1")
 
 

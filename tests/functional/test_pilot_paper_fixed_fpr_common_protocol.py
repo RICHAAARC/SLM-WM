@@ -25,7 +25,7 @@ from experiments.protocol.prompts import build_prompt_records
 from scripts.write_pilot_paper_fixed_fpr_common_protocol_outputs import write_pilot_paper_fixed_fpr_common_protocol_outputs
 
 
-def write_pilot_paper_prompts(repo_root: Path, prompt_count: int = 250) -> Path:
+def write_pilot_paper_prompts(repo_root: Path, prompt_count: int = 700) -> Path:
     """写入测试用 pilot_paper prompt 配置。"""
 
     config_dir = repo_root / "configs"
@@ -36,7 +36,7 @@ def write_pilot_paper_prompts(repo_root: Path, prompt_count: int = 250) -> Path:
     return prompt_path
 
 
-def write_full_paper_prompts(repo_root: Path, prompt_count: int = 250) -> Path:
+def write_full_paper_prompts(repo_root: Path, prompt_count: int = 7000) -> Path:
     """写入测试用 full_paper prompt 配置。"""
 
     config_dir = repo_root / "configs"
@@ -90,8 +90,8 @@ def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_p
     assert prompt_summary["prompt_set"] == "pilot_paper"
     assert prompt_summary["target_fpr"] == 0.01
     assert prompt_summary["prompt_split_ready"] is True
-    assert schema["minimum_result_positive_count"] == 100
-    assert schema["minimum_result_negative_count"] == 100
+    assert schema["minimum_result_positive_count"] == 340
+    assert schema["minimum_result_negative_count"] == 340
     assert validation["input_record_count"] == 0
     assert validation["pilot_paper_result_import_ready"] is False
     assert {row["method_id"] for row in method_rows} == {
@@ -118,7 +118,7 @@ def test_common_protocol_blocks_superiority_claim_when_slm_wm_tpr_is_below_basel
     config = PilotPaperFixedFprConfig()
     prompt_summary = {
         "prompt_split_ready": True,
-        "pilot_paper_prompt_count": 240,
+        "pilot_paper_prompt_count": 700,
         "prompt_split_digest": "prompt_digest",
     }
     attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
@@ -158,6 +158,51 @@ def test_common_protocol_blocks_superiority_claim_when_slm_wm_tpr_is_below_basel
     assert summary["pilot_paper_effectiveness_gate_reason"] == "slm_wm_tpr_not_above_best_baseline"
     assert summary["pilot_paper_supports_superiority_claim"] is False
     assert summary["paper_claim_ready"] is False
+
+
+@pytest.mark.quick
+def test_common_protocol_blocks_duplicate_method_attack_records() -> None:
+    """共同协议必须阻断重复的 method × attack 记录, 避免重复行改变聚合统计。"""
+
+    config = PilotPaperFixedFprConfig()
+    prompt_summary = {"prompt_split_ready": True, "pilot_paper_prompt_count": 700}
+    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
+    method_rows = build_pilot_paper_method_registry_rows(
+        prompt_split_digest="prompt_digest",
+        attack_matrix_digest="attack_digest",
+        fixed_fpr_protocol_digest="fixed_fpr_digest",
+        config=config,
+    )
+    template_rows = build_pilot_paper_result_import_template_rows(method_rows, attack_rows, config)
+    accepted_records = [
+        {
+            **row,
+            "true_positive_rate": 0.9 if row["method_id"] == "slm_wm_current" else 0.5,
+            "false_positive_rate": 0.0,
+            "supports_paper_claim": True,
+        }
+        for row in template_rows
+    ]
+    accepted_records.append(dict(accepted_records[0]))
+
+    summary = build_pilot_paper_common_protocol_summary(
+        prompt_summary=prompt_summary,
+        attack_rows=attack_rows,
+        method_rows=method_rows,
+        template_rows=template_rows,
+        import_validation_report={
+            "pilot_paper_result_import_ready": True,
+            "accepted_pilot_paper_import_count": len(accepted_records),
+            "accepted_records": accepted_records,
+        },
+        config=config,
+    )
+
+    assert summary["paper_run_result_duplicate_template_count"] == 1
+    assert summary["paper_run_result_import_coverage_ready"] is False
+    assert summary["pilot_paper_effectiveness_gate_ready"] is False
+    assert summary["pilot_paper_effectiveness_gate_reason"] == "duplicate_method_attack_template_records"
+    assert summary["supports_paper_claim"] is False
 
 
 @pytest.mark.quick
@@ -231,13 +276,13 @@ def test_writer_switches_common_protocol_to_probe_paper_without_logic_fork(
     assert prompt_summary["prompt_set"] == "probe_paper"
     assert prompt_summary["pilot_paper_prompt_count"] == 70
     assert prompt_summary["target_fpr"] == 0.1
-    assert prompt_summary["pilot_paper_negative_count_minimum_required"] == 10
+    assert prompt_summary["pilot_paper_negative_count_minimum_required"] == 34
     assert prompt_summary["prompt_split_ready"] is True
     assert prompt_summary["prompt_protocol_name"] == "paper_main_probe_paper_prompt_protocol"
     assert schema["paper_claim_scale"] == "probe_paper"
     assert schema["prompt_set"] == "probe_paper"
     assert schema["target_fpr"] == 0.1
-    assert schema["minimum_result_positive_count"] == 10
+    assert schema["minimum_result_positive_count"] == 34
     assert schema["paper_run_allows_paper_claim"] is True
     assert schema["paper_run_claim_type"] == "probe_claim"
     assert schema["prompt_protocol_name"] == "paper_main_probe_paper_prompt_protocol"
@@ -268,10 +313,11 @@ def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dic
         "baseline_result_source": evidence_path,
         "baseline_result_source_digest": "digest",
         "evidence_paths": [evidence_path],
-        "positive_count": 120,
-        "negative_count": 120,
-        "attack_record_count": 240,
-        "supported_record_count": 240,
+        "positive_count": 340,
+        "negative_count": 340,
+        "attacked_negative_count": 340,
+        "attack_record_count": 680,
+        "supported_record_count": 340,
         "true_positive_rate": 0.80,
         "true_positive_rate_ci_low": 0.70,
         "true_positive_rate_ci_high": 0.90,
@@ -297,13 +343,13 @@ def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dic
 
 
 @pytest.mark.quick
-def test_pilot_paper_import_validator_accepts_governed_bootstrap_record(tmp_path: Path) -> None:
-    """带 bootstrap 置信区间的 pilot_paper 结果应能进入受治理导入协议。"""
+def test_pilot_paper_import_validator_accepts_governed_confidence_interval_record(tmp_path: Path) -> None:
+    """带 Hoeffding 置信区间的 pilot_paper 结果应能进入受治理导入协议。"""
 
     config = PilotPaperFixedFprConfig()
     prompt_records = build_prompt_records(
         "pilot_paper",
-        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(250)),
+        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
     )
     prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
     attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
@@ -333,13 +379,49 @@ def test_pilot_paper_import_validator_accepts_governed_bootstrap_record(tmp_path
 
 
 @pytest.mark.quick
+def test_pilot_paper_import_validator_rejects_duplicate_template_key(tmp_path: Path) -> None:
+    """行级导入校验器必须阻断重复的 method × attack 模板键。"""
+
+    config = PilotPaperFixedFprConfig()
+    prompt_records = build_prompt_records(
+        "pilot_paper",
+        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
+    )
+    prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
+    attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
+    schema = build_pilot_paper_result_import_schema(
+        prompt_split_digest=prompt_summary["prompt_split_digest"],
+        attack_matrix_digest=build_attack_matrix_digest(attack_rows),
+        fixed_fpr_protocol_digest=build_fixed_fpr_protocol_digest(config),
+        config=config,
+    )
+    evidence_path = tmp_path / "outputs" / "pilot_paper_fixed_fpr_results" / "tree_ring_metrics.json"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text('{"true_positive_rate": 0.8}\n', encoding="utf-8")
+    row = pilot_paper_result_row(schema, "outputs/pilot_paper_fixed_fpr_results/tree_ring_metrics.json")
+
+    report = validate_pilot_paper_result_import_rows(
+        [row, dict(row)],
+        schema,
+        evidence_root=tmp_path,
+        require_existing_evidence=True,
+    )
+
+    assert report["pilot_paper_result_import_ready"] is False
+    assert report["accepted_pilot_paper_import_count"] == 1
+    assert report["pilot_paper_claim_record_ready"] is False
+    assert report["supports_paper_claim"] is False
+    assert {issue["reason"] for issue in report["issues"]} == {"duplicate_result_template_key"}
+
+
+@pytest.mark.quick
 def test_pilot_paper_import_validator_rejects_full_paper_claim_boundary(tmp_path: Path) -> None:
     """pilot_paper 导入记录不得声明为 full_paper 论文主张。"""
 
     config = PilotPaperFixedFprConfig()
     prompt_records = build_prompt_records(
         "pilot_paper",
-        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(250)),
+        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
     )
     prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
     attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
@@ -362,13 +444,13 @@ def test_pilot_paper_import_validator_rejects_full_paper_claim_boundary(tmp_path
 
 
 @pytest.mark.quick
-def test_pilot_paper_import_validator_rejects_small_sample_result_records(tmp_path: Path) -> None:
+def test_pilot_paper_import_validator_rejects_incomplete_statistical_scale(tmp_path: Path) -> None:
     """低于 pilot_paper fixed-FPR 统计边界的记录不得进入受治理导入协议。"""
 
     config = PilotPaperFixedFprConfig()
     prompt_records = build_prompt_records(
         "pilot_paper",
-        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(250)),
+        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
     )
     prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
     attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)
@@ -396,7 +478,7 @@ def test_paper_import_validator_rejects_nonformal_marked_result_records(tmp_path
     config = PilotPaperFixedFprConfig()
     prompt_records = build_prompt_records(
         "pilot_paper",
-        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(250)),
+        tuple(f"a controlled city pilot_paper prompt variant {index}" for index in range(700)),
     )
     prompt_summary = build_pilot_paper_prompt_split_summary(prompt_records, config)
     attack_rows = build_pilot_paper_attack_matrix_rows(default_attack_configs(), config)

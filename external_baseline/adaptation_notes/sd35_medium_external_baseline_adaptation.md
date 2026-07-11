@@ -19,7 +19,7 @@
 
 原方法依赖 latent noise message、truncated Gaussian sampling 和 bit voting。SD3.5 Medium 的 latent channel 与 pipeline 组件不同, 因此需要重新定义 message 到 16-channel latent 的映射和可审计阈值边界。
 
-当前项目采用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium latent 中用二值 message 控制正负截断 Gaussian noise, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 流匹配反向 Euler 积分恢复 noise sign, 最后经 key 解码与 block voting 计算 bit accuracy 分数。该路径用于 common-backbone 公平对比候选, 但仍需后续 full-main prompt、fixed-FPR 与共同攻击矩阵闭合后才能进入主表正式结果。
+当前项目采用 `method_faithful_sd35` adapter。该路径在 SD3.5 Medium latent 中用二值 message 控制正负截断 Gaussian noise, 真实生成 clean / watermarked 图像, 再通过图像编码和 SD3 scheduler 流匹配反向 Euler 积分恢复 noise sign, 最后经 key 解码与 block voting 计算 bit accuracy 分数。该路径用于 common-backbone 公平对比候选, 但仍需后续 当前论文运行层级的完整 Prompt、fixed-FPR 与共同攻击矩阵闭合后才能进入主表正式结果。
 
 补充表同时提供 `official_reference_gaussian_shading_run.ipynb`。该入口运行官方 `run_gaussian_shading.py` 的 legacy Stable Diffusion / truncated Gaussian message 协议, 并通过 governed import 记录官方源码 commit、依赖环境、运行命令、`Identity.txt` 指标和诊断日志。该路径用于审计 SD3.5 adapter 的方法忠实度, 不替代主表 SD3.5 对比。
 

@@ -53,10 +53,10 @@ def write_required_inputs(path: Path) -> None:
         )
         writer.writerow(
             {
-                "required_input_id": "gap_full_main_sample_scale",
+                "required_input_id": "gap_paper_run_sample_scale",
                 "required_input_area": "statistical_power",
                 "required_input_severity": "critical",
-                "required_action": "补齐 full-main 统计。",
+                "required_action": "补齐 当前运行层级完整统计。",
                 "related_artifacts": "outputs/threshold_calibration",
                 "closes_claim_ids": "claim_submission_ready_package",
                 "recommended_order": 2,
@@ -75,9 +75,6 @@ def test_evidence_closure_entry_review_blocks_before_formal_evidence_is_ready(tm
     paper_blocker = tmp_path / "outputs" / "paper_artifact_evidence_audit" / "submission_blocker_report.json"
     baseline_report = tmp_path / "outputs" / "external_baseline_comparison" / "baseline_runtime_report.json"
     dataset_quality = tmp_path / "outputs" / "dataset_level_quality" / "dataset_quality_summary.json"
-    small_sample = tmp_path / "outputs" / "primary_baseline_small_sample_evidence" / (
-        "primary_baseline_small_sample_evidence_summary.json"
-    )
     write_json(
         submission_report,
         {
@@ -87,9 +84,7 @@ def test_evidence_closure_entry_review_blocks_before_formal_evidence_is_ready(tm
             "release_dry_run_ready": True,
             "required_input_count": 2,
             "critical_required_input_count": 2,
-            "small_sample_baseline_boundary_ready": True,
-            "small_sample_baseline_covered_count": 4,
-            "primary_blockers": ["gap_baseline_results", "gap_full_main_sample_scale"],
+            "primary_blockers": ["gap_baseline_results", "gap_paper_run_sample_scale"],
             "recommended_next_action": "先补齐正式证据。",
         },
     )
@@ -107,25 +102,12 @@ def test_evidence_closure_entry_review_blocks_before_formal_evidence_is_ready(tm
     write_json(
         dataset_quality,
         {
-            "dataset_level_quality_proxy_ready": True,
             "formal_fid_kid_ready": False,
             "formal_sample_scale_ready": False,
             "formal_feature_backend_ready": False,
         },
     )
-    write_json(
-        small_sample,
-        {
-            "small_sample_evidence_ready": True,
-            "small_sample_common_protocol_ready": True,
-            "covered_primary_baseline_count": 4,
-            "paper_claim_ready": False,
-            "formal_full_paper_run_requested": False,
-            "formal_full_paper_run_permitted": False,
-            "excluded_operating_points": ["tpr_at_fpr_0_01", "tpr_at_fpr_0_001"],
-            "supports_paper_claim": False,
-        },
-    )
+
 
     manifest = write_evidence_closure_entry_review_outputs(
         root=tmp_path,
@@ -134,7 +116,6 @@ def test_evidence_closure_entry_review_blocks_before_formal_evidence_is_ready(tm
         paper_blocker_report_path=paper_blocker,
         baseline_runtime_report_path=baseline_report,
         dataset_quality_summary_path=dataset_quality,
-        baseline_small_sample_summary_path=small_sample,
     )
 
     output_dir = tmp_path / "outputs" / "evidence_closure_entry_review"
@@ -147,6 +128,6 @@ def test_evidence_closure_entry_review_blocks_before_formal_evidence_is_ready(tm
     assert report["evidence_closure_allowed"] is False
     assert report["entry_review_decision"] == "blocked_before_evidence_closure"
     assert "formal_comparison_reference_ready" in report["blocked_review_item_ids"]
-    assert "full_main_sample_scale_ready" in report["blocked_review_item_ids"]
+    assert "paper_run_sample_scale_ready" in report["blocked_review_item_ids"]
     assert "dataset_level_quality_ready" in report["blocked_review_item_ids"]
     assert {row["supports_paper_claim"] for row in rows} == {"False"}

@@ -48,7 +48,6 @@ def configure_closure_environment(
     root: str | Path,
     paper_run_name: str,
     package_search_root: str | Path,
-    target_fpr_override: str,
 ) -> dict[str, Any]:
     """配置汇总服务器本地结果闭合环境。"""
 
@@ -63,7 +62,7 @@ def configure_closure_environment(
     set_env("SLM_WM_PROMPT_FILE", defaults["prompt_file"])
     set_env("SLM_WM_DRIVE_RESULT_ROOT", resolved_package_root.as_posix())
     set_env("SLM_WM_PAPER_RUN_SAMPLE_COUNT", "all")
-    set_env("SLM_WM_PAPER_RUN_TARGET_FPR", target_fpr_override or defaults["target_fpr"])
+    set_env("SLM_WM_PAPER_RUN_TARGET_FPR", defaults["target_fpr"])
     os.environ.pop("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", None)
     os.environ.pop("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", None)
     paper_run = build_paper_run_config(root_path)
@@ -87,7 +86,6 @@ def execute_server_result_closure(
     paper_run_name: str,
     package_search_root: str | Path,
     complete_output_dir: str | Path,
-    target_fpr_override: str = "",
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """执行汇总服务器结果闭合。"""
@@ -98,7 +96,6 @@ def execute_server_result_closure(
         root=root_path,
         paper_run_name=paper_run_name,
         package_search_root=package_search_root,
-        target_fpr_override=target_fpr_override,
     )
     resolved_complete_output_dir = Path(complete_output_dir).expanduser()
     if not resolved_complete_output_dir.is_absolute():
@@ -116,7 +113,6 @@ def execute_server_result_closure(
     closure_result = run_paper_result_closure_commands(
         package_search_root=environment_report["package_search_root"],
         complete_drive_output_dir=resolved_complete_output_dir.as_posix(),
-        target_fpr=environment_report["target_fpr"],
         paper_run_name=paper_run_name,
     )
     return {
@@ -133,7 +129,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--paper-run-name", default="full_paper", choices=sorted(RUN_DEFAULTS), help="论文运行层级。")
     parser.add_argument("--package-search-root", required=True, help="三台计算服务器上传结果包后的本地交换目录。")
     parser.add_argument("--complete-output-dir", required=True, help="完整结果包输出目录, 推荐位于交换目录下。")
-    parser.add_argument("--target-fpr", default="", help="可选 fixed-FPR 覆盖值; 为空时使用论文运行层级默认值。")
     parser.add_argument("--dry-run", action="store_true", help="只检查输入包覆盖情况, 不执行闭合命令。")
     return parser
 
@@ -147,7 +142,6 @@ def main() -> None:
         paper_run_name=args.paper_run_name,
         package_search_root=args.package_search_root,
         complete_output_dir=args.complete_output_dir,
-        target_fpr_override=args.target_fpr,
         dry_run=args.dry_run,
     )
     print(stable_json_text(result), end="")

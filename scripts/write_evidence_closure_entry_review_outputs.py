@@ -30,9 +30,6 @@ DEFAULT_REQUIRED_EVIDENCE_INPUTS_PATH = Path("outputs/submission_readiness/requi
 DEFAULT_PAPER_BLOCKER_REPORT_PATH = Path("outputs/paper_artifact_evidence_audit/submission_blocker_report.json")
 DEFAULT_BASELINE_RUNTIME_REPORT_PATH = Path("outputs/external_baseline_comparison/baseline_runtime_report.json")
 DEFAULT_DATASET_QUALITY_SUMMARY_PATH = Path("outputs/dataset_level_quality/dataset_quality_summary.json")
-DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH = Path(
-    "outputs/primary_baseline_small_sample_evidence/primary_baseline_small_sample_evidence_summary.json"
-)
 
 
 def stable_json_text(value: Any) -> str:
@@ -124,7 +121,6 @@ def build_input_bundle(
     paper_blocker_report_path: Path,
     baseline_runtime_report_path: Path,
     dataset_quality_summary_path: Path,
-    baseline_small_sample_summary_path: Path,
 ) -> EvidenceClosureEntryInput:
     """读取受治理输入并构造证据闭合入口审计对象。"""
 
@@ -134,7 +130,6 @@ def build_input_bundle(
         paper_blocker_report=read_json(paper_blocker_report_path),
         baseline_runtime_report=read_json(baseline_runtime_report_path),
         dataset_quality_summary=read_json(dataset_quality_summary_path),
-        baseline_small_sample_summary=read_json(baseline_small_sample_summary_path),
     )
 
 
@@ -146,7 +141,6 @@ def write_evidence_closure_entry_review_outputs(
     paper_blocker_report_path: str | Path = DEFAULT_PAPER_BLOCKER_REPORT_PATH,
     baseline_runtime_report_path: str | Path = DEFAULT_BASELINE_RUNTIME_REPORT_PATH,
     dataset_quality_summary_path: str | Path = DEFAULT_DATASET_QUALITY_SUMMARY_PATH,
-    baseline_small_sample_summary_path: str | Path = DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH,
 ) -> dict[str, Any]:
     """写出证据闭合入口审计报告、审计清单和 manifest。"""
 
@@ -159,7 +153,6 @@ def write_evidence_closure_entry_review_outputs(
     resolved_paper_blocker_report_path = resolve_input_path(root_path, paper_blocker_report_path)
     resolved_baseline_runtime_report_path = resolve_input_path(root_path, baseline_runtime_report_path)
     resolved_dataset_quality_summary_path = resolve_input_path(root_path, dataset_quality_summary_path)
-    resolved_baseline_small_sample_summary_path = resolve_input_path(root_path, baseline_small_sample_summary_path)
 
     bundle = build_input_bundle(
         resolved_submission_readiness_report_path,
@@ -167,7 +160,6 @@ def write_evidence_closure_entry_review_outputs(
         resolved_paper_blocker_report_path,
         resolved_baseline_runtime_report_path,
         resolved_dataset_quality_summary_path,
-        resolved_baseline_small_sample_summary_path,
     )
     checklist_rows = build_evidence_closure_entry_checklist(bundle)
     review_report = build_evidence_closure_entry_review_report(bundle, checklist_rows)
@@ -198,7 +190,6 @@ def write_evidence_closure_entry_review_outputs(
             resolved_paper_blocker_report_path,
             resolved_baseline_runtime_report_path,
             resolved_dataset_quality_summary_path,
-            resolved_baseline_small_sample_summary_path,
         )
     )
     output_paths = tuple(
@@ -259,11 +250,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(DEFAULT_DATASET_QUALITY_SUMMARY_PATH),
         help="数据集级质量摘要路径。",
     )
-    parser.add_argument(
-        "--baseline-small-sample-summary-path",
-        default=str(DEFAULT_BASELINE_SMALL_SAMPLE_SUMMARY_PATH),
-        help="主表 baseline 小样本证据摘要路径。",
-    )
     return parser
 
 
@@ -279,7 +265,6 @@ def main() -> None:
         paper_blocker_report_path=args.paper_blocker_report_path,
         baseline_runtime_report_path=args.baseline_runtime_report_path,
         dataset_quality_summary_path=args.dataset_quality_summary_path,
-        baseline_small_sample_summary_path=args.baseline_small_sample_summary_path,
     )
     print(stable_json_text(manifest), end="")
 

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import base64
 import csv
 import json
 from pathlib import Path
 
 import pytest
 
-from scripts.write_pilot_paper_result_analysis_outputs import write_pilot_paper_result_analysis_outputs
+from scripts.write_pilot_paper_result_analysis_outputs import (
+    build_result_template_coverage,
+    write_pilot_paper_result_analysis_outputs,
+)
 
 
 pytestmark = pytest.mark.quick
@@ -76,7 +80,11 @@ def test_pilot_paper_result_analysis_rebuilds_tables_and_failure_figure(tmp_path
         / "sample_aligned_jpeg_compression.png"
     )
     attacked_image.parent.mkdir(parents=True)
-    attacked_image.write_bytes(b"not_a_real_png_for_svg_href_only")
+    attacked_image.write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+    )
     real_records_path = tmp_path / "outputs" / "real_attack_evaluation" / "formal_attack_detection_records.jsonl"
     _write_jsonl(
         real_records_path,
@@ -114,7 +122,9 @@ def test_pilot_paper_result_analysis_rebuilds_tables_and_failure_figure(tmp_path
     )
 
     output_dir = tmp_path / "outputs" / "pilot_paper_result_analysis"
-    bootstrap_rows = list(csv.DictReader((output_dir / "bootstrap_ci_table.csv").open(encoding="utf-8")))
+    confidence_interval_rows = list(
+        csv.DictReader((output_dir / "confidence_interval_table.csv").open(encoding="utf-8"))
+    )
     superiority_rows = list(csv.DictReader((output_dir / "per_attack_superiority_table.csv").open(encoding="utf-8")))
     failure_rows = [
         json.loads(line)
@@ -125,7 +135,7 @@ def test_pilot_paper_result_analysis_rebuilds_tables_and_failure_figure(tmp_path
     summary = json.loads((output_dir / "result_analysis_summary.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "pilot_paper_result_analysis_manifest"
-    assert len(bootstrap_rows) == 5
+    assert len(confidence_interval_rows) == 5
     assert len(superiority_rows) == 1
     assert superiority_rows[0]["best_baseline_id"] == "shallow_diffuse"
     assert float(superiority_rows[0]["slm_minus_best_baseline_tpr"]) == pytest.approx(0.2)
@@ -133,4 +143,89 @@ def test_pilot_paper_result_analysis_rebuilds_tables_and_failure_figure(tmp_path
     assert len(failure_rows) == 1
     assert failure_rows[0]["attacked_image_digest"] == "attacked_digest"
     assert "jpeg_compression" in svg_text
+    assert "placeholder" not in svg_text
     assert summary["failure_case_figure_ready"] is True
+    assert summary["result_template_coverage_ready"] is False
+    assert summary["supports_paper_claim"] is False
+
+
+def test_result_analysis_rejects_failure_record_without_attacked_image(tmp_path: Path) -> None:
+    """失败记录缺少实际攻击图像时必须停止生成论文图。"""
+
+    result_records_path = tmp_path / "outputs" / "fixed_fpr" / "result_records.jsonl"
+    _write_jsonl(
+        result_records_path,
+        [
+            _result_record("slm_wm_current", "jpeg_compression", 0.9, 0.82, 0.95),
+            _result_record("tree_ring", "jpeg_compression", 0.6, 0.50, 0.70),
+        ],
+    )
+    real_records_path = tmp_path / "outputs" / "attacks" / "formal_detection_records.jsonl"
+    _write_jsonl(
+        real_records_path,
+        [
+            {
+                "sample_role": "positive_source",
+                "attack_family": "standard_distortion",
+                "attack_name": "jpeg_compression",
+                "aligned_content_score_after": 0.1,
+                "evidence_decision": False,
+                "metadata": {"attacked_image_path": "outputs/attacks/missing.png"},
+                "supports_paper_claim": True,
+            }
+        ],
+    )
+    conventional_records_path = tmp_path / "outputs" / "geometric" / "formal_detection_records.jsonl"
+    _write_jsonl(conventional_records_path, [])
+
+    with pytest.raises(FileNotFoundError, match="失败案例攻击图像不存在"):
+        write_pilot_paper_result_analysis_outputs(
+            root=tmp_path,
+            result_records_path=result_records_path,
+            real_attack_formal_records_path=real_records_path,
+            conventional_attack_formal_records_path=conventional_records_path,
+        )
+
+
+def test_result_analysis_blocks_superiority_claim_when_margin_is_not_positive(tmp_path: Path) -> None:
+    """方法置信区间未优于 baseline 时不得支持优势性主张。"""
+
+    result_records_path = tmp_path / "outputs" / "fixed_fpr" / "result_records.jsonl"
+    _write_jsonl(
+        result_records_path,
+        [
+            _result_record("slm_wm_current", "jpeg_compression", 0.6, 0.50, 0.70),
+            _result_record("tree_ring", "jpeg_compression", 0.7, 0.60, 0.78),
+        ],
+    )
+    real_records_path = tmp_path / "outputs" / "attacks" / "formal_detection_records.jsonl"
+    conventional_records_path = tmp_path / "outputs" / "geometric" / "formal_detection_records.jsonl"
+    _write_jsonl(real_records_path, [])
+    _write_jsonl(conventional_records_path, [])
+
+    write_pilot_paper_result_analysis_outputs(
+        root=tmp_path,
+        result_records_path=result_records_path,
+        real_attack_formal_records_path=real_records_path,
+        conventional_attack_formal_records_path=conventional_records_path,
+    )
+    summary = json.loads(
+        (tmp_path / "outputs" / "pilot_paper_result_analysis" / "result_analysis_summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert summary["superiority_claim_ready_count"] == 0
+    assert summary["supports_paper_claim"] is False
+
+
+def test_result_template_coverage_counts_duplicate_keys() -> None:
+    """结果模板覆盖必须显式阻断重复的 method × attack 记录。"""
+
+    record = _result_record("slm_wm_current", "jpeg_compression", 0.9, 0.82, 0.95)
+    coverage = build_result_template_coverage([record, dict(record)])
+
+    assert coverage["actual_result_record_count"] == 2
+    assert coverage["unique_result_record_key_count"] == 1
+    assert coverage["duplicate_result_record_count"] == 1
+    assert coverage["result_template_coverage_ready"] is False

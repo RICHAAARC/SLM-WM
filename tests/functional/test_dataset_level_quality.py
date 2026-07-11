@@ -198,7 +198,7 @@ def test_dataset_quality_materialization_caches_package_digest(tmp_path: Path, m
 
 
 @pytest.mark.quick
-def test_dataset_quality_formal_feature_import_keeps_small_sample_blocked(tmp_path: Path) -> None:
+def test_dataset_quality_formal_feature_import_keeps_incomplete_statistical_scale_blocked(tmp_path: Path) -> None:
     """Inception 特征样本数不足时不得形成正式 FID / KID 结论。"""
 
     rows = registry_rows(tmp_path)

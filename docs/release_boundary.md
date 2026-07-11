@@ -1,123 +1,35 @@
-# Release Boundary
+# 发布边界
 
-## 与 extraction profile 的关系
+## 最小方法包
 
-本文件说明发布边界原则, `docs/extraction_profiles.md` 定义可执行的抽离 profile。发布包不应默认等同于开发仓库。
-
-## 发布包类型
-
-### `minimal_method_package`
-
-该包是最小论文方法代码附件, 只保留核心方法、核心协议和最小配置。
-
-默认包含:
-
-```text
-main/core/
-main/methods/
-main/protocol/
-configs/
-README.md
-pyproject.toml
-```
-
-默认排除:
-
-```text
-main/analysis/
-main/cli/
-experiments/
-paper_experiments/
-external_baseline/
-scripts/
-paper_workflow/
-.codex/
-tools/harness/
-tests/constraints/
-outputs/
-```
-
-### `paper_artifact_rebuild_package`
-
-该包用于重建论文所需 tables、figures、reports 和 manifests。它可以包含 artifact builders、完整论文实验编排和轻量功能测试, 但不包含外层治理实现、Colab 入口或第三方源码缓存。
-
-默认包含:
-
-```text
-main/
-configs/
-experiments/
-paper_experiments/
-scripts/
-docs/中必要的复现和 schema 文档
-tests/functional/
-README.md
-pyproject.toml
-```
-
-默认排除:
-
-```text
-.codex/
-tools/harness/
-external_baseline/
-outputs/
-tests/constraints/
-tests/integration/
-paper_workflow/
-```
-
-### `full_experiment_execution_package`
-
-该包用于在服务器上产出论文所需完整实验结果。它包含核心方法复现层和完整论文实验层, 但仍不包含 Colab 运行层。若需要第三方官方源码, 应由使用者按 `external_baseline/` 来源登记自行拉取或挂载, 不应把第三方源码缓存直接打入发布包。
-
-默认包含:
-
-```text
-main/
-configs/
-experiments/
-paper_experiments/
-scripts/
-docs/中必要的复现和 schema 文档
-tests/functional/
-README.md
-pyproject.toml
-```
-
-默认排除:
-
-```text
-.codex/
-tools/harness/
-paper_workflow/
-external_baseline/中的第三方源码缓存
-outputs/
-tests/constraints/
-tests/integration/
-```
-
-## 默认进入论文发布包
+最小方法包只包含:
 
 - `main/`
-- `configs/`
-- `scripts/` 中必要的复现脚本
-- `paper_experiments/` 中完整论文实验所需的受治理适配和导入协议
-- `docs/` 中的方法、复现、数据准备和模型准备文档
-- `tests/` 中可公开的复现测试
-- 必要的 `experiments/` paper protocol
+- `configs/model_sd35.yaml`
+- 根目录 `README.md`
+- `pyproject.toml`
 
-## 默认不进入论文发布包
+该包不包含实验协议、外部 baseline、脚本、Notebook、测试、治理工具、Prompt 数据或运行产物。
+
+## 论文产物重建包
+
+重建包包含 `main/`、`configs/`、`experiments/`、`paper_experiments/`、`scripts/`、相关文档和轻量功能测试。它不包含 Colab 入口、外部源码缓存或 `outputs/`。
+
+## 完整实验执行包
+
+完整执行包在重建包基础上加入:
+
+- `external_baseline/source_registry.json`
+- `external_baseline/primary/` 中的方法忠实 adapter
+
+该包仍排除每个 baseline 的 `source/` 官方源码缓存。运行时按固定来源登记拉取官方源码。
+
+## 禁止进入发布包的内容
 
 - `.codex/`
-- `tools/harness/`
+- `tools/`
+- `paper_workflow/`
 - `outputs/`
-- `external_baseline/` 中的第三方源码缓存
-- `paper_workflow/` 中的 Colab 入口
-- 本地 Notebook 缓存
-- 私有数据或本地绝对路径配置
-- 未经治理的临时实验结果
-
-## 说明
-
-该边界适用于论文代码开源前的最小发布抽取。内部治理材料可以保留在开发仓库, 但发布包应优先服务审稿复现和读者理解。
+- `audit_reports/`
+- `__pycache__/` 与 `.pytest_cache/`
+- 未登记的第三方源码与凭据

@@ -194,11 +194,11 @@ def test_gaussian_shading_official_reference_prepares_local_model_repository(
 
 
 @pytest.mark.quick
-def test_gaussian_shading_official_reference_prepares_isolated_legacy_environment(
+def test_gaussian_shading_official_reference_blocks_missing_official_requirements(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Colab 独立会话应能把官方 legacy 依赖准备过程收敛为可审计报告。"""
+    """缺少官方 requirements.txt 时必须阻断官方参考运行。"""
 
     config = GaussianShadingOfficialReferenceConfig(
         output_dir="outputs/gaussian_shading_official_reference",
@@ -207,8 +207,6 @@ def test_gaussian_shading_official_reference_prepares_isolated_legacy_environmen
         prepare_legacy_environment=True,
         legacy_environment_prefix=str(tmp_path / "legacy_env"),
         micromamba_path=str(tmp_path / "bin" / "micromamba"),
-        legacy_torch_specs="torch==1.13.0+cu117 torchvision==0.14.0+cu117",
-        legacy_package_specs="transformers==4.23.1 diffusers==0.11.1 datasets==2.6.1",
     )
     paths = output_paths(tmp_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
@@ -234,14 +232,13 @@ def test_gaussian_shading_official_reference_prepares_isolated_legacy_environmen
     saved_report = json.loads(paths["legacy_environment_prepare_result"].read_text(encoding="utf-8"))
 
     assert report["legacy_environment_requested"] is True
-    assert report["legacy_environment_ready"] is True
-    assert saved_report["legacy_environment_profile"] == "colab_compatible_fallback"
+    assert report["legacy_environment_ready"] is False
+    assert saved_report["legacy_environment_profile"] == "none"
     assert saved_report["strict_official_environment_ready"] is False
-    assert saved_report["compatible_environment_fallback_ready"] is True
     assert saved_report["legacy_python_executable"].replace("\\", "/").endswith(
-        "legacy_env/colab_compatible_fallback/bin/python"
+        "legacy_env/official_requirements_strict/bin/python"
     )
-    assert len(saved_report["command_results"]) >= 4
+    assert any(result["return_code"] == 96 for result in saved_report["command_results"])
 
 
 @pytest.mark.quick
@@ -287,18 +284,17 @@ def test_gaussian_shading_official_reference_prefers_strict_official_requirement
     assert report["legacy_environment_ready"] is True
     assert report["legacy_environment_profile"] == "official_requirements_strict"
     assert report["strict_official_environment_ready"] is True
-    assert report["compatible_environment_fallback_ready"] is False
     assert report["legacy_python_executable"].replace("\\", "/").endswith(
         "legacy_env/official_requirements_strict/bin/python"
     )
 
 
 @pytest.mark.quick
-def test_gaussian_shading_official_reference_falls_back_after_strict_dependency_conflict(
+def test_gaussian_shading_official_reference_blocks_strict_dependency_conflict(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """官方 requirements 依赖冲突时, helper 应切换到受治理兼容环境。"""
+    """官方 requirements 依赖冲突时必须保留失败报告并阻断运行。"""
 
     source_dir = tmp_path / "external_baseline" / "primary" / "gaussian_shading" / "source"
     source_dir.mkdir(parents=True)
@@ -310,8 +306,6 @@ def test_gaussian_shading_official_reference_falls_back_after_strict_dependency_
         prepare_legacy_environment=True,
         legacy_environment_prefix=str(tmp_path / "legacy_env"),
         micromamba_path=str(tmp_path / "bin" / "micromamba"),
-        legacy_torch_specs="torch==1.13.0+cu117 torchvision==0.14.0+cu117",
-        legacy_package_specs="transformers==4.23.1 diffusers==0.11.1 datasets==2.6.1",
     )
     paths = output_paths(tmp_path, config)
     paths["output_dir"].mkdir(parents=True, exist_ok=True)
@@ -338,10 +332,9 @@ def test_gaussian_shading_official_reference_falls_back_after_strict_dependency_
 
     report = prepare_gaussian_shading_legacy_environment(tmp_path, config, paths)
 
-    assert report["legacy_environment_ready"] is True
-    assert report["legacy_environment_profile"] == "colab_compatible_fallback"
+    assert report["legacy_environment_ready"] is False
+    assert report["legacy_environment_profile"] == "none"
     assert report["strict_official_environment_ready"] is False
-    assert report["compatible_environment_fallback_ready"] is True
     assert any(
         item["environment_profile"] == "official_requirements_strict" and not item["environment_ready"]
         for item in report["environment_profile_reports"]
@@ -540,10 +533,6 @@ def test_gaussian_shading_official_reference_default_config_reads_legacy_environ
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PREPARE_LEGACY_ENV", "1")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_ENV_PREFIX", "/content/gaussian_shading_legacy_env")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_PYTHON_VERSION", "3.8")
-    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_STRICT_OFFICIAL_ENV", "1")
-    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_ALLOW_COMPATIBLE_ENV_FALLBACK", "1")
-    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_TORCH_SPECS", "torch==1.13.0+cu117")
-    monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_LEGACY_PACKAGE_SPECS", "transformers==4.23.1 diffusers==0.11.1")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_OFFICIAL_MODEL_ID", "Manojb/stable-diffusion-2-1-base")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PATCH_MODEL_REPOSITORY_LAYOUT", "1")
     monkeypatch.setenv("SLM_WM_GAUSSIAN_SHADING_PREPARE_LOCAL_MODEL_REPOSITORY", "1")
@@ -558,10 +547,6 @@ def test_gaussian_shading_official_reference_default_config_reads_legacy_environ
     assert config.prepare_legacy_environment is True
     assert config.legacy_environment_prefix == "/content/gaussian_shading_legacy_env"
     assert config.legacy_python_version == "3.8"
-    assert config.strict_official_environment is True
-    assert config.allow_compatible_environment_fallback is True
-    assert config.legacy_torch_specs == "torch==1.13.0+cu117"
-    assert config.legacy_package_specs == "transformers==4.23.1 diffusers==0.11.1"
     assert config.official_model_id == "Manojb/stable-diffusion-2-1-base"
     assert config.upstream_official_model_id == "stabilityai/stable-diffusion-2-1-base"
     assert config.patch_model_repository_layout is True

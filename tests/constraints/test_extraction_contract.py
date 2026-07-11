@@ -37,6 +37,8 @@ def test_minimal_method_package_dry_run_excludes_governance_layer(tmp_path: Path
     assert all(not path.startswith("experiments/") for path in copied_files)
     assert all(not path.startswith("paper_experiments/") for path in copied_files)
     assert all(not path.startswith("paper_workflow/") for path in copied_files)
+    assert "configs/model_sd35.yaml" in copied_files
+    assert all("_prompts.txt" not in path for path in copied_files)
 
 
 @pytest.mark.constraint
@@ -66,4 +68,5 @@ def test_full_experiment_execution_package_excludes_colab_layer(tmp_path: Path) 
     assert any(path.startswith("paper_experiments/") for path in copied_files)
     assert any(path.startswith("experiments/") for path in copied_files)
     assert all(not path.startswith("paper_workflow/") for path in copied_files)
-    assert all(not path.startswith("external_baseline/") for path in copied_files)
+    assert any(path.startswith("external_baseline/primary/") for path in copied_files)
+    assert all("/source/" not in path for path in copied_files)

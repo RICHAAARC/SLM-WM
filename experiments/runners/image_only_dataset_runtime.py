@@ -421,7 +421,7 @@ def run_image_only_dataset_runtime(
         )
         return progress
 
-    # 完整运行到达后删除旧的续跑状态, 避免 Colab 入口把历史中断记录误判为当前状态。
+    # 完整运行到达后删除续跑状态, 避免 Colab 入口把上一次中断记录误判为当前状态。
     progress_path.unlink(missing_ok=True)
 
     calibration_negatives = tuple(

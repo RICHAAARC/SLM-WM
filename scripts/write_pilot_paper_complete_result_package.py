@@ -47,7 +47,7 @@ REQUIRED_OUTPUT_DIRS = (
     "outputs/tree_ring_official_reference",
     "outputs/gaussian_shading_official_reference",
     "outputs/shallow_diffuse_official_reference",
-    "outputs/t2smark_full_main_reproduction",
+    "outputs/t2smark_formal_reproduction",
     "outputs/external_baseline_results",
     "outputs/primary_baseline_formal_import",
     "outputs/external_baseline_comparison",

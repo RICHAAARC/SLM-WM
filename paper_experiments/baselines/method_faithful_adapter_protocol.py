@@ -100,7 +100,7 @@ def build_primary_baseline_method_faithful_adapter_schema() -> dict[str, Any]:
         "required_image_provenance_fields": list(REQUIRED_IMAGE_PROVENANCE_FIELDS),
         "required_score_fields": list(REQUIRED_SCORE_FIELDS),
         "formal_import_gate": {
-            "full_main_prompt_protocol_ready": "required_after_adapter_protocol",
+            "paper_run_prompt_protocol_ready": "required_after_adapter_protocol",
             "fixed_fpr_baseline_calibration_ready": "required_after_adapter_protocol",
             "attack_matrix_baseline_detection_ready": "required_after_adapter_protocol",
             "formal_evidence_paths_ready": "required_after_adapter_protocol",
