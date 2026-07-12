@@ -23,6 +23,13 @@ from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.runtime import repository_environment
 from experiments.runtime.model_sources import get_model_source, require_registered_model_reference
 from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_observation_threshold
+from experiments.protocol.formal_randomization import (
+    DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
+    build_formal_randomization_identity,
+    formal_watermark_key_seed_random,
+    resolve_formal_randomization_repeat,
+)
+from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
 from experiments.protocol.paper_run_config import (
     DEFAULT_GUIDANCE_SCALE,
     DEFAULT_INFERENCE_STEPS,
@@ -65,7 +72,13 @@ _COMMON_BACKBONE_SOURCE = get_model_source("stabilityai_stable_diffusion_3_5_med
 DEFAULT_MODEL_ID = _COMMON_BACKBONE_SOURCE.repository_id
 DEFAULT_MODEL_REVISION = _COMMON_BACKBONE_SOURCE.revision
 MODEL_REVISION_PATTERN = re.compile(r"[0-9a-f]{40}")
-DEFAULT_BASELINE_SEED = 20260621
+_FORMAL_METHOD_DEFAULTS = load_formal_method_runtime_config(".")
+_DEFAULT_RANDOMIZATION_REPEAT = resolve_formal_randomization_repeat(None)
+DEFAULT_BASELINE_SEED = _FORMAL_METHOD_DEFAULTS.seed
+DEFAULT_WATERMARK_KEY_SEED_RANDOM = formal_watermark_key_seed_random(
+    "slm_wm_paper_key",
+    _DEFAULT_RANDOMIZATION_REPEAT,
+)
 DEFAULT_PACKAGE_PATTERN = "external_baseline_method_faithful_package_*.zip"
 METHOD_FAITHFUL_BASELINE_IDS = (
     "tree_ring",
@@ -89,6 +102,16 @@ class ExternalBaselineMethodFaithfulConfig:
     model_id: str = DEFAULT_MODEL_ID
     model_revision: str = DEFAULT_MODEL_REVISION
     seed: int = DEFAULT_BASELINE_SEED
+    randomization_repeat_id: str = DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID
+    generation_seed_index: int = 0
+    generation_seed_offset: int = 0
+    watermark_key_index: int = 0
+    formal_randomization_protocol_digest: str = field(
+        default_factory=lambda: build_paper_run_config(
+            "."
+        ).formal_randomization_protocol_digest
+    )
+    watermark_key_seed_random: int = DEFAULT_WATERMARK_KEY_SEED_RANDOM
     target_fpr: float = DEFAULT_TARGET_FPR
     num_inference_steps: int = DEFAULT_INFERENCE_STEPS
     num_inversion_steps: int = DEFAULT_INFERENCE_STEPS
@@ -158,6 +181,13 @@ def validate_formal_run_config(
     """要求 GPU runner 与当前论文层级和共同公平预算完全一致。"""
 
     paper_run = build_paper_run_config(root_path)
+    repeat = resolve_formal_randomization_repeat(
+        paper_run.randomization_repeat_id
+    )
+    expected_watermark_key_seed_random = formal_watermark_key_seed_random(
+        os.environ.get("SLM_WM_KEY_MATERIAL", "slm_wm_paper_key"),
+        repeat,
+    )
     expected_attacks = set(supported_formal_image_attack_names())
     configured_attacks = {
         name.strip()
@@ -171,7 +201,18 @@ def validate_formal_run_config(
             config.primary_baseline_max_samples == paper_run.prompt_count,
             config.model_id == DEFAULT_MODEL_ID,
             config.model_revision == DEFAULT_MODEL_REVISION,
-            config.seed == DEFAULT_BASELINE_SEED,
+            config.seed
+            == DEFAULT_BASELINE_SEED + paper_run.generation_seed_offset,
+            config.randomization_repeat_id
+            == paper_run.randomization_repeat_id,
+            config.generation_seed_index == paper_run.generation_seed_index,
+            config.generation_seed_offset
+            == paper_run.generation_seed_offset,
+            config.watermark_key_index == paper_run.watermark_key_index,
+            config.formal_randomization_protocol_digest
+            == paper_run.formal_randomization_protocol_digest,
+            config.watermark_key_seed_random
+            == expected_watermark_key_seed_random,
             math.isclose(config.target_fpr, paper_run.target_fpr, rel_tol=0.0, abs_tol=1e-12),
             config.num_inference_steps == paper_run.inference_steps,
             config.num_inversion_steps == paper_run.inference_steps,
@@ -334,6 +375,13 @@ def read_paper_prompt_rows(
         )
     records = apply_split_assignments(build_prompt_records(config.prompt_set, prompt_texts))
     selected_records = records[:requested_count]
+    root_key_material = os.environ.get(
+        "SLM_WM_KEY_MATERIAL",
+        "slm_wm_paper_key",
+    )
+    repeat = resolve_formal_randomization_repeat(
+        config.randomization_repeat_id
+    )
     return [
         {
             "prompt_id": record.prompt_id,
@@ -342,6 +390,12 @@ def read_paper_prompt_rows(
             "split": record.split,
             "prompt_text": record.prompt_text,
             "prompt_digest": record.prompt_digest,
+            **build_formal_randomization_identity(
+                base_seed=DEFAULT_BASELINE_SEED,
+                prompt_index=record.prompt_index,
+                root_key_material=root_key_material,
+                repeat=repeat,
+            ),
         }
         for record in selected_records
     ]
@@ -505,6 +559,12 @@ def _build_command_plan_command(
         str(config.guidance_scale),
         "--seed",
         str(config.seed),
+        "--tree-ring-watermark-seed",
+        str(config.watermark_key_seed_random),
+        "--gaussian-shading-watermark-seed",
+        str(config.watermark_key_seed_random),
+        "--shallow-diffuse-watermark-seed",
+        str(config.watermark_key_seed_random),
         "--max-samples",
         str(config.primary_baseline_max_samples),
         f"--{baseline_id.replace('_', '-')}-adapter-mode",
@@ -923,6 +983,13 @@ def build_default_config() -> ExternalBaselineMethodFaithfulConfig:
     """从当前论文运行层级与单 baseline 环境变量构造配置。"""
 
     paper_run = build_paper_run_config(".")
+    repeat = resolve_formal_randomization_repeat(
+        paper_run.randomization_repeat_id
+    )
+    root_key_material = os.environ.get(
+        "SLM_WM_KEY_MATERIAL",
+        "slm_wm_paper_key",
+    )
     return ExternalBaselineMethodFaithfulConfig(
         output_dir=os.environ.get("SLM_WM_EXTERNAL_BASELINE_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         drive_output_dir=os.environ.get(
@@ -937,7 +1004,23 @@ def build_default_config() -> ExternalBaselineMethodFaithfulConfig:
             "SLM_WM_EXTERNAL_BASELINE_MODEL_REVISION",
             DEFAULT_MODEL_REVISION,
         ),
-        seed=int(os.environ.get("SLM_WM_EXTERNAL_BASELINE_SEED", "20260621")),
+        seed=int(
+            os.environ.get(
+                "SLM_WM_EXTERNAL_BASELINE_SEED",
+                str(DEFAULT_BASELINE_SEED + repeat.generation_seed_offset),
+            )
+        ),
+        randomization_repeat_id=repeat.randomization_repeat_id,
+        generation_seed_index=repeat.generation_seed_index,
+        generation_seed_offset=repeat.generation_seed_offset,
+        watermark_key_index=repeat.watermark_key_index,
+        formal_randomization_protocol_digest=(
+            paper_run.formal_randomization_protocol_digest
+        ),
+        watermark_key_seed_random=formal_watermark_key_seed_random(
+            root_key_material,
+            repeat,
+        ),
         target_fpr=float(
             os.environ.get("SLM_WM_EXTERNAL_BASELINE_TARGET_FPR", str(paper_run.target_fpr))
         ),

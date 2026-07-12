@@ -15,6 +15,7 @@ from experiments.protocol.paper_run_config import (
     derive_minimum_clean_negative_count,
     parse_record_limit,
     resolve_count_from_environment,
+    shared_experiment_settings,
     shared_method_settings,
 )
 from paper_workflow.colab_utils.paper_run_environment import (
@@ -83,7 +84,9 @@ def test_paper_run_config_resolves_probe_paper_defaults(
     assert config.target_fpr == 0.1
     assert config.minimum_clean_negative_count == 34
     assert config.dataset_level_quality_minimum_count == 70
-    assert config.drive_dir("aligned_rescoring").endswith("/probe_paper_results/aligned_rescoring")
+    assert config.drive_dir("aligned_rescoring").endswith(
+        "/probe_paper_results/randomization_repeats/seed_00_key_00/aligned_rescoring"
+    )
 
 
 @pytest.mark.constraint
@@ -111,7 +114,9 @@ def test_paper_run_config_switches_to_full_paper_without_notebook_rewrite(
     assert config.target_fpr == 0.001
     assert config.minimum_clean_negative_count == 3400
     assert config.dataset_level_quality_minimum_count == 7000
-    assert config.drive_dir("threshold_calibration").endswith("/full_paper_results/threshold_calibration")
+    assert config.drive_dir("threshold_calibration").endswith(
+        "/full_paper_results/randomization_repeats/seed_00_key_00/threshold_calibration"
+    )
 
 
 @pytest.mark.constraint
@@ -139,7 +144,9 @@ def test_paper_run_config_switches_to_pilot_paper_with_explicit_input(
     assert config.target_fpr == 0.01
     assert config.minimum_clean_negative_count == 340
     assert config.dataset_level_quality_minimum_count == 700
-    assert config.drive_dir("aligned_rescoring").endswith("/pilot_paper_results/aligned_rescoring")
+    assert config.drive_dir("aligned_rescoring").endswith(
+        "/pilot_paper_results/randomization_repeats/seed_00_key_00/aligned_rescoring"
+    )
 
 
 @pytest.mark.constraint
@@ -177,6 +184,12 @@ def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: 
 
     assert shared_method_settings(probe_config) == shared_method_settings(pilot_config)
     assert shared_method_settings(pilot_config) == shared_method_settings(full_config)
+    assert shared_experiment_settings(probe_config) == shared_experiment_settings(
+        pilot_config
+    )
+    assert shared_experiment_settings(pilot_config) == shared_experiment_settings(
+        full_config
+    )
     assert shared_method_settings(probe_config)["attention_module_names"] == (
         "transformer_blocks.0.attn",
         "transformer_blocks.23.attn",
@@ -198,6 +211,34 @@ def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: 
     assert full_config.dataset_level_quality_minimum_count == 7000
     assert {probe_config.sample_count, pilot_config.sample_count, full_config.sample_count} == {70, 700, 7000}
     assert len({probe_config.prompt_file, pilot_config.prompt_file, full_config.prompt_file}) == 3
+
+
+@pytest.mark.constraint
+def test_paper_run_selects_registered_crossed_randomization_repeat(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """环境变量只能选择登记的生成种子与密钥交叉重复."""
+
+    prompt_contract = write_prompt_contract(tmp_path, "probe_paper", 7)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.setenv("SLM_WM_RANDOMIZATION_REPEAT_ID", "seed_02_key_01")
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+
+    config = build_paper_run_config(
+        root=tmp_path,
+        prompt_contract=prompt_contract,
+    )
+
+    assert config.randomization_repeat_id == "seed_02_key_01"
+    assert config.generation_seed_index == 2
+    assert config.generation_seed_offset == 2_000_003
+    assert config.watermark_key_index == 1
+    assert config.formal_randomization_repeat_count == 9
+    assert config.drive_dir("runtime").endswith(
+        "/randomization_repeats/seed_02_key_01/runtime"
+    )
 
 
 @pytest.mark.constraint

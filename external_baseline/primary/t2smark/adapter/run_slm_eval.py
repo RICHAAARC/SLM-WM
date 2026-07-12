@@ -285,6 +285,27 @@ def _observation(
         "attack_config_digest": attack_config_digest_value,
         "prompt_id": _prompt_id(row, image_id),
         "prompt_text": str(row.get("prompt_text") or row.get("caption") or ""),
+        "randomization_repeat_id": str(row["randomization_repeat_id"]),
+        "generation_seed_index": int(row["generation_seed_index"]),
+        "generation_seed_offset": int(row["generation_seed_offset"]),
+        "generation_seed_random": int(row["generation_seed_random"]),
+        "watermark_key_index": int(row["watermark_key_index"]),
+        "watermark_key_seed_random": int(row["watermark_key_seed_random"]),
+        "watermark_key_material_digest_random": str(
+            row["watermark_key_material_digest_random"]
+        ),
+        "formal_randomization_protocol_digest": str(
+            row["formal_randomization_protocol_digest"]
+        ),
+        "formal_randomization_identity_digest_random": str(
+            row["formal_randomization_identity_digest_random"]
+        ),
+        "base_latent_content_digest_random": str(
+            row["base_latent_content_digest_random"]
+        ),
+        "base_latent_identity_digest_random": str(
+            row["base_latent_identity_digest_random"]
+        ),
         "image_id": image_id,
         "image_path": image_path,
         "image_digest": image_digest,

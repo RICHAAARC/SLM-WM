@@ -65,6 +65,27 @@ UNIT_ATTACK_REGISTRY = (
 )
 
 
+def paired_randomization_identity(prompt_index: int) -> dict[str, object]:
+    """构造主方法与 baseline 必须逐字段相同的随机身份."""
+
+    return {
+        "randomization_repeat_id": "seed_00_key_00",
+        "generation_seed_index": 0,
+        "generation_seed_offset": 0,
+        "generation_seed_random": 1703 + prompt_index,
+        "watermark_key_index": 0,
+        "watermark_key_seed_random": 1729,
+        "watermark_key_material_digest_random": "d" * 64,
+        "formal_randomization_protocol_digest": "e" * 64,
+        "formal_randomization_identity_digest_random": "f" * 64,
+        "base_latent_content_digest_random": "1" * 64,
+        "base_latent_identity_digest_random": "2" * 64,
+    }
+
+
+PAIRED_RANDOMIZATION_FIELDS = tuple(paired_randomization_identity(0))
+
+
 def observation_rows(
     *,
     baseline_id: str = "",
@@ -82,6 +103,7 @@ def observation_rows(
             decision = prompt_id in positive_ids if baseline_id else True
             row: dict[str, object] = {
                 "prompt_id": prompt_id,
+                **paired_randomization_identity(prompt_index),
                 "split": "test",
                 "sample_role": (
                     "attacked_positive" if baseline_id else "positive_source"
@@ -241,6 +263,29 @@ def test_paired_outcomes_bind_thresholds_and_formal_attack_registry() -> None:
     assert first["attack_config_digest"] == registry_by_id[first["attack_id"]][
         "attack_config_digest"
     ]
+
+
+def test_paired_outcomes_reject_different_base_latent_identity() -> None:
+    """基础 latent 内容不同的样本不得进入方法级配对优势统计."""
+
+    proposed = observation_rows()
+    baseline = observation_rows(baseline_id="tree_ring")
+    baseline[0]["base_latent_content_digest_random"] = "3" * 64
+
+    with pytest.raises(
+        PairedSuperiorityError,
+        match="相同的种子、密钥重复和基础 latent",
+    ):
+        build_paired_outcomes(
+            proposed,
+            baseline,
+            baseline_id="tree_ring",
+            proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
+                "tree_ring"
+            ],
+            attack_registry_rows=UNIT_ATTACK_REGISTRY,
+        )
 
 
 def test_clustered_superiority_discloses_non_superior_result() -> None:
@@ -487,9 +532,10 @@ def test_writer_closes_probe_scale_with_exact_raw_pairs(
     for prompt_index in range(34):
         for attack in attack_registry:
             proposed_rows.append(
-                {
-                    "prompt_id": f"prompt_{prompt_index}",
-                    "split": "test",
+                    {
+                        "prompt_id": f"prompt_{prompt_index}",
+                        **paired_randomization_identity(prompt_index),
+                        "split": "test",
                     "sample_role": "positive_source",
                     "attack_id": attack["attack_id"],
                     "attack_family": attack["attack_family"],
@@ -517,9 +563,13 @@ def test_writer_closes_probe_scale_with_exact_raw_pairs(
     observation_paths: dict[str, Path] = {"slm_wm": proposed_path}
     for baseline_id in PRIMARY_BASELINE_IDS:
         rows = [
-            {
-                "prompt_id": proposed["prompt_id"],
-                "split": "test",
+                {
+                    "prompt_id": proposed["prompt_id"],
+                    **{
+                        field_name: proposed[field_name]
+                        for field_name in PAIRED_RANDOMIZATION_FIELDS
+                    },
+                    "split": "test",
                 "sample_role": "attacked_positive",
                 "attack_id": proposed["attack_id"],
                 "attack_family": proposed["attack_family"],

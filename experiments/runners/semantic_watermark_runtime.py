@@ -15,6 +15,13 @@ import time
 from typing import Any, Mapping
 
 from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
+from experiments.protocol.formal_randomization import (
+    DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
+    build_canonical_sd35_base_latent,
+    formal_random_trace_fields,
+    formal_randomization_protocol_record,
+    resolve_formal_randomization_repeat,
+)
 from experiments.runtime.diffusion.semantic_features import (
     DifferentiableSemanticFeatureRuntime,
     load_clip_vision_model,
@@ -91,6 +98,7 @@ from main.methods.subspace import (
 
 
 _FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(".")
+_FORMAL_RANDOMIZATION_CONFIG = formal_randomization_protocol_record()
 
 
 @dataclass(frozen=True)
@@ -112,6 +120,14 @@ class SemanticWatermarkRuntimeConfig:
     negative_prompt: str = _FORMAL_METHOD_CONFIG.negative_prompt
     key_material: str = "slm_wm_runtime_key"
     seed: int = _FORMAL_METHOD_CONFIG.seed
+    randomization_repeat_id: str = DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID
+    generation_seed_index: int = 0
+    generation_seed_offset: int = 0
+    watermark_key_index: int = 0
+    watermark_key_seed_random: int = 0
+    formal_randomization_protocol_digest: str = _FORMAL_RANDOMIZATION_CONFIG[
+        "formal_randomization_protocol_digest"
+    ]
     width: int = _FORMAL_METHOD_CONFIG.width
     height: int = _FORMAL_METHOD_CONFIG.height
     inference_steps: int = _FORMAL_METHOD_CONFIG.inference_steps
@@ -276,6 +292,19 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError("max_attention_tokens 至少为 4")
         if self.split not in {"dev", "calibration", "test"}:
             raise ValueError("split 必须为 dev、calibration 或 test")
+        repeat = resolve_formal_randomization_repeat(
+            self.randomization_repeat_id
+        )
+        if (
+            self.generation_seed_index != repeat.generation_seed_index
+            or self.generation_seed_offset != repeat.generation_seed_offset
+            or self.watermark_key_index != repeat.watermark_key_index
+            or self.formal_randomization_protocol_digest
+            != _FORMAL_RANDOMIZATION_CONFIG[
+                "formal_randomization_protocol_digest"
+            ]
+        ):
+            raise ValueError("方法运行随机化身份未匹配正式重复注册表")
 
     @property
     def carrier_model_reference(self) -> str:
@@ -2183,10 +2212,43 @@ def run_semantic_watermark_runtime(
         "guidance_scale": config.guidance_scale,
         "output_type": "pil",
     }
-    clean_generator = torch.Generator(device=config.device_name).manual_seed(config.seed)
-    watermarked_generator = torch.Generator(device=config.device_name).manual_seed(config.seed)
+    base_latent_shape = (
+        1,
+        int(pipeline.transformer.config.in_channels),
+        int(config.height) // int(pipeline.vae_scale_factor),
+        int(config.width) // int(pipeline.vae_scale_factor),
+    )
+    base_latent, base_latent_identity = build_canonical_sd35_base_latent(
+        shape=base_latent_shape,
+        generation_seed_random=int(config.seed),
+        model_id=config.model_id,
+        model_revision=config.model_revision,
+        device=pipeline._execution_device,
+        dtype=pipeline.transformer.dtype,
+    )
+    formal_randomization_identity = {
+        "randomization_repeat_id": config.randomization_repeat_id,
+        "generation_seed_index": int(config.generation_seed_index),
+        "generation_seed_offset": int(config.generation_seed_offset),
+        "watermark_key_index": int(config.watermark_key_index),
+        "generation_seed_random": int(config.seed),
+        "watermark_key_seed_random": int(config.watermark_key_seed_random),
+        "formal_randomization_protocol_digest": (
+            config.formal_randomization_protocol_digest
+        ),
+        "watermark_key_material_digest_random": build_stable_digest(
+            {"key_material": config.key_material}
+        ),
+    }
+    formal_randomization_identity[
+        "formal_randomization_identity_digest_random"
+    ] = build_stable_digest(formal_randomization_identity)
+    formal_randomization_identity.update(base_latent_identity)
     with torch.no_grad():
-        clean_image = pipeline(generator=clean_generator, **common_kwargs).images[0]
+        clean_image = pipeline(
+            latents=base_latent.detach().clone(),
+            **common_kwargs,
+        ).images[0]
 
     update_records: list[dict[str, Any]] = []
     active_update_records = update_records
@@ -2627,6 +2689,7 @@ def run_semantic_watermark_runtime(
                 "run_id": run_id,
                 "prompt_id": active_injection_config.prompt_id,
                 "split": active_injection_config.split,
+                **formal_randomization_identity,
                 "step_index": int(step_index),
                 "scheduler_step_timestep": float(timestep.detach().float().item()),
                 "post_step_schedule_index": int(post_step_index),
@@ -2724,7 +2787,7 @@ def run_semantic_watermark_runtime(
         return callback_kwargs
 
     watermarked_image = pipeline(
-        generator=watermarked_generator,
+        latents=base_latent.detach().clone(),
         callback_on_step_end=inject,
         callback_on_step_end_tensor_inputs=["latents"],
         **common_kwargs,
@@ -2743,11 +2806,8 @@ def run_semantic_watermark_runtime(
         active_injection_config = carrier_only_config
         injection_execution_role = "carrier_only_counterfactual"
         previous_step_latent = None
-        carrier_only_generator = torch.Generator(
-            device=config.device_name
-        ).manual_seed(config.seed)
         carrier_only_image = pipeline(
-            generator=carrier_only_generator,
+            latents=base_latent.detach().clone(),
             callback_on_step_end=inject,
             callback_on_step_end_tensor_inputs=["latents"],
             **common_kwargs,
@@ -2886,6 +2946,7 @@ def run_semantic_watermark_runtime(
         record["prompt_id"] = config.prompt_id
         record["split"] = config.split
         record["sample_role"] = sample_role
+        record.update(formal_randomization_identity)
         record["metadata"] = {
             **record["metadata"],
             "supports_paper_claim": False,
@@ -2925,6 +2986,7 @@ def run_semantic_watermark_runtime(
                     "prompt_id": config.prompt_id,
                     "split": config.split,
                     "sample_role": sample_role,
+                    **formal_randomization_identity,
                     "attack_id": attack_config.attack_id,
                     "attack_family": attack_config.attack_family,
                     "attack_name": attack_config.attack_name,
@@ -2976,6 +3038,7 @@ def run_semantic_watermark_runtime(
                         "prompt_id": config.prompt_id,
                         "split": config.split,
                         "sample_role": sample_role,
+                        **formal_randomization_identity,
                         "attack_id": attack_spec.attack_id,
                         "attack_family": attack_spec.attack_family,
                         "attack_name": attack_spec.attack_name,
@@ -3000,7 +3063,7 @@ def run_semantic_watermark_runtime(
 
     elapsed_seconds = time.time() - started_at
     random_identity_random = {
-        "generation_seed_random": int(config.seed),
+        **formal_random_trace_fields(formal_randomization_identity),
         "public_detection_seed_random": int(_public_detection_noise_seed(config)),
         "key_material_digest_random": build_stable_digest(
             {"key_material": config.key_material}
@@ -3042,6 +3105,9 @@ def run_semantic_watermark_runtime(
             "method_definition": semantic_conditioned_latent_method_definition(),
             "method_definition_digest": (
                 semantic_conditioned_latent_method_definition_digest()
+            ),
+            "formal_randomization_identity": (
+                formal_randomization_identity
             ),
             "detector_input_access_mode": "image_key_public_model_only",
             "supports_paper_claim": False,

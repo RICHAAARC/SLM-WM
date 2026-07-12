@@ -52,6 +52,10 @@ from external_baseline.primary.sd35_method_faithful_units import (
     write_completed_method_faithful_unit,
 )
 from experiments.protocol.attacks import attack_config_digest
+from experiments.protocol.formal_randomization import (
+    build_canonical_sd35_base_latent,
+    formal_random_trace_fields,
+)
 
 BASELINE_ID = "tree_ring"
 ADAPTER_BOUNDARY = "method_faithful_sd35_adapter_reproduction"
@@ -440,6 +444,27 @@ def build_observation(
         **attack_identity,
         "prompt_id": row_id(row, index, "prompt_id", "prompt"),
         "prompt_text": prompt_text(row),
+        "randomization_repeat_id": str(row["randomization_repeat_id"]),
+        "generation_seed_index": int(row["generation_seed_index"]),
+        "generation_seed_offset": int(row["generation_seed_offset"]),
+        "generation_seed_random": int(row["generation_seed_random"]),
+        "watermark_key_index": int(row["watermark_key_index"]),
+        "watermark_key_seed_random": int(row["watermark_key_seed_random"]),
+        "watermark_key_material_digest_random": str(
+            row["watermark_key_material_digest_random"]
+        ),
+        "formal_randomization_protocol_digest": str(
+            row["formal_randomization_protocol_digest"]
+        ),
+        "formal_randomization_identity_digest_random": str(
+            row["formal_randomization_identity_digest_random"]
+        ),
+        "base_latent_content_digest_random": str(
+            row["base_latent_content_digest_random"]
+        ),
+        "base_latent_identity_digest_random": str(
+            row["base_latent_identity_digest_random"]
+        ),
         "image_id": image_id,
         "image_path": image_path,
         "image_digest": image_digest,
@@ -602,16 +627,32 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         prompt_id = row_id(row, index, "prompt_id", "prompt")
         image_id = row_id(row, index, "image_id", "tree_ring_image")
         file_stem = safe_file_stem(image_id, f"tree_ring_image_{index:05d}")
-        generator = torch.Generator(device=device).manual_seed(int(args.seed) + index - 1)
+        generation_seed_random = int(row["generation_seed_random"])
+        if generation_seed_random != int(args.seed) + index - 1:
+            raise RuntimeError("Tree-Ring Prompt 生成种子未匹配正式随机化计划")
+        if int(row["watermark_key_seed_random"]) != int(args.watermark_seed):
+            raise RuntimeError("Tree-Ring 水印密钥未匹配正式随机化计划")
+        clean_latents, base_latent_identity = (
+            build_canonical_sd35_base_latent(
+                shape=latent_shape,
+                generation_seed_random=generation_seed_random,
+                model_id=args.model_id,
+                model_revision=args.model_revision,
+                device=device,
+                dtype=pipe.transformer.dtype,
+            )
+        )
+        row = {**row, **base_latent_identity}
         source_unit_spec = build_method_faithful_unit_spec(
             unit_context,
             unit_kind="source_pair",
             row=row,
             index=index,
             random_identity_random={
-                "generation_seed_random": int(args.seed) + index - 1,
+                "generation_seed_random": generation_seed_random,
                 "watermark_seed_random": int(args.watermark_seed),
                 "watermark_carrier_digest_random": watermark_carrier_digest_random,
+                **formal_random_trace_fields(base_latent_identity),
             },
             unit_parameters={
                 "image_id": image_id,
@@ -652,7 +693,6 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
             )
             continue
 
-        clean_latents = torch.randn(latent_shape, generator=generator, device=device, dtype=pipe.transformer.dtype)
         watermarked_latents = inject_watermark(clean_latents.clone(), mask, key)
 
         clean_image = pipe(
@@ -722,6 +762,22 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 "generation_model_id": args.model_id,
                 "generation_model_revision": args.model_revision,
                 "latent_shape": list(latent_shape),
+                "randomization_repeat_id": str(
+                    row["randomization_repeat_id"]
+                ),
+                "generation_seed_index": int(row["generation_seed_index"]),
+                "generation_seed_offset": int(row["generation_seed_offset"]),
+                "watermark_key_index": int(row["watermark_key_index"]),
+                "watermark_key_seed_random": int(
+                    row["watermark_key_seed_random"]
+                ),
+                "watermark_key_material_digest_random": str(
+                    row["watermark_key_material_digest_random"]
+                ),
+                "formal_randomization_identity_digest_random": str(
+                    row["formal_randomization_identity_digest_random"]
+                ),
+                **base_latent_identity,
             }
         )
         observations_without_threshold.append(

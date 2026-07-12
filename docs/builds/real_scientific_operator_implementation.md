@@ -13,6 +13,7 @@
 | 真实注意力梯度 | `main/methods/geometry/differentiable_attention.py` | 从 Transformer `to_q`/`to_k` 得到真实 attention, 构造有身份摘要的稳定 token pair 权重并对 latent 求梯度 |
 | 几何恢复 | `main/methods/geometry/attention_alignment.py` | 使用同一 pair 权重联合规范拉回 $W A_{\mathrm{obs}} W^\top$、观测前推 $V S_K V^\top$、双向覆盖惩罚和攻击无关的分层局部搜索恢复图像参考系 |
 | 仅图像检测 | `main/methods/detection/image_only.py` | 只接收图像、密钥和公开模型配置, 传递注册前后的同一 pair 权重并完成内容主判与同阈值救回 |
+| 正式随机化 | `experiments/protocol/formal_randomization.py` | 冻结3生成 seed × 3水印密钥交叉重复, 以设备无关 SHA-256 Box-Muller 协议构造主方法与 baseline 共享的实际基础 latent Tensor |
 | 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | 在 SD3.5 Medium 中执行完整方法与同种子 carrier-only 总机制效应反事实, 持久化无 attention 更新原子, 并以三边最终特征保持和真实 Q/K 双归因增益门禁验证 attention 可观测性 |
 | 共同攻击算子 | `experiments/runtime/diffusion/regeneration_attacks.py` | 为主方法与全部 baseline 统一执行 SD3.5 img2img、flow-matching 反向 Euler 积分、inpainting 和检测器引导搜索 |
 | 科学会话 | `experiments/runtime/semantic_watermark_scientific_session.py` | 在同一受验证主方法子解释器中调度主运行、质量评估、正式消融与绑定打包 |
@@ -112,7 +113,9 @@ $$
 12. FID/KID 使用 torch-fidelity `inception-v3-compat` 的2048维特征，配对质量指标来自真实图像集合；
 13. 正式消融精确覆盖完整方法和14个变体, 每条记录明确 `generation_rerun=true` 且未使用 counterfactual 分数变换；
 14. 四个注意力分量留一变体在嵌入梯度、回溯、最终归因、仿射注册、原图检测和对齐同步中共享同一权重协议摘要；
-15. 外部 baseline 使用相同 Prompt、攻击和固定 FPR 统计边界。
+15. 外部 baseline 使用相同 Prompt、攻击和固定 FPR 统计边界；
+16. 主方法与4个主表 baseline 在同一交叉重复和 Prompt 上使用相同实际生成 seed 与同一个基础 latent Tensor, 配对统计核验实际 Tensor 内容摘要；
+17. 三个论文运行层级共享同一个9重复注册表, 正式跨种子与跨密钥结论必须覆盖全部重复。
 
 正式 FID/KID 的样本门禁分别为 70/700/7000 对 clean/watermarked 图像, 与三个运行层级的 Prompt 总数一致。该门禁属于项目特定的证据治理要求; 通用做法是明确记录特征提取器版本、输入图像摘要、特征维度和实际样本数。
 

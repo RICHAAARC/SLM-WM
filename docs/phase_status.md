@@ -16,6 +16,8 @@
 
 三类运行层级执行同一方法实现、攻击矩阵、baseline 流程、消融流程、检测器和结果闭合命令。差异仅限 Prompt 数量、固定划分后的样本数量和目标 FPR。
 
+三类运行层级还共享同一个3生成 seed × 3水印密钥交叉重复注册表。每次 GPU 执行选择一个重复并隔离输出, 主方法与4个主表 baseline 对同一 Prompt 必须使用相同生成 seed 和实际基础 latent Tensor；最终论文证据需要汇总全部9个重复。该协议已由代码和轻量公式测试冻结, 真实重复结果仍必须由后续 GPU 运行产生, 当前文档不把协议就绪表述为结果已经成立。
+
 | run_name | Prompt 数量 | dev | calibration | test | target FPR | claim scope |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
 | `probe_paper` | 70 | 3 | 33 | 34 | 0.1 | `probe_claim` |

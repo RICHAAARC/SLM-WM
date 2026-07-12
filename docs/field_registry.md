@@ -2059,7 +2059,31 @@ Notebook 与 repository module 的跨边界数据
 | prompt_identity | protocol | none | true | false | false | 单个科学完成单元绑定的 Prompt id、索引、split、文本和摘要。 |
 | source_identity | provenance | none | true | false | false | T2SMark 单元契约绑定的官方 commit、固定补丁与精确工作树身份。 |
 | formal_unit_aggregate | provenance | none | true | false | false | T2SMark 完整 Prompt 单元的记录摘要与跨会话来源聚合对象。 |
-| clean_base_latent_digest_random | random | _random | true | false | false | 对严格成对图像共用的水印前基础 Gaussian latent 计算的不可逆摘要。 |
+| formal_randomization_protocol | protocol | none | true | false | false | 主方法与全部正式 baseline 共同采用的生成种子和水印密钥交叉重复协议名称。 |
+| formal_randomization_protocol_digest | provenance | none | true | false | false | 完整交叉重复注册表、基础 latent 分布和设备无关 PRG 约定的稳定摘要。 |
+| formal_randomization_repeat_count | metric | none | true | false | false | 论文运行要求完成并汇总的正式交叉重复总数。 |
+| generation_seed_repeat_count | metric | none | true | false | false | 正式交叉重复协议登记的生成种子重复数。 |
+| watermark_key_repeat_count | metric | none | true | false | false | 正式交叉重复协议登记的水印密钥重复数。 |
+| crossed_repeat_count | metric | none | true | false | false | 生成种子与水印密钥笛卡尔积形成的重复单元数。 |
+| repeat_records | protocol | none | true | false | false | 按稳定顺序登记的全部生成种子与水印密钥交叉重复记录。 |
+| randomization_repeat_id | protocol | none | true | false | false | 当前科学运行唯一选择的交叉重复标识。 |
+| generation_seed_index | protocol | none | true | false | false | 当前交叉重复使用的生成种子索引。 |
+| generation_seed_offset | protocol | none | true | false | false | 当前生成种子相对冻结基础 seed 的整数偏移。 |
+| watermark_key_index | protocol | none | true | false | false | 当前交叉重复使用的水印密钥索引。 |
+| watermark_key_seed_random | random | _random | true | false | false | 从统一根密钥和水印密钥索引派生、供各方法构造水印随机材料的整数身份。 |
+| watermark_key_material_digest_random | random | _random | true | false | false | 当前重复的主方法密钥材料不可逆摘要, 用于证明跨路径密钥身份一致。 |
+| formal_randomization_identity_digest_random | random | _random | true | false | false | 单个 Prompt 的重复、生成 seed 与密钥身份对象稳定摘要。 |
+| formal_randomization_identity | provenance | none | true | false | false | 单个 Prompt 的协议身份、随机身份和基础 latent 内容身份合并记录。 |
+| base_latent_distribution | protocol | none | true | false | false | 主方法与正式 baseline 共同基础 latent 的冻结概率分布。 |
+| base_latent_generation | protocol | none | true | false | false | 正式随机化注册表声明的设备无关基础 latent 构造方式。 |
+| base_latent_dtype_cast | protocol | none | true | false | false | 规范基础 latent 在 CPU 完成目标 dtype 转换后才搬运到执行设备的冻结约定。 |
+| base_latent_generation_protocol | protocol | none | true | false | false | 单次运行实际使用的规范 float32 生成和目标 dtype 转换协议。 |
+| base_latent_keyed_prg_version | protocol | none | true | false | false | 基础 latent 使用的 SHA-256 计数器流与 Box-Muller 算法版本。 |
+| base_latent_keyed_prg_protocol_digest | provenance | none | true | false | false | 基础 latent 所用设备无关 PRG 完整协议的稳定摘要。 |
+| base_latent_dtype | provenance | none | true | false | false | 进入生成管线的共享基础 latent 实际 Tensor dtype。 |
+| base_latent_shape | provenance | none | true | false | false | 进入生成管线的共享基础 latent 实际 Tensor 形状。 |
+| base_latent_content_digest_random | random | _random | true | false | false | 对主方法与 baseline 共同使用的实际基础 latent Tensor 字节计算的不可逆摘要。 |
+| base_latent_identity_digest_random | random | _random | true | false | false | 基础 latent 的 seed、协议、dtype、形状与内容摘要联合身份。 |
 | t2smark_secret_material_digest_random | random | _random | true | false | false | 对 T2SMark master key、Prompt key 与 message 计算的不可逆摘要。 |
 | fixed_secret_material_digest_random | random | _random | true | false | false | T2SMark settings 对固定 master key 与 message 计算的不可逆摘要。 |
 | watermark_seed_random | random | _random | true | false | false | 外部 baseline 原子单元实际用于构造水印随机材料的整数 seed。 |

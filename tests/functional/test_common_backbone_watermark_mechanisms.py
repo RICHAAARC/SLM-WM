@@ -446,11 +446,11 @@ def test_gaussian_shading_strict_pair_reuses_exact_base_magnitude() -> None:
     identity = first.build_random_identity_random(
         generation_seed_random=37,
         watermark_seed_random=watermark_seed_random,
-        clean_base_latent_digest_random="a" * 64,
+        base_latent_content_digest_random="a" * 64,
     )
     assert identity["generation_seed_random"] == 37
     assert identity["watermark_seed_random"] == watermark_seed_random
-    assert identity["clean_base_latent_digest_random"] == "a" * 64
+    assert identity["base_latent_content_digest_random"] == "a" * 64
     assert len(identity["gaussian_chacha_secret_material_digest_random"]) == 64
     assert len(identity["gaussian_chacha_message_digest_random"]) == 64
     assert not any("key" in field or "nonce" in field for field in identity)

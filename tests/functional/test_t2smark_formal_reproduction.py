@@ -15,10 +15,17 @@ import pytest
 
 from experiments.runtime import repository_environment
 from experiments.protocol.attacks import attack_config_digest
+from experiments.protocol.formal_randomization import (
+    build_formal_randomization_identity,
+    formal_random_trace_fields,
+    resolve_formal_randomization_repeat,
+)
 from external_baseline.primary.sd35_method_faithful_common import formal_image_attack_config
+from main.core.digest import build_stable_digest
 import paper_experiments.runners.t2smark_formal_reproduction as t2smark_runtime
 from paper_experiments.runners.t2smark_formal_reproduction import (
     DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
+    DEFAULT_T2SMARK_SEED,
     T2SMarkFormalReproductionConfig,
     build_t2smark_formal_protocol_binding,
     build_t2smark_formal_checkpoint_contract,
@@ -52,6 +59,43 @@ from tests.helpers.scientific_execution_binding import (
 
 pytestmark = pytest.mark.quick
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+
+
+def _formal_random_identity(
+    prompt_index: int,
+    *,
+    base_latent_content_digest_random: str,
+) -> dict[str, object]:
+    """构造 T2SMark 单元与 Prompt 计划共享的正式随机身份."""
+
+    identity = build_formal_randomization_identity(
+        base_seed=DEFAULT_T2SMARK_SEED,
+        prompt_index=prompt_index,
+        root_key_material="slm_wm_paper_key",
+        repeat=resolve_formal_randomization_repeat("seed_00_key_00"),
+    )
+    return {
+        **identity,
+        "base_latent_content_digest_random": (
+            base_latent_content_digest_random
+        ),
+        "base_latent_identity_digest_random": build_stable_digest(
+            {
+                "prompt_index": prompt_index,
+                "base_latent_content_digest_random": (
+                    base_latent_content_digest_random
+                ),
+            }
+        ),
+    }
+
+
+def _scientific_random_identity(
+    identity: dict[str, object],
+) -> dict[str, object]:
+    """提取可进入科学来源随机字段容器的后缀合规字段."""
+
+    return formal_random_trace_fields(identity)
 
 
 def test_t2smark_packaging_module_imports_without_scientific_dependencies() -> None:
@@ -154,6 +198,7 @@ def _source_report() -> dict[str, object]:
         "patched_source_sha256": {
             "option.py": "5" * 64,
             "run_sd35.py": "6" * 64,
+            "src/t2s.py": "7" * 64,
         },
     }
 
@@ -407,13 +452,35 @@ def test_t2smark_source_worktree_must_equal_fixed_patch(tmp_path: Path) -> None:
     subprocess.run(["git", "config", "user.name", "Test"], cwd=source_dir, check=True)
     (source_dir / "option.py").write_text("VALUE = 1\n", encoding="utf-8")
     (source_dir / "run_sd35.py").write_text("def run():\n    return 1\n", encoding="utf-8")
-    subprocess.run(["git", "add", "option.py", "run_sd35.py"], cwd=source_dir, check=True)
+    (source_dir / "src").mkdir()
+    (source_dir / "src/t2s.py").write_text(
+        "def encode():\n    return 1\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "option.py", "run_sd35.py", "src/t2s.py"],
+        cwd=source_dir,
+        check=True,
+    )
     subprocess.run(["git", "commit", "-m", "base"], cwd=source_dir, check=True, capture_output=True)
     (source_dir / "option.py").write_text("VALUE = 2\n", encoding="utf-8")
     (source_dir / "run_sd35.py").write_text("def run():\n    return 2\n", encoding="utf-8")
+    (source_dir / "src/t2s.py").write_text(
+        "def encode():\n    return 2\n",
+        encoding="utf-8",
+    )
     patch_path = tmp_path / "formal_protocol.diff"
     diff_result = subprocess.run(
-        ["git", "diff", "--binary", "HEAD", "--", "option.py", "run_sd35.py"],
+        [
+            "git",
+            "diff",
+            "--binary",
+            "HEAD",
+            "--",
+            "option.py",
+            "run_sd35.py",
+            "src/t2s.py",
+        ],
         cwd=source_dir,
         check=True,
         capture_output=True,
@@ -445,13 +512,15 @@ def test_t2smark_fixed_patch_passes_exact_model_revision() -> None:
     assert '+    parser.add_argument("--model_revision", type=str, required=True)' in patch_text
     assert "+    revision=args.model_revision" in patch_text
     assert '+    parser.add_argument("--slm_unit_contract", type=str, required=True)' in patch_text
+    assert '+    parser.add_argument("--slm_watermark_seed", type=int, required=True)' in patch_text
     assert "build_t2smark_formal_unit_record" in patch_text
     assert 'prompt_identity["split"] == "test"' in patch_text
-    assert "encode_with_exact_clean_base" in patch_text
-    assert "torch.random.get_rng_state()" in patch_text
-    assert "torch.random.set_rng_state" in patch_text
-    assert "utils.set_random_seed(args.seed + prompt_id)" in patch_text
-    assert "clean_base_latent_digest_random" in patch_text
+    assert "build_canonical_sd35_base_latent" in patch_text
+    assert "clean_z_k = clean_base_latents[0, args.key_channel_idx, :, :]" in patch_text
+    assert "base_noise=clean_z_k" in patch_text
+    assert "base_noise=clean_z_b" in patch_text
+    assert "utils.set_random_seed(args.slm_watermark_seed + prompt_id)" in patch_text
+    assert "**base_latent_identity" in patch_text
     assert "t2smark_secret_material_digest_random" in patch_text
     assert "return_base=True" not in patch_text
 
@@ -479,14 +548,17 @@ def test_t2smark_fixed_patch_applies_to_registered_source_snapshot(
         cwd=clean_source,
         check=True,
     )
-    for relative_path in ("option.py", "run_sd35.py"):
+    patched_paths = ("option.py", "run_sd35.py", "src/t2s.py")
+    for relative_path in patched_paths:
         content = subprocess.check_output(
             ["git", "show", f"HEAD:{relative_path}"],
             cwd=registered_source,
         )
-        (clean_source / relative_path).write_bytes(content)
+        target_path = clean_source / relative_path
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(content)
     subprocess.run(
-        ["git", "add", "option.py", "run_sd35.py"],
+        ["git", "add", *patched_paths],
         cwd=clean_source,
         check=True,
     )
@@ -587,6 +659,10 @@ def test_t2smark_prompt_units_resume_only_missing_and_reject_damage(
             "split": split,
             "prompt_text": f"prompt {index}",
             "prompt_digest": str(index + 1) * 64,
+            **_formal_random_identity(
+                index,
+                base_latent_content_digest_random=str(index + 6) * 64,
+            ),
         }
         for index, split in enumerate(("dev", "calibration", "test"))
     ]
@@ -611,6 +687,10 @@ def test_t2smark_prompt_units_resume_only_missing_and_reject_damage(
     clean_path.parent.mkdir(parents=True)
     watermarked_path.write_bytes(b"watermarked")
     clean_path.write_bytes(b"clean")
+    random_identity = _formal_random_identity(
+        0,
+        base_latent_content_digest_random="6" * 64,
+    )
     result = {
         "robustness": {
             "norm1_no_w": 0.1,
@@ -624,7 +704,7 @@ def test_t2smark_prompt_units_resume_only_missing_and_reject_damage(
         },
         "pair_quality": {
             "pair_quality_protocol": "strict_clean_watermarked_pair",
-            "clean_base_latent_digest_random": "6" * 64,
+            **random_identity,
             "clean_image_path": str(clean_path),
             "clean_image_digest": t2smark_runtime.file_digest(clean_path),
             "watermarked_image_path": str(watermarked_path),
@@ -644,7 +724,7 @@ def test_t2smark_prompt_units_resume_only_missing_and_reject_damage(
         torch_module=FIXTURE_TORCH,
         execution_device_name="cuda:0",
         random_identity_random={
-            "clean_base_latent_digest_random": "6" * 64,
+            **_scientific_random_identity(random_identity),
             "t2smark_secret_material_digest_random": "7" * 64,
         },
     )
@@ -821,6 +901,12 @@ def _write_package_fixture(
             "split": split,
             "prompt_text": f"formal test prompt {index}",
             "prompt_digest": str(7 + index) * 64,
+            **_formal_random_identity(
+                index,
+                base_latent_content_digest_random=(
+                    ("6" if index == 0 else "8") * 64
+                ),
+            ),
         }
         for index, split in enumerate(("calibration", "test"))
     ]
@@ -890,6 +976,10 @@ def _write_package_fixture(
         clean_digest = t2smark_runtime.file_digest(clean_path)
         watermarked_digest = t2smark_runtime.file_digest(watermarked_path)
         clean_base_digest = ("6" if index == 0 else "8") * 64
+        random_identity = _formal_random_identity(
+            index,
+            base_latent_content_digest_random=clean_base_digest,
+        )
         result_rows[str(index)] = {
             "robustness": {
                 "norm1_no_w": 0.1 + index * 0.01,
@@ -904,7 +994,7 @@ def _write_package_fixture(
             "formal_attacks": formal_attacks,
             "pair_quality": {
                 "pair_quality_protocol": "strict_clean_watermarked_pair",
-                "clean_base_latent_digest_random": clean_base_digest,
+                **random_identity,
                 "clean_image_path": str(clean_path),
                 "clean_image_digest": clean_digest,
                 "watermarked_image_path": str(watermarked_path),
@@ -927,6 +1017,7 @@ def _write_package_fixture(
                 "generated_image_digest": watermarked_digest,
                 "pair_quality_protocol": "strict_clean_watermarked_pair",
                 "strict_pair_quality_ready": True,
+                **random_identity,
             }
         )
 
@@ -951,6 +1042,10 @@ def _write_package_fixture(
     )
     for index in range(len(prompt_rows)):
         clean_base_digest = ("6" if index == 0 else "8") * 64
+        random_identity = _formal_random_identity(
+            index,
+            base_latent_content_digest_random=clean_base_digest,
+        )
         unit_record = build_t2smark_formal_unit_record(
             contract=unit_contract,
             prompt_index=index,
@@ -960,7 +1055,7 @@ def _write_package_fixture(
             torch_module=FIXTURE_TORCH,
             execution_device_name="cuda:0",
             random_identity_random={
-                "clean_base_latent_digest_random": clean_base_digest,
+                **_scientific_random_identity(random_identity),
                 "t2smark_secret_material_digest_random": ("7" if index == 0 else "9") * 64,
             },
         )

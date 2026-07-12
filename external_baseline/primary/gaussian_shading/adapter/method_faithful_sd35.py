@@ -20,6 +20,10 @@ from typing import Any
 
 from experiments.runtime.image_metrics import measured_image_ssim, measured_score_retention
 from experiments.protocol.attacks import attack_config_digest
+from experiments.protocol.formal_randomization import (
+    build_canonical_sd35_base_latent,
+    formal_random_trace_fields,
+)
 from main.core.digest import build_stable_digest
 
 from external_baseline.primary.sd35_method_faithful_common import (
@@ -289,15 +293,15 @@ class GaussianShadingWatermark:
         *,
         generation_seed_random: int,
         watermark_seed_random: int,
-        clean_base_latent_digest_random: str,
+        base_latent_content_digest_random: str,
     ) -> dict[str, Any]:
         """构造只含 seed 和不可逆摘要的逐 Prompt 随机来源."""
 
         return {
             "generation_seed_random": int(generation_seed_random),
             "watermark_seed_random": int(watermark_seed_random),
-            "clean_base_latent_digest_random": str(
-                clean_base_latent_digest_random
+            "base_latent_content_digest_random": str(
+                base_latent_content_digest_random
             ),
             "gaussian_chacha_secret_material_digest_random": (
                 self.secret_material_digest_random
@@ -390,6 +394,29 @@ def build_observation(
             **attack_identity,
             "prompt_id": row_id(row, index, "prompt_id", "prompt"),
             "prompt_text": prompt_text(row),
+            "randomization_repeat_id": str(row["randomization_repeat_id"]),
+            "generation_seed_index": int(row["generation_seed_index"]),
+            "generation_seed_offset": int(row["generation_seed_offset"]),
+            "generation_seed_random": int(row["generation_seed_random"]),
+            "watermark_key_index": int(row["watermark_key_index"]),
+            "watermark_key_seed_random": int(
+                row["watermark_key_seed_random"]
+            ),
+            "watermark_key_material_digest_random": str(
+                row["watermark_key_material_digest_random"]
+            ),
+            "formal_randomization_protocol_digest": str(
+                row["formal_randomization_protocol_digest"]
+            ),
+            "formal_randomization_identity_digest_random": str(
+                row["formal_randomization_identity_digest_random"]
+            ),
+            "base_latent_content_digest_random": str(
+                row["base_latent_content_digest_random"]
+            ),
+            "base_latent_identity_digest_random": str(
+                row["base_latent_identity_digest_random"]
+            ),
             "image_id": image_id,
             "image_path": image_path,
             "image_digest": image_digest,
@@ -505,11 +532,12 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
         prompt_id = row_id(row, index, "prompt_id", "prompt")
         image_id = row_id(row, index, "image_id", "gaussian_shading_image")
         file_stem = safe_file_stem(image_id, f"gaussian_shading_image_{index:05d}")
-        generation_seed_random = int(args.seed) + index - 1
-        watermark_seed_random = int(args.watermark_seed) + index - 1
-        latent_generator = torch.Generator(device=device).manual_seed(
-            generation_seed_random
-        )
+        generation_seed_random = int(row["generation_seed_random"])
+        watermark_seed_random = int(args.watermark_seed)
+        if generation_seed_random != int(args.seed) + index - 1:
+            raise RuntimeError("Gaussian Shading Prompt 生成种子未匹配正式随机化计划")
+        if int(row["watermark_key_seed_random"]) != watermark_seed_random:
+            raise RuntimeError("Gaussian Shading 水印密钥未匹配正式随机化计划")
         watermark_generator = torch.Generator(device="cpu").manual_seed(
             watermark_seed_random
         )
@@ -521,19 +549,31 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
             generator=watermark_generator,
             device=device,
         )
-        clean_latents = torch.randn(
-            latent_shape,
-            generator=latent_generator,
-            device=device,
-            dtype=pipe.transformer.dtype,
+        clean_latents, base_latent_identity = (
+            build_canonical_sd35_base_latent(
+                shape=latent_shape,
+                generation_seed_random=generation_seed_random,
+                model_id=args.model_id,
+                model_revision=args.model_revision,
+                device=device,
+                dtype=pipe.transformer.dtype,
+            )
         )
-        clean_base_latent_digest_random = build_irreversible_random_material_digest(
-            clean_latents
+        row = {**row, **base_latent_identity}
+        base_latent_content_digest_random = str(
+            base_latent_identity["base_latent_content_digest_random"]
         )
         source_random_identity_random = watermark.build_random_identity_random(
             generation_seed_random=generation_seed_random,
             watermark_seed_random=watermark_seed_random,
-            clean_base_latent_digest_random=clean_base_latent_digest_random,
+            base_latent_content_digest_random=(
+                base_latent_identity[
+                    "base_latent_content_digest_random"
+                ]
+            ),
+        )
+        source_random_identity_random.update(
+            formal_random_trace_fields(base_latent_identity)
         )
         source_unit_spec = build_method_faithful_unit_spec(
             unit_context,
@@ -650,7 +690,22 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                 "generation_model_revision": args.model_revision,
                 "latent_shape": list(latent_shape),
                 "strict_pair_shared_magnitude": True,
-                "clean_base_latent_digest_random": clean_base_latent_digest_random,
+                "randomization_repeat_id": str(
+                    row["randomization_repeat_id"]
+                ),
+                "generation_seed_index": int(row["generation_seed_index"]),
+                "generation_seed_offset": int(row["generation_seed_offset"]),
+                "watermark_key_index": int(row["watermark_key_index"]),
+                "watermark_key_seed_random": int(
+                    row["watermark_key_seed_random"]
+                ),
+                "watermark_key_material_digest_random": str(
+                    row["watermark_key_material_digest_random"]
+                ),
+                "formal_randomization_identity_digest_random": str(
+                    row["formal_randomization_identity_digest_random"]
+                ),
+                **base_latent_identity,
                 "gaussian_chacha_secret_material_digest_random": (
                     watermark.secret_material_digest_random
                 ),

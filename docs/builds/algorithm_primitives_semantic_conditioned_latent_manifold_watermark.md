@@ -769,6 +769,33 @@ $$
 5. 报告 fixed-FPR 时必须同时报告 raw content FPR、rescue 后 clean negative FPR 和 rescue 后 attacked negative FPR；
 6. 若 rescue 后整体 evidence-level FPR 超过目标 operating point，则论文不得声称完整系统仍满足该 fixed-FPR 目标，除非重新在 calibration split 中冻结包含 rescue 的完整决策协议。
 
+### 正式随机化与基础 latent 公平控制
+
+正式比较使用生成种子索引 $i\in\{0,1,2\}$ 与水印密钥索引 $j\in\{0,1,2\}$ 的笛卡尔积, 共9个交叉重复。生成 seed 偏移固定为
+
+$$
+\Delta=(0,1000003,2000003).
+$$
+
+对 Prompt 全局索引 $q$ 和冻结基础 seed $s_0=1703$, 当前重复的实际生成 seed 为
+
+$$
+s_{i,q}=s_0+\Delta_i+q.
+$$
+
+基础 latent 不调用各适配器自己的 CPU/CUDA RNG。协议使用版本化 SHA-256 大端计数器流和 Box-Muller 变换, 把模型 ID、40位 revision、$s_{i,q}$、Tensor shape 和协议名称共同写入 domain, 先在 CPU 生成规范 float32 标准高斯 Tensor, 再转换到目标设备和 dtype：
+
+$$
+z^{(0)}_{i,q}=\operatorname{Cast}_{d}\left(
+\operatorname{BoxMuller}\left(
+\operatorname{SHA256Counter}(\mathrm{domain}_{i,q})
+\right)\right).
+$$
+
+SLM-WM、Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark 必须消费 $z^{(0)}_{i,q}$ 的 clone, 并在方法写入前保存实际目标 dtype Tensor 的 shape、dtype、内容 SHA-256 和联合身份摘要。水印密钥整数身份由统一根密钥和 $j$ 经 SHA-256 派生；各方法可以把该身份映射到自身 ring、message、patch 或 T2SMark 编码, 但不得改变重复索引。配对统计逐字段要求两侧的重复 ID、seed/key 索引、实际生成 seed、密钥材料摘要、基础 latent 内容摘要和基础 latent 身份摘要完全相同。
+
+单次执行只选择一个登记重复, 用于支持中断恢复和 GPU 会话隔离。正式论文汇总必须覆盖全部9个重复并把 Prompt、生成 seed 与密钥重复纳入统计组织；任一单重复结果都不能替代跨种子、跨密钥证据。`probe_paper`、`pilot_paper` 与 `full_paper` 使用同一个9重复注册表, 只改变下表中的 Prompt 数量、划分数量和目标 FPR。
+
 三级正式规模固定为：
 
 | Prompt 数量 | dev | calibration | test | 目标 FPR |

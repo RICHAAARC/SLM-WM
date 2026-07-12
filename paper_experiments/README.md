@@ -52,7 +52,8 @@ method-faithful 与 T2SMark 的归档白名单还必须包含 `scientific_execut
 
 ## 主表总体优势统计
 
-- 主表比较只使用 SLM-WM 与 Tree-Ring、Gaussian Shading、Shallow Diffuse、T2SMark 四个正式 baseline。每个 baseline 必须与 SLM-WM 在完全相同的 test Prompt 和攻击条件上形成一一配对, 重复、缺失或额外配对键都会阻断统计。
+- 主表比较只使用 SLM-WM 与 Tree-Ring、Gaussian Shading、Shallow Diffuse、T2SMark 四个正式 baseline。每个 baseline 必须与 SLM-WM 在完全相同的 test Prompt、攻击条件、生成 seed、密钥重复和基础 latent Tensor 上形成一一配对；配对记录必须同时绑定重复 ID、seed/key 索引、实际生成 seed、基础 latent 内容摘要和联合身份摘要。重复、缺失、额外配对键或任一随机身份不一致都会阻断统计。
+- 正式随机化使用3个生成 seed 与3个水印密钥的9个交叉重复。单个 GPU 运行只物化一个活动重复并写入独占 Drive 子目录；最终论文比较必须在全部9个重复完成后按 Prompt、生成 seed 和密钥重复组织统计。任何单重复结果只能说明该登记重复下的运行事实, 不能支持跨种子或跨密钥稳定性主张。
 - 单个 Prompt 的效应值是该 Prompt 跨完整攻击集合的平均二元检测差值。正式统计使用100000次 Prompt-clustered bootstrap 的95% percentile CI, 对取值位于 [-1,1] 的 Prompt 聚类差执行单侧 bounded Hoeffding 均值检验, 再对4个主表 claim p 值执行 Holm 校正。整数动态规划 exact sign-flip 只披露 sharp-null 诊断, 不参与均值优势 claim 门禁。
 - 配对 outcome 逐条绑定规范 test Prompt 身份、正式攻击 ID、资源档位、攻击配置摘要、两方法冻结阈值摘要和原始 observation 文件字节摘要。结果闭合门禁会读取五方法原始 observation 独立重建全部 outcome、样本计数、TPR、clean/attacked FPR、质量均值、分数保持诊断和 Hoeffding 区间, 再精确核验正式 result records、来源文件 SHA-256、模板覆盖、schema validation 与 manifest 配置摘要。
 - 单个 baseline 只有在总体平均差值大于0、bootstrap CI 下界大于0且 Holm 校正后 `p < 0.05` 时才满足 `paired_superiority_ready`。4个 baseline 必须全部满足该条件, `overall_paired_superiority_ready` 才能支持主表总体 superiority claim。

@@ -20,6 +20,10 @@ from typing import Any
 
 from experiments.runtime.image_metrics import measured_image_ssim, measured_score_retention
 from experiments.protocol.attacks import attack_config_digest
+from experiments.protocol.formal_randomization import (
+    build_canonical_sd35_base_latent,
+    formal_random_trace_fields,
+)
 from main.core.digest import build_stable_digest
 
 from external_baseline.primary.sd35_method_faithful_common import (
@@ -280,6 +284,29 @@ def build_observation(
             **attack_identity,
             "prompt_id": row_id(row, index, "prompt_id", "prompt"),
             "prompt_text": prompt_text(row),
+            "randomization_repeat_id": str(row["randomization_repeat_id"]),
+            "generation_seed_index": int(row["generation_seed_index"]),
+            "generation_seed_offset": int(row["generation_seed_offset"]),
+            "generation_seed_random": int(row["generation_seed_random"]),
+            "watermark_key_index": int(row["watermark_key_index"]),
+            "watermark_key_seed_random": int(
+                row["watermark_key_seed_random"]
+            ),
+            "watermark_key_material_digest_random": str(
+                row["watermark_key_material_digest_random"]
+            ),
+            "formal_randomization_protocol_digest": str(
+                row["formal_randomization_protocol_digest"]
+            ),
+            "formal_randomization_identity_digest_random": str(
+                row["formal_randomization_identity_digest_random"]
+            ),
+            "base_latent_content_digest_random": str(
+                row["base_latent_content_digest_random"]
+            ),
+            "base_latent_identity_digest_random": str(
+                row["base_latent_identity_digest_random"]
+            ),
             "image_id": image_id,
             "image_path": image_path,
             "image_digest": image_digest,
@@ -832,18 +859,24 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
         prompt_id = row_id(row, index, "prompt_id", "prompt")
         image_id = row_id(row, index, "image_id", "shallow_diffuse_image")
         file_stem = safe_file_stem(image_id, f"shallow_diffuse_image_{index:05d}")
-        generation_seed_random = int(args.seed) + index - 1
-        latent_generator = torch.Generator(device=device).manual_seed(
-            generation_seed_random
+        generation_seed_random = int(row["generation_seed_random"])
+        if generation_seed_random != int(args.seed) + index - 1:
+            raise RuntimeError("Shallow Diffuse Prompt 生成种子未匹配正式随机化计划")
+        if int(row["watermark_key_seed_random"]) != int(args.watermark_seed):
+            raise RuntimeError("Shallow Diffuse 水印密钥未匹配正式随机化计划")
+        base_latents, base_latent_identity = (
+            build_canonical_sd35_base_latent(
+                shape=latent_shape,
+                generation_seed_random=generation_seed_random,
+                model_id=args.model_id,
+                model_revision=args.model_revision,
+                device=device,
+                dtype=pipe.transformer.dtype,
+            )
         )
-        clean_base_latents = torch.randn(
-            latent_shape,
-            generator=latent_generator,
-            device=device,
-            dtype=pipe.transformer.dtype,
-        )
-        clean_base_latent_digest_random = build_irreversible_random_material_digest(
-            clean_base_latents
+        row = {**row, **base_latent_identity}
+        base_latent_content_digest_random = str(
+            base_latent_identity["base_latent_content_digest_random"]
         )
         source_unit_spec = build_method_faithful_unit_spec(
             unit_context,
@@ -854,7 +887,8 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                 "generation_seed_random": generation_seed_random,
                 "watermark_seed_random": int(args.watermark_seed),
                 "watermark_carrier_digest_random": watermark_carrier_digest_random,
-                "clean_base_latent_digest_random": clean_base_latent_digest_random,
+                "base_latent_content_digest_random": base_latent_content_digest_random,
+                **formal_random_trace_fields(base_latent_identity),
             },
             unit_parameters={
                 "image_id": image_id,
@@ -890,7 +924,7 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                 "injection_mode": injection_mode,
                 "clean_score": float(source_observations[0]["score"]),
                 "watermarked_score": float(source_observations[1]["score"]),
-                "clean_base_latent_digest_random": clean_base_latent_digest_random,
+                "base_latent_content_digest_random": base_latent_content_digest_random,
             }
             source_unit_records.append(completed_source_unit)
             progress_completed += 1
@@ -907,7 +941,7 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
             generate_shallow_diffuse_latent_pair(
                 pipe,
                 current_prompt,
-                base_latents=clean_base_latents,
+                base_latents=base_latents,
                 mask=mask,
                 patch=patch,
                 num_inference_steps=int(args.num_inference_steps),
@@ -963,7 +997,7 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
             "injection_mode": injection_mode,
             "clean_score": clean_score,
             "watermarked_score": watermarked_score,
-            "clean_base_latent_digest_random": clean_base_latent_digest_random,
+            "base_latent_content_digest_random": base_latent_content_digest_random,
         }
         image_pairs.append(
             {
@@ -981,7 +1015,22 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                 "generation_model_revision": args.model_revision,
                 "latent_shape": list(latent_shape),
                 "shallow_injection_mode": injection_mode,
-                "clean_base_latent_digest_random": clean_base_latent_digest_random,
+                "randomization_repeat_id": str(
+                    row["randomization_repeat_id"]
+                ),
+                "generation_seed_index": int(row["generation_seed_index"]),
+                "generation_seed_offset": int(row["generation_seed_offset"]),
+                "watermark_key_index": int(row["watermark_key_index"]),
+                "watermark_key_seed_random": int(
+                    row["watermark_key_seed_random"]
+                ),
+                "watermark_key_material_digest_random": str(
+                    row["watermark_key_material_digest_random"]
+                ),
+                "formal_randomization_identity_digest_random": str(
+                    row["formal_randomization_identity_digest_random"]
+                ),
+                **base_latent_identity,
                 "edit_timestep": edit_timestep,
                 "edit_schedule_index": edit_schedule_index,
                 "post_edit_guidance_scale": 1.0,
@@ -1096,8 +1145,8 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                         "generation_seed_random": int(args.seed) + pair_index - 1,
                         "watermark_seed_random": int(args.watermark_seed),
                         "watermark_carrier_digest_random": watermark_carrier_digest_random,
-                        "clean_base_latent_digest_random": runtime[
-                            "clean_base_latent_digest_random"
+                        "base_latent_content_digest_random": runtime[
+                            "base_latent_content_digest_random"
                         ],
                         "attack_seed_random": attack_seed,
                     },

@@ -26,7 +26,11 @@ DEFAULT_T2SMARK_MODEL_ID = _T2SMARK_MODEL_SOURCE.repository_id
 DEFAULT_T2SMARK_MODEL_REVISION = _T2SMARK_MODEL_SOURCE.revision
 DEFAULT_T2SMARK_SOURCE_ENTRY = "external_baseline/primary/t2smark/source/run_sd35.py"
 DEFAULT_T2SMARK_PROTOCOL_PATCH = "external_baseline/primary/t2smark/adapter/formal_protocol_git_diff.txt"
-T2SMARK_PATCHED_SOURCE_PATHS = ("option.py", "run_sd35.py")
+T2SMARK_PATCHED_SOURCE_PATHS = (
+    "option.py",
+    "run_sd35.py",
+    "src/t2s.py",
+)
 
 
 def configured_attack_names(value: str) -> tuple[str, ...]:
@@ -362,12 +366,14 @@ def _verify_formal_source(source_entry: Path) -> None:
         "build_t2smark_formal_unit_record",
         "aggregate_t2smark_formal_unit_records",
         'prompt_identity["split"] == "test"',
-        "encode_with_exact_clean_base",
-        "torch.random.get_rng_state()",
-        "torch.random.set_rng_state",
-        "utils.set_random_seed(args.seed + prompt_id)",
-        "clean_base_latent_digest_random",
-        "t2smark_secret_material_digest_random",
+            "build_canonical_sd35_base_latent",
+            "clean_z_k = clean_base_latents[0, args.key_channel_idx, :, :]",
+            "base_noise=clean_z_k",
+            "base_noise=clean_z_b",
+            "utils.set_random_seed(args.slm_watermark_seed + prompt_id)",
+            "generation_seed_random",
+            "**base_latent_identity",
+            "t2smark_secret_material_digest_random",
         "fixed_secret_material_digest_random",
     )
     required_option_tokens = (
@@ -377,6 +383,7 @@ def _verify_formal_source(source_entry: Path) -> None:
         "slm_pair_image_dir",
         "slm_unit_contract",
         "slm_runtime_environment_report",
+        "slm_watermark_seed",
     )
     if any(token not in source_text for token in required_source_tokens):
         raise RuntimeError("T2SMark 正式源码缺少仅图像检测或攻击证据算子")

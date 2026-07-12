@@ -457,9 +457,25 @@ def _validated_result_and_artifacts(
     if pair_quality.get("pair_quality_protocol") != "strict_clean_watermarked_pair":
         raise ValueError("T2SMark 单元的严格成对质量协议无效")
     _required_sha256(
-        pair_quality.get("clean_base_latent_digest_random"),
-        "clean_base_latent_digest_random",
+        pair_quality.get("base_latent_content_digest_random"),
+        "base_latent_content_digest_random",
     )
+    for field_name in (
+        "base_latent_identity_digest_random",
+        "formal_randomization_protocol_digest",
+        "formal_randomization_identity_digest_random",
+        "watermark_key_material_digest_random",
+    ):
+        _required_sha256(pair_quality.get(field_name), field_name)
+    if (
+        not str(pair_quality.get("randomization_repeat_id", ""))
+        or int(pair_quality.get("generation_seed_index", -1)) < 0
+        or int(pair_quality.get("generation_seed_offset", -1)) < 0
+        or int(pair_quality.get("generation_seed_random", -1)) < 0
+        or int(pair_quality.get("watermark_key_index", -1)) < 0
+        or int(pair_quality.get("watermark_key_seed_random", -1)) < 0
+    ):
+        raise ValueError("T2SMark 单元的正式随机化身份无效")
     attacks = _as_mapping(payload.get("formal_attacks"), "正式攻击结果")
     if set(attacks) != set(attack_names):
         raise ValueError("T2SMark 单元未覆盖完整且精确的正式攻击集合")
@@ -695,13 +711,34 @@ def validate_t2smark_formal_unit_record(
         _as_mapping(payload.get("result"), "单元结果").get("pair_quality"),
         "严格成对质量",
     )
-    if (
-        provenance["scientific_random_identity_random"].get(
-            "clean_base_latent_digest_random"
-        )
-        != pair_quality.get("clean_base_latent_digest_random")
+    random_identity = provenance["scientific_random_identity_random"]
+    for field_name in (
+        "randomization_repeat_id",
+        "generation_seed_index",
+        "generation_seed_offset",
+        "generation_seed_random",
+        "watermark_key_index",
+        "watermark_key_seed_random",
+        "watermark_key_material_digest_random",
+        "formal_randomization_protocol_digest",
+        "formal_randomization_identity_digest_random",
     ):
-        raise ValueError("T2SMark clean 基础 latent 摘要未绑定逐单元随机身份")
+        if prompt.get(field_name) != pair_quality.get(field_name):
+            raise ValueError(
+                f"T2SMark {field_name} 未绑定 Prompt 随机化计划"
+            )
+    for field_name in (
+        "generation_seed_random",
+        "watermark_key_seed_random",
+        "watermark_key_material_digest_random",
+        "formal_randomization_identity_digest_random",
+        "base_latent_content_digest_random",
+        "base_latent_identity_digest_random",
+    ):
+        if random_identity.get(field_name) != pair_quality.get(field_name):
+            raise ValueError(
+                f"T2SMark {field_name} 未绑定逐单元随机身份"
+            )
     _required_sha256(
         provenance["scientific_random_identity_random"].get(
             "t2smark_secret_material_digest_random"

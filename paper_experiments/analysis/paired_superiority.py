@@ -88,6 +88,17 @@ class PairedOutcome:
 
     baseline_id: str
     prompt_id: str
+    randomization_repeat_id: str
+    generation_seed_index: int
+    generation_seed_offset: int
+    generation_seed_random: int
+    watermark_key_index: int
+    watermark_key_seed_random: int
+    watermark_key_material_digest_random: str
+    formal_randomization_protocol_digest: str
+    formal_randomization_identity_digest_random: str
+    base_latent_content_digest_random: str
+    base_latent_identity_digest_random: str
     attack_id: str
     attack_family: str
     attack_name: str
@@ -110,6 +121,27 @@ class PairedOutcome:
         payload = {
             "baseline_id": self.baseline_id,
             "prompt_id": self.prompt_id,
+            "randomization_repeat_id": self.randomization_repeat_id,
+            "generation_seed_index": self.generation_seed_index,
+            "generation_seed_offset": self.generation_seed_offset,
+            "generation_seed_random": self.generation_seed_random,
+            "watermark_key_index": self.watermark_key_index,
+            "watermark_key_seed_random": self.watermark_key_seed_random,
+            "watermark_key_material_digest_random": (
+                self.watermark_key_material_digest_random
+            ),
+            "formal_randomization_protocol_digest": (
+                self.formal_randomization_protocol_digest
+            ),
+            "formal_randomization_identity_digest_random": (
+                self.formal_randomization_identity_digest_random
+            ),
+            "base_latent_content_digest_random": (
+                self.base_latent_content_digest_random
+            ),
+            "base_latent_identity_digest_random": (
+                self.base_latent_identity_digest_random
+            ),
             "attack_id": self.attack_id,
             "attack_family": self.attack_family,
             "attack_name": self.attack_name,
@@ -412,6 +444,56 @@ def _validate_observation_attack_identity(
             )
 
 
+def _paired_randomization_identity(
+    row: Mapping[str, Any],
+) -> dict[str, Any]:
+    """读取配对观测必须共享的种子、密钥和基础 latent 身份."""
+
+    return {
+        "randomization_repeat_id": _text(row, "randomization_repeat_id"),
+        "generation_seed_index": _normalize_integer(
+            row.get("generation_seed_index"),
+            "generation_seed_index",
+        ),
+        "generation_seed_offset": _normalize_integer(
+            row.get("generation_seed_offset"),
+            "generation_seed_offset",
+        ),
+        "generation_seed_random": _normalize_integer(
+            row.get("generation_seed_random"),
+            "generation_seed_random",
+        ),
+        "watermark_key_index": _normalize_integer(
+            row.get("watermark_key_index"),
+            "watermark_key_index",
+        ),
+        "watermark_key_seed_random": _normalize_integer(
+            row.get("watermark_key_seed_random"),
+            "watermark_key_seed_random",
+        ),
+        "watermark_key_material_digest_random": _sha256_text(
+            row.get("watermark_key_material_digest_random", ""),
+            "watermark_key_material_digest_random",
+        ),
+        "formal_randomization_protocol_digest": _sha256_text(
+            row.get("formal_randomization_protocol_digest", ""),
+            "formal_randomization_protocol_digest",
+        ),
+        "formal_randomization_identity_digest_random": _sha256_text(
+            row.get("formal_randomization_identity_digest_random", ""),
+            "formal_randomization_identity_digest_random",
+        ),
+        "base_latent_content_digest_random": _sha256_text(
+            row.get("base_latent_content_digest_random", ""),
+            "base_latent_content_digest_random",
+        ),
+        "base_latent_identity_digest_random": _sha256_text(
+            row.get("base_latent_identity_digest_random", ""),
+            "base_latent_identity_digest_random",
+        ),
+    }
+
+
 def build_paired_outcomes(
     proposed_rows: Iterable[Mapping[str, Any]],
     baseline_rows: Iterable[Mapping[str, Any]],
@@ -499,6 +581,12 @@ def build_paired_outcomes(
             registry_row,
             require_declared_identity=True,
         )
+        proposed_randomization = _paired_randomization_identity(proposed_row)
+        baseline_randomization = _paired_randomization_identity(baseline_row)
+        if proposed_randomization != baseline_randomization:
+            raise PairedSuperiorityError(
+                f"{baseline_id} 未使用与主方法相同的种子、密钥重复和基础 latent"
+            )
         if (
             _sha256_text(
                 proposed_row.get("frozen_threshold_digest", ""),
@@ -517,6 +605,7 @@ def build_paired_outcomes(
             PairedOutcome(
                 baseline_id=baseline_id,
                 prompt_id=prompt_id,
+                **proposed_randomization,
                 attack_id=registry_row["attack_id"],
                 attack_family=attack_family,
                 attack_name=attack_name,

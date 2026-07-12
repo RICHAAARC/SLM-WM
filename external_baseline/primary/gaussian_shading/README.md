@@ -13,7 +13,7 @@
 2. watermark bit 按官方 `tensor.repeat` 语义扩展到 SD3.5 16-channel latent, 再由 ChaCha20 加密为逐坐标符号 message。
 3. clean latent 只采样一次。watermarked latent 逐坐标复用该 clean latent 的绝对幅值, 仅以 ChaCha20 message 改写符号, 因而构成同一 Gaussian 样本幅值下的严格成对条件采样。
 4. 图像经 VAE 编码和流匹配反向 Euler 积分恢复 noise sign, 检测器使用同一 ChaCha20 key / nonce 解密并执行 block voting。
-5. 原始 key、nonce、watermark 和 message 不进入持久化产物。逐 Prompt 科学单元只记录 `clean_base_latent_digest_random`、`gaussian_chacha_secret_material_digest_random` 和 `gaussian_chacha_message_digest_random` 等不可逆摘要及对应 seed。
+5. 原始 key、nonce、watermark 和 message 不进入持久化产物。逐 Prompt 科学单元只记录 `base_latent_content_digest_random`、`gaussian_chacha_secret_material_digest_random` 和 `gaussian_chacha_message_digest_random` 等不可逆摘要及对应 seed。
 
 ChaCha20 算子采用仓库内最小实现, 字节输出由 IETF ChaCha20 官方测试向量约束。该路线没有 simple XOR 模式或兼容分支。
 

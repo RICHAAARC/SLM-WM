@@ -59,6 +59,12 @@ class PaperRunEnvironment:
     expected_sample_count: int
     minimum_clean_negative_count: str
     dataset_quality_minimum_count: str
+    randomization_repeat_id: str
+    generation_seed_index: int
+    generation_seed_offset: int
+    watermark_key_index: int
+    formal_randomization_repeat_count: int
+    formal_randomization_protocol_digest: str
     selected_baseline_id: str
     formal_execution_commit: str
     formal_execution_lock_digest: str
@@ -121,6 +127,10 @@ def _configure_common_paper_run_environment() -> tuple[Any, str, str]:
     os.environ.pop("SLM_WM_RESUME_CHECKPOINT_DIR", None)
 
     paper_run = build_paper_run_config(".")
+    _set_env(
+        "SLM_WM_RANDOMIZATION_REPEAT_ID",
+        paper_run.randomization_repeat_id,
+    )
     target_fpr_text = _target_fpr_text(paper_run.target_fpr)
     profile = _protocol_profile(paper_run.run_name, target_fpr_text)
     _set_env("SLM_WM_PAPER_RUN_TARGET_FPR", target_fpr_text)
@@ -415,6 +425,16 @@ def configure_paper_run_environment(
         expected_sample_count=int(os.environ["SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT"]),
         minimum_clean_negative_count=os.environ["SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT"],
         dataset_quality_minimum_count=os.environ["SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT"],
+        randomization_repeat_id=paper_run.randomization_repeat_id,
+        generation_seed_index=paper_run.generation_seed_index,
+        generation_seed_offset=paper_run.generation_seed_offset,
+        watermark_key_index=paper_run.watermark_key_index,
+        formal_randomization_repeat_count=(
+            paper_run.formal_randomization_repeat_count
+        ),
+        formal_randomization_protocol_digest=(
+            paper_run.formal_randomization_protocol_digest
+        ),
         selected_baseline_id=baseline_id,
         formal_execution_commit=formal_execution_commit,
         formal_execution_lock_digest=formal_execution_lock_digest,

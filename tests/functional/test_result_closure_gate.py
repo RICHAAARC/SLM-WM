@@ -58,6 +58,10 @@ from experiments.artifacts.detection_score_curves import (
 from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
+from experiments.protocol.formal_randomization import (
+    build_formal_randomization_identity,
+    resolve_formal_randomization_repeat,
+)
 from experiments.artifacts.dataset_level_quality_outputs import (
     _inception_batch_config_digest,
     validate_inception_feature_provenance_groups,
@@ -180,6 +184,35 @@ PROMPT_DIGEST_BY_ID = {
     record.prompt_id: record.prompt_digest
     for record in PROMPT_RECORDS
 }
+PROMPT_INDEX_BY_ID = {
+    record.prompt_id: record.prompt_index
+    for record in PROMPT_RECORDS
+}
+
+
+def paired_randomization_identity(prompt_id: str) -> dict[str, object]:
+    """构造闭合夹具中所有方法共享的正式随机化身份."""
+
+    prompt_index = PROMPT_INDEX_BY_ID[prompt_id]
+    identity = build_formal_randomization_identity(
+        base_seed=1703,
+        prompt_index=prompt_index,
+        root_key_material="slm_wm_paper_key",
+        repeat=resolve_formal_randomization_repeat("seed_00_key_00"),
+    )
+    base_content_digest = build_stable_digest(
+        {"prompt_id": prompt_id, "tensor_role": "base_latent"}
+    )
+    return {
+        **identity,
+        "base_latent_content_digest_random": base_content_digest,
+        "base_latent_identity_digest_random": build_stable_digest(
+            {
+                "prompt_id": prompt_id,
+                "base_latent_content_digest_random": base_content_digest,
+            }
+        ),
+    }
 from experiments.artifacts.attack_family_metrics import (
     build_attack_family_metrics,
 )
@@ -404,6 +437,7 @@ PROPOSED_OBSERVATION_RECORDS = tuple(
         *(
             {
                 "prompt_id": prompt_id,
+                **paired_randomization_identity(prompt_id),
                 "split": "calibration",
                 "sample_role": "clean_negative",
                 "attack_family": "clean",
@@ -418,6 +452,7 @@ PROPOSED_OBSERVATION_RECORDS = tuple(
         *(
             {
                 "prompt_id": prompt_id,
+                **paired_randomization_identity(prompt_id),
                 "split": "test",
                 "sample_role": sample_role,
                 "attack_family": "clean",
@@ -441,6 +476,7 @@ PROPOSED_OBSERVATION_RECORDS = tuple(
         *(
             {
                 "prompt_id": prompt_id,
+                **paired_randomization_identity(prompt_id),
                 "split": "test",
                 "sample_role": sample_role,
                 **attack,
@@ -468,6 +504,7 @@ METHOD_OBSERVATION_RECORDS_BY_METHOD = {
                     {
                         "baseline_id": baseline_id,
                         "prompt_id": prompt_id,
+                        **paired_randomization_identity(prompt_id),
                         "split": "calibration",
                         "sample_role": "clean_negative",
                         "attack_family": "clean",
@@ -484,6 +521,7 @@ METHOD_OBSERVATION_RECORDS_BY_METHOD = {
                     {
                         "baseline_id": baseline_id,
                         "prompt_id": prompt_id,
+                        **paired_randomization_identity(prompt_id),
                         "split": "test",
                         "sample_role": "clean_negative",
                         "attack_family": "clean",
@@ -500,6 +538,7 @@ METHOD_OBSERVATION_RECORDS_BY_METHOD = {
                     {
                         "baseline_id": baseline_id,
                         "prompt_id": prompt_id,
+                        **paired_randomization_identity(prompt_id),
                         "split": "test",
                         "sample_role": sample_role,
                         **attack,

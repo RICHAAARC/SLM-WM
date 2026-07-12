@@ -21,7 +21,7 @@
 - `primary/shallow_diffuse/`: Shallow Diffuse, 需要 SD3.5 shallow latent update 适配。
 - `primary/t2smark/`: T2SMark, 官方源码包含 SD3.5 入口, 当前 adapter 负责结果转写和共同协议落盘。
 
-Tree-Ring、Gaussian Shading 和 Shallow Diffuse 分别由三个 `external_baseline_*_run.ipynb` 入口运行。每个入口只调度一个 baseline, 使用与主方法一致的 SD3.5 生成预算、当前论文层级 fixed-FPR 和完整攻击矩阵。T2SMark 只由 `official_reference_t2smark_run.ipynb` 的正式复现链生成主表候选。
+Tree-Ring、Gaussian Shading 和 Shallow Diffuse 分别由三个 `external_baseline_*_run.ipynb` 入口运行。每个入口只调度一个 baseline, 使用与主方法一致的 SD3.5 生成预算、当前论文层级 fixed-FPR 和完整攻击矩阵。T2SMark 只由 `official_reference_t2smark_run.ipynb` 的正式复现链生成主表候选。四个主表 baseline 还必须读取与主方法相同的活动交叉重复：同一 Prompt 使用同一生成 seed 和由设备无关 SHA-256 Box-Muller 协议生成的同一基础 latent Tensor。各方法保留自身水印编码, 但共同绑定密钥重复索引与派生整数身份；实际 Tensor 摘要不同的 observation 不得进入配对结果。
 
 四个 Notebook 都只准备 CPU `workflow_orchestrator`. repository 的共享隔离调度分别在 `sd35_method_runtime_gpu` 与 `t2smark_sd35_gpu` 子解释器中运行完整 baseline workflow, 并用独立 `scientific_execution_binding.json` 绑定科学 runner 输出的 summary、manifest、profile / 锁摘要、执行报告和依赖报告快照. 该绑定是打包白名单必需项, 不能用父解释器直接执行结果或仅有环境检查替代.
 

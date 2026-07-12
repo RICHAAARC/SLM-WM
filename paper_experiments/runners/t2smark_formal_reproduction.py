@@ -30,6 +30,13 @@ from experiments.protocol.paper_run_config import (
     normalize_paper_run_name,
     resolve_count_from_environment,
 )
+from experiments.protocol.formal_randomization import (
+    DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
+    build_formal_randomization_identity,
+    formal_watermark_key_seed_random,
+    resolve_formal_randomization_repeat,
+)
+from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
 from experiments.runtime import repository_environment
 from experiments.runtime.model_sources import require_registered_model_reference
 from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_observation_threshold
@@ -82,6 +89,13 @@ FORMAL_T2SMARK_GUIDANCE_SCALE = 4.5
 FORMAL_T2SMARK_IMAGE_SIZE = 512
 T2SMARK_FORMAL_PROTOCOL_BINDING_NAME = "t2smark_formal_protocol_binding"
 DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES = ",".join(supported_formal_image_attack_names())
+_FORMAL_METHOD_DEFAULTS = load_formal_method_runtime_config(".")
+DEFAULT_T2SMARK_SEED = _FORMAL_METHOD_DEFAULTS.seed
+_DEFAULT_RANDOMIZATION_REPEAT = resolve_formal_randomization_repeat(None)
+DEFAULT_T2SMARK_WATERMARK_KEY_SEED_RANDOM = formal_watermark_key_seed_random(
+    "slm_wm_paper_key",
+    _DEFAULT_RANDOMIZATION_REPEAT,
+)
 @dataclass(frozen=True)
 class T2SMarkFormalReproductionConfig:
     """描述 T2SMark formal 真实复现所需的最小配置。"""
@@ -95,7 +109,19 @@ class T2SMarkFormalReproductionConfig:
     t2smark_run_name: str = DEFAULT_RUN_NAME
     model_id: str = DEFAULT_T2SMARK_MODEL_ID
     model_revision: str = DEFAULT_T2SMARK_MODEL_REVISION
-    seed: int = 20260621
+    seed: int = DEFAULT_T2SMARK_SEED
+    randomization_repeat_id: str = DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID
+    generation_seed_index: int = 0
+    generation_seed_offset: int = 0
+    watermark_key_index: int = 0
+    formal_randomization_protocol_digest: str = field(
+        default_factory=lambda: build_paper_run_config(
+            "."
+        ).formal_randomization_protocol_digest
+    )
+    watermark_key_seed_random: int = (
+        DEFAULT_T2SMARK_WATERMARK_KEY_SEED_RANDOM
+    )
     prompt_limit: int = DEFAULT_PROMPT_LIMIT
     clip_test_num: int = 0
     num_inference_steps: int = FORMAL_T2SMARK_NUM_INFERENCE_STEPS
@@ -295,10 +321,18 @@ def selected_prompt_texts(prompt_texts: tuple[str, ...], prompt_limit: int) -> t
     return prompt_texts[: int(prompt_limit)]
 
 
-def build_paper_run_prompt_rows(prompt_set: str, prompt_texts: tuple[str, ...]) -> tuple[dict[str, Any], ...]:
+def build_paper_run_prompt_rows(
+    prompt_set: str,
+    prompt_texts: tuple[str, ...],
+    *,
+    base_seed: int = DEFAULT_T2SMARK_SEED,
+    randomization_repeat_id: str = DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
+    root_key_material: str = "slm_wm_paper_key",
+) -> tuple[dict[str, Any], ...]:
     """构造 T2SMark 运行使用的 prompt 计划。"""
 
     rows: list[dict[str, Any]] = []
+    repeat = resolve_formal_randomization_repeat(randomization_repeat_id)
     records = apply_split_assignments(build_prompt_records(prompt_set, prompt_texts))
     for record in records:
         rows.append(
@@ -309,6 +343,12 @@ def build_paper_run_prompt_rows(prompt_set: str, prompt_texts: tuple[str, ...]) 
                 "split": record.split,
                 "prompt_text": record.prompt_text,
                 "prompt_digest": record.prompt_digest,
+                **build_formal_randomization_identity(
+                    base_seed=base_seed,
+                    prompt_index=record.prompt_index,
+                    root_key_material=root_key_material,
+                    repeat=repeat,
+                ),
             }
         )
     return tuple(rows)
@@ -324,7 +364,16 @@ def write_paper_run_prompt_inputs(
     prompt_source_path = root_path / config.prompt_file
     all_prompt_texts = read_prompt_texts(prompt_source_path)
     chosen_prompt_texts = selected_prompt_texts(all_prompt_texts, config.prompt_limit)
-    prompt_rows = build_paper_run_prompt_rows(config.prompt_set, chosen_prompt_texts)
+    prompt_rows = build_paper_run_prompt_rows(
+        config.prompt_set,
+        chosen_prompt_texts,
+        base_seed=DEFAULT_T2SMARK_SEED,
+        randomization_repeat_id=config.randomization_repeat_id,
+        root_key_material=os.environ.get(
+            "SLM_WM_KEY_MATERIAL",
+            "slm_wm_paper_key",
+        ),
+    )
     prompt_protocol_ready = bool(prompt_rows) and len(prompt_rows) >= int(config.minimum_prompt_protocol_count)
     dataset_payload = {
         "annotations": [
@@ -367,6 +416,9 @@ def validate_t2smark_formal_protocol_config(
     if int(config.clip_test_num) != 0:
         raise ValueError("T2SMark formal 必须禁用官方源码中未受治理的 OpenCLIP 测试分支")
     paper_run = build_paper_run_config(root_path)
+    repeat = resolve_formal_randomization_repeat(
+        paper_run.randomization_repeat_id
+    )
     expected_attacks = tuple(supported_formal_image_attack_names())
     actual_attacks = configured_attack_names(config.formal_attack_families)
     if config.prompt_set != paper_run.prompt_set:
@@ -384,6 +436,22 @@ def validate_t2smark_formal_protocol_config(
         raise ValueError("T2SMark formal 必须使用冻结的 SD3.5 Medium backbone")
     if config.model_revision != DEFAULT_T2SMARK_MODEL_REVISION:
         raise ValueError("T2SMark formal 必须使用冻结的 SD3.5 Medium revision")
+    if (
+        config.seed != DEFAULT_T2SMARK_SEED + repeat.generation_seed_offset
+        or config.randomization_repeat_id
+        != paper_run.randomization_repeat_id
+        or config.generation_seed_index != paper_run.generation_seed_index
+        or config.generation_seed_offset != paper_run.generation_seed_offset
+        or config.watermark_key_index != paper_run.watermark_key_index
+        or config.formal_randomization_protocol_digest
+        != paper_run.formal_randomization_protocol_digest
+        or config.watermark_key_seed_random
+        != formal_watermark_key_seed_random(
+            os.environ.get("SLM_WM_KEY_MATERIAL", "slm_wm_paper_key"),
+            repeat,
+        )
+    ):
+        raise ValueError("T2SMark formal 随机化身份未匹配共同协议")
     require_registered_model_reference(
         config.model_id,
         config.model_revision,
@@ -436,6 +504,14 @@ def build_t2smark_formal_protocol_binding(
         "model_id": config.model_id,
         "model_revision": config.model_revision,
         "seed": int(config.seed),
+        "randomization_repeat_id": config.randomization_repeat_id,
+        "generation_seed_index": int(config.generation_seed_index),
+        "generation_seed_offset": int(config.generation_seed_offset),
+        "watermark_key_index": int(config.watermark_key_index),
+        "watermark_key_seed_random": int(config.watermark_key_seed_random),
+        "formal_randomization_protocol_digest": (
+            config.formal_randomization_protocol_digest
+        ),
         "num_inference_steps": int(config.num_inference_steps),
         "num_inversion_steps": int(config.num_inversion_steps),
         "guidance_scale": float(config.guidance_scale),
@@ -742,6 +818,8 @@ def run_t2smark_official_if_needed(
         str(paths["official_root"]),
         "--seed",
         str(config.seed),
+        "--slm_watermark_seed",
+        str(config.watermark_key_seed_random),
         "--robust_test_num",
         str(prompt_report["selected_prompt_count"]),
         "--clip_test_num",
@@ -842,8 +920,39 @@ def build_t2smark_formal_image_pairs(
 ) -> list[dict[str, Any]]:
     """按 当前论文运行层级的完整 Prompt 计划和官方图像目录生成 image_pairs。"""
 
+    official_payload = read_json(paths["official_results"])
+    if not isinstance(official_payload, dict):
+        raise TypeError("T2SMark 官方结果必须是 JSON 对象")
     rows: list[dict[str, Any]] = []
     for index, prompt_row in enumerate(prompt_rows):
+        result = official_payload.get(str(index), official_payload.get(index))
+        if not isinstance(result, dict) or not isinstance(
+            result.get("pair_quality"),
+            dict,
+        ):
+            raise ValueError("T2SMark 官方结果缺少严格配对随机身份")
+        pair_random_identity = dict(result["pair_quality"])
+        randomization_fields = (
+            "randomization_repeat_id",
+            "generation_seed_index",
+            "generation_seed_offset",
+            "generation_seed_random",
+            "watermark_key_index",
+            "watermark_key_seed_random",
+            "watermark_key_material_digest_random",
+            "formal_randomization_protocol_digest",
+            "formal_randomization_identity_digest_random",
+            "base_latent_content_digest_random",
+            "base_latent_identity_digest_random",
+        )
+        if any(
+            field_name not in pair_random_identity
+            for field_name in randomization_fields
+        ):
+            raise ValueError("T2SMark 严格配对结果缺少正式随机化字段")
+        for field_name in randomization_fields[:9]:
+            if pair_random_identity[field_name] != prompt_row[field_name]:
+                raise ValueError("T2SMark 严格配对结果与 Prompt 随机化计划不一致")
         image_path = paths["official_images"] / f"{index:05d}.png"
         clean_image_path = paths["official_run_dir"] / "quality_pairs" / "clean" / f"{index:05d}.png"
         image_id = f"t2smark_formal_{index:05d}"
@@ -866,6 +975,10 @@ def build_t2smark_formal_image_pairs(
                 "watermarked_image_digest": watermarked_image_digest,
                 "pair_quality_protocol": "strict_clean_watermarked_pair",
                 "strict_pair_quality_ready": bool(clean_image_digest and watermarked_image_digest),
+                **{
+                    field_name: pair_random_identity[field_name]
+                    for field_name in randomization_fields
+                },
             }
         )
     write_json(paths["image_pairs"], rows)
@@ -1297,6 +1410,13 @@ def build_default_config() -> T2SMarkFormalReproductionConfig:
 
     paper_run = build_paper_run_config(".")
     default_run_name = f"t2smark_sd35_medium_{paper_run.run_name}"
+    repeat = resolve_formal_randomization_repeat(
+        paper_run.randomization_repeat_id
+    )
+    root_key_material = os.environ.get(
+        "SLM_WM_KEY_MATERIAL",
+        "slm_wm_paper_key",
+    )
     return T2SMarkFormalReproductionConfig(
         output_dir=os.environ.get("SLM_WM_T2SMARK_FORMAL_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         drive_output_dir=os.environ.get(
@@ -1311,7 +1431,23 @@ def build_default_config() -> T2SMarkFormalReproductionConfig:
         ),
         model_id=os.environ.get("SLM_WM_T2SMARK_MODEL_ID", DEFAULT_T2SMARK_MODEL_ID),
         model_revision=os.environ.get("SLM_WM_T2SMARK_MODEL_REVISION", DEFAULT_T2SMARK_MODEL_REVISION),
-        seed=int(os.environ.get("SLM_WM_T2SMARK_FORMAL_SEED", "20260621")),
+        seed=int(
+            os.environ.get(
+                "SLM_WM_T2SMARK_FORMAL_SEED",
+                str(DEFAULT_T2SMARK_SEED + repeat.generation_seed_offset),
+            )
+        ),
+        randomization_repeat_id=repeat.randomization_repeat_id,
+        generation_seed_index=repeat.generation_seed_index,
+        generation_seed_offset=repeat.generation_seed_offset,
+        watermark_key_index=repeat.watermark_key_index,
+        formal_randomization_protocol_digest=(
+            paper_run.formal_randomization_protocol_digest
+        ),
+        watermark_key_seed_random=formal_watermark_key_seed_random(
+            root_key_material,
+            repeat,
+        ),
         prompt_limit=resolve_count_from_environment(
             "SLM_WM_T2SMARK_FORMAL_PROMPT_LIMIT",
             default_value=paper_run.sample_count,

@@ -17,6 +17,13 @@ from pathlib import Path
 from typing import Any
 
 from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
+from experiments.protocol.formal_randomization import (
+    DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
+    build_formal_randomization_identity,
+    formal_randomization_protocol_record,
+    formal_randomization_repeats,
+    resolve_formal_randomization_repeat,
+)
 from experiments.protocol.prompts import PROMPT_FILES, read_prompt_file
 from experiments.protocol.splits import build_group_split_counts
 from main.core.keyed_prg import require_supported_keyed_prg_version
@@ -29,6 +36,13 @@ DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT = 34
 DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT = 70
 DEFAULT_DRIVE_ROOT = "/content/drive/MyDrive/SLM"
 _FORMAL_METHOD_DEFAULTS = load_formal_method_runtime_config(".")
+_FORMAL_RANDOMIZATION_DEFAULTS = formal_randomization_protocol_record()
+DEFAULT_FORMAL_RANDOMIZATION_PROTOCOL_DIGEST = (
+    _FORMAL_RANDOMIZATION_DEFAULTS["formal_randomization_protocol_digest"]
+)
+DEFAULT_FORMAL_RANDOMIZATION_REPEAT_COUNT = int(
+    _FORMAL_RANDOMIZATION_DEFAULTS["crossed_repeat_count"]
+)
 DEFAULT_INFERENCE_STEPS = _FORMAL_METHOD_DEFAULTS.inference_steps
 DEFAULT_GUIDANCE_SCALE = _FORMAL_METHOD_DEFAULTS.guidance_scale
 DEFAULT_ATTENTION_INJECTION_STEPS = _FORMAL_METHOD_DEFAULTS.injection_step_indices
@@ -104,6 +118,14 @@ SHARED_METHOD_SETTING_FIELDS = (
     "attention_coordinate_convention",
     "attention_grid_align_corners",
 )
+SHARED_EXPERIMENT_SETTING_FIELDS = (
+    "randomization_repeat_id",
+    "generation_seed_index",
+    "generation_seed_offset",
+    "watermark_key_index",
+    "formal_randomization_protocol_digest",
+    "formal_randomization_repeat_count",
+)
 
 RUN_DEFAULTS: dict[str, dict[str, Any]] = {
     PROBE_PAPER_RUN_NAME: {
@@ -152,6 +174,16 @@ class PaperRunConfig:
     target_fpr: float = DEFAULT_TARGET_FPR
     minimum_clean_negative_count: int = DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT
     dataset_level_quality_minimum_count: int = DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT
+    randomization_repeat_id: str = DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID
+    generation_seed_index: int = 0
+    generation_seed_offset: int = 0
+    watermark_key_index: int = 0
+    formal_randomization_protocol_digest: str = (
+        DEFAULT_FORMAL_RANDOMIZATION_PROTOCOL_DIGEST
+    )
+    formal_randomization_repeat_count: int = (
+        DEFAULT_FORMAL_RANDOMIZATION_REPEAT_COUNT
+    )
     inference_steps: int = DEFAULT_INFERENCE_STEPS
     guidance_scale: float = DEFAULT_GUIDANCE_SCALE
     attention_injection_steps: tuple[int, ...] = DEFAULT_ATTENTION_INJECTION_STEPS
@@ -265,6 +297,20 @@ class PaperRunConfig:
             is not DEFAULT_ATTENTION_GRID_ALIGN_CORNERS
         ):
             raise ValueError("论文运行必须使用统一冻结的注意力层与坐标约定")
+        repeat = resolve_formal_randomization_repeat(
+            self.randomization_repeat_id
+        )
+        protocol = formal_randomization_protocol_record()
+        if (
+            self.generation_seed_index != repeat.generation_seed_index
+            or self.generation_seed_offset != repeat.generation_seed_offset
+            or self.watermark_key_index != repeat.watermark_key_index
+            or self.formal_randomization_protocol_digest
+            != protocol["formal_randomization_protocol_digest"]
+            or self.formal_randomization_repeat_count
+            != int(protocol["crossed_repeat_count"])
+        ):
+            raise ValueError("论文运行随机化重复未精确匹配正式注册表")
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 兼容字典, 便于写入 manifest 或 Notebook 日志。"""
@@ -274,7 +320,29 @@ class PaperRunConfig:
     def drive_dir(self, child_name: str) -> str:
         """根据统一 Drive 根目录生成某个 workflow 的输出目录。"""
 
-        return f"{self.drive_result_root.rstrip('/')}/{child_name.strip('/')}"
+        return (
+            f"{self.drive_result_root.rstrip('/')}/randomization_repeats/"
+            f"{self.randomization_repeat_id}/{child_name.strip('/')}"
+        )
+
+    def formal_randomization_identity(
+        self,
+        *,
+        base_seed: int,
+        prompt_index: int,
+        root_key_material: str,
+    ) -> dict[str, Any]:
+        """返回当前 Prompt 在活动交叉重复中的随机身份."""
+
+        repeat = resolve_formal_randomization_repeat(
+            self.randomization_repeat_id
+        )
+        return build_formal_randomization_identity(
+            base_seed=base_seed,
+            prompt_index=prompt_index,
+            root_key_material=root_key_material,
+            repeat=repeat,
+        )
 
 
 @dataclass(frozen=True)
@@ -477,6 +545,13 @@ def build_paper_run_config(
     expected_prompt_count = RUN_EXPECTED_PROMPT_COUNTS[run_name]
     derived_minimum_clean_negative_count = derive_minimum_clean_negative_count(expected_prompt_count, target_fpr)
     derived_dataset_level_quality_minimum_count = derive_dataset_level_quality_minimum_count(expected_prompt_count)
+    repeat = resolve_formal_randomization_repeat(
+        os.environ.get(
+            "SLM_WM_RANDOMIZATION_REPEAT_ID",
+            DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
+        )
+    )
+    randomization_protocol = formal_randomization_protocol_record()
     return PaperRunConfig(
         run_name=run_name,
         protocol_profile=os.environ.get("SLM_WM_PROTOCOL_PROFILE", str(defaults["protocol_profile"])),
@@ -488,6 +563,14 @@ def build_paper_run_config(
         target_fpr=target_fpr,
         minimum_clean_negative_count=derived_minimum_clean_negative_count,
         dataset_level_quality_minimum_count=derived_dataset_level_quality_minimum_count,
+        randomization_repeat_id=repeat.randomization_repeat_id,
+        generation_seed_index=repeat.generation_seed_index,
+        generation_seed_offset=repeat.generation_seed_offset,
+        watermark_key_index=repeat.watermark_key_index,
+        formal_randomization_protocol_digest=randomization_protocol[
+            "formal_randomization_protocol_digest"
+        ],
+        formal_randomization_repeat_count=len(formal_randomization_repeats()),
         **method_settings,
     )
 
@@ -522,3 +605,13 @@ def shared_method_settings(config: PaperRunConfig) -> dict[str, Any]:
 
     payload = config.to_dict()
     return {field_name: payload[field_name] for field_name in SHARED_METHOD_SETTING_FIELDS}
+
+
+def shared_experiment_settings(config: PaperRunConfig) -> dict[str, Any]:
+    """返回三个论文层级必须共享的随机化实验设置."""
+
+    payload = config.to_dict()
+    return {
+        field_name: payload[field_name]
+        for field_name in SHARED_EXPERIMENT_SETTING_FIELDS
+    }

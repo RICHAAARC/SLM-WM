@@ -1,23 +1,53 @@
 diff --git a/option.py b/option.py
-index ac9a041..a20f268 100644
+index ac9a041..22a9fb5 100644
 --- a/option.py
 +++ b/option.py
-@@ -15,0 +16,6 @@ def parse_args():
+@@ -13,9 +13,17 @@ def parse_args():
+     parser.add_argument("--clip_test_num", type=int, default=0) # actually the end idx
+     parser.add_argument("--start_idx", type=int, default=0)
+     parser.add_argument("--SDv35M", action="store_true", default=False)
 +    parser.add_argument("--slm_attack_families", type=str, default="")
 +    parser.add_argument("--slm_attack_image_dir", type=str, default=None)
 +    parser.add_argument("--slm_save_clean_pair", action="store_true", default=False)
 +    parser.add_argument("--slm_pair_image_dir", type=str, default=None)
 +    parser.add_argument("--slm_unit_contract", type=str, required=True)
 +    parser.add_argument("--slm_runtime_environment_report", type=str, required=True)
-@@ -18,0 +25 @@ def parse_args():
++    parser.add_argument("--slm_watermark_seed", type=int, required=True)
+ 
+     # diffusion model settings
+     parser.add_argument("--model_key", type=str, default="stabilityai/stable-diffusion-2-1") # stabilityai/stable-diffusion-3.5-medium
 +    parser.add_argument("--model_revision", type=str, required=True)
+     parser.add_argument("--guidance_scale", type=float, default=7.5) # 4.0 for SDv35M diversity and image quality
+     parser.add_argument("--num_inference_steps", type=int, default=50) # 40 for SDv35M
+ 
+@@ -27,7 +35,7 @@ def parse_args():
+     parser.add_argument("--key_length", type=int, default=16) # the session key size
+     parser.add_argument("--msg_length", type=int, default=256) # the watermark capacity
+     parser.add_argument("--tau", type=float, default=0.674) # the threshold for Tail-Truncated Sampling
+-    
++
+     # dataset settings
+     parser.add_argument("--dataset_key", type=str, default="Gustavosta/Stable-Diffusion-Prompts")
+ 
+@@ -45,4 +53,3 @@ def parse_args():
+     return parser.parse_args()
+ 
+ args = parse_args()
+-
 diff --git a/run_sd35.py b/run_sd35.py
-index 39c07d7..e545bd9 100644
+index 39c07d7..d209955 100644
 --- a/run_sd35.py
 +++ b/run_sd35.py
-@@ -1,0 +2 @@ import os
+@@ -1,4 +1,5 @@
+ import os
 +import sys
-@@ -15,0 +17,24 @@ from option import args
+ import json
+ import torch
+ import open_clip
+@@ -13,6 +14,34 @@ from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
+ 
+ from option import args
+ 
 +ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
 +if ROOT not in sys.path:
 +    sys.path.insert(0, ROOT)
@@ -28,6 +58,10 @@ index 39c07d7..e545bd9 100644
 +    canonical_attack_name,
 +    file_digest,
 +    formal_image_attack_identity,
++)
++from experiments.protocol.formal_randomization import (
++    build_canonical_sd35_base_latent,
++    formal_random_trace_fields,
 +)
 +from external_baseline.primary.t2smark.adapter.formal_unit_checkpoint import (
 +    aggregate_t2smark_formal_unit_records,
@@ -42,7 +76,22 @@ index 39c07d7..e545bd9 100644
 +    write_t2smark_formal_unit_record,
 +)
 +
-@@ -48 +73,96 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
+ args.key_channel_idx = (0, 1, 2, 3)
+ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+ msg_channel_idx = [i for i in range(16) if i not in args.key_channel_idx]
+@@ -23,7 +52,7 @@ def setup_clip_measure_function():
+     open_clip_model.eval()
+     open_clip_tokenizer = open_clip.get_tokenizer('ViT-B-32')
+ 
+-    return partial(utils.measure_similarity, model=open_clip_model, 
++    return partial(utils.measure_similarity, model=open_clip_model,
+                    tokenizer=open_clip_tokenizer, clip_preprocess=preprocess, device=device)
+ 
+ def decode(post_reversed_latents, master_key, key, fake_key, msg):
+@@ -45,27 +74,142 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
+         "acc_msg": acc_msg.item()
+     }
+ 
 -pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)
 +
 +def configured_formal_attack_names():
@@ -85,20 +134,6 @@ index 39c07d7..e545bd9 100644
 +    ).images[0]
 +
 +
-+def encode_with_exact_clean_base(encoder, payload, key_material):
-+    """重放 encode 的首个高斯采样, 且不改变官方编码器的随机状态演化."""
-+
-+    random_state_before = torch.random.get_rng_state()
-+    encoded = encoder.encode(payload, key_material)
-+    random_state_after = torch.random.get_rng_state()
-+    try:
-+        torch.random.set_rng_state(random_state_before)
-+        clean_base = torch.randn(encoder.latent_shape).cuda()
-+    finally:
-+        torch.random.set_rng_state(random_state_after)
-+    return encoded, clean_base
-+
-+
 +def load_json_object(path, label):
 +    """读取正式单元契约或运行环境对象。"""
 +
@@ -125,6 +160,7 @@ index 39c07d7..e545bd9 100644
 +        "num_inference_steps": int(config["num_inference_steps"]),
 +        "num_inversion_steps": int(config["num_inversion_steps"]),
 +        "slm_attack_families": ",".join(protocol["formal_attack_names"]),
++        "slm_watermark_seed": int(config["watermark_key_seed_random"]),
 +    }
 +    for field_name, expected_value in expected_values.items():
 +        if getattr(args, field_name) != expected_value:
@@ -140,15 +176,25 @@ index 39c07d7..e545bd9 100644
 +    revision=args.model_revision,
 +    torch_dtype=torch.float16,
 +).to(device)
-@@ -54 +174 @@ t2s_msg = T2SMark(m=args.msg_length, tau=args.tau, latent_shape=(12, 64, 64))
+ pipe.set_progress_bar_config(disable=True)
+ 
+ t2s_key = T2SMark(m=args.key_length, tau=args.tau, latent_shape=(4, 64, 64))
+ t2s_msg = T2SMark(m=args.msg_length, tau=args.tau, latent_shape=(12, 64, 64))
+ 
 -settings = vars(args)
+-if args.fix_key: 
+-    utils.set_random_seed(args.seed)
 +settings = dict(vars(args))
-@@ -59 +179,3 @@ if args.fix_key:
++if args.fix_key:
++    utils.set_random_seed(args.slm_watermark_seed)
+     master_key = torch.randint(0, 2, (args.key_length,)).cuda()
+     msg = torch.randint(0, 2, (args.msg_length,)).cuda()
 -    settings["master_key"] = t2s_key.binlist2int(master_key)
 +    settings["fixed_secret_material_digest_random"] = (
 +        build_t2smark_random_material_digest(master_key, msg)
 +    )
-@@ -62,3 +184,20 @@ print(settings)
+ print(settings)
+ 
 -os.makedirs(os.path.join(args.output_dir, args.name), exist_ok=True)
 -with open(os.path.join(args.output_dir, args.name, "settings.json"), "w") as f:
 -    json.dump(settings, f, indent=4)
@@ -172,7 +218,10 @@ index 39c07d7..e545bd9 100644
 +    artifact_root=official_run_dir,
 +    runtime_environment=runtime_environment,
 +)
-@@ -68,0 +208,14 @@ if args.save_image:
+ 
+ if args.save_image:
+     image_path = os.path.join(args.output_dir, args.name, f'images')
+     os.makedirs(image_path, exist_ok=True)
 +formal_attack_names = configured_formal_attack_names()
 +formal_attack_image_dir = args.slm_attack_image_dir
 +if args.save_image and formal_attack_names:
@@ -187,7 +236,14 @@ index 39c07d7..e545bd9 100644
 +        pair_quality_image_dir = os.path.join(args.output_dir, args.name, "quality_pairs")
 +    pair_quality_clean_image_dir = os.path.join(pair_quality_image_dir, "clean")
 +    os.makedirs(pair_quality_clean_image_dir, exist_ok=True)
-@@ -83,0 +237,16 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+ 
+ results = {}
+ if args.clip_test_num > 0: clip_score_fn = setup_clip_measure_function()
+@@ -81,25 +225,61 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+ 
+         if prompt_id >= args.clip_test_num and prompt_id >= args.robust_test_num:
+             break
+-        
 +
 +        prompt_identity = unit_contract["prompt_rows"][prompt_id]
 +        if prompt != prompt_identity["prompt_text"]:
@@ -202,27 +258,64 @@ index 39c07d7..e545bd9 100644
 +            official_run_dir,
 +            prompt_index=prompt_id,
 +        )
-+        # 每个 Prompt 使用独立确定性随机流, 使跳过已完成单元不改变缺失单元.
-+        utils.set_random_seed(args.seed + prompt_id)
-@@ -97,2 +266,2 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
++        # 每个 Prompt 使用独立确定性密钥流, 使跳过已完成单元不改变缺失单元.
++        utils.set_random_seed(args.slm_watermark_seed + prompt_id)
++
+         results[prompt_id] = {}
+ 
+-        utils.set_random_seed(args.seed + prompt_id)
++        generation_seed_random = int(prompt_identity["generation_seed_random"])
++        if generation_seed_random != args.seed + prompt_id:
++            raise RuntimeError("T2SMark Prompt 生成种子与正式随机化计划不一致")
++        if int(prompt_identity["watermark_key_seed_random"]) != args.slm_watermark_seed:
++            raise RuntimeError("T2SMark 水印密钥与正式随机化计划不一致")
++        utils.set_random_seed(args.slm_watermark_seed + prompt_id)
+ 
+-        if not args.fix_key: 
++        if not args.fix_key:
+             master_key = torch.randint(0, 2, (args.key_length,)).cuda()
+             msg = torch.randint(0, 2, (args.msg_length,)).cuda()
+         key = torch.randint(0, 2, (args.key_length,)).cuda()
+ 
+         # ensure the fake key is different from the master key
+         fake_key = 1 - master_key
+-        
 -        z_k = t2s_key.encode(key, master_key)
 -        z_b = t2s_msg.encode(msg, key)
-+        z_k, clean_z_k = encode_with_exact_clean_base(t2s_key, key, master_key)
-+        z_b, clean_z_b = encode_with_exact_clean_base(t2s_msg, msg, key)
-@@ -102,0 +272,9 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
-+        clean_base_latents = torch.zeros(1, 16, 64, 64).cuda()
-+        clean_base_latents[:, args.key_channel_idx, :, :] = clean_z_k
-+        clean_base_latents[:, msg_channel_idx, :, :] = clean_z_b
-+        clean_base_latent_digest_random = build_t2smark_random_material_digest(
-+            clean_base_latents
+ 
+-        initial_latents = torch.zeros(1, 16, 64, 64).cuda()
++        clean_base_latents, base_latent_identity = (
++            build_canonical_sd35_base_latent(
++                shape=(1, 16, 64, 64),
++                generation_seed_random=generation_seed_random,
++                model_id=args.model_key,
++                model_revision=args.model_revision,
++                device=device,
++                dtype=torch.float16,
++            )
 +        )
++        clean_z_k = clean_base_latents[0, args.key_channel_idx, :, :]
++        clean_z_b = clean_base_latents[0, msg_channel_idx]
++        z_k = t2s_key.encode(key, master_key, base_noise=clean_z_k)
++        z_b = t2s_msg.encode(msg, key, base_noise=clean_z_b)
++
++        initial_latents = clean_base_latents.clone()
+         initial_latents[:, args.key_channel_idx, :, :] = z_k
+         initial_latents[:, msg_channel_idx, :, :] = z_b
 +        t2smark_secret_material_digest_random = build_t2smark_random_material_digest(
 +            master_key, key, msg
 +        )
-@@ -116,0 +295 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+ 
+         generated_image = pipe(
+             prompt,
+@@ -114,9 +294,46 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+         if prompt_id < args.clip_test_num:
+             clip_score = clip_score_fn(generated_image, prompt).item()
+             results[prompt_id]["clip_score"] = clip_score
 +        generated_image_path = ""
-@@ -118 +297,16 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+         if args.save_image:
 -            generated_image.save(os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png'))
+-        
 +            generated_image_path = os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png')
 +            atomic_save_png(generated_image, generated_image_path)
 +        clean_pair_image = None
@@ -233,13 +326,45 @@ index 39c07d7..e545bd9 100644
 +            atomic_save_png(clean_pair_image, clean_pair_path)
 +            results[prompt_id]["pair_quality"] = {
 +                "pair_quality_protocol": "strict_clean_watermarked_pair",
-+                "clean_base_latent_digest_random": clean_base_latent_digest_random,
++                **base_latent_identity,
++                "randomization_repeat_id": prompt_identity[
++                    "randomization_repeat_id"
++                ],
++                "generation_seed_index": int(
++                    prompt_identity["generation_seed_index"]
++                ),
++                "generation_seed_offset": int(
++                    prompt_identity["generation_seed_offset"]
++                ),
++                "watermark_key_index": int(
++                    prompt_identity["watermark_key_index"]
++                ),
++                "watermark_key_seed_random": int(
++                    prompt_identity["watermark_key_seed_random"]
++                ),
++                "watermark_key_material_digest_random": prompt_identity[
++                    "watermark_key_material_digest_random"
++                ],
++                "formal_randomization_identity_digest_random": prompt_identity[
++                    "formal_randomization_identity_digest_random"
++                ],
 +                "clean_image_path": clean_pair_path,
 +                "clean_image_digest": file_digest(clean_pair_path),
 +                "watermarked_image_path": generated_image_path,
 +                "watermarked_image_digest": file_digest(generated_image_path) if generated_image_path else "",
 +            }
-@@ -131,0 +326,111 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
++
+         if prompt_id < args.robust_test_num:
+             noised_image = utils.image_distortion(generated_image, args.seed + prompt_id, args)
+ 
+@@ -126,13 +343,140 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+                 latents=latents,
+                 num_inference_steps=args.num_inversion_steps
+             )
+-            
++
+             decode_result = decode(reversed_latents, master_key, key, fake_key, msg)
+             results[prompt_id]["robustness"] = decode_result
 +            if formal_attack_names:
 +                if clean_pair_image is None:
 +                    raise RuntimeError("正式检测要求同 Prompt、同种子的 clean negative 图像")
@@ -340,7 +465,16 @@ index 39c07d7..e545bd9 100644
 +            execution_device_name=str(device),
 +            random_identity_random={
 +                "t2smark_secret_material_digest_random": t2smark_secret_material_digest_random,
-+                "clean_base_latent_digest_random": clean_base_latent_digest_random,
++                **formal_random_trace_fields(base_latent_identity),
++                "watermark_key_seed_random": int(
++                    prompt_identity["watermark_key_seed_random"]
++                ),
++                "watermark_key_material_digest_random": prompt_identity[
++                    "watermark_key_material_digest_random"
++                ],
++                "formal_randomization_identity_digest_random": prompt_identity[
++                    "formal_randomization_identity_digest_random"
++                ],
 +            },
 +        )
 +        unit_record = write_t2smark_formal_unit_record(
@@ -351,7 +485,10 @@ index 39c07d7..e545bd9 100644
 +            runtime_environment=runtime_environment,
 +        )
 +        unit_records[prompt_id] = unit_record
-@@ -135,0 +441,7 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+ 
+         prompt_id += 1
+         pbar.update(1)
+ 
 +results, formal_unit_aggregate = aggregate_t2smark_formal_unit_records(
 +    unit_records,
 +    contract=unit_contract,
@@ -359,7 +496,13 @@ index 39c07d7..e545bd9 100644
 +    runtime_environment=runtime_environment,
 +)
 +
-@@ -164,5 +476,3 @@ if args.clip_test_num > 0:
+ if args.robust_test_num > 0:
+     total_acc = 0
+     no_w_metrics = []
+@@ -161,8 +505,6 @@ if args.clip_test_num > 0:
+             total_clip_score += results[v]['clip_score']
+     results["clip_score"] = total_clip_score / args.clip_test_num
+ 
 -# save results to json
 -with open(os.path.join(args.output_dir, args.name, "results.json"), "w") as f:
 -    json.dump(results, f, indent=4)
@@ -368,3 +511,30 @@ index 39c07d7..e545bd9 100644
 +# 只有完整单元集合通过复验后才原子发布官方聚合结果。
 +results["slm_formal_unit_aggregate"] = formal_unit_aggregate
 +atomic_write_json(os.path.join(official_run_dir, "results.json"), results)
+diff --git a/src/t2s.py b/src/t2s.py
+index ea42b19..d7a5259 100644
+--- a/src/t2s.py
++++ b/src/t2s.py
+@@ -18,8 +18,13 @@ class T2SMark:
+             return res.item()
+         return res
+ 
+-    def encode(self, b, K):
+-        z = torch.randn(self.latent_shape).cuda().flatten()
++    def encode(self, b, K, base_noise=None):
++        if base_noise is None:
++            z = torch.randn(self.latent_shape).cuda().flatten()
++        else:
++            if tuple(base_noise.shape) != tuple(self.latent_shape):
++                raise ValueError("base_noise 形状必须与 encoder latent_shape 一致")
++            z = base_noise.to(device="cuda", dtype=torch.float32).flatten()
+         self.prng.manual_seed(self.binlist2int(K))
+         v_value = torch.randint(0, 2, (self.k,), generator=self.prng).cuda().float() * 2 - 1
+         v_support = torch.randperm(self.n, generator=self.prng)[:self.k]
+@@ -51,4 +56,4 @@ class T2SMark:
+         b = (p < 0).int()
+         if detection:
+             return b, torch.norm(p.flatten(), p=1).item()
+-        return b
+\ No newline at end of file
++        return b

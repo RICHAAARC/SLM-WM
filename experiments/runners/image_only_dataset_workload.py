@@ -19,6 +19,11 @@ from experiments.protocol.paper_run_config import (
     build_paper_run_config,
     shared_method_settings,
 )
+from experiments.protocol.formal_randomization import (
+    formal_watermark_key_material,
+    formal_watermark_key_seed_random,
+    resolve_formal_randomization_repeat,
+)
 from experiments.runners.image_only_dataset_runtime import (
     package_image_only_dataset_runtime,
     run_image_only_dataset_runtime,
@@ -41,6 +46,13 @@ def build_method_config(
     paper_run = build_paper_run_config(root)
     if shared_method_settings(paper_run) != method.paper_method_settings():
         raise RuntimeError("论文运行配置没有完整继承 configs/model_sd35.yaml")
+    repeat = resolve_formal_randomization_repeat(
+        paper_run.randomization_repeat_id
+    )
+    root_key_material = os.environ.get(
+        "SLM_WM_KEY_MATERIAL",
+        "slm_wm_paper_key",
+    )
     return SemanticWatermarkRuntimeConfig(
         model_family=method.model_family,
         model_id=method.model_id,
@@ -52,8 +64,22 @@ def build_method_config(
         vision_torch_dtype=os.environ.get("SLM_WM_VISION_TORCH_DTYPE", "float32"),
         prompt=method.prompt,
         negative_prompt=method.negative_prompt,
-        key_material=os.environ.get("SLM_WM_KEY_MATERIAL", "slm_wm_paper_key"),
-        seed=method.seed,
+        key_material=formal_watermark_key_material(
+            root_key_material,
+            repeat,
+        ),
+        seed=method.seed + repeat.generation_seed_offset,
+        randomization_repeat_id=repeat.randomization_repeat_id,
+        generation_seed_index=repeat.generation_seed_index,
+        generation_seed_offset=repeat.generation_seed_offset,
+        watermark_key_index=repeat.watermark_key_index,
+        watermark_key_seed_random=formal_watermark_key_seed_random(
+            root_key_material,
+            repeat,
+        ),
+        formal_randomization_protocol_digest=(
+            paper_run.formal_randomization_protocol_digest
+        ),
         width=method.width,
         height=method.height,
         inference_steps=method.inference_steps,
