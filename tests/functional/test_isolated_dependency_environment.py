@@ -16,6 +16,8 @@ import pytest
 
 from experiments.runtime import isolated_dependency_environment as isolated
 from experiments.runtime.dependency_profiles import DependencyProfile, get_dependency_profile
+from experiments.runtime.repository_environment import FORMAL_EXECUTION_LOCK_SCHEMA
+from main.core.digest import build_stable_digest
 
 
 def _ready_profile(profile_id: str, digest_token: str) -> DependencyProfile:
@@ -51,13 +53,16 @@ def _orchestrator_inspection(profile: DependencyProfile) -> dict[str, Any]:
 def _formal_execution_lock() -> dict[str, Any]:
     """构造隔离环境报告必须传播的正式执行锁."""
 
-    return {
-        "formal_execution_lock_schema": "formal_execution_lock",
+    payload = {
+        "formal_execution_lock_schema": FORMAL_EXECUTION_LOCK_SCHEMA,
         "formal_execution_commit": "a" * 40,
         "formal_execution_head_detached": True,
         "formal_execution_worktree_clean": True,
         "formal_execution_lock_ready": True,
-        "formal_execution_lock_digest": "f" * 64,
+    }
+    return {
+        **payload,
+        "formal_execution_lock_digest": build_stable_digest(payload),
     }
 
 
@@ -175,6 +180,20 @@ def _bind_provision_prerequisites(
     )
 
 
+def _unready_profile(profile_id: str) -> DependencyProfile:
+    """由真实 registry 身份构造只缺目标完整锁的 provision fixture."""
+
+    return replace(
+        get_dependency_profile(profile_id),
+        complete_hash_lock_present=False,
+        complete_hash_lock_digest=None,
+        complete_hash_lock_dependency_count=0,
+        locked_requirements=(),
+        formal_ready=False,
+        readiness_blockers=("complete_hash_lock_missing",),
+    )
+
+
 def _provision_runner(
     *,
     profile: DependencyProfile,
@@ -217,7 +236,7 @@ def test_provision_creates_exact_python_without_requiring_target_lock(
 ) -> None:
     """provision 只形成候选锁物化解释器, 不得宣称正式环境 ready."""
 
-    target_profile = get_dependency_profile("tree_ring_official_py39_cu117")
+    target_profile = _unready_profile("tree_ring_official_py39_cu117")
     orchestrator_profile = _ready_profile("workflow_orchestrator", "o")
     _bind_provision_prerequisites(
         monkeypatch,
@@ -474,7 +493,7 @@ def test_formal_prepare_blocks_before_provision_when_target_lock_is_missing(
 ) -> None:
     """正式准备缺少目标锁时不得创建 Python 或执行 uv."""
 
-    target_profile = get_dependency_profile("shallow_diffuse_official_py39_cu117")
+    target_profile = _unready_profile("shallow_diffuse_official_py39_cu117")
     monkeypatch.setattr(
         isolated,
         "get_dependency_profile",
