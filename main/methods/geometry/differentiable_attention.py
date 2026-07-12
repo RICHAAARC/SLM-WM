@@ -13,7 +13,11 @@ import hashlib
 import math
 from typing import Any, Callable, Iterable
 
-from main.core.digest import build_stable_digest
+from main.core.digest import (
+    TENSOR_CONTENT_DIGEST_VERSION,
+    build_stable_digest,
+    tensor_content_sha256,
+)
 from main.core.keyed_prg import (
     KEYED_PRG_VERSION,
     build_keyed_uniform_tensor,
@@ -38,6 +42,13 @@ ATTENTION_COORDINATE_CONVENTION = (
     "normalized_xy_token_centers_corner_endpoints_v1"
 )
 ATTENTION_GRID_ALIGN_CORNERS = True
+QK_ATOMIC_CONTENT_SHA256_FIELDS = (
+    "sampled_query_content_sha256",
+    "sampled_key_content_sha256",
+    "centered_qk_logits_content_sha256",
+    "qk_probabilities_content_sha256",
+    "sampled_token_indices_content_sha256",
+)
 
 
 def _torch() -> Any:
@@ -46,6 +57,15 @@ def _torch() -> Any:
     import torch
 
     return torch
+
+
+def _is_sha256_hex(value: Any) -> bool:
+    """判断内容摘要是否为规范小写 SHA-256 文本."""
+
+    text = str(value)
+    return len(text) == 64 and all(
+        character in "0123456789abcdef" for character in text
+    )
 
 
 def _first_tensor(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any | None:
@@ -164,6 +184,9 @@ class AttentionRelationGraphIdentity:
     qk_operator_metadata_records: tuple[dict[str, Any], ...]
     qk_operator_metadata_digest: str
     qk_operator_metadata_ready: bool
+    qk_atomic_content_records: tuple[dict[str, Any], ...]
+    qk_atomic_content_digest: str
+    qk_atomic_content_ready: bool
 
 
 def attention_probability(attention: Any) -> Any:
@@ -218,6 +241,134 @@ def public_token_grid_coordinates(token_indices: tuple[int, ...], device: Any) -
             )
         )
     return torch.tensor(coordinates, device=device, dtype=torch.float32)
+
+
+def build_qk_atomic_content_metadata(
+    layer_name: str,
+    sampled_query: Any,
+    sampled_key: Any,
+    centered_logits: Any,
+    probabilities: Any,
+    token_indices: tuple[int, ...],
+) -> dict[str, Any]:
+    """绑定一次真实 Q/K 计算的输入、输出与二维索引内容摘要."""
+
+    torch = _torch()
+    payload = {
+        "record_layer_name": layer_name,
+        "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
+        "sampled_query_content_sha256": tensor_content_sha256(sampled_query),
+        "sampled_key_content_sha256": tensor_content_sha256(sampled_key),
+        "centered_qk_logits_content_sha256": tensor_content_sha256(
+            centered_logits
+        ),
+        "qk_probabilities_content_sha256": tensor_content_sha256(
+            probabilities
+        ),
+        "sampled_token_indices_content_sha256": tensor_content_sha256(
+            torch.tensor(token_indices, dtype=torch.int64)
+        ),
+    }
+    return {
+        **payload,
+        "qk_atom_content_digest": build_stable_digest(payload),
+    }
+
+
+def qk_atomic_content_records_digest(
+    records: Iterable[dict[str, Any]],
+) -> str:
+    """计算一组有序 Q/K 层原子内容记录的联合摘要."""
+
+    resolved = tuple(dict(record) for record in records)
+    return build_stable_digest({"qk_atomic_content_records": resolved})
+
+
+def qk_atomic_content_records_ready(records: Any) -> bool:
+    """复验每层 Q/K 原子字段和自摘要是否完整一致."""
+
+    if (
+        not isinstance(records, (list, tuple))
+        or not records
+        or any(not isinstance(record, dict) for record in records)
+    ):
+        return False
+    resolved = tuple(dict(record) for record in records)
+    for record in resolved:
+        payload = {
+            "record_layer_name": record.get("record_layer_name"),
+            "tensor_content_digest_version": record.get(
+                "tensor_content_digest_version"
+            ),
+            **{
+                field_name: record.get(field_name)
+                for field_name in QK_ATOMIC_CONTENT_SHA256_FIELDS
+            },
+        }
+        if (
+            not isinstance(payload["record_layer_name"], str)
+            or not payload["record_layer_name"]
+            or payload["tensor_content_digest_version"]
+            != TENSOR_CONTENT_DIGEST_VERSION
+            or not all(
+                _is_sha256_hex(payload[field_name])
+                for field_name in QK_ATOMIC_CONTENT_SHA256_FIELDS
+            )
+            or record.get("qk_atom_content_digest")
+            != build_stable_digest(payload)
+        ):
+            return False
+    return True
+
+
+def qk_atomic_evaluation_records_digest(
+    records: Iterable[dict[str, Any]],
+    aggregate_field_name: str,
+) -> str:
+    """计算多次 Q/K 评价记录的有序联合摘要."""
+
+    resolved = tuple(dict(record) for record in records)
+    return build_stable_digest({aggregate_field_name: resolved})
+
+
+def qk_atomic_evaluation_records_ready(
+    records: Any,
+    aggregate_digest: Any,
+    *,
+    aggregate_field_name: str,
+    expected_roles: tuple[str, ...],
+    expected_layer_names: tuple[str, ...],
+) -> bool:
+    """复验多次 Q/K 评价的角色、逐层内容与联合摘要."""
+
+    if (
+        not isinstance(records, list)
+        or len(records) != len(expected_roles)
+        or any(not isinstance(record, dict) for record in records)
+        or tuple(record.get("qk_evaluation_role") for record in records)
+        != expected_roles
+    ):
+        return False
+    for evaluation_record in records:
+        atom_records = evaluation_record.get("qk_atomic_content_records")
+        if (
+            evaluation_record.get("qk_atomic_content_ready") is not True
+            or not isinstance(atom_records, list)
+            or any(not isinstance(record, dict) for record in atom_records)
+            or tuple(
+                atom_record.get("record_layer_name")
+                for atom_record in atom_records
+            )
+            != expected_layer_names
+            or not qk_atomic_content_records_ready(atom_records)
+            or evaluation_record.get("qk_atomic_content_digest")
+            != qk_atomic_content_records_digest(atom_records)
+        ):
+            return False
+    return aggregate_digest == qk_atomic_evaluation_records_digest(
+        records,
+        aggregate_field_name,
+    )
 
 
 def _differentiable_row_rank(centered_logits: Any) -> Any:
@@ -420,13 +571,22 @@ def qk_self_attention(
     ) * attention_scale
     centered_logits = per_head_logits - per_head_logits.mean(dim=-1, keepdim=True)
     attention = torch.softmax(per_head_logits, dim=-1)
+    resolved_layer_name = layer_name or module.__class__.__qualname__
+    centered_relation = centered_logits.mean(dim=1)
+    probability_relation = attention.mean(dim=1)
+    qk_atom_metadata = build_qk_atomic_content_metadata(
+        resolved_layer_name,
+        query,
+        key,
+        centered_relation,
+        probability_relation,
+        token_indices,
+    )
     relation = QKAttentionRelation(
-        centered_logits=centered_logits.mean(dim=1),
-        probabilities=attention.mean(dim=1),
+        centered_logits=centered_relation,
+        probabilities=probability_relation,
         metadata={
-            "module_layer_name": (
-                layer_name or module.__class__.__qualname__
-            ),
+            "module_layer_name": resolved_layer_name,
             "module_class_name": (
                 f"{module.__class__.__module__}.{module.__class__.__qualname__}"
             ),
@@ -457,6 +617,7 @@ def qk_self_attention(
             "sampled_token_indices": list(token_indices),
             "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
             "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
+            **qk_atom_metadata,
             "centered_logit_aggregation": (
                 "mean_of_per_head_row_centered_sampled_qk_logits"
             ),
@@ -985,16 +1146,92 @@ def build_attention_relation_graph_identity(
             ],
         }
     )
+    operator_field_names = (
+        "module_layer_name",
+        "module_class_name",
+        "head_count",
+        "head_width",
+        "attention_scale",
+        "attention_scale_source",
+        "q_normalization_applied",
+        "k_normalization_applied",
+        "q_normalization_class",
+        "k_normalization_class",
+        "source_token_count",
+        "source_grid_side",
+        "sampled_token_count",
+        "sampled_grid_side",
+        "sampled_token_indices",
+        "coordinate_convention",
+        "grid_align_corners",
+        "centered_logit_aggregation",
+        "relation_probability_aggregation",
+        "mean_probability_is_softmax_of_mean_logits",
+    )
     operator_records = []
+    atomic_content_records = []
     operator_ready = True
+    atomic_content_ready = True
     for layer_name, attention, token_indices in resolved_records:
         metadata = (
             dict(attention.metadata)
             if isinstance(attention, QKAttentionRelation)
             else {}
         )
-        record = {"record_layer_name": layer_name, **metadata}
+        record = {
+            "record_layer_name": layer_name,
+            **{
+                field_name: metadata.get(field_name)
+                for field_name in operator_field_names
+            },
+        }
         operator_records.append(record)
+        probability = attention_probability(attention)
+        logits, _ = centered_qk_logits(attention)
+        token_index_tensor = _torch().tensor(
+            token_indices,
+            dtype=_torch().int64,
+        )
+        atom_payload = {
+            "record_layer_name": layer_name,
+            "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
+            "sampled_query_content_sha256": str(
+                metadata.get("sampled_query_content_sha256", "")
+            ),
+            "sampled_key_content_sha256": str(
+                metadata.get("sampled_key_content_sha256", "")
+            ),
+            "centered_qk_logits_content_sha256": tensor_content_sha256(
+                logits
+            ),
+            "qk_probabilities_content_sha256": tensor_content_sha256(
+                probability
+            ),
+            "sampled_token_indices_content_sha256": tensor_content_sha256(
+                token_index_tensor
+            ),
+        }
+        qk_atom_content_digest = build_stable_digest(atom_payload)
+        atom_record = {
+            **atom_payload,
+            "qk_atom_content_digest": qk_atom_content_digest,
+        }
+        atomic_content_records.append(atom_record)
+        atomic_content_ready = atomic_content_ready and bool(
+            isinstance(attention, QKAttentionRelation)
+            and attention.relation_source == DIRECT_QK_RELATION_SOURCE
+            and metadata.get("record_layer_name") == layer_name
+            and _is_sha256_hex(atom_payload["sampled_query_content_sha256"])
+            and _is_sha256_hex(atom_payload["sampled_key_content_sha256"])
+            and metadata.get("centered_qk_logits_content_sha256")
+            == atom_payload["centered_qk_logits_content_sha256"]
+            and metadata.get("qk_probabilities_content_sha256")
+            == atom_payload["qk_probabilities_content_sha256"]
+            and metadata.get("sampled_token_indices_content_sha256")
+            == atom_payload["sampled_token_indices_content_sha256"]
+            and metadata.get("qk_atom_content_digest")
+            == qk_atom_content_digest
+        )
         head_width = metadata.get("head_width")
         attention_scale = metadata.get("attention_scale")
         sampled_indices = metadata.get("sampled_token_indices")
@@ -1054,6 +1291,10 @@ def build_attention_relation_graph_identity(
     qk_operator_metadata_digest = build_stable_digest(
         {"qk_operator_metadata_records": qk_operator_metadata_records}
     )
+    qk_atomic_content_records = tuple(atomic_content_records)
+    qk_atomic_content_digest = qk_atomic_content_records_digest(
+        qk_atomic_content_records
+    )
     return AttentionRelationGraphIdentity(
         component_names=reference.component_names,
         relation_source=reference.relation_source,
@@ -1067,6 +1308,12 @@ def build_attention_relation_graph_identity(
         qk_operator_metadata_records=qk_operator_metadata_records,
         qk_operator_metadata_digest=qk_operator_metadata_digest,
         qk_operator_metadata_ready=operator_ready,
+        qk_atomic_content_records=qk_atomic_content_records,
+        qk_atomic_content_digest=qk_atomic_content_digest,
+        qk_atomic_content_ready=(
+            atomic_content_ready
+            and qk_atomic_content_records_ready(qk_atomic_content_records)
+        ),
     )
 
 
@@ -1302,6 +1549,9 @@ class AttentionGeometryGradient:
     attention_relation_qk_operator_metadata_records: tuple[dict[str, Any], ...]
     attention_relation_qk_operator_metadata_digest: str
     attention_relation_qk_operator_metadata_ready: bool
+    qk_atomic_content_records: tuple[dict[str, Any], ...]
+    qk_atomic_content_digest: str
+    qk_atomic_content_ready: bool
     stable_token_fraction: float
     unstable_pair_weight: float
     stable_pair_weights: StableAttentionPairWeights
@@ -1353,8 +1603,9 @@ def compute_attention_geometry_gradient(
         if (
             relation_identity.relation_source != DIRECT_QK_RELATION_SOURCE
             or not relation_identity.qk_operator_metadata_ready
+            or not relation_identity.qk_atomic_content_ready
         ):
-            raise RuntimeError("正式注意力梯度必须绑定完整真实 Q/K 算子元数据")
+            raise RuntimeError("正式注意力梯度必须绑定完整真实 Q/K 算子与内容")
         layer_names = tuple(dict.fromkeys(layer_name for layer_name, _, _ in recorder.records))
         gradient = torch.autograd.grad(score_before_tensor, differentiable_latent, retain_graph=False)[0]
     return AttentionGeometryGradient(
@@ -1397,6 +1648,11 @@ def compute_attention_geometry_gradient(
         attention_relation_qk_operator_metadata_ready=(
             relation_identity.qk_operator_metadata_ready
         ),
+        qk_atomic_content_records=(
+            relation_identity.qk_atomic_content_records
+        ),
+        qk_atomic_content_digest=relation_identity.qk_atomic_content_digest,
+        qk_atomic_content_ready=relation_identity.qk_atomic_content_ready,
         stable_token_fraction=selection.stable_token_fraction,
         unstable_pair_weight=float(unstable_pair_weight),
         stable_pair_weights=pair_weights,
@@ -1428,6 +1684,9 @@ class AttentionGeometryUpdate:
     attention_relation_qk_operator_metadata_records: tuple[dict[str, Any], ...]
     attention_relation_qk_operator_metadata_digest: str
     attention_relation_qk_operator_metadata_ready: bool
+    qk_atomic_evaluation_records: tuple[dict[str, Any], ...]
+    qk_atomic_evaluation_digest: str
+    qk_atomic_content_ready: bool
     update_digest: str
     metadata: dict[str, Any]
 
@@ -1533,6 +1792,54 @@ def optimize_attention_geometry_update(
             applied_strength *= 0.5
         if not accepted:
             raise RuntimeError("注意力几何更新在回溯搜索后仍未提高真实 Q/K 目标")
+    accepted_relation_identity = build_attention_relation_graph_identity(
+        recorder.records,
+        key_material,
+    )
+    if not accepted_relation_identity.qk_atomic_content_ready:
+        raise RuntimeError("接受的注意力候选缺少真实 Q/K 原子内容摘要")
+    qk_atomic_evaluation_records = (
+        {
+            "qk_evaluation_role": "latent_before",
+            "qk_atomic_content_records": list(
+                original_evidence.qk_atomic_content_records
+            ),
+            "qk_atomic_content_digest": (
+                original_evidence.qk_atomic_content_digest
+            ),
+            "qk_atomic_content_ready": (
+                original_evidence.qk_atomic_content_ready
+            ),
+        },
+        {
+            "qk_evaluation_role": "content_base_latent",
+            "qk_atomic_content_records": list(
+                content_base_evidence.qk_atomic_content_records
+            ),
+            "qk_atomic_content_digest": (
+                content_base_evidence.qk_atomic_content_digest
+            ),
+            "qk_atomic_content_ready": (
+                content_base_evidence.qk_atomic_content_ready
+            ),
+        },
+        {
+            "qk_evaluation_role": "accepted_attention_candidate",
+            "qk_atomic_content_records": list(
+                accepted_relation_identity.qk_atomic_content_records
+            ),
+            "qk_atomic_content_digest": (
+                accepted_relation_identity.qk_atomic_content_digest
+            ),
+            "qk_atomic_content_ready": (
+                accepted_relation_identity.qk_atomic_content_ready
+            ),
+        },
+    )
+    qk_atomic_evaluation_digest = qk_atomic_evaluation_records_digest(
+        qk_atomic_evaluation_records,
+        "qk_atomic_evaluation_records",
+    )
     score_after = float(score_after_tensor.detach().item())
     layer_names = content_base_evidence.layer_names
     payload = {
@@ -1570,6 +1877,7 @@ def optimize_attention_geometry_update(
             content_base_evidence.attention_relation_qk_operator_metadata_digest
         ),
         "safe_subspace_digest": safe_subspace.solver_digest,
+        "qk_atomic_evaluation_digest": qk_atomic_evaluation_digest,
     }
     return AttentionGeometryUpdate(
         update=update.to(dtype=latent.dtype),
@@ -1612,6 +1920,12 @@ def optimize_attention_geometry_update(
         ),
         attention_relation_qk_operator_metadata_ready=(
             content_base_evidence.attention_relation_qk_operator_metadata_ready
+        ),
+        qk_atomic_evaluation_records=qk_atomic_evaluation_records,
+        qk_atomic_evaluation_digest=qk_atomic_evaluation_digest,
+        qk_atomic_content_ready=all(
+            bool(record["qk_atomic_content_ready"])
+            for record in qk_atomic_evaluation_records
         ),
         update_digest=build_stable_digest(payload),
         metadata={

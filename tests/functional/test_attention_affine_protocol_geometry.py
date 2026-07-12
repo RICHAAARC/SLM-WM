@@ -20,6 +20,7 @@ from main.methods.geometry.differentiable_attention import (
     QKAttentionRelation,
     StableAttentionTokenSelection,
     build_attention_relation_descriptor,
+    build_qk_atomic_content_metadata,
     build_stable_attention_pair_weights,
     keyed_relation_signs,
     public_token_grid_coordinates,
@@ -45,7 +46,11 @@ _RESERVED_SCALE_VALUES = (
 )
 
 
-def _qk_operator_metadata(layer_name: str) -> dict[str, object]:
+def _qk_operator_metadata(
+    layer_name: str,
+    centered_logits: torch.Tensor,
+    probabilities: torch.Tensor,
+) -> dict[str, object]:
     """构造直接 Q/K 关系测试使用的完整算子元数据。"""
 
     return {
@@ -66,6 +71,14 @@ def _qk_operator_metadata(layer_name: str) -> dict[str, object]:
         "sampled_token_indices": list(_TOKEN_INDICES),
         "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
         "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
+        **build_qk_atomic_content_metadata(
+            layer_name,
+            centered_logits,
+            probabilities,
+            centered_logits,
+            probabilities,
+            _TOKEN_INDICES,
+        ),
         "centered_logit_aggregation": (
             "mean_of_per_head_row_centered_sampled_qk_logits"
         ),
@@ -205,13 +218,20 @@ def _continuous_observed_attention(
         @ observation_weights.transpose(0, 1)
     )
     batched_logits = observed_logits.unsqueeze(0)
+    centered_logits = batched_logits - batched_logits.mean(
+        dim=-1,
+        keepdim=True,
+    )
+    probabilities = torch.softmax(batched_logits, dim=-1)
     return (
         QKAttentionRelation(
-            centered_logits=(
-                batched_logits - batched_logits.mean(dim=-1, keepdim=True)
+            centered_logits=centered_logits,
+            probabilities=probabilities,
+            metadata=_qk_operator_metadata(
+                _LAYER_NAME,
+                centered_logits,
+                probabilities,
             ),
-            probabilities=torch.softmax(batched_logits, dim=-1),
-            metadata=_qk_operator_metadata(_LAYER_NAME),
         ),
         expected_transform,
     )
@@ -452,10 +472,15 @@ def test_relation_registration_rejects_signature_free_attention() -> None:
     """没有密钥关系信息的均匀 attention 不得通过结构注册门禁。"""
 
     zero_logits = torch.zeros(1, _TOKEN_COUNT, _TOKEN_COUNT)
+    uniform_probabilities = torch.softmax(zero_logits, dim=-1)
     uniform_attention = QKAttentionRelation(
         centered_logits=zero_logits,
-        probabilities=torch.softmax(zero_logits, dim=-1),
-        metadata=_qk_operator_metadata(_LAYER_NAME),
+        probabilities=uniform_probabilities,
+        metadata=_qk_operator_metadata(
+            _LAYER_NAME,
+            zero_logits,
+            uniform_probabilities,
+        ),
     )
     descriptor = build_attention_relation_descriptor(
         uniform_attention,

@@ -12,7 +12,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
-from main.core.digest import build_stable_digest
+from main.core.digest import (
+    TENSOR_CONTENT_DIGEST_VERSION,
+    build_stable_digest,
+    tensor_content_sha256,
+)
 from main.methods.semantic.vector_values import (
     NumberLike,
     VectorInput,
@@ -72,6 +76,9 @@ class CarrierRiskField:
     risk_values: tuple[float, ...]
     budget_values: tuple[float, ...]
     eligible_indices: tuple[int, ...]
+    risk_values_content_sha256: str
+    budget_values_content_sha256: str
+    eligible_mask_content_sha256: str
     risk_field_digest: str
     metadata: dict[str, Any]
 
@@ -217,11 +224,30 @@ def _build_single_branch(
         "config": asdict(config),
         "require_eligible_position": require_eligible_position,
     }
+    import torch
+
+    risk_values_content_sha256 = tensor_content_sha256(
+        torch.tensor(risks, dtype=torch.float64)
+    )
+    budget_values_content_sha256 = tensor_content_sha256(
+        torch.tensor(budgets, dtype=torch.float64)
+    )
+    eligible_mask = torch.zeros(len(risks), dtype=torch.bool)
+    if eligible:
+        eligible_mask[list(eligible)] = True
+    eligible_mask_content_sha256 = tensor_content_sha256(eligible_mask)
+    payload["risk_values_content_sha256"] = risk_values_content_sha256
+    payload["budget_values_content_sha256"] = budget_values_content_sha256
+    payload["eligible_mask_content_sha256"] = eligible_mask_content_sha256
+    payload["tensor_content_digest_version"] = TENSOR_CONTENT_DIGEST_VERSION
     return CarrierRiskField(
         branch_name=branch_name,
         risk_values=tuple(risks),
         budget_values=tuple(budgets),
         eligible_indices=eligible,
+        risk_values_content_sha256=risk_values_content_sha256,
+        budget_values_content_sha256=budget_values_content_sha256,
+        eligible_mask_content_sha256=eligible_mask_content_sha256,
         risk_field_digest=build_stable_digest(payload),
         metadata={
             "risk_definition": "branch_specific_nonnegative_risk_terms",
@@ -234,6 +260,7 @@ def _build_single_branch(
             "attention_stability_definition": (
                 "cross_frozen_layer_direct_qk_relation_consistency"
             ),
+            "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
             "texture_preference": config.texture_preference,
             "eligibility_threshold": config.eligibility_threshold,
         },

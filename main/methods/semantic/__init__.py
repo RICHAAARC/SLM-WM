@@ -1,6 +1,7 @@
 """分支语义风险场方法。"""
 
 from main.methods.semantic.branch_risk import (
+    BRANCH_NAMES,
     BranchRiskConfig,
     BranchRiskFieldBundle,
     CarrierRiskField,
@@ -8,6 +9,7 @@ from main.methods.semantic.branch_risk import (
 )
 
 __all__ = [
+    "BRANCH_NAMES",
     "BranchRiskConfig",
     "BranchRiskFieldBundle",
     "CarrierRiskField",

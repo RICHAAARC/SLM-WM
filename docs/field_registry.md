@@ -2749,3 +2749,44 @@ Notebook 与 repository module 的跨边界数据
 | centered_logit_aggregation | method | none | true | false | false | 多头中心化 Q/K logits 的冻结聚合顺序身份。 |
 | relation_probability_aggregation | method | none | true | false | false | 多头抽样图像 token 关系概率的冻结聚合顺序身份。 |
 | mean_probability_is_softmax_of_mean_logits | governance | none | true | false | false | 多头平均概率是否被误写成平均 logits 的 softmax, 正式值固定为 false。 |
+| tensor_content_digest_version | protocol | none | true | true | false | 科学 Tensor 内容摘要协议版本, 绑定 dtype、shape 与连续原始字节。 |
+| tensor_dtype | provenance | none | true | false | false | 科学 Tensor 内容身份中的精确 PyTorch dtype。 |
+| tensor_shape | provenance | none | true | false | false | 科学 Tensor 内容身份中的有序维度。 |
+| tensor_content_sha256 | provenance | none | true | true | false | 科学 Tensor 的摘要版本、dtype、shape 与连续原始字节联合 SHA-256。 |
+| risk_values_content_sha256 | provenance | none | true | true | false | 单个分支完整风险值 Tensor 的内容 SHA-256。 |
+| budget_values_content_sha256 | provenance | none | true | true | false | 单个分支完整连续承载预算 Tensor 的内容 SHA-256。 |
+| eligible_mask_content_sha256 | provenance | none | true | true | false | 单个分支完整资格 mask Tensor 的内容 SHA-256。 |
+| branch_risk_content_digest | provenance | none | true | true | false | 三个分支风险值、预算和资格 mask 内容 SHA-256 的联合摘要。 |
+| candidate_matrix_content_sha256 | provenance | none | true | true | false | Jacobian Null Space 求解器实际候选矩阵 Tensor 的内容 SHA-256。 |
+| risk_budget_content_sha256 | provenance | none | true | true | false | Jacobian Null Space 求解器实际风险预算对角项 Tensor 的内容 SHA-256。 |
+| response_matrix_content_sha256 | provenance | none | true | true | false | 完整特征 Jacobian 对候选矩阵响应 Tensor 的内容 SHA-256。 |
+| latent_basis_content_sha256 | provenance | none | true | true | false | 逐列通过门禁后实际 Null Space 基底 Tensor 的内容 SHA-256。 |
+| lf_update_content_sha256 | provenance | none | true | true | false | 单次注入实际 LF 分支更新 Tensor 的内容 SHA-256。 |
+| tail_robust_update_content_sha256 | provenance | none | true | true | false | 单次注入实际高斯幅值尾部截断分支更新 Tensor 的内容 SHA-256。 |
+| attention_geometry_update_content_sha256 | provenance | none | true | true | false | 单次注入实际注意力几何分支更新 Tensor 的内容 SHA-256。 |
+| branch_updates_content_digest | provenance | none | true | true | false | 单次注入三个分支更新内容 SHA-256 的联合摘要。 |
+| sampled_query_content_sha256 | provenance | none | true | true | false | 单层真实注意力计算中完成模块归一化和二维抽样后的 Q Tensor 内容 SHA-256。 |
+| sampled_key_content_sha256 | provenance | none | true | true | false | 单层真实注意力计算中完成模块归一化和二维抽样后的 K Tensor 内容 SHA-256。 |
+| centered_qk_logits_content_sha256 | provenance | none | true | true | false | 单层抽样 Q/K 经逐头中心化并按头平均后的 logit Tensor 内容 SHA-256。 |
+| qk_probabilities_content_sha256 | provenance | none | true | true | false | 单层抽样 Q/K 经逐头 softmax 并按头平均后的关系概率 Tensor 内容 SHA-256。 |
+| sampled_token_indices_content_sha256 | provenance | none | true | true | false | 单层 Q/K 二维抽样原始 token 索引 Tensor 的内容 SHA-256。 |
+| qk_atom_content_digest | provenance | none | true | true | false | 单层名称、内容摘要协议及 Q、K、logit、概率和 token 索引 SHA-256 的联合摘要。 |
+| qk_atomic_content_records | provenance | none | true | true | false | 一次 Q/K 评价中全部精确冻结层的有序原子内容记录。 |
+| qk_atomic_content_digest | provenance | none | true | true | false | 一次 Q/K 评价中全部层原子内容记录的联合摘要。 |
+| qk_atomic_content_ready | governance | none | true | true | false | 一次 Q/K 评价的逐层原子自摘要、层顺序和联合摘要是否完整一致。 |
+| qk_evaluation_role | protocol | none | true | false | false | Q/K 原子记录在梯度、候选、实际写回、成图或盲检链中的精确评价角色。 |
+| qk_atomic_evaluation_records | provenance | none | true | true | false | 注意力更新内部 latent 前、内容基底和接受候选三次 Q/K 评价的有序原子记录。 |
+| qk_atomic_evaluation_digest | provenance | none | true | true | false | 注意力更新内部多次 Q/K 原子评价记录的联合摘要。 |
+| attention_qk_atomic_content_records | provenance | none | true | true | false | 单次完整注入从原 latent、内容基底、接受候选到实际量化写回 latent 的四次 Q/K 原子记录。 |
+| attention_qk_atomic_content_digest | provenance | none | true | true | false | 单次完整注入四次 Q/K 原子记录的联合摘要。 |
+| attention_qk_atomic_content_ready | governance | none | true | true | false | 单次完整注入四个角色、全部冻结层和逐层原子摘要是否完整一致。 |
+| final_image_qk_atomic_content_records | provenance | none | true | true | false | clean、carrier-only 与完整方法最终成图重编码的三次 Q/K 原子记录。 |
+| final_image_qk_atomic_content_digest | provenance | none | true | true | false | 三张最终成图 Q/K 原子记录的联合摘要。 |
+| final_image_qk_atomic_content_ready | governance | none | true | true | false | 三张最终成图的角色、冻结层和 Q/K 原子摘要是否完整一致。 |
+| detection_qk_atomic_content_records | provenance | none | true | true | false | 仅图像盲检在原始待检图和对齐图上重新提取的两次 Q/K 原子记录。 |
+| detection_qk_atomic_content_digest | provenance | none | true | true | false | 仅图像盲检原始图与对齐图 Q/K 原子记录的联合摘要。 |
+| detection_qk_atomic_content_ready | governance | none | true | true | false | 仅图像盲检两次评价角色、冻结层和 Q/K 原子摘要是否完整一致。 |
+| detection_qk_atomic_content_failure_count | metric | none | true | true | false | 数据集运行中未通过仅图像盲检 Q/K 原子内容门禁的记录数量。 |
+| attention_relation_qk_atomic_content_records | provenance | none | true | true | false | 单次注意力注册输入关系图的逐层 Q/K 原子内容记录。 |
+| attention_relation_qk_atomic_content_digest | provenance | none | true | true | false | 单次注意力注册输入关系图逐层 Q/K 原子记录的联合摘要。 |
+| attention_relation_qk_atomic_content_ready | governance | none | true | true | false | 单次注意力注册输入关系图的逐层 Q/K 原子记录是否完整一致。 |

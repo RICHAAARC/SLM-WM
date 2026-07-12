@@ -23,7 +23,7 @@
 
 | 子目录 | 职责 |
 | --- | --- |
-| `main/core/` | 稳定摘要等最小数学与数据工具 |
+| `main/core/` | JSON 稳定摘要、Tensor 内容摘要和密钥 PRG 等最小数学与数据工具 |
 | `main/methods/semantic/` | 分支风险场与语义条件向量 |
 | `main/methods/subspace/` | 完整特征 Jacobian Null Space |
 | `main/methods/carrier/` | 空间 LF、高斯幅值尾部截断与密钥张量载体 |
@@ -61,13 +61,15 @@
 1. 从语义条件响应计算 LF、`tail_robust` 与 attention 三个分支的风险。
 2. 保留分支间独立风险, 不把单一位置风险复制到全部载体。
 3. 输出归一化风险、分支权重和稳定摘要。
+4. 为每个分支的完整风险值、连续预算和资格 mask 保存版本化 Tensor 内容 SHA-256。
 
 ### 4.2 完整特征 Jacobian Null Space
 
 1. 在真实 SD3.5 / CLIP 语义响应上构造精确 JVP 或等价 Jacobian 线性算子。
 2. 对候选方向执行奇异值分解或等价低响应求解。
 3. 记录候选秩、保留秩、响应残差和投影能量保留率。
-4. 残差或能量门禁失败时停止该样本写入。
+4. 保存实际候选矩阵、风险预算、响应矩阵和最终基底的版本化 Tensor 内容 SHA-256。
+5. 残差或能量门禁失败时停止该样本写入。
 
 ### 4.3 内容载体
 
@@ -88,7 +90,8 @@
 8. 持久化 carrier-only 更新原子 JSONL, 将路径、实际文件 SHA-256 和解析内容摘要绑定到结果、manifest 与缓存复验。
 9. 验证 clean 到完整方法、clean 到 carrier-only 及 carrier-only 到完整方法三条最终 CLIP 语义和204维手工结构统计边。
 10. 对 clean、carrier-only 与完整方法成图重新编码真实 Q/K, 验证自身盲选择归因增益和冻结 carrier-only pair 权重归因增益, 并记录全部四个 Q/K 依赖分量的配对增益。
-11. 记录更新强度、梯度范数、回溯次数、前后目标值、直接 Q/K 来源、四分量与密钥投影身份、反事实身份和 pair 权重身份, 并把反事实原子、身份与图像摘要写入 manifest。
+11. 按原 latent、内容基底、接受候选和实际写回四个角色保存逐层 Q/K 原子；每层绑定抽样 Q、K、中心化 logit、关系概率和二维 token 索引。
+12. 记录更新强度、梯度范数、回溯次数、前后目标值、直接 Q/K 来源、四分量与密钥投影身份、反事实身份和 pair 权重身份, 并把三分支更新、Q/K 原子、反事实原子、身份与图像摘要写入 manifest。
 
 ### 4.5 仅图像盲检
 
@@ -97,9 +100,10 @@
 3. 计算内容分支分数与 attention 几何证据。
 4. 仿射注册使用攻击配置无关的分层搜索, 并把同一 pair 权重从观测网格传递到规范网格。
 5. 对齐图像重新提取 Q/K 后使用传递权重计算同步分数, 不重新选择 token。
-6. 阈值只在 calibration clean negative 上冻结。
-5. test split 使用同一阈值评估 positive、clean negative、wrong-key negative 和 attacked image。
-6. fixed-FPR 门禁使用95%单侧 Wilson 上界, 通用有界指标表使用 Hoeffding 区间。
+6. 保存原图与对齐图两个 Q/K 原子角色, 并复验冻结层顺序和联合摘要。
+7. 阈值只在 calibration clean negative 上冻结。
+8. test split 使用同一阈值评估 positive、clean negative、wrong-key negative 和 attacked image。
+9. fixed-FPR 门禁使用95%单侧 Wilson 上界, 通用有界指标表使用 Hoeffding 区间。
 
 ## 5. 正式运行层级
 

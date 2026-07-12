@@ -23,6 +23,8 @@ from main.methods.geometry.differentiable_attention import (
     attention_geometry_score,
     build_attention_relation_graph_identity,
     build_stable_attention_pair_weights,
+    qk_atomic_evaluation_records_digest,
+    qk_atomic_evaluation_records_ready,
     restore_transported_stable_attention_pair_weights,
     select_stable_attention_tokens,
 )
@@ -193,6 +195,8 @@ def detect_image_only_watermark(
     attention_relation_component_identity_digest = ""
     attention_relation_keyed_projection_digest = ""
     attention_relation_qk_operator_metadata_digest = ""
+    qk_atomic_content_records: list[dict[str, Any]] = []
+    qk_atomic_layer_names: tuple[str, ...] = ()
     if image_attention_extractor is not None:
         attention_records = image_attention_extractor(image)
         if not attention_records:
@@ -211,8 +215,27 @@ def detect_image_only_watermark(
         if (
             relation_identity.relation_source != DIRECT_QK_RELATION_SOURCE
             or not relation_identity.qk_operator_metadata_ready
+            or not relation_identity.qk_atomic_content_ready
         ):
-            raise RuntimeError("正式图像盲检注意力必须绑定完整真实 Q/K 算子元数据")
+            raise RuntimeError("正式图像盲检注意力必须绑定完整真实 Q/K 算子与内容")
+        qk_atomic_content_records.append(
+            {
+                "qk_evaluation_role": "raw_detection_image",
+                "qk_atomic_content_records": list(
+                    relation_identity.qk_atomic_content_records
+                ),
+                "qk_atomic_content_digest": (
+                    relation_identity.qk_atomic_content_digest
+                ),
+                "qk_atomic_content_ready": (
+                    relation_identity.qk_atomic_content_ready
+                ),
+            }
+        )
+        qk_atomic_layer_names = tuple(
+            record["record_layer_name"]
+            for record in relation_identity.qk_atomic_content_records
+        )
         attention_relation_component_names = relation_identity.component_names
         attention_relation_source = relation_identity.relation_source
         attention_relation_component_identity_digest = (
@@ -295,8 +318,23 @@ def detect_image_only_watermark(
                 or not aligned_relation_identity.qk_operator_metadata_ready
                 or aligned_relation_identity.qk_operator_metadata_digest
                 != attention_relation_qk_operator_metadata_digest
+                or not aligned_relation_identity.qk_atomic_content_ready
             ):
                 raise RuntimeError("对齐前后没有共享同一四分量 Q/K 关系图身份")
+            qk_atomic_content_records.append(
+                {
+                    "qk_evaluation_role": "aligned_detection_image",
+                    "qk_atomic_content_records": list(
+                        aligned_relation_identity.qk_atomic_content_records
+                    ),
+                    "qk_atomic_content_digest": (
+                        aligned_relation_identity.qk_atomic_content_digest
+                    ),
+                    "qk_atomic_content_ready": (
+                        aligned_relation_identity.qk_atomic_content_ready
+                    ),
+                }
+            )
             aligned_pair_weights = restore_transported_stable_attention_pair_weights(
                 stable_pair_weights,
                 alignment.canonical_token_weights,
@@ -418,6 +456,14 @@ def detect_image_only_watermark(
         "attention_relation_qk_operator_metadata_digest": (
             attention_relation_qk_operator_metadata_digest
         ),
+        "detection_qk_atomic_content_digest": (
+            qk_atomic_evaluation_records_digest(
+                qk_atomic_content_records,
+                "detection_qk_atomic_content_records",
+            )
+            if qk_atomic_content_records
+            else ""
+        ),
         "content_failure_reason": content_failure_reason,
         "rescue_applied": rescue_applied,
         "evidence_positive": evidence_positive,
@@ -500,6 +546,34 @@ def detect_image_only_watermark(
             "attention_relation_qk_operator_metadata_ready": (
                 bool(image_attention_extractor is not None)
                 and relation_identity.qk_operator_metadata_ready
+            ),
+            "detection_qk_atomic_content_records": qk_atomic_content_records,
+            "detection_qk_atomic_content_digest": (
+                qk_atomic_evaluation_records_digest(
+                    qk_atomic_content_records,
+                    "detection_qk_atomic_content_records",
+                )
+                if qk_atomic_content_records
+                else ""
+            ),
+            "detection_qk_atomic_content_ready": (
+                qk_atomic_evaluation_records_ready(
+                    qk_atomic_content_records,
+                    qk_atomic_evaluation_records_digest(
+                        qk_atomic_content_records,
+                        "detection_qk_atomic_content_records",
+                    ),
+                    aggregate_field_name=(
+                        "detection_qk_atomic_content_records"
+                    ),
+                    expected_roles=(
+                        "raw_detection_image",
+                        "aligned_detection_image",
+                    ),
+                    expected_layer_names=qk_atomic_layer_names,
+                )
+                if qk_atomic_content_records
+                else False
             ),
             "attention_stable_token_fraction": (
                 config.attention_stable_token_fraction

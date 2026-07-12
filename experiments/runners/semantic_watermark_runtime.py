@@ -39,7 +39,11 @@ from experiments.runtime.scientific_unit_provenance import (
     validate_scientific_unit_provenance,
 )
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
-from main.core.digest import build_stable_digest
+from main.core.digest import (
+    TENSOR_CONTENT_DIGEST_VERSION,
+    build_stable_digest,
+    tensor_content_sha256,
+)
 from main.methods.carrier import (
     KEYED_PRG_VERSION,
     build_low_frequency_template,
@@ -62,9 +66,15 @@ from main.methods.geometry import (
     build_stable_attention_pair_weights,
     compute_attention_geometry_gradient,
     optimize_attention_geometry_update,
+    qk_atomic_evaluation_records_digest,
+    qk_atomic_evaluation_records_ready,
     select_stable_attention_tokens,
 )
-from main.methods.semantic import BranchRiskConfig, build_branch_risk_fields
+from main.methods.semantic import (
+    BRANCH_NAMES,
+    BranchRiskConfig,
+    build_branch_risk_fields,
+)
 from main.methods.subspace import (
     ExactJacobianLinearization,
     build_exact_jacobian_linearization,
@@ -363,28 +373,6 @@ def _stable_json(value: Any) -> str:
     """生成稳定 JSON 文本。"""
 
     return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-
-
-def _tensor_content_sha256(tensor: Any) -> str:
-    """以 dtype、shape 与连续原始字节计算 tensor 内容 SHA-256。"""
-
-    import torch
-
-    values = tensor.detach().cpu().contiguous()
-    raw_bytes = values.view(torch.uint8).numpy().tobytes(order="C")
-    digest = hashlib.sha256()
-    digest.update(b"slm_wm_tensor_content_v1\0")
-    digest.update(str(values.dtype).encode("utf-8"))
-    digest.update(b"\0")
-    digest.update(
-        json.dumps(
-            [int(value) for value in values.shape],
-            separators=(",", ":"),
-        ).encode("ascii")
-    )
-    digest.update(b"\0")
-    digest.update(raw_bytes)
-    return digest.hexdigest()
 
 
 def _is_sha256_hex(value: Any) -> bool:
@@ -832,11 +820,20 @@ def _branch_risk_configs(
 
 
 def _branch_risk_record(branch_field: Any) -> dict[str, Any]:
-    """生成不保存大型空间数组的可审计分支风险摘要。"""
+    """生成带精确风险、预算与资格 mask 内容摘要的分支记录."""
 
     return {
         "branch_name": branch_field.branch_name,
         "risk_field_digest": branch_field.risk_field_digest,
+        "risk_values_content_sha256": (
+            branch_field.risk_values_content_sha256
+        ),
+        "budget_values_content_sha256": (
+            branch_field.budget_values_content_sha256
+        ),
+        "eligible_mask_content_sha256": (
+            branch_field.eligible_mask_content_sha256
+        ),
         "risk_value_mean": sum(branch_field.risk_values) / len(branch_field.risk_values),
         "budget_value_mean": sum(branch_field.budget_values) / len(branch_field.budget_values),
         "eligible_position_count": len(branch_field.eligible_indices),
@@ -959,7 +956,7 @@ def _quantized_write_jacobian_response_record(
     quantized_update = quantized_latent - latent.detach()
     update_norm = float(torch.linalg.norm(quantized_update.float()).item())
     base_record = {
-        "quantized_write_update_content_sha256": _tensor_content_sha256(
+        "quantized_write_update_content_sha256": tensor_content_sha256(
             quantized_update
         ),
         "quantized_write_update_dtype": str(quantized_update.dtype),
@@ -1301,6 +1298,9 @@ def _final_image_attention_observability_record(
             "attention_relation_qk_operator_metadata_records": [],
             "attention_relation_qk_operator_metadata_digest": "",
             "attention_relation_qk_operator_metadata_ready": False,
+            "final_image_qk_atomic_content_records": [],
+            "final_image_qk_atomic_content_digest": "",
+            "final_image_qk_atomic_content_ready": False,
             "attention_module_names": list(config.attention_module_names),
             "attention_coordinate_convention": (
                 config.attention_coordinate_convention
@@ -1363,6 +1363,7 @@ def _final_image_attention_observability_record(
     relation_identity_ready = all(
         identity.relation_source == DIRECT_QK_RELATION_SOURCE
         and identity.qk_operator_metadata_ready
+        and identity.qk_atomic_content_ready
         and identity.component_names == relation_identity.component_names
         and identity.component_identity_digest
         == relation_identity.component_identity_digest
@@ -1374,6 +1375,24 @@ def _final_image_attention_observability_record(
     )
     if not relation_identity_ready:
         raise RuntimeError("最终三图没有共享直接 Q/K 四分量关系图身份")
+    final_image_qk_atomic_content_records = tuple(
+        {
+            "qk_evaluation_role": evaluation_role,
+            "qk_atomic_content_records": list(
+                identity.qk_atomic_content_records
+            ),
+            "qk_atomic_content_digest": identity.qk_atomic_content_digest,
+            "qk_atomic_content_ready": identity.qk_atomic_content_ready,
+        }
+        for evaluation_role, identity in zip(
+            (
+                "final_clean_image",
+                "final_carrier_only_image",
+                "final_watermarked_image",
+            ),
+            relation_identities,
+        )
+    )
     all_records = clean_records + carrier_only_records + watermarked_records
     gpu_verified = all(
         getattr(attention, "device", None) is not None
@@ -1541,6 +1560,19 @@ def _final_image_attention_observability_record(
         ),
         "attention_relation_qk_operator_metadata_ready": (
             relation_identity.qk_operator_metadata_ready
+        ),
+        "final_image_qk_atomic_content_records": list(
+            final_image_qk_atomic_content_records
+        ),
+        "final_image_qk_atomic_content_digest": (
+            qk_atomic_evaluation_records_digest(
+                final_image_qk_atomic_content_records,
+                "final_image_qk_atomic_content_records",
+            )
+        ),
+        "final_image_qk_atomic_content_ready": all(
+            bool(record["qk_atomic_content_ready"])
+            for record in final_image_qk_atomic_content_records
         ),
         "attention_module_names": list(config.attention_module_names),
         "attention_coordinate_convention": (
@@ -1740,6 +1772,9 @@ def _carrier_only_counterfactual_identity(
         "combined_update_content_sha256",
         "quantized_write_update_content_sha256",
         "adjacent_step_reference_latent_content_sha256",
+        "lf_update_content_sha256",
+        "tail_robust_update_content_sha256",
+        "attention_geometry_update_content_sha256",
     )
 
     def validate_common_record(
@@ -1765,12 +1800,53 @@ def _carrier_only_counterfactual_identity(
             or set(null_space_records) != set(expected_branches)
         ):
             raise RuntimeError("反事实更新原子的执行角色或活动分支身份不一致")
+        if record.get("tensor_content_digest_version") != (
+            TENSOR_CONTENT_DIGEST_VERSION
+        ):
+            raise RuntimeError("反事实更新原子的 Tensor 内容摘要版本无效")
         for field_name in required_content_sha256_fields:
             value = str(record.get(field_name, ""))
             if len(value) != 64 or any(
                 character not in "0123456789abcdef" for character in value
             ):
                 raise RuntimeError("反事实更新原子缺少完整 tensor 内容 SHA-256")
+        branch_update_content_records = {
+            "lf_content": record.get("lf_update_content_sha256"),
+            "tail_robust": record.get("tail_robust_update_content_sha256"),
+            "attention_geometry": record.get(
+                "attention_geometry_update_content_sha256"
+            ),
+        }
+        if record.get("branch_updates_content_digest") != build_stable_digest(
+            branch_update_content_records
+        ):
+            raise RuntimeError("反事实更新原子的三分支 Tensor 摘要不一致")
+        branch_risk_records = record.get("branch_risk_records")
+        if not isinstance(branch_risk_records, Mapping) or set(
+            branch_risk_records
+        ) != set(BRANCH_NAMES):
+            raise RuntimeError("反事实更新原子缺少三个分支风险记录")
+        branch_risk_content_records = {
+            name: {
+                field_name: branch_record.get(field_name)
+                for field_name in (
+                    "risk_values_content_sha256",
+                    "budget_values_content_sha256",
+                    "eligible_mask_content_sha256",
+                )
+            }
+            for name, branch_record in branch_risk_records.items()
+        }
+        if (
+            any(
+                not _is_sha256_hex(value)
+                for content_record in branch_risk_content_records.values()
+                for value in content_record.values()
+            )
+            or record.get("branch_risk_content_digest")
+            != build_stable_digest(branch_risk_content_records)
+        ):
+            raise RuntimeError("反事实更新原子的分支风险 Tensor 摘要不一致")
         step_index = record.get("step_index")
         if (
             not isinstance(step_index, int)
@@ -1835,6 +1911,22 @@ def _carrier_only_counterfactual_identity(
             "real_qk_projection"
         ):
             raise RuntimeError("完整方法更新原子缺少真实 Q/K attention 来源")
+        if (
+            full_record.get("attention_qk_atomic_content_ready") is not True
+            or not qk_atomic_evaluation_records_ready(
+                full_record.get("attention_qk_atomic_content_records"),
+                full_record.get("attention_qk_atomic_content_digest"),
+                aggregate_field_name="attention_qk_atomic_content_records",
+                expected_roles=(
+                    "latent_before",
+                    "content_base_latent",
+                    "accepted_attention_candidate",
+                    "actual_written_combined_latent",
+                ),
+                expected_layer_names=full_config.attention_module_names,
+            )
+        ):
+            raise RuntimeError("完整方法更新原子缺少真实 Q/K 原子内容摘要")
 
     carrier_none_fields = (
         "attention_score_before",
@@ -1855,11 +1947,13 @@ def _carrier_only_counterfactual_identity(
         "attention_relation_component_identity_digest",
         "attention_relation_keyed_projection_digest",
         "attention_relation_qk_operator_metadata_digest",
+        "attention_qk_atomic_content_digest",
     )
     carrier_empty_list_fields = (
         "stable_token_indices",
         "attention_relation_component_names",
         "attention_relation_qk_operator_metadata_records",
+        "attention_qk_atomic_content_records",
     )
     for carrier_record in carrier_only_update_records:
         validate_common_record(
@@ -1883,6 +1977,8 @@ def _carrier_only_counterfactual_identity(
             raise RuntimeError("carrier-only 更新原子错误声明直接 Q/K 来源")
         if carrier_record.get("attention_relation_qk_operator_metadata_ready") is not False:
             raise RuntimeError("carrier-only 更新原子错误声明 Q/K 算子元数据完整")
+        if carrier_record.get("attention_qk_atomic_content_ready") is not False:
+            raise RuntimeError("carrier-only 更新原子错误声明 Q/K 原子内容完整")
 
     def scheduler_trace(records: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
         """提取足以核验相同 scheduler 轨迹的冻结字段。"""
@@ -2031,7 +2127,7 @@ def run_semantic_watermark_runtime(
             raise RuntimeError(
                 "分支风险缺少紧邻上一 scheduler 步的真实 latent"
             )
-        adjacent_step_reference_sha256 = _tensor_content_sha256(
+        adjacent_step_reference_sha256 = tensor_content_sha256(
             previous_step_latent
         )
         post_step_index = step_index + 1
@@ -2238,6 +2334,12 @@ def run_semantic_watermark_runtime(
                                 attention_gradient.stable_pair_weights
                             ),
                         )
+                        written_qk_identity = (
+                            build_attention_relation_graph_identity(
+                                recorder.records,
+                                active_injection_config.key_material,
+                            )
+                        )
                     final_score = float(final_score_tensor.detach().item())
                     required_score = max(
                         attention_update.score_before,
@@ -2245,6 +2347,23 @@ def run_semantic_watermark_runtime(
                     )
                     if not math.isfinite(final_score) or final_score <= required_score:
                         raise RuntimeError("真正写回的 combined latent 未提高真实 Q/K 目标")
+                    if not written_qk_identity.qk_atomic_content_ready:
+                        raise RuntimeError("真正写回的 combined latent 缺少 Q/K 原子摘要")
+                    qk_atomic_evaluation_records = (
+                        *attention_update.qk_atomic_evaluation_records,
+                        {
+                            "qk_evaluation_role": "actual_written_combined_latent",
+                            "qk_atomic_content_records": list(
+                                written_qk_identity.qk_atomic_content_records
+                            ),
+                            "qk_atomic_content_digest": (
+                                written_qk_identity.qk_atomic_content_digest
+                            ),
+                            "qk_atomic_content_ready": (
+                                written_qk_identity.qk_atomic_content_ready
+                            ),
+                        },
+                    )
                     attention_record = {
                         "attention_score_before": attention_update.score_before,
                         "attention_content_base_score": attention_update.content_base_score,
@@ -2294,6 +2413,19 @@ def run_semantic_watermark_runtime(
                         "attention_relation_qk_operator_metadata_ready": (
                             attention_update.attention_relation_qk_operator_metadata_ready
                         ),
+                        "attention_qk_atomic_content_records": list(
+                            qk_atomic_evaluation_records
+                        ),
+                        "attention_qk_atomic_content_digest": (
+                            qk_atomic_evaluation_records_digest(
+                                qk_atomic_evaluation_records,
+                                "attention_qk_atomic_content_records",
+                            )
+                        ),
+                        "attention_qk_atomic_content_ready": all(
+                            bool(record["qk_atomic_content_ready"])
+                            for record in qk_atomic_evaluation_records
+                        ),
                     }
                 else:
                     attention_tensor = torch.zeros_like(latent)
@@ -2321,6 +2453,9 @@ def run_semantic_watermark_runtime(
                         "attention_relation_qk_operator_metadata_records": [],
                         "attention_relation_qk_operator_metadata_digest": "",
                         "attention_relation_qk_operator_metadata_ready": False,
+                        "attention_qk_atomic_content_records": [],
+                        "attention_qk_atomic_content_digest": "",
+                        "attention_qk_atomic_content_ready": False,
                     }
                 quantized_write_jacobian_record = (
                     _quantized_write_jacobian_response_record(
@@ -2356,6 +2491,29 @@ def run_semantic_watermark_runtime(
                     raise RuntimeError(
                         "真正写回的 combined latent 未通过完整语义与视觉保持门禁"
                     )
+        branch_update_content_records = {
+            "lf_content": tensor_content_sha256(lf_update),
+            "tail_robust": tensor_content_sha256(tail_update),
+            "attention_geometry": tensor_content_sha256(attention_tensor),
+        }
+        branch_risk_records = {
+            name: _branch_risk_record(branch_field)
+            for name, branch_field in branch_fields.items()
+        }
+        branch_risk_content_records = {
+            name: {
+                "risk_values_content_sha256": branch_record[
+                    "risk_values_content_sha256"
+                ],
+                "budget_values_content_sha256": branch_record[
+                    "budget_values_content_sha256"
+                ],
+                "eligible_mask_content_sha256": branch_record[
+                    "eligible_mask_content_sha256"
+                ],
+            }
+            for name, branch_record in branch_risk_records.items()
+        }
         active_update_records.append(
             {
                 "run_id": run_id,
@@ -2372,18 +2530,33 @@ def run_semantic_watermark_runtime(
                     "measured_from_immediately_previous_scheduler_step"
                 ),
                 "timestep": float(method_timestep.detach().float().item()),
-                "latent_content_sha256_before": _tensor_content_sha256(latent),
-                "latent_content_sha256_after": _tensor_content_sha256(injected),
-                "combined_update_content_sha256": _tensor_content_sha256(
+                "latent_content_sha256_before": tensor_content_sha256(latent),
+                "latent_content_sha256_after": tensor_content_sha256(injected),
+                "combined_update_content_sha256": tensor_content_sha256(
                     combined_update
+                ),
+                "lf_update_content_sha256": (
+                    branch_update_content_records["lf_content"]
+                ),
+                "tail_robust_update_content_sha256": (
+                    branch_update_content_records["tail_robust"]
+                ),
+                "attention_geometry_update_content_sha256": (
+                    branch_update_content_records["attention_geometry"]
+                ),
+                "branch_updates_content_digest": build_stable_digest(
+                    branch_update_content_records
+                ),
+                "tensor_content_digest_version": (
+                    TENSOR_CONTENT_DIGEST_VERSION
                 ),
                 "relative_update_norm": tensor_norm(combined_update) / max(tensor_norm(latent), 1e-12),
                 "active_carrier_branches": list(active_branch_names),
                 "branch_risk_bundle_digest": risk_bundle.bundle_digest,
-                "branch_risk_records": {
-                    name: _branch_risk_record(branch_field)
-                    for name, branch_field in branch_fields.items()
-                },
+                "branch_risk_records": branch_risk_records,
+                "branch_risk_content_digest": build_stable_digest(
+                    branch_risk_content_records
+                ),
                 "null_space_records": {
                     name: (
                         result.to_record()

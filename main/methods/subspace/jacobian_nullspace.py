@@ -15,7 +15,11 @@ from dataclasses import dataclass
 import math
 from typing import Any, Callable, Sequence
 
-from main.core.digest import build_stable_digest
+from main.core.digest import (
+    TENSOR_CONTENT_DIGEST_VERSION,
+    build_stable_digest,
+    tensor_content_sha256,
+)
 from main.core.keyed_prg import (
     KEYED_PRG_VERSION,
     build_keyed_gaussian_tensor,
@@ -386,6 +390,10 @@ class JacobianNullSpaceResult:
     response_residual: float
     relative_response_residual: float
     orthogonality_error: float
+    candidate_matrix_content_sha256: str
+    risk_budget_content_sha256: str
+    response_matrix_content_sha256: str
+    latent_basis_content_sha256: str
     solver_digest: str
     metadata: dict[str, Any]
 
@@ -429,6 +437,14 @@ class JacobianNullSpaceResult:
             "response_residual": self.response_residual,
             "relative_response_residual": self.relative_response_residual,
             "orthogonality_error": self.orthogonality_error,
+            "candidate_matrix_content_sha256": (
+                self.candidate_matrix_content_sha256
+            ),
+            "risk_budget_content_sha256": self.risk_budget_content_sha256,
+            "response_matrix_content_sha256": (
+                self.response_matrix_content_sha256
+            ),
+            "latent_basis_content_sha256": self.latent_basis_content_sha256,
             "solver_digest": self.solver_digest,
             "metadata": self.metadata,
         }
@@ -590,6 +606,10 @@ def solve_jacobian_null_space(
     )
     cg_iteration_counts = tuple(item.cg_result.iteration_count for item in accepted)
     cg_relative_residuals = tuple(item.cg_result.relative_residual for item in accepted)
+    candidate_matrix_content_sha256 = tensor_content_sha256(candidate_matrix)
+    risk_budget_content_sha256 = tensor_content_sha256(budget)
+    response_matrix_content_sha256 = tensor_content_sha256(response_matrix)
+    latent_basis_content_sha256 = tensor_content_sha256(latent_basis)
     digest_payload = {
         "branch_name": branch_name,
         "candidate_shape": tuple(int(value) for value in candidate_matrix.shape),
@@ -610,6 +630,11 @@ def solve_jacobian_null_space(
         "response_residual": round(response_residual, 12),
         "relative_response_residual": round(relative_response_residual, 12),
         "orthogonality_error": round(orthogonality_error, 12),
+        "candidate_matrix_content_sha256": candidate_matrix_content_sha256,
+        "risk_budget_content_sha256": risk_budget_content_sha256,
+        "response_matrix_content_sha256": response_matrix_content_sha256,
+        "latent_basis_content_sha256": latent_basis_content_sha256,
+        "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
     }
     return JacobianNullSpaceResult(
         branch_name=branch_name,
@@ -625,6 +650,10 @@ def solve_jacobian_null_space(
         response_residual=response_residual,
         relative_response_residual=relative_response_residual,
         orthogonality_error=orthogonality_error,
+        candidate_matrix_content_sha256=candidate_matrix_content_sha256,
+        risk_budget_content_sha256=risk_budget_content_sha256,
+        response_matrix_content_sha256=response_matrix_content_sha256,
+        latent_basis_content_sha256=latent_basis_content_sha256,
         solver_digest=build_stable_digest(digest_payload),
         metadata={
             "jvp_mode": joint_feature_linearization.linearization_mode,
@@ -643,5 +672,6 @@ def solve_jacobian_null_space(
             ),
             "maximum_orthogonality_error": _MAXIMUM_ORTHOGONALITY_ERROR,
             "risk_budget_operator": "explicit_diagonal_B",
+            "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
         },
     )

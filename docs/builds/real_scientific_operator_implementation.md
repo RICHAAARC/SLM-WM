@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | 分支风险场 | `main/methods/semantic/branch_risk.py` | 分别构造 LF、尾部截断和注意力几何风险与承载预算 |
 | 密钥随机原语 | `main/core/keyed_prg.py` | 通过版本化 SHA-256 计数器流为内容模板、Jacobian 候选方向和注意力关系符号生成规范 CPU float32 Tensor |
+| Tensor 内容身份 | `main/core/digest.py` | 通过版本化 dtype、shape 与连续原始字节 SHA-256 绑定风险、基底、分支更新和 Q/K 原子 |
 | 真实 Jacobian Null Space | `main/methods/subspace/jacobian_nullspace.py` | 通过完整特征 JVP/VJP、显式风险算子和无阻尼 PSD-CG 求解 rank-4 latent Null Space |
 | 语义与手工结构统计 | `experiments/runtime/diffusion/semantic_features.py` | 以512维完整归一化 CLIP embedding 和204维 RGB 统计/梯度/8x8池化向量定义716维 Jacobian，并提供有限更新与最终成图复验 |
 | LF 与尾部载体 | `main/methods/carrier/keyed_tensor.py` | 通过版本化、设备无关的 SHA-256 计数器高斯 PRG 构造检测端可重建模板, 并在嵌入端投影到安全子空间 |
@@ -105,11 +106,12 @@ $$
 6. attention 来源为真实 Q/K 投影和 autograd；中心化 logit、可微 rank、抽样图像 token 关系概率和概率偏离与距离偏离的双中心交互四分量分别完成逐行加权归一化后等权组合, 嵌入与盲检共享该关系算子及 pair 构造规则；
 7. carrier-only 与完整方法首个注入前 latent 字节级相同, 更新数、顺序和 scheduler 轨迹一致；carrier-only 更新原子无 attention 来源、分数、更新、关系、pair 身份或 attention Null Space, 且其 JSONL 路径、文件 SHA-256 和内容摘要绑定结果与 manifest；
 8. 最终 clean、carrier-only 与完整方法成图在 CUDA 上重新构造直接 Q/K 四分量关系, 完整方法相对同种子 carrier-only 的自身盲选择归因增益和冻结 carrier-only pair 权重归因增益都严格超过0.0001, 且反事实保持记录、四分量归因、关系图身份、Q/K 记录与 manifest 绑定同一身份和图像 SHA-256；
-9. 检测访问模式为 `image_key_public_model_only`；
-10. test clean negative 的95%误报率上界不超过目标 FPR；
-11. FID/KID 使用 torch-fidelity `inception-v3-compat` 的2048维特征，配对质量指标来自真实图像集合；
-12. 消融记录明确 `generation_rerun=true` 且未使用 counterfactual 分数变换；
-13. 外部 baseline 使用相同 Prompt、攻击和固定 FPR 统计边界。
+9. `slm_wm_tensor_content_v1` 完整绑定三个风险场、三个 Null Space 的候选/预算/响应/基底、三分支更新与实际写回增量；Q/K 原子完整覆盖注入四角色、最终成图三角色及盲检两角色；
+10. 检测访问模式为 `image_key_public_model_only`；
+11. test clean negative 的95%误报率上界不超过目标 FPR；
+12. FID/KID 使用 torch-fidelity `inception-v3-compat` 的2048维特征，配对质量指标来自真实图像集合；
+13. 消融记录明确 `generation_rerun=true` 且未使用 counterfactual 分数变换；
+14. 外部 baseline 使用相同 Prompt、攻击和固定 FPR 统计边界。
 
 正式 FID/KID 的样本门禁分别为 70/700/7000 对 clean/watermarked 图像, 与三个运行层级的 Prompt 总数一致。该门禁属于项目特定的证据治理要求; 通用做法是明确记录特征提取器版本、输入图像摘要、特征维度和实际样本数。
 
@@ -120,6 +122,8 @@ $$
 ## 七、原子证据与派生结论绑定
 
 论文结论只接受能够从原子记录独立重建并通过即时文件摘要核验的派生产物：
+
+主方法科学原子先执行 Tensor 内容自校验。风险值、预算、资格 mask、Jacobian 候选矩阵、风险预算、响应矩阵、最终基底和三个分支更新均使用同一版本化协议；真实 Q/K 逐层绑定抽样 Q、K、中心化 logit、关系概率和二维 token 索引。算子身份摘要只描述冻结协议, 内容摘要描述一次实际评价, 两者不能互相替代。
 
 1. 正式消融的每个 `ablation_id` 必须逐字段等于登记的机制开关配置, 每个运行结果必须通过科学完成单元来源校验, 且输出目录必须属于该论文层级和消融身份；
 2. `formal_detection_records.jsonl` 与 `per_ablation_frozen_protocols.json` 同时保存字节级 SHA-256 和解析内容稳定摘要, 两类身份均绑定到 summary、manifest config 与 manifest metadata；

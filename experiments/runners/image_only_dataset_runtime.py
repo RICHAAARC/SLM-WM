@@ -64,12 +64,16 @@ from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
 from main.methods.carrier import keyed_prg_protocol_record
-from main.core.digest import build_stable_digest
+from main.core.digest import (
+    TENSOR_CONTENT_DIGEST_VERSION,
+    build_stable_digest,
+)
 from main.methods.geometry import (
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
     DIRECT_QK_RELATION_SOURCE,
+    qk_atomic_evaluation_records_ready,
 )
 
 
@@ -371,12 +375,22 @@ def _scientific_update_record_ready(
             return False
         return float(value) > minimum if strict else float(value) >= minimum
 
+    def sha256_ready(value: Any) -> bool:
+        """判断一个科学内容字段是否为规范 SHA-256."""
+
+        text = str(value)
+        return len(text) == 64 and all(
+            character in "0123456789abcdef" for character in text
+        )
+
     adjacent_reference_sha256 = str(
         record.get("adjacent_step_reference_latent_content_sha256", "")
     )
     step_index = record.get("step_index")
     if (
-        len(adjacent_reference_sha256) != 64
+        record.get("tensor_content_digest_version")
+        != TENSOR_CONTENT_DIGEST_VERSION
+        or len(adjacent_reference_sha256) != 64
         or any(
             character not in "0123456789abcdef"
             for character in adjacent_reference_sha256
@@ -441,6 +455,20 @@ def _scientific_update_record_ready(
             return False
         if metadata.get("feature_compression_applied") is not False:
             return False
+        if metadata.get("tensor_content_digest_version") != (
+            TENSOR_CONTENT_DIGEST_VERSION
+        ):
+            return False
+        if not all(
+            sha256_ready(subspace_record.get(field_name))
+            for field_name in (
+                "candidate_matrix_content_sha256",
+                "risk_budget_content_sha256",
+                "response_matrix_content_sha256",
+                "latent_basis_content_sha256",
+            )
+        ):
+            return False
         if (
             metadata.get("keyed_prg_version") != config.keyed_prg_version
             or metadata.get("keyed_prg_protocol_digest")
@@ -502,6 +530,22 @@ def _scientific_update_record_ready(
         or record.get("keyed_prg_protocol_digest") != expected_prg_digest
     ):
         return False
+    branch_update_content_records = {
+        "lf_content": record.get("lf_update_content_sha256"),
+        "tail_robust": record.get("tail_robust_update_content_sha256"),
+        "attention_geometry": record.get(
+            "attention_geometry_update_content_sha256"
+        ),
+    }
+    if (
+        not all(
+            sha256_ready(value)
+            for value in branch_update_content_records.values()
+        )
+        or record.get("branch_updates_content_digest")
+        != build_stable_digest(branch_update_content_records)
+    ):
+        return False
     if not finite_at_least(
         record.get("lf_projection_energy_retention"),
         config.minimum_projection_energy_retention,
@@ -521,6 +565,22 @@ def _scientific_update_record_ready(
         not isinstance(stable_token_indices, list)
         or len(stable_token_indices) < 4
         or len(set(stable_token_indices)) != len(stable_token_indices)
+    ):
+        return False
+    if (
+        record.get("attention_qk_atomic_content_ready") is not True
+        or not qk_atomic_evaluation_records_ready(
+            record.get("attention_qk_atomic_content_records"),
+            record.get("attention_qk_atomic_content_digest"),
+            aggregate_field_name="attention_qk_atomic_content_records",
+            expected_roles=(
+                "latent_before",
+                "content_base_latent",
+                "accepted_attention_candidate",
+                "actual_written_combined_latent",
+            ),
+            expected_layer_names=config.attention_module_names,
+        )
     ):
         return False
     stable_token_selection_digest = str(
@@ -605,6 +665,34 @@ def _scientific_update_record_ready(
         and isinstance(branch_risk_records, dict)
         and set(branch_risk_records) == {"lf_content", "tail_robust", "attention_geometry"}
         and all(int(value.get("eligible_position_count", 0)) > 0 for value in branch_risk_records.values())
+        and all(
+            all(
+                sha256_ready(branch_record.get(field_name))
+                for field_name in (
+                    "risk_values_content_sha256",
+                    "budget_values_content_sha256",
+                    "eligible_mask_content_sha256",
+                )
+            )
+            for branch_record in branch_risk_records.values()
+        )
+        and record.get("branch_risk_content_digest")
+        == build_stable_digest(
+            {
+                name: {
+                    "risk_values_content_sha256": branch_record.get(
+                        "risk_values_content_sha256"
+                    ),
+                    "budget_values_content_sha256": branch_record.get(
+                        "budget_values_content_sha256"
+                    ),
+                    "eligible_mask_content_sha256": branch_record.get(
+                        "eligible_mask_content_sha256"
+                    ),
+                }
+                for name, branch_record in branch_risk_records.items()
+            }
+        )
     )
 
 
@@ -627,6 +715,32 @@ def _final_image_preservation_ready(
         and isinstance(structure_drift, (int, float))
         and math.isfinite(float(structure_drift))
         and float(structure_drift) <= config.maximum_handcrafted_structure_feature_relative_drift
+    )
+
+
+def _detection_qk_atomic_content_ready(
+    record: dict[str, Any],
+    config: SemanticWatermarkRuntimeConfig,
+) -> bool:
+    """验证一次仅图像检测的 raw 与 aligned Q/K 原子摘要."""
+
+    if not config.attention_geometry_enabled:
+        return True
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    return bool(
+        metadata.get("detection_qk_atomic_content_ready") is True
+        and qk_atomic_evaluation_records_ready(
+            metadata.get("detection_qk_atomic_content_records"),
+            metadata.get("detection_qk_atomic_content_digest"),
+            aggregate_field_name="detection_qk_atomic_content_records",
+            expected_roles=(
+                "raw_detection_image",
+                "aligned_detection_image",
+            ),
+            expected_layer_names=config.attention_module_names,
+        )
     )
 
 
@@ -761,6 +875,18 @@ def _final_image_attention_observability_ready(
         is ATTENTION_GRID_ALIGN_CORNERS
         and record.get("attention_relation_qk_operator_metadata_ready")
         is True
+        and record.get("final_image_qk_atomic_content_ready") is True
+        and qk_atomic_evaluation_records_ready(
+            record.get("final_image_qk_atomic_content_records"),
+            record.get("final_image_qk_atomic_content_digest"),
+            aggregate_field_name="final_image_qk_atomic_content_records",
+            expected_roles=(
+                "final_clean_image",
+                "final_carrier_only_image",
+                "final_watermarked_image",
+            ),
+            expected_layer_names=config.attention_module_names,
+        )
         and isinstance(qk_operator_records, list)
         and tuple(
             operator.get("record_layer_name")
@@ -1058,11 +1184,19 @@ def run_image_only_dataset_runtime(
         )
         for result in runtime_results
     )
+    detection_qk_atomic_content_failure_count = sum(
+        not _detection_qk_atomic_content_ready(
+            record,
+            base_method_config,
+        )
+        for record in detection_records
+    )
     scientific_operator_gate_ready = (
         len(scientific_update_records) == expected_scientific_update_count
         and scientific_operator_failure_count == 0
         and final_image_preservation_failure_count == 0
         and final_image_attention_observability_failure_count == 0
+        and detection_qk_atomic_content_failure_count == 0
     )
     scientific_unit_provenance = aggregate_scientific_unit_provenance(
         (
@@ -1172,6 +1306,12 @@ def run_image_only_dataset_runtime(
         "final_image_attention_observability_ready": (
             final_image_attention_observability_failure_count == 0
         ),
+        "detection_qk_atomic_content_failure_count": (
+            detection_qk_atomic_content_failure_count
+        ),
+        "detection_qk_atomic_content_ready": (
+            detection_qk_atomic_content_failure_count == 0
+        ),
         "scientific_operator_gate_ready": scientific_operator_gate_ready,
         **scientific_unit_provenance,
         "frozen_threshold_digest": protocol.threshold_digest,
@@ -1259,6 +1399,12 @@ def run_image_only_dataset_runtime(
             ],
             "final_image_attention_observability_ready": summary[
                 "final_image_attention_observability_ready"
+            ],
+            "detection_qk_atomic_content_failure_count": summary[
+                "detection_qk_atomic_content_failure_count"
+            ],
+            "detection_qk_atomic_content_ready": summary[
+                "detection_qk_atomic_content_ready"
             ],
             "scientific_unit_provenance_ready": summary[
                 "scientific_unit_provenance_ready"

@@ -651,6 +651,8 @@ class AttentionAlignmentResult:
     attention_relation_keyed_projection_digest: str
     attention_relation_qk_operator_metadata_digest: str
     attention_relation_qk_operator_metadata_ready: bool
+    attention_relation_qk_atomic_content_digest: str
+    attention_relation_qk_atomic_content_ready: bool
     registration_confidence: float
     geometry_reliable: bool
     alignment_digest: str
@@ -860,6 +862,7 @@ def recover_attention_affine_alignment(
         and registration_objective_margin > 0.0
         and descriptor.relation_source == DIRECT_QK_RELATION_SOURCE
         and relation_graph_identity.qk_operator_metadata_ready
+        and relation_graph_identity.qk_atomic_content_ready
     )
     transform_tuple = tuple(
         tuple(float(value) for value in row)
@@ -929,6 +932,12 @@ def recover_attention_affine_alignment(
         "attention_relation_qk_operator_metadata_ready": (
             relation_graph_identity.qk_operator_metadata_ready
         ),
+        "attention_relation_qk_atomic_content_digest": (
+            relation_graph_identity.qk_atomic_content_digest
+        ),
+        "attention_relation_qk_atomic_content_ready": (
+            relation_graph_identity.qk_atomic_content_ready
+        ),
         "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
         "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
     }
@@ -980,6 +989,12 @@ def recover_attention_affine_alignment(
         ),
         attention_relation_qk_operator_metadata_ready=(
             relation_graph_identity.qk_operator_metadata_ready
+        ),
+        attention_relation_qk_atomic_content_digest=(
+            relation_graph_identity.qk_atomic_content_digest
+        ),
+        attention_relation_qk_atomic_content_ready=(
+            relation_graph_identity.qk_atomic_content_ready
         ),
         registration_confidence=confidence,
         geometry_reliable=geometry_reliable,
@@ -1060,6 +1075,15 @@ def recover_attention_affine_alignment(
             ),
             "attention_relation_qk_operator_metadata_ready": (
                 relation_graph_identity.qk_operator_metadata_ready
+            ),
+            "attention_relation_qk_atomic_content_records": list(
+                relation_graph_identity.qk_atomic_content_records
+            ),
+            "attention_relation_qk_atomic_content_digest": (
+                relation_graph_identity.qk_atomic_content_digest
+            ),
+            "attention_relation_qk_atomic_content_ready": (
+                relation_graph_identity.qk_atomic_content_ready
             ),
             "attention_relation_soft_rank_temperature": (
                 descriptor.soft_rank_temperature
