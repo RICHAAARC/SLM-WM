@@ -34,6 +34,10 @@ ATTENTION_RELATION_COMPONENT_WEIGHTS = (0.25, 0.25, 0.25, 0.25)
 ATTENTION_RELATION_COMPONENT_POLARITIES = (1.0, -1.0, 1.0, 1.0)
 DIRECT_QK_RELATION_SOURCE = "direct_qk_centered_logits_and_probabilities"
 PROBABILITY_INVERSE_RELATION_SOURCE = "probability_log_inverse"
+ATTENTION_COORDINATE_CONVENTION = (
+    "normalized_xy_token_centers_corner_endpoints_v1"
+)
+ATTENTION_GRID_ALIGN_CORNERS = True
 
 
 def _torch() -> Any:
@@ -127,6 +131,8 @@ class AttentionRelationDescriptor:
     soft_rank_scale: float
     relative_distance_scale: float
     relation_source: str
+    coordinate_convention: str
+    grid_align_corners: bool
     component_identity_digest: str
 
 
@@ -153,6 +159,8 @@ class AttentionRelationGraphIdentity:
     soft_rank_temperature: float
     soft_rank_scale: float
     relative_distance_scale: float
+    coordinate_convention: str
+    grid_align_corners: bool
     qk_operator_metadata_records: tuple[dict[str, Any], ...]
     qk_operator_metadata_digest: str
     qk_operator_metadata_ready: bool
@@ -189,7 +197,7 @@ def centered_qk_logits(attention: Any) -> tuple[Any, str]:
 
 
 def public_token_grid_coordinates(token_indices: tuple[int, ...], device: Any) -> Any:
-    """由公开原始 token 索引恢复归一化二维坐标。"""
+    """按角点中心落在 -1 和 1 的约定恢复归一化二维坐标."""
 
     torch = _torch()
     if len(token_indices) < 4 or len(set(token_indices)) != len(token_indices):
@@ -321,6 +329,8 @@ def build_attention_relation_descriptor(
         "relative_distance_scale": relative_distance_scale,
         "token_indices": token_indices,
         "relation_source": relation_source,
+        "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
+        "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
     }
     return AttentionRelationDescriptor(
         values=values,
@@ -330,6 +340,8 @@ def build_attention_relation_descriptor(
         soft_rank_scale=soft_rank_scale,
         relative_distance_scale=relative_distance_scale,
         relation_source=relation_source,
+        coordinate_convention=ATTENTION_COORDINATE_CONVENTION,
+        grid_align_corners=ATTENTION_GRID_ALIGN_CORNERS,
         component_identity_digest=build_stable_digest(identity_payload),
     )
 
@@ -443,6 +455,8 @@ def qk_self_attention(
             "sampled_token_count": len(token_indices),
             "sampled_grid_side": sampled_side,
             "sampled_token_indices": list(token_indices),
+            "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
+            "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
             "centered_logit_aggregation": (
                 "mean_of_per_head_row_centered_sampled_qk_logits"
             ),
@@ -499,7 +513,7 @@ def attention_relation_stability_map(
         sampled_map,
         size=spatial_size,
         mode="bilinear",
-        align_corners=False,
+        align_corners=ATTENTION_GRID_ALIGN_CORNERS,
     )[:, 0]
 
 
@@ -1022,6 +1036,10 @@ def build_attention_relation_graph_identity(
             and isinstance(sampled_grid_side, int)
             and sampled_grid_side**2 == len(token_indices)
             and sampled_indices == list(token_indices)
+            and metadata.get("coordinate_convention")
+            == ATTENTION_COORDINATE_CONVENTION
+            and metadata.get("grid_align_corners")
+            is ATTENTION_GRID_ALIGN_CORNERS
             and isinstance(source_grid_side, int)
             and isinstance(source_token_count, int)
             and source_grid_side**2 == source_token_count
@@ -1044,6 +1062,8 @@ def build_attention_relation_graph_identity(
         soft_rank_temperature=reference.soft_rank_temperature,
         soft_rank_scale=reference.soft_rank_scale,
         relative_distance_scale=reference.relative_distance_scale,
+        coordinate_convention=reference.coordinate_convention,
+        grid_align_corners=reference.grid_align_corners,
         qk_operator_metadata_records=qk_operator_metadata_records,
         qk_operator_metadata_digest=qk_operator_metadata_digest,
         qk_operator_metadata_ready=operator_ready,

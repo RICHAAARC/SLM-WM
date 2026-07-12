@@ -29,7 +29,7 @@
 
 高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对标准高斯模板按元素绝对幅值稳定排序，精确保留 `ceil(element_count * tail_fraction)` 个元素，并以展平索引处理同幅值排序；该算子不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。内容模板与安全投影实现位于 `main/methods/carrier/keyed_tensor.py`。
 
-注意力分支风险必须接收由真实跨层 Q/K 关系计算的独立稳定度，核心接口不接受缺失值。最终图像 Q/K 提取在冻结检测日程上调用 scheduler 的 `scale_noise`；缺少该方法或方法不可调用时运行失败，当前协议不定义线性 latent/noise 混合作为替代算子。
+注意力分支风险必须接收由真实跨层 Q/K 关系计算的独立稳定度，核心接口不接受缺失值。正式层集合精确固定为 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 运行时直接按名称解析公开 `to_q`、`to_k` 与 `heads` 协议。token 坐标采用 `normalized_xy_token_centers_corner_endpoints_v1`, 角点中心分别落在 -1 与 1；关系稳定图插值和图像仿射重采样统一使用 `align_corners=True`。最终图像 Q/K 提取在冻结检测日程上调用 scheduler 的 `scale_noise`；缺少该方法或方法不可调用时运行失败，当前协议不定义线性 latent/noise 混合作为替代算子。
 
 分支风险中的 `local_contrast_risk` 定义为解码灰度图相对反射填充5x5局部均值的绝对偏离。`adjacent_step_stability` 直接来自当前与紧邻上一 scheduler 步 latent 的解码 RGB 差异；注入回调在每个 post-step 时刻更新参考 latent，并把参考索引和 Tensor 内容 SHA-256 写入更新原子。204维 `handcrafted_structure_feature` 由 RGB 通道均值/标准差、水平/垂直绝对梯度均值和8x8 RGB 平均池化组成；一般感知质量结论必须独立依赖正式 FID、KID 与配对图像质量指标。
 

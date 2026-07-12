@@ -66,6 +66,8 @@ from experiments.artifacts.image_only_detection_metrics import (
 from main.methods.carrier import keyed_prg_protocol_record
 from main.core.digest import build_stable_digest
 from main.methods.geometry import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
     DIRECT_QK_RELATION_SOURCE,
 )
@@ -550,6 +552,35 @@ def _scientific_update_record_ready(
         != "sampled_image_token_qk_relation_probability"
     ):
         return False
+    qk_operator_records = record.get(
+        "attention_relation_qk_operator_metadata_records"
+    )
+    if (
+        record.get("attention_module_names")
+        != list(config.attention_module_names)
+        or record.get("attention_coordinate_convention")
+        != ATTENTION_COORDINATE_CONVENTION
+        or record.get("attention_grid_align_corners")
+        is not ATTENTION_GRID_ALIGN_CORNERS
+        or record.get("attention_relation_qk_operator_metadata_ready")
+        is not True
+        or not isinstance(qk_operator_records, list)
+        or tuple(
+            operator.get("record_layer_name")
+            for operator in qk_operator_records
+            if isinstance(operator, dict)
+        )
+        != config.attention_module_names
+        or any(
+            not isinstance(operator, dict)
+            or operator.get("coordinate_convention")
+            != ATTENTION_COORDINATE_CONVENTION
+            or operator.get("grid_align_corners")
+            is not ATTENTION_GRID_ALIGN_CORNERS
+            for operator in qk_operator_records
+        )
+    ):
+        return False
     semantic_cosine = record.get("full_semantic_cosine_similarity")
     structure_relative_drift = record.get(
         "full_handcrafted_structure_feature_relative_drift"
@@ -684,6 +715,9 @@ def _final_image_attention_observability_ready(
     paired_component_gains = record.get(
         "final_image_attention_carrier_paired_component_gains"
     )
+    qk_operator_records = record.get(
+        "attention_relation_qk_operator_metadata_records"
+    )
     counterfactual_digests = tuple(
         str(record.get(field_name, ""))
         for field_name in (
@@ -719,6 +753,29 @@ def _final_image_attention_observability_ready(
         and record.get("attention_relation_direct_qk_source_ready") is True
         and record.get("attention_relation_probability_scope")
         == "sampled_image_token_qk_relation_probability"
+        and record.get("attention_module_names")
+        == list(config.attention_module_names)
+        and record.get("attention_coordinate_convention")
+        == ATTENTION_COORDINATE_CONVENTION
+        and record.get("attention_grid_align_corners")
+        is ATTENTION_GRID_ALIGN_CORNERS
+        and record.get("attention_relation_qk_operator_metadata_ready")
+        is True
+        and isinstance(qk_operator_records, list)
+        and tuple(
+            operator.get("record_layer_name")
+            for operator in qk_operator_records
+            if isinstance(operator, dict)
+        )
+        == config.attention_module_names
+        and all(
+            isinstance(operator, dict)
+            and operator.get("coordinate_convention")
+            == ATTENTION_COORDINATE_CONVENTION
+            and operator.get("grid_align_corners")
+            is ATTENTION_GRID_ALIGN_CORNERS
+            for operator in qk_operator_records
+        )
         and component_names == list(ATTENTION_RELATION_COMPONENT_NAMES)
         and len(component_identity_digest) == 64
         and all(

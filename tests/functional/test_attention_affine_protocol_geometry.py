@@ -14,12 +14,15 @@ from main.methods.geometry.attention_alignment import (
     recover_attention_affine_alignment,
 )
 from main.methods.geometry.differentiable_attention import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
     QKAttentionRelation,
     StableAttentionTokenSelection,
     build_attention_relation_descriptor,
     build_stable_attention_pair_weights,
     keyed_relation_signs,
+    public_token_grid_coordinates,
     select_stable_attention_tokens,
     transport_stable_attention_pair_weights,
 )
@@ -61,6 +64,8 @@ def _qk_operator_metadata(layer_name: str) -> dict[str, object]:
         "sampled_token_count": _TOKEN_COUNT,
         "sampled_grid_side": 8,
         "sampled_token_indices": list(_TOKEN_INDICES),
+        "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
+        "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
         "centered_logit_aggregation": (
             "mean_of_per_head_row_centered_sampled_qk_logits"
         ),
@@ -78,6 +83,29 @@ def _grid_coordinates() -> torch.Tensor:
     return torch.tensor(
         [(float(x), float(y)) for y in axis for x in axis],
         dtype=torch.float32,
+    )
+
+
+@pytest.mark.quick
+def test_public_token_coordinates_use_corner_center_endpoints() -> None:
+    """公开 token 坐标必须与 align_corners=True 的角点中心完全一致."""
+
+    coordinates = public_token_grid_coordinates((0, 2, 6, 8), "cpu")
+
+    assert ATTENTION_GRID_ALIGN_CORNERS is True
+    assert ATTENTION_COORDINATE_CONVENTION == (
+        "normalized_xy_token_centers_corner_endpoints_v1"
+    )
+    assert torch.equal(
+        coordinates,
+        torch.tensor(
+            (
+                (-1.0, -1.0),
+                (1.0, -1.0),
+                (-1.0, 1.0),
+                (1.0, 1.0),
+            )
+        ),
     )
 
 

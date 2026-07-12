@@ -177,6 +177,16 @@ def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: 
 
     assert shared_method_settings(probe_config) == shared_method_settings(pilot_config)
     assert shared_method_settings(pilot_config) == shared_method_settings(full_config)
+    assert shared_method_settings(probe_config)["attention_module_names"] == (
+        "transformer_blocks.0.attn",
+        "transformer_blocks.23.attn",
+    )
+    assert shared_method_settings(probe_config)[
+        "attention_coordinate_convention"
+    ] == "normalized_xy_token_centers_corner_endpoints_v1"
+    assert shared_method_settings(probe_config)[
+        "attention_grid_align_corners"
+    ] is True
     assert probe_config.target_fpr == 0.1
     assert pilot_config.target_fpr == 0.01
     assert full_config.target_fpr == 0.001

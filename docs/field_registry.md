@@ -1781,6 +1781,7 @@ Notebook 与 repository module 的跨边界数据
 | eligible_position_count | metric | none | true | true | false | 单个分支通过风险资格阈值的 latent 空间位置数量。 |
 | risk_field_position_count | metric | none | true | true | false | 单个分支风险场覆盖的 latent 空间位置总数。 |
 | scientific_autograd_compatibility | environment | none | true | false | false | 为精确 forward AD 与 latent 输入梯度固定的模型注意力实现摘要。 |
+| attention_operator_contract | environment | none | true | false | false | 当前科学运行实际解析的冻结注意力层集合与统一坐标约定摘要。 |
 | clip_attention_implementation | environment | none | true | false | false | CLIP 视觉编码器使用的注意力实现, 当前正式值为 eager。 |
 | vae_attention_processor | environment | none | true | false | false | VAE 可微解码使用的 Diffusers attention processor。 |
 | baseline_observations_sha256 | provenance | none | true | false | false | 单 baseline transfer manifest 绑定的 observation 文件 SHA-256。 |
@@ -2527,6 +2528,10 @@ Notebook 与 repository module 的跨边界数据
 | adjacent_step_stability_status | governance | none | true | true | false | 相邻步稳定度是否从紧邻上一 scheduler 步真实 latent 测量。 |
 | attention_stable_token_fraction | protocol | none | true | false | false | 真实 Q/K 关系图按稳定度与接收 attention 显著度固定选择的 token 比例。 |
 | attention_unstable_pair_weight | protocol | none | true | false | false | 稳定 token 集合外规则网格关系在 Q/K 目标中保留的冻结支撑权重。 |
+| max_attention_tokens | protocol | none | true | false | false | 每个冻结注意力层按规则二维网格抽样时允许保留的最大 token 数量。 |
+| attention_module_names | method | none | true | true | false | 方法配置、逐注入原子与最终成图 Q/K 记录共同绑定的精确 Transformer 注意力层名称有序集合。 |
+| attention_coordinate_convention | protocol | none | true | true | false | 配置与运行原子使用的归一化 token 坐标约定, 正式值为 normalized_xy_token_centers_corner_endpoints_v1。 |
+| attention_grid_align_corners | protocol | none | true | true | false | token 稳定图插值与图像仿射重采样是否统一使用角点中心端点语义, 正式值为 true。 |
 | minimum_final_image_attention_score_gain | protocol | none | true | true | false | 完整方法相对 carrier-only 的两类最终图像 attention 归因增益共同采用的严格正下界。 |
 | minimum_semantic_preservation_cosine | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的完整 CLIP cosine 冻结下界。 |
 | maximum_handcrafted_structure_feature_relative_drift | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的手工结构统计特征相对漂移冻结上界。 |
@@ -2739,6 +2744,8 @@ Notebook 与 repository module 的跨边界数据
 | sampled_token_count | method | none | true | false | false | 冻结二维关系算子实际保留的图像 token 数量。 |
 | sampled_grid_side | method | none | true | false | false | 冻结二维关系算子抽样网格边长。 |
 | sampled_token_indices | provenance | none | true | false | false | 抽样 token 在原始二维图像 token 网格中的公开索引。 |
+| coordinate_convention | protocol | none | true | false | false | 单层 Q/K 算子与仿射注册元数据记录的归一化 xy 坐标身份。 |
+| grid_align_corners | protocol | none | true | false | false | 单层 Q/K 算子和仿射注册是否采用角点中心对应 -1 与 1 的重采样语义。 |
 | centered_logit_aggregation | method | none | true | false | false | 多头中心化 Q/K logits 的冻结聚合顺序身份。 |
 | relation_probability_aggregation | method | none | true | false | false | 多头抽样图像 token 关系概率的冻结聚合顺序身份。 |
 | mean_probability_is_softmax_of_mean_logits | governance | none | true | false | false | 多头平均概率是否被误写成平均 logits 的 softmax, 正式值固定为 false。 |

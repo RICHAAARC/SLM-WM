@@ -34,6 +34,8 @@ from experiments.runners.image_only_dataset_runtime import (
 )
 from experiments.runtime.repository_environment import file_digest
 from main.methods.geometry.differentiable_attention import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
     QKAttentionRelation,
     keyed_relation_signs,
 )
@@ -151,6 +153,15 @@ def _counterfactual_update_records(
                 "keyed_prg_protocol_digest": keyed_prg_protocol_record(
                     config.keyed_prg_version
                 )["keyed_prg_protocol_digest"],
+                "attention_module_names": list(
+                    config.attention_module_names
+                ),
+                "attention_coordinate_convention": (
+                    config.attention_coordinate_convention
+                ),
+                "attention_grid_align_corners": (
+                    config.attention_grid_align_corners
+                ),
                 "active_carrier_branches": list(branches),
                 "null_space_records": {
                     branch_name: {"branch_name": branch_name}
@@ -565,7 +576,10 @@ def test_final_image_attention_gate_uses_reencoded_real_qk_scores() -> None:
     token_count = 9
     token_indices = tuple(range(token_count))
     key_material = "final_image_qk_gate_key"
-    layer_names = ("final_qk_layer_a", "final_qk_layer_b")
+    layer_names = (
+        "transformer_blocks.0.attn",
+        "transformer_blocks.23.attn",
+    )
 
     def records(signature_strength: float):
         """构造可精确控制密钥关系强度的两层真实 Q/K 记录形状。"""
@@ -601,6 +615,10 @@ def test_final_image_attention_gate_uses_reencoded_real_qk_scores() -> None:
                     "sampled_token_count": token_count,
                     "sampled_grid_side": 3,
                     "sampled_token_indices": list(token_indices),
+                    "coordinate_convention": (
+                        ATTENTION_COORDINATE_CONVENTION
+                    ),
+                    "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
                     "centered_logit_aggregation": (
                         "mean_of_per_head_row_centered_sampled_qk_logits"
                     ),

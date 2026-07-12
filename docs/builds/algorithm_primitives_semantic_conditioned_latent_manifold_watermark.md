@@ -379,8 +379,8 @@ $$
 
 ### （二）Attention graph 构造
 
-对第 $t$ 步、第 $\ell$ 层 Transformer block, 在冻结二维图像 token 抽样集合
-$\mathcal I$ 上直接读取每个注意力头的 `to_q` 与 `to_k` 投影。设
+正式层集合精确固定为 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`。对第 $t$ 步、第 $\ell$ 层 Transformer block, 在冻结二维图像 token 抽样集合
+$\mathcal I$ 上直接读取每个注意力头的 `to_q` 与 `to_k` 投影；层缺失或不公开 `to_q`、`to_k`、`heads` 时运行失败。设
 
 $$
 \ell_{ij}^{(h)}=\frac{q_i^{(h)\top}k_j^{(h)}}{\sqrt{d_h}},\qquad
@@ -436,7 +436,7 @@ $$
 \left[1+\sum_{k\ne j}\sigma\left(\frac{L_{ik}-L_{ij}}{\tau_r}\right)\right].
 $$
 
-公开二维坐标 $p_i\in[-1,1]^2$ 由 `token_indices` 唯一恢复, 距离因子为
+公开二维坐标 $p_i\in[-1,1]^2$ 由 `token_indices` 唯一恢复。角点 token 中心分别落在 -1 与 1, 坐标身份固定为 `normalized_xy_token_centers_corner_endpoints_v1`；token 稳定图插值和图像仿射重采样统一使用 `align_corners=True`。距离因子为
 $D_{ij}=\|p_i-p_j\|_2/(2\sqrt2)$。第4分量使用中心化关系概率调制距离：
 
 $$

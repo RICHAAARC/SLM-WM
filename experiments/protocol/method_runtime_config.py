@@ -17,9 +17,25 @@ import yaml
 
 from experiments.runtime.model_sources import require_registered_model_reference
 from main.core.keyed_prg import require_supported_keyed_prg_version
+from main.methods.geometry import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
+)
 
 
 FORMAL_METHOD_CONFIG_RELATIVE_PATH = Path("configs/model_sd35.yaml")
+
+
+def _is_exact_sd35_attention_module_name(name: str) -> bool:
+    """判断层名是否精确指向一个 SD3.5 主注意力模块."""
+
+    prefix = "transformer_blocks."
+    suffix = ".attn"
+    return (
+        name.startswith(prefix)
+        and name.endswith(suffix)
+        and name[len(prefix) : -len(suffix)].isdigit()
+    )
 
 
 @dataclass(frozen=True)
@@ -59,7 +75,9 @@ class FormalMethodRuntimeConfig:
     maximum_handcrafted_structure_feature_relative_drift: float
     injection_step_indices: tuple[int, ...]
     max_attention_tokens: int
-    attention_module_count: int
+    attention_module_names: tuple[str, ...]
+    attention_coordinate_convention: str
+    attention_grid_align_corners: bool
     diffusion_attacks_enabled: bool
 
     def __post_init__(self) -> None:
@@ -132,8 +150,26 @@ class FormalMethodRuntimeConfig:
             raise ValueError(
                 "maximum_handcrafted_structure_feature_relative_drift 必须位于 [0, 1]"
             )
-        if self.max_attention_tokens < 4 or self.attention_module_count < 2:
+        if self.max_attention_tokens < 4 or len(self.attention_module_names) < 2:
             raise ValueError("注意力几何配置不能退化为单层或过短 token 近似")
+        if len(set(self.attention_module_names)) != len(
+            self.attention_module_names
+        ):
+            raise ValueError("attention_module_names 不得包含重复层名")
+        if any(
+            not _is_exact_sd35_attention_module_name(name)
+            for name in self.attention_module_names
+        ):
+            raise ValueError(
+                "attention_module_names 必须使用精确 transformer_blocks.<index>.attn 名称"
+            )
+        if (
+            self.attention_coordinate_convention
+            != ATTENTION_COORDINATE_CONVENTION
+            or self.attention_grid_align_corners
+            is not ATTENTION_GRID_ALIGN_CORNERS
+        ):
+            raise ValueError("注意力 token 与图像坐标约定必须匹配核心算子")
         if not self.diffusion_attacks_enabled:
             raise ValueError("正式方法配置必须启用真实扩散攻击协议")
 
@@ -175,6 +211,14 @@ class FormalMethodRuntimeConfig:
             "maximum_handcrafted_structure_feature_relative_drift": (
                 self.maximum_handcrafted_structure_feature_relative_drift
             ),
+            "max_attention_tokens": self.max_attention_tokens,
+            "attention_module_names": self.attention_module_names,
+            "attention_coordinate_convention": (
+                self.attention_coordinate_convention
+            ),
+            "attention_grid_align_corners": (
+                self.attention_grid_align_corners
+            ),
         }
 
 
@@ -208,6 +252,9 @@ def load_formal_method_runtime_config(root: str | Path = ".") -> FormalMethodRun
     payload = _required_payload(yaml.safe_load(path.read_text(encoding="utf-8")), path)
     normalized = dict(payload)
     normalized["injection_step_indices"] = tuple(int(value) for value in payload["injection_step_indices"])
+    normalized["attention_module_names"] = tuple(
+        str(value) for value in payload["attention_module_names"]
+    )
     return FormalMethodRuntimeConfig(**normalized)
 
 
@@ -264,6 +311,15 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
             config.maximum_handcrafted_structure_feature_relative_drift
         ),
         "SLM_WM_MAX_ATTENTION_TOKENS": str(config.max_attention_tokens),
+        "SLM_WM_ATTENTION_MODULE_NAMES": ",".join(
+            config.attention_module_names
+        ),
+        "SLM_WM_ATTENTION_COORDINATE_CONVENTION": (
+            config.attention_coordinate_convention
+        ),
+        "SLM_WM_ATTENTION_GRID_ALIGN_CORNERS": (
+            "1" if config.attention_grid_align_corners else "0"
+        ),
         "SLM_WM_ENABLE_DIFFUSION_ATTACKS": "1" if config.diffusion_attacks_enabled else "0",
     }
     drift = {

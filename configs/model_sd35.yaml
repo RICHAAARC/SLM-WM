@@ -31,5 +31,9 @@ minimum_semantic_preservation_cosine: 0.995
 maximum_handcrafted_structure_feature_relative_drift: 0.02
 injection_step_indices: [6, 10, 14]
 max_attention_tokens: 64
-attention_module_count: 2
+attention_module_names:
+  - transformer_blocks.0.attn
+  - transformer_blocks.23.attn
+attention_coordinate_convention: normalized_xy_token_centers_corner_endpoints_v1
+attention_grid_align_corners: true
 diffusion_attacks_enabled: true

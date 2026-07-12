@@ -13,6 +13,7 @@ from zipfile import ZipFile
 
 import pytest
 import torch
+from PIL import Image
 import main.core.keyed_prg as keyed_prg_module
 import main.methods.carrier.keyed_tensor as keyed_tensor_module
 import main.methods.geometry.differentiable_attention as attention_module
@@ -27,6 +28,8 @@ from main.methods.carrier import (
 )
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
     DifferentiableAttentionRecorder,
     QKAttentionRelation,
@@ -60,6 +63,8 @@ from experiments.runners.image_only_dataset_runtime import (
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
+    _align_image,
+    _attention_modules,
     _image_attention_extractor,
     _public_detection_noise_seed,
     build_semantic_watermark_run_id,
@@ -109,6 +114,8 @@ def _direct_qk_relation_from_logits(
             "sampled_token_count": token_count,
             "sampled_grid_side": grid_side,
             "sampled_token_indices": list(range(token_count)),
+            "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
+            "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
             "centered_logit_aggregation": (
                 "mean_of_per_head_row_centered_sampled_qk_logits"
             ),
@@ -372,6 +379,22 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         ),
         "attention_relation_component_identity_digest": "b" * 64,
         "attention_relation_keyed_projection_digest": "c" * 64,
+        "attention_relation_qk_operator_metadata_records": [
+            {
+                "record_layer_name": layer_name,
+                "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
+                "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
+            }
+            for layer_name in config.attention_module_names
+        ],
+        "attention_relation_qk_operator_metadata_ready": True,
+        "attention_module_names": list(config.attention_module_names),
+        "attention_coordinate_convention": (
+            config.attention_coordinate_convention
+        ),
+        "attention_grid_align_corners": (
+            config.attention_grid_align_corners
+        ),
         "quantized_write_update_content_sha256": "d" * 64,
         "quantized_write_jacobian_gate_applicable": True,
         "quantized_write_jacobian_response_norm": 1e-5,
@@ -406,6 +429,9 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "keyed_prg_protocol_digest"
     ]
     record["adjacent_step_reference_index"] = 4
+    assert _scientific_update_record_ready(record, config) is False
+    record["adjacent_step_reference_index"] = 5
+    record["attention_module_names"] = ["transformer_blocks.1.attn"]
     assert _scientific_update_record_ready(record, config) is False
 
 
@@ -531,6 +557,74 @@ class _ToyAttention(torch.nn.Module):
 
 
 @pytest.mark.quick
+def test_attention_modules_resolve_only_frozen_exact_layer_names() -> None:
+    """运行时必须按配置层名解析模块, 不得按枚举位置重新选择."""
+
+    class ToyBlock(torch.nn.Module):
+        """提供一个带主注意力模块的轻量 Transformer block."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.attn = _ToyAttention(4)
+
+    class ToyTransformer(torch.nn.Module):
+        """提供与 SD3.5 相同的公开 block 路径结构."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.transformer_blocks = torch.nn.ModuleList(
+                ToyBlock() for _ in range(24)
+            )
+
+    transformer = ToyTransformer()
+    pipeline = SimpleNamespace(transformer=transformer)
+    frozen_names = (
+        "transformer_blocks.0.attn",
+        "transformer_blocks.23.attn",
+    )
+
+    resolved = _attention_modules(pipeline, frozen_names)
+
+    assert tuple(name for name, _ in resolved) == frozen_names
+    assert resolved[0][1] is transformer.transformer_blocks[0].attn
+    assert resolved[1][1] is transformer.transformer_blocks[23].attn
+    with pytest.raises(RuntimeError, match="冻结注意力层不存在"):
+        _attention_modules(
+            pipeline,
+            ("transformer_blocks.0.attn", "transformer_blocks.24.attn"),
+        )
+
+
+@pytest.mark.quick
+def test_image_alignment_uses_token_endpoint_coordinate_convention() -> None:
+    """图像重采样必须使用与 token 角点中心一致的 align_corners=True."""
+
+    image = Image.new("RGB", (3, 3))
+    image.putdata(
+        [
+            (value, value, value)
+            for _ in range(3)
+            for value in (10, 100, 200)
+        ]
+    )
+    alignment = SimpleNamespace(
+        affine_transform=((1.0, 0.0, 1.0), (0.0, 1.0, 0.0))
+    )
+
+    aligned = _align_image(image, alignment)
+
+    assert ATTENTION_COORDINATE_CONVENTION == (
+        "normalized_xy_token_centers_corner_endpoints_v1"
+    )
+    assert ATTENTION_GRID_ALIGN_CORNERS is True
+    assert [aligned.getpixel((column, 1))[0] for column in range(3)] == [
+        100,
+        200,
+        200,
+    ]
+
+
+@pytest.mark.quick
 def test_qk_sampling_preserves_two_dimensional_token_grid() -> None:
     """有界 Q/K 抽样必须沿二维行列轴取点, 不能等距抽一维序号。"""
 
@@ -589,6 +683,10 @@ def test_multihead_qk_relation_matches_independent_manual_calculation() -> None:
     assert relation.metadata["q_normalization_applied"] is False
     assert relation.metadata["k_normalization_applied"] is False
     assert relation.metadata["sampled_token_indices"] == [0, 1, 2, 3]
+    assert relation.metadata["coordinate_convention"] == (
+        ATTENTION_COORDINATE_CONVENTION
+    )
+    assert relation.metadata["grid_align_corners"] is True
     assert relation.metadata[
         "mean_probability_is_softmax_of_mean_logits"
     ] is False

@@ -65,6 +65,14 @@ DEFAULT_MINIMUM_SEMANTIC_PRESERVATION_COSINE = (
 DEFAULT_MAXIMUM_HANDCRAFTED_STRUCTURE_FEATURE_RELATIVE_DRIFT = (
     _FORMAL_METHOD_DEFAULTS.maximum_handcrafted_structure_feature_relative_drift
 )
+DEFAULT_MAX_ATTENTION_TOKENS = _FORMAL_METHOD_DEFAULTS.max_attention_tokens
+DEFAULT_ATTENTION_MODULE_NAMES = _FORMAL_METHOD_DEFAULTS.attention_module_names
+DEFAULT_ATTENTION_COORDINATE_CONVENTION = (
+    _FORMAL_METHOD_DEFAULTS.attention_coordinate_convention
+)
+DEFAULT_ATTENTION_GRID_ALIGN_CORNERS = (
+    _FORMAL_METHOD_DEFAULTS.attention_grid_align_corners
+)
 UNBOUNDED_LIMIT_TOKENS = {"", "all", "none", "unlimited"}
 SHARED_METHOD_SETTING_FIELDS = (
     "inference_steps",
@@ -87,6 +95,10 @@ SHARED_METHOD_SETTING_FIELDS = (
     "null_space_cg_relative_tolerance",
     "minimum_semantic_preservation_cosine",
     "maximum_handcrafted_structure_feature_relative_drift",
+    "max_attention_tokens",
+    "attention_module_names",
+    "attention_coordinate_convention",
+    "attention_grid_align_corners",
 )
 
 RUN_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -170,6 +182,14 @@ class PaperRunConfig:
     maximum_handcrafted_structure_feature_relative_drift: float = (
         DEFAULT_MAXIMUM_HANDCRAFTED_STRUCTURE_FEATURE_RELATIVE_DRIFT
     )
+    max_attention_tokens: int = DEFAULT_MAX_ATTENTION_TOKENS
+    attention_module_names: tuple[str, ...] = DEFAULT_ATTENTION_MODULE_NAMES
+    attention_coordinate_convention: str = (
+        DEFAULT_ATTENTION_COORDINATE_CONVENTION
+    )
+    attention_grid_align_corners: bool = (
+        DEFAULT_ATTENTION_GRID_ALIGN_CORNERS
+    )
 
     def __post_init__(self) -> None:
         """集中校验内容载体维度边界。
@@ -223,6 +243,16 @@ class PaperRunConfig:
             raise ValueError(
                 "maximum_handcrafted_structure_feature_relative_drift 必须位于 [0, 1]"
             )
+        if self.max_attention_tokens < 4 or len(self.attention_module_names) < 2:
+            raise ValueError("注意力几何配置不能退化为单层或过短 token 近似")
+        if (
+            self.attention_module_names != DEFAULT_ATTENTION_MODULE_NAMES
+            or self.attention_coordinate_convention
+            != DEFAULT_ATTENTION_COORDINATE_CONVENTION
+            or self.attention_grid_align_corners
+            is not DEFAULT_ATTENTION_GRID_ALIGN_CORNERS
+        ):
+            raise ValueError("论文运行必须使用统一冻结的注意力层与坐标约定")
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 兼容字典, 便于写入 manifest 或 Notebook 日志。"""

@@ -42,6 +42,15 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
     assert config.injection_step_indices == method_config.injection_step_indices
     assert config.candidate_count == method_config.jacobian_candidate_count
     assert config.null_rank == method_config.null_space_rank
+    assert config.attention_module_names == (
+        "transformer_blocks.0.attn",
+        "transformer_blocks.23.attn",
+    )
+    assert config.attention_module_names == method_config.attention_module_names
+    assert config.attention_coordinate_convention == (
+        "normalized_xy_token_centers_corner_endpoints_v1"
+    )
+    assert config.attention_grid_align_corners is True
     assert diffusion_source.revision_url.endswith(f"/tree/{diffusion_source.revision}")
     assert "primary_diffusion_model" in diffusion_source.usage_roles
     assert "semantic_condition_encoder" in vision_source.usage_roles
@@ -49,6 +58,13 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         "stabilityai/stable-diffusion-3.5-medium@"
         "b940f670f0eda2d07fbb75229e779da1ad11eb80"
     )
+    with pytest.raises(ValueError, match="精确注意力层集合"):
+        SemanticWatermarkRuntimeConfig(
+            attention_module_names=(
+                "transformer_blocks.1.attn",
+                "transformer_blocks.22.attn",
+            )
+        )
 
 
 @pytest.mark.quick

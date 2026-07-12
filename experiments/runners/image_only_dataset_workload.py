@@ -91,7 +91,13 @@ def build_method_config(
             method.maximum_handcrafted_structure_feature_relative_drift
         ),
         max_attention_tokens=method.max_attention_tokens,
-        attention_module_count=method.attention_module_count,
+        attention_module_names=method.attention_module_names,
+        attention_coordinate_convention=(
+            method.attention_coordinate_convention
+        ),
+        attention_grid_align_corners=(
+            method.attention_grid_align_corners
+        ),
         diffusion_attacks_enabled=method.diffusion_attacks_enabled,
     )
 

@@ -30,7 +30,7 @@
 2. **完整特征 Jacobian Null Space**: 对512维归一化 CLIP embedding 与204维 RGB 统计/梯度/8x8池化手工结构向量执行 JVP/VJP, 再通过无阻尼风险支持约束投影求解逐列通过残差门禁的方向；204维向量不单独表示一般感知质量。
 3. **空间 LF 内容载体**: 使用具有明确低通含义的空间平滑结构承载内容码。
 4. **高斯幅值尾部截断载体**: 按高斯幅值分布的尾部集合选择鲁棒补充分支, 不把该分支解释为空间高频。
-5. **Q/K attention 几何**: 从真实 self-attention 的 Q/K 状态构造图几何并驱动 attention-relative update。
+5. **Q/K attention 几何**: 从精确冻结的 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn` 读取真实 Q/K 状态, 在角点中心映射到 -1 与 1 且图像重采样使用 `align_corners=True` 的统一坐标约定下构造图几何并驱动 attention-relative update。
 6. **仅图像盲检**: 检测器只接收最终图像、方法密钥和公开模型, 不读取生成 latent 轨迹。
 7. **同阈值几何救援**: 几何分支只能在冻结的同一检测阈值下修正证据, 不得重新调节 operating point。
 

@@ -78,7 +78,7 @@
 
 ### 4.4 Q/K attention 几何
 
-1. 从 Transformer attention 模块的 `to_q`、`to_k` 读取真实投影, 在冻结二维抽样图像 token 集合上同时保存中心化 logits 与关系概率。
+1. 精确解析 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 从模块 `to_q`、`to_k` 读取真实投影, 在角点 token 中心映射到 -1 与 1 的冻结二维抽样集合上同时保存中心化 logits 与关系概率；token 插值和图像仿射重采样统一使用 `align_corners=True`。
 2. 构造中心化 logit、温度0.25的可微 rank、抽样关系概率和概率偏离与距离偏离的双中心交互四分量图, 各分量逐行加权归一化后通过密钥符号投影等权组合。
 3. 由跨层稳定度和 attention 显著度选择 token, 构造可跨阶段核对身份的 pair 权重。
 4. 对 latent 求真实目标梯度, 并投影到安全方向。

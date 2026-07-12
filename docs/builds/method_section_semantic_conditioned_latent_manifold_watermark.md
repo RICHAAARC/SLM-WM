@@ -330,8 +330,7 @@ $$
 
 ### 3.6.1 真实 Q/K 关系图
 
-对冻结二维图像 token 抽样集合 $\mathcal I$，正式算子直接调用每个注意力头的
-`to_q` 与 `to_k` 投影。令 $\ell_{ij}^{(h)}=q_i^{(h)\top}k_j^{(h)}/\sqrt{d_h}$,
+正式层集合精确固定为 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`。对冻结二维图像 token 抽样集合 $\mathcal I$，正式算子直接调用每个注意力头的 `to_q` 与 `to_k` 投影, 不按模块枚举位置动态选择层。令 $\ell_{ij}^{(h)}=q_i^{(h)\top}k_j^{(h)}/\sqrt{d_h}$,
 四分量关系边为
 
 $$
@@ -339,7 +338,7 @@ r_{ij}=[L_{ij},\rho_{ij},P_{ij},G_{ij}],
 $$
 
 其中 $L$ 是各头 logits 移除逐行均值后的平均，$P$ 是各头在 $\mathcal I$ 上
-row-softmax 概率的平均，$D_{ij}=\|p_i-p_j\|_2/(2\sqrt2)$ 来自公开二维索引，
+row-softmax 概率的平均。公开坐标采用 `normalized_xy_token_centers_corner_endpoints_v1`, 角点 token 中心分别落在 -1 与 1, token 插值与图像仿射重采样统一使用 `align_corners=True`。$D_{ij}=\|p_i-p_j\|_2/(2\sqrt2)$ 来自该公开二维索引，
 第4分量为
 
 $$

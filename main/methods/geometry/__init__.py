@@ -2,6 +2,8 @@
 
 from main.methods.geometry.attention_alignment import AttentionAlignmentResult, recover_attention_affine_alignment
 from main.methods.geometry.differentiable_attention import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
     ATTENTION_RELATION_COMPONENT_WEIGHTS,
     ATTENTION_RELATION_SOFT_RANK_TEMPERATURE,
@@ -35,6 +37,8 @@ from main.methods.geometry.differentiable_attention import (
 )
 
 __all__ = [
+    "ATTENTION_COORDINATE_CONVENTION",
+    "ATTENTION_GRID_ALIGN_CORNERS",
     "ATTENTION_RELATION_COMPONENT_NAMES",
     "ATTENTION_RELATION_COMPONENT_WEIGHTS",
     "ATTENTION_RELATION_SOFT_RANK_TEMPERATURE",

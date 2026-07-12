@@ -13,6 +13,8 @@ from typing import Any, Iterable
 
 from main.core.digest import build_stable_digest
 from main.methods.geometry.differentiable_attention import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
     ATTENTION_RELATION_COMPONENT_WEIGHTS,
     DIRECT_QK_RELATION_SOURCE,
@@ -927,6 +929,8 @@ def recover_attention_affine_alignment(
         "attention_relation_qk_operator_metadata_ready": (
             relation_graph_identity.qk_operator_metadata_ready
         ),
+        "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
+        "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
     }
     return AttentionAlignmentResult(
         affine_transform=transform_tuple,  # type: ignore[arg-type]
@@ -1065,6 +1069,8 @@ def recover_attention_affine_alignment(
                 descriptor.relative_distance_scale
             ),
             "coordinate_source": "original_image_token_grid",
+            "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
+            "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
             "registration_candidate_count": int(evaluated.transforms.shape[0]),
             "sync_margin_duplicate_transform_tolerance": 1e-4,
             "canonical_relation_weight": _CANONICAL_RELATION_WEIGHT,

@@ -50,6 +50,8 @@ from main.methods.carrier import (
 )
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
     DIRECT_QK_RELATION_SOURCE,
     DifferentiableAttentionRecorder,
@@ -133,7 +135,15 @@ class SemanticWatermarkRuntimeConfig:
         _FORMAL_METHOD_CONFIG.maximum_handcrafted_structure_feature_relative_drift
     )
     max_attention_tokens: int = _FORMAL_METHOD_CONFIG.max_attention_tokens
-    attention_module_count: int = _FORMAL_METHOD_CONFIG.attention_module_count
+    attention_module_names: tuple[str, ...] = (
+        _FORMAL_METHOD_CONFIG.attention_module_names
+    )
+    attention_coordinate_convention: str = (
+        _FORMAL_METHOD_CONFIG.attention_coordinate_convention
+    )
+    attention_grid_align_corners: bool = (
+        _FORMAL_METHOD_CONFIG.attention_grid_align_corners
+    )
     semantic_routing_enabled: bool = True
     branch_risk_mode: str = "branch_specific"
     null_space_enabled: bool = True
@@ -223,8 +233,23 @@ class SemanticWatermarkRuntimeConfig:
             )
         if not self.lf_enabled and not self.tail_robust_enabled:
             raise ValueError("正式内容检测至少需要启用一个内容载体分支")
-        if self.attention_module_count < 2:
+        if len(self.attention_module_names) < 2:
             raise ValueError("真实注意力关系稳定度至少需要两个 Q/K 注意力层")
+        if len(set(self.attention_module_names)) != len(
+            self.attention_module_names
+        ):
+            raise ValueError("attention_module_names 不得包含重复层名")
+        if self.attention_module_names != (
+            _FORMAL_METHOD_CONFIG.attention_module_names
+        ):
+            raise ValueError("正式运行不得改变冻结的精确注意力层集合")
+        if (
+            self.attention_coordinate_convention
+            != ATTENTION_COORDINATE_CONVENTION
+            or self.attention_grid_align_corners
+            is not ATTENTION_GRID_ALIGN_CORNERS
+        ):
+            raise ValueError("注意力 token 与图像坐标约定必须匹配核心算子")
         if self.max_attention_tokens < 4:
             raise ValueError("max_attention_tokens 至少为 4")
         if self.split not in {"dev", "calibration", "test"}:
@@ -301,7 +326,19 @@ def load_semantic_watermark_runtime_context(
     feature_runtime = DifferentiableSemanticFeatureRuntime(pipeline.vae, vision_model)
     for parameter in pipeline.transformer.parameters():
         parameter.requires_grad_(False)
-    attention_modules = _attention_modules(pipeline, config.attention_module_count)
+    attention_modules = _attention_modules(
+        pipeline,
+        config.attention_module_names,
+    )
+    runtime_versions["attention_operator_contract"] = {
+        "attention_module_names": list(config.attention_module_names),
+        "attention_coordinate_convention": (
+            config.attention_coordinate_convention
+        ),
+        "attention_grid_align_corners": (
+            config.attention_grid_align_corners
+        ),
+    }
     unconditional_prompt, unconditional_pooled = _unconditional_embeddings(
         pipeline,
         pipeline._execution_device,
@@ -367,6 +404,7 @@ def semantic_watermark_runtime_config_payload(
     payload = asdict(config)
     payload["key_material"] = build_stable_digest({"key_material": config.key_material})
     payload["injection_step_indices"] = list(config.injection_step_indices)
+    payload["attention_module_names"] = list(config.attention_module_names)
     payload["standard_attack_profiles"] = list(config.standard_attack_profiles)
     return payload
 
@@ -661,25 +699,29 @@ def load_completed_semantic_watermark_runtime_result(
         return None
 
 
-def _attention_modules(pipeline: Any, limit: int) -> tuple[tuple[str, Any], ...]:
-    """选择真实 Transformer 中公开 Q/K 投影的自注意力模块。"""
+def _attention_modules(
+    pipeline: Any,
+    layer_names: tuple[str, ...],
+) -> tuple[tuple[str, Any], ...]:
+    """按配置中的精确层名解析真实 Q/K 注意力模块."""
 
-    candidates = []
-    for name, module in pipeline.transformer.named_modules():
-        if hasattr(module, "to_q") and hasattr(module, "to_k") and hasattr(module, "heads"):
-            candidates.append((name, module))
-    if len(candidates) < limit:
-        raise RuntimeError("模型中的真实 Q/K 注意力模块数量不足")
-    if limit == 1:
-        return (candidates[len(candidates) // 2],)
-    selected = []
-    for index in range(limit):
-        selected_index = round(index * (len(candidates) - 1) / (limit - 1))
-        if candidates[selected_index] not in selected:
-            selected.append(candidates[selected_index])
-    if len(selected) != limit:
-        raise RuntimeError("无法选择足够数量且互不重复的真实 Q/K 注意力模块")
-    return tuple(selected)
+    available = dict(pipeline.transformer.named_modules())
+    resolved = []
+    for layer_name in layer_names:
+        module = available.get(layer_name)
+        if module is None:
+            raise RuntimeError(
+                f"冻结注意力层不存在: {layer_name}"
+            )
+        if not all(
+            hasattr(module, attribute)
+            for attribute in ("to_q", "to_k", "heads")
+        ):
+            raise RuntimeError(
+                f"冻结注意力层不满足公开 Q/K 协议: {layer_name}"
+            )
+        resolved.append((layer_name, module))
+    return tuple(resolved)
 
 
 def _unconditional_embeddings(pipeline: Any, device: Any) -> tuple[Any, Any]:
@@ -1259,6 +1301,13 @@ def _final_image_attention_observability_record(
             "attention_relation_qk_operator_metadata_records": [],
             "attention_relation_qk_operator_metadata_digest": "",
             "attention_relation_qk_operator_metadata_ready": False,
+            "attention_module_names": list(config.attention_module_names),
+            "attention_coordinate_convention": (
+                config.attention_coordinate_convention
+            ),
+            "attention_grid_align_corners": (
+                config.attention_grid_align_corners
+            ),
             "final_carrier_only_paired_attention_component_scores": {},
             "final_watermarked_carrier_paired_attention_component_scores": {},
             "final_image_attention_carrier_paired_component_gains": {},
@@ -1298,6 +1347,10 @@ def _final_image_attention_observability_record(
         == watermarked_record_schema
     ):
         raise RuntimeError("最终三图 Q/K 层身份或二维网格不一致")
+    if tuple(name for name, _ in clean_record_schema) != (
+        config.attention_module_names
+    ):
+        raise RuntimeError("最终成图 Q/K 记录没有使用配置冻结的精确层名")
     relation_identities = tuple(
         build_attention_relation_graph_identity(records, config.key_material)
         for records in (
@@ -1489,6 +1542,13 @@ def _final_image_attention_observability_record(
         "attention_relation_qk_operator_metadata_ready": (
             relation_identity.qk_operator_metadata_ready
         ),
+        "attention_module_names": list(config.attention_module_names),
+        "attention_coordinate_convention": (
+            config.attention_coordinate_convention
+        ),
+        "attention_grid_align_corners": (
+            config.attention_grid_align_corners
+        ),
         "final_carrier_only_paired_attention_component_scores": {
             name: float(value)
             for name, value in zip(
@@ -1617,8 +1677,18 @@ def _align_image(image: Any, alignment: Any) -> Any:
     pixels = torch.frombuffer(bytearray(rgb.tobytes()), dtype=torch.uint8).reshape(height, width, 3)
     tensor = pixels.permute(2, 0, 1).unsqueeze(0).float() / 255.0
     theta = torch.tensor(alignment.affine_transform, dtype=tensor.dtype).unsqueeze(0)
-    grid = functional.affine_grid(theta, tensor.shape, align_corners=False)
-    aligned = functional.grid_sample(tensor, grid, mode="bilinear", padding_mode="border", align_corners=False)
+    grid = functional.affine_grid(
+        theta,
+        tensor.shape,
+        align_corners=ATTENTION_GRID_ALIGN_CORNERS,
+    )
+    aligned = functional.grid_sample(
+        tensor,
+        grid,
+        mode="bilinear",
+        padding_mode="border",
+        align_corners=ATTENTION_GRID_ALIGN_CORNERS,
+    )
     output = (aligned[0].permute(1, 2, 0).clamp(0.0, 1.0) * 255.0).byte().numpy()
     return Image.fromarray(output, mode="RGB")
 
@@ -1718,6 +1788,15 @@ def _carrier_only_counterfactual_identity(
             != expected_prg_digest
         ):
             raise RuntimeError("反事实更新原子的密钥 PRG 协议身份无效")
+        if (
+            record.get("attention_module_names")
+            != list(full_config.attention_module_names)
+            or record.get("attention_coordinate_convention")
+            != ATTENTION_COORDINATE_CONVENTION
+            or record.get("attention_grid_align_corners")
+            is not ATTENTION_GRID_ALIGN_CORNERS
+        ):
+            raise RuntimeError("反事实更新原子的注意力层或坐标身份无效")
         quantized_gate_applicable = record.get(
             "quantized_write_jacobian_gate_applicable"
         )
@@ -2325,6 +2404,15 @@ def run_semantic_watermark_runtime(
                 "keyed_prg_protocol_digest": keyed_prg_protocol_record(
                     active_injection_config.keyed_prg_version
                 )["keyed_prg_protocol_digest"],
+                "attention_module_names": list(
+                    active_injection_config.attention_module_names
+                ),
+                "attention_coordinate_convention": (
+                    active_injection_config.attention_coordinate_convention
+                ),
+                "attention_grid_align_corners": (
+                    active_injection_config.attention_grid_align_corners
+                ),
                 **attention_record,
                 **quantized_write_jacobian_record,
                 **preservation_record,
