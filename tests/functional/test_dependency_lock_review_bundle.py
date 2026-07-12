@@ -61,9 +61,22 @@ def test_qualification_uv_version_rejects_version_or_platform_drift(
 
 
 def _profile(profile_id: str) -> DependencyProfile:
-    """读取共享 registry 中的真实 profile 身份."""
+    """读取真实 profile 身份并构造尚未接收目标锁的候选 fixture.
 
-    return get_dependency_profile(profile_id)
+    审查包测试验证的是从缺锁状态生成候选的控制流, 不应随仓库逐个提交
+    正式锁而改变前置状态. 需要父编排锁 ready 的测试会在此 fixture 上显式
+    构造 ready 记录, 从而分别覆盖两种状态.
+    """
+
+    return replace(
+        get_dependency_profile(profile_id),
+        complete_hash_lock_present=False,
+        complete_hash_lock_digest=None,
+        complete_hash_lock_dependency_count=0,
+        locked_requirements=(),
+        formal_ready=False,
+        readiness_blockers=("complete_hash_lock_missing",),
+    )
 
 
 def _sha256(path: Path) -> str:
