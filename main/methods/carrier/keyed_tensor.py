@@ -11,7 +11,11 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
-from main.core.digest import build_stable_digest
+from main.core.digest import (
+    TENSOR_CONTENT_DIGEST_VERSION,
+    build_stable_digest,
+    tensor_content_sha256,
+)
 from main.core.keyed_prg import (
     KEYED_PRG_VERSION,
     build_keyed_gaussian_tensor,
@@ -28,12 +32,22 @@ def _torch() -> Any:
     return torch
 
 
-def _normalize(template: Any) -> Any:
-    """将模板转换为零均值单位二范数向量。"""
+def _center_and_l2_normalize(template: Any) -> Any:
+    """在整个 Tensor 上执行一次去均值和 L2 归一化。"""
 
     centered = template.float() - template.float().mean()
     norm = centered.norm().clamp_min(1e-12)
     return centered / norm
+
+
+def _l2_normalize_without_centering(template: Any) -> Any:
+    """保留模板的精确零支持, 仅执行全 Tensor L2 归一化。"""
+
+    values = template.float()
+    norm = values.norm()
+    if float(norm.item()) <= 1e-12:
+        raise RuntimeError("载体模板没有可归一化的非零能量")
+    return values / norm
 
 
 def build_low_frequency_template(
@@ -41,6 +55,10 @@ def build_low_frequency_template(
     key_material: str,
     model_id: str,
     kernel_size: int = 5,
+    stride: int = 1,
+    padding: int = 2,
+    boundary_mode: str = "zero_padding",
+    count_include_pad: bool = True,
     *,
     prg_version: str = KEYED_PRG_VERSION,
 ) -> Any:
@@ -56,6 +74,14 @@ def build_low_frequency_template(
         raise ValueError("低频模板要求 latent 具有 [batch, channel, height, width] 形状")
     if kernel_size <= 0 or kernel_size % 2 == 0:
         raise ValueError("kernel_size 必须为正奇数")
+    if stride <= 0:
+        raise ValueError("stride 必须为正整数")
+    if padding < 0:
+        raise ValueError("padding 必须为非负整数")
+    if boundary_mode != "zero_padding":
+        raise ValueError("低频模板只允许 zero_padding 边界协议")
+    if not isinstance(count_include_pad, bool):
+        raise TypeError("count_include_pad 必须为 bool")
     shape = tuple(int(value) for value in reference.shape)
     raw = build_keyed_gaussian_tensor(
         shape,
@@ -67,10 +93,18 @@ def build_low_frequency_template(
         },
         prg_version=prg_version,
     )
-    low_pass = functional.avg_pool2d(raw, kernel_size=kernel_size, stride=1, padding=kernel_size // 2)
-    return _normalize(low_pass).to(
+    low_pass = functional.avg_pool2d(
+        raw,
+        kernel_size=kernel_size,
+        stride=stride,
+        padding=padding,
+        count_include_pad=count_include_pad,
+    )
+    if tuple(low_pass.shape) != shape:
+        raise ValueError("低频池化参数必须保持载体 Tensor 形状不变")
+    return _center_and_l2_normalize(low_pass).to(
         device=reference.device,
-        dtype=reference.dtype,
+        dtype=_torch().float32,
     )
 
 
@@ -120,9 +154,9 @@ def build_tail_robust_template(
     threshold = abs(flat_values[selected_indices[-1]])
     retained_fraction = retained_count / len(flat_values)
     return (
-        _normalize(truncated).to(
+        _l2_normalize_without_centering(truncated).to(
             device=reference.device,
-            dtype=reference.dtype,
+            dtype=torch.float32,
         ),
         float(threshold),
         float(retained_fraction),
@@ -155,14 +189,6 @@ class KeyedTensorCarrier:
     template_digest: str
     metadata: dict[str, Any]
 
-    def scaled_update(self, strength: float) -> Any:
-        """生成指定二范数强度的 latent 更新。"""
-
-        direction = self.embedded_direction.float()
-        return (direction / direction.norm().clamp_min(1e-12) * strength).to(
-            dtype=self.embedded_direction.dtype
-        )
-
     def score(self, observed: Any) -> float:
         """使用检测端可重建的固定模板计算分支分数。"""
 
@@ -194,6 +220,11 @@ def project_canonical_template(
         "shape": tuple(int(value) for value in canonical_template.shape),
         "projection_energy_retention": round(retention, 12),
         "null_space_digest": null_space.solver_digest,
+        "canonical_template_content_sha256": tensor_content_sha256(
+            canonical_template
+        ),
+        "embedded_direction_content_sha256": tensor_content_sha256(projected),
+        "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
         "keyed_prg_version": prg_version,
         "keyed_prg_protocol_digest": prg_record["keyed_prg_protocol_digest"],
     }

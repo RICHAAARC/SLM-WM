@@ -9,7 +9,7 @@ import pytest
 
 @pytest.mark.constraint
 def test_main_contains_only_core_method_modules() -> None:
-    """main 只允许方法定义、最小数学工具和五个正式方法组件。"""
+    """main 只允许方法定义、最小数学工具、正式组件和唯一合成算子。"""
 
     assert {path.name for path in Path("main").iterdir() if path.name != "__pycache__"} == {
         "__init__.py",
@@ -30,6 +30,7 @@ def test_main_contains_only_core_method_modules() -> None:
         "method_definition.py",
         "semantic",
         "subspace",
+        "update_composition.py",
     }
 
 

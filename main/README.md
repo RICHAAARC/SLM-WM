@@ -7,6 +7,7 @@
 - `methods/semantic/`: 使用冻结解析范围的 CLIP patch-to-CLS 一致性、解码纹理、5x5局部对比度、紧邻 scheduler 步 RGB 稳定度和独立跨层 Q/K 稳定度, 构造三个分支的风险场、严格资格集合和连续承载预算。有效预算必须同时进入 Null Space 与最终逐位置写回包络。
 - `methods/subspace/`: 使用512维归一化 CLIP embedding 与204维明确限定的手工结构统计向量组成的716维特征 JVP/VJP、显式风险算子、无阻尼 PSD-CG 和逐列残差门禁求解 Jacobian Null Space。
 - `methods/carrier/`: 构造空间低通 LF 模板、高斯幅值尾部截断模板及其安全子空间投影。
+- `methods/update_composition.py`: 在单位方向上分离处理方向活动 epsilon 与数值退化 epsilon, 清理零预算支持后执行逐位置风险硬包络缩放；attention 候选和最终写回共同调用唯一固定顺序 float32 合成原语, 对 original latent 只执行一次实际 dtype 转换并产出可重算共同回溯证据。
 - `methods/geometry/`: 从真实 Transformer Q/K 直接构造中心化 logit、可微 rank、抽样图像 token 关系概率和距离调制中心化概率四分量图, 计算目标梯度, 构造可核对身份的稳定 token pair 权重, 并通过攻击配置无关的分层搜索恢复二维参考系。归一化 token 坐标把角点中心映射到 -1 与 1, 与图像仿射重采样的 `align_corners=True` 完全一致。
 - `methods/detection/`: 实现只读取待检图像、密钥和公开检测配置的盲检接口, 注册前后使用同一 pair 权重身份且不在对齐后重新选择 token。
 - `core/digest.py`: 提供 JSON 稳定摘要及绑定 dtype、shape 与连续原始字节的版本化 Tensor 内容摘要, 供风险、Null Space、分支更新和 Q/K 科学原子共同复用。
@@ -23,7 +24,7 @@
 
 ## 方法语义
 
-方法名称中的“潜流形”只表示当前样本716维完整特征隐式水平集的局部安全切空间解释。核心数值对象是分支风险支持且通过逐列 Jacobian 残差门禁的 Null Space 基底；`main/` 不构造全局非线性流形，不验证常秩定理条件，也不实现坐标图、测地线或回缩算子。正式更新采用构造式协议：LF 与尾部模板分别投影和缩放，注意力分支在内容基底上投影真实 Q/K 梯度并执行单调回溯，三者相加后对实际 dtype 写回 Tensor 重新执行 JVP 和有限变化门禁。该协议不等价于联合标量 `argmax` 求解。
+方法名称中的“潜流形”只表示当前样本716维完整特征隐式水平集的局部安全切空间解释。核心数值对象是分支风险支持且通过逐列 Jacobian 残差门禁的 Null Space 基底；`main/` 不构造全局非线性流形，不验证常秩定理条件，也不实现坐标图、测地线或回缩算子。正式更新采用构造式协议：LF 与尾部模板分别投影并由对应风险硬包络缩放，注意力分支直接消费同一风险有界单位方向并从最大允许步长执行真实 Q/K 单调回溯, 三者按固定顺序在 float32 中唯一合成并只执行一次实际 dtype 转换。外层运行时对风险清理后的每个实际方向重新执行独立精确 JVP, 随后对实际联合写回 Tensor 复验预算、JVP、有限变化和 Q/K。该协议不等价于联合标量 `argmax` 求解。
 
 `methods/method_definition.py` 提供上述语义边界的版本化可机读记录与稳定摘要。运行配置身份和结果 metadata 同时绑定该摘要，使方法术语或构造协议发生变化时必须形成新的科学单元身份。
 

@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Iterable
+import math
+from typing import Any, Iterable, Mapping
 
 from main.core.digest import (
     TENSOR_CONTENT_DIGEST_VERSION,
@@ -26,6 +27,7 @@ from main.methods.semantic.vector_values import (
 )
 
 BRANCH_NAMES = ("lf_content", "tail_robust", "attention_geometry")
+NEUTRAL_TEXTURE_RISK_VALUE = 0.5
 
 
 @dataclass(frozen=True)
@@ -41,12 +43,12 @@ class BranchRiskConfig:
     semantic_weight: float
     texture_weight: float
     adjacent_step_instability_weight: float
-    attention_instability_weight: float = 0.0
-    texture_preference: str = "neutral"
-    eligibility_threshold: float = 0.55
-    budget_floor: float = 0.05
-    budget_ceiling: float = 1.0
-    budget_gain: float = 0.70
+    attention_instability_weight: float
+    texture_preference: str
+    eligibility_threshold: float
+    budget_floor: float
+    budget_ceiling: float
+    budget_gain: float
 
     def __post_init__(self) -> None:
         """集中校验风险配置, 业务函数只处理已合法参数。"""
@@ -58,14 +60,29 @@ class BranchRiskConfig:
             self.adjacent_step_instability_weight,
             self.attention_instability_weight,
         )
+        scalar_values = (
+            *weights,
+            self.eligibility_threshold,
+            self.budget_floor,
+            self.budget_ceiling,
+            self.budget_gain,
+        )
+        if any(not math.isfinite(value) for value in scalar_values):
+            raise ValueError("分支风险配置必须全部为有限数")
         if any(value < 0.0 for value in weights) or sum(weights) <= 0.0:
             raise ValueError("分支风险权重必须非负且至少一个权重大于 0")
         if self.texture_preference not in {"avoid", "prefer", "neutral"}:
             raise ValueError("texture_preference 必须为 avoid、prefer 或 neutral")
         if not 0.0 <= self.eligibility_threshold <= 1.0:
             raise ValueError("eligibility_threshold 必须位于 [0, 1]")
-        if self.budget_floor < 0.0 or self.budget_ceiling <= self.budget_floor:
+        if (
+            self.budget_floor < 0.0
+            or self.budget_ceiling <= self.budget_floor
+            or self.budget_ceiling > 1.0
+        ):
             raise ValueError("预算上下界必须形成有效区间")
+        if self.budget_gain < 0.0:
+            raise ValueError("budget_gain 必须为非负数")
 
 
 @dataclass(frozen=True)
@@ -75,6 +92,7 @@ class CarrierRiskField:
     branch_name: str
     risk_values: tuple[float, ...]
     budget_values: tuple[float, ...]
+    effective_budget_values: tuple[float, ...]
     eligible_indices: tuple[int, ...]
     risk_values_content_sha256: str
     budget_values_content_sha256: str
@@ -85,7 +103,13 @@ class CarrierRiskField:
     def __post_init__(self) -> None:
         """校验风险和预算宽度一致。"""
 
-        ensure_equal_length({"risk_values": self.risk_values, "budget_values": self.budget_values})
+        ensure_equal_length(
+            {
+                "risk_values": self.risk_values,
+                "budget_values": self.budget_values,
+                "effective_budget_values": self.effective_budget_values,
+            }
+        )
         if self.branch_name not in BRANCH_NAMES:
             raise ValueError("未知载体分支")
 
@@ -122,40 +146,30 @@ class BranchRiskFieldBundle:
         return asdict(self)
 
 
-DEFAULT_BRANCH_CONFIGS = {
-    "lf_content": BranchRiskConfig(
-        local_contrast_risk_weight=0.30,
-        semantic_weight=0.30,
-        texture_weight=0.20,
-        adjacent_step_instability_weight=0.20,
-        texture_preference="avoid",
-    ),
-    "tail_robust": BranchRiskConfig(
-        local_contrast_risk_weight=0.25,
-        semantic_weight=0.25,
-        texture_weight=0.30,
-        adjacent_step_instability_weight=0.20,
-        texture_preference="prefer",
-    ),
-    "attention_geometry": BranchRiskConfig(
-        local_contrast_risk_weight=0.20,
-        semantic_weight=0.25,
-        texture_weight=0.05,
-        adjacent_step_instability_weight=0.20,
-        attention_instability_weight=0.30,
-        texture_preference="neutral",
-    ),
-}
-
-
-def _texture_risk(texture: float, preference: str) -> float:
+def _texture_risk(
+    texture: float,
+    preference: str,
+    neutral_texture_risk_value: float,
+) -> float:
     """把纹理偏好转换成统一的风险量。"""
 
     if preference == "avoid":
         return texture
     if preference == "prefer":
         return 1.0 - texture
-    return 0.0
+    return neutral_texture_risk_value
+
+
+def _require_unit_vector(
+    values: VectorInput | Iterable[NumberLike],
+    field_name: str,
+) -> tuple[float, ...]:
+    """读取有限风险信号并拒绝超出冻结解析范围的输入。"""
+
+    resolved = as_float_vector(values, field_name)
+    if any(value < 0.0 or value > 1.0 for value in resolved):
+        raise ValueError(f"{field_name} 必须全部位于 [0, 1]")
+    return resolved
 
 
 def _build_single_branch(
@@ -166,6 +180,7 @@ def _build_single_branch(
     local_contrast_risk_values: tuple[float, ...],
     attention_stability_values: tuple[float, ...],
     config: BranchRiskConfig,
+    neutral_texture_risk_value: float,
     require_eligible_position: bool,
 ) -> CarrierRiskField:
     """根据统一输入构造一个分支风险场。"""
@@ -195,34 +210,51 @@ def _build_single_branch(
         raw_risk = (
             config.local_contrast_risk_weight * local_contrast_risk
             + config.semantic_weight * semantic
-            + config.texture_weight * _texture_risk(texture, config.texture_preference)
+            + config.texture_weight
+            * _texture_risk(
+                texture,
+                config.texture_preference,
+                neutral_texture_risk_value,
+            )
             + config.adjacent_step_instability_weight
             * (1.0 - adjacent_step_stability)
             + config.attention_instability_weight * (1.0 - attention_stability)
         ) / weight_sum
         risk = clip_unit(raw_risk)
-        budget = min(
-            config.budget_ceiling,
-            config.budget_floor + config.budget_gain * (1.0 - risk),
+        budget = max(
+            config.budget_floor,
+            min(
+                config.budget_ceiling,
+                config.budget_floor + config.budget_gain * (1.0 - risk),
+            ),
         )
         risks.append(risk)
         budgets.append(budget)
     eligible = tuple(
         index
         for index, risk in enumerate(risks)
-        if risk <= config.eligibility_threshold
+        if risk < config.eligibility_threshold
     )
     if require_eligible_position and not eligible:
         raise RuntimeError(
             f"{branch_name} 分支没有满足冻结风险阈值的可承载位置"
         )
+    eligible_set = set(eligible)
+    effective_budgets = tuple(
+        budget if index in eligible_set else 0.0
+        for index, budget in enumerate(budgets)
+    )
     payload = {
         "branch_name": branch_name,
         "risk_values": [round(value, 12) for value in risks],
         "budget_values": [round(value, 12) for value in budgets],
+        "effective_budget_values": [
+            round(value, 12) for value in effective_budgets
+        ],
         "eligible_indices": eligible,
         "config": asdict(config),
         "require_eligible_position": require_eligible_position,
+        "neutral_texture_risk_value": neutral_texture_risk_value,
     }
     import torch
 
@@ -244,6 +276,7 @@ def _build_single_branch(
         branch_name=branch_name,
         risk_values=tuple(risks),
         budget_values=tuple(budgets),
+        effective_budget_values=effective_budgets,
         eligible_indices=eligible,
         risk_values_content_sha256=risk_values_content_sha256,
         budget_values_content_sha256=budget_values_content_sha256,
@@ -263,6 +296,8 @@ def _build_single_branch(
             "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
             "texture_preference": config.texture_preference,
             "eligibility_threshold": config.eligibility_threshold,
+            "eligibility_comparison": "strict_less_than",
+            "neutral_texture_risk_value": neutral_texture_risk_value,
         },
     )
 
@@ -273,7 +308,9 @@ def build_branch_risk_fields(
     adjacent_step_stability_values: VectorInput | Iterable[NumberLike],
     local_contrast_risk_values: VectorInput | Iterable[NumberLike],
     attention_stability_values: VectorInput | Iterable[NumberLike],
-    configs: dict[str, BranchRiskConfig] | None = None,
+    *,
+    configs: Mapping[str, BranchRiskConfig],
+    risk_neutral_texture_value: float,
     required_eligible_branches: Iterable[str] | None = None,
 ) -> BranchRiskFieldBundle:
     """构造三个语义不同且宽度一致的分支风险场。
@@ -284,35 +321,25 @@ def build_branch_risk_fields(
     ``required_eligible_branches`` 指定必须至少存在一个合格位置的活动分支.
     ``None`` 表示完整方法的三个分支都必须通过门禁. 空集合用于移除风险路由的
     正式消融, 此时仍可记录风险诊断值, 但风险阈值不得决定样本能否继续运行.
+    ``configs`` 与 ``risk_neutral_texture_value`` 必须由唯一方法配置显式传入,
+    核心方法不保存会绕过配置身份的正式默认参数.
     """
 
-    semantic = tuple(
-        clip_unit(value)
-        for value in as_float_vector(semantic_values, "semantic_values")
+    semantic = _require_unit_vector(semantic_values, "semantic_values")
+    texture = _require_unit_vector(texture_values, "texture_values")
+    adjacent_step_stability = _require_unit_vector(
+        adjacent_step_stability_values,
+        "adjacent_step_stability_values",
     )
-    texture = tuple(clip_unit(value) for value in as_float_vector(texture_values, "texture_values"))
-    adjacent_step_stability = tuple(
-        clip_unit(value)
-        for value in as_float_vector(
-            adjacent_step_stability_values,
-            "adjacent_step_stability_values",
-        )
-    )
-    local_contrast_risk = tuple(
-        clip_unit(value)
-        for value in as_float_vector(
-            local_contrast_risk_values,
-            "local_contrast_risk_values",
-        )
+    local_contrast_risk = _require_unit_vector(
+        local_contrast_risk_values,
+        "local_contrast_risk_values",
     )
     if attention_stability_values is None:
         raise ValueError("attention_stability_values 必须来自真实跨层 Q/K 关系")
-    attention_stability = tuple(
-        clip_unit(value)
-        for value in as_float_vector(
-            attention_stability_values,
-            "attention_stability_values",
-        )
+    attention_stability = _require_unit_vector(
+        attention_stability_values,
+        "attention_stability_values",
     )
     length = ensure_equal_length(
         {
@@ -323,9 +350,19 @@ def build_branch_risk_fields(
             "attention_stability_values": attention_stability,
         }
     )
-    resolved_configs = configs or DEFAULT_BRANCH_CONFIGS
+    if (
+        not math.isfinite(risk_neutral_texture_value)
+        or risk_neutral_texture_value != NEUTRAL_TEXTURE_RISK_VALUE
+    ):
+        raise ValueError("risk_neutral_texture_value 必须精确等于 0.5")
+    resolved_configs = dict(configs)
     if set(resolved_configs) != set(BRANCH_NAMES):
         raise ValueError("configs 必须完整定义三个载体分支")
+    if any(
+        not isinstance(resolved_configs[name], BranchRiskConfig)
+        for name in BRANCH_NAMES
+    ):
+        raise TypeError("configs 的每个分支都必须使用 BranchRiskConfig")
     required_branches = (
         set(BRANCH_NAMES)
         if required_eligible_branches is None
@@ -342,6 +379,7 @@ def build_branch_risk_fields(
             local_contrast_risk,
             attention_stability,
             resolved_configs[name],
+            risk_neutral_texture_value,
             name in required_branches,
         )
         for name in BRANCH_NAMES

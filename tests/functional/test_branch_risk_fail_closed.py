@@ -23,7 +23,12 @@ def _strict_configs() -> dict[str, BranchRiskConfig]:
             semantic_weight=0.0,
             texture_weight=0.0,
             adjacent_step_instability_weight=0.0,
+            attention_instability_weight=0.0,
+            texture_preference="neutral",
             eligibility_threshold=0.1,
+            budget_floor=0.05,
+            budget_ceiling=1.0,
+            budget_gain=0.70,
         )
         for branch_name in (
             "lf_content",
@@ -45,6 +50,7 @@ def test_branch_risk_rejects_empty_frozen_eligibility_set() -> None:
             local_contrast_risk_values=(0.8, 0.9),
             attention_stability_values=(1.0, 1.0),
             configs=_strict_configs(),
+            risk_neutral_texture_value=0.5,
         )
 
 
@@ -59,6 +65,8 @@ def test_branch_risk_requires_independent_attention_stability() -> None:
             adjacent_step_stability_values=(0.5, 0.6),
             local_contrast_risk_values=(0.7, 0.8),
             attention_stability_values=None,  # type: ignore[arg-type]
+            configs=_strict_configs(),
+            risk_neutral_texture_value=0.5,
         )
 
 
@@ -84,6 +92,7 @@ def test_without_branch_risk_routing_does_not_filter_formal_ablation_samples() -
         local_contrast_risk_values=(0.8, 0.9),
         attention_stability_values=(1.0, 1.0),
         configs=_strict_configs(),
+        risk_neutral_texture_value=0.5,
         required_eligible_branches=required_branches,
     )
 
@@ -124,6 +133,7 @@ def test_disabled_attention_branch_does_not_apply_eligibility_gate() -> None:
         local_contrast_risk_values=(0.8, 0.9),
         attention_stability_values=(1.0, 1.0),
         configs=configs,
+        risk_neutral_texture_value=0.5,
         required_eligible_branches=required_branches,
     )
 

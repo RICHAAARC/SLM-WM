@@ -19,6 +19,7 @@ from experiments.runtime.diffusion.semantic_features import (
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
+    _branch_risk_content_evidence,
     _carrier_only_counterfactual_artifact_binding_ready,
     _carrier_only_counterfactual_identity,
     _combined_update_preservation_record,
@@ -26,6 +27,7 @@ from experiments.runners.semantic_watermark_runtime import (
     _final_image_attention_observability_record,
     _final_image_preservation_record,
     _quantized_write_jacobian_response_record,
+    _quantized_write_update_nonzero,
     _three_way_final_image_preservation_records,
 )
 from experiments.runners.image_only_dataset_runtime import (
@@ -41,6 +43,7 @@ from main.methods.geometry.differentiable_attention import (
     build_qk_atomic_content_metadata,
     keyed_relation_signs,
     qk_atomic_content_records_digest,
+    qk_operator_metadata_records_digest,
 )
 from main.methods.carrier import keyed_prg_protocol_record
 from main.core.digest import build_stable_digest
@@ -65,46 +68,92 @@ def _counterfactual_update_records(
     records = []
     for record_index, step_index in enumerate(config.injection_step_indices):
         before_sha = "1" * 64 if record_index == 0 else "2" * 64
-        qk_values = torch.zeros(1, 4, 4)
-        qk_probabilities = torch.softmax(qk_values, dim=-1)
-        qk_atomic_content_records = [
-            build_qk_atomic_content_metadata(
-                layer_name,
-                qk_values,
-                qk_values,
-                qk_values,
-                qk_probabilities,
-                (0, 1, 2, 3),
+        qk_role_scores = {
+            "latent_before": 0.1,
+            "optimization_content_base_latent": 0.1,
+            "accepted_attention_candidate": 0.2,
+            "actual_written_content_base_latent": 0.1,
+            "actual_written_combined_latent": 0.2,
+        }
+        attention_qk_atomic_content_records = []
+        for role_index, evaluation_role in enumerate(qk_role_scores):
+            qk_values = torch.eye(4).reshape(1, 4, 4) * (
+                0.1 + 0.01 * role_index
             )
-            for layer_name in config.attention_module_names
-        ]
-        qk_atomic_content_digest = qk_atomic_content_records_digest(
-            qk_atomic_content_records
-        )
-        attention_qk_atomic_content_records = [
+            qk_probabilities = torch.softmax(qk_values, dim=-1)
+            qk_atomic_content_records = [
+                build_qk_atomic_content_metadata(
+                    layer_name,
+                    qk_values,
+                    qk_values,
+                    qk_values,
+                    qk_probabilities,
+                    (0, 1, 2, 3),
+                )
+                for layer_name in config.attention_module_names
+            ]
+            attention_qk_atomic_content_records.append(
+                {
+                    "qk_evaluation_role": evaluation_role,
+                    "evaluation_latent_content_sha256": build_stable_digest(
+                        {
+                            "evaluation_role": evaluation_role,
+                            "record_index": record_index,
+                        }
+                    ),
+                    "evaluation_score": qk_role_scores[evaluation_role],
+                    "qk_atomic_content_records": qk_atomic_content_records,
+                    "qk_atomic_content_digest": (
+                        qk_atomic_content_records_digest(
+                            qk_atomic_content_records
+                        )
+                    ),
+                    "qk_atomic_content_ready": True,
+                }
+            )
+        qk_operator_metadata_records = [
             {
-                "qk_evaluation_role": evaluation_role,
-                "qk_atomic_content_records": qk_atomic_content_records,
-                "qk_atomic_content_digest": qk_atomic_content_digest,
-                "qk_atomic_content_ready": True,
+                "record_layer_name": layer_name,
+                "module_layer_name": layer_name,
+                "module_class_name": "FixtureAttention",
+                "head_count": 2,
+                "head_width": 4,
+                "attention_scale": 0.5,
+                "attention_scale_source": "inverse_sqrt_head_width",
+                "q_normalization_applied": False,
+                "k_normalization_applied": False,
+                "q_normalization_class": None,
+                "k_normalization_class": None,
+                "source_token_count": 4,
+                "source_grid_side": 2,
+                "sampled_token_count": 4,
+                "sampled_grid_side": 2,
+                "sampled_token_indices": [0, 1, 2, 3],
+                "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
+                "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
+                "centered_logit_aggregation": (
+                    "mean_of_per_head_row_centered_sampled_qk_logits"
+                ),
+                "relation_probability_aggregation": (
+                    "mean_of_per_head_sampled_image_token_probabilities"
+                ),
+                "mean_probability_is_softmax_of_mean_logits": False,
             }
-            for evaluation_role in (
-                "latent_before",
-                "content_base_latent",
-                "accepted_attention_candidate",
-                "actual_written_combined_latent",
-            )
+            for layer_name in config.attention_module_names
         ]
         attention_record = (
             {
                 "attention_score_before": 0.1,
                 "attention_content_base_score": 0.1,
                 "attention_score_after": 0.2,
+                "attention_actual_written_content_base_score": 0.1,
                 "attention_final_combined_score": 0.2,
                 "attention_score_gain": 0.1,
                 "attention_applied_update_strength": 0.01,
                 "attention_backtracking_step_count": 0,
                 "attention_update_digest": "3" * 64,
+                "attention_update_content_sha256": "c" * 64,
+                "attention_update_unit_direction_content_sha256": "c" * 64,
                 "stable_token_indices": [0, 1, 2, 3],
                 "stable_token_selection_digest": "4" * 64,
                 "stable_pair_weight_identity_digest": "5" * 64,
@@ -130,10 +179,14 @@ def _counterfactual_update_records(
                 "attention_relation_probability_scope": "fixture_probability",
                 "attention_relation_component_identity_digest": "7" * 64,
                 "attention_relation_keyed_projection_digest": "8" * 64,
-                "attention_relation_qk_operator_metadata_records": [
-                    {"operator_identity": "fixture"}
-                ],
-                "attention_relation_qk_operator_metadata_digest": "b" * 64,
+                "attention_relation_qk_operator_metadata_records": (
+                    qk_operator_metadata_records
+                ),
+                "attention_relation_qk_operator_metadata_digest": (
+                    qk_operator_metadata_records_digest(
+                        qk_operator_metadata_records
+                    )
+                ),
                 "attention_relation_qk_operator_metadata_ready": True,
                 "attention_qk_atomic_content_records": (
                     attention_qk_atomic_content_records
@@ -152,11 +205,14 @@ def _counterfactual_update_records(
                 "attention_score_before": None,
                 "attention_content_base_score": None,
                 "attention_score_after": None,
+                "attention_actual_written_content_base_score": None,
                 "attention_final_combined_score": None,
                 "attention_score_gain": None,
                 "attention_applied_update_strength": None,
                 "attention_backtracking_step_count": None,
                 "attention_update_digest": "",
+                "attention_update_content_sha256": "",
+                "attention_update_unit_direction_content_sha256": "",
                 "stable_token_indices": [],
                 "stable_token_selection_digest": "",
                 "stable_pair_weight_identity_digest": "",
@@ -195,10 +251,36 @@ def _counterfactual_update_records(
                 "attention_geometry",
             )
         }
-        branch_risk_content_records = {
-            branch_name: dict(branch_record)
-            for branch_name, branch_record in branch_risk_records.items()
+        for branch_name in branches:
+            branch_risk_records[branch_name].update(
+                {
+                    "effective_budget_values_content_sha256": "b" * 64,
+                    "branch_unit_direction_content_sha256": "c" * 64,
+                    "branch_budget_envelope_content_sha256": "d" * 64,
+                    "branch_written_update_content_sha256": (
+                        branch_update_content_records[branch_name]
+                    ),
+                    "branch_post_risk_direction_content_sha256": "c" * 64,
+                    "branch_post_risk_reference_direction_content_sha256": "e" * 64,
+                    "branch_post_risk_response_content_sha256": "f" * 64,
+                    "branch_post_risk_reference_response_content_sha256": "0" * 64,
+                }
+            )
+        risk_signal_content_records = {
+            "current_decoded_rgb_content_sha256": "6" * 64,
+            "previous_step_decoded_rgb_content_sha256": "7" * 64,
+            "clip_patch_tokens_content_sha256": "8" * 64,
+            "clip_cls_token_content_sha256": "9" * 64,
+            "semantic_risk_signal_content_sha256": "1" * 64,
+            "texture_risk_signal_content_sha256": "2" * 64,
+            "local_contrast_risk_signal_content_sha256": "3" * 64,
+            "adjacent_step_stability_signal_content_sha256": "4" * 64,
+            "attention_stability_signal_content_sha256": "5" * 64,
         }
+        branch_risk_content_evidence = _branch_risk_content_evidence(
+            risk_signal_content_records,
+            branch_risk_records,
+        )
         records.append(
             {
                 "step_index": step_index,
@@ -210,6 +292,7 @@ def _counterfactual_update_records(
                 "adjacent_step_stability_status": (
                     "measured_from_immediately_previous_scheduler_step"
                 ),
+                **risk_signal_content_records,
                 "scheduler_step_timestep": float(100 - step_index),
                 "post_step_schedule_index": step_index + 1,
                 "timestep": float(99 - step_index),
@@ -230,7 +313,7 @@ def _counterfactual_update_records(
                 ),
                 "branch_risk_records": branch_risk_records,
                 "branch_risk_content_digest": build_stable_digest(
-                    branch_risk_content_records
+                    branch_risk_content_evidence
                 ),
                 "quantized_write_update_content_sha256": "c" * 64,
                 "quantized_write_update_dtype": "torch.float16",
@@ -413,7 +496,15 @@ def test_branch_signals_use_actual_adjacent_step_and_local_contrast() -> None:
         "texture",
         "adjacent_step_stability",
         "local_contrast_risk",
+        "current_decoded_rgb",
+        "previous_step_decoded_rgb",
+        "clip_patch_tokens",
+        "clip_cls_token",
     }
+    assert torch.equal(signals["current_decoded_rgb"], current)
+    assert torch.equal(signals["previous_step_decoded_rgb"], previous)
+    assert signals["clip_patch_tokens"].shape == (1, 4, 4)
+    assert signals["clip_cls_token"].shape == (1, 1, 4)
     assert torch.allclose(
         signals["adjacent_step_stability"],
         torch.full((1, 8, 8), 0.5),
@@ -467,6 +558,7 @@ def test_actual_combined_latent_uses_full_feature_preservation_gate() -> None:
     config = SimpleNamespace(
         minimum_semantic_preservation_cosine=0.99,
         maximum_handcrafted_structure_feature_relative_drift=0.05,
+        null_space_numerical_epsilon=1e-12,
     )
     latent = torch.tensor([1.0, 0.0, 0.5])
     accepted = _combined_update_preservation_record(
@@ -530,12 +622,14 @@ def test_quantized_write_jacobian_gate_rechecks_actual_float16_delta() -> None:
         latent,
         null_injected,
         1e-4,
+        1e-12,
     )
     rejected = _quantized_write_jacobian_response_record(
         feature_function,
         latent,
         responsive_injected,
         1e-4,
+        1e-12,
     )
 
     assert accepted["quantized_write_jacobian_gate_applicable"] is True
@@ -563,11 +657,38 @@ def test_quantized_write_jacobian_gate_rejects_update_lost_to_quantization() -> 
         latent,
         injected,
         1e-4,
+        1e-12,
     )
 
     assert float((injected - latent).abs().max().item()) == 0.0
     assert record["quantized_write_update_norm"] == 0.0
+    assert _quantized_write_update_nonzero(record) is False
     assert record["quantized_write_jacobian_gate_ready"] is False
+
+
+@pytest.mark.quick
+def test_nonzero_quantized_write_gate_is_independent_of_null_space() -> None:
+    """移除 Null Space 的正式消融也不得接受量化后为0的写回。"""
+
+    latent = torch.tensor([2048.0], dtype=torch.float16)
+    lost = _quantized_write_jacobian_response_record(
+        None,
+        latent,
+        latent + torch.tensor([0.25], dtype=torch.float16),
+        1e-4,
+        1e-12,
+    )
+    written = _quantized_write_jacobian_response_record(
+        None,
+        latent,
+        latent + torch.tensor([2.0], dtype=torch.float16),
+        1e-4,
+        1e-12,
+    )
+
+    assert lost["quantized_write_jacobian_gate_applicable"] is False
+    assert _quantized_write_update_nonzero(lost) is False
+    assert _quantized_write_update_nonzero(written) is True
 
 
 @pytest.mark.quick
@@ -597,6 +718,7 @@ def test_final_image_gate_checks_cumulative_clean_to_watermarked_drift() -> None
     config = SimpleNamespace(
         minimum_semantic_preservation_cosine=0.99,
         maximum_handcrafted_structure_feature_relative_drift=0.05,
+        null_space_numerical_epsilon=1e-12,
     )
     clean = torch.tensor([[[[1.0, 0.5], [0.25, 0.75]]]])
     close = clean + 0.001
@@ -639,6 +761,7 @@ def test_final_image_gate_checks_cumulative_clean_to_watermarked_drift() -> None
     edge_config = SimpleNamespace(
         minimum_semantic_preservation_cosine=0.99,
         maximum_handcrafted_structure_feature_relative_drift=0.10,
+        null_space_numerical_epsilon=1e-12,
     )
     final_edge, carrier_edge = _three_way_final_image_preservation_records(
         pipeline,
@@ -889,6 +1012,29 @@ def test_final_image_attention_gate_uses_reencoded_real_qk_scores() -> None:
         },
         config,
     ) is True
+    operator_drift_record = {
+        **gpu_record,
+        "attention_relation_qk_operator_metadata_records": [
+            dict(item)
+            for item in gpu_record[
+                "attention_relation_qk_operator_metadata_records"
+            ]
+        ],
+    }
+    operator_drift_record[
+        "attention_relation_qk_operator_metadata_records"
+    ][0]["head_width"] = 2
+    assert _final_image_attention_observability_ready(
+        {
+            "metadata": {
+                **result_metadata,
+                "final_image_attention_observability": (
+                    operator_drift_record
+                ),
+            }
+        },
+        config,
+    ) is False
     mismatched_preservation = dict(preservation)
     mismatched_preservation["carrier_only_counterfactual_identity_digest"] = (
         "f" * 64
@@ -1004,6 +1150,54 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
         "carrier_only_counterfactual_realized_carrier_equality_assumed"
     ] is False
 
+    full_operator_drift = _counterfactual_update_records(
+        full_config,
+        role="full_method",
+        attention_enabled=True,
+    )
+    full_operator_drift[0][
+        "attention_relation_qk_operator_metadata_records"
+    ][0]["head_width"] = 2
+    with pytest.raises(RuntimeError, match="Q/K 算子元数据无效"):
+        _carrier_only_counterfactual_identity(
+            full_config,
+            carrier_config,
+            full_operator_drift,
+            carrier_records,
+        )
+
+    incomplete_risk_digest_records = _counterfactual_update_records(
+        full_config,
+        role="carrier_only_counterfactual",
+        attention_enabled=False,
+    )
+    incomplete_risk_digest_records[0]["branch_risk_content_digest"] = (
+        build_stable_digest(
+            {
+                branch_name: {
+                    field_name: branch_record[field_name]
+                    for field_name in (
+                        "risk_values_content_sha256",
+                        "budget_values_content_sha256",
+                        "eligible_mask_content_sha256",
+                    )
+                }
+                for branch_name, branch_record in (
+                    incomplete_risk_digest_records[0][
+                        "branch_risk_records"
+                    ].items()
+                )
+            }
+        )
+    )
+    with pytest.raises(RuntimeError, match="分支风险 Tensor 摘要"):
+        _carrier_only_counterfactual_identity(
+            full_config,
+            carrier_config,
+            full_records,
+            incomplete_risk_digest_records,
+        )
+
     drifted_records = _counterfactual_update_records(
         full_config,
         role="carrier_only_counterfactual",
@@ -1044,6 +1238,20 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
             carrier_config,
             full_records,
             quantized_gate_drift,
+        )
+
+    quantized_zero_drift = _counterfactual_update_records(
+        full_config,
+        role="carrier_only_counterfactual",
+        attention_enabled=False,
+    )
+    quantized_zero_drift[0]["quantized_write_update_norm"] = 0.0
+    with pytest.raises(RuntimeError, match="实际 dtype 写回不得为0"):
+        _carrier_only_counterfactual_identity(
+            full_config,
+            carrier_config,
+            full_records,
+            quantized_zero_drift,
         )
 
     prg_identity_drift = _counterfactual_update_records(

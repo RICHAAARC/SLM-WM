@@ -101,13 +101,12 @@ def test_registry_separates_core_method_and_runtime_bindings() -> None:
         assert all(path.startswith("main/") for path, _ in method_bindings)
         assert all(path.startswith("experiments/") for path, _ in runtime_bindings)
 
-    # 空集合是当前核心层缺口的显式追踪, 不能被解释为方法已经完成。
     assert invariants["three_branch_update_composition"][
         "method_implementation_symbols"
-    ] == []
+    ]
     assert invariants["actual_dtype_write_revalidation"][
         "method_implementation_symbols"
-    ] == []
+    ]
 
 
 @pytest.mark.constraint
@@ -459,8 +458,8 @@ def test_registry_formulas_freeze_risk_qk_null_and_actual_write_semantics() -> N
 
 
 @pytest.mark.constraint
-def test_unverified_cpu_properties_have_no_verification_nodes() -> None:
-    """已有规范测试不得占用真正 CPU 性质验证节点."""
+def test_cpu_property_nodes_only_cover_independently_implemented_operators() -> None:
+    """CPU 性质节点只能登记已有真实实现和独立正反例的算子。"""
 
     invariants = _invariants_by_id(load_method_semantic_registry(ROOT))
 
@@ -475,10 +474,20 @@ def test_unverified_cpu_properties_have_no_verification_nodes() -> None:
             "cpu_property_test_nodes"
         ]
     )
+    cpu_verified_invariants = {
+        "branch_signal_origin",
+        "branch_risk_bounds_written_update",
+        "exact_jacobian_low_response_subspace",
+        "spatial_low_pass_and_amplitude_tail_carriers",
+        "direct_qk_monotonic_attention_update",
+        "three_branch_update_composition",
+        "actual_dtype_write_revalidation",
+    }
+    assert all(invariants[invariant_id]["cpu_property_test_nodes"] for invariant_id in cpu_verified_invariants)
     assert all(
         item["cpu_property_test_nodes"] == []
         for invariant_id, item in invariants.items()
-        if invariant_id != "exact_jacobian_low_response_subspace"
+        if invariant_id not in cpu_verified_invariants
     )
 
 

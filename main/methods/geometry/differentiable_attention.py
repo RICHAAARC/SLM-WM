@@ -24,6 +24,11 @@ from main.core.keyed_prg import (
     keyed_prg_protocol_record,
 )
 from main.methods.subspace.jacobian_nullspace import JacobianNullSpaceResult
+from main.methods.update_composition import (
+    RiskBoundedUpdate,
+    compose_ordered_float32_update_once,
+    rescale_risk_bounded_update,
+)
 
 
 ATTENTION_RELATION_COMPONENT_NAMES = (
@@ -36,8 +41,8 @@ ATTENTION_RELATION_SOFT_RANK_TEMPERATURE = 0.25
 ATTENTION_RELATION_SOFT_RANK_CHUNK_SIZE = 32
 ATTENTION_RELATION_COMPONENT_WEIGHTS = (0.25, 0.25, 0.25, 0.25)
 ATTENTION_RELATION_COMPONENT_POLARITIES = (1.0, -1.0, 1.0, 1.0)
+ATTENTION_RELATION_NUMERICAL_EPSILON = 1e-12
 DIRECT_QK_RELATION_SOURCE = "direct_qk_centered_logits_and_probabilities"
-PROBABILITY_INVERSE_RELATION_SOURCE = "probability_log_inverse"
 ATTENTION_COORDINATE_CONVENTION = (
     "normalized_xy_token_centers_corner_endpoints_v1"
 )
@@ -49,6 +54,124 @@ QK_ATOMIC_CONTENT_SHA256_FIELDS = (
     "qk_probabilities_content_sha256",
     "sampled_token_indices_content_sha256",
 )
+QK_OPERATOR_METADATA_FIELD_NAMES = (
+    "module_layer_name",
+    "module_class_name",
+    "head_count",
+    "head_width",
+    "attention_scale",
+    "attention_scale_source",
+    "q_normalization_applied",
+    "k_normalization_applied",
+    "q_normalization_class",
+    "k_normalization_class",
+    "source_token_count",
+    "source_grid_side",
+    "sampled_token_count",
+    "sampled_grid_side",
+    "sampled_token_indices",
+    "coordinate_convention",
+    "grid_align_corners",
+    "centered_logit_aggregation",
+    "relation_probability_aggregation",
+    "mean_probability_is_softmax_of_mean_logits",
+)
+
+
+def qk_operator_metadata_records_digest(
+    records: Iterable[dict[str, Any]],
+) -> str:
+    """从完整冻结 Q/K 算子元数据重建聚合摘要。"""
+
+    return build_stable_digest(
+        {"qk_operator_metadata_records": tuple(records)}
+    )
+
+
+def qk_operator_metadata_records_ready(
+    records: Iterable[dict[str, Any]],
+    expected_layer_names: Iterable[str],
+) -> bool:
+    """完整复验冻结 Q/K 层、头布局、归一化和二维抽样协议。"""
+
+    resolved_records = tuple(records)
+    resolved_layers = tuple(expected_layer_names)
+    if len(resolved_records) != len(resolved_layers) or not resolved_records:
+        return False
+    for layer_name, record in zip(resolved_layers, resolved_records):
+        if not isinstance(record, dict) or set(record) != {
+            "record_layer_name",
+            *QK_OPERATOR_METADATA_FIELD_NAMES,
+        }:
+            return False
+        head_count = record.get("head_count")
+        head_width = record.get("head_width")
+        attention_scale = record.get("attention_scale")
+        source_token_count = record.get("source_token_count")
+        source_grid_side = record.get("source_grid_side")
+        sampled_token_count = record.get("sampled_token_count")
+        sampled_grid_side = record.get("sampled_grid_side")
+        sampled_indices = record.get("sampled_token_indices")
+        q_normalized = record.get("q_normalization_applied")
+        k_normalized = record.get("k_normalization_applied")
+        integer_values = (
+            head_count,
+            head_width,
+            source_token_count,
+            source_grid_side,
+            sampled_token_count,
+            sampled_grid_side,
+        )
+        if (
+            record.get("record_layer_name") != layer_name
+            or record.get("module_layer_name") != layer_name
+            or not isinstance(record.get("module_class_name"), str)
+            or not record.get("module_class_name")
+            or not all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value > 0
+                for value in integer_values
+            )
+            or isinstance(attention_scale, bool)
+            or not isinstance(attention_scale, (int, float))
+            or not math.isfinite(float(attention_scale))
+            or not math.isclose(
+                float(attention_scale),
+                1.0 / math.sqrt(int(head_width)),
+                rel_tol=1e-6,
+                abs_tol=ATTENTION_RELATION_NUMERICAL_EPSILON,
+            )
+            or record.get("attention_scale_source")
+            not in {"module_scale", "inverse_sqrt_head_width"}
+            or not isinstance(q_normalized, bool)
+            or not isinstance(k_normalized, bool)
+            or bool(record.get("q_normalization_class")) != q_normalized
+            or bool(record.get("k_normalization_class")) != k_normalized
+            or int(source_grid_side) ** 2 != int(source_token_count)
+            or int(sampled_grid_side) ** 2 != int(sampled_token_count)
+            or not isinstance(sampled_indices, list)
+            or len(sampled_indices) != int(sampled_token_count)
+            or len(set(sampled_indices)) != len(sampled_indices)
+            or not all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and 0 <= value < int(source_token_count)
+                for value in sampled_indices
+            )
+            or record.get("coordinate_convention")
+            != ATTENTION_COORDINATE_CONVENTION
+            or record.get("grid_align_corners")
+            is not ATTENTION_GRID_ALIGN_CORNERS
+            or record.get("centered_logit_aggregation")
+            != "mean_of_per_head_row_centered_sampled_qk_logits"
+            or record.get("relation_probability_aggregation")
+            != "mean_of_per_head_sampled_image_token_probabilities"
+            or record.get("mean_probability_is_softmax_of_mean_logits")
+            is not False
+        ):
+            return False
+    return True
 
 
 def validate_attention_relation_component_weights(
@@ -66,7 +189,12 @@ def validate_attention_relation_component_weights(
         raise ValueError("注意力关系权重必须精确覆盖四个冻结分量")
     if any(not math.isfinite(value) or value < 0.0 for value in resolved):
         raise ValueError("注意力关系权重必须为非负有限数")
-    if not math.isclose(sum(resolved), 1.0, rel_tol=0.0, abs_tol=1e-12):
+    if not math.isclose(
+        sum(resolved),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=ATTENTION_RELATION_NUMERICAL_EPSILON,
+    ):
         raise ValueError("注意力关系权重之和必须为 1")
     if not any(value > 0.0 for value in resolved):
         raise ValueError("注意力关系协议至少需要一个活动分量")
@@ -257,25 +385,11 @@ def attention_probability(attention: Any) -> Any:
 
 
 def centered_qk_logits(attention: Any) -> tuple[Any, str]:
-    """读取真实中心化 Q/K logits, 或从概率恢复行常数不变的 logits。
+    """读取真实中心化 Q/K logits, 拒绝从概率矩阵反推几何关系。"""
 
-    正式运行由 ``QKAttentionRelation`` 提供直接 Q/K logits。仅传入概率矩阵
-    时, ``log(A)`` 与原始 logits 只相差逐行常数, 再次中心化后得到同一关系
-    坐标。该输入形式用于轻量算法测试和通用函数调用, 不支持正式运行来源门禁。
-    """
-
-    torch = _torch()
-    if isinstance(attention, QKAttentionRelation):
-        return attention.centered_logits, attention.relation_source
-    probability = attention_probability(attention).float()
-    if probability.ndim not in {2, 3}:
-        raise ValueError("attention 必须是二维或三维方形概率矩阵")
-    minimum = torch.finfo(probability.dtype).tiny
-    recovered = probability.clamp_min(minimum).log()
-    return (
-        recovered - recovered.mean(dim=-1, keepdim=True),
-        PROBABILITY_INVERSE_RELATION_SOURCE,
-    )
+    if not isinstance(attention, QKAttentionRelation):
+        raise ValueError("注意力几何关系必须直接提供冻结层 Q/K logits 与概率")
+    return attention.centered_logits, attention.relation_source
 
 
 def public_token_grid_coordinates(token_indices: tuple[int, ...], device: Any) -> Any:
@@ -397,6 +511,7 @@ def qk_atomic_evaluation_records_ready(
     aggregate_field_name: str,
     expected_roles: tuple[str, ...],
     expected_layer_names: tuple[str, ...],
+    require_evaluation_identity: bool = False,
 ) -> bool:
     """复验多次 Q/K 评价的角色、逐层内容与联合摘要."""
 
@@ -424,6 +539,43 @@ def qk_atomic_evaluation_records_ready(
             != qk_atomic_content_records_digest(atom_records)
         ):
             return False
+        if require_evaluation_identity and (
+            not _is_sha256_hex(
+                evaluation_record.get(
+                    "evaluation_latent_content_sha256"
+                )
+            )
+            or isinstance(evaluation_record.get("evaluation_score"), bool)
+            or not isinstance(
+                evaluation_record.get("evaluation_score"),
+                (int, float),
+            )
+            or not math.isfinite(
+                float(evaluation_record.get("evaluation_score"))
+            )
+        ):
+            return False
+    if require_evaluation_identity:
+        for left_index, left_record in enumerate(records):
+            for right_record in records[left_index + 1 :]:
+                same_qk_content = (
+                    left_record.get("qk_atomic_content_digest")
+                    == right_record.get("qk_atomic_content_digest")
+                )
+                same_latent = (
+                    left_record.get("evaluation_latent_content_sha256")
+                    == right_record.get("evaluation_latent_content_sha256")
+                )
+                same_score = math.isclose(
+                    float(left_record.get("evaluation_score")),
+                    float(right_record.get("evaluation_score")),
+                    rel_tol=ATTENTION_RELATION_NUMERICAL_EPSILON,
+                    abs_tol=ATTENTION_RELATION_NUMERICAL_EPSILON,
+                )
+                if (same_qk_content and not same_score) or (
+                    same_latent and (not same_qk_content or not same_score)
+                ):
+                    return False
     return aggregate_digest == qk_atomic_evaluation_records_digest(
         records,
         aggregate_field_name,
@@ -501,7 +653,7 @@ def build_attention_relation_descriptor(
     row_probability = probability / probability.sum(
         dim=-1,
         keepdim=True,
-    ).clamp_min(1e-12)
+    ).clamp_min(ATTENTION_RELATION_NUMERICAL_EPSILON)
     soft_rank = _differentiable_row_rank(logits)
     coordinates = public_token_grid_coordinates(token_indices, probability.device)
     relative_distance_scale = 1.0 / (2.0 * math.sqrt(2.0))
@@ -622,7 +774,7 @@ def qk_self_attention(
         attention_scale,
         expected_attention_scale,
         rel_tol=1e-6,
-        abs_tol=1e-12,
+        abs_tol=ATTENTION_RELATION_NUMERICAL_EPSILON,
     ):
         raise RuntimeError("注意力模块 scale 与 1 / sqrt(head_width) 不一致")
     per_head_logits = (
@@ -715,7 +867,13 @@ def attention_relation_stability_map(
     for _, attention, _ in resolved_records:
         matrix = attention_probability(attention).float()
         centered = matrix - matrix.mean(dim=-1, keepdim=True)
-        normalized_rows.append(functional.normalize(centered, dim=-1, eps=1e-12))
+        normalized_rows.append(
+            functional.normalize(
+                centered,
+                dim=-1,
+                eps=ATTENTION_RELATION_NUMERICAL_EPSILON,
+            )
+        )
     pair_scores = []
     for left_index in range(len(normalized_rows) - 1):
         for right_index in range(left_index + 1, len(normalized_rows)):
@@ -995,7 +1153,13 @@ def select_stable_attention_tokens(
     for _, attention, _ in resolved_records:
         matrix = attention_probability(attention).float()
         centered = matrix - matrix.mean(dim=-1, keepdim=True)
-        normalized_rows.append(functional.normalize(centered, dim=-1, eps=1e-12))
+        normalized_rows.append(
+            functional.normalize(
+                centered,
+                dim=-1,
+                eps=ATTENTION_RELATION_NUMERICAL_EPSILON,
+            )
+        )
         centrality_rows.append(matrix.mean(dim=-2).mean(dim=0))
     pair_scores = [
         (normalized_rows[left] * normalized_rows[right]).sum(dim=-1).mean(dim=0)
@@ -1007,7 +1171,9 @@ def select_stable_attention_tokens(
         1.0,
     )
     centrality = torch.stack(centrality_rows).mean(dim=0)
-    centrality = centrality / centrality.sum().clamp_min(1e-12)
+    centrality = centrality / centrality.sum().clamp_min(
+        ATTENTION_RELATION_NUMERICAL_EPSILON
+    )
     selection_scores = (stability * centrality).detach().cpu().tolist()
     selected_count = min(
         token_count,
@@ -1217,31 +1383,13 @@ def build_attention_relation_graph_identity(
             ],
         }
     )
-    operator_field_names = (
-        "module_layer_name",
-        "module_class_name",
-        "head_count",
-        "head_width",
-        "attention_scale",
-        "attention_scale_source",
-        "q_normalization_applied",
-        "k_normalization_applied",
-        "q_normalization_class",
-        "k_normalization_class",
-        "source_token_count",
-        "source_grid_side",
-        "sampled_token_count",
-        "sampled_grid_side",
-        "sampled_token_indices",
-        "coordinate_convention",
-        "grid_align_corners",
-        "centered_logit_aggregation",
-        "relation_probability_aggregation",
-        "mean_probability_is_softmax_of_mean_logits",
-    )
     operator_records = []
     atomic_content_records = []
-    operator_ready = True
+    operator_ready = all(
+        isinstance(attention, QKAttentionRelation)
+        and attention.relation_source == DIRECT_QK_RELATION_SOURCE
+        for _, attention, _ in resolved_records
+    )
     atomic_content_ready = True
     for layer_name, attention, token_indices in resolved_records:
         metadata = (
@@ -1253,7 +1401,7 @@ def build_attention_relation_graph_identity(
             "record_layer_name": layer_name,
             **{
                 field_name: metadata.get(field_name)
-                for field_name in operator_field_names
+                for field_name in QK_OPERATOR_METADATA_FIELD_NAMES
             },
         }
         operator_records.append(record)
@@ -1303,64 +1451,13 @@ def build_attention_relation_graph_identity(
             and metadata.get("qk_atom_content_digest")
             == qk_atom_content_digest
         )
-        head_width = metadata.get("head_width")
-        attention_scale = metadata.get("attention_scale")
-        sampled_indices = metadata.get("sampled_token_indices")
-        sampled_grid_side = metadata.get("sampled_grid_side")
-        source_grid_side = metadata.get("source_grid_side")
-        source_token_count = metadata.get("source_token_count")
-        q_normalized = metadata.get("q_normalization_applied")
-        k_normalized = metadata.get("k_normalization_applied")
-        operator_ready = operator_ready and bool(
-            isinstance(attention, QKAttentionRelation)
-            and metadata.get("module_layer_name") == layer_name
-            and isinstance(metadata.get("module_class_name"), str)
-            and bool(metadata.get("module_class_name"))
-            and isinstance(metadata.get("head_count"), int)
-            and int(metadata.get("head_count", 0)) > 0
-            and isinstance(head_width, int)
-            and int(head_width or 0) > 0
-            and isinstance(attention_scale, (int, float))
-            and math.isfinite(float(attention_scale or 0.0))
-            and math.isclose(
-                float(attention_scale or 0.0),
-                1.0 / math.sqrt(int(head_width or 1)),
-                rel_tol=1e-6,
-                abs_tol=1e-12,
-            )
-            and metadata.get("attention_scale_source")
-            in {"module_scale", "inverse_sqrt_head_width"}
-            and isinstance(q_normalized, bool)
-            and isinstance(k_normalized, bool)
-            and (
-                bool(metadata.get("q_normalization_class"))
-                == q_normalized
-            )
-            and (
-                bool(metadata.get("k_normalization_class"))
-                == k_normalized
-            )
-            and metadata.get("sampled_token_count") == len(token_indices)
-            and isinstance(sampled_grid_side, int)
-            and sampled_grid_side**2 == len(token_indices)
-            and sampled_indices == list(token_indices)
-            and metadata.get("coordinate_convention")
-            == ATTENTION_COORDINATE_CONVENTION
-            and metadata.get("grid_align_corners")
-            is ATTENTION_GRID_ALIGN_CORNERS
-            and isinstance(source_grid_side, int)
-            and isinstance(source_token_count, int)
-            and source_grid_side**2 == source_token_count
-            and metadata.get("centered_logit_aggregation")
-            == "mean_of_per_head_row_centered_sampled_qk_logits"
-            and metadata.get("relation_probability_aggregation")
-            == "mean_of_per_head_sampled_image_token_probabilities"
-            and metadata.get("mean_probability_is_softmax_of_mean_logits")
-            is False
-        )
     qk_operator_metadata_records = tuple(operator_records)
-    qk_operator_metadata_digest = build_stable_digest(
-        {"qk_operator_metadata_records": qk_operator_metadata_records}
+    operator_ready = operator_ready and qk_operator_metadata_records_ready(
+        qk_operator_metadata_records,
+        (layer_name for layer_name, _, _ in resolved_records),
+    )
+    qk_operator_metadata_digest = qk_operator_metadata_records_digest(
+        qk_operator_metadata_records
     )
     qk_atomic_content_records = tuple(atomic_content_records)
     qk_atomic_content_digest = qk_atomic_content_records_digest(
@@ -1463,7 +1560,8 @@ def attention_relation_component_scores(
         * (pair_valid & off_diagonal).to(dtype=relation.dtype)
     )
     row_weight = effective_weights.sum(dim=-1, keepdim=True)
-    safe_row_weight = row_weight.clamp_min(1e-12)
+    numerical_epsilon = ATTENTION_RELATION_NUMERICAL_EPSILON
+    safe_row_weight = row_weight.clamp_min(numerical_epsilon)
     expanded_weights = effective_weights.unsqueeze(-1)
     relation_mean = (
         relation * expanded_weights
@@ -1482,14 +1580,28 @@ def attention_relation_component_scores(
     projection_energy = (
         projection_centered.square() * expanded_weights
     ).sum(dim=-2)
-    row_energy_product = relation_energy * projection_energy
-    row_denominator = row_energy_product.clamp_min(1e-24).sqrt()
-    row_valid = (row_weight.squeeze(-1) > 0.0).unsqueeze(-1) & (
-        row_energy_product > 1e-24
+    energy_threshold = numerical_epsilon**2
+    row_valid = (
+        (row_weight.squeeze(-1) > 0.0).unsqueeze(-1)
+        & (relation_energy > energy_threshold)
+        & (projection_energy > energy_threshold)
     )
+    safe_relation_energy = torch.where(
+        relation_energy > energy_threshold,
+        relation_energy,
+        torch.ones_like(relation_energy),
+    )
+    safe_projection_energy = torch.where(
+        projection_energy > energy_threshold,
+        projection_energy,
+        torch.ones_like(projection_energy),
+    )
+    safe_row_denominator = (
+        safe_relation_energy * safe_projection_energy
+    ).sqrt()
     row_scores = torch.where(
         row_valid,
-        row_numerator / row_denominator.clamp_min(1e-12),
+        row_numerator / safe_row_denominator,
         torch.zeros_like(row_numerator),
     )
     valid_row_count = row_valid.sum(dim=-2).clamp_min(1)
@@ -1624,6 +1736,7 @@ class AttentionGeometryGradient:
     """保存真实 Q/K 目标在当前 latent 点的梯度。"""
 
     gradient: Any
+    evaluation_latent_content_sha256: str
     score_before: float
     gradient_norm: float
     layer_names: tuple[str, ...]
@@ -1709,6 +1822,9 @@ def compute_attention_geometry_gradient(
         gradient = torch.autograd.grad(score_before_tensor, differentiable_latent, retain_graph=False)[0]
     return AttentionGeometryGradient(
         gradient=gradient.detach(),
+        evaluation_latent_content_sha256=tensor_content_sha256(
+            differentiable_latent.detach()
+        ),
         score_before=float(score_before_tensor.detach().item()),
         gradient_norm=float(gradient.detach().float().norm().item()),
         layer_names=layer_names,
@@ -1798,6 +1914,8 @@ class AttentionGeometryUpdate:
     qk_atomic_evaluation_records: tuple[dict[str, Any], ...]
     qk_atomic_evaluation_digest: str
     qk_atomic_content_ready: bool
+    unit_update_content_sha256: str
+    update_content_sha256: str
     update_digest: str
     metadata: dict[str, Any]
 
@@ -1808,8 +1926,11 @@ def optimize_attention_geometry_update(
     recorder: DifferentiableAttentionRecorder,
     key_material: str,
     safe_subspace: JacobianNullSpaceResult,
-    update_strength: float,
-    precomputed_gradient: AttentionGeometryGradient | None = None,
+    risk_bounded_update: RiskBoundedUpdate,
+    precomputed_gradient: AttentionGeometryGradient,
+    precomputed_content_base_gradient: AttentionGeometryGradient,
+    backtracking_factor: float = 0.5,
+    maximum_backtracking_steps: int = 8,
     base_update: Any | None = None,
     stable_token_fraction: float = 0.5,
     unstable_pair_weight: float = 0.25,
@@ -1817,56 +1938,105 @@ def optimize_attention_geometry_update(
 ) -> AttentionGeometryUpdate:
     """在固定内容更新基底上生成并验证真实注意力几何更新。
 
-    ``base_update`` 用于传入已经确定的 LF 与尾部载体更新。回溯搜索对
-    ``latent + base_update + attention_update`` 这一真正写回的候选 latent 评分,
-    避免只验证 attention-only 中间状态后再被内容分支抵消。
+    ``risk_bounded_update`` 必须是 attention 分支风险硬包络从真实 Q/K 安全
+    投影构造的单样本结果。内部每个回溯候选都通过同一对象重新物化, 因而
+    接受候选和最终分支写回共享完全相同的单位方向、步长与 update Tensor。
+    ``base_update`` 用于传入已经确定的 LF 与尾部载体更新。每个候选都先在
+    float32 中合成 original latent、内容更新和注意力更新, 再只向实际 latent
+    dtype 转换一次；回溯评分不得分别量化任一分支。
+
+    ``precomputed_gradient`` 与 ``precomputed_content_base_gradient`` 分别绑定
+    原始 latent 和实际量化后的内容基底 latent。该函数只消费这两个已经完成
+    的真实 Q/K 求值, 不在优化内部重算或用数值近似替代其来源身份。
     """
 
     torch = _torch()
-    if update_strength <= 0.0:
-        raise ValueError("update_strength 必须为正数")
-    original_evidence = precomputed_gradient or compute_attention_geometry_gradient(
-        latent,
-        transformer_forward,
-        recorder,
-        key_material,
-        stable_token_fraction=stable_token_fraction,
-        unstable_pair_weight=unstable_pair_weight,
-        component_weights=component_weights,
+    if not isinstance(risk_bounded_update, RiskBoundedUpdate) or (
+        risk_bounded_update.branch_name != "attention_geometry"
+        or risk_bounded_update.update.shape != latent.shape
+        or risk_bounded_update.applied_strength.numel() != 1
+    ):
+        raise ValueError("risk_bounded_update 必须是单样本 attention_geometry 分支")
+    if (
+        not math.isfinite(backtracking_factor)
+        or not 0.0 < backtracking_factor < 1.0
+    ):
+        raise ValueError("backtracking_factor 必须为 (0, 1) 内的有限数")
+    if (
+        isinstance(maximum_backtracking_steps, bool)
+        or not isinstance(maximum_backtracking_steps, int)
+        or maximum_backtracking_steps < 0
+    ):
+        raise ValueError("maximum_backtracking_steps 必须为非负整数")
+    original_evidence = precomputed_gradient
+    for evidence in (
+        precomputed_gradient,
+        precomputed_content_base_gradient,
+    ):
+        evidence_gradient = torch.as_tensor(
+            evidence.gradient,
+            device=latent.device,
+            dtype=torch.float32,
+        )
+        if (
+            evidence_gradient.shape != latent.shape
+            or not bool(torch.isfinite(evidence_gradient).all())
+            or not math.isfinite(float(evidence.gradient_norm))
+            or float(evidence.gradient_norm)
+            <= risk_bounded_update.numerical_epsilon
+            or evidence.attention_relation_source
+            != DIRECT_QK_RELATION_SOURCE
+            or evidence.attention_relation_qk_operator_metadata_ready
+            is not True
+            or evidence.qk_atomic_content_ready is not True
+        ):
+            raise RuntimeError("预计算注意力梯度缺少完整直接 Q/K 有限证据")
+    original_latent_content_sha256 = tensor_content_sha256(
+        latent.detach().float()
     )
+    if (
+        original_evidence.evaluation_latent_content_sha256
+        != original_latent_content_sha256
+    ):
+        raise RuntimeError("预计算注意力梯度未绑定当前原始 latent")
     resolved_component_weights = validate_attention_relation_component_weights(
         component_weights
     )
     if (
         original_evidence.attention_relation_component_weights
         != resolved_component_weights
+        or precomputed_content_base_gradient.attention_relation_component_weights
+        != resolved_component_weights
     ):
         raise RuntimeError("预计算注意力梯度与当前四分量权重协议不一致")
     resolved_base_update = (
-        torch.zeros_like(latent)
+        torch.zeros_like(latent, dtype=torch.float32)
         if base_update is None
-        else torch.as_tensor(base_update, device=latent.device, dtype=latent.dtype)
+        else torch.as_tensor(
+            base_update,
+            device=latent.device,
+            dtype=torch.float32,
+        )
     )
     if resolved_base_update.shape != latent.shape:
         raise ValueError("base_update 必须与 latent 形状一致")
-    content_base_latent = (latent.detach() + resolved_base_update.detach()).to(dtype=latent.dtype)
-    content_base_evidence = compute_attention_geometry_gradient(
-        content_base_latent,
-        transformer_forward,
-        recorder,
-        key_material,
-        stable_token_fraction=original_evidence.stable_token_fraction,
-        unstable_pair_weight=original_evidence.unstable_pair_weight,
-        stable_token_selection=StableAttentionTokenSelection(
-            token_positions=original_evidence.stable_token_positions,
-            token_indices=original_evidence.stable_token_indices,
-            stable_token_fraction=original_evidence.stable_token_fraction,
-            selection_digest=original_evidence.stable_token_selection_digest,
-        ),
-        component_weights=resolved_component_weights,
+    _, content_base_latent, _ = compose_ordered_float32_update_once(
+        original_latent=latent,
+        branch_update_tensors={"lf_content": resolved_base_update},
+        common_scale=1.0,
+    )
+    content_base_evidence = precomputed_content_base_gradient
+    content_base_latent_content_sha256 = tensor_content_sha256(
+        content_base_latent.detach().float()
     )
     if (
-        content_base_evidence.stable_pair_weight_identity_digest
+        content_base_evidence.evaluation_latent_content_sha256
+        != content_base_latent_content_sha256
+    ):
+        raise RuntimeError("预计算注意力梯度未绑定当前内容基底 latent")
+    if (
+        content_base_evidence.layer_names != original_evidence.layer_names
+        or content_base_evidence.stable_pair_weight_identity_digest
         != original_evidence.stable_pair_weight_identity_digest
         or content_base_evidence.stable_pair_weight_realization_digest
         != original_evidence.stable_pair_weight_realization_digest
@@ -1885,21 +2055,66 @@ def optimize_attention_geometry_update(
         gradient = content_base_evidence.gradient.to(device=latent.device, dtype=torch.float32)
         projected = safe_subspace.project(gradient)
         projected_norm = projected.float().norm()
-        if float(projected_norm.item()) <= 1e-12:
+        if (
+            float(projected_norm.item())
+            <= risk_bounded_update.numerical_epsilon
+        ):
             raise RuntimeError("注意力梯度在安全子空间中的投影为零")
-        unit_update = projected / projected_norm
-        applied_strength = float(update_strength)
-        score_after_tensor = torch.tensor(score_before, device=latent.device, dtype=torch.float32)
+        projected_unit_update = (projected / projected_norm).to(
+            dtype=torch.float32
+        )
+        resolved_unit_update = torch.as_tensor(
+            risk_bounded_update.unit_direction,
+            device=latent.device,
+            dtype=torch.float32,
+        )
+        if (
+            resolved_unit_update.shape != latent.shape
+            or not bool(torch.isfinite(resolved_unit_update).all())
+            or not torch.allclose(
+                resolved_unit_update,
+                projected_unit_update,
+                rtol=1e-5,
+                atol=1e-6,
+            )
+        ):
+            raise RuntimeError(
+                "风险有界单位方向与真实 Q/K 安全投影方向不一致"
+            )
+        unit_update = resolved_unit_update.detach()
+        maximum_update_strength = float(
+            risk_bounded_update.applied_strength.item()
+        )
+        score_after_tensor = torch.tensor(
+            score_before,
+            device=latent.device,
+            dtype=torch.float32,
+        )
         accepted = False
         backtracking_step_count = 0
-        for backtracking_step_count in range(9):
-            update = unit_update * applied_strength
-            candidate = (
-                content_base_latent.detach()
-                + update.detach().to(dtype=content_base_latent.dtype)
-            ).float()
+        update = torch.zeros_like(latent, dtype=torch.float32)
+        for backtracking_step_count in range(maximum_backtracking_steps + 1):
+            proposed_strength = maximum_update_strength * (
+                float(backtracking_factor) ** backtracking_step_count
+            )
+            bounded_candidate = rescale_risk_bounded_update(
+                risk_bounded_update,
+                proposed_strength,
+            )
+            applied_strength = float(
+                bounded_candidate.applied_strength.item()
+            )
+            update = bounded_candidate.update
+            _, candidate, _ = compose_ordered_float32_update_once(
+                original_latent=latent,
+                branch_update_tensors={
+                    "lf_content": resolved_base_update,
+                    "attention_geometry": update,
+                },
+                common_scale=1.0,
+            )
             recorder.clear()
-            transformer_forward(candidate)
+            transformer_forward(candidate.detach())
             score_after_tensor = attention_geometry_score(
                 recorder.records,
                 key_material,
@@ -1908,11 +2123,11 @@ def optimize_attention_geometry_update(
             )
             if (
                 bool(torch.isfinite(score_after_tensor))
-                and float(score_after_tensor.detach().item()) > minimum_accepted_score
+                and float(score_after_tensor.detach().item())
+                > minimum_accepted_score
             ):
                 accepted = True
                 break
-            applied_strength *= 0.5
         if not accepted:
             raise RuntimeError("注意力几何更新在回溯搜索后仍未提高真实 Q/K 目标")
     accepted_relation_identity = build_attention_relation_graph_identity(
@@ -1925,6 +2140,10 @@ def optimize_attention_geometry_update(
     qk_atomic_evaluation_records = (
         {
             "qk_evaluation_role": "latent_before",
+            "evaluation_latent_content_sha256": (
+                original_latent_content_sha256
+            ),
+            "evaluation_score": score_before,
             "qk_atomic_content_records": list(
                 original_evidence.qk_atomic_content_records
             ),
@@ -1936,7 +2155,11 @@ def optimize_attention_geometry_update(
             ),
         },
         {
-            "qk_evaluation_role": "content_base_latent",
+            "qk_evaluation_role": "optimization_content_base_latent",
+            "evaluation_latent_content_sha256": (
+                content_base_latent_content_sha256
+            ),
+            "evaluation_score": content_base_score,
             "qk_atomic_content_records": list(
                 content_base_evidence.qk_atomic_content_records
             ),
@@ -1949,6 +2172,10 @@ def optimize_attention_geometry_update(
         },
         {
             "qk_evaluation_role": "accepted_attention_candidate",
+            "evaluation_latent_content_sha256": tensor_content_sha256(
+                candidate.detach().float()
+            ),
+            "evaluation_score": float(score_after_tensor.detach().item()),
             "qk_atomic_content_records": list(
                 accepted_relation_identity.qk_atomic_content_records
             ),
@@ -1972,8 +2199,24 @@ def optimize_attention_geometry_update(
         "score_after": round(score_after, 12),
         "gradient_norm": round(float(gradient.norm().item()), 12),
         "projected_gradient_norm": round(float(projected.norm().item()), 12),
+        "maximum_update_strength": round(maximum_update_strength, 12),
         "applied_update_strength": round(applied_strength, 12),
+        "backtracking_factor": round(float(backtracking_factor), 12),
+        "maximum_backtracking_steps": maximum_backtracking_steps,
         "backtracking_step_count": backtracking_step_count,
+        "candidate_composition_protocol": (
+            "ordered_float32_branch_sum_then_latent_add_single_cast_v1"
+        ),
+        "returned_update_dtype": "float32",
+        "original_evaluation_latent_content_sha256": (
+            original_latent_content_sha256
+        ),
+        "content_base_evaluation_latent_content_sha256": (
+            content_base_latent_content_sha256
+        ),
+        "unit_update_content_sha256": tensor_content_sha256(unit_update),
+        "update_content_sha256": tensor_content_sha256(update),
+        "risk_bounded_update_consumed": True,
         "layer_names": layer_names,
         "stable_token_indices": content_base_evidence.stable_token_indices,
         "stable_token_selection_digest": (
@@ -2013,7 +2256,7 @@ def optimize_attention_geometry_update(
         "qk_atomic_evaluation_digest": qk_atomic_evaluation_digest,
     }
     return AttentionGeometryUpdate(
-        update=update.to(dtype=latent.dtype),
+        update=update.detach().to(dtype=torch.float32),
         score_before=score_before,
         content_base_score=content_base_score,
         score_after=score_after,
@@ -2069,6 +2312,8 @@ def optimize_attention_geometry_update(
             bool(record["qk_atomic_content_ready"])
             for record in qk_atomic_evaluation_records
         ),
+        unit_update_content_sha256=tensor_content_sha256(unit_update),
+        update_content_sha256=tensor_content_sha256(update),
         update_digest=build_stable_digest(payload),
         metadata={
             "attention_source": "real_qk_projection",
@@ -2077,6 +2322,20 @@ def optimize_attention_geometry_update(
             "update_search": "monotonic_backtracking",
             "optimization_base": "fixed_lf_and_tail_update",
             "verified_candidate": "actual_combined_latent",
+            "maximum_update_strength": maximum_update_strength,
+            "backtracking_factor": float(backtracking_factor),
+            "maximum_backtracking_steps": maximum_backtracking_steps,
+            "candidate_composition_protocol": (
+                "ordered_float32_branch_sum_then_latent_add_single_cast_v1"
+            ),
+            "returned_update_dtype": "float32",
+            "original_evaluation_latent_content_sha256": (
+                original_latent_content_sha256
+            ),
+            "content_base_evaluation_latent_content_sha256": (
+                content_base_latent_content_sha256
+            ),
+            "risk_bounded_update_consumed": True,
             "stable_token_fraction": content_base_evidence.stable_token_fraction,
             "unstable_pair_weight": content_base_evidence.unstable_pair_weight,
             "stable_token_selection_rule": (

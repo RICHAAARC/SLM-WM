@@ -84,7 +84,7 @@ $$
 \Delta z_t^{\mathrm{A}}.
 $$
 
-实际 dtype 写回后，算子对真正写入的 Tensor 重新执行完整特征 JVP，并通过有限特征变化门禁。三个分支分别使用对应风险预算求解局部 Jacobian Null Space，而不是三个独立水印器的简单叠加，也不是未执行的联合目标求解器。
+风险零支持清理和重新单位化后，算子先对每个分支的实际 float32 单位方向独立重新执行完整特征精确 JVP；实际 dtype 写回后，再对真正联合写入的 Tensor 重新执行完整特征 JVP，并通过有限特征变化门禁。逐分支复验防止不同分支响应抵消或共同缩放掩盖非安全方向，联合写回复验捕获 dtype 量化误差。三个分支分别使用对应风险预算求解局部 Jacobian Null Space，而不是三个独立水印器的简单叠加，也不是未执行的联合目标求解器。
 
 ---
 
@@ -160,7 +160,7 @@ $$
 
 $\Omega_{\mathrm{A}}$ 使用独立 attention stability 风险, 不复用 LF 或尾部截断分支的区域集合。该输入必须由不少于两个冻结层的真实 Q/K 关系计算；核心风险接口把它定义为必需参数，缺失时直接失败，普通跨步稳定度不能成为替代值。正式候选矩阵构造时, $u\notin\Omega_b$ 的预算被置为 0, 资格集合内部才保留连续风险预算; 因而 `eligible_indices` 不是仅供日志展示的字段。完整方法只对当前实际参与嵌入的活动分支执行资格集合 fail-closed 门禁；移除风险路由的正式消融不执行该门禁, 避免被移除机制继续筛选实验样本。每次注入同时保存三个分支完整风险值、连续预算和资格 mask 的 Tensor 内容 SHA-256, 并以 `branch_risk_content_digest` 联合绑定三组内容。
 
-连续预算还必须约束最终实际分支更新。空间预算在 channel 维复制到 NCHW latent 后按连续 NCHW 顺序形成 $B_b$；风险求解、写回包络和证据摘要必须消费同一有效预算 Tensor。对单位安全方向 $v_b$、名义强度 $a_b=\lambda_b\|z_t\|_2$ 和冻结常量 $b_{\max}^b$, 定义 $\widehat b_b=b_b^{\mathrm{eff}}/b_{\max}^b$ 以及逐元素硬包络 $E_b(i)=a_b\|v_b\|_\infty\widehat b_b(i)$。`RiskBoundedScale` 只沿 $v_b$ 采用满足 $|\Delta z_t^b(i)|\le E_b(i)$ 的最大可行全局标量；零预算坐标的方向泄漏超过 `risk_bounded_scale_direction_epsilon=1e-12` 时失败, 不能靠分母 epsilon 隐藏。禁止用当前样本的预算最大值重新归一化, 也禁止在风险投影后无条件恢复固定二范数强度。图像风险输入使用 `risk_image_signal_interpolation_mode=bilinear` 与 `risk_image_signal_align_corners=false`, Q/K stability 使用 `risk_attention_signal_interpolation_mode=bilinear` 与 `risk_attention_signal_align_corners=true`；两者均不执行逐样本 min-max。中性纹理值只由 `risk_neutral_texture_value=0.5` 定义。
+连续预算还必须约束最终实际分支更新。空间预算在 channel 维复制到 NCHW latent 后按连续 NCHW 顺序形成 $B_b$；风险求解、写回包络和证据摘要必须消费同一有效预算 Tensor。安全投影保持 float32；先单位化投影方向，以 `risk_bounded_scale_direction_epsilon=1e-12` 检查零预算坐标泄漏，将允许的零预算数值残差置为精确0并重新单位化。对最终单位安全方向 $v_b$、名义强度 $a_b=\lambda_b\|z_t\|_2$ 和冻结常量 $b_{\max}^b$, 定义 $\widehat b_b=b_b^{\mathrm{eff}}/b_{\max}^b$ 以及逐元素硬包络 $E_b(i)=a_b\|v_b\|_\infty\widehat b_b(i)$。`RiskBoundedScale` 只在 $|v_b(i)|>\epsilon_{dir}$ 的活动集合上求满足 $|\Delta z_t^b(i)|\le E_b(i)$ 的最大可行全局标量；活动集为空或最终步长不大于 `null_space_numerical_epsilon=1e-12` 时失败。方向 epsilon 与数值 epsilon 角色不同, 不能共用隐式常量。风险修正后必须以投影前模板或真实 Q/K 梯度响应为分母重新执行逐分支精确 JVP, 相对残差不大于 $10^{-4}$ 才能继续。禁止用当前样本的预算最大值重新归一化, 也禁止在风险投影后无条件恢复固定二范数强度。图像风险输入使用 `risk_image_signal_interpolation_mode=bilinear` 与 `risk_image_signal_align_corners=false`, Q/K stability 使用 `risk_attention_signal_interpolation_mode=bilinear` 与 `risk_attention_signal_align_corners=true`；两者均不执行逐样本 min-max。中性纹理值只由 `risk_neutral_texture_value=0.5` 定义。
 
 ---
 
@@ -242,9 +242,9 @@ $$
 N_{\mathrm{LF}},\qquad N_{\mathrm{tail}},\qquad N_{\mathrm{A}}.
 $$
 
-正式实现逐方向记录 PSD-CG 迭代数与残差、$\|J u_i^b\|_2/\|J B_b d_i^b\|_2$ 和平方二范数投影能量保留比例。设被接受的路由候选矩阵为 $V_b$、投影方向矩阵为 $U_b=N_bR_b$。float32 reduced QR 使用 `null_space_numerical_epsilon=1e-12` 规范列符号；任一对角项不大于该 epsilon 或条件数超过 `maximum_qr_condition_number=1000000.0` 时失败。独立参考严格采用 `qr_reference_solve_protocol=right_upper_triangular_solve_without_explicit_inverse_v1`, 通过 $\widetilde V_bR_b=V_b$ 求解；第 $j$ 列残差使用 $J\widetilde V_b[:,j]$, 不能使用跨列共享 RMS。PSD-CG 不添加阻尼，最大64次迭代，相对收敛阈值为 $10^{-6}$；QR 后每列完整 Jacobian 相对残差不得超过 $10^{-4}$，能量保留比例不得低于0.01，且正交误差不得超过 `maximum_orthogonality_error=0.00001`。任一门禁失败时运行阻断。每个分支分别保存 $D_b$、$B_b$、$J(B_bD_b)$、$U_b$、$JU_b$、$N_b$、$JN_b$ 和 $J\widetilde V_b$ 的角色限定 Tensor 内容 SHA-256；每类响应只能使用其对应角色字段并绑定该数学对象。
+正式实现逐方向记录 PSD-CG 迭代数与残差、$\|J u_i^b\|_2/\|J B_b d_i^b\|_2$ 和平方二范数投影能量保留比例。设被接受的路由候选矩阵为 $V_b$、投影方向矩阵为 $U_b=N_bR_b$。float32 reduced QR 使用 `null_space_numerical_epsilon=1e-12` 规范列符号；任一对角项不大于该 epsilon 或条件数超过 `maximum_qr_condition_number=1000000.0` 时失败。独立参考严格采用 `qr_reference_solve_protocol=right_upper_triangular_solve_without_explicit_inverse_v1`, 通过 $\widetilde V_bR_b=V_b$ 求解；第 $j$ 列残差使用 $J\widetilde V_b[:,j]$, 不能使用跨列共享 RMS。PSD-CG 不添加阻尼，最大64次迭代，相对收敛阈值为 $10^{-6}$；QR 后每列完整 Jacobian 相对残差不得超过 $10^{-4}$，能量保留比例不得低于0.01，且正交误差不得超过 `maximum_orthogonality_error=0.00001`。任一门禁失败时运行阻断。每个分支分别保存 $D_b$、$B_b$、$J(B_bD_b)$、$U_b$、$JU_b$、$N_b$、$JN_b$ 和 $J\widetilde V_b$ 的角色限定 Tensor 内容 SHA-256；每类响应只能使用其对应角色字段并绑定该数学对象。`solver_digest` 由候选与响应形状、秩、接受列索引、全部逐列数值和上述8类 Tensor 内容摘要通过共享纯记录函数重建；结果门禁必须重算, 不接受 producer 自报布尔值。
 
-三个分支先在 float32 中按 `lf_content -> tail_robust -> attention_geometry` 固定顺序累加。不得逐分支 cast。对共同缩放 $q_k=2^{-k}$、$k=0,\ldots,24$, 只把 original latent 的 float32 表示与 $q_k\Delta z_t$ 相加, 随后单次 cast 到真实 latent dtype：
+三个分支先在 float32 中按 `lf_content -> tail_robust -> attention_geometry` 固定顺序累加。不得逐分支 cast。attention 单调回溯与最终写回共同调用唯一的 `compose_ordered_float32_update_once`；不得分别实现 `(z+base)+attention` 和 `z+(LF+tail+attention)` 两种非结合加法路径。对共同缩放 $q_k=2^{-k}$、$k=0,\ldots,24$, 只把 original latent 的 float32 表示与 $q_k\Delta z_t$ 相加, 随后单次 cast 到真实 latent dtype：
 
 $$
 \Delta z_t^{\mathrm{written}}
@@ -265,7 +265,7 @@ $$
 
 这一复验用于捕获 float32 Null Space 方向转换为扩散 latent dtype 后产生的响应，验证对象是实际进入 scheduler 的增量。attention 启用时, 实际写回完整候选还必须高于原 latent 与相同 $q_k$ 下单次 cast 的 LF/tail 内容基底 Q/K 分数。共同回溯只使用 `quantized_budget_envelope_backtracking_factor=0.5` 与 `quantized_budget_envelope_backtracking_maximum_steps=24`。实现选择首个同时通过联合包络、非零写回、Q/K 单调性、完整 JVP 和有限变化的候选；初始候选及最多24次共同减半全部失败时阻断。局部 Jacobian 零响应仍不能单独证明有限写回更新保持完整语义，因此实现还对每次真正写回的 latent 重新提取完整特征；全部扩散步骤结束后，再直接比较最终 clean 与 watermarked 成图。两级有限变化门禁均要求 CLIP cosine 不低于0.995且手工结构统计特征相对漂移不高于0.02。
 
-全部关键 Tensor 使用 `slm_wm_tensor_content_v1` 形成内容身份。该协议依次绑定协议版本、PyTorch dtype、有序 shape 和连续原始字节。单次注入分别保存 $\Delta z_t^{\mathrm{LF}}$、$\Delta z_t^{\mathrm{tail}}$ 与 $\Delta z_t^{\mathrm A}$ 的原生计算 Tensor SHA-256, 再保存三者联合摘要、合成更新摘要和实际量化写回增量摘要；不同 dtype、shape 或任一字节变化都会产生不同身份。
+全部关键 Tensor 使用 `slm_wm_tensor_content_v1` 形成内容身份。该协议依次绑定协议版本、PyTorch dtype、有序 shape 和连续原始字节。单次注入分别保存 $\Delta z_t^{\mathrm{LF}}$、$\Delta z_t^{\mathrm{tail}}$ 与 $\Delta z_t^{\mathrm A}$ 的原生计算 Tensor SHA-256, 再保存三者联合摘要、合成更新摘要和实际量化写回增量摘要。`quantized_composition_evidence_digest` 还按固定角色绑定 original latent、candidate latent、活动分支 update 与 envelope、联合 update 与 envelope、实际写回 dtype/shape、共同缩放因子和回溯步数；结果消费端必须独立重算。不同 dtype、shape、角色、轨迹或任一字节变化都会产生不同身份。
 
 ---
 
@@ -594,14 +594,14 @@ b_A^{\mathrm{eff}},
 \right).
 $$
 
-实现必须在 $z_t^{\mathrm{base}}=z_t+\Delta z_t^{\mathrm{LF}}+\Delta z_t^{\mathrm{tail}}$ 上重算梯度和候选分数。回溯严格使用 `attention_backtracking_factor=0.5` 与 `attention_backtracking_maximum_steps=8`, 即以风险允许步长为起点最多执行8次减半, 只有
+实现必须在 $z_t^{\mathrm{base}}=z_t+\Delta z_t^{\mathrm{LF}}+\Delta z_t^{\mathrm{tail}}$ 上重算梯度和候选分数。优化器直接接收 attention 分支已物化的 `RiskBoundedUpdate`, 每次减半都沿该对象的同一单位方向重新物化 update；禁止仅传入标量强度后在优化器内重建第二个方向。接受候选的 update Tensor 摘要必须与随后进入三分支合成的 attention update Tensor 摘要相同。回溯严格使用 `attention_backtracking_factor=0.5` 与 `attention_backtracking_maximum_steps=8`, 即以风险允许步长为起点最多执行8次减半, 只有
 
 $$
 s_A(z_t^{\mathrm{base}}+\Delta z_t^{\mathrm A})>
 \max\{s_A(z_t),s_A(z_t^{\mathrm{base}})\}
 $$
 
-时才接受。记录必须包含原 latent 分数、内容基底分数、接受分数、实际更新强度、回溯次数、原始梯度范数和投影后梯度范数。单次注入的 Q/K 原子角色固定为 `latent_before`、`content_base_latent`、`accepted_attention_candidate` 与 `actual_written_combined_latent`；四个角色必须逐层完整且联合摘要一致。若安全投影为零、九个候选均不能提升真实 Q/K 目标或任一 Q/K 原子角色缺失, 运行必须失败。关系梯度 proxy 不得进入正式结果。
+时才接受。记录必须包含原 latent 分数、优化内容基底分数、attention 接受候选分数、实际写回内容基底分数、实际写回组合分数、实际更新强度、回溯次数、原始梯度范数和投影后梯度范数。单次注入的 Q/K 原子角色固定为 `latent_before`、`optimization_content_base_latent`、`accepted_attention_candidate`、`actual_written_content_base_latent` 与 `actual_written_combined_latent`；5个角色必须逐层完整, 并分别绑定实际 float32 求值 latent 内容 SHA-256 与该次 Q/K 分数后形成联合摘要。角色分数还必须与顶层五个单调门禁分数字段精确一致。前3个角色验证 attention 分支自身的单调性，后2个角色验证共同缩放和实际 dtype 量化后的最终单调性。若安全投影为零、九个候选均不能提升真实 Q/K 目标或任一 Q/K 原子角色缺失, 运行必须失败。关系梯度 proxy 不得进入正式结果。
 
 最终成图还必须通过 attention 因果可观测性门禁。除 clean 与完整方法图像外,
 运行端以同一生成 seed、同一 scheduler 轨迹、相同 LF/tail 配置与算子重新生成

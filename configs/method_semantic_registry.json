@@ -1,8 +1,8 @@
 {
   "registry_schema": "slm_wm_method_semantic_registry_v1",
   "registry_scope": "normative_traceability_without_scientific_conformance_decision",
-  "method_definition_schema": "slm_wm_constructive_local_tangent_v2",
-  "method_definition_digest": "2e0d2cfc43b72c6e5e875d48a0fbc15b2a48dc248e425ef8d3ead708e86d2f8a",
+  "method_definition_schema": "slm_wm_constructive_local_tangent_v3",
+  "method_definition_digest": "80ad2e38188ec57144bd987070425d65592109d17e90f04fff99c3432309fa1a",
   "invariants": [
     {
       "invariant_id": "constructive_local_tangent_scope",
@@ -194,6 +194,10 @@
         "adjacent_step_stability_status",
         "semantic_feature_schema",
         "attention_relation_qk_atomic_content_digest",
+        "current_decoded_rgb_content_sha256",
+        "previous_step_decoded_rgb_content_sha256",
+        "clip_patch_tokens_content_sha256",
+        "clip_cls_token_content_sha256",
         "semantic_risk_signal_content_sha256",
         "texture_risk_signal_content_sha256",
         "local_contrast_risk_signal_content_sha256",
@@ -219,7 +223,11 @@
         "tests/functional/test_semantic_feature_conditions.py::test_branch_signals_use_actual_adjacent_step_and_local_contrast",
         "tests/functional/test_real_scientific_operators.py::test_attention_stability_comes_from_multiple_real_qk_layers"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_branch_risk_formula.py::test_constant_semantic_maps_keep_analytic_values_without_batch_mixing",
+        "tests/functional/test_branch_risk_formula.py::test_image_risk_signals_match_analytic_texture_contrast_and_adjacent_formulas",
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_comes_from_multiple_real_qk_layers"
+      ],
       "gpu_atomic_roles": [
         "current_latent_tensor",
         "previous_scheduler_latent_tensor",
@@ -240,10 +248,15 @@
         "texture_risk_attention=risk_neutral_texture_value",
         "rho_b=(eta_local_b*local_contrast_risk+eta_semantic_b*semantic_risk+eta_texture_b*texture_risk_b+eta_adjacent_b*(1-adjacent_step_stability)+eta_attention_b*(1-attention_stability))/sum_eta_b",
         "b_eff_b=clip(budget_floor_b+budget_gain_b*(1-rho_b),budget_floor_b,budget_ceiling_b)*eligible_mask_b",
+        "unit_direction_b=renormalize(zero_exactly_where_budget_zero(normalize(projected_direction_b)))",
+        "active_b={i:abs(unit_direction_b[i])>risk_bounded_scale_direction_epsilon}",
         "E_b=nominal_strength_b*max_abs(unit_direction_b)*(b_eff_b/budget_ceiling_b)",
         "applied_strength_b=min(nominal_strength_b,min_active(E_b/abs(unit_direction_b)))",
+        "applied_strength_b>null_space_numerical_epsilon",
         "delta_b=applied_strength_b*unit_direction_b",
-        "abs(delta_b)<=E_b"
+        "abs(delta_b)<=E_b",
+        "post_risk_jvp_ratio_b=norm2(J*unit_direction_b)/max(norm2(J*reference_direction_b),null_space_numerical_epsilon)",
+        "post_risk_jvp_ratio_b<=maximum_relative_response_residual"
       ],
       "configuration_fields": [
         "risk_signal_calibration_protocol",
@@ -253,6 +266,8 @@
         "risk_zero_support_protocol",
         "risk_bounded_scale_protocol",
         "risk_bounded_scale_direction_epsilon",
+        "null_space_numerical_epsilon",
+        "maximum_relative_response_residual",
         "lf_content_risk_config.local_contrast_risk_weight",
         "lf_content_risk_config.semantic_weight",
         "lf_content_risk_config.texture_weight",
@@ -297,8 +312,8 @@
           "symbol": "solve_jacobian_null_space"
         },
         {
-          "path": "main/methods/carrier/keyed_tensor.py",
-          "symbol": "KeyedTensorCarrier"
+          "path": "main/methods/update_composition.py",
+          "symbol": "build_risk_bounded_update"
         }
       ],
       "runtime_binding_symbols": [
@@ -308,6 +323,8 @@
         }
       ],
       "runtime_evidence_fields": [
+        "branch_risk_bundle_digest",
+        "risk_field_digest",
         "risk_values_content_sha256",
         "budget_values_content_sha256",
         "eligible_mask_content_sha256",
@@ -317,17 +334,28 @@
         "branch_written_update_maximum_envelope_ratio",
         "quantized_write_budget_envelope_ready",
         "effective_budget_values_content_sha256",
+        "branch_unit_direction_content_sha256",
         "branch_nominal_strength",
         "branch_applied_strength",
         "branch_risk_scale_factor",
-        "branch_budget_ceiling"
+        "branch_budget_ceiling",
+        "branch_direction_epsilon",
+        "branch_numerical_epsilon",
+        "branch_post_risk_direction_content_sha256",
+        "branch_post_risk_reference_direction_content_sha256",
+        "branch_post_risk_response_content_sha256",
+        "branch_post_risk_reference_response_content_sha256",
+        "branch_post_risk_relative_response_residual",
+        "branch_post_risk_jacobian_gate_ready",
+        "branch_post_risk_jvp_mode"
       ],
       "fail_closed_conditions": [
         "missing_attention_stability",
         "empty_active_branch_eligibility",
         "branch_budget_envelope_violation",
         "zero_budget_nonzero_write",
-        "nonfinite_branch_update"
+        "nonfinite_branch_update",
+        "post_risk_direction_jacobian_response_above_maximum"
       ],
       "forbidden_substitutes": [
         "samplewise_minmax_risk_normalization",
@@ -342,7 +370,16 @@
         "tests/functional/test_real_scientific_operators.py::test_risk_budget_is_explicit_in_full_jacobian_null_projection",
         "tests/functional/test_branch_risk_fail_closed.py::test_branch_risk_rejects_empty_frozen_eligibility_set"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_branch_risk_formula.py::test_branch_risk_formula_uses_frozen_texture_directions_and_neutral_value",
+        "tests/functional/test_branch_risk_formula.py::test_branch_risk_threshold_equality_is_ineligible",
+        "tests/functional/test_risk_bounded_composition.py::test_risk_budget_monotonically_bounds_update_and_zero_support",
+        "tests/functional/test_risk_bounded_composition.py::test_risk_bounded_update_is_batch_isolated_and_reuses_nchw_budget",
+        "tests/functional/test_risk_bounded_composition.py::test_risk_bounded_update_separates_direction_and_numerical_epsilon",
+        "tests/functional/test_risk_bounded_composition.py::test_risk_bounded_direction_support_is_invariant_to_input_scaling",
+        "tests/functional/test_risk_bounded_composition.py::test_direction_epsilon_only_clears_zero_budget_leakage",
+        "tests/functional/test_real_scientific_operators.py::test_post_risk_direction_reexecutes_independent_exact_jvp"
+      ],
       "gpu_atomic_roles": [
         "branch_risk_values_tensor",
         "branch_budget_values_tensor",
@@ -451,6 +488,10 @@
         {
           "path": "main/methods/subspace/jacobian_nullspace.py",
           "symbol": "solve_jacobian_null_space"
+        },
+        {
+          "path": "main/methods/subspace/jacobian_nullspace.py",
+          "symbol": "recompute_jacobian_null_space_result_digest"
         }
       ],
       "runtime_binding_symbols": [
@@ -461,6 +502,10 @@
       ],
       "runtime_evidence_fields": [
         "jvp_mode",
+        "null_space_evidence_version",
+        "solver_digest",
+        "candidate_shape",
+        "response_shape",
         "candidate_matrix_content_sha256",
         "risk_budget_content_sha256",
         "routed_candidate_response_matrix_content_sha256",
@@ -481,7 +526,8 @@
         "insufficient_basis_rank",
         "projection_energy_below_minimum",
         "independent_column_residual_above_maximum",
-        "basis_orthogonality_violation"
+        "basis_orthogonality_violation",
+        "solver_digest_mismatch"
       ],
       "forbidden_substitutes": [
         "finite_difference_jacobian",
@@ -496,7 +542,8 @@
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_full_jacobian_constraint_projection_recovers_null_direction",
         "tests/functional/test_real_scientific_operators.py::test_null_projection_energy_retention_uses_squared_l2_ratio",
-        "tests/functional/test_real_scientific_operators.py::test_undamped_psd_cg_reports_non_convergence_without_fallback"
+        "tests/functional/test_real_scientific_operators.py::test_undamped_psd_cg_reports_non_convergence_without_fallback",
+        "tests/functional/test_real_scientific_operators.py::test_scientific_operator_gate_requires_all_real_operator_evidence"
       ],
       "cpu_property_test_nodes": [
         "tests/functional/test_semantic_feature_conditions.py::test_complete_feature_vector_supports_exact_jvp_and_vjp",
@@ -659,7 +706,11 @@
         "tests/functional/test_real_scientific_operators.py::test_tail_robust_template_records_amplitude_tail_semantics",
         "tests/functional/test_real_scientific_operators.py::test_keyed_templates_use_versioned_device_independent_prg"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_risk_bounded_composition.py::test_low_frequency_template_consumes_frozen_spatial_pooling_parameters",
+        "tests/functional/test_risk_bounded_composition.py::test_tail_template_preserves_exact_sparse_support_without_centering",
+        "tests/functional/test_risk_bounded_composition.py::test_carrier_templates_remain_canonical_float32_for_float16_latent"
+      ],
       "gpu_atomic_roles": [
         "lf_canonical_template",
         "tail_canonical_template",
@@ -687,6 +738,8 @@
         "stable_selection=top_fraction(stable_score,attention_stable_token_fraction,minimum_4,tie_break_original_2d_index)",
         "token_weight=1_if_stable_else_attention_unstable_pair_weight",
         "pair_weight=off_diagonal_outer(token_weight,token_weight)",
+        "attention_relation_numerical_epsilon=1e-12",
+        "row_valid=(pair_weight_sum>0)_and_(relation_energy>epsilon_num^2)_and_(projection_energy>epsilon_num^2)",
         "component_score_c=component_polarity_c*pair_weighted_RowCorr(R_c,S_K,pair_weight)",
         "layer_component_score_c=mean_layers(component_score_c)",
         "s_A=sum_c(attention_relation_component_weights_c*layer_component_score_c)"
@@ -712,6 +765,14 @@
         {
           "path": "main/methods/geometry/differentiable_attention.py",
           "symbol": "attention_relation_component_protocol"
+        },
+        {
+          "path": "main/methods/geometry/differentiable_attention.py",
+          "symbol": "qk_operator_metadata_records_ready"
+        },
+        {
+          "path": "main/methods/geometry/differentiable_attention.py",
+          "symbol": "qk_operator_metadata_records_digest"
         }
       ],
       "runtime_binding_symbols": [
@@ -727,6 +788,11 @@
         "attention_relation_component_names",
         "attention_relation_component_weights",
         "attention_relation_component_protocol_digest",
+        "attention_relation_qk_operator_metadata_records",
+        "attention_relation_qk_operator_metadata_digest",
+        "attention_relation_qk_operator_metadata_ready",
+        "evaluation_latent_content_sha256",
+        "evaluation_score",
         "qk_atomic_content_records",
         "qk_atomic_content_digest",
         "qk_atomic_content_ready"
@@ -737,7 +803,8 @@
         "attention_head_metadata_missing",
         "source_grid_identity_missing",
         "component_protocol_mismatch",
-        "qk_atomic_content_incomplete"
+        "qk_atomic_content_incomplete",
+        "qk_operator_metadata_digest_mismatch"
       ],
       "forbidden_substitutes": [
         "hidden_state_relation_proxy",
@@ -752,7 +819,8 @@
         "tests/functional/test_real_scientific_operators.py::test_multihead_qk_relation_matches_independent_manual_calculation",
         "tests/functional/test_real_scientific_operators.py::test_each_attention_relation_component_changes_keyed_score",
         "tests/functional/test_real_scientific_operators.py::test_distance_modulated_probability_is_distinct_and_differentiable",
-        "tests/functional/test_real_scientific_operators.py::test_image_alignment_uses_token_endpoint_coordinate_convention"
+        "tests/functional/test_real_scientific_operators.py::test_image_alignment_uses_token_endpoint_coordinate_convention",
+        "tests/functional/test_real_scientific_operators.py::test_scientific_operator_gate_requires_all_real_operator_evidence"
       ],
       "cpu_property_test_nodes": [],
       "gpu_atomic_roles": [
@@ -775,8 +843,11 @@
         "Q=attention_module.to_q(hidden_states)",
         "K=attention_module.to_k(hidden_states)",
         "g_A=autograd(geometry_score,z)",
-        "delta_A=monotonic_backtrack(risk_bounded(project_to_attention_subspace(g_A)))",
-        "score(candidate)>max(score(original),score(content_base))"
+        "delta_A=monotonic_backtrack(rescale_same_risk_bounded_update(project_to_attention_subspace(g_A)))",
+        "score(accepted_attention_candidate)>max(score(latent_before),score(optimization_content_base_latent))",
+        "score(actual_written_combined_latent)>max(score(latent_before),score(actual_written_content_base_latent))",
+        "qk_evaluation_roles=(latent_before,optimization_content_base_latent,accepted_attention_candidate,actual_written_content_base_latent,actual_written_combined_latent)",
+        "accepted_attention_update_content_sha256=attention_branch_written_update_content_sha256"
       ],
       "configuration_fields": [
         "attention_module_names",
@@ -815,7 +886,13 @@
         "attention_qk_atomic_content_records",
         "attention_qk_atomic_content_digest",
         "attention_score_before",
+        "attention_content_base_score",
         "attention_score_after",
+        "attention_actual_written_content_base_score",
+        "attention_final_combined_score",
+        "attention_score_gain",
+        "attention_update_unit_direction_content_sha256",
+        "attention_update_content_sha256",
         "attention_backtracking_step_count"
       ],
       "fail_closed_conditions": [
@@ -826,7 +903,8 @@
         "attention_stability_missing",
         "projected_attention_gradient_zero",
         "monotonic_candidate_missing",
-        "scheduler_scale_noise_missing"
+        "scheduler_scale_noise_missing",
+        "attention_risk_bounded_update_identity_mismatch"
       ],
       "forbidden_substitutes": [
         "hidden_state_similarity_proxy",
@@ -834,7 +912,8 @@
         "single_layer_stability_proxy",
         "linear_scheduler_noise_fallback",
         "nonmonotonic_attention_write",
-        "full_joint_attention_claim"
+        "full_joint_attention_claim",
+        "scalar_strength_without_risk_bounded_update"
       ],
       "cpu_property_id": "direct_to_q_to_k_probabilities_and_backtracking_are_formula_exact",
       "specification_test_nodes": [
@@ -843,7 +922,13 @@
         "tests/functional/test_real_scientific_operators.py::test_attention_update_verifies_actual_combined_latent",
         "tests/functional/test_real_scientific_operators.py::test_attention_modules_resolve_only_frozen_exact_layer_names"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_attention_risk_step.py::test_attention_risk_step_starts_at_maximum_and_consumes_factor",
+        "tests/functional/test_attention_risk_step.py::test_attention_risk_step_uses_one_actual_dtype_cast",
+        "tests/functional/test_attention_risk_step.py::test_attention_risk_step_rejects_non_monotonic_candidates_at_step_limit",
+        "tests/functional/test_attention_risk_step.py::test_attention_optimizer_consumes_exact_risk_bounded_direction",
+        "tests/functional/test_attention_risk_step.py::test_attention_optimizer_rejects_different_risk_direction"
+      ],
       "gpu_atomic_roles": [
         "sampled_query_tensor",
         "sampled_key_tensor",
@@ -859,8 +944,9 @@
       "invariant_id": "three_branch_update_composition",
       "definition_pointer": "docs/builds/method_semantic_invariants.md#three_branch_update_composition",
       "formal_expression": [
-        "combined_update=delta_lf+delta_tail+delta_attention",
-        "written_update=cast_dtype(z+combined_update)-z",
+        "combined_update=sum_in_fixed_order(delta_lf,delta_tail,delta_attention)",
+        "candidate_latent=cast_dtype(float32(z)+common_scale*combined_update)",
+        "written_update=candidate_latent-z",
         "composition_count=1"
       ],
       "configuration_fields": [
@@ -871,7 +957,20 @@
         "quantized_branch_composition_protocol",
         "quantized_branch_composition_order"
       ],
-      "method_implementation_symbols": [],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/update_composition.py",
+          "symbol": "build_quantized_composition_candidate"
+        },
+        {
+          "path": "main/methods/update_composition.py",
+          "symbol": "iter_quantized_composition_candidates"
+        },
+        {
+          "path": "main/methods/update_composition.py",
+          "symbol": "compose_ordered_float32_update_once"
+        }
+      ],
       "runtime_binding_symbols": [
         {
           "path": "experiments/runners/semantic_watermark_runtime.py",
@@ -886,7 +985,14 @@
         "combined_update_content_sha256",
         "quantized_write_update_content_sha256",
         "combined_budget_envelope_content_sha256",
-        "quantized_write_composition_order"
+        "quantized_write_composition_order",
+        "quantized_write_original_latent_content_sha256",
+        "quantized_write_candidate_latent_content_sha256",
+        "quantized_write_active_branch_order",
+        "quantized_write_branch_content_identities",
+        "quantized_write_backtracking_factor",
+        "quantized_composition_evidence_version",
+        "quantized_composition_evidence_digest"
       ],
       "fail_closed_conditions": [
         "active_branch_update_missing",
@@ -907,7 +1013,13 @@
         "tests/functional/test_real_scientific_operators.py::test_attention_update_verifies_actual_combined_latent",
         "tests/functional/test_semantic_feature_conditions.py::test_actual_combined_latent_uses_full_feature_preservation_gate"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_risk_bounded_composition.py::test_quantized_composition_accepts_ordered_nonempty_branch_subset",
+        "tests/functional/test_risk_bounded_composition.py::test_quantized_overshoot_requires_common_backtracking_candidate",
+        "tests/functional/test_risk_bounded_composition.py::test_quantized_composition_evidence_binds_real_three_branch_tensors",
+        "tests/functional/test_risk_bounded_composition.py::test_float32_composition_casts_once_instead_of_associative_latent_writes",
+        "tests/functional/test_risk_bounded_composition.py::test_float32_composition_uses_frozen_role_order_not_mapping_order"
+      ],
       "gpu_atomic_roles": [
         "lf_branch_update_tensor",
         "tail_branch_update_tensor",
@@ -942,7 +1054,20 @@
         "quantized_budget_envelope_backtracking_factor",
         "quantized_budget_envelope_backtracking_maximum_steps"
       ],
-      "method_implementation_symbols": [],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/update_composition.py",
+          "symbol": "build_quantized_composition_candidate"
+        },
+        {
+          "path": "main/methods/update_composition.py",
+          "symbol": "iter_quantized_composition_candidates"
+        },
+        {
+          "path": "main/methods/update_composition.py",
+          "symbol": "compose_ordered_float32_update_once"
+        }
+      ],
       "runtime_binding_symbols": [
         {
           "path": "experiments/runners/semantic_watermark_runtime.py",
@@ -953,6 +1078,9 @@
         "quantized_write_update_content_sha256",
         "quantized_write_update_dtype",
         "quantized_write_update_shape",
+        "quantized_write_reference_feature_norm",
+        "quantized_write_jacobian_response_norm",
+        "quantized_write_update_norm",
         "quantized_write_relative_jacobian_response",
         "quantized_write_jacobian_gate_ready",
         "combined_budget_envelope_content_sha256",
@@ -960,7 +1088,14 @@
         "quantized_write_budget_envelope_ready",
         "quantized_write_common_scale",
         "quantized_write_backtracking_step_count",
-        "quantized_write_composition_order"
+        "quantized_write_composition_order",
+        "quantized_write_original_latent_content_sha256",
+        "quantized_write_candidate_latent_content_sha256",
+        "quantized_write_active_branch_order",
+        "quantized_write_branch_content_identities",
+        "quantized_write_backtracking_factor",
+        "quantized_composition_evidence_version",
+        "quantized_composition_evidence_digest"
       ],
       "fail_closed_conditions": [
         "quantized_update_zero",
@@ -980,7 +1115,13 @@
         "tests/functional/test_semantic_feature_conditions.py::test_quantized_write_jacobian_gate_rechecks_actual_float16_delta",
         "tests/functional/test_semantic_feature_conditions.py::test_quantized_write_jacobian_gate_rejects_update_lost_to_quantization"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_risk_bounded_composition.py::test_quantized_overshoot_requires_common_backtracking_candidate",
+        "tests/functional/test_risk_bounded_composition.py::test_quantized_composition_evidence_binds_real_three_branch_tensors",
+        "tests/functional/test_risk_bounded_composition.py::test_quantized_composition_rejects_inconsistent_backtracking_trace",
+        "tests/functional/test_semantic_feature_conditions.py::test_quantized_write_jacobian_gate_rechecks_actual_float16_delta",
+        "tests/functional/test_semantic_feature_conditions.py::test_quantized_write_jacobian_gate_rejects_update_lost_to_quantization"
+      ],
       "gpu_atomic_roles": [
         "prewrite_combined_update_tensor",
         "actual_dtype_written_update_tensor",

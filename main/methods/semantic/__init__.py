@@ -2,6 +2,7 @@
 
 from main.methods.semantic.branch_risk import (
     BRANCH_NAMES,
+    NEUTRAL_TEXTURE_RISK_VALUE,
     BranchRiskConfig,
     BranchRiskFieldBundle,
     CarrierRiskField,
@@ -10,6 +11,7 @@ from main.methods.semantic.branch_risk import (
 
 __all__ = [
     "BRANCH_NAMES",
+    "NEUTRAL_TEXTURE_RISK_VALUE",
     "BranchRiskConfig",
     "BranchRiskFieldBundle",
     "CarrierRiskField",

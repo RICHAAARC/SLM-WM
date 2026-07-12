@@ -26,6 +26,106 @@ from main.core.keyed_prg import (
 )
 
 TensorFeatureFunction = Callable[[Any], Any]
+JACOBIAN_NULL_SPACE_EVIDENCE_VERSION = (
+    "slm_wm_jacobian_null_space_evidence_v1"
+)
+
+
+def recompute_jacobian_null_space_result_digest(
+    record: dict[str, Any],
+) -> str:
+    """仅从持久化记录重建 Null Space 求解证据摘要。
+
+    该函数不重新声称摘要能够替代大型 Tensor。它的作用是把求解维度、逐列
+    数值测量和八类 Tensor 内容身份绑定为同一个不可静默改字段的记录。
+    生产端与论文消费门禁共同复用该函数, 避免两套摘要公式发生漂移。
+    """
+
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError("Null Space 记录缺少 metadata")
+    payload = {
+        "evidence_version": record.get("null_space_evidence_version"),
+        "branch_name": record.get("branch_name"),
+        "candidate_shape": tuple(
+            int(value) for value in record.get("candidate_shape", ())
+        ),
+        "response_shape": tuple(
+            int(value) for value in record.get("response_shape", ())
+        ),
+        "null_rank": int(record.get("null_rank", 0)),
+        "evaluated_direction_indices": [
+            int(value)
+            for value in record.get("evaluated_direction_indices", ())
+        ],
+        "column_response_norms": [
+            round(float(value), 12)
+            for value in record.get("column_response_norms", ())
+        ],
+        "column_reference_response_norms": [
+            round(float(value), 12)
+            for value in record.get("column_reference_response_norms", ())
+        ],
+        "column_relative_response_residuals": [
+            round(float(value), 12)
+            for value in record.get("column_relative_response_residuals", ())
+        ],
+        "projection_energy_retentions": [
+            round(float(value), 12)
+            for value in record.get("projection_energy_retentions", ())
+        ],
+        "cg_iteration_counts": tuple(
+            int(value) for value in record.get("cg_iteration_counts", ())
+        ),
+        "cg_relative_residuals": [
+            round(float(value), 12)
+            for value in record.get("cg_relative_residuals", ())
+        ],
+        "response_residual": round(
+            float(record.get("response_residual")),
+            12,
+        ),
+        "relative_response_residual": round(
+            float(record.get("relative_response_residual")),
+            12,
+        ),
+        "orthogonality_error": round(
+            float(record.get("orthogonality_error")),
+            12,
+        ),
+        "qr_condition_number": round(
+            float(metadata.get("qr_condition_number")),
+            12,
+        ),
+        "candidate_matrix_content_sha256": record.get(
+            "candidate_matrix_content_sha256"
+        ),
+        "risk_budget_content_sha256": record.get(
+            "risk_budget_content_sha256"
+        ),
+        "routed_candidate_response_matrix_content_sha256": record.get(
+            "routed_candidate_response_matrix_content_sha256"
+        ),
+        "projected_direction_matrix_content_sha256": record.get(
+            "projected_direction_matrix_content_sha256"
+        ),
+        "projected_direction_response_matrix_content_sha256": record.get(
+            "projected_direction_response_matrix_content_sha256"
+        ),
+        "latent_basis_content_sha256": record.get(
+            "latent_basis_content_sha256"
+        ),
+        "basis_response_matrix_content_sha256": record.get(
+            "basis_response_matrix_content_sha256"
+        ),
+        "basis_reference_response_matrix_content_sha256": record.get(
+            "basis_reference_response_matrix_content_sha256"
+        ),
+        "tensor_content_digest_version": metadata.get(
+            "tensor_content_digest_version"
+        ),
+    }
+    return build_stable_digest(payload)
 
 
 def _torch() -> Any:
@@ -418,19 +518,34 @@ class JacobianNullSpaceResult:
         return int(self.latent_basis.shape[1])
 
     def project(self, tensor: Any) -> Any:
-        """把任意同形 latent tensor 正交投影到安全子空间。"""
+        """把任意同形 latent Tensor 投影到 float32 安全子空间。
 
-        flat = tensor.reshape(-1).to(device=self.latent_basis.device, dtype=self.latent_basis.dtype)
+        安全基底和后续风险包络都以 float32 定义。此处不得恢复输入 latent 的
+        float16 或 bfloat16 dtype, 否则投影方向会在风险支持修正和 JVP 复验前
+        丢失低幅值坐标。
+        """
+
+        flat = tensor.reshape(-1).to(
+            device=self.latent_basis.device,
+            dtype=self.latent_basis.dtype,
+        )
         projected = self.latent_basis @ (self.latent_basis.transpose(0, 1) @ flat)
-        return projected.reshape(tensor.shape).to(dtype=tensor.dtype)
+        return projected.reshape(tensor.shape).to(dtype=_torch().float32)
 
     def to_record(self) -> dict[str, Any]:
         """返回不包含大型矩阵的受治理摘要记录。"""
 
         return {
+            "null_space_evidence_version": (
+                JACOBIAN_NULL_SPACE_EVIDENCE_VERSION
+            ),
             "branch_name": self.branch_name,
             "basis_rank": self.basis_rank,
+            "null_rank": self.basis_rank,
             "candidate_count": int(self.candidate_matrix.shape[1]),
+            "candidate_shape": [
+                int(value) for value in self.candidate_matrix.shape
+            ],
             "evaluated_direction_count": (
                 max(self.evaluated_direction_indices) + 1
                 if self.evaluated_direction_indices
@@ -438,6 +553,9 @@ class JacobianNullSpaceResult:
             ),
             "evaluated_direction_indices": list(self.evaluated_direction_indices),
             "response_width": int(self.basis_response_matrix.shape[0]),
+            "response_shape": [
+                int(value) for value in self.basis_response_matrix.shape
+            ],
             "column_response_norms": list(self.column_response_norms),
             "column_reference_response_norms": list(
                 self.column_reference_response_norms
@@ -740,32 +858,59 @@ def solve_jacobian_null_space(
     basis_reference_response_matrix_content_sha256 = tensor_content_sha256(
         basis_reference_response_matrix
     )
-    digest_payload = {
-        "branch_name": branch_name,
-        "candidate_shape": tuple(int(value) for value in candidate_matrix.shape),
-        "response_shape": tuple(
-            int(value) for value in basis_response_matrix.shape
+    solver_metadata = {
+        "jvp_mode": joint_feature_linearization.linearization_mode,
+        "solver": "matrix_free_full_jacobian_psd_cg",
+        "latent_basis_formula": (
+            "qr(Bd - B^2 J^T solve_psd_cg(J B^2 J^T, J B d))"
         ),
+        "full_feature_jvp": True,
+        "full_feature_vjp": True,
+        "cg_damping": 0.0,
+        "cg_maximum_iterations": cg_maximum_iterations,
+        "cg_relative_tolerance": cg_relative_tolerance,
+        "maximum_relative_response_residual": (
+            maximum_relative_response_residual
+        ),
+        "minimum_projection_energy_retention": (
+            minimum_projection_energy_retention
+        ),
+        "null_space_numerical_epsilon": numerical_epsilon,
+        "maximum_qr_condition_number": maximum_qr_condition_number,
+        "qr_condition_number": qr_condition_number,
+        "maximum_orthogonality_error": maximum_orthogonality_error,
+        "qr_reference_solve_protocol": qr_reference_solve_protocol,
+        "risk_budget_operator": "explicit_diagonal_B",
+        "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
+    }
+    digest_record = {
+        "null_space_evidence_version": (
+            JACOBIAN_NULL_SPACE_EVIDENCE_VERSION
+        ),
+        "branch_name": branch_name,
+        "candidate_shape": [
+            int(value) for value in candidate_matrix.shape
+        ],
+        "response_shape": [
+            int(value) for value in basis_response_matrix.shape
+        ],
         "null_rank": null_rank,
         "evaluated_direction_indices": accepted_indices,
-        "column_response_norms": [round(value, 12) for value in column_response_norms],
-        "column_reference_response_norms": [
-            round(value, 12) for value in column_reference_response_norms
-        ],
-        "column_relative_response_residuals": [
-            round(value, 12) for value in column_relative_response_residuals
-        ],
-        "projection_energy_retentions": [
-            round(value, 12) for value in projection_energy_retentions
-        ],
-        "cg_iteration_counts": cg_iteration_counts,
-        "cg_relative_residuals": [
-            round(value, 12) for value in cg_relative_residuals
-        ],
-        "response_residual": round(response_residual, 12),
-        "relative_response_residual": round(relative_response_residual, 12),
-        "orthogonality_error": round(orthogonality_error, 12),
-        "qr_condition_number": round(qr_condition_number, 12),
+        "column_response_norms": list(column_response_norms),
+        "column_reference_response_norms": list(
+            column_reference_response_norms
+        ),
+        "column_relative_response_residuals": list(
+            column_relative_response_residuals
+        ),
+        "projection_energy_retentions": list(
+            projection_energy_retentions
+        ),
+        "cg_iteration_counts": list(cg_iteration_counts),
+        "cg_relative_residuals": list(cg_relative_residuals),
+        "response_residual": response_residual,
+        "relative_response_residual": relative_response_residual,
+        "orthogonality_error": orthogonality_error,
         "candidate_matrix_content_sha256": candidate_matrix_content_sha256,
         "risk_budget_content_sha256": risk_budget_content_sha256,
         "routed_candidate_response_matrix_content_sha256": (
@@ -784,8 +929,11 @@ def solve_jacobian_null_space(
         "basis_reference_response_matrix_content_sha256": (
             basis_reference_response_matrix_content_sha256
         ),
-        "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
+        "metadata": solver_metadata,
     }
+    solver_digest = recompute_jacobian_null_space_result_digest(
+        digest_record
+    )
     return JacobianNullSpaceResult(
         branch_name=branch_name,
         candidate_matrix=candidate_matrix,
@@ -827,30 +975,6 @@ def solve_jacobian_null_space(
         basis_reference_response_matrix_content_sha256=(
             basis_reference_response_matrix_content_sha256
         ),
-        solver_digest=build_stable_digest(digest_payload),
-        metadata={
-            "jvp_mode": joint_feature_linearization.linearization_mode,
-            "solver": "matrix_free_full_jacobian_psd_cg",
-            "latent_basis_formula": (
-                "qr(Bd - B^2 J^T solve_psd_cg(J B^2 J^T, J B d))"
-            ),
-            "full_feature_jvp": True,
-            "full_feature_vjp": True,
-            "cg_damping": 0.0,
-            "cg_maximum_iterations": cg_maximum_iterations,
-            "cg_relative_tolerance": cg_relative_tolerance,
-            "maximum_relative_response_residual": (
-                maximum_relative_response_residual
-            ),
-            "minimum_projection_energy_retention": (
-                minimum_projection_energy_retention
-            ),
-            "null_space_numerical_epsilon": numerical_epsilon,
-            "maximum_qr_condition_number": maximum_qr_condition_number,
-            "qr_condition_number": qr_condition_number,
-            "maximum_orthogonality_error": maximum_orthogonality_error,
-            "qr_reference_solve_protocol": qr_reference_solve_protocol,
-            "risk_budget_operator": "explicit_diagonal_B",
-            "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
-        },
+        solver_digest=solver_digest,
+        metadata=solver_metadata,
     )

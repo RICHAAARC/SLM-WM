@@ -82,6 +82,7 @@ def test_shared_global_risk_ablation_reuses_one_real_risk_field() -> None:
         local_contrast_risk_values=(0.3, 0.6),
         attention_stability_values=(0.8, 0.5),
         configs=_branch_risk_configs(config),
+        risk_neutral_texture_value=config.risk_neutral_texture_value,
     )
 
     assert config.branch_risk_mode == "shared_global"

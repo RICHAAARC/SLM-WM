@@ -208,15 +208,6 @@ class DifferentiableSemanticFeatureRuntime:
             "feature_compression_applied": False,
         }
 
-    @staticmethod
-    def _normalize_map(values: Any) -> Any:
-        """逐样本把空间图归一化到 [0, 1]。"""
-
-        flattened = values.flatten(1)
-        minimum = flattened.min(dim=1).values.view(-1, 1, 1)
-        maximum = flattened.max(dim=1).values.view(-1, 1, 1)
-        return (values - minimum) / (maximum - minimum).clamp_min(1e-6)
-
     def branch_signal_maps(
         self,
         latent: Any,
@@ -241,7 +232,9 @@ class DifferentiableSemanticFeatureRuntime:
         patch_tokens = tokens[:, 1:, :]
         cls_token = functional.normalize(tokens[:, :1, :], dim=-1)
         normalized_patches = functional.normalize(patch_tokens, dim=-1)
-        semantic_patch = (normalized_patches * cls_token).sum(dim=-1)
+        semantic_patch = (
+            (normalized_patches * cls_token).sum(dim=-1) + 1.0
+        ) * 0.5
         patch_side = int(round(math.sqrt(semantic_patch.shape[1])))
         if patch_side * patch_side != semantic_patch.shape[1]:
             raise RuntimeError("CLIP patch token 数量无法还原为方形空间网格")
@@ -251,19 +244,17 @@ class DifferentiableSemanticFeatureRuntime:
             size=latent.shape[-2:],
             mode="bilinear",
             align_corners=False,
-        )[:, 0]
-        semantic_map = self._normalize_map(semantic_map)
+        )[:, 0].clamp(0.0, 1.0)
 
         gray = image.mean(dim=1, keepdim=True)
         horizontal = functional.pad((gray[:, :, :, 1:] - gray[:, :, :, :-1]).abs(), (0, 1, 0, 0))
         vertical = functional.pad((gray[:, :, 1:, :] - gray[:, :, :-1, :]).abs(), (0, 0, 0, 1))
         texture_map = functional.interpolate(
-            horizontal + vertical,
+            (horizontal + vertical) * 0.5,
             size=latent.shape[-2:],
             mode="bilinear",
             align_corners=False,
-        )[:, 0]
-        texture_map = self._normalize_map(texture_map)
+        )[:, 0].clamp(0.0, 1.0)
 
         local_mean = functional.avg_pool2d(
             functional.pad(gray, (2, 2, 2, 2), mode="reflect"),
@@ -275,10 +266,7 @@ class DifferentiableSemanticFeatureRuntime:
             size=latent.shape[-2:],
             mode="bilinear",
             align_corners=False,
-        )[:, 0]
-        local_contrast_risk_map = self._normalize_map(
-            local_contrast_risk_map
-        )
+        )[:, 0].clamp(0.0, 1.0)
 
         previous_image = self.decode_latent(previous_step_latent)
         difference = (image - previous_image).abs().mean(
@@ -297,4 +285,8 @@ class DifferentiableSemanticFeatureRuntime:
             "texture": texture_map.detach(),
             "adjacent_step_stability": adjacent_step_stability_map.detach(),
             "local_contrast_risk": local_contrast_risk_map.detach(),
+            "current_decoded_rgb": image.detach(),
+            "previous_step_decoded_rgb": previous_image.detach(),
+            "clip_patch_tokens": patch_tokens.detach(),
+            "clip_cls_token": tokens[:, :1, :].detach(),
         }

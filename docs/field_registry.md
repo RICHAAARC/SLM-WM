@@ -1676,6 +1676,9 @@ Notebook 与 repository module 的跨边界数据
 | eligible_indices | method | none | true | false | false | 分支风险阈值允许承载的位置索引。 |
 | jvp_mode | method | none | true | false | false | 完整 Jacobian 线性算子的实现方式, 正式值为 torch_func_exact_jvp_vjp 或 torch_autograd_exact_jvp_vjp_reexecution。 |
 | solver_digest | method | none | true | false | false | 完整特征 JVP/VJP 与无阻尼约束投影求解记录摘要。 |
+| null_space_evidence_version | provenance | none | true | false | false | Null Space 维度、逐列测量和八类 Tensor 内容摘要采用的可重建证据版本。 |
+| candidate_shape | provenance | none | true | false | false | 完整 Jacobian 求解器候选方向矩阵的二维形状。 |
+| response_shape | provenance | none | true | false | false | QR 后基底完整特征响应矩阵的二维形状。 |
 | response_residual | metric | none | true | true | false | 小奇异值系数在联合响应矩阵上的残差范数。 |
 | orthogonality_error | metric | none | true | true | false | latent 安全基底相对单位矩阵的正交误差。 |
 | projection_energy_retention | metric | none | true | true | false | 固定检测模板投影到安全子空间后保留的能量比例。 |
@@ -1820,6 +1823,7 @@ Notebook 与 repository module 的跨边界数据
 | formal_feature_extractor_ids | provenance | none | true | false | false | 正式质量记录实际出现的特征提取器标识集合。 |
 | canonical_formal_feature_extractor_ready | governance | none | true | false | false | 正式质量记录是否全部来自冻结的 torch-fidelity 0.4.0 兼容 Inception 提取器。 |
 | branch_risk_records | method | none | true | true | false | 单次注入中三个分支风险场的摘要映射。 |
+| branch_risk_bundle_digest | provenance | none | true | true | false | 按 LF、尾部、attention 固定角色顺序重算三个 `risk_field_digest` 得到的联合摘要。 |
 | risk_value_mean | metric | none | true | true | false | 单个分支空间风险值的均值。 |
 | budget_value_mean | metric | none | true | true | false | 单个分支进入硬资格边界前的承载预算均值。 |
 | eligible_position_count | metric | none | true | true | false | 单个分支通过风险资格阈值的 latent 空间位置数量。 |
@@ -2598,8 +2602,10 @@ Notebook 与 repository module 的跨边界数据
 | raw_attention_geometry_score | metric | none | true | true | false | 对待检图像未执行几何配准时计算的真实 Q/K 四分量密钥投影分数。 |
 | attention_sync_score | metric | none | true | true | false | 对齐图像重新提取真实 Q/K 后计算的密钥关系同步分数。 |
 | attention_sync_source | provenance | none | true | false | false | 对齐后同步分数所使用的真实图像重提取 Q/K 数据来源。 |
-| attention_content_base_score | metric | none | true | true | false | 固定加入 LF 与高斯幅值尾部更新后、加入 attention 更新前的真实 Q/K 分数。 |
-| attention_final_combined_score | metric | none | true | true | false | 实际写回 LF、尾部与 attention 组合 latent 后复算的真实 Q/K 分数。 |
+| attention_content_base_score | metric | none | true | true | false | attention 分支内部回溯使用的完整 LF 与高斯幅值尾部优化内容基底真实 Q/K 分数。 |
+| attention_actual_written_content_base_score | metric | none | true | true | false | 三分支共同缩放并按实际 latent dtype 量化后, 仅写入同尺度 LF 与高斯幅值尾部更新的真实 Q/K 分数。 |
+| attention_final_combined_score | metric | none | true | true | false | 三分支共同缩放并按实际 latent dtype 量化后, 写入 LF、尾部与 attention 组合 latent 的真实 Q/K 分数。 |
+| attention_score_gain | metric | none | true | true | false | `attention_final_combined_score` 减去 `attention_score_before` 得到的实际写回 Q/K 增益。 |
 | scheduler_step_timestep | runtime | none | true | false | false | callback-on-step-end 当前刚完成采样步对应的 scheduler timestep。 |
 | post_step_schedule_index | protocol | none | true | false | false | post-step latent 在公开 scheduler 序列中用于方法前向与盲检复现的下一索引。 |
 | registration_calibration_negative_count | metric | none | true | true | false | 参与配准置信度门限冻结的 calibration clean negative 数量。 |
@@ -2912,7 +2918,7 @@ Notebook 与 repository module 的跨边界数据
 | risk_values_content_sha256 | provenance | none | true | true | false | 单个分支完整风险值 Tensor 的内容 SHA-256。 |
 | budget_values_content_sha256 | provenance | none | true | true | false | 单个分支完整连续承载预算 Tensor 的内容 SHA-256。 |
 | eligible_mask_content_sha256 | provenance | none | true | true | false | 单个分支完整资格 mask Tensor 的内容 SHA-256。 |
-| branch_risk_content_digest | provenance | none | true | true | false | 三个分支风险值、预算和资格 mask 内容 SHA-256 的联合摘要。 |
+| branch_risk_content_digest | provenance | none | true | true | false | 五类真实风险输入 Tensor 摘要与三个分支风险值、预算、资格 mask、有效预算、包络及写回摘要的联合摘要。 |
 | candidate_matrix_content_sha256 | provenance | none | true | true | false | Jacobian Null Space 求解器实际候选矩阵 Tensor 的内容 SHA-256。 |
 | risk_budget_content_sha256 | provenance | none | true | true | false | Jacobian Null Space 求解器实际风险预算对角项 Tensor 的内容 SHA-256。 |
 | latent_basis_content_sha256 | provenance | none | true | true | false | 逐列通过门禁后实际 Null Space 基底 Tensor 的内容 SHA-256。 |
@@ -2930,11 +2936,13 @@ Notebook 与 repository module 的跨边界数据
 | qk_atomic_content_digest | provenance | none | true | true | false | 一次 Q/K 评价中全部层原子内容记录的联合摘要。 |
 | qk_atomic_content_ready | governance | none | true | true | false | 一次 Q/K 评价的逐层原子自摘要、层顺序和联合摘要是否完整一致。 |
 | qk_evaluation_role | protocol | none | true | false | false | Q/K 原子记录在梯度、候选、实际写回、成图或盲检链中的精确评价角色。 |
+| evaluation_latent_content_sha256 | provenance | none | true | true | false | 注意力更新中与该角色 Q/K 原子和分数共同绑定的实际 float32 求值 latent 内容 SHA-256。 |
+| evaluation_score | metric | none | true | true | false | 由该角色 Q/K 原子计算并与顶层单调门禁字段交叉复验的注意力分数。 |
 | qk_atomic_evaluation_records | provenance | none | true | true | false | 注意力更新内部 latent 前、内容基底和接受候选三次 Q/K 评价的有序原子记录。 |
 | qk_atomic_evaluation_digest | provenance | none | true | true | false | 注意力更新内部多次 Q/K 原子评价记录的联合摘要。 |
-| attention_qk_atomic_content_records | provenance | none | true | true | false | 单次完整注入从原 latent、内容基底、接受候选到实际量化写回 latent 的四次 Q/K 原子记录。 |
-| attention_qk_atomic_content_digest | provenance | none | true | true | false | 单次完整注入四次 Q/K 原子记录的联合摘要。 |
-| attention_qk_atomic_content_ready | governance | none | true | true | false | 单次完整注入四个角色、全部冻结层和逐层原子摘要是否完整一致。 |
+| attention_qk_atomic_content_records | provenance | none | true | true | false | 单次完整注入从原 latent、优化内容基底、接受候选到实际量化内容基底与联合 latent 的五次 Q/K 原子记录。 |
+| attention_qk_atomic_content_digest | provenance | none | true | true | false | 单次完整注入五次 Q/K 原子、求值 latent 身份和角色分数的联合摘要。 |
+| attention_qk_atomic_content_ready | governance | none | true | true | false | 单次完整注入五个角色、求值 latent 身份、角色分数、全部冻结层和逐层原子摘要是否完整一致。 |
 | final_image_qk_atomic_content_records | provenance | none | true | true | false | clean、carrier-only 与完整方法最终成图重编码的三次 Q/K 原子记录。 |
 | final_image_qk_atomic_content_digest | provenance | none | true | true | false | 三张最终成图 Q/K 原子记录的联合摘要。 |
 | final_image_qk_atomic_content_ready | governance | none | true | true | false | 三张最终成图的角色、冻结层和 Q/K 原子摘要是否完整一致。 |
@@ -2997,12 +3005,19 @@ Notebook 与 repository module 的跨边界数据
 | tail_projection_energy_retention | metric | none | true | true | false | 高斯幅值尾部截断模板投影到对应 Jacobian 低响应子空间后的平方二范数能量保留比例。 |
 | attention_score_before | metric | none | true | true | false | 注意力分支更新前, 由冻结直接 Q/K 四分量关系图得到的目标分数。 |
 | attention_score_after | metric | none | true | true | false | 注意力分支接受候选在相同冻结 Q/K 关系协议下得到的目标分数。 |
+| attention_update_unit_direction_content_sha256 | provenance | none | true | true | false | attention 单调回溯和风险硬包络共同使用的 float32 单位方向 Tensor 内容摘要。 |
+| attention_update_content_sha256 | provenance | none | true | true | false | attention 单调回溯接受候选与最终风险有界分支共同使用的 float32 update Tensor 内容摘要。 |
+| current_decoded_rgb_content_sha256 | provenance | none | true | true | false | 风险信号构造所消费的当前 scheduler latent 解码 RGB Tensor 内容摘要。 |
+| previous_step_decoded_rgb_content_sha256 | provenance | none | true | true | false | 相邻步稳定度所消费的紧邻上一 scheduler latent 解码 RGB Tensor 内容摘要。 |
+| clip_patch_tokens_content_sha256 | provenance | none | true | true | false | 语义风险图所消费的冻结 CLIP 全部 patch token Tensor 内容摘要。 |
+| clip_cls_token_content_sha256 | provenance | none | true | true | false | 语义风险图与 patch token 比较所消费的冻结 CLIP CLS token Tensor 内容摘要。 |
 | semantic_risk_signal_content_sha256 | provenance | none | true | true | false | CLIP patch-to-CLS cosine 经解析范围映射和冻结插值后的完整风险输入 Tensor 内容摘要。 |
 | texture_risk_signal_content_sha256 | provenance | none | true | true | false | 灰度水平与垂直绝对梯度和除以2并经冻结插值后的纹理输入 Tensor 内容摘要。 |
 | local_contrast_risk_signal_content_sha256 | provenance | none | true | true | false | 灰度相对反射填充5x5局部均值的绝对偏离 Tensor 内容摘要。 |
 | adjacent_step_stability_signal_content_sha256 | provenance | none | true | true | false | 当前与紧邻上一 scheduler 步解码 RGB 差异形成的稳定度 Tensor 内容摘要。 |
 | attention_stability_signal_content_sha256 | provenance | none | true | true | false | 冻结直接 Q/K 层关系行一致性形成的 attention 稳定度 Tensor 内容摘要。 |
 | effective_budget_values_content_sha256 | provenance | none | true | true | false | 连续预算乘严格资格 mask 后, 按每个样本 HxW 沿 channel 复制得到的有效预算 Tensor 内容摘要。 |
+| branch_unit_direction_content_sha256 | provenance | none | true | true | false | 零预算支持清理并重新单位化后, 风险包络缩放与分支 JVP 复验共同消费的 float32 单位方向 Tensor 摘要。 |
 | branch_budget_ceiling | protocol | none | true | true | false | 当前分支用于形成绝对预算比例的冻结配置上界, 不得由样本预算最大值替代。 |
 | branch_nominal_strength | metric | none | true | true | false | 当前分支由相对强度与原 latent 二范数得到的名义 float32 步长。 |
 | branch_applied_strength | metric | none | true | true | false | 当前分支在逐位置风险硬包络内实际采用的全局 float32 步长。 |
@@ -3010,12 +3025,30 @@ Notebook 与 repository module 的跨边界数据
 | branch_budget_envelope_content_sha256 | provenance | none | true | true | false | 单个活动分支依据名义强度、冻结预算上界和有效风险预算形成的逐位置硬写回包络 Tensor 内容摘要。 |
 | branch_written_update_content_sha256 | provenance | none | true | true | false | 单个活动分支经过风险包络缩放后物化的 float32 更新 Tensor 内容摘要；分支不单独提前 cast 到 latent dtype。 |
 | branch_written_update_maximum_envelope_ratio | metric | none | true | true | false | 单个实际分支更新逐位置绝对值除以对应硬包络后的最大有限比例, 必须不大于1。 |
+| branch_post_risk_direction_content_sha256 | provenance | none | true | true | false | 清理零预算支持并重新单位化后, 实际进入分支写回的 float32 单位方向 Tensor 摘要。 |
+| branch_post_risk_reference_direction_content_sha256 | provenance | none | true | true | false | 计算逐分支低响应比例时使用的投影前载体模板或真实 Q/K 梯度单位方向 Tensor 摘要。 |
+| branch_post_risk_response_content_sha256 | provenance | none | true | true | false | 完整716维特征 Jacobian 对风险修正后实际单位方向的精确 JVP Tensor 摘要。 |
+| branch_post_risk_reference_response_content_sha256 | provenance | none | true | true | false | 完整716维特征 Jacobian 对投影前参考单位方向的精确 JVP Tensor 摘要。 |
+| branch_post_risk_response_norm | metric | none | true | true | false | 风险修正后实际单位方向完整特征 JVP 的二范数。 |
+| branch_post_risk_reference_response_norm | metric | none | true | true | false | 投影前参考单位方向完整特征 JVP 的二范数。 |
+| branch_post_risk_relative_response_residual | metric | none | true | true | false | 风险修正后实际单位方向 JVP 范数除以投影前参考方向 JVP 范数的比例。 |
+| branch_post_risk_jacobian_gate_ready | governance | none | true | true | false | 风险支持修正后的实际分支方向是否重新执行精确 JVP 并满足冻结相对响应上限。 |
+| branch_post_risk_jvp_mode | provenance | none | true | true | false | 风险支持修正后逐分支复验使用的精确自动微分 JVP 路径。 |
+| branch_direction_epsilon | protocol | none | true | true | false | 定义风险有界单位方向活动坐标和零预算泄漏的冻结阈值。 |
+| branch_numerical_epsilon | protocol | none | true | true | false | 判定风险有界全局步长是否数值退化的冻结阈值, 不得替代方向活动阈值。 |
 | combined_budget_envelope_content_sha256 | provenance | none | true | true | false | 三个活动分支逐位置硬包络求和后形成的实际合成写回包络 Tensor 内容摘要。 |
 | quantized_write_composition_order | protocol | none | true | true | false | float32 分支更新合成的固定顺序, 正式值为 LF、tail、attention。 |
+| quantized_write_active_branch_order | protocol | none | true | true | false | 当前构造实际启用的分支按冻结三分支顺序形成的无重复子序列。 |
+| quantized_write_branch_content_identities | provenance | none | true | true | false | 每个活动分支的 float32 update 与风险硬包络 Tensor 摘要映射。 |
+| quantized_write_original_latent_content_sha256 | provenance | none | true | true | false | 唯一量化合成器实际读取的 original latent Tensor 内容摘要。 |
+| quantized_write_candidate_latent_content_sha256 | provenance | none | true | true | false | 唯一量化合成器按固定顺序、共同缩放和单次 cast 物化的候选 latent Tensor 内容摘要。 |
 | quantized_write_common_scale | metric | none | true | true | false | 实际 dtype 联合写回为了满足包络而对全部活动分支共同采用的缩放因子。 |
+| quantized_write_backtracking_factor | protocol | none | true | true | false | 生成共同缩放序列的冻结乘法因子, 正式值与 `quantized_budget_envelope_backtracking_factor` 一致。 |
 | quantized_write_backtracking_step_count | metric | none | true | true | false | 实际 dtype 联合包络从原始候选开始执行共同减半的次数。 |
 | quantized_write_maximum_envelope_ratio | metric | none | true | true | false | 三分支按固定顺序在 float32 合成、与 original latent float32 相加并单次 cast 后, 实际增量相对共同缩放联合包络的最大有限比例。 |
 | quantized_write_budget_envelope_ready | governance | none | true | true | false | 实际量化写回是否满足联合风险包络、零预算位置和有限数值门禁。 |
+| quantized_composition_evidence_version | provenance | none | true | true | false | 唯一量化合成证据载荷的稳定协议版本。 |
+| quantized_composition_evidence_digest | provenance | none | true | true | false | 原始与候选 latent、活动分支 update 与包络、联合更新、实际写回、dtype、shape 及共同回溯轨迹的可重算联合摘要。 |
 | routed_candidate_response_matrix_content_sha256 | provenance | none | true | true | false | 完整特征 Jacobian 对风险路由候选矩阵 $B D$ 的响应 $J(BD)$ Tensor 内容摘要。 |
 | projected_direction_matrix_content_sha256 | provenance | none | true | true | false | 无阻尼 PSD-CG 约束投影后、QR 前的方向矩阵 $U$ Tensor 内容摘要。 |
 | projected_direction_response_matrix_content_sha256 | provenance | none | true | true | false | 完整特征 Jacobian 对 QR 前投影方向矩阵的响应 $JU$ Tensor 内容摘要。 |

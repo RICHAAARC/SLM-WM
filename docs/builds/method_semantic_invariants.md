@@ -149,7 +149,7 @@ $$
 
 5. $\phi_{\mathrm{attn\_stab}}$ 必须由不少于两个冻结层的直接 Q/K 关系行两两余弦一致性得到, 经 $(c+1)/2$ 映射并使用 `align_corners=true` 插值到 latent 网格。
 
-缺失紧邻前一步 latent、真实 CLIP patch token、任一冻结 Q/K 层或使用隐藏状态稳定度替代 Q/K stability 时直接失败。每个 GPU 注入原子必须绑定五个输入图、当前/前一步 latent、当前/前一步解码图和冻结 Q/K 层身份。
+缺失紧邻前一步 latent、真实 CLIP patch token、任一冻结 Q/K 层或使用隐藏状态稳定度替代 Q/K stability 时直接失败。每个 GPU 注入原子必须绑定五个输入图、当前/前一步 latent、当前/前一步解码 RGB、CLIP patch token、CLIP CLS token 和冻结 Q/K 层身份。
 
 ## `branch_risk_bounds_written_update`
 
@@ -520,7 +520,7 @@ $$
 v_A=\operatorname{Norm}(N_AN_A^\top g_A),
 $$
 
-以 attention 分支风险包络得到的 $\alpha_A$ 为起点, 依次检查 $\alpha_A2^{-k}$, $k=0,\ldots,8$。候选必须满足
+attention 单调回溯必须直接消费已经物化的 `RiskBoundedUpdate`，不得只复制其标量强度后重新计算或替换方向。以该对象的最大步长 $\alpha_A$ 为起点, 每个候选都通过同一对象缩小并重新物化, 依次检查 $\alpha_A2^{-k}$, $k=0,\ldots,8$。接受候选的 update 内容摘要必须与进入三分支合成的 attention 分支 update 内容摘要完全相同。候选必须满足
 
 $$
 s_A(z_t^{\mathrm{base}}+\alpha_A2^{-k}v_A)
@@ -528,7 +528,7 @@ s_A(z_t^{\mathrm{base}}+\alpha_A2^{-k}v_A)
 \max\{s_A(z_t),s_A(z_t^{\mathrm{base}})\}.
 $$
 
-安全投影为零、九个候选均失败、分数非有限或 Q/K 原子不完整时直接失败。单次注入 Q/K 角色精确为 `latent_before`、`content_base_latent`、`accepted_attention_candidate` 和 `actual_written_combined_latent`。
+安全投影为零、九个候选均失败、分数非有限或 Q/K 原子不完整时直接失败。单次注入 Q/K 角色精确为 `latent_before`、`optimization_content_base_latent`、`accepted_attention_candidate`、`actual_written_content_base_latent` 和 `actual_written_combined_latent`。每个角色必须共同绑定实际 float32 求值 latent 内容 SHA-256、该次 Q/K 分数和逐层 Q/K 原子；角色分数必须与顶层两阶段单调门禁字段精确交叉复验。其中前3个角色证明 attention 分支在未执行共同缩放前满足单调回溯，后2个角色证明实际 dtype 写回候选在共同缩放后仍严格优于同尺度内容基底；优化基底与实际写回基底不得合并为同一角色。
 
 ## `three_branch_update_composition`
 
@@ -541,7 +541,7 @@ $$
 \Delta z_t^{\mathrm A}.
 $$
 
-纯组合与共同缩放规则属于 `main/`；`experiments/` 只绑定真实 SD3.5 callback、scheduler 和记录, 不得实现第二套简化组合。
+纯组合与共同缩放规则属于 `main/`；attention 内部回溯候选与最终实际写回都必须调用同一个 `compose_ordered_float32_update_once` 原语，先按冻结分支顺序形成 float32 联合更新，再与 original latent 的 float32 表示相加并只执行一次 dtype cast。`experiments/` 只绑定真实 SD3.5 callback、scheduler 和记录, 不得实现第二套加法结合顺序或简化组合。
 
 ## `actual_dtype_write_revalidation`
 

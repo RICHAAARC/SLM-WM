@@ -505,8 +505,8 @@ def test_relation_registration_rejects_signature_free_attention() -> None:
 
 
 @pytest.mark.quick
-def test_probability_only_relation_cannot_support_formal_alignment() -> None:
-    """只有关系概率的输入可计算诊断分数, 但不得通过正式来源门禁。"""
+def test_probability_only_relation_is_rejected_before_formal_alignment() -> None:
+    """只有关系概率的输入不得通过反推 logits 进入核心几何算子。"""
 
     direct_relation, _ = _continuous_observed_attention(
         18.0,
@@ -515,17 +515,14 @@ def test_probability_only_relation_cannot_support_formal_alignment() -> None:
         -0.05,
     )
     probability_only = direct_relation.probabilities
-    result = recover_attention_affine_alignment(
-        probability_only,
-        _KEY_MATERIAL,
-        _LAYER_NAME,
-        _TOKEN_INDICES,
-        _stable_pair_weights(probability_only),
-    )
-
-    assert result.attention_relation_source == "probability_log_inverse"
-    assert result.metadata["attention_relation_direct_qk_source_ready"] is False
-    assert result.geometry_reliable is False
+    with pytest.raises(ValueError, match="必须直接提供冻结层 Q/K"):
+        recover_attention_affine_alignment(
+            probability_only,
+            _KEY_MATERIAL,
+            _LAYER_NAME,
+            _TOKEN_INDICES,
+            _stable_pair_weights(probability_only),
+        )
 
 
 @pytest.mark.quick

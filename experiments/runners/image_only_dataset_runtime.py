@@ -75,6 +75,16 @@ from main.methods.geometry import (
     DIRECT_QK_RELATION_SOURCE,
     attention_relation_component_protocol,
     qk_atomic_evaluation_records_ready,
+    qk_operator_metadata_records_digest,
+    qk_operator_metadata_records_ready,
+)
+from main.methods.update_composition import (
+    QUANTIZED_COMPOSITION_EVIDENCE_VERSION,
+    recompute_quantized_composition_evidence_digest,
+)
+from main.methods.subspace import (
+    JACOBIAN_NULL_SPACE_EVIDENCE_VERSION,
+    recompute_jacobian_null_space_result_digest,
 )
 
 
@@ -372,7 +382,11 @@ def _scientific_update_record_ready(
     def finite_at_least(value: Any, minimum: float, *, strict: bool = False) -> bool:
         """集中校验一个受治理数值是否有限并满足下界。"""
 
-        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
             return False
         return float(value) > minimum if strict else float(value) >= minimum
 
@@ -402,6 +416,35 @@ def _scientific_update_record_ready(
         != "measured_from_immediately_previous_scheduler_step"
     ):
         return False
+    if not all(
+        sha256_ready(record.get(field_name))
+        for field_name in (
+            "current_decoded_rgb_content_sha256",
+            "previous_step_decoded_rgb_content_sha256",
+            "clip_patch_tokens_content_sha256",
+            "clip_cls_token_content_sha256",
+            "semantic_risk_signal_content_sha256",
+            "texture_risk_signal_content_sha256",
+            "local_contrast_risk_signal_content_sha256",
+            "adjacent_step_stability_signal_content_sha256",
+            "attention_stability_signal_content_sha256",
+        )
+    ):
+        return False
+    risk_signal_content_records = {
+        field_name: record.get(field_name)
+        for field_name in (
+            "current_decoded_rgb_content_sha256",
+            "previous_step_decoded_rgb_content_sha256",
+            "clip_patch_tokens_content_sha256",
+            "clip_cls_token_content_sha256",
+            "semantic_risk_signal_content_sha256",
+            "texture_risk_signal_content_sha256",
+            "local_contrast_risk_signal_content_sha256",
+            "adjacent_step_stability_signal_content_sha256",
+            "attention_stability_signal_content_sha256",
+        )
+    }
 
     null_space_records = record.get("null_space_records")
     if not isinstance(null_space_records, dict) or set(null_space_records) != {
@@ -417,18 +460,58 @@ def _scientific_update_record_ready(
     expected_prg_digest = keyed_prg_protocol_record(
         config.keyed_prg_version
     )["keyed_prg_protocol_digest"]
-    for subspace_record in null_space_records.values():
+    quantized_write_shape_for_subspace = record.get(
+        "quantized_write_update_shape"
+    )
+    if (
+        not isinstance(quantized_write_shape_for_subspace, list)
+        or not quantized_write_shape_for_subspace
+        or not all(
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value > 0
+            for value in quantized_write_shape_for_subspace
+        )
+    ):
+        return False
+    latent_element_count = math.prod(
+        quantized_write_shape_for_subspace
+    )
+    for expected_branch_name, subspace_record in null_space_records.items():
         metadata = subspace_record.get("metadata", {})
         numeric_values = (
             subspace_record.get("response_residual"),
             subspace_record.get("relative_response_residual"),
             subspace_record.get("orthogonality_error"),
         )
-        if not all(isinstance(value, (int, float)) and math.isfinite(float(value)) for value in numeric_values):
+        if not all(
+            finite_at_least(value, 0.0)
+            for value in numeric_values
+        ):
+            return False
+        if (
+            subspace_record.get("branch_name") != expected_branch_name
+            or subspace_record.get("null_space_evidence_version")
+            != JACOBIAN_NULL_SPACE_EVIDENCE_VERSION
+            or not sha256_ready(subspace_record.get("solver_digest"))
+        ):
+            return False
+        try:
+            recomputed_solver_digest = (
+                recompute_jacobian_null_space_result_digest(
+                    subspace_record
+                )
+            )
+        except (TypeError, ValueError, OverflowError):
+            return False
+        if recomputed_solver_digest != subspace_record.get("solver_digest"):
             return False
         if float(subspace_record["relative_response_residual"]) > config.maximum_relative_response_residual:
             return False
-        if float(subspace_record["orthogonality_error"]) > 1e-4:
+        if (
+            float(subspace_record["orthogonality_error"])
+            > config.maximum_orthogonality_error
+        ):
             return False
         if metadata.get("jvp_mode") not in allowed_jvp_modes:
             return False
@@ -460,6 +543,36 @@ def _scientific_update_record_ready(
             TENSOR_CONTENT_DIGEST_VERSION
         ):
             return False
+        qr_condition_number = metadata.get("qr_condition_number")
+        if (
+            metadata.get("null_space_numerical_epsilon")
+            != config.null_space_numerical_epsilon
+            or metadata.get("maximum_qr_condition_number")
+            != config.maximum_qr_condition_number
+            or metadata.get("maximum_orthogonality_error")
+            != config.maximum_orthogonality_error
+            or metadata.get("qr_reference_solve_protocol")
+            != config.qr_reference_solve_protocol
+            or metadata.get("risk_budget_operator")
+            != "explicit_diagonal_B"
+            or metadata.get("full_feature_jvp") is not True
+            or metadata.get("full_feature_vjp") is not True
+            or metadata.get("cg_damping") != 0.0
+            or metadata.get("cg_maximum_iterations")
+            != config.null_space_cg_max_iterations
+            or metadata.get("cg_relative_tolerance")
+            != config.null_space_cg_relative_tolerance
+            or metadata.get("maximum_relative_response_residual")
+            != config.maximum_relative_response_residual
+            or metadata.get("minimum_projection_energy_retention")
+            != config.minimum_projection_energy_retention
+            or metadata.get("latent_basis_formula")
+            != "qr(Bd - B^2 J^T solve_psd_cg(J B^2 J^T, J B d))"
+            or not finite_at_least(qr_condition_number, 0.0, strict=True)
+            or float(qr_condition_number)
+            > config.maximum_qr_condition_number
+        ):
+            return False
         if not all(
             sha256_ready(subspace_record.get(field_name))
             for field_name in (
@@ -483,20 +596,75 @@ def _scientific_update_record_ready(
         column_residuals = subspace_record.get(
             "column_relative_response_residuals"
         )
+        column_response_norms = subspace_record.get(
+            "column_response_norms"
+        )
         column_reference_norms = subspace_record.get(
             "column_reference_response_norms"
         )
         energy_retentions = subspace_record.get("projection_energy_retentions")
         cg_residuals = subspace_record.get("cg_relative_residuals")
+        cg_iteration_counts = subspace_record.get("cg_iteration_counts")
+        evaluated_indices = subspace_record.get(
+            "evaluated_direction_indices"
+        )
+        candidate_shape = subspace_record.get("candidate_shape")
+        response_shape = subspace_record.get("response_shape")
+        if (
+            subspace_record.get("basis_rank") != config.null_rank
+            or subspace_record.get("null_rank") != config.null_rank
+            or not isinstance(candidate_shape, list)
+            or len(candidate_shape) != 2
+            or not all(
+                isinstance(value, int) and not isinstance(value, bool) and value > 0
+                for value in candidate_shape
+            )
+            or subspace_record.get("candidate_count") != candidate_shape[1]
+            or candidate_shape[1] != config.candidate_count
+            or candidate_shape[0] != latent_element_count
+            or not isinstance(response_shape, list)
+            or len(response_shape) != 2
+            or not all(
+                isinstance(value, int) and not isinstance(value, bool) and value > 0
+                for value in response_shape
+            )
+            or response_shape[1] != config.null_rank
+            or response_shape[0] != JOINT_FEATURE_WIDTH
+            or subspace_record.get("response_width") != response_shape[0]
+            or not isinstance(evaluated_indices, list)
+            or len(evaluated_indices) != config.null_rank
+            or not all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and 0 <= value < candidate_shape[1]
+                for value in evaluated_indices
+            )
+            or evaluated_indices != sorted(set(evaluated_indices))
+            or subspace_record.get("evaluated_direction_count")
+            != max(evaluated_indices) + 1
+        ):
+            return False
         if not all(
             isinstance(values, list)
             and len(values) == config.null_rank
-            and all(isinstance(value, (int, float)) and math.isfinite(float(value)) for value in values)
+            and all(finite_at_least(value, 0.0) for value in values)
             for values in (
+                column_response_norms,
                 column_residuals,
                 column_reference_norms,
                 energy_retentions,
                 cg_residuals,
+            )
+        ):
+            return False
+        if (
+            not isinstance(cg_iteration_counts, list)
+            or len(cg_iteration_counts) != config.null_rank
+            or not all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and 0 <= value <= config.null_space_cg_max_iterations
+                for value in cg_iteration_counts
             )
         ):
             return False
@@ -507,6 +675,7 @@ def _scientific_update_record_ready(
             return False
         if any(
             float(value) < config.minimum_projection_energy_retention
+            or float(value) > 1.0 + config.maximum_orthogonality_error
             for value in energy_retentions
         ):
             return False
@@ -520,6 +689,13 @@ def _scientific_update_record_ready(
     )
     quantized_relative_response = record.get(
         "quantized_write_relative_jacobian_response"
+    )
+    quantized_update_norm = record.get("quantized_write_update_norm")
+    quantized_response_norm = record.get(
+        "quantized_write_jacobian_response_norm"
+    )
+    quantized_reference_feature_norm = record.get(
+        "quantized_write_reference_feature_norm"
     )
     if (
         len(quantized_update_sha256) != 64
@@ -535,12 +711,104 @@ def _scientific_update_record_ready(
         or not math.isfinite(float(quantized_relative_response))
         or float(quantized_relative_response)
         > config.maximum_quantized_write_relative_jacobian_response
+        or not isinstance(quantized_update_norm, (int, float))
+        or not math.isfinite(float(quantized_update_norm))
+        or float(quantized_update_norm) <= 0.0
+        or not isinstance(quantized_response_norm, (int, float))
+        or not math.isfinite(float(quantized_response_norm))
+        or float(quantized_response_norm) < 0.0
+        or not isinstance(
+            quantized_reference_feature_norm,
+            (int, float),
+        )
+        or not math.isfinite(float(quantized_reference_feature_norm))
+        or float(quantized_reference_feature_norm)
+        <= config.null_space_numerical_epsilon
+        or not math.isclose(
+            float(quantized_relative_response),
+            float(quantized_response_norm)
+            / float(quantized_reference_feature_norm),
+            rel_tol=1e-9,
+            abs_tol=1e-12,
+        )
         or record.get(
             "maximum_quantized_write_relative_jacobian_response"
         )
         != config.maximum_quantized_write_relative_jacobian_response
         or record.get("keyed_prg_version") != config.keyed_prg_version
         or record.get("keyed_prg_protocol_digest") != expected_prg_digest
+    ):
+        return False
+    quantized_envelope_ratio = record.get(
+        "quantized_write_maximum_envelope_ratio"
+    )
+    quantized_common_scale = record.get("quantized_write_common_scale")
+    quantized_backtracking_factor = record.get(
+        "quantized_write_backtracking_factor"
+    )
+    quantized_backtracking_steps = record.get(
+        "quantized_write_backtracking_step_count"
+    )
+    quantized_write_shape = record.get("quantized_write_update_shape")
+    expected_active_branches = [
+        branch_name
+        for branch_name, enabled in (
+            ("lf_content", config.lf_enabled),
+            ("tail_robust", config.tail_robust_enabled),
+            ("attention_geometry", config.attention_geometry_enabled),
+        )
+        if enabled
+    ]
+    try:
+        recomputed_composition_digest = (
+            recompute_quantized_composition_evidence_digest(record)
+        )
+    except (TypeError, ValueError):
+        return False
+    if (
+        not sha256_ready(record.get("combined_update_content_sha256"))
+        or not sha256_ready(
+            record.get("combined_budget_envelope_content_sha256")
+        )
+        or record.get("quantized_write_composition_order")
+        != list(config.quantized_branch_composition_order)
+        or record.get("quantized_write_budget_envelope_ready") is not True
+        or not isinstance(quantized_envelope_ratio, (int, float))
+        or not math.isfinite(float(quantized_envelope_ratio))
+        or float(quantized_envelope_ratio) < 0.0
+        or float(quantized_envelope_ratio) > 1.0
+        or not isinstance(quantized_common_scale, (int, float))
+        or not math.isfinite(float(quantized_common_scale))
+        or not 0.0 < float(quantized_common_scale) <= 1.0
+        or quantized_backtracking_factor
+        != config.quantized_budget_envelope_backtracking_factor
+        or not isinstance(quantized_backtracking_steps, int)
+        or not 0
+        <= quantized_backtracking_steps
+        <= config.quantized_budget_envelope_backtracking_maximum_steps
+        or float(quantized_common_scale)
+        != float(quantized_backtracking_factor)
+        ** quantized_backtracking_steps
+        or record.get("quantized_composition_evidence_version")
+        != QUANTIZED_COMPOSITION_EVIDENCE_VERSION
+        or record.get("quantized_composition_evidence_digest")
+        != recomputed_composition_digest
+        or record.get("quantized_write_original_latent_content_sha256")
+        != record.get("latent_content_sha256_before")
+        or record.get("quantized_write_candidate_latent_content_sha256")
+        != record.get("latent_content_sha256_after")
+        or record.get("quantized_write_update_dtype")
+        != f"torch.{config.latent_torch_dtype}"
+        or not isinstance(quantized_write_shape, list)
+        or len(quantized_write_shape) != 4
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value <= 0
+            for value in quantized_write_shape
+        )
+        or record.get("quantized_write_active_branch_order")
+        != expected_active_branches
     ):
         return False
     branch_update_content_records = {
@@ -569,7 +837,45 @@ def _scientific_update_record_ready(
         config.minimum_projection_energy_retention,
     ):
         return False
-    if not finite_at_least(record.get("attention_score_gain"), 0.0, strict=True):
+    attention_score_before = record.get("attention_score_before")
+    attention_content_base_score = record.get("attention_content_base_score")
+    attention_score_after = record.get("attention_score_after")
+    attention_actual_content_base_score = record.get(
+        "attention_actual_written_content_base_score"
+    )
+    attention_final_score = record.get("attention_final_combined_score")
+    attention_score_gain = record.get("attention_score_gain")
+    attention_scores = (
+        attention_score_before,
+        attention_content_base_score,
+        attention_score_after,
+        attention_actual_content_base_score,
+        attention_final_score,
+        attention_score_gain,
+    )
+    if not all(
+        isinstance(value, (int, float)) and math.isfinite(float(value))
+        for value in attention_scores
+    ):
+        return False
+    if (
+        float(attention_score_after)
+        <= max(
+            float(attention_score_before),
+            float(attention_content_base_score),
+        )
+        or float(attention_final_score)
+        <= max(
+            float(attention_score_before),
+            float(attention_actual_content_base_score),
+        )
+        or not math.isclose(
+            float(attention_score_gain),
+            float(attention_final_score) - float(attention_score_before),
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        )
+    ):
         return False
     if not finite_at_least(record.get("attention_applied_update_strength"), 0.0, strict=True):
         return False
@@ -588,12 +894,41 @@ def _scientific_update_record_ready(
             aggregate_field_name="attention_qk_atomic_content_records",
             expected_roles=(
                 "latent_before",
-                "content_base_latent",
+                "optimization_content_base_latent",
                 "accepted_attention_candidate",
+                "actual_written_content_base_latent",
                 "actual_written_combined_latent",
             ),
             expected_layer_names=config.attention_module_names,
+            require_evaluation_identity=True,
         )
+    ):
+        return False
+    qk_evaluation_by_role = {
+        str(item["qk_evaluation_role"]): item
+        for item in record["attention_qk_atomic_content_records"]
+    }
+    qk_role_score_fields = {
+        "latent_before": "attention_score_before",
+        "optimization_content_base_latent": (
+            "attention_content_base_score"
+        ),
+        "accepted_attention_candidate": "attention_score_after",
+        "actual_written_content_base_latent": (
+            "attention_actual_written_content_base_score"
+        ),
+        "actual_written_combined_latent": (
+            "attention_final_combined_score"
+        ),
+    }
+    if any(
+        not math.isclose(
+            float(qk_evaluation_by_role[role]["evaluation_score"]),
+            float(record[field_name]),
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        )
+        for role, field_name in qk_role_score_fields.items()
     ):
         return False
     stable_token_selection_digest = str(
@@ -654,19 +989,13 @@ def _scientific_update_record_ready(
         or record.get("attention_relation_qk_operator_metadata_ready")
         is not True
         or not isinstance(qk_operator_records, list)
-        or tuple(
-            operator.get("record_layer_name")
-            for operator in qk_operator_records
-            if isinstance(operator, dict)
+        or not qk_operator_metadata_records_ready(
+            qk_operator_records,
+            config.attention_module_names,
         )
-        != config.attention_module_names
-        or any(
-            not isinstance(operator, dict)
-            or operator.get("coordinate_convention")
-            != ATTENTION_COORDINATE_CONVENTION
-            or operator.get("grid_align_corners")
-            is not ATTENTION_GRID_ALIGN_CORNERS
-            for operator in qk_operator_records
+        or record.get("attention_relation_qk_operator_metadata_digest")
+        != qk_operator_metadata_records_digest(
+            qk_operator_records
         )
     ):
         return False
@@ -689,40 +1018,220 @@ def _scientific_update_record_ready(
     if record.get("semantic_preservation_gate_ready") is not True:
         return False
     branch_risk_records = record.get("branch_risk_records")
-    return (
-        bool(record.get("branch_risk_bundle_digest"))
-        and isinstance(branch_risk_records, dict)
-        and set(branch_risk_records) == {"lf_content", "tail_robust", "attention_geometry"}
-        and all(int(value.get("eligible_position_count", 0)) > 0 for value in branch_risk_records.values())
-        and all(
-            all(
-                sha256_ready(branch_record.get(field_name))
-                for field_name in (
-                    "risk_values_content_sha256",
-                    "budget_values_content_sha256",
-                    "eligible_mask_content_sha256",
-                )
+    if (
+        record.get("active_carrier_branches") != expected_active_branches
+        or not isinstance(branch_risk_records, dict)
+        or set(branch_risk_records)
+        != {"lf_content", "tail_robust", "attention_geometry"}
+    ):
+        return False
+    risk_configs = {
+        "lf_content": config.lf_content_risk_config,
+        "tail_robust": config.tail_robust_risk_config,
+        "attention_geometry": config.attention_geometry_risk_config,
+    }
+    update_digest_fields = {
+        "lf_content": "lf_update_content_sha256",
+        "tail_robust": "tail_robust_update_content_sha256",
+        "attention_geometry": "attention_geometry_update_content_sha256",
+    }
+    composition_branch_identities = record.get(
+        "quantized_write_branch_content_identities"
+    )
+    if (
+        not isinstance(composition_branch_identities, dict)
+        or set(composition_branch_identities) != set(expected_active_branches)
+    ):
+        return False
+    branch_risk_content_records: dict[str, dict[str, Any]] = {}
+    for branch_name, branch_record_value in branch_risk_records.items():
+        if not isinstance(branch_record_value, dict):
+            return False
+        branch_record = branch_record_value
+        if (
+            branch_record.get("branch_name") != branch_name
+            or not sha256_ready(branch_record.get("risk_field_digest"))
+        ):
+            return False
+        base_content = {
+            field_name: branch_record.get(field_name)
+            for field_name in (
+                "risk_values_content_sha256",
+                "budget_values_content_sha256",
+                "eligible_mask_content_sha256",
             )
-            for branch_record in branch_risk_records.values()
-        )
-        and record.get("branch_risk_content_digest")
-        == build_stable_digest(
-            {
-                name: {
-                    "risk_values_content_sha256": branch_record.get(
-                        "risk_values_content_sha256"
+        }
+        if not all(sha256_ready(value) for value in base_content.values()):
+            return False
+        if branch_name in expected_active_branches:
+            bounded_content = {
+                field_name: branch_record.get(field_name)
+                for field_name in (
+                    "effective_budget_values_content_sha256",
+                    "branch_unit_direction_content_sha256",
+                    "branch_budget_envelope_content_sha256",
+                    "branch_written_update_content_sha256",
+                    "branch_post_risk_direction_content_sha256",
+                    "branch_post_risk_reference_direction_content_sha256",
+                    "branch_post_risk_response_content_sha256",
+                    "branch_post_risk_reference_response_content_sha256",
+                )
+            }
+            nominal_strength = branch_record.get("branch_nominal_strength")
+            applied_strength = branch_record.get("branch_applied_strength")
+            scale_factor = branch_record.get("branch_risk_scale_factor")
+            maximum_ratio = branch_record.get(
+                "branch_written_update_maximum_envelope_ratio"
+            )
+            post_risk_response_norm = branch_record.get(
+                "branch_post_risk_response_norm"
+            )
+            post_risk_reference_response_norm = branch_record.get(
+                "branch_post_risk_reference_response_norm"
+            )
+            post_risk_relative_response = branch_record.get(
+                "branch_post_risk_relative_response_residual"
+            )
+            if (
+                (
+                    config.semantic_routing_enabled
+                    and int(branch_record.get("eligible_position_count", 0))
+                    <= 0
+                )
+                or not all(
+                    sha256_ready(value) for value in bounded_content.values()
+                )
+                or bounded_content[
+                    "effective_budget_values_content_sha256"
+                ]
+                != null_space_records[branch_name].get(
+                    "risk_budget_content_sha256"
+                )
+                or bounded_content["branch_written_update_content_sha256"]
+                != record.get(update_digest_fields[branch_name])
+                or bounded_content["branch_unit_direction_content_sha256"]
+                != bounded_content[
+                    "branch_post_risk_direction_content_sha256"
+                ]
+                or branch_record.get("branch_budget_ceiling")
+                != risk_configs[branch_name].budget_ceiling
+                or not isinstance(nominal_strength, (int, float))
+                or not math.isfinite(float(nominal_strength))
+                or float(nominal_strength) <= 0.0
+                or not isinstance(applied_strength, (int, float))
+                or not math.isfinite(float(applied_strength))
+                or not 0.0 < float(applied_strength) <= float(nominal_strength)
+                or not isinstance(scale_factor, (int, float))
+                or not math.isfinite(float(scale_factor))
+                or abs(
+                    float(scale_factor)
+                    - float(applied_strength) / float(nominal_strength)
+                )
+                > 1e-6
+                or not isinstance(maximum_ratio, (int, float))
+                or not math.isfinite(float(maximum_ratio))
+                or float(maximum_ratio) < 0.0
+                or float(maximum_ratio) > 1.0
+                or branch_record.get("branch_direction_epsilon")
+                != config.risk_bounded_scale_direction_epsilon
+                or branch_record.get("branch_numerical_epsilon")
+                != config.null_space_numerical_epsilon
+                or branch_record.get("branch_post_risk_jacobian_gate_ready")
+                is not True
+                or branch_record.get("branch_post_risk_jvp_mode")
+                != "torch_autograd_exact_jvp_vjp_reexecution"
+                or not isinstance(post_risk_response_norm, (int, float))
+                or not math.isfinite(float(post_risk_response_norm))
+                or float(post_risk_response_norm) < 0.0
+                or not isinstance(
+                    post_risk_reference_response_norm,
+                    (int, float),
+                )
+                or not math.isfinite(
+                    float(post_risk_reference_response_norm)
+                )
+                or float(post_risk_reference_response_norm)
+                <= config.null_space_numerical_epsilon
+                or not isinstance(post_risk_relative_response, (int, float))
+                or not math.isfinite(float(post_risk_relative_response))
+                or float(post_risk_relative_response)
+                > config.maximum_relative_response_residual
+                or not math.isclose(
+                    float(post_risk_relative_response),
+                    float(post_risk_response_norm)
+                    / float(post_risk_reference_response_norm),
+                    rel_tol=1e-9,
+                    abs_tol=1e-12,
+                )
+                or composition_branch_identities.get(branch_name)
+                != {
+                    "branch_written_update_content_sha256": (
+                        bounded_content[
+                            "branch_written_update_content_sha256"
+                        ]
                     ),
-                    "budget_values_content_sha256": branch_record.get(
-                        "budget_values_content_sha256"
-                    ),
-                    "eligible_mask_content_sha256": branch_record.get(
-                        "eligible_mask_content_sha256"
+                    "branch_budget_envelope_content_sha256": (
+                        bounded_content[
+                            "branch_budget_envelope_content_sha256"
+                        ]
                     ),
                 }
-                for name, branch_record in branch_risk_records.items()
-            }
+                or (
+                    branch_name == "attention_geometry"
+                    and not math.isclose(
+                        float(record["attention_applied_update_strength"]),
+                        float(applied_strength),
+                        rel_tol=0.0,
+                        abs_tol=0.0,
+                    )
+                )
+            ):
+                return False
+            base_content.update(bounded_content)
+        branch_risk_content_records[branch_name] = base_content
+    if (
+        not sha256_ready(
+            record.get("attention_update_unit_direction_content_sha256")
         )
+        or record.get("attention_update_unit_direction_content_sha256")
+        != branch_risk_records["attention_geometry"].get(
+            "branch_post_risk_direction_content_sha256"
+        )
+    ):
+        return False
+    if (
+        not sha256_ready(record.get("attention_update_content_sha256"))
+        or record.get("attention_update_content_sha256")
+        != branch_risk_records["attention_geometry"].get(
+            "branch_written_update_content_sha256"
+        )
+    ):
+        return False
+    expected_risk_bundle_digest = build_stable_digest(
+        {
+            branch_name: branch_risk_records[branch_name][
+                "risk_field_digest"
+            ]
+            for branch_name in (
+                "lf_content",
+                "tail_robust",
+                "attention_geometry",
+            )
+        }
     )
+    expected_risk_content_digest = build_stable_digest(
+        {
+            "risk_signal_content_records": risk_signal_content_records,
+            "branch_risk_content_records": branch_risk_content_records,
+        }
+    )
+    return bool(
+        record.get("branch_risk_bundle_digest")
+        == expected_risk_bundle_digest
+        and record.get("branch_risk_content_digest")
+        == expected_risk_content_digest
+    )
+
 
 
 def _final_image_preservation_ready(
@@ -761,6 +1270,9 @@ def _detection_qk_atomic_content_ready(
     component_protocol = attention_relation_component_protocol(
         config.attention_relation_component_weights
     )
+    qk_operator_records = metadata.get(
+        "attention_relation_qk_operator_metadata_records"
+    )
     return bool(
         metadata.get("detection_qk_atomic_content_ready") is True
         and metadata.get("attention_relation_active_component_names")
@@ -775,6 +1287,15 @@ def _detection_qk_atomic_content_ready(
         == component_protocol[
             "attention_relation_component_protocol_digest"
         ]
+        and metadata.get("attention_relation_qk_operator_metadata_ready")
+        is True
+        and isinstance(qk_operator_records, list)
+        and qk_operator_metadata_records_ready(
+            qk_operator_records,
+            config.attention_module_names,
+        )
+        and metadata.get("attention_relation_qk_operator_metadata_digest")
+        == qk_operator_metadata_records_digest(qk_operator_records)
         and qk_atomic_evaluation_records_ready(
             metadata.get("detection_qk_atomic_content_records"),
             metadata.get("detection_qk_atomic_content_digest"),
@@ -922,6 +1443,13 @@ def _final_image_attention_observability_ready(
         is ATTENTION_GRID_ALIGN_CORNERS
         and record.get("attention_relation_qk_operator_metadata_ready")
         is True
+        and isinstance(qk_operator_records, list)
+        and qk_operator_metadata_records_ready(
+            qk_operator_records,
+            config.attention_module_names,
+        )
+        and record.get("attention_relation_qk_operator_metadata_digest")
+        == qk_operator_metadata_records_digest(qk_operator_records)
         and record.get("final_image_qk_atomic_content_ready") is True
         and qk_atomic_evaluation_records_ready(
             record.get("final_image_qk_atomic_content_records"),
@@ -933,21 +1461,6 @@ def _final_image_attention_observability_ready(
                 "final_watermarked_image",
             ),
             expected_layer_names=config.attention_module_names,
-        )
-        and isinstance(qk_operator_records, list)
-        and tuple(
-            operator.get("record_layer_name")
-            for operator in qk_operator_records
-            if isinstance(operator, dict)
-        )
-        == config.attention_module_names
-        and all(
-            isinstance(operator, dict)
-            and operator.get("coordinate_convention")
-            == ATTENTION_COORDINATE_CONVENTION
-            and operator.get("grid_align_corners")
-            is ATTENTION_GRID_ALIGN_CORNERS
-            for operator in qk_operator_records
         )
         and component_names == list(ATTENTION_RELATION_COMPONENT_NAMES)
         and record.get("attention_relation_active_component_names")

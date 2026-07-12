@@ -1,4 +1,4 @@
-"""可由仅图像检测器重建的正式内容载体。"""
+"""提供可盲检重建的空间低通与高斯幅值尾部内容载体。"""
 
 from main.core.keyed_prg import (
     KEYED_PRG_VERSION,

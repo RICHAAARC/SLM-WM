@@ -19,7 +19,7 @@ METHOD_CONFIG_RELATIVE_PATH = PurePosixPath("configs/model_sd35.yaml")
 REGISTRY_SCHEMA = "slm_wm_method_semantic_registry_v1"
 REGISTRY_SCOPE = "normative_traceability_without_scientific_conformance_decision"
 EXPECTED_NORMATIVE_TRACE_DIGEST = (
-    "37a2e1e69bb9586d6c2fed5c7752588894db876c724a8060d052d53b015e8013"
+    "e492d9c9284279bc928a5b16d8e31a2fbbf54818d3e415fabaa7bcaeba40fbf9"
 )
 EXPECTED_INVARIANT_IDS = (
     "constructive_local_tangent_scope",
@@ -182,7 +182,10 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
             "main/methods/subspace/jacobian_nullspace.py",
             "solve_jacobian_null_space",
         ),
-        ("main/methods/carrier/keyed_tensor.py", "KeyedTensorCarrier"),
+        (
+            "main/methods/update_composition.py",
+            "build_risk_bounded_update",
+        ),
     ),
     "exact_jacobian_low_response_subspace": _bindings(
         (
@@ -192,6 +195,10 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
         (
             "main/methods/subspace/jacobian_nullspace.py",
             "solve_jacobian_null_space",
+        ),
+        (
+            "main/methods/subspace/jacobian_nullspace.py",
+            "recompute_jacobian_null_space_result_digest",
         ),
     ),
     "complete_716_feature_jacobian": (),
@@ -213,6 +220,14 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
             "main/methods/geometry/differentiable_attention.py",
             "attention_relation_component_protocol",
         ),
+        (
+            "main/methods/geometry/differentiable_attention.py",
+            "qk_operator_metadata_records_ready",
+        ),
+        (
+            "main/methods/geometry/differentiable_attention.py",
+            "qk_operator_metadata_records_digest",
+        ),
     ),
     "direct_qk_monotonic_attention_update": _bindings(
         (
@@ -228,8 +243,20 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
             "DifferentiableAttentionRecorder",
         ),
     ),
-    # 下列空集合明确暴露核心方法层尚无独立写回与组合入口。
-    "actual_dtype_write_revalidation": (),
+    "actual_dtype_write_revalidation": _bindings(
+        (
+            "main/methods/update_composition.py",
+            "build_quantized_composition_candidate",
+        ),
+        (
+            "main/methods/update_composition.py",
+            "iter_quantized_composition_candidates",
+        ),
+        (
+            "main/methods/update_composition.py",
+            "compose_ordered_float32_update_once",
+        ),
+    ),
     "finite_feature_preservation": (),
     "final_image_attention_attribution": (),
     "image_only_detection_boundary": _bindings(
@@ -239,7 +266,20 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
         ("main/core/keyed_prg.py", "build_keyed_gaussian_tensor"),
         ("main/core/keyed_prg.py", "keyed_prg_protocol_record"),
     ),
-    "three_branch_update_composition": (),
+    "three_branch_update_composition": _bindings(
+        (
+            "main/methods/update_composition.py",
+            "build_quantized_composition_candidate",
+        ),
+        (
+            "main/methods/update_composition.py",
+            "iter_quantized_composition_candidates",
+        ),
+        (
+            "main/methods/update_composition.py",
+            "compose_ordered_float32_update_once",
+        ),
+    ),
     "same_threshold_geometry_rescue": _bindings(
         ("main/methods/detection/image_only.py", "detect_image_only_watermark"),
     ),
@@ -375,6 +415,8 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_null_projection_energy_retention_uses_squared_l2_ratio",
         "tests/functional/test_real_scientific_operators.py::"
         "test_undamped_psd_cg_reports_non_convergence_without_fallback",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_scientific_operator_gate_requires_all_real_operator_evidence",
     ),
     "complete_716_feature_jacobian": (
         "tests/functional/test_semantic_feature_conditions.py::"
@@ -399,6 +441,8 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_distance_modulated_probability_is_distinct_and_differentiable",
         "tests/functional/test_real_scientific_operators.py::"
         "test_image_alignment_uses_token_endpoint_coordinate_convention",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_scientific_operator_gate_requires_all_real_operator_evidence",
     ),
     "direct_qk_monotonic_attention_update": (
         "tests/functional/test_real_scientific_operators.py::"
@@ -473,6 +517,78 @@ EXPECTED_CPU_PROPERTY_TEST_NODES["exact_jacobian_low_response_subspace"] = (
     "test_qr_basis_uses_independent_routed_candidate_references",
     "tests/functional/test_real_scientific_operators.py::"
     "test_exact_jacobian_linearization_satisfies_adjoint_identity",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES["branch_signal_origin"] = (
+    "tests/functional/test_branch_risk_formula.py::"
+    "test_constant_semantic_maps_keep_analytic_values_without_batch_mixing",
+    "tests/functional/test_branch_risk_formula.py::"
+    "test_image_risk_signals_match_analytic_texture_contrast_and_adjacent_formulas",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_attention_stability_comes_from_multiple_real_qk_layers",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES["branch_risk_bounds_written_update"] = (
+    "tests/functional/test_branch_risk_formula.py::"
+    "test_branch_risk_formula_uses_frozen_texture_directions_and_neutral_value",
+    "tests/functional/test_branch_risk_formula.py::"
+    "test_branch_risk_threshold_equality_is_ineligible",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_risk_budget_monotonically_bounds_update_and_zero_support",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_risk_bounded_update_is_batch_isolated_and_reuses_nchw_budget",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_risk_bounded_update_separates_direction_and_numerical_epsilon",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_risk_bounded_direction_support_is_invariant_to_input_scaling",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_direction_epsilon_only_clears_zero_budget_leakage",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_post_risk_direction_reexecutes_independent_exact_jvp",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES[
+    "spatial_low_pass_and_amplitude_tail_carriers"
+] = (
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_low_frequency_template_consumes_frozen_spatial_pooling_parameters",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_tail_template_preserves_exact_sparse_support_without_centering",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_carrier_templates_remain_canonical_float32_for_float16_latent",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES["direct_qk_monotonic_attention_update"] = (
+    "tests/functional/test_attention_risk_step.py::"
+    "test_attention_risk_step_starts_at_maximum_and_consumes_factor",
+    "tests/functional/test_attention_risk_step.py::"
+    "test_attention_risk_step_uses_one_actual_dtype_cast",
+    "tests/functional/test_attention_risk_step.py::"
+    "test_attention_risk_step_rejects_non_monotonic_candidates_at_step_limit",
+    "tests/functional/test_attention_risk_step.py::"
+    "test_attention_optimizer_consumes_exact_risk_bounded_direction",
+    "tests/functional/test_attention_risk_step.py::"
+    "test_attention_optimizer_rejects_different_risk_direction",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES["three_branch_update_composition"] = (
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_quantized_composition_accepts_ordered_nonempty_branch_subset",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_quantized_overshoot_requires_common_backtracking_candidate",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_quantized_composition_evidence_binds_real_three_branch_tensors",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_float32_composition_casts_once_instead_of_associative_latent_writes",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_float32_composition_uses_frozen_role_order_not_mapping_order",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES["actual_dtype_write_revalidation"] = (
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_quantized_overshoot_requires_common_backtracking_candidate",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_quantized_composition_evidence_binds_real_three_branch_tensors",
+    "tests/functional/test_risk_bounded_composition.py::"
+    "test_quantized_composition_rejects_inconsistent_backtracking_trace",
+    "tests/functional/test_semantic_feature_conditions.py::"
+    "test_quantized_write_jacobian_gate_rechecks_actual_float16_delta",
+    "tests/functional/test_semantic_feature_conditions.py::"
+    "test_quantized_write_jacobian_gate_rejects_update_lost_to_quantization",
 )
 
 

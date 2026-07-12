@@ -7,7 +7,7 @@ from typing import Any
 from main.core.digest import build_stable_digest
 
 
-METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v2"
+METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v3"
 
 
 def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
@@ -61,6 +61,13 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
                 "maximum_feasible_global_scalar_without_coordinate_clipping"
             ),
             "direction_ratio_epsilon": 1e-12,
+            "direction_ratio_epsilon_role": (
+                "zero_budget_leakage_and_active_coordinate_selection"
+            ),
+            "numerical_epsilon_role": (
+                "nonzero_step_and_response_denominator_stability"
+            ),
+            "epsilon_roles_interchangeable": False,
         },
         "local_geometry": {
             "latent_manifold_term_scope": (
@@ -85,6 +92,12 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             "shared_rms_column_reference_used": False,
             "explicit_qr_factor_inverse_used": False,
             "projection_energy_rule": "squared_l2_ratio",
+            "post_risk_direction_jvp_rule": (
+                "required_independently_for_each_active_branch"
+            ),
+            "post_risk_reference_direction_rule": (
+                "unprojected_carrier_template_or_direct_qk_gradient"
+            ),
         },
         "carrier_normalization": {
             "lf_content_rule": "subtract_global_mean_then_l2_normalize",
@@ -95,6 +108,14 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
         },
         "attention_geometry": {
             "relation_source": "direct_to_q_to_k_sampled_image_token_subgraph",
+            "probability_inverse_relation_allowed": False,
+            "relation_numerical_epsilon": 1e-12,
+            "valid_row_energy_rule": (
+                "both_centered_weighted_energies_strictly_above_epsilon_squared"
+            ),
+            "operator_metadata_evidence_rule": (
+                "shared_full_record_validation_and_digest_recomputation"
+            ),
             "risk_bounded_scale_is_backtracking_start": True,
             "acceptance_rule": (
                 "actual_candidate_score_strictly_above_original_and_content_base"

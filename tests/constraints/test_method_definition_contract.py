@@ -32,7 +32,7 @@ PRIMITIVE_DOCUMENT = (
 )
 FIELD_REGISTRY = ROOT / "docs" / "field_registry.md"
 EXPECTED_METHOD_DEFINITION = {
-    "method_definition_schema": "slm_wm_constructive_local_tangent_v2",
+    "method_definition_schema": "slm_wm_constructive_local_tangent_v3",
     "method_name": "semantic_conditioned_latent_manifold_watermarking",
     "update_construction": {
         "semantics": "branchwise_constructive_safe_subspace_updates",
@@ -67,6 +67,13 @@ EXPECTED_METHOD_DEFINITION = {
             "maximum_feasible_global_scalar_without_coordinate_clipping"
         ),
         "direction_ratio_epsilon": 1e-12,
+        "direction_ratio_epsilon_role": (
+            "zero_budget_leakage_and_active_coordinate_selection"
+        ),
+        "numerical_epsilon_role": (
+            "nonzero_step_and_response_denominator_stability"
+        ),
+        "epsilon_roles_interchangeable": False,
     },
     "local_geometry": {
         "latent_manifold_term_scope": (
@@ -91,6 +98,12 @@ EXPECTED_METHOD_DEFINITION = {
         "shared_rms_column_reference_used": False,
         "explicit_qr_factor_inverse_used": False,
         "projection_energy_rule": "squared_l2_ratio",
+        "post_risk_direction_jvp_rule": (
+            "required_independently_for_each_active_branch"
+        ),
+        "post_risk_reference_direction_rule": (
+            "unprojected_carrier_template_or_direct_qk_gradient"
+        ),
     },
     "carrier_normalization": {
         "lf_content_rule": "subtract_global_mean_then_l2_normalize",
@@ -101,6 +114,14 @@ EXPECTED_METHOD_DEFINITION = {
     },
     "attention_geometry": {
         "relation_source": "direct_to_q_to_k_sampled_image_token_subgraph",
+        "probability_inverse_relation_allowed": False,
+        "relation_numerical_epsilon": 1e-12,
+        "valid_row_energy_rule": (
+            "both_centered_weighted_energies_strictly_above_epsilon_squared"
+        ),
+        "operator_metadata_evidence_rule": (
+            "shared_full_record_validation_and_digest_recomputation"
+        ),
         "risk_bounded_scale_is_backtracking_start": True,
         "acceptance_rule": (
             "actual_candidate_score_strictly_above_original_and_content_base"
@@ -167,7 +188,7 @@ EXPECTED_METHOD_DEFINITION = {
     ],
 }
 EXPECTED_METHOD_DEFINITION_DIGEST = (
-    "2e0d2cfc43b72c6e5e875d48a0fbc15b2a48dc248e425ef8d3ead708e86d2f8a"
+    "80ad2e38188ec57144bd987070425d65592109d17e90f04fff99c3432309fa1a"
 )
 
 
@@ -177,7 +198,7 @@ def test_machine_readable_method_definition_freezes_constructive_semantics() -> 
 
     definition = semantic_conditioned_latent_method_definition()
 
-    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v2"
+    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v3"
     assert definition == EXPECTED_METHOD_DEFINITION
     assert definition["update_construction"]["joint_argmax_solved"] is False
     assert (
