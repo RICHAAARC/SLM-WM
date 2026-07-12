@@ -90,9 +90,11 @@ REQUIRED_OUTPUT_DIR_NAMES = (
 
 # Prompt 文件由 build_package_extra_paths 按当前运行层级动态加入. 共享重建代码
 # 只允许来自 scripts 及更内层, 使完整结果包能够脱离 Notebook 和 Colab 包装复核.
-# 这里不登记其他运行层级的 Prompt 文件, 避免携带与当前 claim scale 无关的数据定义.
+# 完整选择清单是三级运行共享的来源证据, 但这里只加入当前运行层级的实际 Prompt 文件,
+# 不把另外两个运行层级的独立 Prompt 配置当作本次运行输入.
 PACKAGE_EXTRA_PATHS = (
     "configs/prompt_source_registry.json",
+    "configs/prompt_selection_manifest.jsonl",
     "configs/model_sd35.yaml",
     "configs/model_source_registry.json",
     "configs/dependency_profile_registry.json",
@@ -171,6 +173,9 @@ PACKAGE_EXTRA_PATHS = (
     "experiments/ablations/runtime_rerun.py",
     "experiments/protocol/method_runtime_config.py",
     "experiments/protocol/paper_run_config.py",
+    "experiments/protocol/prompt_sources.py",
+    "experiments/protocol/prompts.py",
+    "experiments/protocol/splits.py",
     "experiments/runtime/model_sources.py",
     "experiments/runtime/dependency_profiles.py",
     "experiments/runtime/dependency_preparation.py",

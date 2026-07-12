@@ -21,6 +21,7 @@ from experiments.protocol.attacks import (
 from experiments.protocol.formal_evidence import contains_nonformal_marker
 from experiments.protocol.paper_run_config import (
     FULL_PAPER_RUN_NAME,
+    PaperRunConfig,
     PROBE_PAPER_RUN_NAME,
     RUN_DEFAULTS,
     RUN_EXPECTED_PROMPT_COUNTS,
@@ -365,10 +366,11 @@ class PilotPaperFixedFprConfig:
         return payload
 
 
-def build_paper_fixed_fpr_config(root: str | Path = ".") -> PilotPaperFixedFprConfig:
-    """按统一论文运行配置构造 fixed-FPR 共同协议配置。"""
+def build_paper_fixed_fpr_config_from_paper_run(
+    paper_run: PaperRunConfig,
+) -> PilotPaperFixedFprConfig:
+    """复用已验证论文运行配置构造 fixed-FPR 共同协议配置."""
 
-    paper_run = build_paper_run_config(root)
     return PilotPaperFixedFprConfig(
         paper_run_name=paper_run.run_name,
         prompt_set=paper_run.prompt_set,
@@ -379,6 +381,14 @@ def build_paper_fixed_fpr_config(root: str | Path = ".") -> PilotPaperFixedFprCo
         result_claim_scope=result_claim_scope_for_run(paper_run.run_name),
         target_fpr=paper_run.target_fpr,
         minimum_clean_negative_count=paper_run.minimum_clean_negative_count,
+    )
+
+
+def build_paper_fixed_fpr_config(root: str | Path = ".") -> PilotPaperFixedFprConfig:
+    """按统一论文运行配置构造 fixed-FPR 共同协议配置。"""
+
+    return build_paper_fixed_fpr_config_from_paper_run(
+        build_paper_run_config(root)
     )
 
 

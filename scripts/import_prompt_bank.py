@@ -1,4 +1,4 @@
-﻿"""从外部 prompt bank 导入本项目使用的 prompt 配置。"""
+"""从冻结外部来源构建或复验可逐字节重建的 Prompt bank."""
 
 from __future__ import annotations
 
@@ -6,132 +6,236 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import re
-import zipfile
-from typing import Iterable
+import shutil
+import sys
+from typing import Any
 
-DEFAULT_SOURCE_ARCHIVE = Path("outputs/prompts.zip")
-DEFAULT_CONFIG_DIR = Path("configs")
-PROMPT_SOURCE_ENTRIES = {
-    "pilot_paper": "prompts/sources/paper_main_pilot_paper_prompts.txt",
-    "full_paper": "prompts/sources/paper_main_full_paper_prompts.txt",
-}
-PROMPT_CONFIG_NAMES = {
-    "probe_paper": "paper_main_probe_paper_prompts.txt",
-    "pilot_paper": "paper_main_pilot_paper_prompts.txt",
-    "full_paper": "paper_main_full_paper_prompts.txt",
-}
-_RESTRICTED_MARKER_PATTERNS = (
-    re.compile(r"\b" + "sta" + "ge" + r"\b", re.IGNORECASE),
-    re.compile(r"\b" + "pha" + "se" + r"\b", re.IGNORECASE),
-    re.compile("\u9636\u6bb5"),
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from experiments.protocol.prompt_sources import (
+    PROMPT_SELECTION_MANIFEST_PATH,
+    PROMPT_SOURCE_REGISTRY_PATH,
+    audit_committed_prompt_bank,
+    build_prompt_selection_rows,
+    build_prompt_source_registry,
+    read_selection_manifest,
+    selection_manifest_bytes,
+    verify_selection_against_sources,
+    write_prompt_files_from_selection,
+    write_selection_manifest,
 )
 
 
-def file_sha256(path: Path) -> str:
-    """计算输入文件的 SHA-256 摘要, 用于人工审计来源。"""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+DEFAULT_COCO_SOURCE = Path("outputs/prompt_sources/captions_train2017.json")
+DEFAULT_PARTI_SOURCE = Path("outputs/prompt_sources/PartiPrompts.tsv")
+DEFAULT_OUTPUT_ROOT = Path("outputs/prompt_rebuild")
 
 
-def normalize_prompt_text(text: str) -> str:
-    """规范化 prompt 文本, 避免多余空白影响后续稳定摘要。"""
-    return " ".join(text.strip().split())
+def _stable_report(value: Any) -> str:
+    """把命令报告编码为稳定、便于人工检查的 JSON."""
+
+    return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
 
 
-def sanitize_prompt_text(text: str) -> tuple[str, bool]:
-    """替换仓库治理不允许写入配置正文的过程标记词。"""
-    sanitized = normalize_prompt_text(text)
-    changed = False
-    for pattern in _RESTRICTED_MARKER_PATTERNS:
-        updated = pattern.sub("concert platform", sanitized)
-        changed = changed or updated != sanitized
-        sanitized = updated
-    return sanitized, changed
+def _path_sha256(path: Path) -> str:
+    """计算输出文件摘要, 使构建报告可直接用于复制前复核."""
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def unique_normalized_prompts(prompts: Iterable[str]) -> tuple[tuple[str, ...], int]:
-    """按原始顺序去重, 并返回被治理规则改写的文本数量。"""
-    unique_prompts: list[str] = []
-    seen: set[str] = set()
-    sanitized_count = 0
-    for prompt in prompts:
-        normalized, changed = sanitize_prompt_text(prompt)
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        unique_prompts.append(normalized)
-        sanitized_count += int(changed)
-    return tuple(unique_prompts), sanitized_count
+def _require_persistent_output_root(
+    repository_root: str | Path,
+    output_root: str | Path,
+) -> Path:
+    """要求命令持久化产物位于项目 outputs/ 边界内."""
+
+    root_path = Path(repository_root).resolve()
+    resolved_output_path = Path(output_root).resolve()
+    try:
+        resolved_output_path.relative_to((root_path / "outputs").resolve())
+    except ValueError as exc:
+        raise ValueError("Prompt 构建输出必须位于项目 outputs/ 目录内") from exc
+    return resolved_output_path
 
 
-def read_source_prompts(archive: zipfile.ZipFile, entry_name: str) -> tuple[str, ...]:
-    """读取 prompt source 文本文件。"""
-    text = archive.read(entry_name).decode("utf-8")
-    return tuple(line for line in text.splitlines() if line.strip())
+def build_governed_prompt_bank(
+    *,
+    coco_source_path: str | Path,
+    parti_source_path: str | Path,
+    output_root: str | Path,
+) -> dict[str, Any]:
+    """从两个冻结来源生成选择清单、三级 Prompt 文件和来源注册表."""
 
-
-def load_prompt_bank(source_archive: Path) -> dict[str, tuple[tuple[str, ...], int]]:
-    """从 zip 中加载并治理四组 prompt 配置。"""
-    with zipfile.ZipFile(source_archive) as archive:
-        pilot_source_prompts = read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["pilot_paper"])
-        raw_prompts = {
-        "probe_paper": pilot_source_prompts[:70],
-            "pilot_paper": pilot_source_prompts,
-            "full_paper": read_source_prompts(archive, PROMPT_SOURCE_ENTRIES["full_paper"]),
-        }
-    return {name: unique_normalized_prompts(prompts) for name, prompts in raw_prompts.items()}
-
-
-def write_prompt_config(config_dir: Path, prompt_set: str, prompts: tuple[str, ...]) -> Path:
-    """将单个 prompt set 写入项目配置目录。"""
-    config_dir.mkdir(parents=True, exist_ok=True)
-    output_path = config_dir / PROMPT_CONFIG_NAMES[prompt_set]
-    output_path.write_text("\n".join(prompts) + "\n", encoding="utf-8")
-    return output_path
-
-
-def import_prompt_bank_configs(
-    source_archive: str | Path = DEFAULT_SOURCE_ARCHIVE,
-    config_dir: str | Path = DEFAULT_CONFIG_DIR,
-) -> dict[str, object]:
-    """从外部 prompt bank 重新生成 SLM-WM 使用的 prompt 配置。"""
-    source_path = Path(source_archive)
-    config_path = Path(config_dir)
-    prompt_bank = load_prompt_bank(source_path)
-    prompt_counts: dict[str, int] = {}
-    sanitized_counts: dict[str, int] = {}
-    output_paths: dict[str, str] = {}
-    for prompt_set, (prompts, sanitized_count) in prompt_bank.items():
-        output_path = write_prompt_config(config_path, prompt_set, prompts)
-        prompt_counts[prompt_set] = len(prompts)
-        sanitized_counts[prompt_set] = sanitized_count
-        output_paths[prompt_set] = output_path.as_posix()
+    output_path = Path(output_root)
+    config_path = output_path / "configs"
+    rows, source_statistics = build_prompt_selection_rows(
+        coco_source_path,
+        parti_source_path,
+    )
+    manifest_path = write_selection_manifest(
+        rows,
+        config_path / PROMPT_SELECTION_MANIFEST_PATH.name,
+    )
+    prompt_paths = write_prompt_files_from_selection(rows, config_path)
+    registry = build_prompt_source_registry(
+        rows=rows,
+        source_statistics=source_statistics,
+        coco_source_path=coco_source_path,
+        parti_source_path=parti_source_path,
+    )
+    registry_path = config_path / PROMPT_SOURCE_REGISTRY_PATH.name
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        _stable_report(registry) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    output_files = {
+        "selection_manifest": manifest_path,
+        "source_registry": registry_path,
+        **{f"prompt_{name}": path for name, path in prompt_paths.items()},
+    }
     return {
-        "source_archive": source_path.as_posix(),
-        "source_archive_digest": file_sha256(source_path),
-        "prompt_counts": prompt_counts,
-        "sanitized_prompt_counts": sanitized_counts,
-        "output_paths": output_paths,
+        "operation": "build_governed_prompt_bank",
+        "selection_manifest_record_count": len(rows),
+        "source_statistics": source_statistics,
+        "output_files": {
+            name: {
+                "path": path.as_posix(),
+                "sha256": _path_sha256(path),
+                "size": path.stat().st_size,
+            }
+            for name, path in sorted(output_files.items())
+        },
     }
 
 
+def rebuild_committed_prompt_bank(
+    *,
+    repository_root: str | Path,
+    output_root: str | Path,
+) -> dict[str, Any]:
+    """只依赖提交内清单重建全部 Prompt 配置字节."""
+
+    root_path = Path(repository_root).resolve()
+    audit_report = audit_committed_prompt_bank(root_path)
+    manifest_source_path = root_path / PROMPT_SELECTION_MANIFEST_PATH
+    registry_source_path = root_path / PROMPT_SOURCE_REGISTRY_PATH
+    rows = read_selection_manifest(manifest_source_path)
+    config_path = Path(output_root) / "configs"
+    manifest_output_path = write_selection_manifest(
+        rows,
+        config_path / PROMPT_SELECTION_MANIFEST_PATH.name,
+    )
+    if manifest_output_path.read_bytes() != selection_manifest_bytes(rows):
+        raise RuntimeError("重建的 Prompt 选择清单字节不一致")
+    prompt_paths = write_prompt_files_from_selection(rows, config_path)
+    registry_output_path = config_path / PROMPT_SOURCE_REGISTRY_PATH.name
+    registry_output_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(registry_source_path, registry_output_path)
+    output_files = {
+        "selection_manifest": manifest_output_path,
+        "source_registry": registry_output_path,
+        **{f"prompt_{name}": path for name, path in prompt_paths.items()},
+    }
+    return {
+        "operation": "rebuild_committed_prompt_bank",
+        "audit_report": audit_report,
+        "output_files": {
+            name: {
+                "path": path.as_posix(),
+                "sha256": _path_sha256(path),
+                "size": path.stat().st_size,
+            }
+            for name, path in sorted(output_files.items())
+        },
+    }
+
+
+def verify_committed_selection_sources(
+    *,
+    repository_root: str | Path,
+    coco_source_path: str | Path,
+    parti_source_path: str | Path,
+) -> dict[str, Any]:
+    """从冻结来源重新选择并要求与提交内清单逐字节一致."""
+
+    root_path = Path(repository_root).resolve()
+    manifest_rows = read_selection_manifest(
+        root_path / PROMPT_SELECTION_MANIFEST_PATH
+    )
+    return verify_selection_against_sources(
+        manifest_rows,
+        coco_source_path=coco_source_path,
+        parti_source_path=parti_source_path,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
-    """构造命令行参数解析器。"""
-    parser = argparse.ArgumentParser(description="从外部 prompt bank 生成项目 prompt 配置。")
-    parser.add_argument("--source-archive", default=str(DEFAULT_SOURCE_ARCHIVE), help="外部 prompt bank zip 路径。")
-    parser.add_argument("--config-dir", default=str(DEFAULT_CONFIG_DIR), help="项目 prompt 配置目录。")
+    """构造 Prompt 来源治理命令行参数."""
+
+    parser = argparse.ArgumentParser(
+        description="构建、重建或复验可逐字节追溯的 Prompt bank。"
+    )
+    parser.add_argument(
+        "--operation",
+        choices=("build", "rebuild", "audit", "source_verify"),
+        default="audit",
+        help="选择来源构建、提交内重建、轻量审计或完整来源复验。",
+    )
+    parser.add_argument("--repository-root", default=".", help="项目根目录。")
+    parser.add_argument(
+        "--coco-source",
+        default=DEFAULT_COCO_SOURCE.as_posix(),
+        help="冻结 COCO captions JSON 路径。",
+    )
+    parser.add_argument(
+        "--parti-source",
+        default=DEFAULT_PARTI_SOURCE.as_posix(),
+        help="冻结 PartiPrompts TSV 路径。",
+    )
+    parser.add_argument(
+        "--output-root",
+        default=DEFAULT_OUTPUT_ROOT.as_posix(),
+        help="构建产物目录, 正式调用必须位于 outputs/。",
+    )
     return parser
 
 
 def main() -> None:
-    """命令行入口。"""
+    """执行所选 Prompt 来源治理操作并打印稳定报告."""
+
     args = build_parser().parse_args()
-    summary = import_prompt_bank_configs(source_archive=args.source_archive, config_dir=args.config_dir)
-    print(json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True))
+    if args.operation == "build":
+        output_root = _require_persistent_output_root(
+            args.repository_root,
+            args.output_root,
+        )
+        report = build_governed_prompt_bank(
+            coco_source_path=args.coco_source,
+            parti_source_path=args.parti_source,
+            output_root=output_root,
+        )
+    elif args.operation == "rebuild":
+        output_root = _require_persistent_output_root(
+            args.repository_root,
+            args.output_root,
+        )
+        report = rebuild_committed_prompt_bank(
+            repository_root=args.repository_root,
+            output_root=output_root,
+        )
+    elif args.operation == "source_verify":
+        report = verify_committed_selection_sources(
+            repository_root=args.repository_root,
+            coco_source_path=args.coco_source,
+            parti_source_path=args.parti_source,
+        )
+    else:
+        report = audit_committed_prompt_bank(args.repository_root)
+    print(_stable_report(report))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,3 @@
+/configs/paper_main_*_paper_prompts.txt text eol=lf
+/configs/prompt_selection_manifest.jsonl text eol=lf
+/configs/prompt_source_registry.json text eol=lf

@@ -1407,7 +1407,11 @@ def run_image_only_dataset_runtime(
     manifest = build_artifact_manifest(
         artifact_id=f"{resolved_paper_run.run_name}_image_only_dataset_runtime_manifest",
         artifact_type="local_manifest",
-        input_paths=(prompt_path.relative_to(root_path).as_posix(), "configs/prompt_source_registry.json"),
+        input_paths=(
+            prompt_path.relative_to(root_path).as_posix(),
+            "configs/prompt_source_registry.json",
+            "configs/prompt_selection_manifest.jsonl",
+        ),
         output_paths=(
             runtime_results_path.relative_to(root_path).as_posix(),
             detection_records_path.relative_to(root_path).as_posix(),

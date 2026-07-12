@@ -392,7 +392,11 @@ def write_pilot_paper_fixed_fpr_common_protocol_outputs(
             manifest_path,
         )
     )
-    input_paths = [relative_or_absolute(prompt_path, root_path)]
+    input_paths = [
+        relative_or_absolute(prompt_path, root_path),
+        "configs/prompt_source_registry.json",
+        "configs/prompt_selection_manifest.jsonl",
+    ]
     if candidate_path.exists():
         input_paths.append(relative_or_absolute(candidate_path, root_path))
     input_paths.extend(

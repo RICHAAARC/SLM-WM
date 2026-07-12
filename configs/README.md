@@ -10,7 +10,7 @@
 | `paper_main_pilot_paper_prompts.txt` | 700 | 0.01 | `pilot_claim` | 中等规模正式结果包, test 包含340个独立 Prompt。 |
 | `paper_main_full_paper_prompts.txt` | 7000 | 0.001 | `full_claim` | 全规模正式结果包, test 包含3400个独立 Prompt。 |
 
-Prompt bank 中受外部来源登记约束的子集来自 Google Research PartiPrompts。固定来源版本、许可证、文件摘要和分层选择摘要见 `configs/prompt_source_registry.json`。
+正式 Prompt bank 由 Microsoft COCO 2017 train captions 与 Google Research PartiPrompts 的固定字节版本构造。`configs/prompt_selection_manifest.jsonl` 保存6000条 COCO caption 与1000条 PartiPrompt 的来源记录身份、原始文本和选择摘要；三级 Prompt 文件分别是该清单的前70、前700和前7000条, 并保持 6:1 来源比例。Prompt ID 由统一清单索引和原始文本构造, split 在每个连续70条块内固定分配3/33/34, 因而相同前缀在三级运行中保持相同 Prompt ID 与 split。`configs/prompt_source_registry.json` 固定来源 revision、文件大小、SHA-256、选择清单摘要和三个 Prompt 文件摘要。运行入口会从清单前缀逐字节重建当前 Prompt 文件, 不接受未登记文本、来源改写或独立重新抽样。
 
 三组配置只允许样本数量和 fixed-FPR 标准不同; 方法参数、攻击协议、baseline 入口、Wilson 单侧 FPR 上界、Hoeffding 结果区间、随机种子和结果闭合逻辑必须保持一致。共同协议结果记录必须拒绝 proxy、placeholder、fallback、synthetic 和 formal-null 证据。
 

@@ -1103,6 +1103,8 @@ def test_complete_result_package_required_directories_cover_evidence_closure_cha
     assert "paper_experiments/analysis/result_closure_gate.py" in PACKAGE_EXTRA_PATHS
     assert "scripts/write_submission_readiness_outputs.py" in PACKAGE_EXTRA_PATHS
     assert "scripts/write_evidence_closure_entry_review_outputs.py" in PACKAGE_EXTRA_PATHS
+    assert "configs/prompt_selection_manifest.jsonl" in PACKAGE_EXTRA_PATHS
+    assert "experiments/protocol/prompt_sources.py" in PACKAGE_EXTRA_PATHS
     assert "configs/dependency_profiles/workflow_orchestrator_lock.txt" in PACKAGE_EXTRA_PATHS
     assert "experiments/runtime/dependency_preparation.py" in PACKAGE_EXTRA_PATHS
     assert "experiments/runtime/isolated_dependency_environment.py" in PACKAGE_EXTRA_PATHS

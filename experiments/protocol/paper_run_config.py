@@ -25,6 +25,7 @@ from experiments.protocol.formal_randomization import (
     resolve_formal_randomization_repeat,
 )
 from experiments.protocol.prompts import PROMPT_FILES, read_prompt_file
+from experiments.protocol.prompt_sources import audit_governed_prompt_set
 from experiments.protocol.splits import build_group_split_counts
 from main.core.keyed_prg import require_supported_keyed_prg_version
 
@@ -406,6 +407,8 @@ def _formal_prompt_contract(
     )
     if not registry_path.is_file():
         raise FileNotFoundError("正式运行缺少 configs/prompt_source_registry.json")
+    registry_root = registry_path.parent.parent
+    audit_governed_prompt_set(registry_root, run_name)
     registry = json.loads(registry_path.read_text(encoding="utf-8-sig"))
     record = registry.get("prompt_sets", {}).get(run_name)
     if not isinstance(record, dict):
@@ -413,6 +416,8 @@ def _formal_prompt_contract(
     expected_prompt_count = RUN_EXPECTED_PROMPT_COUNTS[run_name]
     if record.get("result_count") != expected_prompt_count:
         raise ValueError("Prompt 注册表数量与论文运行层级不一致")
+    if record.get("prompt_file") != RUN_DEFAULTS[run_name]["prompt_file"]:
+        raise ValueError("Prompt 注册表路径与论文运行层级不一致")
     return PaperRunPromptContract(
         run_name=run_name,
         prompt_file=str(RUN_DEFAULTS[run_name]["prompt_file"]),

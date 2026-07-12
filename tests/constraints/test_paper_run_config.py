@@ -383,8 +383,10 @@ def test_formal_prompt_contract_rejects_count_and_digest_drift(
     configs_dir = tmp_path / "configs"
     configs_dir.mkdir(parents=True)
     registry_source = repository_root / "configs" / "prompt_source_registry.json"
+    manifest_source = repository_root / "configs" / "prompt_selection_manifest.jsonl"
     prompt_source = repository_root / "configs" / "paper_main_probe_paper_prompts.txt"
     (configs_dir / registry_source.name).write_bytes(registry_source.read_bytes())
+    (configs_dir / manifest_source.name).write_bytes(manifest_source.read_bytes())
     prompt_path = configs_dir / prompt_source.name
     prompt_path.write_bytes(prompt_source.read_bytes())
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
@@ -393,12 +395,12 @@ def test_formal_prompt_contract_rejects_count_and_digest_drift(
 
     lines = prompt_path.read_text(encoding="utf-8").splitlines()
     prompt_path.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="实际数量"):
+    with pytest.raises(ValueError, match="逐字节重建"):
         build_paper_run_config(root=tmp_path)
 
     prompt_path.write_bytes(prompt_source.read_bytes())
     drifted_lines = prompt_path.read_text(encoding="utf-8").splitlines()
     drifted_lines[0] = drifted_lines[0] + " content drift"
     prompt_path.write_text("\n".join(drifted_lines) + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="SHA-256"):
+    with pytest.raises(ValueError, match="逐字节重建"):
         build_paper_run_config(root=tmp_path)

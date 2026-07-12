@@ -24,7 +24,7 @@ from experiments.protocol.paper_run_config import (
     build_paper_run_config,
 )
 from experiments.protocol.pilot_paper_fixed_fpr import (
-    build_paper_fixed_fpr_config,
+    build_paper_fixed_fpr_config_from_paper_run,
     build_pilot_paper_prompt_split_summary,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
@@ -850,7 +850,7 @@ def write_result_closure_gate_outputs(
     canonical_test_prompt_ids = canonical_split_prompt_ids["test"]
     prompt_split_summary = build_pilot_paper_prompt_split_summary(
         canonical_prompt_records,
-        build_paper_fixed_fpr_config(root_path),
+        build_paper_fixed_fpr_config_from_paper_run(paper_run),
     )
     governed_payload_path_map = {
         "main_comparison_table": _relative_or_absolute(

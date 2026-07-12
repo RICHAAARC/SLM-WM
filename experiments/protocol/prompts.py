@@ -6,8 +6,10 @@ from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 from typing import Any
+import unicodedata
 
 from main.core.digest import build_stable_digest
+from experiments.protocol.prompt_sources import audit_committed_prompt_bank
 
 PROMPT_FILES = {
     "probe_paper": Path("configs/paper_main_probe_paper_prompts.txt"),
@@ -20,6 +22,7 @@ EXPECTED_PROMPT_COUNTS = {
     "pilot_paper": 700,
     "full_paper": 7000,
 }
+PROMPT_IDENTITY_PROTOCOL = "nested_prompt_bank_index_text_v1"
 
 
 @dataclass(frozen=True)
@@ -114,10 +117,18 @@ def derive_risk_profile(prompt_text: str) -> str:
 
 
 def build_prompt_id(prompt_set: str, prompt_index: int, prompt_text: str) -> str:
-    """生成稳定 prompt_id, 不依赖文件顺序之外的外部状态。"""
+    """生成跨三个嵌套运行层级保持相同的稳定 Prompt 身份.
+
+    ``prompt_set`` 只描述本次运行规模, 不进入 Prompt 身份。相同清单索引和原始
+    文本在 probe、pilot 与 full 中必须得到同一个 ID, 才能把三级结果解释为同一
+    总体上的递增样本证据。
+    """
+
+    if prompt_set not in EXPECTED_PROMPT_COUNTS:
+        raise ValueError("未知 Prompt 运行层级")
     digest = build_stable_digest(
         {
-            "prompt_set": prompt_set,
+            "prompt_identity_protocol": PROMPT_IDENTITY_PROTOCOL,
             "prompt_index": prompt_index,
             "prompt_text": prompt_text,
         }
@@ -176,24 +187,56 @@ def validate_governed_prompt_bank(
     prompt_files: dict[str, Path] | None = None,
     registry_path: str | Path = PROMPT_SOURCE_REGISTRY,
 ) -> dict[str, Any]:
-    """验证三级 Prompt 数量、集合内去重和来源登记。"""
+    """验证来源、选择清单、三级文件和运行文本的完整身份链."""
 
     files = prompt_files or PROMPT_FILES
+    registry_file = Path(registry_path).resolve()
+    root_path = registry_file.parent.parent
+    registry = load_prompt_source_registry(registry_file)
+    declared_prompt_sets = registry.get("prompt_sets")
+    if not isinstance(declared_prompt_sets, dict):
+        raise ValueError("Prompt 来源注册表缺少 prompt_sets")
+    for prompt_set, path in files.items():
+        record = declared_prompt_sets.get(prompt_set)
+        if not isinstance(record, dict):
+            raise ValueError("Prompt 来源注册表缺少运行层级")
+        declared_path = (root_path / str(record.get("prompt_file", ""))).resolve()
+        if Path(path).resolve() != declared_path:
+            raise ValueError("Prompt 文件路径未匹配来源注册表")
+
+    provenance_report = audit_committed_prompt_bank(root_path)
     counts = {}
     duplicate_counts = {}
+    runtime_text_identity = {}
     for prompt_set, path in files.items():
         prompts = read_prompt_file(path)
-        normalized = tuple(normalize_prompt_text(prompt).lower() for prompt in prompts)
+        normalized = tuple(
+            " ".join(unicodedata.normalize("NFKC", prompt).casefold().split())
+            for prompt in prompts
+        )
         counts[prompt_set] = len(prompts)
         duplicate_counts[prompt_set] = len(prompts) - len(set(normalized))
-    registry = load_prompt_source_registry(registry_path)
+        runtime_text_identity[prompt_set] = all(
+            prompt == normalize_prompt_text(prompt)
+            for prompt in prompts
+        )
+    count_contract_ready = counts == EXPECTED_PROMPT_COUNTS
+    deduplication_ready = all(value == 0 for value in duplicate_counts.values())
+    runtime_text_identity_ready = all(runtime_text_identity.values())
+    if not (
+        count_contract_ready
+        and deduplication_ready
+        and runtime_text_identity_ready
+    ):
+        raise ValueError("Prompt bank 未满足数量、去重或运行文本身份约束")
     return {
         "prompt_counts": counts,
         "expected_prompt_counts": EXPECTED_PROMPT_COUNTS,
         "duplicate_counts": duplicate_counts,
-        "count_contract_ready": counts == EXPECTED_PROMPT_COUNTS,
-        "deduplication_ready": all(value == 0 for value in duplicate_counts.values()),
-        "source_revision": registry.get("source_revision", ""),
-        "source_file_sha256": registry.get("source_file_sha256", ""),
-        "source_registry_ready": bool(registry.get("source_revision") and registry.get("source_file_sha256")),
+        "runtime_text_identity": runtime_text_identity,
+        "count_contract_ready": count_contract_ready,
+        "deduplication_ready": deduplication_ready,
+        "runtime_text_identity_ready": runtime_text_identity_ready,
+        **provenance_report,
+        "governed_prompt_bank_ready": True,
     }

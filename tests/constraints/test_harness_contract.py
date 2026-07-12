@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from tools.harness.lib.naming_rules import has_reserved_progress_marker
+from tools.harness.lib.naming_rules import (
+    has_reserved_progress_marker,
+    is_allowed_file_name,
+)
 from tools.harness.run_all_audits import run_all_audits
 
 
@@ -29,6 +32,14 @@ def test_reserved_progress_marker_detection() -> None:
     blocked_tokens = ("sta" + "ge", "pha" + "se", "\u9636\u6bb5")
     assert all(has_reserved_progress_marker(token) for token in blocked_tokens)
     assert not has_reserved_progress_marker("core_package_boundary_freeze")
+
+
+@pytest.mark.constraint
+def test_git_attributes_is_an_allowed_repository_control_file() -> None:
+    """逐字节治理输入需要允许使用 Git 行尾属性固定 LF."""
+
+    assert is_allowed_file_name(".gitattributes")
+    assert is_allowed_file_name("prompt_selection_manifest.jsonl")
 
 
 @pytest.mark.constraint

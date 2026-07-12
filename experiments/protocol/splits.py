@@ -16,6 +16,7 @@ UNASSIGNED_SPLIT = "unassigned"
 # dev 3/30/300、calibration 33/330/3300 和 test 34/340/3400。
 DEV_RATIO = 3.0 / 70.0
 CALIBRATION_RATIO = 33.0 / 70.0
+SPLIT_ASSIGNMENT_BLOCK_SIZE = 70
 
 
 def dev_ratio_for_prompt_count(prompt_count: int) -> float:
@@ -76,26 +77,56 @@ def allocate_stratified_counts(
 
 
 def build_split_assignments(records: Iterable[PromptProtocolRecord]) -> dict[str, str]:
-    """按 prompt set 与 risk profile 分层后, 为 prompt_id 分配稳定 split。"""
-    grouped_records: dict[tuple[str, str], list[PromptProtocolRecord]] = defaultdict(list)
+    """在固定70条前缀块内按风险类型分层分配稳定 split.
+
+    每个完整块精确产生3个 dev、33个 calibration 和34个 test 记录。因为三级
+    Prompt 文件是同一清单前缀, 同一 Prompt 在 probe、pilot 与 full 中不会改变
+    split。最后一个不足70条的块仍按相同比例分配, 供轻量测试和通用调用复用。
+    """
+
+    grouped_blocks: dict[tuple[str, int], list[PromptProtocolRecord]] = defaultdict(list)
     for record in records:
-        grouped_records[(record.prompt_set, record.risk_profile)].append(record)
+        block_index = record.prompt_index // SPLIT_ASSIGNMENT_BLOCK_SIZE
+        grouped_blocks[(record.prompt_set, block_index)].append(record)
 
     assignments: dict[str, str] = {}
-    group_items = tuple(sorted(grouped_records.items()))
-    group_sizes = tuple(len(group_records) for _, group_records in group_items)
-    dev_counts = allocate_stratified_counts(group_sizes, DEV_RATIO)
-    calibration_capacities = tuple(size - dev_count for size, dev_count in zip(group_sizes, dev_counts))
-    calibration_counts = allocate_stratified_counts(group_sizes, CALIBRATION_RATIO, calibration_capacities)
-    for (_, group_records), dev_count, calibration_count in zip(group_items, dev_counts, calibration_counts):
-        sorted_records = sorted(group_records, key=lambda record: (record.prompt_digest, record.prompt_id))
-        split_sequence = (
-            ["dev"] * dev_count
-            + ["calibration"] * calibration_count
-            + ["test"] * (len(sorted_records) - dev_count - calibration_count)
+    for _, block_records in sorted(grouped_blocks.items()):
+        risk_groups: dict[str, list[PromptProtocolRecord]] = defaultdict(list)
+        for record in block_records:
+            risk_groups[record.risk_profile].append(record)
+        group_items = tuple(sorted(risk_groups.items()))
+        group_sizes = tuple(len(group_records) for _, group_records in group_items)
+        dev_counts = allocate_stratified_counts(group_sizes, DEV_RATIO)
+        calibration_capacities = tuple(
+            size - dev_count
+            for size, dev_count in zip(group_sizes, dev_counts)
         )
-        for record, split_name in zip(sorted_records, split_sequence):
-            assignments[record.prompt_id] = split_name
+        calibration_counts = allocate_stratified_counts(
+            group_sizes,
+            CALIBRATION_RATIO,
+            calibration_capacities,
+        )
+        for (_, group_records), dev_count, calibration_count in zip(
+            group_items,
+            dev_counts,
+            calibration_counts,
+        ):
+            sorted_records = sorted(
+                group_records,
+                key=lambda record: (
+                    record.prompt_digest,
+                    record.prompt_index,
+                    record.prompt_id,
+                ),
+            )
+            split_sequence = (
+                ["dev"] * dev_count
+                + ["calibration"] * calibration_count
+                + ["test"]
+                * (len(sorted_records) - dev_count - calibration_count)
+            )
+            for record, split_name in zip(sorted_records, split_sequence):
+                assignments[record.prompt_id] = split_name
     return assignments
 
 

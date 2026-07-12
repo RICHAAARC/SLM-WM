@@ -601,10 +601,10 @@ Notebook 与 repository module 的跨边界数据
 | missing_input_count | artifact | none | true | false | false | 重载校验中缺失的登记文件数量。 |
 | missing_input_paths | artifact | none | true | false | false | 重载校验中缺失的登记文件路径集合。 |
 | digest_mismatch_count | artifact | none | true | false | false | 重载校验中摘要不一致的文件数量。 |
-| prompt_id | protocol | none | true | false | false | prompt 协议记录的稳定标识。 |
+| prompt_id | protocol | none | true | false | false | 由统一清单索引和原始文本构造、在三级嵌套运行中保持不变的 Prompt 稳定标识。 |
 | prompt_set | protocol | none | true | false | false | prompt 所属集合, 例如 probe_paper、pilot_paper 或 full_paper。 |
 | prompt_index | protocol | none | true | false | false | prompt 在所属集合中的稳定序号。 |
-| prompt_text | protocol | none | true | false | false | 规范化后的 prompt 文本。 |
+| prompt_text | protocol | none | true | false | false | Prompt 协议实际消费的文本；正式来源清单中为未改写的上游 UTF-8 文本。 |
 | risk_profile | method | none | true | false | false | 由 prompt 语义标签派生的轻量风险配置名称。 |
 | split_names | protocol | none | false | false | false | split manifest 中登记的划分名称集合。 |
 | split_counts | protocol | none | false | false | false | split manifest 或统计摘要中的各 split 样本数量。 |
@@ -625,10 +625,17 @@ Notebook 与 repository module 的跨边界数据
 | split_manifest_digest | artifact | none | false | false | false | split manifest payload 的稳定摘要。 |
 | event_protocol_digest | artifact | none | false | false | false | event protocol manifest payload 的稳定摘要。 |
 | prompt_statistics_digest | artifact | none | false | false | false | prompt statistics payload 的稳定摘要。 |
-| source_archive | artifact | none | false | false | false | prompt bank 导入摘要中的来源 archive 路径。 |
-| source_archive_digest | artifact | none | false | false | false | prompt bank 来源 archive 的 SHA-256 摘要。 |
-| prompt_counts | protocol | none | false | false | false | prompt bank 导入摘要中按 prompt_set 聚合的 prompt 数量。 |
-| sanitized_prompt_counts | protocol | none | false | false | false | prompt bank 导入摘要中因治理规则被替换的 prompt 数量。 |
+| manifest_schema | provenance | none | true | false | false | Prompt 选择清单单条记录使用的固定 schema。 |
+| prompt_bank_index | protocol | none | true | false | false | Prompt 在7000条统一选择清单中的零起始连续索引。 |
+| source_rank | provenance | none | true | false | false | Prompt 在所属来源确定性 SHA-256 选择顺序中的零起始秩。 |
+| source_group_id | provenance | none | true | false | false | COCO 图像或 Parti 行形成的来源去重组身份。 |
+| source_record_digest | provenance | none | true | false | false | 上游来源记录关键字段的稳定 SHA-256 摘要。 |
+| selection_score_sha256 | provenance | none | true | false | false | 由协议、来源、记录 ID 和原始 Prompt 文本计算的选择排序 SHA-256。 |
+| category | provenance | none | true | false | false | PartiPrompts 来源记录的原始 Category 值, COCO 记录为空字符串。 |
+| challenge | provenance | none | true | false | false | PartiPrompts 来源记录的原始 Challenge 值, COCO 记录为空字符串。 |
+| prompt_text_utf8_sha256 | provenance | none | true | false | false | 未改写 Prompt 文本精确 UTF-8 字节的 SHA-256。 |
+| selection_record_digest | provenance | none | true | false | false | Prompt 选择清单单条完整记录的稳定 SHA-256 自摘要。 |
+| prompt_counts | protocol | none | false | false | false | Prompt bank 审计中按运行层级聚合的 Prompt 数量。 |
 | route_record_id | protocol | none | true | false | false | 语义路由 record 的稳定标识。 |
 | subspace_plan_id | protocol | none | true | false | false | 安全子空间 plan record 的稳定标识。 |
 | route_id | method | none | true | false | false | 语义条件路由对象的稳定标识。 |
@@ -821,7 +828,7 @@ Notebook 与 repository module 的跨边界数据
 | attack_parameters | protocol | none | true | false | false | 攻击配置的具体参数字典。 |
 | attack_config_digest | artifact | none | true | false | false | 攻击配置 payload 的稳定摘要。 |
 | attack_record_digest | artifact | none | true | false | false | 攻击检测 record payload 的稳定摘要。 |
-| source_record_id | protocol | none | true | false | false | 攻击记录引用的源检测 record 标识。 |
+| source_record_id | protocol | none | true | false | false | 攻击记录引用的源检测 record 标识, 或 Prompt 选择记录的上游 annotation / TSV 行标识。 |
 | source_image_digest | artifact | none | true | false | false | 真实源图像文件的稳定摘要。 |
 | source_image_digest_source | artifact | none | true | false | false | source image digest 的来源说明。 |
 | attacked_image_digest | artifact | none | true | false | false | 真实攻击后图像文件的稳定摘要。 |
@@ -1719,16 +1726,40 @@ Notebook 与 repository module 的跨边界数据
 | source_data_url | provenance | none | true | false | false | 固定 revision 的原始 Prompt 文件地址。 |
 | source_revision | provenance | none | true | false | false | 外部 Prompt 数据固定 Git revision。 |
 | source_file_sha256 | provenance | none | true | false | false | 外部 Prompt 原始文件 SHA-256。 |
+| source_file_size | provenance | none | true | false | false | 外部 Prompt 原始文件的精确字节大小。 |
+| expected_source_file_sha256 | provenance | none | true | false | false | 当前来源协议在代码中冻结的预期文件 SHA-256。 |
+| expected_source_file_size | provenance | none | true | false | false | 当前来源协议在代码中冻结的预期文件字节大小。 |
 | source_record_count | provenance | none | true | false | false | 外部 Prompt 原始文件记录数量。 |
+| eligible_source_record_count | provenance | none | true | false | false | 通过单行、规范空白和命名治理过滤的来源记录数量。 |
+| eligible_source_group_count | provenance | none | true | false | false | 经过同一 COCO 图像或 Parti 行分组后可参与选择的来源组数量。 |
+| selected_record_count | provenance | none | true | false | false | 当前 Prompt bank 从该冻结来源实际选择的记录数量。 |
 | license | provenance | none | true | false | false | 外部 Prompt 数据随来源仓库登记的许可证。 |
-| selection_policy | provenance | none | true | false | false | Prompt 补充数据的确定性分层选择规则。 |
-| normalization_policy | provenance | none | true | false | false | Prompt 去重使用的文本规范化规则。 |
-| prompt_sets | provenance | none | true | false | false | 各 Prompt 集新增数量、类别分布和摘要。 |
-| original_count | provenance | none | true | false | false | Prompt 集补充前数量。 |
-| added_count | provenance | none | true | false | false | Prompt 集从登记来源新增的数量。 |
-| result_count | provenance | none | true | false | false | Prompt 集补充后的数量。 |
-| category_counts | provenance | none | true | false | false | 新增 Prompt 的来源类别分布。 |
-| challenge_counts | provenance | none | true | false | false | 新增 Prompt 的来源挑战类型分布。 |
+| dataset_name | provenance | none | true | false | false | Prompt 来源数据集的人类可读名称。 |
+| canonical_dataset_url | provenance | none | true | false | false | COCO 数据集官方入口。 |
+| canonical_archive_url | provenance | none | true | false | false | COCO 官方 annotations archive 地址。 |
+| mirror_repository | provenance | none | true | false | false | 提供精确 COCO captions 文件的固定镜像仓库。 |
+| mirror_revision | provenance | none | true | false | false | COCO captions 镜像的不可变 revision。 |
+| mirror_file | provenance | none | true | false | false | COCO captions 镜像中的固定文件名。 |
+| mirror_file_url | provenance | none | true | false | false | 绑定镜像 revision 的 COCO captions 精确下载地址。 |
+| source_repository | provenance | none | true | false | false | PartiPrompts 上游 Git 仓库地址。 |
+| source_file | provenance | none | true | false | false | PartiPrompts 上游固定文件名。 |
+| source_file_url | provenance | none | true | false | false | 绑定 revision 的 PartiPrompts 原始文件地址。 |
+| prompt_source_protocol | protocol | none | true | false | false | 统一 Prompt 来源过滤、排序、交织和嵌套协议标识。 |
+| selection_policy | provenance | none | true | false | false | Prompt 来源记录的确定性过滤、SHA-256 排序和 6:1 交织规则。 |
+| text_policy | provenance | none | true | false | false | 上游 Prompt 原样写入及仅用于去重的规范化规则。 |
+| source_exclusion_policy | provenance | none | true | false | false | 选择前排除非单行、非规范空白或命名保留词记录的规则。 |
+| set_relation | protocol | none | true | false | false | probe、pilot 与 full Prompt 文件之间的严格嵌套前缀关系。 |
+| selection_manifest_path | artifact | none | true | false | false | 提交内7000条 Prompt 选择清单的规范路径。 |
+| selection_manifest_record_count | metric | none | true | false | false | Prompt 选择清单的精确记录数量。 |
+| selection_manifest_sha256 | provenance | none | true | false | false | Prompt 选择清单规范 JSONL 文件的字节级 SHA-256。 |
+| selection_manifest_digest | provenance | none | true | false | false | Prompt 选择记录序列的稳定结构摘要。 |
+| selection_manifest_prefix_digest | provenance | none | true | false | false | 当前运行层级对应选择清单前缀的稳定结构摘要。 |
+| registry_digest | provenance | none | true | false | false | Prompt 来源注册表除自摘要字段外全部内容的稳定摘要。 |
+| prompt_sets | provenance | none | true | false | false | 三级 Prompt 文件的来源数量、清单前缀和字节摘要映射。 |
+| result_count | provenance | none | true | false | false | 当前 Prompt 运行层级的精确记录数量。 |
+| source_counts | provenance | none | true | false | false | 当前 Prompt 清单前缀按冻结来源聚合的记录数量。 |
+| parti_category_counts | provenance | none | true | false | false | 当前 Prompt 清单前缀中 PartiPrompts Category 分布。 |
+| parti_challenge_counts | provenance | none | true | false | false | 当前 Prompt 清单前缀中 PartiPrompts Challenge 分布。 |
 | selected_prompt_digest | provenance | none | true | false | false | 确定性选择后 Prompt 文本集合摘要。 |
 | attacked_negative_count | metric | none | false | true | false | 当前攻击设置下完整 test split attacked negative 记录数量, 与 clean negative 数量分开统计。 |
 | generation_rerun | protocol | none | true | true | false | 消融配置是否重新执行真实图像生成。 |

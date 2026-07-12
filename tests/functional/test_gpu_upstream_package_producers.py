@@ -119,6 +119,7 @@ def _canonical_prompt_records(root: Path) -> tuple[object, ...]:
     repository_root = Path(__file__).resolve().parents[2]
     for relative_path in (
         Path("configs/prompt_source_registry.json"),
+        Path("configs/prompt_selection_manifest.jsonl"),
         PROMPT_FILES[PAPER_RUN_NAME],
     ):
         target_path = root / relative_path

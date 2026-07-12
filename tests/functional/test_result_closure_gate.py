@@ -2985,6 +2985,7 @@ def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
     repository_root = Path(__file__).resolve().parents[2]
     for relative_path in (
         Path("configs/prompt_source_registry.json"),
+        Path("configs/prompt_selection_manifest.jsonl"),
         Path(RUN_DEFAULTS[SCALE]["prompt_file"]),
     ):
         target_path = root / relative_path
@@ -3173,12 +3174,6 @@ def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
         "\n".join(f"a governed prompt {index}" for index in range(PROMPT_COUNT)) + "\n",
         encoding="utf-8",
     )
-    registry_path = root / "configs/prompt_source_registry.json"
-    registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    registry["prompt_sets"][SCALE]["prompt_file_sha256"] = hashlib.sha256(
-        prompt_path.read_bytes()
-    ).hexdigest()
-    write_json(registry_path, registry)
     write_paper_artifact_evidence_audit_outputs(
         root=root,
         prompt_contract=test_prompt_contract(root),
@@ -4696,6 +4691,11 @@ def test_result_closure_writer_is_run_scoped_and_require_pass_returns_nonzero(
     )
     denied_entry = {**bundle.entry_review_report, "evidence_closure_allowed": False}
     write_json(denied_entry_path, denied_entry)
+    repository_root = Path(__file__).resolve().parents[2]
+    canonical_prompt_path = repository_root / "configs/paper_main_probe_paper_prompts.txt"
+    (tmp_path / "configs/paper_main_probe_paper_prompts.txt").write_bytes(
+        canonical_prompt_path.read_bytes()
+    )
     monkeypatch.setattr(
         sys,
         "argv",
