@@ -2,6 +2,8 @@
 
 本仓库用于实现“语义条件化的潜空间流形水印-SLM”。项目目标是形成可审计、可重跑、可用于论文投稿材料的方法机制、真实模型运行链路、共同攻击协议、外部 baseline 对比、内部消融和结果图表重建流程。
 
+方法名称中的“潜流形”严格指当前 latent 点处由716维完整特征局部线性化诱导的隐式水平集安全切空间解释。正式算子计算的是分支风险支持的 Jacobian Null Space 数值基底，不验证全局流形定理条件，也不构造全局非线性流形、坐标图、测地线或回缩。三个分支采用投影、强度缩放、Q/K 梯度回溯和实际 dtype 写回复验组成的构造式协议，不声明求解一个联合标量 `argmax`。
+
 ## 项目定位
 
 SLM-WM 的核心思路是在扩散模型潜空间中构造三个受语义条件约束的互补分支: 空间低通 LF 主证据、高斯幅值尾部截断鲁棒补充证据和真实 Q/K Self-Attention 相对关系几何锚点。三个分支分别使用分支风险场, 并通过716维完整特征 Jacobian 的精确 JVP/VJP 与无阻尼 PSD-CG 约束投影求解 rank-4 Null Space。716维特征由512维归一化 CLIP embedding 与204维明确限定的 RGB 通道统计、梯度和8x8池化手工结构向量连接而成；后者不单独代表一般感知质量。注意力算子直接从冻结二维抽样图像 token 的真实 Q/K 构造中心化 logit、可微 rank、关系概率和距离调制中心化概率四分量图；第4分量是概率偏离与公开距离偏离的双中心交互, 均匀 attention 时严格为0。各分量逐行归一化后执行密钥投影, 再按冻结的非负归一化分量权重组合；完整方法使用四项0.25, 四个留一变体分别把一项置零并令其余三项各取 $1/3$。注意力嵌入与仅图像盲检共享四分量算子和稳定 token pair 权重构造规则, 但分别由各自可见的真实 Q/K 数据产生身份；一次注入内部冻结一个身份, 一次盲检则在 raw、registration 和 aligned 路径中冻结另一个身份。几何恢复使用与攻击配置无关的分层搜索。最终成图必须在 CUDA 上比较同 seed、同 scheduler、同 LF/tail 配置与算子且只关闭 attention geometry 的 carrier-only 反事实与完整方法。首个注入前 latent 由 dtype、shape 和全部原始字节 SHA-256 证明相同；carrier-only 的逐注入原子必须证明没有 attention 分数、更新、关系、pair 身份或 attention Null Space。该对照估计 attention 开关经后续 LF、tail 和生成轨迹交互传播后的总机制效应, 不假设两侧 realized carrier update 完全相等, 也不解释为纯直接效应。clean、carrier-only 与完整方法三对最终成图必须同时通过完整 CLIP 语义与手工结构统计保持门禁, 随后完整方法还必须通过自身盲选择和冻结 carrier-only pair 权重的双归因增益门禁。检测侧只读取待检图像、密钥和公开模型配置, 在包含几何救回的完整 fixed-FPR 协议下冻结阈值。正式 Q/K 算子精确绑定 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`；token 坐标采用角点 token 中心分别落在 -1 与 1 的归一化 xy 网格, 图像仿射重采样统一使用 `align_corners=True`。

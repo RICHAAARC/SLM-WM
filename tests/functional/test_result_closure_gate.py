@@ -69,6 +69,10 @@ from experiments.runners.image_only_dataset_runtime import (
 from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
 )
+from main.methods.method_definition import (
+    semantic_conditioned_latent_method_definition,
+    semantic_conditioned_latent_method_definition_digest,
+)
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis.result_closure_gate import (
     ResultClosureGateInput,
@@ -1339,6 +1343,12 @@ def ablation_atomic_records() -> tuple[
                 "prompt": prompt_record.prompt_text,
                 "prompt_id": prompt_id,
                 "split": split,
+                "method_definition": (
+                    semantic_conditioned_latent_method_definition()
+                ),
+                "method_definition_digest": (
+                    semantic_conditioned_latent_method_definition_digest()
+                ),
                 "output_dir": (
                     f"outputs/formal_mechanism_ablation/{SCALE}/"
                     f"runs/{spec.ablation_id}"

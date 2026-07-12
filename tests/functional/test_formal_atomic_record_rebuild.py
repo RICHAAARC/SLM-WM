@@ -22,6 +22,10 @@ from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
 )
 from main.core.digest import build_stable_digest
+from main.methods.method_definition import (
+    semantic_conditioned_latent_method_definition,
+    semantic_conditioned_latent_method_definition_digest,
+)
 from paper_experiments.analysis.formal_record_statistics import (
     FormalRecordStatisticsError,
     rebuild_and_validate_ablation_runtime_aggregates,
@@ -190,6 +194,12 @@ def _ablation_atomic_fixture() -> tuple[
                 "prompt_id": prompt_id,
                 "split": split,
                 "output_dir": f"{ABLATION_RUNTIME_OUTPUT_ROOT}/{ablation_id}",
+                "method_definition": (
+                    semantic_conditioned_latent_method_definition()
+                ),
+                "method_definition_digest": (
+                    semantic_conditioned_latent_method_definition_digest()
+                ),
                 **{
                     field_name: field_value
                     for field_name, field_value in runtime_config.items()

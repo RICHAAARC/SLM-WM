@@ -4,6 +4,8 @@
 
 本文档描述语义条件潜流形水印（SLM-WM）的模块职责、数据流和可审计边界。公式细节以 `algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md` 为准，论文叙事以 `method_section_semantic_conditioned_latent_manifold_watermark.md` 为准，代码映射以 `real_scientific_operator_implementation.md` 为准。
 
+“潜流形”在本项目中严格限定为当前 latent 点处隐式完整特征水平集的局部安全切空间解释。正式代码求解分支风险支持的 Jacobian Null Space 数值基底，并以逐列残差、投影能量、实际 dtype 写回 JVP 和有限特征变化进行门控；它不构造全局非线性流形，不验证常秩定理条件，也不执行坐标图、测地线或回缩求解。三分支更新由模板投影、相对强度缩放、真实 Q/K 梯度投影与单调回溯顺序构造，不是联合标量优化器。
+
 本设计固定采用三个正式分支：
 
 1. `lf_content`：空间低通 LF 主证据；
@@ -42,6 +44,8 @@ $$
 6. calibration split 冻结包含几何救回的完整判定协议，test split 只报告结果。
 
 这不是三个独立水印器的串联。分支风险、完整特征 Null Space、载体投影和完整 fixed-FPR 判定共同构成一个方法闭环。
+
+该闭环属于项目特定的构造式实现。通用工程写法包括精确 JVP/VJP、矩阵自由 PSD-CG、QR 正交化、数值残差门禁和实际写回复验；项目特定写法包括三类分支风险、LF/tail 模板角色、直接 Q/K 四分量目标以及注意力更新的内容基底单调回溯。
 
 ---
 

@@ -32,6 +32,11 @@ from main.methods.geometry import (
     recover_attention_affine_alignment,
     validate_attention_relation_component_weights,
 )
+from main.methods.method_definition import (
+    METHOD_DEFINITION_SCHEMA,
+    semantic_conditioned_latent_method_definition,
+    semantic_conditioned_latent_method_definition_digest,
+)
 from main.methods.semantic import (
     BranchRiskConfig,
     BranchRiskFieldBundle,
@@ -67,6 +72,7 @@ __all__ = [
     "ImageOnlyDetectionResult",
     "JacobianNullSpaceResult",
     "KeyedTensorCarrier",
+    "METHOD_DEFINITION_SCHEMA",
     "PSDConjugateGradientResult",
     "QKAttentionRelation",
     "attention_geometry_score",
@@ -85,6 +91,8 @@ __all__ = [
     "project_canonical_template",
     "qk_self_attention",
     "recover_attention_affine_alignment",
+    "semantic_conditioned_latent_method_definition",
+    "semantic_conditioned_latent_method_definition_digest",
     "validate_attention_relation_component_weights",
     "solve_psd_conjugate_gradient",
     "solve_jacobian_null_space",

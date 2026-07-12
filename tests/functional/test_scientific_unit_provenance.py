@@ -224,3 +224,10 @@ def test_semantic_runtime_result_binds_run_id_to_complete_unit_config() -> None:
     tampered["metadata"]["scientific_unit_config"]["seed"] = 20
     with pytest.raises(ValueError, match="run id 与逐单元配置摘要不一致"):
         validate_semantic_watermark_runtime_result_provenance(tampered)
+
+    method_tampered = deepcopy(result)
+    method_tampered["metadata"]["scientific_unit_config"][
+        "method_definition_digest"
+    ] = "0" * 64
+    with pytest.raises(ValueError, match="未绑定当前方法定义"):
+        validate_semantic_watermark_runtime_result_provenance(method_tampered)

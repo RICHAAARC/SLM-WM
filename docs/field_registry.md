@@ -136,8 +136,9 @@ Notebook 与 repository module 的跨边界数据
 | risk_policy | method | none | false | false | false | 语义条件对象采用的风险策略名称。 |
 | subspace_id | method | none | false | false | false | 潜空间安全子空间对象的稳定标识。 |
 | basis_digest | method | none | false | false | false | 潜空间子空间基的稳定摘要。 |
-| manifold_dimension | method | none | false | false | false | 潜空间流形子空间维度。 |
 | safe_axes | method | none | false | false | false | 可用于水印承载的安全轴集合。 |
+| method_definition | method | none | true | false | false | 构造式三分支协议、局部特征水平集切空间术语边界和实际写回复验规则组成的可机读方法定义。 |
+| method_definition_digest | provenance | none | true | true | false | 版本化可机读方法定义的稳定 SHA-256 摘要, 同时进入运行配置身份与结果 metadata。 |
 | carrier_id | method | none | false | false | false | 水印载体对象的稳定标识。 |
 | carrier_family | method | none | false | false | false | 水印载体所属机制族。 |
 | frequency_band | method | none | false | false | false | 水印载体使用的频带名称或明确的频带不适用标识。 |

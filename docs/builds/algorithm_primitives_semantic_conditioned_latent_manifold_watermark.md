@@ -29,54 +29,66 @@ $$
 3. 在几何失配后能够通过参考系恢复回到同一内容判定标准；
 4. 所有主证据均可在固定误报率（False Positive Rate，FPR）约束下校准。
 
-SLM-WM 将水印方向选择统一为如下受约束优化问题：
+SLM-WM 使用构造式协议选择水印方向，不声明求解一个联合标量优化问题。首先定义当前 latent 点附近的局部隐式特征水平集
 
 $$
-\Delta z_t^\star
+\mathcal L_F(z_t;\mathcal U_t)
 =
-\arg\max_{\Delta z_t}
-\mathcal{S}_{\mathrm{wm}}(z_t+\Delta z_t)
-+
-\beta_g\mathcal{S}_{\mathrm{geo}}(z_t+\Delta z_t)
--
-\beta_s\mathcal{D}_{\mathrm{sem}}(z_t,z_t+\Delta z_t)
--
-\beta_v\mathcal{D}_{\mathrm{vis}}(z_t,z_t+\Delta z_t),
+\{z\in\mathcal U_t:F(z)=F(z_t)\}.
 $$
 
-约束为
+当 $F$ 在局部可微并满足常秩条件时，其在 $z_t$ 处的切空间等于 $\ker J(z_t)$。正式算子不验证常秩定理条件，也不构造全局非线性流形、坐标图、测地线或回缩；“潜流形”严格限定为这一隐式水平集的局部切空间解释。实际数值对象是每个分支经风险支持约束后得到的残差门控子空间
 
 $$
-\Delta z_t\in
-\mathcal{N}_{\mathrm{sem}}(z_t)
-\cap
-\mathcal{M}_{\mathrm{route}}(z_t,p)
-\cap
-\mathcal{B}_{\epsilon},
+\widehat{\mathcal T}_{b,t}
+=
+\operatorname{span}(N_b),
+\qquad
+\|J(z_t)N_b[:,j]\|_2\leq\varepsilon_J.
 $$
 
-其中，$\mathcal{S}_{\mathrm{wm}}$ 表示内容水印可检测性，$\mathcal{S}_{\mathrm{geo}}$ 表示几何同步可恢复性，$\mathcal{D}_{\mathrm{sem}}$ 表示语义偏移代价，$\mathcal{D}_{\mathrm{vis}}$ 表示视觉失真代价，$\mathcal{N}_{\mathrm{sem}}$ 表示语义条件安全子空间，$\mathcal{M}_{\mathrm{route}}$ 表示内容路由诱导的潜流形，$\mathcal{B}_{\epsilon}$ 表示强度预算约束。
-
-在实现层面，$\Delta z_t^\star$ 被分解为三个互补方向：
+对内容分支 $b\in\{\mathrm{LF},\mathrm{tail}\}$，固定密钥模板先投影到对应子空间，再按当前 latent 范数缩放：
 
 $$
-\Delta z_t^\star=
+\Delta z_t^b
+=
+\lambda_b\|z_t\|_2
+\operatorname{Norm}\!\left(N_bN_b^\top\nu_b\right).
+$$
+
+令 $z_t^{\mathrm{base}}=z_t+\Delta z_t^{\mathrm{LF}}+\Delta z_t^{\mathrm{tail}}$。注意力分支在该内容基底上重算直接 Q/K 目标梯度，经自身子空间投影和单调回溯得到
+
+$$
+g_A
+=
+\left.\nabla_z\mathcal S_A(z)\right|_{z=z_t^{\mathrm{base}}},
+\qquad
+\Delta z_t^{\mathrm A}
+=
+\alpha^*\operatorname{Norm}\!\left(N_AN_A^\top g_A\right).
+$$
+
+$\alpha^*$ 只有在候选的真实 Q/K 分数同时高于原始 latent 与内容基底时才被接受。最终构造为
+
+$$
+\Delta z_t
+=
 \Delta z_t^{\mathrm{LF}}
 +
 \Delta z_t^{\mathrm{tail}}
 +
-\Delta z_t^{\mathrm{A}},
+\Delta z_t^{\mathrm{A}}.
 $$
 
-其中，$\Delta z_t^{\mathrm{LF}}$ 为低频稳定主证据，$\Delta z_t^{\mathrm{tail}}$ 为高斯幅值尾部截断鲁棒补充证据，$\Delta z_t^{\mathrm{A}}$ 为 Self-Attention 相对关系几何锚点证据。三个分支分别使用对应风险预算求解真实完整特征 Null Space，而不是三个独立水印器的简单叠加。
+实际 dtype 写回后，算子对真正写入的 Tensor 重新执行完整特征 JVP，并通过有限特征变化门禁。三个分支分别使用对应风险预算求解局部 Jacobian Null Space，而不是三个独立水印器的简单叠加，也不是未执行的联合目标求解器。
 
 ---
 
-## 三、原语 1：语义条件潜流形构造
+## 三、原语 1：分支风险与局部安全几何
 
 ### （一）设计目标
 
-该原语解决“不同图像是否应使用同一嵌入位置、同一扰动方向与同一扰动强度”的问题。固定噪声模式或固定统计子空间忽略图像内容差异，容易在平滑或语义显著区域产生可见扰动，也难以充分利用纹理区域的冗余。SLM-WM 通过语义风险场为每个样本构造自适应潜流形，使水印载体随内容而变化。
+该原语解决“不同图像是否应使用同一嵌入位置、同一扰动方向与同一扰动强度”的问题。固定噪声模式或固定统计子空间忽略图像内容差异，容易在平滑或语义显著区域产生可见扰动，也难以充分利用纹理区域的冗余。SLM-WM 通过语义风险场为每个样本构造分支风险算子，使局部安全切空间候选与水印载体随内容而变化。
 
 ### （二）内容属性场
 
@@ -794,7 +806,7 @@ manifest 聚合全部完成单元的来源集合, 不得用最后一次会话的
 
 SLM-WM 必须满足以下不变量：
 
-1. 所有水印方向均由 $\mathcal{N}_{\mathrm{sem}}\cap\mathcal{M}_{\mathrm{route}}$ 约束；
+1. 所有水印方向均由分支风险支持的局部 Jacobian Null Space 约束；
 2. LF 与尾部截断载体是分支安全子空间中的互补内容证据；
 3. Self-Attention 几何锚点是同一 latent update 的几何分量；
 4. 几何链只恢复参考系，不直接判定 positive；
@@ -812,7 +824,7 @@ SLM-WM 必须满足以下不变量：
 | 语义安全子空间 | 完整特征 JVP/VJP、分支风险预算、密钥种子方向 | $N_{\mathrm{LF}}$、$N_{\mathrm{tail}}$、$N_{\mathrm{A}}$ | semantic Null Space optimization | matrix-free Jacobian Null Space solver |
 | LF 载体 | $N_{\mathrm{LF}}$、$K_{\mathrm{LF}}$ | $\Delta z_t^{\mathrm{LF}}$、$s_{\mathrm{LF}}$ | clean precision 主证据 | LF coder / detector |
 | 尾部截断载体 | $N_{\mathrm{tail}}$、$K_{\mathrm{tail}}$、tail fraction | $\Delta z_t^{\mathrm{tail}}$、$s_{\mathrm{tail}}$ | 困难攻击条件下的补充证据 | tail robust embedder / detector |
-| Attention 几何锚点 | Self-Attention maps、稳定 token | $\Delta z_t^{\mathrm{A}}$、$r_{\mathrm{sync}}$ | 几何同步创新 | attention anchor module |
+| Attention 几何锚点 | 直接 Q/K 关系图、稳定 token | $\Delta z_t^{\mathrm{A}}$、$r_{\mathrm{sync}}$ | 几何同步创新 | attention anchor module |
 | 仅图像鲁棒检测 | 待检图像、密钥、公开模型、$s_{\mathrm{LF}}$、$s_{\mathrm{tail}}$、geometry stats | $y_{\mathrm{evidence}}$ | fixed-FPR 主判 | image-only decision module |
 
 ---

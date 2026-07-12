@@ -72,6 +72,10 @@ from main.methods.geometry import (
     select_stable_attention_tokens,
     validate_attention_relation_component_weights,
 )
+from main.methods.method_definition import (
+    semantic_conditioned_latent_method_definition,
+    semantic_conditioned_latent_method_definition_digest,
+)
 from main.methods.semantic import (
     BRANCH_NAMES,
     BranchRiskConfig,
@@ -405,6 +409,10 @@ def semantic_watermark_runtime_config_payload(
         config.attention_relation_component_weights
     )
     payload["standard_attack_profiles"] = list(config.standard_attack_profiles)
+    payload["method_definition"] = semantic_conditioned_latent_method_definition()
+    payload["method_definition_digest"] = (
+        semantic_conditioned_latent_method_definition_digest()
+    )
     return payload
 
 
@@ -438,6 +446,17 @@ def validate_semantic_watermark_runtime_result_provenance(
     if not isinstance(unit_config, Mapping):
         raise TypeError("语义水印完成结果缺少逐单元配置")
     resolved_unit_config = dict(unit_config)
+    current_method_definition = semantic_conditioned_latent_method_definition()
+    current_method_definition_digest = (
+        semantic_conditioned_latent_method_definition_digest()
+    )
+    if (
+        resolved_unit_config.get("method_definition")
+        != current_method_definition
+        or resolved_unit_config.get("method_definition_digest")
+        != current_method_definition_digest
+    ):
+        raise ValueError("语义水印逐单元配置未绑定当前方法定义")
     config_digest = build_stable_digest(resolved_unit_config)
     if run_id != f"semantic_watermark_{config_digest[:16]}":
         raise ValueError("语义水印 run id 与逐单元配置摘要不一致")
@@ -3020,6 +3039,10 @@ def run_semantic_watermark_runtime(
         metadata={
             **runtime_versions,
             "method_runtime": "real_scientific_operators",
+            "method_definition": semantic_conditioned_latent_method_definition(),
+            "method_definition_digest": (
+                semantic_conditioned_latent_method_definition_digest()
+            ),
             "detector_input_access_mode": "image_key_public_model_only",
             "supports_paper_claim": False,
             "paired_quality": paired_quality,
