@@ -207,6 +207,12 @@ def _cluster_bootstrap_interval(
         raise AblationNecessityStatisticsError("bootstrap 需要非空 Prompt 配对效应")
     if not 0.0 < confidence_level < 1.0 or resample_count <= 0:
         raise AblationNecessityStatisticsError("bootstrap 置信度和重采样次数无效")
+    if np.all(prompt_effects == prompt_effects[0]):
+        # 所有 Prompt 的配对效应完全相同时,任意有放回重采样的均值均相同.
+        # 直接返回退化区间不会改变统计语义，同时避免闭合测试无意义地生成
+        # 大量相同索引;该优化也可复用于真实数据中的退化诊断指标.
+        value = float(prompt_effects[0])
+        return value, value
     generator = np.random.Generator(np.random.PCG64(seed))
     estimates = np.empty(resample_count, dtype=np.float64)
     prompt_count = int(prompt_effects.size)

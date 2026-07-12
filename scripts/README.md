@@ -44,12 +44,12 @@ python scripts/run_gpu_server_workflow.py \
 - `write_primary_baseline_evidence_outputs.py`: 联合核验三个 common-backbone exact-set source 与独立 T2SMark formal source, 生成四方法完整证据门禁。
 - `write_official_reference_fidelity_evidence_outputs.py`: 在精确结果包物化后独立核验三个 official-reference family 的运行、validation、package input 摘要、归档治理和共同 clean 代码版本, 写入 `outputs/official_reference_fidelity_evidence/<paper_run_name>/`; 正式闭合调用使用 `--require-pass`。该入口只生成补充方法忠实度证据, 不声明主表优势。
 - `write_paired_superiority_outputs.py`: 将 SLM-WM 与4个主表 baseline 的完整 test Prompt x attack 记录精确配对, 绑定正式攻击配置、两方法冻结阈值和原始 observation 字节摘要, 写出 `paired_outcomes.jsonl`、4行总体统计表、summary 与 manifest; 正式统计固定使用100000次 Prompt-clustered bootstrap、单侧 bounded Hoeffding Prompt 均值检验和跨4比较的 Holm 校正, exact DP sign-flip 仅作 sharp-null 诊断。
-- `write_pilot_paper_result_analysis_outputs.py`: 生成完整逐攻击 CI 与优势比较表; 完整披露允许存在未显著胜出的攻击, 只有 `universal_per_attack_superiority_claim_ready` 限定“每个攻击均显著胜出”的更强主张。
+- `write_pilot_paper_result_analysis_outputs.py`: 生成完整逐攻击 CI、优势比较表、失败记录与真实失败案例图; summary 与 manifest 共同绑定固定 payload 角色、路径、逐文件 SHA-256 和组合摘要。完整披露允许存在未显著胜出的攻击, 只有 `universal_per_attack_superiority_claim_ready` 限定“每个攻击均显著胜出”的更强主张。
 - `write_pilot_paper_complete_result_package.py`: 仅从显式 `--package-path` 物化输入, 重新核验 run-scoped closure input lock 与最终 result closure gate, 再按当前 `paper_run_name` 独占目录执行 fail-closed 打包; 最终 zip 摘要只写入包外 archive receipt。
 - `write_paper_artifact_evidence_audit_outputs.py`: 实际读取仅图像盲检原始 JSONL、冻结协议与其余正式表图数据, 共绑定11类源文件; 从原始记录重建分数分布、ROC / DET 后逐列、逐行、逐单元格核验, 同时验证 FID / KID 两行实测状态及关键 ready 一致性, 并记录全部输入路径和字节 SHA-256; 缺表或自造曲线时 fail-closed 为 blocked。
 - `write_submission_readiness_outputs.py`: 在实际数据验证与 claim 审计之后执行投稿就绪审计。
 - `write_evidence_closure_entry_review_outputs.py`: 由已物化的受治理审计报告自动生成入口清单与确定性决策; 仅当全部检查项为 ready 时输出 `ready_for_evidence_closure`, 不等待人工批准。
-- `write_result_closure_gate_outputs.py`: 联合复核输入锁、三方法 official-reference 忠实度、五方法阈值、4个主表 baseline 的配对总体优势、正式 records、表图数据、消融、质量和入口审计; 门禁从五份原始 observation 独立重建 paired outcomes、正式统计和完整 result metrics, 同时复验攻击记录身份、来源文件 SHA-256、schema validation、模板覆盖及 manifest 配置摘要, 只在全部受治理事实一致时允许完整打包。
+- `write_result_closure_gate_outputs.py`: 联合复核输入锁、三方法 official-reference 忠实度、五方法阈值、4个主表 baseline 的配对总体优势、正式 records、表图数据、消融、质量和入口审计; 门禁从五份原始 observation 独立重建 paired outcomes、正式统计和完整 result metrics, 同时复验主比较表、攻击表、质量表、结果分析表和失败案例图的实际存在性、来源文件 SHA-256、summary/manifest 绑定、schema validation、模板覆盖及 manifest 配置摘要, 只在全部受治理事实一致时允许完整打包。
 
 ## 18步执行顺序
 

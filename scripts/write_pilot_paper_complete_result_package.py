@@ -38,6 +38,9 @@ from experiments.runtime.dependency_profiles import (
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis.result_closure_gate import build_source_file_sha256_map
+from paper_experiments.analysis.result_analysis_payload import (
+    build_governed_paper_payload_path_map,
+)
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
     ClosurePackageSelectionError,
@@ -552,7 +555,10 @@ def collect_result_closure_source_entries(
         else {}
     )
     entries: list[Path] = []
-    source_map_ready = bool(source_map)
+    required_payload_paths = set(
+        build_governed_paper_payload_path_map(paper_run_name).values()
+    )
+    source_map_ready = bool(source_map) and required_payload_paths <= set(source_map)
     for raw_path, raw_digest in sorted(source_map.items()):
         candidate = Path(str(raw_path)).expanduser()
         path = (
@@ -1231,12 +1237,16 @@ def build_result_closure_gate_status(
     )
     source_artifact_digests = report.get("source_artifact_digests", {})
     expected_prompt_id_digest = str(report.get("expected_prompt_id_digest", ""))
+    expected_test_prompt_id_digest = str(
+        report.get("expected_test_prompt_id_digest", "")
+    )
     expected_manifest_config = {
         "paper_claim_scale": paper_run_name,
         "target_fpr": target_fpr,
         "expected_prompt_count": report.get("expected_prompt_count"),
         "expected_test_count": report.get("expected_test_count"),
         "expected_prompt_id_digest": expected_prompt_id_digest,
+        "expected_test_prompt_id_digest": expected_test_prompt_id_digest,
         "input_bundle_digest": input_bundle_digest,
         "report_digest": report_digest,
         "source_artifact_digests": source_artifact_digests,
@@ -1245,6 +1255,7 @@ def build_result_closure_gate_status(
     }
     manifest_config_ready = (
         _is_sha256(input_bundle_digest)
+        and manifest.get("config") == expected_manifest_config
         and manifest.get("config_digest") == build_stable_digest(expected_manifest_config)
     )
     try:
@@ -1284,6 +1295,8 @@ def build_result_closure_gate_status(
         and manifest_metadata.get("closure_source_file_sha256") == closure_source_file_sha256
         and manifest_metadata.get("closure_source_file_digest") == closure_source_file_digest
         and manifest_metadata.get("expected_prompt_id_digest") == expected_prompt_id_digest
+        and manifest_metadata.get("expected_test_prompt_id_digest")
+        == expected_test_prompt_id_digest
     )
     report_ready = (
         report.get("paper_claim_scale") == paper_run_name
@@ -1298,6 +1311,7 @@ def build_result_closure_gate_status(
         and closure_source_file_digest_ready
         and report_digest_ready
         and _is_sha256(expected_prompt_id_digest)
+        and _is_sha256(expected_test_prompt_id_digest)
     )
     return {
         "result_closure_gate_report_path": report_relative,

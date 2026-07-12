@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 
 from experiments.protocol import (
     FORMAL_FEATURE_BACKEND,
+    FORMAL_FEATURE_EXTRACTOR_ID,
     build_dataset_quality_image_records,
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
@@ -57,11 +58,11 @@ from experiments.runtime.scientific_unit_provenance import (
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.manifest_schema import manifest_config_digest_ready
 from main.core.digest import build_stable_digest
 from experiments.runtime.archive_naming import utc_archive_token
 
 DEFAULT_PROGRESS_INTERVAL_ITEMS = 50
-FORMAL_FEATURE_EXTRACTOR_ID = "torch_fidelity_0_4_0_inception_v3_compat_2048"
 PACKAGE_INPUT_MANIFEST_FILE_NAME = "dataset_quality_package_input_manifest.json"
 
 
@@ -1595,6 +1596,7 @@ def package_dataset_level_quality_outputs(
             is True,
             summary.get("formal_fid_kid_claim_gate_ready") is True,
             manifest.get("artifact_id") == "dataset_level_quality_manifest",
+            manifest_config_digest_ready(manifest),
             feature_contract_ready,
         )
     ):

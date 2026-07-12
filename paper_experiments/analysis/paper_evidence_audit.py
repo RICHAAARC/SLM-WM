@@ -12,6 +12,10 @@ from main.core.digest import build_stable_digest
 
 
 ABLATION_NECESSITY_CLAIMS = {
+    "shared_global_risk_routing": (
+        "claim_advantage_branch_specific_risk_routing",
+        "分支特定风险路由相对共享全局风险场对预注册主指标具有必要增益。",
+    ),
     "without_branch_risk_routing": (
         "claim_necessity_branch_risk_routing",
         "分支风险路由对预注册攻击后检测率主指标具有必要贡献。",
@@ -19,6 +23,14 @@ ABLATION_NECESSITY_CLAIMS = {
     "without_jacobian_null_space": (
         "claim_necessity_jacobian_null_space",
         "语义条件 Jacobian Null Space 投影对预注册主指标具有必要贡献。",
+    ),
+    "lf_content_only": (
+        "claim_complementarity_beyond_lf_only",
+        "完整多载体方法相对 LF-only 配置对预注册主指标具有必要增益。",
+    ),
+    "tail_robust_only": (
+        "claim_complementarity_beyond_tail_only",
+        "完整多载体方法相对 Tail-only 配置对预注册主指标具有必要增益。",
     ),
     "without_lf_content_carrier": (
         "claim_necessity_lf_content_carrier",
@@ -374,7 +386,7 @@ def _row(
 def _ablation_necessity_rows_by_id(
     bundle: AuditInputBundle,
 ) -> dict[str, dict[str, Any]]:
-    """核验7项统计行与独立摘要绑定后按消融身份索引。"""
+    """核验全部正式变体统计行与独立摘要绑定后按消融身份索引。"""
 
     rows = [dict(row) for row in bundle.ablation_necessity_rows]
     expected_ids = tuple(ABLATION_NECESSITY_CLAIMS)
@@ -432,6 +444,10 @@ def _necessity_row_blockers(row: Mapping[str, Any]) -> list[str]:
         ("minimum_effect_ready", "minimum_effect_not_met"),
         ("confidence_interval_ready", "confidence_interval_not_met"),
         ("adjusted_significance_ready", "holm_significance_not_met"),
+        (
+            "paired_ssim_noninferiority_ready",
+            "paired_ssim_noninferiority_not_met",
+        ),
     )
     return [blocker for field_name, blocker in checks if not _yes(row.get(field_name))]
 
@@ -442,7 +458,6 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     attack = bundle.attack_manifest
     baseline = bundle.baseline_runtime_report
     dataset_quality = bundle.dataset_quality_summary
-    ablation = bundle.ablation_claim_summary
     full_ready = (
         _yes(threshold.get("full_method_claim_ready"))
         and _threshold_audit_ready(bundle)
@@ -581,7 +596,10 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
         _row(
             "claim_internal_mechanism_necessity",
             "ablation",
-            "7项内部机制均达到预注册的配对必要性统计标准。",
+            (
+                f"{len(ABLATION_NECESSITY_CLAIMS)}项正式机制对照均达到预注册的"
+                "配对必要性统计与质量非劣标准。"
+            ),
             (
                 "paper_supported"
                 if all_necessity_claims_supported
@@ -686,7 +704,6 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
     attack = bundle.attack_manifest
     baseline = bundle.baseline_runtime_report
     dataset_quality = bundle.dataset_quality_summary
-    ablation = bundle.ablation_claim_summary
     full_ready = (
         _yes(threshold.get("full_method_claim_ready"))
         and _threshold_audit_ready(bundle)
@@ -858,7 +875,6 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
     baseline = bundle.baseline_runtime_report
     attack = bundle.attack_manifest
     threshold = bundle.threshold_report
-    ablation = bundle.ablation_claim_summary
     full_ready = (
         _yes(threshold.get("full_method_claim_ready"))
         and _threshold_audit_ready(bundle)
@@ -1009,7 +1025,6 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     threshold = bundle.threshold_report
     baseline = bundle.baseline_runtime_report
     dataset_quality = bundle.dataset_quality_summary
-    ablation = bundle.ablation_claim_summary
     rows: list[dict[str, Any]] = []
     if not _real_attack_closed_loop_ready(attack):
         rows.append(

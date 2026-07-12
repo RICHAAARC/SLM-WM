@@ -26,15 +26,17 @@ from main.methods.geometry import (
     optimize_attention_geometry_update,
     qk_self_attention,
     recover_attention_affine_alignment,
+    select_stable_attention_tokens,
 )
 from main.methods.geometry.differentiable_attention import keyed_relation_signs
 from main.methods.semantic import build_branch_risk_fields
 from main.methods.subspace import (
     JacobianNullSpaceResult,
-    build_exact_jvp_linearization,
+    build_exact_jacobian_linearization,
     exact_jvp,
     generate_keyed_candidate_directions,
     solve_jacobian_null_space,
+    solve_psd_conjugate_gradient,
 )
 from experiments.runners.image_only_dataset_runtime import (
     FrozenEvidenceProtocol,
@@ -51,6 +53,13 @@ from experiments.runners.semantic_watermark_runtime import (
     semantic_watermark_runtime_config_payload,
 )
 from experiments.runtime.repository_environment import resolve_code_version
+from experiments.runtime.diffusion.semantic_features import (
+    JOINT_FEATURE_WIDTH,
+    SEMANTIC_FEATURE_SCHEMA,
+    SEMANTIC_FEATURE_WIDTH,
+    VISUAL_FEATURE_SCHEMA,
+    VISUAL_FEATURE_WIDTH,
+)
 from main.core.digest import build_stable_digest
 from scripts import semantic_watermark_scientific_workflow as scientific_workflow
 from tests.helpers.scientific_unit_provenance import (
@@ -138,58 +147,90 @@ def test_branch_risk_fields_use_opposite_texture_preferences() -> None:
 
 
 @pytest.mark.quick
-def test_exact_jvp_and_svd_recover_zero_response_latent_direction() -> None:
-    """真实 JVP 与 SVD 应恢复语义和视觉特征都不响应的 latent 方向。"""
+def test_full_jacobian_constraint_projection_recovers_null_direction() -> None:
+    """JVP/VJP 约束投影应恢复完整特征不响应的 latent 方向。"""
 
     latent = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
 
-    def semantic(values: torch.Tensor) -> torch.Tensor:
-        return torch.stack((values[0] ** 2, 3.0 * values[1]))
+    def full_features(values: torch.Tensor) -> torch.Tensor:
+        return torch.stack((values[0] ** 2, 3.0 * values[1], 2.0 * values[2]))
 
-    def visual(values: torch.Tensor) -> torch.Tensor:
-        return torch.stack((2.0 * values[2],))
-
-    _, tangent = exact_jvp(semantic, latent, torch.tensor([1.0, 0.0, 0.0, 0.0]))
+    _, tangent = exact_jvp(full_features, latent, torch.tensor([1.0, 0.0, 0.0, 0.0]))
+    linearization = build_exact_jacobian_linearization(full_features, latent)
     result = solve_jacobian_null_space(
         latent=latent,
-        semantic_feature_function=semantic,
-        visual_feature_function=visual,
-        candidate_matrix=torch.eye(4),
+        candidate_matrix=torch.eye(4)[:, (3, 0, 1, 2)],
+        risk_budget=torch.ones_like(latent),
         null_rank=1,
+        joint_feature_linearization=linearization,
         branch_name="lf_content",
     )
 
-    assert tangent.tolist() == pytest.approx([2.0, 0.0])
+    assert tangent.tolist() == pytest.approx([2.0, 0.0, 0.0])
     assert result.response_residual == pytest.approx(0.0, abs=1e-7)
     assert result.orthogonality_error == pytest.approx(0.0, abs=1e-6)
+    assert result.latent_basis.requires_grad is False
+    assert result.response_matrix.requires_grad is False
     assert abs(float(result.latent_basis[3, 0])) == pytest.approx(1.0, abs=1e-6)
-    assert result.metadata["jvp_mode"] == "torch_autograd_exact_jvp"
+    assert result.metadata["solver"] == "matrix_free_full_jacobian_psd_cg"
+    assert result.metadata["cg_damping"] == 0.0
 
 
 @pytest.mark.quick
-def test_reusable_exact_jvp_linearization_preserves_null_space_solution() -> None:
-    """共享线性算子必须保持真实 JVP 与低响应方向, 不能退化为数值差分。"""
+def test_risk_budget_is_explicit_in_full_jacobian_null_projection() -> None:
+    """风险预算的零支持必须在完整 Jacobian Null Space 基底中保持为零。"""
 
-    latent = torch.tensor([1.0, 2.0, 3.0, 4.0])
-
-    def joint(values: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        return torch.stack((values[0] ** 2, 3.0 * values[1])), torch.stack((2.0 * values[2],))
-
-    linearization = build_exact_jvp_linearization(joint, latent)
-    result = solve_jacobian_null_space(
-        latent=latent,
-        semantic_feature_function=lambda values: joint(values)[0],
-        visual_feature_function=lambda values: joint(values)[1],
-        candidate_matrix=torch.eye(4),
-        null_rank=1,
-        branch_name="lf_content",
-        joint_feature_function=joint,
-        joint_feature_linearization=linearization,
+    latent = torch.zeros(8)
+    jacobian = torch.tensor(
+        (
+            (1.0, 2.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0, -1.0, 0.0, 1.0, 0.0, 0.0),
+        )
     )
 
-    assert result.response_residual == pytest.approx(0.0, abs=1e-7)
-    assert abs(float(result.latent_basis[3, 0])) == pytest.approx(1.0, abs=1e-6)
-    assert "exact_jvp" in result.metadata["jvp_mode"]
+    def full_features(values: torch.Tensor) -> torch.Tensor:
+        return jacobian @ values
+
+    linearization = build_exact_jacobian_linearization(full_features, latent)
+    candidates = generate_keyed_candidate_directions(
+        latent,
+        "full_jacobian_key",
+        "lf_content",
+        candidate_count=8,
+        preferred_directions=(torch.ones_like(latent),),
+    )
+    risk_budget = torch.tensor((1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0))
+    result = solve_jacobian_null_space(
+        latent=latent,
+        candidate_matrix=candidates,
+        risk_budget=risk_budget,
+        null_rank=4,
+        joint_feature_linearization=linearization,
+        branch_name="lf_content",
+    )
+
+    assert result.basis_rank == 4
+    assert max(result.column_relative_response_residuals) <= 1e-4
+    assert torch.linalg.norm(jacobian @ result.latent_basis).item() <= 1e-5
+    assert torch.linalg.norm(result.latent_basis[-1]).item() == pytest.approx(0.0, abs=1e-7)
+    assert all(value >= 0.01 for value in result.projection_energy_retentions)
+
+
+@pytest.mark.quick
+def test_undamped_psd_cg_reports_non_convergence_without_fallback() -> None:
+    """迭代预算不足时 PSD-CG 必须报告失败, 不能加入阻尼后继续。"""
+
+    diagonal = torch.tensor((1.0, 4.0))
+    result = solve_psd_conjugate_gradient(
+        lambda value: diagonal * value,
+        torch.ones(2),
+        maximum_iterations=1,
+        relative_tolerance=1e-8,
+    )
+
+    assert result.converged is False
+    assert result.iteration_count == 1
+    assert result.relative_residual > 1e-8
 
 
 @pytest.mark.quick
@@ -213,27 +254,6 @@ def test_candidate_matrix_preserves_preferred_carrier_direction() -> None:
 
 
 @pytest.mark.quick
-def test_semantic_condition_solver_returns_algebraic_null_space() -> None:
-    """20个候选与16个独立条件必须产生近零响应的4维 Null Space。"""
-
-    latent = torch.zeros(1, 1, 5, 5)
-    candidates = torch.eye(25)[:, :20]
-
-    result = solve_jacobian_null_space(
-        latent=latent,
-        semantic_feature_function=lambda value: value.reshape(-1)[:8],
-        visual_feature_function=lambda value: value.reshape(-1)[8:16],
-        candidate_matrix=candidates,
-        null_rank=4,
-        branch_name="lf_content",
-    )
-
-    assert result.basis_rank == 4
-    assert result.relative_response_residual <= 1e-6
-    assert result.orthogonality_error <= 1e-6
-
-
-@pytest.mark.quick
 def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     """关键算子门禁必须同时检查 JVP、残差、载体能量和 Q/K 提升。"""
 
@@ -241,9 +261,20 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "response_residual": 0.1,
         "relative_response_residual": 1e-6,
         "orthogonality_error": 1e-6,
+        "column_relative_response_residuals": [1e-6] * 4,
+        "projection_energy_retentions": [0.2] * 4,
+        "cg_relative_residuals": [1e-7] * 4,
+        "cg_converged": True,
         "metadata": {
-            "jvp_mode": "torch_func_linearize_exact_jvp",
+            "jvp_mode": "torch_func_exact_jvp_vjp",
+            "solver": "matrix_free_full_jacobian_psd_cg",
             "preferred_direction_count": 1,
+            "semantic_feature_schema": SEMANTIC_FEATURE_SCHEMA,
+            "semantic_feature_width": SEMANTIC_FEATURE_WIDTH,
+            "visual_feature_schema": VISUAL_FEATURE_SCHEMA,
+            "visual_feature_width": VISUAL_FEATURE_WIDTH,
+            "joint_feature_width": JOINT_FEATURE_WIDTH,
+            "feature_compression_applied": False,
         },
     }
     record = {
@@ -261,11 +292,19 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "tail_projection_energy_retention": 0.2,
         "attention_score_gain": 0.01,
         "attention_applied_update_strength": 0.001,
+        "stable_token_indices": [0, 1, 2, 3],
+        "stable_token_selection_digest": "e" * 64,
+        "full_semantic_cosine_similarity": 0.999,
+        "full_visual_feature_relative_drift": 0.001,
+        "semantic_preservation_gate_ready": True,
     }
     config = SemanticWatermarkRuntimeConfig()
 
     assert _scientific_update_record_ready(record, config) is True
     record["attention_score_gain"] = 0.0
+    assert _scientific_update_record_ready(record, config) is False
+    record["attention_score_gain"] = 0.01
+    record["full_semantic_cosine_similarity"] = 0.9
     assert _scientific_update_record_ready(record, config) is False
 
 
@@ -329,6 +368,37 @@ def test_attention_stability_comes_from_multiple_real_qk_layers() -> None:
     assert float(stability.min()) == pytest.approx(1.0, abs=1e-6)
 
 
+@pytest.mark.quick
+def test_stable_attention_tokens_drive_keyed_geometry_score() -> None:
+    """稳定 token 集必须真实改变 Q/K 目标权重并保存可复现身份。"""
+
+    generator = torch.Generator().manual_seed(1703)
+    base = torch.softmax(torch.randn(1, 9, 9, generator=generator), dim=-1)
+    token_indices = tuple(range(9))
+    records = (
+        ("layer_a", base, token_indices),
+        ("layer_b", base.clone(), token_indices),
+    )
+
+    selection = select_stable_attention_tokens(records, stable_token_fraction=0.5)
+    weighted = attention_geometry_score(
+        records,
+        "stable_token_key",
+        stable_token_positions=selection.token_positions,
+        unstable_pair_weight=0.0,
+    )
+    full = attention_geometry_score(
+        records,
+        "stable_token_key",
+        stable_token_positions=selection.token_positions,
+        unstable_pair_weight=0.99,
+    )
+
+    assert len(selection.token_indices) == 5
+    assert len(selection.selection_digest) == 64
+    assert float(weighted) != pytest.approx(float(full), abs=1e-8)
+
+
 def _identity_null_space(latent: torch.Tensor) -> JacobianNullSpaceResult:
     """构造完整空间基底, 隔离注意力梯度测试。"""
 
@@ -338,10 +408,13 @@ def _identity_null_space(latent: torch.Tensor) -> JacobianNullSpaceResult:
         branch_name="attention_geometry",
         candidate_matrix=identity,
         response_matrix=torch.zeros(1, element_count),
-        coefficient_basis=identity,
         latent_basis=identity,
-        singular_values=(0.0,) * element_count,
-        selected_response_values=(0.0,) * element_count,
+        column_response_norms=(0.0,) * element_count,
+        column_relative_response_residuals=(0.0,) * element_count,
+        projection_energy_retentions=(1.0,) * element_count,
+        cg_iteration_counts=(0,) * element_count,
+        cg_relative_residuals=(0.0,) * element_count,
+        evaluated_direction_indices=tuple(range(element_count)),
         response_residual=0.0,
         relative_response_residual=0.0,
         orthogonality_error=0.0,
@@ -362,7 +435,10 @@ def test_attention_update_uses_real_qk_and_autograd() -> None:
     assert attention.shape == (1, 4, 4)
     assert indices == (0, 1, 2, 3)
 
-    with DifferentiableAttentionRecorder((('toy_attention', module),), max_tokens=4) as recorder:
+    with DifferentiableAttentionRecorder(
+        (("toy_attention_a", module), ("toy_attention_b", module)),
+        max_tokens=4,
+    ) as recorder:
         update = optimize_attention_geometry_update(
             latent=latent,
             transformer_forward=module,
@@ -390,7 +466,10 @@ def test_attention_update_verifies_actual_combined_latent() -> None:
     content_base_update = torch.tensor(
         [[[0.01, -0.02, 0.01, 0.00], [0.00, 0.01, -0.01, 0.02], [0.01, 0.00, 0.02, -0.01], [-0.02, 0.01, 0.00, 0.01]]]
     )
-    with DifferentiableAttentionRecorder((("toy_attention", module),), max_tokens=4) as recorder:
+    with DifferentiableAttentionRecorder(
+        (("toy_attention_a", module), ("toy_attention_b", module)),
+        max_tokens=4,
+    ) as recorder:
         update = optimize_attention_geometry_update(
             latent=latent,
             transformer_forward=module,
@@ -488,7 +567,8 @@ def test_image_only_detector_reextracts_qk_after_alignment() -> None:
     def extract(sample: dict[str, torch.Tensor]) -> tuple[tuple[str, torch.Tensor, tuple[int, ...]], ...]:
         nonlocal extraction_count
         extraction_count += 1
-        return ((layer_name, sample["attention"], tuple(range(token_count))),)
+        record = (layer_name, sample["attention"], tuple(range(token_count)))
+        return (record, record)
 
     result = detect_image_only_watermark(
         image=original,

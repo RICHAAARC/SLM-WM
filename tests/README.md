@@ -12,6 +12,6 @@
 
 ## 当前科学算子覆盖
 
-`test_real_scientific_operators.py` 验证分支风险、精确 JVP/SVD、投影能量、Q/K attention 梯度、单调回溯和仅图像检测。`test_paper_run_config.py` 验证 70/700/7000 Prompt 与 34/340/3400 test 划分。方法文档约束测试固定高斯幅值尾部截断的幅值域定义和无空间频带定义。
+`test_real_scientific_operators.py` 验证分支风险、完整特征 JVP/VJP、无阻尼 PSD-CG Null Space、投影能量、Q/K attention 梯度、单调回溯和仅图像检测。`test_semantic_feature_conditions.py` 验证716维完整 Jacobian 输入与最终成图累计保持门禁。`test_paper_run_config.py` 验证70/700/7000 Prompt 与34/340/3400 test 划分。方法文档约束测试固定高斯幅值尾部截断的幅值域定义和无空间频带定义。
 
 GPU 正式结果必须通过 Colab 运行入口产生, 不应为了追求默认测试覆盖率把真实模型运行加入 `pytest -q`。

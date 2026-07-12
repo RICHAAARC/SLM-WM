@@ -1,11 +1,12 @@
-"""使用真实 Jacobian-Vector Product 求解语义条件低响应子空间。
+"""使用完整特征 Jacobian 求解风险支持的真实 Null Space。
 
 通用工程写法: 通过 JVP 计算方向导数, 避免显式构造尺寸为“特征数乘以
 latent 元素数”的完整 Jacobian。
 
-项目特定写法: 候选方向先由分支风险预算限制, 再在语义特征和视觉质量特征的
-联合响应矩阵上执行 SVD。小奇异值右向量先表示候选系数, 必须乘回候选矩阵才
-能得到真正位于 latent 空间中的安全基底。
+项目特定写法: 风险预算作为对角算子 ``B`` 进入约束投影。对实际载体方向
+``d`` 求解 ``(J B^2 J^T)y = J B d``, 再构造
+``u = B d - B^2 J^T y``。实现只在无阻尼 PSD-CG 收敛且完整 Jacobian
+逐列响应通过门禁时返回 Null Space 基底。
 """
 
 from __future__ import annotations
@@ -75,12 +76,12 @@ def generate_keyed_candidate_directions(
     axis_budget: Sequence[float] | Any | None = None,
     preferred_directions: Sequence[Any] = (),
 ) -> Any:
-    """生成风险加权且正交的密钥化候选方向矩阵。
+    """生成可选风险加权且正交的密钥化种子方向矩阵。
 
     返回矩阵形状为 `[latent 元素数, candidate_count]`。每一列都是一个真实
-    latent 方向, 后续 SVD 的右奇异向量只负责组合这些列。调用方可以把固定
-    盲检模板或真实注意力梯度作为优先方向置于随机候选之前, 避免低秩随机
-    子空间几乎完全丢失实际载体能量。
+    latent 种子。正式 Null Space 求解会把分支风险作为显式 ``B`` 传入, 因此
+    正式路径在此处使用单位预算。调用方可以把固定盲检模板或真实注意力梯度
+    置于密钥方向之前, 保证约束投影直接覆盖实际载体方向。
     """
 
     torch = _torch()
@@ -143,42 +144,63 @@ def exact_jvp(feature_function: TensorFeatureFunction, latent: Any, direction: A
 
 
 @dataclass
-class ExactJVPLinearization:
-    """保存同一 latent 点上的可复用精确 JVP 线性算子。"""
+class ExactJacobianLinearization:
+    """保存同一 latent 点上的完整 Jacobian JVP 与 VJP 算子。"""
 
     primal: Any
-    apply_function: Callable[[Any], Any]
+    jvp_function: Callable[[Any], Any]
+    vjp_function: Callable[[Any], Any]
     linearization_mode: str
+    latent_shape: tuple[int, ...]
+
+    @property
+    def output_width(self) -> int:
+        """返回完整特征向量的宽度。"""
+
+        return int(self.primal.numel())
 
     def apply(self, direction: Any) -> Any:
-        """返回给定方向的展平精确 JVP。"""
+        """计算 ``J direction`` 并返回展平完整特征响应。"""
 
-        return _flatten_feature(self.apply_function(direction))
+        return _flatten_feature(self.jvp_function(direction))
+
+    def transpose_apply(self, cotangent: Any) -> Any:
+        """计算 ``J^T cotangent`` 并恢复 latent 形状。"""
+
+        resolved = _flatten_feature(cotangent)
+        if resolved.numel() != self.output_width:
+            raise ValueError("VJP 余切宽度必须等于完整特征宽度")
+        return self.vjp_function(resolved).reshape(self.latent_shape)
 
 
-def build_exact_jvp_linearization(
+def build_exact_jacobian_linearization(
     feature_function: TensorFeatureFunction,
     latent: Any,
-) -> ExactJVPLinearization:
-    """构造可跨候选方向和分支复用的真实 Jacobian 线性算子。
+) -> ExactJacobianLinearization:
+    """构造可复用的完整 Jacobian JVP/VJP 线性算子。
 
-    `torch.func.linearize` 会在固定 primal 点保留精确线性化, 后续每个方向不再
-    重复执行完整 VAE+CLIP primal 前向。若运行时算子不支持该接口, 则回退到
-    `torch.autograd.functional.jvp`; 两条路径都计算真实 JVP, 不使用有限差分。
+    主路径同时使用 ``torch.func.linearize`` 与 ``torch.func.vjp``。若模型算子
+    明确不支持 ``torch.func`` 的前向自动微分, 则回退到逐次重算的 autograd
+    JVP/VJP。两条路径都使用真实自动微分, 不使用有限差分或低维特征草图。
     """
 
     torch = _torch()
 
-    def autograd_compatibility() -> ExactJVPLinearization:
-        """为不支持可复用线性化的算子构造逐方向真实 JVP。"""
+    def flattened(candidate: Any) -> Any:
+        """把完整语义与视觉特征统一为单个向量。"""
 
-        primal = feature_function(latent)
+        return _flatten_feature(feature_function(candidate))
+
+    def autograd_compatibility() -> ExactJacobianLinearization:
+        """为不支持可复用线性化的算子提供精确重算路径。"""
+
+        primal = flattened(latent)
 
         def autograd_jvp(direction: Any) -> Any:
-            """计算一个候选方向的真实 JVP。"""
+            """通过 autograd 计算一个完整特征 JVP。"""
 
             _, tangent = torch.autograd.functional.jvp(
-                feature_function,
+                flattened,
                 (latent,),
                 (direction,),
                 create_graph=False,
@@ -186,18 +208,43 @@ def build_exact_jvp_linearization(
             )
             return tangent
 
-        return ExactJVPLinearization(
+        def autograd_vjp(cotangent: Any) -> Any:
+            """通过 autograd 计算一个完整特征 VJP。"""
+
+            _, gradient = torch.autograd.functional.vjp(
+                flattened,
+                latent,
+                v=cotangent,
+                create_graph=False,
+                strict=True,
+            )
+            return gradient
+
+        return ExactJacobianLinearization(
             primal=primal,
-            apply_function=autograd_jvp,
-            linearization_mode="torch_autograd_exact_jvp_compatibility",
+            jvp_function=autograd_jvp,
+            vjp_function=autograd_vjp,
+            linearization_mode="torch_autograd_exact_jvp_vjp_compatibility",
+            latent_shape=tuple(int(value) for value in latent.shape),
         )
 
     try:
-        primal, jvp_function = torch.func.linearize(feature_function, latent)
-        return ExactJVPLinearization(
+        primal, jvp_function = torch.func.linearize(flattened, latent)
+        vjp_primal, vjp_closure = torch.func.vjp(flattened, latent)
+        if primal.shape != vjp_primal.shape or not bool(torch.allclose(primal, vjp_primal)):
+            raise RuntimeError("JVP 与 VJP 线性化的完整特征 primal 不一致")
+
+        def reusable_vjp(cotangent: Any) -> Any:
+            """调用冻结 primal 点的 VJP closure。"""
+
+            return vjp_closure(cotangent)[0]
+
+        return ExactJacobianLinearization(
             primal=primal,
-            apply_function=jvp_function,
-            linearization_mode="torch_func_linearize_exact_jvp",
+            jvp_function=jvp_function,
+            vjp_function=reusable_vjp,
+            linearization_mode="torch_func_exact_jvp_vjp",
+            latent_shape=tuple(int(value) for value in latent.shape),
         )
     except RuntimeError as exc:
         message = str(exc).lower()
@@ -218,29 +265,117 @@ def build_exact_jvp_linearization(
         return autograd_compatibility()
 
 
-def _apply_feature_weights(response: Any, weights: Any | None, field_name: str) -> Any:
-    """将特征空间权重应用到一列 JVP 响应。"""
+@dataclass(frozen=True)
+class PSDConjugateGradientResult:
+    """保存无阻尼半正定共轭梯度求解状态。"""
+
+    solution: Any
+    converged: bool
+    iteration_count: int
+    absolute_residual: float
+    relative_residual: float
+
+
+def solve_psd_conjugate_gradient(
+    operator: Callable[[Any], Any],
+    right_hand_side: Any,
+    *,
+    maximum_iterations: int,
+    relative_tolerance: float,
+    absolute_tolerance: float = 1e-10,
+) -> PSDConjugateGradientResult:
+    """无阻尼求解一致的半正定线性系统。
+
+    该实现不添加会改变 Null Space 约束的 Tikhonov 阻尼。若曲率失效或在最大
+    迭代数内未达到残差门禁, 调用方必须阻断当前科学算子。
+    """
 
     torch = _torch()
-    if weights is None:
-        return response
-    weight_tensor = torch.as_tensor(weights, device=response.device, dtype=response.dtype).reshape(-1)
-    if weight_tensor.numel() not in {1, response.numel()}:
-        raise ValueError(f"{field_name} 长度必须为 1 或对应特征维度")
-    return response * weight_tensor
+    if maximum_iterations <= 0:
+        raise ValueError("maximum_iterations 必须为正数")
+    if not 0.0 < relative_tolerance < 1.0:
+        raise ValueError("relative_tolerance 必须位于 (0, 1)")
+    if absolute_tolerance <= 0.0:
+        raise ValueError("absolute_tolerance 必须为正数")
+
+    rhs = right_hand_side.detach().float().reshape(-1)
+    rhs_norm = float(torch.linalg.norm(rhs).item())
+    solution = torch.zeros_like(rhs)
+    if rhs_norm <= absolute_tolerance:
+        return PSDConjugateGradientResult(
+            solution=solution,
+            converged=True,
+            iteration_count=0,
+            absolute_residual=rhs_norm,
+            relative_residual=0.0,
+        )
+
+    residual = rhs.clone()
+    search = residual.clone()
+    residual_square = torch.dot(residual, residual)
+    absolute_residual = rhs_norm
+    relative_residual = 1.0
+    iteration_count = 0
+    converged = False
+    for iteration_count in range(1, maximum_iterations + 1):
+        image = operator(search).detach().float().reshape(-1)
+        if image.shape != rhs.shape:
+            raise ValueError("PSD-CG 算子输出宽度必须与右端项一致")
+        curvature = torch.dot(search, image)
+        if not bool(torch.isfinite(curvature)) or float(curvature.item()) <= 0.0:
+            break
+        step_size = residual_square / curvature
+        solution = solution + step_size * search
+        residual = residual - step_size * image
+        next_residual_square = torch.dot(residual, residual)
+        absolute_residual = float(torch.sqrt(next_residual_square.clamp_min(0.0)).item())
+        relative_residual = absolute_residual / max(rhs_norm, absolute_tolerance)
+        if relative_residual <= relative_tolerance or absolute_residual <= absolute_tolerance:
+            converged = True
+            break
+        if not bool(torch.isfinite(next_residual_square)):
+            break
+        search = residual + (next_residual_square / residual_square) * search
+        residual_square = next_residual_square
+
+    return PSDConjugateGradientResult(
+        solution=solution,
+        converged=converged,
+        iteration_count=iteration_count,
+        absolute_residual=absolute_residual,
+        relative_residual=relative_residual,
+    )
+
+
+_MAXIMUM_ORTHOGONALITY_ERROR = 1e-5
+
+
+@dataclass(frozen=True)
+class _ProjectedNullDirection:
+    """保存一个风险支持种子方向的完整 Jacobian 约束投影。"""
+
+    projected: Any
+    reference_response_norm: float
+    response_norm: float
+    relative_response_residual: float
+    projection_energy_retention: float
+    cg_result: PSDConjugateGradientResult
 
 
 @dataclass
 class JacobianNullSpaceResult:
-    """保存真实 JVP 响应矩阵和 SVD 求得的 latent 安全基底。"""
+    """保存通过完整 Jacobian 约束投影求得的 latent Null Space 基底。"""
 
     branch_name: str
     candidate_matrix: Any
     response_matrix: Any
-    coefficient_basis: Any
     latent_basis: Any
-    singular_values: tuple[float, ...]
-    selected_response_values: tuple[float, ...]
+    column_response_norms: tuple[float, ...]
+    column_relative_response_residuals: tuple[float, ...]
+    projection_energy_retentions: tuple[float, ...]
+    cg_iteration_counts: tuple[int, ...]
+    cg_relative_residuals: tuple[float, ...]
+    evaluated_direction_indices: tuple[int, ...]
     response_residual: float
     relative_response_residual: float
     orthogonality_error: float
@@ -267,9 +402,23 @@ class JacobianNullSpaceResult:
             "branch_name": self.branch_name,
             "basis_rank": self.basis_rank,
             "candidate_count": int(self.candidate_matrix.shape[1]),
+            "evaluated_direction_count": (
+                max(self.evaluated_direction_indices) + 1
+                if self.evaluated_direction_indices
+                else 0
+            ),
+            "evaluated_direction_indices": list(self.evaluated_direction_indices),
             "response_width": int(self.response_matrix.shape[0]),
-            "singular_values": list(self.singular_values),
-            "selected_response_values": list(self.selected_response_values),
+            "column_response_norms": list(self.column_response_norms),
+            "column_relative_response_residuals": list(
+                self.column_relative_response_residuals
+            ),
+            "projection_energy_retentions": list(
+                self.projection_energy_retentions
+            ),
+            "cg_iteration_counts": list(self.cg_iteration_counts),
+            "cg_relative_residuals": list(self.cg_relative_residuals),
+            "cg_converged": True,
             "response_residual": self.response_residual,
             "relative_response_residual": self.relative_response_residual,
             "orthogonality_error": self.orthogonality_error,
@@ -280,18 +429,22 @@ class JacobianNullSpaceResult:
 
 def solve_jacobian_null_space(
     latent: Any,
-    semantic_feature_function: TensorFeatureFunction,
-    visual_feature_function: TensorFeatureFunction,
     candidate_matrix: Any,
+    risk_budget: Any,
     null_rank: int,
-    semantic_weights: Any | None = None,
-    visual_weights: Any | None = None,
-    visual_response_weight: float = 1.0,
+    joint_feature_linearization: ExactJacobianLinearization,
     branch_name: str = "lf_content",
-    joint_feature_function: TensorFeatureFunction | None = None,
-    joint_feature_linearization: ExactJVPLinearization | None = None,
+    maximum_relative_response_residual: float = 1e-4,
+    minimum_projection_energy_retention: float = 0.01,
+    cg_maximum_iterations: int = 64,
+    cg_relative_tolerance: float = 1e-6,
 ) -> JacobianNullSpaceResult:
-    """通过真实 JVP 和 SVD 求解语义条件 Jacobian 低响应子空间。"""
+    """通过完整 Jacobian JVP/VJP 与无阻尼 PSD-CG 求解 Null Space。
+
+    候选矩阵只提供实际载体和密钥种子方向, 不限制 Jacobian 校正项所在空间。
+    风险预算 ``B`` 显式进入 ``J B^2 J^T``。因此返回方向同时保留分支风险
+    支持并满足完整特征一阶零响应, 而不是依赖“输出维数小于候选数”制造零值。
+    """
 
     torch = _torch()
     if candidate_matrix.ndim != 2 or candidate_matrix.shape[0] != latent.numel():
@@ -299,81 +452,154 @@ def solve_jacobian_null_space(
     candidate_count = int(candidate_matrix.shape[1])
     if not 0 < null_rank <= candidate_count:
         raise ValueError("null_rank 必须位于 [1, candidate_count]")
-    if visual_response_weight < 0.0:
-        raise ValueError("visual_response_weight 不得为负")
+    if not 0.0 < maximum_relative_response_residual < 1.0:
+        raise ValueError("maximum_relative_response_residual 必须位于 (0, 1)")
+    if not 0.0 < minimum_projection_energy_retention <= 1.0:
+        raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
+    if tuple(joint_feature_linearization.latent_shape) != tuple(latent.shape):
+        raise ValueError("完整 Jacobian 线性化的 latent 形状与求解点不一致")
 
-    joint_semantic_width: int | None = None
-    joint_visual_width: int | None = None
-    if joint_feature_linearization is not None and joint_feature_function is None:
-        raise ValueError("joint_feature_linearization 要求同时声明 joint_feature_function")
-    if joint_feature_function is not None:
-        joint_primal = (
-            joint_feature_linearization.primal
-            if joint_feature_linearization is not None
-            else joint_feature_function(latent)
+    budget = _broadcast_axis_budget(latent, risk_budget).detach().float()
+    if not bool(torch.isfinite(budget).all()) or bool((budget < 0.0).any()):
+        raise ValueError("risk_budget 必须为有限非负值")
+    if float(torch.linalg.norm(budget).item()) <= 1e-12:
+        raise ValueError("risk_budget 不得全部为零")
+    budget_square = budget.square()
+
+    def project_direction(direction: Any) -> _ProjectedNullDirection:
+        """执行一个方向的风险支持完整 Jacobian 约束投影。"""
+
+        resolved_direction = direction.reshape(latent.shape).detach().float()
+        routed_direction = budget * resolved_direction
+        routed_norm = float(torch.linalg.norm(routed_direction).item())
+        if routed_norm <= 1e-12:
+            raise RuntimeError("风险预算后的 Null Space 种子方向能量为零")
+        right_hand_side = joint_feature_linearization.apply(routed_direction).float()
+        reference_norm = float(torch.linalg.norm(right_hand_side).item())
+
+        def gram_operator(cotangent: Any) -> Any:
+            """计算 ``J B^2 J^T cotangent``。"""
+
+            latent_cotangent = joint_feature_linearization.transpose_apply(cotangent)
+            return joint_feature_linearization.apply(
+                budget_square * latent_cotangent.float()
+            )
+
+        cg_result = solve_psd_conjugate_gradient(
+            gram_operator,
+            right_hand_side,
+            maximum_iterations=cg_maximum_iterations,
+            relative_tolerance=cg_relative_tolerance,
         )
-        if not isinstance(joint_primal, (tuple, list)) or len(joint_primal) != 2:
-            raise ValueError("joint_feature_function 必须依次返回语义特征和视觉特征")
-        joint_semantic_width = _flatten_feature(joint_primal[0]).numel()
-        joint_visual_width = _flatten_feature(joint_primal[1]).numel()
+        if not cg_result.converged:
+            raise RuntimeError("完整 Jacobian 无阻尼 PSD-CG 未在冻结迭代预算内收敛")
+        correction = (
+            budget_square
+            * joint_feature_linearization.transpose_apply(cg_result.solution).float()
+        ).detach()
+        projected = (routed_direction - correction).detach()
+        projected_norm = float(torch.linalg.norm(projected).item())
+        energy_retention = projected_norm / max(routed_norm, 1e-12)
+        response = joint_feature_linearization.apply(projected).float().detach()
+        response_norm = float(torch.linalg.norm(response).item())
+        relative_residual = response_norm / max(reference_norm, 1e-12)
+        if not math.isfinite(relative_residual) or (
+            relative_residual > maximum_relative_response_residual
+        ):
+            raise RuntimeError("约束投影方向的完整 Jacobian 相对响应残差超过正式门禁")
+        if not math.isfinite(energy_retention) or (
+            energy_retention < minimum_projection_energy_retention
+        ):
+            raise RuntimeError("约束投影方向的能量保留比例低于正式门禁")
+        return _ProjectedNullDirection(
+            projected=projected,
+            reference_response_norm=reference_norm,
+            response_norm=response_norm,
+            relative_response_residual=relative_residual,
+            projection_energy_retention=energy_retention,
+            cg_result=cg_result,
+        )
 
-    response_columns = []
+    accepted: list[_ProjectedNullDirection] = []
+    accepted_indices: list[int] = []
+    independent_columns: list[Any] = []
     for index in range(candidate_count):
-        direction = candidate_matrix[:, index].reshape(latent.shape).to(dtype=latent.dtype)
-        if joint_feature_function is None:
-            _, semantic_response = exact_jvp(semantic_feature_function, latent, direction)
-            _, visual_response = exact_jvp(visual_feature_function, latent, direction)
-        else:
-            joint_response = (
-                joint_feature_linearization.apply(direction)
-                if joint_feature_linearization is not None
-                else exact_jvp(joint_feature_function, latent, direction)[1]
-            )
-            semantic_width = int(joint_semantic_width or 0)
-            visual_width = int(joint_visual_width or 0)
-            if joint_response.numel() != semantic_width + visual_width:
-                raise ValueError("joint_feature_function 输出宽度必须等于语义与视觉特征宽度之和")
-            semantic_response = joint_response[:semantic_width]
-            visual_response = joint_response[semantic_width:]
-        semantic_response = _apply_feature_weights(semantic_response, semantic_weights, "semantic_weights")
-        visual_response = _apply_feature_weights(visual_response, visual_weights, "visual_weights")
-        response_columns.append(
-            torch.cat(
-                (
-                    semantic_response.float(),
-                    math.sqrt(visual_response_weight) * visual_response.float(),
-                )
-            )
+        result = project_direction(
+            candidate_matrix[:, index].reshape(latent.shape).to(dtype=latent.dtype)
         )
-    response_matrix = torch.stack(response_columns, dim=1)
-    _, singular_values_tensor, right_vectors_transposed = torch.linalg.svd(
-        response_matrix,
-        full_matrices=True,
+        orthogonal = result.projected.reshape(-1).float()
+        for existing in independent_columns:
+            orthogonal = orthogonal - existing * torch.dot(existing, orthogonal)
+        orthogonal_norm = torch.linalg.norm(orthogonal)
+        if float(orthogonal_norm.item()) <= 1e-7:
+            continue
+        independent_columns.append(orthogonal / orthogonal_norm)
+        accepted.append(result)
+        accepted_indices.append(index)
+        if len(accepted) == null_rank:
+            break
+    if len(accepted) != null_rank:
+        raise RuntimeError("完整 Jacobian 约束投影未形成指定秩的独立 Null Space")
+
+    latent_basis_raw = torch.stack(
+        tuple(item.projected.reshape(-1).float() for item in accepted),
+        dim=1,
     )
-    padded_responses = torch.zeros(candidate_count, device=response_matrix.device, dtype=response_matrix.dtype)
-    padded_responses[: singular_values_tensor.numel()] = singular_values_tensor
-    selected_indices = torch.argsort(padded_responses)[:null_rank]
-    coefficient_basis = right_vectors_transposed.transpose(0, 1).index_select(1, selected_indices)
-    latent_basis_raw = candidate_matrix.float() @ coefficient_basis.float()
     latent_basis, _ = torch.linalg.qr(latent_basis_raw, mode="reduced")
-    response_residual = float(torch.linalg.norm(response_matrix @ coefficient_basis).item())
-    response_reference = float(torch.linalg.norm(response_matrix).item())
-    relative_response_residual = (
-        response_residual / math.sqrt(null_rank)
-    ) / max(response_reference / math.sqrt(candidate_count), 1e-12)
+    latent_basis = latent_basis.detach()
+    response_columns = tuple(
+        joint_feature_linearization.apply(
+            latent_basis[:, index].reshape(latent.shape)
+        ).float().detach()
+        for index in range(null_rank)
+    )
+    response_matrix = torch.stack(response_columns, dim=1).detach()
+    response_reference = math.sqrt(
+        sum(item.reference_response_norm**2 for item in accepted) / null_rank
+    )
+    column_response_norms = tuple(
+        float(torch.linalg.norm(column).item()) for column in response_columns
+    )
+    column_relative_response_residuals = tuple(
+        value / max(response_reference, 1e-12) for value in column_response_norms
+    )
+    if any(
+        not math.isfinite(value) or value > maximum_relative_response_residual
+        for value in column_relative_response_residuals
+    ):
+        raise RuntimeError("QR 后 Null Space 基底的完整 Jacobian 逐列残差超过正式门禁")
+    response_residual = float(torch.linalg.norm(response_matrix).item())
+    relative_response_residual = max(column_relative_response_residuals)
     identity = torch.eye(null_rank, device=latent_basis.device, dtype=latent_basis.dtype)
     orthogonality_error = float(
         torch.linalg.norm(latent_basis.transpose(0, 1) @ latent_basis - identity).item()
     )
-    singular_values = tuple(float(value) for value in singular_values_tensor.detach().cpu().tolist())
-    selected_response_values = tuple(float(padded_responses[index].item()) for index in selected_indices)
+    if not math.isfinite(orthogonality_error) or (
+        orthogonality_error > _MAXIMUM_ORTHOGONALITY_ERROR
+    ):
+        raise RuntimeError("完整 Jacobian Null Space 基底正交误差超过正式门禁")
+    projection_energy_retentions = tuple(
+        item.projection_energy_retention for item in accepted
+    )
+    cg_iteration_counts = tuple(item.cg_result.iteration_count for item in accepted)
+    cg_relative_residuals = tuple(item.cg_result.relative_residual for item in accepted)
     digest_payload = {
         "branch_name": branch_name,
         "candidate_shape": tuple(int(value) for value in candidate_matrix.shape),
         "response_shape": tuple(int(value) for value in response_matrix.shape),
         "null_rank": null_rank,
-        "singular_values": [round(value, 12) for value in singular_values],
-        "selected_response_values": [round(value, 12) for value in selected_response_values],
+        "evaluated_direction_indices": accepted_indices,
+        "column_response_norms": [round(value, 12) for value in column_response_norms],
+        "column_relative_response_residuals": [
+            round(value, 12) for value in column_relative_response_residuals
+        ],
+        "projection_energy_retentions": [
+            round(value, 12) for value in projection_energy_retentions
+        ],
+        "cg_iteration_counts": cg_iteration_counts,
+        "cg_relative_residuals": [
+            round(value, 12) for value in cg_relative_residuals
+        ],
         "response_residual": round(response_residual, 12),
         "relative_response_residual": round(relative_response_residual, 12),
         "orthogonality_error": round(orthogonality_error, 12),
@@ -382,23 +608,33 @@ def solve_jacobian_null_space(
         branch_name=branch_name,
         candidate_matrix=candidate_matrix,
         response_matrix=response_matrix,
-        coefficient_basis=coefficient_basis,
         latent_basis=latent_basis,
-        singular_values=singular_values,
-        selected_response_values=selected_response_values,
+        column_response_norms=column_response_norms,
+        column_relative_response_residuals=column_relative_response_residuals,
+        projection_energy_retentions=projection_energy_retentions,
+        cg_iteration_counts=cg_iteration_counts,
+        cg_relative_residuals=cg_relative_residuals,
+        evaluated_direction_indices=tuple(accepted_indices),
         response_residual=response_residual,
         relative_response_residual=relative_response_residual,
         orthogonality_error=orthogonality_error,
         solver_digest=build_stable_digest(digest_payload),
         metadata={
-            "jvp_mode": (
-                joint_feature_linearization.linearization_mode
-                if joint_feature_linearization is not None
-                else "torch_autograd_exact_jvp"
+            "jvp_mode": joint_feature_linearization.linearization_mode,
+            "solver": "matrix_free_full_jacobian_psd_cg",
+            "latent_basis_formula": "qr(Bd - B^2 J^T pinv(J B^2 J^T) J B d)",
+            "full_feature_jvp": True,
+            "full_feature_vjp": True,
+            "cg_damping": 0.0,
+            "cg_maximum_iterations": cg_maximum_iterations,
+            "cg_relative_tolerance": cg_relative_tolerance,
+            "maximum_relative_response_residual": (
+                maximum_relative_response_residual
             ),
-            "solver": "weighted_response_svd",
-            "latent_basis_formula": "orth(candidate_matrix @ small_right_singular_vectors)",
-            "route_applied_before_svd": True,
-            "joint_feature_jvp": joint_feature_function is not None,
+            "minimum_projection_energy_retention": (
+                minimum_projection_energy_retention
+            ),
+            "maximum_orthogonality_error": _MAXIMUM_ORTHOGONALITY_ERROR,
+            "risk_budget_operator": "explicit_diagonal_B",
         },
     )

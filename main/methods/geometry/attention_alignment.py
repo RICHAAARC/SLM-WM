@@ -1,8 +1,8 @@
 """根据密钥注意力关系图恢复图像 token 网格的仿射参考系。
 
-几何变换会同时重排注意力矩阵的行和列。若规范关系图为 ``A``, 观测关系图
-满足 ``A_obs = P A P^T``。因此注册评分必须对两个关系轴同时执行同一个空间
-变换, 不能只把密钥行与观测行做余弦匹配。
+几何变换会同时重排注意力矩阵的行和列. 若规范关系图为 ``A``, 观测关系图
+满足 ``A_obs = P A P^T``. 注册目标同时计算 ``W A_obs W^T`` 的规范拉回
+一致性和 ``V S_key V^T`` 的观测前推一致性, 并显式记录双向覆盖惩罚.
 """
 
 from __future__ import annotations
@@ -13,6 +13,12 @@ from typing import Any, Iterable
 
 from main.core.digest import build_stable_digest
 from main.methods.geometry.differentiable_attention import keyed_relation_signs
+
+
+_CANONICAL_RELATION_WEIGHT = 0.10
+_OBSERVATION_RELATION_WEIGHT = 0.90
+_COVERAGE_PENALTY_WEIGHT = 0.01
+_MINIMUM_REGISTRATION_COVERAGE = 0.45
 
 
 def _torch() -> Any:
@@ -61,6 +67,21 @@ def _apply_affine(points: Any, transform: Any) -> Any:
     )
     homogeneous = torch.cat((expanded, ones), dim=-1)
     return torch.bmm(homogeneous, transform.transpose(1, 2))
+
+
+def _invert_affine(transforms: Any) -> Any:
+    """求一批可逆 2x3 仿射矩阵的逆变换."""
+
+    torch = _torch()
+    resolved = transforms.unsqueeze(0) if transforms.ndim == 2 else transforms
+    homogeneous = torch.eye(
+        3,
+        device=resolved.device,
+        dtype=resolved.dtype,
+    ).unsqueeze(0).repeat(resolved.shape[0], 1, 1)
+    homogeneous[:, :2, :] = resolved
+    inverted = torch.linalg.inv(homogeneous)[:, :2, :]
+    return inverted[0] if transforms.ndim == 2 else inverted
 
 
 def _anchor_indices(token_count: int, anchor_count: int) -> tuple[int, ...]:
@@ -264,7 +285,13 @@ def _relation_scores(aligned: Any, relation_signs: Any, valid: Any) -> Any:
     row_count = float_mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
     row_mean = (aligned * float_mask).sum(dim=-1, keepdim=True) / row_count
     centered = (aligned - row_mean) * float_mask
-    reference = relation_signs.unsqueeze(0).to(dtype=aligned.dtype) * float_mask
+    reference = relation_signs.to(dtype=aligned.dtype)
+    if reference.ndim == 2:
+        reference = reference.unsqueeze(0).expand(aligned.shape[0], -1, -1)
+    if reference.ndim != 3 or reference.shape != aligned.shape:
+        raise ValueError("relation_signs 必须与 aligned 具有相同关系图宽度")
+    reference_mean = (reference * float_mask).sum(dim=-1, keepdim=True) / row_count
+    reference = (reference - reference_mean) * float_mask
     numerator = (centered * reference).sum(dim=(-1, -2))
     denominator = (
         centered.square().sum(dim=(-1, -2)).sqrt()
@@ -274,16 +301,44 @@ def _relation_scores(aligned: Any, relation_signs: Any, valid: Any) -> Any:
     return torch.where(torch.isfinite(scores), scores, torch.full_like(scores, -1.0))
 
 
+def _unique_sampling_ratios(weights: Any, valid: Any) -> Any:
+    """计算每个候选覆盖的唯一观测位置比例."""
+
+    torch = _torch()
+    observed_indices = weights.argmax(dim=-1)
+    observed_counts = torch.zeros(
+        weights.shape[0],
+        weights.shape[-1],
+        device=weights.device,
+        dtype=torch.float32,
+    )
+    observed_counts.scatter_add_(
+        1,
+        observed_indices,
+        valid.to(dtype=torch.float32),
+    )
+    return (observed_counts > 0).float().sum(dim=-1) / valid.float().sum(
+        dim=-1
+    ).clamp_min(1.0)
+
+
 @dataclass(frozen=True)
 class _CandidateEvaluation:
     """保存一批仿射候选的双边关系图评分。"""
 
     transforms: Any
     scores: Any
+    observation_relation_scores: Any
+    bidirectional_relation_scores: Any
     objectives: Any
+    coverage_penalties: Any
     weights: Any
     valid: Any
     nearest_residuals: Any
+    canonical_coverage_ratios: Any
+    observation_coverage_ratios: Any
+    canonical_unique_ratios: Any
+    observation_unique_ratios: Any
 
 
 def _evaluate_candidates(
@@ -292,7 +347,7 @@ def _evaluate_candidates(
     coordinates: Any,
     transforms: Any,
 ) -> _CandidateEvaluation:
-    """对一批候选执行 ``W A W^T`` 并计算带覆盖惩罚的注册目标。"""
+    """计算规范拉回和观测前推一致性共同约束的注册目标."""
 
     torch = _torch()
     target_coordinates = _apply_affine(coordinates, transforms)
@@ -300,30 +355,61 @@ def _evaluate_candidates(
     expanded_matrix = matrix.float().unsqueeze(0).expand(transforms.shape[0], -1, -1)
     aligned = torch.bmm(torch.bmm(weights, expanded_matrix), weights.transpose(1, 2))
     scores = _relation_scores(aligned, relation_signs, valid)
-    coverage = valid.float().mean(dim=-1)
-    observed_indices = weights.argmax(dim=-1)
-    observed_counts = torch.zeros(
+    inverse_transforms = _invert_affine(transforms)
+    canonical_coordinates_at_observation = _apply_affine(
+        coordinates,
+        inverse_transforms,
+    )
+    observation_weights, observation_valid, _ = _sampling_weights(
+        canonical_coordinates_at_observation,
+        coordinates,
+    )
+    expanded_relation_signs = relation_signs.float().unsqueeze(0).expand(
         transforms.shape[0],
-        matrix.shape[0],
-        device=matrix.device,
-        dtype=torch.float32,
+        -1,
+        -1,
     )
-    observed_counts.scatter_add_(
-        1,
-        observed_indices,
-        valid.to(dtype=torch.float32),
+    expected_observation = torch.bmm(
+        torch.bmm(observation_weights, expanded_relation_signs),
+        observation_weights.transpose(1, 2),
     )
-    unique_ratios = (observed_counts > 0).float().sum(dim=-1) / valid.float().sum(
-        dim=-1
-    ).clamp_min(1.0)
-    objectives = scores - 0.25 * (1.0 - coverage) - 0.25 * (1.0 - unique_ratios)
+    observation_relation_scores = _relation_scores(
+        expanded_matrix,
+        expected_observation,
+        observation_valid,
+    )
+    canonical_coverage_ratios = valid.float().mean(dim=-1)
+    observation_coverage_ratios = observation_valid.float().mean(dim=-1)
+    canonical_unique_ratios = _unique_sampling_ratios(weights, valid)
+    observation_unique_ratios = _unique_sampling_ratios(
+        observation_weights,
+        observation_valid,
+    )
+    bidirectional_relation_scores = (
+        _CANONICAL_RELATION_WEIGHT * scores
+        + _OBSERVATION_RELATION_WEIGHT * observation_relation_scores
+    )
+    coverage_penalties = _COVERAGE_PENALTY_WEIGHT * (
+        (1.0 - canonical_coverage_ratios)
+        + (1.0 - observation_coverage_ratios)
+        + (1.0 - canonical_unique_ratios)
+        + (1.0 - observation_unique_ratios)
+    )
+    objectives = bidirectional_relation_scores - coverage_penalties
     return _CandidateEvaluation(
         transforms=transforms,
         scores=scores,
+        observation_relation_scores=observation_relation_scores,
+        bidirectional_relation_scores=bidirectional_relation_scores,
         objectives=objectives,
+        coverage_penalties=coverage_penalties,
         weights=weights,
         valid=valid,
         nearest_residuals=nearest_residuals,
+        canonical_coverage_ratios=canonical_coverage_ratios,
+        observation_coverage_ratios=observation_coverage_ratios,
+        canonical_unique_ratios=canonical_unique_ratios,
+        observation_unique_ratios=observation_unique_ratios,
     )
 
 
@@ -335,10 +421,31 @@ def _combine_evaluations(evaluations: Iterable[_CandidateEvaluation]) -> _Candid
     return _CandidateEvaluation(
         transforms=torch.cat(tuple(item.transforms for item in resolved)),
         scores=torch.cat(tuple(item.scores for item in resolved)),
+        observation_relation_scores=torch.cat(
+            tuple(item.observation_relation_scores for item in resolved)
+        ),
+        bidirectional_relation_scores=torch.cat(
+            tuple(item.bidirectional_relation_scores for item in resolved)
+        ),
         objectives=torch.cat(tuple(item.objectives for item in resolved)),
+        coverage_penalties=torch.cat(
+            tuple(item.coverage_penalties for item in resolved)
+        ),
         weights=torch.cat(tuple(item.weights for item in resolved)),
         valid=torch.cat(tuple(item.valid for item in resolved)),
         nearest_residuals=torch.cat(tuple(item.nearest_residuals for item in resolved)),
+        canonical_coverage_ratios=torch.cat(
+            tuple(item.canonical_coverage_ratios for item in resolved)
+        ),
+        observation_coverage_ratios=torch.cat(
+            tuple(item.observation_coverage_ratios for item in resolved)
+        ),
+        canonical_unique_ratios=torch.cat(
+            tuple(item.canonical_unique_ratios for item in resolved)
+        ),
+        observation_unique_ratios=torch.cat(
+            tuple(item.observation_unique_ratios for item in resolved)
+        ),
     )
 
 
@@ -353,7 +460,17 @@ class AttentionAlignmentResult:
     inlier_ratio: float
     mean_inlier_residual: float
     relation_sync_score: float
+    observation_relation_score: float
+    identity_observation_relation_score: float
+    registration_alignment_gain: float
+    bidirectional_relation_score: float
+    registration_objective_score: float
     registration_objective_margin: float
+    registration_coverage_penalty: float
+    canonical_coverage_ratio: float
+    observation_coverage_ratio: float
+    canonical_unique_ratio: float
+    observation_unique_ratio: float
     registration_confidence: float
     geometry_reliable: bool
     alignment_digest: str
@@ -371,9 +488,9 @@ def recover_attention_affine_alignment(
 ) -> AttentionAlignmentResult:
     """通过双边重采样密钥关系图恢复仿射参考系。
 
-    对每个公开候选仿射变换构造采样矩阵 ``W``, 再比较
-    ``W A_observed W^T`` 与密钥关系图。该目标对查询和键使用同一空间变换,
-    因而正确处理 ``A_observed = P A P^T`` 的列置换。
+    对每个公开候选仿射变换构造规范拉回矩阵 ``W`` 和观测前推矩阵 ``V``.
+    注册目标联合比较 ``W A_observed W^T`` 与密钥关系图, 以及真实观测关系图
+    与 ``V S_key V^T``. 两个方向都对查询轴和键轴应用同一空间变换.
     """
 
     torch = _torch()
@@ -419,7 +536,44 @@ def recover_attention_affine_alignment(
     best_valid = evaluated.valid[best_index]
     best_residuals = evaluated.nearest_residuals[best_index]
     best_score = float(evaluated.scores[best_index].item())
+    best_observation_score = float(
+        evaluated.observation_relation_scores[best_index].item()
+    )
+    best_bidirectional_score = float(
+        evaluated.bidirectional_relation_scores[best_index].item()
+    )
     best_objective = float(evaluated.objectives[best_index].item())
+    best_coverage_penalty = float(
+        evaluated.coverage_penalties[best_index].item()
+    )
+    canonical_coverage_ratio = float(
+        evaluated.canonical_coverage_ratios[best_index].item()
+    )
+    observation_coverage_ratio = float(
+        evaluated.observation_coverage_ratios[best_index].item()
+    )
+    canonical_unique_ratio = float(
+        evaluated.canonical_unique_ratios[best_index].item()
+    )
+    observation_unique_ratio = float(
+        evaluated.observation_unique_ratios[best_index].item()
+    )
+    identity_transform = torch.tensor(
+        ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        device=matrix.device,
+        dtype=evaluated.transforms.dtype,
+    )
+    identity_index = int(
+        (
+            evaluated.transforms - identity_transform.unsqueeze(0)
+        ).square().sum(dim=(1, 2)).argmin().item()
+    )
+    identity_observation_score = float(
+        evaluated.observation_relation_scores[identity_index].item()
+    )
+    registration_alignment_gain = (
+        best_observation_score - identity_observation_score
+    )
     expected_indices = _anchor_indices(token_count, anchor_count)
     expected_tensor = torch.tensor(expected_indices, device=matrix.device, dtype=torch.long)
     observed_indices_tensor = best_weights.argmax(dim=-1).index_select(0, expected_tensor)
@@ -436,16 +590,24 @@ def recover_attention_affine_alignment(
     )
     registration_objective_margin = max(0.0, best_objective - second_objective)
     confidence = (
-        max(0.0, best_score)
+        max(0.0, best_bidirectional_score)
         * inlier_ratio
         * math.exp(-mean_residual)
+        * min(canonical_coverage_ratio, observation_coverage_ratio)
         if math.isfinite(mean_residual)
         else 0.0
     )
     geometry_reliable = (
         math.isfinite(best_score)
+        and math.isfinite(best_observation_score)
+        and math.isfinite(best_bidirectional_score)
+        and best_observation_score > 0.0
+        and best_bidirectional_score > 0.0
         and inlier_ratio >= minimum_inlier_ratio
         and mean_residual <= residual_threshold
+        and canonical_coverage_ratio >= _MINIMUM_REGISTRATION_COVERAGE
+        and observation_coverage_ratio >= _MINIMUM_REGISTRATION_COVERAGE
+        and registration_objective_margin > 0.0
     )
     transform_tuple = tuple(
         tuple(float(value) for value in row)
@@ -463,7 +625,20 @@ def recover_attention_affine_alignment(
         "inlier_ratio": round(inlier_ratio, 12),
         "mean_inlier_residual": round(mean_residual, 12),
         "relation_sync_score": round(best_score, 12),
+        "observation_relation_score": round(best_observation_score, 12),
+        "identity_observation_relation_score": round(
+            identity_observation_score,
+            12,
+        ),
+        "registration_alignment_gain": round(registration_alignment_gain, 12),
+        "bidirectional_relation_score": round(best_bidirectional_score, 12),
+        "registration_objective_score": round(best_objective, 12),
         "registration_objective_margin": round(registration_objective_margin, 12),
+        "registration_coverage_penalty": round(best_coverage_penalty, 12),
+        "canonical_coverage_ratio": round(canonical_coverage_ratio, 12),
+        "observation_coverage_ratio": round(observation_coverage_ratio, 12),
+        "canonical_unique_ratio": round(canonical_unique_ratio, 12),
+        "observation_unique_ratio": round(observation_unique_ratio, 12),
     }
     return AttentionAlignmentResult(
         affine_transform=transform_tuple,  # type: ignore[arg-type]
@@ -473,17 +648,33 @@ def recover_attention_affine_alignment(
         inlier_ratio=inlier_ratio,
         mean_inlier_residual=mean_residual,
         relation_sync_score=best_score,
+        observation_relation_score=best_observation_score,
+        identity_observation_relation_score=identity_observation_score,
+        registration_alignment_gain=registration_alignment_gain,
+        bidirectional_relation_score=best_bidirectional_score,
+        registration_objective_score=best_objective,
         registration_objective_margin=registration_objective_margin,
+        registration_coverage_penalty=best_coverage_penalty,
+        canonical_coverage_ratio=canonical_coverage_ratio,
+        observation_coverage_ratio=observation_coverage_ratio,
+        canonical_unique_ratio=canonical_unique_ratio,
+        observation_unique_ratio=observation_unique_ratio,
         registration_confidence=confidence,
         geometry_reliable=geometry_reliable,
         alignment_digest=build_stable_digest(payload),
         metadata={
             "matcher": "double_sided_keyed_relation_graph_registration",
             "relation_transform": "canonical_attention_equals_w_observed_attention_w_transpose",
+            "observation_relation_transform": "observed_key_relation_equals_v_key_relation_v_transpose",
+            "registration_objective": "weighted_bidirectional_relation_minus_coverage_penalty",
             "transform_family": "bounded_affine_similarity_with_dihedral_support",
             "robust_estimator": "deterministic_coarse_to_local_relation_search",
             "coordinate_source": "original_image_token_grid",
             "registration_candidate_count": int(evaluated.transforms.shape[0]),
             "sync_margin_duplicate_transform_tolerance": 1e-4,
+            "canonical_relation_weight": _CANONICAL_RELATION_WEIGHT,
+            "observation_relation_weight": _OBSERVATION_RELATION_WEIGHT,
+            "registration_coverage_penalty_weight": _COVERAGE_PENALTY_WEIGHT,
+            "minimum_registration_coverage": _MINIMUM_REGISTRATION_COVERAGE,
         },
     )

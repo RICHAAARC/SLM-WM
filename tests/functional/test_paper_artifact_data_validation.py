@@ -371,7 +371,7 @@ def _validate(root: Path, source_paths: dict[str, Path]) -> dict:
         ablation_claim_summary={
             "ablation_claim_gate_ready": True,
             "ablation_necessity_statistics_ready": True,
-            "necessity_statistic_row_count": 7,
+            "necessity_statistic_row_count": len(necessity_rows),
             "paired_prompt_count": 34,
             "expected_paired_prompt_count": 34,
             "necessity_statistic_rows_digest": build_stable_digest(

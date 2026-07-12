@@ -1,7 +1,7 @@
 """运行真实语义安全子空间嵌入和仅图像检测闭环。
 
 该 runner 属于核心方法复现层, 在真实 SD3/SD3.5 latent 上计算分支风险、
-JVP/SVD 低响应子空间、安全投影、真实 Q/K 注意力梯度和最终图像盲检。
+完整特征 JVP/VJP Null Space、安全投影、真实 Q/K 注意力梯度和最终图像盲检。
 """
 
 from __future__ import annotations
@@ -53,10 +53,10 @@ from main.methods.geometry import (
     compute_attention_geometry_gradient,
     optimize_attention_geometry_update,
 )
-from main.methods.semantic import build_branch_risk_fields
+from main.methods.semantic import BranchRiskConfig, build_branch_risk_fields
 from main.methods.subspace import (
-    ExactJVPLinearization,
-    build_exact_jvp_linearization,
+    ExactJacobianLinearization,
+    build_exact_jacobian_linearization,
     generate_keyed_candidate_directions,
     solve_jacobian_null_space,
 )
@@ -94,12 +94,31 @@ class SemanticWatermarkRuntimeConfig:
     lf_relative_strength: float = _FORMAL_METHOD_CONFIG.lf_relative_strength
     tail_relative_strength: float = _FORMAL_METHOD_CONFIG.tail_relative_strength
     attention_relative_strength: float = _FORMAL_METHOD_CONFIG.attention_relative_strength
+    attention_stable_token_fraction: float = (
+        _FORMAL_METHOD_CONFIG.attention_stable_token_fraction
+    )
+    attention_unstable_pair_weight: float = (
+        _FORMAL_METHOD_CONFIG.attention_unstable_pair_weight
+    )
     tail_fraction: float = _FORMAL_METHOD_CONFIG.tail_fraction
     minimum_projection_energy_retention: float = _FORMAL_METHOD_CONFIG.minimum_projection_energy_retention
     maximum_relative_response_residual: float = _FORMAL_METHOD_CONFIG.maximum_relative_response_residual
+    null_space_cg_max_iterations: int = (
+        _FORMAL_METHOD_CONFIG.null_space_cg_max_iterations
+    )
+    null_space_cg_relative_tolerance: float = (
+        _FORMAL_METHOD_CONFIG.null_space_cg_relative_tolerance
+    )
+    minimum_semantic_preservation_cosine: float = (
+        _FORMAL_METHOD_CONFIG.minimum_semantic_preservation_cosine
+    )
+    maximum_visual_feature_relative_drift: float = (
+        _FORMAL_METHOD_CONFIG.maximum_visual_feature_relative_drift
+    )
     max_attention_tokens: int = _FORMAL_METHOD_CONFIG.max_attention_tokens
     attention_module_count: int = _FORMAL_METHOD_CONFIG.attention_module_count
     semantic_routing_enabled: bool = True
+    branch_risk_mode: str = "branch_specific"
     null_space_enabled: bool = True
     lf_enabled: bool = True
     tail_robust_enabled: bool = True
@@ -136,10 +155,34 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError("post-step 注入时刻必须保留一个合法的下一调度时刻")
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
+        if not 0.0 < self.attention_stable_token_fraction <= 1.0:
+            raise ValueError(
+                "attention_stable_token_fraction 必须位于 (0, 1]"
+            )
+        if not 0.0 <= self.attention_unstable_pair_weight < 1.0:
+            raise ValueError(
+                "attention_unstable_pair_weight 必须位于 [0, 1)"
+            )
         if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
             raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
         if not 0.0 < self.maximum_relative_response_residual <= 1.0:
             raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
+        if self.null_space_cg_max_iterations <= 0:
+            raise ValueError("null_space_cg_max_iterations 必须为正整数")
+        if not 0.0 < self.null_space_cg_relative_tolerance < 1.0:
+            raise ValueError("null_space_cg_relative_tolerance 必须位于 (0, 1)")
+        if not 0.0 < self.minimum_semantic_preservation_cosine <= 1.0:
+            raise ValueError(
+                "minimum_semantic_preservation_cosine 必须位于 (0, 1]"
+            )
+        if not 0.0 <= self.maximum_visual_feature_relative_drift <= 1.0:
+            raise ValueError(
+                "maximum_visual_feature_relative_drift 必须位于 [0, 1]"
+            )
+        if self.branch_risk_mode not in {"branch_specific", "shared_global"}:
+            raise ValueError(
+                "branch_risk_mode 必须为 branch_specific 或 shared_global"
+            )
         if not self.lf_enabled and not self.tail_robust_enabled:
             raise ValueError("正式内容检测至少需要启用一个内容载体分支")
         if self.attention_module_count < 2:
@@ -466,6 +509,37 @@ def _required_branch_risk_eligibility(
     return _active_carrier_branch_names(config)
 
 
+def _branch_risk_configs(
+    config: SemanticWatermarkRuntimeConfig,
+) -> dict[str, BranchRiskConfig] | None:
+    """返回完整方法或共享全局风险正式消融使用的风险配置。
+
+    ``None`` 让核心方法构造器使用三个分支各自的正式风险定义。
+    ``shared_global`` 则把同一个预注册全局风险复制到三个载体分支, 用于直接
+    检验分支特定风险语义是否优于单一共享路由。该对照仍执行真实风险门控,
+    不等价于完全移除路由。
+    """
+
+    if config.branch_risk_mode == "branch_specific":
+        return None
+    shared_config = BranchRiskConfig(
+        saliency_weight=0.25,
+        semantic_weight=0.25,
+        texture_weight=0.20,
+        instability_weight=0.20,
+        attention_instability_weight=0.10,
+        texture_preference="avoid",
+    )
+    return {
+        branch_name: shared_config
+        for branch_name in (
+            "lf_content",
+            "tail_robust",
+            "attention_geometry",
+        )
+    }
+
+
 def _branch_risk_record(branch_field: Any) -> dict[str, Any]:
     """生成不保存大型空间数组的可审计分支风险摘要。"""
 
@@ -488,37 +562,174 @@ def _solve_branch_subspace(
     axis_budget: tuple[float, ...],
     candidate_count: int,
     null_rank: int,
-    joint_feature_linearization: ExactJVPLinearization,
+    joint_feature_linearization: ExactJacobianLinearization,
     preferred_directions: tuple[Any, ...] = (),
     maximum_relative_response_residual: float = 1e-4,
+    minimum_projection_energy_retention: float = 0.01,
+    cg_maximum_iterations: int = 64,
+    cg_relative_tolerance: float = 1e-6,
 ) -> Any:
-    """为一个载体分支运行真实 JVP 和 SVD。"""
+    """为一个载体分支运行完整 Jacobian 风险支持约束投影。"""
 
     candidates = generate_keyed_candidate_directions(
         latent,
         key_material,
         branch_name,
         candidate_count,
-        axis_budget,
+        None,
         preferred_directions,
     )
     result = solve_jacobian_null_space(
         latent=latent.float(),
-        semantic_feature_function=feature_runtime.semantic_condition_features,
-        visual_feature_function=feature_runtime.visual_condition_features,
         candidate_matrix=candidates,
+        risk_budget=axis_budget,
         null_rank=null_rank,
-        visual_response_weight=1.0,
-        branch_name=branch_name,
-        joint_feature_function=feature_runtime.joint_condition_features,
         joint_feature_linearization=joint_feature_linearization,
+        branch_name=branch_name,
+        maximum_relative_response_residual=maximum_relative_response_residual,
+        minimum_projection_energy_retention=minimum_projection_energy_retention,
+        cg_maximum_iterations=cg_maximum_iterations,
+        cg_relative_tolerance=cg_relative_tolerance,
     )
     result.metadata["preferred_direction_count"] = len(preferred_directions)
     result.metadata["preferred_direction_role"] = "carrier_or_attention_gradient"
-    result.metadata["maximum_relative_response_residual"] = maximum_relative_response_residual
+    result.metadata.update(feature_runtime.feature_schema_record())
     if result.relative_response_residual > maximum_relative_response_residual:
-        raise RuntimeError("语义条件子空间的相对响应残差超过正式门禁")
+        raise RuntimeError("完整 Jacobian Null Space 的相对响应残差超过正式门禁")
     return result
+
+
+def _feature_preservation_values(
+    semantic_before: Any,
+    visual_before: Any,
+    semantic_after: Any,
+    visual_after: Any,
+    config: SemanticWatermarkRuntimeConfig,
+) -> tuple[float, float, bool]:
+    """统一计算完整 CLIP 与视觉特征的保持指标和门禁。"""
+
+    import torch
+    import torch.nn.functional as functional
+
+    semantic_before_flat = semantic_before.float().reshape(-1)
+    semantic_after_flat = semantic_after.float().reshape(-1)
+    visual_before_flat = visual_before.float().reshape(-1)
+    visual_after_flat = visual_after.float().reshape(-1)
+    if semantic_before_flat.shape != semantic_after_flat.shape:
+        raise RuntimeError("写回前后完整 CLIP 特征宽度不一致")
+    if visual_before_flat.shape != visual_after_flat.shape:
+        raise RuntimeError("写回前后完整视觉特征宽度不一致")
+    semantic_cosine = float(
+        functional.cosine_similarity(
+            semantic_before_flat,
+            semantic_after_flat,
+            dim=0,
+            eps=1e-12,
+        ).item()
+    )
+    visual_relative_drift = float(
+        torch.linalg.norm(visual_after_flat - visual_before_flat).item()
+        / max(float(torch.linalg.norm(visual_before_flat).item()), 1e-12)
+    )
+    ready = bool(
+        math.isfinite(semantic_cosine)
+        and math.isfinite(visual_relative_drift)
+        and semantic_cosine >= config.minimum_semantic_preservation_cosine
+        and visual_relative_drift <= config.maximum_visual_feature_relative_drift
+    )
+    return semantic_cosine, visual_relative_drift, ready
+
+
+def _combined_update_preservation_record(
+    feature_runtime: DifferentiableSemanticFeatureRuntime,
+    latent: Any,
+    injected: Any,
+    config: SemanticWatermarkRuntimeConfig,
+) -> dict[str, Any]:
+    """验证一次实际写回 latent 的完整特征有限更新保持性。"""
+
+    import torch
+
+    with torch.no_grad():
+        semantic_before, visual_before = feature_runtime.joint_features(
+            latent.detach().float()
+        )
+        semantic_after, visual_after = feature_runtime.joint_features(
+            injected.detach().float()
+        )
+    semantic_cosine, visual_relative_drift, ready = _feature_preservation_values(
+        semantic_before,
+        visual_before,
+        semantic_after,
+        visual_after,
+        config,
+    )
+    return {
+        "full_semantic_cosine_similarity": semantic_cosine,
+        "full_visual_feature_relative_drift": visual_relative_drift,
+        "minimum_semantic_preservation_cosine": (
+            config.minimum_semantic_preservation_cosine
+        ),
+        "maximum_visual_feature_relative_drift": (
+            config.maximum_visual_feature_relative_drift
+        ),
+        "semantic_preservation_gate_ready": ready,
+        "preservation_validation_scope": (
+            "actual_combined_latent_full_clip_and_visual_features"
+        ),
+    }
+
+
+def _final_image_preservation_record(
+    pipeline: Any,
+    feature_runtime: DifferentiableSemanticFeatureRuntime,
+    clean_image: Any,
+    watermarked_image: Any,
+    config: SemanticWatermarkRuntimeConfig,
+) -> dict[str, Any]:
+    """在最终成图上验证累计语义与视觉特征保持性。"""
+
+    import torch
+
+    device = pipeline._execution_device
+
+    def image_tensor(image: Any) -> Any:
+        """把最终 PIL 成图转换为 [0, 1] 模型输入 tensor。"""
+
+        pixels = pipeline.image_processor.preprocess(image).to(
+            device=device,
+            dtype=torch.float32,
+        )
+        return (pixels / 2.0 + 0.5).clamp(0.0, 1.0)
+
+    with torch.no_grad():
+        clean_semantic, clean_visual = feature_runtime.joint_image_features(
+            image_tensor(clean_image)
+        )
+        watermarked_semantic, watermarked_visual = (
+            feature_runtime.joint_image_features(image_tensor(watermarked_image))
+        )
+    semantic_cosine, visual_relative_drift, ready = _feature_preservation_values(
+        clean_semantic,
+        clean_visual,
+        watermarked_semantic,
+        watermarked_visual,
+        config,
+    )
+    return {
+        "final_image_semantic_cosine_similarity": semantic_cosine,
+        "final_image_visual_feature_relative_drift": visual_relative_drift,
+        "minimum_semantic_preservation_cosine": (
+            config.minimum_semantic_preservation_cosine
+        ),
+        "maximum_visual_feature_relative_drift": (
+            config.maximum_visual_feature_relative_drift
+        ),
+        "final_image_preservation_gate_ready": ready,
+        "preservation_validation_scope": (
+            "paired_final_images_full_clip_and_visual_features"
+        ),
+    }
 
 
 class _FullLatentSpace:
@@ -711,6 +922,12 @@ def run_semantic_watermark_runtime(
                         transformer_forward,
                         recorder,
                         config.key_material,
+                        stable_token_fraction=(
+                            config.attention_stable_token_fraction
+                        ),
+                        unstable_pair_weight=(
+                            config.attention_unstable_pair_weight
+                        ),
                     )
                     if config.attention_geometry_enabled
                     else None
@@ -729,6 +946,7 @@ def run_semantic_watermark_runtime(
                     stability_values=signals["stability"].mean(dim=0).reshape(-1).cpu().tolist(),
                     saliency_values=signals["saliency"].mean(dim=0).reshape(-1).cpu().tolist(),
                     attention_stability_values=attention_stability.mean(dim=0).reshape(-1).cpu().tolist(),
+                    configs=_branch_risk_configs(config),
                     required_eligible_branches=_required_branch_risk_eligibility(
                         config
                     ),
@@ -753,8 +971,8 @@ def run_semantic_watermark_runtime(
                 }
                 if config.null_space_enabled:
                     linearized_latent = latent.float()
-                    joint_feature_linearization = build_exact_jvp_linearization(
-                        feature_runtime.joint_condition_features,
+                    joint_feature_linearization = build_exact_jacobian_linearization(
+                        feature_runtime.full_joint_feature_vector,
                         linearized_latent,
                     )
                     subspaces = {
@@ -773,10 +991,13 @@ def run_semantic_watermark_runtime(
                             joint_feature_linearization,
                             preferred_directions[branch_name],
                             config.maximum_relative_response_residual,
+                            config.minimum_projection_energy_retention,
+                            config.null_space_cg_max_iterations,
+                            config.null_space_cg_relative_tolerance,
                         )
                         for branch_name, branch_field in active_branch_fields.items()
                     }
-                    # 子空间矩阵已经物化; 立即释放可复用线性化图, 为 Q/K 回溯前向腾出显存。
+                    # Null Space 基底已经物化; 立即释放 JVP/VJP 图, 为 Q/K 回溯腾出显存。
                     del joint_feature_linearization
                 else:
                     subspaces = {branch_name: _FullLatentSpace() for branch_name in active_branch_fields}
@@ -831,6 +1052,12 @@ def run_semantic_watermark_runtime(
                         update_strength=config.attention_relative_strength * float(latent_norm.item()),
                         precomputed_gradient=attention_gradient,
                         base_update=content_base_update,
+                        stable_token_fraction=(
+                            config.attention_stable_token_fraction
+                        ),
+                        unstable_pair_weight=(
+                            config.attention_unstable_pair_weight
+                        ),
                     )
                     attention_tensor = attention_update.update
                     combined_update = content_base_update + attention_tensor
@@ -841,6 +1068,15 @@ def run_semantic_watermark_runtime(
                         final_score_tensor = attention_geometry_score(
                             recorder.records,
                             config.key_material,
+                            stable_token_positions=(
+                                attention_gradient.stable_token_positions
+                            ),
+                            stable_token_fraction=(
+                                config.attention_stable_token_fraction
+                            ),
+                            unstable_pair_weight=(
+                                config.attention_unstable_pair_weight
+                            ),
                         )
                     final_score = float(final_score_tensor.detach().item())
                     required_score = max(
@@ -858,6 +1094,12 @@ def run_semantic_watermark_runtime(
                         "attention_applied_update_strength": attention_update.applied_update_strength,
                         "attention_backtracking_step_count": attention_update.backtracking_step_count,
                         "attention_update_digest": attention_update.update_digest,
+                        "stable_token_indices": list(
+                            attention_update.stable_token_indices
+                        ),
+                        "stable_token_selection_digest": (
+                            attention_update.stable_token_selection_digest
+                        ),
                     }
                 else:
                     attention_tensor = torch.zeros_like(latent)
@@ -872,7 +1114,22 @@ def run_semantic_watermark_runtime(
                         "attention_applied_update_strength": None,
                         "attention_backtracking_step_count": None,
                         "attention_update_digest": "",
+                        "stable_token_indices": [],
+                        "stable_token_selection_digest": "",
                     }
+                preservation_record = _combined_update_preservation_record(
+                    feature_runtime,
+                    latent,
+                    injected,
+                    config,
+                )
+                if (
+                    config.null_space_enabled
+                    and not preservation_record["semantic_preservation_gate_ready"]
+                ):
+                    raise RuntimeError(
+                        "真正写回的 combined latent 未通过完整语义与视觉保持门禁"
+                    )
         update_records.append(
             {
                 "run_id": run_id,
@@ -908,13 +1165,15 @@ def run_semantic_watermark_runtime(
                 "tail_threshold": tail_threshold,
                 "tail_retained_fraction": retained_fraction,
                 **attention_record,
+                **preservation_record,
                 "metadata": {
                     "jvp_mode": jvp_modes[0] if len(jvp_modes) == 1 else "disabled_or_mixed",
                     "jvp_modes": list(jvp_modes),
-                    "basis_solver": "weighted_response_svd",
+                    "basis_solver": "matrix_free_full_jacobian_psd_cg",
                     "attention_source": "real_qk_projection",
                     "detector_requires_generation_trace": False,
                     "semantic_routing_enabled": config.semantic_routing_enabled,
+                    "branch_risk_mode": config.branch_risk_mode,
                     "null_space_enabled": config.null_space_enabled,
                     "lf_enabled": config.lf_enabled,
                     "tail_robust_enabled": config.tail_robust_enabled,
@@ -934,6 +1193,18 @@ def run_semantic_watermark_runtime(
         callback_on_step_end_tensor_inputs=["latents"],
         **common_kwargs,
     ).images[0]
+    final_image_preservation = _final_image_preservation_record(
+        pipeline,
+        feature_runtime,
+        clean_image,
+        watermarked_image,
+        config,
+    )
+    if (
+        config.null_space_enabled
+        and not final_image_preservation["final_image_preservation_gate_ready"]
+    ):
+        raise RuntimeError("最终 clean/watermarked 成图未通过累计完整特征保持门禁")
     paired_quality = compute_image_quality_metrics(clean_image, watermarked_image)
 
     lf_weight = 0.70 if config.lf_enabled and config.tail_robust_enabled else (1.0 if config.lf_enabled else 0.0)
@@ -948,6 +1219,12 @@ def run_semantic_watermark_runtime(
         lf_weight=lf_weight,
         tail_robust_weight=tail_weight,
         tail_fraction=config.tail_fraction if config.tail_truncation_enabled else 1.0,
+        attention_stable_token_fraction=(
+            config.attention_stable_token_fraction
+        ),
+        attention_unstable_pair_weight=(
+            config.attention_unstable_pair_weight
+        ),
     )
     attention_extractor = _image_attention_extractor(
         pipeline,
@@ -1150,6 +1427,7 @@ def run_semantic_watermark_runtime(
             "detector_input_access_mode": "image_key_public_model_only",
             "supports_paper_claim": False,
             "paired_quality": paired_quality,
+            "final_image_preservation": final_image_preservation,
             "scientific_unit_config": semantic_watermark_runtime_config_payload(
                 config
             ),

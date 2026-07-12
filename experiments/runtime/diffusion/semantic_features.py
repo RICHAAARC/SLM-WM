@@ -9,6 +9,13 @@ from typing import Any
 from experiments.runtime.model_sources import require_registered_model_reference
 
 
+SEMANTIC_FEATURE_SCHEMA = "full_normalized_clip_embedding"
+VISUAL_FEATURE_SCHEMA = "full_global_gradient_multiscale_visual_vector"
+SEMANTIC_FEATURE_WIDTH = 512
+VISUAL_FEATURE_WIDTH = 204
+JOINT_FEATURE_WIDTH = SEMANTIC_FEATURE_WIDTH + VISUAL_FEATURE_WIDTH
+
+
 def load_clip_vision_model(
     model_id: str,
     model_revision: str,
@@ -124,7 +131,8 @@ class DifferentiableSemanticFeatureRuntime:
         image = self.decode_latent(latent)
         return self._visual_features_from_image(image)
 
-    def _visual_features_from_image(self, image: Any) -> Any:
+    @staticmethod
+    def _visual_features_from_image(image: Any) -> Any:
         """从已解码图像计算视觉质量特征。"""
 
         import torch
@@ -146,37 +154,50 @@ class DifferentiableSemanticFeatureRuntime:
         )
 
     def joint_features(self, latent: Any) -> tuple[Any, Any]:
-        """一次 VAE 解码同时返回语义与视觉特征, 用于块状真实 JVP。"""
+        """一次 VAE 解码同时返回未压缩语义与完整视觉特征。"""
 
         image = self.decode_latent(latent)
-        return self._semantic_features_from_image(image), self._visual_features_from_image(image)
+        return self.joint_image_features(image)
 
-    @staticmethod
-    def _condition_blocks(features: Any, block_count: int = 8) -> Any:
-        """把真实特征向量汇总为固定数量的可微语义条件。"""
+    def joint_image_features(self, image: Any) -> tuple[Any, Any]:
+        """从 [0, 1] 图像 tensor 返回未压缩语义与完整视觉特征。"""
+
+        if image.ndim != 4 or image.shape[1] != 3:
+            raise ValueError("完整图像特征要求 [batch, 3, height, width] tensor")
+        return (
+            self._semantic_features_from_image(image),
+            self._visual_features_from_image(image),
+        )
+
+    def full_joint_feature_vector(self, latent: Any) -> Any:
+        """返回进入正式 Jacobian 的716维完整特征向量。"""
 
         import torch
 
-        flattened = features.reshape(-1)
-        if flattened.numel() < block_count:
-            raise ValueError("特征宽度不足以构造语义条件分块")
-        return torch.stack(tuple(block.mean() for block in torch.tensor_split(flattened, block_count)))
-
-    def semantic_condition_features(self, latent: Any) -> Any:
-        """返回 8 个 CLIP 嵌入分块均值, 作为显式语义保持条件。"""
-
-        return self._condition_blocks(self.semantic_features(latent))
-
-    def visual_condition_features(self, latent: Any) -> Any:
-        """返回 8 个真实视觉统计分块均值, 作为质量保持条件。"""
-
-        return self._condition_blocks(self.visual_features(latent))
-
-    def joint_condition_features(self, latent: Any) -> tuple[Any, Any]:
-        """一次 VAE 解码返回语义与视觉条件, 供精确 JVP 复用。"""
-
         semantic, visual = self.joint_features(latent)
-        return self._condition_blocks(semantic), self._condition_blocks(visual)
+        vector = torch.cat((semantic.reshape(-1).float(), visual.reshape(-1).float()))
+        if latent.shape[0] == 1 and vector.numel() != JOINT_FEATURE_WIDTH:
+            raise RuntimeError("完整 Jacobian 特征宽度与冻结 CLIP/视觉 schema 不一致")
+        return vector
+
+    def feature_schema_record(self) -> dict[str, Any]:
+        """返回正式完整特征的模型身份、宽度与 schema。"""
+
+        model_config = getattr(self.vision_model, "config", None)
+        semantic_width = int(getattr(model_config, "projection_dim", 0) or 0)
+        if semantic_width <= 0:
+            projection = getattr(self.vision_model, "visual_projection", None)
+            semantic_width = int(getattr(projection, "out_features", 0) or 0)
+        if semantic_width != SEMANTIC_FEATURE_WIDTH:
+            raise ValueError("冻结 CLIP 模型 projection_dim 与正式完整特征宽度不一致")
+        return {
+            "semantic_feature_schema": SEMANTIC_FEATURE_SCHEMA,
+            "semantic_feature_width": semantic_width,
+            "visual_feature_schema": VISUAL_FEATURE_SCHEMA,
+            "visual_feature_width": VISUAL_FEATURE_WIDTH,
+            "joint_feature_width": semantic_width + VISUAL_FEATURE_WIDTH,
+            "feature_compression_applied": False,
+        }
 
     @staticmethod
     def _normalize_map(values: Any) -> Any:

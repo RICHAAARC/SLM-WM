@@ -37,6 +37,10 @@ from experiments.protocol.attacks import default_attack_configs
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
+from paper_experiments.analysis.result_analysis_payload import (
+    build_result_analysis_manifest_config,
+    build_result_analysis_payload_binding,
+)
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_result_analysis"
 DEFAULT_OUTPUT_ROOT = Path("outputs/pilot_paper_result_analysis")
@@ -682,6 +686,10 @@ def write_pilot_paper_result_analysis_outputs(
     )
     write_jsonl(failure_records_path, failure_rows)
     failure_figure_path.write_text(build_failure_case_svg(root_path, output_path, failure_rows), encoding="utf-8")
+    payload_binding = build_result_analysis_payload_binding(
+        repository_root=root_path,
+        output_dir=output_path,
+    )
 
     per_attack_ci_coverage_ready = bool(confidence_interval_rows) and bool(
         template_coverage["result_template_coverage_ready"]
@@ -759,7 +767,9 @@ def write_pilot_paper_result_analysis_outputs(
         ),
         "confidence_level": paired_summary.get("confidence_level", 0.0),
         "failure_case_record_count": len(failure_rows),
+        "failure_case_limit": int(failure_case_limit),
         "failure_case_figure_ready": failure_figure_path.is_file(),
+        **payload_binding,
         **template_coverage,
         "supports_paper_claim": per_attack_ci_coverage_ready
         and per_attack_superiority_evaluation_ready
@@ -784,52 +794,7 @@ def write_pilot_paper_result_analysis_outputs(
             relative_or_absolute(summary_path, root_path),
             relative_or_absolute(manifest_path, root_path),
         ),
-        config={
-            "failure_case_limit": int(failure_case_limit),
-            "primary_baseline_method_ids": list(PRIMARY_BASELINE_METHOD_IDS),
-            "proposed_method_id": PROPOSED_METHOD_ID,
-            "result_record_set_digest": result_record_set_digest,
-            "paired_superiority_rows_digest": paired_summary.get(
-                "paired_superiority_rows_digest", ""
-            ),
-            "paired_superiority_protocol_digest": paired_summary.get(
-                "paired_superiority_protocol_digest", ""
-            ),
-            "paired_test_prompt_count": paired_summary.get(
-                "paired_test_prompt_count", 0
-            ),
-            "paired_test_prompt_id_digest": paired_summary.get(
-                "paired_test_prompt_id_digest", ""
-            ),
-            "paired_attack_registry_digest": paired_summary.get(
-                "paired_attack_registry_digest", ""
-            ),
-            "method_observation_source_sha256_map": paired_summary.get(
-                "method_observation_source_sha256_map", {}
-            ),
-            "threshold_audit_rows_digest": paired_summary.get(
-                "threshold_audit_rows_digest", ""
-            ),
-            "claim_p_value_method": paired_summary.get(
-                "claim_p_value_method", ""
-            ),
-            "sharp_null_diagnostic_method": paired_summary.get(
-                "sharp_null_diagnostic_method", ""
-            ),
-            "bootstrap_analysis_schema": paired_summary.get(
-                "bootstrap_analysis_schema", ""
-            ),
-            "bootstrap_bit_generator": paired_summary.get(
-                "bootstrap_bit_generator", ""
-            ),
-            "bootstrap_quantile_method": paired_summary.get(
-                "bootstrap_quantile_method", ""
-            ),
-            "bootstrap_resample_count": paired_summary.get(
-                "bootstrap_resample_count", 0
-            ),
-            "confidence_level": paired_summary.get("confidence_level", 0.0),
-        },
+        config=build_result_analysis_manifest_config(summary),
         code_version=resolve_code_version(root_path),
         rebuild_command="python scripts/write_pilot_paper_result_analysis_outputs.py",
         metadata=summary,

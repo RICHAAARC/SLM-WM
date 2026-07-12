@@ -12,6 +12,9 @@ import pytest
 
 from experiments.runtime import repository_environment
 from main.core.digest import build_stable_digest
+from paper_experiments.analysis.result_analysis_payload import (
+    build_governed_paper_payload_path_map,
+)
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
     ClosurePackageSelectionError,
@@ -183,6 +186,16 @@ def create_required_outputs(
                 "full_claim_ready": paper_run_name == "full_paper" and paper_run_claim_ready,
             },
         )
+    for role, relative_path in build_governed_paper_payload_path_map(
+        paper_run_name
+    ).items():
+        payload_path = root / relative_path
+        payload_path.parent.mkdir(parents=True, exist_ok=True)
+        payload_path.write_text(
+            f"role,value\n{role},1\n",
+            encoding="utf-8",
+        )
+        governed_source_paths.append(payload_path)
     gate_dir = root / "outputs" / "result_closure_gate" / paper_run_name
     if gate_dir.is_dir():
         target_fpr = {
@@ -210,6 +223,7 @@ def create_required_outputs(
             "expected_prompt_count": expected_counts[0],
             "expected_test_count": expected_counts[1],
             "expected_prompt_id_digest": "c" * 64,
+            "expected_test_prompt_id_digest": "d" * 64,
             "result_closure_ready": result_closure_ready,
             "closure_decision": "pass" if result_closure_ready else "blocked",
             "evidence_closure_allowed": result_closure_ready,
@@ -228,6 +242,7 @@ def create_required_outputs(
             "expected_prompt_count": expected_counts[0],
             "expected_test_count": expected_counts[1],
             "expected_prompt_id_digest": "c" * 64,
+            "expected_test_prompt_id_digest": "d" * 64,
             "input_bundle_digest": input_bundle_digest,
             "report_digest": report_digest,
             "source_artifact_digests": {},
@@ -244,6 +259,7 @@ def create_required_outputs(
                     gate_report_path.relative_to(root).as_posix(),
                     gate_manifest_path.relative_to(root).as_posix(),
                 ],
+                "config": gate_config,
                 "config_digest": build_stable_digest(gate_config),
                 "code_version": "a" * 40,
                 "metadata": {
@@ -253,6 +269,7 @@ def create_required_outputs(
                     "closure_decision": "pass" if result_closure_ready else "blocked",
                     "evidence_closure_allowed": result_closure_ready,
                     "expected_prompt_id_digest": "c" * 64,
+                    "expected_test_prompt_id_digest": "d" * 64,
                     "input_bundle_digest": input_bundle_digest,
                     "report_digest": report_digest,
                     "source_artifact_digests": {},
@@ -336,6 +353,7 @@ def create_closure_input_lock(root: Path, paper_run_name: str) -> tuple[Path, ..
                 lock_path.relative_to(root).as_posix(),
                 manifest_path.relative_to(root).as_posix(),
             ],
+            "config": manifest_config,
             "config_digest": build_stable_digest(manifest_config),
             "metadata": {
                 "closure_input_lock_ready": True,

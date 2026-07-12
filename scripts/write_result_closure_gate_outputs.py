@@ -184,6 +184,7 @@ def write_result_closure_gate_outputs(
     paired_superiority_rows_path: str | Path | None = None,
     paired_superiority_summary_path: str | Path | None = None,
     paired_superiority_manifest_path: str | Path | None = None,
+    ablation_runtime_records_path: str | Path | None = None,
     ablation_summary_path: str | Path | None = None,
     ablation_manifest_path: str | Path | None = None,
     dataset_quality_summary_path: str | Path | None = None,
@@ -428,6 +429,34 @@ def write_result_closure_gate_outputs(
             paper_run_name=paper_run.run_name,
             file_name="manifest.local.json",
         ),
+        "result_analysis_confidence_interval_table": _per_run_path(
+            root_path,
+            None,
+            artifact_root="pilot_paper_result_analysis",
+            paper_run_name=paper_run.run_name,
+            file_name="confidence_interval_table.csv",
+        ),
+        "result_analysis_per_attack_superiority_table": _per_run_path(
+            root_path,
+            None,
+            artifact_root="pilot_paper_result_analysis",
+            paper_run_name=paper_run.run_name,
+            file_name="per_attack_superiority_table.csv",
+        ),
+        "result_analysis_failure_case_records": _per_run_path(
+            root_path,
+            None,
+            artifact_root="pilot_paper_result_analysis",
+            paper_run_name=paper_run.run_name,
+            file_name="failure_case_records.jsonl",
+        ),
+        "result_analysis_failure_case_figure": _per_run_path(
+            root_path,
+            None,
+            artifact_root="pilot_paper_result_analysis",
+            paper_run_name=paper_run.run_name,
+            file_name="failure_case_figure.svg",
+        ),
         "paired_outcomes": _per_run_path(
             root_path,
             paired_outcomes_path,
@@ -462,6 +491,13 @@ def write_result_closure_gate_outputs(
             artifact_root="formal_mechanism_ablation",
             paper_run_name=paper_run.run_name,
             file_name="ablation_claim_summary.json",
+        ),
+        "ablation_runtime_records": _per_run_path(
+            root_path,
+            ablation_runtime_records_path,
+            artifact_root="formal_mechanism_ablation",
+            paper_run_name=paper_run.run_name,
+            file_name="runtime_rerun_records.jsonl",
         ),
         "ablation_manifest": _per_run_path(
             root_path,
@@ -802,6 +838,9 @@ def write_result_closure_gate_outputs(
         paired_superiority_manifest=paired_superiority_manifest,
         ablation_summary=_read_json(resolved_paths["ablation_summary"]),
         ablation_manifest=_read_json(resolved_paths["ablation_manifest"]),
+        ablation_runtime_records=_read_jsonl(
+            resolved_paths["ablation_runtime_records"]
+        ),
         ablation_necessity_rows=_read_csv(
             resolved_paths["ablation_necessity_rows"]
         ),
@@ -813,6 +852,9 @@ def write_result_closure_gate_outputs(
             resolved_paths["dataset_quality_feature_report"]
         ),
         dataset_quality_metrics=_read_csv(resolved_paths["dataset_quality_metrics"]),
+        dataset_quality_feature_records=_read_jsonl(
+            resolved_paths["dataset_quality_feature_records"]
+        ),
         dataset_quality_feature_records_sha256=closure_source_file_sha256[
             _relative_or_absolute(
                 resolved_paths["dataset_quality_feature_records"],
@@ -936,6 +978,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--paired-superiority-rows-path", default=None)
     parser.add_argument("--paired-superiority-summary-path", default=None)
     parser.add_argument("--paired-superiority-manifest-path", default=None)
+    parser.add_argument("--ablation-runtime-records-path", default=None)
     parser.add_argument("--ablation-summary-path", default=None)
     parser.add_argument("--ablation-manifest-path", default=None)
     parser.add_argument("--dataset-quality-summary-path", default=None)
@@ -992,6 +1035,7 @@ def main() -> None:
         paired_superiority_rows_path=args.paired_superiority_rows_path,
         paired_superiority_summary_path=args.paired_superiority_summary_path,
         paired_superiority_manifest_path=args.paired_superiority_manifest_path,
+        ablation_runtime_records_path=args.ablation_runtime_records_path,
         ablation_summary_path=args.ablation_summary_path,
         ablation_manifest_path=args.ablation_manifest_path,
         dataset_quality_summary_path=args.dataset_quality_summary_path,

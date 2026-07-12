@@ -263,6 +263,14 @@ def _prepare_image_runtime(root: Path) -> Path:
                     "target_fpr": TARGET_FPR,
                 }
             },
+            "config_digest": build_stable_digest(
+                {
+                    "paper_run": {
+                        "run_name": PAPER_RUN_NAME,
+                        "target_fpr": TARGET_FPR,
+                    }
+                }
+            ),
             "metadata": {"geometry_protocol_calibration_ready": True},
         },
     )
@@ -412,6 +420,24 @@ def _prepare_ablation(root: Path) -> Path:
             "supports_paper_claim": True,
         },
     )
+    ablation_manifest_config = {
+        "specs": [asdict(spec) for spec in specs],
+        "target_fpr": TARGET_FPR,
+        **ablation_contract,
+        **prompt_contract,
+        "prompt_count": len(prompt_records),
+        "split_counts": {
+            split: sum(record.split == split for record in prompt_records)
+            for split in ("dev", "calibration", "test")
+        },
+        "record_digest": build_stable_digest(ablation_records),
+        "necessity_statistic_rows_digest": necessity_summary[
+            "necessity_statistic_rows_digest"
+        ],
+        "necessity_summary_digest": build_stable_digest(
+            necessity_summary
+        ),
+    }
     _write_json(
         directory / "manifest.local.json",
         {
@@ -433,17 +459,8 @@ def _prepare_ablation(root: Path) -> Path:
                     "manifest.local.json",
                 )
             ],
-            "config": {
-                "target_fpr": TARGET_FPR,
-                **ablation_contract,
-                **prompt_contract,
-                "necessity_statistic_rows_digest": necessity_summary[
-                    "necessity_statistic_rows_digest"
-                ],
-                "necessity_summary_digest": build_stable_digest(
-                    necessity_summary
-                ),
-            },
+            "config": ablation_manifest_config,
+            "config_digest": build_stable_digest(ablation_manifest_config),
             "metadata": {
                 **ablation_contract,
                 **prompt_contract,
@@ -646,6 +663,7 @@ def _prepare_dataset_quality(root: Path) -> Path:
                 **coverage,
             },
             "config": coverage,
+            "config_digest": build_stable_digest(coverage),
         },
     )
     write_test_scientific_execution_binding(
@@ -792,7 +810,7 @@ def test_ablation_and_quality_packages_reject_inexact_scientific_contracts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """消融非8项或质量特征缺配对时不得生成新的正式 ZIP。"""
+    """消融集合不精确或质量特征缺配对时不得生成新的正式 ZIP。"""
 
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
     ablation_archive = _prepare_ablation(tmp_path)
@@ -806,7 +824,7 @@ def test_ablation_and_quality_packages_reject_inexact_scientific_contracts(
     ablation_summary = json.loads(ablation_summary_path.read_text(encoding="utf-8"))
     ablation_summary["actual_ablation_ids"] = list(FORMAL_RUNTIME_RERUN_ABLATION_IDS[:6])
     _write_json(ablation_summary_path, ablation_summary)
-    with pytest.raises(RuntimeError, match="精确8项规范"):
+    with pytest.raises(RuntimeError, match="精确11项规范"):
         package_runtime_rerun_ablations(PAPER_RUN_NAME, root=tmp_path)
 
     quality_archive = _prepare_dataset_quality(tmp_path)

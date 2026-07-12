@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,9 @@ import pytest
 from scripts.write_pilot_paper_result_analysis_outputs import (
     build_result_template_coverage,
     write_pilot_paper_result_analysis_outputs,
+)
+from paper_experiments.analysis.result_analysis_payload import (
+    result_analysis_payload_binding_ready,
 )
 
 
@@ -226,6 +230,21 @@ def test_pilot_paper_result_analysis_rebuilds_tables_and_failure_figure(tmp_path
     assert "jpeg_compression" in svg_text
     assert "placeholder" not in svg_text
     assert summary["failure_case_figure_ready"] is True
+    payload_path_map = summary["result_analysis_payload_path_map"]
+    payload_sha256_map = summary["result_analysis_payload_sha256_map"]
+    actual_source_sha256 = {
+        path: hashlib.sha256((tmp_path / path).read_bytes()).hexdigest()
+        for path in payload_path_map.values()
+    }
+    assert {
+        role: actual_source_sha256[path]
+        for role, path in payload_path_map.items()
+    } == payload_sha256_map
+    assert result_analysis_payload_binding_ready(
+        summary=summary,
+        manifest=manifest,
+        actual_source_sha256=actual_source_sha256,
+    )
     assert summary["result_template_coverage_ready"] is False
     assert summary["supports_paper_claim"] is False
 

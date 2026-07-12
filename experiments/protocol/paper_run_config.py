@@ -35,9 +35,27 @@ DEFAULT_NULL_SPACE_RANK = _FORMAL_METHOD_DEFAULTS.null_space_rank
 DEFAULT_LF_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.lf_relative_strength
 DEFAULT_TAIL_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.tail_relative_strength
 DEFAULT_ATTENTION_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.attention_relative_strength
+DEFAULT_ATTENTION_STABLE_TOKEN_FRACTION = (
+    _FORMAL_METHOD_DEFAULTS.attention_stable_token_fraction
+)
+DEFAULT_ATTENTION_UNSTABLE_PAIR_WEIGHT = (
+    _FORMAL_METHOD_DEFAULTS.attention_unstable_pair_weight
+)
 DEFAULT_TAIL_FRACTION = _FORMAL_METHOD_DEFAULTS.tail_fraction
 DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION = _FORMAL_METHOD_DEFAULTS.minimum_projection_energy_retention
 DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL = _FORMAL_METHOD_DEFAULTS.maximum_relative_response_residual
+DEFAULT_NULL_SPACE_CG_MAX_ITERATIONS = (
+    _FORMAL_METHOD_DEFAULTS.null_space_cg_max_iterations
+)
+DEFAULT_NULL_SPACE_CG_RELATIVE_TOLERANCE = (
+    _FORMAL_METHOD_DEFAULTS.null_space_cg_relative_tolerance
+)
+DEFAULT_MINIMUM_SEMANTIC_PRESERVATION_COSINE = (
+    _FORMAL_METHOD_DEFAULTS.minimum_semantic_preservation_cosine
+)
+DEFAULT_MAXIMUM_VISUAL_FEATURE_RELATIVE_DRIFT = (
+    _FORMAL_METHOD_DEFAULTS.maximum_visual_feature_relative_drift
+)
 UNBOUNDED_LIMIT_TOKENS = {"", "all", "none", "unlimited"}
 SHARED_METHOD_SETTING_FIELDS = (
     "inference_steps",
@@ -48,9 +66,15 @@ SHARED_METHOD_SETTING_FIELDS = (
     "lf_relative_strength",
     "tail_relative_strength",
     "attention_relative_strength",
+    "attention_stable_token_fraction",
+    "attention_unstable_pair_weight",
     "tail_fraction",
     "minimum_projection_energy_retention",
     "maximum_relative_response_residual",
+    "null_space_cg_max_iterations",
+    "null_space_cg_relative_tolerance",
+    "minimum_semantic_preservation_cosine",
+    "maximum_visual_feature_relative_drift",
 )
 
 RUN_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -108,9 +132,25 @@ class PaperRunConfig:
     lf_relative_strength: float = DEFAULT_LF_RELATIVE_STRENGTH
     tail_relative_strength: float = DEFAULT_TAIL_RELATIVE_STRENGTH
     attention_relative_strength: float = DEFAULT_ATTENTION_RELATIVE_STRENGTH
+    attention_stable_token_fraction: float = (
+        DEFAULT_ATTENTION_STABLE_TOKEN_FRACTION
+    )
+    attention_unstable_pair_weight: float = (
+        DEFAULT_ATTENTION_UNSTABLE_PAIR_WEIGHT
+    )
     tail_fraction: float = DEFAULT_TAIL_FRACTION
     minimum_projection_energy_retention: float = DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION
     maximum_relative_response_residual: float = DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL
+    null_space_cg_max_iterations: int = DEFAULT_NULL_SPACE_CG_MAX_ITERATIONS
+    null_space_cg_relative_tolerance: float = (
+        DEFAULT_NULL_SPACE_CG_RELATIVE_TOLERANCE
+    )
+    minimum_semantic_preservation_cosine: float = (
+        DEFAULT_MINIMUM_SEMANTIC_PRESERVATION_COSINE
+    )
+    maximum_visual_feature_relative_drift: float = (
+        DEFAULT_MAXIMUM_VISUAL_FEATURE_RELATIVE_DRIFT
+    )
 
     def __post_init__(self) -> None:
         """集中校验内容载体维度边界。
@@ -124,10 +164,30 @@ class PaperRunConfig:
             raise ValueError("jacobian_candidate_count 必须不小于正的 null_space_rank")
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
+        if not 0.0 < self.attention_stable_token_fraction <= 1.0:
+            raise ValueError(
+                "attention_stable_token_fraction 必须位于 (0, 1]"
+            )
+        if not 0.0 <= self.attention_unstable_pair_weight < 1.0:
+            raise ValueError(
+                "attention_unstable_pair_weight 必须位于 [0, 1)"
+            )
         if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
             raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
         if not 0.0 < self.maximum_relative_response_residual <= 1.0:
             raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
+        if self.null_space_cg_max_iterations <= 0:
+            raise ValueError("null_space_cg_max_iterations 必须为正整数")
+        if not 0.0 < self.null_space_cg_relative_tolerance < 1.0:
+            raise ValueError("null_space_cg_relative_tolerance 必须位于 (0, 1)")
+        if not 0.0 < self.minimum_semantic_preservation_cosine <= 1.0:
+            raise ValueError(
+                "minimum_semantic_preservation_cosine 必须位于 (0, 1]"
+            )
+        if not 0.0 <= self.maximum_visual_feature_relative_drift <= 1.0:
+            raise ValueError(
+                "maximum_visual_feature_relative_drift 必须位于 [0, 1]"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         """转换为 JSON 兼容字典, 便于写入 manifest 或 Notebook 日志。"""

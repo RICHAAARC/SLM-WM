@@ -47,6 +47,7 @@ Notebook 与 repository module 的跨边界数据
 | artifact_type | artifact | none | false | false | false | 受治理论文产物类型, 例如 table、figure、report 或 manifest。 |
 | input_paths | artifact | none | false | false | false | 产物重建所需输入路径。 |
 | output_paths | artifact | none | false | false | false | 产物重建生成输出路径。 |
+| config | artifact | none | false | false | false | 产物重建使用的完整结构化配置; 敏感密钥只允许记录稳定摘要。 |
 | config_digest | artifact | none | false | false | false | 产物重建配置摘要。 |
 | code_version | artifact | none | false | false | false | 产物重建所用的精确40位小写 Git 提交 SHA; dirty 状态不得进入正式证据。 |
 | formal_execution_lock_schema | protocol | none | false | false | false | clean detached Git 正式执行锁使用的稳定 schema 名称。 |
@@ -125,8 +126,8 @@ Notebook 与 repository module 的跨边界数据
 | lf_basis | method | none | false | false | false | LF 路由投影后的子基底。 |
 | tail_basis | method | none | false | false | false | 高斯幅值尾部截断路由投影后的子基底。 |
 | attention_basis | method | none | false | false | false | attention 路由投影后的子基底。 |
-| selected_indices | method | none | false | false | false | Jacobian 低响应子空间基底选中的 latent 位置。 |
-| basis_rank | method | none | false | false | false | 语义条件 Jacobian 低响应子空间的实际秩。 |
+| selected_indices | method | none | false | false | false | Jacobian Null Space 基底构造使用的 latent 位置索引。 |
+| basis_rank | method | none | false | false | false | 完整特征 Jacobian Null Space 的实际基底秩。 |
 | selected_index_count_min | metric | none | false | false | false | 当前语义子空间输出中每条安全基底选中索引数量的最小值。 |
 | selected_index_count_max | metric | none | false | false | false | 当前语义子空间输出中每条安全基底选中索引数量的最大值。 |
 | condition_id | method | none | false | false | false | 语义条件化水印路由对象的稳定标识。 |
@@ -172,7 +173,7 @@ Notebook 与 repository module 的跨边界数据
 | lambda_lf | method | none | true | false | false | 内容分数中 LF 分支权重。 |
 | lambda_tail | method | none | true | false | false | 内容分数中的高斯幅值尾部截断分支权重。 |
 | used_independent_branch_vote | method | none | true | false | false | 是否使用 LF/高斯幅值尾部截断独立阈值投票。正式方法应为 false。 |
-| registration_confidence | method | none | true | false | false | 几何恢复的注册置信度。 |
+| registration_confidence | metric | none | true | true | false | 双向关系分数、锚点内点比例、残差和最小双向覆盖率共同定义的注册置信度。 |
 | anchor_inlier_ratio | method | none | true | false | false | attention anchor 内点比例。 |
 | recovered_sync_consistency | method | none | true | false | false | 恢复后相对关系同步一致性。 |
 | alignment_residual | method | none | true | false | false | 几何恢复后的残差。 |
@@ -1650,8 +1651,8 @@ Notebook 与 repository module 的跨边界数据
 | branch_name | method | none | true | false | false | 分支风险场、Null Space 或载体所属的机制分支。 |
 | bundle_digest | method | none | true | false | false | 三个分支风险场组合后的稳定摘要。 |
 | eligible_indices | method | none | true | false | false | 分支风险阈值允许承载的位置索引。 |
-| jvp_mode | method | none | true | false | false | Jacobian 方向导数的实现方式, 正式值为 torch_func_linearize_exact_jvp、torch_autograd_exact_jvp 或 torch_autograd_exact_jvp_compatibility。 |
-| solver_digest | method | none | true | false | false | 真实 JVP/SVD 子空间求解记录摘要。 |
+| jvp_mode | method | none | true | false | false | 完整 Jacobian 线性算子的实现方式, 正式值为 torch_func_exact_jvp_vjp 或 torch_autograd_exact_jvp_vjp_compatibility。 |
+| solver_digest | method | none | true | false | false | 完整特征 JVP/VJP 与无阻尼约束投影求解记录摘要。 |
 | response_residual | metric | none | true | true | false | 小奇异值系数在联合响应矩阵上的残差范数。 |
 | orthogonality_error | metric | none | true | true | false | latent 安全基底相对单位矩阵的正交误差。 |
 | projection_energy_retention | metric | none | true | true | false | 固定检测模板投影到安全子空间后保留的能量比例。 |
@@ -1752,8 +1753,8 @@ Notebook 与 repository module 的跨边界数据
 | preferred_direction_count | method | none | true | false | false | Jacobian 候选矩阵中显式纳入的固定载体或注意力梯度方向数量。 |
 | preferred_direction_role | method | none | true | false | false | 优先候选方向在当前分支中承担的固定载体或注意力梯度角色。 |
 | minimum_projection_energy_retention | protocol | none | true | false | false | 固定盲检模板投影到语义安全子空间后必须保留的最小能量比例。 |
-| relative_response_residual | metric | none | true | true | false | 选中子空间平均响应相对全部候选平均响应的归一化残差。 |
-| maximum_relative_response_residual | protocol | none | true | false | false | 语义条件低响应子空间允许的最大归一化响应残差。 |
+| relative_response_residual | metric | none | true | true | false | QR 后 Null Space 基底逐列完整 Jacobian 相对响应残差的最大值。 |
+| maximum_relative_response_residual | protocol | none | true | false | false | QR 后完整 Jacobian Null Space 基底逐列允许的最大相对响应残差。 |
 | scientific_update_record_count | metric | none | true | false | false | 数据集正式运行实际生成的关键科学算子注入记录数量。 |
 | expected_scientific_update_record_count | metric | none | true | false | false | Prompt 数量乘以冻结注入时刻数量得到的预期科学算子记录数。 |
 | scientific_operator_failure_count | metric | none | true | false | false | 未通过精确 JVP、残差、正交性、载体能量或 Q/K 单调提升检查的注入记录数。 |
@@ -1864,10 +1865,10 @@ Notebook 与 repository module 的跨边界数据
 | submission_readiness_digest | provenance | none | false | false | false | 投稿就绪报告的稳定摘要。 |
 | entry_review_digest | provenance | none | false | false | false | 论文证据闭合入口审查报告的稳定摘要。 |
 | generation_latent_trace_required | protocol | none | true | false | false | 正式检测是否依赖生成 latent 轨迹; 仅图像盲检正式路径必须为 false。 |
-| expected_ablation_ids | protocol | none | false | false | false | 正式机制消融唯一允许的8项受治理标识序列。 |
+| expected_ablation_ids | protocol | none | false | false | false | 正式机制消融当前冻结的完整受治理标识序列。 |
 | actual_ablation_ids | protocol | none | false | false | false | 当前正式消融实际运行并汇总的机制标识序列。 |
 | ablation_spec_digest | provenance | none | false | false | false | 对实际消融配置完整字段序列计算的稳定摘要。 |
-| ablation_exact_set_ready | governance | none | false | false | false | 实际消融标识、顺序和配置摘要是否与唯一8项正式规范完全一致。 |
+| ablation_exact_set_ready | governance | none | false | false | false | 实际消融标识、顺序和配置摘要是否与当前冻结的完整正式规范完全一致。 |
 | registry_prompt_count | metric | none | false | false | false | 数据集质量图像 registry 中实际出现的 Prompt 记录数量。 |
 | duplicate_registry_prompt_id_count | metric | none | false | false | false | 数据集质量 registry 中重复 Prompt 标识的数量。 |
 | missing_registry_prompt_id_count | metric | none | false | false | false | 当前受治理 Prompt 集中未被质量 registry 覆盖的标识数量。 |
@@ -2381,7 +2382,11 @@ Notebook 与 repository module 的跨边界数据
 | use_dynamic_shifting | protocol | none | false | false | false | FlowMatch scheduler 是否依据图像序列长度计算动态 shift。 |
 | result_path | provenance | none | false | false | false | 精确父编排入口写出的受治理 workflow 结果文件路径。 |
 | orchestrator_bootstrap_identity | provenance | none | false | false | false | 标准库宿主入口实际创建的父 profile、完整锁、精确 Python 版本、解释器路径与解释器文件摘要。 |
-| ablation_necessity_statistics_ready | governance | none | true | false | false | 7项机制必要性统计是否通过结构和摘要绑定门禁。 |
+| failure_case_limit | protocol | none | false | false | false | 结果分析失败案例记录与图最多纳入的真实失败样本数。 |
+| result_analysis_payload_path_map | provenance | none | true | false | false | 结果分析主置信区间表、逐攻击表、失败记录与失败案例图的固定角色到受治理路径映射。 |
+| result_analysis_payload_sha256_map | provenance | none | true | false | false | 结果分析固定 payload 角色到门禁即时复算文件 SHA-256 的映射。 |
+| result_analysis_payload_digest | provenance | none | true | false | false | 结果分析固定 payload 路径映射与文件 SHA-256 映射的稳定组合摘要。 |
+| ablation_necessity_statistics_ready | governance | none | true | false | false | 当前 manifest 声明的全部非完整方法变体必要性统计是否通过结构和摘要绑定门禁。 |
 | adjusted_significance_ready | metric | none | true | true | false | Holm 校正后的单侧配对检验是否达到预注册显著性水平。 |
 | all_mechanism_necessity_claims_supported | governance | none | true | true | false | 全部单机制必要性主张是否均满足预注册统计条件。 |
 | clean_true_positive_mean_paired_effect | metric | none | true | true | false | 完整方法减去消融变体的 clean TPR Prompt 配对均值效应。 |
@@ -2419,7 +2424,7 @@ Notebook 与 repository module 的跨边界数据
 | registration_objective_margin | metric | none | true | true | false | 最优配准目标相对非近重复候选目标的差值。 |
 | registration_candidate_count | protocol | none | true | false | false | 双边关系图配准实际评估的冻结仿射候选数量。 |
 | sync_margin_duplicate_transform_tolerance | protocol | none | true | false | false | 计算配准目标差值时排除近重复仿射候选所用的冻结矩阵距离阈值。 |
-| registration_geometry_reliable | metric | none | true | true | false | 仅依据覆盖率、唯一对应和重采样残差得到的结构配准可靠性。 |
+| registration_geometry_reliable | metric | none | true | true | false | 由正双向关系、正目标间隔、双向最小覆盖率、锚点内点比例和重采样残差共同得到的结构注册可靠性。 |
 | registration_confidence_threshold | protocol | none | true | true | false | calibration clean negatives 冻结的配准置信度门限。 |
 | attention_sync_score_threshold | protocol | none | true | true | false | calibration clean negatives 冻结的对齐后真实 Q/K 同步分数门限。 |
 | raw_attention_geometry_score | metric | none | true | true | false | 对待检图像未执行几何配准时计算的真实 Q/K 密钥关系分数。 |
@@ -2441,3 +2446,80 @@ Notebook 与 repository module 的跨边界数据
 | optimization_base | method | none | true | false | false | attention 几何优化实际采用的固定基底更新身份。 |
 | verified_candidate | method | none | true | false | false | 单调回溯最终复算并接受的真实候选 latent 角色。 |
 | relation_transform | method | none | true | false | false | attention 双边关系图从观测参考系恢复到规范参考系的矩阵变换公式。 |
+| observation_relation_score | metric | none | true | true | false | 候选仿射在观测参考系中以前推密钥关系图解释真实 Q/K 关系的归一化分数。 |
+| identity_observation_relation_score | metric | none | true | true | false | identity 仿射候选在观测参考系中的关系分数, 用作几何对齐增益基准。 |
+| registration_alignment_gain | metric | none | true | true | false | 最优候选观测关系分数相对 identity 候选的确定性增益。 |
+| bidirectional_relation_score | metric | none | true | true | false | 规范拉回关系分数与观测前推关系分数按冻结权重组合的注册分数。 |
+| registration_objective_score | metric | none | true | true | false | 双向关系分数扣除双向覆盖与唯一采样惩罚后的候选注册目标。 |
+| registration_coverage_penalty | metric | none | true | true | false | 最优候选由规范侧和观测侧覆盖率及唯一采样率共同产生的目标扣减值。 |
+| canonical_coverage_ratio | metric | none | true | true | false | 候选从规范 token 坐标采样观测关系图时处于有效网格内的位置比例。 |
+| observation_coverage_ratio | metric | none | true | true | false | 候选从观测 token 坐标前推密钥关系图时处于有效规范网格内的位置比例。 |
+| canonical_unique_ratio | metric | none | true | true | false | 规范拉回方向中有效采样覆盖的唯一观测 token 比例。 |
+| observation_unique_ratio | metric | none | true | true | false | 观测前推方向中有效采样覆盖的唯一规范 token 比例。 |
+| canonical_relation_weight | protocol | none | true | false | false | 注册目标中规范拉回关系分数采用的冻结权重。 |
+| observation_relation_weight | protocol | none | true | false | false | 注册目标中观测前推关系分数采用的冻结权重。 |
+| registration_coverage_penalty_weight | protocol | none | true | false | false | 双向覆盖率和唯一采样率缺失项采用的冻结惩罚权重。 |
+| minimum_registration_coverage | protocol | none | true | true | false | 规范拉回与观测前推方向都必须满足的结构注册最小覆盖率。 |
+| observation_relation_transform | method | none | true | false | false | 密钥关系图从规范参考系前推到观测参考系的双边矩阵变换公式。 |
+| registration_objective | method | none | true | false | false | 双向关系分数与覆盖惩罚组成注册候选目标的冻结公式身份。 |
+| ablation_runtime_records | artifact | none | true | true | false | 最终结果闭合直接消费的逐 Prompt 正式机制消融重运行记录集合。 |
+| ablation_raw_record_count | metric | none | true | true | false | 进入机制必要性独立重建的原始正式消融记录数量。 |
+| ablation_raw_records_digest | provenance | none | true | true | false | 机制必要性独立重建实际消费的原始正式消融记录稳定摘要。 |
+| ablation_statistics_rebuilt_rows_digest | provenance | none | true | true | false | 从逐 Prompt 原始消融记录独立重建的必要性统计行稳定摘要。 |
+| ablation_statistics_rebuild_ready | governance | none | true | true | false | 原始消融记录重建结果是否与必要性 CSV、必要性 summary 和 claim summary 逐字段一致。 |
+| formal_ablation_raw_records_digest | provenance | none | true | true | false | 最终结果闭合报告绑定的完整正式消融原始记录摘要。 |
+| dataset_quality_feature_records | artifact | none | true | true | false | 最终结果闭合直接消费的逐图像正式 Inception 特征记录集合。 |
+| dataset_quality_feature_record_count | metric | none | true | true | false | 进入 FID/KID 独立重算的正式 feature record 数量。 |
+| dataset_quality_rebuilt_metric_rows_digest | provenance | none | true | true | false | 从正式 feature records 独立重算并规范化后的 FID/KID 指标行摘要。 |
+| dataset_quality_metric_relative_tolerance | protocol | none | true | true | false | 比较 GPU 生成值与 CPU float64 独立重算值时采用的冻结相对误差界。 |
+| dataset_quality_metric_absolute_tolerance | protocol | none | true | true | false | 比较 GPU 生成值与 CPU float64 独立重算值时采用的冻结绝对误差界。 |
+| dataset_quality_metric_rebuild_ready | governance | none | true | true | false | 正式 feature records 是否能独立重算 FID/KID 且与指标表全部字段一致。 |
+| dataset_quality_feature_records_content_digest | provenance | none | true | true | false | 最终结果闭合报告直接绑定的规范 feature records 字节级 SHA-256。 |
+| branch_risk_mode | method | none | true | false | false | 载体路由使用分支特定风险场或共享全局风险对照的真实机制模式。 |
+| attention_stable_token_fraction | protocol | none | true | false | false | 真实 Q/K 关系图按稳定度与接收 attention 显著度固定选择的 token 比例。 |
+| attention_unstable_pair_weight | protocol | none | true | false | false | 稳定 token 集合外规则网格关系在 Q/K 目标中保留的冻结支撑权重。 |
+| minimum_semantic_preservation_cosine | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的完整 CLIP cosine 冻结下界。 |
+| maximum_visual_feature_relative_drift | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的完整视觉特征相对漂移冻结上界。 |
+| semantic_feature_schema | method | none | true | false | false | 正式 Jacobian 直接使用的完整归一化 CLIP embedding 定义。 |
+| semantic_feature_width | protocol | none | true | false | false | 进入完整 Jacobian 的 CLIP embedding 坐标数量, 当前冻结为512。 |
+| visual_feature_schema | method | none | true | false | false | 正式 Jacobian 直接使用的完整通道统计、梯度与8x8空间视觉向量定义。 |
+| visual_feature_width | protocol | none | true | false | false | 进入完整 Jacobian 的视觉特征坐标数量, 当前冻结为204。 |
+| joint_feature_width | protocol | none | true | false | false | 完整语义与视觉特征连接后的 Jacobian 输出宽度, 当前冻结为716。 |
+| feature_compression_applied | governance | none | true | true | false | 正式 Jacobian 输入是否经过降维或草图压缩, 正式值必须为 false。 |
+| null_space_cg_max_iterations | protocol | none | true | false | false | 无阻尼 PSD-CG 对每个风险支持方向允许的最大迭代次数。 |
+| null_space_cg_relative_tolerance | protocol | none | true | true | false | 无阻尼 PSD-CG 的冻结相对残差收敛阈值。 |
+| cg_converged | governance | none | true | true | false | 返回 Null Space 前全部被接受方向的无阻尼 PSD-CG 是否收敛。 |
+| cg_iteration_counts | metric | none | true | true | false | 构成 Null Space 基底的各方向实际 PSD-CG 迭代次数。 |
+| cg_relative_residuals | metric | none | true | true | false | 构成 Null Space 基底的各方向最终 PSD-CG 相对残差。 |
+| cg_damping | method | none | true | true | false | PSD-CG 使用的阻尼系数, 真实 Null Space 正式值必须为0。 |
+| cg_maximum_iterations | protocol | none | true | false | false | 单个 Null Space 记录实际采用的 PSD-CG 最大迭代次数。 |
+| cg_relative_tolerance | protocol | none | true | true | false | 单个 Null Space 记录实际采用的 PSD-CG 相对收敛阈值。 |
+| column_response_norms | metric | none | true | true | false | QR 后每个 Null Space 基底列的完整 Jacobian 响应 L2 范数。 |
+| column_relative_response_residuals | metric | none | true | true | false | QR 后每个基底列相对风险支持种子响应尺度的完整 Jacobian 残差。 |
+| projection_energy_retentions | metric | none | true | true | false | 每个被接受风险支持种子在完整 Jacobian 约束投影后的能量保留比例。 |
+| evaluated_direction_count | metric | none | true | true | false | 为形成指定 Null Space 秩实际执行约束投影的种子方向数量。 |
+| evaluated_direction_indices | provenance | none | true | false | false | 构成 Null Space 基底的密钥种子方向索引集合。 |
+| full_feature_jvp | method | none | true | true | false | 求解器是否对未压缩联合特征执行真实 JVP。 |
+| full_feature_vjp | method | none | true | true | false | 求解器是否对未压缩联合特征执行真实 VJP。 |
+| risk_budget_operator | method | none | true | false | false | 风险预算在矩阵自由约束投影中作为显式对角算子 B 的身份。 |
+| maximum_orthogonality_error | protocol | none | true | true | false | QR 后 Null Space 基底允许的最大正交误差。 |
+| solver | method | none | true | false | false | Null Space 记录采用的矩阵自由完整 Jacobian 求解器身份。 |
+| latent_basis_formula | method | none | true | false | false | 风险支持完整 Jacobian 约束投影与 QR 的基底公式身份。 |
+| full_semantic_cosine_similarity | metric | none | true | true | false | 实际 combined latent 写回前后未压缩 CLIP embedding 的 cosine 相似度。 |
+| full_visual_feature_relative_drift | metric | none | true | true | false | 实际 combined latent 写回前后完整视觉特征向量的相对 L2 漂移。 |
+| semantic_preservation_gate_ready | governance | none | true | true | false | 实际 combined latent 是否同时满足完整 CLIP 与视觉特征保持门禁。 |
+| preservation_validation_scope | method | none | true | false | false | 有限更新保持性复验实际覆盖的 combined latent 和完整特征范围。 |
+| final_image_preservation | method | none | true | true | false | 最终 clean 与 watermarked 成图累计完整特征保持记录。 |
+| final_image_semantic_cosine_similarity | metric | none | true | true | false | 最终 clean 与 watermarked 成图的完整 CLIP embedding cosine。 |
+| final_image_visual_feature_relative_drift | metric | none | true | true | false | 最终 clean 与 watermarked 成图的完整视觉特征相对 L2 漂移。 |
+| final_image_preservation_gate_ready | governance | none | true | true | false | 最终成图是否通过累计完整 CLIP 与视觉特征保持门禁。 |
+| final_image_preservation_failure_count | metric | none | true | true | false | 数据集运行中未通过最终成图累计保持门禁的样本数量。 |
+| stable_token_selection_digest | provenance | none | true | false | false | 一次注入中冻结的稳定 token 选择规则、索引和分数稳定摘要。 |
+| aligned_stable_token_indices | method | none | true | false | false | 对齐图像重新提取真实 Q/K 后独立选出的稳定 token 原始索引。 |
+| aligned_stable_token_selection_digest | provenance | none | true | false | false | 对齐图像重新提取 Q/K 后稳定 token 选择的稳定摘要。 |
+| stable_token_selection_rule | method | none | true | false | false | 由跨层关系稳定度与接收 attention 显著度联合排序的冻结选择规则。 |
+| stable_token_positions | method | none | false | false | false | 稳定 token 在当前规则 Q/K 抽样矩阵中的列位置集合。 |
+| stable_token_fraction | protocol | none | true | false | false | 单次 Q/K 优化记录实际采用的稳定 token 固定选择比例。 |
+| unstable_pair_weight | protocol | none | true | false | false | 单次 Q/K 优化记录实际采用的非稳定 token 关系支撑权重。 |
+| selection_rule | method | none | false | false | false | 稳定 token 选择摘要内部绑定的确定性排序规则身份。 |
+| selection_scores | metric | none | false | false | false | 稳定 token 选择摘要内部绑定的逐 token 排序分数。 |

@@ -25,7 +25,7 @@
 | --- | --- |
 | `main/core/` | 稳定摘要等最小数学与数据工具 |
 | `main/methods/semantic/` | 分支风险场与语义条件向量 |
-| `main/methods/subspace/` | 语义条件 Jacobian 低响应子空间 |
+| `main/methods/subspace/` | 完整特征 Jacobian Null Space |
 | `main/methods/carrier/` | 空间 LF、高斯幅值尾部截断与密钥张量载体 |
 | `main/methods/geometry/` | 真实 Q/K attention 几何和可微更新 |
 | `main/methods/detection/` | 最终图像盲检与同阈值证据判定 |
@@ -62,7 +62,7 @@
 2. 保留分支间独立风险, 不把单一位置风险复制到全部载体。
 3. 输出归一化风险、分支权重和稳定摘要。
 
-### 4.2 语义条件 Jacobian 低响应子空间
+### 4.2 完整特征 Jacobian Null Space
 
 1. 在真实 SD3.5 / CLIP 语义响应上构造精确 JVP 或等价 Jacobian 线性算子。
 2. 对候选方向执行奇异值分解或等价低响应求解。
@@ -73,7 +73,7 @@
 
 - 空间 LF 分支使用明确的空间低通构造。
 - `tail_robust` 分支按高斯模板绝对幅值的尾部集合截断。
-- 两个分支均按密钥生成符号与置换, 再投影到低响应子空间。
+- 两个分支均按密钥生成符号与置换, 再投影到逐列通过完整 Jacobian 残差门禁的 Null Space。
 - `tail_robust` 不执行 FFT、DCT、带通滤波或空间频带 mask。
 
 ### 4.4 Q/K attention 几何

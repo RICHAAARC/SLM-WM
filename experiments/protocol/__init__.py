@@ -16,6 +16,7 @@ from experiments.protocol.calibration import (
 )
 from experiments.protocol.dataset_quality import (
     FORMAL_FEATURE_BACKEND,
+    FORMAL_FEATURE_EXTRACTOR_ID,
     FORMAL_FID_KID_BLOCKER,
     FORMAL_FID_KID_NUMERIC_BLOCKER,
     FORMAL_FID_KID_SAMPLE_BLOCKER,
@@ -23,6 +24,7 @@ from experiments.protocol.dataset_quality import (
     build_dataset_quality_image_records,
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
+    rebuild_formal_fid_kid_metric_rows,
 )
 from experiments.protocol.events import build_event_records
 from experiments.protocol.prompts import build_prompt_records, load_prompt_records
@@ -34,6 +36,7 @@ __all__ = [
     "FixedFprCalibrationConfig",
     "FixedFprThreshold",
     "FORMAL_FEATURE_BACKEND",
+    "FORMAL_FEATURE_EXTRACTOR_ID",
     "FORMAL_FID_KID_BLOCKER",
     "FORMAL_FID_KID_NUMERIC_BLOCKER",
     "FORMAL_FID_KID_SAMPLE_BLOCKER",
@@ -44,6 +47,7 @@ __all__ = [
     "build_dataset_quality_image_records",
     "build_dataset_quality_metric_rows",
     "build_dataset_quality_summary",
+    "rebuild_formal_fid_kid_metric_rows",
     "build_event_records",
     "build_prompt_records",
     "calibrated_records",

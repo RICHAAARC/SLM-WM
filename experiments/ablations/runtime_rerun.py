@@ -11,6 +11,7 @@ from typing import Any, Iterable
 from zipfile import ZIP_STORED, ZipFile
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.artifacts.manifest_schema import manifest_config_digest_ready
 from experiments.ablations.necessity_statistics import (
     ABLATION_NECESSITY_FIELDNAMES,
     build_ablation_necessity_statistics,
@@ -94,6 +95,7 @@ class RuntimeRerunAblationSpec:
 
     ablation_id: str
     semantic_routing_enabled: bool = True
+    branch_risk_mode: str = "branch_specific"
     null_space_enabled: bool = True
     lf_enabled: bool = True
     tail_robust_enabled: bool = True
@@ -111,6 +113,7 @@ class RuntimeRerunAblationSpec:
         return replace(
             config,
             semantic_routing_enabled=self.semantic_routing_enabled,
+            branch_risk_mode=self.branch_risk_mode,
             null_space_enabled=self.null_space_enabled,
             lf_enabled=self.lf_enabled,
             tail_robust_enabled=self.tail_robust_enabled,
@@ -124,12 +127,28 @@ class RuntimeRerunAblationSpec:
 FORMAL_RUNTIME_RERUN_ABLATION_SPECS = (
     RuntimeRerunAblationSpec("complete_method"),
     RuntimeRerunAblationSpec(
+        "shared_global_risk_routing",
+        branch_risk_mode="shared_global",
+    ),
+    RuntimeRerunAblationSpec(
         "without_branch_risk_routing",
         semantic_routing_enabled=False,
     ),
     RuntimeRerunAblationSpec(
         "without_jacobian_null_space",
         null_space_enabled=False,
+    ),
+    RuntimeRerunAblationSpec(
+        "lf_content_only",
+        tail_robust_enabled=False,
+        attention_geometry_enabled=False,
+        image_alignment_enabled=False,
+    ),
+    RuntimeRerunAblationSpec(
+        "tail_robust_only",
+        lf_enabled=False,
+        attention_geometry_enabled=False,
+        image_alignment_enabled=False,
     ),
     RuntimeRerunAblationSpec(
         "without_lf_content_carrier",
@@ -161,7 +180,7 @@ FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST = build_stable_digest(
 
 
 def default_runtime_rerun_ablation_specs() -> tuple[RuntimeRerunAblationSpec, ...]:
-    """返回论文协议唯一允许的8项正式重运行消融规范。"""
+    """返回论文协议唯一允许的11项正式重运行消融规范。"""
 
     return FORMAL_RUNTIME_RERUN_ABLATION_SPECS
 
@@ -410,7 +429,7 @@ def run_runtime_rerun_ablations(
     resolved_specs = specs or default_runtime_rerun_ablation_specs()
     ablation_contract = runtime_rerun_ablation_contract(resolved_specs)
     if not ablation_contract["ablation_exact_set_ready"]:
-        raise ValueError("正式消融必须精确使用受治理的8项机制规范")
+        raise ValueError("正式消融必须精确使用受治理的11项机制规范")
     resolved_base_configs = tuple(base_configs)
     if not resolved_base_configs:
         raise ValueError("真实重运行消融至少需要一个 Prompt 配置")
@@ -1026,11 +1045,12 @@ def package_runtime_rerun_ablations(
             packaged_unit_config_contract_ready,
             summary.get("supports_paper_claim") is True,
             manifest.get("artifact_id") == "formal_mechanism_ablation_manifest",
+            manifest_config_digest_ready(manifest),
             exact_set_ready,
             necessity_statistics_ready,
         )
     ):
-        raise RuntimeError("真实重运行消融身份、精确8项规范或 ready 门禁未通过")
+        raise RuntimeError("真实重运行消融身份、精确11项规范或 ready 门禁未通过")
     manifest["formal_execution_package_lock"] = formal_execution_package_lock
     (source_dir / "manifest.local.json").write_text(
         json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",

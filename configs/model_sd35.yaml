@@ -17,9 +17,15 @@ null_space_rank: 4
 lf_relative_strength: 0.0025
 tail_relative_strength: 0.0015
 attention_relative_strength: 0.0010
+attention_stable_token_fraction: 0.50
+attention_unstable_pair_weight: 0.25
 tail_fraction: 0.20
 minimum_projection_energy_retention: 0.01
 maximum_relative_response_residual: 0.0001
+null_space_cg_max_iterations: 64
+null_space_cg_relative_tolerance: 0.000001
+minimum_semantic_preservation_cosine: 0.995
+maximum_visual_feature_relative_drift: 0.02
 injection_step_indices: [6, 10, 14]
 max_attention_tokens: 64
 attention_module_count: 2

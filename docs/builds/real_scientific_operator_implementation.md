@@ -5,10 +5,11 @@
 | 机制 | 正式实现 | 作用 |
 | --- | --- | --- |
 | 分支风险场 | `main/methods/semantic/branch_risk.py` | 分别构造 LF、尾部截断和注意力几何风险与承载预算 |
-| 真实 Jacobian Null Space | `main/methods/subspace/jacobian_nullspace.py` | 通过 autograd JVP、联合响应矩阵和 SVD 求解 latent 低响应基底 |
+| 真实 Jacobian Null Space | `main/methods/subspace/jacobian_nullspace.py` | 通过完整特征 JVP/VJP、显式风险算子和无阻尼 PSD-CG 求解 rank-4 latent Null Space |
+| 语义与视觉特征 | `experiments/runtime/diffusion/semantic_features.py` | 以512维完整归一化 CLIP embedding 和204维完整视觉向量定义716维 Jacobian，并提供有限更新与最终成图复验 |
 | LF 与尾部载体 | `main/methods/carrier/keyed_tensor.py` | 构造检测端可重建的固定模板, 并在嵌入端投影到安全子空间 |
 | 真实注意力梯度 | `main/methods/geometry/differentiable_attention.py` | 从 Transformer `to_q`/`to_k` 得到真实 attention, 对 latent 求梯度 |
-| 几何恢复 | `main/methods/geometry/attention_alignment.py` | 通过双线性 $W A_{\mathrm{obs}} W^\top$ 双边关系图注册、有界变换粗搜索和局部细化恢复图像参考系 |
+| 几何恢复 | `main/methods/geometry/attention_alignment.py` | 联合规范拉回 $W A_{\mathrm{obs}} W^\top$、观测前推 $V S_K V^\top$、双向覆盖惩罚、有界变换粗搜索和局部细化恢复图像参考系 |
 | 仅图像检测 | `main/methods/detection/image_only.py` | 只接收图像、密钥和公开模型配置, 完成内容主判与同阈值救回 |
 | 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | 在 SD3.5 Medium 采样过程中执行全部真实嵌入算子 |
 | 共同攻击算子 | `experiments/runtime/diffusion/regeneration_attacks.py` | 为主方法与全部 baseline 统一执行 SD3.5 img2img、flow-matching 反向 Euler 积分、inpainting 和检测器引导搜索 |
@@ -75,14 +76,15 @@ $$
 2. 科学会话通过 `experiments.runners.image_only_dataset_workload` 读取当前 `paper_run` Prompt 文件并构造唯一正式方法配置；
 3. 复用一次加载的 SD3.5 Medium、VAE 和 CLIP 运行时；
 4. 对每个 Prompt 生成 clean 与 watermarked 图像；
-5. 对选定 test Prompt 执行9类标准图像攻击和8类真实 GPU 扩散攻击；
-6. 所有样本只从最终图像重新编码并检测；
-7. calibration clean negative 冻结包含 rescue 的完整判定协议；
-8. test split 只应用冻结协议并报告置信上界；
-9. 按需通过 `experiments.ablations.mechanism_ablation_workload` 重新运行全部机制消融；
-10. 外层 workflow 写入科学执行绑定并复用同一子解释器重新打包；
-11. 结果 records 和 manifest 进入论文共同协议 builder；
-12. 生成轨迹检测、proxy 分数和 counterfactual 分数变换不能支持论文主张。
+5. 对每次实际写回和最终 clean/watermarked 成图执行完整 CLIP/视觉特征保持门禁；
+6. 对选定 test Prompt 执行9类标准图像攻击和8类真实 GPU 扩散攻击；
+7. 所有样本只从最终图像重新编码并检测；
+8. calibration clean negative 冻结包含 rescue 的完整判定协议；
+9. test split 只应用冻结协议并报告置信上界；
+10. 按需通过 `experiments.ablations.mechanism_ablation_workload` 重新运行全部机制消融；
+11. 外层 workflow 写入科学执行绑定并复用同一子解释器重新打包；
+12. 结果 records 和 manifest 进入论文共同协议 builder；
+13. 生成轨迹检测、proxy 分数和 counterfactual 分数变换不能支持论文主张。
 
 8类 GPU 扩散攻击共享同一个受治理实现。`img2img_regeneration`、`sdedit_regeneration`、`diffusion_purification`、`global_editing_attack` 和 `visual_paraphrase_attack` 通过 `StableDiffusion3Img2ImgPipeline` 的 `image + strength` 路径执行；`flow_matching_inversion_regeneration` 通过 SD3 scheduler 的反向 Euler 积分恢复高噪声 latent 后重建；`local_editing_attack` 通过 inpainting pipeline 和面积受控 mask 执行，并在输出端严格保留 mask 外源像素；`adversarial_removal_attack` 在冻结候选查询预算内逐一调用对应方法的真实仅图像连续检测分数并选择最低分候选。攻击参数、随机种子、mask 摘要和查询轨迹写入 `attack_execution`，外部 baseline 不维护第二套 latent 混合攻击。
 
@@ -90,17 +92,19 @@ $$
 
 实现存在不等于论文结果成立。下列条件全部满足后, 结果记录才允许进入主张门禁：
 
-1. 运行记录的 `jvp_mode` 为 `torch_func_linearize_exact_jvp`、`torch_autograd_exact_jvp` 或 `torch_autograd_exact_jvp_compatibility`, 且不得使用有限差分；
-2. 基底记录包含响应残差、归一化相对响应残差和正交误差, 且相对响应不超过 0.0001；
-3. attention 来源为真实 Q/K 投影和 autograd；
-4. 检测访问模式为 `image_key_public_model_only`；
-5. test clean negative 的 95% 误报率上界不超过目标 FPR；
-6. FID/KID 使用 torch-fidelity `inception-v3-compat` 的 2048 维特征, 配对质量指标来自真实图像集合；
-7. 消融记录明确 `generation_rerun=true` 且未使用 counterfactual 分数变换；
-8. 外部 baseline 使用相同 Prompt、攻击和固定 FPR 统计边界。
+1. 运行记录的 `jvp_mode` 为 `torch_func_exact_jvp_vjp` 或 `torch_autograd_exact_jvp_vjp_compatibility`，且 `feature_compression_applied=false`；
+2. 求解器为 `matrix_free_full_jacobian_psd_cg`、`cg_damping=0`，全部方向 CG 收敛且相对残差不超过 $10^{-6}$；
+3. QR 后每个基底列的完整 Jacobian 相对响应不超过0.0001，投影能量不低于0.01，正交误差不超过 $10^{-5}$；
+4. 每次实际写回与最终 clean/watermarked 成图均通过 CLIP cosine 和视觉漂移门禁；
+5. attention 来源为真实 Q/K 投影和 autograd；
+6. 检测访问模式为 `image_key_public_model_only`；
+7. test clean negative 的95%误报率上界不超过目标 FPR；
+8. FID/KID 使用 torch-fidelity `inception-v3-compat` 的2048维特征，配对质量指标来自真实图像集合；
+9. 消融记录明确 `generation_rerun=true` 且未使用 counterfactual 分数变换；
+10. 外部 baseline 使用相同 Prompt、攻击和固定 FPR 统计边界。
 
 正式 FID/KID 的样本门禁分别为 70/700/7000 对 clean/watermarked 图像, 与三个运行层级的 Prompt 总数一致。该门禁属于项目特定的证据治理要求; 通用做法是明确记录特征提取器版本、输入图像摘要、特征维度和实际样本数。
 
 质量后端固定为 [torch-fidelity v0.4.0](https://github.com/toshas/torch-fidelity/tree/v0.4.0), 提取器为 `inception-v3-compat`, 特征层为 `2048`。运行记录必须保存 `feature_extractor_id=torch_fidelity_0_4_0_inception_v3_compat_2048`; 只有 `canonical_formal_feature_extractor_ready=true` 的质量摘要才能通过论文记录门禁。普通 torchvision ImageNet 分类权重或像素直方图不能冒充该后端。
 
-为降低 Colab 上精确 JVP 遇到 fused attention 不支持 forward AD 的风险, 正式运行固定 CLIP 视觉编码器使用 eager attention, VAE 使用 Diffusers `AttnProcessor`。该调整只改变等价注意力算子的运行实现, 不更改模型权重或方法目标; 实际配置写入 `scientific_autograd_compatibility` 环境记录。显存不足、形状错误或模型实现错误仍直接失败, 不能被兼容路径吞掉。
+为降低 Colab 上完整特征 JVP/VJP 遇到 fused attention 不支持自动微分的风险，正式运行固定 CLIP 视觉编码器使用 eager attention，VAE 使用 Diffusers `AttnProcessor`。该调整只改变等价注意力算子的运行实现，不更改模型权重或方法目标；实际配置写入 `scientific_autograd_compatibility` 环境记录。显存不足、形状错误、CG 不收敛或模型实现错误仍直接失败，不能被兼容路径吞掉。

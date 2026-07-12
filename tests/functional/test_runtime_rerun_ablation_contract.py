@@ -1,4 +1,4 @@
-"""正式重运行消融8项规范的轻量协议测试。"""
+"""正式重运行消融11项规范的轻量协议测试。"""
 
 from __future__ import annotations
 
@@ -14,16 +14,26 @@ from experiments.ablations.runtime_rerun import (
     runtime_rerun_ablation_contract,
 )
 from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.runners.semantic_watermark_runtime import (
+    SemanticWatermarkRuntimeConfig,
+    _branch_risk_configs,
+)
+from main.methods.semantic import build_branch_risk_fields
 
 
 @pytest.mark.quick
-def test_formal_runtime_rerun_ablation_contract_is_exactly_eight_items() -> None:
-    """当前正式消融必须完整覆盖8个唯一机制配置。"""
+def test_formal_runtime_rerun_ablation_contract_is_exactly_eleven_items() -> None:
+    """正式消融必须覆盖分支风险、单载体与逐机制移除配置。"""
 
     contract = runtime_rerun_ablation_contract(default_runtime_rerun_ablation_specs())
 
-    assert len(FORMAL_RUNTIME_RERUN_ABLATION_IDS) == 8
-    assert len(set(FORMAL_RUNTIME_RERUN_ABLATION_IDS)) == 8
+    assert len(FORMAL_RUNTIME_RERUN_ABLATION_IDS) == 11
+    assert len(set(FORMAL_RUNTIME_RERUN_ABLATION_IDS)) == 11
+    assert {
+        "shared_global_risk_routing",
+        "lf_content_only",
+        "tail_robust_only",
+    } <= set(FORMAL_RUNTIME_RERUN_ABLATION_IDS)
     assert contract["expected_ablation_ids"] == list(FORMAL_RUNTIME_RERUN_ABLATION_IDS)
     assert contract["actual_ablation_ids"] == list(FORMAL_RUNTIME_RERUN_ABLATION_IDS)
     assert contract["ablation_spec_digest"] == FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST
@@ -32,7 +42,7 @@ def test_formal_runtime_rerun_ablation_contract_is_exactly_eight_items() -> None
 
 @pytest.mark.quick
 def test_formal_runtime_rerun_ablation_contract_rejects_id_or_setting_drift() -> None:
-    """仅保留6项或修改同名配置字段都必须使精确集合状态失败。"""
+    """缺失正式项或修改同名配置字段都必须使精确集合状态失败。"""
 
     specs = default_runtime_rerun_ablation_specs()
     six_item_contract = runtime_rerun_ablation_contract(specs[:6])
@@ -45,6 +55,53 @@ def test_formal_runtime_rerun_ablation_contract_rejects_id_or_setting_drift() ->
         FORMAL_RUNTIME_RERUN_ABLATION_IDS
     )
     assert changed_setting_contract["ablation_exact_set_ready"] is False
+
+
+@pytest.mark.quick
+def test_shared_global_risk_ablation_reuses_one_real_risk_field() -> None:
+    """共享全局风险对照必须真实改变路由, 不能只更换消融标签。"""
+
+    spec = next(
+        item
+        for item in default_runtime_rerun_ablation_specs()
+        if item.ablation_id == "shared_global_risk_routing"
+    )
+    config = spec.apply(
+        SemanticWatermarkRuntimeConfig(),
+        "outputs/formal_mechanism_ablation/probe_paper",
+    )
+    fields = build_branch_risk_fields(
+        semantic_values=(0.1, 0.7),
+        texture_values=(0.2, 0.8),
+        stability_values=(0.9, 0.4),
+        saliency_values=(0.3, 0.6),
+        attention_stability_values=(0.8, 0.5),
+        configs=_branch_risk_configs(config),
+    )
+
+    assert config.branch_risk_mode == "shared_global"
+    assert fields.lf_content.risk_values == fields.tail_robust.risk_values
+    assert fields.tail_robust.risk_values == fields.attention_geometry.risk_values
+
+
+@pytest.mark.quick
+def test_single_carrier_ablations_disable_attention_and_other_content_branch() -> None:
+    """LF-only 与 Tail-only 必须形成真实单载体重运行配置。"""
+
+    specs = {
+        spec.ablation_id: spec
+        for spec in default_runtime_rerun_ablation_specs()
+    }
+    base = SemanticWatermarkRuntimeConfig()
+    lf_only = specs["lf_content_only"].apply(base, "outputs/ablations")
+    tail_only = specs["tail_robust_only"].apply(base, "outputs/ablations")
+
+    assert (lf_only.lf_enabled, lf_only.tail_robust_enabled) == (True, False)
+    assert (tail_only.lf_enabled, tail_only.tail_robust_enabled) == (False, True)
+    assert lf_only.attention_geometry_enabled is False
+    assert tail_only.attention_geometry_enabled is False
+    assert lf_only.image_alignment_enabled is False
+    assert tail_only.image_alignment_enabled is False
 
 
 def _formal_attack_records() -> tuple[dict[str, object], ...]:

@@ -2,7 +2,7 @@
 
 ## 核心方法层
 
-`main/` 提供分支风险、Jacobian 低响应子空间、内容载体、Q/K attention 几何和仅图像盲检。它不读取 Prompt 文件、不加载实验配置、不写 records。
+`main/` 提供分支风险、完整特征 Jacobian Null Space、内容载体、Q/K attention 几何和仅图像盲检。它不读取 Prompt 文件、不加载实验配置、不写 records。
 
 ## 主方法实验层
 

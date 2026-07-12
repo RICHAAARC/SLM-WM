@@ -143,6 +143,91 @@ def attention_relation_stability_map(
     )[:, 0]
 
 
+@dataclass(frozen=True)
+class StableAttentionTokenSelection:
+    """保存跨层 Q/K 稳定性与 attention 中心性共同选出的 token。"""
+
+    token_positions: tuple[int, ...]
+    token_indices: tuple[int, ...]
+    stable_token_fraction: float
+    selection_digest: str
+
+
+def select_stable_attention_tokens(
+    records: Iterable[tuple[str, Any, tuple[int, ...]]],
+    stable_token_fraction: float = 0.5,
+) -> StableAttentionTokenSelection:
+    """从真实多层 Q/K 关系选择固定比例的稳定且显著 token。
+
+    稳定度使用不同冻结层对应关系行的平均余弦一致性, 显著度使用 token 在
+    全部关系图中接收的平均 attention 质量。两者乘积决定排序, 并以原始 token
+    索引作为确定性并列规则。选择结果在一次注入的梯度、回溯和最终写回复验
+    中保持冻结, 避免优化过程通过改变选择集合抬高自身目标。
+    """
+
+    import torch.nn.functional as functional
+
+    torch = _torch()
+    resolved_records = tuple(records)
+    if len(resolved_records) < 2:
+        raise ValueError("稳定 token 选择至少需要两个真实 Q/K 层")
+    reference_indices = resolved_records[0][2]
+    token_count = len(reference_indices)
+    if token_count < 4 or any(
+        token_indices != reference_indices
+        for _, _, token_indices in resolved_records[1:]
+    ):
+        raise ValueError("稳定 token 选择要求共享且不少于4点的二维抽样网格")
+    if not 0.0 < stable_token_fraction <= 1.0:
+        raise ValueError("stable_token_fraction 必须位于 (0, 1]")
+
+    normalized_rows = []
+    centrality_rows = []
+    for _, attention, _ in resolved_records:
+        matrix = attention.float()
+        centered = matrix - matrix.mean(dim=-1, keepdim=True)
+        normalized_rows.append(functional.normalize(centered, dim=-1, eps=1e-12))
+        centrality_rows.append(matrix.mean(dim=-2).mean(dim=0))
+    pair_scores = [
+        (normalized_rows[left] * normalized_rows[right]).sum(dim=-1).mean(dim=0)
+        for left in range(len(normalized_rows) - 1)
+        for right in range(left + 1, len(normalized_rows))
+    ]
+    stability = ((torch.stack(pair_scores).mean(dim=0) + 1.0) * 0.5).clamp(
+        0.0,
+        1.0,
+    )
+    centrality = torch.stack(centrality_rows).mean(dim=0)
+    centrality = centrality / centrality.sum().clamp_min(1e-12)
+    selection_scores = (stability * centrality).detach().cpu().tolist()
+    selected_count = min(
+        token_count,
+        max(4, int(math.ceil(token_count * stable_token_fraction))),
+    )
+    ordered_positions = sorted(
+        range(token_count),
+        key=lambda position: (
+            -float(selection_scores[position]),
+            int(reference_indices[position]),
+        ),
+    )
+    token_positions = tuple(sorted(ordered_positions[:selected_count]))
+    token_indices = tuple(reference_indices[position] for position in token_positions)
+    payload = {
+        "selection_rule": "cross_layer_relation_stability_times_incoming_attention",
+        "stable_token_fraction": float(stable_token_fraction),
+        "token_positions": token_positions,
+        "token_indices": token_indices,
+        "selection_scores": [round(float(value), 12) for value in selection_scores],
+    }
+    return StableAttentionTokenSelection(
+        token_positions=token_positions,
+        token_indices=token_indices,
+        stable_token_fraction=float(stable_token_fraction),
+        selection_digest=build_stable_digest(payload),
+    )
+
+
 class DifferentiableAttentionRecorder:
     """在指定真实注意力模块上记录保持计算图的 Q/K attention。"""
 
@@ -215,20 +300,59 @@ def keyed_relation_signs(attention: Any, key_material: str, layer_name: str) -> 
 def attention_geometry_score(
     records: Iterable[tuple[str, Any, tuple[int, ...]]],
     key_material: str,
+    *,
+    stable_token_positions: tuple[int, ...] | None = None,
+    stable_token_fraction: float = 0.5,
+    unstable_pair_weight: float = 0.25,
 ) -> Any:
-    """计算真实 Q/K attention 与密钥关系签名的一致性分数。"""
+    """计算稳定 token 加权的真实 Q/K 密钥关系一致性分数。
+
+    稳定 token 对使用权重1, 其余规则网格关系保留较小的冻结权重。保留完整
+    网格可为盲检仿射注册提供连续二维采样支撑, 同时保证稳定 token 集合真实
+    改变嵌入目标而不是只作为日志字段。
+    """
 
     torch = _torch()
+    resolved_records = tuple(records)
+    if not 0.0 <= unstable_pair_weight < 1.0:
+        raise ValueError("unstable_pair_weight 必须位于 [0, 1)")
+    if stable_token_positions is None:
+        selection = select_stable_attention_tokens(
+            resolved_records,
+            stable_token_fraction=stable_token_fraction,
+        )
+        stable_token_positions = selection.token_positions
+    if not stable_token_positions:
+        raise ValueError("stable_token_positions 不得为空")
     layer_scores = []
-    for layer_name, attention, _ in records:
+    for layer_name, attention, _ in resolved_records:
         relation_signs = keyed_relation_signs(attention, key_material, layer_name)
         token_count = int(attention.shape[-1])
+        if any(
+            position < 0 or position >= token_count
+            for position in stable_token_positions
+        ):
+            raise ValueError("stable_token_positions 超出 attention 宽度")
         off_diagonal = 1.0 - torch.eye(token_count, device=attention.device, dtype=attention.dtype)
-        centered = attention - attention.mean(dim=-1, keepdim=True)
-        numerator = (centered * relation_signs * off_diagonal).sum(dim=(-1, -2))
+        token_weights = torch.full(
+            (token_count,),
+            float(unstable_pair_weight),
+            device=attention.device,
+            dtype=attention.dtype,
+        )
+        token_weights[list(stable_token_positions)] = 1.0
+        pair_weights = token_weights[:, None] * token_weights[None, :] * off_diagonal
+        row_weight = pair_weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+        centered = attention - (
+            attention * pair_weights
+        ).sum(dim=-1, keepdim=True) / row_weight
+        square_root_weights = pair_weights.sqrt()
+        weighted_centered = centered * square_root_weights
+        weighted_reference = relation_signs * square_root_weights
+        numerator = (weighted_centered * weighted_reference).sum(dim=(-1, -2))
         denominator = (
-            (centered * off_diagonal).square().sum(dim=(-1, -2)).sqrt()
-            * (relation_signs * off_diagonal).square().sum().sqrt()
+            weighted_centered.square().sum(dim=(-1, -2)).sqrt()
+            * weighted_reference.square().sum().sqrt()
         ).clamp_min(1e-12)
         layer_scores.append((numerator / denominator).mean())
     if not layer_scores:
@@ -244,6 +368,11 @@ class AttentionGeometryGradient:
     score_before: float
     gradient_norm: float
     layer_names: tuple[str, ...]
+    stable_token_positions: tuple[int, ...]
+    stable_token_indices: tuple[int, ...]
+    stable_token_selection_digest: str
+    stable_token_fraction: float
+    unstable_pair_weight: float
 
 
 def compute_attention_geometry_gradient(
@@ -251,6 +380,9 @@ def compute_attention_geometry_gradient(
     transformer_forward: Callable[[Any], Any],
     recorder: DifferentiableAttentionRecorder,
     key_material: str,
+    stable_token_fraction: float = 0.5,
+    unstable_pair_weight: float = 0.25,
+    stable_token_selection: StableAttentionTokenSelection | None = None,
 ) -> AttentionGeometryGradient:
     """对真实 Transformer Q/K 几何分数计算 latent 梯度。"""
 
@@ -259,7 +391,26 @@ def compute_attention_geometry_gradient(
         differentiable_latent = latent.detach().float().requires_grad_(True)
         recorder.clear()
         transformer_forward(differentiable_latent)
-        score_before_tensor = attention_geometry_score(recorder.records, key_material)
+        selection = stable_token_selection or select_stable_attention_tokens(
+            recorder.records,
+            stable_token_fraction=stable_token_fraction,
+        )
+        if stable_token_selection is not None:
+            current_indices = recorder.records[0][2]
+            if tuple(
+                current_indices[position]
+                for position in selection.token_positions
+            ) != selection.token_indices:
+                raise RuntimeError(
+                    "冻结稳定 token 选择与当前 Q/K 二维抽样网格不一致"
+                )
+        score_before_tensor = attention_geometry_score(
+            recorder.records,
+            key_material,
+            stable_token_positions=selection.token_positions,
+            stable_token_fraction=stable_token_fraction,
+            unstable_pair_weight=unstable_pair_weight,
+        )
         layer_names = tuple(dict.fromkeys(layer_name for layer_name, _, _ in recorder.records))
         gradient = torch.autograd.grad(score_before_tensor, differentiable_latent, retain_graph=False)[0]
     return AttentionGeometryGradient(
@@ -267,6 +418,11 @@ def compute_attention_geometry_gradient(
         score_before=float(score_before_tensor.detach().item()),
         gradient_norm=float(gradient.detach().float().norm().item()),
         layer_names=layer_names,
+        stable_token_positions=selection.token_positions,
+        stable_token_indices=selection.token_indices,
+        stable_token_selection_digest=selection.selection_digest,
+        stable_token_fraction=selection.stable_token_fraction,
+        unstable_pair_weight=float(unstable_pair_weight),
     )
 
 
@@ -284,6 +440,8 @@ class AttentionGeometryUpdate:
     applied_update_strength: float
     backtracking_step_count: int
     layer_names: tuple[str, ...]
+    stable_token_indices: tuple[int, ...]
+    stable_token_selection_digest: str
     update_digest: str
     metadata: dict[str, Any]
 
@@ -297,6 +455,8 @@ def optimize_attention_geometry_update(
     update_strength: float,
     precomputed_gradient: AttentionGeometryGradient | None = None,
     base_update: Any | None = None,
+    stable_token_fraction: float = 0.5,
+    unstable_pair_weight: float = 0.25,
 ) -> AttentionGeometryUpdate:
     """在固定内容更新基底上生成并验证真实注意力几何更新。
 
@@ -309,7 +469,12 @@ def optimize_attention_geometry_update(
     if update_strength <= 0.0:
         raise ValueError("update_strength 必须为正数")
     original_evidence = precomputed_gradient or compute_attention_geometry_gradient(
-        latent, transformer_forward, recorder, key_material
+        latent,
+        transformer_forward,
+        recorder,
+        key_material,
+        stable_token_fraction=stable_token_fraction,
+        unstable_pair_weight=unstable_pair_weight,
     )
     resolved_base_update = (
         torch.zeros_like(latent)
@@ -324,6 +489,14 @@ def optimize_attention_geometry_update(
         transformer_forward,
         recorder,
         key_material,
+        stable_token_fraction=original_evidence.stable_token_fraction,
+        unstable_pair_weight=original_evidence.unstable_pair_weight,
+        stable_token_selection=StableAttentionTokenSelection(
+            token_positions=original_evidence.stable_token_positions,
+            token_indices=original_evidence.stable_token_indices,
+            stable_token_fraction=original_evidence.stable_token_fraction,
+            selection_digest=original_evidence.stable_token_selection_digest,
+        ),
     )
     with torch.enable_grad():
         score_before = original_evidence.score_before
@@ -347,7 +520,19 @@ def optimize_attention_geometry_update(
             ).float()
             recorder.clear()
             transformer_forward(candidate)
-            score_after_tensor = attention_geometry_score(recorder.records, key_material)
+            score_after_tensor = attention_geometry_score(
+                recorder.records,
+                key_material,
+                stable_token_positions=(
+                    content_base_evidence.stable_token_positions
+                ),
+                stable_token_fraction=(
+                    content_base_evidence.stable_token_fraction
+                ),
+                unstable_pair_weight=(
+                    content_base_evidence.unstable_pair_weight
+                ),
+            )
             if (
                 bool(torch.isfinite(score_after_tensor))
                 and float(score_after_tensor.detach().item()) > minimum_accepted_score
@@ -368,6 +553,10 @@ def optimize_attention_geometry_update(
         "applied_update_strength": round(applied_strength, 12),
         "backtracking_step_count": backtracking_step_count,
         "layer_names": layer_names,
+        "stable_token_indices": content_base_evidence.stable_token_indices,
+        "stable_token_selection_digest": (
+            content_base_evidence.stable_token_selection_digest
+        ),
         "safe_subspace_digest": safe_subspace.solver_digest,
     }
     return AttentionGeometryUpdate(
@@ -381,6 +570,10 @@ def optimize_attention_geometry_update(
         applied_update_strength=applied_strength,
         backtracking_step_count=backtracking_step_count,
         layer_names=layer_names,
+        stable_token_indices=content_base_evidence.stable_token_indices,
+        stable_token_selection_digest=(
+            content_base_evidence.stable_token_selection_digest
+        ),
         update_digest=build_stable_digest(payload),
         metadata={
             "attention_source": "real_qk_projection",
@@ -389,5 +582,10 @@ def optimize_attention_geometry_update(
             "update_search": "monotonic_backtracking",
             "optimization_base": "fixed_lf_and_tail_update",
             "verified_candidate": "actual_combined_latent",
+            "stable_token_fraction": content_base_evidence.stable_token_fraction,
+            "unstable_pair_weight": content_base_evidence.unstable_pair_weight,
+            "stable_token_selection_rule": (
+                "cross_layer_relation_stability_times_incoming_attention"
+            ),
         },
     )

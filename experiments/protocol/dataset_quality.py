@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
 import os
 from pathlib import Path
 import time
@@ -12,13 +13,15 @@ import numpy as np
 from main.core.digest import build_stable_digest
 
 FORMAL_FEATURE_BACKEND = "inception_feature_backend"
+FORMAL_FEATURE_EXTRACTOR_ID = "torch_fidelity_0_4_0_inception_v3_compat_2048"
 FORMAL_FID_KID_BLOCKER = "requires_inception_feature_backend"
 FORMAL_FID_KID_SAMPLE_BLOCKER = "requires_full_main_sample_scale"
 FORMAL_FID_KID_NUMERIC_BLOCKER = "requires_covariance_square_root_backend"
 FORMAL_FID_CPU_MAX_FEATURE_DIM = 512
-FORMAL_KID_EXACT_MAX_SAMPLE_COUNT = 3000
-FORMAL_KID_SUBSET_COUNT = 8
-FORMAL_KID_SUBSET_SIZE = 512
+FORMAL_KID_EXACT_MAX_SAMPLE_COUNT = 1000
+FORMAL_KID_SUBSET_COUNT = 100
+FORMAL_KID_SUBSET_SIZE = 1000
+FORMAL_KID_RNG_SEED = 2020
 SAFE_ELEMENTWISE_KERNEL_MAX_OPERATIONS = 2_000_000
 
 
@@ -178,6 +181,7 @@ def _torch_gaussian_fid(
     comparison_features: np.ndarray,
     *,
     progress: Any = None,
+    allow_high_dimensional_cpu: bool = False,
 ) -> float | None:
     """优先使用 PyTorch 后端计算完整协方差 FID。
 
@@ -193,10 +197,16 @@ def _torch_gaussian_fid(
         return None
     feature_dim = int(source_features.shape[1])
     use_cuda = bool(torch.cuda.is_available())
-    if not use_cuda and feature_dim > _fid_cpu_feature_dim_limit():
+    if (
+        not use_cuda
+        and feature_dim > _fid_cpu_feature_dim_limit()
+        and not allow_high_dimensional_cpu
+    ):
         return None
     device = torch.device("cuda" if use_cuda else "cpu")
-    dtype = torch.float32 if use_cuda else torch.float64
+    # 正式指标统一使用 float64,使 Colab GPU 生成值与 CPU 独立重算值共享
+    # 可审计的数值精度边界,避免设备差异被误判为证据漂移.
+    dtype = torch.float64
     try:
         with torch.no_grad():
             if progress is not None:
@@ -239,6 +249,7 @@ def _exact_gaussian_fid(
     comparison_features: np.ndarray,
     *,
     progress: Any = None,
+    allow_high_dimensional_cpu: bool = False,
 ) -> float | None:
     """使用完整协方差矩阵计算 FID。
 
@@ -247,11 +258,16 @@ def _exact_gaussian_fid(
     阻断状态, 防止运行入口长时间无界阻塞。
     """
 
-    torch_value = _torch_gaussian_fid(source_features, comparison_features, progress=progress)
+    torch_value = _torch_gaussian_fid(
+        source_features,
+        comparison_features,
+        progress=progress,
+        allow_high_dimensional_cpu=allow_high_dimensional_cpu,
+    )
     if torch_value is not None:
         return torch_value
     feature_dim = int(source_features.shape[1])
-    if feature_dim > _fid_cpu_feature_dim_limit():
+    if feature_dim > _fid_cpu_feature_dim_limit() and not allow_high_dimensional_cpu:
         return None
     if progress is not None:
         progress("fid_numpy_covariance")
@@ -270,21 +286,21 @@ def _exact_gaussian_fid(
 
 
 def _kid_exact_max_sample_count() -> int:
-    """读取 KID 完整核矩阵计算的样本上限。"""
+    """返回冻结的 KID 完整核矩阵样本上限。"""
 
-    return int(os.environ.get("SLM_WM_KID_EXACT_MAX_SAMPLE_COUNT", str(FORMAL_KID_EXACT_MAX_SAMPLE_COUNT)))
+    return FORMAL_KID_EXACT_MAX_SAMPLE_COUNT
 
 
 def _kid_subset_count() -> int:
-    """读取大样本 KID 确定性子集数量。"""
+    """返回冻结的 KID 随机子集数量。"""
 
-    return max(1, int(os.environ.get("SLM_WM_KID_SUBSET_COUNT", str(FORMAL_KID_SUBSET_COUNT))))
+    return FORMAL_KID_SUBSET_COUNT
 
 
 def _kid_subset_size() -> int:
-    """读取大样本 KID 确定性子集大小。"""
+    """返回冻结的 KID 随机子集大小。"""
 
-    return max(2, int(os.environ.get("SLM_WM_KID_SUBSET_SIZE", str(FORMAL_KID_SUBSET_SIZE))))
+    return FORMAL_KID_SUBSET_SIZE
 
 
 def _unbiased_polynomial_mmd_exact(source_features: np.ndarray, comparison_features: np.ndarray) -> float:
@@ -324,8 +340,12 @@ def _torch_unbiased_polynomial_mmd_exact(
     try:
         with torch.no_grad():
             device = torch.device("cuda")
-            source_tensor = torch.as_tensor(source_features, dtype=torch.float32, device=device)
-            comparison_tensor = torch.as_tensor(comparison_features, dtype=torch.float32, device=device)
+            source_tensor = torch.as_tensor(source_features, dtype=torch.float64, device=device)
+            comparison_tensor = torch.as_tensor(
+                comparison_features,
+                dtype=torch.float64,
+                device=device,
+            )
             feature_dim = max(int(source_tensor.shape[1]), 1)
             source_kernel = (source_tensor.matmul(source_tensor.T) / feature_dim + 1.0) ** 3
             comparison_kernel = (comparison_tensor.matmul(comparison_tensor.T) / feature_dim + 1.0) ** 3
@@ -346,31 +366,58 @@ def _torch_unbiased_polynomial_mmd_exact(
     return float(value)
 
 
-def _deterministic_subset_indices(total: int, subset_size: int, subset_index: int, subset_count: int) -> np.ndarray:
-    """生成可复现的大样本 KID 子集索引。"""
+def _formal_random_subset_polynomial_mmd(
+    source_features: np.ndarray,
+    comparison_features: np.ndarray,
+    *,
+    subset_count: int = FORMAL_KID_SUBSET_COUNT,
+    subset_size: int = FORMAL_KID_SUBSET_SIZE,
+    rng_seed: int = FORMAL_KID_RNG_SEED,
+) -> float:
+    """使用冻结随机种子和均匀无放回子集估计大样本 KID。
 
-    if total <= subset_size:
-        return np.arange(total)
-    if subset_count <= 1:
-        start = max(0, (total - subset_size) // 2)
-    else:
-        start = round(subset_index * (total - subset_size) / (subset_count - 1))
-    return np.arange(int(start), int(start) + subset_size)
+    该实现遵循标准 KID 的随机子集 U-statistic 定义。完整特征行摘要仅用于
+    消除 JSONL 物化顺序差异, 不参与样本入选概率;每个样本在每轮子集中仍
+    具有相同的无放回抽样概率。
+    """
 
+    if subset_count <= 0 or subset_size < 2:
+        raise ValueError("KID 子集数量必须为正数且子集大小至少为2")
 
-def _deterministic_subset_polynomial_mmd(source_features: np.ndarray, comparison_features: np.ndarray) -> float:
-    """使用确定性子集估计大样本 KID, 避免构造超大核矩阵。"""
+    # KID 是分布指标,结果不应依赖 feature record 的物化顺序.使用完整
+    # float64 行字节的 SHA-256 排序,可以在2048维和7000样本规模下以一次
+    # 线性扫描确定顺序,避免按每个特征维度执行一次排序比较.
+    def digest_order(features: np.ndarray) -> np.ndarray:
+        """返回由完整特征行摘要确定的稳定顺序。"""
 
-    subset_size = min(_kid_subset_size(), source_features.shape[0], comparison_features.shape[0])
-    subset_count = _kid_subset_count()
+        rows = np.ascontiguousarray(features, dtype=np.float64)
+        digests = np.asarray(
+            [hashlib.sha256(row.tobytes()).digest() for row in rows],
+            dtype="S32",
+        )
+        return np.argsort(digests, kind="stable")
+
+    source_order = digest_order(source_features)
+    comparison_order = digest_order(comparison_features)
+    source_features = source_features[source_order]
+    comparison_features = comparison_features[comparison_order]
+    resolved_subset_size = min(
+        subset_size,
+        source_features.shape[0],
+        comparison_features.shape[0],
+    )
+    random_state = np.random.RandomState(rng_seed)
     values: list[float] = []
-    for subset_index in range(subset_count):
-        source_indices = _deterministic_subset_indices(source_features.shape[0], subset_size, subset_index, subset_count)
-        comparison_indices = _deterministic_subset_indices(
+    for _ in range(subset_count):
+        source_indices = random_state.choice(
+            source_features.shape[0],
+            resolved_subset_size,
+            replace=False,
+        )
+        comparison_indices = random_state.choice(
             comparison_features.shape[0],
-            subset_size,
-            subset_index,
-            subset_count,
+            resolved_subset_size,
+            replace=False,
         )
         values.append(
             _unbiased_polynomial_mmd_exact(
@@ -387,7 +434,7 @@ def _unbiased_polynomial_mmd(source_features: np.ndarray, comparison_features: n
     max_count = max(int(source_features.shape[0]), int(comparison_features.shape[0]))
     if max_count <= _kid_exact_max_sample_count():
         return _unbiased_polynomial_mmd_exact(source_features, comparison_features)
-    return _deterministic_subset_polynomial_mmd(source_features, comparison_features)
+    return _formal_random_subset_polynomial_mmd(source_features, comparison_features)
 
 
 def _formal_metric_rows(
@@ -396,6 +443,7 @@ def _formal_metric_rows(
     *,
     sample_pair_count: int,
     formal_min_sample_count: int,
+    allow_high_dimensional_cpu: bool = False,
 ) -> list[dict[str, Any]]:
     """构造正式 FID / KID 指标行。
 
@@ -440,7 +488,12 @@ def _formal_metric_rows(
         kid_value = "unsupported"
     else:
         metric_progress("formal_fid_start")
-        fid_result = _exact_gaussian_fid(source_array, comparison_array, progress=metric_progress)
+        fid_result = _exact_gaussian_fid(
+            source_array,
+            comparison_array,
+            progress=metric_progress,
+            allow_high_dimensional_cpu=allow_high_dimensional_cpu,
+        )
         if fid_result is None:
             metric_status = FORMAL_FID_KID_NUMERIC_BLOCKER
             fid_value = "unsupported"
@@ -549,6 +602,31 @@ def build_dataset_quality_metric_rows(
         formal_comparison_features,
         sample_pair_count=len(record_values),
         formal_min_sample_count=formal_min_sample_count,
+    )
+
+
+def rebuild_formal_fid_kid_metric_rows(
+    source_features: Any,
+    comparison_features: Any,
+    *,
+    sample_pair_count: int,
+) -> list[dict[str, Any]]:
+    """从已物化的正式特征独立重算 FID 与 KID.
+
+    该函数用于 CPU 结果闭合.与指标生成侧不同,结果闭合不能因特征维度较高而
+    跳过数值计算,否则只能验证文件摘要,无法验证论文表中的指标值.调用方
+    必须已经完成 feature record 的身份,角色,维度和有限值检查;此处只执行
+    与正式生成路径相同的 FID / KID 数学算子,并要求完整样本规模.
+    """
+
+    if sample_pair_count <= 0:
+        raise ValueError("正式 FID/KID 重算需要正样本对数量")
+    return _formal_metric_rows(
+        source_features,
+        comparison_features,
+        sample_pair_count=sample_pair_count,
+        formal_min_sample_count=sample_pair_count,
+        allow_high_dimensional_cpu=True,
     )
 
 

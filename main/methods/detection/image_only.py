@@ -13,7 +13,10 @@ from main.methods.carrier.keyed_tensor import (
     compute_blind_content_score,
 )
 from main.methods.geometry.attention_alignment import AttentionAlignmentResult, recover_attention_affine_alignment
-from main.methods.geometry.differentiable_attention import attention_geometry_score
+from main.methods.geometry.differentiable_attention import (
+    attention_geometry_score,
+    select_stable_attention_tokens,
+)
 
 ImageLatentEncoder = Callable[[Any], Any]
 AttentionRecord = tuple[str, Any, tuple[int, ...]]
@@ -37,6 +40,8 @@ class ImageOnlyDetectionConfig:
     attention_anchor_count: int = 12
     attention_residual_threshold: float = 0.20
     attention_minimum_inlier_ratio: float = 0.50
+    attention_stable_token_fraction: float = 0.50
+    attention_unstable_pair_weight: float = 0.25
 
     def __post_init__(self) -> None:
         """集中校验冻结检测协议。"""
@@ -53,6 +58,14 @@ class ImageOnlyDetectionConfig:
             raise ValueError("registration_confidence_threshold 必须位于 [0, 1]")
         if not -1.0 <= self.attention_sync_score_threshold <= 1.0:
             raise ValueError("attention_sync_score_threshold 必须位于 [-1, 1]")
+        if not 0.0 < self.attention_stable_token_fraction <= 1.0:
+            raise ValueError(
+                "attention_stable_token_fraction 必须位于 (0, 1]"
+            )
+        if not 0.0 <= self.attention_unstable_pair_weight < 1.0:
+            raise ValueError(
+                "attention_unstable_pair_weight 必须位于 [0, 1)"
+            )
 
 
 @dataclass(frozen=True)
@@ -150,11 +163,27 @@ def detect_image_only_watermark(
     alignment: AttentionAlignmentResult | None = None
     geometry_reliable = False
     aligned_image: Any | None = None
+    stable_token_indices: tuple[int, ...] = ()
+    stable_token_selection_digest = ""
+    aligned_stable_token_indices: tuple[int, ...] = ()
+    aligned_stable_token_selection_digest = ""
     if image_attention_extractor is not None:
         attention_records = image_attention_extractor(image)
         if not attention_records:
             raise RuntimeError("图像盲检没有返回真实 Q/K attention")
-        score_tensor = attention_geometry_score(attention_records, key_material)
+        stable_selection = select_stable_attention_tokens(
+            attention_records,
+            stable_token_fraction=config.attention_stable_token_fraction,
+        )
+        stable_token_indices = stable_selection.token_indices
+        stable_token_selection_digest = stable_selection.selection_digest
+        score_tensor = attention_geometry_score(
+            attention_records,
+            key_material,
+            stable_token_positions=stable_selection.token_positions,
+            stable_token_fraction=config.attention_stable_token_fraction,
+            unstable_pair_weight=config.attention_unstable_pair_weight,
+        )
         raw_geometry_score = float(score_tensor.detach().item())
         alignment_candidates = tuple(
             recover_attention_affine_alignment(
@@ -171,7 +200,8 @@ def detect_image_only_watermark(
         alignment = max(
             alignment_candidates,
             key=lambda candidate: (
-                candidate.relation_sync_score,
+                candidate.registration_objective_score,
+                candidate.observation_relation_score,
                 candidate.registration_confidence,
             ),
         )
@@ -182,9 +212,20 @@ def detect_image_only_watermark(
             aligned_attention_records = image_attention_extractor(aligned_image)
             if not aligned_attention_records:
                 raise RuntimeError("对齐图像没有返回真实 Q/K attention")
+            aligned_stable_selection = select_stable_attention_tokens(
+                aligned_attention_records,
+                stable_token_fraction=config.attention_stable_token_fraction,
+            )
+            aligned_stable_token_indices = aligned_stable_selection.token_indices
+            aligned_stable_token_selection_digest = (
+                aligned_stable_selection.selection_digest
+            )
             sync_score_tensor = attention_geometry_score(
                 aligned_attention_records,
                 key_material,
+                stable_token_positions=aligned_stable_selection.token_positions,
+                stable_token_fraction=config.attention_stable_token_fraction,
+                unstable_pair_weight=config.attention_unstable_pair_weight,
             )
             sync_score = float(sync_score_tensor.detach().item())
         geometry_reliable = (
@@ -247,6 +288,12 @@ def detect_image_only_watermark(
             None if registration_confidence is None else round(registration_confidence, 12)
         ),
         "alignment_digest": None if alignment is None else alignment.alignment_digest,
+        "stable_token_indices": stable_token_indices,
+        "stable_token_selection_digest": stable_token_selection_digest,
+        "aligned_stable_token_indices": aligned_stable_token_indices,
+        "aligned_stable_token_selection_digest": (
+            aligned_stable_token_selection_digest
+        ),
         "content_failure_reason": content_failure_reason,
         "rescue_applied": rescue_applied,
         "evidence_positive": evidence_positive,
@@ -280,5 +327,17 @@ def detect_image_only_watermark(
             "registration_confidence_threshold": config.registration_confidence_threshold,
             "attention_sync_score_threshold": config.attention_sync_score_threshold,
             "attention_sync_source": "aligned_image_reextracted_real_qk",
+            "stable_token_indices": list(stable_token_indices),
+            "stable_token_selection_digest": stable_token_selection_digest,
+            "aligned_stable_token_indices": list(aligned_stable_token_indices),
+            "aligned_stable_token_selection_digest": (
+                aligned_stable_token_selection_digest
+            ),
+            "attention_stable_token_fraction": (
+                config.attention_stable_token_fraction
+            ),
+            "attention_unstable_pair_weight": (
+                config.attention_unstable_pair_weight
+            ),
         },
     )

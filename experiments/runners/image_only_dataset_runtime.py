@@ -38,10 +38,18 @@ from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
 )
 from experiments.runtime.diffusion.regeneration_attacks import default_diffusion_attack_specs
+from experiments.runtime.diffusion.semantic_features import (
+    JOINT_FEATURE_WIDTH,
+    SEMANTIC_FEATURE_SCHEMA,
+    SEMANTIC_FEATURE_WIDTH,
+    VISUAL_FEATURE_SCHEMA,
+    VISUAL_FEATURE_WIDTH,
+)
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     load_completed_semantic_watermark_runtime_result,
     load_semantic_watermark_runtime_context,
+    semantic_watermark_runtime_config_payload,
     validate_semantic_watermark_runtime_result_provenance,
     write_semantic_watermark_runtime_outputs,
 )
@@ -364,9 +372,8 @@ def _scientific_update_record_ready(
     }:
         return False
     allowed_jvp_modes = {
-        "torch_func_linearize_exact_jvp",
-        "torch_autograd_exact_jvp",
-        "torch_autograd_exact_jvp_compatibility",
+        "torch_func_exact_jvp_vjp",
+        "torch_autograd_exact_jvp_vjp_compatibility",
     }
     for subspace_record in null_space_records.values():
         metadata = subspace_record.get("metadata", {})
@@ -383,7 +390,50 @@ def _scientific_update_record_ready(
             return False
         if metadata.get("jvp_mode") not in allowed_jvp_modes:
             return False
+        if metadata.get("solver") != "matrix_free_full_jacobian_psd_cg":
+            return False
+        if subspace_record.get("cg_converged") is not True:
+            return False
         if int(metadata.get("preferred_direction_count", 0)) < 1:
+            return False
+        if metadata.get("semantic_feature_schema") != SEMANTIC_FEATURE_SCHEMA:
+            return False
+        if metadata.get("visual_feature_schema") != VISUAL_FEATURE_SCHEMA:
+            return False
+        if int(metadata.get("semantic_feature_width", 0)) != SEMANTIC_FEATURE_WIDTH:
+            return False
+        if int(metadata.get("visual_feature_width", 0)) != VISUAL_FEATURE_WIDTH:
+            return False
+        if int(metadata.get("joint_feature_width", 0)) != JOINT_FEATURE_WIDTH:
+            return False
+        if metadata.get("feature_compression_applied") is not False:
+            return False
+        column_residuals = subspace_record.get(
+            "column_relative_response_residuals"
+        )
+        energy_retentions = subspace_record.get("projection_energy_retentions")
+        cg_residuals = subspace_record.get("cg_relative_residuals")
+        if not all(
+            isinstance(values, list)
+            and len(values) == config.null_rank
+            and all(isinstance(value, (int, float)) and math.isfinite(float(value)) for value in values)
+            for values in (column_residuals, energy_retentions, cg_residuals)
+        ):
+            return False
+        if any(
+            float(value) > config.maximum_relative_response_residual
+            for value in column_residuals
+        ):
+            return False
+        if any(
+            float(value) < config.minimum_projection_energy_retention
+            for value in energy_retentions
+        ):
+            return False
+        if any(
+            float(value) > config.null_space_cg_relative_tolerance
+            for value in cg_residuals
+        ):
             return False
     if not finite_at_least(
         record.get("lf_projection_energy_retention"),
@@ -399,12 +449,63 @@ def _scientific_update_record_ready(
         return False
     if not finite_at_least(record.get("attention_applied_update_strength"), 0.0, strict=True):
         return False
+    stable_token_indices = record.get("stable_token_indices")
+    if (
+        not isinstance(stable_token_indices, list)
+        or len(stable_token_indices) < 4
+        or len(set(stable_token_indices)) != len(stable_token_indices)
+    ):
+        return False
+    stable_token_selection_digest = str(
+        record.get("stable_token_selection_digest", "")
+    )
+    if len(stable_token_selection_digest) != 64 or any(
+        character not in "0123456789abcdef"
+        for character in stable_token_selection_digest
+    ):
+        return False
+    semantic_cosine = record.get("full_semantic_cosine_similarity")
+    visual_relative_drift = record.get("full_visual_feature_relative_drift")
+    if not finite_at_least(
+        semantic_cosine,
+        config.minimum_semantic_preservation_cosine,
+    ):
+        return False
+    if (
+        not isinstance(visual_relative_drift, (int, float))
+        or not math.isfinite(float(visual_relative_drift))
+        or float(visual_relative_drift)
+        > config.maximum_visual_feature_relative_drift
+    ):
+        return False
+    if record.get("semantic_preservation_gate_ready") is not True:
+        return False
     branch_risk_records = record.get("branch_risk_records")
     return (
         bool(record.get("branch_risk_bundle_digest"))
         and isinstance(branch_risk_records, dict)
         and set(branch_risk_records) == {"lf_content", "tail_robust", "attention_geometry"}
         and all(int(value.get("eligible_position_count", 0)) > 0 for value in branch_risk_records.values())
+    )
+
+
+def _final_image_preservation_ready(
+    result: dict[str, Any],
+    config: SemanticWatermarkRuntimeConfig,
+) -> bool:
+    """验证一次运行的最终成图累计完整特征门禁。"""
+
+    record = result.get("metadata", {}).get("final_image_preservation", {})
+    semantic_cosine = record.get("final_image_semantic_cosine_similarity")
+    visual_drift = record.get("final_image_visual_feature_relative_drift")
+    return bool(
+        record.get("final_image_preservation_gate_ready") is True
+        and isinstance(semantic_cosine, (int, float))
+        and math.isfinite(float(semantic_cosine))
+        and float(semantic_cosine) >= config.minimum_semantic_preservation_cosine
+        and isinstance(visual_drift, (int, float))
+        and math.isfinite(float(visual_drift))
+        and float(visual_drift) <= config.maximum_visual_feature_relative_drift
     )
 
 
@@ -640,9 +741,14 @@ def run_image_only_dataset_runtime(
         not _scientific_update_record_ready(record, base_method_config)
         for record in scientific_update_records
     )
+    final_image_preservation_failure_count = sum(
+        not _final_image_preservation_ready(result, base_method_config)
+        for result in runtime_results
+    )
     scientific_operator_gate_ready = (
         len(scientific_update_records) == expected_scientific_update_count
         and scientific_operator_failure_count == 0
+        and final_image_preservation_failure_count == 0
     )
     scientific_unit_provenance = aggregate_scientific_unit_provenance(
         (
@@ -743,6 +849,9 @@ def run_image_only_dataset_runtime(
         "scientific_update_record_count": len(scientific_update_records),
         "expected_scientific_update_record_count": expected_scientific_update_count,
         "scientific_operator_failure_count": scientific_operator_failure_count,
+        "final_image_preservation_failure_count": (
+            final_image_preservation_failure_count
+        ),
         "scientific_operator_gate_ready": scientific_operator_gate_ready,
         **scientific_unit_provenance,
         "frozen_threshold_digest": protocol.threshold_digest,
@@ -806,7 +915,11 @@ def run_image_only_dataset_runtime(
         ),
         config={
             "paper_run": resolved_paper_run.to_dict(),
-            "method_config": asdict(base_method_config),
+            # manifest 现在保存完整配置, 因此必须复用运行时的密钥脱敏配置。
+            # 该结构保留全部可复现实验参数, 但只记录 key material 的稳定摘要。
+            "method_config": semantic_watermark_runtime_config_payload(
+                base_method_config
+            ),
             "method_key_digest": build_stable_digest({"key_material": base_method_config.key_material}),
         },
         code_version=formal_execution_run_lock["formal_execution_commit"],

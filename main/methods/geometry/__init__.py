@@ -5,11 +5,13 @@ from main.methods.geometry.differentiable_attention import (
     AttentionGeometryGradient,
     AttentionGeometryUpdate,
     DifferentiableAttentionRecorder,
+    StableAttentionTokenSelection,
     attention_geometry_score,
     attention_relation_stability_map,
     compute_attention_geometry_gradient,
     optimize_attention_geometry_update,
     qk_self_attention,
+    select_stable_attention_tokens,
 )
 
 __all__ = [
@@ -17,10 +19,12 @@ __all__ = [
     "AttentionGeometryGradient",
     "AttentionGeometryUpdate",
     "DifferentiableAttentionRecorder",
+    "StableAttentionTokenSelection",
     "attention_geometry_score",
     "attention_relation_stability_map",
     "compute_attention_geometry_gradient",
     "optimize_attention_geometry_update",
     "qk_self_attention",
     "recover_attention_affine_alignment",
+    "select_stable_attention_tokens",
 ]

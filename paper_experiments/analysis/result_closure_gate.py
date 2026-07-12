@@ -16,6 +16,7 @@ from experiments.ablations.runtime_rerun import (
 from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
+from experiments.artifacts.manifest_schema import manifest_config_digest_ready
 from experiments.artifacts.attack_family_metrics import (
     ATTACK_FAMILY_METRIC_FIELDS,
     build_attack_family_metrics,
@@ -70,10 +71,18 @@ from paper_experiments.analysis.paired_superiority import (
 from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     build_fixed_fpr_threshold_manifest_config,
 )
+from paper_experiments.analysis.formal_record_statistics import (
+    FormalRecordStatisticsError,
+    rebuild_and_validate_ablation_necessity_statistics,
+    rebuild_and_validate_formal_fid_kid_metrics,
+)
 from paper_experiments.analysis.paper_evidence_audit import (
     AuditInputBundle,
     build_evidence_audit_manifest_config,
     build_evidence_audit_materialization,
+)
+from paper_experiments.analysis.result_analysis_payload import (
+    result_analysis_payload_binding_ready,
 )
 from paper_experiments.baselines.formal_import import (
     build_primary_baseline_observation_metric_values,
@@ -173,11 +182,13 @@ class ResultClosureGateInput:
     paired_superiority_manifest: dict[str, Any]
     ablation_summary: dict[str, Any]
     ablation_manifest: dict[str, Any]
+    ablation_runtime_records: tuple[dict[str, Any], ...]
     ablation_necessity_rows: tuple[dict[str, Any], ...]
     ablation_necessity_summary: dict[str, Any]
     dataset_quality_summary: dict[str, Any]
     dataset_quality_feature_report: dict[str, Any]
     dataset_quality_metrics: tuple[dict[str, Any], ...]
+    dataset_quality_feature_records: tuple[dict[str, Any], ...]
     dataset_quality_feature_records_sha256: str
     dataset_quality_manifest: dict[str, Any]
     evidence_builder_report: dict[str, Any]
@@ -204,6 +215,8 @@ class ResultClosureGateInput:
                 "paired_observation_records_by_method",
                 "attack_detection_records",
                 "attacked_image_registry",
+                "ablation_runtime_records",
+                "dataset_quality_feature_records",
             }
         }
         return payload
@@ -311,7 +324,7 @@ def _manifest_ready(
     return (
         str(manifest.get("artifact_id", "")) == artifact_id
         and bool(str(manifest.get("artifact_type", "")))
-        and _is_sha256(manifest.get("config_digest", ""))
+        and manifest_config_digest_ready(manifest)
         and bool(str(manifest.get("code_version", "")))
         and bool(str(manifest.get("rebuild_command", "")))
         and all(_path_present(outputs, suffix) for suffix in required_output_suffixes)
@@ -2958,6 +2971,11 @@ def _result_analysis_ready(bundle: ResultClosureGateInput) -> bool:
         and _int_value(bundle.result_analysis_summary.get("duplicate_result_record_count")) == 0
         and _int_value(bundle.result_analysis_summary.get("missing_result_record_count")) == 0
         and _int_value(bundle.result_analysis_summary.get("unexpected_result_record_count")) == 0
+        and result_analysis_payload_binding_ready(
+            summary=bundle.result_analysis_summary,
+            manifest=bundle.result_analysis_manifest,
+            actual_source_sha256=bundle.source_file_sha256,
+        )
         and all(
             _path_present(analysis_inputs, suffix)
             for suffix in (
@@ -3003,6 +3021,10 @@ def _result_analysis_ready(bundle: ResultClosureGateInput) -> bool:
                 "bootstrap_quantile_method",
                 "bootstrap_resample_count",
                 "confidence_level",
+                "failure_case_limit",
+                "result_analysis_payload_path_map",
+                "result_analysis_payload_sha256_map",
+                "result_analysis_payload_digest",
                 "supports_paper_claim",
             ),
         )
@@ -3110,6 +3132,7 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
             bundle.ablation_manifest,
             artifact_id="formal_mechanism_ablation_manifest",
             required_output_suffixes=(
+                f"outputs/formal_mechanism_ablation/{scale}/runtime_rerun_records.jsonl",
                 f"outputs/formal_mechanism_ablation/{scale}/per_ablation_frozen_protocols.json",
                 f"outputs/formal_mechanism_ablation/{scale}/mechanism_ablation_metrics.csv",
                 f"outputs/formal_mechanism_ablation/{scale}/mechanism_necessity_statistics.csv",
@@ -3141,6 +3164,84 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
         and _strict_bool(bundle.ablation_manifest.get("metadata", {}).get("generation_rerun_required"))
         and _strict_bool(bundle.ablation_manifest.get("metadata", {}).get("per_ablation_calibration_required"))
     )
+
+
+def _ablation_raw_record_rebuild_ready(bundle: ResultClosureGateInput) -> bool:
+    """从逐 Prompt 正式重运行记录独立重建机制必要性统计."""
+
+    expected_ids = bundle.ablation_summary.get("expected_ablation_ids")
+    if not isinstance(expected_ids, list):
+        return False
+    grouped_prompt_ids: dict[str, set[str]] = {}
+    split_by_prompt_id: dict[str, str] = {}
+    for record in bundle.ablation_runtime_records:
+        ablation_id = str(record.get("ablation_id", ""))
+        prompt_id = str(record.get("prompt_id", ""))
+        split = str(record.get("split", ""))
+        if not ablation_id or not prompt_id or split not in {
+            "dev",
+            "calibration",
+            "test",
+        }:
+            return False
+        previous_split = split_by_prompt_id.setdefault(prompt_id, split)
+        if previous_split != split:
+            return False
+        prompt_ids = grouped_prompt_ids.setdefault(ablation_id, set())
+        if prompt_id in prompt_ids:
+            return False
+        prompt_ids.add(prompt_id)
+    prompt_ids_by_split = {
+        split: sorted(
+            prompt_id
+            for prompt_id, assigned_split in split_by_prompt_id.items()
+            if assigned_split == split
+        )
+        for split in ("dev", "calibration", "test")
+    }
+    manifest_config = bundle.ablation_manifest.get("config", {})
+    if not isinstance(manifest_config, Mapping):
+        return False
+    exact_raw_set_ready = (
+        set(grouped_prompt_ids) == set(expected_ids)
+        and all(
+            len(prompt_ids) == bundle.expected_prompt_count
+            for prompt_ids in grouped_prompt_ids.values()
+        )
+        and len({frozenset(prompt_ids) for prompt_ids in grouped_prompt_ids.values()})
+        == 1
+        and len(bundle.ablation_runtime_records)
+        == bundle.expected_prompt_count * len(expected_ids)
+        and _int_value(bundle.ablation_summary.get("record_count"))
+        == len(bundle.ablation_runtime_records)
+        and build_stable_digest(prompt_ids_by_split["calibration"])
+        == bundle.expected_calibration_prompt_id_digest
+        and build_stable_digest(prompt_ids_by_split["test"])
+        == bundle.expected_test_prompt_id_digest
+        and str(
+            bundle.ablation_necessity_summary.get(
+                "paired_prompt_id_digest",
+                "",
+            )
+        )
+        == bundle.expected_test_prompt_id_digest
+        and str(manifest_config.get("record_digest", ""))
+        == build_stable_digest(bundle.ablation_runtime_records)
+    )
+    if not exact_raw_set_ready:
+        return False
+    try:
+        rebuild_and_validate_ablation_necessity_statistics(
+            bundle.ablation_runtime_records,
+            bundle.ablation_necessity_rows,
+            bundle.ablation_necessity_summary,
+            bundle.ablation_summary,
+            expected_ablation_ids=expected_ids,
+            expected_paired_prompt_count=bundle.expected_test_count,
+        )
+    except (FormalRecordStatisticsError, KeyError, TypeError, ValueError):
+        return False
+    return True
 
 
 def _dataset_quality_ready(bundle: ResultClosureGateInput) -> bool:
@@ -3253,6 +3354,22 @@ def _dataset_quality_ready(bundle: ResultClosureGateInput) -> bool:
             ),
         )
     )
+
+
+def _dataset_quality_feature_record_rebuild_ready(
+    bundle: ResultClosureGateInput,
+) -> bool:
+    """从规范 feature records 独立重算 FID/KID 并核对正式指标表."""
+
+    try:
+        rebuild_and_validate_formal_fid_kid_metrics(
+            bundle.dataset_quality_feature_records,
+            bundle.dataset_quality_metrics,
+            expected_pair_count=bundle.expected_prompt_count,
+        )
+    except (FormalRecordStatisticsError, KeyError, TypeError, ValueError):
+        return False
+    return True
 
 
 def _rebuild_evidence_audit(
@@ -3659,11 +3776,32 @@ def build_result_closure_gate_checks(bundle: ResultClosureGateInput) -> list[dic
             "formal_mechanism_ablation_not_ready",
         ),
         _check(
+            "ablation_raw_record_rebuild_ready",
+            "mechanism_ablation",
+            _ablation_raw_record_rebuild_ready(bundle),
+            (
+                "ablation_runtime_records",
+                "ablation_necessity_rows",
+                "ablation_necessity_summary",
+            ),
+            "ablation_statistics_not_rebuildable_from_raw_records",
+        ),
+        _check(
             "formal_fid_kid_ready",
             "dataset_quality",
             _dataset_quality_ready(bundle),
             ("dataset_quality_summary", "dataset_quality_manifest"),
             "formal_fid_kid_not_ready",
+        ),
+        _check(
+            "dataset_quality_feature_record_rebuild_ready",
+            "dataset_quality",
+            _dataset_quality_feature_record_rebuild_ready(bundle),
+            (
+                "dataset_quality_feature_records",
+                "dataset_quality_metrics",
+            ),
+            "formal_fid_kid_not_rebuildable_from_feature_records",
         ),
         _check(
             "paper_evidence_audit_ready",
@@ -3699,6 +3837,16 @@ def build_result_closure_gate_report(
     blocked = [row for row in materialized if str(row.get("check_status", "")) != "pass"]
     entry_allowed = _strict_bool(bundle.entry_review_report.get("evidence_closure_allowed"))
     ready = bool(materialized) and not blocked and entry_allowed
+    formal_ablation_raw_records_digest = _declared_source_digest(
+        bundle.source_file_sha256,
+        (
+            f"outputs/formal_mechanism_ablation/"
+            f"{bundle.expected_paper_claim_scale}/runtime_rerun_records.jsonl"
+        ),
+    ) or ""
+    dataset_quality_feature_records_content_digest = (
+        bundle.dataset_quality_feature_records_sha256
+    )
     source_digests = {
         "attack_matrix_digest": build_stable_digest(
             {"report": bundle.attack_report, "manifest": bundle.attack_manifest}
@@ -3749,13 +3897,20 @@ def build_result_closure_gate_report(
         "formal_ablation_digest": build_stable_digest(
             {"summary": bundle.ablation_summary, "manifest": bundle.ablation_manifest}
         ),
+        "formal_ablation_raw_records_digest": formal_ablation_raw_records_digest,
         "formal_fid_kid_digest": build_stable_digest(
             {
                 "summary": bundle.dataset_quality_summary,
                 "feature_report": bundle.dataset_quality_feature_report,
+                "feature_records_content_digest": (
+                    dataset_quality_feature_records_content_digest
+                ),
                 "metrics": bundle.dataset_quality_metrics,
                 "manifest": bundle.dataset_quality_manifest,
             }
+        ),
+        "dataset_quality_feature_records_content_digest": (
+            dataset_quality_feature_records_content_digest
         ),
         "paper_evidence_audit_digest": build_stable_digest(
             {

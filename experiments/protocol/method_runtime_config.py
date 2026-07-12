@@ -43,9 +43,15 @@ class FormalMethodRuntimeConfig:
     lf_relative_strength: float
     tail_relative_strength: float
     attention_relative_strength: float
+    attention_stable_token_fraction: float
+    attention_unstable_pair_weight: float
     tail_fraction: float
     minimum_projection_energy_retention: float
     maximum_relative_response_residual: float
+    null_space_cg_max_iterations: int
+    null_space_cg_relative_tolerance: float
+    minimum_semantic_preservation_cosine: float
+    maximum_visual_feature_relative_drift: float
     injection_step_indices: tuple[int, ...]
     max_attention_tokens: int
     attention_module_count: int
@@ -76,10 +82,30 @@ class FormalMethodRuntimeConfig:
             raise ValueError("injection_step_indices 必须位于推理步范围内")
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
+        if not 0.0 < self.attention_stable_token_fraction <= 1.0:
+            raise ValueError(
+                "attention_stable_token_fraction 必须位于 (0, 1]"
+            )
+        if not 0.0 <= self.attention_unstable_pair_weight < 1.0:
+            raise ValueError(
+                "attention_unstable_pair_weight 必须位于 [0, 1)"
+            )
         if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
             raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
         if not 0.0 < self.maximum_relative_response_residual <= 1.0:
             raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
+        if self.null_space_cg_max_iterations <= 0:
+            raise ValueError("null_space_cg_max_iterations 必须为正整数")
+        if not 0.0 < self.null_space_cg_relative_tolerance < 1.0:
+            raise ValueError("null_space_cg_relative_tolerance 必须位于 (0, 1)")
+        if not 0.0 < self.minimum_semantic_preservation_cosine <= 1.0:
+            raise ValueError(
+                "minimum_semantic_preservation_cosine 必须位于 (0, 1]"
+            )
+        if not 0.0 <= self.maximum_visual_feature_relative_drift <= 1.0:
+            raise ValueError(
+                "maximum_visual_feature_relative_drift 必须位于 [0, 1]"
+            )
         if self.max_attention_tokens < 4 or self.attention_module_count < 2:
             raise ValueError("注意力几何配置不能退化为单层或过短 token 近似")
         if not self.diffusion_attacks_enabled:
@@ -97,9 +123,25 @@ class FormalMethodRuntimeConfig:
             "lf_relative_strength": self.lf_relative_strength,
             "tail_relative_strength": self.tail_relative_strength,
             "attention_relative_strength": self.attention_relative_strength,
+            "attention_stable_token_fraction": (
+                self.attention_stable_token_fraction
+            ),
+            "attention_unstable_pair_weight": (
+                self.attention_unstable_pair_weight
+            ),
             "tail_fraction": self.tail_fraction,
             "minimum_projection_energy_retention": self.minimum_projection_energy_retention,
             "maximum_relative_response_residual": self.maximum_relative_response_residual,
+            "null_space_cg_max_iterations": self.null_space_cg_max_iterations,
+            "null_space_cg_relative_tolerance": (
+                self.null_space_cg_relative_tolerance
+            ),
+            "minimum_semantic_preservation_cosine": (
+                self.minimum_semantic_preservation_cosine
+            ),
+            "maximum_visual_feature_relative_drift": (
+                self.maximum_visual_feature_relative_drift
+            ),
         }
 
 
@@ -160,9 +202,27 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         "SLM_WM_LF_RELATIVE_STRENGTH": str(config.lf_relative_strength),
         "SLM_WM_TAIL_RELATIVE_STRENGTH": str(config.tail_relative_strength),
         "SLM_WM_ATTENTION_RELATIVE_STRENGTH": str(config.attention_relative_strength),
+        "SLM_WM_ATTENTION_STABLE_TOKEN_FRACTION": str(
+            config.attention_stable_token_fraction
+        ),
+        "SLM_WM_ATTENTION_UNSTABLE_PAIR_WEIGHT": str(
+            config.attention_unstable_pair_weight
+        ),
         "SLM_WM_TAIL_FRACTION": str(config.tail_fraction),
         "SLM_WM_MINIMUM_PROJECTION_ENERGY_RETENTION": str(config.minimum_projection_energy_retention),
         "SLM_WM_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL": str(config.maximum_relative_response_residual),
+        "SLM_WM_NULL_SPACE_CG_MAX_ITERATIONS": str(
+            config.null_space_cg_max_iterations
+        ),
+        "SLM_WM_NULL_SPACE_CG_RELATIVE_TOLERANCE": str(
+            config.null_space_cg_relative_tolerance
+        ),
+        "SLM_WM_MINIMUM_SEMANTIC_PRESERVATION_COSINE": str(
+            config.minimum_semantic_preservation_cosine
+        ),
+        "SLM_WM_MAXIMUM_VISUAL_FEATURE_RELATIVE_DRIFT": str(
+            config.maximum_visual_feature_relative_drift
+        ),
         "SLM_WM_MAX_ATTENTION_TOKENS": str(config.max_attention_tokens),
         "SLM_WM_ENABLE_DIFFUSION_ATTACKS": "1" if config.diffusion_attacks_enabled else "0",
     }

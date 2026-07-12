@@ -5,7 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from experiments.protocol.dataset_quality import _unbiased_polynomial_mmd_exact
+from experiments.protocol.dataset_quality import (
+    _formal_random_subset_polynomial_mmd,
+    _unbiased_polynomial_mmd_exact,
+)
 
 
 pytestmark = pytest.mark.quick
@@ -32,3 +35,26 @@ def test_unbiased_kid_preserves_legitimate_negative_estimate() -> None:
     value = _unbiased_polynomial_mmd_exact(source, comparison)
 
     assert value == pytest.approx(-0.2960922093, abs=1e-6)
+
+
+def test_deterministic_subset_kid_is_feature_record_order_invariant(
+) -> None:
+    """冻结随机子集 KID 不得随 feature record 排列顺序变化."""
+
+    source = np.arange(30, dtype=np.float64).reshape(10, 3) / 10.0
+    comparison = source * 0.9 + 0.2
+
+    expected = _formal_random_subset_polynomial_mmd(
+        source,
+        comparison,
+        subset_count=3,
+        subset_size=4,
+    )
+    permuted = _formal_random_subset_polynomial_mmd(
+        source[[4, 1, 9, 0, 7, 3, 8, 2, 6, 5]],
+        comparison[[8, 0, 5, 2, 9, 1, 6, 4, 7, 3]],
+        subset_count=3,
+        subset_size=4,
+    )
+
+    assert permuted == pytest.approx(expected, abs=1e-12)

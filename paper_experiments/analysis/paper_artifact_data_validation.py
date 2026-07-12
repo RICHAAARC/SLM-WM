@@ -599,7 +599,7 @@ def _validate_baseline_comparison(path: Path, context: Mapping[str, Any]) -> dic
 
 
 def _validate_ablation_metrics(path: Path, context: Mapping[str, Any]) -> dict[str, Any]:
-    """验证8项正式重运行消融的实测指标表."""
+    """验证唯一正式重运行消融集合的实测指标表."""
 
     rows = _read_csv_exact(path, ABLATION_METRIC_FIELDS)
     if tuple(row["ablation_id"] for row in rows) != FORMAL_RUNTIME_RERUN_ABLATION_IDS:
@@ -624,7 +624,7 @@ def _validate_ablation_metrics(path: Path, context: Mapping[str, Any]) -> dict[s
 
 
 def _validate_ablation_delta(path: Path, context: Mapping[str, Any]) -> dict[str, Any]:
-    """验证相对完整方法的7项真实消融差值."""
+    """验证全部非完整方法变体相对完整方法的真实消融差值."""
 
     rows = _read_csv_exact(path, ABLATION_DELTA_FIELDS)
     expected_ids = tuple(
@@ -661,7 +661,7 @@ def _validate_ablation_necessity_statistics(
         if ablation_id != "complete_method"
     )
     if tuple(row["ablation_id"] for row in rows) != expected_ids:
-        raise ValueError("机制必要性统计未精确覆盖7项正式变体")
+        raise ValueError("机制必要性统计未精确覆盖全部正式变体")
 
     paired_prompt_counts: set[int] = set()
     for row in rows:
@@ -735,7 +735,9 @@ def _validate_ablation_necessity_statistics(
         }
         if any(_as_bool(row[name]) != ready for name, ready in expected_flags.items()):
             raise ValueError("机制必要性统计判定标记与数值不一致")
-        supported = all(expected_flags.values())
+        supported = all(expected_flags.values()) and _as_bool(
+            row["paired_ssim_noninferiority_ready"]
+        )
         expected_decision = (
             "measured_supported" if supported else "measured_not_supported"
         )
@@ -744,7 +746,9 @@ def _validate_ablation_necessity_statistics(
             or _as_bool(row["supports_paper_claim"]) != supported
             or row["necessity_claim_decision"] != expected_decision
         ):
-            raise ValueError("机制必要性主张结论未同时满足四项预注册条件")
+            raise ValueError(
+                "机制必要性主张结论未同时满足统计条件与 paired SSIM 质量非劣门禁"
+            )
         for digest_field in (
             "bootstrap_seed_digest_random",
             "paired_prompt_id_digest",

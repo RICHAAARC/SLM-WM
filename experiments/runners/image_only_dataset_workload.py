@@ -69,6 +69,10 @@ def build_method_config(
             method.minimum_projection_energy_retention
         ),
         maximum_relative_response_residual=method.maximum_relative_response_residual,
+        null_space_cg_max_iterations=method.null_space_cg_max_iterations,
+        null_space_cg_relative_tolerance=(
+            method.null_space_cg_relative_tolerance
+        ),
         max_attention_tokens=method.max_attention_tokens,
         attention_module_count=method.attention_module_count,
         diffusion_attacks_enabled=method.diffusion_attacks_enabled,

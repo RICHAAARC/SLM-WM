@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Mapping
+
+from main.core.digest import build_stable_digest
 
 
 @dataclass(frozen=True)
@@ -14,6 +16,7 @@ class ArtifactManifest:
     artifact_type: str
     input_paths: tuple[str, ...]
     output_paths: tuple[str, ...]
+    config: dict[str, Any]
     config_digest: str
     code_version: str
     rebuild_command: str
@@ -29,6 +32,7 @@ REQUIRED_MANIFEST_FIELDS = (
     "artifact_type",
     "input_paths",
     "output_paths",
+    "config",
     "config_digest",
     "code_version",
     "rebuild_command",
@@ -38,3 +42,14 @@ REQUIRED_MANIFEST_FIELDS = (
 def validate_manifest(manifest: dict[str, Any]) -> list[str]:
     """返回缺失的最小 manifest 字段列表。"""
     return [field_name for field_name in REQUIRED_MANIFEST_FIELDS if field_name not in manifest]
+
+
+def manifest_config_digest_ready(manifest: Mapping[str, Any]) -> bool:
+    """核验 manifest 配置正文与配置摘要来自同一份结构化数据。"""
+
+    config = manifest.get("config")
+    return bool(
+        isinstance(config, Mapping)
+        and str(manifest.get("config_digest", ""))
+        == build_stable_digest(dict(config))
+    )
