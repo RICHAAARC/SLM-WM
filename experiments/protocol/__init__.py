@@ -15,6 +15,9 @@ from experiments.protocol.calibration import (
     operating_point_metrics,
 )
 from experiments.protocol.dataset_quality import (
+    FORMAL_DATASET_QUALITY_ATTACK_NAME,
+    FORMAL_DATASET_QUALITY_IMAGE_PAIR_ROLE,
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
     FORMAL_FEATURE_BACKEND,
     FORMAL_FEATURE_EXTRACTOR_ID,
     FORMAL_FID_KID_BLOCKER,
@@ -24,6 +27,7 @@ from experiments.protocol.dataset_quality import (
     build_dataset_quality_image_records,
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
+    formal_dataset_quality_metric_protocol,
     rebuild_formal_fid_kid_metric_rows,
 )
 from experiments.protocol.events import build_event_records
@@ -35,6 +39,9 @@ __all__ = [
     "DatasetQualityImageRecord",
     "FixedFprCalibrationConfig",
     "FixedFprThreshold",
+    "FORMAL_DATASET_QUALITY_ATTACK_NAME",
+    "FORMAL_DATASET_QUALITY_IMAGE_PAIR_ROLE",
+    "FORMAL_DATASET_QUALITY_METRIC_NAMES",
     "FORMAL_FEATURE_BACKEND",
     "FORMAL_FEATURE_EXTRACTOR_ID",
     "FORMAL_FID_KID_BLOCKER",
@@ -47,6 +54,7 @@ __all__ = [
     "build_dataset_quality_image_records",
     "build_dataset_quality_metric_rows",
     "build_dataset_quality_summary",
+    "formal_dataset_quality_metric_protocol",
     "rebuild_formal_fid_kid_metric_rows",
     "build_event_records",
     "build_prompt_records",

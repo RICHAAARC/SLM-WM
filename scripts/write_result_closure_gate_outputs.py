@@ -37,6 +37,9 @@ from paper_experiments.analysis.result_closure_gate import (
     build_result_closure_gate_report,
     build_source_file_sha256_map,
 )
+from paper_experiments.analysis.result_analysis_payload import (
+    build_governed_paper_payload_path_map,
+)
 from paper_experiments.runners.closure_package_selection import (
     validate_closure_input_lock_payloads,
 )
@@ -91,6 +94,21 @@ def _read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
     )
     if not rows or any(not isinstance(row, dict) for row in rows):
         raise ValueError(f"结果闭合门禁要求非空 JSONL 对象序列: {path.as_posix()}")
+    return tuple(dict(row) for row in rows)
+
+
+def _read_jsonl_allow_empty(path: Path) -> tuple[dict[str, Any], ...]:
+    """读取允许零行这一真实负结果的 JSONL 对象序列。"""
+
+    if not path.is_file():
+        raise FileNotFoundError(f"结果闭合门禁缺少 JSONL 输入: {path.as_posix()}")
+    rows = tuple(
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8-sig").splitlines()
+        if line.strip()
+    )
+    if any(not isinstance(row, dict) for row in rows):
+        raise ValueError(f"结果闭合门禁 JSONL 行必须是对象: {path.as_posix()}")
     return tuple(dict(row) for row in rows)
 
 
@@ -185,9 +203,13 @@ def write_result_closure_gate_outputs(
     paired_superiority_summary_path: str | Path | None = None,
     paired_superiority_manifest_path: str | Path | None = None,
     ablation_runtime_records_path: str | Path | None = None,
+    ablation_detection_records_path: str | Path | None = None,
+    ablation_frozen_protocols_path: str | Path | None = None,
     ablation_summary_path: str | Path | None = None,
     ablation_manifest_path: str | Path | None = None,
     dataset_quality_summary_path: str | Path | None = None,
+    dataset_quality_image_records_path: str | Path | None = None,
+    dataset_quality_image_resolution_records_path: str | Path | None = None,
     dataset_quality_feature_records_path: str | Path | None = None,
     dataset_quality_feature_report_path: str | Path | None = None,
     dataset_quality_metrics_path: str | Path | None = None,
@@ -429,6 +451,13 @@ def write_result_closure_gate_outputs(
             paper_run_name=paper_run.run_name,
             file_name="manifest.local.json",
         ),
+        "baseline_comparison_table": _per_run_path(
+            root_path,
+            None,
+            artifact_root="external_baseline_comparison",
+            paper_run_name=paper_run.run_name,
+            file_name="baseline_comparison_table.csv",
+        ),
         "result_analysis_confidence_interval_table": _per_run_path(
             root_path,
             None,
@@ -499,6 +528,20 @@ def write_result_closure_gate_outputs(
             paper_run_name=paper_run.run_name,
             file_name="runtime_rerun_records.jsonl",
         ),
+        "ablation_detection_records": _per_run_path(
+            root_path,
+            ablation_detection_records_path,
+            artifact_root="formal_mechanism_ablation",
+            paper_run_name=paper_run.run_name,
+            file_name="formal_detection_records.jsonl",
+        ),
+        "ablation_frozen_protocols": _per_run_path(
+            root_path,
+            ablation_frozen_protocols_path,
+            artifact_root="formal_mechanism_ablation",
+            paper_run_name=paper_run.run_name,
+            file_name="per_ablation_frozen_protocols.json",
+        ),
         "ablation_manifest": _per_run_path(
             root_path,
             ablation_manifest_path,
@@ -526,6 +569,20 @@ def write_result_closure_gate_outputs(
             artifact_root="dataset_level_quality",
             paper_run_name=paper_run.run_name,
             file_name="dataset_quality_summary.json",
+        ),
+        "dataset_quality_image_records": _per_run_path(
+            root_path,
+            dataset_quality_image_records_path,
+            artifact_root="dataset_level_quality",
+            paper_run_name=paper_run.run_name,
+            file_name="dataset_quality_image_records.jsonl",
+        ),
+        "dataset_quality_image_resolution_records": _per_run_path(
+            root_path,
+            dataset_quality_image_resolution_records_path,
+            artifact_root="dataset_level_quality",
+            paper_run_name=paper_run.run_name,
+            file_name="dataset_quality_image_resolution_records.jsonl",
         ),
         "dataset_quality_feature_report": _per_run_path(
             root_path,
@@ -633,6 +690,9 @@ def write_result_closure_gate_outputs(
     official_reference_fidelity_records = _read_jsonl(
         resolved_paths["official_reference_fidelity_records"]
     )
+    dataset_quality_image_resolution_records = _read_jsonl(
+        resolved_paths["dataset_quality_image_resolution_records"]
+    )
     artifact_data_validation_report = _read_json(
         resolved_paths["artifact_data_validation_report"]
     )
@@ -728,6 +788,25 @@ def write_result_closure_gate_outputs(
                 f"attack_matrix_source::{source_index:02d}"
             ] = resolved_source
             existing_source_paths.add(resolved_source.resolve())
+    dataset_quality_resolved_identities: set[Path] = set()
+    for source_index, resolution in enumerate(
+        dataset_quality_image_resolution_records
+    ):
+        resolved_image_path = str(resolution.get("resolved_image_path", ""))
+        if not resolved_image_path:
+            raise ValueError("数据集质量图像解析记录缺少实际图像路径")
+        resolved_source = _resolve_path(root_path, resolved_image_path)
+        resolved_identity = resolved_source.resolve()
+        if resolved_identity in dataset_quality_resolved_identities:
+            raise ValueError(
+                "数据集质量图像解析记录重复引用同一实际文件"
+            )
+        dataset_quality_resolved_identities.add(resolved_identity)
+        if resolved_source.resolve() not in existing_source_paths:
+            nested_source_paths[
+                f"dataset_quality_image::{source_index:05d}"
+            ] = resolved_source
+            existing_source_paths.add(resolved_source.resolve())
     resolved_paths.update(nested_source_paths)
 
     closure_input_lock = _read_json(resolved_paths["closure_input_lock"])
@@ -754,9 +833,17 @@ def write_result_closure_gate_outputs(
         paper_run.prompt_set,
         read_prompt_file(canonical_prompt_path),
     )
+    expected_prompt_digest_by_id = {
+        record.prompt_id: record.prompt_digest for record in canonical_prompt_records
+    }
     canonical_split_prompt_ids = group_prompt_ids_by_split(
         canonical_prompt_records
     )
+    expected_prompt_split_by_id = {
+        prompt_id: split
+        for split, prompt_ids in canonical_split_prompt_ids.items()
+        for prompt_id in prompt_ids
+    }
     canonical_calibration_prompt_ids = canonical_split_prompt_ids[
         "calibration"
     ]
@@ -765,6 +852,37 @@ def write_result_closure_gate_outputs(
         canonical_prompt_records,
         build_paper_fixed_fpr_config(root_path),
     )
+    governed_payload_path_map = {
+        "main_comparison_table": _relative_or_absolute(
+            resolved_paths["baseline_comparison_table"], root_path
+        ),
+        "attack_table": _relative_or_absolute(
+            resolved_paths["attack_family_metrics"], root_path
+        ),
+        "quality_table": _relative_or_absolute(
+            resolved_paths["dataset_quality_metrics"], root_path
+        ),
+        "main_confidence_interval_table": _relative_or_absolute(
+            resolved_paths["result_analysis_confidence_interval_table"],
+            root_path,
+        ),
+        "per_attack_superiority_table": _relative_or_absolute(
+            resolved_paths["result_analysis_per_attack_superiority_table"],
+            root_path,
+        ),
+        "failure_case_records": _relative_or_absolute(
+            resolved_paths["result_analysis_failure_case_records"],
+            root_path,
+        ),
+        "failure_case_figure": _relative_or_absolute(
+            resolved_paths["result_analysis_failure_case_figure"],
+            root_path,
+        ),
+    }
+    if governed_payload_path_map != build_governed_paper_payload_path_map(
+        paper_run.run_name
+    ):
+        raise ValueError("结果闭合读取的论文 payload 路径不是规范仓库相对路径")
     bundle = ResultClosureGateInput(
         expected_paper_claim_scale=paper_run.run_name,
         expected_target_fpr=paper_run.target_fpr,
@@ -780,6 +898,8 @@ def write_result_closure_gate_outputs(
         expected_test_prompt_id_digest=build_stable_digest(
             sorted(canonical_test_prompt_ids)
         ),
+        expected_prompt_split_by_id=expected_prompt_split_by_id,
+        expected_prompt_digest_by_id=expected_prompt_digest_by_id,
         source_file_sha256=closure_source_file_sha256,
         attack_report=_read_json(resolved_paths["attack_report"]),
         attack_detection_records=_read_jsonl(
@@ -841,6 +961,12 @@ def write_result_closure_gate_outputs(
         ablation_runtime_records=_read_jsonl(
             resolved_paths["ablation_runtime_records"]
         ),
+        ablation_detection_records=_read_jsonl(
+            resolved_paths["ablation_detection_records"]
+        ),
+        ablation_frozen_protocols=_read_json(
+            resolved_paths["ablation_frozen_protocols"]
+        ),
         ablation_necessity_rows=_read_csv(
             resolved_paths["ablation_necessity_rows"]
         ),
@@ -848,6 +974,12 @@ def write_result_closure_gate_outputs(
             resolved_paths["ablation_necessity_summary"]
         ),
         dataset_quality_summary=_read_json(resolved_paths["dataset_quality_summary"]),
+        dataset_quality_image_records=_read_jsonl(
+            resolved_paths["dataset_quality_image_records"]
+        ),
+        dataset_quality_image_resolution_records=(
+            dataset_quality_image_resolution_records
+        ),
         dataset_quality_feature_report=_read_json(
             resolved_paths["dataset_quality_feature_report"]
         ),
@@ -882,6 +1014,29 @@ def write_result_closure_gate_outputs(
         submission_readiness_manifest=_read_json(resolved_paths["submission_readiness_manifest"]),
         entry_review_report=_read_json(resolved_paths["entry_review_report"]),
         entry_review_manifest=_read_json(resolved_paths["entry_review_manifest"]),
+        result_analysis_governed_payload_path_map=(
+            governed_payload_path_map
+        ),
+        result_analysis_baseline_comparison_rows=_read_csv(
+            resolved_paths["baseline_comparison_table"]
+        ),
+        result_analysis_confidence_interval_rows=_read_csv(
+            resolved_paths["result_analysis_confidence_interval_table"]
+        ),
+        result_analysis_per_attack_superiority_rows=_read_csv(
+            resolved_paths["result_analysis_per_attack_superiority_table"]
+        ),
+        result_analysis_failure_case_rows=_read_jsonl_allow_empty(
+            resolved_paths["result_analysis_failure_case_records"]
+        ),
+        result_analysis_failure_case_svg_text=(
+            resolved_paths["result_analysis_failure_case_figure"].read_text(
+                encoding="utf-8-sig"
+            )
+        ),
+        result_analysis_failure_figure_path=governed_payload_path_map[
+            "failure_case_figure"
+        ],
     )
     checks = build_result_closure_gate_checks(bundle)
     report = build_result_closure_gate_report(bundle, checks)
@@ -979,9 +1134,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--paired-superiority-summary-path", default=None)
     parser.add_argument("--paired-superiority-manifest-path", default=None)
     parser.add_argument("--ablation-runtime-records-path", default=None)
+    parser.add_argument("--ablation-detection-records-path", default=None)
+    parser.add_argument("--ablation-frozen-protocols-path", default=None)
     parser.add_argument("--ablation-summary-path", default=None)
     parser.add_argument("--ablation-manifest-path", default=None)
     parser.add_argument("--dataset-quality-summary-path", default=None)
+    parser.add_argument("--dataset-quality-image-records-path", default=None)
+    parser.add_argument(
+        "--dataset-quality-image-resolution-records-path",
+        default=None,
+    )
     parser.add_argument("--dataset-quality-feature-records-path", default=None)
     parser.add_argument("--dataset-quality-feature-report-path", default=None)
     parser.add_argument("--dataset-quality-metrics-path", default=None)
@@ -1036,9 +1198,15 @@ def main() -> None:
         paired_superiority_summary_path=args.paired_superiority_summary_path,
         paired_superiority_manifest_path=args.paired_superiority_manifest_path,
         ablation_runtime_records_path=args.ablation_runtime_records_path,
+        ablation_detection_records_path=args.ablation_detection_records_path,
+        ablation_frozen_protocols_path=args.ablation_frozen_protocols_path,
         ablation_summary_path=args.ablation_summary_path,
         ablation_manifest_path=args.ablation_manifest_path,
         dataset_quality_summary_path=args.dataset_quality_summary_path,
+        dataset_quality_image_records_path=args.dataset_quality_image_records_path,
+        dataset_quality_image_resolution_records_path=(
+            args.dataset_quality_image_resolution_records_path
+        ),
         dataset_quality_feature_records_path=args.dataset_quality_feature_records_path,
         dataset_quality_feature_report_path=args.dataset_quality_feature_report_path,
         dataset_quality_metrics_path=args.dataset_quality_metrics_path,

@@ -78,18 +78,26 @@
 
 ### 4.4 Q/K attention 几何
 
-1. 从 Transformer attention 模块的 `to_q`、`to_k` 读取真实投影。
-2. 用密钥关系矩阵定义图几何目标。
-3. 对 latent 求真实目标梯度, 并投影到安全方向。
-4. 使用单调回溯验证更新后 Q/K 目标确实提升。
-5. 记录更新强度、梯度范数、回溯次数和前后目标值。
+1. 从 Transformer attention 模块的 `to_q`、`to_k` 读取真实投影, 在冻结二维抽样图像 token 集合上同时保存中心化 logits 与关系概率。
+2. 构造中心化 logit、温度0.25的可微 rank、抽样关系概率和概率偏离与距离偏离的双中心交互四分量图, 各分量逐行加权归一化后通过密钥符号投影等权组合。
+3. 由跨层稳定度和 attention 显著度选择 token, 构造可跨阶段核对身份的 pair 权重。
+4. 对 latent 求真实目标梯度, 并投影到安全方向。
+5. 使用单调回溯验证更新后 Q/K 目标确实提升。
+6. 以同 seed、同 scheduler 和相同 LF/tail 配置及算子生成只关闭 attention geometry 的 carrier-only 成图；该比较测量包含后续轨迹交互的总机制效应, 不假设干预后 realized carrier 相等。
+7. 核验首个注入前 latent 字节身份、完整注入顺序和 scheduler 轨迹；逐条拒绝含 attention 来源、分数、更新、关系、pair 身份或 attention Null Space 的 carrier-only 原子。
+8. 持久化 carrier-only 更新原子 JSONL, 将路径、实际文件 SHA-256 和解析内容摘要绑定到结果、manifest 与缓存复验。
+9. 验证 clean 到完整方法、clean 到 carrier-only 及 carrier-only 到完整方法三条最终 CLIP 语义和视觉特征边。
+10. 对 clean、carrier-only 与完整方法成图重新编码真实 Q/K, 验证自身盲选择归因增益和冻结 carrier-only pair 权重归因增益, 并记录全部四个 Q/K 依赖分量的配对增益。
+11. 记录更新强度、梯度范数、回溯次数、前后目标值、直接 Q/K 来源、四分量与密钥投影身份、反事实身份和 pair 权重身份, 并把反事实原子、身份与图像摘要写入 manifest。
 
 ### 4.5 仅图像盲检
 
 1. 检测输入只包括最终图像、方法密钥与公开模型。
 2. 通过公开 VAE / 视觉编码器恢复检测特征。
 3. 计算内容分支分数与 attention 几何证据。
-4. 阈值只在 calibration clean negative 上冻结。
+4. 仿射注册使用攻击配置无关的分层搜索, 并把同一 pair 权重从观测网格传递到规范网格。
+5. 对齐图像重新提取 Q/K 后使用传递权重计算同步分数, 不重新选择 token。
+6. 阈值只在 calibration clean negative 上冻结。
 5. test split 使用同一阈值评估 positive、clean negative、wrong-key negative 和 attacked image。
 6. fixed-FPR 门禁使用95%单侧 Wilson 上界, 通用有界指标表使用 Hoeffding 区间。
 

@@ -10,10 +10,8 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import datetime, timezone
-import html
 import json
 import math
-import os
 from pathlib import Path
 import sys
 from typing import Any, Iterable
@@ -36,10 +34,17 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
 from experiments.protocol.attacks import default_attack_configs
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.runtime.repository_environment import resolve_code_version
-from main.core.digest import build_stable_digest
 from paper_experiments.analysis.result_analysis_payload import (
+    CONFIDENCE_INTERVAL_FIELDNAMES,
+    FORMAL_FAILURE_CASE_LIMIT,
+    PER_ATTACK_SUPERIORITY_FIELDNAMES,
+    build_confidence_interval_rows,
+    build_failure_case_records,
+    build_failure_case_svg_text,
+    build_per_attack_superiority_rows,
     build_result_analysis_manifest_config,
     build_result_analysis_payload_binding,
+    rebuild_and_validate_result_analysis_derived_payload,
 )
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_result_analysis"
@@ -131,52 +136,6 @@ def ensure_output_dir_under_outputs(root_path: Path, output_dir: str | Path) -> 
     return resolved
 
 
-def _float_value(row: dict[str, Any], field_name: str, default_value: float = 0.0) -> float:
-    """解析浮点字段。"""
-
-    value = row.get(field_name, default_value)
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default_value)
-
-
-def build_confidence_interval_rows(result_records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """从结果记录重建 Hoeffding 置信区间表。"""
-
-    rows: list[dict[str, Any]] = []
-    for record in result_records:
-        if str(record.get("metric_status", "unsupported")) == "unsupported":
-            continue
-        rows.append(
-            {
-                "paper_claim_scale": record.get("paper_claim_scale", ""),
-                "method_id": record.get("method_id", ""),
-                "attack_family": record.get("attack_family", ""),
-                "attack_name": record.get("attack_name", ""),
-                "resource_profile": record.get("resource_profile", ""),
-                "true_positive_rate": record.get("true_positive_rate", ""),
-                "true_positive_rate_ci_low": record.get("true_positive_rate_ci_low", ""),
-                "true_positive_rate_ci_high": record.get("true_positive_rate_ci_high", ""),
-                "false_positive_rate": record.get("false_positive_rate", ""),
-                "false_positive_rate_ci_low": record.get("false_positive_rate_ci_low", ""),
-                "false_positive_rate_ci_high": record.get("false_positive_rate_ci_high", ""),
-                "clean_false_positive_rate": record.get("clean_false_positive_rate", ""),
-                "clean_false_positive_rate_ci_low": record.get("clean_false_positive_rate_ci_low", ""),
-                "clean_false_positive_rate_ci_high": record.get("clean_false_positive_rate_ci_high", ""),
-                "attacked_false_positive_rate": record.get("attacked_false_positive_rate", ""),
-                "attacked_false_positive_rate_ci_low": record.get("attacked_false_positive_rate_ci_low", ""),
-                "attacked_false_positive_rate_ci_high": record.get("attacked_false_positive_rate_ci_high", ""),
-                "positive_count": record.get("positive_count", ""),
-                "negative_count": record.get("negative_count", ""),
-                "confidence_interval_method": record.get("confidence_interval_method", ""),
-                "confidence_level": record.get("confidence_level", ""),
-                "supports_paper_claim": record.get("supports_paper_claim", False),
-            }
-        )
-    return sorted(rows, key=lambda row: (row["attack_name"], row["method_id"]))
-
-
 def _finite_float(row: dict[str, Any], field_name: str) -> float | None:
     """读取有限浮点数; 缺失或非法值用于阻断完整统计披露门禁。"""
 
@@ -253,60 +212,6 @@ def _superiority_evaluation_row_ready(row: dict[str, Any]) -> bool:
     )
 
 
-def build_per_attack_superiority_rows(result_records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """重建每个攻击下 SLM-WM 相对最强主表 baseline 的优势表。"""
-
-    grouped: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
-    for record in result_records:
-        if str(record.get("metric_status", "unsupported")) == "unsupported":
-            continue
-        key = (str(record.get("attack_family", "")), str(record.get("attack_name", "")))
-        grouped.setdefault(key, {})[str(record.get("method_id", ""))] = record
-
-    rows: list[dict[str, Any]] = []
-    for (attack_family, attack_name), method_records in sorted(grouped.items()):
-        slm_record = method_records.get(PROPOSED_METHOD_ID)
-        if slm_record is None:
-            continue
-        baseline_records = [
-            method_records[method_id] for method_id in PRIMARY_BASELINE_METHOD_IDS if method_id in method_records
-        ]
-        if not baseline_records:
-            continue
-        best_baseline = max(baseline_records, key=lambda row: _float_value(row, "true_positive_rate"))
-        slm_tpr = _float_value(slm_record, "true_positive_rate")
-        best_tpr = _float_value(best_baseline, "true_positive_rate")
-        slm_ci_low = _float_value(slm_record, "true_positive_rate_ci_low", slm_tpr)
-        best_ci_high = _float_value(best_baseline, "true_positive_rate_ci_high", best_tpr)
-        margin = slm_tpr - best_tpr
-        conservative_margin = slm_ci_low - best_ci_high
-        rows.append(
-            {
-                "attack_family": attack_family,
-                "attack_name": attack_name,
-                "slm_true_positive_rate": slm_tpr,
-                "slm_true_positive_rate_ci_low": slm_record.get("true_positive_rate_ci_low", ""),
-                "slm_true_positive_rate_ci_high": slm_record.get("true_positive_rate_ci_high", ""),
-                "best_baseline_id": best_baseline.get("method_id", ""),
-                "best_baseline_true_positive_rate": best_tpr,
-                "best_baseline_true_positive_rate_ci_low": best_baseline.get("true_positive_rate_ci_low", ""),
-                "best_baseline_true_positive_rate_ci_high": best_baseline.get("true_positive_rate_ci_high", ""),
-                "slm_minus_best_baseline_tpr": margin,
-                "conservative_ci_margin": conservative_margin,
-                "superiority_claim_ready": bool(
-                    slm_record.get("supports_paper_claim", False)
-                    and best_baseline.get("supports_paper_claim", False)
-                    and conservative_margin > 0
-                ),
-                "supports_paper_claim": bool(
-                    slm_record.get("supports_paper_claim", False)
-                    and best_baseline.get("supports_paper_claim", False)
-                ),
-            }
-        )
-    return rows
-
-
 def read_json_object(path: Path) -> dict[str, Any]:
     """读取必须存在的 JSON 对象."""
 
@@ -371,114 +276,6 @@ def build_result_template_coverage(result_records: Iterable[dict[str, Any]]) -> 
     }
 
 
-def _attacked_image_path(record: dict[str, Any]) -> str:
-    """读取攻击后图像路径。"""
-
-    metadata = record.get("metadata", {})
-    if isinstance(metadata, dict):
-        return str(metadata.get("attacked_image_path", ""))
-    return ""
-
-
-def build_failure_case_records(
-    formal_detection_records: Iterable[dict[str, Any]],
-    *,
-    limit: int = 12,
-) -> list[dict[str, Any]]:
-    """筛选 positive_source 中未通过检测的代表性失败案例。"""
-
-    failures = [
-        record
-        for record in formal_detection_records
-        if record.get("sample_role") == "positive_source" and bool(record.get("evidence_decision", False)) is False
-    ]
-    failures.sort(key=lambda row: (_float_value(row, "aligned_content_score_after"), str(row.get("attack_name", ""))))
-    selected = failures[: max(0, int(limit))]
-    rows: list[dict[str, Any]] = []
-    for index, record in enumerate(selected, start=1):
-        payload = {
-            "failure_case_rank": index,
-            "attack_family": record.get("attack_family", ""),
-            "attack_name": record.get("attack_name", ""),
-            "sample_role": record.get("sample_role", ""),
-            "source_record_id": record.get("source_record_id", ""),
-            "attack_record_id": record.get("attack_record_id", ""),
-            "aligned_content_score_after": record.get("aligned_content_score_after", ""),
-            "aligned_content_score_before": record.get("aligned_content_score_before", ""),
-            "score_retention": record.get("score_retention", ""),
-            "evidence_decision": record.get("evidence_decision", ""),
-            "attacked_image_path": _attacked_image_path(record),
-            "attacked_image_digest": record.get("attacked_image_digest", ""),
-            "source_image_digest": record.get("source_image_digest", ""),
-            "supports_paper_claim": record.get("supports_paper_claim", False),
-        }
-        payload["failure_case_record_digest"] = build_stable_digest(payload)
-        rows.append(payload)
-    return rows
-
-
-def build_failure_case_svg(root_path: Path, output_dir: Path, failure_cases: list[dict[str, Any]]) -> str:
-    """从实际攻击图像生成失败案例 SVG 图。
-
-    该图只引用受治理记录给出的真实攻击图像。只要记录声明了失败案例, 对应
-    图像就必须存在; 缺失图像不能通过空白卡片代替, 因为那会破坏论文图与
-    样本证据之间的一一对应关系。
-    """
-
-    card_width = 260
-    card_height = 250
-    columns = 3
-    rows = max(1, (len(failure_cases) + columns - 1) // columns)
-    width = columns * card_width + 40
-    height = rows * card_height + 80
-    svg_parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        '<style>text{font-family:Arial, sans-serif;} .title{font-size:18px;font-weight:700;} '
-        '.label{font-size:11px;} .small{font-size:10px;fill:#333;} .card{fill:#fff;stroke:#bbb;stroke-width:1;}</style>',
-        '<rect width="100%" height="100%" fill="#ffffff"/>',
-        '<text x="20" y="28" class="title">SLM-WM failure cases under fixed-FPR attack protocol</text>',
-        '<text x="20" y="48" class="small">Each panel renders the attacked image referenced by its governed detection record.</text>',
-    ]
-    if not failure_cases:
-        svg_parts.append(
-            '<text x="20" y="82" class="label">No false-negative case was observed in the governed detection records.</text>'
-        )
-    for index, item in enumerate(failure_cases):
-        column = index % columns
-        row = index // columns
-        x = 20 + column * card_width
-        y = 65 + row * card_height
-        image_path_text = str(item.get("attacked_image_path", ""))
-        if not image_path_text:
-            raise ValueError(
-                f"失败案例 #{item.get('failure_case_rank', index + 1)} 缺少 attacked_image_path"
-            )
-        image_abs_path = resolve_input_path(root_path, image_path_text)
-        if not image_abs_path.is_file():
-            raise FileNotFoundError(f"失败案例攻击图像不存在: {image_abs_path.as_posix()}")
-        href = Path(os.path.relpath(image_abs_path, output_dir)).as_posix()
-        svg_parts.append(f'<rect x="{x}" y="{y}" width="{card_width - 16}" height="{card_height - 14}" class="card"/>')
-        svg_parts.append(
-            f'<image href="{html.escape(href)}" x="{x + 12}" y="{y + 12}" width="220" height="150" '
-            'preserveAspectRatio="xMidYMid meet"/>'
-        )
-        svg_parts.append(
-            f'<text x="{x + 12}" y="{y + 178}" class="label">#{item["failure_case_rank"]} '
-            f'{html.escape(str(item.get("attack_name", "")))}</text>'
-        )
-        svg_parts.append(
-            f'<text x="{x + 12}" y="{y + 195}" class="small">score='
-            f'{html.escape(str(item.get("aligned_content_score_after", "")))[:12]} '
-            f'retention={html.escape(str(item.get("score_retention", "")))[:12]}</text>'
-        )
-        svg_parts.append(
-            f'<text x="{x + 12}" y="{y + 212}" class="small">digest='
-            f'{html.escape(str(item.get("attacked_image_digest", "")))[:18]}</text>'
-        )
-    svg_parts.append("</svg>")
-    return "\n".join(svg_parts) + "\n"
-
-
 def write_pilot_paper_result_analysis_outputs(
     *,
     root: str | Path = ".",
@@ -492,6 +289,10 @@ def write_pilot_paper_result_analysis_outputs(
 ) -> dict[str, Any]:
     """写出 pilot_paper 结果分析表和失败案例图。"""
 
+    if int(failure_case_limit) != FORMAL_FAILURE_CASE_LIMIT:
+        raise ValueError(
+            f"正式失败案例上限必须冻结为 {FORMAL_FAILURE_CASE_LIMIT}"
+        )
     root_path = Path(root).resolve()
     paper_run = build_paper_run_config(root_path)
     output_path = ensure_output_dir_under_outputs(
@@ -640,52 +441,40 @@ def write_pilot_paper_result_analysis_outputs(
     write_csv(
         confidence_interval_path,
         confidence_interval_rows,
-        [
-            "paper_claim_scale",
-            "method_id",
-            "attack_family",
-            "attack_name",
-            "resource_profile",
-            "true_positive_rate",
-            "true_positive_rate_ci_low",
-            "true_positive_rate_ci_high",
-            "false_positive_rate",
-            "false_positive_rate_ci_low",
-            "false_positive_rate_ci_high",
-            "clean_false_positive_rate",
-            "clean_false_positive_rate_ci_low",
-            "clean_false_positive_rate_ci_high",
-            "attacked_false_positive_rate",
-            "attacked_false_positive_rate_ci_low",
-            "attacked_false_positive_rate_ci_high",
-            "positive_count",
-            "negative_count",
-            "confidence_interval_method",
-            "confidence_level",
-            "supports_paper_claim",
-        ],
+        list(CONFIDENCE_INTERVAL_FIELDNAMES),
     )
     write_csv(
         superiority_path,
         superiority_rows,
-        [
-            "attack_family",
-            "attack_name",
-            "slm_true_positive_rate",
-            "slm_true_positive_rate_ci_low",
-            "slm_true_positive_rate_ci_high",
-            "best_baseline_id",
-            "best_baseline_true_positive_rate",
-            "best_baseline_true_positive_rate_ci_low",
-            "best_baseline_true_positive_rate_ci_high",
-            "slm_minus_best_baseline_tpr",
-            "conservative_ci_margin",
-            "superiority_claim_ready",
-            "supports_paper_claim",
-        ],
+        list(PER_ATTACK_SUPERIORITY_FIELDNAMES),
     )
     write_jsonl(failure_records_path, failure_rows)
-    failure_figure_path.write_text(build_failure_case_svg(root_path, output_path, failure_rows), encoding="utf-8")
+    for failure_row in failure_rows:
+        attacked_image_path = resolve_input_path(
+            root_path, str(failure_row.get("attacked_image_path", ""))
+        )
+        if not attacked_image_path.is_file():
+            raise FileNotFoundError(
+                f"失败案例攻击图像不存在: {attacked_image_path.as_posix()}"
+            )
+    recorded_failure_figure_path = relative_or_absolute(
+        failure_figure_path, root_path
+    )
+    failure_svg_text = build_failure_case_svg_text(
+        failure_rows,
+        failure_figure_path=recorded_failure_figure_path,
+    )
+    failure_figure_path.write_text(failure_svg_text, encoding="utf-8")
+    semantic_rebuild = rebuild_and_validate_result_analysis_derived_payload(
+        result_records=result_records,
+        attack_detection_records=formal_detection_records,
+        confidence_interval_rows=confidence_interval_rows,
+        per_attack_superiority_rows=superiority_rows,
+        failure_case_rows=failure_rows,
+        failure_case_svg_text=failure_svg_text,
+        failure_figure_path=recorded_failure_figure_path,
+        failure_case_limit=failure_case_limit,
+    )
     payload_binding = build_result_analysis_payload_binding(
         repository_root=root_path,
         output_dir=output_path,
@@ -769,6 +558,7 @@ def write_pilot_paper_result_analysis_outputs(
         "failure_case_record_count": len(failure_rows),
         "failure_case_limit": int(failure_case_limit),
         "failure_case_figure_ready": failure_figure_path.is_file(),
+        **semantic_rebuild,
         **payload_binding,
         **template_coverage,
         "supports_paper_claim": per_attack_ci_coverage_ready

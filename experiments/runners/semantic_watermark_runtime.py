@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import hashlib
 import json
 import math
@@ -47,11 +47,17 @@ from main.methods.carrier import (
 )
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
+    ATTENTION_RELATION_COMPONENT_NAMES,
+    DIRECT_QK_RELATION_SOURCE,
     DifferentiableAttentionRecorder,
+    attention_geometry_component_scores,
     attention_geometry_score,
     attention_relation_stability_map,
+    build_attention_relation_graph_identity,
+    build_stable_attention_pair_weights,
     compute_attention_geometry_gradient,
     optimize_attention_geometry_update,
+    select_stable_attention_tokens,
 )
 from main.methods.semantic import BranchRiskConfig, build_branch_risk_fields
 from main.methods.subspace import (
@@ -99,6 +105,9 @@ class SemanticWatermarkRuntimeConfig:
     )
     attention_unstable_pair_weight: float = (
         _FORMAL_METHOD_CONFIG.attention_unstable_pair_weight
+    )
+    minimum_final_image_attention_score_gain: float = (
+        _FORMAL_METHOD_CONFIG.minimum_final_image_attention_score_gain
     )
     tail_fraction: float = _FORMAL_METHOD_CONFIG.tail_fraction
     minimum_projection_energy_retention: float = _FORMAL_METHOD_CONFIG.minimum_projection_energy_retention
@@ -162,6 +171,13 @@ class SemanticWatermarkRuntimeConfig:
         if not 0.0 <= self.attention_unstable_pair_weight < 1.0:
             raise ValueError(
                 "attention_unstable_pair_weight 必须位于 [0, 1)"
+            )
+        if (
+            not math.isfinite(self.minimum_final_image_attention_score_gain)
+            or self.minimum_final_image_attention_score_gain <= 0.0
+        ):
+            raise ValueError(
+                "minimum_final_image_attention_score_gain 必须为正有限数"
             )
         if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
             raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
@@ -290,17 +306,34 @@ def _stable_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
 
 
-def _tensor_digest(tensor: Any) -> str:
-    """为真实 tensor 生成不保存原始值的稳定摘要。"""
+def _tensor_content_sha256(tensor: Any) -> str:
+    """以 dtype、shape 与连续原始字节计算 tensor 内容 SHA-256。"""
 
-    values = tensor.detach().float().cpu()
-    return build_stable_digest(
-        {
-            "shape": tuple(int(value) for value in values.shape),
-            "mean": round(float(values.mean().item()), 12),
-            "std": round(float(values.std(unbiased=False).item()), 12),
-            "norm": round(float(values.norm().item()), 12),
-        }
+    import torch
+
+    values = tensor.detach().cpu().contiguous()
+    raw_bytes = values.view(torch.uint8).numpy().tobytes(order="C")
+    digest = hashlib.sha256()
+    digest.update(b"slm_wm_tensor_content_v1\0")
+    digest.update(str(values.dtype).encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(
+        json.dumps(
+            [int(value) for value in values.shape],
+            separators=(",", ":"),
+        ).encode("ascii")
+    )
+    digest.update(b"\0")
+    digest.update(raw_bytes)
+    return digest.hexdigest()
+
+
+def _is_sha256_hex(value: Any) -> bool:
+    """判断字段是否为规范的小写 SHA-256 十六进制文本。"""
+
+    text = str(value)
+    return len(text) == 64 and all(
+        character in "0123456789abcdef" for character in text
     )
 
 
@@ -365,6 +398,193 @@ def validate_semantic_watermark_runtime_result_provenance(
     )
 
 
+def _carrier_only_counterfactual_artifact_binding_ready(
+    result_payload: Mapping[str, Any],
+    manifest: Mapping[str, Any],
+    root_path: Path,
+    config: SemanticWatermarkRuntimeConfig,
+) -> bool:
+    """复验反事实原子、图像、保持记录、Q/K 记录与 manifest 绑定。"""
+
+    if not config.attention_geometry_enabled:
+        return True
+    metadata = result_payload.get("metadata")
+    manifest_metadata = manifest.get("metadata")
+    if not isinstance(metadata, Mapping) or not isinstance(
+        manifest_metadata,
+        Mapping,
+    ):
+        return False
+    observability = metadata.get("final_image_attention_observability")
+    preservation = metadata.get("carrier_only_final_image_preservation")
+    final_preservation = metadata.get("final_image_preservation")
+    counterfactual = metadata.get("carrier_only_counterfactual")
+    if not isinstance(observability, Mapping) or not isinstance(
+        preservation,
+        Mapping,
+    ) or not isinstance(final_preservation, Mapping) or not isinstance(
+        counterfactual,
+        Mapping,
+    ):
+        return False
+    identity_digest = str(
+        counterfactual.get("carrier_only_counterfactual_identity_digest", "")
+    )
+    image_path = str(
+        counterfactual.get("carrier_only_counterfactual_image_path", "")
+    )
+    image_digest = str(
+        counterfactual.get("carrier_only_counterfactual_image_digest", "")
+    )
+    atom_path = str(
+        counterfactual.get("carrier_only_counterfactual_atom_path", "")
+    )
+    atom_file_sha256 = str(
+        counterfactual.get(
+            "carrier_only_counterfactual_atom_file_sha256",
+            "",
+        )
+    )
+    atom_content_digest = str(
+        counterfactual.get(
+            "carrier_only_counterfactual_atom_content_digest",
+            "",
+        )
+    )
+    output_paths = tuple(str(path) for path in manifest.get("output_paths", ()))
+    if not (
+        _is_sha256_hex(identity_digest)
+        and _is_sha256_hex(image_digest)
+        and _is_sha256_hex(atom_file_sha256)
+        and _is_sha256_hex(atom_content_digest)
+        and image_path
+        and atom_path
+        and final_preservation.get("final_image_preservation_gate_ready") is True
+        and preservation.get(
+            "carrier_only_final_image_preservation_gate_ready"
+        )
+        is True
+        and preservation.get(
+            "carrier_only_to_full_final_image_preservation_gate_ready"
+        )
+        is True
+        and preservation.get(
+            "carrier_only_counterfactual_three_way_preservation_gate_ready"
+        )
+        is True
+        and all(
+            record.get("carrier_only_counterfactual_identity_digest")
+            == identity_digest
+            and record.get("carrier_only_counterfactual_image_path")
+            == image_path
+            and record.get("carrier_only_counterfactual_image_digest")
+            == image_digest
+            and record.get("carrier_only_counterfactual_atom_path")
+            == atom_path
+            and record.get("carrier_only_counterfactual_atom_file_sha256")
+            == atom_file_sha256
+            and record.get("carrier_only_counterfactual_atom_content_digest")
+            == atom_content_digest
+            for record in (observability, preservation)
+        )
+        and manifest_metadata.get("carrier_only_counterfactual_identity_digest")
+        == identity_digest
+        and manifest_metadata.get("carrier_only_counterfactual_image_digest")
+        == image_digest
+        and manifest_metadata.get("carrier_only_counterfactual_atom_path")
+        == atom_path
+        and manifest_metadata.get(
+            "carrier_only_counterfactual_atom_file_sha256"
+        )
+        == atom_file_sha256
+        and manifest_metadata.get(
+            "carrier_only_counterfactual_atom_content_digest"
+        )
+        == atom_content_digest
+        and image_path in output_paths
+        and atom_path in output_paths
+    ):
+        return False
+
+    def resolve_output_path(relative_path: str) -> Path | None:
+        """把 manifest 相对路径限制在仓库根目录内。"""
+
+        resolved = (root_path / relative_path).resolve()
+        if resolved != root_path and root_path not in resolved.parents:
+            return None
+        return resolved
+
+    resolved_image_path = resolve_output_path(image_path)
+    resolved_atom_path = resolve_output_path(atom_path)
+    full_record_path_text = str(result_payload.get("update_record_path", ""))
+    resolved_full_record_path = resolve_output_path(full_record_path_text)
+    if (
+        resolved_image_path is None
+        or resolved_atom_path is None
+        or resolved_full_record_path is None
+        or full_record_path_text not in output_paths
+    ):
+        return False
+    if not (
+        resolved_image_path.is_file()
+        and resolved_atom_path.is_file()
+        and resolved_full_record_path.is_file()
+        and file_digest(resolved_image_path) == image_digest
+        and file_digest(resolved_atom_path) == atom_file_sha256
+    ):
+        return False
+
+    def read_jsonl_records(path: Path) -> list[dict[str, Any]]:
+        """读取更新原子并拒绝非对象行。"""
+
+        records = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if not isinstance(payload, dict):
+                raise TypeError("更新原子必须是 JSON 对象")
+            records.append(payload)
+        return records
+
+    try:
+        full_records = read_jsonl_records(resolved_full_record_path)
+        carrier_records = read_jsonl_records(resolved_atom_path)
+        rebuilt_identity = _carrier_only_counterfactual_identity(
+            config,
+            replace(config, attention_geometry_enabled=False),
+            full_records,
+            carrier_records,
+        )
+    except (OSError, TypeError, ValueError, RuntimeError, json.JSONDecodeError):
+        return False
+    return bool(
+        build_stable_digest(carrier_records) == atom_content_digest
+        and rebuilt_identity["carrier_only_counterfactual_identity_digest"]
+        == identity_digest
+        and rebuilt_identity[
+            "full_method_counterfactual_update_records_digest"
+        ]
+        == counterfactual.get(
+            "full_method_counterfactual_update_records_digest"
+        )
+        and rebuilt_identity[
+            "carrier_only_counterfactual_update_records_digest"
+        ]
+        == counterfactual.get(
+            "carrier_only_counterfactual_update_records_digest"
+        )
+        and rebuilt_identity[
+            "full_method_initial_latent_content_sha256"
+        ]
+        == counterfactual.get("full_method_initial_latent_content_sha256")
+        and rebuilt_identity[
+            "carrier_only_initial_latent_content_sha256"
+        ]
+        == counterfactual.get("carrier_only_initial_latent_content_sha256")
+    )
+
+
 def load_completed_semantic_watermark_runtime_result(
     config: SemanticWatermarkRuntimeConfig,
     root: str | Path = ".",
@@ -405,6 +625,13 @@ def load_completed_semantic_watermark_runtime_result(
         return None
     output_paths = tuple(str(path) for path in manifest.get("output_paths", ()))
     if not output_paths or not all((root_path / path).is_file() for path in output_paths):
+        return None
+    if not _carrier_only_counterfactual_artifact_binding_ready(
+        result_payload,
+        manifest,
+        root_path,
+        config,
+    ):
         return None
     try:
         return SemanticWatermarkRuntimeResult(**result_payload)
@@ -689,31 +916,17 @@ def _final_image_preservation_record(
 ) -> dict[str, Any]:
     """在最终成图上验证累计语义与视觉特征保持性。"""
 
-    import torch
-
-    device = pipeline._execution_device
-
-    def image_tensor(image: Any) -> Any:
-        """把最终 PIL 成图转换为 [0, 1] 模型输入 tensor。"""
-
-        pixels = pipeline.image_processor.preprocess(image).to(
-            device=device,
-            dtype=torch.float32,
-        )
-        return (pixels / 2.0 + 0.5).clamp(0.0, 1.0)
-
-    with torch.no_grad():
-        clean_semantic, clean_visual = feature_runtime.joint_image_features(
-            image_tensor(clean_image)
-        )
-        watermarked_semantic, watermarked_visual = (
-            feature_runtime.joint_image_features(image_tensor(watermarked_image))
-        )
+    clean_features, watermarked_features = _final_image_joint_features(
+        pipeline,
+        feature_runtime,
+        clean_image,
+        watermarked_image,
+    )
     semantic_cosine, visual_relative_drift, ready = _feature_preservation_values(
-        clean_semantic,
-        clean_visual,
-        watermarked_semantic,
-        watermarked_visual,
+        clean_features[0],
+        clean_features[1],
+        watermarked_features[0],
+        watermarked_features[1],
         config,
     )
     return {
@@ -729,6 +942,469 @@ def _final_image_preservation_record(
         "preservation_validation_scope": (
             "paired_final_images_full_clip_and_visual_features"
         ),
+    }
+
+
+def _final_image_joint_features(
+    pipeline: Any,
+    feature_runtime: DifferentiableSemanticFeatureRuntime,
+    *images: Any,
+) -> tuple[tuple[Any, Any], ...]:
+    """一次性提取一组最终成图的完整 CLIP 与视觉特征。"""
+
+    import torch
+
+    device = pipeline._execution_device
+
+    def image_tensor(image: Any) -> Any:
+        """把最终 PIL 成图转换为 [0, 1] 模型输入 tensor。"""
+
+        pixels = pipeline.image_processor.preprocess(image).to(
+            device=device,
+            dtype=torch.float32,
+        )
+        return (pixels / 2.0 + 0.5).clamp(0.0, 1.0)
+
+    with torch.no_grad():
+        return tuple(
+            feature_runtime.joint_image_features(image_tensor(image))
+            for image in images
+        )
+
+
+def _three_way_final_image_preservation_records(
+    pipeline: Any,
+    feature_runtime: DifferentiableSemanticFeatureRuntime,
+    clean_image: Any,
+    carrier_only_image: Any,
+    watermarked_image: Any,
+    config: SemanticWatermarkRuntimeConfig,
+    carrier_only_counterfactual: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """验证 clean、carrier-only 与完整方法最终成图的三边保持性。"""
+
+    identity_digest = str(
+        carrier_only_counterfactual.get(
+            "carrier_only_counterfactual_identity_digest",
+            "",
+        )
+    )
+    if (
+        carrier_only_counterfactual.get("carrier_only_counterfactual_ready")
+        is not True
+        or len(identity_digest) != 64
+    ):
+        raise RuntimeError("carrier-only 最终保持门禁缺少反事实身份")
+    clean_features, carrier_features, watermarked_features = (
+        _final_image_joint_features(
+            pipeline,
+            feature_runtime,
+            clean_image,
+            carrier_only_image,
+            watermarked_image,
+        )
+    )
+    clean_full_values = _feature_preservation_values(
+        clean_features[0],
+        clean_features[1],
+        watermarked_features[0],
+        watermarked_features[1],
+        config,
+    )
+    clean_carrier_values = _feature_preservation_values(
+        clean_features[0],
+        clean_features[1],
+        carrier_features[0],
+        carrier_features[1],
+        config,
+    )
+    carrier_full_values = _feature_preservation_values(
+        carrier_features[0],
+        carrier_features[1],
+        watermarked_features[0],
+        watermarked_features[1],
+        config,
+    )
+    final_record = {
+        "final_image_semantic_cosine_similarity": clean_full_values[0],
+        "final_image_visual_feature_relative_drift": clean_full_values[1],
+        "minimum_semantic_preservation_cosine": (
+            config.minimum_semantic_preservation_cosine
+        ),
+        "maximum_visual_feature_relative_drift": (
+            config.maximum_visual_feature_relative_drift
+        ),
+        "final_image_preservation_gate_ready": clean_full_values[2],
+        "preservation_validation_scope": (
+            "clean_to_full_final_images_full_clip_and_visual_features"
+        ),
+    }
+    counterfactual_record = {
+        "carrier_only_final_image_preservation_applicable": True,
+        "carrier_only_final_image_semantic_cosine_similarity": (
+            clean_carrier_values[0]
+        ),
+        "carrier_only_final_image_visual_feature_relative_drift": (
+            clean_carrier_values[1]
+        ),
+        "carrier_only_final_image_preservation_gate_ready": (
+            clean_carrier_values[2]
+        ),
+        "carrier_only_to_full_final_image_semantic_cosine_similarity": (
+            carrier_full_values[0]
+        ),
+        "carrier_only_to_full_final_image_visual_feature_relative_drift": (
+            carrier_full_values[1]
+        ),
+        "carrier_only_to_full_final_image_preservation_gate_ready": (
+            carrier_full_values[2]
+        ),
+        "carrier_only_counterfactual_three_way_preservation_gate_ready": (
+            clean_full_values[2]
+            and clean_carrier_values[2]
+            and carrier_full_values[2]
+        ),
+        "minimum_semantic_preservation_cosine": (
+            config.minimum_semantic_preservation_cosine
+        ),
+        "maximum_visual_feature_relative_drift": (
+            config.maximum_visual_feature_relative_drift
+        ),
+        "carrier_only_counterfactual_identity_digest": identity_digest,
+        "carrier_only_final_image_preservation_status": (
+            "measured_from_clean_carrier_only_and_full_final_images"
+        ),
+        "preservation_validation_scope": (
+            "three_pair_final_images_full_clip_and_visual_features"
+        ),
+    }
+    return final_record, counterfactual_record
+
+
+def _final_image_attention_attribution_gate_ready(
+    *,
+    blind_attribution_gain: float,
+    frozen_pair_attribution_gain: float,
+    minimum_gain: float,
+    measured_values: tuple[float, ...],
+    relation_identity_ready: bool,
+) -> bool:
+    """要求盲选择与冻结 carrier pair 两条归因证据同时通过。"""
+
+    return bool(
+        relation_identity_ready
+        and all(math.isfinite(value) for value in measured_values)
+        and blind_attribution_gain > minimum_gain
+        and frozen_pair_attribution_gain > minimum_gain
+    )
+
+
+def _final_image_attention_observability_record(
+    image_attention_extractor: Any | None,
+    clean_image: Any,
+    carrier_only_image: Any | None,
+    watermarked_image: Any,
+    config: SemanticWatermarkRuntimeConfig,
+    *,
+    carrier_only_counterfactual: Mapping[str, Any] | None = None,
+    require_gpu_execution: bool = True,
+) -> dict[str, Any]:
+    """以 carrier-only 反事实验证最终成图中的 attention 因果增益。
+
+    clean 只保留为总体水印对照。正式 attention 归因比较同 seed、同 scheduler、
+    同 LF/tail 配置与算子的 carrier-only 图像与完整方法图像, 估计含下游交互的
+    总机制效应, 不假设两侧已经实现相同 carrier。盲分数允许两张图分别执行自身
+    稳定 token 选择; 配对分数则冻结 carrier-only 的 pair 权重。两种归因增益都
+    必须严格超过正下界, 且不得使用中间 latent 分数替代最终成图 Q/K。
+    """
+
+    source = "image_reencoded_public_noise_real_qk"
+    if not config.attention_geometry_enabled:
+        return {
+            "final_image_attention_observability_applicable": False,
+            "final_image_attention_observability_gate_ready": False,
+            "final_image_attention_observability_source": source,
+            "final_image_attention_observability_requires_gpu": True,
+            "final_image_attention_observability_gpu_execution_verified": False,
+            "minimum_final_image_attention_score_gain": (
+                config.minimum_final_image_attention_score_gain
+            ),
+            "final_clean_blind_attention_score": None,
+            "final_carrier_only_blind_attention_score": None,
+            "final_watermarked_blind_attention_score": None,
+            "final_image_blind_attention_score_gain": None,
+            "final_image_attention_blind_attribution_gain": None,
+            "final_clean_paired_attention_score": None,
+            "final_carrier_only_paired_attention_score": None,
+            "final_watermarked_carrier_paired_attention_score": None,
+            "final_watermarked_paired_attention_score": None,
+            "final_image_paired_attention_score_gain": None,
+            "final_image_attention_carrier_paired_attribution_gain": None,
+            "final_clean_pair_weight_identity_digest": "",
+            "final_carrier_only_pair_weight_identity_digest": "",
+            "final_watermarked_pair_weight_identity_digest": "",
+            "final_paired_pair_weight_identity_digest": "",
+            "final_image_attention_record_schema_digest": "",
+            "attention_relation_component_names": [],
+            "attention_relation_source": "",
+            "attention_relation_direct_qk_source_ready": False,
+            "attention_relation_component_identity_digest": "",
+            "attention_relation_keyed_projection_digest": "",
+            "attention_relation_qk_operator_metadata_records": [],
+            "attention_relation_qk_operator_metadata_digest": "",
+            "attention_relation_qk_operator_metadata_ready": False,
+            "final_carrier_only_paired_attention_component_scores": {},
+            "final_watermarked_carrier_paired_attention_component_scores": {},
+            "final_image_attention_carrier_paired_component_gains": {},
+            "carrier_only_counterfactual_ready": False,
+            "observability_status": "not_applicable_attention_geometry_disabled",
+        }
+    if image_attention_extractor is None:
+        raise RuntimeError("最终成图注意力可观测性门禁缺少真实 Q/K 提取器")
+    if carrier_only_image is None or not carrier_only_counterfactual:
+        raise RuntimeError("最终成图注意力归因缺少 carrier-only 反事实")
+    if carrier_only_counterfactual.get("carrier_only_counterfactual_ready") is not True:
+        raise RuntimeError("carrier-only 反事实身份没有通过同种子同调度门禁")
+
+    clean_records = tuple(image_attention_extractor(clean_image))
+    carrier_only_records = tuple(image_attention_extractor(carrier_only_image))
+    watermarked_records = tuple(image_attention_extractor(watermarked_image))
+    if any(
+        len(records) < 2
+        for records in (clean_records, carrier_only_records, watermarked_records)
+    ):
+        raise RuntimeError("最终成图注意力可观测性要求至少两个真实 Q/K 层")
+
+    def record_schema(records: tuple[Any, ...]) -> tuple[Any, ...]:
+        """返回 Q/K 层名称与二维 token 网格的共同身份。"""
+
+        return tuple(
+            (layer_name, tuple(token_indices))
+            for layer_name, _, token_indices in records
+        )
+
+    clean_record_schema = record_schema(clean_records)
+    carrier_only_record_schema = record_schema(carrier_only_records)
+    watermarked_record_schema = record_schema(watermarked_records)
+    if not (
+        clean_record_schema
+        == carrier_only_record_schema
+        == watermarked_record_schema
+    ):
+        raise RuntimeError("最终三图 Q/K 层身份或二维网格不一致")
+    relation_identities = tuple(
+        build_attention_relation_graph_identity(records, config.key_material)
+        for records in (
+            clean_records,
+            carrier_only_records,
+            watermarked_records,
+        )
+    )
+    relation_identity = relation_identities[0]
+    relation_identity_ready = all(
+        identity.relation_source == DIRECT_QK_RELATION_SOURCE
+        and identity.qk_operator_metadata_ready
+        and identity.component_names == relation_identity.component_names
+        and identity.component_identity_digest
+        == relation_identity.component_identity_digest
+        and identity.keyed_projection_digest
+        == relation_identity.keyed_projection_digest
+        and identity.qk_operator_metadata_digest
+        == relation_identity.qk_operator_metadata_digest
+        for identity in relation_identities
+    )
+    if not relation_identity_ready:
+        raise RuntimeError("最终三图没有共享直接 Q/K 四分量关系图身份")
+    all_records = clean_records + carrier_only_records + watermarked_records
+    gpu_verified = all(
+        getattr(attention, "device", None) is not None
+        and attention.device.type == "cuda"
+        for _, attention, _ in all_records
+    )
+    if require_gpu_execution and not gpu_verified:
+        raise RuntimeError("最终成图真实 Q/K 可观测性必须在 CUDA 上执行")
+
+    clean_selection = select_stable_attention_tokens(
+        clean_records,
+        stable_token_fraction=config.attention_stable_token_fraction,
+    )
+    carrier_only_selection = select_stable_attention_tokens(
+        carrier_only_records,
+        stable_token_fraction=config.attention_stable_token_fraction,
+    )
+    watermarked_selection = select_stable_attention_tokens(
+        watermarked_records,
+        stable_token_fraction=config.attention_stable_token_fraction,
+    )
+    clean_pair_weights = build_stable_attention_pair_weights(
+        clean_records,
+        clean_selection,
+        unstable_pair_weight=config.attention_unstable_pair_weight,
+    )
+    carrier_only_pair_weights = build_stable_attention_pair_weights(
+        carrier_only_records,
+        carrier_only_selection,
+        unstable_pair_weight=config.attention_unstable_pair_weight,
+    )
+    watermarked_pair_weights = build_stable_attention_pair_weights(
+        watermarked_records,
+        watermarked_selection,
+        unstable_pair_weight=config.attention_unstable_pair_weight,
+    )
+
+    def score(records: tuple[Any, ...], pair_weights: Any) -> float:
+        """以显式冻结 pair 权重计算最终成图真实 Q/K 分数。"""
+
+        value = attention_geometry_score(
+            records,
+            config.key_material,
+            stable_pair_weights=pair_weights,
+        )
+        return float(value.detach().item())
+
+    clean_blind_score = score(clean_records, clean_pair_weights)
+    carrier_only_blind_score = score(
+        carrier_only_records,
+        carrier_only_pair_weights,
+    )
+    watermarked_blind_score = score(
+        watermarked_records,
+        watermarked_pair_weights,
+    )
+    clean_paired_score = score(clean_records, clean_pair_weights)
+    watermarked_paired_score = score(watermarked_records, clean_pair_weights)
+    carrier_only_paired_score = score(
+        carrier_only_records,
+        carrier_only_pair_weights,
+    )
+    watermarked_carrier_paired_score = score(
+        watermarked_records,
+        carrier_only_pair_weights,
+    )
+    carrier_only_paired_components = attention_geometry_component_scores(
+        carrier_only_records,
+        config.key_material,
+        carrier_only_pair_weights,
+    )
+    watermarked_carrier_paired_components = attention_geometry_component_scores(
+        watermarked_records,
+        config.key_material,
+        carrier_only_pair_weights,
+    )
+    carrier_paired_component_gains = (
+        watermarked_carrier_paired_components - carrier_only_paired_components
+    )
+    clean_control_blind_gain = watermarked_blind_score - clean_blind_score
+    clean_control_paired_gain = watermarked_paired_score - clean_paired_score
+    blind_attribution_gain = watermarked_blind_score - carrier_only_blind_score
+    carrier_paired_attribution_gain = (
+        watermarked_carrier_paired_score - carrier_only_paired_score
+    )
+    values = (
+        clean_blind_score,
+        carrier_only_blind_score,
+        watermarked_blind_score,
+        clean_paired_score,
+        carrier_only_paired_score,
+        watermarked_carrier_paired_score,
+        watermarked_paired_score,
+        clean_control_blind_gain,
+        clean_control_paired_gain,
+        blind_attribution_gain,
+        carrier_paired_attribution_gain,
+    )
+    ready = _final_image_attention_attribution_gate_ready(
+        blind_attribution_gain=blind_attribution_gain,
+        frozen_pair_attribution_gain=carrier_paired_attribution_gain,
+        minimum_gain=config.minimum_final_image_attention_score_gain,
+        measured_values=values,
+        relation_identity_ready=relation_identity_ready,
+    )
+    return {
+        **dict(carrier_only_counterfactual),
+        "final_image_attention_observability_applicable": True,
+        "final_image_attention_observability_gate_ready": ready,
+        "final_image_attention_observability_source": source,
+        "final_image_attention_observability_requires_gpu": True,
+        "final_image_attention_observability_gpu_execution_verified": gpu_verified,
+        "minimum_final_image_attention_score_gain": (
+            config.minimum_final_image_attention_score_gain
+        ),
+        "final_clean_blind_attention_score": clean_blind_score,
+        "final_carrier_only_blind_attention_score": carrier_only_blind_score,
+        "final_watermarked_blind_attention_score": watermarked_blind_score,
+        "final_image_blind_attention_score_gain": clean_control_blind_gain,
+        "final_image_attention_blind_attribution_gain": blind_attribution_gain,
+        "final_clean_paired_attention_score": clean_paired_score,
+        "final_carrier_only_paired_attention_score": carrier_only_paired_score,
+        "final_watermarked_carrier_paired_attention_score": (
+            watermarked_carrier_paired_score
+        ),
+        "final_watermarked_paired_attention_score": watermarked_paired_score,
+        "final_image_paired_attention_score_gain": clean_control_paired_gain,
+        "final_image_attention_carrier_paired_attribution_gain": (
+            carrier_paired_attribution_gain
+        ),
+        "final_clean_pair_weight_identity_digest": (
+            clean_pair_weights.pair_weight_identity_digest
+        ),
+        "final_carrier_only_pair_weight_identity_digest": (
+            carrier_only_pair_weights.pair_weight_identity_digest
+        ),
+        "final_watermarked_pair_weight_identity_digest": (
+            watermarked_pair_weights.pair_weight_identity_digest
+        ),
+        "final_paired_pair_weight_identity_digest": (
+            clean_pair_weights.pair_weight_identity_digest
+        ),
+        "final_image_attention_record_schema_digest": build_stable_digest(
+            {"attention_record_schema": clean_record_schema}
+        ),
+        "attention_relation_component_names": list(
+            relation_identity.component_names
+        ),
+        "attention_relation_source": relation_identity.relation_source,
+        "attention_relation_direct_qk_source_ready": relation_identity_ready,
+        "attention_relation_probability_scope": (
+            "sampled_image_token_qk_relation_probability"
+        ),
+        "attention_relation_component_identity_digest": (
+            relation_identity.component_identity_digest
+        ),
+        "attention_relation_keyed_projection_digest": (
+            relation_identity.keyed_projection_digest
+        ),
+        "attention_relation_qk_operator_metadata_records": list(
+            relation_identity.qk_operator_metadata_records
+        ),
+        "attention_relation_qk_operator_metadata_digest": (
+            relation_identity.qk_operator_metadata_digest
+        ),
+        "attention_relation_qk_operator_metadata_ready": (
+            relation_identity.qk_operator_metadata_ready
+        ),
+        "final_carrier_only_paired_attention_component_scores": {
+            name: float(value)
+            for name, value in zip(
+                ATTENTION_RELATION_COMPONENT_NAMES,
+                carrier_only_paired_components.detach().cpu().tolist(),
+            )
+        },
+        "final_watermarked_carrier_paired_attention_component_scores": {
+            name: float(value)
+            for name, value in zip(
+                ATTENTION_RELATION_COMPONENT_NAMES,
+                watermarked_carrier_paired_components.detach().cpu().tolist(),
+            )
+        },
+        "final_image_attention_carrier_paired_component_gains": {
+            name: float(value)
+            for name, value in zip(
+                ATTENTION_RELATION_COMPONENT_NAMES,
+                carrier_paired_component_gains.detach().cpu().tolist(),
+            )
+        },
+        "observability_status": "measured_from_carrier_only_counterfactual_real_qk",
     }
 
 
@@ -840,6 +1516,230 @@ def _align_image(image: Any, alignment: Any) -> Any:
     return Image.fromarray(output, mode="RGB")
 
 
+def _carrier_only_counterfactual_identity(
+    full_config: SemanticWatermarkRuntimeConfig,
+    carrier_only_config: SemanticWatermarkRuntimeConfig,
+    full_update_records: list[dict[str, Any]],
+    carrier_only_update_records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """核验仅关闭 attention geometry 的总机制效应反事实身份。"""
+
+    full_payload = semantic_watermark_runtime_config_payload(full_config)
+    carrier_payload = semantic_watermark_runtime_config_payload(
+        carrier_only_config
+    )
+    changed_fields = tuple(
+        sorted(
+            field_name
+            for field_name in full_payload
+            if full_payload[field_name] != carrier_payload[field_name]
+        )
+    )
+    if changed_fields != ("attention_geometry_enabled",):
+        raise RuntimeError(
+            "carrier-only 反事实必须只关闭 attention_geometry_enabled"
+        )
+    if (
+        full_config.attention_geometry_enabled is not True
+        or carrier_only_config.attention_geometry_enabled is not False
+        or full_config.seed != carrier_only_config.seed
+    ):
+        raise RuntimeError("carrier-only 反事实的 attention 开关或生成种子不一致")
+
+    expected_steps = tuple(int(value) for value in full_config.injection_step_indices)
+    expected_full_branches = _active_carrier_branch_names(full_config)
+    expected_carrier_branches = _active_carrier_branch_names(
+        carrier_only_config
+    )
+    if (
+        len(full_update_records) != len(expected_steps)
+        or len(carrier_only_update_records) != len(expected_steps)
+    ):
+        raise RuntimeError("完整方法与 carrier-only 必须精确覆盖全部注入步")
+
+    required_content_sha256_fields = (
+        "latent_content_sha256_before",
+        "latent_content_sha256_after",
+        "combined_update_content_sha256",
+    )
+
+    def validate_common_record(
+        record: Mapping[str, Any],
+        *,
+        execution_role: str,
+        attention_enabled: bool,
+        expected_branches: tuple[str, ...],
+    ) -> None:
+        """验证反事实两侧更新原子的共同内容与分支身份。"""
+
+        metadata = record.get("metadata")
+        null_space_records = record.get("null_space_records")
+        if not isinstance(metadata, Mapping) or not isinstance(
+            null_space_records,
+            Mapping,
+        ):
+            raise RuntimeError("反事实更新原子缺少 metadata 或 Null Space 记录")
+        if (
+            metadata.get("injection_execution_role") != execution_role
+            or metadata.get("attention_geometry_enabled") is not attention_enabled
+            or record.get("active_carrier_branches") != list(expected_branches)
+            or set(null_space_records) != set(expected_branches)
+        ):
+            raise RuntimeError("反事实更新原子的执行角色或活动分支身份不一致")
+        for field_name in required_content_sha256_fields:
+            value = str(record.get(field_name, ""))
+            if len(value) != 64 or any(
+                character not in "0123456789abcdef" for character in value
+            ):
+                raise RuntimeError("反事实更新原子缺少完整 tensor 内容 SHA-256")
+
+    for full_record in full_update_records:
+        validate_common_record(
+            full_record,
+            execution_role="full_method",
+            attention_enabled=True,
+            expected_branches=expected_full_branches,
+        )
+        if full_record.get("metadata", {}).get("attention_source") != (
+            "real_qk_projection"
+        ):
+            raise RuntimeError("完整方法更新原子缺少真实 Q/K attention 来源")
+
+    carrier_none_fields = (
+        "attention_score_before",
+        "attention_content_base_score",
+        "attention_score_after",
+        "attention_final_combined_score",
+        "attention_score_gain",
+        "attention_applied_update_strength",
+        "attention_backtracking_step_count",
+    )
+    carrier_empty_string_fields = (
+        "attention_update_digest",
+        "stable_token_selection_digest",
+        "stable_pair_weight_identity_digest",
+        "stable_pair_weight_realization_digest",
+        "attention_relation_source",
+        "attention_relation_probability_scope",
+        "attention_relation_component_identity_digest",
+        "attention_relation_keyed_projection_digest",
+        "attention_relation_qk_operator_metadata_digest",
+    )
+    carrier_empty_list_fields = (
+        "stable_token_indices",
+        "attention_relation_component_names",
+        "attention_relation_qk_operator_metadata_records",
+    )
+    for carrier_record in carrier_only_update_records:
+        validate_common_record(
+            carrier_record,
+            execution_role="carrier_only_counterfactual",
+            attention_enabled=False,
+            expected_branches=expected_carrier_branches,
+        )
+        carrier_metadata = carrier_record["metadata"]
+        if carrier_metadata.get("attention_source") != (
+            "disabled_attention_geometry"
+        ):
+            raise RuntimeError("carrier-only 更新原子错误声明真实 Q/K attention 来源")
+        if any(carrier_record.get(field_name) is not None for field_name in carrier_none_fields):
+            raise RuntimeError("carrier-only 更新原子仍包含 attention 数值")
+        if any(carrier_record.get(field_name) != "" for field_name in carrier_empty_string_fields):
+            raise RuntimeError("carrier-only 更新原子仍包含 attention 或 pair 身份")
+        if any(carrier_record.get(field_name) != [] for field_name in carrier_empty_list_fields):
+            raise RuntimeError("carrier-only 更新原子仍包含 attention 关系集合")
+        if carrier_record.get("attention_relation_direct_qk_source_ready") is not False:
+            raise RuntimeError("carrier-only 更新原子错误声明直接 Q/K 来源")
+        if carrier_record.get("attention_relation_qk_operator_metadata_ready") is not False:
+            raise RuntimeError("carrier-only 更新原子错误声明 Q/K 算子元数据完整")
+
+    def scheduler_trace(records: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+        """提取足以核验相同 scheduler 轨迹的冻结字段。"""
+
+        return tuple(
+            {
+                "step_index": int(record["step_index"]),
+                "scheduler_step_timestep": float(
+                    record["scheduler_step_timestep"]
+                ),
+                "post_step_schedule_index": int(
+                    record["post_step_schedule_index"]
+                ),
+                "method_timestep": float(record["timestep"]),
+            }
+            for record in records
+        )
+
+    full_trace = scheduler_trace(full_update_records)
+    carrier_trace = scheduler_trace(carrier_only_update_records)
+    if (
+        tuple(item["step_index"] for item in full_trace) != expected_steps
+        or tuple(item["step_index"] for item in carrier_trace) != expected_steps
+        or full_trace != carrier_trace
+    ):
+        raise RuntimeError("carrier-only 反事实没有复现完整方法的 scheduler 轨迹")
+    full_initial_latent_sha256 = str(
+        full_update_records[0]["latent_content_sha256_before"]
+    )
+    carrier_initial_latent_sha256 = str(
+        carrier_only_update_records[0]["latent_content_sha256_before"]
+    )
+    if full_initial_latent_sha256 != carrier_initial_latent_sha256:
+        raise RuntimeError("完整方法与 carrier-only 的首个注入前 latent 不一致")
+
+    record = {
+        "carrier_only_counterfactual_changed_fields": list(changed_fields),
+        "carrier_only_counterfactual_generation_seed_random": int(
+            full_config.seed
+        ),
+        "carrier_only_counterfactual_config_digest": build_stable_digest(
+            carrier_payload
+        ),
+        "full_method_counterfactual_update_count": len(full_update_records),
+        "carrier_only_counterfactual_update_count": len(
+            carrier_only_update_records
+        ),
+        "full_method_counterfactual_update_records_digest": (
+            build_stable_digest(full_update_records)
+        ),
+        "carrier_only_counterfactual_update_records_digest": (
+            build_stable_digest(carrier_only_update_records)
+        ),
+        "carrier_only_counterfactual_atom_content_digest": (
+            build_stable_digest(carrier_only_update_records)
+        ),
+        "full_method_initial_latent_content_sha256": (
+            full_initial_latent_sha256
+        ),
+        "carrier_only_initial_latent_content_sha256": (
+            carrier_initial_latent_sha256
+        ),
+        "carrier_only_counterfactual_initial_latent_identity_ready": True,
+        "carrier_only_counterfactual_scheduler_trace": list(full_trace),
+        "carrier_only_counterfactual_scheduler_trace_digest": (
+            build_stable_digest(full_trace)
+        ),
+        "carrier_only_counterfactual_scheduler_identity_ready": True,
+        "carrier_only_counterfactual_attention_geometry_enabled": False,
+        "full_method_counterfactual_carrier_branches": list(
+            expected_full_branches
+        ),
+        "carrier_only_counterfactual_carrier_branches": list(
+            expected_carrier_branches
+        ),
+        "carrier_only_counterfactual_effect_scope": (
+            "attention_geometry_switch_total_mechanism_effect"
+        ),
+        "carrier_only_counterfactual_realized_carrier_equality_assumed": False,
+        "carrier_only_counterfactual_downstream_interactions_included": True,
+    }
+    record["carrier_only_counterfactual_identity_digest"] = build_stable_digest(
+        record
+    )
+    record["carrier_only_counterfactual_ready"] = True
+    return record
+
+
 def run_semantic_watermark_runtime(
     config: SemanticWatermarkRuntimeConfig,
     runtime_context: SemanticWatermarkRuntimeContext | None = None,
@@ -847,8 +1747,10 @@ def run_semantic_watermark_runtime(
     SemanticWatermarkRuntimeResult,
     tuple[dict[str, Any], ...],
     tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
     Any,
     Any,
+    Any | None,
     dict[str, Any],
 ]:
     """执行 clean/watermarked 生成和最终图像盲检。"""
@@ -881,12 +1783,15 @@ def run_semantic_watermark_runtime(
         clean_image = pipeline(generator=clean_generator, **common_kwargs).images[0]
 
     update_records: list[dict[str, Any]] = []
+    active_update_records = update_records
+    active_injection_config = config
+    injection_execution_role = "full_method"
     previous_injection_latent: Any | None = None
 
     def inject(pipe: Any, step_index: int, timestep: Any, callback_kwargs: dict[str, Any]) -> dict[str, Any]:
         nonlocal previous_injection_latent
         latent = callback_kwargs.get("latents")
-        if latent is None or step_index not in config.injection_step_indices:
+        if latent is None or step_index not in active_injection_config.injection_step_indices:
             return callback_kwargs
         post_step_index = step_index + 1
         scheduler_timesteps = pipe.scheduler.timesteps
@@ -897,14 +1802,14 @@ def run_semantic_watermark_runtime(
             signals = feature_runtime.branch_signal_maps(latent.float(), previous_injection_latent)
             lf_template = build_low_frequency_template(
                 latent,
-                config.key_material,
-                config.carrier_model_reference,
+                active_injection_config.key_material,
+                active_injection_config.carrier_model_reference,
             )
             tail_template, tail_threshold, retained_fraction = build_tail_robust_template(
                 latent,
-                config.key_material,
-                config.carrier_model_reference,
-                config.tail_fraction if config.tail_truncation_enabled else 1.0,
+                active_injection_config.key_material,
+                active_injection_config.carrier_model_reference,
+                active_injection_config.tail_fraction if active_injection_config.tail_truncation_enabled else 1.0,
             )
             transformer_forward = _transformer_forward_function(
                 pipeline,
@@ -914,22 +1819,22 @@ def run_semantic_watermark_runtime(
             )
             with DifferentiableAttentionRecorder(
                 attention_modules,
-                max_tokens=config.max_attention_tokens,
+                max_tokens=active_injection_config.max_attention_tokens,
             ) as recorder:
                 attention_gradient = (
                     compute_attention_geometry_gradient(
                         latent,
                         transformer_forward,
                         recorder,
-                        config.key_material,
+                        active_injection_config.key_material,
                         stable_token_fraction=(
-                            config.attention_stable_token_fraction
+                            active_injection_config.attention_stable_token_fraction
                         ),
                         unstable_pair_weight=(
-                            config.attention_unstable_pair_weight
+                            active_injection_config.attention_unstable_pair_weight
                         ),
                     )
-                    if config.attention_geometry_enabled
+                    if active_injection_config.attention_geometry_enabled
                     else None
                 )
                 if attention_gradient is None:
@@ -946,9 +1851,9 @@ def run_semantic_watermark_runtime(
                     stability_values=signals["stability"].mean(dim=0).reshape(-1).cpu().tolist(),
                     saliency_values=signals["saliency"].mean(dim=0).reshape(-1).cpu().tolist(),
                     attention_stability_values=attention_stability.mean(dim=0).reshape(-1).cpu().tolist(),
-                    configs=_branch_risk_configs(config),
+                    configs=_branch_risk_configs(active_injection_config),
                     required_eligible_branches=_required_branch_risk_eligibility(
-                        config
+                        active_injection_config
                     ),
                 )
                 branch_fields = {
@@ -956,11 +1861,14 @@ def run_semantic_watermark_runtime(
                     "tail_robust": risk_bundle.tail_robust,
                     "attention_geometry": risk_bundle.attention_geometry,
                 }
-                active_branch_names = set(_active_carrier_branch_names(config))
+                active_branch_names = _active_carrier_branch_names(
+                    active_injection_config
+                )
+                active_branch_name_set = set(active_branch_names)
                 active_branch_fields = {
                     branch_name: branch_field
                     for branch_name, branch_field in branch_fields.items()
-                    if branch_name in active_branch_names
+                    if branch_name in active_branch_name_set
                 }
                 preferred_directions = {
                     "lf_content": (lf_template,),
@@ -969,7 +1877,7 @@ def run_semantic_watermark_runtime(
                         () if attention_gradient is None else (attention_gradient.gradient,)
                     ),
                 }
-                if config.null_space_enabled:
+                if active_injection_config.null_space_enabled:
                     linearized_latent = latent.float()
                     joint_feature_linearization = build_exact_jacobian_linearization(
                         feature_runtime.full_joint_feature_vector,
@@ -979,21 +1887,21 @@ def run_semantic_watermark_runtime(
                         branch_name: _solve_branch_subspace(
                             linearized_latent,
                             feature_runtime,
-                            config.key_material,
+                            active_injection_config.key_material,
                             branch_name,
                             (
                                 _branch_budget(signals["semantic"], branch_field)
-                                if config.semantic_routing_enabled
+                                if active_injection_config.semantic_routing_enabled
                                 else tuple(1.0 for _ in branch_field.budget_values)
                             ),
-                            config.candidate_count,
-                            config.null_rank,
+                            active_injection_config.candidate_count,
+                            active_injection_config.null_rank,
                             joint_feature_linearization,
                             preferred_directions[branch_name],
-                            config.maximum_relative_response_residual,
-                            config.minimum_projection_energy_retention,
-                            config.null_space_cg_max_iterations,
-                            config.null_space_cg_relative_tolerance,
+                            active_injection_config.maximum_relative_response_residual,
+                            active_injection_config.minimum_projection_energy_retention,
+                            active_injection_config.null_space_cg_max_iterations,
+                            active_injection_config.null_space_cg_relative_tolerance,
                         )
                         for branch_name, branch_field in active_branch_fields.items()
                     }
@@ -1015,9 +1923,9 @@ def run_semantic_watermark_runtime(
                         "lf_content",
                         lf_template,
                         subspaces["lf_content"],
-                        config.minimum_projection_energy_retention,
+                        active_injection_config.minimum_projection_energy_retention,
                     )
-                    if config.lf_enabled
+                    if active_injection_config.lf_enabled
                     else None
                 )
                 tail_carrier = (
@@ -1025,19 +1933,19 @@ def run_semantic_watermark_runtime(
                         "tail_robust",
                         tail_template,
                         subspaces["tail_robust"],
-                        config.minimum_projection_energy_retention,
+                        active_injection_config.minimum_projection_energy_retention,
                     )
-                    if config.tail_robust_enabled
+                    if active_injection_config.tail_robust_enabled
                     else None
                 )
                 latent_norm = latent.detach().float().norm()
                 lf_update = (
-                    lf_carrier.scaled_update(config.lf_relative_strength * float(latent_norm.item()))
+                    lf_carrier.scaled_update(active_injection_config.lf_relative_strength * float(latent_norm.item()))
                     if lf_carrier is not None
                     else torch.zeros_like(latent)
                 )
                 tail_update = (
-                    tail_carrier.scaled_update(config.tail_relative_strength * float(latent_norm.item()))
+                    tail_carrier.scaled_update(active_injection_config.tail_relative_strength * float(latent_norm.item()))
                     if tail_carrier is not None
                     else torch.zeros_like(latent)
                 )
@@ -1047,16 +1955,16 @@ def run_semantic_watermark_runtime(
                         latent=latent,
                         transformer_forward=transformer_forward,
                         recorder=recorder,
-                        key_material=config.key_material,
+                        key_material=active_injection_config.key_material,
                         safe_subspace=subspaces["attention_geometry"],
-                        update_strength=config.attention_relative_strength * float(latent_norm.item()),
+                        update_strength=active_injection_config.attention_relative_strength * float(latent_norm.item()),
                         precomputed_gradient=attention_gradient,
                         base_update=content_base_update,
                         stable_token_fraction=(
-                            config.attention_stable_token_fraction
+                            active_injection_config.attention_stable_token_fraction
                         ),
                         unstable_pair_weight=(
-                            config.attention_unstable_pair_weight
+                            active_injection_config.attention_unstable_pair_weight
                         ),
                     )
                     attention_tensor = attention_update.update
@@ -1067,15 +1975,9 @@ def run_semantic_watermark_runtime(
                         transformer_forward(injected.detach().float())
                         final_score_tensor = attention_geometry_score(
                             recorder.records,
-                            config.key_material,
-                            stable_token_positions=(
-                                attention_gradient.stable_token_positions
-                            ),
-                            stable_token_fraction=(
-                                config.attention_stable_token_fraction
-                            ),
-                            unstable_pair_weight=(
-                                config.attention_unstable_pair_weight
+                            active_injection_config.key_material,
+                            stable_pair_weights=(
+                                attention_gradient.stable_pair_weights
                             ),
                         )
                     final_score = float(final_score_tensor.detach().item())
@@ -1100,6 +2002,40 @@ def run_semantic_watermark_runtime(
                         "stable_token_selection_digest": (
                             attention_update.stable_token_selection_digest
                         ),
+                        "stable_pair_weight_identity_digest": (
+                            attention_update.stable_pair_weight_identity_digest
+                        ),
+                        "stable_pair_weight_realization_digest": (
+                            attention_update.stable_pair_weight_realization_digest
+                        ),
+                        "attention_relation_component_names": list(
+                            attention_update.attention_relation_component_names
+                        ),
+                        "attention_relation_source": (
+                            attention_update.attention_relation_source
+                        ),
+                        "attention_relation_direct_qk_source_ready": (
+                            attention_update.attention_relation_source
+                            == DIRECT_QK_RELATION_SOURCE
+                        ),
+                        "attention_relation_probability_scope": (
+                            "sampled_image_token_qk_relation_probability"
+                        ),
+                        "attention_relation_component_identity_digest": (
+                            attention_update.attention_relation_component_identity_digest
+                        ),
+                        "attention_relation_keyed_projection_digest": (
+                            attention_update.attention_relation_keyed_projection_digest
+                        ),
+                        "attention_relation_qk_operator_metadata_records": list(
+                            attention_update.attention_relation_qk_operator_metadata_records
+                        ),
+                        "attention_relation_qk_operator_metadata_digest": (
+                            attention_update.attention_relation_qk_operator_metadata_digest
+                        ),
+                        "attention_relation_qk_operator_metadata_ready": (
+                            attention_update.attention_relation_qk_operator_metadata_ready
+                        ),
                     }
                 else:
                     attention_tensor = torch.zeros_like(latent)
@@ -1116,6 +2052,17 @@ def run_semantic_watermark_runtime(
                         "attention_update_digest": "",
                         "stable_token_indices": [],
                         "stable_token_selection_digest": "",
+                        "stable_pair_weight_identity_digest": "",
+                        "stable_pair_weight_realization_digest": "",
+                        "attention_relation_component_names": [],
+                        "attention_relation_source": "",
+                        "attention_relation_direct_qk_source_ready": False,
+                        "attention_relation_probability_scope": "",
+                        "attention_relation_component_identity_digest": "",
+                        "attention_relation_keyed_projection_digest": "",
+                        "attention_relation_qk_operator_metadata_records": [],
+                        "attention_relation_qk_operator_metadata_digest": "",
+                        "attention_relation_qk_operator_metadata_ready": False,
                     }
                 preservation_record = _combined_update_preservation_record(
                     feature_runtime,
@@ -1124,25 +2071,28 @@ def run_semantic_watermark_runtime(
                     config,
                 )
                 if (
-                    config.null_space_enabled
+                    active_injection_config.null_space_enabled
                     and not preservation_record["semantic_preservation_gate_ready"]
                 ):
                     raise RuntimeError(
                         "真正写回的 combined latent 未通过完整语义与视觉保持门禁"
                     )
-        update_records.append(
+        active_update_records.append(
             {
                 "run_id": run_id,
-                "prompt_id": config.prompt_id,
-                "split": config.split,
+                "prompt_id": active_injection_config.prompt_id,
+                "split": active_injection_config.split,
                 "step_index": int(step_index),
                 "scheduler_step_timestep": float(timestep.detach().float().item()),
                 "post_step_schedule_index": int(post_step_index),
                 "timestep": float(method_timestep.detach().float().item()),
-                "latent_digest_before": _tensor_digest(latent),
-                "latent_digest_after": _tensor_digest(injected),
-                "combined_update_digest": _tensor_digest(combined_update),
+                "latent_content_sha256_before": _tensor_content_sha256(latent),
+                "latent_content_sha256_after": _tensor_content_sha256(injected),
+                "combined_update_content_sha256": _tensor_content_sha256(
+                    combined_update
+                ),
                 "relative_update_norm": tensor_norm(combined_update) / max(tensor_norm(latent), 1e-12),
+                "active_carrier_branches": list(active_branch_names),
                 "branch_risk_bundle_digest": risk_bundle.bundle_digest,
                 "branch_risk_records": {
                     name: _branch_risk_record(branch_field)
@@ -1170,15 +2120,20 @@ def run_semantic_watermark_runtime(
                     "jvp_mode": jvp_modes[0] if len(jvp_modes) == 1 else "disabled_or_mixed",
                     "jvp_modes": list(jvp_modes),
                     "basis_solver": "matrix_free_full_jacobian_psd_cg",
-                    "attention_source": "real_qk_projection",
+                    "attention_source": (
+                        "real_qk_projection"
+                        if active_injection_config.attention_geometry_enabled
+                        else "disabled_attention_geometry"
+                    ),
                     "detector_requires_generation_trace": False,
-                    "semantic_routing_enabled": config.semantic_routing_enabled,
-                    "branch_risk_mode": config.branch_risk_mode,
-                    "null_space_enabled": config.null_space_enabled,
-                    "lf_enabled": config.lf_enabled,
-                    "tail_robust_enabled": config.tail_robust_enabled,
-                    "tail_truncation_enabled": config.tail_truncation_enabled,
-                    "attention_geometry_enabled": config.attention_geometry_enabled,
+                    "semantic_routing_enabled": active_injection_config.semantic_routing_enabled,
+                    "branch_risk_mode": active_injection_config.branch_risk_mode,
+                    "null_space_enabled": active_injection_config.null_space_enabled,
+                    "lf_enabled": active_injection_config.lf_enabled,
+                    "tail_robust_enabled": active_injection_config.tail_robust_enabled,
+                    "tail_truncation_enabled": active_injection_config.tail_truncation_enabled,
+                    "attention_geometry_enabled": active_injection_config.attention_geometry_enabled,
+                    "injection_execution_role": injection_execution_role,
                     "supports_paper_claim": False,
                 },
             }
@@ -1193,13 +2148,96 @@ def run_semantic_watermark_runtime(
         callback_on_step_end_tensor_inputs=["latents"],
         **common_kwargs,
     ).images[0]
-    final_image_preservation = _final_image_preservation_record(
-        pipeline,
-        feature_runtime,
-        clean_image,
-        watermarked_image,
-        config,
+    carrier_only_image: Any | None = None
+    carrier_only_counterfactual: dict[str, Any] | None = None
+    carrier_only_final_image_preservation: dict[str, Any] | None = None
+    final_image_preservation: dict[str, Any] | None = None
+    carrier_only_update_records: list[dict[str, Any]] = []
+    if config.attention_geometry_enabled:
+        carrier_only_config = replace(
+            config,
+            attention_geometry_enabled=False,
+        )
+        active_update_records = carrier_only_update_records
+        active_injection_config = carrier_only_config
+        injection_execution_role = "carrier_only_counterfactual"
+        previous_injection_latent = None
+        carrier_only_generator = torch.Generator(
+            device=config.device_name
+        ).manual_seed(config.seed)
+        carrier_only_image = pipeline(
+            generator=carrier_only_generator,
+            callback_on_step_end=inject,
+            callback_on_step_end_tensor_inputs=["latents"],
+            **common_kwargs,
+        ).images[0]
+        carrier_only_counterfactual = _carrier_only_counterfactual_identity(
+            config,
+            carrier_only_config,
+            update_records,
+            carrier_only_update_records,
+        )
+        active_update_records = update_records
+        active_injection_config = config
+        injection_execution_role = "full_method"
+        previous_injection_latent = None
+        (
+            final_image_preservation,
+            carrier_only_final_image_preservation,
+        ) = _three_way_final_image_preservation_records(
+            pipeline,
+            feature_runtime,
+            clean_image,
+            carrier_only_image,
+            watermarked_image,
+            config,
+            carrier_only_counterfactual,
+        )
+        if not carrier_only_final_image_preservation[
+            "carrier_only_counterfactual_three_way_preservation_gate_ready"
+        ]:
+            raise RuntimeError(
+                "最终 clean、carrier-only 与完整方法成图未通过三边特征保持门禁"
+            )
+    attention_extractor = (
+        _image_attention_extractor(
+            pipeline,
+            config,
+            attention_modules,
+            unconditional_prompt,
+            unconditional_pooled,
+        )
+        if config.attention_geometry_enabled
+        else None
     )
+    final_image_attention_observability = (
+        _final_image_attention_observability_record(
+            attention_extractor,
+            clean_image,
+            carrier_only_image,
+            watermarked_image,
+            config,
+            carrier_only_counterfactual=carrier_only_counterfactual,
+            require_gpu_execution=True,
+        )
+    )
+    if (
+        config.attention_geometry_enabled
+        and not final_image_attention_observability[
+            "final_image_attention_observability_gate_ready"
+        ]
+    ):
+        raise RuntimeError(
+            "最终 carrier-only/完整方法成图未通过真实 Q/K 双归因门禁"
+        )
+    if final_image_preservation is None:
+        final_image_preservation = _final_image_preservation_record(
+            pipeline,
+            feature_runtime,
+            clean_image,
+            watermarked_image,
+            config,
+        )
     if (
         config.null_space_enabled
         and not final_image_preservation["final_image_preservation_gate_ready"]
@@ -1226,14 +2264,6 @@ def run_semantic_watermark_runtime(
             config.attention_unstable_pair_weight
         ),
     )
-    attention_extractor = _image_attention_extractor(
-        pipeline,
-        config,
-        attention_modules,
-        unconditional_prompt,
-        unconditional_pooled,
-    )
-
     def adversarial_detection_score(candidate: Any) -> float:
         """返回与最终内容主判和几何对齐救回一致的连续攻击目标。"""
 
@@ -1428,13 +2458,29 @@ def run_semantic_watermark_runtime(
             "supports_paper_claim": False,
             "paired_quality": paired_quality,
             "final_image_preservation": final_image_preservation,
+            "carrier_only_final_image_preservation": (
+                carrier_only_final_image_preservation
+            ),
+            "carrier_only_counterfactual": carrier_only_counterfactual,
+            "final_image_attention_observability": (
+                final_image_attention_observability
+            ),
             "scientific_unit_config": semantic_watermark_runtime_config_payload(
                 config
             ),
             "scientific_unit_provenance": scientific_unit_provenance,
         },
     )
-    return result, tuple(update_records), tuple(detections), clean_image, watermarked_image, attacked_images
+    return (
+        result,
+        tuple(update_records),
+        tuple(carrier_only_update_records),
+        tuple(detections),
+        clean_image,
+        watermarked_image,
+        carrier_only_image,
+        attacked_images,
+    )
 
 
 def write_semantic_watermark_runtime_outputs(
@@ -1450,7 +2496,16 @@ def write_semantic_watermark_runtime_outputs(
     if output_dir != outputs_root and outputs_root not in output_dir.parents:
         raise ValueError("真实方法输出必须位于 outputs 目录")
     output_dir.mkdir(parents=True, exist_ok=True)
-    result, update_records, detections, clean_image, watermarked_image, attacked_images = run_semantic_watermark_runtime(
+    (
+        result,
+        update_records,
+        carrier_only_update_records,
+        detections,
+        clean_image,
+        watermarked_image,
+        carrier_only_image,
+        attacked_images,
+    ) = run_semantic_watermark_runtime(
         config,
         runtime_context=runtime_context,
     )
@@ -1459,8 +2514,11 @@ def write_semantic_watermark_runtime_outputs(
 
     clean_image_path = run_dir / "clean_image.png"
     watermarked_image_path = run_dir / "watermarked_image.png"
+    carrier_only_image_path = run_dir / "carrier_only_image.png"
     clean_image.save(clean_image_path)
     watermarked_image.save(watermarked_image_path)
+    if carrier_only_image is not None:
+        carrier_only_image.save(carrier_only_image_path)
     attacked_image_dir = run_dir / "attacked_images"
     attacked_image_dir.mkdir(parents=True, exist_ok=True)
     attacked_image_paths = []
@@ -1471,6 +2529,7 @@ def write_semantic_watermark_runtime_outputs(
         attacked_image_path_by_key[image_key] = attacked_path
         attacked_image_paths.append(attacked_path.relative_to(root_path).as_posix())
     update_path = run_dir / "latent_update_records.jsonl"
+    carrier_only_update_path = run_dir / "carrier_only_update_records.jsonl"
     detection_path = run_dir / "image_only_detection_records.jsonl"
     result_path = run_dir / "runtime_result.json"
     governed_detections = []
@@ -1501,10 +2560,73 @@ def write_semantic_watermark_runtime_outputs(
         )
         governed_detections.append(record)
     update_path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in update_records), encoding="utf-8")
+    if carrier_only_image is not None:
+        carrier_only_update_path.write_text(
+            "".join(
+                json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                for row in carrier_only_update_records
+            ),
+            encoding="utf-8",
+        )
     detection_path.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in governed_detections), encoding="utf-8")
+    resolved_result_payload = result.to_dict()
+    resolved_metadata = dict(resolved_result_payload["metadata"])
+    observability_record = dict(
+        resolved_metadata.get("final_image_attention_observability", {})
+    )
+    carrier_preservation_record = dict(
+        resolved_metadata.get("carrier_only_final_image_preservation") or {}
+    )
+    counterfactual_record = dict(
+        resolved_metadata.get("carrier_only_counterfactual") or {}
+    )
+    if carrier_only_image is not None:
+        carrier_image_path = carrier_only_image_path.relative_to(root_path).as_posix()
+        carrier_image_digest = file_digest(carrier_only_image_path)
+        carrier_image_identity = {
+            "carrier_only_counterfactual_image_path": carrier_image_path,
+            "carrier_only_counterfactual_image_digest": carrier_image_digest,
+        }
+        carrier_atom_content_digest = build_stable_digest(
+            list(carrier_only_update_records)
+        )
+        if (
+            counterfactual_record.get(
+                "carrier_only_counterfactual_atom_content_digest"
+            )
+            != carrier_atom_content_digest
+        ):
+            raise RuntimeError("carrier-only 持久化原子的内容摘要与运行身份不一致")
+        carrier_atom_identity = {
+            "carrier_only_counterfactual_atom_path": (
+                carrier_only_update_path.relative_to(root_path).as_posix()
+            ),
+            "carrier_only_counterfactual_atom_file_sha256": file_digest(
+                carrier_only_update_path
+            ),
+            "carrier_only_counterfactual_atom_content_digest": (
+                carrier_atom_content_digest
+            ),
+        }
+        observability_record.update(carrier_image_identity)
+        observability_record.update(carrier_atom_identity)
+        carrier_preservation_record.update(carrier_image_identity)
+        carrier_preservation_record.update(carrier_atom_identity)
+        counterfactual_record.update(carrier_image_identity)
+        counterfactual_record.update(carrier_atom_identity)
+    resolved_metadata["final_image_attention_observability"] = (
+        observability_record
+    )
+    resolved_metadata["carrier_only_final_image_preservation"] = (
+        carrier_preservation_record or None
+    )
+    resolved_metadata["carrier_only_counterfactual"] = (
+        counterfactual_record or None
+    )
     resolved_result = SemanticWatermarkRuntimeResult(
         **{
-            **result.to_dict(),
+            **resolved_result_payload,
+            "metadata": resolved_metadata,
             "clean_image_path": clean_image_path.relative_to(root_path).as_posix(),
             "watermarked_image_path": watermarked_image_path.relative_to(root_path).as_posix(),
             "update_record_path": update_path.relative_to(root_path).as_posix(),
@@ -1524,6 +2646,16 @@ def write_semantic_watermark_runtime_outputs(
             result_path.relative_to(root_path).as_posix(),
             clean_image_path.relative_to(root_path).as_posix(),
             watermarked_image_path.relative_to(root_path).as_posix(),
+            *(
+                (carrier_only_image_path.relative_to(root_path).as_posix(),)
+                if carrier_only_image is not None
+                else ()
+            ),
+            *(
+                (carrier_only_update_path.relative_to(root_path).as_posix(),)
+                if carrier_only_image is not None
+                else ()
+            ),
             manifest_path.relative_to(root_path).as_posix(),
             *attacked_image_paths,
         ),
@@ -1535,6 +2667,37 @@ def write_semantic_watermark_runtime_outputs(
             "protocol_decision": result.run_decision,
             "detector_input_access_mode": "image_key_public_model_only",
             "supports_paper_claim": False,
+            **(
+                {
+                    "carrier_only_counterfactual_identity_digest": (
+                        observability_record[
+                            "carrier_only_counterfactual_identity_digest"
+                        ]
+                    ),
+                    "carrier_only_counterfactual_image_digest": (
+                        observability_record[
+                            "carrier_only_counterfactual_image_digest"
+                        ]
+                    ),
+                    "carrier_only_counterfactual_atom_file_sha256": (
+                        counterfactual_record[
+                            "carrier_only_counterfactual_atom_file_sha256"
+                        ]
+                    ),
+                    "carrier_only_counterfactual_atom_path": (
+                        counterfactual_record[
+                            "carrier_only_counterfactual_atom_path"
+                        ]
+                    ),
+                    "carrier_only_counterfactual_atom_content_digest": (
+                        counterfactual_record[
+                            "carrier_only_counterfactual_atom_content_digest"
+                        ]
+                    ),
+                }
+                if carrier_only_image is not None
+                else {}
+            ),
         },
     ).to_dict()
     manifest_path.write_text(_stable_json(manifest), encoding="utf-8")

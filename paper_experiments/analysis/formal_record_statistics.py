@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 import math
+import os
 from typing import Any, Iterable, Mapping
 
 import numpy as np
@@ -19,10 +20,33 @@ from experiments.ablations.necessity_statistics import (
     build_ablation_necessity_statistics,
     canonicalize_ablation_necessity_rows,
 )
+from experiments.artifacts.dataset_level_quality_outputs import (
+    validate_inception_feature_provenance_groups,
+)
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+)
 from experiments.protocol.dataset_quality import (
+    FORMAL_DATASET_QUALITY_ATTACK_NAME,
+    FORMAL_DATASET_QUALITY_IMAGE_PAIR_ROLE,
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
     FORMAL_FEATURE_BACKEND,
     FORMAL_FEATURE_EXTRACTOR_ID,
+    formal_dataset_quality_metric_protocol,
     rebuild_formal_fid_kid_metric_rows,
+)
+from experiments.runners.image_only_dataset_runtime import (
+    FrozenEvidenceProtocol,
+    apply_frozen_evidence_protocol,
+    calibrate_complete_evidence_protocol,
+)
+from experiments.runners.semantic_watermark_runtime import (
+    validate_semantic_watermark_runtime_result_provenance,
+)
+from experiments.runtime.scientific_unit_provenance import (
+    SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS,
+    aggregate_scientific_unit_provenance,
 )
 from main.core.digest import build_stable_digest
 
@@ -40,6 +64,26 @@ DATASET_QUALITY_METRIC_FIELDNAMES = (
 )
 FORMAL_METRIC_RELATIVE_TOLERANCE = 1e-8
 FORMAL_METRIC_ABSOLUTE_TOLERANCE = 1e-10
+FORMAL_FEATURE_DEPENDENCY_PROFILE_ID = "sd35_method_runtime_gpu"
+FORMAL_FEATURE_DIMENSION = int(
+    formal_dataset_quality_metric_protocol()["feature_dimension"]
+)
+_SHA256_CHARACTERS = frozenset("0123456789abcdef")
+_FORMAL_DETECTION_DERIVED_FIELDS = (
+    "frozen_content_threshold",
+    "frozen_geometry_score_threshold",
+    "frozen_registration_confidence_threshold",
+    "frozen_attention_sync_score_threshold",
+    "frozen_threshold_digest",
+    "formal_raw_content_margin",
+    "formal_aligned_content_margin",
+    "formal_positive_by_content",
+    "formal_content_failure_reason",
+    "formal_rescue_applied",
+    "formal_evidence_positive",
+    "formal_metric_status",
+    "supports_paper_claim",
+)
 
 
 class FormalRecordStatisticsError(ValueError):
@@ -72,6 +116,566 @@ def _positive_int(value: Any, field_name: str) -> int:
     if str(value).strip() not in {str(resolved), f"{resolved}.0"} or resolved <= 0:
         raise FormalRecordStatisticsError(f"{field_name} 必须为正整数")
     return resolved
+
+
+def _nonnegative_int(value: Any, field_name: str) -> int:
+    """读取必须为非负整数的计数字段."""
+
+    if isinstance(value, bool):
+        raise FormalRecordStatisticsError(f"{field_name} 不能使用布尔值")
+    try:
+        resolved = int(value)
+    except (TypeError, ValueError) as exc:
+        raise FormalRecordStatisticsError(f"{field_name} 不是整数") from exc
+    if str(value).strip() not in {str(resolved), f"{resolved}.0"} or resolved < 0:
+        raise FormalRecordStatisticsError(f"{field_name} 必须为非负整数")
+    return resolved
+
+
+def _finite_float(value: Any, field_name: str) -> float:
+    """读取必须为有限数值的字段."""
+
+    if isinstance(value, bool):
+        raise FormalRecordStatisticsError(f"{field_name} 不能使用布尔值")
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError) as exc:
+        raise FormalRecordStatisticsError(f"{field_name} 不是数值") from exc
+    if not math.isfinite(resolved):
+        raise FormalRecordStatisticsError(f"{field_name} 必须为有限数值")
+    return resolved
+
+
+def _is_sha256(value: Any) -> bool:
+    """判断字段是否为规范小写 SHA-256."""
+
+    text = str(value)
+    return len(text) == 64 and set(text) <= _SHA256_CHARACTERS
+
+
+def _same_value(reported: Any, rebuilt: Any) -> bool:
+    """以冻结数值容差比较 JSON 往返后的标量, 其他类型要求精确相等."""
+
+    if isinstance(reported, bool) or isinstance(rebuilt, bool):
+        return type(reported) is type(rebuilt) and reported == rebuilt
+    if isinstance(reported, (int, float)) and isinstance(rebuilt, (int, float)):
+        return math.isclose(
+            float(reported),
+            float(rebuilt),
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        )
+    return reported == rebuilt
+
+
+def _validated_frozen_protocol(
+    raw_protocol: Mapping[str, Any],
+    *,
+    expected_target_fpr: float,
+) -> FrozenEvidenceProtocol:
+    """验证冻结阈值正文、自摘要和目标 FPR, 再构造判定协议."""
+
+    resolved_expected_target_fpr = _finite_float(
+        expected_target_fpr,
+        "expected_target_fpr",
+    )
+    if not 0.0 < resolved_expected_target_fpr < 1.0:
+        raise FormalRecordStatisticsError("正式消融 target_fpr 必须位于 (0, 1)")
+    try:
+        protocol = FrozenEvidenceProtocol(**dict(raw_protocol))
+    except (TypeError, ValueError) as exc:
+        raise FormalRecordStatisticsError("消融冻结检测协议字段集合无效") from exc
+    if not math.isclose(
+        _finite_float(protocol.target_fpr, "target_fpr"),
+        resolved_expected_target_fpr,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise FormalRecordStatisticsError("消融冻结检测协议的 target_fpr 漂移")
+    calibration_negative_count = _positive_int(
+        protocol.calibration_negative_count,
+        "calibration_negative_count",
+    )
+    calibration_false_positive_count = _nonnegative_int(
+        protocol.calibration_false_positive_count,
+        "calibration_false_positive_count",
+    )
+    if calibration_false_positive_count > calibration_negative_count:
+        raise FormalRecordStatisticsError("冻结协议校准假阳性数量超过负样本数量")
+    expected_false_positive_rate = (
+        calibration_false_positive_count / calibration_negative_count
+    )
+    if not math.isclose(
+        _finite_float(
+            protocol.calibration_false_positive_rate,
+            "calibration_false_positive_rate",
+        ),
+        expected_false_positive_rate,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise FormalRecordStatisticsError("冻结协议校准假阳性率与计数不一致")
+    digest_payload = {
+        "content_threshold": _finite_float(
+            protocol.content_threshold,
+            "content_threshold",
+        ),
+        "rescue_margin_low": _finite_float(
+            protocol.rescue_margin_low,
+            "rescue_margin_low",
+        ),
+        "geometry_score_threshold": _finite_float(
+            protocol.geometry_score_threshold,
+            "geometry_score_threshold",
+        ),
+        "registration_confidence_threshold": _finite_float(
+            protocol.registration_confidence_threshold,
+            "registration_confidence_threshold",
+        ),
+        "attention_sync_score_threshold": _finite_float(
+            protocol.attention_sync_score_threshold,
+            "attention_sync_score_threshold",
+        ),
+        "geometry_calibration_negative_count": _nonnegative_int(
+            protocol.geometry_calibration_negative_count,
+            "geometry_calibration_negative_count",
+        ),
+        "geometry_calibration_exceedance_count": _nonnegative_int(
+            protocol.geometry_calibration_exceedance_count,
+            "geometry_calibration_exceedance_count",
+        ),
+        "registration_calibration_negative_count": _nonnegative_int(
+            protocol.registration_calibration_negative_count,
+            "registration_calibration_negative_count",
+        ),
+        "registration_calibration_exceedance_count": _nonnegative_int(
+            protocol.registration_calibration_exceedance_count,
+            "registration_calibration_exceedance_count",
+        ),
+        "sync_calibration_negative_count": _nonnegative_int(
+            protocol.sync_calibration_negative_count,
+            "sync_calibration_negative_count",
+        ),
+        "sync_calibration_exceedance_count": _nonnegative_int(
+            protocol.sync_calibration_exceedance_count,
+            "sync_calibration_exceedance_count",
+        ),
+        "geometry_protocol_calibration_ready": (
+            protocol.geometry_protocol_calibration_ready
+        ),
+        "calibration_negative_count": calibration_negative_count,
+        "calibration_false_positive_count": calibration_false_positive_count,
+        "target_fpr": float(protocol.target_fpr),
+        "decision_scope": "content_or_same_threshold_aligned_content_rescue",
+    }
+    if protocol.geometry_protocol_calibration_ready is not True:
+        raise FormalRecordStatisticsError("消融冻结检测协议未完成几何校准")
+    if (
+        not _is_sha256(protocol.threshold_digest)
+        or build_stable_digest(digest_payload) != protocol.threshold_digest
+    ):
+        raise FormalRecordStatisticsError("消融冻结检测协议摘要与正文不一致")
+    return protocol
+
+
+def _formal_attack_coverage_ready(
+    detections: tuple[dict[str, Any], ...],
+    *,
+    split: str,
+) -> bool:
+    """独立核验 test split 的完整攻击笛卡尔积及其冻结配置身份."""
+
+    attacked_records = tuple(record for record in detections if record.get("attack_id"))
+    if split != "test":
+        return not attacked_records
+    formal_configs = tuple(
+        config
+        for config in default_attack_configs()
+        if config.enabled and config.resource_profile in {"full_main", "full_extra"}
+    )
+    expected_by_key = {
+        (config.attack_id, sample_role): config
+        for config in formal_configs
+        for sample_role in ("clean_negative", "positive_source")
+    }
+    actual_by_key: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for record in attacked_records:
+        actual_by_key[
+            (
+                str(record.get("attack_id", "")),
+                str(record.get("sample_role", "")),
+            )
+        ].append(record)
+    if set(actual_by_key) != set(expected_by_key) or any(
+        len(rows) != 1 for rows in actual_by_key.values()
+    ):
+        return False
+    return all(
+        record.get("attack_family") == config.attack_family
+        and record.get("attack_name") == config.attack_name
+        and record.get("resource_profile") == config.resource_profile
+        and record.get("attack_config_digest") == attack_config_digest(config)
+        and record.get("attack_parameters") == config.attack_parameters
+        and record.get("attack_performed") is True
+        for key, config in expected_by_key.items()
+        for record in actual_by_key[key]
+    )
+
+
+def _revalidated_detection_records(
+    detections: tuple[dict[str, Any], ...],
+    protocol: FrozenEvidenceProtocol,
+) -> tuple[dict[str, Any], ...]:
+    """从原始分数重新应用冻结协议并拒绝持久化判定字段漂移."""
+
+    rebuilt_records: list[dict[str, Any]] = []
+    for detection in detections:
+        source = {
+            key: value
+            for key, value in detection.items()
+            if key not in {"ablation_id", "ablation_prompt_id"}
+        }
+        try:
+            rebuilt = apply_frozen_evidence_protocol((source,), protocol)[0]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise FormalRecordStatisticsError(
+                "消融检测原子缺少冻结判定所需的原始分数"
+            ) from exc
+        for field_name in _FORMAL_DETECTION_DERIVED_FIELDS:
+            if field_name not in detection or not _same_value(
+                detection[field_name],
+                rebuilt[field_name],
+            ):
+                raise FormalRecordStatisticsError(
+                    "消融检测原子的冻结判定字段无法独立重建: "
+                    f"{field_name}"
+                )
+        rebuilt_records.append(dict(detection))
+    return tuple(rebuilt_records)
+
+
+def rebuild_and_validate_ablation_runtime_aggregates(
+    runtime_records: Iterable[Mapping[str, Any]],
+    formal_detection_records: Iterable[Mapping[str, Any]],
+    frozen_protocols: Mapping[str, Mapping[str, Any]],
+    *,
+    expected_ablation_ids: Iterable[str],
+    expected_prompt_split_by_id: Mapping[str, str],
+    expected_prompt_digest_by_id: Mapping[str, str],
+    expected_runtime_config_by_ablation_id: Mapping[str, Mapping[str, Any]],
+    expected_runtime_output_root: str,
+    expected_target_fpr: float,
+) -> dict[str, Any]:
+    """从检测原子和冻结协议独立重建逐 Prompt 消融聚合字段.
+
+    该函数不信任 ``runtime_rerun_records`` 中的检测率、布尔判定、攻击覆盖或
+    阈值身份。它先重新应用冻结判定协议, 再按 ``ablation_id/prompt_id`` 聚合
+    原子检测记录, 并把每个 Prompt 的 split 绑定到调用方提供的规范映射。
+    """
+
+    declared_ablation_ids = tuple(str(value) for value in expected_ablation_ids)
+    expected_prompt_map = {
+        str(prompt_id): str(split)
+        for prompt_id, split in expected_prompt_split_by_id.items()
+    }
+    expected_prompt_digests = {
+        str(prompt_id): str(digest)
+        for prompt_id, digest in expected_prompt_digest_by_id.items()
+    }
+    expected_runtime_configs = {
+        str(ablation_id): dict(config)
+        for ablation_id, config in expected_runtime_config_by_ablation_id.items()
+    }
+    runtime_output_root = str(expected_runtime_output_root).replace("\\", "/").rstrip("/")
+    if (
+        not declared_ablation_ids
+        or len(set(declared_ablation_ids)) != len(declared_ablation_ids)
+        or any(not ablation_id for ablation_id in declared_ablation_ids)
+        or not expected_prompt_map
+        or len(expected_prompt_map) != len(expected_prompt_split_by_id)
+        or any(not prompt_id for prompt_id in expected_prompt_map)
+        or set(expected_prompt_digests) != set(expected_prompt_map)
+        or any(not _is_sha256(digest) for digest in expected_prompt_digests.values())
+        or any(
+            split not in {"dev", "calibration", "test"}
+            for split in expected_prompt_map.values()
+        )
+        or set(expected_runtime_configs) != set(declared_ablation_ids)
+        or any(
+            config.get("ablation_id") != ablation_id
+            for ablation_id, config in expected_runtime_configs.items()
+        )
+        or not runtime_output_root
+    ):
+        raise FormalRecordStatisticsError("正式消融身份或规范 Prompt split 映射无效")
+    if set(frozen_protocols) != set(declared_ablation_ids):
+        raise FormalRecordStatisticsError("冻结检测协议未精确覆盖正式消融身份")
+    protocols = {
+        ablation_id: _validated_frozen_protocol(
+            frozen_protocols[ablation_id],
+            expected_target_fpr=expected_target_fpr,
+        )
+        for ablation_id in declared_ablation_ids
+    }
+
+    materialized_runtime = tuple(dict(record) for record in runtime_records)
+    materialized_detections = tuple(
+        dict(record) for record in formal_detection_records
+    )
+    runtime_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    prompt_index_by_id: dict[str, int] = {}
+    for record in materialized_runtime:
+        ablation_id = str(record.get("ablation_id", ""))
+        prompt_id = str(record.get("prompt_id", ""))
+        key = (ablation_id, prompt_id)
+        if (
+            ablation_id not in protocols
+            or prompt_id not in expected_prompt_map
+            or key in runtime_by_key
+            or str(record.get("split", "")) != expected_prompt_map[prompt_id]
+        ):
+            raise FormalRecordStatisticsError("逐 Prompt 消融记录身份、split 或唯一性无效")
+        prompt_index = _nonnegative_int(record.get("prompt_index"), "prompt_index")
+        previous_index = prompt_index_by_id.setdefault(prompt_id, prompt_index)
+        if previous_index != prompt_index:
+            raise FormalRecordStatisticsError("同一 Prompt 在不同消融中使用了不同索引")
+        runtime_by_key[key] = record
+    expected_keys = {
+        (ablation_id, prompt_id)
+        for ablation_id in declared_ablation_ids
+        for prompt_id in expected_prompt_map
+    }
+    if set(runtime_by_key) != expected_keys or len(set(prompt_index_by_id.values())) != len(
+        prompt_index_by_id
+    ):
+        raise FormalRecordStatisticsError("逐 Prompt 消融记录未精确覆盖规范笛卡尔积")
+
+    detections_by_key: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for detection in materialized_detections:
+        key = (
+            str(detection.get("ablation_id", "")),
+            str(detection.get("ablation_prompt_id", "")),
+        )
+        if key not in expected_keys:
+            raise FormalRecordStatisticsError("消融检测原子包含未声明身份")
+        detections_by_key[key].append(detection)
+    if set(detections_by_key) != expected_keys:
+        raise FormalRecordStatisticsError("消融检测原子未覆盖全部 Prompt 与变体")
+
+    for ablation_id, protocol in protocols.items():
+        calibration_negatives = tuple(
+            detection
+            for (record_ablation_id, prompt_id), detections in detections_by_key.items()
+            if record_ablation_id == ablation_id
+            and expected_prompt_map[prompt_id] == "calibration"
+            for detection in detections
+            if detection.get("sample_role") == "clean_negative"
+            and not detection.get("attack_id")
+        )
+        try:
+            rebuilt_protocol = calibrate_complete_evidence_protocol(
+                calibration_negatives,
+                target_fpr=expected_target_fpr,
+                rescue_margin_low=protocol.rescue_margin_low,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise FormalRecordStatisticsError(
+                "消融 calibration 检测原子无法重建冻结协议"
+            ) from exc
+        if any(
+            field_name not in frozen_protocols[ablation_id]
+            or not _same_value(
+                frozen_protocols[ablation_id][field_name],
+                rebuilt_value,
+            )
+            for field_name, rebuilt_value in rebuilt_protocol.to_dict().items()
+        ):
+            raise FormalRecordStatisticsError(
+                "消融冻结检测协议与 calibration 原子独立重建值不一致"
+            )
+
+    rebuilt_aggregate_rows: list[dict[str, Any]] = []
+    for key in sorted(expected_keys):
+        ablation_id, prompt_id = key
+        runtime_record = runtime_by_key[key]
+        split = expected_prompt_map[prompt_id]
+        protocol = protocols[ablation_id]
+        detections = _revalidated_detection_records(
+            tuple(detections_by_key[key]),
+            protocol,
+        )
+        runtime_result = runtime_record.get("runtime_result")
+        runtime_config = runtime_record.get("runtime_config")
+        runtime_metadata = (
+            runtime_result.get("metadata")
+            if isinstance(runtime_result, Mapping)
+            else None
+        )
+        scientific_config = (
+            runtime_metadata.get("scientific_unit_config")
+            if isinstance(runtime_metadata, Mapping)
+            else None
+        )
+        if (
+            not isinstance(runtime_result, Mapping)
+            or not isinstance(runtime_config, Mapping)
+            or not isinstance(
+                scientific_config,
+                Mapping,
+            )
+        ):
+            raise FormalRecordStatisticsError("逐 Prompt 消融记录缺少科学运行配置")
+        if dict(runtime_config) != expected_runtime_configs[ablation_id]:
+            raise FormalRecordStatisticsError("逐 Prompt 消融记录未执行声明消融的精确机制配置")
+        try:
+            validate_semantic_watermark_runtime_result_provenance(runtime_result)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise FormalRecordStatisticsError(
+                "逐 Prompt 消融结果缺少可重建的科学运行来源"
+            ) from exc
+        paired_quality = runtime_metadata.get("paired_quality")
+        if (
+            runtime_result.get("run_decision") != "pass"
+            or not isinstance(paired_quality, Mapping)
+        ):
+            raise FormalRecordStatisticsError("逐 Prompt 消融科学运行未完成或缺少图像质量")
+        paired_ssim = _finite_float(paired_quality.get("ssim"), "paired_quality.ssim")
+        if (
+            str(runtime_config.get("ablation_id", "")) != ablation_id
+            or scientific_config.get("prompt_id") != prompt_id
+            or scientific_config.get("split") != split
+            or str(scientific_config.get("output_dir", "")).replace("\\", "/")
+            != f"{runtime_output_root}/{ablation_id}"
+            or build_stable_digest(
+                {"prompt_text": scientific_config.get("prompt")}
+            )
+            != str(runtime_record.get("prompt_digest", ""))
+            or str(runtime_record.get("prompt_digest", ""))
+            != expected_prompt_digests[prompt_id]
+            or any(
+                scientific_config.get(field_name) != field_value
+                for field_name, field_value in runtime_config.items()
+                if field_name != "ablation_id"
+            )
+        ):
+            raise FormalRecordStatisticsError("逐 Prompt 消融记录与科学运行配置身份不一致")
+        run_id = str(runtime_result.get("run_id", ""))
+        if not run_id or any(
+            detection.get("prompt_id") != prompt_id
+            or detection.get("split") != split
+            or detection.get("run_id") != run_id
+            for detection in detections
+        ):
+            raise FormalRecordStatisticsError("消融检测原子的 Prompt、split 或 run_id 漂移")
+
+        un_attacked = tuple(
+            detection for detection in detections if not detection.get("attack_id")
+        )
+        un_attacked_by_role: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for detection in un_attacked:
+            un_attacked_by_role[str(detection.get("sample_role", ""))].append(
+                detection
+            )
+        expected_un_attacked_roles = {
+            "clean_negative",
+            "positive_source",
+            "wrong_key_negative",
+        }
+        if set(un_attacked_by_role) != expected_un_attacked_roles or any(
+            len(rows) != 1 for rows in un_attacked_by_role.values()
+        ):
+            raise FormalRecordStatisticsError("消融检测原子缺少唯一 clean/positive/wrong-key 记录")
+        attacked_positive = tuple(
+            detection
+            for detection in detections
+            if detection.get("attack_id")
+            and detection.get("sample_role") == "positive_source"
+        )
+        attacked_negative = tuple(
+            detection
+            for detection in detections
+            if detection.get("attack_id")
+            and detection.get("sample_role") == "clean_negative"
+        )
+        coverage_ready = _formal_attack_coverage_ready(detections, split=split)
+        rebuilt = {
+            "generation_rerun": True,
+            "attack_and_detection_rerun": bool(attacked_positive or attacked_negative),
+            "threshold_calibration_scope": "per_ablation_calibration_split",
+            "frozen_content_threshold": float(protocol.content_threshold),
+            "frozen_threshold_digest": protocol.threshold_digest,
+            "clean_negative_positive": bool(
+                un_attacked_by_role["clean_negative"][0]["formal_evidence_positive"]
+            ),
+            "positive_source_positive": bool(
+                un_attacked_by_role["positive_source"][0]["formal_evidence_positive"]
+            ),
+            "wrong_key_negative_positive": bool(
+                un_attacked_by_role["wrong_key_negative"][0]["formal_evidence_positive"]
+            ),
+            "clean_negative_content_score": float(
+                un_attacked_by_role["clean_negative"][0]["content_score"]
+            ),
+            "positive_source_content_score": float(
+                un_attacked_by_role["positive_source"][0]["content_score"]
+            ),
+            "attacked_positive_count": len(attacked_positive),
+            "attacked_positive_rate": (
+                sum(bool(row["formal_evidence_positive"]) for row in attacked_positive)
+                / len(attacked_positive)
+                if attacked_positive
+                else 0.0
+            ),
+            "attacked_negative_count": len(attacked_negative),
+            "attacked_negative_rate": (
+                sum(bool(row["formal_evidence_positive"]) for row in attacked_negative)
+                / len(attacked_negative)
+                if attacked_negative
+                else 0.0
+            ),
+            "formal_attack_coverage_ready": coverage_ready,
+            "paired_ssim": paired_ssim,
+        }
+        for field_name, rebuilt_value in rebuilt.items():
+            if field_name not in runtime_record or not _same_value(
+                runtime_record[field_name],
+                rebuilt_value,
+            ):
+                raise FormalRecordStatisticsError(
+                    "逐 Prompt 消融聚合字段与检测原子重建值不一致: "
+                    f"{ablation_id}/{prompt_id}/{field_name}"
+                )
+        if not coverage_ready:
+            raise FormalRecordStatisticsError("逐 Prompt 消融攻击覆盖不符合冻结协议")
+        rebuilt_aggregate_rows.append(
+            {
+                "ablation_id": ablation_id,
+                "prompt_id": prompt_id,
+                "split": split,
+                **rebuilt,
+            }
+        )
+    return {
+        "ablation_runtime_record_count": len(materialized_runtime),
+        "ablation_detection_record_count": len(materialized_detections),
+        "ablation_frozen_protocol_count": len(protocols),
+        "ablation_runtime_records_digest": build_stable_digest(
+            materialized_runtime
+        ),
+        "ablation_detection_records_digest": build_stable_digest(
+            materialized_detections
+        ),
+        "ablation_frozen_protocols_digest": build_stable_digest(
+            dict(frozen_protocols)
+        ),
+        "ablation_rebuilt_runtime_aggregates_digest": build_stable_digest(
+            rebuilt_aggregate_rows
+        ),
+        "ablation_expected_runtime_configs_digest": build_stable_digest(
+            expected_runtime_configs
+        ),
+        "ablation_runtime_aggregate_rebuild_ready": True,
+    }
 
 
 def rebuild_and_validate_ablation_necessity_statistics(
@@ -156,6 +760,354 @@ def rebuild_and_validate_ablation_necessity_statistics(
     }
 
 
+def _validated_dataset_quality_image_records(
+    image_records: Iterable[Mapping[str, Any]],
+    *,
+    expected_pair_count: int,
+    expected_prompt_id_digest: str,
+) -> tuple[dict[str, Any], ...]:
+    """验证正式图像对记录的自摘要、Prompt 集合和唯一配对身份."""
+
+    materialized = tuple(dict(record) for record in image_records)
+    if len(materialized) != expected_pair_count:
+        raise FormalRecordStatisticsError("数据集质量图像记录数量与正式样本规模不一致")
+    record_ids: set[str] = set()
+    run_ids: set[str] = set()
+    prompt_ids: list[str] = []
+    pair_indices: list[int] = []
+    source_path_identities: set[str] = set()
+    comparison_path_identities: set[str] = set()
+    expected_fields = {
+        "dataset_quality_record_id",
+        "dataset_quality_record_digest",
+        "run_id",
+        "prompt_id",
+        "attack_name",
+        "image_pair_index",
+        "image_pair_role",
+        "source_image_path",
+        "source_image_digest",
+        "comparison_image_path",
+        "comparison_image_digest",
+        "feature_backend",
+        "supports_paper_claim",
+    }
+    for row_index, record in enumerate(materialized):
+        record_id = str(record.get("dataset_quality_record_id", ""))
+        run_id = str(record.get("run_id", ""))
+        prompt_id = str(record.get("prompt_id", ""))
+        if (
+            set(record) != expected_fields
+            or not record_id
+            or record_id in record_ids
+            or not run_id
+            or run_id in run_ids
+            or not prompt_id
+        ):
+            raise FormalRecordStatisticsError(
+                f"数据集质量图像记录身份重复或缺失: row={row_index}"
+            )
+        pair_index = _nonnegative_int(
+            record.get("image_pair_index"),
+            "image_pair_index",
+        )
+        payload = {
+            "run_id": run_id,
+            "prompt_id": prompt_id,
+            "attack_name": str(record.get("attack_name", "")),
+            "image_pair_index": pair_index,
+            "image_pair_role": str(record.get("image_pair_role", "")),
+            "source_image_path": str(record.get("source_image_path", "")),
+            "source_image_digest": str(record.get("source_image_digest", "")),
+            "comparison_image_path": str(
+                record.get("comparison_image_path", "")
+            ),
+            "comparison_image_digest": str(
+                record.get("comparison_image_digest", "")
+            ),
+            "feature_backend": str(record.get("feature_backend", "")),
+            "supports_paper_claim": record.get("supports_paper_claim"),
+        }
+        digest = str(record.get("dataset_quality_record_digest", ""))
+        if (
+            not payload["image_pair_role"]
+            or payload["attack_name"] != FORMAL_DATASET_QUALITY_ATTACK_NAME
+            or payload["image_pair_role"]
+            != FORMAL_DATASET_QUALITY_IMAGE_PAIR_ROLE
+            or not payload["source_image_path"]
+            or not payload["comparison_image_path"]
+            or not _is_sha256(payload["source_image_digest"])
+            or not _is_sha256(payload["comparison_image_digest"])
+            or payload["feature_backend"] != FORMAL_FEATURE_BACKEND
+            or payload["supports_paper_claim"] is not False
+            or not _is_sha256(digest)
+            or build_stable_digest(payload) != digest
+            or record_id != f"dataset_quality_record_{digest[:16]}"
+        ):
+            raise FormalRecordStatisticsError(
+                f"数据集质量图像记录正文、自摘要或后端无效: row={row_index}"
+            )
+        record_ids.add(record_id)
+        run_ids.add(run_id)
+        prompt_ids.append(prompt_id)
+        pair_indices.append(pair_index)
+        source_path_identity = os.path.normcase(
+            os.path.normpath(payload["source_image_path"])
+        )
+        comparison_path_identity = os.path.normcase(
+            os.path.normpath(payload["comparison_image_path"])
+        )
+        if (
+            source_path_identity == comparison_path_identity
+            or source_path_identity in source_path_identities
+            or comparison_path_identity in comparison_path_identities
+            or source_path_identity in comparison_path_identities
+            or comparison_path_identity in source_path_identities
+        ):
+            raise FormalRecordStatisticsError(
+                "数据集质量图像对未使用角色内唯一且跨角色不相交的独立路径"
+            )
+        source_path_identities.add(source_path_identity)
+        comparison_path_identities.add(comparison_path_identity)
+    if len(set(prompt_ids)) != expected_pair_count:
+        raise FormalRecordStatisticsError("数据集质量图像记录未一对一覆盖 Prompt")
+    if sorted(pair_indices) != list(range(expected_pair_count)):
+        raise FormalRecordStatisticsError("数据集质量图像对索引不是完整连续集合")
+    if build_stable_digest(sorted(prompt_ids)) != expected_prompt_id_digest:
+        raise FormalRecordStatisticsError("数据集质量图像记录 Prompt 集合摘要漂移")
+    return materialized
+
+
+def rebuild_and_validate_dataset_quality_feature_identity(
+    image_records: Iterable[Mapping[str, Any]],
+    image_resolution_records: Iterable[Mapping[str, Any]],
+    feature_records: Iterable[Mapping[str, Any]],
+    reported_provenance_summary: Mapping[str, Any],
+    actual_source_sha256: Mapping[str, str],
+    *,
+    expected_pair_count: int,
+    expected_prompt_id_digest: str,
+    expected_dependency_profile_id: str = FORMAL_FEATURE_DEPENDENCY_PROFILE_ID,
+    expected_formal_execution_commit: str | None = None,
+    expected_formal_execution_lock_digest: str | None = None,
+) -> dict[str, Any]:
+    """把正式 Inception 特征绑定到图像记录与科学完成单元来源.
+
+    通用工程写法是先以 ``dataset_quality_record_id/image role`` 建立精确键,
+    再逐键比较图像路径和 SHA。项目特定约束是每个 feature batch 的
+    ``scientific_unit_provenance`` 还必须绑定同一组图像身份、固定 GPU profile
+    和最终 summary 中的完整来源聚合字段。
+    """
+
+    resolved_expected_pair_count = _positive_int(
+        expected_pair_count,
+        "expected_pair_count",
+    )
+    if not _is_sha256(expected_prompt_id_digest):
+        raise FormalRecordStatisticsError("正式 feature 身份重建参数无效")
+    materialized_images = _validated_dataset_quality_image_records(
+        image_records,
+        expected_pair_count=resolved_expected_pair_count,
+        expected_prompt_id_digest=expected_prompt_id_digest,
+    )
+    materialized_resolutions = tuple(
+        dict(record) for record in image_resolution_records
+    )
+    expected_requested_paths = {
+        str(image[field_name])
+        for image in materialized_images
+        for field_name in ("source_image_path", "comparison_image_path")
+    }
+    resolution_by_requested_path: dict[str, dict[str, Any]] = {}
+    resolved_path_identities: set[str] = set()
+    expected_resolution_fields = {
+        "requested_image_path",
+        "resolved_image_path",
+        "resolved_from_package_path",
+        "resolution_status",
+        "resolved_image_digest",
+        "materialized_image_input",
+        "supports_paper_claim",
+        "image_resolution_record_digest",
+        "image_resolution_record_id",
+    }
+    for row_index, resolution in enumerate(materialized_resolutions):
+        requested_path = str(resolution.get("requested_image_path", ""))
+        resolved_path = str(resolution.get("resolved_image_path", ""))
+        digest_payload = {
+            key: value
+            for key, value in resolution.items()
+            if key not in {
+                "image_resolution_record_digest",
+                "image_resolution_record_id",
+            }
+        }
+        digest = str(resolution.get("image_resolution_record_digest", ""))
+        resolved_path_identity = os.path.normcase(os.path.normpath(resolved_path))
+        if (
+            set(resolution) != expected_resolution_fields
+            or not requested_path
+            or requested_path in resolution_by_requested_path
+            or not resolved_path
+            or resolution.get("resolution_status")
+            not in {
+                "resolved_existing_image_file",
+                "materialized_from_input_package",
+            }
+            or resolution.get("supports_paper_claim") is not False
+            or not isinstance(resolution.get("materialized_image_input"), bool)
+            or not _is_sha256(resolution.get("resolved_image_digest", ""))
+            or not _is_sha256(digest)
+            or build_stable_digest(digest_payload) != digest
+            or resolution.get("image_resolution_record_id")
+            != f"dataset_quality_image_resolution_{digest[:16]}"
+            or actual_source_sha256.get(resolved_path)
+            != resolution.get("resolved_image_digest")
+            or resolved_path_identity in resolved_path_identities
+        ):
+            raise FormalRecordStatisticsError(
+                f"数据集质量图像解析记录或实际文件 SHA 无效: row={row_index}"
+            )
+        resolution_by_requested_path[requested_path] = resolution
+        resolved_path_identities.add(resolved_path_identity)
+    if (
+        len(materialized_resolutions) != resolved_expected_pair_count * 2
+        or len(resolution_by_requested_path) != resolved_expected_pair_count * 2
+        or set(resolution_by_requested_path) != expected_requested_paths
+    ):
+        raise FormalRecordStatisticsError("图像解析记录未精确覆盖全部 source/comparison 路径")
+
+    materialized_features = tuple(dict(record) for record in feature_records)
+    image_by_id = {
+        str(record["dataset_quality_record_id"]): record
+        for record in materialized_images
+    }
+    feature_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for row_index, feature in enumerate(materialized_features):
+        record_id = str(feature.get("dataset_quality_record_id", ""))
+        role = str(feature.get("dataset_quality_image_role", ""))
+        key = (record_id, role)
+        image_record = image_by_id.get(record_id)
+        if (
+            image_record is None
+            or role not in {"source", "comparison"}
+            or key in feature_by_key
+            or feature.get("supports_paper_claim") is not False
+            or feature.get("feature_dimension") != FORMAL_FEATURE_DIMENSION
+        ):
+            raise FormalRecordStatisticsError(
+                f"正式 feature record 的图像对身份或角色无效: row={row_index}"
+            )
+        path_field = f"{role}_image_path"
+        digest_field = f"{role}_image_digest"
+        resolution = resolution_by_requested_path[str(image_record[path_field])]
+        if (
+            str(feature.get("image_path", ""))
+            != str(resolution["resolved_image_path"])
+            or str(feature.get("image_digest", ""))
+            != str(image_record[digest_field])
+            or str(resolution["resolved_image_digest"])
+            != str(image_record[digest_field])
+        ):
+            raise FormalRecordStatisticsError(
+                f"正式 feature record 与图像路径/SHA 脱离: row={row_index}"
+            )
+        feature_by_key[key] = feature
+    expected_feature_keys = {
+        (record_id, role)
+        for record_id in image_by_id
+        for role in ("source", "comparison")
+    }
+    if set(feature_by_key) != expected_feature_keys:
+        raise FormalRecordStatisticsError("正式 feature records 未精确覆盖全部图像角色")
+
+    # 复用 FID/KID 重建的向量 schema 校验, 避免身份验证与数值验证维护两套
+    # feature backend、提取器、维度和有限值规则。
+    _formal_feature_arrays(
+        materialized_features,
+        expected_pair_count=resolved_expected_pair_count,
+    )
+    try:
+        provenance_references = validate_inception_feature_provenance_groups(
+            list(materialized_features)
+        )
+        provenance_summary = aggregate_scientific_unit_provenance(
+            provenance_references,
+            expected_reference_count=len(materialized_features),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise FormalRecordStatisticsError(
+            "正式 feature records 的科学完成单元来源无效"
+        ) from exc
+    if provenance_summary.get("scientific_unit_provenance_ready") is not True:
+        raise FormalRecordStatisticsError("正式 feature 科学来源聚合未就绪")
+    if provenance_summary.get("scientific_dependency_profile_ids") != [
+        expected_dependency_profile_id
+    ]:
+        raise FormalRecordStatisticsError("正式 feature 未使用冻结 GPU 依赖 profile")
+    if (
+        expected_formal_execution_commit is not None
+        and provenance_summary.get("scientific_formal_execution_commits")
+        != [expected_formal_execution_commit]
+    ):
+        raise FormalRecordStatisticsError("正式 feature 科学来源的代码提交漂移")
+    if (
+        expected_formal_execution_lock_digest is not None
+        and provenance_summary.get("scientific_formal_execution_lock_digests")
+        != [expected_formal_execution_lock_digest]
+    ):
+        raise FormalRecordStatisticsError("正式 feature 科学来源的执行锁漂移")
+    for field_name in SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS:
+        if reported_provenance_summary.get(field_name) != provenance_summary.get(
+            field_name
+        ):
+            raise FormalRecordStatisticsError(
+                "正式 feature 科学来源与报告聚合字段不一致: "
+                f"{field_name}"
+            )
+    return {
+        "dataset_quality_image_record_count": len(materialized_images),
+        "dataset_quality_feature_record_count": len(materialized_features),
+        "dataset_quality_image_resolution_record_count": len(
+            materialized_resolutions
+        ),
+        "dataset_quality_image_records_digest": build_stable_digest(
+            materialized_images
+        ),
+        "dataset_quality_feature_records_digest": build_stable_digest(
+            materialized_features
+        ),
+        "dataset_quality_image_resolution_records_digest": build_stable_digest(
+            materialized_resolutions
+        ),
+        "dataset_quality_actual_image_sha256_map_digest": build_stable_digest(
+            {
+                str(resolution["resolved_image_path"]): str(
+                    resolution["resolved_image_digest"]
+                )
+                for resolution in materialized_resolutions
+            }
+        ),
+        "dataset_quality_feature_image_identity_digest": build_stable_digest(
+            [
+                {
+                    "dataset_quality_record_id": record_id,
+                    "dataset_quality_image_role": role,
+                    "image_path": feature_by_key[(record_id, role)]["image_path"],
+                    "image_digest": feature_by_key[(record_id, role)][
+                        "image_digest"
+                    ],
+                }
+                for record_id, role in sorted(expected_feature_keys)
+            ]
+        ),
+        "dataset_quality_scientific_unit_provenance_records_digest": (
+            provenance_summary["scientific_unit_provenance_records_digest"]
+        ),
+        "dataset_quality_feature_identity_rebuild_ready": True,
+    }
+
+
 def _formal_feature_arrays(
     feature_records: Iterable[Mapping[str, Any]],
     *,
@@ -226,11 +1178,20 @@ def _normalized_dataset_metric_row(row: Mapping[str, Any]) -> dict[str, Any]:
         raise FormalRecordStatisticsError("FID/KID 指标值不是有限数值") from exc
     if not math.isfinite(value):
         raise FormalRecordStatisticsError("FID/KID 指标值不是有限数值")
+    metric_name = str(row["quality_metric_name"])
+    paper_metric_name = str(row["paper_metric_name"])
+    if (
+        metric_name not in FORMAL_DATASET_QUALITY_METRIC_NAMES
+        or paper_metric_name != metric_name
+    ):
+        raise FormalRecordStatisticsError("FID/KID 指标名称不符合冻结三行 schema")
+    if metric_name in {"fid", "kid_std"} and value < 0.0:
+        raise FormalRecordStatisticsError("FID 与 KID 子集标准差不得为负数")
     return {
-        "quality_metric_name": str(row["quality_metric_name"]),
+        "quality_metric_name": metric_name,
         "quality_metric_value": value,
         "metric_status": str(row["metric_status"]),
-        "paper_metric_name": str(row["paper_metric_name"]),
+        "paper_metric_name": paper_metric_name,
         "feature_backend": str(row["feature_backend"]),
         "source_image_count": _positive_int(
             row["source_image_count"], "source_image_count"
@@ -277,12 +1238,21 @@ def rebuild_and_validate_formal_fid_kid_metrics(
     ):
         for field_name in DATASET_QUALITY_METRIC_FIELDNAMES:
             if field_name == "quality_metric_value":
-                if not math.isclose(
-                    float(reported[field_name]),
-                    float(rebuilt[field_name]),
-                    rel_tol=FORMAL_METRIC_RELATIVE_TOLERANCE,
-                    abs_tol=FORMAL_METRIC_ABSOLUTE_TOLERANCE,
+                reported_value = float(reported[field_name])
+                rebuilt_value = float(rebuilt[field_name])
+                if (
+                    rebuilt["quality_metric_name"] == "kid_std"
+                    and rebuilt_value == 0.0
                 ):
+                    metric_value_matches = reported_value == 0.0
+                else:
+                    metric_value_matches = math.isclose(
+                        reported_value,
+                        rebuilt_value,
+                        rel_tol=FORMAL_METRIC_RELATIVE_TOLERANCE,
+                        abs_tol=FORMAL_METRIC_ABSOLUTE_TOLERANCE,
+                    )
+                if not metric_value_matches:
                     raise FormalRecordStatisticsError(
                         "FID/KID 指标值与 feature records 独立重算结果不一致: "
                         f"row={row_index}"

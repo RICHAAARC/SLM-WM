@@ -203,7 +203,7 @@ def test_pilot_paper_result_analysis_rebuilds_tables_and_failure_figure(tmp_path
         root=tmp_path,
         result_records_path=result_records_path,
         attack_detection_records_path=real_records_path,
-        failure_case_limit=4,
+        failure_case_limit=12,
     )
 
     output_dir = tmp_path / "outputs" / "pilot_paper_result_analysis" / "pilot_paper"

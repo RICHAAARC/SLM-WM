@@ -64,6 +64,13 @@ def build_method_config(
         lf_relative_strength=method.lf_relative_strength,
         tail_relative_strength=method.tail_relative_strength,
         attention_relative_strength=method.attention_relative_strength,
+        attention_stable_token_fraction=(
+            method.attention_stable_token_fraction
+        ),
+        attention_unstable_pair_weight=method.attention_unstable_pair_weight,
+        minimum_final_image_attention_score_gain=(
+            method.minimum_final_image_attention_score_gain
+        ),
         tail_fraction=method.tail_fraction,
         minimum_projection_energy_retention=(
             method.minimum_projection_energy_retention
@@ -72,6 +79,12 @@ def build_method_config(
         null_space_cg_max_iterations=method.null_space_cg_max_iterations,
         null_space_cg_relative_tolerance=(
             method.null_space_cg_relative_tolerance
+        ),
+        minimum_semantic_preservation_cosine=(
+            method.minimum_semantic_preservation_cosine
+        ),
+        maximum_visual_feature_relative_drift=(
+            method.maximum_visual_feature_relative_drift
         ),
         max_attention_tokens=method.max_attention_tokens,
         attention_module_count=method.attention_module_count,
@@ -115,7 +128,7 @@ def run_image_only_dataset_workload(
         paper_run_name=paper_run.run_name,
         target_fpr=paper_run.target_fpr,
         root=root_path,
-        real_attack_registry_path=(
+        quality_image_registry_path=(
             "outputs/image_only_dataset_runtime/"
             f"{paper_run.run_name}/watermark_quality_image_registry.jsonl"
         ),

@@ -34,6 +34,10 @@ from experiments.artifacts.dataset_level_quality_outputs import (
     path_digest,
 )
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.dataset_quality import (
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
+    formal_dataset_quality_metric_protocol,
+)
 from experiments.protocol.prompts import (
     PROMPT_FILES,
     build_prompt_records,
@@ -307,7 +311,7 @@ def _prepare_ablation(root: Path) -> Path:
                 {
                     "prompt_id": prompt_record.prompt_id,
                     "prompt_digest": build_stable_digest(
-                        {"prompt": prompt_record.prompt_text}
+                        {"prompt_text": prompt_record.prompt_text}
                     ),
                     "split": prompt_record.split,
                     "ablation_id": spec.ablation_id,
@@ -337,9 +341,12 @@ def _prepare_ablation(root: Path) -> Path:
             "mechanism_pairwise_delta.csv",
         ),
     )
+    frozen_protocol_payload = {
+        ablation_id: {} for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+    }
     _write_json(
         directory / "per_ablation_frozen_protocols.json",
-        {ablation_id: {} for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS},
+        frozen_protocol_payload,
     )
     (directory / "mechanism_ablation_metrics.csv").write_text(
         "ablation_id\n"
@@ -397,6 +404,18 @@ def _prepare_ablation(root: Path) -> Path:
         ),
         expected_reference_count=len(ablation_records),
     )
+    atom_identity = {
+        "formal_detection_records_sha256": path_digest(
+            directory / "formal_detection_records.jsonl"
+        ),
+        "formal_detection_records_digest": build_stable_digest([{}]),
+        "per_ablation_frozen_protocols_sha256": path_digest(
+            directory / "per_ablation_frozen_protocols.json"
+        ),
+        "per_ablation_frozen_protocols_digest": build_stable_digest(
+            frozen_protocol_payload
+        ),
+    }
     expected_attacked_run_count = len(split_prompt_ids["test"]) * len(specs)
     _write_json(
         directory / "ablation_claim_summary.json",
@@ -406,6 +425,7 @@ def _prepare_ablation(root: Path) -> Path:
             "target_fpr": TARGET_FPR,
             **ablation_contract,
             **prompt_contract,
+            **atom_identity,
             "record_count": len(ablation_records),
             "expected_attack_and_detection_rerun_count": (
                 expected_attacked_run_count
@@ -425,6 +445,7 @@ def _prepare_ablation(root: Path) -> Path:
         "target_fpr": TARGET_FPR,
         **ablation_contract,
         **prompt_contract,
+        **atom_identity,
         "prompt_count": len(prompt_records),
         "split_counts": {
             split: sum(record.split == split for record in prompt_records)
@@ -464,6 +485,7 @@ def _prepare_ablation(root: Path) -> Path:
             "metadata": {
                 **ablation_contract,
                 **prompt_contract,
+                **atom_identity,
                 "ablation_necessity_statistics_ready": True,
                 "necessity_statistic_rows_digest": necessity_summary[
                     "necessity_statistic_rows_digest"
@@ -505,26 +527,43 @@ def _prepare_dataset_quality(root: Path) -> Path:
         prompt_file=PROMPT_FILES[PAPER_RUN_NAME],
     )
     quality_records: list[dict[str, object]] = []
+    resolution_records: list[dict[str, object]] = []
     feature_rows: list[dict[str, object]] = []
     item_identity: list[dict[str, object]] = []
     for index, prompt_id in enumerate(canonical_ids):
-        record_id = f"dataset_quality_record_{index:05d}"
-        source_path = f"outputs/fixture_images/{record_id}_source.png"
+        source_path = f"outputs/fixture_images/quality_pair_{index:05d}_source.png"
         comparison_path = (
-            f"outputs/fixture_images/{record_id}_comparison.png"
+            f"outputs/fixture_images/quality_pair_{index:05d}_comparison.png"
         )
-        source_digest = hashlib.sha256(source_path.encode("utf-8")).hexdigest()
-        comparison_digest = hashlib.sha256(
-            comparison_path.encode("utf-8")
-        ).hexdigest()
+        source_bytes = f"source-image-{index}".encode("utf-8")
+        comparison_bytes = f"comparison-image-{index}".encode("utf-8")
+        source_file = root / source_path
+        comparison_file = root / comparison_path
+        source_file.parent.mkdir(parents=True, exist_ok=True)
+        source_file.write_bytes(source_bytes)
+        comparison_file.write_bytes(comparison_bytes)
+        source_digest = hashlib.sha256(source_bytes).hexdigest()
+        comparison_digest = hashlib.sha256(comparison_bytes).hexdigest()
+        record_payload = {
+            "run_id": f"quality_runtime_{index:05d}",
+            "prompt_id": prompt_id,
+            "attack_name": "watermark_embedding",
+            "image_pair_index": index,
+            "image_pair_role": "clean_to_watermarked",
+            "source_image_path": source_path,
+            "source_image_digest": source_digest,
+            "comparison_image_path": comparison_path,
+            "comparison_image_digest": comparison_digest,
+            "feature_backend": FORMAL_FEATURE_BACKEND,
+            "supports_paper_claim": False,
+        }
+        record_digest = build_stable_digest(record_payload)
+        record_id = f"dataset_quality_record_{record_digest[:16]}"
         quality_records.append(
             {
                 "dataset_quality_record_id": record_id,
-                "prompt_id": prompt_id,
-                "source_image_path": source_path,
-                "source_image_digest": source_digest,
-                "comparison_image_path": comparison_path,
-                "comparison_image_digest": comparison_digest,
+                "dataset_quality_record_digest": record_digest,
+                **record_payload,
             }
         )
         for role, image_path, image_digest, value in (
@@ -536,6 +575,26 @@ def _prepare_dataset_quality(root: Path) -> Path:
                 float(index) + 0.25,
             ),
         ):
+            resolution_payload = {
+                "requested_image_path": image_path,
+                "resolved_image_path": image_path,
+                "resolved_from_package_path": "",
+                "resolution_status": "resolved_existing_image_file",
+                "resolved_image_digest": image_digest,
+                "materialized_image_input": False,
+                "supports_paper_claim": False,
+            }
+            resolution_digest = build_stable_digest(resolution_payload)
+            resolution_records.append(
+                {
+                    **resolution_payload,
+                    "image_resolution_record_digest": resolution_digest,
+                    "image_resolution_record_id": (
+                        "dataset_quality_image_resolution_"
+                        f"{resolution_digest[:16]}"
+                    ),
+                }
+            )
             item_identity.append(
                 {
                     "dataset_quality_record_id": record_id,
@@ -582,11 +641,9 @@ def _prepare_dataset_quality(root: Path) -> Path:
         directory / "dataset_quality_formal_feature_records.jsonl",
         feature_rows,
     )
-    _write_required_files(
-        directory,
-        (
-            "dataset_quality_image_resolution_records.jsonl",
-        ),
+    _write_jsonl(
+        directory / "dataset_quality_image_resolution_records.jsonl",
+        resolution_records,
     )
     feature_records_path = directory / "dataset_quality_formal_feature_records.jsonl"
     feature_sha256 = path_digest(feature_records_path)
@@ -606,6 +663,17 @@ def _prepare_dataset_quality(root: Path) -> Path:
         "formal_feature_records_sha256": feature_sha256,
         **provenance_summary,
     }
+    resolution_contract = {
+        "image_resolution_records_digest": build_stable_digest(
+            resolution_records
+        ),
+        "image_resolution_record_count": len(resolution_records),
+        "resolved_image_file_count": len(resolution_records),
+        "missing_image_file_count": 0,
+        "materialized_image_input_count": 0,
+        "image_resolution_identity_ready": True,
+    }
+    metric_protocol = formal_dataset_quality_metric_protocol()
     _write_json(
         directory / "dataset_quality_formal_feature_import_report.json",
         {
@@ -613,12 +681,24 @@ def _prepare_dataset_quality(root: Path) -> Path:
             "target_fpr": TARGET_FPR,
             "expected_feature_pair_count": PROMPT_COUNT,
             **coverage,
+            **resolution_contract,
         },
     )
     (directory / "dataset_quality_metrics.csv").write_text(
-        "quality_metric_name,metric_status,source_image_count,comparison_image_count,sample_pair_count\n"
-        f"fid,measured,{PROMPT_COUNT},{PROMPT_COUNT},{PROMPT_COUNT}\n"
-        f"kid,measured,{PROMPT_COUNT},{PROMPT_COUNT},{PROMPT_COUNT}\n",
+        (
+            "quality_metric_name,quality_metric_value,metric_status,"
+            "paper_metric_name,source_image_count,comparison_image_count,"
+            "sample_pair_count\n"
+            + "".join(
+                f"{metric_name},{metric_value},measured,{metric_name},"
+                f"{PROMPT_COUNT},{PROMPT_COUNT},{PROMPT_COUNT}\n"
+                for metric_name, metric_value in zip(
+                    FORMAL_DATASET_QUALITY_METRIC_NAMES,
+                    (1.0, 0.01, 0.0),
+                    strict=True,
+                )
+            )
+        ),
         encoding="utf-8",
     )
     _write_json(
@@ -631,11 +711,17 @@ def _prepare_dataset_quality(root: Path) -> Path:
             "registry_prompt_count": PROMPT_COUNT,
             "sample_pair_count": PROMPT_COUNT,
             **coverage,
+            **resolution_contract,
             "formal_feature_backend_ready": True,
             "formal_sample_scale_ready": True,
             "canonical_formal_feature_extractor_ready": True,
             "scientific_unit_provenance_identity_ready": True,
             "formal_fid_kid_claim_gate_ready": True,
+            "kid_effective_subset_size": PROMPT_COUNT,
+            "formal_metric_protocol": metric_protocol,
+            "formal_metric_protocol_digest": metric_protocol[
+                "formal_metric_protocol_digest"
+            ],
         },
     )
     _write_json(
@@ -661,9 +747,12 @@ def _prepare_dataset_quality(root: Path) -> Path:
                 "paper_run_name": PAPER_RUN_NAME,
                 "target_fpr": TARGET_FPR,
                 **coverage,
+                **resolution_contract,
             },
-            "config": coverage,
-            "config_digest": build_stable_digest(coverage),
+            "config": {**coverage, **resolution_contract},
+            "config_digest": build_stable_digest(
+                {**coverage, **resolution_contract}
+            ),
         },
     )
     write_test_scientific_execution_binding(
@@ -839,6 +928,48 @@ def test_ablation_and_quality_packages_reject_inexact_scientific_contracts(
     quality_report["accepted_feature_pair_count"] = PROMPT_COUNT - 1
     quality_report["missing_feature_pair_count"] = 1
     _write_json(quality_report_path, quality_report)
+    with pytest.raises(RuntimeError, match="精确 Prompt/特征覆盖"):
+        package_dataset_level_quality_outputs(PAPER_RUN_NAME, root=tmp_path)
+
+
+@pytest.mark.quick
+def test_dataset_quality_package_rejects_resigned_feature_schema_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """特征文件和上游摘要同步重签也不得绕过逐行正式 schema 复验."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
+    archive_path = _prepare_dataset_quality(tmp_path)
+    archive_path.unlink()
+    output_dir = (
+        tmp_path / "outputs/dataset_level_quality" / PAPER_RUN_NAME
+    )
+    feature_path = output_dir / "dataset_quality_formal_feature_records.jsonl"
+    feature_rows = [
+        json.loads(line)
+        for line in feature_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    feature_rows[0]["feature_extractor_id"] = "forged_extractor"
+    _write_jsonl(feature_path, feature_rows)
+    feature_sha256 = path_digest(feature_path)
+
+    summary_path = output_dir / "dataset_quality_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["formal_feature_records_sha256"] = feature_sha256
+    _write_json(summary_path, summary)
+    report_path = output_dir / "dataset_quality_formal_feature_import_report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["formal_feature_records_sha256"] = feature_sha256
+    _write_json(report_path, report)
+    manifest_path = output_dir / "manifest.local.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["config"]["formal_feature_records_sha256"] = feature_sha256
+    manifest["metadata"]["formal_feature_records_sha256"] = feature_sha256
+    manifest["config_digest"] = build_stable_digest(manifest["config"])
+    _write_json(manifest_path, manifest)
+
     with pytest.raises(RuntimeError, match="精确 Prompt/特征覆盖"):
         package_dataset_level_quality_outputs(PAPER_RUN_NAME, root=tmp_path)
 

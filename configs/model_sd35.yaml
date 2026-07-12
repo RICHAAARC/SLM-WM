@@ -19,6 +19,7 @@ tail_relative_strength: 0.0015
 attention_relative_strength: 0.0010
 attention_stable_token_fraction: 0.50
 attention_unstable_pair_weight: 0.25
+minimum_final_image_attention_score_gain: 0.0001
 tail_fraction: 0.20
 minimum_projection_energy_retention: 0.01
 maximum_relative_response_residual: 0.0001

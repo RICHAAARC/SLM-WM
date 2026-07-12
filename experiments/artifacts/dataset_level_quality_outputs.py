@@ -21,11 +21,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from experiments.protocol import (
+    FORMAL_DATASET_QUALITY_ATTACK_NAME,
+    FORMAL_DATASET_QUALITY_IMAGE_PAIR_ROLE,
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
     FORMAL_FEATURE_BACKEND,
     FORMAL_FEATURE_EXTRACTOR_ID,
     build_dataset_quality_image_records,
     build_dataset_quality_metric_rows,
     build_dataset_quality_summary,
+    formal_dataset_quality_metric_protocol,
 )
 from experiments.protocol.paper_run_config import (
     RUN_EXPECTED_PROMPT_COUNTS,
@@ -64,6 +68,39 @@ from experiments.runtime.archive_naming import utc_archive_token
 
 DEFAULT_PROGRESS_INTERVAL_ITEMS = 50
 PACKAGE_INPUT_MANIFEST_FILE_NAME = "dataset_quality_package_input_manifest.json"
+FORMAL_FEATURE_DIMENSION = int(
+    formal_dataset_quality_metric_protocol()["feature_dimension"]
+)
+IMAGE_RESOLUTION_RECORD_FIELDNAMES = frozenset(
+    {
+        "requested_image_path",
+        "resolved_image_path",
+        "resolved_from_package_path",
+        "resolution_status",
+        "resolved_image_digest",
+        "materialized_image_input",
+        "supports_paper_claim",
+        "image_resolution_record_digest",
+        "image_resolution_record_id",
+    }
+)
+DATASET_QUALITY_IMAGE_RECORD_FIELDNAMES = frozenset(
+    {
+        "dataset_quality_record_id",
+        "dataset_quality_record_digest",
+        "run_id",
+        "prompt_id",
+        "attack_name",
+        "image_pair_index",
+        "image_pair_role",
+        "source_image_path",
+        "source_image_digest",
+        "comparison_image_path",
+        "comparison_image_digest",
+        "feature_backend",
+        "supports_paper_claim",
+    }
+)
 
 
 def dataset_quality_io_progress_enabled() -> bool:
@@ -258,9 +295,249 @@ def validate_inception_feature_provenance_groups(
     return validated_references
 
 
+def _is_sha256(value: Any) -> bool:
+    """判断字段是否为规范小写 SHA-256."""
+
+    text = str(value)
+    return len(text) == 64 and all(
+        character in "0123456789abcdef" for character in text
+    )
+
+
+def inspect_dataset_quality_image_resolution_identity(
+    *,
+    records: Any,
+    image_resolution_records: Any,
+    root_path: Path,
+) -> tuple[
+    dict[tuple[str, str], tuple[str, str]],
+    list[dict[str, Any]],
+]:
+    """核验图像解析记录并返回 feature 行必须使用的实际路径与 SHA.
+
+    通用写法是在特征导入前把声明路径解析为实际文件, 并重新读取文件计算
+    SHA-256。这样 feature 行不能只复述图像 registry 中的声明摘要。项目特定
+    约束是 source/comparison 两种角色必须精确覆盖每个正式质量记录。
+    """
+
+    materialized_records = tuple(records)
+    materialized_resolutions = tuple(
+        dict(record) for record in image_resolution_records
+    )
+    issues: list[dict[str, Any]] = []
+    declared_by_key: dict[tuple[str, str], tuple[str, str]] = {}
+    declared_digest_by_path: dict[str, str] = {}
+    source_file_identities: set[str] = set()
+    comparison_file_identities: set[str] = set()
+    run_ids: set[str] = set()
+    for record_index, record in enumerate(materialized_records):
+        record_values = vars(record)
+        record_id = str(getattr(record, "dataset_quality_record_id", ""))
+        record_digest = str(
+            getattr(record, "dataset_quality_record_digest", "")
+        )
+        record_payload = {
+            field_name: getattr(record, field_name, None)
+            for field_name in DATASET_QUALITY_IMAGE_RECORD_FIELDNAMES
+            if field_name
+            not in {
+                "dataset_quality_record_id",
+                "dataset_quality_record_digest",
+            }
+        }
+        run_id = str(getattr(record, "run_id", ""))
+        if (
+            set(record_values) != DATASET_QUALITY_IMAGE_RECORD_FIELDNAMES
+            or not _is_sha256(record_digest)
+            or build_stable_digest(record_payload) != record_digest
+            or record_id != f"dataset_quality_record_{record_digest[:16]}"
+            or not run_id
+            or run_id in run_ids
+            or getattr(record, "attack_name", None)
+            != FORMAL_DATASET_QUALITY_ATTACK_NAME
+            or getattr(record, "image_pair_role", None)
+            != FORMAL_DATASET_QUALITY_IMAGE_PAIR_ROLE
+            or getattr(record, "supports_paper_claim", None) is not False
+        ):
+            issues.append(
+                {
+                    "row_index": record_index,
+                    "field_name": "image_pair_role",
+                    "reason": "formal_clean_to_watermarked_pair_required",
+                }
+            )
+        run_ids.add(run_id)
+        role_path_identities: dict[str, str] = {}
+        for role in ("source", "comparison"):
+            requested_path = str(
+                getattr(record, f"{role}_image_path", "")
+            )
+            requested_file = (
+                resolve_path(root_path, requested_path)
+                if requested_path
+                else None
+            )
+            requested_file_identity = (
+                os.path.normcase(str(requested_file.resolve()))
+                if requested_file is not None
+                else ""
+            )
+            role_path_identities[role] = requested_file_identity
+            declared_digest = str(
+                getattr(record, f"{role}_image_digest", "")
+            )
+            key = (record_id, role)
+            if (
+                not record_id
+                or not requested_path
+                or not _is_sha256(declared_digest)
+                or key in declared_by_key
+            ):
+                issues.append(
+                    {
+                        "row_index": record_index,
+                        "field_name": f"{role}_image_path",
+                        "reason": "dataset_quality_image_identity_invalid",
+                    }
+                )
+                continue
+            previous_digest = declared_digest_by_path.setdefault(
+                requested_path,
+                declared_digest,
+            )
+            if previous_digest != declared_digest:
+                issues.append(
+                    {
+                        "row_index": record_index,
+                        "field_name": f"{role}_image_digest",
+                        "reason": "requested_image_path_digest_conflict",
+                    }
+                )
+            declared_by_key[key] = (requested_path, declared_digest)
+        source_identity = role_path_identities.get("source", "")
+        comparison_identity = role_path_identities.get("comparison", "")
+        if (
+            not source_identity
+            or not comparison_identity
+            or source_identity == comparison_identity
+            or source_identity in source_file_identities
+            or comparison_identity in comparison_file_identities
+            or source_identity in comparison_file_identities
+            or comparison_identity in source_file_identities
+        ):
+            issues.append(
+                {
+                    "row_index": record_index,
+                    "field_name": "source_image_path",
+                    "reason": "independent_pair_file_identity_required",
+                }
+            )
+        source_file_identities.add(source_identity)
+        comparison_file_identities.add(comparison_identity)
+
+    resolution_by_requested_path: dict[str, tuple[str, str]] = {}
+    resolved_file_identities: set[str] = set()
+    for row_index, resolution in enumerate(materialized_resolutions):
+        requested_path = str(resolution.get("requested_image_path", ""))
+        resolved_path = str(resolution.get("resolved_image_path", ""))
+        declared_digest = str(resolution.get("resolved_image_digest", ""))
+        digest_payload = {
+            field_name: resolution[field_name]
+            for field_name in IMAGE_RESOLUTION_RECORD_FIELDNAMES
+            if field_name
+            not in {
+                "image_resolution_record_digest",
+                "image_resolution_record_id",
+            }
+            and field_name in resolution
+        }
+        record_digest = str(
+            resolution.get("image_resolution_record_digest", "")
+        )
+        resolved_file = resolve_path(root_path, resolved_path) if resolved_path else None
+        actual_digest = (
+            path_digest(resolved_file)
+            if resolved_file is not None and resolved_file.is_file()
+            else ""
+        )
+        resolved_file_identity = (
+            os.path.normcase(str(resolved_file.resolve()))
+            if resolved_file is not None
+            else ""
+        )
+        if (
+            set(resolution) != IMAGE_RESOLUTION_RECORD_FIELDNAMES
+            or not requested_path
+            or requested_path in resolution_by_requested_path
+            or not resolved_path
+            or resolution.get("resolution_status")
+            not in {
+                "resolved_existing_image_file",
+                "materialized_from_input_package",
+            }
+            or resolution.get("supports_paper_claim") is not False
+            or not isinstance(resolution.get("materialized_image_input"), bool)
+            or not _is_sha256(declared_digest)
+            or declared_digest != actual_digest
+            or not resolved_file_identity
+            or resolved_file_identity in resolved_file_identities
+            or not _is_sha256(record_digest)
+            or build_stable_digest(digest_payload) != record_digest
+            or resolution.get("image_resolution_record_id")
+            != f"dataset_quality_image_resolution_{record_digest[:16]}"
+        ):
+            issues.append(
+                {
+                    "row_index": row_index,
+                    "field_name": "image_resolution_record_digest",
+                    "reason": "image_resolution_record_or_actual_sha_invalid",
+                }
+            )
+            continue
+        resolution_by_requested_path[requested_path] = (
+            resolved_path,
+            declared_digest,
+        )
+        resolved_file_identities.add(resolved_file_identity)
+
+    if (
+        len(materialized_resolutions) != len(materialized_records) * 2
+        or len(resolution_by_requested_path) != len(materialized_records) * 2
+        or set(resolution_by_requested_path) != set(declared_digest_by_path)
+    ):
+        issues.append(
+            {
+                "row_index": -1,
+                "field_name": "requested_image_path",
+                "reason": "image_resolution_exact_path_coverage_required",
+            }
+        )
+
+    expected_feature_identity: dict[
+        tuple[str, str], tuple[str, str]
+    ] = {}
+    for key, (requested_path, declared_digest) in declared_by_key.items():
+        resolution_identity = resolution_by_requested_path.get(requested_path)
+        if (
+            resolution_identity is None
+            or resolution_identity[1] != declared_digest
+        ):
+            issues.append(
+                {
+                    "row_index": -1,
+                    "field_name": "resolved_image_digest",
+                    "reason": "image_resolution_declared_digest_mismatch",
+                }
+            )
+            continue
+        expected_feature_identity[key] = resolution_identity
+    return expected_feature_identity, issues
+
+
 def build_formal_feature_import_payload(
     *,
     records: Any,
+    image_resolution_records: Any,
     feature_rows: list[dict[str, Any]],
     formal_feature_records_path: Path,
     root_path: Path,
@@ -272,26 +549,24 @@ def build_formal_feature_import_payload(
     该函数属于 schema / 配置解析层: 它集中处理字段缺失、角色不合法和维度不一致问题, 下游指标函数只接收矩阵。
     """
 
-    record_ids = [record.dataset_quality_record_id for record in records]
+    materialized_records = tuple(records)
+    record_ids = [
+        record.dataset_quality_record_id for record in materialized_records
+    ]
     expected_pairs = {(record_id, role) for record_id in record_ids for role in ("source", "comparison")}
-    expected_image_identity = {
-        (record.dataset_quality_record_id, "source"): (
-            record.source_image_path,
-            record.source_image_digest,
+    expected_image_identity, resolution_issues = (
+        inspect_dataset_quality_image_resolution_identity(
+            records=materialized_records,
+            image_resolution_records=image_resolution_records,
+            root_path=root_path,
         )
-        for record in records
-    }
-    expected_image_identity.update(
-        {
-            (record.dataset_quality_record_id, "comparison"): (
-                record.comparison_image_path,
-                record.comparison_image_digest,
-            )
-            for record in records
-        }
     )
+    image_resolution_identity_ready = bool(
+        not resolution_issues
+        and set(expected_image_identity) == expected_pairs
+    )
+    issues = list(resolution_issues)
     vectors_by_key: dict[tuple[str, str], list[float]] = {}
-    issues: list[dict[str, Any]] = []
     try:
         provenance_references = validate_inception_feature_provenance_groups(
             feature_rows
@@ -311,12 +586,12 @@ def build_formal_feature_import_payload(
         feature_backend = str(row.get("feature_backend", "") or "")
         feature_vector = _numeric_vector(row.get("feature_vector"))
         key = (record_id, image_role)
-        _, expected_digest = expected_image_identity.get(
+        expected_path, expected_digest = expected_image_identity.get(
             key,
             ("", ""),
         )
         if (
-            not str(row.get("image_path", "")).strip()
+            str(row.get("image_path", "")) != expected_path
             or row.get("image_digest") != expected_digest
         ):
             issues.append(
@@ -333,8 +608,35 @@ def build_formal_feature_import_payload(
         if feature_backend != FORMAL_FEATURE_BACKEND:
             issues.append({"row_index": row_index, "field_name": "feature_backend", "reason": "inception_feature_backend_required"})
             continue
-        if not feature_vector:
-            issues.append({"row_index": row_index, "field_name": "feature_vector", "reason": "numeric_feature_vector_required"})
+        if row.get("feature_extractor_id") != FORMAL_FEATURE_EXTRACTOR_ID:
+            issues.append(
+                {
+                    "row_index": row_index,
+                    "field_name": "feature_extractor_id",
+                    "reason": "canonical_feature_extractor_required",
+                }
+            )
+            continue
+        if (
+            row.get("feature_dimension") != FORMAL_FEATURE_DIMENSION
+            or len(feature_vector) != FORMAL_FEATURE_DIMENSION
+        ):
+            issues.append(
+                {
+                    "row_index": row_index,
+                    "field_name": "feature_dimension",
+                    "reason": "formal_feature_dimension_required",
+                }
+            )
+            continue
+        if row.get("supports_paper_claim") is not False:
+            issues.append(
+                {
+                    "row_index": row_index,
+                    "field_name": "supports_paper_claim",
+                    "reason": "raw_feature_must_not_claim_paper_support",
+                }
+            )
             continue
         if key in vectors_by_key:
             issues.append(
@@ -413,6 +715,7 @@ def build_formal_feature_import_payload(
         "missing_feature_pair_count": missing_feature_count,
         "feature_issue_count": len(issues),
         "feature_dimension": feature_dimension_values[0] if dimension_consistent and feature_dimension_values else 0,
+        "image_resolution_identity_ready": image_resolution_identity_ready,
         "formal_min_sample_count": formal_min_sample_count,
         "formal_feature_backend_ready": formal_feature_backend_ready,
         "formal_sample_scale_ready": formal_sample_scale_ready,
@@ -1030,7 +1333,18 @@ def build_image_resolution_records(
 
     materialized_by_request = {record["requested_image_path"]: record for record in materialized_records}
     resolution_records: list[dict[str, Any]] = []
-    for requested_path in requested_image_paths(records):
+    all_requested_paths = tuple(
+        dict.fromkeys(
+            path_text
+            for record in records
+            for path_text in (
+                record.source_image_path,
+                record.comparison_image_path,
+            )
+            if path_text
+        )
+    )
+    for requested_path in all_requested_paths:
         resolved_path = resolve_existing_image_path(requested_path, root_path, image_search_roots)
         materialized_record = materialized_by_request.get(requested_path)
         if resolved_path.is_file() and materialized_record:
@@ -1067,7 +1381,7 @@ def write_dataset_level_quality_outputs(
     paper_run_name: str,
     target_fpr: float,
     root: str | Path = ".",
-    real_attack_registry_path: str | Path | None = None,
+    quality_image_registry_path: str | Path | None = None,
     image_search_roots: Any = (),
     input_package_paths: Any = (),
     formal_feature_records_path: str | Path | None = None,
@@ -1118,7 +1432,7 @@ def write_dataset_level_quality_outputs(
             f"outputs/dataset_level_quality/{resolved_paper_run_name}"
         ),
     )
-    registry_path = real_attack_registry_path or (
+    registry_path = quality_image_registry_path or (
         Path("outputs")
         / "image_only_dataset_runtime"
         / resolved_paper_run_name
@@ -1186,6 +1500,7 @@ def write_dataset_level_quality_outputs(
     )
     formal_feature_payload = build_formal_feature_import_payload(
         records=records,
+        image_resolution_records=image_resolution_records,
         feature_rows=formal_feature_rows,
         formal_feature_records_path=resolved_formal_feature_records_path,
         root_path=root_path,
@@ -1268,6 +1583,12 @@ def write_dataset_level_quality_outputs(
     manifest_path = resolved_output_dir / "manifest.local.json"
     resolved_image_file_count = sum(1 for record in image_resolution_records if record["resolution_status"] != "image_file_missing")
     materialized_image_input_count = sum(1 for record in image_resolution_records if record["materialized_image_input"])
+    image_resolution_identity_ready = bool(
+        formal_feature_payload["report"][
+            "image_resolution_identity_ready"
+        ]
+        and resolved_image_file_count == len(image_resolution_records)
+    )
 
     base_summary = build_dataset_quality_summary(records, metric_rows)
     formal_feature_extractor_ids = sorted(
@@ -1283,6 +1604,7 @@ def write_dataset_level_quality_outputs(
         and canonical_formal_feature_extractor_ready
         and prompt_contract["prompt_registry_exact_set_ready"]
         and scientific_unit_provenance_identity_ready
+        and image_resolution_identity_ready
         and formal_feature_payload["report"]["accepted_feature_pair_count"]
         == expected_prompt_count
         and formal_feature_payload["report"]["missing_feature_pair_count"] == 0
@@ -1307,7 +1629,10 @@ def write_dataset_level_quality_outputs(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "paper_run_name": resolved_paper_run_name,
         "target_fpr": resolved_target_fpr,
-        "real_attack_registry_path": relative_or_absolute(resolved_registry_path, root_path),
+        "quality_image_registry_path": relative_or_absolute(
+            resolved_registry_path,
+            root_path,
+        ),
         "dataset_quality_metrics_path": relative_or_absolute(metrics_path, root_path),
         "dataset_quality_formal_metrics_path": relative_or_absolute(metrics_path, root_path),
         "dataset_quality_image_resolution_records_path": relative_or_absolute(image_resolution_records_path, root_path),
@@ -1323,6 +1648,7 @@ def write_dataset_level_quality_outputs(
         "resolved_image_file_count": resolved_image_file_count,
         "missing_image_file_count": len(image_resolution_records) - resolved_image_file_count,
         "materialized_image_input_count": materialized_image_input_count,
+        "image_resolution_identity_ready": image_resolution_identity_ready,
         "input_package_count": len(resolved_input_package_paths),
         "formal_feature_backend_ready": formal_feature_payload["report"]["formal_feature_backend_ready"],
         "formal_sample_scale_ready": formal_feature_payload["report"]["formal_sample_scale_ready"],
@@ -1504,8 +1830,12 @@ def package_dataset_level_quality_outputs(
             source_dir / "dataset_quality_image_records.jsonl"
         )
     )
+    packaged_image_resolution_records = read_jsonl_rows(
+        source_dir / "dataset_quality_image_resolution_records.jsonl"
+    )
     revalidated_feature_payload = build_formal_feature_import_payload(
         records=packaged_quality_records,
+        image_resolution_records=packaged_image_resolution_records,
         feature_rows=packaged_feature_rows,
         formal_feature_records_path=feature_records_path,
         root_path=root_path,
@@ -1527,10 +1857,41 @@ def package_dataset_level_quality_outputs(
         for field_name in SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS
     )
     manifest_config = manifest.get("config", {})
+    expected_metric_protocol = formal_dataset_quality_metric_protocol()
+    expected_kid_effective_subset_size = min(
+        int(expected_metric_protocol["kid_subset_size"]),
+        expected_prompt_count,
+    )
+    image_resolution_records_digest = build_stable_digest(
+        packaged_image_resolution_records
+    )
+    image_resolution_contract_ready = bool(
+        packaged_image_resolution_records
+        and summary.get("image_resolution_identity_ready") is True
+        and int(summary.get("image_resolution_record_count", -1))
+        == len(packaged_image_resolution_records)
+        and int(summary.get("resolved_image_file_count", -1))
+        == len(packaged_image_resolution_records)
+        and int(summary.get("missing_image_file_count", -1)) == 0
+        and manifest_config.get("image_resolution_records_digest")
+        == image_resolution_records_digest
+        and revalidated_feature_payload["report"][
+            "image_resolution_identity_ready"
+        ]
+        is True
+    )
     metric_contract_ready = (
-        len(metric_rows) == 2
-        and [row.get("quality_metric_name") for row in metric_rows] == ["fid", "kid"]
+        len(metric_rows) == len(FORMAL_DATASET_QUALITY_METRIC_NAMES)
+        and [row.get("quality_metric_name") for row in metric_rows]
+        == list(FORMAL_DATASET_QUALITY_METRIC_NAMES)
+        and [row.get("paper_metric_name") for row in metric_rows]
+        == list(FORMAL_DATASET_QUALITY_METRIC_NAMES)
         and all(row.get("metric_status") == "measured" for row in metric_rows)
+        and all(
+            float(row.get("quality_metric_value", -1.0)) >= 0.0
+            for row in metric_rows
+            if row.get("quality_metric_name") in {"fid", "kid_std"}
+        )
         and all(
             int(row.get(field_name, -1)) == expected_prompt_count
             for row in metric_rows
@@ -1572,6 +1933,13 @@ def package_dataset_level_quality_outputs(
             metric_contract_ready,
         )
     )
+    metric_protocol_ready = bool(
+        summary.get("formal_metric_protocol") == expected_metric_protocol
+        and summary.get("formal_metric_protocol_digest")
+        == expected_metric_protocol["formal_metric_protocol_digest"]
+        and int(summary.get("kid_effective_subset_size", -1))
+        == expected_kid_effective_subset_size
+    )
     if not all(
         (
             summary.get("paper_run_name") == resolved_paper_run_name,
@@ -1582,6 +1950,11 @@ def package_dataset_level_quality_outputs(
             summary.get("canonical_formal_feature_extractor_ready") is True,
             summary.get("scientific_unit_provenance_ready") is True,
             summary.get("scientific_unit_provenance_identity_ready") is True,
+            summary.get("image_resolution_identity_ready") is True,
+            int(summary.get("image_resolution_record_count", -1)) > 0,
+            int(summary.get("resolved_image_file_count", -1))
+            == int(summary.get("image_resolution_record_count", -1)),
+            int(summary.get("missing_image_file_count", -1)) == 0,
             summary.get("scientific_unit_provenance_reference_count")
             == paper_run.prompt_count * 2,
             bool(summary.get("scientific_unit_provenance_records_digest")),
@@ -1598,6 +1971,8 @@ def package_dataset_level_quality_outputs(
             manifest.get("artifact_id") == "dataset_level_quality_manifest",
             manifest_config_digest_ready(manifest),
             feature_contract_ready,
+            image_resolution_contract_ready,
+            metric_protocol_ready,
         )
     ):
         raise RuntimeError("数据集级质量身份、精确 Prompt/特征覆盖或 ready 门禁未通过")
@@ -1666,9 +2041,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="写出数据集级质量证据产物。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument(
-        "--real-attack-registry-path",
+        "--quality-image-registry-path",
         default=None,
-        help="真实攻击图像 registry 路径; 默认读取当前论文层级主方法 registry。",
+        help="clean/watermarked 质量图像 registry 路径; 默认读取当前论文层级主方法 registry。",
     )
     parser.add_argument(
         "--image-search-root",
@@ -1712,7 +2087,7 @@ def main() -> None:
         paper_run_name=paper_run.run_name,
         target_fpr=paper_run.target_fpr,
         root=args.root,
-        real_attack_registry_path=args.real_attack_registry_path,
+        quality_image_registry_path=args.quality_image_registry_path,
         image_search_roots=args.image_search_root,
         input_package_paths=args.input_package_path,
         formal_feature_records_path=args.formal_feature_records_path,

@@ -27,6 +27,9 @@ from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
 from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.protocol.dataset_quality import (
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
+)
 from paper_experiments.analysis.paper_artifact_data_validation import (
     ABLATION_DELTA_FIELDS,
     ABLATION_METRIC_FIELDS,
@@ -317,14 +320,18 @@ def _prepare_valid_sources(root: Path) -> dict[str, Path]:
             quality_metric_name=metric_name,
             quality_metric_value=value,
             metric_status="measured",
-            paper_metric_name=metric_name.upper(),
+            paper_metric_name=metric_name,
             feature_backend="torch_fidelity_inception_v3_compat",
             source_image_count=70,
             comparison_image_count=70,
             sample_pair_count=70,
             supports_paper_claim=False,
         )
-        for metric_name, value in (("fid", 8.0), ("kid", 0.01))
+        for metric_name, value in zip(
+            FORMAL_DATASET_QUALITY_METRIC_NAMES,
+            (8.0, 0.01, 0.002),
+            strict=True,
+        )
     ]
     _write_csv(
         quality_dir / "dataset_quality_metrics.csv",
@@ -578,3 +585,40 @@ def test_attack_metrics_require_exact_formal_attack_set(tmp_path: Path) -> None:
         "攻击指标未精确覆盖全部正式攻击" in issue
         for issue in report["checks"]["attack_family_metrics_ready"]["issues"]
     )
+
+
+@pytest.mark.quick
+def test_dataset_quality_rejects_legacy_two_row_kid_schema(
+    tmp_path: Path,
+) -> None:
+    """旧 `kid` 两行表不得被解释为当前 KID mean/std 证据。"""
+
+    source_paths = _prepare_valid_sources(tmp_path)
+    metrics_path = source_paths["dataset_quality_metrics_ready"]
+    fieldnames, rows = _read_csv(metrics_path)
+    rows[1]["quality_metric_name"] = "kid"
+    rows[1]["paper_metric_name"] = "kid"
+    _write_csv(metrics_path, fieldnames, rows[:2])
+
+    report = _validate(tmp_path, source_paths)
+
+    assert report["dataset_quality_metrics_ready"] is False
+    assert report["ready_flag_consistency_ready"] is False
+
+
+@pytest.mark.quick
+def test_dataset_quality_rejects_negative_kid_subset_std(
+    tmp_path: Path,
+) -> None:
+    """KID 子集总体标准差为负时必须 fail-closed。"""
+
+    source_paths = _prepare_valid_sources(tmp_path)
+    metrics_path = source_paths["dataset_quality_metrics_ready"]
+    fieldnames, rows = _read_csv(metrics_path)
+    rows[-1]["quality_metric_value"] = "-0.001"
+    _write_csv(metrics_path, fieldnames, rows)
+
+    report = _validate(tmp_path, source_paths)
+
+    assert report["dataset_quality_metrics_ready"] is False
+    assert report["ready_flag_consistency_ready"] is False

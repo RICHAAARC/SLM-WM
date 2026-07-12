@@ -20,9 +20,16 @@ from main.methods.carrier import (
 )
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
+    ATTENTION_RELATION_COMPONENT_NAMES,
     DifferentiableAttentionRecorder,
+    QKAttentionRelation,
     attention_geometry_score,
+    attention_relation_component_scores,
     attention_relation_stability_map,
+    build_attention_relation_descriptor,
+    build_attention_relation_graph_identity,
+    build_stable_attention_pair_weights,
+    keyed_attention_relation_projection,
     optimize_attention_geometry_update,
     qk_self_attention,
     recover_attention_affine_alignment,
@@ -65,6 +72,45 @@ from scripts import semantic_watermark_scientific_workflow as scientific_workflo
 from tests.helpers.scientific_unit_provenance import (
     build_test_scientific_unit_provenance,
 )
+
+
+def _direct_qk_relation_from_logits(
+    logits: torch.Tensor,
+    layer_name: str = "test_qk_relation_layer",
+) -> QKAttentionRelation:
+    """由显式 Q/K logits 构造生产路径相同的双张量关系对象。"""
+
+    resolved = logits.unsqueeze(0) if logits.ndim == 2 else logits
+    token_count = int(resolved.shape[-1])
+    grid_side = int(round(token_count**0.5))
+    return QKAttentionRelation(
+        centered_logits=resolved - resolved.mean(dim=-1, keepdim=True),
+        probabilities=torch.softmax(resolved, dim=-1),
+        metadata={
+            "module_layer_name": layer_name,
+            "module_class_name": "tests.DirectQKRelation",
+            "head_count": 1,
+            "head_width": 1,
+            "attention_scale": 1.0,
+            "attention_scale_source": "inverse_sqrt_head_width",
+            "q_normalization_applied": False,
+            "k_normalization_applied": False,
+            "q_normalization_class": "",
+            "k_normalization_class": "",
+            "source_token_count": token_count,
+            "source_grid_side": grid_side,
+            "sampled_token_count": token_count,
+            "sampled_grid_side": grid_side,
+            "sampled_token_indices": list(range(token_count)),
+            "centered_logit_aggregation": (
+                "mean_of_per_head_row_centered_sampled_qk_logits"
+            ),
+            "relation_probability_aggregation": (
+                "mean_of_per_head_sampled_image_token_probabilities"
+            ),
+            "mean_probability_is_softmax_of_mean_logits": False,
+        },
+    )
 
 
 def write_recovery_candidate(
@@ -294,6 +340,20 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "attention_applied_update_strength": 0.001,
         "stable_token_indices": [0, 1, 2, 3],
         "stable_token_selection_digest": "e" * 64,
+        "stable_pair_weight_identity_digest": "f" * 64,
+        "stable_pair_weight_realization_digest": "a" * 64,
+        "attention_relation_component_names": list(
+            ATTENTION_RELATION_COMPONENT_NAMES
+        ),
+        "attention_relation_source": (
+            "direct_qk_centered_logits_and_probabilities"
+        ),
+        "attention_relation_direct_qk_source_ready": True,
+        "attention_relation_probability_scope": (
+            "sampled_image_token_qk_relation_probability"
+        ),
+        "attention_relation_component_identity_digest": "b" * 64,
+        "attention_relation_keyed_projection_digest": "c" * 64,
         "full_semantic_cosine_similarity": 0.999,
         "full_visual_feature_relative_drift": 0.001,
         "semantic_preservation_gate_ready": True,
@@ -347,9 +407,84 @@ def test_qk_sampling_preserves_two_dimensional_token_grid() -> None:
     module = _ToyAttention(4)
     hidden_states = torch.randn(1, 16, 4)
 
-    _, indices = qk_self_attention(module, hidden_states, max_tokens=4)
+    relation, indices = qk_self_attention(module, hidden_states, max_tokens=4)
 
     assert indices == (0, 3, 12, 15)
+    assert isinstance(relation, QKAttentionRelation)
+    assert relation.relation_source == (
+        "direct_qk_centered_logits_and_probabilities"
+    )
+    assert relation.centered_logits.shape == relation.probabilities.shape
+
+
+@pytest.mark.quick
+def test_multihead_qk_relation_matches_independent_manual_calculation() -> None:
+    """多头 logits 与概率必须先逐头计算再分别平均, 且记录可读算子元数据。"""
+
+    module = _ToyAttention(4)
+    module.heads = 2
+    module.scale = 1.0 / (2.0**0.5)
+    hidden_states = torch.tensor(
+        [
+            [
+                [0.1, 0.8, -0.4, 0.2],
+                [0.7, -0.2, 0.3, 0.9],
+                [-0.5, 0.4, 0.6, -0.1],
+                [0.2, -0.7, 0.5, 0.3],
+            ]
+        ]
+    )
+    relation, token_indices = qk_self_attention(
+        module,
+        hidden_states,
+        max_tokens=4,
+        layer_name="manual_multihead_layer",
+    )
+    per_head = hidden_states.reshape(1, 4, 2, 2).transpose(1, 2)
+    logits = torch.matmul(per_head, per_head.transpose(-1, -2)) * module.scale
+    expected_centered = (
+        logits - logits.mean(dim=-1, keepdim=True)
+    ).mean(dim=1)
+    expected_probability = torch.softmax(logits, dim=-1).mean(dim=1)
+    softmax_of_mean_logits = torch.softmax(logits.mean(dim=1), dim=-1)
+
+    assert token_indices == (0, 1, 2, 3)
+    assert torch.allclose(relation.centered_logits, expected_centered)
+    assert torch.allclose(relation.probabilities, expected_probability)
+    assert not torch.allclose(relation.probabilities, softmax_of_mean_logits)
+    assert relation.metadata["module_layer_name"] == "manual_multihead_layer"
+    assert relation.metadata["head_count"] == 2
+    assert relation.metadata["head_width"] == 2
+    assert relation.metadata["attention_scale"] == pytest.approx(module.scale)
+    assert relation.metadata["q_normalization_applied"] is False
+    assert relation.metadata["k_normalization_applied"] is False
+    assert relation.metadata["sampled_token_indices"] == [0, 1, 2, 3]
+    assert relation.metadata[
+        "mean_probability_is_softmax_of_mean_logits"
+    ] is False
+    identity = build_attention_relation_graph_identity(
+        (("manual_multihead_layer", relation, token_indices),),
+        "manual_multihead_key",
+    )
+    assert identity.qk_operator_metadata_ready is True
+    assert len(identity.qk_operator_metadata_digest) == 64
+
+
+@pytest.mark.quick
+def test_qk_relation_rejects_module_scale_mismatch() -> None:
+    """模块公开 scale 与 head width 理论尺度不一致时必须立即失败。"""
+
+    module = _ToyAttention(4)
+    module.heads = 2
+    module.scale = 0.5
+
+    with pytest.raises(RuntimeError, match="scale"):
+        qk_self_attention(
+            module,
+            torch.randn(1, 4, 4),
+            max_tokens=4,
+            layer_name="mismatched_scale_layer",
+        )
 
 
 @pytest.mark.quick
@@ -381,11 +516,15 @@ def test_stable_attention_tokens_drive_keyed_geometry_score() -> None:
     )
 
     selection = select_stable_attention_tokens(records, stable_token_fraction=0.5)
+    pair_weights = build_stable_attention_pair_weights(
+        records,
+        selection,
+        unstable_pair_weight=0.0,
+    )
     weighted = attention_geometry_score(
         records,
         "stable_token_key",
-        stable_token_positions=selection.token_positions,
-        unstable_pair_weight=0.0,
+        stable_pair_weights=pair_weights,
     )
     full = attention_geometry_score(
         records,
@@ -396,7 +535,114 @@ def test_stable_attention_tokens_drive_keyed_geometry_score() -> None:
 
     assert len(selection.token_indices) == 5
     assert len(selection.selection_digest) == 64
+    assert len(pair_weights.pair_weight_identity_digest) == 64
     assert float(weighted) != pytest.approx(float(full), abs=1e-8)
+
+
+@pytest.mark.quick
+def test_each_attention_relation_component_changes_keyed_score() -> None:
+    """四个非冗余分量逐一变化时, 密钥分量投影总分都必须发生变化。"""
+
+    generator = torch.Generator().manual_seed(260712)
+    logits = torch.randn(1, 9, 9, generator=generator)
+    relation = _direct_qk_relation_from_logits(logits)
+    token_indices = tuple(range(9))
+    descriptor = build_attention_relation_descriptor(relation, token_indices)
+    projection = keyed_attention_relation_projection(
+        descriptor,
+        "four_component_key",
+        "four_component_layer",
+    )
+    pair_weights = 1.0 - torch.eye(9)
+    baseline_components = attention_relation_component_scores(
+        descriptor.values,
+        projection.values,
+        pair_weights,
+    )
+    baseline_total = baseline_components.mean(dim=-1)
+
+    for component_index in range(len(ATTENTION_RELATION_COMPONENT_NAMES)):
+        changed_values = descriptor.values.clone()
+        changed_values[..., component_index] = (
+            changed_values[..., component_index]
+            + 0.5 * projection.values[..., component_index]
+        )
+        changed_components = attention_relation_component_scores(
+            changed_values,
+            projection.values,
+            pair_weights,
+        )
+        changed_total = changed_components.mean(dim=-1)
+        assert not torch.allclose(
+            changed_components[..., component_index],
+            baseline_components[..., component_index],
+            atol=1e-6,
+            rtol=0.0,
+        )
+        assert not torch.allclose(
+            changed_total,
+            baseline_total,
+            atol=1e-6,
+            rtol=0.0,
+        )
+
+
+@pytest.mark.quick
+def test_differentiable_soft_rank_contributes_nonzero_logit_gradient() -> None:
+    """soft-rank 分量必须对真实 Q/K logits 保留非零可微梯度。"""
+
+    generator = torch.Generator().manual_seed(260713)
+    logits = torch.randn(1, 9, 9, generator=generator).requires_grad_(True)
+    relation = QKAttentionRelation(
+        centered_logits=logits - logits.mean(dim=-1, keepdim=True),
+        probabilities=torch.softmax(logits, dim=-1),
+    )
+    descriptor = build_attention_relation_descriptor(relation, tuple(range(9)))
+    projection = keyed_attention_relation_projection(
+        descriptor,
+        "soft_rank_gradient_key",
+        "soft_rank_gradient_layer",
+    )
+    component_scores = attention_relation_component_scores(
+        descriptor.values,
+        projection.values,
+        1.0 - torch.eye(9),
+    )
+    gradient = torch.autograd.grad(component_scores[..., 1].sum(), logits)[0]
+
+    assert bool(torch.isfinite(gradient).all())
+    assert float(gradient.norm()) > 1e-6
+
+
+@pytest.mark.quick
+def test_distance_modulated_probability_is_distinct_and_differentiable() -> None:
+    """距离调制概率必须区别于 P, 并对真实 Q/K logits 保留非零梯度。"""
+
+    generator = torch.Generator().manual_seed(260714)
+    logits = torch.randn(1, 9, 9, generator=generator).requires_grad_(True)
+    relation = QKAttentionRelation(
+        centered_logits=logits - logits.mean(dim=-1, keepdim=True),
+        probabilities=torch.softmax(logits, dim=-1),
+    )
+    descriptor = build_attention_relation_descriptor(relation, tuple(range(9)))
+    projection = keyed_attention_relation_projection(
+        descriptor,
+        "distance_modulation_key",
+        "distance_modulation_layer",
+    )
+    component_scores = attention_relation_component_scores(
+        descriptor.values,
+        projection.values,
+        1.0 - torch.eye(9),
+    )
+    gradient = torch.autograd.grad(component_scores[..., 3].sum(), logits)[0]
+
+    assert not torch.allclose(
+        descriptor.values[..., 2],
+        descriptor.values[..., 3],
+    )
+    assert bool(torch.isfinite(gradient).all())
+    assert float(gradient.norm()) > 1e-6
 
 
 def _identity_null_space(latent: torch.Tensor) -> JacobianNullSpaceResult:
@@ -517,26 +763,48 @@ def test_attention_registration_is_equivariant_to_query_and_key_permutation(
         key_material,
         layer_name,
     )
-    canonical = torch.softmax(2.0 * relation_signs, dim=-1).unsqueeze(0)
+    canonical_logits = (2.0 * relation_signs).unsqueeze(0)
     index = torch.tensor(permutation, dtype=torch.long)
-    observed = canonical.index_select(1, index).index_select(2, index)
+    observed = _direct_qk_relation_from_logits(
+        canonical_logits.index_select(1, index).index_select(2, index),
+        layer_name,
+    )
 
     result = recover_attention_affine_alignment(
         observed,
         key_material,
         layer_name,
         tuple(range(token_count)),
+        build_stable_attention_pair_weights(
+            (
+                (layer_name, observed, tuple(range(token_count))),
+                (f"{layer_name}_replicate", observed.clone(), tuple(range(token_count))),
+            ),
+            select_stable_attention_tokens(
+                (
+                    (layer_name, observed, tuple(range(token_count))),
+                    (f"{layer_name}_replicate", observed.clone(), tuple(range(token_count))),
+                )
+            ),
+        ),
     )
 
     assert transform_name
     assert result.geometry_reliable is True
     assert result.inlier_ratio == pytest.approx(1.0)
-    assert result.relation_sync_score > 0.95
+    assert result.relation_sync_score > 0.65
+    assert set(result.relation_component_scores) == set(
+        ATTENTION_RELATION_COMPONENT_NAMES
+    )
+    assert result.metadata["attention_relation_direct_qk_source_ready"] is True
     assert result.metadata["matcher"] == "double_sided_keyed_relation_graph_registration"
+    assert result.metadata["stable_pair_weight_identity_ready"] is True
 
 
 @pytest.mark.quick
-def test_image_only_detector_reextracts_qk_after_alignment() -> None:
+def test_image_only_detector_reextracts_qk_after_alignment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """几何可靠性必须包含图像对齐后重新提取的真实 Q/K sync。"""
 
     token_count = 64
@@ -548,12 +816,19 @@ def test_image_only_detector_reextracts_qk_after_alignment() -> None:
         key_material,
         layer_name,
     )
-    canonical_attention = torch.softmax(2.0 * relation_signs, dim=-1).unsqueeze(0)
+    canonical_logits = (2.0 * relation_signs).unsqueeze(0)
+    canonical_attention = _direct_qk_relation_from_logits(
+        canonical_logits,
+        layer_name,
+    )
     flip = torch.tensor(
         [row * 8 + (7 - column) for row in range(8) for column in range(8)],
         dtype=torch.long,
     )
-    observed_attention = canonical_attention.index_select(1, flip).index_select(2, flip)
+    observed_attention = _direct_qk_relation_from_logits(
+        canonical_logits.index_select(1, flip).index_select(2, flip),
+        layer_name,
+    )
     reference = torch.zeros(1, 2, 8, 8)
     lf_template = build_low_frequency_template(reference, key_material, model_id)
     tail_template = build_tail_robust_template(reference, key_material, model_id, 0.20)[0]
@@ -563,8 +838,26 @@ def test_image_only_detector_reextracts_qk_after_alignment() -> None:
         "attention": canonical_attention,
     }
     extraction_count = 0
+    stable_selection_count = 0
 
-    def extract(sample: dict[str, torch.Tensor]) -> tuple[tuple[str, torch.Tensor, tuple[int, ...]], ...]:
+    import main.methods.detection.image_only as detector_module
+
+    original_select_stable_tokens = detector_module.select_stable_attention_tokens
+
+    def select_stable_tokens_once(*args: object, **kwargs: object):
+        """记录盲检稳定 token 选择次数, 对齐后不得再次选择。"""
+
+        nonlocal stable_selection_count
+        stable_selection_count += 1
+        return original_select_stable_tokens(*args, **kwargs)
+
+    monkeypatch.setattr(
+        detector_module,
+        "select_stable_attention_tokens",
+        select_stable_tokens_once,
+    )
+
+    def extract(sample: dict[str, object]) -> tuple[tuple[str, object, tuple[int, ...]], ...]:
         nonlocal extraction_count
         extraction_count += 1
         record = (layer_name, sample["attention"], tuple(range(token_count)))
@@ -587,12 +880,17 @@ def test_image_only_detector_reextracts_qk_after_alignment() -> None:
     )
 
     assert extraction_count == 2
+    assert stable_selection_count == 1
     assert result.raw_attention_geometry_score is not None
     assert result.attention_geometry_score is not None
-    assert result.attention_geometry_score > 0.95
-    assert result.attention_sync_score is not None and result.attention_sync_score > 0.95
+    assert result.attention_geometry_score > 0.65
+    assert result.attention_sync_score is not None and result.attention_sync_score > 0.65
+    assert result.metadata["attention_relation_direct_qk_source_ready"] is True
     assert result.geometry_reliable is True
     assert result.rescue_applied is True
+    assert result.metadata["stable_pair_weight_identity_ready"] is True
+    assert len(result.metadata["stable_pair_weight_identity_digest"]) == 64
+    assert len(result.metadata["attention_record_schema_digest"]) == 64
 
 
 @pytest.mark.quick
@@ -819,7 +1117,10 @@ def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None
 def test_completed_runtime_cache_requires_matching_config_and_files(tmp_path: Path) -> None:
     """Colab 续跑只能复用同版本、同配置且输出完整的单 Prompt 结果。"""
 
-    config = SemanticWatermarkRuntimeConfig(output_dir="outputs/cache_test")
+    config = SemanticWatermarkRuntimeConfig(
+        output_dir="outputs/cache_test",
+        attention_geometry_enabled=False,
+    )
     run_id = build_semantic_watermark_run_id(config)
     run_dir = tmp_path / config.output_dir / run_id
     run_dir.mkdir(parents=True)

@@ -235,6 +235,81 @@ def _cluster_bootstrap_interval(
     return float(low), float(high)
 
 
+def _shared_cluster_bootstrap_intervals(
+    prompt_effect_groups: Mapping[str, np.ndarray],
+    *,
+    confidence_level: float,
+    resample_count: int,
+    seed: int,
+) -> dict[str, tuple[float, float]]:
+    """用同一组 Prompt bootstrap 索引同时计算多项配对指标区间。
+
+    三项正式消融指标共享同一 Prompt 聚类抽样单位和同一预注册 seed。一次
+    生成索引后同时计算全部非退化指标,与分别重置同一 PCG64 seed 的结果完全
+    等价,但避免重复生成两份相同的100000次 Prompt 索引矩阵。该结构可复用于
+    任何需要在相同聚类抽样上比较多项配对指标的实验。
+    """
+
+    if not prompt_effect_groups:
+        raise AblationNecessityStatisticsError("共享 bootstrap 至少需要一项配对指标")
+    materialized = {
+        field_name: np.asarray(values, dtype=np.float64)
+        for field_name, values in prompt_effect_groups.items()
+    }
+    prompt_counts = {values.size for values in materialized.values()}
+    if (
+        len(prompt_counts) != 1
+        or next(iter(prompt_counts), 0) <= 0
+        or any(values.ndim != 1 for values in materialized.values())
+    ):
+        raise AblationNecessityStatisticsError(
+            "共享 bootstrap 的全部指标必须具有相同非空一维 Prompt 宽度"
+        )
+    if not 0.0 < confidence_level < 1.0 or resample_count <= 0:
+        raise AblationNecessityStatisticsError("bootstrap 置信度和重采样次数无效")
+
+    intervals: dict[str, tuple[float, float]] = {}
+    active_names: list[str] = []
+    active_rows: list[np.ndarray] = []
+    for field_name, values in materialized.items():
+        if np.all(values == values[0]):
+            value = float(values[0])
+            intervals[field_name] = (value, value)
+        else:
+            active_names.append(field_name)
+            active_rows.append(values)
+    if not active_rows:
+        return intervals
+
+    generator = np.random.Generator(np.random.PCG64(seed))
+    prompt_count = next(iter(prompt_counts))
+    estimates = np.empty(
+        (len(active_rows), resample_count),
+        dtype=np.float64,
+    )
+    effect_matrix = np.stack(active_rows, axis=0)
+    batch_size = 128
+    for start in range(0, resample_count, batch_size):
+        stop = min(start + batch_size, resample_count)
+        indices = generator.integers(
+            0,
+            prompt_count,
+            size=(stop - start, prompt_count),
+            endpoint=False,
+        )
+        estimates[:, start:stop] = effect_matrix[:, indices].mean(axis=2)
+
+    alpha = 1.0 - confidence_level
+    for row_index, field_name in enumerate(active_names):
+        low, high = np.quantile(
+            estimates[row_index],
+            [alpha / 2.0, 1.0 - alpha / 2.0],
+            method=ABLATION_NECESSITY_BOOTSTRAP_QUANTILE_METHOD,
+        )
+        intervals[field_name] = (float(low), float(high))
+    return intervals
+
+
 def _minimum_effect_p_value(
     prompt_effects: np.ndarray,
     minimum_effect_size: float,
@@ -362,24 +437,19 @@ def build_ablation_necessity_statistics(
             confidence_level=confidence_level,
             resample_count=bootstrap_resample_count,
         )
-        ci_low, ci_high = _cluster_bootstrap_interval(
-            prompt_effects,
+        shared_intervals = _shared_cluster_bootstrap_intervals(
+            {
+                "attacked_positive_rate": prompt_effects,
+                "clean_true_positive": clean_true_positive_effects,
+                "paired_ssim": paired_ssim_effects,
+            },
             confidence_level=confidence_level,
             resample_count=bootstrap_resample_count,
             seed=seed,
         )
-        clean_ci_low, clean_ci_high = _cluster_bootstrap_interval(
-            clean_true_positive_effects,
-            confidence_level=confidence_level,
-            resample_count=bootstrap_resample_count,
-            seed=seed,
-        )
-        ssim_ci_low, ssim_ci_high = _cluster_bootstrap_interval(
-            paired_ssim_effects,
-            confidence_level=confidence_level,
-            resample_count=bootstrap_resample_count,
-            seed=seed,
-        )
+        ci_low, ci_high = shared_intervals["attacked_positive_rate"]
+        clean_ci_low, clean_ci_high = shared_intervals["clean_true_positive"]
+        ssim_ci_low, ssim_ci_high = shared_intervals["paired_ssim"]
         mean_effect = float(prompt_effects.mean())
         rows.append(
             {

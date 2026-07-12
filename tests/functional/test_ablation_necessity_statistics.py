@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from experiments.ablations.necessity_statistics import (
     AblationNecessityStatisticsError,
+    _cluster_bootstrap_interval,
+    _shared_cluster_bootstrap_intervals,
     build_ablation_necessity_statistics,
 )
 from experiments.ablations.runtime_rerun import (
@@ -18,6 +21,31 @@ VARIANT_IDS = tuple(
     for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
     if ablation_id != "complete_method"
 )
+
+
+def test_shared_bootstrap_reuses_indices_without_changing_intervals() -> None:
+    """共享 Prompt 索引优化必须与三次独立同 seed 计算逐项完全一致。"""
+
+    effect_groups = {
+        "attack": np.asarray((0.0, 0.2, 0.4, 0.1, 0.3), dtype=np.float64),
+        "clean": np.asarray((0.0, 1.0, 0.0, 1.0, 0.0), dtype=np.float64),
+        "ssim": np.asarray((0.01, -0.01, 0.02, 0.0, 0.03), dtype=np.float64),
+    }
+    shared = _shared_cluster_bootstrap_intervals(
+        effect_groups,
+        confidence_level=0.95,
+        resample_count=500,
+        seed=1703,
+    )
+
+    for field_name, values in effect_groups.items():
+        expected = _cluster_bootstrap_interval(
+            values,
+            confidence_level=0.95,
+            resample_count=500,
+            seed=1703,
+        )
+        assert shared[field_name] == expected
 
 
 def _records() -> list[dict]:

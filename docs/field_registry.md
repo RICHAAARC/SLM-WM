@@ -547,8 +547,9 @@ Notebook 与 repository module 的跨边界数据
 | update_index | method | none | true | false | false | latent update 在注入集合中的顺序索引。 |
 | injection_strength | method | none | true | false | false | 注入到 latent 的 carrier 扰动强度。 |
 | injection_step_indices | method | none | true | false | false | 执行 latent injection 的采样位置集合。 |
-| latent_digest_before | method | none | true | false | false | latent injection 前的 latent tensor 稳定摘要。 |
-| latent_digest_after | method | none | true | false | false | latent injection 后的 latent tensor 稳定摘要。 |
+| latent_content_sha256_before | provenance | none | true | true | false | latent injection 前 tensor 的 dtype、shape 与连续原始字节联合 SHA-256。 |
+| latent_content_sha256_after | provenance | none | true | true | false | latent injection 后 tensor 的 dtype、shape 与连续原始字节联合 SHA-256。 |
+| combined_update_content_sha256 | provenance | none | true | true | false | 实际 combined update tensor 的 dtype、shape 与连续原始字节联合 SHA-256。 |
 | update_norm | method | none | true | false | false | 注入扰动 tensor 的二范数。 |
 | latent_norm_before | method | none | true | false | false | latent injection 前 latent tensor 的二范数。 |
 | latent_norm_after | method | none | true | false | false | latent injection 后 latent tensor 的二范数。 |
@@ -721,8 +722,8 @@ Notebook 与 repository module 的跨边界数据
 | attention_update_strength | method | none | true | false | false | attention update 强度曲线中的实际强度值。 |
 | attention_update_stable | method | none | true | false | false | 单条 carrier 或强度行是否满足 update 稳定性边界。 |
 | attention_relative_carrier_digest | method | none | true | false | false | attention-relative carrier 的稳定摘要。 |
-| quality_metric_name | metric | none | true | true | false | 数据集级正式质量指标名称, 当前精确取 FID 或 KID。 |
-| quality_metric_value | metric | none | true | true | false | 从真实生成图像与真实参考图像特征计算的 FID 或 KID 数值。 |
+| quality_metric_name | metric | none | true | true | false | 数据集级正式质量指标名称, 当前精确取 `fid`、`kid_mean` 或 `kid_std`。 |
+| quality_metric_value | metric | none | true | true | false | 从真实生成图像与真实参考图像特征计算的 FID、KID 子集均值或 KID 子集总体标准差。 |
 | image_quality_metrics_ready | method | none | false | false | false | 是否已经完成真实图像质量指标测量。 |
 | full_method_claim_ready | governance | none | true | true | false | 主方法真实生成、攻击、仅图像检测和科学算子门禁是否共同支持当前论文层级结论。 |
 | selected_attention_carrier_id | method | none | true | false | false | 真实 attention latent injection 中选用的 active carrier 标识。 |
@@ -1073,22 +1074,22 @@ Notebook 与 repository module 的跨边界数据
 | perceptual_metric_device_name | runtime | none | false | false | false | LPIPS 与 CLIP pair-level 指标计算使用的设备名称。 |
 | fid | metric | none | false | false | false | Fréchet Inception Distance 指标值或 unsupported 状态。 |
 | fid_status | metric | none | false | false | false | FID 指标计算状态。 |
-| kid | metric | none | false | false | false | Kernel Inception Distance 指标值或 unsupported 状态。 |
-| kid_status | metric | none | false | false | false | KID 指标计算状态。 |
+| kid_mean | metric | none | false | false | false | 100个冻结子集无偏 MMD 估计值的算术均值或 unsupported 状态。 |
+| kid_std | metric | none | false | false | false | 100个冻结子集无偏 MMD 估计值按 `ddof=0` 计算的总体标准差或 unsupported 状态。 |
 | dataset_quality_record_id | artifact | none | true | false | false | 数据集级质量图像对记录的稳定标识。 |
 | dataset_quality_record_digest | artifact | none | true | false | false | 数据集级质量图像对记录的稳定摘要。 |
 | image_pair_index | protocol | none | true | false | false | 数据集级质量图像对在 registry 中的序号。 |
-| image_pair_role | protocol | none | true | false | false | 数据集级质量图像对的比较角色或攻击名称。 |
+| image_pair_role | protocol | none | true | false | false | 数据集级正式质量图像对角色, 当前协议固定为 `clean_to_watermarked`。 |
 | comparison_image_path | artifact | none | true | false | false | 数据集级质量图像对中的 comparison 图像路径。 |
 | comparison_image_digest | artifact | none | true | false | false | 数据集级质量图像对中的 comparison 图像摘要。 |
 | feature_backend | protocol | none | true | false | false | 数据集级质量指标使用的图像特征后端。 |
-| paper_metric_name | metric | none | false | false | false | 正式质量指标在论文中的规范名称。 |
+| paper_metric_name | metric | none | false | false | false | 正式质量指标在论文中的规范 snake_case 名称, 与 quality_metric_name 逐行相同。 |
 | source_image_count | metric | none | false | false | false | 数据集级质量输入中的 source 图像数量。 |
 | comparison_image_count | metric | none | false | false | false | 数据集级质量输入中的 comparison 图像数量。 |
 | sample_pair_count | metric | none | false | false | false | 数据集级质量输入中的图像配对数量。 |
-| formal_quality_metric_count | metric | none | false | false | false | 数据集级正式质量指标表中的指标行数量, 正式表只包含 FID / KID。 |
+| formal_quality_metric_count | metric | none | false | false | false | 数据集级正式质量指标表中的指标行数量, 当前闭合值为3。 |
 | formal_fid_kid_ready | governance | none | false | false | false | 正式 FID / KID 是否已由论文约定特征后端完成。 |
-| formal_fid_kid_metric_names_ready | governance | none | false | false | false | 正式 FID 与 KID 两个指标是否均已测量, 防止单个指标被误判为完整质量结论。 |
+| formal_fid_kid_metric_names_ready | governance | none | false | false | false | `fid`、`kid_mean` 与 `kid_std` 三行是否均已测量, 防止缺失 KID 离散度仍被误判为完整质量结论。 |
 | formal_fid_kid_claim_gate_ready | governance | none | false | false | false | 数据集级正式 FID / KID 是否通过论文质量主张门禁。 |
 | formal_fid_kid_claim_blocker | governance | none | false | false | false | 阻断正式 FID / KID 质量主张的原因。 |
 | dataset_quality_claim_boundary | governance | none | false | false | false | 数据集级质量证据能够支撑的论文主张边界。 |
@@ -1112,7 +1113,7 @@ Notebook 与 repository module 的跨边界数据
 | feature_model_name | runtime | none | false | false | false | 数据集级质量正式视觉特征提取所使用的模型名称。 |
 | feature_device_name | runtime | none | false | false | false | 数据集级质量正式视觉特征提取所使用的运行设备。 |
 | dataset_quality_metrics_path | artifact | none | false | false | false | 数据集级正式质量指标表路径, 与 dataset_quality_formal_metrics_path 等价。 |
-| real_attack_registry_path | artifact | none | false | false | false | 数据集级质量脚本读取的真实攻击图像 registry 路径。 |
+| quality_image_registry_path | artifact | none | false | false | false | 数据集级质量脚本读取的 `clean_to_watermarked` 图像对 registry 路径。 |
 | dataset_quality_image_resolution_records_path | artifact | none | false | false | false | 数据集级质量图像解析记录 JSONL 路径。 |
 | image_resolution_record_id | artifact | none | true | false | false | 单个数据集级质量图像解析记录的稳定标识。 |
 | image_resolution_record_digest | artifact | none | true | false | false | 单个数据集级质量图像解析记录的稳定摘要。 |
@@ -1123,9 +1124,9 @@ Notebook 与 repository module 的跨边界数据
 | resolved_from_package_digest | artifact | none | true | false | false | 图像来源 ZIP 包的 SHA-256 摘要。 |
 | resolution_status | governance | none | true | false | false | 单个图像路径的解析状态, 例如已存在、从输入包物化或缺失。 |
 | materialized_image_input | artifact | none | true | false | false | 图像是否由前序结果 ZIP 物化到 outputs 下作为本次质量指标输入。 |
-| image_resolution_record_count | metric | none | false | false | false | 数据集级质量图像解析记录总数。 |
-| resolved_image_file_count | metric | none | false | false | false | 数据集级质量图像解析流程成功找到的图像文件数量。 |
-| missing_image_file_count | metric | none | false | false | false | 数据集级质量图像解析流程仍然缺失的图像文件数量。 |
+| image_resolution_record_count | metric | none | true | true | false | 数据集质量产物中精确覆盖全部 source/comparison 独立图像路径的解析记录数量, 正式值为样本对数量的2倍。 |
+| resolved_image_file_count | metric | none | true | true | false | 数据集质量解析记录中闭合时可读取并即时计算 SHA-256 的实际图像文件数量。 |
+| missing_image_file_count | metric | none | true | true | false | 数据集质量解析记录中未找到实际文件的图像路径数量, 正式结论要求为0。 |
 | materialized_image_input_count | metric | none | false | false | false | 从前序结果 ZIP 物化到 outputs 下的图像输入数量。 |
 | input_package_count | metric | none | false | false | false | 数据集级质量指标脚本读取的前序结果 ZIP 数量。 |
 | real_attack_evaluation_drive_package_path | artifact | none | false | false | false | Google Drive 中真实攻击闭环前序包路径。 |
@@ -1657,7 +1658,7 @@ Notebook 与 repository module 的跨边界数据
 | orthogonality_error | metric | none | true | true | false | latent 安全基底相对单位矩阵的正交误差。 |
 | projection_energy_retention | metric | none | true | true | false | 固定检测模板投影到安全子空间后保留的能量比例。 |
 | tail_robust_score | metric | none | true | true | false | 高斯幅值尾部截断载体的图像盲检相关分数。 |
-| attention_geometry_score | metric | none | true | true | false | 真实 Q/K attention 与密钥关系签名的一致性分数。 |
+| attention_geometry_score | metric | none | true | true | false | 真实 Q/K 四分量关系完成逐行加权归一化后与密钥投影等权组合的一致性分数。 |
 | formal_evidence_positive | metric | none | true | true | false | 冻结完整 evidence 协议后的正式布尔判定。 |
 | frozen_content_threshold | protocol | none | true | true | false | calibration clean negative 冻结的内容阈值。 |
 | threshold_digest | protocol | none | true | true | false | calibration 分数集合、冻结阈值、阈值来源和相关 evidence 配置的稳定摘要。 |
@@ -2382,7 +2383,7 @@ Notebook 与 repository module 的跨边界数据
 | use_dynamic_shifting | protocol | none | false | false | false | FlowMatch scheduler 是否依据图像序列长度计算动态 shift。 |
 | result_path | provenance | none | false | false | false | 精确父编排入口写出的受治理 workflow 结果文件路径。 |
 | orchestrator_bootstrap_identity | provenance | none | false | false | false | 标准库宿主入口实际创建的父 profile、完整锁、精确 Python 版本、解释器路径与解释器文件摘要。 |
-| failure_case_limit | protocol | none | false | false | false | 结果分析失败案例记录与图最多纳入的真实失败样本数。 |
+| failure_case_limit | protocol | none | true | true | false | 正式失败案例表和图共同采用的冻结最大展示数量, 当前协议值为12且不得以0跳过语义核验。 |
 | result_analysis_payload_path_map | provenance | none | true | false | false | 结果分析主置信区间表、逐攻击表、失败记录与失败案例图的固定角色到受治理路径映射。 |
 | result_analysis_payload_sha256_map | provenance | none | true | false | false | 结果分析固定 payload 角色到门禁即时复算文件 SHA-256 的映射。 |
 | result_analysis_payload_digest | provenance | none | true | false | false | 结果分析固定 payload 路径映射与文件 SHA-256 映射的稳定组合摘要。 |
@@ -2420,14 +2421,14 @@ Notebook 与 repository module 的跨边界数据
 | primary_metric_name | protocol | none | true | true | false | 机制必要性统计预注册的主指标名称。 |
 | prompt_file_sha256 | provenance | none | true | false | false | 规范 Prompt 文件的字节级 SHA-256 身份。 |
 | significance_alpha | protocol | none | true | true | false | 机制必要性家族检验采用的预注册显著性水平。 |
-| relation_sync_score | metric | none | true | true | false | 双边关系图配准后规范 attention 与密钥关系图的归一化一致性分数。 |
+| relation_sync_score | metric | none | true | true | false | 双边配准后规范四分量关系图与四通道密钥投影的等权归一化一致性分数。 |
 | registration_objective_margin | metric | none | true | true | false | 最优配准目标相对非近重复候选目标的差值。 |
 | registration_candidate_count | protocol | none | true | false | false | 双边关系图配准实际评估的冻结仿射候选数量。 |
 | sync_margin_duplicate_transform_tolerance | protocol | none | true | false | false | 计算配准目标差值时排除近重复仿射候选所用的冻结矩阵距离阈值。 |
 | registration_geometry_reliable | metric | none | true | true | false | 由正双向关系、正目标间隔、双向最小覆盖率、锚点内点比例和重采样残差共同得到的结构注册可靠性。 |
 | registration_confidence_threshold | protocol | none | true | true | false | calibration clean negatives 冻结的配准置信度门限。 |
 | attention_sync_score_threshold | protocol | none | true | true | false | calibration clean negatives 冻结的对齐后真实 Q/K 同步分数门限。 |
-| raw_attention_geometry_score | metric | none | true | true | false | 对待检图像未执行几何配准时计算的真实 Q/K 密钥关系分数。 |
+| raw_attention_geometry_score | metric | none | true | true | false | 对待检图像未执行几何配准时计算的真实 Q/K 四分量密钥投影分数。 |
 | attention_sync_score | metric | none | true | true | false | 对齐图像重新提取真实 Q/K 后计算的密钥关系同步分数。 |
 | attention_sync_source | provenance | none | true | false | false | 对齐后同步分数所使用的真实图像重提取 Q/K 数据来源。 |
 | attention_content_base_score | metric | none | true | true | false | 固定加入 LF 与高斯幅值尾部更新后、加入 attention 更新前的真实 Q/K 分数。 |
@@ -2445,7 +2446,7 @@ Notebook 与 repository module 的跨边界数据
 | content_base_score | metric | none | true | true | false | 注意力回溯优化中固定内容载体基底的真实 Q/K 分数。 |
 | optimization_base | method | none | true | false | false | attention 几何优化实际采用的固定基底更新身份。 |
 | verified_candidate | method | none | true | false | false | 单调回溯最终复算并接受的真实候选 latent 角色。 |
-| relation_transform | method | none | true | false | false | attention 双边关系图从观测参考系恢复到规范参考系的矩阵变换公式。 |
+| relation_transform | method | none | true | false | false | 四分量 Q/K 关系图逐通道从观测参考系恢复到规范参考系的双边矩阵变换公式。 |
 | observation_relation_score | metric | none | true | true | false | 候选仿射在观测参考系中以前推密钥关系图解释真实 Q/K 关系的归一化分数。 |
 | identity_observation_relation_score | metric | none | true | true | false | identity 仿射候选在观测参考系中的关系分数, 用作几何对齐增益基准。 |
 | registration_alignment_gain | metric | none | true | true | false | 最优候选观测关系分数相对 identity 候选的确定性增益。 |
@@ -2460,7 +2461,7 @@ Notebook 与 repository module 的跨边界数据
 | observation_relation_weight | protocol | none | true | false | false | 注册目标中观测前推关系分数采用的冻结权重。 |
 | registration_coverage_penalty_weight | protocol | none | true | false | false | 双向覆盖率和唯一采样率缺失项采用的冻结惩罚权重。 |
 | minimum_registration_coverage | protocol | none | true | true | false | 规范拉回与观测前推方向都必须满足的结构注册最小覆盖率。 |
-| observation_relation_transform | method | none | true | false | false | 密钥关系图从规范参考系前推到观测参考系的双边矩阵变换公式。 |
+| observation_relation_transform | method | none | true | false | false | 四通道密钥分量投影从规范参考系前推到观测参考系的双边矩阵变换公式。 |
 | registration_objective | method | none | true | false | false | 双向关系分数与覆盖惩罚组成注册候选目标的冻结公式身份。 |
 | ablation_runtime_records | artifact | none | true | true | false | 最终结果闭合直接消费的逐 Prompt 正式机制消融重运行记录集合。 |
 | ablation_raw_record_count | metric | none | true | true | false | 进入机制必要性独立重建的原始正式消融记录数量。 |
@@ -2475,9 +2476,39 @@ Notebook 与 repository module 的跨边界数据
 | dataset_quality_metric_absolute_tolerance | protocol | none | true | true | false | 比较 GPU 生成值与 CPU float64 独立重算值时采用的冻结绝对误差界。 |
 | dataset_quality_metric_rebuild_ready | governance | none | true | true | false | 正式 feature records 是否能独立重算 FID/KID 且与指标表全部字段一致。 |
 | dataset_quality_feature_records_content_digest | provenance | none | true | true | false | 最终结果闭合报告直接绑定的规范 feature records 字节级 SHA-256。 |
+| formal_metric_protocol | protocol | none | true | true | false | 正式 FID/KID 特征身份、数值公式与随机子集参数的完整冻结记录。 |
+| formal_metric_protocol_digest | provenance | none | true | true | false | 不含自身摘要字段的正式 FID/KID 协议记录稳定摘要。 |
+| fid_numeric_dtype | protocol | none | true | false | false | FID 协方差与矩阵平方根计算采用的冻结数值类型, 正式值为 float64。 |
+| fid_covariance_denominator | protocol | none | true | false | false | FID 样本协方差分母定义, 正式值为 sample_count_minus_one。 |
+| fid_covariance_square_root | method | none | true | false | false | FID 协方差平方根迹按矩阵秩自适应采用数学等价的样本空间低秩 SVD 或特征空间对称半正定分解。 |
+| fid_low_rank_trace_identity | method | none | true | false | false | 样本数不大于特征维度时以中心化交叉 Gram 矩阵核范数精确计算 FID 协方差平方根迹。 |
+| fid_small_sample_svd_backend | method | none | true | false | false | 小样本 FID 样本空间矩阵采用完整 float64 单边 Jacobi SVD 的数值后端身份。 |
+| fid_small_sample_jacobi_max_count | protocol | none | true | false | false | 使用不依赖宿主 BLAS/LAPACK 线程池的单边 Jacobi SVD 的冻结最大样本数。 |
+| fid_small_sample_jacobi_relative_tolerance | protocol | none | true | true | false | 单边 Jacobi SVD 列向量正交化采用的冻结相对交叉能量阈值。 |
+| kid_estimator | method | none | true | false | false | KID 使用的无偏三阶多项式 MMD 估计器身份。 |
+| kid_polynomial_degree | protocol | none | true | false | false | KID 多项式核次数, 正式值为3。 |
+| kid_polynomial_gamma | protocol | none | true | false | false | KID 多项式核 gamma 定义, 正式值为特征维度倒数。 |
+| kid_polynomial_coefficient | protocol | none | true | false | false | KID 多项式核常数项, 正式值为1。 |
+| kid_subset_sampling | protocol | none | true | false | false | 大样本 KID 的均匀无放回随机子集规则。 |
+| kid_population_order | protocol | none | true | false | false | KID 抽样前按 little-endian float64 C-order 特征行字节的 SHA-256 摘要构造 canonical population。 |
+| kid_subset_count | protocol | none | true | false | false | 大样本 KID 的冻结随机子集数量, 正式值为100。 |
+| kid_subset_size | protocol | none | true | false | false | 大样本 KID 的冻结子集上限, 正式值为1000。 |
+| kid_effective_subset_size_rule | protocol | none | true | false | false | KID 实际子集大小取配置上限、source 样本数与 comparison 样本数的最小值。 |
+| kid_effective_subset_size | metric | none | true | true | false | 当前论文运行层级实际使用的 KID 子集大小, probe/pilot/full 分别为70、700、1000。 |
+| kid_effective_subset_size_by_paper_run | protocol | none | true | false | false | 三个论文运行层级到冻结 KID 实际子集大小的完整映射。 |
+| kid_full_sample_u_statistic_equivalence | protocol | none | true | false | false | 实际子集覆盖完整集合时是否使用单次完整无偏 U-statistic 的数学等价计算。 |
+| kid_rng_seed | protocol | none | true | false | false | 正式 KID 子集抽样使用的冻结随机种子。 |
+| kid_exact_max_sample_count | protocol | none | true | false | false | 直接计算完整无偏 KID 核矩阵的冻结样本数量上限。 |
+| kid_reported_statistics | protocol | none | true | false | false | 正式 KID 必须同时报告的统计量列表, 当前固定为 mean 与 std。 |
+| kid_subset_std_ddof | protocol | none | true | false | false | KID 子集标准差使用的自由度修正, 当前固定为0。 |
+| kid_subset_std_semantics | protocol | none | true | false | false | KID std 表示各子集无偏 MMD 估计值的总体标准差。 |
+| kid_subset_std_is_standard_error | protocol | none | true | true | false | KID std 是否是均值标准误, 正式协议固定为 false。 |
+| kid_output_scale | protocol | none | true | false | false | KID 输出缩放系数, 当前固定为1并保留原始尺度。 |
+| kid_full_sample_subset_std | protocol | none | true | true | false | 子集覆盖完整集合时显式记录的 KID 总体标准差, 当前固定为0。 |
 | branch_risk_mode | method | none | true | false | false | 载体路由使用分支特定风险场或共享全局风险对照的真实机制模式。 |
 | attention_stable_token_fraction | protocol | none | true | false | false | 真实 Q/K 关系图按稳定度与接收 attention 显著度固定选择的 token 比例。 |
 | attention_unstable_pair_weight | protocol | none | true | false | false | 稳定 token 集合外规则网格关系在 Q/K 目标中保留的冻结支撑权重。 |
+| minimum_final_image_attention_score_gain | protocol | none | true | true | false | 完整方法相对 carrier-only 的两类最终图像 attention 归因增益共同采用的严格正下界。 |
 | minimum_semantic_preservation_cosine | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的完整 CLIP cosine 冻结下界。 |
 | maximum_visual_feature_relative_drift | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的完整视觉特征相对漂移冻结上界。 |
 | semantic_feature_schema | method | none | true | false | false | 正式 Jacobian 直接使用的完整归一化 CLIP embedding 定义。 |
@@ -2515,11 +2546,180 @@ Notebook 与 repository module 的跨边界数据
 | final_image_preservation_gate_ready | governance | none | true | true | false | 最终成图是否通过累计完整 CLIP 与视觉特征保持门禁。 |
 | final_image_preservation_failure_count | metric | none | true | true | false | 数据集运行中未通过最终成图累计保持门禁的样本数量。 |
 | stable_token_selection_digest | provenance | none | true | false | false | 一次注入中冻结的稳定 token 选择规则、索引和分数稳定摘要。 |
-| aligned_stable_token_indices | method | none | true | false | false | 对齐图像重新提取真实 Q/K 后独立选出的稳定 token 原始索引。 |
-| aligned_stable_token_selection_digest | provenance | none | true | false | false | 对齐图像重新提取 Q/K 后稳定 token 选择的稳定摘要。 |
+| stable_pair_weight_identity_digest | provenance | none | true | true | false | 稳定 token 选择、原始二维索引、非稳定权重和 pair 外积规则共同形成的跨阶段身份摘要。 |
+| stable_pair_weight_realization_digest | provenance | none | true | true | false | 一次注意力嵌入中 pair 权重在当前 Q/K 坐标网格上的数值实现摘要。 |
+| observed_pair_weight_realization_digest | provenance | none | true | true | false | 图像盲检原始观测参考系中稳定 token pair 权重的数值实现摘要。 |
+| canonical_pair_weight_realization_digest | provenance | none | true | true | false | 仿射注册将同一单点权重传递到规范参考系后的 pair 数值实现摘要。 |
+| aligned_pair_weight_realization_digest | provenance | none | true | true | false | 对齐图像 Q/K 同步分数实际消费的规范参考系 pair 权重实现摘要。 |
+| stable_pair_weight_identity_ready | governance | none | true | true | false | 原始盲分、仿射注册和恢复后同步是否共享同一个稳定 token pair 权重身份。 |
+| stable_pair_weight_flow | method | none | true | false | false | 稳定 token 只选择一次并从观测参考系传递到规范参考系的检测数据流身份。 |
+| attention_record_schema_digest | provenance | none | true | true | false | 盲检原始图像与对齐图像共同使用的 Q/K 层名称和二维 token 网格身份摘要。 |
+| canonical_token_weights | method | none | true | false | false | 使用候选双线性采样矩阵将观测单点权重传递到规范 Q/K 网格后的数值。 |
+| pair_weight_transport | method | none | true | false | false | 先以 a'=W a 双线性传递单点权重场、再以外积构造规范 pair 权重的规则身份。 |
+| local_search_schedule | protocol | none | true | false | false | 攻击配置无关的三层递减旋转、尺度和位移局部搜索步长。 |
+| inlier_ratio_denominator | protocol | none | true | false | false | 仿射锚点内点比例使用有效覆盖锚点数量作为分母的规则身份。 |
 | stable_token_selection_rule | method | none | true | false | false | 由跨层关系稳定度与接收 attention 显著度联合排序的冻结选择规则。 |
 | stable_token_positions | method | none | false | false | false | 稳定 token 在当前规则 Q/K 抽样矩阵中的列位置集合。 |
 | stable_token_fraction | protocol | none | true | false | false | 单次 Q/K 优化记录实际采用的稳定 token 固定选择比例。 |
 | unstable_pair_weight | protocol | none | true | false | false | 单次 Q/K 优化记录实际采用的非稳定 token 关系支撑权重。 |
 | selection_rule | method | none | false | false | false | 稳定 token 选择摘要内部绑定的确定性排序规则身份。 |
 | selection_scores | metric | none | false | false | false | 稳定 token 选择摘要内部绑定的逐 token 排序分数。 |
+| final_image_attention_observability | method | none | true | true | false | 最终 clean、carrier-only 与完整方法成图经 VAE、公开固定噪声和真实 Transformer 重编码得到的 Q/K 可观测性记录。 |
+| final_image_attention_observability_applicable | governance | none | true | true | false | 当前机制配置是否启用最终成图真实 Q/K 可观测性门禁。 |
+| final_image_attention_observability_gate_ready | governance | none | true | true | false | 完整方法相对 carrier-only 的盲选择归因增益与冻结 carrier pair 权重归因增益是否均严格通过正下界。 |
+| final_image_attention_observability_source | provenance | none | true | false | false | 最终图像注意力证据的数据来源, 正式值为 image_reencoded_public_noise_real_qk。 |
+| final_image_attention_observability_requires_gpu | governance | none | true | false | false | 最终图像真实 Q/K 可观测性算子是否要求 CUDA 执行。 |
+| final_image_attention_observability_gpu_execution_verified | governance | none | true | true | false | 最终图像 Q/K 记录是否全部实际位于 CUDA 设备。 |
+| final_clean_blind_attention_score | metric | none | true | true | false | clean 成图按自身稳定 token 盲选择计算的真实 Q/K 分数。 |
+| final_carrier_only_blind_attention_score | metric | none | true | true | false | carrier-only 反事实成图按自身稳定 token 盲选择计算的真实 Q/K 分数。 |
+| final_watermarked_blind_attention_score | metric | none | true | true | false | watermarked 成图按自身稳定 token 盲选择计算的真实 Q/K 分数。 |
+| final_image_blind_attention_score_gain | metric | none | true | true | false | watermarked 盲选择 Q/K 分数减去 clean 盲选择 Q/K 分数。 |
+| final_image_attention_blind_attribution_gain | metric | none | true | true | false | 完整方法自身盲选择分数减去 carrier-only 自身盲选择分数的 attention 归因增益。 |
+| final_clean_paired_attention_score | metric | none | true | true | false | clean 成图使用冻结 clean pair 权重计算的真实 Q/K 分数。 |
+| final_carrier_only_paired_attention_score | metric | none | true | true | false | carrier-only 成图使用自身冻结 pair 权重计算的真实 Q/K 分数。 |
+| final_watermarked_carrier_paired_attention_score | metric | none | true | true | false | 完整方法成图使用冻结 carrier-only pair 权重计算的真实 Q/K 分数。 |
+| final_watermarked_paired_attention_score | metric | none | true | true | false | watermarked 成图使用同一冻结 clean pair 权重计算的真实 Q/K 分数。 |
+| final_image_paired_attention_score_gain | metric | none | true | true | false | 同一冻结 clean pair 权重下 watermarked 与 clean 的真实 Q/K 分数差。 |
+| final_image_attention_carrier_paired_attribution_gain | metric | none | true | true | false | 冻结 carrier-only pair 权重下完整方法与 carrier-only 的真实 Q/K 分数差。 |
+| final_clean_pair_weight_identity_digest | provenance | none | true | false | false | clean 成图独立稳定选择产生的 pair 权重身份摘要。 |
+| final_carrier_only_pair_weight_identity_digest | provenance | none | true | true | false | carrier-only 成图独立稳定选择产生并用于归因配对的 pair 权重身份摘要。 |
+| final_watermarked_pair_weight_identity_digest | provenance | none | true | false | false | watermarked 成图独立稳定选择产生的 pair 权重身份摘要。 |
+| final_paired_pair_weight_identity_digest | provenance | none | true | true | false | 最终配对增益共同使用的 clean pair 权重身份摘要。 |
+| final_image_attention_record_schema_digest | provenance | none | true | true | false | 最终 clean、carrier-only 与完整方法成图共同 Q/K 层名称和二维 token 网格身份摘要。 |
+| carrier_only_counterfactual | method | none | true | true | false | 仅关闭 attention geometry 的反事实配置、更新原子、调度、首 latent、最终图像和持久化身份记录。 |
+| carrier_only_counterfactual_ready | governance | none | true | true | false | 仅关闭 attention geometry 的同种子、同 scheduler 总机制效应反事实是否完整通过原子身份核验。 |
+| carrier_only_counterfactual_changed_fields | method | none | true | false | false | 完整方法与 carrier-only 配置之间允许变化的唯一字段列表。 |
+| carrier_only_counterfactual_generation_seed_random | provenance | none | true | false | true | carrier-only 与完整方法共同使用的生成随机种子。 |
+| carrier_only_counterfactual_config_digest | provenance | none | true | true | false | 仅关闭 attention geometry 后完整 carrier-only 运行配置的稳定摘要。 |
+| full_method_counterfactual_update_count | metric | none | true | true | false | 完整方法用于反事实配对的更新原子数量, 必须精确等于冻结注入步数量。 |
+| carrier_only_counterfactual_update_count | metric | none | true | true | false | carrier-only 反事实实际执行的内容载体注入次数。 |
+| full_method_counterfactual_update_records_digest | provenance | none | true | true | false | 完整方法全部配对更新原子解析内容的稳定摘要。 |
+| carrier_only_counterfactual_update_records_digest | provenance | none | true | true | false | carrier-only 全部 LF 与 tail 更新原子解析内容的稳定摘要。 |
+| full_method_initial_latent_content_sha256 | provenance | none | true | true | false | 完整方法首个注入前 latent 的 dtype、shape 与连续原始字节联合 SHA-256。 |
+| carrier_only_initial_latent_content_sha256 | provenance | none | true | true | false | carrier-only 首个注入前 latent 的 dtype、shape 与连续原始字节联合 SHA-256。 |
+| carrier_only_counterfactual_initial_latent_identity_ready | governance | none | true | true | false | 完整方法与 carrier-only 首个注入前 latent 内容 SHA-256 是否完全相等。 |
+| carrier_only_counterfactual_scheduler_trace | protocol | none | true | true | false | 按冻结注入顺序记录的完整 step、scheduler timestep、post-step 索引和方法 timestep 轨迹。 |
+| carrier_only_counterfactual_scheduler_trace_digest | provenance | none | true | true | false | 完整方法与 carrier-only 共同 scheduler 时刻轨迹的稳定摘要。 |
+| carrier_only_counterfactual_scheduler_identity_ready | governance | none | true | true | false | 两次生成的注入步、scheduler timestep 和方法 timestep 是否逐项相同。 |
+| carrier_only_counterfactual_attention_geometry_enabled | method | none | true | false | false | carrier-only 反事实中的 attention geometry 开关, 正式值为 false。 |
+| full_method_counterfactual_carrier_branches | method | none | true | false | false | 完整方法反事实配对侧实际启用的 LF、tail 与 attention 分支集合。 |
+| carrier_only_counterfactual_carrier_branches | method | none | true | false | false | 关闭 attention 后按配置精确启用的 LF 与 tail 分支集合, 不声明其逐步 realized update 与完整方法相等。 |
+| active_carrier_branches | method | none | true | true | false | 单条更新原子实际进入 Null Space 和写回组合的活动载体分支有序集合。 |
+| attention_source | provenance | none | true | true | false | 单条更新原子的 attention 来源；完整方法为 real_qk_projection, carrier-only 必须为 disabled_attention_geometry。 |
+| carrier_only_counterfactual_effect_scope | method | none | true | true | false | 反事实估计对象, 正式值为 attention_geometry_switch_total_mechanism_effect。 |
+| carrier_only_counterfactual_realized_carrier_equality_assumed | governance | none | true | true | false | 是否假设两侧后续 realized LF/tail 更新完全相等, 正式值必须为 false。 |
+| carrier_only_counterfactual_downstream_interactions_included | governance | none | true | true | false | attention 开关改变后与后续 LF、tail 和生成轨迹交互是否计入总机制效应, 正式值为 true。 |
+| carrier_only_counterfactual_identity_digest | provenance | none | true | true | false | carrier-only 配置、种子、调度轨迹和更新记录身份的联合摘要。 |
+| carrier_only_counterfactual_image_path | artifact | none | true | true | false | 持久化 carrier-only 最终成图的仓库相对路径。 |
+| carrier_only_counterfactual_image_digest | provenance | none | true | true | false | 持久化 carrier-only 最终成图的文件 SHA-256。 |
+| carrier_only_counterfactual_atom_path | artifact | none | true | true | false | carrier-only 逐注入更新原子 JSONL 的仓库相对路径。 |
+| carrier_only_counterfactual_atom_file_sha256 | provenance | none | true | true | false | carrier-only 更新原子 JSONL 实际文件字节的即时 SHA-256。 |
+| carrier_only_counterfactual_atom_content_digest | provenance | none | true | true | false | carrier-only 更新原子 JSONL 解析内容的稳定摘要, 必须等于运行时 carrier 更新记录摘要。 |
+| carrier_only_final_image_preservation | method | none | true | true | false | clean、carrier-only 与完整方法最终成图三边的完整 CLIP 语义和视觉特征保持记录, 并绑定同一反事实与原子产物。 |
+| carrier_only_final_image_preservation_applicable | governance | none | true | true | false | 当前 attention geometry 配置是否必须执行 clean 到 carrier-only 的最终内容保持门禁。 |
+| carrier_only_final_image_semantic_cosine_similarity | metric | none | true | true | false | clean 与 carrier-only 最终成图完整 CLIP 语义特征的余弦相似度。 |
+| carrier_only_final_image_visual_feature_relative_drift | metric | none | true | true | false | clean 与 carrier-only 最终成图完整视觉特征的相对漂移。 |
+| carrier_only_final_image_preservation_gate_ready | governance | none | true | true | false | clean 到 carrier-only 的语义相似度和视觉漂移是否同时通过冻结保持阈值。 |
+| carrier_only_to_full_final_image_semantic_cosine_similarity | metric | none | true | true | false | carrier-only 与完整方法最终成图完整 CLIP 语义特征的直接余弦相似度。 |
+| carrier_only_to_full_final_image_visual_feature_relative_drift | metric | none | true | true | false | carrier-only 与完整方法最终成图完整视觉特征的直接相对漂移。 |
+| carrier_only_to_full_final_image_preservation_gate_ready | governance | none | true | true | false | carrier-only 到完整方法的直接语义相似度和视觉漂移是否通过冻结保持阈值。 |
+| carrier_only_counterfactual_three_way_preservation_gate_ready | governance | none | true | true | false | clean 到完整方法、clean 到 carrier-only 和 carrier-only 到完整方法三条最终特征边是否全部通过。 |
+| carrier_only_final_image_preservation_status | governance | none | true | false | false | carrier-only 最终内容保持记录的真实测量状态。 |
+| injection_execution_role | method | none | true | false | false | 注入 callback 当前执行完整方法或 carrier-only 反事实的角色身份。 |
+| observability_status | governance | none | true | true | false | 最终成图真实 Q/K 可观测性门禁的适用性或已测量状态。 |
+| final_image_attention_observability_failure_count | metric | none | true | true | false | 数据集运行中未通过 carrier-only 原子身份、三边最终内容保持或真实 Q/K 双归因增益门禁的样本数量。 |
+| final_image_attention_observability_ready | governance | none | true | true | false | 数据集全部样本是否通过 carrier-only 原子与图像产物绑定、三边最终内容保持、真实 Q/K 双归因增益与 CUDA 执行门禁。 |
+| expected_prompt_split_by_id | protocol | none | true | true | false | 结果闭合直接由规范 Prompt 文件构造的 Prompt ID 到 dev/calibration/test split 映射。 |
+| expected_prompt_digest_by_id | provenance | none | true | true | false | 结果闭合直接由规范 Prompt 文本构造的 Prompt ID 到 prompt_digest 映射。 |
+| ablation_detection_records | artifact | none | true | true | false | 正式消融每个变体与 Prompt 的 clean、positive、wrong-key 及真实攻击逐检测原子记录。 |
+| ablation_frozen_protocols | artifact | none | true | true | false | 各正式消融变体仅由其 calibration clean negatives 冻结的完整检测协议集合。 |
+| ablation_runtime_record_count | metric | none | true | true | false | 消融检测原子重建实际消费的逐 Prompt runtime record 数量。 |
+| ablation_detection_record_count | metric | none | true | true | false | 消融检测原子重建实际消费的正式 detection record 数量。 |
+| ablation_frozen_protocol_count | metric | none | true | true | false | 消融检测原子重建实际消费且精确覆盖正式变体集合的冻结协议数量。 |
+| ablation_runtime_records_digest | provenance | none | true | true | false | 消融聚合重建实际消费的逐 Prompt runtime records 稳定摘要。 |
+| ablation_detection_records_digest | provenance | none | true | true | false | 消融聚合重建实际消费的逐检测原子稳定摘要。 |
+| ablation_frozen_protocols_digest | provenance | none | true | true | false | 消融聚合重建实际消费的逐变体冻结协议稳定摘要。 |
+| formal_detection_records_sha256 | provenance | none | true | true | false | 正式消融逐检测原子 JSONL 文件的即时字节级 SHA-256, 并同时绑定 summary、manifest config 与 manifest metadata。 |
+| formal_detection_records_digest | provenance | none | true | true | false | 正式消融逐检测原子解析内容的稳定摘要, 用于区分文件字节身份与记录语义身份。 |
+| per_ablation_frozen_protocols_sha256 | provenance | none | true | true | false | 逐消融冻结检测协议 JSON 文件的即时字节级 SHA-256。 |
+| per_ablation_frozen_protocols_digest | provenance | none | true | true | false | 逐消融冻结检测协议解析内容的稳定摘要。 |
+| ablation_rebuilt_runtime_aggregates_digest | provenance | none | true | true | false | 由冻结协议和检测原子独立重建的逐 Prompt 正式聚合字段摘要。 |
+| ablation_expected_runtime_configs_digest | provenance | none | true | true | false | 正式消融身份到精确机制配置映射的稳定摘要, 用于证明每个 ablation_id 实际执行了对应开关组合。 |
+| ablation_runtime_aggregate_rebuild_ready | governance | none | true | true | false | 消融 runtime 中全部检测判定、率、计数和攻击覆盖是否能由原子记录独立重建。 |
+| formal_ablation_detection_atoms_digest | provenance | none | true | true | false | 最终结果闭合报告直接绑定的全部消融正式检测原子摘要。 |
+| formal_ablation_frozen_protocols_digest | provenance | none | true | true | false | 最终结果闭合报告直接绑定的全部消融冻结协议摘要。 |
+| dataset_quality_image_records | artifact | none | true | true | false | 正式 FID/KID 每个 Prompt 的 source/comparison 图像路径、SHA 与配对身份记录。 |
+| dataset_quality_image_resolution_records | artifact | none | true | true | false | 正式 FID/KID 每个声明图像路径到闭合阶段实际文件路径和即时 SHA-256 的一对一解析记录。 |
+| image_resolution_identity_ready | governance | none | true | true | false | 每个声明图像路径是否由唯一解析记录绑定到实际文件且即时 SHA-256 与图像记录一致。 |
+| image_resolution_records_digest | provenance | none | true | true | false | 数据集质量上游 manifest 对完整图像解析记录集合的稳定摘要。 |
+| dataset_quality_image_record_count | metric | none | true | true | false | 正式 feature 身份重建实际消费的图像配对记录数量。 |
+| dataset_quality_image_resolution_record_count | metric | none | true | true | false | 正式 feature 身份重建实际消费且通过自摘要和实际文件 SHA 校验的图像解析记录数量。 |
+| dataset_quality_image_records_digest | provenance | none | true | true | false | 正式 feature 身份重建实际消费的图像配对记录稳定摘要。 |
+| dataset_quality_image_resolution_records_digest | provenance | none | true | true | false | 最终结果闭合实际消费的图像解析记录稳定摘要。 |
+| dataset_quality_actual_image_sha256_map_digest | provenance | none | true | true | false | 最终结果闭合即时读取的实际图像路径到 SHA-256 映射稳定摘要。 |
+| dataset_quality_feature_records_digest | provenance | none | true | true | false | 正式 feature 身份重建实际消费的规范特征记录稳定摘要。 |
+| dataset_quality_feature_image_identity_digest | provenance | none | true | true | false | 每条 source/comparison feature 与图像路径、SHA 和角色一一对应的联合身份摘要。 |
+| dataset_quality_scientific_unit_provenance_records_digest | provenance | none | true | true | false | feature batch 科学完成单元来源经独立验证和聚合后的记录摘要。 |
+| dataset_quality_feature_identity_rebuild_ready | governance | none | true | true | false | 正式 feature 是否同时绑定图像 SHA、规范 Prompt 集和已锁定科学完成单元来源。 |
+| result_analysis_governed_payload_path_map | provenance | none | true | true | false | 最终闭合实际读取的主表、攻击表、质量表、CI、逐攻击和失败案例共7类规范路径映射。 |
+| governed_paper_payload_path_map | provenance | none | true | true | false | 七类论文 payload 必须逐字符等于当前论文层级规范仓库相对路径的映射。 |
+| governed_paper_payload_semantic_digest | provenance | none | true | true | false | 从原子记录独立重建七类论文 payload 后形成的联合语义摘要。 |
+| governed_paper_payload_semantic_rebuild_ready | governance | none | true | true | false | 主表、攻击表、FID/KID、CI、逐攻击、失败 JSONL 与 SVG 是否全部可独立语义重建。 |
+| result_analysis_governed_payload_digest | provenance | none | true | true | false | 最终结果闭合报告绑定的七类论文 payload 路径、表行、失败记录和 SVG 联合摘要。 |
+| main_comparison_rebuilt_rows_digest | provenance | none | true | true | false | 由正式 result records 独立聚合的主比较表规范行摘要。 |
+| main_comparison_semantic_rebuild_ready | governance | none | true | true | false | 主比较表全部方法行和指标是否与正式 result records 独立聚合值一致。 |
+| attack_table_rebuilt_rows_digest | provenance | none | true | true | false | 由逐攻击 detection records 独立聚合的攻击表规范行摘要。 |
+| attack_table_semantic_rebuild_ready | governance | none | true | true | false | 攻击表全部攻击族指标是否与逐样本正式检测原子一致。 |
+| slm_result_attack_consistency_digest | provenance | none | true | true | false | SLM-WM result records 与正式攻击表交叉核对后的规范联合摘要。 |
+| slm_result_attack_consistency_ready | governance | none | true | true | false | SLM-WM 主结果行与攻击矩阵是否在攻击身份、率和样本计数上完全一致。 |
+| result_analysis_semantic_rebuild_digest | provenance | none | true | true | false | 由正式结果和检测原子独立重建 CI、逐攻击结论、失败记录与 SVG 的联合摘要。 |
+| result_analysis_semantic_rebuild_ready | governance | none | true | true | false | 结果分析目录内两张派生表和失败案例表图是否可由原子记录独立重建。 |
+| failure_case_observed_false_negative_count | metric | none | true | true | false | 正式检测原子中观测到的全部假阴性数量, 不受展示上限截断。 |
+| failure_case_expected_record_count | metric | none | true | true | false | 按全部假阴性数量与冻结展示上限共同确定的失败案例记录精确行数。 |
+| paired_superiority_semantic_rows_digest | provenance | none | true | true | false | 按均值、置信区间与 Holm 校正公式重新判定后的配对优势表规范摘要。 |
+| paired_superiority_negative_result_count | metric | none | true | true | false | 配对优势表中未满足正式优势判定公式的真实负结果数量。 |
+| paired_superiority_semantic_rebuild_ready | governance | none | true | true | false | 配对优势表的每个布尔结论是否与均值、CI 和 Holm 校正 p 值严格一致。 |
+| attention_relation_component_names | method | none | true | true | false | 四分量 attention-relative graph 的冻结分量顺序: 中心化 Q/K logit、可微行内 rank、行归一化抽样图像 token 概率和 $G=(P-rowmean(P))(D-rowmean(D))$ 距离调制中心化 attention 概率；纯 $D$ 不构成独立通道。 |
+| attention_relation_source | provenance | none | true | true | false | 四分量关系图的数值来源, 正式值要求为 direct_qk_centered_logits_and_probabilities。 |
+| attention_relation_direct_qk_source_ready | governance | none | true | true | false | 关系图是否同时直接保存真实 Q/K 中心化 logits 与由同次 Q/K 计算产生的抽样图像 token 概率。 |
+| attention_relation_probability_scope | method | none | true | false | false | 概率分量的精确作用域, 正式值为 sampled_image_token_qk_relation_probability, 不表示模块完整 joint-attention 权重。 |
+| attention_relation_component_identity_digest | provenance | none | true | true | false | 分量顺序、soft-rank 温标与尺度、概率和距离双行中心化规则、距离尺度、二维 token 索引和直接 Q/K 来源的联合摘要。 |
+| attention_relation_keyed_projection_digest | provenance | none | true | true | false | 全部冻结层四分量密钥符号投影、分量极性与等权组合协议的联合摘要。 |
+| attention_relation_soft_rank_temperature | protocol | none | true | false | false | 可微降序行内 rank 采用的冻结 logit 温度, 当前值为0.25。 |
+| attention_relation_soft_rank_scale | protocol | none | true | false | false | 可微行内 rank 采用的冻结缩放规则结果, 等于 Q/K 抽样 token 数的倒数。 |
+| attention_relation_relative_distance_scale | protocol | none | true | false | false | 第4分量的公开二维距离因子采用的冻结尺度, 等于方形网格最大欧氏距离的倒数。 |
+| attention_relation_component_weights | protocol | none | true | false | false | 四个关系分量完成逐行加权中心化与归一化后采用的冻结等权向量。 |
+| relation_component_scores | metric | none | true | true | false | 最优候选在规范拉回参考系中的四分量逐项相关分数。 |
+| observation_relation_component_scores | metric | none | true | true | false | 最优候选在观测前推参考系中的四分量逐项相关分数。 |
+| identity_observation_relation_component_scores | metric | none | true | true | false | identity 候选在观测前推参考系中的四分量逐项相关分数。 |
+| final_carrier_only_paired_attention_component_scores | metric | none | true | true | false | 冻结 carrier-only pair 权重时 carrier-only 最终成图的四分量分数。 |
+| final_watermarked_carrier_paired_attention_component_scores | metric | none | true | true | false | 冻结 carrier-only pair 权重时完整方法最终成图的四分量分数。 |
+| final_image_attention_carrier_paired_component_gains | metric | none | true | true | false | 完整方法相对 carrier-only 的冻结 pair 四个 Q/K 依赖分量逐项归因增益。 |
+| similarity_domain_strictly_bounded | governance | none | true | true | false | 粗搜索与全部局部细化候选是否都通过公开相似变换定义域过滤。 |
+| similarity_domain_reference | method | none | true | false | false | 相似变换连续参数采用的离散参考基元, 正式值为 square_dihedral_residual。 |
+| similarity_residual_rotation_bound_degrees | protocol | none | true | false | false | 候选相对任一方形二面体基元的残余旋转绝对上界, 当前为32°。 |
+| similarity_residual_scale_lower_bound | protocol | none | true | false | false | 候选相对方形二面体基元的均匀尺度下界, 当前为 $1/\sqrt2$。 |
+| similarity_residual_scale_upper_bound | protocol | none | true | false | false | 候选相对方形二面体基元的均匀尺度上界, 当前为 $\sqrt2$。 |
+| similarity_translation_bound | protocol | none | true | false | false | 候选两个归一化平移分量共同采用的绝对上界, 当前为0.28。 |
+| local_candidate_boundary_filter | method | none | true | false | false | 每轮局部组合候选使用的严格定义域过滤规则身份。 |
+| attention_relation_qk_operator_metadata_records | provenance | none | true | true | false | 全部冻结层直接 Q/K 关系算子的层名、模块、头、尺度、归一化和抽样网格可读记录。 |
+| attention_relation_qk_operator_metadata_digest | provenance | none | true | true | false | 多层直接 Q/K 算子可读元数据记录的联合稳定摘要。 |
+| attention_relation_qk_operator_metadata_ready | governance | none | true | true | false | 每层 Q/K 算子元数据是否完整且与记录层、理论尺度和抽样网格一致。 |
+| module_layer_name | provenance | none | true | false | false | Q/K 记录对应的冻结 Transformer 模块层名称。 |
+| module_class_name | provenance | none | true | false | false | 提供 `to_q`、`to_k` 和注意力头协议的模块完整类名。 |
+| head_count | method | none | true | false | false | 当前 Q/K 模块实际使用的注意力头数量。 |
+| head_width | method | none | true | false | false | 每个 Q/K 注意力头的投影宽度。 |
+| attention_scale | method | none | true | false | false | QK 点积使用的实际尺度, 必须等于 $1/\sqrt{head\_width}$。 |
+| attention_scale_source | provenance | none | true | false | false | 实际注意力尺度来自模块公开 scale 或由 head_width 理论式得到。 |
+| q_normalization_applied | method | none | true | false | false | Q 投影在点积前是否执行模块公开的 Q 归一化。 |
+| k_normalization_applied | method | none | true | false | false | K 投影在点积前是否执行模块公开的 K 归一化。 |
+| q_normalization_class | provenance | none | true | false | false | Q 归一化模块类名, 未启用时为空字符串。 |
+| k_normalization_class | provenance | none | true | false | false | K 归一化模块类名, 未启用时为空字符串。 |
+| source_token_count | method | none | true | false | false | Q/K 抽样前二维图像 token 总数。 |
+| source_grid_side | method | none | true | false | false | Q/K 抽样前方形图像 token 网格边长。 |
+| sampled_token_count | method | none | true | false | false | 冻结二维关系算子实际保留的图像 token 数量。 |
+| sampled_grid_side | method | none | true | false | false | 冻结二维关系算子抽样网格边长。 |
+| sampled_token_indices | provenance | none | true | false | false | 抽样 token 在原始二维图像 token 网格中的公开索引。 |
+| centered_logit_aggregation | method | none | true | false | false | 多头中心化 Q/K logits 的冻结聚合顺序身份。 |
+| relation_probability_aggregation | method | none | true | false | false | 多头抽样图像 token 关系概率的冻结聚合顺序身份。 |
+| mean_probability_is_softmax_of_mean_logits | governance | none | true | false | false | 多头平均概率是否被误写成平均 logits 的 softmax, 正式值固定为 false。 |

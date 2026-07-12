@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,7 @@ class FormalMethodRuntimeConfig:
     attention_relative_strength: float
     attention_stable_token_fraction: float
     attention_unstable_pair_weight: float
+    minimum_final_image_attention_score_gain: float
     tail_fraction: float
     minimum_projection_energy_retention: float
     maximum_relative_response_residual: float
@@ -90,6 +92,13 @@ class FormalMethodRuntimeConfig:
             raise ValueError(
                 "attention_unstable_pair_weight 必须位于 [0, 1)"
             )
+        if (
+            not math.isfinite(self.minimum_final_image_attention_score_gain)
+            or self.minimum_final_image_attention_score_gain <= 0.0
+        ):
+            raise ValueError(
+                "minimum_final_image_attention_score_gain 必须为正有限数"
+            )
         if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
             raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
         if not 0.0 < self.maximum_relative_response_residual <= 1.0:
@@ -128,6 +137,9 @@ class FormalMethodRuntimeConfig:
             ),
             "attention_unstable_pair_weight": (
                 self.attention_unstable_pair_weight
+            ),
+            "minimum_final_image_attention_score_gain": (
+                self.minimum_final_image_attention_score_gain
             ),
             "tail_fraction": self.tail_fraction,
             "minimum_projection_energy_retention": self.minimum_projection_energy_retention,
@@ -207,6 +219,9 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         ),
         "SLM_WM_ATTENTION_UNSTABLE_PAIR_WEIGHT": str(
             config.attention_unstable_pair_weight
+        ),
+        "SLM_WM_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN": str(
+            config.minimum_final_image_attention_score_gain
         ),
         "SLM_WM_TAIL_FRACTION": str(config.tail_fraction),
         "SLM_WM_MINIMUM_PROJECTION_ENERGY_RETENTION": str(config.minimum_projection_energy_retention),

@@ -6,12 +6,12 @@
 
 - `protocol/`: 论文级 Prompt 分层、fixed-FPR、共同攻击、正式证据和运行规模配置。
 - `runtime/`: SD3.5 模型加载、真实图像攻击、语义特征、续跑、仓库环境与正式依赖环境实现. `dependency_profiles.py` 解析一个 CPU 父编排 profile 与五个 CUDA 科学 profile, 并核验完整锁中的全部直接和传递包; `dependency_preparation.py` 执行当前解释器的 hash-locked 安装与适用的兼容性检查; `isolated_dependency_environment.py` 使用固定且经 distribution `RECORD` 验证的 `uv` 为五个科学 profile 创建独立 CPython 子环境; `isolated_scientific_execution.py` 在执行前后复验子解释器、依赖报告与正式执行锁; `semantic_watermark_scientific_session.py` 在单个主方法科学子解释器中调度运行与绑定打包两种互斥模式; `scientific_execution_binding.py` 保存可脱离临时 venv 审计的产物内证据快照; `resume_checkpoint.py` 提供不依赖 Colab 或 Drive API 的通用原子 checkpoint 发布与恢复协议.
-- `runners/semantic_watermark_runtime.py`: 完整执行分支风险、16维语义与视觉条件 Jacobian、20候选方向的4维 Null Space、LF、Gaussian 幅值尾部截断、真实多层 Q/K 几何更新和仅图像盲检。
+- `runners/semantic_watermark_runtime.py`: 完整执行分支风险、716维完整语义与视觉条件 Jacobian、20候选方向的4维 Null Space、LF、Gaussian 幅值尾部截断、真实多层 Q/K 几何更新、同种子 carrier-only 总机制效应反事实、逐注入无 attention 原子持久化、三边最终完整特征保持门禁、真实 Q/K 双归因增益门禁和仅图像盲检。
 - `runners/image_only_dataset_workload.py`: 从唯一方法 YAML 和论文运行配置构造完整主方法工作负载, 执行主运行与正式 Inception FID / KID, 并根据科学 session 的打包边界返回续跑或完成状态。`scripts/run_image_only_dataset_runtime.py` 只转发到该模块。
 - `runners/image_only_dataset_runtime.py`: 运行完整 Prompt 集, 在 calibration split 独立冻结检测协议, 只在 test split 形成论文统计; 同时从每条仅图像检测记录的真实连续分数生成分数分布、ROC 与 DET 数据。
 - `ablations/mechanism_ablation_workload.py`: 构造当前论文规模的全部消融配置, 调用正式重运行消融并执行受治理打包。`scripts/run_runtime_rerun_ablations.py` 只转发到该模块。
 - `ablations/runtime_rerun.py`: 每个消融配置重新生成、攻击、检测并独立校准, 不读取或变换完整方法分数。
-- `artifacts/dataset_level_quality_outputs.py`: 从真实图像对提取正式 Inception 特征并构建 FID / KID 质量证据。
+- `artifacts/dataset_level_quality_outputs.py`: 从真实 clean/watermarked 图像对提取正式 Inception 特征, 并构建 `fid`、`kid_mean`、`kid_std` 三行质量证据。KID 在 canonical feature population 上执行100轮均匀无放回子集估计, std 表示子集估计值的总体标准差而不是标准误。
 - `artifacts/detection_score_curves.py`: 将内容主判与冻结几何救回转换为判定等价连续分数, 使用 `positive_source` 与 clean negative / wrong-key negative 的记录级真实标签, 对 test overall 与每个同时含正负样本的攻击条件枚举正负无穷端点和全部唯一观测分数, 输出可复用的完整 threshold sweep。
 - `artifacts/`: 保存通用 manifest schema、连续检测统计与正式质量产物构建器。
 - 正式攻击记录必须由运行端直接写入 `attack_id`、`attack_family`、`attack_name`、`resource_profile`、`attack_config_digest` 与 `attack_parameters`; 攻击矩阵只验证并传播该身份, 不根据名称后贴配置摘要。
@@ -34,7 +34,7 @@ summary 必须同时记录带时区的 `generated_at`、`paper_run_name` 与 `ta
 
 ## 正式方法边界
 
-内容载体为 `lf_content` 与 `tail_robust`。`tail_robust` 仅按 Gaussian 元素绝对幅值执行分位点尾部截断, 不具有空间频带含义。注意力稳定度来自至少两个真实 Q/K 层对应关系行的余弦一致性。
+内容载体为 `lf_content` 与 `tail_robust`。`tail_robust` 仅按 Gaussian 元素绝对幅值执行分位点尾部截断, 不具有空间频带含义。注意力稳定度来自至少两个真实 Q/K 层对应关系行的余弦一致性。嵌入与盲检共享稳定 token pair 构造规则, 但数据依赖身份分别在一次注入内部和一次盲检的 raw、registration、aligned 路径内部冻结, 不执行跨端身份比较。注册只使用与攻击配置无关的有界搜索和递减分辨率局部优化。最终 clean、carrier-only 与完整方法成图必须在 CUDA 上重新编码真实 Q/K。carrier-only 与完整方法共享 seed、scheduler、LF/tail 配置和算子, 仅 attention geometry 开关不同；首个注入前 latent 必须字节级相同, 之后允许 attention 介入造成 LF、tail 与轨迹的下游交互, 因而该比较是 attention 开关总机制效应而非纯直接效应。carrier-only 的每个更新原子必须明确没有 attention 分数、更新、关系、pair 身份和 attention Null Space, 并把 JSONL 路径、文件 SHA-256、内容摘要、反事实身份与图像 SHA-256 绑定到结果、manifest 和缓存复验。三张成图的三条完整 CLIP/视觉特征边全部通过后, 才比较自身盲选择归因增益与冻结 carrier-only pair 权重归因增益。clean 只保留为总体水印对照。
 
 主方法检测协议在 calibration clean negative 上联合冻结内容阈值、几何可靠性阈值与同阈值救回规则, 随后只在独立 test split 应用该冻结协议。正式 FPR 证据是 test clean negative 的经验 operating point 及95%单侧 Wilson 上界; 该协议不声明 calibration 导出的 split-conformal 有限样本总体 FPR 保证。
 

@@ -312,7 +312,9 @@ def _run_entry(
     return {
         "prompt_index": prompt_index,
         "prompt_id": base_config.prompt_id,
-        "prompt_digest": build_stable_digest({"prompt": base_config.prompt}),
+        "prompt_digest": build_stable_digest(
+            {"prompt_text": base_config.prompt}
+        ),
         "split": base_config.split,
         "ablation_id": spec.ablation_id,
         "runtime_config": asdict(spec),
@@ -656,6 +658,21 @@ def run_runtime_rerun_ablations(
         ) + "\n",
         encoding="utf-8",
     )
+    formal_detection_records_sha256 = repository_environment.file_digest(
+        detections_path
+    )
+    formal_detection_records_digest = build_stable_digest(
+        formal_detection_records
+    )
+    frozen_protocol_payload = {
+        name: protocol.to_dict() for name, protocol in protocols.items()
+    }
+    per_ablation_frozen_protocols_sha256 = repository_environment.file_digest(
+        thresholds_path
+    )
+    per_ablation_frozen_protocols_digest = build_stable_digest(
+        frozen_protocol_payload
+    )
     _write_csv(metrics_path, metric_rows)
     _write_csv(delta_path, delta_rows)
     necessity_rows, necessity_summary = build_ablation_necessity_statistics(
@@ -748,6 +765,14 @@ def run_runtime_rerun_ablations(
         "formal_attack_coverage_ready": all(
             record["formal_attack_coverage_ready"] for record in formal_records
         ),
+        "formal_detection_records_sha256": formal_detection_records_sha256,
+        "formal_detection_records_digest": formal_detection_records_digest,
+        "per_ablation_frozen_protocols_sha256": (
+            per_ablation_frozen_protocols_sha256
+        ),
+        "per_ablation_frozen_protocols_digest": (
+            per_ablation_frozen_protocols_digest
+        ),
         **scientific_unit_provenance,
         **necessity_summary,
         "ablation_claim_gate_ready": ablation_claim_gate_ready,
@@ -794,6 +819,14 @@ def run_runtime_rerun_ablations(
             "split_counts": split_counts,
             "target_fpr": target_fpr,
             "record_digest": build_stable_digest(formal_records),
+            "formal_detection_records_sha256": formal_detection_records_sha256,
+            "formal_detection_records_digest": formal_detection_records_digest,
+            "per_ablation_frozen_protocols_sha256": (
+                per_ablation_frozen_protocols_sha256
+            ),
+            "per_ablation_frozen_protocols_digest": (
+                per_ablation_frozen_protocols_digest
+            ),
             "necessity_statistic_rows_digest": necessity_summary[
                 "necessity_statistic_rows_digest"
             ],
@@ -810,6 +843,14 @@ def run_runtime_rerun_ablations(
             "formal_attack_coverage_ready": summary[
                 "formal_attack_coverage_ready"
             ],
+            "formal_detection_records_sha256": formal_detection_records_sha256,
+            "formal_detection_records_digest": formal_detection_records_digest,
+            "per_ablation_frozen_protocols_sha256": (
+                per_ablation_frozen_protocols_sha256
+            ),
+            "per_ablation_frozen_protocols_digest": (
+                per_ablation_frozen_protocols_digest
+            ),
             "scientific_unit_provenance_ready": summary[
                 "scientific_unit_provenance_ready"
             ],
@@ -907,7 +948,7 @@ def package_runtime_rerun_ablations(
     ) and all(
         build_stable_digest(
             {
-                "prompt": record["runtime_result"]["metadata"][
+                "prompt_text": record["runtime_result"]["metadata"][
                     "scientific_unit_config"
                 ]["prompt"]
             }
@@ -957,13 +998,27 @@ def package_runtime_rerun_ablations(
             encoding="utf-8-sig"
         )
     )
-    protocol_ids = list(
-        json.loads(
-            (source_dir / "per_ablation_frozen_protocols.json").read_text(
-                encoding="utf-8-sig"
-            )
-        )
+    frozen_protocols_path = source_dir / "per_ablation_frozen_protocols.json"
+    frozen_protocol_payload = json.loads(
+        frozen_protocols_path.read_text(encoding="utf-8-sig")
     )
+    protocol_ids = list(frozen_protocol_payload)
+    formal_detection_records_path = source_dir / "formal_detection_records.jsonl"
+    packaged_detection_records = _read_jsonl(formal_detection_records_path)
+    atom_identity = {
+        "formal_detection_records_sha256": repository_environment.file_digest(
+            formal_detection_records_path
+        ),
+        "formal_detection_records_digest": build_stable_digest(
+            packaged_detection_records
+        ),
+        "per_ablation_frozen_protocols_sha256": (
+            repository_environment.file_digest(frozen_protocols_path)
+        ),
+        "per_ablation_frozen_protocols_digest": build_stable_digest(
+            frozen_protocol_payload
+        ),
+    }
     exact_set_ready = all(
         (
             summary.get("expected_ablation_ids") == expected_ids,
@@ -984,6 +1039,12 @@ def package_runtime_rerun_ablations(
             metric_ids == expected_ids,
             len(protocol_ids) == len(expected_ids),
             set(protocol_ids) == set(expected_ids),
+            all(
+                summary.get(field_name) == value
+                and manifest_config.get(field_name) == value
+                and manifest_metadata.get(field_name) == value
+                for field_name, value in atom_identity.items()
+            ),
         )
     )
     expected_variant_ids = [

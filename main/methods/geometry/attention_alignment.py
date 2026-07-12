@@ -1,8 +1,8 @@
 """根据密钥注意力关系图恢复图像 token 网格的仿射参考系。
 
-几何变换会同时重排注意力矩阵的行和列. 若规范关系图为 ``A``, 观测关系图
-满足 ``A_obs = P A P^T``. 注册目标同时计算 ``W A_obs W^T`` 的规范拉回
-一致性和 ``V S_key V^T`` 的观测前推一致性, 并显式记录双向覆盖惩罚.
+几何变换会同时重排四分量关系张量的查询轴和键轴。若观测关系张量为 ``R_obs``,
+注册目标对四个通道分别计算 ``W R_obs,c W^T`` 的规范拉回一致性, 并计算
+``V (pi_c S_key) V^T`` 的观测前推一致性, 最后显式记录双向覆盖惩罚。
 """
 
 from __future__ import annotations
@@ -12,13 +12,42 @@ import math
 from typing import Any, Iterable
 
 from main.core.digest import build_stable_digest
-from main.methods.geometry.differentiable_attention import keyed_relation_signs
+from main.methods.geometry.differentiable_attention import (
+    ATTENTION_RELATION_COMPONENT_NAMES,
+    ATTENTION_RELATION_COMPONENT_WEIGHTS,
+    DIRECT_QK_RELATION_SOURCE,
+    StableAttentionPairWeights,
+    attention_probability,
+    attention_relation_component_scores,
+    build_attention_relation_descriptor,
+    build_attention_relation_graph_identity,
+    combine_attention_relation_component_scores,
+    keyed_attention_relation_projection,
+    public_token_grid_coordinates,
+    transport_stable_attention_pair_weights,
+)
 
 
 _CANONICAL_RELATION_WEIGHT = 0.10
 _OBSERVATION_RELATION_WEIGHT = 0.90
 _COVERAGE_PENALTY_WEIGHT = 0.01
 _MINIMUM_REGISTRATION_COVERAGE = 0.45
+_SIMILARITY_ROTATION_BOUND_DEGREES = 32.0
+_SIMILARITY_ROTATION_INTERVAL_COUNT = 4
+_SIMILARITY_LOG_SCALE_ANCHOR_BOUND = math.log(math.sqrt(2.0))
+_SIMILARITY_TRANSLATION_ANCHOR_BOUND = 0.28
+_SIMILARITY_LOCAL_REFINEMENT_ROUNDS = 3
+_SIMILARITY_LOCAL_REFINEMENT_RATIO = 3.0
+_DIHEDRAL_LINEAR_PARTS = (
+    ((1.0, 0.0), (0.0, 1.0)),
+    ((-1.0, 0.0), (0.0, 1.0)),
+    ((1.0, 0.0), (0.0, -1.0)),
+    ((-1.0, 0.0), (0.0, -1.0)),
+    ((0.0, -1.0), (1.0, 0.0)),
+    ((0.0, 1.0), (-1.0, 0.0)),
+    ((0.0, 1.0), (1.0, 0.0)),
+    ((0.0, -1.0), (-1.0, 0.0)),
+)
 
 
 def _torch() -> Any:
@@ -32,20 +61,7 @@ def _torch() -> Any:
 def _grid_coordinates(token_indices: tuple[int, ...], device: Any) -> Any:
     """把原始图像 token 索引转换成归一化二维网格坐标。"""
 
-    torch = _torch()
-    if len(token_indices) < 4 or len(set(token_indices)) != len(token_indices):
-        raise ValueError("几何恢复要求至少4个不重复的原始 token 索引")
-    source_token_count = max(token_indices) + 1
-    source_side = int(round(math.sqrt(source_token_count)))
-    if source_side * source_side != source_token_count:
-        raise ValueError("原始 token 索引无法还原为方形图像网格")
-    coordinates = []
-    for token_index in token_indices:
-        row, column = divmod(token_index, source_side)
-        x = -1.0 + 2.0 * column / (source_side - 1)
-        y = -1.0 + 2.0 * row / (source_side - 1)
-        coordinates.append((x, y))
-    return torch.tensor(coordinates, device=device, dtype=torch.float32)
+    return public_token_grid_coordinates(token_indices, device)
 
 
 def _apply_affine(points: Any, transform: Any) -> Any:
@@ -114,61 +130,123 @@ def _affine_matrix(
     )
 
 
-def _coarse_affine_candidates(device: Any) -> Any:
-    """构造冻结的低成本仿射搜索集合。
+def _bounded_similarity_candidate_mask(transforms: Any) -> Any:
+    """校验候选相对某个方形二面体基元的严格相似变换边界。"""
 
-    搜索集合覆盖常见旋转、裁剪重缩放和位移, 并显式加入完整方形二面体变换。
-    该集合属于公开检测协议的一部分, 不读取生成侧状态。
+    torch = _torch()
+    resolved = transforms.unsqueeze(0) if transforms.ndim == 2 else transforms
+    if resolved.ndim != 3 or resolved.shape[-2:] != (2, 3):
+        raise ValueError("候选仿射必须具有 [candidate, 2, 3] 形状")
+    dihedral = torch.tensor(
+        _DIHEDRAL_LINEAR_PARTS,
+        device=resolved.device,
+        dtype=resolved.dtype,
+    )
+    residual = torch.matmul(
+        resolved[:, None, :, :2],
+        dihedral.transpose(-1, -2)[None, :, :, :],
+    )
+    determinant = torch.linalg.det(residual)
+    scale = determinant.clamp_min(0.0).sqrt()
+    rotation = torch.rad2deg(torch.atan2(residual[..., 1, 0], residual[..., 0, 0]))
+    first_column_norm = residual[..., :, 0].norm(dim=-1)
+    second_column_norm = residual[..., :, 1].norm(dim=-1)
+    column_inner_product = (
+        residual[..., :, 0] * residual[..., :, 1]
+    ).sum(dim=-1)
+    similarity_ready = (
+        determinant > 0.0
+    ) & (
+        (first_column_norm - second_column_norm).abs() <= 1e-5
+    ) & (
+        column_inner_product.abs() <= 1e-5
+    )
+    residual_ready = (
+        similarity_ready
+        & (rotation.abs() <= _SIMILARITY_ROTATION_BOUND_DEGREES + 1e-6)
+        & (scale >= math.exp(-_SIMILARITY_LOG_SCALE_ANCHOR_BOUND) - 1e-6)
+        & (scale <= math.exp(_SIMILARITY_LOG_SCALE_ANCHOR_BOUND) + 1e-6)
+    )
+    translation = resolved[:, :, 2]
+    translation_ready = (
+        translation.abs() <= _SIMILARITY_TRANSLATION_ANCHOR_BOUND + 1e-6
+    ).all(dim=-1)
+    return residual_ready.any(dim=1) & translation_ready
+
+
+def _coarse_affine_candidates(device: Any) -> Any:
+    """从通用相似变换定义域构造冻结的低成本搜索集合。
+
+    旋转锚点由对称角度定义域等分得到, 尺度锚点在 log-scale 上对称分布,
+    位移锚点由归一化图像坐标定义域给出。所有数值只由公开的连续变换容量
+    确定, 不读取攻击注册表、攻击角度或裁剪比例。方形二面体变换作为离散
+    对称性另行加入。
     """
 
     torch = _torch()
+    rotation_step = (
+        2.0 * _SIMILARITY_ROTATION_BOUND_DEGREES
+        / float(_SIMILARITY_ROTATION_INTERVAL_COUNT)
+    )
+    rotations = tuple(
+        -_SIMILARITY_ROTATION_BOUND_DEGREES + rotation_step * index
+        for index in range(_SIMILARITY_ROTATION_INTERVAL_COUNT + 1)
+    )
+    scales = tuple(
+        math.exp(log_scale)
+        for log_scale in (
+            -_SIMILARITY_LOG_SCALE_ANCHOR_BOUND,
+            0.0,
+            _SIMILARITY_LOG_SCALE_ANCHOR_BOUND,
+        )
+    )
+    translations = (
+        -_SIMILARITY_TRANSLATION_ANCHOR_BOUND,
+        0.0,
+        _SIMILARITY_TRANSLATION_ANCHOR_BOUND,
+    )
     candidates = [
         _affine_matrix(rotation, scale, tx, ty, device=device)
-        for rotation in (-30.0, -15.0, 0.0, 15.0, 30.0)
-        for scale in (0.80, 1.00, 1.20)
-        for tx in (-0.20, 0.0, 0.20)
-        for ty in (-0.20, 0.0, 0.20)
+        for rotation in rotations
+        for scale in scales
+        for tx in translations
+        for ty in translations
     ]
-    # 正式几何攻击采用中心裁剪和5°/7°旋转, 因此显式包含对应逆尺度。
-    candidates.extend(
-        _affine_matrix(rotation, scale, 0.0, 0.0, device=device)
-        for rotation in (-7.0, -5.0, 0.0, 5.0, 7.0)
-        for scale in (1.0, 1.0 / 0.82, 1.0 / 0.80, 1.0 / 0.78)
-    )
-    dihedral_linear_parts = (
-        ((1.0, 0.0), (0.0, 1.0)),
-        ((-1.0, 0.0), (0.0, 1.0)),
-        ((1.0, 0.0), (0.0, -1.0)),
-        ((-1.0, 0.0), (0.0, -1.0)),
-        ((0.0, -1.0), (1.0, 0.0)),
-        ((0.0, 1.0), (-1.0, 0.0)),
-        ((0.0, 1.0), (1.0, 0.0)),
-        ((0.0, -1.0), (-1.0, 0.0)),
-    )
     candidates.extend(
         torch.tensor(
             ((left[0], left[1], 0.0), (right[0], right[1], 0.0)),
             device=device,
             dtype=torch.float32,
         )
-        for left, right in dihedral_linear_parts
+        for left, right in _DIHEDRAL_LINEAR_PARTS
     )
-    return torch.stack(candidates)
+    stacked = torch.stack(candidates)
+    return stacked[_bounded_similarity_candidate_mask(stacked)]
 
 
-def _local_affine_candidates(best_transform: Any) -> Any:
-    """围绕粗搜索最优解构造一次确定性局部细化集合。"""
+def _local_affine_candidates(
+    best_transform: Any,
+    *,
+    rotation_delta_degrees: float,
+    log_scale_delta: float,
+    translation_delta: float,
+) -> Any:
+    """在 rotation、log-scale 和 translation 上执行对称局部细化。"""
 
     torch = _torch()
     device = best_transform.device
     candidates = []
-    for rotation in (-5.0, 0.0, 5.0):
-        for scale in (0.95, 1.0, 1.05):
+    for rotation in (-rotation_delta_degrees, 0.0, rotation_delta_degrees):
+        for scale in (
+            math.exp(-log_scale_delta),
+            1.0,
+            math.exp(log_scale_delta),
+        ):
             delta = _affine_matrix(rotation, scale, 0.0, 0.0, device=device)
             linear = delta[:, :2] @ best_transform[:, :2]
             base_translation = best_transform[:, 2]
-            for tx in (-0.05, 0.0, 0.05):
-                for ty in (-0.05, 0.0, 0.05):
+            for tx in (-translation_delta, 0.0, translation_delta):
+                for ty in (-translation_delta, 0.0, translation_delta):
                     transform = torch.cat(
                         (
                             linear,
@@ -177,7 +255,36 @@ def _local_affine_candidates(best_transform: Any) -> Any:
                         dim=1,
                     )
                     candidates.append(transform)
-    return torch.stack(candidates)
+    stacked = torch.stack(candidates)
+    bounded = stacked[_bounded_similarity_candidate_mask(stacked)]
+    if bounded.shape[0] == 0:
+        raise RuntimeError("局部相似变换细化没有产生定义域内候选")
+    return bounded
+
+
+def _local_affine_refinement_schedule() -> tuple[tuple[float, float, float], ...]:
+    """由粗网格单元宽度生成与攻击参数无关的三分层级细化日程。
+
+    第一轮在每个粗网格单元的半宽处搜索, 后续轮次按固定三分比例缩小。
+    因此日程只依赖连续变换定义域和网格分辨率, 可以复用于不同攻击协议。
+    """
+
+    coarse_rotation_step = (
+        2.0 * _SIMILARITY_ROTATION_BOUND_DEGREES
+        / float(_SIMILARITY_ROTATION_INTERVAL_COUNT)
+    )
+    initial_deltas = (
+        coarse_rotation_step * 0.5,
+        _SIMILARITY_LOG_SCALE_ANCHOR_BOUND * 0.5,
+        _SIMILARITY_TRANSLATION_ANCHOR_BOUND * 0.5,
+    )
+    return tuple(
+        tuple(
+            delta / (_SIMILARITY_LOCAL_REFINEMENT_RATIO**round_index)
+            for delta in initial_deltas
+        )
+        for round_index in range(_SIMILARITY_LOCAL_REFINEMENT_ROUNDS)
+    )
 
 
 def _sampling_weights(target_coordinates: Any, observed_coordinates: Any) -> tuple[Any, Any, Any]:
@@ -273,32 +380,33 @@ def _sampling_weights(target_coordinates: Any, observed_coordinates: Any) -> tup
     return weights, valid, nearest_residuals
 
 
-def _relation_scores(aligned: Any, relation_signs: Any, valid: Any) -> Any:
-    """计算一批双边对齐关系图与密钥图的归一化相关分数。"""
+def _relation_scores(
+    aligned: Any,
+    relation_projection: Any,
+    valid: Any,
+    pair_weights: Any,
+) -> tuple[Any, Any]:
+    """以统一四分量算子计算一批关系图的分量分数与等权总分。"""
 
     torch = _torch()
-    token_count = int(aligned.shape[-1])
-    pair_mask = valid.unsqueeze(-1) & valid.unsqueeze(-2)
-    off_diagonal = ~torch.eye(token_count, device=aligned.device, dtype=torch.bool).unsqueeze(0)
-    pair_mask = pair_mask & off_diagonal
-    float_mask = pair_mask.to(dtype=aligned.dtype)
-    row_count = float_mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
-    row_mean = (aligned * float_mask).sum(dim=-1, keepdim=True) / row_count
-    centered = (aligned - row_mean) * float_mask
-    reference = relation_signs.to(dtype=aligned.dtype)
-    if reference.ndim == 2:
-        reference = reference.unsqueeze(0).expand(aligned.shape[0], -1, -1)
-    if reference.ndim != 3 or reference.shape != aligned.shape:
-        raise ValueError("relation_signs 必须与 aligned 具有相同关系图宽度")
-    reference_mean = (reference * float_mask).sum(dim=-1, keepdim=True) / row_count
-    reference = (reference - reference_mean) * float_mask
-    numerator = (centered * reference).sum(dim=(-1, -2))
-    denominator = (
-        centered.square().sum(dim=(-1, -2)).sqrt()
-        * reference.square().sum(dim=(-1, -2)).sqrt()
-    ).clamp_min(1e-12)
-    scores = numerator / denominator
-    return torch.where(torch.isfinite(scores), scores, torch.full_like(scores, -1.0))
+    component_scores = attention_relation_component_scores(
+        aligned,
+        relation_projection,
+        pair_weights,
+        valid,
+    )
+    scores = combine_attention_relation_component_scores(component_scores)
+    finite_scores = torch.where(
+        torch.isfinite(scores),
+        scores,
+        torch.full_like(scores, -1.0),
+    )
+    finite_components = torch.where(
+        torch.isfinite(component_scores),
+        component_scores,
+        torch.full_like(component_scores, -1.0),
+    )
+    return finite_scores, finite_components
 
 
 def _unique_sampling_ratios(weights: Any, valid: Any) -> Any:
@@ -328,7 +436,9 @@ class _CandidateEvaluation:
 
     transforms: Any
     scores: Any
+    relation_component_scores: Any
     observation_relation_scores: Any
+    observation_relation_component_scores: Any
     bidirectional_relation_scores: Any
     objectives: Any
     coverage_penalties: Any
@@ -342,19 +452,55 @@ class _CandidateEvaluation:
 
 
 def _evaluate_candidates(
-    matrix: Any,
-    relation_signs: Any,
+    relation_values: Any,
+    relation_projection: Any,
     coordinates: Any,
     transforms: Any,
+    stable_pair_weights: StableAttentionPairWeights,
 ) -> _CandidateEvaluation:
     """计算规范拉回和观测前推一致性共同约束的注册目标."""
 
     torch = _torch()
     target_coordinates = _apply_affine(coordinates, transforms)
     weights, valid, nearest_residuals = _sampling_weights(target_coordinates, coordinates)
-    expanded_matrix = matrix.float().unsqueeze(0).expand(transforms.shape[0], -1, -1)
-    aligned = torch.bmm(torch.bmm(weights, expanded_matrix), weights.transpose(1, 2))
-    scores = _relation_scores(aligned, relation_signs, valid)
+    aligned = torch.einsum(
+        "bik,klc,bjl->bijc",
+        weights,
+        relation_values.float(),
+        weights,
+    )
+    source_token_weights = torch.tensor(
+        stable_pair_weights.token_weights,
+        device=relation_values.device,
+        dtype=torch.float32,
+    )
+    canonical_token_weights = torch.bmm(
+        weights,
+        source_token_weights.reshape(1, -1, 1).expand(
+            transforms.shape[0],
+            -1,
+            -1,
+        ),
+    ).squeeze(-1)
+    canonical_token_weights = canonical_token_weights * valid.to(
+        dtype=canonical_token_weights.dtype
+    )
+    off_diagonal = 1.0 - torch.eye(
+        relation_values.shape[-2],
+        device=relation_values.device,
+        dtype=torch.float32,
+    )
+    canonical_pair_weights = (
+        canonical_token_weights.unsqueeze(-1)
+        * canonical_token_weights.unsqueeze(-2)
+        * off_diagonal.unsqueeze(0)
+    )
+    scores, relation_component_scores = _relation_scores(
+        aligned,
+        relation_projection,
+        valid,
+        canonical_pair_weights,
+    )
     inverse_transforms = _invert_affine(transforms)
     canonical_coordinates_at_observation = _apply_affine(
         coordinates,
@@ -364,19 +510,26 @@ def _evaluate_candidates(
         canonical_coordinates_at_observation,
         coordinates,
     )
-    expanded_relation_signs = relation_signs.float().unsqueeze(0).expand(
+    expected_observation = torch.einsum(
+        "bik,klc,bjl->bijc",
+        observation_weights,
+        relation_projection.float(),
+        observation_weights,
+    )
+    expanded_relation_values = relation_values.float().unsqueeze(0).expand(
         transforms.shape[0],
         -1,
         -1,
+        -1,
     )
-    expected_observation = torch.bmm(
-        torch.bmm(observation_weights, expanded_relation_signs),
-        observation_weights.transpose(1, 2),
-    )
-    observation_relation_scores = _relation_scores(
-        expanded_matrix,
+    (
+        observation_relation_scores,
+        observation_relation_component_scores,
+    ) = _relation_scores(
+        expanded_relation_values,
         expected_observation,
         observation_valid,
+        stable_pair_weights.pair_tensor(relation_values[..., 0]).float(),
     )
     canonical_coverage_ratios = valid.float().mean(dim=-1)
     observation_coverage_ratios = observation_valid.float().mean(dim=-1)
@@ -399,7 +552,11 @@ def _evaluate_candidates(
     return _CandidateEvaluation(
         transforms=transforms,
         scores=scores,
+        relation_component_scores=relation_component_scores,
         observation_relation_scores=observation_relation_scores,
+        observation_relation_component_scores=(
+            observation_relation_component_scores
+        ),
         bidirectional_relation_scores=bidirectional_relation_scores,
         objectives=objectives,
         coverage_penalties=coverage_penalties,
@@ -421,8 +578,17 @@ def _combine_evaluations(evaluations: Iterable[_CandidateEvaluation]) -> _Candid
     return _CandidateEvaluation(
         transforms=torch.cat(tuple(item.transforms for item in resolved)),
         scores=torch.cat(tuple(item.scores for item in resolved)),
+        relation_component_scores=torch.cat(
+            tuple(item.relation_component_scores for item in resolved)
+        ),
         observation_relation_scores=torch.cat(
             tuple(item.observation_relation_scores for item in resolved)
+        ),
+        observation_relation_component_scores=torch.cat(
+            tuple(
+                item.observation_relation_component_scores
+                for item in resolved
+            )
         ),
         bidirectional_relation_scores=torch.cat(
             tuple(item.bidirectional_relation_scores for item in resolved)
@@ -460,8 +626,11 @@ class AttentionAlignmentResult:
     inlier_ratio: float
     mean_inlier_residual: float
     relation_sync_score: float
+    relation_component_scores: dict[str, float]
     observation_relation_score: float
+    observation_relation_component_scores: dict[str, float]
     identity_observation_relation_score: float
+    identity_observation_relation_component_scores: dict[str, float]
     registration_alignment_gain: float
     bidirectional_relation_score: float
     registration_objective_score: float
@@ -471,6 +640,15 @@ class AttentionAlignmentResult:
     observation_coverage_ratio: float
     canonical_unique_ratio: float
     observation_unique_ratio: float
+    canonical_token_weights: tuple[float, ...]
+    stable_pair_weight_identity_digest: str
+    observed_pair_weight_realization_digest: str
+    canonical_pair_weight_realization_digest: str
+    attention_relation_source: str
+    attention_relation_component_identity_digest: str
+    attention_relation_keyed_projection_digest: str
+    attention_relation_qk_operator_metadata_digest: str
+    attention_relation_qk_operator_metadata_ready: bool
     registration_confidence: float
     geometry_reliable: bool
     alignment_digest: str
@@ -482,6 +660,7 @@ def recover_attention_affine_alignment(
     key_material: str,
     layer_name: str,
     token_indices: tuple[int, ...],
+    stable_pair_weights: StableAttentionPairWeights,
     anchor_count: int = 12,
     residual_threshold: float = 0.20,
     minimum_inlier_ratio: float = 0.50,
@@ -489,38 +668,69 @@ def recover_attention_affine_alignment(
     """通过双边重采样密钥关系图恢复仿射参考系。
 
     对每个公开候选仿射变换构造规范拉回矩阵 ``W`` 和观测前推矩阵 ``V``.
-    注册目标联合比较 ``W A_observed W^T`` 与密钥关系图, 以及真实观测关系图
-    与 ``V S_key V^T``. 两个方向都对查询轴和键轴应用同一空间变换.
+    注册目标逐通道比较 ``W R_observed,c W^T`` 与四通道密钥投影, 以及真实
+    观测关系图与 ``V (pi_c S_key) V^T``。两个方向都对查询轴和键轴应用同一
+    空间变换, 每个通道逐行归一化后等权组合。
     """
 
     torch = _torch()
-    matrix = attention.mean(dim=0) if attention.ndim == 3 else attention
+    probability = attention_probability(attention)
+    matrix = probability.mean(dim=0) if probability.ndim == 3 else probability
     if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
         raise ValueError("attention 必须是方形矩阵或带 batch 维的方形矩阵")
     token_count = int(matrix.shape[0])
     if len(token_indices) != token_count:
         raise ValueError("token_indices 数量必须与 attention 宽度一致")
+    if len(stable_pair_weights.token_weights) != token_count:
+        raise ValueError("稳定 token pair 权重宽度必须与 attention 宽度一致")
+    if not stable_pair_weights.pair_weight_identity_digest:
+        raise ValueError("稳定 token pair 权重必须具有可复现身份")
     if not 0.0 < minimum_inlier_ratio <= 1.0:
         raise ValueError("minimum_inlier_ratio 必须位于 (0, 1]")
     if residual_threshold <= 0.0:
         raise ValueError("residual_threshold 必须为正数")
 
+    descriptor = build_attention_relation_descriptor(attention, token_indices)
+    relation_values = descriptor.values.mean(dim=0)
+    relation_projection = keyed_attention_relation_projection(
+        descriptor,
+        key_material,
+        layer_name,
+    )
+    relation_graph_identity = build_attention_relation_graph_identity(
+        ((layer_name, attention, token_indices),),
+        key_material,
+    )
     coordinates = _grid_coordinates(token_indices, matrix.device)
-    relation_signs = keyed_relation_signs(matrix, key_material, layer_name)
     coarse = _evaluate_candidates(
-        matrix,
-        relation_signs,
+        relation_values,
+        relation_projection.values,
         coordinates,
         _coarse_affine_candidates(matrix.device),
+        stable_pair_weights,
     )
     coarse_best_index = int(torch.argmax(coarse.objectives).item())
-    local = _evaluate_candidates(
-        matrix,
-        relation_signs,
-        coordinates,
-        _local_affine_candidates(coarse.transforms[coarse_best_index]),
-    )
-    evaluated = _combine_evaluations((coarse, local))
+    evaluations = [coarse]
+    current_best_transform = coarse.transforms[coarse_best_index]
+    local_search_schedule = _local_affine_refinement_schedule()
+    for rotation_delta, log_scale_delta, translation_delta in local_search_schedule:
+        local = _evaluate_candidates(
+            relation_values,
+            relation_projection.values,
+            coordinates,
+            _local_affine_candidates(
+                current_best_transform,
+                rotation_delta_degrees=rotation_delta,
+                log_scale_delta=log_scale_delta,
+                translation_delta=translation_delta,
+            ),
+            stable_pair_weights,
+        )
+        evaluations.append(local)
+        current_best_transform = local.transforms[
+            int(torch.argmax(local.objectives).item())
+        ]
+    evaluated = _combine_evaluations(evaluations)
     best_index = int(torch.argmax(evaluated.objectives).item())
     best_transform = evaluated.transforms[best_index]
     transform_distances = (
@@ -535,10 +745,33 @@ def recover_attention_affine_alignment(
     best_weights = evaluated.weights[best_index]
     best_valid = evaluated.valid[best_index]
     best_residuals = evaluated.nearest_residuals[best_index]
+    canonical_pair_weights = transport_stable_attention_pair_weights(
+        stable_pair_weights,
+        best_weights,
+        best_valid,
+        coordinate_space="registered_canonical_qk_grid",
+    )
     best_score = float(evaluated.scores[best_index].item())
+    best_component_scores = {
+        component_name: float(value)
+        for component_name, value in zip(
+            ATTENTION_RELATION_COMPONENT_NAMES,
+            evaluated.relation_component_scores[best_index].detach().cpu().tolist(),
+        )
+    }
     best_observation_score = float(
         evaluated.observation_relation_scores[best_index].item()
     )
+    best_observation_component_scores = {
+        component_name: float(value)
+        for component_name, value in zip(
+            ATTENTION_RELATION_COMPONENT_NAMES,
+            evaluated.observation_relation_component_scores[best_index]
+            .detach()
+            .cpu()
+            .tolist(),
+        )
+    }
     best_bidirectional_score = float(
         evaluated.bidirectional_relation_scores[best_index].item()
     )
@@ -571,6 +804,16 @@ def recover_attention_affine_alignment(
     identity_observation_score = float(
         evaluated.observation_relation_scores[identity_index].item()
     )
+    identity_observation_component_scores = {
+        component_name: float(value)
+        for component_name, value in zip(
+            ATTENTION_RELATION_COMPONENT_NAMES,
+            evaluated.observation_relation_component_scores[identity_index]
+            .detach()
+            .cpu()
+            .tolist(),
+        )
+    }
     registration_alignment_gain = (
         best_observation_score - identity_observation_score
     )
@@ -582,7 +825,12 @@ def recover_attention_affine_alignment(
     observed_counts = torch.bincount(observed_indices_tensor, minlength=token_count)
     unique_observed = observed_counts.index_select(0, observed_indices_tensor) == 1
     inliers = anchor_valid & unique_observed & (anchor_residuals <= residual_threshold)
-    inlier_ratio = float(inliers.float().mean().item())
+    valid_anchor_count = int(anchor_valid.sum().item())
+    inlier_ratio = (
+        float(inliers.float().sum().item()) / float(valid_anchor_count)
+        if valid_anchor_count > 0
+        else 0.0
+    )
     mean_residual = (
         float(anchor_residuals[inliers].mean().item())
         if bool(inliers.any())
@@ -608,6 +856,8 @@ def recover_attention_affine_alignment(
         and canonical_coverage_ratio >= _MINIMUM_REGISTRATION_COVERAGE
         and observation_coverage_ratio >= _MINIMUM_REGISTRATION_COVERAGE
         and registration_objective_margin > 0.0
+        and descriptor.relation_source == DIRECT_QK_RELATION_SOURCE
+        and relation_graph_identity.qk_operator_metadata_ready
     )
     transform_tuple = tuple(
         tuple(float(value) for value in row)
@@ -625,11 +875,23 @@ def recover_attention_affine_alignment(
         "inlier_ratio": round(inlier_ratio, 12),
         "mean_inlier_residual": round(mean_residual, 12),
         "relation_sync_score": round(best_score, 12),
+        "relation_component_scores": {
+            key: round(value, 12)
+            for key, value in best_component_scores.items()
+        },
         "observation_relation_score": round(best_observation_score, 12),
+        "observation_relation_component_scores": {
+            key: round(value, 12)
+            for key, value in best_observation_component_scores.items()
+        },
         "identity_observation_relation_score": round(
             identity_observation_score,
             12,
         ),
+        "identity_observation_relation_component_scores": {
+            key: round(value, 12)
+            for key, value in identity_observation_component_scores.items()
+        },
         "registration_alignment_gain": round(registration_alignment_gain, 12),
         "bidirectional_relation_score": round(best_bidirectional_score, 12),
         "registration_objective_score": round(best_objective, 12),
@@ -639,6 +901,32 @@ def recover_attention_affine_alignment(
         "observation_coverage_ratio": round(observation_coverage_ratio, 12),
         "canonical_unique_ratio": round(canonical_unique_ratio, 12),
         "observation_unique_ratio": round(observation_unique_ratio, 12),
+        "canonical_token_weights": [
+            round(float(value), 12)
+            for value in canonical_pair_weights.token_weights
+        ],
+        "stable_pair_weight_identity_digest": (
+            stable_pair_weights.pair_weight_identity_digest
+        ),
+        "observed_pair_weight_realization_digest": (
+            stable_pair_weights.pair_weight_realization_digest
+        ),
+        "canonical_pair_weight_realization_digest": (
+            canonical_pair_weights.pair_weight_realization_digest
+        ),
+        "attention_relation_source": descriptor.relation_source,
+        "attention_relation_component_identity_digest": (
+            descriptor.component_identity_digest
+        ),
+        "attention_relation_keyed_projection_digest": (
+            relation_projection.projection_digest
+        ),
+        "attention_relation_qk_operator_metadata_digest": (
+            relation_graph_identity.qk_operator_metadata_digest
+        ),
+        "attention_relation_qk_operator_metadata_ready": (
+            relation_graph_identity.qk_operator_metadata_ready
+        ),
     }
     return AttentionAlignmentResult(
         affine_transform=transform_tuple,  # type: ignore[arg-type]
@@ -648,8 +936,15 @@ def recover_attention_affine_alignment(
         inlier_ratio=inlier_ratio,
         mean_inlier_residual=mean_residual,
         relation_sync_score=best_score,
+        relation_component_scores=best_component_scores,
         observation_relation_score=best_observation_score,
+        observation_relation_component_scores=(
+            best_observation_component_scores
+        ),
         identity_observation_relation_score=identity_observation_score,
+        identity_observation_relation_component_scores=(
+            identity_observation_component_scores
+        ),
         registration_alignment_gain=registration_alignment_gain,
         bidirectional_relation_score=best_bidirectional_score,
         registration_objective_score=best_objective,
@@ -659,16 +954,116 @@ def recover_attention_affine_alignment(
         observation_coverage_ratio=observation_coverage_ratio,
         canonical_unique_ratio=canonical_unique_ratio,
         observation_unique_ratio=observation_unique_ratio,
+        canonical_token_weights=canonical_pair_weights.token_weights,
+        stable_pair_weight_identity_digest=(
+            stable_pair_weights.pair_weight_identity_digest
+        ),
+        observed_pair_weight_realization_digest=(
+            stable_pair_weights.pair_weight_realization_digest
+        ),
+        canonical_pair_weight_realization_digest=(
+            canonical_pair_weights.pair_weight_realization_digest
+        ),
+        attention_relation_source=descriptor.relation_source,
+        attention_relation_component_identity_digest=(
+            descriptor.component_identity_digest
+        ),
+        attention_relation_keyed_projection_digest=(
+            relation_projection.projection_digest
+        ),
+        attention_relation_qk_operator_metadata_digest=(
+            relation_graph_identity.qk_operator_metadata_digest
+        ),
+        attention_relation_qk_operator_metadata_ready=(
+            relation_graph_identity.qk_operator_metadata_ready
+        ),
         registration_confidence=confidence,
         geometry_reliable=geometry_reliable,
         alignment_digest=build_stable_digest(payload),
         metadata={
             "matcher": "double_sided_keyed_relation_graph_registration",
-            "relation_transform": "canonical_attention_equals_w_observed_attention_w_transpose",
-            "observation_relation_transform": "observed_key_relation_equals_v_key_relation_v_transpose",
+            "relation_transform": "canonical_relation_components_equal_w_observed_relation_components_w_transpose",
+            "observation_relation_transform": "observed_key_components_equal_v_key_components_v_transpose",
             "registration_objective": "weighted_bidirectional_relation_minus_coverage_penalty",
             "transform_family": "bounded_affine_similarity_with_dihedral_support",
-            "robust_estimator": "deterministic_coarse_to_local_relation_search",
+            "robust_estimator": "attack_independent_hierarchical_affine_relation_search",
+            "local_search_schedule": [
+                {
+                    "rotation_delta_degrees": rotation_delta,
+                    "log_scale_delta": log_scale_delta,
+                    "translation_delta": translation_delta,
+                }
+                for rotation_delta, log_scale_delta, translation_delta in local_search_schedule
+            ],
+            "coarse_similarity_domain": {
+                "rotation_bound_degrees": _SIMILARITY_ROTATION_BOUND_DEGREES,
+                "rotation_interval_count": _SIMILARITY_ROTATION_INTERVAL_COUNT,
+                "log_scale_anchor_bound": _SIMILARITY_LOG_SCALE_ANCHOR_BOUND,
+                "translation_anchor_bound": _SIMILARITY_TRANSLATION_ANCHOR_BOUND,
+            },
+            "search_parameter_source": "public_continuous_similarity_domain",
+            "similarity_domain_strictly_bounded": True,
+            "similarity_domain_reference": "square_dihedral_residual",
+            "similarity_residual_rotation_bound_degrees": (
+                _SIMILARITY_ROTATION_BOUND_DEGREES
+            ),
+            "similarity_residual_scale_lower_bound": math.exp(
+                -_SIMILARITY_LOG_SCALE_ANCHOR_BOUND
+            ),
+            "similarity_residual_scale_upper_bound": math.exp(
+                _SIMILARITY_LOG_SCALE_ANCHOR_BOUND
+            ),
+            "similarity_translation_bound": (
+                _SIMILARITY_TRANSLATION_ANCHOR_BOUND
+            ),
+            "local_candidate_boundary_filter": (
+                "dihedral_residual_similarity_domain"
+            ),
+            "stable_pair_weight_identity_digest": (
+                stable_pair_weights.pair_weight_identity_digest
+            ),
+            "stable_pair_weight_identity_ready": (
+                stable_pair_weights.pair_weight_identity_digest
+                == canonical_pair_weights.pair_weight_identity_digest
+            ),
+            "pair_weight_transport": (
+                "token_weight_field_bilinear_transport_then_outer_product"
+            ),
+            "attention_relation_component_names": list(
+                ATTENTION_RELATION_COMPONENT_NAMES
+            ),
+            "attention_relation_component_weights": list(
+                ATTENTION_RELATION_COMPONENT_WEIGHTS
+            ),
+            "attention_relation_source": descriptor.relation_source,
+            "attention_relation_direct_qk_source_ready": (
+                descriptor.relation_source == DIRECT_QK_RELATION_SOURCE
+            ),
+            "attention_relation_probability_scope": (
+                "sampled_image_token_qk_relation_probability"
+            ),
+            "attention_relation_component_identity_digest": (
+                descriptor.component_identity_digest
+            ),
+            "attention_relation_keyed_projection_digest": (
+                relation_projection.projection_digest
+            ),
+            "attention_relation_qk_operator_metadata_records": list(
+                relation_graph_identity.qk_operator_metadata_records
+            ),
+            "attention_relation_qk_operator_metadata_digest": (
+                relation_graph_identity.qk_operator_metadata_digest
+            ),
+            "attention_relation_qk_operator_metadata_ready": (
+                relation_graph_identity.qk_operator_metadata_ready
+            ),
+            "attention_relation_soft_rank_temperature": (
+                descriptor.soft_rank_temperature
+            ),
+            "attention_relation_soft_rank_scale": descriptor.soft_rank_scale,
+            "attention_relation_relative_distance_scale": (
+                descriptor.relative_distance_scale
+            ),
             "coordinate_source": "original_image_token_grid",
             "registration_candidate_count": int(evaluated.transforms.shape[0]),
             "sync_margin_duplicate_transform_tolerance": 1e-4,
@@ -676,5 +1071,6 @@ def recover_attention_affine_alignment(
             "observation_relation_weight": _OBSERVATION_RELATION_WEIGHT,
             "registration_coverage_penalty_weight": _COVERAGE_PENALTY_WEIGHT,
             "minimum_registration_coverage": _MINIMUM_REGISTRATION_COVERAGE,
+            "inlier_ratio_denominator": "valid_covered_anchor_count",
         },
     )

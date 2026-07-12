@@ -10,6 +10,9 @@ from zipfile import ZipFile
 import pytest
 
 from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
+from experiments.protocol.dataset_quality import (
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
+)
 from experiments.protocol.pilot_paper_fixed_fpr import (
     bounded_hoeffding_confidence_interval,
 )
@@ -114,8 +117,17 @@ def write_dataset_quality_inputs(repo_root: Path, paper_claim_scale: str) -> Non
     write_csv_rows(
         quality_dir / "dataset_quality_metrics.csv",
         [
-            {"quality_metric_name": "fid", "metric_status": "measured"},
-            {"quality_metric_name": "kid", "metric_status": "measured"},
+            {
+                "quality_metric_name": metric_name,
+                "quality_metric_value": metric_value,
+                "paper_metric_name": metric_name,
+                "metric_status": "measured",
+            }
+            for metric_name, metric_value in zip(
+                FORMAL_DATASET_QUALITY_METRIC_NAMES,
+                (1.0, 0.01, 0.0),
+                strict=True,
+            )
         ],
     )
     (quality_dir / "dataset_quality_summary.json").write_text(

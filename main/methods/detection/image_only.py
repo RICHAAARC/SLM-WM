@@ -14,7 +14,11 @@ from main.methods.carrier.keyed_tensor import (
 )
 from main.methods.geometry.attention_alignment import AttentionAlignmentResult, recover_attention_affine_alignment
 from main.methods.geometry.differentiable_attention import (
+    DIRECT_QK_RELATION_SOURCE,
     attention_geometry_score,
+    build_attention_relation_graph_identity,
+    build_stable_attention_pair_weights,
+    restore_transported_stable_attention_pair_weights,
     select_stable_attention_tokens,
 )
 
@@ -165,24 +169,68 @@ def detect_image_only_watermark(
     aligned_image: Any | None = None
     stable_token_indices: tuple[int, ...] = ()
     stable_token_selection_digest = ""
-    aligned_stable_token_indices: tuple[int, ...] = ()
-    aligned_stable_token_selection_digest = ""
+    stable_pair_weight_identity_digest = ""
+    observed_pair_weight_realization_digest = ""
+    aligned_pair_weight_realization_digest = ""
+    stable_pair_weight_identity_ready = False
+    attention_record_schema_digest = ""
+    attention_relation_component_names: tuple[str, ...] = ()
+    attention_relation_source = ""
+    attention_relation_component_identity_digest = ""
+    attention_relation_keyed_projection_digest = ""
+    attention_relation_qk_operator_metadata_digest = ""
     if image_attention_extractor is not None:
         attention_records = image_attention_extractor(image)
         if not attention_records:
             raise RuntimeError("图像盲检没有返回真实 Q/K attention")
+        attention_record_schema = tuple(
+            (layer_name, tuple(token_indices))
+            for layer_name, _, token_indices in attention_records
+        )
+        attention_record_schema_digest = build_stable_digest(
+            {"attention_record_schema": attention_record_schema}
+        )
+        relation_identity = build_attention_relation_graph_identity(
+            attention_records,
+            key_material,
+        )
+        if (
+            relation_identity.relation_source != DIRECT_QK_RELATION_SOURCE
+            or not relation_identity.qk_operator_metadata_ready
+        ):
+            raise RuntimeError("正式图像盲检注意力必须绑定完整真实 Q/K 算子元数据")
+        attention_relation_component_names = relation_identity.component_names
+        attention_relation_source = relation_identity.relation_source
+        attention_relation_component_identity_digest = (
+            relation_identity.component_identity_digest
+        )
+        attention_relation_keyed_projection_digest = (
+            relation_identity.keyed_projection_digest
+        )
+        attention_relation_qk_operator_metadata_digest = (
+            relation_identity.qk_operator_metadata_digest
+        )
         stable_selection = select_stable_attention_tokens(
             attention_records,
             stable_token_fraction=config.attention_stable_token_fraction,
         )
         stable_token_indices = stable_selection.token_indices
         stable_token_selection_digest = stable_selection.selection_digest
+        stable_pair_weights = build_stable_attention_pair_weights(
+            attention_records,
+            stable_selection,
+            unstable_pair_weight=config.attention_unstable_pair_weight,
+        )
+        stable_pair_weight_identity_digest = (
+            stable_pair_weights.pair_weight_identity_digest
+        )
+        observed_pair_weight_realization_digest = (
+            stable_pair_weights.pair_weight_realization_digest
+        )
         score_tensor = attention_geometry_score(
             attention_records,
             key_material,
-            stable_token_positions=stable_selection.token_positions,
-            stable_token_fraction=config.attention_stable_token_fraction,
-            unstable_pair_weight=config.attention_unstable_pair_weight,
+            stable_pair_weights=stable_pair_weights,
         )
         raw_geometry_score = float(score_tensor.detach().item())
         alignment_candidates = tuple(
@@ -191,6 +239,7 @@ def detect_image_only_watermark(
                 key_material,
                 layer_name,
                 token_indices,
+                stable_pair_weights,
                 anchor_count=config.attention_anchor_count,
                 residual_threshold=config.attention_residual_threshold,
                 minimum_inlier_ratio=config.attention_minimum_inlier_ratio,
@@ -212,24 +261,57 @@ def detect_image_only_watermark(
             aligned_attention_records = image_attention_extractor(aligned_image)
             if not aligned_attention_records:
                 raise RuntimeError("对齐图像没有返回真实 Q/K attention")
-            aligned_stable_selection = select_stable_attention_tokens(
-                aligned_attention_records,
-                stable_token_fraction=config.attention_stable_token_fraction,
+            aligned_attention_record_schema = tuple(
+                (layer_name, tuple(token_indices))
+                for layer_name, _, token_indices in aligned_attention_records
             )
-            aligned_stable_token_indices = aligned_stable_selection.token_indices
-            aligned_stable_token_selection_digest = (
-                aligned_stable_selection.selection_digest
+            if aligned_attention_record_schema != attention_record_schema:
+                raise RuntimeError("对齐前后真实 Q/K 层身份或二维网格不一致")
+            aligned_relation_identity = build_attention_relation_graph_identity(
+                aligned_attention_records,
+                key_material,
+            )
+            if (
+                aligned_relation_identity.relation_source
+                != DIRECT_QK_RELATION_SOURCE
+                or aligned_relation_identity.component_identity_digest
+                != attention_relation_component_identity_digest
+                or aligned_relation_identity.keyed_projection_digest
+                != attention_relation_keyed_projection_digest
+                or not aligned_relation_identity.qk_operator_metadata_ready
+                or aligned_relation_identity.qk_operator_metadata_digest
+                != attention_relation_qk_operator_metadata_digest
+            ):
+                raise RuntimeError("对齐前后没有共享同一四分量 Q/K 关系图身份")
+            aligned_pair_weights = restore_transported_stable_attention_pair_weights(
+                stable_pair_weights,
+                alignment.canonical_token_weights,
+                coordinate_space="registered_canonical_qk_grid",
+                expected_realization_digest=(
+                    alignment.canonical_pair_weight_realization_digest
+                ),
+            )
+            aligned_pair_weight_realization_digest = (
+                aligned_pair_weights.pair_weight_realization_digest
             )
             sync_score_tensor = attention_geometry_score(
                 aligned_attention_records,
                 key_material,
-                stable_token_positions=aligned_stable_selection.token_positions,
-                stable_token_fraction=config.attention_stable_token_fraction,
-                unstable_pair_weight=config.attention_unstable_pair_weight,
+                stable_pair_weights=aligned_pair_weights,
             )
             sync_score = float(sync_score_tensor.detach().item())
+            stable_pair_weight_identity_ready = (
+                alignment.stable_pair_weight_identity_digest
+                == stable_pair_weights.pair_weight_identity_digest
+                == aligned_pair_weights.pair_weight_identity_digest
+                and alignment.observed_pair_weight_realization_digest
+                == stable_pair_weights.pair_weight_realization_digest
+                and alignment.canonical_pair_weight_realization_digest
+                == aligned_pair_weights.pair_weight_realization_digest
+            )
         geometry_reliable = (
             alignment.geometry_reliable
+            and stable_pair_weight_identity_ready
             and geometry_score >= config.geometry_score_threshold
             and registration_confidence >= config.registration_confidence_threshold
             and sync_score is not None
@@ -290,9 +372,27 @@ def detect_image_only_watermark(
         "alignment_digest": None if alignment is None else alignment.alignment_digest,
         "stable_token_indices": stable_token_indices,
         "stable_token_selection_digest": stable_token_selection_digest,
-        "aligned_stable_token_indices": aligned_stable_token_indices,
-        "aligned_stable_token_selection_digest": (
-            aligned_stable_token_selection_digest
+        "stable_pair_weight_identity_digest": stable_pair_weight_identity_digest,
+        "observed_pair_weight_realization_digest": (
+            observed_pair_weight_realization_digest
+        ),
+        "aligned_pair_weight_realization_digest": (
+            aligned_pair_weight_realization_digest
+        ),
+        "stable_pair_weight_identity_ready": stable_pair_weight_identity_ready,
+        "attention_record_schema_digest": attention_record_schema_digest,
+        "attention_relation_component_names": (
+            attention_relation_component_names
+        ),
+        "attention_relation_source": attention_relation_source,
+        "attention_relation_component_identity_digest": (
+            attention_relation_component_identity_digest
+        ),
+        "attention_relation_keyed_projection_digest": (
+            attention_relation_keyed_projection_digest
+        ),
+        "attention_relation_qk_operator_metadata_digest": (
+            attention_relation_qk_operator_metadata_digest
         ),
         "content_failure_reason": content_failure_reason,
         "rescue_applied": rescue_applied,
@@ -329,9 +429,49 @@ def detect_image_only_watermark(
             "attention_sync_source": "aligned_image_reextracted_real_qk",
             "stable_token_indices": list(stable_token_indices),
             "stable_token_selection_digest": stable_token_selection_digest,
-            "aligned_stable_token_indices": list(aligned_stable_token_indices),
-            "aligned_stable_token_selection_digest": (
-                aligned_stable_token_selection_digest
+            "stable_pair_weight_identity_digest": (
+                stable_pair_weight_identity_digest
+            ),
+            "observed_pair_weight_realization_digest": (
+                observed_pair_weight_realization_digest
+            ),
+            "aligned_pair_weight_realization_digest": (
+                aligned_pair_weight_realization_digest
+            ),
+            "stable_pair_weight_identity_ready": (
+                stable_pair_weight_identity_ready
+            ),
+            "stable_pair_weight_flow": (
+                "single_selection_observed_registration_canonical_recheck"
+            ),
+            "attention_record_schema_digest": attention_record_schema_digest,
+            "attention_relation_component_names": list(
+                attention_relation_component_names
+            ),
+            "attention_relation_source": attention_relation_source,
+            "attention_relation_direct_qk_source_ready": (
+                attention_relation_source == DIRECT_QK_RELATION_SOURCE
+            ),
+            "attention_relation_probability_scope": (
+                "sampled_image_token_qk_relation_probability"
+            ),
+            "attention_relation_component_identity_digest": (
+                attention_relation_component_identity_digest
+            ),
+            "attention_relation_keyed_projection_digest": (
+                attention_relation_keyed_projection_digest
+            ),
+            "attention_relation_qk_operator_metadata_records": (
+                []
+                if image_attention_extractor is None
+                else list(relation_identity.qk_operator_metadata_records)
+            ),
+            "attention_relation_qk_operator_metadata_digest": (
+                attention_relation_qk_operator_metadata_digest
+            ),
+            "attention_relation_qk_operator_metadata_ready": (
+                bool(image_attention_extractor is not None)
+                and relation_identity.qk_operator_metadata_ready
             ),
             "attention_stable_token_fraction": (
                 config.attention_stable_token_fraction

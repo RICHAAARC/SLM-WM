@@ -17,7 +17,10 @@ from experiments.artifacts import dataset_level_quality_outputs
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.artifacts.manifest_schema import manifest_config_digest_ready
 from experiments.protocol.attacks import attack_config_digest, default_attack_configs
-from experiments.protocol.dataset_quality import build_dataset_quality_image_records
+from experiments.protocol.dataset_quality import (
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
+    build_dataset_quality_image_records,
+)
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments
 from experiments.runners.semantic_watermark_runtime import (
@@ -369,8 +372,10 @@ def test_dataset_quality_writer_and_package_share_manifest_config(
         attacked_path.write_bytes(f"attacked-{index}".encode("utf-8"))
         registry_rows.append(
             {
+                "run_id": f"manifest_quality_run_{index}",
                 "prompt_id": prompt_id,
-                "attack_name": "clean_watermarked_pair",
+                "attack_name": "watermark_embedding",
+                "image_pair_role": "clean_to_watermarked",
                 "source_image_path": source_path.relative_to(tmp_path).as_posix(),
                 "source_image_digest": hashlib.sha256(
                     source_path.read_bytes()
@@ -379,6 +384,7 @@ def test_dataset_quality_writer_and_package_share_manifest_config(
                 "attacked_image_digest": hashlib.sha256(
                     attacked_path.read_bytes()
                 ).hexdigest(),
+                "supports_paper_claim": False,
             }
         )
     _write_jsonl(registry_path, registry_rows)
@@ -496,7 +502,11 @@ def test_dataset_quality_writer_and_package_share_manifest_config(
                 "sample_pair_count": count,
                 "supports_paper_claim": False,
             }
-            for name, value in (("fid", 1.0), ("kid", 0.01))
+            for name, value in zip(
+                FORMAL_DATASET_QUALITY_METRIC_NAMES,
+                (1.0, 0.01, 0.0),
+                strict=True,
+            )
         ]
 
     monkeypatch.setattr(
@@ -508,7 +518,7 @@ def test_dataset_quality_writer_and_package_share_manifest_config(
         paper_run_name=PAPER_RUN_NAME,
         target_fpr=TARGET_FPR,
         root=tmp_path,
-        real_attack_registry_path=registry_path,
+        quality_image_registry_path=registry_path,
         formal_feature_records_path=feature_source_path,
         formal_min_sample_count=3,
     )

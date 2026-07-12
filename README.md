@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-SLM-WM 的核心思路是在扩散模型潜空间中构造三个受语义条件约束的互补分支: 空间低通 LF 主证据、高斯幅值尾部截断鲁棒补充证据和真实 Q/K Self-Attention 相对关系几何锚点。三个分支分别使用分支风险场, 并通过716维完整特征 Jacobian 的精确 JVP/VJP 与无阻尼 PSD-CG 约束投影求解 rank-4 Null Space。检测侧只读取待检图像、密钥和公开模型配置, 在包含几何救回的完整 fixed-FPR 协议下冻结阈值。
+SLM-WM 的核心思路是在扩散模型潜空间中构造三个受语义条件约束的互补分支: 空间低通 LF 主证据、高斯幅值尾部截断鲁棒补充证据和真实 Q/K Self-Attention 相对关系几何锚点。三个分支分别使用分支风险场, 并通过716维完整特征 Jacobian 的精确 JVP/VJP 与无阻尼 PSD-CG 约束投影求解 rank-4 Null Space。注意力算子直接从冻结二维抽样图像 token 的真实 Q/K 构造中心化 logit、可微 rank、关系概率和距离调制中心化概率四分量图；第4分量是概率偏离与公开距离偏离的双中心交互, 均匀 attention 时严格为0。各分量逐行归一化后执行密钥投影并等权组合。注意力嵌入与仅图像盲检共享四分量算子和稳定 token pair 权重构造规则, 但分别由各自可见的真实 Q/K 数据产生身份；一次注入内部冻结一个身份, 一次盲检则在 raw、registration 和 aligned 路径中冻结另一个身份。几何恢复使用与攻击配置无关的分层搜索。最终成图必须在 CUDA 上比较同 seed、同 scheduler、同 LF/tail 配置与算子且只关闭 attention geometry 的 carrier-only 反事实与完整方法。首个注入前 latent 由 dtype、shape 和全部原始字节 SHA-256 证明相同；carrier-only 的逐注入原子必须证明没有 attention 分数、更新、关系、pair 身份或 attention Null Space。该对照估计 attention 开关经后续 LF、tail 和生成轨迹交互传播后的总机制效应, 不假设两侧 realized carrier update 完全相等, 也不解释为纯直接效应。clean、carrier-only 与完整方法三对最终成图必须同时通过完整 CLIP 语义与视觉特征保持门禁, 随后完整方法还必须通过自身盲选择和冻结 carrier-only pair 权重的双归因增益门禁。检测侧只读取待检图像、密钥和公开模型配置, 在包含几何救回的完整 fixed-FPR 协议下冻结阈值。
 
 高斯幅值尾部截断分支的正式标识为 `tail_robust`。该分支按高斯模板元素的绝对幅值选择分布尾部, 不执行 FFT、DCT、带通滤波或空间频带选择, 因而不具有空间频率含义。
 

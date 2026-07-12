@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 import hashlib
 import math
 from pathlib import Path
@@ -11,6 +11,7 @@ from typing import Any, Iterable, Mapping
 
 from experiments.ablations.runtime_rerun import (
     FORMAL_RUNTIME_RERUN_ABLATION_IDS,
+    FORMAL_RUNTIME_RERUN_ABLATION_SPECS,
     FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
 )
 from experiments.artifacts.image_only_detection_metrics import (
@@ -26,6 +27,10 @@ from experiments.protocol.attacks import (
     build_attack_record_digest,
     build_attack_matrix_manifest_config,
     default_attack_configs,
+)
+from experiments.protocol.dataset_quality import (
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
+    formal_dataset_quality_metric_protocol,
 )
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_METRIC_BOUNDS,
@@ -73,7 +78,9 @@ from paper_experiments.analysis.fixed_fpr_threshold_audit import (
 )
 from paper_experiments.analysis.formal_record_statistics import (
     FormalRecordStatisticsError,
+    rebuild_and_validate_ablation_runtime_aggregates,
     rebuild_and_validate_ablation_necessity_statistics,
+    rebuild_and_validate_dataset_quality_feature_identity,
     rebuild_and_validate_formal_fid_kid_metrics,
 )
 from paper_experiments.analysis.paper_evidence_audit import (
@@ -82,6 +89,9 @@ from paper_experiments.analysis.paper_evidence_audit import (
     build_evidence_audit_materialization,
 )
 from paper_experiments.analysis.result_analysis_payload import (
+    FORMAL_FAILURE_CASE_LIMIT,
+    ResultAnalysisSemanticError,
+    rebuild_and_validate_result_analysis_semantics,
     result_analysis_payload_binding_ready,
 )
 from paper_experiments.baselines.formal_import import (
@@ -143,6 +153,8 @@ class ResultClosureGateInput:
     expected_prompt_id_digest: str
     expected_calibration_prompt_id_digest: str
     expected_test_prompt_id_digest: str
+    expected_prompt_split_by_id: dict[str, str]
+    expected_prompt_digest_by_id: dict[str, str]
     source_file_sha256: dict[str, str]
     attack_report: dict[str, Any]
     attack_detection_records: tuple[dict[str, Any], ...]
@@ -183,9 +195,13 @@ class ResultClosureGateInput:
     ablation_summary: dict[str, Any]
     ablation_manifest: dict[str, Any]
     ablation_runtime_records: tuple[dict[str, Any], ...]
+    ablation_detection_records: tuple[dict[str, Any], ...]
+    ablation_frozen_protocols: dict[str, dict[str, Any]]
     ablation_necessity_rows: tuple[dict[str, Any], ...]
     ablation_necessity_summary: dict[str, Any]
     dataset_quality_summary: dict[str, Any]
+    dataset_quality_image_records: tuple[dict[str, Any], ...]
+    dataset_quality_image_resolution_records: tuple[dict[str, Any], ...]
     dataset_quality_feature_report: dict[str, Any]
     dataset_quality_metrics: tuple[dict[str, Any], ...]
     dataset_quality_feature_records: tuple[dict[str, Any], ...]
@@ -203,6 +219,13 @@ class ResultClosureGateInput:
     submission_readiness_manifest: dict[str, Any]
     entry_review_report: dict[str, Any]
     entry_review_manifest: dict[str, Any]
+    result_analysis_governed_payload_path_map: dict[str, str]
+    result_analysis_baseline_comparison_rows: tuple[dict[str, Any], ...]
+    result_analysis_confidence_interval_rows: tuple[dict[str, Any], ...]
+    result_analysis_per_attack_superiority_rows: tuple[dict[str, Any], ...]
+    result_analysis_failure_case_rows: tuple[dict[str, Any], ...]
+    result_analysis_failure_case_svg_text: str
+    result_analysis_failure_figure_path: str
 
     def to_dict(self) -> dict[str, Any]:
         """转换为紧凑字典, 大型原始记录由 source SHA 与 manifest 单独绑定."""
@@ -216,7 +239,15 @@ class ResultClosureGateInput:
                 "attack_detection_records",
                 "attacked_image_registry",
                 "ablation_runtime_records",
+                "ablation_detection_records",
+                "dataset_quality_image_records",
+                "dataset_quality_image_resolution_records",
                 "dataset_quality_feature_records",
+                "result_analysis_baseline_comparison_rows",
+                "result_analysis_confidence_interval_rows",
+                "result_analysis_per_attack_superiority_rows",
+                "result_analysis_failure_case_rows",
+                "result_analysis_failure_case_svg_text",
             }
         }
         return payload
@@ -2459,6 +2490,7 @@ def _baseline_ready(bundle: ResultClosureGateInput) -> bool:
             bundle.baseline_manifest,
             artifact_id="external_baseline_comparison_manifest",
             required_output_suffixes=(
+                f"outputs/external_baseline_comparison/{scale}/baseline_comparison_table.csv",
                 f"outputs/external_baseline_comparison/{scale}/baseline_runtime_report.json",
                 f"outputs/external_baseline_comparison/{scale}/manifest.local.json",
             ),
@@ -3031,6 +3063,76 @@ def _result_analysis_ready(bundle: ResultClosureGateInput) -> bool:
     )
 
 
+def _result_analysis_semantic_rebuild_ready(
+    bundle: ResultClosureGateInput,
+) -> bool:
+    """从原子记录独立重建七类论文表图并核对每个派生值。
+
+    通用工程写法是把文件读取留在最外层 writer, 在此只消费不可变记录并
+    调用纯函数。项目特定约束是主比较表、攻击表、FID/KID、CI、逐攻击结论
+    与失败案例图必须同时通过, 任何单表自声明都不能替代完整语义闭合。
+    """
+
+    failure_case_limit = _int_value(
+        bundle.result_analysis_summary.get("failure_case_limit")
+    )
+    if failure_case_limit != FORMAL_FAILURE_CASE_LIMIT:
+        return False
+    try:
+        rebuilt = rebuild_and_validate_result_analysis_semantics(
+            paper_claim_scale=bundle.expected_paper_claim_scale,
+            governed_payload_path_map=(
+                bundle.result_analysis_governed_payload_path_map
+            ),
+            target_fpr=bundle.expected_target_fpr,
+            result_records=bundle.result_records,
+            attack_detection_records=bundle.attack_detection_records,
+            attack_family_metrics=bundle.attack_family_metrics,
+            baseline_comparison_rows=(
+                bundle.result_analysis_baseline_comparison_rows
+            ),
+            dataset_quality_feature_records=(
+                bundle.dataset_quality_feature_records
+            ),
+            dataset_quality_metric_rows=bundle.dataset_quality_metrics,
+            expected_quality_pair_count=bundle.expected_prompt_count,
+            paired_superiority_rows=bundle.paired_superiority_rows,
+            confidence_interval_rows=(
+                bundle.result_analysis_confidence_interval_rows
+            ),
+            per_attack_superiority_rows=(
+                bundle.result_analysis_per_attack_superiority_rows
+            ),
+            failure_case_rows=bundle.result_analysis_failure_case_rows,
+            failure_case_svg_text=(
+                bundle.result_analysis_failure_case_svg_text
+            ),
+            failure_figure_path=bundle.result_analysis_failure_figure_path,
+            failure_case_limit=failure_case_limit,
+        )
+    except (ResultAnalysisSemanticError, KeyError, TypeError, ValueError):
+        return False
+    manifest_metadata = bundle.result_analysis_manifest.get("metadata")
+    rebuilt_semantic_digest = str(
+        rebuilt.get("result_analysis_semantic_rebuild_digest", "")
+    )
+    return bool(
+        rebuilt.get("governed_paper_payload_semantic_rebuild_ready") is True
+        and rebuilt_semantic_digest
+        == str(
+            bundle.result_analysis_summary.get(
+                "result_analysis_semantic_rebuild_digest",
+                "",
+            )
+        )
+        and isinstance(manifest_metadata, Mapping)
+        and rebuilt_semantic_digest
+        == str(
+            manifest_metadata.get("result_analysis_semantic_rebuild_digest", "")
+        )
+    )
+
+
 def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
     """核验正式消融由真实重运行产生并通过逐配置校准门禁。"""
 
@@ -3133,6 +3235,7 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
             artifact_id="formal_mechanism_ablation_manifest",
             required_output_suffixes=(
                 f"outputs/formal_mechanism_ablation/{scale}/runtime_rerun_records.jsonl",
+                f"outputs/formal_mechanism_ablation/{scale}/formal_detection_records.jsonl",
                 f"outputs/formal_mechanism_ablation/{scale}/per_ablation_frozen_protocols.json",
                 f"outputs/formal_mechanism_ablation/{scale}/mechanism_ablation_metrics.csv",
                 f"outputs/formal_mechanism_ablation/{scale}/mechanism_necessity_statistics.csv",
@@ -3163,6 +3266,74 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
         and isinstance(manifest_metadata, Mapping)
         and _strict_bool(bundle.ablation_manifest.get("metadata", {}).get("generation_rerun_required"))
         and _strict_bool(bundle.ablation_manifest.get("metadata", {}).get("per_ablation_calibration_required"))
+    )
+
+
+def _ablation_atomic_record_rebuild_ready(
+    bundle: ResultClosureGateInput,
+) -> bool:
+    """从冻结协议和逐检测原子重建消融逐 Prompt 聚合字段。"""
+
+    try:
+        rebuilt = rebuild_and_validate_ablation_runtime_aggregates(
+            bundle.ablation_runtime_records,
+            bundle.ablation_detection_records,
+            bundle.ablation_frozen_protocols,
+            expected_ablation_ids=FORMAL_RUNTIME_RERUN_ABLATION_IDS,
+            expected_prompt_split_by_id=bundle.expected_prompt_split_by_id,
+            expected_prompt_digest_by_id=bundle.expected_prompt_digest_by_id,
+            expected_runtime_config_by_ablation_id={
+                spec.ablation_id: asdict(spec)
+                for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS
+            },
+            expected_runtime_output_root=(
+                f"outputs/formal_mechanism_ablation/"
+                f"{bundle.expected_paper_claim_scale}/runs"
+            ),
+            expected_target_fpr=bundle.expected_target_fpr,
+        )
+    except (FormalRecordStatisticsError, KeyError, TypeError, ValueError):
+        return False
+    manifest_config = bundle.ablation_manifest.get("config")
+    manifest_metadata = bundle.ablation_manifest.get("metadata")
+    if not isinstance(manifest_config, Mapping) or not isinstance(
+        manifest_metadata,
+        Mapping,
+    ):
+        return False
+    detection_path = (
+        f"outputs/formal_mechanism_ablation/"
+        f"{bundle.expected_paper_claim_scale}/formal_detection_records.jsonl"
+    )
+    protocol_path = (
+        f"outputs/formal_mechanism_ablation/"
+        f"{bundle.expected_paper_claim_scale}/per_ablation_frozen_protocols.json"
+    )
+    expected_atom_fields = {
+        "formal_detection_records_sha256": _declared_source_digest(
+            bundle.source_file_sha256,
+            detection_path,
+        ),
+        "formal_detection_records_digest": rebuilt.get(
+            "ablation_detection_records_digest"
+        ),
+        "per_ablation_frozen_protocols_sha256": _declared_source_digest(
+            bundle.source_file_sha256,
+            protocol_path,
+        ),
+        "per_ablation_frozen_protocols_digest": rebuilt.get(
+            "ablation_frozen_protocols_digest"
+        ),
+    }
+    return bool(
+        rebuilt.get("ablation_runtime_aggregate_rebuild_ready") is True
+        and all(_is_sha256(value) for value in expected_atom_fields.values())
+        and all(
+            bundle.ablation_summary.get(field_name) == value
+            and manifest_config.get(field_name) == value
+            and manifest_metadata.get(field_name) == value
+            for field_name, value in expected_atom_fields.items()
+        )
     )
 
 
@@ -3255,20 +3426,24 @@ def _dataset_quality_ready(bundle: ResultClosureGateInput) -> bool:
         "formal_sample_scale_ready",
         "canonical_formal_feature_extractor_ready",
         "formal_fid_kid_claim_gate_ready",
+        "image_resolution_identity_ready",
     )
     sample_pair_count = _int_value(bundle.dataset_quality_summary.get("sample_pair_count"))
     source_count = _int_value(bundle.dataset_quality_summary.get("source_image_count"))
     comparison_count = _int_value(bundle.dataset_quality_summary.get("comparison_image_count"))
     expected_prompt_count = bundle.expected_prompt_count
+    expected_image_path_count = expected_prompt_count * 2
     feature_report = bundle.dataset_quality_feature_report
     metric_rows = bundle.dataset_quality_metrics
     metric_names = [str(row.get("quality_metric_name", "")) for row in metric_rows]
     metric_contract_ready = (
-        len(metric_rows) == 2
-        and len(set(metric_names)) == 2
-        and set(metric_names) == {"fid", "kid"}
+        len(metric_rows) == len(FORMAL_DATASET_QUALITY_METRIC_NAMES)
+        and metric_names == list(FORMAL_DATASET_QUALITY_METRIC_NAMES)
+        and [str(row.get("paper_metric_name", "")) for row in metric_rows]
+        == list(FORMAL_DATASET_QUALITY_METRIC_NAMES)
         and all(str(row.get("metric_status", "")) == "measured" for row in metric_rows)
         and all(_float_value(row.get("quality_metric_value")) is not None for row in metric_rows)
+        and float(metric_rows[-1].get("quality_metric_value", -1.0)) >= 0.0
         and all(
             _int_value(row.get(field_name)) == expected_prompt_count
             for row in metric_rows
@@ -3312,6 +3487,30 @@ def _dataset_quality_ready(bundle: ResultClosureGateInput) -> bool:
         and _int_value(bundle.dataset_quality_summary.get("feature_issue_count")) == 0
         and _int_value(bundle.dataset_quality_summary.get("formal_feature_record_count"))
         == expected_prompt_count * 2
+        and _int_value(
+            bundle.dataset_quality_summary.get("image_resolution_record_count")
+        )
+        == expected_image_path_count
+        and _int_value(
+            bundle.dataset_quality_summary.get("resolved_image_file_count")
+        )
+        == expected_image_path_count
+        and _int_value(
+            bundle.dataset_quality_summary.get("missing_image_file_count")
+        )
+        == 0
+        and bundle.dataset_quality_summary.get("formal_metric_protocol")
+        == formal_dataset_quality_metric_protocol()
+        and bundle.dataset_quality_summary.get("formal_metric_protocol_digest")
+        == formal_dataset_quality_metric_protocol()[
+            "formal_metric_protocol_digest"
+        ]
+        and _int_value(
+            bundle.dataset_quality_summary.get("kid_effective_subset_size")
+        )
+        == formal_dataset_quality_metric_protocol()[
+            "kid_effective_subset_size_by_paper_run"
+        ][scale]
         and _is_sha256(bundle.dataset_quality_summary.get("formal_feature_records_sha256", ""))
         and bundle.dataset_quality_feature_records_sha256
         == str(bundle.dataset_quality_summary.get("formal_feature_records_sha256", ""))
@@ -3336,6 +3535,8 @@ def _dataset_quality_ready(bundle: ResultClosureGateInput) -> bool:
             bundle.dataset_quality_manifest,
             artifact_id="dataset_level_quality_manifest",
             required_output_suffixes=(
+                f"outputs/dataset_level_quality/{scale}/dataset_quality_image_records.jsonl",
+                f"outputs/dataset_level_quality/{scale}/dataset_quality_image_resolution_records.jsonl",
                 f"outputs/dataset_level_quality/{scale}/dataset_quality_formal_feature_records.jsonl",
                 f"outputs/dataset_level_quality/{scale}/dataset_quality_formal_feature_import_report.json",
                 f"outputs/dataset_level_quality/{scale}/dataset_quality_metrics.csv",
@@ -3350,6 +3551,7 @@ def _dataset_quality_ready(bundle: ResultClosureGateInput) -> bool:
                 "formal_fid_kid_ready",
                 "formal_sample_scale_ready",
                 "formal_fid_kid_claim_gate_ready",
+                "kid_effective_subset_size",
                 *coverage_fields,
             ),
         )
@@ -3370,6 +3572,45 @@ def _dataset_quality_feature_record_rebuild_ready(
     except (FormalRecordStatisticsError, KeyError, TypeError, ValueError):
         return False
     return True
+
+
+def _dataset_quality_feature_identity_rebuild_ready(
+    bundle: ResultClosureGateInput,
+) -> bool:
+    """把正式 Inception 特征绑定到图像 SHA 和科学完成单元来源。"""
+
+    execution_lock = bundle.dataset_quality_manifest.get(
+        "formal_execution_run_lock"
+    )
+    if not isinstance(execution_lock, Mapping):
+        return False
+    formal_execution_commit = str(
+        execution_lock.get("formal_execution_commit", "")
+    )
+    formal_execution_lock_digest = str(
+        execution_lock.get("formal_execution_lock_digest", "")
+    )
+    if not formal_execution_commit or not _is_sha256(
+        formal_execution_lock_digest
+    ):
+        return False
+    try:
+        rebuilt = rebuild_and_validate_dataset_quality_feature_identity(
+            bundle.dataset_quality_image_records,
+            bundle.dataset_quality_image_resolution_records,
+            bundle.dataset_quality_feature_records,
+            bundle.dataset_quality_summary,
+            bundle.source_file_sha256,
+            expected_pair_count=bundle.expected_prompt_count,
+            expected_prompt_id_digest=bundle.expected_prompt_id_digest,
+            expected_formal_execution_commit=formal_execution_commit,
+            expected_formal_execution_lock_digest=(
+                formal_execution_lock_digest
+            ),
+        )
+    except (FormalRecordStatisticsError, KeyError, TypeError, ValueError):
+        return False
+    return rebuilt.get("dataset_quality_feature_identity_rebuild_ready") is True
 
 
 def _rebuild_evidence_audit(
@@ -3769,11 +4010,41 @@ def build_result_closure_gate_checks(bundle: ResultClosureGateInput) -> list[dic
             "paper_result_analysis_not_ready",
         ),
         _check(
+            "result_analysis_semantic_rebuild_ready",
+            "result_analysis",
+            _result_analysis_semantic_rebuild_ready(bundle),
+            (
+                "result_records",
+                "attack_detection_records",
+                "attack_family_metrics",
+                "baseline_comparison_rows",
+                "dataset_quality_feature_records",
+                "dataset_quality_metrics",
+                "paired_superiority_rows",
+                "confidence_interval_rows",
+                "per_attack_superiority_rows",
+                "failure_case_records",
+                "failure_case_figure",
+            ),
+            "paper_result_payload_not_rebuildable_from_governed_records",
+        ),
+        _check(
             "formal_ablation_ready",
             "mechanism_ablation",
             _ablation_ready(bundle),
             ("ablation_summary", "ablation_manifest"),
             "formal_mechanism_ablation_not_ready",
+        ),
+        _check(
+            "ablation_atomic_record_rebuild_ready",
+            "mechanism_ablation",
+            _ablation_atomic_record_rebuild_ready(bundle),
+            (
+                "ablation_runtime_records",
+                "ablation_detection_records",
+                "ablation_frozen_protocols",
+            ),
+            "ablation_runtime_aggregates_not_rebuildable_from_detection_atoms",
         ),
         _check(
             "ablation_raw_record_rebuild_ready",
@@ -3792,6 +4063,18 @@ def build_result_closure_gate_checks(bundle: ResultClosureGateInput) -> list[dic
             _dataset_quality_ready(bundle),
             ("dataset_quality_summary", "dataset_quality_manifest"),
             "formal_fid_kid_not_ready",
+        ),
+        _check(
+            "dataset_quality_feature_identity_rebuild_ready",
+            "dataset_quality",
+            _dataset_quality_feature_identity_rebuild_ready(bundle),
+            (
+                "dataset_quality_image_records",
+                "dataset_quality_image_resolution_records",
+                "dataset_quality_feature_records",
+                "dataset_quality_scientific_unit_provenance",
+            ),
+            "formal_features_not_bound_to_images_and_scientific_provenance",
         ),
         _check(
             "dataset_quality_feature_record_rebuild_ready",
@@ -3898,6 +4181,12 @@ def build_result_closure_gate_report(
             {"summary": bundle.ablation_summary, "manifest": bundle.ablation_manifest}
         ),
         "formal_ablation_raw_records_digest": formal_ablation_raw_records_digest,
+        "formal_ablation_detection_atoms_digest": build_stable_digest(
+            bundle.ablation_detection_records
+        ),
+        "formal_ablation_frozen_protocols_digest": build_stable_digest(
+            bundle.ablation_frozen_protocols
+        ),
         "formal_fid_kid_digest": build_stable_digest(
             {
                 "summary": bundle.dataset_quality_summary,
@@ -3911,6 +4200,30 @@ def build_result_closure_gate_report(
         ),
         "dataset_quality_feature_records_content_digest": (
             dataset_quality_feature_records_content_digest
+        ),
+        "dataset_quality_image_records_digest": build_stable_digest(
+            bundle.dataset_quality_image_records
+        ),
+        "dataset_quality_image_resolution_records_digest": build_stable_digest(
+            bundle.dataset_quality_image_resolution_records
+        ),
+        "result_analysis_governed_payload_digest": build_stable_digest(
+            {
+                "path_map": bundle.result_analysis_governed_payload_path_map,
+                "baseline_comparison_rows": (
+                    bundle.result_analysis_baseline_comparison_rows
+                ),
+                "confidence_interval_rows": (
+                    bundle.result_analysis_confidence_interval_rows
+                ),
+                "per_attack_superiority_rows": (
+                    bundle.result_analysis_per_attack_superiority_rows
+                ),
+                "failure_case_rows": bundle.result_analysis_failure_case_rows,
+                "failure_case_svg_text": (
+                    bundle.result_analysis_failure_case_svg_text
+                ),
+            }
         ),
         "paper_evidence_audit_digest": build_stable_digest(
             {

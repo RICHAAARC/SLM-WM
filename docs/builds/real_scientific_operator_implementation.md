@@ -8,10 +8,10 @@
 | 真实 Jacobian Null Space | `main/methods/subspace/jacobian_nullspace.py` | 通过完整特征 JVP/VJP、显式风险算子和无阻尼 PSD-CG 求解 rank-4 latent Null Space |
 | 语义与视觉特征 | `experiments/runtime/diffusion/semantic_features.py` | 以512维完整归一化 CLIP embedding 和204维完整视觉向量定义716维 Jacobian，并提供有限更新与最终成图复验 |
 | LF 与尾部载体 | `main/methods/carrier/keyed_tensor.py` | 构造检测端可重建的固定模板, 并在嵌入端投影到安全子空间 |
-| 真实注意力梯度 | `main/methods/geometry/differentiable_attention.py` | 从 Transformer `to_q`/`to_k` 得到真实 attention, 对 latent 求梯度 |
-| 几何恢复 | `main/methods/geometry/attention_alignment.py` | 联合规范拉回 $W A_{\mathrm{obs}} W^\top$、观测前推 $V S_K V^\top$、双向覆盖惩罚、有界变换粗搜索和局部细化恢复图像参考系 |
-| 仅图像检测 | `main/methods/detection/image_only.py` | 只接收图像、密钥和公开模型配置, 完成内容主判与同阈值救回 |
-| 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | 在 SD3.5 Medium 采样过程中执行全部真实嵌入算子 |
+| 真实注意力梯度 | `main/methods/geometry/differentiable_attention.py` | 从 Transformer `to_q`/`to_k` 得到真实 attention, 构造有身份摘要的稳定 token pair 权重并对 latent 求梯度 |
+| 几何恢复 | `main/methods/geometry/attention_alignment.py` | 使用同一 pair 权重联合规范拉回 $W A_{\mathrm{obs}} W^\top$、观测前推 $V S_K V^\top$、双向覆盖惩罚和攻击无关的分层局部搜索恢复图像参考系 |
+| 仅图像检测 | `main/methods/detection/image_only.py` | 只接收图像、密钥和公开模型配置, 传递注册前后的同一 pair 权重并完成内容主判与同阈值救回 |
+| 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | 在 SD3.5 Medium 中执行完整方法与同种子 carrier-only 总机制效应反事实, 持久化无 attention 更新原子, 并以三边最终特征保持和真实 Q/K 双归因增益门禁验证 attention 可观测性 |
 | 共同攻击算子 | `experiments/runtime/diffusion/regeneration_attacks.py` | 为主方法与全部 baseline 统一执行 SD3.5 img2img、flow-matching 反向 Euler 积分、inpainting 和检测器引导搜索 |
 | 科学会话 | `experiments/runtime/semantic_watermark_scientific_session.py` | 在同一受验证主方法子解释器中调度主运行、质量评估、正式消融与绑定打包 |
 | 主方法工作负载 | `experiments/runners/image_only_dataset_workload.py` | 构造当前论文规模的正式配置并执行数据集协议与质量评估 |
@@ -95,16 +95,34 @@ $$
 1. 运行记录的 `jvp_mode` 为 `torch_func_exact_jvp_vjp` 或 `torch_autograd_exact_jvp_vjp_compatibility`，且 `feature_compression_applied=false`；
 2. 求解器为 `matrix_free_full_jacobian_psd_cg`、`cg_damping=0`，全部方向 CG 收敛且相对残差不超过 $10^{-6}$；
 3. QR 后每个基底列的完整 Jacobian 相对响应不超过0.0001，投影能量不低于0.01，正交误差不超过 $10^{-5}$；
-4. 每次实际写回与最终 clean/watermarked 成图均通过 CLIP cosine 和视觉漂移门禁；
-5. attention 来源为真实 Q/K 投影和 autograd；
-6. 检测访问模式为 `image_key_public_model_only`；
-7. test clean negative 的95%误报率上界不超过目标 FPR；
-8. FID/KID 使用 torch-fidelity `inception-v3-compat` 的2048维特征，配对质量指标来自真实图像集合；
-9. 消融记录明确 `generation_rerun=true` 且未使用 counterfactual 分数变换；
-10. 外部 baseline 使用相同 Prompt、攻击和固定 FPR 统计边界。
+4. 每次实际写回以及最终 clean/完整方法、clean/carrier-only、carrier-only/完整方法三条成图边均通过 CLIP cosine 和视觉漂移门禁；
+5. attention 来源为真实 Q/K 投影和 autograd；中心化 logit、可微 rank、抽样图像 token 关系概率和概率偏离与距离偏离的双中心交互四分量分别完成逐行加权归一化后等权组合, 嵌入与盲检共享该关系算子及 pair 构造规则；
+6. carrier-only 与完整方法首个注入前 latent 字节级相同, 更新数、顺序和 scheduler 轨迹一致；carrier-only 更新原子无 attention 来源、分数、更新、关系、pair 身份或 attention Null Space, 且其 JSONL 路径、文件 SHA-256 和内容摘要绑定结果与 manifest；
+7. 最终 clean、carrier-only 与完整方法成图在 CUDA 上重新构造直接 Q/K 四分量关系, 完整方法相对同种子 carrier-only 的自身盲选择归因增益和冻结 carrier-only pair 权重归因增益都严格超过0.0001, 且反事实保持记录、四分量归因、关系图身份、Q/K 记录与 manifest 绑定同一身份和图像 SHA-256；
+8. 检测访问模式为 `image_key_public_model_only`；
+9. test clean negative 的95%误报率上界不超过目标 FPR；
+10. FID/KID 使用 torch-fidelity `inception-v3-compat` 的2048维特征，配对质量指标来自真实图像集合；
+11. 消融记录明确 `generation_rerun=true` 且未使用 counterfactual 分数变换；
+12. 外部 baseline 使用相同 Prompt、攻击和固定 FPR 统计边界。
 
 正式 FID/KID 的样本门禁分别为 70/700/7000 对 clean/watermarked 图像, 与三个运行层级的 Prompt 总数一致。该门禁属于项目特定的证据治理要求; 通用做法是明确记录特征提取器版本、输入图像摘要、特征维度和实际样本数。
 
 质量后端固定为 [torch-fidelity v0.4.0](https://github.com/toshas/torch-fidelity/tree/v0.4.0), 提取器为 `inception-v3-compat`, 特征层为 `2048`。运行记录必须保存 `feature_extractor_id=torch_fidelity_0_4_0_inception_v3_compat_2048`; 只有 `canonical_formal_feature_extractor_ready=true` 的质量摘要才能通过论文记录门禁。普通 torchvision ImageNet 分类权重或像素直方图不能冒充该后端。
 
 为降低 Colab 上完整特征 JVP/VJP 遇到 fused attention 不支持自动微分的风险，正式运行固定 CLIP 视觉编码器使用 eager attention，VAE 使用 Diffusers `AttnProcessor`。该调整只改变等价注意力算子的运行实现，不更改模型权重或方法目标；实际配置写入 `scientific_autograd_compatibility` 环境记录。显存不足、形状错误、CG 不收敛或模型实现错误仍直接失败，不能被兼容路径吞掉。
+
+## 七、原子证据与派生结论绑定
+
+论文结论只接受能够从原子记录独立重建并通过即时文件摘要核验的派生产物：
+
+1. 正式消融的每个 `ablation_id` 必须逐字段等于登记的机制开关配置, 每个运行结果必须通过科学完成单元来源校验, 且输出目录必须属于该论文层级和消融身份；
+2. `formal_detection_records.jsonl` 与 `per_ablation_frozen_protocols.json` 同时保存字节级 SHA-256 和解析内容稳定摘要, 两类身份均绑定到 summary、manifest config 与 manifest metadata；
+3. 消融表中的检测判定、攻击覆盖率和 `paired_ssim` 只能由冻结协议、逐检测原子和实际 runtime 结果重建, 不接受由 `ablation_id` 推断的分数变换；
+4. 正式 FID/KID 只接受 `watermark_embedding` 的 `clean_to_watermarked` 图像对, 每条记录绑定唯一 `run_id`, 原始 feature 行不得直接声明论文支持；
+5. 每对 source/comparison 必须指向不同实际文件, source 路径与 comparison 路径各自全局唯一且跨角色不相交, $N$ 个 Prompt 必须对应精确 $2N$ 条图像解析记录；
+6. 每个 source/comparison 路径都必须有唯一图像解析记录, 解析记录的 SHA-256 必须等于闭合阶段即时读取实际图像文件所得摘要, feature record 只能引用该解析后的实际路径, 固定提取器和2048维有限向量；
+7. 逐攻击保守优势以所有 baseline 的 TPR 置信区间上界最大者作为比较对象, 只有主方法置信区间下界严格高于该上界时才允许声明该攻击上的优势；
+8. 失败案例记录精确等于全部假阴性按冻结上限12截取的结果, 上限不能设为0以跳过语义核验；
+9. 主表、攻击表、FID/KID 表、置信区间表、逐攻击表、失败 JSONL 与失败 SVG 的联合语义摘要必须由闭合侧独立重建, 并与结果分析 summary 和 manifest metadata 同时一致。
+
+这一证据绑定方式属于通用的可复现实验治理写法。项目特定部分是把真实消融重运行、仅图像检测协议、实际图像 SHA 和七类论文 payload 纳入同一个 fail-closed 闭合门禁。

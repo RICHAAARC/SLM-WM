@@ -64,6 +64,10 @@ from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
 from main.core.digest import build_stable_digest
+from main.methods.geometry import (
+    ATTENTION_RELATION_COMPONENT_NAMES,
+    DIRECT_QK_RELATION_SOURCE,
+)
 
 
 PACKAGE_INPUT_MANIFEST_FILE_NAME = "image_only_dataset_package_input_manifest.json"
@@ -464,6 +468,27 @@ def _scientific_update_record_ready(
         for character in stable_token_selection_digest
     ):
         return False
+    for digest_field in (
+        "stable_pair_weight_identity_digest",
+        "stable_pair_weight_realization_digest",
+        "attention_relation_component_identity_digest",
+        "attention_relation_keyed_projection_digest",
+    ):
+        digest = str(record.get(digest_field, ""))
+        if len(digest) != 64 or any(
+            character not in "0123456789abcdef" for character in digest
+        ):
+            return False
+    if (
+        record.get("attention_relation_component_names")
+        != list(ATTENTION_RELATION_COMPONENT_NAMES)
+        or record.get("attention_relation_source")
+        != DIRECT_QK_RELATION_SOURCE
+        or record.get("attention_relation_direct_qk_source_ready") is not True
+        or record.get("attention_relation_probability_scope")
+        != "sampled_image_token_qk_relation_probability"
+    ):
+        return False
     semantic_cosine = record.get("full_semantic_cosine_similarity")
     visual_relative_drift = record.get("full_visual_feature_relative_drift")
     if not finite_at_least(
@@ -506,6 +531,165 @@ def _final_image_preservation_ready(
         and isinstance(visual_drift, (int, float))
         and math.isfinite(float(visual_drift))
         and float(visual_drift) <= config.maximum_visual_feature_relative_drift
+    )
+
+
+def _carrier_only_final_image_preservation_ready(
+    result: dict[str, Any],
+    config: SemanticWatermarkRuntimeConfig,
+) -> bool:
+    """验证 clean 到 carrier-only 的最终内容保持与产物身份绑定。"""
+
+    if not config.attention_geometry_enabled:
+        return True
+    metadata = result.get("metadata", {})
+    record = metadata.get("carrier_only_final_image_preservation") or {}
+    observability = metadata.get("final_image_attention_observability") or {}
+    semantic_cosine = record.get(
+        "carrier_only_final_image_semantic_cosine_similarity"
+    )
+    visual_drift = record.get(
+        "carrier_only_final_image_visual_feature_relative_drift"
+    )
+    identity_digest = str(
+        record.get("carrier_only_counterfactual_identity_digest", "")
+    )
+    observability_identity_digest = str(
+        observability.get("carrier_only_counterfactual_identity_digest", "")
+    )
+    image_path = str(record.get("carrier_only_counterfactual_image_path", ""))
+    observability_image_path = str(
+        observability.get("carrier_only_counterfactual_image_path", "")
+    )
+    image_digest = str(
+        record.get("carrier_only_counterfactual_image_digest", "")
+    )
+    observability_image_digest = str(
+        observability.get("carrier_only_counterfactual_image_digest", "")
+    )
+    return bool(
+        record.get("carrier_only_final_image_preservation_applicable") is True
+        and record.get("carrier_only_final_image_preservation_gate_ready") is True
+        and isinstance(semantic_cosine, (int, float))
+        and math.isfinite(float(semantic_cosine))
+        and float(semantic_cosine) >= config.minimum_semantic_preservation_cosine
+        and isinstance(visual_drift, (int, float))
+        and math.isfinite(float(visual_drift))
+        and float(visual_drift) <= config.maximum_visual_feature_relative_drift
+        and len(identity_digest) == 64
+        and identity_digest == observability_identity_digest
+        and all(character in "0123456789abcdef" for character in identity_digest)
+        and bool(image_path)
+        and image_path == observability_image_path
+        and len(image_digest) == 64
+        and image_digest == observability_image_digest
+        and all(character in "0123456789abcdef" for character in image_digest)
+    )
+
+
+def _final_image_attention_observability_ready(
+    result: dict[str, Any],
+    config: SemanticWatermarkRuntimeConfig,
+) -> bool:
+    """验证最终成图重编码的真实 Q/K 水印增益证据。"""
+
+    if not config.attention_geometry_enabled:
+        return True
+    record = result.get("metadata", {}).get(
+        "final_image_attention_observability",
+        {},
+    )
+    blind_gain = record.get("final_image_attention_blind_attribution_gain")
+    paired_gain = record.get(
+        "final_image_attention_carrier_paired_attribution_gain"
+    )
+    paired_digest = str(
+        record.get("final_carrier_only_pair_weight_identity_digest", "")
+    )
+    record_schema_digest = str(
+        record.get("final_image_attention_record_schema_digest", "")
+    )
+    component_identity_digest = str(
+        record.get("attention_relation_component_identity_digest", "")
+    )
+    keyed_projection_digest = str(
+        record.get("attention_relation_keyed_projection_digest", "")
+    )
+    component_names = record.get("attention_relation_component_names")
+    paired_component_gains = record.get(
+        "final_image_attention_carrier_paired_component_gains"
+    )
+    counterfactual_digests = tuple(
+        str(record.get(field_name, ""))
+        for field_name in (
+            "carrier_only_counterfactual_identity_digest",
+            "carrier_only_counterfactual_config_digest",
+            "carrier_only_counterfactual_update_records_digest",
+            "carrier_only_counterfactual_scheduler_trace_digest",
+        )
+    )
+    return bool(
+        record.get("final_image_attention_observability_applicable") is True
+        and record.get("carrier_only_counterfactual_ready") is True
+        and record.get("carrier_only_counterfactual_changed_fields")
+        == ["attention_geometry_enabled"]
+        and record.get(
+            "carrier_only_counterfactual_scheduler_identity_ready"
+        )
+        is True
+        and record.get(
+            "carrier_only_counterfactual_attention_geometry_enabled"
+        )
+        is False
+        and record.get("final_image_attention_observability_gate_ready") is True
+        and record.get("final_image_attention_observability_requires_gpu") is True
+        and record.get(
+            "final_image_attention_observability_gpu_execution_verified"
+        )
+        is True
+        and record.get("final_image_attention_observability_source")
+        == "image_reencoded_public_noise_real_qk"
+        and record.get("attention_relation_source")
+        == DIRECT_QK_RELATION_SOURCE
+        and record.get("attention_relation_direct_qk_source_ready") is True
+        and record.get("attention_relation_probability_scope")
+        == "sampled_image_token_qk_relation_probability"
+        and component_names == list(ATTENTION_RELATION_COMPONENT_NAMES)
+        and len(component_identity_digest) == 64
+        and all(
+            character in "0123456789abcdef"
+            for character in component_identity_digest
+        )
+        and len(keyed_projection_digest) == 64
+        and all(
+            character in "0123456789abcdef"
+            for character in keyed_projection_digest
+        )
+        and isinstance(paired_component_gains, dict)
+        and set(paired_component_gains) == set(ATTENTION_RELATION_COMPONENT_NAMES)
+        and all(
+            isinstance(value, (int, float)) and math.isfinite(float(value))
+            for value in paired_component_gains.values()
+        )
+        and isinstance(blind_gain, (int, float))
+        and math.isfinite(float(blind_gain))
+        and float(blind_gain) > config.minimum_final_image_attention_score_gain
+        and isinstance(paired_gain, (int, float))
+        and math.isfinite(float(paired_gain))
+        and float(paired_gain) > config.minimum_final_image_attention_score_gain
+        and len(paired_digest) == 64
+        and all(character in "0123456789abcdef" for character in paired_digest)
+        and len(record_schema_digest) == 64
+        and all(
+            character in "0123456789abcdef"
+            for character in record_schema_digest
+        )
+        and all(
+            len(digest) == 64
+            and all(character in "0123456789abcdef" for character in digest)
+            for digest in counterfactual_digests
+        )
+        and _carrier_only_final_image_preservation_ready(result, config)
     )
 
 
@@ -745,10 +929,18 @@ def run_image_only_dataset_runtime(
         not _final_image_preservation_ready(result, base_method_config)
         for result in runtime_results
     )
+    final_image_attention_observability_failure_count = sum(
+        not _final_image_attention_observability_ready(
+            result,
+            base_method_config,
+        )
+        for result in runtime_results
+    )
     scientific_operator_gate_ready = (
         len(scientific_update_records) == expected_scientific_update_count
         and scientific_operator_failure_count == 0
         and final_image_preservation_failure_count == 0
+        and final_image_attention_observability_failure_count == 0
     )
     scientific_unit_provenance = aggregate_scientific_unit_provenance(
         (
@@ -852,6 +1044,12 @@ def run_image_only_dataset_runtime(
         "final_image_preservation_failure_count": (
             final_image_preservation_failure_count
         ),
+        "final_image_attention_observability_failure_count": (
+            final_image_attention_observability_failure_count
+        ),
+        "final_image_attention_observability_ready": (
+            final_image_attention_observability_failure_count == 0
+        ),
         "scientific_operator_gate_ready": scientific_operator_gate_ready,
         **scientific_unit_provenance,
         "frozen_threshold_digest": protocol.threshold_digest,
@@ -934,6 +1132,12 @@ def run_image_only_dataset_runtime(
             "attack_record_coverage_ready": summary["attack_record_coverage_ready"],
             "attacked_image_evidence_chain_ready": summary["attacked_image_evidence_chain_ready"],
             "scientific_operator_gate_ready": summary["scientific_operator_gate_ready"],
+            "final_image_attention_observability_failure_count": summary[
+                "final_image_attention_observability_failure_count"
+            ],
+            "final_image_attention_observability_ready": summary[
+                "final_image_attention_observability_ready"
+            ],
             "scientific_unit_provenance_ready": summary[
                 "scientific_unit_provenance_ready"
             ],

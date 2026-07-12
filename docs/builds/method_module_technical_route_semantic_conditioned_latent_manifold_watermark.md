@@ -195,15 +195,30 @@ $$
 
 ## 七、Q/K 注意力几何模块
 
-正式 attention map 由模型的 Q/K 投影计算：
+正式关系算子在冻结二维图像 token 抽样集合上直接调用模型 `to_q` 与 `to_k`。
+对每个注意力头先计算 $\ell^{(h)}=Q^{(h)}K^{(h)\top}/\sqrt{d_h}$, 再构造
 
 $$
-A=\operatorname{softmax}\left(\frac{QK^\top}{\sqrt d}\right).
+R_{ij}=[L_{ij},\rho_{ij},P_{ij},G_{ij}]\in\mathbb R^4.
 $$
 
-跨冻结层 Q/K 关系行稳定度与接收 attention 显著度共同确定前50%的稳定 token 集合。一次注入的梯度、内容基底复算、回溯和最终写回复验冻结同一集合；集合内关系权重为1, 其余规则网格关系保留0.25权重。密钥确定关系目标，autograd 对 latent 求目标梯度。该梯度作为注意力分支优先方向进入 Null Space 求解，再在安全基底中投影。嵌入使用单调回溯，只接受使注意力目标分数改善且满足强度预算的更新。
+$L$ 是各头中心化 logits 的平均；$\rho$ 是基于 $L$、温度0.25并按
+$1/n$ 缩放的可微降序行内 rank；$P$ 是各头在抽样图像 token 集合上的
+row-softmax 概率平均；第4分量为
+$G_{ij}=(P_{ij}-\overline P_i)(D_{ij}-\overline D_i)$, 其中 $D$ 是由公开二维
+`token_indices` 得到并按最大网格距离归一化的相对距离。概率与距离双行中心化
+移除了距离行均值对第3分量的一阶重复, 且均匀 $P$ 使 $G$ 严格为0。$P$ 是项目定义的抽样图像 token 关系概率, 不表示 SD3.5
+包含文本 token 与未抽样图像 token 的完整 joint-attention 权重。正式证据要求
+同时直接保存真实 Q/K 的 $L$ 与 $P$。多头概率采用逐头 softmax 后平均, 不以
+平均 logits 的 softmax 替代。层名、模块类、头数、head width、scale、Q/K
+归一化和源/抽样网格必须进入元数据, 且公开 module scale 与
+$1/\sqrt{head\_width}$ 不一致时立即失败。
 
-检测端从待检图像、密钥和公开模型提取真实 Q/K 关系图。对冻结的有界相似仿射与方形二面体候选构造双线性矩阵 $W_T$ 与逆向矩阵 $V_T$，分别计算规范拉回 $W_TA_{\mathrm{obs}}W_T^\top$ 和观测前推 $V_TS_KV_T^\top$。注册目标以0.10和0.90组合两个方向的关系相关分数，再显式扣除规范侧与观测侧的覆盖率、唯一采样率损失。输出必须记录相对 identity 候选的对齐增益、双向关系分数、覆盖惩罚、目标间隔和恢复变换。结构注册只接受正双向关系、正目标间隔以及两个方向覆盖率均不低于0.45的候选。恢复图像参考系后必须重新提取全部冻结层的真实 Q/K，并由 calibration split 冻结注册分数、注册置信度和恢复后同步阈值。几何统计只能决定是否允许重对齐，不能独立给出 positive。
+跨冻结层 Q/K 关系行稳定度与接收 attention 显著度共同确定前50%的稳定 token 集合。稳定 token 的单点权重为1, 其余规则网格 token 的单点权重为0.25, 非对角 pair 权重由两个端点权重外积得到。选择摘要、原始二维索引、权重参数和外积规则共同形成 `stable_pair_weight_identity_digest`。一次注入的梯度、内容基底复算、回溯和最终写回复验只消费这一权重对象, 不允许各阶段重新解释权重。密钥符号图按 $(1,-1,1,1)$ 投影到四个分量, 每个分量完成逐行 pair 加权中心化和归一化后以0.25等权组合。$G$ 通过中心化 $P$ 对 latent 保留非零梯度, 因而四个通道都依赖真实 Q/K。该梯度作为注意力分支优先方向进入 Null Space 求解，再在安全基底中投影。嵌入使用单调回溯，只接受使四分量目标分数改善且满足强度预算的更新。
+
+检测端从待检图像、密钥和公开模型构造 $R_{\mathrm{obs}}\in\mathbb R^{n\times n\times4}$, 只执行一次稳定 token 选择。观测参考系使用该选择产生的 pair 权重, 规范拉回参考系使用同一个 $W_T$ 将单点权重传递后再做外积, 两者共享同一个权重身份摘要。对每个有界相似仿射与方形二面体候选, 四个关系通道分别执行 $\widehat R_{T,c}=W_TR_{\mathrm{obs},c}W_T^\top$；四通道密钥投影分别执行 $\widetilde S_{T,c}=V_T(\pi_cS_K)V_T^\top$。两个方向都先逐通道计算相关再等权组合, 注册目标以0.10和0.90组合规范拉回与观测前推总分，再显式扣除规范侧与观测侧的覆盖率、唯一采样率损失。搜索协议只由旋转、log-scale 和归一化位移的公开连续定义域及三分层级分辨率生成, 每轮组合后严格过滤残余旋转、均匀尺度与平移, 保证相对方形二面体基元分别位于 $[-32,32]$、$[1/\sqrt2,\sqrt2]$ 和 $[-0.28,0.28]^2$；协议不读取任何攻击角度、裁剪比例或位移参数。确定性随机 held-out 验证使用远离正式攻击取值的连续变换。输出必须记录四通道分数、相对 identity 候选的对齐增益、双向关系分数、覆盖惩罚、目标间隔、恢复变换和权重身份。结构注册要求完整四通道观测与双向分数为正、正目标间隔以及两个方向覆盖率均不低于0.45。均匀 attention 使 $G=0$ 且其他分量在逐行中心化后也不产生密钥相关, 因而公开坐标不能单独通过门禁。恢复图像参考系后必须重新提取全部冻结层的真实 Q/K, 并使用注册传递后的同一 pair 权重计算同步分数, 不重新选择稳定 token。注册分数、注册置信度和恢复后同步阈值由 calibration split 冻结。几何统计只能决定是否允许重对齐，不能独立给出 positive。
+
+最终图像 attention 归因必须额外执行一次同 seed、同 scheduler、同 LF/tail 配置与算子且只关闭 attention geometry 的 carrier-only 生成。首个注入前 latent 必须具有相同 dtype、shape 与原始字节 SHA-256；两侧更新原子精确覆盖同一注入序列和 scheduler 轨迹。carrier-only 原子的 attention 分数、更新、关系、pair 身份和 attention Null Space 必须为空, `attention_source` 必须为 `disabled_attention_geometry`。该干预测量 attention 开关包含后续 LF、tail 与轨迹交互的总机制效应, 不冻结干预后的 realized carrier, 也不解释为纯直接效应。clean、carrier-only 与完整方法成图都重新执行 VAE 编码、公开固定噪声加噪和直接 Q/K 四分量关系构造。clean 到完整方法、clean 到 carrier-only 及 carrier-only 到完整方法三条 CLIP/视觉边全部通过后, 门禁才同时要求完整方法相对 carrier-only 的自身盲选择分数增益及冻结 carrier-only pair 权重后的配对分数增益严格大于 `minimum_final_image_attention_score_gain=0.0001`。四个 Q/K 依赖分量的配对增益同时写入记录。正式保持记录和 Q/K 记录必须共享直接来源、四分量身份、密钥投影身份、反事实身份、原子 JSONL 路径、文件 SHA-256、内容摘要、持久化图像路径与图像 SHA-256, 并在缓存复用时从实际文件重建。clean 分数只作为总体水印对照；该累计归因门禁不向仅图像检测器提供 clean、carrier-only 图像或生成轨迹。
 
 ---
 

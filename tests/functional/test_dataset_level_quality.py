@@ -19,6 +19,7 @@ from experiments.runtime.scientific_unit_provenance import (
 )
 from experiments.artifacts.dataset_level_quality_outputs import write_dataset_level_quality_outputs
 from experiments.protocol import (
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
     FORMAL_FEATURE_BACKEND,
     FORMAL_FID_KID_BLOCKER,
     build_dataset_quality_image_records,
@@ -142,6 +143,18 @@ def file_digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def formal_feature_vector(index: int, role: str) -> list[float]:
+    """构造维度正确且避免退化秩的确定性测试特征."""
+
+    role_offset = 1 if role == "source" else PROMPT_COUNT + 1
+    multiplier = index + role_offset
+    return [
+        float((multiplier * (dimension + 1) + 17 * dimension * dimension) % 10007)
+        / 10007.0
+        for dimension in range(2048)
+    ]
+
+
 def registry_rows(root_path: Path) -> list[dict[str, object]]:
     """构造两个真实 source / comparison 图像对。"""
 
@@ -155,18 +168,26 @@ def registry_rows(root_path: Path) -> list[dict[str, object]]:
     write_image(attacked_b, (10, 240, 10))
     return [
         {
-            "attack_name": "img2img_regeneration",
+            "run_id": "quality_run_a",
+            "prompt_id": "quality_prompt_a",
+            "attack_name": "watermark_embedding",
+            "image_pair_role": "clean_to_watermarked",
             "source_image_path": source_a.relative_to(root_path).as_posix(),
             "source_image_digest": file_digest(source_a),
             "attacked_image_path": attacked_a.relative_to(root_path).as_posix(),
             "attacked_image_digest": file_digest(attacked_a),
+            "supports_paper_claim": False,
         },
         {
-            "attack_name": "sdedit_regeneration",
+            "run_id": "quality_run_b",
+            "prompt_id": "quality_prompt_b",
+            "attack_name": "watermark_embedding",
+            "image_pair_role": "clean_to_watermarked",
             "source_image_path": source_b.relative_to(root_path).as_posix(),
             "source_image_digest": file_digest(source_b),
             "attacked_image_path": attacked_b.relative_to(root_path).as_posix(),
             "attacked_image_digest": file_digest(attacked_b),
+            "supports_paper_claim": False,
         },
     ]
 
@@ -187,11 +208,48 @@ def canonical_prompt_ids() -> tuple[str, ...]:
 def canonical_registry_rows(root_path: Path) -> list[dict[str, object]]:
     """构造恰好一条图像对对应一个受治理 Prompt 的 registry。"""
 
-    templates = registry_rows(root_path)
-    return [
-        {**templates[index % len(templates)], "prompt_id": prompt_id}
-        for index, prompt_id in enumerate(canonical_prompt_ids())
-    ]
+    rows: list[dict[str, object]] = []
+    for index, prompt_id in enumerate(canonical_prompt_ids()):
+        source_path = (
+            root_path
+            / "outputs/images/canonical_quality"
+            / f"clean_{index:05d}.png"
+        )
+        comparison_path = (
+            root_path
+            / "outputs/images/canonical_quality"
+            / f"watermarked_{index:05d}.png"
+        )
+        write_image(
+            source_path,
+            ((index * 17) % 256, (index * 29) % 256, (index * 43) % 256),
+        )
+        write_image(
+            comparison_path,
+            (
+                (index * 17 + 3) % 256,
+                (index * 29 + 5) % 256,
+                (index * 43 + 7) % 256,
+            ),
+        )
+        rows.append(
+            {
+                "run_id": f"quality_run_{index:05d}",
+                "prompt_id": prompt_id,
+                "attack_name": "watermark_embedding",
+                "image_pair_role": "clean_to_watermarked",
+                "source_image_path": source_path.relative_to(
+                    root_path
+                ).as_posix(),
+                "source_image_digest": file_digest(source_path),
+                "attacked_image_path": comparison_path.relative_to(
+                    root_path
+                ).as_posix(),
+                "attacked_image_digest": file_digest(comparison_path),
+                "supports_paper_claim": False,
+            }
+        )
+    return rows
 
 
 def write_registry(root_path: Path, rows: list[dict[str, object]]) -> Path:
@@ -207,6 +265,215 @@ def write_registry(root_path: Path, rows: list[dict[str, object]]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
     return path
+
+
+def formal_feature_import_fixture(
+    root_path: Path,
+) -> tuple[
+    tuple[object, ...],
+    tuple[dict[str, object], ...],
+    list[dict[str, object]],
+]:
+    """构造一对具有实际图像解析身份和科学来源的正式特征行."""
+
+    records = build_dataset_quality_image_records(
+        registry_rows(root_path)[:1],
+        root_path,
+    )
+    resolution_records = (
+        dataset_quality_writer.build_image_resolution_records(
+            records=records,
+            root_path=root_path,
+            image_search_roots=(),
+            materialized_root=(
+                root_path / "outputs/dataset_level_quality/materialized"
+            ),
+            materialized_records=(),
+        )
+    )
+    rows: list[dict[str, object]] = []
+    for role, value in (("source", 0.0), ("comparison", 0.25)):
+        record = records[0]
+        row = {
+            "dataset_quality_record_id": record.dataset_quality_record_id,
+            "dataset_quality_image_role": role,
+            "feature_backend": FORMAL_FEATURE_BACKEND,
+            "feature_extractor_id": (
+                dataset_quality_writer.FORMAL_FEATURE_EXTRACTOR_ID
+            ),
+            "feature_dimension": 2048,
+            "image_path": getattr(record, f"{role}_image_path"),
+            "image_digest": getattr(record, f"{role}_image_digest"),
+            "feature_vector": [value] * 2048,
+            "supports_paper_claim": False,
+        }
+        item_identity = [
+            {
+                field_name: row[field_name]
+                for field_name in (
+                    "dataset_quality_record_id",
+                    "dataset_quality_image_role",
+                    "image_path",
+                    "image_digest",
+                )
+            }
+        ]
+        unit_id = (
+            "feature_batch_"
+            + dataset_quality_writer.build_stable_digest(
+                [
+                    (
+                        row["dataset_quality_record_id"],
+                        row["dataset_quality_image_role"],
+                    )
+                ]
+            )[:16]
+        )
+        row["scientific_unit_provenance"] = build_feature_provenance(
+            unit_id,
+            dataset_quality_writer._inception_batch_config_digest(
+                item_identity
+            ),
+        )
+        rows.append(row)
+    return records, resolution_records, rows
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("mutation_id", "expected_issue_field"),
+    (
+        ("feature_extractor_id", "feature_extractor_id"),
+        ("declared_feature_dimension", "feature_dimension"),
+        ("feature_vector_length", "feature_dimension"),
+        ("supports_paper_claim", "supports_paper_claim"),
+        ("resolved_image_path", "image_digest"),
+    ),
+)
+def test_formal_feature_import_rejects_resigned_row_schema_drift(
+    tmp_path: Path,
+    mutation_id: str,
+    expected_issue_field: str,
+) -> None:
+    """逐行字段即使同步重签科学来源也不得进入正式 FID/KID."""
+
+    records, resolution_records, rows = formal_feature_import_fixture(
+        tmp_path
+    )
+    forged = dict(rows[0])
+    if mutation_id == "feature_extractor_id":
+        forged["feature_extractor_id"] = "forged_extractor"
+    elif mutation_id == "declared_feature_dimension":
+        forged["feature_dimension"] = 1024
+    elif mutation_id == "feature_vector_length":
+        forged["feature_vector"] = [0.0] * 2047
+    elif mutation_id == "supports_paper_claim":
+        forged["supports_paper_claim"] = True
+    elif mutation_id == "resolved_image_path":
+        forged["image_path"] = "outputs/images/forged.png"
+    else:  # pragma: no cover - 参数集合由测试本身冻结.
+        raise AssertionError("未知测试变体")
+    item_identity = [
+        {
+            field_name: forged[field_name]
+            for field_name in (
+                "dataset_quality_record_id",
+                "dataset_quality_image_role",
+                "image_path",
+                "image_digest",
+            )
+        }
+    ]
+    forged["scientific_unit_provenance"] = build_feature_provenance(
+        str(forged["scientific_unit_provenance"]["scientific_unit_id"]),
+        dataset_quality_writer._inception_batch_config_digest(item_identity),
+    )
+    rows[0] = forged
+
+    payload = dataset_quality_writer.build_formal_feature_import_payload(
+        records=records,
+        image_resolution_records=resolution_records,
+        feature_rows=rows,
+        formal_feature_records_path=tmp_path / "features.jsonl",
+        root_path=tmp_path,
+        formal_min_sample_count=1,
+        formal_feature_records_sha256="f" * 64,
+    )
+
+    assert payload["report"]["formal_feature_backend_ready"] is False
+    assert expected_issue_field in {
+        issue["field_name"] for issue in payload["report"]["issues"]
+    }
+
+
+@pytest.mark.quick
+def test_formal_feature_import_rehashes_actual_resolution_image(
+    tmp_path: Path,
+) -> None:
+    """解析记录生成后实际图像字节漂移必须在特征导入层阻断."""
+
+    records, resolution_records, rows = formal_feature_import_fixture(
+        tmp_path
+    )
+    source_path = tmp_path / records[0].source_image_path
+    source_path.write_bytes(b"forged-image-bytes")
+
+    payload = dataset_quality_writer.build_formal_feature_import_payload(
+        records=records,
+        image_resolution_records=resolution_records,
+        feature_rows=rows,
+        formal_feature_records_path=tmp_path / "features.jsonl",
+        root_path=tmp_path,
+        formal_min_sample_count=1,
+        formal_feature_records_sha256="f" * 64,
+    )
+
+    assert payload["report"]["image_resolution_identity_ready"] is False
+    assert payload["report"]["formal_feature_backend_ready"] is False
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("field_name", "forged_value"),
+    (
+        ("attack_name", "jpeg_compression"),
+        ("image_pair_role", "clean_to_attacked"),
+        ("supports_paper_claim", True),
+    ),
+)
+def test_dataset_quality_records_require_clean_to_watermarked_semantics(
+    tmp_path: Path,
+    field_name: str,
+    forged_value: object,
+) -> None:
+    """真实路径和 SHA 有效也不能把其他攻击对冒充 clean/watermarked."""
+
+    rows = registry_rows(tmp_path)
+    rows[0] = {**rows[0], field_name: forged_value}
+
+    with pytest.raises(ValueError, match="clean-to-watermarked"):
+        build_dataset_quality_image_records(rows, tmp_path)
+
+
+@pytest.mark.quick
+def test_dataset_quality_records_reject_resolved_path_alias_reuse(
+    tmp_path: Path,
+) -> None:
+    """不同文本路径解析到同一文件时不得重复计入正式样本规模."""
+
+    rows = registry_rows(tmp_path)
+    source_path = str(rows[0]["source_image_path"])
+    rows[1] = {
+        **rows[1],
+        "source_image_path": (
+            f"{Path(source_path).parent.as_posix()}/./"
+            f"{Path(source_path).name}"
+        ),
+        "source_image_digest": rows[0]["source_image_digest"],
+    }
+
+    with pytest.raises(ValueError, match="实际文件路径"):
+        build_dataset_quality_image_records(rows, tmp_path)
 
 
 def write_inception_checkpoint_fixture(
@@ -479,7 +746,8 @@ def test_dataset_quality_protocol_requires_formal_inception_features(tmp_path: P
     assert len(records) == 2
     assert all(record.feature_backend == FORMAL_FEATURE_BACKEND for record in records)
     assert rows_by_name["fid"]["metric_status"] == FORMAL_FID_KID_BLOCKER
-    assert rows_by_name["kid"]["metric_status"] == FORMAL_FID_KID_BLOCKER
+    assert rows_by_name["kid_mean"]["metric_status"] == FORMAL_FID_KID_BLOCKER
+    assert rows_by_name["kid_std"]["metric_status"] == FORMAL_FID_KID_BLOCKER
     assert summary["feature_backend"] == FORMAL_FEATURE_BACKEND
     assert summary["formal_fid_kid_ready"] is False
     assert summary["formal_fid_kid_claim_blocker"] == FORMAL_FID_KID_BLOCKER
@@ -501,7 +769,9 @@ def test_dataset_quality_writer_outputs_only_formal_metrics(tmp_path: Path) -> N
     summary = json.loads((output_dir / "dataset_quality_summary.json").read_text(encoding="utf-8"))
 
     assert manifest["artifact_id"] == "dataset_level_quality_manifest"
-    assert {row["quality_metric_name"] for row in metric_rows} == {"fid", "kid"}
+    assert [row["quality_metric_name"] for row in metric_rows] == list(
+        FORMAL_DATASET_QUALITY_METRIC_NAMES
+    )
     assert not (output_dir / "dataset_quality_diagnostic_metrics.csv").exists()
     assert summary["dataset_quality_formal_metrics_path"] == (
         "outputs/dataset_level_quality/probe_paper/dataset_quality_metrics.csv"
@@ -559,7 +829,8 @@ def test_dataset_quality_writer_copies_external_features_and_binds_exact_coverag
             "dataset_quality_image_role": role,
             "feature_backend": FORMAL_FEATURE_BACKEND,
             "feature_extractor_id": dataset_quality_writer.FORMAL_FEATURE_EXTRACTOR_ID,
-            "feature_vector": [float(index), role_offset, 1.0],
+            "feature_dimension": 2048,
+            "feature_vector": formal_feature_vector(index, role),
             "image_path": (
                 record.source_image_path
                 if role == "source"
@@ -570,9 +841,10 @@ def test_dataset_quality_writer_copies_external_features_and_binds_exact_coverag
                 if role == "source"
                 else record.comparison_image_digest
             ),
+            "supports_paper_claim": False,
         }
         for index, record in enumerate(records)
-        for role, role_offset in (("source", 0.0), ("comparison", 0.1))
+        for role in ("source", "comparison")
     ]
     feature_rows = [
         {
@@ -634,8 +906,11 @@ def test_dataset_quality_writer_copies_external_features_and_binds_exact_coverag
     assert summary["missing_feature_pair_count"] == 0
     assert summary["feature_issue_count"] == 0
     assert summary["formal_feature_record_count"] == PROMPT_COUNT * 2
+    assert summary["kid_effective_subset_size"] == PROMPT_COUNT
     assert report["formal_feature_records_sha256"] == summary["formal_feature_records_sha256"]
-    assert {row["quality_metric_name"] for row in metric_rows} == {"fid", "kid"}
+    assert [row["quality_metric_name"] for row in metric_rows] == list(
+        FORMAL_DATASET_QUALITY_METRIC_NAMES
+    )
     assert {row["metric_status"] for row in metric_rows} == {"measured"}
     assert all(int(row["sample_pair_count"]) == PROMPT_COUNT for row in metric_rows)
     assert canonical_feature_path.relative_to(tmp_path).as_posix() in manifest["output_paths"]
@@ -646,33 +921,51 @@ def test_dataset_quality_writer_copies_external_features_and_binds_exact_coverag
 def test_dataset_quality_writer_materializes_required_images_from_package(tmp_path: Path) -> None:
     """图像只存在于结果包时应按摘要物化正式特征所需文件。"""
 
-    source_path = tmp_path / "outputs" / "runtime" / "source.png"
-    attacked_path = tmp_path / "outputs" / "runtime" / "attacked.png"
-    write_image(source_path, (120, 10, 10))
-    write_image(attacked_path, (100, 20, 20))
-    source_digest = file_digest(source_path)
-    attacked_digest = file_digest(attacked_path)
     package_path = tmp_path / "outputs" / "input_packages" / "runtime_package.zip"
     package_path.parent.mkdir(parents=True, exist_ok=True)
+    registry: list[dict[str, object]] = []
     with zipfile.ZipFile(package_path, "w") as archive:
-        archive.write(source_path, source_path.relative_to(tmp_path).as_posix())
-        archive.write(attacked_path, attacked_path.relative_to(tmp_path).as_posix())
-    source_path.unlink()
-    attacked_path.unlink()
-    materialized_row = {
-        "attack_name": "watermark_embedding",
-        "source_image_path": "outputs/runtime/source.png",
-        "source_image_digest": source_digest,
-        "attacked_image_path": "outputs/runtime/attacked.png",
-        "attacked_image_digest": attacked_digest,
-    }
-    write_registry(
-        tmp_path,
-        [
-            {**materialized_row, "prompt_id": prompt_id}
-            for prompt_id in canonical_prompt_ids()
-        ],
-    )
+        for index, prompt_id in enumerate(canonical_prompt_ids()):
+            source_path = (
+                tmp_path / "outputs/runtime" / f"clean_{index:05d}.png"
+            )
+            comparison_path = (
+                tmp_path
+                / "outputs/runtime"
+                / f"watermarked_{index:05d}.png"
+            )
+            write_image(source_path, ((index * 3) % 256, 10, 20))
+            write_image(comparison_path, ((index * 3 + 1) % 256, 12, 22))
+            source_digest = file_digest(source_path)
+            comparison_digest = file_digest(comparison_path)
+            archive.write(
+                source_path,
+                source_path.relative_to(tmp_path).as_posix(),
+            )
+            archive.write(
+                comparison_path,
+                comparison_path.relative_to(tmp_path).as_posix(),
+            )
+            registry.append(
+                {
+                    "run_id": f"materialized_run_{index:05d}",
+                    "prompt_id": prompt_id,
+                    "attack_name": "watermark_embedding",
+                    "image_pair_role": "clean_to_watermarked",
+                    "source_image_path": source_path.relative_to(
+                        tmp_path
+                    ).as_posix(),
+                    "source_image_digest": source_digest,
+                    "attacked_image_path": comparison_path.relative_to(
+                        tmp_path
+                    ).as_posix(),
+                    "attacked_image_digest": comparison_digest,
+                    "supports_paper_claim": False,
+                }
+            )
+            source_path.unlink()
+            comparison_path.unlink()
+    write_registry(tmp_path, registry)
 
     manifest = write_dataset_level_quality_outputs(
         paper_run_name=PAPER_RUN_NAME,
@@ -689,7 +982,7 @@ def test_dataset_quality_writer_materializes_required_images_from_package(tmp_pa
             / "dataset_quality_summary.json"
         ).read_text(encoding="utf-8")
     )
-    assert summary["materialized_image_input_count"] == 2
+    assert summary["materialized_image_input_count"] == PROMPT_COUNT * 2
     assert any("materialized_image_inputs" in path for path in manifest["output_paths"])
 
 
@@ -703,14 +996,22 @@ def test_dataset_quality_materialization_caches_package_digest(tmp_path: Path, m
     records = build_dataset_quality_image_records(
         [
             {
-                "attack_name": "jpeg_compression",
+                "run_id": "materialization_run_0",
+                "prompt_id": "materialization_prompt_0",
+                "attack_name": "watermark_embedding",
+                "image_pair_role": "clean_to_watermarked",
                 "source_image_path": entries[0].as_posix(),
                 "attacked_image_path": entries[1].as_posix(),
+                "supports_paper_claim": False,
             },
             {
-                "attack_name": "gaussian_blur",
+                "run_id": "materialization_run_1",
+                "prompt_id": "materialization_prompt_1",
+                "attack_name": "watermark_embedding",
+                "image_pair_role": "clean_to_watermarked",
                 "source_image_path": entries[2].as_posix(),
                 "attacked_image_path": entries[3].as_posix(),
+                "supports_paper_claim": False,
             },
         ],
         tmp_path,
@@ -799,9 +1100,13 @@ def test_dataset_quality_formal_features_measure_fid_and_kid_at_required_scale(t
     rows_by_name = {row["quality_metric_name"]: row for row in metric_rows}
 
     assert rows_by_name["fid"]["metric_status"] == "measured"
-    assert rows_by_name["kid"]["metric_status"] == "measured"
+    assert rows_by_name["kid_mean"]["metric_status"] == "measured"
+    assert rows_by_name["kid_std"]["metric_status"] == "measured"
     assert isinstance(rows_by_name["fid"]["quality_metric_value"], float)
-    assert isinstance(rows_by_name["kid"]["quality_metric_value"], float)
+    assert isinstance(rows_by_name["kid_mean"]["quality_metric_value"], float)
+    assert rows_by_name["kid_std"]["quality_metric_value"] == 0.0
     assert summary["formal_fid_kid_ready"] is True
+    assert summary["formal_quality_metric_count"] == 3
+    assert summary["kid_effective_subset_size"] == 2
     assert summary["feature_backend"] == FORMAL_FEATURE_BACKEND
     assert all("proxy" not in key for key in summary)

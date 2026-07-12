@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,9 @@ DEFAULT_ATTENTION_STABLE_TOKEN_FRACTION = (
 DEFAULT_ATTENTION_UNSTABLE_PAIR_WEIGHT = (
     _FORMAL_METHOD_DEFAULTS.attention_unstable_pair_weight
 )
+DEFAULT_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN = (
+    _FORMAL_METHOD_DEFAULTS.minimum_final_image_attention_score_gain
+)
 DEFAULT_TAIL_FRACTION = _FORMAL_METHOD_DEFAULTS.tail_fraction
 DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION = _FORMAL_METHOD_DEFAULTS.minimum_projection_energy_retention
 DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL = _FORMAL_METHOD_DEFAULTS.maximum_relative_response_residual
@@ -68,6 +72,7 @@ SHARED_METHOD_SETTING_FIELDS = (
     "attention_relative_strength",
     "attention_stable_token_fraction",
     "attention_unstable_pair_weight",
+    "minimum_final_image_attention_score_gain",
     "tail_fraction",
     "minimum_projection_energy_retention",
     "maximum_relative_response_residual",
@@ -138,6 +143,9 @@ class PaperRunConfig:
     attention_unstable_pair_weight: float = (
         DEFAULT_ATTENTION_UNSTABLE_PAIR_WEIGHT
     )
+    minimum_final_image_attention_score_gain: float = (
+        DEFAULT_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN
+    )
     tail_fraction: float = DEFAULT_TAIL_FRACTION
     minimum_projection_energy_retention: float = DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION
     maximum_relative_response_residual: float = DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL
@@ -171,6 +179,13 @@ class PaperRunConfig:
         if not 0.0 <= self.attention_unstable_pair_weight < 1.0:
             raise ValueError(
                 "attention_unstable_pair_weight 必须位于 [0, 1)"
+            )
+        if (
+            not math.isfinite(self.minimum_final_image_attention_score_gain)
+            or self.minimum_final_image_attention_score_gain <= 0.0
+        ):
+            raise ValueError(
+                "minimum_final_image_attention_score_gain 必须为正有限数"
             )
         if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
             raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")

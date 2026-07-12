@@ -14,11 +14,16 @@ from main.methods.detection import (
     detect_image_only_watermark,
 )
 from main.methods.geometry import (
+    ATTENTION_RELATION_COMPONENT_NAMES,
+    DIRECT_QK_RELATION_SOURCE,
     AttentionAlignmentResult,
     AttentionGeometryGradient,
     AttentionGeometryUpdate,
+    AttentionRelationDescriptor,
     DifferentiableAttentionRecorder,
+    QKAttentionRelation,
     attention_geometry_score,
+    build_attention_relation_descriptor,
     compute_attention_geometry_gradient,
     optimize_attention_geometry_update,
     qk_self_attention,
@@ -42,9 +47,12 @@ from main.methods.subspace import (
 )
 
 __all__ = [
+    "ATTENTION_RELATION_COMPONENT_NAMES",
+    "DIRECT_QK_RELATION_SOURCE",
     "AttentionAlignmentResult",
     "AttentionGeometryGradient",
     "AttentionGeometryUpdate",
+    "AttentionRelationDescriptor",
     "BlindContentScore",
     "BranchRiskConfig",
     "BranchRiskFieldBundle",
@@ -56,7 +64,9 @@ __all__ = [
     "JacobianNullSpaceResult",
     "KeyedTensorCarrier",
     "PSDConjugateGradientResult",
+    "QKAttentionRelation",
     "attention_geometry_score",
+    "build_attention_relation_descriptor",
     "build_branch_risk_fields",
     "build_exact_jacobian_linearization",
     "build_low_frequency_template",

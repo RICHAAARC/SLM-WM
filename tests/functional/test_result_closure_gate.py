@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, replace
 from functools import lru_cache
 import hashlib
 import io
@@ -16,6 +16,7 @@ import pytest
 
 from experiments.ablations.runtime_rerun import (
     FORMAL_RUNTIME_RERUN_ABLATION_IDS,
+    FORMAL_RUNTIME_RERUN_ABLATION_SPECS,
     FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
 )
 from experiments.protocol.attacks import (
@@ -57,6 +58,17 @@ from experiments.artifacts.detection_score_curves import (
 from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
+from experiments.artifacts.dataset_level_quality_outputs import (
+    _inception_batch_config_digest,
+    validate_inception_feature_provenance_groups,
+)
+from experiments.runners.image_only_dataset_runtime import (
+    apply_frozen_evidence_protocol,
+    calibrate_complete_evidence_protocol,
+)
+from experiments.runtime.scientific_unit_provenance import (
+    aggregate_scientific_unit_provenance,
+)
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis.result_closure_gate import (
     ResultClosureGateInput,
@@ -97,9 +109,17 @@ from paper_experiments.analysis.paper_evidence_audit import (
 from experiments.protocol.dataset_quality import (
     FORMAL_FEATURE_BACKEND,
     FORMAL_FEATURE_EXTRACTOR_ID,
+    formal_dataset_quality_metric_protocol,
     rebuild_formal_fid_kid_metric_rows,
 )
 from paper_experiments.analysis.result_analysis_payload import (
+    build_confidence_interval_rows,
+    build_failure_case_records,
+    build_failure_case_svg_text,
+    build_governed_paper_payload_path_map,
+    build_main_comparison_rows_from_result_records,
+    build_per_attack_superiority_rows,
+    rebuild_and_validate_result_analysis_derived_payload,
     build_result_analysis_manifest_config,
 )
 from scripts.write_result_closure_gate_outputs import main, write_result_closure_gate_outputs
@@ -108,6 +128,12 @@ from scripts.write_paper_artifact_evidence_audit_outputs import (
 )
 from tests.helpers.closure_input_lock import (
     build_test_closure_input_lock_payloads,
+)
+from tests.helpers.formal_execution_lock import (
+    build_test_formal_execution_lock,
+)
+from tests.helpers.scientific_unit_provenance import (
+    build_test_scientific_unit_provenance,
 )
 
 
@@ -146,6 +172,10 @@ PROMPT_SPLIT_BY_ID = {
     for split, prompt_ids in group_prompt_ids_by_split(PROMPT_RECORDS).items()
     for prompt_id in prompt_ids
 }
+PROMPT_DIGEST_BY_ID = {
+    record.prompt_id: record.prompt_digest
+    for record in PROMPT_RECORDS
+}
 from experiments.artifacts.attack_family_metrics import (
     build_attack_family_metrics,
 )
@@ -155,36 +185,146 @@ CALIBRATION_PROMPT_ID_DIGEST = build_stable_digest(
 TEST_PROMPT_ID_DIGEST = build_stable_digest(
     TEST_PROMPT_IDS
 )
-QUALITY_FEATURE_RECORDS = tuple(
-    record
-    for pair_index in range(PROMPT_COUNT)
-    for record in (
-        {
-            "dataset_quality_record_id": f"quality_record_{pair_index:04d}",
-            "dataset_quality_image_role": "source",
+QUALITY_FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+
+
+def dataset_quality_atomic_records() -> tuple[
+    tuple[dict[str, object], ...],
+    tuple[dict[str, object], ...],
+    tuple[dict[str, object], ...],
+    dict[str, object],
+]:
+    """构造图像、2048维 Inception 特征和完整科学来源绑定。"""
+
+    image_records: list[dict[str, object]] = []
+    resolution_records: list[dict[str, object]] = []
+    feature_records: list[dict[str, object]] = []
+    item_identity: list[dict[str, object]] = []
+    for pair_index, prompt_record in enumerate(PROMPT_RECORDS):
+        source_path = (
+            f"outputs/dataset_level_quality/{SCALE}/images/"
+            f"source_{pair_index:04d}.png"
+        )
+        comparison_path = (
+            f"outputs/dataset_level_quality/{SCALE}/images/"
+            f"comparison_{pair_index:04d}.png"
+        )
+        source_bytes = (
+            f"quality-image:{prompt_record.prompt_id}:source"
+        ).encode("utf-8")
+        comparison_bytes = (
+            f"quality-image:{prompt_record.prompt_id}:comparison"
+        ).encode("utf-8")
+        source_digest = hashlib.sha256(source_bytes).hexdigest()
+        comparison_digest = hashlib.sha256(comparison_bytes).hexdigest()
+        image_payload: dict[str, object] = {
+            "run_id": f"quality_runtime_{pair_index:05d}",
+            "prompt_id": prompt_record.prompt_id,
+            "attack_name": "watermark_embedding",
+            "image_pair_index": pair_index,
+            "image_pair_role": "clean_to_watermarked",
+            "source_image_path": source_path,
+            "source_image_digest": source_digest,
+            "comparison_image_path": comparison_path,
+            "comparison_image_digest": comparison_digest,
             "feature_backend": FORMAL_FEATURE_BACKEND,
-            "feature_extractor_id": FORMAL_FEATURE_EXTRACTOR_ID,
-            "feature_dimension": 2,
-            "feature_vector": [
+            "supports_paper_claim": False,
+        }
+        image_digest = build_stable_digest(image_payload)
+        record_id = f"dataset_quality_record_{image_digest[:16]}"
+        image_records.append(
+            {
+                "dataset_quality_record_id": record_id,
+                "dataset_quality_record_digest": image_digest,
+                **image_payload,
+            }
+        )
+        for role, path, digest, first_value in (
+            (
+                "source",
+                source_path,
+                source_digest,
                 pair_index / PROMPT_COUNT,
-                (pair_index % 7) / 7.0,
-            ],
-            "supports_paper_claim": False,
-        },
-        {
-            "dataset_quality_record_id": f"quality_record_{pair_index:04d}",
-            "dataset_quality_image_role": "comparison",
-            "feature_backend": FORMAL_FEATURE_BACKEND,
-            "feature_extractor_id": FORMAL_FEATURE_EXTRACTOR_ID,
-            "feature_dimension": 2,
-            "feature_vector": [
+            ),
+            (
+                "comparison",
+                comparison_path,
+                comparison_digest,
                 pair_index / PROMPT_COUNT + 0.1,
-                (pair_index % 7) / 7.0 - 0.05,
-            ],
-            "supports_paper_claim": False,
-        },
+            ),
+        ):
+            resolution_payload: dict[str, object] = {
+                "requested_image_path": path,
+                "resolved_image_path": path,
+                "resolved_from_package_path": "",
+                "resolution_status": "resolved_existing_image_file",
+                "resolved_image_digest": digest,
+                "materialized_image_input": False,
+                "supports_paper_claim": False,
+            }
+            resolution_digest = build_stable_digest(resolution_payload)
+            resolution_records.append(
+                {
+                    **resolution_payload,
+                    "image_resolution_record_digest": resolution_digest,
+                    "image_resolution_record_id": (
+                        "dataset_quality_image_resolution_"
+                        f"{resolution_digest[:16]}"
+                    ),
+                }
+            )
+            identity: dict[str, object] = {
+                "dataset_quality_record_id": record_id,
+                "dataset_quality_image_role": role,
+                "image_path": path,
+                "image_digest": digest,
+            }
+            item_identity.append(identity)
+            feature_records.append(
+                {
+                    **identity,
+                    "feature_backend": FORMAL_FEATURE_BACKEND,
+                    "feature_extractor_id": FORMAL_FEATURE_EXTRACTOR_ID,
+                    "feature_dimension": 2048,
+                    "feature_vector": [float(first_value), *([0.0] * 2047)],
+                    "supports_paper_claim": False,
+                }
+            )
+
+    batch_identity_digest = build_stable_digest(
+        [
+            (
+                identity["dataset_quality_record_id"],
+                identity["dataset_quality_image_role"],
+            )
+            for identity in item_identity
+        ]
     )
-)
+    provenance = build_test_scientific_unit_provenance(
+        f"feature_batch_{batch_identity_digest[:16]}",
+        _inception_batch_config_digest(item_identity),
+        formal_execution_lock=QUALITY_FORMAL_EXECUTION_LOCK,
+    )
+    for feature_record in feature_records:
+        feature_record["scientific_unit_provenance"] = provenance
+    provenance_summary = aggregate_scientific_unit_provenance(
+        validate_inception_feature_provenance_groups(feature_records),
+        expected_reference_count=len(feature_records),
+    )
+    return (
+        tuple(image_records),
+        tuple(resolution_records),
+        tuple(feature_records),
+        provenance_summary,
+    )
+
+
+(
+    QUALITY_IMAGE_RECORDS,
+    QUALITY_IMAGE_RESOLUTION_RECORDS,
+    QUALITY_FEATURE_RECORDS,
+    QUALITY_PROVENANCE_SUMMARY,
+) = dataset_quality_atomic_records()
 FEATURE_RECORDS_TEXT = "".join(
     json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
     for record in QUALITY_FEATURE_RECORDS
@@ -458,34 +598,6 @@ RESULT_ANALYSIS_PAYLOAD_PATH_MAP = {
         f"outputs/pilot_paper_result_analysis/{SCALE}/failure_case_figure.svg"
     ),
 }
-RESULT_ANALYSIS_PAYLOAD_BYTES = {
-    RESULT_ANALYSIS_PAYLOAD_PATH_MAP["main_confidence_interval_table"]: (
-        b"method_id,true_positive_rate\nslm_wm_current,0.9\n"
-    ),
-    RESULT_ANALYSIS_PAYLOAD_PATH_MAP["per_attack_superiority_table"]: (
-        b"attack_name,slm_minus_best_baseline_tpr\njpeg_compression,0.2\n"
-    ),
-    RESULT_ANALYSIS_PAYLOAD_PATH_MAP["failure_case_records"]: (
-        b'{"attack_name":"jpeg_compression","evidence_decision":false}\n'
-    ),
-    RESULT_ANALYSIS_PAYLOAD_PATH_MAP["failure_case_figure"]: (
-        b'<svg xmlns="http://www.w3.org/2000/svg"><title>failure</title></svg>\n'
-    ),
-}
-RESULT_ANALYSIS_PAYLOAD_SHA256_MAP = {
-    role: hashlib.sha256(
-        RESULT_ANALYSIS_PAYLOAD_BYTES[RESULT_ANALYSIS_PAYLOAD_PATH_MAP[role]]
-    ).hexdigest()
-    for role in RESULT_ANALYSIS_PAYLOAD_PATH_MAP
-}
-RESULT_ANALYSIS_PAYLOAD_DIGEST = build_stable_digest(
-    {
-        "result_analysis_payload_path_map": RESULT_ANALYSIS_PAYLOAD_PATH_MAP,
-        "result_analysis_payload_sha256_map": RESULT_ANALYSIS_PAYLOAD_SHA256_MAP,
-    }
-)
-
-
 def evidence_audit_source_path_map() -> dict[str, str]:
     """构造证据审计纯函数使用的当前 run 受治理路径映射."""
 
@@ -585,6 +697,7 @@ def artifact_source_payloads(
     quality_metrics: tuple[dict[str, object], ...],
     attack_family_metrics: tuple[dict[str, object], ...],
     necessity_rows: tuple[dict[str, object], ...],
+    baseline_rows: tuple[dict[str, object], ...],
 ) -> dict[str, bytes]:
     """构造可由真实 validator 独立重建的12类源文件字节."""
 
@@ -605,33 +718,6 @@ def artifact_source_payloads(
     test_metrics = build_image_only_test_metric_rows(
         detection_records,
         TARGET_FPR,
-    )
-    baseline_rows = tuple(
-        schema_row(
-            BASELINE_COMPARISON_FIELDS,
-            method_id=method_id,
-            method_role=method_role,
-            comparison_scope="common_protocol_governed_result",
-            common_prompt_protocol_ready=True,
-            common_attack_protocol_ready=True,
-            common_threshold_protocol_ready=True,
-            metric_status="measured_governed_result",
-            true_positive_rate=0.9 - index * 0.05,
-            false_positive_rate=0.05,
-            clean_false_positive_rate=0.05,
-            attacked_false_positive_rate=0.05,
-            quality_score_mean=0.9,
-            supports_paper_claim=True,
-        )
-        for index, (method_id, method_role) in enumerate(
-            (
-                ("slm_wm_current", "proposed_method_governed_result"),
-                ("tree_ring", "external_baseline_primary"),
-                ("gaussian_shading", "external_baseline_primary"),
-                ("shallow_diffuse", "external_baseline_primary"),
-                ("t2smark", "external_baseline_primary"),
-            )
-        )
     )
     ablation_rows = tuple(
         schema_row(
@@ -1180,6 +1266,238 @@ def closure_input_lock() -> tuple[dict[str, object], dict[str, object]]:
     )
 
 
+def _raw_ablation_detection(
+    *,
+    run_id: str,
+    prompt_id: str,
+    split: str,
+    sample_role: str,
+    content_score: float,
+    attack: object | None = None,
+) -> dict[str, object]:
+    """构造应用消融冻结协议前的最小图像盲检原子。"""
+
+    record: dict[str, object] = {
+        "run_id": run_id,
+        "prompt_id": prompt_id,
+        "split": split,
+        "sample_role": sample_role,
+        "content_score": content_score,
+        "aligned_content_score": None,
+        "attention_geometry_score": 0.0,
+        "registration_confidence": 0.0,
+        "attention_sync_score": 0.0,
+        "alignment": {"registration_geometry_reliable": False},
+    }
+    if attack is not None:
+        record.update(
+            {
+                "attack_id": attack.attack_id,
+                "attack_family": attack.attack_family,
+                "attack_name": attack.attack_name,
+                "resource_profile": attack.resource_profile,
+                "attack_config_digest": attack_config_digest(attack),
+                "attack_parameters": attack.attack_parameters,
+                "attack_performed": True,
+            }
+        )
+    return record
+
+
+def ablation_atomic_records() -> tuple[
+    tuple[dict[str, object], ...],
+    tuple[dict[str, object], ...],
+    dict[str, dict[str, object]],
+]:
+    """构造11项消融、70个 Prompt 和正式攻击集合的完整原子链。"""
+
+    runtime_records: list[dict[str, object]] = []
+    detection_records: list[dict[str, object]] = []
+    protocols: dict[str, dict[str, object]] = {}
+    for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS:
+        calibration_negatives = tuple(
+            _raw_ablation_detection(
+                run_id=f"ablation_{spec.ablation_id}_{prompt_id}",
+                prompt_id=prompt_id,
+                split="calibration",
+                sample_role="clean_negative",
+                content_score=0.0,
+            )
+            for prompt_id in CALIBRATION_PROMPT_IDS
+        )
+        protocol = calibrate_complete_evidence_protocol(
+            calibration_negatives,
+            target_fpr=TARGET_FPR,
+            rescue_margin_low=-0.05,
+        )
+        protocols[spec.ablation_id] = protocol.to_dict()
+        runtime_config = asdict(spec)
+        for prompt_record in PROMPT_RECORDS:
+            prompt_id = prompt_record.prompt_id
+            split = PROMPT_SPLIT_BY_ID[prompt_id]
+            scientific_config = {
+                "prompt": prompt_record.prompt_text,
+                "prompt_id": prompt_id,
+                "split": split,
+                "output_dir": (
+                    f"outputs/formal_mechanism_ablation/{SCALE}/"
+                    f"runs/{spec.ablation_id}"
+                ),
+                **{
+                    field_name: field_value
+                    for field_name, field_value in runtime_config.items()
+                    if field_name != "ablation_id"
+                },
+            }
+            scientific_config_digest = build_stable_digest(scientific_config)
+            run_id = f"semantic_watermark_{scientific_config_digest[:16]}"
+            positive_score = 1.0 if spec.ablation_id == "complete_method" else 0.0
+            raw_detections = [
+                _raw_ablation_detection(
+                    run_id=run_id,
+                    prompt_id=prompt_id,
+                    split=split,
+                    sample_role="clean_negative",
+                    content_score=0.0,
+                ),
+                _raw_ablation_detection(
+                    run_id=run_id,
+                    prompt_id=prompt_id,
+                    split=split,
+                    sample_role="positive_source",
+                    content_score=positive_score,
+                ),
+                _raw_ablation_detection(
+                    run_id=run_id,
+                    prompt_id=prompt_id,
+                    split=split,
+                    sample_role="wrong_key_negative",
+                    content_score=0.0,
+                ),
+            ]
+            if split == "test":
+                raw_detections.extend(
+                    _raw_ablation_detection(
+                        run_id=run_id,
+                        prompt_id=prompt_id,
+                        split=split,
+                        sample_role=sample_role,
+                        content_score=(
+                            positive_score
+                            if sample_role == "positive_source"
+                            else 0.0
+                        ),
+                        attack=attack,
+                    )
+                    for attack in FORMAL_ATTACK_CONFIGS
+                    for sample_role in ("clean_negative", "positive_source")
+                )
+            detections = apply_frozen_evidence_protocol(
+                raw_detections,
+                protocol,
+            )
+            detection_records.extend(
+                {
+                    **record,
+                    "ablation_id": spec.ablation_id,
+                    "ablation_prompt_id": prompt_id,
+                }
+                for record in detections
+            )
+            un_attacked = {
+                str(record["sample_role"]): record
+                for record in detections
+                if not record.get("attack_id")
+            }
+            attacked_positive = tuple(
+                record
+                for record in detections
+                if record.get("attack_id")
+                and record.get("sample_role") == "positive_source"
+            )
+            attacked_negative = tuple(
+                record
+                for record in detections
+                if record.get("attack_id")
+                and record.get("sample_role") == "clean_negative"
+            )
+            runtime_records.append(
+                {
+                    "prompt_index": prompt_record.prompt_index,
+                    "prompt_id": prompt_id,
+                    "prompt_digest": PROMPT_DIGEST_BY_ID[prompt_id],
+                    "split": split,
+                    "ablation_id": spec.ablation_id,
+                    "runtime_config": runtime_config,
+                    "runtime_result": {
+                        "run_id": run_id,
+                        "run_decision": "pass",
+                        "metadata": {
+                            "scientific_unit_config": scientific_config,
+                            "scientific_unit_provenance": (
+                                build_test_scientific_unit_provenance(
+                                    run_id,
+                                    scientific_config_digest,
+                                )
+                            ),
+                            "paired_quality": {"ssim": 0.95},
+                        },
+                    },
+                    "generation_rerun": True,
+                    "attack_and_detection_rerun": split == "test",
+                    "threshold_calibration_scope": (
+                        "per_ablation_calibration_split"
+                    ),
+                    "frozen_content_threshold": protocol.content_threshold,
+                    "frozen_threshold_digest": protocol.threshold_digest,
+                    "clean_negative_positive": bool(
+                        un_attacked["clean_negative"][
+                            "formal_evidence_positive"
+                        ]
+                    ),
+                    "positive_source_positive": bool(
+                        un_attacked["positive_source"][
+                            "formal_evidence_positive"
+                        ]
+                    ),
+                    "wrong_key_negative_positive": bool(
+                        un_attacked["wrong_key_negative"][
+                            "formal_evidence_positive"
+                        ]
+                    ),
+                    "clean_negative_content_score": float(
+                        un_attacked["clean_negative"]["content_score"]
+                    ),
+                    "positive_source_content_score": float(
+                        un_attacked["positive_source"]["content_score"]
+                    ),
+                    "attacked_positive_count": len(attacked_positive),
+                    "attacked_positive_rate": (
+                        sum(
+                            bool(record["formal_evidence_positive"])
+                            for record in attacked_positive
+                        )
+                        / len(attacked_positive)
+                        if attacked_positive
+                        else 0.0
+                    ),
+                    "attacked_negative_count": len(attacked_negative),
+                    "attacked_negative_rate": (
+                        sum(
+                            bool(record["formal_evidence_positive"])
+                            for record in attacked_negative
+                        )
+                        / len(attacked_negative)
+                        if attacked_negative
+                        else 0.0
+                    ),
+                    "formal_attack_coverage_ready": True,
+                    "paired_ssim": 0.95,
+                }
+            )
+    return tuple(runtime_records), tuple(detection_records), protocols
+
+
 @lru_cache(maxsize=1)
 def _ready_bundle_template() -> ResultClosureGateInput:
     """构造证据完整且允许至少一个逐攻击比较未显著胜出的输入包。"""
@@ -1189,21 +1507,34 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
         if ablation_id != "complete_method"
     )
-    necessity_records = [
-        {
-            "ablation_id": ablation_id,
-            "prompt_id": prompt_record.prompt_id,
-            "split": PROMPT_SPLIT_BY_ID[prompt_record.prompt_id],
-            "formal_attack_coverage_ready": True,
-            "attacked_positive_rate": (
-                1.0 if ablation_id == "complete_method" else 0.0
-            ),
-            "positive_source_positive": ablation_id == "complete_method",
-            "paired_ssim": 0.95,
-        }
-        for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
-        for prompt_record in PROMPT_RECORDS
-    ]
+    (
+        necessity_records,
+        ablation_detection_records,
+        ablation_frozen_protocols,
+    ) = ablation_atomic_records()
+    ablation_detection_records_bytes = "".join(
+        json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+        for record in ablation_detection_records
+    ).encode("utf-8")
+    ablation_frozen_protocols_bytes = json.dumps(
+        ablation_frozen_protocols,
+        ensure_ascii=False,
+        sort_keys=True,
+    ).encode("utf-8")
+    ablation_atom_identity = {
+        "formal_detection_records_sha256": hashlib.sha256(
+            ablation_detection_records_bytes
+        ).hexdigest(),
+        "formal_detection_records_digest": build_stable_digest(
+            ablation_detection_records
+        ),
+        "per_ablation_frozen_protocols_sha256": hashlib.sha256(
+            ablation_frozen_protocols_bytes
+        ).hexdigest(),
+        "per_ablation_frozen_protocols_digest": build_stable_digest(
+            ablation_frozen_protocols
+        ),
+    }
     necessity_rows, necessity_summary = build_ablation_necessity_statistics(
         necessity_records,
         expected_ablation_ids=necessity_variant_ids,
@@ -1214,6 +1545,18 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         formal_result_record(method_id, attack)
         for method_id in METHOD_THRESHOLD_DIGEST_MAP
         for attack in ATTACK_REGISTRY
+    )
+    result_analysis_governed_path_map = (
+        build_governed_paper_payload_path_map(SCALE)
+    )
+    result_analysis_baseline_rows = tuple(
+        build_main_comparison_rows_from_result_records(result_records)
+    )
+    result_analysis_confidence_rows = tuple(
+        build_confidence_interval_rows(result_records)
+    )
+    result_analysis_per_attack_rows = tuple(
+        build_per_attack_superiority_rows(result_records)
     )
     result_record_set_digest = build_pilot_paper_result_record_set_digest(result_records)
     primary_evidence_records = tuple(
@@ -1256,6 +1599,64 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "supports_paper_claim": False,
     }
     attack_detection_records = formal_attack_detection_records()
+    result_analysis_failure_rows = tuple(
+        build_failure_case_records(
+            attack_detection_records,
+            limit=12,
+        )
+    )
+    result_analysis_failure_figure_path = (
+        RESULT_ANALYSIS_PAYLOAD_PATH_MAP["failure_case_figure"]
+    )
+    result_analysis_failure_svg_text = build_failure_case_svg_text(
+        result_analysis_failure_rows,
+        failure_figure_path=result_analysis_failure_figure_path,
+    )
+    result_analysis_payload_bytes = {
+        RESULT_ANALYSIS_PAYLOAD_PATH_MAP["main_confidence_interval_table"]: (
+            csv_bytes(result_analysis_confidence_rows)
+        ),
+        RESULT_ANALYSIS_PAYLOAD_PATH_MAP["per_attack_superiority_table"]: (
+            csv_bytes(result_analysis_per_attack_rows)
+        ),
+        RESULT_ANALYSIS_PAYLOAD_PATH_MAP["failure_case_records"]: (
+            "".join(
+                json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                for row in result_analysis_failure_rows
+            ).encode("utf-8")
+        ),
+        result_analysis_failure_figure_path: (
+            result_analysis_failure_svg_text.encode("utf-8")
+        ),
+    }
+    result_analysis_payload_sha256_map = {
+        role: hashlib.sha256(
+            result_analysis_payload_bytes[RESULT_ANALYSIS_PAYLOAD_PATH_MAP[role]]
+        ).hexdigest()
+        for role in RESULT_ANALYSIS_PAYLOAD_PATH_MAP
+    }
+    result_analysis_payload_digest = build_stable_digest(
+        {
+            "result_analysis_payload_path_map": (
+                RESULT_ANALYSIS_PAYLOAD_PATH_MAP
+            ),
+            "result_analysis_payload_sha256_map": (
+                result_analysis_payload_sha256_map
+            ),
+        }
+    )
+    result_analysis_semantic_evidence = (
+        rebuild_and_validate_result_analysis_derived_payload(
+            result_records=result_records,
+            attack_detection_records=attack_detection_records,
+            confidence_interval_rows=result_analysis_confidence_rows,
+            per_attack_superiority_rows=result_analysis_per_attack_rows,
+            failure_case_rows=result_analysis_failure_rows,
+            failure_case_svg_text=result_analysis_failure_svg_text,
+            failure_figure_path=result_analysis_failure_figure_path,
+            failure_case_limit=12,
+        )
+    )
     attack_family_metrics = build_attack_family_metrics(
         attack_detection_records,
         TARGET_FPR,
@@ -1620,9 +2021,10 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "failure_case_figure_ready": True,
         "result_analysis_payload_path_map": RESULT_ANALYSIS_PAYLOAD_PATH_MAP,
         "result_analysis_payload_sha256_map": (
-            RESULT_ANALYSIS_PAYLOAD_SHA256_MAP
+            result_analysis_payload_sha256_map
         ),
-        "result_analysis_payload_digest": RESULT_ANALYSIS_PAYLOAD_DIGEST,
+        "result_analysis_payload_digest": result_analysis_payload_digest,
+        **result_analysis_semantic_evidence,
         "result_template_coverage_ready": True,
         "per_attack_ci_coverage_ready": True,
         "per_attack_superiority_evaluation_ready": True,
@@ -1686,6 +2088,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "formal_attack_coverage_ready_count": PROMPT_COUNT
         * len(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
         "formal_attack_coverage_ready": True,
+        **ablation_atom_identity,
         "expected_ablation_ids": list(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
         "actual_ablation_ids": list(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
         "ablation_spec_digest": FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
@@ -1738,6 +2141,18 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "feature_issue_count": 0,
         "formal_feature_records_sha256": FEATURE_RECORDS_SHA256,
         "formal_fid_kid_claim_gate_ready": True,
+        "image_resolution_record_count": len(
+            QUALITY_IMAGE_RESOLUTION_RECORDS
+        ),
+        "resolved_image_file_count": len(QUALITY_IMAGE_RESOLUTION_RECORDS),
+        "missing_image_file_count": 0,
+        "image_resolution_identity_ready": True,
+        "kid_effective_subset_size": PROMPT_COUNT,
+        "formal_metric_protocol": formal_dataset_quality_metric_protocol(),
+        "formal_metric_protocol_digest": formal_dataset_quality_metric_protocol()[
+            "formal_metric_protocol_digest"
+        ],
+        **QUALITY_PROVENANCE_SUMMARY,
     }
     quality_feature_report = {
         "paper_run_name": SCALE,
@@ -1751,6 +2166,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "missing_feature_pair_count": 0,
         "feature_issue_count": 0,
         "formal_feature_records_sha256": FEATURE_RECORDS_SHA256,
+        **QUALITY_PROVENANCE_SUMMARY,
     }
     source_features = [
         record["feature_vector"]
@@ -1780,6 +2196,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         quality_metrics,
         attack_family_metrics,
         tuple(necessity_rows),
+        result_analysis_baseline_rows,
     )
     artifact_source_sha256 = {
         path: hashlib.sha256(payload).hexdigest()
@@ -1809,12 +2226,24 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "checks": artifact_checks,
         "supports_paper_claim": False,
     }
+    quality_resolution_records_bytes = "".join(
+        json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
+        for record in QUALITY_IMAGE_RESOLUTION_RECORDS
+    ).encode("utf-8")
+    quality_actual_image_sha256 = {
+        str(record["resolved_image_path"]): str(record["resolved_image_digest"])
+        for record in QUALITY_IMAGE_RESOLUTION_RECORDS
+    }
     source_file_sha256 = {
         **{
             path: hashlib.sha256(payload).hexdigest()
             for path, payload in official_source_payload_map.items()
         },
         **artifact_source_sha256,
+        f"outputs/dataset_level_quality/{SCALE}/dataset_quality_image_resolution_records.jsonl": (
+            hashlib.sha256(quality_resolution_records_bytes).hexdigest()
+        ),
+        **quality_actual_image_sha256,
         f"outputs/formal_mechanism_ablation/{SCALE}/runtime_rerun_records.jsonl": (
             hashlib.sha256(
                 "".join(
@@ -1823,9 +2252,15 @@ def _ready_bundle_template() -> ResultClosureGateInput:
                 ).encode("utf-8")
             ).hexdigest()
         ),
+        f"outputs/formal_mechanism_ablation/{SCALE}/formal_detection_records.jsonl": (
+            ablation_atom_identity["formal_detection_records_sha256"]
+        ),
+        f"outputs/formal_mechanism_ablation/{SCALE}/per_ablation_frozen_protocols.json": (
+            ablation_atom_identity["per_ablation_frozen_protocols_sha256"]
+        ),
         **{
             RESULT_ANALYSIS_PAYLOAD_PATH_MAP[role]: digest
-            for role, digest in RESULT_ANALYSIS_PAYLOAD_SHA256_MAP.items()
+            for role, digest in result_analysis_payload_sha256_map.items()
         },
         **{
             METHOD_OBSERVATION_SOURCE_PATH_MAP[method_id]: digest
@@ -1918,6 +2353,8 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             CALIBRATION_PROMPT_ID_DIGEST
         ),
         expected_test_prompt_id_digest=TEST_PROMPT_ID_DIGEST,
+        expected_prompt_split_by_id=PROMPT_SPLIT_BY_ID,
+        expected_prompt_digest_by_id=PROMPT_DIGEST_BY_ID,
             source_file_sha256=source_file_sha256,
             attack_report=attack_report,
             attack_detection_records=attack_detection_records,
@@ -1998,6 +2435,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             "external_baseline_comparison_manifest",
             (
                 f"outputs/external_baseline_comparison/{SCALE}/baseline_runtime_report.json",
+                f"outputs/external_baseline_comparison/{SCALE}/baseline_comparison_table.csv",
                 f"outputs/external_baseline_comparison/{SCALE}/manifest.local.json",
             ),
             baseline_report,
@@ -2069,6 +2507,25 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             ),
             config=build_result_analysis_manifest_config(analysis_summary),
         ),
+        result_analysis_governed_payload_path_map=(
+            result_analysis_governed_path_map
+        ),
+        result_analysis_baseline_comparison_rows=(
+            result_analysis_baseline_rows
+        ),
+        result_analysis_confidence_interval_rows=(
+            result_analysis_confidence_rows
+        ),
+        result_analysis_per_attack_superiority_rows=(
+            result_analysis_per_attack_rows
+        ),
+        result_analysis_failure_case_rows=result_analysis_failure_rows,
+        result_analysis_failure_case_svg_text=(
+            result_analysis_failure_svg_text
+        ),
+        result_analysis_failure_figure_path=(
+            result_analysis_failure_figure_path
+        ),
         paired_observation_records_by_method=(
             METHOD_OBSERVATION_RECORDS_BY_METHOD
         ),
@@ -2098,6 +2555,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             "formal_mechanism_ablation_manifest",
             (
                 f"outputs/formal_mechanism_ablation/{SCALE}/runtime_rerun_records.jsonl",
+                f"outputs/formal_mechanism_ablation/{SCALE}/formal_detection_records.jsonl",
                 f"outputs/formal_mechanism_ablation/{SCALE}/per_ablation_frozen_protocols.json",
                 f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_ablation_metrics.csv",
                 f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_statistics.csv",
@@ -2116,6 +2574,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
                 "calibration_prompt_id_digest": CALIBRATION_PROMPT_ID_DIGEST,
                 "test_prompt_id_digest": TEST_PROMPT_ID_DIGEST,
                 "formal_attack_coverage_ready": True,
+                **ablation_atom_identity,
                 "ablation_necessity_statistics_ready": True,
                 "necessity_statistic_rows_digest": necessity_summary[
                     "necessity_statistic_rows_digest"
@@ -2137,37 +2596,49 @@ def _ready_bundle_template() -> ResultClosureGateInput:
                 "ablation_spec_digest": FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
                 "ablation_exact_set_ready": True,
                 "record_digest": build_stable_digest(necessity_records),
+                **ablation_atom_identity,
             },
         ),
         ablation_runtime_records=tuple(necessity_records),
+        ablation_detection_records=ablation_detection_records,
+        ablation_frozen_protocols=ablation_frozen_protocols,
         ablation_necessity_rows=tuple(necessity_rows),
         ablation_necessity_summary=necessity_summary,
         dataset_quality_summary=quality_summary,
+        dataset_quality_image_records=QUALITY_IMAGE_RECORDS,
+        dataset_quality_image_resolution_records=(
+            QUALITY_IMAGE_RESOLUTION_RECORDS
+        ),
         dataset_quality_feature_report=quality_feature_report,
         dataset_quality_metrics=quality_metrics,
         dataset_quality_feature_records=QUALITY_FEATURE_RECORDS,
         dataset_quality_feature_records_sha256=FEATURE_RECORDS_SHA256,
-        dataset_quality_manifest=manifest(
-            "dataset_level_quality_manifest",
-            (
-                f"outputs/dataset_level_quality/{SCALE}/dataset_quality_formal_feature_records.jsonl",
-                f"outputs/dataset_level_quality/{SCALE}/dataset_quality_formal_feature_import_report.json",
-                f"outputs/dataset_level_quality/{SCALE}/dataset_quality_metrics.csv",
-                f"outputs/dataset_level_quality/{SCALE}/dataset_quality_summary.json",
-                f"outputs/dataset_level_quality/{SCALE}/manifest.local.json",
+        dataset_quality_manifest={
+            **manifest(
+                "dataset_level_quality_manifest",
+                (
+                    f"outputs/dataset_level_quality/{SCALE}/dataset_quality_image_records.jsonl",
+                    f"outputs/dataset_level_quality/{SCALE}/dataset_quality_image_resolution_records.jsonl",
+                    f"outputs/dataset_level_quality/{SCALE}/dataset_quality_formal_feature_records.jsonl",
+                    f"outputs/dataset_level_quality/{SCALE}/dataset_quality_formal_feature_import_report.json",
+                    f"outputs/dataset_level_quality/{SCALE}/dataset_quality_metrics.csv",
+                    f"outputs/dataset_level_quality/{SCALE}/dataset_quality_summary.json",
+                    f"outputs/dataset_level_quality/{SCALE}/manifest.local.json",
+                ),
+                quality_summary,
+                config={
+                    "canonical_prompt_id_digest": PROMPT_ID_DIGEST,
+                    "registry_prompt_id_digest": PROMPT_ID_DIGEST,
+                    "prompt_registry_exact_set_ready": True,
+                    "accepted_feature_pair_count": PROMPT_COUNT,
+                    "missing_feature_pair_count": 0,
+                    "feature_issue_count": 0,
+                    "formal_feature_record_count": PROMPT_COUNT * 2,
+                    "formal_feature_records_sha256": FEATURE_RECORDS_SHA256,
+                },
             ),
-            quality_summary,
-            config={
-                "canonical_prompt_id_digest": PROMPT_ID_DIGEST,
-                "registry_prompt_id_digest": PROMPT_ID_DIGEST,
-                "prompt_registry_exact_set_ready": True,
-                "accepted_feature_pair_count": PROMPT_COUNT,
-                "missing_feature_pair_count": 0,
-                "feature_issue_count": 0,
-                "formal_feature_record_count": PROMPT_COUNT * 2,
-                "formal_feature_records_sha256": FEATURE_RECORDS_SHA256,
-            },
-        ),
+            "formal_execution_run_lock": QUALITY_FORMAL_EXECUTION_LOCK,
+        },
         evidence_builder_report=builder_report,
         evidence_blocker_report=blocker_report,
         evidence_audit_runtime_report=evidence_runtime_report,
@@ -2441,9 +2912,11 @@ def write_jsonl(path: Path, rows: tuple[dict[str, object], ...]) -> None:
     """写出测试 JSONL 文件."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows),
-        encoding="utf-8",
+    path.write_bytes(
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+            for row in rows
+        ).encode("utf-8")
     )
 
 
@@ -2495,6 +2968,7 @@ def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
         f"outputs/paired_superiority_analysis/{SCALE}/manifest.local.json": bundle.paired_superiority_manifest,
         f"outputs/formal_mechanism_ablation/{SCALE}/ablation_claim_summary.json": bundle.ablation_summary,
         f"outputs/formal_mechanism_ablation/{SCALE}/manifest.local.json": bundle.ablation_manifest,
+        f"outputs/formal_mechanism_ablation/{SCALE}/per_ablation_frozen_protocols.json": bundle.ablation_frozen_protocols,
         f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_summary.json": bundle.ablation_necessity_summary,
         f"outputs/dataset_level_quality/{SCALE}/dataset_quality_summary.json": bundle.dataset_quality_summary,
         f"outputs/dataset_level_quality/{SCALE}/dataset_quality_formal_feature_import_report.json": bundle.dataset_quality_feature_report,
@@ -2560,6 +3034,11 @@ def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
         / f"outputs/formal_mechanism_ablation/{SCALE}/runtime_rerun_records.jsonl",
         bundle.ablation_runtime_records,
     )
+    write_jsonl(
+        root
+        / f"outputs/formal_mechanism_ablation/{SCALE}/formal_detection_records.jsonl",
+        bundle.ablation_detection_records,
+    )
     write_csv(
         root
         / f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_statistics.csv",
@@ -2569,6 +3048,34 @@ def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
         root / f"outputs/dataset_level_quality/{SCALE}/dataset_quality_metrics.csv",
         bundle.dataset_quality_metrics,
     )
+    write_jsonl(
+        root
+        / f"outputs/dataset_level_quality/{SCALE}/dataset_quality_image_records.jsonl",
+        bundle.dataset_quality_image_records,
+    )
+    write_jsonl(
+        root
+        / f"outputs/dataset_level_quality/{SCALE}/dataset_quality_image_resolution_records.jsonl",
+        bundle.dataset_quality_image_resolution_records,
+    )
+    image_record_by_path = {
+        str(record[field_name]): (
+            str(record["prompt_id"]),
+            "source" if field_name == "source_image_path" else "comparison",
+        )
+        for record in bundle.dataset_quality_image_records
+        for field_name in ("source_image_path", "comparison_image_path")
+    }
+    for resolution in bundle.dataset_quality_image_resolution_records:
+        resolved_path = str(resolution["resolved_image_path"])
+        prompt_id, role = image_record_by_path[
+            str(resolution["requested_image_path"])
+        ]
+        image_path = root / resolved_path
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image_path.write_bytes(
+            f"quality-image:{prompt_id}:{role}".encode("utf-8")
+        )
     feature_records_path = (
         root
         / f"outputs/dataset_level_quality/{SCALE}/dataset_quality_formal_feature_records.jsonl"
@@ -2580,14 +3087,32 @@ def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
             for record in bundle.dataset_quality_feature_records
         ).encode("utf-8")
     )
+    result_analysis_payload_bytes = {
+        RESULT_ANALYSIS_PAYLOAD_PATH_MAP["main_confidence_interval_table"]: (
+            csv_bytes(bundle.result_analysis_confidence_interval_rows)
+        ),
+        RESULT_ANALYSIS_PAYLOAD_PATH_MAP["per_attack_superiority_table"]: (
+            csv_bytes(bundle.result_analysis_per_attack_superiority_rows)
+        ),
+        RESULT_ANALYSIS_PAYLOAD_PATH_MAP["failure_case_records"]: (
+            "".join(
+                json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                for row in bundle.result_analysis_failure_case_rows
+            ).encode("utf-8")
+        ),
+        bundle.result_analysis_failure_figure_path: (
+            bundle.result_analysis_failure_case_svg_text.encode("utf-8")
+        ),
+    }
     for relative_path, payload in {
         **official_reference_source_payloads(),
         **artifact_source_payloads(
             bundle.dataset_quality_metrics,
             bundle.attack_family_metrics,
             bundle.ablation_necessity_rows,
+            bundle.result_analysis_baseline_comparison_rows,
         ),
-        **RESULT_ANALYSIS_PAYLOAD_BYTES,
+        **result_analysis_payload_bytes,
         **METHOD_OBSERVATION_SOURCE_PAYLOADS,
     }.items():
         source_path = root / relative_path
@@ -2644,6 +3169,195 @@ def test_result_closure_gate_passes_only_when_all_semantic_evidence_is_ready() -
     assert len(bundle.paired_superiority_rows) == 4
     assert len(bundle.artifact_data_validation_report["source_paths"]) == 12
     assert bundle.entry_review_report["entry_review_decision"] == "ready_for_evidence_closure"
+
+
+@pytest.mark.quick
+def test_result_closure_gate_rejects_ablation_detection_atom_drift() -> None:
+    """消融检测原子的冻结判定被篡改时必须阻断逐 Prompt 重建。"""
+
+    bundle = ready_bundle()
+    records = list(bundle.ablation_detection_records)
+    forged_record = dict(records[0])
+    forged_record["formal_evidence_positive"] = not bool(
+        forged_record["formal_evidence_positive"]
+    )
+    records[0] = forged_record
+    forged = replace(bundle, ablation_detection_records=tuple(records))
+
+    checks = build_result_closure_gate_checks(forged)
+
+    rebuild_check = next(
+        row
+        for row in checks
+        if row["check_id"] == "ablation_atomic_record_rebuild_ready"
+    )
+    assert rebuild_check["check_status"] == "blocked"
+
+
+@pytest.mark.quick
+def test_result_closure_gate_rejects_ablation_atom_file_sha_drift() -> None:
+    """解析内容未变时，正式消融 atom 文件字节 SHA 漂移仍必须阻断。"""
+
+    bundle = ready_bundle()
+    path = (
+        f"outputs/formal_mechanism_ablation/{SCALE}/"
+        "formal_detection_records.jsonl"
+    )
+    bundle.source_file_sha256[path] = "f" * 64
+
+    checks = build_result_closure_gate_checks(bundle)
+
+    rebuild_check = next(
+        row
+        for row in checks
+        if row["check_id"] == "ablation_atomic_record_rebuild_ready"
+    )
+    assert rebuild_check["check_status"] == "blocked"
+
+
+@pytest.mark.quick
+def test_result_closure_gate_rejects_feature_image_identity_drift() -> None:
+    """正式 feature 脱离图像记录路径时必须阻断来源身份重建。"""
+
+    bundle = ready_bundle()
+    records = list(bundle.dataset_quality_feature_records)
+    forged_record = dict(records[0])
+    forged_record["image_path"] = (
+        "outputs/dataset_level_quality/probe_paper/images/forged.png"
+    )
+    records[0] = forged_record
+    forged = replace(bundle, dataset_quality_feature_records=tuple(records))
+
+    checks = build_result_closure_gate_checks(forged)
+
+    rebuild_check = next(
+        row
+        for row in checks
+        if row["check_id"]
+        == "dataset_quality_feature_identity_rebuild_ready"
+    )
+    assert rebuild_check["check_status"] == "blocked"
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("mutation", ("pair_role", "duplicate_path"))
+def test_result_closure_gate_rejects_quality_pair_identity_forgery(
+    mutation: str,
+) -> None:
+    """同步重签记录也不得伪造 clean/watermarked 语义或复用样本路径."""
+
+    bundle = ready_bundle()
+    records = [dict(record) for record in bundle.dataset_quality_image_records]
+    forged_record = records[1]
+    if mutation == "pair_role":
+        forged_record["image_pair_role"] = "clean_to_attacked"
+    else:
+        forged_record["source_image_path"] = records[0]["source_image_path"]
+        forged_record["source_image_digest"] = records[0][
+            "source_image_digest"
+        ]
+    payload = {
+        key: value
+        for key, value in forged_record.items()
+        if key
+        not in {
+            "dataset_quality_record_id",
+            "dataset_quality_record_digest",
+        }
+    }
+    digest = build_stable_digest(payload)
+    forged_record["dataset_quality_record_digest"] = digest
+    forged_record["dataset_quality_record_id"] = (
+        f"dataset_quality_record_{digest[:16]}"
+    )
+    forged = replace(bundle, dataset_quality_image_records=tuple(records))
+
+    checks = build_result_closure_gate_checks(forged)
+
+    rebuild_check = next(
+        row
+        for row in checks
+        if row["check_id"]
+        == "dataset_quality_feature_identity_rebuild_ready"
+    )
+    assert rebuild_check["check_status"] == "blocked"
+
+
+@pytest.mark.quick
+def test_result_closure_gate_rejects_actual_quality_image_sha_drift() -> None:
+    """图像解析记录的声明 SHA 不得覆盖闭合侧即时文件摘要。"""
+
+    bundle = ready_bundle()
+    image_path = str(
+        bundle.dataset_quality_image_resolution_records[0][
+            "resolved_image_path"
+        ]
+    )
+    bundle.source_file_sha256[image_path] = "f" * 64
+
+    checks = build_result_closure_gate_checks(bundle)
+
+    rebuild_check = next(
+        row
+        for row in checks
+        if row["check_id"]
+        == "dataset_quality_feature_identity_rebuild_ready"
+    )
+    assert rebuild_check["check_status"] == "blocked"
+
+
+@pytest.mark.quick
+def test_result_closure_gate_rejects_result_analysis_cell_drift() -> None:
+    """结果分析 CI 表任一单元偏离正式记录时必须阻断语义闭合。"""
+
+    bundle = ready_bundle()
+    rows = list(bundle.result_analysis_confidence_interval_rows)
+    forged_row = dict(rows[0])
+    forged_row["true_positive_rate"] = 0.123
+    rows[0] = forged_row
+    forged = replace(
+        bundle,
+        result_analysis_confidence_interval_rows=tuple(rows),
+    )
+
+    checks = build_result_closure_gate_checks(forged)
+
+    rebuild_check = next(
+        row
+        for row in checks
+        if row["check_id"] == "result_analysis_semantic_rebuild_ready"
+    )
+    assert rebuild_check["check_status"] == "blocked"
+
+
+@pytest.mark.quick
+def test_result_closure_gate_rejects_resigned_semantic_digest_forgery() -> None:
+    """summary 与 manifest 同步重签也不得替代闭合侧独立语义摘要。"""
+
+    bundle = ready_bundle()
+    forged_digest = "f" * 64
+    bundle.result_analysis_summary[
+        "result_analysis_semantic_rebuild_digest"
+    ] = forged_digest
+    bundle.result_analysis_manifest["metadata"][
+        "result_analysis_semantic_rebuild_digest"
+    ] = forged_digest
+    manifest_config = build_result_analysis_manifest_config(
+        bundle.result_analysis_summary
+    )
+    bundle.result_analysis_manifest["config"] = manifest_config
+    bundle.result_analysis_manifest["config_digest"] = build_stable_digest(
+        manifest_config
+    )
+
+    checks = build_result_closure_gate_checks(bundle)
+
+    rebuild_check = next(
+        row
+        for row in checks
+        if row["check_id"] == "result_analysis_semantic_rebuild_ready"
+    )
+    assert rebuild_check["check_status"] == "blocked"
 
 
 @pytest.mark.quick
@@ -2762,6 +3476,55 @@ def test_result_closure_gate_rejects_dataset_quality_metric_value_drift() -> Non
         if row["check_id"] == "dataset_quality_feature_record_rebuild_ready"
     )
     assert rebuild_check["check_status"] == "blocked"
+
+
+@pytest.mark.quick
+def test_result_closure_gate_rejects_full_sample_kid_std_drift() -> None:
+    """全样本 KID std 必须精确为0, 不能被一般浮点容差掩盖。"""
+
+    bundle = ready_bundle()
+    rows = [dict(row) for row in bundle.dataset_quality_metrics]
+    kid_std_row = next(
+        row for row in rows if row["quality_metric_name"] == "kid_std"
+    )
+    kid_std_row["quality_metric_value"] = "1e-12"
+    forged = replace(bundle, dataset_quality_metrics=tuple(rows))
+
+    checks = build_result_closure_gate_checks(forged)
+
+    rebuild_check = next(
+        row
+        for row in checks
+        if row["check_id"] == "dataset_quality_feature_record_rebuild_ready"
+    )
+    assert rebuild_check["check_status"] == "blocked"
+
+
+@pytest.mark.quick
+def test_result_closure_gate_rejects_negative_or_legacy_kid_std() -> None:
+    """负标准差和旧 `kid` 行身份都不得通过正式质量闭合。"""
+
+    bundle = ready_bundle()
+    for mutation in ("negative_std", "legacy_kid"):
+        rows = [dict(row) for row in bundle.dataset_quality_metrics]
+        kid_std_row = next(
+            row for row in rows if row["quality_metric_name"] == "kid_std"
+        )
+        if mutation == "negative_std":
+            kid_std_row["quality_metric_value"] = "-0.001"
+        else:
+            kid_std_row["quality_metric_name"] = "kid"
+            kid_std_row["paper_metric_name"] = "kid"
+        forged = replace(bundle, dataset_quality_metrics=tuple(rows))
+
+        checks = build_result_closure_gate_checks(forged)
+
+        quality_check = next(
+            row
+            for row in checks
+            if row["check_id"] == "formal_fid_kid_ready"
+        )
+        assert quality_check["check_status"] == "blocked"
 
 
 @pytest.mark.quick

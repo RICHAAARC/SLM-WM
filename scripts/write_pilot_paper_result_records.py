@@ -13,6 +13,7 @@ import csv
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -30,6 +31,9 @@ from experiments.protocol.attacks import (
     resolve_formal_attack_config,
 )
 from experiments.protocol.formal_evidence import contains_nonformal_marker
+from experiments.protocol.dataset_quality import (
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
+)
 from experiments.runtime.repository_environment import resolve_code_version
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_METRIC_BOUNDS,
@@ -441,12 +445,43 @@ def dataset_quality_claim_gate_fields(dataset_quality_metrics_path: Path, root_p
     dataset_quality_summary_path = dataset_quality_metrics_path.with_name(DEFAULT_DATASET_QUALITY_SUMMARY_NAME)
     summary = read_json(dataset_quality_summary_path)
     metric_rows = read_csv_rows(dataset_quality_metrics_path)
+    try:
+        metric_values = {
+            _str_field(row, "quality_metric_name"): float(
+                row["quality_metric_value"]
+            )
+            for row in metric_rows
+        }
+    except (KeyError, TypeError, ValueError):
+        metric_values = {}
+    metric_values_ready = bool(
+        set(metric_values) == set(FORMAL_DATASET_QUALITY_METRIC_NAMES)
+        and all(math.isfinite(value) for value in metric_values.values())
+        and metric_values["fid"] >= 0.0
+        and metric_values["kid_std"] >= 0.0
+    )
     measured_formal_names = {
         _str_field(row, "quality_metric_name")
         for row in metric_rows
-        if _str_field(row, "quality_metric_name") in {"fid", "kid"} and _str_field(row, "metric_status") == "measured"
+        if _str_field(row, "quality_metric_name")
+        in FORMAL_DATASET_QUALITY_METRIC_NAMES
+        and _str_field(row, "metric_status") == "measured"
     }
-    metric_names_ready = bool(summary.get("formal_fid_kid_metric_names_ready", measured_formal_names == {"fid", "kid"}))
+    metric_names_ready = bool(
+        summary.get(
+            "formal_fid_kid_metric_names_ready",
+            measured_formal_names == set(FORMAL_DATASET_QUALITY_METRIC_NAMES),
+        )
+        and [
+            _str_field(row, "quality_metric_name") for row in metric_rows
+        ]
+        == list(FORMAL_DATASET_QUALITY_METRIC_NAMES)
+        and [
+            _str_field(row, "paper_metric_name") for row in metric_rows
+        ]
+        == list(FORMAL_DATASET_QUALITY_METRIC_NAMES)
+        and metric_values_ready
+    )
     canonical_extractor_ready = bool(summary.get("canonical_formal_feature_extractor_ready", False))
     claim_gate_ready = bool(
         summary.get("formal_fid_kid_claim_gate_ready", metric_names_ready)

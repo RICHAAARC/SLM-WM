@@ -37,6 +37,9 @@ from experiments.protocol.attacks import (
     default_attack_configs,
     resolve_formal_attack_config,
 )
+from experiments.protocol.dataset_quality import (
+    FORMAL_DATASET_QUALITY_METRIC_NAMES,
+)
 from main.core.digest import build_stable_digest
 
 
@@ -789,18 +792,22 @@ def _validate_ablation_necessity_statistics(
 
 
 def _validate_dataset_quality(path: Path, context: Mapping[str, Any]) -> dict[str, Any]:
-    """验证 FID/KID 两行正式 Inception 质量证据."""
+    """验证 FID 与 KID mean/std 三行正式 Inception 质量证据."""
 
     rows = _read_csv_exact(path, DATASET_QUALITY_FIELDS)
-    if [row["quality_metric_name"] for row in rows] != ["fid", "kid"]:
-        raise ValueError("数据集质量表必须恰好按 FID, KID 两行排列")
+    if [row["quality_metric_name"] for row in rows] != list(
+        FORMAL_DATASET_QUALITY_METRIC_NAMES
+    ):
+        raise ValueError("数据集质量表必须恰好按 FID, KID mean, KID std 三行排列")
     counts = set()
     for row in rows:
         if row["metric_status"] != "measured":
             raise ValueError("FID/KID 必须是 measured 状态")
+        if row["paper_metric_name"] != row["quality_metric_name"]:
+            raise ValueError("FID/KID 论文指标名称与机器指标名称不一致")
         value = _finite(row["quality_metric_value"])
-        if row["quality_metric_name"] == "fid" and value < 0.0:
-            raise ValueError("FID 不得为负数")
+        if row["quality_metric_name"] in {"fid", "kid_std"} and value < 0.0:
+            raise ValueError("FID 与 KID 子集标准差不得为负数")
         if not row["feature_backend"]:
             raise ValueError("FID/KID feature_backend 不得为空")
         row_counts = tuple(
@@ -815,7 +822,7 @@ def _validate_dataset_quality(path: Path, context: Mapping[str, Any]) -> dict[st
             raise ValueError("FID/KID 图像数量与配对数不一致")
         counts.add(row_counts)
     if len(counts) != 1:
-        raise ValueError("FID 与 KID 使用的样本集合不一致")
+        raise ValueError("FID 与 KID mean/std 使用的样本集合不一致")
     return {"row_count": len(rows)}
 
 
