@@ -219,7 +219,7 @@ def build_branch_risk_fields(
     texture_values: VectorInput | Iterable[NumberLike],
     stability_values: VectorInput | Iterable[NumberLike],
     saliency_values: VectorInput | Iterable[NumberLike],
-    attention_stability_values: VectorInput | Iterable[NumberLike] | None = None,
+    attention_stability_values: VectorInput | Iterable[NumberLike],
     configs: dict[str, BranchRiskConfig] | None = None,
     required_eligible_branches: Iterable[str] | None = None,
 ) -> BranchRiskFieldBundle:
@@ -237,12 +237,13 @@ def build_branch_risk_fields(
     texture = tuple(clip_unit(value) for value in as_float_vector(texture_values, "texture_values"))
     stability = tuple(clip_unit(value) for value in as_float_vector(stability_values, "stability_values"))
     saliency = tuple(clip_unit(value) for value in as_float_vector(saliency_values, "saliency_values"))
-    attention_stability = (
-        stability
-        if attention_stability_values is None
-        else tuple(
-            clip_unit(value)
-            for value in as_float_vector(attention_stability_values, "attention_stability_values")
+    if attention_stability_values is None:
+        raise ValueError("attention_stability_values 必须来自真实跨层 Q/K 关系")
+    attention_stability = tuple(
+        clip_unit(value)
+        for value in as_float_vector(
+            attention_stability_values,
+            "attention_stability_values",
         )
     )
     length = ensure_equal_length(

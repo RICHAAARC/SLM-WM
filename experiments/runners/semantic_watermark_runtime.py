@@ -1567,15 +1567,16 @@ def _image_attention_extractor(
             device=pipeline._execution_device,
         )
         timestep = pipeline.scheduler.timesteps[detection_index]
+        scale_noise = getattr(pipeline.scheduler, "scale_noise", None)
+        if not callable(scale_noise):
+            raise RuntimeError(
+                "正式仅图像 Q/K 提取要求 scheduler 提供可调用的 scale_noise"
+            )
         latent = _encode_image_latent(pipeline, image)
         generator = torch.Generator(device=latent.device.type).manual_seed(public_detection_seed)
         noise = torch.randn(latent.shape, generator=generator, device=latent.device, dtype=latent.dtype)
-        if hasattr(pipeline.scheduler, "scale_noise"):
-            timestep_batch = timestep.reshape(1).expand(latent.shape[0])
-            noisy_latent = pipeline.scheduler.scale_noise(latent, timestep_batch, noise)
-        else:
-            sigma = float(detection_index + 1) / float(config.inference_steps)
-            noisy_latent = (1.0 - sigma) * latent + sigma * noise
+        timestep_batch = timestep.reshape(1).expand(latent.shape[0])
+        noisy_latent = scale_noise(latent, timestep_batch, noise)
         with DifferentiableAttentionRecorder(modules, max_tokens=config.max_attention_tokens) as recorder:
             with torch.no_grad():
                 _transformer_forward_function(

@@ -136,7 +136,7 @@ $$
 \Omega_{\mathrm{A}}=\{u:\rho_{\mathrm{A}}(u)<\tau_A\}.
 $$
 
-$\Omega_{\mathrm{A}}$ 使用独立 attention stability 风险, 不复用 LF 或尾部截断分支的区域集合。正式候选矩阵构造时, $u\notin\Omega_b$ 的预算被置为 0, 资格集合内部才保留连续风险预算; 因而 `eligible_indices` 不是仅供日志展示的字段。完整方法只对当前实际参与嵌入的活动分支执行资格集合 fail-closed 门禁；移除风险路由的正式消融不执行该门禁, 避免被移除机制继续筛选实验样本。每次注入同时保存三个分支的风险摘要、资格位置数和风险场摘要值。
+$\Omega_{\mathrm{A}}$ 使用独立 attention stability 风险, 不复用 LF 或尾部截断分支的区域集合。该输入必须由不少于两个冻结层的真实 Q/K 关系计算；核心风险接口把它定义为必需参数，缺失时直接失败，普通跨步稳定度不能成为替代值。正式候选矩阵构造时, $u\notin\Omega_b$ 的预算被置为 0, 资格集合内部才保留连续风险预算; 因而 `eligible_indices` 不是仅供日志展示的字段。完整方法只对当前实际参与嵌入的活动分支执行资格集合 fail-closed 门禁；移除风险路由的正式消融不执行该门禁, 避免被移除机制继续筛选实验样本。每次注入同时保存三个分支的风险摘要、资格位置数和风险场摘要值。
 
 ---
 
@@ -498,8 +498,10 @@ carrier-only 反事实 $x_{\mathrm C}$, 配置中只关闭 attention geometry。
 逐注入原子必须精确覆盖冻结注入步, 与完整方法逐项共享 scheduler 轨迹, 且每条
 原子都没有 attention 分数、attention update、关系身份、pair 身份或 attention
 Null Space 记录；该 JSONL 的路径、实际文件 SHA-256 和解析内容摘要共同进入结果
-与 manifest。三张图像分别经 VAE 编码、公开固定噪声加噪和同一冻结 Transformer
-前向得到真实 Q/K。
+与 manifest。三张图像分别经 VAE 编码，并在正式检测 timestep 调用冻结 scheduler
+的 `scale_noise` 施加公开固定噪声，再由同一冻结 Transformer 前向得到真实 Q/K。
+当前协议不定义线性 latent/noise 混合作为等价加噪算子；scheduler 缺少可调用的
+`scale_noise` 时科学单元直接失败。
 
 该干预估计的是 attention geometry 开关的总机制效应。首个 attention 干预发生
 后, 完整方法与 carrier-only 的 latent 会不同, 因而后续 LF、tail 更新及生成轨迹

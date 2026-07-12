@@ -49,6 +49,20 @@ def test_branch_risk_rejects_empty_frozen_eligibility_set() -> None:
 
 
 @pytest.mark.quick
+def test_branch_risk_requires_independent_attention_stability() -> None:
+    """缺少真实跨层 Q/K 稳定度时必须失败, 不得复用扩散稳定度."""
+
+    with pytest.raises(ValueError, match="真实跨层 Q/K"):
+        build_branch_risk_fields(
+            semantic_values=(0.1, 0.2),
+            texture_values=(0.3, 0.4),
+            stability_values=(0.5, 0.6),
+            saliency_values=(0.7, 0.8),
+            attention_stability_values=None,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.quick
 def test_without_branch_risk_routing_does_not_filter_formal_ablation_samples() -> None:
     """移除风险路由的正式消融不得继续用风险阈值筛掉样本."""
 

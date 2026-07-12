@@ -1085,6 +1085,48 @@ def test_image_attention_extractor_batches_flowmatch_timestep(monkeypatch: pytes
 
 
 @pytest.mark.quick
+def test_image_attention_extractor_requires_scheduler_scale_noise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正式 Q/K 提取必须使用 scheduler 的真实加噪算子, 不得线性替代."""
+
+    import experiments.runners.semantic_watermark_runtime as runtime_module
+
+    class SchedulerWithoutScaleNoise:
+        """只提供检测日程, 故意缺少 scale_noise."""
+
+        def __init__(self) -> None:
+            self.timesteps = torch.arange(20, dtype=torch.float32)
+
+        def set_timesteps(self, step_count: int, device: str) -> None:
+            self.timesteps = torch.arange(
+                step_count,
+                device=device,
+                dtype=torch.float32,
+            )
+
+    pipeline = SimpleNamespace(
+        scheduler=SchedulerWithoutScaleNoise(),
+        _execution_device="cpu",
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "_encode_image_latent",
+        lambda _pipeline, _image: torch.zeros(1, 1, 2, 2),
+    )
+    extractor = _image_attention_extractor(
+        pipeline,
+        SemanticWatermarkRuntimeConfig(),
+        (),
+        None,
+        None,
+    )
+
+    with pytest.raises(RuntimeError, match="scheduler.*scale_noise"):
+        extractor(object())
+
+
+@pytest.mark.quick
 def test_post_step_injection_rejects_last_scheduler_step() -> None:
     """callback-on-step-end 的最后一步没有下一时刻, 必须在配置层拒绝。"""
 

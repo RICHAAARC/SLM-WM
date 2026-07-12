@@ -29,6 +29,8 @@
 
 高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对标准高斯模板按元素绝对幅值稳定排序，精确保留 `ceil(element_count * tail_fraction)` 个元素，并以展平索引处理同幅值排序；该算子不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。内容模板与安全投影实现位于 `main/methods/carrier/keyed_tensor.py`。
 
+注意力分支风险必须接收由真实跨层 Q/K 关系计算的独立稳定度，核心接口不接受缺失值。最终图像 Q/K 提取在冻结检测日程上调用 scheduler 的 `scale_noise`；缺少该方法或方法不可调用时运行失败，当前协议不定义线性 latent/noise 混合作为替代算子。
+
 四个主表外部 baseline 保留各自关键科学算子, 共同协议只统一 backbone、Prompt、攻击、仅图像访问和 fixed-FPR 统计边界。Tree-Ring 与 Shallow Diffuse 分别按官方调度在 Prompt 循环外构造一次全局载体。Gaussian Shading 使用 ChaCha20 key / nonce 加密 message, 并以同一 clean Gaussian latent 的逐坐标幅值构造严格配对的符号条件样本。T2SMark clean 图像重放编码器实际使用的水印前基础 Gaussian latent。simple XOR、独立 clean / watermarked latent 采样或逐 Prompt 替换官方全局载体均不属于正式主表实现。
 
 ## 二、不可变模型输入
