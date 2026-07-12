@@ -2946,6 +2946,7 @@ def run_semantic_watermark_runtime(
         record["prompt_id"] = config.prompt_id
         record["split"] = config.split
         record["sample_role"] = sample_role
+        record["embedding_pair_ssim"] = float(paired_quality["ssim"])
         record.update(formal_randomization_identity)
         record["metadata"] = {
             **record["metadata"],
@@ -2986,6 +2987,7 @@ def run_semantic_watermark_runtime(
                     "prompt_id": config.prompt_id,
                     "split": config.split,
                     "sample_role": sample_role,
+                    "embedding_pair_ssim": float(paired_quality["ssim"]),
                     **formal_randomization_identity,
                     "attack_id": attack_config.attack_id,
                     "attack_family": attack_config.attack_family,
@@ -3038,6 +3040,7 @@ def run_semantic_watermark_runtime(
                         "prompt_id": config.prompt_id,
                         "split": config.split,
                         "sample_role": sample_role,
+                        "embedding_pair_ssim": float(paired_quality["ssim"]),
                         **formal_randomization_identity,
                         "attack_id": attack_spec.attack_id,
                         "attack_family": attack_spec.attack_family,

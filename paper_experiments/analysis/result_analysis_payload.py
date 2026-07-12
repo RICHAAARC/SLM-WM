@@ -140,6 +140,28 @@ PAIRED_SUPERIORITY_FIELDNAMES = (
     "paired_outcome_set_digest",
     "protocol_digest",
     "paired_superiority_ready",
+    "quality_matching_protocol_schema",
+    "quality_matching_protocol_digest",
+    "quality_metric_name",
+    "quality_match_caliper",
+    "minimum_matched_prompt_fraction",
+    "total_quality_prompt_count",
+    "minimum_matched_prompt_count",
+    "matched_prompt_count",
+    "unmatched_prompt_count",
+    "matched_prompt_fraction",
+    "proposed_embedding_pair_ssim_mean",
+    "baseline_embedding_pair_ssim_mean",
+    "mean_embedding_pair_ssim_gap",
+    "max_absolute_embedding_pair_ssim_gap",
+    "quality_match_coverage_ready",
+    "quality_matched_observation_count",
+    "quality_matched_mean_paired_true_positive_rate_difference",
+    "quality_matched_mean_paired_difference_ci_low",
+    "quality_matched_mean_paired_difference_ci_high",
+    "quality_matched_holm_adjusted_p_value",
+    "quality_matched_superiority_ready",
+    "quality_matched_row_digest",
     "supports_paper_claim",
 )
 
@@ -1247,13 +1269,54 @@ def _validate_paired_superiority_rows(
         ready = _strict_bool(
             row["paired_superiority_ready"], "paired_superiority_ready"
         )
+        quality_coverage_ready = _strict_bool(
+            row["quality_match_coverage_ready"],
+            "quality_match_coverage_ready",
+        )
+        quality_mean = _finite_float(
+            row[
+                "quality_matched_mean_paired_true_positive_rate_difference"
+            ],
+            "quality_matched_mean_paired_true_positive_rate_difference",
+        )
+        quality_ci_low = _finite_float(
+            row["quality_matched_mean_paired_difference_ci_low"],
+            "quality_matched_mean_paired_difference_ci_low",
+        )
+        quality_ci_high = _finite_float(
+            row["quality_matched_mean_paired_difference_ci_high"],
+            "quality_matched_mean_paired_difference_ci_high",
+        )
+        quality_adjusted_p = _finite_float(
+            row["quality_matched_holm_adjusted_p_value"],
+            "quality_matched_holm_adjusted_p_value",
+        )
+        if not (
+            -1.0 <= quality_ci_low <= quality_mean <= quality_ci_high <= 1.0
+            and 0.0 <= quality_adjusted_p <= 1.0
+        ):
+            raise ResultAnalysisSemanticError("质量匹配配对优势统计值无效")
+        quality_ready = _strict_bool(
+            row["quality_matched_superiority_ready"],
+            "quality_matched_superiority_ready",
+        )
         supports = _strict_bool(
             row["supports_paper_claim"], "supports_paper_claim"
         )
         expected_ready = bool(mean > 0.0 and ci_low > 0.0 and adjusted_p < 0.05)
-        if ready != expected_ready or supports != expected_ready:
+        expected_quality_ready = bool(
+            quality_coverage_ready
+            and quality_mean > 0.0
+            and quality_ci_low > 0.0
+            and quality_adjusted_p < 0.05
+        )
+        if (
+            ready != expected_ready
+            or quality_ready != expected_quality_ready
+            or supports != (expected_ready and expected_quality_ready)
+        ):
             raise ResultAnalysisSemanticError(
-                "配对优势表结论与均值、CI 和 Holm 校正 p 值不一致"
+                "配对优势表结论与全样本或质量匹配统计不一致"
             )
         payload = dict(row)
         payload.update(
@@ -1264,6 +1327,18 @@ def _validate_paired_superiority_rows(
                 "mean_paired_difference_ci_high": ci_high,
                 "holm_adjusted_p_value": adjusted_p,
                 "paired_superiority_ready": ready,
+                "quality_match_coverage_ready": quality_coverage_ready,
+                "quality_matched_mean_paired_true_positive_rate_difference": (
+                    quality_mean
+                ),
+                "quality_matched_mean_paired_difference_ci_low": (
+                    quality_ci_low
+                ),
+                "quality_matched_mean_paired_difference_ci_high": (
+                    quality_ci_high
+                ),
+                "quality_matched_holm_adjusted_p_value": quality_adjusted_p,
+                "quality_matched_superiority_ready": quality_ready,
                 "supports_paper_claim": supports,
             }
         )
@@ -1470,6 +1545,20 @@ def build_result_analysis_manifest_config(summary: Mapping[str, Any]) -> dict[st
         ),
         "paired_superiority_protocol_digest": summary.get(
             "paired_superiority_protocol_digest", ""
+        ),
+        "quality_matching_protocol_schema": summary.get(
+            "quality_matching_protocol_schema", ""
+        ),
+        "quality_matching_protocol_digest": summary.get(
+            "quality_matching_protocol_digest", ""
+        ),
+        "quality_metric_name": summary.get("quality_metric_name", ""),
+        "quality_match_caliper": summary.get("quality_match_caliper", 0.0),
+        "minimum_matched_prompt_fraction": summary.get(
+            "minimum_matched_prompt_fraction", 0.0
+        ),
+        "quality_matched_rows_digest": summary.get(
+            "quality_matched_rows_digest", ""
         ),
         "paired_test_prompt_count": summary.get("paired_test_prompt_count", 0),
         "paired_test_prompt_id_digest": summary.get(

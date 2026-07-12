@@ -736,7 +736,7 @@ Notebook 与 repository module 的跨边界数据
 | attention_update_strength | method | none | true | false | false | attention update 强度曲线中的实际强度值。 |
 | attention_update_stable | method | none | true | false | false | 单条 carrier 或强度行是否满足 update 稳定性边界。 |
 | attention_relative_carrier_digest | method | none | true | false | false | attention-relative carrier 的稳定摘要。 |
-| quality_metric_name | metric | none | true | true | false | 数据集级正式质量指标名称, 当前精确取 `fid`、`kid_mean` 或 `kid_std`。 |
+| quality_metric_name | metric | none | true | true | false | 正式质量指标身份; 数据集级取 `fid`、`kid_mean` 或 `kid_std`, 主表质量匹配固定取 `embedding_pair_ssim`。 |
 | quality_metric_value | metric | none | true | true | false | 从真实生成图像与真实参考图像特征计算的 FID、KID 子集均值或 KID 子集总体标准差。 |
 | image_quality_metrics_ready | method | none | false | false | false | 是否已经完成真实图像质量指标测量。 |
 | full_method_claim_ready | governance | none | true | true | false | 主方法真实生成、攻击、仅图像检测和科学算子门禁是否共同支持当前论文层级结论。 |
@@ -2058,6 +2058,46 @@ Notebook 与 repository module 的跨边界数据
 | source_unit_output_ready | governance | none | true | false | false | 动态补丁后的官方源码是否具备逐 Prompt 观测和原子 payload 发布能力。 |
 | method_faithful_source_identity | provenance | none | true | false | false | Common-backbone adapter 绑定外部方法登记 commit 与实际适配实现摘要的源码身份。 |
 | method_faithful_source_identity_digest | provenance | none | true | false | false | method_faithful_source_identity 排除自指字段后的稳定 SHA-256 摘要。 |
+| numerical_fidelity_reference_mode | protocol | none | true | false | false | 单个主表 baseline 的关键算子数值参照模式, 区分官方 commit 算子执行、源码契约绑定和 native official result 精确重建。 |
+| numerical_fidelity_report_path | artifact | none | true | false | false | 主表 baseline 数值忠实度报告的仓库相对路径。 |
+| numerical_fidelity_report_sha256 | provenance | none | true | false | false | 数值忠实度报告文件的原始字节 SHA-256。 |
+| numerical_fidelity_report_digest | provenance | none | true | false | false | 数值忠实度报告排除自指字段后的稳定摘要。 |
+| method_faithful_numerical_fidelity_ready | governance | none | true | false | false | Common-backbone adapter 的全部已登记关键算子是否通过独立数值语义复验。 |
+| numerical_fidelity_mode | protocol | none | true | false | false | 主表证据记录使用的数值忠实度验证模式。 |
+| baseline_numerical_fidelity_ready | governance | none | true | true | false | 单个主表 baseline 是否具备与其实现路线一致的数值忠实度资格证据。 |
+| numerical_fidelity_ready_count | metric | none | true | true | false | 已通过数值忠实度资格门禁的主表 baseline 数量。 |
+| numerical_fidelity_ready_ids | governance | none | true | true | false | 已通过数值忠实度资格门禁的主表 baseline 身份集合。 |
+| primary_baseline_numerical_fidelity_ready | governance | none | true | true | false | 精确4个主表 baseline 是否全部通过各自的数值忠实度资格门禁。 |
+| official_source_read_mode | protocol | none | true | false | false | 数值报告读取官方源码的固定模式, 正式值为 immutable Git commit blob。 |
+| official_source_file | artifact | none | true | false | false | 数值比较所绑定的官方源码文件路径。 |
+| official_source_blob_sha256 | provenance | none | true | false | false | 登记 commit 中官方源码 blob 的 SHA-256。 |
+| official_operator_ast_digest | provenance | none | true | false | false | 从官方源码 blob 抽取的已登记关键定义 AST 稳定摘要。 |
+| official_entrypoint_blob_sha256 | provenance | none | true | false | false | Shallow Diffuse 编辑时刻公式所在官方入口 blob 的 SHA-256。 |
+| official_edit_timestep_formula_ast_digest | provenance | none | true | false | false | Shallow Diffuse 官方编辑时刻取整公式 AST 的稳定摘要。 |
+| adapter_file | artifact | none | true | false | false | 参与关键算子数值比较的本地 adapter 文件路径。 |
+| adapter_file_sha256 | provenance | none | true | false | false | 参与关键算子数值比较的 adapter 文件 SHA-256。 |
+| operator_ids | protocol | none | true | false | false | 当前 baseline 必须按固定顺序覆盖的关键算子身份集合。 |
+| operator_record_count | metric | none | true | false | false | 数值忠实度报告包含的关键算子比较记录数量。 |
+| operator_records | artifact | none | true | false | false | 数值忠实度报告中的逐算子原始比较记录。 |
+| operator_records_digest | provenance | none | true | false | false | 按固定算子顺序排列的全部数值比较记录稳定摘要。 |
+| operator_id | protocol | none | true | false | false | 单条数值比较记录对应的关键算子稳定身份。 |
+| reference_origin | provenance | none | true | false | false | 单条比较中参照值的来源, 例如官方 commit 算子或官方定义契约。 |
+| comparison_mode | protocol | none | true | false | false | 数值比较采用的 exact Tensor、误差 Tensor 或标量绝对误差模式。 |
+| reference_dtype | runtime | none | true | false | false | 参照 Tensor 的实际 dtype。 |
+| adapter_dtype | runtime | none | true | false | false | Adapter Tensor 的实际 dtype。 |
+| reference_shape | runtime | none | true | false | false | 参照 Tensor 的有序 shape。 |
+| adapter_shape | runtime | none | true | false | false | Adapter Tensor 的有序 shape。 |
+| element_count | metric | none | true | false | false | 单条 Tensor 比较覆盖的元素数量。 |
+| absolute_tolerance | protocol | none | true | false | false | 单条关键算子数值比较预注册的绝对误差容限。 |
+| max_absolute_error | metric | none | true | false | false | 参照输出与 adapter 输出的最大绝对误差。 |
+| exact_match | metric | none | true | false | false | Exact Tensor 比较的 dtype、shape 与值是否完全一致。 |
+| reference_value | metric | none | true | false | false | 标量比较中的官方参照数值。 |
+| adapter_value | metric | none | true | false | false | 标量比较中的 adapter 数值。 |
+| reference_value_digest | provenance | none | true | false | false | 参照 Tensor 的 dtype、shape 与连续内容稳定摘要。 |
+| adapter_value_digest | provenance | none | true | false | false | Adapter Tensor 的 dtype、shape 与连续内容稳定摘要。 |
+| numerical_fidelity_ready | governance | none | true | false | false | 单条算子比较是否由原始数值、容限和来源约束共同重建为通过。 |
+| comparison_record_digest | provenance | none | true | false | false | 单条数值比较记录排除自指字段后的稳定摘要。 |
+| official_source_cipher_contract_ready | governance | none | true | false | false | Gaussian Shading ChaCha20 known-answer 比较是否同时绑定官方源码调用契约。 |
 | stable_scientific_execution_identity | provenance | none | true | false | false | 跨 Colab 会话必须一致的代码锁、依赖锁、Python、PyTorch 与 CUDA build 身份。 |
 | stable_scientific_execution_identity_digest | provenance | none | true | false | false | stable_scientific_execution_identity 的稳定 SHA-256 摘要。 |
 | method_faithful_scientific_unit_count | metric | none | true | false | false | 当前 common-backbone 运行完整复验的 source pair 与攻击单元总数。 |
@@ -2272,6 +2312,42 @@ Notebook 与 repository module 的跨边界数据
 | baseline_decision | metric | none | true | true | false | 单个 Prompt 与攻击条件配对中主表 baseline 的正式二元检测判定。 |
 | paired_difference | metric | none | true | true | false | 同一 Prompt 与攻击条件下 SLM-WM 判定减 baseline 判定的差值, 取值为 -1、0或1。 |
 | paired_outcome_digest | provenance | none | true | true | false | 单条 Prompt x attack 配对结果核心内容的稳定摘要。 |
+| embedding_pair_ssim | metric | none | true | true | false | 同一 Prompt、seed、密钥和基础 latent 的未攻击 clean-watermarked 图像 pair 实测 SSIM。 |
+| quality_matching_protocol_schema | protocol | none | true | true | false | 检测标签无关的逐 Prompt 质量匹配协议版本。 |
+| quality_matching_protocol_digest | provenance | none | true | true | false | 质量指标、caliper、最低覆盖比例、匹配单位和标签独立约束的稳定摘要。 |
+| proposed_embedding_pair_ssim | metric | none | true | true | false | 当前配对 outcome 对应的 SLM-WM 未攻击图像 pair SSIM。 |
+| baseline_embedding_pair_ssim | metric | none | true | true | false | 当前配对 outcome 对应的 baseline 未攻击图像 pair SSIM。 |
+| embedding_pair_ssim_gap | metric | none | true | true | false | SLM-WM 未攻击 pair SSIM 减 baseline 未攻击 pair SSIM 的有符号差值。 |
+| absolute_embedding_pair_ssim_gap | metric | none | true | true | false | 两方法未攻击 pair SSIM 差值的绝对值。 |
+| quality_match_caliper | protocol | none | true | true | false | 逐 Prompt 质量匹配允许的最大绝对 SSIM 差, 正式值为0.02。 |
+| quality_matched | governance | none | true | true | false | 当前 Prompt 的绝对 SSIM 差是否不超过冻结 caliper。 |
+| proposed_quality_record_digest | provenance | none | true | true | false | SLM-WM 未攻击质量记录及其完整随机身份的稳定摘要。 |
+| baseline_quality_record_digest | provenance | none | true | true | false | Baseline 未攻击质量记录及其完整随机身份的稳定摘要。 |
+| minimum_matched_prompt_fraction | protocol | none | true | true | false | 单个 baseline 质量匹配子集要求覆盖的最低 test Prompt 比例, 正式值为0.80。 |
+| total_quality_prompt_count | metric | none | true | true | false | 单个 baseline 参与质量 caliper 判定的唯一 test Prompt 总数。 |
+| minimum_matched_prompt_count | metric | none | true | true | false | 按最低覆盖比例向上取整得到的最少匹配 Prompt 数量。 |
+| matched_prompt_count | metric | none | true | true | false | 单个 baseline 实际通过质量 caliper 的唯一 Prompt 数量。 |
+| unmatched_prompt_count | metric | none | true | true | false | 单个 baseline 未通过质量 caliper 的唯一 Prompt 数量。 |
+| matched_prompt_fraction | metric | none | true | true | false | 单个 baseline 实际通过质量 caliper 的 Prompt 比例。 |
+| proposed_embedding_pair_ssim_mean | metric | none | true | true | false | 当前 baseline 比较中 SLM-WM 全部质量身份的逐 Prompt SSIM 均值。 |
+| baseline_embedding_pair_ssim_mean | metric | none | true | true | false | 当前 baseline 全部质量身份的逐 Prompt SSIM 均值。 |
+| mean_embedding_pair_ssim_gap | metric | none | true | true | false | 当前 baseline 比较中逐 Prompt 有符号 SSIM 差值均值。 |
+| max_absolute_embedding_pair_ssim_gap | metric | none | true | true | false | 当前 baseline 比较中逐 Prompt 绝对 SSIM 差的最大值。 |
+| quality_match_coverage_ready | governance | none | true | true | false | 单个 baseline 的质量匹配 Prompt 覆盖是否达到预注册最低比例。 |
+| quality_matched_observation_count | metric | none | true | true | false | 单个 baseline 质量匹配 Prompt 子集覆盖的 Prompt x attack 观测数量。 |
+| quality_matched_mean_paired_true_positive_rate_difference | metric | none | true | true | false | 在当前 baseline 质量匹配 Prompt 子集上重算的平均二元检测差值。 |
+| quality_matched_mean_paired_difference_ci_low | metric | none | true | true | false | 质量匹配子集 Prompt-clustered bootstrap 均值差 CI 下界。 |
+| quality_matched_mean_paired_difference_ci_high | metric | none | true | true | false | 质量匹配子集 Prompt-clustered bootstrap 均值差 CI 上界。 |
+| quality_matched_holm_adjusted_p_value | metric | none | true | true | false | 质量匹配子集按预注册4个 baseline 比较执行 Holm 校正后的 claim p 值。 |
+| quality_matched_superiority_ready | governance | none | true | true | false | 单个 baseline 是否同时达到质量覆盖、正效应、正 CI 下界和校正显著性门禁。 |
+| quality_matched_row_digest | provenance | none | true | true | false | 单个 baseline 质量匹配统计行的稳定摘要。 |
+| quality_matched_row_count | metric | none | true | true | false | 质量匹配统计实际包含的主表 baseline 行数, 闭合值为4。 |
+| quality_matched_ready_ids | governance | none | true | true | false | 已通过质量匹配优势门禁的主表 baseline 身份集合。 |
+| quality_matched_exact_set_ready | governance | none | true | true | false | 质量匹配统计是否无缺失、无额外且无重复地覆盖4个主表 baseline。 |
+| overall_quality_matched_superiority_ready | governance | none | true | true | false | 4个主表 baseline 是否全部通过质量匹配覆盖与优势门禁。 |
+| quality_matched_rows_digest | provenance | none | true | true | false | 按固定 baseline 顺序排列的4行质量匹配统计稳定摘要。 |
+| quality_matching_uses_detection_labels | governance | none | true | true | false | 质量子集选择是否读取检测标签, 正式闭合值必须为 false。 |
+| supports_quality_matched_paper_claim | governance | none | true | true | false | 质量匹配统计是否允许在当前论文运行层级支持质量控制后的优势结论。 |
 | proposed_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中 SLM-WM 实际使用的审计冻结阈值摘要。 |
 | baseline_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中对应主表 baseline 实际使用的审计冻结阈值摘要。 |
 | paired_prompt_count | metric | none | true | true | false | 单个主表 baseline 参与总体配对统计的唯一 test Prompt 数量。 |

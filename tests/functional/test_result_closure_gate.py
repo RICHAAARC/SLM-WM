@@ -96,8 +96,11 @@ from paper_experiments.analysis.paired_superiority import (
     build_paired_superiority_manifest_config,
     build_paired_superiority_rows,
     build_paired_superiority_summary,
+    build_quality_matched_superiority_rows,
+    build_quality_matched_superiority_summary,
     canonical_attack_registry_rows,
     canonical_threshold_audit_rows,
+    merge_paired_and_quality_matched_rows,
 )
 from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     build_fixed_fpr_threshold_manifest_config,
@@ -463,6 +466,7 @@ PROPOSED_OBSERVATION_RECORDS = tuple(
                 ),
                 "source_to_evaluated_ssim": 1.0,
                 "source_to_evaluated_psnr": 100.0,
+                "embedding_pair_ssim": 0.9,
                 "frozen_threshold_digest": MAIN_THRESHOLD_DIGEST,
                 "formal_evidence_positive": sample_role == "positive_source",
             }
@@ -531,6 +535,24 @@ METHOD_OBSERVATION_RECORDS_BY_METHOD = {
                             baseline_id
                         ],
                         "detection_decision": False,
+                    }
+                    for prompt_id in TEST_PROMPT_IDS
+                ),
+                *(
+                    {
+                        "baseline_id": baseline_id,
+                        "prompt_id": prompt_id,
+                        **paired_randomization_identity(prompt_id),
+                        "split": "test",
+                        "sample_role": "positive_source",
+                        "attack_family": "clean",
+                        "attack_name": "clean_none",
+                        "quality_score": 0.9,
+                        "threshold_digest": METHOD_THRESHOLD_DIGEST_MAP[
+                            baseline_id
+                        ],
+                        "detection_decision": True,
+                        "final_decision": True,
                     }
                     for prompt_id in TEST_PROMPT_IDS
                 ),
@@ -986,18 +1008,32 @@ def paired_superiority_evidence(
                 baseline_id
             ],
             attack_registry_rows=ATTACK_REGISTRY,
+            include_quality_matching=True,
         )
     )
-    rows = tuple(
+    all_sample_rows = tuple(
         build_paired_superiority_rows(
             materialized_outcomes,
             protocol_digest=protocol_digest,
+        )
+    )
+    quality_rows = tuple(
+        build_quality_matched_superiority_rows(
+            materialized_outcomes,
+            protocol_digest=protocol_digest,
+        )
+    )
+    rows = tuple(
+        merge_paired_and_quality_matched_rows(
+            all_sample_rows,
+            quality_rows,
         )
     )
     statistical_summary = build_paired_superiority_summary(
         rows,
         paired_outcomes=materialized_outcomes,
     )
+    quality_summary = build_quality_matched_superiority_summary(quality_rows)
     summary = {
         "paper_claim_scale": SCALE,
         "target_fpr": TARGET_FPR,
@@ -1034,6 +1070,7 @@ def paired_superiority_evidence(
         ),
         "paired_superiority_scale_ready": True,
         **statistical_summary,
+        **quality_summary,
         "overall_paired_superiority_ready": True,
         "supports_paper_claim": True,
     }
@@ -1259,6 +1296,18 @@ def formal_attacked_image_registry(
 def primary_evidence_record(baseline_id: str) -> dict[str, object]:
     """构造可独立复算身份摘要的 primary baseline 证据记录."""
 
+    numerical_fidelity_mode = (
+        "native_official_result_exact_rebuild"
+        if baseline_id == "t2smark"
+        else (
+            "official_source_bound_rfc8439_and_operator_equivalence"
+            if baseline_id == "gaussian_shading"
+            else "executed_official_commit_operator_equivalence"
+        )
+    )
+    numerical_fidelity_report_digest = build_stable_digest(
+        {"baseline_id": baseline_id, "mode": numerical_fidelity_mode}
+    )
     payload: dict[str, object] = {
         "baseline_id": baseline_id,
         "source_status": "downloaded",
@@ -1269,6 +1318,9 @@ def primary_evidence_record(baseline_id: str) -> dict[str, object]:
         "adapter_run_ready": True,
         "adapter_run_observation_count": PROMPT_COUNT,
         "method_faithful_adapter_ready": True,
+        "numerical_fidelity_mode": numerical_fidelity_mode,
+        "numerical_fidelity_report_digest": numerical_fidelity_report_digest,
+        "baseline_numerical_fidelity_ready": True,
         "blocking_reasons": (),
     }
     digest = build_stable_digest(payload)
@@ -1288,6 +1340,12 @@ def primary_evidence_record(baseline_id: str) -> dict[str, object]:
         "adapter_run_sample_roles": ["clean_negative", "positive_source"],
         "adapter_run_latent_shapes": [[1, 16, 64, 64]],
         "method_faithful_adapter_ready": True,
+        "numerical_fidelity_mode": numerical_fidelity_mode,
+        "numerical_fidelity_report_path": (
+            f"outputs/formal/{baseline_id}/numerical_fidelity_report.json"
+        ),
+        "numerical_fidelity_report_digest": numerical_fidelity_report_digest,
+        "baseline_numerical_fidelity_ready": True,
         "paper_run_prompt_protocol_ready": True,
         "fixed_fpr_baseline_calibration_ready": True,
         "attack_matrix_baseline_detection_ready": True,
@@ -1842,6 +1900,14 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "adapter_run_ready_ids": ["tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark"],
         "formal_result_ready_count": 4,
         "formal_result_ready_ids": ["tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark"],
+        "numerical_fidelity_ready_count": 4,
+        "numerical_fidelity_ready_ids": [
+            "tree_ring",
+            "gaussian_shading",
+            "shallow_diffuse",
+            "t2smark",
+        ],
+        "primary_baseline_numerical_fidelity_ready": True,
         "input_baseline_ids": ["tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark"],
         "primary_baseline_formal_ready": True,
         "blocking_reasons": [],
@@ -1927,6 +1993,9 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "paired_superiority_ready": True,
         "paired_superiority_exact_set_ready": True,
         "overall_paired_superiority_ready": True,
+        "overall_quality_matched_superiority_ready": True,
+        "quality_matched_exact_set_ready": True,
+        "quality_matching_uses_detection_labels": False,
         "pilot_paper_effectiveness_gate_ready": True,
         "slm_wm_fixed_fpr_boundary_ready": True,
         "paper_run_claim_ready": True,
@@ -1942,6 +2011,20 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         ],
         "paired_superiority_protocol_digest": paired_summary[
             "paired_superiority_protocol_digest"
+        ],
+        "quality_matching_protocol_schema": paired_summary[
+            "quality_matching_protocol_schema"
+        ],
+        "quality_matching_protocol_digest": paired_summary[
+            "quality_matching_protocol_digest"
+        ],
+        "quality_metric_name": paired_summary["quality_metric_name"],
+        "quality_match_caliper": paired_summary["quality_match_caliper"],
+        "minimum_matched_prompt_fraction": paired_summary[
+            "minimum_matched_prompt_fraction"
+        ],
+        "quality_matched_rows_digest": paired_summary[
+            "quality_matched_rows_digest"
         ],
         "paired_test_prompt_count": paired_summary["paired_test_prompt_count"],
         "paired_test_prompt_id_digest": paired_summary[
@@ -1990,6 +2073,9 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             "common_code_version": COMMON_CODE_VERSION,
             "paired_superiority_ready": True,
             "overall_paired_superiority_ready": True,
+            "overall_quality_matched_superiority_ready": True,
+            "quality_matched_exact_set_ready": True,
+            "quality_matching_uses_detection_labels": False,
             "paired_outcome_set_digest": paired_summary[
                 "paired_outcome_set_digest"
             ],
@@ -1998,6 +2084,20 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             ],
             "paired_superiority_protocol_digest": paired_summary[
                 "paired_superiority_protocol_digest"
+            ],
+            "quality_matching_protocol_schema": paired_summary[
+                "quality_matching_protocol_schema"
+            ],
+            "quality_matching_protocol_digest": paired_summary[
+                "quality_matching_protocol_digest"
+            ],
+            "quality_metric_name": paired_summary["quality_metric_name"],
+            "quality_match_caliper": paired_summary["quality_match_caliper"],
+            "minimum_matched_prompt_fraction": paired_summary[
+                "minimum_matched_prompt_fraction"
+            ],
+            "quality_matched_rows_digest": paired_summary[
+                "quality_matched_rows_digest"
             ],
             "paired_test_prompt_count": paired_summary[
                 "paired_test_prompt_count"
@@ -2080,6 +2180,9 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "universal_per_attack_superiority_claim_ready": False,
         "paired_superiority_ready": True,
         "overall_paired_superiority_ready": True,
+        "overall_quality_matched_superiority_ready": True,
+        "quality_matched_exact_set_ready": True,
+        "quality_matching_uses_detection_labels": False,
         "paired_superiority_row_count": len(paired_rows),
         "paired_outcome_set_digest": paired_summary["paired_outcome_set_digest"],
         "paired_superiority_rows_digest": paired_summary[
@@ -2087,6 +2190,20 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         ],
         "paired_superiority_protocol_digest": paired_summary[
             "paired_superiority_protocol_digest"
+        ],
+        "quality_matching_protocol_schema": paired_summary[
+            "quality_matching_protocol_schema"
+        ],
+        "quality_matching_protocol_digest": paired_summary[
+            "quality_matching_protocol_digest"
+        ],
+        "quality_metric_name": paired_summary["quality_metric_name"],
+        "quality_match_caliper": paired_summary["quality_match_caliper"],
+        "minimum_matched_prompt_fraction": paired_summary[
+            "minimum_matched_prompt_fraction"
+        ],
+        "quality_matched_rows_digest": paired_summary[
+            "quality_matched_rows_digest"
         ],
         "paired_test_prompt_count": paired_summary["paired_test_prompt_count"],
         "paired_test_prompt_id_digest": paired_summary[
@@ -2803,13 +2920,28 @@ def synchronize_paired_evidence(
 ) -> ResultClosureGateInput:
     """同步伪造配对链的全部自声明摘要, 用于验证门禁会独立复算."""
 
+    quality_rows = tuple(
+        build_quality_matched_superiority_rows(
+            outcomes,
+            protocol_digest=str(
+                bundle.paired_superiority_summary[
+                    "paired_superiority_protocol_digest"
+                ]
+            ),
+        )
+    )
+    merged_rows = tuple(
+        merge_paired_and_quality_matched_rows(rows, quality_rows)
+    )
     rebuilt_summary = build_paired_superiority_summary(
-        rows,
+        merged_rows,
         paired_outcomes=outcomes,
     )
+    quality_summary = build_quality_matched_superiority_summary(quality_rows)
     summary = {
         **bundle.paired_superiority_summary,
         **rebuilt_summary,
+        **quality_summary,
         "paired_outcome_count": len(outcomes),
         "paired_outcome_set_digest": build_stable_digest(outcomes),
     }
@@ -2817,6 +2949,15 @@ def synchronize_paired_evidence(
         "paired_outcome_set_digest",
         "paired_superiority_rows_digest",
         "paired_superiority_protocol_digest",
+        "quality_matching_protocol_schema",
+        "quality_matching_protocol_digest",
+        "quality_metric_name",
+        "quality_match_caliper",
+        "minimum_matched_prompt_fraction",
+        "quality_matched_rows_digest",
+        "overall_quality_matched_superiority_ready",
+        "quality_matched_exact_set_ready",
+        "quality_matching_uses_detection_labels",
         "paired_test_prompt_count",
         "paired_test_prompt_id_digest",
         "paired_attack_registry_digest",
@@ -2853,7 +2994,7 @@ def synchronize_paired_evidence(
     return replace(
         bundle,
         paired_outcomes=outcomes,
-        paired_superiority_rows=rows,
+        paired_superiority_rows=merged_rows,
         paired_superiority_summary=summary,
         paired_superiority_manifest=paired_manifest,
         common_protocol_summary=common_summary,

@@ -16,6 +16,7 @@ from scripts.write_pilot_paper_result_analysis_outputs import (
     write_pilot_paper_result_analysis_outputs,
 )
 from paper_experiments.analysis.result_analysis_payload import (
+    PAIRED_SUPERIORITY_FIELDNAMES,
     result_analysis_payload_binding_ready,
 )
 
@@ -55,6 +56,20 @@ def _write_paired_superiority_inputs(root: Path) -> None:
         "paired_outcome_set_digest": "a" * 64,
         "paired_superiority_rows_digest": "b" * 64,
         "paired_superiority_protocol_digest": "c" * 64,
+        "quality_matching_protocol_schema": (
+            "paired_prompt_embedding_ssim_caliper_v1"
+        ),
+        "quality_matching_protocol_digest": "1" * 64,
+        "quality_metric_name": "embedding_pair_ssim",
+        "quality_match_caliper": 0.02,
+        "minimum_matched_prompt_fraction": 0.8,
+        "quality_matched_row_count": len(baseline_ids),
+        "quality_matched_ready_ids": list(baseline_ids),
+        "quality_matched_exact_set_ready": True,
+        "overall_quality_matched_superiority_ready": True,
+        "quality_matched_rows_digest": "2" * 64,
+        "quality_matching_uses_detection_labels": False,
+        "supports_quality_matched_paper_claim": True,
         "paired_test_prompt_count": 340,
         "paired_test_prompt_id_digest": "d" * 64,
         "expected_attack_count": 1,
@@ -96,13 +111,68 @@ def _write_paired_superiority_inputs(root: Path) -> None:
     ) as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=("baseline_id", "paired_superiority_ready", "supports_paper_claim"),
+            fieldnames=PAIRED_SUPERIORITY_FIELDNAMES,
         )
         writer.writeheader()
         writer.writerows(
             {
                 "baseline_id": baseline_id,
+                "paired_prompt_count": 340,
+                "paired_attack_count": 1,
+                "paired_observation_count": 340,
+                "mean_paired_true_positive_rate_difference": 0.2,
+                "mean_paired_difference_ci_low": 0.1,
+                "mean_paired_difference_ci_high": 0.3,
+                "positive_prompt_cluster_count": 340,
+                "negative_prompt_cluster_count": 0,
+                "tied_prompt_cluster_count": 0,
+                "one_sided_bounded_hoeffding_mean_p_value": 0.001,
+                "one_sided_exact_prompt_cluster_sign_flip_p_value": 0.001,
+                "exact_prompt_cluster_sign_flip_p_value_is_diagnostic": True,
+                "sharp_null_diagnostic_method": (
+                    "exact_prompt_cluster_sign_flip_dp"
+                ),
+                "claim_p_value_method": (
+                    "bounded_hoeffding_prompt_cluster_mean"
+                ),
+                "holm_adjusted_p_value": 0.004,
+                "confidence_level": 0.95,
+                "bootstrap_resample_count": 100_000,
+                "bootstrap_seed_digest_random": "3" * 64,
+                "bootstrap_analysis_schema": "paired_prompt_cluster_bootstrap_v1",
+                "bootstrap_bit_generator": "PCG64",
+                "bootstrap_quantile_method": "linear",
+                "proposed_method_threshold_digest": "6" * 64,
+                "baseline_method_threshold_digest": "7" * 64,
+                "paired_test_prompt_id_digest": "d" * 64,
+                "paired_attack_registry_digest": "e" * 64,
+                "paired_outcome_set_digest": "a" * 64,
+                "protocol_digest": "c" * 64,
                 "paired_superiority_ready": True,
+                "quality_matching_protocol_schema": (
+                    "paired_prompt_embedding_ssim_caliper_v1"
+                ),
+                "quality_matching_protocol_digest": "1" * 64,
+                "quality_metric_name": "embedding_pair_ssim",
+                "quality_match_caliper": 0.02,
+                "minimum_matched_prompt_fraction": 0.8,
+                "total_quality_prompt_count": 340,
+                "minimum_matched_prompt_count": 272,
+                "matched_prompt_count": 340,
+                "unmatched_prompt_count": 0,
+                "matched_prompt_fraction": 1.0,
+                "proposed_embedding_pair_ssim_mean": 0.95,
+                "baseline_embedding_pair_ssim_mean": 0.95,
+                "mean_embedding_pair_ssim_gap": 0.0,
+                "max_absolute_embedding_pair_ssim_gap": 0.0,
+                "quality_match_coverage_ready": True,
+                "quality_matched_observation_count": 340,
+                "quality_matched_mean_paired_true_positive_rate_difference": 0.2,
+                "quality_matched_mean_paired_difference_ci_low": 0.1,
+                "quality_matched_mean_paired_difference_ci_high": 0.3,
+                "quality_matched_holm_adjusted_p_value": 0.004,
+                "quality_matched_superiority_ready": True,
+                "quality_matched_row_digest": "4" * 64,
                 "supports_paper_claim": True,
             }
             for baseline_id in baseline_ids

@@ -26,6 +26,9 @@ from experiments.runtime.model_sources import get_model_source, require_register
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments
 from main.core.digest import build_stable_digest
+from paper_experiments.baselines.method_faithful_numerical_fidelity import (
+    validate_method_faithful_numerical_fidelity_report,
+)
 from paper_experiments.baselines.observation_io import load_baseline_observation_rows
 
 METHOD_FAITHFUL_BASELINE_IDS = (
@@ -52,6 +55,9 @@ class MethodFaithfulObservationSource:
     prompt_plan_path: Path
     adapter_manifest_path: Path
     execution_manifest_path: Path
+    numerical_fidelity_report_path: Path
+    numerical_fidelity_report_digest: str
+    numerical_fidelity_reference_mode: str
     model_id: str
     model_revision: str
     rows: tuple[dict[str, Any], ...]
@@ -242,7 +248,7 @@ def _validate_transfer_manifest(
     manifest: Mapping[str, Any],
     collection_root: Path,
     protocol: MethodFaithfulCollectionProtocol,
-) -> tuple[Path, int, str, Path, Path, Path]:
+) -> tuple[Path, int, str, Path, Path, Path, Path, str, str]:
     """校验单 baseline manifest 的身份、文件摘要和当前论文协议。"""
 
     required_fields = (
@@ -257,6 +263,11 @@ def _validate_transfer_manifest(
         "adapter_manifest_sha256",
         "execution_manifest_path",
         "execution_manifest_sha256",
+        "numerical_fidelity_report_path",
+        "numerical_fidelity_report_sha256",
+        "numerical_fidelity_report_digest",
+        "numerical_fidelity_reference_mode",
+        "method_faithful_numerical_fidelity_ready",
         "paper_run_name",
         "prompt_set",
         "prompt_count",
@@ -343,6 +354,36 @@ def _validate_transfer_manifest(
         path_field="execution_manifest_path",
         digest_field="execution_manifest_sha256",
     )
+    numerical_fidelity_report_path = _validate_manifest_bound_file(
+        baseline_id=baseline_id,
+        manifest=manifest,
+        collection_root=collection_root,
+        path_field="numerical_fidelity_report_path",
+        digest_field="numerical_fidelity_report_sha256",
+    )
+    numerical_fidelity_report = validate_method_faithful_numerical_fidelity_report(
+        _read_json_object(
+            numerical_fidelity_report_path,
+            "numerical_fidelity_report",
+        ),
+        expected_baseline_id=baseline_id,
+    )
+    numerical_fidelity_report_digest = str(
+        numerical_fidelity_report["numerical_fidelity_report_digest"]
+    )
+    numerical_fidelity_reference_mode = str(
+        numerical_fidelity_report["numerical_fidelity_reference_mode"]
+    )
+    if (
+        manifest["method_faithful_numerical_fidelity_ready"] is not True
+        or str(manifest["numerical_fidelity_report_digest"])
+        != numerical_fidelity_report_digest
+        or str(manifest["numerical_fidelity_reference_mode"])
+        != numerical_fidelity_reference_mode
+    ):
+        raise ValueError(
+            f"method_faithful_numerical_fidelity_not_ready:{baseline_id}"
+        )
     prompt_rows = _read_json_array(prompt_plan_path, "prompt_plan")
     prompt_digest = canonical_prompt_protocol_digest(prompt_rows)
     if str(manifest["prompt_protocol_digest"]) != prompt_digest:
@@ -397,6 +438,9 @@ def _validate_transfer_manifest(
         prompt_plan_path,
         adapter_manifest_path,
         execution_manifest_path,
+        numerical_fidelity_report_path,
+        numerical_fidelity_report_digest,
+        numerical_fidelity_reference_mode,
     )
 
 
@@ -555,6 +599,9 @@ def load_method_faithful_observation_collection(
             prompt_plan_path,
             adapter_manifest_path,
             execution_manifest_path,
+            numerical_fidelity_report_path,
+            numerical_fidelity_report_digest,
+            numerical_fidelity_reference_mode,
         ) = _validate_transfer_manifest(
             baseline_id=baseline_id,
             manifest=manifest,
@@ -651,6 +698,13 @@ def load_method_faithful_observation_collection(
                 prompt_plan_path=prompt_plan_path,
                 adapter_manifest_path=adapter_manifest_path,
                 execution_manifest_path=execution_manifest_path,
+                numerical_fidelity_report_path=numerical_fidelity_report_path,
+                numerical_fidelity_report_digest=(
+                    numerical_fidelity_report_digest
+                ),
+                numerical_fidelity_reference_mode=(
+                    numerical_fidelity_reference_mode
+                ),
                 model_id=resolved_protocol.model_id,
                 model_revision=resolved_protocol.model_revision,
                 rows=tuple(normalized_rows),

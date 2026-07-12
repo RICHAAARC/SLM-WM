@@ -14,6 +14,7 @@ from experiments.protocol.fixed_fpr_observation_audit import (
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments
+from main.core.digest import build_stable_digest
 from paper_experiments.baselines.method_faithful_observation_collection import (
     FORMAL_MODEL_ID,
     FORMAL_MODEL_REVISION,
@@ -25,6 +26,9 @@ from paper_experiments.baselines.method_faithful_observation_collection import (
     observation_relative_path,
     transfer_manifest_relative_path,
 )
+from paper_experiments.baselines.method_faithful_numerical_fidelity import (
+    METHOD_FAITHFUL_NUMERICAL_FIDELITY_SCHEMA,
+)
 from tests.helpers.formal_prompt_source import copy_governed_prompt_file
 
 
@@ -33,6 +37,92 @@ def write_json(path: Path, payload: Any) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def numerical_fidelity_report(baseline_id: str) -> dict[str, Any]:
+    """构造覆盖登记算子集合且可重建门禁的数值忠实度测试记录."""
+
+    operator_ids = {
+        "tree_ring": (
+            "tree_ring.mask",
+            "tree_ring.ring_key",
+            "tree_ring.fourier_injection",
+            "tree_ring.negative_l1_detection_score",
+        ),
+        "gaussian_shading": (
+            "gaussian_shading.chacha20_ietf_cipher",
+            "gaussian_shading.block_voting",
+            "gaussian_shading.conditional_gaussian_sign_mapping",
+        ),
+        "shallow_diffuse": (
+            "shallow_diffuse.ring_mask",
+            "shallow_diffuse.complex_random_patch",
+            "shallow_diffuse.fourier_injection",
+            "shallow_diffuse.negative_l1_detection_score",
+            "shallow_diffuse.edit_timestep_floor",
+        ),
+    }[baseline_id]
+    reference_mode = {
+        "tree_ring": "executed_official_commit_operator_equivalence",
+        "gaussian_shading": (
+            "official_source_bound_rfc8439_and_operator_equivalence"
+        ),
+        "shallow_diffuse": "executed_official_commit_operator_equivalence",
+    }[baseline_id]
+    records = []
+    for operator_id in operator_ids:
+        comparison = {
+            "operator_id": operator_id,
+            "reference_origin": "executed_official_commit_operator",
+            "comparison_mode": "exact_tensor",
+            "reference_dtype": "torch.float32",
+            "adapter_dtype": "torch.float32",
+            "reference_shape": [1],
+            "adapter_shape": [1],
+            "element_count": 1,
+            "absolute_tolerance": 0.0,
+            "max_absolute_error": 0.0,
+            "exact_match": True,
+            "reference_value_digest": "1" * 64,
+            "adapter_value_digest": "1" * 64,
+            "numerical_fidelity_ready": True,
+        }
+        if operator_id == "gaussian_shading.chacha20_ietf_cipher":
+            comparison["official_source_cipher_contract_ready"] = True
+        if operator_id == "shallow_diffuse.edit_timestep_floor":
+            comparison["official_edit_timestep_formula_ast_digest"] = "2" * 64
+        comparison["comparison_record_digest"] = build_stable_digest(comparison)
+        records.append(comparison)
+    payload = {
+        "report_schema": METHOD_FAITHFUL_NUMERICAL_FIDELITY_SCHEMA,
+        "baseline_id": baseline_id,
+        "numerical_fidelity_reference_mode": reference_mode,
+        "official_repository_commit": "a" * 40,
+        "official_source_read_mode": "immutable_git_commit_blob",
+        "official_source_file": f"external_baseline/{baseline_id}/source.py",
+        "official_source_blob_sha256": "3" * 64,
+        "official_operator_ast_digest": "4" * 64,
+        "adapter_file": f"external_baseline/{baseline_id}/adapter.py",
+        "adapter_file_sha256": "5" * 64,
+        "execution_device": "cpu",
+        "torch_version": "test",
+        "numpy_version": "test",
+        "operator_ids": list(operator_ids),
+        "operator_record_count": len(records),
+        "operator_records": records,
+        "operator_records_digest": build_stable_digest(records),
+        "method_faithful_numerical_fidelity_ready": True,
+        "supports_paper_claim": False,
+    }
+    if baseline_id == "shallow_diffuse":
+        payload.update(
+            {
+                "official_entrypoint_blob_sha256": "6" * 64,
+                "official_edit_timestep_formula_ast_digest": "2" * 64,
+            }
+        )
+    payload["numerical_fidelity_report_digest"] = build_stable_digest(payload)
+    return payload
 
 
 def prompt_rows(prompt_set: str, splits: Iterable[str]) -> list[dict[str, Any]]:
@@ -206,6 +296,7 @@ def write_collection_source(
     prompt_path = run_dir / f"{baseline_id}_prompt_plan.json"
     adapter_path = run_dir / f"{baseline_id}_adapter_manifest.json"
     execution_path = run_dir / f"{baseline_id}_execution_manifest.json"
+    numerical_fidelity_path = run_dir / f"{baseline_id}_numerical_fidelity_report.json"
     write_json(observations_path, observations)
     write_json(
         command_path,
@@ -261,6 +352,8 @@ def write_collection_source(
             "observation_count": len(observations),
         },
     )
+    fidelity_report = numerical_fidelity_report(baseline_id)
+    write_json(numerical_fidelity_path, fidelity_report)
     transfer = {
         "artifact_name": f"{baseline_id}_baseline_transfer_manifest.json",
         "baseline_id": baseline_id,
@@ -276,6 +369,17 @@ def write_collection_source(
         "adapter_manifest_sha256": file_sha256(adapter_path),
         "execution_manifest_path": execution_path.relative_to(collection_root).as_posix(),
         "execution_manifest_sha256": file_sha256(execution_path),
+        "numerical_fidelity_report_path": numerical_fidelity_path.relative_to(
+            collection_root
+        ).as_posix(),
+        "numerical_fidelity_report_sha256": file_sha256(numerical_fidelity_path),
+        "numerical_fidelity_report_digest": fidelity_report[
+            "numerical_fidelity_report_digest"
+        ],
+        "numerical_fidelity_reference_mode": fidelity_report[
+            "numerical_fidelity_reference_mode"
+        ],
+        "method_faithful_numerical_fidelity_ready": True,
         "paper_run_name": protocol.paper_run_name,
         "prompt_set": protocol.prompt_set,
         "prompt_count": protocol.prompt_count,

@@ -30,6 +30,7 @@ from paper_experiments.analysis.paired_superiority import (
     THRESHOLD_AUDIT_FIELDS,
     THRESHOLD_AUDIT_METHOD_IDS,
     PairedSuperiorityError,
+    build_quality_matched_superiority_rows,
     build_paired_outcome_set_digest,
     build_paired_outcomes,
     build_paired_superiority_protocol_digest,
@@ -161,6 +162,62 @@ def paired_outcomes(
             attack_registry_rows=UNIT_ATTACK_REGISTRY,
         )
     )
+
+
+def quality_matched_paired_outcomes(
+    *,
+    baseline_positive_prompt_ids: set[str] | None = None,
+) -> tuple[dict[str, object], ...]:
+    """构造各 baseline 排除不同 Prompt 的质量匹配 outcome."""
+
+    prompt_count = 5
+    proposed_rows = observation_rows(prompt_count=prompt_count)
+    proposed_rows.extend(
+        {
+            "prompt_id": f"prompt_{prompt_index}",
+            **paired_randomization_identity(prompt_index),
+            "split": "test",
+            "sample_role": "positive_source",
+            "attack_family": "clean",
+            "embedding_pair_ssim": 0.95,
+        }
+        for prompt_index in range(prompt_count)
+    )
+    outcomes: list[dict[str, object]] = []
+    for baseline_index, baseline_id in enumerate(PRIMARY_BASELINE_IDS):
+        baseline_rows = observation_rows(
+            baseline_id=baseline_id,
+            baseline_positive_prompt_ids=baseline_positive_prompt_ids,
+            prompt_count=prompt_count,
+        )
+        baseline_rows.extend(
+            {
+                "prompt_id": f"prompt_{prompt_index}",
+                **paired_randomization_identity(prompt_index),
+                "split": "test",
+                "sample_role": "positive_source",
+                "attack_family": "clean",
+                "baseline_id": baseline_id,
+                "quality_score": (
+                    0.80 if prompt_index == baseline_index else 0.95
+                ),
+            }
+            for prompt_index in range(prompt_count)
+        )
+        outcomes.extend(
+            build_paired_outcomes(
+                proposed_rows,
+                baseline_rows,
+                baseline_id=baseline_id,
+                proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
+                baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
+                    baseline_id
+                ],
+                attack_registry_rows=UNIT_ATTACK_REGISTRY,
+                include_quality_matching=True,
+            )
+        )
+    return tuple(outcomes)
 
 
 def file_sha256(path: Path) -> str:
@@ -486,6 +543,50 @@ def test_protocol_digest_covers_canonical_threshold_rows_and_report() -> None:
     )
 
 
+def test_quality_matching_supports_baseline_specific_prompt_subsets() -> None:
+    """质量匹配应允许各 baseline 命中不同 Prompt 且不读取检测标签."""
+
+    negative_outcomes = quality_matched_paired_outcomes()
+    positive_outcomes = quality_matched_paired_outcomes(
+        baseline_positive_prompt_ids={f"prompt_{index}" for index in range(5)}
+    )
+    negative_selection = {
+        (row["baseline_id"], row["prompt_id"]): row["quality_matched"]
+        for row in negative_outcomes
+    }
+    positive_selection = {
+        (row["baseline_id"], row["prompt_id"]): row["quality_matched"]
+        for row in positive_outcomes
+    }
+    assert negative_selection == positive_selection
+
+    quality_rows = build_quality_matched_superiority_rows(
+        negative_outcomes,
+        protocol_digest="3" * 64,
+    )
+    assert {
+        row["baseline_id"]: (
+            row["matched_prompt_count"],
+            row["unmatched_prompt_count"],
+            row["quality_match_coverage_ready"],
+        )
+        for row in quality_rows
+    } == {
+        baseline_id: (4, 1, True) for baseline_id in PRIMARY_BASELINE_IDS
+    }
+    unmatched_by_baseline = {
+        baseline_id: {
+            prompt_id
+            for (current_baseline_id, prompt_id), matched in (
+                negative_selection.items()
+            )
+            if current_baseline_id == baseline_id and matched is False
+        }
+        for baseline_id in PRIMARY_BASELINE_IDS
+    }
+    assert len({next(iter(value)) for value in unmatched_by_baseline.values()}) == 4
+
+
 def test_writer_closes_probe_scale_with_exact_raw_pairs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -528,10 +629,10 @@ def test_writer_closes_probe_scale_with_exact_raw_pairs(
         / "image_only_detection_records.jsonl"
     )
     proposed_path.parent.mkdir(parents=True)
-    proposed_rows = []
+    proposed_attack_rows = []
     for prompt_index in range(34):
         for attack in attack_registry:
-            proposed_rows.append(
+            proposed_attack_rows.append(
                     {
                         "prompt_id": f"prompt_{prompt_index}",
                         **paired_randomization_identity(prompt_index),
@@ -546,6 +647,17 @@ def test_writer_closes_probe_scale_with_exact_raw_pairs(
                     "formal_evidence_positive": True,
                 }
             )
+    proposed_rows = [
+        {
+            "prompt_id": f"prompt_{prompt_index}",
+            **paired_randomization_identity(prompt_index),
+            "split": "test",
+            "sample_role": "positive_source",
+            "attack_family": "clean",
+            "embedding_pair_ssim": 0.95,
+        }
+        for prompt_index in range(34)
+    ] + proposed_attack_rows
     proposed_path.write_text(
         "".join(json.dumps(row, sort_keys=True) + "\n" for row in proposed_rows),
         encoding="utf-8",
@@ -580,8 +692,20 @@ def test_writer_closes_probe_scale_with_exact_raw_pairs(
                 "threshold_digest": BASELINE_THRESHOLD_DIGESTS[baseline_id],
                 "detection_decision": False,
             }
-            for proposed in proposed_rows
+            for proposed in proposed_attack_rows
         ]
+        rows.extend(
+            {
+                "prompt_id": f"prompt_{prompt_index}",
+                **paired_randomization_identity(prompt_index),
+                "split": "test",
+                "sample_role": "positive_source",
+                "attack_family": "clean",
+                "baseline_id": baseline_id,
+                "quality_score": 0.95,
+            }
+            for prompt_index in range(34)
+        )
         baseline_rows_by_id[baseline_id] = rows
         if baseline_id != "t2smark":
             path = split_root / f"{baseline_id}_baseline_observations.json"
@@ -683,6 +807,8 @@ def test_writer_closes_probe_scale_with_exact_raw_pairs(
     summary = manifest["metadata"]
     assert summary["paired_superiority_scale_ready"] is True
     assert summary["overall_paired_superiority_ready"] is True
+    assert summary["overall_quality_matched_superiority_ready"] is True
+    assert summary["quality_matching_uses_detection_labels"] is False
     assert summary["paired_outcome_count"] == 34 * len(attack_registry) * 4
     assert summary["paired_test_prompt_count"] == 34
     assert len(summary["paired_test_prompt_id_digest"]) == 64
@@ -719,6 +845,8 @@ def test_writer_closes_probe_scale_with_exact_raw_pairs(
     )
     assert outcome["proposed_method_threshold_digest"] == PROPOSED_THRESHOLD_DIGEST
     assert len(outcome["attack_config_digest"]) == 64
+    assert outcome["quality_matched"] is True
+    assert outcome["absolute_embedding_pair_ssim_gap"] == 0.0
 
     table_path = (
         tmp_path
@@ -751,9 +879,23 @@ def test_writer_closes_probe_scale_with_exact_raw_pairs(
         "paired_superiority_rows_digest": summary[
             "paired_superiority_rows_digest"
         ],
-        "paired_superiority_protocol_digest": summary[
-            "paired_superiority_protocol_digest"
-        ],
+            "paired_superiority_protocol_digest": summary[
+                "paired_superiority_protocol_digest"
+            ],
+            "quality_matching_protocol_schema": summary[
+                "quality_matching_protocol_schema"
+            ],
+            "quality_matching_protocol_digest": summary[
+                "quality_matching_protocol_digest"
+            ],
+            "quality_metric_name": summary["quality_metric_name"],
+            "quality_match_caliper": summary["quality_match_caliper"],
+            "minimum_matched_prompt_fraction": summary[
+                "minimum_matched_prompt_fraction"
+            ],
+            "quality_matched_rows_digest": summary[
+                "quality_matched_rows_digest"
+            ],
         "paired_test_prompt_count": summary["paired_test_prompt_count"],
         "paired_test_prompt_id_digest": summary["paired_test_prompt_id_digest"],
         "paired_attack_registry_digest": summary["paired_attack_registry_digest"],

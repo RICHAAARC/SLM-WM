@@ -133,7 +133,7 @@
         "runtime": "cpu"
       },
       "complete_hash_lock_path": "configs/dependency_profiles/workflow_orchestrator_lock.txt",
-      "direct_requirements_digest": "f688f80a9f1622a40865451ae150d697facec073747794eb876f31a7b26e1c9f",
+      "direct_requirements_digest": "9541024fca78a978977fa80a05d1c6a2083840cd477e04432b26a0a9af3d5222",
       "direct_requirements_path": "configs/dependency_profiles/workflow_orchestrator_direct.txt",
       "execution_role": "workflow_orchestration",
       "platform": {

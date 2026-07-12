@@ -116,6 +116,7 @@ def test_registry_defines_one_cpu_parent_and_five_cuda_runtime_identities() -> N
         if profile_name == "workflow_orchestrator":
             assert profile.execution_role == "workflow_orchestration"
             assert profile.accelerator_runtime == "cpu"
+            assert "numpy==2.0.2" in profile.direct_requirements
             assert all(
                 value is None
                 for value in (

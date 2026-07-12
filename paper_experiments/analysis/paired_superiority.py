@@ -29,6 +29,10 @@ BOOTSTRAP_BIT_GENERATOR = "PCG64"
 BOOTSTRAP_QUANTILE_METHOD = "linear"
 CLAIM_P_VALUE_METHOD = "bounded_hoeffding_prompt_cluster_mean"
 SHARP_NULL_DIAGNOSTIC_METHOD = "exact_prompt_cluster_sign_flip_dp"
+QUALITY_MATCHING_PROTOCOL_SCHEMA = "paired_prompt_embedding_ssim_caliper_v1"
+QUALITY_MATCHING_METRIC_NAME = "embedding_pair_ssim"
+QUALITY_MATCHING_CALIPER = 0.02
+QUALITY_MATCHING_MINIMUM_FRACTION = 0.80
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 THRESHOLD_AUDIT_TEXT_FIELDS = (
@@ -242,6 +246,10 @@ def _formal_attacked_positive_rows(
             continue
         if str(row.get("sample_role", "")) not in accepted_roles:
             continue
+        declared_attack_id = str(row.get("attack_id", "")).strip()
+        declared_attack_family = str(row.get("attack_family", "")).strip()
+        if not declared_attack_id and declared_attack_family in {"", "none", "clean"}:
+            continue
         attack_name = _attack_name(row)
         attack_family = _text(row, "attack_family")
         if attack_name in {"none", "clean", "clean_none"}:
@@ -288,6 +296,25 @@ def _normalize_float(
         raise PairedSuperiorityError(f"{field_name} 必须是有限浮点数") from error
     if not math.isfinite(resolved):
         raise PairedSuperiorityError(f"{field_name} 必须是有限浮点数")
+    return resolved
+
+
+def _bounded_float(
+    value: Any,
+    field_name: str,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    """读取有限浮点数并执行闭区间边界校验."""
+
+    resolved = _normalize_float(value, field_name)
+    if resolved is None:
+        raise PairedSuperiorityError(f"{field_name} 不得为空")
+    if not minimum <= resolved <= maximum:
+        raise PairedSuperiorityError(
+            f"{field_name} 必须位于 [{minimum}, {maximum}]"
+        )
     return resolved
 
 
@@ -494,6 +521,66 @@ def _paired_randomization_identity(
     }
 
 
+def build_quality_matching_protocol_digest() -> str:
+    """构造无数据依赖的正式质量匹配协议摘要."""
+
+    return build_stable_digest(
+        {
+            "quality_matching_protocol_schema": QUALITY_MATCHING_PROTOCOL_SCHEMA,
+            "quality_metric_name": QUALITY_MATCHING_METRIC_NAME,
+            "quality_match_caliper": QUALITY_MATCHING_CALIPER,
+            "minimum_matched_prompt_fraction": (
+                QUALITY_MATCHING_MINIMUM_FRACTION
+            ),
+            "selection_uses_detection_labels": False,
+            "matching_unit": "same_prompt_seed_key_base_latent",
+        }
+    )
+
+
+def _embedding_quality_by_prompt(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    method_id: str,
+    value_field: str,
+) -> dict[str, dict[str, Any]]:
+    """从未攻击 positive source 建立逐 Prompt 嵌入质量身份."""
+
+    records: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if (
+            str(row.get("split", "")) != "test"
+            or str(row.get("sample_role", "")) != "positive_source"
+            or bool(str(row.get("attack_id", "")).strip())
+            or str(row.get("attack_family", "")) not in {"", "clean"}
+        ):
+            continue
+        prompt_id = _text(row, "prompt_id")
+        quality = _bounded_float(
+            row.get(value_field),
+            f"{method_id}.{value_field}",
+            minimum=0.0,
+            maximum=1.0,
+        )
+        randomization = _paired_randomization_identity(row)
+        payload = {
+            "method_id": method_id,
+            "prompt_id": prompt_id,
+            "quality_metric_name": QUALITY_MATCHING_METRIC_NAME,
+            "embedding_pair_ssim": quality,
+            **randomization,
+        }
+        payload["quality_record_digest"] = build_stable_digest(payload)
+        if prompt_id in records:
+            raise PairedSuperiorityError(
+                f"{method_id} 存在重复未攻击嵌入质量记录: {prompt_id}"
+            )
+        records[prompt_id] = payload
+    if not records:
+        raise PairedSuperiorityError(f"{method_id} 缺少逐 Prompt 嵌入质量记录")
+    return records
+
+
 def build_paired_outcomes(
     proposed_rows: Iterable[Mapping[str, Any]],
     baseline_rows: Iterable[Mapping[str, Any]],
@@ -502,11 +589,32 @@ def build_paired_outcomes(
     proposed_method_threshold_digest: str,
     baseline_method_threshold_digest: str,
     attack_registry_rows: Iterable[Mapping[str, Any]],
+    include_quality_matching: bool = False,
 ) -> tuple[dict[str, Any], ...]:
     """对齐一个 baseline 与主方法的完整 Prompt x 正式攻击观测."""
 
     if baseline_id not in PRIMARY_BASELINE_IDS:
         raise PairedSuperiorityError(f"未登记的主表 baseline: {baseline_id}")
+    proposed_input = tuple(dict(row) for row in proposed_rows)
+    baseline_input = tuple(dict(row) for row in baseline_rows)
+    proposed_quality_by_prompt = (
+        _embedding_quality_by_prompt(
+            proposed_input,
+            method_id="slm_wm",
+            value_field="embedding_pair_ssim",
+        )
+        if include_quality_matching
+        else {}
+    )
+    baseline_quality_by_prompt = (
+        _embedding_quality_by_prompt(
+            baseline_input,
+            method_id=baseline_id,
+            value_field="quality_score",
+        )
+        if include_quality_matching
+        else {}
+    )
     proposed_threshold_digest = _sha256_text(
         proposed_method_threshold_digest,
         "proposed_method_threshold_digest",
@@ -521,13 +629,14 @@ def build_paired_outcomes(
         for row in attack_registry
     }
     proposed = _formal_attacked_positive_rows(
-        proposed_rows,
+        proposed_input,
         accepted_sample_roles=("positive_source",),
     )
     baseline = tuple(
         row
         for row in _formal_attacked_positive_rows(
-            baseline_rows,
+            baseline_input,
+            # 输入已物化, 从而质量记录与攻击记录读取同一字节集合.
             accepted_sample_roles=("attacked_positive",),
         )
         if str(row.get("baseline_id", "")) == baseline_id
@@ -601,28 +710,74 @@ def build_paired_outcomes(
         )
         if declared_baseline_digest != baseline_threshold_digest:
             raise PairedSuperiorityError("baseline observation 未使用审计冻结阈值")
-        outcomes.append(
-            PairedOutcome(
-                baseline_id=baseline_id,
-                prompt_id=prompt_id,
-                **proposed_randomization,
-                attack_id=registry_row["attack_id"],
-                attack_family=attack_family,
-                attack_name=attack_name,
-                resource_profile=registry_row["resource_profile"],
-                attack_config_digest=registry_row["attack_config_digest"],
-                proposed_method_threshold_digest=proposed_threshold_digest,
-                baseline_method_threshold_digest=baseline_threshold_digest,
-                proposed_decision=_verified_decision(
-                    proposed_row,
-                    required_field="formal_evidence_positive",
+        outcome = PairedOutcome(
+            baseline_id=baseline_id,
+            prompt_id=prompt_id,
+            **proposed_randomization,
+            attack_id=registry_row["attack_id"],
+            attack_family=attack_family,
+            attack_name=attack_name,
+            resource_profile=registry_row["resource_profile"],
+            attack_config_digest=registry_row["attack_config_digest"],
+            proposed_method_threshold_digest=proposed_threshold_digest,
+            baseline_method_threshold_digest=baseline_threshold_digest,
+            proposed_decision=_verified_decision(
+                proposed_row,
+                required_field="formal_evidence_positive",
+            ),
+            baseline_decision=_verified_decision(
+                baseline_row,
+                required_field="detection_decision",
+            ),
+        ).to_dict()
+        if include_quality_matching:
+            proposed_quality = proposed_quality_by_prompt.get(prompt_id)
+            baseline_quality = baseline_quality_by_prompt.get(prompt_id)
+            if proposed_quality is None or baseline_quality is None:
+                raise PairedSuperiorityError(
+                    f"{baseline_id} 缺少攻击 Prompt 对应的嵌入质量记录"
+                )
+            if any(
+                proposed_quality.get(field_name) != field_value
+                or baseline_quality.get(field_name) != field_value
+                for field_name, field_value in proposed_randomization.items()
+            ):
+                raise PairedSuperiorityError(
+                    f"{baseline_id} 嵌入质量记录未绑定同一随机身份"
+                )
+            proposed_quality_value = float(
+                proposed_quality["embedding_pair_ssim"]
+            )
+            baseline_quality_value = float(
+                baseline_quality["embedding_pair_ssim"]
+            )
+            quality_gap = proposed_quality_value - baseline_quality_value
+            quality_payload = {
+                "quality_metric_name": QUALITY_MATCHING_METRIC_NAME,
+                "proposed_embedding_pair_ssim": proposed_quality_value,
+                "baseline_embedding_pair_ssim": baseline_quality_value,
+                "embedding_pair_ssim_gap": quality_gap,
+                "absolute_embedding_pair_ssim_gap": abs(quality_gap),
+                "quality_match_caliper": QUALITY_MATCHING_CALIPER,
+                "quality_matched": abs(quality_gap) <= QUALITY_MATCHING_CALIPER,
+                "quality_matching_protocol_digest": (
+                    build_quality_matching_protocol_digest()
                 ),
-                baseline_decision=_verified_decision(
-                    baseline_row,
-                    required_field="detection_decision",
-                ),
-            ).to_dict()
-        )
+                "proposed_quality_record_digest": proposed_quality[
+                    "quality_record_digest"
+                ],
+                "baseline_quality_record_digest": baseline_quality[
+                    "quality_record_digest"
+                ],
+            }
+            outcome = {
+                key: value
+                for key, value in outcome.items()
+                if key != "paired_outcome_digest"
+            }
+            outcome.update(quality_payload)
+            outcome["paired_outcome_digest"] = build_stable_digest(outcome)
+        outcomes.append(outcome)
     return tuple(outcomes)
 
 
@@ -1004,6 +1159,486 @@ def build_paired_superiority_rows(
     return summaries
 
 
+def _build_quality_subset_statistical_rows(
+    matched_outcomes: Iterable[Mapping[str, Any]],
+    *,
+    protocol_digest: str,
+    confidence_level: float,
+    bootstrap_resample_count: int,
+) -> list[dict[str, Any]]:
+    """分别计算各 baseline 的质量子集统计, 不要求四者命中同一 Prompt."""
+
+    resolved_protocol_digest = _sha256_text(protocol_digest, "protocol_digest")
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for source_row in matched_outcomes:
+        row = dict(source_row)
+        baseline_id = _text(row, "baseline_id")
+        if baseline_id not in PRIMARY_BASELINE_IDS:
+            raise PairedSuperiorityError("质量匹配统计包含未登记 baseline")
+        grouped[baseline_id].append(row)
+
+    summaries: list[dict[str, Any]] = []
+    for baseline_id in PRIMARY_BASELINE_IDS:
+        baseline_rows = grouped.get(baseline_id, [])
+        if not baseline_rows:
+            continue
+        by_prompt: dict[str, list[int]] = defaultdict(list)
+        attack_ids_by_prompt: dict[str, set[str]] = defaultdict(set)
+        attack_descriptor_by_id: dict[str, dict[str, str]] = {}
+        proposed_threshold_digests: set[str] = set()
+        baseline_threshold_digests: set[str] = set()
+        for row in baseline_rows:
+            prompt_id = _text(row, "prompt_id")
+            descriptor = _outcome_attack_descriptor(row)
+            attack_id = descriptor["attack_id"]
+            if attack_id in attack_ids_by_prompt[prompt_id]:
+                raise PairedSuperiorityError(
+                    f"{baseline_id} 的质量匹配 Prompt {prompt_id} 存在重复攻击键"
+                )
+            previous_descriptor = attack_descriptor_by_id.setdefault(
+                attack_id,
+                descriptor,
+            )
+            if previous_descriptor != descriptor:
+                raise PairedSuperiorityError("质量匹配中的同一 attack_id 配置不一致")
+            attack_ids_by_prompt[prompt_id].add(attack_id)
+            proposed = row.get("proposed_decision")
+            baseline = row.get("baseline_decision")
+            if not isinstance(proposed, bool) or not isinstance(baseline, bool):
+                raise PairedSuperiorityError("质量匹配 outcome 判定字段必须是布尔值")
+            difference = int(row.get("paired_difference", 99))
+            expected_difference = int(proposed) - int(baseline)
+            if difference != expected_difference or difference not in {-1, 0, 1}:
+                raise PairedSuperiorityError(
+                    "质量匹配 paired_difference 与二元判定不一致"
+                )
+            by_prompt[prompt_id].append(difference)
+            proposed_threshold_digests.add(
+                _sha256_text(
+                    row.get("proposed_method_threshold_digest", ""),
+                    "proposed_method_threshold_digest",
+                )
+            )
+            baseline_threshold_digests.add(
+                _sha256_text(
+                    row.get("baseline_method_threshold_digest", ""),
+                    "baseline_method_threshold_digest",
+                )
+            )
+        attack_sets = {
+            frozenset(value) for value in attack_ids_by_prompt.values()
+        }
+        if len(attack_sets) != 1:
+            raise PairedSuperiorityError(
+                f"{baseline_id} 的质量匹配 Prompt 未覆盖同一攻击集合"
+            )
+        attack_ids = next(iter(attack_sets))
+        if attack_ids != set(attack_descriptor_by_id):
+            raise PairedSuperiorityError(
+                f"{baseline_id} 的质量匹配攻击 registry 覆盖不完整"
+            )
+        if (
+            len(proposed_threshold_digests) != 1
+            or len(baseline_threshold_digests) != 1
+        ):
+            raise PairedSuperiorityError("质量匹配 outcome 未共享唯一方法阈值摘要")
+        prompt_ids = tuple(sorted(by_prompt))
+        attack_descriptors = tuple(
+            attack_descriptor_by_id[attack_id]
+            for attack_id in sorted(attack_ids)
+        )
+        prompt_values = np.asarray(
+            [float(np.mean(by_prompt[prompt_id])) for prompt_id in prompt_ids],
+            dtype=np.float64,
+        )
+        prompt_integer_sums = np.asarray(
+            [sum(by_prompt[prompt_id]) for prompt_id in prompt_ids],
+            dtype=np.int64,
+        )
+        paired_outcome_set_digest = build_paired_outcome_set_digest(
+            baseline_rows
+        )
+        paired_test_prompt_id_digest = build_stable_digest(list(prompt_ids))
+        paired_attack_registry_digest = build_stable_digest(
+            list(attack_descriptors)
+        )
+        bootstrap_seed_digest, bootstrap_seed = _bootstrap_seed_digest_random(
+            baseline_id=baseline_id,
+            paired_test_prompt_id_digest=paired_test_prompt_id_digest,
+            paired_attack_registry_digest=paired_attack_registry_digest,
+            paired_outcome_set_digest=paired_outcome_set_digest,
+            confidence_level=confidence_level,
+            resample_count=int(bootstrap_resample_count),
+        )
+        ci_low, ci_high = _cluster_bootstrap_interval(
+            prompt_values,
+            confidence_level=confidence_level,
+            resample_count=int(bootstrap_resample_count),
+            seed=bootstrap_seed,
+        )
+        positive_prompt_count = int(np.count_nonzero(prompt_values > 0.0))
+        negative_prompt_count = int(np.count_nonzero(prompt_values < 0.0))
+        summaries.append(
+            {
+                "baseline_id": baseline_id,
+                "paired_prompt_count": len(prompt_ids),
+                "paired_attack_count": len(attack_ids),
+                "paired_observation_count": len(baseline_rows),
+                "mean_paired_true_positive_rate_difference": float(
+                    prompt_values.mean()
+                ),
+                "mean_paired_difference_ci_low": ci_low,
+                "mean_paired_difference_ci_high": ci_high,
+                "positive_prompt_cluster_count": positive_prompt_count,
+                "negative_prompt_cluster_count": negative_prompt_count,
+                "tied_prompt_cluster_count": (
+                    int(prompt_values.size)
+                    - positive_prompt_count
+                    - negative_prompt_count
+                ),
+                "one_sided_bounded_hoeffding_mean_p_value": (
+                    _bounded_hoeffding_mean_p_value(prompt_values)
+                ),
+                "one_sided_exact_prompt_cluster_sign_flip_p_value": (
+                    _exact_cluster_sign_flip_p_value(prompt_integer_sums)
+                ),
+                "exact_prompt_cluster_sign_flip_p_value_is_diagnostic": True,
+                "sharp_null_diagnostic_method": SHARP_NULL_DIAGNOSTIC_METHOD,
+                "claim_p_value_method": CLAIM_P_VALUE_METHOD,
+                "confidence_level": confidence_level,
+                "bootstrap_resample_count": int(bootstrap_resample_count),
+                "bootstrap_seed_digest_random": bootstrap_seed_digest,
+                "bootstrap_analysis_schema": BOOTSTRAP_ANALYSIS_SCHEMA,
+                "bootstrap_bit_generator": BOOTSTRAP_BIT_GENERATOR,
+                "bootstrap_quantile_method": BOOTSTRAP_QUANTILE_METHOD,
+                "proposed_method_threshold_digest": next(
+                    iter(proposed_threshold_digests)
+                ),
+                "baseline_method_threshold_digest": next(
+                    iter(baseline_threshold_digests)
+                ),
+                "paired_test_prompt_id_digest": paired_test_prompt_id_digest,
+                "paired_attack_registry_digest": paired_attack_registry_digest,
+                "paired_outcome_set_digest": paired_outcome_set_digest,
+                "protocol_digest": resolved_protocol_digest,
+            }
+        )
+
+    ordered = sorted(
+        enumerate(summaries),
+        key=lambda item: (
+            item[1]["one_sided_bounded_hoeffding_mean_p_value"],
+            item[1]["baseline_id"],
+        ),
+    )
+    running_adjusted = 0.0
+    planned_comparison_count = len(PRIMARY_BASELINE_IDS)
+    for rank, (original_index, row) in enumerate(ordered, start=1):
+        adjusted = min(
+            1.0,
+            max(
+                running_adjusted,
+                float(row["one_sided_bounded_hoeffding_mean_p_value"])
+                * (planned_comparison_count - rank + 1),
+            ),
+        )
+        running_adjusted = adjusted
+        summaries[original_index]["holm_adjusted_p_value"] = adjusted
+    for row in summaries:
+        ready = bool(
+            float(row["mean_paired_true_positive_rate_difference"]) > 0.0
+            and float(row["mean_paired_difference_ci_low"]) > 0.0
+            and float(row["holm_adjusted_p_value"]) < 0.05
+        )
+        row["paired_superiority_ready"] = ready
+        row["supports_paper_claim"] = ready
+    return summaries
+
+
+def build_quality_matched_superiority_rows(
+    paired_outcomes: Iterable[Mapping[str, Any]],
+    *,
+    protocol_digest: str,
+    confidence_level: float = DEFAULT_CONFIDENCE_LEVEL,
+    bootstrap_resample_count: int = DEFAULT_BOOTSTRAP_RESAMPLE_COUNT,
+) -> list[dict[str, Any]]:
+    """在检测标签无关的逐 Prompt SSIM caliper 子集上复算配对优势."""
+
+    rows = [dict(row) for row in paired_outcomes]
+    expected_quality_protocol_digest = build_quality_matching_protocol_digest()
+    quality_fields = (
+        "proposed_embedding_pair_ssim",
+        "baseline_embedding_pair_ssim",
+        "embedding_pair_ssim_gap",
+        "absolute_embedding_pair_ssim_gap",
+        "quality_match_caliper",
+    )
+    quality_by_baseline: dict[str, dict[str, dict[str, Any]]] = {
+        baseline_id: {} for baseline_id in PRIMARY_BASELINE_IDS
+    }
+    for row in rows:
+        baseline_id = _text(row, "baseline_id")
+        if baseline_id not in quality_by_baseline:
+            raise PairedSuperiorityError("质量匹配包含未登记 baseline")
+        if row.get("quality_metric_name") != QUALITY_MATCHING_METRIC_NAME:
+            raise PairedSuperiorityError("质量匹配指标必须固定为嵌入 pair SSIM")
+        if (
+            _sha256_text(
+                row.get("quality_matching_protocol_digest", ""),
+                "quality_matching_protocol_digest",
+            )
+            != expected_quality_protocol_digest
+        ):
+            raise PairedSuperiorityError("质量匹配协议摘要不一致")
+        values = {
+            field_name: _bounded_float(
+                row.get(field_name),
+                field_name,
+                minimum=(
+                    -1.0 if field_name == "embedding_pair_ssim_gap" else 0.0
+                ),
+                maximum=1.0,
+            )
+            for field_name in quality_fields
+        }
+        proposed_quality = values["proposed_embedding_pair_ssim"]
+        baseline_quality = values["baseline_embedding_pair_ssim"]
+        gap = proposed_quality - baseline_quality
+        if not math.isclose(
+            values["embedding_pair_ssim_gap"],
+            gap,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ) or not math.isclose(
+            values["absolute_embedding_pair_ssim_gap"],
+            abs(gap),
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            raise PairedSuperiorityError("质量匹配 gap 未由两侧 SSIM 精确重建")
+        if not math.isclose(
+            values["quality_match_caliper"],
+            QUALITY_MATCHING_CALIPER,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        ):
+            raise PairedSuperiorityError("质量匹配 caliper 未使用预注册常量")
+        expected_matched = abs(gap) <= QUALITY_MATCHING_CALIPER
+        if row.get("quality_matched") is not expected_matched:
+            raise PairedSuperiorityError("quality_matched 与 SSIM gap 不一致")
+        for field_name in (
+            "proposed_quality_record_digest",
+            "baseline_quality_record_digest",
+        ):
+            _sha256_text(row.get(field_name, ""), field_name)
+        prompt_id = _text(row, "prompt_id")
+        prompt_record = {
+            **values,
+            "quality_matched": expected_matched,
+            "proposed_quality_record_digest": str(
+                row["proposed_quality_record_digest"]
+            ),
+            "baseline_quality_record_digest": str(
+                row["baseline_quality_record_digest"]
+            ),
+        }
+        current = quality_by_baseline[baseline_id].get(prompt_id)
+        if current is not None and current != prompt_record:
+            raise PairedSuperiorityError(
+                f"{baseline_id} 同一 Prompt 的质量身份随攻击发生漂移"
+            )
+        quality_by_baseline[baseline_id][prompt_id] = prompt_record
+
+    matched_outcomes = [row for row in rows if row.get("quality_matched") is True]
+    matched_statistical_rows = _build_quality_subset_statistical_rows(
+        matched_outcomes,
+        protocol_digest=build_stable_digest(
+            {
+                "paired_superiority_protocol_digest": _sha256_text(
+                    protocol_digest,
+                    "protocol_digest",
+                ),
+                "quality_matching_protocol_digest": (
+                    expected_quality_protocol_digest
+                ),
+            }
+        ),
+        confidence_level=confidence_level,
+        bootstrap_resample_count=bootstrap_resample_count,
+    )
+    matched_statistics = {
+        str(row["baseline_id"]): row for row in matched_statistical_rows
+    }
+    results: list[dict[str, Any]] = []
+    for baseline_id in PRIMARY_BASELINE_IDS:
+        prompt_records = quality_by_baseline[baseline_id]
+        total_prompt_count = len(prompt_records)
+        matched_prompt_count = sum(
+            record["quality_matched"] is True
+            for record in prompt_records.values()
+        )
+        minimum_matched_prompt_count = math.ceil(
+            total_prompt_count * QUALITY_MATCHING_MINIMUM_FRACTION
+        )
+        matched_fraction = (
+            matched_prompt_count / total_prompt_count
+            if total_prompt_count
+            else 0.0
+        )
+        quality_values = list(prompt_records.values())
+        statistic = matched_statistics.get(baseline_id)
+        coverage_ready = bool(
+            total_prompt_count > 0
+            and matched_prompt_count >= minimum_matched_prompt_count
+        )
+
+        def mean(field_name: str) -> float | None:
+            """计算逐 Prompt 质量均值, 空集合返回 None."""
+
+            return (
+                sum(float(record[field_name]) for record in quality_values)
+                / len(quality_values)
+                if quality_values
+                else None
+            )
+
+        row = {
+            "baseline_id": baseline_id,
+            "quality_matching_protocol_schema": (
+                QUALITY_MATCHING_PROTOCOL_SCHEMA
+            ),
+            "quality_matching_protocol_digest": (
+                expected_quality_protocol_digest
+            ),
+            "quality_metric_name": QUALITY_MATCHING_METRIC_NAME,
+            "quality_match_caliper": QUALITY_MATCHING_CALIPER,
+            "minimum_matched_prompt_fraction": (
+                QUALITY_MATCHING_MINIMUM_FRACTION
+            ),
+            "total_quality_prompt_count": total_prompt_count,
+            "minimum_matched_prompt_count": minimum_matched_prompt_count,
+            "matched_prompt_count": matched_prompt_count,
+            "unmatched_prompt_count": total_prompt_count - matched_prompt_count,
+            "matched_prompt_fraction": matched_fraction,
+            "proposed_embedding_pair_ssim_mean": mean(
+                "proposed_embedding_pair_ssim"
+            ),
+            "baseline_embedding_pair_ssim_mean": mean(
+                "baseline_embedding_pair_ssim"
+            ),
+            "mean_embedding_pair_ssim_gap": mean(
+                "embedding_pair_ssim_gap"
+            ),
+            "max_absolute_embedding_pair_ssim_gap": (
+                max(
+                    float(record["absolute_embedding_pair_ssim_gap"])
+                    for record in quality_values
+                )
+                if quality_values
+                else None
+            ),
+            "quality_match_coverage_ready": coverage_ready,
+            "quality_matched_observation_count": (
+                int(statistic["paired_observation_count"])
+                if statistic is not None
+                else 0
+            ),
+            "quality_matched_mean_paired_true_positive_rate_difference": (
+                float(statistic["mean_paired_true_positive_rate_difference"])
+                if statistic is not None
+                else None
+            ),
+            "quality_matched_mean_paired_difference_ci_low": (
+                float(statistic["mean_paired_difference_ci_low"])
+                if statistic is not None
+                else None
+            ),
+            "quality_matched_mean_paired_difference_ci_high": (
+                float(statistic["mean_paired_difference_ci_high"])
+                if statistic is not None
+                else None
+            ),
+            "quality_matched_holm_adjusted_p_value": (
+                float(statistic["holm_adjusted_p_value"])
+                if statistic is not None
+                else None
+            ),
+            "quality_matched_superiority_ready": bool(
+                coverage_ready
+                and statistic is not None
+                and statistic["paired_superiority_ready"] is True
+            ),
+        }
+        row["quality_matched_row_digest"] = build_stable_digest(row)
+        results.append(row)
+    return results
+
+
+def merge_paired_and_quality_matched_rows(
+    paired_rows: Iterable[Mapping[str, Any]],
+    quality_rows: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """把全样本统计与质量匹配统计按唯一 baseline 身份合并."""
+
+    paired = {str(row.get("baseline_id", "")): dict(row) for row in paired_rows}
+    quality = {str(row.get("baseline_id", "")): dict(row) for row in quality_rows}
+    if set(paired) != set(PRIMARY_BASELINE_IDS) or set(quality) != set(
+        PRIMARY_BASELINE_IDS
+    ):
+        raise PairedSuperiorityError("全样本与质量匹配统计未精确覆盖4个 baseline")
+    merged = []
+    for baseline_id in PRIMARY_BASELINE_IDS:
+        row = {**paired[baseline_id], **quality[baseline_id]}
+        row["supports_paper_claim"] = bool(
+            row.get("paired_superiority_ready") is True
+            and row.get("quality_matched_superiority_ready") is True
+        )
+        merged.append(row)
+    return merged
+
+
+def build_quality_matched_superiority_summary(
+    rows: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """汇总4个 baseline 的质量匹配覆盖和配对优势门禁."""
+
+    materialized = [dict(row) for row in rows]
+    baseline_ids = [str(row.get("baseline_id", "")) for row in materialized]
+    exact_set_ready = bool(
+        len(baseline_ids) == len(PRIMARY_BASELINE_IDS)
+        and len(set(baseline_ids)) == len(baseline_ids)
+        and set(baseline_ids) == set(PRIMARY_BASELINE_IDS)
+    )
+    ready_ids = [
+        baseline_id
+        for baseline_id in PRIMARY_BASELINE_IDS
+        if any(
+            row.get("baseline_id") == baseline_id
+            and row.get("quality_matched_superiority_ready") is True
+            for row in materialized
+        )
+    ]
+    overall_ready = exact_set_ready and len(ready_ids) == len(
+        PRIMARY_BASELINE_IDS
+    )
+    return {
+        "quality_matching_protocol_schema": QUALITY_MATCHING_PROTOCOL_SCHEMA,
+        "quality_matching_protocol_digest": (
+            build_quality_matching_protocol_digest()
+        ),
+        "quality_metric_name": QUALITY_MATCHING_METRIC_NAME,
+        "quality_match_caliper": QUALITY_MATCHING_CALIPER,
+        "minimum_matched_prompt_fraction": QUALITY_MATCHING_MINIMUM_FRACTION,
+        "quality_matched_row_count": len(materialized),
+        "quality_matched_ready_ids": ready_ids,
+        "quality_matched_exact_set_ready": exact_set_ready,
+        "overall_quality_matched_superiority_ready": overall_ready,
+        "quality_matched_rows_digest": build_stable_digest(materialized),
+        "quality_matching_uses_detection_labels": False,
+        "supports_quality_matched_paper_claim": overall_ready,
+    }
+
+
 def build_paired_superiority_summary(
     rows: Iterable[Mapping[str, Any]],
     *,
@@ -1076,6 +1711,22 @@ def build_paired_superiority_manifest_config(
         ),
         "paired_superiority_protocol_digest": str(
             summary.get("paired_superiority_protocol_digest", "")
+        ),
+        "quality_matching_protocol_schema": str(
+            summary.get("quality_matching_protocol_schema", "")
+        ),
+        "quality_matching_protocol_digest": str(
+            summary.get("quality_matching_protocol_digest", "")
+        ),
+        "quality_metric_name": str(summary.get("quality_metric_name", "")),
+        "quality_match_caliper": float(
+            summary.get("quality_match_caliper", math.nan)
+        ),
+        "minimum_matched_prompt_fraction": float(
+            summary.get("minimum_matched_prompt_fraction", math.nan)
+        ),
+        "quality_matched_rows_digest": str(
+            summary.get("quality_matched_rows_digest", "")
         ),
         "paired_test_prompt_count": int(
             summary.get("paired_test_prompt_count", 0)

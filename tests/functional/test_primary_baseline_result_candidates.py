@@ -312,6 +312,13 @@ def test_method_candidate_statistics_use_test_split_only(
         prompt_plan_path=source_path,
         adapter_manifest_path=transfer_manifest_path,
         execution_manifest_path=transfer_manifest_path,
+        numerical_fidelity_report_path=transfer_manifest_path,
+        numerical_fidelity_report_digest="a" * 64,
+        numerical_fidelity_reference_mode=(
+            "official_source_bound_rfc8439_and_operator_equivalence"
+            if baseline_id == "gaussian_shading"
+            else "executed_official_commit_operator_equivalence"
+        ),
         model_id=FORMAL_MODEL_ID,
         model_revision=FORMAL_MODEL_REVISION,
         rows=tuple(dict(row) for row in observations),

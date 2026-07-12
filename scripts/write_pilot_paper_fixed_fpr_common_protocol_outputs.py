@@ -222,6 +222,33 @@ def write_pilot_paper_fixed_fpr_common_protocol_outputs(
             "overall_paired_superiority_ready": paired_summary.get(
                 "overall_paired_superiority_ready", False
             ),
+            "overall_quality_matched_superiority_ready": paired_summary.get(
+                "overall_quality_matched_superiority_ready", False
+            ),
+            "quality_matched_exact_set_ready": paired_summary.get(
+                "quality_matched_exact_set_ready", False
+            ),
+            "quality_matching_uses_detection_labels": paired_summary.get(
+                "quality_matching_uses_detection_labels", True
+            ),
+            "quality_matching_protocol_schema": paired_summary.get(
+                "quality_matching_protocol_schema", ""
+            ),
+            "quality_matching_protocol_digest": paired_summary.get(
+                "quality_matching_protocol_digest", ""
+            ),
+            "quality_metric_name": paired_summary.get(
+                "quality_metric_name", ""
+            ),
+            "quality_match_caliper": paired_summary.get(
+                "quality_match_caliper", 0.0
+            ),
+            "minimum_matched_prompt_fraction": paired_summary.get(
+                "minimum_matched_prompt_fraction", 0.0
+            ),
+            "quality_matched_rows_digest": paired_summary.get(
+                "quality_matched_rows_digest", ""
+            ),
             "paired_superiority_protocol_digest": paired_summary.get(
                 "paired_superiority_protocol_digest", ""
             ),
@@ -303,6 +330,15 @@ def write_pilot_paper_fixed_fpr_common_protocol_outputs(
                 "target_fpr",
                 "paired_superiority_exact_set_ready",
                 "overall_paired_superiority_ready",
+                "overall_quality_matched_superiority_ready",
+                "quality_matched_exact_set_ready",
+                "quality_matching_uses_detection_labels",
+                "quality_matching_protocol_schema",
+                "quality_matching_protocol_digest",
+                "quality_metric_name",
+                "quality_match_caliper",
+                "minimum_matched_prompt_fraction",
+                "quality_matched_rows_digest",
                 "paired_superiority_rows_digest",
                 "paired_outcome_set_digest",
                 "paired_test_prompt_count",

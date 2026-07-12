@@ -37,6 +37,10 @@ class PrimaryBaselineEvidenceRecord:
     adapter_run_sample_roles: tuple[str, ...]
     adapter_run_latent_shapes: tuple[tuple[int, ...], ...]
     method_faithful_adapter_ready: bool
+    numerical_fidelity_mode: str
+    numerical_fidelity_report_path: str
+    numerical_fidelity_report_digest: str
+    baseline_numerical_fidelity_ready: bool
     paper_run_prompt_protocol_ready: bool
     fixed_fpr_baseline_calibration_ready: bool
     attack_matrix_baseline_detection_ready: bool
@@ -149,6 +153,7 @@ def _blocking_reasons(
     fixed_fpr_baseline_calibration_ready: bool,
     attack_matrix_baseline_detection_ready: bool,
     formal_evidence_paths_ready: bool,
+    baseline_numerical_fidelity_ready: bool,
 ) -> tuple[str, ...]:
     """生成正式主表 baseline 结果仍缺失的原因集合。"""
 
@@ -157,6 +162,8 @@ def _blocking_reasons(
         reasons.append("adapter_run_missing")
     if baseline_id in METHOD_FAITHFUL_ADAPTER_REQUIRED_IDS and not method_faithful_adapter_ready:
         reasons.append("method_faithful_sd35_adapter_required")
+    if not baseline_numerical_fidelity_ready:
+        reasons.append("baseline_numerical_fidelity_required")
     if not paper_run_prompt_protocol_ready:
         reasons.append("paper_run_prompt_protocol_required")
     if not fixed_fpr_baseline_calibration_ready:
@@ -179,6 +186,7 @@ def build_primary_baseline_evidence_records(
     formal_evidence_paths_ready: bool = False,
     protocol_readiness_by_baseline: Mapping[str, Mapping[str, Any]] | None = None,
     formal_evidence_paths_by_baseline: Mapping[str, Iterable[str]] | None = None,
+    numerical_fidelity_by_baseline: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """构造主表 baseline 证据边界记录。
 
@@ -196,6 +204,10 @@ def build_primary_baseline_evidence_records(
     evidence_paths_by_id = {
         str(baseline_id): _unique_strings(values)
         for baseline_id, values in (formal_evidence_paths_by_baseline or {}).items()
+    }
+    numerical_fidelity_by_id = {
+        str(baseline_id): dict(values)
+        for baseline_id, values in (numerical_fidelity_by_baseline or {}).items()
     }
     records: list[dict[str, Any]] = []
     for baseline_id in PRIMARY_BASELINE_IDS:
@@ -218,6 +230,10 @@ def build_primary_baseline_evidence_records(
             readiness.get("formal_evidence_paths_ready", formal_evidence_paths_ready)
         )
         formal_evidence_paths = evidence_paths_by_id.get(baseline_id, ())
+        numerical_fidelity = numerical_fidelity_by_id.get(baseline_id, {})
+        numerical_fidelity_ready = bool(
+            numerical_fidelity.get("baseline_numerical_fidelity_ready", False)
+        )
         if formal_evidence_paths_by_baseline is not None:
             evidence_paths_ready = evidence_paths_ready and bool(formal_evidence_paths)
         reasons = _blocking_reasons(
@@ -228,6 +244,7 @@ def build_primary_baseline_evidence_records(
             fixed_fpr_baseline_calibration_ready=fixed_fpr_ready,
             attack_matrix_baseline_detection_ready=attack_ready,
             formal_evidence_paths_ready=evidence_paths_ready,
+            baseline_numerical_fidelity_ready=numerical_fidelity_ready,
         )
         formal_ready = not reasons
         payload = {
@@ -238,6 +255,13 @@ def build_primary_baseline_evidence_records(
             "adapter_run_ready": adapter_ready,
             "adapter_run_observation_count": len(rows),
             "method_faithful_adapter_ready": method_ready,
+            "numerical_fidelity_mode": str(
+                numerical_fidelity.get("numerical_fidelity_mode", "")
+            ),
+            "numerical_fidelity_report_digest": str(
+                numerical_fidelity.get("numerical_fidelity_report_digest", "")
+            ),
+            "baseline_numerical_fidelity_ready": numerical_fidelity_ready,
             "blocking_reasons": reasons,
         }
         digest = build_stable_digest(payload)
@@ -257,6 +281,16 @@ def build_primary_baseline_evidence_records(
             adapter_run_sample_roles=_unique_strings(row.get("sample_role", "") for row in rows),
             adapter_run_latent_shapes=_unique_shapes(row.get("latent_shape", []) for row in rows),
             method_faithful_adapter_ready=method_ready,
+            numerical_fidelity_mode=str(
+                numerical_fidelity.get("numerical_fidelity_mode", "")
+            ),
+            numerical_fidelity_report_path=str(
+                numerical_fidelity.get("numerical_fidelity_report_path", "")
+            ),
+            numerical_fidelity_report_digest=str(
+                numerical_fidelity.get("numerical_fidelity_report_digest", "")
+            ),
+            baseline_numerical_fidelity_ready=numerical_fidelity_ready,
             paper_run_prompt_protocol_ready=prompt_ready,
             fixed_fpr_baseline_calibration_ready=fixed_fpr_ready,
             attack_matrix_baseline_detection_ready=attack_ready,
@@ -276,6 +310,11 @@ def build_primary_baseline_evidence_summary(records: Iterable[Mapping[str, Any]]
     rows = [dict(row) for row in records]
     adapter_ready_ids = [str(row["baseline_id"]) for row in rows if row.get("adapter_run_ready")]
     formal_ready_ids = [str(row["baseline_id"]) for row in rows if row.get("formal_result_ready")]
+    numerical_fidelity_ready_ids = [
+        str(row["baseline_id"])
+        for row in rows
+        if row.get("baseline_numerical_fidelity_ready")
+    ]
     blocking_reasons = sorted({reason for row in rows for reason in row.get("blocking_reasons", [])})
     canonical_rows = sorted(rows, key=lambda row: str(row.get("baseline_id", "")))
     return {
@@ -284,6 +323,11 @@ def build_primary_baseline_evidence_summary(records: Iterable[Mapping[str, Any]]
         "adapter_run_ready_ids": adapter_ready_ids,
         "formal_result_ready_count": len(formal_ready_ids),
         "formal_result_ready_ids": formal_ready_ids,
+        "numerical_fidelity_ready_count": len(numerical_fidelity_ready_ids),
+        "numerical_fidelity_ready_ids": numerical_fidelity_ready_ids,
+        "primary_baseline_numerical_fidelity_ready": (
+            len(numerical_fidelity_ready_ids) == len(rows) and bool(rows)
+        ),
         "primary_baseline_formal_ready": len(formal_ready_ids) == len(rows) and bool(rows),
         "primary_baseline_evidence_records_digest": build_stable_digest(canonical_rows),
         "blocking_reasons": blocking_reasons,

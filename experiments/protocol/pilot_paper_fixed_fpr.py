@@ -1165,6 +1165,13 @@ def build_pilot_paper_common_protocol_summary(
         str(value)
         for value in paired_superiority_summary.get("paired_superiority_ready_ids", ())
     }
+    quality_matched_ready_ids = {
+        str(value)
+        for value in paired_superiority_summary.get(
+            "quality_matched_ready_ids",
+            (),
+        )
+    }
     paired_attack_counts = {
         int(value) for value in paired_superiority_summary.get("paired_attack_counts", ())
     }
@@ -1179,6 +1186,8 @@ def build_pilot_paper_common_protocol_summary(
         "paired_outcome_set_digest",
         "paired_superiority_rows_digest",
         "paired_superiority_protocol_digest",
+        "quality_matching_protocol_digest",
+        "quality_matched_rows_digest",
         "paired_test_prompt_id_digest",
         "paired_attack_registry_digest",
         "threshold_audit_rows_digest",
@@ -1195,10 +1204,20 @@ def build_pilot_paper_common_protocol_summary(
         and paired_superiority_summary.get("paired_superiority_exact_set_ready") is True
         and paired_superiority_summary.get("paired_superiority_scale_ready") is True
         and paired_superiority_summary.get("overall_paired_superiority_ready") is True
+        and paired_superiority_summary.get(
+            "overall_quality_matched_superiority_ready"
+        )
+        is True
+        and paired_superiority_summary.get("quality_matched_exact_set_ready") is True
+        and paired_superiority_summary.get("quality_matching_uses_detection_labels")
+        is False
         and paired_superiority_summary.get("supports_paper_claim") is True
         and paired_baseline_ids == expected_paired_baseline_ids
         and paired_ready_ids == expected_paired_baseline_ids
+        and quality_matched_ready_ids == expected_paired_baseline_ids
         and int(paired_superiority_summary.get("paired_superiority_row_count", 0))
+        == len(expected_paired_baseline_ids)
+        and int(paired_superiority_summary.get("quality_matched_row_count", 0))
         == len(expected_paired_baseline_ids)
         and int(paired_superiority_summary.get("expected_test_count", 0))
         == resolved_config.minimum_clean_negative_count
@@ -1315,6 +1334,44 @@ def build_pilot_paper_common_protocol_summary(
         ),
         "overall_paired_superiority_ready": paired_superiority_summary.get(
             "overall_paired_superiority_ready", False
+        ),
+        "overall_quality_matched_superiority_ready": (
+            paired_superiority_summary.get(
+                "overall_quality_matched_superiority_ready",
+                False,
+            )
+        ),
+        "quality_matched_exact_set_ready": paired_superiority_summary.get(
+            "quality_matched_exact_set_ready",
+            False,
+        ),
+        "quality_matching_uses_detection_labels": paired_superiority_summary.get(
+            "quality_matching_uses_detection_labels",
+            True,
+        ),
+        "quality_matching_protocol_schema": paired_superiority_summary.get(
+            "quality_matching_protocol_schema",
+            "",
+        ),
+        "quality_matching_protocol_digest": paired_superiority_summary.get(
+            "quality_matching_protocol_digest",
+            "",
+        ),
+        "quality_metric_name": paired_superiority_summary.get(
+            "quality_metric_name",
+            "",
+        ),
+        "quality_match_caliper": paired_superiority_summary.get(
+            "quality_match_caliper",
+            0.0,
+        ),
+        "minimum_matched_prompt_fraction": paired_superiority_summary.get(
+            "minimum_matched_prompt_fraction",
+            0.0,
+        ),
+        "quality_matched_rows_digest": paired_superiority_summary.get(
+            "quality_matched_rows_digest",
+            "",
         ),
         "paired_superiority_protocol_digest": paired_superiority_summary.get(
             "paired_superiority_protocol_digest", ""

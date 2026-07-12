@@ -51,6 +51,7 @@ from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 from tests.helpers.scientific_execution_binding import (
     write_test_scientific_execution_binding,
 )
+from tests.helpers.method_faithful_collection import numerical_fidelity_report
 
 
 PACKAGE_TEST_CODE_VERSION = "b" * 40
@@ -216,6 +217,10 @@ def prepare_transfer_inputs(
                 "guidance_scale": config.guidance_scale,
             },
         },
+    )
+    write_json(
+        paths["numerical_fidelity_report"],
+        numerical_fidelity_report(baseline_id),
     )
     return paths
 
@@ -741,6 +746,11 @@ def prepare_package_source(
     transfer_manifest_path = split_dir / f"{baseline_id}_baseline_transfer_manifest.json"
     write_json(split_observations_path, observations)
     write_json(split_command_results_path, command_results)
+    fidelity_report = numerical_fidelity_report(baseline_id)
+    numerical_fidelity_path = (
+        run_dir / f"{baseline_id}_numerical_fidelity_report.json"
+    )
+    write_json(numerical_fidelity_path, fidelity_report)
     transfer_manifest = {
         "baseline_id": baseline_id,
         "baseline_observations_path": split_observations_path.relative_to(output_root).as_posix(),
@@ -759,6 +769,17 @@ def prepare_package_source(
         "execution_manifest_sha256": _sha256(
             execution_dir / "baseline_execution_manifest.json"
         ),
+        "numerical_fidelity_report_path": numerical_fidelity_path.relative_to(
+            output_root
+        ).as_posix(),
+        "numerical_fidelity_report_sha256": _sha256(numerical_fidelity_path),
+        "numerical_fidelity_report_digest": fidelity_report[
+            "numerical_fidelity_report_digest"
+        ],
+        "numerical_fidelity_reference_mode": fidelity_report[
+            "numerical_fidelity_reference_mode"
+        ],
+        "method_faithful_numerical_fidelity_ready": True,
         "paper_run_name": "pilot_paper",
         "target_fpr": 0.01,
         "threshold": threshold,
@@ -788,6 +809,13 @@ def prepare_package_source(
             "model_id": DEFAULT_MODEL_ID,
             "model_revision": DEFAULT_MODEL_REVISION,
         },
+        "numerical_fidelity_report_digest": fidelity_report[
+            "numerical_fidelity_report_digest"
+        ],
+        "numerical_fidelity_reference_mode": fidelity_report[
+            "numerical_fidelity_reference_mode"
+        ],
+        "method_faithful_numerical_fidelity_ready": True,
         **unit_evidence,
     }
     write_json(run_dir / f"{baseline_id}_summary.json", summary)
@@ -808,6 +836,13 @@ def prepare_package_source(
                 "method_faithful_scientific_unit_records_digest": unit_evidence[
                     "method_faithful_scientific_unit_records_digest"
                 ],
+                "numerical_fidelity_report_digest": fidelity_report[
+                    "numerical_fidelity_report_digest"
+                ],
+                "numerical_fidelity_reference_mode": fidelity_report[
+                    "numerical_fidelity_reference_mode"
+                ],
+                "method_faithful_numerical_fidelity_ready": True,
             },
         },
     )

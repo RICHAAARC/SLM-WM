@@ -64,6 +64,10 @@ from paper_experiments.baselines.method_faithful_observation_collection import (
     canonical_prompt_protocol_digest,
     validate_formal_attack_observation_identities,
 )
+from paper_experiments.baselines.method_faithful_numerical_fidelity import (
+    build_method_faithful_numerical_fidelity_report,
+    validate_method_faithful_numerical_fidelity_report,
+)
 from paper_experiments.baselines.observation_io import load_baseline_observation_rows
 
 
@@ -296,6 +300,9 @@ def output_paths(root_path: Path, config: ExternalBaselineMethodFaithfulConfig) 
         "transfer_manifest": split_dir / f"{baseline_id}_baseline_transfer_manifest.json",
         "progress_events": run_dir / f"{baseline_id}_progress_events.jsonl",
         "environment_report": run_dir / f"{baseline_id}_environment_report.json",
+        "numerical_fidelity_report": (
+            run_dir / f"{baseline_id}_numerical_fidelity_report.json"
+        ),
         "summary": run_dir / f"{baseline_id}_summary.json",
         "manifest": run_dir / f"{baseline_id}_manifest.local.json",
         "package_record_dir": run_dir / "package_records",
@@ -650,6 +657,11 @@ def write_baseline_transfer_files(
     )
     if unit_evidence["method_faithful_scientific_unit_resume_ready"] is not True:
         raise RuntimeError("adapter 原子科学完成单元证据未闭合")
+    numerical_fidelity_report = read_json(paths["numerical_fidelity_report"])
+    validated_fidelity = validate_method_faithful_numerical_fidelity_report(
+        numerical_fidelity_report,
+        expected_baseline_id=baseline_id,
+    )
     declared_counts.add(int(adapter_manifest.get("observation_count", -1)))
     if declared_counts != {actual_count}:
         raise ValueError(
@@ -705,6 +717,19 @@ def write_baseline_transfer_files(
         "prompt_protocol_digest": canonical_prompt_protocol_digest(prompt_rows),
         "adapter_manifest_path": adapter_manifest_path.relative_to(collection_root).as_posix(),
         "adapter_manifest_sha256": file_sha256(adapter_manifest_path),
+        "numerical_fidelity_report_path": paths[
+            "numerical_fidelity_report"
+        ].relative_to(collection_root).as_posix(),
+        "numerical_fidelity_report_sha256": file_sha256(
+            paths["numerical_fidelity_report"]
+        ),
+        "numerical_fidelity_report_digest": validated_fidelity[
+            "numerical_fidelity_report_digest"
+        ],
+        "numerical_fidelity_reference_mode": validated_fidelity[
+            "numerical_fidelity_reference_mode"
+        ],
+        "method_faithful_numerical_fidelity_ready": True,
         **unit_evidence,
         "execution_manifest_path": paths["execution_manifest"].relative_to(collection_root).as_posix(),
         "execution_manifest_sha256": file_sha256(paths["execution_manifest"]),
@@ -800,6 +825,21 @@ def build_and_run_primary_baseline_adapter(
     if int(validation_result["return_code"]) != 0:
         raise RuntimeError("baseline 执行证据校验失败")
 
+    numerical_fidelity_report = (
+        build_method_faithful_numerical_fidelity_report(
+            root_path,
+            config.primary_baseline_id,
+        )
+    )
+    write_json(paths["numerical_fidelity_report"], numerical_fidelity_report)
+    if (
+        numerical_fidelity_report[
+            "method_faithful_numerical_fidelity_ready"
+        ]
+        is not True
+    ):
+        raise RuntimeError("baseline 关键算子数值忠实度未通过")
+
     transfer_manifest = write_baseline_transfer_files(root_path, config, paths)
     unit_evidence = {
         key: value
@@ -815,6 +855,13 @@ def build_and_run_primary_baseline_adapter(
         ),
         "transfer_manifest_path": relative_or_absolute(paths["transfer_manifest"], root_path),
         "threshold_digest": str(transfer_manifest["threshold_digest"]),
+        "numerical_fidelity_report_digest": str(
+            transfer_manifest["numerical_fidelity_report_digest"]
+        ),
+        "numerical_fidelity_reference_mode": str(
+            transfer_manifest["numerical_fidelity_reference_mode"]
+        ),
+        "method_faithful_numerical_fidelity_ready": True,
         "unit_evidence": unit_evidence,
     }
 
@@ -871,7 +918,7 @@ def write_external_baseline_method_faithful_outputs(
     prepare_single_baseline_run_directory(paths)
     try:
         with progress_bar(
-            3,
+            4,
             desc=f"method-faithful {config.primary_baseline_id}",
             enabled=config.enable_workflow_progress_bar,
         ) as run_progress:
@@ -924,6 +971,19 @@ def write_external_baseline_method_faithful_outputs(
         },
         "transfer_manifest_path": adapter_report["transfer_manifest_path"],
         "threshold_digest": adapter_report["threshold_digest"],
+        "numerical_fidelity_report_path": relative_or_absolute(
+            paths["numerical_fidelity_report"],
+            root_path,
+        ),
+        "numerical_fidelity_report_digest": adapter_report[
+            "numerical_fidelity_report_digest"
+        ],
+        "numerical_fidelity_reference_mode": adapter_report[
+            "numerical_fidelity_reference_mode"
+        ],
+        "method_faithful_numerical_fidelity_ready": adapter_report[
+            "method_faithful_numerical_fidelity_ready"
+        ],
         "environment_report_path": relative_or_absolute(paths["environment_report"], root_path),
         "dependency_profile_id": environment_report["dependency_profile_id"],
         "dependency_profile_digest": environment_report[
@@ -955,6 +1015,7 @@ def write_external_baseline_method_faithful_outputs(
             relative_or_absolute(paths["transfer_manifest"], root_path),
             relative_or_absolute(paths["split_observations"], root_path),
             relative_or_absolute(paths["split_command_results"], root_path),
+            relative_or_absolute(paths["numerical_fidelity_report"], root_path),
         ),
         config=asdict(config),
         code_version=formal_execution_run_lock["formal_execution_commit"],
@@ -971,6 +1032,15 @@ def write_external_baseline_method_faithful_outputs(
             "method_faithful_scientific_unit_records_digest": adapter_report[
                 "unit_evidence"
             ]["method_faithful_scientific_unit_records_digest"],
+            "numerical_fidelity_report_digest": adapter_report[
+                "numerical_fidelity_report_digest"
+            ],
+            "numerical_fidelity_reference_mode": adapter_report[
+                "numerical_fidelity_reference_mode"
+            ],
+            "method_faithful_numerical_fidelity_ready": adapter_report[
+                "method_faithful_numerical_fidelity_ready"
+            ],
             "supports_paper_claim": False,
         },
     ).to_dict()
@@ -1295,6 +1365,12 @@ def collect_package_entries(
             path_field="baseline_command_results_path",
             digest_field="baseline_command_results_sha256",
         ),
+        _resolve_transfer_member(
+            output_dir,
+            transfer_manifest,
+            path_field="numerical_fidelity_report_path",
+            digest_field="numerical_fidelity_report_sha256",
+        ),
     }
     required_runner_entries = {
         run_dir / f"{resolved_baseline_id}_baseline_command_plan.json",
@@ -1304,6 +1380,7 @@ def collect_package_entries(
         run_dir / f"{resolved_baseline_id}_prompt_plan.json",
         run_dir / f"{resolved_baseline_id}_progress_events.jsonl",
         run_dir / f"{resolved_baseline_id}_environment_report.json",
+        run_dir / f"{resolved_baseline_id}_numerical_fidelity_report.json",
         run_dir / f"{resolved_baseline_id}_summary.json",
         run_dir / f"{resolved_baseline_id}_manifest.local.json",
         run_dir / "execution" / "baseline_execution_manifest.json",
@@ -1442,6 +1519,10 @@ def _validate_package_unit_evidence(
         ),
         ("prompt_plan_path", "prompt_plan_sha256"),
         ("adapter_manifest_path", "adapter_manifest_sha256"),
+        (
+            "numerical_fidelity_report_path",
+            "numerical_fidelity_report_sha256",
+        ),
         ("execution_manifest_path", "execution_manifest_sha256"),
     )
     members = {
@@ -1459,6 +1540,12 @@ def _validate_package_unit_evidence(
     command_results = read_json(members["baseline_command_results_path"])
     execution_manifest = read_json(members["execution_manifest_path"])
     adapter_manifest = read_json(members["adapter_manifest_path"])
+    numerical_fidelity_report = (
+        validate_method_faithful_numerical_fidelity_report(
+            read_json(members["numerical_fidelity_report_path"]),
+            expected_baseline_id=str(transfer_manifest.get("baseline_id", "")),
+        )
+    )
     unit_evidence = validate_method_faithful_adapter_unit_evidence(
         manifest=adapter_manifest,
         observation_rows=observations,
@@ -1492,6 +1579,12 @@ def _validate_package_unit_evidence(
             set(run_attack_names) == set(transfer_attack_names),
             transfer_manifest.get("prompt_protocol_digest")
             == canonical_prompt_protocol_digest(prompt_rows),
+            transfer_manifest.get("method_faithful_numerical_fidelity_ready")
+            is True,
+            transfer_manifest.get("numerical_fidelity_report_digest")
+            == numerical_fidelity_report["numerical_fidelity_report_digest"],
+            transfer_manifest.get("numerical_fidelity_reference_mode")
+            == numerical_fidelity_report["numerical_fidelity_reference_mode"],
         )
     ):
         raise RuntimeError("baseline 归档单元计划未绑定完整 Prompt 与正式攻击协议")
@@ -1557,6 +1650,16 @@ def _validate_package_unit_evidence(
             metadata.get("method_faithful_scientific_unit_resume_ready") is True,
             metadata.get("method_faithful_scientific_unit_records_digest")
             == unit_evidence["method_faithful_scientific_unit_records_digest"],
+            metadata.get("method_faithful_numerical_fidelity_ready") is True,
+            metadata.get("numerical_fidelity_report_digest")
+            == numerical_fidelity_report["numerical_fidelity_report_digest"],
+            metadata.get("numerical_fidelity_reference_mode")
+            == numerical_fidelity_report["numerical_fidelity_reference_mode"],
+            run_summary.get("method_faithful_numerical_fidelity_ready") is True,
+            run_summary.get("numerical_fidelity_report_digest")
+            == numerical_fidelity_report["numerical_fidelity_report_digest"],
+            run_summary.get("numerical_fidelity_reference_mode")
+            == numerical_fidelity_report["numerical_fidelity_reference_mode"],
         )
     ):
         raise RuntimeError("baseline 运行 manifest 未绑定原子单元证据")

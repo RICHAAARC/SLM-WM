@@ -466,6 +466,7 @@ def write_primary_baseline_evidence_outputs(
                 source.prompt_plan_path,
                 source.adapter_manifest_path,
                 source.execution_manifest_path,
+                source.numerical_fidelity_report_path,
                 command_result_paths[index],
             )
         ]
@@ -492,12 +493,40 @@ def write_primary_baseline_evidence_outputs(
     )
     if not all(readiness_by_baseline["t2smark"].values()):
         raise ValueError("T2SMark formal observations 未通过独立 Prompt、fixed-FPR 或攻击覆盖审计")
+    numerical_fidelity_by_baseline = {
+        source.baseline_id: {
+            "numerical_fidelity_mode": source.numerical_fidelity_reference_mode,
+            "numerical_fidelity_report_path": relative_or_absolute(
+                source.numerical_fidelity_report_path,
+                root_path,
+            ),
+            "numerical_fidelity_report_digest": (
+                source.numerical_fidelity_report_digest
+            ),
+            "baseline_numerical_fidelity_ready": True,
+        }
+        for source in sources
+    }
+    numerical_fidelity_by_baseline["t2smark"] = {
+        "numerical_fidelity_mode": "native_official_result_exact_rebuild",
+        "numerical_fidelity_report_path": relative_or_absolute(
+            resolved_t2smark_output_dir
+            / "t2smark_formal_import_validation_report.json",
+            root_path,
+        ),
+        "numerical_fidelity_report_digest": file_sha256(
+            resolved_t2smark_output_dir
+            / "t2smark_formal_import_validation_report.json"
+        ),
+        "baseline_numerical_fidelity_ready": True,
+    }
     records = build_primary_baseline_evidence_records(
         source_registry=source_registry,
         command_results=command_results,
         observation_rows=observation_rows,
         protocol_readiness_by_baseline=readiness_by_baseline,
         formal_evidence_paths_by_baseline=formal_evidence_paths_by_baseline,
+        numerical_fidelity_by_baseline=numerical_fidelity_by_baseline,
     )
     summary = build_primary_baseline_evidence_summary(records)
     summary.update(
@@ -530,6 +559,7 @@ def write_primary_baseline_evidence_outputs(
             source.prompt_plan_path,
             source.adapter_manifest_path,
             source.execution_manifest_path,
+            source.numerical_fidelity_report_path,
         )
     )
     input_paths.extend(relative_or_absolute(path, root_path) for path in command_result_paths)

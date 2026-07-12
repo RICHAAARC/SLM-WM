@@ -42,9 +42,12 @@ from paper_experiments.analysis.paired_superiority import (
     build_paired_superiority_protocol_digest,
     build_paired_superiority_rows,
     build_paired_superiority_summary,
+    build_quality_matched_superiority_rows,
+    build_quality_matched_superiority_summary,
     build_threshold_audit_binding_maps,
     canonical_attack_registry_rows,
     canonical_threshold_audit_rows,
+    merge_paired_and_quality_matched_rows,
 )
 from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     build_fixed_fpr_threshold_manifest_config,
@@ -356,12 +359,22 @@ def write_paired_superiority_outputs(
             proposed_method_threshold_digest=method_threshold_digest_map["slm_wm"],
             baseline_method_threshold_digest=method_threshold_digest_map[baseline_id],
             attack_registry_rows=attack_registry,
+            include_quality_matching=True,
         )
     )
-    statistical_rows = build_paired_superiority_rows(
+    full_statistical_rows = build_paired_superiority_rows(
         paired_outcomes,
         protocol_digest=protocol_digest,
         bootstrap_resample_count=int(bootstrap_resample_count),
+    )
+    quality_matched_rows = build_quality_matched_superiority_rows(
+        paired_outcomes,
+        protocol_digest=protocol_digest,
+        bootstrap_resample_count=int(bootstrap_resample_count),
+    )
+    statistical_rows = merge_paired_and_quality_matched_rows(
+        full_statistical_rows,
+        quality_matched_rows,
     )
     expected_test_count = int(build_group_split_counts(paper_run.prompt_count)["test"])
     expected_attack_count = len(attack_registry)
@@ -379,6 +392,9 @@ def write_paired_superiority_outputs(
         statistical_rows,
         paired_outcomes=paired_outcomes,
     )
+    quality_matched_summary = build_quality_matched_superiority_summary(
+        quality_matched_rows
+    )
     prompt_identity_ready = (
         int(statistical_summary["paired_test_prompt_count"]) == expected_test_count
     )
@@ -386,6 +402,9 @@ def write_paired_superiority_outputs(
         scale_ready
         and prompt_identity_ready
         and statistical_summary["overall_paired_superiority_ready"]
+        and quality_matched_summary[
+            "overall_quality_matched_superiority_ready"
+        ]
     )
 
     outcomes_path = output_path / "paired_outcomes.jsonl"
@@ -432,6 +451,28 @@ def write_paired_superiority_outputs(
             "paired_outcome_set_digest",
             "protocol_digest",
             "paired_superiority_ready",
+            "quality_matching_protocol_schema",
+            "quality_matching_protocol_digest",
+            "quality_metric_name",
+            "quality_match_caliper",
+            "minimum_matched_prompt_fraction",
+            "total_quality_prompt_count",
+            "minimum_matched_prompt_count",
+            "matched_prompt_count",
+            "unmatched_prompt_count",
+            "matched_prompt_fraction",
+            "proposed_embedding_pair_ssim_mean",
+            "baseline_embedding_pair_ssim_mean",
+            "mean_embedding_pair_ssim_gap",
+            "max_absolute_embedding_pair_ssim_gap",
+            "quality_match_coverage_ready",
+            "quality_matched_observation_count",
+            "quality_matched_mean_paired_true_positive_rate_difference",
+            "quality_matched_mean_paired_difference_ci_low",
+            "quality_matched_mean_paired_difference_ci_high",
+            "quality_matched_holm_adjusted_p_value",
+            "quality_matched_superiority_ready",
+            "quality_matched_row_digest",
             "supports_paper_claim",
         ),
     )
@@ -466,6 +507,7 @@ def write_paired_superiority_outputs(
         ),
         "paired_superiority_scale_ready": scale_ready,
         **statistical_summary,
+        **quality_matched_summary,
         "overall_paired_superiority_ready": overall_ready,
         "supports_paper_claim": overall_ready,
     }
@@ -493,7 +535,9 @@ def write_paired_superiority_outputs(
     ).to_dict()
     manifest_path.write_text(_stable_json_text(manifest), encoding="utf-8")
     if require_pass and not overall_ready:
-        raise RuntimeError("主方法总体配对优势未通过, 不得闭合 superiority claim")
+        raise RuntimeError(
+            "主方法全样本或质量匹配配对优势未通过, 不得闭合 superiority claim"
+        )
     return manifest
 
 

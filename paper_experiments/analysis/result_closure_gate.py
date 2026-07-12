@@ -69,9 +69,12 @@ from paper_experiments.analysis.paired_superiority import (
     build_paired_superiority_protocol_digest,
     build_paired_superiority_rows,
     build_paired_superiority_summary,
+    build_quality_matched_superiority_rows,
+    build_quality_matched_superiority_summary,
     build_threshold_audit_binding_maps,
     canonical_attack_registry_rows,
     canonical_threshold_audit_rows,
+    merge_paired_and_quality_matched_rows,
 )
 from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     build_fixed_fpr_threshold_manifest_config,
@@ -437,6 +440,15 @@ def _primary_baseline_record_digest_ready(record: Mapping[str, Any]) -> bool:
         "method_faithful_adapter_ready": _strict_bool(
             record.get("method_faithful_adapter_ready")
         ),
+        "numerical_fidelity_mode": str(
+            record.get("numerical_fidelity_mode", "")
+        ),
+        "numerical_fidelity_report_digest": str(
+            record.get("numerical_fidelity_report_digest", "")
+        ),
+        "baseline_numerical_fidelity_ready": _strict_bool(
+            record.get("baseline_numerical_fidelity_ready")
+        ),
         "blocking_reasons": tuple(record.get("blocking_reasons", ())),
     }
     digest = str(record.get("primary_baseline_evidence_digest", ""))
@@ -501,6 +513,11 @@ def _normalized_paired_statistical_row(
         "negative_prompt_cluster_count",
         "tied_prompt_cluster_count",
         "bootstrap_resample_count",
+        "total_quality_prompt_count",
+        "minimum_matched_prompt_count",
+        "matched_prompt_count",
+        "unmatched_prompt_count",
+        "quality_matched_observation_count",
     )
     float_fields = (
         "mean_paired_true_positive_rate_difference",
@@ -510,6 +527,17 @@ def _normalized_paired_statistical_row(
         "one_sided_exact_prompt_cluster_sign_flip_p_value",
         "holm_adjusted_p_value",
         "confidence_level",
+        "quality_match_caliper",
+        "minimum_matched_prompt_fraction",
+        "matched_prompt_fraction",
+        "proposed_embedding_pair_ssim_mean",
+        "baseline_embedding_pair_ssim_mean",
+        "mean_embedding_pair_ssim_gap",
+        "max_absolute_embedding_pair_ssim_gap",
+        "quality_matched_mean_paired_true_positive_rate_difference",
+        "quality_matched_mean_paired_difference_ci_low",
+        "quality_matched_mean_paired_difference_ci_high",
+        "quality_matched_holm_adjusted_p_value",
     )
     text_fields = (
         "baseline_id",
@@ -525,10 +553,16 @@ def _normalized_paired_statistical_row(
         "paired_test_prompt_id_digest",
         "paired_outcome_set_digest",
         "protocol_digest",
+        "quality_matching_protocol_schema",
+        "quality_matching_protocol_digest",
+        "quality_metric_name",
+        "quality_matched_row_digest",
     )
     boolean_fields = (
         "exact_prompt_cluster_sign_flip_p_value_is_diagnostic",
         "paired_superiority_ready",
+        "quality_match_coverage_ready",
+        "quality_matched_superiority_ready",
         "supports_paper_claim",
     )
     if set(row) != {*integer_fields, *float_fields, *text_fields, *boolean_fields}:
@@ -574,8 +608,24 @@ def _normalized_paired_statistical_row(
             row.get("paired_outcome_set_digest", "")
         ),
         "protocol_digest": str(row.get("protocol_digest", "")),
+        "quality_matching_protocol_schema": str(
+            row.get("quality_matching_protocol_schema", "")
+        ),
+        "quality_matching_protocol_digest": str(
+            row.get("quality_matching_protocol_digest", "")
+        ),
+        "quality_metric_name": str(row.get("quality_metric_name", "")),
+        "quality_matched_row_digest": str(
+            row.get("quality_matched_row_digest", "")
+        ),
         "paired_superiority_ready": _strict_bool(
             row.get("paired_superiority_ready")
+        ),
+        "quality_match_coverage_ready": _strict_bool(
+            row.get("quality_match_coverage_ready")
+        ),
+        "quality_matched_superiority_ready": _strict_bool(
+            row.get("quality_matched_superiority_ready")
         ),
         "supports_paper_claim": _strict_bool(row.get("supports_paper_claim")),
     }
@@ -852,6 +902,42 @@ def _expected_common_protocol_schema(
             "overall_paired_superiority_ready": paired_summary.get(
                 "overall_paired_superiority_ready",
                 False,
+            ),
+            "overall_quality_matched_superiority_ready": paired_summary.get(
+                "overall_quality_matched_superiority_ready",
+                False,
+            ),
+            "quality_matched_exact_set_ready": paired_summary.get(
+                "quality_matched_exact_set_ready",
+                False,
+            ),
+            "quality_matching_uses_detection_labels": paired_summary.get(
+                "quality_matching_uses_detection_labels",
+                True,
+            ),
+            "quality_matching_protocol_schema": paired_summary.get(
+                "quality_matching_protocol_schema",
+                "",
+            ),
+            "quality_matching_protocol_digest": paired_summary.get(
+                "quality_matching_protocol_digest",
+                "",
+            ),
+            "quality_metric_name": paired_summary.get(
+                "quality_metric_name",
+                "",
+            ),
+            "quality_match_caliper": paired_summary.get(
+                "quality_match_caliper",
+                0.0,
+            ),
+            "minimum_matched_prompt_fraction": paired_summary.get(
+                "minimum_matched_prompt_fraction",
+                0.0,
+            ),
+            "quality_matched_rows_digest": paired_summary.get(
+                "quality_matched_rows_digest",
+                "",
             ),
             "paired_superiority_protocol_digest": paired_summary.get(
                 "paired_superiority_protocol_digest",
@@ -1646,6 +1732,7 @@ def _paired_superiority_ready(bundle: ResultClosureGateInput) -> bool:
                 proposed_method_threshold_digest=threshold_map["slm_wm"],
                 baseline_method_threshold_digest=threshold_map[baseline_id],
                 attack_registry_rows=attack_registry,
+                include_quality_matching=True,
             )
         )
     except (PairedSuperiorityError, TypeError, ValueError):
@@ -1730,18 +1817,42 @@ def _paired_superiority_ready(bundle: ResultClosureGateInput) -> bool:
         dict(row) for row in normalized_rows if isinstance(row, Mapping)
     )
     try:
-        recomputed_rows = tuple(
-            build_paired_superiority_rows(
+        recomputed_full_rows = build_paired_superiority_rows(
                 outcomes,
                 protocol_digest=protocol_digest,
                 confidence_level=DEFAULT_CONFIDENCE_LEVEL,
                 bootstrap_resample_count=DEFAULT_BOOTSTRAP_RESAMPLE_COUNT,
+            )
+        recomputed_quality_rows = build_quality_matched_superiority_rows(
+            outcomes,
+            protocol_digest=protocol_digest,
+            confidence_level=DEFAULT_CONFIDENCE_LEVEL,
+            bootstrap_resample_count=DEFAULT_BOOTSTRAP_RESAMPLE_COUNT,
+        )
+        recomputed_rows = tuple(
+            merge_paired_and_quality_matched_rows(
+                recomputed_full_rows,
+                recomputed_quality_rows,
             )
         )
         recomputed_summary = build_paired_superiority_summary(
             recomputed_rows,
             paired_outcomes=outcomes,
         )
+        recomputed_quality_summary = build_quality_matched_superiority_summary(
+            recomputed_quality_rows
+        )
+        recomputed_summary.update(recomputed_quality_summary)
+        recomputed_overall_ready = bool(
+            recomputed_summary["overall_paired_superiority_ready"]
+            and recomputed_quality_summary[
+                "overall_quality_matched_superiority_ready"
+            ]
+        )
+        recomputed_summary["overall_paired_superiority_ready"] = (
+            recomputed_overall_ready
+        )
+        recomputed_summary["supports_paper_claim"] = recomputed_overall_ready
     except (PairedSuperiorityError, TypeError, ValueError):
         return False
     if statistical_rows != recomputed_rows:
@@ -1755,9 +1866,23 @@ def _paired_superiority_ready(bundle: ResultClosureGateInput) -> bool:
         "paired_superiority_ready_ids",
         "paired_superiority_exact_set_ready",
         "overall_paired_superiority_ready",
+        "overall_quality_matched_superiority_ready",
+        "quality_matched_exact_set_ready",
         "paired_superiority_rows_digest",
         "paired_test_prompt_count",
         "paired_test_prompt_id_digest",
+        "quality_matching_protocol_schema",
+        "quality_matching_protocol_digest",
+        "quality_metric_name",
+        "quality_match_caliper",
+        "minimum_matched_prompt_fraction",
+        "quality_matched_row_count",
+        "quality_matched_ready_ids",
+        "quality_matched_exact_set_ready",
+        "overall_quality_matched_superiority_ready",
+        "quality_matched_rows_digest",
+        "quality_matching_uses_detection_labels",
+        "supports_quality_matched_paper_claim",
         "supports_paper_claim",
     )
     summary_ready = bool(
@@ -1827,6 +1952,15 @@ def _paired_superiority_ready(bundle: ResultClosureGateInput) -> bool:
         "paired_outcome_set_digest",
         "paired_superiority_rows_digest",
         "paired_superiority_protocol_digest",
+        "quality_matching_protocol_schema",
+        "quality_matching_protocol_digest",
+        "quality_metric_name",
+        "quality_match_caliper",
+        "minimum_matched_prompt_fraction",
+        "quality_matched_rows_digest",
+        "overall_quality_matched_superiority_ready",
+        "quality_matched_exact_set_ready",
+        "quality_matching_uses_detection_labels",
         "paired_test_prompt_count",
         "paired_test_prompt_id_digest",
         "paired_attack_registry_digest",
@@ -2516,12 +2650,20 @@ def _primary_baseline_evidence_ready(bundle: ResultClosureGateInput) -> bool:
     manifest_metadata = bundle.primary_baseline_evidence_manifest.get("metadata", {})
     adapter_ids = [str(value) for value in summary.get("adapter_run_ready_ids", ())]
     formal_ids = [str(value) for value in summary.get("formal_result_ready_ids", ())]
+    numerical_fidelity_ids = [
+        str(value) for value in summary.get("numerical_fidelity_ready_ids", ())
+    ]
     input_ids = [str(value) for value in summary.get("input_baseline_ids", ())]
     identities_ready = all(
         len(values) == len(expected_ids)
         and len(set(values)) == len(values)
         and set(values) == expected_ids
-        for values in (adapter_ids, formal_ids, input_ids)
+        for values in (
+            adapter_ids,
+            formal_ids,
+            numerical_fidelity_ids,
+            input_ids,
+        )
     )
     record_identity_ready = (
         len(record_ids) == len(expected_ids)
@@ -2540,6 +2682,20 @@ def _primary_baseline_evidence_ready(bundle: ResultClosureGateInput) -> bool:
             and _strict_bool(row.get("adapter_run_ready"))
             and (_int_value(row.get("adapter_run_observation_count")) or 0) > 0
             and _strict_bool(row.get("method_faithful_adapter_ready"))
+            and str(row.get("numerical_fidelity_mode", ""))
+            == (
+                "native_official_result_exact_rebuild"
+                if str(row.get("baseline_id", "")) == "t2smark"
+                else (
+                    "official_source_bound_rfc8439_and_operator_equivalence"
+                    if str(row.get("baseline_id", ""))
+                    == "gaussian_shading"
+                    else "executed_official_commit_operator_equivalence"
+                )
+            )
+            and bool(str(row.get("numerical_fidelity_report_path", "")))
+            and _is_sha256(row.get("numerical_fidelity_report_digest", ""))
+            and _strict_bool(row.get("baseline_numerical_fidelity_ready"))
             and _strict_bool(row.get("paper_run_prompt_protocol_ready"))
             and _strict_bool(row.get("fixed_fpr_baseline_calibration_ready"))
             and _strict_bool(row.get("attack_matrix_baseline_detection_ready"))
@@ -2559,6 +2715,9 @@ def _primary_baseline_evidence_ready(bundle: ResultClosureGateInput) -> bool:
         and _int_value(summary.get("primary_baseline_count")) == len(expected_ids)
         and _int_value(summary.get("adapter_run_ready_count")) == len(expected_ids)
         and _int_value(summary.get("formal_result_ready_count")) == len(expected_ids)
+        and _int_value(summary.get("numerical_fidelity_ready_count"))
+        == len(expected_ids)
+        and _strict_bool(summary.get("primary_baseline_numerical_fidelity_ready"))
         and _strict_bool(summary.get("primary_baseline_formal_ready"))
         and identities_ready
         and isinstance(summary.get("blocking_reasons"), list)
@@ -2590,6 +2749,7 @@ def _primary_baseline_evidence_ready(bundle: ResultClosureGateInput) -> bool:
                 "paper_claim_scale",
                 "target_fpr",
                 "primary_baseline_formal_ready",
+                "primary_baseline_numerical_fidelity_ready",
                 "primary_baseline_evidence_records_digest",
             ),
         )
@@ -2898,6 +3058,10 @@ def _common_protocol_ready(bundle: ResultClosureGateInput) -> bool:
     )
     return (
         _all_true(bundle.common_protocol_summary, ready_fields)
+        and bundle.common_protocol_summary.get(
+            "quality_matching_uses_detection_labels"
+        )
+        is False
         and _all_zero(bundle.common_protocol_summary, zero_fields)
         and str(
             bundle.common_protocol_summary.get(
@@ -2959,10 +3123,16 @@ def _result_analysis_ready(bundle: ResultClosureGateInput) -> bool:
                 "per_attack_superiority_evaluation_ready",
                 "paired_superiority_ready",
                 "overall_paired_superiority_ready",
+                "overall_quality_matched_superiority_ready",
+                "quality_matched_exact_set_ready",
                 "supports_paper_claim",
             ),
         )
         and result_record_count > 0
+        and bundle.result_analysis_summary.get(
+            "quality_matching_uses_detection_labels"
+        )
+        is False
         and attack_registry is not None
         and result_record_count
         == len(attack_registry) * (len(PRIMARY_BASELINE_IDS) + 1)
@@ -2985,6 +3155,15 @@ def _result_analysis_ready(bundle: ResultClosureGateInput) -> bool:
                 "paired_outcome_set_digest",
                 "paired_superiority_rows_digest",
                 "paired_superiority_protocol_digest",
+                "quality_matching_protocol_schema",
+                "quality_matching_protocol_digest",
+                "quality_metric_name",
+                "quality_match_caliper",
+                "minimum_matched_prompt_fraction",
+                "quality_matched_rows_digest",
+                "overall_quality_matched_superiority_ready",
+                "quality_matched_exact_set_ready",
+                "quality_matching_uses_detection_labels",
                 "paired_test_prompt_count",
                 "paired_test_prompt_id_digest",
                 "paired_attack_registry_digest",
@@ -3040,6 +3219,9 @@ def _result_analysis_ready(bundle: ResultClosureGateInput) -> bool:
                 "universal_per_attack_superiority_claim_ready",
                 "paired_superiority_ready",
                 "overall_paired_superiority_ready",
+                "overall_quality_matched_superiority_ready",
+                "quality_matched_exact_set_ready",
+                "quality_matching_uses_detection_labels",
                 "paired_superiority_rows_digest",
                 "paired_test_prompt_count",
                 "paired_test_prompt_id_digest",
