@@ -2,6 +2,11 @@
 
 `scripts/` 提供可脱离 Notebook 运行的命令行入口, 不承载方法数学实现。
 
+## 代码包抽离入口
+
+- `extract_release_package.py`: 按 `minimal_method_package`、`paper_artifact_rebuild_package` 或 `paper_experiment_execution_package` 复制唯一文件集合, 记录逐文件 SHA-256 和源仓库提交。两个可运行 profile 要求源工作树 clean、六个依赖锁完整, 并在输出目录创建新的 clean detached Git 根提交。命令只允许把持久化代码包写入 `outputs/`。
+- `validate_extracted_package.py`: 在脱离开发仓库的代码包中复算全部文件摘要, 核验 Git 跟踪集合、源提交映射、六个完整依赖锁和必需 CLI 入口。验证子进程不继承开发仓库 `PYTHONPATH`, 不包含 `paper_workflow/`, 也不导入或执行 CUDA。
+
 ## 正式依赖入口
 
 - `prepare_dependency_profile.py`: 薄转发入口, 在当前解释器中调用 `experiments.runtime.dependency_preparation`; 仅消费已提交且 ready 的完整哈希锁。
@@ -9,6 +14,7 @@
 - `materialize_dependency_lock_candidate.py`: 在与目标 profile 精确匹配的解释器中解析完整 wheel 闭包候选, 只写 `outputs/`, 不直接修改 `configs/`。
 - `write_dependency_lock_review_bundle.py`: fresh Linux x86_64 host 资格化入口, CLI 必须使用 `python -I`。脚本使用宿主 Python 标准库下载工具锁固定的 PyPI Linux x86_64 `uv` wheel, 复验 URL、平台文件名和 SHA-256 后直接提取唯一 executable, 不依赖宿主 `venv`、`pip` 或 `ensurepip`。固定 `uv` 创建精确 `workflow_orchestrator` CPython 3.12.13 子解释器, 再由该 child 运行唯一审查包实现。`workflow_orchestrator` 候选不要求自身完整锁; 五个科学 profile 在 orchestrator 锁尚未提交时会在下载前失败, 通过顺序门禁后才准备父环境、创建目标 CPython 子解释器并使用登记的 PyTorch index 解析 wheel 闭包。父 launcher 会重新读取本地与 Drive 的 manifest、精确文件集合、路径、大小和摘要, 不能用退出码0代替受治理审查包。
 - `write_reviewed_dependency_hash_lock.py`: 在人工批准后离线复验 Drive 回传审查包、候选生成代码锁、当前 clean Git HEAD、三个文件摘要和 pip resolver 闭包, 并在实际写锁前再次核验 HEAD 与 clean 状态, 然后把规范候选写入 registry 登记且仍缺失的完整锁路径。CLI 只允许由目标 checkout 内同一份脚本修改该 checkout, 不允许从另一代码版本通过 `--root` 写入。该入口不覆盖已有锁、不提交 Git, 写入结论固定不支持论文 claim。
+- `write_reviewed_scientific_dependency_hash_locks.py`: 在父编排锁已经提交后, 原子复验同一 clean detached commit 生成的五个科学 profile 审查包。CLI 要求按 registry 顺序逐项批准五个 profile; 全部 manifest、resolver report、wheel SHA-256 与规范锁文本通过后才写入任何目标。任一候选或写入失败都会删除本次已写文件, 因而不会留下部分科学锁集合。该入口不执行 CUDA, 不提交 Git, 也不支持论文 claim。
 - `run_formal_workflow_host.py`: 正式结果的唯一 fresh-host 父入口, 必须以 `python -I` 在 Linux x86_64 调用。该入口先要求请求提交对应的 clean detached checkout, 再复用固定 URL、平台文件名和 SHA-256 的 `uv` wheel 引导, 创建 registry 指定的 CPython 3.12.13, 并以当前 HEAD 中的 `workflow_orchestrator` 完整哈希锁执行 `pip install --require-hashes --only-binary=:all:`、`pip check` 与隔离解释器复验。受治理 workflow 结果同时记录父 profile、完整锁摘要、解释器路径和解释器文件摘要; 任一命令失败均不会进入 GPU 或 CPU 闭合业务入口。
 - `formal_workflow_entry.py`: 精确 `workflow_orchestrator` 子解释器中的统一 GPU / CPU 子入口。该文件位于 `scripts/`, 不依赖 `paper_workflow/`, 因而 fresh host、普通 GPU 服务器和 Colab 均执行同一内层入口。
 - `formal_workflow_environment.py`: 统一发布论文运行层级、固定 FPR、模型 revision、baseline 身份和 workflow 持久化参数。`run_gpu_server_workflow.py` 直接调用该实现；Colab helper 只在外层补充 Notebook 会话起点记录。

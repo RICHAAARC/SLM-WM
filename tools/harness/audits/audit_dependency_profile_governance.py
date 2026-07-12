@@ -33,6 +33,7 @@ REQUIRED_PATHS = (
     "scripts/materialize_dependency_lock_candidate.py",
     "scripts/write_dependency_lock_review_bundle.py",
     "scripts/write_reviewed_dependency_hash_lock.py",
+    "scripts/write_reviewed_scientific_dependency_hash_locks.py",
     "configs/dependency_profiles/dependency_qualification_uv_linux_x86_64_lock.txt",
     "docs/field_registry.md",
     "docs/builds/formal_dependency_environment.md",
@@ -240,6 +241,15 @@ REQUIRED_LOCK_ACCEPTANCE_TOKENS = (
     "repository_state_changed_before_lock_write",
     "receiver_code_root_mismatch",
     "lock_written_for_commit",
+)
+REQUIRED_SCIENTIFIC_LOCK_ACCEPTANCE_TOKENS = (
+    "SCIENTIFIC_PROFILE_IDS",
+    "_validate_bundle_identity",
+    "_validate_candidate_closure",
+    "common_formal_lock",
+    'target_path.open("xb")',
+    "for written_path in reversed(written_paths)",
+    "scientific_dependency_locks_written_for_commit",
 )
 QUALIFICATION_TOOL_LOCK_TEXT = (
     "uv==0.11.28 "
@@ -669,6 +679,29 @@ def run_audit(root: str | Path) -> dict[str, Any]:
                     {
                         "path": "scripts/write_reviewed_dependency_hash_lock.py",
                         "reason": "dependency_lock_acceptance_contract_missing",
+                        "token": token,
+                    }
+                )
+
+    scientific_acceptance_path = (
+        root_path
+        / "scripts/write_reviewed_scientific_dependency_hash_locks.py"
+    )
+    if scientific_acceptance_path.is_file():
+        scientific_acceptance_text = scientific_acceptance_path.read_text(
+            encoding="utf-8-sig"
+        )
+        for token in REQUIRED_SCIENTIFIC_LOCK_ACCEPTANCE_TOKENS:
+            if token not in scientific_acceptance_text:
+                violations.append(
+                    {
+                        "path": (
+                            "scripts/"
+                            "write_reviewed_scientific_dependency_hash_locks.py"
+                        ),
+                        "reason": (
+                            "scientific_dependency_lock_acceptance_contract_missing"
+                        ),
                         "token": token,
                     }
                 )

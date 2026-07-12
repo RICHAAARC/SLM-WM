@@ -203,10 +203,10 @@ def test_submission_readiness_outputs_are_rebuildable_and_claim_safe(
     assert manifest["artifact_id"] == "submission_readiness_manifest"
     assert manifest["metadata"]["readiness_decision"] == "blocked"
     assert report["submission_ready"] is False
-    assert report["release_dry_run_ready"] is True
+    assert report["release_dry_run_ready"] is False
     assert {row["required_input_id"] for row in required_rows} == {"gap_real_attacked_image_closed_loop", "gap_baseline_results"}
     assert {row["release_profile_name"] for row in release_rows} == {
-        "full_experiment_execution_package",
+        "paper_experiment_execution_package",
         "minimal_method_package",
         "paper_artifact_rebuild_package",
     }

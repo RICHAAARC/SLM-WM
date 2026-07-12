@@ -44,7 +44,7 @@
 
 五个科学 profile 的 `torch` 与 `torchvision` 必须同时出现在 profile 和直接输入文件中。二者的 `+cu*` local version、registry 中的 CUDA 版本和 PyTorch index 后缀必须完全一致。CPU 父 profile 的 CUDA、torch、torchvision 与 PyTorch index 字段必须为 `null`, 直接输入不得出现 `torch` 或 `torchvision`。
 
-六个直接输入文件当前共登记111个精确条目。父编排 profile 固定 `uv==0.11.28` 与 `huggingface_hub==1.20.1`; 后者供父 runner 下载固定 revision 的模型和 OpenCLIP 快照。五个科学执行 profile 均固定 `pip==24.3.1`、`setuptools==75.3.0` 和 `wheel==0.45.1`, 使目标环境中的安装器也进入完整锁证据。T2SMark 固定 `diffusers==0.32.0`; Gaussian Shading 固定 `scipy==1.10.1` 和 `huggingface_hub==0.25.2`。所有精确值在目标完整锁提交并通过对应 CPU 或 GPU smoke 前都只是受治理输入, 不能表述为已资格化环境。
+六个直接输入文件当前共登记111个精确条目。父编排 profile 固定 `uv==0.11.28` 与 `huggingface_hub==1.20.1`; 后者供父 runner 下载固定 revision 的模型和 OpenCLIP 快照。五个科学执行 profile 均固定 `pip==24.3.1`、`setuptools==75.3.0` 和 `wheel==0.45.1`, 使目标环境中的安装器也进入完整锁证据。T2SMark 固定 `diffusers==0.32.0`; Gaussian Shading 固定 `scipy==1.10.1`、`huggingface_hub==0.25.2` 与 `transformers==4.33.3`, 该组合保留官方代码使用的 CLIP 接口并形成可解析的 Python 3.8 wheel 闭包。所有精确值在目标完整锁提交并通过对应 CPU 或 GPU smoke 前都只是受治理输入, 不能表述为已资格化环境。
 
 ## 4. 直接输入与完整锁
 
@@ -77,7 +77,7 @@ package_name==exact_version
 
 orchestrator 候选由精确 child 直接解析, 因而不会产生“先有 orchestrator 锁才能创建 orchestrator 候选”的循环依赖。科学 profile 只有在检出的提交已经包含 orchestrator 完整锁时才能继续: child 先以 `--require-hashes` 准备 orchestrator, 再由已验证的固定 uv 创建目标 CPython 子解释器并执行同一候选物化器。host launcher 最后重新读取 child manifest 与三个候选文件; 仅有返回码0但缺少文件、摘要不一致或 profile 身份漂移都不能形成成功报告。
 
-Drive 回传后, `write_reviewed_dependency_hash_lock.py` 要求显式重复目标 profile, 并在候选生成提交对应的 clean Git HEAD 上重新验证正式代码锁、manifest、逐文件 SHA-256、pip report、全部直接输入、wheel URL、候选文本、逻辑摘要和依赖数量。接收器只允许写入 registry 登记且当前缺失的锁路径, 不覆盖已有锁、不执行 Git commit, 写入报告也不支持论文 claim。每个写入锁必须单独审查并提交; 后续资格化应检出包含已接收锁的新精确提交。
+Drive 回传后, 父编排候选由 `write_reviewed_dependency_hash_lock.py` 显式重复目标 profile, 并在候选生成提交对应的 clean Git HEAD 上重新验证正式代码锁、manifest、逐文件 SHA-256、pip report、全部直接输入、wheel URL、候选文本、逻辑摘要和依赖数量。父编排锁必须独立接收并提交, 使科学隔离解释器具备唯一可信的创建环境。随后五个科学 profile 可以基于同一新提交生成审查包, 并由 `write_reviewed_scientific_dependency_hash_locks.py` 按 registry 顺序逐项批准和原子接收。批量接收在写入前复验全部五个候选; 任一候选失败时不写任何科学锁, 任一写入失败时删除本次已写文件。两个接收器都只允许写 registry 登记且当前缺失的路径, 不覆盖已有锁、不执行 Git commit, 写入报告也不支持论文 claim。
 
 ## 5. Readiness 与完整环境 inspection
 

@@ -18,7 +18,7 @@
         "runtime": "cuda"
       },
       "complete_hash_lock_path": "configs/dependency_profiles/gaussian_shading_official_py38_cu117_lock.txt",
-      "direct_requirements_digest": "b0e8b29120b2d38609934864b47f8bf34452a8769c8f11b5e17a5079c08d3daa",
+      "direct_requirements_digest": "aaae5add5557675ac75c86f045c2e27b17b0259fccbb14e466656bbf9a5d44e1",
       "direct_requirements_path": "configs/dependency_profiles/gaussian_shading_official_py38_cu117_direct.txt",
       "execution_role": "gaussian_shading_official_reference_execution",
       "platform": {

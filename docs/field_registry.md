@@ -477,6 +477,10 @@ Notebook 与 repository module 的跨边界数据
 | isolated_python_provision | provenance | none | true | false | false | 科学 profile 候选锁物化使用的隔离 CPython provision 身份与结论。 |
 | candidate_materialization | provenance | none | true | false | false | 候选锁物化器在父解释器或科学子解释器中的完整执行记录。 |
 | diagnostic_message | runtime | none | false | false | false | 候选锁资格化或审查包写入失败时保存的诊断信息。 |
+| review_bundle_root | artifact | none | false | false | false | 五个科学依赖锁审查包共享的受治理根目录。 |
+| approved_profile_ids | governance | none | false | false | false | 批量锁接收时按 registry 顺序显式批准的五个科学 profile 标识。 |
+| profile_records | provenance | none | false | false | false | 科学依赖锁原子接收报告中逐 profile 保存的候选目录、目标锁、摘要、数量与 readiness 记录。 |
+| review_bundle_dir | artifact | none | false | false | false | 单个科学 profile 在批量接收根目录中的审查包目录。 |
 | python_version | runtime | none | false | false | false | Colab runtime 中的 Python 版本。 |
 | python_executable | runtime | none | false | false | false | 当前进程或科学会话实际使用的 Python 解释器路径。 |
 | platform | runtime | none | false | false | false | Colab runtime 的平台摘要。 |
@@ -1196,12 +1200,20 @@ Notebook 与 repository module 的跨边界数据
 | required_input_severity | governance | none | false | false | false | 投稿就绪门禁中待补齐输入的阻断严重程度。 |
 | input_ready | governance | none | false | false | false | 单个待补齐输入是否已经满足投稿冻结条件。 |
 | profile_name | governance | none | false | false | false | release 抽取配置或正式依赖 profile 的稳定名称。 |
-| root_path | governance | none | false | false | false | release 抽取 dry-run 使用的仓库根路径。 |
-| output_path | artifact | none | false | false | false | release 抽取 dry-run 指定的输出路径。 |
 | copied_files | artifact | none | false | false | false | release 抽取 dry-run 将会复制的文件清单。 |
+| copied_file_records | provenance | none | false | false | false | release 抽离 manifest 中逐文件保存的相对路径、大小与 SHA-256 记录。 |
 | missing_paths | artifact | none | false | false | false | release 抽取 dry-run 中缺失的输入路径清单。 |
 | excluded_parts | governance | none | false | false | false | release 抽取配置中排除的路径片段集合。 |
 | dry_run | governance | none | false | false | false | release 抽取或审计命令是否只执行 dry-run。 |
+| extraction_manifest_schema | governance | none | false | false | false | 可独立执行代码包抽离 manifest 的固定 schema。 |
+| source_repository_commit | provenance | none | false | false | false | 抽离代码包对应的开发仓库精确 Git 提交。 |
+| package_repository_commit | provenance | none | false | false | false | 抽离代码包内部独立 clean detached Git 根提交。 |
+| standalone_repository | governance | none | false | false | false | 抽离 profile 是否必须创建不依赖开发仓库的独立 Git 根。 |
+| complete_dependency_locks_required | governance | none | false | false | false | 抽离 profile 是否要求六个依赖 profile 全部具有完整哈希锁。 |
+| required_entrypoints | governance | none | false | false | false | 独立代码包必须能够在隔离 Python 模式启动的 CLI 相对路径集合。 |
+| entrypoint_records | provenance | none | false | false | false | 独立代码包验证报告保存的逐入口隔离启动结果。 |
+| paper_workflow_excluded | governance | none | false | false | false | 独立服务器代码包是否确认排除 Notebook 与 Colab 外层。 |
+| sha256 | provenance | none | false | false | false | 抽离 manifest 单个普通文件的实际 SHA-256。 |
 | release_profile_name | governance | none | false | false | false | 投稿就绪门禁中被审计的 release profile 名称。 |
 | release_profile_file_count | metric | none | false | false | false | 单个 release profile dry-run 中可复制文件数量。 |
 | release_profile_missing_count | metric | none | false | false | false | 单个 release profile dry-run 中缺失路径数量。 |

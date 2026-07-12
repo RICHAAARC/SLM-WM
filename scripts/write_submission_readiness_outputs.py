@@ -24,7 +24,7 @@ from paper_experiments.analysis.submission_readiness import (
     build_submission_readiness_report,
 )
 from main.core.digest import build_stable_digest
-from scripts.extract_minimal_paper_package import PROFILES, extract_profile
+from scripts.extract_release_package import PROFILES, extract_profile
 
 CONSTRUCTION_UNIT_NAME = "submission_readiness_gate"
 DEFAULT_OUTPUT_ROOT = Path("outputs/submission_readiness")

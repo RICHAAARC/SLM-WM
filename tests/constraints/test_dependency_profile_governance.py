@@ -31,6 +31,7 @@ def _copy_governance_fixture(tmp_path: Path) -> Path:
         "scripts/materialize_dependency_lock_candidate.py",
         "scripts/write_dependency_lock_review_bundle.py",
         "scripts/write_reviewed_dependency_hash_lock.py",
+        "scripts/write_reviewed_scientific_dependency_hash_locks.py",
         "docs/field_registry.md",
         "docs/builds/formal_dependency_environment.md",
     )

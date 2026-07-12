@@ -68,7 +68,18 @@ python scripts/write_reviewed_dependency_hash_lock.py \
 
 3. 提交 orchestrator 完整锁并重新检出该精确提交。此后才选择五个科学 profile; 若父锁缺失, host launcher 会在下载 wheel 或创建环境前失败。资格化 child 先按已提交哈希锁准备 orchestrator 环境, 再调用 `provision_isolated_dependency_python` 创建目标完整 CPython patch 的独立子环境, 最后由目标子解释器运行同一候选物化器。
 4. `sd35_method_runtime_gpu`、`t2smark_sd35_gpu` 与三个 official-reference profile 各自固定 Python、CUDA identity、PyTorch index 和直接依赖。锁资格化执行 `pip --dry-run` wheel 解析, 不导入 torch、不执行 CUDA, 因而可以在无 GPU 的 Linux x86_64 服务器完成; 真实安装、`pip check`、CUDA 可用性和科学运行仍必须在匹配的 Colab GPU 环境通过。
-5. 每个科学 profile 的审查包均使用同一接收命令, 并把两个 profile 参数同时改为当前目标。接收 CLI 必须在候选提交对应的同一 checkout 中运行; 它在完整审查后、写入前再次读取 HEAD 与全量 clean 状态。每次只写入一个锁并提交 Git, 后续资格化必须检出包含已接收锁的新精确提交。
+5. 父编排锁提交后, 五个科学 profile 必须从同一新提交分别生成审查包。人工审查全部五个目录后, 在该候选提交对应的同一 clean checkout 运行原子接收命令; `--approve-profile` 必须按 registry 顺序依次填写 `sd35_method_runtime_gpu`、`t2smark_sd35_gpu`、`tree_ring_official_py39_cu117`、`gaussian_shading_official_py38_cu117` 与 `shallow_diffuse_official_py39_cu117`。接收器在写入前复验全部五个候选和当前 HEAD, 只有完整集合通过时才写入锁。
+
+```bash
+python scripts/write_reviewed_scientific_dependency_hash_locks.py \
+  --review-bundle-root outputs/dependency_lock_review_transfers/scientific_profiles \
+  --approve-profile sd35_method_runtime_gpu \
+  --approve-profile t2smark_sd35_gpu \
+  --approve-profile tree_ring_official_py39_cu117 \
+  --approve-profile gaussian_shading_official_py38_cu117 \
+  --approve-profile shallow_diffuse_official_py39_cu117 \
+  --root .
+```
 
 候选锁经人工审查并提交后才具备仓库输入身份。候选审查包本身不属于论文 records、tables、figures 或支持性证据。
 

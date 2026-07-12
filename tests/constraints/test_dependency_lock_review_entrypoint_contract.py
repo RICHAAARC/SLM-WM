@@ -19,6 +19,9 @@ SCRIPT_PATH = ROOT / "scripts/write_dependency_lock_review_bundle.py"
 ACCEPTANCE_SCRIPT_PATH = (
     ROOT / "scripts/write_reviewed_dependency_hash_lock.py"
 )
+SCIENTIFIC_ACCEPTANCE_SCRIPT_PATH = (
+    ROOT / "scripts/write_reviewed_scientific_dependency_hash_locks.py"
+)
 
 
 def _notebook() -> dict[str, object]:
@@ -198,6 +201,35 @@ def test_reviewed_lock_writer_requires_explicit_profile_approval() -> None:
     source = ACCEPTANCE_SCRIPT_PATH.read_text(encoding="utf-8")
     assert 'target_path.open("xb")' in source
     assert "complete_hash_lock_already_present" in source
+    assert "git commit" not in source.lower()
+
+
+@pytest.mark.constraint
+def test_scientific_lock_writer_requires_five_explicit_approvals() -> None:
+    """科学锁接收器必须固定审查包根并逐项批准全部五个 profile."""
+
+    tree = ast.parse(SCIENTIFIC_ACCEPTANCE_SCRIPT_PATH.read_text(encoding="utf-8"))
+    argument_names = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr != "add_argument" or not node.args:
+            continue
+        first_argument = node.args[0]
+        if isinstance(first_argument, ast.Constant) and isinstance(
+            first_argument.value,
+            str,
+        ):
+            argument_names.append(first_argument.value)
+    assert argument_names == [
+        "--review-bundle-root",
+        "--approve-profile",
+        "--root",
+    ]
+    source = SCIENTIFIC_ACCEPTANCE_SCRIPT_PATH.read_text(encoding="utf-8")
+    assert "approvals != SCIENTIFIC_PROFILE_IDS" in source
+    assert 'target_path.open("xb")' in source
+    assert "for written_path in reversed(written_paths)" in source
     assert "git commit" not in source.lower()
 
 

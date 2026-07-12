@@ -17,6 +17,7 @@ from main.core.digest import build_stable_digest
 from scripts import materialize_dependency_lock_candidate as materialization
 from scripts import write_dependency_lock_review_bundle as review_bundle
 from scripts import write_reviewed_dependency_hash_lock as lock_writer
+from scripts import write_reviewed_scientific_dependency_hash_locks as scientific_writer
 
 
 COMMIT = "a" * 40
@@ -386,3 +387,82 @@ def test_receiver_cli_rejects_code_loaded_from_a_different_checkout(
     assert exit_code == 2
     payload = json.loads(capsys.readouterr().err)
     assert payload["failure_reasons"] == ["receiver_code_root_mismatch"]
+
+
+@pytest.mark.quick
+def test_scientific_receiver_atomically_writes_all_explicitly_approved_locks(
+    tmp_path: Path,
+) -> None:
+    """五个同提交审查包必须在全部复验后一次形成完整锁集合."""
+
+    _copy_dependency_configs(tmp_path)
+    bundle_root = tmp_path / "scientific_review_bundles"
+    bundle_root.mkdir()
+    for profile_id in scientific_writer.SCIENTIFIC_PROFILE_IDS:
+        generated = _write_valid_review_bundle(tmp_path, profile_id)
+        generated.rename(bundle_root / profile_id)
+
+    report, report_path = (
+        scientific_writer.write_reviewed_scientific_dependency_hash_locks(
+            bundle_root,
+            scientific_writer.SCIENTIFIC_PROFILE_IDS,
+            repository_root=tmp_path,
+            git_command_runner=_clean_git_runner,
+        )
+    )
+
+    assert report["decision"] == scientific_writer.SUCCESS_DECISION
+    assert report["supports_paper_claim"] is False
+    assert len(report["profile_records"]) == len(
+        scientific_writer.SCIENTIFIC_PROFILE_IDS
+    )
+    for record in report["profile_records"]:
+        profile = get_dependency_profile(
+            record["profile_id"],
+            tmp_path / "configs/dependency_profile_registry.json",
+        )
+        assert profile.formal_ready is True
+        assert profile.complete_hash_lock_digest == record[
+            "complete_hash_lock_digest"
+        ]
+    assert json.loads(report_path.read_text(encoding="utf-8")) == report
+
+
+@pytest.mark.quick
+def test_scientific_receiver_rejects_one_tampered_bundle_without_partial_locks(
+    tmp_path: Path,
+) -> None:
+    """任一科学候选被改写时不得写入其他四个合法锁."""
+
+    _copy_dependency_configs(tmp_path)
+    bundle_root = tmp_path / "scientific_review_bundles"
+    bundle_root.mkdir()
+    for profile_id in scientific_writer.SCIENTIFIC_PROFILE_IDS:
+        generated = _write_valid_review_bundle(tmp_path, profile_id)
+        generated.rename(bundle_root / profile_id)
+    tampered_path = (
+        bundle_root
+        / scientific_writer.SCIENTIFIC_PROFILE_IDS[-1]
+        / materialization.CANDIDATE_LOCK_FILE_NAME
+    )
+    tampered_path.write_bytes(tampered_path.read_bytes() + b"# tampered\n")
+
+    report, _ = (
+        scientific_writer.write_reviewed_scientific_dependency_hash_locks(
+            bundle_root,
+            scientific_writer.SCIENTIFIC_PROFILE_IDS,
+            repository_root=tmp_path,
+            git_command_runner=_clean_git_runner,
+        )
+    )
+
+    assert report["decision"] == "fail"
+    assert report["failure_reasons"] == [
+        "scientific_review_bundle_validation_failed"
+    ]
+    for profile_id in scientific_writer.SCIENTIFIC_PROFILE_IDS:
+        profile = get_dependency_profile(
+            profile_id,
+            tmp_path / "configs/dependency_profile_registry.json",
+        )
+        assert not (tmp_path / profile.complete_hash_lock_path).exists()

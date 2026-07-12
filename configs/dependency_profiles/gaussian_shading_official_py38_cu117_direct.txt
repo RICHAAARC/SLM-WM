@@ -13,5 +13,5 @@ setuptools==75.3.0
 torch==1.13.0+cu117
 torchvision==0.14.0+cu117
 tqdm==4.66.2
-transformers==4.34.0
+transformers==4.33.3
 wheel==0.45.1
