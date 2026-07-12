@@ -218,7 +218,26 @@ $$
 
 正式实现逐方向记录 PSD-CG 迭代数与残差、$\|J u_i^b\|_2/\|J B_b d_i^b\|_2$、投影能量保留比例，并在 QR 后重新计算每列 $\|J N_b[:,j]\|_2$。PSD-CG 不添加阻尼，最大64次迭代，相对收敛阈值为 $10^{-6}$；QR 后每列完整 Jacobian 相对残差不得超过 $10^{-4}$，能量保留比例不得低于0.01，且基底正交误差不得超过 $10^{-5}$。任一门禁失败时运行阻断。只有这些条件全部成立的记录才称为 Null Space。
 
-局部 Jacobian 零响应不能单独证明有限写回更新保持完整语义。三个分支合成后，实现对每次真正写回的 latent 重新提取完整特征；全部扩散步骤结束后，还直接比较最终 clean 与 watermarked 成图。两级门禁均要求 CLIP cosine 不低于0.995且完整视觉特征相对漂移不高于0.02。
+三个分支合成后，先按真实 latent dtype 执行写回，并显式恢复实际量化增量
+
+$$
+\Delta z_t^{\mathrm{written}}
+=
+\operatorname{cast}_{\operatorname{dtype}(z_t)}
+\left(z_t+\Delta z_t\right)-z_t.
+$$
+
+随后对该 Tensor 重新执行完整特征精确 JVP：
+
+$$
+r_{\mathrm{written}}
+=
+\frac{\left\|J_t\Delta z_t^{\mathrm{written}}\right\|_2}
+{\max\!\left(\left\|F(z_t)\right\|_2,\epsilon\right)}
+\leq10^{-4}.
+$$
+
+这一复验用于捕获 float32 Null Space 方向转换为扩散 latent dtype 后产生的响应，验证对象是实际进入 scheduler 的增量。局部 Jacobian 零响应仍不能单独证明有限写回更新保持完整语义，因此实现还对每次真正写回的 latent 重新提取完整特征；全部扩散步骤结束后，再直接比较最终 clean 与 watermarked 成图。两级有限变化门禁均要求 CLIP cosine 不低于0.995且完整视觉特征相对漂移不高于0.02。
 
 ---
 

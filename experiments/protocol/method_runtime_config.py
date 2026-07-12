@@ -50,6 +50,7 @@ class FormalMethodRuntimeConfig:
     tail_fraction: float
     minimum_projection_energy_retention: float
     maximum_relative_response_residual: float
+    maximum_quantized_write_relative_jacobian_response: float
     null_space_cg_max_iterations: int
     null_space_cg_relative_tolerance: float
     minimum_semantic_preservation_cosine: float
@@ -103,6 +104,10 @@ class FormalMethodRuntimeConfig:
             raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
         if not 0.0 < self.maximum_relative_response_residual <= 1.0:
             raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
+        if not 0.0 < self.maximum_quantized_write_relative_jacobian_response <= 1.0:
+            raise ValueError(
+                "maximum_quantized_write_relative_jacobian_response 必须位于 (0, 1]"
+            )
         if self.null_space_cg_max_iterations <= 0:
             raise ValueError("null_space_cg_max_iterations 必须为正整数")
         if not 0.0 < self.null_space_cg_relative_tolerance < 1.0:
@@ -144,6 +149,9 @@ class FormalMethodRuntimeConfig:
             "tail_fraction": self.tail_fraction,
             "minimum_projection_energy_retention": self.minimum_projection_energy_retention,
             "maximum_relative_response_residual": self.maximum_relative_response_residual,
+            "maximum_quantized_write_relative_jacobian_response": (
+                self.maximum_quantized_write_relative_jacobian_response
+            ),
             "null_space_cg_max_iterations": self.null_space_cg_max_iterations,
             "null_space_cg_relative_tolerance": (
                 self.null_space_cg_relative_tolerance
@@ -226,6 +234,9 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         "SLM_WM_TAIL_FRACTION": str(config.tail_fraction),
         "SLM_WM_MINIMUM_PROJECTION_ENERGY_RETENTION": str(config.minimum_projection_energy_retention),
         "SLM_WM_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL": str(config.maximum_relative_response_residual),
+        "SLM_WM_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE": str(
+            config.maximum_quantized_write_relative_jacobian_response
+        ),
         "SLM_WM_NULL_SPACE_CG_MAX_ITERATIONS": str(
             config.null_space_cg_max_iterations
         ),

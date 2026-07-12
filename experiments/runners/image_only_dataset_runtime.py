@@ -439,6 +439,32 @@ def _scientific_update_record_ready(
             for value in cg_residuals
         ):
             return False
+    quantized_update_sha256 = str(
+        record.get("quantized_write_update_content_sha256", "")
+    )
+    quantized_relative_response = record.get(
+        "quantized_write_relative_jacobian_response"
+    )
+    if (
+        len(quantized_update_sha256) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in quantized_update_sha256
+        )
+        or record.get("quantized_write_jacobian_gate_applicable") is not True
+        or record.get("quantized_write_jacobian_gate_ready") is not True
+        or record.get("quantized_write_jacobian_status")
+        != "measured_from_actual_quantized_latent_delta"
+        or not isinstance(quantized_relative_response, (int, float))
+        or not math.isfinite(float(quantized_relative_response))
+        or float(quantized_relative_response)
+        > config.maximum_quantized_write_relative_jacobian_response
+        or record.get(
+            "maximum_quantized_write_relative_jacobian_response"
+        )
+        != config.maximum_quantized_write_relative_jacobian_response
+    ):
+        return False
     if not finite_at_least(
         record.get("lf_projection_energy_retention"),
         config.minimum_projection_energy_retention,

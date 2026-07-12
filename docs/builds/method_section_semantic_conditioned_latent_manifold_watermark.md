@@ -194,7 +194,25 @@ $$
 
 正式记录必须保存完整特征 schema、每列 CG 迭代数和收敛残差、约束投影能量、QR 后逐列完整 Jacobian 响应与正交误差。CG 阻尼固定为0，最多64次迭代且相对收敛阈值为 $10^{-6}$；QR 后每列相对响应不得超过 $10^{-4}$，能量保留比例不得低于0.01，正交误差不得超过 $10^{-5}$。任一条件失败时直接停止运行。
 
-在三个分支合成为实际写回更新后，运行时对每次实际写回执行完整特征有限更新复验；全部扩散步骤结束后，还直接比较最终 clean 与 watermarked 成图。两级门禁均要求 CLIP cosine 不低于0.995且完整视觉特征相对漂移不高于0.02。
+三个分支合成后，先按扩散 latent 的真实存储 dtype 执行加法，再从实际写回值恢复量化增量
+
+$$
+\Delta z_t^{\mathrm{written}}
+=
+\operatorname{cast}_{\operatorname{dtype}(z_t)}
+\left(z_t+\Delta z_t\right)-z_t.
+$$
+
+运行时必须对该实际量化增量重新执行完整特征精确 JVP，并计算
+
+$$
+r_{\mathrm{written}}
+=
+\frac{\left\|J_t\Delta z_t^{\mathrm{written}}\right\|_2}
+{\max\!\left(\left\|F(z_t)\right\|_2,\epsilon\right)}.
+$$
+
+当前冻结阈值要求 $r_{\mathrm{written}}\leq10^{-4}$。该门禁直接约束真正进入 scheduler 的低精度 Tensor，不能由量化前方向的 Null Space 残差替代。随后，运行时还对每次实际写回执行完整特征有限更新复验；全部扩散步骤结束后，再直接比较最终 clean 与 watermarked 成图。两级有限变化门禁均要求 CLIP cosine 不低于0.995且完整视觉特征相对漂移不高于0.02。
 
 ---
 

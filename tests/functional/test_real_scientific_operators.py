@@ -354,6 +354,16 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         ),
         "attention_relation_component_identity_digest": "b" * 64,
         "attention_relation_keyed_projection_digest": "c" * 64,
+        "quantized_write_update_content_sha256": "d" * 64,
+        "quantized_write_jacobian_gate_applicable": True,
+        "quantized_write_jacobian_response_norm": 1e-5,
+        "quantized_write_reference_feature_norm": 1.0,
+        "quantized_write_relative_jacobian_response": 1e-5,
+        "maximum_quantized_write_relative_jacobian_response": 1e-4,
+        "quantized_write_jacobian_gate_ready": True,
+        "quantized_write_jacobian_status": (
+            "measured_from_actual_quantized_latent_delta"
+        ),
         "full_semantic_cosine_similarity": 0.999,
         "full_visual_feature_relative_drift": 0.001,
         "semantic_preservation_gate_ready": True,
@@ -365,6 +375,9 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     assert _scientific_update_record_ready(record, config) is False
     record["attention_score_gain"] = 0.01
     record["full_semantic_cosine_similarity"] = 0.9
+    assert _scientific_update_record_ready(record, config) is False
+    record["full_semantic_cosine_similarity"] = 0.999
+    record["quantized_write_relative_jacobian_response"] = 1e-3
     assert _scientific_update_record_ready(record, config) is False
 
 

@@ -23,6 +23,7 @@ minimum_final_image_attention_score_gain: 0.0001
 tail_fraction: 0.20
 minimum_projection_energy_retention: 0.01
 maximum_relative_response_residual: 0.0001
+maximum_quantized_write_relative_jacobian_response: 0.0001
 null_space_cg_max_iterations: 64
 null_space_cg_relative_tolerance: 0.000001
 minimum_semantic_preservation_cosine: 0.995

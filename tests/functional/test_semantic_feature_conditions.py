@@ -25,6 +25,7 @@ from experiments.runners.semantic_watermark_runtime import (
     _final_image_attention_attribution_gate_ready,
     _final_image_attention_observability_record,
     _final_image_preservation_record,
+    _quantized_write_jacobian_response_record,
     _tensor_content_sha256,
     _three_way_final_image_preservation_records,
 )
@@ -113,6 +114,33 @@ def _counterfactual_update_records(
                 "latent_content_sha256_before": before_sha,
                 "latent_content_sha256_after": "9" * 64,
                 "combined_update_content_sha256": "a" * 64,
+                "quantized_write_update_content_sha256": "c" * 64,
+                "quantized_write_update_dtype": "torch.float16",
+                "quantized_write_update_shape": [1, 16, 64, 64],
+                "quantized_write_update_norm": 0.01,
+                "maximum_quantized_write_relative_jacobian_response": (
+                    config.maximum_quantized_write_relative_jacobian_response
+                ),
+                "quantized_write_jacobian_gate_applicable": (
+                    config.null_space_enabled
+                ),
+                "quantized_write_jacobian_response_norm": (
+                    1e-5 if config.null_space_enabled else None
+                ),
+                "quantized_write_reference_feature_norm": (
+                    1.0 if config.null_space_enabled else None
+                ),
+                "quantized_write_relative_jacobian_response": (
+                    1e-5 if config.null_space_enabled else None
+                ),
+                "quantized_write_jacobian_gate_ready": (
+                    config.null_space_enabled
+                ),
+                "quantized_write_jacobian_status": (
+                    "measured_from_actual_quantized_latent_delta"
+                    if config.null_space_enabled
+                    else "not_applicable_jacobian_null_space_disabled"
+                ),
                 "active_carrier_branches": list(branches),
                 "null_space_records": {
                     branch_name: {"branch_name": branch_name}
@@ -286,6 +314,70 @@ def test_tensor_content_sha256_binds_dtype_shape_and_raw_bytes() -> None:
     assert _tensor_content_sha256(noncontiguous) == _tensor_content_sha256(
         noncontiguous.contiguous()
     )
+
+
+@pytest.mark.quick
+def test_quantized_write_jacobian_gate_rechecks_actual_float16_delta() -> None:
+    """实际写回门禁必须对量化后增量重新执行完整 JVP。"""
+
+    latent = torch.tensor([1.0, 2.0], dtype=torch.float16)
+
+    def feature_function(values: torch.Tensor) -> torch.Tensor:
+        """只让第一个 latent 坐标改变完整特征。"""
+
+        return values[:1]
+
+    null_injected = latent + torch.tensor(
+        [0.0, 0.125],
+        dtype=torch.float16,
+    )
+    responsive_injected = latent + torch.tensor(
+        [0.125, 0.0],
+        dtype=torch.float16,
+    )
+    accepted = _quantized_write_jacobian_response_record(
+        feature_function,
+        latent,
+        null_injected,
+        1e-4,
+    )
+    rejected = _quantized_write_jacobian_response_record(
+        feature_function,
+        latent,
+        responsive_injected,
+        1e-4,
+    )
+
+    assert accepted["quantized_write_jacobian_gate_applicable"] is True
+    assert accepted["quantized_write_jacobian_gate_ready"] is True
+    assert accepted["quantized_write_jacobian_response_norm"] == pytest.approx(
+        0.0,
+        abs=1e-12,
+    )
+    assert accepted["quantized_write_update_content_sha256"] == (
+        _tensor_content_sha256(null_injected - latent)
+    )
+    assert rejected["quantized_write_jacobian_gate_ready"] is False
+    assert rejected["quantized_write_relative_jacobian_response"] > 1e-4
+
+
+@pytest.mark.quick
+def test_quantized_write_jacobian_gate_rejects_update_lost_to_quantization() -> None:
+    """量化后增量变为零时不得误用量化前更新通过门禁。"""
+
+    latent = torch.tensor([2048.0], dtype=torch.float16)
+    proposed = torch.tensor([0.25], dtype=torch.float32)
+    injected = latent + proposed.to(dtype=latent.dtype)
+    record = _quantized_write_jacobian_response_record(
+        lambda values: values,
+        latent,
+        injected,
+        1e-4,
+    )
+
+    assert float((injected - latent).abs().max().item()) == 0.0
+    assert record["quantized_write_update_norm"] == 0.0
+    assert record["quantized_write_jacobian_gate_ready"] is False
 
 
 @pytest.mark.quick
@@ -721,6 +813,20 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
             carrier_config,
             full_records,
             initial_latent_drift,
+        )
+
+    quantized_gate_drift = _counterfactual_update_records(
+        full_config,
+        role="carrier_only_counterfactual",
+        attention_enabled=False,
+    )
+    quantized_gate_drift[0]["quantized_write_jacobian_gate_ready"] = False
+    with pytest.raises(RuntimeError, match="实际量化写回 Jacobian 门禁"):
+        _carrier_only_counterfactual_identity(
+            full_config,
+            carrier_config,
+            full_records,
+            quantized_gate_drift,
         )
 
     attention_atom_drift = _counterfactual_update_records(

@@ -48,6 +48,9 @@ DEFAULT_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN = (
 DEFAULT_TAIL_FRACTION = _FORMAL_METHOD_DEFAULTS.tail_fraction
 DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION = _FORMAL_METHOD_DEFAULTS.minimum_projection_energy_retention
 DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL = _FORMAL_METHOD_DEFAULTS.maximum_relative_response_residual
+DEFAULT_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE = (
+    _FORMAL_METHOD_DEFAULTS.maximum_quantized_write_relative_jacobian_response
+)
 DEFAULT_NULL_SPACE_CG_MAX_ITERATIONS = (
     _FORMAL_METHOD_DEFAULTS.null_space_cg_max_iterations
 )
@@ -76,6 +79,7 @@ SHARED_METHOD_SETTING_FIELDS = (
     "tail_fraction",
     "minimum_projection_energy_retention",
     "maximum_relative_response_residual",
+    "maximum_quantized_write_relative_jacobian_response",
     "null_space_cg_max_iterations",
     "null_space_cg_relative_tolerance",
     "minimum_semantic_preservation_cosine",
@@ -149,6 +153,9 @@ class PaperRunConfig:
     tail_fraction: float = DEFAULT_TAIL_FRACTION
     minimum_projection_energy_retention: float = DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION
     maximum_relative_response_residual: float = DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL
+    maximum_quantized_write_relative_jacobian_response: float = (
+        DEFAULT_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE
+    )
     null_space_cg_max_iterations: int = DEFAULT_NULL_SPACE_CG_MAX_ITERATIONS
     null_space_cg_relative_tolerance: float = (
         DEFAULT_NULL_SPACE_CG_RELATIVE_TOLERANCE
@@ -191,6 +198,10 @@ class PaperRunConfig:
             raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
         if not 0.0 < self.maximum_relative_response_residual <= 1.0:
             raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
+        if not 0.0 < self.maximum_quantized_write_relative_jacobian_response <= 1.0:
+            raise ValueError(
+                "maximum_quantized_write_relative_jacobian_response 必须位于 (0, 1]"
+            )
         if self.null_space_cg_max_iterations <= 0:
             raise ValueError("null_space_cg_max_iterations 必须为正整数")
         if not 0.0 < self.null_space_cg_relative_tolerance < 1.0:

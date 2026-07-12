@@ -63,6 +63,7 @@ from main.methods.semantic import BranchRiskConfig, build_branch_risk_fields
 from main.methods.subspace import (
     ExactJacobianLinearization,
     build_exact_jacobian_linearization,
+    exact_jvp,
     generate_keyed_candidate_directions,
     solve_jacobian_null_space,
 )
@@ -112,6 +113,9 @@ class SemanticWatermarkRuntimeConfig:
     tail_fraction: float = _FORMAL_METHOD_CONFIG.tail_fraction
     minimum_projection_energy_retention: float = _FORMAL_METHOD_CONFIG.minimum_projection_energy_retention
     maximum_relative_response_residual: float = _FORMAL_METHOD_CONFIG.maximum_relative_response_residual
+    maximum_quantized_write_relative_jacobian_response: float = (
+        _FORMAL_METHOD_CONFIG.maximum_quantized_write_relative_jacobian_response
+    )
     null_space_cg_max_iterations: int = (
         _FORMAL_METHOD_CONFIG.null_space_cg_max_iterations
     )
@@ -183,6 +187,10 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
         if not 0.0 < self.maximum_relative_response_residual <= 1.0:
             raise ValueError("maximum_relative_response_residual 必须位于 (0, 1]")
+        if not 0.0 < self.maximum_quantized_write_relative_jacobian_response <= 1.0:
+            raise ValueError(
+                "maximum_quantized_write_relative_jacobian_response 必须位于 (0, 1]"
+            )
         if self.null_space_cg_max_iterations <= 0:
             raise ValueError("null_space_cg_max_iterations 必须为正整数")
         if not 0.0 < self.null_space_cg_relative_tolerance < 1.0:
@@ -865,6 +873,87 @@ def _feature_preservation_values(
         and visual_relative_drift <= config.maximum_visual_feature_relative_drift
     )
     return semantic_cosine, visual_relative_drift, ready
+
+
+def _quantized_write_jacobian_response_record(
+    feature_function: Any | None,
+    latent: Any,
+    injected: Any,
+    maximum_relative_response: float,
+) -> dict[str, Any]:
+    """复验实际量化写回 Tensor 的完整特征 Jacobian 响应。
+
+    Null Space 基底在 float32 中求解, 但扩散 latent 通常使用 float16。该函数
+    先按真实 latent dtype 完成加法, 再以 ``written_latent - latent`` 恢复实际
+    写入增量。相对响应以当前完整特征向量二范数归一化, 因而直接表示一阶
+    特征变化相对于当前语义与视觉状态的比例。该门禁验证量化后的写回对象,
+    不能由量化前的分支方向或有限更新保持记录替代。
+    """
+
+    import torch
+
+    if not 0.0 < maximum_relative_response <= 1.0:
+        raise ValueError("实际写回 Jacobian 相对响应阈值必须位于 (0, 1]")
+    if tuple(latent.shape) != tuple(injected.shape):
+        raise ValueError("实际写回前后的 latent 形状必须一致")
+    quantized_latent = injected.detach().to(dtype=latent.dtype)
+    quantized_update = quantized_latent - latent.detach()
+    update_norm = float(torch.linalg.norm(quantized_update.float()).item())
+    base_record = {
+        "quantized_write_update_content_sha256": _tensor_content_sha256(
+            quantized_update
+        ),
+        "quantized_write_update_dtype": str(quantized_update.dtype),
+        "quantized_write_update_shape": [
+            int(value) for value in quantized_update.shape
+        ],
+        "quantized_write_update_norm": update_norm,
+        "maximum_quantized_write_relative_jacobian_response": (
+            maximum_relative_response
+        ),
+    }
+    if feature_function is None:
+        return {
+            **base_record,
+            "quantized_write_jacobian_gate_applicable": False,
+            "quantized_write_jacobian_response_norm": None,
+            "quantized_write_reference_feature_norm": None,
+            "quantized_write_relative_jacobian_response": None,
+            "quantized_write_jacobian_gate_ready": False,
+            "quantized_write_jacobian_status": (
+                "not_applicable_jacobian_null_space_disabled"
+            ),
+        }
+    primal, response = exact_jvp(
+        feature_function,
+        latent.detach().float(),
+        quantized_update.float(),
+    )
+    response = response.detach().float()
+    response_norm = float(torch.linalg.norm(response).item())
+    reference_feature_norm = float(
+        torch.linalg.norm(primal.detach().float()).item()
+    )
+    relative_response = response_norm / max(reference_feature_norm, 1e-12)
+    ready = bool(
+        math.isfinite(update_norm)
+        and update_norm > 0.0
+        and math.isfinite(response_norm)
+        and math.isfinite(reference_feature_norm)
+        and math.isfinite(relative_response)
+        and relative_response <= maximum_relative_response
+    )
+    return {
+        **base_record,
+        "quantized_write_jacobian_gate_applicable": True,
+        "quantized_write_jacobian_response_norm": response_norm,
+        "quantized_write_reference_feature_norm": reference_feature_norm,
+        "quantized_write_relative_jacobian_response": relative_response,
+        "quantized_write_jacobian_gate_ready": ready,
+        "quantized_write_jacobian_status": (
+            "measured_from_actual_quantized_latent_delta"
+        ),
+    }
 
 
 def _combined_update_preservation_record(
@@ -1561,6 +1650,7 @@ def _carrier_only_counterfactual_identity(
         "latent_content_sha256_before",
         "latent_content_sha256_after",
         "combined_update_content_sha256",
+        "quantized_write_update_content_sha256",
     )
 
     def validate_common_record(
@@ -1592,6 +1682,32 @@ def _carrier_only_counterfactual_identity(
                 character not in "0123456789abcdef" for character in value
             ):
                 raise RuntimeError("反事实更新原子缺少完整 tensor 内容 SHA-256")
+        quantized_gate_applicable = record.get(
+            "quantized_write_jacobian_gate_applicable"
+        )
+        quantized_gate_ready = record.get(
+            "quantized_write_jacobian_gate_ready"
+        )
+        if full_config.null_space_enabled:
+            relative_response = record.get(
+                "quantized_write_relative_jacobian_response"
+            )
+            if (
+                quantized_gate_applicable is not True
+                or quantized_gate_ready is not True
+                or not isinstance(relative_response, (int, float))
+                or not math.isfinite(float(relative_response))
+                or float(relative_response)
+                > full_config.maximum_quantized_write_relative_jacobian_response
+            ):
+                raise RuntimeError("反事实更新原子的实际量化写回 Jacobian 门禁无效")
+        elif (
+            quantized_gate_applicable is not False
+            or quantized_gate_ready is not False
+            or record.get("quantized_write_jacobian_status")
+            != "not_applicable_jacobian_null_space_disabled"
+        ):
+            raise RuntimeError("Null Space 消融错误声明实际量化写回 Jacobian 门禁")
 
     for full_record in full_update_records:
         validate_common_record(
@@ -2064,6 +2180,27 @@ def run_semantic_watermark_runtime(
                         "attention_relation_qk_operator_metadata_digest": "",
                         "attention_relation_qk_operator_metadata_ready": False,
                     }
+                quantized_write_jacobian_record = (
+                    _quantized_write_jacobian_response_record(
+                        (
+                            feature_runtime.full_joint_feature_vector
+                            if active_injection_config.null_space_enabled
+                            else None
+                        ),
+                        latent,
+                        injected,
+                        active_injection_config.maximum_quantized_write_relative_jacobian_response,
+                    )
+                )
+                if (
+                    active_injection_config.null_space_enabled
+                    and not quantized_write_jacobian_record[
+                        "quantized_write_jacobian_gate_ready"
+                    ]
+                ):
+                    raise RuntimeError(
+                        "实际量化写回 Tensor 的完整 Jacobian 相对响应超过正式门禁"
+                    )
                 preservation_record = _combined_update_preservation_record(
                     feature_runtime,
                     latent,
@@ -2115,6 +2252,7 @@ def run_semantic_watermark_runtime(
                 "tail_threshold": tail_threshold,
                 "tail_retained_fraction": retained_fraction,
                 **attention_record,
+                **quantized_write_jacobian_record,
                 **preservation_record,
                 "metadata": {
                     "jvp_mode": jvp_modes[0] if len(jvp_modes) == 1 else "disabled_or_mixed",

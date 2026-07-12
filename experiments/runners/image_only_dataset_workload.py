@@ -76,6 +76,9 @@ def build_method_config(
             method.minimum_projection_energy_retention
         ),
         maximum_relative_response_residual=method.maximum_relative_response_residual,
+        maximum_quantized_write_relative_jacobian_response=(
+            method.maximum_quantized_write_relative_jacobian_response
+        ),
         null_space_cg_max_iterations=method.null_space_cg_max_iterations,
         null_space_cg_relative_tolerance=(
             method.null_space_cg_relative_tolerance

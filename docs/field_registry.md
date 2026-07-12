@@ -1756,6 +1756,17 @@ Notebook 与 repository module 的跨边界数据
 | minimum_projection_energy_retention | protocol | none | true | false | false | 固定盲检模板投影到语义安全子空间后必须保留的最小能量比例。 |
 | relative_response_residual | metric | none | true | true | false | QR 后 Null Space 基底逐列完整 Jacobian 相对响应残差的最大值。 |
 | maximum_relative_response_residual | protocol | none | true | false | false | QR 后完整 Jacobian Null Space 基底逐列允许的最大相对响应残差。 |
+| maximum_quantized_write_relative_jacobian_response | protocol | none | true | false | false | 实际量化写回增量的完整特征 Jacobian 响应相对当前完整特征范数允许的最大比例。 |
+| quantized_write_update_content_sha256 | provenance | none | true | true | false | 按真实 latent dtype 写回后, `written_latent - latent` Tensor 的 dtype、shape 与连续原始字节内容摘要。 |
+| quantized_write_update_dtype | provenance | none | true | true | false | 实际量化写回增量的 Tensor dtype。 |
+| quantized_write_update_shape | provenance | none | true | true | false | 实际量化写回增量的 Tensor shape。 |
+| quantized_write_update_norm | metric | none | true | true | false | 实际量化写回增量转换为 float32 后的二范数。 |
+| quantized_write_jacobian_gate_applicable | governance | none | true | true | false | 当前机制配置是否启用 Jacobian Null Space 并要求实际量化写回精确 JVP 门禁。 |
+| quantized_write_jacobian_response_norm | metric | none | true | true | false | 对实际量化写回增量重新执行完整特征精确 JVP 得到的响应二范数。 |
+| quantized_write_reference_feature_norm | metric | none | true | true | false | 实际量化写回 Jacobian 响应归一化所使用的当前完整特征二范数。 |
+| quantized_write_relative_jacobian_response | metric | none | true | true | false | 实际量化写回 Jacobian 响应范数相对当前完整特征范数的比例。 |
+| quantized_write_jacobian_gate_ready | governance | none | true | true | false | 实际量化写回增量是否非零、有限且通过冻结的完整特征 Jacobian 响应门禁。 |
+| quantized_write_jacobian_status | governance | none | true | true | false | 实际量化写回 Jacobian 门禁的精确测量状态或 Null Space 消融不适用状态。 |
 | scientific_update_record_count | metric | none | true | false | false | 数据集正式运行实际生成的关键科学算子注入记录数量。 |
 | expected_scientific_update_record_count | metric | none | true | false | false | Prompt 数量乘以冻结注入时刻数量得到的预期科学算子记录数。 |
 | scientific_operator_failure_count | metric | none | true | false | false | 未通过精确 JVP、残差、正交性、载体能量或 Q/K 单调提升检查的注入记录数。 |
