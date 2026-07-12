@@ -28,7 +28,6 @@ from paper_experiments.baselines import (
 from paper_experiments.baselines.gaussian_shading_official_reference import REQUIRED_METRIC_FIELDS
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from paper_experiments.runners.external_source_runtime import (
-    bind_successful_official_command_execution_evidence,
     build_registered_source_patch_evidence,
     inspect_cuda_with_python_executable,
     load_baseline_registry_item,
@@ -40,7 +39,6 @@ from experiments.runtime.progress import (
     call_runner_with_progress_status,
     emit_progress_status,
     progress_bar,
-    run_quiet_subprocess_with_progress,
     update_progress,
 )
 from experiments.runtime.archive_naming import utc_archive_token
@@ -72,6 +70,14 @@ from paper_experiments.runners.openclip_checkpoint_runtime import (
     OPENCLIP_USAGE_ROLE,
     write_openclip_checkpoint_report,
 )
+from paper_experiments.runners.official_reference_unit_runtime import (
+    DEFAULT_OFFICIAL_REFERENCE_UNIT_BATCH_SIZE,
+    aggregate_gaussian_shading_unit_observations,
+    run_official_reference_unit_schedule,
+    validate_official_reference_package_root_exact_set,
+    validate_official_reference_scientific_config_and_commands,
+    validate_persisted_official_reference_units,
+)
 
 DEFAULT_OUTPUT_DIR = "outputs/gaussian_shading_official_reference"
 DEFAULT_DRIVE_OUTPUT_DIR = ""
@@ -79,6 +85,34 @@ DEFAULT_SOURCE_DIR = "external_baseline/primary/gaussian_shading/source"
 EXPECTED_PATCHED_SOURCE_PATHS = (
     "optim_utils.py",
     "run_gaussian_shading.py",
+)
+GAUSSIAN_SHADING_PACKAGE_GENERATED_FILE_NAMES = frozenset(
+    {
+        "gaussian_shading_official_reference_package_input_manifest.json",
+        "gaussian_shading_official_reference_archive_summary.json",
+        "gaussian_shading_official_reference_archive_manifest.local.json",
+    }
+)
+GAUSSIAN_SHADING_PACKAGE_ROOT_FILE_WHITELIST = frozenset(
+    {
+        "gaussian_shading_official_command_result.json",
+        "gaussian_shading_official_source_prepare_result.json",
+        "gaussian_shading_official_source_patch_result.json",
+        "gaussian_shading_model_repository_prepare_result.json",
+        "gaussian_shading_openclip_checkpoint_prepare_result.json",
+        "gaussian_shading_dependency_environment_prepare_result.json",
+        "gaussian_shading_official_stdout.txt",
+        "gaussian_shading_official_stderr.txt",
+        "gaussian_shading_official_metric_summary.json",
+        "gaussian_shading_official_reference_schema.json",
+        "gaussian_shading_official_reference_records.jsonl",
+        "gaussian_shading_official_reference_validation_report.json",
+        "gaussian_shading_official_reference_environment_report.json",
+        "gaussian_shading_official_reference_summary.json",
+        "manifest.local.json",
+        "official_output/Identity.txt",
+        *GAUSSIAN_SHADING_PACKAGE_GENERATED_FILE_NAMES,
+    }
 )
 DEFAULT_RUN_NAME = "gaussian_shading_official_reference"
 DEFAULT_SAMPLE_COUNT = 700
@@ -110,6 +144,8 @@ class GaussianShadingOfficialReferenceConfig:
     source_dir: str = DEFAULT_SOURCE_DIR
     run_name: str = DEFAULT_RUN_NAME
     sample_count: int = DEFAULT_SAMPLE_COUNT
+    start_index: int = 0
+    unit_batch_size: int = DEFAULT_OFFICIAL_REFERENCE_UNIT_BATCH_SIZE
     official_output_subdir: str = DEFAULT_OUTPUT_SUBDIR
     official_model_id: str = DEFAULT_OFFICIAL_MODEL_ID
     official_model_revision: str = DEFAULT_OFFICIAL_MODEL_REVISION
@@ -153,6 +189,8 @@ class GaussianShadingOfficialReferenceConfig:
             raise ValueError("Gaussian Shading OpenCLIP 预训练参数必须指向登记的本地 checkpoint")
         if self.dependency_profile_id != DEFAULT_DEPENDENCY_PROFILE_ID:
             raise ValueError("Gaussian Shading 正式参考必须使用固定依赖 profile")
+        if int(self.unit_batch_size) != DEFAULT_OFFICIAL_REFERENCE_UNIT_BATCH_SIZE:
+            raise ValueError("Gaussian Shading 正式参考必须使用预注册的10-Prompt原子批次")
 
 
 @dataclass(frozen=True)
@@ -243,6 +281,8 @@ def output_paths(root_path: Path, config: GaussianShadingOfficialReferenceConfig
         "official_stdout": output_dir / "gaussian_shading_official_stdout.txt",
         "official_stderr": output_dir / "gaussian_shading_official_stderr.txt",
         "official_metric_summary": output_dir / "gaussian_shading_official_metric_summary.json",
+        "scientific_unit_dir": output_dir / "scientific_units",
+        "scientific_unit_workspace_root": output_dir / "scientific_unit_workspace",
         "reference_schema": output_dir / "gaussian_shading_official_reference_schema.json",
         "reference_records": output_dir / "gaussian_shading_official_reference_records.jsonl",
         "reference_validation": output_dir / "gaussian_shading_official_reference_validation_report.json",
@@ -393,6 +433,86 @@ def patch_gaussian_shading_model_repository_layout(
     optim_before_digest = file_digest(optim_utils_path)
     patched_source_text = source_text
     patched_optim_text = optim_text
+    unit_import_marker = "# SLM-WM: 仅添加原子科学单元记录, 不改变 Gaussian Shading 算子."
+    unit_import_anchor = "from watermark import *\n"
+    unit_import_replacement = (
+        "from watermark import *\n"
+        "import hashlib\n"
+        "import os\n"
+        f"{unit_import_marker}\n"
+        "from paper_experiments.runners.official_reference_unit_runtime import (\n"
+        "    build_irreversible_random_material_digest,\n"
+        "    write_official_reference_source_unit_payload,\n"
+        ")\n"
+    )
+    if unit_import_marker not in patched_source_text and unit_import_anchor in patched_source_text:
+        patched_source_text = patched_source_text.replace(unit_import_anchor, unit_import_replacement, 1)
+        report["patch_items"].append("emit_atomic_scientific_unit_import")
+
+    unit_list_marker = "# SLM-WM: 收集逐 Prompt 原始科学观测."
+    unit_list_anchor = "    #CLIP Scores\n    clip_scores = []\n"
+    unit_list_replacement = (
+        "    #CLIP Scores\n"
+        "    clip_scores = []\n"
+        f"    {unit_list_marker}\n"
+        "    scientific_observations = []\n"
+    )
+    if unit_list_marker not in patched_source_text and unit_list_anchor in patched_source_text:
+        patched_source_text = patched_source_text.replace(unit_list_anchor, unit_list_replacement, 1)
+        report["patch_items"].append("collect_prompt_level_scientific_observations")
+
+    unit_range_marker = "# SLM-WM: 仅增加外层预注册索引范围, 不改变样本内方法逻辑."
+    unit_range_anchor = "    for i in tqdm(range(args.num)):\n"
+    unit_range_replacement = (
+        f"    {unit_range_marker}\n"
+        "    scientific_start_index = int(os.environ.get('SLM_WM_OFFICIAL_START_INDEX', '0'))\n"
+        "    for i in tqdm(range(scientific_start_index, scientific_start_index + args.num)):\n"
+    )
+    if unit_range_marker not in patched_source_text and unit_range_anchor in patched_source_text:
+        patched_source_text = patched_source_text.replace(unit_range_anchor, unit_range_replacement, 1)
+        report["patch_items"].append("pre_registered_prompt_range")
+
+    unit_observation_marker = "# SLM-WM: key 和 nonce 仅保存不可逆摘要."
+    unit_observation_anchor = "        clip_scores.append(clip_socre)\n"
+    unit_observation_replacement = (
+        "        clip_scores.append(clip_socre)\n"
+        f"        {unit_observation_marker}\n"
+        "        scientific_observations.append({\n"
+        "            'prompt_index': i,\n"
+        "            'prompt_digest': hashlib.sha256(current_prompt.encode('utf-8')).hexdigest(),\n"
+        "            'prompt_seed_random': seed,\n"
+        "            'bit_accuracy': float(acc_metric),\n"
+        "            'clip_score': float(clip_socre),\n"
+        "            'detection_hit': bool(acc_metric >= watermark.tau_onebit),\n"
+        "            'traceability_hit': bool(acc_metric >= watermark.tau_bits),\n"
+        "            'random_material_digest_random': build_irreversible_random_material_digest(\n"
+        "                watermark.key, watermark.nonce, watermark.watermark\n"
+        "            ),\n"
+        "        })\n"
+    )
+    if unit_observation_marker not in patched_source_text and unit_observation_anchor in patched_source_text:
+        patched_source_text = patched_source_text.replace(unit_observation_anchor, unit_observation_replacement, 1)
+        report["patch_items"].append("emit_prompt_level_scientific_observations")
+
+    unit_output_marker = "# SLM-WM: 只有完整批次完成后才原子发布科学单元."
+    unit_output_anchor = "    save_metrics(args, tpr_detection, tpr_traceability, acc, clip_scores)\n"
+    unit_output_replacement = (
+        "    save_metrics(args, tpr_detection, tpr_traceability, acc, clip_scores)\n"
+        f"    {unit_output_marker}\n"
+        "    write_official_reference_source_unit_payload(\n"
+        "        baseline_id='gaussian_shading',\n"
+        "        observations=scientific_observations,\n"
+        "        random_identity_random={\n"
+        "            'sample_random_material_digests_random': [\n"
+        "                item['random_material_digest_random'] for item in scientific_observations\n"
+        "            ],\n"
+        "        },\n"
+        "        torch_module=torch,\n"
+        "    )\n"
+    )
+    if unit_output_marker not in patched_source_text and unit_output_anchor in patched_source_text:
+        patched_source_text = patched_source_text.replace(unit_output_anchor, unit_output_replacement, 1)
+        report["patch_items"].append("atomic_scientific_unit_publish")
     marker = "# SLM-WM: 公开镜像没有 fp16 分支, 因此从 main 分支加载模型权重。"
     target = "            revision='fp16',\n"
     if marker not in patched_source_text and target in patched_source_text:
@@ -412,6 +532,21 @@ def patch_gaussian_shading_model_repository_layout(
             )
     if patched_optim_text != optim_text:
         report["patch_items"].append("pin_prompt_dataset_revision")
+
+    source_unit_output_ready = all(
+        marker in patched_source_text
+        for marker in (
+            unit_import_marker,
+            unit_list_marker,
+            unit_range_marker,
+            unit_observation_marker,
+            unit_output_marker,
+        )
+    )
+    report["source_unit_output_ready"] = source_unit_output_ready
+    if not source_unit_output_ready:
+        write_json(paths["source_patch_result"], report)
+        raise RuntimeError("Gaussian Shading 原子科学单元源码补丁后置条件未满足")
 
     if patched_source_text == source_text and patched_optim_text == optim_text:
         report.update(
@@ -689,8 +824,13 @@ def run_official_command(
     dependency_python_executable: str | Path,
     progress: object | None = None,
     device_report: dict[str, Any] | None = None,
+    formal_execution_lock: dict[str, Any] | None = None,
+    source_identity_status: dict[str, Any] | None = None,
+    dependency_environment_report: dict[str, Any] | None = None,
+    model_repository_report: dict[str, Any] | None = None,
+    openclip_checkpoint_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """执行本次 Gaussian Shading 官方命令并保存独立运行证据."""
+    """验证并补齐 Gaussian Shading 原子批次, 再复算完整指标."""
 
     paths["official_metric_text"].unlink(missing_ok=True)
     resolved_device_report = device_report or inspect_cuda_with_python_executable(
@@ -734,31 +874,99 @@ def run_official_command(
         }
         write_json(paths["official_command_result"], result)
         return result
-    paths["official_output_dir"].mkdir(parents=True, exist_ok=True)
-    command = build_official_command(
-        root_path,
-        config,
-        paths,
-        dependency_python_executable,
-    )
     source_dir = (root_path / config.source_dir).resolve()
-    env = os.environ.copy()
-    env.setdefault("WANDB_MODE", "disabled")
+    if (
+        formal_execution_lock is None
+        or source_identity_status is None
+        or dependency_environment_report is None
+        or model_repository_report is None
+        or openclip_checkpoint_report is None
+    ):
+        raise RuntimeError("Gaussian Shading 原子批次缺少代码锁、源码或依赖身份")
+    scientific_config = asdict(config)
+    for operational_field in (
+        "output_dir",
+        "drive_output_dir",
+        "source_dir",
+        "run_name",
+        "official_output_subdir",
+        "openclip_cache_root",
+        "local_model_repository_dir",
+        "reference_model_checkpoint_path",
+        "timeout_seconds",
+        "enable_workflow_progress_bar",
+        "require_cuda",
+        "prepare_local_model_repository",
+        "patch_model_repository_layout",
+        "patch_model_index_for_pinned_transformers",
+    ):
+        scientific_config.pop(operational_field, None)
+    scientific_config.update(
+        {
+            "official_model_id": DEFAULT_OFFICIAL_MODEL_ID,
+            "official_model_revision": DEFAULT_OFFICIAL_MODEL_REVISION,
+            "openclip_checkpoint_sha256": OPENCLIP_CHECKPOINT_SHA256,
+            "model_snapshot_content_digest": model_repository_report[
+                "model_snapshot_content"
+            ]["snapshot_content_digest"],
+            "openclip_snapshot_content_digest": openclip_checkpoint_report[
+                "openclip_snapshot_content_digest"
+            ],
+        }
+    )
+
+    def command_builder(
+        unit_start: int,
+        unit_end: int,
+        workspace: Path,
+    ) -> tuple[list[str], Path, dict[str, str]]:
+        """为一个预注册范围构造独立输出目录和官方 argv."""
+
+        unit_paths = dict(paths)
+        unit_paths["official_output_dir"] = workspace / "official_output"
+        unit_paths["official_output_dir"].mkdir(parents=True, exist_ok=True)
+        unit_config = replace(config, sample_count=unit_end - unit_start)
+        return (
+            build_official_command(
+                root_path,
+                unit_config,
+                unit_paths,
+                dependency_python_executable,
+            ),
+            source_dir,
+            {
+                "WANDB_MODE": "disabled",
+                "SLM_WM_OFFICIAL_START_INDEX": str(unit_start),
+            },
+        )
+
     try:
-        completed = run_quiet_subprocess_with_progress(
-            command,
-            cwd=source_dir,
-            env=env,
+        result = run_official_reference_unit_schedule(
+            root_path=root_path,
+            baseline_id="gaussian_shading",
+            start_index=config.start_index,
+            sample_count=config.sample_count,
+            batch_size=config.unit_batch_size,
+            scientific_config=scientific_config,
+            formal_execution_lock=formal_execution_lock,
+            source_status=source_identity_status,
+            dependency_environment_report=dependency_environment_report,
+            device_report=resolved_device_report,
+            model_repository_report=model_repository_report,
+            openclip_report=openclip_checkpoint_report,
+            dependency_python_executable=dependency_python_executable,
+            unit_dir=paths["scientific_unit_dir"],
+            workspace_root=paths["scientific_unit_workspace_root"],
             timeout_seconds=int(config.timeout_seconds),
             progress=progress,
-            progress_profile=f"operation=gaussian_shading_official_command samples={config.sample_count}",
+            command_builder=command_builder,
         )
     except Exception as error:
         paths["official_stdout"].write_text("", encoding="utf-8")
         paths["official_stderr"].write_text(f"{type(error).__name__}:{error}", encoding="utf-8")
         result = {
             "official_command_requested": True,
-            "official_command": command,
+            "official_command": [],
             "return_code": 98,
             "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
             "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
@@ -766,23 +974,29 @@ def run_official_command(
         }
         write_json(paths["official_command_result"], result)
         return result
-    paths["official_stdout"].write_text(completed.stdout, encoding="utf-8")
-    paths["official_stderr"].write_text(completed.stderr, encoding="utf-8")
-    result = {
-        "official_command_requested": True,
-        "official_command": command,
-        "return_code": int(completed.returncode),
-        "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
-        "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
-        "official_metric_text_path": relative_or_absolute(paths["official_metric_text"], root_path),
-    }
-    result = bind_successful_official_command_execution_evidence(
-        result,
-        baseline_id="gaussian_shading",
-        command=command,
-        working_directory=source_dir,
-        dependency_python_executable=dependency_python_executable,
-        cuda_inspection_report=resolved_device_report,
+    metric_summary = aggregate_gaussian_shading_unit_observations(
+        result.pop("official_unit_observations")
+    )
+    metric_text = (
+        f"tpr_detection:{metric_summary['detection_true_positive_rate']}      "
+        f"tpr_traceability:{metric_summary['traceability_true_positive_rate']}      "
+        f"mean_acc:{metric_summary['mean_bit_accuracy']}      "
+        f"std_acc:{metric_summary['std_bit_accuracy']}      "
+        f"mean_clip_score:{metric_summary['mean_clip_score']}      "
+        f"std_clip_score:{metric_summary['std_clip_score']}\n"
+    )
+    paths["official_output_dir"].mkdir(parents=True, exist_ok=True)
+    paths["official_metric_text"].write_text(metric_text, encoding="utf-8")
+    paths["official_stdout"].write_text(metric_text, encoding="utf-8")
+    paths["official_stderr"].write_text("", encoding="utf-8")
+    result.update(
+        {
+            "official_command": [],
+            "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
+            "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
+            "official_metric_text_path": relative_or_absolute(paths["official_metric_text"], root_path),
+            "official_metric_summary": metric_summary,
+        }
     )
     write_json(paths["official_command_result"], result)
     return result
@@ -885,6 +1099,8 @@ def build_reference_record_report(
         (
             official_report.get("official_command_requested") is True,
             int(official_report.get("return_code", -1)) == 0,
+            official_report.get("official_unit_coverage_ready") is True,
+            official_report.get("official_command_execution_evidence_ready") is True,
         )
     )
     scientific_metrics_complete = metric_summary_has_complete_scientific_values(
@@ -944,6 +1160,11 @@ def build_reference_record_report(
     ):
         if candidate.is_file():
             local_evidence_paths.append(relative_or_absolute(candidate, root_path))
+    if paths["scientific_unit_dir"].is_dir():
+        local_evidence_paths.extend(
+            relative_or_absolute(unit_path, root_path)
+            for unit_path in sorted(paths["scientific_unit_dir"].glob("unit_*.json"))
+        )
     result_source = relative_or_absolute(paths["official_metric_summary"], root_path)
     result_digest = file_digest(paths["official_metric_summary"])
     snapshot_content = model_repository_report["model_snapshot_content"]
@@ -963,6 +1184,14 @@ def build_reference_record_report(
             "official_model_repository_id": model_repository_report["official_model_id"],
             "official_model_revision": model_repository_report["official_model_revision"],
             "model_snapshot_content_digest": snapshot_content["snapshot_content_digest"],
+            "official_scientific_config": official_report.get(
+                "official_scientific_config",
+                {},
+            ),
+            "official_scientific_config_digest": official_report.get(
+                "official_scientific_config_digest",
+                "",
+            ),
             **openclip_report,
         },
         metric_values=metric_summary,
@@ -986,6 +1215,38 @@ def build_reference_record_report(
         "validation": validation,
         "record_digest": record["reference_record_digest"],
         "official_command_succeeded": official_command_succeeded,
+        "official_unit_coverage_ready": bool(
+            official_report.get("official_unit_coverage_ready")
+        ),
+        "official_unit_batch_size": int(
+            official_report.get("official_unit_batch_size", config.unit_batch_size)
+        ),
+        "official_unit_expected_count": int(
+            official_report.get("official_unit_expected_count", 0)
+        ),
+        "official_unit_completed_count": int(
+            official_report.get("official_unit_completed_count", 0)
+        ),
+        "official_unit_records_digest": str(
+            official_report.get("official_unit_records_digest", "")
+        ),
+        "official_unit_observations_digest": str(
+            official_report.get("official_unit_observations_digest", "")
+        ),
+        "official_unit_command_identities_digest": str(
+            official_report.get("official_unit_command_identities_digest", "")
+        ),
+        "scientific_unit_provenance": official_report.get(
+            "scientific_unit_provenance",
+            {},
+        ),
+        "official_scientific_config": official_report.get(
+            "official_scientific_config",
+            {},
+        ),
+        "official_scientific_config_digest": str(
+            official_report.get("official_scientific_config_digest", "")
+        ),
         "scientific_metrics_complete": scientific_metrics_complete,
         "source_ready": source_ready,
         "environment_ready": environment_ready,
@@ -1103,15 +1364,20 @@ def write_gaussian_shading_official_reference_outputs(
                 dependency_environment_report["dependency_python_executable"],
                 progress=run_progress,
                 device_report=device_report,
+                formal_execution_lock=formal_execution_run_lock,
+                source_identity_status=source_status,
+                dependency_environment_report=dependency_environment_report,
+                model_repository_report=model_repository_report,
+                openclip_checkpoint_report=openclip_report,
             )
         update_progress(run_progress, profile="operation=gaussian_shading_official_command")
         emit_progress_status(run_progress, profile="operation=parse_gaussian_shading_metrics status=running")
         command_metrics: dict[str, Any] = {}
-        if official_report.get("return_code") == 0 and paths["official_metric_text"].is_file():
-            command_metrics = parse_metric_text(
-                paths["official_metric_text"].read_text(encoding="utf-8", errors="ignore"),
-                effective_config.sample_count,
-            )
+        if (
+            official_report.get("return_code") == 0
+            and official_report.get("official_unit_coverage_ready") is True
+        ):
+            command_metrics = dict(official_report.get("official_metric_summary", {}))
         metric_summary = (
             normalize_metric_summary(command_metrics, effective_config.sample_count)
             if command_metrics
@@ -1176,6 +1442,8 @@ def write_gaussian_shading_official_reference_outputs(
         (
             official_report.get("official_command_requested") is True,
             int(official_report.get("return_code", -1)) == 0,
+            official_report.get("official_unit_coverage_ready") is True,
+            official_report.get("official_command_execution_evidence_ready") is True,
         )
     )
     scientific_metrics_complete = metric_summary_has_complete_scientific_values(
@@ -1209,9 +1477,42 @@ def write_gaussian_shading_official_reference_outputs(
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
         "official_command_succeeded": official_command_succeeded,
+        "official_scientific_config": official_report.get(
+            "official_scientific_config",
+            {},
+        ),
+        "official_scientific_config_digest": str(
+            official_report.get("official_scientific_config_digest", "")
+        ),
+        "official_unit_coverage_ready": bool(
+            official_report.get("official_unit_coverage_ready")
+        ),
+        "official_unit_batch_size": int(
+            official_report.get("official_unit_batch_size", config.unit_batch_size)
+        ),
+        "official_unit_expected_count": int(
+            official_report.get("official_unit_expected_count", 0)
+        ),
+        "official_unit_completed_count": int(
+            official_report.get("official_unit_completed_count", 0)
+        ),
+        "official_unit_records_digest": str(
+            official_report.get("official_unit_records_digest", "")
+        ),
+        "official_unit_observations_digest": str(
+            official_report.get("official_unit_observations_digest", "")
+        ),
+        "official_unit_command_identities_digest": str(
+            official_report.get("official_unit_command_identities_digest", "")
+        ),
+        "scientific_unit_provenance": official_report.get(
+            "scientific_unit_provenance",
+            {},
+        ),
         "scientific_metrics_complete": scientific_metrics_complete,
         "scientific_metric_fields": list(REQUIRED_METRIC_FIELDS),
         "sample_count": int(effective_config.sample_count),
+        "start_index": int(effective_config.start_index),
         "paper_claim_scale": paper_run.run_name,
         "target_fpr": paper_run.target_fpr,
         "dependency_environment_requested": bool(dependency_environment_report.get("dependency_environment_requested")),
@@ -1292,6 +1593,11 @@ def write_gaussian_shading_official_reference_outputs(
     ):
         if optional_path.exists():
             output_paths_for_manifest.append(relative_or_absolute(optional_path, root_path))
+    if paths["scientific_unit_dir"].is_dir():
+        output_paths_for_manifest.extend(
+            relative_or_absolute(unit_path, root_path)
+            for unit_path in sorted(paths["scientific_unit_dir"].glob("unit_*.json"))
+        )
     formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
         formal_execution_run_lock,
         repository_environment.require_published_formal_execution_lock(root_path),
@@ -1378,18 +1684,117 @@ def run_default_gaussian_shading_official_reference_plan(root: str | Path = ".")
 
 
 def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Path) -> tuple[Path, ...]:
-    """仅收集当前论文层级的 Gaussian Shading outputs family 文件。"""
+    """按精确白名单收集 Gaussian Shading 输入, 不跟随链接."""
 
-    entries: list[Path] = []
-    if output_dir.exists():
-        for path in sorted(output_dir.rglob("*")):
-            if path.is_file() and path.resolve() != archive_path.resolve() and path.suffix.lower() != ".zip":
-                entries.append(path)
-    unique_entries: list[Path] = []
-    for entry in entries:
-        if entry not in unique_entries:
-            unique_entries.append(entry)
-    return tuple(unique_entries)
+    del root_path, archive_path
+    root_files = validate_official_reference_package_root_exact_set(
+        output_dir=output_dir,
+        allowed_relative_file_paths=tuple(
+            GAUSSIAN_SHADING_PACKAGE_ROOT_FILE_WHITELIST
+        ),
+        optional_relative_file_paths=tuple(
+            GAUSSIAN_SHADING_PACKAGE_GENERATED_FILE_NAMES
+        ),
+    )
+    entries = [
+        path
+        for path in root_files
+        if path.name not in GAUSSIAN_SHADING_PACKAGE_GENERATED_FILE_NAMES
+    ]
+    return tuple(entries)
+
+
+def _validate_packaged_gaussian_shading_reference_evidence(
+    root_path: Path,
+    source_dir: Path,
+    run_summary: dict[str, Any],
+    unit_validation: dict[str, Any],
+) -> None:
+    """从原子单元重建 Gaussian Shading record 与 validation report."""
+
+    metric_path = source_dir / "gaussian_shading_official_metric_summary.json"
+    records_path = source_dir / "gaussian_shading_official_reference_records.jsonl"
+    validation_path = source_dir / "gaussian_shading_official_reference_validation_report.json"
+    evidence_candidates = (
+        metric_path,
+        source_dir / "gaussian_shading_official_command_result.json",
+        source_dir / "gaussian_shading_official_stdout.txt",
+        source_dir / "gaussian_shading_official_stderr.txt",
+        source_dir / "official_output" / "Identity.txt",
+        source_dir / "gaussian_shading_official_source_prepare_result.json",
+        source_dir / "gaussian_shading_official_source_patch_result.json",
+        source_dir / "gaussian_shading_model_repository_prepare_result.json",
+        source_dir / "gaussian_shading_openclip_checkpoint_prepare_result.json",
+        source_dir / "gaussian_shading_dependency_environment_prepare_result.json",
+        source_dir / "gaussian_shading_official_reference_environment_report.json",
+    )
+    evidence_paths = [
+        relative_or_absolute(path, root_path)
+        for path in evidence_candidates
+        if path.is_file()
+    ]
+    evidence_paths.extend(
+        relative_or_absolute(path, root_path)
+        for path in sorted((source_dir / "scientific_units").glob("unit_*.json"))
+    )
+    stable_identity = unit_validation["stable_unit_identity"]
+    expected_record = build_gaussian_shading_official_reference_record(
+        official_command_requested=True,
+        official_command_return_code=0,
+        official_entrypoint="external_baseline/primary/gaussian_shading/source/run_gaussian_shading.py",
+        official_repository_commit=stable_identity["official_repository_commit"],
+        official_environment_profile=DEFAULT_DEPENDENCY_PROFILE_ID,
+        baseline_result_source=relative_or_absolute(metric_path, root_path),
+        baseline_result_source_digest=file_digest(metric_path),
+        evidence_paths=sorted(set(evidence_paths)),
+        source_provenance={
+            "source_worktree_digest": stable_identity["source_worktree_digest"],
+            "source_patch_sha256": stable_identity["source_patch_sha256"],
+            "prompt_dataset_repository_id": run_summary["prompt_dataset_repository_id"],
+            "prompt_dataset_revision": run_summary["prompt_dataset_revision"],
+            "official_model_repository_id": run_summary["model_source_repository_id"],
+            "official_model_revision": run_summary["model_source_revision"],
+            "model_snapshot_content_digest": run_summary["model_snapshot_content_digest"],
+            "openclip_source_name": run_summary["openclip_source_name"],
+            "openclip_usage_role": run_summary["openclip_usage_role"],
+            "openclip_model_name": run_summary["openclip_model_name"],
+            "openclip_repository_id": run_summary["openclip_repository_id"],
+            "openclip_revision": run_summary["openclip_revision"],
+            "openclip_checkpoint_filename": run_summary["openclip_checkpoint_filename"],
+            "openclip_checkpoint_sha256": run_summary["openclip_checkpoint_sha256"],
+            "openclip_checkpoint_size_bytes": run_summary["openclip_checkpoint_size_bytes"],
+            "openclip_snapshot_content_digest": run_summary["openclip_snapshot_content_digest"],
+            "official_scientific_config": unit_validation[
+                "official_scientific_config"
+            ],
+            "official_scientific_config_digest": unit_validation[
+                "official_scientific_config_digest"
+            ],
+        },
+        metric_values=unit_validation["metric_summary"],
+        ready_flags={
+            "official_command_succeeded": True,
+            "official_source_ready": True,
+            "source_identity_ready": True,
+            "source_worktree_exact": True,
+            "official_environment_report_ready": True,
+            "official_result_summary_ready": True,
+            "model_source_ready": True,
+            "openclip_source_ready": True,
+            "governed_import_ready": True,
+        },
+    )
+    expected_record = json.loads(json.dumps(expected_record, ensure_ascii=False))
+    record_lines = [
+        line for line in records_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()
+    ]
+    if len(record_lines) != 1 or json.loads(record_lines[0]) != expected_record:
+        raise RuntimeError("Gaussian Shading governed reference record 无法由科学单元重建")
+    expected_validation = validate_gaussian_shading_official_reference_records(
+        [expected_record]
+    )
+    if read_json(validation_path) != expected_validation:
+        raise RuntimeError("Gaussian Shading validation report 与重建记录不一致")
 
 
 def package_gaussian_shading_official_reference_outputs(
@@ -1411,6 +1816,15 @@ def package_gaussian_shading_official_reference_outputs(
     if configured_output_root != expected_output_root:
         raise ValueError("Gaussian Shading 官方参考打包根目录必须使用正式 outputs family")
     source_dir = expected_output_root / paper_run.run_name
+    validate_official_reference_package_root_exact_set(
+        output_dir=source_dir,
+        allowed_relative_file_paths=tuple(
+            GAUSSIAN_SHADING_PACKAGE_ROOT_FILE_WHITELIST
+        ),
+        optional_relative_file_paths=tuple(
+            GAUSSIAN_SHADING_PACKAGE_GENERATED_FILE_NAMES
+        ),
+    )
     required_runtime_paths = (
         source_dir / "gaussian_shading_official_reference_summary.json",
         source_dir / "manifest.local.json",
@@ -1427,6 +1841,55 @@ def package_gaussian_shading_official_reference_outputs(
         formal_execution_package_lock,
         run_manifest.get("code_version"),
     )
+    unit_validation = validate_persisted_official_reference_units(
+        unit_dir=source_dir / "scientific_units",
+        baseline_id="gaussian_shading",
+        start_index=int(run_summary.get("start_index", 0)),
+        sample_count=int(run_summary.get("sample_count", 0)),
+        batch_size=int(run_summary.get("official_unit_batch_size", 0)),
+    )
+    metric_summary_path = source_dir / "gaussian_shading_official_metric_summary.json"
+    if not metric_summary_path.is_file():
+        raise FileNotFoundError("Gaussian Shading 正式参考缺少可复算指标摘要")
+    stable_unit_identity = unit_validation["stable_unit_identity"]
+    if not all(
+        (
+            unit_validation["official_unit_coverage_ready"] is True,
+            unit_validation["official_unit_expected_count"] == run_summary.get("official_unit_expected_count"),
+            unit_validation["official_unit_completed_count"] == run_summary.get("official_unit_completed_count"),
+            unit_validation["official_unit_records_digest"] == run_summary.get("official_unit_records_digest"),
+            unit_validation["official_unit_observations_digest"] == run_summary.get("official_unit_observations_digest"),
+            unit_validation["official_unit_command_identities_digest"] == run_summary.get("official_unit_command_identities_digest"),
+            unit_validation["scientific_unit_provenance"] == run_summary.get("scientific_unit_provenance"),
+            unit_validation["official_scientific_config"] == run_summary.get("official_scientific_config"),
+            unit_validation["official_scientific_config_digest"] == run_summary.get("official_scientific_config_digest"),
+            unit_validation["metric_summary"] == read_json(metric_summary_path),
+            stable_unit_identity["formal_execution_commit"] == formal_execution_run_lock["formal_execution_commit"],
+            stable_unit_identity["formal_execution_lock_digest"] == formal_execution_run_lock["formal_execution_lock_digest"],
+            stable_unit_identity["official_repository_commit"] == run_summary.get("official_repository_commit"),
+            stable_unit_identity["source_patch_sha256"] == run_summary.get("source_patch_sha256"),
+            stable_unit_identity["source_worktree_digest"] == run_summary.get("source_worktree_digest"),
+        )
+    ):
+        raise RuntimeError("Gaussian Shading 持久化科学单元无法复算运行摘要")
+    _validate_packaged_gaussian_shading_reference_evidence(
+        root_path,
+        source_dir,
+        run_summary,
+        unit_validation,
+    )
+    validate_official_reference_scientific_config_and_commands(
+        baseline_id="gaussian_shading",
+        scientific_config=unit_validation["official_scientific_config"],
+        unit_commands=unit_validation["official_unit_commands"],
+        run_summary=run_summary,
+        model_repository_report=read_json(
+            source_dir / "gaussian_shading_model_repository_prepare_result.json"
+        ),
+        openclip_report=read_json(
+            source_dir / "gaussian_shading_openclip_checkpoint_prepare_result.json"
+        ),
+    )
     if not all(
         (
             run_summary.get("run_decision") == "pass",
@@ -1435,6 +1898,19 @@ def package_gaussian_shading_official_reference_outputs(
             run_summary.get("official_command_requested") is True,
             run_summary.get("official_command_return_code") == 0,
             run_summary.get("official_command_succeeded") is True,
+            run_summary.get("official_unit_coverage_ready") is True,
+            int(run_summary.get("official_unit_batch_size", 0))
+            == DEFAULT_OFFICIAL_REFERENCE_UNIT_BATCH_SIZE,
+            int(run_summary.get("official_unit_completed_count", 0))
+            == int(run_summary.get("official_unit_expected_count", -1)),
+            int(run_summary.get("official_unit_expected_count", 0)) > 0,
+            re.fullmatch(r"[0-9a-f]{64}", str(run_summary.get("official_unit_records_digest", ""))) is not None,
+            re.fullmatch(r"[0-9a-f]{64}", str(run_summary.get("official_unit_observations_digest", ""))) is not None,
+            re.fullmatch(r"[0-9a-f]{64}", str(run_summary.get("official_unit_command_identities_digest", ""))) is not None,
+            isinstance(run_summary.get("scientific_unit_provenance"), dict),
+            isinstance(run_summary.get("official_scientific_config"), dict),
+            re.fullmatch(r"[0-9a-f]{64}", str(run_summary.get("official_scientific_config_digest", ""))) is not None,
+            run_summary.get("scientific_unit_provenance", {}).get("scientific_unit_provenance_ready") is True,
             run_summary.get("scientific_metrics_complete") is True,
             run_summary.get("baseline_id") == "gaussian_shading",
             run_summary.get("dependency_environment_profile_id") == DEFAULT_DEPENDENCY_PROFILE_ID,

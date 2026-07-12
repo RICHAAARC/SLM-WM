@@ -1,34 +1,23 @@
 diff --git a/option.py b/option.py
-index ac9a041..42da855 100644
+index ac9a041..a20f268 100644
 --- a/option.py
 +++ b/option.py
-@@ -13,7 +13,12 @@ def parse_args():
-     parser.add_argument("--clip_test_num", type=int, default=0) # actually the end idx
-     parser.add_argument("--start_idx", type=int, default=0)
-     parser.add_argument("--SDv35M", action="store_true", default=False)
+@@ -15,0 +16,6 @@ def parse_args():
 +    parser.add_argument("--slm_attack_families", type=str, default="")
 +    parser.add_argument("--slm_attack_image_dir", type=str, default=None)
 +    parser.add_argument("--slm_save_clean_pair", action="store_true", default=False)
 +    parser.add_argument("--slm_pair_image_dir", type=str, default=None)
- 
-     # diffusion model settings
-     parser.add_argument("--model_key", type=str, default="stabilityai/stable-diffusion-2-1") # stabilityai/stable-diffusion-3.5-medium
++    parser.add_argument("--slm_unit_contract", type=str, required=True)
++    parser.add_argument("--slm_runtime_environment_report", type=str, required=True)
+@@ -18,0 +25 @@ def parse_args():
 +    parser.add_argument("--model_revision", type=str, required=True)
-     parser.add_argument("--guidance_scale", type=float, default=7.5) # 4.0 for SDv35M diversity and image quality
 diff --git a/run_sd35.py b/run_sd35.py
-index 39c07d7..003aba7 100644
+index 39c07d7..e545bd9 100644
 --- a/run_sd35.py
 +++ b/run_sd35.py
-@@ -1,4 +1,5 @@
- import os
+@@ -1,0 +2 @@ import os
 +import sys
- import json
- import torch
- import open_clip
-@@ -13,6 +14,18 @@ from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
- 
- from option import args
- 
+@@ -15,0 +17,24 @@ from option import args
 +ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
 +if ROOT not in sys.path:
 +    sys.path.insert(0, ROOT)
@@ -40,14 +29,21 @@ index 39c07d7..003aba7 100644
 +    file_digest,
 +    formal_image_attack_identity,
 +)
++from external_baseline.primary.t2smark.adapter.formal_unit_checkpoint import (
++    aggregate_t2smark_formal_unit_records,
++    atomic_save_png,
++    atomic_write_json,
++    build_t2smark_random_material_digest,
++    build_t2smark_formal_unit_record,
++    inspect_t2smark_formal_unit_records,
++    remove_stale_atomic_temporary_files,
++    remove_uncommitted_t2smark_unit_artifacts,
++    validate_t2smark_formal_unit_contract,
++    write_t2smark_formal_unit_record,
++)
 +
- args.key_channel_idx = (0, 1, 2, 3)
- device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
- msg_channel_idx = [i for i in range(16) if i not in args.key_channel_idx]
-@@ -45,6 +58,52 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
-         "acc_msg": acc_msg.item()
-     }
- 
+@@ -48 +73,96 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
+-pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)
 +
 +def configured_formal_attack_names():
 +    """解析 SLM-WM 共同协议要求的攻击名称。"""
@@ -76,32 +72,107 @@ index 39c07d7..003aba7 100644
 +
 +
 +# SLM-WM 正式协议: 输出严格成对质量图像。
-+def generate_clean_pair_image(prompt, prompt_id):
-+    """生成与 T2SMark 水印图像同 prompt 和同随机种子对齐的 clean 参照图像。"""
++def generate_clean_pair_image(prompt, clean_base_latents):
++    """使用水印编码前的同一基础 latent 生成严格 clean 配对图像。"""
 +
-+    clean_generator = torch.Generator(device=device).manual_seed(args.seed + prompt_id)
 +    return pipe(
 +        prompt,
 +        guidance_scale=args.guidance_scale,
 +        num_inference_steps=args.num_inference_steps,
 +        height=512,
 +        width=512,
-+        generator=clean_generator,
++        latents=clean_base_latents.half(),
 +    ).images[0]
 +
 +
--pipe = InversionDiffusion3Pipeline.from_pretrained(args.model_key, torch_dtype=torch.float16).to(device)
++def encode_with_exact_clean_base(encoder, payload, key_material):
++    """重放 encode 的首个高斯采样, 且不改变官方编码器的随机状态演化."""
++
++    random_state_before = torch.random.get_rng_state()
++    encoded = encoder.encode(payload, key_material)
++    random_state_after = torch.random.get_rng_state()
++    try:
++        torch.random.set_rng_state(random_state_before)
++        clean_base = torch.randn(encoder.latent_shape).cuda()
++    finally:
++        torch.random.set_rng_state(random_state_after)
++    return encoded, clean_base
++
++
++def load_json_object(path, label):
++    """读取正式单元契约或运行环境对象。"""
++
++    with open(path, "r", encoding="utf-8-sig") as stream:
++        payload = json.load(stream)
++    if not isinstance(payload, dict):
++        raise TypeError(f"{label} 必须是 JSON 对象")
++    return payload
++
++
++def validate_formal_unit_contract_arguments(contract):
++    """要求官方源码实际参数与外层完整协议绑定逐字段一致。"""
++
++    config = contract["formal_reproduction_config"]
++    protocol = contract["protocol_binding"]
++    expected_values = {
++        "name": config["t2smark_run_name"],
++        "seed": int(config["seed"]),
++        "robust_test_num": len(contract["prompt_rows"]),
++        "clip_test_num": int(config["clip_test_num"]),
++        "model_key": config["model_id"],
++        "model_revision": config["model_revision"],
++        "guidance_scale": float(config["guidance_scale"]),
++        "num_inference_steps": int(config["num_inference_steps"]),
++        "num_inversion_steps": int(config["num_inversion_steps"]),
++        "slm_attack_families": ",".join(protocol["formal_attack_names"]),
++    }
++    for field_name, expected_value in expected_values.items():
++        if getattr(args, field_name) != expected_value:
++            raise RuntimeError(f"T2SMark 源码参数 {field_name} 与正式单元契约不一致")
++    if args.start_idx != 0 or not args.fix_key or not args.save_image:
++        raise RuntimeError("T2SMark 正式单元恢复要求全局索引、固定密钥和图像落盘")
++    if not args.slm_save_clean_pair:
++        raise RuntimeError("T2SMark 正式单元恢复要求严格 clean pair")
++
++
 +pipe = InversionDiffusion3Pipeline.from_pretrained(
 +    args.model_key,
 +    revision=args.model_revision,
 +    torch_dtype=torch.float16,
 +).to(device)
- pipe.set_progress_bar_config(disable=True)
- 
-@@ -66,6 +121,20 @@ with open(os.path.join(args.output_dir, args.name, "settings.json"), "w") as f:
- if args.save_image:
-     image_path = os.path.join(args.output_dir, args.name, f'images')
-     os.makedirs(image_path, exist_ok=True)
+@@ -54 +174 @@ t2s_msg = T2SMark(m=args.msg_length, tau=args.tau, latent_shape=(12, 64, 64))
+-settings = vars(args)
++settings = dict(vars(args))
+@@ -59 +179,3 @@ if args.fix_key:
+-    settings["master_key"] = t2s_key.binlist2int(master_key)
++    settings["fixed_secret_material_digest_random"] = (
++        build_t2smark_random_material_digest(master_key, msg)
++    )
+@@ -62,3 +184,20 @@ print(settings)
+-os.makedirs(os.path.join(args.output_dir, args.name), exist_ok=True)
+-with open(os.path.join(args.output_dir, args.name, "settings.json"), "w") as f:
+-    json.dump(settings, f, indent=4)
++official_run_dir = os.path.join(args.output_dir, args.name)
++os.makedirs(official_run_dir, exist_ok=True)
++atomic_write_json(os.path.join(official_run_dir, "settings.json"), settings)
++
++unit_contract = validate_t2smark_formal_unit_contract(
++    load_json_object(args.slm_unit_contract, "T2SMark 正式单元契约")
++)
++runtime_environment = load_json_object(
++    args.slm_runtime_environment_report,
++    "T2SMark 正式运行环境",
++)
++validate_formal_unit_contract_arguments(unit_contract)
++unit_record_dir = os.path.join(official_run_dir, "slm_formal_units")
++remove_stale_atomic_temporary_files(official_run_dir)
++unit_records, _ = inspect_t2smark_formal_unit_records(
++    unit_record_dir,
++    contract=unit_contract,
++    artifact_root=official_run_dir,
++    runtime_environment=runtime_environment,
++)
+@@ -68,0 +208,14 @@ if args.save_image:
 +formal_attack_names = configured_formal_attack_names()
 +formal_attack_image_dir = args.slm_attack_image_dir
 +if args.save_image and formal_attack_names:
@@ -116,41 +187,62 @@ index 39c07d7..003aba7 100644
 +        pair_quality_image_dir = os.path.join(args.output_dir, args.name, "quality_pairs")
 +    pair_quality_clean_image_dir = os.path.join(pair_quality_image_dir, "clean")
 +    os.makedirs(pair_quality_clean_image_dir, exist_ok=True)
- 
- results = {}
- if args.clip_test_num > 0: clip_score_fn = setup_clip_measure_function()
-@@ -114,8 +183,23 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
-         if prompt_id < args.clip_test_num:
-             clip_score = clip_score_fn(generated_image, prompt).item()
-             results[prompt_id]["clip_score"] = clip_score
+@@ -83,0 +237,16 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
++
++        prompt_identity = unit_contract["prompt_rows"][prompt_id]
++        if prompt != prompt_identity["prompt_text"]:
++            raise RuntimeError("T2SMark 数据集 Prompt 与正式单元契约不一致")
++        if prompt_id in unit_records:
++            results[prompt_id] = unit_records[prompt_id]["result"]
++            prompt_id += 1
++            pbar.update(1)
++            continue
++
++        remove_uncommitted_t2smark_unit_artifacts(
++            official_run_dir,
++            prompt_index=prompt_id,
++        )
++        # 每个 Prompt 使用独立确定性随机流, 使跳过已完成单元不改变缺失单元.
++        utils.set_random_seed(args.seed + prompt_id)
+@@ -97,2 +266,2 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+-        z_k = t2s_key.encode(key, master_key)
+-        z_b = t2s_msg.encode(msg, key)
++        z_k, clean_z_k = encode_with_exact_clean_base(t2s_key, key, master_key)
++        z_b, clean_z_b = encode_with_exact_clean_base(t2s_msg, msg, key)
+@@ -102,0 +272,9 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
++        clean_base_latents = torch.zeros(1, 16, 64, 64).cuda()
++        clean_base_latents[:, args.key_channel_idx, :, :] = clean_z_k
++        clean_base_latents[:, msg_channel_idx, :, :] = clean_z_b
++        clean_base_latent_digest_random = build_t2smark_random_material_digest(
++            clean_base_latents
++        )
++        t2smark_secret_material_digest_random = build_t2smark_random_material_digest(
++            master_key, key, msg
++        )
+@@ -116,0 +295 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
 +        generated_image_path = ""
-         if args.save_image:
+@@ -118 +297,16 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
 -            generated_image.save(os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png'))
 +            generated_image_path = os.path.join(image_path, f'{str(prompt_id).zfill(5)}.png')
-+            generated_image.save(generated_image_path)
++            atomic_save_png(generated_image, generated_image_path)
 +        clean_pair_image = None
 +        if formal_attack_names or args.slm_save_clean_pair:
-+            clean_pair_image = generate_clean_pair_image(prompt, prompt_id)
++            clean_pair_image = generate_clean_pair_image(prompt, clean_base_latents)
 +        if args.save_image and args.slm_save_clean_pair and pair_quality_clean_image_dir:
 +            clean_pair_path = os.path.join(pair_quality_clean_image_dir, f'{str(prompt_id).zfill(5)}.png')
-+            clean_pair_image.save(clean_pair_path)
++            atomic_save_png(clean_pair_image, clean_pair_path)
 +            results[prompt_id]["pair_quality"] = {
 +                "pair_quality_protocol": "strict_clean_watermarked_pair",
++                "clean_base_latent_digest_random": clean_base_latent_digest_random,
 +                "clean_image_path": clean_pair_path,
 +                "clean_image_digest": file_digest(clean_pair_path),
 +                "watermarked_image_path": generated_image_path,
 +                "watermarked_image_digest": file_digest(generated_image_path) if generated_image_path else "",
 +            }
-         
-         if prompt_id < args.robust_test_num:
-             noised_image = utils.image_distortion(generated_image, args.seed + prompt_id, args)
-@@ -129,6 +213,90 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
-             
-             decode_result = decode(reversed_latents, master_key, key, fake_key, msg)
-             results[prompt_id]["robustness"] = decode_result
+@@ -131,0 +326,111 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
 +            if formal_attack_names:
 +                if clean_pair_image is None:
-+                    raise RuntimeError("正式攻击要求同 Prompt、同种子的 clean negative 图像")
++                    raise RuntimeError("正式检测要求同 Prompt、同种子的 clean negative 图像")
 +                clean_detection = decode_attacked_image(
 +                    clean_pair_image,
 +                    master_key,
@@ -170,7 +262,12 @@ index 39c07d7..003aba7 100644
 +                    "watermarked_score": float(watermarked_detection["norm1_w"]),
 +                }
 +                results[prompt_id]["formal_attacks"] = {}
-+                for formal_attack_name in formal_attack_names:
++                prompt_attack_names = (
++                    formal_attack_names
++                    if prompt_identity["split"] == "test"
++                    else []
++                )
++                for formal_attack_name in prompt_attack_names:
 +                    attack_matrix_family = canonical_attack_family(formal_attack_name)
 +                    attack_matrix_name = canonical_attack_name(formal_attack_name)
 +                    attack_identity = formal_image_attack_identity(formal_attack_name)
@@ -209,7 +306,7 @@ index 39c07d7..003aba7 100644
 +                                formal_attack_image_dir,
 +                                f"{str(prompt_id).zfill(5)}_{attack_matrix_name}_{source_role}.png",
 +                            )
-+                            attacked_image.save(attacked_path)
++                            atomic_save_png(attacked_image, attacked_path)
 +                            attacked_digest = file_digest(attacked_path)
 +                        formal_decode_result = decode_attacked_image(
 +                            attacked_image,
@@ -232,6 +329,42 @@ index 39c07d7..003aba7 100644
 +                        if torch.cuda.is_available():
 +                            torch.cuda.empty_cache()
 +                    results[prompt_id]["formal_attacks"][attack_matrix_name] = attack_result
- 
-         prompt_id += 1
-         pbar.update(1)
++
++        unit_record = build_t2smark_formal_unit_record(
++            contract=unit_contract,
++            prompt_index=prompt_id,
++            result=results[prompt_id],
++            artifact_root=official_run_dir,
++            runtime_environment=runtime_environment,
++            torch_module=torch,
++            execution_device_name=str(device),
++            random_identity_random={
++                "t2smark_secret_material_digest_random": t2smark_secret_material_digest_random,
++                "clean_base_latent_digest_random": clean_base_latent_digest_random,
++            },
++        )
++        unit_record = write_t2smark_formal_unit_record(
++            os.path.join(unit_record_dir, f"{prompt_id:05d}.json"),
++            unit_record,
++            contract=unit_contract,
++            artifact_root=official_run_dir,
++            runtime_environment=runtime_environment,
++        )
++        unit_records[prompt_id] = unit_record
+@@ -135,0 +441,7 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
++results, formal_unit_aggregate = aggregate_t2smark_formal_unit_records(
++    unit_records,
++    contract=unit_contract,
++    artifact_root=official_run_dir,
++    runtime_environment=runtime_environment,
++)
++
+@@ -164,5 +476,3 @@ if args.clip_test_num > 0:
+-# save results to json
+-with open(os.path.join(args.output_dir, args.name, "results.json"), "w") as f:
+-    json.dump(results, f, indent=4)
+-
+-
++# 只有完整单元集合通过复验后才原子发布官方聚合结果。
++results["slm_formal_unit_aggregate"] = formal_unit_aggregate
++atomic_write_json(os.path.join(official_run_dir, "results.json"), results)

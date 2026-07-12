@@ -227,7 +227,14 @@ def verify_exact_t2smark_protocol_worktree(source_dir: Path, patch_path: Path) -
         environment["GIT_INDEX_FILE"] = str(index_path)
         _run_git_checked(["git", "read-tree", "HEAD"], cwd=resolved_source, env=environment)
         _run_git_checked(
-            ["git", "apply", "--ignore-space-change", "--cached", str(resolved_patch)],
+            [
+                "git",
+                "apply",
+                "--unidiff-zero",
+                "--ignore-space-change",
+                "--cached",
+                str(resolved_patch),
+            ],
             cwd=resolved_source,
             env=environment,
         )
@@ -275,7 +282,14 @@ def _apply_protocol_patch(
     """应用固定补丁，已应用时通过 reverse-check 精确识别。"""
 
     check_result = _run_git(
-        ["git", "apply", "--ignore-space-change", "--check", str(patch_path)],
+        [
+            "git",
+            "apply",
+            "--unidiff-zero",
+            "--ignore-space-change",
+            "--check",
+            str(patch_path),
+        ],
         cwd=source_dir,
         timeout_seconds=300,
         progress=progress,
@@ -284,7 +298,13 @@ def _apply_protocol_patch(
     patch_applied = False
     if int(check_result["return_code"]) == 0:
         apply_result = _run_git(
-            ["git", "apply", "--ignore-space-change", str(patch_path)],
+            [
+                "git",
+                "apply",
+                "--unidiff-zero",
+                "--ignore-space-change",
+                str(patch_path),
+            ],
             cwd=source_dir,
             timeout_seconds=300,
             progress=progress,
@@ -295,7 +315,15 @@ def _apply_protocol_patch(
         patch_applied = True
     else:
         reverse_result = _run_git(
-            ["git", "apply", "--ignore-space-change", "--reverse", "--check", str(patch_path)],
+            [
+                "git",
+                "apply",
+                "--unidiff-zero",
+                "--ignore-space-change",
+                "--reverse",
+                "--check",
+                str(patch_path),
+            ],
             cwd=source_dir,
             timeout_seconds=300,
             progress=progress,
@@ -330,12 +358,25 @@ def _verify_formal_source(source_entry: Path) -> None:
         "attack_config_digest",
         "resource_profile",
         "attack_id",
+        "slm_formal_units",
+        "build_t2smark_formal_unit_record",
+        "aggregate_t2smark_formal_unit_records",
+        'prompt_identity["split"] == "test"',
+        "encode_with_exact_clean_base",
+        "torch.random.get_rng_state()",
+        "torch.random.set_rng_state",
+        "utils.set_random_seed(args.seed + prompt_id)",
+        "clean_base_latent_digest_random",
+        "t2smark_secret_material_digest_random",
+        "fixed_secret_material_digest_random",
     )
     required_option_tokens = (
         "slm_attack_families",
         "slm_attack_image_dir",
         "slm_save_clean_pair",
         "slm_pair_image_dir",
+        "slm_unit_contract",
+        "slm_runtime_environment_report",
     )
     if any(token not in source_text for token in required_source_tokens):
         raise RuntimeError("T2SMark 正式源码缺少仅图像检测或攻击证据算子")

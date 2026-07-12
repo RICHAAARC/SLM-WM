@@ -12,7 +12,7 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import sys
@@ -50,6 +50,9 @@ from experiments.runtime.scientific_execution_binding import (
     validate_scientific_execution_binding,
 )
 from external_baseline.primary.sd35_method_faithful_common import supported_formal_image_attack_names
+from external_baseline.primary.sd35_method_faithful_units import (
+    validate_method_faithful_adapter_unit_evidence,
+)
 from paper_experiments.baselines.method_faithful_observation_collection import (
     canonical_prompt_protocol_digest,
     validate_formal_attack_observation_identities,
@@ -259,11 +262,11 @@ def output_paths(root_path: Path, config: ExternalBaselineMethodFaithfulConfig) 
 
 
 def prepare_single_baseline_run_directory(paths: Mapping[str, Path]) -> None:
-    """清理当前 baseline 的固定运行目录和共享 transfer 文件。
+    """保留原子科学单元, 清理当前 baseline 的可重建派生产物。
 
-    该函数属于通用可复现运行写法: 每次运行从空的 baseline 独占目录开始，
-    避免 probe、pilot、full 或失败重跑遗留的图片和 manifest 混入新结果包。
-    其他 baseline 的共享 transfer 文件不会被删除。
+    完成单元及其图像位于 ``adapter_outputs``. 该目录必须跨 Colab 会话保留,
+    其余 runner 文件均可由完成单元重建. 其他 baseline 的共享 transfer 文件
+    不会被删除.
     """
 
     output_dir = paths["output_dir"].resolve()
@@ -275,10 +278,33 @@ def prepare_single_baseline_run_directory(paths: Mapping[str, Path]) -> None:
     if not relative_run_dir.parts:
         raise ValueError("baseline 运行目录不得等于输出根目录")
     if run_dir.is_symlink():
-        run_dir.unlink()
-    elif run_dir.exists():
-        shutil.rmtree(run_dir)
+        raise ValueError("baseline 运行目录不得为符号链接")
     run_dir.mkdir(parents=True, exist_ok=True)
+    preserved_adapter_root = paths["adapter_output_root"].resolve()
+    for child in tuple(run_dir.iterdir()):
+        if child.resolve() == preserved_adapter_root:
+            continue
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            shutil.rmtree(child)
+    if preserved_adapter_root.exists():
+        current_baseline_root = preserved_adapter_root / run_dir.name
+        for child in tuple(preserved_adapter_root.iterdir()):
+            if child.resolve() == current_baseline_root.resolve():
+                continue
+            if child.is_symlink() or child.is_file():
+                child.unlink()
+            elif child.is_dir():
+                shutil.rmtree(child)
+        if current_baseline_root.exists():
+            for child in tuple(current_baseline_root.iterdir()):
+                if child.name == "artifacts" and child.is_dir() and not child.is_symlink():
+                    continue
+                if child.is_symlink() or child.is_file():
+                    child.unlink()
+                elif child.is_dir():
+                    shutil.rmtree(child)
     for field_name in ("split_observations", "split_command_results", "transfer_manifest"):
         split_path = paths[field_name].resolve()
         try:
@@ -557,6 +583,13 @@ def write_baseline_transfer_files(
         )
     ):
         raise ValueError("adapter manifest 未绑定当前正式模型 id 与 revision")
+    unit_evidence = validate_method_faithful_adapter_unit_evidence(
+        manifest=adapter_manifest,
+        observation_rows=observations,
+        root=root_path,
+    )
+    if unit_evidence["method_faithful_scientific_unit_resume_ready"] is not True:
+        raise RuntimeError("adapter 原子科学完成单元证据未闭合")
     declared_counts.add(int(adapter_manifest.get("observation_count", -1)))
     if declared_counts != {actual_count}:
         raise ValueError(
@@ -612,6 +645,7 @@ def write_baseline_transfer_files(
         "prompt_protocol_digest": canonical_prompt_protocol_digest(prompt_rows),
         "adapter_manifest_path": adapter_manifest_path.relative_to(collection_root).as_posix(),
         "adapter_manifest_sha256": file_sha256(adapter_manifest_path),
+        **unit_evidence,
         "execution_manifest_path": paths["execution_manifest"].relative_to(collection_root).as_posix(),
         "execution_manifest_sha256": file_sha256(paths["execution_manifest"]),
         "paper_run_name": config.prompt_set,
@@ -707,6 +741,11 @@ def build_and_run_primary_baseline_adapter(
         raise RuntimeError("baseline 执行证据校验失败")
 
     transfer_manifest = write_baseline_transfer_files(root_path, config, paths)
+    unit_evidence = {
+        key: value
+        for key, value in transfer_manifest.items()
+        if key.startswith("method_faithful_") or key.startswith("scientific_")
+    }
     return {
         "adapter_execution_ready": True,
         "primary_baseline_adapter_ready": True,
@@ -716,6 +755,7 @@ def build_and_run_primary_baseline_adapter(
         ),
         "transfer_manifest_path": relative_or_absolute(paths["transfer_manifest"], root_path),
         "threshold_digest": str(transfer_manifest["threshold_digest"]),
+        "unit_evidence": unit_evidence,
     }
 
 
@@ -835,6 +875,7 @@ def write_external_baseline_method_faithful_outputs(
         "dependency_environment_ready": environment_report[
             "dependency_environment_ready"
         ],
+        **adapter_report["unit_evidence"],
         "supports_paper_claim": False,
         "unsupported_reason": "formal_import_and_comparison_required",
     }
@@ -864,6 +905,12 @@ def write_external_baseline_method_faithful_outputs(
             "primary_baseline_observation_count": adapter_report[
                 "primary_baseline_observation_count"
             ],
+            "method_faithful_scientific_unit_resume_ready": adapter_report[
+                "unit_evidence"
+            ]["method_faithful_scientific_unit_resume_ready"],
+            "method_faithful_scientific_unit_records_digest": adapter_report[
+                "unit_evidence"
+            ]["method_faithful_scientific_unit_records_digest"],
             "supports_paper_claim": False,
         },
     ).to_dict()
@@ -935,13 +982,185 @@ def run_default_external_baseline_method_faithful_plan(root: str | Path = ".") -
     return write_external_baseline_method_faithful_outputs(config=build_default_config(), root=root)
 
 
+def _resolve_repository_member(
+    root_path: Path,
+    relative_value: Any,
+    *,
+    field_name: str,
+    require_file: bool = True,
+) -> Path:
+    """解析仓库相对 POSIX 路径, 并拒绝逃逸和最终符号链接."""
+
+    relative_text = str(relative_value or "")
+    pure_path = PurePosixPath(relative_text)
+    if (
+        not relative_text
+        or "\\" in relative_text
+        or pure_path.is_absolute()
+        or any(part in {"", ".", ".."} for part in pure_path.parts)
+        or pure_path.as_posix() != relative_text
+    ):
+        raise RuntimeError(f"method-faithful 的 {field_name} 不是安全仓库相对路径")
+    resolved_root = root_path.resolve()
+    unresolved = root_path / relative_text
+    resolved = unresolved.resolve()
+    try:
+        resolved.relative_to(resolved_root)
+    except ValueError as exc:
+        raise RuntimeError(f"method-faithful 的 {field_name} 逃逸仓库根目录") from exc
+    if unresolved.is_symlink():
+        raise RuntimeError(f"method-faithful 的 {field_name} 不得为符号链接")
+    if require_file and not resolved.is_file():
+        raise FileNotFoundError(f"method-faithful 的 {field_name} 文件不存在: {relative_text}")
+    if not require_file and not resolved.is_dir():
+        raise FileNotFoundError(f"method-faithful 的 {field_name} 目录不存在: {relative_text}")
+    return resolved
+
+
+def _collect_adapter_unit_files(
+    *,
+    root_path: Path,
+    source_dir: Path,
+    run_dir: Path,
+    baseline_id: str,
+    transfer_manifest: Mapping[str, Any],
+) -> set[Path]:
+    """从 adapter manifest 和完成单元引用构造精确归档文件集合."""
+
+    adapter_manifest_path = _resolve_transfer_member(
+        source_dir,
+        transfer_manifest,
+        path_field="adapter_manifest_path",
+        digest_field="adapter_manifest_sha256",
+    )
+    expected_adapter_root = (run_dir / "adapter_outputs" / baseline_id).resolve()
+    expected_manifest_path = (
+        expected_adapter_root
+        / f"{baseline_id}_method_faithful_sd35_adapter_manifest.json"
+    )
+    if adapter_manifest_path != expected_manifest_path:
+        raise RuntimeError("baseline transfer 未绑定当前 baseline 的唯一 adapter manifest")
+    adapter_manifest = read_json(adapter_manifest_path)
+    artifact_root = _resolve_repository_member(
+        root_path,
+        adapter_manifest.get("artifact_root"),
+        field_name="artifact_root",
+        require_file=False,
+    )
+    expected_artifact_root = expected_adapter_root / "artifacts"
+    if artifact_root != expected_artifact_root:
+        raise RuntimeError("adapter manifest 的 artifact_root 未绑定当前 baseline")
+
+    prompt_plan_path = _resolve_repository_member(
+        root_path,
+        adapter_manifest.get("prompt_plan_path"),
+        field_name="prompt_plan_path",
+    )
+    transfer_prompt_path = _resolve_transfer_member(
+        source_dir,
+        transfer_manifest,
+        path_field="prompt_plan_path",
+        digest_field="prompt_plan_sha256",
+    )
+    if prompt_plan_path != transfer_prompt_path:
+        raise RuntimeError("adapter manifest 与 transfer 未绑定同一 Prompt 计划")
+
+    adapter_files = {adapter_manifest_path}
+    for field_name in (
+        "baseline_observations_path",
+        "image_pairs_path",
+        "attacked_image_manifest_path",
+        "method_faithful_run_identity_path",
+    ):
+        adapter_files.add(
+            _resolve_repository_member(
+                root_path,
+                adapter_manifest.get(field_name),
+                field_name=field_name,
+            )
+        )
+    record_paths = adapter_manifest.get("method_faithful_scientific_unit_record_paths")
+    if not isinstance(record_paths, list) or not record_paths:
+        raise RuntimeError("adapter manifest 缺少方法忠实完成单元路径")
+    for index, relative_path in enumerate(record_paths):
+        record_path = _resolve_repository_member(
+            root_path,
+            relative_path,
+            field_name=f"method_faithful_scientific_unit_record_paths[{index}]",
+        )
+        try:
+            record_path.relative_to(artifact_root)
+        except ValueError as exc:
+            raise RuntimeError("方法忠实完成单元记录未位于当前 artifact_root") from exc
+        adapter_files.add(record_path)
+        record = read_json(record_path)
+        artifacts = record.get("unit_artifacts")
+        if not isinstance(artifacts, list) or not artifacts:
+            raise RuntimeError("方法忠实完成单元缺少真实图像产物")
+        for artifact_index, artifact in enumerate(artifacts):
+            if not isinstance(artifact, Mapping):
+                raise RuntimeError("方法忠实完成单元产物记录必须为 object")
+            artifact_path = _resolve_repository_member(
+                root_path,
+                artifact.get("artifact_path"),
+                field_name=f"unit_artifacts[{artifact_index}].artifact_path",
+            )
+            try:
+                artifact_path.relative_to(artifact_root)
+            except ValueError as exc:
+                raise RuntimeError("方法忠实完成单元图像未位于当前 artifact_root") from exc
+            adapter_files.add(artifact_path)
+
+    for path in adapter_files:
+        try:
+            path.relative_to(expected_adapter_root)
+        except ValueError as exc:
+            raise RuntimeError("adapter 归档成员逃逸当前 baseline 独占目录") from exc
+    adapter_observations_path = _resolve_repository_member(
+        root_path,
+        adapter_manifest.get("baseline_observations_path"),
+        field_name="baseline_observations_path",
+    )
+    split_observations_path = _resolve_transfer_member(
+        source_dir,
+        transfer_manifest,
+        path_field="baseline_observations_path",
+        digest_field="baseline_observations_sha256",
+    )
+    if read_json(adapter_observations_path) != read_json(split_observations_path):
+        raise RuntimeError("adapter 原始 observation 与 transfer observation 不一致")
+    return adapter_files
+
+
+def _inventory_regular_tree(root_dir: Path) -> tuple[set[Path], set[Path]]:
+    """递归盘点普通文件和目录, 遇到符号链接或特殊节点立即闭锁."""
+
+    files: set[Path] = set()
+    directories: set[Path] = set()
+    pending = [root_dir]
+    while pending:
+        current = pending.pop()
+        for child in current.iterdir():
+            if child.is_symlink():
+                raise RuntimeError(f"method-faithful 运行目录包含符号链接: {child.name}")
+            if child.is_file():
+                files.add(child.resolve())
+            elif child.is_dir():
+                resolved_child = child.resolve()
+                directories.add(resolved_child)
+                pending.append(resolved_child)
+            else:
+                raise RuntimeError(f"method-faithful 运行目录包含特殊文件: {child.name}")
+    return files, directories
+
+
 def collect_package_entries(
     root_path: Path,
     output_dir: Path,
     archive_path: Path,
     baseline_id: str,
 ) -> tuple[Path, ...]:
-    """白名单收集当前 baseline 独占产物。"""
+    """按事实引用白名单收集当前 baseline 独占产物."""
 
     resolved_baseline_id = resolve_primary_baseline_id(baseline_id)
     run_dir = output_dir / "run_records" / resolved_baseline_id
@@ -974,19 +1193,291 @@ def collect_package_entries(
         expected_paper_run_name=output_dir.name,
         repository_root=root_path,
     )
-    entries: list[Path] = list(required_scientific_entries)
-    for path in sorted(run_dir.rglob("*")) if run_dir.exists() else ():
-        if path.is_file() and path.resolve() != archive_path.resolve() and path.suffix.lower() != ".zip":
-            entries.append(path)
-    for suffix in (
-        "baseline_observations.json",
-        "baseline_command_results.json",
-        "baseline_transfer_manifest.json",
+
+    transfer_manifest_path = (
+        split_dir / f"{resolved_baseline_id}_baseline_transfer_manifest.json"
+    )
+    transfer_manifest = read_json(transfer_manifest_path)
+    transfer_entries = {
+        transfer_manifest_path.resolve(),
+        _resolve_transfer_member(
+            output_dir,
+            transfer_manifest,
+            path_field="baseline_observations_path",
+            digest_field="baseline_observations_sha256",
+        ),
+        _resolve_transfer_member(
+            output_dir,
+            transfer_manifest,
+            path_field="baseline_command_results_path",
+            digest_field="baseline_command_results_sha256",
+        ),
+    }
+    required_runner_entries = {
+        run_dir / f"{resolved_baseline_id}_baseline_command_plan.json",
+        run_dir / f"{resolved_baseline_id}_command_plan_builder_result.json",
+        run_dir / f"{resolved_baseline_id}_command_plan_runner_result.json",
+        run_dir / f"{resolved_baseline_id}_evidence_validation_result.json",
+        run_dir / f"{resolved_baseline_id}_prompt_plan.json",
+        run_dir / f"{resolved_baseline_id}_progress_events.jsonl",
+        run_dir / f"{resolved_baseline_id}_environment_report.json",
+        run_dir / f"{resolved_baseline_id}_summary.json",
+        run_dir / f"{resolved_baseline_id}_manifest.local.json",
+        run_dir / "execution" / "baseline_execution_manifest.json",
+        run_dir / "execution" / "baseline_command_results.json",
+        run_dir / "execution" / "baseline_observations.json",
+        run_dir / "execution" / "baseline_command_plan_manifest.json",
+        *required_scientific_entries,
+    }
+    missing_runner_entries = sorted(
+        path for path in required_runner_entries if not path.is_file() or path.is_symlink()
+    )
+    if missing_runner_entries:
+        raise FileNotFoundError(
+            "method-faithful 打包缺少正式运行成员: "
+            + ",".join(path.name for path in missing_runner_entries)
+        )
+    adapter_entries = _collect_adapter_unit_files(
+        root_path=root_path,
+        source_dir=output_dir,
+        run_dir=run_dir,
+        baseline_id=resolved_baseline_id,
+        transfer_manifest=transfer_manifest,
+    )
+
+    package_record_dir = run_dir / "package_records"
+    package_record_names = {
+        f"{resolved_baseline_id}_package_input_manifest.json",
+        f"{resolved_baseline_id}_archive_summary.json",
+        f"{resolved_baseline_id}_archive_manifest.local.json",
+    }
+    package_record_files = (
+        {path.resolve() for path in package_record_dir.iterdir() if path.is_file()}
+        if package_record_dir.is_dir() and not package_record_dir.is_symlink()
+        else set()
+    )
+    if package_record_files and {
+        path.name for path in package_record_files
+    } != package_record_names:
+        raise RuntimeError("method-faithful package_records 必须为空或精确包含三项治理记录")
+
+    expected_run_files = {
+        *(path.resolve() for path in required_runner_entries),
+        *(path.resolve() for path in adapter_entries),
+        *package_record_files,
+    }
+    actual_run_files, actual_run_directories = _inventory_regular_tree(run_dir)
+    expected_run_directories = {run_dir.resolve(), package_record_dir.resolve()}
+    for path in expected_run_files:
+        parent = path.parent
+        while True:
+            expected_run_directories.add(parent.resolve())
+            if parent.resolve() == run_dir.resolve():
+                break
+            parent = parent.parent
+    if actual_run_files != expected_run_files:
+        unexpected = sorted(path.name for path in actual_run_files - expected_run_files)
+        missing = sorted(path.name for path in expected_run_files - actual_run_files)
+        raise RuntimeError(
+            "method-faithful 运行目录文件不满足精确白名单: "
+            f"unexpected={unexpected},missing={missing}"
+        )
+    expected_child_directories = expected_run_directories - {run_dir.resolve()}
+    if actual_run_directories != expected_child_directories:
+        unexpected = sorted(
+            path.name for path in actual_run_directories - expected_child_directories
+        )
+        missing = sorted(
+            path.name for path in expected_child_directories - actual_run_directories
+        )
+        raise RuntimeError(
+            "method-faithful 运行目录结构不满足精确白名单: "
+            f"unexpected={unexpected},missing={missing}"
+        )
+    entries = {
+        *expected_run_files,
+        *transfer_entries,
+    }
+    if archive_path.resolve() in entries:
+        raise RuntimeError("method-faithful 结果包不得递归包含自身")
+    return tuple(sorted(entries, key=lambda path: path.relative_to(root_path).as_posix()))
+
+
+def _resolve_transfer_member(
+    source_dir: Path,
+    transfer_manifest: Mapping[str, Any],
+    *,
+    path_field: str,
+    digest_field: str,
+) -> Path:
+    """解析并复验 transfer manifest 声明的单个仓库内事实文件."""
+
+    relative_text = str(transfer_manifest.get(path_field, ""))
+    pure_path = PurePosixPath(relative_text)
+    if (
+        not relative_text
+        or "\\" in relative_text
+        or pure_path.is_absolute()
+        or any(part in {"", ".", ".."} for part in pure_path.parts)
+        or pure_path.as_posix() != relative_text
     ):
-        path = split_dir / f"{resolved_baseline_id}_{suffix}"
-        if path.is_file():
-            entries.append(path)
-    return tuple(dict.fromkeys(entries))
+        raise RuntimeError(f"baseline transfer 的 {path_field} 不是安全相对路径")
+    unresolved = source_dir / relative_text
+    resolved = unresolved.resolve()
+    resolved.relative_to(source_dir.resolve())
+    current = source_dir
+    for part in pure_path.parts:
+        current = current / part
+        if current.is_symlink():
+            raise RuntimeError(f"baseline transfer 的 {path_field} 不得经过符号链接")
+    if not resolved.is_file():
+        raise FileNotFoundError(f"baseline transfer 成员不存在: {relative_text}")
+    if file_sha256(resolved) != str(transfer_manifest.get(digest_field, "")):
+        raise RuntimeError(f"baseline transfer 的 {path_field} 字节摘要不一致")
+    return resolved
+
+
+def _validate_package_unit_evidence(
+    *,
+    root_path: Path,
+    source_dir: Path,
+    paper_run: Any,
+    run_summary: Mapping[str, Any],
+    run_manifest: Mapping[str, Any],
+    transfer_manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    """在归档前从原子单元重新构造 observation 与来源聚合."""
+
+    member_specs = (
+        (
+            "baseline_observations_path",
+            "baseline_observations_sha256",
+        ),
+        (
+            "baseline_command_results_path",
+            "baseline_command_results_sha256",
+        ),
+        ("prompt_plan_path", "prompt_plan_sha256"),
+        ("adapter_manifest_path", "adapter_manifest_sha256"),
+        ("execution_manifest_path", "execution_manifest_sha256"),
+    )
+    members = {
+        path_field: _resolve_transfer_member(
+            source_dir,
+            transfer_manifest,
+            path_field=path_field,
+            digest_field=digest_field,
+        )
+        for path_field, digest_field in member_specs
+    }
+    observations = load_baseline_observation_rows(
+        members["baseline_observations_path"]
+    )
+    command_results = read_json(members["baseline_command_results_path"])
+    execution_manifest = read_json(members["execution_manifest_path"])
+    adapter_manifest = read_json(members["adapter_manifest_path"])
+    unit_evidence = validate_method_faithful_adapter_unit_evidence(
+        manifest=adapter_manifest,
+        observation_rows=observations,
+        root=root_path,
+    )
+    prompt_rows = read_json(members["prompt_plan_path"])
+    if not isinstance(prompt_rows, list) or len(prompt_rows) != paper_run.prompt_count:
+        raise RuntimeError("baseline 归档 Prompt 计划未覆盖完整论文运行规模")
+    expected_calibration_count = sum(
+        str(row.get("split", "")) == "calibration"
+        for row in prompt_rows
+        if isinstance(row, Mapping)
+    )
+    expected_test_count = sum(
+        str(row.get("split", "")) == "test"
+        for row in prompt_rows
+        if isinstance(row, Mapping)
+    )
+    run_config = adapter_manifest.get("run_config")
+    formal_attack_names = transfer_manifest.get("formal_attack_names")
+    if not isinstance(run_config, Mapping) or not isinstance(formal_attack_names, list):
+        raise RuntimeError("baseline 归档缺少方法忠实运行配置或正式攻击集合")
+    run_attack_names = [str(name) for name in run_config.get("attack_families", ())]
+    transfer_attack_names = [str(name) for name in formal_attack_names]
+    if not all(
+        (
+            int(run_config.get("prompt_count", -1)) == len(prompt_rows),
+            int(run_config.get("test_prompt_count", -1)) == expected_test_count,
+            len(run_attack_names) == len(set(run_attack_names)),
+            len(transfer_attack_names) == len(set(transfer_attack_names)),
+            set(run_attack_names) == set(transfer_attack_names),
+            transfer_manifest.get("prompt_protocol_digest")
+            == canonical_prompt_protocol_digest(prompt_rows),
+        )
+    ):
+        raise RuntimeError("baseline 归档单元计划未绑定完整 Prompt 与正式攻击协议")
+    expected_attack_unit_count = expected_test_count * len(transfer_attack_names) * 2
+    if not all(
+        (
+            int(unit_evidence.get("method_faithful_source_prompt_unit_count", -1))
+            == len(prompt_rows),
+            int(unit_evidence.get("method_faithful_formal_attack_unit_count", -1))
+            == expected_attack_unit_count,
+            len(observations) == len(prompt_rows) * 2 + expected_attack_unit_count,
+        )
+    ):
+        raise RuntimeError("baseline 归档原子单元未覆盖完整 Prompt 与攻击 exact set")
+    if (
+        not isinstance(command_results, list)
+        or len(command_results) != 1
+        or not isinstance(execution_manifest, Mapping)
+    ):
+        raise RuntimeError("baseline 归档 command result 数量不一致")
+    command_result = command_results[0]
+    if not isinstance(command_result, Mapping) or not all(
+        (
+            command_result.get("baseline_id") == transfer_manifest.get("baseline_id"),
+            int(command_result.get("return_code", -1)) == 0,
+            int(command_result.get("observation_count", -1)) == len(observations),
+            int(execution_manifest.get("observation_count", -1)) == len(observations),
+        )
+    ):
+        raise RuntimeError("baseline 归档命令结果或执行 manifest 未绑定 observation")
+    threshold_audit = audit_fixed_fpr_observation_threshold(
+        observations,
+        target_fpr=paper_run.target_fpr,
+        expected_calibration_negative_count=expected_calibration_count,
+    )
+    if not threshold_audit.fixed_fpr_ready:
+        raise RuntimeError("baseline 归档 observation 未通过 fixed-FPR 复验")
+    if not all(
+        (
+            int(transfer_manifest.get("baseline_observation_count", -1))
+            == len(observations),
+            int(run_summary.get("primary_baseline_observation_count", -1))
+            == len(observations),
+            transfer_manifest.get("threshold") == threshold_audit.frozen_threshold,
+            transfer_manifest.get("threshold_digest")
+            == threshold_audit.threshold_digest,
+            run_summary.get("threshold_digest") == threshold_audit.threshold_digest,
+        )
+    ):
+        raise RuntimeError("baseline 归档 observation 计数或冻结阈值身份不一致")
+    for field_name, expected_value in unit_evidence.items():
+        if transfer_manifest.get(field_name) != expected_value:
+            raise RuntimeError(
+                f"baseline transfer 的 {field_name} 未绑定原子单元复算值"
+            )
+        if run_summary.get(field_name) != expected_value:
+            raise RuntimeError(
+                f"baseline summary 的 {field_name} 未绑定原子单元复算值"
+            )
+    metadata = run_manifest.get("metadata")
+    if not isinstance(metadata, Mapping) or not all(
+        (
+            metadata.get("method_faithful_scientific_unit_resume_ready") is True,
+            metadata.get("method_faithful_scientific_unit_records_digest")
+            == unit_evidence["method_faithful_scientific_unit_records_digest"],
+        )
+    ):
+        raise RuntimeError("baseline 运行 manifest 未绑定原子单元证据")
+    return unit_evidence
 
 
 def package_external_baseline_method_faithful_outputs(
@@ -1078,6 +1569,14 @@ def package_external_baseline_method_faithful_outputs(
         )
     ):
         raise RuntimeError("baseline transfer manifest 未通过")
+    package_unit_evidence = _validate_package_unit_evidence(
+        root_path=root_path,
+        source_dir=source_dir,
+        paper_run=paper_run,
+        run_summary=run_summary,
+        run_manifest=run_manifest,
+        transfer_manifest=transfer_manifest,
+    )
 
     resolved_archive_name = archive_name or (
         f"external_baseline_method_faithful_package_{resolved_baseline_id}_"
@@ -1126,6 +1625,9 @@ def package_external_baseline_method_faithful_outputs(
             "model_revision": DEFAULT_MODEL_REVISION,
             "formal_execution_run_lock": formal_execution_run_lock,
             "formal_execution_package_lock": formal_execution_package_lock,
+            "method_faithful_scientific_unit_records_digest": package_unit_evidence[
+                "method_faithful_scientific_unit_records_digest"
+            ],
             "entry_paths": [entry.relative_to(root_path).as_posix() for entry in entries],
             "entry_sha256": {
                 entry.relative_to(root_path).as_posix(): file_sha256(entry) for entry in entries

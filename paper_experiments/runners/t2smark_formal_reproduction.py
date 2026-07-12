@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import stat
 import sys
 from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -37,6 +38,16 @@ from experiments.protocol.splits import apply_split_assignments
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from external_baseline.primary.sd35_method_faithful_common import supported_formal_image_attack_names
+from external_baseline.primary.t2smark.adapter.formal_unit_checkpoint import (
+    aggregate_t2smark_formal_unit_records,
+    build_t2smark_formal_unit_contract,
+    inspect_t2smark_formal_unit_records,
+    validate_t2smark_formal_unit_contract,
+    write_or_validate_t2smark_formal_unit_contract,
+)
+from external_baseline.primary.t2smark.adapter.run_slm_eval import (
+    build_t2smark_observations,
+)
 from paper_experiments.runners.external_source_runtime import ensure_cuda_if_requested, run_command
 from paper_experiments.runners.t2smark_source_runtime import (
     DEFAULT_T2SMARK_MODEL_ID,
@@ -243,6 +254,8 @@ def output_paths(root_path: Path, config: T2SMarkFormalReproductionConfig) -> di
         "official_results": official_run_dir / "results.json",
         "official_settings": official_run_dir / "settings.json",
         "official_protocol_binding": official_run_dir / "slm_formal_protocol_binding.json",
+        "official_unit_contract": official_run_dir / "slm_formal_unit_contract.json",
+        "official_unit_dir": official_run_dir / "slm_formal_units",
         "official_images": official_run_dir / "images",
         "prompt_dataset": output_dir / "t2smark_formal_prompt_dataset.json",
         "prompt_plan": output_dir / "t2smark_formal_prompt_plan.json",
@@ -319,6 +332,9 @@ def write_paper_run_prompt_inputs(
                 "caption": row["prompt_text"],
                 "prompt_id": row["prompt_id"],
                 "prompt_index": row["prompt_index"],
+                "prompt_set": row["prompt_set"],
+                "split": row["split"],
+                "prompt_digest": row["prompt_digest"],
             }
             for row in prompt_rows
         ]
@@ -439,6 +455,58 @@ def build_t2smark_formal_protocol_binding(
     return payload
 
 
+def build_t2smark_formal_checkpoint_contract(
+    config: T2SMarkFormalReproductionConfig,
+    *,
+    paper_run: Any,
+    prompt_rows: list[dict[str, Any]],
+    protocol_binding: dict[str, Any],
+    source_report: dict[str, Any],
+    formal_execution_lock: dict[str, Any],
+) -> dict[str, Any]:
+    """构造官方源码逐 Prompt 恢复所需的静态完整契约."""
+
+    source_identity = {
+        field_name: source_report[field_name]
+        for field_name in (
+            "official_repository_commit",
+            "protocol_patch_sha256",
+            "source_worktree_exact",
+            "source_worktree_digest",
+            "patched_source_sha256",
+        )
+    }
+    paper_run_identity = {
+        "run_name": paper_run.run_name,
+        "protocol_profile": paper_run.protocol_profile,
+        "prompt_set": paper_run.prompt_set,
+        "prompt_count": int(paper_run.prompt_count),
+        "sample_count": int(paper_run.sample_count),
+        "target_fpr": float(paper_run.target_fpr),
+    }
+    formal_reproduction_config = asdict(config)
+    for operational_field in (
+        "output_dir",
+        "drive_output_dir",
+        "prompt_file",
+        "reuse_existing",
+        "force_generate",
+        "require_cuda",
+        "timeout_seconds",
+        "enable_workflow_progress_bar",
+    ):
+        formal_reproduction_config.pop(operational_field, None)
+    return build_t2smark_formal_unit_contract(
+        formal_reproduction_config=formal_reproduction_config,
+        paper_run_identity=paper_run_identity,
+        prompt_rows=prompt_rows,
+        prompt_plan_digest=build_stable_digest(prompt_rows),
+        protocol_binding=protocol_binding,
+        source_identity=source_identity,
+        formal_execution_lock=formal_execution_lock,
+    )
+
+
 def write_t2smark_formal_protocol_binding(
     path: Path,
     expected_binding: dict[str, Any],
@@ -496,11 +564,15 @@ def should_run_official(
     protocol_binding_path: Path,
     settings_path: Path,
     expected_protocol_binding: dict[str, Any],
+    formal_unit_set_ready: bool | None = None,
+    expected_formal_attack_sample_count: int | None = None,
 ) -> tuple[bool, str]:
     """仅在 canonical 协议、源码和结果摘要全部一致时复用官方结果。"""
 
     if config.force_generate:
         return True, "force_generate_requested"
+    if formal_unit_set_ready is False:
+        return True, "formal_prompt_units_incomplete"
     if config.reuse_existing and results_path.is_file():
         try:
             validate_t2smark_formal_protocol_binding(
@@ -512,10 +584,15 @@ def should_run_official(
         except (FileNotFoundError, TypeError, ValueError):
             return True, "existing_results_protocol_binding_mismatch"
         attack_names = configured_attack_names(config.formal_attack_families)
-        if attack_names and count_t2smark_formal_attack_items(results_path, attack_names) != max(
-            1,
-            int(config.prompt_limit),
-        ):
+        required_attack_count = (
+            max(1, int(config.prompt_limit))
+            if expected_formal_attack_sample_count is None
+            else int(expected_formal_attack_sample_count)
+        )
+        if attack_names and count_t2smark_formal_attack_items(
+            results_path,
+            attack_names,
+        ) != required_attack_count:
             return True, "existing_results_formal_attack_count_mismatch"
         if config.save_clean_pair and count_t2smark_pair_quality_items(results_path) != max(1, int(config.prompt_limit)):
             return True, "existing_results_pair_quality_count_mismatch"
@@ -562,6 +639,9 @@ def run_t2smark_official_if_needed(
     config: T2SMarkFormalReproductionConfig,
     paths: dict[str, Path],
     prompt_report: dict[str, Any],
+    prompt_rows: list[dict[str, Any]],
+    environment_report: dict[str, Any],
+    formal_execution_lock: dict[str, Any],
     progress: object | None = None,
 ) -> dict[str, Any]:
     """运行或复用 T2SMark 官方 SD3.5 Medium formal 结果。"""
@@ -575,14 +655,52 @@ def run_t2smark_official_if_needed(
         prompt_report=prompt_report,
         source_report=source_report,
     )
+    resolved_run_dir = paths["official_run_dir"].resolve()
+    resolved_official_root = paths["official_root"].resolve()
+    resolved_run_dir.relative_to(resolved_official_root)
+    resolved_run_dir.mkdir(parents=True, exist_ok=True)
+    expected_contract = build_t2smark_formal_checkpoint_contract(
+        config,
+        paper_run=paper_run,
+        prompt_rows=prompt_rows,
+        protocol_binding=expected_binding,
+        source_report=source_report,
+        formal_execution_lock=formal_execution_lock,
+    )
+    unit_contract = write_or_validate_t2smark_formal_unit_contract(
+        paths["official_unit_contract"],
+        expected_contract,
+    )
+    unit_records, missing_unit_indices = inspect_t2smark_formal_unit_records(
+        paths["official_unit_dir"],
+        contract=unit_contract,
+        artifact_root=paths["official_run_dir"],
+        runtime_environment=environment_report,
+    )
+    expected_attack_sample_count = sum(
+        str(row.get("split", "")) == "test" for row in prompt_rows
+    )
     should_run, reason = should_run_official(
         config,
         paths["official_results"],
         protocol_binding_path=paths["official_protocol_binding"],
         settings_path=paths["official_settings"],
         expected_protocol_binding=expected_binding,
+        formal_unit_set_ready=not missing_unit_indices,
+        expected_formal_attack_sample_count=expected_attack_sample_count,
     )
     if not should_run:
+        rebuilt_results, unit_aggregate = aggregate_t2smark_formal_unit_records(
+            unit_records,
+            contract=unit_contract,
+            artifact_root=paths["official_run_dir"],
+            runtime_environment=environment_report,
+        )
+        official_payload = read_json(paths["official_results"])
+        if not isinstance(official_payload, dict) or official_payload != (
+            _rebuild_t2smark_official_payload(rebuilt_results, unit_aggregate)
+        ):
+            raise RuntimeError("T2SMark 官方结果与逐 Prompt 单元聚合不一致")
         protocol_binding = validate_t2smark_formal_protocol_binding(
             paths["official_protocol_binding"],
             expected_binding,
@@ -609,14 +727,10 @@ def run_t2smark_official_if_needed(
             "official_protocol_binding_ready": True,
             "official_protocol_binding": protocol_binding,
             "official_protocol_binding_path": relative_or_absolute(paths["official_protocol_binding"], root_path),
+            "formal_unit_aggregate": unit_aggregate,
+            "formal_unit_contract": unit_contract,
         }
 
-    resolved_run_dir = paths["official_run_dir"].resolve()
-    resolved_official_root = paths["official_root"].resolve()
-    resolved_run_dir.relative_to(resolved_official_root)
-    if resolved_run_dir.exists():
-        shutil.rmtree(resolved_run_dir)
-    resolved_run_dir.mkdir(parents=True, exist_ok=True)
     ensure_cuda_if_requested(config.require_cuda)
     source_entry = root_path / DEFAULT_T2SMARK_SOURCE_ENTRY
     command = [
@@ -646,6 +760,10 @@ def run_t2smark_official_if_needed(
         str(config.num_inversion_steps),
         "--fix_key",
         "--SDv35M",
+        "--slm_unit_contract",
+        str(paths["official_unit_contract"]),
+        "--slm_runtime_environment_report",
+        str(paths["environment_report"]),
     ]
     if config.save_clean_pair:
         command.extend(
@@ -676,6 +794,25 @@ def run_t2smark_official_if_needed(
     write_json(paths["official_command_result"], result)
     if int(result["return_code"]) != 0:
         raise RuntimeError("T2SMark 官方 formal 命令执行失败")
+    unit_records, missing_unit_indices = inspect_t2smark_formal_unit_records(
+        paths["official_unit_dir"],
+        contract=unit_contract,
+        artifact_root=paths["official_run_dir"],
+        runtime_environment=environment_report,
+    )
+    if missing_unit_indices:
+        raise RuntimeError("T2SMark 官方命令返回成功但仍缺少逐 Prompt 完成单元")
+    rebuilt_results, unit_aggregate = aggregate_t2smark_formal_unit_records(
+        unit_records,
+        contract=unit_contract,
+        artifact_root=paths["official_run_dir"],
+        runtime_environment=environment_report,
+    )
+    official_payload = read_json(paths["official_results"])
+    if not isinstance(official_payload, dict) or official_payload != (
+        _rebuild_t2smark_official_payload(rebuilt_results, unit_aggregate)
+    ):
+        raise RuntimeError("T2SMark 官方结果未由完整逐 Prompt 单元确定性重建")
     protocol_binding = write_t2smark_formal_protocol_binding(
         paths["official_protocol_binding"],
         expected_binding,
@@ -693,6 +830,8 @@ def run_t2smark_official_if_needed(
         "official_protocol_binding_ready": True,
         "official_protocol_binding": protocol_binding,
         "official_protocol_binding_path": relative_or_absolute(paths["official_protocol_binding"], root_path),
+        "formal_unit_aggregate": unit_aggregate,
+        "formal_unit_contract": unit_contract,
     }
 
 
@@ -905,6 +1044,7 @@ def build_t2smark_formal_run_readiness(
     pair_quality_ready: bool,
     formal_attack_ready: bool,
     formal_import_validation_ready: bool,
+    formal_unit_set_ready: bool,
 ) -> bool:
     """集中判定 T2SMark 运行是否达到可打包的正式边界。"""
 
@@ -917,6 +1057,7 @@ def build_t2smark_formal_run_readiness(
             pair_quality_ready,
             formal_attack_ready,
             formal_import_validation_ready,
+            formal_unit_set_ready,
         )
     )
 
@@ -961,7 +1102,16 @@ def write_t2smark_formal_reproduction_outputs(
                 raise RuntimeError("T2SMark canonical Prompt 协议未完整物化")
             prompt_rows = read_json(paths["prompt_plan"])
             update_progress(run_progress, profile=f"operation=write_prompt_inputs prompts={prompt_report['selected_prompt_count']}")
-            official_report = run_t2smark_official_if_needed(root_path, config, paths, prompt_report, progress=run_progress)
+            official_report = run_t2smark_official_if_needed(
+                root_path,
+                config,
+                paths,
+                prompt_report,
+                prompt_rows,
+                environment_report,
+                formal_execution_run_lock,
+                progress=run_progress,
+            )
             update_progress(run_progress, profile="operation=t2smark_formal_official_reference")
             emit_progress_status(run_progress, profile="operation=build_image_pairs status=running")
             image_pairs = build_t2smark_formal_image_pairs(root_path, paths, prompt_rows)
@@ -1001,12 +1151,22 @@ def write_t2smark_formal_reproduction_outputs(
         and official_report.get("official_protocol_binding_ready")
         and paths["official_protocol_binding"].is_file()
     )
+    formal_unit_aggregate = dict(official_report.get("formal_unit_aggregate", {}))
+    formal_unit_set_ready = bool(
+        formal_unit_aggregate.get("formal_unit_set_complete") is True
+        and formal_unit_aggregate.get("scientific_unit_provenance_ready") is True
+        and int(formal_unit_aggregate.get("formal_unit_record_count", 0))
+        == int(prompt_report["selected_prompt_count"])
+    )
     adapter_ready = paths["adapter_observations"].is_file() and adapter_report.get("adapter_return_code") == 0
     pair_quality_ready = bool(pair_quality_report.get("strict_pair_quality_ready", False))
     formal_attack_names = configured_attack_names(config.formal_attack_families)
     formal_attack_result_count = count_t2smark_formal_attack_items(paths["official_results"], formal_attack_names)
+    expected_formal_attack_sample_count = sum(
+        str(row.get("split", "")) == "test" for row in prompt_rows
+    )
     formal_attack_ready = bool(formal_attack_names) and formal_attack_result_count == int(
-        prompt_report["selected_prompt_count"]
+        expected_formal_attack_sample_count
     )
     run_ready = build_t2smark_formal_run_readiness(
         dependency_environment_ready=bool(
@@ -1018,6 +1178,7 @@ def write_t2smark_formal_reproduction_outputs(
         pair_quality_ready=not config.save_clean_pair or pair_quality_ready,
         formal_attack_ready=formal_attack_ready,
         formal_import_validation_ready=formal_import_ready,
+        formal_unit_set_ready=formal_unit_set_ready,
     )
     protocol_binding = dict(official_report.get("official_protocol_binding", {}))
     summary = {
@@ -1034,7 +1195,21 @@ def write_t2smark_formal_reproduction_outputs(
         "paper_run_prompt_protocol_ready": bool(prompt_report["paper_run_prompt_protocol_ready"]),
         "t2smark_formal_attack_names": list(formal_attack_names),
         "t2smark_formal_attack_result_count": formal_attack_result_count,
+        "t2smark_formal_attack_expected_test_count": expected_formal_attack_sample_count,
         "t2smark_formal_attack_ready": formal_attack_ready,
+        "t2smark_formal_unit_set_ready": formal_unit_set_ready,
+        "t2smark_formal_unit_record_count": int(
+            formal_unit_aggregate.get("formal_unit_record_count", 0)
+        ),
+        "t2smark_formal_unit_records_digest": str(
+            formal_unit_aggregate.get("formal_unit_records_digest", "")
+        ),
+        "t2smark_formal_unit_aggregate_digest": str(
+            formal_unit_aggregate.get("formal_unit_aggregate_digest", "")
+        ),
+        "scientific_unit_provenance_ready": bool(
+            formal_unit_aggregate.get("scientific_unit_provenance_ready", False)
+        ),
         "image_pair_count": len(image_pairs),
         "t2smark_strict_pair_quality_ready": pair_quality_ready,
         "t2smark_strict_pair_quality_count": int(pair_quality_report.get("measured_strict_pair_quality_count", 0)),
@@ -1077,6 +1252,7 @@ def write_t2smark_formal_reproduction_outputs(
         relative_or_absolute(paths["pair_quality_metrics"], root_path),
         relative_or_absolute(paths["pair_quality_summary"], root_path),
         relative_or_absolute(paths["official_protocol_binding"], root_path),
+        relative_or_absolute(paths["official_unit_contract"], root_path),
         relative_or_absolute(paths["source_prepare_result"], root_path),
         relative_or_absolute(paths["official_command_result"], root_path),
         relative_or_absolute(paths["adapter_command_result"], root_path),
@@ -1104,6 +1280,10 @@ def write_t2smark_formal_reproduction_outputs(
             "formal_import_validation_ready": summary["formal_import_validation_ready"],
             "t2smark_strict_pair_quality_ready": pair_quality_ready,
             "t2smark_strict_pair_quality_count": summary["t2smark_strict_pair_quality_count"],
+            "t2smark_formal_unit_set_ready": formal_unit_set_ready,
+            "t2smark_formal_unit_records_digest": summary[
+                "t2smark_formal_unit_records_digest"
+            ],
             "supports_paper_claim": False,
         },
     ).to_dict()
@@ -1198,26 +1378,129 @@ def _read_jsonl_count(path: Path, label: str) -> int:
     return len(rows)
 
 
+def _read_jsonl_rows(path: Path, label: str) -> list[dict[str, Any]]:
+    """读取打包门禁所需 JSONL 对象, 并保留正式顺序."""
+
+    if not path.is_file():
+        raise FileNotFoundError(f"T2SMark 打包缺少 {label}: {path}")
+    rows = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8-sig").splitlines()
+        if line.strip()
+    ]
+    if not all(isinstance(row, dict) for row in rows):
+        raise TypeError(f"T2SMark {label} 必须只包含 JSON object")
+    return [dict(row) for row in rows]
+
+
+def _rebuild_t2smark_official_payload(
+    results: dict[str, Any],
+    unit_aggregate: dict[str, Any],
+) -> dict[str, Any]:
+    """从逐 Prompt 单元重建官方 results.json 的全部正式派生字段."""
+
+    ordered_indices = tuple(range(len(results)))
+    if set(results) != {str(index) for index in ordered_indices}:
+        raise RuntimeError("T2SMark 单元聚合结果索引不是连续 exact set")
+    ordered_results = [dict(results[str(index)]) for index in ordered_indices]
+    no_watermark_scores = [
+        float(row["robustness"]["norm1_no_w"]) for row in ordered_results
+    ]
+    watermarked_scores = [
+        float(row["robustness"]["norm1_w"]) for row in ordered_results
+    ]
+    bit_accuracies = [
+        float(row["robustness"]["acc_msg"]) for row in ordered_results
+    ]
+    if not no_watermark_scores or not watermarked_scores:
+        raise RuntimeError("T2SMark 官方派生结果缺少完整正负连续分数")
+    maximum_negative = max(no_watermark_scores)
+    zero_fpr_tpr = sum(
+        score > maximum_negative for score in watermarked_scores
+    ) / len(watermarked_scores)
+    payload = {str(index): ordered_results[index] for index in ordered_indices}
+    payload["tpr"] = zero_fpr_tpr
+    payload["bit_accuracy"] = sum(bit_accuracies) / len(bit_accuracies)
+    payload["slm_formal_unit_aggregate"] = dict(unit_aggregate)
+    return payload
+
+
 def _expected_indexed_pngs(directory: Path, count: int) -> set[Path]:
     """构造从0开始的完整 Prompt 图像文件集合。"""
 
     return {directory / f"{index:05d}.png" for index in range(count)}
 
 
-def _expected_attack_pngs(directory: Path, count: int, attack_names: tuple[str, ...]) -> set[Path]:
+def _expected_attack_pngs(
+    directory: Path,
+    prompt_indices: tuple[int, ...],
+    attack_names: tuple[str, ...],
+) -> set[Path]:
     """构造每个 Prompt、每种攻击和正负角色的完整图像集合。"""
 
     return {
         directory / f"{index:05d}_{attack_name}_{sample_role}.png"
-        for index in range(count)
+        for index in prompt_indices
         for attack_name in attack_names
         for sample_role in ("attacked_negative", "attacked_positive")
     }
 
 
+def _path_is_link_or_reparse(path: Path) -> bool:
+    """不跟随目标地识别符号链接、junction 和 Windows reparse point。"""
+
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    if is_junction is not None and is_junction():
+        return True
+    try:
+        file_attributes = int(getattr(path.lstat(), "st_file_attributes", 0))
+    except FileNotFoundError:
+        return False
+    reparse_attribute = int(getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+    return bool(reparse_attribute and file_attributes & reparse_attribute)
+
+
+def _inventory_t2smark_result_tree(
+    output_dir: Path,
+) -> tuple[tuple[Path, ...], tuple[Path, ...]]:
+    """使用 lstat 枚举普通文件与目录, 拒绝根路径和成员中的链接或特殊文件。"""
+
+    if _path_is_link_or_reparse(output_dir):
+        raise RuntimeError("T2SMark 结果根不得是链接或 reparse point")
+    try:
+        root_mode = output_dir.lstat().st_mode
+    except FileNotFoundError as error:
+        raise FileNotFoundError("T2SMark 结果根不存在") from error
+    if not stat.S_ISDIR(root_mode):
+        raise RuntimeError("T2SMark 结果根必须是普通目录")
+
+    files: list[Path] = []
+    directories: list[Path] = []
+    pending = [output_dir]
+    while pending:
+        directory = pending.pop()
+        for path in sorted(directory.iterdir(), key=lambda item: item.name):
+            if _path_is_link_or_reparse(path):
+                raise RuntimeError("T2SMark 结果目录包含链接或 reparse point")
+            mode = path.lstat().st_mode
+            if stat.S_ISREG(mode):
+                files.append(path)
+            elif stat.S_ISDIR(mode):
+                directories.append(path)
+                pending.append(path)
+            else:
+                raise RuntimeError("T2SMark 结果目录包含非普通文件")
+    return tuple(files), tuple(directories)
+
+
 def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Path) -> tuple[Path, ...]:
     """校验 pass 运行并返回 T2SMark formal 精确白名单文件。"""
 
+    inventory_files, inventory_directories = _inventory_t2smark_result_tree(
+        output_dir
+    )
     summary_path = output_dir / "t2smark_formal_reproduction_summary.json"
     validation_path = output_dir / "t2smark_formal_import_validation_report.json"
     manifest_path = output_dir / "t2smark_formal_reproduction_manifest.local.json"
@@ -1286,7 +1569,14 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
     image_pairs = _read_json_array(paths["image_pairs"], "image pairs")
     observations = _read_json_array(paths["adapter_observations"], "adapter observations")
     attack_names = configured_attack_names(config.formal_attack_families)
-    expected_observation_count = prompt_count * (2 + 2 * len(attack_names))
+    test_prompt_indices = tuple(
+        index
+        for index, row in enumerate(prompt_rows)
+        if str(row.get("split", "")) == "test"
+    )
+    expected_observation_count = prompt_count * 2 + len(test_prompt_indices) * 2 * len(
+        attack_names
+    )
     if len(prompt_rows) != prompt_count or len(image_pairs) != prompt_count:
         raise RuntimeError("T2SMark Prompt plan 或 image pair 数量不完整")
     if len(observations) != expected_observation_count:
@@ -1301,13 +1591,172 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
         raise RuntimeError("T2SMark strict pair quality 未通过")
     if int(pair_quality_summary.get("measured_strict_pair_quality_count", 0)) != prompt_count:
         raise RuntimeError("T2SMark strict pair quality 未覆盖完整 Prompt")
-    if count_t2smark_formal_attack_items(paths["official_results"], attack_names) != prompt_count:
-        raise RuntimeError("T2SMark 官方结果未覆盖完整 Prompt 与攻击集合")
+    if count_t2smark_formal_attack_items(
+        paths["official_results"], attack_names
+    ) != len(test_prompt_indices):
+        raise RuntimeError("T2SMark 官方结果未覆盖完整 test Prompt 与攻击集合")
+    environment_report = read_json(paths["environment_report"])
+    if not isinstance(environment_report, dict):
+        raise TypeError("T2SMark 打包环境报告必须是 JSON object")
+    formal_execution_lock = run_manifest.get("formal_execution_run_lock")
+    if not isinstance(formal_execution_lock, dict):
+        raise TypeError("T2SMark 运行 manifest 缺少正式代码锁")
+    expected_contract = build_t2smark_formal_checkpoint_contract(
+        config,
+        paper_run=paper_run,
+        prompt_rows=prompt_rows,
+        protocol_binding=expected_binding,
+        source_report=source_report,
+        formal_execution_lock=formal_execution_lock,
+    )
+    unit_contract = validate_t2smark_formal_unit_contract(
+        read_json(paths["official_unit_contract"])
+    )
+    if unit_contract != expected_contract:
+        raise RuntimeError("T2SMark 打包单元契约与正式运行身份不一致")
+    unit_records, missing_unit_indices = inspect_t2smark_formal_unit_records(
+        paths["official_unit_dir"],
+        contract=unit_contract,
+        artifact_root=paths["official_run_dir"],
+        runtime_environment=environment_report,
+    )
+    if missing_unit_indices:
+        raise RuntimeError("T2SMark 打包缺少逐 Prompt 完成单元")
+    rebuilt_results, unit_aggregate = aggregate_t2smark_formal_unit_records(
+        unit_records,
+        contract=unit_contract,
+        artifact_root=paths["official_run_dir"],
+        runtime_environment=environment_report,
+    )
+    official_payload = read_json(paths["official_results"])
+    expected_official_payload = _rebuild_t2smark_official_payload(
+        rebuilt_results,
+        unit_aggregate,
+    )
+    if not isinstance(official_payload, dict) or official_payload != expected_official_payload:
+        raise RuntimeError("T2SMark 打包结果与逐 Prompt 单元聚合不一致")
+    if not all(
+        (
+            summary.get("t2smark_formal_unit_set_ready") is True,
+            summary.get("t2smark_formal_unit_records_digest")
+            == unit_aggregate["formal_unit_records_digest"],
+            summary.get("t2smark_formal_unit_aggregate_digest")
+            == unit_aggregate["formal_unit_aggregate_digest"],
+        )
+    ):
+        raise RuntimeError("T2SMark summary 未绑定完整逐 Prompt 单元集合")
+
+    adapter_manifest = read_json(paths["adapter_manifest"])
+    adapter_artifact_manifest = read_json(paths["adapter_artifact_manifest"])
+    if not isinstance(adapter_manifest, dict) or adapter_artifact_manifest != adapter_manifest:
+        raise RuntimeError("T2SMark adapter manifest 双份事实不一致")
+    adapter_digest = str(adapter_manifest.get("adapter_digest", ""))
+    if build_stable_digest(
+        {key: value for key, value in adapter_manifest.items() if key != "adapter_digest"}
+    ) != adapter_digest:
+        raise RuntimeError("T2SMark adapter manifest 自摘要不一致")
+    rebuilt_observations, rebuilt_adapter_core = build_t2smark_observations(
+        image_pairs=image_pairs,
+        t2smark_results=rebuilt_results,
+        target_fpr=config.target_fpr,
+        evidence_root=root_path,
+    )
+    if observations != rebuilt_observations:
+        raise RuntimeError("T2SMark adapter observations 无法由原子单元确定性重建")
+    for field_name, expected_value in rebuilt_adapter_core.items():
+        if field_name == "adapter_digest":
+            continue
+        if adapter_manifest.get(field_name) != expected_value:
+            raise RuntimeError(f"T2SMark adapter manifest 的 {field_name} 复算不一致")
+    expected_adapter_paths = {
+        "baseline_observations_path": paths["adapter_observations"]
+        .relative_to(root_path)
+        .as_posix(),
+        "image_pairs_path": paths["image_pairs"].relative_to(root_path).as_posix(),
+        "t2smark_results_path": paths["official_results"]
+        .relative_to(root_path)
+        .as_posix(),
+    }
+    for field_name, expected_value in expected_adapter_paths.items():
+        if adapter_manifest.get(field_name) != expected_value:
+            raise RuntimeError(f"T2SMark adapter manifest 的 {field_name} 不是可迁移路径")
+    if adapter_manifest.get("generation_protocol") != {
+        "model_id": config.model_id,
+        "model_revision": config.model_revision,
+        "num_inference_steps": int(config.num_inference_steps),
+        "guidance_scale": float(config.guidance_scale),
+    }:
+        raise RuntimeError("T2SMark adapter 生成协议与正式配置不一致")
+    if adapter_manifest.get("detection_protocol") != {
+        "input_access_mode": "image_only",
+        "num_inversion_steps": int(config.num_inversion_steps),
+        "target_fpr": float(config.target_fpr),
+    }:
+        raise RuntimeError("T2SMark adapter 检测协议与正式配置不一致")
+
+    expected_calibration_count = sum(
+        str(row.get("split", "")) == "calibration" for row in prompt_rows
+    )
+    threshold_audit = audit_fixed_fpr_observation_threshold(
+        observations,
+        target_fpr=config.target_fpr,
+        expected_calibration_negative_count=expected_calibration_count,
+    )
+    if not threshold_audit.fixed_fpr_ready:
+        raise RuntimeError("T2SMark 打包 observation 未通过 fixed-FPR 复验")
+    from experiments.protocol.attacks import default_attack_configs
+
+    required_attack_names = {
+        attack.attack_name
+        for attack in default_attack_configs()
+        if attack.enabled and attack.resource_profile in {"full_main", "full_extra"}
+    }
+    actual_attack_names = {
+        str(row.get("attack_name") or row.get("attack_condition"))
+        for row in observations
+        if str(row.get("sample_role", "")).startswith("attacked_")
+    }
+    evidence_paths = [
+        relative_or_absolute(paths["official_results"], root_path),
+        relative_or_absolute(paths["image_pairs"], root_path),
+        relative_or_absolute(paths["adapter_observations"], root_path),
+        relative_or_absolute(paths["prompt_dataset"], root_path),
+        relative_or_absolute(paths["prompt_plan"], root_path),
+    ]
+    expected_candidates = build_t2smark_formal_candidate_records(
+        observation_rows=observations,
+        target_fpr=config.target_fpr,
+        baseline_result_source=relative_or_absolute(paths["official_results"], root_path),
+        baseline_result_source_digest=file_digest(paths["official_results"]),
+        evidence_paths=evidence_paths,
+        prompt_protocol_digest=str(prompt_report["prompt_protocol_digest"]),
+        paper_run_prompt_protocol_ready=bool(
+            prompt_report["paper_run_prompt_protocol_ready"]
+        ),
+        fixed_fpr_baseline_calibration_ready=threshold_audit.fixed_fpr_ready,
+        attack_matrix_baseline_detection_ready=actual_attack_names
+        == required_attack_names,
+    )
+    actual_candidates = _read_jsonl_rows(
+        paths["candidate_records"],
+        "formal candidate records",
+    )
+    if actual_candidates != list(expected_candidates):
+        raise RuntimeError("T2SMark formal candidate records 无法由 observation 重建")
+    rebuilt_validation = validate_primary_baseline_formal_import_rows(
+        expected_candidates,
+        evidence_root=root_path,
+        target_fpr=config.target_fpr,
+        require_existing_evidence=True,
+    )
+    if validation != rebuilt_validation:
+        raise RuntimeError("T2SMark formal validation report 无法由候选记录重建")
 
     required_entries = {
         paths["official_results"],
         paths["official_settings"],
         paths["official_protocol_binding"],
+        paths["official_unit_contract"],
         paths["prompt_dataset"],
         paths["prompt_plan"],
         paths["image_pairs"],
@@ -1335,7 +1784,15 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
         _expected_indexed_pngs(paths["official_run_dir"] / "quality_pairs" / "clean", prompt_count)
     )
     required_entries.update(
-        _expected_attack_pngs(paths["official_run_dir"] / "formal_attacks", prompt_count, attack_names)
+        _expected_attack_pngs(
+            paths["official_run_dir"] / "formal_attacks",
+            test_prompt_indices,
+            attack_names,
+        )
+    )
+    required_entries.update(
+        paths["official_unit_dir"] / f"{index:05d}.json"
+        for index in range(prompt_count)
     )
     missing_entries = sorted(path for path in required_entries if not path.is_file())
     if missing_entries:
@@ -1352,16 +1809,32 @@ def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Pat
 
     actual_output_entries = {
         path
-        for path in output_dir.rglob("*")
-        if path.is_file()
-        and path.resolve() != archive_path.resolve()
-        and path.suffix.lower() != ".zip"
+        for path in inventory_files
+        if path.resolve() != archive_path.resolve()
     }
     unexpected_entries = sorted(actual_output_entries - required_entries)
     if unexpected_entries:
         raise RuntimeError(
             "T2SMark 结果目录包含旧运行或非白名单文件: "
             + ",".join(path.relative_to(output_dir).as_posix() for path in unexpected_entries[:20])
+        )
+    expected_directories: set[Path] = set()
+    for entry in required_entries:
+        parent = entry.parent
+        while parent != output_dir:
+            parent.resolve().relative_to(output_dir.resolve())
+            expected_directories.add(parent)
+            parent = parent.parent
+    actual_directories = {
+        path for path in inventory_directories
+    }
+    if actual_directories != expected_directories:
+        unexpected_directories = sorted(actual_directories - expected_directories)
+        missing_directories = sorted(expected_directories - actual_directories)
+        raise RuntimeError(
+            "T2SMark 结果目录层级不是精确白名单: "
+            f"unexpected={[path.relative_to(output_dir).as_posix() for path in unexpected_directories[:20]]},"
+            f"missing={[path.relative_to(output_dir).as_posix() for path in missing_directories[:20]]}"
         )
 
     return tuple(sorted(required_entries, key=lambda path: path.as_posix()))
@@ -1413,7 +1886,11 @@ def package_t2smark_formal_reproduction_outputs(
     summary_path = source_dir / "t2smark_formal_archive_summary.json"
     manifest_path = source_dir / "t2smark_formal_archive_manifest.local.json"
     for stale_path in (package_manifest_path, summary_path, manifest_path, archive_path):
+        if _path_is_link_or_reparse(stale_path):
+            raise RuntimeError("T2SMark 打包目标不得是链接或 reparse point")
         if stale_path.exists():
+            if not stale_path.is_file():
+                raise RuntimeError("T2SMark 打包目标必须是普通文件")
             stale_path.unlink()
     entries = collect_package_entries(root_path, source_dir, archive_path)
     package_manifest = {

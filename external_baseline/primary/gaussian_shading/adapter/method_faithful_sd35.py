@@ -1,19 +1,20 @@
-"""Gaussian Shading 在 SD3.5 Medium 上的方法忠实适配器。
+"""Gaussian Shading 在 SD3.5 Medium 上的方法忠实适配器.
 
-该模块位于 external baseline 适配层。它保留 Gaussian Shading 的核心机制:
-使用二值 message 控制 latent noise 的正负截断 Gaussian 采样, 生成图像后通过
-图像编码和流匹配反向 Euler 积分恢复 noise sign, 再经 key 解码与 block voting 得到检测分数。
+该模块位于 external baseline 适配层. watermark bit 经 ChaCha20 key/nonce 加密为
+latent sign message. clean / watermarked 路线共享同一 Gaussian 样本的逐坐标幅值,
+图像反演恢复 noise sign 后使用 ChaCha20 解密与 block voting 得到检测分数.
 
 项目特定写法:
 - SD3.5 Medium 使用 16-channel latent, 因此 message 与 watermark 的重复映射从
-  官方 4-channel latent 显式推广到可配置通道数。
-- observation 标记为 method-faithful adapter, 但仍不直接声明论文主张。
+  官方 4-channel latent 显式推广到可配置通道数.
+- observation 标记为 method-faithful adapter, 但仍不直接声明论文主张.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -45,13 +46,155 @@ from external_baseline.primary.sd35_method_faithful_common import (
     validated_observation_attack_identity,
     write_json,
 )
+from external_baseline.primary.sd35_method_faithful_units import (
+    aggregate_method_faithful_unit_records,
+    apply_frozen_threshold,
+    build_irreversible_random_material_digest,
+    build_method_faithful_unit_context,
+    build_method_faithful_unit_spec,
+    load_completed_method_faithful_unit,
+    repository_relative_method_faithful_path,
+    resolve_method_faithful_output_path,
+    threshold_independent_observation,
+    write_completed_method_faithful_unit,
+)
 
 BASELINE_ID = "gaussian_shading"
 DEFAULT_SCORE_NAME = "gaussian_shading_bit_vote_accuracy"
+CHACHA20_PROTOCOL = "chacha20_ietf_256_bit_key_96_bit_nonce"
+
+
+def _rotate_left32(value: int, count: int) -> int:
+    """执行 ChaCha20 定义的32位循环左移."""
+
+    masked = value & 0xFFFFFFFF
+    return ((masked << count) & 0xFFFFFFFF) | (masked >> (32 - count))
+
+
+def _chacha20_quarter_round(
+    state: list[int],
+    first: int,
+    second: int,
+    third: int,
+    fourth: int,
+) -> None:
+    """就地执行一个 ChaCha20 quarter round."""
+
+    state[first] = (state[first] + state[second]) & 0xFFFFFFFF
+    state[fourth] = _rotate_left32(state[fourth] ^ state[first], 16)
+    state[third] = (state[third] + state[fourth]) & 0xFFFFFFFF
+    state[second] = _rotate_left32(state[second] ^ state[third], 12)
+    state[first] = (state[first] + state[second]) & 0xFFFFFFFF
+    state[fourth] = _rotate_left32(state[fourth] ^ state[first], 8)
+    state[third] = (state[third] + state[fourth]) & 0xFFFFFFFF
+    state[second] = _rotate_left32(state[second] ^ state[third], 7)
+
+
+def chacha20_encrypt(
+    plaintext: bytes,
+    *,
+    key: bytes,
+    nonce: bytes,
+    initial_counter: int = 0,
+) -> bytes:
+    """实现官方 use_chacha 路线使用的32字节 key 与12字节 nonce ChaCha20."""
+
+    if len(key) != 32:
+        raise ValueError("ChaCha20 key 必须恰好为32字节")
+    if len(nonce) != 12:
+        raise ValueError("ChaCha20 nonce 必须恰好为12字节")
+    if not 0 <= int(initial_counter) <= 0xFFFFFFFF:
+        raise ValueError("ChaCha20 initial_counter 超出32位范围")
+    constants = b"expand 32-byte k"
+    prefix = [
+        int.from_bytes(constants[offset : offset + 4], "little")
+        for offset in range(0, 16, 4)
+    ]
+    key_words = [
+        int.from_bytes(key[offset : offset + 4], "little")
+        for offset in range(0, 32, 4)
+    ]
+    nonce_words = [
+        int.from_bytes(nonce[offset : offset + 4], "little")
+        for offset in range(0, 12, 4)
+    ]
+    output = bytearray()
+    for block_index, offset in enumerate(range(0, len(plaintext), 64)):
+        counter = int(initial_counter) + block_index
+        if counter > 0xFFFFFFFF:
+            raise ValueError("ChaCha20 counter 已耗尽")
+        state = [*prefix, *key_words, counter, *nonce_words]
+        working = list(state)
+        for _ in range(10):
+            _chacha20_quarter_round(working, 0, 4, 8, 12)
+            _chacha20_quarter_round(working, 1, 5, 9, 13)
+            _chacha20_quarter_round(working, 2, 6, 10, 14)
+            _chacha20_quarter_round(working, 3, 7, 11, 15)
+            _chacha20_quarter_round(working, 0, 5, 10, 15)
+            _chacha20_quarter_round(working, 1, 6, 11, 12)
+            _chacha20_quarter_round(working, 2, 7, 8, 13)
+            _chacha20_quarter_round(working, 3, 4, 9, 14)
+        key_stream = b"".join(
+            ((working[index] + state[index]) & 0xFFFFFFFF).to_bytes(4, "little")
+            for index in range(16)
+        )
+        block = plaintext[offset : offset + 64]
+        output.extend(value ^ key_stream[index] for index, value in enumerate(block))
+    return bytes(output)
+
+
+def chacha20_decrypt(
+    ciphertext: bytes,
+    *,
+    key: bytes,
+    nonce: bytes,
+    initial_counter: int = 0,
+) -> bytes:
+    """使用相同 ChaCha20 keystream 解密 ciphertext."""
+
+    return chacha20_encrypt(
+        ciphertext,
+        key=key,
+        nonce=nonce,
+        initial_counter=initial_counter,
+    )
+
+
+def _pack_binary_tensor(value: Any) -> bytes:
+    """按官方 numpy.packbits 的 big-endian 位顺序压缩二值 tensor."""
+
+    import numpy as np
+    import torch
+
+    array = (
+        value.detach()
+        .to(device="cpu", dtype=torch.uint8)
+        .contiguous()
+        .numpy()
+        .reshape(-1)
+    )
+    return np.packbits(array, bitorder="big").tobytes()
+
+
+def _unpack_binary_bytes(value: bytes, *, latent_shape: tuple[int, int, int, int], device: str) -> Any:
+    """按官方 numpy.unpackbits 的 big-endian 位顺序恢复二值 tensor."""
+
+    import numpy as np
+    import torch
+
+    bit_count = math.prod(latent_shape)
+    unpacked = np.unpackbits(
+        np.frombuffer(value, dtype=np.uint8),
+        bitorder="big",
+    )[:bit_count].copy()
+    return torch.from_numpy(unpacked).reshape(latent_shape).to(
+        device=device,
+        dtype=torch.int64,
+    )
 
 
 class GaussianShadingWatermark:
-    """SD3.5 latent 形状下的 Gaussian Shading message 与 voting 状态。"""
+    """保存 SD3.5 Gaussian Shading 的 ChaCha20 message 与 voting 状态."""
 
     def __init__(
         self,
@@ -62,7 +205,7 @@ class GaussianShadingWatermark:
         generator: Any,
         device: str,
     ) -> None:
-        """初始化 watermark、key 与重复映射参数。"""
+        """初始化 watermark, ChaCha20 key/nonce 与重复映射参数."""
 
         import torch
 
@@ -75,42 +218,94 @@ class GaussianShadingWatermark:
         self.channel_copy = int(channel_copy)
         self.hw_copy = int(hw_copy)
         self.device = device
-        self.key = torch.randint(0, 2, latent_shape, generator=generator, device=device, dtype=torch.int64)
+        key_values = torch.randint(
+            0,
+            256,
+            (32,),
+            generator=generator,
+            device="cpu",
+            dtype=torch.int64,
+        )
+        nonce_values = torch.randint(
+            0,
+            256,
+            (12,),
+            generator=generator,
+            device="cpu",
+            dtype=torch.int64,
+        )
+        self._key_material = bytes(int(value) for value in key_values.tolist())
+        self._nonce_material = bytes(int(value) for value in nonce_values.tolist())
         self.watermark = torch.randint(
             0,
             2,
             (batch, channels // self.channel_copy, height // self.hw_copy, width // self.hw_copy),
             generator=generator,
-            device=device,
+            device="cpu",
             dtype=torch.int64,
-        )
+        ).to(device=device)
         self.vote_threshold = max(1, self.channel_copy * self.hw_copy * self.hw_copy // 2)
+        encrypted_message = chacha20_encrypt(
+            _pack_binary_tensor(self.expanded_watermark()),
+            key=self._key_material,
+            nonce=self._nonce_material,
+        )
+        self.encrypted_message = _unpack_binary_bytes(
+            encrypted_message,
+            latent_shape=self.latent_shape,
+            device=device,
+        )
+        self.secret_material_digest_random = build_irreversible_random_material_digest(
+            self._key_material,
+            self._nonce_material,
+            self.watermark,
+        )
+        self.chacha_message_digest_random = build_irreversible_random_material_digest(
+            encrypted_message
+        )
 
     def expanded_watermark(self) -> Any:
-        """把低维 watermark bit 重复到完整 SD3.5 latent 形状。"""
+        """按官方 tensor.repeat 调度把低维 watermark 平铺到完整 latent."""
 
-        return (
-            self.watermark.repeat_interleave(self.channel_copy, dim=1)
-            .repeat_interleave(self.hw_copy, dim=2)
-            .repeat_interleave(self.hw_copy, dim=3)
+        return self.watermark.repeat(
+            1,
+            self.channel_copy,
+            self.hw_copy,
+            self.hw_copy,
         )
 
-    def create_watermarked_latents(self, *, dtype: Any, generator: Any) -> Any:
-        """按 Gaussian Shading 的截断 Gaussian message 采样水印 latent。"""
+    def create_strict_paired_latents(self, clean_latents: Any) -> Any:
+        """以 clean latent 的同一幅值和 ChaCha20 message 符号构造条件采样."""
 
         import torch
 
-        message = (self.expanded_watermark() + self.key) % 2
-        magnitude = torch.clamp(torch.abs(torch.randn(self.latent_shape, generator=generator, device=self.device)), min=1e-4)
-        signed_latents = (message.to(dtype=torch.float32) * 2.0 - 1.0) * magnitude
-        return signed_latents.to(dtype=dtype)
+        if tuple(clean_latents.shape) != self.latent_shape:
+            raise ValueError("Gaussian Shading strict pair 的 latent 形状不匹配")
+        signs = self.encrypted_message.to(dtype=torch.float32) * 2.0 - 1.0
+        return (signs * torch.abs(clean_latents.float())).to(dtype=clean_latents.dtype)
 
-    def create_clean_latents(self, *, dtype: Any, generator: Any) -> Any:
-        """生成未携带 Gaussian Shading message 的 clean latent。"""
+    def build_random_identity_random(
+        self,
+        *,
+        generation_seed_random: int,
+        watermark_seed_random: int,
+        clean_base_latent_digest_random: str,
+    ) -> dict[str, Any]:
+        """构造只含 seed 和不可逆摘要的逐 Prompt 随机来源."""
 
-        import torch
-
-        return torch.randn(self.latent_shape, generator=generator, device=self.device, dtype=dtype)
+        return {
+            "generation_seed_random": int(generation_seed_random),
+            "watermark_seed_random": int(watermark_seed_random),
+            "clean_base_latent_digest_random": str(
+                clean_base_latent_digest_random
+            ),
+            "gaussian_chacha_secret_material_digest_random": (
+                self.secret_material_digest_random
+            ),
+            "gaussian_chacha_message_digest_random": (
+                self.chacha_message_digest_random
+            ),
+        }
 
     def decode_recovered_watermark(self, reversed_latents: Any) -> Any:
         """从反演 latent 的 sign 恢复 watermark bit 并执行 block voting。"""
@@ -118,7 +313,16 @@ class GaussianShadingWatermark:
         import torch
 
         reversed_message = (reversed_latents.float() > 0).to(dtype=torch.int64)
-        decoded = (reversed_message + self.key) % 2
+        decrypted_message = chacha20_decrypt(
+            _pack_binary_tensor(reversed_message),
+            key=self._key_material,
+            nonce=self._nonce_material,
+        )
+        decoded = _unpack_binary_bytes(
+            decrypted_message,
+            latent_shape=self.latent_shape,
+            device=self.device,
+        )
         batch, channels, height, width = self.latent_shape
         split_dim1 = torch.cat(torch.split(decoded, channels // self.channel_copy, dim=1), dim=0)
         split_dim2 = torch.cat(torch.split(split_dim1, height // self.hw_copy, dim=2), dim=0)
@@ -220,7 +424,8 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
 
     prompt_rows = select_prompt_rows(load_prompt_rows(args.prompt_plan), args.max_samples)
     attack_families = [item.strip() for item in str(args.attack_families or "").split(",") if item.strip()]
-    progress_total = max(1, 1 + len(prompt_rows) + len(attack_families) * len(prompt_rows) * 2)
+    test_prompt_count = sum(split_name(row) == "test" for row in prompt_rows)
+    progress_total = max(1, 1 + len(prompt_rows) + len(attack_families) * test_prompt_count * 2)
     progress_completed = 0
     emit_adapter_progress(
         baseline_id=BASELINE_ID,
@@ -257,18 +462,57 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
     attacked_dir.mkdir(parents=True, exist_ok=True)
 
     latent_shape = (1, int(args.latent_channels), max(1, int(args.height) // 8), max(1, int(args.width) // 8))
+    run_config = {
+        "adapter_boundary": METHOD_FAITHFUL_ADAPTER_BOUNDARY,
+        "model_id": args.model_id,
+        "model_revision": validate_model_revision(args.model_revision),
+        "torch_dtype": str(args.torch_dtype),
+        "latent_shape": list(latent_shape),
+        "height": int(args.height),
+        "width": int(args.width),
+        "num_inference_steps": int(args.num_inference_steps),
+        "num_inversion_steps": int(args.num_inversion_steps),
+        "guidance_scale": float(args.guidance_scale),
+        "target_fpr": float(args.target_fpr),
+        "explicit_threshold": args.threshold,
+        "attack_families": list(attack_families),
+        "attack_execution_split": "test",
+        "prompt_count": len(prompt_rows),
+        "test_prompt_count": test_prompt_count,
+        "seed": int(args.seed),
+        "watermark_seed": int(args.watermark_seed),
+        "channel_copy": int(args.channel_copy),
+        "hw_copy": int(args.hw_copy),
+        "message_encryption": CHACHA20_PROTOCOL,
+        "strict_pair_shared_magnitude": True,
+        "prompt_plan_digest": build_stable_digest(prompt_rows),
+    }
+    unit_context = build_method_faithful_unit_context(
+        baseline_id=BASELINE_ID,
+        artifact_root=artifact_root,
+        run_config=run_config,
+        execution_device=device,
+        torch_module=torch,
+    )
     observations_without_threshold: list[dict[str, Any]] = []
     image_pairs: list[dict[str, Any]] = []
     runtime_keys: dict[str, dict[str, Any]] = {}
+    source_unit_specs: list[Any] = []
+    source_unit_records: list[dict[str, Any]] = []
 
     for index, row in enumerate(prompt_rows, start=1):
         current_prompt = prompt_text(row)
         prompt_id = row_id(row, index, "prompt_id", "prompt")
         image_id = row_id(row, index, "image_id", "gaussian_shading_image")
         file_stem = safe_file_stem(image_id, f"gaussian_shading_image_{index:05d}")
-        latent_generator = torch.Generator(device=device).manual_seed(int(args.seed) + index - 1)
-        watermark_generator = torch.Generator(device=device).manual_seed(int(args.watermark_seed) + index - 1)
-        sampling_generator = torch.Generator(device=device).manual_seed(int(args.watermark_seed) + 100000 + index - 1)
+        generation_seed_random = int(args.seed) + index - 1
+        watermark_seed_random = int(args.watermark_seed) + index - 1
+        latent_generator = torch.Generator(device=device).manual_seed(
+            generation_seed_random
+        )
+        watermark_generator = torch.Generator(device="cpu").manual_seed(
+            watermark_seed_random
+        )
 
         watermark = GaussianShadingWatermark(
             latent_shape=latent_shape,
@@ -277,8 +521,69 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
             generator=watermark_generator,
             device=device,
         )
-        clean_latents = watermark.create_clean_latents(dtype=pipe.transformer.dtype, generator=latent_generator)
-        watermarked_latents = watermark.create_watermarked_latents(dtype=pipe.transformer.dtype, generator=sampling_generator)
+        clean_latents = torch.randn(
+            latent_shape,
+            generator=latent_generator,
+            device=device,
+            dtype=pipe.transformer.dtype,
+        )
+        clean_base_latent_digest_random = build_irreversible_random_material_digest(
+            clean_latents
+        )
+        source_random_identity_random = watermark.build_random_identity_random(
+            generation_seed_random=generation_seed_random,
+            watermark_seed_random=watermark_seed_random,
+            clean_base_latent_digest_random=clean_base_latent_digest_random,
+        )
+        source_unit_spec = build_method_faithful_unit_spec(
+            unit_context,
+            unit_kind="source_pair",
+            row=row,
+            index=index,
+            random_identity_random=source_random_identity_random,
+            unit_parameters={
+                "image_id": image_id,
+                "latent_shape": list(latent_shape),
+                "message_encryption": CHACHA20_PROTOCOL,
+                "strict_pair_shared_magnitude": True,
+            },
+        )
+        source_unit_specs.append(source_unit_spec)
+        completed_source_unit = load_completed_method_faithful_unit(
+            unit_context,
+            source_unit_spec,
+        )
+        if completed_source_unit is not None:
+            unit_data = completed_source_unit["unit_data"]
+            image_pair = dict(unit_data["image_pair"])
+            source_observations = [
+                dict(item) for item in unit_data["observations_without_threshold"]
+            ]
+            if len(source_observations) != 2:
+                raise ValueError("Gaussian Shading Prompt 源图完成单元必须包含两条连续分数")
+            image_pairs.append(image_pair)
+            observations_without_threshold.extend(source_observations)
+            runtime_keys[image_id] = {
+                "watermark": watermark,
+                "row": row,
+                "row_index": index,
+                "clean_score": float(source_observations[0]["score"]),
+                "watermarked_score": float(source_observations[1]["score"]),
+                "source_random_identity_random": source_random_identity_random,
+            }
+            source_unit_records.append(completed_source_unit)
+            progress_completed += 1
+            emit_adapter_progress(
+                baseline_id=BASELINE_ID,
+                operation="source_pair_resume",
+                completed=progress_completed,
+                total=progress_total,
+                profile=f"operation=source_pair_resume prompt={index}/{len(prompt_rows)} image_id={image_id}",
+            )
+            continue
+        watermarked_latents = watermark.create_strict_paired_latents(clean_latents)
+        if not torch.equal(clean_latents.abs(), watermarked_latents.abs()):
+            raise RuntimeError("Gaussian Shading strict pair 的逐坐标幅值不一致")
 
         clean_image = pipe(
             current_prompt,
@@ -327,6 +632,7 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
             "row_index": index,
             "clean_score": clean_score,
             "watermarked_score": watermarked_score,
+            "source_random_identity_random": source_random_identity_random,
         }
         image_pairs.append(
             {
@@ -343,6 +649,14 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                 "generation_model_id": args.model_id,
                 "generation_model_revision": args.model_revision,
                 "latent_shape": list(latent_shape),
+                "strict_pair_shared_magnitude": True,
+                "clean_base_latent_digest_random": clean_base_latent_digest_random,
+                "gaussian_chacha_secret_material_digest_random": (
+                    watermark.secret_material_digest_random
+                ),
+                "gaussian_chacha_message_digest_random": (
+                    watermark.chacha_message_digest_random
+                ),
             }
         )
         observations_without_threshold.append(
@@ -389,6 +703,27 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                 score_retention=1.0,
             )
         )
+        source_observations = [
+            threshold_independent_observation(item)
+            for item in observations_without_threshold[-2:]
+        ]
+        observations_without_threshold[-2:] = source_observations
+        completed_source_unit = write_completed_method_faithful_unit(
+            unit_context,
+            source_unit_spec,
+            unit_data={
+                "image_pair": image_pairs[-1],
+                "observations_without_threshold": source_observations,
+            },
+            artifact_paths=(clean_path, watermarked_path),
+        )
+        canonical_source_data = completed_source_unit["unit_data"]
+        image_pairs[-1] = dict(canonical_source_data["image_pair"])
+        observations_without_threshold[-2:] = [
+            dict(item)
+            for item in canonical_source_data["observations_without_threshold"]
+        ]
+        source_unit_records.append(completed_source_unit)
         if device == "cuda":
             torch.cuda.empty_cache()
         progress_completed += 1
@@ -401,34 +736,83 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
         )
 
     threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold, args.target_fpr)
-    observations: list[dict[str, Any]] = []
-    for row in observations_without_threshold:
-        updated = dict(row)
-        updated["threshold"] = float(threshold)
-        updated["threshold_source"] = threshold_source
-        updated["detection_decision"] = bool(float(updated["score"]) >= float(threshold))
-        updated["final_decision"] = updated["detection_decision"]
-        updated["baseline_observation_digest"] = build_stable_digest(updated)
-        observations.append(updated)
-
     attacked_records: list[dict[str, Any]] = []
+    attack_observations_without_threshold: list[dict[str, Any]] = []
+    attack_unit_specs: list[Any] = []
+    attack_unit_records: list[dict[str, Any]] = []
     for attack_family in attack_families:
         formal_attack_config = formal_image_attack_config(attack_family)
         attack_matrix_family = canonical_attack_family(attack_family)
         attack_matrix_name = canonical_attack_name(attack_family)
         formal_attack_digest = attack_config_digest(formal_attack_config)
         for pair_index, pair in enumerate(image_pairs, start=1):
+            if str(pair.get("split", "")) != "test":
+                continue
             image_id = str(pair["image_id"])
             runtime = runtime_keys[image_id]
             for role_name, source_path_field, source_digest_field, sample_role in (
                 ("clean", "clean_image_path", "clean_image_digest", "attacked_negative"),
                 ("watermarked", "watermarked_image_path", "watermarked_image_digest", "attacked_positive"),
             ):
-                with Image.open(pair[source_path_field]) as source_image:
+                attack_seed = int(args.seed) + pair_index
+                attack_unit_spec = build_method_faithful_unit_spec(
+                    unit_context,
+                    unit_kind=f"formal_attack_{attack_matrix_name}_{role_name}",
+                    row=runtime["row"],
+                    index=int(runtime["row_index"]),
+                    random_identity_random={
+                        **dict(runtime["source_random_identity_random"]),
+                        "attack_seed_random": attack_seed,
+                    },
+                    unit_parameters={
+                        "image_id": image_id,
+                        "source_role": role_name,
+                        "sample_role": sample_role,
+                        "attack_id": formal_attack_config.attack_id,
+                        "attack_config_digest": formal_attack_digest,
+                        "frozen_threshold_digest": build_stable_digest(
+                            {
+                                "threshold": float(threshold),
+                                "threshold_source": threshold_source,
+                            }
+                        ),
+                    },
+                )
+                attack_unit_specs.append(attack_unit_spec)
+                completed_attack_unit = load_completed_method_faithful_unit(
+                    unit_context,
+                    attack_unit_spec,
+                )
+                if completed_attack_unit is not None:
+                    unit_data = completed_attack_unit["unit_data"]
+                    attack_observations_without_threshold.append(
+                        dict(unit_data["observation_without_threshold"])
+                    )
+                    attacked_records.append(dict(unit_data["attacked_record"]))
+                    attack_unit_records.append(completed_attack_unit)
+                    progress_completed += 1
+                    emit_adapter_progress(
+                        baseline_id=BASELINE_ID,
+                        operation="formal_image_attack_resume",
+                        completed=progress_completed,
+                        total=progress_total,
+                        profile=(
+                            "operation=formal_image_attack_resume "
+                            f"attack={attack_matrix_name} pair={pair_index}/{len(image_pairs)} role={role_name}"
+                        ),
+                        attack_name=attack_matrix_name,
+                        image_id=image_id,
+                    )
+                    continue
+                source_image_path = resolve_method_faithful_output_path(
+                    unit_context,
+                    pair[source_path_field],
+                )
+                with Image.open(source_image_path) as source_image:
                     attacked_image, attack_transform_name, attack_execution = apply_formal_image_attack(
                         source_image,
                         attack_family=attack_family,
-                        seed=int(args.seed) + pair_index,
+                        seed=attack_seed,
                         pipe=pipe,
                         prompt=str(pair["prompt_text"]),
                         size=int(args.height),
@@ -456,12 +840,12 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                     watermark=runtime["watermark"],
                     num_inversion_steps=int(args.num_inversion_steps),
                 )
-                observations.append(
+                attack_observation = threshold_independent_observation(
                     build_observation(
                         event_id=attacked_id,
                         score=score,
-                        threshold=threshold,
-                        threshold_source=threshold_source,
+                        threshold=0.0,
+                        threshold_source="pending",
                         row=runtime["row"],
                         index=int(runtime["row_index"]),
                         sample_role=sample_role,
@@ -484,28 +868,43 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                         attack_config_digest_value=formal_attack_digest,
                     )
                 )
-                attacked_records.append(
-                    {
-                        "attacked_image_id": attacked_id,
-                        "source_image_id": image_id,
-                        "source_role": role_name,
-                        "sample_role": sample_role,
-                        "source_image_path": pair[source_path_field],
-                        "source_image_digest": pair[source_digest_field],
-                        "attacked_image_path": str(attacked_path),
-                        "attacked_image_digest": attacked_digest,
-                        "attack_family": attack_matrix_family,
-                        "attack_name": attack_matrix_name,
-                        "attack_condition": attack_matrix_name,
-                        "attack_id": formal_attack_config.attack_id,
-                        "resource_profile": formal_attack_config.resource_profile,
-                        "attack_config_digest": formal_attack_digest,
-                        "attack_transform_name": attack_transform_name,
-                        "attack_execution": attack_execution,
-                        "generation_model_id": args.model_id,
-                        "generation_model_revision": args.model_revision,
-                    }
+                attacked_record = {
+                    "attacked_image_id": attacked_id,
+                    "source_image_id": image_id,
+                    "source_role": role_name,
+                    "sample_role": sample_role,
+                    "source_image_path": pair[source_path_field],
+                    "source_image_digest": pair[source_digest_field],
+                    "attacked_image_path": str(attacked_path),
+                    "attacked_image_digest": attacked_digest,
+                    "attack_family": attack_matrix_family,
+                    "attack_name": attack_matrix_name,
+                    "attack_condition": attack_matrix_name,
+                    "attack_id": formal_attack_config.attack_id,
+                    "resource_profile": formal_attack_config.resource_profile,
+                    "attack_config_digest": formal_attack_digest,
+                    "attack_transform_name": attack_transform_name,
+                    "attack_execution": attack_execution,
+                    "generation_model_id": args.model_id,
+                    "generation_model_revision": args.model_revision,
+                }
+                attack_observations_without_threshold.append(attack_observation)
+                attacked_records.append(attacked_record)
+                completed_attack_unit = write_completed_method_faithful_unit(
+                    unit_context,
+                    attack_unit_spec,
+                    unit_data={
+                        "observation_without_threshold": attack_observation,
+                        "attacked_record": attacked_record,
+                    },
+                    artifact_paths=(attacked_path,),
                 )
+                canonical_attack_data = completed_attack_unit["unit_data"]
+                attack_observations_without_threshold[-1] = dict(
+                    canonical_attack_data["observation_without_threshold"]
+                )
+                attacked_records[-1] = dict(canonical_attack_data["attacked_record"])
+                attack_unit_records.append(completed_attack_unit)
                 if device == "cuda":
                     torch.cuda.empty_cache()
                 progress_completed += 1
@@ -522,6 +921,16 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                     image_id=image_id,
                 )
 
+    unit_aggregate = aggregate_method_faithful_unit_records(
+        unit_context,
+        (*source_unit_records, *attack_unit_records),
+        expected_specs=(*source_unit_specs, *attack_unit_specs),
+    )
+    observations = apply_frozen_threshold(
+        (*observations_without_threshold, *attack_observations_without_threshold),
+        threshold=threshold,
+        threshold_source=threshold_source,
+    )
     image_pairs_path = write_json(artifact_root / "gaussian_shading_image_pairs.json", image_pairs)
     attacked_manifest_path = write_json(
         artifact_root / "attacked_image_manifest.json",
@@ -540,13 +949,25 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
         "adapter_status": "method_faithful_sd35_adapter_ready",
         "model_id": args.model_id,
         "model_revision": args.model_revision,
-        "prompt_plan_path": str(Path(args.prompt_plan)),
-        "baseline_observations_path": str(Path(args.out)),
-        "artifact_root": str(artifact_root),
-        "image_pairs_path": str(image_pairs_path),
-        "attacked_image_manifest_path": str(attacked_manifest_path),
+        "prompt_plan_path": repository_relative_method_faithful_path(
+            unit_context, args.prompt_plan
+        ),
+        "baseline_observations_path": repository_relative_method_faithful_path(
+            unit_context, args.out
+        ),
+        "artifact_root": repository_relative_method_faithful_path(
+            unit_context, artifact_root
+        ),
+        "image_pairs_path": repository_relative_method_faithful_path(
+            unit_context, image_pairs_path
+        ),
+        "attacked_image_manifest_path": repository_relative_method_faithful_path(
+            unit_context, attacked_manifest_path
+        ),
         "image_pair_count": len(image_pairs),
         "attacked_image_count": len(attacked_records),
+        "test_prompt_count": test_prompt_count,
+        "expected_formal_attack_unit_count": test_prompt_count * len(attack_families) * 2,
         "observation_count": len(observations),
         "latent_shape": list(latent_shape),
         "execution_device": device,
@@ -567,10 +988,21 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
             "channel_copy": int(args.channel_copy),
             "hw_copy": int(args.hw_copy),
             "watermark_seed": int(args.watermark_seed),
-            "message_mapping": "sign_truncated_gaussian_with_repeated_bit_voting",
+            "message_encryption": CHACHA20_PROTOCOL,
+            "message_mapping": "chacha20_sign_conditioned_gaussian_with_repeated_bit_voting",
+            "strict_pair_shared_magnitude": True,
         },
         "threshold": float(threshold),
         "threshold_source": threshold_source,
+        "run_config": unit_context.run_config,
+        "run_config_digest": unit_context.run_config_digest,
+        "stable_scientific_execution_identity": unit_context.stable_execution_identity,
+        "stable_scientific_execution_identity_digest": unit_context.stable_execution_identity_digest,
+        "method_faithful_source_identity": unit_context.source_identity,
+        "method_faithful_source_identity_digest": unit_context.source_identity[
+            "method_faithful_source_identity_digest"
+        ],
+        **unit_aggregate,
         "formal_result_claim": False,
         "supports_paper_claim": False,
     }
@@ -619,8 +1051,7 @@ def run_cli(argv: list[str] | None = None) -> None:
 
     args = build_parser().parse_args(argv)
     observations, manifest = run_gaussian_shading_method_faithful_adapter(args)
-    output_path = write_json(args.out, observations)
-    manifest["baseline_observations_path"] = str(output_path)
+    write_json(args.out, observations)
     manifest_path = Path(args.out).with_name("gaussian_shading_method_faithful_sd35_adapter_manifest.json")
     write_json(manifest_path, manifest)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))

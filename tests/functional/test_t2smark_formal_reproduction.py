@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -19,13 +21,22 @@ from paper_experiments.runners.t2smark_formal_reproduction import (
     DEFAULT_FORMAL_IMAGE_ATTACK_FAMILIES,
     T2SMarkFormalReproductionConfig,
     build_t2smark_formal_protocol_binding,
+    build_t2smark_formal_checkpoint_contract,
     build_t2smark_formal_run_readiness,
     package_t2smark_formal_reproduction_outputs,
     should_run_official,
     validate_t2smark_formal_protocol_config,
     write_t2smark_formal_protocol_binding,
 )
+from external_baseline.primary.t2smark.adapter.formal_unit_checkpoint import (
+    aggregate_t2smark_formal_unit_records,
+    build_t2smark_formal_unit_record,
+    inspect_t2smark_formal_unit_records,
+    write_or_validate_t2smark_formal_unit_contract,
+    write_t2smark_formal_unit_record,
+)
 from paper_experiments.runners.t2smark_source_runtime import (
+    _verify_formal_source,
     configured_attack_names,
     verify_exact_t2smark_protocol_worktree,
 )
@@ -140,6 +151,10 @@ def _source_report() -> dict[str, object]:
         "protocol_patch_sha256": "2" * 64,
         "source_worktree_exact": True,
         "source_worktree_digest": "3" * 64,
+        "patched_source_sha256": {
+            "option.py": "5" * 64,
+            "run_sd35.py": "6" * 64,
+        },
     }
 
 
@@ -150,10 +165,14 @@ def _prompt_report(prompt_count: int, digest: str = "4" * 64) -> dict[str, objec
         "prompt_protocol_name": "paper_probe_paper_prompt_protocol",
         "prompt_protocol_digest": digest,
         "selected_prompt_count": prompt_count,
+        "paper_run_prompt_protocol_ready": True,
     }
 
 
-def _paper_run(prompt_count: int) -> SimpleNamespace:
+def _paper_run(
+    prompt_count: int,
+    prompt_file: str = "configs/paper_main_probe_paper_prompts.txt",
+) -> SimpleNamespace:
     """构造协议绑定使用的最小论文运行对象。"""
 
     return SimpleNamespace(
@@ -161,6 +180,9 @@ def _paper_run(prompt_count: int) -> SimpleNamespace:
         protocol_profile="probe_paper_fixed_fpr_0_1",
         prompt_count=prompt_count,
         target_fpr=0.1,
+        prompt_set="probe_paper",
+        prompt_file=prompt_file,
+        sample_count=prompt_count,
     )
 
 
@@ -351,6 +373,7 @@ def test_t2smark_run_readiness_requires_formal_import_validation() -> None:
         pair_quality_ready=True,
         formal_attack_ready=True,
         formal_import_validation_ready=False,
+        formal_unit_set_ready=True,
     ) is False
     assert build_t2smark_formal_run_readiness(
         dependency_environment_ready=True,
@@ -360,6 +383,7 @@ def test_t2smark_run_readiness_requires_formal_import_validation() -> None:
         pair_quality_ready=True,
         formal_attack_ready=True,
         formal_import_validation_ready=True,
+        formal_unit_set_ready=True,
     ) is True
     assert build_t2smark_formal_run_readiness(
         dependency_environment_ready=False,
@@ -369,6 +393,7 @@ def test_t2smark_run_readiness_requires_formal_import_validation() -> None:
         pair_quality_ready=True,
         formal_attack_ready=True,
         formal_import_validation_ready=True,
+        formal_unit_set_ready=True,
     ) is False
 
 
@@ -419,13 +444,332 @@ def test_t2smark_fixed_patch_passes_exact_model_revision() -> None:
 
     assert '+    parser.add_argument("--model_revision", type=str, required=True)' in patch_text
     assert "+    revision=args.model_revision" in patch_text
+    assert '+    parser.add_argument("--slm_unit_contract", type=str, required=True)' in patch_text
+    assert "build_t2smark_formal_unit_record" in patch_text
+    assert 'prompt_identity["split"] == "test"' in patch_text
+    assert "encode_with_exact_clean_base" in patch_text
+    assert "torch.random.get_rng_state()" in patch_text
+    assert "torch.random.set_rng_state" in patch_text
+    assert "utils.set_random_seed(args.seed + prompt_id)" in patch_text
+    assert "clean_base_latent_digest_random" in patch_text
+    assert "t2smark_secret_material_digest_random" in patch_text
+    assert "return_base=True" not in patch_text
+
+
+def test_t2smark_fixed_patch_applies_to_registered_source_snapshot(
+    tmp_path: Path,
+) -> None:
+    """固定补丁必须可应用到登记源码快照并形成精确正式工作树."""
+
+    root = Path(__file__).resolve().parents[2]
+    registered_source = root / "external_baseline/primary/t2smark/source"
+    patch_path = (
+        root / "external_baseline/primary/t2smark/adapter/formal_protocol_git_diff.txt"
+    )
+    clean_source = tmp_path / "source"
+    clean_source.mkdir()
+    subprocess.run(["git", "init"], cwd=clean_source, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=clean_source,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=clean_source,
+        check=True,
+    )
+    for relative_path in ("option.py", "run_sd35.py"):
+        content = subprocess.check_output(
+            ["git", "show", f"HEAD:{relative_path}"],
+            cwd=registered_source,
+        )
+        (clean_source / relative_path).write_bytes(content)
+    subprocess.run(
+        ["git", "add", "option.py", "run_sd35.py"],
+        cwd=clean_source,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "base"],
+        cwd=clean_source,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "apply", "--unidiff-zero", "--check", str(patch_path)],
+        cwd=clean_source,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "apply", "--unidiff-zero", str(patch_path)],
+        cwd=clean_source,
+        check=True,
+    )
+
+    report = verify_exact_t2smark_protocol_worktree(clean_source, patch_path)
+    _verify_formal_source(clean_source / "run_sd35.py")
+    assert report["source_worktree_exact"] is True
+
+
+class _FixtureCuda:
+    """提供科学单元来源构造所需的最小 CUDA 身份接口."""
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
+
+    @staticmethod
+    def current_device() -> int:
+        return 0
+
+    @staticmethod
+    def device_count() -> int:
+        return 1
+
+    @staticmethod
+    def get_device_capability(_index: int) -> tuple[int, int]:
+        return (7, 5)
+
+    @staticmethod
+    def get_device_name(_index: int) -> str:
+        return "NVIDIA T4"
+
+
+FIXTURE_TORCH = SimpleNamespace(
+    __version__="2.11.0+cu128",
+    version=SimpleNamespace(cuda="12.8"),
+    cuda=_FixtureCuda(),
+)
+
+
+def _unit_runtime_environment() -> dict[str, object]:
+    """构造逐 Prompt 来源校验使用的完整隔离环境报告."""
+
+    return {
+        "dependency_environment_ready": True,
+        "formal_execution_lock_ready": True,
+        "isolated_scientific_context_ready": True,
+        "dependency_profile_id": "t2smark_sd35_gpu",
+        "dependency_profile_digest": "1" * 64,
+        "direct_requirements_digest": "2" * 64,
+        "complete_hash_lock_digest": "3" * 64,
+        "formal_execution_commit": FORMAL_EXECUTION_LOCK["formal_execution_commit"],
+        "formal_execution_lock_digest": FORMAL_EXECUTION_LOCK[
+            "formal_execution_lock_digest"
+        ],
+        "python_version": "3.12.13",
+        "package_versions": {"torch": "2.11.0+cu128"},
+        "cuda_version": "12.8",
+        "gpu_name": "NVIDIA T4",
+        "device_count": 1,
+        "isolated_scientific_context": {
+            "dependency_environment_report_actual_digest": "4" * 64,
+            "current_python_executable_sha256": "5" * 64,
+        },
+    }
+
+
+def test_t2smark_prompt_units_resume_only_missing_and_reject_damage(
+    tmp_path: Path,
+) -> None:
+    """dev/calibration/test 均形成单元, 续跑只返回缺失索引且损坏单元闭锁."""
+
+    config = T2SMarkFormalReproductionConfig(
+        prompt_limit=3,
+        minimum_prompt_protocol_count=3,
+    )
+    prompt_rows = [
+        {
+            "prompt_id": f"prompt_{index:06d}",
+            "prompt_index": index,
+            "prompt_set": "probe_paper",
+            "split": split,
+            "prompt_text": f"prompt {index}",
+            "prompt_digest": str(index + 1) * 64,
+        }
+        for index, split in enumerate(("dev", "calibration", "test"))
+    ]
+    protocol_binding = build_t2smark_formal_protocol_binding(
+        config,
+        paper_run=_paper_run(3),
+        prompt_report=_prompt_report(3),
+        source_report=_source_report(),
+    )
+    contract = build_t2smark_formal_checkpoint_contract(
+        config,
+        paper_run=_paper_run(3),
+        prompt_rows=prompt_rows,
+        protocol_binding=protocol_binding,
+        source_report=_source_report(),
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+    )
+    artifact_root = tmp_path / "workspace_a" / "outputs" / "t2smark" / "run"
+    watermarked_path = artifact_root / "images" / "00000.png"
+    clean_path = artifact_root / "quality_pairs" / "clean" / "00000.png"
+    watermarked_path.parent.mkdir(parents=True)
+    clean_path.parent.mkdir(parents=True)
+    watermarked_path.write_bytes(b"watermarked")
+    clean_path.write_bytes(b"clean")
+    result = {
+        "robustness": {
+            "norm1_no_w": 0.1,
+            "norm1_w": 0.9,
+            "acc_key": 1.0,
+            "acc_msg": 1.0,
+        },
+        "image_only_detection": {
+            "clean_score": 0.1,
+            "watermarked_score": 0.9,
+        },
+        "pair_quality": {
+            "pair_quality_protocol": "strict_clean_watermarked_pair",
+            "clean_base_latent_digest_random": "6" * 64,
+            "clean_image_path": str(clean_path),
+            "clean_image_digest": t2smark_runtime.file_digest(clean_path),
+            "watermarked_image_path": str(watermarked_path),
+            "watermarked_image_digest": t2smark_runtime.file_digest(
+                watermarked_path
+            ),
+        },
+        "formal_attacks": {},
+    }
+    runtime_environment = _unit_runtime_environment()
+    record = build_t2smark_formal_unit_record(
+        contract=contract,
+        prompt_index=0,
+        result=result,
+        artifact_root=artifact_root,
+        runtime_environment=runtime_environment,
+        torch_module=FIXTURE_TORCH,
+        execution_device_name="cuda:0",
+        random_identity_random={
+            "clean_base_latent_digest_random": "6" * 64,
+            "t2smark_secret_material_digest_random": "7" * 64,
+        },
+    )
+    assert not Path(record["result"]["pair_quality"]["clean_image_path"]).is_absolute()
+    assert not Path(
+        record["result"]["pair_quality"]["watermarked_image_path"]
+    ).is_absolute()
+    unit_path = artifact_root / "slm_formal_units" / "00000.json"
+    write_t2smark_formal_unit_record(
+        unit_path,
+        record,
+        contract=contract,
+        artifact_root=artifact_root,
+        runtime_environment=runtime_environment,
+    )
+
+    records, missing = inspect_t2smark_formal_unit_records(
+        unit_path.parent,
+        contract=contract,
+        artifact_root=artifact_root,
+        runtime_environment=runtime_environment,
+    )
+    assert sorted(records) == [0]
+    assert missing == (1, 2)
+
+    moved_artifact_root = (
+        tmp_path / "workspace_b" / "outputs" / "t2smark" / "run"
+    )
+    shutil.copytree(artifact_root, moved_artifact_root)
+    moved_records, moved_missing = inspect_t2smark_formal_unit_records(
+        moved_artifact_root / "slm_formal_units",
+        contract=contract,
+        artifact_root=moved_artifact_root,
+        runtime_environment=runtime_environment,
+    )
+    assert sorted(moved_records) == [0]
+    assert moved_missing == (1, 2)
+
+    forbidden_attack_path = (
+        artifact_root
+        / "formal_attacks"
+        / "00000_jpeg_compression_attacked_positive.png"
+    )
+    forbidden_attack_path.parent.mkdir(parents=True, exist_ok=True)
+    forbidden_attack_path.write_bytes(b"forbidden dev attack")
+    with pytest.raises(ValueError, match="split 协议之外"):
+        inspect_t2smark_formal_unit_records(
+            unit_path.parent,
+            contract=contract,
+            artifact_root=artifact_root,
+            runtime_environment=runtime_environment,
+        )
+    forbidden_attack_path.unlink()
+
+    watermarked_path.write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="摘要漂移"):
+        inspect_t2smark_formal_unit_records(
+            unit_path.parent,
+            contract=contract,
+            artifact_root=artifact_root,
+            runtime_environment=runtime_environment,
+        )
+
+
+def test_t2smark_unit_contract_excludes_workspace_and_control_paths() -> None:
+    """Drive、checkout 路径和续跑控制开关不得改变科学单元身份."""
+
+    first = T2SMarkFormalReproductionConfig(
+        output_dir="outputs/t2smark_formal_reproduction",
+        drive_output_dir="/content/drive/session_a",
+        prompt_file="/content/checkout_a/configs/paper_main_probe_paper_prompts.txt",
+    )
+    second = replace(
+        first,
+        output_dir="outputs/t2smark_formal_reproduction",
+        drive_output_dir="/mnt/drive/session_b",
+        prompt_file="/workspace_b/configs/paper_main_probe_paper_prompts.txt",
+        reuse_existing=False,
+        force_generate=True,
+        timeout_seconds=123,
+        enable_workflow_progress_bar=False,
+    )
+    prompt_rows = [
+        {
+            "prompt_id": "prompt_000000",
+            "prompt_index": 0,
+            "prompt_set": "probe_paper",
+            "split": "test",
+            "prompt_text": "a ceramic fox",
+            "prompt_digest": "1" * 64,
+        }
+    ]
+    protocol_binding = build_t2smark_formal_protocol_binding(
+        first,
+        paper_run=_paper_run(1),
+        prompt_report=_prompt_report(1),
+        source_report=_source_report(),
+    )
+    first_contract = build_t2smark_formal_checkpoint_contract(
+        first,
+        paper_run=_paper_run(1, "/content/checkout_a/configs/prompts.txt"),
+        prompt_rows=prompt_rows,
+        protocol_binding=protocol_binding,
+        source_report=_source_report(),
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+    )
+    second_contract = build_t2smark_formal_checkpoint_contract(
+        second,
+        paper_run=_paper_run(1, "/workspace_b/configs/prompts.txt"),
+        prompt_rows=prompt_rows,
+        protocol_binding=protocol_binding,
+        source_report=_source_report(),
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+    )
+
+    assert first_contract == second_contract
 
 
 def _write_package_fixture(
     root_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[Path, Path]:
-    """写出一个 Prompt 的完整 T2SMark 精确白名单打包 fixture。"""
+    """写出 calibration 与 test 均闭合的 T2SMark 精确白名单 fixture."""
+
+    from PIL import Image
 
     code_version = "b" * 40
     monkeypatch.setattr(t2smark_runtime, "resolve_code_version", lambda _root: code_version)
@@ -435,11 +779,11 @@ def _write_package_fixture(
         prompt_set="probe_paper",
         prompt_file="configs/paper_main_probe_paper_prompts.txt",
         t2smark_run_name="t",
-        prompt_limit=1,
-        minimum_prompt_protocol_count=1,
+        prompt_limit=2,
+        minimum_prompt_protocol_count=2,
         target_fpr=0.1,
     )
-    paper_run = _paper_run(1)
+    paper_run = _paper_run(2)
     monkeypatch.setattr(
         t2smark_runtime,
         "validate_t2smark_formal_protocol_config",
@@ -447,11 +791,42 @@ def _write_package_fixture(
     )
     monkeypatch.setattr(t2smark_runtime, "build_paper_run_config", lambda _root: paper_run)
     paths = t2smark_runtime.output_paths(root_path, config)
+    def validate_fixture_candidates(
+        rows: Any,
+        **_kwargs: object,
+    ) -> dict[str, object]:
+        """隔离封装测试中的论文规模门禁, 保留候选内容精确重建校验."""
+
+        materialized = tuple(rows)
+        return {
+            "formal_import_validation_ready": True,
+            "accepted_formal_import_count": len(materialized),
+            "rejected_formal_import_count": 0,
+            "formal_import_issue_count": 0,
+        }
+
+    monkeypatch.setattr(
+        t2smark_runtime,
+        "validate_primary_baseline_formal_import_rows",
+        validate_fixture_candidates,
+    )
     attack_names = configured_attack_names(config.formal_attack_families)
     source_report = _source_report()
-    prompt_report = _prompt_report(1)
+    prompt_report = _prompt_report(2)
+    prompt_rows = [
+        {
+            "prompt_id": f"prompt_{index:06d}",
+            "prompt_index": index,
+            "prompt_set": "probe_paper",
+            "split": split,
+            "prompt_text": f"formal test prompt {index}",
+            "prompt_digest": str(7 + index) * 64,
+        }
+        for index, split in enumerate(("calibration", "test"))
+    ]
+    runtime_environment = _unit_runtime_environment()
 
-    for path in (
+    for path_value in (
         paths["official_settings"],
         paths["prompt_dataset"],
         paths["prompt_plan"],
@@ -466,52 +841,95 @@ def _write_package_fixture(
         paths["official_command_result"],
         paths["adapter_command_result"],
     ):
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path_value.parent.mkdir(parents=True, exist_ok=True)
 
-    watermarked_path = paths["official_images"] / "00000.png"
-    clean_path = paths["official_run_dir"] / "quality_pairs" / "clean" / "00000.png"
-    watermarked_path.parent.mkdir(parents=True, exist_ok=True)
-    clean_path.parent.mkdir(parents=True, exist_ok=True)
-    watermarked_path.write_bytes(b"watermarked")
-    clean_path.write_bytes(b"clean")
-    formal_attacks: dict[str, object] = {}
-    for attack_name in attack_names:
-        attack_config = formal_image_attack_config(attack_name)
-        attack_identity = {
-            "attack_id": attack_config.attack_id,
-            "resource_profile": attack_config.resource_profile,
-            "attack_config_digest": attack_config_digest(attack_config),
-        }
-        role_rows: dict[str, object] = {}
-        for sample_role in ("attacked_negative", "attacked_positive"):
-            attack_path = paths["official_run_dir"] / "formal_attacks" / (
-                f"00000_{attack_name}_{sample_role}.png"
-            )
-            attack_path.parent.mkdir(parents=True, exist_ok=True)
-            attack_path.write_bytes(f"{attack_name}:{sample_role}".encode("utf-8"))
-            role_rows[sample_role] = {
-                **attack_identity,
-                "detection_score": 0.1,
-            }
-        formal_attacks[attack_name] = {
-            **attack_identity,
-            "attack_name": attack_name,
-            **role_rows,
-        }
-    official_results = {
-        "0": {
-            "image_only_detection": {"clean_score": 0.1, "watermarked_score": 0.9},
+    result_rows: dict[str, dict[str, object]] = {}
+    image_pairs: list[dict[str, object]] = []
+    for index, prompt_row in enumerate(prompt_rows):
+        sample_name = f"{index:05d}.png"
+        watermarked_path = paths["official_images"] / sample_name
+        clean_path = paths["official_run_dir"] / "quality_pairs" / "clean" / sample_name
+        watermarked_path.parent.mkdir(parents=True, exist_ok=True)
+        clean_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (16, 16), color=(30 + index, 40, 50)).save(clean_path)
+        Image.new("RGB", (16, 16), color=(31 + index, 40, 50)).save(watermarked_path)
+        formal_attacks: dict[str, object] = {}
+        if prompt_row["split"] == "test":
+            for attack_name in attack_names:
+                attack_config = formal_image_attack_config(attack_name)
+                attack_identity = {
+                    "attack_id": attack_config.attack_id,
+                    "resource_profile": attack_config.resource_profile,
+                    "attack_config_digest": attack_config_digest(attack_config),
+                }
+                role_rows: dict[str, object] = {}
+                for role_offset, sample_role in enumerate(
+                    ("attacked_negative", "attacked_positive")
+                ):
+                    attack_path = paths["official_run_dir"] / "formal_attacks" / (
+                        f"{index:05d}_{attack_name}_{sample_role}.png"
+                    )
+                    attack_path.parent.mkdir(parents=True, exist_ok=True)
+                    Image.new(
+                        "RGB",
+                        (16, 16),
+                        color=(60 + role_offset, 70, 80),
+                    ).save(attack_path)
+                    role_rows[sample_role] = {
+                        **attack_identity,
+                        "detection_score": 0.2 if sample_role == "attacked_negative" else 0.8,
+                        "attacked_image_path": str(attack_path),
+                        "attacked_image_digest": t2smark_runtime.file_digest(attack_path),
+                    }
+                formal_attacks[attack_name] = {
+                    **attack_identity,
+                    "attack_family": attack_config.attack_family,
+                    "attack_name": attack_name,
+                    **role_rows,
+                }
+        clean_digest = t2smark_runtime.file_digest(clean_path)
+        watermarked_digest = t2smark_runtime.file_digest(watermarked_path)
+        clean_base_digest = ("6" if index == 0 else "8") * 64
+        result_rows[str(index)] = {
+            "robustness": {
+                "norm1_no_w": 0.1 + index * 0.01,
+                "norm1_w": 0.9 - index * 0.01,
+                "acc_key": 1.0,
+                "acc_msg": 1.0,
+            },
+            "image_only_detection": {
+                "clean_score": 0.1 + index * 0.01,
+                "watermarked_score": 0.9 - index * 0.01,
+            },
             "formal_attacks": formal_attacks,
             "pair_quality": {
                 "pair_quality_protocol": "strict_clean_watermarked_pair",
+                "clean_base_latent_digest_random": clean_base_digest,
                 "clean_image_path": str(clean_path),
-                "clean_image_digest": "clean",
+                "clean_image_digest": clean_digest,
                 "watermarked_image_path": str(watermarked_path),
-                "watermarked_image_digest": "watermarked",
+                "watermarked_image_digest": watermarked_digest,
             },
         }
-    }
-    t2smark_runtime.write_json(paths["official_results"], official_results)
+        image_pairs.append(
+            {
+                "image_id": f"image_{index:06d}",
+                "event_id": f"image_{index:06d}",
+                "prompt_id": prompt_row["prompt_id"],
+                "prompt_index": index,
+                "prompt_set": "probe_paper",
+                "split": prompt_row["split"],
+                "clean_image_path": clean_path.relative_to(root_path).as_posix(),
+                "clean_image_digest": clean_digest,
+                "watermarked_image_path": watermarked_path.relative_to(root_path).as_posix(),
+                "watermarked_image_digest": watermarked_digest,
+                "generated_image_path": watermarked_path.relative_to(root_path).as_posix(),
+                "generated_image_digest": watermarked_digest,
+                "pair_quality_protocol": "strict_clean_watermarked_pair",
+                "strict_pair_quality_ready": True,
+            }
+        )
+
     t2smark_runtime.write_json(paths["official_settings"], {"settings": "formal"})
     expected_binding = build_t2smark_formal_protocol_binding(
         config,
@@ -519,48 +937,133 @@ def _write_package_fixture(
         prompt_report=prompt_report,
         source_report=source_report,
     )
+    unit_contract = build_t2smark_formal_checkpoint_contract(
+        config,
+        paper_run=paper_run,
+        prompt_rows=prompt_rows,
+        protocol_binding=expected_binding,
+        source_report=source_report,
+        formal_execution_lock=FORMAL_EXECUTION_LOCK,
+    )
+    write_or_validate_t2smark_formal_unit_contract(
+        paths["official_unit_contract"],
+        unit_contract,
+    )
+    for index in range(len(prompt_rows)):
+        clean_base_digest = ("6" if index == 0 else "8") * 64
+        unit_record = build_t2smark_formal_unit_record(
+            contract=unit_contract,
+            prompt_index=index,
+            result=result_rows[str(index)],
+            artifact_root=paths["official_run_dir"],
+            runtime_environment=runtime_environment,
+            torch_module=FIXTURE_TORCH,
+            execution_device_name="cuda:0",
+            random_identity_random={
+                "clean_base_latent_digest_random": clean_base_digest,
+                "t2smark_secret_material_digest_random": ("7" if index == 0 else "9") * 64,
+            },
+        )
+        write_t2smark_formal_unit_record(
+            paths["official_unit_dir"] / f"{index:05d}.json",
+            unit_record,
+            contract=unit_contract,
+            artifact_root=paths["official_run_dir"],
+            runtime_environment=runtime_environment,
+        )
+    unit_records, missing_indices = inspect_t2smark_formal_unit_records(
+        paths["official_unit_dir"],
+        contract=unit_contract,
+        artifact_root=paths["official_run_dir"],
+        runtime_environment=runtime_environment,
+    )
+    assert not missing_indices
+    rebuilt_results, unit_aggregate = aggregate_t2smark_formal_unit_records(
+        unit_records,
+        contract=unit_contract,
+        artifact_root=paths["official_run_dir"],
+        runtime_environment=runtime_environment,
+    )
+    official_results = t2smark_runtime._rebuild_t2smark_official_payload(
+        rebuilt_results,
+        unit_aggregate,
+    )
+    t2smark_runtime.write_json(paths["official_results"], official_results)
     persisted_binding = write_t2smark_formal_protocol_binding(
         paths["official_protocol_binding"],
         expected_binding,
         results_path=paths["official_results"],
         settings_path=paths["official_settings"],
     )
-    t2smark_runtime.write_json(paths["prompt_dataset"], {"annotations": [{}]})
-    t2smark_runtime.write_json(paths["prompt_plan"], [{"prompt_id": "prompt_000000"}])
-    t2smark_runtime.write_json(paths["image_pairs"], [{"image_id": "image_000000"}])
+    t2smark_runtime.write_json(
+        paths["prompt_dataset"],
+        {
+            "annotations": [
+                {"caption": row["prompt_text"], **row} for row in prompt_rows
+            ]
+        },
+    )
+    t2smark_runtime.write_json(paths["prompt_plan"], prompt_rows)
+    t2smark_runtime.write_json(paths["image_pairs"], image_pairs)
+    observations, adapter_manifest = t2smark_runtime.build_t2smark_observations(
+        image_pairs=image_pairs,
+        t2smark_results=rebuilt_results,
+        target_fpr=config.target_fpr,
+        evidence_root=root_path,
+    )
+    t2smark_runtime.write_json(paths["adapter_observations"], observations)
+    adapter_manifest.pop("adapter_digest", None)
+    adapter_manifest.update(
+        {
+            "baseline_observations_path": paths["adapter_observations"]
+            .relative_to(root_path)
+            .as_posix(),
+            "image_pairs_path": paths["image_pairs"].relative_to(root_path).as_posix(),
+            "t2smark_results_path": paths["official_results"]
+            .relative_to(root_path)
+            .as_posix(),
+            "generation_protocol": {
+                "model_id": config.model_id,
+                "model_revision": config.model_revision,
+                "num_inference_steps": config.num_inference_steps,
+                "guidance_scale": config.guidance_scale,
+            },
+            "detection_protocol": {
+                "input_access_mode": "image_only",
+                "num_inversion_steps": config.num_inversion_steps,
+                "target_fpr": config.target_fpr,
+            },
+        }
+    )
+    adapter_manifest["adapter_digest"] = t2smark_runtime.build_stable_digest(
+        adapter_manifest
+    )
+    t2smark_runtime.write_json(paths["adapter_manifest"], adapter_manifest)
+    t2smark_runtime.write_json(paths["adapter_artifact_manifest"], adapter_manifest)
     t2smark_runtime.write_json(
         paths["pair_quality_summary"],
-        {"strict_pair_quality_ready": True, "measured_strict_pair_quality_count": 1},
+        {"strict_pair_quality_ready": True, "measured_strict_pair_quality_count": 2},
     )
-    paths["pair_quality_metrics"].write_text("image_id,ssim\nimage_000000,1.0\n", encoding="utf-8")
-    t2smark_runtime.write_json(
-        paths["adapter_observations"],
-        [{"event_id": f"event_{index}"} for index in range(2 + 2 * len(attack_names))],
+    paths["pair_quality_metrics"].write_text(
+        "image_id,ssim\nimage_000000,1.0\nimage_000001,1.0\n",
+        encoding="utf-8",
     )
-    for path in (
-        paths["adapter_manifest"],
-        paths["adapter_artifact_manifest"],
-        paths["environment_report"],
+    for path_value in (
         paths["source_prepare_result"],
         paths["official_command_result"],
         paths["adapter_command_result"],
     ):
-        t2smark_runtime.write_json(path, {})
-    candidate_count = len(attack_names)
-    paths["candidate_records"].write_text(
-        "".join(
-            json.dumps({"attack_name": name, "baseline_id": "t2smark"}) + "\n"
-            for name in attack_names
-        ),
-        encoding="utf-8",
+        t2smark_runtime.write_json(path_value, {})
+    t2smark_runtime.write_json(paths["environment_report"], runtime_environment)
+    import_report = t2smark_runtime.build_candidate_records_and_validation(
+        root_path,
+        config,
+        paths,
+        prompt_report,
     )
-    validation = {
-        "formal_import_validation_ready": True,
-        "accepted_formal_import_count": candidate_count,
-        "rejected_formal_import_count": 0,
-        "formal_import_issue_count": 0,
-    }
-    t2smark_runtime.write_json(paths["validation_report"], validation)
+    validation = import_report["validation_report"]
+    candidate_count = int(import_report["candidate_record_count"])
+    assert validation["formal_import_validation_ready"] is True
     summary = {
         "generated_at": "2026-07-11T00:00:00+00:00",
         "baseline_id": "t2smark",
@@ -569,9 +1072,18 @@ def _write_package_fixture(
         "run_decision": "pass",
         "t2smark_formal_reproduction_ready": True,
         "t2smark_formal_attack_ready": True,
+        "t2smark_formal_unit_set_ready": True,
+        "t2smark_formal_unit_record_count": 2,
+        "t2smark_formal_unit_records_digest": unit_aggregate[
+            "formal_unit_records_digest"
+        ],
+        "t2smark_formal_unit_aggregate_digest": unit_aggregate[
+            "formal_unit_aggregate_digest"
+        ],
+        "scientific_unit_provenance_ready": True,
         "t2smark_strict_pair_quality_ready": True,
         "formal_import_validation_ready": True,
-        "selected_prompt_count": 1,
+        "selected_prompt_count": 2,
         "formal_import_candidate_record_count": candidate_count,
         "official_protocol_binding_digest": expected_binding["protocol_binding_digest"],
         "metadata": {
@@ -632,11 +1144,40 @@ def test_t2smark_package_requires_pass_validation_and_exact_whitelist(
     assert candidate.package_family == "official_reference_t2smark"
     old_archive_path = output_dir / "external_baseline_official_reference_package_t2smark_old.zip"
     old_archive_path.write_bytes(b"old archive is not a package member")
-    package_t2smark_formal_reproduction_outputs(
-        root=tmp_path,
-        output_dir="outputs/t2smark_formal_reproduction",
-        drive_output_dir=str(drive_dir),
-        archive_name="external_baseline_official_reference_package_t2smark_test.zip",
+    with pytest.raises(RuntimeError, match="旧运行或非白名单"):
+        package_t2smark_formal_reproduction_outputs(
+            root=tmp_path,
+            output_dir="outputs/t2smark_formal_reproduction",
+            drive_output_dir=str(drive_dir),
+            archive_name="external_baseline_official_reference_package_t2smark_test.zip",
+        )
+    old_archive_path.unlink()
+    adapter_manifest_path = output_dir / "t2smark_adapter/t2smark_slm_adapter_manifest.json"
+    adapter_artifact_manifest_path = (
+        output_dir / "t2smark_adapter/artifacts/t2smark_slm_adapter_manifest.json"
+    )
+    adapter_manifest = json.loads(adapter_manifest_path.read_text(encoding="utf-8"))
+    canonical_adapter_manifest = dict(adapter_manifest)
+    adapter_manifest["baseline_observations_path"] = str(
+        output_dir / "t2smark_adapter/baseline_observations.json"
+    )
+    adapter_manifest.pop("adapter_digest")
+    adapter_manifest["adapter_digest"] = t2smark_runtime.build_stable_digest(
+        adapter_manifest
+    )
+    t2smark_runtime.write_json(adapter_manifest_path, adapter_manifest)
+    t2smark_runtime.write_json(adapter_artifact_manifest_path, adapter_manifest)
+    with pytest.raises(RuntimeError, match="不是可迁移路径"):
+        package_t2smark_formal_reproduction_outputs(
+            root=tmp_path,
+            output_dir="outputs/t2smark_formal_reproduction",
+            drive_output_dir=str(drive_dir),
+            archive_name="external_baseline_official_reference_package_t2smark_test.zip",
+        )
+    t2smark_runtime.write_json(adapter_manifest_path, canonical_adapter_manifest)
+    t2smark_runtime.write_json(
+        adapter_artifact_manifest_path,
+        canonical_adapter_manifest,
     )
     stale_path = output_dir / "stale_previous_run.json"
     stale_path.write_text("{}\n", encoding="utf-8")
@@ -648,6 +1189,48 @@ def test_t2smark_package_requires_pass_validation_and_exact_whitelist(
             archive_name="external_baseline_official_reference_package_t2smark_test.zip",
         )
     stale_path.unlink()
+    stale_directory = output_dir / "stale_empty_directory"
+    stale_directory.mkdir()
+    with pytest.raises(RuntimeError, match="层级不是精确白名单"):
+        package_t2smark_formal_reproduction_outputs(
+            root=tmp_path,
+            output_dir="outputs/t2smark_formal_reproduction",
+            drive_output_dir=str(drive_dir),
+            archive_name="external_baseline_official_reference_package_t2smark_test.zip",
+        )
+    stale_directory.rmdir()
+    symbolic_link = output_dir / "unexpected_symbolic_link.json"
+    try:
+        symbolic_link.symlink_to(output_dir / "t2smark_official_results.json")
+    except OSError:
+        pass
+    else:
+        with pytest.raises(RuntimeError, match="链接"):
+            package_t2smark_formal_reproduction_outputs(
+                root=tmp_path,
+                output_dir="outputs/t2smark_formal_reproduction",
+                drive_output_dir=str(drive_dir),
+                archive_name="external_baseline_official_reference_package_t2smark_test.zip",
+            )
+        symbolic_link.unlink()
+    candidate_path = output_dir / "t2smark_formal_import_candidate_records.jsonl"
+    original_candidates = candidate_path.read_text(encoding="utf-8")
+    candidate_rows = [
+        json.loads(line) for line in original_candidates.splitlines() if line.strip()
+    ]
+    candidate_rows[0]["true_positive_rate"] = 0.0
+    candidate_path.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in candidate_rows),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="candidate records 无法"):
+        package_t2smark_formal_reproduction_outputs(
+            root=tmp_path,
+            output_dir="outputs/t2smark_formal_reproduction",
+            drive_output_dir=str(drive_dir),
+            archive_name="external_baseline_official_reference_package_t2smark_test.zip",
+        )
+    candidate_path.write_text(original_candidates, encoding="utf-8")
     validation_path = output_dir / "t2smark_formal_import_validation_report.json"
     validation = json.loads(validation_path.read_text(encoding="utf-8"))
     validation["formal_import_validation_ready"] = False
@@ -659,3 +1242,51 @@ def test_t2smark_package_requires_pass_validation_and_exact_whitelist(
             drive_output_dir=str(drive_dir),
             archive_name="external_baseline_official_reference_package_t2smark_test.zip",
         )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("nested_reparse", (False, True))
+def test_t2smark_inventory_rejects_root_or_nested_reparse_point(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    nested_reparse: bool,
+) -> None:
+    """结果根和任一嵌套目录都不得通过 Windows reparse point 逃逸。"""
+
+    output_dir = tmp_path / "t2smark_results"
+    output_dir.mkdir()
+    reparse_path = output_dir
+    if nested_reparse:
+        reparse_path = output_dir / "nested"
+        reparse_path.mkdir()
+    original_is_junction = getattr(Path, "is_junction", lambda _path: False)
+
+    def simulated_is_junction(path: Path) -> bool:
+        """仅把目标测试路径模拟为 junction, 其他路径保留平台行为。"""
+
+        return path == reparse_path or bool(original_is_junction(path))
+
+    monkeypatch.setattr(Path, "is_junction", simulated_is_junction, raising=False)
+    with pytest.raises(RuntimeError, match="reparse point"):
+        t2smark_runtime._inventory_t2smark_result_tree(output_dir)
+
+
+def test_t2smark_package_survives_cross_workspace_restore(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """完整 outputs 快照搬迁后可直接重建并打包, 不依赖旧 checkout 路径."""
+
+    source_root = tmp_path / "workspace_a"
+    restored_root = tmp_path / "workspace_b"
+    _write_package_fixture(source_root, monkeypatch)
+    shutil.copytree(source_root / "outputs", restored_root / "outputs")
+    restored_drive = restored_root / "drive"
+    record = package_t2smark_formal_reproduction_outputs(
+        root=restored_root,
+        output_dir="outputs/t2smark_formal_reproduction",
+        drive_output_dir=str(restored_drive),
+        archive_name="external_baseline_official_reference_package_t2smark_restored.zip",
+    )
+
+    assert (restored_root / record.archive_path).is_file()

@@ -25,6 +25,8 @@ from paper_experiments.runners.tree_ring_official_reference import (
     OPENCLIP_MODEL_NAME,
     OPENCLIP_REPOSITORY_ID,
     OPENCLIP_REVISION,
+    TREE_RING_PACKAGE_GENERATED_FILE_NAMES,
+    TREE_RING_PACKAGE_ROOT_FILE_WHITELIST,
     TreeRingOfficialReferenceConfig,
     build_reference_record_report,
     build_default_config,
@@ -45,11 +47,19 @@ from paper_experiments.runners.closure_package_selection import (
     inspect_closure_package,
 )
 from paper_experiments.runners.model_snapshot_runtime import DIFFUSERS_PIPELINE_ALLOW_PATTERNS
+from paper_experiments.runners.official_reference_unit_runtime import (
+    build_official_reference_config_digest,
+)
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
 DEPENDENCY_PROFILE_ID = "tree_ring_official_py39_cu117"
+OFFICIAL_SCIENTIFIC_CONFIG = {"test": True}
+OFFICIAL_SCIENTIFIC_CONFIG_DIGEST = build_official_reference_config_digest(
+    "tree_ring",
+    OFFICIAL_SCIENTIFIC_CONFIG,
+)
 SOURCE_PROVENANCE = {
     "source_worktree_digest": "a" * 64,
     "source_patch_sha256": "b" * 64,
@@ -65,6 +75,8 @@ SOURCE_PROVENANCE = {
     "openclip_checkpoint_sha256": OPENCLIP_CHECKPOINT_SHA256,
     "openclip_checkpoint_size_bytes": OPENCLIP_CHECKPOINT_SIZE_BYTES,
     "openclip_snapshot_content_digest": "c" * 64,
+    "official_scientific_config": OFFICIAL_SCIENTIFIC_CONFIG,
+    "official_scientific_config_digest": OFFICIAL_SCIENTIFIC_CONFIG_DIGEST,
 }
 
 READY_FLAGS = {
@@ -322,6 +334,13 @@ def test_tree_ring_official_reference_patches_model_repository_layout(tmp_path: 
     source_dir.mkdir(parents=True)
     entrypoint = source_dir / "run_tree_ring_watermark.py"
     entrypoint.write_text(
+        "from io_utils import *\n"
+        "def emit(results, i, current_prompt, seed, no_w_metric, w_metric, w_no_sim, w_sim):\n"
+        "        results.append({\n"
+        "            'no_w_metric': no_w_metric, 'w_metric': w_metric, 'w_no_sim': w_no_sim, 'w_sim': w_sim,\n"
+        "        })\n"
+        "def finish(auc, acc, low):\n"
+        "    print(f'auc: {auc}, acc: {acc}, TPR@1%FPR: {low}')\n"
         "pipe = InversableStableDiffusionPipeline.from_pretrained(\n"
         "        args.model_id,\n"
         "        scheduler=scheduler,\n"
@@ -537,6 +556,15 @@ def test_tree_ring_official_reference_record_validates_when_all_boundaries_ready
     assert report["reference_import_ready"] is True
     assert report["accepted_reference_record_count"] == 1
 
+    tampered_record = json.loads(json.dumps(record))
+    tampered_record["official_scientific_config"]["test"] = False
+    tampered_report = validate_tree_ring_official_reference_records(
+        [tampered_record]
+    )
+    assert "official_scientific_config_digest_mismatch" in {
+        issue["reason"] for issue in tampered_report["issues"]
+    }
+
 
 @pytest.mark.quick
 def test_tree_ring_record_builder_rejects_missing_scientific_metric() -> None:
@@ -628,7 +656,14 @@ def test_tree_ring_record_report_requires_current_command_and_complete_metrics(t
         config,
         paths,
         incomplete_metrics,
-        {"official_command_requested": True, "return_code": 0},
+        {
+            "official_command_requested": True,
+            "return_code": 0,
+            "official_unit_coverage_ready": True,
+            "official_command_execution_evidence_ready": True,
+            "official_scientific_config": OFFICIAL_SCIENTIFIC_CONFIG,
+            "official_scientific_config_digest": OFFICIAL_SCIENTIFIC_CONFIG_DIGEST,
+        },
         source_status,
         {"dependency_environment_ready": True, "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID},
         model_report,
@@ -645,7 +680,14 @@ def test_tree_ring_record_report_requires_current_command_and_complete_metrics(t
         config,
         paths,
         _complete_metric_values(),
-        {"official_command_requested": True, "return_code": 0},
+        {
+            "official_command_requested": True,
+            "return_code": 0,
+            "official_unit_coverage_ready": True,
+            "official_command_execution_evidence_ready": True,
+            "official_scientific_config": OFFICIAL_SCIENTIFIC_CONFIG,
+            "official_scientific_config_digest": OFFICIAL_SCIENTIFIC_CONFIG_DIGEST,
+        },
         source_status,
         {"dependency_environment_ready": True, "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID},
         model_report,
@@ -731,6 +773,18 @@ def test_tree_ring_official_reference_package_embeds_archive_self_description(
                 "official_command_requested": True,
                 "official_command_return_code": 0,
                 "official_execution_ready": True,
+                "official_unit_coverage_ready": True,
+                "official_unit_batch_size": 10,
+                "official_unit_expected_count": 7,
+                "official_unit_completed_count": 7,
+                "official_unit_records_digest": "6" * 64,
+                    "official_unit_observations_digest": "7" * 64,
+                    "official_unit_command_identities_digest": "9" * 64,
+                "scientific_unit_provenance": {
+                    "scientific_unit_provenance_ready": True
+                },
+                "official_scientific_config": {"test": True},
+                "official_scientific_config_digest": "8" * 64,
                 "required_metrics_ready": True,
                 "dependency_profile_id": DEPENDENCY_PROFILE_ID,
                 "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID,
@@ -775,6 +829,61 @@ def test_tree_ring_official_reference_package_embeds_archive_self_description(
     (output_dir / "tree_ring_official_reference_validation_report.json").write_text(
         json.dumps({"reference_import_ready": True}) + "\n",
         encoding="utf-8",
+    )
+    (output_dir / "tree_ring_official_metric_summary.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    (output_dir / "tree_ring_model_repository_prepare_result.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    (output_dir / "tree_ring_openclip_checkpoint_prepare_result.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    for relative_path in sorted(
+        TREE_RING_PACKAGE_ROOT_FILE_WHITELIST
+        - TREE_RING_PACKAGE_GENERATED_FILE_NAMES
+    ):
+        required_path = output_dir / relative_path
+        if not required_path.exists():
+            required_path.parent.mkdir(parents=True, exist_ok=True)
+            required_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "paper_experiments.runners.tree_ring_official_reference.validate_persisted_official_reference_units",
+        lambda **_kwargs: {
+            "official_unit_coverage_ready": True,
+            "official_unit_expected_count": 7,
+            "official_unit_completed_count": 7,
+            "official_unit_records_digest": "6" * 64,
+                "official_unit_observations_digest": "7" * 64,
+                "official_unit_command_identities_digest": "9" * 64,
+            "scientific_unit_provenance": {
+                "scientific_unit_provenance_ready": True
+            },
+            "official_scientific_config": {"test": True},
+            "official_scientific_config_digest": "8" * 64,
+            "official_unit_commands": [],
+            "metric_summary": {},
+            "stable_unit_identity": {
+                "formal_execution_commit": code_version,
+                "formal_execution_lock_digest": FORMAL_EXECUTION_LOCK[
+                    "formal_execution_lock_digest"
+                ],
+                "official_repository_commit": None,
+                "source_patch_sha256": None,
+                "source_worktree_digest": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.tree_ring_official_reference._validate_packaged_tree_ring_reference_evidence",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.tree_ring_official_reference.validate_official_reference_scientific_config_and_commands",
+        lambda **_kwargs: None,
     )
 
     record = package_tree_ring_official_reference_outputs(
@@ -830,7 +939,10 @@ def test_tree_ring_official_reference_package_embeds_archive_self_description(
         for item in CLOSURE_PACKAGE_FAMILY_SPECS
         if item.package_family == "official_reference_tree_ring"
     )
-    with pytest.raises(ClosurePackageSelectionError, match="缺少必要成员"):
+    with pytest.raises(
+        ClosurePackageSelectionError,
+        match="缺少必要成员|科学执行证据摘要非法",
+    ):
         inspect_closure_package(
             archive_path,
             spec=spec,

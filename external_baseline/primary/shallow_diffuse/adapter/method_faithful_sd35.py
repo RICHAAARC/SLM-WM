@@ -1,13 +1,14 @@
-"""Shallow Diffuse 在 SD3.5 Medium 上的方法忠实适配器。
+"""Shallow Diffuse 在 SD3.5 Medium 上的方法忠实适配器.
 
-该模块位于 external baseline 适配层。它保留 Shallow Diffuse 的核心机制:
-在扩散采样的浅层 latent 中按照局部 mask 写入 watermark patch, 生成图像后通过
-图像编码和流匹配反向 Euler 积分恢复 latent, 再以 masked patch 距离作为检测分数。
+该模块位于 external baseline 适配层. 同一 clean base latent 先按正文 guidance
+运行到 edit timestep, 固定 patch 在该状态注入, clean 与 watermarked 分支再以
+guidance=1 完成后段去噪. 最终图像仅保留指定水印通道, 其他通道来自 clean 分支.
+检测器从图像仅反演到同一 edit timestep, 再计算 masked patch 距离.
+整次运行在 Prompt 循环外生成唯一 patch, 所有 Prompt 与恢复会话复用该固定载体.
 
 项目特定写法:
-- SD3.5 Medium 使用 16-channel latent, 因此 mask 和 patch 均按可配置通道数构造。
-- 使用 Diffusers 的 callback_on_step_end 在中间 denoising 位置注入; callback 未实际执行时
-  立即终止, 不生成 method-faithful 正式候选记录。
+- SD3.5 Medium 使用 16-channel latent, 因此 mask, patch 和通道融合按可配置通道数构造.
+- 两段生成与部分反演直接复用 SD3.5 FlowMatch Euler 的同一完整 schedule.
 """
 
 from __future__ import annotations
@@ -33,18 +34,30 @@ from external_baseline.primary.sd35_method_faithful_common import (
     emit_adapter_progress,
     file_digest,
     formal_image_attack_config,
+    image_to_tensor,
     load_prompt_rows,
     load_sd3_pipeline,
     observation_digest,
     prompt_text,
     row_id,
     safe_file_stem,
-    score_image_latents,
     select_prompt_rows,
     split_name,
     validate_model_revision,
     validated_observation_attack_identity,
     write_json,
+)
+from external_baseline.primary.sd35_method_faithful_units import (
+    aggregate_method_faithful_unit_records,
+    apply_frozen_threshold,
+    build_irreversible_random_material_digest,
+    build_method_faithful_unit_context,
+    build_method_faithful_unit_spec,
+    load_completed_method_faithful_unit,
+    repository_relative_method_faithful_path,
+    resolve_method_faithful_output_path,
+    threshold_independent_observation,
+    write_completed_method_faithful_unit,
 )
 
 BASELINE_ID = "shallow_diffuse"
@@ -129,7 +142,42 @@ def build_watermark_patch(
     if "rand" in pattern_name or "seed" in pattern_name:
         patch[:] = patch[0]
         return patch
-    return patch
+    raise ValueError(f"unsupported_shallow_diffuse_pattern:{pattern}")
+
+
+def build_fixed_watermark_carrier(
+    latent_shape: tuple[int, int, int, int],
+    *,
+    mask_shape: str,
+    radius: int,
+    inner_radius: int,
+    channel: int,
+    pattern: str,
+    watermark_seed: int,
+    device: str,
+) -> tuple[Any, Any, str]:
+    """由固定 seed 构造整次运行共享的 Shallow Diffuse mask, patch 和摘要."""
+
+    import torch
+
+    mask = build_watermark_mask(
+        latent_shape,
+        mask_shape=mask_shape,
+        radius=int(radius),
+        inner_radius=int(inner_radius),
+        channel=int(channel),
+        device=device,
+    )
+    patch_generator = torch.Generator(device=device).manual_seed(int(watermark_seed))
+    patch = build_watermark_patch(
+        latent_shape,
+        pattern=pattern,
+        radius=int(radius),
+        generator=patch_generator,
+        device=device,
+    )
+    carrier_digest_random = build_irreversible_random_material_digest(patch)
+    return mask, patch, carrier_digest_random
 
 
 def inject_watermark(latents: Any, mask: Any, patch: Any, *, injection: str) -> Any:
@@ -252,52 +300,417 @@ def build_observation(
     )
 
 
-def generate_watermarked_image(
+def resolve_shallow_diffuse_edit_timestep(
+    num_inference_steps: int,
+    edit_fraction: float,
+) -> tuple[int, int]:
+    """按官方 floor 语义返回 edit timestep 与前段结束 schedule index."""
+
+    step_count = int(num_inference_steps)
+    if step_count <= 1:
+        raise ValueError("Shallow Diffuse 至少需要2个推理 step")
+    edit_timestep = int(float(edit_fraction) * step_count)
+    if not 0 < edit_timestep < step_count:
+        raise ValueError("Shallow Diffuse edit timestep 必须位于完整 schedule 内部")
+    return edit_timestep, step_count - edit_timestep
+
+
+def _scheduler_config_value(config: Any, field_name: str, default: Any) -> Any:
+    """从 Diffusers FrozenDict 或普通对象读取 scheduler 配置."""
+
+    if hasattr(config, "get"):
+        return config.get(field_name, default)
+    return getattr(config, field_name, default)
+
+
+def _set_flow_matching_schedule(
+    pipe: Any,
+    *,
+    num_inference_steps: int,
+    latent_shape: tuple[int, ...],
+) -> tuple[Any, Any]:
+    """按 SD3.5 pipeline 语义设置完整 FlowMatch Euler schedule."""
+
+    scheduler_kwargs: dict[str, Any] = {}
+    scheduler_config = pipe.scheduler.config
+    if bool(
+        _scheduler_config_value(
+            scheduler_config,
+            "use_dynamic_shifting",
+            False,
+        )
+    ):
+        patch_size = int(getattr(pipe.transformer.config, "patch_size", 2))
+        image_sequence_length = (int(latent_shape[-2]) // patch_size) * (
+            int(latent_shape[-1]) // patch_size
+        )
+        base_sequence_length = int(
+            _scheduler_config_value(
+                scheduler_config,
+                "base_image_seq_len",
+                256,
+            )
+        )
+        maximum_sequence_length = int(
+            _scheduler_config_value(
+                scheduler_config,
+                "max_image_seq_len",
+                4096,
+            )
+        )
+        base_shift = float(
+            _scheduler_config_value(scheduler_config, "base_shift", 0.5)
+        )
+        maximum_shift = float(
+            _scheduler_config_value(scheduler_config, "max_shift", 1.16)
+        )
+        slope = (maximum_shift - base_shift) / (
+            maximum_sequence_length - base_sequence_length
+        )
+        scheduler_kwargs["mu"] = (
+            image_sequence_length * slope
+            + base_shift
+            - base_sequence_length * slope
+        )
+    pipe.scheduler.set_timesteps(
+        int(num_inference_steps),
+        device=pipe._execution_device,
+        **scheduler_kwargs,
+    )
+    timesteps = pipe.scheduler.timesteps
+    sigmas = pipe.scheduler.sigmas
+    if len(timesteps) != int(num_inference_steps) or len(sigmas) != len(timesteps) + 1:
+        raise RuntimeError("Shallow Diffuse FlowMatch schedule 长度不符合 Euler 契约")
+    if bool(_scheduler_config_value(scheduler_config, "stochastic_sampling", False)):
+        raise RuntimeError("Shallow Diffuse 正式路线要求确定性 FlowMatch Euler schedule")
+    return timesteps, sigmas
+
+
+def _encode_sd3_prompt_conditioning(
+    pipe: Any,
+    *,
+    prompt: str,
+    guidance_scale: float,
+) -> tuple[Any, Any, bool]:
+    """按 SD3 pipeline 语义构造正负 Prompt embedding 与 pooled projection."""
+
+    import torch
+
+    do_classifier_free_guidance = float(guidance_scale) > 1.0
+    (
+        prompt_embeds,
+        negative_prompt_embeds,
+        pooled_prompt_embeds,
+        negative_pooled_prompt_embeds,
+    ) = pipe.encode_prompt(
+        prompt=prompt,
+        prompt_2=None,
+        prompt_3=None,
+        device=pipe._execution_device,
+        do_classifier_free_guidance=do_classifier_free_guidance,
+        negative_prompt="",
+    )
+    if do_classifier_free_guidance:
+        if negative_prompt_embeds is None or negative_pooled_prompt_embeds is None:
+            raise RuntimeError("Shallow Diffuse 前段 CFG 缺少 negative embedding")
+        prompt_embeds = torch.cat(
+            [negative_prompt_embeds, prompt_embeds],
+            dim=0,
+        )
+        pooled_prompt_embeds = torch.cat(
+            [negative_pooled_prompt_embeds, pooled_prompt_embeds],
+            dim=0,
+        )
+    return prompt_embeds, pooled_prompt_embeds, do_classifier_free_guidance
+
+
+def _predict_flow_matching_velocity(
+    pipe: Any,
+    latents: Any,
+    *,
+    timestep: Any,
+    prompt_embeds: Any,
+    pooled_prompt_embeds: Any,
+    guidance_scale: float,
+    do_classifier_free_guidance: bool,
+) -> Any:
+    """调用真实 SD3 transformer 并执行与 pipeline 一致的 CFG 合成."""
+
+    import torch
+
+    latent_model_input = (
+        torch.cat([latents] * 2)
+        if do_classifier_free_guidance
+        else latents
+    )
+    timestep_tensor = timestep.expand(latent_model_input.shape[0])
+    velocity = pipe.transformer(
+        hidden_states=latent_model_input,
+        timestep=timestep_tensor,
+        encoder_hidden_states=prompt_embeds,
+        pooled_projections=pooled_prompt_embeds,
+        joint_attention_kwargs=getattr(pipe, "_joint_attention_kwargs", None),
+        return_dict=False,
+    )[0]
+    if do_classifier_free_guidance:
+        velocity_unconditional, velocity_conditional = velocity.chunk(2)
+        velocity = velocity_unconditional + float(guidance_scale) * (
+            velocity_conditional - velocity_unconditional
+        )
+    return velocity
+
+
+def denoise_flow_matching_segment(
+    pipe: Any,
+    latents: Any,
+    *,
+    prompt: str,
+    guidance_scale: float,
+    num_inference_steps: int,
+    start_schedule_index: int,
+    end_schedule_index: int,
+) -> Any:
+    """沿完整 SD3 schedule 执行指定的前闭后开真实 Euler 去噪区间."""
+
+    import torch
+
+    step_count = int(num_inference_steps)
+    start_index = int(start_schedule_index)
+    end_index = int(end_schedule_index)
+    if not 0 <= start_index <= end_index <= step_count:
+        raise ValueError("Shallow Diffuse 去噪区间超出完整 schedule")
+    with torch.inference_mode():
+        timesteps, sigmas = _set_flow_matching_schedule(
+            pipe,
+            num_inference_steps=step_count,
+            latent_shape=tuple(latents.shape),
+        )
+        prompt_embeds, pooled_prompt_embeds, do_cfg = (
+            _encode_sd3_prompt_conditioning(
+                pipe,
+                prompt=prompt,
+                guidance_scale=float(guidance_scale),
+            )
+        )
+        current = latents.clone()
+        for schedule_index in range(start_index, end_index):
+            velocity = _predict_flow_matching_velocity(
+                pipe,
+                current,
+                timestep=timesteps[schedule_index],
+                prompt_embeds=prompt_embeds,
+                pooled_prompt_embeds=pooled_prompt_embeds,
+                guidance_scale=float(guidance_scale),
+                do_classifier_free_guidance=do_cfg,
+            )
+            sigma_current = sigmas[schedule_index].to(
+                device=current.device,
+                dtype=torch.float32,
+            )
+            sigma_next = sigmas[schedule_index + 1].to(
+                device=current.device,
+                dtype=torch.float32,
+            )
+            current = (
+                current.to(dtype=torch.float32)
+                + (sigma_next - sigma_current) * velocity
+            ).to(dtype=velocity.dtype)
+    return current
+
+
+def fuse_shallow_diffuse_watermark_channels(
+    clean_latents: Any,
+    watermarked_latents: Any,
+    *,
+    watermark_channel: int,
+) -> Any:
+    """仅保留指定水印通道, 其余通道精确恢复 clean 分支."""
+
+    if tuple(clean_latents.shape) != tuple(watermarked_latents.shape):
+        raise ValueError("Shallow Diffuse 通道融合要求相同 latent 形状")
+    channel = int(watermark_channel)
+    if channel < -1 or channel >= int(clean_latents.shape[1]):
+        raise ValueError("Shallow Diffuse 水印通道超出 latent 维度")
+    fused = clean_latents.clone()
+    if channel == -1:
+        fused[:] = watermarked_latents
+    else:
+        fused[:, channel, :, :] = watermarked_latents[:, channel, :, :]
+    return fused
+
+
+def generate_shallow_diffuse_latent_pair(
     pipe: Any,
     prompt: str,
     *,
-    latents: Any,
+    base_latents: Any,
     mask: Any,
     patch: Any,
-    args: argparse.Namespace,
-) -> tuple[Any, str]:
-    """在浅层 denoising 位置注入 watermark 并生成图像。"""
+    num_inference_steps: int,
+    guidance_scale: float,
+    edit_fraction: float,
+    injection: str,
+    watermark_channel: int,
+) -> tuple[Any, Any, dict[str, Any]]:
+    """执行官方两段去噪, edit 注入, guidance=1 后段和通道融合."""
 
-    injection_step = max(0, min(int(args.num_inference_steps) - 1, int(round(float(args.edit_fraction) * int(args.num_inference_steps)))))
-    injection_mode = "callback_on_step_end"
-    injected_flag = {"value": False}
+    edit_timestep, edit_schedule_index = resolve_shallow_diffuse_edit_timestep(
+        int(num_inference_steps),
+        float(edit_fraction),
+    )
+    edit_clean_latents = denoise_flow_matching_segment(
+        pipe,
+        base_latents,
+        prompt=prompt,
+        guidance_scale=float(guidance_scale),
+        num_inference_steps=int(num_inference_steps),
+        start_schedule_index=0,
+        end_schedule_index=edit_schedule_index,
+    )
+    edit_watermarked_latents = inject_watermark(
+        edit_clean_latents.clone(),
+        mask,
+        patch,
+        injection=str(injection),
+    )
+    clean_final_latents = denoise_flow_matching_segment(
+        pipe,
+        edit_clean_latents,
+        prompt=prompt,
+        guidance_scale=1.0,
+        num_inference_steps=int(num_inference_steps),
+        start_schedule_index=edit_schedule_index,
+        end_schedule_index=int(num_inference_steps),
+    )
+    watermarked_branch_latents = denoise_flow_matching_segment(
+        pipe,
+        edit_watermarked_latents,
+        prompt=prompt,
+        guidance_scale=1.0,
+        num_inference_steps=int(num_inference_steps),
+        start_schedule_index=edit_schedule_index,
+        end_schedule_index=int(num_inference_steps),
+    )
+    fused_watermarked_latents = fuse_shallow_diffuse_watermark_channels(
+        clean_final_latents,
+        watermarked_branch_latents,
+        watermark_channel=int(watermark_channel),
+    )
+    protocol = {
+        "injection_mode": "edit_timestep_split_flow_matching",
+        "edit_timestep": edit_timestep,
+        "edit_schedule_index": edit_schedule_index,
+        "pre_edit_guidance_scale": float(guidance_scale),
+        "post_edit_guidance_scale": 1.0,
+        "watermark_channel": int(watermark_channel),
+        "channel_fusion": "watermark_channel_from_watermarked_branch_other_channels_from_clean_branch",
+    }
+    return clean_final_latents, fused_watermarked_latents, protocol
 
-    def callback_on_step_end(_pipe: Any, step_index: int, _timestep: Any, callback_kwargs: dict[str, Any]) -> dict[str, Any]:
-        if int(step_index) == injection_step:
-            callback_kwargs["latents"] = inject_watermark(
-                callback_kwargs["latents"],
-                mask,
-                patch,
-                injection=str(args.w_injection),
+
+def decode_sd3_latents_to_image(pipe: Any, latents: Any) -> Any:
+    """按 StableDiffusion3Pipeline 当前解码契约把 latent 转换为 PIL 图像."""
+
+    import torch
+
+    with torch.inference_mode():
+        scaling_factor = float(pipe.vae.config.scaling_factor)
+        shift_factor = float(pipe.vae.config.shift_factor)
+        decoded = pipe.vae.decode(
+            latents / scaling_factor + shift_factor,
+            return_dict=False,
+        )[0]
+        return pipe.image_processor.postprocess(decoded, output_type="pil")[0]
+
+
+def invert_flow_matching_to_edit_timestep(
+    pipe: Any,
+    image_latents: Any,
+    *,
+    num_inference_steps: int,
+    edit_timestep: int,
+) -> Any:
+    """从图像 latent 仅反演到生成时的同一 edit timestep."""
+
+    import torch
+
+    step_count = int(num_inference_steps)
+    resolved_edit_timestep = int(edit_timestep)
+    if not 0 < resolved_edit_timestep < step_count:
+        raise ValueError("Shallow Diffuse 检测 edit timestep 超出完整 schedule")
+    edit_schedule_index = step_count - resolved_edit_timestep
+    with torch.inference_mode():
+        timesteps, sigmas = _set_flow_matching_schedule(
+            pipe,
+            num_inference_steps=step_count,
+            latent_shape=tuple(image_latents.shape),
+        )
+        prompt_embeds, pooled_prompt_embeds, do_cfg = (
+            _encode_sd3_prompt_conditioning(
+                pipe,
+                prompt="",
+                guidance_scale=1.0,
             )
-            injected_flag["value"] = True
-        return callback_kwargs
+        )
+        current = image_latents.clone()
+        for schedule_index in range(step_count - 1, edit_schedule_index - 1, -1):
+            velocity = _predict_flow_matching_velocity(
+                pipe,
+                current,
+                timestep=timesteps[schedule_index],
+                prompt_embeds=prompt_embeds,
+                pooled_prompt_embeds=pooled_prompt_embeds,
+                guidance_scale=1.0,
+                do_classifier_free_guidance=do_cfg,
+            )
+            sigma_current = sigmas[schedule_index + 1].to(
+                device=current.device,
+                dtype=torch.float32,
+            )
+            sigma_next = sigmas[schedule_index].to(
+                device=current.device,
+                dtype=torch.float32,
+            )
+            current = (
+                current.to(dtype=torch.float32)
+                + (sigma_next - sigma_current) * velocity
+            ).to(dtype=velocity.dtype)
+    return current
 
-    image = pipe(
-        prompt,
-        guidance_scale=float(args.guidance_scale),
-        num_inference_steps=int(args.num_inference_steps),
-        height=int(args.height),
-        width=int(args.width),
-        latents=latents.clone(),
-        callback_on_step_end=callback_on_step_end,
-        callback_on_step_end_tensor_inputs=["latents"],
-    ).images[0]
-    if not injected_flag["value"]:
-        raise RuntimeError("Shallow Diffuse 正式适配要求浅层 callback 实际执行")
-    return image, injection_mode
 
+def score_image(
+    pipe: Any,
+    image: Any,
+    *,
+    size: int,
+    device: str,
+    mask: Any,
+    patch: Any,
+    measurement: str,
+    num_inference_steps: int,
+    edit_timestep: int,
+) -> float:
+    """把图像仅反演到 edit timestep 并计算 masked patch 距离分数."""
 
-def score_image(pipe: Any, image: Any, *, size: int, device: str, mask: Any, patch: Any, measurement: str, num_inversion_steps: int) -> float:
-    """把图像重新编码、反演并计算 masked patch 距离分数。"""
-
-    reversed_latents = score_image_latents(pipe, image, size=int(size), device=device, num_inversion_steps=int(num_inversion_steps))
-    return score_latents(reversed_latents, mask=mask, patch=patch, measurement=measurement)
+    tensor = image_to_tensor(
+        image,
+        size=int(size),
+        device=device,
+        dtype=pipe.vae.dtype,
+    )
+    image_latents = pipe.get_image_latents(tensor, sample=False)
+    reversed_latents = invert_flow_matching_to_edit_timestep(
+        pipe,
+        image_latents,
+        num_inference_steps=int(num_inference_steps),
+        edit_timestep=int(edit_timestep),
+    )
+    return score_latents(
+        reversed_latents,
+        mask=mask,
+        patch=patch,
+        measurement=measurement,
+    )
 
 
 def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -308,7 +721,16 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
 
     prompt_rows = select_prompt_rows(load_prompt_rows(args.prompt_plan), args.max_samples)
     attack_families = [item.strip() for item in str(args.attack_families or "").split(",") if item.strip()]
-    progress_total = max(1, 1 + len(prompt_rows) + len(attack_families) * len(prompt_rows) * 2)
+    if int(args.num_inversion_steps) != int(args.num_inference_steps):
+        raise ValueError(
+            "Shallow Diffuse 检测必须复用生成的完整 FlowMatch schedule"
+        )
+    edit_timestep, edit_schedule_index = resolve_shallow_diffuse_edit_timestep(
+        int(args.num_inference_steps),
+        float(args.edit_fraction),
+    )
+    test_prompt_count = sum(split_name(row) == "test" for row in prompt_rows)
+    progress_total = max(1, 1 + len(prompt_rows) + len(attack_families) * test_prompt_count * 2)
     progress_completed = 0
     emit_adapter_progress(
         baseline_id=BASELINE_ID,
@@ -345,52 +767,162 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
     attacked_dir.mkdir(parents=True, exist_ok=True)
 
     latent_shape = (1, int(args.latent_channels), max(1, int(args.height) // 8), max(1, int(args.width) // 8))
+    mask, patch, watermark_carrier_digest_random = build_fixed_watermark_carrier(
+        latent_shape,
+        mask_shape=str(args.w_mask_shape),
+        radius=int(args.w_radius),
+        inner_radius=int(args.w_inner_radius),
+        channel=int(args.w_channel),
+        pattern=str(args.w_pattern),
+        watermark_seed=int(args.watermark_seed),
+        device=device,
+    )
+    run_config = {
+        "adapter_boundary": METHOD_FAITHFUL_ADAPTER_BOUNDARY,
+        "model_id": args.model_id,
+        "model_revision": validate_model_revision(args.model_revision),
+        "torch_dtype": str(args.torch_dtype),
+        "latent_shape": list(latent_shape),
+        "height": int(args.height),
+        "width": int(args.width),
+        "num_inference_steps": int(args.num_inference_steps),
+        "num_inversion_steps": int(args.num_inversion_steps),
+        "guidance_scale": float(args.guidance_scale),
+        "target_fpr": float(args.target_fpr),
+        "explicit_threshold": args.threshold,
+        "attack_families": list(attack_families),
+        "attack_execution_split": "test",
+        "prompt_count": len(prompt_rows),
+        "test_prompt_count": test_prompt_count,
+        "seed": int(args.seed),
+        "watermark_seed": int(args.watermark_seed),
+        "w_channel": int(args.w_channel),
+        "w_radius": int(args.w_radius),
+        "w_inner_radius": int(args.w_inner_radius),
+        "w_mask_shape": str(args.w_mask_shape),
+        "w_pattern": str(args.w_pattern),
+        "w_injection": str(args.w_injection),
+        "w_measurement": str(args.w_measurement),
+        "edit_fraction": float(args.edit_fraction),
+        "edit_timestep": edit_timestep,
+        "edit_schedule_index": edit_schedule_index,
+        "pre_edit_guidance_scale": float(args.guidance_scale),
+        "post_edit_guidance_scale": 1.0,
+        "detection_inversion_stop_timestep": edit_timestep,
+        "channel_fusion": "watermark_channel_from_watermarked_branch_other_channels_from_clean_branch",
+        "watermark_carrier_digest_random": watermark_carrier_digest_random,
+        "prompt_plan_digest": build_stable_digest(prompt_rows),
+    }
+    unit_context = build_method_faithful_unit_context(
+        baseline_id=BASELINE_ID,
+        artifact_root=artifact_root,
+        run_config=run_config,
+        execution_device=device,
+        torch_module=torch,
+    )
     observations_without_threshold: list[dict[str, Any]] = []
     image_pairs: list[dict[str, Any]] = []
     runtime_keys: dict[str, dict[str, Any]] = {}
     injection_modes: set[str] = set()
+    source_unit_specs: list[Any] = []
+    source_unit_records: list[dict[str, Any]] = []
 
     for index, row in enumerate(prompt_rows, start=1):
         current_prompt = prompt_text(row)
         prompt_id = row_id(row, index, "prompt_id", "prompt")
         image_id = row_id(row, index, "image_id", "shallow_diffuse_image")
         file_stem = safe_file_stem(image_id, f"shallow_diffuse_image_{index:05d}")
-        latent_generator = torch.Generator(device=device).manual_seed(int(args.seed) + index - 1)
-        patch_generator = torch.Generator(device=device).manual_seed(int(args.watermark_seed) + index - 1)
-
-        clean_latents = torch.randn(latent_shape, generator=latent_generator, device=device, dtype=pipe.transformer.dtype)
-        mask = build_watermark_mask(
-            latent_shape,
-            mask_shape=str(args.w_mask_shape),
-            radius=int(args.w_radius),
-            inner_radius=int(args.w_inner_radius),
-            channel=int(args.w_channel),
-            device=device,
+        generation_seed_random = int(args.seed) + index - 1
+        latent_generator = torch.Generator(device=device).manual_seed(
+            generation_seed_random
         )
-        patch = build_watermark_patch(
+        clean_base_latents = torch.randn(
             latent_shape,
-            pattern=str(args.w_pattern),
-            radius=int(args.w_radius),
-            generator=patch_generator,
+            generator=latent_generator,
             device=device,
+            dtype=pipe.transformer.dtype,
         )
+        clean_base_latent_digest_random = build_irreversible_random_material_digest(
+            clean_base_latents
+        )
+        source_unit_spec = build_method_faithful_unit_spec(
+            unit_context,
+            unit_kind="source_pair",
+            row=row,
+            index=index,
+            random_identity_random={
+                "generation_seed_random": generation_seed_random,
+                "watermark_seed_random": int(args.watermark_seed),
+                "watermark_carrier_digest_random": watermark_carrier_digest_random,
+                "clean_base_latent_digest_random": clean_base_latent_digest_random,
+            },
+            unit_parameters={
+                "image_id": image_id,
+                "latent_shape": list(latent_shape),
+                "edit_timestep": edit_timestep,
+                "edit_schedule_index": edit_schedule_index,
+                "post_edit_guidance_scale": 1.0,
+                "watermark_channel": int(args.w_channel),
+            },
+        )
+        source_unit_specs.append(source_unit_spec)
+        completed_source_unit = load_completed_method_faithful_unit(
+            unit_context,
+            source_unit_spec,
+        )
+        if completed_source_unit is not None:
+            unit_data = completed_source_unit["unit_data"]
+            image_pair = dict(unit_data["image_pair"])
+            source_observations = [
+                dict(item) for item in unit_data["observations_without_threshold"]
+            ]
+            if len(source_observations) != 2:
+                raise ValueError("Shallow Diffuse Prompt 源图完成单元必须包含两条连续分数")
+            injection_mode = str(image_pair["shallow_injection_mode"])
+            injection_modes.add(injection_mode)
+            image_pairs.append(image_pair)
+            observations_without_threshold.extend(source_observations)
+            runtime_keys[image_id] = {
+                "mask": mask,
+                "patch": patch,
+                "row": row,
+                "row_index": index,
+                "injection_mode": injection_mode,
+                "clean_score": float(source_observations[0]["score"]),
+                "watermarked_score": float(source_observations[1]["score"]),
+                "clean_base_latent_digest_random": clean_base_latent_digest_random,
+            }
+            source_unit_records.append(completed_source_unit)
+            progress_completed += 1
+            emit_adapter_progress(
+                baseline_id=BASELINE_ID,
+                operation="source_pair_resume",
+                completed=progress_completed,
+                total=progress_total,
+                profile=f"operation=source_pair_resume prompt={index}/{len(prompt_rows)} image_id={image_id}",
+            )
+            continue
 
-        clean_image = pipe(
-            current_prompt,
-            guidance_scale=float(args.guidance_scale),
-            num_inference_steps=int(args.num_inference_steps),
-            height=int(args.height),
-            width=int(args.width),
-            latents=clean_latents,
-        ).images[0]
-        watermarked_image, injection_mode = generate_watermarked_image(
+        clean_final_latents, watermarked_final_latents, shallow_protocol = (
+            generate_shallow_diffuse_latent_pair(
+                pipe,
+                current_prompt,
+                base_latents=clean_base_latents,
+                mask=mask,
+                patch=patch,
+                num_inference_steps=int(args.num_inference_steps),
+                guidance_scale=float(args.guidance_scale),
+                edit_fraction=float(args.edit_fraction),
+                injection=str(args.w_injection),
+                watermark_channel=int(args.w_channel),
+            )
+        )
+        clean_image = decode_sd3_latents_to_image(pipe, clean_final_latents)
+        watermarked_image = decode_sd3_latents_to_image(
             pipe,
-            current_prompt,
-            latents=clean_latents,
-            mask=mask,
-            patch=patch,
-            args=args,
+            watermarked_final_latents,
         )
+        injection_mode = str(shallow_protocol["injection_mode"])
         injection_modes.add(injection_mode)
 
         clean_path = clean_dir / f"{file_stem}_clean.png"
@@ -407,7 +939,8 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
             mask=mask,
             patch=patch,
             measurement=str(args.w_measurement),
-            num_inversion_steps=int(args.num_inversion_steps),
+            num_inference_steps=int(args.num_inference_steps),
+            edit_timestep=edit_timestep,
         )
         watermarked_score = score_image(
             pipe,
@@ -417,7 +950,8 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
             mask=mask,
             patch=patch,
             measurement=str(args.w_measurement),
-            num_inversion_steps=int(args.num_inversion_steps),
+            num_inference_steps=int(args.num_inference_steps),
+            edit_timestep=edit_timestep,
         )
         pair_quality = measured_image_ssim(clean_image, watermarked_image)
 
@@ -429,6 +963,7 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
             "injection_mode": injection_mode,
             "clean_score": clean_score,
             "watermarked_score": watermarked_score,
+            "clean_base_latent_digest_random": clean_base_latent_digest_random,
         }
         image_pairs.append(
             {
@@ -446,6 +981,12 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                 "generation_model_revision": args.model_revision,
                 "latent_shape": list(latent_shape),
                 "shallow_injection_mode": injection_mode,
+                "clean_base_latent_digest_random": clean_base_latent_digest_random,
+                "edit_timestep": edit_timestep,
+                "edit_schedule_index": edit_schedule_index,
+                "post_edit_guidance_scale": 1.0,
+                "watermark_channel": int(args.w_channel),
+                "channel_fusion": shallow_protocol["channel_fusion"],
             }
         )
         observations_without_threshold.append(
@@ -494,6 +1035,27 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                 score_retention=1.0,
             )
         )
+        source_observations = [
+            threshold_independent_observation(item)
+            for item in observations_without_threshold[-2:]
+        ]
+        observations_without_threshold[-2:] = source_observations
+        completed_source_unit = write_completed_method_faithful_unit(
+            unit_context,
+            source_unit_spec,
+            unit_data={
+                "image_pair": image_pairs[-1],
+                "observations_without_threshold": source_observations,
+            },
+            artifact_paths=(clean_path, watermarked_path),
+        )
+        canonical_source_data = completed_source_unit["unit_data"]
+        image_pairs[-1] = dict(canonical_source_data["image_pair"])
+        observations_without_threshold[-2:] = [
+            dict(item)
+            for item in canonical_source_data["observations_without_threshold"]
+        ]
+        source_unit_records.append(completed_source_unit)
         if device == "cuda":
             torch.cuda.empty_cache()
         progress_completed += 1
@@ -506,34 +1068,90 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
         )
 
     threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold, args.target_fpr)
-    observations: list[dict[str, Any]] = []
-    for row in observations_without_threshold:
-        updated = dict(row)
-        updated["threshold"] = float(threshold)
-        updated["threshold_source"] = threshold_source
-        updated["detection_decision"] = bool(float(updated["score"]) >= float(threshold))
-        updated["final_decision"] = updated["detection_decision"]
-        updated["baseline_observation_digest"] = build_stable_digest(updated)
-        observations.append(updated)
-
     attacked_records: list[dict[str, Any]] = []
+    attack_observations_without_threshold: list[dict[str, Any]] = []
+    attack_unit_specs: list[Any] = []
+    attack_unit_records: list[dict[str, Any]] = []
     for attack_family in attack_families:
         formal_attack_config = formal_image_attack_config(attack_family)
         attack_matrix_family = canonical_attack_family(attack_family)
         attack_matrix_name = canonical_attack_name(attack_family)
         formal_attack_digest = attack_config_digest(formal_attack_config)
         for pair_index, pair in enumerate(image_pairs, start=1):
+            if str(pair.get("split", "")) != "test":
+                continue
             image_id = str(pair["image_id"])
             runtime = runtime_keys[image_id]
             for role_name, source_path_field, source_digest_field, sample_role in (
                 ("clean", "clean_image_path", "clean_image_digest", "attacked_negative"),
                 ("watermarked", "watermarked_image_path", "watermarked_image_digest", "attacked_positive"),
             ):
-                with Image.open(pair[source_path_field]) as source_image:
+                attack_seed = int(args.seed) + pair_index
+                attack_unit_spec = build_method_faithful_unit_spec(
+                    unit_context,
+                    unit_kind=f"formal_attack_{attack_matrix_name}_{role_name}",
+                    row=runtime["row"],
+                    index=int(runtime["row_index"]),
+                    random_identity_random={
+                        "generation_seed_random": int(args.seed) + pair_index - 1,
+                        "watermark_seed_random": int(args.watermark_seed),
+                        "watermark_carrier_digest_random": watermark_carrier_digest_random,
+                        "clean_base_latent_digest_random": runtime[
+                            "clean_base_latent_digest_random"
+                        ],
+                        "attack_seed_random": attack_seed,
+                    },
+                    unit_parameters={
+                        "image_id": image_id,
+                        "source_role": role_name,
+                        "sample_role": sample_role,
+                        "attack_id": formal_attack_config.attack_id,
+                        "attack_config_digest": formal_attack_digest,
+                        "edit_timestep": edit_timestep,
+                        "edit_schedule_index": edit_schedule_index,
+                        "frozen_threshold_digest": build_stable_digest(
+                            {
+                                "threshold": float(threshold),
+                                "threshold_source": threshold_source,
+                            }
+                        ),
+                    },
+                )
+                attack_unit_specs.append(attack_unit_spec)
+                completed_attack_unit = load_completed_method_faithful_unit(
+                    unit_context,
+                    attack_unit_spec,
+                )
+                if completed_attack_unit is not None:
+                    unit_data = completed_attack_unit["unit_data"]
+                    attack_observations_without_threshold.append(
+                        dict(unit_data["observation_without_threshold"])
+                    )
+                    attacked_records.append(dict(unit_data["attacked_record"]))
+                    attack_unit_records.append(completed_attack_unit)
+                    progress_completed += 1
+                    emit_adapter_progress(
+                        baseline_id=BASELINE_ID,
+                        operation="formal_image_attack_resume",
+                        completed=progress_completed,
+                        total=progress_total,
+                        profile=(
+                            "operation=formal_image_attack_resume "
+                            f"attack={attack_matrix_name} pair={pair_index}/{len(image_pairs)} role={role_name}"
+                        ),
+                        attack_name=attack_matrix_name,
+                        image_id=image_id,
+                    )
+                    continue
+                source_image_path = resolve_method_faithful_output_path(
+                    unit_context,
+                    pair[source_path_field],
+                )
+                with Image.open(source_image_path) as source_image:
                     attacked_image, attack_transform_name, attack_execution = apply_formal_image_attack(
                         source_image,
                         attack_family=attack_family,
-                        seed=int(args.seed) + pair_index,
+                        seed=attack_seed,
                         pipe=pipe,
                         prompt=str(pair["prompt_text"]),
                         size=int(args.height),
@@ -546,7 +1164,8 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                             mask=runtime["mask"],
                             patch=runtime["patch"],
                             measurement=str(args.w_measurement),
-                            num_inversion_steps=int(args.num_inversion_steps),
+                            num_inference_steps=int(args.num_inference_steps),
+                            edit_timestep=edit_timestep,
                         ),
                     )
                     attack_quality = measured_image_ssim(source_image, attacked_image)
@@ -563,14 +1182,15 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                     mask=runtime["mask"],
                     patch=runtime["patch"],
                     measurement=str(args.w_measurement),
-                    num_inversion_steps=int(args.num_inversion_steps),
+                    num_inference_steps=int(args.num_inference_steps),
+                    edit_timestep=edit_timestep,
                 )
-                observations.append(
+                attack_observation = threshold_independent_observation(
                     build_observation(
                         event_id=attacked_id,
                         score=score,
-                        threshold=threshold,
-                        threshold_source=threshold_source,
+                        threshold=0.0,
+                        threshold_source="pending",
                         row=runtime["row"],
                         index=int(runtime["row_index"]),
                         sample_role=sample_role,
@@ -594,28 +1214,43 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                         attack_config_digest_value=formal_attack_digest,
                     )
                 )
-                attacked_records.append(
-                    {
-                        "attacked_image_id": attacked_id,
-                        "source_image_id": image_id,
-                        "source_role": role_name,
-                        "sample_role": sample_role,
-                        "source_image_path": pair[source_path_field],
-                        "source_image_digest": pair[source_digest_field],
-                        "attacked_image_path": str(attacked_path),
-                        "attacked_image_digest": attacked_digest,
-                        "attack_family": attack_matrix_family,
-                        "attack_name": attack_matrix_name,
-                        "attack_condition": attack_matrix_name,
-                        "attack_id": formal_attack_config.attack_id,
-                        "resource_profile": formal_attack_config.resource_profile,
-                        "attack_config_digest": formal_attack_digest,
-                        "attack_transform_name": attack_transform_name,
-                        "attack_execution": attack_execution,
-                        "generation_model_id": args.model_id,
-                        "generation_model_revision": args.model_revision,
-                    }
+                attacked_record = {
+                    "attacked_image_id": attacked_id,
+                    "source_image_id": image_id,
+                    "source_role": role_name,
+                    "sample_role": sample_role,
+                    "source_image_path": pair[source_path_field],
+                    "source_image_digest": pair[source_digest_field],
+                    "attacked_image_path": str(attacked_path),
+                    "attacked_image_digest": attacked_digest,
+                    "attack_family": attack_matrix_family,
+                    "attack_name": attack_matrix_name,
+                    "attack_condition": attack_matrix_name,
+                    "attack_id": formal_attack_config.attack_id,
+                    "resource_profile": formal_attack_config.resource_profile,
+                    "attack_config_digest": formal_attack_digest,
+                    "attack_transform_name": attack_transform_name,
+                    "attack_execution": attack_execution,
+                    "generation_model_id": args.model_id,
+                    "generation_model_revision": args.model_revision,
+                }
+                attack_observations_without_threshold.append(attack_observation)
+                attacked_records.append(attacked_record)
+                completed_attack_unit = write_completed_method_faithful_unit(
+                    unit_context,
+                    attack_unit_spec,
+                    unit_data={
+                        "observation_without_threshold": attack_observation,
+                        "attacked_record": attacked_record,
+                    },
+                    artifact_paths=(attacked_path,),
                 )
+                canonical_attack_data = completed_attack_unit["unit_data"]
+                attack_observations_without_threshold[-1] = dict(
+                    canonical_attack_data["observation_without_threshold"]
+                )
+                attacked_records[-1] = dict(canonical_attack_data["attacked_record"])
+                attack_unit_records.append(completed_attack_unit)
                 if device == "cuda":
                     torch.cuda.empty_cache()
                 progress_completed += 1
@@ -632,6 +1267,16 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
                     image_id=image_id,
                 )
 
+    unit_aggregate = aggregate_method_faithful_unit_records(
+        unit_context,
+        (*source_unit_records, *attack_unit_records),
+        expected_specs=(*source_unit_specs, *attack_unit_specs),
+    )
+    observations = apply_frozen_threshold(
+        (*observations_without_threshold, *attack_observations_without_threshold),
+        threshold=threshold,
+        threshold_source=threshold_source,
+    )
     image_pairs_path = write_json(artifact_root / "shallow_diffuse_image_pairs.json", image_pairs)
     attacked_manifest_path = write_json(
         artifact_root / "attacked_image_manifest.json",
@@ -650,13 +1295,25 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
         "adapter_status": "method_faithful_sd35_adapter_ready",
         "model_id": args.model_id,
         "model_revision": args.model_revision,
-        "prompt_plan_path": str(Path(args.prompt_plan)),
-        "baseline_observations_path": str(Path(args.out)),
-        "artifact_root": str(artifact_root),
-        "image_pairs_path": str(image_pairs_path),
-        "attacked_image_manifest_path": str(attacked_manifest_path),
+        "prompt_plan_path": repository_relative_method_faithful_path(
+            unit_context, args.prompt_plan
+        ),
+        "baseline_observations_path": repository_relative_method_faithful_path(
+            unit_context, args.out
+        ),
+        "artifact_root": repository_relative_method_faithful_path(
+            unit_context, artifact_root
+        ),
+        "image_pairs_path": repository_relative_method_faithful_path(
+            unit_context, image_pairs_path
+        ),
+        "attacked_image_manifest_path": repository_relative_method_faithful_path(
+            unit_context, attacked_manifest_path
+        ),
         "image_pair_count": len(image_pairs),
         "attacked_image_count": len(attacked_records),
+        "test_prompt_count": test_prompt_count,
+        "expected_formal_attack_unit_count": test_prompt_count * len(attack_families) * 2,
         "observation_count": len(observations),
         "latent_shape": list(latent_shape),
         "execution_device": device,
@@ -665,12 +1322,17 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
             "model_revision": args.model_revision,
             "num_inference_steps": int(args.num_inference_steps),
             "guidance_scale": float(args.guidance_scale),
+            "post_edit_guidance_scale": 1.0,
+            "edit_timestep": edit_timestep,
+            "edit_schedule_index": edit_schedule_index,
             "height": int(args.height),
             "width": int(args.width),
         },
         "detection_protocol": {
             "input_access_mode": "image_only",
             "num_inversion_steps": int(args.num_inversion_steps),
+            "detection_inversion_stop_timestep": edit_timestep,
+            "detection_inversion_stop_schedule_index": edit_schedule_index,
             "target_fpr": float(args.target_fpr),
         },
         "shallow_injection_modes": sorted(injection_modes),
@@ -683,10 +1345,24 @@ def run_shallow_diffuse_method_faithful_adapter(args: argparse.Namespace) -> tup
             "w_injection": str(args.w_injection),
             "w_measurement": str(args.w_measurement),
             "edit_fraction": float(args.edit_fraction),
+            "edit_timestep": edit_timestep,
+            "edit_schedule_index": edit_schedule_index,
+            "post_edit_guidance_scale": 1.0,
+            "channel_fusion": "watermark_channel_from_watermarked_branch_other_channels_from_clean_branch",
             "watermark_seed": int(args.watermark_seed),
+            "watermark_carrier_digest_random": watermark_carrier_digest_random,
         },
         "threshold": float(threshold),
         "threshold_source": threshold_source,
+        "run_config": unit_context.run_config,
+        "run_config_digest": unit_context.run_config_digest,
+        "stable_scientific_execution_identity": unit_context.stable_execution_identity,
+        "stable_scientific_execution_identity_digest": unit_context.stable_execution_identity_digest,
+        "method_faithful_source_identity": unit_context.source_identity,
+        "method_faithful_source_identity_digest": unit_context.source_identity[
+            "method_faithful_source_identity_digest"
+        ],
+        **unit_aggregate,
         "formal_result_claim": False,
         "supports_paper_claim": False,
     }
@@ -741,8 +1417,7 @@ def run_cli(argv: list[str] | None = None) -> None:
 
     args = build_parser().parse_args(argv)
     observations, manifest = run_shallow_diffuse_method_faithful_adapter(args)
-    output_path = write_json(args.out, observations)
-    manifest["baseline_observations_path"] = str(output_path)
+    write_json(args.out, observations)
     manifest_path = Path(args.out).with_name("shallow_diffuse_method_faithful_sd35_adapter_manifest.json")
     write_json(manifest_path, manifest)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))

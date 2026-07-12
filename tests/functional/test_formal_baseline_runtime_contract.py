@@ -200,6 +200,38 @@ def test_t2smark_threshold_uses_only_calibration_clean_scores() -> None:
 
 
 @pytest.mark.quick
+def test_t2smark_adapter_rejects_incomplete_calibration_before_threshold() -> None:
+    """缺少任一 Prompt 单元时不得用部分 calibration 分数冻结阈值."""
+
+    pairs = [
+        {"split": "calibration"},
+        {"split": "calibration"},
+        {"split": "test"},
+    ]
+    incomplete_results = {
+        "0": {
+            "image_only_detection": {
+                "clean_score": 0.1,
+                "watermarked_score": 0.9,
+            }
+        },
+        "2": {
+            "image_only_detection": {
+                "clean_score": 0.2,
+                "watermarked_score": 0.8,
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="完整 Prompt 单元集合"):
+        build_t2smark_observations(
+            image_pairs=pairs,
+            t2smark_results=incomplete_results,
+            target_fpr=0.1,
+        )
+
+
+@pytest.mark.quick
 def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
     tmp_path: Path,
 ) -> None:

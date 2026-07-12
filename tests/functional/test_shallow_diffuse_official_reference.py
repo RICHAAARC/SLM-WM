@@ -18,6 +18,8 @@ from paper_experiments.baselines import (
 )
 from paper_experiments.runners.shallow_diffuse_official_reference import (
     ShallowDiffuseOfficialReferenceConfig,
+    SHALLOW_DIFFUSE_PACKAGE_GENERATED_FILE_NAMES,
+    SHALLOW_DIFFUSE_PACKAGE_ROOT_FILE_WHITELIST,
     build_reference_record_report,
     build_default_config,
     build_official_command,
@@ -45,11 +47,19 @@ from paper_experiments.runners.closure_package_selection import (
     ClosurePackageSelectionError,
     inspect_closure_package,
 )
+from paper_experiments.runners.official_reference_unit_runtime import (
+    build_official_reference_config_digest,
+)
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
 DEPENDENCY_PROFILE_ID = "shallow_diffuse_official_py39_cu117"
+OFFICIAL_SCIENTIFIC_CONFIG = {"test": True}
+OFFICIAL_SCIENTIFIC_CONFIG_DIGEST = build_official_reference_config_digest(
+    "shallow_diffuse",
+    OFFICIAL_SCIENTIFIC_CONFIG,
+)
 SOURCE_PROVENANCE = {
     "source_worktree_digest": "a" * 64,
     "source_patch_sha256": "b" * 64,
@@ -65,6 +75,8 @@ SOURCE_PROVENANCE = {
     "openclip_checkpoint_sha256": OPENCLIP_CHECKPOINT_SHA256,
     "openclip_checkpoint_size_bytes": OPENCLIP_CHECKPOINT_SIZE_BYTES,
     "openclip_snapshot_content_digest": "c" * 64,
+    "official_scientific_config": OFFICIAL_SCIENTIFIC_CONFIG,
+    "official_scientific_config_digest": OFFICIAL_SCIENTIFIC_CONFIG_DIGEST,
 }
 READY_FLAGS = {
     "official_source_ready": True,
@@ -265,6 +277,15 @@ def test_shallow_diffuse_official_reference_record_validates_when_all_boundaries
     assert report["reference_import_ready"] is True
     assert report["accepted_reference_record_count"] == 1
 
+    tampered_record = json.loads(json.dumps(record))
+    tampered_record["official_scientific_config"]["test"] = False
+    tampered_report = validate_shallow_diffuse_official_reference_records(
+        [tampered_record]
+    )
+    assert "official_scientific_config_digest_mismatch" in {
+        issue["reason"] for issue in tampered_report["issues"]
+    }
+
     incomplete_record = dict(record)
     incomplete_record.pop("watermarked_clip_score_mean")
     incomplete_report = validate_shallow_diffuse_official_reference_records([incomplete_record])
@@ -316,6 +337,19 @@ def test_shallow_diffuse_official_reference_patches_source_runtime_boundaries(tm
     source_dir.mkdir(parents=True)
     entrypoint = source_dir / "run_shallow_diffuse_t2i.py"
     entrypoint.write_text(
+        "from arguments import parse_args\n"
+        "def collect():\n"
+        "    final_result = {}\n"
+        "    return final_result\n"
+        "def aggregate(single_task):\n"
+        "    final_result_list = {}\n"
+        "    if True:\n"
+        "        if True:\n"
+        "            if True:\n"
+        "                final_result = single_task[0].result()\n"
+        "                for key, value in final_result.items():\n"
+        "                    final_result_list[key].append(value)\n"
+        "    torch.cuda.empty_cache()\n"
         "pipe = InversableStableDiffusionPipeline.from_pretrained(\n"
         "        args.model_id,\n"
         "        scheduler=scheduler,\n"
@@ -402,6 +436,37 @@ def test_shallow_diffuse_official_reference_patches_source_runtime_boundaries(tm
     assert report["similarity_variable_ready"] is True
     assert report["prompt_dataset_revision_ready"] is True
     assert report["source_patch_postcondition_ready"] is True
+    assert report["source_unit_output_ready"] is True
+    required_unit_markers = (
+        "# SLM-WM: 仅添加原子科学单元记录, 不改变 Shallow Diffuse 算子.",
+        "# SLM-WM: 保存逐 Prompt 索引, 种子和 Prompt 摘要.",
+        "# SLM-WM: 收集完整逐 Prompt 原始科学观测.",
+        "# SLM-WM: 元数据不进入官方指标列表, 仅进入原子观测记录.",
+        "# SLM-WM: 只有完整批次完成后才原子发布科学单元.",
+    )
+    assert all(marker in patched_entrypoint for marker in required_unit_markers)
+    assert {
+        "emit_atomic_scientific_unit_import",
+        "emit_prompt_identity",
+        "collect_prompt_level_scientific_observations",
+        "separate_prompt_metadata_from_official_metrics",
+        "atomic_scientific_unit_publish",
+    }.issubset(report["patch_items"])
+
+    output_marker = required_unit_markers[-1]
+    entrypoint.write_text(
+        patched_entrypoint.replace(output_marker, "").replace(
+            "    torch.cuda.empty_cache()\n",
+            "    pass\n",
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="必需源码补丁后置条件未满足"):
+        patch_shallow_diffuse_model_repository_layout(tmp_path, config, paths)
+    failed_report = json.loads(paths["source_patch_result"].read_text(encoding="utf-8"))
+    assert failed_report["similarity_variable_ready"] is True
+    assert failed_report["prompt_dataset_revision_ready"] is True
+    assert failed_report["source_unit_output_ready"] is False
 
 
 @pytest.mark.quick
@@ -436,6 +501,7 @@ def test_shallow_diffuse_source_patch_rejects_missing_similarity_postcondition(
     report = json.loads(paths["source_patch_result"].read_text(encoding="utf-8"))
     assert report["similarity_variable_ready"] is False
     assert report["prompt_dataset_revision_ready"] is True
+    assert report["source_unit_output_ready"] is False
     assert report["source_patch_postcondition_ready"] is False
 
 
@@ -717,7 +783,14 @@ def test_shallow_diffuse_record_requires_successful_current_official_command(
         config,
         paths,
         metric_summary,
-        {"official_command_requested": True, "return_code": 0},
+        {
+            "official_command_requested": True,
+            "return_code": 0,
+            "official_unit_coverage_ready": True,
+            "official_command_execution_evidence_ready": True,
+            "official_scientific_config": OFFICIAL_SCIENTIFIC_CONFIG,
+            "official_scientific_config_digest": OFFICIAL_SCIENTIFIC_CONFIG_DIGEST,
+        },
         source_status,
         {"dependency_environment_ready": True, "dependency_environment_profile_id": DEPENDENCY_PROFILE_ID},
         MODEL_REPOSITORY_REPORT,
@@ -792,6 +865,18 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
                 "official_command_requested": True,
                 "official_command_return_code": 0,
                 "official_execution_ready": True,
+                "official_unit_coverage_ready": True,
+                "official_unit_batch_size": 10,
+                "official_unit_expected_count": 7,
+                "official_unit_completed_count": 7,
+                "official_unit_records_digest": "6" * 64,
+                    "official_unit_observations_digest": "7" * 64,
+                    "official_unit_command_identities_digest": "9" * 64,
+                "scientific_unit_provenance": {
+                    "scientific_unit_provenance_ready": True
+                },
+                "official_scientific_config": {"test": True},
+                "official_scientific_config_digest": "8" * 64,
                 "required_metrics_ready": True,
                 "official_command_result_ready": True,
                 "governed_reference_record_count": 1,
@@ -818,6 +903,61 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
     (output_dir / "shallow_diffuse_official_reference_validation_report.json").write_text(
         json.dumps({"reference_import_ready": True}) + "\n",
         encoding="utf-8",
+    )
+    (output_dir / "shallow_diffuse_official_metric_summary.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    (output_dir / "shallow_diffuse_model_repository_prepare_result.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    (output_dir / "shallow_diffuse_openclip_checkpoint_prepare_result.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    for relative_path in sorted(
+        SHALLOW_DIFFUSE_PACKAGE_ROOT_FILE_WHITELIST
+        - SHALLOW_DIFFUSE_PACKAGE_GENERATED_FILE_NAMES
+    ):
+        required_path = output_dir / relative_path
+        if not required_path.exists():
+            required_path.parent.mkdir(parents=True, exist_ok=True)
+            required_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "paper_experiments.runners.shallow_diffuse_official_reference.validate_persisted_official_reference_units",
+        lambda **_kwargs: {
+            "official_unit_coverage_ready": True,
+            "official_unit_expected_count": 7,
+            "official_unit_completed_count": 7,
+            "official_unit_records_digest": "6" * 64,
+                "official_unit_observations_digest": "7" * 64,
+                "official_unit_command_identities_digest": "9" * 64,
+            "scientific_unit_provenance": {
+                "scientific_unit_provenance_ready": True
+            },
+            "official_scientific_config": {"test": True},
+            "official_scientific_config_digest": "8" * 64,
+            "official_unit_commands": [],
+            "metric_summary": {},
+            "stable_unit_identity": {
+                "formal_execution_commit": code_version,
+                "formal_execution_lock_digest": FORMAL_EXECUTION_LOCK[
+                    "formal_execution_lock_digest"
+                ],
+                "official_repository_commit": None,
+                "source_patch_sha256": None,
+                "source_worktree_digest": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.shallow_diffuse_official_reference._validate_packaged_shallow_diffuse_reference_evidence",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "paper_experiments.runners.shallow_diffuse_official_reference.validate_official_reference_scientific_config_and_commands",
+        lambda **_kwargs: None,
     )
 
     record = package_shallow_diffuse_official_reference_outputs(
@@ -851,7 +991,10 @@ def test_shallow_diffuse_official_reference_package_embeds_archive_self_descript
         for item in CLOSURE_PACKAGE_FAMILY_SPECS
         if item.package_family == "official_reference_shallow_diffuse"
     )
-    with pytest.raises(ClosurePackageSelectionError, match="缺少必要成员"):
+    with pytest.raises(
+        ClosurePackageSelectionError,
+        match="缺少必要成员|科学执行证据摘要非法",
+    ):
         inspect_closure_package(
             archive_path,
             spec=spec,

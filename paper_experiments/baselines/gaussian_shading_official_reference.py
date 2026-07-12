@@ -46,6 +46,8 @@ REQUIRED_SOURCE_PROVENANCE_FIELDS = (
     "openclip_checkpoint_sha256",
     "openclip_checkpoint_size_bytes",
     "openclip_snapshot_content_digest",
+    "official_scientific_config",
+    "official_scientific_config_digest",
 )
 REQUIRED_METRIC_FIELDS = (
     "sample_count",
@@ -121,6 +123,8 @@ class GaussianShadingOfficialReferenceRecord:
     openclip_checkpoint_sha256: str
     openclip_checkpoint_size_bytes: int
     openclip_snapshot_content_digest: str
+    official_scientific_config: dict[str, Any]
+    official_scientific_config_digest: str
     official_environment_profile: str
     baseline_result_source: str
     baseline_result_source_digest: str
@@ -200,6 +204,30 @@ def _exact_digest(value: Any, length: int) -> bool:
     return len(text) == length and _HEX_DIGEST_PATTERN.fullmatch(text) is not None
 
 
+def _scientific_config_fields(
+    source_provenance: Mapping[str, Any],
+) -> tuple[dict[str, Any], str]:
+    """读取并复验与 Gaussian Shading 科学单元同源的规范配置."""
+
+    raw_config = source_provenance.get("official_scientific_config")
+    if not isinstance(raw_config, Mapping) or not raw_config:
+        raise ValueError("official_scientific_config 是必需非空映射")
+    scientific_config = dict(raw_config)
+    config_digest = _str_field(
+        source_provenance,
+        "official_scientific_config_digest",
+    )
+    expected_digest = build_stable_digest(
+        {
+            "baseline_id": "gaussian_shading",
+            "scientific_config": scientific_config,
+        }
+    )
+    if config_digest != expected_digest:
+        raise ValueError("official_scientific_config_digest 与规范配置不一致")
+    return scientific_config, config_digest
+
+
 def build_gaussian_shading_official_reference_schema() -> dict[str, Any]:
     """构造 Gaussian Shading 官方参考导入 schema 描述。"""
 
@@ -240,6 +268,9 @@ def build_gaussian_shading_official_reference_record(
     该记录不得进入主表正式对比。
     """
 
+    scientific_config, scientific_config_digest = _scientific_config_fields(
+        source_provenance
+    )
     payload = {
         "baseline_id": "gaussian_shading",
         "reference_protocol_name": GAUSSIAN_SHADING_OFFICIAL_REFERENCE_PROTOCOL_NAME,
@@ -265,6 +296,8 @@ def build_gaussian_shading_official_reference_record(
         "openclip_checkpoint_sha256": _str_field(source_provenance, "openclip_checkpoint_sha256"),
         "openclip_checkpoint_size_bytes": _int_field(source_provenance, "openclip_checkpoint_size_bytes"),
         "openclip_snapshot_content_digest": _str_field(source_provenance, "openclip_snapshot_content_digest"),
+        "official_scientific_config": scientific_config,
+        "official_scientific_config_digest": scientific_config_digest,
         "official_environment_profile": official_environment_profile,
         "baseline_result_source": baseline_result_source,
         "baseline_result_source_digest": baseline_result_source_digest,
@@ -373,6 +406,7 @@ def validate_gaussian_shading_official_reference_records(rows: Iterable[Mapping[
             ("openclip_revision", 40),
             ("openclip_checkpoint_sha256", 64),
             ("openclip_snapshot_content_digest", 64),
+            ("official_scientific_config_digest", 64),
         ):
             if not _exact_digest(row.get(field_name), expected_length):
                 row_issues.append(
@@ -382,6 +416,28 @@ def validate_gaussian_shading_official_reference_records(rows: Iterable[Mapping[
                         f"{field_name}_exact_digest_required",
                     )
                 )
+        scientific_config = row.get("official_scientific_config")
+        if not isinstance(scientific_config, Mapping) or not scientific_config:
+            row_issues.append(
+                GaussianShadingOfficialReferenceIssue(
+                    row_index,
+                    "official_scientific_config",
+                    "official_scientific_config_required",
+                )
+            )
+        elif build_stable_digest(
+            {
+                "baseline_id": "gaussian_shading",
+                "scientific_config": dict(scientific_config),
+            }
+        ) != _str_field(row, "official_scientific_config_digest"):
+            row_issues.append(
+                GaussianShadingOfficialReferenceIssue(
+                    row_index,
+                    "official_scientific_config_digest",
+                    "official_scientific_config_digest_mismatch",
+                )
+            )
         if not _exact_digest(row.get("baseline_result_source_digest"), 64):
             row_issues.append(
                 GaussianShadingOfficialReferenceIssue(row_index, "baseline_result_source_digest", "result_source_digest_required")

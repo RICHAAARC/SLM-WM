@@ -26,7 +26,6 @@ from paper_experiments.baselines import (
 )
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from paper_experiments.runners.external_source_runtime import (
-    bind_successful_official_command_execution_evidence,
     build_registered_source_patch_evidence,
     inspect_cuda_with_python_executable,
     load_baseline_registry_item,
@@ -38,7 +37,6 @@ from experiments.runtime.progress import (
     call_runner_with_progress_status,
     emit_progress_status,
     progress_bar,
-    run_quiet_subprocess_with_progress,
     update_progress,
 )
 from experiments.runtime.archive_naming import utc_archive_token
@@ -67,6 +65,14 @@ from paper_experiments.runners.openclip_checkpoint_runtime import (
     OPENCLIP_REVISION,
     write_openclip_checkpoint_report,
 )
+from paper_experiments.runners.official_reference_unit_runtime import (
+    DEFAULT_OFFICIAL_REFERENCE_UNIT_BATCH_SIZE,
+    aggregate_tree_ring_unit_observations,
+    run_official_reference_unit_schedule,
+    validate_official_reference_package_root_exact_set,
+    validate_official_reference_scientific_config_and_commands,
+    validate_persisted_official_reference_units,
+)
 
 DEFAULT_OUTPUT_DIR = "outputs/tree_ring_official_reference"
 DEFAULT_DRIVE_OUTPUT_DIR = ""
@@ -74,6 +80,33 @@ DEFAULT_SOURCE_DIR = "external_baseline/primary/tree_ring/source"
 EXPECTED_PATCHED_SOURCE_PATHS = (
     "optim_utils.py",
     "run_tree_ring_watermark.py",
+)
+TREE_RING_PACKAGE_GENERATED_FILE_NAMES = frozenset(
+    {
+        "tree_ring_official_reference_package_input_manifest.json",
+        "tree_ring_official_reference_archive_summary.json",
+        "tree_ring_official_reference_archive_manifest.local.json",
+    }
+)
+TREE_RING_PACKAGE_ROOT_FILE_WHITELIST = frozenset(
+    {
+        "tree_ring_official_command_result.json",
+        "tree_ring_official_source_prepare_result.json",
+        "tree_ring_official_source_patch_result.json",
+        "tree_ring_model_repository_prepare_result.json",
+        "tree_ring_openclip_checkpoint_prepare_result.json",
+        "tree_ring_dependency_environment_prepare_result.json",
+        "tree_ring_official_stdout.txt",
+        "tree_ring_official_stderr.txt",
+        "tree_ring_official_metric_summary.json",
+        "tree_ring_official_reference_schema.json",
+        "tree_ring_official_reference_records.jsonl",
+        "tree_ring_official_reference_validation_report.json",
+        "tree_ring_official_reference_environment_report.json",
+        "tree_ring_official_reference_summary.json",
+        "manifest.local.json",
+        *TREE_RING_PACKAGE_GENERATED_FILE_NAMES,
+    }
 )
 DEFAULT_RUN_NAME = "tree_ring_official_reference"
 DEFAULT_SAMPLE_COUNT = 700
@@ -105,6 +138,7 @@ class TreeRingOfficialReferenceConfig:
     run_name: str = DEFAULT_RUN_NAME
     sample_count: int = DEFAULT_SAMPLE_COUNT
     start_index: int = 0
+    unit_batch_size: int = DEFAULT_OFFICIAL_REFERENCE_UNIT_BATCH_SIZE
     dataset: str = DEFAULT_PROMPT_DATASET_ID
     dataset_revision: str = DEFAULT_PROMPT_DATASET_REVISION
     reference_model: str = OPENCLIP_MODEL_NAME
@@ -138,6 +172,8 @@ class TreeRingOfficialReferenceConfig:
             raise ValueError("Tree-Ring OpenCLIP 预训练参数必须指向登记的本地 checkpoint")
         if int(self.sample_count) <= 0:
             raise ValueError("Tree-Ring 正式参考 sample_count 必须为正整数")
+        if int(self.unit_batch_size) != DEFAULT_OFFICIAL_REFERENCE_UNIT_BATCH_SIZE:
+            raise ValueError("Tree-Ring 正式参考必须使用预注册的10-Prompt原子批次")
         if self.dependency_profile_id != DEFAULT_DEPENDENCY_PROFILE_ID:
             raise ValueError("Tree-Ring 正式参考必须使用固定依赖 profile")
 
@@ -227,6 +263,8 @@ def output_paths(root_path: Path, config: TreeRingOfficialReferenceConfig) -> di
         "official_stdout": output_dir / "tree_ring_official_stdout.txt",
         "official_stderr": output_dir / "tree_ring_official_stderr.txt",
         "official_metric_summary": output_dir / "tree_ring_official_metric_summary.json",
+        "scientific_unit_dir": output_dir / "scientific_units",
+        "scientific_unit_workspace_root": output_dir / "scientific_unit_workspace",
         "reference_schema": output_dir / "tree_ring_official_reference_schema.json",
         "reference_records": output_dir / "tree_ring_official_reference_records.jsonl",
         "reference_validation": output_dir / "tree_ring_official_reference_validation_report.json",
@@ -378,6 +416,73 @@ def patch_tree_ring_model_repository_layout(
     optim_before_digest = file_digest(optim_utils_path)
     patched_source_text = source_text
     patched_optim_text = optim_text
+    unit_import_marker = "# SLM-WM: 仅添加原子科学单元记录, 不改变官方方法算子."
+    unit_import_anchor = "from io_utils import *\n"
+    unit_import_replacement = (
+        "from io_utils import *\n"
+        "import hashlib\n"
+        f"{unit_import_marker}\n"
+        "from paper_experiments.runners.official_reference_unit_runtime import (\n"
+        "    build_irreversible_random_material_digest,\n"
+        "    write_official_reference_source_unit_payload,\n"
+        ")\n"
+    )
+    if unit_import_marker not in patched_source_text and unit_import_anchor in patched_source_text:
+        patched_source_text = patched_source_text.replace(
+            unit_import_anchor,
+            unit_import_replacement,
+            1,
+        )
+        report["patch_items"].append("emit_atomic_scientific_unit_import")
+
+    unit_observation_marker = "# SLM-WM: 保存逐 Prompt 原始观测与随机种子身份."
+    unit_observation_target = (
+        "        results.append({\n"
+        "            'no_w_metric': no_w_metric, 'w_metric': w_metric, 'w_no_sim': w_no_sim, 'w_sim': w_sim,\n"
+        "        })\n"
+    )
+    unit_observation_replacement = (
+        f"        {unit_observation_marker}\n"
+        "        results.append({\n"
+        "            'prompt_index': i,\n"
+        "            'prompt_digest': hashlib.sha256(current_prompt.encode('utf-8')).hexdigest(),\n"
+        "            'prompt_seed_random': seed,\n"
+        "            'no_w_metric': float(no_w_metric),\n"
+        "            'w_metric': float(w_metric),\n"
+        "            'w_no_sim': float(w_no_sim),\n"
+        "            'w_sim': float(w_sim),\n"
+        "        })\n"
+    )
+    if unit_observation_marker not in patched_source_text and unit_observation_target in patched_source_text:
+        patched_source_text = patched_source_text.replace(
+            unit_observation_target,
+            unit_observation_replacement,
+            1,
+        )
+        report["patch_items"].append("emit_prompt_level_scientific_observations")
+
+    unit_output_marker = "# SLM-WM: 只有完整批次完成后才原子发布科学单元."
+    unit_output_anchor = "    print(f'auc: {auc}, acc: {acc}, TPR@1%FPR: {low}')\n"
+    unit_output_replacement = (
+        "    print(f'auc: {auc}, acc: {acc}, TPR@1%FPR: {low}')\n"
+        f"    {unit_output_marker}\n"
+        "    write_official_reference_source_unit_payload(\n"
+        "        baseline_id='tree_ring',\n"
+        "        observations=results,\n"
+        "        random_identity_random={\n"
+        "            'prompt_seed_schedule_digest_random': build_irreversible_random_material_digest([item['prompt_seed_random'] for item in results]),\n"
+        "            'watermark_pattern_digest_random': build_irreversible_random_material_digest(gt_patch),\n"
+        "        },\n"
+        "        torch_module=torch,\n"
+        "    )\n"
+    )
+    if unit_output_marker not in patched_source_text and unit_output_anchor in patched_source_text:
+        patched_source_text = patched_source_text.replace(
+            unit_output_anchor,
+            unit_output_replacement,
+            1,
+        )
+        report["patch_items"].append("atomic_scientific_unit_publish")
     marker = "# SLM-WM: 公开镜像没有 fp16 分支, 因此从 main 分支加载模型权重。"
     target = "        revision='fp16',\n"
     if marker not in patched_source_text and target in patched_source_text:
@@ -391,6 +496,19 @@ def patch_tree_ring_model_repository_layout(
     if dataset_target in patched_optim_text:
         patched_optim_text = patched_optim_text.replace(dataset_target, dataset_replacement)
         report["patch_items"].append("pin_prompt_dataset_revision")
+
+    source_unit_output_ready = all(
+        marker in patched_source_text
+        for marker in (
+            unit_import_marker,
+            unit_observation_marker,
+            unit_output_marker,
+        )
+    )
+    report["source_unit_output_ready"] = source_unit_output_ready
+    if not source_unit_output_ready:
+        write_json(paths["source_patch_result"], report)
+        raise RuntimeError("Tree-Ring 原子科学单元源码补丁后置条件未满足")
 
     if patched_source_text == source_text and patched_optim_text == optim_text:
         report.update(
@@ -550,6 +668,10 @@ def build_official_command(
         "3",
         "--w_pattern",
         "ring",
+        "--gen_seed",
+        "0",
+        "--w_seed",
+        "999999",
         "--start",
         str(config.start_index),
         "--end",
@@ -671,6 +793,8 @@ def _official_execution_ready(official_report: dict[str, Any]) -> bool:
         (
             official_report.get("official_command_requested") is True,
             int(official_report.get("return_code", -1)) == 0,
+            official_report.get("official_unit_coverage_ready") is True,
+            official_report.get("official_command_execution_evidence_ready") is True,
         )
     )
 
@@ -748,8 +872,13 @@ def run_official_command_if_requested(
     dependency_python_executable: str | Path,
     progress: object | None = None,
     device_report: dict[str, Any] | None = None,
+    formal_execution_lock: dict[str, Any] | None = None,
+    source_identity_status: dict[str, Any] | None = None,
+    dependency_environment_report: dict[str, Any] | None = None,
+    model_repository_report: dict[str, Any] | None = None,
+    openclip_checkpoint_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """根据配置执行 Tree-Ring 官方命令, 并保存 stdout / stderr。"""
+    """验证并补齐 Tree-Ring 原子批次, 然后复算完整官方指标。"""
 
     if not config.run_official_command:
         return {
@@ -781,8 +910,8 @@ def run_official_command_if_requested(
         }
         write_json(paths["official_command_result"], result)
         return result
-    source_status = source_report(root_path, config)
-    if not source_status["official_entrypoint_ready"]:
+    current_source_report = source_report(root_path, config)
+    if not current_source_report["official_entrypoint_ready"]:
         paths["official_stdout"].write_text("", encoding="utf-8")
         paths["official_stderr"].write_text("tree_ring_official_source_entrypoint_missing", encoding="utf-8")
         result = {
@@ -799,29 +928,101 @@ def run_official_command_if_requested(
         }
         write_json(paths["official_command_result"], result)
         return result
-    command = build_official_command(
-        root_path,
-        config,
-        dependency_python_executable,
-    )
     source_dir = (root_path / config.source_dir).resolve()
-    env = os.environ.copy()
-    env.setdefault("WANDB_MODE", "disabled")
+    if (
+        formal_execution_lock is None
+        or source_identity_status is None
+        or dependency_environment_report is None
+        or model_repository_report is None
+        or openclip_checkpoint_report is None
+    ):
+        raise RuntimeError("Tree-Ring 原子批次缺少代码锁、源码或依赖身份")
+    scientific_config = asdict(config)
+    for operational_field in (
+        "output_dir",
+        "drive_output_dir",
+        "source_dir",
+        "run_name",
+        "openclip_cache_root",
+        "local_model_repository_dir",
+        "reference_model_checkpoint_path",
+        "timeout_seconds",
+        "enable_workflow_progress_bar",
+        "run_official_command",
+        "require_cuda",
+        "prepare_local_model_repository",
+        "patch_model_repository_layout",
+        "patch_model_index_for_pinned_transformers",
+    ):
+        scientific_config.pop(operational_field, None)
+    scientific_config.update(
+        {
+            "official_model_id": DEFAULT_OFFICIAL_MODEL_ID,
+            "official_model_revision": DEFAULT_OFFICIAL_MODEL_REVISION,
+            "openclip_checkpoint_sha256": OPENCLIP_CHECKPOINT_SHA256,
+            "model_snapshot_content_digest": model_repository_report[
+                "model_snapshot_content"
+            ]["snapshot_content_digest"],
+            "openclip_snapshot_content_digest": openclip_checkpoint_report[
+                "openclip_snapshot_content_digest"
+            ],
+            "gen_seed": 0,
+            "w_seed": 999999,
+            "w_channel": 3,
+            "w_pattern": "ring",
+            "with_tracking": True,
+        }
+    )
+
+    def command_builder(
+        unit_start: int,
+        unit_end: int,
+        _workspace: Path,
+    ) -> tuple[list[str], Path, dict[str, str]]:
+        """为一个预注册范围构造官方 argv, 方法参数保持不变。"""
+
+        unit_config = replace(
+            config,
+            start_index=unit_start,
+            sample_count=unit_end - unit_start,
+        )
+        return (
+            build_official_command(
+                root_path,
+                unit_config,
+                dependency_python_executable,
+            ),
+            source_dir,
+            {"WANDB_MODE": "disabled"},
+        )
+
     try:
-        completed = run_quiet_subprocess_with_progress(
-            command,
-            cwd=source_dir,
-            env=env,
+        result = run_official_reference_unit_schedule(
+            root_path=root_path,
+            baseline_id="tree_ring",
+            start_index=config.start_index,
+            sample_count=config.sample_count,
+            batch_size=config.unit_batch_size,
+            scientific_config=scientific_config,
+            formal_execution_lock=formal_execution_lock,
+            source_status=source_identity_status,
+            dependency_environment_report=dependency_environment_report,
+            device_report=resolved_device_report,
+            model_repository_report=model_repository_report,
+            openclip_report=openclip_checkpoint_report,
+            dependency_python_executable=dependency_python_executable,
+            unit_dir=paths["scientific_unit_dir"],
+            workspace_root=paths["scientific_unit_workspace_root"],
             timeout_seconds=int(config.timeout_seconds),
             progress=progress,
-            progress_profile=f"operation=tree_ring_official_command samples={config.sample_count}",
+            command_builder=command_builder,
         )
     except Exception as error:
         paths["official_stdout"].write_text("", encoding="utf-8")
         paths["official_stderr"].write_text(f"{type(error).__name__}:{error}", encoding="utf-8")
         result = {
             "official_command_requested": True,
-            "official_command": command,
+            "official_command": [],
             "return_code": 98,
             "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
             "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
@@ -829,22 +1030,24 @@ def run_official_command_if_requested(
         }
         write_json(paths["official_command_result"], result)
         return result
-    paths["official_stdout"].write_text(completed.stdout, encoding="utf-8")
-    paths["official_stderr"].write_text(completed.stderr, encoding="utf-8")
-    result = {
-        "official_command_requested": True,
-        "official_command": command,
-        "return_code": int(completed.returncode),
-        "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
-        "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
-    }
-    result = bind_successful_official_command_execution_evidence(
-        result,
-        baseline_id="tree_ring",
-        command=command,
-        working_directory=source_dir,
-        dependency_python_executable=dependency_python_executable,
-        cuda_inspection_report=resolved_device_report,
+    metric_summary = aggregate_tree_ring_unit_observations(
+        result.pop("official_unit_observations")
+    )
+    metric_text = (
+        f"clip_score_mean: {metric_summary['clip_score_mean']}\n"
+        f"w_clip_score_mean: {metric_summary['watermarked_clip_score_mean']}\n"
+        f"auc: {metric_summary['auc']}, acc: {metric_summary['accuracy']}, "
+        f"TPR@1%FPR: {metric_summary['true_positive_rate_at_one_percent_fpr']}\n"
+    )
+    paths["official_stdout"].write_text(metric_text, encoding="utf-8")
+    paths["official_stderr"].write_text("", encoding="utf-8")
+    result.update(
+        {
+            "official_command": [],
+            "stdout_path": relative_or_absolute(paths["official_stdout"], root_path),
+            "stderr_path": relative_or_absolute(paths["official_stderr"], root_path),
+            "official_metric_summary": metric_summary,
+        }
     )
     write_json(paths["official_command_result"], result)
     return result
@@ -927,6 +1130,9 @@ def build_reference_record_report(
     ):
         if candidate.is_file():
             local_evidence_paths.append(relative_or_absolute(candidate, root_path))
+    if paths["scientific_unit_dir"].is_dir():
+        for unit_path in sorted(paths["scientific_unit_dir"].glob("unit_*.json")):
+            local_evidence_paths.append(relative_or_absolute(unit_path, root_path))
     result_source = relative_or_absolute(paths["official_metric_summary"], root_path)
     result_digest = file_digest(paths["official_metric_summary"])
     record = build_tree_ring_official_reference_record(
@@ -949,6 +1155,14 @@ def build_reference_record_report(
                 )
                 if isinstance(model_repository_report.get("model_snapshot_content"), dict)
                 else ""
+            ),
+            "official_scientific_config": official_report.get(
+                "official_scientific_config",
+                {},
+            ),
+            "official_scientific_config_digest": official_report.get(
+                "official_scientific_config_digest",
+                "",
             ),
             **openclip_report,
         },
@@ -1086,12 +1300,20 @@ def write_tree_ring_official_reference_outputs(
                 dependency_environment_report["dependency_python_executable"],
                 progress=run_progress,
                 device_report=device_report,
+                formal_execution_lock=formal_execution_run_lock,
+                source_identity_status=source_status,
+                dependency_environment_report=dependency_environment_report,
+                model_repository_report=model_repository_report,
+                openclip_checkpoint_report=openclip_report,
             )
         update_progress(run_progress, profile="operation=tree_ring_official_command")
         emit_progress_status(run_progress, profile="operation=parse_tree_ring_metrics status=running")
-        if _official_execution_ready(official_report) and paths["official_stdout"].is_file():
-            command_metrics = parse_metric_text(paths["official_stdout"].read_text(encoding="utf-8", errors="ignore"), effective_config.sample_count)
-            metric_summary = normalize_metric_summary(command_metrics, effective_config.sample_count)
+        if _official_execution_ready(official_report):
+            command_metrics = official_report.get("official_metric_summary", {})
+            metric_summary = normalize_metric_summary(
+                command_metrics,
+                effective_config.sample_count,
+            )
         else:
             metric_summary = {}
         update_progress(run_progress, profile="operation=parse_tree_ring_metrics")
@@ -1172,10 +1394,43 @@ def write_tree_ring_official_reference_outputs(
         "official_command_requested": bool(official_report.get("official_command_requested")),
         "official_command_return_code": int(official_report.get("return_code", -1)),
         "official_execution_ready": official_execution_ready,
+        "official_unit_coverage_ready": bool(
+            official_report.get("official_unit_coverage_ready")
+        ),
+        "official_unit_batch_size": int(
+            official_report.get("official_unit_batch_size", config.unit_batch_size)
+        ),
+        "official_unit_expected_count": int(
+            official_report.get("official_unit_expected_count", 0)
+        ),
+        "official_unit_completed_count": int(
+            official_report.get("official_unit_completed_count", 0)
+        ),
+        "official_unit_records_digest": str(
+            official_report.get("official_unit_records_digest", "")
+        ),
+        "official_unit_observations_digest": str(
+            official_report.get("official_unit_observations_digest", "")
+        ),
+        "official_unit_command_identities_digest": str(
+            official_report.get("official_unit_command_identities_digest", "")
+        ),
+        "scientific_unit_provenance": official_report.get(
+            "scientific_unit_provenance",
+            {},
+        ),
+        "official_scientific_config": official_report.get(
+            "official_scientific_config",
+            {},
+        ),
+        "official_scientific_config_digest": str(
+            official_report.get("official_scientific_config_digest", "")
+        ),
         "required_metrics_ready": required_metrics_ready,
         "missing_required_metric_fields": metric_validation["missing_required_metric_fields"],
         "invalid_required_metric_fields": metric_validation["invalid_required_metric_fields"],
         "sample_count": int(effective_config.sample_count),
+        "start_index": int(effective_config.start_index),
         "paper_claim_scale": paper_run.run_name,
         "target_fpr": paper_run.target_fpr,
         "dependency_environment_requested": bool(dependency_environment_report.get("dependency_environment_requested")),
@@ -1242,6 +1497,11 @@ def write_tree_ring_official_reference_outputs(
     for optional_path in (paths["official_command_result"], paths["official_stdout"], paths["official_stderr"], paths["official_metric_summary"]):
         if optional_path.exists():
             output_paths_for_manifest.append(relative_or_absolute(optional_path, root_path))
+    if paths["scientific_unit_dir"].is_dir():
+        output_paths_for_manifest.extend(
+            relative_or_absolute(unit_path, root_path)
+            for unit_path in sorted(paths["scientific_unit_dir"].glob("unit_*.json"))
+        )
     if paths["source_prepare_result"].exists():
         output_paths_for_manifest.append(relative_or_absolute(paths["source_prepare_result"], root_path))
     if paths["source_patch_result"].exists():
@@ -1320,18 +1580,122 @@ def run_default_tree_ring_official_reference_plan(root: str | Path = ".") -> dic
 
 
 def collect_package_entries(root_path: Path, output_dir: Path, archive_path: Path) -> tuple[Path, ...]:
-    """仅收集当前论文层级的 Tree-Ring outputs family 文件。"""
+    """按精确白名单收集 Tree-Ring 输入, 不递归跟随任何链接."""
 
-    entries: list[Path] = []
-    if output_dir.exists():
-        for path in sorted(output_dir.rglob("*")):
-            if path.is_file() and path.resolve() != archive_path.resolve() and path.suffix.lower() != ".zip":
-                entries.append(path)
-    unique_entries: list[Path] = []
-    for entry in entries:
-        if entry not in unique_entries:
-            unique_entries.append(entry)
-    return tuple(unique_entries)
+    del root_path, archive_path
+    root_files = validate_official_reference_package_root_exact_set(
+        output_dir=output_dir,
+        allowed_relative_file_paths=tuple(TREE_RING_PACKAGE_ROOT_FILE_WHITELIST),
+        optional_relative_file_paths=tuple(TREE_RING_PACKAGE_GENERATED_FILE_NAMES),
+    )
+    entries = [
+        path
+        for path in root_files
+        if path.name not in TREE_RING_PACKAGE_GENERATED_FILE_NAMES
+    ]
+    return tuple(entries)
+
+
+def _validate_packaged_tree_ring_reference_evidence(
+    root_path: Path,
+    source_dir: Path,
+    run_summary: dict[str, Any],
+    unit_validation: dict[str, Any],
+) -> None:
+    """从原子单元重建 Tree-Ring governed record 与 validation report."""
+
+    metric_path = source_dir / "tree_ring_official_metric_summary.json"
+    records_path = source_dir / "tree_ring_official_reference_records.jsonl"
+    validation_path = source_dir / "tree_ring_official_reference_validation_report.json"
+    evidence_candidates = (
+        metric_path,
+        source_dir / "tree_ring_official_command_result.json",
+        source_dir / "tree_ring_official_stdout.txt",
+        source_dir / "tree_ring_official_stderr.txt",
+        source_dir / "tree_ring_official_source_prepare_result.json",
+        source_dir / "tree_ring_official_source_patch_result.json",
+        source_dir / "tree_ring_model_repository_prepare_result.json",
+        source_dir / "tree_ring_openclip_checkpoint_prepare_result.json",
+        source_dir / "tree_ring_dependency_environment_prepare_result.json",
+    )
+    evidence_paths = [
+        relative_or_absolute(path, root_path)
+        for path in evidence_candidates
+        if path.is_file()
+    ]
+    evidence_paths.extend(
+        relative_or_absolute(path, root_path)
+        for path in sorted((source_dir / "scientific_units").glob("unit_*.json"))
+    )
+    metric_summary = dict(unit_validation["metric_summary"])
+    metric_validation = validate_tree_ring_metric_summary(
+        metric_summary,
+        int(run_summary["sample_count"]),
+    )
+    record_gate = {
+        "official_execution_ready": True,
+        "required_metrics_ready": metric_validation["required_metrics_ready"],
+        "source_revision_ready": True,
+        "dependency_environment_ready": True,
+        "model_source_ready": True,
+        "openclip_source_ready": True,
+        "metric_validation": metric_validation,
+        "record_ready": True,
+    }
+    stable_identity = unit_validation["stable_unit_identity"]
+    expected_record = build_tree_ring_official_reference_record(
+        official_entrypoint="external_baseline/primary/tree_ring/source/run_tree_ring_watermark.py",
+        official_repository_commit=stable_identity["official_repository_commit"],
+        official_environment_profile=DEFAULT_DEPENDENCY_PROFILE_ID,
+        baseline_result_source=relative_or_absolute(metric_path, root_path),
+        baseline_result_source_digest=file_digest(metric_path),
+        evidence_paths=sorted(set(evidence_paths)),
+        source_provenance={
+            "source_worktree_digest": stable_identity["source_worktree_digest"],
+            "source_patch_sha256": stable_identity["source_patch_sha256"],
+            "prompt_dataset_repository_id": run_summary["prompt_dataset_repository_id"],
+            "prompt_dataset_revision": run_summary["prompt_dataset_revision"],
+            "official_model_repository_id": run_summary["model_source_repository_id"],
+            "official_model_revision": run_summary["model_source_revision"],
+            "model_snapshot_content_digest": run_summary["model_snapshot_content_digest"],
+            "openclip_model_name": OPENCLIP_MODEL_NAME,
+            "openclip_repository_id": run_summary["openclip_repository_id"],
+            "openclip_revision": run_summary["openclip_revision"],
+            "openclip_checkpoint_filename": run_summary["openclip_checkpoint_filename"],
+            "openclip_checkpoint_sha256": run_summary["openclip_checkpoint_sha256"],
+            "openclip_checkpoint_size_bytes": run_summary["openclip_checkpoint_size_bytes"],
+            "openclip_snapshot_content_digest": run_summary["openclip_snapshot_content_digest"],
+            "official_scientific_config": unit_validation[
+                "official_scientific_config"
+            ],
+            "official_scientific_config_digest": unit_validation[
+                "official_scientific_config_digest"
+            ],
+        },
+        metric_values=metric_summary,
+        ready_flags={
+            "official_source_ready": True,
+            "source_identity_ready": True,
+            "source_worktree_exact": True,
+            "official_environment_report_ready": True,
+            "official_execution_ready": True,
+            "required_metrics_ready": True,
+            "model_source_ready": True,
+            "openclip_source_ready": True,
+            "official_result_summary_ready": True,
+            "governed_import_ready": True,
+        },
+    )
+    expected_record = json.loads(json.dumps(expected_record, ensure_ascii=False))
+    record_lines = [
+        line for line in records_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()
+    ]
+    if len(record_lines) != 1 or json.loads(record_lines[0]) != expected_record:
+        raise RuntimeError("Tree-Ring governed reference record 无法由科学单元重建")
+    expected_validation = validate_tree_ring_official_reference_records([expected_record])
+    expected_validation["record_gate"] = record_gate
+    if read_json(validation_path) != expected_validation:
+        raise RuntimeError("Tree-Ring reference validation report 与重建记录不一致")
 
 
 def package_tree_ring_official_reference_outputs(
@@ -1353,6 +1717,11 @@ def package_tree_ring_official_reference_outputs(
     if configured_output_root != expected_output_root:
         raise ValueError("Tree-Ring 官方参考打包根目录必须使用正式 outputs family")
     source_dir = expected_output_root / paper_run.run_name
+    validate_official_reference_package_root_exact_set(
+        output_dir=source_dir,
+        allowed_relative_file_paths=tuple(TREE_RING_PACKAGE_ROOT_FILE_WHITELIST),
+        optional_relative_file_paths=tuple(TREE_RING_PACKAGE_GENERATED_FILE_NAMES),
+    )
     required_runtime_paths = (
         source_dir / "tree_ring_official_reference_summary.json",
         source_dir / "manifest.local.json",
@@ -1369,12 +1738,107 @@ def package_tree_ring_official_reference_outputs(
         formal_execution_package_lock,
         run_manifest.get("code_version"),
     )
+    unit_validation = validate_persisted_official_reference_units(
+        unit_dir=source_dir / "scientific_units",
+        baseline_id="tree_ring",
+        start_index=int(run_summary.get("start_index", 0)),
+        sample_count=int(run_summary.get("sample_count", 0)),
+        batch_size=int(run_summary.get("official_unit_batch_size", 0)),
+    )
+    metric_summary_path = source_dir / "tree_ring_official_metric_summary.json"
+    if not metric_summary_path.is_file():
+        raise FileNotFoundError("Tree-Ring 正式参考缺少可复算指标摘要")
+    stable_unit_identity = unit_validation["stable_unit_identity"]
+    if not all(
+        (
+            unit_validation["official_unit_coverage_ready"] is True,
+            unit_validation["official_unit_expected_count"]
+            == run_summary.get("official_unit_expected_count"),
+            unit_validation["official_unit_completed_count"]
+            == run_summary.get("official_unit_completed_count"),
+            unit_validation["official_unit_records_digest"]
+            == run_summary.get("official_unit_records_digest"),
+            unit_validation["official_unit_observations_digest"]
+            == run_summary.get("official_unit_observations_digest"),
+            unit_validation["official_unit_command_identities_digest"]
+            == run_summary.get("official_unit_command_identities_digest"),
+            unit_validation["scientific_unit_provenance"]
+            == run_summary.get("scientific_unit_provenance"),
+            unit_validation["official_scientific_config"]
+            == run_summary.get("official_scientific_config"),
+            unit_validation["official_scientific_config_digest"]
+            == run_summary.get("official_scientific_config_digest"),
+            unit_validation["metric_summary"] == read_json(metric_summary_path),
+            stable_unit_identity["formal_execution_commit"]
+            == formal_execution_run_lock["formal_execution_commit"],
+            stable_unit_identity["formal_execution_lock_digest"]
+            == formal_execution_run_lock["formal_execution_lock_digest"],
+            stable_unit_identity["official_repository_commit"]
+            == run_summary.get("official_repository_commit"),
+            stable_unit_identity["source_patch_sha256"]
+            == run_summary.get("source_patch_sha256"),
+            stable_unit_identity["source_worktree_digest"]
+            == run_summary.get("source_worktree_digest"),
+        )
+    ):
+        raise RuntimeError("Tree-Ring 持久化科学单元无法复算运行摘要")
+    _validate_packaged_tree_ring_reference_evidence(
+        root_path,
+        source_dir,
+        run_summary,
+        unit_validation,
+    )
+    validate_official_reference_scientific_config_and_commands(
+        baseline_id="tree_ring",
+        scientific_config=unit_validation["official_scientific_config"],
+        unit_commands=unit_validation["official_unit_commands"],
+        run_summary=run_summary,
+        model_repository_report=read_json(
+            source_dir / "tree_ring_model_repository_prepare_result.json"
+        ),
+        openclip_report=read_json(
+            source_dir / "tree_ring_openclip_checkpoint_prepare_result.json"
+        ),
+    )
     if not all(
         (
             run_summary.get("run_decision") == "pass",
             run_summary.get("tree_ring_official_reference_ready") is True,
             run_summary.get("reference_import_ready") is True,
             run_summary.get("official_execution_ready") is True,
+            run_summary.get("official_unit_coverage_ready") is True,
+            int(run_summary.get("official_unit_batch_size", 0))
+            == DEFAULT_OFFICIAL_REFERENCE_UNIT_BATCH_SIZE,
+            int(run_summary.get("official_unit_completed_count", 0))
+            == int(run_summary.get("official_unit_expected_count", -1)),
+            int(run_summary.get("official_unit_expected_count", 0)) > 0,
+            re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(run_summary.get("official_unit_records_digest", "")),
+            )
+            is not None,
+            re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(run_summary.get("official_unit_observations_digest", "")),
+            )
+            is not None,
+            re.fullmatch(
+                r"[0-9a-f]{64}",
+                str(
+                    run_summary.get(
+                        "official_unit_command_identities_digest",
+                        "",
+                    )
+                ),
+            )
+            is not None,
+            isinstance(run_summary.get("scientific_unit_provenance"), dict),
+            isinstance(run_summary.get("official_scientific_config"), dict),
+            re.fullmatch(r"[0-9a-f]{64}", str(run_summary.get("official_scientific_config_digest", ""))) is not None,
+            run_summary.get("scientific_unit_provenance", {}).get(
+                "scientific_unit_provenance_ready"
+            )
+            is True,
             run_summary.get("required_metrics_ready") is True,
             run_summary.get("official_command_requested") is True,
             int(run_summary.get("official_command_return_code", -1)) == 0,

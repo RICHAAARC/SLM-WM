@@ -8,7 +8,6 @@ adapter 主表结果分开记录。
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from experiments.runtime.model_sources import get_model_source
@@ -51,6 +50,8 @@ REQUIRED_SOURCE_PROVENANCE_FIELDS = (
     "openclip_checkpoint_sha256",
     "openclip_checkpoint_size_bytes",
     "openclip_snapshot_content_digest",
+    "official_scientific_config",
+    "official_scientific_config_digest",
 )
 REQUIRED_METRIC_FIELDS = (
     "sample_count",
@@ -104,6 +105,8 @@ class ShallowDiffuseOfficialReferenceRecord:
     openclip_checkpoint_sha256: str
     openclip_checkpoint_size_bytes: int
     openclip_snapshot_content_digest: str
+    official_scientific_config: dict[str, Any]
+    official_scientific_config_digest: str
     official_environment_profile: str
     baseline_result_source: str
     baseline_result_source_digest: str
@@ -174,6 +177,30 @@ def _float_field(row: Mapping[str, Any], field_name: str) -> float:
     return value
 
 
+def _scientific_config_fields(
+    source_provenance: Mapping[str, Any],
+) -> tuple[dict[str, Any], str]:
+    """读取并复验与 Shallow Diffuse 科学单元同源的规范配置."""
+
+    raw_config = source_provenance.get("official_scientific_config")
+    if not isinstance(raw_config, Mapping) or not raw_config:
+        raise ValueError("official_scientific_config 是必需非空映射")
+    scientific_config = dict(raw_config)
+    config_digest = _str_field(
+        source_provenance,
+        "official_scientific_config_digest",
+    )
+    expected_digest = build_stable_digest(
+        {
+            "baseline_id": "shallow_diffuse",
+            "scientific_config": scientific_config,
+        }
+    )
+    if config_digest != expected_digest:
+        raise ValueError("official_scientific_config_digest 与规范配置不一致")
+    return scientific_config, config_digest
+
+
 def build_shallow_diffuse_official_reference_schema() -> dict[str, Any]:
     """构造 Shallow Diffuse 官方参考导入 schema 描述。"""
 
@@ -214,6 +241,9 @@ def build_shallow_diffuse_official_reference_record(
     if missing_metric_fields:
         raise ValueError(f"Shallow Diffuse 官方记录缺少科学指标: {missing_metric_fields}")
 
+    scientific_config, scientific_config_digest = _scientific_config_fields(
+        source_provenance
+    )
     payload = {
         "baseline_id": "shallow_diffuse",
         "reference_protocol_name": SHALLOW_DIFFUSE_OFFICIAL_REFERENCE_PROTOCOL_NAME,
@@ -241,6 +271,8 @@ def build_shallow_diffuse_official_reference_record(
             source_provenance,
             "openclip_snapshot_content_digest",
         ),
+        "official_scientific_config": scientific_config,
+        "official_scientific_config_digest": scientific_config_digest,
         "official_environment_profile": official_environment_profile,
         "baseline_result_source": baseline_result_source,
         "baseline_result_source_digest": baseline_result_source_digest,
@@ -313,6 +345,7 @@ def validate_shallow_diffuse_official_reference_records(rows: Iterable[Mapping[s
             ("openclip_revision", 40),
             ("openclip_checkpoint_sha256", 64),
             ("openclip_snapshot_content_digest", 64),
+            ("official_scientific_config_digest", 64),
         ):
             if len(_str_field(row, field_name)) != expected_length:
                 row_issues.append(
@@ -322,6 +355,28 @@ def validate_shallow_diffuse_official_reference_records(rows: Iterable[Mapping[s
                         f"{field_name}_exact_digest_required",
                     )
                 )
+        scientific_config = row.get("official_scientific_config")
+        if not isinstance(scientific_config, Mapping) or not scientific_config:
+            row_issues.append(
+                ShallowDiffuseOfficialReferenceIssue(
+                    row_index,
+                    "official_scientific_config",
+                    "official_scientific_config_required",
+                )
+            )
+        elif build_stable_digest(
+            {
+                "baseline_id": "shallow_diffuse",
+                "scientific_config": dict(scientific_config),
+            }
+        ) != _str_field(row, "official_scientific_config_digest"):
+            row_issues.append(
+                ShallowDiffuseOfficialReferenceIssue(
+                    row_index,
+                    "official_scientific_config_digest",
+                    "official_scientific_config_digest_mismatch",
+                )
+            )
         if not _str_field(row, "baseline_result_source_digest"):
             row_issues.append(ShallowDiffuseOfficialReferenceIssue(row_index, "baseline_result_source_digest", "result_source_digest_required"))
         if not row.get("evidence_paths"):

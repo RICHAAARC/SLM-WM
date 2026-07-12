@@ -17,6 +17,10 @@ from experiments.runtime.progress import progress_event_path_from_environment, w
 from experiments.runtime.image_metrics import measured_image_ssim, measured_score_retention
 from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
 from main.core.digest import build_stable_digest
+from external_baseline.primary.t2smark.adapter.formal_unit_checkpoint import (
+    atomic_write_json,
+    repository_relative_t2smark_path,
+)
 
 BASELINE_ID = "t2smark"
 DEFAULT_SCORE_NAME = "t2smark_norm1_detection_score"
@@ -26,12 +30,7 @@ def _write_json(path: str | Path, payload: Any) -> Path:
     """写出稳定 JSON 文件。"""
 
     output_path = Path(path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return output_path
+    return atomic_write_json(output_path, payload)
 
 
 def _require_cuda_if_requested(required: bool) -> None:
@@ -129,13 +128,24 @@ def _prompt_id(row: dict[str, Any], image_id: str) -> str:
     return str(row.get("prompt_id") or f"prompt_for_{image_id}")
 
 
-def _measured_pair_quality(reference_path: str, candidate_path: str) -> float:
+def _measured_pair_quality(
+    reference_path: str,
+    candidate_path: str,
+    *,
+    evidence_root: str | Path | None = None,
+) -> float:
     """从实际落盘图像计算 SSIM, 缺少图像时拒绝生成正式 observation。"""
 
     from PIL import Image
 
+    root = Path(evidence_root).resolve() if evidence_root is not None else None
     reference = Path(reference_path)
     candidate = Path(candidate_path)
+    if root is not None:
+        if not reference.is_absolute():
+            reference = root / reference
+        if not candidate.is_absolute():
+            candidate = root / candidate
     if not reference.is_file() or not candidate.is_file():
         raise FileNotFoundError("T2SMark observation 缺少质量测量所需图像")
     with Image.open(reference) as left, Image.open(candidate) as right:
@@ -215,6 +225,23 @@ def _auto_threshold(
     raise RuntimeError("无法冻结 T2SMark fixed-FPR 阈值")
 
 
+def _require_complete_result_set(
+    results_by_index: dict[int, dict[str, Any]],
+    image_pairs: list[dict[str, Any]],
+) -> None:
+    """只允许完整 Prompt 结果集合进入 calibration 阈值冻结与 test 聚合."""
+
+    expected_indices = set(range(len(image_pairs)))
+    actual_indices = set(results_by_index)
+    if actual_indices != expected_indices:
+        missing = sorted(expected_indices.difference(actual_indices))
+        extra = sorted(actual_indices.difference(expected_indices))
+        raise ValueError(
+            "T2SMark fixed-FPR 要求完整 Prompt 单元集合: "
+            f"missing={missing[:20]},extra={extra[:20]}"
+        )
+
+
 def _observation(
     *,
     event_id: str,
@@ -291,10 +318,12 @@ def build_t2smark_observations(
     target_fpr: float = 0.1,
     attack_family: str = "clean",
     attack_condition: str = "clean_none",
+    evidence_root: str | Path | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """把 T2SMark results.json 映射为 baseline observations。"""
 
     results_by_index = _result_items(t2smark_results)
+    _require_complete_result_set(results_by_index, image_pairs)
     if threshold is None:
         threshold_value, threshold_source = _auto_threshold(results_by_index, image_pairs, target_fpr)
     else:
@@ -315,18 +344,7 @@ def build_t2smark_observations(
     )
     for index, row in enumerate(image_pairs):
         result = results_by_index.get(index)
-        if result is None:
-            missing_indices.append(index)
-            write_progress_event(
-                progress_path,
-                desc="method-faithful adapter",
-                completed=index + 1,
-                total=progress_total,
-                profile=f"operation=t2smark_observation_conversion sample={index + 1}/{len(image_pairs)} missing=true",
-                baseline_id=BASELINE_ID,
-                operation="t2smark_observation_conversion",
-            )
-            continue
+        assert result is not None
         robustness = _robustness(result, result_index=index)
         detection = _image_only_detection(result, result_index=index)
         image_id = _image_id(row, index + 1)
@@ -334,7 +352,11 @@ def build_t2smark_observations(
         watermarked_path = str(
             row.get("watermarked_image_path") or row.get("generated_image_path") or ""
         )
-        pair_quality = _measured_pair_quality(clean_path, watermarked_path)
+        pair_quality = _measured_pair_quality(
+            clean_path,
+            watermarked_path,
+            evidence_root=evidence_root,
+        )
         clean_score = _finite_score(
             detection.get("clean_score"),
             field_name="image_only_detection.clean_score",
@@ -437,6 +459,7 @@ def build_t2smark_observations(
                             quality_score=_measured_pair_quality(
                                 source_path,
                                 attacked_image_path,
+                                evidence_root=evidence_root,
                             ),
                             score_retention=measured_score_retention(
                                 source_score,
@@ -513,7 +536,11 @@ def build_t2smark_observations(
                     robustness=robustness,
                     image_path=attacked_path,
                     image_digest=str(record.get("attacked_image_digest") or ""),
-                    quality_score=_measured_pair_quality(source_path, attacked_path),
+                    quality_score=_measured_pair_quality(
+                        source_path,
+                        attacked_path,
+                        evidence_root=evidence_root,
+                    ),
                     score_retention=measured_score_retention(source_score, attacked_score),
                     attack_id=attack_identity["attack_id"],
                     resource_profile=attack_identity["resource_profile"],
@@ -532,6 +559,12 @@ def build_t2smark_observations(
         }
     )
     strict_pair_quality_count = sum(1 for row in image_pairs if bool(row.get("strict_pair_quality_ready", False)))
+    calibration_result_indices = [
+        index for index, row in enumerate(image_pairs) if _split(row) == "calibration"
+    ]
+    test_result_indices = [
+        index for index, row in enumerate(image_pairs) if _split(row) == "test"
+    ]
     manifest = {
         "artifact_name": "t2smark_slm_adapter_manifest.json",
         "producer_id": "t2smark_slm_observation_adapter",
@@ -546,6 +579,13 @@ def build_t2smark_observations(
         "formal_attack_names": formal_attack_names,
         "formal_attack_observation_count": sum(1 for row in observations if str(row.get("sample_role", "")).startswith("attacked_")),
         "missing_result_indices": missing_indices,
+        "complete_result_set_ready": True,
+        "calibration_result_count": len(calibration_result_indices),
+        "calibration_result_indices": calibration_result_indices,
+        "calibration_result_digest": build_stable_digest(
+            [results_by_index[index] for index in calibration_result_indices]
+        ),
+        "test_result_count": len(test_result_indices),
         "threshold": threshold_value,
         "threshold_source": threshold_source,
         "formal_result_claim": False,
@@ -600,12 +640,22 @@ def main() -> None:
         target_fpr=args.target_fpr,
         attack_family=args.attack_family,
         attack_condition=args.attack_condition,
+        evidence_root=Path.cwd(),
     )
     output_path = Path(args.out)
     manifest.pop("adapter_digest", None)
-    manifest["baseline_observations_path"] = str(output_path)
-    manifest["image_pairs_path"] = str(Path(args.image_pairs))
-    manifest["t2smark_results_path"] = str(Path(args.t2smark_results))
+    manifest["baseline_observations_path"] = repository_relative_t2smark_path(
+        output_path,
+        output_anchor=output_path,
+    )
+    manifest["image_pairs_path"] = repository_relative_t2smark_path(
+        args.image_pairs,
+        output_anchor=output_path,
+    )
+    manifest["t2smark_results_path"] = repository_relative_t2smark_path(
+        args.t2smark_results,
+        output_anchor=output_path,
+    )
     manifest["generation_protocol"] = {
         "model_id": args.model_id,
         "model_revision": args.model_revision,

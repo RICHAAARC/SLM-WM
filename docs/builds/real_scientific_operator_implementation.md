@@ -18,9 +18,16 @@
 | 消融工作负载 | `experiments/ablations/mechanism_ablation_workload.py` | 构造完整 Prompt 消融配置并调用真实重运行协议 |
 | 正式消融 | `experiments/ablations/runtime_rerun.py` | 对每个机制配置重新生成、重新攻击和重新检测 |
 | 正式 FID/KID | `experiments/artifacts/dataset_level_quality_outputs.py` | 使用 torch-fidelity 0.4.0 的 TensorFlow 兼容 Inception v3 2048 维特征生成可审计质量记录 |
+| Tree-Ring common-backbone | `external_baseline/primary/tree_ring/adapter/method_faithful_sd35.py` | 在 SD3.5 初始 latent 傅里叶域写入全局固定 ring key, 并通过图像反演计算 key 区域距离 |
+| Gaussian Shading common-backbone | `external_baseline/primary/gaussian_shading/adapter/method_faithful_sd35.py` | 执行 ChaCha20 message、同幅值截断 Gaussian 条件采样、图像反演解密与 block voting |
+| Shallow Diffuse common-backbone | `external_baseline/primary/shallow_diffuse/adapter/method_faithful_sd35.py` | 从同一基础 latent 去噪到固定 `edit_timestep` 后注入全局固定 patch, 以 `guidance_scale=1.0` 完成双分支去噪并仅融合指定水印通道, 检测时仅从图像反演到同一停止位置计算 masked distance |
+| T2SMark 正式复现 | `paper_experiments/runners/t2smark_formal_reproduction.py` | 调用固定官方源码补丁, 执行逐 Prompt 严格同基础 latent 配对、仅图像检测与正式攻击 |
+| 官方参考原子批次 | `paper_experiments/runners/official_reference_unit_runtime.py` | 以10-Prompt 批次运行登记官方算子, 保存逐 Prompt 观测并确定性重建官方指标 |
 | Colab 续跑 | `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb` | 在 Drive 持久化工作区分批运行主方法、质量评估与正式消融 |
 
 高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对标准高斯模板按元素绝对幅值分位点截断, 不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。内容模板与安全投影实现位于 `main/methods/carrier/keyed_tensor.py`。
+
+四个主表外部 baseline 保留各自关键科学算子, 共同协议只统一 backbone、Prompt、攻击、仅图像访问和 fixed-FPR 统计边界。Tree-Ring 与 Shallow Diffuse 分别按官方调度在 Prompt 循环外构造一次全局载体。Gaussian Shading 使用 ChaCha20 key / nonce 加密 message, 并以同一 clean Gaussian latent 的逐坐标幅值构造严格配对的符号条件样本。T2SMark clean 图像重放编码器实际使用的水印前基础 Gaussian latent。simple XOR、独立 clean / watermarked latent 采样或逐 Prompt 替换官方全局载体均不属于正式主表实现。
 
 ## 二、不可变模型输入
 

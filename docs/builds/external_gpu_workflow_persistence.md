@@ -66,6 +66,16 @@ runner 返回后必须同时满足以下条件, 才能发布完成 workflow chec
 
 完成单元由 `experiments.runtime.resume_checkpoint.persist_checkpoint_files` 发布.下一次同身份运行先调用 `restore_role_checkpoints`; 恢复成功并再次通过上述完成门禁后, 才允许跳过科学 runner.
 
+7条路由的科学 runner 同时具有方法内部的真实原子完成单元:
+
+| 路由类型 | 原子完成单元 | 正式聚合条件 |
+| --- | --- | --- |
+| Tree-Ring / Gaussian Shading / Shallow Diffuse common-backbone | 每个 Prompt 的 source pair; 每个 test Prompt × 攻击 × 阴阳角色 | 全部 Prompt source pair 与完整 test 攻击笛卡尔积 |
+| T2SMark | 每个全局 `prompt_index` | 全部 Prompt 单元, 且攻击仅覆盖 test split |
+| Tree-Ring / Gaussian Shading / Shallow Diffuse official-reference | 连续10个 Prompt 的预注册批次 | 批次范围无缺失、无重叠并完整覆盖当前论文层级 |
+
+每个方法内部单元均由实际科学进程原子发布, 绑定科学配置、Prompt 或索引范围、随机性摘要、代码与依赖锁、真实 CUDA 来源及事实文件摘要。恢复后的 runner 先逐单元复验, 只执行缺失单元; 已存在但损坏、身份漂移或集合之外的单元会直接闭锁, 不会被静默覆盖。
+
 ## 两阶段恢复
 
 恢复使用“全部验证, 然后发布”的顺序:
@@ -100,6 +110,8 @@ clean detached Git commit 与正式执行锁摘要
 Prompt 与 L4 会话完成的 Prompt 可以共同进入同一次正式汇总, 但最终记录会准确
 保留两种真实设备, 不会把全部样本错误归因到最后一个会话.
 
+三条 common-backbone 路线会从 source pair 与攻击单元重新生成 observation, 并在完整 calibration source pair 齐备后冻结 fixed-FPR 阈值。T2SMark 会从逐 Prompt 单元重新生成 `results.json`、adapter observations、正式导入候选和校验报告。三条 official-reference 会从预注册批次重新计算 method-specific metric, 再重建受治理 record 与 validation report。任何派生文件与复算值不一致都会阻断归档。
+
 打包器不会只信任 summary.主方法打包会重新验证每条 result 的完整配置、run id、
 Prompt 身份和正式机制开关; 消融打包会重新绑定逐条机制规范、Prompt 摘要与输出
 职责; 数据集质量打包会按 feature batch 分组, 从组内图像路径和摘要重新计算配置
@@ -117,7 +129,7 @@ evidence_eligibility = intermediate_state_only
 
 完成 checkpoint 只表示“这些字节可以安全恢复并重新进入正式打包器”, 不表示已经形成论文结论.正式证据仍要求各 workflow 生成受治理 records、运行 manifest、package input manifest、archive summary、archive manifest 和 ZIP, 再由 CPU 结果闭合验证精确输入锁、fixed-FPR、方法比较和 claim-evidence 关系.
 
-恢复粒度以 runner 或上游工具已经原子发布的文件和完整科学单元为界.如果上游命令只在命令结束时发布结构化结果, 断线后会重放该未完成命令.项目不声称进程内列表、半写图像、任意 Python 指令或 GPU kernel 可以作为完成态续跑.
+恢复粒度以方法内部已经原子发布的完整科学单元为界。中断时正在计算的单个 source pair、攻击样本、T2SMark Prompt 或 official-reference 批次会从该单元起点重新执行; 其他已验证单元不会重放。项目不声称进程内列表、半写图像、任意 Python 指令或 GPU kernel 可以作为完成态续跑.
 
 ## 可复用部分与项目特定部分
 

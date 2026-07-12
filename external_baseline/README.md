@@ -29,6 +29,10 @@ Tree-Ring、Gaussian Shading 和 Shallow Diffuse 分别由三个 `external_basel
 
 运行产物写入 `outputs/external_baseline_method_faithful/<paper_run_name>/run_records/<baseline_id>/`, 跨包交换文件写入同一论文层级下的 `split_observations/`。每个压缩包只包含当前论文层级和当前 baseline 的独占路径, 多包物化不会覆盖其他方法。
 
+三个 common-backbone adapter 均以真实科学完成单元执行。每个 Prompt 的 clean / watermarked 源图及连续盲检分数构成一个 `source_pair` 单元; 每个 test Prompt、正式攻击和阴阳角色构成一个攻击单元。单元记录采用原子替换写入, 并绑定 clean detached 代码锁、完整依赖锁、受治理外部源码 revision、适配实现摘要、Prompt、配置、seed 和实际 CUDA 设备。workspace 绝对路径不进入科学身份或完成单元, outputs 引用统一保存为仓库相对 POSIX 路径, 因而 Drive 恢复到另一 checkout 路径后仍可验证和继续运行。重启时只复用完整且逐字节验证通过的单元, 损坏、身份不符、额外旧文件或 exact-set 不完整都会闭锁。
+
+fixed-FPR 阈值只在全部 Prompt 的 `source_pair` 单元齐备后, 使用 calibration clean negative 连续分数冻结。dev / calibration 不执行攻击; 攻击 exact set 固定为 test Prompt 数量乘以正式攻击数量乘以阴阳2个角色。最终 observation、adapter manifest 和 transfer 文件只能由全部完成单元确定性重建, Notebook 与持久化 wrapper 不承担断点恢复或统计聚合逻辑。
+
 ## official reference
 
 official reference 用于记录外部方法在其官方依赖环境下的参考结果, 再通过 受治理导入 协议进入补充表和方法忠实度审计。该链路不替代 SD3.5 method-faithful adapter, 也不能单独支持主表 common-backbone 结论。

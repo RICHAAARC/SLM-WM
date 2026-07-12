@@ -1947,6 +1947,185 @@ Notebook 与 repository module 的跨边界数据
 | reference_record_digest | provenance | none | true | false | false | 单次 official-reference 复现记录全部受治理字段的稳定摘要。 |
 | reference_protocol_name | protocol | none | true | false | false | official-reference 记录采用的固定补充证据协议名称。 |
 | official_environment_profile | protocol | none | true | false | false | 官方原始实现实际运行所用的隔离 Python 与依赖环境身份。 |
+| official_scientific_config | protocol | none | true | false | false | 官方参考科学单元、运行摘要与受治理记录共同绑定的规范科学配置。 |
+| official_scientific_config_digest | provenance | none | true | false | false | 方法身份与 official_scientific_config 联合计算的稳定 SHA-256 摘要。 |
+| scientific_config | protocol | none | true | false | false | 单个外部科学路线用于构造原子单元身份的规范配置。 |
+| unit_identity | provenance | none | true | false | false | 原子科学单元绑定方法、配置、索引范围、源码和依赖的完整稳定身份。 |
+| unit_identity_digest | provenance | none | true | false | false | unit_identity 排除路径搬迁因素后的稳定 SHA-256 摘要。 |
+| unit_complete | governance | none | true | false | false | 原子科学单元是否已完整写出并可进入复验。 |
+| scientific_unit_record_digest | provenance | none | true | false | false | 单个原子科学完成记录排除自指字段后的稳定 SHA-256 摘要。 |
+| source_payload | provenance | none | true | false | false | 实际官方科学子进程发布的逐 Prompt 观测与来源对象。 |
+| source_payload_digest | provenance | none | true | false | false | source_payload 排除自指字段后的稳定 SHA-256 摘要。 |
+| observations | protocol | none | true | false | false | 一个官方参考科学单元实际产生的逐 Prompt 原始观测列表。 |
+| observations_digest | provenance | none | true | false | false | observations 保持正式顺序计算的稳定 SHA-256 摘要。 |
+| official_command_execution_evidence | provenance | none | true | false | false | 官方命令 argv、工作目录、解释器及 CUDA 检查的执行事实。 |
+| official_command_canonical_identity | provenance | none | true | false | false | 从原始 argv 复算且排除 workspace 绝对路径的官方命令规范身份。 |
+| official_command_canonical_identity_digest | provenance | none | true | false | false | 规范命令身份绑定科学参数、模型内容与 OpenCLIP 内容的稳定 SHA-256 摘要。 |
+| official_command_scientific_parameters | protocol | none | true | false | false | 从实际 argv 提取并与规范科学配置逐项相等的 workspace-independent 科学参数。 |
+| official_model_binding | provenance | none | true | false | false | 规范命令身份绑定的官方模型仓库、revision 与快照内容摘要。 |
+| openclip_binding | provenance | none | true | false | false | 规范命令身份绑定的 OpenCLIP 模型名、checkpoint SHA 与快照内容摘要。 |
+| workspace_independent | governance | none | true | false | false | 规范身份是否明确排除仅用于当前执行会话定位的绝对路径。 |
+| entrypoint_filename | protocol | none | true | false | false | 规范命令身份绑定的官方方法入口文件名。 |
+| canonical_identity | provenance | none | true | false | false | CPU 打包复验随原始批次 argv 读取的规范命令身份对象。 |
+| cuda_inspection_report | provenance | none | true | false | false | 官方命令执行前对 PyTorch CUDA build 与实际设备的检查报告。 |
+| official_unit_coverage_ready | governance | none | true | false | false | 官方参考原子批次是否无缺失、无重叠并完整覆盖预注册索引。 |
+| official_unit_batch_size | protocol | none | true | false | false | 官方参考一次原子科学批次包含的 Prompt 数量。 |
+| official_unit_expected_count | metric | none | true | false | false | 当前论文规模预注册的官方参考原子批次数量。 |
+| official_unit_completed_count | metric | none | true | false | false | 聚合时通过完整复验的官方参考原子批次数量。 |
+| official_unit_resumed_count | metric | none | true | false | false | 本次运行开始前已存在且通过复验的官方参考原子批次数量。 |
+| official_unit_executed_count | metric | none | true | false | false | 本次运行实际补算的官方参考原子批次数量。 |
+| official_unit_executed_ids | provenance | none | true | false | false | 本次运行实际补算的官方参考科学单元标识列表。 |
+| official_unit_ids | provenance | none | true | false | false | 当前正式计划预注册的全部官方参考科学单元标识列表。 |
+| official_unit_records_digest | provenance | none | true | false | false | 按索引范围排序的全部官方参考完成记录稳定摘要。 |
+| official_unit_observations_digest | provenance | none | true | false | false | 全部官方参考逐 Prompt 观测保持全局顺序计算的稳定摘要。 |
+| official_unit_observations | provenance | none | true | false | false | 从完整官方参考原子批次确定性拼接的逐 Prompt 原始观测。 |
+| official_unit_command_identities | provenance | none | true | false | false | 按预注册索引顺序排列的全部 workspace-independent 规范命令身份。 |
+| official_unit_command_identities_digest | provenance | none | true | false | false | 全部规范命令身份保持预注册顺序计算的稳定 SHA-256 摘要。 |
+| official_unit_commands | provenance | none | true | false | false | 正式聚合实际引用的每批官方命令执行证据列表。 |
+| stable_unit_identity | provenance | none | true | false | false | 归档复验从全部批次提取的单一稳定代码、源码、依赖与科学配置身份。 |
+| prompt_seed_random | random | _random | true | false | false | 原子单元中实际控制单个 Prompt 随机流的整数 seed。 |
+| no_w_metric | metric | none | true | false | false | Tree-Ring 官方参考单个 clean 样本的检测距离。 |
+| w_metric | metric | none | true | false | false | Tree-Ring 官方参考单个 watermarked 样本的检测距离。 |
+| w_no_sim | metric | none | true | false | false | Tree-Ring 官方参考单个 clean 样本与 Prompt 的 CLIP 相似度。 |
+| w_sim | metric | none | true | false | false | Tree-Ring 官方参考单个 watermarked 样本与 Prompt 的 CLIP 相似度。 |
+| detection_hit | metric | none | true | false | false | Gaussian Shading 官方参考单个样本是否达到检测阈值。 |
+| traceability_hit | metric | none | true | false | false | Gaussian Shading 官方参考单个样本是否达到追踪阈值。 |
+| random_material_digest_random | random | _random | true | false | false | Gaussian Shading 官方参考单元对 key、nonce 与 watermark 原文计算的不可逆摘要。 |
+| no_w_metrics_none | metric | none | true | false | false | Shallow Diffuse 官方参考单个 clean 样本的无攻击检测指标。 |
+| avg_metrics_none | metric | none | true | false | false | Shallow Diffuse 官方参考单个 watermarked 样本的无攻击检测指标。 |
+| clip_scores_no_w | metric | none | true | false | false | Shallow Diffuse 官方参考单个 clean 样本的 CLIP 分数。 |
+| clip_scores_avg | metric | none | true | false | false | Shallow Diffuse 官方参考单个 watermarked 样本的 CLIP 分数。 |
+| source_unit_output_ready | governance | none | true | false | false | 动态补丁后的官方源码是否具备逐 Prompt 观测和原子 payload 发布能力。 |
+| method_faithful_source_identity | provenance | none | true | false | false | Common-backbone adapter 绑定外部方法登记 commit 与实际适配实现摘要的源码身份。 |
+| method_faithful_source_identity_digest | provenance | none | true | false | false | method_faithful_source_identity 排除自指字段后的稳定 SHA-256 摘要。 |
+| stable_scientific_execution_identity | provenance | none | true | false | false | 跨 Colab 会话必须一致的代码锁、依赖锁、Python、PyTorch 与 CUDA build 身份。 |
+| stable_scientific_execution_identity_digest | provenance | none | true | false | false | stable_scientific_execution_identity 的稳定 SHA-256 摘要。 |
+| method_faithful_scientific_unit_count | metric | none | true | false | false | 当前 common-backbone 运行完整复验的 source pair 与攻击单元总数。 |
+| method_faithful_scientific_unit_record_paths | artifact | none | true | false | false | 当前 common-backbone 运行全部原子完成记录的仓库相对路径列表。 |
+| method_faithful_scientific_unit_records_digest | provenance | none | true | false | false | 按正式计划顺序排列的全部 common-backbone 原子记录稳定摘要。 |
+| method_faithful_scientific_unit_resume_ready | governance | none | true | false | false | Common-backbone 完成单元集合是否可恢复且满足 Prompt 与攻击 exact set。 |
+| method_faithful_source_prompt_unit_count | metric | none | true | false | false | Common-backbone 完整 source pair 单元覆盖的 Prompt 数量。 |
+| method_faithful_formal_attack_unit_count | metric | none | true | false | false | Common-backbone 完整 test Prompt 攻击角色单元数量。 |
+| method_faithful_run_identity_path | artifact | none | true | false | false | Common-backbone 原子运行稳定身份记录的仓库相对路径。 |
+| method_faithful_run_identity_sha256 | provenance | none | true | false | false | method_faithful_run_identity_path 指向文件的字节 SHA-256。 |
+| method_faithful_run_identity_digest | provenance | none | true | false | false | Common-backbone 原子运行身份对象排除自指字段后的稳定摘要。 |
+| expected_formal_attack_unit_count | metric | none | true | false | false | 当前 test Prompt、攻击名称与阴阳角色笛卡尔积的预期单元数。 |
+| source_registry_item_digest | provenance | none | true | false | false | 单个外部方法源码登记项的稳定 SHA-256 摘要。 |
+| adapter_implementation_sha256 | provenance | none | true | false | false | Common-backbone adapter 与共享单元实现文件到字节 SHA-256 的映射。 |
+| method_faithful_unit_digest | provenance | none | true | false | false | 单个 common-backbone 完成单元排除自指字段后的稳定摘要。 |
+| unit_artifacts | artifact | none | true | false | false | 单个科学完成单元绑定的事实文件路径、大小与 SHA-256 列表。 |
+| unit_data | artifact | none | true | false | false | 单个科学完成单元用于重建 observation 与派生 manifest 的规范数据。 |
+| run_config | protocol | none | true | false | false | 原子科学运行排除传输路径后的完整方法与公平协议配置。 |
+| run_config_digest | provenance | none | true | false | false | run_config 与稳定源码、代码锁和依赖身份联合计算的摘要。 |
+| unit_contract_digest | provenance | none | true | false | false | T2SMark 完整原子单元契约排除自指字段后的稳定摘要。 |
+| formal_unit_record_digest | provenance | none | true | false | false | 单个 T2SMark Prompt 完成记录排除自指字段后的稳定摘要。 |
+| formal_unit_record_count | metric | none | true | false | false | T2SMark 完整聚合实际引用的 Prompt 单元数量。 |
+| formal_unit_record_digests | provenance | none | true | false | false | 按全局 Prompt 索引排列的 T2SMark 单元摘要列表。 |
+| formal_unit_records_digest | provenance | none | true | false | false | 按全局 Prompt 索引排列的全部 T2SMark 单元记录稳定摘要。 |
+| formal_unit_aggregate_digest | provenance | none | true | false | false | T2SMark 单元覆盖、来源聚合与记录摘要对象的稳定摘要。 |
+| formal_unit_set_complete | governance | none | true | false | false | T2SMark Prompt 单元是否完整覆盖当前正式计划。 |
+| t2smark_formal_unit_set_ready | governance | none | true | false | false | T2SMark 运行摘要中的完整单元集合门禁。 |
+| t2smark_formal_unit_record_count | metric | none | true | false | false | T2SMark 运行摘要绑定的 Prompt 完成单元数量。 |
+| t2smark_formal_unit_records_digest | provenance | none | true | false | false | T2SMark 运行摘要绑定的全部 Prompt 单元记录摘要。 |
+| t2smark_formal_unit_aggregate_digest | provenance | none | true | false | false | T2SMark 运行摘要绑定的单元来源聚合摘要。 |
+| t2smark_formal_attack_expected_test_count | metric | none | true | false | false | T2SMark 正式攻击结果应覆盖的 test Prompt 数量。 |
+| complete_result_set_ready | governance | none | true | false | false | Adapter 是否已读取连续无缺失的完整 Prompt 结果集合。 |
+| calibration_result_count | metric | none | true | false | false | Adapter 用于 fixed-FPR 冻结的 calibration Prompt 结果数量。 |
+| calibration_result_indices | protocol | none | true | false | false | Adapter fixed-FPR 校准引用的全局 Prompt 索引列表。 |
+| calibration_result_digest | provenance | none | true | false | false | 按 calibration_result_indices 排列的原始结果稳定摘要。 |
+| test_result_count | metric | none | true | false | false | Adapter 进入正式攻击聚合的 test Prompt 结果数量。 |
+| artifact_sha256 | provenance | none | true | false | false | 单个科学单元内事实文件角色到字节 SHA-256 的映射。 |
+| formal_reproduction_config | protocol | none | true | false | false | T2SMark 排除 Drive、checkout 与控制开关后的正式科学复现配置。 |
+| paper_run_identity | protocol | none | true | false | false | T2SMark 单元契约绑定的论文层级、规模和 fixed-FPR 身份。 |
+| prompt_rows | protocol | none | true | false | false | T2SMark 单元契约按全局索引保存的完整规范 Prompt 行列表。 |
+| prompt_plan_digest | provenance | none | true | false | false | 完整 Prompt 行列表按正式顺序计算的稳定摘要。 |
+| prompt_identity | protocol | none | true | false | false | 单个科学完成单元绑定的 Prompt id、索引、split、文本和摘要。 |
+| source_identity | provenance | none | true | false | false | T2SMark 单元契约绑定的官方 commit、固定补丁与精确工作树身份。 |
+| formal_unit_aggregate | provenance | none | true | false | false | T2SMark 完整 Prompt 单元的记录摘要与跨会话来源聚合对象。 |
+| clean_base_latent_digest_random | random | _random | true | false | false | 对严格成对图像共用的水印前基础 Gaussian latent 计算的不可逆摘要。 |
+| t2smark_secret_material_digest_random | random | _random | true | false | false | 对 T2SMark master key、Prompt key 与 message 计算的不可逆摘要。 |
+| fixed_secret_material_digest_random | random | _random | true | false | false | T2SMark settings 对固定 master key 与 message 计算的不可逆摘要。 |
+| watermark_seed_random | random | _random | true | false | false | 外部 baseline 原子单元实际用于构造水印随机材料的整数 seed。 |
+| watermark_carrier_digest_random | random | _random | true | false | false | Tree-Ring 或 Shallow Diffuse 全局固定载体原文的不可逆摘要。 |
+| gaussian_chacha_secret_material_digest_random | random | _random | true | false | false | Gaussian Shading 对 ChaCha20 key、nonce 与 watermark 原文计算的不可逆摘要。 |
+| gaussian_chacha_message_digest_random | random | _random | true | false | false | Gaussian Shading 对 ChaCha20 加密后逐坐标符号 message 计算的不可逆摘要。 |
+| strict_pair_shared_magnitude | method | none | true | false | false | Gaussian Shading clean 与 watermarked latent 是否逐坐标共享同一绝对幅值。 |
+| message_encryption | method | none | true | false | false | Gaussian Shading 主路线使用的消息加密算子与 key / nonce 规格。 |
+| acc_key | metric | none | true | false | false | T2SMark 单个 Prompt 的 key bit 恢复准确率。 |
+| acc_msg | metric | none | true | false | false | T2SMark 单个 Prompt 的 message bit 恢复准确率。 |
+| annotations | protocol | none | true | false | false | T2SMark 官方数据集输入中的规范 Prompt annotation 列表。 |
+| artifact_root | artifact | none | false | false | false | Adapter 内部事实图像与原子记录的受限 outputs 根路径。 |
+| attack_condition | protocol | none | true | false | false | Observation 对应的规范攻击条件名称。 |
+| attack_execution_split | protocol | none | true | false | false | 正式攻击允许执行的唯一 Prompt split。 |
+| attack_families | protocol | none | true | false | false | 当前外部 baseline 运行按顺序冻结的正式攻击名称列表。 |
+| attacked_image_id | protocol | none | true | false | false | 单个攻击后图像的稳定标识。 |
+| attacked_image_manifest_path | artifact | none | true | false | false | Adapter 攻击图像事实清单的仓库相对路径。 |
+| attacked_record | artifact | none | true | false | false | 单个攻击单元用于重建 observation 与图像清单的规范事实对象。 |
+| dependency_environment_ready | governance | none | true | false | false | 当前隔离科学依赖环境是否通过完整锁门禁。 |
+| dependency_profile_digest | provenance | none | true | false | false | 科学依赖 profile 规范内容的稳定 SHA-256 摘要。 |
+| dependency_profile_id | provenance | none | true | false | false | 当前科学执行使用的受治理依赖 profile 标识。 |
+| explicit_threshold | protocol | none | true | false | false | 外部 adapter 是否由调用方显式提供检测阈值; 正式默认值为空。 |
+| formal_attacks | protocol | none | true | false | false | T2SMark 单个 Prompt 按正式攻击名称组织的正负攻击结果映射。 |
+| formal_unit_contract | protocol | none | true | false | false | T2SMark runner 返回并持久化的完整原子单元契约。 |
+| gen_seed | protocol | none | true | false | false | 官方参考脚本用于生成逐 Prompt seed 的固定基值。 |
+| generated_image_digest | provenance | none | true | false | false | 生成图像文件的字节 SHA-256。 |
+| generated_image_path | artifact | none | true | false | false | 生成图像文件的仓库相对路径。 |
+| image_id | protocol | none | true | false | false | 外部 baseline 图像样本的稳定标识。 |
+| image_pair | artifact | none | true | false | false | 单个 source pair 单元的 clean / watermarked 图像事实对象。 |
+| image_paths | artifact | none | false | false | false | 测试或归档构造中使用的事实图像路径集合。 |
+| injection_mode | method | none | true | false | false | Shallow Diffuse 在 `edit_timestep` 分支位置使用的 patch 注入语义。 |
+| input_access_mode | protocol | none | true | false | false | 检测器允许读取的输入访问模式; 正式外部 baseline 为 image_only。 |
+| key | runtime | none | false | false | false | Tree-Ring 当前进程内检测所需的载体张量, 不得持久化。 |
+| mask | runtime | none | false | false | false | Tree-Ring 或 Shallow Diffuse 当前进程内使用的载体区域 mask。 |
+| metric_summary | metric | none | true | false | false | 测试或官方参考重建得到的方法指标汇总对象。 |
+| metric_validation | governance | none | true | false | false | 官方参考逐 Prompt 指标重建是否通过完整性校验的报告。 |
+| norm1_no_w | metric | none | true | false | false | T2SMark 对 clean 图像恢复噪声的 L1 检测分数。 |
+| norm1_w | metric | none | true | false | false | T2SMark 对 watermarked 图像恢复噪声的 L1 检测分数。 |
+| num_inference_steps | protocol | none | true | false | false | 图像生成使用的去噪采样步数。 |
+| num_inversion_steps | protocol | none | true | false | false | 仅图像检测恢复初始 noise 使用的反演步数。 |
+| observation_without_threshold | artifact | none | true | false | false | 单个攻击单元在 fixed-FPR 冻结前保存的连续分数 observation。 |
+| observations_without_threshold | artifact | none | true | false | false | 单个 source pair 单元在 fixed-FPR 冻结前保存的正负连续分数列表。 |
+| official_clip_scores_path | artifact | none | true | false | false | Shallow Diffuse 官方 CLIP 原始分数文件路径。 |
+| official_command_execution_evidence_ready | governance | none | true | false | false | 官方命令是否成功且解释器、工作目录与 CUDA 证据均已绑定。 |
+| official_metric_summary | metric | none | true | false | false | 从全部官方参考逐 Prompt 原始观测复算的最终指标对象。 |
+| official_metric_text_path | artifact | none | true | false | false | Gaussian Shading 官方文本指标文件路径。 |
+| official_model_id | protocol | none | true | false | false | 官方参考运行实际使用的冻结模型仓库标识。 |
+| official_overall_scores_path | artifact | none | true | false | false | Shallow Diffuse 官方总体检测分数文件路径。 |
+| official_run_name | protocol | none | true | false | false | 官方参考源码使用的运行目录语义名称。 |
+| official_timestep_dir | artifact | none | true | false | false | Shallow Diffuse 官方 shallow timestep 输出目录。 |
+| official_unit_contract | artifact | none | false | false | false | T2SMark outputs 路径映射中的原子单元契约文件。 |
+| official_unit_dir | artifact | none | false | false | false | T2SMark outputs 路径映射中的逐 Prompt 单元目录。 |
+| output_root | artifact | none | false | false | false | 测试或 adapter 路径构造使用的 outputs 根目录。 |
+| pair_quality | metric | none | true | false | false | 单个 Prompt 严格 clean / watermarked 图像配对的事实与摘要对象。 |
+| pair_quality_protocol | protocol | none | true | false | false | 图像质量记录采用的严格配对协议名称。 |
+| patch | runtime | none | false | false | false | Shallow Diffuse 当前进程内注入与检测使用的固定 patch 张量。 |
+| primary_baseline_id | protocol | none | true | false | false | 单条 common-backbone 运行唯一绑定的主 baseline 标识。 |
+| protocol_profile | protocol | none | true | false | false | 当前论文运行层级使用的 fixed-FPR 协议 profile 名称。 |
+| record_ready | governance | none | true | false | false | 官方参考受治理 record 是否已由完整单元和指标重建。 |
+| robustness | metric | none | true | false | false | T2SMark 单个 Prompt 的连续检测与 bit 恢复指标对象。 |
+| row | runtime | none | false | false | false | Adapter 当前进程内与图像状态关联的 Prompt 行对象。 |
+| row_index | runtime | none | false | false | false | Adapter 当前进程内 Prompt 行的一基索引。 |
+| run_dir | artifact | none | false | false | false | 测试或 runner 路径映射中的单方法独占运行目录。 |
+| run_name | protocol | none | true | false | false | 正式 runner 输出目录与科学配置使用的运行名称。 |
+| scientific_unit_dir | artifact | none | false | false | false | 官方参考 runner 保存预注册原子批次记录的目录。 |
+| scientific_unit_workspace_root | artifact | none | false | false | false | 官方参考缺失批次执行时使用且聚合前必须删除的工作区根目录。 |
+| source_random_identity_random | random | _random | false | false | false | Adapter 当前进程内关联 source 单元与攻击单元的随机来源对象。 |
+| split_observations | artifact | none | false | false | false | 测试路径映射中的单 baseline 跨包 observation 文件。 |
+| start_index | protocol | none | true | false | false | 官方参考当前正式计划的全局 Prompt 起始索引。 |
+| stderr_path | artifact | none | true | false | false | 官方参考单元命令标准错误日志文件路径。 |
+| stdout_path | artifact | none | true | false | false | 官方参考单元命令标准输出日志文件路径。 |
+| strict_pair_quality_ready | governance | none | true | false | false | 当前 clean / watermarked 图像集合是否全部满足严格配对事实门禁。 |
+| t2smark_results_path | artifact | none | true | false | false | T2SMark adapter 读取的官方结果仓库相对路径。 |
+| transfer_manifest | artifact | none | false | false | false | 测试路径映射中的单 baseline 跨包传输 manifest。 |
+| unit_evidence | provenance | none | false | false | false | Runner 内部从 transfer manifest 提取的原子单元证据对象。 |
+| unit_records | artifact | none | false | false | false | 测试夹具或聚合函数输入的原子完成记录集合。 |
+| w_channel | method | none | true | false | false | Tree-Ring 或 Shallow Diffuse 载体写入的 latent 通道选择。 |
+| w_pattern | method | none | true | false | false | Tree-Ring 或 Shallow Diffuse 固定载体的 pattern 名称。 |
+| w_radius | method | none | true | false | false | Tree-Ring 或 Shallow Diffuse mask 的外半径。 |
+| w_seed | protocol | none | true | false | false | Tree-Ring 官方源码构造全局载体使用的固定 seed。 |
+| watermark | runtime | none | false | false | false | Gaussian Shading 当前进程内检测使用的 watermark bit 张量。 |
+| watermark_seed | protocol | none | true | false | false | Common-backbone adapter 构造水印载体随机流使用的固定 seed。 |
+| with_tracking | protocol | none | true | false | false | Tree-Ring 官方源码是否启用实验追踪参数。 |
 | official_source_ready | governance | none | true | false | false | 官方源码入口、精确 Git 身份、确定性补丁与数据来源是否共同通过。 |
 | official_environment_report_ready | governance | none | true | false | false | official-reference 是否写出并绑定当前运行环境报告。 |
 | official_execution_ready | governance | none | true | false | false | 当前 official-reference 命令是否被请求并以返回码0完成。 |
@@ -2142,3 +2321,61 @@ Notebook 与 repository module 的跨边界数据
 | qualification_tool_wheel_sha256 | provenance | none | true | false | false | 下载后重新计算并与工具锁比较的 uv wheel SHA-256。 |
 | qualification_tool_wheel_member | provenance | none | true | false | false | 固定 wheel 内唯一被提取为资格化工具的 uv executable 成员路径。 |
 | qualification_report_path | artifact | none | true | false | false | host launcher 写入 `outputs/dependency_lock_qualification/` 的资格化命令与 child 身份报告路径。 |
+| accepted_reference_record_ids | provenance | none | true | true | false | official-reference 验证报告中通过全部来源、配置与指标门禁的记录身份集合。 |
+| actual_formal_attack_unit_count | metric | none | true | false | false | 方法忠实外部基线实际完成并通过复验的 Prompt 攻击科学单元数量。 |
+| artifact_path | artifact | none | true | false | false | 原子科学单元绑定的事实产物仓库相对路径。 |
+| artifact_size | artifact | none | true | false | false | 原子科学单元绑定的事实产物字节数。 |
+| base_seed_random | random | _random | true | false | false | T2SMark 逐 Prompt 随机种子计划使用的固定基础种子。 |
+| channel | protocol | none | true | false | false | 水印载体参数中的 latent 通道索引或通道数量。 |
+| clean_image | artifact | none | true | false | false | 严格配对单元中未嵌入水印的图像事实角色。 |
+| dataset_path | artifact | none | true | false | false | 官方参考运行实际消费的数据集文件或目录路径。 |
+| dependency_lock_digest | provenance | none | true | false | false | 科学单元实际使用的完整依赖锁稳定摘要。 |
+| device | runtime | none | true | false | false | 科学单元实际执行设备的规范名称。 |
+| effective_official_model_id | provenance | none | true | false | false | official-reference 命令解析后实际生效的官方模型身份。 |
+| image_length | protocol | none | true | false | false | official-reference 生成与检测协议使用的方形图像边长。 |
+| inner_radius | protocol | none | true | false | false | Tree-Ring 环形载体掩码的内半径。 |
+| invalid_required_metric_fields | governance | none | true | false | false | official-reference 记录中存在但未通过类型或有限数值校验的必需指标字段集合。 |
+| isolated_dependency_environment_report | provenance | none | true | false | false | 原子科学单元绑定的隔离依赖环境完整报告。 |
+| isolated_dependency_environment_report_digest | provenance | none | true | false | false | 隔离依赖环境完整报告的稳定摘要。 |
+| mask_shape | protocol | none | true | false | false | 水印载体掩码使用的几何形状。 |
+| measured_score | metric | none | true | true | false | 单条方法忠实观测由真实检测算子计算的连续分数。 |
+| missing_required_metric_fields | governance | none | true | false | false | official-reference 记录中缺失的必需指标字段集合。 |
+| pattern | protocol | none | true | false | false | 水印载体在选定 latent 区域内使用的数值图案类型。 |
+| primary_edit_timestep | protocol | none | true | false | false | Shallow Diffuse 正式检测采用的主编辑时间步。 |
+| prompt_indices | protocol | none | true | false | false | official-reference 原子批次实际覆盖的规范 Prompt 索引序列。 |
+| prompt_row | protocol | none | true | false | false | T2SMark 单元绑定的单条完整 Prompt 身份与 split 记录。 |
+| prompt_seed_schedule_digest_random | random | _digest_random | true | false | false | official-reference 逐 Prompt 固定种子调度表的不可逆稳定摘要。 |
+| protocol_binding | protocol | none | true | false | false | 原子科学单元绑定的攻击、检测、split 与 fixed-FPR 协议身份对象。 |
+| radius | protocol | none | true | false | false | 水印载体掩码的外半径或单半径参数。 |
+| random_identity_random | random | _random | true | false | false | 方法忠实单元中影响生成与载体构造的完整随机身份对象。 |
+| raw_observations | artifact | none | true | false | false | 方法忠实科学单元聚合前重新读取并验证的原始观测记录集合。 |
+| record_schema | protocol | none | true | false | false | 原子契约或记录采用的稳定 schema 名称。 |
+| reference_model | provenance | none | true | false | false | official-reference 运行实际使用的参考检测模型身份。 |
+| source_identity_digest | provenance | none | true | false | false | 方法忠实单元绑定的外部源码登记与适配实现组合摘要。 |
+| source_prompt_count | metric | none | true | false | false | 方法忠实单元集合实际覆盖的唯一源 Prompt 数量。 |
+| source_registry_sha256 | provenance | none | true | false | false | 外部 baseline 来源登记文件的实际 SHA-256。 |
+| stable_execution_identity | provenance | none | true | false | false | 跨恢复会话必须完全一致的代码锁、依赖锁、源码与科学配置身份。 |
+| torch | runtime | none | true | false | false | 依赖版本映射中实际加载的 PyTorch 版本。 |
+| unit_batch_size | protocol | none | true | false | false | official-reference 原子科学单元的规范批次样本数。 |
+| unit_end | protocol | none | true | false | false | official-reference 原子科学单元覆盖区间的排他结束索引。 |
+| unit_kind | protocol | none | true | false | false | 原子科学单元的职责类型, 区分源图生成与攻击评估等任务。 |
+| unit_parameters | protocol | none | true | false | false | 方法忠实原子科学单元完整绑定的 Prompt、攻击与随机参数对象。 |
+| unit_rebuilt | governance | none | true | false | false | official-reference 归档记录是否由已复验原子单元重新构建。 |
+| unit_start | protocol | none | true | false | false | official-reference 原子科学单元覆盖区间的包含式起始索引。 |
+| use_chacha | protocol | none | true | false | false | Gaussian Shading 官方配置是否启用真实 ChaCha20 消息加密。 |
+| user_number | protocol | none | true | false | false | Gaussian Shading 官方配置中的用户码字空间规模参数。 |
+| watermarked_image | artifact | none | true | false | false | 严格配对单元中嵌入水印的图像事实角色。 |
+| edit_timestep | method | none | true | false | false | Shallow Diffuse 在完整扩散步数中定义的浅层水印注入时间步。 |
+| edit_schedule_index | method | none | true | false | false | Shallow Diffuse 完整 FlowMatch Euler 调度中与注入时间步对应的前段结束索引。 |
+| pre_edit_guidance_scale | method | none | true | false | false | Shallow Diffuse 从初始噪声运行到浅层注入位置时使用的 Prompt guidance 强度。 |
+| post_edit_guidance_scale | method | none | true | false | false | Shallow Diffuse clean 与 watermarked 分支在注入后共同使用的 guidance 强度, 正式值为1.0。 |
+| detection_inversion_stop_timestep | method | none | true | false | false | Shallow Diffuse 仅图像检测反演停止并计算载体距离的生成同位时间步。 |
+| detection_inversion_stop_schedule_index | method | none | true | false | false | Shallow Diffuse 检测反演停止时间步对应的完整 FlowMatch Euler 调度索引。 |
+| channel_fusion | method | none | true | false | false | Shallow Diffuse 解码前保留水印通道并从 clean 分支恢复其他通道的融合规则。 |
+| watermark_channel | method | none | true | false | false | Shallow Diffuse 注入、通道融合和检测共同使用的 latent 水印通道。 |
+| conditioning | runtime | none | false | false | false | FlowMatch transformer 调用记录中用于核验条件分支选择的测试诊断值。 |
+| dataset | protocol | none | true | false | false | official-reference 科学配置实际绑定的 Prompt 数据集仓库身份。 |
+| latent_batch | runtime | none | false | false | false | FlowMatch transformer 单次调用接收的 latent batch 大小诊断值。 |
+| patch_size | protocol | none | false | false | false | SD3 transformer 配置用于计算动态 shift 图像序列长度的 patch 边长。 |
+| stochastic_sampling | protocol | none | false | false | false | FlowMatch scheduler 是否启用随机采样; 方法忠实正式路线要求为 false。 |
+| use_dynamic_shifting | protocol | none | false | false | false | FlowMatch scheduler 是否依据图像序列长度计算动态 shift。 |

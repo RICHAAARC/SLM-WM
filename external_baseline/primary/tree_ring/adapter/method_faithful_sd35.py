@@ -3,6 +3,7 @@
 该模块只位于 external baseline 适配层, 不属于 SLM-WM 主方法实现。它参考
 Tree-Ring 官方源码的核心机制: 在扩散初始 latent 的傅里叶域中心环形区域写入 key,
 生成图像后通过图像到 latent 的流匹配反向 Euler 积分恢复初始噪声, 再用 key 距离进行检测。
+整次运行在 Prompt 循环外生成唯一 key, 所有 Prompt 与恢复会话复用该固定载体.
 
 通用工程写法:
 - Notebook 或命令计划只调用本模块入口, 不直接手写 records。
@@ -37,6 +38,18 @@ from external_baseline.primary.sd35_method_faithful_common import (
     formal_image_attack_config,
     validate_model_revision,
     validated_observation_attack_identity,
+)
+from external_baseline.primary.sd35_method_faithful_units import (
+    aggregate_method_faithful_unit_records,
+    apply_frozen_threshold,
+    build_irreversible_random_material_digest,
+    build_method_faithful_unit_context,
+    build_method_faithful_unit_spec,
+    load_completed_method_faithful_unit,
+    repository_relative_method_faithful_path,
+    resolve_method_faithful_output_path,
+    threshold_independent_observation,
+    write_completed_method_faithful_unit,
 )
 from experiments.protocol.attacks import attack_config_digest
 
@@ -189,6 +202,37 @@ def build_watermark_mask(shape: tuple[int, int, int, int], *, channel: int, radi
     else:
         mask[:, channel, torch_mask] = True
     return mask
+
+
+def build_fixed_watermark_carrier(
+    shape: tuple[int, int, int, int],
+    *,
+    pattern: str,
+    channel: int,
+    radius: int,
+    watermark_seed: int,
+    device: str,
+) -> tuple[Any, Any, str]:
+    """由固定 seed 构造整次运行共享的 Tree-Ring mask, key 和不可逆摘要."""
+
+    import torch
+
+    key_generator = torch.Generator(device=device).manual_seed(int(watermark_seed))
+    key = build_watermark_key(
+        shape,
+        pattern=pattern,
+        radius=int(radius),
+        generator=key_generator,
+        device=device,
+    )
+    mask = build_watermark_mask(
+        shape,
+        channel=int(channel),
+        radius=int(radius),
+        device=device,
+    )
+    carrier_digest_random = build_irreversible_random_material_digest(key)
+    return mask, key, carrier_digest_random
 
 
 def inject_watermark(latents: Any, mask: Any, key: Any) -> Any:
@@ -470,7 +514,8 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
     if args.max_samples is not None:
         prompt_rows = prompt_rows[: max(0, int(args.max_samples))]
     attack_families = [item.strip() for item in str(args.attack_families or "").split(",") if item.strip()]
-    progress_total = max(1, 1 + len(prompt_rows) + len(attack_families) * len(prompt_rows) * 2)
+    test_prompt_count = sum(split_name(row) == "test" for row in prompt_rows)
+    progress_total = max(1, 1 + len(prompt_rows) + len(attack_families) * test_prompt_count * 2)
     progress_completed = 0
     emit_adapter_progress(
         baseline_id=BASELINE_ID,
@@ -506,9 +551,51 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
     attacked_dir.mkdir(parents=True, exist_ok=True)
 
     latent_shape = (1, int(args.latent_channels), max(1, int(args.height) // 8), max(1, int(args.width) // 8))
+    mask, key, watermark_carrier_digest_random = build_fixed_watermark_carrier(
+        latent_shape,
+        pattern=str(args.w_pattern),
+        channel=int(args.w_channel),
+        radius=int(args.w_radius),
+        watermark_seed=int(args.watermark_seed),
+        device=device,
+    )
+    run_config = {
+        "adapter_boundary": ADAPTER_BOUNDARY,
+        "model_id": args.model_id,
+        "model_revision": validate_model_revision(args.model_revision),
+        "torch_dtype": str(args.torch_dtype),
+        "latent_shape": list(latent_shape),
+        "height": int(args.height),
+        "width": int(args.width),
+        "num_inference_steps": int(args.num_inference_steps),
+        "num_inversion_steps": int(args.num_inversion_steps),
+        "guidance_scale": float(args.guidance_scale),
+        "target_fpr": float(args.target_fpr),
+        "explicit_threshold": args.threshold,
+        "attack_families": list(attack_families),
+        "attack_execution_split": "test",
+        "prompt_count": len(prompt_rows),
+        "test_prompt_count": test_prompt_count,
+        "seed": int(args.seed),
+        "watermark_seed": int(args.watermark_seed),
+        "w_channel": int(args.w_channel),
+        "w_radius": int(args.w_radius),
+        "w_pattern": str(args.w_pattern),
+        "watermark_carrier_digest_random": watermark_carrier_digest_random,
+        "prompt_plan_digest": build_stable_digest(prompt_rows),
+    }
+    unit_context = build_method_faithful_unit_context(
+        baseline_id=BASELINE_ID,
+        artifact_root=artifact_root,
+        run_config=run_config,
+        execution_device=device,
+        torch_module=torch,
+    )
     observations_without_threshold: list[dict[str, Any]] = []
     image_pairs: list[dict[str, Any]] = []
     runtime_keys: dict[str, dict[str, Any]] = {}
+    source_unit_specs: list[Any] = []
+    source_unit_records: list[dict[str, Any]] = []
 
     for index, row in enumerate(prompt_rows, start=1):
         current_prompt = prompt_text(row)
@@ -516,17 +603,56 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         image_id = row_id(row, index, "image_id", "tree_ring_image")
         file_stem = safe_file_stem(image_id, f"tree_ring_image_{index:05d}")
         generator = torch.Generator(device=device).manual_seed(int(args.seed) + index - 1)
-        key_generator = torch.Generator(device=device).manual_seed(int(args.watermark_seed) + index - 1)
+        source_unit_spec = build_method_faithful_unit_spec(
+            unit_context,
+            unit_kind="source_pair",
+            row=row,
+            index=index,
+            random_identity_random={
+                "generation_seed_random": int(args.seed) + index - 1,
+                "watermark_seed_random": int(args.watermark_seed),
+                "watermark_carrier_digest_random": watermark_carrier_digest_random,
+            },
+            unit_parameters={
+                "image_id": image_id,
+                "latent_shape": list(latent_shape),
+            },
+        )
+        source_unit_specs.append(source_unit_spec)
+        completed_source_unit = load_completed_method_faithful_unit(
+            unit_context,
+            source_unit_spec,
+        )
+        if completed_source_unit is not None:
+            unit_data = completed_source_unit["unit_data"]
+            image_pair = dict(unit_data["image_pair"])
+            source_observations = [
+                dict(item) for item in unit_data["observations_without_threshold"]
+            ]
+            if len(source_observations) != 2:
+                raise ValueError("Tree-Ring Prompt 源图完成单元必须包含两条连续分数")
+            image_pairs.append(image_pair)
+            observations_without_threshold.extend(source_observations)
+            runtime_keys[image_id] = {
+                "mask": mask,
+                "key": key,
+                "row": row,
+                "row_index": index,
+                "clean_score": float(source_observations[0]["score"]),
+                "watermarked_score": float(source_observations[1]["score"]),
+            }
+            source_unit_records.append(completed_source_unit)
+            progress_completed += 1
+            emit_adapter_progress(
+                baseline_id=BASELINE_ID,
+                operation="source_pair_resume",
+                completed=progress_completed,
+                total=progress_total,
+                profile=f"operation=source_pair_resume prompt={index}/{len(prompt_rows)} image_id={image_id}",
+            )
+            continue
 
         clean_latents = torch.randn(latent_shape, generator=generator, device=device, dtype=pipe.transformer.dtype)
-        key = build_watermark_key(
-            latent_shape,
-            pattern=args.w_pattern,
-            radius=int(args.w_radius),
-            generator=key_generator,
-            device=device,
-        )
-        mask = build_watermark_mask(latent_shape, channel=int(args.w_channel), radius=int(args.w_radius), device=device)
         watermarked_latents = inject_watermark(clean_latents.clone(), mask, key)
 
         clean_image = pipe(
@@ -642,6 +768,27 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                 score_retention=1.0,
             )
         )
+        source_observations = [
+            threshold_independent_observation(item)
+            for item in observations_without_threshold[-2:]
+        ]
+        observations_without_threshold[-2:] = source_observations
+        completed_source_unit = write_completed_method_faithful_unit(
+            unit_context,
+            source_unit_spec,
+            unit_data={
+                "image_pair": image_pairs[-1],
+                "observations_without_threshold": source_observations,
+            },
+            artifact_paths=(clean_path, watermarked_path),
+        )
+        canonical_source_data = completed_source_unit["unit_data"]
+        image_pairs[-1] = dict(canonical_source_data["image_pair"])
+        observations_without_threshold[-2:] = [
+            dict(item)
+            for item in canonical_source_data["observations_without_threshold"]
+        ]
+        source_unit_records.append(completed_source_unit)
         if device == "cuda":
             torch.cuda.empty_cache()
         progress_completed += 1
@@ -654,34 +801,85 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         )
 
     threshold, threshold_source = derive_threshold(observations_without_threshold, args.threshold, args.target_fpr)
-    observations: list[dict[str, Any]] = []
-    for row in observations_without_threshold:
-        updated = dict(row)
-        updated["threshold"] = float(threshold)
-        updated["threshold_source"] = threshold_source
-        updated["detection_decision"] = bool(float(updated["score"]) >= float(threshold))
-        updated["final_decision"] = updated["detection_decision"]
-        updated["baseline_observation_digest"] = build_stable_digest(updated)
-        observations.append(updated)
-
     attacked_records: list[dict[str, Any]] = []
+    attack_observations_without_threshold: list[dict[str, Any]] = []
+    attack_unit_specs: list[Any] = []
+    attack_unit_records: list[dict[str, Any]] = []
     for attack_family in attack_families:
         formal_attack_config = formal_image_attack_config(attack_family)
         attack_matrix_family = canonical_attack_family(attack_family)
         attack_matrix_name = canonical_attack_name(attack_family)
         formal_attack_digest = attack_config_digest(formal_attack_config)
         for pair_index, pair in enumerate(image_pairs, start=1):
+            if str(pair.get("split", "")) != "test":
+                continue
             image_id = str(pair["image_id"])
             runtime = runtime_keys[image_id]
             for role_name, source_path_field, source_digest_field, sample_role in (
                 ("clean", "clean_image_path", "clean_image_digest", "attacked_negative"),
                 ("watermarked", "watermarked_image_path", "watermarked_image_digest", "attacked_positive"),
             ):
-                with Image.open(pair[source_path_field]) as source_image:
+                attack_seed = int(args.seed) + pair_index
+                attack_unit_spec = build_method_faithful_unit_spec(
+                    unit_context,
+                    unit_kind=f"formal_attack_{attack_matrix_name}_{role_name}",
+                    row=runtime["row"],
+                    index=int(runtime["row_index"]),
+                    random_identity_random={
+                        "generation_seed_random": int(args.seed) + pair_index - 1,
+                        "watermark_seed_random": int(args.watermark_seed),
+                        "watermark_carrier_digest_random": watermark_carrier_digest_random,
+                        "attack_seed_random": attack_seed,
+                    },
+                    unit_parameters={
+                        "image_id": image_id,
+                        "source_role": role_name,
+                        "sample_role": sample_role,
+                        "attack_id": formal_attack_config.attack_id,
+                        "attack_config_digest": formal_attack_digest,
+                        "frozen_threshold_digest": build_stable_digest(
+                            {
+                                "threshold": float(threshold),
+                                "threshold_source": threshold_source,
+                            }
+                        ),
+                    },
+                )
+                attack_unit_specs.append(attack_unit_spec)
+                completed_attack_unit = load_completed_method_faithful_unit(
+                    unit_context,
+                    attack_unit_spec,
+                )
+                if completed_attack_unit is not None:
+                    unit_data = completed_attack_unit["unit_data"]
+                    attack_observations_without_threshold.append(
+                        dict(unit_data["observation_without_threshold"])
+                    )
+                    attacked_records.append(dict(unit_data["attacked_record"]))
+                    attack_unit_records.append(completed_attack_unit)
+                    progress_completed += 1
+                    emit_adapter_progress(
+                        baseline_id=BASELINE_ID,
+                        operation="formal_image_attack_resume",
+                        completed=progress_completed,
+                        total=progress_total,
+                        profile=(
+                            "operation=formal_image_attack_resume "
+                            f"attack={attack_matrix_name} pair={pair_index}/{len(image_pairs)} role={role_name}"
+                        ),
+                        attack_name=attack_matrix_name,
+                        image_id=image_id,
+                    )
+                    continue
+                source_image_path = resolve_method_faithful_output_path(
+                    unit_context,
+                    pair[source_path_field],
+                )
+                with Image.open(source_image_path) as source_image:
                     attacked_image, attack_transform_name, attack_execution = apply_formal_image_attack(
                         source_image,
                         attack_family=attack_family,
-                        seed=int(args.seed) + pair_index,
+                        seed=attack_seed,
                         pipe=pipe,
                         prompt=str(pair["prompt_text"]),
                         size=int(args.height),
@@ -711,12 +909,12 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                     key=runtime["key"],
                     num_inversion_steps=int(args.num_inversion_steps),
                 )
-                observations.append(
+                attack_observation = threshold_independent_observation(
                     build_observation(
                         event_id=attacked_id,
                         score=score,
-                        threshold=threshold,
-                        threshold_source=threshold_source,
+                        threshold=0.0,
+                        threshold_source="pending",
                         row=runtime["row"],
                         index=int(runtime["row_index"]),
                         sample_role=sample_role,
@@ -739,28 +937,43 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                         attack_config_digest_value=formal_attack_digest,
                     )
                 )
-                attacked_records.append(
-                    {
-                        "attacked_image_id": attacked_id,
-                        "source_image_id": image_id,
-                        "source_role": role_name,
-                        "sample_role": sample_role,
-                        "source_image_path": pair[source_path_field],
-                        "source_image_digest": pair[source_digest_field],
-                        "attacked_image_path": str(attacked_path),
-                        "attacked_image_digest": attacked_digest,
-                        "attack_family": attack_matrix_family,
-                        "attack_name": attack_matrix_name,
-                        "attack_condition": attack_matrix_name,
-                        "attack_id": formal_attack_config.attack_id,
-                        "resource_profile": formal_attack_config.resource_profile,
-                        "attack_config_digest": formal_attack_digest,
-                        "attack_transform_name": attack_transform_name,
-                        "attack_execution": attack_execution,
-                        "generation_model_id": args.model_id,
-                        "generation_model_revision": args.model_revision,
-                    }
+                attacked_record = {
+                    "attacked_image_id": attacked_id,
+                    "source_image_id": image_id,
+                    "source_role": role_name,
+                    "sample_role": sample_role,
+                    "source_image_path": pair[source_path_field],
+                    "source_image_digest": pair[source_digest_field],
+                    "attacked_image_path": str(attacked_path),
+                    "attacked_image_digest": attacked_digest,
+                    "attack_family": attack_matrix_family,
+                    "attack_name": attack_matrix_name,
+                    "attack_condition": attack_matrix_name,
+                    "attack_id": formal_attack_config.attack_id,
+                    "resource_profile": formal_attack_config.resource_profile,
+                    "attack_config_digest": formal_attack_digest,
+                    "attack_transform_name": attack_transform_name,
+                    "attack_execution": attack_execution,
+                    "generation_model_id": args.model_id,
+                    "generation_model_revision": args.model_revision,
+                }
+                attack_observations_without_threshold.append(attack_observation)
+                attacked_records.append(attacked_record)
+                completed_attack_unit = write_completed_method_faithful_unit(
+                    unit_context,
+                    attack_unit_spec,
+                    unit_data={
+                        "observation_without_threshold": attack_observation,
+                        "attacked_record": attacked_record,
+                    },
+                    artifact_paths=(attacked_path,),
                 )
+                canonical_attack_data = completed_attack_unit["unit_data"]
+                attack_observations_without_threshold[-1] = dict(
+                    canonical_attack_data["observation_without_threshold"]
+                )
+                attacked_records[-1] = dict(canonical_attack_data["attacked_record"])
+                attack_unit_records.append(completed_attack_unit)
                 if device == "cuda":
                     torch.cuda.empty_cache()
                 progress_completed += 1
@@ -777,6 +990,16 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
                     image_id=image_id,
                 )
 
+    unit_aggregate = aggregate_method_faithful_unit_records(
+        unit_context,
+        (*source_unit_records, *attack_unit_records),
+        expected_specs=(*source_unit_specs, *attack_unit_specs),
+    )
+    observations = apply_frozen_threshold(
+        (*observations_without_threshold, *attack_observations_without_threshold),
+        threshold=threshold,
+        threshold_source=threshold_source,
+    )
     image_pairs_path = write_json(artifact_root / "tree_ring_image_pairs.json", image_pairs)
     attacked_manifest_path = write_json(
         artifact_root / "attacked_image_manifest.json",
@@ -795,13 +1018,25 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
         "adapter_status": "method_faithful_sd35_adapter_ready",
         "model_id": args.model_id,
         "model_revision": args.model_revision,
-        "prompt_plan_path": str(Path(args.prompt_plan)),
-        "baseline_observations_path": str(Path(args.out)),
-        "artifact_root": str(artifact_root),
-        "image_pairs_path": str(image_pairs_path),
-        "attacked_image_manifest_path": str(attacked_manifest_path),
+        "prompt_plan_path": repository_relative_method_faithful_path(
+            unit_context, args.prompt_plan
+        ),
+        "baseline_observations_path": repository_relative_method_faithful_path(
+            unit_context, args.out
+        ),
+        "artifact_root": repository_relative_method_faithful_path(
+            unit_context, artifact_root
+        ),
+        "image_pairs_path": repository_relative_method_faithful_path(
+            unit_context, image_pairs_path
+        ),
+        "attacked_image_manifest_path": repository_relative_method_faithful_path(
+            unit_context, attacked_manifest_path
+        ),
         "image_pair_count": len(image_pairs),
         "attacked_image_count": len(attacked_records),
+        "test_prompt_count": test_prompt_count,
+        "expected_formal_attack_unit_count": test_prompt_count * len(attack_families) * 2,
         "observation_count": len(observations),
         "latent_shape": list(latent_shape),
         "execution_device": device,
@@ -823,9 +1058,19 @@ def run_tree_ring_method_faithful_adapter(args: argparse.Namespace) -> tuple[lis
             "w_radius": int(args.w_radius),
             "w_pattern": args.w_pattern,
             "watermark_seed": int(args.watermark_seed),
+            "watermark_carrier_digest_random": watermark_carrier_digest_random,
         },
         "threshold": float(threshold),
         "threshold_source": threshold_source,
+        "run_config": unit_context.run_config,
+        "run_config_digest": unit_context.run_config_digest,
+        "stable_scientific_execution_identity": unit_context.stable_execution_identity,
+        "stable_scientific_execution_identity_digest": unit_context.stable_execution_identity_digest,
+        "method_faithful_source_identity": unit_context.source_identity,
+        "method_faithful_source_identity_digest": unit_context.source_identity[
+            "method_faithful_source_identity_digest"
+        ],
+        **unit_aggregate,
         "formal_result_claim": False,
         "supports_paper_claim": False,
     }
@@ -875,8 +1120,7 @@ def run_cli(argv: list[str] | None = None) -> None:
 
     args = build_parser().parse_args(argv)
     observations, manifest = run_tree_ring_method_faithful_adapter(args)
-    output_path = write_json(args.out, observations)
-    manifest["baseline_observations_path"] = str(output_path)
+    write_json(args.out, observations)
     manifest_path = Path(args.out).with_name("tree_ring_method_faithful_sd35_adapter_manifest.json")
     write_json(manifest_path, manifest)
     print(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True))
