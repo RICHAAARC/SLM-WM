@@ -1024,6 +1024,8 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "quantized_write_jacobian_gate_applicable": True,
         "quantized_write_jacobian_response_norm": 1e-5,
         "quantized_write_reference_feature_norm": 1.0,
+        "quantized_write_reference_feature_content_sha256": "1" * 64,
+        "quantized_write_jacobian_response_content_sha256": "2" * 64,
         "quantized_write_relative_jacobian_response": 1e-5,
         "maximum_quantized_write_relative_jacobian_response": 1e-4,
         "quantized_write_jacobian_gate_ready": True,
@@ -1070,6 +1072,20 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     record["quantized_write_reference_feature_norm"] = -1.0
     assert _scientific_update_record_ready(record, config) is False
     record["quantized_write_reference_feature_norm"] = 1.0
+    reference_feature_content_sha256 = record.pop(
+        "quantized_write_reference_feature_content_sha256"
+    )
+    assert _scientific_update_record_ready(record, config) is False
+    record["quantized_write_reference_feature_content_sha256"] = (
+        reference_feature_content_sha256
+    )
+    response_content_sha256 = record.pop(
+        "quantized_write_jacobian_response_content_sha256"
+    )
+    assert _scientific_update_record_ready(record, config) is False
+    record["quantized_write_jacobian_response_content_sha256"] = (
+        response_content_sha256
+    )
     record["branch_risk_records"]["lf_content"].pop(
         "branch_written_update_content_sha256"
     )
@@ -2470,8 +2486,10 @@ def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None
 
 
 @pytest.mark.quick
-def test_completed_runtime_cache_requires_matching_config_and_files(tmp_path: Path) -> None:
-    """Colab 续跑只能复用同版本、同配置且输出完整的单 Prompt 结果。"""
+def test_completed_runtime_cache_rejects_missing_scientific_content_binding(
+    tmp_path: Path,
+) -> None:
+    """Colab 续跑必须拒绝缺少总科学内容绑定的旧运行结果。"""
 
     config = SemanticWatermarkRuntimeConfig(
         output_dir="outputs/cache_test",
@@ -2525,12 +2543,13 @@ def test_completed_runtime_cache_requires_matching_config_and_files(tmp_path: Pa
         encoding="utf-8",
     )
 
-    cached = load_completed_semantic_watermark_runtime_result(config, root=tmp_path)
-    assert cached is not None
-    assert cached.run_id == run_id
-
-    files["clean_image_path"].unlink()
-    assert load_completed_semantic_watermark_runtime_result(config, root=tmp_path) is None
+    assert (
+        load_completed_semantic_watermark_runtime_result(
+            config,
+            root=tmp_path,
+        )
+        is None
+    )
 
 
 @pytest.mark.quick

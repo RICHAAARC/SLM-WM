@@ -23,6 +23,10 @@ from experiments.runtime import repository_environment
 from experiments.runtime.scientific_execution_binding import (
     validate_scientific_execution_binding,
 )
+from experiments.runtime.scientific_content_binding import (
+    SCIENTIFIC_CONTENT_BINDING_SCHEMA,
+    recompute_scientific_content_binding_digest,
+)
 from experiments.runtime.package_input_manifest import (
     collect_exact_package_entries,
     validate_exact_package_archive,
@@ -47,6 +51,8 @@ from experiments.runtime.diffusion.semantic_features import (
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
+    _carrier_only_counterfactual_artifact_binding_ready,
+    _scientific_content_binding_artifact_ready,
     load_completed_semantic_watermark_runtime_result,
     load_semantic_watermark_runtime_context,
     semantic_watermark_runtime_config_payload,
@@ -373,6 +379,46 @@ def _write_csv(path: Path, rows: tuple[dict[str, Any], ...]) -> None:
         writer.writerows(rows)
 
 
+def _sha256_ready(value: Any) -> bool:
+    """判断字段是否为规范小写 SHA-256, 不接受对象字符串化。"""
+
+    return bool(
+        isinstance(value, str)
+        and len(value) == 64
+        and all(
+            character in "0123456789abcdef" for character in value
+        )
+    )
+
+
+def _scientific_content_binding_record_ready(
+    result: dict[str, Any],
+) -> bool:
+    """复验单 Prompt 内嵌总记录的 schema、run id 与自摘要。"""
+
+    metadata = result.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    record = metadata.get("scientific_content_binding_record")
+    supplied_digest = metadata.get("scientific_content_binding_digest")
+    if (
+        not isinstance(record, dict)
+        or metadata.get("scientific_content_binding_schema")
+        != SCIENTIFIC_CONTENT_BINDING_SCHEMA
+        or record.get("run_id") != result.get("run_id")
+        or record.get("scientific_content_binding_digest")
+        != supplied_digest
+    ):
+        return False
+    try:
+        return bool(
+            recompute_scientific_content_binding_digest(record)
+            == supplied_digest
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def _scientific_update_record_ready(
     record: dict[str, Any],
     config: SemanticWatermarkRuntimeConfig,
@@ -393,10 +439,7 @@ def _scientific_update_record_ready(
     def sha256_ready(value: Any) -> bool:
         """判断一个科学内容字段是否为规范 SHA-256."""
 
-        text = str(value)
-        return len(text) == 64 and all(
-            character in "0123456789abcdef" for character in text
-        )
+        return _sha256_ready(value)
 
     adjacent_reference_sha256 = str(
         record.get("adjacent_step_reference_latent_content_sha256", "")
@@ -724,6 +767,16 @@ def _scientific_update_record_ready(
         or not math.isfinite(float(quantized_reference_feature_norm))
         or float(quantized_reference_feature_norm)
         <= config.null_space_numerical_epsilon
+        or not sha256_ready(
+            record.get(
+                "quantized_write_reference_feature_content_sha256"
+            )
+        )
+        or not sha256_ready(
+            record.get(
+                "quantized_write_jacobian_response_content_sha256"
+            )
+        )
         or not math.isclose(
             float(quantized_relative_response),
             float(quantized_response_norm)
@@ -1763,12 +1816,41 @@ def run_image_only_dataset_runtime(
         )
         for record in detection_records
     )
+    scientific_content_binding_digests = [
+        str(
+            result.get("metadata", {}).get(
+                "scientific_content_binding_digest",
+                "",
+            )
+        )
+        for result in runtime_results
+    ]
+    scientific_content_binding_failure_count = sum(
+        not _scientific_content_binding_record_ready(result)
+        for result in runtime_results
+    )
+    scientific_content_binding_gate_ready = bool(
+        len(scientific_content_binding_digests) == len(prompt_records)
+        and scientific_content_binding_failure_count == 0
+    )
+    scientific_content_binding_digest = (
+        build_stable_digest(
+            {
+                "scientific_content_binding_digests": (
+                    scientific_content_binding_digests
+                )
+            }
+        )
+        if scientific_content_binding_gate_ready
+        else ""
+    )
     scientific_operator_gate_ready = (
         len(scientific_update_records) == expected_scientific_update_count
         and scientific_operator_failure_count == 0
         and final_image_preservation_failure_count == 0
         and final_image_attention_observability_failure_count == 0
         and detection_qk_atomic_content_failure_count == 0
+        and scientific_content_binding_gate_ready
     )
     scientific_unit_provenance = aggregate_scientific_unit_provenance(
         (
@@ -1884,6 +1966,18 @@ def run_image_only_dataset_runtime(
         "detection_qk_atomic_content_ready": (
             detection_qk_atomic_content_failure_count == 0
         ),
+        "scientific_content_binding_digests": (
+            scientific_content_binding_digests
+        ),
+        "scientific_content_binding_digest": (
+            scientific_content_binding_digest
+        ),
+        "scientific_content_binding_failure_count": (
+            scientific_content_binding_failure_count
+        ),
+        "scientific_content_binding_gate_ready": (
+            scientific_content_binding_gate_ready
+        ),
         "scientific_operator_gate_ready": scientific_operator_gate_ready,
         **scientific_unit_provenance,
         "frozen_threshold_digest": protocol.threshold_digest,
@@ -1924,6 +2018,22 @@ def run_image_only_dataset_runtime(
         ),
     }
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    scientific_unit_output_paths: list[str] = []
+    for result in runtime_results:
+        unit_manifest_path = root_path / str(result["manifest_path"])
+        unit_manifest = json.loads(
+            unit_manifest_path.read_text(encoding="utf-8-sig")
+        )
+        unit_output_paths = unit_manifest.get("output_paths")
+        if not isinstance(unit_output_paths, list) or not unit_output_paths:
+            raise RuntimeError("单 Prompt 方法产物清单缺少科学内容叶子")
+        scientific_unit_output_paths.extend(
+            str(path) for path in unit_output_paths
+        )
+    if len(scientific_unit_output_paths) != len(
+        set(scientific_unit_output_paths)
+    ):
+        raise RuntimeError("单 Prompt 方法产物清单包含跨单元重复路径")
     formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
         formal_execution_run_lock,
         repository_environment.require_published_formal_execution_lock(root_path),
@@ -1948,6 +2058,7 @@ def run_image_only_dataset_runtime(
             detection_score_table_paths["det_curve_points"].relative_to(root_path).as_posix(),
             summary_path.relative_to(root_path).as_posix(),
             manifest_path.relative_to(root_path).as_posix(),
+            *scientific_unit_output_paths,
         ),
         config={
             "paper_run": resolved_paper_run.to_dict(),
@@ -1981,6 +2092,15 @@ def run_image_only_dataset_runtime(
             ],
             "detection_qk_atomic_content_ready": summary[
                 "detection_qk_atomic_content_ready"
+            ],
+            "scientific_content_binding_digest": summary[
+                "scientific_content_binding_digest"
+            ],
+            "scientific_content_binding_failure_count": summary[
+                "scientific_content_binding_failure_count"
+            ],
+            "scientific_content_binding_gate_ready": summary[
+                "scientific_content_binding_gate_ready"
             ],
             "scientific_unit_provenance_ready": summary[
                 "scientific_unit_provenance_ready"
@@ -2032,9 +2152,80 @@ def package_image_only_dataset_runtime(
         raise FileNotFoundError("仅图像数据集运行输出不完整, 不得打包")
     summary = json.loads((source_dir / "dataset_runtime_summary.json").read_text(encoding="utf-8-sig"))
     manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
+    dataset_output_paths = manifest.get("output_paths")
+    if not isinstance(dataset_output_paths, list) or not dataset_output_paths:
+        raise RuntimeError("数据集 manifest 缺少正式输出路径")
+    dataset_output_path_set = set(dataset_output_paths)
+    if len(dataset_output_path_set) != len(dataset_output_paths):
+        raise RuntimeError("数据集 manifest 不得包含重复输出路径")
+    scientific_unit_output_paths: list[str] = []
     packaged_runtime_results = _read_jsonl(source_dir / "runtime_results.jsonl")
     for result in packaged_runtime_results:
         validate_semantic_watermark_runtime_result_provenance(result)
+        unit_manifest_relative = Path(
+            str(result.get("manifest_path", ""))
+        )
+        unit_manifest_path = (root_path / unit_manifest_relative).resolve()
+        try:
+            unit_manifest_path.relative_to(source_dir / "runs")
+        except ValueError as error:
+            raise RuntimeError(
+                "单 Prompt manifest 必须位于当前数据集 runs 目录"
+            ) from error
+        if (
+            unit_manifest_relative.is_absolute()
+            or not unit_manifest_path.is_file()
+            or unit_manifest_path.is_symlink()
+        ):
+            raise FileNotFoundError("单 Prompt 科学内容 manifest 不存在")
+        unit_manifest = json.loads(
+            unit_manifest_path.read_text(encoding="utf-8-sig")
+        )
+        unit_output_paths = unit_manifest.get("output_paths")
+        unit_manifest_relative_path = unit_manifest_path.relative_to(
+            root_path
+        ).as_posix()
+        if (
+            not isinstance(unit_output_paths, list)
+            or not unit_output_paths
+            or any(not isinstance(path, str) or not path for path in unit_output_paths)
+            or len(unit_output_paths) != len(set(unit_output_paths))
+            or unit_manifest_relative_path not in unit_output_paths
+        ):
+            raise RuntimeError("单 Prompt manifest 的科学叶子路径集合无效")
+        scientific_unit_output_paths.extend(unit_output_paths)
+        unit_config = result.get("metadata", {}).get(
+            "scientific_unit_config"
+        )
+        if (
+            not isinstance(unit_config, dict)
+            or unit_manifest.get("config") != unit_config
+            or unit_manifest.get("config_digest")
+            != build_stable_digest(unit_config)
+            or not (
+            _carrier_only_counterfactual_artifact_binding_ready(
+                result,
+                unit_manifest,
+                root_path,
+                unit_config,
+            )
+            and _scientific_content_binding_artifact_ready(
+                result,
+                unit_manifest,
+                root_path,
+                unit_config,
+            )
+            )
+        ):
+            raise RuntimeError("单 Prompt 科学内容无法从完成包叶子重建")
+    if (
+        len(scientific_unit_output_paths)
+        != len(set(scientific_unit_output_paths))
+        or not set(scientific_unit_output_paths).issubset(
+            dataset_output_path_set
+        )
+    ):
+        raise RuntimeError("数据集 manifest 未完整覆盖全部单 Prompt 科学叶子")
     packaged_prompt_records = apply_split_assignments(
         build_prompt_records(
             paper_run.prompt_set,
@@ -2106,6 +2297,34 @@ def package_image_only_dataset_runtime(
         == packaged_scientific_unit_provenance[field_name]
         for field_name in SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS
     )
+    packaged_scientific_content_binding_digests = [
+        str(
+            result.get("metadata", {}).get(
+                "scientific_content_binding_digest",
+                "",
+            )
+        )
+        for result in packaged_runtime_results
+    ]
+    packaged_scientific_content_binding_digest = build_stable_digest(
+        {
+            "scientific_content_binding_digests": (
+                packaged_scientific_content_binding_digests
+            )
+        }
+    )
+    scientific_content_binding_summary_bound = bool(
+        len(packaged_scientific_content_binding_digests)
+        == paper_run.prompt_count
+        and all(
+            _sha256_ready(digest)
+            for digest in packaged_scientific_content_binding_digests
+        )
+        and summary.get("scientific_content_binding_digests")
+        == packaged_scientific_content_binding_digests
+        and summary.get("scientific_content_binding_digest")
+        == packaged_scientific_content_binding_digest
+    )
     formal_execution_run_lock = repository_environment.validate_formal_execution_lock_pair(
         manifest.get("formal_execution_run_lock"),
         formal_execution_package_lock,
@@ -2128,6 +2347,12 @@ def package_image_only_dataset_runtime(
             summary.get("scientific_unit_provenance_record_count")
             == paper_run.prompt_count,
             bool(summary.get("scientific_unit_provenance_records_digest")),
+            summary.get("scientific_content_binding_gate_ready") is True,
+            summary.get("scientific_content_binding_failure_count") == 0,
+            _sha256_ready(
+                summary.get("scientific_content_binding_digest")
+            ),
+            scientific_content_binding_summary_bound,
             scientific_unit_provenance_summary_bound,
             packaged_unit_config_contract_ready,
             summary.get("detection_curve_data_ready") is True,
@@ -2138,6 +2363,14 @@ def package_image_only_dataset_runtime(
                 "geometry_protocol_calibration_ready"
             )
             is True,
+            manifest.get("metadata", {}).get(
+                "scientific_content_binding_gate_ready"
+            )
+            is True,
+            manifest.get("metadata", {}).get(
+                "scientific_content_binding_digest"
+            )
+            == summary.get("scientific_content_binding_digest"),
         )
     ):
         raise RuntimeError("仅图像数据集运行身份或 ready 门禁未通过")

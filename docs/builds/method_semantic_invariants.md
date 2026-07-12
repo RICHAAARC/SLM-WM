@@ -702,7 +702,44 @@ $$
 
 ## `scientific_content_binding`
 
-`slm_wm_tensor_content_v1` 按协议版本、dtype、shape 和连续原始字节绑定 Tensor 身份。风险输入、风险/预算/mask、Null Space 八类角色、三分支更新、联合包络、实际写回、全部 Q/K 角色和最终图像必须形成有序联合摘要。摘要只证明一次记录引用的内容身份没有漂移；SHA-256 本身不能重建 Tensor。
+`slm_wm_tensor_content_v1` 按协议版本、dtype、shape 和连续原始字节绑定 Tensor 身份。最终图像不能只绑定 PNG 文件字节, 因为相同像素可以使用不同压缩参数编码。`slm_wm_image_rgb_uint8_content_v1` 必须先把持久化图像解码为 RGB, 再按以下固定顺序计算规范 RGB uint8 像素摘要:
+
+$$
+h_{rgb}=\operatorname{SHA256}(
+\texttt{slm\_wm\_image\_rgb\_uint8\_content\_v1}
+\Vert \operatorname{uint64be}(W)
+\Vert \operatorname{uint64be}(H)
+\Vert \operatorname{RGBBytes}_{uint8}).
+$$
+
+一次方法运行的写入端必须先持久化更新 JSONL、检测 JSONL 和图像文件, 再从磁盘重新读取更新 JSONL、检测 JSONL 和最终图像构造 `scientific_content_binding_record`。该记录按冻结顺序联合绑定:
+
+1. 当前/相邻解码 RGB、CLIP patch/CLS 和五类风险信号。
+2. 三个分支的风险值、预算、资格 mask、有效预算、单位方向、硬包络和实际分支写回。
+3. 每个活动分支 Null Space 的候选矩阵、风险预算、路由响应、投影方向、投影响应、最终基底、基底响应和逐列参考响应八类内容身份。
+4. 量化写回前后 latent、三个分支更新、联合包络、实际 dtype 写回、完整716维参考特征 Tensor 与实际写回 JVP Tensor, 并重算唯一量化合成证据摘要。
+5. 注意力注入的 `latent_before`、`optimization_content_base_latent`、`accepted_attention_candidate`、`actual_written_content_base_latent`、`actual_written_combined_latent` 五角色真实 Q/K 原子及精确算子元数据。
+6. clean、carrier-only 和 watermarked 三张最终图像的文件摘要与规范 RGB uint8 像素摘要, 以及三角色最终图像 Q/K 原子、公开噪声证据和图像到 Q/K/噪声的逐角色绑定。
+7. 每次仅图像检测的 source/evaluated 图像文件与像素身份、raw/aligned 检测 Q/K、公开检测噪声 Tensor、版本化 PRG 身份和逐评价噪声证据。
+8. carrier-only 更新链、最终图像保持记录和 attention 开关反事实身份。
+
+公开检测噪声由同一个 detector extractor 在一次方法运行内共享。最终 clean、carrier-only、watermarked 三图评价固定消费全局索引0、1、2, 因而首条 detection 的 raw 评价必须从索引3开始；后续 raw/aligned 评价沿实际调用顺序形成 `range(3, 3+n)`。禁止每进入一条 detection 就归零, 也禁止接受任意非3起点。公开噪声内容摘要、PRG 身份、Q/K 原子和图像到 Q/K 绑定必须逐评价引用同一个全局索引。执行对齐时, `alignment_digest` 必须是完整 alignment 记录的规范小写 SHA-256；未执行对齐时该字段必须为空字符串, 对象字符串化或任意文本不能充当对齐身份。
+
+最终三图 Q/K 不能只记录 Q/K Tensor。每个角色必须持久化公开噪声证据记录, 并逐项复验证据索引分别为0、1、2、噪声 Tensor 内容摘要相同、版本化 PRG 身份相同且证据摘要可由叶子重建。`final_image_qk_image_content_bindings` 的每一项必须同时包含图像像素摘要、Q/K 原子摘要、公开噪声内容摘要、PRG 身份和评价索引。后续检测的首个噪声身份必须与最终三图完全相同, 只能从索引3继续；为最终三图与检测分别构造两套公开噪声、只记录索引而不记录 Tensor/PRG 身份或让像素-Q/K 绑定遗漏噪声身份均必须拒绝。
+
+结果读取端不得信任已保存的顶层摘要。`load_completed_semantic_watermark_runtime_result` 必须重新读取上述 JSONL 和图像文件, 重算叶子内容、子记录摘要、有序角色摘要及顶层摘要, 并要求重建记录与已保存记录完全相等。路径存在、文件 SHA-256 相同或顶层摘要格式合法均不能替代该重建。
+
+数据集汇总不得直接信任每个样本已保存的 `scientific_content_binding_digest`。汇总端必须先重算每个内嵌 `scientific_content_binding_record`, 要求其 schema、run id、自摘要与结果 metadata 一致, 再按 Prompt 运行顺序收集摘要；摘要数量必须等于当前层级完整 Prompt 数量, 随后才构造数据集级有序摘要。
+
+每个科学单元 manifest 的 `output_paths` 必须是非空且无重复的相对路径集合, 并必须包含该单元 manifest 自身。所有单元路径集合必须两两互斥。数据集 manifest 的 `output_paths` 自身也不得重复, 且必须是全部单元路径并集的超集, 从而纳入每个单元声明的全部 JSONL、图像、结果记录和单元 manifest 叶子。省略部分单元叶子、单元内重复、跨单元重复或只声明数据集汇总文件均必须拒绝。
+
+`package_image_only_dataset_runtime` 在打包前必须逐单元读取 `runtime_results.jsonl` 中的持久化脱敏 `scientific_unit_config`, 再读取该单元 manifest 和其声明的叶子文件。单元 manifest 的 `config` 必须与结果内 `scientific_unit_config` 完全相等, `config_digest` 必须等于该脱敏配置的稳定摘要；随后才调用与完成结果加载器相同的重建路径。缺少完整 `scientific_content_binding_record` 的仅摘要结果、缺失单元配置或 manifest、配置或配置摘要漂移、叶子内容篡改、数据集 manifest 漏报单元叶子时都必须拒绝打包。打包器不得只检查摘要格式或重新签署被篡改的顶层摘要。
+
+attention geometry 开启时, 写出单元产物后和数据集打包前都必须调用 `_carrier_only_counterfactual_artifact_binding_ready`。同一个 validator 必须同时接受进程内完整 `SemanticWatermarkRuntimeConfig` 和结果内持久化脱敏 `scientific_unit_config`。它从 carrier-only 更新 JSONL、图像、保持记录、Q/K 记录与单元 manifest 重建反事实身份；任一 carrier-only 原子残留 attention 分数、更新、关系、pair 身份、Q/K 内容或 attention Null Space 字段时必须拒绝。仅比较 carrier-only 顶层摘要或只在写出时检查一次均不满足该门禁。
+
+该门禁必须同时进入科学算子门禁、summary、manifest、打包前逐单元重建和完成包核验, 不能用部分样本摘要或只含数据集汇总文件的 manifest 替代完整覆盖。
+
+这些摘要只证明同一结果包内部的内容一致性、角色顺序和持久化前后没有不可见漂移。SHA-256 本身不能重建 Tensor, 也不能证明外部数据来源真实、公开模型权重真实、GPU/CUDA 算子执行正确、方法效果成立或论文结论成立。真实外部来源、CUDA 运行和科学有效性仍分别由来源锁、GPU 原子证据、统计协议及论文结果包负责。
 
 ## GPU 观察边界
 

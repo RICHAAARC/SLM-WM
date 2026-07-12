@@ -70,6 +70,9 @@ from tests.helpers.scientific_execution_binding import (
 from tests.helpers.scientific_unit_provenance import (
     build_test_scientific_unit_provenance,
 )
+from tests.functional.test_scientific_content_binding import (
+    _artifact_fixture,
+)
 
 
 PAPER_RUN_NAME = "probe_paper"
@@ -192,19 +195,91 @@ def _write_required_files(directory: Path, filenames: tuple[str, ...]) -> None:
         path.write_text("{}\n", encoding="utf-8")
 
 
-def _prepare_image_runtime(root: Path) -> Path:
+def _prepare_image_runtime(
+    root: Path,
+    *,
+    digest_only: bool = False,
+    tamper_unit_leaf: bool = False,
+    omit_unit_leaves: bool = False,
+) -> Path:
     """构造仅图像运行打包门禁所需的最小正式形状。"""
 
     directory = root / "outputs" / "image_only_dataset_runtime" / PAPER_RUN_NAME
     prompt_records = _canonical_prompt_records(root)
     paper_run = build_paper_run_config(root)
-    runtime_results = [
-        _runtime_result_payload(
-            _base_runtime_config(prompt_record, paper_run),
+    runtime_results = []
+    scientific_unit_output_paths: list[str] = []
+    for prompt_record in prompt_records:
+        config = _base_runtime_config(prompt_record, paper_run)
+        run_id = build_semantic_watermark_run_id(config)
+        _, content_result, unit_manifest, _ = _artifact_fixture(
+            root,
+            runtime_config=config,
+            relative_output_dir=f"{config.output_dir}/{run_id}",
+            run_id=run_id,
+        )
+        result = _runtime_result_payload(
+            config,
             seed=20260711 + prompt_record.prompt_index,
         )
-        for prompt_record in prompt_records
-    ]
+        result.update(
+            {
+                field_name: content_result[field_name]
+                for field_name in (
+                    "update_record_path",
+                    "detection_record_path",
+                    "clean_image_path",
+                    "watermarked_image_path",
+                )
+            }
+        )
+        result["metadata"] = {
+            **content_result["metadata"],
+            **result["metadata"],
+        }
+        unit_dir = root / config.output_dir / run_id
+        result_path = unit_dir / "runtime_result.json"
+        unit_manifest_path = unit_dir / "manifest.local.json"
+        result["manifest_path"] = unit_manifest_path.relative_to(
+            root
+        ).as_posix()
+        result_path.write_text(
+            json.dumps(result, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        unit_manifest["output_paths"].extend(
+            (
+                result_path.relative_to(root).as_posix(),
+                unit_manifest_path.relative_to(root).as_posix(),
+            )
+        )
+        unit_config = semantic_watermark_runtime_config_payload(config)
+        unit_manifest["config"] = unit_config
+        unit_manifest["config_digest"] = build_stable_digest(unit_config)
+        unit_manifest_path.write_text(
+            json.dumps(
+                unit_manifest,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        scientific_unit_output_paths.extend(unit_manifest["output_paths"])
+        runtime_results.append(result)
+    if digest_only:
+        for result in runtime_results:
+            result["metadata"].pop("scientific_content_binding_schema")
+            result["metadata"].pop("scientific_content_binding_record")
+    if tamper_unit_leaf:
+        update_path = root / str(runtime_results[0]["update_record_path"])
+        update_records = [
+            json.loads(line)
+            for line in update_path.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        update_records[0]["semantic_risk_signal_content_sha256"] = "f" * 64
+        _write_jsonl(update_path, update_records)
     _write_jsonl(directory / "runtime_results.jsonl", runtime_results)
     _write_required_files(
         directory,
@@ -225,6 +300,17 @@ def _prepare_image_runtime(root: Path) -> Path:
         ),
         expected_reference_count=PROMPT_COUNT,
     )
+    scientific_content_binding_digests = [
+        result["metadata"]["scientific_content_binding_digest"]
+        for result in runtime_results
+    ]
+    scientific_content_binding_digest = build_stable_digest(
+        {
+            "scientific_content_binding_digests": (
+                scientific_content_binding_digests
+            )
+        }
+    )
     _write_json(
         directory / "dataset_runtime_summary.json",
         {
@@ -235,6 +321,14 @@ def _prepare_image_runtime(root: Path) -> Path:
             "full_method_claim_ready": True,
             "geometry_protocol_calibration_ready": True,
             "detection_curve_data_ready": True,
+            "scientific_content_binding_digests": (
+                scientific_content_binding_digests
+            ),
+            "scientific_content_binding_digest": (
+                scientific_content_binding_digest
+            ),
+            "scientific_content_binding_failure_count": 0,
+            "scientific_content_binding_gate_ready": True,
             **provenance_summary,
             "supports_paper_claim": True,
         },
@@ -260,7 +354,8 @@ def _prepare_image_runtime(root: Path) -> Path:
                     "dataset_runtime_summary.json",
                     "manifest.local.json",
                 )
-            ],
+            ]
+            + ([] if omit_unit_leaves else scientific_unit_output_paths),
             "config": {
                 "paper_run": {
                     "run_name": PAPER_RUN_NAME,
@@ -275,7 +370,14 @@ def _prepare_image_runtime(root: Path) -> Path:
                     }
                 }
             ),
-            "metadata": {"geometry_protocol_calibration_ready": True},
+            "metadata": {
+                "geometry_protocol_calibration_ready": True,
+                "scientific_content_binding_digest": (
+                    scientific_content_binding_digest
+                ),
+                "scientific_content_binding_failure_count": 0,
+                "scientific_content_binding_gate_ready": True,
+            },
         },
     )
     write_test_scientific_execution_binding(
@@ -815,6 +917,31 @@ def test_primary_gpu_package_producers_pass_strict_closure_contract(
                 member_name: hashlib.sha256(archive.read(member_name)).hexdigest()
                 for member_name in declared_paths
             }
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "fixture_mode",
+    ("digest_only", "tampered_leaf", "omitted_leaves"),
+)
+def test_image_runtime_package_requires_rebuilt_unit_content_binding(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fixture_mode: str,
+) -> None:
+    """打包前必须逐单元重建科学叶子, 不接受伪摘要或被改写叶子。"""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", PAPER_RUN_NAME)
+    with pytest.raises(
+        RuntimeError,
+        match="科学内容无法从完成包叶子重建|未完整覆盖",
+    ):
+        _prepare_image_runtime(
+            tmp_path,
+            digest_only=fixture_mode == "digest_only",
+            tamper_unit_leaf=fixture_mode == "tampered_leaf",
+            omit_unit_leaves=fixture_mode == "omitted_leaves",
+        )
 
 
 @pytest.mark.quick

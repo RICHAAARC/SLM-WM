@@ -641,6 +641,12 @@ def test_quantized_write_jacobian_gate_rechecks_actual_float16_delta() -> None:
     assert accepted["quantized_write_update_content_sha256"] == (
         tensor_content_sha256(null_injected - latent)
     )
+    assert accepted[
+        "quantized_write_reference_feature_content_sha256"
+    ] == tensor_content_sha256(feature_function(latent.float()))
+    assert accepted[
+        "quantized_write_jacobian_response_content_sha256"
+    ] == tensor_content_sha256(torch.zeros(1, dtype=torch.float32))
     assert rejected["quantized_write_jacobian_gate_ready"] is False
     assert rejected["quantized_write_relative_jacobian_response"] > 1e-4
 
@@ -879,6 +885,51 @@ def test_final_image_attention_gate_uses_reencoded_real_qk_scores() -> None:
         "carrier_only": records(0.0),
         "watermarked": records(2.0),
     }
+
+    def attention_extractor(
+        image_records: dict[str, tuple[object, ...]],
+    ):
+        """构造同时记录0至2公开噪声身份的最终图像 Q/K 提取器。"""
+
+        evidence_records: list[dict[str, object]] = []
+        prg_payload = {
+            "keyed_prg_version": "fixture_prg_v1",
+            "shape": [1, 16, 4, 4],
+        }
+        prg_digest = build_stable_digest(prg_payload)
+
+        def extract(image: str):
+            evaluation_index = len(evidence_records)
+            evidence_records.append(
+                {
+                    "public_detection_noise_evaluation_index": (
+                        evaluation_index
+                    ),
+                    "tensor_content_digest_version": (
+                        TENSOR_CONTENT_DIGEST_VERSION
+                    ),
+                    "public_detection_noise_content_sha256": "7" * 64,
+                    "public_detection_noise_prg_identity_digest": (
+                        prg_digest
+                    ),
+                    "public_detection_noise_prg_identity": {
+                        **prg_payload,
+                        "public_detection_noise_prg_identity_digest": (
+                            prg_digest
+                        ),
+                    },
+                    "public_detection_noise_shape": [1, 16, 4, 4],
+                    "public_detection_noise_dtype": "torch.float16",
+                }
+            )
+            return image_records[image]
+
+        setattr(
+            extract,
+            "public_detection_noise_evidence_records",
+            evidence_records,
+        )
+        return extract
     counterfactual = {
         "carrier_only_counterfactual_ready": True,
         "carrier_only_counterfactual_changed_fields": [
@@ -896,7 +947,7 @@ def test_final_image_attention_gate_uses_reencoded_real_qk_scores() -> None:
         minimum_final_image_attention_score_gain=0.0001,
     )
     accepted = _final_image_attention_observability_record(
-        lambda image: images[image],
+        attention_extractor(images),
         "clean",
         "carrier_only",
         "watermarked",
@@ -905,7 +956,7 @@ def test_final_image_attention_gate_uses_reencoded_real_qk_scores() -> None:
         require_gpu_execution=False,
     )
     rejected = _final_image_attention_observability_record(
-        lambda image: images[image],
+        attention_extractor(images),
         "clean",
         "watermarked",
         "carrier_only",
@@ -934,7 +985,7 @@ def test_final_image_attention_gate_uses_reencoded_real_qk_scores() -> None:
     }
     with pytest.raises(RuntimeError, match="没有共享直接 Q/K 四分量关系图身份"):
         _final_image_attention_observability_record(
-            lambda image: drifted_images[image],
+            attention_extractor(drifted_images),
             "clean",
             "carrier_only",
             "watermarked",

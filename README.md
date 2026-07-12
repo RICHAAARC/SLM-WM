@@ -40,6 +40,8 @@ fixed-FPR clean negative 门禁等于当前层级完整 test split: `probe_paper
 
 三类正式结果包均拒绝 proxy、placeholder、fallback、synthetic 和 formal-null 证据进入共同协议结果记录。诊断入口可以产生环境检查报告, 但诊断报告不能支持三类论文主张。
 
+单次主方法结果使用 Tensor 原始字节身份与规范 RGB uint8 像素身份形成总科学内容绑定。写入端和完成结果加载器都必须从磁盘重读更新 JSONL、检测 JSONL 和图像后重算风险、Null Space、实际量化 JVP Tensor、三分支更新、注入五角色 Q/K、最终三图与检测 Q/K、公开噪声及 carrier-only 反事实的有序联合身份。最终三图 Q/K 逐角色持久化并复验同一公开噪声 Tensor、PRG 身份及索引0、1、2, 像素-Q/K 绑定也包含噪声身份；检测共享该身份并从3继续。对齐摘要必须是规范 SHA-256。attention 开启时, 写后和打包前都以完整配置或持久化脱敏配置重建 carrier-only 产物, 任一残留 attention 字段都会拒绝。数据集汇总重算每个内嵌绑定记录；单元 manifest 必须自包含、路径无重复且配置与结果完全一致, 数据集 manifest 必须无重复并覆盖全部互斥单元叶子。打包器不接受仅摘要结果、遗漏叶子或被篡改叶子。SHA-256 只能证明同一结果包内的内容一致性, 不能替代模型来源证明、真实 GPU 运行或论文统计结论。
+
 正式机制消融固定为完整方法加14个真实重运行变体。除风险、Null Space、内容载体、完整 attention geometry 和图像对齐对照外, 四个 Q/K 关系分量分别执行一次留一消融：被移除分量权重为0, 其余三个分量各为 $1/3$。每个变体都使用自身配置重新生成、攻击、仅图像检测和 calibration 阈值冻结, 不从完整方法分数推导结果。
 
 在 Colab 中切换运行层级时, 只应修改 Notebook 顶部的入口变量:

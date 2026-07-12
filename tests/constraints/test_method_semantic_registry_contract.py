@@ -349,14 +349,138 @@ def test_registry_covers_required_method_atomic_roles() -> None:
             "runtime_evidence_fields"
         ]
     )
-    assert "scientific_content_binding_digest" in invariants[
-        "scientific_content_binding"
-    ]["runtime_evidence_fields"]
+    assert {
+        "scientific_content_binding_schema",
+        "scientific_content_binding_record",
+        "scientific_content_binding_digest",
+        "scientific_content_binding_digests",
+        "scientific_content_binding_failure_count",
+        "scientific_content_binding_gate_ready",
+        "image_rgb_uint8_content_schema",
+        "image_rgb_uint8_content_sha256",
+        "full_update_content_bundle_digest",
+        "carrier_only_update_content_bundle_digest",
+        "detection_content_bundle_digest",
+        "final_image_content_bundle_digest",
+        "detection_qk_image_content_binding_digest",
+        "final_image_qk_image_content_binding_digest",
+        "public_detection_noise_evaluation_index",
+        "public_detection_noise_evaluation_indices",
+        "scientific_unit_config",
+        "scientific_unit_config_digest",
+        "manifest_path",
+        "output_paths",
+        "alignment_digest",
+        "final_image_public_detection_noise_evidence_records",
+        "final_image_public_detection_noise_evidence_digest",
+        "final_image_public_detection_noise_content_sha256",
+        "final_image_public_detection_noise_prg_identity_digest",
+        "final_image_public_detection_noise_evidence_ready",
+        "final_image_public_detection_noise_identity",
+    }.issubset(
+        invariants["scientific_content_binding"][
+            "runtime_evidence_fields"
+        ]
+    )
     assert any(
         "final_images" in expression
         for expression in invariants["scientific_content_binding"][
             "formal_expression"
         ]
+    )
+    assert any(
+        "dataset_scientific_content_binding_gate" in expression
+        for expression in invariants["scientific_content_binding"][
+            "formal_expression"
+        ]
+    )
+    assert any(
+        "public_detection_noise_evaluation_indices=range" in expression
+        for expression in invariants["scientific_content_binding"][
+            "formal_expression"
+        ]
+    )
+    assert any(
+        "for_each_unit_rebuild" in expression
+        for expression in invariants["scientific_content_binding"][
+            "formal_expression"
+        ]
+    )
+    assert any(
+        "carrier_only_artifact_binding" in expression
+        for expression in invariants["scientific_content_binding"][
+            "formal_expression"
+        ]
+    )
+    assert any(
+        "range(3,3+detection_qk_evaluation_count)" in expression
+        for expression in invariants["scientific_content_binding"][
+            "formal_expression"
+        ]
+    )
+    assert any(
+        "recompute_each_embedded" in expression
+        for expression in invariants["scientific_content_binding"][
+            "formal_expression"
+        ]
+    )
+    assert any(
+        "disjoint_union" in expression
+        for expression in invariants["scientific_content_binding"][
+            "formal_expression"
+        ]
+    )
+    assert any(
+        "final_image_public_noise_indices=(0,1,2)" in expression
+        for expression in invariants["scientific_content_binding"][
+            "formal_expression"
+        ]
+    )
+    assert any(
+        "final_detection_public_noise_identity=shared" in expression
+        for expression in invariants["scientific_content_binding"][
+            "formal_expression"
+        ]
+    )
+    assert "omitted_unit_leaves_packaging" in invariants[
+        "scientific_content_binding"
+    ]["forbidden_substitutes"]
+    assert {
+        (
+            "experiments/runtime/scientific_content_binding.py",
+            "build_scientific_content_binding_record",
+        ),
+        (
+            "experiments/runtime/scientific_content_binding.py",
+            "_public_noise_evidence_identity",
+        ),
+        (
+            "experiments/runners/semantic_watermark_runtime.py",
+            "_carrier_only_counterfactual_artifact_binding_ready",
+        ),
+        (
+            "experiments/runners/semantic_watermark_runtime.py",
+            "_scientific_content_binding_validation_parameters",
+        ),
+        (
+            "experiments/runners/semantic_watermark_runtime.py",
+            "_scientific_content_binding_artifact_ready",
+        ),
+        (
+            "experiments/runners/image_only_dataset_runtime.py",
+            "run_image_only_dataset_runtime",
+        ),
+        (
+            "experiments/runners/image_only_dataset_runtime.py",
+            "package_image_only_dataset_runtime",
+        ),
+    }.issubset(
+        {
+            (binding["path"], binding["symbol"])
+            for binding in invariants["scientific_content_binding"][
+                "runtime_binding_symbols"
+            ]
+        }
     )
     assert {
         "public_detection_schedule_index",
@@ -482,6 +606,7 @@ def test_cpu_property_nodes_only_cover_independently_implemented_operators() -> 
         "direct_qk_monotonic_attention_update",
         "three_branch_update_composition",
         "actual_dtype_write_revalidation",
+        "scientific_content_binding",
     }
     assert all(invariants[invariant_id]["cpu_property_test_nodes"] for invariant_id in cpu_verified_invariants)
     assert all(
@@ -502,6 +627,23 @@ def test_authority_document_freezes_risk_and_null_space_counterexamples() -> Non
     assert r"\widetilde V_bR_b=V_b" in text
     assert "不得使用跨列共享 RMS" in text
     assert "SHA-256 本身不能重建 Tensor" in text
+    assert "从磁盘重新读取更新 JSONL、检测 JSONL 和最终图像" in text
+    assert "规范 RGB uint8 像素摘要" in text
+    assert "不能证明外部数据来源真实" in text
+    assert "禁止每进入一条 detection 就归零" in text
+    assert "逐单元读取 `runtime_results.jsonl`" in text
+    assert "仅摘要结果" in text
+    assert "全部 JSONL、图像、结果记录和单元 manifest 叶子" in text
+    assert "写出单元产物后和数据集打包前" in text
+    assert "残留 attention 分数、更新、关系、pair 身份" in text
+    assert "`range(3, 3+n)`" in text
+    assert "`alignment_digest` 必须是完整 alignment 记录" in text
+    assert "单元 manifest 自身" in text
+    assert "配置或配置摘要漂移" in text
+    assert "重算每个内嵌 `scientific_content_binding_record`" in text
+    assert "最终三图 Q/K 不能只记录 Q/K Tensor" in text
+    assert "图像像素摘要、Q/K 原子摘要、公开噪声内容摘要" in text
+    assert "最终三图与检测分别构造两套公开噪声" in text
 
 
 @pytest.mark.constraint

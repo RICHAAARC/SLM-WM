@@ -1444,9 +1444,25 @@
       "definition_pointer": "docs/builds/method_semantic_invariants.md#scientific_content_binding",
       "formal_expression": [
         "tensor_identity=sha256(protocol_version,dtype,ordered_shape,contiguous_raw_bytes)",
+        "image_identity=sha256(image_rgb_uint8_content_schema,width_uint64_be,height_uint64_be,rgb_uint8_pixels)",
         "ordered_bundle_identity=sha256(ordered_role_content_identities)",
-        "scientific_content_binding_digest=ordered_digest(risk_signals,risk_budgets,null_space_eight_roles,branch_updates,envelopes,actual_write,qk_roles,final_images)",
-        "scientific_content_binding_digest_includes_public_detection_noise_evidence"
+        "producer_binding=rebuild_from_persisted_update_jsonl_detection_jsonl_and_decoded_final_images",
+        "loader_binding=recompute_from_persisted_artifacts_and_require_exact_record_equality",
+        "scientific_content_binding_digest=ordered_digest(risk_signals,risk_budgets,null_space_eight_roles,quantized_write_jvp_tensors,branch_updates,envelopes,actual_write,injection_five_qk_roles,final_three_images,final_image_qk_roles,detection_qk_roles,public_detection_noise_evidence,carrier_only_counterfactual)",
+        "dataset_scientific_content_binding_digest=ordered_digest(per_prompt_scientific_content_binding_digests)",
+        "dataset_scientific_content_binding_gate=all_prompt_bindings_present_and_valid",
+        "public_detection_noise_evaluation_indices=range(3,3+detection_qk_evaluation_count)",
+        "package_binding=for_each_unit_rebuild(scientific_unit_config,unit_manifest,persisted_leaf_artifacts)",
+        "dataset_manifest_output_paths=ordered_union(all_scientific_unit_manifest_output_paths)",
+        "carrier_only_artifact_binding=validate_after_write_and_before_package(full_or_persisted_config,unit_manifest,carrier_update_jsonl,carrier_image,no_attention_residue)",
+        "summary_binding=recompute_each_embedded_scientific_content_binding_record_before_dataset_digest",
+        "unit_manifest_config=scientific_unit_config_and_config_digest=sha256(scientific_unit_config)",
+        "unit_manifest_output_paths=unique_and_contains_own_manifest_path",
+        "dataset_manifest_output_paths=unique_and_superset(disjoint_union(all_scientific_unit_manifest_output_paths))",
+        "detection_alignment_identity=canonical_sha256_or_empty_for_unaligned_detection",
+        "final_image_public_noise_indices=(0,1,2)",
+        "final_detection_public_noise_identity=shared(content_sha256,prg_identity_digest)",
+        "final_image_qk_pixel_noise_binding=ordered_bind(image_rgb_uint8_content_sha256,qk_atomic_content_digest,public_noise_content_sha256,public_noise_prg_identity_digest,public_noise_evaluation_index)"
       ],
       "configuration_fields": [
         "model_id",
@@ -1466,8 +1482,44 @@
       ],
       "runtime_binding_symbols": [
         {
+          "path": "experiments/runtime/scientific_content_binding.py",
+          "symbol": "build_scientific_content_binding_record"
+        },
+        {
+          "path": "experiments/runtime/scientific_content_binding.py",
+          "symbol": "read_canonical_rgb_uint8_content_record"
+        },
+        {
+          "path": "experiments/runtime/scientific_content_binding.py",
+          "symbol": "recompute_scientific_content_binding_digest"
+        },
+        {
+          "path": "experiments/runtime/scientific_content_binding.py",
+          "symbol": "_public_noise_evidence_identity"
+        },
+        {
           "path": "experiments/runners/semantic_watermark_runtime.py",
-          "symbol": "validate_semantic_watermark_runtime_result_provenance"
+          "symbol": "_carrier_only_counterfactual_artifact_binding_ready"
+        },
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "_scientific_content_binding_validation_parameters"
+        },
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "_scientific_content_binding_artifact_ready"
+        },
+        {
+          "path": "experiments/runners/image_only_dataset_runtime.py",
+          "symbol": "_scientific_content_binding_record_ready"
+        },
+        {
+          "path": "experiments/runners/image_only_dataset_runtime.py",
+          "symbol": "run_image_only_dataset_runtime"
+        },
+        {
+          "path": "experiments/runners/image_only_dataset_runtime.py",
+          "symbol": "package_image_only_dataset_runtime"
         }
       ],
       "runtime_evidence_fields": [
@@ -1477,50 +1529,145 @@
         "branch_updates_content_digest",
         "combined_update_content_sha256",
         "quantized_write_update_content_sha256",
+        "quantized_write_reference_feature_content_sha256",
+        "quantized_write_jacobian_response_content_sha256",
         "qk_atomic_content_digest",
+        "image_rgb_uint8_content_schema",
+        "image_rgb_uint8_content_sha256",
+        "detection_qk_image_content_binding_digest",
+        "final_image_qk_image_content_binding_digest",
+        "full_update_content_bundle_digest",
+        "carrier_only_update_content_bundle_digest",
+        "detection_content_bundle_digest",
+        "final_image_content_bundle_digest",
         "clean_image_digest",
         "carrier_only_counterfactual_image_digest",
         "watermarked_image_digest",
         "final_image_qk_atomic_content_digest",
+        "scientific_content_binding_schema",
+        "scientific_content_binding_record",
         "scientific_content_binding_digest",
+        "scientific_content_binding_digests",
+        "scientific_content_binding_failure_count",
+        "scientific_content_binding_gate_ready",
         "public_detection_noise_content_sha256",
         "public_detection_noise_prg_identity_digest",
         "public_detection_noise_evidence_digest",
         "public_detection_noise_evidence_records",
-        "public_detection_noise_evidence_ready"
+        "public_detection_noise_evidence_ready",
+        "public_detection_noise_evaluation_index",
+        "public_detection_noise_evaluation_indices",
+        "scientific_unit_config",
+        "scientific_unit_config_digest",
+        "manifest_path",
+        "output_paths",
+        "alignment_digest",
+        "final_image_public_detection_noise_evidence_records",
+        "final_image_public_detection_noise_evidence_digest",
+        "final_image_public_detection_noise_content_sha256",
+        "final_image_public_detection_noise_prg_identity_digest",
+        "final_image_public_detection_noise_evidence_ready",
+        "final_image_public_detection_noise_identity"
       ],
       "fail_closed_conditions": [
         "tensor_identity_missing",
         "tensor_identity_mismatch",
         "ordered_role_missing",
         "ordered_bundle_digest_mismatch",
-        "dtype_or_shape_identity_missing"
+        "dtype_or_shape_identity_missing",
+        "persisted_jsonl_content_mismatch",
+        "canonical_rgb_pixel_content_mismatch",
+        "runtime_manifest_binding_mismatch",
+        "scientific_content_record_mismatch",
+        "dataset_binding_coverage_mismatch",
+        "public_detection_noise_global_index_discontinuity",
+        "scientific_unit_config_missing",
+        "scientific_unit_manifest_missing",
+        "scientific_unit_leaf_mismatch",
+        "dataset_manifest_missing_unit_leaf",
+        "carrier_only_persisted_config_mismatch",
+        "carrier_only_residual_attention_field_present",
+        "public_detection_noise_index_not_three_based_after_final_images",
+        "alignment_digest_not_canonical_sha256",
+        "summary_embedded_binding_record_mismatch",
+        "scientific_unit_manifest_config_mismatch",
+        "scientific_unit_manifest_path_not_self_declared",
+        "scientific_unit_manifest_duplicate_path",
+        "cross_unit_manifest_duplicate_path",
+        "dataset_manifest_output_path_duplicate",
+        "dataset_manifest_omits_unit_leaf",
+        "final_image_public_noise_evidence_missing",
+        "final_image_public_noise_index_mismatch",
+        "final_detection_public_noise_identity_mismatch",
+        "final_image_qk_pixel_noise_binding_mismatch"
       ],
       "forbidden_substitutes": [
         "summary_scalar_as_tensor_identity",
         "path_only_artifact_binding",
         "unordered_role_digest",
         "hash_as_tensor_reconstruction",
-        "operator_digest_as_content_digest"
+        "operator_digest_as_content_digest",
+        "file_sha256_as_canonical_rgb_pixel_identity",
+        "producer_memory_only_binding",
+        "loader_trusts_stored_digest",
+        "aggregate_accepts_missing_sample_binding",
+        "per_detection_noise_index_reset",
+        "digest_only_packaging_acceptance",
+        "dataset_manifest_without_unit_leaves",
+        "carrier_only_digest_only_acceptance",
+        "carrier_only_validator_skipped_before_package",
+        "arbitrary_public_noise_index_origin",
+        "noncanonical_alignment_identity",
+        "summary_trusts_stored_sample_digest",
+        "unit_manifest_config_not_bound_to_result",
+        "unit_manifest_omits_own_path",
+        "duplicate_unit_leaf_path",
+        "omitted_unit_leaves_packaging",
+        "final_qk_without_public_noise_binding",
+        "separate_final_detection_public_noise_identity",
+        "pixel_qk_binding_without_public_noise_identity"
       ],
       "cpu_property_id": "all_scientific_tensors_and_ordered_roles_bind_dtype_shape_and_raw_bytes",
       "specification_test_nodes": [
         "tests/functional/test_semantic_feature_conditions.py::test_tensor_content_sha256_binds_dtype_shape_and_raw_bytes",
-        "tests/functional/test_real_scientific_operators.py::test_scientific_operator_gate_requires_all_real_operator_evidence"
+        "tests/functional/test_real_scientific_operators.py::test_scientific_operator_gate_requires_all_real_operator_evidence",
+        "tests/functional/test_scientific_content_binding.py::test_scientific_content_binding_digest_is_recomputable",
+        "tests/functional/test_scientific_content_binding.py::test_detection_public_noise_uses_shared_global_evaluation_indices",
+        "tests/functional/test_gpu_upstream_package_producers.py::test_primary_gpu_package_producers_pass_strict_closure_contract",
+        "tests/functional/test_gpu_upstream_package_producers.py::test_image_runtime_package_requires_rebuilt_unit_content_binding",
+        "tests/functional/test_scientific_content_binding.py::test_carrier_only_artifact_validator_accepts_persisted_config_payload",
+        "tests/functional/test_scientific_content_binding.py::test_scientific_content_binding_artifact_validator_rejects_tampering"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_scientific_content_binding.py::test_scientific_content_binding_digest_is_recomputable",
+        "tests/functional/test_scientific_content_binding.py::test_scientific_content_binding_digest_rejects_leaf_tampering",
+        "tests/functional/test_scientific_content_binding.py::test_scientific_content_binding_artifact_validator_rejects_tampering",
+        "tests/functional/test_scientific_content_binding.py::test_detection_public_noise_uses_shared_global_evaluation_indices",
+        "tests/functional/test_gpu_upstream_package_producers.py::test_primary_gpu_package_producers_pass_strict_closure_contract",
+        "tests/functional/test_gpu_upstream_package_producers.py::test_image_runtime_package_requires_rebuilt_unit_content_binding",
+        "tests/functional/test_scientific_content_binding.py::test_carrier_only_artifact_validator_accepts_persisted_config_payload"
+      ],
       "gpu_atomic_roles": [
         "risk_signal_tensor_bundle",
+        "risk_budget_tensor_bundle",
         "null_space_tensor_bundle",
+        "quantized_write_jvp_tensor_bundle",
         "branch_update_tensor_bundle",
         "actual_write_tensor",
-        "qk_atomic_tensor_bundle",
-        "final_image_tensor_bundle",
+        "injection_five_role_qk_tensor_bundle",
+        "final_three_image_pixel_bundle",
+        "final_image_qk_tensor_bundle",
+        "detection_qk_tensor_bundle",
         "public_detection_noise_tensor",
-        "public_detection_noise_evidence_bundle"
+        "public_detection_noise_evidence_bundle",
+        "carrier_only_counterfactual_bundle",
+        "dataset_scientific_content_binding_bundle",
+        "scientific_unit_config_bundle",
+        "scientific_unit_manifest_leaf_bundle",
+        "dataset_manifest_unit_leaf_union"
       ],
-      "gpu_observation_requirement": "GPU 原子必须以有序角色和统一 Tensor 内容协议形成联合身份。",
-      "claim_boundary": "摘要证明内容身份没有漂移，但摘要本身不能重建 Tensor。"
+      "gpu_observation_requirement": "写入端必须从磁盘重读更新 JSONL、检测 JSONL 和最终图像, 加载器及数据集 summary 必须重算内嵌记录的全部叶子与有序联合身份；最终三图 Q/K 必须逐角色绑定公开噪声 Tensor、PRG 身份及索引0/1/2, 检测从3继续并共享同一噪声身份, 像素-Q/K 绑定必须同时含噪声身份；attention 开启时写后和打包前都必须使用完整配置或脱敏配置复验 carrier-only 反事实且拒绝残留 attention 字段；alignment 摘要必须规范；打包器必须要求逐单元配置与 manifest 一致、单元路径无重复且自包含 manifest, 数据集 manifest 必须无重复并覆盖全部互斥单元叶子。",
+      "claim_boundary": "SHA-256 只证明同一结果包内的内容一致性和漂移可检测性, 不能证明外部数据真实性、模型语义正确性、CUDA 算子正确性或论文结论。"
     }
   ]
 }

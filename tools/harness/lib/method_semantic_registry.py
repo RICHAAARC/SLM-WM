@@ -19,7 +19,7 @@ METHOD_CONFIG_RELATIVE_PATH = PurePosixPath("configs/model_sd35.yaml")
 REGISTRY_SCHEMA = "slm_wm_method_semantic_registry_v1"
 REGISTRY_SCOPE = "normative_traceability_without_scientific_conformance_decision"
 EXPECTED_NORMATIVE_TRACE_DIGEST = (
-    "e492d9c9284279bc928a5b16d8e31a2fbbf54818d3e415fabaa7bcaeba40fbf9"
+    "62769cee7e8f70730a9dc8775469a10e66ddbcb442c78433ce4f9f1c8d562011"
 )
 EXPECTED_INVARIANT_IDS = (
     "constructive_local_tangent_scope",
@@ -374,8 +374,44 @@ EXPECTED_RUNTIME_BINDING_SYMBOLS.update(
         ),
         "scientific_content_binding": _bindings(
             (
+                "experiments/runtime/scientific_content_binding.py",
+                "build_scientific_content_binding_record",
+            ),
+            (
+                "experiments/runtime/scientific_content_binding.py",
+                "read_canonical_rgb_uint8_content_record",
+            ),
+            (
+                "experiments/runtime/scientific_content_binding.py",
+                "recompute_scientific_content_binding_digest",
+            ),
+            (
+                "experiments/runtime/scientific_content_binding.py",
+                "_public_noise_evidence_identity",
+            ),
+            (
                 "experiments/runners/semantic_watermark_runtime.py",
-                "validate_semantic_watermark_runtime_result_provenance",
+                "_carrier_only_counterfactual_artifact_binding_ready",
+            ),
+            (
+                "experiments/runners/semantic_watermark_runtime.py",
+                "_scientific_content_binding_validation_parameters",
+            ),
+            (
+                "experiments/runners/semantic_watermark_runtime.py",
+                "_scientific_content_binding_artifact_ready",
+            ),
+            (
+                "experiments/runners/image_only_dataset_runtime.py",
+                "_scientific_content_binding_record_ready",
+            ),
+            (
+                "experiments/runners/image_only_dataset_runtime.py",
+                "run_image_only_dataset_runtime",
+            ),
+            (
+                "experiments/runners/image_only_dataset_runtime.py",
+                "package_image_only_dataset_runtime",
             ),
         ),
         "versioned_key_prg_reconstruction": (),
@@ -503,6 +539,18 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_tensor_content_sha256_binds_dtype_shape_and_raw_bytes",
         "tests/functional/test_real_scientific_operators.py::"
         "test_scientific_operator_gate_requires_all_real_operator_evidence",
+        "tests/functional/test_scientific_content_binding.py::"
+        "test_scientific_content_binding_digest_is_recomputable",
+        "tests/functional/test_scientific_content_binding.py::"
+        "test_detection_public_noise_uses_shared_global_evaluation_indices",
+        "tests/functional/test_gpu_upstream_package_producers.py::"
+        "test_primary_gpu_package_producers_pass_strict_closure_contract",
+        "tests/functional/test_gpu_upstream_package_producers.py::"
+        "test_image_runtime_package_requires_rebuilt_unit_content_binding",
+        "tests/functional/test_scientific_content_binding.py::"
+        "test_carrier_only_artifact_validator_accepts_persisted_config_payload",
+        "tests/functional/test_scientific_content_binding.py::"
+        "test_scientific_content_binding_artifact_validator_rejects_tampering",
     ),
 }
 EXPECTED_CPU_PROPERTY_TEST_NODES = {
@@ -589,6 +637,22 @@ EXPECTED_CPU_PROPERTY_TEST_NODES["actual_dtype_write_revalidation"] = (
     "test_quantized_write_jacobian_gate_rechecks_actual_float16_delta",
     "tests/functional/test_semantic_feature_conditions.py::"
     "test_quantized_write_jacobian_gate_rejects_update_lost_to_quantization",
+)
+EXPECTED_CPU_PROPERTY_TEST_NODES["scientific_content_binding"] = (
+    "tests/functional/test_scientific_content_binding.py::"
+    "test_scientific_content_binding_digest_is_recomputable",
+    "tests/functional/test_scientific_content_binding.py::"
+    "test_scientific_content_binding_digest_rejects_leaf_tampering",
+    "tests/functional/test_scientific_content_binding.py::"
+    "test_scientific_content_binding_artifact_validator_rejects_tampering",
+    "tests/functional/test_scientific_content_binding.py::"
+    "test_detection_public_noise_uses_shared_global_evaluation_indices",
+    "tests/functional/test_gpu_upstream_package_producers.py::"
+    "test_primary_gpu_package_producers_pass_strict_closure_contract",
+    "tests/functional/test_gpu_upstream_package_producers.py::"
+    "test_image_runtime_package_requires_rebuilt_unit_content_binding",
+    "tests/functional/test_scientific_content_binding.py::"
+    "test_carrier_only_artifact_validator_accepts_persisted_config_payload",
 )
 
 

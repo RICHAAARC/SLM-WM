@@ -2991,7 +2991,8 @@ Notebook 与 repository module 的跨边界数据
 | public_detection_noise_prg_identity | provenance | none | true | true | false | 仅图像检测公开高斯噪声的协议版本、domain、模型、日程索引和 Tensor shape 身份记录。 |
 | public_detection_noise_prg_identity_digest | provenance | none | true | true | false | 仅图像检测公开高斯噪声 PRG 身份记录的稳定摘要。 |
 | public_detection_noise_content_sha256 | provenance | none | true | true | false | 仅图像 Q/K 提取实际使用的公开高斯噪声 Tensor 内容摘要。 |
-| public_detection_noise_evaluation_index | provenance | none | true | false | false | 同一 detector extractor 内公开噪声评价的有序索引。 |
+| public_detection_noise_evaluation_index | provenance | none | true | false | false | 同一共享 detector extractor 内跨 detection 连续递增的全局公开噪声评价索引, 不得按单条检测记录归零。 |
+| public_detection_noise_evaluation_indices | provenance | none | true | true | false | 单条检测记录按 raw/aligned 评价顺序消费的共享 extractor 全局索引子序列。 |
 | public_detection_noise_shape | provenance | none | true | true | false | 实际公开检测噪声 Tensor 的有序 shape。 |
 | public_detection_noise_dtype | provenance | none | true | true | false | 实际公开检测噪声 Tensor 的 PyTorch dtype。 |
 | public_detection_noise_evidence_digest | provenance | none | true | true | false | 公开噪声 PRG 身份、实际 Tensor 内容和检测 Q/K 评价角色的联合摘要。 |
@@ -3049,6 +3050,8 @@ Notebook 与 repository module 的跨边界数据
 | quantized_write_budget_envelope_ready | governance | none | true | true | false | 实际量化写回是否满足联合风险包络、零预算位置和有限数值门禁。 |
 | quantized_composition_evidence_version | provenance | none | true | true | false | 唯一量化合成证据载荷的稳定协议版本。 |
 | quantized_composition_evidence_digest | provenance | none | true | true | false | 原始与候选 latent、活动分支 update 与包络、联合更新、实际写回、dtype、shape 及共同回溯轨迹的可重算联合摘要。 |
+| quantized_write_reference_feature_content_sha256 | provenance | none | true | true | false | 实际 dtype 写回精确 JVP 复验使用的完整716维参考特征 Tensor 内容摘要。 |
+| quantized_write_jacobian_response_content_sha256 | provenance | none | true | true | false | 实际 dtype 写回增量经过完整716维特征 Jacobian 后的精确 JVP Tensor 内容摘要。 |
 | routed_candidate_response_matrix_content_sha256 | provenance | none | true | true | false | 完整特征 Jacobian 对风险路由候选矩阵 $B D$ 的响应 $J(BD)$ Tensor 内容摘要。 |
 | projected_direction_matrix_content_sha256 | provenance | none | true | true | false | 无阻尼 PSD-CG 约束投影后、QR 前的方向矩阵 $U$ Tensor 内容摘要。 |
 | projected_direction_response_matrix_content_sha256 | provenance | none | true | true | false | 完整特征 Jacobian 对 QR 前投影方向矩阵的响应 $JU$ Tensor 内容摘要。 |
@@ -3056,3 +3059,66 @@ Notebook 与 repository module 的跨边界数据
 | basis_reference_response_matrix_content_sha256 | provenance | none | true | true | false | 与 QR 列混合一致的路由候选参考 $V R^{-1}$ 经过 Jacobian 后的响应 Tensor 内容摘要。 |
 | column_reference_response_norms | metric | none | true | true | false | QR 后每个基底列各自对应的 $J(VR^{-1})$ 参考响应二范数, 不允许使用跨列共享 RMS。 |
 | scientific_content_binding_digest | provenance | none | true | true | false | 风险输入、风险预算、Null Space 八类角色、三分支更新、联合包络、实际写回、全部 Q/K 角色和最终图像身份的有序联合摘要。 |
+| scientific_content_binding_schema | provenance | none | true | true | false | 单次方法运行总科学内容绑定记录的固定协议标识。 |
+| scientific_content_binding_record | provenance | none | true | true | false | 从持久化更新、检测和最终图像重建的完整有序科学内容身份记录。 |
+| scientific_content_binding_digests | provenance | none | true | true | false | 数据集内按 Prompt 运行顺序收集的单样本科学内容绑定摘要。 |
+| scientific_content_binding_failure_count | metric | none | true | true | false | 数据集内缺失或不是规范 SHA-256 的单样本科学内容绑定数量。 |
+| scientific_content_binding_gate_ready | governance | none | true | true | false | 数据集是否完整覆盖当前层级全部 Prompt 且每个单样本绑定均有效。 |
+| image_rgb_uint8_content_schema | provenance | none | true | true | false | 解码图像按 RGB uint8 像素、宽和高形成规范内容身份的协议标识。 |
+| image_rgb_uint8_content_sha256 | provenance | none | true | true | false | 与 PNG 编码参数无关的规范 RGB uint8 像素内容摘要。 |
+| image_width | metric | none | true | true | false | 参与规范 RGB uint8 像素摘要的持久化图像宽度。 |
+| image_height | metric | none | true | true | false | 参与规范 RGB uint8 像素摘要的持久化图像高度。 |
+| image_role | provenance | none | true | true | false | 最终图像在 clean、carrier-only、watermarked 冻结顺序中的角色。 |
+| image_file_sha256 | provenance | none | true | true | false | 最终图像持久化文件字节摘要, 与规范像素摘要共同记录。 |
+| source_image_file_sha256 | provenance | none | true | true | false | 检测 source 图像持久化文件字节摘要。 |
+| source_image_rgb_uint8_content_sha256 | provenance | none | true | true | false | 检测 source 图像解码后的规范 RGB uint8 像素摘要。 |
+| source_image_width | metric | none | true | true | false | 检测 source 图像的持久化像素宽度。 |
+| source_image_height | metric | none | true | true | false | 检测 source 图像的持久化像素高度。 |
+| evaluated_image_path | artifact | none | true | false | false | 仅图像检测实际消费图像的仓库相对持久化路径。 |
+| evaluated_image_digest | provenance | none | true | true | false | 仅图像检测实际消费图像的文件字节摘要。 |
+| evaluated_image_file_sha256 | provenance | none | true | true | false | 总科学内容记录中重命名后的实际检测图像文件字节摘要。 |
+| evaluated_image_rgb_uint8_content_sha256 | provenance | none | true | true | false | 仅图像检测实际消费图像解码后的规范 RGB uint8 像素摘要。 |
+| evaluated_image_width | metric | none | true | true | false | 仅图像检测实际消费图像的像素宽度。 |
+| evaluated_image_height | metric | none | true | true | false | 仅图像检测实际消费图像的像素高度。 |
+| evaluation_image_rgb_uint8_content_sha256 | provenance | none | true | true | false | 单个 Q/K 评价角色实际消费图像的规范 RGB uint8 像素摘要。 |
+| attention_geometry_enabled | protocol | none | true | true | false | 当前总科学内容记录是否启用真实 Q/K attention geometry 分支。 |
+| null_space_enabled | protocol | none | true | true | false | 当前总科学内容记录是否启用精确 Jacobian Null Space。 |
+| full_active_branches | provenance | none | true | true | false | 完整方法更新记录按冻结顺序启用的分支集合。 |
+| carrier_only_active_branches | provenance | none | true | true | false | carrier-only 反事实更新记录按冻结顺序启用的分支集合。 |
+| risk_signal_content_records | provenance | none | true | true | false | 当前与相邻解码、CLIP 条件和五类风险信号的叶子内容摘要映射。 |
+| branch_risk_content_records | provenance | none | true | true | false | 三个冻结分支的风险、预算、mask、包络和实际写回叶子身份。 |
+| risk_content_evidence | provenance | none | true | true | false | 风险来源与三分支风险内容记录形成的联合证据对象。 |
+| null_space_content_records | provenance | none | true | true | false | 各活动分支按顺序保存的 Null Space 八类 Tensor 身份与自摘要。 |
+| null_space_record_digest | provenance | none | true | true | false | 单个活动分支完整 Null Space 原子记录的稳定摘要。 |
+| solver_role | provenance | none | true | false | false | 明确关闭 Null Space 的消融中记录的完整空间求解角色, 不支持完整方法主张。 |
+| update_content_records | provenance | none | true | true | false | 一次注入前后 latent、分支更新、联合包络、量化写回与实际 JVP 身份映射。 |
+| update_record_content_digest | provenance | none | true | true | false | 从磁盘重读的一条完整更新 JSONL 原子记录摘要。 |
+| attention_qk_evaluation_records_digest | provenance | none | true | true | false | 一次注入冻结五角色 Q/K 评价记录的有序稳定摘要。 |
+| full_update_content_identities | provenance | none | true | true | false | 完整方法全部注入步骤的有序科学内容身份。 |
+| full_update_content_bundle_digest | provenance | none | true | true | false | 完整方法全部注入步骤身份的有序联合摘要。 |
+| carrier_only_update_content_identities | provenance | none | true | true | false | carrier-only 全部注入步骤的有序科学内容身份。 |
+| carrier_only_update_content_bundle_digest | provenance | none | true | true | false | carrier-only 全部注入步骤身份的有序联合摘要。 |
+| detection_index | provenance | none | true | true | false | 检测 JSONL 记录在单次方法运行中的冻结顺序索引。 |
+| detection_record_content_digest | provenance | none | true | true | false | 从磁盘重读的一条完整检测 JSONL 原子记录摘要。 |
+| alignment_digest | provenance | none | true | true | false | 对齐检测使用的完整 alignment 记录规范 SHA-256；未执行对齐的检测必须为空字符串。 |
+| detection_content_identities | provenance | none | true | true | false | 单次方法运行全部仅图像检测记录的有序科学内容身份。 |
+| detection_content_bundle_digest | provenance | none | true | true | false | 全部仅图像检测内容身份的有序联合摘要。 |
+| detection_qk_image_content_bindings | provenance | none | true | true | false | raw/aligned 检测图像像素、公开噪声评价索引与 Q/K 原子的逐角色绑定。 |
+| detection_qk_image_content_binding_digest | provenance | none | true | true | false | 检测图像、公开噪声评价索引与 Q/K 原子逐角色绑定的联合摘要。 |
+| detection_qk_operator_metadata_digest | provenance | none | true | true | false | 总科学内容记录中检测 Q/K 精确算子元数据的重算摘要。 |
+| public_detection_noise_evidence_records_digest | provenance | none | true | true | false | 检测 Q/K 各评价角色公开噪声证据记录的有序稳定摘要。 |
+| final_image_content_records | provenance | none | true | true | false | clean、carrier-only、watermarked 最终图像的文件和规范像素身份记录。 |
+| final_image_content_bundle_digest | provenance | none | true | true | false | 最终三图文件与规范 RGB uint8 像素身份的有序联合摘要。 |
+| final_image_qk_image_content_bindings | provenance | none | true | true | false | 最终三图规范像素身份、真实 Q/K 原子、公开噪声 Tensor 身份、PRG 身份和索引0/1/2的逐角色绑定。 |
+| final_image_qk_image_content_binding_digest | provenance | none | true | true | false | 最终三图像素、Q/K 原子与公开噪声逐角色绑定的联合摘要。 |
+| final_image_public_detection_noise_evidence_records | provenance | none | true | true | false | 最终 clean、carrier-only、watermarked 三图 Q/K 评价按索引0、1、2持久化的公开噪声证据记录。 |
+| final_image_public_detection_noise_evidence_digest | provenance | none | true | true | false | 最终三图公开噪声证据记录的可重算有序摘要。 |
+| final_image_public_detection_noise_content_sha256 | provenance | none | true | true | false | 最终三图 Q/K 评价共同消费的公开噪声 Tensor 内容摘要。 |
+| final_image_public_detection_noise_prg_identity_digest | provenance | none | true | true | false | 最终三图 Q/K 评价共同消费的版本化公开噪声 PRG 身份摘要。 |
+| final_image_public_detection_noise_evidence_ready | governance | none | true | true | false | 最终三图公开噪声证据是否覆盖索引0、1、2并通过内容、PRG 与角色一致性复验。 |
+| final_image_public_detection_noise_identity | provenance | none | true | true | false | 总科学内容记录内最终三图公开噪声内容、PRG、证据和索引序列的联合身份。 |
+| final_image_qk_operator_metadata_digest | provenance | none | true | true | false | 总科学内容记录中最终图像 Q/K 精确算子元数据的重算摘要。 |
+| final_image_attention_observability_record_digest | provenance | none | true | true | false | 完整最终三图 attention 可观测记录的稳定摘要。 |
+| final_image_preservation_record_digest | provenance | none | true | true | false | 完整方法最终图像特征保持记录的稳定摘要。 |
+| carrier_only_final_image_preservation_record_digest | provenance | none | true | true | false | carrier-only 最终图像特征保持记录的稳定摘要。 |
+| carrier_only_counterfactual_record_digest | provenance | none | true | true | false | attention 开关 carrier-only 反事实完整记录的稳定摘要。 |
