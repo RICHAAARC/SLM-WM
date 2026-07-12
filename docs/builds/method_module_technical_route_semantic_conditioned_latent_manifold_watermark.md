@@ -2,9 +2,9 @@
 
 ## 一、文档定位
 
-本文档描述语义条件潜流形水印（SLM-WM）的模块职责、数据流和可审计边界。公式细节以 `algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md` 为准，论文叙事以 `method_section_semantic_conditioned_latent_manifold_watermark.md` 为准，代码映射以 `real_scientific_operator_implementation.md` 为准。
+本文档描述语义条件潜流形水印（SLM-WM）的模块职责、数据流和可审计边界。可证伪方法语义以 `method_semantic_invariants.md` 为权威来源, 算法展开以 `algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md` 为准，论文叙事以 `method_section_semantic_conditioned_latent_manifold_watermark.md` 为准，代码映射以 `real_scientific_operator_implementation.md` 为准。
 
-“潜流形”在本项目中严格限定为当前 latent 点处隐式完整特征水平集的局部安全切空间解释。正式代码求解分支风险支持的 Jacobian Null Space 数值基底，并以逐列残差、投影能量、实际 dtype 写回 JVP 和有限特征变化进行门控；它不构造全局非线性流形，不验证常秩定理条件，也不执行坐标图、测地线或回缩求解。三分支更新由模板投影、相对强度缩放、真实 Q/K 梯度投影与单调回溯顺序构造，不是联合标量优化器。
+“潜流形”在本项目中严格限定为当前 latent 点处隐式完整特征水平集的局部安全切空间解释。正式代码求解分支风险支持的 Jacobian Null Space 数值基底，并以逐列残差、投影能量、风险硬包络、实际 dtype 写回 JVP 和有限特征变化进行门控；它不构造全局非线性流形，不验证常秩定理条件，也不执行坐标图、测地线或回缩求解。三分支更新由模板投影、风险约束缩放、真实 Q/K 梯度投影与单调回溯顺序构造，不是联合标量优化器。
 
 本设计固定采用三个正式分支：
 
@@ -39,13 +39,19 @@ $$
 1. 当前样本的语义、纹理、稳定性、显著性和注意力稳定性决定三个独立风险场；
 2. 分支资格集合与承载预算形成显式风险对角算子 $B_b$；
 3. 完整特征 JVP/VJP 与无阻尼 PSD-CG 执行风险支持 Jacobian 约束投影；
-4. LF、尾部截断和注意力几何更新分别投影到对应安全子空间；
+4. LF、尾部截断和注意力几何更新分别投影到对应安全子空间, 再沿原方向执行风险硬包络允许的最大可行标量缩放；
 5. 检测端只从待检图像重建固定模板和注意力关系，不读取生成侧私有状态；
 6. calibration split 冻结包含几何救回的完整判定协议，test split 只报告结果。
 
 这不是三个独立水印器的串联。分支风险、完整特征 Null Space、载体投影和完整 fixed-FPR 判定共同构成一个方法闭环。
 
 该闭环属于项目特定的构造式实现。通用工程写法包括精确 JVP/VJP、矩阵自由 PSD-CG、QR 正交化、数值残差门禁和实际写回复验；项目特定写法包括三类分支风险、LF/tail 模板角色、直接 Q/K 四分量目标以及注意力更新的内容基底单调回溯。
+
+### （一）冻结科学算子身份
+
+正式运行只读取 `configs/model_sd35.yaml` 的唯一解析结果。算子身份字段固定为 `model_id=stabilityai/stable-diffusion-3.5-medium`、`model_revision=b940f670f0eda2d07fbb75229e779da1ad11eb80`、`vision_model_id=openai/clip-vit-base-patch32`、`vision_model_revision=3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268`、`pipeline_class_name=diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline`、`vae_class_name=diffusers.models.autoencoders.autoencoder_kl.AutoencoderKL`、`transformer_class_name=diffusers.models.transformers.transformer_sd3.SD3Transformer2DModel`、`scheduler_class_name=diffusers.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler`、`vae_scaling_factor=1.5305`、`vae_shift_factor=0.0609`、`latent_torch_dtype=float16`、`vision_torch_dtype=float32` 与 `public_detection_schedule_index=7`。
+
+完整解析 dataclass 的 `asdict` 值与 `formal_method_config_schema=slm_wm_formal_method_runtime_config_v1` 形成规范 payload；使用 UTF-8、`ensure_ascii=false`、键名升序、无空白分隔符 `(',', ':')` 和 SHA-256 得到 `formal_method_config_digest`。运行时类名、VAE scale/shift、dtype、检测索引、冻结层集合和配置摘要必须逐项一致, 不能由环境变量或运行时默认值改变。
 
 ---
 
@@ -56,13 +62,13 @@ $$
 | 分支风险 | `main/methods/semantic/branch_risk.py` | 语义、纹理、相邻步稳定度、局部对比度风险和跨层 Q/K 稳定度 | 三个风险场、预算和资格集合 | 用单一共享风险标量替代三个分支 |
 | Jacobian Null Space | `main/methods/subspace/jacobian_nullspace.py` | latent、716维完整特征函数、分支预算、实际载体方向和密钥 | 三个 rank-4 Null Space 基底及 CG/逐列残差记录 | 低维草图制造代数零空间；阻尼求解后仍声明 Null Space |
 | 固定内容模板 | `main/methods/carrier/keyed_tensor.py` | 密钥、公开模型标识和 latent 形状 | LF 模板与尾部截断模板 | 模板依赖 Prompt、生成轨迹或样本级基底 |
-| 安全投影 | `main/methods/carrier/keyed_tensor.py` | 固定模板、分支基底和相对强度 | 投影更新和能量保留率 | 对近零投影强制归一化后继续运行 |
+| 固定载体安全投影 | `main/methods/carrier/keyed_tensor.py` | 固定模板、分支基底和最小能量保留率 | 投影方向和能量保留率 | 对近零投影继续运行；使用未投影模板写回 |
 | 科学内容身份 | `main/core/digest.py` | 风险、预算、基底、更新和 Q/K Tensor | 绑定 dtype、shape 与原始字节的版本化 SHA-256 | 只保存均值、形状或可替换标签作为科学内容证据 |
 | 注意力几何 | `main/methods/geometry/differentiable_attention.py` | 真实 Transformer Q/K 与 latent | 目标梯度、分数增益和回溯记录 | 使用合成 attention map 支持正式主张 |
 | 图像盲检 | `main/methods/detection/image_only.py` | 待检图像、密钥和公开模型配置 | 内容分数、几何统计和 evidence 判定 | 读取 Prompt、源 latent、轨迹或样本级 Null Space |
 | 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | SD3.5 Medium pipeline 与方法配置 | clean/watermarked 图像和科学算子记录 | 绕过科学算子门禁写出正式结果 |
 | 数据集协议 | `experiments/runners/image_only_dataset_runtime.py` | Prompt split、攻击配置和目标 FPR | 冻结协议、test records 和质量 registry | 使用 test split 调阈值 |
-| 正式消融 | `experiments/ablations/runtime_rerun.py` | 改变后的机制配置与冻结检测协议 | 重新生成、攻击和检测的消融记录 | 修改历史分数模拟消融 |
+| 正式消融 | `experiments/ablations/runtime_rerun.py` | 改变后的机制配置与冻结检测协议 | 重新生成、攻击和检测的消融记录 | 修改完整方法已有分数模拟消融 |
 
 `paper_workflow/` 只负责 Colab 调度与 Drive 续跑，`scripts/` 只负责命令包装，`paper_experiments/` 负责 baseline 和论文结果闭合。正式算法不能只存在于 Notebook cell。
 
@@ -85,7 +91,7 @@ $$
 ].
 $$
 
-$\phi_{\mathrm{lcr}}$ 固定为解码灰度相对反射填充5x5局部均值的绝对偏离；$\phi_{\mathrm{adj}}$ 固定为当前与紧邻上一 scheduler 步解码 RGB 的逐位置稳定度。运行时在全部 post-step 回调上维护上一 latent，缺失时直接失败。$\phi_{\mathrm{attn\_stab}}$ 则独立来自不少于两个冻结层的直接 Q/K 关系。
+$\phi_{\mathrm{sem}}$ 把 CLIP patch-to-CLS cosine 经 $(c+1)/2$ 映射后双线性插值；$\phi_{\mathrm{tex}}$ 把解码灰度水平/垂直前向绝对差之和除以2后插值；$\phi_{\mathrm{lcr}}$ 固定为解码灰度相对反射填充5x5局部均值的绝对偏离；前三者只截断到 $[0,1]$, 不执行逐样本 min-max, 且精确使用 `risk_image_signal_interpolation_mode=bilinear` 与 `risk_image_signal_align_corners=false`。$\phi_{\mathrm{adj}}$ 固定为当前与紧邻上一 scheduler 步解码 RGB 的逐位置稳定度。运行时在全部 post-step 回调上维护上一 latent，缺失时直接失败。$\phi_{\mathrm{attn\_stab}}$ 独立来自不少于两个冻结层的直接 Q/K 关系, 并精确使用 `risk_attention_signal_interpolation_mode=bilinear` 与 `risk_attention_signal_align_corners=true`。
 
 ### （二）分支输出
 
@@ -102,9 +108,11 @@ $$
 +\eta_d^b(1-\phi_{\mathrm{adj}}(u))
 +\eta_A^b(1-\phi_{\mathrm{attn\_stab}}(u))
 \right],
+\qquad
+Z_b=\eta_c^b+\eta_m^b+\eta_t^b+\eta_d^b+\eta_A^b.
 $$
 
-并生成承载预算 $b_b(u)$ 与资格集合 $\Omega_b$。资格集合外的预算必须置为 0，确保路由会真实改变子空间求解。
+其中 $Z_b$ 精确等于非负权重和, $\psi_{LF}(q)=q$、$\psi_{tail}(q)=1-q$, $\psi_A(q)$ 由 `risk_neutral_texture_value=0.5` 定义。系统生成承载预算 $b_b(u)$ 与严格资格集合 $\Omega_b=\{u:\rho_b(u)<\tau_b\}$；等于阈值的位置不合格。空间有效预算在 channel 维复制成 NCHW Tensor, 再按连续 NCHW 顺序进入 $B_b$。同一 Tensor 身份同时进入子空间求解、最终逐元素硬包络和运行记录。零预算位置的安全方向泄漏超过 `risk_bounded_scale_direction_epsilon=1e-12` 时失败；风险投影后不得无条件恢复固定二范数强度。三分支配置精确来自 `lf_content_risk_config.*`、`tail_robust_risk_config.*` 与 `attention_geometry_risk_config.*`, 例如 LF 局部对比权重读取 `lf_content_risk_config.local_contrast_risk_weight`, 不读取 dataclass 隐式默认值。
 
 ---
 
@@ -140,7 +148,11 @@ $$
 N_b=\operatorname{qr}([u_1^b,\ldots,u_4^b]).
 $$
 
-正式记录保存每列 CG 迭代数、CG 相对残差、投影能量、QR 后完整 Jacobian 响应与正交误差。CG 最大64次、相对收敛阈值为 $10^{-6}$ 且阻尼固定为0；QR 后每列相对响应不得超过 $10^{-4}$，投影能量不得低于0.01，正交误差不得超过 $10^{-5}$。候选矩阵、风险预算、完整响应矩阵和最终基底分别保存版本化 Tensor 内容 SHA-256。三个分支合成后必须复验实际写回 latent, 并分别绑定三个原生分支更新及其联合摘要；完整扩散结束后还必须比较最终 clean 与 watermarked 成图。两级保持门禁均要求 CLIP cosine 不低于0.995且手工结构统计特征相对漂移不高于0.02。
+设接受的路由候选和投影方向为 $V_b$ 与 $U_b$, float32 reduced QR 满足 $U_b=N_bR_b$。基底列使用 `null_space_numerical_epsilon=1e-12` 规范符号；$R_b$ 对角近零或条件数超过 `maximum_qr_condition_number=1000000.0` 时失败。独立参考严格采用 `qr_reference_solve_protocol=right_upper_triangular_solve_without_explicit_inverse_v1`, 通过 $\widetilde V_bR_b=V_b$ 求解。每列相对残差固定为 $\|JN_b[:,j]\|_2/\max(\|J\widetilde V_b[:,j]\|_2,\texttt{null\_space\_numerical\_epsilon})$, 不能使用共享 RMS。CG 最大64次、相对收敛阈值为 $10^{-6}$ 且阻尼为0；平方能量保留率不得低于0.01, 每列残差不得超过 $10^{-4}$, 正交误差不得超过 `maximum_orthogonality_error=0.00001`。
+
+角色限定内容摘要必须分别绑定 $D_b$、$B_b$、$J(B_bD_b)$、$U_b$、$JU_b$、$N_b$、$JN_b$ 和 $J\widetilde V_b$；每类响应只能使用其对应角色字段并绑定该数学对象。
+
+三个分支在 float32 中按 LF、tail、attention 固定顺序累加, original latent 也先转换为 float32, 随后只执行一次 cast。若实际写回违反联合包络, 按 `quantized_budget_envelope_backtracking_factor=0.5` 对三个分支共同缩放并从头重算单次 cast, 最多执行 `quantized_budget_envelope_backtracking_maximum_steps=24` 次减半。每个候选都必须通过非零写回、严格联合包络、完整 JVP、有限变化及实际 Q/K 相对原 latent/同倍率内容基底的单调性；全部失败时停止。完整扩散结束后还必须比较最终 clean 与 watermarked 成图。两级保持门禁均要求 CLIP cosine 不低于0.995且手工结构统计特征相对漂移不高于0.02。
 
 ---
 
@@ -158,9 +170,9 @@ $$
 (\operatorname{PRG}_{\mathcal N}(K_{\mathrm{LF}},M,shape))\right).
 $$
 
-高斯 PRG 固定为 `sha256_counter_box_muller_float32_v1`。密钥、精确模型标识、分支和 shape 进入 SHA-256 计数器 domain，高斯变换先在 CPU 生成 float32 规范 Tensor，再搬运到目标设备；设备 RNG 不参与模板身份。
+高斯 PRG 固定为 `sha256_counter_box_muller_float32_v1`。domain payload 精确包含 `keyed_prg_version`、`key_material`、`domain_fields` 和 `shape`, 通过 UTF-8、`ensure_ascii=false`、键名升序和无空白分隔符 `(',', ':')` 形成 stable JSON, 再执行 SHA-256 得到32字节 domain digest。counter 从0开始并编码为16字节无符号大端整数；`SHA256(domain_digest || counter_uint128_be)` 的每个32字节块按 offset 0、8、16、24 分成4个连续8字节无符号大端 word。每个 word 取高53位 $m=w\gg11$, 按 $u=(m+1)/(2^{53}+2)$ 映射到 $(0,1)$。Gaussian 路径依次消费 $(u_{2r},u_{2r+1})$, 令 $R_r=\sqrt{-2\log u_{2r}}$、$\Theta_r=2\pi u_{2r+1}$, 固定先输出 $R_r\cos\Theta_r$, 再输出 $R_r\sin\Theta_r$；达到元素数后截断, 最后一次性转换为 CPU float32 并按连续行优先顺序 reshape。attention 关系符号只对独立 uniform stream 按0.5阈值符号化, 不经 Box-Muller。设备 RNG 不参与方法身份。
 
-该分支具有明确的空间低通定义。
+该分支只在 height/width 二维轴执行平均池化, 对每个 batch/channel 独立使用 kernel 5、stride 1、padding 2、二维零填充和 `count_include_pad=true`, 不跨 batch 或 channel 轴传播数值；池化后去均值与 L2 归一化各自在整个模板 Tensor 上计算一个全局标量, 因而具有明确的离散空间低通定义。
 
 ### （二）高斯幅值尾部截断
 
@@ -176,27 +188,24 @@ I_\gamma=\operatorname{TopK}_{\lceil n\gamma\rceil}
 \left(\left\{(|\nu_i|,-i)\right\}_{i=1}^{n}\right).
 $$
 
-$\gamma$ 是标准高斯元素绝对幅值的尾部保留比例，同幅值元素由展平索引升序确定选择顺序。该过程不执行 FFT、DCT、空间波数排序或频带 mask，因此只定义幅值域筛选, 不定义空间频带。其攻击鲁棒性必须由真实实验验证。
+$\gamma$ 是标准高斯元素绝对幅值的尾部保留比例，同幅值元素由展平索引升序确定选择顺序。非入选元素保持精确0, 模板只执行整体二范数归一化, 不执行去均值。该过程不执行 FFT、DCT、空间波数排序或频带 mask，因此只定义幅值域筛选, 不定义空间频带。其攻击鲁棒性必须由真实实验验证。
 
 ### （三）安全投影与内容分数
 
-两个固定模板分别投影到对应安全子空间：
+两个固定模板分别投影到对应安全子空间, 令 $v_b=\operatorname{Norm}(N_bN_b^\top\nu_b)$。最终更新由风险硬包络算子构造：
 
 $$
 \Delta z_t^b
 =
-\alpha_t^b\operatorname{Norm}(N_bN_b^\top\nu_b),
+\operatorname{RiskBoundedScale}
+\left(v_b,b_b^{\mathrm{eff}},\lambda_b\|z_t\|_2\right),
 \qquad b\in\{\mathrm{LF},\mathrm{tail}\}.
 $$
 
 检测端不恢复 $N_b$，只计算待检图像编码与固定模板的相关性：
 
 $$
-s_c
-=
-\lambda_{\mathrm{LF}}s_{\mathrm{LF}}
-+
-\lambda_{\mathrm{tail}}s_{\mathrm{tail}}.
+s_c=0.70s_{\mathrm{LF}}+0.30s_{\mathrm{tail}}.
 $$
 
 两个分支不能分别设置独立正判阈值后投票。
@@ -205,7 +214,7 @@ $$
 
 ## 七、Q/K 注意力几何模块
 
-正式关系算子精确绑定 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 在冻结二维图像 token 抽样集合上直接调用模型 `to_q` 与 `to_k`；层解析不依赖模块枚举顺序。
+正式关系算子精确绑定 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 在冻结空文本条件和二维图像 token 抽样集合上直接调用模型 `to_q` 与 `to_k`；层解析不依赖模块枚举顺序。若 source grid 边长为 $s$, 抽样边长为 $m=\min(s,8)$, 每轴使用 $\operatorname{round}(k(s-1)/(m-1))$ 得到至多64个二维 token, 不执行一维序号等距抽样。
 对每个注意力头先计算 $\ell^{(h)}=Q^{(h)}K^{(h)\top}/\sqrt{d_h}$, 再构造
 
 $$
@@ -226,7 +235,88 @@ $1/\sqrt{head\_width}$ 不一致时立即失败。
 
 算子元数据身份与图像数据内容身份分开记录。每层内容原子包含抽样后的 Q、K、中心化 logits、关系概率和二维 token 索引 SHA-256；单次注入保存原 latent、内容基底、接受候选和实际写回四个角色, 最终成图保存 clean、carrier-only、完整方法三个角色, 仅图像盲检保存原图和对齐图两个角色。任何角色或冻结层缺失均使科学门禁失败。
 
-跨冻结层 Q/K 关系行稳定度与接收 attention 显著度共同确定前50%的稳定 token 集合。稳定 token 的单点权重为1, 其余规则网格 token 的单点权重为0.25, 非对角 pair 权重由两个端点权重外积得到。选择摘要、原始二维索引、权重参数和外积规则共同形成 `stable_pair_weight_identity_digest`。一次注入的梯度、内容基底复算、回溯和最终写回复验只消费这一权重对象, 不允许各阶段重新解释权重。密钥符号图按 $(1,-1,1,1)$ 投影到四个分量, 每个分量完成逐行 pair 加权中心化和归一化后按冻结非负归一化权重组合。完整方法使用四项0.25；正式留一变体把一个分量置零并令其余三个分量各取 $1/3$。$G$ 通过中心化 $P$ 对 latent 保留非零梯度, 因而四个通道都依赖真实 Q/K。该梯度作为注意力分支优先方向进入 Null Space 求解，再在安全基底中投影。嵌入使用单调回溯，只接受使当前分量协议目标分数改善且满足强度预算的更新。
+对 batch $b$、层 $\ell$ 和 token $i$, 中心化概率行、跨层一致性、incoming centrality 与排序分数为
+
+$$
+\widetilde P_{bi:}^{\ell}=P_{bi:}^{\ell}-\frac1n\mathbf1,
+\qquad
+\overline P_{bi:}^{\ell}=\frac{\widetilde P_{bi:}^{\ell}}
+{\max(\|\widetilde P_{bi:}^{\ell}\|_2,\epsilon_{\mathrm{num}})},
+$$
+
+$$
+\operatorname{Stab}_i=\operatorname{clip}_{[0,1]}\left(
+\operatorname{Mean}_{b,\ell<r}
+\frac{1+\langle\overline P_{bi:}^{\ell},\overline P_{bi:}^{r}\rangle}{2}
+\right),
+\qquad
+c_i=\operatorname{Mean}_{\ell,b,j}P_{bji}^{\ell},
+$$
+
+$$
+\operatorname{Cent}_i=\frac{c_i}{\max(\sum_r c_r,\epsilon_{\mathrm{num}})},
+\qquad
+q_i=\operatorname{Stab}_i\operatorname{Cent}_i.
+$$
+
+选择数固定为 $k=\min(n,\max(4,\lceil0.5n\rceil))$；按 $(-q_i,\operatorname{token\_index}_i)$ 升序稳定排序选择前 $k$ 个, 再把选中位置升序记录。单点与 pair 权重为
+
+$$
+a_i=\begin{cases}1,&i\in\mathcal V_A,\\0.25,&i\notin\mathcal V_A,\end{cases}
+\qquad
+w_{ij}=a_ia_j\mathbf1[i\ne j].
+$$
+
+选择摘要、原始二维索引、权重参数和外积规则共同形成 `stable_pair_weight_identity_digest`。一次注入的梯度、内容基底复算、回溯和最终写回复验只消费这一 $(\mathcal V_A,a,w)$ 对象。
+
+每层由独立 uniform Tensor $U^\ell$ 构造密钥对称符号图：
+
+$$
+S_{K,ij}^{\ell}=\begin{cases}
+0,&i=j,\\
+1,&i<j\ \land\ U_{ij}^{\ell}\ge0.5,\\
+-1,&i<j\ \land\ U_{ij}^{\ell}<0.5,\\
+S_{K,ji}^{\ell},&i>j,
+\end{cases}
+\qquad
+T_{ijc}^{\ell}=\pi_cS_{K,ij}^{\ell},
+\quad
+\pi=(1,-1,1,1).
+$$
+
+令 $W_i=\sum_jw_{ij}$。对 batch、层、row 和分量分别计算
+
+$$
+\mu_{R,bic}^{\ell}=\frac{\sum_jw_{ij}R_{bijc}^{\ell}}{W_i},
+\qquad
+\mu_{T,ic}^{\ell}=\frac{\sum_jw_{ij}T_{ijc}^{\ell}}{W_i},
+$$
+
+$$
+\operatorname{RowCorr}_{bic}^{\ell}=
+\frac{\sum_jw_{ij}(R_{bijc}^{\ell}-\mu_{R,bic}^{\ell})
+(T_{ijc}^{\ell}-\mu_{T,ic}^{\ell})}
+{\sqrt{\sum_jw_{ij}(R_{bijc}^{\ell}-\mu_{R,bic}^{\ell})^2
+\sum_jw_{ij}(T_{ijc}^{\ell}-\mu_{T,ic}^{\ell})^2}}.
+$$
+
+$W_i=0$ 或任一中心化能量不大于 $\epsilon_{\mathrm{num}}^2$ 时该 row 无效。每个 batch 先对有效 row 取均值, 无有效 row 时记0；随后按 batch、层等权聚合：
+
+$$
+C_c^{\ell}=\frac1B\sum_b
+\operatorname{Mean}_{i\in\mathcal I_{b\ell c}^{valid}}
+\operatorname{RowCorr}_{bic}^{\ell},
+\qquad
+C_c=\frac1{|\mathcal L|}\sum_{\ell\in\mathcal L}C_c^{\ell},
+$$
+
+$$
+s_A(z;K)=\sum_{c=1}^{4}\omega_cC_c(z;K).
+$$
+
+完整方法使用 $\omega=(0.25,0.25,0.25,0.25)$；正式留一变体把一个分量置零并令其余三个分量各取 $1/3$。$G$ 通过中心化 $P$ 对 latent 保留非零梯度, 因而四个通道都依赖真实 Q/K。
+
+注意力梯度在 $z_t^{base}=z_t+\Delta z_t^{LF}+\Delta z_t^{tail}$ 上重算, 再投影到 $N_A$。回溯使用 `attention_backtracking_factor=0.5` 和 `attention_backtracking_maximum_steps=8`, 以风险包络最大步长为起点检查初始候选及最多8次减半；只有完整候选分数严格高于原 latent 和内容基底时才接受。安全投影为零、九个候选均失败或四个 Q/K 原子角色 `latent_before`、`content_base_latent`、`accepted_attention_candidate`、`actual_written_combined_latent` 不完整时阻断。
 
 检测端从待检图像、密钥和公开模型构造 $R_{\mathrm{obs}}\in\mathbb R^{n\times n\times4}$, 只执行一次稳定 token 选择。观测参考系使用该选择产生的 pair 权重, 规范拉回参考系使用同一个 $W_T$ 将单点权重传递后再做外积, 两者共享同一个权重身份摘要。对每个有界相似仿射与方形二面体候选, 四个关系通道分别执行 $\widehat R_{T,c}=W_TR_{\mathrm{obs},c}W_T^\top$；四通道密钥投影分别执行 $\widetilde S_{T,c}=V_T(\pi_cS_K)V_T^\top$。两个方向都先逐通道计算相关, 再使用与嵌入端相同的冻结分量权重组合；注册目标以0.10和0.90组合规范拉回与观测前推总分，再显式扣除规范侧与观测侧的覆盖率、唯一采样率损失。搜索协议只由旋转、log-scale 和归一化位移的公开连续定义域及三分层级分辨率生成, 每轮组合后严格过滤残余旋转、均匀尺度与平移, 保证相对方形二面体基元分别位于 $[-32,32]$、$[1/\sqrt2,\sqrt2]$ 和 $[-0.28,0.28]^2$；协议不读取任何攻击角度、裁剪比例或位移参数。确定性随机 held-out 验证使用远离正式攻击取值的连续变换。输出必须记录四通道分数、相对 identity 候选的对齐增益、双向关系分数、覆盖惩罚、目标间隔、恢复变换和权重身份。结构注册要求完整四通道观测与双向分数为正、正目标间隔以及两个方向覆盖率均不低于0.45。均匀 attention 使 $G=0$ 且其他分量在逐行中心化后也不产生密钥相关, 因而公开坐标不能单独通过门禁。恢复图像参考系后必须重新提取全部冻结层的真实 Q/K, 并使用注册传递后的同一 pair 权重计算同步分数, 不重新选择稳定 token。注册分数、注册置信度和恢复后同步阈值由 calibration split 冻结。几何统计只能决定是否允许重对齐，不能独立给出 positive。
 
@@ -242,7 +332,11 @@ $$
 \operatorname{Detect}(x',K,M).
 $$
 
-calibration split 同时冻结内容阈值、几何可靠性阈值、rescue window 和失败原因 gate。rescue 只对内容阈值附近的边界失败样本开放，对齐后复用同一个内容阈值。最终 fixed-FPR 对应 `content OR same-threshold rescue` 的完整布尔协议。
+检测图像使用冻结 VAE posterior mode 编码为 $\hat z=(\operatorname{mode}(q_{VAE}(x'))-\texttt{vae\_shift\_factor})\cdot\texttt{vae\_scaling\_factor}$。固定模板只依赖密钥、精确模型标识和 shape, 内容分数固定为 $0.70s_{LF}+0.30s_{tail}$。
+
+仅图像 Q/K 的公开噪声输出 `shape` 精确等于 $\hat z$ 的 NCHW shape。调用使用 `public_detection_noise_prg_protocol=sha256_counter_box_muller_float32_v1`, 且 `key_material=public_detection_noise_domain=public_image_only_qk_detection_noise_v1`；`domain_fields` 精确包含同值 `operator`、冻结 `model_id`、40位 `model_revision`、`width=512`、`height=512`、`inference_steps=20`、`public_detection_schedule_index=7` 和 `latent_shape=shape`。domain 不含水印密钥、Prompt、生成 seed 或轨迹, 并完整执行本节的 SHA-256、53位映射、顺序 Box-Muller 与 CPU float32 reshape, 再只搬运到 $\hat z$ 的设备与实际 dtype。令 $t_{det}=\operatorname{scheduler.timesteps}[7]$, 检测 latent 只能由 `scheduler.scale_noise(hat_z,t_det,epsilon_det)` 得到；缺失 `scale_noise` 时失败。Transformer 条件固定为 `public_detection_conditioning_protocol=sd3_empty_text_triplet_without_cfg_v1` 与 `public_detection_condition_text=""`。raw 与 aligned 图像分别重新编码和提取 Q/K, 原子角色固定为 `raw_detection_image` 和 `aligned_detection_image`。
+
+calibration split 同时冻结内容阈值、几何可靠性阈值、rescue window 和失败原因 gate。rescue 只对内容阈值附近且失败原因为 `geometry_suspected` 或 `low_confidence` 的样本开放；注册必须通过双向关系、覆盖、唯一采样、inlier、残差、pair 身份和恢复后 sync。对齐后不重新选择稳定 token, 并复用同一个内容阈值。最终 fixed-FPR 对应 `content OR same-threshold rescue` 的完整布尔协议；几何分数不能独立产生 positive。
 
 三级运行配置分别使用 70/700/7000 个 Prompt，test 数量为 34/340/3400，目标 FPR 为 0.1/0.01/0.001。test split 只应用冻结协议并报告置信上界。
 

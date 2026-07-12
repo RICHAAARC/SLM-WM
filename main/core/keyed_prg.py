@@ -42,12 +42,22 @@ def keyed_prg_protocol_record(
     require_supported_keyed_prg_version(prg_version)
     payload = {
         "keyed_prg_version": prg_version,
-        "counter_stream": "sha256_domain_counter_big_endian",
+        "domain_serialization": "stable_json_utf8_then_sha256",
+        "counter_stream": "sha256(domain_digest||counter_uint128_be)",
+        "counter_initial_value": 0,
         "counter_bytes": _PRG_COUNTER_BYTES,
+        "sha256_block_bytes": 32,
+        "word_bytes": 8,
+        "word_byte_order": "big",
+        "word_offsets": [0, 8, 16, 24],
         "uniform_bits": _PRG_UNIFORM_BITS,
+        "uniform_word_rule": "high_53_bits_of_uint64_be",
+        "uniform_mapping": "(mantissa+1)/(2^53+2)",
         "uniform_interval": "strict_open_unit_interval",
         "normal_transform": "box_muller_float64_then_float32",
+        "normal_pair_order": "radius_cos_then_radius_sin",
         "canonical_generation_device": "cpu",
+        "canonical_output_dtype": "float32",
     }
     return {
         **payload,

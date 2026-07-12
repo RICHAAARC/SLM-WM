@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
-from experiments.runners.semantic_watermark_runtime import SemanticWatermarkRuntimeConfig
+from experiments.protocol.method_runtime_config import (
+    formal_method_config_digest,
+    load_formal_method_runtime_config,
+    resolve_formal_method_config_path,
+)
+from experiments.runners.semantic_watermark_runtime import (
+    SemanticWatermarkRuntimeConfig,
+    semantic_watermark_runtime_config_payload,
+)
 from experiments.runtime.diffusion import sd3_pipeline_runtime, semantic_features
 from experiments.runtime.model_sources import (
     MODEL_SOURCE_REGISTRY_PATH,
@@ -38,6 +46,54 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
     )
     assert method_config.model_revision == diffusion_source.revision
     assert method_config.vision_model_revision == vision_source.revision
+    assert (
+        method_config.pipeline_class_name,
+        method_config.vae_class_name,
+        method_config.transformer_class_name,
+        method_config.scheduler_class_name,
+    ) == (
+        "diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline",
+        "diffusers.models.autoencoders.autoencoder_kl.AutoencoderKL",
+        "diffusers.models.transformers.transformer_sd3.SD3Transformer2DModel",
+        "diffusers.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler",
+    )
+    assert (
+        method_config.vae_scaling_factor,
+        method_config.vae_shift_factor,
+        method_config.latent_torch_dtype,
+        method_config.vision_torch_dtype,
+    ) == (1.5305, 0.0609, "float16", "float32")
+    assert method_config.public_detection_schedule_index == 7
+    assert method_config.public_detection_schedule_index == (
+        method_config.injection_step_indices[0] + 1
+    )
+    assert method_config.public_detection_noise_prg_protocol == (
+        "sha256_counter_box_muller_float32_v1"
+    )
+    assert method_config.public_detection_noise_domain == (
+        "public_image_only_qk_detection_noise_v1"
+    )
+    assert method_config.public_detection_conditioning_protocol == (
+        "sd3_empty_text_triplet_without_cfg_v1"
+    )
+    assert method_config.public_detection_condition_text == ""
+    assert method_config.formal_method_config_digest == (
+        formal_method_config_digest(method_config)
+    )
+    assert config.formal_method_config_digest == (
+        method_config.formal_method_config_digest
+    )
+    formal_settings = method_config.paper_method_settings()
+    runtime_payload = semantic_watermark_runtime_config_payload(config)
+    assert set(formal_settings).issubset(
+        SemanticWatermarkRuntimeConfig.__dataclass_fields__
+    )
+    assert set(formal_settings).issubset(runtime_payload)
+    for field_name, expected_value in formal_settings.items():
+        runtime_value = getattr(config, field_name)
+        if field_name.endswith("_risk_config"):
+            runtime_value = asdict(runtime_value)
+        assert runtime_value == expected_value
     assert config.inference_steps == method_config.inference_steps
     assert config.injection_step_indices == method_config.injection_step_indices
     assert config.candidate_count == method_config.jacobian_candidate_count
@@ -51,6 +107,96 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         "normalized_xy_token_centers_corner_endpoints_v1"
     )
     assert config.attention_grid_align_corners is True
+    assert method_config.risk_signal_calibration_protocol == (
+        "analytic_bounded_branch_signals_v1"
+    )
+    assert (
+        method_config.risk_image_signal_interpolation_mode,
+        method_config.risk_image_signal_align_corners,
+        method_config.risk_attention_signal_interpolation_mode,
+        method_config.risk_attention_signal_align_corners,
+    ) == ("bilinear", False, "bilinear", True)
+    assert method_config.risk_neutral_texture_value == 0.5
+    assert method_config.risk_eligibility_comparison == "strict_less_than"
+    assert method_config.risk_budget_broadcast_protocol == (
+        "per_sample_hw_repeat_channels_nchw_v1"
+    )
+    assert method_config.risk_zero_support_protocol == (
+        "exact_zero_direction_or_fail_closed"
+    )
+    assert method_config.risk_bounded_scale_protocol == (
+        "direction_peak_frozen_budget_ceiling_box_v1"
+    )
+    assert method_config.risk_bounded_scale_direction_epsilon == 1e-12
+    assert asdict(method_config.lf_content_risk_config) == {
+        "local_contrast_risk_weight": 0.30,
+        "semantic_weight": 0.30,
+        "texture_weight": 0.20,
+        "adjacent_step_instability_weight": 0.20,
+        "attention_instability_weight": 0.0,
+        "texture_preference": "avoid",
+        "eligibility_threshold": 0.55,
+        "budget_floor": 0.05,
+        "budget_ceiling": 1.0,
+        "budget_gain": 0.70,
+    }
+    assert asdict(method_config.tail_robust_risk_config) == {
+        "local_contrast_risk_weight": 0.25,
+        "semantic_weight": 0.25,
+        "texture_weight": 0.30,
+        "adjacent_step_instability_weight": 0.20,
+        "attention_instability_weight": 0.0,
+        "texture_preference": "prefer",
+        "eligibility_threshold": 0.55,
+        "budget_floor": 0.05,
+        "budget_ceiling": 1.0,
+        "budget_gain": 0.70,
+    }
+    assert asdict(method_config.attention_geometry_risk_config) == {
+        "local_contrast_risk_weight": 0.20,
+        "semantic_weight": 0.25,
+        "texture_weight": 0.05,
+        "adjacent_step_instability_weight": 0.20,
+        "attention_instability_weight": 0.30,
+        "texture_preference": "neutral",
+        "eligibility_threshold": 0.55,
+        "budget_floor": 0.05,
+        "budget_ceiling": 1.0,
+        "budget_gain": 0.70,
+    }
+    assert (
+        method_config.null_space_numerical_epsilon,
+        method_config.maximum_qr_condition_number,
+        method_config.maximum_orthogonality_error,
+        method_config.qr_reference_solve_protocol,
+    ) == (
+        1e-12,
+        1e6,
+        1e-5,
+        "right_upper_triangular_solve_without_explicit_inverse_v1",
+    )
+    assert (
+        method_config.lf_kernel_size,
+        method_config.lf_stride,
+        method_config.lf_padding,
+        method_config.lf_boundary_mode,
+        method_config.lf_count_include_pad,
+    ) == (5, 1, 2, "zero_padding", True)
+    assert (
+        method_config.quantized_branch_composition_protocol,
+        method_config.quantized_branch_composition_order,
+        method_config.combined_budget_envelope_rule,
+        method_config.quantized_budget_envelope_absolute_tolerance,
+        method_config.quantized_budget_envelope_backtracking_factor,
+        method_config.quantized_budget_envelope_backtracking_maximum_steps,
+    ) == (
+        "float32_ordered_branch_sum_add_float32_latent_single_cast_v1",
+        ("lf_content", "tail_robust", "attention_geometry"),
+        "sum_active_branch_envelopes",
+        0.0,
+        0.5,
+        24,
+    )
     assert diffusion_source.revision_url.endswith(f"/tree/{diffusion_source.revision}")
     assert "primary_diffusion_model" in diffusion_source.usage_roles
     assert "semantic_condition_encoder" in vision_source.usage_roles
@@ -58,7 +204,7 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         "stabilityai/stable-diffusion-3.5-medium@"
         "b940f670f0eda2d07fbb75229e779da1ad11eb80"
     )
-    with pytest.raises(ValueError, match="精确注意力层集合"):
+    with pytest.raises(ValueError, match="attention_module_names"):
         SemanticWatermarkRuntimeConfig(
             attention_module_names=(
                 "transformer_blocks.1.attn",
@@ -102,6 +248,103 @@ def test_dataset_runtime_rejects_method_environment_drift(
 
     with pytest.raises(ValueError, match="model_sd35.yaml 不一致"):
         image_only_dataset_workload.build_method_config(".")
+
+
+@pytest.mark.quick
+def test_dataset_runtime_rejects_risk_protocol_environment_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """环境变量不得把严格风险资格边界改为未登记比较规则。"""
+
+    monkeypatch.setenv(
+        "SLM_WM_RISK_ELIGIBILITY_COMPARISON",
+        "less_than_or_equal",
+    )
+
+    with pytest.raises(ValueError, match="model_sd35.yaml 不一致"):
+        image_only_dataset_workload.build_method_config(".")
+
+
+@pytest.mark.quick
+def test_paper_method_settings_include_frozen_risk_and_write_protocols() -> None:
+    """三级论文配置必须共享完整风险、Null Space 和量化合成常量。"""
+
+    settings = load_formal_method_runtime_config(".").paper_method_settings()
+
+    assert settings["risk_eligibility_comparison"] == "strict_less_than"
+    assert settings["risk_neutral_texture_value"] == 0.5
+    assert settings["risk_budget_broadcast_protocol"] == (
+        "per_sample_hw_repeat_channels_nchw_v1"
+    )
+    assert settings["lf_content_risk_config"]["budget_ceiling"] == 1.0
+    assert settings["qr_reference_solve_protocol"] == (
+        "right_upper_triangular_solve_without_explicit_inverse_v1"
+    )
+    assert settings["quantized_branch_composition_protocol"] == (
+        "float32_ordered_branch_sum_add_float32_latent_single_cast_v1"
+    )
+    assert settings["quantized_budget_envelope_backtracking_maximum_steps"] == 24
+
+
+@pytest.mark.quick
+def test_formal_method_config_rejects_branch_risk_constant_drift(
+    tmp_path: Path,
+) -> None:
+    """YAML 中任一正式风险阈值漂移都必须在配置构造边界失败。"""
+
+    source = Path("configs/model_sd35.yaml").read_text(encoding="utf-8")
+    changed = source.replace(
+        "  eligibility_threshold: 0.55",
+        "  eligibility_threshold: 0.56",
+        1,
+    )
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "model_sd35.yaml").write_text(changed, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="三分支风险权重、阈值或预算常量发生漂移"):
+        load_formal_method_runtime_config(tmp_path)
+
+
+@pytest.mark.quick
+def test_formal_method_config_path_does_not_fall_back_to_package(
+    tmp_path: Path,
+) -> None:
+    """目标根目录缺少唯一 YAML 时不得静默读取当前仓库配置。"""
+
+    with pytest.raises(FileNotFoundError, match="正式方法配置不存在"):
+        resolve_formal_method_config_path(tmp_path)
+    with pytest.raises(FileNotFoundError, match="正式方法配置不存在"):
+        load_formal_method_runtime_config(tmp_path)
+
+
+@pytest.mark.quick
+def test_formal_method_config_digest_is_value_stable(
+    tmp_path: Path,
+) -> None:
+    """YAML 排版不进入摘要, 任何实际配置值变化必须改变摘要。"""
+
+    source = Path("configs/model_sd35.yaml").read_text(encoding="utf-8")
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    target = config_dir / "model_sd35.yaml"
+    target.write_text(source + "\n# 仅改变 YAML 排版\n", encoding="utf-8")
+    baseline = load_formal_method_runtime_config(".")
+    reformatted = load_formal_method_runtime_config(tmp_path)
+
+    assert reformatted.formal_method_config_digest == (
+        baseline.formal_method_config_digest
+    )
+
+    target.write_text(
+        source.replace(
+            "prompt: a high quality photograph of a glass sphere on a wooden table",
+            "prompt: a governed alternate configuration value",
+        ),
+        encoding="utf-8",
+    )
+    changed = load_formal_method_runtime_config(tmp_path)
+    assert changed.formal_method_config_digest != baseline.formal_method_config_digest
 
 
 @pytest.mark.quick
@@ -192,8 +435,41 @@ def test_sd35_pipeline_forwards_registered_revision(monkeypatch: pytest.MonkeyPa
         cuda = FakeCuda()
         float16 = "float16"
 
+    class FakeParameter:
+        """提供组件 dtype 复验需要的最小参数对象."""
+
+        dtype = "float16"
+
+    class FakeVAE:
+        """模拟冻结类身份和 VAE 归一化常量."""
+
+        config = SimpleNamespace(scaling_factor=1.5305, shift_factor=0.0609)
+
+        @staticmethod
+        def parameters() -> tuple[FakeParameter, ...]:
+            """返回可核验 dtype 的参数."""
+
+            return (FakeParameter(),)
+
+    class FakeTransformer:
+        """模拟冻结 SD3 Transformer 类."""
+
+        @staticmethod
+        def parameters() -> tuple[FakeParameter, ...]:
+            """返回可核验 dtype 的参数."""
+
+            return (FakeParameter(),)
+
+    class FakeScheduler:
+        """模拟冻结 FlowMatch scheduler 类."""
+
     class FakePipeline:
         """记录 from_pretrained 参数而不下载模型."""
+
+        def __init__(self) -> None:
+            self.vae = FakeVAE()
+            self.transformer = FakeTransformer()
+            self.scheduler = FakeScheduler()
 
         @classmethod
         def from_pretrained(cls, model_id: str, **kwargs: object) -> "FakePipeline":
@@ -213,6 +489,21 @@ def test_sd35_pipeline_forwards_registered_revision(monkeypatch: pytest.MonkeyPa
             """记录进度条配置."""
 
             captured["progress_disabled"] = disable
+
+    FakePipeline.__module__ = (
+        "diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3"
+    )
+    FakePipeline.__qualname__ = "StableDiffusion3Pipeline"
+    FakeVAE.__module__ = "diffusers.models.autoencoders.autoencoder_kl"
+    FakeVAE.__qualname__ = "AutoencoderKL"
+    FakeTransformer.__module__ = (
+        "diffusers.models.transformers.transformer_sd3"
+    )
+    FakeTransformer.__qualname__ = "SD3Transformer2DModel"
+    FakeScheduler.__module__ = (
+        "diffusers.schedulers.scheduling_flow_match_euler_discrete"
+    )
+    FakeScheduler.__qualname__ = "FlowMatchEulerDiscreteScheduler"
 
     monkeypatch.setattr(
         sd3_pipeline_runtime.repository_environment,
@@ -235,11 +526,29 @@ def test_sd35_pipeline_forwards_registered_revision(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(sd3_pipeline_runtime, "flatten_environment_versions", lambda report: {})
 
     config = SemanticWatermarkRuntimeConfig()
-    _, runtime_versions = sd3_pipeline_runtime.load_pipeline(config)
+    pipeline, runtime_versions = sd3_pipeline_runtime.load_pipeline(config)
 
     assert captured["model_id"] == config.model_id
     assert captured["revision"] == config.model_revision
+    assert captured["torch_dtype"] == "float16"
     assert runtime_versions["diffusion_model_source"]["revision"] == config.model_revision
+    assert runtime_versions["sd35_operator_identity"] == {
+        "component_class_names": {
+            "pipeline": config.pipeline_class_name,
+            "vae": config.vae_class_name,
+            "transformer": config.transformer_class_name,
+            "scheduler": config.scheduler_class_name,
+        },
+        "vae_scaling_factor": 1.5305,
+        "vae_shift_factor": 0.0609,
+        "latent_component_dtypes": {
+            "vae": "float16",
+            "transformer": "float16",
+        },
+    }
+    pipeline.vae.config.scaling_factor = 1.0
+    with pytest.raises(RuntimeError, match="scaling_factor"):
+        sd3_pipeline_runtime._validate_loaded_pipeline(config, pipeline)
 
 
 @pytest.mark.quick

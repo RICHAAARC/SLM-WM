@@ -464,7 +464,7 @@ def test_actual_combined_latent_uses_full_feature_preservation_gate() -> None:
             )
             return semantic, structure
 
-    config = SemanticWatermarkRuntimeConfig(
+    config = SimpleNamespace(
         minimum_semantic_preservation_cosine=0.99,
         maximum_handcrafted_structure_feature_relative_drift=0.05,
     )
@@ -594,7 +594,7 @@ def test_final_image_gate_checks_cumulative_clean_to_watermarked_drift() -> None
         _execution_device="cpu",
         image_processor=_ImageProcessor(),
     )
-    config = SemanticWatermarkRuntimeConfig(
+    config = SimpleNamespace(
         minimum_semantic_preservation_cosine=0.99,
         maximum_handcrafted_structure_feature_relative_drift=0.05,
     )
@@ -636,7 +636,7 @@ def test_final_image_gate_checks_cumulative_clean_to_watermarked_drift() -> None
         )
     )
     center = torch.tensor([[[[0.6, 0.5], [0.4, 0.5]]]])
-    edge_config = SemanticWatermarkRuntimeConfig(
+    edge_config = SimpleNamespace(
         minimum_semantic_preservation_cosine=0.99,
         maximum_handcrafted_structure_feature_relative_drift=0.10,
     )

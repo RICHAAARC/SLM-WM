@@ -43,7 +43,7 @@ def test_formal_randomization_registry_is_exact_three_by_three_cross() -> None:
     assert protocol["watermark_key_repeat_count"] == 3
     assert protocol["crossed_repeat_count"] == 9
     assert protocol["formal_randomization_protocol_digest"] == (
-        "300cd25c1ec239e0208413fc097dce0cb78071222165a56b3232b9ac5aa4242f"
+        "bac52313e8c4ed3e4339b65c3da897013c060d153c3c0b98de8e2e1d5bd679a0"
     )
 
 

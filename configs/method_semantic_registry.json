@@ -1,0 +1,1385 @@
+{
+  "registry_schema": "slm_wm_method_semantic_registry_v1",
+  "registry_scope": "normative_traceability_without_scientific_conformance_decision",
+  "method_definition_schema": "slm_wm_constructive_local_tangent_v2",
+  "method_definition_digest": "2e0d2cfc43b72c6e5e875d48a0fbc15b2a48dc248e425ef8d3ead708e86d2f8a",
+  "invariants": [
+    {
+      "invariant_id": "constructive_local_tangent_scope",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#constructive_local_tangent_scope",
+      "formal_expression": [
+        "T_z=kernel(J_F(z))",
+        "joint_argmax_solved=false",
+        "global_nonlinear_manifold_constructed=false"
+      ],
+      "configuration_fields": [
+        "model_id",
+        "model_revision",
+        "vision_model_id",
+        "vision_model_revision",
+        "null_space_numerical_epsilon"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/method_definition.py",
+          "symbol": "semantic_conditioned_latent_method_definition"
+        }
+      ],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "run_semantic_watermark_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "method_definition",
+        "method_definition_digest",
+        "basis_rank",
+        "relative_response_residual"
+      ],
+      "fail_closed_conditions": [
+        "method_definition_identity_mismatch",
+        "joint_argmax_semantics_detected",
+        "global_manifold_semantics_detected"
+      ],
+      "forbidden_substitutes": [
+        "global_manifold_solver_claim",
+        "joint_scalar_argmax_claim",
+        "basis_rank_as_global_manifold_dimension"
+      ],
+      "cpu_property_id": "local_level_set_scope_is_constructive_and_not_global_manifold",
+      "specification_test_nodes": [
+        "tests/constraints/test_method_definition_contract.py::test_machine_readable_method_definition_freezes_constructive_semantics"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "method_definition_identity",
+        "local_jacobian_basis_evidence"
+      ],
+      "gpu_observation_requirement": "真实 SD3.5 注入记录必须绑定同一方法定义摘要与局部 Jacobian 数值证据。",
+      "claim_boundary": "潜流形只表示当前 latent 点处716维完整特征水平集的一阶局部切空间解释，不表示全局流形、测地线、回缩或联合标量 argmax。"
+    },
+    {
+      "invariant_id": "frozen_model_operator_identity",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#frozen_model_operator_identity",
+      "formal_expression": [
+        "operator_identity=(sd35_revision,clip_revision,vae_config,scheduler_class,transformer_class,latent_dtype,attention_layers,formal_method_config_digest)"
+      ],
+      "configuration_fields": [
+        "model_family",
+        "model_id",
+        "model_revision",
+        "vision_model_id",
+        "vision_model_revision",
+        "backend_mode",
+        "pipeline_class_name",
+        "vae_class_name",
+        "transformer_class_name",
+        "scheduler_class_name",
+        "vae_scaling_factor",
+        "vae_shift_factor",
+        "latent_torch_dtype",
+        "vision_torch_dtype",
+        "public_detection_schedule_index",
+        "attention_module_names",
+        "attention_coordinate_convention",
+        "attention_grid_align_corners"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/method_definition.py",
+          "symbol": "semantic_conditioned_latent_method_definition"
+        }
+      ],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runtime/model_sources.py",
+          "symbol": "require_registered_model_reference"
+        },
+        {
+          "path": "experiments/runtime/diffusion/sd3_pipeline_runtime.py",
+          "symbol": "load_pipeline"
+        },
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "load_semantic_watermark_runtime_context"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "model_family",
+        "model_id",
+        "model_revision",
+        "vision_model_revision",
+        "attention_module_names",
+        "attention_coordinate_convention",
+        "attention_grid_align_corners",
+        "scientific_execution_environment_digest",
+        "pipeline_class_name",
+        "vae_class_name",
+        "transformer_class_name",
+        "scheduler_class_name",
+        "vae_scaling_factor",
+        "vae_shift_factor",
+        "latent_torch_dtype",
+        "vision_torch_dtype",
+        "public_detection_schedule_index",
+        "formal_method_config_digest"
+      ],
+      "fail_closed_conditions": [
+        "model_revision_missing",
+        "model_snapshot_identity_drift",
+        "scheduler_class_mismatch",
+        "transformer_class_mismatch",
+        "latent_dtype_missing",
+        "frozen_attention_layer_missing"
+      ],
+      "forbidden_substitutes": [
+        "mutable_model_branch",
+        "model_family_without_revision",
+        "unregistered_model_snapshot",
+        "unrecorded_scheduler_substitution",
+        "unrecorded_dtype_substitution"
+      ],
+      "cpu_property_id": "exact_model_revisions_and_runtime_operator_classes_define_the_scientific_operator",
+      "specification_test_nodes": [
+        "tests/functional/test_model_source_registry.py::test_primary_model_config_matches_immutable_source_registry",
+        "tests/functional/test_model_source_registry.py::test_sd35_pipeline_forwards_registered_revision",
+        "tests/functional/test_model_source_registry.py::test_clip_loader_forwards_registered_revision"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "sd35_model_snapshot_identity",
+        "clip_model_snapshot_identity",
+        "vae_runtime_identity",
+        "scheduler_runtime_identity",
+        "transformer_runtime_identity",
+        "latent_dtype_identity"
+      ],
+      "gpu_observation_requirement": "真实 GPU 原子必须绑定精确模型 revision、实际组件类、latent dtype 与冻结注意力层集合。",
+      "claim_boundary": "模型族名称或可变分支不能替代精确权重和实际运行算子身份。"
+    },
+    {
+      "invariant_id": "branch_signal_origin",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#branch_signal_origin",
+      "formal_expression": [
+        "semantic_signal=clip((patch_cls_cosine+1)/2,0,1)",
+        "texture_signal=clip(interpolate((abs(dx_gray)+abs(dy_gray))/2,bilinear,false),0,1)",
+        "local_contrast_signal=clip(interpolate(abs(gray-reflect_avgpool5(gray)),bilinear,false),0,1)",
+        "adjacent_stability=1-clip(interpolate(mean_rgb_abs_change,bilinear,false),0,1)",
+        "attention_stability=interpolate(multilayer_direct_qk_row_consistency,bilinear,true)"
+      ],
+      "configuration_fields": [
+        "risk_signal_calibration_protocol",
+        "risk_image_signal_interpolation_mode",
+        "risk_image_signal_align_corners",
+        "risk_attention_signal_interpolation_mode",
+        "risk_attention_signal_align_corners",
+        "risk_neutral_texture_value",
+        "attention_module_names"
+      ],
+      "method_implementation_symbols": [],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runtime/diffusion/semantic_features.py",
+          "symbol": "DifferentiableSemanticFeatureRuntime"
+        },
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "run_semantic_watermark_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "adjacent_step_reference_index",
+        "adjacent_step_reference_latent_content_sha256",
+        "adjacent_step_stability_status",
+        "semantic_feature_schema",
+        "attention_relation_qk_atomic_content_digest",
+        "semantic_risk_signal_content_sha256",
+        "texture_risk_signal_content_sha256",
+        "local_contrast_risk_signal_content_sha256",
+        "adjacent_step_stability_signal_content_sha256",
+        "attention_stability_signal_content_sha256"
+      ],
+      "fail_closed_conditions": [
+        "previous_scheduler_latent_missing",
+        "clip_patch_tokens_missing",
+        "frozen_qk_layer_missing",
+        "branch_signal_nonfinite",
+        "branch_signal_outside_unit_interval"
+      ],
+      "forbidden_substitutes": [
+        "samplewise_minmax_normalization",
+        "hidden_state_attention_stability",
+        "nonadjacent_latent_stability",
+        "synthetic_semantic_saliency",
+        "silent_constant_signal_substitution"
+      ],
+      "cpu_property_id": "branch_signals_use_frozen_analytic_ranges_and_real_adjacent_or_qk_sources",
+      "specification_test_nodes": [
+        "tests/functional/test_semantic_feature_conditions.py::test_branch_signals_use_actual_adjacent_step_and_local_contrast",
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_comes_from_multiple_real_qk_layers"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "current_latent_tensor",
+        "previous_scheduler_latent_tensor",
+        "current_decoded_rgb_tensor",
+        "previous_decoded_rgb_tensor",
+        "clip_patch_token_tensor",
+        "multilayer_qk_stability_tensor"
+      ],
+      "gpu_observation_requirement": "真实注入必须保存五类风险输入及其当前和相邻调度状态来源。",
+      "claim_boundary": "风险输入只声明冻结解析信号，不允许逐样本重标定或隐藏状态代理。"
+    },
+    {
+      "invariant_id": "branch_risk_bounds_written_update",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#branch_risk_bounds_written_update",
+      "formal_expression": [
+        "texture_risk_lf=texture_signal",
+        "texture_risk_tail=1-texture_signal",
+        "texture_risk_attention=risk_neutral_texture_value",
+        "rho_b=(eta_local_b*local_contrast_risk+eta_semantic_b*semantic_risk+eta_texture_b*texture_risk_b+eta_adjacent_b*(1-adjacent_step_stability)+eta_attention_b*(1-attention_stability))/sum_eta_b",
+        "b_eff_b=clip(budget_floor_b+budget_gain_b*(1-rho_b),budget_floor_b,budget_ceiling_b)*eligible_mask_b",
+        "E_b=nominal_strength_b*max_abs(unit_direction_b)*(b_eff_b/budget_ceiling_b)",
+        "applied_strength_b=min(nominal_strength_b,min_active(E_b/abs(unit_direction_b)))",
+        "delta_b=applied_strength_b*unit_direction_b",
+        "abs(delta_b)<=E_b"
+      ],
+      "configuration_fields": [
+        "risk_signal_calibration_protocol",
+        "risk_neutral_texture_value",
+        "risk_eligibility_comparison",
+        "risk_budget_broadcast_protocol",
+        "risk_zero_support_protocol",
+        "risk_bounded_scale_protocol",
+        "risk_bounded_scale_direction_epsilon",
+        "lf_content_risk_config.local_contrast_risk_weight",
+        "lf_content_risk_config.semantic_weight",
+        "lf_content_risk_config.texture_weight",
+        "lf_content_risk_config.adjacent_step_instability_weight",
+        "lf_content_risk_config.attention_instability_weight",
+        "lf_content_risk_config.texture_preference",
+        "lf_content_risk_config.eligibility_threshold",
+        "lf_content_risk_config.budget_floor",
+        "lf_content_risk_config.budget_ceiling",
+        "lf_content_risk_config.budget_gain",
+        "tail_robust_risk_config.local_contrast_risk_weight",
+        "tail_robust_risk_config.semantic_weight",
+        "tail_robust_risk_config.texture_weight",
+        "tail_robust_risk_config.adjacent_step_instability_weight",
+        "tail_robust_risk_config.attention_instability_weight",
+        "tail_robust_risk_config.texture_preference",
+        "tail_robust_risk_config.eligibility_threshold",
+        "tail_robust_risk_config.budget_floor",
+        "tail_robust_risk_config.budget_ceiling",
+        "tail_robust_risk_config.budget_gain",
+        "attention_geometry_risk_config.local_contrast_risk_weight",
+        "attention_geometry_risk_config.semantic_weight",
+        "attention_geometry_risk_config.texture_weight",
+        "attention_geometry_risk_config.adjacent_step_instability_weight",
+        "attention_geometry_risk_config.attention_instability_weight",
+        "attention_geometry_risk_config.texture_preference",
+        "attention_geometry_risk_config.eligibility_threshold",
+        "attention_geometry_risk_config.budget_floor",
+        "attention_geometry_risk_config.budget_ceiling",
+        "attention_geometry_risk_config.budget_gain",
+        "lf_relative_strength",
+        "tail_relative_strength",
+        "attention_relative_strength"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/semantic/branch_risk.py",
+          "symbol": "build_branch_risk_fields"
+        },
+        {
+          "path": "main/methods/subspace/jacobian_nullspace.py",
+          "symbol": "solve_jacobian_null_space"
+        },
+        {
+          "path": "main/methods/carrier/keyed_tensor.py",
+          "symbol": "KeyedTensorCarrier"
+        }
+      ],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "run_semantic_watermark_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "risk_values_content_sha256",
+        "budget_values_content_sha256",
+        "eligible_mask_content_sha256",
+        "branch_risk_content_digest",
+        "branch_budget_envelope_content_sha256",
+        "branch_written_update_content_sha256",
+        "branch_written_update_maximum_envelope_ratio",
+        "quantized_write_budget_envelope_ready",
+        "effective_budget_values_content_sha256",
+        "branch_nominal_strength",
+        "branch_applied_strength",
+        "branch_risk_scale_factor",
+        "branch_budget_ceiling"
+      ],
+      "fail_closed_conditions": [
+        "missing_attention_stability",
+        "empty_active_branch_eligibility",
+        "branch_budget_envelope_violation",
+        "zero_budget_nonzero_write",
+        "nonfinite_branch_update"
+      ],
+      "forbidden_substitutes": [
+        "samplewise_minmax_risk_normalization",
+        "sample_budget_max_renormalization",
+        "post_projection_fixed_l2_rescaling",
+        "risk_digest_without_written_update_measurement",
+        "shared_global_risk_in_full_method"
+      ],
+      "cpu_property_id": "risk_budget_monotonically_bounds_actual_dtype_write",
+      "specification_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_branch_risk_fields_use_opposite_texture_preferences",
+        "tests/functional/test_real_scientific_operators.py::test_risk_budget_is_explicit_in_full_jacobian_null_projection",
+        "tests/functional/test_branch_risk_fail_closed.py::test_branch_risk_rejects_empty_frozen_eligibility_set"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "branch_risk_values_tensor",
+        "branch_budget_values_tensor",
+        "branch_eligible_mask_tensor",
+        "branch_budget_envelope_tensor",
+        "branch_written_update_tensor",
+        "quantized_combined_update_tensor"
+      ],
+      "gpu_observation_requirement": "每次真实注入必须保存三个分支的风险、预算、写回包络、实际分支更新与量化合成更新，并重新核验逐位置上界。",
+      "claim_boundary": "分支风险必须同时改变支持、方向和最终实际写回幅值；仅把预算传入 Null Space 或保存摘要不能证明该不变量。"
+    },
+    {
+      "invariant_id": "complete_716_feature_jacobian",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#complete_716_feature_jacobian",
+      "formal_expression": [
+        "F(z)=concat(normalized_clip_embedding_512,handcrafted_structure_204)",
+        "handcrafted_204=rgb_mean_3+rgb_std_3+horizontal_gradient_3+vertical_gradient_3+adaptive_avgpool8x8_rgb_192",
+        "feature_width=716"
+      ],
+      "configuration_fields": [
+        "vision_model_id",
+        "vision_model_revision"
+      ],
+      "method_implementation_symbols": [],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runtime/diffusion/semantic_features.py",
+          "symbol": "DifferentiableSemanticFeatureRuntime"
+        },
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "run_semantic_watermark_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "semantic_feature_schema",
+        "semantic_feature_width",
+        "handcrafted_structure_feature_schema",
+        "handcrafted_structure_feature_width",
+        "joint_feature_width",
+        "feature_compression_applied",
+        "vision_model_revision"
+      ],
+      "fail_closed_conditions": [
+        "clip_feature_width_mismatch",
+        "handcrafted_feature_width_mismatch",
+        "joint_feature_width_mismatch",
+        "feature_compression_detected",
+        "feature_coordinate_nonfinite"
+      ],
+      "forbidden_substitutes": [
+        "coordinate_selection",
+        "random_feature_projection",
+        "feature_sketch",
+        "compressed_jacobian_output",
+        "handcrafted_features_as_general_perceptual_metric"
+      ],
+      "cpu_property_id": "jacobian_uses_all_512_clip_and_204_declared_structure_coordinates_without_compression",
+      "specification_test_nodes": [
+        "tests/functional/test_semantic_feature_conditions.py::test_formal_jacobian_keeps_clip_and_handcrafted_structure_coordinates",
+        "tests/functional/test_semantic_feature_conditions.py::test_handcrafted_structure_vector_preserves_declared_coordinates",
+        "tests/functional/test_semantic_feature_conditions.py::test_complete_feature_vector_supports_exact_jvp_and_vjp"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "clip_embedding_tensor",
+        "handcrafted_structure_tensor",
+        "joint_feature_tensor",
+        "feature_schema_identity"
+      ],
+      "gpu_observation_requirement": "真实线性化必须记录完整716维特征及两个冻结模型身份。",
+      "claim_boundary": "204维结构坐标只用于明确结构保持，不代表一般感知质量。"
+    },
+    {
+      "invariant_id": "exact_jacobian_low_response_subspace",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#exact_jacobian_low_response_subspace",
+      "formal_expression": [
+        "exact_autodiff_modes={torch_func_exact_jvp_vjp,torch_autograd_exact_jvp_vjp_reexecution}",
+        "Jv=exact_jvp(F,z,v)",
+        "J_T_y=exact_vjp(F,z,y)",
+        "u=B*d-B^2*J_T*solve_psd(J*B^2*J_T,J*B*d)",
+        "projection_energy=norm2(u)^2/norm2(B*d)^2",
+        "U=N*R",
+        "V_tilde=right_upper_triangular_solve(V,R)",
+        "V_tilde*R=V",
+        "column_reference=J*V_tilde",
+        "column_residual_j=norm2(J*N[:,j])/max(norm2(column_reference[:,j]),null_space_numerical_epsilon)"
+      ],
+      "configuration_fields": [
+        "jacobian_candidate_count",
+        "null_space_rank",
+        "null_space_numerical_epsilon",
+        "maximum_qr_condition_number",
+        "maximum_orthogonality_error",
+        "qr_reference_solve_protocol",
+        "minimum_projection_energy_retention",
+        "maximum_relative_response_residual",
+        "null_space_cg_max_iterations",
+        "null_space_cg_relative_tolerance"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/subspace/jacobian_nullspace.py",
+          "symbol": "build_exact_jacobian_linearization"
+        },
+        {
+          "path": "main/methods/subspace/jacobian_nullspace.py",
+          "symbol": "solve_jacobian_null_space"
+        }
+      ],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "run_semantic_watermark_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "jvp_mode",
+        "candidate_matrix_content_sha256",
+        "risk_budget_content_sha256",
+        "routed_candidate_response_matrix_content_sha256",
+        "basis_response_matrix_content_sha256",
+        "basis_reference_response_matrix_content_sha256",
+        "latent_basis_content_sha256",
+        "column_response_norms",
+        "column_reference_response_norms",
+        "column_relative_response_residuals",
+        "projection_energy_retentions",
+        "orthogonality_error",
+        "projected_direction_matrix_content_sha256",
+        "projected_direction_response_matrix_content_sha256"
+      ],
+      "fail_closed_conditions": [
+        "exact_autodiff_unavailable",
+        "psd_cg_not_converged",
+        "insufficient_basis_rank",
+        "projection_energy_below_minimum",
+        "independent_column_residual_above_maximum",
+        "basis_orthogonality_violation"
+      ],
+      "forbidden_substitutes": [
+        "finite_difference_jacobian",
+        "feature_sketch_jacobian",
+        "damped_cg_fallback",
+        "shared_rms_column_reference",
+        "amplitude_norm_retention",
+        "silent_solver_substitution",
+        "explicit_qr_factor_inverse"
+      ],
+      "cpu_property_id": "exact_jvp_vjp_projection_has_independent_column_residuals",
+      "specification_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_full_jacobian_constraint_projection_recovers_null_direction",
+        "tests/functional/test_real_scientific_operators.py::test_null_projection_energy_retention_uses_squared_l2_ratio",
+        "tests/functional/test_real_scientific_operators.py::test_undamped_psd_cg_reports_non_convergence_without_fallback"
+      ],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_semantic_feature_conditions.py::test_complete_feature_vector_supports_exact_jvp_and_vjp",
+        "tests/functional/test_real_scientific_operators.py::test_null_projection_energy_retention_uses_squared_l2_ratio",
+        "tests/functional/test_real_scientific_operators.py::test_qr_basis_uses_independent_routed_candidate_references",
+        "tests/functional/test_real_scientific_operators.py::test_exact_jacobian_linearization_satisfies_adjoint_identity"
+      ],
+      "gpu_atomic_roles": [
+        "routed_candidate_matrix",
+        "routed_candidate_response_matrix",
+        "projected_direction_matrix",
+        "qr_basis_matrix",
+        "basis_response_matrix",
+        "basis_reference_response_matrix"
+      ],
+      "gpu_observation_requirement": "真实716维特征线性化必须保存风险路由候选响应、QR 基底响应、逐列独立参考量和正交性证据。",
+      "claim_boundary": "Null Space 指通过精确自动微分、无阻尼 PSD-CG、平方能量比例和 QR 后逐列门禁得到的数值低响应基底，不包含有限差分或静默替代。"
+    },
+    {
+      "invariant_id": "versioned_key_prg_reconstruction",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#versioned_key_prg_reconstruction",
+      "formal_expression": [
+        "uniform=open_interval_uint53(sha256_counter_stream(domain))",
+        "gaussian=box_muller(uniform_pair)",
+        "canonical_tensor=cpu_float32(gaussian)",
+        "device_tensor=canonical_tensor.to(target_device)",
+        "public_detection_noise=gaussian_prg(key_material=public_detection_noise_domain,domain_fields=(operator,model_id,model_revision,width,height,inference_steps,public_detection_schedule_index,latent_shape),shape=latent_shape)"
+      ],
+      "configuration_fields": [
+        "keyed_prg_version",
+        "model_id",
+        "model_revision",
+        "public_detection_schedule_index",
+        "public_detection_noise_prg_protocol",
+        "public_detection_noise_domain",
+        "public_detection_conditioning_protocol",
+        "public_detection_condition_text"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/core/keyed_prg.py",
+          "symbol": "build_keyed_gaussian_tensor"
+        },
+        {
+          "path": "main/core/keyed_prg.py",
+          "symbol": "keyed_prg_protocol_record"
+        }
+      ],
+      "runtime_binding_symbols": [],
+      "runtime_evidence_fields": [
+        "keyed_prg_version",
+        "keyed_prg_protocol_digest",
+        "base_latent_keyed_prg_version",
+        "base_latent_content_digest_random",
+        "public_detection_noise_prg_identity",
+        "public_detection_noise_prg_identity_digest",
+        "public_detection_noise_content_sha256",
+        "public_detection_noise_evidence_digest",
+        "public_detection_noise_evidence_records",
+        "public_detection_noise_evidence_ready"
+      ],
+      "fail_closed_conditions": [
+        "unsupported_prg_version",
+        "domain_binding_missing",
+        "known_answer_vector_mismatch",
+        "canonical_tensor_not_cpu_float32",
+        "device_transport_content_mismatch"
+      ],
+      "forbidden_substitutes": [
+        "torch_device_rng",
+        "numpy_rng",
+        "python_random",
+        "unstable_hash_seed",
+        "unversioned_prg",
+        "device_specific_gaussian_sampling"
+      ],
+      "cpu_property_id": "sha256_counter_box_muller_bytes_are_device_independent",
+      "specification_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_keyed_templates_use_versioned_device_independent_prg"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "canonical_cpu_prg_tensor",
+        "transported_cuda_prg_tensor",
+        "prg_protocol_identity",
+        "prg_domain_identity",
+        "public_detection_noise_tensor",
+        "public_detection_prg_identity",
+        "public_detection_noise_evidence_bundle"
+      ],
+      "gpu_observation_requirement": "CPU 规范 Tensor 搬运到 CUDA 后的内容必须与相同协议输入重建结果一致。",
+      "claim_boundary": "方法身份只由版本化 SHA-256 计数器、53位均匀映射和 Box-Muller 路径决定，不依赖 CPU/CUDA 设备 RNG。"
+    },
+    {
+      "invariant_id": "spatial_low_pass_and_amplitude_tail_carriers",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#spatial_low_pass_and_amplitude_tail_carriers",
+      "formal_expression": [
+        "lf_template=global_center_then_l2_normalize(avg_pool2d(keyed_gaussian,kernel,stride=1,padding=2,count_include_pad=true))",
+        "tail_count=ceil(element_count*tail_fraction)",
+        "tail_order=descending(abs(value),ascending(flat_index))",
+        "tail_nonselected_coordinates=exact_zero",
+        "tail_template=global_l2_normalize_without_centering(amplitude_truncated_gaussian)",
+        "carrier_direction=project_to_branch_subspace(canonical_template)"
+      ],
+      "configuration_fields": [
+        "lf_kernel_size",
+        "lf_stride",
+        "lf_padding",
+        "lf_boundary_mode",
+        "lf_count_include_pad",
+        "tail_fraction",
+        "keyed_prg_version",
+        "minimum_projection_energy_retention",
+        "lf_relative_strength",
+        "tail_relative_strength"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/carrier/keyed_tensor.py",
+          "symbol": "build_low_frequency_template"
+        },
+        {
+          "path": "main/methods/carrier/keyed_tensor.py",
+          "symbol": "build_tail_robust_template"
+        },
+        {
+          "path": "main/methods/carrier/keyed_tensor.py",
+          "symbol": "project_canonical_template"
+        }
+      ],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "run_semantic_watermark_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "lf_template_digest",
+        "tail_template_digest",
+        "lf_projection_energy_retention",
+        "tail_projection_energy_retention",
+        "tail_fraction"
+      ],
+      "fail_closed_conditions": [
+        "invalid_tail_fraction",
+        "tail_retained_count_mismatch",
+        "carrier_projection_energy_below_minimum",
+        "carrier_direction_zero"
+      ],
+      "forbidden_substitutes": [
+        "fft_frequency_mask",
+        "dct_frequency_mask",
+        "spatial_high_frequency_claim",
+        "batch_axis_low_pass",
+        "channel_axis_low_pass",
+        "unprojected_canonical_embedding"
+      ],
+      "cpu_property_id": "lf_is_two_dimensional_low_pass_and_tail_is_amplitude_order_statistic",
+      "specification_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_tail_robust_template_records_amplitude_tail_semantics",
+        "tests/functional/test_real_scientific_operators.py::test_keyed_templates_use_versioned_device_independent_prg"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "lf_canonical_template",
+        "tail_canonical_template",
+        "lf_projected_direction",
+        "tail_projected_direction",
+        "lf_written_update",
+        "tail_written_update"
+      ],
+      "gpu_observation_requirement": "真实 latent shape 上的 LF 与尾部模板身份、投影能量和分支更新必须进入同一注入记录。",
+      "claim_boundary": "LF 只在二维空间轴执行低通；tail_robust 只按高斯元素绝对幅值和展平索引稳定截断，不具有空间频率含义。"
+    },
+    {
+      "invariant_id": "direct_qk_four_component_relation",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#direct_qk_four_component_relation",
+      "formal_expression": [
+        "logit_h=Q_h*K_h_T/sqrt(head_width)",
+        "L=mean_heads(row_center(logit_h))",
+        "P=mean_heads(softmax(logit_h,key_axis))",
+        "rho=soft_rank(L,temperature_0_25)",
+        "G=row_center(P)*row_center(public_distance)",
+        "R=(L,rho,P,G)",
+        "keyed_sign=S_K(keyed_prg_uniform,layer_name,token_count)",
+        "component_polarity=(1,-1,1,1)",
+        "stable_score=multilayer_centered_relation_row_consistency*received_attention_saliency",
+        "stable_selection=top_fraction(stable_score,attention_stable_token_fraction,minimum_4,tie_break_original_2d_index)",
+        "token_weight=1_if_stable_else_attention_unstable_pair_weight",
+        "pair_weight=off_diagonal_outer(token_weight,token_weight)",
+        "component_score_c=component_polarity_c*pair_weighted_RowCorr(R_c,S_K,pair_weight)",
+        "layer_component_score_c=mean_layers(component_score_c)",
+        "s_A=sum_c(attention_relation_component_weights_c*layer_component_score_c)"
+      ],
+      "configuration_fields": [
+        "attention_module_names",
+        "max_attention_tokens",
+        "attention_coordinate_convention",
+        "attention_grid_align_corners",
+        "attention_stable_token_fraction",
+        "attention_unstable_pair_weight",
+        "attention_relation_component_weights"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/geometry/differentiable_attention.py",
+          "symbol": "qk_self_attention"
+        },
+        {
+          "path": "main/methods/geometry/differentiable_attention.py",
+          "symbol": "build_attention_relation_descriptor"
+        },
+        {
+          "path": "main/methods/geometry/differentiable_attention.py",
+          "symbol": "attention_relation_component_protocol"
+        }
+      ],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "run_semantic_watermark_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "attention_module_names",
+        "attention_coordinate_convention",
+        "attention_grid_align_corners",
+        "attention_relation_component_names",
+        "attention_relation_component_weights",
+        "attention_relation_component_protocol_digest",
+        "qk_atomic_content_records",
+        "qk_atomic_content_digest",
+        "qk_atomic_content_ready"
+      ],
+      "fail_closed_conditions": [
+        "direct_qk_projection_missing",
+        "qk_normalization_identity_missing",
+        "attention_head_metadata_missing",
+        "source_grid_identity_missing",
+        "component_protocol_mismatch",
+        "qk_atomic_content_incomplete"
+      ],
+      "forbidden_substitutes": [
+        "hidden_state_relation_proxy",
+        "attention_output_relation_proxy",
+        "probability_only_geometry",
+        "full_joint_attention_claim",
+        "frequency_domain_attention_proxy",
+        "single_component_postprocessing"
+      ],
+      "cpu_property_id": "direct_qk_subgraph_uses_the_frozen_four_component_relation_formula",
+      "specification_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_multihead_qk_relation_matches_independent_manual_calculation",
+        "tests/functional/test_real_scientific_operators.py::test_each_attention_relation_component_changes_keyed_score",
+        "tests/functional/test_real_scientific_operators.py::test_distance_modulated_probability_is_distinct_and_differentiable",
+        "tests/functional/test_real_scientific_operators.py::test_image_alignment_uses_token_endpoint_coordinate_convention"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "sampled_query_tensor",
+        "sampled_key_tensor",
+        "centered_logit_component_tensor",
+        "soft_rank_component_tensor",
+        "probability_component_tensor",
+        "distance_interaction_component_tensor",
+        "sampled_token_indices_tensor"
+      ],
+      "gpu_observation_requirement": "冻结两个 SD3.5 层必须保存四分量关系及完整 Q/K 算子元数据。",
+      "claim_boundary": "该关系只覆盖冻结抽样图像 token 子图，不声明完整 joint-attention。"
+    },
+    {
+      "invariant_id": "direct_qk_monotonic_attention_update",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#direct_qk_monotonic_attention_update",
+      "formal_expression": [
+        "A=mean_heads(softmax(Q*K_T/sqrt(head_dim),dim=key_axis))",
+        "Q=attention_module.to_q(hidden_states)",
+        "K=attention_module.to_k(hidden_states)",
+        "g_A=autograd(geometry_score,z)",
+        "delta_A=monotonic_backtrack(risk_bounded(project_to_attention_subspace(g_A)))",
+        "score(candidate)>max(score(original),score(content_base))"
+      ],
+      "configuration_fields": [
+        "attention_module_names",
+        "max_attention_tokens",
+        "attention_stable_token_fraction",
+        "attention_unstable_pair_weight",
+        "attention_relation_component_weights",
+        "attention_backtracking_factor",
+        "attention_backtracking_maximum_steps",
+        "attention_relative_strength"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/geometry/differentiable_attention.py",
+          "symbol": "qk_self_attention"
+        },
+        {
+          "path": "main/methods/geometry/differentiable_attention.py",
+          "symbol": "optimize_attention_geometry_update"
+        },
+        {
+          "path": "main/methods/geometry/differentiable_attention.py",
+          "symbol": "DifferentiableAttentionRecorder"
+        }
+      ],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "run_semantic_watermark_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "attention_module_names",
+        "attention_coordinate_convention",
+        "attention_grid_align_corners",
+        "attention_qk_atomic_content_records",
+        "attention_qk_atomic_content_digest",
+        "attention_score_before",
+        "attention_score_after",
+        "attention_backtracking_step_count"
+      ],
+      "fail_closed_conditions": [
+        "frozen_attention_layer_missing",
+        "direct_to_q_missing",
+        "direct_to_k_missing",
+        "attention_head_count_missing",
+        "attention_stability_missing",
+        "projected_attention_gradient_zero",
+        "monotonic_candidate_missing",
+        "scheduler_scale_noise_missing"
+      ],
+      "forbidden_substitutes": [
+        "hidden_state_similarity_proxy",
+        "attention_output_proxy",
+        "single_layer_stability_proxy",
+        "linear_scheduler_noise_fallback",
+        "nonmonotonic_attention_write",
+        "full_joint_attention_claim"
+      ],
+      "cpu_property_id": "direct_to_q_to_k_probabilities_and_backtracking_are_formula_exact",
+      "specification_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_multihead_qk_relation_matches_independent_manual_calculation",
+        "tests/functional/test_real_scientific_operators.py::test_attention_update_uses_real_qk_and_autograd",
+        "tests/functional/test_real_scientific_operators.py::test_attention_update_verifies_actual_combined_latent",
+        "tests/functional/test_real_scientific_operators.py::test_attention_modules_resolve_only_frozen_exact_layer_names"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "sampled_query_tensor",
+        "sampled_key_tensor",
+        "centered_qk_logits_tensor",
+        "qk_probabilities_tensor",
+        "sampled_token_indices_tensor",
+        "accepted_attention_update_tensor"
+      ],
+      "gpu_observation_requirement": "冻结的两个 SD3.5 attention 层必须产生真实 Q、K、logit、逐头概率、token 索引和单调回溯证据。",
+      "claim_boundary": "注意力算子只声明两个冻结层上最多64个抽样图像 token 的直接 Q/K 子图，不声明完整 joint-attention 全 token 优化。"
+    },
+    {
+      "invariant_id": "three_branch_update_composition",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#three_branch_update_composition",
+      "formal_expression": [
+        "combined_update=delta_lf+delta_tail+delta_attention",
+        "written_update=cast_dtype(z+combined_update)-z",
+        "composition_count=1"
+      ],
+      "configuration_fields": [
+        "lf_relative_strength",
+        "tail_relative_strength",
+        "attention_relative_strength",
+        "injection_step_indices",
+        "quantized_branch_composition_protocol",
+        "quantized_branch_composition_order"
+      ],
+      "method_implementation_symbols": [],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "run_semantic_watermark_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "lf_update_content_sha256",
+        "tail_robust_update_content_sha256",
+        "attention_geometry_update_content_sha256",
+        "branch_updates_content_digest",
+        "combined_update_content_sha256",
+        "quantized_write_update_content_sha256",
+        "combined_budget_envelope_content_sha256",
+        "quantized_write_composition_order"
+      ],
+      "fail_closed_conditions": [
+        "active_branch_update_missing",
+        "branch_update_identity_missing",
+        "multiple_composition_paths_detected",
+        "combined_update_identity_mismatch",
+        "joint_budget_envelope_violation"
+      ],
+      "forbidden_substitutes": [
+        "experiment_only_composition_formula",
+        "second_simplified_composition_path",
+        "branch_score_postprocessing_as_update",
+        "joint_argmax_claim",
+        "unbounded_branch_sum"
+      ],
+      "cpu_property_id": "branch_updates_compose_once_and_preserve_joint_bounds",
+      "specification_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_attention_update_verifies_actual_combined_latent",
+        "tests/functional/test_semantic_feature_conditions.py::test_actual_combined_latent_uses_full_feature_preservation_gate"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "lf_branch_update_tensor",
+        "tail_branch_update_tensor",
+        "attention_branch_update_tensor",
+        "combined_update_tensor",
+        "actual_dtype_written_update_tensor"
+      ],
+      "gpu_observation_requirement": "每次真实注入必须保存三分支更新、唯一合成更新、联合预算包络和实际写回身份，且不存在第二套组合路径。",
+      "claim_boundary": "完整方法是三分支构造式更新的一次合成，不声明联合 argmax，也不允许实验 runner 以另一套简化组合替代正式方法。"
+    },
+    {
+      "invariant_id": "actual_dtype_write_revalidation",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#actual_dtype_write_revalidation",
+      "formal_expression": [
+        "ordered_float32_update=sum_in_fixed_order(lf_content,tail_robust,attention_geometry)",
+        "common_scale_k=quantized_budget_envelope_backtracking_factor^k",
+        "content_base_k=cast_dtype(float32(z)+common_scale_k*ordered_sum(lf_content,tail_robust))",
+        "final_latent_k=cast_dtype(float32(z)+common_scale_k*ordered_float32_update)",
+        "written_update_k=final_latent_k-z",
+        "combined_envelope_k=common_scale_k*sum_active_branch_envelopes",
+        "abs(written_update_k)<=combined_envelope_k",
+        "written_jacobian_ratio=norm2(J*written_update_k)/max(norm2(F(z)),null_space_numerical_epsilon)",
+        "attention_final_qk_revalidation=s_A(final_latent_k)>max(s_A(z),s_A(content_base_k))",
+        "accept_first_k_passing_envelope_jvp_finite_feature_and_attention_revalidation"
+      ],
+      "configuration_fields": [
+        "maximum_quantized_write_relative_jacobian_response",
+        "quantized_branch_composition_protocol",
+        "quantized_branch_composition_order",
+        "combined_budget_envelope_rule",
+        "quantized_budget_envelope_absolute_tolerance",
+        "quantized_budget_envelope_backtracking_factor",
+        "quantized_budget_envelope_backtracking_maximum_steps"
+      ],
+      "method_implementation_symbols": [],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "_quantized_write_jacobian_response_record"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "quantized_write_update_content_sha256",
+        "quantized_write_update_dtype",
+        "quantized_write_update_shape",
+        "quantized_write_relative_jacobian_response",
+        "quantized_write_jacobian_gate_ready",
+        "combined_budget_envelope_content_sha256",
+        "quantized_write_maximum_envelope_ratio",
+        "quantized_write_budget_envelope_ready",
+        "quantized_write_common_scale",
+        "quantized_write_backtracking_step_count",
+        "quantized_write_composition_order"
+      ],
+      "fail_closed_conditions": [
+        "quantized_update_zero",
+        "quantized_budget_envelope_violation",
+        "quantized_jacobian_response_above_maximum",
+        "finite_feature_change_violation",
+        "nonfinite_quantized_update"
+      ],
+      "forbidden_substitutes": [
+        "precast_update_jvp",
+        "float32_update_digest_as_write_proof",
+        "theoretical_branch_sum_as_written_tensor",
+        "silent_quantization_clamp"
+      ],
+      "cpu_property_id": "cast_sum_minus_original_is_the_only_write_gate_input",
+      "specification_test_nodes": [
+        "tests/functional/test_semantic_feature_conditions.py::test_quantized_write_jacobian_gate_rechecks_actual_float16_delta",
+        "tests/functional/test_semantic_feature_conditions.py::test_quantized_write_jacobian_gate_rejects_update_lost_to_quantization"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "prewrite_combined_update_tensor",
+        "actual_dtype_written_update_tensor",
+        "combined_budget_envelope_tensor",
+        "written_update_jacobian_response",
+        "written_feature_change_measurement"
+      ],
+      "gpu_observation_requirement": "真实混合精度 latent 必须以 cast(z+update)-z 恢复实际增量，并同时通过预算包络与完整特征 JVP 门禁。",
+      "claim_boundary": "量化前 float32 更新、理论分支和或预写回摘要都不能替代实际进入 scheduler 的 Tensor。"
+    },
+    {
+      "invariant_id": "finite_feature_preservation",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#finite_feature_preservation",
+      "formal_expression": [
+        "written_jacobian_ratio=norm2(J*written_update)/max(norm2(F(z)),null_space_numerical_epsilon)",
+        "clip_cosine>=minimum_semantic_preservation_cosine",
+        "handcrafted_relative_drift<=maximum_handcrafted_structure_feature_relative_drift"
+      ],
+      "configuration_fields": [
+        "maximum_quantized_write_relative_jacobian_response",
+        "minimum_semantic_preservation_cosine",
+        "maximum_handcrafted_structure_feature_relative_drift",
+        "null_space_numerical_epsilon"
+      ],
+      "method_implementation_symbols": [],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "_combined_update_preservation_record"
+        },
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "_final_image_preservation_record"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "quantized_write_relative_jacobian_response",
+        "maximum_quantized_write_relative_jacobian_response",
+        "minimum_semantic_preservation_cosine",
+        "maximum_handcrafted_structure_feature_relative_drift",
+        "semantic_preservation_gate_ready",
+        "preservation_validation_scope",
+        "final_image_preservation",
+        "final_image_preservation_gate_ready"
+      ],
+      "fail_closed_conditions": [
+        "written_jacobian_response_above_maximum",
+        "local_clip_cosine_below_minimum",
+        "local_structure_drift_above_maximum",
+        "final_clip_cosine_below_minimum",
+        "final_structure_drift_above_maximum"
+      ],
+      "forbidden_substitutes": [
+        "prewrite_feature_measurement",
+        "compressed_feature_preservation",
+        "clip_only_preservation",
+        "structure_only_preservation",
+        "quality_metric_replacement"
+      ],
+      "cpu_property_id": "actual_written_update_and_final_images_preserve_the_frozen_feature_coordinates",
+      "specification_test_nodes": [
+        "tests/functional/test_semantic_feature_conditions.py::test_actual_combined_latent_uses_full_feature_preservation_gate",
+        "tests/functional/test_semantic_feature_conditions.py::test_final_image_gate_checks_cumulative_clean_to_watermarked_drift"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "actual_dtype_written_update_tensor",
+        "written_jacobian_response",
+        "local_feature_preservation_measurement",
+        "final_image_feature_preservation_measurement"
+      ],
+      "gpu_observation_requirement": "真实写回和最终成图都必须产生完整 CLIP 与204维结构保持记录。",
+      "claim_boundary": "该门禁不能替代 FID、KID、配对感知质量或人工评价。"
+    },
+    {
+      "invariant_id": "final_image_attention_attribution",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#final_image_attention_attribution",
+      "formal_expression": [
+        "blind_gain=score_blind(final_watermarked)-score_blind(final_carrier_only)>0.0001",
+        "paired_gain=score_carrier_pairs(final_watermarked)-score_carrier_pairs(final_carrier_only)>0.0001",
+        "counterfactual_shared_identity=(seed,base_latent,scheduler,injection_steps,lf_tail_config)"
+      ],
+      "configuration_fields": [
+        "minimum_final_image_attention_score_gain",
+        "minimum_semantic_preservation_cosine",
+        "maximum_handcrafted_structure_feature_relative_drift",
+        "injection_step_indices"
+      ],
+      "method_implementation_symbols": [],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "_final_image_attention_observability_record"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "full_method_initial_latent_content_sha256",
+        "carrier_only_initial_latent_content_sha256",
+        "final_image_attention_observability_gate_ready",
+        "final_image_attention_blind_attribution_gain",
+        "final_image_attention_carrier_paired_attribution_gain",
+        "final_carrier_only_pair_weight_identity_digest",
+        "carrier_only_counterfactual_three_way_preservation_gate_ready",
+        "clean_image_digest",
+        "carrier_only_counterfactual_image_digest",
+        "watermarked_image_digest",
+        "final_image_qk_atomic_content_digest"
+      ],
+      "fail_closed_conditions": [
+        "counterfactual_base_latent_mismatch",
+        "counterfactual_scheduler_mismatch",
+        "carrier_only_attention_atom_present",
+        "three_way_preservation_failed",
+        "blind_attribution_gain_not_strict",
+        "paired_attribution_gain_not_strict",
+        "final_image_qk_atom_missing"
+      ],
+      "forbidden_substitutes": [
+        "clean_image_only_comparison",
+        "unpaired_generation_comparison",
+        "generation_qk_reuse",
+        "blind_gain_without_paired_gain",
+        "paired_gain_without_blind_gain",
+        "pure_direct_effect_claim"
+      ],
+      "cpu_property_id": "final_images_attribute_attention_by_a_shared_identity_carrier_only_counterfactual",
+      "specification_test_nodes": [
+        "tests/functional/test_semantic_feature_conditions.py::test_final_image_attention_gate_uses_reencoded_real_qk_scores",
+        "tests/functional/test_semantic_feature_conditions.py::test_attention_gate_rejects_blind_only_gain_without_frozen_pair_gain",
+        "tests/functional/test_semantic_feature_conditions.py::test_carrier_only_counterfactual_binds_same_seed_and_scheduler"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "final_clean_image",
+        "final_carrier_only_image",
+        "final_watermarked_image",
+        "carrier_only_pair_identity",
+        "blind_attribution_measurement",
+        "paired_attribution_measurement"
+      ],
+      "gpu_observation_requirement": "GPU 必须真实生成三张配对图像并重新提取每张图像的 Q/K 原子。",
+      "claim_boundary": "该反事实只估计 attention 开关经后续轨迹传播的总机制效应。"
+    },
+    {
+      "invariant_id": "image_only_detection_boundary",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#image_only_detection_boundary",
+      "formal_expression": [
+        "decision=detector(image,key,public_model_config)",
+        "public_detection_noise=versioned_key_prg_reconstruction(public_detection_noise_role,public_model_identity,image_shape,public_detection_schedule_index)",
+        "content_threshold=frozen_from_calibration_clean_negatives",
+        "rescue_content_threshold=content_threshold"
+      ],
+      "configuration_fields": [
+        "detector_input_access_mode",
+        "model_id",
+        "model_revision",
+        "width",
+        "height",
+        "inference_steps",
+        "keyed_prg_version",
+        "tail_fraction",
+        "attention_module_names",
+        "attention_stable_token_fraction",
+        "attention_unstable_pair_weight",
+        "attention_relation_component_weights",
+        "attention_coordinate_convention",
+        "attention_grid_align_corners",
+        "public_detection_schedule_index",
+        "public_detection_noise_prg_protocol",
+        "public_detection_noise_domain",
+        "public_detection_conditioning_protocol",
+        "public_detection_condition_text"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/detection/image_only.py",
+          "symbol": "detect_image_only_watermark"
+        }
+      ],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "run_semantic_watermark_runtime"
+        },
+        {
+          "path": "experiments/runners/image_only_dataset_runtime.py",
+          "symbol": "run_image_only_dataset_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "detector_input_access_mode",
+        "decision_scope",
+        "detection_threshold",
+        "threshold_source",
+        "same_threshold_rescue_source",
+        "formal_method_config_digest",
+        "public_detection_noise_prg_identity",
+        "public_detection_noise_prg_identity_digest",
+        "public_detection_noise_content_sha256",
+        "public_detection_noise_evidence_digest",
+        "public_detection_noise_evidence_records",
+        "public_detection_noise_evidence_ready"
+      ],
+      "fail_closed_conditions": [
+        "private_generation_state_requested",
+        "calibration_threshold_missing",
+        "rescue_threshold_identity_mismatch",
+        "image_reencoding_missing",
+        "required_qk_reextraction_missing"
+      ],
+      "forbidden_substitutes": [
+        "prompt_conditioned_detection",
+        "source_latent_detection",
+        "sampling_trajectory_detection",
+        "sample_null_space_detection",
+        "generation_qk_atom_reuse",
+        "separate_rescue_threshold"
+      ],
+      "cpu_property_id": "detector_signature_and_runtime_reject_generation_private_state",
+      "specification_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_image_only_detector_interface_and_positive_content_path",
+        "tests/functional/test_attack_matrix.py::test_attack_matrix_rejects_non_blind_detection_records"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "input_image_identity",
+        "reencoded_image_latent",
+        "raw_image_qk_atoms",
+        "aligned_image_qk_atoms",
+        "frozen_threshold_identity",
+        "image_only_decision_record",
+        "public_detection_noise_tensor",
+        "public_detection_noise_evidence_bundle"
+      ],
+      "gpu_observation_requirement": "真实检测记录只能绑定待检图像、密钥、公开模型、冻结阈值和图像重编码证据。",
+      "claim_boundary": "检测器不得读取 Prompt、源 latent、采样轨迹、样本级 Null Space 或生成端注意力原子。"
+    },
+    {
+      "invariant_id": "same_threshold_geometry_rescue",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#same_threshold_geometry_rescue",
+      "formal_expression": [
+        "positive_content=(raw_content_score-content_threshold)>=0",
+        "rescue_eligible=margin_in_window_and_geometry_failure_and_registration_ready",
+        "rescue=rescue_eligible_and((aligned_content_score-content_threshold)>=0)",
+        "evidence_positive=positive_content_or_rescue",
+        "raw_and_aligned_detection_bind_public_detection_noise_evidence"
+      ],
+      "configuration_fields": [
+        "detector_input_access_mode",
+        "attention_stable_token_fraction",
+        "attention_unstable_pair_weight",
+        "attention_relation_component_weights"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/methods/detection/image_only.py",
+          "symbol": "detect_image_only_watermark"
+        }
+      ],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/protocol/calibration.py",
+          "symbol": "empirical_threshold_at_fpr"
+        },
+        {
+          "path": "experiments/runners/image_only_dataset_runtime.py",
+          "symbol": "run_image_only_dataset_runtime"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "content_threshold",
+        "threshold_digest",
+        "threshold_source",
+        "same_threshold_rescue_source",
+        "decision_scope",
+        "public_detection_noise_content_sha256",
+        "public_detection_noise_prg_identity_digest",
+        "public_detection_noise_evidence_digest",
+        "public_detection_noise_evidence_records",
+        "public_detection_noise_evidence_ready"
+      ],
+      "fail_closed_conditions": [
+        "calibration_clean_negatives_missing",
+        "content_threshold_missing",
+        "rescue_threshold_identity_mismatch",
+        "registration_gate_failed",
+        "aligned_content_reencoding_missing",
+        "threshold_dependent_reason_stale"
+      ],
+      "forbidden_substitutes": [
+        "independent_rescue_threshold",
+        "geometry_score_direct_positive",
+        "test_split_threshold_tuning",
+        "temporary_failure_reason_reuse",
+        "aligned_score_without_reencoding"
+      ],
+      "cpu_property_id": "geometry_rescue_reuses_the_calibrated_content_threshold_and_cannot_vote_positive_alone",
+      "specification_test_nodes": [
+        "tests/functional/test_real_scientific_operators.py::test_complete_evidence_calibration_includes_geometry_rescue",
+        "tests/functional/test_real_scientific_operators.py::test_frozen_protocol_recomputes_threshold_dependent_failure_reason",
+        "tests/functional/test_fixed_fpr_threshold_audit.py::test_main_method_threshold_audit_recomputes_complete_rescue_protocol"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "calibration_clean_negative_scores",
+        "frozen_content_threshold",
+        "raw_detection_record",
+        "registration_measurement",
+        "aligned_detection_record",
+        "same_threshold_decision",
+        "raw_detection_public_noise",
+        "aligned_detection_public_noise",
+        "public_detection_noise_evidence_bundle"
+      ],
+      "gpu_observation_requirement": "真实 calibration 和 test 记录必须绑定同一个内容阈值及完整 rescue 规则。",
+      "claim_boundary": "几何只负责恢复参考系，不能独立产生 positive。"
+    },
+    {
+      "invariant_id": "scientific_content_binding",
+      "definition_pointer": "docs/builds/method_semantic_invariants.md#scientific_content_binding",
+      "formal_expression": [
+        "tensor_identity=sha256(protocol_version,dtype,ordered_shape,contiguous_raw_bytes)",
+        "ordered_bundle_identity=sha256(ordered_role_content_identities)",
+        "scientific_content_binding_digest=ordered_digest(risk_signals,risk_budgets,null_space_eight_roles,branch_updates,envelopes,actual_write,qk_roles,final_images)",
+        "scientific_content_binding_digest_includes_public_detection_noise_evidence"
+      ],
+      "configuration_fields": [
+        "model_id",
+        "model_revision",
+        "keyed_prg_version",
+        "quantized_branch_composition_order"
+      ],
+      "method_implementation_symbols": [
+        {
+          "path": "main/core/digest.py",
+          "symbol": "tensor_content_sha256"
+        },
+        {
+          "path": "main/core/digest.py",
+          "symbol": "build_stable_digest"
+        }
+      ],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "validate_semantic_watermark_runtime_result_provenance"
+        }
+      ],
+      "runtime_evidence_fields": [
+        "tensor_content_digest_version",
+        "tensor_content_sha256",
+        "branch_risk_content_digest",
+        "branch_updates_content_digest",
+        "combined_update_content_sha256",
+        "quantized_write_update_content_sha256",
+        "qk_atomic_content_digest",
+        "clean_image_digest",
+        "carrier_only_counterfactual_image_digest",
+        "watermarked_image_digest",
+        "final_image_qk_atomic_content_digest",
+        "scientific_content_binding_digest",
+        "public_detection_noise_content_sha256",
+        "public_detection_noise_prg_identity_digest",
+        "public_detection_noise_evidence_digest",
+        "public_detection_noise_evidence_records",
+        "public_detection_noise_evidence_ready"
+      ],
+      "fail_closed_conditions": [
+        "tensor_identity_missing",
+        "tensor_identity_mismatch",
+        "ordered_role_missing",
+        "ordered_bundle_digest_mismatch",
+        "dtype_or_shape_identity_missing"
+      ],
+      "forbidden_substitutes": [
+        "summary_scalar_as_tensor_identity",
+        "path_only_artifact_binding",
+        "unordered_role_digest",
+        "hash_as_tensor_reconstruction",
+        "operator_digest_as_content_digest"
+      ],
+      "cpu_property_id": "all_scientific_tensors_and_ordered_roles_bind_dtype_shape_and_raw_bytes",
+      "specification_test_nodes": [
+        "tests/functional/test_semantic_feature_conditions.py::test_tensor_content_sha256_binds_dtype_shape_and_raw_bytes",
+        "tests/functional/test_real_scientific_operators.py::test_scientific_operator_gate_requires_all_real_operator_evidence"
+      ],
+      "cpu_property_test_nodes": [],
+      "gpu_atomic_roles": [
+        "risk_signal_tensor_bundle",
+        "null_space_tensor_bundle",
+        "branch_update_tensor_bundle",
+        "actual_write_tensor",
+        "qk_atomic_tensor_bundle",
+        "final_image_tensor_bundle",
+        "public_detection_noise_tensor",
+        "public_detection_noise_evidence_bundle"
+      ],
+      "gpu_observation_requirement": "GPU 原子必须以有序角色和统一 Tensor 内容协议形成联合身份。",
+      "claim_boundary": "摘要证明内容身份没有漂移，但摘要本身不能重建 Tensor。"
+    }
+  ]
+}

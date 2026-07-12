@@ -4,7 +4,9 @@
 
 ## Harness
 
-`tools/harness/run_all_audits.py` 是完整审计入口。它顺序执行仓库结构、命名治理、placeholder/random 字段、字段登记、发布边界、测试结构和输出路径等检查, 并把持久化报告写入 `outputs/audit_reports/`。
+`tools/harness/run_all_audits.py` 是完整审计入口。它顺序执行仓库结构、命名治理、placeholder/random 字段、字段登记、方法规范追踪、发布边界、测试结构和输出路径等检查, 并把持久化报告写入 `outputs/audit_reports/`。
+
+这些治理审计不能单独证明水印方法公式成立。方法语义必须由 `docs/builds/method_semantic_invariants.md` 约束, 并由调用真实公开实现的独立 CPU 正例和反例测量器验证；源码字符串、字段存在或业务记录中的 `*_ready` 不能替代科学性质判断。
 
 提交修改前必须运行:
 

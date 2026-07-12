@@ -412,7 +412,7 @@ def _scientific_update_record_ready(
         return False
     allowed_jvp_modes = {
         "torch_func_exact_jvp_vjp",
-        "torch_autograd_exact_jvp_vjp_compatibility",
+        "torch_autograd_exact_jvp_vjp_reexecution",
     }
     expected_prg_digest = keyed_prg_protocol_record(
         config.keyed_prg_version
@@ -465,8 +465,12 @@ def _scientific_update_record_ready(
             for field_name in (
                 "candidate_matrix_content_sha256",
                 "risk_budget_content_sha256",
-                "response_matrix_content_sha256",
+                "routed_candidate_response_matrix_content_sha256",
+                "projected_direction_matrix_content_sha256",
+                "projected_direction_response_matrix_content_sha256",
                 "latent_basis_content_sha256",
+                "basis_response_matrix_content_sha256",
+                "basis_reference_response_matrix_content_sha256",
             )
         ):
             return False
@@ -479,13 +483,21 @@ def _scientific_update_record_ready(
         column_residuals = subspace_record.get(
             "column_relative_response_residuals"
         )
+        column_reference_norms = subspace_record.get(
+            "column_reference_response_norms"
+        )
         energy_retentions = subspace_record.get("projection_energy_retentions")
         cg_residuals = subspace_record.get("cg_relative_residuals")
         if not all(
             isinstance(values, list)
             and len(values) == config.null_rank
             and all(isinstance(value, (int, float)) and math.isfinite(float(value)) for value in values)
-            for values in (column_residuals, energy_retentions, cg_residuals)
+            for values in (
+                column_residuals,
+                column_reference_norms,
+                energy_retentions,
+                cg_residuals,
+            )
         ):
             return False
         if any(

@@ -23,10 +23,20 @@ from paper_workflow.colab_utils.paper_run_environment import (
 )
 
 
+def write_method_config(root: Path) -> None:
+    """把唯一正式方法配置显式复制到受测试目标根目录。"""
+
+    source = Path(__file__).resolve().parents[2] / "configs" / "model_sd35.yaml"
+    target = root / "configs" / "model_sd35.yaml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(source.read_bytes())
+
+
 def write_prompt_file(path: Path, count: int) -> None:
     """写出受测试控制的 prompt 文件, 用于避免依赖仓库外部状态."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
+    write_method_config(path.parent.parent)
     path.write_text("\n".join(f"a controlled prompt {index}" for index in range(count)) + "\n", encoding="utf-8")
 
 
@@ -37,6 +47,7 @@ def write_prompt_contract(
 ) -> PaperRunPromptContract:
     """显式构造测试 Prompt 依赖, 不冒充正式注册表输入。"""
 
+    write_method_config(root)
     relative_path = Path("configs") / f"paper_main_{run_name}_prompts.txt"
     path = root / relative_path
     write_prompt_file(path, count)
@@ -200,6 +211,69 @@ def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: 
     assert shared_method_settings(probe_config)[
         "attention_grid_align_corners"
     ] is True
+    frozen_settings = shared_method_settings(probe_config)
+    assert len(frozen_settings["formal_method_config_digest"]) == 64
+    assert frozen_settings["pipeline_class_name"].endswith(
+        ".StableDiffusion3Pipeline"
+    )
+    assert frozen_settings["vae_class_name"].endswith(".AutoencoderKL")
+    assert frozen_settings["transformer_class_name"].endswith(
+        ".SD3Transformer2DModel"
+    )
+    assert frozen_settings["scheduler_class_name"].endswith(
+        ".FlowMatchEulerDiscreteScheduler"
+    )
+    assert (
+        frozen_settings["vae_scaling_factor"],
+        frozen_settings["vae_shift_factor"],
+        frozen_settings["latent_torch_dtype"],
+        frozen_settings["vision_torch_dtype"],
+    ) == (1.5305, 0.0609, "float16", "float32")
+    assert frozen_settings["public_detection_schedule_index"] == 7
+    assert frozen_settings["public_detection_noise_prg_protocol"] == (
+        "sha256_counter_box_muller_float32_v1"
+    )
+    assert frozen_settings["public_detection_noise_domain"] == (
+        "public_image_only_qk_detection_noise_v1"
+    )
+    assert frozen_settings["public_detection_condition_text"] == ""
+    assert frozen_settings["risk_signal_calibration_protocol"] == (
+        "analytic_bounded_branch_signals_v1"
+    )
+    assert frozen_settings["risk_eligibility_comparison"] == "strict_less_than"
+    assert frozen_settings["risk_neutral_texture_value"] == 0.5
+    assert frozen_settings["risk_budget_broadcast_protocol"] == (
+        "per_sample_hw_repeat_channels_nchw_v1"
+    )
+    assert frozen_settings["risk_zero_support_protocol"] == (
+        "exact_zero_direction_or_fail_closed"
+    )
+    assert frozen_settings["lf_content_risk_config"][
+        "eligibility_threshold"
+    ] == 0.55
+    assert frozen_settings["tail_robust_risk_config"][
+        "texture_preference"
+    ] == "prefer"
+    assert frozen_settings["attention_geometry_risk_config"][
+        "attention_instability_weight"
+    ] == 0.30
+    assert frozen_settings["qr_reference_solve_protocol"] == (
+        "right_upper_triangular_solve_without_explicit_inverse_v1"
+    )
+    assert frozen_settings["quantized_branch_composition_protocol"] == (
+        "float32_ordered_branch_sum_add_float32_latent_single_cast_v1"
+    )
+    assert frozen_settings["quantized_branch_composition_order"] == (
+        "lf_content",
+        "tail_robust",
+        "attention_geometry",
+    )
+    assert frozen_settings["combined_budget_envelope_rule"] == (
+        "sum_active_branch_envelopes"
+    )
+    assert frozen_settings[
+        "quantized_budget_envelope_backtracking_maximum_steps"
+    ] == 24
     assert probe_config.target_fpr == 0.1
     assert pilot_config.target_fpr == 0.01
     assert full_config.target_fpr == 0.001
@@ -330,6 +404,7 @@ def test_formal_prompt_contract_uses_packaged_source_for_artifact_only_root(
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+    write_method_config(tmp_path)
 
     config = build_paper_run_config(root=tmp_path)
 
@@ -380,8 +455,9 @@ def test_formal_prompt_contract_rejects_count_and_digest_drift(
     """正式入口必须分别拒绝数量漂移和保持数量时的内容漂移。"""
 
     repository_root = Path(__file__).resolve().parents[2]
+    write_method_config(tmp_path)
     configs_dir = tmp_path / "configs"
-    configs_dir.mkdir(parents=True)
+    configs_dir.mkdir(parents=True, exist_ok=True)
     registry_source = repository_root / "configs" / "prompt_source_registry.json"
     manifest_source = repository_root / "configs" / "prompt_selection_manifest.jsonl"
     prompt_source = repository_root / "configs" / "paper_main_probe_paper_prompts.txt"

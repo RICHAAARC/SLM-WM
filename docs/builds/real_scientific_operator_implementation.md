@@ -5,7 +5,7 @@
 | 机制 | 正式实现 | 作用 |
 | --- | --- | --- |
 | 分支风险场 | `main/methods/semantic/branch_risk.py` | 分别构造 LF、尾部截断和注意力几何风险与承载预算 |
-| 密钥随机原语 | `main/core/keyed_prg.py` | 通过版本化 SHA-256 计数器流为内容模板、Jacobian 候选方向和注意力关系符号生成规范 CPU float32 Tensor |
+| 密钥随机原语 | `main/core/keyed_prg.py` | 通过版本化 SHA-256 计数器流生成规范均匀数, 为内容模板和 Jacobian 候选方向派生 Box-Muller 高斯 Tensor, 并为注意力关系符号直接执行均匀阈值化 |
 | Tensor 内容身份 | `main/core/digest.py` | 通过版本化 dtype、shape 与连续原始字节 SHA-256 绑定风险、基底、分支更新和 Q/K 原子 |
 | 真实 Jacobian Null Space | `main/methods/subspace/jacobian_nullspace.py` | 通过完整特征 JVP/VJP、显式风险算子和无阻尼 PSD-CG 求解 rank-4 latent Null Space |
 | 语义与手工结构统计 | `experiments/runtime/diffusion/semantic_features.py` | 以512维完整归一化 CLIP embedding 和204维 RGB 统计/梯度/8x8池化向量定义716维 Jacobian，并提供有限更新与最终成图复验 |
@@ -99,7 +99,7 @@ $$
 
 实现存在不等于论文结果成立。下列条件全部满足后, 结果记录才允许进入主张门禁：
 
-1. 运行记录的 `jvp_mode` 为 `torch_func_exact_jvp_vjp` 或 `torch_autograd_exact_jvp_vjp_compatibility`，且 `feature_compression_applied=false`；
+1. 运行记录的 `jvp_mode` 为 `torch_func_exact_jvp_vjp` 或 `torch_autograd_exact_jvp_vjp_reexecution`，且 `feature_compression_applied=false`；
 2. 求解器为 `matrix_free_full_jacobian_psd_cg`、`cg_damping=0`，全部方向 CG 收敛且相对残差不超过 $10^{-6}$；
 3. QR 后每个基底列的完整 Jacobian 相对响应不超过0.0001，投影能量不低于0.01，正交误差不超过 $10^{-5}$；
 4. 三分支合成更新按真实 latent dtype 写回后，以实际 `written_latent - latent` 增量重新执行完整特征精确 JVP，其响应范数相对当前完整特征范数的比例不超过0.0001；
@@ -121,13 +121,13 @@ $$
 
 质量后端固定为 [torch-fidelity v0.4.0](https://github.com/toshas/torch-fidelity/tree/v0.4.0), 提取器为 `inception-v3-compat`, 特征层为 `2048`。运行记录必须保存 `feature_extractor_id=torch_fidelity_0_4_0_inception_v3_compat_2048`; 只有 `canonical_formal_feature_extractor_ready=true` 的质量摘要才能通过论文记录门禁。普通 torchvision ImageNet 分类权重或像素直方图不能冒充该后端。
 
-为降低 Colab 上完整特征 JVP/VJP 遇到 fused attention 不支持自动微分的风险，正式运行固定 CLIP 视觉编码器使用 eager attention，VAE 使用 Diffusers `AttnProcessor`。该调整只改变等价注意力算子的运行实现，不更改模型权重或方法目标；实际配置写入 `scientific_autograd_compatibility` 环境记录。显存不足、形状错误、CG 不收敛或模型实现错误仍直接失败，不能被兼容路径吞掉。
+为降低 Colab 上完整特征 JVP/VJP 遇到 fused attention 不支持自动微分的风险，正式运行固定 CLIP 视觉编码器使用 eager attention，VAE 使用 Diffusers `AttnProcessor`。该调整只改变等价注意力算子的运行实现，不更改模型权重或方法目标；实际配置写入 `scientific_autograd_operator_configuration` 环境记录。显存不足、形状错误、CG 不收敛或模型实现错误仍直接失败, 不能通过切换执行方式隐藏。
 
 ## 七、原子证据与派生结论绑定
 
 论文结论只接受能够从原子记录独立重建并通过即时文件摘要核验的派生产物：
 
-主方法科学原子先执行 Tensor 内容自校验。风险值、预算、资格 mask、Jacobian 候选矩阵、风险预算、响应矩阵、最终基底和三个分支更新均使用同一版本化协议；真实 Q/K 逐层绑定抽样 Q、K、中心化 logit、关系概率和二维 token 索引。算子身份摘要只描述冻结协议, 内容摘要描述一次实际评价, 两者不能互相替代。
+主方法科学原子先执行 Tensor 内容自校验。风险值、预算、资格 mask、Jacobian 候选矩阵、风险预算、路由候选响应 $J(BD)$、QR 基底响应 $JN$、逐列参考响应、最终基底和三个分支更新均使用同一版本化协议与角色限定字段；真实 Q/K 逐层绑定抽样 Q、K、中心化 logit、关系概率和二维 token 索引。算子身份摘要只描述冻结协议, 内容摘要只绑定一次实际评价的 dtype、shape 和原始字节身份, 不能由摘要本身重建 Tensor, 两类摘要也不能互相替代。
 
 1. 正式消融的每个 `ablation_id` 必须逐字段等于登记的机制开关配置, 每个运行结果必须通过科学完成单元来源校验, 且输出目录必须属于该论文层级和消融身份；
 2. `formal_detection_records.jsonl` 与 `per_ablation_frozen_protocols.json` 同时保存字节级 SHA-256 和解析内容稳定摘要, 两类身份均绑定到 summary、manifest config 与 manifest metadata；

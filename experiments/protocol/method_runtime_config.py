@@ -7,7 +7,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import json
 import math
 import os
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import Any
 import yaml
 
 from experiments.runtime.model_sources import require_registered_model_reference
+from main.core.digest import build_stable_digest
 from main.core.keyed_prg import require_supported_keyed_prg_version
 from main.methods.geometry import (
     ATTENTION_COORDINATE_CONVENTION,
@@ -26,6 +28,114 @@ from main.methods.geometry import (
 
 
 FORMAL_METHOD_CONFIG_RELATIVE_PATH = Path("configs/model_sd35.yaml")
+FORMAL_METHOD_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
+FORMAL_METHOD_CONFIG_SCHEMA = "slm_wm_formal_method_runtime_config_v1"
+FORMAL_SD35_PIPELINE_CLASS_NAME = (
+    "diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3."
+    "StableDiffusion3Pipeline"
+)
+FORMAL_SD35_VAE_CLASS_NAME = (
+    "diffusers.models.autoencoders.autoencoder_kl.AutoencoderKL"
+)
+FORMAL_SD35_TRANSFORMER_CLASS_NAME = (
+    "diffusers.models.transformers.transformer_sd3.SD3Transformer2DModel"
+)
+FORMAL_SD35_SCHEDULER_CLASS_NAME = (
+    "diffusers.schedulers.scheduling_flow_match_euler_discrete."
+    "FlowMatchEulerDiscreteScheduler"
+)
+FORMAL_PUBLIC_DETECTION_NOISE_DOMAIN = (
+    "public_image_only_qk_detection_noise_v1"
+)
+FORMAL_PUBLIC_DETECTION_CONDITIONING_PROTOCOL = (
+    "sd3_empty_text_triplet_without_cfg_v1"
+)
+
+
+@dataclass(frozen=True)
+class FormalBranchRiskConfig:
+    """保存一个正式载体分支的风险公式常量。"""
+
+    local_contrast_risk_weight: float
+    semantic_weight: float
+    texture_weight: float
+    adjacent_step_instability_weight: float
+    attention_instability_weight: float
+    texture_preference: str
+    eligibility_threshold: float
+    budget_floor: float
+    budget_ceiling: float
+    budget_gain: float
+
+    def __post_init__(self) -> None:
+        """集中校验风险权重、严格资格阈值和绝对预算范围。"""
+
+        weights = (
+            self.local_contrast_risk_weight,
+            self.semantic_weight,
+            self.texture_weight,
+            self.adjacent_step_instability_weight,
+            self.attention_instability_weight,
+        )
+        values = (
+            *weights,
+            self.eligibility_threshold,
+            self.budget_floor,
+            self.budget_ceiling,
+            self.budget_gain,
+        )
+        if any(not math.isfinite(value) for value in values):
+            raise ValueError("正式分支风险配置必须全部为有限数")
+        if any(value < 0.0 for value in weights) or sum(weights) <= 0.0:
+            raise ValueError("正式分支风险权重必须非负且至少一个大于 0")
+        if self.texture_preference not in {"avoid", "prefer", "neutral"}:
+            raise ValueError(
+                "正式 texture_preference 必须为 avoid、prefer 或 neutral"
+            )
+        if not 0.0 <= self.eligibility_threshold <= 1.0:
+            raise ValueError("正式 eligibility_threshold 必须位于 [0, 1]")
+        if not 0.0 <= self.budget_floor < self.budget_ceiling <= 1.0:
+            raise ValueError("正式风险预算必须满足 0 <= floor < ceiling <= 1")
+        if self.budget_gain < 0.0:
+            raise ValueError("正式 budget_gain 必须非负")
+
+
+FORMAL_LF_CONTENT_RISK_CONFIG = FormalBranchRiskConfig(
+    local_contrast_risk_weight=0.30,
+    semantic_weight=0.30,
+    texture_weight=0.20,
+    adjacent_step_instability_weight=0.20,
+    attention_instability_weight=0.0,
+    texture_preference="avoid",
+    eligibility_threshold=0.55,
+    budget_floor=0.05,
+    budget_ceiling=1.0,
+    budget_gain=0.70,
+)
+FORMAL_TAIL_ROBUST_RISK_CONFIG = FormalBranchRiskConfig(
+    local_contrast_risk_weight=0.25,
+    semantic_weight=0.25,
+    texture_weight=0.30,
+    adjacent_step_instability_weight=0.20,
+    attention_instability_weight=0.0,
+    texture_preference="prefer",
+    eligibility_threshold=0.55,
+    budget_floor=0.05,
+    budget_ceiling=1.0,
+    budget_gain=0.70,
+)
+FORMAL_ATTENTION_GEOMETRY_RISK_CONFIG = FormalBranchRiskConfig(
+    local_contrast_risk_weight=0.20,
+    semantic_weight=0.25,
+    texture_weight=0.05,
+    adjacent_step_instability_weight=0.20,
+    attention_instability_weight=0.30,
+    texture_preference="neutral",
+    eligibility_threshold=0.55,
+    budget_floor=0.05,
+    budget_ceiling=1.0,
+    budget_gain=0.70,
+)
 
 
 def _is_exact_sd35_attention_module_name(name: str) -> bool:
@@ -49,6 +159,14 @@ class FormalMethodRuntimeConfig:
     model_revision: str
     vision_model_id: str
     vision_model_revision: str
+    pipeline_class_name: str
+    vae_class_name: str
+    transformer_class_name: str
+    scheduler_class_name: str
+    vae_scaling_factor: float
+    vae_shift_factor: float
+    latent_torch_dtype: str
+    vision_torch_dtype: str
     backend_mode: str
     prompt: str
     negative_prompt: str
@@ -58,25 +176,61 @@ class FormalMethodRuntimeConfig:
     inference_steps: int
     guidance_scale: float
     detector_input_access_mode: str
+    risk_signal_calibration_protocol: str
+    risk_image_signal_interpolation_mode: str
+    risk_image_signal_align_corners: bool
+    risk_attention_signal_interpolation_mode: str
+    risk_attention_signal_align_corners: bool
+    risk_neutral_texture_value: float
+    risk_eligibility_comparison: str
+    risk_budget_broadcast_protocol: str
+    risk_zero_support_protocol: str
+    risk_bounded_scale_protocol: str
+    risk_bounded_scale_direction_epsilon: float
+    lf_content_risk_config: FormalBranchRiskConfig
+    tail_robust_risk_config: FormalBranchRiskConfig
+    attention_geometry_risk_config: FormalBranchRiskConfig
     jacobian_candidate_count: int
     null_space_rank: int
+    null_space_numerical_epsilon: float
+    maximum_qr_condition_number: float
+    maximum_orthogonality_error: float
+    qr_reference_solve_protocol: str
     lf_relative_strength: float
     tail_relative_strength: float
     attention_relative_strength: float
+    lf_kernel_size: int
+    lf_stride: int
+    lf_padding: int
+    lf_boundary_mode: str
+    lf_count_include_pad: bool
     attention_stable_token_fraction: float
     attention_unstable_pair_weight: float
     attention_relation_component_weights: tuple[float, ...]
+    attention_backtracking_factor: float
+    attention_backtracking_maximum_steps: int
     minimum_final_image_attention_score_gain: float
     tail_fraction: float
     keyed_prg_version: str
     minimum_projection_energy_retention: float
     maximum_relative_response_residual: float
     maximum_quantized_write_relative_jacobian_response: float
+    quantized_branch_composition_protocol: str
+    quantized_branch_composition_order: tuple[str, ...]
+    combined_budget_envelope_rule: str
+    quantized_budget_envelope_absolute_tolerance: float
+    quantized_budget_envelope_backtracking_factor: float
+    quantized_budget_envelope_backtracking_maximum_steps: int
     null_space_cg_max_iterations: int
     null_space_cg_relative_tolerance: float
     minimum_semantic_preservation_cosine: float
     maximum_handcrafted_structure_feature_relative_drift: float
     injection_step_indices: tuple[int, ...]
+    public_detection_schedule_index: int
+    public_detection_noise_prg_protocol: str
+    public_detection_noise_domain: str
+    public_detection_conditioning_protocol: str
+    public_detection_condition_text: str
     max_attention_tokens: int
     attention_module_names: tuple[str, ...]
     attention_coordinate_convention: str
@@ -96,14 +250,99 @@ class FormalMethodRuntimeConfig:
             self.vision_model_revision,
             required_usage_role="semantic_condition_encoder",
         )
+        if (
+            self.pipeline_class_name != FORMAL_SD35_PIPELINE_CLASS_NAME
+            or self.vae_class_name != FORMAL_SD35_VAE_CLASS_NAME
+            or self.transformer_class_name
+            != FORMAL_SD35_TRANSFORMER_CLASS_NAME
+            or self.scheduler_class_name != FORMAL_SD35_SCHEDULER_CLASS_NAME
+        ):
+            raise ValueError("正式 SD3.5 pipeline 组件类身份发生漂移")
+        if (
+            not math.isfinite(self.vae_scaling_factor)
+            or not math.isfinite(self.vae_shift_factor)
+            or self.vae_scaling_factor != 1.5305
+            or self.vae_shift_factor != 0.0609
+        ):
+            raise ValueError("正式 SD3.5 VAE scaling_factor 或 shift_factor 发生漂移")
+        if (
+            self.latent_torch_dtype != "float16"
+            or self.vision_torch_dtype != "float32"
+        ):
+            raise ValueError("正式 latent 与视觉编码 dtype 必须分别为 float16 和 float32")
         if self.model_family != "sd35" or self.backend_mode != "real_diffusion":
             raise ValueError("正式方法配置必须使用 sd35 real_diffusion 后端")
         if self.detector_input_access_mode != "image_key_public_model_only":
             raise ValueError("正式检测器必须保持仅图像盲检输入制度")
+        if self.risk_signal_calibration_protocol != (
+            "analytic_bounded_branch_signals_v1"
+        ):
+            raise ValueError("正式风险输入必须使用冻结解析范围协议")
+        if (
+            self.risk_image_signal_interpolation_mode != "bilinear"
+            or self.risk_image_signal_align_corners is not False
+            or self.risk_attention_signal_interpolation_mode != "bilinear"
+            or self.risk_attention_signal_align_corners is not True
+        ):
+            raise ValueError("正式风险图插值模式与 align_corners 约定不匹配")
+        if (
+            not math.isfinite(self.risk_neutral_texture_value)
+            or self.risk_neutral_texture_value != 0.5
+        ):
+            raise ValueError("正式 neutral texture 风险项必须固定为 0.5")
+        if self.risk_eligibility_comparison != "strict_less_than":
+            raise ValueError("正式风险资格集合必须使用严格小于阈值")
+        if self.risk_budget_broadcast_protocol != (
+            "per_sample_hw_repeat_channels_nchw_v1"
+        ):
+            raise ValueError("正式风险预算必须逐样本沿通道重复且不得混合 batch")
+        if self.risk_zero_support_protocol != (
+            "exact_zero_direction_or_fail_closed"
+        ):
+            raise ValueError("正式零预算支持必须对应精确零方向或直接失败")
+        if self.risk_bounded_scale_protocol != (
+            "direction_peak_frozen_budget_ceiling_box_v1"
+        ):
+            raise ValueError("正式风险写回必须使用冻结的 RiskBoundedScale 协议")
+        if (
+            not math.isfinite(self.risk_bounded_scale_direction_epsilon)
+            or self.risk_bounded_scale_direction_epsilon != 1e-12
+        ):
+            raise ValueError("正式 RiskBoundedScale 方向 epsilon 必须固定为 1e-12")
+        expected_risk_configs = (
+            FORMAL_LF_CONTENT_RISK_CONFIG,
+            FORMAL_TAIL_ROBUST_RISK_CONFIG,
+            FORMAL_ATTENTION_GEOMETRY_RISK_CONFIG,
+        )
+        if (
+            self.lf_content_risk_config,
+            self.tail_robust_risk_config,
+            self.attention_geometry_risk_config,
+        ) != expected_risk_configs:
+            raise ValueError("正式三分支风险权重、阈值或预算常量发生漂移")
         if self.width <= 0 or self.height <= 0 or self.inference_steps <= 0:
             raise ValueError("图像尺寸和推理步数必须为正整数")
         if self.jacobian_candidate_count < self.null_space_rank or self.null_space_rank <= 0:
             raise ValueError("jacobian_candidate_count 必须不小于正的 null_space_rank")
+        if (
+            not math.isfinite(self.null_space_numerical_epsilon)
+            or self.null_space_numerical_epsilon != 1e-12
+        ):
+            raise ValueError("正式 Null Space 数值 epsilon 必须固定为 1e-12")
+        if (
+            not math.isfinite(self.maximum_qr_condition_number)
+            or self.maximum_qr_condition_number != 1e6
+        ):
+            raise ValueError("正式 QR 条件数上界必须固定为 1e6")
+        if (
+            not math.isfinite(self.maximum_orthogonality_error)
+            or self.maximum_orthogonality_error != 1e-5
+        ):
+            raise ValueError("正式 Null Space 正交误差上界必须固定为 1e-5")
+        if self.qr_reference_solve_protocol != (
+            "right_upper_triangular_solve_without_explicit_inverse_v1"
+        ):
+            raise ValueError("正式 QR 列参考必须使用右侧上三角求解")
         if any(
             index <= 0 or index >= self.inference_steps
             for index in self.injection_step_indices
@@ -111,9 +350,39 @@ class FormalMethodRuntimeConfig:
             raise ValueError(
                 "injection_step_indices 必须保留紧邻上一 scheduler 步"
             )
+        if (
+            not self.injection_step_indices
+            or self.public_detection_schedule_index
+            != self.injection_step_indices[0] + 1
+            or self.public_detection_schedule_index != 7
+            or self.public_detection_schedule_index >= self.inference_steps
+        ):
+            raise ValueError(
+                "公开检测 schedule index 必须固定为首次注入后的第7步"
+            )
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
+        if (
+            self.lf_kernel_size != 5
+            or self.lf_stride != 1
+            or self.lf_padding != 2
+            or self.lf_boundary_mode != "zero_padding"
+            or self.lf_count_include_pad is not True
+        ):
+            raise ValueError("正式 LF 二维平均低通核、步幅、填充或边界协议发生漂移")
         require_supported_keyed_prg_version(self.keyed_prg_version)
+        require_supported_keyed_prg_version(
+            self.public_detection_noise_prg_protocol
+        )
+        if (
+            self.public_detection_noise_prg_protocol != self.keyed_prg_version
+            or self.public_detection_noise_domain
+            != FORMAL_PUBLIC_DETECTION_NOISE_DOMAIN
+            or self.public_detection_conditioning_protocol
+            != FORMAL_PUBLIC_DETECTION_CONDITIONING_PROTOCOL
+            or self.public_detection_condition_text != ""
+        ):
+            raise ValueError("公开仅图像检测的 PRG domain 或空文本条件发生漂移")
         if not 0.0 < self.attention_stable_token_fraction <= 1.0:
             raise ValueError(
                 "attention_stable_token_fraction 必须位于 (0, 1]"
@@ -127,6 +396,11 @@ class FormalMethodRuntimeConfig:
         )
         if component_weights != ATTENTION_RELATION_COMPONENT_WEIGHTS:
             raise ValueError("正式完整方法必须启用四个等权注意力关系分量")
+        if (
+            self.attention_backtracking_factor != 0.5
+            or self.attention_backtracking_maximum_steps != 8
+        ):
+            raise ValueError("正式注意力回溯必须固定为最多8次二分缩减")
         if (
             not math.isfinite(self.minimum_final_image_attention_score_gain)
             or self.minimum_final_image_attention_score_gain <= 0.0
@@ -142,6 +416,28 @@ class FormalMethodRuntimeConfig:
             raise ValueError(
                 "maximum_quantized_write_relative_jacobian_response 必须位于 (0, 1]"
             )
+        if self.quantized_branch_composition_protocol != (
+            "float32_ordered_branch_sum_add_float32_latent_single_cast_v1"
+        ):
+            raise ValueError("正式三分支实际 dtype 合成协议发生漂移")
+        if self.quantized_branch_composition_order != (
+            "lf_content",
+            "tail_robust",
+            "attention_geometry",
+        ):
+            raise ValueError("正式三分支 actual-dtype 合成顺序发生漂移")
+        if self.combined_budget_envelope_rule != "sum_active_branch_envelopes":
+            raise ValueError("正式联合风险包络必须等于活动分支包络之和")
+        if (
+            not math.isfinite(self.quantized_budget_envelope_absolute_tolerance)
+            or self.quantized_budget_envelope_absolute_tolerance != 0.0
+        ):
+            raise ValueError("正式量化写回风险包络不允许正的绝对超限容差")
+        if (
+            self.quantized_budget_envelope_backtracking_factor != 0.5
+            or self.quantized_budget_envelope_backtracking_maximum_steps != 24
+        ):
+            raise ValueError("正式量化包络回溯必须固定为最多24次二分缩减")
         if self.null_space_cg_max_iterations <= 0:
             raise ValueError("null_space_cg_max_iterations 必须为正整数")
         if not 0.0 < self.null_space_cg_relative_tolerance < 1.0:
@@ -181,18 +477,76 @@ class FormalMethodRuntimeConfig:
         if not self.diffusion_attacks_enabled:
             raise ValueError("正式方法配置必须启用真实扩散攻击协议")
 
+    @property
+    def formal_method_config_digest(self) -> str:
+        """返回与 YAML 排版和仓库绝对路径无关的正式配置摘要。"""
+
+        return formal_method_config_digest(self)
+
     def paper_method_settings(self) -> dict[str, Any]:
         """返回需要写入各论文运行层级的共享方法字段。"""
 
         return {
+            "formal_method_config_digest": self.formal_method_config_digest,
+            "pipeline_class_name": self.pipeline_class_name,
+            "vae_class_name": self.vae_class_name,
+            "transformer_class_name": self.transformer_class_name,
+            "scheduler_class_name": self.scheduler_class_name,
+            "vae_scaling_factor": self.vae_scaling_factor,
+            "vae_shift_factor": self.vae_shift_factor,
+            "latent_torch_dtype": self.latent_torch_dtype,
+            "vision_torch_dtype": self.vision_torch_dtype,
             "inference_steps": self.inference_steps,
             "guidance_scale": self.guidance_scale,
+            "risk_signal_calibration_protocol": (
+                self.risk_signal_calibration_protocol
+            ),
+            "risk_image_signal_interpolation_mode": (
+                self.risk_image_signal_interpolation_mode
+            ),
+            "risk_image_signal_align_corners": (
+                self.risk_image_signal_align_corners
+            ),
+            "risk_attention_signal_interpolation_mode": (
+                self.risk_attention_signal_interpolation_mode
+            ),
+            "risk_attention_signal_align_corners": (
+                self.risk_attention_signal_align_corners
+            ),
+            "risk_neutral_texture_value": self.risk_neutral_texture_value,
+            "risk_eligibility_comparison": self.risk_eligibility_comparison,
+            "risk_budget_broadcast_protocol": (
+                self.risk_budget_broadcast_protocol
+            ),
+            "risk_zero_support_protocol": self.risk_zero_support_protocol,
+            "risk_bounded_scale_protocol": self.risk_bounded_scale_protocol,
+            "risk_bounded_scale_direction_epsilon": (
+                self.risk_bounded_scale_direction_epsilon
+            ),
+            "lf_content_risk_config": asdict(self.lf_content_risk_config),
+            "tail_robust_risk_config": asdict(
+                self.tail_robust_risk_config
+            ),
+            "attention_geometry_risk_config": asdict(
+                self.attention_geometry_risk_config
+            ),
             "attention_injection_steps": self.injection_step_indices,
             "jacobian_candidate_count": self.jacobian_candidate_count,
             "null_space_rank": self.null_space_rank,
+            "null_space_numerical_epsilon": (
+                self.null_space_numerical_epsilon
+            ),
+            "maximum_qr_condition_number": self.maximum_qr_condition_number,
+            "maximum_orthogonality_error": self.maximum_orthogonality_error,
+            "qr_reference_solve_protocol": self.qr_reference_solve_protocol,
             "lf_relative_strength": self.lf_relative_strength,
             "tail_relative_strength": self.tail_relative_strength,
             "attention_relative_strength": self.attention_relative_strength,
+            "lf_kernel_size": self.lf_kernel_size,
+            "lf_stride": self.lf_stride,
+            "lf_padding": self.lf_padding,
+            "lf_boundary_mode": self.lf_boundary_mode,
+            "lf_count_include_pad": self.lf_count_include_pad,
             "attention_stable_token_fraction": (
                 self.attention_stable_token_fraction
             ),
@@ -201,6 +555,12 @@ class FormalMethodRuntimeConfig:
             ),
             "attention_relation_component_weights": (
                 self.attention_relation_component_weights
+            ),
+            "attention_backtracking_factor": (
+                self.attention_backtracking_factor
+            ),
+            "attention_backtracking_maximum_steps": (
+                self.attention_backtracking_maximum_steps
             ),
             "minimum_final_image_attention_score_gain": (
                 self.minimum_final_image_attention_score_gain
@@ -212,6 +572,24 @@ class FormalMethodRuntimeConfig:
             "maximum_quantized_write_relative_jacobian_response": (
                 self.maximum_quantized_write_relative_jacobian_response
             ),
+            "quantized_branch_composition_protocol": (
+                self.quantized_branch_composition_protocol
+            ),
+            "quantized_branch_composition_order": (
+                self.quantized_branch_composition_order
+            ),
+            "combined_budget_envelope_rule": (
+                self.combined_budget_envelope_rule
+            ),
+            "quantized_budget_envelope_absolute_tolerance": (
+                self.quantized_budget_envelope_absolute_tolerance
+            ),
+            "quantized_budget_envelope_backtracking_factor": (
+                self.quantized_budget_envelope_backtracking_factor
+            ),
+            "quantized_budget_envelope_backtracking_maximum_steps": (
+                self.quantized_budget_envelope_backtracking_maximum_steps
+            ),
             "null_space_cg_max_iterations": self.null_space_cg_max_iterations,
             "null_space_cg_relative_tolerance": (
                 self.null_space_cg_relative_tolerance
@@ -221,6 +599,21 @@ class FormalMethodRuntimeConfig:
             ),
             "maximum_handcrafted_structure_feature_relative_drift": (
                 self.maximum_handcrafted_structure_feature_relative_drift
+            ),
+            "public_detection_schedule_index": (
+                self.public_detection_schedule_index
+            ),
+            "public_detection_noise_prg_protocol": (
+                self.public_detection_noise_prg_protocol
+            ),
+            "public_detection_noise_domain": (
+                self.public_detection_noise_domain
+            ),
+            "public_detection_conditioning_protocol": (
+                self.public_detection_conditioning_protocol
+            ),
+            "public_detection_condition_text": (
+                self.public_detection_condition_text
             ),
             "max_attention_tokens": self.max_attention_tokens,
             "attention_module_names": self.attention_module_names,
@@ -233,12 +626,30 @@ class FormalMethodRuntimeConfig:
         }
 
 
+def formal_method_config_payload(
+    config: FormalMethodRuntimeConfig,
+) -> dict[str, Any]:
+    """返回不含文件路径和派生摘要的规范正式方法配置。"""
+
+    return {
+        "formal_method_config_schema": FORMAL_METHOD_CONFIG_SCHEMA,
+        "formal_method_config": asdict(config),
+    }
+
+
+def formal_method_config_digest(config: FormalMethodRuntimeConfig) -> str:
+    """计算只由完整配置值决定的稳定 SHA-256 摘要。"""
+
+    return build_stable_digest(formal_method_config_payload(config))
+
+
 def resolve_formal_method_config_path(root: str | Path = ".") -> Path:
-    """优先解析目标仓库配置, 打包测试缺少配置时回落到当前包内配置。"""
+    """解析目标仓库内的唯一正式配置, 缺失时直接失败。"""
 
     requested_path = (Path(root) / FORMAL_METHOD_CONFIG_RELATIVE_PATH).resolve()
-    package_path = (Path(__file__).resolve().parents[2] / FORMAL_METHOD_CONFIG_RELATIVE_PATH).resolve()
-    return requested_path if requested_path.is_file() else package_path
+    if not requested_path.is_file():
+        raise FileNotFoundError(f"正式方法配置不存在: {requested_path}")
+    return requested_path
 
 
 def _required_payload(payload: Any, path: Path) -> dict[str, Any]:
@@ -270,6 +681,18 @@ def load_formal_method_runtime_config(root: str | Path = ".") -> FormalMethodRun
         float(value)
         for value in payload["attention_relation_component_weights"]
     )
+    normalized["quantized_branch_composition_order"] = tuple(
+        str(value) for value in payload["quantized_branch_composition_order"]
+    )
+    for field_name in (
+        "lf_content_risk_config",
+        "tail_robust_risk_config",
+        "attention_geometry_risk_config",
+    ):
+        field_payload = payload[field_name]
+        if not isinstance(field_payload, dict):
+            raise ValueError(f"正式 {field_name} 必须是 YAML 映射")
+        normalized[field_name] = FormalBranchRiskConfig(**field_payload)
     return FormalMethodRuntimeConfig(**normalized)
 
 
@@ -286,17 +709,98 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         "SLM_WM_MODEL_REVISION": config.model_revision,
         "SLM_WM_VISION_MODEL_ID": config.vision_model_id,
         "SLM_WM_VISION_MODEL_REVISION": config.vision_model_revision,
+        "SLM_WM_PIPELINE_CLASS_NAME": config.pipeline_class_name,
+        "SLM_WM_VAE_CLASS_NAME": config.vae_class_name,
+        "SLM_WM_TRANSFORMER_CLASS_NAME": config.transformer_class_name,
+        "SLM_WM_SCHEDULER_CLASS_NAME": config.scheduler_class_name,
+        "SLM_WM_VAE_SCALING_FACTOR": str(config.vae_scaling_factor),
+        "SLM_WM_VAE_SHIFT_FACTOR": str(config.vae_shift_factor),
+        "SLM_WM_TORCH_DTYPE": config.latent_torch_dtype,
+        "SLM_WM_VISION_TORCH_DTYPE": config.vision_torch_dtype,
+        "SLM_WM_FORMAL_METHOD_CONFIG_DIGEST": (
+            config.formal_method_config_digest
+        ),
         "SLM_WM_SEED": str(config.seed),
         "SLM_WM_IMAGE_WIDTH": str(config.width),
         "SLM_WM_IMAGE_HEIGHT": str(config.height),
         "SLM_WM_INFERENCE_STEPS": str(config.inference_steps),
         "SLM_WM_GUIDANCE_SCALE": str(config.guidance_scale),
+        "SLM_WM_RISK_SIGNAL_CALIBRATION_PROTOCOL": (
+            config.risk_signal_calibration_protocol
+        ),
+        "SLM_WM_RISK_IMAGE_SIGNAL_INTERPOLATION_MODE": (
+            config.risk_image_signal_interpolation_mode
+        ),
+        "SLM_WM_RISK_IMAGE_SIGNAL_ALIGN_CORNERS": (
+            "1" if config.risk_image_signal_align_corners else "0"
+        ),
+        "SLM_WM_RISK_ATTENTION_SIGNAL_INTERPOLATION_MODE": (
+            config.risk_attention_signal_interpolation_mode
+        ),
+        "SLM_WM_RISK_ATTENTION_SIGNAL_ALIGN_CORNERS": (
+            "1" if config.risk_attention_signal_align_corners else "0"
+        ),
+        "SLM_WM_RISK_NEUTRAL_TEXTURE_VALUE": str(
+            config.risk_neutral_texture_value
+        ),
+        "SLM_WM_RISK_ELIGIBILITY_COMPARISON": (
+            config.risk_eligibility_comparison
+        ),
+        "SLM_WM_RISK_BUDGET_BROADCAST_PROTOCOL": (
+            config.risk_budget_broadcast_protocol
+        ),
+        "SLM_WM_RISK_ZERO_SUPPORT_PROTOCOL": (
+            config.risk_zero_support_protocol
+        ),
+        "SLM_WM_RISK_BOUNDED_SCALE_PROTOCOL": (
+            config.risk_bounded_scale_protocol
+        ),
+        "SLM_WM_RISK_BOUNDED_SCALE_DIRECTION_EPSILON": str(
+            config.risk_bounded_scale_direction_epsilon
+        ),
+        "SLM_WM_LF_CONTENT_RISK_CONFIG": json.dumps(
+            asdict(config.lf_content_risk_config),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        "SLM_WM_TAIL_ROBUST_RISK_CONFIG": json.dumps(
+            asdict(config.tail_robust_risk_config),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        "SLM_WM_ATTENTION_GEOMETRY_RISK_CONFIG": json.dumps(
+            asdict(config.attention_geometry_risk_config),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
         "SLM_WM_ATTENTION_INJECTION_STEPS": ",".join(str(value) for value in config.injection_step_indices),
         "SLM_WM_JACOBIAN_CANDIDATE_COUNT": str(config.jacobian_candidate_count),
         "SLM_WM_NULL_SPACE_RANK": str(config.null_space_rank),
+        "SLM_WM_NULL_SPACE_NUMERICAL_EPSILON": str(
+            config.null_space_numerical_epsilon
+        ),
+        "SLM_WM_MAXIMUM_QR_CONDITION_NUMBER": str(
+            config.maximum_qr_condition_number
+        ),
+        "SLM_WM_MAXIMUM_ORTHOGONALITY_ERROR": str(
+            config.maximum_orthogonality_error
+        ),
+        "SLM_WM_QR_REFERENCE_SOLVE_PROTOCOL": (
+            config.qr_reference_solve_protocol
+        ),
         "SLM_WM_LF_RELATIVE_STRENGTH": str(config.lf_relative_strength),
         "SLM_WM_TAIL_RELATIVE_STRENGTH": str(config.tail_relative_strength),
         "SLM_WM_ATTENTION_RELATIVE_STRENGTH": str(config.attention_relative_strength),
+        "SLM_WM_LF_KERNEL_SIZE": str(config.lf_kernel_size),
+        "SLM_WM_LF_STRIDE": str(config.lf_stride),
+        "SLM_WM_LF_PADDING": str(config.lf_padding),
+        "SLM_WM_LF_BOUNDARY_MODE": config.lf_boundary_mode,
+        "SLM_WM_LF_COUNT_INCLUDE_PAD": (
+            "1" if config.lf_count_include_pad else "0"
+        ),
         "SLM_WM_ATTENTION_STABLE_TOKEN_FRACTION": str(
             config.attention_stable_token_fraction
         ),
@@ -307,6 +811,12 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
             str(value)
             for value in config.attention_relation_component_weights
         ),
+        "SLM_WM_ATTENTION_BACKTRACKING_FACTOR": str(
+            config.attention_backtracking_factor
+        ),
+        "SLM_WM_ATTENTION_BACKTRACKING_MAXIMUM_STEPS": str(
+            config.attention_backtracking_maximum_steps
+        ),
         "SLM_WM_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN": str(
             config.minimum_final_image_attention_score_gain
         ),
@@ -316,6 +826,24 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         "SLM_WM_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL": str(config.maximum_relative_response_residual),
         "SLM_WM_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE": str(
             config.maximum_quantized_write_relative_jacobian_response
+        ),
+        "SLM_WM_QUANTIZED_BRANCH_COMPOSITION_PROTOCOL": (
+            config.quantized_branch_composition_protocol
+        ),
+        "SLM_WM_QUANTIZED_BRANCH_COMPOSITION_ORDER": ",".join(
+            config.quantized_branch_composition_order
+        ),
+        "SLM_WM_COMBINED_BUDGET_ENVELOPE_RULE": (
+            config.combined_budget_envelope_rule
+        ),
+        "SLM_WM_QUANTIZED_BUDGET_ENVELOPE_ABSOLUTE_TOLERANCE": str(
+            config.quantized_budget_envelope_absolute_tolerance
+        ),
+        "SLM_WM_QUANTIZED_BUDGET_ENVELOPE_BACKTRACKING_FACTOR": str(
+            config.quantized_budget_envelope_backtracking_factor
+        ),
+        "SLM_WM_QUANTIZED_BUDGET_ENVELOPE_BACKTRACKING_MAXIMUM_STEPS": str(
+            config.quantized_budget_envelope_backtracking_maximum_steps
         ),
         "SLM_WM_NULL_SPACE_CG_MAX_ITERATIONS": str(
             config.null_space_cg_max_iterations
@@ -330,6 +858,21 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
             config.maximum_handcrafted_structure_feature_relative_drift
         ),
         "SLM_WM_MAX_ATTENTION_TOKENS": str(config.max_attention_tokens),
+        "SLM_WM_PUBLIC_DETECTION_SCHEDULE_INDEX": str(
+            config.public_detection_schedule_index
+        ),
+        "SLM_WM_PUBLIC_DETECTION_NOISE_PRG_PROTOCOL": (
+            config.public_detection_noise_prg_protocol
+        ),
+        "SLM_WM_PUBLIC_DETECTION_NOISE_DOMAIN": (
+            config.public_detection_noise_domain
+        ),
+        "SLM_WM_PUBLIC_DETECTION_CONDITIONING_PROTOCOL": (
+            config.public_detection_conditioning_protocol
+        ),
+        "SLM_WM_PUBLIC_DETECTION_CONDITION_TEXT": (
+            config.public_detection_condition_text
+        ),
         "SLM_WM_ATTENTION_MODULE_NAMES": ",".join(
             config.attention_module_names
         ),

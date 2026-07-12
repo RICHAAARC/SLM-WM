@@ -31,8 +31,143 @@ PRIMITIVE_DOCUMENT = (
     / "algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md"
 )
 FIELD_REGISTRY = ROOT / "docs" / "field_registry.md"
+EXPECTED_METHOD_DEFINITION = {
+    "method_definition_schema": "slm_wm_constructive_local_tangent_v2",
+    "method_name": "semantic_conditioned_latent_manifold_watermarking",
+    "update_construction": {
+        "semantics": "branchwise_constructive_safe_subspace_updates",
+        "content_branch_rule": "project_template_then_risk_bounded_scale",
+        "attention_branch_rule": (
+            "project_direct_qk_gradient_then_risk_bounded_monotonic_backtracking"
+        ),
+        "composition_rule": "single_core_ordered_actual_dtype_branch_sum",
+        "composition_implementation_layer": "main",
+        "joint_argmax_solved": False,
+    },
+    "branch_risk": {
+        "signal_calibration_rule": (
+            "analytic_bounded_signals_without_per_sample_minmax"
+        ),
+        "neutral_texture_rule": "fixed_constant_risk_term",
+        "neutral_texture_value": 0.5,
+        "eligibility_rule": "strict_risk_less_than_threshold",
+        "budget_broadcast_protocol": "per_sample_hw_repeat_channels_nchw_v1",
+        "zero_support_rule": "exact_zero_direction_or_fail_closed",
+        "effective_budget_rule": (
+            "configured_budget_times_eligibility_indicator"
+        ),
+        "risk_bounded_scale_protocol": (
+            "direction_peak_frozen_budget_ceiling_box_v1"
+        ),
+        "amplitude_envelope_rule": (
+            "nominal_l2_times_unit_direction_linf_times_"
+            "effective_budget_over_frozen_ceiling"
+        ),
+        "direction_scaling_rule": (
+            "maximum_feasible_global_scalar_without_coordinate_clipping"
+        ),
+        "direction_ratio_epsilon": 1e-12,
+    },
+    "local_geometry": {
+        "latent_manifold_term_scope": (
+            "local_implicit_feature_level_set_tangent_interpretation"
+        ),
+        "numerical_object": "kernel_of_local_feature_jacobian",
+        "feature_width": 716,
+        "branch_risk_conditioned": True,
+        "local_tangent_residual_gated": True,
+        "global_nonlinear_manifold_constructed": False,
+        "constant_rank_condition_verified": False,
+        "chart_geodesic_or_retraction_used": False,
+        "qr_column_reference_rule": (
+            "routed_candidate_right_solve_upper_triangular_qr_factor"
+        ),
+        "qr_reference_solve_protocol": (
+            "right_upper_triangular_solve_without_explicit_inverse_v1"
+        ),
+        "null_space_numerical_epsilon": 1e-12,
+        "maximum_qr_condition_number": 1e6,
+        "maximum_orthogonality_error": 1e-5,
+        "shared_rms_column_reference_used": False,
+        "explicit_qr_factor_inverse_used": False,
+        "projection_energy_rule": "squared_l2_ratio",
+    },
+    "carrier_normalization": {
+        "lf_content_rule": "subtract_global_mean_then_l2_normalize",
+        "tail_robust_rule": (
+            "amplitude_truncate_then_l2_normalize_without_mean_centering"
+        ),
+        "tail_nonselected_coordinate_rule": "exact_zero_after_normalization",
+    },
+    "attention_geometry": {
+        "relation_source": "direct_to_q_to_k_sampled_image_token_subgraph",
+        "risk_bounded_scale_is_backtracking_start": True,
+        "acceptance_rule": (
+            "actual_candidate_score_strictly_above_original_and_content_base"
+        ),
+        "full_joint_attention_all_tokens_optimized": False,
+    },
+    "write_validation": {
+        "branch_amplitude_envelope_validation_rule": (
+            "required_on_each_materialized_active_branch_update"
+        ),
+        "actual_dtype_composition_protocol": (
+            "float32_ordered_branch_sum_add_float32_latent_single_cast_v1"
+        ),
+        "actual_dtype_composition_order": [
+            "lf_content",
+            "tail_robust",
+            "attention_geometry",
+        ],
+        "combined_budget_envelope_rule": "sum_active_branch_envelopes",
+        "quantized_budget_envelope_absolute_tolerance": 0.0,
+        "quantized_budget_envelope_backtracking_factor": 0.5,
+        "quantized_budget_envelope_backtracking_maximum_steps": 24,
+        "quantized_envelope_recovery_rule": (
+            "common_positive_scalar_backtracking_then_full_revalidation"
+        ),
+        "attention_post_composition_validation_rule": (
+            "required_after_any_common_scalar_backtracking"
+        ),
+        "actual_dtype_budget_envelope_validation_rule": "required",
+        "actual_dtype_update_jvp_validation_rule": "required",
+        "finite_feature_change_validation_rule": "required",
+    },
+    "ablation_isolation": {
+        "without_branch_risk_routing": (
+            "unit_effective_budget_without_eligibility_filter"
+        ),
+        "without_jacobian_null_space": (
+            "retain_risk_support_and_amplitude_envelope"
+        ),
+        "inactive_branch_envelope_rule": "exclude_from_combined_envelope_sum",
+    },
+    "keyed_prg": {
+        "canonical_device": "cpu",
+        "canonical_dtype": "float32",
+        "uniform_output_rule": "direct_open_unit_interval_float32",
+        "uniform_output_role": "attention_relation_signs",
+        "uniform_uses_box_muller": False,
+        "gaussian_output_rule": "box_muller_float64_then_float32",
+        "gaussian_output_roles": [
+            "content_carrier_templates",
+            "jacobian_candidate_directions",
+            "public_image_only_detection_noise",
+        ],
+        "public_detection_noise_key_role": (
+            "deterministic_public_protocol_identity_not_secret_key"
+        ),
+        "gaussian_uses_box_muller": True,
+        "uniform_and_gaussian_roles_interchangeable": False,
+    },
+    "branch_names": [
+        "lf_content",
+        "tail_robust",
+        "attention_geometry",
+    ],
+}
 EXPECTED_METHOD_DEFINITION_DIGEST = (
-    "c0ff8777eb21c97ccca4725c3be30f73ed2948ab98143fdcd1a1d17a916618c3"
+    "2e0d2cfc43b72c6e5e875d48a0fbc15b2a48dc248e425ef8d3ead708e86d2f8a"
 )
 
 
@@ -42,7 +177,8 @@ def test_machine_readable_method_definition_freezes_constructive_semantics() -> 
 
     definition = semantic_conditioned_latent_method_definition()
 
-    assert definition["method_definition_schema"] == METHOD_DEFINITION_SCHEMA
+    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v2"
+    assert definition == EXPECTED_METHOD_DEFINITION
     assert definition["update_construction"]["joint_argmax_solved"] is False
     assert (
         definition["local_geometry"]["numerical_object"]

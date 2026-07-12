@@ -7,14 +7,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
-import hashlib
 import json
 import math
 from pathlib import Path
 import time
 from typing import Any, Mapping
 
-from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
+from experiments.protocol.method_runtime_config import (
+    FORMAL_METHOD_PACKAGE_ROOT,
+    FormalBranchRiskConfig,
+    load_formal_method_runtime_config,
+)
 from experiments.protocol.formal_randomization import (
     DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
     build_canonical_sd35_base_latent,
@@ -51,6 +54,7 @@ from main.core.digest import (
     build_stable_digest,
     tensor_content_sha256,
 )
+from main.core.keyed_prg import build_keyed_gaussian_tensor
 from main.methods.carrier import (
     KEYED_PRG_VERSION,
     build_low_frequency_template,
@@ -97,8 +101,17 @@ from main.methods.subspace import (
 )
 
 
-_FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(".")
+_FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
+    FORMAL_METHOD_PACKAGE_ROOT
+)
 _FORMAL_RANDOMIZATION_CONFIG = formal_randomization_protocol_record()
+_FORMAL_ATTENTION_COMPONENT_WEIGHT_PROTOCOLS = (
+    _FORMAL_METHOD_CONFIG.attention_relation_component_weights,
+    (0.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0),
+    (1.0 / 3.0, 0.0, 1.0 / 3.0, 1.0 / 3.0),
+    (1.0 / 3.0, 1.0 / 3.0, 0.0, 1.0 / 3.0),
+    (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 0.0),
+)
 
 
 @dataclass(frozen=True)
@@ -110,9 +123,19 @@ class SemanticWatermarkRuntimeConfig:
     model_revision: str = _FORMAL_METHOD_CONFIG.model_revision
     vision_model_id: str = _FORMAL_METHOD_CONFIG.vision_model_id
     vision_model_revision: str = _FORMAL_METHOD_CONFIG.vision_model_revision
+    formal_method_config_digest: str = (
+        _FORMAL_METHOD_CONFIG.formal_method_config_digest
+    )
+    pipeline_class_name: str = _FORMAL_METHOD_CONFIG.pipeline_class_name
+    vae_class_name: str = _FORMAL_METHOD_CONFIG.vae_class_name
+    transformer_class_name: str = _FORMAL_METHOD_CONFIG.transformer_class_name
+    scheduler_class_name: str = _FORMAL_METHOD_CONFIG.scheduler_class_name
+    vae_scaling_factor: float = _FORMAL_METHOD_CONFIG.vae_scaling_factor
+    vae_shift_factor: float = _FORMAL_METHOD_CONFIG.vae_shift_factor
+    latent_torch_dtype: str = _FORMAL_METHOD_CONFIG.latent_torch_dtype
     device_name: str = "cuda"
-    torch_dtype: str = "float16"
-    vision_torch_dtype: str = "float32"
+    torch_dtype: str = _FORMAL_METHOD_CONFIG.latent_torch_dtype
+    vision_torch_dtype: str = _FORMAL_METHOD_CONFIG.vision_torch_dtype
     hf_token_env: str = "HF_TOKEN"
     prompt: str = _FORMAL_METHOD_CONFIG.prompt
     prompt_id: str = "runtime_prompt"
@@ -132,12 +155,76 @@ class SemanticWatermarkRuntimeConfig:
     height: int = _FORMAL_METHOD_CONFIG.height
     inference_steps: int = _FORMAL_METHOD_CONFIG.inference_steps
     guidance_scale: float = _FORMAL_METHOD_CONFIG.guidance_scale
+    risk_signal_calibration_protocol: str = (
+        _FORMAL_METHOD_CONFIG.risk_signal_calibration_protocol
+    )
+    risk_image_signal_interpolation_mode: str = (
+        _FORMAL_METHOD_CONFIG.risk_image_signal_interpolation_mode
+    )
+    risk_image_signal_align_corners: bool = (
+        _FORMAL_METHOD_CONFIG.risk_image_signal_align_corners
+    )
+    risk_attention_signal_interpolation_mode: str = (
+        _FORMAL_METHOD_CONFIG.risk_attention_signal_interpolation_mode
+    )
+    risk_attention_signal_align_corners: bool = (
+        _FORMAL_METHOD_CONFIG.risk_attention_signal_align_corners
+    )
+    risk_neutral_texture_value: float = (
+        _FORMAL_METHOD_CONFIG.risk_neutral_texture_value
+    )
+    risk_eligibility_comparison: str = (
+        _FORMAL_METHOD_CONFIG.risk_eligibility_comparison
+    )
+    risk_budget_broadcast_protocol: str = (
+        _FORMAL_METHOD_CONFIG.risk_budget_broadcast_protocol
+    )
+    risk_zero_support_protocol: str = (
+        _FORMAL_METHOD_CONFIG.risk_zero_support_protocol
+    )
+    risk_bounded_scale_protocol: str = (
+        _FORMAL_METHOD_CONFIG.risk_bounded_scale_protocol
+    )
+    risk_bounded_scale_direction_epsilon: float = (
+        _FORMAL_METHOD_CONFIG.risk_bounded_scale_direction_epsilon
+    )
+    lf_content_risk_config: FormalBranchRiskConfig = (
+        _FORMAL_METHOD_CONFIG.lf_content_risk_config
+    )
+    tail_robust_risk_config: FormalBranchRiskConfig = (
+        _FORMAL_METHOD_CONFIG.tail_robust_risk_config
+    )
+    attention_geometry_risk_config: FormalBranchRiskConfig = (
+        _FORMAL_METHOD_CONFIG.attention_geometry_risk_config
+    )
+    attention_injection_steps: tuple[int, ...] = (
+        _FORMAL_METHOD_CONFIG.injection_step_indices
+    )
     injection_step_indices: tuple[int, ...] = _FORMAL_METHOD_CONFIG.injection_step_indices
+    jacobian_candidate_count: int = _FORMAL_METHOD_CONFIG.jacobian_candidate_count
     candidate_count: int = _FORMAL_METHOD_CONFIG.jacobian_candidate_count
+    null_space_rank: int = _FORMAL_METHOD_CONFIG.null_space_rank
     null_rank: int = _FORMAL_METHOD_CONFIG.null_space_rank
+    null_space_numerical_epsilon: float = (
+        _FORMAL_METHOD_CONFIG.null_space_numerical_epsilon
+    )
+    maximum_qr_condition_number: float = (
+        _FORMAL_METHOD_CONFIG.maximum_qr_condition_number
+    )
+    maximum_orthogonality_error: float = (
+        _FORMAL_METHOD_CONFIG.maximum_orthogonality_error
+    )
+    qr_reference_solve_protocol: str = (
+        _FORMAL_METHOD_CONFIG.qr_reference_solve_protocol
+    )
     lf_relative_strength: float = _FORMAL_METHOD_CONFIG.lf_relative_strength
     tail_relative_strength: float = _FORMAL_METHOD_CONFIG.tail_relative_strength
     attention_relative_strength: float = _FORMAL_METHOD_CONFIG.attention_relative_strength
+    lf_kernel_size: int = _FORMAL_METHOD_CONFIG.lf_kernel_size
+    lf_stride: int = _FORMAL_METHOD_CONFIG.lf_stride
+    lf_padding: int = _FORMAL_METHOD_CONFIG.lf_padding
+    lf_boundary_mode: str = _FORMAL_METHOD_CONFIG.lf_boundary_mode
+    lf_count_include_pad: bool = _FORMAL_METHOD_CONFIG.lf_count_include_pad
     attention_stable_token_fraction: float = (
         _FORMAL_METHOD_CONFIG.attention_stable_token_fraction
     )
@@ -146,6 +233,12 @@ class SemanticWatermarkRuntimeConfig:
     )
     attention_relation_component_weights: tuple[float, ...] = (
         _FORMAL_METHOD_CONFIG.attention_relation_component_weights
+    )
+    attention_backtracking_factor: float = (
+        _FORMAL_METHOD_CONFIG.attention_backtracking_factor
+    )
+    attention_backtracking_maximum_steps: int = (
+        _FORMAL_METHOD_CONFIG.attention_backtracking_maximum_steps
     )
     minimum_final_image_attention_score_gain: float = (
         _FORMAL_METHOD_CONFIG.minimum_final_image_attention_score_gain
@@ -156,6 +249,24 @@ class SemanticWatermarkRuntimeConfig:
     maximum_relative_response_residual: float = _FORMAL_METHOD_CONFIG.maximum_relative_response_residual
     maximum_quantized_write_relative_jacobian_response: float = (
         _FORMAL_METHOD_CONFIG.maximum_quantized_write_relative_jacobian_response
+    )
+    quantized_branch_composition_protocol: str = (
+        _FORMAL_METHOD_CONFIG.quantized_branch_composition_protocol
+    )
+    quantized_branch_composition_order: tuple[str, ...] = (
+        _FORMAL_METHOD_CONFIG.quantized_branch_composition_order
+    )
+    combined_budget_envelope_rule: str = (
+        _FORMAL_METHOD_CONFIG.combined_budget_envelope_rule
+    )
+    quantized_budget_envelope_absolute_tolerance: float = (
+        _FORMAL_METHOD_CONFIG.quantized_budget_envelope_absolute_tolerance
+    )
+    quantized_budget_envelope_backtracking_factor: float = (
+        _FORMAL_METHOD_CONFIG.quantized_budget_envelope_backtracking_factor
+    )
+    quantized_budget_envelope_backtracking_maximum_steps: int = (
+        _FORMAL_METHOD_CONFIG.quantized_budget_envelope_backtracking_maximum_steps
     )
     null_space_cg_max_iterations: int = (
         _FORMAL_METHOD_CONFIG.null_space_cg_max_iterations
@@ -168,6 +279,21 @@ class SemanticWatermarkRuntimeConfig:
     )
     maximum_handcrafted_structure_feature_relative_drift: float = (
         _FORMAL_METHOD_CONFIG.maximum_handcrafted_structure_feature_relative_drift
+    )
+    public_detection_schedule_index: int = (
+        _FORMAL_METHOD_CONFIG.public_detection_schedule_index
+    )
+    public_detection_noise_prg_protocol: str = (
+        _FORMAL_METHOD_CONFIG.public_detection_noise_prg_protocol
+    )
+    public_detection_noise_domain: str = (
+        _FORMAL_METHOD_CONFIG.public_detection_noise_domain
+    )
+    public_detection_conditioning_protocol: str = (
+        _FORMAL_METHOD_CONFIG.public_detection_conditioning_protocol
+    )
+    public_detection_condition_text: str = (
+        _FORMAL_METHOD_CONFIG.public_detection_condition_text
     )
     max_attention_tokens: int = _FORMAL_METHOD_CONFIG.max_attention_tokens
     attention_module_names: tuple[str, ...] = (
@@ -209,6 +335,44 @@ class SemanticWatermarkRuntimeConfig:
             self.vision_model_revision,
             required_usage_role="semantic_condition_encoder",
         )
+        if (
+            not math.isfinite(self.minimum_final_image_attention_score_gain)
+            or self.minimum_final_image_attention_score_gain <= 0.0
+        ):
+            raise ValueError(
+                "minimum_final_image_attention_score_gain 必须为正有限数"
+            )
+        expected_method_settings = _FORMAL_METHOD_CONFIG.paper_method_settings()
+        actual_method_settings: dict[str, Any] = {}
+        for field_name in expected_method_settings:
+            field_value = getattr(self, field_name)
+            actual_method_settings[field_name] = (
+                asdict(field_value)
+                if isinstance(field_value, FormalBranchRiskConfig)
+                else field_value
+            )
+        drifted_method_fields = tuple(
+            field_name
+            for field_name, expected_value in expected_method_settings.items()
+            if actual_method_settings[field_name] != expected_value
+            and not (
+                field_name == "attention_relation_component_weights"
+                and self.attention_relation_component_weights
+                in _FORMAL_ATTENTION_COMPONENT_WEIGHT_PROTOCOLS
+            )
+        )
+        if drifted_method_fields:
+            raise ValueError(
+                "方法运行设置必须精确继承 configs/model_sd35.yaml: "
+                + ", ".join(drifted_method_fields)
+            )
+        if (
+            self.torch_dtype != self.latent_torch_dtype
+            or self.injection_step_indices != self.attention_injection_steps
+            or self.candidate_count != self.jacobian_candidate_count
+            or self.null_rank != self.null_space_rank
+        ):
+            raise ValueError("方法运行别名字段必须与唯一正式配置保持一致")
         if self.device_name != "cuda":
             raise ValueError("正式真实方法运行要求 CUDA 设备")
         if self.candidate_count < self.null_rank or self.null_rank <= 0:
@@ -234,13 +398,6 @@ class SemanticWatermarkRuntimeConfig:
         validate_attention_relation_component_weights(
             self.attention_relation_component_weights
         )
-        if (
-            not math.isfinite(self.minimum_final_image_attention_score_gain)
-            or self.minimum_final_image_attention_score_gain <= 0.0
-        ):
-            raise ValueError(
-                "minimum_final_image_attention_score_gain 必须为正有限数"
-            )
         if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
             raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
         if not 0.0 < self.maximum_relative_response_residual <= 1.0:
@@ -358,7 +515,7 @@ def load_semantic_watermark_runtime_context(
     from diffusers.models.attention_processor import AttnProcessor
 
     pipeline.vae.set_attn_processor(AttnProcessor())
-    runtime_versions["scientific_autograd_compatibility"] = {
+    runtime_versions["scientific_autograd_operator_configuration"] = {
         "clip_attention_implementation": "eager",
         "vae_attention_processor": "AttnProcessor",
         "reason": "exact_forward_ad_and_input_gradient_compatibility",
@@ -393,6 +550,8 @@ def load_semantic_watermark_runtime_context(
     unconditional_prompt, unconditional_pooled = _unconditional_embeddings(
         pipeline,
         pipeline._execution_device,
+        config.public_detection_conditioning_protocol,
+        config.public_detection_condition_text,
     )
     diffusion_attack_runtime = (
         DiffusionAttackRuntime.from_text_to_image_pipeline(pipeline, config)
@@ -433,11 +592,17 @@ def semantic_watermark_runtime_config_payload(
     payload = asdict(config)
     payload["key_material"] = build_stable_digest({"key_material": config.key_material})
     payload["injection_step_indices"] = list(config.injection_step_indices)
+    payload["attention_injection_steps"] = list(
+        config.attention_injection_steps
+    )
     payload["attention_module_names"] = list(config.attention_module_names)
     payload["attention_relation_component_weights"] = list(
         config.attention_relation_component_weights
     )
     payload["standard_attack_profiles"] = list(config.standard_attack_profiles)
+    payload["quantized_branch_composition_order"] = list(
+        config.quantized_branch_composition_order
+    )
     payload["method_definition"] = semantic_conditioned_latent_method_definition()
     payload["method_definition_digest"] = (
         semantic_conditioned_latent_method_definition_digest()
@@ -771,13 +936,24 @@ def _attention_modules(
     return tuple(resolved)
 
 
-def _unconditional_embeddings(pipeline: Any, device: Any) -> tuple[Any, Any]:
+def _unconditional_embeddings(
+    pipeline: Any,
+    device: Any,
+    conditioning_protocol: str,
+    condition_text: str,
+) -> tuple[Any, Any]:
     """构造嵌入端和检测端都可复现的空文本条件。"""
 
+    if (
+        conditioning_protocol
+        != _FORMAL_METHOD_CONFIG.public_detection_conditioning_protocol
+        or condition_text != ""
+    ):
+        raise ValueError("公开检测条件必须使用冻结的 SD3 三路空文本编码")
     prompt_embeds, _, pooled_prompt_embeds, _ = pipeline.encode_prompt(
-        prompt="",
-        prompt_2="",
-        prompt_3="",
+        prompt=condition_text,
+        prompt_2=condition_text,
+        prompt_3=condition_text,
         device=device,
         num_images_per_prompt=1,
         do_classifier_free_guidance=False,
@@ -915,6 +1091,12 @@ def _solve_branch_subspace(
     minimum_projection_energy_retention: float = 0.01,
     cg_maximum_iterations: int = 64,
     cg_relative_tolerance: float = 1e-6,
+    numerical_epsilon: float = 1e-12,
+    maximum_qr_condition_number: float = 1e6,
+    maximum_orthogonality_error: float = 1e-5,
+    qr_reference_solve_protocol: str = (
+        "right_upper_triangular_solve_without_explicit_inverse_v1"
+    ),
     prg_version: str = KEYED_PRG_VERSION,
 ) -> Any:
     """为一个载体分支运行完整 Jacobian 风险支持约束投影。"""
@@ -939,6 +1121,10 @@ def _solve_branch_subspace(
         minimum_projection_energy_retention=minimum_projection_energy_retention,
         cg_maximum_iterations=cg_maximum_iterations,
         cg_relative_tolerance=cg_relative_tolerance,
+        numerical_epsilon=numerical_epsilon,
+        maximum_qr_condition_number=maximum_qr_condition_number,
+        maximum_orthogonality_error=maximum_orthogonality_error,
+        qr_reference_solve_protocol=qr_reference_solve_protocol,
     )
     result.metadata["preferred_direction_count"] = len(preferred_directions)
     result.metadata["preferred_direction_role"] = "carrier_or_attention_gradient"
@@ -1715,15 +1901,79 @@ def _encode_image_latent(pipeline: Any, image: Any) -> Any:
     return (encoded - shift_factor) * scaling_factor
 
 
-def _public_detection_noise_seed(config: SemanticWatermarkRuntimeConfig) -> int:
-    """由公开模型和检测协议派生与生成样本无关的固定噪声种子。"""
+def _public_detection_noise_prg_identity(
+    config: SemanticWatermarkRuntimeConfig,
+    latent_shape: tuple[int, ...],
+) -> dict[str, Any]:
+    """返回公开检测噪声的完整逐字节 PRG 调用身份。"""
 
-    detection_index = config.injection_step_indices[0] + 1
-    payload = (
-        f"slm_wm_image_only_attention|{config.carrier_model_reference}|{config.width}x{config.height}|"
-        f"{config.inference_steps}|post_step_schedule_index={detection_index}"
-    ).encode("utf-8")
-    return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big") % (2**63 - 1)
+    domain_fields = {
+        "operator": config.public_detection_noise_domain,
+        "model_id": config.model_id,
+        "model_revision": config.model_revision,
+        "width": config.width,
+        "height": config.height,
+        "inference_steps": config.inference_steps,
+        "public_detection_schedule_index": (
+            config.public_detection_schedule_index
+        ),
+        "latent_shape": latent_shape,
+    }
+    payload: dict[str, Any] = {
+        "public_detection_noise_prg_protocol": (
+            config.public_detection_noise_prg_protocol
+        ),
+        "key_material": config.public_detection_noise_domain,
+        "domain_fields": domain_fields,
+        "shape": latent_shape,
+    }
+    return {
+        **payload,
+        "public_detection_noise_prg_identity_digest": build_stable_digest(
+            payload
+        ),
+    }
+
+
+def _public_detection_noise_seed(config: SemanticWatermarkRuntimeConfig) -> int:
+    """为记录层生成不参与 PRG 字节流的公开随机追踪编号。"""
+
+    identity_digest = build_stable_digest(
+        {
+            "public_detection_noise_prg_protocol": (
+                config.public_detection_noise_prg_protocol
+            ),
+            "public_detection_noise_domain": (
+                config.public_detection_noise_domain
+            ),
+            "model_id": config.model_id,
+            "model_revision": config.model_revision,
+            "width": config.width,
+            "height": config.height,
+            "inference_steps": config.inference_steps,
+            "public_detection_schedule_index": (
+                config.public_detection_schedule_index
+            ),
+        }
+    )
+    return int(identity_digest[:16], 16) % (2**63 - 1)
+
+
+def _public_detection_noise_tensor(
+    latent: Any,
+    config: SemanticWatermarkRuntimeConfig,
+) -> Any:
+    """在 CPU 规范域生成公开高斯噪声, 再搬运到 latent 的设备与 dtype。"""
+
+    shape = tuple(int(value) for value in latent.shape)
+    identity = _public_detection_noise_prg_identity(config, shape)
+    noise_cpu = build_keyed_gaussian_tensor(
+        shape,
+        key_material=config.public_detection_noise_domain,
+        domain_fields=identity["domain_fields"],
+        prg_version=config.public_detection_noise_prg_protocol,
+    )
+    return noise_cpu.to(device=latent.device, dtype=latent.dtype)
 
 
 def _image_attention_extractor(
@@ -1737,8 +1987,8 @@ def _image_attention_extractor(
 
     import torch
 
-    detection_index = config.injection_step_indices[0] + 1
-    public_detection_seed = _public_detection_noise_seed(config)
+    detection_index = config.public_detection_schedule_index
+    noise_evidence_records: list[dict[str, Any]] = []
 
     def extract(image: Any) -> tuple[tuple[str, Any, tuple[int, ...]], ...]:
         """从任意待检图像提取全部冻结层的公开固定噪声 Q/K 关系。"""
@@ -1757,8 +2007,34 @@ def _image_attention_extractor(
                 "正式仅图像 Q/K 提取要求 scheduler 提供可调用的 scale_noise"
             )
         latent = _encode_image_latent(pipeline, image)
-        generator = torch.Generator(device=latent.device.type).manual_seed(public_detection_seed)
-        noise = torch.randn(latent.shape, generator=generator, device=latent.device, dtype=latent.dtype)
+        noise = _public_detection_noise_tensor(latent, config)
+        noise_identity = _public_detection_noise_prg_identity(
+            config,
+            tuple(int(value) for value in latent.shape),
+        )
+        noise_evidence_records.append(
+            {
+                "public_detection_noise_evaluation_index": len(
+                    noise_evidence_records
+                ),
+                "tensor_content_digest_version": (
+                    TENSOR_CONTENT_DIGEST_VERSION
+                ),
+                "public_detection_noise_content_sha256": (
+                    tensor_content_sha256(noise)
+                ),
+                "public_detection_noise_prg_identity_digest": (
+                    noise_identity[
+                        "public_detection_noise_prg_identity_digest"
+                    ]
+                ),
+                "public_detection_noise_prg_identity": noise_identity,
+                "public_detection_noise_shape": [
+                    int(value) for value in noise.shape
+                ],
+                "public_detection_noise_dtype": str(noise.dtype),
+            }
+        )
         timestep_batch = timestep.reshape(1).expand(latent.shape[0])
         noisy_latent = scale_noise(latent, timestep_batch, noise)
         with DifferentiableAttentionRecorder(modules, max_tokens=config.max_attention_tokens) as recorder:
@@ -1777,7 +2053,136 @@ def _image_attention_extractor(
             )
         return records
 
+    setattr(
+        extract,
+        "public_detection_noise_evidence_records",
+        noise_evidence_records,
+    )
     return extract
+
+
+def _public_detection_noise_evidence_cursor(extractor: Any | None) -> int:
+    """返回 extractor 当前公开检测噪声证据条数。"""
+
+    records = getattr(
+        extractor,
+        "public_detection_noise_evidence_records",
+        (),
+    )
+    return len(records)
+
+
+def _discard_public_detection_noise_evidence_since(
+    extractor: Any | None,
+    cursor: int,
+) -> None:
+    """丢弃只服务攻击优化目标且不会持久化的临时检测证据。"""
+
+    records = getattr(
+        extractor,
+        "public_detection_noise_evidence_records",
+        None,
+    )
+    if isinstance(records, list):
+        del records[cursor:]
+
+
+def _bind_public_detection_noise_qk_evidence(
+    record: dict[str, Any],
+    extractor: Any | None,
+    cursor: int,
+) -> None:
+    """把本次公开噪声实际 Tensor 摘要绑定到对应检测 Q/K 证据。"""
+
+    records = getattr(
+        extractor,
+        "public_detection_noise_evidence_records",
+        (),
+    )
+    evidence_records = [dict(item) for item in records[cursor:]]
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        raise RuntimeError("检测记录缺少可绑定公开噪声的 metadata")
+    qk_records_value = metadata.get("detection_qk_atomic_content_records")
+    if not isinstance(qk_records_value, list) or len(qk_records_value) != len(
+        evidence_records
+    ):
+        raise RuntimeError("公开检测噪声证据数量与 Q/K 评价次数不一致")
+    if not evidence_records:
+        raise RuntimeError("真实 Q/K 检测缺少公开噪声 Tensor 内容摘要")
+    qk_records = [dict(item) for item in qk_records_value]
+    for qk_record, noise_record in zip(qk_records, evidence_records):
+        qk_record.update(
+            {
+                "public_detection_noise_content_sha256": noise_record[
+                    "public_detection_noise_content_sha256"
+                ],
+                "public_detection_noise_prg_identity_digest": noise_record[
+                    "public_detection_noise_prg_identity_digest"
+                ],
+                "public_detection_noise_evaluation_index": noise_record[
+                    "public_detection_noise_evaluation_index"
+                ],
+            }
+        )
+    qk_digest = qk_atomic_evaluation_records_digest(
+        qk_records,
+        "detection_qk_atomic_content_records",
+    )
+    expected_roles_by_count = {
+        1: ("raw_detection_image",),
+        2: ("raw_detection_image", "aligned_detection_image"),
+    }
+    expected_roles = expected_roles_by_count.get(len(qk_records))
+    if expected_roles is None:
+        raise RuntimeError("检测 Q/K 公开噪声证据包含未定义的评价次数")
+    first_atoms = qk_records[0].get("qk_atomic_content_records")
+    if not isinstance(first_atoms, list):
+        raise RuntimeError("检测 Q/K 证据缺少逐层原子记录")
+    expected_layer_names = tuple(
+        str(item["record_layer_name"]) for item in first_atoms
+    )
+    qk_ready = qk_atomic_evaluation_records_ready(
+        qk_records,
+        qk_digest,
+        aggregate_field_name="detection_qk_atomic_content_records",
+        expected_roles=expected_roles,
+        expected_layer_names=expected_layer_names,
+    )
+    content_digests = {
+        str(item["public_detection_noise_content_sha256"])
+        for item in evidence_records
+    }
+    identity_digests = {
+        str(item["public_detection_noise_prg_identity_digest"])
+        for item in evidence_records
+    }
+    if len(content_digests) != 1 or len(identity_digests) != 1 or not qk_ready:
+        raise RuntimeError("公开检测噪声没有与 Q/K 证据形成唯一稳定绑定")
+    noise_evidence_digest = build_stable_digest(
+        {"public_detection_noise_evidence_records": evidence_records}
+    )
+    content_digest = next(iter(content_digests))
+    identity_digest = next(iter(identity_digests))
+    metadata.update(
+        {
+            "public_detection_noise_evidence_records": evidence_records,
+            "public_detection_noise_evidence_digest": noise_evidence_digest,
+            "public_detection_noise_content_sha256": content_digest,
+            "public_detection_noise_prg_identity_digest": identity_digest,
+            "public_detection_noise_evidence_ready": True,
+            "detection_qk_atomic_content_records": qk_records,
+            "detection_qk_atomic_content_digest": qk_digest,
+            "detection_qk_atomic_content_ready": True,
+        }
+    )
+    record.update(
+        {
+            "public_detection_noise_content_sha256": content_digest,
+            "public_detection_noise_prg_identity_digest": identity_digest,
+            "public_detection_noise_evidence_digest": noise_evidence_digest,
+        }
+    )
 
 
 def _align_image(image: Any, alignment: Any) -> Any:
@@ -2380,24 +2785,44 @@ def run_semantic_watermark_runtime(
                     )
                     subspaces = {
                         branch_name: _solve_branch_subspace(
-                            linearized_latent,
-                            feature_runtime,
-                            active_injection_config.key_material,
-                            branch_name,
-                            (
+                            latent=linearized_latent,
+                            feature_runtime=feature_runtime,
+                            key_material=active_injection_config.key_material,
+                            branch_name=branch_name,
+                            axis_budget=(
                                 _branch_budget(signals["semantic"], branch_field)
                                 if active_injection_config.semantic_routing_enabled
                                 else tuple(1.0 for _ in branch_field.budget_values)
                             ),
-                            active_injection_config.candidate_count,
-                            active_injection_config.null_rank,
-                            joint_feature_linearization,
-                            preferred_directions[branch_name],
-                            active_injection_config.maximum_relative_response_residual,
-                            active_injection_config.minimum_projection_energy_retention,
-                            active_injection_config.null_space_cg_max_iterations,
-                            active_injection_config.null_space_cg_relative_tolerance,
-                            active_injection_config.keyed_prg_version,
+                            candidate_count=active_injection_config.candidate_count,
+                            null_rank=active_injection_config.null_rank,
+                            joint_feature_linearization=joint_feature_linearization,
+                            preferred_directions=preferred_directions[branch_name],
+                            maximum_relative_response_residual=(
+                                active_injection_config.maximum_relative_response_residual
+                            ),
+                            minimum_projection_energy_retention=(
+                                active_injection_config.minimum_projection_energy_retention
+                            ),
+                            cg_maximum_iterations=(
+                                active_injection_config.null_space_cg_max_iterations
+                            ),
+                            cg_relative_tolerance=(
+                                active_injection_config.null_space_cg_relative_tolerance
+                            ),
+                            numerical_epsilon=(
+                                active_injection_config.null_space_numerical_epsilon
+                            ),
+                            maximum_qr_condition_number=(
+                                active_injection_config.maximum_qr_condition_number
+                            ),
+                            maximum_orthogonality_error=(
+                                active_injection_config.maximum_orthogonality_error
+                            ),
+                            qr_reference_solve_protocol=(
+                                active_injection_config.qr_reference_solve_protocol
+                            ),
+                            prg_version=active_injection_config.keyed_prg_version,
                         )
                         for branch_name, branch_field in active_branch_fields.items()
                     }
@@ -2912,6 +3337,9 @@ def run_semantic_watermark_runtime(
     def adversarial_detection_score(candidate: Any) -> float:
         """返回与最终内容主判和几何对齐救回一致的连续攻击目标。"""
 
+        noise_evidence_cursor = _public_detection_noise_evidence_cursor(
+            attention_extractor
+        )
         evaluated = detect_image_only_watermark(
             image=candidate,
             key_material=config.key_material,
@@ -2921,6 +3349,10 @@ def run_semantic_watermark_runtime(
                 attention_extractor if config.attention_geometry_enabled else None
             ),
             image_aligner=_align_image if config.image_alignment_enabled else None,
+        )
+        _discard_public_detection_noise_evidence_since(
+            attention_extractor,
+            noise_evidence_cursor,
         )
         scores = [evaluated.content.content_score]
         if evaluated.geometry_reliable and evaluated.aligned_content_score is not None:
@@ -2933,6 +3365,9 @@ def run_semantic_watermark_runtime(
         ("positive_source", watermarked_image, config.key_material),
         ("wrong_key_negative", watermarked_image, f"{config.key_material}|wrong-key"),
     ):
+        noise_evidence_cursor = _public_detection_noise_evidence_cursor(
+            attention_extractor
+        )
         detection = detect_image_only_watermark(
             image=image,
             key_material=detection_key,
@@ -2942,6 +3377,12 @@ def run_semantic_watermark_runtime(
             image_aligner=_align_image if config.image_alignment_enabled else None,
         )
         record = detection.to_record()
+        if config.attention_geometry_enabled:
+            _bind_public_detection_noise_qk_evidence(
+                record,
+                attention_extractor,
+                noise_evidence_cursor,
+            )
         record["run_id"] = run_id
         record["prompt_id"] = config.prompt_id
         record["split"] = config.split
@@ -2972,6 +3413,9 @@ def run_semantic_watermark_runtime(
             )
             image_key = f"{sample_role}_{attack_config.attack_id}"
             attacked_images[image_key] = attacked_image
+            noise_evidence_cursor = _public_detection_noise_evidence_cursor(
+                attention_extractor
+            )
             detection = detect_image_only_watermark(
                 image=attacked_image,
                 key_material=config.key_material,
@@ -2981,6 +3425,12 @@ def run_semantic_watermark_runtime(
                 image_aligner=_align_image if config.image_alignment_enabled else None,
             )
             record = detection.to_record()
+            if config.attention_geometry_enabled:
+                _bind_public_detection_noise_qk_evidence(
+                    record,
+                    attention_extractor,
+                    noise_evidence_cursor,
+                )
             record.update(
                 {
                     "run_id": run_id,
@@ -3025,6 +3475,9 @@ def run_semantic_watermark_runtime(
                 attacked_image = attack_execution.image
                 image_key = f"{sample_role}_{attack_spec.attack_id}"
                 attacked_images[image_key] = attacked_image
+                noise_evidence_cursor = _public_detection_noise_evidence_cursor(
+                    attention_extractor
+                )
                 detection = detect_image_only_watermark(
                     image=attacked_image,
                     key_material=config.key_material,
@@ -3034,6 +3487,12 @@ def run_semantic_watermark_runtime(
                     image_aligner=_align_image if config.image_alignment_enabled else None,
                 )
                 record = detection.to_record()
+                if config.attention_geometry_enabled:
+                    _bind_public_detection_noise_qk_evidence(
+                        record,
+                        attention_extractor,
+                        noise_evidence_cursor,
+                    )
                 record.update(
                     {
                         "run_id": run_id,
@@ -3105,6 +3564,9 @@ def run_semantic_watermark_runtime(
         metadata={
             **runtime_versions,
             "method_runtime": "real_scientific_operators",
+            "formal_method_config_digest": (
+                config.formal_method_config_digest
+            ),
             "method_definition": semantic_conditioned_latent_method_definition(),
             "method_definition_digest": (
                 semantic_conditioned_latent_method_definition_digest()
@@ -3113,6 +3575,14 @@ def run_semantic_watermark_runtime(
                 formal_randomization_identity
             ),
             "detector_input_access_mode": "image_key_public_model_only",
+            "public_detection_noise_prg_identity": detections[0][
+                "metadata"
+            ]["public_detection_noise_evidence_records"][0][
+                "public_detection_noise_prg_identity"
+            ],
+            "public_detection_noise_prg_identity_digest": detections[0][
+                "public_detection_noise_prg_identity_digest"
+            ],
             "supports_paper_claim": False,
             "paired_quality": paired_quality,
             "final_image_preservation": final_image_preservation,

@@ -52,7 +52,7 @@ def _flatten_feature(value: Any) -> Any:
 
 
 def _broadcast_axis_budget(latent: Any, axis_budget: Sequence[float] | Any | None) -> Any:
-    """把空间风险预算广播到完整 latent 形状。"""
+    """把每个样本的空间风险预算只沿 channel 维广播。"""
 
     torch = _torch()
     if axis_budget is None:
@@ -62,9 +62,12 @@ def _broadcast_axis_budget(latent: Any, axis_budget: Sequence[float] | Any | Non
         return budget
     if budget.numel() == latent.numel():
         return budget.reshape(latent.shape)
-    if latent.ndim >= 2 and budget.numel() == math.prod(latent.shape[-2:]):
-        view_shape = (1,) * (latent.ndim - 2) + tuple(latent.shape[-2:])
-        return budget.reshape(view_shape).expand(latent.shape)
+    if latent.ndim == 4:
+        batch, _, height, width = (int(value) for value in latent.shape)
+        if tuple(budget.shape) == (batch, height, width):
+            return budget.unsqueeze(1).expand(latent.shape)
+        if batch == 1 and budget.numel() == height * width:
+            return budget.reshape(1, 1, height, width).expand(latent.shape)
     raise ValueError("axis_budget 无法广播到 latent 形状")
 
 
@@ -191,8 +194,8 @@ def build_exact_jacobian_linearization(
     """构造可复用的完整 Jacobian JVP/VJP 线性算子。
 
     主路径同时使用 ``torch.func.linearize`` 与 ``torch.func.vjp``。若模型算子
-    明确不支持 ``torch.func`` 的前向自动微分, 则回退到逐次重算的 autograd
-    JVP/VJP。两条路径都使用真实自动微分, 不使用有限差分或低维特征草图。
+    明确不支持 ``torch.func`` 的前向自动微分, 则改用逐次重算的 autograd
+    JVP/VJP。两种精确执行方式都使用真实自动微分, 不使用有限差分或低维特征草图。
     """
 
     torch = _torch()
@@ -202,8 +205,8 @@ def build_exact_jacobian_linearization(
 
         return _flatten_feature(feature_function(candidate))
 
-    def autograd_compatibility() -> ExactJacobianLinearization:
-        """为不支持可复用线性化的算子提供精确重算路径。"""
+    def autograd_reexecution() -> ExactJacobianLinearization:
+        """为不支持可复用线性化的算子提供精确重算方式。"""
 
         primal = flattened(latent)
 
@@ -235,7 +238,7 @@ def build_exact_jacobian_linearization(
             primal=primal,
             jvp_function=autograd_jvp,
             vjp_function=autograd_vjp,
-            linearization_mode="torch_autograd_exact_jvp_vjp_compatibility",
+            linearization_mode="torch_autograd_exact_jvp_vjp_reexecution",
             latent_shape=tuple(int(value) for value in latent.shape),
         )
 
@@ -269,11 +272,11 @@ def build_exact_jacobian_linearization(
             )
         )
         if not unsupported_forward_ad:
-            # 显存不足、形状错误和模型实现缺陷必须直接暴露, 不能伪装成兼容性回退。
+            # 显存不足、形状错误和模型实现缺陷必须直接暴露, 不能改用另一执行方式隐藏错误。
             raise
-        return autograd_compatibility()
+        return autograd_reexecution()
     except NotImplementedError:
-        return autograd_compatibility()
+        return autograd_reexecution()
 
 
 @dataclass(frozen=True)
@@ -358,14 +361,14 @@ def solve_psd_conjugate_gradient(
     )
 
 
-_MAXIMUM_ORTHOGONALITY_ERROR = 1e-5
-
-
 @dataclass(frozen=True)
 class _ProjectedNullDirection:
     """保存一个风险支持种子方向的完整 Jacobian 约束投影。"""
 
+    routed: Any
+    routed_response: Any
     projected: Any
+    projected_response: Any
     reference_response_norm: float
     response_norm: float
     relative_response_residual: float
@@ -379,9 +382,16 @@ class JacobianNullSpaceResult:
 
     branch_name: str
     candidate_matrix: Any
-    response_matrix: Any
+    routed_candidate_matrix: Any
+    routed_candidate_response_matrix: Any
+    projected_direction_matrix: Any
+    projected_direction_response_matrix: Any
     latent_basis: Any
+    basis_response_matrix: Any
+    basis_reference_matrix: Any
+    basis_reference_response_matrix: Any
     column_response_norms: tuple[float, ...]
+    column_reference_response_norms: tuple[float, ...]
     column_relative_response_residuals: tuple[float, ...]
     projection_energy_retentions: tuple[float, ...]
     cg_iteration_counts: tuple[int, ...]
@@ -392,8 +402,12 @@ class JacobianNullSpaceResult:
     orthogonality_error: float
     candidate_matrix_content_sha256: str
     risk_budget_content_sha256: str
-    response_matrix_content_sha256: str
+    routed_candidate_response_matrix_content_sha256: str
+    projected_direction_matrix_content_sha256: str
+    projected_direction_response_matrix_content_sha256: str
     latent_basis_content_sha256: str
+    basis_response_matrix_content_sha256: str
+    basis_reference_response_matrix_content_sha256: str
     solver_digest: str
     metadata: dict[str, Any]
 
@@ -423,8 +437,11 @@ class JacobianNullSpaceResult:
                 else 0
             ),
             "evaluated_direction_indices": list(self.evaluated_direction_indices),
-            "response_width": int(self.response_matrix.shape[0]),
+            "response_width": int(self.basis_response_matrix.shape[0]),
             "column_response_norms": list(self.column_response_norms),
+            "column_reference_response_norms": list(
+                self.column_reference_response_norms
+            ),
             "column_relative_response_residuals": list(
                 self.column_relative_response_residuals
             ),
@@ -441,10 +458,22 @@ class JacobianNullSpaceResult:
                 self.candidate_matrix_content_sha256
             ),
             "risk_budget_content_sha256": self.risk_budget_content_sha256,
-            "response_matrix_content_sha256": (
-                self.response_matrix_content_sha256
+            "routed_candidate_response_matrix_content_sha256": (
+                self.routed_candidate_response_matrix_content_sha256
+            ),
+            "projected_direction_matrix_content_sha256": (
+                self.projected_direction_matrix_content_sha256
+            ),
+            "projected_direction_response_matrix_content_sha256": (
+                self.projected_direction_response_matrix_content_sha256
             ),
             "latent_basis_content_sha256": self.latent_basis_content_sha256,
+            "basis_response_matrix_content_sha256": (
+                self.basis_response_matrix_content_sha256
+            ),
+            "basis_reference_response_matrix_content_sha256": (
+                self.basis_reference_response_matrix_content_sha256
+            ),
             "solver_digest": self.solver_digest,
             "metadata": self.metadata,
         }
@@ -461,6 +490,12 @@ def solve_jacobian_null_space(
     minimum_projection_energy_retention: float = 0.01,
     cg_maximum_iterations: int = 64,
     cg_relative_tolerance: float = 1e-6,
+    numerical_epsilon: float = 1e-12,
+    maximum_qr_condition_number: float = 1e6,
+    maximum_orthogonality_error: float = 1e-5,
+    qr_reference_solve_protocol: str = (
+        "right_upper_triangular_solve_without_explicit_inverse_v1"
+    ),
 ) -> JacobianNullSpaceResult:
     """通过完整 Jacobian JVP/VJP 与无阻尼 PSD-CG 求解 Null Space。
 
@@ -479,13 +514,29 @@ def solve_jacobian_null_space(
         raise ValueError("maximum_relative_response_residual 必须位于 (0, 1)")
     if not 0.0 < minimum_projection_energy_retention <= 1.0:
         raise ValueError("minimum_projection_energy_retention 必须位于 (0, 1]")
+    if not math.isfinite(numerical_epsilon) or numerical_epsilon <= 0.0:
+        raise ValueError("numerical_epsilon 必须为正有限数")
+    if (
+        not math.isfinite(maximum_qr_condition_number)
+        or maximum_qr_condition_number <= 1.0
+    ):
+        raise ValueError("maximum_qr_condition_number 必须为大于1的有限数")
+    if (
+        not math.isfinite(maximum_orthogonality_error)
+        or maximum_orthogonality_error <= 0.0
+    ):
+        raise ValueError("maximum_orthogonality_error 必须为正有限数")
+    if qr_reference_solve_protocol != (
+        "right_upper_triangular_solve_without_explicit_inverse_v1"
+    ):
+        raise ValueError("QR 逐列参考必须使用冻结的右侧上三角求解协议")
     if tuple(joint_feature_linearization.latent_shape) != tuple(latent.shape):
         raise ValueError("完整 Jacobian 线性化的 latent 形状与求解点不一致")
 
     budget = _broadcast_axis_budget(latent, risk_budget).detach().float()
     if not bool(torch.isfinite(budget).all()) or bool((budget < 0.0).any()):
         raise ValueError("risk_budget 必须为有限非负值")
-    if float(torch.linalg.norm(budget).item()) <= 1e-12:
+    if float(torch.linalg.norm(budget).item()) <= numerical_epsilon:
         raise ValueError("risk_budget 不得全部为零")
     budget_square = budget.square()
 
@@ -495,7 +546,7 @@ def solve_jacobian_null_space(
         resolved_direction = direction.reshape(latent.shape).detach().float()
         routed_direction = budget * resolved_direction
         routed_norm = float(torch.linalg.norm(routed_direction).item())
-        if routed_norm <= 1e-12:
+        if routed_norm <= numerical_epsilon:
             raise RuntimeError("风险预算后的 Null Space 种子方向能量为零")
         right_hand_side = joint_feature_linearization.apply(routed_direction).float()
         reference_norm = float(torch.linalg.norm(right_hand_side).item())
@@ -527,7 +578,7 @@ def solve_jacobian_null_space(
         energy_retention = projected_energy / max(routed_energy, 1e-24)
         response = joint_feature_linearization.apply(projected).float().detach()
         response_norm = float(torch.linalg.norm(response).item())
-        relative_residual = response_norm / max(reference_norm, 1e-12)
+        relative_residual = response_norm / max(reference_norm, numerical_epsilon)
         if not math.isfinite(relative_residual) or (
             relative_residual > maximum_relative_response_residual
         ):
@@ -537,7 +588,10 @@ def solve_jacobian_null_space(
         ):
             raise RuntimeError("约束投影方向的能量保留比例低于正式门禁")
         return _ProjectedNullDirection(
+            routed=routed_direction,
+            routed_response=right_hand_side.detach(),
             projected=projected,
+            projected_response=response,
             reference_response_norm=reference_norm,
             response_norm=response_norm,
             relative_response_residual=relative_residual,
@@ -556,7 +610,7 @@ def solve_jacobian_null_space(
         for existing in independent_columns:
             orthogonal = orthogonal - existing * torch.dot(existing, orthogonal)
         orthogonal_norm = torch.linalg.norm(orthogonal)
-        if float(orthogonal_norm.item()) <= 1e-7:
+        if float(orthogonal_norm.item()) <= numerical_epsilon:
             continue
         independent_columns.append(orthogonal / orthogonal_norm)
         accepted.append(result)
@@ -566,41 +620,101 @@ def solve_jacobian_null_space(
     if len(accepted) != null_rank:
         raise RuntimeError("完整 Jacobian 约束投影未形成指定秩的独立 Null Space")
 
-    latent_basis_raw = torch.stack(
+    routed_candidate_matrix = torch.stack(
+        tuple(item.routed.reshape(-1).float() for item in accepted),
+        dim=1,
+    ).detach()
+    routed_candidate_response_matrix = torch.stack(
+        tuple(item.routed_response.reshape(-1).float() for item in accepted),
+        dim=1,
+    ).detach()
+    projected_direction_matrix = torch.stack(
         tuple(item.projected.reshape(-1).float() for item in accepted),
         dim=1,
+    ).detach()
+    projected_direction_response_matrix = torch.stack(
+        tuple(item.projected_response.reshape(-1).float() for item in accepted),
+        dim=1,
+    ).detach()
+    latent_basis, qr_factor = torch.linalg.qr(
+        projected_direction_matrix,
+        mode="reduced",
     )
-    latent_basis, _ = torch.linalg.qr(latent_basis_raw, mode="reduced")
+    for column_index in range(null_rank):
+        nonzero_positions = torch.nonzero(
+            latent_basis[:, column_index].abs() > numerical_epsilon,
+            as_tuple=False,
+        ).reshape(-1)
+        if nonzero_positions.numel() == 0:
+            raise RuntimeError("QR 基底列没有可用的符号锚点")
+        anchor_index = int(nonzero_positions[0].item())
+        if float(latent_basis[anchor_index, column_index].item()) < 0.0:
+            latent_basis[:, column_index] = -latent_basis[:, column_index]
+            qr_factor[column_index, :] = -qr_factor[column_index, :]
     latent_basis = latent_basis.detach()
-    response_columns = tuple(
+    qr_factor = qr_factor.detach()
+    qr_diagonal = torch.diagonal(qr_factor).abs()
+    if bool((qr_diagonal <= numerical_epsilon).any()):
+        raise RuntimeError("QR 上三角因子的对角元素低于冻结数值门禁")
+    qr_condition_number = float(torch.linalg.cond(qr_factor).item())
+    if (
+        not math.isfinite(qr_condition_number)
+        or qr_condition_number > maximum_qr_condition_number
+    ):
+        raise RuntimeError("QR 上三角因子的条件数超过冻结门禁")
+    basis_response_columns = tuple(
         joint_feature_linearization.apply(
             latent_basis[:, index].reshape(latent.shape)
         ).float().detach()
         for index in range(null_rank)
     )
-    response_matrix = torch.stack(response_columns, dim=1).detach()
-    response_reference = math.sqrt(
-        sum(item.reference_response_norm**2 for item in accepted) / null_rank
+    basis_response_matrix = torch.stack(
+        basis_response_columns,
+        dim=1,
+    ).detach()
+    basis_reference_matrix = torch.linalg.solve_triangular(
+        qr_factor.transpose(0, 1),
+        routed_candidate_matrix.transpose(0, 1),
+        upper=False,
+    ).transpose(0, 1).detach()
+    basis_reference_response_columns = tuple(
+        joint_feature_linearization.apply(
+            basis_reference_matrix[:, index].reshape(latent.shape)
+        ).float().detach()
+        for index in range(null_rank)
     )
+    basis_reference_response_matrix = torch.stack(
+        basis_reference_response_columns,
+        dim=1,
+    ).detach()
     column_response_norms = tuple(
-        float(torch.linalg.norm(column).item()) for column in response_columns
+        float(torch.linalg.norm(column).item())
+        for column in basis_response_columns
+    )
+    column_reference_response_norms = tuple(
+        float(torch.linalg.norm(column).item())
+        for column in basis_reference_response_columns
     )
     column_relative_response_residuals = tuple(
-        value / max(response_reference, 1e-12) for value in column_response_norms
+        response_norm / max(reference_norm, numerical_epsilon)
+        for response_norm, reference_norm in zip(
+            column_response_norms,
+            column_reference_response_norms,
+        )
     )
     if any(
         not math.isfinite(value) or value > maximum_relative_response_residual
         for value in column_relative_response_residuals
     ):
         raise RuntimeError("QR 后 Null Space 基底的完整 Jacobian 逐列残差超过正式门禁")
-    response_residual = float(torch.linalg.norm(response_matrix).item())
+    response_residual = float(torch.linalg.norm(basis_response_matrix).item())
     relative_response_residual = max(column_relative_response_residuals)
     identity = torch.eye(null_rank, device=latent_basis.device, dtype=latent_basis.dtype)
     orthogonality_error = float(
         torch.linalg.norm(latent_basis.transpose(0, 1) @ latent_basis - identity).item()
     )
     if not math.isfinite(orthogonality_error) or (
-        orthogonality_error > _MAXIMUM_ORTHOGONALITY_ERROR
+        orthogonality_error > maximum_orthogonality_error
     ):
         raise RuntimeError("完整 Jacobian Null Space 基底正交误差超过正式门禁")
     projection_energy_retentions = tuple(
@@ -610,15 +724,34 @@ def solve_jacobian_null_space(
     cg_relative_residuals = tuple(item.cg_result.relative_residual for item in accepted)
     candidate_matrix_content_sha256 = tensor_content_sha256(candidate_matrix)
     risk_budget_content_sha256 = tensor_content_sha256(budget)
-    response_matrix_content_sha256 = tensor_content_sha256(response_matrix)
+    routed_candidate_response_matrix_content_sha256 = tensor_content_sha256(
+        routed_candidate_response_matrix
+    )
+    projected_direction_matrix_content_sha256 = tensor_content_sha256(
+        projected_direction_matrix
+    )
+    projected_direction_response_matrix_content_sha256 = tensor_content_sha256(
+        projected_direction_response_matrix
+    )
     latent_basis_content_sha256 = tensor_content_sha256(latent_basis)
+    basis_response_matrix_content_sha256 = tensor_content_sha256(
+        basis_response_matrix
+    )
+    basis_reference_response_matrix_content_sha256 = tensor_content_sha256(
+        basis_reference_response_matrix
+    )
     digest_payload = {
         "branch_name": branch_name,
         "candidate_shape": tuple(int(value) for value in candidate_matrix.shape),
-        "response_shape": tuple(int(value) for value in response_matrix.shape),
+        "response_shape": tuple(
+            int(value) for value in basis_response_matrix.shape
+        ),
         "null_rank": null_rank,
         "evaluated_direction_indices": accepted_indices,
         "column_response_norms": [round(value, 12) for value in column_response_norms],
+        "column_reference_response_norms": [
+            round(value, 12) for value in column_reference_response_norms
+        ],
         "column_relative_response_residuals": [
             round(value, 12) for value in column_relative_response_residuals
         ],
@@ -632,18 +765,42 @@ def solve_jacobian_null_space(
         "response_residual": round(response_residual, 12),
         "relative_response_residual": round(relative_response_residual, 12),
         "orthogonality_error": round(orthogonality_error, 12),
+        "qr_condition_number": round(qr_condition_number, 12),
         "candidate_matrix_content_sha256": candidate_matrix_content_sha256,
         "risk_budget_content_sha256": risk_budget_content_sha256,
-        "response_matrix_content_sha256": response_matrix_content_sha256,
+        "routed_candidate_response_matrix_content_sha256": (
+            routed_candidate_response_matrix_content_sha256
+        ),
+        "projected_direction_matrix_content_sha256": (
+            projected_direction_matrix_content_sha256
+        ),
+        "projected_direction_response_matrix_content_sha256": (
+            projected_direction_response_matrix_content_sha256
+        ),
         "latent_basis_content_sha256": latent_basis_content_sha256,
+        "basis_response_matrix_content_sha256": (
+            basis_response_matrix_content_sha256
+        ),
+        "basis_reference_response_matrix_content_sha256": (
+            basis_reference_response_matrix_content_sha256
+        ),
         "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
     }
     return JacobianNullSpaceResult(
         branch_name=branch_name,
         candidate_matrix=candidate_matrix,
-        response_matrix=response_matrix,
+        routed_candidate_matrix=routed_candidate_matrix,
+        routed_candidate_response_matrix=routed_candidate_response_matrix,
+        projected_direction_matrix=projected_direction_matrix,
+        projected_direction_response_matrix=(
+            projected_direction_response_matrix
+        ),
         latent_basis=latent_basis,
+        basis_response_matrix=basis_response_matrix,
+        basis_reference_matrix=basis_reference_matrix,
+        basis_reference_response_matrix=basis_reference_response_matrix,
         column_response_norms=column_response_norms,
+        column_reference_response_norms=column_reference_response_norms,
         column_relative_response_residuals=column_relative_response_residuals,
         projection_energy_retentions=projection_energy_retentions,
         cg_iteration_counts=cg_iteration_counts,
@@ -654,13 +811,29 @@ def solve_jacobian_null_space(
         orthogonality_error=orthogonality_error,
         candidate_matrix_content_sha256=candidate_matrix_content_sha256,
         risk_budget_content_sha256=risk_budget_content_sha256,
-        response_matrix_content_sha256=response_matrix_content_sha256,
+        routed_candidate_response_matrix_content_sha256=(
+            routed_candidate_response_matrix_content_sha256
+        ),
+        projected_direction_matrix_content_sha256=(
+            projected_direction_matrix_content_sha256
+        ),
+        projected_direction_response_matrix_content_sha256=(
+            projected_direction_response_matrix_content_sha256
+        ),
         latent_basis_content_sha256=latent_basis_content_sha256,
+        basis_response_matrix_content_sha256=(
+            basis_response_matrix_content_sha256
+        ),
+        basis_reference_response_matrix_content_sha256=(
+            basis_reference_response_matrix_content_sha256
+        ),
         solver_digest=build_stable_digest(digest_payload),
         metadata={
             "jvp_mode": joint_feature_linearization.linearization_mode,
             "solver": "matrix_free_full_jacobian_psd_cg",
-            "latent_basis_formula": "qr(Bd - B^2 J^T pinv(J B^2 J^T) J B d)",
+            "latent_basis_formula": (
+                "qr(Bd - B^2 J^T solve_psd_cg(J B^2 J^T, J B d))"
+            ),
             "full_feature_jvp": True,
             "full_feature_vjp": True,
             "cg_damping": 0.0,
@@ -672,7 +845,11 @@ def solve_jacobian_null_space(
             "minimum_projection_energy_retention": (
                 minimum_projection_energy_retention
             ),
-            "maximum_orthogonality_error": _MAXIMUM_ORTHOGONALITY_ERROR,
+            "null_space_numerical_epsilon": numerical_epsilon,
+            "maximum_qr_condition_number": maximum_qr_condition_number,
+            "qr_condition_number": qr_condition_number,
+            "maximum_orthogonality_error": maximum_orthogonality_error,
+            "qr_reference_solve_protocol": qr_reference_solve_protocol,
             "risk_budget_operator": "explicit_diagonal_B",
             "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
         },

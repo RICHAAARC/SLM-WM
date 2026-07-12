@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import hashlib
 import json
 import math
@@ -16,7 +16,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
+from experiments.protocol.method_runtime_config import (
+    FORMAL_METHOD_PACKAGE_ROOT,
+    load_formal_method_runtime_config,
+)
 from experiments.protocol.formal_randomization import (
     DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
     build_formal_randomization_identity,
@@ -36,7 +39,9 @@ DEFAULT_TARGET_FPR = 0.1
 DEFAULT_MINIMUM_CLEAN_NEGATIVE_COUNT = 34
 DEFAULT_DATASET_LEVEL_QUALITY_MINIMUM_COUNT = 70
 DEFAULT_DRIVE_ROOT = "/content/drive/MyDrive/SLM"
-_FORMAL_METHOD_DEFAULTS = load_formal_method_runtime_config(".")
+_FORMAL_METHOD_DEFAULTS = load_formal_method_runtime_config(
+    FORMAL_METHOD_PACKAGE_ROOT
+)
 _FORMAL_RANDOMIZATION_DEFAULTS = formal_randomization_protocol_record()
 DEFAULT_FORMAL_RANDOMIZATION_PROTOCOL_DIGEST = (
     _FORMAL_RANDOMIZATION_DEFAULTS["formal_randomization_protocol_digest"]
@@ -44,14 +49,84 @@ DEFAULT_FORMAL_RANDOMIZATION_PROTOCOL_DIGEST = (
 DEFAULT_FORMAL_RANDOMIZATION_REPEAT_COUNT = int(
     _FORMAL_RANDOMIZATION_DEFAULTS["crossed_repeat_count"]
 )
+DEFAULT_FORMAL_METHOD_CONFIG_DIGEST = (
+    _FORMAL_METHOD_DEFAULTS.formal_method_config_digest
+)
+DEFAULT_PIPELINE_CLASS_NAME = _FORMAL_METHOD_DEFAULTS.pipeline_class_name
+DEFAULT_VAE_CLASS_NAME = _FORMAL_METHOD_DEFAULTS.vae_class_name
+DEFAULT_TRANSFORMER_CLASS_NAME = _FORMAL_METHOD_DEFAULTS.transformer_class_name
+DEFAULT_SCHEDULER_CLASS_NAME = _FORMAL_METHOD_DEFAULTS.scheduler_class_name
+DEFAULT_VAE_SCALING_FACTOR = _FORMAL_METHOD_DEFAULTS.vae_scaling_factor
+DEFAULT_VAE_SHIFT_FACTOR = _FORMAL_METHOD_DEFAULTS.vae_shift_factor
+DEFAULT_LATENT_TORCH_DTYPE = _FORMAL_METHOD_DEFAULTS.latent_torch_dtype
+DEFAULT_VISION_TORCH_DTYPE = _FORMAL_METHOD_DEFAULTS.vision_torch_dtype
 DEFAULT_INFERENCE_STEPS = _FORMAL_METHOD_DEFAULTS.inference_steps
 DEFAULT_GUIDANCE_SCALE = _FORMAL_METHOD_DEFAULTS.guidance_scale
+DEFAULT_RISK_SIGNAL_CALIBRATION_PROTOCOL = (
+    _FORMAL_METHOD_DEFAULTS.risk_signal_calibration_protocol
+)
+DEFAULT_RISK_IMAGE_SIGNAL_INTERPOLATION_MODE = (
+    _FORMAL_METHOD_DEFAULTS.risk_image_signal_interpolation_mode
+)
+DEFAULT_RISK_IMAGE_SIGNAL_ALIGN_CORNERS = (
+    _FORMAL_METHOD_DEFAULTS.risk_image_signal_align_corners
+)
+DEFAULT_RISK_ATTENTION_SIGNAL_INTERPOLATION_MODE = (
+    _FORMAL_METHOD_DEFAULTS.risk_attention_signal_interpolation_mode
+)
+DEFAULT_RISK_ATTENTION_SIGNAL_ALIGN_CORNERS = (
+    _FORMAL_METHOD_DEFAULTS.risk_attention_signal_align_corners
+)
+DEFAULT_RISK_NEUTRAL_TEXTURE_VALUE = (
+    _FORMAL_METHOD_DEFAULTS.risk_neutral_texture_value
+)
+DEFAULT_RISK_ELIGIBILITY_COMPARISON = (
+    _FORMAL_METHOD_DEFAULTS.risk_eligibility_comparison
+)
+DEFAULT_RISK_BUDGET_BROADCAST_PROTOCOL = (
+    _FORMAL_METHOD_DEFAULTS.risk_budget_broadcast_protocol
+)
+DEFAULT_RISK_ZERO_SUPPORT_PROTOCOL = (
+    _FORMAL_METHOD_DEFAULTS.risk_zero_support_protocol
+)
+DEFAULT_RISK_BOUNDED_SCALE_PROTOCOL = (
+    _FORMAL_METHOD_DEFAULTS.risk_bounded_scale_protocol
+)
+DEFAULT_RISK_BOUNDED_SCALE_DIRECTION_EPSILON = (
+    _FORMAL_METHOD_DEFAULTS.risk_bounded_scale_direction_epsilon
+)
+DEFAULT_LF_CONTENT_RISK_CONFIG = asdict(
+    _FORMAL_METHOD_DEFAULTS.lf_content_risk_config
+)
+DEFAULT_TAIL_ROBUST_RISK_CONFIG = asdict(
+    _FORMAL_METHOD_DEFAULTS.tail_robust_risk_config
+)
+DEFAULT_ATTENTION_GEOMETRY_RISK_CONFIG = asdict(
+    _FORMAL_METHOD_DEFAULTS.attention_geometry_risk_config
+)
 DEFAULT_ATTENTION_INJECTION_STEPS = _FORMAL_METHOD_DEFAULTS.injection_step_indices
 DEFAULT_JACOBIAN_CANDIDATE_COUNT = _FORMAL_METHOD_DEFAULTS.jacobian_candidate_count
 DEFAULT_NULL_SPACE_RANK = _FORMAL_METHOD_DEFAULTS.null_space_rank
+DEFAULT_NULL_SPACE_NUMERICAL_EPSILON = (
+    _FORMAL_METHOD_DEFAULTS.null_space_numerical_epsilon
+)
+DEFAULT_MAXIMUM_QR_CONDITION_NUMBER = (
+    _FORMAL_METHOD_DEFAULTS.maximum_qr_condition_number
+)
+DEFAULT_MAXIMUM_ORTHOGONALITY_ERROR = (
+    _FORMAL_METHOD_DEFAULTS.maximum_orthogonality_error
+)
+DEFAULT_QR_REFERENCE_SOLVE_PROTOCOL = (
+    _FORMAL_METHOD_DEFAULTS.qr_reference_solve_protocol
+)
 DEFAULT_LF_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.lf_relative_strength
 DEFAULT_TAIL_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.tail_relative_strength
 DEFAULT_ATTENTION_RELATIVE_STRENGTH = _FORMAL_METHOD_DEFAULTS.attention_relative_strength
+DEFAULT_LF_KERNEL_SIZE = _FORMAL_METHOD_DEFAULTS.lf_kernel_size
+DEFAULT_LF_STRIDE = _FORMAL_METHOD_DEFAULTS.lf_stride
+DEFAULT_LF_PADDING = _FORMAL_METHOD_DEFAULTS.lf_padding
+DEFAULT_LF_BOUNDARY_MODE = _FORMAL_METHOD_DEFAULTS.lf_boundary_mode
+DEFAULT_LF_COUNT_INCLUDE_PAD = _FORMAL_METHOD_DEFAULTS.lf_count_include_pad
 DEFAULT_ATTENTION_STABLE_TOKEN_FRACTION = (
     _FORMAL_METHOD_DEFAULTS.attention_stable_token_fraction
 )
@@ -60,6 +135,12 @@ DEFAULT_ATTENTION_UNSTABLE_PAIR_WEIGHT = (
 )
 DEFAULT_ATTENTION_RELATION_COMPONENT_WEIGHTS = (
     _FORMAL_METHOD_DEFAULTS.attention_relation_component_weights
+)
+DEFAULT_ATTENTION_BACKTRACKING_FACTOR = (
+    _FORMAL_METHOD_DEFAULTS.attention_backtracking_factor
+)
+DEFAULT_ATTENTION_BACKTRACKING_MAXIMUM_STEPS = (
+    _FORMAL_METHOD_DEFAULTS.attention_backtracking_maximum_steps
 )
 DEFAULT_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN = (
     _FORMAL_METHOD_DEFAULTS.minimum_final_image_attention_score_gain
@@ -70,6 +151,24 @@ DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION = _FORMAL_METHOD_DEFAULTS.minimum_pr
 DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL = _FORMAL_METHOD_DEFAULTS.maximum_relative_response_residual
 DEFAULT_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE = (
     _FORMAL_METHOD_DEFAULTS.maximum_quantized_write_relative_jacobian_response
+)
+DEFAULT_QUANTIZED_BRANCH_COMPOSITION_PROTOCOL = (
+    _FORMAL_METHOD_DEFAULTS.quantized_branch_composition_protocol
+)
+DEFAULT_QUANTIZED_BRANCH_COMPOSITION_ORDER = (
+    _FORMAL_METHOD_DEFAULTS.quantized_branch_composition_order
+)
+DEFAULT_COMBINED_BUDGET_ENVELOPE_RULE = (
+    _FORMAL_METHOD_DEFAULTS.combined_budget_envelope_rule
+)
+DEFAULT_QUANTIZED_BUDGET_ENVELOPE_ABSOLUTE_TOLERANCE = (
+    _FORMAL_METHOD_DEFAULTS.quantized_budget_envelope_absolute_tolerance
+)
+DEFAULT_QUANTIZED_BUDGET_ENVELOPE_BACKTRACKING_FACTOR = (
+    _FORMAL_METHOD_DEFAULTS.quantized_budget_envelope_backtracking_factor
+)
+DEFAULT_QUANTIZED_BUDGET_ENVELOPE_BACKTRACKING_MAXIMUM_STEPS = (
+    _FORMAL_METHOD_DEFAULTS.quantized_budget_envelope_backtracking_maximum_steps
 )
 DEFAULT_NULL_SPACE_CG_MAX_ITERATIONS = (
     _FORMAL_METHOD_DEFAULTS.null_space_cg_max_iterations
@@ -83,6 +182,21 @@ DEFAULT_MINIMUM_SEMANTIC_PRESERVATION_COSINE = (
 DEFAULT_MAXIMUM_HANDCRAFTED_STRUCTURE_FEATURE_RELATIVE_DRIFT = (
     _FORMAL_METHOD_DEFAULTS.maximum_handcrafted_structure_feature_relative_drift
 )
+DEFAULT_PUBLIC_DETECTION_SCHEDULE_INDEX = (
+    _FORMAL_METHOD_DEFAULTS.public_detection_schedule_index
+)
+DEFAULT_PUBLIC_DETECTION_NOISE_PRG_PROTOCOL = (
+    _FORMAL_METHOD_DEFAULTS.public_detection_noise_prg_protocol
+)
+DEFAULT_PUBLIC_DETECTION_NOISE_DOMAIN = (
+    _FORMAL_METHOD_DEFAULTS.public_detection_noise_domain
+)
+DEFAULT_PUBLIC_DETECTION_CONDITIONING_PROTOCOL = (
+    _FORMAL_METHOD_DEFAULTS.public_detection_conditioning_protocol
+)
+DEFAULT_PUBLIC_DETECTION_CONDITION_TEXT = (
+    _FORMAL_METHOD_DEFAULTS.public_detection_condition_text
+)
 DEFAULT_MAX_ATTENTION_TOKENS = _FORMAL_METHOD_DEFAULTS.max_attention_tokens
 DEFAULT_ATTENTION_MODULE_NAMES = _FORMAL_METHOD_DEFAULTS.attention_module_names
 DEFAULT_ATTENTION_COORDINATE_CONVENTION = (
@@ -92,32 +206,8 @@ DEFAULT_ATTENTION_GRID_ALIGN_CORNERS = (
     _FORMAL_METHOD_DEFAULTS.attention_grid_align_corners
 )
 UNBOUNDED_LIMIT_TOKENS = {"", "all", "none", "unlimited"}
-SHARED_METHOD_SETTING_FIELDS = (
-    "inference_steps",
-    "guidance_scale",
-    "attention_injection_steps",
-    "jacobian_candidate_count",
-    "null_space_rank",
-    "lf_relative_strength",
-    "tail_relative_strength",
-    "attention_relative_strength",
-    "attention_stable_token_fraction",
-    "attention_unstable_pair_weight",
-    "attention_relation_component_weights",
-    "minimum_final_image_attention_score_gain",
-    "tail_fraction",
-    "keyed_prg_version",
-    "minimum_projection_energy_retention",
-    "maximum_relative_response_residual",
-    "maximum_quantized_write_relative_jacobian_response",
-    "null_space_cg_max_iterations",
-    "null_space_cg_relative_tolerance",
-    "minimum_semantic_preservation_cosine",
-    "maximum_handcrafted_structure_feature_relative_drift",
-    "max_attention_tokens",
-    "attention_module_names",
-    "attention_coordinate_convention",
-    "attention_grid_align_corners",
+SHARED_METHOD_SETTING_FIELDS = tuple(
+    _FORMAL_METHOD_DEFAULTS.paper_method_settings()
 )
 SHARED_EXPERIMENT_SETTING_FIELDS = (
     "randomization_repeat_id",
@@ -185,14 +275,66 @@ class PaperRunConfig:
     formal_randomization_repeat_count: int = (
         DEFAULT_FORMAL_RANDOMIZATION_REPEAT_COUNT
     )
+    formal_method_config_digest: str = DEFAULT_FORMAL_METHOD_CONFIG_DIGEST
+    pipeline_class_name: str = DEFAULT_PIPELINE_CLASS_NAME
+    vae_class_name: str = DEFAULT_VAE_CLASS_NAME
+    transformer_class_name: str = DEFAULT_TRANSFORMER_CLASS_NAME
+    scheduler_class_name: str = DEFAULT_SCHEDULER_CLASS_NAME
+    vae_scaling_factor: float = DEFAULT_VAE_SCALING_FACTOR
+    vae_shift_factor: float = DEFAULT_VAE_SHIFT_FACTOR
+    latent_torch_dtype: str = DEFAULT_LATENT_TORCH_DTYPE
+    vision_torch_dtype: str = DEFAULT_VISION_TORCH_DTYPE
     inference_steps: int = DEFAULT_INFERENCE_STEPS
     guidance_scale: float = DEFAULT_GUIDANCE_SCALE
+    risk_signal_calibration_protocol: str = (
+        DEFAULT_RISK_SIGNAL_CALIBRATION_PROTOCOL
+    )
+    risk_image_signal_interpolation_mode: str = (
+        DEFAULT_RISK_IMAGE_SIGNAL_INTERPOLATION_MODE
+    )
+    risk_image_signal_align_corners: bool = (
+        DEFAULT_RISK_IMAGE_SIGNAL_ALIGN_CORNERS
+    )
+    risk_attention_signal_interpolation_mode: str = (
+        DEFAULT_RISK_ATTENTION_SIGNAL_INTERPOLATION_MODE
+    )
+    risk_attention_signal_align_corners: bool = (
+        DEFAULT_RISK_ATTENTION_SIGNAL_ALIGN_CORNERS
+    )
+    risk_neutral_texture_value: float = DEFAULT_RISK_NEUTRAL_TEXTURE_VALUE
+    risk_eligibility_comparison: str = DEFAULT_RISK_ELIGIBILITY_COMPARISON
+    risk_budget_broadcast_protocol: str = (
+        DEFAULT_RISK_BUDGET_BROADCAST_PROTOCOL
+    )
+    risk_zero_support_protocol: str = DEFAULT_RISK_ZERO_SUPPORT_PROTOCOL
+    risk_bounded_scale_protocol: str = DEFAULT_RISK_BOUNDED_SCALE_PROTOCOL
+    risk_bounded_scale_direction_epsilon: float = (
+        DEFAULT_RISK_BOUNDED_SCALE_DIRECTION_EPSILON
+    )
+    lf_content_risk_config: dict[str, Any] = field(
+        default_factory=lambda: dict(DEFAULT_LF_CONTENT_RISK_CONFIG)
+    )
+    tail_robust_risk_config: dict[str, Any] = field(
+        default_factory=lambda: dict(DEFAULT_TAIL_ROBUST_RISK_CONFIG)
+    )
+    attention_geometry_risk_config: dict[str, Any] = field(
+        default_factory=lambda: dict(DEFAULT_ATTENTION_GEOMETRY_RISK_CONFIG)
+    )
     attention_injection_steps: tuple[int, ...] = DEFAULT_ATTENTION_INJECTION_STEPS
     jacobian_candidate_count: int = DEFAULT_JACOBIAN_CANDIDATE_COUNT
     null_space_rank: int = DEFAULT_NULL_SPACE_RANK
+    null_space_numerical_epsilon: float = DEFAULT_NULL_SPACE_NUMERICAL_EPSILON
+    maximum_qr_condition_number: float = DEFAULT_MAXIMUM_QR_CONDITION_NUMBER
+    maximum_orthogonality_error: float = DEFAULT_MAXIMUM_ORTHOGONALITY_ERROR
+    qr_reference_solve_protocol: str = DEFAULT_QR_REFERENCE_SOLVE_PROTOCOL
     lf_relative_strength: float = DEFAULT_LF_RELATIVE_STRENGTH
     tail_relative_strength: float = DEFAULT_TAIL_RELATIVE_STRENGTH
     attention_relative_strength: float = DEFAULT_ATTENTION_RELATIVE_STRENGTH
+    lf_kernel_size: int = DEFAULT_LF_KERNEL_SIZE
+    lf_stride: int = DEFAULT_LF_STRIDE
+    lf_padding: int = DEFAULT_LF_PADDING
+    lf_boundary_mode: str = DEFAULT_LF_BOUNDARY_MODE
+    lf_count_include_pad: bool = DEFAULT_LF_COUNT_INCLUDE_PAD
     attention_stable_token_fraction: float = (
         DEFAULT_ATTENTION_STABLE_TOKEN_FRACTION
     )
@@ -201,6 +343,10 @@ class PaperRunConfig:
     )
     attention_relation_component_weights: tuple[float, ...] = (
         DEFAULT_ATTENTION_RELATION_COMPONENT_WEIGHTS
+    )
+    attention_backtracking_factor: float = DEFAULT_ATTENTION_BACKTRACKING_FACTOR
+    attention_backtracking_maximum_steps: int = (
+        DEFAULT_ATTENTION_BACKTRACKING_MAXIMUM_STEPS
     )
     minimum_final_image_attention_score_gain: float = (
         DEFAULT_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN
@@ -212,6 +358,22 @@ class PaperRunConfig:
     maximum_quantized_write_relative_jacobian_response: float = (
         DEFAULT_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE
     )
+    quantized_branch_composition_protocol: str = (
+        DEFAULT_QUANTIZED_BRANCH_COMPOSITION_PROTOCOL
+    )
+    quantized_branch_composition_order: tuple[str, ...] = (
+        DEFAULT_QUANTIZED_BRANCH_COMPOSITION_ORDER
+    )
+    combined_budget_envelope_rule: str = DEFAULT_COMBINED_BUDGET_ENVELOPE_RULE
+    quantized_budget_envelope_absolute_tolerance: float = (
+        DEFAULT_QUANTIZED_BUDGET_ENVELOPE_ABSOLUTE_TOLERANCE
+    )
+    quantized_budget_envelope_backtracking_factor: float = (
+        DEFAULT_QUANTIZED_BUDGET_ENVELOPE_BACKTRACKING_FACTOR
+    )
+    quantized_budget_envelope_backtracking_maximum_steps: int = (
+        DEFAULT_QUANTIZED_BUDGET_ENVELOPE_BACKTRACKING_MAXIMUM_STEPS
+    )
     null_space_cg_max_iterations: int = DEFAULT_NULL_SPACE_CG_MAX_ITERATIONS
     null_space_cg_relative_tolerance: float = (
         DEFAULT_NULL_SPACE_CG_RELATIVE_TOLERANCE
@@ -221,6 +383,21 @@ class PaperRunConfig:
     )
     maximum_handcrafted_structure_feature_relative_drift: float = (
         DEFAULT_MAXIMUM_HANDCRAFTED_STRUCTURE_FEATURE_RELATIVE_DRIFT
+    )
+    public_detection_schedule_index: int = (
+        DEFAULT_PUBLIC_DETECTION_SCHEDULE_INDEX
+    )
+    public_detection_noise_prg_protocol: str = (
+        DEFAULT_PUBLIC_DETECTION_NOISE_PRG_PROTOCOL
+    )
+    public_detection_noise_domain: str = (
+        DEFAULT_PUBLIC_DETECTION_NOISE_DOMAIN
+    )
+    public_detection_conditioning_protocol: str = (
+        DEFAULT_PUBLIC_DETECTION_CONDITIONING_PROTOCOL
+    )
+    public_detection_condition_text: str = (
+        DEFAULT_PUBLIC_DETECTION_CONDITION_TEXT
     )
     max_attention_tokens: int = DEFAULT_MAX_ATTENTION_TOKENS
     attention_module_names: tuple[str, ...] = DEFAULT_ATTENTION_MODULE_NAMES
@@ -239,6 +416,24 @@ class PaperRunConfig:
         fixed-FPR 阈值, 造成真实 positive 难以越过阈值。
         """
 
+        expected_method_settings = (
+            _FORMAL_METHOD_DEFAULTS.paper_method_settings()
+        )
+        actual_method_settings = {
+            field_name: getattr(self, field_name)
+            for field_name in SHARED_METHOD_SETTING_FIELDS
+        }
+        drifted_method_fields = tuple(
+            field_name
+            for field_name in SHARED_METHOD_SETTING_FIELDS
+            if actual_method_settings[field_name]
+            != expected_method_settings[field_name]
+        )
+        if drifted_method_fields:
+            raise ValueError(
+                "论文运行方法设置必须精确继承 configs/model_sd35.yaml: "
+                + ", ".join(drifted_method_fields)
+            )
         if self.jacobian_candidate_count < self.null_space_rank or self.null_space_rank <= 0:
             raise ValueError("jacobian_candidate_count 必须不小于正的 null_space_rank")
         if not 0.0 < self.tail_fraction <= 1.0:
@@ -515,7 +710,8 @@ def build_paper_run_config(
 
     run_name = normalize_paper_run_name(os.environ.get("SLM_WM_PAPER_RUN_NAME"))
     defaults = RUN_DEFAULTS[run_name]
-    method_settings = load_formal_method_runtime_config(root).paper_method_settings()
+    # 方法配置属于当前可执行代码包, 不属于可替换的结果根目录。
+    method_settings = _FORMAL_METHOD_DEFAULTS.paper_method_settings()
     prompt_set = os.environ.get("SLM_WM_PROMPT_SET", str(defaults["prompt_set"]))
     resolved_prompt_contract = prompt_contract or _formal_prompt_contract(
         root,

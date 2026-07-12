@@ -69,7 +69,10 @@ from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     _align_image,
     _attention_modules,
+    _bind_public_detection_noise_qk_evidence,
     _image_attention_extractor,
+    _public_detection_noise_prg_identity,
+    _public_detection_noise_tensor,
     _public_detection_noise_seed,
     build_semantic_watermark_run_id,
     load_completed_semantic_watermark_runtime_result,
@@ -186,6 +189,15 @@ def write_recovery_candidate(
     )
 
 
+def write_formal_method_config(root: Path) -> None:
+    """把正式方法 YAML 显式复制到隔离 workflow 测试根目录。"""
+
+    source = Path(__file__).resolve().parents[2] / "configs" / "model_sd35.yaml"
+    target = root / "configs" / "model_sd35.yaml"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(source.read_bytes())
+
+
 @pytest.mark.quick
 def test_image_only_attention_noise_seed_does_not_depend_on_generation_seed_or_prompt() -> None:
     """盲检公开噪声不得依赖生成种子、Prompt 或样本序号。"""
@@ -198,13 +210,71 @@ def test_image_only_attention_noise_seed_does_not_depend_on_generation_seed_or_p
             "Manojb/stable-diffusion-2-1-base@"
             "0094d483a120f3f33dafbd187ea4aa60d10de75c"
         ),
+        model_id="Manojb/stable-diffusion-2-1-base",
+        model_revision="0094d483a120f3f33dafbd187ea4aa60d10de75c",
         width=base.width,
         height=base.height,
         inference_steps=base.inference_steps,
+        public_detection_schedule_index=base.public_detection_schedule_index,
+        public_detection_noise_prg_protocol=(
+            base.public_detection_noise_prg_protocol
+        ),
+        public_detection_noise_domain=base.public_detection_noise_domain,
+        public_detection_conditioning_protocol=(
+            base.public_detection_conditioning_protocol
+        ),
+        public_detection_condition_text=base.public_detection_condition_text,
     )
 
     assert _public_detection_noise_seed(base) == _public_detection_noise_seed(changed_sample)
     assert _public_detection_noise_seed(base) != _public_detection_noise_seed(changed_model)
+
+
+@pytest.mark.quick
+def test_public_detection_noise_uses_canonical_gaussian_prg() -> None:
+    """公开检测噪声必须跨生成样本稳定, 并绑定实际 dtype Tensor 字节。"""
+
+    base = SemanticWatermarkRuntimeConfig()
+    changed_sample = replace(
+        base,
+        seed=base.seed + 17,
+        prompt="另一条生成 Prompt",
+        prompt_id="other_prompt",
+    )
+    latent = torch.zeros((1, 4, 2, 2), dtype=torch.float16)
+
+    first = _public_detection_noise_tensor(latent, base)
+    second = _public_detection_noise_tensor(latent, changed_sample)
+
+    assert first.device.type == "cpu"
+    assert first.dtype == torch.float16
+    assert torch.equal(first, second)
+    assert tensor_content_sha256(first) == tensor_content_sha256(second)
+    assert tensor_content_sha256(first) == (
+        "8a2811a582caffa6ac1c60124a31d277b9d30ea57ff63d6bcdd32da1c5ca0ff2"
+    )
+    identity = _public_detection_noise_prg_identity(
+        base,
+        tuple(int(value) for value in latent.shape),
+    )
+    assert identity["key_material"] == base.public_detection_noise_domain
+    assert identity["domain_fields"] == {
+        "operator": base.public_detection_noise_domain,
+        "model_id": base.model_id,
+        "model_revision": base.model_revision,
+        "width": 512,
+        "height": 512,
+        "inference_steps": 20,
+        "public_detection_schedule_index": 7,
+        "latent_shape": (1, 4, 2, 2),
+    }
+    assert identity["public_detection_noise_prg_identity_digest"] == (
+        "9bd16d9ee24c491bed02d841a8f3a9d77239399de63289167d8afa15593233a0"
+    )
+    source = inspect.getsource(_public_detection_noise_tensor)
+    assert "build_keyed_gaussian_tensor" in source
+    assert "torch.randn" not in source
+    assert "torch.Generator" not in source
 
 
 @pytest.mark.quick
@@ -251,15 +321,30 @@ def test_full_jacobian_constraint_projection_recovers_null_direction() -> None:
     assert result.response_residual == pytest.approx(0.0, abs=1e-7)
     assert result.orthogonality_error == pytest.approx(0.0, abs=1e-6)
     assert result.latent_basis.requires_grad is False
-    assert result.response_matrix.requires_grad is False
+    assert result.basis_response_matrix.requires_grad is False
     assert abs(float(result.latent_basis[3, 0])) == pytest.approx(1.0, abs=1e-6)
     assert result.metadata["solver"] == "matrix_free_full_jacobian_psd_cg"
     assert result.metadata["cg_damping"] == 0.0
     assert result.to_record()["latent_basis_content_sha256"] == (
         tensor_content_sha256(result.latent_basis)
     )
-    assert result.to_record()["response_matrix_content_sha256"] == (
-        tensor_content_sha256(result.response_matrix)
+    assert result.to_record()["basis_response_matrix_content_sha256"] == (
+        tensor_content_sha256(result.basis_response_matrix)
+    )
+    assert result.to_record()[
+        "projected_direction_matrix_content_sha256"
+    ] == tensor_content_sha256(result.projected_direction_matrix)
+    assert result.to_record()[
+        "projected_direction_response_matrix_content_sha256"
+    ] == tensor_content_sha256(result.projected_direction_response_matrix)
+    assert result.to_record()[
+        "basis_reference_response_matrix_content_sha256"
+    ] == tensor_content_sha256(result.basis_reference_response_matrix)
+    assert result.column_reference_response_norms == pytest.approx(
+        tuple(
+            float(torch.linalg.norm(column).item())
+            for column in result.basis_reference_response_matrix.unbind(dim=1)
+        )
     )
 
 
@@ -294,6 +379,89 @@ def test_null_projection_energy_retention_uses_squared_l2_ratio() -> None:
     assert result.projection_energy_retentions[0] != pytest.approx(
         inverse_square_root_two
     )
+
+
+@pytest.mark.quick
+def test_qr_basis_uses_independent_routed_candidate_references() -> None:
+    """QR 每列参考必须通过右侧三角求解与同一列混合保持一致。"""
+
+    latent = torch.zeros(5)
+
+    def full_features(values: torch.Tensor) -> torch.Tensor:
+        return values[:2]
+
+    candidate_matrix = torch.tensor(
+        (
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (1.0, 1.0),
+            (1.0, 0.0),
+            (0.0, 2.0),
+        )
+    )
+    linearization = build_exact_jacobian_linearization(full_features, latent)
+    result = solve_jacobian_null_space(
+        latent=latent,
+        candidate_matrix=candidate_matrix,
+        risk_budget=torch.ones_like(latent),
+        null_rank=2,
+        joint_feature_linearization=linearization,
+    )
+
+    qr_factor = (
+        result.latent_basis.transpose(0, 1)
+        @ result.projected_direction_matrix
+    )
+    expected_reference = torch.linalg.solve_triangular(
+        qr_factor.transpose(0, 1),
+        result.routed_candidate_matrix.transpose(0, 1),
+        upper=False,
+    ).transpose(0, 1)
+    expected_response = torch.stack(
+        tuple(
+            linearization.apply(expected_reference[:, index]).detach()
+            for index in range(expected_reference.shape[1])
+        ),
+        dim=1,
+    )
+
+    assert torch.allclose(result.basis_reference_matrix, expected_reference)
+    assert torch.allclose(
+        result.basis_reference_response_matrix,
+        expected_response,
+    )
+    assert result.column_reference_response_norms == pytest.approx(
+        tuple(
+            float(torch.linalg.norm(column).item())
+            for column in expected_response.unbind(dim=1)
+        )
+    )
+
+
+@pytest.mark.quick
+def test_exact_jacobian_linearization_satisfies_adjoint_identity() -> None:
+    """精确 JVP 与 VJP 必须满足同一 Jacobian 的伴随恒等式。"""
+
+    latent = torch.tensor((0.2, -0.4, 0.7), dtype=torch.float32)
+
+    def full_features(values: torch.Tensor) -> torch.Tensor:
+        return torch.stack(
+            (
+                values[0] * values[1],
+                values[1].square() + 2.0 * values[2],
+            )
+        )
+
+    linearization = build_exact_jacobian_linearization(full_features, latent)
+    direction = torch.tensor((0.3, -0.2, 0.5), dtype=torch.float32)
+    tangent = linearization.apply(direction)
+    cotangent = torch.tensor((0.6, -0.8), dtype=tangent.dtype)
+    transpose_image = linearization.transpose_apply(cotangent)
+
+    left = torch.dot(tangent, cotangent)
+    right = torch.dot(direction.to(transpose_image.dtype), transpose_image)
+
+    assert float(left.item()) == pytest.approx(float(right.item()), abs=1e-6)
 
 
 @pytest.mark.quick
@@ -334,6 +502,28 @@ def test_risk_budget_is_explicit_in_full_jacobian_null_projection() -> None:
     assert torch.linalg.norm(jacobian @ result.latent_basis).item() <= 1e-5
     assert torch.linalg.norm(result.latent_basis[-1]).item() == pytest.approx(0.0, abs=1e-7)
     assert all(value >= 0.01 for value in result.projection_energy_retentions)
+
+
+@pytest.mark.quick
+def test_risk_budget_does_not_repeat_one_sample_across_batch() -> None:
+    """多样本 latent 不得把单张 HxW 预算静默复制到其他样本。"""
+
+    latent = torch.zeros((2, 1, 2, 2))
+
+    def full_features(values: torch.Tensor) -> torch.Tensor:
+        return values.reshape(-1)[:1]
+
+    with pytest.raises(ValueError, match="axis_budget 无法广播"):
+        solve_jacobian_null_space(
+            latent=latent,
+            candidate_matrix=torch.eye(latent.numel()),
+            risk_budget=torch.ones(4),
+            null_rank=1,
+            joint_feature_linearization=build_exact_jacobian_linearization(
+                full_features,
+                latent,
+            ),
+        )
 
 
 @pytest.mark.quick
@@ -382,6 +572,7 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "relative_response_residual": 1e-6,
         "orthogonality_error": 1e-6,
         "column_relative_response_residuals": [1e-6] * 4,
+        "column_reference_response_norms": [1.0] * 4,
         "projection_energy_retentions": [0.2] * 4,
         "cg_relative_residuals": [1e-7] * 4,
         "cg_converged": True,
@@ -403,8 +594,12 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         },
         "candidate_matrix_content_sha256": "1" * 64,
         "risk_budget_content_sha256": "2" * 64,
-        "response_matrix_content_sha256": "3" * 64,
+        "routed_candidate_response_matrix_content_sha256": "3" * 64,
+        "projected_direction_matrix_content_sha256": "4" * 64,
+        "projected_direction_response_matrix_content_sha256": "5" * 64,
         "latent_basis_content_sha256": "4" * 64,
+        "basis_response_matrix_content_sha256": "6" * 64,
+        "basis_reference_response_matrix_content_sha256": "7" * 64,
     }
     config = SemanticWatermarkRuntimeConfig()
     qk_atomic_content_records = []
@@ -629,6 +824,16 @@ def test_keyed_templates_use_versioned_device_independent_prg() -> None:
         0.25,
     )
     protocol = keyed_prg_protocol_record()
+    uniform_vector = keyed_prg_module.build_keyed_uniform_tensor(
+        (4,),
+        "known-key",
+        {"operator": "known_answer_uniform", "role": "cpu_test"},
+    )
+    gaussian_vector = keyed_prg_module.build_keyed_gaussian_tensor(
+        (4,),
+        "known-key",
+        {"operator": "known_answer_gaussian", "role": "cpu_test"},
+    )
 
     assert KEYED_PRG_VERSION == (
         "sha256_counter_box_muller_float32_v1"
@@ -643,7 +848,35 @@ def test_keyed_templates_use_versioned_device_independent_prg() -> None:
     assert threshold == pytest.approx(1.4844163656234741)
     assert retained_fraction == 0.25
     assert protocol["canonical_generation_device"] == "cpu"
-    assert len(protocol["keyed_prg_protocol_digest"]) == 64
+    assert protocol["counter_initial_value"] == 0
+    assert protocol["counter_bytes"] == 16
+    assert protocol["word_offsets"] == [0, 8, 16, 24]
+    assert protocol["uniform_mapping"] == "(mantissa+1)/(2^53+2)"
+    assert uniform_vector.tolist() == pytest.approx(
+        (
+            0.6363481879234314,
+            0.9151367545127869,
+            0.688735842704773,
+            0.9310290813446045,
+        )
+    )
+    assert gaussian_vector.tolist() == pytest.approx(
+        (
+            0.8609815239906311,
+            -2.1549675464630127,
+            -0.15070036053657532,
+            1.2798569202423096,
+        )
+    )
+    assert protocol["keyed_prg_protocol_digest"] == (
+        "5c5671c02383d5b364dbeaa03de6e6cdd8aac745099f588b367ca93f7b0df363"
+    )
+    assert tensor_content_sha256(uniform_vector) == (
+        "4cef7d7d81adee142e4bdc3e11f8411e21b07b28b273ded3fc8924833b826a89"
+    )
+    assert tensor_content_sha256(gaussian_vector) == (
+        "16681e4720d512d10c2f01043f7b9929ae101ae780f8de49e9eda66577aedcad"
+    )
 
     first_candidates = generate_keyed_candidate_directions(
         torch.zeros((1, 1, 2, 2), dtype=torch.float32),
@@ -665,6 +898,12 @@ def test_keyed_templates_use_versioned_device_independent_prg() -> None:
     assert torch.equal(first_candidates, second_candidates)
     assert torch.equal(relation_signs, relation_signs.transpose(0, 1))
     assert torch.count_nonzero(torch.diag(relation_signs)).item() == 0
+    assert relation_signs.tolist() == [
+        [0.0, -1.0, 1.0, -1.0],
+        [-1.0, 0.0, 1.0, -1.0],
+        [1.0, 1.0, 0.0, -1.0],
+        [-1.0, -1.0, -1.0, 0.0],
+    ]
 
     source = "\n".join(
         inspect.getsource(module)
@@ -1072,9 +1311,16 @@ def _identity_null_space(latent: torch.Tensor) -> JacobianNullSpaceResult:
     return JacobianNullSpaceResult(
         branch_name="attention_geometry",
         candidate_matrix=identity,
-        response_matrix=response_matrix,
+        routed_candidate_matrix=identity,
+        routed_candidate_response_matrix=response_matrix,
+        projected_direction_matrix=identity,
+        projected_direction_response_matrix=response_matrix,
         latent_basis=identity,
+        basis_response_matrix=response_matrix,
+        basis_reference_matrix=identity,
+        basis_reference_response_matrix=response_matrix,
         column_response_norms=(0.0,) * element_count,
+        column_reference_response_norms=(0.0,) * element_count,
         column_relative_response_residuals=(0.0,) * element_count,
         projection_energy_retentions=(1.0,) * element_count,
         cg_iteration_counts=(0,) * element_count,
@@ -1085,8 +1331,18 @@ def _identity_null_space(latent: torch.Tensor) -> JacobianNullSpaceResult:
         orthogonality_error=0.0,
         candidate_matrix_content_sha256=tensor_content_sha256(identity),
         risk_budget_content_sha256=tensor_content_sha256(risk_budget),
-        response_matrix_content_sha256=tensor_content_sha256(response_matrix),
+        routed_candidate_response_matrix_content_sha256=tensor_content_sha256(
+            response_matrix
+        ),
+        projected_direction_matrix_content_sha256=tensor_content_sha256(identity),
+        projected_direction_response_matrix_content_sha256=tensor_content_sha256(
+            response_matrix
+        ),
         latent_basis_content_sha256=tensor_content_sha256(identity),
+        basis_response_matrix_content_sha256=tensor_content_sha256(response_matrix),
+        basis_reference_response_matrix_content_sha256=tensor_content_sha256(
+            response_matrix
+        ),
         solver_digest="identity_test_basis",
         metadata={},
     )
@@ -1411,6 +1667,54 @@ def test_image_attention_extractor_batches_flowmatch_timestep(monkeypatch: pytes
     records = extractor(object())
 
     assert records
+    noise_evidence_records = getattr(
+        extractor,
+        "public_detection_noise_evidence_records",
+    )
+    assert len(noise_evidence_records) == 1
+    assert noise_evidence_records[0]["tensor_content_digest_version"] == (
+        TENSOR_CONTENT_DIGEST_VERSION
+    )
+    assert len(
+        noise_evidence_records[0][
+            "public_detection_noise_content_sha256"
+        ]
+    ) == 64
+    relation_identity = build_attention_relation_graph_identity(
+        records,
+        "test_detection_key",
+    )
+    detection_record = {
+        "metadata": {
+            "detection_qk_atomic_content_records": [
+                {
+                    "qk_evaluation_role": "raw_detection_image",
+                    "qk_atomic_content_records": list(
+                        relation_identity.qk_atomic_content_records
+                    ),
+                    "qk_atomic_content_digest": (
+                        relation_identity.qk_atomic_content_digest
+                    ),
+                    "qk_atomic_content_ready": (
+                        relation_identity.qk_atomic_content_ready
+                    ),
+                }
+            ]
+        }
+    }
+    _bind_public_detection_noise_qk_evidence(
+        detection_record,
+        extractor,
+        0,
+    )
+    assert detection_record["metadata"][
+        "public_detection_noise_evidence_ready"
+    ] is True
+    assert detection_record["metadata"][
+        "detection_qk_atomic_content_records"
+    ][0]["public_detection_noise_content_sha256"] == (
+        detection_record["public_detection_noise_content_sha256"]
+    )
     assert scheduler.received_timestep is not None
     assert scheduler.received_timestep.shape == (2,)
     assert scheduler.received_timestep[0].item() == pytest.approx(7.0)
@@ -1473,12 +1777,12 @@ def test_image_attention_extractor_requires_scheduler_scale_noise(
 
 @pytest.mark.quick
 def test_post_step_injection_requires_adjacent_scheduler_steps() -> None:
-    """注入时刻必须同时具有真实的上一和下一 scheduler 时刻."""
+    """运行时不得通过别名字段改写冻结的相邻 scheduler 时刻."""
 
     base = SemanticWatermarkRuntimeConfig()
-    with pytest.raises(ValueError, match="post-step"):
+    with pytest.raises(ValueError, match="唯一正式配置"):
         replace(base, injection_step_indices=(base.inference_steps - 1,))
-    with pytest.raises(ValueError, match="相邻的前后调度时刻"):
+    with pytest.raises(ValueError, match="唯一正式配置"):
         replace(base, injection_step_indices=(0,))
 
 
@@ -1715,6 +2019,7 @@ def test_partial_closed_archive_recovery_neither_extracts_nor_skips_execution(
     """只恢复主方法包时不得提取旧结果或跳过当前科学子命令."""
 
     run_name = "probe_paper"
+    write_formal_method_config(tmp_path)
     runtime_candidate = write_recovery_candidate(
         tmp_path,
         "image_only_dataset_runtime",
@@ -1810,6 +2115,7 @@ def test_all_current_closed_archives_restore_without_new_execution(
 ) -> None:
     """全部请求角色通过当前身份校验后才允许整体恢复并结束会话."""
 
+    write_formal_method_config(tmp_path)
     candidates = {
         role: write_recovery_candidate(tmp_path, role)
         for role in (
@@ -1997,6 +2303,7 @@ def test_colab_image_only_session_reports_persistent_resume(
     """Colab 调度器必须优先返回主流程续跑状态, 不能误读旧正式摘要。"""
 
     run_name = "probe_paper"
+    write_formal_method_config(tmp_path)
     output_dir = tmp_path / "outputs" / "image_only_dataset_runtime" / run_name
     output_dir.mkdir(parents=True)
     (output_dir / "dataset_runtime_progress.json").write_text(
@@ -2049,6 +2356,7 @@ def test_colab_image_only_session_mirrors_completed_formal_packages(
     """主流程完成后应把盲检包和正式质量包镜像到论文运行目录。"""
 
     run_name = "probe_paper"
+    write_formal_method_config(tmp_path)
     runtime_dir = tmp_path / "outputs" / "image_only_dataset_runtime" / run_name
     quality_dir = tmp_path / "outputs" / "dataset_level_quality" / run_name
     runtime_dir.mkdir(parents=True)
@@ -2133,6 +2441,7 @@ def test_formal_ablation_resume_skips_binding_and_packaging(
     """正式消融仍有 progress 时不得重复生成主运行与质量归档."""
 
     run_name = "probe_paper"
+    write_formal_method_config(tmp_path)
     runtime_dir = tmp_path / "outputs" / "image_only_dataset_runtime" / run_name
     quality_dir = tmp_path / "outputs" / "dataset_level_quality" / run_name
     ablation_dir = tmp_path / "outputs" / "formal_mechanism_ablation" / run_name

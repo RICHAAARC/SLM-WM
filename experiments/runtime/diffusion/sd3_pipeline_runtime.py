@@ -29,12 +29,95 @@ def import_runtime_dependencies() -> tuple[Any, Any, Any, Any]:
     return None, torch, diffusers, StableDiffusion3Pipeline
 
 
+def _qualified_class_name(value: Any) -> str:
+    """返回对象或类的完整模块限定类名。"""
+
+    resolved_class = value if isinstance(value, type) else type(value)
+    return f"{resolved_class.__module__}.{resolved_class.__qualname__}"
+
+
+def _module_dtype_name(module: Any, component_name: str) -> str:
+    """读取真实模型组件 dtype, 缺少参数时按 fail-closed 处理。"""
+
+    dtype = getattr(module, "dtype", None)
+    if dtype is None:
+        parameters = getattr(module, "parameters", None)
+        if not callable(parameters):
+            raise RuntimeError(f"{component_name} 不提供可核验的 dtype")
+        try:
+            dtype = next(iter(parameters())).dtype
+        except (StopIteration, AttributeError) as exc:
+            raise RuntimeError(f"{component_name} 不提供可核验的 dtype") from exc
+    dtype_name = str(dtype)
+    return dtype_name.removeprefix("torch.")
+
+
+def _validate_loaded_pipeline(config: Any, pipeline: Any) -> dict[str, Any]:
+    """复验实际加载组件的类、VAE 归一化常量和参数 dtype。"""
+
+    components = {
+        "pipeline": pipeline,
+        "vae": getattr(pipeline, "vae", None),
+        "transformer": getattr(pipeline, "transformer", None),
+        "scheduler": getattr(pipeline, "scheduler", None),
+    }
+    if any(component is None for component in components.values()):
+        raise RuntimeError("SD3.5 pipeline 缺少 VAE、Transformer 或 scheduler")
+    expected_class_names = {
+        "pipeline": config.pipeline_class_name,
+        "vae": config.vae_class_name,
+        "transformer": config.transformer_class_name,
+        "scheduler": config.scheduler_class_name,
+    }
+    actual_class_names = {
+        name: _qualified_class_name(component)
+        for name, component in components.items()
+    }
+    if actual_class_names != expected_class_names:
+        raise RuntimeError(
+            "SD3.5 pipeline 组件类身份不匹配: "
+            f"expected={expected_class_names}, actual={actual_class_names}"
+        )
+    vae_config = getattr(components["vae"], "config", None)
+    if vae_config is None:
+        raise RuntimeError("SD3.5 VAE 缺少可核验的 config")
+    actual_scaling_factor = getattr(vae_config, "scaling_factor", None)
+    actual_shift_factor = getattr(vae_config, "shift_factor", None)
+    if (
+        actual_scaling_factor != config.vae_scaling_factor
+        or actual_shift_factor != config.vae_shift_factor
+    ):
+        raise RuntimeError(
+            "SD3.5 VAE scaling_factor 或 shift_factor 与正式配置不匹配"
+        )
+    component_dtypes = {
+        "vae": _module_dtype_name(components["vae"], "VAE"),
+        "transformer": _module_dtype_name(
+            components["transformer"],
+            "Transformer",
+        ),
+    }
+    if any(
+        dtype_name != config.latent_torch_dtype
+        for dtype_name in component_dtypes.values()
+    ):
+        raise RuntimeError(
+            "SD3.5 latent 组件 dtype 与正式配置不匹配: "
+            f"{component_dtypes}"
+        )
+    return {
+        "component_class_names": actual_class_names,
+        "vae_scaling_factor": float(actual_scaling_factor),
+        "vae_shift_factor": float(actual_shift_factor),
+        "latent_component_dtypes": component_dtypes,
+    }
+
+
 def load_pipeline(config: Any) -> tuple[Any, dict[str, Any]]:
     """加载真实 SD3 系列 pipeline 并移动到目标设备。
 
-    `config` 只要求提供 `device_name`、`torch_dtype`、`hf_token_env`、
-    `model_id` 和 `model_revision` 字段, 因而可被最小机制预检 runner 与
-    正式 latent injection runner 共同复用。
+    `config` 必须提供设备、精确模型 revision、组件类身份、VAE 归一化常量和
+    latent dtype。加载后会复验实际对象, 任一身份不匹配都会在科学运行前失败。
     """
 
     formal_execution_lock = (
@@ -56,7 +139,9 @@ def load_pipeline(config: Any) -> tuple[Any, dict[str, Any]]:
     if environment_report["dependency_environment_ready"] is not True:
         blockers = ",".join(environment_report["dependency_readiness_blockers"])
         raise RuntimeError(f"dependency_profile_environment_not_ready:{blockers}")
-    dtype = getattr(torch, config.torch_dtype)
+    if _qualified_class_name(pipeline_class) != config.pipeline_class_name:
+        raise RuntimeError("导入的 SD3.5 pipeline 类与正式配置不匹配")
+    dtype = getattr(torch, config.latent_torch_dtype)
     token = os.environ.get(config.hf_token_env) or None
     pipeline = pipeline_class.from_pretrained(
         config.model_id,
@@ -65,11 +150,13 @@ def load_pipeline(config: Any) -> tuple[Any, dict[str, Any]]:
         token=token,
     )
     pipeline = pipeline.to(config.device_name)
+    operator_identity = _validate_loaded_pipeline(config, pipeline)
     pipeline.set_progress_bar_config(disable=False)
     runtime_versions = {
         **flatten_environment_versions(environment_report),
         "runtime_environment": environment_report,
         "diffusion_model_source": model_source.to_dict(),
+        "sd35_operator_identity": operator_identity,
     }
     return pipeline, runtime_versions
 

@@ -46,8 +46,8 @@ def build_low_frequency_template(
 ) -> Any:
     """在真实 latent 空间轴上构造低通密钥模板。
 
-    与旧的一维索引平滑不同, 此处只在 latent 的二维空间轴执行平均低通, 不混淆
-    batch 维和通道维。该定义使“低频”具有明确的空间含义。
+    该算子只在 latent 的二维空间轴执行平均低通, 不混淆 batch 维和通道维。
+    该定义使“低频”具有明确的空间含义。
     """
 
     import torch.nn.functional as functional

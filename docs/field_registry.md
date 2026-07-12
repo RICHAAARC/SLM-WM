@@ -1674,7 +1674,7 @@ Notebook 与 repository module 的跨边界数据
 | branch_name | method | none | true | false | false | 分支风险场、Null Space 或载体所属的机制分支。 |
 | bundle_digest | method | none | true | false | false | 三个分支风险场组合后的稳定摘要。 |
 | eligible_indices | method | none | true | false | false | 分支风险阈值允许承载的位置索引。 |
-| jvp_mode | method | none | true | false | false | 完整 Jacobian 线性算子的实现方式, 正式值为 torch_func_exact_jvp_vjp 或 torch_autograd_exact_jvp_vjp_compatibility。 |
+| jvp_mode | method | none | true | false | false | 完整 Jacobian 线性算子的实现方式, 正式值为 torch_func_exact_jvp_vjp 或 torch_autograd_exact_jvp_vjp_reexecution。 |
 | solver_digest | method | none | true | false | false | 完整特征 JVP/VJP 与无阻尼约束投影求解记录摘要。 |
 | response_residual | metric | none | true | true | false | 小奇异值系数在联合响应矩阵上的残差范数。 |
 | orthogonality_error | metric | none | true | true | false | latent 安全基底相对单位矩阵的正交误差。 |
@@ -1824,7 +1824,7 @@ Notebook 与 repository module 的跨边界数据
 | budget_value_mean | metric | none | true | true | false | 单个分支进入硬资格边界前的承载预算均值。 |
 | eligible_position_count | metric | none | true | true | false | 单个分支通过风险资格阈值的 latent 空间位置数量。 |
 | risk_field_position_count | metric | none | true | true | false | 单个分支风险场覆盖的 latent 空间位置总数。 |
-| scientific_autograd_compatibility | environment | none | true | false | false | 为精确 forward AD 与 latent 输入梯度固定的模型注意力实现摘要。 |
+| scientific_autograd_operator_configuration | environment | none | true | false | false | 为精确 forward AD 与 latent 输入梯度固定的模型注意力实现摘要。 |
 | attention_operator_contract | environment | none | true | false | false | 当前科学运行实际解析的冻结注意力层集合与统一坐标约定摘要。 |
 | clip_attention_implementation | environment | none | true | false | false | CLIP 视觉编码器使用的注意力实现, 当前正式值为 eager。 |
 | vae_attention_processor | environment | none | true | false | false | VAE 可微解码使用的 Diffusers attention processor。 |
@@ -2915,7 +2915,6 @@ Notebook 与 repository module 的跨边界数据
 | branch_risk_content_digest | provenance | none | true | true | false | 三个分支风险值、预算和资格 mask 内容 SHA-256 的联合摘要。 |
 | candidate_matrix_content_sha256 | provenance | none | true | true | false | Jacobian Null Space 求解器实际候选矩阵 Tensor 的内容 SHA-256。 |
 | risk_budget_content_sha256 | provenance | none | true | true | false | Jacobian Null Space 求解器实际风险预算对角项 Tensor 的内容 SHA-256。 |
-| response_matrix_content_sha256 | provenance | none | true | true | false | 完整特征 Jacobian 对候选矩阵响应 Tensor 的内容 SHA-256。 |
 | latent_basis_content_sha256 | provenance | none | true | true | false | 逐列通过门禁后实际 Null Space 基底 Tensor 的内容 SHA-256。 |
 | lf_update_content_sha256 | provenance | none | true | true | false | 单次注入实际 LF 分支更新 Tensor 的内容 SHA-256。 |
 | tail_robust_update_content_sha256 | provenance | none | true | true | false | 单次注入实际高斯幅值尾部截断分支更新 Tensor 的内容 SHA-256。 |
@@ -2946,3 +2945,81 @@ Notebook 与 repository module 的跨边界数据
 | attention_relation_qk_atomic_content_records | provenance | none | true | true | false | 单次注意力注册输入关系图的逐层 Q/K 原子内容记录。 |
 | attention_relation_qk_atomic_content_digest | provenance | none | true | true | false | 单次注意力注册输入关系图逐层 Q/K 原子记录的联合摘要。 |
 | attention_relation_qk_atomic_content_ready | governance | none | true | true | false | 单次注意力注册输入关系图的逐层 Q/K 原子记录是否完整一致。 |
+
+## 核心方法语义不变量证据字段
+
+| 字段 | 类型 | placeholder | 正式必需 | 支持主张 | random | 含义 |
+| --- | --- | --- | --- | --- | --- | --- |
+| method_definition_schema | protocol | none | true | false | false | 可机读方法定义的版本化 schema, 只表达规范身份。 |
+| invariant_id | protocol | none | true | false | false | 核心方法语义不变量的稳定 snake_case 标识。 |
+| registry_scope | governance | none | true | false | false | 方法登记表的职责边界, 固定为规范追踪且不生成科学通过结论。 |
+| formal_expression | method | none | true | false | false | 单个方法不变量必须满足的可机读数学表达式列表。 |
+| configuration_fields | protocol | none | true | false | false | 单个方法不变量引用 `configs/model_sd35.yaml` 的精确顶层键或 nested dot path。 |
+| method_implementation_symbols | provenance | none | true | false | false | 单个不变量在 `main/` 核心方法层中的实现符号绑定；空集合表示尚无核心纯算子入口。 |
+| runtime_binding_symbols | provenance | none | true | false | false | 单个不变量在 `experiments/` 真实模型运行层中的绑定符号。 |
+| fail_closed_conditions | protocol | none | true | false | false | 单个不变量必须直接阻断执行的错误条件集合。 |
+| forbidden_substitutes | protocol | none | true | false | false | 不能替代正式科学算子的代理、近似或静默替代集合。 |
+| cpu_property_id | protocol | none | true | false | false | 单个不变量需要由独立 CPU 性质测量验证的稳定标识。 |
+| specification_test_nodes | provenance | none | true | false | false | 只验证公式、配置和追踪结构的 pytest 节点, 不支持方法科学通过结论。 |
+| cpu_property_test_nodes | provenance | none | true | false | false | 实际调用公开方法实现并同时覆盖正例与反例的 CPU 性质 pytest 节点；空集合表示尚未达到 CPU 验证。 |
+| gpu_atomic_roles | protocol | none | true | false | false | 真实 SD3.5 CUDA 运行必须物化的科学原子角色集合。 |
+| gpu_observation_requirement | protocol | none | true | false | false | 单个不变量只能由真实 GPU 观察完成的验证职责。 |
+| claim_boundary | governance | none | true | false | false | 单个不变量允许支持的最强论文解释及禁止外推边界。 |
+| formal_method_config_digest | provenance | none | true | true | false | `configs/model_sd35.yaml` 经完整解析和规范化后的稳定方法配置摘要。 |
+| sd35_operator_identity | provenance | none | true | true | false | 实际加载 SD3.5 pipeline 的组件类、VAE 常量和参数 dtype 联合身份记录。 |
+| component_class_names | provenance | none | true | true | false | 实际加载 pipeline、VAE、Transformer 与 scheduler 的完整 Python 类名映射。 |
+| latent_component_dtypes | provenance | none | true | true | false | 实际加载 VAE 与 Transformer 参数 dtype 的映射。 |
+| pipeline_class_name | protocol | none | true | true | false | 正式扩散 pipeline 的完整 Python 类名。 |
+| vae_class_name | protocol | none | true | true | false | 正式 VAE encoder/decoder 的完整 Python 类名。 |
+| transformer_class_name | protocol | none | true | true | false | 正式扩散 Transformer 的完整 Python 类名。 |
+| scheduler_class_name | protocol | none | true | true | false | 正式 Flow Matching scheduler 的完整 Python 类名。 |
+| vae_scaling_factor | protocol | none | true | true | false | 冻结模型 revision 对应的 VAE latent 缩放常量。 |
+| vae_shift_factor | protocol | none | true | true | false | 冻结模型 revision 对应的 VAE latent 平移常量。 |
+| latent_torch_dtype | protocol | none | true | true | false | 正式 SD3.5 latent 与主模型执行使用的 PyTorch dtype 名称。 |
+| vision_torch_dtype | protocol | none | true | true | false | 冻结 CLIP 视觉编码器执行使用的 PyTorch dtype 名称。 |
+| public_detection_schedule_index | protocol | none | true | true | false | 仅图像 Q/K 检测在公开 scheduler 日程中使用的固定索引。 |
+| public_detection_noise_prg_protocol | protocol | none | true | true | false | 仅图像检测公开高斯噪声使用的版本化密钥 PRG 协议。 |
+| public_detection_noise_domain | protocol | none | true | true | false | 仅图像检测公开高斯噪声的固定 PRG domain。 |
+| public_detection_noise_prg_identity | provenance | none | true | true | false | 仅图像检测公开高斯噪声的协议版本、domain、模型、日程索引和 Tensor shape 身份记录。 |
+| public_detection_noise_prg_identity_digest | provenance | none | true | true | false | 仅图像检测公开高斯噪声 PRG 身份记录的稳定摘要。 |
+| public_detection_noise_content_sha256 | provenance | none | true | true | false | 仅图像 Q/K 提取实际使用的公开高斯噪声 Tensor 内容摘要。 |
+| public_detection_noise_evaluation_index | provenance | none | true | false | false | 同一 detector extractor 内公开噪声评价的有序索引。 |
+| public_detection_noise_shape | provenance | none | true | true | false | 实际公开检测噪声 Tensor 的有序 shape。 |
+| public_detection_noise_dtype | provenance | none | true | true | false | 实际公开检测噪声 Tensor 的 PyTorch dtype。 |
+| public_detection_noise_evidence_digest | provenance | none | true | true | false | 公开噪声 PRG 身份、实际 Tensor 内容和检测 Q/K 评价角色的联合摘要。 |
+| public_detection_noise_evidence_records | provenance | none | true | true | false | raw 与 aligned 仅图像 Q/K 评价实际使用的公开噪声证据记录。 |
+| public_detection_noise_evidence_ready | governance | none | true | true | false | 公开噪声证据的角色、PRG 身份、内容摘要及联合摘要是否完整一致。 |
+| public_detection_conditioning_protocol | protocol | none | true | true | false | 仅图像 Q/K 提取使用的公开空文本条件构造协议。 |
+| public_detection_condition_text | protocol | none | true | false | false | 仅图像 Q/K 提取固定使用的公开条件文本, 正式值为空字符串。 |
+| lf_template_digest | provenance | none | true | true | false | LF 固定模板、分支身份、形状、PRG 和安全投影身份的稳定摘要。 |
+| tail_template_digest | provenance | none | true | true | false | 高斯幅值尾部截断模板、分支身份、形状、PRG 和安全投影身份的稳定摘要。 |
+| lf_projection_energy_retention | metric | none | true | true | false | LF 固定模板投影到对应 Jacobian 低响应子空间后的平方二范数能量保留比例。 |
+| tail_projection_energy_retention | metric | none | true | true | false | 高斯幅值尾部截断模板投影到对应 Jacobian 低响应子空间后的平方二范数能量保留比例。 |
+| attention_score_before | metric | none | true | true | false | 注意力分支更新前, 由冻结直接 Q/K 四分量关系图得到的目标分数。 |
+| attention_score_after | metric | none | true | true | false | 注意力分支接受候选在相同冻结 Q/K 关系协议下得到的目标分数。 |
+| semantic_risk_signal_content_sha256 | provenance | none | true | true | false | CLIP patch-to-CLS cosine 经解析范围映射和冻结插值后的完整风险输入 Tensor 内容摘要。 |
+| texture_risk_signal_content_sha256 | provenance | none | true | true | false | 灰度水平与垂直绝对梯度和除以2并经冻结插值后的纹理输入 Tensor 内容摘要。 |
+| local_contrast_risk_signal_content_sha256 | provenance | none | true | true | false | 灰度相对反射填充5x5局部均值的绝对偏离 Tensor 内容摘要。 |
+| adjacent_step_stability_signal_content_sha256 | provenance | none | true | true | false | 当前与紧邻上一 scheduler 步解码 RGB 差异形成的稳定度 Tensor 内容摘要。 |
+| attention_stability_signal_content_sha256 | provenance | none | true | true | false | 冻结直接 Q/K 层关系行一致性形成的 attention 稳定度 Tensor 内容摘要。 |
+| effective_budget_values_content_sha256 | provenance | none | true | true | false | 连续预算乘严格资格 mask 后, 按每个样本 HxW 沿 channel 复制得到的有效预算 Tensor 内容摘要。 |
+| branch_budget_ceiling | protocol | none | true | true | false | 当前分支用于形成绝对预算比例的冻结配置上界, 不得由样本预算最大值替代。 |
+| branch_nominal_strength | metric | none | true | true | false | 当前分支由相对强度与原 latent 二范数得到的名义 float32 步长。 |
+| branch_applied_strength | metric | none | true | true | false | 当前分支在逐位置风险硬包络内实际采用的全局 float32 步长。 |
+| branch_risk_scale_factor | metric | none | true | true | false | 实际分支步长相对名义步长的比例, 只允许沿固定安全方向执行全局缩放。 |
+| branch_budget_envelope_content_sha256 | provenance | none | true | true | false | 单个活动分支依据名义强度、冻结预算上界和有效风险预算形成的逐位置硬写回包络 Tensor 内容摘要。 |
+| branch_written_update_content_sha256 | provenance | none | true | true | false | 单个活动分支经过风险包络缩放后物化的 float32 更新 Tensor 内容摘要；分支不单独提前 cast 到 latent dtype。 |
+| branch_written_update_maximum_envelope_ratio | metric | none | true | true | false | 单个实际分支更新逐位置绝对值除以对应硬包络后的最大有限比例, 必须不大于1。 |
+| combined_budget_envelope_content_sha256 | provenance | none | true | true | false | 三个活动分支逐位置硬包络求和后形成的实际合成写回包络 Tensor 内容摘要。 |
+| quantized_write_composition_order | protocol | none | true | true | false | float32 分支更新合成的固定顺序, 正式值为 LF、tail、attention。 |
+| quantized_write_common_scale | metric | none | true | true | false | 实际 dtype 联合写回为了满足包络而对全部活动分支共同采用的缩放因子。 |
+| quantized_write_backtracking_step_count | metric | none | true | true | false | 实际 dtype 联合包络从原始候选开始执行共同减半的次数。 |
+| quantized_write_maximum_envelope_ratio | metric | none | true | true | false | 三分支按固定顺序在 float32 合成、与 original latent float32 相加并单次 cast 后, 实际增量相对共同缩放联合包络的最大有限比例。 |
+| quantized_write_budget_envelope_ready | governance | none | true | true | false | 实际量化写回是否满足联合风险包络、零预算位置和有限数值门禁。 |
+| routed_candidate_response_matrix_content_sha256 | provenance | none | true | true | false | 完整特征 Jacobian 对风险路由候选矩阵 $B D$ 的响应 $J(BD)$ Tensor 内容摘要。 |
+| projected_direction_matrix_content_sha256 | provenance | none | true | true | false | 无阻尼 PSD-CG 约束投影后、QR 前的方向矩阵 $U$ Tensor 内容摘要。 |
+| projected_direction_response_matrix_content_sha256 | provenance | none | true | true | false | 完整特征 Jacobian 对 QR 前投影方向矩阵的响应 $JU$ Tensor 内容摘要。 |
+| basis_response_matrix_content_sha256 | provenance | none | true | true | false | 完整特征 Jacobian 对 QR 正交基底 $N$ 的响应 $JN$ Tensor 内容摘要。 |
+| basis_reference_response_matrix_content_sha256 | provenance | none | true | true | false | 与 QR 列混合一致的路由候选参考 $V R^{-1}$ 经过 Jacobian 后的响应 Tensor 内容摘要。 |
+| column_reference_response_norms | metric | none | true | true | false | QR 后每个基底列各自对应的 $J(VR^{-1})$ 参考响应二范数, 不允许使用跨列共享 RMS。 |
+| scientific_content_binding_digest | provenance | none | true | true | false | 风险输入、风险预算、Null Space 八类角色、三分支更新、联合包络、实际写回、全部 Q/K 角色和最终图像身份的有序联合摘要。 |

@@ -11,8 +11,11 @@
 - 当前推进单元允许实现真实方法算子、真实模型运行时接口、仅图像检测接口和对应轻量测试。
 - 当前推进单元不得把 synthetic、proxy、counterfactual 或未完成的大规模运行结果登记为正式论文证据。
 - 进入 `experiment_protocol_validation` 前, 真实分支风险场、Jacobian Null Space、尾部截断鲁棒载体、注意力几何和仅图像检测必须形成可执行闭环并通过 harness gates。
+- `docs/builds/method_semantic_invariants.md` 是核心方法数学语义的权威来源；`main/methods/method_definition.py` 只能作为可执行镜像, 不得由当前实现反向改写方法定义。
+- `configs/method_semantic_registry.json` 只登记公式、实现符号、CPU 性质和 GPU 原子证据之间的追踪关系, 不得自行保存 `ready`、`verified`、`pass` 或其他科学验证结论。
+- 方法规范冻结只定义可证伪公式、唯一配置、失败条件、禁止替代项和验证职责, 不得据此声明实现已经通过。某个核心方法不变量提升到 `cpu_verified` 时, 必须在同一提交中完成真实实现、独立正反例性质测试、运行证据 schema 和当前方法文档对齐。全部核心不变量通过独立 CPU 语义审计前, 不得进入论文实验协议推进。
 - 当前没有本地 CUDA 环境, 也没有可用的远程 Linux 服务器。真实 SD3.5 生成、精确 JVP、Q/K 梯度、再扩散攻击和正式 Inception 特征提取只能由 Colab GPU 入口执行; 本地环境只承担 CPU 测试、静态审计、记录物化和论文结果闭合。
-- 在 Colab GPU 结果包尚未生成并通过门禁前, 项目保持在当前构建单元, 不得把代码可执行性写成已经完成的论文实验结果。
+- 在全部核心方法不变量通过独立 CPU 语义审计前, 项目保持在当前构建单元。进入后续单元仍不得把代码可执行性写成已经完成的论文实验结果；真实方法稳定性与论文结论分别需要后续 Colab GPU 科学预检和正式结果包证明。
 
 ## Ordered Semantic Construction Units
 
