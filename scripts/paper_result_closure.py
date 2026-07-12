@@ -11,14 +11,22 @@ import subprocess
 import sys
 from typing import Any, Callable, List
 
-from experiments.protocol.paper_run_config import build_paper_run_config, normalize_paper_run_name
-from experiments.runtime import repository_environment
-from experiments.runtime.archive_naming import utc_archive_token
-from experiments.runtime.repository_environment import (
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from experiments.protocol.paper_run_config import (  # noqa: E402
+    build_paper_run_config,
+    normalize_paper_run_name,
+)
+from experiments.runtime import repository_environment  # noqa: E402
+from experiments.runtime.archive_naming import utc_archive_token  # noqa: E402
+from experiments.runtime.repository_environment import (  # noqa: E402
     FORMAL_GIT_COMMIT_PATTERN,
     resolve_code_version,
 )
-from paper_experiments.runners.closure_package_selection import (
+from paper_experiments.runners.closure_package_selection import (  # noqa: E402
     CLOSURE_PACKAGE_FAMILY_SPECS,
     build_closure_input_selection_report,
 )
