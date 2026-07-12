@@ -12,6 +12,11 @@ from main.methods.carrier.keyed_tensor import (
     build_tail_robust_template,
     compute_blind_content_score,
 )
+from main.core.keyed_prg import (
+    KEYED_PRG_VERSION,
+    keyed_prg_protocol_record,
+    require_supported_keyed_prg_version,
+)
 from main.methods.geometry.attention_alignment import AttentionAlignmentResult, recover_attention_affine_alignment
 from main.methods.geometry.differentiable_attention import (
     DIRECT_QK_RELATION_SOURCE,
@@ -35,6 +40,7 @@ class ImageOnlyDetectionConfig:
     model_id: str
     content_threshold: float
     geometry_score_threshold: float
+    keyed_prg_version: str = KEYED_PRG_VERSION
     registration_confidence_threshold: float = 0.0
     attention_sync_score_threshold: float = 0.0
     rescue_margin_low: float = -0.05
@@ -52,6 +58,7 @@ class ImageOnlyDetectionConfig:
 
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
+        require_supported_keyed_prg_version(self.keyed_prg_version)
         if self.rescue_margin_low >= 0.0:
             raise ValueError("rescue_margin_low 必须小于 0")
         if abs(self.lf_weight + self.tail_robust_weight - 1.0) > 1e-9:
@@ -143,12 +150,19 @@ def detect_image_only_watermark(
     """
 
     observed_latent = image_latent_encoder(image)
-    lf_template = build_low_frequency_template(observed_latent, key_material, config.model_id)
+    prg_record = keyed_prg_protocol_record(config.keyed_prg_version)
+    lf_template = build_low_frequency_template(
+        observed_latent,
+        key_material,
+        config.model_id,
+        prg_version=config.keyed_prg_version,
+    )
     tail_template, tail_threshold, retained_fraction = build_tail_robust_template(
         observed_latent,
         key_material,
         config.model_id,
         config.tail_fraction,
+        prg_version=config.keyed_prg_version,
     )
     content = compute_blind_content_score(
         observed_latent,
@@ -342,12 +356,18 @@ def detect_image_only_watermark(
         aligned_latent = image_latent_encoder(aligned_image)
         aligned_content = compute_blind_content_score(
             aligned_latent,
-            build_low_frequency_template(aligned_latent, key_material, config.model_id),
+            build_low_frequency_template(
+                aligned_latent,
+                key_material,
+                config.model_id,
+                prg_version=config.keyed_prg_version,
+            ),
             build_tail_robust_template(
                 aligned_latent,
                 key_material,
                 config.model_id,
                 config.tail_fraction,
+                prg_version=config.keyed_prg_version,
             )[0],
             config.lf_weight,
             config.tail_robust_weight,
@@ -358,6 +378,10 @@ def detect_image_only_watermark(
     evidence_positive = positive_by_content or rescue_applied
     payload = {
         "content_score_digest": content.score_digest,
+        "keyed_prg_version": config.keyed_prg_version,
+        "keyed_prg_protocol_digest": prg_record[
+            "keyed_prg_protocol_digest"
+        ],
         "content_threshold": config.content_threshold,
         "raw_content_margin": round(margin, 12),
         "aligned_content_margin": None if aligned_content_margin is None else round(aligned_content_margin, 12),
@@ -423,6 +447,10 @@ def detect_image_only_watermark(
             "prompt_required": False,
             "tail_threshold": tail_threshold,
             "tail_retained_fraction": retained_fraction,
+            "keyed_prg_version": config.keyed_prg_version,
+            "keyed_prg_protocol_digest": prg_record[
+                "keyed_prg_protocol_digest"
+            ],
             "geometry_score_threshold": config.geometry_score_threshold,
             "registration_confidence_threshold": config.registration_confidence_threshold,
             "attention_sync_score_threshold": config.attention_sync_score_threshold,

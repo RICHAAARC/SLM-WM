@@ -17,7 +17,11 @@ def test_main_contains_only_core_method_modules() -> None:
         "core",
         "methods",
     }
-    assert {path.name for path in Path("main/core").glob("*.py")} == {"__init__.py", "digest.py"}
+    assert {path.name for path in Path("main/core").glob("*.py")} == {
+        "__init__.py",
+        "digest.py",
+        "keyed_prg.py",
+    }
     assert {path.name for path in Path("main/methods").iterdir() if path.name != "__pycache__"} == {
         "__init__.py",
         "carrier",

@@ -1,5 +1,10 @@
 """可由仅图像检测器重建的正式内容载体。"""
 
+from main.core.keyed_prg import (
+    KEYED_PRG_VERSION,
+    keyed_prg_protocol_record,
+    require_supported_keyed_prg_version,
+)
 from main.methods.carrier.keyed_tensor import (
     BlindContentScore,
     KeyedTensorCarrier,
@@ -11,9 +16,12 @@ from main.methods.carrier.keyed_tensor import (
 
 __all__ = [
     "BlindContentScore",
+    "KEYED_PRG_VERSION",
     "KeyedTensorCarrier",
     "build_low_frequency_template",
     "build_tail_robust_template",
     "compute_blind_content_score",
+    "keyed_prg_protocol_record",
     "project_canonical_template",
+    "require_supported_keyed_prg_version",
 ]

@@ -19,7 +19,7 @@ def test_formal_method_uses_tail_mathematical_branch() -> None:
 
     text = METHOD_DOCUMENT.read_text(encoding="utf-8")
 
-    assert "高斯幅值尾部截断分支只比较高斯模板元素的绝对幅值与分位点" in text
+    assert "高斯幅值尾部截断分支只按高斯模板元素的绝对幅值和展平索引执行稳定排序" in text
     assert "正式分支标识为 `tail_robust`" in text
     assert "\\Delta z_t^{\\mathrm{tail}}" in text
     assert "\\widetilde\\nu_{\\mathrm{tail},i}" in text
@@ -27,7 +27,7 @@ def test_formal_method_uses_tail_mathematical_branch() -> None:
 
 @pytest.mark.constraint
 def test_algorithm_primitive_defines_amplitude_tail_without_frequency_band() -> None:
-    """算法原语必须分别定义幅值分位点与空间频带边界。"""
+    """算法原语必须分别定义幅值稳定排序与空间频带边界。"""
 
     text = PRIMITIVE_DOCUMENT.read_text(encoding="utf-8")
 
@@ -44,5 +44,5 @@ def test_tail_primitive_metadata_uses_amplitude_domain_semantics() -> None:
     text = TAIL_CARRIER_SOURCE.read_text(encoding="utf-8")
 
     assert '"tail_branch_semantics": "gaussian_amplitude_tail_truncation"' in text
-    assert "quantile" in text
-    assert "abs()" in text
+    assert "ranked_indices" in text
+    assert "abs(flat_values[index])" in text

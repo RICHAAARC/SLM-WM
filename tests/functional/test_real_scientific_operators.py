@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -12,11 +13,17 @@ from zipfile import ZipFile
 
 import pytest
 import torch
+import main.core.keyed_prg as keyed_prg_module
+import main.methods.carrier.keyed_tensor as keyed_tensor_module
+import main.methods.geometry.differentiable_attention as attention_module
+import main.methods.subspace.jacobian_nullspace as nullspace_module
 
 from main.methods.carrier import (
+    KEYED_PRG_VERSION,
     build_low_frequency_template,
     build_tail_robust_template,
     compute_blind_content_score,
+    keyed_prg_protocol_record,
 )
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
@@ -321,8 +328,13 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
             "visual_feature_width": VISUAL_FEATURE_WIDTH,
             "joint_feature_width": JOINT_FEATURE_WIDTH,
             "feature_compression_applied": False,
+            "keyed_prg_version": KEYED_PRG_VERSION,
+            "keyed_prg_protocol_digest": keyed_prg_protocol_record()[
+                "keyed_prg_protocol_digest"
+            ],
         },
     }
+    config = SemanticWatermarkRuntimeConfig()
     record = {
         "branch_risk_bundle_digest": "risk_digest",
         "branch_risk_records": {
@@ -364,12 +376,14 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "quantized_write_jacobian_status": (
             "measured_from_actual_quantized_latent_delta"
         ),
+        "keyed_prg_version": config.keyed_prg_version,
+        "keyed_prg_protocol_digest": keyed_prg_protocol_record(
+            config.keyed_prg_version
+        )["keyed_prg_protocol_digest"],
         "full_semantic_cosine_similarity": 0.999,
         "full_visual_feature_relative_drift": 0.001,
         "semantic_preservation_gate_ready": True,
     }
-    config = SemanticWatermarkRuntimeConfig()
-
     assert _scientific_update_record_ready(record, config) is True
     record["attention_score_gain"] = 0.0
     assert _scientific_update_record_ready(record, config) is False
@@ -378,6 +392,9 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     assert _scientific_update_record_ready(record, config) is False
     record["full_semantic_cosine_similarity"] = 0.999
     record["quantized_write_relative_jacobian_response"] = 1e-3
+    assert _scientific_update_record_ready(record, config) is False
+    record["quantized_write_relative_jacobian_response"] = 1e-5
+    record["keyed_prg_protocol_digest"] = "0" * 64
     assert _scientific_update_record_ready(record, config) is False
 
 
@@ -394,6 +411,95 @@ def test_tail_robust_template_records_amplitude_tail_semantics() -> None:
     assert 0.15 <= retained_fraction <= 0.25
     assert score.content_score > 0.5
     assert score.metadata["tail_branch_semantics"] == "gaussian_amplitude_tail_truncation"
+
+
+@pytest.mark.quick
+def test_keyed_templates_use_versioned_device_independent_prg() -> None:
+    """密钥模板必须由固定 PRG 算法生成, 设备 RNG 不得参与定义."""
+
+    reference = torch.zeros((1, 1, 4, 4), dtype=torch.float32)
+    first_lf = build_low_frequency_template(
+        reference,
+        "known-key",
+        "known-model",
+    )
+    second_lf = build_low_frequency_template(
+        reference,
+        "known-key",
+        "known-model",
+    )
+    tail, threshold, retained_fraction = build_tail_robust_template(
+        reference,
+        "known-key",
+        "known-model",
+        0.25,
+    )
+    protocol = keyed_prg_protocol_record()
+
+    assert KEYED_PRG_VERSION == (
+        "sha256_counter_box_muller_float32_v1"
+    )
+    assert torch.equal(first_lf, second_lf)
+    assert hashlib.sha256(
+        first_lf.detach().contiguous().numpy().tobytes()
+    ).hexdigest() == "7bb7ce000ed31ce3470d4554424849c7602d735de73a9bed4e3bed491ba65f8e"
+    assert hashlib.sha256(
+        tail.detach().contiguous().numpy().tobytes()
+    ).hexdigest() == "b213af9ced637ddf82540806b18a57b5ecc1e94d71e2256f726ce3980612f7a8"
+    assert threshold == pytest.approx(1.4844163656234741)
+    assert retained_fraction == 0.25
+    assert protocol["canonical_generation_device"] == "cpu"
+    assert len(protocol["keyed_prg_protocol_digest"]) == 64
+
+    first_candidates = generate_keyed_candidate_directions(
+        torch.zeros((1, 1, 2, 2), dtype=torch.float32),
+        "known-key",
+        "lf_content",
+        2,
+    )
+    second_candidates = generate_keyed_candidate_directions(
+        torch.zeros((1, 1, 2, 2), dtype=torch.float32),
+        "known-key",
+        "lf_content",
+        2,
+    )
+    relation_signs = keyed_relation_signs(
+        torch.zeros((4, 4), dtype=torch.float32),
+        "known-key",
+        "transformer_blocks.0.attn",
+    )
+    assert torch.equal(first_candidates, second_candidates)
+    assert torch.equal(relation_signs, relation_signs.transpose(0, 1))
+    assert torch.count_nonzero(torch.diag(relation_signs)).item() == 0
+
+    source = "\n".join(
+        inspect.getsource(module)
+        for module in (
+            keyed_prg_module,
+            keyed_tensor_module,
+            attention_module,
+            nullspace_module,
+        )
+    )
+    assert "torch.Generator(" not in source
+    assert "torch.randn(" not in source
+    assert "torch.quantile(" not in source
+
+    with pytest.raises(ValueError, match="keyed_prg_version"):
+        build_low_frequency_template(
+            reference,
+            "known-key",
+            "known-model",
+            prg_version="unsupported_prg",
+        )
+    with pytest.raises(ValueError, match="keyed_prg_version"):
+        generate_keyed_candidate_directions(
+            torch.zeros((1, 1, 2, 2), dtype=torch.float32),
+            "known-key",
+            "lf_content",
+            2,
+            prg_version="unsupported_prg",
+        )
 
 
 class _ToyAttention(torch.nn.Module):

@@ -12,11 +12,14 @@ latent 元素数”的完整 Jacobian。
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 import math
 from typing import Any, Callable, Sequence
 
 from main.core.digest import build_stable_digest
+from main.core.keyed_prg import (
+    KEYED_PRG_VERSION,
+    build_keyed_gaussian_tensor,
+)
 
 TensorFeatureFunction = Callable[[Any], Any]
 
@@ -44,13 +47,6 @@ def _flatten_feature(value: Any) -> Any:
     return value.reshape(-1)
 
 
-def _stable_seed(key_material: str, branch_name: str) -> int:
-    """从密钥材料生成 PyTorch 可用的确定性随机种子。"""
-
-    digest = hashlib.sha256(f"{key_material}|{branch_name}".encode("utf-8")).digest()
-    return int.from_bytes(digest[:8], "big") % (2**63 - 1)
-
-
 def _broadcast_axis_budget(latent: Any, axis_budget: Sequence[float] | Any | None) -> Any:
     """把空间风险预算广播到完整 latent 形状。"""
 
@@ -75,6 +71,7 @@ def generate_keyed_candidate_directions(
     candidate_count: int,
     axis_budget: Sequence[float] | Any | None = None,
     preferred_directions: Sequence[Any] = (),
+    prg_version: str = KEYED_PRG_VERSION,
 ) -> Any:
     """生成可选风险加权且正交的密钥化种子方向矩阵。
 
@@ -90,17 +87,27 @@ def generate_keyed_candidate_directions(
     element_count = latent.numel()
     if candidate_count > element_count:
         raise ValueError("candidate_count 不得超过 latent 元素数")
-    generator_device = latent.device.type if latent.device.type in {"cpu", "cuda"} else "cpu"
-    generator = torch.Generator(device=generator_device).manual_seed(_stable_seed(key_material, branch_name))
     preferred_values = tuple(preferred_directions)
     if len(preferred_values) > candidate_count:
         raise ValueError("preferred_directions 数量不得超过 candidate_count")
-    random_matrix = torch.randn(
-        element_count,
-        candidate_count - len(preferred_values),
-        generator=generator,
-        device=latent.device,
-        dtype=torch.float32,
+    random_column_count = candidate_count - len(preferred_values)
+    random_matrix = (
+        build_keyed_gaussian_tensor(
+            (element_count, random_column_count),
+            key_material,
+            {
+                "operator": "jacobian_candidate_directions",
+                "branch_name": branch_name,
+                "latent_shape": tuple(int(value) for value in latent.shape),
+            },
+            prg_version=prg_version,
+        ).to(device=latent.device, dtype=torch.float32)
+        if random_column_count > 0
+        else torch.empty(
+            (element_count, 0),
+            device=latent.device,
+            dtype=torch.float32,
+        )
     )
     budget = _broadcast_axis_budget(latent, axis_budget).reshape(-1, 1)
     preferred_columns = []

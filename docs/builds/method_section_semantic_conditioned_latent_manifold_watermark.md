@@ -41,7 +41,7 @@ $$
 
 $\Delta z_t^{\mathrm{LF}}$ 是具有明确空间低通构造的内容主证据；$\Delta z_t^{\mathrm{tail}}$ 是高斯幅值尾部截断鲁棒补充证据；$\Delta z_t^{\mathrm{A}}$ 是基于真实 Q/K Self-Attention 相对关系的几何锚点。
 
-高斯幅值尾部截断分支只比较高斯模板元素的绝对幅值与分位点，不执行 FFT、DCT、带通滤波或空间频带选择。该分支不具有空间频率语义。正式分支标识为 `tail_robust`，论文公式使用下标 $\mathrm{tail}$。
+高斯幅值尾部截断分支只按高斯模板元素的绝对幅值和展平索引执行稳定排序，并精确保留冻结比例，不执行 FFT、DCT、带通滤波或空间频带选择。该分支不具有空间频率语义。正式分支标识为 `tail_robust`，论文公式使用下标 $\mathrm{tail}$。
 
 该设计由以下统一目标刻画：
 
@@ -169,7 +169,7 @@ D_b=[d_1^b,\ldots,d_m^b]\in\mathbb{R}^{n\times m},
 \qquad D_b^\top D_b=I.
 $$
 
-LF 与尾部截断分支分别把固定盲检模板作为首个方向；注意力分支把真实 Q/K 目标梯度作为首个方向；其余列由密钥化方向补齐。分支资格 mask 与连续风险预算构成非负对角算子 $B_b$，并显式进入约束系统。
+LF 与尾部截断分支分别把固定盲检模板作为首个方向；注意力分支把真实 Q/K 目标梯度作为首个方向；其余列由设备无关密钥 PRG 方向补齐。候选方向的 domain 绑定算子角色、分支名称、latent shape 和矩阵 shape, 并使用与内容模板相同的版本化 SHA-256 计数器原语。分支资格 mask 与连续风险预算构成非负对角算子 $B_b$，并显式进入约束系统。
 
 ### 3.4.3 无阻尼约束投影与门禁
 
@@ -232,6 +232,8 @@ $$
 \right).
 $$
 
+其中，$\operatorname{PRG}_{\mathcal N}$ 固定为 `sha256_counter_box_muller_float32_v1`：密钥、精确模型标识、分支名称和 shape 先形成 SHA-256 domain；大端计数器流提供53位开区间均匀数，Box-Muller 在 CPU float64 中完成高斯变换，再统一取整为 CPU float32 规范 Tensor。CPU 或 CUDA 只接收该规范 Tensor 的副本，PyTorch 设备 RNG 不参与模板定义。
+
 平均池化在 latent 的二维空间轴上抑制快速空间变化，因此 LF 分支具有明确的空间低通定义。嵌入端把固定模板投影到分支安全子空间：
 
 $$
@@ -258,21 +260,23 @@ $$
 \operatorname{PRG}_{\mathcal N}(K_{\mathrm{tail}},M,shape).
 $$
 
-对冻结的尾部比例 $\gamma$，计算绝对幅值的 $1-\gamma$ 分位点，并仅保留大幅值元素：
+设模板包含 $n$ 个元素。对冻结的尾部比例 $\gamma$，按绝对幅值降序、展平索引升序进行稳定排序，并取
 
 $$
-q_{1-\gamma}
+I_\gamma
 =
-\operatorname{Quantile}_{1-\gamma}(|\nu_{\mathrm{tail}}|),
+\operatorname{TopK}_{\lceil n\gamma\rceil}
+\left(\left\{(|\nu_{\mathrm{tail},i}|,-i)\right\}_{i=1}^{n}\right),
 $$
 
 $$
 \widetilde\nu_{\mathrm{tail},i}
 =
 \nu_{\mathrm{tail},i}
-\mathbb{I}
-\left(|\nu_{\mathrm{tail},i}|\ge q_{1-\gamma}\right).
+\mathbb{I}\left(i\in I_\gamma\right).
 $$
+
+因此保留元素数精确等于 $\lceil n\gamma\rceil$；同幅值元素由公开的展平索引规则消除歧义。记录中的 `tail_threshold` 是 $I_\gamma$ 内最小绝对幅值，不是由设备算子重新估计的随机分位点。
 
 嵌入更新为
 

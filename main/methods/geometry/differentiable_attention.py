@@ -14,6 +14,11 @@ import math
 from typing import Any, Callable, Iterable
 
 from main.core.digest import build_stable_digest
+from main.core.keyed_prg import (
+    KEYED_PRG_VERSION,
+    build_keyed_uniform_tensor,
+    keyed_prg_protocol_record,
+)
 from main.methods.subspace.jacobian_nullspace import JacobianNullSpaceResult
 
 
@@ -37,13 +42,6 @@ def _torch() -> Any:
     import torch
 
     return torch
-
-
-def _seed(key_material: str, layer_name: str, token_count: int) -> int:
-    """为每个注意力层生成稳定密钥种子。"""
-
-    payload = f"{key_material}|{layer_name}|{token_count}".encode("utf-8")
-    return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big") % (2**63 - 1)
 
 
 def _first_tensor(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any | None:
@@ -859,20 +857,26 @@ class DifferentiableAttentionRecorder:
         self.close()
 
 
-def keyed_relation_signs(attention: Any, key_material: str, layer_name: str) -> Any:
+def keyed_relation_signs(
+    attention: Any,
+    key_material: str,
+    layer_name: str,
+    prg_version: str = KEYED_PRG_VERSION,
+) -> Any:
     """为注意力关系生成零对角、近似均衡的密钥符号矩阵。"""
 
     torch = _torch()
     token_count = int(attention.shape[-1])
-    device_name = attention.device.type if attention.device.type in {"cpu", "cuda"} else "cpu"
-    generator = torch.Generator(device=device_name).manual_seed(_seed(key_material, layer_name, token_count))
-    random_values = torch.rand(
-        token_count,
-        token_count,
-        generator=generator,
-        device=attention.device,
-        dtype=torch.float32,
-    )
+    random_values = build_keyed_uniform_tensor(
+        (token_count, token_count),
+        key_material,
+        {
+            "operator": "attention_relation_signs",
+            "layer_name": layer_name,
+            "token_count": token_count,
+        },
+        prg_version=prg_version,
+    ).to(device=attention.device, dtype=torch.float32)
     signs = torch.where(random_values >= 0.5, 1.0, -1.0)
     signs = torch.triu(signs, diagonal=1)
     signs = signs + signs.transpose(0, 1)
@@ -883,6 +887,7 @@ def keyed_attention_relation_projection(
     descriptor: AttentionRelationDescriptor,
     key_material: str,
     layer_name: str,
+    prg_version: str = KEYED_PRG_VERSION,
 ) -> KeyedAttentionRelationProjection:
     """为四分量关系描述构造共享密钥图和冻结分量极性的投影。"""
 
@@ -891,7 +896,9 @@ def keyed_attention_relation_projection(
         descriptor.values[..., 0],
         key_material,
         layer_name,
+        prg_version,
     )
+    prg_record = keyed_prg_protocol_record(prg_version)
     polarities = torch.tensor(
         ATTENTION_RELATION_COMPONENT_POLARITIES,
         device=descriptor.values.device,
@@ -909,6 +916,10 @@ def keyed_attention_relation_projection(
         "layer_name": layer_name,
         "token_indices": descriptor.token_indices,
         "projection_rule": "shared_symmetric_pair_sign_with_component_polarity",
+        "keyed_prg_version": prg_version,
+        "keyed_prg_protocol_digest": prg_record[
+            "keyed_prg_protocol_digest"
+        ],
     }
     return KeyedAttentionRelationProjection(
         values=values,

@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from experiments.runtime.model_sources import require_registered_model_reference
+from main.core.keyed_prg import require_supported_keyed_prg_version
 
 
 FORMAL_METHOD_CONFIG_RELATIVE_PATH = Path("configs/model_sd35.yaml")
@@ -48,6 +49,7 @@ class FormalMethodRuntimeConfig:
     attention_unstable_pair_weight: float
     minimum_final_image_attention_score_gain: float
     tail_fraction: float
+    keyed_prg_version: str
     minimum_projection_energy_retention: float
     maximum_relative_response_residual: float
     maximum_quantized_write_relative_jacobian_response: float
@@ -85,6 +87,7 @@ class FormalMethodRuntimeConfig:
             raise ValueError("injection_step_indices 必须位于推理步范围内")
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
+        require_supported_keyed_prg_version(self.keyed_prg_version)
         if not 0.0 < self.attention_stable_token_fraction <= 1.0:
             raise ValueError(
                 "attention_stable_token_fraction 必须位于 (0, 1]"
@@ -147,6 +150,7 @@ class FormalMethodRuntimeConfig:
                 self.minimum_final_image_attention_score_gain
             ),
             "tail_fraction": self.tail_fraction,
+            "keyed_prg_version": self.keyed_prg_version,
             "minimum_projection_energy_retention": self.minimum_projection_energy_retention,
             "maximum_relative_response_residual": self.maximum_relative_response_residual,
             "maximum_quantized_write_relative_jacobian_response": (
@@ -232,6 +236,7 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
             config.minimum_final_image_attention_score_gain
         ),
         "SLM_WM_TAIL_FRACTION": str(config.tail_fraction),
+        "SLM_WM_KEYED_PRG_VERSION": config.keyed_prg_version,
         "SLM_WM_MINIMUM_PROJECTION_ENERGY_RETENTION": str(config.minimum_projection_energy_retention),
         "SLM_WM_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL": str(config.maximum_relative_response_residual),
         "SLM_WM_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE": str(

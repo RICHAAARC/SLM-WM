@@ -10,7 +10,7 @@
 2. `tail_robust`：高斯幅值尾部截断鲁棒补充证据；
 3. `attention_geometry`：真实 Q/K Self-Attention 相对关系几何锚点。
 
-`tail_robust` 按高斯模板元素绝对幅值的分位点选择分布尾部, 不具有空间频带定义。
+`tail_robust` 按高斯模板元素绝对幅值和展平索引稳定排序, 精确保留冻结比例的分布尾部, 不具有空间频带定义。
 
 ---
 
@@ -153,6 +153,8 @@ $$
 (\operatorname{PRG}_{\mathcal N}(K_{\mathrm{LF}},M,shape))\right).
 $$
 
+高斯 PRG 固定为 `sha256_counter_box_muller_float32_v1`。密钥、精确模型标识、分支和 shape 进入 SHA-256 计数器 domain，高斯变换先在 CPU 生成 float32 规范 Tensor，再搬运到目标设备；设备 RNG 不参与模板身份。
+
 该分支具有明确的空间低通定义。
 
 ### （二）高斯幅值尾部截断
@@ -163,10 +165,13 @@ $$
 \widetilde\nu_{\mathrm{tail},i}
 =
 \nu_{\mathrm{tail},i}
-\mathbb I(|\nu_{\mathrm{tail},i}|\ge q_{1-\gamma}).
+\mathbb I(i\in I_\gamma),
+\qquad
+I_\gamma=\operatorname{TopK}_{\lceil n\gamma\rceil}
+\left(\left\{(|\nu_i|,-i)\right\}_{i=1}^{n}\right).
 $$
 
-$\gamma$ 是标准高斯元素绝对幅值的尾部保留比例。该过程不执行 FFT、DCT、空间波数排序或频带 mask，因此只定义幅值域筛选, 不定义空间频带。其攻击鲁棒性必须由真实实验验证。
+$\gamma$ 是标准高斯元素绝对幅值的尾部保留比例，同幅值元素由展平索引升序确定选择顺序。该过程不执行 FFT、DCT、空间波数排序或频带 mask，因此只定义幅值域筛选, 不定义空间频带。其攻击鲁棒性必须由真实实验验证。
 
 ### （三）安全投影与内容分数
 

@@ -150,8 +150,10 @@ Notebook 与 repository module 的跨边界数据
 | lf_carrier_digest | method | none | true | false | false | LF carrier 的稳定摘要。 |
 | tail_carrier_digest | method | none | true | false | false | 高斯幅值尾部截断 carrier 的稳定摘要。 |
 | core_update_digest | method | none | true | false | false | LF/高斯幅值尾部截断/attention carrier 合成后的核心 update 摘要。 |
-| tail_threshold | method | none | false | false | false | 高斯幅值尾部截断使用的幅值分位点阈值, 不表示频率截止值。 |
+| tail_threshold | method | none | false | false | false | 高斯幅值尾部稳定排序入选集合中的最小绝对幅值, 不表示频率截止值。 |
 | retained_fraction | method | none | false | false | false | 高斯幅值尾部截断后实际保留的模板元素比例。 |
+| keyed_prg_version | protocol | none | true | false | false | 内容模板、Jacobian 候选方向和注意力关系符号共同使用的设备无关密钥 PRG 算法版本。 |
+| keyed_prg_protocol_digest | provenance | none | true | true | false | 不含密钥的 SHA-256 计数器流、均匀映射、高斯变换和规范生成设备协议摘要。 |
 | tail_fraction | method | none | false | false | false | 高斯幅值尾部截断的目标元素保留比例, 不定义空间频带。 |
 | embedding_strength | method | none | false | false | false | 水印嵌入强度。 |
 | anchor_id | method | none | false | false | false | 注意力几何锚点对象的稳定标识。 |

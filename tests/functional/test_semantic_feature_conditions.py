@@ -37,6 +37,7 @@ from main.methods.geometry.differentiable_attention import (
     QKAttentionRelation,
     keyed_relation_signs,
 )
+from main.methods.carrier import keyed_prg_protocol_record
 from main.methods.subspace import build_exact_jacobian_linearization
 
 
@@ -141,6 +142,10 @@ def _counterfactual_update_records(
                     if config.null_space_enabled
                     else "not_applicable_jacobian_null_space_disabled"
                 ),
+                "keyed_prg_version": config.keyed_prg_version,
+                "keyed_prg_protocol_digest": keyed_prg_protocol_record(
+                    config.keyed_prg_version
+                )["keyed_prg_protocol_digest"],
                 "active_carrier_branches": list(branches),
                 "null_space_records": {
                     branch_name: {"branch_name": branch_name}
@@ -827,6 +832,20 @@ def test_carrier_only_counterfactual_binds_same_seed_and_scheduler() -> None:
             carrier_config,
             full_records,
             quantized_gate_drift,
+        )
+
+    prg_identity_drift = _counterfactual_update_records(
+        full_config,
+        role="carrier_only_counterfactual",
+        attention_enabled=False,
+    )
+    prg_identity_drift[0]["keyed_prg_protocol_digest"] = "d" * 64
+    with pytest.raises(RuntimeError, match="密钥 PRG 协议身份"):
+        _carrier_only_counterfactual_identity(
+            full_config,
+            carrier_config,
+            full_records,
+            prg_identity_drift,
         )
 
     attention_atom_drift = _counterfactual_update_records(

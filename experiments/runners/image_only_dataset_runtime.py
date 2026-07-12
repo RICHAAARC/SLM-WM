@@ -63,6 +63,7 @@ from experiments.artifacts.detection_score_curves import (
 from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
+from main.methods.carrier import keyed_prg_protocol_record
 from main.core.digest import build_stable_digest
 from main.methods.geometry import (
     ATTENTION_RELATION_COMPONENT_NAMES,
@@ -379,6 +380,9 @@ def _scientific_update_record_ready(
         "torch_func_exact_jvp_vjp",
         "torch_autograd_exact_jvp_vjp_compatibility",
     }
+    expected_prg_digest = keyed_prg_protocol_record(
+        config.keyed_prg_version
+    )["keyed_prg_protocol_digest"]
     for subspace_record in null_space_records.values():
         metadata = subspace_record.get("metadata", {})
         numeric_values = (
@@ -411,6 +415,12 @@ def _scientific_update_record_ready(
         if int(metadata.get("joint_feature_width", 0)) != JOINT_FEATURE_WIDTH:
             return False
         if metadata.get("feature_compression_applied") is not False:
+            return False
+        if (
+            metadata.get("keyed_prg_version") != config.keyed_prg_version
+            or metadata.get("keyed_prg_protocol_digest")
+            != expected_prg_digest
+        ):
             return False
         column_residuals = subspace_record.get(
             "column_relative_response_residuals"
@@ -463,6 +473,8 @@ def _scientific_update_record_ready(
             "maximum_quantized_write_relative_jacobian_response"
         )
         != config.maximum_quantized_write_relative_jacobian_response
+        or record.get("keyed_prg_version") != config.keyed_prg_version
+        or record.get("keyed_prg_protocol_digest") != expected_prg_digest
     ):
         return False
     if not finite_at_least(

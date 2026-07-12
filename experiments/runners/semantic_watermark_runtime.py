@@ -41,9 +41,12 @@ from experiments.runtime.scientific_unit_provenance import (
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from main.core.digest import build_stable_digest
 from main.methods.carrier import (
+    KEYED_PRG_VERSION,
     build_low_frequency_template,
     build_tail_robust_template,
+    keyed_prg_protocol_record,
     project_canonical_template,
+    require_supported_keyed_prg_version,
 )
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
@@ -111,6 +114,7 @@ class SemanticWatermarkRuntimeConfig:
         _FORMAL_METHOD_CONFIG.minimum_final_image_attention_score_gain
     )
     tail_fraction: float = _FORMAL_METHOD_CONFIG.tail_fraction
+    keyed_prg_version: str = _FORMAL_METHOD_CONFIG.keyed_prg_version
     minimum_projection_energy_retention: float = _FORMAL_METHOD_CONFIG.minimum_projection_energy_retention
     maximum_relative_response_residual: float = _FORMAL_METHOD_CONFIG.maximum_relative_response_residual
     maximum_quantized_write_relative_jacobian_response: float = (
@@ -168,6 +172,7 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError("post-step 注入时刻必须保留一个合法的下一调度时刻")
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
+        require_supported_keyed_prg_version(self.keyed_prg_version)
         if not 0.0 < self.attention_stable_token_fraction <= 1.0:
             raise ValueError(
                 "attention_stable_token_fraction 必须位于 (0, 1]"
@@ -803,6 +808,7 @@ def _solve_branch_subspace(
     minimum_projection_energy_retention: float = 0.01,
     cg_maximum_iterations: int = 64,
     cg_relative_tolerance: float = 1e-6,
+    prg_version: str = KEYED_PRG_VERSION,
 ) -> Any:
     """为一个载体分支运行完整 Jacobian 风险支持约束投影。"""
 
@@ -811,8 +817,9 @@ def _solve_branch_subspace(
         key_material,
         branch_name,
         candidate_count,
-        None,
-        preferred_directions,
+        axis_budget=None,
+        preferred_directions=preferred_directions,
+        prg_version=prg_version,
     )
     result = solve_jacobian_null_space(
         latent=latent.float(),
@@ -828,6 +835,7 @@ def _solve_branch_subspace(
     )
     result.metadata["preferred_direction_count"] = len(preferred_directions)
     result.metadata["preferred_direction_role"] = "carrier_or_attention_gradient"
+    result.metadata.update(keyed_prg_protocol_record(prg_version))
     result.metadata.update(feature_runtime.feature_schema_record())
     if result.relative_response_residual > maximum_relative_response_residual:
         raise RuntimeError("完整 Jacobian Null Space 的相对响应残差超过正式门禁")
@@ -1682,6 +1690,15 @@ def _carrier_only_counterfactual_identity(
                 character not in "0123456789abcdef" for character in value
             ):
                 raise RuntimeError("反事实更新原子缺少完整 tensor 内容 SHA-256")
+        expected_prg_digest = keyed_prg_protocol_record(
+            full_config.keyed_prg_version
+        )["keyed_prg_protocol_digest"]
+        if (
+            record.get("keyed_prg_version") != full_config.keyed_prg_version
+            or record.get("keyed_prg_protocol_digest")
+            != expected_prg_digest
+        ):
+            raise RuntimeError("反事实更新原子的密钥 PRG 协议身份无效")
         quantized_gate_applicable = record.get(
             "quantized_write_jacobian_gate_applicable"
         )
@@ -1920,12 +1937,14 @@ def run_semantic_watermark_runtime(
                 latent,
                 active_injection_config.key_material,
                 active_injection_config.carrier_model_reference,
+                prg_version=active_injection_config.keyed_prg_version,
             )
             tail_template, tail_threshold, retained_fraction = build_tail_robust_template(
                 latent,
                 active_injection_config.key_material,
                 active_injection_config.carrier_model_reference,
                 active_injection_config.tail_fraction if active_injection_config.tail_truncation_enabled else 1.0,
+                prg_version=active_injection_config.keyed_prg_version,
             )
             transformer_forward = _transformer_forward_function(
                 pipeline,
@@ -2018,6 +2037,7 @@ def run_semantic_watermark_runtime(
                             active_injection_config.minimum_projection_energy_retention,
                             active_injection_config.null_space_cg_max_iterations,
                             active_injection_config.null_space_cg_relative_tolerance,
+                            active_injection_config.keyed_prg_version,
                         )
                         for branch_name, branch_field in active_branch_fields.items()
                     }
@@ -2040,6 +2060,7 @@ def run_semantic_watermark_runtime(
                         lf_template,
                         subspaces["lf_content"],
                         active_injection_config.minimum_projection_energy_retention,
+                        prg_version=active_injection_config.keyed_prg_version,
                     )
                     if active_injection_config.lf_enabled
                     else None
@@ -2050,6 +2071,7 @@ def run_semantic_watermark_runtime(
                         tail_template,
                         subspaces["tail_robust"],
                         active_injection_config.minimum_projection_energy_retention,
+                        prg_version=active_injection_config.keyed_prg_version,
                     )
                     if active_injection_config.tail_robust_enabled
                     else None
@@ -2251,6 +2273,10 @@ def run_semantic_watermark_runtime(
                 ),
                 "tail_threshold": tail_threshold,
                 "tail_retained_fraction": retained_fraction,
+                "keyed_prg_version": active_injection_config.keyed_prg_version,
+                "keyed_prg_protocol_digest": keyed_prg_protocol_record(
+                    active_injection_config.keyed_prg_version
+                )["keyed_prg_protocol_digest"],
                 **attention_record,
                 **quantized_write_jacobian_record,
                 **preservation_record,
@@ -2387,6 +2413,7 @@ def run_semantic_watermark_runtime(
     tail_weight = 1.0 - lf_weight
     detector_config = ImageOnlyDetectionConfig(
         model_id=config.carrier_model_reference,
+        keyed_prg_version=config.keyed_prg_version,
         content_threshold=config.content_threshold,
         geometry_score_threshold=config.geometry_score_threshold,
         registration_confidence_threshold=config.registration_confidence_threshold,

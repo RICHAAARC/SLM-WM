@@ -180,7 +180,7 @@ $$
 D_b=[d_1^b,\ldots,d_m^b]\in\mathbb{R}^{n\times m},\qquad {D_b}^{\top}D_b=I.
 $$
 
-LF 与尾部截断分支分别把固定盲检模板作为首个方向；注意力分支把真实 Q/K 目标梯度作为首个方向；其余列由密钥化方向补齐。分支风险预算以非负对角算子 $B_b=\operatorname{diag}(b_b)$ 显式进入约束投影，而不是预乘后再用低维响应矩阵选择方向。
+LF 与尾部截断分支分别把固定盲检模板作为首个方向；注意力分支把真实 Q/K 目标梯度作为首个方向；其余列由设备无关密钥 PRG 方向补齐。候选方向以算子角色、分支、latent shape 和候选矩阵 shape 形成独立 domain, 并使用与内容模板相同的版本化 SHA-256 计数器流。分支风险预算以非负对角算子 $B_b=\operatorname{diag}(b_b)$ 显式进入约束投影，而不是预乘后再用低维响应矩阵选择方向。
 
 在正式算法中, $F_{\mathrm{sem}}$ 不只由 CLIP 架构名称定义, 还由 `openai/clip-vit-base-patch32@3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268` 的精确权重函数定义。同理, 潜空间变量、VAE 解码器和扩散 Transformer 来自 `stabilityai/stable-diffusion-3.5-medium@b940f670f0eda2d07fbb75229e779da1ad11eb80`。仓库分支漂移会改变 Jacobian 与 Null Space, 因此精确 revision 属于科学算子定义, 而不是可选的工程元数据。
 
@@ -260,6 +260,8 @@ $$
 \right).
 $$
 
+正式 $\operatorname{PRG}_{\mathcal N}$ 版本为 `sha256_counter_box_muller_float32_v1`。其 domain 同时绑定密钥、精确模型标识、分支名称和 latent shape；SHA-256 大端计数器流经53位开区间均匀映射与 Box-Muller 变换后，先生成 CPU float32 规范 Tensor，再搬运到目标设备。该定义不调用 CPU/CUDA 的设备 RNG，因而同一协议输入在两种设备上重建相同模板字节。
+
 固定模板投影到真实安全子空间：
 
 $$
@@ -307,16 +309,23 @@ $$
 \operatorname{PRG}_{\mathcal{N}}(K_{\mathrm{tail}},model,shape).
 $$
 
-根据冻结的尾部比例 $\gamma$ 计算幅值分位点：
+令元素总数为 $n$。根据冻结的尾部比例 $\gamma$，按 $(|\nu_i|,-i)$ 降序稳定选择 $\lceil n\gamma\rceil$ 个元素：
+
+$$
+I_\gamma
+=
+\operatorname{TopK}_{\lceil n\gamma\rceil}
+\left(\left\{(|\nu_{\mathrm{tail},i}|,-i)\right\}_{i=1}^{n}\right),
+$$
 
 $$
 \widetilde{\nu}_{\mathrm{tail},i}
 =
 \nu_{\mathrm{tail},i}
-\mathbb{I}(|\nu_{\mathrm{tail},i}|\ge q_{1-\gamma}).
+\mathbb{I}(i\in I_\gamma).
 $$
 
-该选择发生在元素幅值域，不对元素执行 Fourier 变换、余弦变换、带通滤波或按空间波数排序。截断后的模板具有由随机样本决定的宽频谱。`tail_fraction` 是概率分布尾部保留比例，不是频率截止值，也不定义空间频带。
+该选择发生在元素幅值域，同幅值时以公开展平索引消除歧义；记录中的阈值是入选集合内最小绝对幅值。该过程不对元素执行 Fourier 变换、余弦变换、带通滤波或按空间波数排序。截断后的模板具有由随机样本决定的宽频谱。`tail_fraction` 是概率分布尾部保留比例，不是频率截止值，也不定义空间频带。
 
 尾部载体同样先投影到分支安全子空间：
 
@@ -458,7 +467,7 @@ $$
 
 ### （三）几何水印嵌入
 
-正式实现直接调用 Transformer attention 模块的 `to_q` 和 `to_k` 投影。为使检测端不需要原始 prompt, 嵌入与检测都使用冻结的空文本条件和公开检测时刻。密钥产生零对角关系符号矩阵 $S_K$, 四个分量采用冻结极性
+正式实现直接调用 Transformer attention 模块的 `to_q` 和 `to_k` 投影。为使检测端不需要原始 prompt, 嵌入与检测都使用冻结的空文本条件和公开检测时刻。密钥通过同一版本化 SHA-256 计数器 PRG 的均匀数流产生零对角关系符号矩阵 $S_K$；domain 绑定层名和 token 数, 规范 CPU float32 符号搬运到目标设备后再形成对称矩阵。四个分量采用冻结极性
 $\pi=(1,-1,1,1)$；rank 的反极性使较高 logit 对应较小降序 rank。对每个分量
 分别执行逐行 pair 加权中心化和归一化相关, 再严格等权组合：
 

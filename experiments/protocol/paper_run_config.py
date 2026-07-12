@@ -19,6 +19,7 @@ from typing import Any
 from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
 from experiments.protocol.prompts import PROMPT_FILES, read_prompt_file
 from experiments.protocol.splits import build_group_split_counts
+from main.core.keyed_prg import require_supported_keyed_prg_version
 
 PILOT_PAPER_RUN_NAME = "pilot_paper"
 PROBE_PAPER_RUN_NAME = "probe_paper"
@@ -46,6 +47,7 @@ DEFAULT_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN = (
     _FORMAL_METHOD_DEFAULTS.minimum_final_image_attention_score_gain
 )
 DEFAULT_TAIL_FRACTION = _FORMAL_METHOD_DEFAULTS.tail_fraction
+DEFAULT_KEYED_PRG_VERSION = _FORMAL_METHOD_DEFAULTS.keyed_prg_version
 DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION = _FORMAL_METHOD_DEFAULTS.minimum_projection_energy_retention
 DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL = _FORMAL_METHOD_DEFAULTS.maximum_relative_response_residual
 DEFAULT_MAXIMUM_QUANTIZED_WRITE_RELATIVE_JACOBIAN_RESPONSE = (
@@ -77,6 +79,7 @@ SHARED_METHOD_SETTING_FIELDS = (
     "attention_unstable_pair_weight",
     "minimum_final_image_attention_score_gain",
     "tail_fraction",
+    "keyed_prg_version",
     "minimum_projection_energy_retention",
     "maximum_relative_response_residual",
     "maximum_quantized_write_relative_jacobian_response",
@@ -151,6 +154,7 @@ class PaperRunConfig:
         DEFAULT_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN
     )
     tail_fraction: float = DEFAULT_TAIL_FRACTION
+    keyed_prg_version: str = DEFAULT_KEYED_PRG_VERSION
     minimum_projection_energy_retention: float = DEFAULT_MINIMUM_PROJECTION_ENERGY_RETENTION
     maximum_relative_response_residual: float = DEFAULT_MAXIMUM_RELATIVE_RESPONSE_RESIDUAL
     maximum_quantized_write_relative_jacobian_response: float = (
@@ -179,6 +183,7 @@ class PaperRunConfig:
             raise ValueError("jacobian_candidate_count 必须不小于正的 null_space_rank")
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
+        require_supported_keyed_prg_version(self.keyed_prg_version)
         if not 0.0 < self.attention_stable_token_fraction <= 1.0:
             raise ValueError(
                 "attention_stable_token_fraction 必须位于 (0, 1]"
