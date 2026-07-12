@@ -264,6 +264,39 @@ def test_full_jacobian_constraint_projection_recovers_null_direction() -> None:
 
 
 @pytest.mark.quick
+def test_null_projection_energy_retention_uses_squared_l2_ratio() -> None:
+    """Null Space 投影保留率必须比较平方 L2 能量, 而不是振幅范数。"""
+
+    latent = torch.zeros(2)
+
+    def full_features(values: torch.Tensor) -> torch.Tensor:
+        return values[:1]
+
+    inverse_square_root_two = 2.0**-0.5
+    candidate = torch.tensor(
+        ((inverse_square_root_two,), (inverse_square_root_two,))
+    )
+    result = solve_jacobian_null_space(
+        latent=latent,
+        candidate_matrix=candidate,
+        risk_budget=torch.ones_like(latent),
+        null_rank=1,
+        joint_feature_linearization=build_exact_jacobian_linearization(
+            full_features,
+            latent,
+        ),
+        branch_name="lf_content",
+    )
+
+    # 候选向量能量为1, 投影后只保留第二个坐标, 能量为1/2。
+    assert result.projection_energy_retentions == pytest.approx((0.5,))
+    # 范数比例为 sqrt(1/2), 此断言独立阻止实现退回振幅比例。
+    assert result.projection_energy_retentions[0] != pytest.approx(
+        inverse_square_root_two
+    )
+
+
+@pytest.mark.quick
 def test_risk_budget_is_explicit_in_full_jacobian_null_projection() -> None:
     """风险预算的零支持必须在完整 Jacobian Null Space 基底中保持为零。"""
 

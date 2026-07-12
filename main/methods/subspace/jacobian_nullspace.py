@@ -522,7 +522,9 @@ def solve_jacobian_null_space(
         ).detach()
         projected = (routed_direction - correction).detach()
         projected_norm = float(torch.linalg.norm(projected).item())
-        energy_retention = projected_norm / max(routed_norm, 1e-12)
+        projected_energy = projected_norm * projected_norm
+        routed_energy = routed_norm * routed_norm
+        energy_retention = projected_energy / max(routed_energy, 1e-24)
         response = joint_feature_linearization.apply(projected).float().detach()
         response_norm = float(torch.linalg.norm(response).item())
         relative_residual = response_norm / max(reference_norm, 1e-12)
