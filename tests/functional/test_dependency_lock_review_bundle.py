@@ -27,6 +27,39 @@ FORMAL_EXECUTION_LOCK = {
 }
 
 
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "output",
+    (
+        "uv 0.11.28\n",
+        "uv 0.11.28 (x86_64-unknown-linux-gnu)\n",
+    ),
+)
+def test_qualification_uv_version_accepts_fixed_linux_wheel_outputs(
+    output: str,
+) -> None:
+    """固定 Linux wheel 的两种真实版本输出都必须保持同一身份."""
+
+    assert review_bundle._matches_qualification_uv_version_output(output)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "output",
+    (
+        "uv 0.11.27 (x86_64-unknown-linux-gnu)",
+        "uv 0.11.28 (aarch64-unknown-linux-gnu)",
+        "uv 0.11.28 extra",
+    ),
+)
+def test_qualification_uv_version_rejects_version_or_platform_drift(
+    output: str,
+) -> None:
+    """版本、平台或额外文本漂移不得绕过固定工具身份门禁."""
+
+    assert not review_bundle._matches_qualification_uv_version_output(output)
+
+
 def _profile(profile_id: str) -> DependencyProfile:
     """读取共享 registry 中的真实 profile 身份."""
 

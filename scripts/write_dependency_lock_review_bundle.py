@@ -93,6 +93,24 @@ _QUALIFICATION_SANITIZED_ENVIRONMENT_NAMES = frozenset(
 )
 
 CURRENT_INTERPRETER_PROFILE_ID = WORKFLOW_ORCHESTRATOR_PROFILE_ID
+
+
+def _matches_qualification_uv_version_output(output: str) -> bool:
+    """核验固定 ``uv`` wheel 的版本输出, 并接受其可选目标三元组.
+
+    ``uv`` 的 Linux standalone executable 会在精确版本后附加编译目标,
+    而部分测试替身和其他发行形式只输出版本. wheel URL、文件名和 SHA-256
+    已由上游门禁固定, 因此此处只解析同一 executable 的两种官方输出形态,
+    不放宽版本或平台身份.
+    """
+
+    expected = re.escape(UV_DISTRIBUTION_VERSION)
+    return re.fullmatch(
+        rf"uv {expected}(?: \(x86_64-unknown-linux-gnu\))?",
+        output.strip(),
+    ) is not None
+
+
 ISOLATED_PYTHON_PROFILE_IDS = tuple(
     profile_id
     for profile_id in REQUIRED_DEPENDENCY_PROFILE_NAMES
@@ -923,7 +941,7 @@ def launch_dependency_lock_qualification(
                 "资格化命令返回非零退出码.",
             )
         if operation == "qualification_uv_version":
-            if record["stdout"].strip() != f"uv {UV_DISTRIBUTION_VERSION}":
+            if not _matches_qualification_uv_version_output(record["stdout"]):
                 return _write_qualification_failure(
                     report,
                     report_path,
