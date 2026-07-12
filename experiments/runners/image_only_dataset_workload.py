@@ -68,6 +68,9 @@ def build_method_config(
             method.attention_stable_token_fraction
         ),
         attention_unstable_pair_weight=method.attention_unstable_pair_weight,
+        attention_relation_component_weights=(
+            method.attention_relation_component_weights
+        ),
         minimum_final_image_attention_score_gain=(
             method.minimum_final_image_attention_score_gain
         ),

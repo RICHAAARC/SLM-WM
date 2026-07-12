@@ -43,6 +43,9 @@ DEFAULT_ATTENTION_STABLE_TOKEN_FRACTION = (
 DEFAULT_ATTENTION_UNSTABLE_PAIR_WEIGHT = (
     _FORMAL_METHOD_DEFAULTS.attention_unstable_pair_weight
 )
+DEFAULT_ATTENTION_RELATION_COMPONENT_WEIGHTS = (
+    _FORMAL_METHOD_DEFAULTS.attention_relation_component_weights
+)
 DEFAULT_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN = (
     _FORMAL_METHOD_DEFAULTS.minimum_final_image_attention_score_gain
 )
@@ -85,6 +88,7 @@ SHARED_METHOD_SETTING_FIELDS = (
     "attention_relative_strength",
     "attention_stable_token_fraction",
     "attention_unstable_pair_weight",
+    "attention_relation_component_weights",
     "minimum_final_image_attention_score_gain",
     "tail_fraction",
     "keyed_prg_version",
@@ -162,6 +166,9 @@ class PaperRunConfig:
     attention_unstable_pair_weight: float = (
         DEFAULT_ATTENTION_UNSTABLE_PAIR_WEIGHT
     )
+    attention_relation_component_weights: tuple[float, ...] = (
+        DEFAULT_ATTENTION_RELATION_COMPONENT_WEIGHTS
+    )
     minimum_final_image_attention_score_gain: float = (
         DEFAULT_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN
     )
@@ -212,6 +219,11 @@ class PaperRunConfig:
             raise ValueError(
                 "attention_unstable_pair_weight 必须位于 [0, 1)"
             )
+        if (
+            self.attention_relation_component_weights
+            != DEFAULT_ATTENTION_RELATION_COMPONENT_WEIGHTS
+        ):
+            raise ValueError("论文运行必须使用四个等权注意力关系分量")
         if (
             not math.isfinite(self.minimum_final_image_attention_score_gain)
             or self.minimum_final_image_attention_score_gain <= 0.0

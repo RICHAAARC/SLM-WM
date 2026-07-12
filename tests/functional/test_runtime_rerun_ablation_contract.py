@@ -1,4 +1,4 @@
-"""正式重运行消融11项规范的轻量协议测试。"""
+"""正式重运行消融15项规范的轻量协议测试."""
 
 from __future__ import annotations
 
@@ -17,22 +17,27 @@ from experiments.protocol.attacks import attack_config_digest, default_attack_co
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     _branch_risk_configs,
+    semantic_watermark_runtime_config_payload,
 )
 from main.methods.semantic import build_branch_risk_fields
 
 
 @pytest.mark.quick
-def test_formal_runtime_rerun_ablation_contract_is_exactly_eleven_items() -> None:
-    """正式消融必须覆盖分支风险、单载体与逐机制移除配置。"""
+def test_formal_runtime_rerun_ablation_contract_is_exactly_fifteen_items() -> None:
+    """正式消融必须覆盖机制开关与四个注意力分量留一对照."""
 
     contract = runtime_rerun_ablation_contract(default_runtime_rerun_ablation_specs())
 
-    assert len(FORMAL_RUNTIME_RERUN_ABLATION_IDS) == 11
-    assert len(set(FORMAL_RUNTIME_RERUN_ABLATION_IDS)) == 11
+    assert len(FORMAL_RUNTIME_RERUN_ABLATION_IDS) == 15
+    assert len(set(FORMAL_RUNTIME_RERUN_ABLATION_IDS)) == 15
     assert {
         "shared_global_risk_routing",
         "lf_content_only",
         "tail_robust_only",
+        "without_centered_qk_logit",
+        "without_differentiable_row_rank",
+        "without_attention_probability",
+        "without_distance_modulated_probability",
     } <= set(FORMAL_RUNTIME_RERUN_ABLATION_IDS)
     assert contract["expected_ablation_ids"] == list(FORMAL_RUNTIME_RERUN_ABLATION_IDS)
     assert contract["actual_ablation_ids"] == list(FORMAL_RUNTIME_RERUN_ABLATION_IDS)
@@ -102,6 +107,41 @@ def test_single_carrier_ablations_disable_attention_and_other_content_branch() -
     assert tail_only.attention_geometry_enabled is False
     assert lf_only.image_alignment_enabled is False
     assert tail_only.image_alignment_enabled is False
+
+
+@pytest.mark.quick
+def test_four_attention_component_ablations_zero_exactly_one_weight() -> None:
+    """四个分量对照必须逐项置零并对其余三个分量重新归一化."""
+
+    component_ids = (
+        "without_centered_qk_logit",
+        "without_differentiable_row_rank",
+        "without_attention_probability",
+        "without_distance_modulated_probability",
+    )
+    specs = {
+        spec.ablation_id: spec
+        for spec in default_runtime_rerun_ablation_specs()
+    }
+    base = SemanticWatermarkRuntimeConfig()
+
+    for removed_index, ablation_id in enumerate(component_ids):
+        spec = specs[ablation_id]
+        weights = spec.attention_relation_component_weights
+        runtime_config = spec.apply(base, "outputs/formal_mechanism_ablation")
+        assert len(weights) == 4
+        assert weights[removed_index] == 0.0
+        assert sum(weight == 0.0 for weight in weights) == 1
+        assert sum(weights) == pytest.approx(1.0)
+        assert all(
+            weight == pytest.approx(1.0 / 3.0)
+            for index, weight in enumerate(weights)
+            if index != removed_index
+        )
+        assert runtime_config.attention_relation_component_weights == weights
+        assert semantic_watermark_runtime_config_payload(runtime_config)[
+            "attention_relation_component_weights"
+        ] == list(weights)
 
 
 def _formal_attack_records() -> tuple[dict[str, object], ...]:

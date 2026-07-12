@@ -35,7 +35,9 @@ from experiments.runtime.repository_environment import file_digest
 from main.methods.geometry.differentiable_attention import (
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_RELATION_COMPONENT_NAMES,
     QKAttentionRelation,
+    attention_relation_component_protocol,
     build_qk_atomic_content_metadata,
     keyed_relation_signs,
     qk_atomic_content_records_digest,
@@ -107,7 +109,22 @@ def _counterfactual_update_records(
                 "stable_token_selection_digest": "4" * 64,
                 "stable_pair_weight_identity_digest": "5" * 64,
                 "stable_pair_weight_realization_digest": "6" * 64,
-                "attention_relation_component_names": ["direct_qk_fixture"],
+                "attention_relation_component_names": list(
+                    ATTENTION_RELATION_COMPONENT_NAMES
+                ),
+                "attention_relation_active_component_names": list(
+                    attention_relation_component_protocol(
+                        config.attention_relation_component_weights
+                    )["attention_relation_active_component_names"]
+                ),
+                "attention_relation_component_weights": list(
+                    config.attention_relation_component_weights
+                ),
+                "attention_relation_component_protocol_digest": (
+                    attention_relation_component_protocol(
+                        config.attention_relation_component_weights
+                    )["attention_relation_component_protocol_digest"]
+                ),
                 "attention_relation_source": "direct_qk_fixture",
                 "attention_relation_direct_qk_source_ready": True,
                 "attention_relation_probability_scope": "fixture_probability",
@@ -145,6 +162,9 @@ def _counterfactual_update_records(
                 "stable_pair_weight_identity_digest": "",
                 "stable_pair_weight_realization_digest": "",
                 "attention_relation_component_names": [],
+                "attention_relation_active_component_names": [],
+                "attention_relation_component_weights": [],
+                "attention_relation_component_protocol_digest": "",
                 "attention_relation_source": "",
                 "attention_relation_direct_qk_source_ready": False,
                 "attention_relation_probability_scope": "",

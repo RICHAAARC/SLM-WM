@@ -18,6 +18,8 @@ Prompt bank 中受外部来源登记约束的子集来自 Google Research PartiP
 
 Tensor 内容摘要协议固定为 `slm_wm_tensor_content_v1`, 由核心方法代码定义且不提供运行时改写配置。该协议同时散列版本、PyTorch dtype、有序 shape 和连续原始字节；正式记录必须用它绑定三个风险场、三个 Null Space 求解过程、三个分支更新及全部真实 Q/K 原子。仅修改摘要字符串或汇总数值不能通过联合内容摘要复验。
 
+`attention_relation_component_weights=[0.25,0.25,0.25,0.25]` 是完整方法唯一配置。正式四分量留一消融不改写该 YAML, 而由受治理消融规范分别使用 `(0,1/3,1/3,1/3)`、`(1/3,0,1/3,1/3)`、`(1/3,1/3,0,1/3)` 和 `(1/3,1/3,1/3,0)`。嵌入目标、单调回溯、最终成图归因、盲检原分数、仿射注册和对齐后同步分数必须共同消费同一权重协议摘要。
+
 模型与外部数据资源统一登记在 `configs/model_source_registry.json`。每条 Hugging Face 资源记录同时给出仓库标识、资源类型和40位小写十六进制提交 revision。主方法的 SD3.5 Medium 与 CLIP 图像编码器必须使用 `configs/model_sd35.yaml` 中的精确 revision, 不允许使用 `main`、分支名或短提交。该约束用于固定实际下载内容, 与固定本项目 Git 代码版本共同构成可重建运行输入。
 
 对于单一权重文件即可确定运行输入的资源, `required_files` 进一步登记相对路径、字节大小和 SHA-256。official-reference 的 `ViT-g-14` OpenCLIP checkpoint 采用该约束; 共享缓存中的额外文件、符号链接、大小漂移或摘要漂移都会阻断正式命令。

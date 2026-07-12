@@ -103,15 +103,16 @@ $$
 3. QR 后每个基底列的完整 Jacobian 相对响应不超过0.0001，投影能量不低于0.01，正交误差不超过 $10^{-5}$；
 4. 三分支合成更新按真实 latent dtype 写回后，以实际 `written_latent - latent` 增量重新执行完整特征精确 JVP，其响应范数相对当前完整特征范数的比例不超过0.0001；
 5. 每次实际写回以及最终 clean/完整方法、clean/carrier-only、carrier-only/完整方法三条成图边均通过 CLIP cosine 和视觉漂移门禁；
-6. attention 来源为真实 Q/K 投影和 autograd；中心化 logit、可微 rank、抽样图像 token 关系概率和概率偏离与距离偏离的双中心交互四分量分别完成逐行加权归一化后等权组合, 嵌入与盲检共享该关系算子及 pair 构造规则；
+6. attention 来源为真实 Q/K 投影和 autograd；中心化 logit、可微 rank、抽样图像 token 关系概率和概率偏离与距离偏离的双中心交互四分量分别完成逐行加权归一化后按冻结协议组合, 嵌入、注册与盲检共享分量权重及 pair 构造规则；完整方法为四项等权, 四个留一变体各自把一项置零并将其余三项设为 $1/3$；
 7. carrier-only 与完整方法首个注入前 latent 字节级相同, 更新数、顺序和 scheduler 轨迹一致；carrier-only 更新原子无 attention 来源、分数、更新、关系、pair 身份或 attention Null Space, 且其 JSONL 路径、文件 SHA-256 和内容摘要绑定结果与 manifest；
 8. 最终 clean、carrier-only 与完整方法成图在 CUDA 上重新构造直接 Q/K 四分量关系, 完整方法相对同种子 carrier-only 的自身盲选择归因增益和冻结 carrier-only pair 权重归因增益都严格超过0.0001, 且反事实保持记录、四分量归因、关系图身份、Q/K 记录与 manifest 绑定同一身份和图像 SHA-256；
 9. `slm_wm_tensor_content_v1` 完整绑定三个风险场、三个 Null Space 的候选/预算/响应/基底、三分支更新与实际写回增量；Q/K 原子完整覆盖注入四角色、最终成图三角色及盲检两角色；
 10. 检测访问模式为 `image_key_public_model_only`；
 11. test clean negative 的95%误报率上界不超过目标 FPR；
 12. FID/KID 使用 torch-fidelity `inception-v3-compat` 的2048维特征，配对质量指标来自真实图像集合；
-13. 消融记录明确 `generation_rerun=true` 且未使用 counterfactual 分数变换；
-14. 外部 baseline 使用相同 Prompt、攻击和固定 FPR 统计边界。
+13. 正式消融精确覆盖完整方法和14个变体, 每条记录明确 `generation_rerun=true` 且未使用 counterfactual 分数变换；
+14. 四个注意力分量留一变体在嵌入梯度、回溯、最终归因、仿射注册、原图检测和对齐同步中共享同一权重协议摘要；
+15. 外部 baseline 使用相同 Prompt、攻击和固定 FPR 统计边界。
 
 正式 FID/KID 的样本门禁分别为 70/700/7000 对 clean/watermarked 图像, 与三个运行层级的 Prompt 总数一致。该门禁属于项目特定的证据治理要求; 通用做法是明确记录特征提取器版本、输入图像摘要、特征维度和实际样本数。
 

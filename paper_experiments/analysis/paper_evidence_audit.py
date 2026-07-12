@@ -44,6 +44,22 @@ ABLATION_NECESSITY_CLAIMS = {
         "claim_necessity_tail_amplitude_truncation",
         "高斯幅值尾部截断算子对预注册主指标具有必要贡献。",
     ),
+    "without_centered_qk_logit": (
+        "claim_necessity_centered_qk_logit",
+        "中心化 Q/K logit 评分通道对预注册主指标具有边际必要贡献。",
+    ),
+    "without_differentiable_row_rank": (
+        "claim_necessity_differentiable_row_rank",
+        "可微行内 rank 评分通道对预注册主指标具有边际必要贡献。",
+    ),
+    "without_attention_probability": (
+        "claim_necessity_attention_probability",
+        "抽样图像 token 关系概率评分通道对预注册主指标具有边际必要贡献。",
+    ),
+    "without_distance_modulated_probability": (
+        "claim_necessity_distance_modulated_probability",
+        "距离调制中心化关系概率评分通道对预注册主指标具有边际必要贡献。",
+    ),
     "without_attention_geometry": (
         "claim_necessity_attention_geometry",
         "注意力几何算子对预注册主指标具有必要贡献。",

@@ -34,12 +34,14 @@ from main.methods.geometry import (
     DifferentiableAttentionRecorder,
     QKAttentionRelation,
     attention_geometry_score,
+    attention_relation_component_protocol,
     attention_relation_component_scores,
     attention_relation_stability_map,
     build_attention_relation_descriptor,
     build_attention_relation_graph_identity,
     build_qk_atomic_content_metadata,
     build_stable_attention_pair_weights,
+    combine_attention_relation_component_scores,
     keyed_attention_relation_projection,
     optimize_attention_geometry_update,
     qk_atomic_content_records_digest,
@@ -455,6 +457,19 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "stable_pair_weight_realization_digest": "a" * 64,
         "attention_relation_component_names": list(
             ATTENTION_RELATION_COMPONENT_NAMES
+        ),
+        "attention_relation_active_component_names": list(
+            attention_relation_component_protocol(
+                config.attention_relation_component_weights
+            )["attention_relation_active_component_names"]
+        ),
+        "attention_relation_component_weights": list(
+            config.attention_relation_component_weights
+        ),
+        "attention_relation_component_protocol_digest": (
+            attention_relation_component_protocol(
+                config.attention_relation_component_weights
+            )["attention_relation_component_protocol_digest"]
         ),
         "attention_relation_source": (
             "direct_qk_centered_logits_and_probabilities"
@@ -928,6 +943,35 @@ def test_each_attention_relation_component_changes_keyed_score() -> None:
 
 
 @pytest.mark.quick
+def test_leave_one_component_out_weights_remove_exact_score_contribution() -> None:
+    """留一权重协议必须让被移除分量不再进入真实组合分数."""
+
+    component_scores = torch.tensor((0.2, -0.4, 0.6, 0.8))
+    for removed_index in range(len(ATTENTION_RELATION_COMPONENT_NAMES)):
+        weights = tuple(
+            0.0 if index == removed_index else 1.0 / 3.0
+            for index in range(len(ATTENTION_RELATION_COMPONENT_NAMES))
+        )
+        baseline = combine_attention_relation_component_scores(
+            component_scores,
+            weights,
+        )
+        changed = component_scores.clone()
+        changed[removed_index] += 100.0
+        changed_score = combine_attention_relation_component_scores(
+            changed,
+            weights,
+        )
+        protocol = attention_relation_component_protocol(weights)
+
+        assert float(changed_score) == pytest.approx(float(baseline))
+        assert ATTENTION_RELATION_COMPONENT_NAMES[removed_index] not in (
+            protocol["attention_relation_active_component_names"]
+        )
+        assert len(protocol["attention_relation_component_protocol_digest"]) == 64
+
+
+@pytest.mark.quick
 def test_differentiable_soft_rank_contributes_nonzero_logit_gradient() -> None:
     """soft-rank 分量必须对真实 Q/K logits 保留非零可微梯度。"""
 
@@ -1229,6 +1273,12 @@ def test_image_only_detector_reextracts_qk_after_alignment(
             registration_confidence_threshold=0.5,
             attention_sync_score_threshold=0.5,
             rescue_margin_low=-0.5,
+            attention_relation_component_weights=(
+                1.0 / 3.0,
+                0.0,
+                1.0 / 3.0,
+                1.0 / 3.0,
+            ),
         ),
         image_latent_encoder=lambda sample: sample["latent"],
         image_attention_extractor=extract,
@@ -1253,6 +1303,25 @@ def test_image_only_detector_reextracts_qk_after_alignment(
         for record in result.metadata["detection_qk_atomic_content_records"]
     ) == ("raw_detection_image", "aligned_detection_image")
     assert len(result.metadata["detection_qk_atomic_content_digest"]) == 64
+    assert result.metadata["attention_relation_component_weights"] == [
+        1.0 / 3.0,
+        0.0,
+        1.0 / 3.0,
+        1.0 / 3.0,
+    ]
+    assert "differentiable_row_rank" not in result.metadata[
+        "attention_relation_active_component_names"
+    ]
+    assert len(
+        result.metadata["attention_relation_component_protocol_digest"]
+    ) == 64
+    assert result.alignment is not None
+    assert result.alignment.attention_relation_component_weights == (
+        1.0 / 3.0,
+        0.0,
+        1.0 / 3.0,
+        1.0 / 3.0,
+    )
 
 
 @pytest.mark.quick

@@ -19,14 +19,17 @@ from main.core.keyed_prg import (
 )
 from main.methods.geometry.attention_alignment import AttentionAlignmentResult, recover_attention_affine_alignment
 from main.methods.geometry.differentiable_attention import (
+    ATTENTION_RELATION_COMPONENT_WEIGHTS,
     DIRECT_QK_RELATION_SOURCE,
     attention_geometry_score,
+    attention_relation_component_protocol,
     build_attention_relation_graph_identity,
     build_stable_attention_pair_weights,
     qk_atomic_evaluation_records_digest,
     qk_atomic_evaluation_records_ready,
     restore_transported_stable_attention_pair_weights,
     select_stable_attention_tokens,
+    validate_attention_relation_component_weights,
 )
 
 ImageLatentEncoder = Callable[[Any], Any]
@@ -54,6 +57,9 @@ class ImageOnlyDetectionConfig:
     attention_minimum_inlier_ratio: float = 0.50
     attention_stable_token_fraction: float = 0.50
     attention_unstable_pair_weight: float = 0.25
+    attention_relation_component_weights: tuple[float, ...] = (
+        ATTENTION_RELATION_COMPONENT_WEIGHTS
+    )
 
     def __post_init__(self) -> None:
         """集中校验冻结检测协议。"""
@@ -79,6 +85,9 @@ class ImageOnlyDetectionConfig:
             raise ValueError(
                 "attention_unstable_pair_weight 必须位于 [0, 1)"
             )
+        validate_attention_relation_component_weights(
+            self.attention_relation_component_weights
+        )
 
 
 @dataclass(frozen=True)
@@ -152,6 +161,12 @@ def detect_image_only_watermark(
     """
 
     observed_latent = image_latent_encoder(image)
+    component_protocol = attention_relation_component_protocol(
+        config.attention_relation_component_weights
+    )
+    component_weights = tuple(
+        component_protocol["attention_relation_component_weights"]
+    )
     prg_record = keyed_prg_protocol_record(config.keyed_prg_version)
     lf_template = build_low_frequency_template(
         observed_latent,
@@ -211,6 +226,7 @@ def detect_image_only_watermark(
         relation_identity = build_attention_relation_graph_identity(
             attention_records,
             key_material,
+            component_weights,
         )
         if (
             relation_identity.relation_source != DIRECT_QK_RELATION_SOURCE
@@ -268,6 +284,7 @@ def detect_image_only_watermark(
             attention_records,
             key_material,
             stable_pair_weights=stable_pair_weights,
+            component_weights=component_weights,
         )
         raw_geometry_score = float(score_tensor.detach().item())
         alignment_candidates = tuple(
@@ -280,6 +297,7 @@ def detect_image_only_watermark(
                 anchor_count=config.attention_anchor_count,
                 residual_threshold=config.attention_residual_threshold,
                 minimum_inlier_ratio=config.attention_minimum_inlier_ratio,
+                component_weights=component_weights,
             )
             for layer_name, attention, token_indices in attention_records
         )
@@ -307,6 +325,7 @@ def detect_image_only_watermark(
             aligned_relation_identity = build_attention_relation_graph_identity(
                 aligned_attention_records,
                 key_material,
+                component_weights,
             )
             if (
                 aligned_relation_identity.relation_source
@@ -350,6 +369,7 @@ def detect_image_only_watermark(
                 aligned_attention_records,
                 key_material,
                 stable_pair_weights=aligned_pair_weights,
+                component_weights=component_weights,
             )
             sync_score = float(sync_score_tensor.detach().item())
             stable_pair_weight_identity_ready = (
@@ -456,6 +476,13 @@ def detect_image_only_watermark(
         "attention_relation_qk_operator_metadata_digest": (
             attention_relation_qk_operator_metadata_digest
         ),
+        "attention_relation_active_component_names": component_protocol[
+            "attention_relation_active_component_names"
+        ],
+        "attention_relation_component_weights": component_weights,
+        "attention_relation_component_protocol_digest": component_protocol[
+            "attention_relation_component_protocol_digest"
+        ],
         "detection_qk_atomic_content_digest": (
             qk_atomic_evaluation_records_digest(
                 qk_atomic_content_records,
@@ -521,6 +548,17 @@ def detect_image_only_watermark(
             "attention_record_schema_digest": attention_record_schema_digest,
             "attention_relation_component_names": list(
                 attention_relation_component_names
+            ),
+            "attention_relation_active_component_names": list(
+                component_protocol[
+                    "attention_relation_active_component_names"
+                ]
+            ),
+            "attention_relation_component_weights": list(component_weights),
+            "attention_relation_component_protocol_digest": (
+                component_protocol[
+                    "attention_relation_component_protocol_digest"
+                ]
             ),
             "attention_relation_source": attention_relation_source,
             "attention_relation_direct_qk_source_ready": (

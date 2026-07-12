@@ -15,6 +15,7 @@ from main.methods.detection import (
 )
 from main.methods.geometry import (
     ATTENTION_RELATION_COMPONENT_NAMES,
+    ATTENTION_RELATION_COMPONENT_WEIGHTS,
     DIRECT_QK_RELATION_SOURCE,
     AttentionAlignmentResult,
     AttentionGeometryGradient,
@@ -23,11 +24,13 @@ from main.methods.geometry import (
     DifferentiableAttentionRecorder,
     QKAttentionRelation,
     attention_geometry_score,
+    attention_relation_component_protocol,
     build_attention_relation_descriptor,
     compute_attention_geometry_gradient,
     optimize_attention_geometry_update,
     qk_self_attention,
     recover_attention_affine_alignment,
+    validate_attention_relation_component_weights,
 )
 from main.methods.semantic import (
     BranchRiskConfig,
@@ -48,6 +51,7 @@ from main.methods.subspace import (
 
 __all__ = [
     "ATTENTION_RELATION_COMPONENT_NAMES",
+    "ATTENTION_RELATION_COMPONENT_WEIGHTS",
     "DIRECT_QK_RELATION_SOURCE",
     "AttentionAlignmentResult",
     "AttentionGeometryGradient",
@@ -66,6 +70,7 @@ __all__ = [
     "PSDConjugateGradientResult",
     "QKAttentionRelation",
     "attention_geometry_score",
+    "attention_relation_component_protocol",
     "build_attention_relation_descriptor",
     "build_branch_risk_fields",
     "build_exact_jacobian_linearization",
@@ -80,6 +85,7 @@ __all__ = [
     "project_canonical_template",
     "qk_self_attention",
     "recover_attention_affine_alignment",
+    "validate_attention_relation_component_weights",
     "solve_psd_conjugate_gradient",
     "solve_jacobian_null_space",
 ]

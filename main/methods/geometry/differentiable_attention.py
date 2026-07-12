@@ -51,6 +51,62 @@ QK_ATOMIC_CONTENT_SHA256_FIELDS = (
 )
 
 
+def validate_attention_relation_component_weights(
+    component_weights: Iterable[float],
+) -> tuple[float, ...]:
+    """校验并规范化四分量评分协议的冻结权重.
+
+    完整方法使用四个等权分量. 正式留一消融把被移除分量权重置零, 其余
+    三个分量各取三分之一. 所有权重必须非负且精确归一化, 避免运行端通过
+    未登记的整体缩放改变注意力阈值和回溯目标.
+    """
+
+    resolved = tuple(float(value) for value in component_weights)
+    if len(resolved) != len(ATTENTION_RELATION_COMPONENT_NAMES):
+        raise ValueError("注意力关系权重必须精确覆盖四个冻结分量")
+    if any(not math.isfinite(value) or value < 0.0 for value in resolved):
+        raise ValueError("注意力关系权重必须为非负有限数")
+    if not math.isclose(sum(resolved), 1.0, rel_tol=0.0, abs_tol=1e-12):
+        raise ValueError("注意力关系权重之和必须为 1")
+    if not any(value > 0.0 for value in resolved):
+        raise ValueError("注意力关系协议至少需要一个活动分量")
+    return resolved
+
+
+def attention_relation_component_protocol(
+    component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
+) -> dict[str, Any]:
+    """返回四分量名称、活动集合、权重和稳定协议摘要."""
+
+    resolved_weights = validate_attention_relation_component_weights(
+        component_weights
+    )
+    active_names = tuple(
+        name
+        for name, weight in zip(
+            ATTENTION_RELATION_COMPONENT_NAMES,
+            resolved_weights,
+        )
+        if weight > 0.0
+    )
+    payload = {
+        "attention_relation_component_names": (
+            ATTENTION_RELATION_COMPONENT_NAMES
+        ),
+        "attention_relation_active_component_names": active_names,
+        "attention_relation_component_weights": resolved_weights,
+        "attention_relation_component_combination_rule": (
+            "normalized_nonnegative_weighted_sum"
+        ),
+    }
+    return {
+        **payload,
+        "attention_relation_component_protocol_digest": (
+            build_stable_digest(payload)
+        ),
+    }
+
+
 def _torch() -> Any:
     """延迟导入 PyTorch。"""
 
@@ -173,6 +229,9 @@ class AttentionRelationGraphIdentity:
     """保存一次多层四分量关系评分的科学算子身份。"""
 
     component_names: tuple[str, ...]
+    active_component_names: tuple[str, ...]
+    component_weights: tuple[float, ...]
+    component_protocol_digest: str
     relation_source: str
     component_identity_digest: str
     keyed_projection_digest: str
@@ -1063,10 +1122,14 @@ def keyed_attention_relation_projection(
     key_material: str,
     layer_name: str,
     prg_version: str = KEYED_PRG_VERSION,
+    component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> KeyedAttentionRelationProjection:
     """为四分量关系描述构造共享密钥图和冻结分量极性的投影。"""
 
     torch = _torch()
+    resolved_component_weights = validate_attention_relation_component_weights(
+        component_weights
+    )
     base_signs = keyed_relation_signs(
         descriptor.values[..., 0],
         key_material,
@@ -1083,7 +1146,7 @@ def keyed_attention_relation_projection(
     projection_payload = {
         "component_identity_digest": descriptor.component_identity_digest,
         "component_names": descriptor.component_names,
-        "component_weights": ATTENTION_RELATION_COMPONENT_WEIGHTS,
+        "component_weights": resolved_component_weights,
         "component_polarities": ATTENTION_RELATION_COMPONENT_POLARITIES,
         "key_material_digest": hashlib.sha256(
             key_material.encode("utf-8")
@@ -1099,7 +1162,7 @@ def keyed_attention_relation_projection(
     return KeyedAttentionRelationProjection(
         values=values,
         component_names=descriptor.component_names,
-        component_weights=ATTENTION_RELATION_COMPONENT_WEIGHTS,
+        component_weights=resolved_component_weights,
         component_polarities=ATTENTION_RELATION_COMPONENT_POLARITIES,
         component_identity_digest=descriptor.component_identity_digest,
         projection_digest=build_stable_digest(projection_payload),
@@ -1109,10 +1172,17 @@ def keyed_attention_relation_projection(
 def build_attention_relation_graph_identity(
     records: Iterable[tuple[str, Any, tuple[int, ...]]],
     key_material: str,
+    component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> AttentionRelationGraphIdentity:
     """重建多层关系分量和密钥投影的共同身份。"""
 
     resolved_records = tuple(records)
+    component_protocol = attention_relation_component_protocol(
+        component_weights
+    )
+    resolved_component_weights = tuple(
+        component_protocol["attention_relation_component_weights"]
+    )
     if not resolved_records:
         raise RuntimeError("关系图身份要求至少一层真实 Q/K 记录")
     descriptors = tuple(
@@ -1131,6 +1201,7 @@ def build_attention_relation_graph_identity(
             descriptor,
             key_material,
             layer_name,
+            component_weights=resolved_component_weights,
         )
         for (layer_name, _, _), descriptor in zip(resolved_records, descriptors)
     )
@@ -1297,6 +1368,15 @@ def build_attention_relation_graph_identity(
     )
     return AttentionRelationGraphIdentity(
         component_names=reference.component_names,
+        active_component_names=tuple(
+            component_protocol["attention_relation_active_component_names"]
+        ),
+        component_weights=resolved_component_weights,
+        component_protocol_digest=str(
+            component_protocol[
+                "attention_relation_component_protocol_digest"
+            ]
+        ),
         relation_source=reference.relation_source,
         component_identity_digest=reference.component_identity_digest,
         keyed_projection_digest=projection_digest,
@@ -1327,7 +1407,7 @@ def attention_relation_component_scores(
 
     该算子同时服务嵌入评分和仿射注册。每个分量先独立计算逐行加权相关,
     再在具有非零关系方差的有效行上取平均, 避免 logits、概率、rank 与距离
-    的数值尺度差异改变冻结的等权组合。
+    的数值尺度差异改变冻结的分量权重语义。
     """
 
     torch = _torch()
@@ -1418,14 +1498,20 @@ def attention_relation_component_scores(
     ) / valid_row_count
 
 
-def combine_attention_relation_component_scores(component_scores: Any) -> Any:
-    """按冻结的四分量等权协议组合逐分量关系分数。"""
+def combine_attention_relation_component_scores(
+    component_scores: Any,
+    component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
+) -> Any:
+    """按冻结权重协议组合逐分量关系分数."""
 
     torch = _torch()
     if component_scores.shape[-1] != len(ATTENTION_RELATION_COMPONENT_WEIGHTS):
         raise ValueError("component_scores 最后一维必须覆盖全部四个关系分量")
+    resolved_weights = validate_attention_relation_component_weights(
+        component_weights
+    )
     weights = torch.tensor(
-        ATTENTION_RELATION_COMPONENT_WEIGHTS,
+        resolved_weights,
         device=component_scores.device,
         dtype=component_scores.dtype,
     )
@@ -1436,6 +1522,7 @@ def attention_geometry_component_scores(
     records: Iterable[tuple[str, Any, tuple[int, ...]]],
     key_material: str,
     stable_pair_weights: StableAttentionPairWeights,
+    component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> Any:
     """使用同一 pair 权重计算多层四分量几何分数。"""
 
@@ -1452,6 +1539,7 @@ def attention_geometry_component_scores(
             descriptor,
             key_material,
             layer_name,
+            component_weights=component_weights,
         )
         component_scores = attention_relation_component_scores(
             descriptor.values,
@@ -1472,13 +1560,14 @@ def attention_geometry_score(
     stable_token_fraction: float = 0.5,
     unstable_pair_weight: float = 0.25,
     stable_pair_weights: StableAttentionPairWeights | None = None,
+    component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> Any:
     """计算稳定 token 加权的四分量 Q/K 密钥关系一致性分数。
 
     稳定 token 对使用权重1, 其余规则网格关系保留较小的冻结权重。保留完整
     网格可为盲检仿射注册提供连续二维采样支撑, 同时保证稳定 token 集合真实
-    改变嵌入目标而不是只作为日志字段。四分量分别逐行中心化、归一化后等权,
-    防止不同物理量的数值尺度主导最终分数。
+    改变嵌入目标而不是只作为日志字段。四分量分别逐行中心化、归一化后按
+    冻结非负权重组合, 防止不同物理量的数值尺度主导最终分数。
     """
 
     resolved_records = tuple(records)
@@ -1522,8 +1611,12 @@ def attention_geometry_score(
         resolved_records,
         key_material,
         stable_pair_weights,
+        component_weights,
     )
-    return combine_attention_relation_component_scores(component_scores)
+    return combine_attention_relation_component_scores(
+        component_scores,
+        component_weights,
+    )
 
 
 @dataclass
@@ -1540,6 +1633,9 @@ class AttentionGeometryGradient:
     stable_pair_weight_identity_digest: str
     stable_pair_weight_realization_digest: str
     attention_relation_component_names: tuple[str, ...]
+    attention_relation_active_component_names: tuple[str, ...]
+    attention_relation_component_weights: tuple[float, ...]
+    attention_relation_component_protocol_digest: str
     attention_relation_source: str
     attention_relation_component_identity_digest: str
     attention_relation_keyed_projection_digest: str
@@ -1565,6 +1661,7 @@ def compute_attention_geometry_gradient(
     stable_token_fraction: float = 0.5,
     unstable_pair_weight: float = 0.25,
     stable_token_selection: StableAttentionTokenSelection | None = None,
+    component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> AttentionGeometryGradient:
     """对真实 Transformer Q/K 几何分数计算 latent 梯度。"""
 
@@ -1595,10 +1692,12 @@ def compute_attention_geometry_gradient(
             recorder.records,
             key_material,
             stable_pair_weights=pair_weights,
+            component_weights=component_weights,
         )
         relation_identity = build_attention_relation_graph_identity(
             recorder.records,
             key_material,
+            component_weights,
         )
         if (
             relation_identity.relation_source != DIRECT_QK_RELATION_SOURCE
@@ -1624,6 +1723,15 @@ def compute_attention_geometry_gradient(
         ),
         attention_relation_component_names=(
             relation_identity.component_names
+        ),
+        attention_relation_active_component_names=(
+            relation_identity.active_component_names
+        ),
+        attention_relation_component_weights=(
+            relation_identity.component_weights
+        ),
+        attention_relation_component_protocol_digest=(
+            relation_identity.component_protocol_digest
         ),
         attention_relation_source=relation_identity.relation_source,
         attention_relation_component_identity_digest=(
@@ -1678,6 +1786,9 @@ class AttentionGeometryUpdate:
     stable_pair_weight_identity_digest: str
     stable_pair_weight_realization_digest: str
     attention_relation_component_names: tuple[str, ...]
+    attention_relation_active_component_names: tuple[str, ...]
+    attention_relation_component_weights: tuple[float, ...]
+    attention_relation_component_protocol_digest: str
     attention_relation_source: str
     attention_relation_component_identity_digest: str
     attention_relation_keyed_projection_digest: str
@@ -1702,6 +1813,7 @@ def optimize_attention_geometry_update(
     base_update: Any | None = None,
     stable_token_fraction: float = 0.5,
     unstable_pair_weight: float = 0.25,
+    component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> AttentionGeometryUpdate:
     """在固定内容更新基底上生成并验证真实注意力几何更新。
 
@@ -1720,7 +1832,16 @@ def optimize_attention_geometry_update(
         key_material,
         stable_token_fraction=stable_token_fraction,
         unstable_pair_weight=unstable_pair_weight,
+        component_weights=component_weights,
     )
+    resolved_component_weights = validate_attention_relation_component_weights(
+        component_weights
+    )
+    if (
+        original_evidence.attention_relation_component_weights
+        != resolved_component_weights
+    ):
+        raise RuntimeError("预计算注意力梯度与当前四分量权重协议不一致")
     resolved_base_update = (
         torch.zeros_like(latent)
         if base_update is None
@@ -1742,6 +1863,7 @@ def optimize_attention_geometry_update(
             stable_token_fraction=original_evidence.stable_token_fraction,
             selection_digest=original_evidence.stable_token_selection_digest,
         ),
+        component_weights=resolved_component_weights,
     )
     if (
         content_base_evidence.stable_pair_weight_identity_digest
@@ -1782,6 +1904,7 @@ def optimize_attention_geometry_update(
                 recorder.records,
                 key_material,
                 stable_pair_weights=content_base_evidence.stable_pair_weights,
+                component_weights=resolved_component_weights,
             )
             if (
                 bool(torch.isfinite(score_after_tensor))
@@ -1795,6 +1918,7 @@ def optimize_attention_geometry_update(
     accepted_relation_identity = build_attention_relation_graph_identity(
         recorder.records,
         key_material,
+        resolved_component_weights,
     )
     if not accepted_relation_identity.qk_atomic_content_ready:
         raise RuntimeError("接受的注意力候选缺少真实 Q/K 原子内容摘要")
@@ -1864,6 +1988,15 @@ def optimize_attention_geometry_update(
         "attention_relation_component_names": (
             content_base_evidence.attention_relation_component_names
         ),
+        "attention_relation_active_component_names": (
+            content_base_evidence.attention_relation_active_component_names
+        ),
+        "attention_relation_component_weights": (
+            content_base_evidence.attention_relation_component_weights
+        ),
+        "attention_relation_component_protocol_digest": (
+            content_base_evidence.attention_relation_component_protocol_digest
+        ),
         "attention_relation_source": (
             content_base_evidence.attention_relation_source
         ),
@@ -1902,6 +2035,15 @@ def optimize_attention_geometry_update(
         ),
         attention_relation_component_names=(
             content_base_evidence.attention_relation_component_names
+        ),
+        attention_relation_active_component_names=(
+            content_base_evidence.attention_relation_active_component_names
+        ),
+        attention_relation_component_weights=(
+            content_base_evidence.attention_relation_component_weights
+        ),
+        attention_relation_component_protocol_digest=(
+            content_base_evidence.attention_relation_component_protocol_digest
         ),
         attention_relation_source=(
             content_base_evidence.attention_relation_source
@@ -1949,6 +2091,9 @@ def optimize_attention_geometry_update(
             "attention_relation_component_names": list(
                 content_base_evidence.attention_relation_component_names
             ),
+            "attention_relation_active_component_names": list(
+                content_base_evidence.attention_relation_active_component_names
+            ),
             "attention_relation_source": (
                 content_base_evidence.attention_relation_source
             ),
@@ -1984,7 +2129,10 @@ def optimize_attention_geometry_update(
                 content_base_evidence.attention_relation_relative_distance_scale
             ),
             "attention_relation_component_weights": list(
-                ATTENTION_RELATION_COMPONENT_WEIGHTS
+                content_base_evidence.attention_relation_component_weights
+            ),
+            "attention_relation_component_protocol_digest": (
+                content_base_evidence.attention_relation_component_protocol_digest
             ),
         },
     )

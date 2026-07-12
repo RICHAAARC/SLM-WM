@@ -20,6 +20,7 @@ from main.methods.geometry.differentiable_attention import (
     attention_geometry_score,
     attention_geometry_component_scores,
     attention_probability,
+    attention_relation_component_protocol,
     attention_relation_component_scores,
     attention_relation_stability_map,
     build_attention_relation_descriptor,
@@ -39,6 +40,7 @@ from main.methods.geometry.differentiable_attention import (
     restore_transported_stable_attention_pair_weights,
     select_stable_attention_tokens,
     transport_stable_attention_pair_weights,
+    validate_attention_relation_component_weights,
 )
 
 __all__ = [
@@ -61,6 +63,7 @@ __all__ = [
     "attention_geometry_score",
     "attention_geometry_component_scores",
     "attention_probability",
+    "attention_relation_component_protocol",
     "attention_relation_component_scores",
     "attention_relation_stability_map",
     "build_attention_relation_descriptor",
@@ -81,4 +84,5 @@ __all__ = [
     "select_stable_attention_tokens",
     "restore_transported_stable_attention_pair_weights",
     "transport_stable_attention_pair_weights",
+    "validate_attention_relation_component_weights",
 ]

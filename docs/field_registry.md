@@ -1660,7 +1660,7 @@ Notebook 与 repository module 的跨边界数据
 | orthogonality_error | metric | none | true | true | false | latent 安全基底相对单位矩阵的正交误差。 |
 | projection_energy_retention | metric | none | true | true | false | 固定检测模板投影到安全子空间后保留的能量比例。 |
 | tail_robust_score | metric | none | true | true | false | 高斯幅值尾部截断载体的图像盲检相关分数。 |
-| attention_geometry_score | metric | none | true | true | false | 真实 Q/K 四分量关系完成逐行加权归一化后与密钥投影等权组合的一致性分数。 |
+| attention_geometry_score | metric | none | true | true | false | 真实 Q/K 四分量关系完成逐行加权归一化后按当前冻结分量权重组合的一致性分数。 |
 | formal_evidence_positive | metric | none | true | true | false | 冻结完整 evidence 协议后的正式布尔判定。 |
 | frozen_content_threshold | protocol | none | true | true | false | calibration clean negative 冻结的内容阈值。 |
 | threshold_digest | protocol | none | true | true | false | calibration 分数集合、冻结阈值、阈值来源和相关 evidence 配置的稳定摘要。 |
@@ -2435,7 +2435,7 @@ Notebook 与 repository module 的跨边界数据
 | primary_metric_name | protocol | none | true | true | false | 机制必要性统计预注册的主指标名称。 |
 | prompt_file_sha256 | provenance | none | true | false | false | 规范 Prompt 文件的字节级 SHA-256 身份。 |
 | significance_alpha | protocol | none | true | true | false | 机制必要性家族检验采用的预注册显著性水平。 |
-| relation_sync_score | metric | none | true | true | false | 双边配准后规范四分量关系图与四通道密钥投影的等权归一化一致性分数。 |
+| relation_sync_score | metric | none | true | true | false | 双边配准后规范四分量关系图与四通道密钥投影按当前冻结分量权重组合的一致性分数。 |
 | registration_objective_margin | metric | none | true | true | false | 最优配准目标相对非近重复候选目标的差值。 |
 | registration_candidate_count | protocol | none | true | false | false | 双边关系图配准实际评估的冻结仿射候选数量。 |
 | sync_margin_duplicate_transform_tolerance | protocol | none | true | false | false | 计算配准目标差值时排除近重复仿射候选所用的冻结矩阵距离阈值。 |
@@ -2708,11 +2708,14 @@ Notebook 与 repository module 的跨边界数据
 | attention_relation_direct_qk_source_ready | governance | none | true | true | false | 关系图是否同时直接保存真实 Q/K 中心化 logits 与由同次 Q/K 计算产生的抽样图像 token 概率。 |
 | attention_relation_probability_scope | method | none | true | false | false | 概率分量的精确作用域, 正式值为 sampled_image_token_qk_relation_probability, 不表示模块完整 joint-attention 权重。 |
 | attention_relation_component_identity_digest | provenance | none | true | true | false | 分量顺序、soft-rank 温标与尺度、概率和距离双行中心化规则、距离尺度、二维 token 索引和直接 Q/K 来源的联合摘要。 |
-| attention_relation_keyed_projection_digest | provenance | none | true | true | false | 全部冻结层四分量密钥符号投影、分量极性与等权组合协议的联合摘要。 |
+| attention_relation_keyed_projection_digest | provenance | none | true | true | false | 全部冻结层四分量密钥符号投影、分量极性与当前冻结权重协议的联合摘要。 |
 | attention_relation_soft_rank_temperature | protocol | none | true | false | false | 可微降序行内 rank 采用的冻结 logit 温度, 当前值为0.25。 |
 | attention_relation_soft_rank_scale | protocol | none | true | false | false | 可微行内 rank 采用的冻结缩放规则结果, 等于 Q/K 抽样 token 数的倒数。 |
 | attention_relation_relative_distance_scale | protocol | none | true | false | false | 第4分量的公开二维距离因子采用的冻结尺度, 等于方形网格最大欧氏距离的倒数。 |
-| attention_relation_component_weights | protocol | none | true | false | false | 四个关系分量完成逐行加权中心化与归一化后采用的冻结等权向量。 |
+| attention_relation_component_weights | protocol | none | true | true | false | 四个关系分量完成逐行加权中心化与归一化后采用的归一化非负权重；完整方法为四项等权, 留一消融把一项置零并令其余三项等权。 |
+| attention_relation_active_component_names | protocol | none | true | true | false | 当前注意力关系权重严格大于0的有序分量名称。 |
+| attention_relation_component_combination_rule | protocol | none | true | false | false | 四分量分数使用非负归一化权重求和的冻结组合规则。 |
+| attention_relation_component_protocol_digest | provenance | none | true | true | false | 四分量名称、活动集合、归一化权重和组合规则的联合稳定摘要。 |
 | relation_component_scores | metric | none | true | true | false | 最优候选在规范拉回参考系中的四分量逐项相关分数。 |
 | observation_relation_component_scores | metric | none | true | true | false | 最优候选在观测前推参考系中的四分量逐项相关分数。 |
 | identity_observation_relation_component_scores | metric | none | true | true | false | identity 候选在观测前推参考系中的四分量逐项相关分数。 |

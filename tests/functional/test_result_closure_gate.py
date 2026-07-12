@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 from copy import deepcopy
-from dataclasses import asdict, replace
+from dataclasses import replace
 from functools import lru_cache
 import hashlib
 import io
@@ -1309,7 +1309,7 @@ def ablation_atomic_records() -> tuple[
     tuple[dict[str, object], ...],
     dict[str, dict[str, object]],
 ]:
-    """构造11项消融、70个 Prompt 和正式攻击集合的完整原子链。"""
+    """构造15项消融、70个 Prompt 和正式攻击集合的完整原子链."""
 
     runtime_records: list[dict[str, object]] = []
     detection_records: list[dict[str, object]] = []
@@ -1331,7 +1331,7 @@ def ablation_atomic_records() -> tuple[
             rescue_margin_low=-0.05,
         )
         protocols[spec.ablation_id] = protocol.to_dict()
-        runtime_config = asdict(spec)
+        runtime_config = spec.to_dict()
         for prompt_record in PROMPT_RECORDS:
             prompt_id = prompt_record.prompt_id
             split = PROMPT_SPLIT_BY_ID[prompt_id]

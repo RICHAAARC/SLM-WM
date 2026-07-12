@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import dataclass, fields
 import hashlib
 import math
 from pathlib import Path
@@ -3283,7 +3283,7 @@ def _ablation_atomic_record_rebuild_ready(
             expected_prompt_split_by_id=bundle.expected_prompt_split_by_id,
             expected_prompt_digest_by_id=bundle.expected_prompt_digest_by_id,
             expected_runtime_config_by_ablation_id={
-                spec.ablation_id: asdict(spec)
+                spec.ablation_id: spec.to_dict()
                 for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS
             },
             expected_runtime_output_root=(

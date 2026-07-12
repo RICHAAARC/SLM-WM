@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import csv
 import hashlib
 import json
@@ -315,7 +314,7 @@ def _prepare_ablation(root: Path) -> Path:
                     ),
                     "split": prompt_record.split,
                     "ablation_id": spec.ablation_id,
-                    "runtime_config": asdict(spec),
+                    "runtime_config": spec.to_dict(),
                     "runtime_result": _runtime_result_payload(
                         run_config,
                         seed=run_config.seed,
@@ -441,7 +440,7 @@ def _prepare_ablation(root: Path) -> Path:
         },
     )
     ablation_manifest_config = {
-        "specs": [asdict(spec) for spec in specs],
+        "specs": [spec.to_dict() for spec in specs],
         "target_fpr": TARGET_FPR,
         **ablation_contract,
         **prompt_contract,
@@ -913,7 +912,7 @@ def test_ablation_and_quality_packages_reject_inexact_scientific_contracts(
     ablation_summary = json.loads(ablation_summary_path.read_text(encoding="utf-8"))
     ablation_summary["actual_ablation_ids"] = list(FORMAL_RUNTIME_RERUN_ABLATION_IDS[:6])
     _write_json(ablation_summary_path, ablation_summary)
-    with pytest.raises(RuntimeError, match="精确11项规范"):
+    with pytest.raises(RuntimeError, match="精确15项规范"):
         package_runtime_rerun_ablations(PAPER_RUN_NAME, root=tmp_path)
 
     quality_archive = _prepare_dataset_quality(tmp_path)

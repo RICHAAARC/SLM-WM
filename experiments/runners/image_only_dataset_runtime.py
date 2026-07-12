@@ -73,6 +73,7 @@ from main.methods.geometry import (
     ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
     DIRECT_QK_RELATION_SOURCE,
+    attention_relation_component_protocol,
     qk_atomic_evaluation_records_ready,
 )
 
@@ -596,15 +597,31 @@ def _scientific_update_record_ready(
         "stable_pair_weight_realization_digest",
         "attention_relation_component_identity_digest",
         "attention_relation_keyed_projection_digest",
+        "attention_relation_component_protocol_digest",
     ):
         digest = str(record.get(digest_field, ""))
         if len(digest) != 64 or any(
             character not in "0123456789abcdef" for character in digest
         ):
             return False
+    component_protocol = attention_relation_component_protocol(
+        config.attention_relation_component_weights
+    )
     if (
         record.get("attention_relation_component_names")
         != list(ATTENTION_RELATION_COMPONENT_NAMES)
+        or record.get("attention_relation_active_component_names")
+        != list(
+            component_protocol[
+                "attention_relation_active_component_names"
+            ]
+        )
+        or record.get("attention_relation_component_weights")
+        != list(config.attention_relation_component_weights)
+        or record.get("attention_relation_component_protocol_digest")
+        != component_protocol[
+            "attention_relation_component_protocol_digest"
+        ]
         or record.get("attention_relation_source")
         != DIRECT_QK_RELATION_SOURCE
         or record.get("attention_relation_direct_qk_source_ready") is not True
@@ -729,8 +746,23 @@ def _detection_qk_atomic_content_ready(
     metadata = record.get("metadata")
     if not isinstance(metadata, dict):
         return False
+    component_protocol = attention_relation_component_protocol(
+        config.attention_relation_component_weights
+    )
     return bool(
         metadata.get("detection_qk_atomic_content_ready") is True
+        and metadata.get("attention_relation_active_component_names")
+        == list(
+            component_protocol[
+                "attention_relation_active_component_names"
+            ]
+        )
+        and metadata.get("attention_relation_component_weights")
+        == list(config.attention_relation_component_weights)
+        and metadata.get("attention_relation_component_protocol_digest")
+        == component_protocol[
+            "attention_relation_component_protocol_digest"
+        ]
         and qk_atomic_evaluation_records_ready(
             metadata.get("detection_qk_atomic_content_records"),
             metadata.get("detection_qk_atomic_content_digest"),
@@ -841,6 +873,9 @@ def _final_image_attention_observability_ready(
             "carrier_only_counterfactual_scheduler_trace_digest",
         )
     )
+    component_protocol = attention_relation_component_protocol(
+        config.attention_relation_component_weights
+    )
     return bool(
         record.get("final_image_attention_observability_applicable") is True
         and record.get("carrier_only_counterfactual_ready") is True
@@ -903,6 +938,18 @@ def _final_image_attention_observability_ready(
             for operator in qk_operator_records
         )
         and component_names == list(ATTENTION_RELATION_COMPONENT_NAMES)
+        and record.get("attention_relation_active_component_names")
+        == list(
+            component_protocol[
+                "attention_relation_active_component_names"
+            ]
+        )
+        and record.get("attention_relation_component_weights")
+        == list(config.attention_relation_component_weights)
+        and record.get("attention_relation_component_protocol_digest")
+        == component_protocol[
+            "attention_relation_component_protocol_digest"
+        ]
         and len(component_identity_digest) == 64
         and all(
             character in "0123456789abcdef"

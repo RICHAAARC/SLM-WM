@@ -10,7 +10,7 @@
 - `runners/image_only_dataset_workload.py`: 从唯一方法 YAML 和论文运行配置构造完整主方法工作负载, 执行主运行与正式 Inception FID / KID, 并根据科学 session 的打包边界返回续跑或完成状态。`scripts/run_image_only_dataset_runtime.py` 只转发到该模块。
 - `runners/image_only_dataset_runtime.py`: 运行完整 Prompt 集, 在 calibration split 独立冻结检测协议, 只在 test split 形成论文统计; 同时从每条仅图像检测记录的真实连续分数生成分数分布、ROC 与 DET 数据。
 - `ablations/mechanism_ablation_workload.py`: 构造当前论文规模的全部消融配置, 调用正式重运行消融并执行受治理打包。`scripts/run_runtime_rerun_ablations.py` 只转发到该模块。
-- `ablations/runtime_rerun.py`: 每个消融配置重新生成、攻击、检测并独立校准, 不读取或变换完整方法分数。
+- `ablations/runtime_rerun.py`: 对完整方法与14个消融配置分别重新生成、攻击、检测并独立校准, 包括中心化 Q/K logit、可微行内 rank、关系概率和距离调制中心化概率四个逐项留一变体；不读取或变换完整方法分数。
 - `artifacts/dataset_level_quality_outputs.py`: 从真实 clean/watermarked 图像对提取正式 Inception 特征, 并构建 `fid`、`kid_mean`、`kid_std` 三行质量证据。KID 在 canonical feature population 上执行100轮均匀无放回子集估计, std 表示子集估计值的总体标准差而不是标准误。
 - `artifacts/detection_score_curves.py`: 将内容主判与冻结几何救回转换为判定等价连续分数, 使用 `positive_source` 与 clean negative / wrong-key negative 的记录级真实标签, 对 test overall 与每个同时含正负样本的攻击条件枚举正负无穷端点和全部唯一观测分数, 输出可复用的完整 threshold sweep。
 - `artifacts/`: 保存通用 manifest schema、连续检测统计与正式质量产物构建器。
@@ -37,6 +37,8 @@ summary 必须同时记录带时区的 `generated_at`、`paper_run_name` 与 `ta
 内容载体为 `lf_content` 与 `tail_robust`。`tail_robust` 仅按 Gaussian 元素绝对幅值执行分位点尾部截断, 不具有空间频带含义。注意力稳定度来自至少两个真实 Q/K 层对应关系行的余弦一致性。嵌入与盲检共享稳定 token pair 构造规则, 但数据依赖身份分别在一次注入内部和一次盲检的 raw、registration、aligned 路径内部冻结, 不执行跨端身份比较。注册只使用与攻击配置无关的有界搜索和递减分辨率局部优化。最终 clean、carrier-only 与完整方法成图必须在 CUDA 上重新编码真实 Q/K。carrier-only 与完整方法共享 seed、scheduler、LF/tail 配置和算子, 仅 attention geometry 开关不同；首个注入前 latent 必须字节级相同, 之后允许 attention 介入造成 LF、tail 与轨迹的下游交互, 因而该比较是 attention 开关总机制效应而非纯直接效应。carrier-only 的每个更新原子必须明确没有 attention 分数、更新、关系、pair 身份和 attention Null Space, 并把 JSONL 路径、文件 SHA-256、内容摘要、反事实身份与图像 SHA-256 绑定到结果、manifest 和缓存复验。三张成图的三条完整 CLIP/视觉特征边全部通过后, 才比较自身盲选择归因增益与冻结 carrier-only pair 权重归因增益。clean 只保留为总体水印对照。
 
 科学内容门禁使用 `slm_wm_tensor_content_v1`。每条完整方法更新记录必须覆盖三个风险 Tensor、每个活动分支的候选矩阵/风险预算/响应矩阵/最终基底、三个分支更新和实际量化写回增量。真实 Q/K 原子覆盖原 latent、内容基底、接受候选、实际写回、三张最终成图以及仅图像盲检原图和对齐图；任一角色、冻结层、逐层自摘要或联合摘要缺失都会计入科学算子失败。
+
+四分量留一变体在生成端和检测端共用同一归一化权重。被移除分量的权重严格为0, 其余三个分量各为 $1/3$；该权重同时进入梯度、回溯、最终归因、注册和同步评分。每个变体继续执行完整 Prompt、攻击和独立 calibration 流程, 因而属于真实方法重运行而不是汇总层算术消融。
 
 主方法检测协议在 calibration clean negative 上联合冻结内容阈值、几何可靠性阈值与同阈值救回规则, 随后只在独立 test split 应用该冻结协议。正式 FPR 证据是 test clean negative 的经验 operating point 及95%单侧 Wilson 上界; 该协议不声明 calibration 导出的 split-conformal 有限样本总体 FPR 保证。
 

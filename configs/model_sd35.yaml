@@ -19,6 +19,7 @@ tail_relative_strength: 0.0015
 attention_relative_strength: 0.0010
 attention_stable_token_fraction: 0.50
 attention_unstable_pair_weight: 0.25
+attention_relation_component_weights: [0.25, 0.25, 0.25, 0.25]
 minimum_final_image_attention_score_gain: 0.0001
 tail_fraction: 0.20
 keyed_prg_version: sha256_counter_box_muller_float32_v1

@@ -20,6 +20,8 @@ from main.core.keyed_prg import require_supported_keyed_prg_version
 from main.methods.geometry import (
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_RELATION_COMPONENT_WEIGHTS,
+    validate_attention_relation_component_weights,
 )
 
 
@@ -63,6 +65,7 @@ class FormalMethodRuntimeConfig:
     attention_relative_strength: float
     attention_stable_token_fraction: float
     attention_unstable_pair_weight: float
+    attention_relation_component_weights: tuple[float, ...]
     minimum_final_image_attention_score_gain: float
     tail_fraction: float
     keyed_prg_version: str
@@ -119,6 +122,11 @@ class FormalMethodRuntimeConfig:
             raise ValueError(
                 "attention_unstable_pair_weight 必须位于 [0, 1)"
             )
+        component_weights = validate_attention_relation_component_weights(
+            self.attention_relation_component_weights
+        )
+        if component_weights != ATTENTION_RELATION_COMPONENT_WEIGHTS:
+            raise ValueError("正式完整方法必须启用四个等权注意力关系分量")
         if (
             not math.isfinite(self.minimum_final_image_attention_score_gain)
             or self.minimum_final_image_attention_score_gain <= 0.0
@@ -191,6 +199,9 @@ class FormalMethodRuntimeConfig:
             "attention_unstable_pair_weight": (
                 self.attention_unstable_pair_weight
             ),
+            "attention_relation_component_weights": (
+                self.attention_relation_component_weights
+            ),
             "minimum_final_image_attention_score_gain": (
                 self.minimum_final_image_attention_score_gain
             ),
@@ -255,6 +266,10 @@ def load_formal_method_runtime_config(root: str | Path = ".") -> FormalMethodRun
     normalized["attention_module_names"] = tuple(
         str(value) for value in payload["attention_module_names"]
     )
+    normalized["attention_relation_component_weights"] = tuple(
+        float(value)
+        for value in payload["attention_relation_component_weights"]
+    )
     return FormalMethodRuntimeConfig(**normalized)
 
 
@@ -287,6 +302,10 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         ),
         "SLM_WM_ATTENTION_UNSTABLE_PAIR_WEIGHT": str(
             config.attention_unstable_pair_weight
+        ),
+        "SLM_WM_ATTENTION_RELATION_COMPONENT_WEIGHTS": ",".join(
+            str(value)
+            for value in config.attention_relation_component_weights
         ),
         "SLM_WM_MINIMUM_FINAL_IMAGE_ATTENTION_SCORE_GAIN": str(
             config.minimum_final_image_attention_score_gain

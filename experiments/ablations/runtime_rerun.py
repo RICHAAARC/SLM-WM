@@ -54,6 +54,7 @@ from experiments.runners.semantic_watermark_runtime import (
 )
 from experiments.runtime.archive_naming import utc_archive_token
 from main.core.digest import build_stable_digest
+from main.methods.geometry import ATTENTION_RELATION_COMPONENT_WEIGHTS
 
 
 PACKAGE_INPUT_MANIFEST_FILE_NAME = "mechanism_ablation_package_input_manifest.json"
@@ -102,6 +103,19 @@ class RuntimeRerunAblationSpec:
     tail_truncation_enabled: bool = True
     attention_geometry_enabled: bool = True
     image_alignment_enabled: bool = True
+    attention_relation_component_weights: tuple[
+        float,
+        ...,
+    ] = ATTENTION_RELATION_COMPONENT_WEIGHTS
+
+    def to_dict(self) -> dict[str, Any]:
+        """返回跨 JSON 边界保持同一类型的正式机制配置."""
+
+        payload = asdict(self)
+        payload["attention_relation_component_weights"] = list(
+            self.attention_relation_component_weights
+        )
+        return payload
 
     def apply(
         self,
@@ -120,6 +134,9 @@ class RuntimeRerunAblationSpec:
             tail_truncation_enabled=self.tail_truncation_enabled,
             attention_geometry_enabled=self.attention_geometry_enabled,
             image_alignment_enabled=self.image_alignment_enabled,
+            attention_relation_component_weights=(
+                self.attention_relation_component_weights
+            ),
             output_dir=f"{output_root}/runs/{self.ablation_id}",
         )
 
@@ -163,6 +180,42 @@ FORMAL_RUNTIME_RERUN_ABLATION_SPECS = (
         tail_truncation_enabled=False,
     ),
     RuntimeRerunAblationSpec(
+        "without_centered_qk_logit",
+        attention_relation_component_weights=(
+            0.0,
+            1.0 / 3.0,
+            1.0 / 3.0,
+            1.0 / 3.0,
+        ),
+    ),
+    RuntimeRerunAblationSpec(
+        "without_differentiable_row_rank",
+        attention_relation_component_weights=(
+            1.0 / 3.0,
+            0.0,
+            1.0 / 3.0,
+            1.0 / 3.0,
+        ),
+    ),
+    RuntimeRerunAblationSpec(
+        "without_attention_probability",
+        attention_relation_component_weights=(
+            1.0 / 3.0,
+            1.0 / 3.0,
+            0.0,
+            1.0 / 3.0,
+        ),
+    ),
+    RuntimeRerunAblationSpec(
+        "without_distance_modulated_probability",
+        attention_relation_component_weights=(
+            1.0 / 3.0,
+            1.0 / 3.0,
+            1.0 / 3.0,
+            0.0,
+        ),
+    ),
+    RuntimeRerunAblationSpec(
         "without_attention_geometry",
         attention_geometry_enabled=False,
     ),
@@ -175,12 +228,12 @@ FORMAL_RUNTIME_RERUN_ABLATION_IDS = tuple(
     spec.ablation_id for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS
 )
 FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST = build_stable_digest(
-    [asdict(spec) for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS]
+    [spec.to_dict() for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS]
 )
 
 
 def default_runtime_rerun_ablation_specs() -> tuple[RuntimeRerunAblationSpec, ...]:
-    """返回论文协议唯一允许的11项正式重运行消融规范。"""
+    """返回论文协议唯一允许的15项正式重运行消融规范."""
 
     return FORMAL_RUNTIME_RERUN_ABLATION_SPECS
 
@@ -196,7 +249,9 @@ def runtime_rerun_ablation_contract(
 
     actual_specs = tuple(specs)
     actual_ids = tuple(spec.ablation_id for spec in actual_specs)
-    actual_digest = build_stable_digest([asdict(spec) for spec in actual_specs])
+    actual_digest = build_stable_digest(
+        [spec.to_dict() for spec in actual_specs]
+    )
     return {
         "expected_ablation_ids": list(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
         "actual_ablation_ids": list(actual_ids),
@@ -317,7 +372,7 @@ def _run_entry(
         ),
         "split": base_config.split,
         "ablation_id": spec.ablation_id,
-        "runtime_config": asdict(spec),
+        "runtime_config": spec.to_dict(),
         "runtime_result": result.to_dict(),
         "detections": detections,
     }
@@ -431,7 +486,7 @@ def run_runtime_rerun_ablations(
     resolved_specs = specs or default_runtime_rerun_ablation_specs()
     ablation_contract = runtime_rerun_ablation_contract(resolved_specs)
     if not ablation_contract["ablation_exact_set_ready"]:
-        raise ValueError("正式消融必须精确使用受治理的11项机制规范")
+        raise ValueError("正式消融必须精确使用受治理的15项机制规范")
     resolved_base_configs = tuple(base_configs)
     if not resolved_base_configs:
         raise ValueError("真实重运行消融至少需要一个 Prompt 配置")
@@ -812,7 +867,7 @@ def run_runtime_rerun_ablations(
             manifest_path.relative_to(root_path).as_posix(),
         ),
         config={
-            "specs": [asdict(spec) for spec in resolved_specs],
+            "specs": [spec.to_dict() for spec in resolved_specs],
             **ablation_contract,
             **prompt_contract,
             "prompt_count": len(resolved_base_configs),
@@ -931,12 +986,14 @@ def package_runtime_rerun_ablations(
         for record in packaged_records
         for field_name in (
             "semantic_routing_enabled",
+            "branch_risk_mode",
             "null_space_enabled",
             "lf_enabled",
             "tail_robust_enabled",
             "tail_truncation_enabled",
             "attention_geometry_enabled",
             "image_alignment_enabled",
+            "attention_relation_component_weights",
         )
     ) and all(
         record["runtime_result"]["metadata"]["scientific_unit_config"].get(
@@ -1111,7 +1168,7 @@ def package_runtime_rerun_ablations(
             necessity_statistics_ready,
         )
     ):
-        raise RuntimeError("真实重运行消融身份、精确11项规范或 ready 门禁未通过")
+        raise RuntimeError("真实重运行消融身份、精确15项规范或 ready 门禁未通过")
     manifest["formal_execution_package_lock"] = formal_execution_package_lock
     (source_dir / "manifest.local.json").write_text(
         json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",

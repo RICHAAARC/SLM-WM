@@ -27,6 +27,7 @@ from main.methods.geometry.differentiable_attention import (
     keyed_attention_relation_projection,
     public_token_grid_coordinates,
     transport_stable_attention_pair_weights,
+    validate_attention_relation_component_weights,
 )
 
 
@@ -387,8 +388,9 @@ def _relation_scores(
     relation_projection: Any,
     valid: Any,
     pair_weights: Any,
+    component_weights: tuple[float, ...],
 ) -> tuple[Any, Any]:
-    """以统一四分量算子计算一批关系图的分量分数与等权总分。"""
+    """以统一四分量算子计算一批关系图的分量分数与协议总分."""
 
     torch = _torch()
     component_scores = attention_relation_component_scores(
@@ -397,7 +399,10 @@ def _relation_scores(
         pair_weights,
         valid,
     )
-    scores = combine_attention_relation_component_scores(component_scores)
+    scores = combine_attention_relation_component_scores(
+        component_scores,
+        component_weights,
+    )
     finite_scores = torch.where(
         torch.isfinite(scores),
         scores,
@@ -459,6 +464,7 @@ def _evaluate_candidates(
     coordinates: Any,
     transforms: Any,
     stable_pair_weights: StableAttentionPairWeights,
+    component_weights: tuple[float, ...],
 ) -> _CandidateEvaluation:
     """计算规范拉回和观测前推一致性共同约束的注册目标."""
 
@@ -502,6 +508,7 @@ def _evaluate_candidates(
         relation_projection,
         valid,
         canonical_pair_weights,
+        component_weights,
     )
     inverse_transforms = _invert_affine(transforms)
     canonical_coordinates_at_observation = _apply_affine(
@@ -532,6 +539,7 @@ def _evaluate_candidates(
         expected_observation,
         observation_valid,
         stable_pair_weights.pair_tensor(relation_values[..., 0]).float(),
+        component_weights,
     )
     canonical_coverage_ratios = valid.float().mean(dim=-1)
     observation_coverage_ratios = observation_valid.float().mean(dim=-1)
@@ -647,6 +655,9 @@ class AttentionAlignmentResult:
     observed_pair_weight_realization_digest: str
     canonical_pair_weight_realization_digest: str
     attention_relation_source: str
+    attention_relation_active_component_names: tuple[str, ...]
+    attention_relation_component_weights: tuple[float, ...]
+    attention_relation_component_protocol_digest: str
     attention_relation_component_identity_digest: str
     attention_relation_keyed_projection_digest: str
     attention_relation_qk_operator_metadata_digest: str
@@ -668,16 +679,20 @@ def recover_attention_affine_alignment(
     anchor_count: int = 12,
     residual_threshold: float = 0.20,
     minimum_inlier_ratio: float = 0.50,
+    component_weights: tuple[float, ...] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> AttentionAlignmentResult:
     """通过双边重采样密钥关系图恢复仿射参考系。
 
     对每个公开候选仿射变换构造规范拉回矩阵 ``W`` 和观测前推矩阵 ``V``.
     注册目标逐通道比较 ``W R_observed,c W^T`` 与四通道密钥投影, 以及真实
     观测关系图与 ``V (pi_c S_key) V^T``。两个方向都对查询轴和键轴应用同一
-    空间变换, 每个通道逐行归一化后等权组合。
+    空间变换, 每个通道逐行归一化后按冻结分量权重组合。
     """
 
     torch = _torch()
+    resolved_component_weights = validate_attention_relation_component_weights(
+        component_weights
+    )
     probability = attention_probability(attention)
     matrix = probability.mean(dim=0) if probability.ndim == 3 else probability
     if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
@@ -700,10 +715,12 @@ def recover_attention_affine_alignment(
         descriptor,
         key_material,
         layer_name,
+        component_weights=resolved_component_weights,
     )
     relation_graph_identity = build_attention_relation_graph_identity(
         ((layer_name, attention, token_indices),),
         key_material,
+        resolved_component_weights,
     )
     coordinates = _grid_coordinates(token_indices, matrix.device)
     coarse = _evaluate_candidates(
@@ -712,6 +729,7 @@ def recover_attention_affine_alignment(
         coordinates,
         _coarse_affine_candidates(matrix.device),
         stable_pair_weights,
+        resolved_component_weights,
     )
     coarse_best_index = int(torch.argmax(coarse.objectives).item())
     evaluations = [coarse]
@@ -729,6 +747,7 @@ def recover_attention_affine_alignment(
                 translation_delta=translation_delta,
             ),
             stable_pair_weights,
+            resolved_component_weights,
         )
         evaluations.append(local)
         current_best_transform = local.transforms[
@@ -920,6 +939,13 @@ def recover_attention_affine_alignment(
             canonical_pair_weights.pair_weight_realization_digest
         ),
         "attention_relation_source": descriptor.relation_source,
+        "attention_relation_active_component_names": (
+            relation_graph_identity.active_component_names
+        ),
+        "attention_relation_component_weights": resolved_component_weights,
+        "attention_relation_component_protocol_digest": (
+            relation_graph_identity.component_protocol_digest
+        ),
         "attention_relation_component_identity_digest": (
             descriptor.component_identity_digest
         ),
@@ -978,6 +1004,13 @@ def recover_attention_affine_alignment(
             canonical_pair_weights.pair_weight_realization_digest
         ),
         attention_relation_source=descriptor.relation_source,
+        attention_relation_active_component_names=(
+            relation_graph_identity.active_component_names
+        ),
+        attention_relation_component_weights=resolved_component_weights,
+        attention_relation_component_protocol_digest=(
+            relation_graph_identity.component_protocol_digest
+        ),
         attention_relation_component_identity_digest=(
             descriptor.component_identity_digest
         ),
@@ -1051,8 +1084,14 @@ def recover_attention_affine_alignment(
             "attention_relation_component_names": list(
                 ATTENTION_RELATION_COMPONENT_NAMES
             ),
+            "attention_relation_active_component_names": list(
+                relation_graph_identity.active_component_names
+            ),
             "attention_relation_component_weights": list(
-                ATTENTION_RELATION_COMPONENT_WEIGHTS
+                resolved_component_weights
+            ),
+            "attention_relation_component_protocol_digest": (
+                relation_graph_identity.component_protocol_digest
             ),
             "attention_relation_source": descriptor.relation_source,
             "attention_relation_direct_qk_source_ready": (

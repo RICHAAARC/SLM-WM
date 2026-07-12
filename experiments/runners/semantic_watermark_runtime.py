@@ -61,6 +61,7 @@ from main.methods.geometry import (
     DifferentiableAttentionRecorder,
     attention_geometry_component_scores,
     attention_geometry_score,
+    attention_relation_component_protocol,
     attention_relation_stability_map,
     build_attention_relation_graph_identity,
     build_stable_attention_pair_weights,
@@ -69,6 +70,7 @@ from main.methods.geometry import (
     qk_atomic_evaluation_records_digest,
     qk_atomic_evaluation_records_ready,
     select_stable_attention_tokens,
+    validate_attention_relation_component_weights,
 )
 from main.methods.semantic import (
     BRANCH_NAMES,
@@ -121,6 +123,9 @@ class SemanticWatermarkRuntimeConfig:
     )
     attention_unstable_pair_weight: float = (
         _FORMAL_METHOD_CONFIG.attention_unstable_pair_weight
+    )
+    attention_relation_component_weights: tuple[float, ...] = (
+        _FORMAL_METHOD_CONFIG.attention_relation_component_weights
     )
     minimum_final_image_attention_score_gain: float = (
         _FORMAL_METHOD_CONFIG.minimum_final_image_attention_score_gain
@@ -206,6 +211,9 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError(
                 "attention_unstable_pair_weight 必须位于 [0, 1)"
             )
+        validate_attention_relation_component_weights(
+            self.attention_relation_component_weights
+        )
         if (
             not math.isfinite(self.minimum_final_image_attention_score_gain)
             or self.minimum_final_image_attention_score_gain <= 0.0
@@ -393,6 +401,9 @@ def semantic_watermark_runtime_config_payload(
     payload["key_material"] = build_stable_digest({"key_material": config.key_material})
     payload["injection_step_indices"] = list(config.injection_step_indices)
     payload["attention_module_names"] = list(config.attention_module_names)
+    payload["attention_relation_component_weights"] = list(
+        config.attention_relation_component_weights
+    )
     payload["standard_attack_profiles"] = list(config.standard_attack_profiles)
     return payload
 
@@ -1291,6 +1302,9 @@ def _final_image_attention_observability_record(
             "final_paired_pair_weight_identity_digest": "",
             "final_image_attention_record_schema_digest": "",
             "attention_relation_component_names": [],
+            "attention_relation_active_component_names": [],
+            "attention_relation_component_weights": [],
+            "attention_relation_component_protocol_digest": "",
             "attention_relation_source": "",
             "attention_relation_direct_qk_source_ready": False,
             "attention_relation_component_identity_digest": "",
@@ -1352,7 +1366,11 @@ def _final_image_attention_observability_record(
     ):
         raise RuntimeError("最终成图 Q/K 记录没有使用配置冻结的精确层名")
     relation_identities = tuple(
-        build_attention_relation_graph_identity(records, config.key_material)
+        build_attention_relation_graph_identity(
+            records,
+            config.key_material,
+            config.attention_relation_component_weights,
+        )
         for records in (
             clean_records,
             carrier_only_records,
@@ -1365,6 +1383,11 @@ def _final_image_attention_observability_record(
         and identity.qk_operator_metadata_ready
         and identity.qk_atomic_content_ready
         and identity.component_names == relation_identity.component_names
+        and identity.active_component_names
+        == relation_identity.active_component_names
+        and identity.component_weights == relation_identity.component_weights
+        and identity.component_protocol_digest
+        == relation_identity.component_protocol_digest
         and identity.component_identity_digest
         == relation_identity.component_identity_digest
         and identity.keyed_projection_digest
@@ -1437,6 +1460,7 @@ def _final_image_attention_observability_record(
             records,
             config.key_material,
             stable_pair_weights=pair_weights,
+            component_weights=config.attention_relation_component_weights,
         )
         return float(value.detach().item())
 
@@ -1463,11 +1487,13 @@ def _final_image_attention_observability_record(
         carrier_only_records,
         config.key_material,
         carrier_only_pair_weights,
+        config.attention_relation_component_weights,
     )
     watermarked_carrier_paired_components = attention_geometry_component_scores(
         watermarked_records,
         config.key_material,
         carrier_only_pair_weights,
+        config.attention_relation_component_weights,
     )
     carrier_paired_component_gains = (
         watermarked_carrier_paired_components - carrier_only_paired_components
@@ -1540,6 +1566,15 @@ def _final_image_attention_observability_record(
         ),
         "attention_relation_component_names": list(
             relation_identity.component_names
+        ),
+        "attention_relation_active_component_names": list(
+            relation_identity.active_component_names
+        ),
+        "attention_relation_component_weights": list(
+            relation_identity.component_weights
+        ),
+        "attention_relation_component_protocol_digest": (
+            relation_identity.component_protocol_digest
         ),
         "attention_relation_source": relation_identity.relation_source,
         "attention_relation_direct_qk_source_ready": relation_identity_ready,
@@ -1911,6 +1946,28 @@ def _carrier_only_counterfactual_identity(
             "real_qk_projection"
         ):
             raise RuntimeError("完整方法更新原子缺少真实 Q/K attention 来源")
+        component_protocol = attention_relation_component_protocol(
+            full_config.attention_relation_component_weights
+        )
+        if (
+            full_record.get("attention_relation_component_names")
+            != list(ATTENTION_RELATION_COMPONENT_NAMES)
+            or full_record.get("attention_relation_active_component_names")
+            != list(
+                component_protocol[
+                    "attention_relation_active_component_names"
+                ]
+            )
+            or full_record.get("attention_relation_component_weights")
+            != list(full_config.attention_relation_component_weights)
+            or full_record.get(
+                "attention_relation_component_protocol_digest"
+            )
+            != component_protocol[
+                "attention_relation_component_protocol_digest"
+            ]
+        ):
+            raise RuntimeError("完整方法更新原子的四分量权重协议无效")
         if (
             full_record.get("attention_qk_atomic_content_ready") is not True
             or not qk_atomic_evaluation_records_ready(
@@ -1947,11 +2004,14 @@ def _carrier_only_counterfactual_identity(
         "attention_relation_component_identity_digest",
         "attention_relation_keyed_projection_digest",
         "attention_relation_qk_operator_metadata_digest",
+        "attention_relation_component_protocol_digest",
         "attention_qk_atomic_content_digest",
     )
     carrier_empty_list_fields = (
         "stable_token_indices",
         "attention_relation_component_names",
+        "attention_relation_active_component_names",
+        "attention_relation_component_weights",
         "attention_relation_qk_operator_metadata_records",
         "attention_qk_atomic_content_records",
     )
@@ -2175,6 +2235,9 @@ def run_semantic_watermark_runtime(
                         unstable_pair_weight=(
                             active_injection_config.attention_unstable_pair_weight
                         ),
+                        component_weights=(
+                            active_injection_config.attention_relation_component_weights
+                        ),
                     )
                     if active_injection_config.attention_geometry_enabled
                     else None
@@ -2320,6 +2383,9 @@ def run_semantic_watermark_runtime(
                         unstable_pair_weight=(
                             active_injection_config.attention_unstable_pair_weight
                         ),
+                        component_weights=(
+                            active_injection_config.attention_relation_component_weights
+                        ),
                     )
                     attention_tensor = attention_update.update
                     combined_update = content_base_update + attention_tensor
@@ -2333,11 +2399,15 @@ def run_semantic_watermark_runtime(
                             stable_pair_weights=(
                                 attention_gradient.stable_pair_weights
                             ),
+                            component_weights=(
+                                active_injection_config.attention_relation_component_weights
+                            ),
                         )
                         written_qk_identity = (
                             build_attention_relation_graph_identity(
                                 recorder.records,
                                 active_injection_config.key_material,
+                                active_injection_config.attention_relation_component_weights,
                             )
                         )
                     final_score = float(final_score_tensor.detach().item())
@@ -2349,6 +2419,13 @@ def run_semantic_watermark_runtime(
                         raise RuntimeError("真正写回的 combined latent 未提高真实 Q/K 目标")
                     if not written_qk_identity.qk_atomic_content_ready:
                         raise RuntimeError("真正写回的 combined latent 缺少 Q/K 原子摘要")
+                    if (
+                        written_qk_identity.component_protocol_digest
+                        != attention_update.attention_relation_component_protocol_digest
+                        or written_qk_identity.component_weights
+                        != attention_update.attention_relation_component_weights
+                    ):
+                        raise RuntimeError("真正写回的 combined latent 四分量协议漂移")
                     qk_atomic_evaluation_records = (
                         *attention_update.qk_atomic_evaluation_records,
                         {
@@ -2387,6 +2464,15 @@ def run_semantic_watermark_runtime(
                         ),
                         "attention_relation_component_names": list(
                             attention_update.attention_relation_component_names
+                        ),
+                        "attention_relation_active_component_names": list(
+                            attention_update.attention_relation_active_component_names
+                        ),
+                        "attention_relation_component_weights": list(
+                            attention_update.attention_relation_component_weights
+                        ),
+                        "attention_relation_component_protocol_digest": (
+                            attention_update.attention_relation_component_protocol_digest
                         ),
                         "attention_relation_source": (
                             attention_update.attention_relation_source
@@ -2445,6 +2531,9 @@ def run_semantic_watermark_runtime(
                         "stable_pair_weight_identity_digest": "",
                         "stable_pair_weight_realization_digest": "",
                         "attention_relation_component_names": [],
+                        "attention_relation_active_component_names": [],
+                        "attention_relation_component_weights": [],
+                        "attention_relation_component_protocol_digest": "",
                         "attention_relation_source": "",
                         "attention_relation_direct_qk_source_ready": False,
                         "attention_relation_probability_scope": "",
@@ -2736,6 +2825,9 @@ def run_semantic_watermark_runtime(
         ),
         attention_unstable_pair_weight=(
             config.attention_unstable_pair_weight
+        ),
+        attention_relation_component_weights=(
+            config.attention_relation_component_weights
         ),
     )
     def adversarial_detection_score(candidate: Any) -> float:
