@@ -400,12 +400,14 @@ def test_main_method_routes_use_isolated_scientific_command(
         *,
         run_formal_ablation: bool,
         archive_destination_dirs: object = None,
+        resume_checkpoint_dir: object = None,
     ) -> dict[str, Any]:
         captured.update(
             {
                 "root": root,
                 "run_formal_ablation": run_formal_ablation,
                 "archive_destination_dirs": archive_destination_dirs,
+                "resume_checkpoint_dir": resume_checkpoint_dir,
                 "paper_run_name": os.environ[workflow.PAPER_RUN_NAME_ENVIRONMENT_KEY],
                 "baseline_id": os.environ.get(
                     workflow.PRIMARY_BASELINE_ID_ENVIRONMENT_KEY
@@ -445,6 +447,7 @@ def test_main_method_routes_use_isolated_scientific_command(
         workflow_name == "mechanism_ablation"
     )
     assert captured["archive_destination_dirs"] is None
+    assert captured["resume_checkpoint_dir"] is None
     assert captured["paper_run_name"] == "probe_paper"
     assert captured["baseline_id"] is None
     assert captured["formal_commit"] == COMMIT
@@ -457,6 +460,44 @@ def test_main_method_routes_use_isolated_scientific_command(
     assert result["return_code"] == 0
     assert result["workflow_summary"]["workflow_decision"] == "complete"
     assert os.environ[workflow.PRIMARY_BASELINE_ID_ENVIRONMENT_KEY] == "outer_baseline"
+
+
+@pytest.mark.quick
+def test_main_method_route_maps_persistent_archives_and_resume_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """主方法持久根目录必须同时覆盖完成归档与仅供续跑的 checkpoint."""
+
+    captured: dict[str, Any] = {}
+
+    def fake_session(root: Path, **kwargs: Any) -> dict[str, Any]:
+        captured.update(root=root, **kwargs)
+        return {"workflow_decision": "complete"}
+
+    monkeypatch.setattr(
+        method_session,
+        "run_semantic_watermark_image_only_session",
+        fake_session,
+    )
+    persistent_root = tmp_path / "persistent"
+    result = workflow._run_main_method_route(
+        route=workflow.WORKFLOW_ROUTES["mechanism_ablation"],
+        workflow_name="mechanism_ablation",
+        paper_run_name="probe_paper",
+        root_path=tmp_path,
+        persistent_output_dir=persistent_root,
+    )
+
+    assert captured["archive_destination_dirs"] == {
+        "image_only_dataset_runtime": persistent_root / "image_only_dataset_runtime",
+        "dataset_level_quality": persistent_root / "dataset_level_quality",
+        "runtime_rerun_ablation": persistent_root / "runtime_rerun_ablation",
+    }
+    assert captured["resume_checkpoint_dir"] == (
+        persistent_root / "semantic_watermark_resume_checkpoint"
+    )
+    assert result["workflow_summary"]["workflow_decision"] == "complete"
 
 
 @pytest.mark.quick

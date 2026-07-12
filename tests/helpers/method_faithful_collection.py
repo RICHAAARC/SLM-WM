@@ -25,6 +25,7 @@ from paper_experiments.baselines.method_faithful_observation_collection import (
     observation_relative_path,
     transfer_manifest_relative_path,
 )
+from tests.helpers.formal_prompt_source import copy_governed_prompt_file
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -74,16 +75,10 @@ def write_current_paper_protocol(
     root_path: Path,
     *,
     paper_run_name: str = "probe_paper",
-    prompt_count: int = 70,
 ) -> tuple[list[dict[str, Any]], MethodFaithfulCollectionProtocol]:
     """写出当前论文层级 Prompt 文件并返回其真实规范协议。"""
 
-    prompt_path = root_path / "configs" / f"paper_main_{paper_run_name}_prompts.txt"
-    prompt_path.parent.mkdir(parents=True, exist_ok=True)
-    prompt_path.write_text(
-        "".join(f"formal prompt {index}\n" for index in range(prompt_count)),
-        encoding="utf-8",
-    )
+    copy_governed_prompt_file(root_path, paper_run_name)
     paper_run = build_paper_run_config(root_path)
     records = apply_split_assignments(
         build_prompt_records(paper_run.prompt_set, read_prompt_file(root_path / paper_run.prompt_file))

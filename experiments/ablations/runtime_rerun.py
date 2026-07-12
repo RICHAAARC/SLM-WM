@@ -11,6 +11,10 @@ from typing import Any, Iterable
 from zipfile import ZIP_STORED, ZipFile
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.ablations.necessity_statistics import (
+    ABLATION_NECESSITY_FIELDNAMES,
+    build_ablation_necessity_statistics,
+)
 from experiments.runtime import repository_environment
 from experiments.runtime.scientific_execution_binding import (
     validate_scientific_execution_binding,
@@ -605,6 +609,12 @@ def run_runtime_rerun_ablations(
     thresholds_path = resolved_output / "per_ablation_frozen_protocols.json"
     metrics_path = resolved_output / "mechanism_ablation_metrics.csv"
     delta_path = resolved_output / "mechanism_pairwise_delta.csv"
+    necessity_statistics_path = (
+        resolved_output / "mechanism_necessity_statistics.csv"
+    )
+    necessity_summary_path = (
+        resolved_output / "mechanism_necessity_summary.json"
+    )
     summary_path = resolved_output / "ablation_claim_summary.json"
     manifest_path = resolved_output / "manifest.local.json"
     records_path.write_text(
@@ -629,6 +639,36 @@ def run_runtime_rerun_ablations(
     )
     _write_csv(metrics_path, metric_rows)
     _write_csv(delta_path, delta_rows)
+    necessity_rows, necessity_summary = build_ablation_necessity_statistics(
+        formal_records,
+        expected_ablation_ids=tuple(
+            ablation_id
+            for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+            if ablation_id != "complete_method"
+        ),
+        expected_paired_prompt_count=split_counts["test"],
+    )
+    with necessity_statistics_path.open(
+        "w",
+        encoding="utf-8",
+        newline="",
+    ) as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=ABLATION_NECESSITY_FIELDNAMES,
+        )
+        writer.writeheader()
+        writer.writerows(necessity_rows)
+    necessity_summary_path.write_text(
+        json.dumps(
+            necessity_summary,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     scientific_unit_provenance = aggregate_scientific_unit_provenance(
         (
@@ -690,9 +730,18 @@ def run_runtime_rerun_ablations(
             record["formal_attack_coverage_ready"] for record in formal_records
         ),
         **scientific_unit_provenance,
+        **necessity_summary,
         "ablation_claim_gate_ready": ablation_claim_gate_ready,
-        "protocol_decision": "pass" if ablation_claim_gate_ready else "fail",
-        "supports_paper_claim": ablation_claim_gate_ready,
+        "protocol_decision": (
+            "pass"
+            if ablation_claim_gate_ready
+            and necessity_summary["ablation_necessity_statistics_ready"]
+            else "fail"
+        ),
+        "supports_paper_claim": (
+            ablation_claim_gate_ready
+            and necessity_summary["ablation_necessity_statistics_ready"]
+        ),
     }
     summary_path.write_text(
         json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
@@ -713,6 +762,8 @@ def run_runtime_rerun_ablations(
             thresholds_path.relative_to(root_path).as_posix(),
             metrics_path.relative_to(root_path).as_posix(),
             delta_path.relative_to(root_path).as_posix(),
+            necessity_statistics_path.relative_to(root_path).as_posix(),
+            necessity_summary_path.relative_to(root_path).as_posix(),
             summary_path.relative_to(root_path).as_posix(),
             manifest_path.relative_to(root_path).as_posix(),
         ),
@@ -724,6 +775,10 @@ def run_runtime_rerun_ablations(
             "split_counts": split_counts,
             "target_fpr": target_fpr,
             "record_digest": build_stable_digest(formal_records),
+            "necessity_statistic_rows_digest": necessity_summary[
+                "necessity_statistic_rows_digest"
+            ],
+            "necessity_summary_digest": build_stable_digest(necessity_summary),
         },
         code_version=formal_execution_run_lock["formal_execution_commit"],
         rebuild_command="调用 experiments.ablations.runtime_rerun.run_runtime_rerun_ablations",
@@ -741,6 +796,21 @@ def run_runtime_rerun_ablations(
             ],
             "scientific_unit_provenance_records_digest": summary[
                 "scientific_unit_provenance_records_digest"
+            ],
+            "ablation_necessity_statistics_ready": summary[
+                "ablation_necessity_statistics_ready"
+            ],
+            "necessity_statistic_rows_digest": summary[
+                "necessity_statistic_rows_digest"
+            ],
+            "necessity_supported_ablation_ids": summary[
+                "necessity_supported_ablation_ids"
+            ],
+            "necessity_not_supported_ablation_ids": summary[
+                "necessity_not_supported_ablation_ids"
+            ],
+            "all_mechanism_necessity_claims_supported": summary[
+                "all_mechanism_necessity_claims_supported"
             ],
             "supports_paper_claim": summary["supports_paper_claim"],
         },
@@ -778,6 +848,8 @@ def package_runtime_rerun_ablations(
             "per_ablation_frozen_protocols.json",
             "mechanism_ablation_metrics.csv",
             "mechanism_pairwise_delta.csv",
+            "mechanism_necessity_statistics.csv",
+            "mechanism_necessity_summary.json",
             "ablation_claim_summary.json",
             "manifest.local.json",
         )
@@ -856,6 +928,16 @@ def package_runtime_rerun_ablations(
         newline="",
     ) as stream:
         metric_ids = [str(row.get("ablation_id", "")) for row in csv.DictReader(stream)]
+    with (source_dir / "mechanism_necessity_statistics.csv").open(
+        encoding="utf-8-sig",
+        newline="",
+    ) as stream:
+        necessity_statistic_rows = [dict(row) for row in csv.DictReader(stream)]
+    necessity_summary = json.loads(
+        (source_dir / "mechanism_necessity_summary.json").read_text(
+            encoding="utf-8-sig"
+        )
+    )
     protocol_ids = list(
         json.loads(
             (source_dir / "per_ablation_frozen_protocols.json").read_text(
@@ -885,6 +967,50 @@ def package_runtime_rerun_ablations(
             set(protocol_ids) == set(expected_ids),
         )
     )
+    expected_variant_ids = [
+        ablation_id
+        for ablation_id in expected_ids
+        if ablation_id != "complete_method"
+    ]
+    necessity_ids = [
+        str(row.get("ablation_id", "")) for row in necessity_statistic_rows
+    ]
+    necessity_partition = [
+        *necessity_summary.get("necessity_supported_ablation_ids", []),
+        *necessity_summary.get("necessity_not_supported_ablation_ids", []),
+    ]
+    necessity_statistics_ready = all(
+        (
+            necessity_ids == expected_variant_ids,
+            sorted(necessity_partition) == sorted(expected_variant_ids),
+            len(necessity_partition) == len(set(necessity_partition)),
+            necessity_summary.get("expected_variant_ablation_ids")
+            == expected_variant_ids,
+            necessity_summary.get("ablation_necessity_statistics_ready") is True,
+            necessity_summary.get("necessity_statistic_row_count")
+            == len(expected_variant_ids),
+            necessity_summary.get("paired_prompt_count")
+            == paper_run.minimum_clean_negative_count,
+            necessity_summary.get("expected_paired_prompt_count")
+            == paper_run.minimum_clean_negative_count,
+            necessity_summary.get("necessity_statistic_rows_digest")
+            == build_stable_digest(necessity_statistic_rows),
+            summary.get("necessity_statistic_rows_digest")
+            == necessity_summary.get("necessity_statistic_rows_digest"),
+            summary.get("ablation_necessity_statistics_ready") is True,
+            summary.get("necessity_supported_ablation_ids")
+            == necessity_summary.get("necessity_supported_ablation_ids"),
+            summary.get("necessity_not_supported_ablation_ids")
+            == necessity_summary.get("necessity_not_supported_ablation_ids"),
+            manifest_config.get("necessity_statistic_rows_digest")
+            == necessity_summary.get("necessity_statistic_rows_digest"),
+            manifest_config.get("necessity_summary_digest")
+            == build_stable_digest(necessity_summary),
+            manifest_metadata.get("ablation_necessity_statistics_ready") is True,
+            manifest_metadata.get("necessity_statistic_rows_digest")
+            == necessity_summary.get("necessity_statistic_rows_digest"),
+        )
+    )
     if not all(
         (
             summary.get("paper_run_name") == resolved_paper_run_name,
@@ -901,6 +1027,7 @@ def package_runtime_rerun_ablations(
             summary.get("supports_paper_claim") is True,
             manifest.get("artifact_id") == "formal_mechanism_ablation_manifest",
             exact_set_ready,
+            necessity_statistics_ready,
         )
     ):
         raise RuntimeError("真实重运行消融身份、精确8项规范或 ready 门禁未通过")

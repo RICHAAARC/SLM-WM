@@ -22,7 +22,14 @@ from experiments.protocol.attacks import (
     build_attack_matrix_manifest_config,
     default_attack_configs,
 )
-from experiments.protocol.paper_run_config import RUN_DEFAULTS
+from experiments.ablations.necessity_statistics import (
+    ABLATION_NECESSITY_FIELDNAMES,
+    build_ablation_necessity_statistics,
+)
+from experiments.protocol.paper_run_config import (
+    RUN_DEFAULTS,
+    PaperRunPromptContract,
+)
 from experiments.protocol.prompts import build_prompt_records
 from experiments.protocol.splits import group_prompt_ids_by_split
 from experiments.protocol.pilot_paper_fixed_fpr import (
@@ -380,6 +387,9 @@ ARTIFACT_SOURCE_PATHS = {
     "mechanism_pairwise_delta_ready": (
         f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_pairwise_delta.csv"
     ),
+    "mechanism_necessity_statistics_ready": (
+        f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_statistics.csv"
+    ),
     "dataset_quality_metrics_ready": (
         f"outputs/dataset_level_quality/{SCALE}/dataset_quality_metrics.csv"
     ),
@@ -419,6 +429,12 @@ def evidence_audit_source_path_map() -> dict[str, str]:
         "ablation_claim_summary": f"{ablation_root}/ablation_claim_summary.json",
         "mechanism_ablation_table": f"{ablation_root}/mechanism_ablation_metrics.csv",
         "method_pairwise_delta_table": f"{ablation_root}/mechanism_pairwise_delta.csv",
+        "mechanism_necessity_statistics": (
+            f"{ablation_root}/mechanism_necessity_statistics.csv"
+        ),
+        "mechanism_necessity_summary": (
+            f"{ablation_root}/mechanism_necessity_summary.json"
+        ),
     }
 
 
@@ -478,8 +494,9 @@ def schema_row(fields: set[str], **values: object) -> dict[str, object]:
 def artifact_source_payloads(
     quality_metrics: tuple[dict[str, object], ...],
     attack_family_metrics: tuple[dict[str, object], ...],
+    necessity_rows: tuple[dict[str, object], ...],
 ) -> dict[str, bytes]:
-    """构造可由真实 validator 独立重建的11类源文件字节."""
+    """构造可由真实 validator 独立重建的12类源文件字节."""
 
     protocol = {
         "content_threshold": 0.5,
@@ -601,6 +618,12 @@ def artifact_source_payloads(
             csv_bytes_with_fields(
                 delta_rows,
                 tuple(ABLATION_DELTA_FIELDS),
+            )
+        ),
+        ARTIFACT_SOURCE_PATHS["mechanism_necessity_statistics_ready"]: (
+            csv_bytes_with_fields(
+                necessity_rows,
+                ABLATION_NECESSITY_FIELDNAMES,
             )
         ),
         ARTIFACT_SOURCE_PATHS["dataset_quality_metrics_ready"]: (
@@ -1069,6 +1092,33 @@ def closure_input_lock() -> tuple[dict[str, object], dict[str, object]]:
 
 def ready_bundle() -> ResultClosureGateInput:
     """构造证据完整且允许至少一个逐攻击比较未显著胜出的输入包。"""
+
+    necessity_variant_ids = tuple(
+        ablation_id
+        for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+        if ablation_id != "complete_method"
+    )
+    necessity_records = [
+        {
+            "ablation_id": ablation_id,
+            "prompt_id": f"prompt_{prompt_index:03d}",
+            "split": "test",
+            "formal_attack_coverage_ready": True,
+            "attacked_positive_rate": (
+                1.0 if ablation_id == "complete_method" else 0.0
+            ),
+            "positive_source_positive": ablation_id == "complete_method",
+            "paired_ssim": 0.95,
+        }
+        for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+        for prompt_index in range(TEST_COUNT)
+    ]
+    necessity_rows, necessity_summary = build_ablation_necessity_statistics(
+        necessity_records,
+        expected_ablation_ids=necessity_variant_ids,
+        expected_paired_prompt_count=TEST_COUNT,
+        bootstrap_resample_count=100,
+    )
 
     result_records = tuple(
         formal_result_record(method_id, attack)
@@ -1545,6 +1595,23 @@ def ready_bundle() -> ResultClosureGateInput:
         "ablation_spec_digest": FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
         "ablation_exact_set_ready": True,
         "ablation_claim_gate_ready": True,
+        "ablation_necessity_statistics_ready": True,
+        "necessity_statistic_row_count": len(
+            FORMAL_RUNTIME_RERUN_ABLATION_IDS
+        )
+        - 1,
+        "paired_prompt_count": TEST_COUNT,
+        "expected_paired_prompt_count": TEST_COUNT,
+        "necessity_statistic_rows_digest": necessity_summary[
+            "necessity_statistic_rows_digest"
+        ],
+        "necessity_supported_ablation_ids": [
+            ablation_id
+            for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+            if ablation_id != "complete_method"
+        ],
+        "necessity_not_supported_ablation_ids": [],
+        "all_mechanism_necessity_claims_supported": True,
         "protocol_decision": "pass",
         "supports_paper_claim": True,
     }
@@ -1605,6 +1672,7 @@ def ready_bundle() -> ResultClosureGateInput:
     artifact_payload_map = artifact_source_payloads(
         quality_metrics,
         attack_family_metrics,
+        tuple(necessity_rows),
     )
     artifact_source_sha256 = {
         path: hashlib.sha256(payload).hexdigest()
@@ -1912,6 +1980,8 @@ def ready_bundle() -> ResultClosureGateInput:
             (
                 f"outputs/formal_mechanism_ablation/{SCALE}/per_ablation_frozen_protocols.json",
                 f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_ablation_metrics.csv",
+                f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_statistics.csv",
+                f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_summary.json",
                 f"outputs/formal_mechanism_ablation/{SCALE}/ablation_claim_summary.json",
                 f"outputs/formal_mechanism_ablation/{SCALE}/manifest.local.json",
             ),
@@ -1926,6 +1996,17 @@ def ready_bundle() -> ResultClosureGateInput:
                 "calibration_prompt_id_digest": CALIBRATION_PROMPT_ID_DIGEST,
                 "test_prompt_id_digest": TEST_PROMPT_ID_DIGEST,
                 "formal_attack_coverage_ready": True,
+                "ablation_necessity_statistics_ready": True,
+                "necessity_statistic_rows_digest": necessity_summary[
+                    "necessity_statistic_rows_digest"
+                ],
+                "necessity_supported_ablation_ids": [
+                    ablation_id
+                    for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+                    if ablation_id != "complete_method"
+                ],
+                "necessity_not_supported_ablation_ids": [],
+                "all_mechanism_necessity_claims_supported": True,
                 "generation_rerun_required": True,
                 "per_ablation_calibration_required": True,
                 "supports_paper_claim": True,
@@ -1937,6 +2018,8 @@ def ready_bundle() -> ResultClosureGateInput:
                 "ablation_exact_set_ready": True,
             },
         ),
+        ablation_necessity_rows=tuple(necessity_rows),
+        ablation_necessity_summary=necessity_summary,
         dataset_quality_summary=quality_summary,
         dataset_quality_feature_report=quality_feature_report,
         dataset_quality_metrics=quality_metrics,
@@ -2032,8 +2115,13 @@ def ready_bundle() -> ResultClosureGateInput:
         ablation_claim_summary=bundle.ablation_summary,
         source_path_map=bundle.evidence_audit_source_path_map,
         artifact_data_validation=(
-            bundle.recomputed_artifact_data_validation_report
+            {
+                **bundle.recomputed_artifact_data_validation_report,
+                "mechanism_necessity_statistics_ready": True,
+            }
         ),
+        ablation_necessity_rows=tuple(necessity_rows),
+        ablation_necessity_summary=necessity_summary,
     )
     materialization = build_evidence_audit_materialization(audit_bundle)
     audit_manifest_config = build_evidence_audit_manifest_config(
@@ -2243,6 +2331,14 @@ def write_csv(path: Path, rows: tuple[dict[str, object], ...]) -> None:
 def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
     """按正式默认路径写出脚本测试需要的输入证据."""
 
+    repository_root = Path(__file__).resolve().parents[2]
+    for relative_path in (
+        Path("configs/prompt_source_registry.json"),
+        Path(RUN_DEFAULTS[SCALE]["prompt_file"]),
+    ):
+        target_path = root / relative_path
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes((repository_root / relative_path).read_bytes())
     json_paths = {
         f"outputs/image_only_dataset_runtime/{SCALE}/dataset_runtime_summary.json": bundle.evidence_audit_runtime_report,
         f"outputs/image_only_dataset_runtime/{SCALE}/manifest.local.json": bundle.evidence_audit_runtime_manifest,
@@ -2270,6 +2366,7 @@ def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
         f"outputs/paired_superiority_analysis/{SCALE}/manifest.local.json": bundle.paired_superiority_manifest,
         f"outputs/formal_mechanism_ablation/{SCALE}/ablation_claim_summary.json": bundle.ablation_summary,
         f"outputs/formal_mechanism_ablation/{SCALE}/manifest.local.json": bundle.ablation_manifest,
+        f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_summary.json": bundle.ablation_necessity_summary,
         f"outputs/dataset_level_quality/{SCALE}/dataset_quality_summary.json": bundle.dataset_quality_summary,
         f"outputs/dataset_level_quality/{SCALE}/dataset_quality_formal_feature_import_report.json": bundle.dataset_quality_feature_report,
         f"outputs/dataset_level_quality/{SCALE}/manifest.local.json": bundle.dataset_quality_manifest,
@@ -2343,6 +2440,7 @@ def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
         **artifact_source_payloads(
             bundle.dataset_quality_metrics,
             bundle.attack_family_metrics,
+            bundle.ablation_necessity_rows,
         ),
         **METHOD_OBSERVATION_SOURCE_PAYLOADS,
     }.items():
@@ -2355,7 +2453,29 @@ def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
         "\n".join(f"a governed prompt {index}" for index in range(PROMPT_COUNT)) + "\n",
         encoding="utf-8",
     )
-    write_paper_artifact_evidence_audit_outputs(root=root)
+    registry_path = root / "configs/prompt_source_registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["prompt_sets"][SCALE]["prompt_file_sha256"] = hashlib.sha256(
+        prompt_path.read_bytes()
+    ).hexdigest()
+    write_json(registry_path, registry)
+    write_paper_artifact_evidence_audit_outputs(
+        root=root,
+        prompt_contract=test_prompt_contract(root),
+    )
+
+
+def test_prompt_contract(root: Path) -> PaperRunPromptContract:
+    """显式声明 result closure 临时 Prompt 的测试依赖。"""
+
+    relative_path = Path("configs/paper_main_probe_paper_prompts.txt")
+    path = root / relative_path
+    return PaperRunPromptContract(
+        run_name=SCALE,
+        prompt_file=relative_path.as_posix(),
+        expected_prompt_count=PROMPT_COUNT,
+        prompt_file_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
 
 
 @pytest.mark.quick
@@ -2376,7 +2496,7 @@ def test_result_closure_gate_passes_only_when_all_semantic_evidence_is_ready() -
     assert len(bundle.official_reference_fidelity_records) == 3
     assert len(bundle.paired_outcomes) == 4 * TEST_COUNT * len(ATTACK_SPECS)
     assert len(bundle.paired_superiority_rows) == 4
-    assert len(bundle.artifact_data_validation_report["source_paths"]) == 11
+    assert len(bundle.artifact_data_validation_report["source_paths"]) == 12
     assert bundle.entry_review_report["entry_review_decision"] == "ready_for_evidence_closure"
 
 
@@ -3404,7 +3524,10 @@ def test_result_closure_writer_is_run_scoped_and_require_pass_returns_nonzero(
     bundle = ready_bundle()
     write_bundle_inputs(tmp_path, bundle)
 
-    report = write_result_closure_gate_outputs(root=tmp_path)
+    report = write_result_closure_gate_outputs(
+        root=tmp_path,
+        prompt_contract=test_prompt_contract(tmp_path),
+    )
     output_dir = tmp_path / "outputs/result_closure_gate" / SCALE
     written_report = json.loads((output_dir / "result_closure_gate_report.json").read_text(encoding="utf-8"))
     written_manifest = json.loads((output_dir / "manifest.local.json").read_text(encoding="utf-8"))
@@ -3503,7 +3626,10 @@ def test_result_closure_writer_rejects_synchronized_artifact_self_declaration(
     )
     write_json(evidence_manifest_path, evidence_manifest)
 
-    report = write_result_closure_gate_outputs(root=tmp_path)
+    report = write_result_closure_gate_outputs(
+        root=tmp_path,
+        prompt_contract=test_prompt_contract(tmp_path),
+    )
 
     assert report["result_closure_ready"] is False
     assert "paper_evidence_audit_ready" in report["blocked_check_ids"]

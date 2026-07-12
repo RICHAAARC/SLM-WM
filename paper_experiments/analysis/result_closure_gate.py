@@ -173,6 +173,8 @@ class ResultClosureGateInput:
     paired_superiority_manifest: dict[str, Any]
     ablation_summary: dict[str, Any]
     ablation_manifest: dict[str, Any]
+    ablation_necessity_rows: tuple[dict[str, Any], ...]
+    ablation_necessity_summary: dict[str, Any]
     dataset_quality_summary: dict[str, Any]
     dataset_quality_feature_report: dict[str, Any]
     dataset_quality_metrics: tuple[dict[str, Any], ...]
@@ -3014,6 +3016,33 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
     record_count = _int_value(bundle.ablation_summary.get("record_count"))
     ablation_count = _int_value(bundle.ablation_summary.get("ablation_count"))
     expected_ids = list(FORMAL_RUNTIME_RERUN_ABLATION_IDS)
+    expected_variant_ids = [
+        ablation_id
+        for ablation_id in expected_ids
+        if ablation_id != "complete_method"
+    ]
+    necessity_supported_ids = bundle.ablation_summary.get(
+        "necessity_supported_ablation_ids",
+        [],
+    )
+    necessity_not_supported_ids = bundle.ablation_summary.get(
+        "necessity_not_supported_ablation_ids",
+        [],
+    )
+    necessity_partition_ready = (
+        isinstance(necessity_supported_ids, list)
+        and isinstance(necessity_not_supported_ids, list)
+        and sorted([*necessity_supported_ids, *necessity_not_supported_ids])
+        == sorted(expected_variant_ids)
+        and len(necessity_supported_ids) + len(necessity_not_supported_ids)
+        == len(set([*necessity_supported_ids, *necessity_not_supported_ids]))
+        and _strict_bool(
+            bundle.ablation_summary.get(
+                "all_mechanism_necessity_claims_supported"
+            )
+        )
+        == (not necessity_not_supported_ids)
+    )
     manifest_metadata = bundle.ablation_manifest.get("metadata", {})
     return (
         _all_true(bundle.ablation_summary, ("ablation_claim_gate_ready", "supports_paper_claim"))
@@ -3023,6 +3052,25 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
         and bundle.ablation_summary.get("ablation_spec_digest")
         == FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST
         and _strict_bool(bundle.ablation_summary.get("ablation_exact_set_ready"))
+        and _strict_bool(
+            bundle.ablation_summary.get("ablation_necessity_statistics_ready")
+        )
+        and _int_value(
+            bundle.ablation_summary.get("necessity_statistic_row_count")
+        )
+        == len(expected_variant_ids)
+        and _int_value(
+            bundle.ablation_summary.get("paired_prompt_count")
+        )
+        == bundle.expected_test_count
+        and _int_value(
+            bundle.ablation_summary.get("expected_paired_prompt_count")
+        )
+        == bundle.expected_test_count
+        and _is_sha256(
+            bundle.ablation_summary.get("necessity_statistic_rows_digest", "")
+        )
+        and necessity_partition_ready
         and record_count is not None
         and record_count > 0
         and _int_value(bundle.ablation_summary.get("prompt_count")) == bundle.expected_prompt_count
@@ -3064,6 +3112,8 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
             required_output_suffixes=(
                 f"outputs/formal_mechanism_ablation/{scale}/per_ablation_frozen_protocols.json",
                 f"outputs/formal_mechanism_ablation/{scale}/mechanism_ablation_metrics.csv",
+                f"outputs/formal_mechanism_ablation/{scale}/mechanism_necessity_statistics.csv",
+                f"outputs/formal_mechanism_ablation/{scale}/mechanism_necessity_summary.json",
                 f"outputs/formal_mechanism_ablation/{scale}/ablation_claim_summary.json",
                 f"outputs/formal_mechanism_ablation/{scale}/manifest.local.json",
             ),
@@ -3079,6 +3129,11 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
                 "ablation_exact_set_ready",
                 "prompt_protocol_exact_set_ready",
                 "formal_attack_coverage_ready",
+                "ablation_necessity_statistics_ready",
+                "necessity_statistic_rows_digest",
+                "necessity_supported_ablation_ids",
+                "necessity_not_supported_ablation_ids",
+                "all_mechanism_necessity_claims_supported",
                 "supports_paper_claim",
             ),
         )
@@ -3227,6 +3282,8 @@ def _rebuild_evidence_audit(
         artifact_data_validation=(
             bundle.recomputed_artifact_data_validation_report
         ),
+        ablation_necessity_rows=bundle.ablation_necessity_rows,
+        ablation_necessity_summary=bundle.ablation_necessity_summary,
     )
     materialization = build_evidence_audit_materialization(audit_bundle)
     manifest_config = build_evidence_audit_manifest_config(
@@ -3282,6 +3339,7 @@ def _evidence_audit_ready(bundle: ResultClosureGateInput) -> bool:
         "baseline_comparison_table_ready",
         "mechanism_ablation_metrics_ready",
         "mechanism_pairwise_delta_ready",
+        "mechanism_necessity_statistics_ready",
         "dataset_quality_metrics_ready",
         "ready_flag_consistency_ready",
     }
@@ -3303,7 +3361,7 @@ def _evidence_audit_ready(bundle: ResultClosureGateInput) -> bool:
             for check in checks.values()
         )
         and isinstance(source_paths, Mapping)
-        and len(source_paths) == 11
+        and len(source_paths) == 12
         and set(source_paths) == expected_data_check_ids - {"ready_flag_consistency_ready"}
         and isinstance(source_sha256, Mapping)
         and set(source_sha256) == set(source_paths.values())

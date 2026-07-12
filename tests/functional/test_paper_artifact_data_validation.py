@@ -8,6 +8,16 @@ from pathlib import Path
 
 import pytest
 
+from experiments.ablations.necessity_statistics import (
+    ABLATION_NECESSITY_ANALYSIS_SCHEMA,
+    ABLATION_NECESSITY_BOOTSTRAP_BIT_GENERATOR,
+    ABLATION_NECESSITY_BOOTSTRAP_QUANTILE_METHOD,
+    ABLATION_NECESSITY_EFFECT_DIRECTION,
+    ABLATION_NECESSITY_FIELDNAMES,
+    ABLATION_NECESSITY_P_VALUE_METHOD,
+    ABLATION_NECESSITY_PRIMARY_METRIC,
+    canonicalize_ablation_necessity_rows,
+)
 from experiments.ablations.runtime_rerun import FORMAL_RUNTIME_RERUN_ABLATION_IDS
 from experiments.artifacts.detection_score_curves import (
     build_detection_score_tables,
@@ -26,6 +36,7 @@ from paper_experiments.analysis.paper_artifact_data_validation import (
     TEST_METRIC_FIELDS,
     validate_paper_artifact_source_data,
 )
+from main.core.digest import build_stable_digest
 
 
 TARGET_FPR = 0.1
@@ -253,6 +264,52 @@ def _prepare_valid_sources(root: Path) -> dict[str, Path]:
         tuple(ABLATION_DELTA_FIELDS),
         delta_rows,
     )
+    necessity_rows = [
+        {
+            "ablation_id": ablation_id,
+            "primary_metric_name": ABLATION_NECESSITY_PRIMARY_METRIC,
+            "effect_direction": ABLATION_NECESSITY_EFFECT_DIRECTION,
+            "paired_prompt_count": 34,
+            "mean_paired_effect": 0.2,
+            "mean_paired_effect_ci_low": 0.15,
+            "mean_paired_effect_ci_high": 0.25,
+            "clean_true_positive_mean_paired_effect": 0.1,
+            "clean_true_positive_mean_paired_effect_ci_low": 0.05,
+            "clean_true_positive_mean_paired_effect_ci_high": 0.15,
+            "paired_ssim_mean_paired_effect": 0.0,
+            "paired_ssim_mean_paired_effect_ci_low": -0.005,
+            "paired_ssim_mean_paired_effect_ci_high": 0.005,
+            "paired_ssim_noninferiority_margin": 0.01,
+            "paired_ssim_noninferiority_ready": True,
+            "minimum_effect_size": 0.01,
+            "one_sided_paired_p_value": 0.001,
+            "holm_adjusted_p_value": 0.007,
+            "effect_direction_ready": True,
+            "minimum_effect_ready": True,
+            "confidence_interval_ready": True,
+            "adjusted_significance_ready": True,
+            "necessity_claim_supported": True,
+            "necessity_claim_decision": "measured_supported",
+            "confidence_level": 0.95,
+            "significance_alpha": 0.05,
+            "bootstrap_resample_count": 100000,
+            "bootstrap_seed_digest_random": "a" * 64,
+            "bootstrap_analysis_schema": ABLATION_NECESSITY_ANALYSIS_SCHEMA,
+            "bootstrap_bit_generator": ABLATION_NECESSITY_BOOTSTRAP_BIT_GENERATOR,
+            "bootstrap_quantile_method": ABLATION_NECESSITY_BOOTSTRAP_QUANTILE_METHOD,
+            "paired_p_value_method": ABLATION_NECESSITY_P_VALUE_METHOD,
+            "paired_prompt_id_digest": "b" * 64,
+            "input_record_digest": "c" * 64,
+            "supports_paper_claim": True,
+        }
+        for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+        if ablation_id != "complete_method"
+    ]
+    _write_csv(
+        ablation_dir / "mechanism_necessity_statistics.csv",
+        ABLATION_NECESSITY_FIELDNAMES,
+        necessity_rows,
+    )
 
     quality_rows = [
         _row(
@@ -287,6 +344,9 @@ def _prepare_valid_sources(root: Path) -> dict[str, Path]:
         "baseline_comparison_table_ready": baseline_dir / "baseline_comparison_table.csv",
         "mechanism_ablation_metrics_ready": ablation_dir / "mechanism_ablation_metrics.csv",
         "mechanism_pairwise_delta_ready": ablation_dir / "mechanism_pairwise_delta.csv",
+        "mechanism_necessity_statistics_ready": (
+            ablation_dir / "mechanism_necessity_statistics.csv"
+        ),
         "dataset_quality_metrics_ready": quality_dir / "dataset_quality_metrics.csv",
     }
 
@@ -294,6 +354,9 @@ def _prepare_valid_sources(root: Path) -> dict[str, Path]:
 def _validate(root: Path, source_paths: dict[str, Path]) -> dict:
     """以全部 ready 的摘要调用实际数据验证器."""
 
+    _, necessity_rows = _read_csv(
+        source_paths["mechanism_necessity_statistics_ready"]
+    )
     return validate_paper_artifact_source_data(
         root_path=root,
         source_paths=source_paths,
@@ -305,7 +368,23 @@ def _validate(root: Path, source_paths: dict[str, Path]) -> dict:
         attack_manifest={"attack_metrics_ready": True},
         baseline_runtime_report={"comparison_table_supports_paper_claim": True},
         dataset_quality_summary={"formal_fid_kid_claim_gate_ready": True},
-        ablation_claim_summary={"ablation_claim_gate_ready": True},
+        ablation_claim_summary={
+            "ablation_claim_gate_ready": True,
+            "ablation_necessity_statistics_ready": True,
+            "necessity_statistic_row_count": 7,
+            "paired_prompt_count": 34,
+            "expected_paired_prompt_count": 34,
+            "necessity_statistic_rows_digest": build_stable_digest(
+                canonicalize_ablation_necessity_rows(necessity_rows)
+            ),
+            "necessity_supported_ablation_ids": [
+                ablation_id
+                for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+                if ablation_id != "complete_method"
+            ],
+            "necessity_not_supported_ablation_ids": [],
+            "all_mechanism_necessity_claims_supported": True,
+        },
     )
 
 
@@ -320,8 +399,8 @@ def test_actual_paper_artifact_data_passes_exact_schema_and_numeric_validation(t
     assert report["artifact_data_validation_ready"] is True
     assert report["raw_image_only_detection_records_ready"] is True
     assert report["blocked_artifact_data_ids"] == []
-    assert report["artifact_data_check_count"] == 12
-    assert len(report["evidence_source_file_sha256"]) == 11
+    assert report["artifact_data_check_count"] == 13
+    assert len(report["evidence_source_file_sha256"]) == 12
     assert all(len(digest) == 64 for digest in report["evidence_source_file_sha256"].values())
     raw_path = report["source_paths"]["raw_image_only_detection_records_ready"]
     assert report["raw_image_only_detection_records_sha256"] == report[

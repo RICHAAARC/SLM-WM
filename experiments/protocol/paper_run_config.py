@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -138,6 +140,27 @@ class PaperRunConfig:
         return f"{self.drive_result_root.rstrip('/')}/{child_name.strip('/')}"
 
 
+@dataclass(frozen=True)
+class PaperRunPromptContract:
+    """显式声明测试注入或正式注册表约束的 Prompt 文件身份。"""
+
+    run_name: str
+    prompt_file: str
+    expected_prompt_count: int
+    prompt_file_sha256: str
+
+    def __post_init__(self) -> None:
+        """在配置边界校验数量和 SHA-256 身份。"""
+
+        if self.expected_prompt_count <= 0:
+            raise ValueError("expected_prompt_count 必须为正整数")
+        if len(self.prompt_file_sha256) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in self.prompt_file_sha256
+        ):
+            raise ValueError("prompt_file_sha256 必须是小写 SHA-256")
+
+
 def normalize_paper_run_name(value: str | None) -> str:
     """解析论文运行层级名称。"""
 
@@ -147,15 +170,85 @@ def normalize_paper_run_name(value: str | None) -> str:
     return resolved
 
 
-def _read_prompt_count(prompt_file: str | Path, root: str | Path = ".") -> int:
-    """从受治理 Prompt 文件读取实际数量。"""
+def _file_sha256(path: Path) -> str:
+    """计算 Prompt 文件的字节级 SHA-256。"""
 
-    path = Path(prompt_file)
-    if not path.is_absolute():
-        requested_path = (Path(root) / path).resolve()
-        package_resource_path = (Path(__file__).resolve().parents[2] / path).resolve()
-        path = requested_path if requested_path.is_file() else package_resource_path
-    return len(read_prompt_file(path))
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _formal_prompt_contract(
+    root: str | Path,
+    run_name: str,
+) -> PaperRunPromptContract:
+    """从受治理注册表加载正式 Prompt 数量和文件摘要。
+
+    ``root`` 在产物构建测试中可能只表示隔离输出根目录, 并不包含项目配置。
+    因此该函数与正式方法 YAML 的解析规则保持一致: 目标根目录存在注册表时
+    必须使用目标注册表; 目标根目录没有注册表时, 使用当前代码包内随提交固定
+    的注册表。该回退不会接受外部同名文件, 因为后续仍会核验规范路径、数量和
+    字节级 SHA-256。
+    """
+
+    root_path = Path(root).resolve()
+    package_root = Path(__file__).resolve().parents[2]
+    requested_registry_path = (
+        root_path / "configs" / "prompt_source_registry.json"
+    )
+    registry_path = (
+        requested_registry_path
+        if requested_registry_path.is_file()
+        else package_root / "configs" / "prompt_source_registry.json"
+    )
+    if not registry_path.is_file():
+        raise FileNotFoundError("正式运行缺少 configs/prompt_source_registry.json")
+    registry = json.loads(registry_path.read_text(encoding="utf-8-sig"))
+    record = registry.get("prompt_sets", {}).get(run_name)
+    if not isinstance(record, dict):
+        raise ValueError("Prompt 注册表缺少当前论文运行层级")
+    expected_prompt_count = RUN_EXPECTED_PROMPT_COUNTS[run_name]
+    if record.get("result_count") != expected_prompt_count:
+        raise ValueError("Prompt 注册表数量与论文运行层级不一致")
+    return PaperRunPromptContract(
+        run_name=run_name,
+        prompt_file=str(RUN_DEFAULTS[run_name]["prompt_file"]),
+        expected_prompt_count=expected_prompt_count,
+        prompt_file_sha256=str(record.get("prompt_file_sha256", "")),
+    )
+
+
+def _validate_prompt_contract(
+    root: str | Path,
+    contract: PaperRunPromptContract,
+) -> tuple[str, int]:
+    """要求 Prompt 路径、数量和字节摘要同时精确匹配。
+
+    调用方根目录包含规范路径时必须核验该文件; 仅将 ``root`` 用作隔离产物
+    根目录且没有 Prompt 文件时, 才核验当前代码包内随提交固定的规范文件。
+    这一解析次序可以让通用产物构建器脱离仓库根目录复用, 同时保证任何显式
+    提供的同名文件都不能绕过摘要校验。
+    """
+
+    root_path = Path(root).resolve()
+    package_root = Path(__file__).resolve().parents[2]
+    prompt_path = Path(contract.prompt_file)
+    if prompt_path.is_absolute():
+        resolved_path = prompt_path.resolve()
+        try:
+            resolved_path.relative_to(root_path)
+        except ValueError as exc:
+            raise ValueError("Prompt 文件必须位于显式配置根目录内") from exc
+    else:
+        requested_path = (root_path / prompt_path).resolve()
+        packaged_path = (package_root / prompt_path).resolve()
+        resolved_path = requested_path if requested_path.is_file() else packaged_path
+    if not resolved_path.is_file():
+        raise FileNotFoundError(f"Prompt 文件不存在: {contract.prompt_file}")
+    prompt_count = len(read_prompt_file(resolved_path))
+    if prompt_count != contract.expected_prompt_count:
+        raise ValueError("Prompt 文件实际数量与受治理数量不一致")
+    if _file_sha256(resolved_path) != contract.prompt_file_sha256:
+        raise ValueError("Prompt 文件 SHA-256 与受治理摘要不一致")
+    return contract.prompt_file, prompt_count
 
 
 def parse_record_limit(value: str | int | None, *, prompt_count: int, default_value: str | int | None = "all") -> int:
@@ -203,20 +296,41 @@ def derive_dataset_level_quality_minimum_count(prompt_count: int) -> int:
     return int(prompt_count)
 
 
-def build_paper_run_config(root: str | Path = ".") -> PaperRunConfig:
+def build_paper_run_config(
+    root: str | Path = ".",
+    *,
+    prompt_contract: PaperRunPromptContract | None = None,
+) -> PaperRunConfig:
     """从运行规模环境变量和唯一方法 YAML 构建论文配置。"""
 
     run_name = normalize_paper_run_name(os.environ.get("SLM_WM_PAPER_RUN_NAME"))
     defaults = RUN_DEFAULTS[run_name]
     method_settings = load_formal_method_runtime_config(root).paper_method_settings()
     prompt_set = os.environ.get("SLM_WM_PROMPT_SET", str(defaults["prompt_set"]))
-    prompt_file = os.environ.get("SLM_WM_PROMPT_FILE", str(defaults["prompt_file"]))
+    resolved_prompt_contract = prompt_contract or _formal_prompt_contract(
+        root,
+        run_name,
+    )
+    if resolved_prompt_contract.run_name != run_name:
+        raise ValueError("Prompt contract 必须与当前论文运行层级一致")
+    if prompt_contract is None and Path(
+        resolved_prompt_contract.prompt_file
+    ).as_posix() != Path(str(defaults["prompt_file"])).as_posix():
+        raise ValueError("正式 Prompt contract 路径不是规范运行路径")
+    prompt_file = os.environ.get(
+        "SLM_WM_PROMPT_FILE",
+        resolved_prompt_contract.prompt_file,
+    )
     if prompt_set != str(defaults["prompt_set"]):
         raise ValueError("SLM_WM_PROMPT_SET 必须与 SLM_WM_PAPER_RUN_NAME 对应的论文运行层级一致")
-    expected_prompt_file_name = Path(str(defaults["prompt_file"])).name
-    if Path(prompt_file).name != expected_prompt_file_name:
-        raise ValueError("SLM_WM_PROMPT_FILE 必须使用当前论文运行层级对应的 prompt 文件")
-    prompt_count = _read_prompt_count(prompt_file, root)
+    if Path(prompt_file).as_posix() != Path(
+        resolved_prompt_contract.prompt_file
+    ).as_posix():
+        raise ValueError("SLM_WM_PROMPT_FILE 必须精确匹配受治理 Prompt 路径")
+    prompt_file, prompt_count = _validate_prompt_contract(
+        root,
+        resolved_prompt_contract,
+    )
     sample_count = parse_record_limit(
         os.environ.get("SLM_WM_PAPER_RUN_SAMPLE_COUNT", str(defaults["sample_count"])),
         prompt_count=prompt_count,
@@ -246,10 +360,14 @@ def resolve_count_from_environment(
     *,
     root: str | Path = ".",
     default_value: str | int | None = None,
+    prompt_contract: PaperRunPromptContract | None = None,
 ) -> int:
     """按当前论文运行配置解析某个计数环境变量。"""
 
-    paper_run = build_paper_run_config(root)
+    paper_run = build_paper_run_config(
+        root,
+        prompt_contract=prompt_contract,
+    )
     return parse_record_limit(
         os.environ.get(env_name),
         prompt_count=paper_run.prompt_count,

@@ -523,6 +523,8 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
             ABLATION_PREFIX + "per_ablation_frozen_protocols.json",
             ABLATION_PREFIX + "mechanism_ablation_metrics.csv",
             ABLATION_PREFIX + "mechanism_pairwise_delta.csv",
+            ABLATION_PREFIX + "mechanism_necessity_statistics.csv",
+            ABLATION_PREFIX + "mechanism_necessity_summary.json",
             ABLATION_SUMMARY,
             ABLATION_MANIFEST,
             ABLATION_PACKAGE_INPUT,
@@ -548,6 +550,11 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
         value_requirements=(
             _require(ABLATION_SUMMARY, "protocol_decision", "pass"),
             _require(ABLATION_SUMMARY, "ablation_claim_gate_ready", True),
+            _require(
+                ABLATION_SUMMARY,
+                "ablation_necessity_statistics_ready",
+                True,
+            ),
             _require(
                 ABLATION_SUMMARY,
                 "scientific_unit_provenance_ready",

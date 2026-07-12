@@ -27,6 +27,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     validate_pilot_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records
+from tests.helpers.formal_prompt_source import copy_governed_prompt_file
 from scripts.write_pilot_paper_fixed_fpr_common_protocol_outputs import write_pilot_paper_fixed_fpr_common_protocol_outputs
 from tests.helpers.closure_input_lock import write_test_closure_input_lock
 
@@ -147,37 +148,22 @@ def write_paired_superiority_inputs(
     )
 
 
-def write_pilot_paper_prompts(repo_root: Path, prompt_count: int = 700) -> Path:
-    """写入测试用 pilot_paper prompt 配置。"""
+def write_pilot_paper_prompts(repo_root: Path) -> Path:
+    """写入受治理的 pilot_paper Prompt 配置。"""
 
-    config_dir = repo_root / "configs"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    prompt_path = config_dir / "paper_main_pilot_paper_prompts.txt"
-    prompt_lines = [f"a controlled city pilot_paper prompt variant {index}" for index in range(prompt_count)]
-    prompt_path.write_text("\n".join(prompt_lines) + "\n", encoding="utf-8")
-    return prompt_path
+    return copy_governed_prompt_file(repo_root, "pilot_paper")
 
 
-def write_full_paper_prompts(repo_root: Path, prompt_count: int = 7000) -> Path:
-    """写入测试用 full_paper prompt 配置。"""
+def write_full_paper_prompts(repo_root: Path) -> Path:
+    """写入受治理的 full_paper Prompt 配置。"""
 
-    config_dir = repo_root / "configs"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    prompt_path = config_dir / "paper_main_full_paper_prompts.txt"
-    prompt_lines = [f"a controlled city full_paper prompt variant {index}" for index in range(prompt_count)]
-    prompt_path.write_text("\n".join(prompt_lines) + "\n", encoding="utf-8")
-    return prompt_path
+    return copy_governed_prompt_file(repo_root, "full_paper")
 
 
-def write_probe_paper_prompts(repo_root: Path, prompt_count: int = 70) -> Path:
-    """写入测试用 probe_paper prompt 配置。"""
+def write_probe_paper_prompts(repo_root: Path) -> Path:
+    """写入受治理的 probe_paper Prompt 配置。"""
 
-    config_dir = repo_root / "configs"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    prompt_path = config_dir / "paper_main_probe_paper_prompts.txt"
-    prompt_lines = [f"a controlled city probe_paper prompt variant {index}" for index in range(prompt_count)]
-    prompt_path.write_text("\n".join(prompt_lines) + "\n", encoding="utf-8")
-    return prompt_path
+    return copy_governed_prompt_file(repo_root, "probe_paper")
 
 
 @pytest.mark.quick

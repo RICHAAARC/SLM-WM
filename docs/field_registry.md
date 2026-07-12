@@ -2379,3 +2379,65 @@ Notebook 与 repository module 的跨边界数据
 | patch_size | protocol | none | false | false | false | SD3 transformer 配置用于计算动态 shift 图像序列长度的 patch 边长。 |
 | stochastic_sampling | protocol | none | false | false | false | FlowMatch scheduler 是否启用随机采样; 方法忠实正式路线要求为 false。 |
 | use_dynamic_shifting | protocol | none | false | false | false | FlowMatch scheduler 是否依据图像序列长度计算动态 shift。 |
+| result_path | provenance | none | false | false | false | 精确父编排入口写出的受治理 workflow 结果文件路径。 |
+| orchestrator_bootstrap_identity | provenance | none | false | false | false | 标准库宿主入口实际创建的父 profile、完整锁、精确 Python 版本、解释器路径与解释器文件摘要。 |
+| ablation_necessity_statistics_ready | governance | none | true | false | false | 7项机制必要性统计是否通过结构和摘要绑定门禁。 |
+| adjusted_significance_ready | metric | none | true | true | false | Holm 校正后的单侧配对检验是否达到预注册显著性水平。 |
+| all_mechanism_necessity_claims_supported | governance | none | true | true | false | 全部单机制必要性主张是否均满足预注册统计条件。 |
+| clean_true_positive_mean_paired_effect | metric | none | true | true | false | 完整方法减去消融变体的 clean TPR Prompt 配对均值效应。 |
+| clean_true_positive_mean_paired_effect_ci_low | metric | none | true | true | false | clean TPR Prompt 配对均值效应置信区间下界。 |
+| clean_true_positive_mean_paired_effect_ci_high | metric | none | true | true | false | clean TPR Prompt 配对均值效应置信区间上界。 |
+| confidence_interval_ready | metric | none | true | true | false | 主指标 bootstrap 置信区间下界是否超过最小效应阈值。 |
+| effect_direction | protocol | none | true | true | false | 机制必要性主指标预注册的配对效应方向。 |
+| effect_direction_ready | metric | none | true | true | false | 主指标实测效应是否符合预注册正方向。 |
+| expected_paired_prompt_count | protocol | none | true | false | false | 当前 paper run test split 要求的精确 Prompt 配对数量。 |
+| expected_variant_ablation_ids | protocol | none | true | false | false | 机制必要性统计必须精确覆盖的消融变体身份序列。 |
+| input_record_digest | provenance | none | true | false | false | 机制必要性统计所消费规范化逐 Prompt 记录的稳定摘要。 |
+| mean_paired_effect | metric | none | true | true | false | 完整方法减去消融变体的主指标 Prompt 配对均值效应。 |
+| mean_paired_effect_ci_low | metric | none | true | true | false | 主指标 Prompt 配对均值效应 bootstrap 置信区间下界。 |
+| mean_paired_effect_ci_high | metric | none | true | true | false | 主指标 Prompt 配对均值效应 bootstrap 置信区间上界。 |
+| minimum_effect_ready | metric | none | true | true | false | 主指标均值效应是否达到预注册最小效应。 |
+| minimum_effect_size | protocol | none | true | true | false | 机制必要性主张采用的预注册最小效应阈值。 |
+| necessity_claim_decision | governance | none | true | true | false | 单机制或总机制必要性主张的实测支持决定。 |
+| necessity_claim_supported | governance | none | true | true | false | 单机制必要性主张是否同时满足效应方向、最小效应、置信区间、Holm 校正显著性和 paired SSIM 质量非劣性。 |
+| necessity_not_supported_ablation_ids | governance | none | true | true | false | 未达到必要性统计门槛的正式消融变体身份。 |
+| necessity_statistic_row_count | metric | none | true | false | false | 独立机制必要性统计表的正式行数。 |
+| necessity_statistic_rows_digest | provenance | none | true | false | false | 独立机制必要性统计行的稳定摘要。 |
+| necessity_supported_ablation_ids | governance | none | true | true | false | 达到必要性统计门槛的正式消融变体身份。 |
+| one_sided_paired_p_value | metric | none | true | true | false | 相对最小效应零假设的单侧 Prompt 配对 p 值。 |
+| paired_p_value_method | protocol | none | true | true | false | 机制必要性单侧 Prompt 配对检验采用的方法身份。 |
+| paired_prompt_id_digest | provenance | none | true | false | false | 机制必要性统计共同 test Prompt 身份集合的稳定摘要。 |
+| paired_ssim_mean_paired_effect | metric | none | true | true | false | 完整方法减去消融变体的 paired SSIM Prompt 配对均值效应。 |
+| paired_ssim_mean_paired_effect_ci_low | metric | none | true | true | false | paired SSIM Prompt 配对均值效应置信区间下界。 |
+| paired_ssim_mean_paired_effect_ci_high | metric | none | true | true | false | paired SSIM Prompt 配对均值效应置信区间上界。 |
+| paired_ssim_noninferiority_margin | protocol | none | true | true | false | 完整方法相对消融变体的 paired SSIM 预注册非劣界。 |
+| paired_ssim_noninferiority_ready | metric | none | true | true | false | paired SSIM 置信区间是否满足预注册质量非劣界。 |
+| primary_metric_name | protocol | none | true | true | false | 机制必要性统计预注册的主指标名称。 |
+| prompt_file_sha256 | provenance | none | true | false | false | 规范 Prompt 文件的字节级 SHA-256 身份。 |
+| significance_alpha | protocol | none | true | true | false | 机制必要性家族检验采用的预注册显著性水平。 |
+| relation_sync_score | metric | none | true | true | false | 双边关系图配准后规范 attention 与密钥关系图的归一化一致性分数。 |
+| registration_objective_margin | metric | none | true | true | false | 最优配准目标相对非近重复候选目标的差值。 |
+| registration_candidate_count | protocol | none | true | false | false | 双边关系图配准实际评估的冻结仿射候选数量。 |
+| sync_margin_duplicate_transform_tolerance | protocol | none | true | false | false | 计算配准目标差值时排除近重复仿射候选所用的冻结矩阵距离阈值。 |
+| registration_geometry_reliable | metric | none | true | true | false | 仅依据覆盖率、唯一对应和重采样残差得到的结构配准可靠性。 |
+| registration_confidence_threshold | protocol | none | true | true | false | calibration clean negatives 冻结的配准置信度门限。 |
+| attention_sync_score_threshold | protocol | none | true | true | false | calibration clean negatives 冻结的对齐后真实 Q/K 同步分数门限。 |
+| raw_attention_geometry_score | metric | none | true | true | false | 对待检图像未执行几何配准时计算的真实 Q/K 密钥关系分数。 |
+| attention_sync_score | metric | none | true | true | false | 对齐图像重新提取真实 Q/K 后计算的密钥关系同步分数。 |
+| attention_sync_source | provenance | none | true | false | false | 对齐后同步分数所使用的真实图像重提取 Q/K 数据来源。 |
+| attention_content_base_score | metric | none | true | true | false | 固定加入 LF 与高斯幅值尾部更新后、加入 attention 更新前的真实 Q/K 分数。 |
+| attention_final_combined_score | metric | none | true | true | false | 实际写回 LF、尾部与 attention 组合 latent 后复算的真实 Q/K 分数。 |
+| scheduler_step_timestep | runtime | none | true | false | false | callback-on-step-end 当前刚完成采样步对应的 scheduler timestep。 |
+| post_step_schedule_index | protocol | none | true | false | false | post-step latent 在公开 scheduler 序列中用于方法前向与盲检复现的下一索引。 |
+| registration_calibration_negative_count | metric | none | true | true | false | 参与配准置信度门限冻结的 calibration clean negative 数量。 |
+| registration_calibration_exceedance_count | metric | none | true | true | false | 在冻结配准置信度门限上达到或超过门限的 calibration clean negative 数量。 |
+| sync_calibration_negative_count | metric | none | true | true | false | 参与对齐后 Q/K 同步门限冻结的 calibration clean negative 数量。 |
+| sync_calibration_exceedance_count | metric | none | true | true | false | 在冻结同步门限上达到或超过门限的 calibration clean negative 数量。 |
+| geometry_protocol_calibration_ready | governance | none | true | true | false | 关系分、配准置信度与对齐后同步分均具有完整 calibration 证据的门禁结果。 |
+| frozen_geometry_score_threshold | protocol | none | true | true | false | 完整 evidence 协议在 calibration split 冻结的注册关系分门限。 |
+| frozen_registration_confidence_threshold | protocol | none | true | true | false | 应用于正式 detection records 的冻结配准置信度门限。 |
+| frozen_attention_sync_score_threshold | protocol | none | true | true | false | 应用于正式 detection records 的冻结对齐后 Q/K 同步门限。 |
+| content_base_score | metric | none | true | true | false | 注意力回溯优化中固定内容载体基底的真实 Q/K 分数。 |
+| optimization_base | method | none | true | false | false | attention 几何优化实际采用的固定基底更新身份。 |
+| verified_candidate | method | none | true | false | false | 单调回溯最终复算并接受的真实候选 latent 角色。 |
+| relation_transform | method | none | true | false | false | attention 双边关系图从观测参考系恢复到规范参考系的矩阵变换公式。 |

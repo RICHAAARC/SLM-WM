@@ -136,7 +136,7 @@ $$
 \Omega_{\mathrm{A}}=\{u:\rho_{\mathrm{A}}(u)<\tau_A\}.
 $$
 
-$\Omega_{\mathrm{A}}$ 使用独立 attention stability 风险, 不复用 LF 或尾部截断分支的区域集合。正式候选矩阵构造时, $u\notin\Omega_b$ 的预算被置为 0, 资格集合内部才保留连续风险预算; 因而 `eligible_indices` 不是仅供日志展示的字段。每次注入同时保存三个分支的风险摘要、资格位置数和风险场摘要值。
+$\Omega_{\mathrm{A}}$ 使用独立 attention stability 风险, 不复用 LF 或尾部截断分支的区域集合。正式候选矩阵构造时, $u\notin\Omega_b$ 的预算被置为 0, 资格集合内部才保留连续风险预算; 因而 `eligible_indices` 不是仅供日志展示的字段。完整方法只对当前实际参与嵌入的活动分支执行资格集合 fail-closed 门禁；移除风险路由的正式消融不执行该门禁, 避免被移除机制继续筛选实验样本。每次注入同时保存三个分支的风险摘要、资格位置数和风险场摘要值。
 
 ---
 
@@ -402,20 +402,48 @@ $$
 
 ### （四）几何可靠性统计量
 
-检测端只从待检图像执行 VAE 编码, 在公开固定噪声时刻运行一次空文本 Transformer 前向并提取真实 Q/K attention。密钥关系行与观测 attention 行执行余弦一对一匹配, 再用三点确定性 RANSAC 拟合二维仿射变换 $\hat T$。几何可靠性定义为：
+检测端只从待检图像执行 VAE 编码, 在公开固定噪声时刻运行空文本 Transformer 前向并提取真实 Q/K attention。设第 $l$ 个冻结层的观测关系图为 $A_{\mathrm{obs}}^{(l)}$, 密钥关系图为 $S_K^{(l)}$。对冻结的有界相似仿射与方形二面体候选 $T$, 根据规范 token 坐标和观测 token 坐标构造双线性采样矩阵 $W_T$, 并计算
+
+$$
+\widehat A_T^{(l)}=W_TA_{\mathrm{obs}}^{(l)}W_T^\top.
+$$
+
+候选注册目标为
+
+$$
+J(T,l)=
+\operatorname{corr}_{\mathrm{offdiag}}
+\left(\widehat A_T^{(l)},S_K^{(l)}\right)
+-0.25(1-c_{\mathrm{valid}})
+-0.25(1-c_{\mathrm{unique}}),
+$$
+
+其中 $c_{\mathrm{valid}}$ 是有效坐标覆盖率, $c_{\mathrm{unique}}$ 是唯一观测位置比例。检测器先在冻结候选集合中粗搜索, 再围绕最优候选进行一次确定性局部细化。注册关系分数记为 $s_{\mathrm{reg}}$, 锚点内点比例记为 $r_{\mathrm{inlier}}$, 内点平均残差记为 $e_{\mathrm{affine}}$。注册置信度为
+
+$$
+r_{\mathrm{reg}}=
+\max(0,s_{\mathrm{reg}})
+\cdot r_{\mathrm{inlier}}
+\cdot
+\exp(-e_{\mathrm{affine}}).
+$$
+
+使用 $\hat T$ 重采样待检图像后, 检测端必须重新运行同一个仅图像 Q/K 提取器, 并从全部冻结层计算恢复后同步分数 $s_{\mathrm{sync}}$。几何可靠性定义为：
 
 $$
 geometry\_reliable=
-(s_A\ge\tau_A)
+(s_{\mathrm{reg}}\ge\tau_{\mathrm{reg}})
 \land
 (r_{\mathrm{inlier}}\ge\tau_{\mathrm{inlier}})
 \land
 (e_{\mathrm{affine}}\le\tau_{\mathrm{residual}})
 \land
-(r_{\mathrm{sync}}\ge\tau_{\mathrm{sync}}).
+(r_{\mathrm{reg}}\ge\tau_{\mathrm{confidence}})
+\land
+(s_{\mathrm{sync}}\ge\tau_{\mathrm{sync}}).
 $$
 
-其中，$r_{\mathrm{reg}}$ 表示注册置信度，$r_{\mathrm{inlier}}$ 表示 attention anchor 内点比例，$r_{\mathrm{sync}}$ 表示恢复后相对关系一致性。
+关系分数、注册置信度和恢复后同步阈值都由 calibration split 的未删失 clean negatives 冻结。任何一项缺失或不满足阈值时, 几何路径都不得执行内容救回。
 
 ---
 

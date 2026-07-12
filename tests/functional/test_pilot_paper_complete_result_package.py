@@ -28,6 +28,7 @@ from scripts.write_pilot_paper_complete_result_package import (
     write_pilot_paper_complete_result_package_outputs,
 )
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
+from tests.helpers.formal_prompt_source import copy_governed_prompt_file
 
 
 class _ClosureCandidate:
@@ -96,9 +97,7 @@ def inspect_test_closure_package(
 def configure_paper_run(monkeypatch: pytest.MonkeyPatch, root: Path, paper_run_name: str) -> Path:
     """配置一个最小当前论文运行层级与对应 Prompt 文件。"""
 
-    prompt_path = root / "configs" / f"paper_main_{paper_run_name}_prompts.txt"
-    prompt_path.parent.mkdir(parents=True, exist_ok=True)
-    prompt_path.write_text(f"a {paper_run_name} prompt\n", encoding="utf-8")
+    prompt_path = copy_governed_prompt_file(root, paper_run_name)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", paper_run_name)
     monkeypatch.setenv("SLM_WM_PROMPT_SET", paper_run_name)
     monkeypatch.setenv("SLM_WM_PROMPT_FILE", prompt_path.relative_to(root).as_posix())

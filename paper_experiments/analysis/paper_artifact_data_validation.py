@@ -10,6 +10,19 @@ import math
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
+from experiments.ablations.necessity_statistics import (
+    ABLATION_NECESSITY_ALPHA,
+    ABLATION_NECESSITY_ANALYSIS_SCHEMA,
+    ABLATION_NECESSITY_BOOTSTRAP_BIT_GENERATOR,
+    ABLATION_NECESSITY_BOOTSTRAP_QUANTILE_METHOD,
+    ABLATION_NECESSITY_EFFECT_DIRECTION,
+    ABLATION_NECESSITY_FIELDNAMES,
+    ABLATION_NECESSITY_MINIMUM_EFFECT_SIZE,
+    ABLATION_NECESSITY_PAIRED_SSIM_NONINFERIORITY_MARGIN,
+    ABLATION_NECESSITY_P_VALUE_METHOD,
+    ABLATION_NECESSITY_PRIMARY_METRIC,
+    canonicalize_ablation_necessity_rows,
+)
 from experiments.ablations.runtime_rerun import FORMAL_RUNTIME_RERUN_ABLATION_IDS
 from experiments.artifacts.detection_score_curves import (
     CURVE_POINT_FIELDNAMES,
@@ -24,6 +37,7 @@ from experiments.protocol.attacks import (
     default_attack_configs,
     resolve_formal_attack_config,
 )
+from main.core.digest import build_stable_digest
 
 
 FROZEN_PROTOCOL_FIELDS = {
@@ -125,6 +139,8 @@ ABLATION_DELTA_FIELDS = {
     "paired_ssim_delta",
     "metric_status",
 }
+
+ABLATION_NECESSITY_FIELDS = set(ABLATION_NECESSITY_FIELDNAMES)
 
 DATASET_QUALITY_FIELDS = {
     "quality_metric_name",
@@ -632,6 +648,142 @@ def _validate_ablation_delta(path: Path, context: Mapping[str, Any]) -> dict[str
     return {"row_count": len(rows)}
 
 
+def _validate_ablation_necessity_statistics(
+    path: Path,
+    context: Mapping[str, Any],
+) -> dict[str, Any]:
+    """验证逐 Prompt 配对机制必要性统计及其受治理摘要绑定。"""
+
+    rows = _read_csv_exact(path, ABLATION_NECESSITY_FIELDS)
+    expected_ids = tuple(
+        ablation_id
+        for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+        if ablation_id != "complete_method"
+    )
+    if tuple(row["ablation_id"] for row in rows) != expected_ids:
+        raise ValueError("机制必要性统计未精确覆盖7项正式变体")
+
+    paired_prompt_counts: set[int] = set()
+    for row in rows:
+        if row["primary_metric_name"] != ABLATION_NECESSITY_PRIMARY_METRIC:
+            raise ValueError("机制必要性统计主指标不符合预注册协议")
+        if row["effect_direction"] != ABLATION_NECESSITY_EFFECT_DIRECTION:
+            raise ValueError("机制必要性统计效应方向不符合预注册协议")
+        if row["bootstrap_analysis_schema"] != ABLATION_NECESSITY_ANALYSIS_SCHEMA:
+            raise ValueError("机制必要性统计 schema 不符合正式协议")
+        if row["bootstrap_bit_generator"] != ABLATION_NECESSITY_BOOTSTRAP_BIT_GENERATOR:
+            raise ValueError("机制必要性 bootstrap 随机生成器不符合协议")
+        if row["bootstrap_quantile_method"] != ABLATION_NECESSITY_BOOTSTRAP_QUANTILE_METHOD:
+            raise ValueError("机制必要性 bootstrap 分位数方法不符合协议")
+        if row["paired_p_value_method"] != ABLATION_NECESSITY_P_VALUE_METHOD:
+            raise ValueError("机制必要性配对检验方法不符合协议")
+
+        paired_prompt_counts.add(_count(row["paired_prompt_count"], positive=True))
+        _count(row["bootstrap_resample_count"], positive=True)
+        mean_effect = _finite(row["mean_paired_effect"])
+        ci_low = _finite(row["mean_paired_effect_ci_low"])
+        ci_high = _finite(row["mean_paired_effect_ci_high"])
+        minimum_effect = _finite(row["minimum_effect_size"])
+        confidence_level = _finite(row["confidence_level"])
+        significance_alpha = _finite(row["significance_alpha"])
+        p_value = _finite(row["one_sided_paired_p_value"])
+        adjusted_p_value = _finite(row["holm_adjusted_p_value"])
+        clean_effect = _finite(row["clean_true_positive_mean_paired_effect"])
+        clean_ci_low = _finite(
+            row["clean_true_positive_mean_paired_effect_ci_low"]
+        )
+        clean_ci_high = _finite(
+            row["clean_true_positive_mean_paired_effect_ci_high"]
+        )
+        ssim_effect = _finite(row["paired_ssim_mean_paired_effect"])
+        ssim_ci_low = _finite(
+            row["paired_ssim_mean_paired_effect_ci_low"]
+        )
+        ssim_ci_high = _finite(
+            row["paired_ssim_mean_paired_effect_ci_high"]
+        )
+        ssim_margin = _finite(row["paired_ssim_noninferiority_margin"])
+        if not -1.0 <= ci_low <= mean_effect <= ci_high <= 1.0:
+            raise ValueError("机制必要性效应或置信区间超出有效范围")
+        if abs(minimum_effect - ABLATION_NECESSITY_MINIMUM_EFFECT_SIZE) > 1e-12:
+            raise ValueError("机制必要性最小效应阈值与预注册协议不一致")
+        if not 0.0 < confidence_level < 1.0:
+            raise ValueError("机制必要性置信水平无效")
+        if abs(significance_alpha - ABLATION_NECESSITY_ALPHA) > 1e-12:
+            raise ValueError("机制必要性显著性水平与预注册协议不一致")
+        if not 0.0 <= p_value <= adjusted_p_value <= 1.0:
+            raise ValueError("机制必要性 p 值或 Holm 校正结果无效")
+        if not -1.0 <= clean_ci_low <= clean_effect <= clean_ci_high <= 1.0:
+            raise ValueError("clean TPR 配对诊断或置信区间无效")
+        if not -1.0 <= ssim_ci_low <= ssim_effect <= ssim_ci_high <= 1.0:
+            raise ValueError("paired SSIM 配对诊断或置信区间无效")
+        if abs(
+            ssim_margin
+            - ABLATION_NECESSITY_PAIRED_SSIM_NONINFERIORITY_MARGIN
+        ) > 1e-12:
+            raise ValueError("paired SSIM 非劣界与预注册协议不一致")
+        if _as_bool(row["paired_ssim_noninferiority_ready"]) != (
+            ssim_ci_low >= -ssim_margin
+        ):
+            raise ValueError("paired SSIM 非劣判定与置信区间不一致")
+
+        expected_flags = {
+            "effect_direction_ready": mean_effect > 0.0,
+            "minimum_effect_ready": mean_effect >= minimum_effect,
+            "confidence_interval_ready": ci_low > minimum_effect,
+            "adjusted_significance_ready": adjusted_p_value < significance_alpha,
+        }
+        if any(_as_bool(row[name]) != ready for name, ready in expected_flags.items()):
+            raise ValueError("机制必要性统计判定标记与数值不一致")
+        supported = all(expected_flags.values())
+        expected_decision = (
+            "measured_supported" if supported else "measured_not_supported"
+        )
+        if (
+            _as_bool(row["necessity_claim_supported"]) != supported
+            or _as_bool(row["supports_paper_claim"]) != supported
+            or row["necessity_claim_decision"] != expected_decision
+        ):
+            raise ValueError("机制必要性主张结论未同时满足四项预注册条件")
+        for digest_field in (
+            "bootstrap_seed_digest_random",
+            "paired_prompt_id_digest",
+            "input_record_digest",
+        ):
+            digest = str(row[digest_field])
+            if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+                raise ValueError("机制必要性统计摘要字段不是 SHA-256")
+
+    summary = context["ablation_claim_summary"]
+    supported_ids = [
+        row["ablation_id"] for row in rows if _as_bool(row["necessity_claim_supported"])
+    ]
+    not_supported_ids = [
+        row["ablation_id"] for row in rows if not _as_bool(row["necessity_claim_supported"])
+    ]
+    if not all(
+        (
+            _as_bool(summary.get("ablation_necessity_statistics_ready")),
+            summary.get("necessity_statistic_row_count") == len(expected_ids),
+            len(paired_prompt_counts) == 1,
+            summary.get("paired_prompt_count") == next(
+                iter(paired_prompt_counts),
+                -1,
+            ),
+            summary.get("expected_paired_prompt_count")
+            == summary.get("paired_prompt_count"),
+            summary.get("necessity_statistic_rows_digest")
+            == build_stable_digest(canonicalize_ablation_necessity_rows(rows)),
+            summary.get("necessity_supported_ablation_ids") == supported_ids,
+            summary.get("necessity_not_supported_ablation_ids") == not_supported_ids,
+            _as_bool(summary.get("all_mechanism_necessity_claims_supported"))
+            == (not not_supported_ids),
+        )
+    ):
+        raise ValueError("机制必要性统计与受治理摘要不一致")
+    return {"row_count": len(rows), "rows": rows}
+
+
 def _validate_dataset_quality(path: Path, context: Mapping[str, Any]) -> dict[str, Any]:
     """验证 FID/KID 两行正式 Inception 质量证据."""
 
@@ -723,7 +875,7 @@ def validate_paper_artifact_source_data(
     dataset_quality_summary: Mapping[str, Any],
     ablation_claim_summary: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """读取并验证论文表图所依赖的11类实际数据文件.
+    """读取并验证论文表图所依赖的12类实际数据文件.
 
     返回值保留每个阻断原因和全部已存在输入文件的字节摘要.文件缺失时不抛出
     到 writer 外层, 而是让对应 table/figure readiness 明确进入 blocked.
@@ -737,6 +889,7 @@ def validate_paper_artifact_source_data(
         "baseline_claim_ready": _as_bool(
             baseline_runtime_report.get("comparison_table_supports_paper_claim", False)
         ),
+        "ablation_claim_summary": dict(ablation_claim_summary),
     }
     checks: dict[str, dict[str, Any]] = {}
     details: dict[str, dict[str, Any] | None] = {}
@@ -751,6 +904,9 @@ def validate_paper_artifact_source_data(
         "baseline_comparison_table_ready": _validate_baseline_comparison,
         "mechanism_ablation_metrics_ready": _validate_ablation_metrics,
         "mechanism_pairwise_delta_ready": _validate_ablation_delta,
+        "mechanism_necessity_statistics_ready": (
+            _validate_ablation_necessity_statistics
+        ),
         "dataset_quality_metrics_ready": _validate_dataset_quality,
     }
 
@@ -859,8 +1015,12 @@ def validate_paper_artifact_source_data(
         ),
         (
             _as_bool(ablation_claim_summary.get("ablation_claim_gate_ready", False)),
-            ("mechanism_ablation_metrics_ready", "mechanism_pairwise_delta_ready"),
-            "消融 ready 但实测指标或 delta 表无效",
+            (
+                "mechanism_ablation_metrics_ready",
+                "mechanism_pairwise_delta_ready",
+                "mechanism_necessity_statistics_ready",
+            ),
+            "消融 ready 但实测指标, delta 或必要性统计表无效",
         ),
         (
             _as_bool(dataset_quality_summary.get("formal_fid_kid_claim_gate_ready", False)),

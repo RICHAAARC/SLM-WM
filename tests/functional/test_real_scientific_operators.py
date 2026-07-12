@@ -21,10 +21,13 @@ from main.methods.carrier import (
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
     DifferentiableAttentionRecorder,
+    attention_geometry_score,
     attention_relation_stability_map,
     optimize_attention_geometry_update,
     qk_self_attention,
+    recover_attention_affine_alignment,
 )
+from main.methods.geometry.differentiable_attention import keyed_relation_signs
 from main.methods.semantic import build_branch_risk_fields
 from main.methods.subspace import (
     JacobianNullSpaceResult,
@@ -41,6 +44,7 @@ from experiments.runners.image_only_dataset_runtime import (
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
+    _image_attention_extractor,
     _public_detection_noise_seed,
     build_semantic_watermark_run_id,
     load_completed_semantic_watermark_runtime_result,
@@ -376,6 +380,223 @@ def test_attention_update_uses_real_qk_and_autograd() -> None:
 
 
 @pytest.mark.quick
+def test_attention_update_verifies_actual_combined_latent() -> None:
+    """Attention 回溯必须以固定内容更新为基底并验证真正写回的组合 latent。"""
+
+    module = _ToyAttention(4)
+    latent = torch.tensor(
+        [[[0.3, 0.2, -0.1, 0.4], [0.1, -0.2, 0.5, 0.3], [-0.4, 0.2, 0.1, 0.6], [0.2, 0.7, -0.3, 0.1]]]
+    )
+    content_base_update = torch.tensor(
+        [[[0.01, -0.02, 0.01, 0.00], [0.00, 0.01, -0.01, 0.02], [0.01, 0.00, 0.02, -0.01], [-0.02, 0.01, 0.00, 0.01]]]
+    )
+    with DifferentiableAttentionRecorder((("toy_attention", module),), max_tokens=4) as recorder:
+        update = optimize_attention_geometry_update(
+            latent=latent,
+            transformer_forward=module,
+            recorder=recorder,
+            key_material="combined_attention_key",
+            safe_subspace=_identity_null_space(latent),
+            update_strength=0.05,
+            base_update=content_base_update,
+        )
+        recorder.clear()
+        module(latent + content_base_update + update.update)
+        actual_score = float(
+            attention_geometry_score(
+                recorder.records,
+                "combined_attention_key",
+            ).detach().item()
+        )
+
+    assert actual_score == pytest.approx(update.score_after, abs=1e-7)
+    assert actual_score > update.score_before
+    assert actual_score > update.content_base_score
+    assert update.metadata["verified_candidate"] == "actual_combined_latent"
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("transform_name", "permutation"),
+    (
+        ("horizontal_flip", tuple(row * 8 + (7 - column) for row in range(8) for column in range(8))),
+        ("vertical_flip", tuple((7 - row) * 8 + column for row in range(8) for column in range(8))),
+        ("rotation_90", tuple((7 - column) * 8 + row for row in range(8) for column in range(8))),
+    ),
+)
+def test_attention_registration_is_equivariant_to_query_and_key_permutation(
+    transform_name: str,
+    permutation: tuple[int, ...],
+) -> None:
+    """注册必须同时还原 ``P A P^T`` 的查询轴和键轴。"""
+
+    token_count = 64
+    key_material = "equivariant_registration_key"
+    layer_name = "registered_layer"
+    relation_signs = keyed_relation_signs(
+        torch.zeros(1, token_count, token_count),
+        key_material,
+        layer_name,
+    )
+    canonical = torch.softmax(2.0 * relation_signs, dim=-1).unsqueeze(0)
+    index = torch.tensor(permutation, dtype=torch.long)
+    observed = canonical.index_select(1, index).index_select(2, index)
+
+    result = recover_attention_affine_alignment(
+        observed,
+        key_material,
+        layer_name,
+        tuple(range(token_count)),
+    )
+
+    assert transform_name
+    assert result.geometry_reliable is True
+    assert result.inlier_ratio == pytest.approx(1.0)
+    assert result.relation_sync_score > 0.95
+    assert result.metadata["matcher"] == "double_sided_keyed_relation_graph_registration"
+
+
+@pytest.mark.quick
+def test_image_only_detector_reextracts_qk_after_alignment() -> None:
+    """几何可靠性必须包含图像对齐后重新提取的真实 Q/K sync。"""
+
+    token_count = 64
+    key_material = "detector_sync_key"
+    model_id = "detector_sync_model"
+    layer_name = "detector_sync_layer"
+    relation_signs = keyed_relation_signs(
+        torch.zeros(1, token_count, token_count),
+        key_material,
+        layer_name,
+    )
+    canonical_attention = torch.softmax(2.0 * relation_signs, dim=-1).unsqueeze(0)
+    flip = torch.tensor(
+        [row * 8 + (7 - column) for row in range(8) for column in range(8)],
+        dtype=torch.long,
+    )
+    observed_attention = canonical_attention.index_select(1, flip).index_select(2, flip)
+    reference = torch.zeros(1, 2, 8, 8)
+    lf_template = build_low_frequency_template(reference, key_material, model_id)
+    tail_template = build_tail_robust_template(reference, key_material, model_id, 0.20)[0]
+    original = {"latent": torch.zeros_like(reference), "attention": observed_attention}
+    aligned = {
+        "latent": 0.8 * lf_template + 0.4 * tail_template,
+        "attention": canonical_attention,
+    }
+    extraction_count = 0
+
+    def extract(sample: dict[str, torch.Tensor]) -> tuple[tuple[str, torch.Tensor, tuple[int, ...]], ...]:
+        nonlocal extraction_count
+        extraction_count += 1
+        return ((layer_name, sample["attention"], tuple(range(token_count))),)
+
+    result = detect_image_only_watermark(
+        image=original,
+        key_material=key_material,
+        config=ImageOnlyDetectionConfig(
+            model_id=model_id,
+            content_threshold=0.2,
+            geometry_score_threshold=0.5,
+            registration_confidence_threshold=0.5,
+            attention_sync_score_threshold=0.5,
+            rescue_margin_low=-0.5,
+        ),
+        image_latent_encoder=lambda sample: sample["latent"],
+        image_attention_extractor=extract,
+        image_aligner=lambda _image, _alignment: aligned,
+    )
+
+    assert extraction_count == 2
+    assert result.raw_attention_geometry_score is not None
+    assert result.attention_geometry_score is not None
+    assert result.attention_geometry_score > 0.95
+    assert result.attention_sync_score is not None and result.attention_sync_score > 0.95
+    assert result.geometry_reliable is True
+    assert result.rescue_applied is True
+
+
+@pytest.mark.quick
+def test_image_attention_extractor_batches_flowmatch_timestep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FlowMatch ``scale_noise`` 必须接收与 latent batch 一致的一维 timestep。"""
+
+    import experiments.runners.semantic_watermark_runtime as runtime_module
+
+    module = _ToyAttention(1)
+
+    class Scheduler:
+        """记录仅图像检测传入的 timestep 形状。"""
+
+        def __init__(self) -> None:
+            self.timesteps = torch.arange(20, dtype=torch.float32)
+            self.received_timestep: torch.Tensor | None = None
+            self.schedule_step_counts: list[int] = []
+
+        def set_timesteps(self, step_count: int, device: str) -> None:
+            self.schedule_step_counts.append(step_count)
+            self.timesteps = torch.arange(step_count, device=device, dtype=torch.float32)
+
+        def scale_noise(
+            self,
+            latent: torch.Tensor,
+            timestep: torch.Tensor,
+            noise: torch.Tensor,
+        ) -> torch.Tensor:
+            self.received_timestep = timestep
+            assert timestep.shape == (latent.shape[0],)
+            return latent + 0.0 * noise
+
+    scheduler = Scheduler()
+    pipeline = SimpleNamespace(scheduler=scheduler, _execution_device="cpu")
+    monkeypatch.setattr(
+        runtime_module,
+        "_encode_image_latent",
+        lambda _pipeline, _image: torch.zeros(2, 1, 2, 2),
+    )
+    monkeypatch.setattr(
+        runtime_module,
+        "_transformer_forward_function",
+        lambda *_args, **_kwargs: lambda latent: module(latent.reshape(latent.shape[0], 4, 1)),
+    )
+    config = SemanticWatermarkRuntimeConfig()
+    extractor = _image_attention_extractor(
+        pipeline,
+        config,
+        (("toy_attention", module),),
+        None,
+        None,
+    )
+
+    records = extractor(object())
+
+    assert records
+    assert scheduler.received_timestep is not None
+    assert scheduler.received_timestep.shape == (2,)
+    assert scheduler.received_timestep[0].item() == pytest.approx(7.0)
+    assert scheduler.schedule_step_counts == [20]
+
+    # 模拟共享 img2img scheduler 在扩散攻击结束后留下另一套日程. 下一次盲检
+    # 必须重新建立20步正式检测日程, 不能把旧 timestep 与攻击 sigma 混用.
+    scheduler.set_timesteps(5, "cpu")
+    scheduler.received_timestep = None
+    second_records = extractor(object())
+
+    assert second_records
+    assert scheduler.schedule_step_counts == [20, 5, 20]
+    assert scheduler.received_timestep is not None
+    assert scheduler.received_timestep.shape == (2,)
+    assert scheduler.received_timestep[0].item() == pytest.approx(7.0)
+
+
+@pytest.mark.quick
+def test_post_step_injection_rejects_last_scheduler_step() -> None:
+    """callback-on-step-end 的最后一步没有下一时刻, 必须在配置层拒绝。"""
+
+    base = SemanticWatermarkRuntimeConfig()
+    with pytest.raises(ValueError, match="post-step"):
+        replace(base, injection_step_indices=(base.inference_steps - 1,))
+
+
+@pytest.mark.quick
 def test_image_only_detector_interface_and_positive_content_path() -> None:
     """正式检测接口不得接收生成轨迹, 且能从图像编码 latent 完成内容主判。"""
 
@@ -418,6 +639,13 @@ def test_complete_evidence_calibration_includes_geometry_rescue() -> None:
                 "content_score": index / 100.0,
                 "aligned_content_score": (index + 5) / 100.0,
                 "geometry_reliable": index % 2 == 0,
+                "attention_geometry_score": 0.5 + index / 1000.0,
+                "registration_confidence": 0.6 + index / 1000.0,
+                "attention_sync_score": 0.7 + index / 1000.0,
+                "alignment": {
+                    "registration_geometry_reliable": index % 2 == 0,
+                    "geometry_reliable": index % 2 == 0,
+                },
             }
         )
     protocol = calibrate_complete_evidence_protocol(
@@ -430,6 +658,36 @@ def test_complete_evidence_calibration_includes_geometry_rescue() -> None:
     assert sum(record["formal_evidence_positive"] for record in formal_records) <= 2
     assert protocol.calibration_false_positive_count <= 2
     assert protocol.calibration_false_positive_rate <= 0.1
+    assert protocol.geometry_protocol_calibration_ready is True
+    assert protocol.geometry_calibration_negative_count == 33
+    assert protocol.registration_calibration_negative_count == 33
+    assert protocol.sync_calibration_negative_count == 33
+
+
+@pytest.mark.quick
+def test_geometry_protocol_cannot_close_with_missing_calibration_scores() -> None:
+    """任一几何数值门禁缺失时不得把完整 rescue 协议标记为已校准。"""
+
+    records = tuple(
+        {
+            "content_score": index / 100.0,
+            "aligned_content_score": (index + 1) / 100.0,
+            "attention_geometry_score": 0.1,
+            "registration_confidence": 0.2,
+            "attention_sync_score": None if index == 0 else 0.3,
+            "alignment": {"registration_geometry_reliable": True},
+        }
+        for index in range(33)
+    )
+
+    protocol = calibrate_complete_evidence_protocol(
+        records,
+        target_fpr=0.1,
+        rescue_margin_low=-0.05,
+    )
+
+    assert protocol.geometry_protocol_calibration_ready is False
+    assert protocol.sync_calibration_negative_count == 32
 
 
 @pytest.mark.quick
@@ -440,8 +698,15 @@ def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None
         content_threshold=0.5,
         rescue_margin_low=-0.2,
         geometry_score_threshold=0.0,
+        registration_confidence_threshold=0.0,
+        attention_sync_score_threshold=0.0,
         geometry_calibration_negative_count=10,
         geometry_calibration_exceedance_count=0,
+        registration_calibration_negative_count=10,
+        registration_calibration_exceedance_count=0,
+        sync_calibration_negative_count=10,
+        sync_calibration_exceedance_count=0,
+        geometry_protocol_calibration_ready=True,
         calibration_negative_count=10,
         calibration_false_positive_count=0,
         calibration_false_positive_rate=0.0,
@@ -452,8 +717,13 @@ def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None
         "content_score": 0.4,
         "aligned_content_score": 0.6,
         "attention_geometry_score": 0.1,
-        "geometry_reliable": True,
-        "alignment": {"geometry_reliable": True},
+        "registration_confidence": 0.8,
+        "attention_sync_score": 0.8,
+        "geometry_reliable": False,
+        "alignment": {
+            "registration_geometry_reliable": True,
+            "geometry_reliable": False,
+        },
         "content_failure_reason": "content_positive",
     }
 

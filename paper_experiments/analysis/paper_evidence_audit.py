@@ -5,7 +5,42 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable, Mapping
 
+from experiments.ablations.necessity_statistics import (
+    canonicalize_ablation_necessity_rows,
+)
 from main.core.digest import build_stable_digest
+
+
+ABLATION_NECESSITY_CLAIMS = {
+    "without_branch_risk_routing": (
+        "claim_necessity_branch_risk_routing",
+        "分支风险路由对预注册攻击后检测率主指标具有必要贡献。",
+    ),
+    "without_jacobian_null_space": (
+        "claim_necessity_jacobian_null_space",
+        "语义条件 Jacobian Null Space 投影对预注册主指标具有必要贡献。",
+    ),
+    "without_lf_content_carrier": (
+        "claim_necessity_lf_content_carrier",
+        "LF 内容载体分支对预注册主指标具有必要贡献。",
+    ),
+    "without_tail_robust_carrier": (
+        "claim_necessity_tail_robust_carrier",
+        "幅值尾部稳健载体分支对预注册主指标具有必要贡献。",
+    ),
+    "without_tail_amplitude_truncation": (
+        "claim_necessity_tail_amplitude_truncation",
+        "高斯幅值尾部截断算子对预注册主指标具有必要贡献。",
+    ),
+    "without_attention_geometry": (
+        "claim_necessity_attention_geometry",
+        "注意力几何算子对预注册主指标具有必要贡献。",
+    ),
+    "without_image_alignment": (
+        "claim_necessity_image_alignment",
+        "仅图像检测对齐算子对预注册主指标具有必要贡献。",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -30,6 +65,8 @@ class AuditInputBundle:
     ablation_claim_summary: dict[str, Any]
     source_path_map: dict[str, str]
     artifact_data_validation: dict[str, Any] = field(default_factory=dict)
+    ablation_necessity_rows: tuple[dict[str, Any], ...] = ()
+    ablation_necessity_summary: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """转为 JSON 兼容字典。"""
@@ -334,6 +371,71 @@ def _row(
     }
 
 
+def _ablation_necessity_rows_by_id(
+    bundle: AuditInputBundle,
+) -> dict[str, dict[str, Any]]:
+    """核验7项统计行与独立摘要绑定后按消融身份索引。"""
+
+    rows = [dict(row) for row in bundle.ablation_necessity_rows]
+    expected_ids = tuple(ABLATION_NECESSITY_CLAIMS)
+    if tuple(str(row.get("ablation_id", "")) for row in rows) != expected_ids:
+        return {}
+    if not bundle.ablation_necessity_summary:
+        return {}
+    summary = bundle.ablation_necessity_summary
+    try:
+        rows_digest = build_stable_digest(
+            canonicalize_ablation_necessity_rows(rows)
+        )
+    except (KeyError, TypeError):
+        return {}
+    if not all(
+        (
+            _yes(summary.get("ablation_necessity_statistics_ready")),
+            summary.get("expected_variant_ablation_ids") == list(expected_ids),
+            int(summary.get("necessity_statistic_row_count", -1)) == len(rows),
+            summary.get("necessity_statistic_rows_digest") == rows_digest,
+            bundle.ablation_claim_summary.get("necessity_statistic_rows_digest")
+            == rows_digest,
+        )
+    ):
+        return {}
+    return {str(row["ablation_id"]): row for row in rows}
+
+
+def _ablation_evidence_ready(bundle: AuditInputBundle) -> bool:
+    """判断消融协议和必要性统计是否闭合, 不推断统计结论必然为正。"""
+
+    return (
+        _yes(bundle.ablation_claim_summary.get("ablation_claim_gate_ready"))
+        and _yes(bundle.ablation_claim_summary.get("supports_paper_claim"))
+        and _yes(
+            bundle.ablation_claim_summary.get(
+                "ablation_necessity_statistics_ready"
+            )
+        )
+        and bool(_ablation_necessity_rows_by_id(bundle))
+        and _artifact_data_ready(bundle, "mechanism_ablation_metrics_ready")
+        and _artifact_data_ready(bundle, "mechanism_pairwise_delta_ready")
+        and _artifact_data_ready(
+            bundle,
+            "mechanism_necessity_statistics_ready",
+        )
+    )
+
+
+def _necessity_row_blockers(row: Mapping[str, Any]) -> list[str]:
+    """列出单机制未达到预注册必要性结论的统计原因。"""
+
+    checks = (
+        ("effect_direction_ready", "effect_direction_not_met"),
+        ("minimum_effect_ready", "minimum_effect_not_met"),
+        ("confidence_interval_ready", "confidence_interval_not_met"),
+        ("adjusted_significance_ready", "holm_significance_not_met"),
+    )
+    return [blocker for field_name, blocker in checks if not _yes(row.get(field_name))]
+
+
 def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     """构造论文 claim 到证据路径的审计表。"""
     threshold = bundle.threshold_report
@@ -366,19 +468,66 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
         and _yes(dataset_quality.get("formal_fid_kid_claim_gate_ready"))
         and dataset_metrics_data_ready
     )
-    ablation_claim_ready = (
-        _yes(ablation.get("ablation_claim_gate_ready"))
-        and _yes(ablation.get("supports_paper_claim"))
-        and _artifact_data_ready(bundle, "mechanism_ablation_metrics_ready")
-        and _artifact_data_ready(bundle, "mechanism_pairwise_delta_ready")
+    ablation_evidence_ready = _ablation_evidence_ready(bundle)
+    necessity_rows_by_id = _ablation_necessity_rows_by_id(bundle)
+    all_necessity_claims_supported = (
+        ablation_evidence_ready
+        and all(
+            _yes(row.get("necessity_claim_supported"))
+            for row in necessity_rows_by_id.values()
+        )
     )
+    individual_necessity_claim_rows = [
+        _row(
+            claim_id,
+            "ablation",
+            claim_text,
+            (
+                "paper_supported"
+                if _yes(necessity_rows_by_id[ablation_id].get("necessity_claim_supported"))
+                else "measured_not_supported"
+            ),
+            (
+                _source(
+                    bundle,
+                    "mechanism_necessity_statistics",
+                    "mechanism_necessity_statistics.csv",
+                )
+                + f"#{ablation_id}"
+            ),
+            _necessity_row_blockers(necessity_rows_by_id[ablation_id]),
+            paper_claim_supported=_yes(
+                necessity_rows_by_id[ablation_id].get(
+                    "necessity_claim_supported"
+                )
+            ),
+        )
+        for ablation_id, (claim_id, claim_text) in ABLATION_NECESSITY_CLAIMS.items()
+    ] if ablation_evidence_ready else [
+        _row(
+            claim_id,
+            "ablation",
+            claim_text,
+            "unsupported",
+            (
+                _source(
+                    bundle,
+                    "mechanism_necessity_statistics",
+                    "mechanism_necessity_statistics.csv",
+                )
+                + f"#{ablation_id}"
+            ),
+            ["ablation_necessity_statistics_not_ready"],
+        )
+        for ablation_id, (claim_id, claim_text) in ABLATION_NECESSITY_CLAIMS.items()
+    ]
     sample_scale_ready = _runtime_sample_scale_ready(threshold)
     submission_core_ready = (
         full_ready
         and attack_ready
         and baseline_ready
         and dataset_quality_ready
-        and ablation_claim_ready
+        and ablation_evidence_ready
         and sample_scale_ready
     )
     return [
@@ -432,12 +581,40 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
         _row(
             "claim_internal_mechanism_necessity",
             "ablation",
-            "语义路由、Jacobian Null Space、空间 LF、幅值尾部稳健载体和注意力几何均为必要机制。",
-            "paper_supported" if ablation_claim_ready else "preview_only",
-            _source(bundle, "ablation_claim_summary", "ablation_claim_summary"),
-            [] if ablation_claim_ready else ["ablation_claim_gate_not_ready"],
-            paper_claim_supported=ablation_claim_ready,
+            "7项内部机制均达到预注册的配对必要性统计标准。",
+            (
+                "paper_supported"
+                if all_necessity_claims_supported
+                else (
+                    "measured_not_supported"
+                    if ablation_evidence_ready
+                    else "unsupported"
+                )
+            ),
+            _source(
+                bundle,
+                "mechanism_necessity_statistics",
+                "mechanism_necessity_statistics.csv",
+            ),
+            (
+                []
+                if all_necessity_claims_supported
+                else (
+                    [
+                        "necessity_not_supported:"
+                        + ",".join(
+                            ablation_id
+                            for ablation_id, row in necessity_rows_by_id.items()
+                            if not _yes(row.get("necessity_claim_supported"))
+                        )
+                    ]
+                    if ablation_evidence_ready
+                    else ["ablation_necessity_statistics_not_ready"]
+                )
+            ),
+            paper_claim_supported=all_necessity_claims_supported,
         ),
+        *individual_necessity_claim_rows,
         _row(
             "claim_quality_preservation_pair_metrics",
             "quality",
@@ -471,7 +648,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "" if baseline_ready else "baseline_result_missing",
                 "" if attack_ready else "real_attack_evidence_missing",
                 "" if dataset_quality_ready else "formal_dataset_quality_missing",
-                "" if ablation_claim_ready else "formal_ablation_missing",
+                "" if ablation_evidence_ready else "formal_ablation_missing",
                 "" if sample_scale_ready else "declared_sample_scale_incomplete",
             ],
             paper_claim_supported=submission_core_ready,
@@ -523,6 +700,10 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
     attack_metrics_data_ready = _artifact_data_ready(bundle, "attack_family_metrics_ready")
     baseline_table_data_ready = _artifact_data_ready(bundle, "baseline_comparison_table_ready")
     ablation_metrics_data_ready = _artifact_data_ready(bundle, "mechanism_ablation_metrics_ready")
+    ablation_necessity_data_ready = _artifact_data_ready(
+        bundle,
+        "mechanism_necessity_statistics_ready",
+    )
     dataset_metrics_data_ready = _artifact_data_ready(bundle, "dataset_quality_metrics_ready")
     attack_blockers = _attack_robustness_blockers(
         attack,
@@ -535,12 +716,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
         and _yes(dataset_quality.get("formal_fid_kid_claim_gate_ready"))
         and dataset_metrics_data_ready
     )
-    ablation_claim_ready = (
-        _yes(ablation.get("ablation_claim_gate_ready"))
-        and _yes(ablation.get("supports_paper_claim"))
-        and ablation_metrics_data_ready
-        and _artifact_data_ready(bundle, "mechanism_pairwise_delta_ready")
-    )
+    ablation_evidence_ready = _ablation_evidence_ready(bundle)
     baseline_ready = _baseline_comparison_ready(
         baseline,
         table_data_ready=baseline_table_data_ready,
@@ -619,16 +795,41 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             "table_internal_ablation",
             "table",
             "内部机制消融表",
-            [_source(bundle, "mechanism_ablation_table", "mechanism_ablation_table")],
+            [
+                _source(
+                    bundle,
+                    "mechanism_ablation_table",
+                    "mechanism_ablation_table",
+                ),
+                _source(
+                    bundle,
+                    "mechanism_necessity_statistics",
+                    "mechanism_necessity_statistics.csv",
+                ),
+            ],
             (
                 "blocked"
-                if not ablation_metrics_data_ready
-                else ("rebuildable_paper_claim" if ablation_claim_ready else "rebuildable_preview")
+                if not (
+                    ablation_metrics_data_ready
+                    and ablation_necessity_data_ready
+                )
+                else (
+                    "rebuildable_paper_claim"
+                    if ablation_evidence_ready
+                    else "rebuildable_preview"
+                )
             ),
-            ablation_claim_ready,
+            ablation_evidence_ready,
             []
-            if ablation_claim_ready
-            else (["ablation_metrics_data_invalid"] if not ablation_metrics_data_ready else ["ablation_claim_gate_not_ready"]),
+            if ablation_evidence_ready
+            else (
+                ["ablation_statistics_data_invalid"]
+                if not (
+                    ablation_metrics_data_ready
+                    and ablation_necessity_data_ready
+                )
+                else ["ablation_evidence_gate_not_ready"]
+            ),
         ),
         _artifact_row(
             "table_quality_metrics",
@@ -671,18 +872,17 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
     det_data_ready = _artifact_data_ready(bundle, "det_curve_points_ready")
     attack_metrics_data_ready = _artifact_data_ready(bundle, "attack_family_metrics_ready")
     ablation_delta_data_ready = _artifact_data_ready(bundle, "mechanism_pairwise_delta_ready")
+    ablation_necessity_data_ready = _artifact_data_ready(
+        bundle,
+        "mechanism_necessity_statistics_ready",
+    )
     baseline_table_data_ready = _artifact_data_ready(bundle, "baseline_comparison_table_ready")
     attack_blockers = _attack_robustness_blockers(
         attack,
         attack_metrics_data_ready=attack_metrics_data_ready,
     )
     attack_ready = not attack_blockers
-    ablation_claim_ready = (
-        _yes(ablation.get("ablation_claim_gate_ready"))
-        and _yes(ablation.get("supports_paper_claim"))
-        and _artifact_data_ready(bundle, "mechanism_ablation_metrics_ready")
-        and ablation_delta_data_ready
-    )
+    ablation_evidence_ready = _ablation_evidence_ready(bundle)
     baseline_ready = _baseline_comparison_ready(
         baseline,
         table_data_ready=baseline_table_data_ready,
@@ -753,16 +953,41 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
             "figure_ablation_delta",
             "figure_data",
             "内部消融 delta 图数据",
-            [_source(bundle, "method_pairwise_delta_table", "method_pairwise_delta_table")],
+            [
+                _source(
+                    bundle,
+                    "method_pairwise_delta_table",
+                    "method_pairwise_delta_table",
+                ),
+                _source(
+                    bundle,
+                    "mechanism_necessity_statistics",
+                    "mechanism_necessity_statistics.csv",
+                ),
+            ],
             (
                 "blocked"
-                if not ablation_delta_data_ready
-                else ("rebuildable_paper_claim" if ablation_claim_ready else "rebuildable_preview")
+                if not (
+                    ablation_delta_data_ready
+                    and ablation_necessity_data_ready
+                )
+                else (
+                    "rebuildable_paper_claim"
+                    if ablation_evidence_ready
+                    else "rebuildable_preview"
+                )
             ),
-            ablation_claim_ready,
+            ablation_evidence_ready,
             []
-            if ablation_claim_ready
-            else (["ablation_delta_data_invalid"] if not ablation_delta_data_ready else ["ablation_claim_gate_not_ready"]),
+            if ablation_evidence_ready
+            else (
+                ["ablation_statistics_data_invalid"]
+                if not (
+                    ablation_delta_data_ready
+                    and ablation_necessity_data_ready
+                )
+                else ["ablation_evidence_gate_not_ready"]
+            ),
         ),
         _artifact_row(
             "figure_baseline_comparison",
@@ -869,18 +1094,13 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "supports_paper_claim": False,
             },
         )
-    if not (
-        _yes(ablation.get("ablation_claim_gate_ready"))
-        and _yes(ablation.get("supports_paper_claim"))
-        and _artifact_data_ready(bundle, "mechanism_ablation_metrics_ready")
-        and _artifact_data_ready(bundle, "mechanism_pairwise_delta_ready")
-    ):
+    if not _ablation_evidence_ready(bundle):
         rows.append(
             {
                 "gap_id": "gap_formal_mechanism_ablation",
                 "gap_area": "ablation",
                 "blocker_severity": "major",
-                "required_action": "对每个机制开关重新执行生成、攻击和仅图像检测, 禁止分数倍率或反事实变换。",
+                "required_action": "对每个机制开关完成逐 Prompt 配对重运行, 并生成效应方向、最小效应、bootstrap CI、配对检验与 Holm 校正统计。",
                 "related_artifacts": _source(
                     bundle,
                     "ablation_claim_summary",

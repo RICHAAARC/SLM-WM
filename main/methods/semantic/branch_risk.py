@@ -153,6 +153,7 @@ def _build_single_branch(
     saliency_values: tuple[float, ...],
     attention_stability_values: tuple[float, ...],
     config: BranchRiskConfig,
+    require_eligible_position: bool,
 ) -> CarrierRiskField:
     """根据统一输入构造一个分支风险场。"""
 
@@ -187,14 +188,17 @@ def _build_single_branch(
         risks.append(risk)
         budgets.append(budget)
     eligible = tuple(index for index, risk in enumerate(risks) if risk <= config.eligibility_threshold)
-    if not eligible:
-        eligible = (min(range(len(risks)), key=risks.__getitem__),)
+    if require_eligible_position and not eligible:
+        raise RuntimeError(
+            f"{branch_name} 分支没有满足冻结风险阈值的可承载位置"
+        )
     payload = {
         "branch_name": branch_name,
         "risk_values": [round(value, 12) for value in risks],
         "budget_values": [round(value, 12) for value in budgets],
         "eligible_indices": eligible,
         "config": asdict(config),
+        "require_eligible_position": require_eligible_position,
     }
     return CarrierRiskField(
         branch_name=branch_name,
@@ -217,11 +221,16 @@ def build_branch_risk_fields(
     saliency_values: VectorInput | Iterable[NumberLike],
     attention_stability_values: VectorInput | Iterable[NumberLike] | None = None,
     configs: dict[str, BranchRiskConfig] | None = None,
+    required_eligible_branches: Iterable[str] | None = None,
 ) -> BranchRiskFieldBundle:
     """构造三个语义不同且宽度一致的分支风险场。
 
     该函数是正式方法路径唯一使用的风险入口。三个分支必须分别构造风险语义,
     不能通过单一共享标量或仅用于日志的路由记录替代。
+
+    ``required_eligible_branches`` 指定必须至少存在一个合格位置的活动分支.
+    ``None`` 表示完整方法的三个分支都必须通过门禁. 空集合用于移除风险路由的
+    正式消融, 此时仍可记录风险诊断值, 但风险阈值不得决定样本能否继续运行.
     """
 
     semantic = tuple(clip_unit(value) for value in as_float_vector(semantic_values, "semantic_values"))
@@ -248,6 +257,13 @@ def build_branch_risk_fields(
     resolved_configs = configs or DEFAULT_BRANCH_CONFIGS
     if set(resolved_configs) != set(BRANCH_NAMES):
         raise ValueError("configs 必须完整定义三个载体分支")
+    required_branches = (
+        set(BRANCH_NAMES)
+        if required_eligible_branches is None
+        else set(required_eligible_branches)
+    )
+    if not required_branches <= set(BRANCH_NAMES):
+        raise ValueError("required_eligible_branches 包含未知载体分支")
     fields = {
         name: _build_single_branch(
             name,
@@ -257,6 +273,7 @@ def build_branch_risk_fields(
             saliency,
             attention_stability,
             resolved_configs[name],
+            name in required_branches,
         )
         for name in BRANCH_NAMES
     }

@@ -32,6 +32,7 @@
         "Writing & Symbols": 55
       },
       "original_count": 6000,
+      "prompt_file_sha256": "4ad8f5482bf129e5c85aa51e36d3768316f4d56df9f2e9930d4b742291f0f1cc",
       "result_count": 7000,
       "selected_prompt_digest": "ac984b0ec88c04fbc7ee6530dc7ab53b66ac3ece1086073c474dfd3ab5559ada"
     },
@@ -65,6 +66,7 @@
         "Writing & Symbols": 7
       },
       "original_count": 600,
+      "prompt_file_sha256": "567c5480d4a80c06c51700d0165bf6962691b31f36b4003d09ee79190c70a302",
       "result_count": 700,
       "selected_prompt_digest": "0cb84b288fe65033bf3d1a39a608324f952f287f926d42831b66e7141bf1a4de"
     },
@@ -89,6 +91,7 @@
         "Writing & Symbols": 2
       },
       "original_count": 60,
+      "prompt_file_sha256": "0fa716a27c926f0561508c4afbb9b50f03f0405d7e743d1647b29ed2113d1cf0",
       "result_count": 70,
       "selected_prompt_digest": "2975e260b6c168c71be59b889a8e8000370adfdb512700d993f0a48572e89e21"
     }

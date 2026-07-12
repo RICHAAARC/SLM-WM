@@ -27,6 +27,7 @@ from paper_experiments.baselines import (
     validate_primary_baseline_formal_import_rows,
 )
 from scripts.write_primary_baseline_formal_import_protocol import write_primary_baseline_formal_import_protocol_outputs
+from tests.helpers.formal_prompt_source import copy_governed_prompt_file
 
 
 PAPER_RUN_PARAMETERS = {
@@ -361,12 +362,7 @@ def test_formal_import_protocol_switches_prompt_schema_to_full_paper(
 ) -> None:
     """主表 baseline 正式导入 schema 和 validator 应跟随 full_paper 运行层级。"""
 
-    config_dir = tmp_path / "configs"
-    config_dir.mkdir(parents=True)
-    (config_dir / "paper_main_full_paper_prompts.txt").write_text(
-        "".join(f"a full paper prompt {index}\n" for index in range(7000)),
-        encoding="utf-8",
-    )
+    copy_governed_prompt_file(tmp_path, "full_paper")
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
     row, _ = write_formal_tree_ring_row(tmp_path, paper_run_name="full_paper")
 

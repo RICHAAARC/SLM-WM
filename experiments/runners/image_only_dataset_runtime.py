@@ -68,8 +68,15 @@ class FrozenEvidenceProtocol:
     content_threshold: float
     rescue_margin_low: float
     geometry_score_threshold: float
+    registration_confidence_threshold: float
+    attention_sync_score_threshold: float
     geometry_calibration_negative_count: int
     geometry_calibration_exceedance_count: int
+    registration_calibration_negative_count: int
+    registration_calibration_exceedance_count: int
+    sync_calibration_negative_count: int
+    sync_calibration_exceedance_count: int
+    geometry_protocol_calibration_ready: bool
     calibration_negative_count: int
     calibration_false_positive_count: int
     calibration_false_positive_rate: float
@@ -93,6 +100,8 @@ def _decision(
     threshold: float,
     rescue_margin_low: float,
     geometry_score_threshold: float = 0.0,
+    registration_confidence_threshold: float = 0.0,
+    attention_sync_score_threshold: float = 0.0,
 ) -> tuple[bool, bool, bool, str]:
     """用冻结阈值重算内容主判和同阈值几何救回。"""
 
@@ -102,14 +111,28 @@ def _decision(
     aligned_score = record.get("aligned_content_score")
     alignment = record.get("alignment")
     if isinstance(alignment, dict):
-        alignment_reliable = bool(alignment.get("geometry_reliable", False))
+        alignment_reliable = bool(
+            alignment.get(
+                "registration_geometry_reliable",
+                alignment.get("geometry_reliable", False),
+            )
+        )
     else:
-        alignment_reliable = bool(record.get("geometry_reliable", False))
+        alignment_reliable = False
     geometry_score = record.get("attention_geometry_score")
-    geometry_reliable = alignment_reliable and (
-        bool(record.get("geometry_reliable", False))
-        if geometry_score is None
-        else float(geometry_score) >= geometry_score_threshold
+    registration_confidence = record.get("registration_confidence")
+    attention_sync_score = record.get("attention_sync_score")
+    geometry_reliable = (
+        alignment_reliable
+        and isinstance(geometry_score, (int, float))
+        and math.isfinite(float(geometry_score))
+        and float(geometry_score) >= geometry_score_threshold
+        and isinstance(registration_confidence, (int, float))
+        and math.isfinite(float(registration_confidence))
+        and float(registration_confidence) >= registration_confidence_threshold
+        and isinstance(attention_sync_score, (int, float))
+        and math.isfinite(float(attention_sync_score))
+        and float(attention_sync_score) >= attention_sync_score_threshold
     )
     if positive_by_content:
         failure_reason = "content_positive"
@@ -146,26 +169,59 @@ def calibrate_complete_evidence_protocol(
     if not 0.0 < target_fpr < 1.0:
         raise ValueError("target_fpr 必须位于 (0, 1)")
     allowed_false_positives = max(0, math.floor(target_fpr * (len(records) + 1)) - 1)
-    reliable_geometry_scores = tuple(
-        float(record["attention_geometry_score"])
-        for record in records
-        if bool(record.get("geometry_reliable", False))
-        and isinstance(record.get("attention_geometry_score"), (int, float))
-        and math.isfinite(float(record["attention_geometry_score"]))
-    )
-    geometry_score_threshold = 0.0
-    geometry_exceedance_count = 0
-    if reliable_geometry_scores:
-        geometry_candidates = sorted(
-            {math.nextafter(value, math.inf) for value in reliable_geometry_scores}
+    def freeze_geometry_gate(field_name: str) -> tuple[float, int, int]:
+        """从全部未删失 clean negatives 冻结单个几何门禁。"""
+
+        values = tuple(
+            float(record[field_name])
+            for record in records
+            if isinstance(record.get(field_name), (int, float))
+            and math.isfinite(float(record[field_name]))
         )
-        geometry_score_threshold = geometry_candidates[-1]
-        for candidate in geometry_candidates:
-            exceedance_count = sum(value >= candidate for value in reliable_geometry_scores)
+        if not values:
+            return 0.0, 0, 0
+        candidates = sorted({math.nextafter(value, math.inf) for value in values})
+        selected = candidates[-1]
+        selected_count = sum(value >= selected for value in values)
+        for candidate in candidates:
+            exceedance_count = sum(value >= candidate for value in values)
             if exceedance_count <= allowed_false_positives:
-                geometry_score_threshold = candidate
-                geometry_exceedance_count = exceedance_count
+                selected = candidate
+                selected_count = exceedance_count
                 break
+        return selected, len(values), selected_count
+
+    (
+        geometry_score_threshold,
+        geometry_negative_count,
+        geometry_exceedance_count,
+    ) = freeze_geometry_gate("attention_geometry_score")
+    (
+        registration_confidence_threshold,
+        registration_negative_count,
+        registration_exceedance_count,
+    ) = freeze_geometry_gate("registration_confidence")
+    (
+        attention_sync_score_threshold,
+        sync_negative_count,
+        sync_exceedance_count,
+    ) = freeze_geometry_gate("attention_sync_score")
+    geometry_protocol_calibration_ready = (
+        geometry_negative_count == len(records)
+        and registration_negative_count == len(records)
+        and sync_negative_count == len(records)
+        and all(
+            isinstance(record.get("alignment"), dict)
+            and isinstance(
+                record["alignment"].get(
+                    "registration_geometry_reliable",
+                    record["alignment"].get("geometry_reliable"),
+                ),
+                bool,
+            )
+            for record in records
+        )
+    )
     score_candidates = []
     for record in records:
         score_candidates.append(float(record["content_score"]))
@@ -176,7 +232,14 @@ def calibrate_complete_evidence_protocol(
     selected_false_positives = 0
     for threshold in thresholds:
         false_positives = sum(
-            _decision(record, threshold, rescue_margin_low, geometry_score_threshold)[2]
+            _decision(
+                record,
+                threshold,
+                rescue_margin_low,
+                geometry_score_threshold,
+                registration_confidence_threshold,
+                attention_sync_score_threshold,
+            )[2]
             for record in records
         )
         if false_positives <= allowed_false_positives:
@@ -187,8 +250,15 @@ def calibrate_complete_evidence_protocol(
         "content_threshold": selected_threshold,
         "rescue_margin_low": rescue_margin_low,
         "geometry_score_threshold": geometry_score_threshold,
-        "geometry_calibration_negative_count": len(reliable_geometry_scores),
+        "registration_confidence_threshold": registration_confidence_threshold,
+        "attention_sync_score_threshold": attention_sync_score_threshold,
+        "geometry_calibration_negative_count": geometry_negative_count,
         "geometry_calibration_exceedance_count": geometry_exceedance_count,
+        "registration_calibration_negative_count": registration_negative_count,
+        "registration_calibration_exceedance_count": registration_exceedance_count,
+        "sync_calibration_negative_count": sync_negative_count,
+        "sync_calibration_exceedance_count": sync_exceedance_count,
+        "geometry_protocol_calibration_ready": geometry_protocol_calibration_ready,
         "calibration_negative_count": len(records),
         "calibration_false_positive_count": selected_false_positives,
         "target_fpr": target_fpr,
@@ -198,8 +268,15 @@ def calibrate_complete_evidence_protocol(
         content_threshold=selected_threshold,
         rescue_margin_low=rescue_margin_low,
         geometry_score_threshold=geometry_score_threshold,
-        geometry_calibration_negative_count=len(reliable_geometry_scores),
+        registration_confidence_threshold=registration_confidence_threshold,
+        attention_sync_score_threshold=attention_sync_score_threshold,
+        geometry_calibration_negative_count=geometry_negative_count,
         geometry_calibration_exceedance_count=geometry_exceedance_count,
+        registration_calibration_negative_count=registration_negative_count,
+        registration_calibration_exceedance_count=registration_exceedance_count,
+        sync_calibration_negative_count=sync_negative_count,
+        sync_calibration_exceedance_count=sync_exceedance_count,
+        geometry_protocol_calibration_ready=geometry_protocol_calibration_ready,
         calibration_negative_count=len(records),
         calibration_false_positive_count=selected_false_positives,
         calibration_false_positive_rate=selected_false_positives / len(records),
@@ -221,6 +298,8 @@ def apply_frozen_evidence_protocol(
             protocol.content_threshold,
             protocol.rescue_margin_low,
             protocol.geometry_score_threshold,
+            protocol.registration_confidence_threshold,
+            protocol.attention_sync_score_threshold,
         )
         raw_margin = float(record["content_score"]) - protocol.content_threshold
         aligned_score = record.get("aligned_content_score")
@@ -228,6 +307,13 @@ def apply_frozen_evidence_protocol(
             {
                 **record,
                 "frozen_content_threshold": protocol.content_threshold,
+                "frozen_geometry_score_threshold": protocol.geometry_score_threshold,
+                "frozen_registration_confidence_threshold": (
+                    protocol.registration_confidence_threshold
+                ),
+                "frozen_attention_sync_score_threshold": (
+                    protocol.attention_sync_score_threshold
+                ),
                 "frozen_threshold_digest": protocol.threshold_digest,
                 "formal_raw_content_margin": raw_margin,
                 "formal_aligned_content_margin": (
@@ -623,6 +709,7 @@ def run_image_only_dataset_runtime(
         and clean_fixed_fpr_ready
         and wrong_key_fixed_fpr_ready
         and image_only_protocol_ready
+        and protocol.geometry_protocol_calibration_ready
         and scientific_operator_gate_ready
         and scientific_unit_provenance["scientific_unit_provenance_ready"]
     )
@@ -659,14 +746,19 @@ def run_image_only_dataset_runtime(
         "scientific_operator_gate_ready": scientific_operator_gate_ready,
         **scientific_unit_provenance,
         "frozen_threshold_digest": protocol.threshold_digest,
+        "geometry_protocol_calibration_ready": (
+            protocol.geometry_protocol_calibration_ready
+        ),
         "target_fpr": resolved_paper_run.target_fpr,
         "clean_test_fixed_fpr_upper_bound_ready": clean_fixed_fpr_ready,
         "wrong_key_test_fixed_fpr_upper_bound_ready": wrong_key_fixed_fpr_ready,
         "paired_ssim_mean": sum(paired_ssim_values) / len(paired_ssim_values) if paired_ssim_values else None,
         "paired_psnr_mean": sum(paired_psnr_values) / len(paired_psnr_values) if paired_psnr_values else None,
-        "fixed_fpr_and_rescue_boundary_ready": True,
+        "fixed_fpr_and_rescue_boundary_ready": (
+            protocol.geometry_protocol_calibration_ready
+        ),
         "fixed_fpr_boundary_ready": True,
-        "rescue_boundary_ready": True,
+        "rescue_boundary_ready": protocol.geometry_protocol_calibration_ready,
         "raw_content_claim_ready": True,
         "perceptual_metrics_ready": bool(paired_ssim_values),
         "real_attacked_image_count": len(attacked_records),
@@ -723,6 +815,9 @@ def run_image_only_dataset_runtime(
             "protocol_decision": summary["protocol_decision"],
             "detector_input_access_mode": "image_key_public_model_only",
             "full_method_claim_ready": summary["full_method_claim_ready"],
+            "geometry_protocol_calibration_ready": summary[
+                "geometry_protocol_calibration_ready"
+            ],
             "attack_record_coverage_ready": summary["attack_record_coverage_ready"],
             "attacked_image_evidence_chain_ready": summary["attacked_image_evidence_chain_ready"],
             "scientific_operator_gate_ready": summary["scientific_operator_gate_ready"],
@@ -867,6 +962,7 @@ def package_image_only_dataset_runtime(
             bool(summary.get("generated_at")),
             summary.get("protocol_decision") == "pass",
             summary.get("full_method_claim_ready") is True,
+            summary.get("geometry_protocol_calibration_ready") is True,
             summary.get("scientific_unit_provenance_ready") is True,
             summary.get("scientific_unit_provenance_record_count")
             == paper_run.prompt_count,
@@ -877,6 +973,10 @@ def package_image_only_dataset_runtime(
             summary.get("supports_paper_claim") is True,
             manifest.get("artifact_id")
             == f"{resolved_paper_run_name}_image_only_dataset_runtime_manifest",
+            manifest.get("metadata", {}).get(
+                "geometry_protocol_calibration_ready"
+            )
+            is True,
         )
     ):
         raise RuntimeError("仅图像数据集运行身份或 ready 门禁未通过")

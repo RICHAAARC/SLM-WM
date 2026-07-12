@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import hashlib
 import json
+import math
 from pathlib import Path
 import time
 from typing import Any, Mapping
@@ -47,6 +48,7 @@ from main.methods.carrier import (
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
     DifferentiableAttentionRecorder,
+    attention_geometry_score,
     attention_relation_stability_map,
     compute_attention_geometry_gradient,
     optimize_attention_geometry_update,
@@ -108,6 +110,8 @@ class SemanticWatermarkRuntimeConfig:
     diffusion_attacks_enabled: bool = _FORMAL_METHOD_CONFIG.diffusion_attacks_enabled
     content_threshold: float = 0.0
     geometry_score_threshold: float = 0.0
+    registration_confidence_threshold: float = 0.0
+    attention_sync_score_threshold: float = 0.0
     rescue_margin_low: float = -0.05
     output_dir: str = "outputs/semantic_watermark_runtime"
 
@@ -128,8 +132,8 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError("正式真实方法运行要求 CUDA 设备")
         if self.candidate_count < self.null_rank or self.null_rank <= 0:
             raise ValueError("candidate_count 必须不小于正的 null_rank")
-        if any(index < 0 or index >= self.inference_steps for index in self.injection_step_indices):
-            raise ValueError("注入时刻必须位于推理步范围内")
+        if any(index < 0 or index >= self.inference_steps - 1 for index in self.injection_step_indices):
+            raise ValueError("post-step 注入时刻必须保留一个合法的下一调度时刻")
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
         if not 0.0 < self.minimum_projection_energy_retention <= 1.0:
@@ -435,6 +439,33 @@ def _branch_budget(signal_map: Any, branch_field: Any) -> tuple[float, ...]:
     return tuple(value if index in eligible else 0.0 for index, value in enumerate(values))
 
 
+def _active_carrier_branch_names(
+    config: SemanticWatermarkRuntimeConfig,
+) -> tuple[str, ...]:
+    """返回当前机制配置中实际参与嵌入的载体分支。"""
+
+    enabled = {
+        "lf_content": config.lf_enabled,
+        "tail_robust": config.tail_robust_enabled,
+        "attention_geometry": config.attention_geometry_enabled,
+    }
+    return tuple(branch_name for branch_name, is_enabled in enabled.items() if is_enabled)
+
+
+def _required_branch_risk_eligibility(
+    config: SemanticWatermarkRuntimeConfig,
+) -> tuple[str, ...]:
+    """返回需要执行风险资格门禁的活动分支。
+
+    完整方法只对实际参与嵌入的分支执行 fail-closed 门禁. 移除风险路由的正式
+    消融返回空集合, 避免已移除机制继续筛掉高风险样本.
+    """
+
+    if not config.semantic_routing_enabled:
+        return ()
+    return _active_carrier_branch_names(config)
+
+
 def _branch_risk_record(branch_field: Any) -> dict[str, Any]:
     """生成不保存大型空间数组的可审计分支风险摘要。"""
 
@@ -519,10 +550,10 @@ def _encode_image_latent(pipeline: Any, image: Any) -> Any:
 def _public_detection_noise_seed(config: SemanticWatermarkRuntimeConfig) -> int:
     """由公开模型和检测协议派生与生成样本无关的固定噪声种子。"""
 
-    detection_index = config.injection_step_indices[0]
+    detection_index = config.injection_step_indices[0] + 1
     payload = (
         f"slm_wm_image_only_attention|{config.carrier_model_reference}|{config.width}x{config.height}|"
-        f"{config.inference_steps}|{detection_index}"
+        f"{config.inference_steps}|post_step_schedule_index={detection_index}"
     ).encode("utf-8")
     return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big") % (2**63 - 1)
 
@@ -538,19 +569,26 @@ def _image_attention_extractor(
 
     import torch
 
-    pipeline.scheduler.set_timesteps(config.inference_steps, device=pipeline._execution_device)
-    detection_index = config.injection_step_indices[0]
-    timestep = pipeline.scheduler.timesteps[detection_index]
+    detection_index = config.injection_step_indices[0] + 1
     public_detection_seed = _public_detection_noise_seed(config)
 
     def extract(image: Any) -> tuple[tuple[str, Any, tuple[int, ...]], ...]:
         """从任意待检图像提取全部冻结层的公开固定噪声 Q/K 关系。"""
 
+        # img2img, 反演和再生成攻击会与主 pipeline 共享 scheduler 实例并改写
+        # timesteps, begin_index 和 step_index. 每次检测都重新建立正式检测日程,
+        # 保证 scale_noise 使用的 sigma 与 Transformer 前向 timestep 属于同一日程.
+        pipeline.scheduler.set_timesteps(
+            config.inference_steps,
+            device=pipeline._execution_device,
+        )
+        timestep = pipeline.scheduler.timesteps[detection_index]
         latent = _encode_image_latent(pipeline, image)
         generator = torch.Generator(device=latent.device.type).manual_seed(public_detection_seed)
         noise = torch.randn(latent.shape, generator=generator, device=latent.device, dtype=latent.dtype)
         if hasattr(pipeline.scheduler, "scale_noise"):
-            noisy_latent = pipeline.scheduler.scale_noise(latent, timestep, noise)
+            timestep_batch = timestep.reshape(1).expand(latent.shape[0])
+            noisy_latent = pipeline.scheduler.scale_noise(latent, timestep_batch, noise)
         else:
             sigma = float(detection_index + 1) / float(config.inference_steps)
             noisy_latent = (1.0 - sigma) * latent + sigma * noise
@@ -639,6 +677,11 @@ def run_semantic_watermark_runtime(
         latent = callback_kwargs.get("latents")
         if latent is None or step_index not in config.injection_step_indices:
             return callback_kwargs
+        post_step_index = step_index + 1
+        scheduler_timesteps = pipe.scheduler.timesteps
+        if post_step_index >= len(scheduler_timesteps):
+            raise RuntimeError("post-step 注入缺少合法的下一调度时刻")
+        method_timestep = scheduler_timesteps[post_step_index]
         with torch.enable_grad():
             signals = feature_runtime.branch_signal_maps(latent.float(), previous_injection_latent)
             lf_template = build_low_frequency_template(
@@ -654,7 +697,7 @@ def run_semantic_watermark_runtime(
             )
             transformer_forward = _transformer_forward_function(
                 pipeline,
-                timestep,
+                method_timestep,
                 unconditional_prompt,
                 unconditional_pooled,
             )
@@ -686,20 +729,20 @@ def run_semantic_watermark_runtime(
                     stability_values=signals["stability"].mean(dim=0).reshape(-1).cpu().tolist(),
                     saliency_values=signals["saliency"].mean(dim=0).reshape(-1).cpu().tolist(),
                     attention_stability_values=attention_stability.mean(dim=0).reshape(-1).cpu().tolist(),
+                    required_eligible_branches=_required_branch_risk_eligibility(
+                        config
+                    ),
                 )
                 branch_fields = {
                     "lf_content": risk_bundle.lf_content,
                     "tail_robust": risk_bundle.tail_robust,
                     "attention_geometry": risk_bundle.attention_geometry,
                 }
+                active_branch_names = set(_active_carrier_branch_names(config))
                 active_branch_fields = {
                     branch_name: branch_field
                     for branch_name, branch_field in branch_fields.items()
-                    if (
-                        (branch_name == "lf_content" and config.lf_enabled)
-                        or (branch_name == "tail_robust" and config.tail_robust_enabled)
-                        or (branch_name == "attention_geometry" and config.attention_geometry_enabled)
-                    )
+                    if branch_name in active_branch_names
                 }
                 preferred_directions = {
                     "lf_content": (lf_template,),
@@ -778,6 +821,7 @@ def run_semantic_watermark_runtime(
                     else torch.zeros_like(latent)
                 )
                 if attention_gradient is not None:
+                    content_base_update = lf_update + tail_update
                     attention_update = optimize_attention_geometry_update(
                         latent=latent,
                         transformer_forward=transformer_forward,
@@ -786,35 +830,58 @@ def run_semantic_watermark_runtime(
                         safe_subspace=subspaces["attention_geometry"],
                         update_strength=config.attention_relative_strength * float(latent_norm.item()),
                         precomputed_gradient=attention_gradient,
+                        base_update=content_base_update,
                     )
                     attention_tensor = attention_update.update
+                    combined_update = content_base_update + attention_tensor
+                    injected = latent + combined_update.to(dtype=latent.dtype)
+                    recorder.clear()
+                    with torch.no_grad():
+                        transformer_forward(injected.detach().float())
+                        final_score_tensor = attention_geometry_score(
+                            recorder.records,
+                            config.key_material,
+                        )
+                    final_score = float(final_score_tensor.detach().item())
+                    required_score = max(
+                        attention_update.score_before,
+                        attention_update.content_base_score,
+                    )
+                    if not math.isfinite(final_score) or final_score <= required_score:
+                        raise RuntimeError("真正写回的 combined latent 未提高真实 Q/K 目标")
                     attention_record = {
                         "attention_score_before": attention_update.score_before,
-                        "attention_score_after": attention_update.score_after,
-                        "attention_score_gain": attention_update.score_gain,
+                        "attention_content_base_score": attention_update.content_base_score,
+                        "attention_score_after": final_score,
+                        "attention_final_combined_score": final_score,
+                        "attention_score_gain": final_score - attention_update.score_before,
                         "attention_applied_update_strength": attention_update.applied_update_strength,
                         "attention_backtracking_step_count": attention_update.backtracking_step_count,
                         "attention_update_digest": attention_update.update_digest,
                     }
                 else:
                     attention_tensor = torch.zeros_like(latent)
+                    combined_update = lf_update + tail_update
+                    injected = latent + combined_update.to(dtype=latent.dtype)
                     attention_record = {
                         "attention_score_before": None,
+                        "attention_content_base_score": None,
                         "attention_score_after": None,
+                        "attention_final_combined_score": None,
                         "attention_score_gain": None,
                         "attention_applied_update_strength": None,
                         "attention_backtracking_step_count": None,
                         "attention_update_digest": "",
                     }
-                combined_update = lf_update + tail_update + attention_tensor
-                injected = latent + combined_update.to(dtype=latent.dtype)
         update_records.append(
             {
                 "run_id": run_id,
                 "prompt_id": config.prompt_id,
                 "split": config.split,
                 "step_index": int(step_index),
-                "timestep": float(timestep.detach().float().item()),
+                "scheduler_step_timestep": float(timestep.detach().float().item()),
+                "post_step_schedule_index": int(post_step_index),
+                "timestep": float(method_timestep.detach().float().item()),
                 "latent_digest_before": _tensor_digest(latent),
                 "latent_digest_after": _tensor_digest(injected),
                 "combined_update_digest": _tensor_digest(combined_update),
@@ -875,6 +942,8 @@ def run_semantic_watermark_runtime(
         model_id=config.carrier_model_reference,
         content_threshold=config.content_threshold,
         geometry_score_threshold=config.geometry_score_threshold,
+        registration_confidence_threshold=config.registration_confidence_threshold,
+        attention_sync_score_threshold=config.attention_sync_score_threshold,
         rescue_margin_low=config.rescue_margin_low,
         lf_weight=lf_weight,
         tail_robust_weight=tail_weight,

@@ -19,7 +19,10 @@ from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.artifacts.dataset_level_quality_outputs import (
     canonical_prompt_ids_for_paper_run,
 )
-from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.paper_run_config import (
+    PaperRunPromptContract,
+    build_paper_run_config,
+)
 from experiments.protocol.pilot_paper_fixed_fpr import (
     build_paper_fixed_fpr_config,
     build_pilot_paper_prompt_split_summary,
@@ -196,11 +199,15 @@ def write_result_closure_gate_outputs(
     submission_readiness_manifest_path: str | Path | None = None,
     entry_review_report_path: str | Path | None = None,
     entry_review_manifest_path: str | Path | None = None,
+    prompt_contract: PaperRunPromptContract | None = None,
 ) -> dict[str, Any]:
     """读取所有正式证据并写出当前 run 的结果闭合 report 与 manifest。"""
 
     root_path = Path(root).resolve()
-    paper_run = build_paper_run_config(root_path)
+    paper_run = build_paper_run_config(
+        root_path,
+        prompt_contract=prompt_contract,
+    )
     split_counts = build_group_split_counts(paper_run.prompt_count)
     output_dir = _ensure_run_output_dir(root_path, output_root, paper_run.run_name)
     requested_prompt_path = _resolve_path(root_path, paper_run.prompt_file)
@@ -462,6 +469,20 @@ def write_result_closure_gate_outputs(
             artifact_root="formal_mechanism_ablation",
             paper_run_name=paper_run.run_name,
             file_name="manifest.local.json",
+        ),
+        "ablation_necessity_rows": _per_run_path(
+            root_path,
+            None,
+            artifact_root="formal_mechanism_ablation",
+            paper_run_name=paper_run.run_name,
+            file_name="mechanism_necessity_statistics.csv",
+        ),
+        "ablation_necessity_summary": _per_run_path(
+            root_path,
+            None,
+            artifact_root="formal_mechanism_ablation",
+            paper_run_name=paper_run.run_name,
+            file_name="mechanism_necessity_summary.json",
         ),
         "dataset_quality_summary": _per_run_path(
             root_path,
@@ -781,6 +802,12 @@ def write_result_closure_gate_outputs(
         paired_superiority_manifest=paired_superiority_manifest,
         ablation_summary=_read_json(resolved_paths["ablation_summary"]),
         ablation_manifest=_read_json(resolved_paths["ablation_manifest"]),
+        ablation_necessity_rows=_read_csv(
+            resolved_paths["ablation_necessity_rows"]
+        ),
+        ablation_necessity_summary=_read_json(
+            resolved_paths["ablation_necessity_summary"]
+        ),
         dataset_quality_summary=_read_json(resolved_paths["dataset_quality_summary"]),
         dataset_quality_feature_report=_read_json(
             resolved_paths["dataset_quality_feature_report"]

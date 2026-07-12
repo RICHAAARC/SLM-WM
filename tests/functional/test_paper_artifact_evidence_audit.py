@@ -4,11 +4,19 @@ from __future__ import annotations
 
 import csv
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
+from experiments.ablations.necessity_statistics import (
+    build_ablation_necessity_statistics,
+)
+from experiments.ablations.runtime_rerun import (
+    FORMAL_RUNTIME_RERUN_ABLATION_IDS,
+)
+from experiments.protocol.paper_run_config import PaperRunPromptContract
 from paper_experiments.analysis.paper_evidence_audit import (
     AuditInputBundle,
     build_builder_readiness_report,
@@ -122,18 +130,62 @@ def make_boundary_ready_bundle() -> AuditInputBundle:
     )
 
 
-def make_ablation_claim_ready_bundle() -> AuditInputBundle:
+def make_ablation_claim_ready_bundle(
+    unsupported_ablation_id: str | None = None,
+) -> AuditInputBundle:
     """构造正式机制消融声明已闭合的审计输入。"""
 
     bundle = make_boundary_ready_bundle()
+    variant_ids = tuple(
+        ablation_id
+        for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+        if ablation_id != "complete_method"
+    )
+    records = [
+        {
+            "ablation_id": ablation_id,
+            "prompt_id": f"prompt_{prompt_index:03d}",
+            "split": "test",
+            "formal_attack_coverage_ready": True,
+            "attacked_positive_rate": (
+                1.0
+                if ablation_id in {"complete_method", unsupported_ablation_id}
+                else 0.0
+            ),
+            "positive_source_positive": ablation_id
+            in {"complete_method", unsupported_ablation_id},
+            "paired_ssim": 0.95,
+        }
+        for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+        for prompt_index in range(34)
+    ]
+    necessity_rows, necessity_summary = build_ablation_necessity_statistics(
+        records,
+        expected_ablation_ids=variant_ids,
+        expected_paired_prompt_count=34,
+        bootstrap_resample_count=1000,
+    )
     summary = {
         **bundle.ablation_claim_summary,
         "mechanism_coverage_ready": True,
         "ablation_claim_gate_ready": True,
-        "strong_ablation_standalone_claim_ready": True,
+        **necessity_summary,
         "supports_paper_claim": True,
     }
-    return replace(bundle, ablation_claim_summary=summary)
+    source_path_map = {
+        **bundle.source_path_map,
+        "mechanism_necessity_statistics": (
+            "outputs/formal_mechanism_ablation/pilot_paper/"
+            "mechanism_necessity_statistics.csv"
+        ),
+    }
+    return replace(
+        bundle,
+        ablation_claim_summary=summary,
+        ablation_necessity_rows=tuple(necessity_rows),
+        ablation_necessity_summary=necessity_summary,
+        source_path_map=source_path_map,
+    )
 
 
 @pytest.mark.quick
@@ -246,6 +298,27 @@ def test_ablation_claim_gate_marks_ablation_claim_artifacts_ready() -> None:
     assert figure_by_id["figure_ablation_delta"]["supports_paper_claim"] is True
 
 
+@pytest.mark.quick
+def test_measured_negative_ablation_is_honest_but_does_not_block_package() -> None:
+    """完整统计中的负结论应标记 measured_not_supported, 不伪造必要性。"""
+
+    unsupported_id = "without_attention_geometry"
+    bundle = make_ablation_claim_ready_bundle(unsupported_id)
+    claim_rows = build_claim_audit_rows(bundle)
+    claims_by_id = {row["claim_id"]: row for row in claim_rows}
+
+    assert claims_by_id["claim_internal_mechanism_necessity"]["claim_decision"] == (
+        "measured_not_supported"
+    )
+    assert claims_by_id["claim_necessity_attention_geometry"]["claim_decision"] == (
+        "measured_not_supported"
+    )
+    assert claims_by_id["claim_necessity_attention_geometry"][
+        "paper_claim_supported"
+    ] is False
+    assert build_table_readiness_rows(bundle)[4]["paper_ready"] is True
+
+
 def write_json(path: Path, value: dict) -> None:
     """以 UTF-8 写入稳定 JSON, 供脚本在临时目录中读取。"""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -282,6 +355,21 @@ def write_minimal_upstream_artifacts(tmp_path: Path) -> None:
     write_json(ablation_dir / "ablation_claim_summary.json", make_audit_input_bundle().ablation_claim_summary)
 
 
+def write_test_prompt_contract(tmp_path: Path) -> PaperRunPromptContract:
+    """为临时 writer 测试显式注入最小 Prompt 依赖。"""
+
+    relative_path = Path("configs/paper_main_pilot_paper_prompts.txt")
+    path = tmp_path / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("a controlled prompt\n", encoding="utf-8")
+    return PaperRunPromptContract(
+        run_name="pilot_paper",
+        prompt_file=relative_path.as_posix(),
+        expected_prompt_count=1,
+        prompt_file_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+
+
 @pytest.mark.quick
 def test_paper_artifact_evidence_outputs_are_rebuildable_and_claim_safe(
     tmp_path: Path,
@@ -292,7 +380,10 @@ def test_paper_artifact_evidence_outputs_are_rebuildable_and_claim_safe(
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
     write_minimal_upstream_artifacts(tmp_path)
 
-    manifest = write_paper_artifact_evidence_audit_outputs(root=tmp_path)
+    manifest = write_paper_artifact_evidence_audit_outputs(
+        root=tmp_path,
+        prompt_contract=write_test_prompt_contract(tmp_path),
+    )
     output_dir = tmp_path / "outputs" / "paper_artifact_evidence_audit" / "pilot_paper"
     expected_files = {
         "claim_audit_table.csv",
@@ -333,7 +424,7 @@ def test_paper_artifact_evidence_outputs_are_rebuildable_and_claim_safe(
         "roc_curve_points_ready",
         "det_curve_points_ready",
     }.issubset(data_validation_report["blocked_artifact_data_ids"])
-    assert len(data_validation_report["source_paths"]) == 11
+    assert len(data_validation_report["source_paths"]) == 12
     raw_detection_path = (
         "outputs/image_only_dataset_runtime/pilot_paper/"
         "image_only_detection_records.jsonl"

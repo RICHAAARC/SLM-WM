@@ -246,6 +246,7 @@ def _run_main_method_route(
     workflow_name: str,
     paper_run_name: str,
     root_path: Path,
+    persistent_output_dir: Optional[str | Path] = None,
 ) -> Dict[str, Any]:
     """调用可脱离 Notebook 的完整主方法绑定与打包会话."""
 
@@ -253,9 +254,24 @@ def _run_main_method_route(
         run_semantic_watermark_image_only_session,
     )
 
+    archive_destination_dirs = None
+    resume_checkpoint_dir = None
+    if persistent_output_dir is not None:
+        persistent_root = Path(persistent_output_dir).expanduser().resolve()
+        archive_destination_dirs = {
+            "image_only_dataset_runtime": persistent_root / "image_only_dataset_runtime",
+            "dataset_level_quality": persistent_root / "dataset_level_quality",
+        }
+        if workflow_name == "mechanism_ablation":
+            archive_destination_dirs["runtime_rerun_ablation"] = (
+                persistent_root / "runtime_rerun_ablation"
+            )
+        resume_checkpoint_dir = persistent_root / "semantic_watermark_resume_checkpoint"
     session = run_semantic_watermark_image_only_session(
         root_path,
         run_formal_ablation=workflow_name == "mechanism_ablation",
+        archive_destination_dirs=archive_destination_dirs,
+        resume_checkpoint_dir=resume_checkpoint_dir,
     )
     return {
         "workflow_summary": session,
@@ -463,6 +479,7 @@ def run_workflow(
                 workflow_name=workflow_name,
                 paper_run_name=paper_run_name,
                 root_path=root_path,
+                persistent_output_dir=persistent_output_dir,
             )
             if route.uses_scientific_command
             else _run_shared_route(

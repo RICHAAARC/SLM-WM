@@ -73,7 +73,6 @@ def qk_self_attention(module: Any, hidden_states: Any, max_tokens: int = 256) ->
         for row in axis_indices
         for column in axis_indices
     )
-    bounded_count = len(token_indices)
     index_tensor = torch.tensor(token_indices, device=hidden_states.device)
     query = module.to_q(hidden_states)
     key = module.to_k(hidden_states)
@@ -277,6 +276,7 @@ class AttentionGeometryUpdate:
 
     update: Any
     score_before: float
+    content_base_score: float
     score_after: float
     score_gain: float
     gradient_norm: float
@@ -296,22 +296,40 @@ def optimize_attention_geometry_update(
     safe_subspace: JacobianNullSpaceResult,
     update_strength: float,
     precomputed_gradient: AttentionGeometryGradient | None = None,
+    base_update: Any | None = None,
 ) -> AttentionGeometryUpdate:
-    """通过真实 Transformer 前向和 autograd 生成注意力几何更新。"""
+    """在固定内容更新基底上生成并验证真实注意力几何更新。
+
+    ``base_update`` 用于传入已经确定的 LF 与尾部载体更新。回溯搜索对
+    ``latent + base_update + attention_update`` 这一真正写回的候选 latent 评分,
+    避免只验证 attention-only 中间状态后再被内容分支抵消。
+    """
 
     torch = _torch()
     if update_strength <= 0.0:
         raise ValueError("update_strength 必须为正数")
-    gradient_evidence = precomputed_gradient or compute_attention_geometry_gradient(
-        latent,
+    original_evidence = precomputed_gradient or compute_attention_geometry_gradient(
+        latent, transformer_forward, recorder, key_material
+    )
+    resolved_base_update = (
+        torch.zeros_like(latent)
+        if base_update is None
+        else torch.as_tensor(base_update, device=latent.device, dtype=latent.dtype)
+    )
+    if resolved_base_update.shape != latent.shape:
+        raise ValueError("base_update 必须与 latent 形状一致")
+    content_base_latent = (latent.detach() + resolved_base_update.detach()).to(dtype=latent.dtype)
+    content_base_evidence = compute_attention_geometry_gradient(
+        content_base_latent,
         transformer_forward,
         recorder,
         key_material,
     )
     with torch.enable_grad():
-        differentiable_latent = latent.detach().float()
-        score_before = gradient_evidence.score_before
-        gradient = gradient_evidence.gradient.to(device=latent.device, dtype=torch.float32)
+        score_before = original_evidence.score_before
+        content_base_score = content_base_evidence.score_before
+        minimum_accepted_score = max(score_before, content_base_score)
+        gradient = content_base_evidence.gradient.to(device=latent.device, dtype=torch.float32)
         projected = safe_subspace.project(gradient)
         projected_norm = projected.float().norm()
         if float(projected_norm.item()) <= 1e-12:
@@ -323,20 +341,27 @@ def optimize_attention_geometry_update(
         backtracking_step_count = 0
         for backtracking_step_count in range(9):
             update = unit_update * applied_strength
-            candidate = differentiable_latent.detach() + update.detach().float()
+            candidate = (
+                content_base_latent.detach()
+                + update.detach().to(dtype=content_base_latent.dtype)
+            ).float()
             recorder.clear()
             transformer_forward(candidate)
             score_after_tensor = attention_geometry_score(recorder.records, key_material)
-            if bool(torch.isfinite(score_after_tensor)) and float(score_after_tensor.detach().item()) > score_before:
+            if (
+                bool(torch.isfinite(score_after_tensor))
+                and float(score_after_tensor.detach().item()) > minimum_accepted_score
+            ):
                 accepted = True
                 break
             applied_strength *= 0.5
         if not accepted:
             raise RuntimeError("注意力几何更新在回溯搜索后仍未提高真实 Q/K 目标")
     score_after = float(score_after_tensor.detach().item())
-    layer_names = gradient_evidence.layer_names
+    layer_names = content_base_evidence.layer_names
     payload = {
         "score_before": round(score_before, 12),
+        "content_base_score": round(content_base_score, 12),
         "score_after": round(score_after, 12),
         "gradient_norm": round(float(gradient.norm().item()), 12),
         "projected_gradient_norm": round(float(projected.norm().item()), 12),
@@ -348,9 +373,10 @@ def optimize_attention_geometry_update(
     return AttentionGeometryUpdate(
         update=update.to(dtype=latent.dtype),
         score_before=score_before,
+        content_base_score=content_base_score,
         score_after=score_after,
         score_gain=score_after - score_before,
-        gradient_norm=gradient_evidence.gradient_norm,
+        gradient_norm=content_base_evidence.gradient_norm,
         projected_gradient_norm=float(projected.norm().item()),
         applied_update_strength=applied_strength,
         backtracking_step_count=backtracking_step_count,
@@ -361,5 +387,7 @@ def optimize_attention_geometry_update(
             "gradient_source": "torch_autograd",
             "safe_projection": "jacobian_null_space",
             "update_search": "monotonic_backtracking",
+            "optimization_base": "fixed_lf_and_tail_update",
+            "verified_candidate": "actual_combined_latent",
         },
     )

@@ -24,7 +24,10 @@ from paper_experiments.analysis.paper_evidence_audit import (
 from paper_experiments.analysis.paper_artifact_data_validation import (
     validate_paper_artifact_source_data,
 )
-from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.paper_run_config import (
+    PaperRunPromptContract,
+    build_paper_run_config,
+)
 
 CONSTRUCTION_UNIT_NAME = "paper_artifact_evidence_audit"
 DEFAULT_OUTPUT_ROOT = Path("outputs/paper_artifact_evidence_audit")
@@ -44,6 +47,13 @@ def stable_json_text(value: Any) -> str:
 def read_json(path: Path) -> dict[str, Any]:
     """读取 JSON 文件。"""
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_csv_rows(path: Path) -> tuple[dict[str, Any], ...]:
+    """读取受治理 CSV 的全部数据行。"""
+
+    with path.open(encoding="utf-8-sig", newline="") as stream:
+        return tuple(dict(row) for row in csv.DictReader(stream))
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str]) -> None:
@@ -120,6 +130,20 @@ def build_input_bundle(
     dataset_quality_summary = read_json(dataset_quality_summary_path)
     ablation_manifest = read_json(ablation_manifest_path)
     ablation_claim_summary = read_json(ablation_claim_summary_path)
+    ablation_necessity_path = ablation_dir / "mechanism_necessity_statistics.csv"
+    ablation_necessity_summary_path = (
+        ablation_dir / "mechanism_necessity_summary.json"
+    )
+    ablation_necessity_rows = (
+        read_csv_rows(ablation_necessity_path)
+        if ablation_necessity_path.is_file()
+        else ()
+    )
+    ablation_necessity_summary = (
+        read_json(ablation_necessity_summary_path)
+        if ablation_necessity_summary_path.is_file()
+        else {}
+    )
     source_data_paths = {
         "frozen_evidence_protocol_ready": runtime_dir / "frozen_evidence_protocol.json",
         "raw_image_only_detection_records_ready": (
@@ -133,6 +157,7 @@ def build_input_bundle(
         "baseline_comparison_table_ready": baseline_dir / "baseline_comparison_table.csv",
         "mechanism_ablation_metrics_ready": ablation_dir / "mechanism_ablation_metrics.csv",
         "mechanism_pairwise_delta_ready": ablation_dir / "mechanism_pairwise_delta.csv",
+        "mechanism_necessity_statistics_ready": ablation_necessity_path,
         "dataset_quality_metrics_ready": dataset_quality_dir / "dataset_quality_metrics.csv",
     }
     artifact_data_validation = validate_paper_artifact_source_data(
@@ -184,8 +209,16 @@ def build_input_bundle(
             "ablation_claim_summary": governed_path(ablation_claim_summary_path),
             "mechanism_ablation_table": governed_path(ablation_dir / "mechanism_ablation_metrics.csv"),
             "method_pairwise_delta_table": governed_path(ablation_dir / "mechanism_pairwise_delta.csv"),
+            "mechanism_necessity_statistics": governed_path(
+                ablation_necessity_path
+            ),
+            "mechanism_necessity_summary": governed_path(
+                ablation_necessity_summary_path
+            ),
         },
         artifact_data_validation=artifact_data_validation,
+        ablation_necessity_rows=ablation_necessity_rows,
+        ablation_necessity_summary=ablation_necessity_summary,
     )
 
 
@@ -204,10 +237,14 @@ def write_paper_artifact_evidence_audit_outputs(
     dataset_quality_summary_path: str | Path | None = None,
     ablation_manifest_path: str | Path | None = None,
     ablation_claim_summary_path: str | Path | None = None,
+    prompt_contract: PaperRunPromptContract | None = None,
 ) -> dict[str, Any]:
     """写出论文证据审计表、readiness 表、gap 清单、阻断报告与 manifest。"""
     root_path = Path(root).resolve()
-    paper_run = build_paper_run_config(root_path)
+    paper_run = build_paper_run_config(
+        root_path,
+        prompt_contract=prompt_contract,
+    )
     resolved_output_dir = ensure_output_dir_under_outputs(
         root_path,
         Path(output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name),

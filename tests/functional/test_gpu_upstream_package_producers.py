@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import csv
 import hashlib
 import json
 from pathlib import Path
@@ -19,6 +20,10 @@ from experiments.ablations.runtime_rerun import (
     FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
     default_runtime_rerun_ablation_specs,
     package_runtime_rerun_ablations,
+)
+from experiments.ablations.necessity_statistics import (
+    ABLATION_NECESSITY_FIELDNAMES,
+    build_ablation_necessity_statistics,
 )
 from experiments.artifacts.dataset_level_quality_outputs import (
     FORMAL_FEATURE_BACKEND,
@@ -108,14 +113,17 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
 def _canonical_prompt_records(root: Path) -> tuple[object, ...]:
     """读取当前测试论文层级的完整规范 Prompt 与 split."""
 
+    repository_root = Path(__file__).resolve().parents[2]
+    for relative_path in (
+        Path("configs/prompt_source_registry.json"),
+        PROMPT_FILES[PAPER_RUN_NAME],
+    ):
+        target_path = root / relative_path
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        if not target_path.is_file():
+            target_path.write_bytes((repository_root / relative_path).read_bytes())
     paper_run = build_paper_run_config(root)
-    source_prompt_path = (
-        Path(__file__).resolve().parents[2] / paper_run.prompt_file
-    )
     prompt_path = root / paper_run.prompt_file
-    prompt_path.parent.mkdir(parents=True, exist_ok=True)
-    if not prompt_path.is_file():
-        prompt_path.write_bytes(source_prompt_path.read_bytes())
     return apply_split_assignments(
         build_prompt_records(
             paper_run.prompt_set,
@@ -184,8 +192,8 @@ def _prepare_image_runtime(root: Path) -> Path:
     """构造仅图像运行打包门禁所需的最小正式形状。"""
 
     directory = root / "outputs" / "image_only_dataset_runtime" / PAPER_RUN_NAME
-    paper_run = build_paper_run_config(root)
     prompt_records = _canonical_prompt_records(root)
+    paper_run = build_paper_run_config(root)
     runtime_results = [
         _runtime_result_payload(
             _base_runtime_config(prompt_record, paper_run),
@@ -221,6 +229,7 @@ def _prepare_image_runtime(root: Path) -> Path:
             "target_fpr": TARGET_FPR,
             "protocol_decision": "pass",
             "full_method_claim_ready": True,
+            "geometry_protocol_calibration_ready": True,
             "detection_curve_data_ready": True,
             **provenance_summary,
             "supports_paper_claim": True,
@@ -254,6 +263,7 @@ def _prepare_image_runtime(root: Path) -> Path:
                     "target_fpr": TARGET_FPR,
                 }
             },
+            "metadata": {"geometry_protocol_calibration_ready": True},
         },
     )
     write_test_scientific_execution_binding(
@@ -274,8 +284,8 @@ def _prepare_ablation(root: Path) -> Path:
     """构造正式重运行消融打包门禁所需的最小正式形状。"""
 
     directory = root / "outputs" / "formal_mechanism_ablation" / PAPER_RUN_NAME
-    paper_run = build_paper_run_config(root)
     prompt_records = _canonical_prompt_records(root)
+    paper_run = build_paper_run_config(root)
     specs = default_runtime_rerun_ablation_specs()
     ablation_records: list[dict[str, object]] = []
     for spec in specs:
@@ -298,6 +308,14 @@ def _prepare_ablation(root: Path) -> Path:
                         run_config,
                         seed=run_config.seed,
                     ),
+                    "formal_attack_coverage_ready": True,
+                    "attacked_positive_rate": (
+                        1.0 if spec.ablation_id == "complete_method" else 0.0
+                    ),
+                    "positive_source_positive": (
+                        spec.ablation_id == "complete_method"
+                    ),
+                    "paired_ssim": 0.95,
                 }
             )
     _write_jsonl(
@@ -339,6 +357,29 @@ def _prepare_ablation(root: Path) -> Path:
         ),
         "prompt_protocol_exact_set_ready": True,
     }
+    variant_ids = tuple(
+        ablation_id
+        for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
+        if ablation_id != "complete_method"
+    )
+    necessity_rows, necessity_summary = build_ablation_necessity_statistics(
+        ablation_records,
+        expected_ablation_ids=variant_ids,
+        expected_paired_prompt_count=len(split_prompt_ids["test"]),
+        bootstrap_resample_count=1000,
+    )
+    with (directory / "mechanism_necessity_statistics.csv").open(
+        "w",
+        encoding="utf-8",
+        newline="",
+    ) as stream:
+        writer = csv.DictWriter(stream, fieldnames=ABLATION_NECESSITY_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(necessity_rows)
+    _write_json(
+        directory / "mechanism_necessity_summary.json",
+        necessity_summary,
+    )
     provenance_summary = aggregate_scientific_unit_provenance(
         (
             record["runtime_result"]["metadata"][
@@ -365,6 +406,7 @@ def _prepare_ablation(root: Path) -> Path:
             "formal_attack_coverage_ready_count": len(ablation_records),
             "formal_attack_coverage_ready": True,
             **provenance_summary,
+            **necessity_summary,
             "protocol_decision": "pass",
             "ablation_claim_gate_ready": True,
             "supports_paper_claim": True,
@@ -385,6 +427,8 @@ def _prepare_ablation(root: Path) -> Path:
                     "per_ablation_frozen_protocols.json",
                     "mechanism_ablation_metrics.csv",
                     "mechanism_pairwise_delta.csv",
+                    "mechanism_necessity_statistics.csv",
+                    "mechanism_necessity_summary.json",
                     "ablation_claim_summary.json",
                     "manifest.local.json",
                 )
@@ -393,8 +437,30 @@ def _prepare_ablation(root: Path) -> Path:
                 "target_fpr": TARGET_FPR,
                 **ablation_contract,
                 **prompt_contract,
+                "necessity_statistic_rows_digest": necessity_summary[
+                    "necessity_statistic_rows_digest"
+                ],
+                "necessity_summary_digest": build_stable_digest(
+                    necessity_summary
+                ),
             },
-            "metadata": {**ablation_contract, **prompt_contract},
+            "metadata": {
+                **ablation_contract,
+                **prompt_contract,
+                "ablation_necessity_statistics_ready": True,
+                "necessity_statistic_rows_digest": necessity_summary[
+                    "necessity_statistic_rows_digest"
+                ],
+                "necessity_supported_ablation_ids": necessity_summary[
+                    "necessity_supported_ablation_ids"
+                ],
+                "necessity_not_supported_ablation_ids": necessity_summary[
+                    "necessity_not_supported_ablation_ids"
+                ],
+                "all_mechanism_necessity_claims_supported": necessity_summary[
+                    "all_mechanism_necessity_claims_supported"
+                ],
+            },
         },
     )
     write_test_scientific_execution_binding(

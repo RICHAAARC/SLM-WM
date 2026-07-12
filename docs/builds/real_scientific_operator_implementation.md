@@ -8,7 +8,7 @@
 | 真实 Jacobian Null Space | `main/methods/subspace/jacobian_nullspace.py` | 通过 autograd JVP、联合响应矩阵和 SVD 求解 latent 低响应基底 |
 | LF 与尾部载体 | `main/methods/carrier/keyed_tensor.py` | 构造检测端可重建的固定模板, 并在嵌入端投影到安全子空间 |
 | 真实注意力梯度 | `main/methods/geometry/differentiable_attention.py` | 从 Transformer `to_q`/`to_k` 得到真实 attention, 对 latent 求梯度 |
-| 几何恢复 | `main/methods/geometry/attention_alignment.py` | 执行密钥关系匹配、三点 RANSAC 和仿射估计 |
+| 几何恢复 | `main/methods/geometry/attention_alignment.py` | 通过双线性 $W A_{\mathrm{obs}} W^\top$ 双边关系图注册、有界变换粗搜索和局部细化恢复图像参考系 |
 | 仅图像检测 | `main/methods/detection/image_only.py` | 只接收图像、密钥和公开模型配置, 完成内容主判与同阈值救回 |
 | 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | 在 SD3.5 Medium 采样过程中执行全部真实嵌入算子 |
 | 共同攻击算子 | `experiments/runtime/diffusion/regeneration_attacks.py` | 为主方法与全部 baseline 统一执行 SD3.5 img2img、flow-matching 反向 Euler 积分、inpainting 和检测器引导搜索 |

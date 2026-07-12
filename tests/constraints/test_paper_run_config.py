@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
 
 from experiments.protocol.paper_run_config import (
     DEFAULT_DRIVE_ROOT,
+    PaperRunPromptContract,
     build_paper_run_config,
     derive_dataset_level_quality_minimum_count,
     derive_minimum_clean_negative_count,
@@ -25,6 +27,24 @@ def write_prompt_file(path: Path, count: int) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(f"a controlled prompt {index}" for index in range(count)) + "\n", encoding="utf-8")
+
+
+def write_prompt_contract(
+    root: Path,
+    run_name: str,
+    count: int,
+) -> PaperRunPromptContract:
+    """显式构造测试 Prompt 依赖, 不冒充正式注册表输入。"""
+
+    relative_path = Path("configs") / f"paper_main_{run_name}_prompts.txt"
+    path = root / relative_path
+    write_prompt_file(path, count)
+    return PaperRunPromptContract(
+        run_name=run_name,
+        prompt_file=relative_path.as_posix(),
+        expected_prompt_count=count,
+        prompt_file_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
 
 
 @pytest.mark.constraint
@@ -45,14 +65,14 @@ def test_paper_run_config_resolves_probe_paper_defaults(
 ) -> None:
     """无显式运行层级时应唯一解析为 probe_paper 并使用全部 Prompt."""
 
-    write_prompt_file(tmp_path / "configs" / "paper_main_probe_paper_prompts.txt", 7)
+    prompt_contract = write_prompt_contract(tmp_path, "probe_paper", 7)
     monkeypatch.delenv("SLM_WM_PAPER_RUN_NAME", raising=False)
     monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
     monkeypatch.delenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
 
-    config = build_paper_run_config(root=tmp_path)
+    config = build_paper_run_config(root=tmp_path, prompt_contract=prompt_contract)
 
     assert config.run_name == "probe_paper"
     assert config.prompt_set == "probe_paper"
@@ -73,14 +93,14 @@ def test_paper_run_config_switches_to_full_paper_without_notebook_rewrite(
 ) -> None:
     """切换环境变量即可让同一入口使用 full_paper prompt 与 Drive 根目录."""
 
-    write_prompt_file(tmp_path / "configs" / "paper_main_full_paper_prompts.txt", 11)
+    prompt_contract = write_prompt_contract(tmp_path, "full_paper", 11)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
     monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", "all")
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
 
-    config = build_paper_run_config(root=tmp_path)
+    config = build_paper_run_config(root=tmp_path, prompt_contract=prompt_contract)
 
     assert config.run_name == "full_paper"
     assert config.prompt_set == "full_paper"
@@ -101,14 +121,14 @@ def test_paper_run_config_switches_to_pilot_paper_with_explicit_input(
 ) -> None:
     """显式选择 pilot_paper 时应使用其完整 Prompt 协议与统计强度."""
 
-    write_prompt_file(tmp_path / "configs" / "paper_main_pilot_paper_prompts.txt", 700)
+    prompt_contract = write_prompt_contract(tmp_path, "pilot_paper", 700)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
     monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
     monkeypatch.delenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
 
-    config = build_paper_run_config(root=tmp_path)
+    config = build_paper_run_config(root=tmp_path, prompt_contract=prompt_contract)
 
     assert config.run_name == "pilot_paper"
     assert config.prompt_set == "pilot_paper"
@@ -126,20 +146,34 @@ def test_paper_run_config_switches_to_pilot_paper_with_explicit_input(
 def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """三类论文运行层级共享方法参数, 门禁规模只能由样本规模和 fixed-FPR 派生。"""
 
-    write_prompt_file(tmp_path / "configs" / "paper_main_probe_paper_prompts.txt", 70)
-    write_prompt_file(tmp_path / "configs" / "paper_main_pilot_paper_prompts.txt", 700)
-    write_prompt_file(tmp_path / "configs" / "paper_main_full_paper_prompts.txt", 7000)
+    contracts = {
+        run_name: write_prompt_contract(tmp_path, run_name, count)
+        for run_name, count in (
+            ("probe_paper", 70),
+            ("pilot_paper", 700),
+            ("full_paper", 7000),
+        )
+    }
     monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
     monkeypatch.delenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", raising=False)
 
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
-    probe_config = build_paper_run_config(root=tmp_path)
+    probe_config = build_paper_run_config(
+        root=tmp_path,
+        prompt_contract=contracts["probe_paper"],
+    )
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
-    pilot_config = build_paper_run_config(root=tmp_path)
+    pilot_config = build_paper_run_config(
+        root=tmp_path,
+        prompt_contract=contracts["pilot_paper"],
+    )
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
-    full_config = build_paper_run_config(root=tmp_path)
+    full_config = build_paper_run_config(
+        root=tmp_path,
+        prompt_contract=contracts["full_paper"],
+    )
 
     assert shared_method_settings(probe_config) == shared_method_settings(pilot_config)
     assert shared_method_settings(pilot_config) == shared_method_settings(full_config)
@@ -186,13 +220,17 @@ def test_count_environment_resolver_inherits_current_paper_run(
 ) -> None:
     """业务 helper 读取单项计数环境变量时应复用统一论文运行配置."""
 
-    write_prompt_file(tmp_path / "configs" / "paper_main_pilot_paper_prompts.txt", 13)
+    prompt_contract = write_prompt_contract(tmp_path, "pilot_paper", 13)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
     monkeypatch.setenv("SLM_WM_EXAMPLE_COUNT", "all")
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
 
-    assert resolve_count_from_environment("SLM_WM_EXAMPLE_COUNT", root=tmp_path) == 13
+    assert resolve_count_from_environment(
+        "SLM_WM_EXAMPLE_COUNT",
+        root=tmp_path,
+        prompt_contract=prompt_contract,
+    ) == 13
 
 
 @pytest.mark.constraint
@@ -202,14 +240,114 @@ def test_paper_run_config_rejects_stale_prompt_environment(
 ) -> None:
     """切换到 full_paper 时不得静默沿用 pilot_paper prompt 环境变量."""
 
-    write_prompt_file(tmp_path / "configs" / "paper_main_full_paper_prompts.txt", 11)
+    prompt_contract = write_prompt_contract(tmp_path, "full_paper", 11)
     monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
     monkeypatch.setenv("SLM_WM_PROMPT_SET", "pilot_paper")
     monkeypatch.setenv("SLM_WM_PROMPT_FILE", "configs/paper_main_pilot_paper_prompts.txt")
 
     with pytest.raises(ValueError, match="SLM_WM_PROMPT_SET"):
-        build_paper_run_config(root=tmp_path)
+        build_paper_run_config(root=tmp_path, prompt_contract=prompt_contract)
 
     monkeypatch.setenv("SLM_WM_PROMPT_SET", "full_paper")
     with pytest.raises(ValueError, match="SLM_WM_PROMPT_FILE"):
+        build_paper_run_config(root=tmp_path, prompt_contract=prompt_contract)
+
+
+@pytest.mark.constraint
+def test_formal_prompt_contract_accepts_repository_governed_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正式入口必须能核验仓库内规范 Prompt 的数量和字节摘要。"""
+
+    root = Path(__file__).resolve().parents[2]
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+
+    config = build_paper_run_config(root=root)
+
+    assert config.prompt_count == 70
+
+
+@pytest.mark.constraint
+def test_formal_prompt_contract_uses_packaged_source_for_artifact_only_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """仅包含产物的隔离根目录应复用当前提交内受治理 Prompt。"""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+
+    config = build_paper_run_config(root=tmp_path)
+
+    assert config.prompt_count == 70
+    assert config.prompt_file == "configs/paper_main_probe_paper_prompts.txt"
+
+
+@pytest.mark.constraint
+def test_formal_prompt_contract_rejects_unregistered_root_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """隔离根目录一旦提供规范路径文件, 就必须通过当前摘要校验。"""
+
+    prompt_path = tmp_path / "configs" / "paper_main_probe_paper_prompts.txt"
+    write_prompt_file(prompt_path, 70)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        build_paper_run_config(root=tmp_path)
+
+
+@pytest.mark.constraint
+def test_formal_prompt_contract_rejects_external_same_name_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同名外部文件不得通过仅比较 basename 的旧边界。"""
+
+    root = Path(__file__).resolve().parents[2]
+    external_path = tmp_path / "paper_main_probe_paper_prompts.txt"
+    write_prompt_file(external_path, 70)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.setenv("SLM_WM_PROMPT_FILE", str(external_path))
+
+    with pytest.raises(ValueError, match="精确匹配"):
+        build_paper_run_config(root=root)
+
+
+@pytest.mark.constraint
+def test_formal_prompt_contract_rejects_count_and_digest_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正式入口必须分别拒绝数量漂移和保持数量时的内容漂移。"""
+
+    repository_root = Path(__file__).resolve().parents[2]
+    configs_dir = tmp_path / "configs"
+    configs_dir.mkdir(parents=True)
+    registry_source = repository_root / "configs" / "prompt_source_registry.json"
+    prompt_source = repository_root / "configs" / "paper_main_probe_paper_prompts.txt"
+    (configs_dir / registry_source.name).write_bytes(registry_source.read_bytes())
+    prompt_path = configs_dir / prompt_source.name
+    prompt_path.write_bytes(prompt_source.read_bytes())
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+
+    lines = prompt_path.read_text(encoding="utf-8").splitlines()
+    prompt_path.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="实际数量"):
+        build_paper_run_config(root=tmp_path)
+
+    prompt_path.write_bytes(prompt_source.read_bytes())
+    drifted_lines = prompt_path.read_text(encoding="utf-8").splitlines()
+    drifted_lines[0] = drifted_lines[0] + " content drift"
+    prompt_path.write_text("\n".join(drifted_lines) + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="SHA-256"):
         build_paper_run_config(root=tmp_path)

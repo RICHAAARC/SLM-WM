@@ -19,6 +19,7 @@ from scripts.write_pilot_paper_result_records import (
     write_pilot_paper_result_record_outputs,
 )
 from tests.helpers.closure_input_lock import write_test_closure_input_lock
+from tests.helpers.formal_prompt_source import copy_governed_prompt_file
 
 
 pytestmark = pytest.mark.quick
@@ -103,13 +104,7 @@ def write_csv_rows(path: Path, rows: list[dict[str, object]]) -> None:
 def write_prompt_file(repo_root: Path, paper_claim_scale: str) -> None:
     """写出当前运行层级要求的完整 Prompt 集。"""
 
-    prompt_count = int(PAPER_SCALE[paper_claim_scale]["prompt_count"])
-    prompt_path = repo_root / "configs" / f"paper_main_{paper_claim_scale}_prompts.txt"
-    prompt_path.parent.mkdir(parents=True, exist_ok=True)
-    prompt_path.write_text(
-        "\n".join(f"a governed {paper_claim_scale} prompt {index}" for index in range(prompt_count)) + "\n",
-        encoding="utf-8",
-    )
+    copy_governed_prompt_file(repo_root, paper_claim_scale)
 
 
 def write_dataset_quality_inputs(repo_root: Path, paper_claim_scale: str) -> None:

@@ -1,6 +1,6 @@
 # Paper Workflow
 
-`paper_workflow/` 是最外层 Colab 入口与运行环境包装层。Notebook 只设置论文级别、调用统一依赖 profile 准备 CLI 并启动仓库 workflow, 不定义方法、攻击、baseline、依赖解析或统计代码。
+`paper_workflow/` 是最外层 Colab 入口与运行环境包装层。Notebook 只设置论文级别、挂载 Drive、调用统一宿主 launcher 并读取受治理结果, 不定义方法、攻击、baseline、依赖解析或统计代码。
 
 ## 正式入口
 
@@ -19,20 +19,20 @@
 | `pilot_paper` | 700 | 340 | 0.01 |
 | `full_paper` | 7000 | 3400 | 0.001 |
 
-每个 Notebook 在拉取仓库前必须由 `SLM_WM_REPOSITORY_COMMIT` 提供精确40位小写 Git SHA。入口先执行 detached checkout 和 clean worktree 校验, 再由 `scripts/prepare_dependency_profile.py` 资格化 CPU 父 `workflow_orchestrator`。GPU workflow 随后通过 repository runtime API 准备且只准备当前职责对应的一个 CUDA 科学子 profile; 五个科学 profile 均不得安装到 Notebook 父解释器。两个 CLI 都只消费已经提交且逐项携带 SHA-256 的完整依赖锁, Notebook 不拼装包名、版本或安装命令。正式运行函数在业务执行开始与运行 manifest 写出前实时复验同一 Git 锁, 打包函数在归档开始与 ZIP 写出后再次复验。运行 manifest 与归档 manifest 分别保存完整 `formal_execution_run_lock` 和 `formal_execution_package_lock`; 任一分支名、短 SHA、attached HEAD、dirty 工作树、依赖锁缺失、科学子解释器证据缺失或锁摘要漂移都会阻断正式归档。依赖实现与当前执行接线状态见 `docs/builds/formal_dependency_environment.md`。
+每个 Notebook 在拉取仓库前必须由 `SLM_WM_REPOSITORY_COMMIT` 提供精确40位小写 Git SHA。正式结果入口只以 `python -I scripts/run_formal_workflow_host.py` 调用宿主 launcher, 不在 Colab 系统解释器中导入 repository helper 或直接安装依赖。launcher 先复验 clean detached checkout, 再从固定 SHA-256 的 `uv` wheel 创建 registry 指定的精确 CPython 3.12.13, 按已提交完整哈希锁准备 CPU 父 `workflow_orchestrator`, 最后由该解释器调用现有 GPU workflow 或 CPU 闭合入口。GPU workflow 只准备当前职责对应的一个 CUDA 科学子 profile。正式运行与打包边界仍实时复验 Git 锁、依赖身份和科学执行证据。
 
-主方法 Notebook 只准备 CPU `workflow_orchestrator`, 随后调用 `scripts.semantic_watermark_scientific_workflow`. 该内层 workflow 对 `sd35_method_runtime_gpu` 调用一次 `execute_isolated_scientific_command`, 子解释器入口固定为 `experiments.runtime.semantic_watermark_scientific_session`, 并顺序执行主方法、正式 FID / KID 和按需消融. 完成产物以独立 `scientific_execution_binding.json` 绑定 profile、完整哈希锁、正式执行锁、科学执行报告、依赖环境报告、逐命令报告以及科学 runner 输出的摘要和 manifest 摘要; workflow 随后复用该子解释器重新打包并仅镜像新归档. 该绑定补充执行来源, 不修改科学 runner 已完成的摘要或 manifest, 也不单独支持论文 claim.
+主方法 Notebook 只选择公开 GPU route, 精确父解释器随后调用 `scripts.semantic_watermark_scientific_workflow`. 该内层 workflow 对 `sd35_method_runtime_gpu` 调用一次 `execute_isolated_scientific_command`, 子解释器入口固定为 `experiments.runtime.semantic_watermark_scientific_session`, 并顺序执行主方法、正式 FID / KID 和按需消融. 完成产物以独立 `scientific_execution_binding.json` 绑定 profile、完整哈希锁、正式执行锁、科学执行报告、依赖环境报告、逐命令报告以及科学 runner 输出的摘要和 manifest 摘要; workflow 随后复用该子解释器重新打包并仅镜像新归档. 该绑定补充执行来源, 不修改科学 runner 已完成的摘要或 manifest, 也不单独支持论文 claim.
 
 主方法 Colab 入口把 clean detached Git 工作树、`outputs/` 和隔离 Python 环境放在 `/content` 本地磁盘, 不在 Drive FUSE 上执行科学代码。外层 helper 只注入 `SLM_WM_RESUME_CHECKPOINT_DIR`; 通用 `experiments.runtime.resume_checkpoint` 在变量未配置时保持无操作, 因而同一 workflow 可脱离 Notebook 在普通 GPU 服务器运行。配置该目录后, 已完成 Prompt、正式消融运行、Inception 特征 batch 和进度记录采用临时副本、SHA-256 复验、原子 rename 与 manifest 最后发布语义同步到持久盘。所有 checkpoint 固定为 `evidence_eligibility=intermediate_state_only` 且 `supports_paper_claim=false`; 只有科学 runner 的完整 manifest 和后续闭合包门禁能够形成论文证据入口。
 
 Drive 中既有闭合包仅在当前请求的主方法、数据集质量及按需消融角色全部通过包结构、论文运行身份、正式执行锁、代码提交和科学依赖身份校验时整体恢复。只命中部分角色时仅返回诊断信息, 当前会话仍执行完整主命令, 不为旧主方法或质量结果伪造新的执行绑定。
 
-三个 method-faithful 入口和 T2SMark 入口同样只准备 CPU `workflow_orchestrator`, 不直接准备或导入 CUDA 科学 profile. `notebook_entrypoint.run_workflow` 调用共享 repository dispatch, 由 dispatch 创建对应隔离解释器、运行完整科学 runner、严格读取唯一结果 envelope, 再把 execution report、依赖报告快照和科学 runner 输出的 summary / manifest 写入不可变科学执行绑定. 打包函数会离线复核该绑定, 缺少任一文件或摘要漂移均阻断归档.
+三个 method-faithful 入口和 T2SMark 入口同样只调用宿主 launcher, 不在宿主解释器准备或导入任何 profile. 精确父解释器调用共享 repository dispatch, 由 dispatch 创建对应隔离解释器、运行完整科学 runner、严格读取唯一结果 envelope, 再把 execution report、依赖报告快照和科学 runner 输出的 summary / manifest 写入不可变科学执行绑定. 打包函数会离线复核该绑定, 缺少任一文件或摘要漂移均阻断归档.
 
 三条 method-faithful、T2SMark 和三条 official-reference 共7条外部 GPU 路径统一进入 `paper_experiments.runners.persistent_workflow_session`.该共享会话默认每60秒把复制期间保持稳定的普通文件写入不可变 Drive generation, 并原子更新 current 指针; 完成态还必须通过各 runner 的真实 ready、baseline、论文层级、运行锁和必需文件门禁.method-faithful 与 T2SMark 额外复验科学执行绑定.恢复先验证全部 manifest、路径与 SHA-256, 再清理当前路由的 stale 文件并原子发布, 因而损坏的 Drive 状态不会提前删除本地有效输出.所有 checkpoint 只具备续跑资格, 固定不支持论文 claim; 正式 ZIP 和 CPU 证据闭合仍是独立且必需的证据路径.
 
 主方法、method-faithful、T2SMark 和三套 official-reference 入口均已映射到五个登记 CUDA profile 的隔离子执行路径。完整锁候选由独立资格化 Notebook 调用 repository host launcher, 在目标 CPython/Linux x86_64 子解释器中向登记 PyTorch index 执行 wheel 解析; 该步骤不要求 GPU。已提交锁的真实安装、torch/CUDA identity、CUDA 可用性和科学运行仍必须在匹配的 Colab GPU 环境完成, Notebook 不得用临时安装或父解释器直接执行绕过该门禁。
 
-不使用 Notebook 时, 应通过 `python scripts/run_gpu_server_workflow.py --workflow <工作流> --paper-run-name <论文级别> --repository-commit <40位提交> --persistent-output-dir <持久磁盘目录>` 启动 GPU 工作流. 该 CPU 父入口公开9个路由: `image_only_dataset`、`mechanism_ablation`、`external_baseline_tree_ring`、`external_baseline_gaussian_shading`、`external_baseline_shallow_diffuse`、`official_reference_t2smark`、`official_reference_tree_ring`、`official_reference_gaussian_shading` 和 `official_reference_shallow_diffuse`。主方法与消融调用内层主方法 workflow, 三个 method-faithful baseline 与 T2SMark 调用共享隔离包装, 三个 official-reference 路由调用各自隔离 runner; 宿主解释器不直接执行科学代码.`--persistent-output-dir` 可指向服务器持久磁盘或已挂载 Drive, 不影响科学执行边界. 当前 `8.216.54.104` 无 GPU, 不得用于生成正式模型结果.
+不使用 Notebook 时, 应通过 `python -I scripts/run_formal_workflow_host.py --repository-commit <40位提交> gpu --workflow <工作流> --paper-run-name <论文级别> --persistent-output-dir <持久磁盘目录> --result-path <outputs下结果路径>` 启动 GPU 工作流. 该 CPU 父入口公开9个路由: `image_only_dataset`、`mechanism_ablation`、`external_baseline_tree_ring`、`external_baseline_gaussian_shading`、`external_baseline_shallow_diffuse`、`official_reference_t2smark`、`official_reference_tree_ring`、`official_reference_gaussian_shading` 和 `official_reference_shallow_diffuse`。主方法与消融调用内层主方法 workflow, 三个 method-faithful baseline 与 T2SMark 调用共享隔离包装, 三个 official-reference 路由调用各自隔离 runner; 宿主解释器不直接执行科学代码.`--persistent-output-dir` 可指向服务器持久磁盘或已挂载 Drive, 不影响科学执行边界. 当前 `8.216.54.104` 无 GPU, 不得用于生成正式模型结果.
 
 各 GPU workflow 只在 `outputs/<artifact>/<paper_run_name>/` 写入正式产物并从该目录生成归档。CPU 闭合选择器会重算10类输入包的运行锁和打包锁摘要, 并要求两者与全部 `code_version` 来源完全一致。Notebook 运行时间观测使用独立的 `outputs/notebook_runtime_observation/<paper_run_name>/` 路径, 因而不参与方法证据或结果包选择。
