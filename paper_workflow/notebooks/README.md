@@ -12,7 +12,7 @@ python -I scripts/run_formal_workflow_host.py --repository-commit <40位提交> 
   --result-path outputs/formal_workflow_execution/<论文层级>/<公开路由>/workflow_result.json
 ```
 
-Notebook 只声明论文层级和公开路由, 不导入 repository workflow helper, 也不保存包名、版本约束、安装命令、解释器创建或依赖诊断实现。宿主入口使用固定 `uv` wheel 创建 registry 指定的精确父解释器, 再由父解释器选择唯一科学 profile。CPU 闭合同样使用该宿主入口的 `closure` 子命令。
+Notebook 只声明论文层级和公开路由, 不导入 repository workflow helper, 也不保存包名、版本约束、安装命令、解释器创建或依赖诊断实现。宿主入口使用固定 `uv` wheel 创建 registry 指定的精确父解释器, 再执行 `scripts/formal_workflow_entry.py`；该内层入口使用 `scripts/formal_workflow_environment.py` 配置并选择唯一科学 profile。CPU 闭合同样使用该宿主入口的 `closure` 子命令。
 
 | Notebook 职责 | 父解释器 `profile_id` | 科学子解释器 `profile_id` |
 |---|---|---|

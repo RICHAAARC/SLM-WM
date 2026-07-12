@@ -4,7 +4,7 @@
 解释器不需要提供 ``pip``、``venv`` 或 ``ensurepip``. 入口先验证当前仓库是
 请求提交对应的 clean detached checkout, 再创建 registry 指定的精确 CPython,
 按已提交完整哈希锁准备 ``workflow_orchestrator``, 最后在该解释器内调用
-``paper_workflow/cli/formal_workflow_entry.py``.
+``scripts/formal_workflow_entry.py``.
 """
 
 from __future__ import annotations
@@ -349,12 +349,12 @@ def build_child_command(
     root: Path,
     bootstrap_identity: Mapping[str, Any],
 ) -> list[str]:
-    """构造精确父解释器中的唯一 Colab/服务器子入口命令."""
+    """构造精确父解释器中的唯一正式服务器子入口命令."""
 
     command = [
         str(python_executable),
         "-I",
-        str(root / "paper_workflow/cli/formal_workflow_entry.py"),
+        str(root / "scripts/formal_workflow_entry.py"),
         arguments.operation,
         "--root",
         str(root),

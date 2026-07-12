@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from paper_workflow.cli import formal_workflow_entry as entry
+from scripts import formal_workflow_entry as entry
 
 
 BOOTSTRAP_IDENTITY = {
@@ -22,36 +22,18 @@ BOOTSTRAP_IDENTITY = {
 
 
 @pytest.mark.quick
-def test_gpu_entry_configures_route_and_uses_drive_persistence(
+def test_gpu_entry_delegates_to_independent_server_workflow(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """内部入口应配置唯一 baseline 并把 Drive 目录交给服务器 workflow."""
+    """内部入口应把 GPU 配置与持久化解析交给独立服务器 workflow."""
 
     captured: dict[str, object] = {}
-
-    def fake_configure(
-        workflow_name: str,
-        *,
-        baseline_id: str,
-        repository_root: Path,
-    ) -> dict[str, object]:
-        captured.update(
-            workflow_name=workflow_name,
-            baseline_id=baseline_id,
-            repository_root=repository_root,
-        )
-        monkeypatch.setenv(
-            "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
-            "/drive/method_faithful",
-        )
-        return {}
 
     def fake_run_workflow(*arguments: object) -> dict[str, object]:
         captured["run_arguments"] = arguments
         return {"workflow_summary": {"run_decision": "pass"}, "archive_record": {}}
 
-    monkeypatch.setattr(entry, "configure_paper_run_environment", fake_configure)
     monkeypatch.setattr(entry, "run_workflow", fake_run_workflow)
     arguments = argparse.Namespace(
         workflow="external_baseline_tree_ring",
@@ -61,9 +43,13 @@ def test_gpu_entry_configures_route_and_uses_drive_persistence(
     )
     result = entry._gpu_result(arguments, tmp_path)
 
-    assert captured["workflow_name"] == "external_baseline_method_faithful"
-    assert captured["baseline_id"] == "tree_ring"
-    assert captured["run_arguments"][-1] == "/drive/method_faithful"
+    assert captured["run_arguments"] == (
+        "external_baseline_tree_ring",
+        "probe_paper",
+        "a" * 40,
+        tmp_path,
+        None,
+    )
     assert result["workflow_summary"] == {"run_decision": "pass"}
 
 
@@ -146,6 +132,7 @@ def test_execute_records_bootstrap_and_verified_orchestrator_environment(
         "_gpu_result",
         lambda arguments, root: {
             "workflow_summary": {"workflow_decision": "complete"},
+            "workflow_environment": {"persistent_output_dir": "/persistent"},
             "archive_record": {"archive_ready": True},
             "orchestrator_dependency_environment": orchestrator_environment,
         },
@@ -163,3 +150,6 @@ def test_execute_records_bootstrap_and_verified_orchestrator_environment(
     assert result["orchestrator_bootstrap_identity"] == BOOTSTRAP_IDENTITY
     assert result["orchestrator_dependency_environment"] == orchestrator_environment
     assert result["formal_execution_lock"] == execution_lock
+    assert result["workflow_environment"] == {
+        "persistent_output_dir": "/persistent"
+    }

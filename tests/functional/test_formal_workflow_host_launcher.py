@@ -152,7 +152,7 @@ def test_child_command_covers_gpu_and_cpu_closure_routes(tmp_path: Path) -> None
     assert gpu_command[:3] == [
         str(python_executable),
         "-I",
-        str(Path("/repository/paper_workflow/cli/formal_workflow_entry.py")),
+        str(Path("/repository/scripts/formal_workflow_entry.py")),
     ]
     assert gpu_command[gpu_command.index("--workflow") + 1] == "external_baseline_tree_ring"
 

@@ -17,7 +17,7 @@ import sys
 from typing import Any, Sequence
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -25,50 +25,16 @@ from experiments.runtime.repository_environment import (  # noqa: E402
     build_formal_execution_lock,
     publish_formal_execution_lock,
 )
-from paper_workflow.colab_utils.paper_run_environment import (  # noqa: E402
-    configure_paper_run_environment,
-)
 from scripts.run_gpu_server_result_closure import (  # noqa: E402
     execute_server_result_closure,
 )
 from scripts.run_gpu_server_workflow import (  # noqa: E402
+    WORKFLOW_ROUTES,
     _require_workflow_orchestrator_environment,
     run_workflow,
 )
 
 
-WORKFLOW_CONFIGURATION = {
-    "image_only_dataset": ("semantic_watermark_image_only", ""),
-    "mechanism_ablation": ("semantic_watermark_image_only", ""),
-    "external_baseline_tree_ring": ("external_baseline_method_faithful", "tree_ring"),
-    "external_baseline_gaussian_shading": (
-        "external_baseline_method_faithful",
-        "gaussian_shading",
-    ),
-    "external_baseline_shallow_diffuse": (
-        "external_baseline_method_faithful",
-        "shallow_diffuse",
-    ),
-    "official_reference_t2smark": ("official_reference_t2smark", ""),
-    "official_reference_tree_ring": ("official_reference_tree_ring", ""),
-    "official_reference_gaussian_shading": (
-        "official_reference_gaussian_shading",
-        "",
-    ),
-    "official_reference_shallow_diffuse": (
-        "official_reference_shallow_diffuse",
-        "",
-    ),
-}
-WORKFLOW_PERSISTENT_ENVIRONMENT_KEYS = {
-    "external_baseline_tree_ring": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
-    "external_baseline_gaussian_shading": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
-    "external_baseline_shallow_diffuse": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
-    "official_reference_t2smark": "SLM_WM_T2SMARK_FORMAL_DRIVE_OUTPUT_DIR",
-    "official_reference_tree_ring": "SLM_WM_TREE_RING_OFFICIAL_DRIVE_OUTPUT_DIR",
-    "official_reference_gaussian_shading": "SLM_WM_GAUSSIAN_SHADING_OFFICIAL_DRIVE_OUTPUT_DIR",
-    "official_reference_shallow_diffuse": "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_DRIVE_OUTPUT_DIR",
-}
 ORCHESTRATOR_PROFILE_ID = "workflow_orchestrator"
 ORCHESTRATOR_PYTHON_VERSION = "3.12.13"
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -139,29 +105,14 @@ def _write_result(root: Path, result_path: str | Path, payload: dict[str, Any]) 
 
 
 def _gpu_result(arguments: argparse.Namespace, root: Path) -> dict[str, Any]:
-    """配置外层 Colab 语义并调用现有 GPU 服务器 workflow."""
+    """调用能够自行完成环境配置的独立 GPU 服务器 workflow."""
 
-    configuration_name, baseline_id = WORKFLOW_CONFIGURATION[arguments.workflow]
-    os.environ["SLM_WM_PAPER_RUN_NAME"] = arguments.paper_run_name
-    configure_paper_run_environment(
-        configuration_name,
-        baseline_id=baseline_id,
-        repository_root=root,
-    )
-    persistent_output_dir = arguments.persistent_output_dir
-    if not persistent_output_dir:
-        if arguments.workflow in {"image_only_dataset", "mechanism_ablation"}:
-            persistent_output_dir = os.environ["SLM_WM_DRIVE_RESULT_ROOT"]
-        else:
-            persistent_output_dir = os.environ[
-                WORKFLOW_PERSISTENT_ENVIRONMENT_KEYS[arguments.workflow]
-            ]
     return run_workflow(
         arguments.workflow,
         arguments.paper_run_name,
         arguments.repository_commit,
         root,
-        persistent_output_dir,
+        arguments.persistent_output_dir or None,
     )
 
 
@@ -177,10 +128,14 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         result = _gpu_result(arguments, root)
         workflow_name = arguments.workflow
         workflow_summary = result.get("workflow_summary", {})
+        workflow_environment = result.get("workflow_environment")
         archive_record = result.get("archive_record")
         orchestrator_environment = result.get("orchestrator_dependency_environment")
-        if not isinstance(orchestrator_environment, dict):
-            raise RuntimeError("GPU workflow 缺少父编排依赖环境证据")
+        if not isinstance(orchestrator_environment, dict) or not isinstance(
+            workflow_environment,
+            dict,
+        ):
+            raise RuntimeError("GPU workflow 缺少父编排或 workflow 环境证据")
     else:
         orchestrator_environment = _require_workflow_orchestrator_environment(root)
         result = execute_server_result_closure(
@@ -193,6 +148,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         )
         workflow_name = "paper_result_closure"
         workflow_summary = result
+        workflow_environment = {}
         archive_record = None
     if (
         orchestrator_environment.get("profile_id")
@@ -212,6 +168,7 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         "orchestrator_dependency_environment": orchestrator_environment,
         "formal_execution_lock": execution_lock,
         "workflow_summary": workflow_summary,
+        "workflow_environment": workflow_environment,
         "archive_record": archive_record,
         "decision": "pass",
         "supports_paper_claim": False,
@@ -232,7 +189,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--orchestrator-lock-digest", required=True)
     parser.add_argument("--orchestrator-python-executable", required=True)
     parser.add_argument("--orchestrator-python-executable-sha256", required=True)
-    parser.add_argument("--workflow", choices=tuple(WORKFLOW_CONFIGURATION))
+    parser.add_argument("--workflow", choices=tuple(WORKFLOW_ROUTES))
     parser.add_argument("--persistent-output-dir", default="")
     parser.add_argument("--package-search-root", default="")
     parser.add_argument("--complete-output-dir", default="")
@@ -286,6 +243,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "orchestrator_dependency_environment": {},
             "formal_execution_lock": {},
             "workflow_summary": {},
+            "workflow_environment": {},
             "archive_record": None,
             "decision": "fail",
             "failure_reasons": [f"{type(exc).__name__}:{exc}"],

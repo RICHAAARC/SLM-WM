@@ -27,6 +27,10 @@
 5. `scripts/` 不得依赖 `paper_workflow/`。
 6. Notebook 不定义方法、攻击、baseline、统计或图表构造函数。
 
+精确父编排入口、正式 workflow 环境配置和 GPU 服务器路由分别位于
+`scripts/formal_workflow_entry.py`、`scripts/formal_workflow_environment.py` 与
+`scripts/run_gpu_server_workflow.py`。`paper_workflow/` 只调用这些入口, 不被其反向引用。
+
 ## `main/` 最小结构
 
 ```text

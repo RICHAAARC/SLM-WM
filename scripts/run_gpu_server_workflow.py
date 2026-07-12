@@ -31,6 +31,9 @@ from experiments.runtime.repository_environment import (
     build_formal_execution_lock,
     publish_formal_execution_lock,
 )
+from scripts.formal_workflow_environment import (
+    configure_formal_workflow_environment,
+)
 
 
 PAPER_RUN_NAME_ENVIRONMENT_KEY = "SLM_WM_PAPER_RUN_NAME"
@@ -120,6 +123,47 @@ WORKFLOW_ROUTES: Dict[str, WorkflowRoute] = {
         official_reference_runner_name="shallow_diffuse",
     ),
 }
+WORKFLOW_ENVIRONMENT_CONFIGURATION = {
+    "image_only_dataset": ("semantic_watermark_image_only", ""),
+    "mechanism_ablation": ("semantic_watermark_image_only", ""),
+    "external_baseline_tree_ring": (
+        "external_baseline_method_faithful",
+        "tree_ring",
+    ),
+    "external_baseline_gaussian_shading": (
+        "external_baseline_method_faithful",
+        "gaussian_shading",
+    ),
+    "external_baseline_shallow_diffuse": (
+        "external_baseline_method_faithful",
+        "shallow_diffuse",
+    ),
+    "official_reference_t2smark": ("official_reference_t2smark", ""),
+    "official_reference_tree_ring": ("official_reference_tree_ring", ""),
+    "official_reference_gaussian_shading": (
+        "official_reference_gaussian_shading",
+        "",
+    ),
+    "official_reference_shallow_diffuse": (
+        "official_reference_shallow_diffuse",
+        "",
+    ),
+}
+WORKFLOW_PERSISTENT_ENVIRONMENT_KEYS = {
+    "image_only_dataset": "SLM_WM_DRIVE_RESULT_ROOT",
+    "mechanism_ablation": "SLM_WM_DRIVE_RESULT_ROOT",
+    "external_baseline_tree_ring": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
+    "external_baseline_gaussian_shading": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
+    "external_baseline_shallow_diffuse": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
+    "official_reference_t2smark": "SLM_WM_T2SMARK_FORMAL_DRIVE_OUTPUT_DIR",
+    "official_reference_tree_ring": "SLM_WM_TREE_RING_OFFICIAL_DRIVE_OUTPUT_DIR",
+    "official_reference_gaussian_shading": (
+        "SLM_WM_GAUSSIAN_SHADING_OFFICIAL_DRIVE_OUTPUT_DIR"
+    ),
+    "official_reference_shallow_diffuse": (
+        "SLM_WM_SHALLOW_DIFFUSE_OFFICIAL_DRIVE_OUTPUT_DIR"
+    ),
+}
 
 
 def _require_workflow_orchestrator_environment(root_path: Path) -> Dict[str, Any]:
@@ -203,13 +247,11 @@ def _published_workflow_environment(
     外部 baseline 包装则通过同一环境继承机制解析唯一 baseline.
     """
 
-    keys = (
-        FORMAL_EXECUTION_COMMIT_ENVIRONMENT_KEY,
-        FORMAL_EXECUTION_LOCK_DIGEST_ENVIRONMENT_KEY,
-        PAPER_RUN_NAME_ENVIRONMENT_KEY,
-        PRIMARY_BASELINE_ID_ENVIRONMENT_KEY,
-    )
-    previous_values = {key: os.environ.get(key) for key in keys}
+    previous_values = {
+        key: value
+        for key, value in os.environ.items()
+        if key.startswith("SLM_WM_") or key == "WANDB_MODE"
+    }
     try:
         publish_formal_execution_lock(execution_lock)
         os.environ[PAPER_RUN_NAME_ENVIRONMENT_KEY] = paper_run_name
@@ -219,8 +261,44 @@ def _published_workflow_environment(
             os.environ[PRIMARY_BASELINE_ID_ENVIRONMENT_KEY] = baseline_id
         yield
     finally:
-        for key, value in previous_values.items():
-            _restore_environment_value(key, value)
+        configured_keys = {
+            key
+            for key in os.environ
+            if key.startswith("SLM_WM_") or key == "WANDB_MODE"
+        }
+        for key in configured_keys | set(previous_values):
+            _restore_environment_value(key, previous_values.get(key))
+
+
+def _configure_workflow_execution_environment(
+    *,
+    workflow_name: str,
+    root_path: Path,
+    persistent_output_dir: Optional[str | Path],
+) -> tuple[Dict[str, Any], str | Path]:
+    """配置独立服务器环境并解析本次持久化根目录."""
+
+    configuration_name, baseline_id = WORKFLOW_ENVIRONMENT_CONFIGURATION[
+        workflow_name
+    ]
+    environment_record = configure_formal_workflow_environment(
+        configuration_name,
+        baseline_id=baseline_id,
+        repository_root=root_path,
+    )
+    environment_key = WORKFLOW_PERSISTENT_ENVIRONMENT_KEYS[workflow_name]
+    resolved_persistent_output = persistent_output_dir
+    if not resolved_persistent_output:
+        resolved_persistent_output = os.environ.get(environment_key, "")
+    if not resolved_persistent_output:
+        raise RuntimeError("正式 GPU workflow 缺少持久化输出目录")
+    os.environ[environment_key] = str(resolved_persistent_output)
+    environment_record = {
+        **dict(environment_record),
+        "persistent_environment_key": environment_key,
+        "persistent_output_dir": str(resolved_persistent_output),
+    }
+    return environment_record, resolved_persistent_output
 
 
 def _run_shared_isolated_workflow(
@@ -407,12 +485,14 @@ def _build_workflow_result(
 
     workflow_summary = route_result.get("workflow_summary")
     archive_record = route_result.get("archive_record")
+    workflow_environment = route_result.get("workflow_environment")
     return_code = route_result.get("return_code")
     stdout = route_result.get("stdout")
     stderr = route_result.get("stderr")
     if not all(
         (
             isinstance(workflow_summary, Mapping),
+            isinstance(workflow_environment, Mapping),
             archive_record is None or isinstance(archive_record, Mapping),
             isinstance(return_code, int),
             not isinstance(return_code, bool),
@@ -435,6 +515,7 @@ def _build_workflow_result(
         "shared_isolated_workflow_name": route.shared_isolated_workflow_name,
         "official_reference_runner_name": route.official_reference_runner_name,
         "workflow_summary": dict(workflow_summary),
+        "workflow_environment": dict(workflow_environment),
         "archive_record": (
             None if archive_record is None else dict(archive_record)
         ),
@@ -473,13 +554,20 @@ def run_workflow(
         paper_run_name,
         route.baseline_id,
     ):
+        workflow_environment, resolved_persistent_output_dir = (
+            _configure_workflow_execution_environment(
+                workflow_name=workflow_name,
+                root_path=root_path,
+                persistent_output_dir=persistent_output_dir,
+            )
+        )
         route_result = (
             _run_main_method_route(
                 route=route,
                 workflow_name=workflow_name,
                 paper_run_name=paper_run_name,
                 root_path=root_path,
-                persistent_output_dir=persistent_output_dir,
+                persistent_output_dir=resolved_persistent_output_dir,
             )
             if route.uses_scientific_command
             else _run_shared_route(
@@ -487,9 +575,13 @@ def run_workflow(
                 root_path=root_path,
                 workflow_name=workflow_name,
                 paper_run_name=paper_run_name,
-                persistent_output_dir=persistent_output_dir,
+                persistent_output_dir=resolved_persistent_output_dir,
             )
         )
+        route_result = {
+            **dict(route_result),
+            "workflow_environment": workflow_environment,
+        }
     return _build_workflow_result(
         workflow_name=workflow_name,
         paper_run_name=paper_run_name,

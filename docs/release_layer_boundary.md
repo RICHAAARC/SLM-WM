@@ -14,11 +14,11 @@
 
 ## 独立执行层
 
-`scripts/` 把前三层组织成可在 GPU 服务器或 CPU 汇总服务器运行的命令。所有正式逻辑必须能通过该层脱离 Notebook 执行。
+`scripts/` 把前三层组织成可在 GPU 服务器或 CPU 汇总服务器运行的命令。`formal_workflow_entry.py` 是精确父解释器子入口, `formal_workflow_environment.py` 负责服务器与 Colab 共用配置, `run_gpu_server_workflow.py` 负责9条 GPU 路由。所有正式逻辑必须能通过该层脱离 Notebook 执行。
 
 ## Colab 运行层
 
-`paper_workflow/` 只配置 Colab 环境、Drive 路径、进度和打包。Notebook 只能调用已有 runner 或 script。
+`paper_workflow/` 只负责 Colab 挂载、会话观测、入口参数和结果展示。Notebook 只能调用已有 script；正式环境配置也必须位于内层 `scripts/`。
 
 ## 依赖矩阵
 

@@ -24,6 +24,7 @@ ORCHESTRATOR_EVIDENCE = {
     "inspection_digest": "4" * 64,
     "inspection": {"decision": "pass"},
 }
+TEST_PERSISTENT_ROOT = Path("outputs/pytest_server_persistent").resolve()
 PUBLIC_WORKFLOW_EXPECTATIONS = {
     "image_only_dataset": (
         workflow.MAIN_METHOD_PROFILE_ID,
@@ -106,6 +107,29 @@ def _patch_formal_lock(monkeypatch: pytest.MonkeyPatch) -> Mapping[str, Any]:
         "_require_workflow_orchestrator_environment",
         lambda root: dict(ORCHESTRATOR_EVIDENCE),
     )
+
+    def fake_configure_environment(
+        workflow_name: str,
+        *,
+        baseline_id: str,
+        repository_root: Path,
+    ) -> dict[str, Any]:
+        for environment_key in set(
+            workflow.WORKFLOW_PERSISTENT_ENVIRONMENT_KEYS.values()
+        ):
+            os.environ[environment_key] = str(TEST_PERSISTENT_ROOT)
+        return {
+            "workflow_name": workflow_name,
+            "paper_run_name": os.environ[workflow.PAPER_RUN_NAME_ENVIRONMENT_KEY],
+            "selected_baseline_id": baseline_id,
+            "repository_root": repository_root.as_posix(),
+        }
+
+    monkeypatch.setattr(
+        workflow,
+        "configure_formal_workflow_environment",
+        fake_configure_environment,
+    )
     return execution_lock
 
 
@@ -120,6 +144,61 @@ def test_server_workflow_exposes_complete_isolated_gpu_routes() -> None:
         assert route.scientific_profile_id == expected_profile
         assert route.baseline_id == expected_baseline
         assert route.child_argv_tail == expected_tail
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("workflow_name", tuple(PUBLIC_WORKFLOW_EXPECTATIONS))
+def test_server_workflow_configures_inner_environment_and_persistence(
+    workflow_name: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """每条服务器路由应在 scripts 层完成配置并发布显式持久化目录."""
+
+    captured: dict[str, Any] = {}
+
+    def fake_configure(
+        configuration_name: str,
+        *,
+        baseline_id: str,
+        repository_root: Path,
+    ) -> dict[str, Any]:
+        captured.update(
+            configuration_name=configuration_name,
+            baseline_id=baseline_id,
+            repository_root=repository_root,
+        )
+        return {"configuration_ready": True}
+
+    monkeypatch.setattr(
+        workflow,
+        "configure_formal_workflow_environment",
+        fake_configure,
+    )
+    persistent_root = tmp_path / "persistent"
+    environment_key = workflow.WORKFLOW_PERSISTENT_ENVIRONMENT_KEYS[workflow_name]
+    monkeypatch.setenv(environment_key, "outer_persistent_value")
+
+    environment_record, resolved_path = (
+        workflow._configure_workflow_execution_environment(
+            workflow_name=workflow_name,
+            root_path=tmp_path,
+            persistent_output_dir=persistent_root,
+        )
+    )
+
+    expected_configuration, expected_baseline = (
+        workflow.WORKFLOW_ENVIRONMENT_CONFIGURATION[workflow_name]
+    )
+    assert captured == {
+        "configuration_name": expected_configuration,
+        "baseline_id": expected_baseline,
+        "repository_root": tmp_path,
+    }
+    assert resolved_path == persistent_root
+    assert os.environ[environment_key] == str(persistent_root)
+    assert environment_record["persistent_environment_key"] == environment_key
+    assert environment_record["persistent_output_dir"] == str(persistent_root)
 
 
 @pytest.mark.quick
@@ -330,6 +409,9 @@ def test_all_nine_routes_emit_one_output_schema(
         assert result["official_reference_runner_name"] == (
             route.official_reference_runner_name
         )
+        assert result["workflow_environment"]["persistent_output_dir"] == str(
+            TEST_PERSISTENT_ROOT
+        )
         assert result["decision"] == "pass"
         assert result["supports_paper_claim"] is False
         assert result["orchestrator_dependency_environment"] == (
@@ -446,13 +528,28 @@ def test_main_method_routes_use_isolated_scientific_command(
     assert captured["run_formal_ablation"] is (
         workflow_name == "mechanism_ablation"
     )
-    assert captured["archive_destination_dirs"] is None
-    assert captured["resume_checkpoint_dir"] is None
+    expected_archive_dirs = {
+        "image_only_dataset_runtime": (
+            TEST_PERSISTENT_ROOT / "image_only_dataset_runtime"
+        ),
+        "dataset_level_quality": TEST_PERSISTENT_ROOT / "dataset_level_quality",
+    }
+    if workflow_name == "mechanism_ablation":
+        expected_archive_dirs["runtime_rerun_ablation"] = (
+            TEST_PERSISTENT_ROOT / "runtime_rerun_ablation"
+        )
+    assert captured["archive_destination_dirs"] == expected_archive_dirs
+    assert captured["resume_checkpoint_dir"] == (
+        TEST_PERSISTENT_ROOT / "semantic_watermark_resume_checkpoint"
+    )
     assert captured["paper_run_name"] == "probe_paper"
     assert captured["baseline_id"] is None
     assert captured["formal_commit"] == COMMIT
     assert captured["formal_digest"] == LOCK_DIGEST
     assert result["formal_execution_lock"] == execution_lock
+    assert result["workflow_environment"]["persistent_output_dir"] == str(
+        TEST_PERSISTENT_ROOT
+    )
     assert result["orchestrator_dependency_environment"] == ORCHESTRATOR_EVIDENCE
     assert result["scientific_profile_id"] == workflow.MAIN_METHOD_PROFILE_ID
     assert result["child_argv_tail"] == list(expected_tail)
@@ -613,6 +710,9 @@ def test_baseline_and_t2smark_routes_use_shared_isolated_wrapper(
     assert result["formal_execution_lock"] == execution_lock
     assert result["return_code"] == 0
     assert result["orchestrator_dependency_environment"] == ORCHESTRATOR_EVIDENCE
+    assert result["workflow_environment"]["persistent_output_dir"] == str(
+        tmp_path / "persistent_delivery"
+    )
     assert os.environ[workflow.PRIMARY_BASELINE_ID_ENVIRONMENT_KEY] == "outer_baseline"
 
 
@@ -620,9 +720,17 @@ def test_baseline_and_t2smark_routes_use_shared_isolated_wrapper(
 def test_gpu_server_parent_has_no_notebook_or_direct_scientific_runner_dependency() -> None:
     """服务器父入口只能依赖内层隔离 API, 不能导入 Notebook 或科学 runner."""
 
-    source = Path("scripts/run_gpu_server_workflow.py").read_text(encoding="utf-8")
+    sources = {
+        path: Path(path).read_text(encoding="utf-8")
+        for path in (
+            "scripts/formal_workflow_entry.py",
+            "scripts/formal_workflow_environment.py",
+            "scripts/run_gpu_server_workflow.py",
+        )
+    }
 
-    assert "paper_workflow" not in source
+    assert all("paper_workflow" not in source for source in sources.values())
+    source = sources["scripts/run_gpu_server_workflow.py"]
     assert "run_image_only_dataset_runtime.py" not in source
     assert "run_runtime_rerun_ablations.py" not in source
     assert "subprocess.run" not in source

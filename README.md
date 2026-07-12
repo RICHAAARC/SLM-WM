@@ -44,7 +44,7 @@ fixed-FPR clean negative 门禁等于当前层级完整 test split: `probe_paper
 SLM_WM_PAPER_RUN_NAME = "pilot_paper"
 ```
 
-运行层级、prompt 文件、样本数、目标 FPR、fixed-FPR 门禁、Google Drive 子目录和常用环境变量由 `paper_workflow/colab_utils/paper_run_environment.py` 统一派生。Notebook 不应维护重复配置表。
+运行层级、prompt 文件、样本数、目标 FPR、fixed-FPR 门禁、持久化目录和常用环境变量由 `scripts/formal_workflow_environment.py` 统一派生。`paper_workflow/colab_utils/paper_run_environment.py` 只增加 Notebook 会话起点记录并向内转发。Notebook 不维护重复配置表。
 
 ## 五层代码边界
 
@@ -67,9 +67,11 @@ outputs/audit_reports/      harness 审计输出, 默认不提交
 
 依赖方向必须保持为 `paper_workflow/ -> scripts/ -> paper_experiments/ -> experiments/ -> main/`。`external_baseline/` 是外部源码缓存与 adapter 边界, 不进入最小方法发布包。
 
+精确父解释器的受治理子入口固定为 `scripts/formal_workflow_entry.py`。`scripts/run_formal_workflow_host.py`、直接 GPU 服务器命令和 Colab Notebook 均进入该 scripts 层边界；`scripts/` 中不存在对 `paper_workflow/` 的运行时导入或动态执行路径。
+
 ## Notebook 与服务器入口
 
-Notebook 只负责挂载 Google Drive、在 `/content` 检出精确提交、选择运行层级、调用 repository modules 和显示结果路径。正式 records、thresholds、tables、figures、reports、manifests、checkpoint 发布和结果包镜像逻辑必须位于 `main/`、`experiments/`、`paper_experiments/`、`scripts/` 或薄外层 helper 中。
+Notebook 只负责挂载 Google Drive、在 `/content` 检出精确提交、选择运行层级、调用 repository scripts 和显示结果路径。正式环境配置、records、thresholds、tables、figures、reports、manifests、checkpoint 发布和结果包镜像逻辑必须位于 `main/`、`experiments/`、`paper_experiments/` 或 `scripts/`。
 
 - Colab 入口说明见 `paper_workflow/notebooks/README.md`。
 - 服务器命令入口说明见 `scripts/README.md`。

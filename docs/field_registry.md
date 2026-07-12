@@ -2348,6 +2348,15 @@ Notebook 与 repository module 的跨边界数据
 | route_kind | runtime | none | true | false | false | GPU 服务器公开工作流进入科学会话、共享隔离工作流或官方参考编排器的稳定路由类别。 |
 | shared_isolated_workflow_name | provenance | none | true | false | false | GPU 服务器路由调用的共享隔离科学工作流名称; 非共享路由为 null。 |
 | official_reference_runner_name | provenance | none | true | false | false | GPU 服务器路由调用的官方参考编排器名称; 非官方参考路由为 null。 |
+| workflow_environment | provenance | none | true | false | false | GPU 服务器在 scripts 层冻结并实际发布的论文运行、模型、随机化和持久化环境记录。 |
+| persistent_environment_key | runtime | none | true | false | false | 当前 GPU 路由绑定持久化目录所使用的唯一环境变量名。 |
+| persistent_output_dir | artifact | none | true | false | false | 当前 GPU 路由实际使用的服务器持久磁盘或已挂载 Drive 目录。 |
+| drive_result_root | artifact | none | true | false | false | 当前论文运行配置登记的默认外部持久化根目录。 |
+| sample_count_token | protocol | none | true | false | false | 正式 workflow 解析的全量或显式样本数量令牌。 |
+| expected_sample_count | metric | none | true | false | false | 当前运行层级由受治理 Prompt 配置派生的期望样本总数。 |
+| dataset_quality_minimum_count | metric | none | true | false | false | 当前运行层级正式数据集质量评估要求的最小图像对数量。 |
+| selected_baseline_id | protocol | none | true | false | false | 当前 workflow 环境唯一选择的外部 baseline 身份, 主方法与非 baseline 路由为空。 |
+| configured_environment_keys | provenance | none | true | false | false | 正式 workflow 配置完成后纳入记录的全部 `SLM_WM_` 环境变量名称。 |
 | workflow_summary | runtime | none | true | false | false | GPU 服务器内层隔离工作流返回的原始受治理摘要。 |
 | archive_record | provenance | none | true | false | false | GPU 服务器共享或官方参考路由生成的结果包记录; 主方法会话为 null。 |
 | orchestrator_dependency_environment | provenance | none | true | false | false | GPU 服务器 CPU 父解释器绑定的 workflow_orchestrator profile、完整锁和环境 inspection 证据。 |
