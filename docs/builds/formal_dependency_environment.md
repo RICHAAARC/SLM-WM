@@ -44,7 +44,7 @@
 
 五个科学 profile 的 `torch` 与 `torchvision` 必须同时出现在 profile 和直接输入文件中。二者的 `+cu*` local version、registry 中的 CUDA 版本和 PyTorch index 后缀必须完全一致。CPU 父 profile 的 CUDA、torch、torchvision 与 PyTorch index 字段必须为 `null`, 直接输入不得出现 `torch` 或 `torchvision`。
 
-六个直接输入文件当前共登记111个精确条目。父编排 profile 固定 `uv==0.11.28` 与 `huggingface_hub==1.20.1`; 后者供父 runner 下载固定 revision 的模型和 OpenCLIP 快照。五个科学执行 profile 均固定 `pip==24.3.1`、`setuptools==75.3.0` 和 `wheel==0.45.1`, 使目标环境中的安装器也进入完整锁证据。T2SMark 固定 `diffusers==0.32.0`; Gaussian Shading 固定 `scipy==1.10.1`、`huggingface_hub==0.25.2` 与 `transformers==4.33.3`, 该组合保留官方代码使用的 CLIP 接口并形成可解析的 Python 3.8 wheel 闭包。所有精确值在目标完整锁提交并通过对应 CPU 或 GPU smoke 前都只是受治理输入, 不能表述为已资格化环境。
+六个直接输入文件当前共登记110个精确条目。父编排 profile 固定 `uv==0.11.28` 与 `huggingface_hub==1.20.1`; 后者供父 runner 下载固定 revision 的模型和 OpenCLIP 快照。五个科学执行 profile 均固定 `pip==24.3.1`、`setuptools==75.3.0` 和 `wheel==0.45.1`, 使目标环境中的安装器也进入完整锁证据。T2SMark 固定 `diffusers==0.32.0`; Gaussian Shading 固定 `scipy==1.10.1`、`huggingface_hub==0.25.2` 与 `transformers==4.33.3`, 该组合保留官方代码使用的 CLIP 接口并形成可解析的 Python 3.8 wheel 闭包。Shallow Diffuse profile 只登记固定官方入口及其导入图实际使用的包, 并要求全部传递依赖存在 Linux wheel, 使 `--only-binary=:all:` 闭包可逐项哈希。所有精确值在目标完整锁提交并通过对应 CPU 或 GPU smoke 前都只是受治理输入, 不能表述为已资格化环境。
 
 ## 4. 直接输入与完整锁
 

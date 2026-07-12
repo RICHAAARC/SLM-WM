@@ -64,7 +64,7 @@
         "runtime": "cuda"
       },
       "complete_hash_lock_path": "configs/dependency_profiles/shallow_diffuse_official_py39_cu117_lock.txt",
-      "direct_requirements_digest": "0fce6cab21e4d20e38c63e2ea99f2e983f5394d70617999b91888c12c153ad34",
+      "direct_requirements_digest": "09e4ce939484a39af446dc13370feb530e613694ce8dfdd6f696bab428a307fa",
       "direct_requirements_path": "configs/dependency_profiles/shallow_diffuse_official_py39_cu117_direct.txt",
       "execution_role": "shallow_diffuse_official_reference_execution",
       "platform": {
