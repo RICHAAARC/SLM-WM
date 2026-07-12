@@ -19,10 +19,10 @@ def _strict_configs() -> dict[str, BranchRiskConfig]:
 
     return {
         branch_name: BranchRiskConfig(
-            saliency_weight=1.0,
+            local_contrast_risk_weight=1.0,
             semantic_weight=0.0,
             texture_weight=0.0,
-            instability_weight=0.0,
+            adjacent_step_instability_weight=0.0,
             eligibility_threshold=0.1,
         )
         for branch_name in (
@@ -41,8 +41,8 @@ def test_branch_risk_rejects_empty_frozen_eligibility_set() -> None:
         build_branch_risk_fields(
             semantic_values=(0.0, 0.0),
             texture_values=(0.0, 0.0),
-            stability_values=(1.0, 1.0),
-            saliency_values=(0.8, 0.9),
+            adjacent_step_stability_values=(1.0, 1.0),
+            local_contrast_risk_values=(0.8, 0.9),
             attention_stability_values=(1.0, 1.0),
             configs=_strict_configs(),
         )
@@ -56,8 +56,8 @@ def test_branch_risk_requires_independent_attention_stability() -> None:
         build_branch_risk_fields(
             semantic_values=(0.1, 0.2),
             texture_values=(0.3, 0.4),
-            stability_values=(0.5, 0.6),
-            saliency_values=(0.7, 0.8),
+            adjacent_step_stability_values=(0.5, 0.6),
+            local_contrast_risk_values=(0.7, 0.8),
             attention_stability_values=None,  # type: ignore[arg-type]
         )
 
@@ -80,8 +80,8 @@ def test_without_branch_risk_routing_does_not_filter_formal_ablation_samples() -
     fields = build_branch_risk_fields(
         semantic_values=(0.0, 0.0),
         texture_values=(0.0, 0.0),
-        stability_values=(1.0, 1.0),
-        saliency_values=(0.8, 0.9),
+        adjacent_step_stability_values=(1.0, 1.0),
+        local_contrast_risk_values=(0.8, 0.9),
         attention_stability_values=(1.0, 1.0),
         configs=_strict_configs(),
         required_eligible_branches=required_branches,
@@ -120,8 +120,8 @@ def test_disabled_attention_branch_does_not_apply_eligibility_gate() -> None:
     fields = build_branch_risk_fields(
         semantic_values=(0.0, 0.0),
         texture_values=(0.0, 0.0),
-        stability_values=(1.0, 1.0),
-        saliency_values=(0.8, 0.9),
+        adjacent_step_stability_values=(1.0, 1.0),
+        local_contrast_risk_values=(0.8, 0.9),
         attention_stability_values=(1.0, 1.0),
         configs=configs,
         required_eligible_branches=required_branches,

@@ -73,8 +73,8 @@ def test_shared_global_risk_ablation_reuses_one_real_risk_field() -> None:
     fields = build_branch_risk_fields(
         semantic_values=(0.1, 0.7),
         texture_values=(0.2, 0.8),
-        stability_values=(0.9, 0.4),
-        saliency_values=(0.3, 0.6),
+        adjacent_step_stability_values=(0.9, 0.4),
+        local_contrast_risk_values=(0.3, 0.6),
         attention_stability_values=(0.8, 0.5),
         configs=_branch_risk_configs(config),
     )

@@ -13,8 +13,8 @@ from experiments.runtime.diffusion.semantic_features import (
     JOINT_FEATURE_WIDTH,
     SEMANTIC_FEATURE_SCHEMA,
     SEMANTIC_FEATURE_WIDTH,
-    VISUAL_FEATURE_SCHEMA,
-    VISUAL_FEATURE_WIDTH,
+    HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
+    HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
     DifferentiableSemanticFeatureRuntime,
 )
 from experiments.runners.semantic_watermark_runtime import (
@@ -109,6 +109,11 @@ def _counterfactual_update_records(
         records.append(
             {
                 "step_index": step_index,
+                "adjacent_step_reference_index": step_index - 1,
+                "adjacent_step_reference_latent_content_sha256": "e" * 64,
+                "adjacent_step_stability_status": (
+                    "measured_from_immediately_previous_scheduler_step"
+                ),
                 "scheduler_step_timestep": float(100 - step_index),
                 "post_step_schedule_index": step_index + 1,
                 "timestep": float(99 - step_index),
@@ -167,12 +172,17 @@ def _counterfactual_update_records(
 
 
 @pytest.mark.quick
-def test_formal_jacobian_vector_keeps_every_clip_and_visual_coordinate() -> None:
-    """正式 Jacobian 输入必须直接连接512维 CLIP 与204维视觉特征。"""
+def test_formal_jacobian_keeps_clip_and_handcrafted_structure_coordinates() -> None:
+    """正式 Jacobian 必须连接512维 CLIP 与204维手工结构统计."""
 
     semantic = torch.arange(SEMANTIC_FEATURE_WIDTH, dtype=torch.float32).reshape(1, -1)
-    visual = torch.arange(VISUAL_FEATURE_WIDTH, dtype=torch.float32)
-    runtime = SimpleNamespace(joint_features=lambda _latent: (semantic, visual))
+    structure = torch.arange(
+        HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
+        dtype=torch.float32,
+    )
+    runtime = SimpleNamespace(
+        joint_features=lambda _latent: (semantic, structure)
+    )
 
     vector = DifferentiableSemanticFeatureRuntime.full_joint_feature_vector(
         runtime,
@@ -181,7 +191,7 @@ def test_formal_jacobian_vector_keeps_every_clip_and_visual_coordinate() -> None
 
     assert vector.shape == (JOINT_FEATURE_WIDTH,)
     assert torch.equal(vector[:SEMANTIC_FEATURE_WIDTH], semantic.reshape(-1))
-    assert torch.equal(vector[SEMANTIC_FEATURE_WIDTH:], visual)
+    assert torch.equal(vector[SEMANTIC_FEATURE_WIDTH:], structure)
 
 
 @pytest.mark.quick
@@ -200,16 +210,19 @@ def test_full_feature_schema_declares_no_compression() -> None:
     assert record == {
         "semantic_feature_schema": SEMANTIC_FEATURE_SCHEMA,
         "semantic_feature_width": SEMANTIC_FEATURE_WIDTH,
-        "visual_feature_schema": VISUAL_FEATURE_SCHEMA,
-        "visual_feature_width": VISUAL_FEATURE_WIDTH,
+        "handcrafted_structure_feature_schema": HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
+        "handcrafted_structure_feature_width": HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
         "joint_feature_width": JOINT_FEATURE_WIDTH,
         "feature_compression_applied": False,
     }
+    assert HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA == (
+        "handcrafted_rgb_statistics_gradient_8x8_structure_vector"
+    )
 
 
 @pytest.mark.quick
-def test_full_visual_vector_preserves_spatial_and_gradient_information() -> None:
-    """完整视觉向量必须保留通道统计、梯度与8x8空间池化。"""
+def test_handcrafted_structure_vector_preserves_declared_coordinates() -> None:
+    """手工结构向量必须保留通道统计、梯度与8x8空间池化."""
 
     smooth = torch.full((1, 3, 16, 16), 0.5)
     checker = smooth.clone()
@@ -219,18 +232,18 @@ def test_full_visual_vector_preserves_spatial_and_gradient_information() -> None
     spatial[:, :, :, :8] = 0.25
     spatial[:, :, :, 8:] = 0.75
 
-    smooth_features = DifferentiableSemanticFeatureRuntime._visual_features_from_image(
+    smooth_features = DifferentiableSemanticFeatureRuntime._handcrafted_structure_features_from_image(
         smooth
     )
-    checker_features = DifferentiableSemanticFeatureRuntime._visual_features_from_image(
+    checker_features = DifferentiableSemanticFeatureRuntime._handcrafted_structure_features_from_image(
         checker
     )
-    spatial_features = DifferentiableSemanticFeatureRuntime._visual_features_from_image(
+    spatial_features = DifferentiableSemanticFeatureRuntime._handcrafted_structure_features_from_image(
         spatial
     )
 
-    assert smooth_features.shape == (VISUAL_FEATURE_WIDTH,)
-    assert checker_features.shape == (VISUAL_FEATURE_WIDTH,)
+    assert smooth_features.shape == (HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,)
+    assert checker_features.shape == (HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,)
     assert checker_features[3:6].mean() > smooth_features[3:6].mean()
     assert checker_features[6:9].mean() > smooth_features[6:9].mean()
     assert checker_features[9:12].mean() > smooth_features[9:12].mean()
@@ -238,6 +251,55 @@ def test_full_visual_vector_preserves_spatial_and_gradient_information() -> None
         spatial_features[12:],
         smooth_features[12:],
     )
+
+
+@pytest.mark.quick
+def test_branch_signals_use_actual_adjacent_step_and_local_contrast() -> None:
+    """风险输入必须区分真实相邻步稳定度与局部对比度风险."""
+
+    class _Vision(torch.nn.Module):
+        """返回方形 patch token 网格的轻量冻结视觉模块."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.anchor = torch.nn.Parameter(torch.zeros(()))
+
+        def forward(
+            self,
+            pixel_values: torch.Tensor,
+            output_hidden_states: bool,
+        ) -> SimpleNamespace:
+            del output_hidden_states
+            token_values = torch.ones(
+                (pixel_values.shape[0], 5, 4),
+                device=pixel_values.device,
+                dtype=torch.float32,
+            )
+            return SimpleNamespace(last_hidden_state=token_values)
+
+    runtime = DifferentiableSemanticFeatureRuntime(
+        vae=torch.nn.Identity(),
+        vision_model=_Vision(),
+    )
+    runtime.decode_latent = lambda latent: latent  # type: ignore[method-assign]
+    previous = torch.full((1, 3, 8, 8), 0.25)
+    current = torch.full((1, 3, 8, 8), 0.75)
+
+    signals = runtime.branch_signal_maps(current, previous)
+
+    assert set(signals) == {
+        "semantic",
+        "texture",
+        "adjacent_step_stability",
+        "local_contrast_risk",
+    }
+    assert torch.allclose(
+        signals["adjacent_step_stability"],
+        torch.full((1, 8, 8), 0.5),
+    )
+    assert torch.count_nonzero(signals["local_contrast_risk"]).item() == 0
+    with pytest.raises(ValueError, match="上一 scheduler 步"):
+        runtime.branch_signal_maps(current, None)  # type: ignore[arg-type]
 
 
 @pytest.mark.quick
@@ -270,18 +332,20 @@ def test_actual_combined_latent_uses_full_feature_preservation_gate() -> None:
     """有限更新门禁必须检查完整特征, 而不只信局部 Jacobian 残差。"""
 
     class _FeatureRuntime:
-        """提供可精确控制的完整语义与视觉特征。"""
+        """提供可精确控制的 CLIP 语义与手工结构统计."""
 
         @staticmethod
         def joint_features(latent: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
             values = latent.reshape(-1).float()
             semantic = torch.nn.functional.normalize(values[:2], dim=0)
-            visual = torch.stack((values[0], values[1], values.square().mean()))
-            return semantic, visual
+            structure = torch.stack(
+                (values[0], values[1], values.square().mean())
+            )
+            return semantic, structure
 
     config = SemanticWatermarkRuntimeConfig(
         minimum_semantic_preservation_cosine=0.99,
-        maximum_visual_feature_relative_drift=0.05,
+        maximum_handcrafted_structure_feature_relative_drift=0.05,
     )
     latent = torch.tensor([1.0, 0.0, 0.5])
     accepted = _combined_update_preservation_record(
@@ -397,7 +461,7 @@ def test_final_image_gate_checks_cumulative_clean_to_watermarked_drift() -> None
             return image * 2.0 - 1.0
 
     class _ImageFeatureRuntime:
-        """从最终图像 tensor 生成可控制的语义与视觉特征。"""
+        """从最终图像 tensor 生成可控制的 CLIP 与手工结构统计."""
 
         @staticmethod
         def joint_image_features(image: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -411,7 +475,7 @@ def test_final_image_gate_checks_cumulative_clean_to_watermarked_drift() -> None
     )
     config = SemanticWatermarkRuntimeConfig(
         minimum_semantic_preservation_cosine=0.99,
-        maximum_visual_feature_relative_drift=0.05,
+        maximum_handcrafted_structure_feature_relative_drift=0.05,
     )
     clean = torch.tensor([[[[1.0, 0.5], [0.25, 0.75]]]])
     close = clean + 0.001
@@ -453,7 +517,7 @@ def test_final_image_gate_checks_cumulative_clean_to_watermarked_drift() -> None
     center = torch.tensor([[[[0.6, 0.5], [0.4, 0.5]]]])
     edge_config = SemanticWatermarkRuntimeConfig(
         minimum_semantic_preservation_cosine=0.99,
-        maximum_visual_feature_relative_drift=0.10,
+        maximum_handcrafted_structure_feature_relative_drift=0.10,
     )
     final_edge, carrier_edge = _three_way_final_image_preservation_records(
         pipeline,
@@ -651,7 +715,7 @@ def test_final_image_attention_gate_uses_reencoded_real_qk_scores() -> None:
         "carrier_only_final_image_preservation_applicable": True,
         "carrier_only_final_image_preservation_gate_ready": True,
         "carrier_only_final_image_semantic_cosine_similarity": 1.0,
-        "carrier_only_final_image_visual_feature_relative_drift": 0.0,
+        "carrier_only_final_image_handcrafted_structure_feature_relative_drift": 0.0,
         "carrier_only_counterfactual_identity_digest": "a" * 64,
         "carrier_only_counterfactual_image_path": carrier_image_path,
         "carrier_only_counterfactual_image_digest": carrier_image_digest,

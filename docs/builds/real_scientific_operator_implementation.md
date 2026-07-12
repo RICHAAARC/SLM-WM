@@ -7,7 +7,7 @@
 | 分支风险场 | `main/methods/semantic/branch_risk.py` | 分别构造 LF、尾部截断和注意力几何风险与承载预算 |
 | 密钥随机原语 | `main/core/keyed_prg.py` | 通过版本化 SHA-256 计数器流为内容模板、Jacobian 候选方向和注意力关系符号生成规范 CPU float32 Tensor |
 | 真实 Jacobian Null Space | `main/methods/subspace/jacobian_nullspace.py` | 通过完整特征 JVP/VJP、显式风险算子和无阻尼 PSD-CG 求解 rank-4 latent Null Space |
-| 语义与视觉特征 | `experiments/runtime/diffusion/semantic_features.py` | 以512维完整归一化 CLIP embedding 和204维完整视觉向量定义716维 Jacobian，并提供有限更新与最终成图复验 |
+| 语义与手工结构统计 | `experiments/runtime/diffusion/semantic_features.py` | 以512维完整归一化 CLIP embedding 和204维 RGB 统计/梯度/8x8池化向量定义716维 Jacobian，并提供有限更新与最终成图复验 |
 | LF 与尾部载体 | `main/methods/carrier/keyed_tensor.py` | 通过版本化、设备无关的 SHA-256 计数器高斯 PRG 构造检测端可重建模板, 并在嵌入端投影到安全子空间 |
 | 真实注意力梯度 | `main/methods/geometry/differentiable_attention.py` | 从 Transformer `to_q`/`to_k` 得到真实 attention, 构造有身份摘要的稳定 token pair 权重并对 latent 求梯度 |
 | 几何恢复 | `main/methods/geometry/attention_alignment.py` | 使用同一 pair 权重联合规范拉回 $W A_{\mathrm{obs}} W^\top$、观测前推 $V S_K V^\top$、双向覆盖惩罚和攻击无关的分层局部搜索恢复图像参考系 |
@@ -30,6 +30,8 @@
 高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对标准高斯模板按元素绝对幅值稳定排序，精确保留 `ceil(element_count * tail_fraction)` 个元素，并以展平索引处理同幅值排序；该算子不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。内容模板与安全投影实现位于 `main/methods/carrier/keyed_tensor.py`。
 
 注意力分支风险必须接收由真实跨层 Q/K 关系计算的独立稳定度，核心接口不接受缺失值。最终图像 Q/K 提取在冻结检测日程上调用 scheduler 的 `scale_noise`；缺少该方法或方法不可调用时运行失败，当前协议不定义线性 latent/noise 混合作为替代算子。
+
+分支风险中的 `local_contrast_risk` 定义为解码灰度图相对反射填充5x5局部均值的绝对偏离。`adjacent_step_stability` 直接来自当前与紧邻上一 scheduler 步 latent 的解码 RGB 差异；注入回调在每个 post-step 时刻更新参考 latent，并把参考索引和 Tensor 内容 SHA-256 写入更新原子。204维 `handcrafted_structure_feature` 由 RGB 通道均值/标准差、水平/垂直绝对梯度均值和8x8 RGB 平均池化组成；一般感知质量结论必须独立依赖正式 FID、KID 与配对图像质量指标。
 
 四个主表外部 baseline 保留各自关键科学算子, 共同协议只统一 backbone、Prompt、攻击、仅图像访问和 fixed-FPR 统计边界。Tree-Ring 与 Shallow Diffuse 分别按官方调度在 Prompt 循环外构造一次全局载体。Gaussian Shading 使用 ChaCha20 key / nonce 加密 message, 并以同一 clean Gaussian latent 的逐坐标幅值构造严格配对的符号条件样本。T2SMark clean 图像重放编码器实际使用的水印前基础 Gaussian latent。simple XOR、独立 clean / watermarked latent 采样或逐 Prompt 替换官方全局载体均不属于正式主表实现。
 
@@ -68,7 +70,7 @@ $$
 
 检测端与原始固定模板 $\nu$ 计算相关性, 不需要恢复 $B$。该设计的主要考虑在于：
 
-1. $B$ 只控制嵌入方向对语义和视觉特征的响应；
+1. $B$ 只控制嵌入方向对 CLIP 语义和声明的手工结构统计坐标的响应；
 2. 固定模板提供图像盲检所需的可重建参考；
 3. $\nu^\top BB^\top\nu\ge0$, 投影保留的模板能量可以作为运行记录审计；
 4. 投影能量过低时运行必须失败, 不能退回 one-hot 或周期平铺代理。
@@ -79,7 +81,7 @@ $$
 2. 科学会话通过 `experiments.runners.image_only_dataset_workload` 读取当前 `paper_run` Prompt 文件并构造唯一正式方法配置；
 3. 复用一次加载的 SD3.5 Medium、VAE 和 CLIP 运行时；
 4. 对每个 Prompt 生成 clean 与 watermarked 图像；
-5. 对每次实际写回和最终 clean/watermarked 成图执行完整 CLIP/视觉特征保持门禁；
+5. 对每次实际写回和最终 clean/watermarked 成图执行完整 CLIP/手工结构统计保持门禁；
 6. 对选定 test Prompt 执行9类标准图像攻击和8类真实 GPU 扩散攻击；
 7. 所有样本只从最终图像重新编码并检测；
 8. calibration clean negative 冻结包含 rescue 的完整判定协议；

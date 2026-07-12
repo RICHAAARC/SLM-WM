@@ -13,24 +13,30 @@ from dataclasses import asdict, dataclass
 from typing import Any, Iterable
 
 from main.core.digest import build_stable_digest
-from main.methods.semantic.vector_values import NumberLike, VectorInput, as_float_vector, clip_unit, ensure_equal_length
+from main.methods.semantic.vector_values import (
+    NumberLike,
+    VectorInput,
+    as_float_vector,
+    clip_unit,
+    ensure_equal_length,
+)
 
 BRANCH_NAMES = ("lf_content", "tail_robust", "attention_geometry")
 
 
 @dataclass(frozen=True)
 class BranchRiskConfig:
-    """描述一个载体分支如何解释纹理和稳定性。
+    """描述一个载体分支如何解释局部对比度、纹理和真实稳定性.
 
     `texture_preference` 取值为 `avoid`、`prefer` 或 `neutral`。`avoid` 表示纹理
     越高风险越高, `prefer` 表示纹理越低风险越高。该枚举避免使用容易产生
     符号歧义的负权重。
     """
 
-    saliency_weight: float
+    local_contrast_risk_weight: float
     semantic_weight: float
     texture_weight: float
-    instability_weight: float
+    adjacent_step_instability_weight: float
     attention_instability_weight: float = 0.0
     texture_preference: str = "neutral"
     eligibility_threshold: float = 0.55
@@ -42,10 +48,10 @@ class BranchRiskConfig:
         """集中校验风险配置, 业务函数只处理已合法参数。"""
 
         weights = (
-            self.saliency_weight,
+            self.local_contrast_risk_weight,
             self.semantic_weight,
             self.texture_weight,
-            self.instability_weight,
+            self.adjacent_step_instability_weight,
             self.attention_instability_weight,
         )
         if any(value < 0.0 for value in weights) or sum(weights) <= 0.0:
@@ -111,24 +117,24 @@ class BranchRiskFieldBundle:
 
 DEFAULT_BRANCH_CONFIGS = {
     "lf_content": BranchRiskConfig(
-        saliency_weight=0.30,
+        local_contrast_risk_weight=0.30,
         semantic_weight=0.30,
         texture_weight=0.20,
-        instability_weight=0.20,
+        adjacent_step_instability_weight=0.20,
         texture_preference="avoid",
     ),
     "tail_robust": BranchRiskConfig(
-        saliency_weight=0.25,
+        local_contrast_risk_weight=0.25,
         semantic_weight=0.25,
         texture_weight=0.30,
-        instability_weight=0.20,
+        adjacent_step_instability_weight=0.20,
         texture_preference="prefer",
     ),
     "attention_geometry": BranchRiskConfig(
-        saliency_weight=0.20,
+        local_contrast_risk_weight=0.20,
         semantic_weight=0.25,
         texture_weight=0.05,
-        instability_weight=0.20,
+        adjacent_step_instability_weight=0.20,
         attention_instability_weight=0.30,
         texture_preference="neutral",
     ),
@@ -149,8 +155,8 @@ def _build_single_branch(
     branch_name: str,
     semantic_values: tuple[float, ...],
     texture_values: tuple[float, ...],
-    stability_values: tuple[float, ...],
-    saliency_values: tuple[float, ...],
+    adjacent_step_stability_values: tuple[float, ...],
+    local_contrast_risk_values: tuple[float, ...],
     attention_stability_values: tuple[float, ...],
     config: BranchRiskConfig,
     require_eligible_position: bool,
@@ -158,26 +164,33 @@ def _build_single_branch(
     """根据统一输入构造一个分支风险场。"""
 
     weight_sum = (
-        config.saliency_weight
+        config.local_contrast_risk_weight
         + config.semantic_weight
         + config.texture_weight
-        + config.instability_weight
+        + config.adjacent_step_instability_weight
         + config.attention_instability_weight
     )
     risks: list[float] = []
     budgets: list[float] = []
-    for semantic, texture, stability, saliency, attention_stability in zip(
+    for (
+        semantic,
+        texture,
+        adjacent_step_stability,
+        local_contrast_risk,
+        attention_stability,
+    ) in zip(
         semantic_values,
         texture_values,
-        stability_values,
-        saliency_values,
+        adjacent_step_stability_values,
+        local_contrast_risk_values,
         attention_stability_values,
     ):
         raw_risk = (
-            config.saliency_weight * saliency
+            config.local_contrast_risk_weight * local_contrast_risk
             + config.semantic_weight * semantic
             + config.texture_weight * _texture_risk(texture, config.texture_preference)
-            + config.instability_weight * (1.0 - stability)
+            + config.adjacent_step_instability_weight
+            * (1.0 - adjacent_step_stability)
             + config.attention_instability_weight * (1.0 - attention_stability)
         ) / weight_sum
         risk = clip_unit(raw_risk)
@@ -187,7 +200,11 @@ def _build_single_branch(
         )
         risks.append(risk)
         budgets.append(budget)
-    eligible = tuple(index for index, risk in enumerate(risks) if risk <= config.eligibility_threshold)
+    eligible = tuple(
+        index
+        for index, risk in enumerate(risks)
+        if risk <= config.eligibility_threshold
+    )
     if require_eligible_position and not eligible:
         raise RuntimeError(
             f"{branch_name} 分支没有满足冻结风险阈值的可承载位置"
@@ -208,6 +225,15 @@ def _build_single_branch(
         risk_field_digest=build_stable_digest(payload),
         metadata={
             "risk_definition": "branch_specific_nonnegative_risk_terms",
+            "local_contrast_risk_definition": (
+                "decoded_grayscale_absolute_deviation_from_5x5_local_mean"
+            ),
+            "adjacent_step_stability_definition": (
+                "one_minus_mean_absolute_decoded_rgb_change_from_previous_scheduler_step"
+            ),
+            "attention_stability_definition": (
+                "cross_frozen_layer_direct_qk_relation_consistency"
+            ),
             "texture_preference": config.texture_preference,
             "eligibility_threshold": config.eligibility_threshold,
         },
@@ -217,8 +243,8 @@ def _build_single_branch(
 def build_branch_risk_fields(
     semantic_values: VectorInput | Iterable[NumberLike],
     texture_values: VectorInput | Iterable[NumberLike],
-    stability_values: VectorInput | Iterable[NumberLike],
-    saliency_values: VectorInput | Iterable[NumberLike],
+    adjacent_step_stability_values: VectorInput | Iterable[NumberLike],
+    local_contrast_risk_values: VectorInput | Iterable[NumberLike],
     attention_stability_values: VectorInput | Iterable[NumberLike],
     configs: dict[str, BranchRiskConfig] | None = None,
     required_eligible_branches: Iterable[str] | None = None,
@@ -233,10 +259,25 @@ def build_branch_risk_fields(
     正式消融, 此时仍可记录风险诊断值, 但风险阈值不得决定样本能否继续运行.
     """
 
-    semantic = tuple(clip_unit(value) for value in as_float_vector(semantic_values, "semantic_values"))
+    semantic = tuple(
+        clip_unit(value)
+        for value in as_float_vector(semantic_values, "semantic_values")
+    )
     texture = tuple(clip_unit(value) for value in as_float_vector(texture_values, "texture_values"))
-    stability = tuple(clip_unit(value) for value in as_float_vector(stability_values, "stability_values"))
-    saliency = tuple(clip_unit(value) for value in as_float_vector(saliency_values, "saliency_values"))
+    adjacent_step_stability = tuple(
+        clip_unit(value)
+        for value in as_float_vector(
+            adjacent_step_stability_values,
+            "adjacent_step_stability_values",
+        )
+    )
+    local_contrast_risk = tuple(
+        clip_unit(value)
+        for value in as_float_vector(
+            local_contrast_risk_values,
+            "local_contrast_risk_values",
+        )
+    )
     if attention_stability_values is None:
         raise ValueError("attention_stability_values 必须来自真实跨层 Q/K 关系")
     attention_stability = tuple(
@@ -250,8 +291,8 @@ def build_branch_risk_fields(
         {
             "semantic_values": semantic,
             "texture_values": texture,
-            "stability_values": stability,
-            "saliency_values": saliency,
+            "adjacent_step_stability_values": adjacent_step_stability,
+            "local_contrast_risk_values": local_contrast_risk,
             "attention_stability_values": attention_stability,
         }
     )
@@ -270,8 +311,8 @@ def build_branch_risk_fields(
             name,
             semantic,
             texture,
-            stability,
-            saliency,
+            adjacent_step_stability,
+            local_contrast_risk,
             attention_stability,
             resolved_configs[name],
             name in required_branches,

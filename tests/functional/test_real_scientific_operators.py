@@ -71,8 +71,8 @@ from experiments.runtime.diffusion.semantic_features import (
     JOINT_FEATURE_WIDTH,
     SEMANTIC_FEATURE_SCHEMA,
     SEMANTIC_FEATURE_WIDTH,
-    VISUAL_FEATURE_SCHEMA,
-    VISUAL_FEATURE_WIDTH,
+    HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
+    HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
 )
 from main.core.digest import build_stable_digest
 from scripts import semantic_watermark_scientific_workflow as scientific_workflow
@@ -189,8 +189,8 @@ def test_branch_risk_fields_use_opposite_texture_preferences() -> None:
     fields = build_branch_risk_fields(
         semantic_values=(0.2, 0.2),
         texture_values=(0.1, 0.9),
-        stability_values=(0.8, 0.8),
-        saliency_values=(0.2, 0.2),
+        adjacent_step_stability_values=(0.8, 0.8),
+        local_contrast_risk_values=(0.2, 0.2),
         attention_stability_values=(0.8, 0.8),
     )
 
@@ -324,8 +324,8 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
             "preferred_direction_count": 1,
             "semantic_feature_schema": SEMANTIC_FEATURE_SCHEMA,
             "semantic_feature_width": SEMANTIC_FEATURE_WIDTH,
-            "visual_feature_schema": VISUAL_FEATURE_SCHEMA,
-            "visual_feature_width": VISUAL_FEATURE_WIDTH,
+            "handcrafted_structure_feature_schema": HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
+            "handcrafted_structure_feature_width": HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
             "joint_feature_width": JOINT_FEATURE_WIDTH,
             "feature_compression_applied": False,
             "keyed_prg_version": KEYED_PRG_VERSION,
@@ -336,6 +336,12 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     }
     config = SemanticWatermarkRuntimeConfig()
     record = {
+        "step_index": 6,
+        "adjacent_step_reference_index": 5,
+        "adjacent_step_reference_latent_content_sha256": "1" * 64,
+        "adjacent_step_stability_status": (
+            "measured_from_immediately_previous_scheduler_step"
+        ),
         "branch_risk_bundle_digest": "risk_digest",
         "branch_risk_records": {
             name: {"eligible_position_count": 10}
@@ -381,7 +387,7 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
             config.keyed_prg_version
         )["keyed_prg_protocol_digest"],
         "full_semantic_cosine_similarity": 0.999,
-        "full_visual_feature_relative_drift": 0.001,
+        "full_handcrafted_structure_feature_relative_drift": 0.001,
         "semantic_preservation_gate_ready": True,
     }
     assert _scientific_update_record_ready(record, config) is True
@@ -395,6 +401,11 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     assert _scientific_update_record_ready(record, config) is False
     record["quantized_write_relative_jacobian_response"] = 1e-5
     record["keyed_prg_protocol_digest"] = "0" * 64
+    assert _scientific_update_record_ready(record, config) is False
+    record["keyed_prg_protocol_digest"] = keyed_prg_protocol_record()[
+        "keyed_prg_protocol_digest"
+    ]
+    record["adjacent_step_reference_index"] = 4
     assert _scientific_update_record_ready(record, config) is False
 
 
@@ -1127,12 +1138,14 @@ def test_image_attention_extractor_requires_scheduler_scale_noise(
 
 
 @pytest.mark.quick
-def test_post_step_injection_rejects_last_scheduler_step() -> None:
-    """callback-on-step-end 的最后一步没有下一时刻, 必须在配置层拒绝。"""
+def test_post_step_injection_requires_adjacent_scheduler_steps() -> None:
+    """注入时刻必须同时具有真实的上一和下一 scheduler 时刻."""
 
     base = SemanticWatermarkRuntimeConfig()
     with pytest.raises(ValueError, match="post-step"):
         replace(base, injection_step_indices=(base.inference_steps - 1,))
+    with pytest.raises(ValueError, match="相邻的前后调度时刻"):
+        replace(base, injection_step_indices=(0,))
 
 
 @pytest.mark.quick

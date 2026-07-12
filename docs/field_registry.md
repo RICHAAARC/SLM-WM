@@ -103,10 +103,10 @@ Notebook 与 repository module 的跨边界数据
 | writes_persistent_output_by_default | governance | none | false | false | false | 脚本默认是否写出持久化输出。 |
 | attention_runtime | method | none | false | false | false | attention 原语是否接入真实运行时的状态说明。 |
 | branch | method | none | false | false | false | 载体派生分支名称, 例如 LF、`tail_robust` 或 attention。 |
-| eta_saliency | method | none | false | false | false | 语义风险场中 saliency 权重。 |
+| eta_local_contrast_risk | method | none | false | false | false | 分支风险场中解码灰度局部对比度风险的权重。 |
 | eta_semantic | method | none | false | false | false | 语义风险场中 semantic 权重。 |
 | eta_texture | method | none | false | false | false | 语义风险场中 texture 权重。 |
-| eta_stability | method | none | false | false | false | 语义风险场中 stability 权重。 |
+| eta_adjacent_step_instability | method | none | false | false | false | 分支风险场中相邻 scheduler 步解码不稳定度的权重。 |
 | budget_min | method | none | false | false | false | 语义承载预算下界。 |
 | budget_max | method | none | false | false | false | 语义承载预算上界。 |
 | budget_gain | method | none | false | false | false | 由低风险区域提升承载预算的增益。 |
@@ -2519,16 +2519,22 @@ Notebook 与 repository module 的跨边界数据
 | kid_output_scale | protocol | none | true | false | false | KID 输出缩放系数, 当前固定为1并保留原始尺度。 |
 | kid_full_sample_subset_std | protocol | none | true | true | false | 子集覆盖完整集合时显式记录的 KID 总体标准差, 当前固定为0。 |
 | branch_risk_mode | method | none | true | false | false | 载体路由使用分支特定风险场或共享全局风险对照的真实机制模式。 |
+| local_contrast_risk_weight | method | none | true | false | false | 灰度相对反射填充5x5局部均值绝对偏离在分支风险中的非负权重。 |
+| adjacent_step_instability_weight | method | none | true | false | false | 当前与紧邻上一 scheduler 步解码 RGB 不稳定度在分支风险中的非负权重。 |
+| attention_instability_weight | method | none | true | false | false | 真实跨冻结层 Q/K 关系不稳定度在分支风险中的非负权重。 |
+| adjacent_step_reference_index | provenance | none | true | true | false | 当前注入用于稳定度计算的紧邻上一 scheduler 步索引。 |
+| adjacent_step_reference_latent_content_sha256 | provenance | none | true | true | false | 紧邻上一 scheduler 步实际 latent 的 dtype、shape 与连续原始字节内容摘要。 |
+| adjacent_step_stability_status | governance | none | true | true | false | 相邻步稳定度是否从紧邻上一 scheduler 步真实 latent 测量。 |
 | attention_stable_token_fraction | protocol | none | true | false | false | 真实 Q/K 关系图按稳定度与接收 attention 显著度固定选择的 token 比例。 |
 | attention_unstable_pair_weight | protocol | none | true | false | false | 稳定 token 集合外规则网格关系在 Q/K 目标中保留的冻结支撑权重。 |
 | minimum_final_image_attention_score_gain | protocol | none | true | true | false | 完整方法相对 carrier-only 的两类最终图像 attention 归因增益共同采用的严格正下界。 |
 | minimum_semantic_preservation_cosine | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的完整 CLIP cosine 冻结下界。 |
-| maximum_visual_feature_relative_drift | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的完整视觉特征相对漂移冻结上界。 |
+| maximum_handcrafted_structure_feature_relative_drift | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的手工结构统计特征相对漂移冻结上界。 |
 | semantic_feature_schema | method | none | true | false | false | 正式 Jacobian 直接使用的完整归一化 CLIP embedding 定义。 |
 | semantic_feature_width | protocol | none | true | false | false | 进入完整 Jacobian 的 CLIP embedding 坐标数量, 当前冻结为512。 |
-| visual_feature_schema | method | none | true | false | false | 正式 Jacobian 直接使用的完整通道统计、梯度与8x8空间视觉向量定义。 |
-| visual_feature_width | protocol | none | true | false | false | 进入完整 Jacobian 的视觉特征坐标数量, 当前冻结为204。 |
-| joint_feature_width | protocol | none | true | false | false | 完整语义与视觉特征连接后的 Jacobian 输出宽度, 当前冻结为716。 |
+| handcrafted_structure_feature_schema | method | none | true | false | false | 正式 Jacobian 使用的 RGB 通道均值/标准差、绝对梯度均值和8x8 RGB 平均池化手工结构统计定义。 |
+| handcrafted_structure_feature_width | protocol | none | true | false | false | 进入完整 Jacobian 的手工结构统计坐标数量, 当前冻结为204。 |
+| joint_feature_width | protocol | none | true | false | false | 512维 CLIP 语义与204维手工结构统计连接后的 Jacobian 输出宽度, 当前冻结为716。 |
 | feature_compression_applied | governance | none | true | true | false | 正式 Jacobian 输入是否经过降维或草图压缩, 正式值必须为 false。 |
 | null_space_cg_max_iterations | protocol | none | true | false | false | 无阻尼 PSD-CG 对每个风险支持方向允许的最大迭代次数。 |
 | null_space_cg_relative_tolerance | protocol | none | true | true | false | 无阻尼 PSD-CG 的冻结相对残差收敛阈值。 |
@@ -2550,13 +2556,13 @@ Notebook 与 repository module 的跨边界数据
 | solver | method | none | true | false | false | Null Space 记录采用的矩阵自由完整 Jacobian 求解器身份。 |
 | latent_basis_formula | method | none | true | false | false | 风险支持完整 Jacobian 约束投影与 QR 的基底公式身份。 |
 | full_semantic_cosine_similarity | metric | none | true | true | false | 实际 combined latent 写回前后未压缩 CLIP embedding 的 cosine 相似度。 |
-| full_visual_feature_relative_drift | metric | none | true | true | false | 实际 combined latent 写回前后完整视觉特征向量的相对 L2 漂移。 |
-| semantic_preservation_gate_ready | governance | none | true | true | false | 实际 combined latent 是否同时满足完整 CLIP 与视觉特征保持门禁。 |
+| full_handcrafted_structure_feature_relative_drift | metric | none | true | true | false | 实际 combined latent 写回前后手工结构统计特征向量的相对 L2 漂移。 |
+| semantic_preservation_gate_ready | governance | none | true | true | false | 实际 combined latent 是否同时满足完整 CLIP 与手工结构统计保持门禁。 |
 | preservation_validation_scope | method | none | true | false | false | 有限更新保持性复验实际覆盖的 combined latent 和完整特征范围。 |
 | final_image_preservation | method | none | true | true | false | 最终 clean 与 watermarked 成图累计完整特征保持记录。 |
 | final_image_semantic_cosine_similarity | metric | none | true | true | false | 最终 clean 与 watermarked 成图的完整 CLIP embedding cosine。 |
-| final_image_visual_feature_relative_drift | metric | none | true | true | false | 最终 clean 与 watermarked 成图的完整视觉特征相对 L2 漂移。 |
-| final_image_preservation_gate_ready | governance | none | true | true | false | 最终成图是否通过累计完整 CLIP 与视觉特征保持门禁。 |
+| final_image_handcrafted_structure_feature_relative_drift | metric | none | true | true | false | 最终 clean 与 watermarked 成图的手工结构统计特征相对 L2 漂移。 |
+| final_image_preservation_gate_ready | governance | none | true | true | false | 最终成图是否通过累计完整 CLIP 与手工结构统计保持门禁。 |
 | final_image_preservation_failure_count | metric | none | true | true | false | 数据集运行中未通过最终成图累计保持门禁的样本数量。 |
 | stable_token_selection_digest | provenance | none | true | false | false | 一次注入中冻结的稳定 token 选择规则、索引和分数稳定摘要。 |
 | stable_pair_weight_identity_digest | provenance | none | true | true | false | 稳定 token 选择、原始二维索引、非稳定权重和 pair 外积规则共同形成的跨阶段身份摘要。 |
@@ -2628,14 +2634,14 @@ Notebook 与 repository module 的跨边界数据
 | carrier_only_counterfactual_atom_path | artifact | none | true | true | false | carrier-only 逐注入更新原子 JSONL 的仓库相对路径。 |
 | carrier_only_counterfactual_atom_file_sha256 | provenance | none | true | true | false | carrier-only 更新原子 JSONL 实际文件字节的即时 SHA-256。 |
 | carrier_only_counterfactual_atom_content_digest | provenance | none | true | true | false | carrier-only 更新原子 JSONL 解析内容的稳定摘要, 必须等于运行时 carrier 更新记录摘要。 |
-| carrier_only_final_image_preservation | method | none | true | true | false | clean、carrier-only 与完整方法最终成图三边的完整 CLIP 语义和视觉特征保持记录, 并绑定同一反事实与原子产物。 |
+| carrier_only_final_image_preservation | method | none | true | true | false | clean、carrier-only 与完整方法最终成图三边的完整 CLIP 语义和手工结构统计保持记录, 并绑定同一反事实与原子产物。 |
 | carrier_only_final_image_preservation_applicable | governance | none | true | true | false | 当前 attention geometry 配置是否必须执行 clean 到 carrier-only 的最终内容保持门禁。 |
 | carrier_only_final_image_semantic_cosine_similarity | metric | none | true | true | false | clean 与 carrier-only 最终成图完整 CLIP 语义特征的余弦相似度。 |
-| carrier_only_final_image_visual_feature_relative_drift | metric | none | true | true | false | clean 与 carrier-only 最终成图完整视觉特征的相对漂移。 |
-| carrier_only_final_image_preservation_gate_ready | governance | none | true | true | false | clean 到 carrier-only 的语义相似度和视觉漂移是否同时通过冻结保持阈值。 |
+| carrier_only_final_image_handcrafted_structure_feature_relative_drift | metric | none | true | true | false | clean 与 carrier-only 最终成图手工结构统计特征的相对漂移。 |
+| carrier_only_final_image_preservation_gate_ready | governance | none | true | true | false | clean 到 carrier-only 的 CLIP 相似度和手工结构统计漂移是否同时通过冻结保持阈值。 |
 | carrier_only_to_full_final_image_semantic_cosine_similarity | metric | none | true | true | false | carrier-only 与完整方法最终成图完整 CLIP 语义特征的直接余弦相似度。 |
-| carrier_only_to_full_final_image_visual_feature_relative_drift | metric | none | true | true | false | carrier-only 与完整方法最终成图完整视觉特征的直接相对漂移。 |
-| carrier_only_to_full_final_image_preservation_gate_ready | governance | none | true | true | false | carrier-only 到完整方法的直接语义相似度和视觉漂移是否通过冻结保持阈值。 |
+| carrier_only_to_full_final_image_handcrafted_structure_feature_relative_drift | metric | none | true | true | false | carrier-only 与完整方法最终成图手工结构统计特征的直接相对漂移。 |
+| carrier_only_to_full_final_image_preservation_gate_ready | governance | none | true | true | false | carrier-only 到完整方法的直接 CLIP 相似度和手工结构统计漂移是否通过冻结保持阈值。 |
 | carrier_only_counterfactual_three_way_preservation_gate_ready | governance | none | true | true | false | clean 到完整方法、clean 到 carrier-only 和 carrier-only 到完整方法三条最终特征边是否全部通过。 |
 | carrier_only_final_image_preservation_status | governance | none | true | false | false | carrier-only 最终内容保持记录的真实测量状态。 |
 | injection_execution_role | method | none | true | false | false | 注入 callback 当前执行完整方法或 carrier-only 反事实的角色身份。 |

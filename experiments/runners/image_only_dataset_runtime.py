@@ -42,8 +42,8 @@ from experiments.runtime.diffusion.semantic_features import (
     JOINT_FEATURE_WIDTH,
     SEMANTIC_FEATURE_SCHEMA,
     SEMANTIC_FEATURE_WIDTH,
-    VISUAL_FEATURE_SCHEMA,
-    VISUAL_FEATURE_WIDTH,
+    HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
+    HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -369,6 +369,23 @@ def _scientific_update_record_ready(
             return False
         return float(value) > minimum if strict else float(value) >= minimum
 
+    adjacent_reference_sha256 = str(
+        record.get("adjacent_step_reference_latent_content_sha256", "")
+    )
+    step_index = record.get("step_index")
+    if (
+        len(adjacent_reference_sha256) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in adjacent_reference_sha256
+        )
+        or not isinstance(step_index, int)
+        or record.get("adjacent_step_reference_index") != step_index - 1
+        or record.get("adjacent_step_stability_status")
+        != "measured_from_immediately_previous_scheduler_step"
+    ):
+        return False
+
     null_space_records = record.get("null_space_records")
     if not isinstance(null_space_records, dict) or set(null_space_records) != {
         "lf_content",
@@ -406,11 +423,17 @@ def _scientific_update_record_ready(
             return False
         if metadata.get("semantic_feature_schema") != SEMANTIC_FEATURE_SCHEMA:
             return False
-        if metadata.get("visual_feature_schema") != VISUAL_FEATURE_SCHEMA:
+        if (
+            metadata.get("handcrafted_structure_feature_schema")
+            != HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA
+        ):
             return False
         if int(metadata.get("semantic_feature_width", 0)) != SEMANTIC_FEATURE_WIDTH:
             return False
-        if int(metadata.get("visual_feature_width", 0)) != VISUAL_FEATURE_WIDTH:
+        if (
+            int(metadata.get("handcrafted_structure_feature_width", 0))
+            != HANDCRAFTED_STRUCTURE_FEATURE_WIDTH
+        ):
             return False
         if int(metadata.get("joint_feature_width", 0)) != JOINT_FEATURE_WIDTH:
             return False
@@ -528,17 +551,19 @@ def _scientific_update_record_ready(
     ):
         return False
     semantic_cosine = record.get("full_semantic_cosine_similarity")
-    visual_relative_drift = record.get("full_visual_feature_relative_drift")
+    structure_relative_drift = record.get(
+        "full_handcrafted_structure_feature_relative_drift"
+    )
     if not finite_at_least(
         semantic_cosine,
         config.minimum_semantic_preservation_cosine,
     ):
         return False
     if (
-        not isinstance(visual_relative_drift, (int, float))
-        or not math.isfinite(float(visual_relative_drift))
-        or float(visual_relative_drift)
-        > config.maximum_visual_feature_relative_drift
+        not isinstance(structure_relative_drift, (int, float))
+        or not math.isfinite(float(structure_relative_drift))
+        or float(structure_relative_drift)
+        > config.maximum_handcrafted_structure_feature_relative_drift
     ):
         return False
     if record.get("semantic_preservation_gate_ready") is not True:
@@ -560,15 +585,17 @@ def _final_image_preservation_ready(
 
     record = result.get("metadata", {}).get("final_image_preservation", {})
     semantic_cosine = record.get("final_image_semantic_cosine_similarity")
-    visual_drift = record.get("final_image_visual_feature_relative_drift")
+    structure_drift = record.get(
+        "final_image_handcrafted_structure_feature_relative_drift"
+    )
     return bool(
         record.get("final_image_preservation_gate_ready") is True
         and isinstance(semantic_cosine, (int, float))
         and math.isfinite(float(semantic_cosine))
         and float(semantic_cosine) >= config.minimum_semantic_preservation_cosine
-        and isinstance(visual_drift, (int, float))
-        and math.isfinite(float(visual_drift))
-        and float(visual_drift) <= config.maximum_visual_feature_relative_drift
+        and isinstance(structure_drift, (int, float))
+        and math.isfinite(float(structure_drift))
+        and float(structure_drift) <= config.maximum_handcrafted_structure_feature_relative_drift
     )
 
 
@@ -586,8 +613,8 @@ def _carrier_only_final_image_preservation_ready(
     semantic_cosine = record.get(
         "carrier_only_final_image_semantic_cosine_similarity"
     )
-    visual_drift = record.get(
-        "carrier_only_final_image_visual_feature_relative_drift"
+    structure_drift = record.get(
+        "carrier_only_final_image_handcrafted_structure_feature_relative_drift"
     )
     identity_digest = str(
         record.get("carrier_only_counterfactual_identity_digest", "")
@@ -611,9 +638,9 @@ def _carrier_only_final_image_preservation_ready(
         and isinstance(semantic_cosine, (int, float))
         and math.isfinite(float(semantic_cosine))
         and float(semantic_cosine) >= config.minimum_semantic_preservation_cosine
-        and isinstance(visual_drift, (int, float))
-        and math.isfinite(float(visual_drift))
-        and float(visual_drift) <= config.maximum_visual_feature_relative_drift
+        and isinstance(structure_drift, (int, float))
+        and math.isfinite(float(structure_drift))
+        and float(structure_drift) <= config.maximum_handcrafted_structure_feature_relative_drift
         and len(identity_digest) == 64
         and identity_digest == observability_identity_digest
         and all(character in "0123456789abcdef" for character in identity_digest)

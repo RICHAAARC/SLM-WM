@@ -74,13 +74,13 @@ $$
 [
 \phi_{\mathrm{sem}}(u),
 \phi_{\mathrm{tex}}(u),
-\phi_{\mathrm{stab}}(u),
-\phi_{\mathrm{sal}}(u),
+\phi_{\mathrm{adj}}(u),
+\phi_{\mathrm{lcr}}(u),
 \phi_{\mathrm{attn\_stab}}(u)
 ].
 $$
 
-若 saliency 或 segmentation 首先在图像域计算，必须通过 $\Pi_{x\rightarrow z}$ 映射到 latent 分辨率。该 mask 需要参与风险和候选方向构造，不能只用于可视化。
+$\phi_{\mathrm{lcr}}$ 固定为解码灰度相对反射填充5x5局部均值的绝对偏离；$\phi_{\mathrm{adj}}$ 固定为当前与紧邻上一 scheduler 步解码 RGB 的逐位置稳定度。运行时在全部 post-step 回调上维护上一 latent，缺失时直接失败。$\phi_{\mathrm{attn\_stab}}$ 则独立来自不少于两个冻结层的直接 Q/K 关系。
 
 ### （二）分支输出
 
@@ -91,10 +91,10 @@ $$
 =
 \frac{1}{Z_b}
 \left[
-\eta_s^b\phi_{\mathrm{sal}}(u)
+\eta_c^b\phi_{\mathrm{lcr}}(u)
 +\eta_m^b\phi_{\mathrm{sem}}(u)
 +\eta_t^b\psi_b(\phi_{\mathrm{tex}}(u))
-+\eta_i^b(1-\phi_{\mathrm{stab}}(u))
++\eta_d^b(1-\phi_{\mathrm{adj}}(u))
 +\eta_A^b(1-\phi_{\mathrm{attn\_stab}}(u))
 \right],
 $$
@@ -113,7 +113,7 @@ $$
 D_b=[d_1^b,\ldots,d_m^b],\qquad D_b^\top D_b=I.
 $$
 
-LF 与尾部截断分支把对应固定模板作为首个方向；注意力分支把真实 Q/K 目标梯度作为首个方向；其余列由密钥化方向补齐。完整特征函数连接512维归一化 CLIP embedding 和204维视觉向量，正式输出宽度为716且不执行压缩。
+LF 与尾部截断分支把对应固定模板作为首个方向；注意力分支把真实 Q/K 目标梯度作为首个方向；其余列由密钥化方向补齐。完整特征函数连接512维归一化 CLIP embedding 和204维手工结构统计向量，正式输出宽度为716且不执行压缩。该204维向量只包含 RGB 通道均值/标准差、水平/垂直绝对梯度均值和8x8 RGB 平均池化，不声明覆盖一般感知质量。
 
 ### （二）矩阵自由风险支持约束投影
 
@@ -135,7 +135,7 @@ $$
 N_b=\operatorname{qr}([u_1^b,\ldots,u_4^b]).
 $$
 
-正式记录保存每列 CG 迭代数、CG 相对残差、投影能量、QR 后完整 Jacobian 响应与正交误差。CG 最大64次、相对收敛阈值为 $10^{-6}$ 且阻尼固定为0；QR 后每列相对响应不得超过 $10^{-4}$，投影能量不得低于0.01，正交误差不得超过 $10^{-5}$。三个分支合成后必须复验实际写回 latent；完整扩散结束后还必须比较最终 clean 与 watermarked 成图。两级保持门禁均要求 CLIP cosine 不低于0.995且视觉特征相对漂移不高于0.02。
+正式记录保存每列 CG 迭代数、CG 相对残差、投影能量、QR 后完整 Jacobian 响应与正交误差。CG 最大64次、相对收敛阈值为 $10^{-6}$ 且阻尼固定为0；QR 后每列相对响应不得超过 $10^{-4}$，投影能量不得低于0.01，正交误差不得超过 $10^{-5}$。三个分支合成后必须复验实际写回 latent；完整扩散结束后还必须比较最终 clean 与 watermarked 成图。两级保持门禁均要求 CLIP cosine 不低于0.995且手工结构统计特征相对漂移不高于0.02。
 
 ---
 

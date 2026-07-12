@@ -86,7 +86,7 @@
 6. 以同 seed、同 scheduler 和相同 LF/tail 配置及算子生成只关闭 attention geometry 的 carrier-only 成图；该比较测量包含后续轨迹交互的总机制效应, 不假设干预后 realized carrier 相等。
 7. 核验首个注入前 latent 字节身份、完整注入顺序和 scheduler 轨迹；逐条拒绝含 attention 来源、分数、更新、关系、pair 身份或 attention Null Space 的 carrier-only 原子。
 8. 持久化 carrier-only 更新原子 JSONL, 将路径、实际文件 SHA-256 和解析内容摘要绑定到结果、manifest 与缓存复验。
-9. 验证 clean 到完整方法、clean 到 carrier-only 及 carrier-only 到完整方法三条最终 CLIP 语义和视觉特征边。
+9. 验证 clean 到完整方法、clean 到 carrier-only 及 carrier-only 到完整方法三条最终 CLIP 语义和204维手工结构统计边。
 10. 对 clean、carrier-only 与完整方法成图重新编码真实 Q/K, 验证自身盲选择归因增益和冻结 carrier-only pair 权重归因增益, 并记录全部四个 Q/K 依赖分量的配对增益。
 11. 记录更新强度、梯度范数、回溯次数、前后目标值、直接 Q/K 来源、四分量与密钥投影身份、反事实身份和 pair 权重身份, 并把反事实原子、身份与图像摘要写入 manifest。
 

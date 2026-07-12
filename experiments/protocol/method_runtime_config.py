@@ -56,7 +56,7 @@ class FormalMethodRuntimeConfig:
     null_space_cg_max_iterations: int
     null_space_cg_relative_tolerance: float
     minimum_semantic_preservation_cosine: float
-    maximum_visual_feature_relative_drift: float
+    maximum_handcrafted_structure_feature_relative_drift: float
     injection_step_indices: tuple[int, ...]
     max_attention_tokens: int
     attention_module_count: int
@@ -83,8 +83,13 @@ class FormalMethodRuntimeConfig:
             raise ValueError("图像尺寸和推理步数必须为正整数")
         if self.jacobian_candidate_count < self.null_space_rank or self.null_space_rank <= 0:
             raise ValueError("jacobian_candidate_count 必须不小于正的 null_space_rank")
-        if any(index < 0 or index >= self.inference_steps for index in self.injection_step_indices):
-            raise ValueError("injection_step_indices 必须位于推理步范围内")
+        if any(
+            index <= 0 or index >= self.inference_steps
+            for index in self.injection_step_indices
+        ):
+            raise ValueError(
+                "injection_step_indices 必须保留紧邻上一 scheduler 步"
+            )
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
         require_supported_keyed_prg_version(self.keyed_prg_version)
@@ -119,9 +124,13 @@ class FormalMethodRuntimeConfig:
             raise ValueError(
                 "minimum_semantic_preservation_cosine 必须位于 (0, 1]"
             )
-        if not 0.0 <= self.maximum_visual_feature_relative_drift <= 1.0:
+        if not (
+            0.0
+            <= self.maximum_handcrafted_structure_feature_relative_drift
+            <= 1.0
+        ):
             raise ValueError(
-                "maximum_visual_feature_relative_drift 必须位于 [0, 1]"
+                "maximum_handcrafted_structure_feature_relative_drift 必须位于 [0, 1]"
             )
         if self.max_attention_tokens < 4 or self.attention_module_count < 2:
             raise ValueError("注意力几何配置不能退化为单层或过短 token 近似")
@@ -163,8 +172,8 @@ class FormalMethodRuntimeConfig:
             "minimum_semantic_preservation_cosine": (
                 self.minimum_semantic_preservation_cosine
             ),
-            "maximum_visual_feature_relative_drift": (
-                self.maximum_visual_feature_relative_drift
+            "maximum_handcrafted_structure_feature_relative_drift": (
+                self.maximum_handcrafted_structure_feature_relative_drift
             ),
         }
 
@@ -251,8 +260,8 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         "SLM_WM_MINIMUM_SEMANTIC_PRESERVATION_COSINE": str(
             config.minimum_semantic_preservation_cosine
         ),
-        "SLM_WM_MAXIMUM_VISUAL_FEATURE_RELATIVE_DRIFT": str(
-            config.maximum_visual_feature_relative_drift
+        "SLM_WM_MAXIMUM_HANDCRAFTED_STRUCTURE_FEATURE_RELATIVE_DRIFT": str(
+            config.maximum_handcrafted_structure_feature_relative_drift
         ),
         "SLM_WM_MAX_ATTENTION_TOKENS": str(config.max_attention_tokens),
         "SLM_WM_ENABLE_DIFFUSION_ATTACKS": "1" if config.diffusion_attacks_enabled else "0",

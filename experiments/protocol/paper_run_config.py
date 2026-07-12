@@ -62,8 +62,8 @@ DEFAULT_NULL_SPACE_CG_RELATIVE_TOLERANCE = (
 DEFAULT_MINIMUM_SEMANTIC_PRESERVATION_COSINE = (
     _FORMAL_METHOD_DEFAULTS.minimum_semantic_preservation_cosine
 )
-DEFAULT_MAXIMUM_VISUAL_FEATURE_RELATIVE_DRIFT = (
-    _FORMAL_METHOD_DEFAULTS.maximum_visual_feature_relative_drift
+DEFAULT_MAXIMUM_HANDCRAFTED_STRUCTURE_FEATURE_RELATIVE_DRIFT = (
+    _FORMAL_METHOD_DEFAULTS.maximum_handcrafted_structure_feature_relative_drift
 )
 UNBOUNDED_LIMIT_TOKENS = {"", "all", "none", "unlimited"}
 SHARED_METHOD_SETTING_FIELDS = (
@@ -86,7 +86,7 @@ SHARED_METHOD_SETTING_FIELDS = (
     "null_space_cg_max_iterations",
     "null_space_cg_relative_tolerance",
     "minimum_semantic_preservation_cosine",
-    "maximum_visual_feature_relative_drift",
+    "maximum_handcrafted_structure_feature_relative_drift",
 )
 
 RUN_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -167,8 +167,8 @@ class PaperRunConfig:
     minimum_semantic_preservation_cosine: float = (
         DEFAULT_MINIMUM_SEMANTIC_PRESERVATION_COSINE
     )
-    maximum_visual_feature_relative_drift: float = (
-        DEFAULT_MAXIMUM_VISUAL_FEATURE_RELATIVE_DRIFT
+    maximum_handcrafted_structure_feature_relative_drift: float = (
+        DEFAULT_MAXIMUM_HANDCRAFTED_STRUCTURE_FEATURE_RELATIVE_DRIFT
     )
 
     def __post_init__(self) -> None:
@@ -215,9 +215,13 @@ class PaperRunConfig:
             raise ValueError(
                 "minimum_semantic_preservation_cosine 必须位于 (0, 1]"
             )
-        if not 0.0 <= self.maximum_visual_feature_relative_drift <= 1.0:
+        if not (
+            0.0
+            <= self.maximum_handcrafted_structure_feature_relative_drift
+            <= 1.0
+        ):
             raise ValueError(
-                "maximum_visual_feature_relative_drift 必须位于 [0, 1]"
+                "maximum_handcrafted_structure_feature_relative_drift 必须位于 [0, 1]"
             )
 
     def to_dict(self) -> dict[str, Any]:

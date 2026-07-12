@@ -129,8 +129,8 @@ class SemanticWatermarkRuntimeConfig:
     minimum_semantic_preservation_cosine: float = (
         _FORMAL_METHOD_CONFIG.minimum_semantic_preservation_cosine
     )
-    maximum_visual_feature_relative_drift: float = (
-        _FORMAL_METHOD_CONFIG.maximum_visual_feature_relative_drift
+    maximum_handcrafted_structure_feature_relative_drift: float = (
+        _FORMAL_METHOD_CONFIG.maximum_handcrafted_structure_feature_relative_drift
     )
     max_attention_tokens: int = _FORMAL_METHOD_CONFIG.max_attention_tokens
     attention_module_count: int = _FORMAL_METHOD_CONFIG.attention_module_count
@@ -168,8 +168,13 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError("正式真实方法运行要求 CUDA 设备")
         if self.candidate_count < self.null_rank or self.null_rank <= 0:
             raise ValueError("candidate_count 必须不小于正的 null_rank")
-        if any(index < 0 or index >= self.inference_steps - 1 for index in self.injection_step_indices):
-            raise ValueError("post-step 注入时刻必须保留一个合法的下一调度时刻")
+        if any(
+            index <= 0 or index >= self.inference_steps - 1
+            for index in self.injection_step_indices
+        ):
+            raise ValueError(
+                "post-step 注入时刻必须保留相邻的前后调度时刻"
+            )
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
         require_supported_keyed_prg_version(self.keyed_prg_version)
@@ -204,9 +209,13 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError(
                 "minimum_semantic_preservation_cosine 必须位于 (0, 1]"
             )
-        if not 0.0 <= self.maximum_visual_feature_relative_drift <= 1.0:
+        if not (
+            0.0
+            <= self.maximum_handcrafted_structure_feature_relative_drift
+            <= 1.0
+        ):
             raise ValueError(
-                "maximum_visual_feature_relative_drift 必须位于 [0, 1]"
+                "maximum_handcrafted_structure_feature_relative_drift 必须位于 [0, 1]"
             )
         if self.branch_risk_mode not in {"branch_specific", "shared_global"}:
             raise ValueError(
@@ -763,10 +772,10 @@ def _branch_risk_configs(
     if config.branch_risk_mode == "branch_specific":
         return None
     shared_config = BranchRiskConfig(
-        saliency_weight=0.25,
+        local_contrast_risk_weight=0.25,
         semantic_weight=0.25,
         texture_weight=0.20,
-        instability_weight=0.20,
+        adjacent_step_instability_weight=0.20,
         attention_instability_weight=0.10,
         texture_preference="avoid",
     )
@@ -844,24 +853,24 @@ def _solve_branch_subspace(
 
 def _feature_preservation_values(
     semantic_before: Any,
-    visual_before: Any,
+    structure_before: Any,
     semantic_after: Any,
-    visual_after: Any,
+    structure_after: Any,
     config: SemanticWatermarkRuntimeConfig,
 ) -> tuple[float, float, bool]:
-    """统一计算完整 CLIP 与视觉特征的保持指标和门禁。"""
+    """统一计算完整 CLIP 与手工结构统计的保持指标和门禁."""
 
     import torch
     import torch.nn.functional as functional
 
     semantic_before_flat = semantic_before.float().reshape(-1)
     semantic_after_flat = semantic_after.float().reshape(-1)
-    visual_before_flat = visual_before.float().reshape(-1)
-    visual_after_flat = visual_after.float().reshape(-1)
+    structure_before_flat = structure_before.float().reshape(-1)
+    structure_after_flat = structure_after.float().reshape(-1)
     if semantic_before_flat.shape != semantic_after_flat.shape:
         raise RuntimeError("写回前后完整 CLIP 特征宽度不一致")
-    if visual_before_flat.shape != visual_after_flat.shape:
-        raise RuntimeError("写回前后完整视觉特征宽度不一致")
+    if structure_before_flat.shape != structure_after_flat.shape:
+        raise RuntimeError("写回前后手工结构统计特征宽度不一致")
     semantic_cosine = float(
         functional.cosine_similarity(
             semantic_before_flat,
@@ -870,17 +879,17 @@ def _feature_preservation_values(
             eps=1e-12,
         ).item()
     )
-    visual_relative_drift = float(
-        torch.linalg.norm(visual_after_flat - visual_before_flat).item()
-        / max(float(torch.linalg.norm(visual_before_flat).item()), 1e-12)
+    structure_relative_drift = float(
+        torch.linalg.norm(structure_after_flat - structure_before_flat).item()
+        / max(float(torch.linalg.norm(structure_before_flat).item()), 1e-12)
     )
     ready = bool(
         math.isfinite(semantic_cosine)
-        and math.isfinite(visual_relative_drift)
+        and math.isfinite(structure_relative_drift)
         and semantic_cosine >= config.minimum_semantic_preservation_cosine
-        and visual_relative_drift <= config.maximum_visual_feature_relative_drift
+        and structure_relative_drift <= config.maximum_handcrafted_structure_feature_relative_drift
     )
-    return semantic_cosine, visual_relative_drift, ready
+    return semantic_cosine, structure_relative_drift, ready
 
 
 def _quantized_write_jacobian_response_record(
@@ -975,31 +984,31 @@ def _combined_update_preservation_record(
     import torch
 
     with torch.no_grad():
-        semantic_before, visual_before = feature_runtime.joint_features(
+        semantic_before, structure_before = feature_runtime.joint_features(
             latent.detach().float()
         )
-        semantic_after, visual_after = feature_runtime.joint_features(
+        semantic_after, structure_after = feature_runtime.joint_features(
             injected.detach().float()
         )
-    semantic_cosine, visual_relative_drift, ready = _feature_preservation_values(
+    semantic_cosine, structure_relative_drift, ready = _feature_preservation_values(
         semantic_before,
-        visual_before,
+        structure_before,
         semantic_after,
-        visual_after,
+        structure_after,
         config,
     )
     return {
         "full_semantic_cosine_similarity": semantic_cosine,
-        "full_visual_feature_relative_drift": visual_relative_drift,
+        "full_handcrafted_structure_feature_relative_drift": structure_relative_drift,
         "minimum_semantic_preservation_cosine": (
             config.minimum_semantic_preservation_cosine
         ),
-        "maximum_visual_feature_relative_drift": (
-            config.maximum_visual_feature_relative_drift
+        "maximum_handcrafted_structure_feature_relative_drift": (
+            config.maximum_handcrafted_structure_feature_relative_drift
         ),
         "semantic_preservation_gate_ready": ready,
         "preservation_validation_scope": (
-            "actual_combined_latent_full_clip_and_visual_features"
+            "actual_combined_latent_full_clip_and_handcrafted_structure_features"
         ),
     }
 
@@ -1011,7 +1020,7 @@ def _final_image_preservation_record(
     watermarked_image: Any,
     config: SemanticWatermarkRuntimeConfig,
 ) -> dict[str, Any]:
-    """在最终成图上验证累计语义与视觉特征保持性。"""
+    """在最终成图上验证累计 CLIP 与手工结构统计保持性."""
 
     clean_features, watermarked_features = _final_image_joint_features(
         pipeline,
@@ -1019,7 +1028,7 @@ def _final_image_preservation_record(
         clean_image,
         watermarked_image,
     )
-    semantic_cosine, visual_relative_drift, ready = _feature_preservation_values(
+    semantic_cosine, structure_relative_drift, ready = _feature_preservation_values(
         clean_features[0],
         clean_features[1],
         watermarked_features[0],
@@ -1028,16 +1037,16 @@ def _final_image_preservation_record(
     )
     return {
         "final_image_semantic_cosine_similarity": semantic_cosine,
-        "final_image_visual_feature_relative_drift": visual_relative_drift,
+        "final_image_handcrafted_structure_feature_relative_drift": structure_relative_drift,
         "minimum_semantic_preservation_cosine": (
             config.minimum_semantic_preservation_cosine
         ),
-        "maximum_visual_feature_relative_drift": (
-            config.maximum_visual_feature_relative_drift
+        "maximum_handcrafted_structure_feature_relative_drift": (
+            config.maximum_handcrafted_structure_feature_relative_drift
         ),
         "final_image_preservation_gate_ready": ready,
         "preservation_validation_scope": (
-            "paired_final_images_full_clip_and_visual_features"
+            "paired_final_images_full_clip_and_handcrafted_structure_features"
         ),
     }
 
@@ -1047,7 +1056,7 @@ def _final_image_joint_features(
     feature_runtime: DifferentiableSemanticFeatureRuntime,
     *images: Any,
 ) -> tuple[tuple[Any, Any], ...]:
-    """一次性提取一组最终成图的完整 CLIP 与视觉特征。"""
+    """一次性提取最终成图的完整 CLIP 与手工结构统计."""
 
     import torch
 
@@ -1124,16 +1133,16 @@ def _three_way_final_image_preservation_records(
     )
     final_record = {
         "final_image_semantic_cosine_similarity": clean_full_values[0],
-        "final_image_visual_feature_relative_drift": clean_full_values[1],
+        "final_image_handcrafted_structure_feature_relative_drift": clean_full_values[1],
         "minimum_semantic_preservation_cosine": (
             config.minimum_semantic_preservation_cosine
         ),
-        "maximum_visual_feature_relative_drift": (
-            config.maximum_visual_feature_relative_drift
+        "maximum_handcrafted_structure_feature_relative_drift": (
+            config.maximum_handcrafted_structure_feature_relative_drift
         ),
         "final_image_preservation_gate_ready": clean_full_values[2],
         "preservation_validation_scope": (
-            "clean_to_full_final_images_full_clip_and_visual_features"
+            "clean_to_full_final_images_full_clip_and_handcrafted_structure_features"
         ),
     }
     counterfactual_record = {
@@ -1141,7 +1150,7 @@ def _three_way_final_image_preservation_records(
         "carrier_only_final_image_semantic_cosine_similarity": (
             clean_carrier_values[0]
         ),
-        "carrier_only_final_image_visual_feature_relative_drift": (
+        "carrier_only_final_image_handcrafted_structure_feature_relative_drift": (
             clean_carrier_values[1]
         ),
         "carrier_only_final_image_preservation_gate_ready": (
@@ -1150,7 +1159,7 @@ def _three_way_final_image_preservation_records(
         "carrier_only_to_full_final_image_semantic_cosine_similarity": (
             carrier_full_values[0]
         ),
-        "carrier_only_to_full_final_image_visual_feature_relative_drift": (
+        "carrier_only_to_full_final_image_handcrafted_structure_feature_relative_drift": (
             carrier_full_values[1]
         ),
         "carrier_only_to_full_final_image_preservation_gate_ready": (
@@ -1164,15 +1173,15 @@ def _three_way_final_image_preservation_records(
         "minimum_semantic_preservation_cosine": (
             config.minimum_semantic_preservation_cosine
         ),
-        "maximum_visual_feature_relative_drift": (
-            config.maximum_visual_feature_relative_drift
+        "maximum_handcrafted_structure_feature_relative_drift": (
+            config.maximum_handcrafted_structure_feature_relative_drift
         ),
         "carrier_only_counterfactual_identity_digest": identity_digest,
         "carrier_only_final_image_preservation_status": (
             "measured_from_clean_carrier_only_and_full_final_images"
         ),
         "preservation_validation_scope": (
-            "three_pair_final_images_full_clip_and_visual_features"
+            "three_pair_final_images_full_clip_and_handcrafted_structure_features"
         ),
     }
     return final_record, counterfactual_record
@@ -1660,6 +1669,7 @@ def _carrier_only_counterfactual_identity(
         "latent_content_sha256_after",
         "combined_update_content_sha256",
         "quantized_write_update_content_sha256",
+        "adjacent_step_reference_latent_content_sha256",
     )
 
     def validate_common_record(
@@ -1691,6 +1701,14 @@ def _carrier_only_counterfactual_identity(
                 character not in "0123456789abcdef" for character in value
             ):
                 raise RuntimeError("反事实更新原子缺少完整 tensor 内容 SHA-256")
+        step_index = record.get("step_index")
+        if (
+            not isinstance(step_index, int)
+            or record.get("adjacent_step_reference_index") != step_index - 1
+            or record.get("adjacent_step_stability_status")
+            != "measured_from_immediately_previous_scheduler_step"
+        ):
+            raise RuntimeError("反事实更新原子的相邻调度步稳定度身份无效")
         expected_prg_digest = keyed_prg_protocol_record(
             full_config.keyed_prg_version
         )["keyed_prg_protocol_digest"]
@@ -1920,20 +1938,33 @@ def run_semantic_watermark_runtime(
     active_update_records = update_records
     active_injection_config = config
     injection_execution_role = "full_method"
-    previous_injection_latent: Any | None = None
+    previous_step_latent: Any | None = None
 
     def inject(pipe: Any, step_index: int, timestep: Any, callback_kwargs: dict[str, Any]) -> dict[str, Any]:
-        nonlocal previous_injection_latent
+        nonlocal previous_step_latent
         latent = callback_kwargs.get("latents")
-        if latent is None or step_index not in active_injection_config.injection_step_indices:
+        if latent is None:
             return callback_kwargs
+        if step_index not in active_injection_config.injection_step_indices:
+            previous_step_latent = latent.detach().clone()
+            return callback_kwargs
+        if previous_step_latent is None:
+            raise RuntimeError(
+                "分支风险缺少紧邻上一 scheduler 步的真实 latent"
+            )
+        adjacent_step_reference_sha256 = _tensor_content_sha256(
+            previous_step_latent
+        )
         post_step_index = step_index + 1
         scheduler_timesteps = pipe.scheduler.timesteps
         if post_step_index >= len(scheduler_timesteps):
             raise RuntimeError("post-step 注入缺少合法的下一调度时刻")
         method_timestep = scheduler_timesteps[post_step_index]
         with torch.enable_grad():
-            signals = feature_runtime.branch_signal_maps(latent.float(), previous_injection_latent)
+            signals = feature_runtime.branch_signal_maps(
+                latent.float(),
+                previous_step_latent.float(),
+            )
             lf_template = build_low_frequency_template(
                 latent,
                 active_injection_config.key_material,
@@ -1984,9 +2015,18 @@ def run_semantic_watermark_runtime(
                 risk_bundle = build_branch_risk_fields(
                     semantic_values=signals["semantic"].mean(dim=0).reshape(-1).cpu().tolist(),
                     texture_values=signals["texture"].mean(dim=0).reshape(-1).cpu().tolist(),
-                    stability_values=signals["stability"].mean(dim=0).reshape(-1).cpu().tolist(),
-                    saliency_values=signals["saliency"].mean(dim=0).reshape(-1).cpu().tolist(),
-                    attention_stability_values=attention_stability.mean(dim=0).reshape(-1).cpu().tolist(),
+                    adjacent_step_stability_values=signals[
+                        "adjacent_step_stability"
+                    ].mean(dim=0).reshape(-1).cpu().tolist(),
+                    local_contrast_risk_values=signals[
+                        "local_contrast_risk"
+                    ].mean(dim=0).reshape(-1).cpu().tolist(),
+                    attention_stability_values=(
+                        attention_stability.mean(dim=0)
+                        .reshape(-1)
+                        .cpu()
+                        .tolist()
+                    ),
                     configs=_branch_risk_configs(active_injection_config),
                     required_eligible_branches=_required_branch_risk_eligibility(
                         active_injection_config
@@ -2245,6 +2285,13 @@ def run_semantic_watermark_runtime(
                 "step_index": int(step_index),
                 "scheduler_step_timestep": float(timestep.detach().float().item()),
                 "post_step_schedule_index": int(post_step_index),
+                "adjacent_step_reference_index": int(step_index - 1),
+                "adjacent_step_reference_latent_content_sha256": (
+                    adjacent_step_reference_sha256
+                ),
+                "adjacent_step_stability_status": (
+                    "measured_from_immediately_previous_scheduler_step"
+                ),
                 "timestep": float(method_timestep.detach().float().item()),
                 "latent_content_sha256_before": _tensor_content_sha256(latent),
                 "latent_content_sha256_after": _tensor_content_sha256(injected),
@@ -2303,7 +2350,7 @@ def run_semantic_watermark_runtime(
                 },
             }
         )
-        previous_injection_latent = latent.detach().float()
+        previous_step_latent = injected.detach().clone()
         callback_kwargs["latents"] = injected.detach().to(dtype=latent.dtype)
         return callback_kwargs
 
@@ -2326,7 +2373,7 @@ def run_semantic_watermark_runtime(
         active_update_records = carrier_only_update_records
         active_injection_config = carrier_only_config
         injection_execution_role = "carrier_only_counterfactual"
-        previous_injection_latent = None
+        previous_step_latent = None
         carrier_only_generator = torch.Generator(
             device=config.device_name
         ).manual_seed(config.seed)
@@ -2345,7 +2392,7 @@ def run_semantic_watermark_runtime(
         active_update_records = update_records
         active_injection_config = config
         injection_execution_role = "full_method"
-        previous_injection_latent = None
+        previous_step_latent = None
         (
             final_image_preservation,
             carrier_only_final_image_preservation,

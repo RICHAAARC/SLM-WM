@@ -87,8 +87,8 @@ def build_method_config(
         minimum_semantic_preservation_cosine=(
             method.minimum_semantic_preservation_cosine
         ),
-        maximum_visual_feature_relative_drift=(
-            method.maximum_visual_feature_relative_drift
+        maximum_handcrafted_structure_feature_relative_drift=(
+            method.maximum_handcrafted_structure_feature_relative_drift
         ),
         max_attention_tokens=method.max_attention_tokens,
         attention_module_count=method.attention_module_count,

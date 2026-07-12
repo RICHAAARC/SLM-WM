@@ -1,4 +1,4 @@
-"""为真实 SD3/SD3.5 latent 构造可微语义与视觉特征。"""
+"""为真实 SD3/SD3.5 latent 构造可微语义与手工结构约束特征."""
 
 from __future__ import annotations
 
@@ -10,10 +10,12 @@ from experiments.runtime.model_sources import require_registered_model_reference
 
 
 SEMANTIC_FEATURE_SCHEMA = "full_normalized_clip_embedding"
-VISUAL_FEATURE_SCHEMA = "full_global_gradient_multiscale_visual_vector"
+HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA = (
+    "handcrafted_rgb_statistics_gradient_8x8_structure_vector"
+)
 SEMANTIC_FEATURE_WIDTH = 512
-VISUAL_FEATURE_WIDTH = 204
-JOINT_FEATURE_WIDTH = SEMANTIC_FEATURE_WIDTH + VISUAL_FEATURE_WIDTH
+HANDCRAFTED_STRUCTURE_FEATURE_WIDTH = 204
+JOINT_FEATURE_WIDTH = SEMANTIC_FEATURE_WIDTH + HANDCRAFTED_STRUCTURE_FEATURE_WIDTH
 
 
 def load_clip_vision_model(
@@ -56,7 +58,7 @@ def freeze_module_parameters(module: Any) -> None:
 
 @dataclass
 class DifferentiableSemanticFeatureRuntime:
-    """封装 VAE 解码、CLIP 语义特征和视觉质量特征。"""
+    """封装 VAE 解码、CLIP 语义特征和手工结构统计约束."""
 
     vae: Any
     vision_model: Any
@@ -125,15 +127,15 @@ class DifferentiableSemanticFeatureRuntime:
             image_embeds = outputs.pooler_output
         return functional.normalize(image_embeds.float(), dim=-1)
 
-    def visual_features(self, latent: Any) -> Any:
-        """返回亮度、对比度、边缘和多尺度结构特征。"""
+    def handcrafted_structure_features(self, latent: Any) -> Any:
+        """返回固定204维 RGB 统计、梯度和8x8池化结构向量."""
 
         image = self.decode_latent(latent)
-        return self._visual_features_from_image(image)
+        return self._handcrafted_structure_features_from_image(image)
 
     @staticmethod
-    def _visual_features_from_image(image: Any) -> Any:
-        """从已解码图像计算视觉质量特征。"""
+    def _handcrafted_structure_features_from_image(image: Any) -> Any:
+        """从已解码图像计算范围明确的手工结构统计向量."""
 
         import torch
         import torch.nn.functional as functional
@@ -154,19 +156,19 @@ class DifferentiableSemanticFeatureRuntime:
         )
 
     def joint_features(self, latent: Any) -> tuple[Any, Any]:
-        """一次 VAE 解码同时返回未压缩语义与完整视觉特征。"""
+        """一次 VAE 解码同时返回 CLIP 语义与手工结构统计."""
 
         image = self.decode_latent(latent)
         return self.joint_image_features(image)
 
     def joint_image_features(self, image: Any) -> tuple[Any, Any]:
-        """从 [0, 1] 图像 tensor 返回未压缩语义与完整视觉特征。"""
+        """从 [0, 1] 图像 tensor 返回语义与手工结构统计."""
 
         if image.ndim != 4 or image.shape[1] != 3:
             raise ValueError("完整图像特征要求 [batch, 3, height, width] tensor")
         return (
             self._semantic_features_from_image(image),
-            self._visual_features_from_image(image),
+            self._handcrafted_structure_features_from_image(image),
         )
 
     def full_joint_feature_vector(self, latent: Any) -> Any:
@@ -174,10 +176,17 @@ class DifferentiableSemanticFeatureRuntime:
 
         import torch
 
-        semantic, visual = self.joint_features(latent)
-        vector = torch.cat((semantic.reshape(-1).float(), visual.reshape(-1).float()))
+        semantic, structure = self.joint_features(latent)
+        vector = torch.cat(
+            (
+                semantic.reshape(-1).float(),
+                structure.reshape(-1).float(),
+            )
+        )
         if latent.shape[0] == 1 and vector.numel() != JOINT_FEATURE_WIDTH:
-            raise RuntimeError("完整 Jacobian 特征宽度与冻结 CLIP/视觉 schema 不一致")
+            raise RuntimeError(
+                "完整 Jacobian 特征宽度与冻结 CLIP/手工结构 schema 不一致"
+            )
         return vector
 
     def feature_schema_record(self) -> dict[str, Any]:
@@ -193,9 +202,9 @@ class DifferentiableSemanticFeatureRuntime:
         return {
             "semantic_feature_schema": SEMANTIC_FEATURE_SCHEMA,
             "semantic_feature_width": semantic_width,
-            "visual_feature_schema": VISUAL_FEATURE_SCHEMA,
-            "visual_feature_width": VISUAL_FEATURE_WIDTH,
-            "joint_feature_width": semantic_width + VISUAL_FEATURE_WIDTH,
+            "handcrafted_structure_feature_schema": HANDCRAFTED_STRUCTURE_FEATURE_SCHEMA,
+            "handcrafted_structure_feature_width": HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
+            "joint_feature_width": semantic_width + HANDCRAFTED_STRUCTURE_FEATURE_WIDTH,
             "feature_compression_applied": False,
         }
 
@@ -208,16 +217,24 @@ class DifferentiableSemanticFeatureRuntime:
         maximum = flattened.max(dim=1).values.view(-1, 1, 1)
         return (values - minimum) / (maximum - minimum).clamp_min(1e-6)
 
-    def branch_signal_maps(self, latent: Any, previous_latent: Any | None = None) -> dict[str, Any]:
+    def branch_signal_maps(
+        self,
+        latent: Any,
+        previous_step_latent: Any,
+    ) -> dict[str, Any]:
         """从真实解码图像和 CLIP patch token 构造分支风险输入图。
 
         semantic 图表示 patch 与全局 CLS 语义的一致性; texture 图表示局部梯度;
-        stability 图表示相邻注入时刻的图像稳定性。若没有上一时刻, 使用局部平滑
-        一致性作为可复现的首时刻稳定性定义。
+        local_contrast_risk 图表示灰度相对5x5局部均值的绝对偏离;
+        adjacent_step_stability 图表示相邻 scheduler 步解码 RGB 的真实稳定性.
         """
 
         import torch.nn.functional as functional
 
+        if previous_step_latent is None:
+            raise ValueError(
+                "adjacent_step_stability 要求上一 scheduler 步的真实 latent"
+            )
         image = self.decode_latent(latent)
         outputs = self.vision_model(pixel_values=self.clip_pixels(image), output_hidden_states=True)
         tokens = outputs.last_hidden_state.float()
@@ -248,37 +265,36 @@ class DifferentiableSemanticFeatureRuntime:
         )[:, 0]
         texture_map = self._normalize_map(texture_map)
 
-        local_mean = functional.avg_pool2d(gray, kernel_size=5, stride=1, padding=2)
-        saliency_map = functional.interpolate(
+        local_mean = functional.avg_pool2d(
+            functional.pad(gray, (2, 2, 2, 2), mode="reflect"),
+            kernel_size=5,
+            stride=1,
+        )
+        local_contrast_risk_map = functional.interpolate(
             (gray - local_mean).abs(),
             size=latent.shape[-2:],
             mode="bilinear",
             align_corners=False,
         )[:, 0]
-        saliency_map = self._normalize_map(saliency_map)
+        local_contrast_risk_map = self._normalize_map(
+            local_contrast_risk_map
+        )
 
-        if previous_latent is None:
-            stability_map = 1.0 - self._normalize_map(
-                functional.interpolate(
-                    (gray - local_mean).abs(),
-                    size=latent.shape[-2:],
-                    mode="bilinear",
-                    align_corners=False,
-                )[:, 0]
-            )
-        else:
-            previous_image = self.decode_latent(previous_latent)
-            difference = (image - previous_image).abs().mean(dim=1, keepdim=True)
-            instability_map = functional.interpolate(
-                difference,
-                size=latent.shape[-2:],
-                mode="bilinear",
-                align_corners=False,
-            )[:, 0]
-            stability_map = 1.0 - self._normalize_map(instability_map)
+        previous_image = self.decode_latent(previous_step_latent)
+        difference = (image - previous_image).abs().mean(
+            dim=1,
+            keepdim=True,
+        )
+        adjacent_step_instability_map = functional.interpolate(
+            difference,
+            size=latent.shape[-2:],
+            mode="bilinear",
+            align_corners=False,
+        )[:, 0].clamp(0.0, 1.0)
+        adjacent_step_stability_map = 1.0 - adjacent_step_instability_map
         return {
             "semantic": semantic_map.detach(),
             "texture": texture_map.detach(),
-            "stability": stability_map.detach(),
-            "saliency": saliency_map.detach(),
+            "adjacent_step_stability": adjacent_step_stability_map.detach(),
+            "local_contrast_risk": local_contrast_risk_map.detach(),
         }
