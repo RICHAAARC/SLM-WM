@@ -19,7 +19,7 @@ METHOD_CONFIG_RELATIVE_PATH = PurePosixPath("configs/model_sd35.yaml")
 REGISTRY_SCHEMA = "slm_wm_method_semantic_registry_v1"
 REGISTRY_SCOPE = "normative_traceability_without_scientific_conformance_decision"
 EXPECTED_NORMATIVE_TRACE_DIGEST = (
-    "62769cee7e8f70730a9dc8775469a10e66ddbcb442c78433ce4f9f1c8d562011"
+    "5f69999d6213863f2812ea95d5cf64e52782c3c06aed2ba8808095610b8aba66"
 )
 EXPECTED_INVARIANT_IDS = (
     "constructive_local_tangent_scope",
@@ -429,12 +429,20 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_sd35_pipeline_forwards_registered_revision",
         "tests/functional/test_model_source_registry.py::"
         "test_clip_loader_forwards_registered_revision",
+        "tests/functional/test_semantic_feature_conditions.py::"
+        "test_latent_decoder_requires_explicit_vae_scaling_and_shift",
     ),
     "branch_signal_origin": (
         "tests/functional/test_semantic_feature_conditions.py::"
         "test_branch_signals_use_actual_adjacent_step_and_local_contrast",
         "tests/functional/test_real_scientific_operators.py::"
         "test_attention_stability_comes_from_multiple_real_qk_layers",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_stability_and_selection_require_direct_qk_identity",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_records_bind_outer_layer_and_token_identity",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_stability_rejects_duplicate_layer_identity",
     ),
     "branch_risk_bounds_written_update": (
         "tests/functional/test_real_scientific_operators.py::"
@@ -461,6 +469,8 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_handcrafted_structure_vector_preserves_declared_coordinates",
         "tests/functional/test_semantic_feature_conditions.py::"
         "test_complete_feature_vector_supports_exact_jvp_and_vjp",
+        "tests/functional/test_semantic_feature_conditions.py::"
+        "test_semantic_features_require_projected_clip_image_embedding",
     ),
     "spatial_low_pass_and_amplitude_tail_carriers": (
         "tests/functional/test_real_scientific_operators.py::"
@@ -479,6 +489,16 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_image_alignment_uses_token_endpoint_coordinate_convention",
         "tests/functional/test_real_scientific_operators.py::"
         "test_scientific_operator_gate_requires_all_real_operator_evidence",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_qk_relation_requires_explicit_positive_integer_head_count",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_recorder_rejects_missing_hidden_state_tensor",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_stability_and_selection_require_direct_qk_identity",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_records_bind_outer_layer_and_token_identity",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_stability_rejects_duplicate_layer_identity",
     ),
     "direct_qk_monotonic_attention_update": (
         "tests/functional/test_real_scientific_operators.py::"
@@ -489,6 +509,16 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_attention_update_verifies_actual_combined_latent",
         "tests/functional/test_real_scientific_operators.py::"
         "test_attention_modules_resolve_only_frozen_exact_layer_names",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_qk_relation_requires_explicit_positive_integer_head_count",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_recorder_rejects_missing_hidden_state_tensor",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_stability_and_selection_require_direct_qk_identity",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_records_bind_outer_layer_and_token_identity",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_attention_stability_rejects_duplicate_layer_identity",
     ),
     "actual_dtype_write_revalidation": (
         "tests/functional/test_semantic_feature_conditions.py::"
@@ -573,6 +603,12 @@ EXPECTED_CPU_PROPERTY_TEST_NODES["branch_signal_origin"] = (
     "test_image_risk_signals_match_analytic_texture_contrast_and_adjacent_formulas",
     "tests/functional/test_real_scientific_operators.py::"
     "test_attention_stability_comes_from_multiple_real_qk_layers",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_attention_stability_and_selection_require_direct_qk_identity",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_attention_records_bind_outer_layer_and_token_identity",
+    "tests/functional/test_real_scientific_operators.py::"
+    "test_attention_stability_rejects_duplicate_layer_identity",
 )
 EXPECTED_CPU_PROPERTY_TEST_NODES["branch_risk_bounds_written_update"] = (
     "tests/functional/test_branch_risk_formula.py::"

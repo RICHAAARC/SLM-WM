@@ -2751,8 +2751,8 @@ def _encode_image_latent(pipeline: Any, image: Any) -> Any:
     pixels = pipeline.image_processor.preprocess(image).to(device=pipeline._execution_device, dtype=dtype)
     with torch.no_grad():
         encoded = pipeline.vae.encode(pixels).latent_dist.mode()
-    shift_factor = float(getattr(pipeline.vae.config, "shift_factor", 0.0) or 0.0)
-    scaling_factor = float(getattr(pipeline.vae.config, "scaling_factor", 1.0))
+    shift_factor = float(pipeline.vae.config.shift_factor)
+    scaling_factor = float(pipeline.vae.config.scaling_factor)
     return (encoded - shift_factor) * scaling_factor
 
 

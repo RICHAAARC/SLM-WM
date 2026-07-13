@@ -73,8 +73,8 @@ class DifferentiableSemanticFeatureRuntime:
     def decode_latent(self, latent: Any) -> Any:
         """按照 diffusers VAE 缩放约定将 latent 解码为 [0, 1] 图像 tensor。"""
 
-        scaling_factor = float(getattr(self.vae.config, "scaling_factor", 1.0))
-        shift_factor = float(getattr(self.vae.config, "shift_factor", 0.0) or 0.0)
+        scaling_factor = float(self.vae.config.scaling_factor)
+        shift_factor = float(self.vae.config.shift_factor)
         vae_dtype = next(self.vae.parameters()).dtype
         scaled_latent = (latent / scaling_factor + shift_factor).to(dtype=vae_dtype)
         decoded = self.vae.decode(scaled_latent, return_dict=False)[0]
@@ -113,7 +113,7 @@ class DifferentiableSemanticFeatureRuntime:
         outputs = self.vision_outputs(latent)
         image_embeds = getattr(outputs, "image_embeds", None)
         if image_embeds is None:
-            image_embeds = outputs.pooler_output
+            raise RuntimeError("冻结 CLIP 图像模型没有返回投影后的 image_embeds")
         return functional.normalize(image_embeds.float(), dim=-1)
 
     def _semantic_features_from_image(self, image: Any) -> Any:
@@ -124,7 +124,7 @@ class DifferentiableSemanticFeatureRuntime:
         outputs = self.vision_model(pixel_values=self.clip_pixels(image), output_hidden_states=True)
         image_embeds = getattr(outputs, "image_embeds", None)
         if image_embeds is None:
-            image_embeds = outputs.pooler_output
+            raise RuntimeError("冻结 CLIP 图像模型没有返回投影后的 image_embeds")
         return functional.normalize(image_embeds.float(), dim=-1)
 
     def handcrafted_structure_features(self, latent: Any) -> Any:

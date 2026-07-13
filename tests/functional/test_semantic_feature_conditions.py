@@ -515,6 +515,84 @@ def test_branch_signals_use_actual_adjacent_step_and_local_contrast() -> None:
 
 
 @pytest.mark.quick
+def test_semantic_features_require_projected_clip_image_embedding() -> None:
+    """716维特征必须消费 CLIP 投影嵌入, 不得退回预投影 pooler 输出。"""
+
+    class _VisionWithoutProjection(torch.nn.Module):
+        """只返回预投影池化值, 用于验证正式路径会 fail-closed。"""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.anchor = torch.nn.Parameter(torch.zeros(()))
+
+        def forward(
+            self,
+            pixel_values: torch.Tensor,
+            output_hidden_states: bool,
+        ) -> SimpleNamespace:
+            del output_hidden_states
+            return SimpleNamespace(
+                image_embeds=None,
+                pooler_output=torch.ones(
+                    (pixel_values.shape[0], 768),
+                    device=pixel_values.device,
+                ),
+            )
+
+    runtime = DifferentiableSemanticFeatureRuntime(
+        vae=torch.nn.Identity(),
+        vision_model=_VisionWithoutProjection(),
+    )
+    runtime.vision_outputs = lambda latent: SimpleNamespace(  # type: ignore[method-assign]
+        image_embeds=None,
+        pooler_output=torch.ones((latent.shape[0], 768)),
+    )
+    with pytest.raises(RuntimeError, match="image_embeds"):
+        runtime.semantic_features(torch.zeros((1, 4)))
+    with pytest.raises(RuntimeError, match="image_embeds"):
+        runtime._semantic_features_from_image(
+            torch.zeros((1, 3, 16, 16))
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "vae_config",
+    [
+        SimpleNamespace(shift_factor=0.0609),
+        SimpleNamespace(scaling_factor=1.5305),
+    ],
+)
+def test_latent_decoder_requires_explicit_vae_scaling_and_shift(
+    vae_config: SimpleNamespace,
+) -> None:
+    """VAE 解码必须读取冻结配置字段, 不得以1或0补齐缺失值。"""
+
+    class _Vae(torch.nn.Module):
+        """提供最小参数和 decode 接口, 让测试只观察配置字段门禁。"""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.anchor = torch.nn.Parameter(torch.zeros(()))
+            self.config = vae_config
+
+        def decode(
+            self,
+            latent: torch.Tensor,
+            return_dict: bool,
+        ) -> tuple[torch.Tensor]:
+            del return_dict
+            return (latent,)
+
+    runtime = DifferentiableSemanticFeatureRuntime(
+        vae=_Vae(),
+        vision_model=torch.nn.Identity(),
+    )
+    with pytest.raises(AttributeError):
+        runtime.decode_latent(torch.zeros((1, 3, 8, 8)))
+
+
+@pytest.mark.quick
 def test_complete_feature_vector_supports_exact_jvp_and_vjp() -> None:
     """716维完整输出必须同时支持精确 JVP 与 VJP。"""
 

@@ -240,9 +240,21 @@ def _continuous_observed_attention(
 def _stable_pair_weights(observed_attention: object):
     """为注册构造与盲检评分共享的稳定 token pair 权重。"""
 
+    if not isinstance(observed_attention, QKAttentionRelation):
+        raise TypeError("测试关系必须具有直接 Q/K 身份")
+    replicate_layer = f"{_LAYER_NAME}_replicate"
+    replicate = QKAttentionRelation(
+        centered_logits=observed_attention.centered_logits.clone(),
+        probabilities=observed_attention.probabilities.clone(),
+        metadata=_qk_operator_metadata(
+            replicate_layer,
+            observed_attention.centered_logits,
+            observed_attention.probabilities,
+        ),
+    )
     records = (
         (_LAYER_NAME, observed_attention, _TOKEN_INDICES),
-        (f"{_LAYER_NAME}_replicate", observed_attention.clone(), _TOKEN_INDICES),
+        (replicate_layer, replicate, _TOKEN_INDICES),
     )
     selection = select_stable_attention_tokens(records, stable_token_fraction=0.5)
     return build_stable_attention_pair_weights(
@@ -515,13 +527,13 @@ def test_probability_only_relation_is_rejected_before_formal_alignment() -> None
         -0.05,
     )
     probability_only = direct_relation.probabilities
-    with pytest.raises(ValueError, match="必须直接提供冻结层 Q/K"):
+    with pytest.raises(ValueError, match="直接 Q/K"):
         recover_attention_affine_alignment(
             probability_only,
             _KEY_MATERIAL,
             _LAYER_NAME,
             _TOKEN_INDICES,
-            _stable_pair_weights(probability_only),
+            _stable_pair_weights(direct_relation),
         )
 
 
@@ -580,13 +592,29 @@ def test_distance_modulated_component_changes_registration_objective(
 def test_pair_transport_interpolates_token_field_before_outer_product() -> None:
     """规范 pair 必须由 ``a'=W a`` 外积构造, 不能使用 ``W P W^T``。"""
 
-    attention = torch.full(
+    probabilities = torch.full(
         (1, _TOKEN_COUNT, _TOKEN_COUNT),
         1.0 / _TOKEN_COUNT,
     )
+    logits = torch.zeros_like(probabilities)
+    replicate_layer = f"{_LAYER_NAME}_replicate"
+    attention = QKAttentionRelation(
+        centered_logits=logits,
+        probabilities=probabilities,
+        metadata=_qk_operator_metadata(_LAYER_NAME, logits, probabilities),
+    )
+    replicate = QKAttentionRelation(
+        centered_logits=logits.clone(),
+        probabilities=probabilities.clone(),
+        metadata=_qk_operator_metadata(
+            replicate_layer,
+            logits,
+            probabilities,
+        ),
+    )
     records = (
         (_LAYER_NAME, attention, _TOKEN_INDICES),
-        (f"{_LAYER_NAME}_replicate", attention.clone(), _TOKEN_INDICES),
+        (replicate_layer, replicate, _TOKEN_INDICES),
     )
     selection = StableAttentionTokenSelection(
         token_positions=(0, 2, 4, 6),

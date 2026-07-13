@@ -2694,7 +2694,7 @@ Notebook 与 repository module 的跨边界数据
 | minimum_final_image_attention_score_gain | protocol | none | true | true | false | 完整方法相对 carrier-only 的两类最终图像 attention 归因增益共同采用的严格正下界。 |
 | minimum_semantic_preservation_cosine | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的完整 CLIP cosine 冻结下界。 |
 | maximum_handcrafted_structure_feature_relative_drift | protocol | none | true | true | false | 单次实际写回和最终成图累计保持共同采用的手工结构统计特征相对漂移冻结上界。 |
-| semantic_feature_schema | method | none | true | false | false | 正式 Jacobian 直接使用的完整归一化 CLIP embedding 定义。 |
+| semantic_feature_schema | method | none | true | false | false | 正式 Jacobian 直接使用投影后 `image_embeds` 的完整归一化 CLIP embedding 定义; 缺失时失败, `pooler_output` 不得替代。 |
 | semantic_feature_width | protocol | none | true | false | false | 进入完整 Jacobian 的 CLIP embedding 坐标数量, 当前冻结为512。 |
 | handcrafted_structure_feature_schema | method | none | true | false | false | 正式 Jacobian 使用的 RGB 通道均值/标准差、绝对梯度均值和8x8 RGB 平均池化手工结构统计定义。 |
 | handcrafted_structure_feature_width | protocol | none | true | false | false | 进入完整 Jacobian 的手工结构统计坐标数量, 当前冻结为204。 |
@@ -2863,7 +2863,7 @@ Notebook 与 repository module 的跨边界数据
 | paired_superiority_negative_result_count | metric | none | true | true | false | 配对优势表中未满足正式优势判定公式的真实负结果数量。 |
 | paired_superiority_semantic_rebuild_ready | governance | none | true | true | false | 配对优势表的每个布尔结论是否与均值、CI 和 Holm 校正 p 值严格一致。 |
 | attention_relation_component_names | method | none | true | true | false | 四分量 attention-relative graph 的冻结分量顺序: 中心化 Q/K logit、可微行内 rank、行归一化抽样图像 token 概率和 $G=(P-rowmean(P))(D-rowmean(D))$ 距离调制中心化 attention 概率；纯 $D$ 不构成独立通道。 |
-| attention_relation_source | provenance | none | true | true | false | 四分量关系图的数值来源, 正式值要求为 direct_qk_centered_logits_and_probabilities。 |
+| attention_relation_source | provenance | none | true | true | false | 四分量关系图的数值来源, 正式值要求为 direct_qk_centered_logits_and_probabilities; 所有概率、stability 和稳定 token 选择算子都必须拒绝其他来源。 |
 | attention_relation_direct_qk_source_ready | governance | none | true | true | false | 关系图是否同时直接保存真实 Q/K 中心化 logits 与由同次 Q/K 计算产生的抽样图像 token 概率。 |
 | attention_relation_probability_scope | method | none | true | false | false | 概率分量的精确作用域, 正式值为 sampled_image_token_qk_relation_probability, 不表示模块完整 joint-attention 权重。 |
 | attention_relation_component_identity_digest | provenance | none | true | true | false | 分量顺序、soft-rank 温标与尺度、概率和距离双行中心化规则、距离尺度、二维 token 索引和直接 Q/K 来源的联合摘要。 |
@@ -2890,10 +2890,10 @@ Notebook 与 repository module 的跨边界数据
 | local_candidate_boundary_filter | method | none | true | false | false | 每轮局部组合候选使用的严格定义域过滤规则身份。 |
 | attention_relation_qk_operator_metadata_records | provenance | none | true | true | false | 全部冻结层直接 Q/K 关系算子的层名、模块、头、尺度、归一化和抽样网格可读记录。 |
 | attention_relation_qk_operator_metadata_digest | provenance | none | true | true | false | 多层直接 Q/K 算子可读元数据记录的联合稳定摘要。 |
-| attention_relation_qk_operator_metadata_ready | governance | none | true | true | false | 每层 Q/K 算子元数据是否完整且与记录层、理论尺度和抽样网格一致。 |
-| module_layer_name | provenance | none | true | false | false | Q/K 记录对应的冻结 Transformer 模块层名称。 |
+| attention_relation_qk_operator_metadata_ready | governance | none | true | true | false | 每层 Q/K 算子元数据是否完整且与记录层、理论尺度和抽样网格一致; 核心概率消费者不得接受缺失或未通过复算的元数据。 |
+| module_layer_name | provenance | none | true | false | false | Q/K 关系内部绑定的冻结 Transformer 模块层名称; 必须等于外层记录层名, 且多层记录中不得重复。 |
 | module_class_name | provenance | none | true | false | false | 提供 `to_q`、`to_k` 和注意力头协议的模块完整类名。 |
-| head_count | method | none | true | false | false | 当前 Q/K 模块实际使用的注意力头数量。 |
+| head_count | method | none | true | false | false | 当前 Q/K 模块显式公开的正整数注意力头数量; 缺失、bool、非整数或不大于0时失败。 |
 | head_width | method | none | true | false | false | 每个 Q/K 注意力头的投影宽度。 |
 | attention_scale | method | none | true | false | false | QK 点积使用的实际尺度, 必须等于 $1/\sqrt{head\_width}$。 |
 | attention_scale_source | provenance | none | true | false | false | 实际注意力尺度来自模块公开 scale 或由 head_width 理论式得到。 |
@@ -2905,7 +2905,7 @@ Notebook 与 repository module 的跨边界数据
 | source_grid_side | method | none | true | false | false | Q/K 抽样前方形图像 token 网格边长。 |
 | sampled_token_count | method | none | true | false | false | 冻结二维关系算子实际保留的图像 token 数量。 |
 | sampled_grid_side | method | none | true | false | false | 冻结二维关系算子抽样网格边长。 |
-| sampled_token_indices | provenance | none | true | false | false | 抽样 token 在原始二维图像 token 网格中的公开索引。 |
+| sampled_token_indices | provenance | none | true | false | false | Q/K 关系内部绑定的原始二维图像 token 抽样索引; 必须逐项等于外层记录 token_indices。 |
 | coordinate_convention | protocol | none | true | false | false | 单层 Q/K 算子与仿射注册元数据记录的归一化 xy 坐标身份。 |
 | grid_align_corners | protocol | none | true | false | false | 单层 Q/K 算子和仿射注册是否采用角点中心对应 -1 与 1 的重采样语义。 |
 | centered_logit_aggregation | method | none | true | false | false | 多头中心化 Q/K logits 的冻结聚合顺序身份。 |
@@ -2934,7 +2934,7 @@ Notebook 与 repository module 的跨边界数据
 | qk_atom_content_digest | provenance | none | true | true | false | 单层名称、内容摘要协议及 Q、K、logit、概率和 token 索引 SHA-256 的联合摘要。 |
 | qk_atomic_content_records | provenance | none | true | true | false | 一次 Q/K 评价中全部精确冻结层的有序原子内容记录。 |
 | qk_atomic_content_digest | provenance | none | true | true | false | 一次 Q/K 评价中全部层原子内容记录的联合摘要。 |
-| qk_atomic_content_ready | governance | none | true | true | false | 一次 Q/K 评价的逐层原子自摘要、层顺序和联合摘要是否完整一致。 |
+| qk_atomic_content_ready | governance | none | true | true | false | 一次 Q/K 评价的逐层原子自摘要、层顺序和联合摘要是否完整一致; stability 与稳定 token 选择不得接受缺失原子内容身份的关系。 |
 | qk_evaluation_role | protocol | none | true | false | false | Q/K 原子记录在梯度、候选、实际写回、成图或盲检链中的精确评价角色。 |
 | evaluation_latent_content_sha256 | provenance | none | true | true | false | 注意力更新中与该角色 Q/K 原子和分数共同绑定的实际 float32 求值 latent 内容 SHA-256。 |
 | evaluation_score | metric | none | true | true | false | 由该角色 Q/K 原子计算并与顶层单调门禁字段交叉复验的注意力分数。 |
@@ -2981,8 +2981,8 @@ Notebook 与 repository module 的跨边界数据
 | vae_class_name | protocol | none | true | true | false | 正式 VAE encoder/decoder 的完整 Python 类名。 |
 | transformer_class_name | protocol | none | true | true | false | 正式扩散 Transformer 的完整 Python 类名。 |
 | scheduler_class_name | protocol | none | true | true | false | 正式 Flow Matching scheduler 的完整 Python 类名。 |
-| vae_scaling_factor | protocol | none | true | true | false | 冻结模型 revision 对应的 VAE latent 缩放常量。 |
-| vae_shift_factor | protocol | none | true | true | false | 冻结模型 revision 对应的 VAE latent 平移常量。 |
+| vae_scaling_factor | protocol | none | true | true | false | 冻结模型 revision 对应且必须由实际 VAE config 显式提供的 latent 缩放常量; 缺失时不得以1补齐。 |
+| vae_shift_factor | protocol | none | true | true | false | 冻结模型 revision 对应且必须由实际 VAE config 显式提供的 latent 平移常量; 缺失时不得以0补齐。 |
 | latent_torch_dtype | protocol | none | true | true | false | 正式 SD3.5 latent 与主模型执行使用的 PyTorch dtype 名称。 |
 | vision_torch_dtype | protocol | none | true | true | false | 冻结 CLIP 视觉编码器执行使用的 PyTorch dtype 名称。 |
 | public_detection_schedule_index | protocol | none | true | true | false | 仅图像 Q/K 检测在公开 scheduler 日程中使用的固定索引。 |

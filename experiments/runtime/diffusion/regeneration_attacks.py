@@ -278,8 +278,8 @@ class DiffusionAttackRuntime:
         )
         with torch.inference_mode():
             encoding = pipeline.vae.encode(pixels).latent_dist.mode()
-            shift = float(getattr(pipeline.vae.config, "shift_factor", 0.0) or 0.0)
-            scale = float(getattr(pipeline.vae.config, "scaling_factor", 1.0) or 1.0)
+            shift = float(pipeline.vae.config.shift_factor)
+            scale = float(pipeline.vae.config.scaling_factor)
             latents = (encoding - shift) * scale
             pipeline.scheduler.set_timesteps(
                 int(inversion_steps),

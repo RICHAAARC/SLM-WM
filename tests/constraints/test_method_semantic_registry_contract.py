@@ -556,6 +556,11 @@ def test_registry_formulas_freeze_risk_qk_null_and_actual_write_semantics() -> N
     }.issubset(risk)
 
     for required_fragment in (
+        "heads=explicit_positive_integer_attention_module_heads",
+        "recorder_hidden_states=required_tensor_from_each_frozen_layer_hook",
+        "probability_consumer_input=QKAttentionRelation",
+        "qk_record_identity=(outer_layer_name==relation.metadata.record_layer_name)",
+        "multilayer_qk_identity=unique",
         "keyed_sign=",
         "component_polarity=",
         "stable_selection=",
@@ -579,6 +584,61 @@ def test_registry_formulas_freeze_risk_qk_null_and_actual_write_semantics() -> N
         "attention_final_qk_revalidation=",
     ):
         assert any(required_fragment in expression for expression in actual_write)
+
+
+@pytest.mark.constraint
+def test_registry_freezes_fail_closed_model_and_qk_inputs() -> None:
+    """CLIP、VAE 与 Q/K 核心输入不得通过兼容默认值或静默漏记补齐。"""
+
+    invariants = _invariants_by_id(load_method_semantic_registry(ROOT))
+    frozen_model = invariants["frozen_model_operator_identity"]
+    complete_feature = invariants["complete_716_feature_jacobian"]
+    direct_qk = invariants["direct_qk_four_component_relation"]
+
+    assert {
+        "vae_scaling_factor_missing",
+        "vae_shift_factor_missing",
+    }.issubset(frozen_model["fail_closed_conditions"])
+    assert {
+        "default_vae_scaling_factor_one",
+        "default_vae_shift_factor_zero",
+    }.issubset(frozen_model["forbidden_substitutes"])
+    assert "clip_projected_image_embeds_missing" in complete_feature[
+        "fail_closed_conditions"
+    ]
+    assert "clip_pooler_output_substitution" in complete_feature[
+        "forbidden_substitutes"
+    ]
+    assert {
+        "attention_heads_missing_or_invalid",
+        "attention_hook_tensor_input_missing",
+    }.issubset(direct_qk["fail_closed_conditions"])
+    assert {
+        "implicit_single_attention_head_default",
+        "silent_qk_record_skip_on_missing_tensor_input",
+    }.issubset(direct_qk["forbidden_substitutes"])
+    assert {
+        "qk_relation_type_missing",
+        "qk_relation_source_mismatch",
+        "qk_relation_operator_metadata_incomplete",
+        "qk_relation_atom_content_incomplete",
+    }.issubset(direct_qk["fail_closed_conditions"])
+    assert {
+        "bare_attention_probability_tensor",
+        "non_direct_qk_relation_source",
+        "qk_relation_without_operator_metadata",
+        "qk_relation_without_atom_content_identity",
+    }.issubset(direct_qk["forbidden_substitutes"])
+    assert {
+        "qk_outer_layer_name_mismatch",
+        "qk_outer_token_indices_mismatch",
+        "qk_multilayer_name_duplicate",
+    }.issubset(direct_qk["fail_closed_conditions"])
+    assert {
+        "outer_qk_layer_renaming",
+        "outer_qk_token_index_replacement",
+        "same_internal_layer_clone_as_multilayer_evidence",
+    }.issubset(direct_qk["forbidden_substitutes"])
 
 
 @pytest.mark.constraint
@@ -638,6 +698,15 @@ def test_authority_document_freezes_risk_and_null_space_counterexamples() -> Non
     assert "残留 attention 分数、更新、关系、pair 身份" in text
     assert "`range(3, 3+n)`" in text
     assert "`alignment_digest` 必须是完整 alignment 记录" in text
+    assert "不允许用1或0补齐" in text
+    assert "不允许用投影前 `pooler_output`" in text
+    assert "必须显式公开非 bool 的正整数 `heads`" in text
+    assert "没有 Tensor 输入时必须立即失败" in text
+    assert "都必须接收 `QKAttentionRelation`" in text
+    assert "裸概率 Tensor、错误 `relation_source`" in text
+    assert "`layer_name=relation.metadata.record_layer_name`" in text
+    assert "多层记录的层名必须唯一" in text
+    assert "复制同一内部层冒充多层" in text
     assert "单元 manifest 自身" in text
     assert "配置或配置摘要漂移" in text
     assert "重算每个内嵌 `scientific_content_binding_record`" in text

@@ -377,18 +377,113 @@ class AttentionRelationGraphIdentity:
 
 
 def attention_probability(attention: Any) -> Any:
-    """统一读取真实 Q/K 关系对象或概率矩阵中的 attention 概率。"""
+    """只读取具有完整直接 Q/K 内容和算子身份的关系概率。"""
 
-    if isinstance(attention, QKAttentionRelation):
-        return attention.probabilities
-    return attention
+    if (
+        not isinstance(attention, QKAttentionRelation)
+        or attention.relation_source != DIRECT_QK_RELATION_SOURCE
+    ):
+        raise ValueError("注意力概率必须来自具有冻结身份的直接 Q/K 关系")
+    metadata = attention.metadata
+    if not isinstance(metadata, dict):
+        raise ValueError("直接 Q/K 关系缺少可核验的算子元数据")
+    layer_name = metadata.get("record_layer_name")
+    token_indices = metadata.get("sampled_token_indices")
+    if (
+        not isinstance(layer_name, str)
+        or not layer_name
+        or not isinstance(token_indices, list)
+    ):
+        raise ValueError("直接 Q/K 关系缺少冻结层或 token 索引身份")
+    operator_record = {
+        "record_layer_name": layer_name,
+        **{
+            field_name: metadata.get(field_name)
+            for field_name in QK_OPERATOR_METADATA_FIELD_NAMES
+        },
+    }
+    token_index_tensor = _torch().tensor(token_indices, dtype=_torch().int64)
+    atom_payload = {
+        "record_layer_name": layer_name,
+        "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
+        "sampled_query_content_sha256": metadata.get(
+            "sampled_query_content_sha256"
+        ),
+        "sampled_key_content_sha256": metadata.get(
+            "sampled_key_content_sha256"
+        ),
+        "centered_qk_logits_content_sha256": tensor_content_sha256(
+            attention.centered_logits
+        ),
+        "qk_probabilities_content_sha256": tensor_content_sha256(
+            attention.probabilities
+        ),
+        "sampled_token_indices_content_sha256": tensor_content_sha256(
+            token_index_tensor
+        ),
+    }
+    atom_record = {
+        **atom_payload,
+        "qk_atom_content_digest": build_stable_digest(atom_payload),
+    }
+    if (
+        not qk_operator_metadata_records_ready(
+            (operator_record,),
+            (layer_name,),
+        )
+        or not qk_atomic_content_records_ready((atom_record,))
+        or any(
+            metadata.get(field_name) != atom_record[field_name]
+            for field_name in (
+                *QK_ATOMIC_CONTENT_SHA256_FIELDS,
+                "qk_atom_content_digest",
+            )
+        )
+    ):
+        raise ValueError("直接 Q/K 关系的算子或原子内容身份不完整")
+    return attention.probabilities
+
+
+def _require_qk_record_identity(
+    layer_name: str,
+    attention: Any,
+    token_indices: tuple[int, ...],
+) -> Any:
+    """绑定外层记录的层名和 token 索引到关系对象内部身份。"""
+
+    probability = attention_probability(attention)
+    metadata = attention.metadata
+    if (
+        metadata.get("record_layer_name") != layer_name
+        or tuple(metadata.get("sampled_token_indices", ()))
+        != tuple(token_indices)
+    ):
+        raise ValueError("Q/K 记录的外层层名或 token 索引与内部身份不一致")
+    return probability
+
+
+def _require_qk_record_identities(
+    records: Iterable[tuple[str, Any, tuple[int, ...]]],
+) -> tuple[tuple[str, Any, tuple[int, ...]], ...]:
+    """集中复验一组有序 Q/K 记录的唯一层身份和内外绑定。"""
+
+    resolved = tuple(records)
+    layer_names = tuple(layer_name for layer_name, _, _ in resolved)
+    if len(set(layer_names)) != len(layer_names):
+        raise ValueError("Q/K 记录不得用同一层身份重复冒充多层关系")
+    for layer_name, attention, token_indices in resolved:
+        _require_qk_record_identity(
+            layer_name,
+            attention,
+            tuple(token_indices),
+        )
+    return resolved
 
 
 def centered_qk_logits(attention: Any) -> tuple[Any, str]:
     """读取真实中心化 Q/K logits, 拒绝从概率矩阵反推几何关系。"""
 
-    if not isinstance(attention, QKAttentionRelation):
-        raise ValueError("注意力几何关系必须直接提供冻结层 Q/K logits 与概率")
+    attention_probability(attention)
     return attention.centered_logits, attention.relation_source
 
 
@@ -634,7 +729,17 @@ def build_attention_relation_descriptor(
     """
 
     torch = _torch()
-    probability = attention_probability(attention).float()
+    internal_layer_name = (
+        attention.metadata.get("record_layer_name", "")
+        if isinstance(attention, QKAttentionRelation)
+        and isinstance(attention.metadata, dict)
+        else ""
+    )
+    probability = _require_qk_record_identity(
+        internal_layer_name,
+        attention,
+        tuple(token_indices),
+    ).float()
     logits, relation_source = centered_qk_logits(attention)
     logits = logits.float()
     if probability.ndim == 2:
@@ -749,7 +854,14 @@ def qk_self_attention(
     index_tensor = torch.tensor(token_indices, device=hidden_states.device)
     query = module.to_q(hidden_states)
     key = module.to_k(hidden_states)
-    heads = int(getattr(module, "heads", 1))
+    heads_value = getattr(module, "heads", None)
+    if (
+        isinstance(heads_value, bool)
+        or not isinstance(heads_value, int)
+        or heads_value <= 0
+    ):
+        raise TypeError("注意力模块必须公开正整数 heads")
+    heads = heads_value
     if query.shape[-1] % heads != 0:
         raise ValueError("Q 投影宽度必须能被注意力头数整除")
     head_width = int(query.shape[-1] // heads)
@@ -854,7 +966,7 @@ def attention_relation_stability_map(
     import torch.nn.functional as functional
 
     torch = _torch()
-    resolved_records = tuple(records)
+    resolved_records = _require_qk_record_identities(records)
     if len(resolved_records) < 2:
         raise ValueError("注意力关系稳定图至少需要两个真实 Q/K 层")
     reference_indices = resolved_records[0][2]
@@ -864,8 +976,12 @@ def attention_relation_stability_map(
     if sampled_side * sampled_side != len(reference_indices):
         raise ValueError("注意力稳定度要求抽样 token 构成方形二维网格")
     normalized_rows = []
-    for _, attention, _ in resolved_records:
-        matrix = attention_probability(attention).float()
+    for layer_name, attention, token_indices in resolved_records:
+        matrix = _require_qk_record_identity(
+            layer_name,
+            attention,
+            token_indices,
+        ).float()
         centered = matrix - matrix.mean(dim=-1, keepdim=True)
         normalized_rows.append(
             functional.normalize(
@@ -979,7 +1095,7 @@ def build_stable_attention_pair_weights(
     token 权重为 ``unstable_pair_weight``, pair 权重由两个端点权重的外积得到。
     """
 
-    resolved_records = tuple(records)
+    resolved_records = _require_qk_record_identities(records)
     if not resolved_records:
         raise ValueError("构造稳定 token 权重至少需要一层 Q/K 记录")
     reference_indices = tuple(int(value) for value in resolved_records[0][2])
@@ -1135,7 +1251,7 @@ def select_stable_attention_tokens(
     import torch.nn.functional as functional
 
     torch = _torch()
-    resolved_records = tuple(records)
+    resolved_records = _require_qk_record_identities(records)
     if len(resolved_records) < 2:
         raise ValueError("稳定 token 选择至少需要两个真实 Q/K 层")
     reference_indices = resolved_records[0][2]
@@ -1150,8 +1266,12 @@ def select_stable_attention_tokens(
 
     normalized_rows = []
     centrality_rows = []
-    for _, attention, _ in resolved_records:
-        matrix = attention_probability(attention).float()
+    for layer_name, attention, token_indices in resolved_records:
+        matrix = _require_qk_record_identity(
+            layer_name,
+            attention,
+            token_indices,
+        ).float()
         centered = matrix - matrix.mean(dim=-1, keepdim=True)
         normalized_rows.append(
             functional.normalize(
@@ -1223,7 +1343,9 @@ class DifferentiableAttentionRecorder:
         def capture(module: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
             hidden_states = _first_tensor(args, kwargs)
             if hidden_states is None:
-                return
+                raise RuntimeError(
+                    f"冻结注意力层 {layer_name} 没有提供可核验的 hidden_states Tensor"
+                )
             attention, token_indices = qk_self_attention(
                 module,
                 hidden_states,
@@ -1342,7 +1464,7 @@ def build_attention_relation_graph_identity(
 ) -> AttentionRelationGraphIdentity:
     """重建多层关系分量和密钥投影的共同身份。"""
 
-    resolved_records = tuple(records)
+    resolved_records = _require_qk_record_identities(records)
     component_protocol = attention_relation_component_protocol(
         component_weights
     )
@@ -1640,7 +1762,9 @@ def attention_geometry_component_scores(
 
     torch = _torch()
     layer_component_scores = []
-    for layer_name, attention, token_indices in tuple(records):
+    for layer_name, attention, token_indices in _require_qk_record_identities(
+        records
+    ):
         token_count = int(attention.shape[-1])
         if len(token_indices) != token_count:
             raise ValueError("Q/K token_indices 数量必须与 attention 宽度一致")

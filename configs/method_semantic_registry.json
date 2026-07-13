@@ -63,7 +63,8 @@
       "invariant_id": "frozen_model_operator_identity",
       "definition_pointer": "docs/builds/method_semantic_invariants.md#frozen_model_operator_identity",
       "formal_expression": [
-        "operator_identity=(sd35_revision,clip_revision,vae_config,scheduler_class,transformer_class,latent_dtype,attention_layers,formal_method_config_digest)"
+        "operator_identity=(sd35_revision,clip_revision,vae_config,scheduler_class,transformer_class,latent_dtype,attention_layers,formal_method_config_digest)",
+        "vae_config_fields=required_explicit(scaling_factor,shift_factor)"
       ],
       "configuration_fields": [
         "model_family",
@@ -131,20 +132,25 @@
         "scheduler_class_mismatch",
         "transformer_class_mismatch",
         "latent_dtype_missing",
-        "frozen_attention_layer_missing"
+        "frozen_attention_layer_missing",
+        "vae_scaling_factor_missing",
+        "vae_shift_factor_missing"
       ],
       "forbidden_substitutes": [
         "mutable_model_branch",
         "model_family_without_revision",
         "unregistered_model_snapshot",
         "unrecorded_scheduler_substitution",
-        "unrecorded_dtype_substitution"
+        "unrecorded_dtype_substitution",
+        "default_vae_scaling_factor_one",
+        "default_vae_shift_factor_zero"
       ],
       "cpu_property_id": "exact_model_revisions_and_runtime_operator_classes_define_the_scientific_operator",
       "specification_test_nodes": [
         "tests/functional/test_model_source_registry.py::test_primary_model_config_matches_immutable_source_registry",
         "tests/functional/test_model_source_registry.py::test_sd35_pipeline_forwards_registered_revision",
-        "tests/functional/test_model_source_registry.py::test_clip_loader_forwards_registered_revision"
+        "tests/functional/test_model_source_registry.py::test_clip_loader_forwards_registered_revision",
+        "tests/functional/test_semantic_feature_conditions.py::test_latent_decoder_requires_explicit_vae_scaling_and_shift"
       ],
       "cpu_property_test_nodes": [],
       "gpu_atomic_roles": [
@@ -155,8 +161,8 @@
         "transformer_runtime_identity",
         "latent_dtype_identity"
       ],
-      "gpu_observation_requirement": "真实 GPU 原子必须绑定精确模型 revision、实际组件类、latent dtype 与冻结注意力层集合。",
-      "claim_boundary": "模型族名称或可变分支不能替代精确权重和实际运行算子身份。"
+      "gpu_observation_requirement": "真实 GPU 原子必须绑定精确模型 revision、实际组件类、latent dtype、冻结注意力层集合, 并证明 VAE scaling_factor 与 shift_factor 由实际 config 显式提供。",
+      "claim_boundary": "模型族名称、可变分支或 VAE 缩放和平移默认值不能替代精确权重和实际运行算子身份。"
     },
     {
       "invariant_id": "branch_signal_origin",
@@ -166,7 +172,10 @@
         "texture_signal=clip(interpolate((abs(dx_gray)+abs(dy_gray))/2,bilinear,false),0,1)",
         "local_contrast_signal=clip(interpolate(abs(gray-reflect_avgpool5(gray)),bilinear,false),0,1)",
         "adjacent_stability=1-clip(interpolate(mean_rgb_abs_change,bilinear,false),0,1)",
-        "attention_stability=interpolate(multilayer_direct_qk_row_consistency,bilinear,true)"
+        "attention_stability=interpolate(multilayer_direct_qk_row_consistency,bilinear,true)",
+        "attention_stability_input=QKAttentionRelation(DIRECT_QK,complete_operator_metadata,complete_qk_atom_content)",
+        "qk_record_identity=(outer_layer_name==relation.metadata.record_layer_name)_and_(outer_token_indices==relation.metadata.sampled_token_indices)",
+        "multilayer_qk_identity=unique(relation.metadata.record_layer_name)"
       ],
       "configuration_fields": [
         "risk_signal_calibration_protocol",
@@ -209,24 +218,44 @@
         "clip_patch_tokens_missing",
         "frozen_qk_layer_missing",
         "branch_signal_nonfinite",
-        "branch_signal_outside_unit_interval"
+        "branch_signal_outside_unit_interval",
+        "qk_relation_type_missing",
+        "qk_relation_source_mismatch",
+        "qk_relation_operator_metadata_incomplete",
+        "qk_relation_atom_content_incomplete",
+        "qk_outer_layer_name_mismatch",
+        "qk_outer_token_indices_mismatch",
+        "qk_multilayer_name_duplicate"
       ],
       "forbidden_substitutes": [
         "samplewise_minmax_normalization",
         "hidden_state_attention_stability",
         "nonadjacent_latent_stability",
         "synthetic_semantic_saliency",
-        "silent_constant_signal_substitution"
+        "silent_constant_signal_substitution",
+        "bare_attention_probability_tensor",
+        "non_direct_qk_relation_source",
+        "qk_relation_without_operator_metadata",
+        "qk_relation_without_atom_content_identity",
+        "outer_qk_layer_renaming",
+        "outer_qk_token_index_replacement",
+        "same_internal_layer_clone_as_multilayer_evidence"
       ],
       "cpu_property_id": "branch_signals_use_frozen_analytic_ranges_and_real_adjacent_or_qk_sources",
       "specification_test_nodes": [
         "tests/functional/test_semantic_feature_conditions.py::test_branch_signals_use_actual_adjacent_step_and_local_contrast",
-        "tests/functional/test_real_scientific_operators.py::test_attention_stability_comes_from_multiple_real_qk_layers"
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_comes_from_multiple_real_qk_layers",
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_and_selection_require_direct_qk_identity",
+        "tests/functional/test_real_scientific_operators.py::test_attention_records_bind_outer_layer_and_token_identity",
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_rejects_duplicate_layer_identity"
       ],
       "cpu_property_test_nodes": [
         "tests/functional/test_branch_risk_formula.py::test_constant_semantic_maps_keep_analytic_values_without_batch_mixing",
         "tests/functional/test_branch_risk_formula.py::test_image_risk_signals_match_analytic_texture_contrast_and_adjacent_formulas",
-        "tests/functional/test_real_scientific_operators.py::test_attention_stability_comes_from_multiple_real_qk_layers"
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_comes_from_multiple_real_qk_layers",
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_and_selection_require_direct_qk_identity",
+        "tests/functional/test_real_scientific_operators.py::test_attention_records_bind_outer_layer_and_token_identity",
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_rejects_duplicate_layer_identity"
       ],
       "gpu_atomic_roles": [
         "current_latent_tensor",
@@ -236,8 +265,8 @@
         "clip_patch_token_tensor",
         "multilayer_qk_stability_tensor"
       ],
-      "gpu_observation_requirement": "真实注入必须保存五类风险输入及其当前和相邻调度状态来源。",
-      "claim_boundary": "风险输入只声明冻结解析信号，不允许逐样本重标定或隐藏状态代理。"
+      "gpu_observation_requirement": "真实注入必须保存五类风险输入及其当前和相邻调度状态来源; attention stability 必须由具有直接 Q/K 来源、完整算子元数据和 Q/K 原子内容身份的关系对象计算, 且外层层名/token 索引必须与内部身份一致并保持多层唯一。",
+      "claim_boundary": "风险输入只声明冻结解析信号, 不允许逐样本重标定、隐藏状态代理、裸概率 Tensor、缺少直接 Q/K 身份、外层身份漂移或同层克隆冒充多层的 stability 输入。"
     },
     {
       "invariant_id": "branch_risk_bounds_written_update",
@@ -396,6 +425,7 @@
       "definition_pointer": "docs/builds/method_semantic_invariants.md#complete_716_feature_jacobian",
       "formal_expression": [
         "F(z)=concat(normalized_clip_embedding_512,handcrafted_structure_204)",
+        "F_CLIP=normalize(projected_image_embeds_512)",
         "handcrafted_204=rgb_mean_3+rgb_std_3+horizontal_gradient_3+vertical_gradient_3+adaptive_avgpool8x8_rgb_192",
         "feature_width=716"
       ],
@@ -428,20 +458,24 @@
         "handcrafted_feature_width_mismatch",
         "joint_feature_width_mismatch",
         "feature_compression_detected",
-        "feature_coordinate_nonfinite"
+        "feature_coordinate_nonfinite",
+        "clip_projected_image_embeds_missing"
       ],
       "forbidden_substitutes": [
         "coordinate_selection",
         "random_feature_projection",
         "feature_sketch",
         "compressed_jacobian_output",
-        "handcrafted_features_as_general_perceptual_metric"
+        "handcrafted_features_as_general_perceptual_metric",
+        "clip_pooler_output_substitution",
+        "hidden_state_as_projected_clip_embedding"
       ],
       "cpu_property_id": "jacobian_uses_all_512_clip_and_204_declared_structure_coordinates_without_compression",
       "specification_test_nodes": [
         "tests/functional/test_semantic_feature_conditions.py::test_formal_jacobian_keeps_clip_and_handcrafted_structure_coordinates",
         "tests/functional/test_semantic_feature_conditions.py::test_handcrafted_structure_vector_preserves_declared_coordinates",
-        "tests/functional/test_semantic_feature_conditions.py::test_complete_feature_vector_supports_exact_jvp_and_vjp"
+        "tests/functional/test_semantic_feature_conditions.py::test_complete_feature_vector_supports_exact_jvp_and_vjp",
+        "tests/functional/test_semantic_feature_conditions.py::test_semantic_features_require_projected_clip_image_embedding"
       ],
       "cpu_property_test_nodes": [],
       "gpu_atomic_roles": [
@@ -450,8 +484,8 @@
         "joint_feature_tensor",
         "feature_schema_identity"
       ],
-      "gpu_observation_requirement": "真实线性化必须记录完整716维特征及两个冻结模型身份。",
-      "claim_boundary": "204维结构坐标只用于明确结构保持，不代表一般感知质量。"
+      "gpu_observation_requirement": "真实线性化必须记录由投影后 image_embeds 构造的完整512维 CLIP 特征、204维结构特征、联合716维特征及两个冻结模型身份。",
+      "claim_boundary": "CLIP 分量只使用投影后 image_embeds; pooler_output 和隐藏状态不能替代。204维结构坐标只用于明确结构保持, 不代表一般感知质量。"
     },
     {
       "invariant_id": "exact_jacobian_low_response_subspace",
@@ -727,6 +761,8 @@
       "definition_pointer": "docs/builds/method_semantic_invariants.md#direct_qk_four_component_relation",
       "formal_expression": [
         "logit_h=Q_h*K_h_T/sqrt(head_width)",
+        "heads=explicit_positive_integer_attention_module_heads",
+        "recorder_hidden_states=required_tensor_from_each_frozen_layer_hook",
         "L=mean_heads(row_center(logit_h))",
         "P=mean_heads(softmax(logit_h,key_axis))",
         "rho=soft_rank(L,temperature_0_25)",
@@ -742,7 +778,10 @@
         "row_valid=(pair_weight_sum>0)_and_(relation_energy>epsilon_num^2)_and_(projection_energy>epsilon_num^2)",
         "component_score_c=component_polarity_c*pair_weighted_RowCorr(R_c,S_K,pair_weight)",
         "layer_component_score_c=mean_layers(component_score_c)",
-        "s_A=sum_c(attention_relation_component_weights_c*layer_component_score_c)"
+        "s_A=sum_c(attention_relation_component_weights_c*layer_component_score_c)",
+        "probability_consumer_input=QKAttentionRelation(DIRECT_QK,complete_operator_metadata,complete_qk_atom_content)",
+        "qk_record_identity=(outer_layer_name==relation.metadata.record_layer_name)_and_(outer_token_indices==relation.metadata.sampled_token_indices)",
+        "multilayer_qk_identity=unique(relation.metadata.record_layer_name)"
       ],
       "configuration_fields": [
         "attention_module_names",
@@ -804,7 +843,16 @@
         "source_grid_identity_missing",
         "component_protocol_mismatch",
         "qk_atomic_content_incomplete",
-        "qk_operator_metadata_digest_mismatch"
+        "qk_operator_metadata_digest_mismatch",
+        "attention_heads_missing_or_invalid",
+        "attention_hook_tensor_input_missing",
+        "qk_relation_type_missing",
+        "qk_relation_source_mismatch",
+        "qk_relation_operator_metadata_incomplete",
+        "qk_relation_atom_content_incomplete",
+        "qk_outer_layer_name_mismatch",
+        "qk_outer_token_indices_mismatch",
+        "qk_multilayer_name_duplicate"
       ],
       "forbidden_substitutes": [
         "hidden_state_relation_proxy",
@@ -812,7 +860,16 @@
         "probability_only_geometry",
         "full_joint_attention_claim",
         "frequency_domain_attention_proxy",
-        "single_component_postprocessing"
+        "single_component_postprocessing",
+        "implicit_single_attention_head_default",
+        "silent_qk_record_skip_on_missing_tensor_input",
+        "bare_attention_probability_tensor",
+        "non_direct_qk_relation_source",
+        "qk_relation_without_operator_metadata",
+        "qk_relation_without_atom_content_identity",
+        "outer_qk_layer_renaming",
+        "outer_qk_token_index_replacement",
+        "same_internal_layer_clone_as_multilayer_evidence"
       ],
       "cpu_property_id": "direct_qk_subgraph_uses_the_frozen_four_component_relation_formula",
       "specification_test_nodes": [
@@ -820,7 +877,12 @@
         "tests/functional/test_real_scientific_operators.py::test_each_attention_relation_component_changes_keyed_score",
         "tests/functional/test_real_scientific_operators.py::test_distance_modulated_probability_is_distinct_and_differentiable",
         "tests/functional/test_real_scientific_operators.py::test_image_alignment_uses_token_endpoint_coordinate_convention",
-        "tests/functional/test_real_scientific_operators.py::test_scientific_operator_gate_requires_all_real_operator_evidence"
+        "tests/functional/test_real_scientific_operators.py::test_scientific_operator_gate_requires_all_real_operator_evidence",
+        "tests/functional/test_real_scientific_operators.py::test_qk_relation_requires_explicit_positive_integer_head_count",
+        "tests/functional/test_real_scientific_operators.py::test_attention_recorder_rejects_missing_hidden_state_tensor",
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_and_selection_require_direct_qk_identity",
+        "tests/functional/test_real_scientific_operators.py::test_attention_records_bind_outer_layer_and_token_identity",
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_rejects_duplicate_layer_identity"
       ],
       "cpu_property_test_nodes": [],
       "gpu_atomic_roles": [
@@ -832,7 +894,7 @@
         "distance_interaction_component_tensor",
         "sampled_token_indices_tensor"
       ],
-      "gpu_observation_requirement": "冻结两个 SD3.5 层必须保存四分量关系及完整 Q/K 算子元数据。",
+      "gpu_observation_requirement": "冻结两个 SD3.5 层必须显式提供正整数 heads 和 hidden_states Tensor, 保存四分量关系及完整 Q/K 算子元数据; 所有消费点必须复验直接 Q/K 来源、原子内容、外层层名/token 索引与内部身份一致, 并要求多层名称唯一。",
       "claim_boundary": "该关系只覆盖冻结抽样图像 token 子图，不声明完整 joint-attention。"
     },
     {
@@ -842,12 +904,17 @@
         "A=mean_heads(softmax(Q*K_T/sqrt(head_dim),dim=key_axis))",
         "Q=attention_module.to_q(hidden_states)",
         "K=attention_module.to_k(hidden_states)",
+        "heads=explicit_positive_integer_attention_module_heads",
+        "recorder_hidden_states=required_tensor_from_each_frozen_layer_hook",
         "g_A=autograd(geometry_score,z)",
         "delta_A=monotonic_backtrack(rescale_same_risk_bounded_update(project_to_attention_subspace(g_A)))",
         "score(accepted_attention_candidate)>max(score(latent_before),score(optimization_content_base_latent))",
         "score(actual_written_combined_latent)>max(score(latent_before),score(actual_written_content_base_latent))",
         "qk_evaluation_roles=(latent_before,optimization_content_base_latent,accepted_attention_candidate,actual_written_content_base_latent,actual_written_combined_latent)",
-        "accepted_attention_update_content_sha256=attention_branch_written_update_content_sha256"
+        "accepted_attention_update_content_sha256=attention_branch_written_update_content_sha256",
+        "probability_consumer_input=QKAttentionRelation(DIRECT_QK,complete_operator_metadata,complete_qk_atom_content)",
+        "qk_record_identity=(outer_layer_name==relation.metadata.record_layer_name)_and_(outer_token_indices==relation.metadata.sampled_token_indices)",
+        "multilayer_qk_identity=unique(relation.metadata.record_layer_name)"
       ],
       "configuration_fields": [
         "attention_module_names",
@@ -904,7 +971,16 @@
         "projected_attention_gradient_zero",
         "monotonic_candidate_missing",
         "scheduler_scale_noise_missing",
-        "attention_risk_bounded_update_identity_mismatch"
+        "attention_risk_bounded_update_identity_mismatch",
+        "attention_heads_missing_or_invalid",
+        "attention_hook_tensor_input_missing",
+        "qk_relation_type_missing",
+        "qk_relation_source_mismatch",
+        "qk_relation_operator_metadata_incomplete",
+        "qk_relation_atom_content_incomplete",
+        "qk_outer_layer_name_mismatch",
+        "qk_outer_token_indices_mismatch",
+        "qk_multilayer_name_duplicate"
       ],
       "forbidden_substitutes": [
         "hidden_state_similarity_proxy",
@@ -913,14 +989,28 @@
         "linear_scheduler_noise_fallback",
         "nonmonotonic_attention_write",
         "full_joint_attention_claim",
-        "scalar_strength_without_risk_bounded_update"
+        "scalar_strength_without_risk_bounded_update",
+        "implicit_single_attention_head_default",
+        "silent_qk_record_skip_on_missing_tensor_input",
+        "bare_attention_probability_tensor",
+        "non_direct_qk_relation_source",
+        "qk_relation_without_operator_metadata",
+        "qk_relation_without_atom_content_identity",
+        "outer_qk_layer_renaming",
+        "outer_qk_token_index_replacement",
+        "same_internal_layer_clone_as_multilayer_evidence"
       ],
       "cpu_property_id": "direct_to_q_to_k_probabilities_and_backtracking_are_formula_exact",
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_multihead_qk_relation_matches_independent_manual_calculation",
         "tests/functional/test_real_scientific_operators.py::test_attention_update_uses_real_qk_and_autograd",
         "tests/functional/test_real_scientific_operators.py::test_attention_update_verifies_actual_combined_latent",
-        "tests/functional/test_real_scientific_operators.py::test_attention_modules_resolve_only_frozen_exact_layer_names"
+        "tests/functional/test_real_scientific_operators.py::test_attention_modules_resolve_only_frozen_exact_layer_names",
+        "tests/functional/test_real_scientific_operators.py::test_qk_relation_requires_explicit_positive_integer_head_count",
+        "tests/functional/test_real_scientific_operators.py::test_attention_recorder_rejects_missing_hidden_state_tensor",
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_and_selection_require_direct_qk_identity",
+        "tests/functional/test_real_scientific_operators.py::test_attention_records_bind_outer_layer_and_token_identity",
+        "tests/functional/test_real_scientific_operators.py::test_attention_stability_rejects_duplicate_layer_identity"
       ],
       "cpu_property_test_nodes": [
         "tests/functional/test_attention_risk_step.py::test_attention_risk_step_starts_at_maximum_and_consumes_factor",
@@ -937,7 +1027,7 @@
         "sampled_token_indices_tensor",
         "accepted_attention_update_tensor"
       ],
-      "gpu_observation_requirement": "冻结的两个 SD3.5 attention 层必须产生真实 Q、K、logit、逐头概率、token 索引和单调回溯证据。",
+      "gpu_observation_requirement": "冻结的两个 SD3.5 attention 层必须显式提供正整数 heads 和 hidden_states Tensor, 产生真实 Q、K、logit、逐头概率、token 索引和单调回溯证据; stability、稳定 token、pair weight、graph identity 和 geometry score 均须复验内外身份及多层唯一性。",
       "claim_boundary": "注意力算子只声明两个冻结层上最多64个抽样图像 token 的直接 Q/K 子图，不声明完整 joint-attention 全 token 优化。"
     },
     {

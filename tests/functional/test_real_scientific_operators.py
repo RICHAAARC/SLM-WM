@@ -1541,13 +1541,56 @@ def test_qk_relation_rejects_module_scale_mismatch() -> None:
 
 
 @pytest.mark.quick
+@pytest.mark.parametrize("invalid_heads", [None, True, 0, -1, 1.5])
+def test_qk_relation_requires_explicit_positive_integer_head_count(
+    invalid_heads: object,
+) -> None:
+    """核心 Q/K 算子必须拒绝缺失或非法 heads, 不得静默退化成单头。"""
+
+    module = _ToyAttention(4)
+    if invalid_heads is None:
+        del module.heads
+    else:
+        module.heads = invalid_heads
+
+    with pytest.raises(TypeError, match="正整数 heads"):
+        qk_self_attention(
+            module,
+            torch.randn(1, 4, 4),
+            max_tokens=4,
+            layer_name="invalid_head_count_layer",
+        )
+
+
+@pytest.mark.quick
+def test_attention_recorder_rejects_missing_hidden_state_tensor() -> None:
+    """冻结层钩子必须立即拒绝无 Tensor 输入, 不得静默漏记 Q/K 原子。"""
+
+    module = _ToyAttention(4)
+    with DifferentiableAttentionRecorder(
+        (("required_attention_layer", module),),
+        max_tokens=4,
+    ):
+        with pytest.raises(RuntimeError, match="没有提供可核验"):
+            module("not-a-tensor")  # type: ignore[arg-type]
+
+
+@pytest.mark.quick
 def test_attention_stability_comes_from_multiple_real_qk_layers() -> None:
     """相同 Q/K 关系层应产生接近 1 的真实关系稳定图。"""
 
-    attention = torch.softmax(torch.randn(1, 4, 4), dim=-1)
+    logits = torch.randn(1, 4, 4)
     records = (
-        ("layer_a", attention, (0, 3, 12, 15)),
-        ("layer_b", attention.clone(), (0, 3, 12, 15)),
+        (
+            "layer_a",
+            _direct_qk_relation_from_logits(logits, "layer_a"),
+            (0, 1, 2, 3),
+        ),
+        (
+            "layer_b",
+            _direct_qk_relation_from_logits(logits.clone(), "layer_b"),
+            (0, 1, 2, 3),
+        ),
     )
 
     stability = attention_relation_stability_map(records, (4, 4))
@@ -1557,16 +1600,110 @@ def test_attention_stability_comes_from_multiple_real_qk_layers() -> None:
 
 
 @pytest.mark.quick
+@pytest.mark.parametrize(
+    "invalid_relation",
+    ["bare_tensor", "wrong_source", "missing_metadata"],
+)
+def test_attention_stability_and_selection_require_direct_qk_identity(
+    invalid_relation: str,
+) -> None:
+    """稳定度与 token 选择必须拒绝裸概率或错误来源关系。"""
+
+    logits = torch.randn(1, 4, 4)
+    if invalid_relation == "bare_tensor":
+        relation: object = torch.softmax(logits, dim=-1)
+    elif invalid_relation == "wrong_source":
+        direct = _direct_qk_relation_from_logits(logits, "layer_a")
+        relation = QKAttentionRelation(
+            centered_logits=direct.centered_logits,
+            probabilities=direct.probabilities,
+            relation_source="untrusted_attention_output",
+            metadata=dict(direct.metadata),
+        )
+    else:
+        relation = QKAttentionRelation(
+            centered_logits=logits - logits.mean(dim=-1, keepdim=True),
+            probabilities=torch.softmax(logits, dim=-1),
+        )
+    second_relation = (
+        _direct_qk_relation_from_logits(logits.clone(), "layer_b")
+        if invalid_relation == "bare_tensor"
+        else relation.clone() if hasattr(relation, "clone") else relation
+    )
+    records = (
+        ("layer_a", relation, (0, 1, 2, 3)),
+        ("layer_b", second_relation, (0, 1, 2, 3)),
+    )
+
+    with pytest.raises(ValueError, match="直接 Q/K"):
+        attention_relation_stability_map(records, (4, 4))
+    with pytest.raises(ValueError, match="直接 Q/K"):
+        select_stable_attention_tokens(records, stable_token_fraction=0.5)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("mismatch", ["layer_name", "token_indices"])
+def test_attention_records_bind_outer_layer_and_token_identity(
+    mismatch: str,
+) -> None:
+    """外层 Q/K 记录不得改名或更换 token 索引后冒充另一科学原子。"""
+
+    logits = torch.randn(1, 4, 4)
+    layer_a = _direct_qk_relation_from_logits(logits, "layer_a")
+    layer_b = _direct_qk_relation_from_logits(logits.clone(), "layer_b")
+    first_layer_name = "forged_layer" if mismatch == "layer_name" else "layer_a"
+    first_token_indices = (
+        (0, 3, 12, 15)
+        if mismatch == "token_indices"
+        else (0, 1, 2, 3)
+    )
+    records = (
+        (first_layer_name, layer_a, first_token_indices),
+        ("layer_b", layer_b, (0, 1, 2, 3)),
+    )
+
+    with pytest.raises(ValueError, match="内部身份不一致"):
+        attention_relation_stability_map(records, (4, 4))
+    with pytest.raises(ValueError, match="内部身份不一致"):
+        select_stable_attention_tokens(records, stable_token_fraction=0.5)
+
+
+@pytest.mark.quick
+def test_attention_stability_rejects_duplicate_layer_identity() -> None:
+    """同一 Q/K 层的克隆不得通过改写记录数量冒充跨层稳定性。"""
+
+    logits = torch.randn(1, 4, 4)
+    first = _direct_qk_relation_from_logits(logits, "layer_a")
+    second = _direct_qk_relation_from_logits(logits.clone(), "layer_a")
+    records = (
+        ("layer_a", first, (0, 1, 2, 3)),
+        ("layer_a", second, (0, 1, 2, 3)),
+    )
+
+    with pytest.raises(ValueError, match="不得用同一层"):
+        attention_relation_stability_map(records, (4, 4))
+    with pytest.raises(ValueError, match="不得用同一层"):
+        select_stable_attention_tokens(records, stable_token_fraction=0.5)
+
+
+@pytest.mark.quick
 def test_stable_attention_tokens_drive_keyed_geometry_score() -> None:
     """稳定 token 集必须真实改变 Q/K 目标权重并保存可复现身份。"""
 
     generator = torch.Generator().manual_seed(1703)
     logits = torch.randn(1, 9, 9, generator=generator)
-    base = _direct_qk_relation_from_logits(logits)
     token_indices = tuple(range(9))
     records = (
-        ("layer_a", base, token_indices),
-        ("layer_b", _direct_qk_relation_from_logits(logits.clone()), token_indices),
+        (
+            "layer_a",
+            _direct_qk_relation_from_logits(logits, "layer_a"),
+            token_indices,
+        ),
+        (
+            "layer_b",
+            _direct_qk_relation_from_logits(logits.clone(), "layer_b"),
+            token_indices,
+        ),
     )
 
     selection = select_stable_attention_tokens(records, stable_token_fraction=0.5)
@@ -1714,10 +1851,7 @@ def test_differentiable_soft_rank_contributes_nonzero_logit_gradient() -> None:
 
     generator = torch.Generator().manual_seed(260713)
     logits = torch.randn(1, 9, 9, generator=generator).requires_grad_(True)
-    relation = QKAttentionRelation(
-        centered_logits=logits - logits.mean(dim=-1, keepdim=True),
-        probabilities=torch.softmax(logits, dim=-1),
-    )
+    relation = _direct_qk_relation_from_logits(logits)
     descriptor = build_attention_relation_descriptor(relation, tuple(range(9)))
     projection = keyed_attention_relation_projection(
         descriptor,
@@ -1741,10 +1875,7 @@ def test_distance_modulated_probability_is_distinct_and_differentiable() -> None
 
     generator = torch.Generator().manual_seed(260714)
     logits = torch.randn(1, 9, 9, generator=generator).requires_grad_(True)
-    relation = QKAttentionRelation(
-        centered_logits=logits - logits.mean(dim=-1, keepdim=True),
-        probabilities=torch.softmax(logits, dim=-1),
-    )
+    relation = _direct_qk_relation_from_logits(logits)
     descriptor = build_attention_relation_descriptor(relation, tuple(range(9)))
     projection = keyed_attention_relation_projection(
         descriptor,
@@ -2018,6 +2149,11 @@ def test_attention_registration_is_equivariant_to_query_and_key_permutation(
         canonical_logits.index_select(1, index).index_select(2, index),
         layer_name,
     )
+    replicate_layer_name = f"{layer_name}_replicate"
+    observed_replicate = _direct_qk_relation_from_logits(
+        observed.centered_logits.clone(),
+        replicate_layer_name,
+    )
 
     result = recover_attention_affine_alignment(
         observed,
@@ -2025,16 +2161,24 @@ def test_attention_registration_is_equivariant_to_query_and_key_permutation(
         layer_name,
         tuple(range(token_count)),
         build_stable_attention_pair_weights(
-            (
-                (layer_name, observed, tuple(range(token_count))),
-                (f"{layer_name}_replicate", observed.clone(), tuple(range(token_count))),
-            ),
-            select_stable_attention_tokens(
                 (
                     (layer_name, observed, tuple(range(token_count))),
-                    (f"{layer_name}_replicate", observed.clone(), tuple(range(token_count))),
-                )
-            ),
+                    (
+                        replicate_layer_name,
+                        observed_replicate,
+                        tuple(range(token_count)),
+                    ),
+                ),
+                select_stable_attention_tokens(
+                    (
+                        (layer_name, observed, tuple(range(token_count))),
+                        (
+                            replicate_layer_name,
+                            observed_replicate,
+                            tuple(range(token_count)),
+                        ),
+                    )
+                ),
         ),
     )
 
@@ -2060,6 +2204,7 @@ def test_image_only_detector_reextracts_qk_after_alignment(
     key_material = "detector_sync_key"
     model_id = "detector_sync_model"
     layer_name = "detector_sync_layer"
+    second_layer_name = f"{layer_name}_second"
     relation_signs = keyed_relation_signs(
         torch.zeros(1, token_count, token_count),
         key_material,
@@ -2078,13 +2223,30 @@ def test_image_only_detector_reextracts_qk_after_alignment(
         canonical_logits.index_select(1, flip).index_select(2, flip),
         layer_name,
     )
+    second_relation_signs = keyed_relation_signs(
+        torch.zeros(1, token_count, token_count),
+        key_material,
+        second_layer_name,
+    )
+    second_canonical_logits = (2.0 * second_relation_signs).unsqueeze(0)
+    second_canonical_attention = _direct_qk_relation_from_logits(
+        second_canonical_logits,
+        second_layer_name,
+    )
+    second_observed_attention = _direct_qk_relation_from_logits(
+        second_canonical_logits.index_select(1, flip).index_select(2, flip),
+        second_layer_name,
+    )
     reference = torch.zeros(1, 2, 8, 8)
     lf_template = build_low_frequency_template(reference, key_material, model_id)
     tail_template = build_tail_robust_template(reference, key_material, model_id, 0.20)[0]
-    original = {"latent": torch.zeros_like(reference), "attention": observed_attention}
+    original = {
+        "latent": torch.zeros_like(reference),
+        "attentions": (observed_attention, second_observed_attention),
+    }
     aligned = {
         "latent": 0.8 * lf_template + 0.4 * tail_template,
-        "attention": canonical_attention,
+        "attentions": (canonical_attention, second_canonical_attention),
     }
     extraction_count = 0
     stable_selection_count = 0
@@ -2109,8 +2271,19 @@ def test_image_only_detector_reextracts_qk_after_alignment(
     def extract(sample: dict[str, object]) -> tuple[tuple[str, object, tuple[int, ...]], ...]:
         nonlocal extraction_count
         extraction_count += 1
-        record = (layer_name, sample["attention"], tuple(range(token_count)))
-        return (record, record)
+        relations = sample["attentions"]
+        assert isinstance(relations, tuple) and len(relations) == 2
+        relation, second_relation = relations
+        assert isinstance(relation, QKAttentionRelation)
+        assert isinstance(second_relation, QKAttentionRelation)
+        return (
+            (layer_name, relation, tuple(range(token_count))),
+            (
+                second_layer_name,
+                second_relation,
+                tuple(range(token_count)),
+            ),
+        )
 
     result = detect_image_only_watermark(
         image=original,
