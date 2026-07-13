@@ -16,15 +16,25 @@ from experiments.ablations import runtime_rerun
 from experiments.artifacts import dataset_level_quality_outputs
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.artifacts.manifest_schema import manifest_config_digest_ready
-from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
     build_dataset_quality_image_records,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.formal_randomization import (
+    formal_generation_seed,
+    formal_randomization_sample_reference,
     formal_randomization_protocol_record,
+    formal_watermark_key_material_from_seed,
+    formal_watermark_key_plan_record,
     resolve_formal_randomization_repeat,
+    validate_formal_prompt_randomization_identity,
 )
 from experiments.protocol.splits import apply_split_assignments
 from experiments.runners.semantic_watermark_runtime import (
@@ -111,16 +121,39 @@ def _minimal_paper_run(prompt_file: str, prompt_count: int) -> SimpleNamespace:
 
 def _runtime_result_payload(
     config: SemanticWatermarkRuntimeConfig,
+    *,
+    prompt_index: int,
 ) -> dict[str, Any]:
     """构造配置、run id 和科学来源完全一致的最小运行结果。"""
 
     unit_config = semantic_watermark_runtime_config_payload(config)
     run_id = build_semantic_watermark_run_id(config)
+    randomization_identity = validate_formal_prompt_randomization_identity(
+        base_generation_seed_random=SemanticWatermarkRuntimeConfig().seed,
+        prompt_index=prompt_index,
+        randomization_repeat_id=config.randomization_repeat_id,
+        generation_seed_index=config.generation_seed_index,
+        generation_seed_offset=config.generation_seed_offset,
+        watermark_key_index=config.watermark_key_index,
+        generation_seed_random=config.seed,
+        watermark_key_seed_random=config.watermark_key_seed_random,
+        key_material=config.key_material,
+        formal_randomization_protocol_digest=(
+            config.formal_randomization_protocol_digest
+        ),
+    )
     return {
         "run_id": run_id,
         "run_decision": "pass",
         "metadata": {
-            "scientific_unit_config": unit_config,
+            "scientific_unit_config_digest": build_stable_digest(
+                unit_config
+            ),
+            "formal_randomization_reference": (
+                formal_randomization_sample_reference(
+                    randomization_identity
+                )
+            ),
             "scientific_unit_provenance": build_test_scientific_unit_provenance(
                 run_id,
                 build_stable_digest(unit_config),
@@ -137,6 +170,7 @@ def _detection_record(
     sample_role: str,
     content_score: float,
     attack: Any | None = None,
+    generation_seed_random: int | None = None,
 ) -> dict[str, Any]:
     """构造能够进入真实 fixed-FPR 校准和攻击覆盖检查的检测原子。"""
 
@@ -152,6 +186,8 @@ def _detection_record(
         },
     }
     if attack is not None:
+        if generation_seed_random is None:
+            raise ValueError("攻击检测记录必须提供实际生成 seed")
         record.update(
             {
                 "attack_id": attack.attack_id,
@@ -161,6 +197,16 @@ def _detection_record(
                 "attack_config_digest": attack_config_digest(attack),
                 "attack_parameters": attack.attack_parameters,
                 "attack_performed": True,
+                "generation_seed_random": generation_seed_random,
+                "attack_seed_random": formal_attack_seed_random(
+                    generation_seed_random,
+                    attack.attack_id,
+                ),
+                "formal_attack_seed_protocol_digest": (
+                    formal_attack_seed_protocol_record()[
+                        "formal_attack_seed_protocol_digest"
+                    ]
+                ),
             }
         )
     return bind_formal_detection_record(record)
@@ -210,15 +256,47 @@ def test_runtime_rerun_writer_package_and_closure_share_manifest_config(
             read_prompt_file(prompt_path),
         )
     )
+    repeat = resolve_formal_randomization_repeat(
+        paper_run.randomization_repeat_id
+    )
+    key_record = next(
+        record
+        for record in formal_watermark_key_plan_record()[
+            "watermark_key_records"
+        ]
+        if record["watermark_key_index"] == repeat.watermark_key_index
+    )
+    key_seed = int(key_record["watermark_key_seed_random"])
+    base_generation_seed = SemanticWatermarkRuntimeConfig().seed
     base_configs = tuple(
         SemanticWatermarkRuntimeConfig(
             prompt=record.prompt_text,
             prompt_id=record.prompt_id,
             split=record.split,
-            seed=100 + record.prompt_index,
+            seed=formal_generation_seed(
+                base_generation_seed,
+                record.prompt_index,
+                repeat,
+            ),
+            key_material=formal_watermark_key_material_from_seed(
+                key_seed,
+                repeat,
+            ),
+            randomization_repeat_id=repeat.randomization_repeat_id,
+            generation_seed_index=repeat.generation_seed_index,
+            generation_seed_offset=repeat.generation_seed_offset,
+            watermark_key_index=repeat.watermark_key_index,
+            watermark_key_seed_random=key_seed,
+            formal_randomization_protocol_digest=(
+                paper_run.formal_randomization_protocol_digest
+            ),
         )
         for record in prompt_records
     )
+    prompt_index_by_id = {
+        record.prompt_id: record.prompt_index
+        for record in prompt_records
+    }
 
     monkeypatch.setattr(
         repository_environment,
@@ -254,13 +332,17 @@ def test_runtime_rerun_writer_package_and_closure_share_manifest_config(
                         positive_score if sample_role == "positive_source" else 0.0
                     ),
                     attack=attack,
+                    generation_seed_random=config.seed,
                 )
                 for attack in default_attack_configs()
                 if attack.enabled
                 and attack.resource_profile in {"full_main", "full_extra"}
                 for sample_role in ("clean_negative", "positive_source")
             )
-        payload = _runtime_result_payload(config)
+        payload = _runtime_result_payload(
+            config,
+            prompt_index=prompt_index_by_id[config.prompt_id],
+        )
         relative_path = (
             Path("outputs/manifest_chain_runtime")
             / payload["run_id"]

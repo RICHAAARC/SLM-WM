@@ -26,6 +26,7 @@ from experiments.protocol.fixed_fpr_observation_audit import audit_fixed_fpr_obs
 from experiments.protocol.formal_randomization import (
     DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
     build_formal_randomization_identity,
+    formal_runtime_randomization_plan_record,
     formal_watermark_key_seed_random,
     require_formal_watermark_key_plan,
     resolve_formal_randomization_repeat,
@@ -168,6 +169,21 @@ class ExternalBaselineMethodFaithfulArchiveRecord:
         """转换为 JSON 兼容字典。"""
 
         return asdict(self)
+
+
+def baseline_run_identity_manifest_config(
+    config: ExternalBaselineMethodFaithfulConfig,
+) -> dict[str, Any]:
+    """构造 baseline 顶层 manifest 的完整随机身份配置."""
+
+    return {
+        **asdict(config),
+        "formal_randomization_plan": (
+            formal_runtime_randomization_plan_record(
+                config.seed - config.generation_seed_offset,
+            )
+        ),
+    }
 
 
 def resolve_primary_baseline_id(value: str) -> str:
@@ -900,7 +916,7 @@ def write_failure_outputs(
             relative_or_absolute(paths["summary"], root_path),
             relative_or_absolute(paths["environment_report"], root_path),
         ),
-        config=asdict(config),
+        config=baseline_run_identity_manifest_config(config),
         code_version=resolve_code_version(root_path),
         rebuild_command="调用 paper_experiments.runners.external_baseline_method_faithful",
         metadata={"run_decision": "fail", "supports_paper_claim": False},
@@ -1023,7 +1039,7 @@ def write_external_baseline_method_faithful_outputs(
             relative_or_absolute(paths["split_command_results"], root_path),
             relative_or_absolute(paths["numerical_fidelity_report"], root_path),
         ),
-        config=asdict(config),
+        config=baseline_run_identity_manifest_config(config),
         code_version=formal_execution_run_lock["formal_execution_commit"],
         rebuild_command="调用 paper_experiments.runners.external_baseline_method_faithful",
         metadata={

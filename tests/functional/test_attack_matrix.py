@@ -9,7 +9,12 @@ from pathlib import Path
 from PIL import Image
 import pytest
 
-from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from experiments.runtime.repository_environment import file_digest
 from scripts.write_attack_matrix_outputs import (
     build_attack_coverage,
@@ -148,6 +153,35 @@ def test_attack_config_digest_is_stable() -> None:
 
     config = default_attack_configs()[1]
     assert attack_config_digest(config) == attack_config_digest(config)
+
+
+@pytest.mark.quick
+def test_formal_attack_seed_is_deterministic_and_attack_specific() -> None:
+    """相同生成 seed 与攻击必须复现同一 seed, 不同攻击必须分离."""
+
+    first = formal_attack_seed_random(1703, "gaussian_noise_main")
+    repeated = formal_attack_seed_random(1703, "gaussian_noise_main")
+    different_attack = formal_attack_seed_random(1703, "crop_main")
+
+    assert first == repeated
+    assert first != different_attack
+    assert 0 <= first < 1 << 63
+    assert len(
+        formal_attack_seed_protocol_record()[
+            "formal_attack_seed_protocol_digest"
+        ]
+    ) == 64
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("generation_seed", (False, -1, 1.0))
+def test_formal_attack_seed_rejects_noncanonical_generation_seed(
+    generation_seed: object,
+) -> None:
+    """攻击 seed 公式不得接受 bool、负数或浮点伪整数."""
+
+    with pytest.raises(ValueError, match="generation_seed_random"):
+        formal_attack_seed_random(generation_seed, "crop_main")
 
 def _runtime_detection_records(runtime_dir: Path) -> tuple[dict[str, object], ...]:
     """读取运行夹具中的仅图像检测记录."""

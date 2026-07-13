@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
 from typing import Any, Iterable, Mapping
 
 from main.core.digest import build_stable_digest
@@ -11,6 +12,42 @@ from main.core.digest import build_stable_digest
 DIFFUSION_ATTACK_INFERENCE_STEPS = 28
 DIFFUSION_ATTACK_GUIDANCE_SCALE = 4.5
 DIFFUSION_ATTACK_NEGATIVE_PROMPT = "low quality, blurry"
+FORMAL_ATTACK_SEED_PROTOCOL = "sha256_generation_seed_attack_id_uint63_v1"
+
+
+def formal_attack_seed_protocol_record() -> dict[str, Any]:
+    """返回跨方法统一的攻击随机 seed 派生协议."""
+
+    payload = {
+        "formal_attack_seed_protocol": FORMAL_ATTACK_SEED_PROTOCOL,
+        "input_fields": ["generation_seed_random", "attack_id"],
+        "derivation": "sha256_domain_separated_first_uint64_mask_uint63",
+        "output_field": "attack_seed_random",
+    }
+    return {
+        **payload,
+        "formal_attack_seed_protocol_digest": build_stable_digest(payload),
+    }
+
+
+def formal_attack_seed_random(
+    generation_seed_random: int,
+    attack_id: str,
+) -> int:
+    """从基础生成 seed 与攻击 ID 派生跨方法一致的非负63位 seed."""
+
+    if type(generation_seed_random) is not int or generation_seed_random < 0:
+        raise ValueError("generation_seed_random 必须是非负整数")
+    normalized_attack_id = str(attack_id).strip()
+    if not normalized_attack_id:
+        raise ValueError("attack_id 不能为空")
+    payload = (
+        f"{FORMAL_ATTACK_SEED_PROTOCOL}\0{generation_seed_random}\0"
+        f"{normalized_attack_id}"
+    ).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big") & (
+        (1 << 63) - 1
+    )
 
 
 @dataclass(frozen=True)
@@ -59,6 +96,8 @@ ATTACK_RECORD_DIGEST_FIELDS = (
     "attack_name",
     "resource_profile",
     "attack_config_digest",
+    "attack_seed_random",
+    "formal_attack_seed_protocol_digest",
     "detector_digest",
     "source_image_digest",
     "attacked_image_digest",
@@ -107,6 +146,7 @@ def build_attack_matrix_manifest_config(
         "attack_record_digest": build_stable_digest(
             [dict(record) for record in attack_records]
         ),
+        **formal_attack_seed_protocol_record(),
     }
 
 

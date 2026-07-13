@@ -26,6 +26,8 @@ from experiments.artifacts.dataset_level_quality_outputs import (
 from experiments.protocol.attacks import (
     attack_config_digest,
     default_attack_configs,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
 )
 from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_ATTACK_NAME,
@@ -443,16 +445,34 @@ def _formal_attack_coverage_ready(
         len(rows) != 1 for rows in actual_by_key.values()
     ):
         return False
-    return all(
-        record.get("attack_family") == config.attack_family
-        and record.get("attack_name") == config.attack_name
-        and record.get("resource_profile") == config.resource_profile
-        and record.get("attack_config_digest") == attack_config_digest(config)
-        and record.get("attack_parameters") == config.attack_parameters
-        and record.get("attack_performed") is True
-        for key, config in expected_by_key.items()
-        for record in actual_by_key[key]
-    )
+    attack_seed_protocol_digest = formal_attack_seed_protocol_record()[
+        "formal_attack_seed_protocol_digest"
+    ]
+    for key, config in expected_by_key.items():
+        for record in actual_by_key[key]:
+            try:
+                expected_attack_seed = formal_attack_seed_random(
+                    record.get("generation_seed_random"),
+                    config.attack_id,
+                )
+            except (TypeError, ValueError):
+                return False
+            if not (
+                record.get("attack_family") == config.attack_family
+                and record.get("attack_name") == config.attack_name
+                and record.get("resource_profile") == config.resource_profile
+                and record.get("attack_config_digest")
+                == attack_config_digest(config)
+                and record.get("attack_parameters")
+                == config.attack_parameters
+                and record.get("attack_performed") is True
+                and record.get("attack_seed_random")
+                == expected_attack_seed
+                and record.get("formal_attack_seed_protocol_digest")
+                == attack_seed_protocol_digest
+            ):
+                return False
+    return True
 
 
 def _revalidated_detection_records(
@@ -492,6 +512,7 @@ def rebuild_and_validate_ablation_runtime_aggregates(
     formal_detection_records: Iterable[Mapping[str, Any]],
     frozen_protocols: Mapping[str, Mapping[str, Any]],
     *,
+    scientific_unit_identity_records: Iterable[Mapping[str, Any]],
     expected_ablation_ids: Iterable[str],
     expected_prompt_split_by_id: Mapping[str, str],
     expected_prompt_digest_by_id: Mapping[str, str],
@@ -582,6 +603,20 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         prompt_index_by_id
     ):
         raise FormalRecordStatisticsError("逐 Prompt 消融记录未精确覆盖规范笛卡尔积")
+    materialized_unit_identities = tuple(
+        dict(record) for record in scientific_unit_identity_records
+    )
+    unit_identity_by_run_id = {
+        str(record.get("run_id", "")): record
+        for record in materialized_unit_identities
+    }
+    if (
+        len(unit_identity_by_run_id) != len(materialized_unit_identities)
+        or len(unit_identity_by_run_id) != len(expected_keys)
+    ):
+        raise FormalRecordStatisticsError(
+            "消融顶层 manifest 逐单元身份未精确覆盖运行笛卡尔积"
+        )
 
     detections_by_key: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     for detection in materialized_detections:
@@ -644,9 +679,14 @@ def rebuild_and_validate_ablation_runtime_aggregates(
             if isinstance(runtime_result, Mapping)
             else None
         )
+        run_id = str(runtime_result.get("run_id", "")) if isinstance(
+            runtime_result,
+            Mapping,
+        ) else ""
+        unit_identity = unit_identity_by_run_id.get(run_id)
         scientific_config = (
-            runtime_metadata.get("scientific_unit_config")
-            if isinstance(runtime_metadata, Mapping)
+            unit_identity.get("scientific_unit_config")
+            if isinstance(unit_identity, Mapping)
             else None
         )
         if (
@@ -661,7 +701,14 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         if dict(runtime_config) != expected_runtime_configs[ablation_id]:
             raise FormalRecordStatisticsError("逐 Prompt 消融记录未执行声明消融的精确机制配置")
         try:
-            validate_semantic_watermark_runtime_result_provenance(runtime_result)
+            if unit_identity.get("formal_randomization_reference") != (
+                runtime_metadata.get("formal_randomization_reference")
+            ):
+                raise ValueError("运行结果未引用顶层 manifest 随机身份")
+            validate_semantic_watermark_runtime_result_provenance(
+                runtime_result,
+                unit_config=scientific_config,
+            )
         except (KeyError, TypeError, ValueError) as exc:
             raise FormalRecordStatisticsError(
                 "逐 Prompt 消融结果缺少可重建的科学运行来源"
@@ -692,7 +739,6 @@ def rebuild_and_validate_ablation_runtime_aggregates(
             )
         ):
             raise FormalRecordStatisticsError("逐 Prompt 消融记录与科学运行配置身份不一致")
-        run_id = str(runtime_result.get("run_id", ""))
         if not run_id or any(
             detection.get("prompt_id") != prompt_id
             or detection.get("split") != split

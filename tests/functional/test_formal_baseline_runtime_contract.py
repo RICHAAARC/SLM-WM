@@ -10,7 +10,12 @@ import pytest
 from PIL import Image
 
 from experiments.runtime.image_metrics import compute_image_quality_metrics, measured_image_ssim
-from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+    resolve_formal_attack_config,
+)
 from external_baseline.primary.sd35_method_faithful_common import (
     DEFAULT_SD35_MODEL_REVISION,
     derive_threshold,
@@ -269,6 +274,10 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
             "strict_pair_quality_ready": True,
         }
     ]
+    attack_seed = formal_attack_seed_random(1703, "jpeg_compression_main")
+    attack_seed_protocol_digest = formal_attack_seed_protocol_record()[
+        "formal_attack_seed_protocol_digest"
+    ]
     results = {
         "0": {
             "robustness": {"norm1_no_w": 0.2, "norm1_w": 0.9, "acc_msg": 1.0},
@@ -286,6 +295,10 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
                             attack_name="jpeg_compression",
                         )
                     ),
+                    "attack_seed_random": attack_seed,
+                    "formal_attack_seed_protocol_digest": (
+                        attack_seed_protocol_digest
+                    ),
                     "attacked_negative": {
                         "attack_id": "jpeg_compression_main",
                         "resource_profile": "full_main",
@@ -294,6 +307,10 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
                                 attack_family="standard_distortion",
                                 attack_name="jpeg_compression",
                             )
+                        ),
+                        "attack_seed_random": attack_seed,
+                        "formal_attack_seed_protocol_digest": (
+                            attack_seed_protocol_digest
                         ),
                         "detection_score": 0.12,
                         "attacked_image_path": str(attacked_negative_path),
@@ -307,6 +324,10 @@ def test_t2smark_formal_attacks_use_distinct_clean_and_watermarked_images(
                                 attack_family="standard_distortion",
                                 attack_name="jpeg_compression",
                             )
+                        ),
+                        "attack_seed_random": attack_seed,
+                        "formal_attack_seed_protocol_digest": (
+                            attack_seed_protocol_digest
                         ),
                         "detection_score": 0.75,
                         "attacked_image_path": str(attacked_positive_path),

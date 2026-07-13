@@ -15,6 +15,9 @@ from main.core.keyed_prg import (
 
 
 FORMAL_RANDOMIZATION_PROTOCOL = "crossed_generation_seed_watermark_key_v2"
+FORMAL_GENERATION_SEED_DERIVATION_PROTOCOL = (
+    "base_seed_plus_repeat_offset_plus_prompt_index_v1"
+)
 FORMAL_GENERATION_SEED_OFFSETS = (0, 1_000_003, 2_000_003)
 FORMAL_WATERMARK_KEY_INDICES = (0, 1, 2)
 FORMAL_WATERMARK_KEY_PLAN_PROTOCOL = "fixed_three_key_commitment_v1"
@@ -212,6 +215,13 @@ def formal_randomization_protocol_record() -> dict[str, Any]:
         "generation_seed_repeat_count": len(FORMAL_GENERATION_SEED_OFFSETS),
         "watermark_key_repeat_count": len(FORMAL_WATERMARK_KEY_INDICES),
         "crossed_repeat_count": len(repeat_records),
+        "formal_generation_seed_derivation_protocol": (
+            FORMAL_GENERATION_SEED_DERIVATION_PROTOCOL
+        ),
+        "generation_seed_formula": (
+            "base_generation_seed_random + generation_seed_offset + "
+            "prompt_index"
+        ),
         "repeat_records": repeat_records,
         "base_latent_distribution": (
             "midpoint_inverse_cdf_quantized_standard_normal_table20"
@@ -426,6 +436,173 @@ def build_formal_randomization_identity(
     return payload
 
 
+def validate_formal_prompt_randomization_identity(
+    *,
+    base_generation_seed_random: int,
+    prompt_index: int,
+    randomization_repeat_id: str,
+    generation_seed_index: int,
+    generation_seed_offset: int,
+    watermark_key_index: int,
+    generation_seed_random: int,
+    watermark_key_seed_random: int,
+    key_material: str,
+    formal_randomization_protocol_digest: str,
+) -> dict[str, Any]:
+    """校验正式 Prompt 的 seed、key 和 repeat 是否符合冻结公式.
+
+    该校验只用于正式数据集、baseline 和消融入口. 开发路径可以继续构造
+    非论文配置, 但任何进入论文统计的样本都必须由同一个公开 seed 公式和
+    预注册 key plan 重建, 从而避免 manifest 声明身份与实际运行身份分叉.
+    """
+
+    repeat = resolve_formal_randomization_repeat(randomization_repeat_id)
+    actual_repeat = {
+        "generation_seed_index": generation_seed_index,
+        "generation_seed_offset": generation_seed_offset,
+        "watermark_key_index": watermark_key_index,
+    }
+    expected_repeat = {
+        "generation_seed_index": repeat.generation_seed_index,
+        "generation_seed_offset": repeat.generation_seed_offset,
+        "watermark_key_index": repeat.watermark_key_index,
+    }
+    if actual_repeat != expected_repeat:
+        raise ValueError("正式 Prompt 的 repeat 身份未匹配冻结注册表")
+    expected_seed = formal_generation_seed(
+        base_generation_seed_random,
+        prompt_index,
+        repeat,
+    )
+    if type(generation_seed_random) is not int or generation_seed_random != expected_seed:
+        raise ValueError("正式 Prompt 的生成 seed 未匹配冻结派生公式")
+    key_plan = formal_watermark_key_plan_record()
+    expected_key_record = next(
+        record
+        for record in key_plan["watermark_key_records"]
+        if record["watermark_key_index"] == repeat.watermark_key_index
+    )
+    if (
+        type(watermark_key_seed_random) is not int
+        or watermark_key_seed_random
+        != expected_key_record["watermark_key_seed_random"]
+    ):
+        raise ValueError("正式 Prompt 的 watermark key seed 未匹配预注册计划")
+    rebuilt_key_material = formal_watermark_key_material_from_seed(
+        watermark_key_seed_random,
+        repeat,
+    )
+    rebuilt_key_digest = build_stable_digest(
+        {"key_material": rebuilt_key_material}
+    )
+    if (
+        key_material != rebuilt_key_material
+        or rebuilt_key_digest
+        != expected_key_record["watermark_key_material_digest_random"]
+    ):
+        raise ValueError("正式 Prompt 的 watermark key material 无法逐项重建")
+    protocol = formal_randomization_protocol_record()
+    if formal_randomization_protocol_digest != protocol[
+        "formal_randomization_protocol_digest"
+    ]:
+        raise ValueError("正式 Prompt 的随机化协议摘要发生漂移")
+    payload = {
+        **repeat.to_dict(),
+        "generation_seed_random": generation_seed_random,
+        "watermark_key_seed_random": watermark_key_seed_random,
+        "watermark_key_material_digest_random": rebuilt_key_digest,
+        "formal_randomization_protocol_digest": (
+            formal_randomization_protocol_digest
+        ),
+    }
+    payload["formal_randomization_identity_digest_random"] = (
+        build_stable_digest(payload)
+    )
+    return payload
+
+
+def formal_runtime_randomization_plan_record(
+    base_generation_seed_random: int,
+    *,
+    base_latent_dtype: str = "torch.float16",
+    base_latent_shape: tuple[int, ...] = (1, 16, 64, 64),
+) -> dict[str, Any]:
+    """返回顶层运行 manifest 保存的完整正式随机化计划正文."""
+
+    if type(base_generation_seed_random) is not int or base_generation_seed_random < 0:
+        raise ValueError("base_generation_seed_random 必须是非负整数")
+    normalized_shape = tuple(int(value) for value in base_latent_shape)
+    if not base_latent_dtype or not normalized_shape or any(
+        value <= 0 for value in normalized_shape
+    ):
+        raise ValueError("正式 base latent 的 dtype 和 shape 必须完整")
+    protocol = formal_randomization_protocol_record()
+    payload = {
+        "formal_randomization_protocol": FORMAL_RANDOMIZATION_PROTOCOL,
+        "formal_randomization_protocol_digest": protocol[
+            "formal_randomization_protocol_digest"
+        ],
+        "formal_generation_seed_derivation_protocol": (
+            FORMAL_GENERATION_SEED_DERIVATION_PROTOCOL
+        ),
+        "generation_seed_formula": protocol["generation_seed_formula"],
+        "base_generation_seed_random": base_generation_seed_random,
+        "repeat_records": protocol["repeat_records"],
+        "formal_watermark_key_plan_protocol": protocol[
+            "formal_watermark_key_plan_protocol"
+        ],
+        "formal_watermark_key_plan_digest": protocol[
+            "formal_watermark_key_plan_digest"
+        ],
+        "watermark_key_records": protocol["watermark_key_records"],
+        "base_latent_generation_protocol": (
+            FORMAL_BASE_LATENT_GENERATION_PROTOCOL
+        ),
+        "base_latent_keyed_prg_version": protocol[
+            "base_latent_keyed_prg_version"
+        ],
+        "base_latent_keyed_prg_protocol_digest": protocol[
+            "base_latent_keyed_prg_protocol_digest"
+        ],
+        "base_latent_dtype": base_latent_dtype,
+        "base_latent_shape": list(normalized_shape),
+    }
+    return {
+        **payload,
+        "formal_runtime_randomization_plan_digest_random": (
+            build_stable_digest(payload)
+        ),
+    }
+
+
+def formal_randomization_sample_reference(
+    identity: Mapping[str, Any],
+    *,
+    base_latent_identity: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """提取样本级公平配对所需的最小随机身份引用."""
+
+    reference_fields = (
+        "randomization_repeat_id",
+        "generation_seed_index",
+        "generation_seed_offset",
+        "generation_seed_random",
+        "watermark_key_index",
+        "watermark_key_seed_random",
+        "watermark_key_material_digest_random",
+        "formal_randomization_protocol_digest",
+        "formal_randomization_identity_digest_random",
+    )
+    reference = {field_name: identity[field_name] for field_name in reference_fields}
+    if base_latent_identity is not None:
+        for field_name in (
+            "base_latent_content_digest_random",
+            "base_latent_identity_digest_random",
+        ):
+            reference[field_name] = base_latent_identity[field_name]
+    return reference
+
+
 def build_canonical_sd35_base_latent(
     *,
     shape: tuple[int, ...],
@@ -508,6 +685,7 @@ def formal_random_trace_fields(identity: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID",
     "FORMAL_GENERATION_SEED_OFFSETS",
+    "FORMAL_GENERATION_SEED_DERIVATION_PROTOCOL",
     "FORMAL_BASE_LATENT_GENERATION_PROTOCOL",
     "FORMAL_RANDOMIZATION_PROTOCOL",
     "FORMAL_RANDOMIZATION_REPEAT_IDENTITY_FIELDS",
@@ -519,6 +697,8 @@ __all__ = [
     "build_canonical_sd35_base_latent",
     "build_formal_randomization_repeat_coverage",
     "build_formal_randomization_identity",
+    "formal_randomization_sample_reference",
+    "formal_runtime_randomization_plan_record",
     "formal_generation_seed",
     "formal_random_trace_fields",
     "formal_randomization_protocol_record",
@@ -532,4 +712,5 @@ __all__ = [
     "require_formal_watermark_key_plan",
     "resolve_formal_randomization_repeat",
     "validate_formal_randomization_repeat_records",
+    "validate_formal_prompt_randomization_identity",
 ]

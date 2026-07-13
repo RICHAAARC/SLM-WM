@@ -921,7 +921,15 @@ z^{(0)}_{i,q}=\operatorname{Cast}_{d}\left(
 \right)\right).
 $$
 
-SLM-WM、Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark 必须消费 $z^{(0)}_{i,q}$ 的 clone, 并在方法写入前保存实际目标 dtype Tensor 的 shape、dtype、内容 SHA-256 和联合身份摘要。水印密钥整数身份由统一根密钥和 $j$ 经 SHA-256 派生；各方法可以把该身份映射到自身 ring、message、patch 或 T2SMark 编码, 但不得改变重复索引。配对统计逐字段要求两侧的重复 ID、seed/key 索引、实际生成 seed、密钥材料摘要、基础 latent 内容摘要和基础 latent 身份摘要完全相同。
+SLM-WM、Tree-Ring、Gaussian Shading、Shallow Diffuse 和 T2SMark 必须消费 $z^{(0)}_{i,q}$ 的 clone。顶层运行 manifest 保存完整9重复计划、目标 Tensor 的 shape、dtype 和生成协议；样本 observation 只保存实际目标 dtype Tensor 的内容 SHA-256、联合身份摘要及必要的 seed/key 引用。统计重建从顶层计划重新生成 $z^{(0)}_{i,q}$ 并比较样本摘要。水印密钥整数身份由统一根密钥和 $j$ 经 SHA-256 派生；各方法可以把该身份映射到自身 ring、message、patch 或 T2SMark 编码, 但不得改变重复索引。配对统计逐字段要求两侧的重复 ID、seed/key 索引、实际生成 seed、密钥材料摘要、基础 latent 内容摘要和基础 latent 身份摘要完全相同。
+
+每个攻击的随机种子按冻结域分离公式
+
+$$
+s^{\mathrm{attack}}_{i,q,a}=\operatorname{Uint63}\!\left(\operatorname{SHA256}(\text{domain},s_{i,q},a)\right)
+$$
+
+从实际生成 seed 与规范攻击 ID 派生。clean/watermarked 配对角色、主方法、全部 baseline 和全部消融必须对同一 $(i,q,a)$ 使用相同攻击 seed。攻击 producer、方法间配对、method-repeat 阈值重建和消融独立统计重建都必须复算该公式并拒绝协议或数值漂移。
 
 单次执行只选择一个登记重复, 用于支持中断恢复和 GPU 会话隔离。正式论文汇总必须覆盖全部9个重复并把 Prompt、生成 seed 与密钥重复纳入统计组织；任一单重复结果都不能替代跨种子、跨密钥证据。`probe_paper`、`pilot_paper` 与 `full_paper` 使用同一个9重复注册表, 只改变下表中的 Prompt 数量、划分数量和目标 FPR。
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from experiments.protocol.formal_randomization import (
     build_canonical_sd35_base_latent,
     build_formal_randomization_identity,
     build_formal_randomization_repeat_coverage,
+    formal_randomization_sample_reference,
     formal_randomization_protocol_record,
     formal_randomization_repeat_ids,
     formal_randomization_repeat_registry_digest,
@@ -18,17 +20,25 @@ from experiments.protocol.formal_randomization import (
     formal_watermark_key_material_from_seed,
     formal_watermark_key_plan_record,
     formal_watermark_key_seed_random,
+    formal_runtime_randomization_plan_record,
     require_formal_watermark_key_plan,
     resolve_formal_randomization_repeat,
     validate_formal_randomization_repeat_records,
+    validate_formal_prompt_randomization_identity,
 )
 from experiments.runners.image_only_dataset_workload import build_method_config
+from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.runners.image_only_dataset_runtime import (
+    validate_formal_dataset_randomization_identity,
+)
 from main.core.digest import build_stable_digest
 from paper_experiments.runners.external_baseline_method_faithful import (
+    baseline_run_identity_manifest_config,
     build_default_config as build_baseline_config,
 )
 from paper_experiments.runners.t2smark_formal_reproduction import (
     build_default_config as build_t2smark_config,
+    t2smark_run_identity_manifest_config,
 )
 
 
@@ -52,7 +62,7 @@ def test_formal_randomization_registry_is_exact_three_by_three_cross() -> None:
     assert protocol["watermark_key_repeat_count"] == 3
     assert protocol["crossed_repeat_count"] == 9
     assert protocol["formal_randomization_protocol_digest"] == (
-        "a5389d2e72e331d81a7e7d0f9614a3ce801fbf432476f18208b5e366a9b12a64"
+        "d09928b763c17d2c68fa2bc3921b59b76c3df2fc264fb364ae33bcc8bdeba0d5"
     )
     assert formal_randomization_repeat_ids() == tuple(
         f"seed_{seed_index:02d}_key_{key_index:02d}"
@@ -208,7 +218,7 @@ def test_formal_sd35_shape_base_latent_has_frozen_cpu_golden_identity() -> None:
         "389678342d98601962a78b3fd03d576a7462ab294b1a6faf9d49e3d71cd1fdb1"
     )
     assert identity["base_latent_identity_digest_random"] == (
-        "3f246e7ff53f50bba08bd93c2677bddbf2fd511ec35067a28453901adb321116"
+        "29b0091a136f90cba887445f227b9e61cc4376c8bb90ab7fb94c0bc7de1d066d"
     )
 
 
@@ -233,6 +243,152 @@ def test_formal_key_material_can_be_rebuilt_from_governed_key_seed() -> None:
             repeat=repeat,
         )["watermark_key_material_digest_random"]
     )
+
+
+def test_formal_prompt_identity_is_rebuilt_from_frozen_formula() -> None:
+    """正式入口必须从 base seed、Prompt 索引和注册 key 重建实际身份."""
+
+    repeat = resolve_formal_randomization_repeat("seed_01_key_02")
+    identity = build_formal_randomization_identity(
+        base_seed=1703,
+        prompt_index=11,
+        root_key_material="slm_wm_paper_key",
+        repeat=repeat,
+    )
+    key_material = formal_watermark_key_material(
+        "slm_wm_paper_key",
+        repeat,
+    )
+
+    rebuilt = validate_formal_prompt_randomization_identity(
+        base_generation_seed_random=1703,
+        prompt_index=11,
+        randomization_repeat_id=repeat.randomization_repeat_id,
+        generation_seed_index=repeat.generation_seed_index,
+        generation_seed_offset=repeat.generation_seed_offset,
+        watermark_key_index=repeat.watermark_key_index,
+        generation_seed_random=identity["generation_seed_random"],
+        watermark_key_seed_random=identity["watermark_key_seed_random"],
+        key_material=key_material,
+        formal_randomization_protocol_digest=identity[
+            "formal_randomization_protocol_digest"
+        ],
+    )
+
+    assert rebuilt == identity
+
+
+@pytest.mark.parametrize(
+    "drifted_field",
+    (
+        "generation_seed_random",
+        "watermark_key_seed_random",
+        "key_material",
+        "formal_randomization_protocol_digest",
+    ),
+)
+def test_formal_prompt_identity_rejects_declared_runtime_drift(
+    drifted_field: str,
+) -> None:
+    """实际 seed、key 或协议与顶层声明分叉时必须失败关闭."""
+
+    repeat = resolve_formal_randomization_repeat("seed_02_key_01")
+    identity = build_formal_randomization_identity(
+        base_seed=1703,
+        prompt_index=5,
+        root_key_material="slm_wm_paper_key",
+        repeat=repeat,
+    )
+    arguments = {
+        "base_generation_seed_random": 1703,
+        "prompt_index": 5,
+        "randomization_repeat_id": repeat.randomization_repeat_id,
+        "generation_seed_index": repeat.generation_seed_index,
+        "generation_seed_offset": repeat.generation_seed_offset,
+        "watermark_key_index": repeat.watermark_key_index,
+        "generation_seed_random": identity["generation_seed_random"],
+        "watermark_key_seed_random": identity["watermark_key_seed_random"],
+        "key_material": formal_watermark_key_material(
+            "slm_wm_paper_key",
+            repeat,
+        ),
+        "formal_randomization_protocol_digest": identity[
+            "formal_randomization_protocol_digest"
+        ],
+    }
+    if drifted_field in {"generation_seed_random", "watermark_key_seed_random"}:
+        arguments[drifted_field] = int(arguments[drifted_field]) + 1
+    else:
+        arguments[drifted_field] = "drifted"
+
+    with pytest.raises(ValueError):
+        validate_formal_prompt_randomization_identity(**arguments)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "replacement"),
+    (
+        ("seed", 999_001),
+        ("watermark_key_seed_random", 999_002),
+        ("key_material", "unregistered-key-material"),
+        ("randomization_repeat_id", "seed_00_key_01"),
+    ),
+)
+def test_formal_dataset_entry_rejects_actual_identity_drift(
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+    replacement: object,
+) -> None:
+    """正式数据集入口必须核对实际运行配置, 不能只信任顶层声明."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.setenv(
+        "SLM_WM_RANDOMIZATION_REPEAT_ID",
+        "seed_01_key_02",
+    )
+    monkeypatch.delenv("SLM_WM_KEY_MATERIAL", raising=False)
+    config = build_method_config(ROOT)
+    paper_run = build_paper_run_config(ROOT)
+
+    identity = validate_formal_dataset_randomization_identity(
+        config,
+        paper_run,
+        prompt_index=0,
+    )
+    assert identity["generation_seed_random"] == config.seed
+
+    with pytest.raises(ValueError):
+        drifted = replace(config, **{field_name: replacement})
+        validate_formal_dataset_randomization_identity(
+            drifted,
+            paper_run,
+            prompt_index=0,
+        )
+
+
+def test_runtime_plan_keeps_full_body_while_sample_reference_is_compact() -> None:
+    """顶层 manifest 保存完整计划, 样本只保留公平配对所需引用."""
+
+    repeat = resolve_formal_randomization_repeat("seed_00_key_02")
+    identity = build_formal_randomization_identity(
+        base_seed=1703,
+        prompt_index=3,
+        root_key_material="slm_wm_paper_key",
+        repeat=repeat,
+    )
+    plan = formal_runtime_randomization_plan_record(1703)
+    reference = formal_randomization_sample_reference(identity)
+
+    assert len(plan["repeat_records"]) == 9
+    assert len(plan["watermark_key_records"]) == 3
+    assert plan["base_generation_seed_random"] == 1703
+    assert "repeat_records" not in reference
+    assert reference["formal_randomization_protocol_digest"] == identity[
+        "formal_randomization_protocol_digest"
+    ]
+    assert reference["formal_randomization_identity_digest_random"] == identity[
+        "formal_randomization_identity_digest_random"
+    ]
 
 
 def test_formal_watermark_key_plan_is_preregistered_and_root_bound() -> None:
@@ -315,6 +471,13 @@ def test_main_and_all_formal_baselines_share_active_repeat(
     assert prompt_identity["watermark_key_material_digest_random"] == (
         build_stable_digest({"key_material": method.key_material})
     )
+    expected_plan = formal_runtime_randomization_plan_record(1703)
+    assert baseline_run_identity_manifest_config(baseline)[
+        "formal_randomization_plan"
+    ] == expected_plan
+    assert t2smark_run_identity_manifest_config(t2smark)[
+        "formal_randomization_plan"
+    ] == expected_plan
 
 
 def test_sd35_adapters_construct_the_shared_canonical_base_latent() -> None:

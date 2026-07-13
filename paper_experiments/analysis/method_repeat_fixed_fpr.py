@@ -19,6 +19,10 @@ from experiments.protocol.fixed_fpr_observation_audit import (
     FORMAL_THRESHOLD_SOURCE,
     audit_fixed_fpr_observation_threshold,
 )
+from experiments.protocol.attacks import (
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from experiments.protocol.formal_randomization import (
     FORMAL_BASE_LATENT_GENERATION_PROTOCOL,
     formal_randomization_protocol_record,
@@ -206,6 +210,7 @@ class MethodRepeatObservationSource:
     threshold_declaration_archive_member: str
     threshold_declaration_source_sha256: str
     declared_threshold_protocol: Mapping[str, Any]
+    main_base_latent_protocol: Mapping[str, Any] | None
     observation_rows: tuple[Mapping[str, Any], ...]
 
     def __post_init__(self) -> None:
@@ -262,6 +267,15 @@ class MethodRepeatObservationSource:
             )
         if not isinstance(self.declared_threshold_protocol, Mapping):
             raise MethodRepeatFixedFprError("阈值声明必须是 mapping")
+        if self.method_id == "slm_wm":
+            if not isinstance(self.main_base_latent_protocol, Mapping):
+                raise MethodRepeatFixedFprError(
+                    "主方法来源缺少顶层 manifest base latent 协议"
+                )
+        elif self.main_base_latent_protocol is not None:
+            raise MethodRepeatFixedFprError(
+                "baseline 来源不得声明主方法 base latent 协议正文"
+            )
         rows = tuple(dict(row) for row in self.observation_rows)
         if not rows:
             raise MethodRepeatFixedFprError("raw observation 不得为空")
@@ -272,6 +286,12 @@ class MethodRepeatObservationSource:
             dict(self.declared_threshold_protocol),
         )
         object.__setattr__(self, "observation_rows", rows)
+        if self.main_base_latent_protocol is not None:
+            object.__setattr__(
+                self,
+                "main_base_latent_protocol",
+                dict(self.main_base_latent_protocol),
+            )
 
 
 def build_prompt_split_contract(
@@ -397,6 +417,38 @@ def _validate_source_rows(
     prompt_by_id = {str(row["prompt_id"]): dict(row) for row in prompt_rows}
     identities: dict[str, dict[str, Any]] = {}
     main_base_latent_protocols: dict[str, dict[str, Any]] = {}
+    normalized_main_base_protocol: dict[str, Any] | None = None
+    if source.method_id == "slm_wm":
+        assert source.main_base_latent_protocol is not None
+        raw_base_protocol = {
+            field_name: source.main_base_latent_protocol.get(field_name)
+            for field_name in _MAIN_BASE_LATENT_PROTOCOL_FIELDS
+        }
+        raw_shape = raw_base_protocol["base_latent_shape"]
+        if (
+            set(source.main_base_latent_protocol)
+            != set(_MAIN_BASE_LATENT_PROTOCOL_FIELDS)
+            or raw_base_protocol["base_latent_generation_protocol"]
+            != FORMAL_BASE_LATENT_GENERATION_PROTOCOL
+            or raw_base_protocol["base_latent_keyed_prg_version"]
+            != base_latent_prg_version
+            or raw_base_protocol["base_latent_keyed_prg_protocol_digest"]
+            != randomization_protocol[
+                "base_latent_keyed_prg_protocol_digest"
+            ]
+            or raw_base_protocol["base_latent_dtype"]
+            != FORMAL_BASE_LATENT_DTYPE
+            or not isinstance(raw_shape, (tuple, list))
+            or any(type(value) is not int or value <= 0 for value in raw_shape)
+            or tuple(raw_shape) != FORMAL_BASE_LATENT_SHAPE
+        ):
+            raise MethodRepeatFixedFprError(
+                "顶层 manifest 的主方法 base latent 协议无效"
+            )
+        normalized_main_base_protocol = {
+            **raw_base_protocol,
+            "base_latent_shape": list(raw_shape),
+        }
     clean_rows_by_prompt: dict[str, list[dict[str, Any]]] = {
         prompt_id: [] for prompt_id in prompt_by_id
     }
@@ -475,33 +527,29 @@ def _validate_source_rows(
             "formal_randomization_identity_digest_random"
         ]:
             raise MethodRepeatFixedFprError("formal randomization identity 摘要不可重建")
-        if source.method_id == "slm_wm":
-            raw_base_protocol = {
-                field_name: row.get(field_name)
-                for field_name in _MAIN_BASE_LATENT_PROTOCOL_FIELDS
-            }
-            raw_shape = raw_base_protocol["base_latent_shape"]
-            if (
-                raw_base_protocol["base_latent_generation_protocol"]
-                != FORMAL_BASE_LATENT_GENERATION_PROTOCOL
-                or raw_base_protocol["base_latent_keyed_prg_version"]
-                != base_latent_prg_version
-                or raw_base_protocol["base_latent_dtype"]
-                != FORMAL_BASE_LATENT_DTYPE
-                or not isinstance(raw_shape, (tuple, list))
-                or any(type(value) is not int or value <= 0 for value in raw_shape)
-                or tuple(raw_shape) != FORMAL_BASE_LATENT_SHAPE
+        attack_id = str(row.get("attack_id", "")).strip()
+        if attack_id:
+            expected_attack_seed = formal_attack_seed_random(
+                int(identity["generation_seed_random"]),
+                attack_id,
+            )
+            if row.get("attack_seed_random") != expected_attack_seed:
+                raise MethodRepeatFixedFprError(
+                    "攻击 observation 的 seed 未匹配统一跨方法公式"
+                )
+            if row.get("formal_attack_seed_protocol_digest") != (
+                formal_attack_seed_protocol_record()[
+                    "formal_attack_seed_protocol_digest"
+                ]
             ):
                 raise MethodRepeatFixedFprError(
-                    "主方法 base latent 协议、PRG、dtype 或 shape 无效"
+                    "攻击 observation 的 seed 协议摘要发生漂移"
                 )
-            normalized_base_protocol = {
-                **raw_base_protocol,
-                "base_latent_shape": list(raw_shape),
-            }
+        if source.method_id == "slm_wm":
+            assert normalized_main_base_protocol is not None
             base_identity_payload = {
                 "generation_seed_random": identity["generation_seed_random"],
-                **normalized_base_protocol,
+                **normalized_main_base_protocol,
                 "formal_randomization_protocol_digest": identity[
                     "formal_randomization_protocol_digest"
                 ],
@@ -517,9 +565,9 @@ def _validate_source_rows(
                 )
             previous_base_protocol = main_base_latent_protocols.setdefault(
                 prompt_id,
-                normalized_base_protocol,
+                normalized_main_base_protocol,
             )
-            if previous_base_protocol != normalized_base_protocol:
+            if previous_base_protocol != normalized_main_base_protocol:
                 raise MethodRepeatFixedFprError(
                     "同一主方法 Prompt 的 base latent 协议发生漂移"
                 )

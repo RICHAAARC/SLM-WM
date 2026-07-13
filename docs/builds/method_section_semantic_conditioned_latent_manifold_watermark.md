@@ -690,7 +690,7 @@ SLM-WM 的科学方法终止于仅图像 $y_{\mathrm{evidence}}$ 判定。事件
 
 ### 实验随机化与方法间配对
 
-正式比较采用3个生成种子与3个水印密钥组成的9个交叉重复。对固定 Prompt 索引, SLM-WM 与全部主表 baseline 共享同一模型 revision、实际生成 seed 和基础 latent Tensor。基础 latent 由 `sha256_counter_normal_icdf_table20_float32_v2` 在 CPU float32 中查询冻结 Q20 中点逆 CDF 表规范生成, 在 CPU 转换到目标 dtype 后才搬运到执行设备；目标 Tensor 的 shape、dtype、内容 SHA-256 和联合身份摘要随 observation 持久化。水印密钥重复共享根密钥派生索引与整数身份, 各方法仍使用自身载体和检测机制。配对统计在比较检测判定之前先拒绝任何 seed、密钥重复或基础 latent 身份不一致的样本。
+正式比较采用3个生成种子与3个水印密钥组成的9个交叉重复。对固定 Prompt 索引, SLM-WM 与全部主表 baseline 共享同一模型 revision、实际生成 seed 和基础 latent Tensor。基础 latent 由 `sha256_counter_normal_icdf_table20_float32_v2` 在 CPU float32 中查询冻结 Q20 中点逆 CDF 表规范生成, 在 CPU 转换到目标 dtype 后才搬运到执行设备。顶层运行 manifest 保存完整9重复计划和基础 latent 的 shape、dtype 生成协议；observation 只保存实际 Tensor 的内容摘要、联合身份摘要及必要的 seed/key 引用。统计重建从顶层计划规范重建基础 latent, 再比较 observation 摘要。水印密钥重复共享根密钥派生索引与整数身份, 各方法仍使用自身载体和检测机制。配对统计在比较检测判定之前先拒绝任何 seed、密钥重复或基础 latent 身份不一致的样本。
 
 单次 GPU 运行只物化一个登记重复, 最终论文统计必须覆盖全部9个重复。三个论文运行层级使用同一个随机化注册表、方法参数、攻击与 baseline 协议, 只改变 Prompt 数量、划分规模和目标 FPR。因此 probe 结果只能支持 probe 的统计强度, 但其方法与公平评测定义不能比 pilot 或 full 更弱。
 

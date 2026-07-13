@@ -11,15 +11,37 @@ from experiments.ablations.runtime_rerun import (
     FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
     _formal_attack_coverage_ready,
     default_runtime_rerun_ablation_specs,
+    runtime_rerun_randomization_plan,
     runtime_rerun_ablation_contract,
 )
-from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.protocol.formal_randomization import (
+    formal_runtime_randomization_plan_record,
+)
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     _branch_risk_configs,
     semantic_watermark_runtime_config_payload,
 )
 from main.methods.semantic import build_branch_risk_fields
+
+
+@pytest.mark.quick
+def test_ablation_manifest_uses_complete_shared_randomization_plan() -> None:
+    """消融顶层 manifest 必须声明与主方法相同的9重复计划."""
+
+    plan = runtime_rerun_randomization_plan(
+        SemanticWatermarkRuntimeConfig()
+    )
+
+    assert plan == formal_runtime_randomization_plan_record(1703)
+    assert len(plan["repeat_records"]) == 9
+    assert len(plan["watermark_key_records"]) == 3
 
 
 @pytest.mark.quick
@@ -148,6 +170,10 @@ def test_four_attention_component_ablations_zero_exactly_one_weight() -> None:
 def _formal_attack_records() -> tuple[dict[str, object], ...]:
     """构造一个 test Prompt 的完整正式攻击身份记录."""
 
+    generation_seed_random = 1703
+    attack_seed_protocol_digest = formal_attack_seed_protocol_record()[
+        "formal_attack_seed_protocol_digest"
+    ]
     return tuple(
         {
             "attack_id": config.attack_id,
@@ -158,6 +184,14 @@ def _formal_attack_records() -> tuple[dict[str, object], ...]:
             "attack_parameters": config.attack_parameters,
             "attack_performed": True,
             "sample_role": sample_role,
+            "generation_seed_random": generation_seed_random,
+            "attack_seed_random": formal_attack_seed_random(
+                generation_seed_random,
+                config.attack_id,
+            ),
+            "formal_attack_seed_protocol_digest": (
+                attack_seed_protocol_digest
+            ),
         }
         for config in default_attack_configs()
         if config.enabled and config.resource_profile in {"full_main", "full_extra"}
@@ -184,3 +218,15 @@ def test_formal_ablation_attack_coverage_rejects_missing_or_duplicate_record() -
 
     assert _formal_attack_coverage_ready(records[:-1], split="test") is False
     assert _formal_attack_coverage_ready((*records, records[0]), split="test") is False
+
+
+@pytest.mark.quick
+def test_formal_ablation_attack_coverage_rejects_seed_drift() -> None:
+    """消融攻击 seed 必须由生成 seed 与攻击 ID 的统一公式重建."""
+
+    records = [dict(record) for record in _formal_attack_records()]
+    records[0]["attack_seed_random"] = int(
+        records[0]["attack_seed_random"]
+    ) + 1
+
+    assert _formal_attack_coverage_ready(tuple(records), split="test") is False

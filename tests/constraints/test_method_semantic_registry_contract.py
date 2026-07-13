@@ -734,8 +734,8 @@ def test_authority_document_freezes_risk_and_null_space_counterexamples() -> Non
     assert "规范 RGB uint8 像素摘要" in text
     assert "不能证明外部数据来源真实" in text
     assert "禁止每进入一条 detection 就归零" in text
-    assert "逐单元读取 `runtime_results.jsonl`" in text
-    assert "仅摘要结果" in text
+    assert "从数据集顶层 manifest" in text
+    assert "读取 `runtime_results.jsonl` 中的配置摘要和紧凑随机化引用" in text
     assert "全部 JSONL、图像、结果记录和单元 manifest 叶子" in text
     assert "写出单元产物后和数据集打包前" in text
     assert "残留 attention 分数、更新、关系、pair 身份" in text
@@ -751,7 +751,7 @@ def test_authority_document_freezes_risk_and_null_space_counterexamples() -> Non
     assert "多层记录的层名必须唯一" in text
     assert "复制同一内部层冒充多层" in text
     assert "单元 manifest 自身" in text
-    assert "配置或配置摘要漂移" in text
+    assert "配置摘要或随机化引用漂移" in text
     assert "重算每个内嵌 `scientific_content_binding_record`" in text
     assert "最终三图 Q/K 不能只记录 Q/K Tensor" in text
     assert "图像像素摘要、Q/K 原子摘要、公开噪声内容摘要" in text

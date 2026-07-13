@@ -33,6 +33,7 @@ from experiments.protocol.paper_run_config import (
 from experiments.protocol.formal_randomization import (
     DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
     build_formal_randomization_identity,
+    formal_runtime_randomization_plan_record,
     formal_watermark_key_seed_random,
     require_formal_watermark_key_plan,
     resolve_formal_randomization_repeat,
@@ -160,6 +161,21 @@ class T2SMarkFormalArchiveRecord:
         """转换为 JSON 兼容字典。"""
 
         return asdict(self)
+
+
+def t2smark_run_identity_manifest_config(
+    config: T2SMarkFormalReproductionConfig,
+) -> dict[str, Any]:
+    """构造 T2SMark 顶层 manifest 的完整随机身份配置."""
+
+    return {
+        **asdict(config),
+        "formal_randomization_plan": (
+            formal_runtime_randomization_plan_record(
+                config.seed - config.generation_seed_offset,
+            )
+        ),
+    }
 
 
 def stable_json_text(value: Any) -> str:
@@ -1390,7 +1406,7 @@ def write_t2smark_formal_reproduction_outputs(
         artifact_type="local_manifest",
         input_paths=(relative_or_absolute(root_path / config.prompt_file, root_path),),
         output_paths=tuple(output_paths_for_manifest + [relative_or_absolute(paths["manifest"], root_path)]),
-        config=asdict(config),
+        config=t2smark_run_identity_manifest_config(config),
         code_version=formal_execution_run_lock["formal_execution_commit"],
         rebuild_command="调用 paper_experiments.runners.t2smark_formal_reproduction",
         metadata={

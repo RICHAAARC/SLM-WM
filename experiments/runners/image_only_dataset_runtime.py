@@ -27,6 +27,10 @@ from experiments.protocol.method_runtime_config import (
     FORMAL_METHOD_PACKAGE_ROOT,
     load_formal_method_runtime_config,
 )
+from experiments.protocol.formal_randomization import (
+    formal_runtime_randomization_plan_record,
+    validate_formal_prompt_randomization_identity,
+)
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from experiments.protocol.attacks import default_attack_configs
 from experiments.runtime import repository_environment
@@ -123,6 +127,47 @@ _FORMAL_ATTENTION_ALIGNMENT_GATE = attention_alignment_gate_record(
 _FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
     FORMAL_METHOD_PACKAGE_ROOT
 )
+
+
+def validate_formal_dataset_randomization_identity(
+    config: SemanticWatermarkRuntimeConfig,
+    paper_run: PaperRunConfig,
+    *,
+    prompt_index: int,
+) -> dict[str, Any]:
+    """校验正式主方法或消融样本是否使用当前 repeat 的冻结身份公式."""
+
+    declared_repeat = {
+        "randomization_repeat_id": paper_run.randomization_repeat_id,
+        "generation_seed_index": paper_run.generation_seed_index,
+        "generation_seed_offset": paper_run.generation_seed_offset,
+        "watermark_key_index": paper_run.watermark_key_index,
+        "formal_randomization_protocol_digest": (
+            paper_run.formal_randomization_protocol_digest
+        ),
+    }
+    actual_repeat = {
+        field_name: getattr(config, field_name)
+        for field_name in declared_repeat
+    }
+    if actual_repeat != declared_repeat:
+        raise ValueError("正式运行配置未匹配当前 PaperRun repeat 身份")
+    return validate_formal_prompt_randomization_identity(
+        base_generation_seed_random=_FORMAL_METHOD_CONFIG.seed,
+        prompt_index=prompt_index,
+        randomization_repeat_id=config.randomization_repeat_id,
+        generation_seed_index=config.generation_seed_index,
+        generation_seed_offset=config.generation_seed_offset,
+        watermark_key_index=config.watermark_key_index,
+        generation_seed_random=config.seed,
+        watermark_key_seed_random=config.watermark_key_seed_random,
+        key_material=config.key_material,
+        formal_randomization_protocol_digest=(
+            config.formal_randomization_protocol_digest
+        ),
+    )
+
+
 _FORMAL_LF_CARRIER_PROTOCOL = (
     _FORMAL_METHOD_CONFIG.low_frequency_carrier_config.to_record()
 )
@@ -2207,6 +2252,11 @@ def run_image_only_dataset_runtime(
         repository_environment.require_published_formal_execution_lock(root_path)
     )
     resolved_paper_run = paper_run or build_paper_run_config(root_path)
+    validate_formal_dataset_randomization_identity(
+        base_method_config,
+        resolved_paper_run,
+        prompt_index=0,
+    )
     prompt_path = (root_path / resolved_paper_run.prompt_file).resolve()
     prompt_records = apply_split_assignments(
         build_prompt_records(
@@ -2235,6 +2285,7 @@ def run_image_only_dataset_runtime(
         ]
     }
     runtime_results = []
+    scientific_unit_configs: list[dict[str, Any]] = []
     detection_records: list[dict[str, Any]] = []
     scientific_update_records: list[dict[str, Any]] = []
     completed_prompt_ids: list[str] = []
@@ -2291,6 +2342,11 @@ def run_image_only_dataset_runtime(
                 f"outputs/image_only_dataset_runtime/{resolved_paper_run.run_name}/runs"
             ),
         )
+        validate_formal_dataset_randomization_identity(
+            run_config,
+            resolved_paper_run,
+            prompt_index=prompt_record.prompt_index,
+        )
         result = load_completed_semantic_watermark_runtime_result(run_config, root=root_path)
         generated_now = False
         if result is not None:
@@ -2313,6 +2369,9 @@ def run_image_only_dataset_runtime(
             expected_config=run_config,
         )
         runtime_results.append(result_payload)
+        scientific_unit_configs.append(
+            semantic_watermark_runtime_config_payload(run_config)
+        )
         detection_records.extend(_read_jsonl(root_path / result.detection_record_path))
         scientific_update_records.extend(_read_jsonl(root_path / result.update_record_path))
         completed_prompt_ids.append(prompt_record.prompt_id)
@@ -2706,7 +2765,12 @@ def run_image_only_dataset_runtime(
     )
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     scientific_unit_output_paths: list[str] = []
-    for result in runtime_results:
+    scientific_unit_identity_records: list[dict[str, Any]] = []
+    for result, full_unit_config in zip(
+        runtime_results,
+        scientific_unit_configs,
+        strict=True,
+    ):
         unit_manifest_path = root_path / str(result["manifest_path"])
         unit_manifest = json.loads(
             unit_manifest_path.read_text(encoding="utf-8-sig")
@@ -2716,6 +2780,27 @@ def run_image_only_dataset_runtime(
             raise RuntimeError("单 Prompt 方法产物清单缺少科学内容叶子")
         scientific_unit_output_paths.extend(
             str(path) for path in unit_output_paths
+        )
+        unit_manifest_config = unit_manifest.get("config")
+        randomization_reference = result.get("metadata", {}).get(
+            "formal_randomization_reference"
+        )
+        if not isinstance(unit_manifest_config, dict) or not isinstance(
+            randomization_reference,
+            dict,
+        ) or unit_manifest_config != {
+            "scientific_unit_config_digest": build_stable_digest(
+                full_unit_config
+            ),
+            "formal_randomization_reference": randomization_reference,
+        }:
+            raise RuntimeError("单 Prompt manifest 缺少正式配置或随机身份引用")
+        scientific_unit_identity_records.append(
+            {
+                "run_id": result["run_id"],
+                "scientific_unit_config": full_unit_config,
+                "formal_randomization_reference": randomization_reference,
+            }
         )
     if len(scientific_unit_output_paths) != len(
         set(scientific_unit_output_paths)
@@ -2753,6 +2838,23 @@ def run_image_only_dataset_runtime(
         ),
         config={
             "paper_run": resolved_paper_run.to_dict(),
+            "formal_randomization_plan": (
+                formal_runtime_randomization_plan_record(
+                    _FORMAL_METHOD_CONFIG.seed,
+                    base_latent_dtype=(
+                        f"torch.{base_method_config.torch_dtype}"
+                    ),
+                    base_latent_shape=(
+                        1,
+                        16,
+                        base_method_config.height // 8,
+                        base_method_config.width // 8,
+                    ),
+                )
+            ),
+            "scientific_unit_identity_records": (
+                scientific_unit_identity_records
+            ),
             # manifest 现在保存完整配置, 因此必须复用运行时的密钥脱敏配置。
             # 该结构保留全部可复现实验参数, 但只记录 key material 的稳定摘要。
             "method_config": semantic_watermark_runtime_config_payload(
@@ -2882,8 +2984,45 @@ def package_image_only_dataset_runtime(
         raise RuntimeError("数据集 manifest 不得包含重复输出路径")
     scientific_unit_output_paths: list[str] = []
     packaged_runtime_results = _read_jsonl(source_dir / "runtime_results.jsonl")
+    manifest_config = manifest.get("config")
+    unit_identity_records = (
+        manifest_config.get("scientific_unit_identity_records")
+        if isinstance(manifest_config, dict)
+        else None
+    )
+    if not isinstance(unit_identity_records, list):
+        raise RuntimeError("数据集顶层 manifest 缺少逐单元完整身份正文")
+    unit_identity_by_run_id = {
+        str(record.get("run_id", "")): record
+        for record in unit_identity_records
+        if isinstance(record, dict)
+    }
+    if (
+        len(unit_identity_by_run_id) != len(unit_identity_records)
+        or len(unit_identity_by_run_id) != len(packaged_runtime_results)
+    ):
+        raise RuntimeError("数据集顶层 manifest 的逐单元身份集合无效")
     for result in packaged_runtime_results:
-        validate_semantic_watermark_runtime_result_provenance(result)
+        unit_identity = unit_identity_by_run_id.get(str(result.get("run_id", "")))
+        unit_config = (
+            unit_identity.get("scientific_unit_config")
+            if isinstance(unit_identity, dict)
+            else None
+        )
+        randomization_reference = (
+            unit_identity.get("formal_randomization_reference")
+            if isinstance(unit_identity, dict)
+            else None
+        )
+        if not isinstance(unit_config, dict) or not isinstance(
+            randomization_reference,
+            dict,
+        ):
+            raise RuntimeError("顶层 manifest 逐单元配置或随机身份无效")
+        validate_semantic_watermark_runtime_result_provenance(
+            result,
+            unit_config=unit_config,
+        )
         unit_manifest_relative = Path(
             str(result.get("manifest_path", ""))
         )
@@ -2916,14 +3055,18 @@ def package_image_only_dataset_runtime(
         ):
             raise RuntimeError("单 Prompt manifest 的科学叶子路径集合无效")
         scientific_unit_output_paths.extend(unit_output_paths)
-        unit_config = result.get("metadata", {}).get(
-            "scientific_unit_config"
-        )
+        expected_unit_manifest_config = {
+            "scientific_unit_config_digest": build_stable_digest(
+                unit_config
+            ),
+            "formal_randomization_reference": randomization_reference,
+        }
         if (
-            not isinstance(unit_config, dict)
-            or unit_manifest.get("config") != unit_config
+            result.get("metadata", {}).get("formal_randomization_reference")
+            != randomization_reference
+            or unit_manifest.get("config") != expected_unit_manifest_config
             or unit_manifest.get("config_digest")
-            != build_stable_digest(unit_config)
+            != build_stable_digest(expected_unit_manifest_config)
             or not (
             _carrier_only_counterfactual_artifact_binding_ready(
                 result,
@@ -2955,7 +3098,9 @@ def package_image_only_dataset_runtime(
         )
     )[: paper_run.sample_count]
     packaged_unit_configs = [
-        result["metadata"]["scientific_unit_config"]
+        unit_identity_by_run_id[str(result["run_id"])][
+            "scientific_unit_config"
+        ]
         for result in packaged_runtime_results
     ]
     packaged_unit_config_contract_ready = (

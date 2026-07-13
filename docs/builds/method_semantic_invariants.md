@@ -357,7 +357,7 @@ domain_fields = {
 
 `public_detection_noise_prg_protocol` 必须等于 `sha256_counter_normal_icdf_table20_float32_v2`。上述 `key_material`、`domain_fields` 和 `shape` 进入本节定义的完整 stable JSON domain payload, 经 SHA-256、从0开始的16字节大端计数器、MSB-first 连续20位索引提取和冻结 Q20 表查询得到 CPU float32 Tensor；实际 latent dtype 转换在 CPU 完成, 随后才搬运到执行设备。该公开 domain 不含水印密钥、Prompt、生成 seed 或生成轨迹。
 
-CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `2b7ab51c952abf74d145fd23694790b9de71fc6712b319fb10b3f46c9db0a0fe`, 正式随机化协议摘要固定为 `a5389d2e72e331d81a7e7d0f9614a3ce801fbf432476f18208b5e366a9b12a64`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
+CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `2b7ab51c952abf74d145fd23694790b9de71fc6712b319fb10b3f46c9db0a0fe`, 正式随机化协议摘要固定为 `d09928b763c17d2c68fa2bc3921b59b76c3df2fc264fb364ae33bcc8bdeba0d5`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
 
 ## `spatial_low_pass_and_amplitude_tail_carriers`
 
@@ -792,9 +792,9 @@ $$
 
 每个科学单元 manifest 的 `output_paths` 必须是非空且无重复的相对路径集合, 并必须包含该单元 manifest 自身。所有单元路径集合必须两两互斥。数据集 manifest 的 `output_paths` 自身也不得重复, 且必须是全部单元路径并集的超集, 从而纳入每个单元声明的全部 JSONL、图像、结果记录和单元 manifest 叶子。省略部分单元叶子、单元内重复、跨单元重复或只声明数据集汇总文件均必须拒绝。
 
-`package_image_only_dataset_runtime` 在打包前必须逐单元读取 `runtime_results.jsonl` 中的持久化脱敏 `scientific_unit_config`, 再读取该单元 manifest 和其声明的叶子文件。单元 manifest 的 `config` 必须与结果内 `scientific_unit_config` 完全相等, `config_digest` 必须等于该脱敏配置的稳定摘要；随后才调用与完成结果加载器相同的重建路径。缺少完整 `scientific_content_binding_record` 的仅摘要结果、缺失单元配置或 manifest、配置或配置摘要漂移、叶子内容篡改、数据集 manifest 漏报单元叶子时都必须拒绝打包。打包器不得只检查摘要格式或重新签署被篡改的顶层摘要。
+`package_image_only_dataset_runtime` 在打包前必须从数据集顶层 manifest 的 `scientific_unit_identity_records` 读取每个科学单元的完整脱敏配置, 再读取 `runtime_results.jsonl` 中的配置摘要和紧凑随机化引用、该单元 manifest 及其声明的叶子文件。打包器以 `run_id` 连接顶层配置与样本结果, 独立重算配置摘要、运行身份和来源绑定, 随后才调用与完成结果加载器相同的叶子重建路径。缺少完整 `scientific_content_binding_record`、缺失顶层单元配置或 manifest、配置摘要或随机化引用漂移、叶子内容损坏、数据集 manifest 漏报单元叶子时都必须拒绝打包。
 
-attention geometry 开启时, 写出单元产物后和数据集打包前都必须调用 `_carrier_only_counterfactual_artifact_binding_ready`。同一个 validator 必须同时接受进程内完整 `SemanticWatermarkRuntimeConfig` 和结果内持久化脱敏 `scientific_unit_config`。它从 carrier-only 更新 JSONL、图像、保持记录、Q/K 记录与单元 manifest 重建反事实身份；任一 carrier-only 原子残留 attention 分数、更新、关系、pair 身份、Q/K 内容或 attention Null Space 字段时必须拒绝。仅比较 carrier-only 顶层摘要或只在写出时检查一次均不满足该门禁。
+attention geometry 开启时, 写出单元产物后和数据集打包前都必须调用 `_carrier_only_counterfactual_artifact_binding_ready`。同一个 validator 必须分别接受进程内完整 `SemanticWatermarkRuntimeConfig` 与由数据集顶层 manifest 按 `run_id` 取得的完整脱敏单元配置。它从 carrier-only 更新 JSONL、图像、保持记录、Q/K 记录与单元 manifest 重建反事实身份；任一 carrier-only 原子残留 attention 分数、更新、关系、pair 身份、Q/K 内容或 attention Null Space 字段时必须拒绝。仅比较 carrier-only 顶层摘要或只在写出时检查一次均不满足该门禁。
 
 该门禁必须同时进入科学算子门禁、summary、manifest、打包前逐单元重建和完成包核验, 不能用部分样本摘要或只含数据集汇总文件的 manifest 替代完整覆盖。
 

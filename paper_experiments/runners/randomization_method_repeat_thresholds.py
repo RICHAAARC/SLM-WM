@@ -25,6 +25,7 @@ from experiments.protocol.formal_randomization import (
     formal_generation_seed,
     formal_randomization_protocol_record,
     formal_randomization_repeat_ids,
+    formal_runtime_randomization_plan_record,
     formal_watermark_key_plan_record,
     formal_watermark_key_material_from_seed,
     resolve_formal_randomization_repeat,
@@ -95,6 +96,12 @@ _METHOD_SOURCE_ROLES = {
         "t2smark_baseline_observation",
         "t2smark_formal_import_candidate_record",
     ),
+}
+_BASELINE_RUN_MANIFEST_SOURCE_ROLES = {
+    "tree_ring": "tree_ring_baseline_run_manifest",
+    "gaussian_shading": "gaussian_shading_baseline_run_manifest",
+    "shallow_diffuse": "shallow_diffuse_baseline_run_manifest",
+    "t2smark": "t2smark_baseline_run_manifest",
 }
 _SOURCE_LINEAGE_FIELDS = (
     "randomization_scope",
@@ -390,6 +397,43 @@ def _runtime_prompt_rows(
                 "runtime 成员摘要与工作区登记映射发生漂移"
             )
         _require_source_aggregate_identity(source, provenance)
+        manifest_source = workspace.find_source(
+            randomization_repeat_id=repeat_id,
+            package_family="image_only_dataset_runtime",
+            record_role="semantic_watermark_dataset_manifest",
+        )
+        _require_source_aggregate_identity(manifest_source, provenance)
+        expected_manifest_member = (
+            f"outputs/image_only_dataset_runtime/{paper_run_name}/"
+            "manifest.local.json"
+        )
+        if manifest_source.record_member != expected_manifest_member:
+            raise RandomizationMethodRepeatThresholdError(
+                "runtime 顶层 manifest 成员路径不规范"
+            )
+        dataset_manifest = workspace.read_object(manifest_source)
+        dataset_manifest_config = dataset_manifest.get("config")
+        unit_identity_records = (
+            dataset_manifest_config.get("scientific_unit_identity_records")
+            if isinstance(dataset_manifest_config, Mapping)
+            else None
+        )
+        if not isinstance(unit_identity_records, list):
+            raise RandomizationMethodRepeatThresholdError(
+                "runtime 顶层 manifest 缺少逐单元完整身份正文"
+            )
+        unit_identity_by_run_id = {
+            str(record.get("run_id", "")): record
+            for record in unit_identity_records
+            if isinstance(record, Mapping)
+        }
+        if (
+            len(unit_identity_by_run_id) != expected_count
+            or len(unit_identity_by_run_id) != len(unit_identity_records)
+        ):
+            raise RandomizationMethodRepeatThresholdError(
+                "runtime 顶层 manifest 的逐单元身份集合无效"
+            )
         expected_member = (
             f"outputs/image_only_dataset_runtime/{paper_run_name}/"
             "runtime_results.jsonl"
@@ -407,9 +451,34 @@ def _runtime_prompt_rows(
         configs: list[Mapping[str, Any]] = []
         prompt_texts: list[str] = []
         for runtime_row in runtime_rows:
+            unit_identity = unit_identity_by_run_id.get(
+                str(runtime_row.get("run_id", ""))
+            )
+            if unit_identity is None:
+                raise RandomizationMethodRepeatThresholdError(
+                    "runtime raw record 的 run_id、配置或科学来源不可重建"
+                )
+            config = (
+                unit_identity.get("scientific_unit_config")
+                if isinstance(unit_identity, Mapping)
+                else None
+            )
+            randomization_reference = (
+                unit_identity.get("formal_randomization_reference")
+                if isinstance(unit_identity, Mapping)
+                else None
+            )
+            if not isinstance(config, Mapping) or not isinstance(
+                randomization_reference,
+                Mapping,
+            ):
+                raise RandomizationMethodRepeatThresholdError(
+                    "runtime 顶层 manifest 逐单元身份正文无效"
+                )
             try:
                 validate_semantic_watermark_runtime_result_provenance(
-                    runtime_row
+                    runtime_row,
+                    unit_config=config,
                 )
             except (TypeError, ValueError) as exc:
                 raise RandomizationMethodRepeatThresholdError(
@@ -420,10 +489,11 @@ def _runtime_prompt_rows(
                 raise RandomizationMethodRepeatThresholdError(
                     "runtime 记录缺少科学单元 metadata"
                 )
-            config = metadata.get("scientific_unit_config")
-            if not isinstance(config, Mapping):
+            if metadata.get("formal_randomization_reference") != dict(
+                randomization_reference
+            ):
                 raise RandomizationMethodRepeatThresholdError(
-                    "runtime 记录缺少科学单元配置"
+                    "runtime 记录未引用顶层 manifest 随机身份"
                 )
             _validate_formal_runtime_method_config(
                 config,
@@ -692,6 +762,64 @@ def _require_method_source_pair(
         )
 
 
+def _require_baseline_run_manifest(
+    workspace: RandomizationAggregateRecordWorkspace,
+    provenance: RandomizationAggregateProvenance,
+    *,
+    method_id: str,
+    repeat_id: str,
+    observation_source: RandomizationAggregateRecordSource,
+    expected_plan: Mapping[str, Any],
+) -> None:
+    """核验 baseline 顶层 manifest 的完整计划与活动 repeat 身份."""
+
+    manifest_source = workspace.find_source(
+        randomization_repeat_id=repeat_id,
+        package_family=METHOD_LEAF_PACKAGE_FAMILY[method_id],
+        record_role=_BASELINE_RUN_MANIFEST_SOURCE_ROLES[method_id],
+    )
+    _require_source_aggregate_identity(manifest_source, provenance)
+    if any(
+        getattr(manifest_source, field_name)
+        != getattr(observation_source, field_name)
+        for field_name in _SOURCE_LINEAGE_FIELDS
+    ):
+        raise RandomizationMethodRepeatThresholdError(
+            "baseline 顶层 manifest 未绑定 observation 所在 leaf"
+        )
+    manifest = workspace.read_object(manifest_source)
+    config = manifest.get("config")
+    repeat = resolve_formal_randomization_repeat(repeat_id)
+    key_record = formal_watermark_key_plan_record()[
+        "watermark_key_records"
+    ][repeat.watermark_key_index]
+    expected_artifact_id = (
+        "t2smark_formal_reproduction_manifest"
+        if method_id == "t2smark"
+        else f"{method_id}_method_faithful_manifest"
+    )
+    if (
+        manifest.get("artifact_id") != expected_artifact_id
+        or not isinstance(config, Mapping)
+        or config.get("formal_randomization_plan") != dict(expected_plan)
+        or config.get("randomization_repeat_id") != repeat_id
+        or config.get("generation_seed_index")
+        != repeat.generation_seed_index
+        or config.get("generation_seed_offset")
+        != repeat.generation_seed_offset
+        or config.get("watermark_key_index") != repeat.watermark_key_index
+        or config.get("seed")
+        != _FROZEN_BASE_GENERATION_SEED + repeat.generation_seed_offset
+        or config.get("watermark_key_seed_random")
+        != key_record["watermark_key_seed_random"]
+        or config.get("formal_randomization_protocol_digest")
+        != expected_plan["formal_randomization_protocol_digest"]
+    ):
+        raise RandomizationMethodRepeatThresholdError(
+            "baseline 顶层 manifest 未绑定完整正式随机化计划"
+        )
+
+
 def _normalize_transfer_threshold(
     declaration: Mapping[str, Any],
     *,
@@ -884,6 +1012,28 @@ def _verify_canonical_base_latent_identities(
     for repeat_id in formal_randomization_repeat_ids():
         expected_identities = runtime_randomization_identity_map[repeat_id]
         main_source = source_by_key[(repeat_id, "slm_wm")]
+        if main_source.main_base_latent_protocol is None:
+            raise RandomizationMethodRepeatThresholdError(
+                "主方法来源缺少顶层 manifest base latent 协议"
+            )
+        raw_shape = main_source.main_base_latent_protocol.get(
+            "base_latent_shape"
+        )
+        dtype_text = str(
+            main_source.main_base_latent_protocol.get(
+                "base_latent_dtype",
+                "",
+            )
+        )
+        if (
+            not isinstance(raw_shape, list | tuple)
+            or not raw_shape
+            or any(type(value) is not int or value <= 0 for value in raw_shape)
+        ):
+            raise RandomizationMethodRepeatThresholdError(
+                "顶层 manifest 的 latent shape 无效"
+            )
+        shape = tuple(int(value) for value in raw_shape)
         clean_rows = tuple(
             row
             for row in main_source.observation_rows
@@ -908,18 +1058,10 @@ def _verify_canonical_base_latent_identities(
                 expected_identity["generation_seed_random"]
             )
             row = clean_by_prompt[prompt_id][0]
-            raw_shape = row.get("base_latent_shape")
-            dtype_text = str(row.get("base_latent_dtype", ""))
-            if (
-                not isinstance(raw_shape, list | tuple)
-                or not raw_shape
-                or any(type(value) is not int or value <= 0 for value in raw_shape)
-                or row.get("generation_seed_random") != expected_seed
-            ):
+            if row.get("generation_seed_random") != expected_seed:
                 raise RandomizationMethodRepeatThresholdError(
-                    "主方法 clean negative 的 latent shape 或生成 seed 无效"
+                    "主方法 clean negative 的生成 seed 无效"
                 )
-            shape = tuple(int(value) for value in raw_shape)
             cache_key = (
                 expected_seed,
                 expected_model_id,
@@ -956,6 +1098,13 @@ def _verify_canonical_base_latent_identities(
             if any(
                 row.get(field_name) != expected_value
                 for field_name, expected_value in identity.items()
+                if field_name
+                in {
+                    "generation_seed_random",
+                    "formal_randomization_protocol_digest",
+                    "base_latent_content_digest_random",
+                    "base_latent_identity_digest_random",
+                }
             ):
                 raise RandomizationMethodRepeatThresholdError(
                     "主方法 base latent 身份无法从规范高斯字节流重建"
@@ -1031,6 +1180,38 @@ def _method_repeat_sources(
             "聚合工作区未提供精确45个 observation 与45个阈值声明"
         )
     sources: list[MethodRepeatObservationSource] = []
+    main_base_latent_protocol_by_repeat: dict[str, dict[str, Any]] = {}
+    expected_plan = formal_runtime_randomization_plan_record(
+        _FROZEN_BASE_GENERATION_SEED
+    )
+    for repeat_id in formal_randomization_repeat_ids():
+        manifest_source = workspace.find_source(
+            randomization_repeat_id=repeat_id,
+            package_family="image_only_dataset_runtime",
+            record_role="semantic_watermark_dataset_manifest",
+        )
+        _require_source_aggregate_identity(manifest_source, provenance)
+        manifest = workspace.read_object(manifest_source)
+        manifest_config = manifest.get("config")
+        plan = (
+            manifest_config.get("formal_randomization_plan")
+            if isinstance(manifest_config, Mapping)
+            else None
+        )
+        if plan != expected_plan:
+            raise RandomizationMethodRepeatThresholdError(
+                "主方法顶层 manifest 的正式随机化计划发生漂移"
+            )
+        main_base_latent_protocol_by_repeat[repeat_id] = {
+            field_name: plan[field_name]
+            for field_name in (
+                "base_latent_generation_protocol",
+                "base_latent_keyed_prg_version",
+                "base_latent_keyed_prg_protocol_digest",
+                "base_latent_dtype",
+                "base_latent_shape",
+            )
+        }
     for repeat_id in formal_randomization_repeat_ids():
         for method_id in FIXED_FPR_THRESHOLD_METHOD_IDS:
             package_family = METHOD_LEAF_PACKAGE_FAMILY[method_id]
@@ -1052,6 +1233,15 @@ def _method_repeat_sources(
                 declaration_source,
                 provenance,
             )
+            if method_id != "slm_wm":
+                _require_baseline_run_manifest(
+                    workspace,
+                    provenance,
+                    method_id=method_id,
+                    repeat_id=repeat_id,
+                    observation_source=observation_source,
+                    expected_plan=expected_plan,
+                )
             observation_rows = tuple(
                 workspace.iter_records(observation_source)
             )
@@ -1160,6 +1350,11 @@ def _method_repeat_sources(
                         declaration_source.record_sha256
                     ),
                     declared_threshold_protocol=declared_protocol,
+                    main_base_latent_protocol=(
+                        main_base_latent_protocol_by_repeat[repeat_id]
+                        if method_id == "slm_wm"
+                        else None
+                    ),
                     observation_rows=observation_rows,
                 )
             )

@@ -10,7 +10,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from experiments.protocol.attacks import default_attack_configs
+from experiments.protocol.attacks import (
+    default_attack_configs,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from experiments.protocol.pilot_paper_fixed_fpr import (
     build_pilot_paper_attack_matrix_rows,
 )
@@ -113,6 +117,15 @@ def observation_rows(
                 "attack_name": attack["attack_name"],
                 "resource_profile": attack["resource_profile"],
                 "attack_config_digest": attack["attack_config_digest"],
+                "attack_seed_random": formal_attack_seed_random(
+                    1703 + prompt_index,
+                    attack["attack_id"],
+                ),
+                "formal_attack_seed_protocol_digest": (
+                    formal_attack_seed_protocol_record()[
+                        "formal_attack_seed_protocol_digest"
+                    ]
+                ),
             }
             if baseline_id:
                 row.update(
@@ -332,6 +345,28 @@ def test_paired_outcomes_reject_different_base_latent_identity() -> None:
         PairedSuperiorityError,
         match="相同的种子、密钥重复和基础 latent",
     ):
+        build_paired_outcomes(
+            proposed,
+            baseline,
+            baseline_id="tree_ring",
+            proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
+                "tree_ring"
+            ],
+            attack_registry_rows=UNIT_ATTACK_REGISTRY,
+        )
+
+
+def test_paired_outcomes_reject_attack_seed_drift() -> None:
+    """主方法与 baseline 任一方攻击 seed 漂移时不得进入配对统计."""
+
+    proposed = observation_rows()
+    baseline = observation_rows(baseline_id="tree_ring")
+    baseline[0]["attack_seed_random"] = int(
+        baseline[0]["attack_seed_random"]
+    ) + 1
+
+    with pytest.raises(PairedSuperiorityError, match="attack_seed_random"):
         build_paired_outcomes(
             proposed,
             baseline,

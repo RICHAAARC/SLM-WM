@@ -10,6 +10,9 @@ from experiments.protocol.fixed_fpr_observation_audit import (
     audit_fixed_fpr_observation_threshold,
     conformal_threshold_from_clean_negative_scores,
 )
+from experiments.protocol.attacks import (
+    formal_attack_seed_protocol_record,
+)
 from experiments.protocol.formal_randomization import (
     formal_randomization_protocol_record,
     formal_randomization_repeats,
@@ -215,7 +218,7 @@ def _source(
             **_identity(
                 repeat_index,
                 int(prompt["prompt_index"]),
-                include_base_protocol=method_id == "slm_wm",
+                include_base_protocol=False,
             ),
             **(
                 {}
@@ -319,6 +322,24 @@ def _source(
             {"threshold_declaration": identity}
         ),
         declared_threshold_protocol=declaration,
+        main_base_latent_protocol=(
+            {
+                field_name: _identity(
+                    repeat_index,
+                    0,
+                    include_base_protocol=True,
+                )[field_name]
+                for field_name in (
+                    "base_latent_generation_protocol",
+                    "base_latent_keyed_prg_version",
+                    "base_latent_keyed_prg_protocol_digest",
+                    "base_latent_dtype",
+                    "base_latent_shape",
+                )
+            }
+            if method_id == "slm_wm"
+            else None
+        ),
         observation_rows=observation_rows,
         **_member_paths(method_id, repeat.randomization_repeat_id),
     )
@@ -488,6 +509,37 @@ def test_recomputation_rejects_baseline_prompt_text_drift(
     drifted = replace(source, observation_rows=tuple(rows))
 
     with pytest.raises(MethodRepeatFixedFprError, match="Prompt 文本"):
+        _run(
+            (
+                *exact_sources[:source_index],
+                drifted,
+                *exact_sources[source_index + 1 :],
+            )
+        )
+
+
+def test_recomputation_rejects_attacked_observation_seed_drift(
+    exact_sources: tuple[MethodRepeatObservationSource, ...],
+) -> None:
+    """任一方法的攻击 seed 偏离统一公式时不得进入阈值统计."""
+
+    source_index = 1
+    source = exact_sources[source_index]
+    rows = [dict(row) for row in source.observation_rows]
+    rows[0].update(
+        {
+            "attack_id": "gaussian_noise_std_0_01",
+            "attack_seed_random": 1,
+            "formal_attack_seed_protocol_digest": (
+                formal_attack_seed_protocol_record()[
+                    "formal_attack_seed_protocol_digest"
+                ]
+            ),
+        }
+    )
+    drifted = replace(source, observation_rows=tuple(rows))
+
+    with pytest.raises(MethodRepeatFixedFprError, match="统一跨方法公式"):
         _run(
             (
                 *exact_sources[:source_index],

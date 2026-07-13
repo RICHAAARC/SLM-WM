@@ -431,7 +431,11 @@ def test_workspace_revalidates_and_inspects_every_leaf_before_exposing_records(
         assert len(workspace.quality_sources) == 27
         assert len(workspace.quality_feature_sources) == 9
         assert len(workspace.reference_sources) == 3
-        assert len(workspace.record_sources) == 174
+        assert len(workspace.record_sources) == 219
+        assert sum(
+            source.record_group == "run_manifest"
+            for source in workspace.record_sources
+        ) == 45
         first_prompt_source = workspace.prompt_source_sources[0]
         assert workspace.read_bytes(first_prompt_source)
         assert all(

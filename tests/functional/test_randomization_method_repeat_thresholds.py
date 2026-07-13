@@ -21,6 +21,7 @@ from experiments.protocol.formal_randomization import (
     formal_randomization_protocol_record,
     formal_randomization_repeat_ids,
     formal_randomization_repeats,
+    formal_runtime_randomization_plan_record,
     formal_watermark_key_material_from_seed,
     formal_watermark_key_plan_record,
     resolve_formal_randomization_repeat,
@@ -221,6 +222,20 @@ def _method_roles(method_id: str) -> tuple[str, str]:
     return bridge_module._METHOD_SOURCE_ROLES[method_id]
 
 
+def _baseline_manifest_member(method_id: str) -> str:
+    """返回 baseline 顶层运行 manifest 的规范成员路径."""
+
+    if method_id == "t2smark":
+        return (
+            f"outputs/t2smark_formal_reproduction/{PAPER_RUN_NAME}/"
+            "t2smark_formal_reproduction_manifest.local.json"
+        )
+    return (
+        f"outputs/external_baseline_method_faithful/{PAPER_RUN_NAME}/"
+        f"run_records/{method_id}/{method_id}_manifest.local.json"
+    )
+
+
 class _MemoryAggregateWorkspace:
     """在内存中模拟已经独立验证的工作区读取接口."""
 
@@ -400,6 +415,31 @@ class _MemoryAggregateWorkspace:
         ]
         for repeat in formal_randomization_repeats():
             repeat_id = repeat.randomization_repeat_id
+            manifest_role = "semantic_watermark_dataset_manifest"
+            manifest_source = self._source(
+                repeat_id=repeat_id,
+                package_family="image_only_dataset_runtime",
+                record_role=manifest_role,
+                record_member=(
+                    f"outputs/image_only_dataset_runtime/{PAPER_RUN_NAME}/"
+                    "manifest.local.json"
+                ),
+                record_format=RECORD_FORMAT_JSON_OBJECT,
+            )
+            manifest_key = (
+                repeat_id,
+                "image_only_dataset_runtime",
+                manifest_role,
+            )
+            self._sources[manifest_key] = manifest_source
+            self._objects[manifest_key] = {
+                "config": {
+                    "formal_randomization_plan": (
+                        formal_runtime_randomization_plan_record(BASE_SEED)
+                    ),
+                    "scientific_unit_identity_records": [],
+                }
+            }
             runtime_role = "semantic_watermark_runtime_record"
             runtime_source = self._source(
                 repeat_id=repeat_id,
@@ -419,6 +459,7 @@ class _MemoryAggregateWorkspace:
             self._sources[runtime_key] = runtime_source
             self._runtime_property_sources.append(runtime_source)
             runtime_rows = []
+            unit_identity_records = []
             for prompt in prompt_records:
                 key_seed = _watermark_key_seed_random(repeat)
                 runtime_config = SemanticWatermarkRuntimeConfig(
@@ -452,14 +493,49 @@ class _MemoryAggregateWorkspace:
                 config = semantic_watermark_runtime_config_payload(
                     runtime_config
                 )
+                run_id = "runtime_" + build_stable_digest(config)[:16]
+                generation_seed_random = int(config["seed"])
+                randomization_reference = {
+                    **_formal_randomization_identity(
+                        repeat,
+                        generation_seed_random,
+                    ),
+                    **{
+                        field_name: _base_latent_identity(
+                            generation_seed_random
+                        )[field_name]
+                        for field_name in (
+                            "base_latent_content_digest_random",
+                            "base_latent_identity_digest_random",
+                        )
+                    },
+                }
                 runtime_rows.append(
                     {
-                        "run_id": "runtime_"
-                        + build_stable_digest(config)[:16],
-                        "metadata": {"scientific_unit_config": config},
+                        "run_id": run_id,
+                        "metadata": {
+                            "scientific_unit_config_digest": (
+                                build_stable_digest(config)
+                            ),
+                            "formal_randomization_reference": (
+                                randomization_reference
+                            ),
+                        },
+                    }
+                )
+                unit_identity_records.append(
+                    {
+                        "run_id": run_id,
+                        "scientific_unit_config": config,
+                        "formal_randomization_reference": (
+                            randomization_reference
+                        ),
                     }
                 )
             self._rows[runtime_key] = tuple(runtime_rows)
+            self._objects[manifest_key]["config"][
+                "scientific_unit_identity_records"
+            ] = unit_identity_records
 
             prompt_source_payloads = {
                 "governed_prompt_file_bytes": (
@@ -509,6 +585,52 @@ class _MemoryAggregateWorkspace:
 
             for method_id in FIXED_FPR_THRESHOLD_METHOD_IDS:
                 package_family = METHOD_LEAF_PACKAGE_FAMILY[method_id]
+                if method_id != "slm_wm":
+                    manifest_role = (
+                        bridge_module._BASELINE_RUN_MANIFEST_SOURCE_ROLES[
+                            method_id
+                        ]
+                    )
+                    baseline_manifest_source = self._source(
+                        repeat_id=repeat_id,
+                        package_family=package_family,
+                        record_role=manifest_role,
+                        record_member=_baseline_manifest_member(method_id),
+                        record_format=RECORD_FORMAT_JSON_OBJECT,
+                    )
+                    baseline_manifest_key = (
+                        repeat_id,
+                        package_family,
+                        manifest_role,
+                    )
+                    self._sources[baseline_manifest_key] = (
+                        baseline_manifest_source
+                    )
+                    self._objects[baseline_manifest_key] = {
+                        "artifact_id": (
+                            "t2smark_formal_reproduction_manifest"
+                            if method_id == "t2smark"
+                            else f"{method_id}_method_faithful_manifest"
+                        ),
+                        "config": {
+                            "formal_randomization_plan": (
+                                formal_runtime_randomization_plan_record(
+                                    BASE_SEED
+                                )
+                            ),
+                            "seed": (
+                                BASE_SEED
+                                + repeat.generation_seed_offset
+                            ),
+                            **repeat.to_dict(),
+                            "watermark_key_seed_random": (
+                                _watermark_key_seed_random(repeat)
+                            ),
+                            "formal_randomization_protocol_digest": (
+                                protocol_digest
+                            ),
+                        },
+                    }
                 observation_role, declaration_role = _method_roles(method_id)
                 observation_member, declaration_member = _member_paths(
                     method_id
@@ -572,7 +694,15 @@ class _MemoryAggregateWorkspace:
                             repeat,
                             generation_seed_random,
                         ),
-                        **_base_latent_identity(generation_seed_random),
+                        **{
+                            field_name: _base_latent_identity(
+                                generation_seed_random
+                            )[field_name]
+                            for field_name in (
+                                "base_latent_content_digest_random",
+                                "base_latent_identity_digest_random",
+                            )
+                        },
                     }
                     if method_id != "slm_wm":
                         observation.update(
@@ -707,18 +837,32 @@ class _MemoryAggregateWorkspace:
             "image_only_dataset_runtime",
             "semantic_watermark_runtime_record",
         )
+        manifest_key = (
+            repeat_id,
+            "image_only_dataset_runtime",
+            "semantic_watermark_dataset_manifest",
+        )
         rows = [dict(row) for row in self._rows[key]]
+        manifest = copy.deepcopy(self._objects[manifest_key])
+        unit_records = manifest["config"][
+            "scientific_unit_identity_records"
+        ]
         texts = [
-            str(row["metadata"]["scientific_unit_config"]["prompt"])
-            for row in rows
+            str(record["scientific_unit_config"]["prompt"])
+            for record in unit_records
         ]
         texts[prompt_index] = prompt_text
         rebuilt = apply_split_assignments(
             build_prompt_records(PAPER_RUN_NAME, tuple(texts))
         )
-        for row, prompt in zip(rows, rebuilt, strict=True):
+        for row, unit_record, prompt in zip(
+            rows,
+            unit_records,
+            rebuilt,
+            strict=True,
+        ):
             metadata = dict(row["metadata"])
-            config = dict(metadata["scientific_unit_config"])
+            config = dict(unit_record["scientific_unit_config"])
             config.update(
                 {
                     "prompt_id": prompt.prompt_id,
@@ -732,10 +876,16 @@ class _MemoryAggregateWorkspace:
                     ),
                 }
             )
-            metadata["scientific_unit_config"] = config
+            metadata["scientific_unit_config_digest"] = (
+                build_stable_digest(config)
+            )
             row["metadata"] = metadata
-            row["run_id"] = "runtime_" + build_stable_digest(config)[:16]
+            run_id = "runtime_" + build_stable_digest(config)[:16]
+            row["run_id"] = run_id
+            unit_record["run_id"] = run_id
+            unit_record["scientific_unit_config"] = config
         self._rows[key] = tuple(rows)
+        self._objects[manifest_key] = manifest
 
 
 def _replace_runtime_key_identity(
@@ -752,19 +902,50 @@ def _replace_runtime_key_identity(
         "semantic_watermark_runtime_record",
     )
     rows = [dict(row) for row in workspace._rows[key]]
+    manifest_key = (
+        repeat_id,
+        "image_only_dataset_runtime",
+        "semantic_watermark_dataset_manifest",
+    )
+    manifest = copy.deepcopy(workspace._objects[manifest_key])
+    unit_records = manifest["config"]["scientific_unit_identity_records"]
     forged_material_digest = _watermark_key_material_digest_random(
         repeat,
         key_seed=forged_key_seed,
     )
-    for row in rows:
+    for row, unit_record in zip(rows, unit_records, strict=True):
         metadata = dict(row["metadata"])
-        config = dict(metadata["scientific_unit_config"])
+        config = dict(unit_record["scientific_unit_config"])
         config["watermark_key_seed_random"] = forged_key_seed
         config["key_material_digest_random"] = forged_material_digest
-        metadata["scientific_unit_config"] = config
+        generation_seed_random = int(config["seed"])
+        randomization_reference = {
+            **_formal_randomization_identity(
+                repeat,
+                generation_seed_random,
+                key_seed=forged_key_seed,
+            ),
+            "base_latent_content_digest_random": metadata[
+                "formal_randomization_reference"
+            ]["base_latent_content_digest_random"],
+            "base_latent_identity_digest_random": metadata[
+                "formal_randomization_reference"
+            ]["base_latent_identity_digest_random"],
+        }
+        metadata["scientific_unit_config_digest"] = build_stable_digest(
+            config
+        )
+        metadata["formal_randomization_reference"] = randomization_reference
         row["metadata"] = metadata
-        row["run_id"] = "runtime_" + build_stable_digest(config)[:16]
+        run_id = "runtime_" + build_stable_digest(config)[:16]
+        row["run_id"] = run_id
+        unit_record["run_id"] = run_id
+        unit_record["scientific_unit_config"] = config
+        unit_record["formal_randomization_reference"] = (
+            randomization_reference
+        )
     workspace._rows[key] = tuple(rows)
+    workspace._objects[manifest_key] = manifest
 
 
 def _replace_all_runtime_config_field(
@@ -781,14 +962,68 @@ def _replace_all_runtime_config_field(
             "semantic_watermark_runtime_record",
         )
         rows = [dict(row) for row in workspace._rows[key]]
-        for row in rows:
+        manifest_key = (
+            repeat_id,
+            "image_only_dataset_runtime",
+            "semantic_watermark_dataset_manifest",
+        )
+        manifest = copy.deepcopy(workspace._objects[manifest_key])
+        unit_records = manifest["config"][
+            "scientific_unit_identity_records"
+        ]
+        for row, unit_record in zip(rows, unit_records, strict=True):
             metadata = dict(row["metadata"])
-            config = dict(metadata["scientific_unit_config"])
+            config = dict(unit_record["scientific_unit_config"])
             config[field_name] = value
-            metadata["scientific_unit_config"] = config
+            metadata["scientific_unit_config_digest"] = (
+                build_stable_digest(config)
+            )
             row["metadata"] = metadata
-            row["run_id"] = "runtime_" + build_stable_digest(config)[:16]
+            run_id = "runtime_" + build_stable_digest(config)[:16]
+            row["run_id"] = run_id
+            unit_record["run_id"] = run_id
+            unit_record["scientific_unit_config"] = config
         workspace._rows[key] = tuple(rows)
+        workspace._objects[manifest_key] = manifest
+
+
+def _replace_runtime_unit_config(
+    workspace: _MemoryAggregateWorkspace,
+    *,
+    repeat_id: str,
+    unit_index: int,
+    replacements: Mapping[str, Any],
+) -> None:
+    """修改顶层逐单元身份正文, 并同步最小结果引用."""
+
+    runtime_key = (
+        repeat_id,
+        "image_only_dataset_runtime",
+        "semantic_watermark_runtime_record",
+    )
+    manifest_key = (
+        repeat_id,
+        "image_only_dataset_runtime",
+        "semantic_watermark_dataset_manifest",
+    )
+    rows = [dict(row) for row in workspace._rows[runtime_key]]
+    manifest = copy.deepcopy(workspace._objects[manifest_key])
+    unit_record = manifest["config"]["scientific_unit_identity_records"][
+        unit_index
+    ]
+    config = dict(unit_record["scientific_unit_config"])
+    config.update(replacements)
+    run_id = "runtime_" + build_stable_digest(config)[:16]
+
+    metadata = dict(rows[unit_index]["metadata"])
+    metadata["scientific_unit_config_digest"] = build_stable_digest(config)
+    rows[unit_index]["metadata"] = metadata
+    rows[unit_index]["run_id"] = run_id
+    unit_record["run_id"] = run_id
+    unit_record["scientific_unit_config"] = config
+
+    workspace._rows[runtime_key] = tuple(rows)
+    workspace._objects[manifest_key] = manifest
 
 
 def _replace_observation_key_identity(
@@ -868,10 +1103,18 @@ def _install_memory_boundaries(
         lambda source: workspace,
     )
 
-    def validate_runtime(row: Mapping[str, Any]) -> dict[str, Any]:
-        config = row["metadata"]["scientific_unit_config"]
+    def validate_runtime(
+        row: Mapping[str, Any],
+        *,
+        unit_config: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        config = dict(unit_config)
         expected_run_id = "runtime_" + build_stable_digest(config)[:16]
-        if row.get("run_id") != expected_run_id:
+        if (
+            row.get("run_id") != expected_run_id
+            or row["metadata"].get("scientific_unit_config_digest")
+            != build_stable_digest(config)
+        ):
             raise ValueError("run_id 与配置摘要不一致")
         return {"runtime_record_ready": True}
 
@@ -1192,42 +1435,40 @@ def test_bridge_rejects_same_count_calibration_test_split_swap(
 ) -> None:
     provenance, workspace, _captured = bridge_context
     repeat_id = formal_randomization_repeat_ids()[0]
-    key = (
+    manifest_key = (
         repeat_id,
         "image_only_dataset_runtime",
-        "semantic_watermark_runtime_record",
+        "semantic_watermark_dataset_manifest",
     )
-    rows = [dict(row) for row in workspace._rows[key]]
+    unit_records = workspace._objects[manifest_key]["config"][
+        "scientific_unit_identity_records"
+    ]
     calibration_index = next(
         index
-        for index, row in enumerate(rows)
-        if row["metadata"]["scientific_unit_config"]["split"]
-        == "calibration"
+        for index, record in enumerate(unit_records)
+        if record["scientific_unit_config"]["split"] == "calibration"
     )
     test_index = next(
         index
-        for index, row in enumerate(rows)
-        if row["metadata"]["scientific_unit_config"]["split"] == "test"
+        for index, record in enumerate(unit_records)
+        if record["scientific_unit_config"]["split"] == "test"
     )
     for index, replacement_split in (
         (calibration_index, "test"),
         (test_index, "calibration"),
     ):
-        metadata = dict(rows[index]["metadata"])
-        config = dict(metadata["scientific_unit_config"])
-        config["split"] = replacement_split
-        config["standard_attack_profiles"] = (
-            ["full_main"] if replacement_split == "test" else []
+        _replace_runtime_unit_config(
+            workspace,
+            repeat_id=repeat_id,
+            unit_index=index,
+            replacements={
+                "split": replacement_split,
+                "standard_attack_profiles": (
+                    ["full_main"] if replacement_split == "test" else []
+                ),
+                "diffusion_attacks_enabled": replacement_split == "test",
+            },
         )
-        config["diffusion_attacks_enabled"] = (
-            replacement_split == "test"
-        )
-        metadata["scientific_unit_config"] = config
-        rows[index]["metadata"] = metadata
-        rows[index]["run_id"] = (
-            "runtime_" + build_stable_digest(config)[:16]
-        )
-    workspace._rows[key] = tuple(rows)
 
     with pytest.raises(
         RandomizationMethodRepeatThresholdError,
@@ -1241,19 +1482,25 @@ def test_bridge_rejects_runtime_generation_seed_formula_drift(
 ) -> None:
     provenance, workspace, _captured = bridge_context
     repeat_id = formal_randomization_repeat_ids()[0]
-    key = (
-        repeat_id,
-        "image_only_dataset_runtime",
-        "semantic_watermark_runtime_record",
+    _replace_runtime_unit_config(
+        workspace,
+        repeat_id=repeat_id,
+        unit_index=0,
+        replacements={
+            "seed": int(
+                workspace._objects[
+                    (
+                        repeat_id,
+                        "image_only_dataset_runtime",
+                        "semantic_watermark_dataset_manifest",
+                    )
+                ]["config"]["scientific_unit_identity_records"][0][
+                    "scientific_unit_config"
+                ]["seed"]
+            )
+            + 1
+        },
     )
-    rows = [dict(row) for row in workspace._rows[key]]
-    metadata = dict(rows[0]["metadata"])
-    config = dict(metadata["scientific_unit_config"])
-    config["seed"] = int(config["seed"]) + 1
-    metadata["scientific_unit_config"] = config
-    rows[0]["metadata"] = metadata
-    rows[0]["run_id"] = "runtime_" + build_stable_digest(config)[:16]
-    workspace._rows[key] = tuple(rows)
 
     with pytest.raises(
         RandomizationMethodRepeatThresholdError,
@@ -1269,23 +1516,42 @@ def test_bridge_rejects_runtime_key_material_not_derived_from_key_seed(
 
     provenance, workspace, _captured = bridge_context
     repeat_id = formal_randomization_repeat_ids()[0]
-    key = (
-        repeat_id,
-        "image_only_dataset_runtime",
-        "semantic_watermark_runtime_record",
+    _replace_runtime_unit_config(
+        workspace,
+        repeat_id=repeat_id,
+        unit_index=0,
+        replacements={"key_material_digest_random": "f" * 64},
     )
-    rows = [dict(row) for row in workspace._rows[key]]
-    metadata = dict(rows[0]["metadata"])
-    config = dict(metadata["scientific_unit_config"])
-    config["key_material_digest_random"] = "f" * 64
-    metadata["scientific_unit_config"] = config
-    rows[0]["metadata"] = metadata
-    rows[0]["run_id"] = "runtime_" + build_stable_digest(config)[:16]
-    workspace._rows[key] = tuple(rows)
 
     with pytest.raises(
         RandomizationMethodRepeatThresholdError,
         match="key material 摘要",
+    ):
+        recompute_randomization_method_repeat_fixed_fpr(provenance)
+
+
+def test_bridge_rejects_baseline_manifest_randomization_plan_drift(
+    bridge_context,
+) -> None:
+    """baseline 顶层计划漂移时不得仅依赖样本字段进入统计."""
+
+    provenance, workspace, _captured = bridge_context
+    repeat_id = formal_randomization_repeat_ids()[0]
+    method_id = "tree_ring"
+    key = (
+        repeat_id,
+        METHOD_LEAF_PACKAGE_FAMILY[method_id],
+        bridge_module._BASELINE_RUN_MANIFEST_SOURCE_ROLES[method_id],
+    )
+    manifest = copy.deepcopy(workspace._objects[key])
+    manifest["config"]["formal_randomization_plan"][
+        "base_generation_seed_random"
+    ] += 1
+    workspace._objects[key] = manifest
+
+    with pytest.raises(
+        RandomizationMethodRepeatThresholdError,
+        match="完整正式随机化计划",
     ):
         recompute_randomization_method_repeat_fixed_fpr(provenance)
 

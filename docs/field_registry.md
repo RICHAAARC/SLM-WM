@@ -531,8 +531,9 @@ Notebook 与 repository module 的跨边界数据
 | runtime_environment | runtime | none | false | false | false | 真实 runtime 结果 metadata 中嵌入的环境快照。 |
 | scientific_unit_provenance | provenance | none | true | false | false | 单个 Prompt、正式消融运行或 Inception feature batch 在实际完成进程中写出的代码锁、依赖锁、设备和随机性来源记录。 |
 | scientific_unit_id | provenance | none | true | false | false | 由完成单元精确配置或 batch 图像身份派生的稳定标识。 |
-| scientific_unit_config | protocol | none | true | false | false | 单个语义水印完成单元隐藏密钥原文后的完整科学运行配置。 |
-| scientific_unit_config_digest | provenance | none | true | false | false | 单个完成单元精确科学配置的稳定 SHA-256 摘要。 |
+| scientific_unit_config | protocol | none | true | false | false | 仅由顶层运行 manifest 保存的单个科学完成单元完整配置；样本结果只引用其摘要。 |
+| scientific_unit_config_digest | provenance | none | true | false | false | 样本结果和单元 manifest 引用顶层完整科学配置的稳定 SHA-256 摘要。 |
+| scientific_unit_identity_records | provenance | none | true | true | false | 顶层运行 manifest 按 run_id 保存的逐单元完整配置与紧凑随机身份引用集合。 |
 | scientific_execution_environment | runtime | none | true | false | false | 单个完成单元实际使用的依赖 profile、完整哈希锁、代码锁、Python、PyTorch、CUDA 与 GPU 身份。 |
 | scientific_execution_environment_digest | provenance | none | true | false | false | 单个完成单元实际执行环境记录的稳定 SHA-256 摘要。 |
 | scientific_random_identity_random | random | _random | true | false | false | 单个完成单元实际使用的生成种子、检测种子、攻击种子或明确无随机生成器模式。 |
@@ -970,7 +971,9 @@ Notebook 与 repository module 的跨边界数据
 | attacked_image_path | artifact | none | true | false | false | 真实 attacked image 文件的受治理路径。 |
 | attack_implementation | protocol | none | true | false | false | 真实图像级攻击运行使用的具体 pipeline 或算子机制。 |
 | attack_execution | protocol | none | true | false | false | 单次攻击的冻结参数、随机种子、mask 与检测器查询轨迹。 |
-| attack_seed_random | random | none | true | false | false | 生成单次随机攻击变换的可复现种子。 |
+| attack_seed_random | random | _random | true | true | false | 由生成 seed 与攻击 ID 的唯一跨方法公式派生、供配对角色共享的攻击种子。 |
+| formal_attack_seed_protocol | protocol | none | true | true | false | 主方法、baseline 与消融共同使用的域分离 SHA-256 攻击 seed 派生协议。 |
+| formal_attack_seed_protocol_digest | provenance | none | true | true | false | 攻击 seed 输入字段、派生规则与输出字段组成的稳定协议摘要。 |
 | effective_parameters | protocol | none | true | false | false | 单次攻击实际消费的冻结参数集合。 |
 | local_edit_mask_digest | artifact | none | true | false | false | 局部 inpainting 白色编辑 mask 的 SHA-256 摘要。 |
 | local_edit_mask_area_ratio | metric | none | true | false | false | 局部 inpainting 白色编辑区域占整幅图像的实际面积比例。 |
@@ -2346,6 +2349,9 @@ Notebook 与 repository module 的跨边界数据
 | formal_unit_aggregate | provenance | none | true | false | false | T2SMark 完整 Prompt 单元的记录摘要与跨会话来源聚合对象。 |
 | formal_randomization_protocol | protocol | none | true | false | false | 主方法与全部正式 baseline 共同采用的生成种子和水印密钥交叉重复协议名称。 |
 | formal_randomization_protocol_digest | provenance | none | true | false | false | 完整交叉重复注册表、预注册3-key 计划、基础 latent 分布和设备无关 PRG 约定的稳定摘要。 |
+| formal_generation_seed_derivation_protocol | protocol | none | true | true | false | 由冻结基础 seed、repeat offset 与 Prompt 索引构造实际生成 seed 的唯一协议。 |
+| generation_seed_formula | protocol | none | true | true | false | 顶层计划声明的 `base_generation_seed_random + generation_seed_offset + prompt_index` 公式。 |
+| base_generation_seed_random | random | _random | true | true | false | 顶层运行计划保存的公开基础生成 seed；各 Prompt 实际 seed 由冻结公式派生。 |
 | formal_watermark_key_plan_protocol | protocol | none | true | false | false | 在任何正式运行前冻结3个水印 key 身份的预注册计划协议。 |
 | formal_watermark_key_plan_digest | provenance | none | true | true | false | 按 key index 排列的3个预注册 key seed 与 key material 摘要联合承诺。 |
 | watermark_key_records | protocol | none | true | true | false | 预注册3-key 计划中按 key index 排列的 seed 与 material 摘要记录。 |
@@ -2359,6 +2365,8 @@ Notebook 与 repository module 的跨边界数据
 | watermark_key_repeat_count | metric | none | true | false | false | 正式交叉重复协议登记的水印密钥重复数。 |
 | crossed_repeat_count | metric | none | true | false | false | 生成种子与水印密钥笛卡尔积形成的重复单元数。 |
 | repeat_records | protocol | none | true | false | false | 按稳定顺序登记的全部生成种子与水印密钥交叉重复记录。 |
+| formal_randomization_plan | protocol | none | true | true | false | 顶层运行 manifest 唯一保存的9重复、3密钥、基础 seed 与基础 latent 完整计划正文。 |
+| formal_runtime_randomization_plan_digest_random | random | _digest_random | true | true | false | 顶层完整随机身份计划排除自摘要字段后的稳定摘要。 |
 | randomization_repeat_id | protocol | none | true | false | false | 当前科学运行唯一选择的交叉重复标识。 |
 | generation_seed_index | protocol | none | true | false | false | 当前交叉重复使用的生成种子索引。 |
 | generation_seed_offset | protocol | none | true | false | false | 当前生成种子相对冻结基础 seed 的整数偏移。 |
@@ -2374,7 +2382,7 @@ Notebook 与 repository module 的跨边界数据
 | registered_wrong_key_negative_digest_random | random | _digest_random | true | true | false | 检测密钥计划中预注册 wrong-key 材料的不可逆摘要。 |
 | detection_key_plan_digest_random | random | _digest_random | true | true | false | 排除自摘要字段后的检测密钥计划稳定摘要。 |
 | formal_randomization_identity_digest_random | random | _random | true | false | false | 单个 Prompt 的重复、生成 seed 与密钥身份对象稳定摘要。 |
-| formal_randomization_identity | provenance | none | true | false | false | 单个 Prompt 的协议身份、随机身份和基础 latent 内容身份合并记录。 |
+| formal_randomization_reference | provenance | none | true | true | false | 样本和单元结果保存的紧凑配对引用，只含 repeat、seed、key 与基础 latent 必要摘要，不复制顶层完整计划。 |
 | base_latent_distribution | protocol | none | true | false | false | 主方法与正式 baseline 共同基础 latent 的冻结概率分布。 |
 | base_latent_generation | protocol | none | true | false | false | 正式随机化注册表声明的设备无关基础 latent 构造方式。 |
 | base_latent_dtype_cast | protocol | none | true | false | false | 规范基础 latent 在 CPU 完成目标 dtype 转换后才搬运到执行设备的冻结约定。 |

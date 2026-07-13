@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -360,20 +361,25 @@ def _verify_formal_source(source_entry: Path) -> None:
         "strict_clean_watermarked_pair",
         "attack_execution",
         "attack_config_digest",
+        "formal_attack_seed_random",
+        "formal_attack_seed_protocol_record",
+        "attack_seed_random",
+        "formal_attack_seed_protocol_digest",
         "resource_profile",
         "attack_id",
         "slm_formal_units",
         "build_t2smark_formal_unit_record",
         "aggregate_t2smark_formal_unit_records",
         'prompt_identity["split"] == "test"',
-            "build_canonical_sd35_base_latent",
-            "clean_z_k = clean_base_latents[0, args.key_channel_idx, :, :]",
-            "base_noise=clean_z_k",
-            "base_noise=clean_z_b",
-            "utils.set_random_seed(args.slm_watermark_seed + prompt_id)",
-            "generation_seed_random",
-            "**base_latent_identity",
-            "t2smark_secret_material_digest_random",
+        "build_canonical_sd35_base_latent",
+        "clean_z_k = clean_base_latents[0, args.key_channel_idx, :, :]",
+        "base_noise=clean_z_k",
+        "base_noise=clean_z_b",
+        "utils.set_random_seed(args.slm_watermark_seed + prompt_id)",
+        "generation_seed_random",
+        "base_latent_content_digest_random",
+        "base_latent_identity_digest_random",
+        "t2smark_secret_material_digest_random",
         "fixed_secret_material_digest_random",
     )
     required_option_tokens = (
@@ -389,6 +395,31 @@ def _verify_formal_source(source_entry: Path) -> None:
         raise RuntimeError("T2SMark 正式源码缺少仅图像检测或攻击证据算子")
     if any(token not in option_text for token in required_option_tokens):
         raise RuntimeError("T2SMark 正式源码缺少受治理协议参数")
+
+    source_tree = ast.parse(source_text, filename=source_entry.as_posix())
+    pair_quality_fields: set[str] | None = None
+    for node in ast.walk(source_tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Dict):
+            continue
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Subscript):
+            continue
+        target_key = node.targets[0].slice
+        if not isinstance(target_key, ast.Constant) or target_key.value != "pair_quality":
+            continue
+        pair_quality_fields = {
+            str(key.value)
+            for key in node.value.keys
+            if isinstance(key, ast.Constant) and isinstance(key.value, str)
+        }
+        break
+    required_pair_quality_fields = {
+        "generation_seed_random",
+        "formal_randomization_protocol_digest",
+    }
+    if pair_quality_fields is None or not required_pair_quality_fields.issubset(
+        pair_quality_fields
+    ):
+        raise RuntimeError("T2SMark 严格配对记录缺少正式随机化身份字段")
 
 
 def ensure_t2smark_source_available(

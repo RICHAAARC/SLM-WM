@@ -56,6 +56,11 @@ from experiments.protocol.formal_randomization import (
     formal_randomization_repeat_ids,
     formal_randomization_repeat_registry_digest,
     formal_randomization_repeats,
+    formal_runtime_randomization_plan_record,
+)
+from experiments.protocol.method_runtime_config import (
+    FORMAL_METHOD_PACKAGE_ROOT,
+    load_formal_method_runtime_config,
 )
 from experiments.protocol.splits import build_group_split_counts
 from experiments.runtime.image_metrics import measured_score_retention
@@ -105,6 +110,14 @@ from paper_experiments.analysis.result_analysis_payload import (
 )
 from paper_experiments.baselines.formal_import import (
     build_primary_baseline_observation_metric_values,
+)
+
+
+_FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
+    FORMAL_METHOD_PACKAGE_ROOT
+)
+_FORMAL_RUNTIME_RANDOMIZATION_PLAN = formal_runtime_randomization_plan_record(
+    _FORMAL_METHOD_CONFIG.seed
 )
 
 
@@ -3623,11 +3636,26 @@ def _ablation_atomic_record_rebuild_ready(
 ) -> bool:
     """从冻结协议和逐检测原子重建消融逐 Prompt 聚合字段。"""
 
+    manifest_config = bundle.ablation_manifest.get("config")
+    manifest_metadata = bundle.ablation_manifest.get("metadata")
+    if not isinstance(manifest_config, Mapping) or not isinstance(
+        manifest_metadata,
+        Mapping,
+    ):
+        return False
+    if manifest_config.get("formal_randomization_plan") != (
+        _FORMAL_RUNTIME_RANDOMIZATION_PLAN
+    ):
+        return False
     try:
         rebuilt = rebuild_and_validate_ablation_runtime_aggregates(
             bundle.ablation_runtime_records,
             bundle.ablation_detection_records,
             bundle.ablation_frozen_protocols,
+            scientific_unit_identity_records=manifest_config.get(
+                "scientific_unit_identity_records",
+                (),
+            ),
             expected_ablation_ids=FORMAL_RUNTIME_RERUN_ABLATION_IDS,
             expected_prompt_split_by_id=bundle.expected_prompt_split_by_id,
             expected_prompt_digest_by_id=bundle.expected_prompt_digest_by_id,
@@ -3642,13 +3670,6 @@ def _ablation_atomic_record_rebuild_ready(
             expected_target_fpr=bundle.expected_target_fpr,
         )
     except (FormalRecordStatisticsError, KeyError, TypeError, ValueError):
-        return False
-    manifest_config = bundle.ablation_manifest.get("config")
-    manifest_metadata = bundle.ablation_manifest.get("metadata")
-    if not isinstance(manifest_config, Mapping) or not isinstance(
-        manifest_metadata,
-        Mapping,
-    ):
         return False
     detection_path = (
         f"outputs/formal_mechanism_ablation/"

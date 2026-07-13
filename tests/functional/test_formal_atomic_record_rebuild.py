@@ -12,7 +12,12 @@ from experiments.artifacts.dataset_level_quality_outputs import (
     _inception_batch_config_digest,
     validate_inception_feature_provenance_groups,
 )
-from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from experiments.runners.image_only_dataset_runtime import (
     FrozenEvidenceProtocol,
     apply_frozen_evidence_protocol,
@@ -28,6 +33,7 @@ from main.methods.method_definition import (
 )
 from paper_experiments.analysis.formal_record_statistics import (
     FormalRecordStatisticsError,
+    _formal_attack_coverage_ready as _analysis_formal_attack_coverage_ready,
     rebuild_and_validate_ablation_runtime_aggregates,
     rebuild_and_validate_dataset_quality_feature_identity,
 )
@@ -94,6 +100,7 @@ def _raw_detection(
         "alignment": {"registration_geometry_reliable": False},
     }
     if attack is not None:
+        generation_seed_random = 1703
         record.update(
             {
                 "attack_id": attack.attack_id,
@@ -103,6 +110,16 @@ def _raw_detection(
                 "attack_config_digest": attack_config_digest(attack),
                 "attack_parameters": attack.attack_parameters,
                 "attack_performed": True,
+                "generation_seed_random": generation_seed_random,
+                "attack_seed_random": formal_attack_seed_random(
+                    generation_seed_random,
+                    attack.attack_id,
+                ),
+                "formal_attack_seed_protocol_digest": (
+                    formal_attack_seed_protocol_record()[
+                        "formal_attack_seed_protocol_digest"
+                    ]
+                ),
             }
         )
     return _bind_attention_alignment_gate(record)
@@ -173,12 +190,14 @@ def _ablation_atomic_fixture() -> tuple[
     list[dict[str, Any]],
     list[dict[str, Any]],
     dict[str, dict[str, Any]],
+    list[dict[str, Any]],
 ]:
     """构造能够独立重建的逐 Prompt 消融记录、检测原子和协议。"""
 
     runtime_records: list[dict[str, Any]] = []
     detection_records: list[dict[str, Any]] = []
     protocols: dict[str, dict[str, Any]] = {}
+    unit_identity_records: list[dict[str, Any]] = []
     for ablation_id in ABLATION_IDS:
         calibration_negative = _raw_detection(
             run_id=f"run_{ablation_id}_prompt_calibration",
@@ -215,6 +234,22 @@ def _ablation_atomic_fixture() -> tuple[
             }
             config_digest = build_stable_digest(scientific_config)
             run_id = f"semantic_watermark_{config_digest[:16]}"
+            randomization_reference = {
+                "formal_randomization_identity_digest_random": (
+                    build_stable_digest(
+                        {"ablation_id": ablation_id, "prompt_id": prompt_id}
+                    )
+                )
+            }
+            unit_identity_records.append(
+                {
+                    "run_id": run_id,
+                    "scientific_unit_config": scientific_config,
+                    "formal_randomization_reference": (
+                        randomization_reference
+                    ),
+                }
+            )
             detections = _formal_detection_group(
                 ablation_id=ablation_id,
                 prompt_id=prompt_id,
@@ -255,7 +290,10 @@ def _ablation_atomic_fixture() -> tuple[
                         "run_id": run_id,
                         "run_decision": "pass",
                         "metadata": {
-                            "scientific_unit_config": scientific_config,
+                            "scientific_unit_config_digest": config_digest,
+                            "formal_randomization_reference": (
+                                randomization_reference
+                            ),
                             "scientific_unit_provenance": (
                                 build_test_scientific_unit_provenance(
                                     run_id,
@@ -313,19 +351,27 @@ def _ablation_atomic_fixture() -> tuple[
                     "paired_ssim": 0.95,
                 }
             )
-    return runtime_records, detection_records, protocols
+    return (
+        runtime_records,
+        detection_records,
+        protocols,
+        unit_identity_records,
+    )
 
 
 @pytest.mark.quick
 def test_ablation_runtime_aggregates_rebuild_from_detection_atoms() -> None:
     """逐 Prompt 聚合值与检测原子、冻结阈值一致时才允许闭合。"""
 
-    runtime_records, detections, protocols = _ablation_atomic_fixture()
+    runtime_records, detections, protocols, unit_identities = (
+        _ablation_atomic_fixture()
+    )
 
     result = rebuild_and_validate_ablation_runtime_aggregates(
         runtime_records,
         detections,
         protocols,
+        scientific_unit_identity_records=unit_identities,
         expected_ablation_ids=ABLATION_IDS,
         expected_prompt_split_by_id=PROMPT_SPLITS,
         expected_prompt_digest_by_id=PROMPT_DIGESTS,
@@ -356,7 +402,9 @@ def test_ablation_runtime_aggregate_rebuild_fails_closed_on_drift(
 ) -> None:
     """任一聚合、原子、split 或阈值漂移都必须阻断。"""
 
-    runtime_records, detections, protocols = _ablation_atomic_fixture()
+    runtime_records, detections, protocols, unit_identities = (
+        _ablation_atomic_fixture()
+    )
     if mutation == "aggregate_rate":
         target = next(record for record in runtime_records if record["split"] == "test")
         target["attacked_positive_rate"] = 0.25
@@ -399,6 +447,7 @@ def test_ablation_runtime_aggregate_rebuild_fails_closed_on_drift(
             runtime_records,
             detections,
             protocols,
+            scientific_unit_identity_records=unit_identities,
             expected_ablation_ids=ABLATION_IDS,
                 expected_prompt_split_by_id=PROMPT_SPLITS,
                 expected_prompt_digest_by_id=PROMPT_DIGESTS,
@@ -415,12 +464,23 @@ def test_ablation_runtime_aggregate_rejects_semantic_identity_drift(
 ) -> None:
     """同步自洽的错误机制开关或图像质量字段也不得冒充正式消融。"""
 
-    runtime_records, detections, protocols = _ablation_atomic_fixture()
+    runtime_records, detections, protocols, unit_identities = (
+        _ablation_atomic_fixture()
+    )
     target = runtime_records[0]
     if mutation == "mechanism_config":
         target["runtime_config"] = dict(target["runtime_config"])
         target["runtime_config"]["semantic_routing_enabled"] = False
-        target["runtime_result"]["metadata"]["scientific_unit_config"][
+        target_run_id = target["runtime_result"]["run_id"]
+        identity = next(
+            record
+            for record in unit_identities
+            if record["run_id"] == target_run_id
+        )
+        identity["scientific_unit_config"] = dict(
+            identity["scientific_unit_config"]
+        )
+        identity["scientific_unit_config"][
             "semantic_routing_enabled"
         ] = False
     else:
@@ -431,6 +491,7 @@ def test_ablation_runtime_aggregate_rejects_semantic_identity_drift(
             runtime_records,
             detections,
             protocols,
+            scientific_unit_identity_records=unit_identities,
             expected_ablation_ids=ABLATION_IDS,
             expected_prompt_split_by_id=PROMPT_SPLITS,
             expected_prompt_digest_by_id=PROMPT_DIGESTS,
@@ -713,3 +774,47 @@ def test_dataset_quality_feature_identity_rebuild_fails_closed_on_drift(
             expected_pair_count=2,
             expected_prompt_id_digest=expected_prompt_digest,
         )
+
+
+def test_ablation_statistics_rejects_attack_seed_drift() -> None:
+    """独立统计重建必须拒绝与统一公式不一致的消融攻击 seed."""
+
+    generation_seed_random = 1703
+    protocol_digest = formal_attack_seed_protocol_record()[
+        "formal_attack_seed_protocol_digest"
+    ]
+    records = tuple(
+        {
+            "attack_id": config.attack_id,
+            "attack_family": config.attack_family,
+            "attack_name": config.attack_name,
+            "resource_profile": config.resource_profile,
+            "attack_config_digest": attack_config_digest(config),
+            "attack_parameters": config.attack_parameters,
+            "attack_performed": True,
+            "sample_role": sample_role,
+            "generation_seed_random": generation_seed_random,
+            "attack_seed_random": formal_attack_seed_random(
+                generation_seed_random,
+                config.attack_id,
+            ),
+            "formal_attack_seed_protocol_digest": protocol_digest,
+        }
+        for config in default_attack_configs()
+        if config.enabled
+        and config.resource_profile in {"full_main", "full_extra"}
+        for sample_role in ("clean_negative", "positive_source")
+    )
+    assert _analysis_formal_attack_coverage_ready(
+        records,
+        split="test",
+    )
+
+    drifted = [dict(record) for record in records]
+    drifted[0]["attack_seed_random"] = int(
+        drifted[0]["attack_seed_random"]
+    ) + 1
+    assert not _analysis_formal_attack_coverage_ready(
+        tuple(drifted),
+        split="test",
+    )

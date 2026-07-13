@@ -19,7 +19,11 @@ from pathlib import Path
 from typing import Any
 
 from experiments.runtime.image_metrics import measured_image_ssim, measured_score_retention
-from experiments.protocol.attacks import attack_config_digest
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from experiments.protocol.formal_randomization import (
     build_canonical_sd35_base_latent,
     formal_random_trace_fields,
@@ -364,6 +368,8 @@ def build_observation(
     attack_id: str = "",
     resource_profile: str = "",
     attack_config_digest_value: str = "",
+    attack_seed_random: int | None = None,
+    formal_attack_seed_protocol_digest: str = "",
 ) -> dict[str, Any]:
     """构造统一 baseline observation。"""
 
@@ -432,6 +438,16 @@ def build_observation(
             "execution_device": execution_device,
             "quality_score": float(quality_score),
             "score_retention": float(score_retention),
+            **(
+                {
+                    "attack_seed_random": int(attack_seed_random),
+                    "formal_attack_seed_protocol_digest": (
+                        formal_attack_seed_protocol_digest
+                    ),
+                }
+                if attack_id
+                else {}
+            ),
         }
     )
 
@@ -705,7 +721,12 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                 "formal_randomization_identity_digest_random": str(
                     row["formal_randomization_identity_digest_random"]
                 ),
-                **base_latent_identity,
+                "base_latent_content_digest_random": base_latent_identity[
+                    "base_latent_content_digest_random"
+                ],
+                "base_latent_identity_digest_random": base_latent_identity[
+                    "base_latent_identity_digest_random"
+                ],
                 "gaussian_chacha_secret_material_digest_random": (
                     watermark.secret_material_digest_random
                 ),
@@ -809,7 +830,13 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                 ("clean", "clean_image_path", "clean_image_digest", "attacked_negative"),
                 ("watermarked", "watermarked_image_path", "watermarked_image_digest", "attacked_positive"),
             ):
-                attack_seed = int(args.seed) + pair_index
+                attack_seed = formal_attack_seed_random(
+                    int(pair["generation_seed_random"]),
+                    formal_attack_config.attack_id,
+                )
+                attack_seed_protocol_digest = formal_attack_seed_protocol_record()[
+                    "formal_attack_seed_protocol_digest"
+                ]
                 attack_unit_spec = build_method_faithful_unit_spec(
                     unit_context,
                     unit_kind=f"formal_attack_{attack_matrix_name}_{role_name}",
@@ -921,6 +948,10 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                         attack_id=formal_attack_config.attack_id,
                         resource_profile=formal_attack_config.resource_profile,
                         attack_config_digest_value=formal_attack_digest,
+                        attack_seed_random=attack_seed,
+                        formal_attack_seed_protocol_digest=(
+                            attack_seed_protocol_digest
+                        ),
                     )
                 )
                 attacked_record = {
@@ -938,6 +969,10 @@ def run_gaussian_shading_method_faithful_adapter(args: argparse.Namespace) -> tu
                     "attack_id": formal_attack_config.attack_id,
                     "resource_profile": formal_attack_config.resource_profile,
                     "attack_config_digest": formal_attack_digest,
+                    "attack_seed_random": attack_seed,
+                    "formal_attack_seed_protocol_digest": (
+                        attack_seed_protocol_digest
+                    ),
                     "attack_transform_name": attack_transform_name,
                     "attack_execution": attack_execution,
                     "generation_model_id": args.model_id,

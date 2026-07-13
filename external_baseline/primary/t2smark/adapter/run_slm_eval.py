@@ -15,7 +15,12 @@ if str(ROOT) not in sys.path:
 
 from experiments.runtime.progress import progress_event_path_from_environment, write_progress_event
 from experiments.runtime.image_metrics import measured_image_ssim, measured_score_retention
-from experiments.protocol.attacks import attack_config_digest, resolve_formal_attack_config
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+    resolve_formal_attack_config,
+)
 from main.core.digest import build_stable_digest
 from external_baseline.primary.t2smark.adapter.formal_unit_checkpoint import (
     atomic_write_json,
@@ -191,6 +196,31 @@ def _validated_attack_identity(
     return identity
 
 
+def _validated_attack_seed(
+    payload: dict[str, Any],
+    *,
+    generation_seed_random: int,
+    attack_id: str,
+    field_prefix: str,
+) -> tuple[int, str]:
+    """核验攻击执行 seed 是否由统一跨方法公式生成."""
+
+    expected_seed = formal_attack_seed_random(
+        generation_seed_random,
+        attack_id,
+    )
+    expected_protocol_digest = formal_attack_seed_protocol_record()[
+        "formal_attack_seed_protocol_digest"
+    ]
+    if payload.get("attack_seed_random") != expected_seed:
+        raise ValueError(f"{field_prefix}.attack_seed_random 与统一公式不一致")
+    if payload.get("formal_attack_seed_protocol_digest") != expected_protocol_digest:
+        raise ValueError(
+            f"{field_prefix}.formal_attack_seed_protocol_digest 与统一协议不一致"
+        )
+    return expected_seed, expected_protocol_digest
+
+
 def _auto_threshold(
     results_by_index: dict[int, dict[str, Any]],
     image_pairs: list[dict[str, Any]],
@@ -261,6 +291,8 @@ def _observation(
     attack_id: str = "",
     resource_profile: str = "",
     attack_config_digest_value: str = "",
+    attack_seed_random: int | None = None,
+    formal_attack_seed_protocol_digest: str = "",
 ) -> dict[str, Any]:
     """构造一条 SLM baseline observation row。"""
 
@@ -325,6 +357,16 @@ def _observation(
         "supports_paper_claim": False,
         "quality_score": float(quality_score),
         "score_retention": float(score_retention),
+        **(
+            {
+                "attack_seed_random": int(attack_seed_random),
+                "formal_attack_seed_protocol_digest": (
+                    formal_attack_seed_protocol_digest
+                ),
+            }
+            if attack_id
+            else {}
+        ),
     }
     payload["baseline_observation_digest"] = build_stable_digest(payload)
     return payload
@@ -438,6 +480,12 @@ def build_t2smark_observations(
                     attack_name=attack_name,
                     field_prefix=f"formal_attacks.{attack_name}",
                 )
+                attack_seed, attack_seed_protocol_digest = _validated_attack_seed(
+                    attack_payload,
+                    generation_seed_random=int(row["generation_seed_random"]),
+                    attack_id=attack_identity["attack_id"],
+                    field_prefix=f"formal_attacks.{attack_name}",
+                )
                 for sample_role, source_path, source_score in (
                     ("attacked_negative", clean_path, clean_score),
                     ("attacked_positive", watermarked_path, watermarked_score),
@@ -456,6 +504,21 @@ def build_t2smark_observations(
                     if role_identity != attack_identity:
                         raise ValueError(
                             f"formal_attacks.{attack_name}.{sample_role} 攻击身份不一致"
+                        )
+                    role_attack_seed = _validated_attack_seed(
+                        role_payload,
+                        generation_seed_random=int(row["generation_seed_random"]),
+                        attack_id=attack_identity["attack_id"],
+                        field_prefix=(
+                            f"formal_attacks.{attack_name}.{sample_role}"
+                        ),
+                    )
+                    if role_attack_seed != (
+                        attack_seed,
+                        attack_seed_protocol_digest,
+                    ):
+                        raise ValueError(
+                            f"formal_attacks.{attack_name}.{sample_role} 攻击 seed 不一致"
                         )
                     attacked_image_path = str(role_payload.get("attacked_image_path") or "")
                     attacked_image_digest = str(role_payload.get("attacked_image_digest") or "")
@@ -491,6 +554,10 @@ def build_t2smark_observations(
                             attack_config_digest_value=attack_identity[
                                 "attack_config_digest"
                             ],
+                            attack_seed_random=attack_seed,
+                            formal_attack_seed_protocol_digest=(
+                                attack_seed_protocol_digest
+                            ),
                         )
                     )
 
@@ -543,6 +610,12 @@ def build_t2smark_observations(
                 attack_name=attack_name,
                 field_prefix=f"attacked_images[{attack_index}]",
             )
+            attack_seed, attack_seed_protocol_digest = _validated_attack_seed(
+                record,
+                generation_seed_random=int(row["generation_seed_random"]),
+                attack_id=attack_identity["attack_id"],
+                field_prefix=f"attacked_images[{attack_index}]",
+            )
             observations.append(
                 _observation(
                     event_id=str(record.get("attacked_image_id") or f"attacked_{attack_index:04d}"),
@@ -568,6 +641,10 @@ def build_t2smark_observations(
                     attack_config_digest_value=attack_identity[
                         "attack_config_digest"
                     ],
+                    attack_seed_random=attack_seed,
+                    formal_attack_seed_protocol_digest=(
+                        attack_seed_protocol_digest
+                    ),
                 )
             )
 

@@ -22,6 +22,7 @@ from experiments.protocol.method_runtime_config import (
 from experiments.protocol.formal_randomization import (
     DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
     build_canonical_sd35_base_latent,
+    formal_randomization_sample_reference,
     formal_random_trace_fields,
     formal_randomization_protocol_record,
     resolve_formal_randomization_repeat,
@@ -36,7 +37,12 @@ from experiments.runtime.diffusion.semantic_features import (
     DifferentiableSemanticFeatureRuntime,
     load_clip_vision_model,
 )
-from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from experiments.runtime.diffusion.regeneration_attacks import (
     DiffusionAttackRuntime,
     default_diffusion_attack_specs,
@@ -741,18 +747,25 @@ def validate_semantic_watermark_runtime_result_provenance(
     result_payload: Mapping[str, Any],
     *,
     expected_config: SemanticWatermarkRuntimeConfig | None = None,
+    unit_config: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """把持久化结果的配置、run id 与科学完成单元来源精确绑定."""
+    """用顶层 manifest 配置把结果、run id 与科学来源精确绑定."""
 
     payload = dict(result_payload)
     run_id = str(payload.get("run_id", ""))
     metadata = payload.get("metadata")
     if not isinstance(metadata, Mapping):
         raise TypeError("语义水印完成结果缺少 metadata")
-    unit_config = metadata.get("scientific_unit_config")
-    if not isinstance(unit_config, Mapping):
-        raise TypeError("语义水印完成结果缺少逐单元配置")
-    resolved_unit_config = dict(unit_config)
+    if expected_config is not None:
+        resolved_unit_config = semantic_watermark_runtime_config_payload(
+            expected_config
+        )
+        if unit_config is not None and dict(unit_config) != resolved_unit_config:
+            raise ValueError("顶层 manifest 配置与当前请求不一致")
+    elif isinstance(unit_config, Mapping):
+        resolved_unit_config = dict(unit_config)
+    else:
+        raise TypeError("结果复验必须提供顶层 manifest 逐单元配置")
     current_method_definition = semantic_conditioned_latent_method_definition()
     current_method_definition_digest = (
         semantic_conditioned_latent_method_definition_digest()
@@ -765,14 +778,10 @@ def validate_semantic_watermark_runtime_result_provenance(
     ):
         raise ValueError("语义水印逐单元配置未绑定当前方法定义")
     config_digest = build_stable_digest(resolved_unit_config)
+    if metadata.get("scientific_unit_config_digest") != config_digest:
+        raise ValueError("语义水印结果未引用顶层逐单元配置摘要")
     if run_id != f"semantic_watermark_{config_digest[:16]}":
         raise ValueError("语义水印 run id 与逐单元配置摘要不一致")
-    if (
-        expected_config is not None
-        and resolved_unit_config
-        != semantic_watermark_runtime_config_payload(expected_config)
-    ):
-        raise ValueError("语义水印逐单元配置与当前请求不一致")
     provenance = metadata.get("scientific_unit_provenance")
     if not isinstance(provenance, Mapping):
         raise TypeError("语义水印完成结果缺少科学运行来源记录")
@@ -1510,7 +1519,14 @@ def load_completed_semantic_watermark_runtime_result(
     except (OSError, json.JSONDecodeError):
         return None
     expected_config_digest = semantic_watermark_runtime_config_digest(config)
-    if manifest.get("config_digest") != expected_config_digest:
+    manifest_config = manifest.get("config")
+    if (
+        not isinstance(manifest_config, Mapping)
+        or manifest_config.get("scientific_unit_config_digest")
+        != expected_config_digest
+        or manifest.get("config_digest")
+        != build_stable_digest(manifest_config)
+    ):
         return None
     if manifest.get("code_version") != resolve_code_version(root_path):
         return None
@@ -3731,7 +3747,11 @@ def run_semantic_watermark_runtime(
     formal_randomization_identity[
         "formal_randomization_identity_digest_random"
     ] = build_stable_digest(formal_randomization_identity)
-    formal_randomization_identity.update(base_latent_identity)
+    sample_randomization_reference = formal_randomization_sample_reference(
+        formal_randomization_identity,
+        base_latent_identity=base_latent_identity,
+    )
+    attack_seed_protocol = formal_attack_seed_protocol_record()
     with torch.no_grad():
         clean_image = pipeline(
             latents=base_latent.detach().clone(),
@@ -4697,7 +4717,7 @@ def run_semantic_watermark_runtime(
                 "run_id": run_id,
                 "prompt_id": active_injection_config.prompt_id,
                 "split": active_injection_config.split,
-                **formal_randomization_identity,
+                **sample_randomization_reference,
                 "step_index": int(step_index),
                 "scheduler_step_timestep": float(timestep.detach().float().item()),
                 "post_step_schedule_index": int(post_step_index),
@@ -5005,7 +5025,7 @@ def run_semantic_watermark_runtime(
         record["sample_role"] = sample_role
         record.update(detection_key_identity)
         record["embedding_pair_ssim"] = float(paired_quality["ssim"])
-        record.update(formal_randomization_identity)
+        record.update(sample_randomization_reference)
         record["metadata"] = {
             **record["metadata"],
             "supports_paper_claim": False,
@@ -5028,11 +5048,15 @@ def run_semantic_watermark_runtime(
         and attack.resource_profile in set(config.standard_attack_profiles)
     )
     for sample_role, source_image in (("clean_negative", clean_image), ("positive_source", watermarked_image)):
-        for attack_index, attack_config in enumerate(attack_configs):
+        for attack_config in attack_configs:
+            attack_seed_random = formal_attack_seed_random(
+                int(config.seed),
+                attack_config.attack_id,
+            )
             attacked_image = apply_standard_image_attack(
                 source_image,
                 attack_config,
-                seed=config.seed + attack_index,
+                seed=attack_seed_random,
             )
             image_key = f"{sample_role}_{attack_config.attack_id}"
             attacked_images[image_key] = attacked_image
@@ -5062,12 +5086,18 @@ def run_semantic_watermark_runtime(
                     "sample_role": sample_role,
                     **registered_detection_key_identity,
                     "embedding_pair_ssim": float(paired_quality["ssim"]),
-                    **formal_randomization_identity,
+                    **sample_randomization_reference,
                     "attack_id": attack_config.attack_id,
                     "attack_family": attack_config.attack_family,
                     "attack_name": attack_config.attack_name,
                     "resource_profile": attack_config.resource_profile,
                     "attack_config_digest": attack_config_digest(attack_config),
+                    "attack_seed_random": attack_seed_random,
+                    "formal_attack_seed_protocol_digest": (
+                        attack_seed_protocol[
+                            "formal_attack_seed_protocol_digest"
+                        ]
+                    ),
                     "attack_parameters": attack_config.attack_parameters,
                     "attack_performed": True,
                     "attacked_image_key": image_key,
@@ -5088,11 +5118,15 @@ def run_semantic_watermark_runtime(
             attack.attack_id: attack for attack in default_attack_configs()
         }
         for sample_role, source_image in (("clean_negative", clean_image), ("positive_source", watermarked_image)):
-            for attack_index, attack_spec in enumerate(default_diffusion_attack_specs()):
+            for attack_spec in default_diffusion_attack_specs():
+                attack_seed_random = formal_attack_seed_random(
+                    int(config.seed),
+                    attack_spec.attack_id,
+                )
                 attack_execution = diffusion_attack_runtime.apply(
                     source_image,
                     attack_spec,
-                    seed=config.seed + 20000 + attack_index,
+                    seed=attack_seed_random,
                     prompt_text=config.prompt,
                     detection_score=adversarial_detection_score,
                 )
@@ -5125,13 +5159,19 @@ def run_semantic_watermark_runtime(
                         "sample_role": sample_role,
                         **registered_detection_key_identity,
                         "embedding_pair_ssim": float(paired_quality["ssim"]),
-                        **formal_randomization_identity,
+                        **sample_randomization_reference,
                         "attack_id": attack_spec.attack_id,
                         "attack_family": attack_spec.attack_family,
                         "attack_name": attack_spec.attack_name,
                         "resource_profile": "full_extra",
                         "attack_config_digest": attack_config_digest(
                             formal_attack_configs_by_id[attack_spec.attack_id]
+                        ),
+                        "attack_seed_random": attack_seed_random,
+                        "formal_attack_seed_protocol_digest": (
+                            attack_seed_protocol[
+                                "formal_attack_seed_protocol_digest"
+                            ]
                         ),
                         "attack_parameters": attack_spec.attack_parameters,
                         "attack_implementation": attack_spec.attack_implementation,
@@ -5151,6 +5191,7 @@ def run_semantic_watermark_runtime(
     elapsed_seconds = time.time() - started_at
     random_identity_random = {
         **formal_random_trace_fields(formal_randomization_identity),
+        **formal_random_trace_fields(base_latent_identity),
         "public_detection_seed_random": int(_public_detection_noise_seed(config)),
         "key_material_digest_random": build_stable_digest(
             {"key_material": config.key_material}
@@ -5166,12 +5207,18 @@ def run_semantic_watermark_runtime(
             ]
         ),
         "standard_attack_seeds_random": {
-            attack.attack_id: int(config.seed + attack_index)
-            for attack_index, attack in enumerate(attack_configs)
+            attack.attack_id: formal_attack_seed_random(
+                int(config.seed),
+                attack.attack_id,
+            )
+            for attack in attack_configs
         },
         "diffusion_attack_seeds_random": {
-            attack.attack_id: int(config.seed + 20000 + attack_index)
-            for attack_index, attack in enumerate(default_diffusion_attack_specs())
+            attack.attack_id: formal_attack_seed_random(
+                int(config.seed),
+                attack.attack_id,
+            )
+            for attack in default_diffusion_attack_specs()
         }
         if config.diffusion_attacks_enabled
         else {},
@@ -5206,8 +5253,8 @@ def run_semantic_watermark_runtime(
             "method_definition_digest": (
                 semantic_conditioned_latent_method_definition_digest()
             ),
-            "formal_randomization_identity": (
-                formal_randomization_identity
+            "formal_randomization_reference": (
+                sample_randomization_reference
             ),
             "detector_input_access_mode": "image_key_public_model_only",
             "public_detection_noise_prg_identity": detections[0][
@@ -5228,8 +5275,8 @@ def run_semantic_watermark_runtime(
             "final_image_attention_observability": (
                 final_image_attention_observability
             ),
-            "scientific_unit_config": semantic_watermark_runtime_config_payload(
-                config
+            "scientific_unit_config_digest": (
+                semantic_watermark_runtime_config_digest(config)
             ),
             "scientific_unit_provenance": scientific_unit_provenance,
         },
@@ -5516,6 +5563,9 @@ def write_semantic_watermark_runtime_outputs(
     )
     result_path.write_text(_stable_json(resolved_result.to_dict()), encoding="utf-8")
     manifest_path = run_dir / "manifest.local.json"
+    scientific_unit_config_digest = semantic_watermark_runtime_config_digest(
+        config
+    )
     manifest = build_artifact_manifest(
         artifact_id=f"{result.run_id}_manifest",
         artifact_type="local_manifest",
@@ -5539,7 +5589,12 @@ def write_semantic_watermark_runtime_outputs(
             manifest_path.relative_to(root_path).as_posix(),
             *attacked_image_paths,
         ),
-        config=semantic_watermark_runtime_config_payload(config),
+        config={
+            "scientific_unit_config_digest": scientific_unit_config_digest,
+            "formal_randomization_reference": resolved_metadata[
+                "formal_randomization_reference"
+            ],
+        },
         code_version=resolve_code_version(root_path),
         rebuild_command="调用 experiments.runners.semantic_watermark_runtime.write_semantic_watermark_runtime_outputs",
         metadata={

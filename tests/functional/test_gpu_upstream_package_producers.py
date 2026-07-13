@@ -33,6 +33,14 @@ from experiments.artifacts.dataset_level_quality_outputs import (
     path_digest,
 )
 from experiments.protocol.paper_run_config import build_paper_run_config
+from experiments.protocol.formal_randomization import (
+    formal_generation_seed,
+    formal_randomization_sample_reference,
+    formal_runtime_randomization_plan_record,
+    formal_watermark_key_material_from_seed,
+    formal_watermark_key_plan_record,
+    resolve_formal_randomization_repeat,
+)
 from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
     formal_dataset_quality_metric_protocol,
@@ -54,6 +62,7 @@ from experiments.runners.image_only_dataset_runtime import (
     _formal_attention_alignment_gate_record_ready,
     _write_prompt_source_snapshot,
     package_image_only_dataset_runtime,
+    validate_formal_dataset_randomization_identity,
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -151,6 +160,7 @@ def _runtime_result_payload(
     config: SemanticWatermarkRuntimeConfig,
     *,
     seed: int,
+    randomization_reference: dict[str, object],
 ) -> dict[str, object]:
     """构造配置、run id 与来源自摘要一致的最小完成结果."""
 
@@ -161,7 +171,8 @@ def _runtime_result_payload(
         "run_id": run_id,
         "run_decision": "pass",
         "metadata": {
-            "scientific_unit_config": unit_config,
+            "scientific_unit_config_digest": config_digest,
+            "formal_randomization_reference": randomization_reference,
             "scientific_unit_provenance": (
                 build_test_scientific_unit_provenance(
                     run_id,
@@ -180,11 +191,39 @@ def _base_runtime_config(
 ) -> SemanticWatermarkRuntimeConfig:
     """按正式论文配置构造一个 Prompt 的完整主方法运行身份."""
 
+    repeat = resolve_formal_randomization_repeat(
+        paper_run.randomization_repeat_id
+    )
+    key_record = next(
+        record
+        for record in formal_watermark_key_plan_record()[
+            "watermark_key_records"
+        ]
+        if record["watermark_key_index"] == repeat.watermark_key_index
+    )
+    key_seed = int(key_record["watermark_key_seed_random"])
+    base_generation_seed = SemanticWatermarkRuntimeConfig().seed
     return SemanticWatermarkRuntimeConfig(
         prompt=prompt_record.prompt_text,
         prompt_id=prompt_record.prompt_id,
         split=prompt_record.split,
-        seed=20260711 + prompt_record.prompt_index,
+        key_material=formal_watermark_key_material_from_seed(
+            key_seed,
+            repeat,
+        ),
+        seed=formal_generation_seed(
+            base_generation_seed,
+            prompt_record.prompt_index,
+            repeat,
+        ),
+        randomization_repeat_id=repeat.randomization_repeat_id,
+        generation_seed_index=repeat.generation_seed_index,
+        generation_seed_offset=repeat.generation_seed_offset,
+        watermark_key_index=repeat.watermark_key_index,
+        watermark_key_seed_random=key_seed,
+        formal_randomization_protocol_digest=(
+            paper_run.formal_randomization_protocol_digest
+        ),
         inference_steps=paper_run.inference_steps,
         guidance_scale=paper_run.guidance_scale,
         injection_step_indices=paper_run.attention_injection_steps,
@@ -246,8 +285,16 @@ def _prepare_image_runtime(
     }
     runtime_results = []
     scientific_unit_output_paths: list[str] = []
+    scientific_unit_identity_records: list[dict[str, object]] = []
     for prompt_record in prompt_records:
         config = _base_runtime_config(prompt_record, paper_run)
+        randomization_reference = formal_randomization_sample_reference(
+            validate_formal_dataset_randomization_identity(
+                config,
+                paper_run,
+                prompt_index=prompt_record.prompt_index,
+            )
+        )
         run_id = build_semantic_watermark_run_id(config)
         _, content_result, unit_manifest, _ = _artifact_fixture(
             root,
@@ -257,7 +304,8 @@ def _prepare_image_runtime(
         )
         result = _runtime_result_payload(
             config,
-            seed=20260711 + prompt_record.prompt_index,
+            seed=config.seed,
+            randomization_reference=randomization_reference,
         )
         result.update(
             {
@@ -291,8 +339,16 @@ def _prepare_image_runtime(
             )
         )
         unit_config = semantic_watermark_runtime_config_payload(config)
-        unit_manifest["config"] = unit_config
-        unit_manifest["config_digest"] = build_stable_digest(unit_config)
+        unit_manifest_config = {
+            "scientific_unit_config_digest": build_stable_digest(
+                unit_config
+            ),
+            "formal_randomization_reference": randomization_reference,
+        }
+        unit_manifest["config"] = unit_manifest_config
+        unit_manifest["config_digest"] = build_stable_digest(
+            unit_manifest_config
+        )
         unit_manifest_path.write_text(
             json.dumps(
                 unit_manifest,
@@ -303,6 +359,15 @@ def _prepare_image_runtime(
             encoding="utf-8",
         )
         scientific_unit_output_paths.extend(unit_manifest["output_paths"])
+        scientific_unit_identity_records.append(
+            {
+                "run_id": run_id,
+                "scientific_unit_config": unit_config,
+                "formal_randomization_reference": (
+                    randomization_reference
+                ),
+            }
+        )
         runtime_results.append(result)
     if digest_only:
         for result in runtime_results:
@@ -412,7 +477,7 @@ def _prepare_image_runtime(
             "prompt_source_contract_ready": True,
         },
     )
-    method_config = runtime_results[0]["metadata"][
+    method_config = scientific_unit_identity_records[0][
         "scientific_unit_config"
     ]
     manifest_config = {
@@ -421,6 +486,14 @@ def _prepare_image_runtime(
             "target_fpr": TARGET_FPR,
             **repeat_identity,
         },
+        "formal_randomization_plan": (
+            formal_runtime_randomization_plan_record(
+                SemanticWatermarkRuntimeConfig().seed
+            )
+        ),
+        "scientific_unit_identity_records": (
+            scientific_unit_identity_records
+        ),
         "method_config": method_config,
     }
     _write_json(
@@ -490,12 +563,38 @@ def _prepare_ablation(root: Path) -> Path:
     repeat_identity = _randomization_repeat_identity(paper_run)
     specs = default_runtime_rerun_ablation_specs()
     ablation_records: list[dict[str, object]] = []
+    scientific_unit_identity_records: list[dict[str, object]] = []
     for spec in specs:
         for prompt_record in prompt_records:
             base_config = _base_runtime_config(prompt_record, paper_run)
+            randomization_reference = formal_randomization_sample_reference(
+                validate_formal_dataset_randomization_identity(
+                    base_config,
+                    paper_run,
+                    prompt_index=prompt_record.prompt_index,
+                )
+            )
             run_config = spec.apply(
                 base_config,
                 f"outputs/formal_mechanism_ablation/{PAPER_RUN_NAME}",
+            )
+            runtime_result = _runtime_result_payload(
+                run_config,
+                seed=run_config.seed,
+                randomization_reference=randomization_reference,
+            )
+            scientific_unit_identity_records.append(
+                {
+                    "run_id": runtime_result["run_id"],
+                    "scientific_unit_config": (
+                        semantic_watermark_runtime_config_payload(
+                            run_config
+                        )
+                    ),
+                    "formal_randomization_reference": (
+                        randomization_reference
+                    ),
+                }
             )
             ablation_records.append(
                 {
@@ -506,10 +605,7 @@ def _prepare_ablation(root: Path) -> Path:
                     "split": prompt_record.split,
                     "ablation_id": spec.ablation_id,
                     "runtime_config": spec.to_dict(),
-                    "runtime_result": _runtime_result_payload(
-                        run_config,
-                        seed=run_config.seed,
-                    ),
+                    "runtime_result": runtime_result,
                     "formal_attack_coverage_ready": True,
                     "attacked_positive_rate": (
                         1.0 if spec.ablation_id == "complete_method" else 0.0
@@ -637,6 +733,14 @@ def _prepare_ablation(root: Path) -> Path:
         "specs": [spec.to_dict() for spec in specs],
         "target_fpr": TARGET_FPR,
         "randomization_repeat_identity": repeat_identity,
+        "formal_randomization_plan": (
+            formal_runtime_randomization_plan_record(
+                SemanticWatermarkRuntimeConfig().seed
+            )
+        ),
+        "scientific_unit_identity_records": (
+            scientific_unit_identity_records
+        ),
         **ablation_contract,
         **prompt_contract,
         **atom_identity,

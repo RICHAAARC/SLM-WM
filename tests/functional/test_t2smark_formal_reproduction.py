@@ -14,7 +14,11 @@ from typing import Any
 import pytest
 
 from experiments.runtime import repository_environment
-from experiments.protocol.attacks import attack_config_digest
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from experiments.protocol.formal_randomization import (
     build_formal_randomization_identity,
     formal_random_trace_fields,
@@ -159,6 +163,9 @@ def _write_results(path: Path, *, sample_count: int, missing_attack_name: str = 
         for attack_name in attack_names
         for config in (formal_image_attack_config(attack_name),)
     }
+    attack_seed_protocol_digest = formal_attack_seed_protocol_record()[
+        "formal_attack_seed_protocol_digest"
+    ]
     payload = {
         str(index): {
             "image_only_detection": {
@@ -168,13 +175,34 @@ def _write_results(path: Path, *, sample_count: int, missing_attack_name: str = 
             "formal_attacks": {
                 attack_name: {
                     **attack_identities[attack_name],
+                    "attack_seed_random": formal_attack_seed_random(
+                        DEFAULT_T2SMARK_SEED + index,
+                        attack_identities[attack_name]["attack_id"],
+                    ),
+                    "formal_attack_seed_protocol_digest": (
+                        attack_seed_protocol_digest
+                    ),
                     "attack_name": attack_name,
                     "attacked_negative": {
                         **attack_identities[attack_name],
+                        "attack_seed_random": formal_attack_seed_random(
+                            DEFAULT_T2SMARK_SEED + index,
+                            attack_identities[attack_name]["attack_id"],
+                        ),
+                        "formal_attack_seed_protocol_digest": (
+                            attack_seed_protocol_digest
+                        ),
                         "detection_score": 0.1,
                     },
                     "attacked_positive": {
                         **attack_identities[attack_name],
+                        "attack_seed_random": formal_attack_seed_random(
+                            DEFAULT_T2SMARK_SEED + index,
+                            attack_identities[attack_name]["attack_id"],
+                        ),
+                        "formal_attack_seed_protocol_digest": (
+                            attack_seed_protocol_digest
+                        ),
                         "detection_score": 0.9,
                     },
                 }
@@ -548,11 +576,16 @@ def test_t2smark_fixed_patch_passes_exact_model_revision() -> None:
     assert "build_t2smark_formal_unit_record" in patch_text
     assert 'prompt_identity["split"] == "test"' in patch_text
     assert "build_canonical_sd35_base_latent" in patch_text
+    assert "formal_attack_seed_random" in patch_text
+    assert "formal_attack_seed_protocol_record" in patch_text
+    assert '"attack_seed_random": attack_seed_random' in patch_text
+    assert '"formal_attack_seed_protocol_digest"' in patch_text
     assert "clean_z_k = clean_base_latents[0, args.key_channel_idx, :, :]" in patch_text
     assert "base_noise=clean_z_k" in patch_text
     assert "base_noise=clean_z_b" in patch_text
     assert "utils.set_random_seed(args.slm_watermark_seed + prompt_id)" in patch_text
-    assert "**base_latent_identity" in patch_text
+    assert "base_latent_content_digest_random" in patch_text
+    assert "base_latent_identity_digest_random" in patch_text
     assert "t2smark_secret_material_digest_random" in patch_text
     assert "return_base=True" not in patch_text
 
@@ -614,6 +647,19 @@ def test_t2smark_fixed_patch_applies_to_registered_source_snapshot(
     report = verify_exact_t2smark_protocol_worktree(clean_source, patch_path)
     _verify_formal_source(clean_source / "run_sd35.py")
     assert report["source_worktree_exact"] is True
+
+    source_entry = clean_source / "run_sd35.py"
+    source_text = source_entry.read_text(encoding="utf-8")
+    source_entry.write_text(
+        source_text.replace(
+            '"generation_seed_random": int(',
+            '"generation_seed_random_missing": int(',
+            1,
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="严格配对记录缺少正式随机化身份字段"):
+        _verify_formal_source(source_entry)
 
 
 class _FixtureCuda:
@@ -975,6 +1021,13 @@ def _write_package_fixture(
         if prompt_row["split"] == "test":
             for attack_name in attack_names:
                 attack_config = formal_image_attack_config(attack_name)
+                attack_seed = formal_attack_seed_random(
+                    DEFAULT_T2SMARK_SEED + index,
+                    attack_config.attack_id,
+                )
+                attack_seed_protocol_digest = formal_attack_seed_protocol_record()[
+                    "formal_attack_seed_protocol_digest"
+                ]
                 attack_identity = {
                     "attack_id": attack_config.attack_id,
                     "resource_profile": attack_config.resource_profile,
@@ -995,12 +1048,20 @@ def _write_package_fixture(
                     ).save(attack_path)
                     role_rows[sample_role] = {
                         **attack_identity,
+                        "attack_seed_random": attack_seed,
+                        "formal_attack_seed_protocol_digest": (
+                            attack_seed_protocol_digest
+                        ),
                         "detection_score": 0.2 if sample_role == "attacked_negative" else 0.8,
                         "attacked_image_path": str(attack_path),
                         "attacked_image_digest": t2smark_runtime.file_digest(attack_path),
                     }
                 formal_attacks[attack_name] = {
                     **attack_identity,
+                    "attack_seed_random": attack_seed,
+                    "formal_attack_seed_protocol_digest": (
+                        attack_seed_protocol_digest
+                    ),
                     "attack_family": attack_config.attack_family,
                     "attack_name": attack_name,
                     **role_rows,

@@ -57,6 +57,7 @@ RECORD_GROUP_THRESHOLD_BINDING = "threshold_binding"
 RECORD_GROUP_REFERENCE = "reference"
 RECORD_GROUP_PROMPT_RUNTIME = "prompt_runtime"
 RECORD_GROUP_PROMPT_SOURCE = "prompt_source"
+RECORD_GROUP_RUN_MANIFEST = "run_manifest"
 
 
 class RandomizationAggregateRecordWorkspaceError(ValueError):
@@ -110,6 +111,16 @@ class _RecordMemberSpec:
 
 
 _ACTIVE_RECORD_MEMBER_SPECS = (
+    _RecordMemberSpec(
+        package_family="image_only_dataset_runtime",
+        record_group=RECORD_GROUP_RUN_MANIFEST,
+        record_role="semantic_watermark_dataset_manifest",
+        member_template=(
+            "outputs/image_only_dataset_runtime/{paper_run}/"
+            "manifest.local.json"
+        ),
+        record_format=RECORD_FORMAT_JSON_OBJECT,
+    ),
     _RecordMemberSpec(
         package_family="image_only_dataset_runtime",
         record_group=RECORD_GROUP_PROMPT_RUNTIME,
@@ -172,6 +183,16 @@ _ACTIVE_RECORD_MEMBER_SPECS = (
     ),
     _RecordMemberSpec(
         package_family="method_faithful_tree_ring",
+        record_group=RECORD_GROUP_RUN_MANIFEST,
+        record_role="tree_ring_baseline_run_manifest",
+        member_template=(
+            "outputs/external_baseline_method_faithful/{paper_run}/"
+            "run_records/tree_ring/tree_ring_manifest.local.json"
+        ),
+        record_format=RECORD_FORMAT_JSON_OBJECT,
+    ),
+    _RecordMemberSpec(
+        package_family="method_faithful_tree_ring",
         record_group=RECORD_GROUP_OBSERVATION,
         record_role="tree_ring_baseline_observation",
         member_template=(
@@ -187,6 +208,17 @@ _ACTIVE_RECORD_MEMBER_SPECS = (
         member_template=(
             "outputs/external_baseline_method_faithful/{paper_run}/"
             "split_observations/tree_ring_baseline_transfer_manifest.json"
+        ),
+        record_format=RECORD_FORMAT_JSON_OBJECT,
+    ),
+    _RecordMemberSpec(
+        package_family="method_faithful_gaussian_shading",
+        record_group=RECORD_GROUP_RUN_MANIFEST,
+        record_role="gaussian_shading_baseline_run_manifest",
+        member_template=(
+            "outputs/external_baseline_method_faithful/{paper_run}/"
+            "run_records/gaussian_shading/"
+            "gaussian_shading_manifest.local.json"
         ),
         record_format=RECORD_FORMAT_JSON_OBJECT,
     ),
@@ -212,6 +244,17 @@ _ACTIVE_RECORD_MEMBER_SPECS = (
     ),
     _RecordMemberSpec(
         package_family="method_faithful_shallow_diffuse",
+        record_group=RECORD_GROUP_RUN_MANIFEST,
+        record_role="shallow_diffuse_baseline_run_manifest",
+        member_template=(
+            "outputs/external_baseline_method_faithful/{paper_run}/"
+            "run_records/shallow_diffuse/"
+            "shallow_diffuse_manifest.local.json"
+        ),
+        record_format=RECORD_FORMAT_JSON_OBJECT,
+    ),
+    _RecordMemberSpec(
+        package_family="method_faithful_shallow_diffuse",
         record_group=RECORD_GROUP_OBSERVATION,
         record_role="shallow_diffuse_baseline_observation",
         member_template=(
@@ -227,6 +270,16 @@ _ACTIVE_RECORD_MEMBER_SPECS = (
         member_template=(
             "outputs/external_baseline_method_faithful/{paper_run}/"
             "split_observations/shallow_diffuse_baseline_transfer_manifest.json"
+        ),
+        record_format=RECORD_FORMAT_JSON_OBJECT,
+    ),
+    _RecordMemberSpec(
+        package_family="official_reference_t2smark",
+        record_group=RECORD_GROUP_RUN_MANIFEST,
+        record_role="t2smark_baseline_run_manifest",
+        member_template=(
+            "outputs/t2smark_formal_reproduction/{paper_run}/"
+            "t2smark_formal_reproduction_manifest.local.json"
         ),
         record_format=RECORD_FORMAT_JSON_OBJECT,
     ),
@@ -1367,6 +1420,7 @@ __all__ = [
     "RECORD_GROUP_REFERENCE",
     "RECORD_GROUP_PROMPT_RUNTIME",
     "RECORD_GROUP_PROMPT_SOURCE",
+    "RECORD_GROUP_RUN_MANIFEST",
     "RandomizationAggregateRecordSource",
     "RandomizationAggregateQualityFeaturePair",
     "RandomizationAggregateRecordWorkspace",

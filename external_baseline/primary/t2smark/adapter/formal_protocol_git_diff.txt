@@ -35,7 +35,7 @@ index ac9a041..22a9fb5 100644
  args = parse_args()
 -
 diff --git a/run_sd35.py b/run_sd35.py
-index 39c07d7..d209955 100644
+index 39c07d7..c9889ea 100644
 --- a/run_sd35.py
 +++ b/run_sd35.py
 @@ -1,4 +1,5 @@
@@ -44,7 +44,7 @@ index 39c07d7..d209955 100644
  import json
  import torch
  import open_clip
-@@ -13,6 +14,34 @@ from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
+@@ -13,6 +14,38 @@ from src.inversion.inverse_diffusion3 import InversionDiffusion3Pipeline
  
  from option import args
  
@@ -63,6 +63,10 @@ index 39c07d7..d209955 100644
 +    build_canonical_sd35_base_latent,
 +    formal_random_trace_fields,
 +)
++from experiments.protocol.attacks import (
++    formal_attack_seed_protocol_record,
++    formal_attack_seed_random,
++)
 +from external_baseline.primary.t2smark.adapter.formal_unit_checkpoint import (
 +    aggregate_t2smark_formal_unit_records,
 +    atomic_save_png,
@@ -79,7 +83,7 @@ index 39c07d7..d209955 100644
  args.key_channel_idx = (0, 1, 2, 3)
  device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
  msg_channel_idx = [i for i in range(16) if i not in args.key_channel_idx]
-@@ -23,7 +52,7 @@ def setup_clip_measure_function():
+@@ -23,7 +56,7 @@ def setup_clip_measure_function():
      open_clip_model.eval()
      open_clip_tokenizer = open_clip.get_tokenizer('ViT-B-32')
  
@@ -88,7 +92,7 @@ index 39c07d7..d209955 100644
                     tokenizer=open_clip_tokenizer, clip_preprocess=preprocess, device=device)
  
  def decode(post_reversed_latents, master_key, key, fake_key, msg):
-@@ -45,27 +74,142 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
+@@ -45,27 +78,142 @@ def decode(post_reversed_latents, master_key, key, fake_key, msg):
          "acc_msg": acc_msg.item()
      }
  
@@ -239,7 +243,7 @@ index 39c07d7..d209955 100644
  
  results = {}
  if args.clip_test_num > 0: clip_score_fn = setup_clip_measure_function()
-@@ -81,25 +225,61 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+@@ -81,25 +229,61 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
  
          if prompt_id >= args.clip_test_num and prompt_id >= args.robust_test_num:
              break
@@ -308,7 +312,7 @@ index 39c07d7..d209955 100644
  
          generated_image = pipe(
              prompt,
-@@ -114,9 +294,46 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+@@ -114,9 +298,57 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
          if prompt_id < args.clip_test_num:
              clip_score = clip_score_fn(generated_image, prompt).item()
              results[prompt_id]["clip_score"] = clip_score
@@ -326,7 +330,12 @@ index 39c07d7..d209955 100644
 +            atomic_save_png(clean_pair_image, clean_pair_path)
 +            results[prompt_id]["pair_quality"] = {
 +                "pair_quality_protocol": "strict_clean_watermarked_pair",
-+                **base_latent_identity,
++                "base_latent_content_digest_random": base_latent_identity[
++                    "base_latent_content_digest_random"
++                ],
++                "base_latent_identity_digest_random": base_latent_identity[
++                    "base_latent_identity_digest_random"
++                ],
 +                "randomization_repeat_id": prompt_identity[
 +                    "randomization_repeat_id"
 +                ],
@@ -336,6 +345,9 @@ index 39c07d7..d209955 100644
 +                "generation_seed_offset": int(
 +                    prompt_identity["generation_seed_offset"]
 +                ),
++                "generation_seed_random": int(
++                    prompt_identity["generation_seed_random"]
++                ),
 +                "watermark_key_index": int(
 +                    prompt_identity["watermark_key_index"]
 +                ),
@@ -344,6 +356,9 @@ index 39c07d7..d209955 100644
 +                ),
 +                "watermark_key_material_digest_random": prompt_identity[
 +                    "watermark_key_material_digest_random"
++                ],
++                "formal_randomization_protocol_digest": prompt_identity[
++                    "formal_randomization_protocol_digest"
 +                ],
 +                "formal_randomization_identity_digest_random": prompt_identity[
 +                    "formal_randomization_identity_digest_random"
@@ -357,7 +372,7 @@ index 39c07d7..d209955 100644
          if prompt_id < args.robust_test_num:
              noised_image = utils.image_distortion(generated_image, args.seed + prompt_id, args)
  
-@@ -126,13 +343,140 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
+@@ -126,13 +358,155 @@ with tqdm(total=max(args.robust_test_num, args.clip_test_num)) as pbar:
                  latents=latents,
                  num_inference_steps=args.num_inversion_steps
              )
@@ -396,6 +411,13 @@ index 39c07d7..d209955 100644
 +                    attack_matrix_family = canonical_attack_family(formal_attack_name)
 +                    attack_matrix_name = canonical_attack_name(formal_attack_name)
 +                    attack_identity = formal_image_attack_identity(formal_attack_name)
++                    attack_seed_random = formal_attack_seed_random(
++                        generation_seed_random,
++                        attack_identity["attack_id"],
++                    )
++                    attack_seed_protocol_digest = formal_attack_seed_protocol_record()[
++                        "formal_attack_seed_protocol_digest"
++                    ]
 +                    attack_result = {
 +                        "attack_id": attack_identity["attack_id"],
 +                        "resource_profile": attack_identity["resource_profile"],
@@ -403,6 +425,10 @@ index 39c07d7..d209955 100644
 +                        "attack_family": attack_matrix_family,
 +                        "attack_name": attack_matrix_name,
 +                        "attack_condition": attack_matrix_name,
++                        "attack_seed_random": attack_seed_random,
++                        "formal_attack_seed_protocol_digest": (
++                            attack_seed_protocol_digest
++                        ),
 +                    }
 +                    for source_role, source_image in (
 +                        ("attacked_negative", clean_pair_image),
@@ -411,7 +437,7 @@ index 39c07d7..d209955 100644
 +                        attacked_image, attack_transform_name, attack_execution = apply_formal_image_attack(
 +                            source_image,
 +                            attack_family=formal_attack_name,
-+                            seed=args.seed + prompt_id,
++                            seed=attack_seed_random,
 +                            pipe=pipe,
 +                            prompt=prompt,
 +                            size=512,
@@ -445,6 +471,10 @@ index 39c07d7..d209955 100644
 +                            "attack_id": attack_identity["attack_id"],
 +                            "resource_profile": attack_identity["resource_profile"],
 +                            "attack_config_digest": attack_identity["attack_config_digest"],
++                            "attack_seed_random": attack_seed_random,
++                            "formal_attack_seed_protocol_digest": (
++                                attack_seed_protocol_digest
++                            ),
 +                            "detection_score": float(formal_decode_result["norm1_w"]),
 +                            "attack_transform_name": attack_transform_name,
 +                            "attack_execution": attack_execution,
@@ -499,7 +529,7 @@ index 39c07d7..d209955 100644
  if args.robust_test_num > 0:
      total_acc = 0
      no_w_metrics = []
-@@ -161,8 +505,6 @@ if args.clip_test_num > 0:
+@@ -161,8 +535,6 @@ if args.clip_test_num > 0:
              total_clip_score += results[v]['clip_score']
      results["clip_score"] = total_clip_score / args.clip_test_num
  

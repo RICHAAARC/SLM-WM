@@ -38,17 +38,31 @@ from experiments.protocol.paper_run_config import (
     build_paper_run_config,
     normalize_paper_run_name,
 )
-from experiments.protocol.attacks import attack_config_digest, default_attack_configs
+from experiments.protocol.formal_randomization import (
+    formal_runtime_randomization_plan_record,
+)
+from experiments.protocol.method_runtime_config import (
+    FORMAL_METHOD_PACKAGE_ROOT,
+    load_formal_method_runtime_config,
+)
+from experiments.protocol.attacks import (
+    attack_config_digest,
+    default_attack_configs,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
 from experiments.protocol.splits import apply_split_assignments, group_prompt_ids_by_split
 from experiments.runners.image_only_dataset_runtime import (
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
+    validate_formal_dataset_randomization_identity,
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     load_completed_semantic_watermark_runtime_result,
     load_semantic_watermark_runtime_context,
+    semantic_watermark_runtime_config_payload,
     validate_semantic_watermark_runtime_result_provenance,
     write_semantic_watermark_runtime_outputs,
 )
@@ -58,6 +72,26 @@ from main.methods.geometry import ATTENTION_RELATION_COMPONENT_WEIGHTS
 
 
 PACKAGE_INPUT_MANIFEST_FILE_NAME = "mechanism_ablation_package_input_manifest.json"
+_FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
+    FORMAL_METHOD_PACKAGE_ROOT
+)
+
+
+def runtime_rerun_randomization_plan(
+    config: SemanticWatermarkRuntimeConfig,
+) -> dict[str, Any]:
+    """构造消融顶层 manifest 使用的完整随机身份计划."""
+
+    return formal_runtime_randomization_plan_record(
+        _FORMAL_METHOD_CONFIG.seed,
+        base_latent_dtype=f"torch.{config.torch_dtype}",
+        base_latent_shape=(
+            1,
+            16,
+            config.height // 8,
+            config.width // 8,
+        ),
+    )
 
 
 def _read_jsonl(path: Path) -> tuple[dict[str, Any], ...]:
@@ -298,6 +332,16 @@ def _canonical_prompt_contract(
     )
     if not exact_set_ready:
         raise ValueError("正式消融必须精确覆盖当前论文运行的规范 Prompt 与 split")
+    prompt_index_by_id = {
+        record.prompt_id: record.prompt_index
+        for record in canonical_records
+    }
+    for config in base_configs:
+        validate_formal_dataset_randomization_identity(
+            config,
+            paper_run,
+            prompt_index=prompt_index_by_id[config.prompt_id],
+        )
     split_prompt_ids = group_prompt_ids_by_split(canonical_records)
     return {
         "prompt_id_digest": build_stable_digest(sorted(expected_by_id)),
@@ -339,8 +383,18 @@ def _formal_attack_coverage_ready(
         len(rows) != 1 for rows in actual_by_key.values()
     ):
         return False
+    attack_seed_protocol_digest = formal_attack_seed_protocol_record()[
+        "formal_attack_seed_protocol_digest"
+    ]
     for key, config in expected_by_key.items():
         record = actual_by_key[key][0]
+        try:
+            expected_attack_seed = formal_attack_seed_random(
+                record.get("generation_seed_random"),
+                config.attack_id,
+            )
+        except (TypeError, ValueError):
+            return False
         if not all(
             (
                 record.get("attack_family") == config.attack_family,
@@ -349,6 +403,9 @@ def _formal_attack_coverage_ready(
                 record.get("attack_config_digest") == attack_config_digest(config),
                 record.get("attack_parameters") == config.attack_parameters,
                 record.get("attack_performed") is True,
+                record.get("attack_seed_random") == expected_attack_seed,
+                record.get("formal_attack_seed_protocol_digest")
+                == attack_seed_protocol_digest,
             )
         ):
             return False
@@ -504,6 +561,7 @@ def run_runtime_rerun_ablations(
 
     shared_context = None
     run_entries: list[dict[str, Any]] = []
+    scientific_unit_identity_records: list[dict[str, Any]] = []
     resumed_run_count = 0
     new_run_count = 0
     expected_run_count = len(resolved_base_configs) * len(resolved_specs)
@@ -564,6 +622,17 @@ def run_runtime_rerun_ablations(
             validate_semantic_watermark_runtime_result_provenance(
                 result_payload,
                 expected_config=run_config,
+            )
+            scientific_unit_identity_records.append(
+                {
+                    "run_id": result_payload["run_id"],
+                    "scientific_unit_config": (
+                        semantic_watermark_runtime_config_payload(run_config)
+                    ),
+                    "formal_randomization_reference": result_payload[
+                        "metadata"
+                    ]["formal_randomization_reference"],
+                }
             )
             detections = _read_jsonl(root_path / result.detection_record_path)
             run_entries.append(_run_entry(prompt_index, base_config, spec, result, detections))
@@ -878,6 +947,12 @@ def run_runtime_rerun_ablations(
             manifest_path.relative_to(root_path).as_posix(),
         ),
         config={
+            "formal_randomization_plan": runtime_rerun_randomization_plan(
+                resolved_base_configs[0]
+            ),
+            "scientific_unit_identity_records": (
+                scientific_unit_identity_records
+            ),
             "specs": [spec.to_dict() for spec in resolved_specs],
             **ablation_contract,
             **prompt_contract,
@@ -1006,16 +1081,52 @@ def package_runtime_rerun_ablations(
     summary = json.loads((source_dir / "ablation_component_summary.json").read_text(encoding="utf-8-sig"))
     manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
     packaged_records = _read_jsonl(source_dir / "runtime_rerun_records.jsonl")
+    manifest_config = manifest.get("config", {})
+    unit_identity_records = manifest_config.get(
+        "scientific_unit_identity_records"
+    )
+    if not isinstance(unit_identity_records, list):
+        raise RuntimeError("消融顶层 manifest 缺少逐单元完整身份正文")
+    unit_identity_by_run_id = {
+        str(record.get("run_id", "")): record
+        for record in unit_identity_records
+        if isinstance(record, dict)
+    }
+    if (
+        len(unit_identity_by_run_id) != len(unit_identity_records)
+        or len(unit_identity_by_run_id) != len(packaged_records)
+    ):
+        raise RuntimeError("消融顶层 manifest 的逐单元身份集合无效")
+    packaged_unit_configs: list[dict[str, Any]] = []
     for record in packaged_records:
+        runtime_result = record["runtime_result"]
+        unit_identity = unit_identity_by_run_id.get(
+            str(runtime_result.get("run_id", ""))
+        )
+        unit_config = (
+            unit_identity.get("scientific_unit_config")
+            if isinstance(unit_identity, dict)
+            else None
+        )
+        if not isinstance(unit_config, dict) or unit_identity.get(
+            "formal_randomization_reference"
+        ) != runtime_result.get("metadata", {}).get(
+            "formal_randomization_reference"
+        ):
+            raise RuntimeError("消融结果未引用顶层 manifest 随机身份")
         validate_semantic_watermark_runtime_result_provenance(
-            record["runtime_result"]
+            runtime_result,
+            unit_config=unit_config,
         )
+        packaged_unit_configs.append(unit_config)
     packaged_unit_config_contract_ready = all(
-        record["runtime_result"]["metadata"]["scientific_unit_config"].get(
-            field_name
-        )
+        unit_config.get(field_name)
         == record["runtime_config"][field_name]
-        for record in packaged_records
+        for record, unit_config in zip(
+            packaged_records,
+            packaged_unit_configs,
+            strict=True,
+        )
         for field_name in (
             "semantic_routing_enabled",
             "branch_risk_mode",
@@ -1028,29 +1139,31 @@ def package_runtime_rerun_ablations(
             "attention_relation_component_weights",
         )
     ) and all(
-        record["runtime_result"]["metadata"]["scientific_unit_config"].get(
-            field_name
-        )
+        unit_config.get(field_name)
         == record[field_name]
-        for record in packaged_records
+        for record, unit_config in zip(
+            packaged_records,
+            packaged_unit_configs,
+            strict=True,
+        )
         for field_name in ("prompt_id", "split")
     ) and all(
         build_stable_digest(
             {
-                "prompt_text": record["runtime_result"]["metadata"][
-                    "scientific_unit_config"
-                ]["prompt"]
+                "prompt_text": unit_config["prompt"]
             }
         )
         == record["prompt_digest"]
-        and record["runtime_result"]["metadata"]["scientific_unit_config"].get(
-            "output_dir"
-        )
+        and unit_config.get("output_dir")
         == (
             f"outputs/formal_mechanism_ablation/"
             f"{resolved_paper_run_name}/runs/{record['ablation_id']}"
         )
-        for record in packaged_records
+        for record, unit_config in zip(
+            packaged_records,
+            packaged_unit_configs,
+            strict=True,
+        )
     )
     packaged_scientific_unit_provenance = aggregate_scientific_unit_provenance(
         (
@@ -1070,7 +1183,6 @@ def package_runtime_rerun_ablations(
         manifest.get("code_version"),
     )
     expected_ids = list(FORMAL_RUNTIME_RERUN_ABLATION_IDS)
-    manifest_config = manifest.get("config", {})
     manifest_metadata = manifest.get("metadata", {})
     with (source_dir / "mechanism_ablation_metrics.csv").open(
         encoding="utf-8-sig",

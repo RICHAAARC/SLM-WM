@@ -10,6 +10,10 @@ from typing import Any, Iterable, Mapping
 
 import numpy as np
 
+from experiments.protocol.attacks import (
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
+)
 from main.core.digest import build_stable_digest
 
 
@@ -108,6 +112,8 @@ class PairedOutcome:
     attack_name: str
     resource_profile: str
     attack_config_digest: str
+    attack_seed_random: int
+    formal_attack_seed_protocol_digest: str
     proposed_method_threshold_digest: str
     baseline_method_threshold_digest: str
     proposed_decision: bool
@@ -151,6 +157,10 @@ class PairedOutcome:
             "attack_name": self.attack_name,
             "resource_profile": self.resource_profile,
             "attack_config_digest": self.attack_config_digest,
+            "attack_seed_random": self.attack_seed_random,
+            "formal_attack_seed_protocol_digest": (
+                self.formal_attack_seed_protocol_digest
+            ),
             "proposed_method_threshold_digest": self.proposed_method_threshold_digest,
             "baseline_method_threshold_digest": self.baseline_method_threshold_digest,
             "proposed_decision": self.proposed_decision,
@@ -458,7 +468,7 @@ def _validate_observation_attack_identity(
     registry_row: Mapping[str, str],
     *,
     require_declared_identity: bool,
-) -> None:
+) -> tuple[int, str]:
     """核验 observation 声明的攻击身份与正式 registry 一致."""
 
     for field_name in ("attack_id", "resource_profile", "attack_config_digest"):
@@ -469,6 +479,32 @@ def _validate_observation_attack_identity(
             raise PairedSuperiorityError(
                 f"observation 的 {field_name} 与正式攻击 registry 不一致"
             )
+    generation_seed_random = _normalize_integer(
+        row.get("generation_seed_random"),
+        "generation_seed_random",
+    )
+    expected_attack_seed = formal_attack_seed_random(
+        generation_seed_random,
+        str(registry_row["attack_id"]),
+    )
+    actual_attack_seed = _normalize_integer(
+        row.get("attack_seed_random"),
+        "attack_seed_random",
+    )
+    if actual_attack_seed != expected_attack_seed:
+        raise PairedSuperiorityError(
+            "observation 的 attack_seed_random 未匹配统一攻击公式"
+        )
+    expected_protocol_digest = formal_attack_seed_protocol_record()[
+        "formal_attack_seed_protocol_digest"
+    ]
+    actual_protocol_digest = _sha256_text(
+        row.get("formal_attack_seed_protocol_digest", ""),
+        "formal_attack_seed_protocol_digest",
+    )
+    if actual_protocol_digest != expected_protocol_digest:
+        raise PairedSuperiorityError("observation 的攻击 seed 协议发生漂移")
+    return actual_attack_seed, actual_protocol_digest
 
 
 def _paired_randomization_identity(
@@ -680,16 +716,20 @@ def build_paired_outcomes(
         proposed_row = proposed_by_key[(prompt_id, attack_family, attack_name)]
         baseline_row = baseline_by_key[(prompt_id, attack_family, attack_name)]
         registry_row = registry_by_key[(attack_family, attack_name)]
-        _validate_observation_attack_identity(
+        proposed_attack_seed = _validate_observation_attack_identity(
             proposed_row,
             registry_row,
             require_declared_identity=True,
         )
-        _validate_observation_attack_identity(
+        baseline_attack_seed = _validate_observation_attack_identity(
             baseline_row,
             registry_row,
             require_declared_identity=True,
         )
+        if proposed_attack_seed != baseline_attack_seed:
+            raise PairedSuperiorityError(
+                f"{baseline_id} 未使用与主方法相同的攻击随机 seed"
+            )
         proposed_randomization = _paired_randomization_identity(proposed_row)
         baseline_randomization = _paired_randomization_identity(baseline_row)
         if proposed_randomization != baseline_randomization:
@@ -719,6 +759,8 @@ def build_paired_outcomes(
             attack_name=attack_name,
             resource_profile=registry_row["resource_profile"],
             attack_config_digest=registry_row["attack_config_digest"],
+            attack_seed_random=proposed_attack_seed[0],
+            formal_attack_seed_protocol_digest=proposed_attack_seed[1],
             proposed_method_threshold_digest=proposed_threshold_digest,
             baseline_method_threshold_digest=baseline_threshold_digest,
             proposed_decision=_verified_decision(

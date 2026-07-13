@@ -188,7 +188,7 @@ def test_scientific_unit_provenance_rejects_out_of_range_cuda_index() -> None:
 
 
 def test_semantic_runtime_result_binds_run_id_to_complete_unit_config() -> None:
-    """打包复验必须从结果内完整配置重算 run id 与 provenance 摘要."""
+    """打包复验必须从顶层 manifest 配置重算 run id 与 provenance 摘要."""
 
     config = SemanticWatermarkRuntimeConfig(
         prompt="a governed test prompt",
@@ -209,8 +209,8 @@ def test_semantic_runtime_result_binds_run_id_to_complete_unit_config() -> None:
     result = {
         "run_id": run_id,
         "metadata": {
-            "scientific_unit_config": semantic_watermark_runtime_config_payload(
-                config
+            "scientific_unit_config_digest": (
+                semantic_watermark_runtime_config_digest(config)
             ),
             "scientific_unit_provenance": provenance,
         },
@@ -220,14 +220,18 @@ def test_semantic_runtime_result_binds_run_id_to_complete_unit_config() -> None:
         result,
         expected_config=config,
     )
-    tampered = deepcopy(result)
-    tampered["metadata"]["scientific_unit_config"]["seed"] = 20
-    with pytest.raises(ValueError, match="run id 与逐单元配置摘要不一致"):
-        validate_semantic_watermark_runtime_result_provenance(tampered)
+    tampered_config = semantic_watermark_runtime_config_payload(config)
+    tampered_config["seed"] = 20
+    with pytest.raises(ValueError, match="未引用顶层逐单元配置摘要"):
+        validate_semantic_watermark_runtime_result_provenance(
+            result,
+            unit_config=tampered_config,
+        )
 
-    method_tampered = deepcopy(result)
-    method_tampered["metadata"]["scientific_unit_config"][
-        "method_definition_digest"
-    ] = "0" * 64
+    method_tampered = semantic_watermark_runtime_config_payload(config)
+    method_tampered["method_definition_digest"] = "0" * 64
     with pytest.raises(ValueError, match="未绑定当前方法定义"):
-        validate_semantic_watermark_runtime_result_provenance(method_tampered)
+        validate_semantic_watermark_runtime_result_provenance(
+            result,
+            unit_config=method_tampered,
+        )
