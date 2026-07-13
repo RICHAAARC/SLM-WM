@@ -5,6 +5,7 @@
 ## 当前方法文档
 
 - `builds/method_semantic_invariants.md`: 核心方法数学语义的权威来源, 冻结可证伪不变量、风险写回包络、逐列 Jacobian 参考和 CPU/GPU 证据边界。
+- `builds/method_conformance_report.md`: 核心方法独立正反例审计结论及仍须真实 GPU 验证的边界。
 - `builds/algorithm_primitives_semantic_conditioned_latent_manifold_watermark.md`: 算法原语的规范来源, 定义分支风险、真实 Jacobian Null Space、空间 LF、高斯幅值尾部截断、Q/K attention geometry 和仅图像 fixed-FPR 检测。
 - `builds/method_section_semantic_conditioned_latent_manifold_watermark.md`: 论文方法章节的规范草稿, 当前实现必须由独立性质测试逐项证明与其一致。
 - `builds/real_scientific_operator_implementation.md`: 科学算子到代码文件、实验入口和论文主张门禁的映射。
