@@ -44,6 +44,9 @@ from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     audit_baseline_fixed_fpr,
     audit_main_method_fixed_fpr,
 )
+from paper_experiments.analysis.formal_record_statistics import (
+    validate_frozen_evidence_protocol_record,
+)
 
 
 METHOD_REPEAT_THRESHOLD_SCHEMA = "method_repeat_fixed_fpr_threshold_record"
@@ -675,8 +678,10 @@ def _validate_cross_repeat_randomization(
 def _same_value(left: Any, right: Any) -> bool:
     """比较阈值声明字段, 浮点使用严格绝对容差."""
 
-    if isinstance(left, int | float) and isinstance(right, int | float):
-        return math.isclose(float(left), float(right), rel_tol=0.0, abs_tol=1e-12)
+    if type(left) is not type(right):
+        return False
+    if type(left) is float:
+        return math.isclose(left, right, rel_tol=0.0, abs_tol=1e-12)
     return left == right
 
 
@@ -724,6 +729,15 @@ def _recompute_threshold_record(
         }
         if set(declaration) != expected_declaration_fields:
             raise MethodRepeatFixedFprError("主方法阈值声明字段集合不完整")
+        try:
+            validate_frozen_evidence_protocol_record(
+                declaration,
+                expected_target_fpr=target_fpr,
+            )
+        except (TypeError, ValueError) as exc:
+            raise MethodRepeatFixedFprError(
+                "主方法阈值声明正文或摘要无效"
+            ) from exc
         if any(
             not _same_value(declaration[field_name], expected_value)
             for field_name, expected_value in recomputed_protocol.items()

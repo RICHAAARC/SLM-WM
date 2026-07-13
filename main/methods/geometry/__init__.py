@@ -1,6 +1,14 @@
 """真实 Q/K 注意力几何方法。"""
 
-from main.methods.geometry.attention_alignment import AttentionAlignmentResult, recover_attention_affine_alignment
+from main.methods.geometry.attention_alignment import (
+    ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+    ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
+    ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
+    AttentionAlignmentResult,
+    attention_alignment_gate_record,
+    recover_attention_affine_alignment,
+    validate_attention_alignment_gate,
+)
 from main.methods.geometry.differentiable_attention import (
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
@@ -49,6 +57,9 @@ from main.methods.geometry.differentiable_attention import (
 __all__ = [
     "ATTENTION_COORDINATE_CONVENTION",
     "ATTENTION_GRID_ALIGN_CORNERS",
+    "ATTENTION_ALIGNMENT_ANCHOR_COUNT",
+    "ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO",
+    "ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD",
     "ATTENTION_RELATION_COMPONENT_NAMES",
     "ATTENTION_RELATION_COMPONENT_WEIGHTS",
     "ATTENTION_RELATION_NUMERICAL_EPSILON",
@@ -65,6 +76,7 @@ __all__ = [
     "StableAttentionPairWeights",
     "StableAttentionTokenSelection",
     "attention_geometry_score",
+    "attention_alignment_gate_record",
     "attention_geometry_component_scores",
     "attention_probability",
     "attention_relation_component_protocol",
@@ -87,6 +99,7 @@ __all__ = [
     "qk_operator_metadata_records_ready",
     "qk_self_attention",
     "recover_attention_affine_alignment",
+    "validate_attention_alignment_gate",
     "select_stable_attention_tokens",
     "restore_transported_stable_attention_pair_weights",
     "transport_stable_attention_pair_weights",

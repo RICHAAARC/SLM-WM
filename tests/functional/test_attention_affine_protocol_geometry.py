@@ -13,6 +13,7 @@ import main.methods.geometry.attention_alignment as alignment_module
 from main.core.keyed_prg import KEYED_PRG_VERSION
 from main.methods.geometry.attention_alignment import (
     recover_attention_affine_alignment,
+    validate_attention_alignment_gate,
 )
 from main.methods.geometry.differentiable_attention import (
     ATTENTION_COORDINATE_CONVENTION,
@@ -34,6 +35,11 @@ _TOKEN_COUNT = 64
 _TOKEN_INDICES = tuple(range(_TOKEN_COUNT))
 _KEY_MATERIAL = "held_out_affine_relation_key"
 _LAYER_NAME = "held_out_affine_relation_layer"
+_ALIGNMENT_GATE_KWARGS = {
+    "anchor_count": 12,
+    "residual_threshold": 0.20,
+    "minimum_inlier_ratio": 0.50,
+}
 _RESERVED_ROTATION_MAGNITUDES = (5.0, 7.0)
 _RESERVED_SCALE_VALUES = (
     0.75,
@@ -326,6 +332,7 @@ def test_generic_hierarchical_search_recovers_random_continuous_affine(
         _TOKEN_INDICES,
         pair_weights,
         KEYED_PRG_VERSION,
+        **_ALIGNMENT_GATE_KWARGS,
     )
 
     recovered_transform = torch.tensor(result.affine_transform)
@@ -510,6 +517,7 @@ def test_relation_registration_rejects_signature_free_attention() -> None:
         _TOKEN_INDICES,
         pair_weights,
         KEYED_PRG_VERSION,
+        **_ALIGNMENT_GATE_KWARGS,
     )
 
     for component_name in ATTENTION_RELATION_COMPONENT_NAMES:
@@ -518,6 +526,127 @@ def test_relation_registration_rejects_signature_free_attention() -> None:
         ] == pytest.approx(0.0, abs=1e-12)
     assert result.observation_relation_score == pytest.approx(0.0, abs=1e-12)
     assert result.geometry_reliable is False
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("anchor_count", "residual_threshold", "minimum_inlier_ratio"),
+    (
+        (True, 0.20, 0.50),
+        (2, 0.20, 0.50),
+        (3.5, 0.20, 0.50),
+        (12, 0.0, 0.50),
+        (12, -0.1, 0.50),
+        (12, math.nan, 0.50),
+        (12, math.inf, 0.50),
+        (12, 0.20, 0.0),
+        (12, 0.20, -0.1),
+        (12, 0.20, 1.01),
+        (12, 0.20, math.nan),
+        (12, 0.20, math.inf),
+    ),
+)
+def test_attention_alignment_gate_rejects_invalid_values(
+    anchor_count: object,
+    residual_threshold: object,
+    minimum_inlier_ratio: object,
+) -> None:
+    """结构门禁必须拒绝隐式类型、非有限数和越界数值."""
+
+    with pytest.raises(ValueError):
+        validate_attention_alignment_gate(
+            anchor_count,  # type: ignore[arg-type]
+            residual_threshold,  # type: ignore[arg-type]
+            minimum_inlier_ratio,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.quick
+def test_attention_alignment_rejects_anchor_count_above_token_count() -> None:
+    """声明锚点数超过真实 token 数量时不得静默缩减."""
+
+    relation, _ = _continuous_observed_attention(0.0, 1.0, 0.0, 0.0)
+    with pytest.raises(ValueError, match="不得超过实际 token 数量"):
+        recover_attention_affine_alignment(
+            relation,
+            _KEY_MATERIAL,
+            _LAYER_NAME,
+            _TOKEN_INDICES,
+            _stable_pair_weights(relation),
+            KEYED_PRG_VERSION,
+            anchor_count=_TOKEN_COUNT + 1,
+            residual_threshold=0.20,
+            minimum_inlier_ratio=0.50,
+        )
+
+
+@pytest.mark.quick
+def test_alignment_digest_binds_every_alignment_gate_parameter() -> None:
+    """任一结构门禁变化都必须改变对齐身份摘要和持久化记录."""
+
+    relation, _ = _continuous_observed_attention(18.0, 0.95, 0.08, -0.05)
+    pair_weights = _stable_pair_weights(relation)
+    baseline = recover_attention_affine_alignment(
+        relation,
+        _KEY_MATERIAL,
+        _LAYER_NAME,
+        _TOKEN_INDICES,
+        pair_weights,
+        KEYED_PRG_VERSION,
+        **_ALIGNMENT_GATE_KWARGS,
+    )
+    expected_gate = {
+        "attention_anchor_count": 12,
+        "attention_residual_threshold": 0.20,
+        "attention_minimum_inlier_ratio": 0.50,
+    }
+    assert baseline.metadata["attention_alignment_gate"] == expected_gate
+
+    variants = (
+        {
+            "anchor_count": 13,
+            "residual_threshold": 0.20,
+            "minimum_inlier_ratio": 0.50,
+        },
+        {
+            "anchor_count": 12,
+            "residual_threshold": 0.200001,
+            "minimum_inlier_ratio": 0.50,
+        },
+        {
+            "anchor_count": 12,
+            "residual_threshold": 0.20,
+            "minimum_inlier_ratio": 0.500001,
+        },
+    )
+    for gate in variants:
+        changed = recover_attention_affine_alignment(
+            relation,
+            _KEY_MATERIAL,
+            _LAYER_NAME,
+            _TOKEN_INDICES,
+            pair_weights,
+            KEYED_PRG_VERSION,
+            **gate,
+        )
+        changed_gate = {
+            "attention_anchor_count": gate["anchor_count"],
+            "attention_residual_threshold": gate["residual_threshold"],
+            "attention_minimum_inlier_ratio": gate[
+                "minimum_inlier_ratio"
+            ],
+        }
+        assert changed.alignment_digest != baseline.alignment_digest
+        assert changed.metadata["attention_alignment_gate"] == changed_gate
+        assert changed.attention_anchor_count == gate["anchor_count"]
+        assert changed.attention_residual_threshold == gate[
+            "residual_threshold"
+        ]
+        assert changed.attention_minimum_inlier_ratio == gate[
+            "minimum_inlier_ratio"
+        ]
+        if gate["anchor_count"] == 12:
+            assert changed.affine_transform == baseline.affine_transform
 
 
 @pytest.mark.quick
@@ -539,6 +668,7 @@ def test_probability_only_relation_is_rejected_before_formal_alignment() -> None
             _TOKEN_INDICES,
             _stable_pair_weights(direct_relation),
             KEYED_PRG_VERSION,
+            **_ALIGNMENT_GATE_KWARGS,
         )
 
 
@@ -557,6 +687,7 @@ def test_distance_modulated_component_changes_registration_objective(
         _TOKEN_INDICES,
         pair_weights,
         KEYED_PRG_VERSION,
+        **_ALIGNMENT_GATE_KWARGS,
     )
     original_builder = alignment_module.build_attention_relation_descriptor
 
@@ -580,6 +711,7 @@ def test_distance_modulated_component_changes_registration_objective(
         _TOKEN_INDICES,
         pair_weights,
         KEYED_PRG_VERSION,
+        **_ALIGNMENT_GATE_KWARGS,
     )
     component_name = "distance_modulated_centered_attention_probability"
 

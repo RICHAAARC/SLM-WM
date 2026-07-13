@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from experiments.protocol.method_runtime_config import (
     formal_method_config_digest,
+    formal_method_config_payload,
     load_formal_method_runtime_config,
     resolve_formal_method_config_path,
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
+    _build_image_only_detection_config,
     semantic_watermark_runtime_config_payload,
 )
 from experiments.runtime.diffusion import sd3_pipeline_runtime, semantic_features
@@ -77,6 +81,11 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         "sd3_empty_text_triplet_without_cfg_v1"
     )
     assert method_config.public_detection_condition_text == ""
+    assert (
+        method_config.attention_anchor_count,
+        method_config.attention_residual_threshold,
+        method_config.attention_minimum_inlier_ratio,
+    ) == (12, 0.20, 0.50)
     assert method_config.formal_method_config_digest == (
         formal_method_config_digest(method_config)
     )
@@ -266,6 +275,18 @@ def test_dataset_runtime_rejects_risk_protocol_environment_drift(
 
 
 @pytest.mark.quick
+def test_dataset_runtime_rejects_alignment_gate_environment_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """环境变量不得改写预注册注意力结构门禁."""
+
+    monkeypatch.setenv("SLM_WM_ATTENTION_ANCHOR_COUNT", "13")
+
+    with pytest.raises(ValueError, match="model_sd35.yaml 不一致"):
+        image_only_dataset_workload.build_method_config(".")
+
+
+@pytest.mark.quick
 def test_paper_method_settings_include_frozen_risk_and_write_protocols() -> None:
     """三级论文配置必须共享完整风险、Null Space 和量化合成常量。"""
 
@@ -284,6 +305,122 @@ def test_paper_method_settings_include_frozen_risk_and_write_protocols() -> None
         "float32_ordered_branch_sum_add_float32_latent_single_cast_v1"
     )
     assert settings["quantized_budget_envelope_backtracking_maximum_steps"] == 24
+    assert settings["attention_anchor_count"] == 12
+    assert settings["attention_residual_threshold"] == 0.20
+    assert settings["attention_minimum_inlier_ratio"] == 0.50
+
+
+@pytest.mark.quick
+def test_attention_alignment_gate_is_frozen_in_formal_config_and_digest() -> None:
+    """正式配置摘要必须逐字段绑定预注册注意力结构门禁."""
+
+    config = load_formal_method_runtime_config(".")
+    payload = formal_method_config_payload(config)
+
+    def independent_digest(value: object) -> str:
+        """以独立规范 JSON 公式重算正式配置摘要."""
+
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    baseline_digest = independent_digest(payload)
+    assert baseline_digest == formal_method_config_digest(config)
+    for field_name, changed_value in (
+        ("attention_anchor_count", 13),
+        ("attention_residual_threshold", 0.21),
+        ("attention_minimum_inlier_ratio", 0.51),
+    ):
+        changed_payload = deepcopy(payload)
+        changed_payload["formal_method_config"][field_name] = changed_value
+        assert independent_digest(changed_payload) != baseline_digest
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("source_line", "changed_line"),
+    (
+        ("attention_anchor_count: 12", "attention_anchor_count: 13"),
+        (
+            "attention_residual_threshold: 0.20",
+            "attention_residual_threshold: 0.21",
+        ),
+        (
+            "attention_minimum_inlier_ratio: 0.50",
+            "attention_minimum_inlier_ratio: 0.51",
+        ),
+    ),
+)
+def test_formal_method_config_rejects_attention_alignment_gate_drift(
+    tmp_path: Path,
+    source_line: str,
+    changed_line: str,
+) -> None:
+    """唯一 YAML 中任一注意力结构门禁漂移都必须失败关闭."""
+
+    source = Path("configs/model_sd35.yaml").read_text(encoding="utf-8")
+    changed = source.replace(source_line, changed_line, 1)
+    assert changed != source
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "model_sd35.yaml").write_text(changed, encoding="utf-8")
+
+    with pytest.raises(
+        ValueError,
+        match="正式注意力配准锚点、残差或内点门禁发生漂移",
+    ):
+        load_formal_method_runtime_config(tmp_path)
+
+
+@pytest.mark.quick
+def test_runtime_detector_config_consumes_formal_alignment_gate() -> None:
+    """运行层必须把唯一正式门禁显式传递给核心盲检器."""
+
+    runtime = SemanticWatermarkRuntimeConfig()
+    detector = _build_image_only_detection_config(runtime)
+    payload = semantic_watermark_runtime_config_payload(runtime)
+
+    assert detector.attention_anchor_count == runtime.attention_anchor_count == 12
+    assert (
+        detector.attention_residual_threshold
+        == runtime.attention_residual_threshold
+        == 0.20
+    )
+    assert (
+        detector.attention_minimum_inlier_ratio
+        == runtime.attention_minimum_inlier_ratio
+        == 0.50
+    )
+    assert payload["attention_anchor_count"] == 12
+    assert payload["attention_residual_threshold"] == 0.20
+    assert payload["attention_minimum_inlier_ratio"] == 0.50
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    (
+        ("attention_anchor_count", 12.0),
+        ("attention_anchor_count", True),
+        ("attention_residual_threshold", float("nan")),
+        ("attention_minimum_inlier_ratio", float("inf")),
+    ),
+)
+def test_runtime_config_rejects_invalid_alignment_gate_types(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    """运行配置入口必须先执行精确类型与有限性门禁."""
+
+    with pytest.raises(ValueError):
+        replace(
+            SemanticWatermarkRuntimeConfig(),
+            **{field_name: invalid_value},
+        )
 
 
 @pytest.mark.quick

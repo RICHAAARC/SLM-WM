@@ -17,6 +17,9 @@ from experiments.runners.image_only_dataset_runtime import (
     calibrate_complete_evidence_protocol,
 )
 from main.core.digest import build_stable_digest
+from paper_experiments.analysis.formal_record_statistics import (
+    validate_frozen_evidence_protocol_record,
+)
 
 
 MAIN_THRESHOLD_SOURCE = (
@@ -35,8 +38,10 @@ FIXED_FPR_THRESHOLD_METHOD_IDS = (
 def _same_protocol_value(left: Any, right: Any) -> bool:
     """比较协议字段，浮点值使用严格绝对容差。"""
 
-    if isinstance(left, int | float) and isinstance(right, int | float):
-        return math.isclose(float(left), float(right), rel_tol=0.0, abs_tol=1e-12)
+    if type(left) is not type(right):
+        return False
+    if type(left) is float:
+        return math.isclose(left, right, rel_tol=0.0, abs_tol=1e-12)
     return left == right
 
 
@@ -67,24 +72,28 @@ def audit_main_method_fixed_fpr(
         and not row.get("attack_id")
     )
     protocol_field_names = tuple(field.name for field in fields(FrozenEvidenceProtocol))
-    protocol_fields_ready = all(name in frozen_protocol for name in protocol_field_names)
-    target_ready = protocol_fields_ready and math.isclose(
-        float(frozen_protocol.get("target_fpr", math.nan)),
-        float(target_fpr),
-        rel_tol=0.0,
-        abs_tol=1e-12,
-    )
+    protocol_fields_ready = set(frozen_protocol) == set(protocol_field_names)
+    declared_protocol: FrozenEvidenceProtocol | None = None
+    if protocol_fields_ready:
+        try:
+            declared_protocol = validate_frozen_evidence_protocol_record(
+                frozen_protocol,
+                expected_target_fpr=target_fpr,
+            )
+        except (TypeError, ValueError):
+            declared_protocol = None
+    target_ready = declared_protocol is not None
     recomputed: FrozenEvidenceProtocol | None = None
-    if calibration_rows and "rescue_margin_low" in frozen_protocol:
+    if calibration_rows and declared_protocol is not None:
         recomputed = calibrate_complete_evidence_protocol(
             calibration_rows,
             float(target_fpr),
-            float(frozen_protocol["rescue_margin_low"]),
+            declared_protocol.rescue_margin_low,
         )
     recomputed_payload = recomputed.to_dict() if recomputed is not None else {}
     protocol_value_ready = bool(
         recomputed is not None
-        and protocol_fields_ready
+        and declared_protocol is not None
         and all(
             _same_protocol_value(frozen_protocol[name], recomputed_payload[name])
             for name in protocol_field_names

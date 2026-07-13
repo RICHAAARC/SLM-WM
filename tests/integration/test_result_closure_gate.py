@@ -148,7 +148,42 @@ SCALE = "probe_paper"
 TARGET_FPR = 0.1
 PROMPT_COUNT = 70
 TEST_COUNT = 34
-MAIN_THRESHOLD_DIGEST = "1" * 64
+ATTENTION_ALIGNMENT_GATE = {
+    "attention_anchor_count": 12,
+    "attention_residual_threshold": 0.20,
+    "attention_minimum_inlier_ratio": 0.50,
+}
+_FROZEN_PROTOCOL_DIGEST_PAYLOAD = {
+    "content_threshold": 0.5,
+    "rescue_margin_low": -0.2,
+    "geometry_score_threshold": 0.5,
+    "registration_confidence_threshold": 0.5,
+    "attention_sync_score_threshold": 0.5,
+    **ATTENTION_ALIGNMENT_GATE,
+    "geometry_calibration_negative_count": 10,
+    "geometry_calibration_exceedance_count": 0,
+    "registration_calibration_negative_count": 10,
+    "registration_calibration_exceedance_count": 0,
+    "sync_calibration_negative_count": 10,
+    "sync_calibration_exceedance_count": 0,
+    "geometry_protocol_calibration_ready": True,
+    "calibration_negative_count": 10,
+    "calibration_false_positive_count": 1,
+    "target_fpr": TARGET_FPR,
+    "decision_scope": "content_or_same_threshold_aligned_content_rescue",
+}
+MAIN_THRESHOLD_DIGEST = build_stable_digest(
+    _FROZEN_PROTOCOL_DIGEST_PAYLOAD
+)
+FROZEN_PROTOCOL = {
+    **{
+        field_name: value
+        for field_name, value in _FROZEN_PROTOCOL_DIGEST_PAYLOAD.items()
+        if field_name != "decision_scope"
+    },
+    "calibration_false_positive_rate": TARGET_FPR,
+    "threshold_digest": MAIN_THRESHOLD_DIGEST,
+}
 PROMPT_RECORDS = build_prompt_records(
     SCALE,
     tuple(f"a governed prompt {index}" for index in range(PROMPT_COUNT)),
@@ -431,8 +466,32 @@ METHOD_OBSERVATION_SOURCE_PATH_MAP = {
         "baseline_observations.json"
     ),
 }
+
+
+def _formal_detection_record(record: dict[str, object]) -> dict[str, object]:
+    """为闭合测试记录补齐正式结构门禁和连续分数原子."""
+
+    return {
+        **record,
+        "aligned_content_score": None,
+        "attention_geometry_score": 0.0,
+        "registration_confidence": 0.0,
+        "attention_sync_score": 0.0,
+        "geometry_reliable": False,
+        "alignment": None,
+        "metadata": {
+            "attention_alignment_gate": dict(
+                ATTENTION_ALIGNMENT_GATE
+            ),
+            **ATTENTION_ALIGNMENT_GATE,
+        },
+        "detector_digest": build_stable_digest(record),
+    }
+
+
 PROPOSED_OBSERVATION_RECORDS = tuple(
-    [
+    _formal_detection_record(record)
+    for record in [
         *(
             {
                 "prompt_id": prompt_id,
@@ -762,18 +821,7 @@ def artifact_source_payloads(
 ) -> dict[str, bytes]:
     """构造可由真实 validator 独立重建的12类源文件字节."""
 
-    protocol = {
-        "content_threshold": 0.5,
-        "rescue_margin_low": -0.2,
-        "geometry_score_threshold": 0.5,
-        "geometry_calibration_negative_count": 2,
-        "geometry_calibration_exceedance_count": 0,
-        "calibration_negative_count": 10,
-        "calibration_false_positive_count": 1,
-        "calibration_false_positive_rate": TARGET_FPR,
-        "target_fpr": TARGET_FPR,
-        "threshold_digest": MAIN_THRESHOLD_DIGEST,
-    }
+    protocol = dict(FROZEN_PROTOCOL)
     detection_records = PROPOSED_OBSERVATION_RECORDS
     detection_tables = build_detection_score_tables(detection_records, protocol)
     test_metrics = build_image_only_test_metric_rows(
@@ -1529,6 +1577,35 @@ def randomization_aggregate_provenance() -> tuple[dict[str, object], dict[str, o
     return payload, manifest
 
 
+ATTENTION_ALIGNMENT_GATE = {
+    "attention_anchor_count": 12,
+    "attention_residual_threshold": 0.20,
+    "attention_minimum_inlier_ratio": 0.50,
+}
+
+
+def _bind_attention_alignment_gate(
+    record: dict[str, object],
+) -> dict[str, object]:
+    """为检测夹具绑定预注册注意力配准门禁."""
+
+    gate = dict(ATTENTION_ALIGNMENT_GATE)
+    metadata = dict(record.get("metadata", {}))
+    metadata.update(gate)
+    metadata["attention_alignment_gate"] = dict(gate)
+    resolved = {**record, "metadata": metadata}
+    alignment = resolved.get("alignment")
+    if isinstance(alignment, dict):
+        alignment_metadata = dict(alignment.get("metadata", {}))
+        alignment_metadata["attention_alignment_gate"] = dict(gate)
+        resolved["alignment"] = {
+            **alignment,
+            **gate,
+            "metadata": alignment_metadata,
+        }
+    return resolved
+
+
 def _raw_ablation_detection(
     *,
     run_id: str,
@@ -1564,7 +1641,7 @@ def _raw_ablation_detection(
                 "attack_performed": True,
             }
         )
-    return record
+    return _bind_attention_alignment_gate(record)
 
 
 def ablation_atomic_records() -> tuple[

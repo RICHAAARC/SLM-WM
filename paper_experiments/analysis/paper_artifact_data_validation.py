@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import fields
 import csv
 import hashlib
 import json
@@ -41,19 +42,17 @@ from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
 )
 from main.core.digest import build_stable_digest
+from experiments.runners.image_only_dataset_runtime import (
+    FrozenEvidenceProtocol,
+    validate_detection_attention_alignment_gate,
+)
+from paper_experiments.analysis.formal_record_statistics import (
+    validate_frozen_evidence_protocol_record,
+)
 
 
 FROZEN_PROTOCOL_FIELDS = {
-    "content_threshold",
-    "rescue_margin_low",
-    "geometry_score_threshold",
-    "geometry_calibration_negative_count",
-    "geometry_calibration_exceedance_count",
-    "calibration_negative_count",
-    "calibration_false_positive_count",
-    "calibration_false_positive_rate",
-    "target_fpr",
-    "threshold_digest",
+    field.name for field in fields(FrozenEvidenceProtocol)
 }
 
 TEST_METRIC_FIELDS = {
@@ -269,6 +268,8 @@ def _validate_raw_detection_records(
     if not isinstance(frozen_protocol, Mapping):
         raise ValueError("冻结协议无效, 无法重建连续检测表")
     records = _read_jsonl_records(path)
+    for record in records:
+        validate_detection_attention_alignment_gate(record)
     rebuilt_tables = {
         **build_detection_score_tables(records, frozen_protocol),
         "test_detection_metrics": build_image_only_test_metric_rows(
@@ -329,25 +330,10 @@ def _validate_frozen_protocol(path: Path, context: Mapping[str, Any]) -> dict[st
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict) or set(payload) != FROZEN_PROTOCOL_FIELDS:
         raise ValueError("冻结协议字段集合不一致")
-    _finite(payload["content_threshold"])
-    if _finite(payload["rescue_margin_low"]) > 0.0:
-        raise ValueError("rescue_margin_low 不得大于0")
-    _finite(payload["geometry_score_threshold"])
-    negative_count = _count(payload["calibration_negative_count"], positive=True)
-    false_positive_count = _count(payload["calibration_false_positive_count"])
-    if false_positive_count > negative_count:
-        raise ValueError("校准假阳性计数超过阴性总数")
-    if not math.isclose(
-        _rate(payload["calibration_false_positive_rate"]),
-        false_positive_count / negative_count,
-        rel_tol=0.0,
-        abs_tol=1e-12,
-    ):
-        raise ValueError("校准假阳性率与计数不一致")
-    if not 0.0 < _rate(payload["target_fpr"]) < 1.0:
-        raise ValueError("target_fpr 必须位于 (0, 1)")
-    if not str(payload["threshold_digest"]):
-        raise ValueError("threshold_digest 不得为空")
+    validate_frozen_evidence_protocol_record(
+        payload,
+        expected_target_fpr=_finite(context["target_fpr"]),
+    )
     if not _same_float(payload["target_fpr"], context["target_fpr"]):
         raise ValueError("冻结协议 target_fpr 与运行摘要不一致")
     if str(payload["threshold_digest"]) != str(context["threshold_digest"]):

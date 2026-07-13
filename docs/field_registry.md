@@ -206,6 +206,16 @@ Notebook 与 repository module 的跨边界数据
 | lambda_tail | method | none | true | false | false | 内容分数中的高斯幅值尾部截断分支权重。 |
 | used_independent_branch_vote | method | none | true | false | false | 是否使用 LF/高斯幅值尾部截断独立阈值投票。正式方法应为 false。 |
 | registration_confidence | metric | none | true | true | false | 双向关系分数、锚点内点比例、残差和最小双向覆盖率共同定义的注册置信度。 |
+| image_only_alignment | method | none | true | true | false | 仅图像检测中仿射参考系恢复的预注册结构门禁定义。 |
+| attention_alignment_gate | protocol | none | true | true | false | 锚点数量、归一化坐标残差上界与最小内点比例组成的完整预注册结构门禁记录；alignment、detector、冻结阈值及结果摘要必须绑定同一值。 |
+| anchor_selection_rule | protocol | none | true | true | false | 在抽样 token 索引范围内确定性选择12个均匀间隔锚点的规则；实际 token 数少于12时失败。 |
+| attention_anchor_count | protocol | none | true | true | false | 注意力仿射配准请求使用的预注册锚点数量, 正式方法固定为12。 |
+| attention_residual_threshold | protocol | none | true | true | false | 注意力仿射配准在归一化 xy 坐标中的预注册内点残差上界, 正式方法固定为0.20。 |
+| attention_minimum_inlier_ratio | protocol | none | true | true | false | 注意力仿射配准相对有效覆盖锚点的预注册最小内点比例, 正式方法固定为0.50。 |
+| attention_residual_coordinate_unit | protocol | none | true | true | false | 注意力配准残差采用 normalized_xy_token_centers_corner_endpoints_v1 坐标中的 xy 欧氏距离。 |
+| gate_parameter_source | protocol | none | true | true | false | 注意力结构门禁来自预注册正式方法配置而非 calibration 或 test 调参。 |
+| calibration_data_used_for_gate_parameters | governance | none | true | true | false | 是否使用 calibration 数据选择锚点、残差或内点比例结构门禁, 正式方法固定为 false。 |
+| alignment_digest_binds_gate_parameters | governance | none | true | true | false | 对齐摘要是否直接绑定锚点、残差与最小内点比例三项门禁。 |
 | anchor_inlier_ratio | method | none | true | false | false | attention anchor 内点比例。 |
 | recovered_sync_consistency | method | none | true | false | false | 恢复后相对关系同步一致性。 |
 | alignment_residual | method | none | true | false | false | 几何恢复后的残差。 |
@@ -1762,7 +1772,7 @@ Notebook 与 repository module 的跨边界数据
 | attention_geometry_score | metric | none | true | true | false | 真实 Q/K 四分量关系完成逐行加权归一化后按当前冻结分量权重组合的一致性分数。 |
 | formal_evidence_positive | metric | none | true | true | false | 冻结完整 evidence 协议后的正式布尔判定。 |
 | frozen_content_threshold | protocol | none | true | true | false | calibration clean negative 冻结的内容阈值。 |
-| threshold_digest | protocol | none | true | true | false | calibration 分数集合、冻结阈值、阈值来源和相关 evidence 配置的稳定摘要。 |
+| threshold_digest | protocol | none | true | true | false | calibration 分数集合、冻结统计阈值、rescue window、预注册注意力配准结构门禁和相关 evidence 配置的稳定摘要。 |
 | jacobian_candidate_count | method | none | true | false | false | 每个分支参与真实 JVP 的候选方向数量。 |
 | null_space_rank | method | none | true | false | false | 每个分支保留的小响应 latent 基底秩。 |
 | lf_relative_strength | method | none | true | false | false | LF 更新相对当前 latent 范数的强度。 |
@@ -3129,7 +3139,8 @@ Notebook 与 repository module 的跨边界数据
 | gpu_atomic_roles | protocol | none | true | false | false | 真实 SD3.5 CUDA 运行必须物化的科学原子角色集合。 |
 | gpu_observation_requirement | protocol | none | true | false | false | 单个不变量只能由真实 GPU 观察完成的验证职责。 |
 | claim_boundary | governance | none | true | false | false | 单个不变量允许支持的最强论文解释及禁止外推边界。 |
-| formal_method_config_digest | provenance | none | true | true | false | `configs/model_sd35.yaml` 经完整解析和规范化后的稳定方法配置摘要。 |
+| formal_method_config_schema | protocol | none | true | true | false | 完整方法运行配置规范 payload 的 schema 身份, 当前固定为 slm_wm_formal_method_runtime_config_v2。 |
+| formal_method_config_digest | provenance | none | true | true | false | `configs/model_sd35.yaml` 经完整解析和规范化后的稳定方法配置摘要, 包含预注册注意力配准三项结构常量。 |
 | sd35_operator_identity | provenance | none | true | true | false | 实际加载 SD3.5 pipeline 的组件类、VAE 常量和参数 dtype 联合身份记录。 |
 | component_class_names | provenance | none | true | true | false | 实际加载 pipeline、VAE、Transformer 与 scheduler 的完整 Python 类名映射。 |
 | latent_component_dtypes | provenance | none | true | true | false | 实际加载 VAE 与 Transformer 参数 dtype 的映射。 |
@@ -3256,7 +3267,8 @@ Notebook 与 repository module 的跨边界数据
 | carrier_only_update_content_bundle_digest | provenance | none | true | true | false | carrier-only 全部注入步骤身份的有序联合摘要。 |
 | detection_index | provenance | none | true | true | false | 检测 JSONL 记录在单次方法运行中的冻结顺序索引。 |
 | detection_record_content_digest | provenance | none | true | true | false | 从磁盘重读的一条完整检测 JSONL 原子记录摘要。 |
-| alignment_digest | provenance | none | true | true | false | 对齐检测使用的完整 alignment 记录规范 SHA-256；未执行对齐的检测必须为空字符串。 |
+| alignment_digest | provenance | none | true | true | false | 对齐检测使用的完整 alignment 记录规范 SHA-256, 直接绑定12个锚点、0.20残差上界和0.50最小内点率；未执行对齐的检测必须为空字符串。 |
+| detector_digest | provenance | none | true | true | false | 仅图像检测输入、分数、决策、预注册注意力配准结构门禁与对齐身份的规范 SHA-256。 |
 | detection_content_identities | provenance | none | true | true | false | 单次方法运行全部仅图像检测记录的有序科学内容身份。 |
 | detection_content_bundle_digest | provenance | none | true | true | false | 全部仅图像检测内容身份的有序联合摘要。 |
 | detection_qk_image_content_bindings | provenance | none | true | true | false | raw/aligned 检测图像像素、公开噪声评价索引与 Q/K 原子的逐角色绑定。 |

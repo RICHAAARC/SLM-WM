@@ -61,6 +61,33 @@ PROMPT_DIGESTS = {
     )
     for prompt_id in PROMPT_SPLITS
 }
+ATTENTION_ALIGNMENT_GATE = {
+    "attention_anchor_count": 12,
+    "attention_residual_threshold": 0.20,
+    "attention_minimum_inlier_ratio": 0.50,
+}
+
+
+def _bind_attention_alignment_gate(
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    """为检测夹具绑定预注册注意力配准门禁."""
+
+    gate = dict(ATTENTION_ALIGNMENT_GATE)
+    metadata = dict(record.get("metadata", {}))
+    metadata.update(gate)
+    metadata["attention_alignment_gate"] = dict(gate)
+    resolved = {**record, "metadata": metadata}
+    alignment = resolved.get("alignment")
+    if isinstance(alignment, dict):
+        alignment_metadata = dict(alignment.get("metadata", {}))
+        alignment_metadata["attention_alignment_gate"] = dict(gate)
+        resolved["alignment"] = {
+            **alignment,
+            **gate,
+            "metadata": alignment_metadata,
+        }
+    return resolved
 
 
 def _raw_detection(
@@ -98,7 +125,7 @@ def _raw_detection(
                 "attack_performed": True,
             }
         )
-    return record
+    return _bind_attention_alignment_gate(record)
 
 
 def _formal_detection_group(

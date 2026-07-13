@@ -35,6 +35,9 @@ _CANONICAL_RELATION_WEIGHT = 0.10
 _OBSERVATION_RELATION_WEIGHT = 0.90
 _COVERAGE_PENALTY_WEIGHT = 0.01
 _MINIMUM_REGISTRATION_COVERAGE = 0.45
+ATTENTION_ALIGNMENT_ANCHOR_COUNT = 12
+ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD = 0.20
+ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO = 0.50
 _SIMILARITY_ROTATION_BOUND_DEGREES = 32.0
 _SIMILARITY_ROTATION_INTERVAL_COUNT = 4
 _SIMILARITY_LOG_SCALE_ANCHOR_BOUND = math.log(math.sqrt(2.0))
@@ -59,6 +62,53 @@ def _torch() -> Any:
     import torch
 
     return torch
+
+
+def validate_attention_alignment_gate(
+    anchor_count: int,
+    residual_threshold: float,
+    minimum_inlier_ratio: float,
+) -> tuple[int, float, float]:
+    """集中校验可持久化的注意力配准结构门禁参数."""
+
+    if type(anchor_count) is not int or anchor_count < 3:
+        raise ValueError("attention_anchor_count 必须为不小于3的整数")
+    if (
+        isinstance(residual_threshold, bool)
+        or not isinstance(residual_threshold, (int, float))
+        or not math.isfinite(residual_threshold)
+        or residual_threshold <= 0.0
+    ):
+        raise ValueError("attention_residual_threshold 必须为正有限数")
+    if not (
+        not isinstance(minimum_inlier_ratio, bool)
+        and isinstance(minimum_inlier_ratio, (int, float))
+        and math.isfinite(minimum_inlier_ratio)
+        and 0.0 < minimum_inlier_ratio <= 1.0
+    ):
+        raise ValueError(
+            "attention_minimum_inlier_ratio 必须位于 (0, 1]"
+        )
+    return anchor_count, float(residual_threshold), float(minimum_inlier_ratio)
+
+
+def attention_alignment_gate_record(
+    anchor_count: int,
+    residual_threshold: float,
+    minimum_inlier_ratio: float,
+) -> dict[str, int | float]:
+    """返回经过集中校验且可进入摘要的注意力配准门禁记录."""
+
+    resolved_gate = validate_attention_alignment_gate(
+        anchor_count,
+        residual_threshold,
+        minimum_inlier_ratio,
+    )
+    return {
+        "attention_anchor_count": resolved_gate[0],
+        "attention_residual_threshold": resolved_gate[1],
+        "attention_minimum_inlier_ratio": resolved_gate[2],
+    }
 
 
 def _grid_coordinates(token_indices: tuple[int, ...], device: Any) -> Any:
@@ -106,10 +156,12 @@ def _invert_affine(transforms: Any) -> Any:
 def _anchor_indices(token_count: int, anchor_count: int) -> tuple[int, ...]:
     """在完整 token 网格上稳定选择锚点。"""
 
-    bounded = max(3, min(anchor_count, token_count))
-    if bounded == token_count:
+    if anchor_count == token_count:
         return tuple(range(token_count))
-    return tuple(round(index * (token_count - 1) / (bounded - 1)) for index in range(bounded))
+    return tuple(
+        round(index * (token_count - 1) / (anchor_count - 1))
+        for index in range(anchor_count)
+    )
 
 
 def _affine_matrix(
@@ -633,6 +685,9 @@ class AttentionAlignmentResult:
     expected_anchor_indices: tuple[int, ...]
     observed_anchor_indices: tuple[int, ...]
     inlier_mask: tuple[bool, ...]
+    attention_anchor_count: int
+    attention_residual_threshold: float
+    attention_minimum_inlier_ratio: float
     inlier_ratio: float
     mean_inlier_residual: float
     relation_sync_score: float
@@ -677,9 +732,9 @@ def recover_attention_affine_alignment(
     token_indices: tuple[int, ...],
     stable_pair_weights: StableAttentionPairWeights,
     prg_version: str,
-    anchor_count: int = 12,
-    residual_threshold: float = 0.20,
-    minimum_inlier_ratio: float = 0.50,
+    anchor_count: int,
+    residual_threshold: float,
+    minimum_inlier_ratio: float,
     component_weights: tuple[float, ...] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> AttentionAlignmentResult:
     """通过双边重采样密钥关系图恢复仿射参考系。
@@ -705,10 +760,20 @@ def recover_attention_affine_alignment(
         raise ValueError("稳定 token pair 权重宽度必须与 attention 宽度一致")
     if not stable_pair_weights.pair_weight_identity_digest:
         raise ValueError("稳定 token pair 权重必须具有可复现身份")
-    if not 0.0 < minimum_inlier_ratio <= 1.0:
-        raise ValueError("minimum_inlier_ratio 必须位于 (0, 1]")
-    if residual_threshold <= 0.0:
-        raise ValueError("residual_threshold 必须为正数")
+    alignment_gate = attention_alignment_gate_record(
+        anchor_count,
+        residual_threshold,
+        minimum_inlier_ratio,
+    )
+    anchor_count = int(alignment_gate["attention_anchor_count"])
+    residual_threshold = float(
+        alignment_gate["attention_residual_threshold"]
+    )
+    minimum_inlier_ratio = float(
+        alignment_gate["attention_minimum_inlier_ratio"]
+    )
+    if anchor_count > token_count:
+        raise ValueError("attention_anchor_count 不得超过实际 token 数量")
 
     descriptor = build_attention_relation_descriptor(attention, token_indices)
     relation_values = descriptor.values.mean(dim=0)
@@ -895,6 +960,7 @@ def recover_attention_affine_alignment(
     payload = {
         "layer_name": layer_name,
         "token_indices": token_indices,
+        **alignment_gate,
         "expected_anchor_indices": expected_indices,
         "observed_anchor_indices": observed_indices,
         "inlier_mask": list(inlier_values),
@@ -975,6 +1041,9 @@ def recover_attention_affine_alignment(
         expected_anchor_indices=expected_indices,
         observed_anchor_indices=observed_indices,
         inlier_mask=inlier_values,
+        attention_anchor_count=anchor_count,
+        attention_residual_threshold=residual_threshold,
+        attention_minimum_inlier_ratio=minimum_inlier_ratio,
         inlier_ratio=inlier_ratio,
         mean_inlier_residual=mean_residual,
         relation_sync_score=best_score,
@@ -1143,6 +1212,8 @@ def recover_attention_affine_alignment(
             "observation_relation_weight": _OBSERVATION_RELATION_WEIGHT,
             "registration_coverage_penalty_weight": _COVERAGE_PENALTY_WEIGHT,
             "minimum_registration_coverage": _MINIMUM_REGISTRATION_COVERAGE,
+            "attention_alignment_gate": dict(alignment_gate),
+            **alignment_gate,
             "inlier_ratio_denominator": "valid_covered_anchor_count",
         },
     )

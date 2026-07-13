@@ -31,7 +31,7 @@
 
 高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对 Q20 中点逆 CDF 量化标准正态模板按元素绝对幅值稳定排序，精确保留 `ceil(element_count * tail_fraction)` 个元素，并以展平索引处理同幅值排序；该算子不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。内容模板与安全投影实现位于 `main/methods/carrier/keyed_tensor.py`。
 
-注意力分支风险必须接收由真实跨层 Q/K 关系计算的独立稳定度，核心接口不接受缺失值。正式层集合精确固定为 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 运行时直接按名称解析公开 `to_q`、`to_k` 与 `heads` 协议。token 坐标采用 `normalized_xy_token_centers_corner_endpoints_v1`, 角点中心分别落在 -1 与 1；关系稳定图插值和图像仿射重采样统一使用 `align_corners=True`。最终图像 Q/K 提取在冻结检测日程上调用 scheduler 的 `scale_noise`；缺少该方法或方法不可调用时运行失败，当前协议不定义线性 latent/noise 混合作为替代算子。
+注意力分支风险必须接收由真实跨层 Q/K 关系计算的独立稳定度，核心接口不接受缺失值。正式层集合精确固定为 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 运行时直接按名称解析公开 `to_q`、`to_k` 与 `heads` 协议。token 坐标采用 `normalized_xy_token_centers_corner_endpoints_v1`, 角点中心分别落在 -1 与 1；关系稳定图插值和图像仿射重采样统一使用 `align_corners=True`。图像配准结构门禁固定 `attention_anchor_count=12`、`attention_residual_threshold=0.20` 和 `attention_minimum_inlier_ratio=0.50`。锚点在抽样 token 索引中确定性均匀选择, token 数少于12时失败；残差为归一化 xy 欧氏距离, 内点率只以具有有效双线性覆盖的锚点为分母并要求唯一观测匹配。三项值来自预注册方法配置, calibration 和 test 不得调节, 且必须同时绑定方法配置摘要、对齐摘要、检测器摘要、冻结阈值摘要以及结果 records、summary 和 manifest。最终图像 Q/K 提取在冻结检测日程上调用 scheduler 的 `scale_noise`；缺少该方法或方法不可调用时运行失败，当前协议不定义线性 latent/noise 混合作为替代算子。
 
 分支风险中的 `local_contrast_risk` 定义为解码灰度图相对反射填充5x5局部均值的绝对偏离。`adjacent_step_stability` 直接来自当前与紧邻上一 scheduler 步 latent 的解码 RGB 差异；注入回调在每个 post-step 时刻更新参考 latent，并把参考索引和 Tensor 内容 SHA-256 写入更新原子。204维 `handcrafted_structure_feature` 由 RGB 通道均值/标准差、水平/垂直绝对梯度均值和8x8 RGB 平均池化组成；一般感知质量结论必须独立依赖正式 FID、KID 与配对图像质量指标。
 
@@ -86,7 +86,7 @@ $$
 5. 对每次实际写回和最终 clean/watermarked 成图执行完整 CLIP/手工结构统计保持门禁；
 6. 对选定 test Prompt 执行9类标准图像攻击和8类真实 GPU 扩散攻击；
 7. 所有样本只从最终图像重新编码并检测；
-8. calibration clean negative 冻结包含 rescue 的完整判定协议；
+8. calibration clean negative 只冻结内容分数、几何关系分、注册置信度、恢复后同步分的阈值和 rescue window, 并绑定预注册注意力配准结构门禁；
 9. test split 只应用冻结协议并报告置信上界；
 10. 按需通过 `experiments.ablations.mechanism_ablation_workload` 重新运行全部机制消融；
 11. 外层 workflow 写入科学执行绑定并复用同一子解释器重新打包；
@@ -108,7 +108,7 @@ $$
 7. carrier-only 与完整方法首个注入前 latent 字节级相同, 更新数、顺序和 scheduler 轨迹一致；carrier-only 更新原子无 attention 来源、分数、更新、关系、pair 身份或 attention Null Space, 且其 JSONL 路径、文件 SHA-256 和内容摘要绑定结果与 manifest；
 8. 最终 clean、carrier-only 与完整方法成图在 CUDA 上重新构造直接 Q/K 四分量关系, 完整方法相对同种子 carrier-only 的自身盲选择归因增益和冻结 carrier-only pair 权重归因增益都严格超过0.0001, 且反事实保持记录、四分量归因、关系图身份、Q/K 记录与 manifest 绑定同一身份和图像 SHA-256；
 9. `slm_wm_tensor_content_v1` 完整绑定三个风险场、三个 Null Space 的候选/预算/响应/基底、三分支更新与实际写回增量；Q/K 原子完整覆盖注入四角色、最终成图三角色及盲检两角色；
-10. 检测访问模式为 `image_key_public_model_only`；
+10. 检测访问模式为 `image_key_public_model_only`, 每条对齐、检测和冻结阈值记录均绑定12个锚点、0.20归一化 xy 欧氏残差上界与0.50最小有效覆盖锚点内点率；
 11. test clean negative 的95%误报率上界不超过目标 FPR；
 12. FID/KID 使用 torch-fidelity `inception-v3-compat` 的2048维特征，配对质量指标来自真实图像集合；
 13. 正式消融精确覆盖完整方法和14个变体, 每条记录明确 `generation_rerun=true` 且未使用 counterfactual 分数变换；

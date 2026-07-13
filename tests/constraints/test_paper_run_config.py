@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -213,6 +214,9 @@ def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: 
         "attention_grid_align_corners"
     ] is True
     frozen_settings = shared_method_settings(probe_config)
+    assert frozen_settings["attention_anchor_count"] == 12
+    assert frozen_settings["attention_residual_threshold"] == 0.20
+    assert frozen_settings["attention_minimum_inlier_ratio"] == 0.50
     assert len(frozen_settings["formal_method_config_digest"]) == 64
     assert frozen_settings["pipeline_class_name"].endswith(
         ".StableDiffusion3Pipeline"
@@ -481,6 +485,43 @@ def test_formal_prompt_contract_rejects_count_and_digest_drift(
     prompt_path.write_text("\n".join(drifted_lines) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="逐字节重建"):
         build_paper_run_config(root=tmp_path)
+
+@pytest.mark.constraint
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    (
+        ("attention_anchor_count", 12.0),
+        ("attention_anchor_count", True),
+        ("attention_residual_threshold", float("nan")),
+        ("attention_minimum_inlier_ratio", float("inf")),
+    ),
+)
+def test_paper_run_config_rejects_invalid_alignment_gate_types(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    """论文配置入口必须拒绝可与正式值宽松相等的错误类型."""
+
+    prompt_contract = write_prompt_contract(
+        tmp_path,
+        "probe_paper",
+        7,
+    )
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.delenv("SLM_WM_DRIVE_RESULT_ROOT", raising=False)
+    monkeypatch.delenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
+    monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+    config = build_paper_run_config(
+        root=tmp_path,
+        prompt_contract=prompt_contract,
+    )
+
+    with pytest.raises(ValueError):
+        replace(config, **{field_name: invalid_value})
+
 
 @pytest.mark.parametrize(
     "paper_run_name,target_fpr",

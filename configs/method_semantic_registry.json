@@ -1,8 +1,8 @@
 {
   "registry_schema": "slm_wm_method_semantic_registry_v1",
   "registry_scope": "normative_traceability_without_scientific_conformance_decision",
-  "method_definition_schema": "slm_wm_constructive_local_tangent_v4",
-  "method_definition_digest": "aa1fe3b81f1763403b58bb85c01a44c048b8d2b0916f3a3d9cf72c2275a4fd7c",
+  "method_definition_schema": "slm_wm_constructive_local_tangent_v6",
+  "method_definition_digest": "1895838d4a89b41e3692f6aad547a7feb9a698f1520bd81b83af457680476fc2",
   "invariants": [
     {
       "invariant_id": "constructive_local_tangent_scope",
@@ -1384,7 +1384,8 @@
         "decision=detector(image,key,public_model_config)",
         "public_detection_noise=versioned_key_prg_reconstruction(public_detection_noise_role,public_model_identity,image_shape,public_detection_schedule_index)",
         "content_threshold=frozen_from_calibration_clean_negatives",
-        "rescue_content_threshold=content_threshold"
+        "rescue_content_threshold=content_threshold",
+        "alignment_structure_gate=preregistered(anchor_count=12,residual_threshold=0.20,minimum_inlier_ratio=0.50)"
       ],
       "configuration_fields": [
         "detector_input_access_mode",
@@ -1399,6 +1400,9 @@
         "attention_stable_token_fraction",
         "attention_unstable_pair_weight",
         "attention_relation_component_weights",
+        "attention_anchor_count",
+        "attention_residual_threshold",
+        "attention_minimum_inlier_ratio",
         "attention_coordinate_convention",
         "attention_grid_align_corners",
         "public_detection_schedule_index",
@@ -1408,6 +1412,14 @@
         "public_detection_condition_text"
       ],
       "method_implementation_symbols": [
+        {
+          "path": "main/methods/geometry/attention_alignment.py",
+          "symbol": "attention_alignment_gate_record"
+        },
+        {
+          "path": "main/methods/geometry/attention_alignment.py",
+          "symbol": "recover_attention_affine_alignment"
+        },
         {
           "path": "main/methods/detection/image_only.py",
           "symbol": "detect_image_only_watermark"
@@ -1430,6 +1442,10 @@
         "threshold_source",
         "same_threshold_rescue_source",
         "formal_method_config_digest",
+        "attention_alignment_gate",
+        "attention_anchor_count",
+        "attention_residual_threshold",
+        "attention_minimum_inlier_ratio",
         "public_detection_noise_prg_identity",
         "public_detection_noise_prg_identity_digest",
         "public_detection_noise_content_sha256",
@@ -1442,7 +1458,8 @@
         "calibration_threshold_missing",
         "rescue_threshold_identity_mismatch",
         "image_reencoding_missing",
-        "required_qk_reextraction_missing"
+        "required_qk_reextraction_missing",
+        "alignment_structure_gate_missing_or_drifted"
       ],
       "forbidden_substitutes": [
         "prompt_conditioned_detection",
@@ -1455,7 +1472,8 @@
       "cpu_property_id": "detector_signature_and_runtime_reject_generation_private_state",
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_image_only_detector_interface_and_positive_content_path",
-        "tests/functional/test_attack_matrix.py::test_attack_matrix_rejects_non_blind_detection_records"
+        "tests/functional/test_attack_matrix.py::test_attack_matrix_rejects_non_blind_detection_records",
+        "tests/functional/test_model_source_registry.py::test_runtime_detector_config_consumes_formal_alignment_gate"
       ],
       "cpu_property_test_nodes": [],
       "gpu_atomic_roles": [
@@ -1463,13 +1481,14 @@
         "reencoded_image_latent",
         "raw_image_qk_atoms",
         "aligned_image_qk_atoms",
+        "preregistered_alignment_structure_gate",
         "frozen_threshold_identity",
         "image_only_decision_record",
         "public_detection_noise_tensor",
         "public_detection_noise_evidence_bundle"
       ],
       "gpu_observation_requirement": "真实检测记录只能绑定待检图像、密钥、公开模型、冻结阈值和图像重编码证据。",
-      "claim_boundary": "检测器不得读取 Prompt、源 latent、采样轨迹、样本级 Null Space 或生成端注意力原子。"
+      "claim_boundary": "检测器不得读取 Prompt、源 latent、采样轨迹、样本级 Null Space 或生成端注意力原子；锚点数量、归一化坐标残差和最小内点比例是预注册方法常量，不由 calibration 或 test 样本调参。"
     },
     {
       "invariant_id": "same_threshold_geometry_rescue",
@@ -1479,15 +1498,27 @@
         "rescue_eligible=margin_in_window_and_geometry_failure_and_registration_ready",
         "rescue=rescue_eligible_and((aligned_content_score-content_threshold)>=0)",
         "evidence_positive=positive_content_or_rescue",
-        "raw_and_aligned_detection_bind_public_detection_noise_evidence"
+        "raw_and_aligned_detection_bind_public_detection_noise_evidence",
+        "registration_geometry_gate=(requested_anchor_count=12,residual<=0.20,inlier_ratio>=0.50)"
       ],
       "configuration_fields": [
         "detector_input_access_mode",
         "attention_stable_token_fraction",
         "attention_unstable_pair_weight",
-        "attention_relation_component_weights"
+        "attention_relation_component_weights",
+        "attention_anchor_count",
+        "attention_residual_threshold",
+        "attention_minimum_inlier_ratio"
       ],
       "method_implementation_symbols": [
+        {
+          "path": "main/methods/geometry/attention_alignment.py",
+          "symbol": "attention_alignment_gate_record"
+        },
+        {
+          "path": "main/methods/geometry/attention_alignment.py",
+          "symbol": "recover_attention_affine_alignment"
+        },
         {
           "path": "main/methods/detection/image_only.py",
           "symbol": "detect_image_only_watermark"
@@ -1509,6 +1540,11 @@
         "threshold_source",
         "same_threshold_rescue_source",
         "decision_scope",
+        "attention_alignment_gate",
+        "attention_anchor_count",
+        "attention_residual_threshold",
+        "attention_minimum_inlier_ratio",
+        "alignment_digest",
         "public_detection_noise_content_sha256",
         "public_detection_noise_prg_identity_digest",
         "public_detection_noise_evidence_digest",
@@ -1520,6 +1556,7 @@
         "content_threshold_missing",
         "rescue_threshold_identity_mismatch",
         "registration_gate_failed",
+        "alignment_structure_gate_missing_or_drifted",
         "aligned_content_reencoding_missing",
         "threshold_dependent_reason_stale"
       ],
@@ -1534,7 +1571,8 @@
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_complete_evidence_calibration_includes_geometry_rescue",
         "tests/functional/test_real_scientific_operators.py::test_frozen_protocol_recomputes_threshold_dependent_failure_reason",
-        "tests/functional/test_fixed_fpr_threshold_audit.py::test_main_method_threshold_audit_recomputes_complete_rescue_protocol"
+        "tests/functional/test_fixed_fpr_threshold_audit.py::test_main_method_threshold_audit_recomputes_complete_rescue_protocol",
+        "tests/functional/test_real_scientific_operators.py::test_frozen_evidence_protocol_rejects_alignment_gate_drift"
       ],
       "cpu_property_test_nodes": [],
       "gpu_atomic_roles": [
@@ -1542,6 +1580,7 @@
         "frozen_content_threshold",
         "raw_detection_record",
         "registration_measurement",
+        "preregistered_alignment_structure_gate",
         "aligned_detection_record",
         "same_threshold_decision",
         "raw_detection_public_noise",
@@ -1549,7 +1588,7 @@
         "public_detection_noise_evidence_bundle"
       ],
       "gpu_observation_requirement": "真实 calibration 和 test 记录必须绑定同一个内容阈值及完整 rescue 规则。",
-      "claim_boundary": "几何只负责恢复参考系，不能独立产生 positive。"
+      "claim_boundary": "几何只负责恢复参考系，不能独立产生 positive；12个锚点、0.20归一化坐标残差上界和0.50最小内点比例属于预注册方法定义，calibration 只冻结运行点阈值。"
     },
     {
       "invariant_id": "scientific_content_binding",

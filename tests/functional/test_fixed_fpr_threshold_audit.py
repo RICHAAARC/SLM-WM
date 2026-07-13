@@ -31,13 +31,40 @@ pytestmark = pytest.mark.quick
 
 
 OBSERVATION_SOURCE_SHA256 = "a" * 64
+ATTENTION_ALIGNMENT_GATE = {
+    "attention_anchor_count": 12,
+    "attention_residual_threshold": 0.20,
+    "attention_minimum_inlier_ratio": 0.50,
+}
+
+
+def _bind_attention_alignment_gate(
+    record: dict[str, object],
+) -> dict[str, object]:
+    """为检测夹具绑定预注册注意力配准门禁."""
+
+    gate = dict(ATTENTION_ALIGNMENT_GATE)
+    metadata = dict(record.get("metadata", {}))
+    metadata.update(gate)
+    metadata["attention_alignment_gate"] = dict(gate)
+    resolved = {**record, "metadata": metadata}
+    alignment = resolved.get("alignment")
+    if isinstance(alignment, dict):
+        alignment_metadata = dict(alignment.get("metadata", {}))
+        alignment_metadata["attention_alignment_gate"] = dict(gate)
+        resolved["alignment"] = {
+            **alignment,
+            **gate,
+            "metadata": alignment_metadata,
+        }
+    return resolved
 
 
 def _main_method_rows() -> tuple[tuple[dict[str, object], ...], dict[str, object]]:
     """构造包含 calibration 和 test clean negative 的主方法记录。"""
 
     raw_rows = tuple(
-        {
+        _bind_attention_alignment_gate({
             "prompt_id": f"prompt-{index}",
             "split": split,
             "sample_role": "clean_negative",
@@ -45,8 +72,13 @@ def _main_method_rows() -> tuple[tuple[dict[str, object], ...], dict[str, object
             "content_score": score,
             "aligned_content_score": score,
             "attention_geometry_score": 0.0,
+            "registration_confidence": 0.0,
+            "attention_sync_score": 0.0,
             "geometry_reliable": False,
-        }
+            "alignment": {
+                "registration_geometry_reliable": False,
+            },
+        })
         for index, (split, score) in enumerate(
             (
                 ("calibration", 0.1),
@@ -135,6 +167,40 @@ def test_main_method_threshold_audit_recomputes_complete_rescue_protocol() -> No
         expected_test_negative_count=2,
     )
     assert failed_margin["detection_decision_ready"] is False
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    (
+        ("attention_anchor_count", 12.0),
+        ("geometry_protocol_calibration_ready", 1),
+        ("unexpected_protocol_field", "forbidden"),
+    ),
+)
+def test_main_method_threshold_audit_rejects_protocol_type_and_schema_drift(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    """正式阈值审计必须拒绝宽松数值相等和未知协议字段."""
+
+    rows, protocol = _main_method_rows()
+    changed_protocol = {
+        **protocol,
+        field_name: invalid_value,
+    }
+
+    result = audit_main_method_fixed_fpr(
+        rows,
+        changed_protocol,
+        observation_source_sha256=OBSERVATION_SOURCE_SHA256,
+        target_fpr=0.25,
+        expected_calibration_negative_count=3,
+        expected_test_negative_count=2,
+    )
+
+    assert result["protocol_value_ready"] is False
+    assert result["detection_decision_ready"] is False
+    assert result["fixed_fpr_threshold_ready"] is False
 
 
 def test_baseline_threshold_audit_binds_recomputed_threshold_and_digest() -> None:

@@ -97,6 +97,13 @@ def build_method_config(
         attention_relation_component_weights=(
             method.attention_relation_component_weights
         ),
+        attention_anchor_count=method.attention_anchor_count,
+        attention_residual_threshold=(
+            method.attention_residual_threshold
+        ),
+        attention_minimum_inlier_ratio=(
+            method.attention_minimum_inlier_ratio
+        ),
         minimum_final_image_attention_score_gain=(
             method.minimum_final_image_attention_score_gain
         ),

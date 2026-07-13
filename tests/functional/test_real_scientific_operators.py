@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import inspect
 from dataclasses import replace
@@ -28,6 +29,9 @@ from main.methods.carrier import (
 )
 from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
 from main.methods.geometry import (
+    ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+    ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
+    ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
@@ -109,6 +113,41 @@ from scripts import semantic_watermark_scientific_workflow as scientific_workflo
 from tests.helpers.scientific_unit_provenance import (
     build_test_scientific_unit_provenance,
 )
+
+
+_FORMAL_ATTENTION_ALIGNMENT_GATE = {
+    "attention_anchor_count": ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+    "attention_residual_threshold": ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
+    "attention_minimum_inlier_ratio": (
+        ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO
+    ),
+}
+
+
+def _formal_detection_alignment_identity(
+    *,
+    registration_geometry_reliable: bool,
+    geometry_reliable: bool | None = None,
+) -> tuple[dict[str, object], dict[str, object]]:
+    """构造与生产记录相同的注意力结构门禁身份字段."""
+
+    resolved_geometry_reliable = (
+        registration_geometry_reliable
+        if geometry_reliable is None
+        else geometry_reliable
+    )
+    gate = dict(_FORMAL_ATTENTION_ALIGNMENT_GATE)
+    detector_metadata = {
+        "attention_alignment_gate": dict(gate),
+        **gate,
+    }
+    alignment = {
+        "registration_geometry_reliable": registration_geometry_reliable,
+        "geometry_reliable": resolved_geometry_reliable,
+        "metadata": {"attention_alignment_gate": dict(gate)},
+        **gate,
+    }
+    return detector_metadata, alignment
 
 
 def _direct_qk_relation_from_logits(
@@ -2211,6 +2250,9 @@ def test_attention_registration_is_equivariant_to_query_and_key_permutation(
                 ),
         ),
         prg_version=KEYED_PRG_VERSION,
+        anchor_count=12,
+        residual_threshold=0.20,
+        minimum_inlier_ratio=0.50,
     )
 
     assert transform_name
@@ -2325,6 +2367,9 @@ def test_image_only_detector_reextracts_qk_after_alignment(
             model_id=model_id,
             content_threshold=0.2,
             geometry_score_threshold=0.5,
+            attention_anchor_count=12,
+            attention_residual_threshold=0.20,
+            attention_minimum_inlier_ratio=0.50,
             registration_confidence_threshold=0.5,
             attention_sync_score_threshold=0.5,
             rescue_margin_low=-0.5,
@@ -2377,6 +2422,18 @@ def test_image_only_detector_reextracts_qk_after_alignment(
         1.0 / 3.0,
         1.0 / 3.0,
     )
+    record = result.to_record()
+    assert record["metadata"]["attention_alignment_gate"] == (
+        _FORMAL_ATTENTION_ALIGNMENT_GATE
+    )
+    assert record["alignment"] is not None
+    assert {
+        field_name: record["alignment"][field_name]
+        for field_name in _FORMAL_ATTENTION_ALIGNMENT_GATE
+    } == _FORMAL_ATTENTION_ALIGNMENT_GATE
+    assert record["alignment"]["metadata"][
+        "attention_alignment_gate"
+    ] == _FORMAL_ATTENTION_ALIGNMENT_GATE
 
 
 @pytest.mark.quick
@@ -2573,6 +2630,9 @@ def test_image_only_detector_interface_and_positive_content_path() -> None:
             model_id="model",
             content_threshold=0.20,
             geometry_score_threshold=0.0,
+            attention_anchor_count=12,
+            attention_residual_threshold=0.20,
+            attention_minimum_inlier_ratio=0.50,
         ),
         image_latent_encoder=lambda image: image,
     )
@@ -2583,6 +2643,47 @@ def test_image_only_detector_interface_and_positive_content_path() -> None:
     assert result.rescue_applied is False
     assert result.metadata["blind_image_detector"] is True
     assert result.metadata["generation_latent_trace_required"] is False
+    assert result.metadata["attention_alignment_gate"] == (
+        _FORMAL_ATTENTION_ALIGNMENT_GATE
+    )
+
+
+@pytest.mark.quick
+def test_detector_digest_binds_every_alignment_gate_parameter() -> None:
+    """内容主判路径的检测摘要也必须逐字段绑定注意力结构门禁."""
+
+    image = torch.zeros(1, 2, 8, 8)
+    baseline_config = ImageOnlyDetectionConfig(
+        model_id="detector_gate_digest_model",
+        content_threshold=0.20,
+        geometry_score_threshold=0.0,
+        attention_anchor_count=12,
+        attention_residual_threshold=0.20,
+        attention_minimum_inlier_ratio=0.50,
+    )
+    baseline = detect_image_only_watermark(
+        image=image,
+        key_material="detector_gate_digest_key",
+        config=baseline_config,
+        image_latent_encoder=lambda value: value,
+    )
+    for field_name, value in (
+        ("attention_anchor_count", 13),
+        ("attention_residual_threshold", 0.21),
+        ("attention_minimum_inlier_ratio", 0.51),
+    ):
+        changed_config = replace(
+            baseline_config,
+            **{field_name: value},
+        )
+        changed = detect_image_only_watermark(
+            image=image,
+            key_material="detector_gate_digest_key",
+            config=changed_config,
+            image_latent_encoder=lambda candidate: candidate,
+        )
+        assert changed.detector_digest != baseline.detector_digest
+        assert changed.metadata[field_name] == value
 
 
 @pytest.mark.quick
@@ -2591,6 +2692,9 @@ def test_complete_evidence_calibration_includes_geometry_rescue() -> None:
 
     calibration_records = []
     for index in range(33):
+        metadata, alignment = _formal_detection_alignment_identity(
+            registration_geometry_reliable=index % 2 == 0,
+        )
         calibration_records.append(
             {
                 "content_score": index / 100.0,
@@ -2599,10 +2703,8 @@ def test_complete_evidence_calibration_includes_geometry_rescue() -> None:
                 "attention_geometry_score": 0.5 + index / 1000.0,
                 "registration_confidence": 0.6 + index / 1000.0,
                 "attention_sync_score": 0.7 + index / 1000.0,
-                "alignment": {
-                    "registration_geometry_reliable": index % 2 == 0,
-                    "geometry_reliable": index % 2 == 0,
-                },
+                "metadata": metadata,
+                "alignment": alignment,
             }
         )
     protocol = calibrate_complete_evidence_protocol(
@@ -2622,20 +2724,115 @@ def test_complete_evidence_calibration_includes_geometry_rescue() -> None:
 
 
 @pytest.mark.quick
+def test_frozen_evidence_protocol_rejects_alignment_gate_drift() -> None:
+    """校准和应用环节都不得接受非预注册注意力结构门禁."""
+
+    metadata, alignment = _formal_detection_alignment_identity(
+        registration_geometry_reliable=True,
+    )
+    baseline_record = {
+        "content_score": 0.1,
+        "aligned_content_score": 0.2,
+        "attention_geometry_score": 0.3,
+        "registration_confidence": 0.4,
+        "attention_sync_score": 0.5,
+        "metadata": metadata,
+        "alignment": alignment,
+    }
+    protocol = calibrate_complete_evidence_protocol(
+        (baseline_record,),
+        target_fpr=0.1,
+        rescue_margin_low=-0.05,
+    )
+    changed_record = deepcopy(baseline_record)
+    changed_value = 0.21
+    changed_record["metadata"][
+        "attention_residual_threshold"
+    ] = changed_value
+    changed_record["metadata"]["attention_alignment_gate"][
+        "attention_residual_threshold"
+    ] = changed_value
+    changed_record["alignment"][
+        "attention_residual_threshold"
+    ] = changed_value
+    changed_record["alignment"]["metadata"]["attention_alignment_gate"][
+        "attention_residual_threshold"
+    ] = changed_value
+
+    with pytest.raises(ValueError, match="预注册注意力结构门禁"):
+        calibrate_complete_evidence_protocol(
+            (changed_record,),
+            target_fpr=0.1,
+            rescue_margin_low=-0.05,
+        )
+    with pytest.raises(ValueError, match="预注册注意力结构门禁"):
+        apply_frozen_evidence_protocol((changed_record,), protocol)
+
+
+@pytest.mark.quick
+def test_threshold_digest_binds_every_alignment_gate_parameter() -> None:
+    """冻结阈值摘要必须逐字段绑定结构门禁而非只绑定分数阈值."""
+
+    metadata, alignment = _formal_detection_alignment_identity(
+        registration_geometry_reliable=True,
+    )
+    protocol = calibrate_complete_evidence_protocol(
+        (
+            {
+                "content_score": 0.1,
+                "aligned_content_score": 0.2,
+                "attention_geometry_score": 0.3,
+                "registration_confidence": 0.4,
+                "attention_sync_score": 0.5,
+                "metadata": metadata,
+                "alignment": alignment,
+            },
+        ),
+        target_fpr=0.1,
+        rescue_margin_low=-0.05,
+    )
+    digest_payload = {
+        field_name: value
+        for field_name, value in protocol.to_dict().items()
+        if field_name not in {
+            "calibration_false_positive_rate",
+            "threshold_digest",
+        }
+    }
+    digest_payload["decision_scope"] = (
+        "content_or_same_threshold_aligned_content_rescue"
+    )
+    assert build_stable_digest(digest_payload) == protocol.threshold_digest
+    for field_name, value in (
+        ("attention_anchor_count", 13),
+        ("attention_residual_threshold", 0.21),
+        ("attention_minimum_inlier_ratio", 0.51),
+    ):
+        changed_payload = dict(digest_payload)
+        changed_payload[field_name] = value
+        assert build_stable_digest(changed_payload) != protocol.threshold_digest
+
+
+@pytest.mark.quick
 def test_geometry_protocol_cannot_close_with_missing_calibration_scores() -> None:
     """任一几何数值门禁缺失时不得把完整 rescue 协议标记为已校准。"""
 
-    records = tuple(
-        {
-            "content_score": index / 100.0,
-            "aligned_content_score": (index + 1) / 100.0,
-            "attention_geometry_score": 0.1,
-            "registration_confidence": 0.2,
-            "attention_sync_score": None if index == 0 else 0.3,
-            "alignment": {"registration_geometry_reliable": True},
-        }
-        for index in range(33)
-    )
+    records = []
+    for index in range(33):
+        metadata, alignment = _formal_detection_alignment_identity(
+            registration_geometry_reliable=True,
+        )
+        records.append(
+            {
+                "content_score": index / 100.0,
+                "aligned_content_score": (index + 1) / 100.0,
+                "attention_geometry_score": 0.1,
+                "registration_confidence": 0.2,
+                "attention_sync_score": None if index == 0 else 0.3,
+                "metadata": metadata,
+                "alignment": alignment,
+            }
+        )
 
     protocol = calibrate_complete_evidence_protocol(
         records,
@@ -2657,6 +2854,11 @@ def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None
         geometry_score_threshold=0.0,
         registration_confidence_threshold=0.0,
         attention_sync_score_threshold=0.0,
+        attention_anchor_count=ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+        attention_residual_threshold=ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
+        attention_minimum_inlier_ratio=(
+            ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO
+        ),
         geometry_calibration_negative_count=10,
         geometry_calibration_exceedance_count=0,
         registration_calibration_negative_count=10,
@@ -2670,6 +2872,10 @@ def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None
         target_fpr=0.1,
         threshold_digest="fixture_threshold",
     )
+    metadata, alignment = _formal_detection_alignment_identity(
+        registration_geometry_reliable=True,
+        geometry_reliable=False,
+    )
     record = {
         "content_score": 0.4,
         "aligned_content_score": 0.6,
@@ -2677,10 +2883,8 @@ def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None
         "registration_confidence": 0.8,
         "attention_sync_score": 0.8,
         "geometry_reliable": False,
-        "alignment": {
-            "registration_geometry_reliable": True,
-            "geometry_reliable": False,
-        },
+        "metadata": metadata,
+        "alignment": alignment,
         "content_failure_reason": "content_positive",
     }
 

@@ -81,6 +81,9 @@ lf_count_include_pad: true
 attention_stable_token_fraction: 0.50
 attention_unstable_pair_weight: 0.25
 attention_relation_component_weights: [0.25, 0.25, 0.25, 0.25]
+attention_anchor_count: 12
+attention_residual_threshold: 0.20
+attention_minimum_inlier_ratio: 0.50
 attention_backtracking_factor: 0.5
 attention_backtracking_maximum_steps: 8
 minimum_final_image_attention_score_gain: 0.0001

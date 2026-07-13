@@ -49,6 +49,33 @@ MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 MODEL_REVISION = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
 RESCUE_MARGIN_LOW = -0.05
 EXPECTED_BASE_SEED = 1703
+ATTENTION_ALIGNMENT_GATE = {
+    "attention_anchor_count": 12,
+    "attention_residual_threshold": 0.20,
+    "attention_minimum_inlier_ratio": 0.50,
+}
+
+
+def _bind_attention_alignment_gate(
+    record: dict[str, object],
+) -> dict[str, object]:
+    """为检测夹具绑定预注册注意力配准门禁."""
+
+    gate = dict(ATTENTION_ALIGNMENT_GATE)
+    metadata = dict(record.get("metadata", {}))
+    metadata.update(gate)
+    metadata["attention_alignment_gate"] = dict(gate)
+    resolved = {**record, "metadata": metadata}
+    alignment = resolved.get("alignment")
+    if isinstance(alignment, dict):
+        alignment_metadata = dict(alignment.get("metadata", {}))
+        alignment_metadata["attention_alignment_gate"] = dict(gate)
+        resolved["alignment"] = {
+            **alignment,
+            **gate,
+            "metadata": alignment_metadata,
+        }
+    return resolved
 
 
 def _prompt_rows() -> tuple[dict[str, object], ...]:
@@ -242,6 +269,10 @@ def _source(
         }
         for prompt in _prompt_rows()
     )
+    if method_id == "slm_wm":
+        raw_rows = tuple(
+            _bind_attention_alignment_gate(row) for row in raw_rows
+        )
     calibration_rows = tuple(
         row for row in raw_rows if row["split"] == "calibration"
     )
@@ -557,6 +588,24 @@ def test_exact_method_repeat_recomputation_rejects_declared_threshold_drift(
 
     with pytest.raises(MethodRepeatFixedFprError, match="重算或逐条判定"):
         _run((*exact_sources[:source_index], drifted, *exact_sources[source_index + 1 :]))
+
+
+def test_exact_method_repeat_rejects_float_anchor_in_main_protocol(
+    exact_sources: tuple[MethodRepeatObservationSource, ...],
+) -> None:
+    """主方法重复声明不得把整数锚点改为宽松相等的浮点数."""
+
+    source = exact_sources[0]
+    drifted = replace(
+        source,
+        declared_threshold_protocol={
+            **source.declared_threshold_protocol,
+            "attention_anchor_count": 12.0,
+        },
+    )
+
+    with pytest.raises(MethodRepeatFixedFprError, match="正文或摘要无效"):
+        _run((drifted, *exact_sources[1:]))
 
 
 def test_exact_method_repeat_recomputation_rejects_mixed_aggregate_identity(

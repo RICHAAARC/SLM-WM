@@ -19,7 +19,7 @@ METHOD_CONFIG_RELATIVE_PATH = PurePosixPath("configs/model_sd35.yaml")
 REGISTRY_SCHEMA = "slm_wm_method_semantic_registry_v1"
 REGISTRY_SCOPE = "normative_traceability_without_scientific_conformance_decision"
 EXPECTED_NORMATIVE_TRACE_DIGEST = (
-    "406d491e24edefd1d1e0d511287552a6130f1519626c71bda43a36ed6dca95c4"
+    "1841a409f228e1ee4a56e10f21bea9d610e282d1accd6c195d6846b0c6b5b1b0"
 )
 EXPECTED_INVARIANT_IDS = (
     "constructive_local_tangent_scope",
@@ -260,6 +260,14 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
     "finite_feature_preservation": (),
     "final_image_attention_attribution": (),
     "image_only_detection_boundary": _bindings(
+        (
+            "main/methods/geometry/attention_alignment.py",
+            "attention_alignment_gate_record",
+        ),
+        (
+            "main/methods/geometry/attention_alignment.py",
+            "recover_attention_affine_alignment",
+        ),
         ("main/methods/detection/image_only.py", "detect_image_only_watermark"),
     ),
     "versioned_key_prg_reconstruction": _bindings(
@@ -286,6 +294,14 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
         ),
     ),
     "same_threshold_geometry_rescue": _bindings(
+        (
+            "main/methods/geometry/attention_alignment.py",
+            "attention_alignment_gate_record",
+        ),
+        (
+            "main/methods/geometry/attention_alignment.py",
+            "recover_attention_affine_alignment",
+        ),
         ("main/methods/detection/image_only.py", "detect_image_only_watermark"),
     ),
     "scientific_content_binding": _bindings(
@@ -559,6 +575,8 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_image_only_detector_interface_and_positive_content_path",
         "tests/functional/test_attack_matrix.py::"
         "test_attack_matrix_rejects_non_blind_detection_records",
+        "tests/functional/test_model_source_registry.py::"
+        "test_runtime_detector_config_consumes_formal_alignment_gate",
     ),
     "versioned_key_prg_reconstruction": (
         "tests/functional/test_real_scientific_operators.py::"
@@ -577,6 +595,8 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
         "test_frozen_protocol_recomputes_threshold_dependent_failure_reason",
         "tests/functional/test_fixed_fpr_threshold_audit.py::"
         "test_main_method_threshold_audit_recomputes_complete_rescue_protocol",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_frozen_evidence_protocol_rejects_alignment_gate_drift",
     ),
     "scientific_content_binding": (
         "tests/functional/test_semantic_feature_conditions.py::"

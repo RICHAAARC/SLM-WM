@@ -36,6 +36,7 @@ from paper_experiments.analysis.paper_artifact_data_validation import (
     ATTACK_METRIC_FIELDS,
     BASELINE_COMPARISON_FIELDS,
     DATASET_QUALITY_FIELDS,
+    FROZEN_PROTOCOL_FIELDS,
     TEST_METRIC_FIELDS,
     validate_paper_artifact_source_data,
 )
@@ -43,7 +44,59 @@ from main.core.digest import build_stable_digest
 
 
 TARGET_FPR = 0.1
-THRESHOLD_DIGEST = "threshold_digest_validation"
+EXPECTED_FROZEN_PROTOCOL_FIELDS = {
+    "content_threshold",
+    "rescue_margin_low",
+    "geometry_score_threshold",
+    "registration_confidence_threshold",
+    "attention_sync_score_threshold",
+    "attention_anchor_count",
+    "attention_residual_threshold",
+    "attention_minimum_inlier_ratio",
+    "geometry_calibration_negative_count",
+    "geometry_calibration_exceedance_count",
+    "registration_calibration_negative_count",
+    "registration_calibration_exceedance_count",
+    "sync_calibration_negative_count",
+    "sync_calibration_exceedance_count",
+    "geometry_protocol_calibration_ready",
+    "calibration_negative_count",
+    "calibration_false_positive_count",
+    "calibration_false_positive_rate",
+    "target_fpr",
+    "threshold_digest",
+}
+_FROZEN_PROTOCOL_DIGEST_PAYLOAD = {
+    "content_threshold": 0.5,
+    "rescue_margin_low": -0.2,
+    "geometry_score_threshold": 0.5,
+    "registration_confidence_threshold": 0.5,
+    "attention_sync_score_threshold": 0.5,
+    "attention_anchor_count": 12,
+    "attention_residual_threshold": 0.20,
+    "attention_minimum_inlier_ratio": 0.50,
+    "geometry_calibration_negative_count": 10,
+    "geometry_calibration_exceedance_count": 0,
+    "registration_calibration_negative_count": 10,
+    "registration_calibration_exceedance_count": 0,
+    "sync_calibration_negative_count": 10,
+    "sync_calibration_exceedance_count": 0,
+    "geometry_protocol_calibration_ready": True,
+    "calibration_negative_count": 10,
+    "calibration_false_positive_count": 1,
+    "target_fpr": TARGET_FPR,
+    "decision_scope": "content_or_same_threshold_aligned_content_rescue",
+}
+THRESHOLD_DIGEST = build_stable_digest(_FROZEN_PROTOCOL_DIGEST_PAYLOAD)
+FROZEN_PROTOCOL = {
+    **{
+        field_name: value
+        for field_name, value in _FROZEN_PROTOCOL_DIGEST_PAYLOAD.items()
+        if field_name != "decision_scope"
+    },
+    "calibration_false_positive_rate": 0.1,
+    "threshold_digest": THRESHOLD_DIGEST,
+}
 FORMAL_ATTACK_CONFIGS = tuple(
     config
     for config in default_attack_configs()
@@ -74,6 +127,14 @@ def _read_csv(path: Path) -> tuple[tuple[str, ...], list[dict[str, str]]]:
 def _detection_record(prompt_id: str, sample_role: str, score: float) -> dict:
     """构造与冻结协议一致的 test 连续检测记录."""
 
+    alignment_gate = {
+        field_name: FROZEN_PROTOCOL[field_name]
+        for field_name in (
+            "attention_anchor_count",
+            "attention_residual_threshold",
+            "attention_minimum_inlier_ratio",
+        )
+    }
     return {
         "run_id": f"run_{prompt_id}",
         "prompt_id": prompt_id,
@@ -88,6 +149,13 @@ def _detection_record(prompt_id: str, sample_role: str, score: float) -> dict:
         "source_to_evaluated_psnr": 40.0,
         "geometry_reliable": False,
         "attention_geometry_score": 0.0,
+        "registration_confidence": 0.0,
+        "attention_sync_score": 0.0,
+        "metadata": {
+            "attention_alignment_gate": dict(alignment_gate),
+            **alignment_gate,
+        },
+        "alignment": None,
         "formal_evidence_positive": score >= 0.5,
         "detector_digest": f"detector_{prompt_id}_{sample_role}",
     }
@@ -99,6 +167,23 @@ def _row(fields: set[str], **values: object) -> dict:
     return {field_name: values.get(field_name, "") for field_name in fields}
 
 
+def _recompute_protocol_digest(protocol: dict[str, object]) -> str:
+    """按生产协议独立重建冻结阈值摘要."""
+
+    payload = {
+        field_name: value
+        for field_name, value in protocol.items()
+        if field_name not in {
+            "calibration_false_positive_rate",
+            "threshold_digest",
+        }
+    }
+    payload["decision_scope"] = (
+        "content_or_same_threshold_aligned_content_rescue"
+    )
+    return build_stable_digest(payload)
+
+
 def _prepare_valid_sources(root: Path) -> dict[str, Path]:
     """写出能够独立通过全部11类数据检查的最小正式形状."""
 
@@ -108,18 +193,7 @@ def _prepare_valid_sources(root: Path) -> dict[str, Path]:
     ablation_dir = root / "ablation"
     quality_dir = root / "quality"
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    protocol = {
-        "content_threshold": 0.5,
-        "rescue_margin_low": -0.2,
-        "geometry_score_threshold": 0.5,
-        "geometry_calibration_negative_count": 2,
-        "geometry_calibration_exceedance_count": 0,
-        "calibration_negative_count": 10,
-        "calibration_false_positive_count": 1,
-        "calibration_false_positive_rate": 0.1,
-        "target_fpr": TARGET_FPR,
-        "threshold_digest": THRESHOLD_DIGEST,
-    }
+    protocol = dict(FROZEN_PROTOCOL)
     (runtime_dir / "frozen_evidence_protocol.json").write_text(
         json.dumps(protocol, ensure_ascii=False),
         encoding="utf-8",
@@ -413,6 +487,80 @@ def test_actual_paper_artifact_data_passes_exact_schema_and_numeric_validation(t
     assert report["raw_image_only_detection_records_sha256"] == report[
         "evidence_source_file_sha256"
     ][raw_path]
+
+
+@pytest.mark.quick
+def test_frozen_protocol_schema_matches_runtime_dataclass_exactly() -> None:
+    """论文产物校验器不得保留缺少结构门禁的旧字段白名单."""
+
+    assert FROZEN_PROTOCOL_FIELDS == EXPECTED_FROZEN_PROTOCOL_FIELDS
+    assert set(FROZEN_PROTOCOL) == EXPECTED_FROZEN_PROTOCOL_FIELDS
+    assert _recompute_protocol_digest(FROZEN_PROTOCOL) == THRESHOLD_DIGEST
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("field_name", "changed_value"),
+    (
+        ("attention_anchor_count", 13),
+        ("attention_residual_threshold", 0.21),
+        ("attention_minimum_inlier_ratio", 0.51),
+    ),
+)
+def test_frozen_protocol_rejects_rehashed_alignment_gate_drift(
+    tmp_path: Path,
+    field_name: str,
+    changed_value: object,
+) -> None:
+    """即使重新计算摘要, 非预注册结构门禁也不得进入论文证据."""
+
+    source_paths = _prepare_valid_sources(tmp_path)
+    protocol_path = source_paths["frozen_evidence_protocol_ready"]
+    protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+    protocol[field_name] = changed_value
+    protocol["threshold_digest"] = _recompute_protocol_digest(protocol)
+    protocol_path.write_text(
+        json.dumps(protocol, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    report = _validate(tmp_path, source_paths)
+
+    assert report["frozen_evidence_protocol_ready"] is False
+    assert report["artifact_data_validation_ready"] is False
+    assert any(
+        "注意力结构门禁发生漂移" in issue
+        for issue in report["checks"][
+            "frozen_evidence_protocol_ready"
+        ]["issues"]
+    )
+
+
+@pytest.mark.quick
+def test_frozen_protocol_rejects_float_anchor_count_after_rehash(
+    tmp_path: Path,
+) -> None:
+    """锚点数量即使数值相等也不得接受 JSON 浮点类型."""
+
+    source_paths = _prepare_valid_sources(tmp_path)
+    protocol_path = source_paths["frozen_evidence_protocol_ready"]
+    protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+    protocol["attention_anchor_count"] = 12.0
+    protocol["threshold_digest"] = _recompute_protocol_digest(protocol)
+    protocol_path.write_text(
+        json.dumps(protocol, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    report = _validate(tmp_path, source_paths)
+
+    assert report["frozen_evidence_protocol_ready"] is False
+    assert any(
+        "注意力结构门禁无效" in issue
+        for issue in report["checks"][
+            "frozen_evidence_protocol_ready"
+        ]["issues"]
+    )
 
 
 @pytest.mark.quick

@@ -43,6 +43,9 @@ $$
 | `risk_attention_signal_interpolation_mode` / `risk_attention_signal_align_corners` | `bilinear` / `true` |
 | `risk_neutral_texture_value` | 0.5 |
 | `attention_grid_align_corners` | `true` |
+| `attention_anchor_count` | 12 |
+| `attention_residual_threshold` | 0.20 |
+| `attention_minimum_inlier_ratio` | 0.50 |
 | `lf_kernel_size` / `lf_stride` / `lf_padding` / `lf_boundary_mode` / `lf_count_include_pad` | 5 / 1 / 2 / `zero_padding` / `true` |
 | `tail_fraction` | 0.20 |
 | `attention_backtracking_factor` / `attention_backtracking_maximum_steps` | 0.5 / 8 |
@@ -93,7 +96,7 @@ VAE decoder、VAE encoder、冻结 CLIP、扩散 Transformer、FlowMatch schedul
 
 ```text
 {
-  "formal_method_config_schema": "slm_wm_formal_method_runtime_config_v1",
+  "formal_method_config_schema": "slm_wm_formal_method_runtime_config_v2",
   "formal_method_config": asdict(C_method)
 }
 ```
@@ -352,7 +355,7 @@ domain_fields = {
 
 `public_detection_noise_prg_protocol` 必须等于 `sha256_counter_normal_icdf_table20_float32_v2`。上述 `key_material`、`domain_fields` 和 `shape` 进入本节定义的完整 stable JSON domain payload, 经 SHA-256、从0开始的16字节大端计数器、MSB-first 连续20位索引提取和冻结 Q20 表查询得到 CPU float32 Tensor；实际 latent dtype 转换在 CPU 完成, 随后才搬运到执行设备。该公开 domain 不含水印密钥、Prompt、生成 seed 或生成轨迹。
 
-CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `aa1fe3b81f1763403b58bb85c01a44c048b8d2b0916f3a3d9cf72c2275a4fd7c`, 正式随机化协议摘要固定为 `a5389d2e72e331d81a7e7d0f9614a3ce801fbf432476f18208b5e366a9b12a64`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
+CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `1895838d4a89b41e3692f6aad547a7feb9a698f1520bd81b83af457680476fc2`, 正式随机化协议摘要固定为 `a5389d2e72e331d81a7e7d0f9614a3ce801fbf432476f18208b5e366a9b12a64`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
 
 ## `spatial_low_pass_and_amplitude_tail_carriers`
 
@@ -679,9 +682,28 @@ J(T)=0.10s_{\mathrm{can}}(T)+0.90s_{\mathrm{obs}}(T)
 -0.01\sum_{q\in\{c_{\mathrm{can}},u_{\mathrm{can}},c_{\mathrm{obs}},u_{\mathrm{obs}}\}}(1-q).
 $$
 
-搜索定义域固定为残余旋转 $[-32,32]$ 度、均匀尺度 $[1/\sqrt2,\sqrt2]$ 和两个归一化平移分量 $[-0.28,0.28]$, 并使用三层三分局部细化；搜索器不得读取攻击参数。结构可靠性要求观测和双向关系分数为正、相对 identity 的目标间隔为正、两个方向覆盖率均不低于0.45, 并通过 calibration 冻结的 inlier 与残差门禁。aligned 图像重新提取真实 Q/K 后, 使用传递的同一 pair 身份计算 sync, 不重新选择稳定 token。
+搜索定义域固定为残余旋转 $[-32,32]$ 度、均匀尺度 $[1/\sqrt2,\sqrt2]$ 和两个归一化平移分量 $[-0.28,0.28]$, 并使用三层三分局部细化；搜索器不得读取攻击参数。结构可靠性要求观测和双向关系分数为正、相对 identity 的目标间隔为正、两个方向覆盖率均不低于0.45, 并通过下述预注册结构门禁。aligned 图像重新提取真实 Q/K 后, 使用传递的同一 pair 身份计算 sync, 不重新选择稳定 token。
 
-calibration clean negatives 冻结内容阈值 $\tau_c$、几何阈值、rescue window 和失败原因规则。原图主判为
+令当前规则二维抽样网格包含 $n$ 个 token。正式锚点数量固定为 $A=12$；若 $n<12$, 当前检测单元必须失败, 不允许缩减锚点数。锚点位置按
+
+$$
+h_j=\operatorname{round}\left(\frac{j(n-1)}{A-1}\right),
+\qquad j=0,\ldots,A-1
+$$
+
+在抽样 token 索引范围内确定性均匀选择。所有锚点和残差都使用 `normalized_xy_token_centers_corner_endpoints_v1` 坐标, 角点 token 中心分别为 -1 与1；关系图采样和图像仿射重采样统一使用 `align_corners=true`。对候选恢复变换, 仅具有有效双线性覆盖的锚点进入分母集合 $\mathcal V$。锚点同时满足观测匹配唯一且归一化 xy 欧氏残差 $d_j\le0.20$ 时记为内点, 因而
+
+$$
+r_{\mathrm{inlier}}
+=\frac{\sum_{j\in\mathcal V}\mathbf1[\operatorname{unique}(j)\land d_j\le0.20]}
+{|\mathcal V|},
+\qquad
+r_{\mathrm{inlier}}\ge0.50.
+$$
+
+无有效覆盖锚点时 $r_{\mathrm{inlier}}=0$；无内点时平均内点残差为非有限失败值。`attention_anchor_count=12`、`attention_residual_threshold=0.20` 和 `attention_minimum_inlier_ratio=0.50` 是正式方法的预注册结构常量, 必须进入唯一方法配置摘要、对齐摘要、检测器摘要、冻结阈值摘要以及相应 records、summary 和 manifest。calibration 或 test 数据不得选择、放宽或替换这三项常量；任一字段缺失、数值漂移、摘要未绑定或记录之间不一致都使证据闭合失败。
+
+calibration clean negatives 只冻结内容阈值 $\tau_c$、几何关系分阈值、注册置信度阈值、恢复后同步分阈值和 rescue window。失败原因由冻结内容余量与几何可靠性布尔规则确定, 不作为可从 calibration 或 test 调参的独立机制。原图主判为
 
 $$
 positive_{content}=\mathbf1[s_c^{raw}-\tau_c\ge0].

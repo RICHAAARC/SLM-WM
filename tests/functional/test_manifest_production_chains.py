@@ -49,6 +49,11 @@ from tests.helpers.scientific_unit_provenance import (
 PAPER_RUN_NAME = "probe_paper"
 TARGET_FPR = 0.1
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+ATTENTION_ALIGNMENT_GATE = {
+    "attention_anchor_count": 12,
+    "attention_residual_threshold": 0.20,
+    "attention_minimum_inlier_ratio": 0.50,
+}
 
 
 @dataclass(frozen=True)
@@ -146,7 +151,21 @@ def _detection_record(
         "attention_geometry_score": 0.0,
         "registration_confidence": 0.0,
         "attention_sync_score": 0.0,
-        "alignment": {"registration_geometry_reliable": False},
+        "metadata": {
+            "attention_alignment_gate": dict(
+                ATTENTION_ALIGNMENT_GATE
+            ),
+            **ATTENTION_ALIGNMENT_GATE,
+        },
+        "alignment": {
+            "registration_geometry_reliable": False,
+            "metadata": {
+                "attention_alignment_gate": dict(
+                    ATTENTION_ALIGNMENT_GATE
+                ),
+            },
+            **ATTENTION_ALIGNMENT_GATE,
+        },
     }
     if attack is not None:
         record.update(

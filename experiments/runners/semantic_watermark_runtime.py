@@ -92,6 +92,7 @@ from main.methods.geometry import (
     qk_operator_metadata_records_digest,
     qk_operator_metadata_records_ready,
     select_stable_attention_tokens,
+    validate_attention_alignment_gate,
     validate_attention_relation_component_weights,
 )
 from main.methods.method_definition import (
@@ -252,6 +253,15 @@ class SemanticWatermarkRuntimeConfig:
     attention_relation_component_weights: tuple[float, ...] = (
         _FORMAL_METHOD_CONFIG.attention_relation_component_weights
     )
+    attention_anchor_count: int = (
+        _FORMAL_METHOD_CONFIG.attention_anchor_count
+    )
+    attention_residual_threshold: float = (
+        _FORMAL_METHOD_CONFIG.attention_residual_threshold
+    )
+    attention_minimum_inlier_ratio: float = (
+        _FORMAL_METHOD_CONFIG.attention_minimum_inlier_ratio
+    )
     attention_backtracking_factor: float = (
         _FORMAL_METHOD_CONFIG.attention_backtracking_factor
     )
@@ -360,6 +370,11 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError(
                 "minimum_final_image_attention_score_gain 必须为正有限数"
             )
+        validate_attention_alignment_gate(
+            self.attention_anchor_count,
+            self.attention_residual_threshold,
+            self.attention_minimum_inlier_ratio,
+        )
         expected_method_settings = _FORMAL_METHOD_CONFIG.paper_method_settings()
         actual_method_settings: dict[str, Any] = {}
         for field_name in expected_method_settings:
@@ -2928,6 +2943,50 @@ def _image_attention_extractor(
     return extract
 
 
+def _build_image_only_detection_config(
+    config: SemanticWatermarkRuntimeConfig,
+) -> ImageOnlyDetectionConfig:
+    """把唯一正式运行配置完整映射为核心仅图像检测配置."""
+
+    lf_weight = (
+        0.70
+        if config.lf_enabled and config.tail_robust_enabled
+        else (1.0 if config.lf_enabled else 0.0)
+    )
+    return ImageOnlyDetectionConfig(
+        model_id=config.carrier_model_reference,
+        keyed_prg_version=config.keyed_prg_version,
+        content_threshold=config.content_threshold,
+        geometry_score_threshold=config.geometry_score_threshold,
+        registration_confidence_threshold=(
+            config.registration_confidence_threshold
+        ),
+        attention_sync_score_threshold=(
+            config.attention_sync_score_threshold
+        ),
+        rescue_margin_low=config.rescue_margin_low,
+        lf_weight=lf_weight,
+        tail_robust_weight=1.0 - lf_weight,
+        tail_fraction=(
+            config.tail_fraction if config.tail_truncation_enabled else 1.0
+        ),
+        attention_stable_token_fraction=(
+            config.attention_stable_token_fraction
+        ),
+        attention_unstable_pair_weight=(
+            config.attention_unstable_pair_weight
+        ),
+        attention_relation_component_weights=(
+            config.attention_relation_component_weights
+        ),
+        attention_anchor_count=config.attention_anchor_count,
+        attention_residual_threshold=config.attention_residual_threshold,
+        attention_minimum_inlier_ratio=(
+            config.attention_minimum_inlier_ratio
+        ),
+    )
+
+
 def _public_detection_noise_evidence_cursor(extractor: Any | None) -> int:
     """返回 extractor 当前公开检测噪声证据条数。"""
 
@@ -4755,29 +4814,8 @@ def run_semantic_watermark_runtime(
         raise RuntimeError("最终 clean/watermarked 成图未通过累计完整特征保持门禁")
     paired_quality = compute_image_quality_metrics(clean_image, watermarked_image)
 
-    lf_weight = 0.70 if config.lf_enabled and config.tail_robust_enabled else (1.0 if config.lf_enabled else 0.0)
-    tail_weight = 1.0 - lf_weight
-    detector_config = ImageOnlyDetectionConfig(
-        model_id=config.carrier_model_reference,
-        keyed_prg_version=config.keyed_prg_version,
-        content_threshold=config.content_threshold,
-        geometry_score_threshold=config.geometry_score_threshold,
-        registration_confidence_threshold=config.registration_confidence_threshold,
-        attention_sync_score_threshold=config.attention_sync_score_threshold,
-        rescue_margin_low=config.rescue_margin_low,
-        lf_weight=lf_weight,
-        tail_robust_weight=tail_weight,
-        tail_fraction=config.tail_fraction if config.tail_truncation_enabled else 1.0,
-        attention_stable_token_fraction=(
-            config.attention_stable_token_fraction
-        ),
-        attention_unstable_pair_weight=(
-            config.attention_unstable_pair_weight
-        ),
-        attention_relation_component_weights=(
-            config.attention_relation_component_weights
-        ),
-    )
+    detector_config = _build_image_only_detection_config(config)
+
     def adversarial_detection_score(candidate: Any) -> float:
         """返回与最终内容主判和几何对齐救回一致的连续攻击目标。"""
 

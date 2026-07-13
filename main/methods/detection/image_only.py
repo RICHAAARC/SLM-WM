@@ -17,7 +17,12 @@ from main.core.keyed_prg import (
     keyed_prg_protocol_record,
     require_supported_keyed_prg_version,
 )
-from main.methods.geometry.attention_alignment import AttentionAlignmentResult, recover_attention_affine_alignment
+from main.methods.geometry.attention_alignment import (
+    AttentionAlignmentResult,
+    attention_alignment_gate_record,
+    recover_attention_affine_alignment,
+    validate_attention_alignment_gate,
+)
 from main.methods.geometry.differentiable_attention import (
     ATTENTION_RELATION_COMPONENT_WEIGHTS,
     DIRECT_QK_RELATION_SOURCE,
@@ -45,6 +50,9 @@ class ImageOnlyDetectionConfig:
     model_id: str
     content_threshold: float
     geometry_score_threshold: float
+    attention_anchor_count: int
+    attention_residual_threshold: float
+    attention_minimum_inlier_ratio: float
     keyed_prg_version: str = KEYED_PRG_VERSION
     registration_confidence_threshold: float = 0.0
     attention_sync_score_threshold: float = 0.0
@@ -52,9 +60,6 @@ class ImageOnlyDetectionConfig:
     lf_weight: float = 0.70
     tail_robust_weight: float = 0.30
     tail_fraction: float = 0.20
-    attention_anchor_count: int = 12
-    attention_residual_threshold: float = 0.20
-    attention_minimum_inlier_ratio: float = 0.50
     attention_stable_token_fraction: float = 0.50
     attention_unstable_pair_weight: float = 0.25
     attention_relation_component_weights: tuple[float, ...] = (
@@ -66,6 +71,11 @@ class ImageOnlyDetectionConfig:
 
         if not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
+        validate_attention_alignment_gate(
+            self.attention_anchor_count,
+            self.attention_residual_threshold,
+            self.attention_minimum_inlier_ratio,
+        )
         require_supported_keyed_prg_version(self.keyed_prg_version)
         if self.rescue_margin_low >= 0.0:
             raise ValueError("rescue_margin_low 必须小于 0")
@@ -161,6 +171,11 @@ def detect_image_only_watermark(
     """
 
     observed_latent = image_latent_encoder(image)
+    alignment_gate = attention_alignment_gate_record(
+        config.attention_anchor_count,
+        config.attention_residual_threshold,
+        config.attention_minimum_inlier_ratio,
+    )
     component_protocol = attention_relation_component_protocol(
         config.attention_relation_component_weights
     )
@@ -457,6 +472,8 @@ def detect_image_only_watermark(
             None if registration_confidence is None else round(registration_confidence, 12)
         ),
         "alignment_digest": None if alignment is None else alignment.alignment_digest,
+        "attention_alignment_gate": dict(alignment_gate),
+        **alignment_gate,
         "stable_token_indices": stable_token_indices,
         "stable_token_selection_digest": stable_token_selection_digest,
         "stable_pair_weight_identity_digest": stable_pair_weight_identity_digest,
@@ -531,6 +548,8 @@ def detect_image_only_watermark(
             ],
             "geometry_score_threshold": config.geometry_score_threshold,
             "registration_confidence_threshold": config.registration_confidence_threshold,
+            "attention_alignment_gate": dict(alignment_gate),
+            **alignment_gate,
             "attention_sync_score_threshold": config.attention_sync_score_threshold,
             "attention_sync_source": "aligned_image_reextracted_real_qk",
             "stable_token_indices": list(stable_token_indices),

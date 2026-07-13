@@ -6,9 +6,18 @@ from typing import Any
 
 from main.core.digest import build_stable_digest
 from main.core.keyed_prg import KEYED_PRG_VERSION, keyed_prg_protocol_record
+from main.methods.geometry.attention_alignment import (
+    ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+    ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
+    ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
+)
+from main.methods.geometry.differentiable_attention import (
+    ATTENTION_COORDINATE_CONVENTION,
+    ATTENTION_GRID_ALIGN_CORNERS,
+)
 
 
-METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v4"
+METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v6"
 
 
 def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
@@ -122,6 +131,33 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
                 "actual_candidate_score_strictly_above_original_and_content_base"
             ),
             "full_joint_attention_all_tokens_optimized": False,
+        },
+        "image_only_alignment": {
+            "anchor_selection_rule": (
+                "evenly_spaced_over_sampled_token_index_range"
+            ),
+            "attention_anchor_count": ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+            "inlier_ratio_denominator": "valid_covered_anchor_count",
+            "attention_residual_threshold": (
+                ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD
+            ),
+            "attention_residual_coordinate_unit": (
+                "normalized_xy_euclidean_distance"
+            ),
+            "attention_minimum_inlier_ratio": (
+                ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO
+            ),
+            "attention_coordinate_convention": (
+                ATTENTION_COORDINATE_CONVENTION
+            ),
+            "attention_grid_align_corners": (
+                ATTENTION_GRID_ALIGN_CORNERS
+            ),
+            "gate_parameter_source": (
+                "preregistered_formal_method_configuration"
+            ),
+            "calibration_data_used_for_gate_parameters": False,
+            "alignment_digest_binds_gate_parameters": True,
         },
         "write_validation": {
             "branch_amplitude_envelope_validation_rule": (

@@ -81,11 +81,15 @@ from main.core.digest import (
     build_stable_digest,
 )
 from main.methods.geometry import (
+    ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+    ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
+    ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
     DIRECT_QK_RELATION_SOURCE,
     attention_relation_component_protocol,
+    attention_alignment_gate_record,
     qk_atomic_evaluation_records_ready,
     qk_operator_metadata_records_digest,
     qk_operator_metadata_records_ready,
@@ -102,6 +106,39 @@ from main.methods.subspace import (
 
 PACKAGE_INPUT_MANIFEST_FILE_NAME = "image_only_dataset_package_input_manifest.json"
 PROMPT_SOURCE_SNAPSHOT_DIRECTORY_NAME = "prompt_source_snapshot"
+_FORMAL_ATTENTION_ALIGNMENT_GATE = attention_alignment_gate_record(
+    ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+    ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
+    ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
+)
+
+
+def _formal_attention_alignment_gate_fields_ready(
+    record: Any,
+) -> bool:
+    """判断记录是否逐字段绑定唯一正式注意力结构门禁."""
+
+    return bool(isinstance(record, dict) and all(
+        type(record.get(field_name)) is type(value)
+        and record.get(field_name) == value
+        for field_name, value in _FORMAL_ATTENTION_ALIGNMENT_GATE.items()
+    ))
+
+
+def _formal_attention_alignment_gate_record_ready(
+    record: Any,
+) -> bool:
+    """判断记录是否同时保存规范门禁对象和三个平坦字段."""
+
+    if not isinstance(record, dict):
+        return False
+    nested_gate = record.get("attention_alignment_gate")
+    return bool(
+        isinstance(nested_gate, dict)
+        and set(nested_gate) == set(_FORMAL_ATTENTION_ALIGNMENT_GATE)
+        and _formal_attention_alignment_gate_fields_ready(nested_gate)
+        and _formal_attention_alignment_gate_fields_ready(record)
+    )
 
 
 def _prompt_source_snapshot_paths(
@@ -197,6 +234,9 @@ class FrozenEvidenceProtocol:
     geometry_score_threshold: float
     registration_confidence_threshold: float
     attention_sync_score_threshold: float
+    attention_anchor_count: int
+    attention_residual_threshold: float
+    attention_minimum_inlier_ratio: float
     geometry_calibration_negative_count: int
     geometry_calibration_exceedance_count: int
     registration_calibration_negative_count: int
@@ -220,6 +260,62 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     """读取 JSONL 记录。"""
 
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def validate_detection_attention_alignment_gate(
+    record: dict[str, Any],
+) -> dict[str, int | float]:
+    """从检测及对齐记录重建唯一结构门禁, 拒绝缺失或身份分叉."""
+
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError("检测记录缺少 attention alignment metadata")
+    raw_gate = metadata.get("attention_alignment_gate")
+    if not isinstance(raw_gate, dict) or set(raw_gate) != set(
+        _FORMAL_ATTENTION_ALIGNMENT_GATE
+    ):
+        raise ValueError("检测记录缺少完整 attention_alignment_gate")
+    try:
+        gate = attention_alignment_gate_record(
+            raw_gate["attention_anchor_count"],
+            raw_gate["attention_residual_threshold"],
+            raw_gate["attention_minimum_inlier_ratio"],
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("检测记录 attention_alignment_gate 无效") from exc
+    if any(
+        type(metadata.get(field_name)) is not type(value)
+        or metadata.get(field_name) != value
+        for field_name, value in gate.items()
+    ):
+        raise ValueError("检测 metadata 与 attention_alignment_gate 不一致")
+    alignment = record.get("alignment")
+    if isinstance(alignment, dict):
+        if any(
+            type(alignment.get(field_name)) is not type(value)
+            or alignment.get(field_name) != value
+            for field_name, value in gate.items()
+        ):
+            raise ValueError("alignment 与检测结构门禁不一致")
+        alignment_metadata = alignment.get("metadata")
+        raw_alignment_gate = (
+            alignment_metadata.get("attention_alignment_gate")
+            if isinstance(alignment_metadata, dict)
+            else None
+        )
+        if (
+            not isinstance(raw_alignment_gate, dict)
+            or set(raw_alignment_gate) != set(gate)
+            or any(
+                type(raw_alignment_gate.get(field_name)) is not type(value)
+                or raw_alignment_gate.get(field_name) != value
+                for field_name, value in gate.items()
+            )
+        ):
+            raise ValueError("alignment metadata 未绑定结构门禁")
+    if gate != _FORMAL_ATTENTION_ALIGNMENT_GATE:
+        raise ValueError("检测记录未使用预注册注意力结构门禁")
+    return gate
 
 
 def _decision(
@@ -295,6 +391,15 @@ def calibrate_complete_evidence_protocol(
         raise ValueError("calibration clean negative 记录不得为空")
     if not 0.0 < target_fpr < 1.0:
         raise ValueError("target_fpr 必须位于 (0, 1)")
+    if (
+        isinstance(rescue_margin_low, bool)
+        or not isinstance(rescue_margin_low, (int, float))
+        or not math.isfinite(rescue_margin_low)
+        or rescue_margin_low >= 0.0
+    ):
+        raise ValueError("rescue_margin_low 必须为负有限数")
+    for record in records:
+        validate_detection_attention_alignment_gate(record)
     allowed_false_positives = max(0, math.floor(target_fpr * (len(records) + 1)) - 1)
     def freeze_geometry_gate(field_name: str) -> tuple[float, int, int]:
         """从全部未删失 clean negatives 冻结单个几何门禁。"""
@@ -379,6 +484,7 @@ def calibrate_complete_evidence_protocol(
         "geometry_score_threshold": geometry_score_threshold,
         "registration_confidence_threshold": registration_confidence_threshold,
         "attention_sync_score_threshold": attention_sync_score_threshold,
+        **_FORMAL_ATTENTION_ALIGNMENT_GATE,
         "geometry_calibration_negative_count": geometry_negative_count,
         "geometry_calibration_exceedance_count": geometry_exceedance_count,
         "registration_calibration_negative_count": registration_negative_count,
@@ -397,6 +503,19 @@ def calibrate_complete_evidence_protocol(
         geometry_score_threshold=geometry_score_threshold,
         registration_confidence_threshold=registration_confidence_threshold,
         attention_sync_score_threshold=attention_sync_score_threshold,
+        attention_anchor_count=int(
+            _FORMAL_ATTENTION_ALIGNMENT_GATE["attention_anchor_count"]
+        ),
+        attention_residual_threshold=float(
+            _FORMAL_ATTENTION_ALIGNMENT_GATE[
+                "attention_residual_threshold"
+            ]
+        ),
+        attention_minimum_inlier_ratio=float(
+            _FORMAL_ATTENTION_ALIGNMENT_GATE[
+                "attention_minimum_inlier_ratio"
+            ]
+        ),
         geometry_calibration_negative_count=geometry_negative_count,
         geometry_calibration_exceedance_count=geometry_exceedance_count,
         registration_calibration_negative_count=registration_negative_count,
@@ -418,8 +537,19 @@ def apply_frozen_evidence_protocol(
 ) -> tuple[dict[str, Any], ...]:
     """对全部 split 和攻击记录应用同一冻结协议。"""
 
+    protocol_alignment_gate = attention_alignment_gate_record(
+        protocol.attention_anchor_count,
+        protocol.attention_residual_threshold,
+        protocol.attention_minimum_inlier_ratio,
+    )
+    if protocol_alignment_gate != _FORMAL_ATTENTION_ALIGNMENT_GATE:
+        raise ValueError("冻结 evidence protocol 的注意力结构门禁发生漂移")
     resolved = []
     for record in records:
+        if validate_detection_attention_alignment_gate(record) != (
+            protocol_alignment_gate
+        ):
+            raise ValueError("检测记录与冻结注意力结构门禁不一致")
         positive_by_content, rescue_applied, evidence_positive, failure_reason = _decision(
             record,
             protocol.content_threshold,
@@ -2086,6 +2216,10 @@ def run_image_only_dataset_runtime(
         ),
         "scientific_operator_gate_ready": scientific_operator_gate_ready,
         **scientific_unit_provenance,
+        "attention_alignment_gate": dict(
+            _FORMAL_ATTENTION_ALIGNMENT_GATE
+        ),
+        **_FORMAL_ATTENTION_ALIGNMENT_GATE,
         "frozen_threshold_digest": protocol.threshold_digest,
         "geometry_protocol_calibration_ready": (
             protocol.geometry_protocol_calibration_ready
@@ -2213,6 +2347,10 @@ def run_image_only_dataset_runtime(
         metadata={
             "protocol_decision": summary["protocol_decision"],
             "detector_input_access_mode": "image_key_public_model_only",
+            "attention_alignment_gate": dict(
+                _FORMAL_ATTENTION_ALIGNMENT_GATE
+            ),
+            **_FORMAL_ATTENTION_ALIGNMENT_GATE,
             "full_method_component_ready": summary[
                 "full_method_component_ready"
             ],
@@ -2302,6 +2440,11 @@ def package_image_only_dataset_runtime(
         raise FileNotFoundError("仅图像数据集运行输出不完整, 不得打包")
     summary = json.loads((source_dir / "dataset_runtime_summary.json").read_text(encoding="utf-8-sig"))
     manifest = json.loads((source_dir / "manifest.local.json").read_text(encoding="utf-8-sig"))
+    frozen_protocol_record = json.loads(
+        (source_dir / "frozen_evidence_protocol.json").read_text(
+            encoding="utf-8-sig"
+        )
+    )
     dataset_output_paths = manifest.get("output_paths")
     if not isinstance(dataset_output_paths, list) or not dataset_output_paths:
         raise RuntimeError("数据集 manifest 缺少正式输出路径")
@@ -2491,6 +2634,12 @@ def package_image_only_dataset_runtime(
             ),
             bool(summary.get("generated_at")),
             summary.get("protocol_decision") == "pass",
+            _formal_attention_alignment_gate_record_ready(summary),
+            _formal_attention_alignment_gate_fields_ready(
+                frozen_protocol_record
+            ),
+            frozen_protocol_record.get("threshold_digest")
+            == summary.get("frozen_threshold_digest"),
             summary.get("full_method_component_ready") is True,
             summary.get("geometry_protocol_calibration_ready") is True,
             summary.get("scientific_unit_provenance_ready") is True,
@@ -2522,6 +2671,12 @@ def package_image_only_dataset_runtime(
             == prompt_source_report["packaged_prompt_source_audit_digest"],
             manifest.get("artifact_id")
             == f"{resolved_paper_run_name}_image_only_dataset_runtime_manifest",
+            _formal_attention_alignment_gate_record_ready(
+                manifest.get("metadata", {})
+            ),
+            _formal_attention_alignment_gate_fields_ready(
+                manifest.get("config", {}).get("method_config", {})
+            ),
             manifest.get("metadata", {}).get(
                 "geometry_protocol_calibration_ready"
             )

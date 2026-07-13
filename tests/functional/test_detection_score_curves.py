@@ -40,12 +40,19 @@ def _record(
         "aligned_content_score": aligned_score,
         "geometry_reliable": geometry_reliable,
         "attention_geometry_score": 0.8 if geometry_reliable else 0.0,
+        "registration_confidence": 0.8 if geometry_reliable else 0.0,
+        "attention_sync_score": 0.8 if geometry_reliable else 0.0,
+        "alignment": {
+            "registration_geometry_reliable": geometry_reliable,
+        },
         "detector_digest": f"detector_{prompt_id}_{sample_role}_{attack_name}",
     }
     equivalent_score = decision_equivalent_score(
         record,
         rescue_margin_low=-0.2,
         geometry_score_threshold=0.5,
+        registration_confidence_threshold=0.5,
+        attention_sync_score_threshold=0.5,
     )
     record["formal_evidence_positive"] = equivalent_score >= 0.5
     return record
@@ -58,6 +65,8 @@ def _protocol() -> dict:
         "content_threshold": 0.5,
         "rescue_margin_low": -0.2,
         "geometry_score_threshold": 0.5,
+        "registration_confidence_threshold": 0.5,
+        "attention_sync_score_threshold": 0.5,
         "threshold_digest": "threshold_digest_test",
     }
 
@@ -78,11 +87,63 @@ def test_decision_equivalent_score_preserves_geometry_rescue_boundary() -> None:
         record,
         rescue_margin_low=-0.2,
         geometry_score_threshold=0.5,
+        registration_confidence_threshold=0.5,
+        attention_sync_score_threshold=0.5,
     )
 
     assert score == pytest.approx(0.6)
     assert score >= 0.5
     assert score < 0.61
+
+
+@pytest.mark.quick
+def test_decision_equivalent_score_rejects_registration_below_threshold() -> None:
+    """注册置信度未通过冻结阈值时 aligned score 不得形成救回分数."""
+
+    record = _record(
+        "registration_gate",
+        "positive_source",
+        0.4,
+        aligned_score=0.9,
+        geometry_reliable=True,
+    )
+    record["registration_confidence"] = 0.49
+
+    score = decision_equivalent_score(
+        record,
+        rescue_margin_low=-0.2,
+        geometry_score_threshold=0.5,
+        registration_confidence_threshold=0.5,
+        attention_sync_score_threshold=0.5,
+    )
+
+    assert score == pytest.approx(0.4)
+    assert score < 0.5
+
+
+@pytest.mark.quick
+def test_decision_equivalent_score_rejects_sync_below_threshold() -> None:
+    """恢复后同步分未通过冻结阈值时 aligned score 不得形成救回分数."""
+
+    record = _record(
+        "sync_gate",
+        "positive_source",
+        0.4,
+        aligned_score=0.9,
+        geometry_reliable=True,
+    )
+    record["attention_sync_score"] = 0.49
+
+    score = decision_equivalent_score(
+        record,
+        rescue_margin_low=-0.2,
+        geometry_score_threshold=0.5,
+        registration_confidence_threshold=0.5,
+        attention_sync_score_threshold=0.5,
+    )
+
+    assert score == pytest.approx(0.4)
+    assert score < 0.5
 
 
 @pytest.mark.quick

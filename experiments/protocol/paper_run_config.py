@@ -31,6 +31,7 @@ from experiments.protocol.prompts import PROMPT_FILES, read_prompt_file
 from experiments.protocol.prompt_sources import audit_governed_prompt_set
 from experiments.protocol.splits import build_group_split_counts
 from main.core.keyed_prg import require_supported_keyed_prg_version
+from main.methods.geometry import validate_attention_alignment_gate
 
 PILOT_PAPER_RUN_NAME = "pilot_paper"
 PROBE_PAPER_RUN_NAME = "probe_paper"
@@ -135,6 +136,15 @@ DEFAULT_ATTENTION_UNSTABLE_PAIR_WEIGHT = (
 )
 DEFAULT_ATTENTION_RELATION_COMPONENT_WEIGHTS = (
     _FORMAL_METHOD_DEFAULTS.attention_relation_component_weights
+)
+DEFAULT_ATTENTION_ANCHOR_COUNT = (
+    _FORMAL_METHOD_DEFAULTS.attention_anchor_count
+)
+DEFAULT_ATTENTION_RESIDUAL_THRESHOLD = (
+    _FORMAL_METHOD_DEFAULTS.attention_residual_threshold
+)
+DEFAULT_ATTENTION_MINIMUM_INLIER_RATIO = (
+    _FORMAL_METHOD_DEFAULTS.attention_minimum_inlier_ratio
 )
 DEFAULT_ATTENTION_BACKTRACKING_FACTOR = (
     _FORMAL_METHOD_DEFAULTS.attention_backtracking_factor
@@ -344,6 +354,13 @@ class PaperRunConfig:
     attention_relation_component_weights: tuple[float, ...] = (
         DEFAULT_ATTENTION_RELATION_COMPONENT_WEIGHTS
     )
+    attention_anchor_count: int = DEFAULT_ATTENTION_ANCHOR_COUNT
+    attention_residual_threshold: float = (
+        DEFAULT_ATTENTION_RESIDUAL_THRESHOLD
+    )
+    attention_minimum_inlier_ratio: float = (
+        DEFAULT_ATTENTION_MINIMUM_INLIER_RATIO
+    )
     attention_backtracking_factor: float = DEFAULT_ATTENTION_BACKTRACKING_FACTOR
     attention_backtracking_maximum_steps: int = (
         DEFAULT_ATTENTION_BACKTRACKING_MAXIMUM_STEPS
@@ -416,6 +433,11 @@ class PaperRunConfig:
         fixed-FPR 阈值, 造成真实 positive 难以越过阈值。
         """
 
+        validate_attention_alignment_gate(
+            self.attention_anchor_count,
+            self.attention_residual_threshold,
+            self.attention_minimum_inlier_ratio,
+        )
         expected_method_settings = (
             _FORMAL_METHOD_DEFAULTS.paper_method_settings()
         )

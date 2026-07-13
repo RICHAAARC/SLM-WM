@@ -97,6 +97,8 @@ def decision_equivalent_score(
     *,
     rescue_margin_low: float,
     geometry_score_threshold: float,
+    registration_confidence_threshold: float,
+    attention_sync_score_threshold: float,
 ) -> float:
     """把内容主判与几何救回写成等价的连续检测分数.
 
@@ -108,34 +110,61 @@ def decision_equivalent_score(
 
     raw_score = _finite_float(record.get("content_score"), "content_score")
     resolved_rescue_margin = _finite_float(rescue_margin_low, "rescue_margin_low")
-    if resolved_rescue_margin > 0.0:
-        raise ValueError("rescue_margin_low 不得大于0")
+    if resolved_rescue_margin >= 0.0:
+        raise ValueError("rescue_margin_low 必须小于0")
     resolved_geometry_threshold = _finite_float(
         geometry_score_threshold,
         "geometry_score_threshold",
+    )
+    resolved_registration_threshold = _finite_float(
+        registration_confidence_threshold,
+        "registration_confidence_threshold",
+    )
+    resolved_sync_threshold = _finite_float(
+        attention_sync_score_threshold,
+        "attention_sync_score_threshold",
     )
     aligned_score_value = record.get("aligned_content_score")
     if aligned_score_value is None:
         return raw_score
     aligned_score = _finite_float(aligned_score_value, "aligned_content_score")
     alignment = record.get("alignment")
-    alignment_reliable = (
+    alignment_reliable = bool(
         _strict_boolean(
-            alignment.get("geometry_reliable", False),
-            "alignment.geometry_reliable",
+            alignment.get(
+                "registration_geometry_reliable",
+                alignment.get("geometry_reliable", False),
+            ),
+            "alignment.registration_geometry_reliable",
         )
         if isinstance(alignment, Mapping)
-        else _strict_boolean(
-            record.get("geometry_reliable", False),
-            "geometry_reliable",
-        )
+        else False
     )
-    geometry_score_value = record.get("attention_geometry_score")
-    geometry_reliable = alignment_reliable and (
-        _strict_boolean(record.get("geometry_reliable", False), "geometry_reliable")
-        if geometry_score_value is None
-        else _finite_float(geometry_score_value, "attention_geometry_score")
-        >= resolved_geometry_threshold
+
+    def finite_at_least(value: Any, threshold: float) -> bool:
+        """复现冻结布尔协议对可选几何数值的有限性门禁."""
+
+        return bool(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and float(value) >= threshold
+        )
+
+    geometry_reliable = (
+        alignment_reliable
+        and finite_at_least(
+            record.get("attention_geometry_score"),
+            resolved_geometry_threshold,
+        )
+        and finite_at_least(
+            record.get("registration_confidence"),
+            resolved_registration_threshold,
+        )
+        and finite_at_least(
+            record.get("attention_sync_score"),
+            resolved_sync_threshold,
+        )
     )
     if not geometry_reliable:
         return raw_score
@@ -288,6 +317,14 @@ def build_detection_score_tables(
         frozen_protocol.get("geometry_score_threshold"),
         "geometry_score_threshold",
     )
+    registration_confidence_threshold = _finite_float(
+        frozen_protocol.get("registration_confidence_threshold"),
+        "registration_confidence_threshold",
+    )
+    attention_sync_score_threshold = _finite_float(
+        frozen_protocol.get("attention_sync_score_threshold"),
+        "attention_sync_score_threshold",
+    )
     threshold_digest = str(frozen_protocol.get("threshold_digest", ""))
     if not threshold_digest:
         raise ValueError("frozen protocol 必须提供 threshold_digest")
@@ -301,6 +338,12 @@ def build_detection_score_tables(
             record,
             rescue_margin_low=rescue_margin_low,
             geometry_score_threshold=geometry_score_threshold,
+            registration_confidence_threshold=(
+                registration_confidence_threshold
+            ),
+            attention_sync_score_threshold=(
+                attention_sync_score_threshold
+            ),
         )
         formal_decision = record.get("formal_evidence_positive")
         if formal_decision is not None and _strict_boolean(

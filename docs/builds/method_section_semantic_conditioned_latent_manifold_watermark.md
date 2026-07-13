@@ -110,7 +110,7 @@ $$
 - `vae_scaling_factor=1.5305`、`vae_shift_factor=0.0609`、`latent_torch_dtype=float16`、`vision_torch_dtype=float32`；
 - `public_detection_schedule_index=7`、冻结 attention 层名与统一坐标约定。
 
-将解析 dataclass 的完整 `asdict` 结果与 `formal_method_config_schema=slm_wm_formal_method_runtime_config_v1` 组成规范 payload, 使用 UTF-8、`ensure_ascii=false`、键名升序和无空白分隔符 `(',', ':')` 序列化后执行 SHA-256, 得到 `formal_method_config_digest`。该摘要不依赖 YAML 排版或仓库绝对路径。运行原子必须同时记录上述配置值、运行时实际类名、VAE 实际 scale/shift、实际 dtype、检测索引和 `formal_method_config_digest`；任一不一致都使科学单元失败。
+将解析 dataclass 的完整 `asdict` 结果与 `formal_method_config_schema=slm_wm_formal_method_runtime_config_v2` 组成规范 payload, 使用 UTF-8、`ensure_ascii=false`、键名升序和无空白分隔符 `(',', ':')` 序列化后执行 SHA-256, 得到 `formal_method_config_digest`。该摘要不依赖 YAML 排版或仓库绝对路径。运行原子必须同时记录上述配置值、运行时实际类名、VAE 实际 scale/shift、实际 dtype、检测索引和 `formal_method_config_digest`；任一不一致都使科学单元失败。
 
 ---
 
@@ -556,7 +556,7 @@ J(T)=0.10s_{\mathrm{can}}+0.90s_{\mathrm{obs}}
 -0.01\sum_{q\in\{c_{\mathrm{can}},u_{\mathrm{can}},c_{\mathrm{obs}},u_{\mathrm{obs}}\}}(1-q).
 $$
 
-$c$ 和 $u$ 分别表示有效坐标覆盖率与唯一采样率。观测前推项使用完整观测关系解释候选变换，防止只保留中心子图的尺度候选通过较小有效区域获得更高目标。检测端只在原始观测 Q/K 上执行一次稳定 token 选择。观测项使用 $w_{\mathrm{obs}}$, 规范项使用 $a_{\mathrm{can},T}=W_Ta_{\mathrm{obs}}$ 后重新外积得到的 $w_{\mathrm{can},T}$, 两者共享权重身份摘要。检测器从与攻击注册表无关的旋转、log-scale 和归一化位移连续定义域生成粗锚点，并按固定三分比例执行三层局部细化。每轮局部组合都相对方形二面体基元执行严格过滤, 保证残余旋转不超过32°、尺度始终位于 $[1/\sqrt2,\sqrt2]$、两个平移分量绝对值不超过0.28；搜索器不读取攻击角度、裁剪比例或位移参数，验证集使用远离正式攻击取值的确定性随机连续变换。输出包括四通道分数、相对 identity 候选的观测关系增益、双向关系分数、覆盖惩罚、目标间隔、注册置信度、有效锚点内点比例、对齐残差和权重身份。结构注册要求完整四通道观测与双向分数为正、目标间隔为正、两个方向覆盖率均不低于0.45，并继续执行内点比例和残差门禁。由于均匀 attention 使 $G=0$ 且其余通道在逐行中心化后也为0, 公开坐标不能单独形成可靠注册。得到 $\widehat T$ 后，检测器重采样待检图像并重新提取全部冻结层的真实 Q/K；恢复后同步分数使用传递后的 $w_{\mathrm{can},\widehat T}$, 不重新选择稳定 token。权重身份一致且同步分数通过 calibration split 冻结阈值后, 才允许进入同阈值内容救回。几何链只负责参考系恢复和救回资格门禁，不独立产生 positive 判定。
+$c$ 和 $u$ 分别表示有效坐标覆盖率与唯一采样率。观测前推项使用完整观测关系解释候选变换，防止只保留中心子图的尺度候选通过较小有效区域获得更高目标。检测端只在原始观测 Q/K 上执行一次稳定 token 选择。观测项使用 $w_{\mathrm{obs}}$, 规范项使用 $a_{\mathrm{can},T}=W_Ta_{\mathrm{obs}}$ 后重新外积得到的 $w_{\mathrm{can},T}$, 两者共享权重身份摘要。检测器从与攻击注册表无关的旋转、log-scale 和归一化位移连续定义域生成粗锚点，并按固定三分比例执行三层局部细化。每轮局部组合都相对方形二面体基元执行严格过滤, 保证残余旋转不超过32°、尺度始终位于 $[1/\sqrt2,\sqrt2]$、两个平移分量绝对值不超过0.28；搜索器不读取攻击角度、裁剪比例或位移参数，验证集使用远离正式攻击取值的确定性随机连续变换。输出包括四通道分数、相对 identity 候选的观测关系增益、双向关系分数、覆盖惩罚、目标间隔、注册置信度、有效锚点内点比例、对齐残差和权重身份。结构门禁预注册锚点数12、归一化 xy 欧氏残差上界0.20和最小内点率0.50。锚点按抽样 token 索引确定性均匀选择, token 数少于12时失败；内点率以具有有效双线性覆盖的锚点为分母, 并要求唯一观测匹配。坐标固定为 `normalized_xy_token_centers_corner_endpoints_v1`, token 采样与图像重采样统一使用 `align_corners=True`。结构注册要求完整四通道观测与双向分数为正、目标间隔为正、两个方向覆盖率均不低于0.45，并通过上述固定内点率和残差门禁。三项常量必须进入方法配置、对齐、检测、冻结阈值与结果摘要, calibration 和 test 不得调节。由于均匀 attention 使 $G=0$ 且其余通道在逐行中心化后也为0, 公开坐标不能单独形成可靠注册。得到 $\widehat T$ 后，检测器重采样待检图像并重新提取全部冻结层的真实 Q/K；恢复后同步分数使用传递后的 $w_{\mathrm{can},\widehat T}$, 不重新选择稳定 token。权重身份一致且同步分数通过 calibration split 冻结阈值后, 才允许进入同阈值内容救回。几何链只负责参考系恢复和救回资格门禁，不独立产生 positive 判定。
 
 ### 3.6.4 最终成图注意力可观测性
 
@@ -618,7 +618,7 @@ $$
 
 ### 3.7.3 完整协议冻结
 
-fixed-FPR 约束的是包含 rescue 的完整 evidence 判定，而不是只冻结内容阈值后任意增加第二条判定路径。内容阈值、几何可靠性阈值、rescue window 和失败原因 gate 均在 calibration 或预注册协议中冻结。test split 只能应用冻结协议并报告 clean negative 的二项分布置信上界，不参与任何参数选择。
+fixed-FPR 约束的是包含 rescue 的完整 evidence 判定，而不是只冻结内容阈值后任意增加第二条判定路径。calibration clean negatives 只冻结内容分数阈值、几何关系分阈值、注册置信度阈值、恢复后同步分阈值和 rescue window；锚点数12、归一化 xy 残差上界0.20、最小内点率0.50和失败原因映射属于预注册确定性协议。test split 只能应用冻结协议并报告 clean negative 的二项分布置信上界，不参与任何参数选择。
 
 当前三类运行配置为：
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import MISSING
+import inspect
 from pathlib import Path
 
 import pytest
@@ -10,6 +12,8 @@ from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     semantic_watermark_runtime_config_payload,
 )
+from main.methods.detection import ImageOnlyDetectionConfig
+from main.methods.geometry import recover_attention_affine_alignment
 from main.methods.method_definition import (
     METHOD_DEFINITION_SCHEMA,
     semantic_conditioned_latent_method_definition,
@@ -32,7 +36,7 @@ PRIMITIVE_DOCUMENT = (
 )
 FIELD_REGISTRY = ROOT / "docs" / "field_registry.md"
 EXPECTED_METHOD_DEFINITION = {
-    "method_definition_schema": "slm_wm_constructive_local_tangent_v4",
+    "method_definition_schema": "slm_wm_constructive_local_tangent_v6",
     "method_name": "semantic_conditioned_latent_manifold_watermarking",
     "update_construction": {
         "semantics": "branchwise_constructive_safe_subspace_updates",
@@ -128,6 +132,27 @@ EXPECTED_METHOD_DEFINITION = {
         ),
         "full_joint_attention_all_tokens_optimized": False,
     },
+    "image_only_alignment": {
+        "anchor_selection_rule": (
+            "evenly_spaced_over_sampled_token_index_range"
+        ),
+        "attention_anchor_count": 12,
+        "inlier_ratio_denominator": "valid_covered_anchor_count",
+        "attention_residual_threshold": 0.20,
+        "attention_residual_coordinate_unit": (
+            "normalized_xy_euclidean_distance"
+        ),
+        "attention_minimum_inlier_ratio": 0.50,
+        "attention_coordinate_convention": (
+            "normalized_xy_token_centers_corner_endpoints_v1"
+        ),
+        "attention_grid_align_corners": True,
+        "gate_parameter_source": (
+            "preregistered_formal_method_configuration"
+        ),
+        "calibration_data_used_for_gate_parameters": False,
+        "alignment_digest_binds_gate_parameters": True,
+    },
     "write_validation": {
         "branch_amplitude_envelope_validation_rule": (
             "required_on_each_materialized_active_branch_update"
@@ -196,7 +221,7 @@ EXPECTED_METHOD_DEFINITION = {
     ],
 }
 EXPECTED_METHOD_DEFINITION_DIGEST = (
-    "aa1fe3b81f1763403b58bb85c01a44c048b8d2b0916f3a3d9cf72c2275a4fd7c"
+    "1895838d4a89b41e3692f6aad547a7feb9a698f1520bd81b83af457680476fc2"
 )
 
 
@@ -206,7 +231,7 @@ def test_machine_readable_method_definition_freezes_constructive_semantics() -> 
 
     definition = semantic_conditioned_latent_method_definition()
 
-    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v4"
+    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v6"
     assert definition == EXPECTED_METHOD_DEFINITION
     assert definition["update_construction"]["joint_argmax_solved"] is False
     assert (
@@ -270,3 +295,27 @@ def test_runtime_config_identity_binds_method_definition() -> None:
     assert payload["method_definition_digest"] == (
         EXPECTED_METHOD_DEFINITION_DIGEST
     )
+
+
+@pytest.mark.constraint
+def test_attention_alignment_gate_has_no_core_fallback_defaults() -> None:
+    """核心检测和配准 API 必须要求调用方显式提供结构门禁."""
+
+    signature = inspect.signature(recover_attention_affine_alignment)
+    for parameter_name in (
+        "anchor_count",
+        "residual_threshold",
+        "minimum_inlier_ratio",
+    ):
+        assert (
+            signature.parameters[parameter_name].default
+            is inspect.Parameter.empty
+        )
+    for field_name in (
+        "attention_anchor_count",
+        "attention_residual_threshold",
+        "attention_minimum_inlier_ratio",
+    ):
+        field = ImageOnlyDetectionConfig.__dataclass_fields__[field_name]
+        assert field.default is MISSING
+        assert field.default_factory is MISSING

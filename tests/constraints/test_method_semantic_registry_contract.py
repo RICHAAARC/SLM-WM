@@ -529,6 +529,48 @@ def test_registry_covers_required_method_atomic_roles() -> None:
 
 
 @pytest.mark.constraint
+def test_registry_binds_preregistered_alignment_gate_evidence() -> None:
+    """盲检和同阈值救回必须登记完整结构门禁及其核心实现符号."""
+
+    invariants = _invariants_by_id(load_method_semantic_registry(ROOT))
+    required_fields = {
+        "attention_alignment_gate",
+        "attention_anchor_count",
+        "attention_residual_threshold",
+        "attention_minimum_inlier_ratio",
+        "alignment_digest",
+    }
+    required_symbols = {
+        (
+            "main/methods/geometry/attention_alignment.py",
+            "attention_alignment_gate_record",
+        ),
+        (
+            "main/methods/geometry/attention_alignment.py",
+            "recover_attention_affine_alignment",
+        ),
+    }
+    for invariant_id in (
+        "image_only_detection_boundary",
+        "same_threshold_geometry_rescue",
+    ):
+        evidence_fields = set(
+            invariants[invariant_id]["runtime_evidence_fields"]
+        )
+        if invariant_id == "image_only_detection_boundary":
+            assert required_fields - {"alignment_digest"} <= evidence_fields
+        else:
+            assert required_fields <= evidence_fields
+        bindings = {
+            (binding["path"], binding["symbol"])
+            for binding in invariants[invariant_id][
+                "method_implementation_symbols"
+            ]
+        }
+        assert required_symbols <= bindings
+
+
+@pytest.mark.constraint
 def test_registry_formulas_freeze_risk_qk_null_and_actual_write_semantics() -> None:
     """规范公式必须显式覆盖关键项, 不能用宽泛算子名称代替."""
 

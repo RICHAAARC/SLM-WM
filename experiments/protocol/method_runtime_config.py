@@ -20,16 +20,20 @@ from experiments.runtime.model_sources import require_registered_model_reference
 from main.core.digest import build_stable_digest
 from main.core.keyed_prg import require_supported_keyed_prg_version
 from main.methods.geometry import (
+    ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+    ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
+    ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_WEIGHTS,
+    validate_attention_alignment_gate,
     validate_attention_relation_component_weights,
 )
 
 
 FORMAL_METHOD_CONFIG_RELATIVE_PATH = Path("configs/model_sd35.yaml")
 FORMAL_METHOD_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
-FORMAL_METHOD_CONFIG_SCHEMA = "slm_wm_formal_method_runtime_config_v1"
+FORMAL_METHOD_CONFIG_SCHEMA = "slm_wm_formal_method_runtime_config_v2"
 FORMAL_SD35_PIPELINE_CLASS_NAME = (
     "diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3."
     "StableDiffusion3Pipeline"
@@ -207,6 +211,9 @@ class FormalMethodRuntimeConfig:
     attention_stable_token_fraction: float
     attention_unstable_pair_weight: float
     attention_relation_component_weights: tuple[float, ...]
+    attention_anchor_count: int
+    attention_residual_threshold: float
+    attention_minimum_inlier_ratio: float
     attention_backtracking_factor: float
     attention_backtracking_maximum_steps: int
     minimum_final_image_attention_score_gain: float
@@ -396,6 +403,19 @@ class FormalMethodRuntimeConfig:
         )
         if component_weights != ATTENTION_RELATION_COMPONENT_WEIGHTS:
             raise ValueError("正式完整方法必须启用四个等权注意力关系分量")
+        validate_attention_alignment_gate(
+            self.attention_anchor_count,
+            self.attention_residual_threshold,
+            self.attention_minimum_inlier_ratio,
+        )
+        if (
+            self.attention_anchor_count != ATTENTION_ALIGNMENT_ANCHOR_COUNT
+            or self.attention_residual_threshold
+            != ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD
+            or self.attention_minimum_inlier_ratio
+            != ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO
+        ):
+            raise ValueError("正式注意力配准锚点、残差或内点门禁发生漂移")
         if (
             self.attention_backtracking_factor != 0.5
             or self.attention_backtracking_maximum_steps != 8
@@ -555,6 +575,13 @@ class FormalMethodRuntimeConfig:
             ),
             "attention_relation_component_weights": (
                 self.attention_relation_component_weights
+            ),
+            "attention_anchor_count": self.attention_anchor_count,
+            "attention_residual_threshold": (
+                self.attention_residual_threshold
+            ),
+            "attention_minimum_inlier_ratio": (
+                self.attention_minimum_inlier_ratio
             ),
             "attention_backtracking_factor": (
                 self.attention_backtracking_factor
@@ -810,6 +837,15 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         "SLM_WM_ATTENTION_RELATION_COMPONENT_WEIGHTS": ",".join(
             str(value)
             for value in config.attention_relation_component_weights
+        ),
+        "SLM_WM_ATTENTION_ANCHOR_COUNT": str(
+            config.attention_anchor_count
+        ),
+        "SLM_WM_ATTENTION_RESIDUAL_THRESHOLD": str(
+            config.attention_residual_threshold
+        ),
+        "SLM_WM_ATTENTION_MINIMUM_INLIER_RATIO": str(
+            config.attention_minimum_inlier_ratio
         ),
         "SLM_WM_ATTENTION_BACKTRACKING_FACTOR": str(
             config.attention_backtracking_factor

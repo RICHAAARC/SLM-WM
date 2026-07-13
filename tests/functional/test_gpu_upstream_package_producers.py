@@ -51,6 +51,7 @@ from experiments.runtime.scientific_unit_provenance import (
 )
 from main.core.digest import build_stable_digest
 from experiments.runners.image_only_dataset_runtime import (
+    _formal_attention_alignment_gate_record_ready,
     _write_prompt_source_snapshot,
     package_image_only_dataset_runtime,
 )
@@ -81,6 +82,11 @@ TARGET_FPR = 0.1
 PROMPT_COUNT = 70
 GENERATED_AT = "2026-07-11T00:00:00+00:00"
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
+ATTENTION_ALIGNMENT_GATE = {
+    "attention_anchor_count": 12,
+    "attention_residual_threshold": 0.20,
+    "attention_minimum_inlier_ratio": 0.50,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -309,6 +315,14 @@ def _prepare_image_runtime(
             "det_curve_points.csv",
         ),
     )
+    threshold_digest = "c" * 64
+    _write_json(
+        directory / "frozen_evidence_protocol.json",
+        {
+            **ATTENTION_ALIGNMENT_GATE,
+            "threshold_digest": threshold_digest,
+        },
+    )
     prompt_source_snapshot_paths, prompt_source_report = (
         _write_prompt_source_snapshot(
             root_path=root,
@@ -343,6 +357,11 @@ def _prepare_image_runtime(
             "target_fpr": TARGET_FPR,
             "randomization_repeat_identity": repeat_identity,
             "protocol_decision": "pass",
+            "attention_alignment_gate": dict(
+                ATTENTION_ALIGNMENT_GATE
+            ),
+            **ATTENTION_ALIGNMENT_GATE,
+            "frozen_threshold_digest": threshold_digest,
             "full_method_component_ready": True,
             "geometry_protocol_calibration_ready": True,
             "detection_curve_data_ready": True,
@@ -376,6 +395,17 @@ def _prepare_image_runtime(
             "prompt_source_contract_ready": True,
         },
     )
+    method_config = runtime_results[0]["metadata"][
+        "scientific_unit_config"
+    ]
+    manifest_config = {
+        "paper_run": {
+            "run_name": PAPER_RUN_NAME,
+            "target_fpr": TARGET_FPR,
+            **repeat_identity,
+        },
+        "method_config": method_config,
+    }
     _write_json(
         directory / "manifest.local.json",
         {
@@ -403,23 +433,13 @@ def _prepare_image_runtime(
                 for path in prompt_source_snapshot_paths
             ]
             + ([] if omit_unit_leaves else scientific_unit_output_paths),
-            "config": {
-                "paper_run": {
-                    "run_name": PAPER_RUN_NAME,
-                    "target_fpr": TARGET_FPR,
-                    **repeat_identity,
-                }
-            },
-            "config_digest": build_stable_digest(
-                {
-                    "paper_run": {
-                        "run_name": PAPER_RUN_NAME,
-                        "target_fpr": TARGET_FPR,
-                        **repeat_identity,
-                    }
-                }
-            ),
+            "config": manifest_config,
+            "config_digest": build_stable_digest(manifest_config),
             "metadata": {
+                "attention_alignment_gate": dict(
+                    ATTENTION_ALIGNMENT_GATE
+                ),
+                **ATTENTION_ALIGNMENT_GATE,
                 "geometry_protocol_calibration_ready": True,
                 "scientific_content_binding_digest": (
                     scientific_content_binding_digest
@@ -938,6 +958,21 @@ def _prepare_dataset_quality(root: Path) -> Path:
         execution_route="semantic_watermark_session",
     )
     return package_dataset_level_quality_outputs(PAPER_RUN_NAME, root=root)
+
+
+@pytest.mark.quick
+def test_summary_and_manifest_gate_reject_float_anchor_type() -> None:
+    """结果摘要和 manifest 的嵌套锚点字段必须保留整数类型."""
+
+    record = {
+        "attention_alignment_gate": {
+            **ATTENTION_ALIGNMENT_GATE,
+            "attention_anchor_count": 12.0,
+        },
+        **ATTENTION_ALIGNMENT_GATE,
+    }
+
+    assert _formal_attention_alignment_gate_record_ready(record) is False
 
 
 @pytest.mark.quick

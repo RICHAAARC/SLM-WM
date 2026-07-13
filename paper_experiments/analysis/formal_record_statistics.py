@@ -49,6 +49,12 @@ from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
 )
 from main.core.digest import build_stable_digest
+from main.methods.geometry import (
+    ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+    ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
+    ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
+    attention_alignment_gate_record,
+)
 
 
 DATASET_QUALITY_METRIC_FIELDNAMES = (
@@ -168,7 +174,7 @@ def _same_value(reported: Any, rebuilt: Any) -> bool:
     return reported == rebuilt
 
 
-def _validated_frozen_protocol(
+def validate_frozen_evidence_protocol_record(
     raw_protocol: Mapping[str, Any],
     *,
     expected_target_fpr: float,
@@ -192,6 +198,10 @@ def _validated_frozen_protocol(
         abs_tol=1e-12,
     ):
         raise FormalRecordStatisticsError("消融冻结检测协议的 target_fpr 漂移")
+    if _finite_float(protocol.rescue_margin_low, "rescue_margin_low") >= 0.0:
+        raise FormalRecordStatisticsError(
+            "消融冻结检测协议的 rescue_margin_low 必须小于0"
+        )
     calibration_negative_count = _positive_int(
         protocol.calibration_negative_count,
         "calibration_negative_count",
@@ -215,6 +225,25 @@ def _validated_frozen_protocol(
         abs_tol=1e-12,
     ):
         raise FormalRecordStatisticsError("冻结协议校准假阳性率与计数不一致")
+    try:
+        alignment_gate = attention_alignment_gate_record(
+            protocol.attention_anchor_count,
+            protocol.attention_residual_threshold,
+            protocol.attention_minimum_inlier_ratio,
+        )
+    except ValueError as exc:
+        raise FormalRecordStatisticsError(
+            "消融冻结检测协议的注意力结构门禁无效"
+        ) from exc
+    formal_alignment_gate = attention_alignment_gate_record(
+        ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+        ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
+        ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
+    )
+    if alignment_gate != formal_alignment_gate:
+        raise FormalRecordStatisticsError(
+            "消融冻结检测协议的注意力结构门禁发生漂移"
+        )
     digest_payload = {
         "content_threshold": _finite_float(
             protocol.content_threshold,
@@ -236,6 +265,7 @@ def _validated_frozen_protocol(
             protocol.attention_sync_score_threshold,
             "attention_sync_score_threshold",
         ),
+        **alignment_gate,
         "geometry_calibration_negative_count": _nonnegative_int(
             protocol.geometry_calibration_negative_count,
             "geometry_calibration_negative_count",
@@ -270,6 +300,35 @@ def _validated_frozen_protocol(
     }
     if protocol.geometry_protocol_calibration_ready is not True:
         raise FormalRecordStatisticsError("消融冻结检测协议未完成几何校准")
+    if any(
+        digest_payload[field_name] != calibration_negative_count
+        for field_name in (
+            "geometry_calibration_negative_count",
+            "registration_calibration_negative_count",
+            "sync_calibration_negative_count",
+        )
+    ):
+        raise FormalRecordStatisticsError(
+            "消融冻结检测协议的几何校准覆盖未包含全部负样本"
+        )
+    for negative_field, exceedance_field in (
+        (
+            "geometry_calibration_negative_count",
+            "geometry_calibration_exceedance_count",
+        ),
+        (
+            "registration_calibration_negative_count",
+            "registration_calibration_exceedance_count",
+        ),
+        (
+            "sync_calibration_negative_count",
+            "sync_calibration_exceedance_count",
+        ),
+    ):
+        if digest_payload[exceedance_field] > digest_payload[negative_field]:
+            raise FormalRecordStatisticsError(
+                "消融冻结检测协议的几何超限计数超过负样本数量"
+            )
     if (
         not _is_sha256(protocol.threshold_digest)
         or build_stable_digest(digest_payload) != protocol.threshold_digest
@@ -411,7 +470,7 @@ def rebuild_and_validate_ablation_runtime_aggregates(
     if set(frozen_protocols) != set(declared_ablation_ids):
         raise FormalRecordStatisticsError("冻结检测协议未精确覆盖正式消融身份")
     protocols = {
-        ablation_id: _validated_frozen_protocol(
+        ablation_id: validate_frozen_evidence_protocol_record(
             frozen_protocols[ablation_id],
             expected_target_fpr=expected_target_fpr,
         )
