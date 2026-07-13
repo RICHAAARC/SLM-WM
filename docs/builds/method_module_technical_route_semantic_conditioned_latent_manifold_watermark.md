@@ -51,7 +51,7 @@ $$
 
 正式运行只读取 `configs/model_sd35.yaml` 的唯一解析结果。算子身份字段固定为 `model_id=stabilityai/stable-diffusion-3.5-medium`、`model_revision=b940f670f0eda2d07fbb75229e779da1ad11eb80`、`vision_model_id=openai/clip-vit-base-patch32`、`vision_model_revision=3d74acf9a28c67741b2f4f2ea7635f0aaf6f0268`、`pipeline_class_name=diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline`、`vae_class_name=diffusers.models.autoencoders.autoencoder_kl.AutoencoderKL`、`transformer_class_name=diffusers.models.transformers.transformer_sd3.SD3Transformer2DModel`、`scheduler_class_name=diffusers.schedulers.scheduling_flow_match_euler_discrete.FlowMatchEulerDiscreteScheduler`、`vae_scaling_factor=1.5305`、`vae_shift_factor=0.0609`、`latent_torch_dtype=float16`、`vision_torch_dtype=float32` 与 `public_detection_schedule_index=7`。
 
-完整解析 dataclass 的 `asdict` 值与 `formal_method_config_schema=slm_wm_formal_method_runtime_config_v2` 形成规范 payload；使用 UTF-8、`ensure_ascii=false`、键名升序、无空白分隔符 `(',', ':')` 和 SHA-256 得到 `formal_method_config_digest`。运行时类名、VAE scale/shift、dtype、检测索引、冻结层集合和配置摘要必须逐项一致, 不能由环境变量或运行时默认值改变。
+完整解析 dataclass 的 `asdict` 值与 `formal_method_config_schema=slm_wm_formal_method_runtime_config_v4` 形成规范 payload；使用 UTF-8、`ensure_ascii=false`、键名升序、无空白分隔符 `(',', ':')` 和 SHA-256 得到 `formal_method_config_digest`。运行时类名、VAE scale/shift、dtype、检测索引、冻结层集合和配置摘要必须逐项一致, 不能由环境变量或运行时默认值改变。
 
 ---
 
@@ -173,7 +173,7 @@ $$
 
 高斯 PRG 固定为 `sha256_counter_normal_icdf_table20_float32_v2`。domain payload 精确包含 `keyed_prg_version`、`key_material`、`domain_fields` 和 `shape`, 通过 UTF-8、`ensure_ascii=false`、键名升序和无空白分隔符 `(',', ':')` 形成 stable JSON, 再执行 SHA-256 得到32字节 domain digest。counter 从0开始并编码为16字节无符号大端整数；`SHA256(domain_digest || counter_uint128_be)` 的连续32字节块组成 MSB-first 大端比特流。高斯路径跨块连续提取20位索引 $i$, 查询 $q_i=\operatorname{round}_{\mathrm{binary32}}\!\left(\Phi^{-1}((i+0.5)/2^{20})\right)$ 的冻结1048576项表。表的完整大端字节 SHA-256 为 `70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a`。该有限离散 Q20 量化标准正态不是连续精确的 $\mathcal N(0,1)$；其理想中点 KS 距离为 $2^{-21}$, 含 float32 舍入的登记上界为 `4.912236096776823e-7`。规范 float32 生成和目标 dtype 转换都在 CPU 完成, 随后才搬运到执行设备。独立 uniform 路径把每个块按 offset 0、8、16、24 分成8字节无符号大端 word, 取高53位并按 $u=(m+1)/(2^{53}+2)$ 映射到 $(0,1)$；该路径只用于按0.5阈值生成 attention 关系符号。设备 RNG 不参与方法身份。MPFR 复验是外层参考证据, 不进入 PRG 算法摘要。当前固定向量只在 Windows CPU 实测, Linux/Colab 逐字节一致性留给 GPU 运行前门禁。
 
-该分支只在 height/width 二维轴执行平均池化, 对每个 batch/channel 独立使用 kernel 5、stride 1、padding 2、二维零填充和 `count_include_pad=true`, 不跨 batch 或 channel 轴传播数值；池化后去均值与 L2 归一化各自在整个模板 Tensor 上计算一个全局标量, 因而具有明确的离散空间低通定义。
+该分支只在 height/width 二维轴执行平均池化, 对每个 batch/channel 独立使用 kernel 5、stride 1、padding 2、二维零填充、`ceil_mode=false`、`count_include_pad=true` 和 `divisor_override=null`, 不跨 batch 或 channel 轴传播数值；池化后去均值与 L2 归一化各自在整个模板 Tensor 上计算一个全局标量, 因而具有明确的离散空间低通定义。
 
 ### （二）高斯幅值尾部截断
 
@@ -190,6 +190,8 @@ I_\gamma=\operatorname{TopK}_{\lceil n\gamma\rceil}
 $$
 
 $\gamma$ 是 Q20 中点逆 CDF 量化标准正态元素绝对幅值的尾部保留比例，同幅值元素由展平索引升序确定选择顺序。非入选元素保持精确0, 模板只执行整体二范数归一化, 不执行去均值。该过程不执行 FFT、DCT、空间波数排序或频带 mask，因此只定义幅值域筛选, 不定义空间频带。其攻击鲁棒性必须由真实实验验证。
+
+尾部载体协议绑定 $\gamma$、稳定排序规则与 PRG 版本。仅图像检测原子保存模板 shape、元素总数、精确选中数、阈值、实际保留比例与模板内容摘要；raw/aligned 路径必须复用同一 LF 与尾部固定模板身份。
 
 ### （三）安全投影与内容分数
 
@@ -321,7 +323,7 @@ $$
 
 注意力梯度在 $z_t^{base}=z_t+\Delta z_t^{LF}+\Delta z_t^{tail}$ 上重算, 再投影到 $N_A$。回溯使用 `attention_backtracking_factor=0.5` 和 `attention_backtracking_maximum_steps=8`, 以风险包络最大步长为起点检查初始候选及最多8次减半；只有完整候选分数严格高于原 latent 和优化内容基底时才接受。随后对三分支执行共同缩放时，实际写回组合 latent 还必须严格优于同一共同缩放系数下的实际写回内容基底。安全投影为零、九个候选均失败或5个 Q/K 原子角色 `latent_before`、`optimization_content_base_latent`、`accepted_attention_candidate`、`actual_written_content_base_latent`、`actual_written_combined_latent` 不完整时阻断。优化内容基底和实际写回内容基底分别对应 attention 内部回溯与三分支共同缩放，不得合并。
 
-检测端从待检图像、密钥和公开模型构造 $R_{\mathrm{obs}}\in\mathbb R^{n\times n\times4}$, 只执行一次稳定 token 选择。观测参考系使用该选择产生的 pair 权重, 规范拉回参考系使用同一个 $W_T$ 将单点权重传递后再做外积, 两者共享同一个权重身份摘要。对每个有界相似仿射与方形二面体候选, 四个关系通道分别执行 $\widehat R_{T,c}=W_TR_{\mathrm{obs},c}W_T^\top$；四通道密钥投影分别执行 $\widetilde S_{T,c}=V_T(\pi_cS_K)V_T^\top$。两个方向都先逐通道计算相关, 再使用与嵌入端相同的冻结分量权重组合；注册目标以0.10和0.90组合规范拉回与观测前推总分，再显式扣除规范侧与观测侧的覆盖率、唯一采样率损失。搜索协议只由旋转、log-scale 和归一化位移的公开连续定义域及三分层级分辨率生成, 每轮组合后严格过滤残余旋转、均匀尺度与平移, 保证相对方形二面体基元分别位于 $[-32,32]$、$[1/\sqrt2,\sqrt2]$ 和 $[-0.28,0.28]^2$；协议不读取任何攻击角度、裁剪比例或位移参数。确定性随机 held-out 验证使用远离正式攻击取值的连续变换。输出必须记录四通道分数、相对 identity 候选的对齐增益、双向关系分数、覆盖惩罚、目标间隔、恢复变换和权重身份。结构注册预注册 `attention_anchor_count=12`、`attention_residual_threshold=0.20` 和 `attention_minimum_inlier_ratio=0.50`。锚点在抽样 token 索引中确定性均匀选择；实际 token 数少于12时失败。残差是 `normalized_xy_token_centers_corner_endpoints_v1` 坐标中的欧氏距离, 关系采样和图像重采样统一使用 `align_corners=True`；内点率只以具有有效双线性覆盖的锚点为分母, 并要求唯一观测匹配。完整四通道观测与双向分数必须为正、目标间隔为正、两个方向覆盖率均不低于0.45、内点率不低于0.50且平均内点残差不超过0.20。均匀 attention 使 $G=0$ 且其他分量在逐行中心化后也不产生密钥相关, 因而公开坐标不能单独通过门禁。恢复图像参考系后必须重新提取全部冻结层的真实 Q/K, 并使用注册传递后的同一 pair 权重计算同步分数, 不重新选择稳定 token。三项结构常量进入方法配置、对齐、检测、冻结阈值和结果摘要, calibration 或 test 不得调节；calibration 只冻结内容分数、注册关系分、注册置信度、恢复后同步分和 rescue window。几何统计只能决定是否允许重对齐，不能独立给出 positive。
+检测端从待检图像、密钥和公开模型构造 $R_{\mathrm{obs}}\in\mathbb R^{n\times n\times4}$, 只执行一次稳定 token 选择。观测参考系使用该选择产生的 pair 权重, 规范拉回参考系使用同一个 $W_T$ 将单点权重传递后再做外积, 两者共享同一个权重身份摘要。对每个有界相似仿射与方形二面体候选, 四个关系通道分别执行 $\widehat R_{T,c}=W_TR_{\mathrm{obs},c}W_T^\top$；四通道密钥投影分别执行 $\widetilde S_{T,c}=V_T(\pi_cS_K)V_T^\top$。两个方向都先逐通道计算相关, 再使用与嵌入端相同的冻结分量权重组合；注册目标以0.10和0.90组合规范拉回与观测前推总分，再显式扣除规范侧与观测侧的覆盖率、唯一采样率损失。搜索协议只由旋转、log-scale 和归一化位移的公开连续定义域及三分层级分辨率生成, 每轮组合后严格过滤残余旋转、均匀尺度与平移, 保证相对方形二面体基元分别位于 $[-32,32]$、$[1/\sqrt2,\sqrt2]$ 和 $[-0.28,0.28]^2$；协议不读取任何攻击角度、裁剪比例或位移参数。确定性随机 held-out 验证使用远离正式攻击取值的连续变换。输出必须记录四通道分数、相对 identity 候选的对齐增益、双向关系分数、覆盖惩罚、目标间隔、恢复变换和权重身份。结构注册预注册 `attention_anchor_count=12`、`attention_residual_threshold=0.20` 和 `attention_minimum_inlier_ratio=0.50`。锚点在抽样 token 索引中确定性均匀选择；实际 token 数少于12时失败。残差是 `normalized_xy_token_centers_corner_endpoints_v1` 坐标中的欧氏距离, 关系采样和图像重采样统一使用 `align_corners=True`；内点率只以具有有效双线性覆盖的锚点为分母, 并要求唯一观测匹配。完整四通道观测与双向分数必须为正、目标间隔为正、两个方向覆盖率均不低于0.45、内点率不低于0.50且平均内点残差不超过0.20。均匀 attention 使 $G=0$ 且其他分量在逐行中心化后也不产生密钥相关, 因而公开坐标不能单独通过门禁。恢复图像参考系后必须重新提取全部冻结层的真实 Q/K, 并使用注册传递后的同一 pair 权重计算同步分数, 不重新选择稳定 token。完整检测器配置只保存在顶层运行 manifest；对齐与检测记录保存三项结构常量、决策字段及检测器配置摘要, calibration/test 必须绑定同一摘要。calibration 或 test 不得调节结构常量；calibration 只冻结内容分数、注册关系分、注册置信度、恢复后同步分和 rescue window。几何统计只能决定是否允许重对齐，不能独立给出 positive。冻结层有序集合精确为 `transformer_blocks.0.attn`、`transformer_blocks.23.attn`。每层先独立完成层内搜索；跨层候选依次按注册目标、观测关系分、注册置信度执行字典序最大化, 三者完全同分时选择冻结顺序中更靠前的层。恢复图像固定使用 bilinear、`padding_mode=border`、`align_corners=True`, 连续结果按 `floor(clamp(x, 0, 1) * 255)` 转回 RGB uint8 后才重新编码。
 
 最终图像 attention 归因必须额外执行一次同 seed、同 scheduler、同 LF/tail 配置与算子且只关闭 attention geometry 的 carrier-only 生成。首个注入前 latent 必须具有相同 dtype、shape 与原始字节 SHA-256；两侧更新原子精确覆盖同一注入序列和 scheduler 轨迹。carrier-only 原子的 attention 分数、更新、关系、pair 身份和 attention Null Space 必须为空, `attention_source` 必须为 `disabled_attention_geometry`。该干预测量 attention 开关包含后续 LF、tail 与轨迹交互的总机制效应, 不冻结干预后的 realized carrier, 也不解释为纯直接效应。clean、carrier-only 与完整方法成图都重新执行 VAE 编码、公开固定噪声加噪和直接 Q/K 四分量关系构造。clean 到完整方法、clean 到 carrier-only 及 carrier-only 到完整方法三条 CLIP/手工结构统计边全部通过后, 门禁才同时要求完整方法相对 carrier-only 的自身盲选择分数增益及冻结 carrier-only pair 权重后的配对分数增益严格大于 `minimum_final_image_attention_score_gain=0.0001`。四个 Q/K 依赖分量的配对增益同时写入记录。正式保持记录和 Q/K 记录必须共享直接来源、四分量身份、密钥投影身份、反事实身份、原子 JSONL 路径、文件 SHA-256、内容摘要、持久化图像路径与图像 SHA-256, 并在缓存复用时从实际文件重建。clean 分数只作为总体水印对照；该累计归因门禁不向仅图像检测器提供 clean、carrier-only 图像或生成轨迹。
 
@@ -336,6 +338,10 @@ $$
 $$
 
 检测图像使用冻结 VAE posterior mode 编码为 $\hat z=(\operatorname{mode}(q_{VAE}(x'))-\texttt{vae\_shift\_factor})\cdot\texttt{vae\_scaling\_factor}$。固定模板只依赖密钥、精确模型标识和 shape, 内容分数固定为 $0.70s_{LF}+0.30s_{tail}$。
+
+完整注入、carrier-only 和全部检测记录对每个活动内容分支必须共享唯一模板内容摘要及载体协议摘要。calibration 冻结正文同时包含 LF/tail 协议摘要、内容权重和尾部比例；test 应用前必须重算完整 `threshold_digest` 与 calibration 假阳性率。
+
+检测密钥计划分为注册水印密钥和预注册 wrong-key 两个角色。wrong-key 使用版本化 SHA-256 domain separation 派生；注入密钥摘要、注册密钥检测模板、wrong-key 独立模板及计划摘要必须在总科学内容记录中交叉一致。
 
 仅图像 Q/K 的公开噪声输出 `shape` 精确等于 $\hat z$ 的 NCHW shape。调用使用 `public_detection_noise_prg_protocol=sha256_counter_normal_icdf_table20_float32_v2`, 且 `key_material=public_detection_noise_domain=public_image_only_qk_detection_noise_v1`；`domain_fields` 精确包含同值 `operator`、冻结 `model_id`、40位 `model_revision`、`width=512`、`height=512`、`inference_steps=20`、`public_detection_schedule_index=7` 和 `latent_shape=shape`。domain 不含水印密钥、Prompt、生成 seed 或轨迹, 并完整执行本节的 SHA-256 大端计数器比特流、连续20位索引提取与 Q20 中点逆 CDF float32 表查询；实际 dtype 转换在 CPU 完成, 随后才搬运到 $\hat z$ 的设备。令 $t_{det}=\operatorname{scheduler.timesteps}[7]$, 检测 latent 只能由 `scheduler.scale_noise(hat_z,t_det,epsilon_det)` 得到；缺失 `scale_noise` 时失败。Transformer 条件固定为 `public_detection_conditioning_protocol=sd3_empty_text_triplet_without_cfg_v1` 与 `public_detection_condition_text=""`。raw 与 aligned 图像分别重新编码和提取 Q/K, 原子角色固定为 `raw_detection_image` 和 `aligned_detection_image`。
 

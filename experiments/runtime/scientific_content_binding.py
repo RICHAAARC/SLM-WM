@@ -4,14 +4,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import hashlib
+import math
 from pathlib import Path
 import struct
 from typing import Any
 
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WATERMARK_KEY_ROLE,
+    REGISTERED_WRONG_KEY_ROLE,
+    validate_detection_key_identity_record,
+    validate_detection_key_plan_record,
+)
 from main.core.digest import (
     TENSOR_CONTENT_DIGEST_VERSION,
     build_stable_digest,
 )
+from main.methods.detection import validate_image_only_detection_digest_record
 from main.methods.geometry import (
     qk_atomic_evaluation_records_digest,
     qk_atomic_evaluation_records_ready,
@@ -27,7 +35,7 @@ from main.methods.update_composition import (
 
 
 SCIENTIFIC_CONTENT_BINDING_SCHEMA = (
-    "slm_wm_scientific_content_binding_v1"
+    "slm_wm_scientific_content_binding_v4"
 )
 IMAGE_RGB_UINT8_CONTENT_SCHEMA = "slm_wm_image_rgb_uint8_content_v1"
 
@@ -343,7 +351,89 @@ def _update_content_identity(
     """提取一次注入原子的风险、基底、分支、写回与 Q/K 身份。"""
 
     resolved = dict(record)
+    watermark_key_material_digest_random = _sha256(
+        resolved.get("watermark_key_material_digest_random"),
+        field_name="watermark_key_material_digest_random",
+    )
+    lf_carrier_protocol_digest = _sha256(
+        resolved.get("lf_carrier_protocol_digest"),
+        field_name="lf_carrier_protocol_digest",
+    )
+    tail_carrier_protocol_digest = _sha256(
+        resolved.get("tail_carrier_protocol_digest"),
+        field_name="tail_carrier_protocol_digest",
+    )
+    lf_template_content_sha256 = _sha256(
+        resolved.get("lf_template_content_sha256"),
+        field_name="lf_template_content_sha256",
+    )
+    tail_template_content_sha256 = _sha256(
+        resolved.get("tail_template_content_sha256"),
+        field_name="tail_template_content_sha256",
+    )
+    lf_template_shape = list(resolved.get("lf_template_shape", ()))
+    tail_template_shape = list(resolved.get("tail_template_shape", ()))
+    tail_template_element_count = resolved.get("tail_template_element_count")
+    tail_selected_element_count = resolved.get("tail_selected_element_count")
+    tail_fraction = resolved.get("tail_fraction")
+    if (
+        len(lf_template_shape) != 4
+        or len(tail_template_shape) != 4
+        or any(
+            type(value) is not int or value <= 0
+            for value in (*lf_template_shape, *tail_template_shape)
+        )
+        or type(tail_template_element_count) is not int
+        or tail_template_element_count != math.prod(tail_template_shape)
+        or type(tail_selected_element_count) is not int
+        or type(tail_fraction) is not float
+        or tail_selected_element_count
+        != math.ceil(tail_template_element_count * tail_fraction)
+    ):
+        raise ValueError("注入载体的模板 shape 或尾部选择计数无效")
     resolved_branches = list(expected_branches)
+    if "lf_content" in resolved_branches:
+        lf_template_digest = _sha256(
+            resolved.get("lf_template_digest"),
+            field_name="lf_template_digest",
+        )
+        lf_projection_energy_retention = resolved.get(
+            "lf_projection_energy_retention"
+        )
+        if (
+            not isinstance(lf_projection_energy_retention, float)
+            or not math.isfinite(lf_projection_energy_retention)
+        ):
+            raise ValueError("LF 投影能量比例无效")
+    else:
+        lf_template_digest = ""
+        lf_projection_energy_retention = None
+        if (
+            resolved.get("lf_template_digest") != ""
+            or resolved.get("lf_projection_energy_retention") is not None
+        ):
+            raise ValueError("禁用 LF 分支不得保留投影模板摘要")
+    if "tail_robust" in resolved_branches:
+        tail_template_digest = _sha256(
+            resolved.get("tail_template_digest"),
+            field_name="tail_template_digest",
+        )
+        tail_projection_energy_retention = resolved.get(
+            "tail_projection_energy_retention"
+        )
+        if (
+            not isinstance(tail_projection_energy_retention, float)
+            or not math.isfinite(tail_projection_energy_retention)
+        ):
+            raise ValueError("尾部投影能量比例无效")
+    else:
+        tail_template_digest = ""
+        tail_projection_energy_retention = None
+        if (
+            resolved.get("tail_template_digest") != ""
+            or resolved.get("tail_projection_energy_retention") is not None
+        ):
+            raise ValueError("禁用尾部分支不得保留投影模板摘要")
     if resolved.get("tensor_content_digest_version") != (
         TENSOR_CONTENT_DIGEST_VERSION
     ):
@@ -523,9 +613,35 @@ def _update_content_identity(
         "post_step_schedule_index": int(
             resolved.get("post_step_schedule_index")
         ),
+        "watermark_key_material_digest_random": (
+            watermark_key_material_digest_random
+        ),
         "active_carrier_branches": resolved_branches,
         "null_space_enabled": bool(null_space_enabled),
         "risk_content_evidence": risk_evidence,
+        "content_carrier_identity": {
+            "lf_carrier_protocol_digest": lf_carrier_protocol_digest,
+            "lf_template_content_sha256": lf_template_content_sha256,
+            "lf_template_digest": lf_template_digest,
+            "lf_template_shape": lf_template_shape,
+            "lf_projection_energy_retention": (
+                lf_projection_energy_retention
+            ),
+            "tail_carrier_protocol_digest": tail_carrier_protocol_digest,
+            "tail_template_content_sha256": (
+                tail_template_content_sha256
+            ),
+            "tail_template_digest": tail_template_digest,
+            "tail_template_shape": tail_template_shape,
+            "tail_template_element_count": tail_template_element_count,
+            "tail_selected_element_count": tail_selected_element_count,
+            "tail_projection_energy_retention": (
+                tail_projection_energy_retention
+            ),
+            "tail_retained_fraction": resolved.get(
+                "tail_retained_fraction"
+            ),
+        },
         "null_space_content_records": null_space_identities,
         "update_content_records": update_content,
         **attention_identity,
@@ -538,6 +654,7 @@ def _detection_content_identity(
     *,
     expected_attention: bool,
     detection_index: int,
+    detection_key_plan: Mapping[str, Any],
 ) -> dict[str, Any]:
     """绑定一次盲检所评估图像、公开噪声和检测 Q/K 内容。"""
 
@@ -546,6 +663,67 @@ def _detection_content_identity(
         resolved.get("metadata"),
         field_name="detection.metadata",
     )
+    validate_image_only_detection_digest_record(resolved)
+    detector_config_digest = _sha256(
+        resolved.get("image_only_detector_config_digest"),
+        field_name="detection.image_only_detector_config_digest",
+    )
+    if metadata.get("attention_geometry_enabled") is not expected_attention:
+        raise ValueError("盲检配置身份与正式方法机制开关不一致")
+    detection_key_identity = validate_detection_key_identity_record(
+        resolved,
+        detection_key_plan,
+    )
+    watermark_key_material_digest_random = _sha256(
+        resolved.get("watermark_key_material_digest_random"),
+        field_name="detection.watermark_key_material_digest_random",
+    )
+    sample_role = str(resolved.get("sample_role", ""))
+    attack_id = str(resolved.get("attack_id", "none"))
+    attack_present = attack_id not in {"", "none"}
+    detection_key_role = detection_key_identity["detection_key_role"]
+    if (
+        detection_key_role == REGISTERED_WATERMARK_KEY_ROLE
+        and sample_role not in {"clean_negative", "positive_source"}
+    ) or (
+        detection_key_role == REGISTERED_WRONG_KEY_ROLE
+        and (sample_role != "wrong_key_negative" or attack_present)
+    ):
+        raise ValueError("检测密钥角色与样本角色或攻击角色不一致")
+    lf_carrier_protocol_digest = _sha256(
+        resolved.get("lf_carrier_protocol_digest"),
+        field_name="detection.lf_carrier_protocol_digest",
+    )
+    tail_carrier_protocol_digest = _sha256(
+        resolved.get("tail_carrier_protocol_digest"),
+        field_name="detection.tail_carrier_protocol_digest",
+    )
+    lf_template_content_sha256 = _sha256(
+        resolved.get("lf_template_content_sha256"),
+        field_name="detection.lf_template_content_sha256",
+    )
+    tail_template_content_sha256 = _sha256(
+        resolved.get("tail_template_content_sha256"),
+        field_name="detection.tail_template_content_sha256",
+    )
+    lf_weight = float(resolved.get("lf_weight"))
+    tail_robust_weight = float(resolved.get("tail_robust_weight"))
+    tail_threshold = float(resolved.get("tail_threshold"))
+    tail_retained_fraction = float(resolved.get("tail_retained_fraction"))
+    tail_template_shape = list(resolved.get("tail_template_shape"))
+    tail_template_element_count = int(
+        resolved.get("tail_template_element_count")
+    )
+    tail_selected_element_count = int(
+        resolved.get("tail_selected_element_count")
+    )
+    aligned_content_identity = {
+        "aligned_lf_score": resolved.get("aligned_lf_score"),
+        "aligned_tail_robust_score": resolved.get(
+            "aligned_tail_robust_score"
+        ),
+        "aligned_content_score": resolved.get("aligned_content_score"),
+    }
     attacked_digest = resolved.get("attacked_image_digest", "")
     if attacked_digest:
         attacked_digest = _sha256(
@@ -751,8 +929,12 @@ def _detection_content_identity(
         )
     return {
         "detection_index": detection_index,
-        "sample_role": str(resolved.get("sample_role", "")),
-        "attack_id": str(resolved.get("attack_id", "none")),
+        "sample_role": sample_role,
+        "detection_key_identity": detection_key_identity,
+        "watermark_key_material_digest_random": (
+            watermark_key_material_digest_random
+        ),
+        "attack_id": attack_id,
         "source_image_path": str(resolved.get("source_image_path", "")),
         "source_image_file_sha256": _sha256(
             resolved.get("source_image_digest"),
@@ -772,6 +954,28 @@ def _detection_content_identity(
             field_name="evaluated_image_digest",
         ),
         "evaluated_image_rgb_uint8_content_sha256": evaluated_pixels,
+        "content_carrier_identity": {
+            "lf_carrier_protocol_digest": lf_carrier_protocol_digest,
+            "lf_template_content_sha256": lf_template_content_sha256,
+            "tail_carrier_protocol_digest": tail_carrier_protocol_digest,
+            "tail_template_content_sha256": tail_template_content_sha256,
+            "tail_template_shape": tail_template_shape,
+            "tail_template_element_count": tail_template_element_count,
+            "tail_selected_element_count": tail_selected_element_count,
+            "tail_threshold": tail_threshold,
+            "tail_retained_fraction": tail_retained_fraction,
+            "lf_weight": lf_weight,
+            "tail_robust_weight": tail_robust_weight,
+            "lf_score": resolved.get("lf_score"),
+            "tail_robust_score": resolved.get("tail_robust_score"),
+            "content_score": resolved.get("content_score"),
+            **aligned_content_identity,
+        },
+        "image_only_detector_config_digest": detector_config_digest,
+        "detector_digest": _sha256(
+            resolved.get("detector_digest"),
+            field_name="detector_digest",
+        ),
         "evaluated_image_width": evaluated_width,
         "evaluated_image_height": evaluated_height,
         "attacked_image_digest": attacked_digest,
@@ -789,6 +993,7 @@ def build_scientific_content_binding_record(
     full_update_records: Sequence[Mapping[str, Any]],
     carrier_only_update_records: Sequence[Mapping[str, Any]],
     detection_records: Sequence[Mapping[str, Any]],
+    detection_key_plan: Mapping[str, Any],
     final_image_records: Mapping[str, Mapping[str, Any]],
     final_image_attention_observability: Mapping[str, Any] | None,
     final_image_preservation: Mapping[str, Any] | None,
@@ -831,16 +1036,136 @@ def build_scientific_content_binding_record(
         raise ValueError("carrier-only 与完整方法的注入步骤身份不一致")
     if not attention_geometry_enabled and carrier_identities:
         raise ValueError("关闭 attention geometry 时不得存在 carrier-only 轨迹")
+    validated_detection_key_plan = validate_detection_key_plan_record(
+        detection_key_plan
+    )
     detection_identities = [
         _detection_content_identity(
             record,
             expected_attention=attention_geometry_enabled,
             detection_index=index,
+            detection_key_plan=validated_detection_key_plan,
         )
         for index, record in enumerate(detection_records)
     ]
     if not detection_identities:
         raise ValueError("总科学内容绑定缺少仅图像检测记录")
+    detector_config_digests = {
+        identity["image_only_detector_config_digest"]
+        for identity in detection_identities
+    }
+    if len(detector_config_digests) != 1:
+        raise ValueError("同一科学单元的检测记录混用了不同盲检配置")
+    update_key_digests = {
+        identity["watermark_key_material_digest_random"]
+        for identity in (*full_identities, *carrier_identities)
+    }
+    if update_key_digests != {
+        validated_detection_key_plan[
+            "registered_watermark_key_digest_random"
+        ]
+    }:
+        raise ValueError("注入轨迹与检测密钥计划未共享同一注册密钥身份")
+    registered_key_detections = [
+        identity
+        for identity in detection_identities
+        if identity["detection_key_identity"]["detection_key_role"]
+        == REGISTERED_WATERMARK_KEY_ROLE
+    ]
+    wrong_key_detections = [
+        identity
+        for identity in detection_identities
+        if identity["detection_key_identity"]["detection_key_role"]
+        == REGISTERED_WRONG_KEY_ROLE
+    ]
+    if not registered_key_detections or not wrong_key_detections:
+        raise ValueError("检测记录必须同时覆盖注册密钥与预注册 wrong-key 角色")
+    content_carrier_cross_path_identity: dict[str, dict[str, str]] = {}
+    for (
+        branch_name,
+        template_field_name,
+        protocol_field_name,
+        template_shape_field_name,
+    ) in (
+        (
+            "lf_content",
+            "lf_template_content_sha256",
+            "lf_carrier_protocol_digest",
+            "lf_template_shape",
+        ),
+        (
+            "tail_robust",
+            "tail_template_content_sha256",
+            "tail_carrier_protocol_digest",
+            "tail_template_shape",
+        ),
+    ):
+        update_template_digests = {
+            identity["content_carrier_identity"][template_field_name]
+            for identity in (*full_identities, *carrier_identities)
+            if branch_name in identity["active_carrier_branches"]
+        }
+        update_protocol_digests = {
+            identity["content_carrier_identity"][protocol_field_name]
+            for identity in (*full_identities, *carrier_identities)
+            if branch_name in identity["active_carrier_branches"]
+        }
+        update_template_shapes = {
+            tuple(
+                identity["content_carrier_identity"][
+                    template_shape_field_name
+                ]
+            )
+            for identity in (*full_identities, *carrier_identities)
+            if branch_name in identity["active_carrier_branches"]
+        }
+        if not update_template_digests:
+            continue
+        registered_template_digests = {
+            identity["content_carrier_identity"][template_field_name]
+            for identity in registered_key_detections
+        }
+        wrong_key_template_digests = {
+            identity["content_carrier_identity"][template_field_name]
+            for identity in wrong_key_detections
+        }
+        detection_protocol_digests = {
+            identity["content_carrier_identity"][protocol_field_name]
+            for identity in detection_identities
+        }
+        detection_template_shapes = {
+            tuple(
+                identity["content_carrier_identity"][
+                    "tail_template_shape"
+                ]
+            )
+            for identity in detection_identities
+        }
+        if (
+            len(update_template_digests) != 1
+            or registered_template_digests != update_template_digests
+            or len(wrong_key_template_digests) != 1
+            or wrong_key_template_digests == update_template_digests
+            or len(update_protocol_digests) != 1
+            or detection_protocol_digests != update_protocol_digests
+            or len(update_template_shapes) != 1
+            or detection_template_shapes != update_template_shapes
+        ):
+            raise ValueError(
+                f"{branch_name} 在嵌入与仅图像检测路径中的固定模板身份不一致"
+            )
+        content_carrier_cross_path_identity[branch_name] = {
+            "registered_template_content_sha256": next(
+                iter(update_template_digests)
+            ),
+            "wrong_key_template_content_sha256": next(
+                iter(wrong_key_template_digests)
+            ),
+            "carrier_protocol_digest": next(
+                iter(update_protocol_digests)
+            ),
+            "template_shape": list(next(iter(update_template_shapes))),
+        }
     if attention_geometry_enabled:
         public_noise_indices = [
             evaluation_index
@@ -1130,8 +1455,17 @@ def build_scientific_content_binding_record(
             carrier_identities
         ),
         "detection_content_identities": detection_identities,
+        "image_only_detector_config_digest": next(
+            iter(detector_config_digests)
+        ),
         "detection_content_bundle_digest": build_stable_digest(
             detection_identities
+        ),
+        "detection_key_plan_digest_random": validated_detection_key_plan[
+            "detection_key_plan_digest_random"
+        ],
+        "content_carrier_cross_path_identity": (
+            content_carrier_cross_path_identity
         ),
         "final_image_content_records": final_images,
         "final_image_content_bundle_digest": build_stable_digest(

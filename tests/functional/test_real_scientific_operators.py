@@ -5,7 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import inspect
-from dataclasses import replace
+import math
+from dataclasses import MISSING, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -22,20 +23,31 @@ import main.methods.subspace.jacobian_nullspace as nullspace_module
 
 from main.methods.carrier import (
     KEYED_PRG_VERSION,
+    LowFrequencyCarrierConfig,
     build_low_frequency_template,
     build_tail_robust_template,
     compute_blind_content_score,
     keyed_prg_protocol_record,
+    tail_robust_carrier_protocol_record,
 )
-from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
+from main.methods.detection import (
+    ImageOnlyDetectionConfig,
+    detect_image_only_watermark,
+    recompute_image_only_detection_digest_payload,
+    validate_image_only_detection_digest_record,
+)
 from main.methods.geometry import (
     ATTENTION_ALIGNMENT_ANCHOR_COUNT,
     ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
     ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_IMAGE_PADDING_MODE,
+    ATTENTION_IMAGE_QUANTIZATION_PROTOCOL,
+    ATTENTION_IMAGE_RESAMPLING_MODE,
     ATTENTION_RELATION_COMPONENT_NAMES,
     DifferentiableAttentionRecorder,
+    FROZEN_SD35_ATTENTION_MODULE_NAMES,
     QKAttentionRelation,
     StableAttentionTokenSelection,
     attention_geometry_score,
@@ -54,6 +66,7 @@ from main.methods.geometry import (
     qk_atomic_evaluation_records_digest,
     qk_operator_metadata_records_digest,
     qk_self_attention,
+    recompute_attention_alignment_digest_payload,
     recover_attention_affine_alignment,
     select_stable_attention_tokens,
 )
@@ -77,9 +90,11 @@ from main.methods.update_composition import (
 )
 from experiments.runners.image_only_dataset_runtime import (
     FrozenEvidenceProtocol,
+    _decision,
     _scientific_update_record_ready,
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
+    frozen_evidence_protocol_digest_payload,
 )
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -113,6 +128,7 @@ from scripts import semantic_watermark_scientific_workflow as scientific_workflo
 from tests.helpers.scientific_unit_provenance import (
     build_test_scientific_unit_provenance,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 _FORMAL_ATTENTION_ALIGNMENT_GATE = {
@@ -122,6 +138,116 @@ _FORMAL_ATTENTION_ALIGNMENT_GATE = {
         ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO
     ),
 }
+_FORMAL_LOW_FREQUENCY_CONFIG = LowFrequencyCarrierConfig(
+    kernel_size=5,
+    stride=1,
+    padding=2,
+    boundary_mode="zero_padding",
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+)
+_FORMAL_LOW_FREQUENCY_PROTOCOL = (
+    _FORMAL_LOW_FREQUENCY_CONFIG.to_record()
+)
+_FORMAL_LF_WEIGHT = 0.70
+_FORMAL_TAIL_ROBUST_WEIGHT = 0.30
+_FORMAL_TAIL_FRACTION = 0.20
+_FORMAL_TAIL_CARRIER_PROTOCOL = tail_robust_carrier_protocol_record(
+    _FORMAL_TAIL_FRACTION,
+    prg_version=KEYED_PRG_VERSION,
+)
+
+
+def _formal_content_carrier_identity_fields() -> dict[str, object]:
+    """返回检测正文和 metadata 共享的完整内容载体身份."""
+
+    return {
+        "lf_carrier_protocol_digest": (
+            _FORMAL_LOW_FREQUENCY_CONFIG.protocol_digest
+        ),
+        "lf_weight": _FORMAL_LF_WEIGHT,
+        "tail_robust_weight": _FORMAL_TAIL_ROBUST_WEIGHT,
+        "tail_fraction": _FORMAL_TAIL_FRACTION,
+        "tail_carrier_protocol_digest": (
+            _FORMAL_TAIL_CARRIER_PROTOCOL[
+                "tail_carrier_protocol_digest"
+            ]
+        ),
+    }
+
+
+def _fixture_keyed_tensor_carrier_identity(
+    branch_name: str,
+    carrier_protocol_digest: str,
+    projection_energy_retention: float,
+    *,
+    null_space_digest: str = "1" * 64,
+) -> dict[str, object]:
+    """构造不持久化嵌套摘要正文的固定载体测试引用."""
+
+    payload: dict[str, object] = {
+        "branch_name": branch_name,
+        "template_shape": [1, 16, 64, 64],
+        "projection_energy_retention": round(
+            projection_energy_retention,
+            12,
+        ),
+        "minimum_projection_energy_retention": 0.01,
+        "null_space_digest": null_space_digest,
+        "canonical_template_content_sha256": "2" * 64,
+        "embedded_direction_content_sha256": "3" * 64,
+        "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
+        "keyed_prg_version": KEYED_PRG_VERSION,
+        "keyed_prg_protocol_digest": keyed_prg_protocol_record()[
+            "keyed_prg_protocol_digest"
+        ],
+        "carrier_protocol_digest": carrier_protocol_digest,
+    }
+    return {
+        "branch_name": branch_name,
+        "projection_energy_retention": projection_energy_retention,
+        "carrier_protocol_digest": carrier_protocol_digest,
+        "template_shape": [1, 16, 64, 64],
+        "canonical_template_content_sha256": "2" * 64,
+        "template_digest": build_stable_digest(payload),
+    }
+
+
+def _image_only_detection_config(
+    **overrides: object,
+) -> ImageOnlyDetectionConfig:
+    """构造显式绑定全部内容协议字段的轻量盲检配置."""
+
+    values: dict[str, object] = {
+        "model_id": "model",
+        "attention_module_names": FROZEN_SD35_ATTENTION_MODULE_NAMES,
+        "content_threshold": 0.20,
+        "geometry_score_threshold": 0.0,
+        "attention_anchor_count": ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+        "attention_residual_threshold": ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
+        "attention_minimum_inlier_ratio": (
+            ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO
+        ),
+        "low_frequency_config": _FORMAL_LOW_FREQUENCY_CONFIG,
+        "lf_weight": _FORMAL_LF_WEIGHT,
+        "tail_robust_weight": _FORMAL_TAIL_ROBUST_WEIGHT,
+        "tail_fraction": _FORMAL_TAIL_FRACTION,
+        "keyed_prg_version": KEYED_PRG_VERSION,
+        "registration_confidence_threshold": 0.0,
+        "attention_sync_score_threshold": 0.0,
+        "rescue_margin_low": -0.05,
+        "attention_stable_token_fraction": 0.50,
+        "attention_unstable_pair_weight": 0.25,
+        "attention_relation_component_weights": (
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+        ),
+    }
+    values.update(overrides)
+    return ImageOnlyDetectionConfig(**values)
 
 
 def _formal_detection_alignment_identity(
@@ -139,7 +265,9 @@ def _formal_detection_alignment_identity(
     gate = dict(_FORMAL_ATTENTION_ALIGNMENT_GATE)
     detector_metadata = {
         "attention_alignment_gate": dict(gate),
+        "stable_pair_weight_identity_ready": True,
         **gate,
+        **_formal_content_carrier_identity_fields(),
     }
     alignment = {
         "registration_geometry_reliable": registration_geometry_reliable,
@@ -148,6 +276,25 @@ def _formal_detection_alignment_identity(
         **gate,
     }
     return detector_metadata, alignment
+
+
+@pytest.mark.quick
+def test_image_only_detection_config_has_no_method_parameter_defaults() -> None:
+    """盲检全部科学参数必须由正式运行配置显式提供."""
+
+    config_fields = ImageOnlyDetectionConfig.__dataclass_fields__
+    for field_name in config_fields:
+        field = config_fields[field_name]
+        assert field.default is MISSING
+        assert field.default_factory is MISSING
+
+    decision_parameters = inspect.signature(_decision).parameters
+    for field_name in (
+        "geometry_score_threshold",
+        "registration_confidence_threshold",
+        "attention_sync_score_threshold",
+    ):
+        assert decision_parameters[field_name].default is inspect.Parameter.empty
 
 
 def _direct_qk_relation_from_logits(
@@ -741,6 +888,28 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "basis_reference_response_matrix_content_sha256": "7" * 64,
     }
     config = SemanticWatermarkRuntimeConfig()
+    tail_carrier_protocol_digest = build_stable_digest(
+        {
+            "tail_carrier_protocol_schema": (
+                "slm_wm_tail_robust_carrier_protocol_v1"
+            ),
+            "tail_fraction": config.tail_fraction,
+            "tail_selection_rule": (
+                "descending_absolute_value_then_ascending_flat_index"
+            ),
+            "keyed_prg_version": config.keyed_prg_version,
+        }
+    )
+    lf_template_identity = _fixture_keyed_tensor_carrier_identity(
+        "lf_content",
+        config.low_frequency_carrier_config.protocol_digest,
+        0.2,
+    )
+    tail_template_identity = _fixture_keyed_tensor_carrier_identity(
+        "tail_robust",
+        tail_carrier_protocol_digest,
+        0.2,
+    )
     qk_role_scores = {
         "latent_before": 0.10,
         "optimization_content_base_latent": 0.11,
@@ -822,6 +991,22 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
             )
         )
         null_space_records[branch_name] = branch_subspace
+    lf_template_identity = _fixture_keyed_tensor_carrier_identity(
+        "lf_content",
+        config.low_frequency_carrier_config.protocol_digest,
+        0.2,
+        null_space_digest=null_space_records["lf_content"][
+            "solver_digest"
+        ],
+    )
+    tail_template_identity = _fixture_keyed_tensor_carrier_identity(
+        "tail_robust",
+        tail_carrier_protocol_digest,
+        0.2,
+        null_space_digest=null_space_records["tail_robust"][
+            "solver_digest"
+        ],
+    )
     branch_update_content_records = {
         "lf_content": "5" * 64,
         "tail_robust": "6" * 64,
@@ -889,6 +1074,7 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     }
     record = {
         "step_index": 6,
+        **_formal_content_carrier_identity_fields(),
         "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
         "adjacent_step_reference_index": 5,
         "adjacent_step_reference_latent_content_sha256": "1" * 64,
@@ -939,7 +1125,32 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
             }
         ),
         "null_space_records": null_space_records,
+        "lf_template_content_sha256": lf_template_identity[
+            "canonical_template_content_sha256"
+        ],
+        "lf_template_digest": lf_template_identity["template_digest"],
+        "lf_template_shape": lf_template_identity["template_shape"],
         "lf_projection_energy_retention": 0.2,
+        "tail_template_digest": tail_template_identity["template_digest"],
+        "tail_template_content_sha256": tail_template_identity[
+            "canonical_template_content_sha256"
+        ],
+        "tail_template_shape": tail_template_identity["template_shape"],
+        "tail_template_element_count": math.prod(
+            tail_template_identity["template_shape"]
+        ),
+        "tail_selected_element_count": math.ceil(
+            math.prod(tail_template_identity["template_shape"])
+            * config.tail_fraction
+        ),
+        "tail_threshold": 1.0,
+        "tail_retained_fraction": (
+            math.ceil(
+                math.prod(tail_template_identity["template_shape"])
+                * config.tail_fraction
+            )
+            / math.prod(tail_template_identity["template_shape"])
+        ),
         "tail_projection_energy_retention": 0.2,
         "attention_score_before": 0.10,
         "attention_content_base_score": 0.11,
@@ -1086,6 +1297,14 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         recompute_quantized_composition_evidence_digest(record)
     )
     assert _scientific_update_record_ready(record, config) is True
+    record["lf_carrier_protocol_digest"] = "0" * 64
+    assert _scientific_update_record_ready(record, config) is False
+    record["lf_carrier_protocol_digest"] = (
+        _FORMAL_LOW_FREQUENCY_CONFIG.protocol_digest
+    )
+    record["lf_template_digest"] = ""
+    assert _scientific_update_record_ready(record, config) is False
+    record["lf_template_digest"] = lf_template_identity["template_digest"]
     removed_signal = record.pop("semantic_risk_signal_content_sha256")
     assert _scientific_update_record_ready(record, config) is False
     record["semantic_risk_signal_content_sha256"] = removed_signal
@@ -1259,10 +1478,28 @@ def test_tail_robust_template_records_amplitude_tail_semantics() -> None:
     """尾部截断应改变稀疏率, 并记录幅值尾部语义。"""
 
     latent = torch.zeros(1, 2, 8, 8)
-    lf_template = build_low_frequency_template(latent, "key", "model")
-    tail_template, _, retained_fraction = build_tail_robust_template(latent, "key", "model", 0.20)
+    lf_template = build_low_frequency_template(
+        latent,
+        "key",
+        "model",
+        _FORMAL_LOW_FREQUENCY_CONFIG,
+        prg_version=KEYED_PRG_VERSION,
+    )
+    tail_template, _, retained_fraction = build_tail_robust_template(
+        latent,
+        "key",
+        "model",
+        0.20,
+        prg_version=KEYED_PRG_VERSION,
+    )
     observed = 0.7 * lf_template + 0.3 * tail_template
-    score = compute_blind_content_score(observed, lf_template, tail_template)
+    score = compute_blind_content_score(
+        observed,
+        lf_template,
+        tail_template,
+        _FORMAL_LF_WEIGHT,
+        _FORMAL_TAIL_ROBUST_WEIGHT,
+    )
 
     assert 0.15 <= retained_fraction <= 0.25
     assert int(torch.count_nonzero(tail_template).item()) == 26
@@ -1279,17 +1516,22 @@ def test_keyed_templates_use_versioned_device_independent_prg() -> None:
         reference,
         "known-key",
         "known-model",
+        _FORMAL_LOW_FREQUENCY_CONFIG,
+        prg_version=KEYED_PRG_VERSION,
     )
     second_lf = build_low_frequency_template(
         reference,
         "known-key",
         "known-model",
+        _FORMAL_LOW_FREQUENCY_CONFIG,
+        prg_version=KEYED_PRG_VERSION,
     )
     tail, threshold, retained_fraction = build_tail_robust_template(
         reference,
         "known-key",
         "known-model",
         0.25,
+        prg_version=KEYED_PRG_VERSION,
     )
     protocol = keyed_prg_protocol_record()
     uniform_vector = keyed_prg_module.build_keyed_uniform_tensor(
@@ -1399,6 +1641,7 @@ def test_keyed_templates_use_versioned_device_independent_prg() -> None:
             reference,
             "known-key",
             "known-model",
+            _FORMAL_LOW_FREQUENCY_CONFIG,
             prg_version="unsupported_prg",
         )
     with pytest.raises(ValueError, match="keyed_prg_version"):
@@ -1489,11 +1732,32 @@ def test_image_alignment_uses_token_endpoint_coordinate_convention() -> None:
         "normalized_xy_token_centers_corner_endpoints_v1"
     )
     assert ATTENTION_GRID_ALIGN_CORNERS is True
+    assert ATTENTION_IMAGE_RESAMPLING_MODE == "bilinear"
+    assert ATTENTION_IMAGE_PADDING_MODE == "border"
+    assert ATTENTION_IMAGE_QUANTIZATION_PROTOCOL == (
+        "clamp_0_1_multiply_255_floor_uint8_rgb_v1"
+    )
     assert [aligned.getpixel((column, 1))[0] for column in range(3)] == [
         100,
         200,
         200,
     ]
+
+
+@pytest.mark.quick
+def test_image_alignment_quantizes_fractional_rgb_with_floor() -> None:
+    """对齐后的连续 RGB 值必须按冻结协议向下量化而非四舍五入."""
+
+    image = Image.new("RGB", (2, 2))
+    image.putdata([(0, 0, 0), (4, 4, 4), (0, 0, 0), (4, 4, 4)])
+    alignment = SimpleNamespace(
+        affine_transform=((1.0, 0.0, 0.28), (0.0, 1.0, 0.0))
+    )
+
+    aligned = _align_image(image, alignment)
+
+    assert aligned.getpixel((0, 0)) == (0, 0, 0)
+    assert aligned.getpixel((1, 0)) == (4, 4, 4)
 
 
 @pytest.mark.quick
@@ -2276,8 +2540,7 @@ def test_image_only_detector_reextracts_qk_after_alignment(
     token_count = 64
     key_material = "detector_sync_key"
     model_id = "detector_sync_model"
-    layer_name = "detector_sync_layer"
-    second_layer_name = f"{layer_name}_second"
+    layer_name, second_layer_name = FROZEN_SD35_ATTENTION_MODULE_NAMES
     relation_signs = keyed_relation_signs(
         torch.zeros(1, token_count, token_count),
         key_material,
@@ -2313,8 +2576,20 @@ def test_image_only_detector_reextracts_qk_after_alignment(
         second_layer_name,
     )
     reference = torch.zeros(1, 2, 8, 8)
-    lf_template = build_low_frequency_template(reference, key_material, model_id)
-    tail_template = build_tail_robust_template(reference, key_material, model_id, 0.20)[0]
+    lf_template = build_low_frequency_template(
+        reference,
+        key_material,
+        model_id,
+        _FORMAL_LOW_FREQUENCY_CONFIG,
+        prg_version=KEYED_PRG_VERSION,
+    )
+    tail_template = build_tail_robust_template(
+        reference,
+        key_material,
+        model_id,
+        0.20,
+        prg_version=KEYED_PRG_VERSION,
+    )[0]
     original = {
         "latent": torch.zeros_like(reference),
         "attentions": (observed_attention, second_observed_attention),
@@ -2329,6 +2604,34 @@ def test_image_only_detector_reextracts_qk_after_alignment(
     import main.methods.detection.image_only as detector_module
 
     original_select_stable_tokens = detector_module.select_stable_attention_tokens
+    original_build_low_frequency_template = (
+        detector_module.build_low_frequency_template
+    )
+    consumed_lf_protocols: list[dict[str, object]] = []
+
+    def build_low_frequency_template_with_trace(
+        reference_latent: object,
+        consumed_key: str,
+        consumed_model: str,
+        low_frequency_config: LowFrequencyCarrierConfig,
+        **kwargs: object,
+    ) -> object:
+        """记录 raw 与 aligned 两次盲检实际消费的 LF 协议."""
+
+        consumed_lf_protocols.append(low_frequency_config.to_record())
+        return original_build_low_frequency_template(
+            reference_latent,
+            consumed_key,
+            consumed_model,
+            low_frequency_config,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        detector_module,
+        "build_low_frequency_template",
+        build_low_frequency_template_with_trace,
+    )
 
     def select_stable_tokens_once(*args: object, **kwargs: object):
         """记录盲检稳定 token 选择次数, 对齐后不得再次选择。"""
@@ -2363,7 +2666,7 @@ def test_image_only_detector_reextracts_qk_after_alignment(
     result = detect_image_only_watermark(
         image=original,
         key_material=key_material,
-        config=ImageOnlyDetectionConfig(
+        config=_image_only_detection_config(
             model_id=model_id,
             content_threshold=0.2,
             geometry_score_threshold=0.5,
@@ -2387,6 +2690,13 @@ def test_image_only_detector_reextracts_qk_after_alignment(
 
     assert extraction_count == 2
     assert stable_selection_count == 1
+    assert consumed_lf_protocols == [
+        _FORMAL_LOW_FREQUENCY_PROTOCOL,
+        _FORMAL_LOW_FREQUENCY_PROTOCOL,
+    ]
+    assert result.lf_carrier_protocol_digest == (
+        _FORMAL_LOW_FREQUENCY_CONFIG.protocol_digest
+    )
     assert result.raw_attention_geometry_score is not None
     assert result.attention_geometry_score is not None
     assert result.attention_geometry_score > 0.65
@@ -2396,25 +2706,12 @@ def test_image_only_detector_reextracts_qk_after_alignment(
     assert result.rescue_applied is True
     assert result.metadata["stable_pair_weight_identity_ready"] is True
     assert len(result.metadata["stable_pair_weight_identity_digest"]) == 64
-    assert len(result.metadata["attention_record_schema_digest"]) == 64
     assert result.metadata["detection_qk_atomic_content_ready"] is True
     assert tuple(
         record["qk_evaluation_role"]
         for record in result.metadata["detection_qk_atomic_content_records"]
     ) == ("raw_detection_image", "aligned_detection_image")
     assert len(result.metadata["detection_qk_atomic_content_digest"]) == 64
-    assert result.metadata["attention_relation_component_weights"] == [
-        1.0 / 3.0,
-        0.0,
-        1.0 / 3.0,
-        1.0 / 3.0,
-    ]
-    assert "differentiable_row_rank" not in result.metadata[
-        "attention_relation_active_component_names"
-    ]
-    assert len(
-        result.metadata["attention_relation_component_protocol_digest"]
-    ) == 64
     assert result.alignment is not None
     assert result.alignment.attention_relation_component_weights == (
         1.0 / 3.0,
@@ -2508,24 +2805,32 @@ def test_image_attention_extractor_batches_flowmatch_timestep(monkeypatch: pytes
         "test_detection_key",
         prg_version=KEYED_PRG_VERSION,
     )
-    detection_record = {
-        "metadata": {
-            "detection_qk_atomic_content_records": [
-                {
-                    "qk_evaluation_role": "raw_detection_image",
-                    "qk_atomic_content_records": list(
-                        relation_identity.qk_atomic_content_records
-                    ),
-                    "qk_atomic_content_digest": (
-                        relation_identity.qk_atomic_content_digest
-                    ),
-                    "qk_atomic_content_ready": (
-                        relation_identity.qk_atomic_content_ready
-                    ),
-                }
-            ]
+    detection_record = bind_formal_detection_record(
+        {
+            "content_score": 0.1,
+            "aligned_content_score": None,
+            "attention_geometry_score": 0.1,
+            "registration_confidence": 0.1,
+            "attention_sync_score": 0.1,
+            "alignment": None,
         }
-    }
+    )
+    detection_record["metadata"][
+        "detection_qk_atomic_content_records"
+    ] = [
+        {
+            "qk_evaluation_role": "raw_detection_image",
+            "qk_atomic_content_records": list(
+                relation_identity.qk_atomic_content_records
+            ),
+            "qk_atomic_content_digest": (
+                relation_identity.qk_atomic_content_digest
+            ),
+            "qk_atomic_content_ready": (
+                relation_identity.qk_atomic_content_ready
+            ),
+        }
+    ]
     _bind_public_detection_noise_qk_evidence(
         detection_record,
         extractor,
@@ -2539,6 +2844,7 @@ def test_image_attention_extractor_batches_flowmatch_timestep(monkeypatch: pytes
     ][0]["public_detection_noise_content_sha256"] == (
         detection_record["public_detection_noise_content_sha256"]
     )
+    validate_image_only_detection_digest_record(detection_record)
     assert scheduler.received_timestep is not None
     assert scheduler.received_timestep.shape == (2,)
     assert scheduler.received_timestep[0].item() == pytest.approx(7.0)
@@ -2620,13 +2926,25 @@ def test_image_only_detector_interface_and_positive_content_path() -> None:
     assert "prompt" not in parameters
 
     reference = torch.zeros(1, 2, 8, 8)
-    lf_template = build_low_frequency_template(reference, "blind_key", "model")
-    tail_template = build_tail_robust_template(reference, "blind_key", "model", 0.20)[0]
+    lf_template = build_low_frequency_template(
+        reference,
+        "blind_key",
+        "model",
+        _FORMAL_LOW_FREQUENCY_CONFIG,
+        prg_version=KEYED_PRG_VERSION,
+    )
+    tail_template = build_tail_robust_template(
+        reference,
+        "blind_key",
+        "model",
+        0.20,
+        prg_version=KEYED_PRG_VERSION,
+    )[0]
     encoded = 0.8 * lf_template + 0.4 * tail_template
     result = detect_image_only_watermark(
         image=encoded,
         key_material="blind_key",
-        config=ImageOnlyDetectionConfig(
+        config=_image_only_detection_config(
             model_id="model",
             content_threshold=0.20,
             geometry_score_threshold=0.0,
@@ -2646,6 +2964,11 @@ def test_image_only_detector_interface_and_positive_content_path() -> None:
     assert result.metadata["attention_alignment_gate"] == (
         _FORMAL_ATTENTION_ALIGNMENT_GATE
     )
+    assert result.lf_carrier_protocol_digest == (
+        _FORMAL_LOW_FREQUENCY_CONFIG.protocol_digest
+    )
+    assert result.content.lf_weight == _FORMAL_LF_WEIGHT
+    assert result.content.tail_robust_weight == _FORMAL_TAIL_ROBUST_WEIGHT
 
 
 @pytest.mark.quick
@@ -2653,7 +2976,7 @@ def test_detector_digest_binds_every_alignment_gate_parameter() -> None:
     """内容主判路径的检测摘要也必须逐字段绑定注意力结构门禁."""
 
     image = torch.zeros(1, 2, 8, 8)
-    baseline_config = ImageOnlyDetectionConfig(
+    baseline_config = _image_only_detection_config(
         model_id="detector_gate_digest_model",
         content_threshold=0.20,
         geometry_score_threshold=0.0,
@@ -2683,7 +3006,67 @@ def test_detector_digest_binds_every_alignment_gate_parameter() -> None:
             image_latent_encoder=lambda candidate: candidate,
         )
         assert changed.detector_digest != baseline.detector_digest
-        assert changed.metadata[field_name] == value
+        assert (
+            changed.image_only_detector_config_digest
+            != baseline.image_only_detector_config_digest
+        )
+
+
+@pytest.mark.quick
+def test_detector_rejects_alignment_selected_from_unfrozen_layer() -> None:
+    """可重算的 alignment 仍必须来自冻结 SD3.5 层集合."""
+
+    metadata, alignment = _formal_detection_alignment_identity(
+        registration_geometry_reliable=True,
+    )
+    record = bind_formal_detection_record(
+        {
+            **_formal_content_carrier_identity_fields(),
+            "content_score": 0.10,
+            "aligned_content_score": 0.20,
+            "attention_geometry_score": 0.30,
+            "registration_confidence": 0.40,
+            "attention_sync_score": 0.50,
+            "metadata": metadata,
+            "alignment": alignment,
+        }
+    )
+    record["alignment"]["layer_name"] = "transformer_blocks.1.attn"
+    record["alignment"]["alignment_digest"] = build_stable_digest(
+        recompute_attention_alignment_digest_payload(record["alignment"])
+    )
+    record["detector_digest"] = build_stable_digest(
+        recompute_image_only_detection_digest_payload(record)
+    )
+
+    with pytest.raises(ValueError, match="所选层不属于冻结"):
+        validate_image_only_detection_digest_record(record)
+
+
+@pytest.mark.quick
+def test_detector_digest_separates_zero_score_template_content_collisions() -> None:
+    """相同零分数摘要不得掩盖不同 shape 对应的 LF 模板身份."""
+
+    config = _image_only_detection_config(
+        model_id="detector_zero_score_collision_model"
+    )
+    first = detect_image_only_watermark(
+        image=torch.zeros(1, 1, 8, 8),
+        key_material="detector_zero_score_collision_key",
+        config=config,
+        image_latent_encoder=lambda value: value,
+    )
+    second = detect_image_only_watermark(
+        image=torch.zeros(1, 2, 8, 8),
+        key_material="detector_zero_score_collision_key",
+        config=config,
+        image_latent_encoder=lambda value: value,
+    )
+
+    assert first.content.content_score == second.content.content_score == 0.0
+    assert first.content.score_digest == second.content.score_digest
+    assert first.lf_template_content_sha256 != second.lf_template_content_sha256
+    assert first.detector_digest != second.detector_digest
 
 
 @pytest.mark.quick
@@ -2696,7 +3079,8 @@ def test_complete_evidence_calibration_includes_geometry_rescue() -> None:
             registration_geometry_reliable=index % 2 == 0,
         )
         calibration_records.append(
-            {
+            bind_formal_detection_record({
+                **_formal_content_carrier_identity_fields(),
                 "content_score": index / 100.0,
                 "aligned_content_score": (index + 5) / 100.0,
                 "geometry_reliable": index % 2 == 0,
@@ -2705,7 +3089,7 @@ def test_complete_evidence_calibration_includes_geometry_rescue() -> None:
                 "attention_sync_score": 0.7 + index / 1000.0,
                 "metadata": metadata,
                 "alignment": alignment,
-            }
+            })
         )
     protocol = calibrate_complete_evidence_protocol(
         calibration_records,
@@ -2724,13 +3108,43 @@ def test_complete_evidence_calibration_includes_geometry_rescue() -> None:
 
 
 @pytest.mark.quick
+def test_frozen_rescue_rejects_unbound_stable_pair_identity() -> None:
+    """冻结 rescue 不得绕过检测器的稳定 pair 权重身份门禁."""
+
+    decision = _decision(
+        {
+            "content_score": 0.10,
+            "aligned_content_score": 0.20,
+            "attention_geometry_score": 0.90,
+            "registration_confidence": 0.90,
+            "attention_sync_score": 0.90,
+            "alignment": {
+                "registration_geometry_reliable": True,
+                "geometry_reliable": True,
+            },
+            "metadata": {
+                "stable_pair_weight_identity_ready": False,
+            },
+        },
+        threshold=0.15,
+        rescue_margin_low=-0.10,
+        geometry_score_threshold=0.50,
+        registration_confidence_threshold=0.50,
+        attention_sync_score_threshold=0.50,
+    )
+
+    assert decision == (False, False, False, "low_confidence")
+
+
+@pytest.mark.quick
 def test_frozen_evidence_protocol_rejects_alignment_gate_drift() -> None:
     """校准和应用环节都不得接受非预注册注意力结构门禁."""
 
     metadata, alignment = _formal_detection_alignment_identity(
         registration_geometry_reliable=True,
     )
-    baseline_record = {
+    baseline_record = bind_formal_detection_record({
+        **_formal_content_carrier_identity_fields(),
         "content_score": 0.1,
         "aligned_content_score": 0.2,
         "attention_geometry_score": 0.3,
@@ -2738,7 +3152,7 @@ def test_frozen_evidence_protocol_rejects_alignment_gate_drift() -> None:
         "attention_sync_score": 0.5,
         "metadata": metadata,
         "alignment": alignment,
-    }
+    })
     protocol = calibrate_complete_evidence_protocol(
         (baseline_record,),
         target_fpr=0.1,
@@ -2770,6 +3184,49 @@ def test_frozen_evidence_protocol_rejects_alignment_gate_drift() -> None:
 
 
 @pytest.mark.quick
+def test_frozen_evidence_protocol_rejects_low_frequency_protocol_drift() -> None:
+    """校准和应用均不得接受 LF 协议摘要或权重分叉."""
+
+    metadata, alignment = _formal_detection_alignment_identity(
+        registration_geometry_reliable=True,
+    )
+    baseline_record = bind_formal_detection_record({
+        **_formal_content_carrier_identity_fields(),
+        "content_score": 0.1,
+        "aligned_content_score": 0.2,
+        "attention_geometry_score": 0.3,
+        "registration_confidence": 0.4,
+        "attention_sync_score": 0.5,
+        "metadata": metadata,
+        "alignment": alignment,
+    })
+    protocol = calibrate_complete_evidence_protocol(
+        (baseline_record,),
+        target_fpr=0.1,
+        rescue_margin_low=-0.05,
+    )
+    for mutation in ("digest", "weight"):
+        changed_record = deepcopy(baseline_record)
+        if mutation == "digest":
+            changed_record["lf_carrier_protocol_digest"] = "0" * 64
+        else:
+            changed_record["lf_weight"] = 0.69
+            changed_record["tail_robust_weight"] = 0.31
+        changed_record["detector_digest"] = build_stable_digest(
+            recompute_image_only_detection_digest_payload(changed_record)
+        )
+
+        with pytest.raises(ValueError):
+            calibrate_complete_evidence_protocol(
+                (changed_record,),
+                target_fpr=0.1,
+                rescue_margin_low=-0.05,
+            )
+        with pytest.raises(ValueError):
+            apply_frozen_evidence_protocol((changed_record,), protocol)
+
+
+@pytest.mark.quick
 def test_threshold_digest_binds_every_alignment_gate_parameter() -> None:
     """冻结阈值摘要必须逐字段绑定结构门禁而非只绑定分数阈值."""
 
@@ -2778,7 +3235,8 @@ def test_threshold_digest_binds_every_alignment_gate_parameter() -> None:
     )
     protocol = calibrate_complete_evidence_protocol(
         (
-            {
+            bind_formal_detection_record({
+                **_formal_content_carrier_identity_fields(),
                 "content_score": 0.1,
                 "aligned_content_score": 0.2,
                 "attention_geometry_score": 0.3,
@@ -2786,7 +3244,7 @@ def test_threshold_digest_binds_every_alignment_gate_parameter() -> None:
                 "attention_sync_score": 0.5,
                 "metadata": metadata,
                 "alignment": alignment,
-            },
+            }),
         ),
         target_fpr=0.1,
         rescue_margin_low=-0.05,
@@ -2807,10 +3265,51 @@ def test_threshold_digest_binds_every_alignment_gate_parameter() -> None:
         ("attention_anchor_count", 13),
         ("attention_residual_threshold", 0.21),
         ("attention_minimum_inlier_ratio", 0.51),
+        ("lf_carrier_protocol_digest", "0" * 64),
+        ("lf_weight", 0.69),
+        ("tail_robust_weight", 0.31),
+        ("tail_fraction", 1.0),
+        ("tail_carrier_protocol_digest", "0" * 64),
     ):
         changed_payload = dict(digest_payload)
         changed_payload[field_name] = value
         assert build_stable_digest(changed_payload) != protocol.threshold_digest
+
+
+@pytest.mark.quick
+def test_frozen_protocol_application_rejects_threshold_digest_drift() -> None:
+    """协议应用时必须先从全部冻结字段独立重建阈值摘要."""
+
+    metadata, alignment = _formal_detection_alignment_identity(
+        registration_geometry_reliable=True,
+    )
+    record = bind_formal_detection_record(
+        {
+            **_formal_content_carrier_identity_fields(),
+            "content_score": 0.1,
+            "aligned_content_score": 0.2,
+            "attention_geometry_score": 0.3,
+            "registration_confidence": 0.4,
+            "attention_sync_score": 0.5,
+            "metadata": metadata,
+            "alignment": alignment,
+        }
+    )
+    protocol = calibrate_complete_evidence_protocol(
+        (record,),
+        target_fpr=0.1,
+        rescue_margin_low=-0.05,
+    )
+    for drifted in (
+        replace(protocol, content_threshold=999.0),
+        replace(protocol, threshold_digest="f" * 64),
+        replace(protocol, calibration_false_positive_rate=0.999),
+    ):
+        with pytest.raises(
+            ValueError,
+            match="阈值摘要不能由正文重建|假阳性率与计数不一致",
+        ):
+            apply_frozen_evidence_protocol((record,), drifted)
 
 
 @pytest.mark.quick
@@ -2823,7 +3322,8 @@ def test_geometry_protocol_cannot_close_with_missing_calibration_scores() -> Non
             registration_geometry_reliable=True,
         )
         records.append(
-            {
+            bind_formal_detection_record({
+                **_formal_content_carrier_identity_fields(),
                 "content_score": index / 100.0,
                 "aligned_content_score": (index + 1) / 100.0,
                 "attention_geometry_score": 0.1,
@@ -2831,7 +3331,7 @@ def test_geometry_protocol_cannot_close_with_missing_calibration_scores() -> Non
                 "attention_sync_score": None if index == 0 else 0.3,
                 "metadata": metadata,
                 "alignment": alignment,
-            }
+            })
         )
 
     protocol = calibrate_complete_evidence_protocol(
@@ -2848,6 +3348,23 @@ def test_geometry_protocol_cannot_close_with_missing_calibration_scores() -> Non
 def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None:
     """冻结阈值改变后必须重算失败原因, 不能沿用预检测阈值的分类。"""
 
+    metadata, alignment = _formal_detection_alignment_identity(
+        registration_geometry_reliable=True,
+        geometry_reliable=True,
+    )
+    metadata["rescue_margin_low"] = -0.2
+    record = bind_formal_detection_record({
+        **_formal_content_carrier_identity_fields(),
+        "content_score": 0.4,
+        "aligned_content_score": 0.6,
+        "attention_geometry_score": 0.1,
+        "registration_confidence": 0.8,
+        "attention_sync_score": 0.8,
+        "geometry_reliable": False,
+        "metadata": metadata,
+        "alignment": alignment,
+        "content_failure_reason": "content_positive",
+    })
     protocol = FrozenEvidenceProtocol(
         content_threshold=0.5,
         rescue_margin_low=-0.2,
@@ -2859,6 +3376,18 @@ def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None
         attention_minimum_inlier_ratio=(
             ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO
         ),
+        lf_carrier_protocol_digest=(
+            _FORMAL_LOW_FREQUENCY_CONFIG.protocol_digest
+        ),
+        lf_weight=_FORMAL_LF_WEIGHT,
+        tail_robust_weight=_FORMAL_TAIL_ROBUST_WEIGHT,
+        tail_fraction=_FORMAL_TAIL_FRACTION,
+        tail_carrier_protocol_digest=_FORMAL_TAIL_CARRIER_PROTOCOL[
+            "tail_carrier_protocol_digest"
+        ],
+        image_only_detector_config_digest=record[
+            "image_only_detector_config_digest"
+        ],
         geometry_calibration_negative_count=10,
         geometry_calibration_exceedance_count=0,
         registration_calibration_negative_count=10,
@@ -2872,22 +3401,12 @@ def test_frozen_protocol_recomputes_threshold_dependent_failure_reason() -> None
         target_fpr=0.1,
         threshold_digest="fixture_threshold",
     )
-    metadata, alignment = _formal_detection_alignment_identity(
-        registration_geometry_reliable=True,
-        geometry_reliable=False,
+    protocol = replace(
+        protocol,
+        threshold_digest=build_stable_digest(
+            frozen_evidence_protocol_digest_payload(protocol)
+        ),
     )
-    record = {
-        "content_score": 0.4,
-        "aligned_content_score": 0.6,
-        "attention_geometry_score": 0.1,
-        "registration_confidence": 0.8,
-        "attention_sync_score": 0.8,
-        "geometry_reliable": False,
-        "metadata": metadata,
-        "alignment": alignment,
-        "content_failure_reason": "content_positive",
-    }
-
     resolved = apply_frozen_evidence_protocol((record,), protocol)[0]
 
     assert resolved["formal_content_failure_reason"] == "geometry_suspected"

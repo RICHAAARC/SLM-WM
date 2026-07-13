@@ -15,6 +15,7 @@ from experiments.artifacts.detection_score_curves import (
     decision_equivalent_score,
     write_detection_score_tables,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 def _record(
@@ -28,7 +29,7 @@ def _record(
 ) -> dict:
     """构造一条带真实标签和连续分数的 test 记录."""
 
-    record = {
+    record = bind_formal_detection_record({
         "run_id": f"run_{prompt_id}",
         "prompt_id": prompt_id,
         "split": "test",
@@ -45,8 +46,7 @@ def _record(
         "alignment": {
             "registration_geometry_reliable": geometry_reliable,
         },
-        "detector_digest": f"detector_{prompt_id}_{sample_role}_{attack_name}",
-    }
+    })
     equivalent_score = decision_equivalent_score(
         record,
         rescue_margin_low=-0.2,

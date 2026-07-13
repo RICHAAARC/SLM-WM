@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import MISSING, fields
+import inspect
 import math
 
 import pytest
@@ -10,10 +12,13 @@ import torch
 import torch.nn.functional as functional
 
 from main.core.digest import tensor_content_sha256
-from main.core.keyed_prg import build_keyed_gaussian_tensor
+from main.core.keyed_prg import KEYED_PRG_VERSION, build_keyed_gaussian_tensor
 from main.methods.carrier.keyed_tensor import (
+    LowFrequencyCarrierConfig,
     build_low_frequency_template,
     build_tail_robust_template,
+    compute_blind_content_score,
+    project_canonical_template,
 )
 from main.methods.update_composition import (
     QUANTIZED_COMPOSITION_EVIDENCE_VERSION,
@@ -27,6 +32,155 @@ from main.methods.update_composition import (
 )
 
 
+FORMAL_LOW_FREQUENCY_CONFIG = LowFrequencyCarrierConfig(
+    kernel_size=5,
+    stride=1,
+    padding=2,
+    boundary_mode="zero_padding",
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+)
+
+
+@pytest.mark.quick
+def test_low_frequency_and_content_score_protocols_have_no_defaults() -> None:
+    """核心 LF 协议和内容权重必须由调用方完整显式提供."""
+
+    for field in fields(LowFrequencyCarrierConfig):
+        assert field.default is MISSING
+        assert field.default_factory is MISSING
+    template_signature = inspect.signature(build_low_frequency_template)
+    for parameter_name in ("low_frequency_config", "prg_version"):
+        assert (
+            template_signature.parameters[parameter_name].default
+            is inspect.Parameter.empty
+        )
+    score_signature = inspect.signature(compute_blind_content_score)
+    for parameter_name in ("lf_weight", "tail_robust_weight"):
+        assert (
+            score_signature.parameters[parameter_name].default
+            is inspect.Parameter.empty
+        )
+    tail_signature = inspect.signature(build_tail_robust_template)
+    for parameter_name in ("tail_fraction", "prg_version"):
+        assert (
+            tail_signature.parameters[parameter_name].default
+            is inspect.Parameter.empty
+        )
+    projection_signature = inspect.signature(project_canonical_template)
+    for parameter_name in (
+        "minimum_energy_retention",
+        "carrier_protocol_digest",
+        "prg_version",
+    ):
+        assert (
+            projection_signature.parameters[parameter_name].default
+            is inspect.Parameter.empty
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("tail_fraction", (True, 1, 0.0, 1.1))
+def test_tail_template_rejects_fraction_type_or_range_drift(
+    tail_fraction: object,
+) -> None:
+    """尾部模板必须独立拒绝布尔、整数和越界保留比例."""
+
+    with pytest.raises(ValueError, match="精确 float"):
+        build_tail_robust_template(
+            torch.zeros(1, 1, 4, 4),
+            "tail-key",
+            "tail-model",
+            tail_fraction,
+            prg_version=KEYED_PRG_VERSION,
+        )
+
+
+@pytest.mark.quick
+def test_tail_template_requires_nchw_reference() -> None:
+    """尾部模板不得把非 NCHW Tensor 解释为正式 latent."""
+
+    with pytest.raises(ValueError, match="batch, channel, height, width"):
+        build_tail_robust_template(
+            torch.zeros(1, 4, 4),
+            "tail-key",
+            "tail-model",
+            0.20,
+            prg_version=KEYED_PRG_VERSION,
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("lf_weight", "tail_weight", "error_type"),
+    (
+        (-1.0, 2.0, ValueError),
+        (2.0, -1.0, ValueError),
+        (0, 1.0, TypeError),
+        (0.5, True, TypeError),
+    ),
+)
+def test_blind_content_score_rejects_invalid_weight_protocol(
+    lf_weight: object,
+    tail_weight: object,
+    error_type: type[Exception],
+) -> None:
+    """核心内容分数算子必须独立拒绝越界权重和类型伪装."""
+
+    observed = torch.zeros(1, 1, 4, 4)
+    template = torch.ones_like(observed)
+    with pytest.raises(error_type):
+        compute_blind_content_score(
+            observed,
+            template,
+            template,
+            lf_weight,
+            tail_weight,
+        )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value", "error_type"),
+    (
+        ("kernel_size", 5.0, TypeError),
+        ("stride", True, TypeError),
+        ("padding", 2.0, TypeError),
+        ("boundary_mode", None, TypeError),
+        ("ceil_mode", 0, TypeError),
+        ("count_include_pad", 1, TypeError),
+        ("divisor_override", False, TypeError),
+        ("kernel_size", 7, ValueError),
+        ("stride", 2, ValueError),
+        ("padding", 1, ValueError),
+        ("boundary_mode", "reflect", ValueError),
+        ("ceil_mode", True, ValueError),
+        ("count_include_pad", False, ValueError),
+        ("divisor_override", 9, TypeError),
+    ),
+)
+def test_low_frequency_config_rejects_exact_type_and_protocol_drift(
+    field_name: str,
+    invalid_value: object,
+    error_type: type[Exception],
+) -> None:
+    """七个离散字段不得接受 Python 等值伪装或正式协议漂移."""
+
+    values = {
+        "kernel_size": 5,
+        "stride": 1,
+        "padding": 2,
+        "boundary_mode": "zero_padding",
+        "ceil_mode": False,
+        "count_include_pad": True,
+        "divisor_override": None,
+    }
+    values[field_name] = invalid_value
+    with pytest.raises(error_type):
+        LowFrequencyCarrierConfig(**values)
+
+
 @pytest.mark.quick
 def test_low_frequency_template_consumes_frozen_spatial_pooling_parameters() -> None:
     """LF 必须只在 H/W 上执行显式零填充平均池化并全局归一化。"""
@@ -36,11 +190,8 @@ def test_low_frequency_template_consumes_frozen_spatial_pooling_parameters() -> 
         reference,
         "lf-key",
         "model@revision",
-        kernel_size=5,
-        stride=1,
-        padding=2,
-        boundary_mode="zero_padding",
-        count_include_pad=True,
+        FORMAL_LOW_FREQUENCY_CONFIG,
+        prg_version=KEYED_PRG_VERSION,
     )
     raw = build_keyed_gaussian_tensor(
         tuple(reference.shape),
@@ -56,27 +207,15 @@ def test_low_frequency_template_consumes_frozen_spatial_pooling_parameters() -> 
         kernel_size=5,
         stride=1,
         padding=2,
+        ceil_mode=False,
         count_include_pad=True,
+        divisor_override=None,
     )
     expected = (pooled - pooled.mean()) / (pooled - pooled.mean()).norm()
 
     assert torch.equal(template, expected)
     assert float(template.mean().item()) == pytest.approx(0.0, abs=1e-7)
     assert float(template.norm().item()) == pytest.approx(1.0, abs=1e-7)
-    with pytest.raises(ValueError, match="zero_padding"):
-        build_low_frequency_template(
-            reference,
-            "lf-key",
-            "model@revision",
-            boundary_mode="reflect",
-        )
-    with pytest.raises(ValueError, match="保持载体 Tensor 形状"):
-        build_low_frequency_template(
-            reference,
-            "lf-key",
-            "model@revision",
-            stride=2,
-        )
 
 
 @pytest.mark.quick
@@ -90,6 +229,7 @@ def test_tail_template_preserves_exact_sparse_support_without_centering() -> Non
         "tail-key",
         "model@revision",
         tail_fraction,
+        prg_version=KEYED_PRG_VERSION,
     )
     raw = build_keyed_gaussian_tensor(
         tuple(reference.shape),
@@ -131,21 +271,29 @@ def test_carrier_templates_remain_canonical_float32_for_float16_latent() -> None
         reference_float16,
         "canonical-lf-key",
         "canonical-model",
+        FORMAL_LOW_FREQUENCY_CONFIG,
+        prg_version=KEYED_PRG_VERSION,
     )
     lf_float32 = build_low_frequency_template(
         reference_float32,
         "canonical-lf-key",
         "canonical-model",
+        FORMAL_LOW_FREQUENCY_CONFIG,
+        prg_version=KEYED_PRG_VERSION,
     )
     tail_float16 = build_tail_robust_template(
         reference_float16,
         "canonical-tail-key",
         "canonical-model",
+        0.20,
+        prg_version=KEYED_PRG_VERSION,
     )[0]
     tail_float32 = build_tail_robust_template(
         reference_float32,
         "canonical-tail-key",
         "canonical-model",
+        0.20,
+        prg_version=KEYED_PRG_VERSION,
     )[0]
 
     assert lf_float16.dtype == torch.float32

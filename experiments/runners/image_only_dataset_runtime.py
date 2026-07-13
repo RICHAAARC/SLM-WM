@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, replace
 import csv
 from datetime import datetime, timezone
 import json
@@ -22,6 +22,10 @@ from experiments.protocol.prompt_sources import (
     PROMPT_SELECTION_MANIFEST_PATH,
     PROMPT_SOURCE_REGISTRY_PATH,
     audit_packaged_prompt_set_bytes,
+)
+from experiments.protocol.method_runtime_config import (
+    FORMAL_METHOD_PACKAGE_ROOT,
+    load_formal_method_runtime_config,
 )
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from experiments.protocol.attacks import default_attack_configs
@@ -75,7 +79,11 @@ from experiments.artifacts.detection_score_curves import (
 from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
-from main.methods.carrier import keyed_prg_protocol_record
+from main.methods.carrier import (
+    keyed_prg_protocol_record,
+    tail_robust_carrier_protocol_record,
+    validate_low_frequency_carrier_protocol_record,
+)
 from main.core.digest import (
     TENSOR_CONTENT_DIGEST_VERSION,
     build_stable_digest,
@@ -94,6 +102,7 @@ from main.methods.geometry import (
     qk_operator_metadata_records_digest,
     qk_operator_metadata_records_ready,
 )
+from main.methods.detection import validate_image_only_detection_digest_record
 from main.methods.update_composition import (
     QUANTIZED_COMPOSITION_EVIDENCE_VERSION,
     recompute_quantized_composition_evidence_digest,
@@ -111,6 +120,28 @@ _FORMAL_ATTENTION_ALIGNMENT_GATE = attention_alignment_gate_record(
     ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
 )
+_FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
+    FORMAL_METHOD_PACKAGE_ROOT
+)
+_FORMAL_LF_CARRIER_PROTOCOL = (
+    _FORMAL_METHOD_CONFIG.low_frequency_carrier_config.to_record()
+)
+_FORMAL_CONTENT_WEIGHT_PROTOCOLS = {
+    (
+        _FORMAL_METHOD_CONFIG.lf_detection_score_weight,
+        _FORMAL_METHOD_CONFIG.tail_robust_detection_score_weight,
+    ),
+    (1.0, 0.0),
+    (0.0, 1.0),
+}
+_FORMAL_TAIL_FRACTIONS = {_FORMAL_METHOD_CONFIG.tail_fraction, 1.0}
+_FORMAL_TAIL_CARRIER_PROTOCOLS = {
+    tail_fraction: tail_robust_carrier_protocol_record(
+        tail_fraction,
+        prg_version=_FORMAL_METHOD_CONFIG.keyed_prg_version,
+    )
+    for tail_fraction in _FORMAL_TAIL_FRACTIONS
+}
 
 
 def _formal_attention_alignment_gate_fields_ready(
@@ -139,6 +170,87 @@ def _formal_attention_alignment_gate_record_ready(
         and _formal_attention_alignment_gate_fields_ready(nested_gate)
         and _formal_attention_alignment_gate_fields_ready(record)
     )
+
+
+def formal_low_frequency_carrier_protocol_record() -> dict[str, Any]:
+    """返回由唯一方法 YAML 构造的正式 LF 载体协议记录."""
+
+    return dict(_FORMAL_LF_CARRIER_PROTOCOL)
+
+
+def _formal_content_carrier_fields_ready(record: Any) -> bool:
+    """判断完整方法记录是否绑定正式内容载体协议和检测权重."""
+
+    expected_tail_protocol = _FORMAL_TAIL_CARRIER_PROTOCOLS[
+        _FORMAL_METHOD_CONFIG.tail_fraction
+    ]
+    return bool(
+        isinstance(record, dict)
+        and record.get("lf_carrier_protocol_digest")
+        == _FORMAL_LF_CARRIER_PROTOCOL["lf_carrier_protocol_digest"]
+        and type(record.get("lf_weight")) is float
+        and record.get("lf_weight")
+        == _FORMAL_METHOD_CONFIG.lf_detection_score_weight
+        and type(record.get("tail_robust_weight")) is float
+        and record.get("tail_robust_weight")
+        == _FORMAL_METHOD_CONFIG.tail_robust_detection_score_weight
+        and type(record.get("tail_fraction")) is float
+        and record.get("tail_fraction") == _FORMAL_METHOD_CONFIG.tail_fraction
+        and record.get("tail_carrier_protocol_digest")
+        == expected_tail_protocol["tail_carrier_protocol_digest"]
+    )
+
+
+def validate_detection_content_carrier_protocol(
+    record: dict[str, Any],
+) -> dict[str, Any]:
+    """复验样本级内容分数及其正式协议摘要引用."""
+
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        raise ValueError("检测记录缺少 metadata")
+    validate_image_only_detection_digest_record(record)
+    detector_config_digest = record.get(
+        "image_only_detector_config_digest"
+    )
+    if (
+        not isinstance(detector_config_digest, str)
+        or metadata.get("image_only_detector_config_digest")
+        != detector_config_digest
+    ):
+        raise ValueError("检测记录的检测器配置摘要引用发生分叉")
+    lf_weight = record.get("lf_weight")
+    tail_weight = record.get("tail_robust_weight")
+    tail_fraction = record.get("tail_fraction")
+    expected_tail_protocol = _FORMAL_TAIL_CARRIER_PROTOCOLS.get(
+        tail_fraction
+    )
+    if (
+        record.get("lf_carrier_protocol_digest")
+        != _FORMAL_LF_CARRIER_PROTOCOL["lf_carrier_protocol_digest"]
+        or type(lf_weight) is not float
+        or type(tail_weight) is not float
+        or type(tail_fraction) is not float
+        or not math.isclose(lf_weight + tail_weight, 1.0, abs_tol=1e-12)
+        or (lf_weight, tail_weight) not in _FORMAL_CONTENT_WEIGHT_PROTOCOLS
+        or tail_fraction not in _FORMAL_TAIL_FRACTIONS
+        or expected_tail_protocol is None
+        or record.get("tail_carrier_protocol_digest")
+        != expected_tail_protocol["tail_carrier_protocol_digest"]
+    ):
+        raise ValueError("检测记录与正式内容载体摘要或权重不一致")
+    return {
+        "lf_carrier_protocol_digest": record[
+            "lf_carrier_protocol_digest"
+        ],
+        "lf_weight": lf_weight,
+        "tail_robust_weight": tail_weight,
+        "tail_fraction": tail_fraction,
+        "tail_carrier_protocol_digest": record[
+            "tail_carrier_protocol_digest"
+        ],
+        "image_only_detector_config_digest": detector_config_digest,
+    }
 
 
 def _prompt_source_snapshot_paths(
@@ -237,6 +349,12 @@ class FrozenEvidenceProtocol:
     attention_anchor_count: int
     attention_residual_threshold: float
     attention_minimum_inlier_ratio: float
+    lf_carrier_protocol_digest: str
+    tail_carrier_protocol_digest: str
+    lf_weight: float
+    tail_robust_weight: float
+    tail_fraction: float
+    image_only_detector_config_digest: str
     geometry_calibration_negative_count: int
     geometry_calibration_exceedance_count: int
     registration_calibration_negative_count: int
@@ -254,6 +372,137 @@ class FrozenEvidenceProtocol:
         """转为可写入 JSON 的字典。"""
 
         return asdict(self)
+
+
+_FROZEN_EVIDENCE_DIGEST_EXCLUDED_FIELDS = frozenset(
+    {"calibration_false_positive_rate", "threshold_digest"}
+)
+
+
+def frozen_evidence_protocol_digest_payload(
+    protocol_record: Any,
+) -> dict[str, Any]:
+    """从完整冻结协议正文构造唯一阈值摘要 payload."""
+
+    if isinstance(protocol_record, FrozenEvidenceProtocol):
+        resolved = protocol_record.to_dict()
+    elif isinstance(protocol_record, dict):
+        resolved = dict(protocol_record)
+    else:
+        raise TypeError("冻结 evidence protocol 必须为 dataclass 或 dict")
+    digest_field_names = tuple(
+        field.name
+        for field in fields(FrozenEvidenceProtocol)
+        if field.name not in _FROZEN_EVIDENCE_DIGEST_EXCLUDED_FIELDS
+    )
+    missing_fields = tuple(
+        field_name
+        for field_name in digest_field_names
+        if field_name not in resolved
+    )
+    if missing_fields:
+        raise ValueError(
+            "冻结 evidence protocol 缺少阈值摘要字段: "
+            + ",".join(missing_fields)
+        )
+    return {
+        **{
+            field_name: resolved[field_name]
+            for field_name in digest_field_names
+        },
+        "decision_scope": (
+            "content_or_same_threshold_aligned_content_rescue"
+        ),
+    }
+
+
+def validate_frozen_evidence_protocol_integrity(
+    protocol: FrozenEvidenceProtocol,
+) -> None:
+    """在应用阈值前复验冻结协议的数值、计数和自摘要完整性."""
+
+    if not isinstance(protocol, FrozenEvidenceProtocol):
+        raise TypeError("protocol 必须为 FrozenEvidenceProtocol")
+    if (
+        type(protocol.image_only_detector_config_digest) is not str
+        or len(protocol.image_only_detector_config_digest) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in protocol.image_only_detector_config_digest
+        )
+    ):
+        raise ValueError("冻结 evidence protocol 的检测器配置摘要无效")
+    finite_fields = (
+        protocol.content_threshold,
+        protocol.rescue_margin_low,
+        protocol.geometry_score_threshold,
+        protocol.registration_confidence_threshold,
+        protocol.attention_sync_score_threshold,
+        protocol.target_fpr,
+    )
+    count_fields = (
+        protocol.geometry_calibration_negative_count,
+        protocol.geometry_calibration_exceedance_count,
+        protocol.registration_calibration_negative_count,
+        protocol.registration_calibration_exceedance_count,
+        protocol.sync_calibration_negative_count,
+        protocol.sync_calibration_exceedance_count,
+        protocol.calibration_negative_count,
+        protocol.calibration_false_positive_count,
+    )
+    if (
+        any(
+            type(value) is not float or not math.isfinite(value)
+            for value in finite_fields
+        )
+        or protocol.rescue_margin_low >= 0.0
+        or not 0.0 < protocol.target_fpr < 1.0
+        or any(type(value) is not int or value < 0 for value in count_fields)
+        or protocol.calibration_negative_count <= 0
+        or protocol.calibration_false_positive_count
+        > protocol.calibration_negative_count
+        or type(protocol.geometry_protocol_calibration_ready) is not bool
+    ):
+        raise ValueError("冻结 evidence protocol 的数值或计数语义无效")
+    for negative_count, exceedance_count in (
+        (
+            protocol.geometry_calibration_negative_count,
+            protocol.geometry_calibration_exceedance_count,
+        ),
+        (
+            protocol.registration_calibration_negative_count,
+            protocol.registration_calibration_exceedance_count,
+        ),
+        (
+            protocol.sync_calibration_negative_count,
+            protocol.sync_calibration_exceedance_count,
+        ),
+    ):
+        if (
+            negative_count > protocol.calibration_negative_count
+            or exceedance_count > negative_count
+        ):
+            raise ValueError("冻结 evidence protocol 的几何计数不一致")
+    expected_false_positive_rate = (
+        protocol.calibration_false_positive_count
+        / protocol.calibration_negative_count
+    )
+    if (
+        type(protocol.calibration_false_positive_rate) is not float
+        or not math.isfinite(protocol.calibration_false_positive_rate)
+        or not math.isclose(
+            protocol.calibration_false_positive_rate,
+            expected_false_positive_rate,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+    ):
+        raise ValueError("冻结 evidence protocol 的校准假阳性率与计数不一致")
+    expected_threshold_digest = build_stable_digest(
+        frozen_evidence_protocol_digest_payload(protocol)
+    )
+    if protocol.threshold_digest != expected_threshold_digest:
+        raise ValueError("冻结 evidence protocol 的阈值摘要不能由正文重建")
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -322,9 +571,9 @@ def _decision(
     record: dict[str, Any],
     threshold: float,
     rescue_margin_low: float,
-    geometry_score_threshold: float = 0.0,
-    registration_confidence_threshold: float = 0.0,
-    attention_sync_score_threshold: float = 0.0,
+    geometry_score_threshold: float,
+    registration_confidence_threshold: float,
+    attention_sync_score_threshold: float,
 ) -> tuple[bool, bool, bool, str]:
     """用冻结阈值重算内容主判和同阈值几何救回。"""
 
@@ -334,19 +583,20 @@ def _decision(
     aligned_score = record.get("aligned_content_score")
     alignment = record.get("alignment")
     if isinstance(alignment, dict):
-        alignment_reliable = bool(
-            alignment.get(
-                "registration_geometry_reliable",
-                alignment.get("geometry_reliable", False),
-            )
-        )
+        alignment_reliable = alignment.get("geometry_reliable") is True
     else:
         alignment_reliable = False
+    metadata = record.get("metadata")
+    stable_pair_identity_ready = bool(
+        isinstance(metadata, dict)
+        and metadata.get("stable_pair_weight_identity_ready") is True
+    )
     geometry_score = record.get("attention_geometry_score")
     registration_confidence = record.get("registration_confidence")
     attention_sync_score = record.get("attention_sync_score")
     geometry_reliable = (
         alignment_reliable
+        and stable_pair_identity_ready
         and isinstance(geometry_score, (int, float))
         and math.isfinite(float(geometry_score))
         and float(geometry_score) >= geometry_score_threshold
@@ -398,8 +648,45 @@ def calibrate_complete_evidence_protocol(
         or rescue_margin_low >= 0.0
     ):
         raise ValueError("rescue_margin_low 必须为负有限数")
+    content_carrier_identities = []
     for record in records:
         validate_detection_attention_alignment_gate(record)
+        content_carrier_identities.append(
+            validate_detection_content_carrier_protocol(record)
+        )
+    first_content_carrier_identity = content_carrier_identities[0]
+    first_detector_config_digest = first_content_carrier_identity[
+        "image_only_detector_config_digest"
+    ]
+    if any(
+        identity["image_only_detector_config_digest"]
+        != first_detector_config_digest
+        for identity in content_carrier_identities[1:]
+    ):
+        raise ValueError(
+            "calibration clean negatives 混用了检测器配置身份"
+        )
+    if any(
+        any(
+            identity[field_name]
+            != first_content_carrier_identity[field_name]
+            for field_name in (
+                "lf_carrier_protocol_digest",
+                "lf_weight",
+                "tail_robust_weight",
+                "tail_fraction",
+                "tail_carrier_protocol_digest",
+            )
+        )
+        for identity in content_carrier_identities[1:]
+    ):
+        raise ValueError("calibration clean negatives 混用了内容载体协议")
+    if any(
+        record.get("metadata", {}).get("rescue_margin_low")
+        != float(rescue_margin_low)
+        for record in records
+    ):
+        raise ValueError("calibration rescue margin 与检测器配置身份不一致")
     allowed_false_positives = max(0, math.floor(target_fpr * (len(records) + 1)) - 1)
     def freeze_geometry_gate(field_name: str) -> tuple[float, int, int]:
         """从全部未删失 clean negatives 冻结单个几何门禁。"""
@@ -444,13 +731,7 @@ def calibrate_complete_evidence_protocol(
         and sync_negative_count == len(records)
         and all(
             isinstance(record.get("alignment"), dict)
-            and isinstance(
-                record["alignment"].get(
-                    "registration_geometry_reliable",
-                    record["alignment"].get("geometry_reliable"),
-                ),
-                bool,
-            )
+            and type(record["alignment"].get("geometry_reliable")) is bool
             for record in records
         )
     )
@@ -485,6 +766,22 @@ def calibrate_complete_evidence_protocol(
         "registration_confidence_threshold": registration_confidence_threshold,
         "attention_sync_score_threshold": attention_sync_score_threshold,
         **_FORMAL_ATTENTION_ALIGNMENT_GATE,
+        "lf_carrier_protocol_digest": _FORMAL_LF_CARRIER_PROTOCOL[
+            "lf_carrier_protocol_digest"
+        ],
+        "tail_carrier_protocol_digest": (
+            first_content_carrier_identity[
+                "tail_carrier_protocol_digest"
+            ]
+        ),
+        "lf_weight": first_content_carrier_identity["lf_weight"],
+        "tail_robust_weight": first_content_carrier_identity[
+            "tail_robust_weight"
+        ],
+        "tail_fraction": first_content_carrier_identity["tail_fraction"],
+        "image_only_detector_config_digest": (
+            first_detector_config_digest
+        ),
         "geometry_calibration_negative_count": geometry_negative_count,
         "geometry_calibration_exceedance_count": geometry_exceedance_count,
         "registration_calibration_negative_count": registration_negative_count,
@@ -516,6 +813,18 @@ def calibrate_complete_evidence_protocol(
                 "attention_minimum_inlier_ratio"
             ]
         ),
+        lf_carrier_protocol_digest=_FORMAL_LF_CARRIER_PROTOCOL[
+            "lf_carrier_protocol_digest"
+        ],
+        tail_carrier_protocol_digest=first_content_carrier_identity[
+            "tail_carrier_protocol_digest"
+        ],
+        lf_weight=first_content_carrier_identity["lf_weight"],
+        tail_robust_weight=first_content_carrier_identity[
+            "tail_robust_weight"
+        ],
+        tail_fraction=first_content_carrier_identity["tail_fraction"],
+        image_only_detector_config_digest=first_detector_config_digest,
         geometry_calibration_negative_count=geometry_negative_count,
         geometry_calibration_exceedance_count=geometry_exceedance_count,
         registration_calibration_negative_count=registration_negative_count,
@@ -527,7 +836,9 @@ def calibrate_complete_evidence_protocol(
         calibration_false_positive_count=selected_false_positives,
         calibration_false_positive_rate=selected_false_positives / len(records),
         target_fpr=target_fpr,
-        threshold_digest=build_stable_digest(payload),
+        threshold_digest=build_stable_digest(
+            frozen_evidence_protocol_digest_payload(payload)
+        ),
     )
 
 
@@ -537,6 +848,7 @@ def apply_frozen_evidence_protocol(
 ) -> tuple[dict[str, Any], ...]:
     """对全部 split 和攻击记录应用同一冻结协议。"""
 
+    validate_frozen_evidence_protocol_integrity(protocol)
     protocol_alignment_gate = attention_alignment_gate_record(
         protocol.attention_anchor_count,
         protocol.attention_residual_threshold,
@@ -544,12 +856,57 @@ def apply_frozen_evidence_protocol(
     )
     if protocol_alignment_gate != _FORMAL_ATTENTION_ALIGNMENT_GATE:
         raise ValueError("冻结 evidence protocol 的注意力结构门禁发生漂移")
+    if protocol.lf_carrier_protocol_digest != _FORMAL_LF_CARRIER_PROTOCOL[
+        "lf_carrier_protocol_digest"
+    ]:
+        raise ValueError("冻结 evidence protocol 的 LF 载体协议发生漂移")
+    expected_tail_protocol = _FORMAL_TAIL_CARRIER_PROTOCOLS.get(
+        protocol.tail_fraction
+    )
+    if (
+        type(protocol.lf_weight) is not float
+        or type(protocol.tail_robust_weight) is not float
+        or not 0.0 <= protocol.lf_weight <= 1.0
+        or not 0.0 <= protocol.tail_robust_weight <= 1.0
+        or not math.isclose(
+            protocol.lf_weight + protocol.tail_robust_weight,
+            1.0,
+            abs_tol=1e-12,
+        )
+        or (protocol.lf_weight, protocol.tail_robust_weight)
+        not in _FORMAL_CONTENT_WEIGHT_PROTOCOLS
+        or type(protocol.tail_fraction) is not float
+        or protocol.tail_fraction not in _FORMAL_TAIL_FRACTIONS
+        or expected_tail_protocol is None
+        or protocol.tail_carrier_protocol_digest
+        != expected_tail_protocol["tail_carrier_protocol_digest"]
+    ):
+        raise ValueError("冻结 evidence protocol 的内容检测权重发生漂移")
     resolved = []
     for record in records:
         if validate_detection_attention_alignment_gate(record) != (
             protocol_alignment_gate
         ):
             raise ValueError("检测记录与冻结注意力结构门禁不一致")
+        content_carrier_identity = (
+            validate_detection_content_carrier_protocol(record)
+        )
+        if (
+            content_carrier_identity["lf_carrier_protocol_digest"]
+            != protocol.lf_carrier_protocol_digest
+            or content_carrier_identity["lf_weight"] != protocol.lf_weight
+            or content_carrier_identity["tail_robust_weight"]
+            != protocol.tail_robust_weight
+            or content_carrier_identity["tail_fraction"]
+            != protocol.tail_fraction
+            or content_carrier_identity["tail_carrier_protocol_digest"]
+            != protocol.tail_carrier_protocol_digest
+            or content_carrier_identity[
+                "image_only_detector_config_digest"
+            ]
+            != protocol.image_only_detector_config_digest
+        ):
+            raise ValueError("检测记录与冻结载体或检测器配置身份不一致")
         positive_by_content, rescue_applied, evidence_positive, failure_reason = _decision(
             record,
             protocol.content_threshold,
@@ -572,6 +929,9 @@ def apply_frozen_evidence_protocol(
                     protocol.attention_sync_score_threshold
                 ),
                 "frozen_threshold_digest": protocol.threshold_digest,
+                "frozen_image_only_detector_config_digest": (
+                    protocol.image_only_detector_config_digest
+                ),
                 "formal_raw_content_margin": raw_margin,
                 "formal_aligned_content_margin": (
                     None if aligned_score is None else float(aligned_score) - protocol.content_threshold
@@ -661,6 +1021,53 @@ def _scientific_update_record_ready(
         """判断一个科学内容字段是否为规范 SHA-256."""
 
         return _sha256_ready(value)
+
+    expected_lf_protocol_digest = (
+        config.low_frequency_carrier_config.protocol_digest
+    )
+    tail_carrier_protocol = tail_robust_carrier_protocol_record(
+        config.tail_fraction if config.tail_truncation_enabled else 1.0,
+        prg_version=config.keyed_prg_version,
+    )
+    lf_template_shape = record.get("lf_template_shape")
+    tail_template_shape = record.get("tail_template_shape")
+    tail_element_count = record.get("tail_template_element_count")
+    tail_selected_count = record.get("tail_selected_element_count")
+    expected_tail_fraction = (
+        config.tail_fraction if config.tail_truncation_enabled else 1.0
+    )
+    if (
+        record.get("lf_carrier_protocol_digest")
+        != expected_lf_protocol_digest
+        or record.get("tail_carrier_protocol_digest")
+        != tail_carrier_protocol["tail_carrier_protocol_digest"]
+        or not sha256_ready(record.get("lf_template_content_sha256"))
+        or not sha256_ready(record.get("lf_template_digest"))
+        or not sha256_ready(record.get("tail_template_content_sha256"))
+        or not sha256_ready(record.get("tail_template_digest"))
+        or not isinstance(lf_template_shape, list)
+        or not isinstance(tail_template_shape, list)
+        or lf_template_shape != tail_template_shape
+        or len(tail_template_shape) != 4
+        or any(
+            type(value) is not int or value <= 0
+            for value in tail_template_shape
+        )
+        or type(tail_element_count) is not int
+        or tail_element_count != math.prod(tail_template_shape)
+        or type(tail_selected_count) is not int
+        or tail_selected_count
+        != math.ceil(tail_element_count * expected_tail_fraction)
+        or not finite_at_least(
+            record.get("lf_projection_energy_retention"),
+            config.minimum_projection_energy_retention,
+        )
+        or not finite_at_least(
+            record.get("tail_projection_energy_retention"),
+            config.minimum_projection_energy_retention,
+        )
+    ):
+        return False
 
     adjacent_reference_sha256 = str(
         record.get("adjacent_step_reference_latent_content_sha256", "")
@@ -2220,6 +2627,16 @@ def run_image_only_dataset_runtime(
             _FORMAL_ATTENTION_ALIGNMENT_GATE
         ),
         **_FORMAL_ATTENTION_ALIGNMENT_GATE,
+        "lf_carrier_protocol_digest": protocol.lf_carrier_protocol_digest,
+        "tail_carrier_protocol_digest": (
+            protocol.tail_carrier_protocol_digest
+        ),
+        "lf_weight": protocol.lf_weight,
+        "tail_robust_weight": protocol.tail_robust_weight,
+        "tail_fraction": protocol.tail_fraction,
+        "image_only_detector_config_digest": (
+            protocol.image_only_detector_config_digest
+        ),
         "frozen_threshold_digest": protocol.threshold_digest,
         "geometry_protocol_calibration_ready": (
             protocol.geometry_protocol_calibration_ready
@@ -2351,6 +2768,18 @@ def run_image_only_dataset_runtime(
                 _FORMAL_ATTENTION_ALIGNMENT_GATE
             ),
             **_FORMAL_ATTENTION_ALIGNMENT_GATE,
+            "lf_carrier_protocol_digest": (
+                protocol.lf_carrier_protocol_digest
+            ),
+            "tail_carrier_protocol_digest": (
+                protocol.tail_carrier_protocol_digest
+            ),
+            "lf_weight": protocol.lf_weight,
+            "tail_robust_weight": protocol.tail_robust_weight,
+            "tail_fraction": protocol.tail_fraction,
+            "image_only_detector_config_digest": (
+                protocol.image_only_detector_config_digest
+            ),
             "full_method_component_ready": summary[
                 "full_method_component_ready"
             ],
@@ -2635,9 +3064,25 @@ def package_image_only_dataset_runtime(
             bool(summary.get("generated_at")),
             summary.get("protocol_decision") == "pass",
             _formal_attention_alignment_gate_record_ready(summary),
+            _formal_content_carrier_fields_ready(summary),
+            _sha256_ready(
+                summary.get("image_only_detector_config_digest")
+            ),
             _formal_attention_alignment_gate_fields_ready(
                 frozen_protocol_record
             ),
+            _formal_content_carrier_fields_ready(
+                frozen_protocol_record
+            ),
+            _sha256_ready(
+                frozen_protocol_record.get(
+                    "image_only_detector_config_digest"
+                )
+            ),
+            frozen_protocol_record.get(
+                "image_only_detector_config_digest"
+            )
+            == summary.get("image_only_detector_config_digest"),
             frozen_protocol_record.get("threshold_digest")
             == summary.get("frozen_threshold_digest"),
             summary.get("full_method_component_ready") is True,
@@ -2674,6 +3119,18 @@ def package_image_only_dataset_runtime(
             _formal_attention_alignment_gate_record_ready(
                 manifest.get("metadata", {})
             ),
+            _formal_content_carrier_fields_ready(
+                manifest.get("metadata", {})
+            ),
+            _sha256_ready(
+                manifest.get("metadata", {}).get(
+                    "image_only_detector_config_digest"
+                )
+            ),
+            manifest.get("metadata", {}).get(
+                "image_only_detector_config_digest"
+            )
+            == summary.get("image_only_detector_config_digest"),
             _formal_attention_alignment_gate_fields_ready(
                 manifest.get("config", {}).get("method_config", {})
             ),

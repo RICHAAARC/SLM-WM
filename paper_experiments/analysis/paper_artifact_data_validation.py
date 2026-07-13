@@ -45,6 +45,7 @@ from main.core.digest import build_stable_digest
 from experiments.runners.image_only_dataset_runtime import (
     FrozenEvidenceProtocol,
     validate_detection_attention_alignment_gate,
+    validate_detection_content_carrier_protocol,
 )
 from paper_experiments.analysis.formal_record_statistics import (
     validate_frozen_evidence_protocol_record,
@@ -270,6 +271,7 @@ def _validate_raw_detection_records(
     records = _read_jsonl_records(path)
     for record in records:
         validate_detection_attention_alignment_gate(record)
+        validate_detection_content_carrier_protocol(record)
     rebuilt_tables = {
         **build_detection_score_tables(records, frozen_protocol),
         "test_detection_metrics": build_image_only_test_metric_rows(

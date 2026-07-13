@@ -65,6 +65,7 @@ from paper_experiments.runners.randomization_method_repeat_thresholds import (
     RandomizationMethodRepeatThresholdError,
     recompute_randomization_method_repeat_fixed_fpr,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 pytestmark = pytest.mark.quick
@@ -78,33 +79,12 @@ BASE_SEED = 1703
 RESCUE_MARGIN_LOW = -0.05
 AGGREGATE_PACKAGE_SHA256 = build_stable_digest({"aggregate_package": 1})
 AGGREGATE_DIGEST = build_stable_digest({"aggregate": 1})
-ATTENTION_ALIGNMENT_GATE = {
-    "attention_anchor_count": 12,
-    "attention_residual_threshold": 0.20,
-    "attention_minimum_inlier_ratio": 0.50,
-}
-
-
 def _bind_attention_alignment_gate(
     record: dict[str, Any],
 ) -> dict[str, Any]:
     """为检测夹具绑定预注册注意力配准门禁."""
 
-    gate = dict(ATTENTION_ALIGNMENT_GATE)
-    metadata = dict(record.get("metadata", {}))
-    metadata.update(gate)
-    metadata["attention_alignment_gate"] = dict(gate)
-    resolved = {**record, "metadata": metadata}
-    alignment = resolved.get("alignment")
-    if isinstance(alignment, dict):
-        alignment_metadata = dict(alignment.get("metadata", {}))
-        alignment_metadata["attention_alignment_gate"] = dict(gate)
-        resolved["alignment"] = {
-            **alignment,
-            **gate,
-            "metadata": alignment_metadata,
-        }
-    return resolved
+    return bind_formal_detection_record(record)
 
 
 def _watermark_key_seed_random(repeat: Any) -> int:

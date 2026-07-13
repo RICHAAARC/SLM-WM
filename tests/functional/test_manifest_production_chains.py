@@ -38,6 +38,7 @@ from paper_experiments.analysis.result_closure_gate import (
     _ablation_raw_record_rebuild_ready,
 )
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 from tests.helpers.scientific_execution_binding import (
     write_test_scientific_execution_binding,
 )
@@ -49,11 +50,6 @@ from tests.helpers.scientific_unit_provenance import (
 PAPER_RUN_NAME = "probe_paper"
 TARGET_FPR = 0.1
 FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock()
-ATTENTION_ALIGNMENT_GATE = {
-    "attention_anchor_count": 12,
-    "attention_residual_threshold": 0.20,
-    "attention_minimum_inlier_ratio": 0.50,
-}
 
 
 @dataclass(frozen=True)
@@ -151,20 +147,8 @@ def _detection_record(
         "attention_geometry_score": 0.0,
         "registration_confidence": 0.0,
         "attention_sync_score": 0.0,
-        "metadata": {
-            "attention_alignment_gate": dict(
-                ATTENTION_ALIGNMENT_GATE
-            ),
-            **ATTENTION_ALIGNMENT_GATE,
-        },
         "alignment": {
             "registration_geometry_reliable": False,
-            "metadata": {
-                "attention_alignment_gate": dict(
-                    ATTENTION_ALIGNMENT_GATE
-                ),
-            },
-            **ATTENTION_ALIGNMENT_GATE,
         },
     }
     if attack is not None:
@@ -179,7 +163,7 @@ def _detection_record(
                 "attack_performed": True,
             }
         )
-    return record
+    return bind_formal_detection_record(record)
 
 
 @pytest.mark.quick

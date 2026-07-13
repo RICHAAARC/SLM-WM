@@ -19,7 +19,7 @@ METHOD_CONFIG_RELATIVE_PATH = PurePosixPath("configs/model_sd35.yaml")
 REGISTRY_SCHEMA = "slm_wm_method_semantic_registry_v1"
 REGISTRY_SCOPE = "normative_traceability_without_scientific_conformance_decision"
 EXPECTED_NORMATIVE_TRACE_DIGEST = (
-    "1841a409f228e1ee4a56e10f21bea9d610e282d1accd6c195d6846b0c6b5b1b0"
+    "6dd763343d71c3fc6803c9bfad60ff6ad2159d139a75682f2b3223c67112419c"
 )
 EXPECTED_INVARIANT_IDS = (
     "constructive_local_tangent_scope",
@@ -204,8 +204,18 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
     "complete_716_feature_jacobian": (),
     "spatial_low_pass_and_amplitude_tail_carriers": _bindings(
         ("main/methods/carrier/keyed_tensor.py", "build_low_frequency_template"),
+        ("main/methods/carrier/keyed_tensor.py", "LowFrequencyCarrierConfig"),
+        (
+            "main/methods/carrier/keyed_tensor.py",
+            "validate_low_frequency_carrier_protocol_record",
+        ),
         ("main/methods/carrier/keyed_tensor.py", "build_tail_robust_template"),
+        (
+            "main/methods/carrier/keyed_tensor.py",
+            "validate_tail_robust_carrier_protocol_record",
+        ),
         ("main/methods/carrier/keyed_tensor.py", "project_canonical_template"),
+        ("main/methods/detection/image_only.py", "detect_image_only_watermark"),
     ),
     "direct_qk_four_component_relation": _bindings(
         (
@@ -268,6 +278,14 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
             "main/methods/geometry/attention_alignment.py",
             "recover_attention_affine_alignment",
         ),
+        (
+            "main/methods/geometry/attention_alignment.py",
+            "resample_attention_aligned_rgb_uint8",
+        ),
+        (
+            "main/methods/detection/image_only.py",
+            "select_image_only_alignment_candidate",
+        ),
         ("main/methods/detection/image_only.py", "detect_image_only_watermark"),
     ),
     "versioned_key_prg_reconstruction": _bindings(
@@ -301,6 +319,14 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
         (
             "main/methods/geometry/attention_alignment.py",
             "recover_attention_affine_alignment",
+        ),
+        (
+            "main/methods/geometry/attention_alignment.py",
+            "resample_attention_aligned_rgb_uint8",
+        ),
+        (
+            "main/methods/detection/image_only.py",
+            "select_image_only_alignment_candidate",
         ),
         ("main/methods/detection/image_only.py", "detect_image_only_watermark"),
     ),
@@ -358,6 +384,20 @@ EXPECTED_RUNTIME_BINDING_SYMBOLS.update(
             (
                 "experiments/runners/semantic_watermark_runtime.py",
                 "_quantized_write_jacobian_response_record",
+            ),
+        ),
+        "spatial_low_pass_and_amplitude_tail_carriers": _bindings(
+            (
+                "experiments/runners/semantic_watermark_runtime.py",
+                "run_semantic_watermark_runtime",
+            ),
+            (
+                "experiments/runners/image_only_dataset_runtime.py",
+                "validate_detection_content_carrier_protocol",
+            ),
+            (
+                "experiments/protocol/detection_key_identity.py",
+                "validate_detection_key_identity_record",
             ),
         ),
         "image_only_detection_boundary": _bindings(
@@ -573,6 +613,10 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
     "image_only_detection_boundary": (
         "tests/functional/test_real_scientific_operators.py::"
         "test_image_only_detector_interface_and_positive_content_path",
+        "tests/functional/test_attention_affine_protocol_geometry.py::"
+        "test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_image_alignment_quantizes_fractional_rgb_with_floor",
         "tests/functional/test_attack_matrix.py::"
         "test_attack_matrix_rejects_non_blind_detection_records",
         "tests/functional/test_model_source_registry.py::"
@@ -591,6 +635,10 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
     "same_threshold_geometry_rescue": (
         "tests/functional/test_real_scientific_operators.py::"
         "test_complete_evidence_calibration_includes_geometry_rescue",
+        "tests/functional/test_attention_affine_protocol_geometry.py::"
+        "test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
+        "tests/functional/test_real_scientific_operators.py::"
+        "test_image_alignment_quantizes_fractional_rgb_with_floor",
         "tests/functional/test_real_scientific_operators.py::"
         "test_frozen_protocol_recomputes_threshold_dependent_failure_reason",
         "tests/functional/test_fixed_fpr_threshold_audit.py::"

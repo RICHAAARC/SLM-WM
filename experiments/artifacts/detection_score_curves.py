@@ -131,11 +131,8 @@ def decision_equivalent_score(
     alignment = record.get("alignment")
     alignment_reliable = bool(
         _strict_boolean(
-            alignment.get(
-                "registration_geometry_reliable",
-                alignment.get("geometry_reliable", False),
-            ),
-            "alignment.registration_geometry_reliable",
+            alignment.get("geometry_reliable"),
+            "alignment.geometry_reliable",
         )
         if isinstance(alignment, Mapping)
         else False

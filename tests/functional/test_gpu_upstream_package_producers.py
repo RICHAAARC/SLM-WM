@@ -66,6 +66,7 @@ from paper_experiments.runners.closure_package_selection import (
     inspect_closure_package,
 )
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 from tests.helpers.scientific_execution_binding import (
     write_test_scientific_execution_binding,
 )
@@ -229,6 +230,20 @@ def _prepare_image_runtime(
     prompt_records = _canonical_prompt_records(root)
     paper_run = build_paper_run_config(root)
     repeat_identity = _randomization_repeat_identity(paper_run)
+    formal_detection_record = bind_formal_detection_record(
+        {"content_score": 0.0}
+    )
+    formal_detector_identity = {
+        field_name: formal_detection_record[field_name]
+        for field_name in (
+            "lf_carrier_protocol_digest",
+            "tail_carrier_protocol_digest",
+            "lf_weight",
+            "tail_robust_weight",
+            "tail_fraction",
+            "image_only_detector_config_digest",
+        )
+    }
     runtime_results = []
     scientific_unit_output_paths: list[str] = []
     for prompt_record in prompt_records:
@@ -320,6 +335,7 @@ def _prepare_image_runtime(
         directory / "frozen_evidence_protocol.json",
         {
             **ATTENTION_ALIGNMENT_GATE,
+            **formal_detector_identity,
             "threshold_digest": threshold_digest,
         },
     )
@@ -361,6 +377,7 @@ def _prepare_image_runtime(
                 ATTENTION_ALIGNMENT_GATE
             ),
             **ATTENTION_ALIGNMENT_GATE,
+            **formal_detector_identity,
             "frozen_threshold_digest": threshold_digest,
             "full_method_component_ready": True,
             "geometry_protocol_calibration_ready": True,
@@ -440,6 +457,7 @@ def _prepare_image_runtime(
                     ATTENTION_ALIGNMENT_GATE
                 ),
                 **ATTENTION_ALIGNMENT_GATE,
+                **formal_detector_identity,
                 "geometry_protocol_calibration_ready": True,
                 "scientific_content_binding_digest": (
                     scientific_content_binding_digest

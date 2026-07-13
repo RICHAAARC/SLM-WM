@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import csv
 import hashlib
 import json
@@ -18,6 +19,9 @@ from experiments.runners.image_only_dataset_runtime import (
     calibrate_complete_evidence_protocol,
 )
 from main.core.digest import build_stable_digest
+from main.methods.detection.image_only import (
+    recompute_image_only_detection_digest_payload,
+)
 from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     MAIN_THRESHOLD_SOURCE,
     audit_baseline_fixed_fpr,
@@ -25,17 +29,13 @@ from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     build_fixed_fpr_threshold_audit_report,
     build_fixed_fpr_threshold_manifest_config,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 pytestmark = pytest.mark.quick
 
 
 OBSERVATION_SOURCE_SHA256 = "a" * 64
-ATTENTION_ALIGNMENT_GATE = {
-    "attention_anchor_count": 12,
-    "attention_residual_threshold": 0.20,
-    "attention_minimum_inlier_ratio": 0.50,
-}
 
 
 def _bind_attention_alignment_gate(
@@ -43,21 +43,7 @@ def _bind_attention_alignment_gate(
 ) -> dict[str, object]:
     """为检测夹具绑定预注册注意力配准门禁."""
 
-    gate = dict(ATTENTION_ALIGNMENT_GATE)
-    metadata = dict(record.get("metadata", {}))
-    metadata.update(gate)
-    metadata["attention_alignment_gate"] = dict(gate)
-    resolved = {**record, "metadata": metadata}
-    alignment = resolved.get("alignment")
-    if isinstance(alignment, dict):
-        alignment_metadata = dict(alignment.get("metadata", {}))
-        alignment_metadata["attention_alignment_gate"] = dict(gate)
-        resolved["alignment"] = {
-            **alignment,
-            **gate,
-            "metadata": alignment_metadata,
-        }
-    return resolved
+    return bind_formal_detection_record(record)
 
 
 def _main_method_rows() -> tuple[tuple[dict[str, object], ...], dict[str, object]]:
@@ -141,6 +127,15 @@ def test_main_method_threshold_audit_recomputes_complete_rescue_protocol() -> No
     assert result["protocol_value_ready"] is True
     assert result["threshold_source"] == MAIN_THRESHOLD_SOURCE
     assert "conformal" not in result["threshold_source"]
+    detector_config_digest = protocol[
+        "image_only_detector_config_digest"
+    ]
+    assert all(
+        row["image_only_detector_config_digest"]
+        == row["frozen_image_only_detector_config_digest"]
+        == detector_config_digest
+        for row in rows
+    )
     tampered = [dict(row) for row in rows]
     tampered[0]["formal_evidence_positive"] = not bool(
         tampered[0]["formal_evidence_positive"]
@@ -173,6 +168,8 @@ def test_main_method_threshold_audit_recomputes_complete_rescue_protocol() -> No
     ("field_name", "invalid_value"),
     (
         ("attention_anchor_count", 12.0),
+        ("lf_carrier_protocol_digest", "f" * 64),
+        ("tail_carrier_protocol_digest", "f" * 64),
         ("geometry_protocol_calibration_ready", 1),
         ("unexpected_protocol_field", "forbidden"),
     ),
@@ -201,6 +198,151 @@ def test_main_method_threshold_audit_rejects_protocol_type_and_schema_drift(
     assert result["protocol_value_ready"] is False
     assert result["detection_decision_ready"] is False
     assert result["fixed_fpr_threshold_ready"] is False
+
+
+def test_calibration_rejects_mixed_low_frequency_carrier_identity() -> None:
+    """Calibration 记录不得混用不同的 LF 检测权重身份."""
+
+    rows, _protocol = _main_method_rows()
+    mixed_rows = [dict(row) for row in rows[:3]]
+    mixed_rows[1] = bind_formal_detection_record(
+        mixed_rows[1],
+        lf_weight=1.0,
+        tail_robust_weight=0.0,
+        tail_fraction=1.0,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="混用了内容载体协议|混用了检测器配置身份",
+    ):
+        calibrate_complete_evidence_protocol(
+            mixed_rows,
+            target_fpr=0.25,
+            rescue_margin_low=-0.05,
+        )
+
+
+def test_calibration_rejects_low_frequency_carrier_protocol_drift() -> None:
+    """Calibration 记录不得混入摘要漂移的 LF 载体协议."""
+
+    rows, _protocol = _main_method_rows()
+    mixed_rows = [dict(row) for row in rows[:3]]
+    drifted = dict(mixed_rows[1])
+    drifted["lf_carrier_protocol_digest"] = "f" * 64
+    drifted["detector_digest"] = build_stable_digest(
+        recompute_image_only_detection_digest_payload(drifted)
+    )
+    mixed_rows[1] = drifted
+
+    with pytest.raises(ValueError):
+        calibrate_complete_evidence_protocol(
+            mixed_rows,
+            target_fpr=0.25,
+            rescue_margin_low=-0.05,
+        )
+
+
+def test_calibration_rejects_tail_carrier_protocol_drift() -> None:
+    """Calibration 记录不得混入摘要漂移的尾部载体协议."""
+
+    rows, _protocol = _main_method_rows()
+    mixed_rows = [dict(row) for row in rows[:3]]
+    drifted = dict(mixed_rows[1])
+    drifted["tail_carrier_protocol_digest"] = "f" * 64
+    drifted["detector_digest"] = build_stable_digest(
+        recompute_image_only_detection_digest_payload(drifted)
+    )
+    mixed_rows[1] = drifted
+
+    with pytest.raises(ValueError):
+        calibrate_complete_evidence_protocol(
+            mixed_rows,
+            target_fpr=0.25,
+            rescue_margin_low=-0.05,
+        )
+
+
+def test_apply_frozen_protocol_rejects_low_frequency_record_drift() -> None:
+    """冻结协议应用时必须拒绝记录级 LF 权重漂移."""
+
+    rows, protocol_record = _main_method_rows()
+    protocol = calibrate_complete_evidence_protocol(
+        rows[:3],
+        target_fpr=0.25,
+        rescue_margin_low=-0.05,
+    )
+    assert protocol.to_dict() == protocol_record
+    drifted = bind_formal_detection_record(
+        rows[3],
+        lf_weight=1.0,
+        tail_robust_weight=0.0,
+        tail_fraction=1.0,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="冻结内容载体协议|冻结载体或检测器配置身份",
+    ):
+        apply_frozen_evidence_protocol((drifted,), protocol)
+
+
+def test_apply_rejects_test_record_with_different_detector_config() -> None:
+    """测试 split 不得混用 calibration 未冻结的检测器配置身份."""
+
+    rows, _protocol_record = _main_method_rows()
+    protocol = calibrate_complete_evidence_protocol(
+        rows[:3],
+        target_fpr=0.25,
+        rescue_margin_low=-0.05,
+    )
+    drifted_metadata = {
+        **dict(rows[3]["metadata"]),
+        "model_id": "fixture/different-detector-model",
+    }
+    drifted = bind_formal_detection_record(
+        {
+            **rows[3],
+            "metadata": drifted_metadata,
+        }
+    )
+
+    with pytest.raises(ValueError, match="检测器配置身份"):
+        apply_frozen_evidence_protocol((drifted,), protocol)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    (
+        ("content_threshold", 999.0),
+        ("threshold_digest", "f" * 64),
+        ("calibration_false_positive_rate", 0.999),
+        ("content_threshold", 1),
+        ("rescue_margin_low", -1),
+        ("geometry_score_threshold", 0),
+        ("registration_confidence_threshold", 0),
+        ("attention_sync_score_threshold", 0),
+    ),
+)
+def test_apply_frozen_protocol_rejects_protocol_integrity_drift(
+    field_name: str,
+    value: object,
+) -> None:
+    """协议应用时必须先拒绝冻结协议正文、派生率或摘要漂移."""
+
+    rows, _protocol_record = _main_method_rows()
+    protocol = calibrate_complete_evidence_protocol(
+        rows[:3],
+        target_fpr=0.25,
+        rescue_margin_low=-0.05,
+    )
+    drifted = replace(protocol, **{field_name: value})
+
+    with pytest.raises(
+        ValueError,
+        match="阈值摘要|假阳性率|数值或计数语义|检测器配置身份",
+    ):
+        apply_frozen_evidence_protocol((rows[3],), drifted)
 
 
 def test_baseline_threshold_audit_binds_recomputed_threshold_and_digest() -> None:

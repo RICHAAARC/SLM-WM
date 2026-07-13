@@ -19,13 +19,19 @@ import yaml
 from experiments.runtime.model_sources import require_registered_model_reference
 from main.core.digest import build_stable_digest
 from main.core.keyed_prg import require_supported_keyed_prg_version
+from main.methods.carrier import LowFrequencyCarrierConfig
+from main.methods.detection import ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE
 from main.methods.geometry import (
     ATTENTION_ALIGNMENT_ANCHOR_COUNT,
     ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
     ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
+    ATTENTION_IMAGE_PADDING_MODE,
+    ATTENTION_IMAGE_QUANTIZATION_PROTOCOL,
+    ATTENTION_IMAGE_RESAMPLING_MODE,
     ATTENTION_RELATION_COMPONENT_WEIGHTS,
+    FROZEN_SD35_ATTENTION_MODULE_NAMES,
     validate_attention_alignment_gate,
     validate_attention_relation_component_weights,
 )
@@ -33,7 +39,7 @@ from main.methods.geometry import (
 
 FORMAL_METHOD_CONFIG_RELATIVE_PATH = Path("configs/model_sd35.yaml")
 FORMAL_METHOD_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
-FORMAL_METHOD_CONFIG_SCHEMA = "slm_wm_formal_method_runtime_config_v2"
+FORMAL_METHOD_CONFIG_SCHEMA = "slm_wm_formal_method_runtime_config_v4"
 FORMAL_SD35_PIPELINE_CLASS_NAME = (
     "diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3."
     "StableDiffusion3Pipeline"
@@ -141,19 +147,6 @@ FORMAL_ATTENTION_GEOMETRY_RISK_CONFIG = FormalBranchRiskConfig(
     budget_gain=0.70,
 )
 
-
-def _is_exact_sd35_attention_module_name(name: str) -> bool:
-    """判断层名是否精确指向一个 SD3.5 主注意力模块."""
-
-    prefix = "transformer_blocks."
-    suffix = ".attn"
-    return (
-        name.startswith(prefix)
-        and name.endswith(suffix)
-        and name[len(prefix) : -len(suffix)].isdigit()
-    )
-
-
 @dataclass(frozen=True)
 class FormalMethodRuntimeConfig:
     """保存由 YAML 唯一确定的正式方法参数。"""
@@ -207,7 +200,11 @@ class FormalMethodRuntimeConfig:
     lf_stride: int
     lf_padding: int
     lf_boundary_mode: str
+    lf_ceil_mode: bool
     lf_count_include_pad: bool
+    lf_divisor_override: int | None
+    lf_detection_score_weight: float
+    tail_robust_detection_score_weight: float
     attention_stable_token_fraction: float
     attention_unstable_pair_weight: float
     attention_relation_component_weights: tuple[float, ...]
@@ -240,6 +237,10 @@ class FormalMethodRuntimeConfig:
     public_detection_condition_text: str
     max_attention_tokens: int
     attention_module_names: tuple[str, ...]
+    attention_alignment_layer_selection_rule: str
+    image_alignment_resampling_mode: str
+    image_alignment_padding_mode: str
+    image_alignment_quantization_protocol: str
     attention_coordinate_convention: str
     attention_grid_align_corners: bool
     diffusion_attacks_enabled: bool
@@ -367,16 +368,29 @@ class FormalMethodRuntimeConfig:
             raise ValueError(
                 "公开检测 schedule index 必须固定为首次注入后的第7步"
             )
-        if not 0.0 < self.tail_fraction <= 1.0:
-            raise ValueError("tail_fraction 必须位于 (0, 1]")
+        if type(self.tail_fraction) is not float or not 0.0 < self.tail_fraction <= 1.0:
+            raise ValueError("tail_fraction 必须为 (0, 1] 内的精确 float")
+        # 核心协议对象执行精确类型校验, 防止 5.0 或 bool 通过 Python 等值比较.
+        self.low_frequency_carrier_config
         if (
             self.lf_kernel_size != 5
             or self.lf_stride != 1
             or self.lf_padding != 2
             or self.lf_boundary_mode != "zero_padding"
+            or self.lf_ceil_mode is not False
             or self.lf_count_include_pad is not True
+            or self.lf_divisor_override is not None
         ):
             raise ValueError("正式 LF 二维平均低通核、步幅、填充或边界协议发生漂移")
+        if (
+            type(self.lf_detection_score_weight) is not float
+            or type(self.tail_robust_detection_score_weight) is not float
+            or not math.isfinite(self.lf_detection_score_weight)
+            or not math.isfinite(self.tail_robust_detection_score_weight)
+            or self.lf_detection_score_weight != 0.70
+            or self.tail_robust_detection_score_weight != 0.30
+        ):
+            raise ValueError("正式内容检测分支权重必须固定为 0.70 和 0.30")
         require_supported_keyed_prg_version(self.keyed_prg_version)
         require_supported_keyed_prg_version(
             self.public_detection_noise_prg_protocol
@@ -474,19 +488,21 @@ class FormalMethodRuntimeConfig:
             raise ValueError(
                 "maximum_handcrafted_structure_feature_relative_drift 必须位于 [0, 1]"
             )
-        if self.max_attention_tokens < 4 or len(self.attention_module_names) < 2:
+        if self.max_attention_tokens < 4:
             raise ValueError("注意力几何配置不能退化为单层或过短 token 近似")
-        if len(set(self.attention_module_names)) != len(
-            self.attention_module_names
+        if self.attention_module_names != FROZEN_SD35_ATTENTION_MODULE_NAMES:
+            raise ValueError("attention_module_names 必须等于冻结 SD3.5 层顺序")
+        if (
+            self.attention_alignment_layer_selection_rule
+            != ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE
+            or self.image_alignment_resampling_mode
+            != ATTENTION_IMAGE_RESAMPLING_MODE
+            or self.image_alignment_padding_mode
+            != ATTENTION_IMAGE_PADDING_MODE
+            or self.image_alignment_quantization_protocol
+            != ATTENTION_IMAGE_QUANTIZATION_PROTOCOL
         ):
-            raise ValueError("attention_module_names 不得包含重复层名")
-        if any(
-            not _is_exact_sd35_attention_module_name(name)
-            for name in self.attention_module_names
-        ):
-            raise ValueError(
-                "attention_module_names 必须使用精确 transformer_blocks.<index>.attn 名称"
-            )
+            raise ValueError("注意力跨层裁决或 aligned 图像重采样协议发生漂移")
         if (
             self.attention_coordinate_convention
             != ATTENTION_COORDINATE_CONVENTION
@@ -496,6 +512,20 @@ class FormalMethodRuntimeConfig:
             raise ValueError("注意力 token 与图像坐标约定必须匹配核心算子")
         if not self.diffusion_attacks_enabled:
             raise ValueError("正式方法配置必须启用真实扩散攻击协议")
+
+    @property
+    def low_frequency_carrier_config(self) -> LowFrequencyCarrierConfig:
+        """把 YAML 七字段转换为核心嵌入与检测共享的 LF 协议对象."""
+
+        return LowFrequencyCarrierConfig(
+            kernel_size=self.lf_kernel_size,
+            stride=self.lf_stride,
+            padding=self.lf_padding,
+            boundary_mode=self.lf_boundary_mode,
+            ceil_mode=self.lf_ceil_mode,
+            count_include_pad=self.lf_count_include_pad,
+            divisor_override=self.lf_divisor_override,
+        )
 
     @property
     def formal_method_config_digest(self) -> str:
@@ -566,7 +596,13 @@ class FormalMethodRuntimeConfig:
             "lf_stride": self.lf_stride,
             "lf_padding": self.lf_padding,
             "lf_boundary_mode": self.lf_boundary_mode,
+            "lf_ceil_mode": self.lf_ceil_mode,
             "lf_count_include_pad": self.lf_count_include_pad,
+            "lf_divisor_override": self.lf_divisor_override,
+            "lf_detection_score_weight": self.lf_detection_score_weight,
+            "tail_robust_detection_score_weight": (
+                self.tail_robust_detection_score_weight
+            ),
             "attention_stable_token_fraction": (
                 self.attention_stable_token_fraction
             ),
@@ -644,6 +680,18 @@ class FormalMethodRuntimeConfig:
             ),
             "max_attention_tokens": self.max_attention_tokens,
             "attention_module_names": self.attention_module_names,
+            "attention_alignment_layer_selection_rule": (
+                self.attention_alignment_layer_selection_rule
+            ),
+            "image_alignment_resampling_mode": (
+                self.image_alignment_resampling_mode
+            ),
+            "image_alignment_padding_mode": (
+                self.image_alignment_padding_mode
+            ),
+            "image_alignment_quantization_protocol": (
+                self.image_alignment_quantization_protocol
+            ),
             "attention_coordinate_convention": (
                 self.attention_coordinate_convention
             ),
@@ -825,8 +873,20 @@ def require_formal_method_environment_consistency(config: FormalMethodRuntimeCon
         "SLM_WM_LF_STRIDE": str(config.lf_stride),
         "SLM_WM_LF_PADDING": str(config.lf_padding),
         "SLM_WM_LF_BOUNDARY_MODE": config.lf_boundary_mode,
+        "SLM_WM_LF_CEIL_MODE": "1" if config.lf_ceil_mode else "0",
         "SLM_WM_LF_COUNT_INCLUDE_PAD": (
             "1" if config.lf_count_include_pad else "0"
+        ),
+        "SLM_WM_LF_DIVISOR_OVERRIDE": (
+            "none"
+            if config.lf_divisor_override is None
+            else str(config.lf_divisor_override)
+        ),
+        "SLM_WM_LF_DETECTION_SCORE_WEIGHT": str(
+            config.lf_detection_score_weight
+        ),
+        "SLM_WM_TAIL_ROBUST_DETECTION_SCORE_WEIGHT": str(
+            config.tail_robust_detection_score_weight
         ),
         "SLM_WM_ATTENTION_STABLE_TOKEN_FRACTION": str(
             config.attention_stable_token_fraction

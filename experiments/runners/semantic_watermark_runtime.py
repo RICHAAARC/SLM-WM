@@ -26,6 +26,12 @@ from experiments.protocol.formal_randomization import (
     formal_randomization_protocol_record,
     resolve_formal_randomization_repeat,
 )
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WATERMARK_KEY_ROLE,
+    REGISTERED_WRONG_KEY_ROLE,
+    build_detection_key_plan_record,
+    resolve_detection_key_material_and_identity,
+)
 from experiments.runtime.diffusion.semantic_features import (
     DifferentiableSemanticFeatureRuntime,
     load_clip_vision_model,
@@ -65,13 +71,19 @@ from main.core.digest import (
 from main.core.keyed_prg import build_keyed_gaussian_tensor
 from main.methods.carrier import (
     KEYED_PRG_VERSION,
+    LowFrequencyCarrierConfig,
     build_low_frequency_template,
     build_tail_robust_template,
     keyed_prg_protocol_record,
     project_canonical_template,
     require_supported_keyed_prg_version,
+    tail_robust_carrier_protocol_record,
 )
-from main.methods.detection import ImageOnlyDetectionConfig, detect_image_only_watermark
+from main.methods.detection import (
+    ImageOnlyDetectionConfig,
+    detect_image_only_watermark,
+    recompute_image_only_detection_digest_payload,
+)
 from main.methods.geometry import (
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
@@ -91,6 +103,7 @@ from main.methods.geometry import (
     qk_atomic_evaluation_records_ready,
     qk_operator_metadata_records_digest,
     qk_operator_metadata_records_ready,
+    resample_attention_aligned_rgb_uint8,
     select_stable_attention_tokens,
     validate_attention_alignment_gate,
     validate_attention_relation_component_weights,
@@ -243,7 +256,17 @@ class SemanticWatermarkRuntimeConfig:
     lf_stride: int = _FORMAL_METHOD_CONFIG.lf_stride
     lf_padding: int = _FORMAL_METHOD_CONFIG.lf_padding
     lf_boundary_mode: str = _FORMAL_METHOD_CONFIG.lf_boundary_mode
+    lf_ceil_mode: bool = _FORMAL_METHOD_CONFIG.lf_ceil_mode
     lf_count_include_pad: bool = _FORMAL_METHOD_CONFIG.lf_count_include_pad
+    lf_divisor_override: int | None = (
+        _FORMAL_METHOD_CONFIG.lf_divisor_override
+    )
+    lf_detection_score_weight: float = (
+        _FORMAL_METHOD_CONFIG.lf_detection_score_weight
+    )
+    tail_robust_detection_score_weight: float = (
+        _FORMAL_METHOD_CONFIG.tail_robust_detection_score_weight
+    )
     attention_stable_token_fraction: float = (
         _FORMAL_METHOD_CONFIG.attention_stable_token_fraction
     )
@@ -326,6 +349,18 @@ class SemanticWatermarkRuntimeConfig:
     max_attention_tokens: int = _FORMAL_METHOD_CONFIG.max_attention_tokens
     attention_module_names: tuple[str, ...] = (
         _FORMAL_METHOD_CONFIG.attention_module_names
+    )
+    attention_alignment_layer_selection_rule: str = (
+        _FORMAL_METHOD_CONFIG.attention_alignment_layer_selection_rule
+    )
+    image_alignment_resampling_mode: str = (
+        _FORMAL_METHOD_CONFIG.image_alignment_resampling_mode
+    )
+    image_alignment_padding_mode: str = (
+        _FORMAL_METHOD_CONFIG.image_alignment_padding_mode
+    )
+    image_alignment_quantization_protocol: str = (
+        _FORMAL_METHOD_CONFIG.image_alignment_quantization_protocol
     )
     attention_coordinate_convention: str = (
         _FORMAL_METHOD_CONFIG.attention_coordinate_convention
@@ -417,8 +452,14 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError(
                 "post-step 注入时刻必须保留相邻的前后调度时刻"
             )
-        if not 0.0 < self.tail_fraction <= 1.0:
-            raise ValueError("tail_fraction 必须位于 (0, 1]")
+        if type(self.tail_fraction) is not float or not 0.0 < self.tail_fraction <= 1.0:
+            raise ValueError("tail_fraction 必须为 (0, 1] 内的精确 float")
+        self.low_frequency_carrier_config
+        if (
+            type(self.lf_detection_score_weight) is not float
+            or type(self.tail_robust_detection_score_weight) is not float
+        ):
+            raise TypeError("正式内容检测分支权重必须为精确 float")
         require_supported_keyed_prg_version(self.keyed_prg_version)
         if not 0.0 < self.attention_stable_token_fraction <= 1.0:
             raise ValueError(
@@ -497,6 +538,20 @@ class SemanticWatermarkRuntimeConfig:
             raise ValueError("方法运行随机化身份未匹配正式重复注册表")
 
     @property
+    def low_frequency_carrier_config(self) -> LowFrequencyCarrierConfig:
+        """返回嵌入和仅图像检测共同消费的冻结 LF 协议对象."""
+
+        return LowFrequencyCarrierConfig(
+            kernel_size=self.lf_kernel_size,
+            stride=self.lf_stride,
+            padding=self.lf_padding,
+            boundary_mode=self.lf_boundary_mode,
+            ceil_mode=self.lf_ceil_mode,
+            count_include_pad=self.lf_count_include_pad,
+            divisor_override=self.lf_divisor_override,
+        )
+
+    @property
     def carrier_model_reference(self) -> str:
         """返回同时绑定仓库和精确 revision 的公开载体标识."""
 
@@ -573,6 +628,18 @@ def load_semantic_watermark_runtime_context(
     )
     runtime_versions["attention_operator_contract"] = {
         "attention_module_names": list(config.attention_module_names),
+        "attention_alignment_layer_selection_rule": (
+            config.attention_alignment_layer_selection_rule
+        ),
+        "image_alignment_resampling_mode": (
+            config.image_alignment_resampling_mode
+        ),
+        "image_alignment_padding_mode": (
+            config.image_alignment_padding_mode
+        ),
+        "image_alignment_quantization_protocol": (
+            config.image_alignment_quantization_protocol
+        ),
         "attention_coordinate_convention": (
             config.attention_coordinate_convention
         ),
@@ -639,6 +706,16 @@ def semantic_watermark_runtime_config_payload(
     payload["quantized_branch_composition_order"] = list(
         config.quantized_branch_composition_order
     )
+    payload["lf_carrier_protocol_digest"] = (
+        config.low_frequency_carrier_config.protocol_digest
+    )
+    tail_carrier_protocol = tail_robust_carrier_protocol_record(
+        config.tail_fraction if config.tail_truncation_enabled else 1.0,
+        prg_version=config.keyed_prg_version,
+    )
+    payload["tail_carrier_protocol_digest"] = tail_carrier_protocol[
+        "tail_carrier_protocol_digest"
+    ]
     payload["method_definition"] = semantic_conditioned_latent_method_definition()
     payload["method_definition_digest"] = (
         semantic_conditioned_latent_method_definition_digest()
@@ -1376,6 +1453,10 @@ def _scientific_content_binding_artifact_ready(
             full_update_records=full_records,
             carrier_only_update_records=carrier_records,
             detection_records=detection_records,
+            detection_key_plan=manifest_metadata.get(
+                "detection_key_plan",
+                {},
+            ),
             final_image_records=final_image_records,
             final_image_attention_observability=metadata.get(
                 "final_image_attention_observability"
@@ -2756,7 +2837,9 @@ def _final_image_attention_observability_record(
 class _FullLatentSpace:
     """在 Null Space 消融中提供不改变方向的完整空间投影。"""
 
-    solver_digest = "full_latent_space_ablation"
+    solver_digest = build_stable_digest(
+        {"solver_role": "full_latent_space_ablation"}
+    )
 
     @staticmethod
     def project(tensor: Any) -> Any:
@@ -2949,12 +3032,14 @@ def _build_image_only_detection_config(
     """把唯一正式运行配置完整映射为核心仅图像检测配置."""
 
     lf_weight = (
-        0.70
+        config.lf_detection_score_weight
         if config.lf_enabled and config.tail_robust_enabled
         else (1.0 if config.lf_enabled else 0.0)
     )
     return ImageOnlyDetectionConfig(
         model_id=config.carrier_model_reference,
+        attention_module_names=config.attention_module_names,
+        low_frequency_config=config.low_frequency_carrier_config,
         keyed_prg_version=config.keyed_prg_version,
         content_threshold=config.content_threshold,
         geometry_score_threshold=config.geometry_score_threshold,
@@ -2966,7 +3051,11 @@ def _build_image_only_detection_config(
         ),
         rescue_margin_low=config.rescue_margin_low,
         lf_weight=lf_weight,
-        tail_robust_weight=1.0 - lf_weight,
+        tail_robust_weight=(
+            config.tail_robust_detection_score_weight
+            if config.lf_enabled and config.tail_robust_enabled
+            else 1.0 - lf_weight
+        ),
         tail_fraction=(
             config.tail_fraction if config.tail_truncation_enabled else 1.0
         ),
@@ -3109,33 +3198,25 @@ def _bind_public_detection_noise_qk_evidence(
             "public_detection_noise_evidence_digest": noise_evidence_digest,
         }
     )
+    record["detector_digest"] = build_stable_digest(
+        recompute_image_only_detection_digest_payload(record)
+    )
 
 
 def _align_image(image: Any, alignment: Any) -> Any:
     """依据恢复的仿射参考系对待检图像执行可复现重采样。"""
 
     import torch
-    import torch.nn.functional as functional
     from PIL import Image
 
     rgb = image.convert("RGB")
     width, height = rgb.size
     pixels = torch.frombuffer(bytearray(rgb.tobytes()), dtype=torch.uint8).reshape(height, width, 3)
-    tensor = pixels.permute(2, 0, 1).unsqueeze(0).float() / 255.0
-    theta = torch.tensor(alignment.affine_transform, dtype=tensor.dtype).unsqueeze(0)
-    grid = functional.affine_grid(
-        theta,
-        tensor.shape,
-        align_corners=ATTENTION_GRID_ALIGN_CORNERS,
+    aligned = resample_attention_aligned_rgb_uint8(
+        pixels.permute(2, 0, 1).unsqueeze(0),
+        alignment.affine_transform,
     )
-    aligned = functional.grid_sample(
-        tensor,
-        grid,
-        mode="bilinear",
-        padding_mode="border",
-        align_corners=ATTENTION_GRID_ALIGN_CORNERS,
-    )
-    output = (aligned[0].permute(1, 2, 0).clamp(0.0, 1.0) * 255.0).byte().numpy()
+    output = aligned[0].permute(1, 2, 0).numpy()
     return Image.fromarray(output, mode="RGB")
 
 
@@ -3692,13 +3773,7 @@ def run_semantic_watermark_runtime(
                 latent,
                 active_injection_config.key_material,
                 active_injection_config.carrier_model_reference,
-                kernel_size=active_injection_config.lf_kernel_size,
-                stride=active_injection_config.lf_stride,
-                padding=active_injection_config.lf_padding,
-                boundary_mode=active_injection_config.lf_boundary_mode,
-                count_include_pad=(
-                    active_injection_config.lf_count_include_pad
-                ),
+                active_injection_config.low_frequency_carrier_config,
                 prg_version=active_injection_config.keyed_prg_version,
             )
             tail_template, tail_threshold, retained_fraction = build_tail_robust_template(
@@ -3706,6 +3781,14 @@ def run_semantic_watermark_runtime(
                 active_injection_config.key_material,
                 active_injection_config.carrier_model_reference,
                 active_injection_config.tail_fraction if active_injection_config.tail_truncation_enabled else 1.0,
+                prg_version=active_injection_config.keyed_prg_version,
+            )
+            tail_carrier_protocol = tail_robust_carrier_protocol_record(
+                (
+                    active_injection_config.tail_fraction
+                    if active_injection_config.tail_truncation_enabled
+                    else 1.0
+                ),
                 prg_version=active_injection_config.keyed_prg_version,
             )
             transformer_forward = _transformer_forward_function(
@@ -3916,6 +3999,9 @@ def run_semantic_watermark_runtime(
                         lf_template,
                         subspaces["lf_content"],
                         active_injection_config.minimum_projection_energy_retention,
+                        carrier_protocol_digest=(
+                            active_injection_config.low_frequency_carrier_config.protocol_digest
+                        ),
                         prg_version=active_injection_config.keyed_prg_version,
                     )
                     if active_injection_config.lf_enabled
@@ -3927,6 +4013,9 @@ def run_semantic_watermark_runtime(
                         tail_template,
                         subspaces["tail_robust"],
                         active_injection_config.minimum_projection_energy_retention,
+                        carrier_protocol_digest=tail_carrier_protocol[
+                            "tail_carrier_protocol_digest"
+                        ],
                         prg_version=active_injection_config.keyed_prg_version,
                     )
                     if active_injection_config.tail_robust_enabled
@@ -4659,13 +4748,37 @@ def run_semantic_watermark_runtime(
                 "lf_projection_energy_retention": (
                     None if lf_carrier is None else lf_carrier.projection_energy_retention
                 ),
+                "lf_carrier_protocol_digest": (
+                    active_injection_config.low_frequency_carrier_config.protocol_digest
+                ),
+                "lf_template_content_sha256": tensor_content_sha256(
+                    lf_template
+                ),
                 "lf_template_digest": (
                     "" if lf_carrier is None else lf_carrier.template_digest
                 ),
+                "lf_template_shape": [int(value) for value in lf_template.shape],
                 "tail_template_digest": (
                     ""
                     if tail_carrier is None
                     else tail_carrier.template_digest
+                ),
+                "tail_carrier_protocol_digest": tail_carrier_protocol[
+                    "tail_carrier_protocol_digest"
+                ],
+                "tail_fraction": active_injection_config.tail_fraction,
+                "tail_template_content_sha256": tensor_content_sha256(
+                    tail_template
+                ),
+                "tail_template_shape": [
+                    int(value) for value in tail_template.shape
+                ],
+                "tail_template_element_count": int(tail_template.numel()),
+                "tail_selected_element_count": int(
+                    math.ceil(
+                        tail_template.numel()
+                        * active_injection_config.tail_fraction
+                    )
                 ),
                 "tail_projection_energy_retention": (
                     None if tail_carrier is None else tail_carrier.projection_energy_retention
@@ -4841,12 +4954,33 @@ def run_semantic_watermark_runtime(
             scores.append(evaluated.aligned_content_score)
         return max(scores)
 
+    detection_key_plan = build_detection_key_plan_record(
+        config.key_material
+    )
     detections = []
-    for sample_role, image, detection_key in (
-        ("clean_negative", clean_image, config.key_material),
-        ("positive_source", watermarked_image, config.key_material),
-        ("wrong_key_negative", watermarked_image, f"{config.key_material}|wrong-key"),
+    for sample_role, image, detection_key_role in (
+        (
+            "clean_negative",
+            clean_image,
+            REGISTERED_WATERMARK_KEY_ROLE,
+        ),
+        (
+            "positive_source",
+            watermarked_image,
+            REGISTERED_WATERMARK_KEY_ROLE,
+        ),
+        (
+            "wrong_key_negative",
+            watermarked_image,
+            REGISTERED_WRONG_KEY_ROLE,
+        ),
     ):
+        detection_key, detection_key_identity = (
+            resolve_detection_key_material_and_identity(
+                config.key_material,
+                detection_key_role,
+            )
+        )
         noise_evidence_cursor = _public_detection_noise_evidence_cursor(
             attention_extractor
         )
@@ -4869,6 +5003,7 @@ def run_semantic_watermark_runtime(
         record["prompt_id"] = config.prompt_id
         record["split"] = config.split
         record["sample_role"] = sample_role
+        record.update(detection_key_identity)
         record["embedding_pair_ssim"] = float(paired_quality["ssim"])
         record.update(formal_randomization_identity)
         record["metadata"] = {
@@ -4878,6 +5013,12 @@ def run_semantic_watermark_runtime(
         }
         detections.append(record)
 
+    _, registered_detection_key_identity = (
+        resolve_detection_key_material_and_identity(
+            config.key_material,
+            REGISTERED_WATERMARK_KEY_ROLE,
+        )
+    )
     attacked_images: dict[str, Any] = {}
     attack_configs = tuple(
         attack
@@ -4919,6 +5060,7 @@ def run_semantic_watermark_runtime(
                     "prompt_id": config.prompt_id,
                     "split": config.split,
                     "sample_role": sample_role,
+                    **registered_detection_key_identity,
                     "embedding_pair_ssim": float(paired_quality["ssim"]),
                     **formal_randomization_identity,
                     "attack_id": attack_config.attack_id,
@@ -4981,6 +5123,7 @@ def run_semantic_watermark_runtime(
                         "prompt_id": config.prompt_id,
                         "split": config.split,
                         "sample_role": sample_role,
+                        **registered_detection_key_identity,
                         "embedding_pair_ssim": float(paired_quality["ssim"]),
                         **formal_randomization_identity,
                         "attack_id": attack_spec.attack_id,
@@ -5011,6 +5154,16 @@ def run_semantic_watermark_runtime(
         "public_detection_seed_random": int(_public_detection_noise_seed(config)),
         "key_material_digest_random": build_stable_digest(
             {"key_material": config.key_material}
+        ),
+        "detection_key_plan_digest_random": (
+            registered_detection_key_identity[
+                "detection_key_plan_digest_random"
+            ]
+        ),
+        "registered_wrong_key_negative_digest_random": (
+            detection_key_plan[
+                "registered_wrong_key_negative_digest_random"
+            ]
         ),
         "standard_attack_seeds_random": {
             attack.attack_id: int(config.seed + attack_index)
@@ -5118,6 +5271,9 @@ def write_semantic_watermark_runtime_outputs(
     ) = run_semantic_watermark_runtime(
         config,
         runtime_context=runtime_context,
+    )
+    detection_key_plan = build_detection_key_plan_record(
+        config.key_material
     )
     run_dir = output_dir / result.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -5312,6 +5468,7 @@ def write_semantic_watermark_runtime_outputs(
             full_update_records=persisted_update_records,
             carrier_only_update_records=persisted_carrier_records,
             detection_records=persisted_detection_records,
+            detection_key_plan=detection_key_plan,
             final_image_records=final_image_content_records,
             final_image_attention_observability=observability_record,
             final_image_preservation=resolved_metadata.get(
@@ -5389,6 +5546,7 @@ def write_semantic_watermark_runtime_outputs(
             "run_id": result.run_id,
             "protocol_decision": result.run_decision,
             "detector_input_access_mode": "image_key_public_model_only",
+            "detection_key_plan": detection_key_plan,
             "supports_paper_claim": False,
             "scientific_content_binding_schema": (
                 SCIENTIFIC_CONTENT_BINDING_SCHEMA

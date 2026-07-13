@@ -9,6 +9,7 @@ import pytest
 from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 pytestmark = pytest.mark.quick
@@ -22,7 +23,7 @@ def detection_record(
 ) -> dict[str, object]:
     """构造单条 test split 检测记录."""
 
-    return {
+    return bind_formal_detection_record({
         "split": "test",
         "sample_role": "positive_source",
         "attack_family": "clean",
@@ -33,7 +34,7 @@ def detection_record(
         "source_to_evaluated_ssim": 1.0,
         "source_to_evaluated_psnr": psnr,
         "source_to_evaluated_mse": mse,
-    }
+    })
 
 
 def test_metric_rows_preserve_exact_match_infinite_psnr_mean() -> None:

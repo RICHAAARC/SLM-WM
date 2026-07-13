@@ -49,6 +49,7 @@ from experiments.runners.semantic_watermark_runtime import (
     validate_semantic_watermark_runtime_result_provenance,
 )
 from main.core.digest import build_stable_digest
+from main.methods.carrier import tail_robust_carrier_protocol_record
 from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     FIXED_FPR_THRESHOLD_METHOD_IDS,
 )
@@ -166,6 +167,8 @@ def _validate_formal_runtime_method_config(
             "key_material_digest_random",
             "method_definition",
             "method_definition_digest",
+            "lf_carrier_protocol_digest",
+            "tail_carrier_protocol_digest",
         }
     )
     if set(config) != expected_payload_fields:
@@ -217,6 +220,15 @@ def _validate_formal_runtime_method_config(
         "registration_confidence_threshold": 0.0,
         "attention_sync_score_threshold": 0.0,
         "rescue_margin_low": FORMAL_RUNTIME_RESCUE_MARGIN_LOW,
+        "lf_carrier_protocol_digest": (
+            _FROZEN_METHOD_CONFIG.low_frequency_carrier_config.protocol_digest
+        ),
+        "tail_carrier_protocol_digest": (
+            tail_robust_carrier_protocol_record(
+                _FROZEN_METHOD_CONFIG.tail_fraction,
+                prg_version=_FROZEN_METHOD_CONFIG.keyed_prg_version,
+            )["tail_carrier_protocol_digest"]
+        ),
         "output_dir": (
             f"outputs/image_only_dataset_runtime/{paper_run_name}/runs"
         ),

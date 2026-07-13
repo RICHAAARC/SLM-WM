@@ -6,18 +6,36 @@ from typing import Any
 
 from main.core.digest import build_stable_digest
 from main.core.keyed_prg import KEYED_PRG_VERSION, keyed_prg_protocol_record
+from main.methods.carrier.keyed_tensor import (
+    LOW_FREQUENCY_BOUNDARY_MODE,
+    LOW_FREQUENCY_CARRIER_PROTOCOL_SCHEMA,
+    LOW_FREQUENCY_CEIL_MODE,
+    LOW_FREQUENCY_COUNT_INCLUDE_PAD,
+    LOW_FREQUENCY_DIVISOR_OVERRIDE,
+    LOW_FREQUENCY_KERNEL_SIZE,
+    LOW_FREQUENCY_PADDING,
+    LOW_FREQUENCY_STRIDE,
+    TAIL_ROBUST_CARRIER_PROTOCOL_SCHEMA,
+)
+from main.methods.detection.image_only import (
+    ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE,
+)
 from main.methods.geometry.attention_alignment import (
     ATTENTION_ALIGNMENT_ANCHOR_COUNT,
     ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
     ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
+    ATTENTION_IMAGE_PADDING_MODE,
+    ATTENTION_IMAGE_QUANTIZATION_PROTOCOL,
+    ATTENTION_IMAGE_RESAMPLING_MODE,
 )
 from main.methods.geometry.differentiable_attention import (
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
+    FROZEN_SD35_ATTENTION_MODULE_NAMES,
 )
 
 
-METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v6"
+METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v9"
 
 
 def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
@@ -110,11 +128,38 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             ),
         },
         "carrier_normalization": {
+            "lf_carrier_protocol_schema": (
+                LOW_FREQUENCY_CARRIER_PROTOCOL_SCHEMA
+            ),
+            "lf_kernel_size": LOW_FREQUENCY_KERNEL_SIZE,
+            "lf_stride": LOW_FREQUENCY_STRIDE,
+            "lf_padding": LOW_FREQUENCY_PADDING,
+            "lf_boundary_mode": LOW_FREQUENCY_BOUNDARY_MODE,
+            "lf_ceil_mode": LOW_FREQUENCY_CEIL_MODE,
+            "lf_count_include_pad": LOW_FREQUENCY_COUNT_INCLUDE_PAD,
+            "lf_divisor_override": LOW_FREQUENCY_DIVISOR_OVERRIDE,
+            "lf_pooling_axes": "height_width_only",
+            "lf_batch_channel_isolation": True,
             "lf_content_rule": "subtract_global_mean_then_l2_normalize",
+            "lf_normalization_scope": "global_tensor",
+            "lf_detection_score_weight": 0.70,
+            "tail_robust_detection_score_weight": 0.30,
             "tail_robust_rule": (
                 "amplitude_truncate_then_l2_normalize_without_mean_centering"
             ),
+            "tail_carrier_protocol_schema": (
+                TAIL_ROBUST_CARRIER_PROTOCOL_SCHEMA
+            ),
+            "tail_selection_rule": (
+                "descending_absolute_value_then_ascending_flat_index"
+            ),
             "tail_nonselected_coordinate_rule": "exact_zero_after_normalization",
+            "raw_aligned_template_identity_rule": (
+                "same_shape_same_key_same_protocol_exact_content_digest"
+            ),
+            "fixed_fpr_carrier_identity_rule": (
+                "lf_and_tail_protocol_digests_frozen_from_calibration"
+            ),
         },
         "attention_geometry": {
             "relation_source": "direct_to_q_to_k_sampled_image_token_subgraph",
@@ -133,6 +178,15 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             "full_joint_attention_all_tokens_optimized": False,
         },
         "image_only_alignment": {
+            "attention_module_names": list(
+                FROZEN_SD35_ATTENTION_MODULE_NAMES
+            ),
+            "cross_layer_selection_rule": (
+                ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE
+            ),
+            "cross_layer_tie_break_rule": (
+                "earlier_frozen_attention_module_name"
+            ),
             "anchor_selection_rule": (
                 "evenly_spaced_over_sampled_token_index_range"
             ),
@@ -152,6 +206,11 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             ),
             "attention_grid_align_corners": (
                 ATTENTION_GRID_ALIGN_CORNERS
+            ),
+            "image_resampling_mode": ATTENTION_IMAGE_RESAMPLING_MODE,
+            "image_padding_mode": ATTENTION_IMAGE_PADDING_MODE,
+            "image_quantization_protocol": (
+                ATTENTION_IMAGE_QUANTIZATION_PROTOCOL
             ),
             "gate_parameter_source": (
                 "preregistered_formal_method_configuration"

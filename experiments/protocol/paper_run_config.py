@@ -31,6 +31,7 @@ from experiments.protocol.prompts import PROMPT_FILES, read_prompt_file
 from experiments.protocol.prompt_sources import audit_governed_prompt_set
 from experiments.protocol.splits import build_group_split_counts
 from main.core.keyed_prg import require_supported_keyed_prg_version
+from main.methods.carrier import LowFrequencyCarrierConfig
 from main.methods.geometry import validate_attention_alignment_gate
 
 PILOT_PAPER_RUN_NAME = "pilot_paper"
@@ -127,7 +128,15 @@ DEFAULT_LF_KERNEL_SIZE = _FORMAL_METHOD_DEFAULTS.lf_kernel_size
 DEFAULT_LF_STRIDE = _FORMAL_METHOD_DEFAULTS.lf_stride
 DEFAULT_LF_PADDING = _FORMAL_METHOD_DEFAULTS.lf_padding
 DEFAULT_LF_BOUNDARY_MODE = _FORMAL_METHOD_DEFAULTS.lf_boundary_mode
+DEFAULT_LF_CEIL_MODE = _FORMAL_METHOD_DEFAULTS.lf_ceil_mode
 DEFAULT_LF_COUNT_INCLUDE_PAD = _FORMAL_METHOD_DEFAULTS.lf_count_include_pad
+DEFAULT_LF_DIVISOR_OVERRIDE = _FORMAL_METHOD_DEFAULTS.lf_divisor_override
+DEFAULT_LF_DETECTION_SCORE_WEIGHT = (
+    _FORMAL_METHOD_DEFAULTS.lf_detection_score_weight
+)
+DEFAULT_TAIL_ROBUST_DETECTION_SCORE_WEIGHT = (
+    _FORMAL_METHOD_DEFAULTS.tail_robust_detection_score_weight
+)
 DEFAULT_ATTENTION_STABLE_TOKEN_FRACTION = (
     _FORMAL_METHOD_DEFAULTS.attention_stable_token_fraction
 )
@@ -209,6 +218,18 @@ DEFAULT_PUBLIC_DETECTION_CONDITION_TEXT = (
 )
 DEFAULT_MAX_ATTENTION_TOKENS = _FORMAL_METHOD_DEFAULTS.max_attention_tokens
 DEFAULT_ATTENTION_MODULE_NAMES = _FORMAL_METHOD_DEFAULTS.attention_module_names
+DEFAULT_ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE = (
+    _FORMAL_METHOD_DEFAULTS.attention_alignment_layer_selection_rule
+)
+DEFAULT_IMAGE_ALIGNMENT_RESAMPLING_MODE = (
+    _FORMAL_METHOD_DEFAULTS.image_alignment_resampling_mode
+)
+DEFAULT_IMAGE_ALIGNMENT_PADDING_MODE = (
+    _FORMAL_METHOD_DEFAULTS.image_alignment_padding_mode
+)
+DEFAULT_IMAGE_ALIGNMENT_QUANTIZATION_PROTOCOL = (
+    _FORMAL_METHOD_DEFAULTS.image_alignment_quantization_protocol
+)
 DEFAULT_ATTENTION_COORDINATE_CONVENTION = (
     _FORMAL_METHOD_DEFAULTS.attention_coordinate_convention
 )
@@ -344,7 +365,13 @@ class PaperRunConfig:
     lf_stride: int = DEFAULT_LF_STRIDE
     lf_padding: int = DEFAULT_LF_PADDING
     lf_boundary_mode: str = DEFAULT_LF_BOUNDARY_MODE
+    lf_ceil_mode: bool = DEFAULT_LF_CEIL_MODE
     lf_count_include_pad: bool = DEFAULT_LF_COUNT_INCLUDE_PAD
+    lf_divisor_override: int | None = DEFAULT_LF_DIVISOR_OVERRIDE
+    lf_detection_score_weight: float = DEFAULT_LF_DETECTION_SCORE_WEIGHT
+    tail_robust_detection_score_weight: float = (
+        DEFAULT_TAIL_ROBUST_DETECTION_SCORE_WEIGHT
+    )
     attention_stable_token_fraction: float = (
         DEFAULT_ATTENTION_STABLE_TOKEN_FRACTION
     )
@@ -418,6 +445,16 @@ class PaperRunConfig:
     )
     max_attention_tokens: int = DEFAULT_MAX_ATTENTION_TOKENS
     attention_module_names: tuple[str, ...] = DEFAULT_ATTENTION_MODULE_NAMES
+    attention_alignment_layer_selection_rule: str = (
+        DEFAULT_ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE
+    )
+    image_alignment_resampling_mode: str = (
+        DEFAULT_IMAGE_ALIGNMENT_RESAMPLING_MODE
+    )
+    image_alignment_padding_mode: str = DEFAULT_IMAGE_ALIGNMENT_PADDING_MODE
+    image_alignment_quantization_protocol: str = (
+        DEFAULT_IMAGE_ALIGNMENT_QUANTIZATION_PROTOCOL
+    )
     attention_coordinate_convention: str = (
         DEFAULT_ATTENTION_COORDINATE_CONVENTION
     )
@@ -438,6 +475,20 @@ class PaperRunConfig:
             self.attention_residual_threshold,
             self.attention_minimum_inlier_ratio,
         )
+        LowFrequencyCarrierConfig(
+            kernel_size=self.lf_kernel_size,
+            stride=self.lf_stride,
+            padding=self.lf_padding,
+            boundary_mode=self.lf_boundary_mode,
+            ceil_mode=self.lf_ceil_mode,
+            count_include_pad=self.lf_count_include_pad,
+            divisor_override=self.lf_divisor_override,
+        )
+        if (
+            type(self.lf_detection_score_weight) is not float
+            or type(self.tail_robust_detection_score_weight) is not float
+        ):
+            raise TypeError("论文内容检测分支权重必须为精确 float")
         expected_method_settings = (
             _FORMAL_METHOD_DEFAULTS.paper_method_settings()
         )
@@ -458,8 +509,8 @@ class PaperRunConfig:
             )
         if self.jacobian_candidate_count < self.null_space_rank or self.null_space_rank <= 0:
             raise ValueError("jacobian_candidate_count 必须不小于正的 null_space_rank")
-        if not 0.0 < self.tail_fraction <= 1.0:
-            raise ValueError("tail_fraction 必须位于 (0, 1]")
+        if type(self.tail_fraction) is not float or not 0.0 < self.tail_fraction <= 1.0:
+            raise ValueError("tail_fraction 必须为 (0, 1] 内的精确 float")
         require_supported_keyed_prg_version(self.keyed_prg_version)
         if not 0.0 < self.attention_stable_token_fraction <= 1.0:
             raise ValueError(
@@ -509,6 +560,14 @@ class PaperRunConfig:
             raise ValueError("注意力几何配置不能退化为单层或过短 token 近似")
         if (
             self.attention_module_names != DEFAULT_ATTENTION_MODULE_NAMES
+            or self.attention_alignment_layer_selection_rule
+            != DEFAULT_ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE
+            or self.image_alignment_resampling_mode
+            != DEFAULT_IMAGE_ALIGNMENT_RESAMPLING_MODE
+            or self.image_alignment_padding_mode
+            != DEFAULT_IMAGE_ALIGNMENT_PADDING_MODE
+            or self.image_alignment_quantization_protocol
+            != DEFAULT_IMAGE_ALIGNMENT_QUANTIZATION_PROTOCOL
             or self.attention_coordinate_convention
             != DEFAULT_ATTENTION_COORDINATE_CONVENTION
             or self.attention_grid_align_corners

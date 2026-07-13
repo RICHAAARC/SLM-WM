@@ -30,6 +30,9 @@ from experiments.protocol.attacks import attack_config_digest, default_attack_co
 from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
 )
+from experiments.runners.image_only_dataset_runtime import (
+    formal_low_frequency_carrier_protocol_record,
+)
 from paper_experiments.analysis.paper_artifact_data_validation import (
     ABLATION_DELTA_FIELDS,
     ABLATION_METRIC_FIELDS,
@@ -41,9 +44,39 @@ from paper_experiments.analysis.paper_artifact_data_validation import (
     validate_paper_artifact_source_data,
 )
 from main.core.digest import build_stable_digest
+from main.methods.carrier import (
+    KEYED_PRG_VERSION,
+    tail_robust_carrier_protocol_record,
+)
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 TARGET_FPR = 0.1
+LF_CARRIER_PROTOCOL = formal_low_frequency_carrier_protocol_record()
+LF_CARRIER_PROTOCOL_DIGEST = str(
+    LF_CARRIER_PROTOCOL["lf_carrier_protocol_digest"]
+)
+LF_WEIGHT = 0.70
+TAIL_ROBUST_WEIGHT = 0.30
+TAIL_FRACTION = 0.20
+TAIL_CARRIER_PROTOCOL = tail_robust_carrier_protocol_record(
+    TAIL_FRACTION,
+    prg_version=KEYED_PRG_VERSION,
+)
+TAIL_CARRIER_PROTOCOL_DIGEST = str(
+    TAIL_CARRIER_PROTOCOL["tail_carrier_protocol_digest"]
+)
+_DETECTOR_CONFIG_RECORD = bind_formal_detection_record(
+    {
+        "content_score": 0.0,
+        "aligned_content_score": None,
+        "alignment": None,
+        "metadata": {"rescue_margin_low": -0.2},
+    }
+)
+DETECTOR_CONFIG_DIGEST = str(
+    _DETECTOR_CONFIG_RECORD["image_only_detector_config_digest"]
+)
 EXPECTED_FROZEN_PROTOCOL_FIELDS = {
     "content_threshold",
     "rescue_margin_low",
@@ -53,6 +86,12 @@ EXPECTED_FROZEN_PROTOCOL_FIELDS = {
     "attention_anchor_count",
     "attention_residual_threshold",
     "attention_minimum_inlier_ratio",
+    "lf_carrier_protocol_digest",
+    "lf_weight",
+    "tail_robust_weight",
+    "tail_fraction",
+    "tail_carrier_protocol_digest",
+    "image_only_detector_config_digest",
     "geometry_calibration_negative_count",
     "geometry_calibration_exceedance_count",
     "registration_calibration_negative_count",
@@ -75,6 +114,12 @@ _FROZEN_PROTOCOL_DIGEST_PAYLOAD = {
     "attention_anchor_count": 12,
     "attention_residual_threshold": 0.20,
     "attention_minimum_inlier_ratio": 0.50,
+    "lf_carrier_protocol_digest": LF_CARRIER_PROTOCOL_DIGEST,
+    "lf_weight": LF_WEIGHT,
+    "tail_robust_weight": TAIL_ROBUST_WEIGHT,
+    "tail_fraction": TAIL_FRACTION,
+    "tail_carrier_protocol_digest": TAIL_CARRIER_PROTOCOL_DIGEST,
+    "image_only_detector_config_digest": DETECTOR_CONFIG_DIGEST,
     "geometry_calibration_negative_count": 10,
     "geometry_calibration_exceedance_count": 0,
     "registration_calibration_negative_count": 10,
@@ -127,15 +172,7 @@ def _read_csv(path: Path) -> tuple[tuple[str, ...], list[dict[str, str]]]:
 def _detection_record(prompt_id: str, sample_role: str, score: float) -> dict:
     """构造与冻结协议一致的 test 连续检测记录."""
 
-    alignment_gate = {
-        field_name: FROZEN_PROTOCOL[field_name]
-        for field_name in (
-            "attention_anchor_count",
-            "attention_residual_threshold",
-            "attention_minimum_inlier_ratio",
-        )
-    }
-    return {
+    return bind_formal_detection_record({
         "run_id": f"run_{prompt_id}",
         "prompt_id": prompt_id,
         "split": "test",
@@ -151,14 +188,10 @@ def _detection_record(prompt_id: str, sample_role: str, score: float) -> dict:
         "attention_geometry_score": 0.0,
         "registration_confidence": 0.0,
         "attention_sync_score": 0.0,
-        "metadata": {
-            "attention_alignment_gate": dict(alignment_gate),
-            **alignment_gate,
-        },
         "alignment": None,
+        "metadata": {"rescue_margin_low": -0.2},
         "formal_evidence_positive": score >= 0.5,
-        "detector_digest": f"detector_{prompt_id}_{sample_role}",
-    }
+    })
 
 
 def _row(fields: set[str], **values: object) -> dict:
@@ -530,6 +563,8 @@ def test_frozen_protocol_rejects_rehashed_alignment_gate_drift(
     assert report["artifact_data_validation_ready"] is False
     assert any(
         "注意力结构门禁发生漂移" in issue
+        or "检测器配置身份" in issue
+        or "冻结检测协议字段集合无效" in issue
         for issue in report["checks"][
             "frozen_evidence_protocol_ready"
         ]["issues"]

@@ -72,6 +72,7 @@ from experiments.artifacts.dataset_level_quality_outputs import (
 from experiments.runners.image_only_dataset_runtime import (
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
+    formal_low_frequency_carrier_protocol_record,
 )
 from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
@@ -81,6 +82,10 @@ from main.methods.method_definition import (
     semantic_conditioned_latent_method_definition_digest,
 )
 from main.core.digest import build_stable_digest
+from main.methods.carrier import (
+    KEYED_PRG_VERSION,
+    tail_robust_carrier_protocol_record,
+)
 from paper_experiments.analysis.result_closure_gate import (
     ResultClosureGateInput,
     build_result_closure_gate_checks,
@@ -139,6 +144,7 @@ from paper_experiments.analysis.result_analysis_payload import (
 from tests.helpers.formal_execution_lock import (
     build_test_formal_execution_lock,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 from tests.helpers.scientific_unit_provenance import (
     build_test_scientific_unit_provenance,
 )
@@ -153,6 +159,31 @@ ATTENTION_ALIGNMENT_GATE = {
     "attention_residual_threshold": 0.20,
     "attention_minimum_inlier_ratio": 0.50,
 }
+LF_CARRIER_PROTOCOL = formal_low_frequency_carrier_protocol_record()
+LF_CARRIER_PROTOCOL_DIGEST = str(
+    LF_CARRIER_PROTOCOL["lf_carrier_protocol_digest"]
+)
+LF_WEIGHT = 0.70
+TAIL_ROBUST_WEIGHT = 0.30
+TAIL_FRACTION = 0.20
+TAIL_CARRIER_PROTOCOL = tail_robust_carrier_protocol_record(
+    TAIL_FRACTION,
+    prg_version=KEYED_PRG_VERSION,
+)
+TAIL_CARRIER_PROTOCOL_DIGEST = str(
+    TAIL_CARRIER_PROTOCOL["tail_carrier_protocol_digest"]
+)
+_DETECTOR_CONFIG_RECORD = bind_formal_detection_record(
+    {
+        "content_score": 0.0,
+        "aligned_content_score": None,
+        "alignment": None,
+        "metadata": {"rescue_margin_low": -0.2},
+    }
+)
+DETECTOR_CONFIG_DIGEST = str(
+    _DETECTOR_CONFIG_RECORD["image_only_detector_config_digest"]
+)
 _FROZEN_PROTOCOL_DIGEST_PAYLOAD = {
     "content_threshold": 0.5,
     "rescue_margin_low": -0.2,
@@ -160,6 +191,12 @@ _FROZEN_PROTOCOL_DIGEST_PAYLOAD = {
     "registration_confidence_threshold": 0.5,
     "attention_sync_score_threshold": 0.5,
     **ATTENTION_ALIGNMENT_GATE,
+    "lf_carrier_protocol_digest": LF_CARRIER_PROTOCOL_DIGEST,
+    "lf_weight": LF_WEIGHT,
+    "tail_robust_weight": TAIL_ROBUST_WEIGHT,
+    "tail_fraction": TAIL_FRACTION,
+    "tail_carrier_protocol_digest": TAIL_CARRIER_PROTOCOL_DIGEST,
+    "image_only_detector_config_digest": DETECTOR_CONFIG_DIGEST,
     "geometry_calibration_negative_count": 10,
     "geometry_calibration_exceedance_count": 0,
     "registration_calibration_negative_count": 10,
@@ -471,22 +508,19 @@ METHOD_OBSERVATION_SOURCE_PATH_MAP = {
 def _formal_detection_record(record: dict[str, object]) -> dict[str, object]:
     """为闭合测试记录补齐正式结构门禁和连续分数原子."""
 
-    return {
+    return bind_formal_detection_record({
         **record,
+        "metadata": {
+            **dict(record.get("metadata", {})),
+            "rescue_margin_low": -0.2,
+        },
         "aligned_content_score": None,
         "attention_geometry_score": 0.0,
         "registration_confidence": 0.0,
         "attention_sync_score": 0.0,
         "geometry_reliable": False,
         "alignment": None,
-        "metadata": {
-            "attention_alignment_gate": dict(
-                ATTENTION_ALIGNMENT_GATE
-            ),
-            **ATTENTION_ALIGNMENT_GATE,
-        },
-        "detector_digest": build_stable_digest(record),
-    }
+    })
 
 
 PROPOSED_OBSERVATION_RECORDS = tuple(
@@ -1589,21 +1623,7 @@ def _bind_attention_alignment_gate(
 ) -> dict[str, object]:
     """为检测夹具绑定预注册注意力配准门禁."""
 
-    gate = dict(ATTENTION_ALIGNMENT_GATE)
-    metadata = dict(record.get("metadata", {}))
-    metadata.update(gate)
-    metadata["attention_alignment_gate"] = dict(gate)
-    resolved = {**record, "metadata": metadata}
-    alignment = resolved.get("alignment")
-    if isinstance(alignment, dict):
-        alignment_metadata = dict(alignment.get("metadata", {}))
-        alignment_metadata["attention_alignment_gate"] = dict(gate)
-        resolved["alignment"] = {
-            **alignment,
-            **gate,
-            "metadata": alignment_metadata,
-        }
-    return resolved
+    return bind_formal_detection_record(record)
 
 
 def _raw_ablation_detection(
@@ -3404,6 +3424,27 @@ def test_result_closure_gate_rejects_ablation_detection_atom_drift() -> None:
     forged_record["formal_evidence_positive"] = not bool(
         forged_record["formal_evidence_positive"]
     )
+    records[0] = forged_record
+    forged = replace(bundle, ablation_detection_records=tuple(records))
+
+    checks = build_result_closure_gate_checks(forged)
+
+    rebuild_check = next(
+        row
+        for row in checks
+        if row["check_id"] == "ablation_atomic_record_rebuild_ready"
+    )
+    assert rebuild_check["check_status"] == "blocked"
+
+
+@pytest.mark.integration
+def test_result_closure_gate_rejects_ablation_low_frequency_identity_drift() -> None:
+    """消融检测原子的 LF 协议身份漂移时必须阻断证据闭合."""
+
+    bundle = ready_bundle()
+    records = list(bundle.ablation_detection_records)
+    forged_record = dict(records[0])
+    forged_record["lf_carrier_protocol_digest"] = "f" * 64
     records[0] = forged_record
     forged = replace(bundle, ablation_detection_records=tuple(records))
 

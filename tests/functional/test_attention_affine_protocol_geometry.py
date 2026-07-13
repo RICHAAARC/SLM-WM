@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
+import json
 import math
 import random
 
@@ -11,14 +13,18 @@ import torch
 
 import main.methods.geometry.attention_alignment as alignment_module
 from main.core.keyed_prg import KEYED_PRG_VERSION
+from main.methods.detection import select_image_only_alignment_candidate
 from main.methods.geometry.attention_alignment import (
+    recompute_attention_alignment_digest_payload,
     recover_attention_affine_alignment,
     validate_attention_alignment_gate,
+    validate_attention_alignment_record,
 )
 from main.methods.geometry.differentiable_attention import (
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
+    FROZEN_SD35_ATTENTION_MODULE_NAMES,
     QKAttentionRelation,
     StableAttentionTokenSelection,
     build_attention_relation_descriptor,
@@ -647,6 +653,143 @@ def test_alignment_digest_binds_every_alignment_gate_parameter() -> None:
         ]
         if gate["anchor_count"] == 12:
             assert changed.affine_transform == baseline.affine_transform
+
+
+@pytest.mark.quick
+def test_complete_alignment_record_digest_rebuild_rejects_field_mutations() -> None:
+    """完整 alignment 摘要必须绑定分数、置信度、可靠性和仿射矩阵。"""
+
+    relation, _ = _continuous_observed_attention(18.0, 0.95, 0.08, -0.05)
+    baseline = recover_attention_affine_alignment(
+        relation,
+        _KEY_MATERIAL,
+        _LAYER_NAME,
+        _TOKEN_INDICES,
+        _stable_pair_weights(relation),
+        KEYED_PRG_VERSION,
+        **_ALIGNMENT_GATE_KWARGS,
+    )
+    record = dict(baseline.__dict__)
+    rebuilt_payload = recompute_attention_alignment_digest_payload(record)
+    assert validate_attention_alignment_record(record) == rebuilt_payload
+
+    serialized_record = json.loads(json.dumps(record))
+    assert validate_attention_alignment_record(serialized_record) == (
+        rebuilt_payload
+    )
+    wrapped_record = copy.deepcopy(serialized_record)
+    wrapped_record["registration_geometry_reliable"] = wrapped_record[
+        "geometry_reliable"
+    ]
+    assert recompute_attention_alignment_digest_payload(wrapped_record) == (
+        rebuilt_payload
+    )
+    assert validate_attention_alignment_record(wrapped_record) == (
+        rebuilt_payload
+    )
+
+    mutated_wrapper = copy.deepcopy(wrapped_record)
+    mutated_wrapper["registration_geometry_reliable"] = not mutated_wrapper[
+        "registration_geometry_reliable"
+    ]
+    with pytest.raises(ValueError, match="注册可靠性与核心门禁不一致"):
+        validate_attention_alignment_record(mutated_wrapper)
+
+    mutations = []
+
+    relation_score_record = copy.deepcopy(serialized_record)
+    relation_score_record["relation_sync_score"] = (
+        relation_score_record["relation_sync_score"] - 0.01
+    )
+    mutations.append(relation_score_record)
+
+    confidence_record = copy.deepcopy(serialized_record)
+    confidence_record["registration_confidence"] = (
+        confidence_record["registration_confidence"] * 0.5
+    )
+    mutations.append(confidence_record)
+
+    reliability_record = copy.deepcopy(serialized_record)
+    reliability_record["geometry_reliable"] = not reliability_record[
+        "geometry_reliable"
+    ]
+    mutations.append(reliability_record)
+
+    affine_record = copy.deepcopy(serialized_record)
+    affine_record["affine_transform"][0][0] += 0.001
+    mutations.append(affine_record)
+
+    for mutated in mutations:
+        with pytest.raises(ValueError, match="正文与 alignment_digest 不一致"):
+            validate_attention_alignment_record(mutated)
+
+
+@pytest.mark.quick
+def test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule() -> None:
+    """跨层候选必须按冻结三指标字典序及层顺序唯一裁决."""
+
+    relation, _ = _continuous_observed_attention(18.0, 0.95, 0.08, -0.05)
+    baseline = recover_attention_affine_alignment(
+        relation,
+        _KEY_MATERIAL,
+        _LAYER_NAME,
+        _TOKEN_INDICES,
+        _stable_pair_weights(relation),
+        KEYED_PRG_VERSION,
+        **_ALIGNMENT_GATE_KWARGS,
+    )
+    first = replace(
+        baseline,
+        layer_name=FROZEN_SD35_ATTENTION_MODULE_NAMES[0],
+        registration_objective_score=0.40,
+        observation_relation_score=0.30,
+        registration_confidence=0.20,
+    )
+    tied_second = replace(
+        first,
+        layer_name=FROZEN_SD35_ATTENTION_MODULE_NAMES[1],
+    )
+
+    assert select_image_only_alignment_candidate(
+        (first, tied_second),
+        FROZEN_SD35_ATTENTION_MODULE_NAMES,
+    ) is first
+
+    confidence_winner = replace(
+        tied_second,
+        registration_confidence=0.21,
+    )
+    assert select_image_only_alignment_candidate(
+        (first, confidence_winner),
+        FROZEN_SD35_ATTENTION_MODULE_NAMES,
+    ) is confidence_winner
+
+    observation_winner = replace(
+        tied_second,
+        observation_relation_score=0.31,
+        registration_confidence=0.0,
+    )
+    assert select_image_only_alignment_candidate(
+        (first, observation_winner),
+        FROZEN_SD35_ATTENTION_MODULE_NAMES,
+    ) is observation_winner
+
+    objective_winner = replace(
+        tied_second,
+        registration_objective_score=0.41,
+        observation_relation_score=-1.0,
+        registration_confidence=0.0,
+    )
+    assert select_image_only_alignment_candidate(
+        (first, objective_winner),
+        FROZEN_SD35_ATTENTION_MODULE_NAMES,
+    ) is objective_winner
+
+    with pytest.raises(ValueError, match="冻结层顺序逐项一致"):
+        select_image_only_alignment_candidate(
+            (tied_second, first),
+            FROZEN_SD35_ATTENTION_MODULE_NAMES,
+        )
 
 
 @pytest.mark.quick

@@ -15,6 +15,7 @@ from scripts.write_attack_matrix_outputs import (
     build_attack_coverage,
     build_measured_attack_records,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 def _json_line(value: dict[str, object]) -> str:
@@ -49,7 +50,7 @@ def _write_runtime_fixture(root: Path, *, attack_prompt_count: int = 1, blind_de
         ("positive_source", watermarked_path, 0.88),
     ):
         records.append(
-            {
+            bind_formal_detection_record({
                 "run_id": "run_fixture",
                 "prompt_id": "prompt_fixture",
                 "split": "test",
@@ -61,9 +62,8 @@ def _write_runtime_fixture(root: Path, *, attack_prompt_count: int = 1, blind_de
                 "formal_evidence_positive": sample_role == "positive_source",
                 "formal_rescue_applied": False,
                 "formal_metric_status": "measured_image_only_detection",
-                "detector_digest": f"source_{sample_role}",
                 "metadata": metadata,
-            }
+            })
         )
     configs = tuple(
         config
@@ -76,7 +76,7 @@ def _write_runtime_fixture(root: Path, *, attack_prompt_count: int = 1, blind_de
             ("positive_source", watermarked_path, attacked_positive_path, 0.76),
         ):
             records.append(
-                {
+                bind_formal_detection_record({
                     "run_id": "run_fixture",
                     "prompt_id": "prompt_fixture",
                     "split": "test",
@@ -100,10 +100,9 @@ def _write_runtime_fixture(root: Path, *, attack_prompt_count: int = 1, blind_de
                     "formal_rescue_applied": False,
                     "formal_metric_status": "measured_image_only_detection",
                     "frozen_threshold_digest": "threshold_fixture",
-                    "detector_digest": f"{config.attack_id}_{sample_role}",
                     "geometry_reliable": False,
                     "metadata": metadata,
-                }
+                })
             )
     (runtime_dir / "image_only_detection_records.jsonl").write_text(
         "".join(_json_line(record) for record in records),

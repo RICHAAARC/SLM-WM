@@ -12,10 +12,22 @@ from main.core.digest import tensor_content_sha256
 from main.core.keyed_prg import KEYED_PRG_VERSION
 from main.core.normal_quantile_table import NORMAL_QUANTILE_TABLE_SHA256
 from main.methods.carrier import (
+    LowFrequencyCarrierConfig,
     build_low_frequency_template,
     build_tail_robust_template,
 )
 from main.methods.geometry.differentiable_attention import keyed_relation_signs
+
+
+FORMAL_LOW_FREQUENCY_CONFIG = LowFrequencyCarrierConfig(
+    kernel_size=5,
+    stride=1,
+    padding=2,
+    boundary_mode="zero_padding",
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+)
 
 
 @pytest.mark.integration
@@ -30,29 +42,38 @@ def test_keyed_prg_templates_are_exactly_device_independent() -> None:
         cpu_reference,
         "device-independent-key",
         "registered-model@revision",
+        FORMAL_LOW_FREQUENCY_CONFIG,
+        prg_version=KEYED_PRG_VERSION,
     )
     cuda_lf = build_low_frequency_template(
         cuda_reference,
         "device-independent-key",
         "registered-model@revision",
+        FORMAL_LOW_FREQUENCY_CONFIG,
+        prg_version=KEYED_PRG_VERSION,
     )
     cpu_tail, cpu_threshold, cpu_retained = build_tail_robust_template(
         cpu_reference,
         "device-independent-key",
         "registered-model@revision",
         0.20,
+        prg_version=KEYED_PRG_VERSION,
     )
     cuda_tail, cuda_threshold, cuda_retained = build_tail_robust_template(
         cuda_reference,
         "device-independent-key",
         "registered-model@revision",
         0.20,
+        prg_version=KEYED_PRG_VERSION,
     )
 
     assert torch.equal(cpu_lf, cuda_lf.cpu())
     assert torch.equal(cpu_tail, cuda_tail.cpu())
     assert cpu_threshold == cuda_threshold
     assert cpu_retained == cuda_retained
+    assert FORMAL_LOW_FREQUENCY_CONFIG.to_record()[
+        "lf_carrier_protocol_digest"
+    ] == FORMAL_LOW_FREQUENCY_CONFIG.protocol_digest
 
     cpu_attention = torch.zeros((8, 8), dtype=torch.float32)
     cuda_attention = cpu_attention.to("cuda")

@@ -1,0 +1,185 @@
+"""验证仅图像盲检器完整配置身份及摘要门禁。"""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from dataclasses import replace
+
+import pytest
+
+from main.core.keyed_prg import KEYED_PRG_VERSION
+from main.methods.carrier import (
+    LOW_FREQUENCY_BOUNDARY_MODE,
+    LOW_FREQUENCY_CEIL_MODE,
+    LOW_FREQUENCY_COUNT_INCLUDE_PAD,
+    LOW_FREQUENCY_DIVISOR_OVERRIDE,
+    LOW_FREQUENCY_KERNEL_SIZE,
+    LOW_FREQUENCY_PADDING,
+    LOW_FREQUENCY_STRIDE,
+    LowFrequencyCarrierConfig,
+)
+from main.methods.detection import (
+    ImageOnlyDetectionConfig,
+    detect_image_only_watermark,
+    image_only_detector_config_identity_record,
+    validate_image_only_detection_digest_record,
+)
+from main.methods.geometry import FROZEN_SD35_ATTENTION_MODULE_NAMES
+
+
+pytestmark = pytest.mark.quick
+
+
+def _config() -> ImageOnlyDetectionConfig:
+    """构造显式覆盖每个正式字段的检测器配置。"""
+
+    return ImageOnlyDetectionConfig(
+        model_id="detector-config-model",
+        attention_module_names=FROZEN_SD35_ATTENTION_MODULE_NAMES,
+        content_threshold=0.10,
+        geometry_score_threshold=0.20,
+        attention_anchor_count=12,
+        attention_residual_threshold=0.20,
+        attention_minimum_inlier_ratio=0.50,
+        low_frequency_config=LowFrequencyCarrierConfig(
+            kernel_size=LOW_FREQUENCY_KERNEL_SIZE,
+            stride=LOW_FREQUENCY_STRIDE,
+            padding=LOW_FREQUENCY_PADDING,
+            boundary_mode=LOW_FREQUENCY_BOUNDARY_MODE,
+            ceil_mode=LOW_FREQUENCY_CEIL_MODE,
+            count_include_pad=LOW_FREQUENCY_COUNT_INCLUDE_PAD,
+            divisor_override=LOW_FREQUENCY_DIVISOR_OVERRIDE,
+        ),
+        lf_weight=0.70,
+        tail_robust_weight=0.30,
+        tail_fraction=0.20,
+        keyed_prg_version=KEYED_PRG_VERSION,
+        registration_confidence_threshold=0.30,
+        attention_sync_score_threshold=0.40,
+        rescue_margin_low=-0.05,
+        attention_stable_token_fraction=0.50,
+        attention_unstable_pair_weight=0.25,
+        attention_relation_component_weights=(0.25, 0.25, 0.25, 0.25),
+    )
+
+
+@pytest.mark.parametrize(
+    ("changes"),
+    (
+        {"model_id": "detector-config-model-2"},
+        {"content_threshold": 0.11},
+        {"geometry_score_threshold": 0.21},
+        {"attention_anchor_count": 13},
+        {"attention_residual_threshold": 0.21},
+        {"attention_minimum_inlier_ratio": 0.51},
+        {"lf_weight": 0.60, "tail_robust_weight": 0.40},
+        {"tail_fraction": 0.21},
+        {"registration_confidence_threshold": 0.31},
+        {"attention_sync_score_threshold": 0.41},
+        {"rescue_margin_low": -0.06},
+        {"attention_stable_token_fraction": 0.51},
+        {"attention_unstable_pair_weight": 0.26},
+        {
+            "attention_relation_component_weights": (
+                1.0 / 3.0,
+                0.0,
+                1.0 / 3.0,
+                1.0 / 3.0,
+            )
+        },
+    ),
+)
+def test_detector_config_digest_binds_every_runtime_parameter(
+    changes: dict[str, object],
+) -> None:
+    """任一有效运行参数变化都必须产生不同的配置摘要。"""
+
+    baseline = image_only_detector_config_identity_record(
+        _config(),
+        attention_geometry_enabled=True,
+        image_alignment_enabled=True,
+    )
+    changed = image_only_detector_config_identity_record(
+        replace(_config(), **changes),
+        attention_geometry_enabled=True,
+        image_alignment_enabled=True,
+    )
+
+    assert changed["image_only_detector_config_digest"] != baseline[
+        "image_only_detector_config_digest"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("attention_geometry_enabled", "image_alignment_enabled"),
+    ((False, True), (True, False), (False, False)),
+)
+def test_detector_config_digest_binds_mechanism_switches(
+    attention_geometry_enabled: bool,
+    image_alignment_enabled: bool,
+) -> None:
+    """消融机制开关必须属于检测器身份而不是外部说明。"""
+
+    baseline = image_only_detector_config_identity_record(
+        _config(),
+        attention_geometry_enabled=True,
+        image_alignment_enabled=True,
+    )
+    changed = image_only_detector_config_identity_record(
+        _config(),
+        attention_geometry_enabled=attention_geometry_enabled,
+        image_alignment_enabled=image_alignment_enabled,
+    )
+
+    assert changed["image_only_detector_config_digest"] != baseline[
+        "image_only_detector_config_digest"
+    ]
+
+
+def test_detection_record_rejects_stale_detector_config_identity() -> None:
+    """检测正文改变后不得沿用旧配置身份并伪造新的外层摘要。"""
+
+    torch = pytest.importorskip("torch")
+    image = torch.zeros(1, 2, 8, 8)
+    record = detect_image_only_watermark(
+        image=image,
+        key_material="detector-config-key",
+        config=_config(),
+        image_latent_encoder=lambda value: value,
+    ).to_record()
+    validate_image_only_detection_digest_record(record)
+
+    drifted = deepcopy(record)
+    drifted["metadata"]["content_threshold"] = 0.12
+    with pytest.raises(ValueError, match="margin|最终判定|detector digest"):
+        validate_image_only_detection_digest_record(drifted)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    (
+        ("attention_residual_threshold", 1),
+        ("attention_minimum_inlier_ratio", 1),
+        ("attention_relation_component_weights", [0.25] * 4),
+    ),
+)
+def test_detector_config_rejects_implicit_numeric_or_container_types(
+    field_name: str,
+    invalid_value: object,
+) -> None:
+    """正式配置拒绝会掩盖序列化漂移的隐式类型转换。"""
+
+    with pytest.raises(ValueError, match="精确 float"):
+        replace(_config(), **{field_name: invalid_value})
+
+
+def test_detector_config_rejects_attention_layer_order_drift() -> None:
+    """盲检配置不得交换或替换冻结的 SD3.5 注意力层顺序."""
+
+    with pytest.raises(ValueError, match="冻结 SD3.5 层顺序"):
+        replace(
+            _config(),
+            attention_module_names=tuple(
+                reversed(FROZEN_SD35_ATTENTION_MODULE_NAMES)
+            ),
+        )

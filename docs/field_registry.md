@@ -561,11 +561,51 @@ Notebook 与 repository module 的跨边界数据
 | null_space_numerical_epsilon | protocol | none | true | false | false | Null Space 数值求解中仅用于稳定除法和退化判断的 epsilon。 |
 | maximum_qr_condition_number | protocol | none | true | false | false | QR 参考求解允许的最大条件数。 |
 | qr_reference_solve_protocol | protocol | none | true | false | false | Null Space 基底 QR 参考求解及复验使用的冻结协议。 |
-| lf_kernel_size | method | none | true | false | false | LF 平均池化算子的冻结核尺寸。 |
-| lf_stride | method | none | true | false | false | LF 平均池化算子的冻结步幅。 |
-| lf_padding | method | none | true | false | false | LF 平均池化算子的冻结填充宽度。 |
-| lf_boundary_mode | protocol | none | true | false | false | LF 平均池化边界采用的冻结处理模式。 |
-| lf_count_include_pad | protocol | none | true | false | false | LF 平均池化计算均值时是否计入填充值。 |
+| lf_kernel_size | method | none | true | false | false | LF 平均池化算子的冻结核尺寸, 正式值为5。 |
+| lf_stride | method | none | true | false | false | LF 平均池化算子的冻结步幅, 正式值为1。 |
+| lf_padding | method | none | true | false | false | LF 平均池化算子的冻结填充宽度, 正式值为2。 |
+| lf_boundary_mode | protocol | none | true | false | false | LF 平均池化边界采用冻结的 `zero_padding` 模式。 |
+| lf_ceil_mode | protocol | none | true | false | false | LF 平均池化是否采用向上取整输出尺寸, 正式值为 false。 |
+| lf_count_include_pad | protocol | none | true | false | false | LF 平均池化计算均值时是否计入填充值, 正式值为 true。 |
+| lf_divisor_override | protocol | none | true | false | false | LF 平均池化是否覆盖默认除数, 正式值为 null。 |
+| lf_detection_score_weight | method | none | true | false | false | 完整方法检测分数中 LF 分支的冻结权重0.70。 |
+| tail_robust_detection_score_weight | method | none | true | false | false | 完整方法检测分数中尾部鲁棒分支的冻结权重0.30。 |
+| lf_carrier_protocol_schema | protocol | none | true | false | false | LF 二维平均低通协议记录的版本化 schema。 |
+| lf_pooling_axes | protocol | none | true | false | false | LF 平均池化只允许作用于 height/width 轴。 |
+| lf_batch_channel_isolation | protocol | none | true | false | false | LF 平均池化必须保持 batch 和 channel 间数值隔离。 |
+| lf_normalization_scope | protocol | none | true | false | false | LF 模板去均值和 L2 归一化采用的全 Tensor 作用域。 |
+| lf_carrier_protocol_digest | provenance | none | true | true | false | LF 载体协议正文的稳定 SHA-256 摘要。 |
+| lf_template_content_sha256 | provenance | none | true | true | false | 仅图像检测或注入使用的 LF 规范模板 Tensor 内容摘要。 |
+| template_digest | provenance | none | true | true | false | 载体构造时由内部规范正文计算的模板身份 SHA-256, 正式记录不重复保存该内部正文。 |
+| template_shape | provenance | none | true | true | false | 固定载体规范模板的 NCHW 形状, 用于重建模板投影身份和内容摘要边界。 |
+| canonical_template_content_sha256 | provenance | none | true | true | false | 投影前固定载体规范模板 Tensor 内容的 SHA-256。 |
+| embedded_direction_content_sha256 | provenance | none | true | true | false | 固定载体规范模板投影到语义条件 Jacobian Null Space 后所得方向 Tensor 内容的 SHA-256。 |
+| carrier_protocol_digest | provenance | none | true | true | false | 单个载体模板身份绑定的构造协议摘要。 |
+| content_carrier_identity | provenance | none | true | true | false | 科学内容绑定中汇总 LF 与尾部载体协议、模板摘要、分数权重和对齐身份的规范对象。 |
+| content_carrier_cross_path_identity | provenance | none | true | true | false | 将每个活动内容分支在完整注入、载体反事实与注册密钥检测中的模板摘要交叉绑定, 并单独登记唯一且不同的预注册 wrong-key 模板摘要。 |
+| template_content_sha256 | provenance | none | true | true | false | 单个活动内容分支在跨路径载体身份记录中的规范模板 Tensor 内容摘要。 |
+| registered_template_content_sha256 | provenance | none | true | true | false | 注册密钥检测路径与嵌入路径一致的规范模板 Tensor 内容摘要。 |
+| wrong_key_template_content_sha256 | provenance | none | true | true | false | 预注册错误密钥检测路径中必须区别于注册密钥的规范模板 Tensor 内容摘要。 |
+| tail_carrier_protocol_schema | protocol | none | true | false | false | 高斯幅值尾部载体协议的版本化 schema。 |
+| tail_carrier_protocol_digest | provenance | none | true | true | false | 高斯幅值尾部载体协议正文的稳定 SHA-256 摘要。 |
+| tail_selection_rule | method | none | true | false | false | 尾部载体按绝对幅值降序和展平索引升序执行的冻结选择规则。 |
+| tail_template_content_sha256 | provenance | none | true | true | false | 高斯幅值尾部规范模板 Tensor 的内容摘要, 注入端与仅图像检测端均绑定该叶子身份。 |
+| tail_template_shape | provenance | none | true | true | false | 仅图像检测时实际构造的高斯幅值尾部模板 NCHW 形状。 |
+| tail_template_element_count | provenance | none | true | true | false | 由尾部模板形状乘积精确重建的元素总数。 |
+| tail_selected_element_count | provenance | none | true | true | false | 按 `ceil(tail_template_element_count * tail_fraction)` 重建的非零保留元素数。 |
+| tail_retained_fraction | metric | none | true | true | false | 尾部模板实际保留元素数除以元素总数的精确比例。 |
+| lf_weight | method | none | true | true | false | 当前检测变体实际使用的 LF 内容分数权重。 |
+| tail_robust_weight | method | none | true | true | false | 当前检测变体实际使用的尾部鲁棒内容分数权重。 |
+| aligned_lf_score | metric | none | false | true | false | 图像配准后重新编码 latent 的 LF 相关分数。 |
+| aligned_tail_robust_score | metric | none | false | true | false | 图像配准后重新编码 latent 的尾部鲁棒相关分数。 |
+| aligned_tail_threshold | metric | none | false | true | false | 对齐图像尾部模板入选集合的最小绝对幅值, 必须与原图冻结模板统计相同。 |
+| aligned_tail_retained_fraction | metric | none | false | true | false | 对齐图像尾部模板的实际保留比例, 必须与原图冻结模板统计相同。 |
+| image_only_detector_config_schema | protocol | none | true | true | false | 仅图像检测器完整配置身份正文采用的版本化 schema。 |
+| image_only_detector_config_digest | provenance | none | true | true | false | 由冻结检测器配置正文生成, 用于拒绝 calibration/test 配置错配的 SHA-256。 |
+| attention_alignment_layer_selection_rule | method | none | true | true | false | 两个冻结层候选按注册目标、观测关系分、注册置信度及冻结层顺序执行的唯一字典序裁决协议。 |
+| image_alignment_resampling_mode | method | none | true | true | false | aligned 图像恢复参考系使用的 bilinear 采样模式。 |
+| image_alignment_padding_mode | method | none | true | true | false | aligned 图像越界坐标使用的 border 边界复制模式。 |
+| image_alignment_quantization_protocol | method | none | true | true | false | 连续 aligned RGB 按 clamp、乘255和 floor 转为 RGB uint8 的冻结协议。 |
 | attention_backtracking_factor | method | none | true | false | false | 注意力几何更新单调回溯时的冻结缩放因子。 |
 | attention_backtracking_maximum_steps | method | none | true | false | false | 注意力几何更新允许执行的最大回溯次数。 |
 | quantized_branch_composition_protocol | protocol | none | true | false | false | 三分支量化写回前后执行组合与复验的冻结协议。 |
@@ -2325,6 +2365,14 @@ Notebook 与 repository module 的跨边界数据
 | watermark_key_index | protocol | none | true | false | false | 当前交叉重复使用的水印密钥索引。 |
 | watermark_key_seed_random | random | _random | true | false | false | 从统一根密钥和水印密钥索引派生、供各方法构造水印随机材料的整数身份。 |
 | watermark_key_material_digest_random | random | _random | true | false | false | 当前重复的主方法密钥材料不可逆摘要, 用于证明跨路径密钥身份一致。 |
+| detection_key_role | protocol | none | true | true | false | 单条仅图像检测使用注册水印密钥或预注册 wrong-key 对照的角色标识。 |
+| detection_key_material_digest_random | random | _digest_random | true | true | false | 单条检测实际使用的密钥材料不可逆摘要。 |
+| detection_key_plan | protocol | none | true | true | false | 只在顶层运行身份保存一次的版本化密钥计划正文, 包含注册水印密钥与 domain-separated wrong-key 两个角色摘要。 |
+| detection_key_plan_schema | protocol | none | true | true | false | 检测密钥计划的版本化 schema。 |
+| detection_key_plan_protocol | protocol | none | true | true | false | 注册密钥和 SHA-256 domain-separated wrong-key 的冻结派生协议。 |
+| registered_watermark_key_digest_random | random | _digest_random | true | true | false | 检测密钥计划中注册水印密钥材料的不可逆摘要。 |
+| registered_wrong_key_negative_digest_random | random | _digest_random | true | true | false | 检测密钥计划中预注册 wrong-key 材料的不可逆摘要。 |
+| detection_key_plan_digest_random | random | _digest_random | true | true | false | 排除自摘要字段后的检测密钥计划稳定摘要。 |
 | formal_randomization_identity_digest_random | random | _random | true | false | false | 单个 Prompt 的重复、生成 seed 与密钥身份对象稳定摘要。 |
 | formal_randomization_identity | provenance | none | true | false | false | 单个 Prompt 的协议身份、随机身份和基础 latent 内容身份合并记录。 |
 | base_latent_distribution | protocol | none | true | false | false | 主方法与正式 baseline 共同基础 latent 的冻结概率分布。 |
@@ -3139,7 +3187,7 @@ Notebook 与 repository module 的跨边界数据
 | gpu_atomic_roles | protocol | none | true | false | false | 真实 SD3.5 CUDA 运行必须物化的科学原子角色集合。 |
 | gpu_observation_requirement | protocol | none | true | false | false | 单个不变量只能由真实 GPU 观察完成的验证职责。 |
 | claim_boundary | governance | none | true | false | false | 单个不变量允许支持的最强论文解释及禁止外推边界。 |
-| formal_method_config_schema | protocol | none | true | true | false | 完整方法运行配置规范 payload 的 schema 身份, 当前固定为 slm_wm_formal_method_runtime_config_v2。 |
+| formal_method_config_schema | protocol | none | true | true | false | 完整方法运行配置规范 payload 的 schema 身份, 当前固定为 slm_wm_formal_method_runtime_config_v4。 |
 | formal_method_config_digest | provenance | none | true | true | false | `configs/model_sd35.yaml` 经完整解析和规范化后的稳定方法配置摘要, 包含预注册注意力配准三项结构常量。 |
 | sd35_operator_identity | provenance | none | true | true | false | 实际加载 SD3.5 pipeline 的组件类、VAE 常量和参数 dtype 联合身份记录。 |
 | component_class_names | provenance | none | true | true | false | 实际加载 pipeline、VAE、Transformer 与 scheduler 的完整 Python 类名映射。 |

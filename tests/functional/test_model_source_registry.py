@@ -29,6 +29,7 @@ from experiments.runtime.model_sources import (
     require_registered_model_reference,
 )
 from experiments.runners import image_only_dataset_workload
+from main.methods.carrier import LowFrequencyCarrierConfig
 
 
 @pytest.mark.quick
@@ -189,8 +190,12 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         method_config.lf_stride,
         method_config.lf_padding,
         method_config.lf_boundary_mode,
+        method_config.lf_ceil_mode,
         method_config.lf_count_include_pad,
-    ) == (5, 1, 2, "zero_padding", True)
+        method_config.lf_divisor_override,
+        method_config.lf_detection_score_weight,
+        method_config.tail_robust_detection_score_weight,
+    ) == (5, 1, 2, "zero_padding", False, True, None, 0.70, 0.30)
     assert (
         method_config.quantized_branch_composition_protocol,
         method_config.quantized_branch_composition_order,
@@ -308,6 +313,17 @@ def test_paper_method_settings_include_frozen_risk_and_write_protocols() -> None
     assert settings["attention_anchor_count"] == 12
     assert settings["attention_residual_threshold"] == 0.20
     assert settings["attention_minimum_inlier_ratio"] == 0.50
+    assert (
+        settings["lf_kernel_size"],
+        settings["lf_stride"],
+        settings["lf_padding"],
+        settings["lf_boundary_mode"],
+        settings["lf_ceil_mode"],
+        settings["lf_count_include_pad"],
+        settings["lf_divisor_override"],
+    ) == (5, 1, 2, "zero_padding", False, True, None)
+    assert settings["lf_detection_score_weight"] == 0.70
+    assert settings["tail_robust_detection_score_weight"] == 0.30
 
 
 @pytest.mark.quick
@@ -338,6 +354,81 @@ def test_attention_alignment_gate_is_frozen_in_formal_config_and_digest() -> Non
         changed_payload = deepcopy(payload)
         changed_payload["formal_method_config"][field_name] = changed_value
         assert independent_digest(changed_payload) != baseline_digest
+
+
+@pytest.mark.quick
+def test_low_frequency_protocol_is_frozen_in_formal_config_and_digest() -> None:
+    """正式配置摘要必须逐字段绑定 LF 离散协议和内容权重."""
+
+    config = load_formal_method_runtime_config(".")
+    payload = formal_method_config_payload(config)
+    baseline_digest = hashlib.sha256(
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    assert baseline_digest == formal_method_config_digest(config)
+    for field_name, changed_value in (
+        ("lf_kernel_size", 7),
+        ("lf_stride", 2),
+        ("lf_padding", 1),
+        ("lf_boundary_mode", "reflect"),
+        ("lf_ceil_mode", True),
+        ("lf_count_include_pad", False),
+        ("lf_divisor_override", 9),
+        ("lf_detection_score_weight", 0.69),
+        ("tail_robust_detection_score_weight", 0.31),
+    ):
+        changed_payload = deepcopy(payload)
+        changed_payload["formal_method_config"][field_name] = changed_value
+        changed_digest = hashlib.sha256(
+            json.dumps(
+                changed_payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        assert changed_digest != baseline_digest
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("source_line", "changed_line"),
+    (
+        ("lf_kernel_size: 5", "lf_kernel_size: 7"),
+        ("lf_stride: 1", "lf_stride: 2"),
+        ("lf_padding: 2", "lf_padding: 1"),
+        ("lf_boundary_mode: zero_padding", "lf_boundary_mode: reflect"),
+        ("lf_ceil_mode: false", "lf_ceil_mode: true"),
+        ("lf_count_include_pad: true", "lf_count_include_pad: false"),
+        ("lf_divisor_override: null", "lf_divisor_override: 9"),
+        ("lf_detection_score_weight: 0.70", "lf_detection_score_weight: 0.69"),
+        (
+            "tail_robust_detection_score_weight: 0.30",
+            "tail_robust_detection_score_weight: 0.31",
+        ),
+    ),
+)
+def test_formal_method_config_rejects_low_frequency_protocol_drift(
+    tmp_path: Path,
+    source_line: str,
+    changed_line: str,
+) -> None:
+    """唯一 YAML 的任一 LF 离散字段或检测权重漂移都必须失败关闭."""
+
+    source = Path("configs/model_sd35.yaml").read_text(encoding="utf-8")
+    changed = source.replace(source_line, changed_line, 1)
+    assert changed != source
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir()
+    (config_dir / "model_sd35.yaml").write_text(changed, encoding="utf-8")
+
+    with pytest.raises((TypeError, ValueError)):
+        load_formal_method_runtime_config(tmp_path)
 
 
 @pytest.mark.quick
@@ -398,6 +489,39 @@ def test_runtime_detector_config_consumes_formal_alignment_gate() -> None:
     assert payload["attention_anchor_count"] == 12
     assert payload["attention_residual_threshold"] == 0.20
     assert payload["attention_minimum_inlier_ratio"] == 0.50
+
+
+@pytest.mark.quick
+def test_runtime_detector_config_consumes_formal_low_frequency_protocol() -> None:
+    """嵌入运行与核心盲检器必须消费同一 LF 对象、权重和 tail 比例."""
+
+    runtime = SemanticWatermarkRuntimeConfig()
+    detector = _build_image_only_detection_config(runtime)
+    payload = semantic_watermark_runtime_config_payload(runtime)
+
+    assert isinstance(detector.low_frequency_config, LowFrequencyCarrierConfig)
+    assert detector.low_frequency_config == runtime.low_frequency_carrier_config
+    assert detector.low_frequency_config.to_record() == (
+        runtime.low_frequency_carrier_config.to_record()
+    )
+    assert detector.lf_weight == runtime.lf_detection_score_weight == 0.70
+    assert (
+        detector.tail_robust_weight
+        == runtime.tail_robust_detection_score_weight
+        == 0.30
+    )
+    assert detector.tail_fraction == runtime.tail_fraction == 0.20
+    assert (
+        payload["lf_kernel_size"],
+        payload["lf_stride"],
+        payload["lf_padding"],
+        payload["lf_boundary_mode"],
+        payload["lf_ceil_mode"],
+        payload["lf_count_include_pad"],
+        payload["lf_divisor_override"],
+    ) == (5, 1, 2, "zero_padding", False, True, None)
+    assert payload["lf_detection_score_weight"] == 0.70
+    assert payload["tail_robust_detection_score_weight"] == 0.30
 
 
 @pytest.mark.quick

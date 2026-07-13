@@ -77,7 +77,11 @@ lf_kernel_size: 5
 lf_stride: 1
 lf_padding: 2
 lf_boundary_mode: zero_padding
+lf_ceil_mode: false
 lf_count_include_pad: true
+lf_divisor_override: null
+lf_detection_score_weight: 0.70
+tail_robust_detection_score_weight: 0.30
 attention_stable_token_fraction: 0.50
 attention_unstable_pair_weight: 0.25
 attention_relation_component_weights: [0.25, 0.25, 0.25, 0.25]
@@ -112,6 +116,10 @@ max_attention_tokens: 64
 attention_module_names:
   - transformer_blocks.0.attn
   - transformer_blocks.23.attn
+attention_alignment_layer_selection_rule: lexicographic_objective_observation_confidence_then_frozen_layer_order_v1
+image_alignment_resampling_mode: bilinear
+image_alignment_padding_mode: border
+image_alignment_quantization_protocol: clamp_0_1_multiply_255_floor_uint8_rgb_v1
 attention_coordinate_convention: normalized_xy_token_centers_corner_endpoints_v1
 attention_grid_align_corners: true
 diffusion_attacks_enabled: true

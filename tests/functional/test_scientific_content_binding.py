@@ -13,6 +13,12 @@ import pytest
 from PIL import Image
 import torch
 
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WATERMARK_KEY_ROLE,
+    REGISTERED_WRONG_KEY_ROLE,
+    build_detection_key_plan_record,
+    resolve_detection_key_material_and_identity,
+)
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     _align_image,
@@ -21,6 +27,9 @@ from experiments.runners.semantic_watermark_runtime import (
     _scientific_content_binding_artifact_ready,
     semantic_watermark_runtime_config_digest,
     semantic_watermark_runtime_config_payload,
+)
+from experiments.runners.image_only_dataset_runtime import (
+    formal_low_frequency_carrier_protocol_record,
 )
 from experiments.runtime.repository_environment import file_digest
 from experiments.runtime.scientific_content_binding import (
@@ -33,16 +42,27 @@ from experiments.runtime.scientific_content_binding import (
 )
 from main.core.digest import TENSOR_CONTENT_DIGEST_VERSION, build_stable_digest
 from main.methods.geometry import (
+    ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+    ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
+    ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     ATTENTION_COORDINATE_CONVENTION,
     ATTENTION_GRID_ALIGN_CORNERS,
     ATTENTION_RELATION_COMPONENT_NAMES,
+    DIRECT_QK_RELATION_SOURCE,
+    attention_alignment_gate_record,
     attention_relation_component_protocol,
     build_qk_atomic_content_metadata,
     qk_atomic_content_records_digest,
     qk_atomic_evaluation_records_digest,
     qk_operator_metadata_records_digest,
 )
-from main.methods.carrier import keyed_prg_protocol_record
+from main.methods.carrier import (
+    keyed_prg_protocol_record,
+    tail_robust_carrier_protocol_record,
+)
+from main.methods.detection import (
+    recompute_image_only_detection_digest_payload,
+)
 from main.methods.method_definition import (
     semantic_conditioned_latent_method_definition_digest,
 )
@@ -55,11 +75,22 @@ from main.methods.update_composition import (
     QUANTIZED_COMPOSITION_ORDER,
     recompute_quantized_composition_evidence_digest,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 _BRANCHES = ("lf_content", "tail_robust", "attention_geometry")
 _CARRIER_BRANCHES = ("lf_content", "tail_robust")
+_FIXTURE_REGISTERED_KEY_MATERIAL = "scientific-content-binding-key"
+_FIXTURE_REGISTERED_KEY_DIGEST_RANDOM = build_stable_digest(
+    {"key_material": _FIXTURE_REGISTERED_KEY_MATERIAL}
+)
 _ATTENTION_LAYER_NAMES = SemanticWatermarkRuntimeConfig().attention_module_names
+_LF_CARRIER_PROTOCOL = formal_low_frequency_carrier_protocol_record()
+_ATTENTION_ALIGNMENT_GATE = attention_alignment_gate_record(
+    ATTENTION_ALIGNMENT_ANCHOR_COUNT,
+    ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
+    ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
+)
 _IDENTITY_AFFINE_TRANSFORM = (
     (1.0, 0.0, 0.0),
     (0.0, 1.0, 0.0),
@@ -130,6 +161,50 @@ def _digest_supplier(offset: int) -> Callable[[], str]:
         return _sha256(cursor)
 
     return take
+
+
+def _template_identity_record(
+    *,
+    branch_name: str,
+    canonical_template_content_sha256: str,
+    embedded_direction_content_sha256: str,
+    null_space_digest: str,
+    carrier_protocol_digest: str,
+    config: SemanticWatermarkRuntimeConfig,
+) -> dict[str, Any]:
+    """构造不持久化嵌套摘要正文的模板引用."""
+
+    payload = {
+        "branch_name": branch_name,
+        "template_shape": [1, 16, 4, 4],
+        "projection_energy_retention": 0.2,
+        "minimum_projection_energy_retention": (
+            config.minimum_projection_energy_retention
+        ),
+        "null_space_digest": null_space_digest,
+        "canonical_template_content_sha256": (
+            canonical_template_content_sha256
+        ),
+        "embedded_direction_content_sha256": (
+            embedded_direction_content_sha256
+        ),
+        "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
+        "keyed_prg_version": config.keyed_prg_version,
+        "keyed_prg_protocol_digest": keyed_prg_protocol_record(
+            config.keyed_prg_version
+        )["keyed_prg_protocol_digest"],
+        "carrier_protocol_digest": carrier_protocol_digest,
+    }
+    return {
+        "branch_name": branch_name,
+        "projection_energy_retention": 0.2,
+        "carrier_protocol_digest": carrier_protocol_digest,
+        "template_shape": [1, 16, 4, 4],
+        "canonical_template_content_sha256": (
+            canonical_template_content_sha256
+        ),
+        "template_digest": build_stable_digest(payload),
+    }
 
 
 def _null_space_record(
@@ -257,6 +332,8 @@ def _update_record(
     digest_offset: int,
     config: SemanticWatermarkRuntimeConfig | None = None,
     latent_before_override: str | None = None,
+    lf_template_content_sha256_override: str | None = None,
+    tail_template_content_sha256_override: str | None = None,
 ) -> dict[str, Any]:
     """构造能通过风险、Null Space、量化写回和 Q/K 公式复验的记录。"""
 
@@ -320,6 +397,9 @@ def _update_record(
     attention_enabled = "attention_geometry" in branches
     record: dict[str, Any] = {
         "step_index": step_index,
+        "watermark_key_material_digest_random": (
+            _FIXTURE_REGISTERED_KEY_DIGEST_RANDOM
+        ),
         "scheduler_step_timestep": float(step_index),
         "post_step_schedule_index": step_index + 1,
         "timestep": float(step_index) + 0.5,
@@ -523,6 +603,65 @@ def _update_record(
                 "attention_qk_atomic_content_ready": False,
             }
         )
+    lf_template_content_sha256 = (
+        lf_template_content_sha256_override or take_digest()
+    )
+    tail_template_content_sha256 = (
+        tail_template_content_sha256_override or take_digest()
+    )
+    tail_protocol = tail_robust_carrier_protocol_record(
+        resolved_config.tail_fraction,
+        prg_version=resolved_config.keyed_prg_version,
+    )
+    lf_identity = _template_identity_record(
+        branch_name="lf_content",
+        canonical_template_content_sha256=lf_template_content_sha256,
+        embedded_direction_content_sha256=take_digest(),
+        null_space_digest=record["null_space_records"]["lf_content"][
+            "solver_digest"
+        ],
+        carrier_protocol_digest=_LF_CARRIER_PROTOCOL[
+            "lf_carrier_protocol_digest"
+        ],
+        config=resolved_config,
+    )
+    tail_identity = _template_identity_record(
+        branch_name="tail_robust",
+        canonical_template_content_sha256=tail_template_content_sha256,
+        embedded_direction_content_sha256=take_digest(),
+        null_space_digest=record["null_space_records"]["tail_robust"][
+            "solver_digest"
+        ],
+        carrier_protocol_digest=tail_protocol[
+            "tail_carrier_protocol_digest"
+        ],
+        config=resolved_config,
+    )
+    record.update(
+        {
+            "lf_carrier_protocol_digest": _LF_CARRIER_PROTOCOL[
+                "lf_carrier_protocol_digest"
+            ],
+            "lf_template_content_sha256": lf_template_content_sha256,
+            "lf_template_digest": lf_identity["template_digest"],
+            "lf_template_shape": lf_identity["template_shape"],
+            "lf_projection_energy_retention": 0.2,
+            "tail_carrier_protocol_digest": tail_protocol[
+                "tail_carrier_protocol_digest"
+            ],
+            "tail_fraction": resolved_config.tail_fraction,
+            "tail_template_content_sha256": (
+                tail_template_content_sha256
+            ),
+            "tail_template_digest": tail_identity["template_digest"],
+            "tail_template_shape": tail_identity["template_shape"],
+            "tail_template_element_count": 256,
+            "tail_selected_element_count": 52,
+            "tail_threshold": 1.0,
+            "tail_retained_fraction": 52 / 256,
+            "tail_projection_energy_retention": 0.2,
+        }
+    )
     record["quantized_composition_evidence_digest"] = (
         recompute_quantized_composition_evidence_digest(record)
     )
@@ -531,12 +670,16 @@ def _update_record(
 
 def _detection_record(
     *,
+    sample_role: str,
+    detection_key_role: str,
     source_path: str,
     source_file_sha256: str,
     source_rgb_sha256: str,
     evaluated_path: str,
     evaluated_file_sha256: str,
     evaluated_rgb_sha256: str,
+    lf_template_content_sha256: str,
+    tail_template_content_sha256: str,
     digest_offset: int,
     include_aligned_evaluation: bool = False,
     aligned_rgb_sha256: str | None = None,
@@ -544,6 +687,13 @@ def _detection_record(
 ) -> dict[str, Any]:
     """构造逐次绑定图像、公开噪声和检测 Q/K 的盲检记录。"""
 
+    resolved_config = SemanticWatermarkRuntimeConfig()
+    _detection_key_material, detection_key_identity = (
+        resolve_detection_key_material_and_identity(
+            _FIXTURE_REGISTERED_KEY_MATERIAL,
+            detection_key_role,
+        )
+    )
     take_digest = _digest_supplier(digest_offset)
     public_noise_content = _PUBLIC_NOISE_CONTENT_SHA256
     public_noise_prg_payload = dict(_PUBLIC_NOISE_PRG_PAYLOAD)
@@ -603,8 +753,22 @@ def _detection_record(
         for index, qk_record in enumerate(qk_records)
     ]
     operator_records = _qk_operator_records()
-    return {
-        "sample_role": "watermarked",
+    lf_score = 0.2
+    tail_score = 0.1
+    content_score = 0.7 * lf_score + 0.3 * tail_score
+    aligned_lf_score = 0.3 if include_aligned_evaluation else None
+    aligned_tail_score = 0.2 if include_aligned_evaluation else None
+    aligned_content_score = (
+        0.7 * aligned_lf_score + 0.3 * aligned_tail_score
+        if aligned_lf_score is not None and aligned_tail_score is not None
+        else None
+    )
+    record = {
+        "sample_role": sample_role,
+        **detection_key_identity,
+        "watermark_key_material_digest_random": (
+            _FIXTURE_REGISTERED_KEY_DIGEST_RANDOM
+        ),
         "attack_id": "none",
         "source_image_path": source_path,
         "source_image_digest": source_file_sha256,
@@ -617,6 +781,33 @@ def _detection_record(
         "evaluated_image_width": 8,
         "evaluated_image_height": 8,
         "attacked_image_digest": "",
+        "lf_score": lf_score,
+        "tail_robust_score": tail_score,
+        "content_score": content_score,
+        "lf_weight": 0.7,
+        "tail_robust_weight": 0.3,
+        "tail_fraction": 0.2,
+        "lf_carrier_protocol_digest": _LF_CARRIER_PROTOCOL[
+            "lf_carrier_protocol_digest"
+        ],
+        "lf_template_content_sha256": lf_template_content_sha256,
+        "tail_template_content_sha256": tail_template_content_sha256,
+        "tail_template_shape": [1, 16, 4, 4],
+        "raw_content_margin": content_score,
+        "aligned_lf_score": aligned_lf_score,
+        "aligned_tail_robust_score": aligned_tail_score,
+        "aligned_content_score": aligned_content_score,
+        "aligned_content_margin": aligned_content_score,
+        "positive_by_content": True,
+        "attention_geometry_score": 0.4,
+        "raw_attention_geometry_score": 0.4,
+        "attention_sync_score": 0.4,
+        "registration_confidence": 0.8,
+        "geometry_reliable": bool(include_aligned_evaluation),
+        "content_failure_reason": "content_positive",
+        "rescue_eligible": False,
+        "rescue_applied": False,
+        "evidence_positive": True,
         "alignment": (
             {
                 "affine_transform": [
@@ -628,6 +819,19 @@ def _detection_record(
             else None
         ),
         "metadata": {
+            "content_threshold": 0.0,
+            "attention_alignment_gate": dict(_ATTENTION_ALIGNMENT_GATE),
+            **_ATTENTION_ALIGNMENT_GATE,
+            "stable_token_selection_digest": take_digest(),
+            "stable_pair_weight_identity_digest": take_digest(),
+            "observed_pair_weight_realization_digest": take_digest(),
+            "aligned_pair_weight_realization_digest": (
+                take_digest() if include_aligned_evaluation else ""
+            ),
+            "stable_pair_weight_identity_ready": True,
+            "attention_relation_source": DIRECT_QK_RELATION_SOURCE,
+            "attention_relation_component_identity_digest": take_digest(),
+            "attention_relation_keyed_projection_digest": take_digest(),
             "public_detection_noise_content_sha256": public_noise_content,
             "public_detection_noise_prg_identity_digest": public_noise_prg,
             "public_detection_noise_evidence_records": evidence_records,
@@ -663,6 +867,7 @@ def _detection_record(
             ),
         },
     }
+    return bind_formal_detection_record(record)
 
 
 def _final_observability(
@@ -790,24 +995,39 @@ def _binding_inputs() -> dict[str, Any]:
             "outputs/test/watermarked.png", 7005
         ),
     }
+    full_update_record = _update_record(
+        _BRANCHES,
+        step_index=6,
+        digest_offset=100,
+    )
+    lf_template_sha256 = full_update_record[
+        "lf_template_content_sha256"
+    ]
+    tail_template_sha256 = full_update_record[
+        "tail_template_content_sha256"
+    ]
+    carrier_update_record = _update_record(
+        _CARRIER_BRANCHES,
+        step_index=6,
+        digest_offset=1000,
+        lf_template_content_sha256_override=lf_template_sha256,
+        tail_template_content_sha256_override=tail_template_sha256,
+    )
     return {
         "run_id": "scientific-content-binding-test",
         "method_definition_digest": (
             semantic_conditioned_latent_method_definition_digest()
         ),
         "scientific_unit_config_digest": _sha256(2),
-        "full_update_records": [
-            _update_record(_BRANCHES, step_index=6, digest_offset=100)
-        ],
-        "carrier_only_update_records": [
-            _update_record(
-                _CARRIER_BRANCHES,
-                step_index=6,
-                digest_offset=1000,
-            )
-        ],
+        "full_update_records": [full_update_record],
+        "carrier_only_update_records": [carrier_update_record],
+        "detection_key_plan": build_detection_key_plan_record(
+            _FIXTURE_REGISTERED_KEY_MATERIAL
+        ),
         "detection_records": [
             _detection_record(
+                sample_role="positive_source",
+                detection_key_role=REGISTERED_WATERMARK_KEY_ROLE,
                 source_path=images["clean_image"]["image_path"],
                 source_file_sha256=images["clean_image"][
                     "image_file_sha256"
@@ -822,8 +1042,40 @@ def _binding_inputs() -> dict[str, Any]:
                 evaluated_rgb_sha256=images["watermarked_image"][
                     "image_rgb_uint8_content_sha256"
                 ],
+                lf_template_content_sha256=lf_template_sha256,
+                tail_template_content_sha256=tail_template_sha256,
                 digest_offset=5000,
-            )
+                include_aligned_evaluation=True,
+                aligned_rgb_sha256=images["watermarked_image"][
+                    "image_rgb_uint8_content_sha256"
+                ],
+            ),
+            _detection_record(
+                sample_role="wrong_key_negative",
+                detection_key_role=REGISTERED_WRONG_KEY_ROLE,
+                source_path=images["watermarked_image"]["image_path"],
+                source_file_sha256=images["watermarked_image"][
+                    "image_file_sha256"
+                ],
+                source_rgb_sha256=images["watermarked_image"][
+                    "image_rgb_uint8_content_sha256"
+                ],
+                evaluated_path=images["watermarked_image"]["image_path"],
+                evaluated_file_sha256=images["watermarked_image"][
+                    "image_file_sha256"
+                ],
+                evaluated_rgb_sha256=images["watermarked_image"][
+                    "image_rgb_uint8_content_sha256"
+                ],
+                lf_template_content_sha256=_sha256(60003),
+                tail_template_content_sha256=_sha256(60004),
+                digest_offset=6000,
+                include_aligned_evaluation=True,
+                aligned_rgb_sha256=images["watermarked_image"][
+                    "image_rgb_uint8_content_sha256"
+                ],
+                evaluation_index_offset=5,
+            ),
         ],
         "final_image_records": images,
         "final_image_attention_observability": _final_observability(images),
@@ -852,21 +1104,102 @@ def test_scientific_content_binding_digest_is_recomputable() -> None:
 
 
 @pytest.mark.quick
+@pytest.mark.parametrize(
+    "template_field_name",
+    (
+        "lf_template_content_sha256",
+        "tail_template_content_sha256",
+    ),
+)
+def test_scientific_binding_rejects_embedding_detection_template_split(
+    template_field_name: str,
+) -> None:
+    """嵌入端和仅图像检测端不得使用两套固定模板身份."""
+
+    inputs = _binding_inputs()
+    detection = deepcopy(inputs["detection_records"][0])
+    detection[template_field_name] = "f" * 64
+    inputs["detection_records"] = [
+        bind_formal_detection_record(detection),
+        inputs["detection_records"][1],
+    ]
+
+    with pytest.raises(ValueError, match="固定模板身份不一致"):
+        build_scientific_content_binding_record(**inputs)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "wrong_key_reuses_registered_template",
+        "wrong_key_declares_registered_role",
+        "different_detection_key_plan",
+        "update_key_digest_split",
+    ),
+)
+def test_scientific_binding_rejects_detection_key_identity_split(
+    mutation: str,
+) -> None:
+    """wrong-key 角色、计划和嵌入注册密钥必须形成同一证据闭环."""
+
+    inputs = _binding_inputs()
+    wrong_detection = deepcopy(inputs["detection_records"][1])
+    if mutation == "wrong_key_reuses_registered_template":
+        registered_detection = inputs["detection_records"][0]
+        wrong_detection["lf_template_content_sha256"] = (
+            registered_detection["lf_template_content_sha256"]
+        )
+        wrong_detection["tail_template_content_sha256"] = (
+            registered_detection["tail_template_content_sha256"]
+        )
+        wrong_detection = bind_formal_detection_record(wrong_detection)
+    elif mutation == "wrong_key_declares_registered_role":
+        _material, identity = resolve_detection_key_material_and_identity(
+            _FIXTURE_REGISTERED_KEY_MATERIAL,
+            REGISTERED_WATERMARK_KEY_ROLE,
+        )
+        wrong_detection.update(identity)
+    elif mutation == "different_detection_key_plan":
+        _material, identity = resolve_detection_key_material_and_identity(
+            "different-registered-key",
+            REGISTERED_WRONG_KEY_ROLE,
+        )
+        wrong_detection.update(identity)
+    else:
+        inputs["full_update_records"][0][
+            "watermark_key_material_digest_random"
+        ] = "f" * 64
+    inputs["detection_records"] = [
+        inputs["detection_records"][0],
+        wrong_detection,
+    ]
+
+    with pytest.raises(ValueError, match="密钥|wrong-key|模板身份"):
+        build_scientific_content_binding_record(**inputs)
+
+
+@pytest.mark.quick
 def test_detection_public_noise_uses_shared_global_evaluation_indices() -> None:
     """多条检测必须接受 extractor 的连续全局索引, 不得逐记录归零。"""
 
     inputs = _binding_inputs()
     first = deepcopy(inputs["detection_records"][0])
-    second = deepcopy(first)
-    second["sample_role"] = "wrong_key_negative"
+    second = deepcopy(inputs["detection_records"][1])
 
-    def set_evaluation_index(record: dict[str, Any], index: int) -> None:
-        """同步改写公开噪声、Q/K 与图像绑定的同一全局索引。"""
+    def set_evaluation_indices(
+        record: dict[str, Any],
+        indices: tuple[int, ...],
+    ) -> None:
+        """同步改写 raw/aligned 评价使用的连续全局索引。"""
 
         metadata = record["metadata"]
-        metadata["public_detection_noise_evidence_records"][0][
-            "public_detection_noise_evaluation_index"
-        ] = index
+        for evidence, index in zip(
+            metadata["public_detection_noise_evidence_records"],
+            indices,
+            strict=True,
+        ):
+            evidence["public_detection_noise_evaluation_index"] = index
         metadata["public_detection_noise_evidence_digest"] = (
             build_stable_digest(
                 {
@@ -876,18 +1209,24 @@ def test_detection_public_noise_uses_shared_global_evaluation_indices() -> None:
                 }
             )
         )
-        metadata["detection_qk_atomic_content_records"][0][
-            "public_detection_noise_evaluation_index"
-        ] = index
+        for qk_record, index in zip(
+            metadata["detection_qk_atomic_content_records"],
+            indices,
+            strict=True,
+        ):
+            qk_record["public_detection_noise_evaluation_index"] = index
         metadata["detection_qk_atomic_content_digest"] = (
             qk_atomic_evaluation_records_digest(
                 metadata["detection_qk_atomic_content_records"],
                 "detection_qk_atomic_content_records",
             )
         )
-        metadata["detection_qk_image_content_bindings"][0][
-            "public_detection_noise_evaluation_index"
-        ] = index
+        for image_binding, index in zip(
+            metadata["detection_qk_image_content_bindings"],
+            indices,
+            strict=True,
+        ):
+            image_binding["public_detection_noise_evaluation_index"] = index
         metadata["detection_qk_image_content_binding_digest"] = (
             build_stable_digest(
                 {
@@ -897,21 +1236,52 @@ def test_detection_public_noise_uses_shared_global_evaluation_indices() -> None:
                 }
             )
         )
+        record["detector_digest"] = build_stable_digest(
+            recompute_image_only_detection_digest_payload(record)
+        )
 
-    set_evaluation_index(first, 3)
-    set_evaluation_index(second, 4)
+    set_evaluation_indices(first, (3, 4))
+    set_evaluation_indices(second, (5, 6))
     inputs["detection_records"] = [first, second]
 
     record = build_scientific_content_binding_record(**inputs)
     assert record["detection_content_identities"][0][
         "public_detection_noise_evaluation_indices"
-    ] == [3]
+    ] == [3, 4]
     assert record["detection_content_identities"][1][
         "public_detection_noise_evaluation_indices"
-    ] == [4]
+    ] == [5, 6]
 
-    set_evaluation_index(second, 5)
+    set_evaluation_indices(second, (6, 7))
     with pytest.raises(ValueError, match="连续全局索引"):
+        build_scientific_content_binding_record(**inputs)
+
+
+@pytest.mark.quick
+def test_scientific_binding_rejects_mixed_detector_config_identities() -> None:
+    """同一科学单元不得把不同阈值配置的检测记录合并为一个结论。"""
+
+    inputs = _binding_inputs()
+    drifted = deepcopy(inputs["detection_records"][1])
+    drifted["metadata"]["content_threshold"] = 0.01
+    drifted["raw_content_margin"] = drifted["content_score"] - 0.01
+    drifted["aligned_content_margin"] = (
+        drifted["aligned_content_score"] - 0.01
+    )
+    config_digest = "f" * 64
+    drifted["image_only_detector_config_digest"] = config_digest
+    drifted["metadata"][
+        "image_only_detector_config_digest"
+    ] = config_digest
+    drifted["detector_digest"] = build_stable_digest(
+        recompute_image_only_detection_digest_payload(drifted)
+    )
+    inputs["detection_records"] = [
+        inputs["detection_records"][0],
+        drifted,
+    ]
+
+    with pytest.raises(ValueError, match="不同盲检配置"):
         build_scientific_content_binding_record(**inputs)
 
 
@@ -1043,6 +1413,8 @@ def _artifact_fixture(
             )
         )["image_rgb_uint8_content_sha256"]
     shared_initial_latent_sha256 = _sha256(60000)
+    shared_lf_template_sha256 = _sha256(60001)
+    shared_tail_template_sha256 = _sha256(60002)
     full_records = [
         _update_record(
             _BRANCHES,
@@ -1053,6 +1425,12 @@ def _artifact_fixture(
                 shared_initial_latent_sha256
                 if record_index == 0
                 else None
+            ),
+            lf_template_content_sha256_override=(
+                shared_lf_template_sha256
+            ),
+            tail_template_content_sha256_override=(
+                shared_tail_template_sha256
             ),
         )
         for record_index, step_index in enumerate(
@@ -1070,6 +1448,12 @@ def _artifact_fixture(
                 if record_index == 0
                 else None
             ),
+            lf_template_content_sha256_override=(
+                shared_lf_template_sha256
+            ),
+            tail_template_content_sha256_override=(
+                shared_tail_template_sha256
+            ),
         )
         for record_index, step_index in enumerate(
             config.injection_step_indices
@@ -1077,6 +1461,8 @@ def _artifact_fixture(
     ]
     detection_records = [
         _detection_record(
+            sample_role="positive_source",
+            detection_key_role=REGISTERED_WATERMARK_KEY_ROLE,
             source_path=images["clean_image"]["image_path"],
             source_file_sha256=images["clean_image"]["image_file_sha256"],
             source_rgb_sha256=images["clean_image"][
@@ -1089,10 +1475,36 @@ def _artifact_fixture(
             evaluated_rgb_sha256=images["watermarked_image"][
                 "image_rgb_uint8_content_sha256"
             ],
+            lf_template_content_sha256=shared_lf_template_sha256,
+            tail_template_content_sha256=shared_tail_template_sha256,
             digest_offset=50000,
             include_aligned_evaluation=True,
             aligned_rgb_sha256=aligned_rgb_sha256,
-        )
+        ),
+        _detection_record(
+            sample_role="wrong_key_negative",
+            detection_key_role=REGISTERED_WRONG_KEY_ROLE,
+            source_path=images["watermarked_image"]["image_path"],
+            source_file_sha256=images["watermarked_image"][
+                "image_file_sha256"
+            ],
+            source_rgb_sha256=images["watermarked_image"][
+                "image_rgb_uint8_content_sha256"
+            ],
+            evaluated_path=images["watermarked_image"]["image_path"],
+            evaluated_file_sha256=images["watermarked_image"][
+                "image_file_sha256"
+            ],
+            evaluated_rgb_sha256=images["watermarked_image"][
+                "image_rgb_uint8_content_sha256"
+            ],
+            lf_template_content_sha256=_sha256(60003),
+            tail_template_content_sha256=_sha256(60004),
+            digest_offset=51000,
+            include_aligned_evaluation=True,
+            aligned_rgb_sha256=aligned_rgb_sha256,
+            evaluation_index_offset=5,
+        ),
     ]
     _write_jsonl(paths["full_update"], full_records)
     _write_jsonl(paths["carrier_update"], carrier_records)
@@ -1149,6 +1561,9 @@ def _artifact_fixture(
     }
     observability.update(carrier_artifact_identity)
     carrier_preservation.update(carrier_artifact_identity)
+    detection_key_plan = build_detection_key_plan_record(
+        _FIXTURE_REGISTERED_KEY_MATERIAL
+    )
     binding_record = build_scientific_content_binding_record(
         run_id=run_id,
         method_definition_digest=(
@@ -1160,6 +1575,7 @@ def _artifact_fixture(
         full_update_records=full_records,
         carrier_only_update_records=carrier_records,
         detection_records=detection_records,
+        detection_key_plan=detection_key_plan,
         final_image_records=images,
         final_image_attention_observability=observability,
         final_image_preservation=preservation,
@@ -1199,6 +1615,7 @@ def _artifact_fixture(
             "scientific_content_binding_digest": binding_record[
                 "scientific_content_binding_digest"
             ],
+            "detection_key_plan": detection_key_plan,
             **carrier_artifact_identity,
         },
     }
@@ -1247,9 +1664,14 @@ def test_scientific_content_binding_artifact_validator_rejects_tampering(
         "public_detection_noise",
         "aligned_detection_image",
     }:
-        detection_record = json.loads(
-            paths["detection"].read_text(encoding="utf-8")
-        )
+        detection_records = [
+            json.loads(line)
+            for line in paths["detection"].read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line
+        ]
+        detection_record = detection_records[0]
         if leaf_role == "public_detection_noise":
             detection_record["metadata"][
                 "public_detection_noise_content_sha256"
@@ -1258,7 +1680,7 @@ def test_scientific_content_binding_artifact_validator_rejects_tampering(
             detection_record["alignment"]["affine_transform"][0][2] = (
                 0.25
             )
-        _write_jsonl(paths["detection"], [detection_record])
+        _write_jsonl(paths["detection"], detection_records)
     else:
         update_records = [
             json.loads(line)

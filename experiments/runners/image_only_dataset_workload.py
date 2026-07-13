@@ -90,6 +90,17 @@ def build_method_config(
         lf_relative_strength=method.lf_relative_strength,
         tail_relative_strength=method.tail_relative_strength,
         attention_relative_strength=method.attention_relative_strength,
+        lf_kernel_size=method.lf_kernel_size,
+        lf_stride=method.lf_stride,
+        lf_padding=method.lf_padding,
+        lf_boundary_mode=method.lf_boundary_mode,
+        lf_ceil_mode=method.lf_ceil_mode,
+        lf_count_include_pad=method.lf_count_include_pad,
+        lf_divisor_override=method.lf_divisor_override,
+        lf_detection_score_weight=method.lf_detection_score_weight,
+        tail_robust_detection_score_weight=(
+            method.tail_robust_detection_score_weight
+        ),
         attention_stable_token_fraction=(
             method.attention_stable_token_fraction
         ),

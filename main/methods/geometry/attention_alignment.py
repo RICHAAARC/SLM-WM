@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from main.core.digest import build_stable_digest
 from main.methods.geometry.differentiable_attention import (
@@ -38,6 +38,11 @@ _MINIMUM_REGISTRATION_COVERAGE = 0.45
 ATTENTION_ALIGNMENT_ANCHOR_COUNT = 12
 ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD = 0.20
 ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO = 0.50
+ATTENTION_IMAGE_RESAMPLING_MODE = "bilinear"
+ATTENTION_IMAGE_PADDING_MODE = "border"
+ATTENTION_IMAGE_QUANTIZATION_PROTOCOL = (
+    "clamp_0_1_multiply_255_floor_uint8_rgb_v1"
+)
 _SIMILARITY_ROTATION_BOUND_DEGREES = 32.0
 _SIMILARITY_ROTATION_INTERVAL_COUNT = 4
 _SIMILARITY_LOG_SCALE_ANCHOR_BOUND = math.log(math.sqrt(2.0))
@@ -62,6 +67,55 @@ def _torch() -> Any:
     import torch
 
     return torch
+
+
+def resample_attention_aligned_rgb_uint8(
+    image_rgb_uint8: Any,
+    affine_transform: Any,
+) -> Any:
+    """按冻结图像协议恢复参考系并返回 RGB uint8 Tensor.
+
+    输入必须是 ``[1, 3, H, W]`` 的 RGB uint8 Tensor. 仿射网格和图像采样
+    统一使用 ``align_corners=True``；边界复制避免几何恢复引入额外黑边。输出先
+    截断到 ``[0, 1]``，乘以255后执行 floor, 从而把连续采样结果唯一映射回
+    仅图像检测重新编码所消费的 RGB 字节。
+    """
+
+    torch = _torch()
+    import torch.nn.functional as functional
+
+    if (
+        not isinstance(image_rgb_uint8, torch.Tensor)
+        or image_rgb_uint8.dtype != torch.uint8
+        or image_rgb_uint8.ndim != 4
+        or tuple(image_rgb_uint8.shape[:2]) != (1, 3)
+        or int(image_rgb_uint8.shape[-2]) < 2
+        or int(image_rgb_uint8.shape[-1]) < 2
+    ):
+        raise ValueError("图像配准输入必须为 [1, 3, H, W] RGB uint8 Tensor")
+    tensor = image_rgb_uint8.to(dtype=torch.float32) / 255.0
+    theta = torch.as_tensor(
+        affine_transform,
+        dtype=tensor.dtype,
+        device=tensor.device,
+    )
+    if theta.shape != (2, 3) or not bool(torch.isfinite(theta).all().item()):
+        raise ValueError("图像配准仿射矩阵必须为有限的 [2, 3] Tensor")
+    grid = functional.affine_grid(
+        theta.unsqueeze(0),
+        tensor.shape,
+        align_corners=ATTENTION_GRID_ALIGN_CORNERS,
+    )
+    aligned = functional.grid_sample(
+        tensor,
+        grid,
+        mode=ATTENTION_IMAGE_RESAMPLING_MODE,
+        padding_mode=ATTENTION_IMAGE_PADDING_MODE,
+        align_corners=ATTENTION_GRID_ALIGN_CORNERS,
+    )
+    return torch.floor(aligned.clamp(0.0, 1.0) * 255.0).to(
+        dtype=torch.uint8
+    )
 
 
 def validate_attention_alignment_gate(
@@ -681,6 +735,8 @@ def _combine_evaluations(evaluations: Iterable[_CandidateEvaluation]) -> _Candid
 class AttentionAlignmentResult:
     """保存双边关系图注册和仿射恢复结果。"""
 
+    layer_name: str
+    token_indices: tuple[int, ...]
     affine_transform: tuple[tuple[float, float, float], tuple[float, float, float]]
     expected_anchor_indices: tuple[int, ...]
     observed_anchor_indices: tuple[int, ...]
@@ -723,6 +779,369 @@ class AttentionAlignmentResult:
     geometry_reliable: bool
     alignment_digest: str
     metadata: dict[str, Any]
+
+
+def _alignment_float(
+    record: Mapping[str, Any],
+    field_name: str,
+    *,
+    allow_positive_infinity: bool = False,
+) -> float:
+    """读取 alignment 决策字段并拒绝隐式数值类型。"""
+
+    value = record.get(field_name)
+    if type(value) is not float or (
+        not math.isfinite(value)
+        and not (allow_positive_infinity and value == math.inf)
+    ):
+        raise ValueError(f"alignment 字段 {field_name} 必须为有限精确 float")
+    return value
+
+
+def recompute_attention_alignment_digest_payload(
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    """从一次 alignment 记录重建影响配准和 rescue 的规范摘要正文。
+
+    该函数只覆盖方法数值、结构门禁和检测决策实际使用的字段, 不承担通用
+    metadata 防篡改职责。检测层附加的注册可靠性别名不进入核心摘要, 由
+    ``validate_attention_alignment_record`` 单独核对。
+    """
+
+    if not isinstance(record, Mapping):
+        raise TypeError("alignment 记录必须为 mapping")
+    metadata = record.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise ValueError("alignment 记录缺少 metadata")
+
+    layer_name = record.get("layer_name")
+    token_indices = record.get("token_indices")
+    if type(layer_name) is not str or not layer_name:
+        raise ValueError("alignment layer_name 必须为非空精确 str")
+    if not isinstance(token_indices, (list, tuple)) or any(
+        type(value) is not int or value < 0 for value in token_indices
+    ):
+        raise ValueError("alignment token_indices 必须为非负整数序列")
+
+    def integer_sequence(field_name: str) -> list[int]:
+        """读取固定顺序的整数索引序列。"""
+
+        value = record.get(field_name)
+        if not isinstance(value, (list, tuple)) or any(
+            type(item) is not int for item in value
+        ):
+            raise ValueError(f"alignment 字段 {field_name} 必须为整数序列")
+        return list(value)
+
+    def float_sequence(
+        field_name: str,
+        *,
+        round_values: bool = True,
+    ) -> list[float]:
+        """读取并规范化有限浮点序列。"""
+
+        value = record.get(field_name)
+        if not isinstance(value, (list, tuple)) or any(
+            type(item) is not float or not math.isfinite(item)
+            for item in value
+        ):
+            raise ValueError(f"alignment 字段 {field_name} 必须为有限 float 序列")
+        return [
+            round(item, 12) if round_values else item
+            for item in value
+        ]
+
+    def component_scores(field_name: str) -> dict[str, float]:
+        """读取四分量关系得分并固定数值精度。"""
+
+        value = record.get(field_name)
+        if not isinstance(value, Mapping) or any(
+            type(item) is not float or not math.isfinite(item)
+            for item in value.values()
+        ):
+            raise ValueError(f"alignment 字段 {field_name} 必须为有限 float mapping")
+        return {
+            str(name): round(item, 12)
+            for name, item in value.items()
+        }
+
+    inlier_mask = record.get("inlier_mask")
+    affine_transform = record.get("affine_transform")
+    active_component_names = record.get(
+        "attention_relation_active_component_names"
+    )
+    if not isinstance(inlier_mask, (list, tuple)) or any(
+        type(value) is not bool for value in inlier_mask
+    ):
+        raise ValueError("alignment inlier_mask 必须为 bool 序列")
+    if (
+        not isinstance(affine_transform, (list, tuple))
+        or len(affine_transform) != 2
+        or any(
+            not isinstance(row, (list, tuple)) or len(row) != 3
+            for row in affine_transform
+        )
+        or any(
+            type(value) is not float or not math.isfinite(value)
+            for row in affine_transform
+            for value in row
+        )
+    ):
+        raise ValueError("alignment affine_transform 必须为有限 float 2x3 矩阵")
+    if not isinstance(active_component_names, (list, tuple)) or any(
+        type(value) is not str for value in active_component_names
+    ):
+        raise ValueError("alignment 活动分量名称必须为 str 序列")
+
+    gate = attention_alignment_gate_record(
+        record.get("attention_anchor_count"),
+        record.get("attention_residual_threshold"),
+        record.get("attention_minimum_inlier_ratio"),
+    )
+    return {
+        "layer_name": layer_name,
+        "token_indices": list(token_indices),
+        **gate,
+        "expected_anchor_indices": integer_sequence(
+            "expected_anchor_indices"
+        ),
+        "observed_anchor_indices": integer_sequence(
+            "observed_anchor_indices"
+        ),
+        "inlier_mask": list(inlier_mask),
+        "affine_transform": [list(row) for row in affine_transform],
+        "inlier_ratio": round(_alignment_float(record, "inlier_ratio"), 12),
+        "mean_inlier_residual": round(
+            _alignment_float(
+                record,
+                "mean_inlier_residual",
+                allow_positive_infinity=True,
+            ),
+            12,
+        ),
+        "relation_sync_score": round(
+            _alignment_float(record, "relation_sync_score"),
+            12,
+        ),
+        "relation_component_scores": component_scores(
+            "relation_component_scores"
+        ),
+        "observation_relation_score": round(
+            _alignment_float(record, "observation_relation_score"),
+            12,
+        ),
+        "observation_relation_component_scores": component_scores(
+            "observation_relation_component_scores"
+        ),
+        "identity_observation_relation_score": round(
+            _alignment_float(
+                record,
+                "identity_observation_relation_score",
+            ),
+            12,
+        ),
+        "identity_observation_relation_component_scores": component_scores(
+            "identity_observation_relation_component_scores"
+        ),
+        "registration_alignment_gain": round(
+            _alignment_float(record, "registration_alignment_gain"),
+            12,
+        ),
+        "bidirectional_relation_score": round(
+            _alignment_float(record, "bidirectional_relation_score"),
+            12,
+        ),
+        "registration_objective_score": round(
+            _alignment_float(record, "registration_objective_score"),
+            12,
+        ),
+        "registration_objective_margin": round(
+            _alignment_float(record, "registration_objective_margin"),
+            12,
+        ),
+        "registration_coverage_penalty": round(
+            _alignment_float(record, "registration_coverage_penalty"),
+            12,
+        ),
+        "canonical_coverage_ratio": round(
+            _alignment_float(record, "canonical_coverage_ratio"),
+            12,
+        ),
+        "observation_coverage_ratio": round(
+            _alignment_float(record, "observation_coverage_ratio"),
+            12,
+        ),
+        "canonical_unique_ratio": round(
+            _alignment_float(record, "canonical_unique_ratio"),
+            12,
+        ),
+        "observation_unique_ratio": round(
+            _alignment_float(record, "observation_unique_ratio"),
+            12,
+        ),
+        "canonical_token_weights": float_sequence(
+            "canonical_token_weights"
+        ),
+        "stable_pair_weight_identity_digest": record.get(
+            "stable_pair_weight_identity_digest"
+        ),
+        "observed_pair_weight_realization_digest": record.get(
+            "observed_pair_weight_realization_digest"
+        ),
+        "canonical_pair_weight_realization_digest": record.get(
+            "canonical_pair_weight_realization_digest"
+        ),
+        "attention_relation_source": record.get(
+            "attention_relation_source"
+        ),
+        "attention_relation_active_component_names": list(
+            active_component_names
+        ),
+        "attention_relation_component_weights": float_sequence(
+            "attention_relation_component_weights",
+            round_values=False,
+        ),
+        "attention_relation_component_protocol_digest": record.get(
+            "attention_relation_component_protocol_digest"
+        ),
+        "attention_relation_component_identity_digest": record.get(
+            "attention_relation_component_identity_digest"
+        ),
+        "attention_relation_keyed_projection_digest": record.get(
+            "attention_relation_keyed_projection_digest"
+        ),
+        "attention_relation_qk_operator_metadata_digest": record.get(
+            "attention_relation_qk_operator_metadata_digest"
+        ),
+        "attention_relation_qk_operator_metadata_ready": record.get(
+            "attention_relation_qk_operator_metadata_ready"
+        ),
+        "attention_relation_qk_atomic_content_digest": record.get(
+            "attention_relation_qk_atomic_content_digest"
+        ),
+        "attention_relation_qk_atomic_content_ready": record.get(
+            "attention_relation_qk_atomic_content_ready"
+        ),
+        "coordinate_convention": metadata.get("coordinate_convention"),
+        "grid_align_corners": metadata.get("grid_align_corners"),
+        "registration_confidence": round(
+            _alignment_float(record, "registration_confidence"),
+            12,
+        ),
+        "geometry_reliable": record.get("geometry_reliable"),
+    }
+
+
+def validate_attention_alignment_record(
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    """复验影响检测 rescue 的 alignment 数值、门禁和规范摘要。"""
+
+    payload = recompute_attention_alignment_digest_payload(record)
+    alignment_digest = record.get("alignment_digest")
+    if (
+        type(alignment_digest) is not str
+        or len(alignment_digest) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in alignment_digest
+        )
+        or build_stable_digest(payload) != alignment_digest
+    ):
+        raise ValueError("alignment 正文与 alignment_digest 不一致")
+
+    metadata = record["metadata"]
+    gate = {
+        field_name: payload[field_name]
+        for field_name in (
+            "attention_anchor_count",
+            "attention_residual_threshold",
+            "attention_minimum_inlier_ratio",
+        )
+    }
+    if (
+        metadata.get("attention_alignment_gate") != gate
+        or any(metadata.get(name) != value for name, value in gate.items())
+        or payload["coordinate_convention"]
+        != ATTENTION_COORDINATE_CONVENTION
+        or payload["grid_align_corners"] is not ATTENTION_GRID_ALIGN_CORNERS
+    ):
+        raise ValueError("alignment 结构门禁或坐标约定不一致")
+
+    inlier_ratio = _alignment_float(record, "inlier_ratio")
+    mean_residual = _alignment_float(
+        record,
+        "mean_inlier_residual",
+        allow_positive_infinity=True,
+    )
+    bidirectional_score = _alignment_float(
+        record,
+        "bidirectional_relation_score",
+    )
+    canonical_coverage = _alignment_float(
+        record,
+        "canonical_coverage_ratio",
+    )
+    observation_coverage = _alignment_float(
+        record,
+        "observation_coverage_ratio",
+    )
+    if (
+        not 0.0 <= inlier_ratio <= 1.0
+        or mean_residual < 0.0
+        or not 0.0 <= canonical_coverage <= 1.0
+        or not 0.0 <= observation_coverage <= 1.0
+    ):
+        raise ValueError("alignment 内点率、残差或覆盖率超出定义域")
+    expected_confidence = (
+        max(0.0, bidirectional_score)
+        * inlier_ratio
+        * math.exp(-mean_residual)
+        * min(canonical_coverage, observation_coverage)
+    )
+    registration_confidence = _alignment_float(
+        record,
+        "registration_confidence",
+    )
+    if (
+        not 0.0 <= registration_confidence <= 1.0
+        or not math.isclose(
+            registration_confidence,
+            expected_confidence,
+            rel_tol=0.0,
+            abs_tol=2e-12,
+        )
+    ):
+        raise ValueError("registration_confidence 与配准公式不一致")
+
+    expected_reliable = bool(
+        _alignment_float(record, "relation_sync_score") >= -1.0
+        and _alignment_float(record, "observation_relation_score") > 0.0
+        and bidirectional_score > 0.0
+        and inlier_ratio >= gate["attention_minimum_inlier_ratio"]
+        and mean_residual <= gate["attention_residual_threshold"]
+        and canonical_coverage >= _MINIMUM_REGISTRATION_COVERAGE
+        and observation_coverage >= _MINIMUM_REGISTRATION_COVERAGE
+        and _alignment_float(record, "registration_objective_margin") > 0.0
+        and record.get("attention_relation_source")
+        == DIRECT_QK_RELATION_SOURCE
+        and record.get("attention_relation_qk_operator_metadata_ready")
+        is True
+        and record.get("attention_relation_qk_atomic_content_ready") is True
+    )
+    geometry_reliable = record.get("geometry_reliable")
+    wrapper_reliable = record.get(
+        "registration_geometry_reliable",
+        geometry_reliable,
+    )
+    if (
+        type(geometry_reliable) is not bool
+        or geometry_reliable is not expected_reliable
+        or type(wrapper_reliable) is not bool
+        or wrapper_reliable is not geometry_reliable
+    ):
+        raise ValueError("alignment 注册可靠性与核心门禁不一致")
+    return payload
 
 
 def recover_attention_affine_alignment(
@@ -1035,8 +1454,12 @@ def recover_attention_affine_alignment(
         ),
         "coordinate_convention": ATTENTION_COORDINATE_CONVENTION,
         "grid_align_corners": ATTENTION_GRID_ALIGN_CORNERS,
+        "registration_confidence": round(confidence, 12),
+        "geometry_reliable": geometry_reliable,
     }
     return AttentionAlignmentResult(
+        layer_name=layer_name,
+        token_indices=token_indices,
         affine_transform=transform_tuple,  # type: ignore[arg-type]
         expected_anchor_indices=expected_indices,
         observed_anchor_indices=observed_indices,

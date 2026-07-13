@@ -39,6 +39,7 @@ from paper_experiments.analysis.method_repeat_fixed_fpr import (
     MethodRepeatObservationSource,
     recompute_exact_method_repeat_fixed_fpr,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 pytestmark = pytest.mark.quick
@@ -49,33 +50,12 @@ MODEL_ID = "stabilityai/stable-diffusion-3.5-medium"
 MODEL_REVISION = "b940f670f0eda2d07fbb75229e779da1ad11eb80"
 RESCUE_MARGIN_LOW = -0.05
 EXPECTED_BASE_SEED = 1703
-ATTENTION_ALIGNMENT_GATE = {
-    "attention_anchor_count": 12,
-    "attention_residual_threshold": 0.20,
-    "attention_minimum_inlier_ratio": 0.50,
-}
-
-
 def _bind_attention_alignment_gate(
     record: dict[str, object],
 ) -> dict[str, object]:
     """为检测夹具绑定预注册注意力配准门禁."""
 
-    gate = dict(ATTENTION_ALIGNMENT_GATE)
-    metadata = dict(record.get("metadata", {}))
-    metadata.update(gate)
-    metadata["attention_alignment_gate"] = dict(gate)
-    resolved = {**record, "metadata": metadata}
-    alignment = resolved.get("alignment")
-    if isinstance(alignment, dict):
-        alignment_metadata = dict(alignment.get("metadata", {}))
-        alignment_metadata["attention_alignment_gate"] = dict(gate)
-        resolved["alignment"] = {
-            **alignment,
-            **gate,
-            "metadata": alignment_metadata,
-        }
-    return resolved
+    return bind_formal_detection_record(record)
 
 
 def _prompt_rows() -> tuple[dict[str, object], ...]:

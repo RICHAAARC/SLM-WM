@@ -46,7 +46,9 @@ $$
 | `attention_anchor_count` | 12 |
 | `attention_residual_threshold` | 0.20 |
 | `attention_minimum_inlier_ratio` | 0.50 |
-| `lf_kernel_size` / `lf_stride` / `lf_padding` / `lf_boundary_mode` / `lf_count_include_pad` | 5 / 1 / 2 / `zero_padding` / `true` |
+| `lf_kernel_size` / `lf_stride` / `lf_padding` / `lf_boundary_mode` | 5 / 1 / 2 / `zero_padding` |
+| `lf_ceil_mode` / `lf_count_include_pad` / `lf_divisor_override` | `false` / `true` / `null` |
+| `lf_detection_score_weight` / `tail_robust_detection_score_weight` | 0.70 / 0.30 |
 | `tail_fraction` | 0.20 |
 | `attention_backtracking_factor` / `attention_backtracking_maximum_steps` | 0.5 / 8 |
 | `quantized_budget_envelope_backtracking_factor` / `quantized_budget_envelope_backtracking_maximum_steps` | 0.5 / 24 |
@@ -96,7 +98,7 @@ VAE decoder、VAE encoder、冻结 CLIP、扩散 Transformer、FlowMatch schedul
 
 ```text
 {
-  "formal_method_config_schema": "slm_wm_formal_method_runtime_config_v2",
+  "formal_method_config_schema": "slm_wm_formal_method_runtime_config_v4",
   "formal_method_config": asdict(C_method)
 }
 ```
@@ -355,15 +357,19 @@ domain_fields = {
 
 `public_detection_noise_prg_protocol` 必须等于 `sha256_counter_normal_icdf_table20_float32_v2`。上述 `key_material`、`domain_fields` 和 `shape` 进入本节定义的完整 stable JSON domain payload, 经 SHA-256、从0开始的16字节大端计数器、MSB-first 连续20位索引提取和冻结 Q20 表查询得到 CPU float32 Tensor；实际 latent dtype 转换在 CPU 完成, 随后才搬运到执行设备。该公开 domain 不含水印密钥、Prompt、生成 seed 或生成轨迹。
 
-CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `1895838d4a89b41e3692f6aad547a7feb9a698f1520bd81b83af457680476fc2`, 正式随机化协议摘要固定为 `a5389d2e72e331d81a7e7d0f9614a3ce801fbf432476f18208b5e366a9b12a64`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
+CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `2b7ab51c952abf74d145fd23694790b9de71fc6712b319fb10b3f46c9db0a0fe`, 正式随机化协议摘要固定为 `a5389d2e72e331d81a7e7d0f9614a3ce801fbf432476f18208b5e366a9b12a64`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
 
 ## `spatial_low_pass_and_amplitude_tail_carriers`
 
-LF 对每个 batch/channel 独立执行 kernel 5、stride 1、padding 2、`count_include_pad=true` 的二维平均池化。低通卷积只作用于 height/width, 不跨 batch 或 channel 传播样本值；池化完成后, 去均值和 L2 归一化明确在整个模板 Tensor 上各计算一个全局标量。
+LF 对每个 batch/channel 独立执行 kernel 5、stride 1、padding 2、零填充、`ceil_mode=false`、`count_include_pad=true` 和 `divisor_override=null` 的二维平均池化。低通卷积只作用于 height/width, 不跨 batch 或 channel 传播样本值；池化完成后, 去均值和 L2 归一化明确在整个模板 Tensor 上各计算一个全局标量。嵌入、raw 检测和 aligned 检测必须消费同一版本化 LF 协议；完整检测分数固定使用 LF 权重0.70与尾部权重0.30。
 
 `tail_robust` 按高斯模板元素的 $(|\nu_i|,-i)$ 降序稳定排序, 精确保留 $\lceil n\gamma\rceil$ 个元素, 其余位置保持精确0, 随后只除以整体二范数, 不执行会使非入选位置重新非零的去均值操作。该分支不执行 FFT、DCT、带通滤波或空间频率 mask, 不具有空间高频语义。
 
+尾部载体协议固定为 `slm_wm_tail_robust_carrier_protocol_v1`, 正文同时绑定 `tail_fraction`、绝对幅值降序且展平索引升序的选择规则和密钥 PRG 版本。仅图像检测记录必须保存模板 NCHW 形状、元素总数、$\lceil n\gamma\rceil$ 选中数、阈值、实际保留比例及模板内容摘要；raw 与 aligned 路径必须具有相同 latent 形状、LF 模板摘要、尾部模板摘要、尾部阈值和保留比例。
+
 两个模板分别投影到对应 $N_b$, 投影平方能量保留率低于0.01或投影方向近零时直接失败；最终更新必须再经过分支风险硬包络。
+
+载体构造时, 每个投影身份必须由模板 shape、规范模板内容摘要、投影方向内容摘要、Null Space 摘要、最小能量保留率、实际平方能量保留率、Tensor 摘要版本、PRG 摘要和载体协议摘要共同计算。正式样本记录不复制该内部摘要正文, 只保存模板摘要、模板内容摘要、模板 shape、协议摘要和投影能量比例。完整注入、carrier-only 反事实及 `registered_watermark_key` 检测必须对每个活动内容分支形成唯一相同的模板 shape、规范模板内容摘要和协议摘要；`registered_wrong_key_negative` 在自身 raw/aligned 路径中保持唯一模板身份, 使用相同载体协议, 且模板摘要必须与注册密钥不同。
 
 ## `direct_qk_four_component_relation`
 
@@ -626,6 +632,10 @@ s_c=0.70\operatorname{Corr}(\hat z,\nu_{\mathrm{LF}})
 +0.30\operatorname{Corr}(\hat z,\widetilde\nu_{\mathrm{tail}}).
 $$
 
+完整方法的0.70/0.30权重、LF 协议摘要、尾部协议摘要和 `tail_fraction` 随 calibration clean negatives 一起进入唯一 `threshold_digest`。应用冻结阈值前必须从全部协议字段重新计算该摘要, 并由计数重算 calibration 假阳性率；test、攻击和消融记录不得替换任一载体协议或权重。
+
+仅图像检测密钥计划固定包含 `registered_watermark_key` 与 `registered_wrong_key_negative` 两个角色。wrong-key 由 `registered_key_and_sha256_domain_separated_wrong_key_v1` 从当前注册水印密钥确定性派生；记录只保存两个材料摘要、版本化计划正文和计划摘要, 不保存密钥原文。完整注入与 carrier-only 更新中的 `watermark_key_material_digest_random` 必须等于计划中的注册密钥摘要；注册密钥检测模板必须与嵌入模板相同, wrong-key 模板必须在每个分支内部唯一且与注册密钥模板不同。只修改 `sample_role` 不能建立 wrong-key 证据。
+
 检测 Q/K 的公开 schedule 索引和实际 timestep 精确为
 
 $$
@@ -660,27 +670,37 @@ $$
 检测端只在 raw 图像 Q/K 上盲选一次稳定 token。对公开有界相似仿射与方形二面体候选 $T$, 关系拉回和密钥前推为
 
 $$
-\widehat R_{T,c}=W_TR_{\mathrm{obs},c}W_T^\top,
+\widehat R_{T,c}^{(l)}=W_TR_{\mathrm{obs},c}^{(l)}W_T^\top,
 \qquad
-\widetilde S_{T,c}=V_T(\pi_cS_K)V_T^\top.
+\widetilde S_{T,c}^{(l)}=V_T(\pi_cS_K^{(l)})V_T^\top.
 $$
 
 观测权重为 $w_{\mathrm{obs}}$；规范权重先传递单点权重 $a_{\mathrm{can},T}=W_Ta_{\mathrm{obs}}$, 再执行非对角外积, 不能用 $W_Tw_{\mathrm{obs}}W_T^\top$ 代替。双向分数和注册目标为
 
 $$
-s_{\mathrm{can}}(T)=\frac14\sum_c
-\operatorname{RowCorr}_{w_{\mathrm{can},T}}(\widehat R_{T,c},S_{K,c}),
+s_{\mathrm{can}}(T,l)=\frac14\sum_c
+\operatorname{RowCorr}_{w_{\mathrm{can},T}}(\widehat R_{T,c}^{(l)},S_{K,c}^{(l)}),
 $$
 
 $$
-s_{\mathrm{obs}}(T)=\frac14\sum_c
-\operatorname{RowCorr}_{w_{\mathrm{obs}}}(R_{\mathrm{obs},c},\widetilde S_{T,c}),
+s_{\mathrm{obs}}(T,l)=\frac14\sum_c
+\operatorname{RowCorr}_{w_{\mathrm{obs}}}(R_{\mathrm{obs},c}^{(l)},\widetilde S_{T,c}^{(l)}),
 $$
 
 $$
-J(T)=0.10s_{\mathrm{can}}(T)+0.90s_{\mathrm{obs}}(T)
+J(T,l)=0.10s_{\mathrm{can}}(T,l)+0.90s_{\mathrm{obs}}(T,l)
 -0.01\sum_{q\in\{c_{\mathrm{can}},u_{\mathrm{can}},c_{\mathrm{obs}},u_{\mathrm{obs}}\}}(1-q).
 $$
+
+冻结层有序集合精确为 $\mathcal L=(\texttt{transformer\_blocks.0.attn},\texttt{transformer\_blocks.23.attn})$。每层先独立完成层内搜索并得到 $\widehat T_l$；跨层结果按
+
+$$
+(\widehat l,\widehat T)=
+\operatorname*{lexargmax}_{l\in\mathcal L}
+\left(J(\widehat T_l,l),s_{\mathrm{obs}}(\widehat T_l,l),r_{\mathrm{reg}}(\widehat T_l,l),-\operatorname{rank}_{\mathcal L}(l)\right)
+$$
+
+唯一选择。比较优先级依次是注册目标、观测关系分和注册置信度；三者完全相同时选择冻结层顺序中更靠前的层。检测器不得依赖回调或容器的偶然遍历顺序改变该裁决。
 
 搜索定义域固定为残余旋转 $[-32,32]$ 度、均匀尺度 $[1/\sqrt2,\sqrt2]$ 和两个归一化平移分量 $[-0.28,0.28]$, 并使用三层三分局部细化；搜索器不得读取攻击参数。结构可靠性要求观测和双向关系分数为正、相对 identity 的目标间隔为正、两个方向覆盖率均不低于0.45, 并通过下述预注册结构门禁。aligned 图像重新提取真实 Q/K 后, 使用传递的同一 pair 身份计算 sync, 不重新选择稳定 token。
 
@@ -701,7 +721,19 @@ r_{\mathrm{inlier}}
 r_{\mathrm{inlier}}\ge0.50.
 $$
 
-无有效覆盖锚点时 $r_{\mathrm{inlier}}=0$；无内点时平均内点残差为非有限失败值。`attention_anchor_count=12`、`attention_residual_threshold=0.20` 和 `attention_minimum_inlier_ratio=0.50` 是正式方法的预注册结构常量, 必须进入唯一方法配置摘要、对齐摘要、检测器摘要、冻结阈值摘要以及相应 records、summary 和 manifest。calibration 或 test 数据不得选择、放宽或替换这三项常量；任一字段缺失、数值漂移、摘要未绑定或记录之间不一致都使证据闭合失败。
+无有效覆盖锚点时 $r_{\mathrm{inlier}}=0$；无内点时平均内点残差为非有限失败值。`attention_anchor_count=12`、`attention_residual_threshold=0.20` 和 `attention_minimum_inlier_ratio=0.50` 是正式方法的预注册结构常量。完整检测器配置只保存在顶层运行 manifest；alignment 和样本记录保存决策所需字段及检测器配置摘要, calibration/test 必须绑定同一摘要。calibration 或 test 数据不得选择、放宽或替换这三项常量；任一决策字段缺失、数值漂移或配置摘要不一致都使证据闭合失败。
+
+令内点平均残差为 $e_{\mathrm{affine}}$, 则跨层裁决与 calibration 共同使用的注册置信度精确定义为
+
+$$
+r_{\mathrm{reg}}=
+\max(0,0.10s_{\mathrm{can}}+0.90s_{\mathrm{obs}})
+\cdot r_{\mathrm{inlier}}
+\cdot\exp(-e_{\mathrm{affine}})
+\cdot\min(c_{\mathrm{can}},c_{\mathrm{obs}}).
+$$
+
+使用 $\widehat T$ 恢复待检图像时, 输入先解码为 RGB uint8 Tensor 并归一化到 $[0,1]$。仿射网格和图像采样固定采用 bilinear、`padding_mode=border` 与 `align_corners=true`。连续结果执行 $\operatorname{floor}(255\cdot\operatorname{clip}(x,0,1))$, 转回 RGB uint8 后才进入 aligned VAE 编码和 Q/K 重提取。
 
 calibration clean negatives 只冻结内容阈值 $\tau_c$、几何关系分阈值、注册置信度阈值、恢复后同步分阈值和 rescue window。失败原因由冻结内容余量与几何可靠性布尔规则确定, 不作为可从 calibration 或 test 调参的独立机制。原图主判为
 

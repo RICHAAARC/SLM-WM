@@ -1,8 +1,8 @@
 {
   "registry_schema": "slm_wm_method_semantic_registry_v1",
   "registry_scope": "normative_traceability_without_scientific_conformance_decision",
-  "method_definition_schema": "slm_wm_constructive_local_tangent_v6",
-  "method_definition_digest": "1895838d4a89b41e3692f6aad547a7feb9a698f1520bd81b83af457680476fc2",
+  "method_definition_schema": "slm_wm_constructive_local_tangent_v9",
+  "method_definition_digest": "2b7ab51c952abf74d145fd23694790b9de71fc6712b319fb10b3f46c9db0a0fe",
   "invariants": [
     {
       "invariant_id": "constructive_local_tangent_scope",
@@ -697,7 +697,10 @@
       "invariant_id": "spatial_low_pass_and_amplitude_tail_carriers",
       "definition_pointer": "docs/builds/method_semantic_invariants.md#spatial_low_pass_and_amplitude_tail_carriers",
       "formal_expression": [
-        "lf_template=global_center_then_l2_normalize(avg_pool2d(keyed_gaussian,kernel,stride=1,padding=2,count_include_pad=true))",
+        "lf_template=global_center_then_l2_normalize(avg_pool2d(keyed_gaussian,kernel=5,stride=1,padding=2,ceil_mode=false,count_include_pad=true,divisor_override=null))",
+        "lf_boundary_mode=zero_padding",
+        "lf_pooling_axes=height_width_only_with_batch_channel_isolation",
+        "content_score=0.70*lf_score+0.30*tail_robust_score",
         "tail_count=ceil(element_count*tail_fraction)",
         "tail_order=descending(abs(value),ascending(flat_index))",
         "tail_nonselected_coordinates=exact_zero",
@@ -709,7 +712,11 @@
         "lf_stride",
         "lf_padding",
         "lf_boundary_mode",
+        "lf_ceil_mode",
         "lf_count_include_pad",
+        "lf_divisor_override",
+        "lf_detection_score_weight",
+        "tail_robust_detection_score_weight",
         "tail_fraction",
         "keyed_prg_version",
         "minimum_projection_energy_retention",
@@ -723,21 +730,64 @@
         },
         {
           "path": "main/methods/carrier/keyed_tensor.py",
+          "symbol": "LowFrequencyCarrierConfig"
+        },
+        {
+          "path": "main/methods/carrier/keyed_tensor.py",
+          "symbol": "validate_low_frequency_carrier_protocol_record"
+        },
+        {
+          "path": "main/methods/carrier/keyed_tensor.py",
           "symbol": "build_tail_robust_template"
         },
         {
           "path": "main/methods/carrier/keyed_tensor.py",
+          "symbol": "validate_tail_robust_carrier_protocol_record"
+        },
+        {
+          "path": "main/methods/carrier/keyed_tensor.py",
           "symbol": "project_canonical_template"
+        },
+        {
+          "path": "main/methods/detection/image_only.py",
+          "symbol": "detect_image_only_watermark"
         }
       ],
       "runtime_binding_symbols": [
         {
           "path": "experiments/runners/semantic_watermark_runtime.py",
           "symbol": "run_semantic_watermark_runtime"
+        },
+        {
+          "path": "experiments/runners/image_only_dataset_runtime.py",
+          "symbol": "validate_detection_content_carrier_protocol"
+        },
+        {
+          "path": "experiments/protocol/detection_key_identity.py",
+          "symbol": "validate_detection_key_identity_record"
         }
       ],
       "runtime_evidence_fields": [
         "lf_template_digest",
+        "lf_template_content_sha256",
+        "tail_template_content_sha256",
+        "tail_carrier_protocol_digest",
+        "lf_carrier_protocol_digest",
+        "lf_weight",
+        "tail_robust_weight",
+        "aligned_lf_score",
+        "aligned_tail_robust_score",
+        "tail_template_shape",
+        "tail_template_element_count",
+        "tail_selected_element_count",
+        "tail_threshold",
+        "tail_retained_fraction",
+        "content_carrier_cross_path_identity",
+        "detection_key_role",
+        "detection_key_material_digest_random",
+        "detection_key_plan",
+        "detection_key_plan_digest_random",
+        "detector_digest",
         "tail_template_digest",
         "lf_projection_energy_retention",
         "tail_projection_energy_retention",
@@ -745,6 +795,17 @@
       ],
       "fail_closed_conditions": [
         "invalid_tail_fraction",
+        "lf_carrier_protocol_missing_or_digest_mismatch",
+        "lf_carrier_protocol_type_or_value_drift",
+        "embedding_detection_lf_protocol_identity_mismatch",
+        "content_detection_weight_identity_mismatch",
+        "calibration_test_lf_protocol_identity_mismatch",
+        "tail_carrier_protocol_missing_or_digest_mismatch",
+        "aligned_template_reconstruction_mismatch",
+        "calibration_test_tail_protocol_identity_mismatch",
+        "embedding_detection_template_content_identity_mismatch",
+        "embedding_detection_registered_key_identity_mismatch",
+        "wrong_key_role_or_plan_identity_mismatch",
         "tail_retained_count_mismatch",
         "carrier_projection_energy_below_minimum",
         "carrier_direction_zero"
@@ -755,6 +816,8 @@
         "spatial_high_frequency_claim",
         "batch_axis_low_pass",
         "channel_axis_low_pass",
+        "implicit_avg_pool2d_defaults",
+        "detector_side_hardcoded_lf_protocol",
         "unprojected_canonical_embedding"
       ],
       "cpu_property_id": "lf_is_two_dimensional_low_pass_and_tail_is_amplitude_order_statistic",
@@ -769,14 +832,16 @@
       ],
       "gpu_atomic_roles": [
         "lf_canonical_template",
+        "lf_carrier_protocol_identity",
+        "lf_template_content_identity",
         "tail_canonical_template",
         "lf_projected_direction",
         "tail_projected_direction",
         "lf_written_update",
         "tail_written_update"
       ],
-      "gpu_observation_requirement": "真实 latent shape 上的 LF 与尾部模板身份、投影能量和分支更新必须进入同一注入记录。",
-      "claim_boundary": "LF 只在二维空间轴执行低通；tail_robust 只按高斯元素绝对幅值和展平索引稳定截断，不具有空间频率含义。"
+      "gpu_observation_requirement": "真实 latent shape 上的 LF 与尾部载体协议摘要、模板内容身份、投影能量和分支更新必须进入同一注入记录；注册密钥 raw/aligned/攻击检测必须与嵌入共享模板身份, wrong-key raw/aligned 必须内部唯一且与注册模板不同。",
+      "claim_boundary": "LF 只在二维空间轴执行冻结的零填充平均低通；tail_robust 只按高斯元素绝对幅值和展平索引稳定截断, 不具有空间频率含义。两类检测密钥角色共享载体协议；注册密钥检测与嵌入共享模板身份, wrong-key 模板保持角色内唯一且与注册模板不同。"
     },
     {
       "invariant_id": "direct_qk_four_component_relation",
@@ -1382,10 +1447,13 @@
       "definition_pointer": "docs/builds/method_semantic_invariants.md#image_only_detection_boundary",
       "formal_expression": [
         "decision=detector(image,key,public_model_config)",
+        "detector_config_digest=sha256(frozen_detector_method_parameters)",
         "public_detection_noise=versioned_key_prg_reconstruction(public_detection_noise_role,public_model_identity,image_shape,public_detection_schedule_index)",
         "content_threshold=frozen_from_calibration_clean_negatives",
         "rescue_content_threshold=content_threshold",
-        "alignment_structure_gate=preregistered(anchor_count=12,residual_threshold=0.20,minimum_inlier_ratio=0.50)"
+        "alignment_structure_gate=preregistered(anchor_count=12,residual_threshold=0.20,minimum_inlier_ratio=0.50)",
+        "alignment_layer=lexicographic_argmax(registration_objective,observation_relation,registration_confidence,negative_frozen_layer_rank)",
+        "aligned_rgb_uint8=floor(255*clip(grid_sample(image,bilinear,border,align_corners_true),0,1))"
       ],
       "configuration_fields": [
         "detector_input_access_mode",
@@ -1397,6 +1465,10 @@
         "keyed_prg_version",
         "tail_fraction",
         "attention_module_names",
+        "attention_alignment_layer_selection_rule",
+        "image_alignment_resampling_mode",
+        "image_alignment_padding_mode",
+        "image_alignment_quantization_protocol",
         "attention_stable_token_fraction",
         "attention_unstable_pair_weight",
         "attention_relation_component_weights",
@@ -1421,6 +1493,14 @@
           "symbol": "recover_attention_affine_alignment"
         },
         {
+          "path": "main/methods/geometry/attention_alignment.py",
+          "symbol": "resample_attention_aligned_rgb_uint8"
+        },
+        {
+          "path": "main/methods/detection/image_only.py",
+          "symbol": "select_image_only_alignment_candidate"
+        },
+        {
           "path": "main/methods/detection/image_only.py",
           "symbol": "detect_image_only_watermark"
         }
@@ -1442,6 +1522,12 @@
         "threshold_source",
         "same_threshold_rescue_source",
         "formal_method_config_digest",
+        "image_only_detector_config_digest",
+        "attention_module_names",
+        "attention_alignment_layer_selection_rule",
+        "image_alignment_resampling_mode",
+        "image_alignment_padding_mode",
+        "image_alignment_quantization_protocol",
         "attention_alignment_gate",
         "attention_anchor_count",
         "attention_residual_threshold",
@@ -1459,7 +1545,11 @@
         "rescue_threshold_identity_mismatch",
         "image_reencoding_missing",
         "required_qk_reextraction_missing",
-        "alignment_structure_gate_missing_or_drifted"
+        "alignment_structure_gate_missing_or_drifted",
+        "calibration_test_detector_config_digest_mismatch",
+        "alignment_decision_field_mismatch",
+        "alignment_layer_order_or_selection_mismatch",
+        "aligned_image_resampling_protocol_drift"
       ],
       "forbidden_substitutes": [
         "prompt_conditioned_detection",
@@ -1467,11 +1557,16 @@
         "sampling_trajectory_detection",
         "sample_null_space_detection",
         "generation_qk_atom_reuse",
-        "separate_rescue_threshold"
+        "separate_rescue_threshold",
+        "implicit_detector_parameter_defaults",
+        "implicit_callback_order_alignment_tie_break",
+        "alternate_aligned_image_padding_or_quantization"
       ],
       "cpu_property_id": "detector_signature_and_runtime_reject_generation_private_state",
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_image_only_detector_interface_and_positive_content_path",
+        "tests/functional/test_attention_affine_protocol_geometry.py::test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
+        "tests/functional/test_real_scientific_operators.py::test_image_alignment_quantizes_fractional_rgb_with_floor",
         "tests/functional/test_attack_matrix.py::test_attack_matrix_rejects_non_blind_detection_records",
         "tests/functional/test_model_source_registry.py::test_runtime_detector_config_consumes_formal_alignment_gate"
       ],
@@ -1488,7 +1583,7 @@
         "public_detection_noise_evidence_bundle"
       ],
       "gpu_observation_requirement": "真实检测记录只能绑定待检图像、密钥、公开模型、冻结阈值和图像重编码证据。",
-      "claim_boundary": "检测器不得读取 Prompt、源 latent、采样轨迹、样本级 Null Space 或生成端注意力原子；锚点数量、归一化坐标残差和最小内点比例是预注册方法常量，不由 calibration 或 test 样本调参。"
+      "claim_boundary": "检测器不得读取 Prompt、源 latent、采样轨迹、样本级 Null Space 或生成端注意力原子；所有检测器方法参数必须显式提供，calibration 与 test 必须绑定同一配置摘要；锚点数量、归一化坐标残差和最小内点比例是预注册方法常量，不由 calibration 或 test 样本调参。"
     },
     {
       "invariant_id": "same_threshold_geometry_rescue",
@@ -1499,13 +1594,20 @@
         "rescue=rescue_eligible_and((aligned_content_score-content_threshold)>=0)",
         "evidence_positive=positive_content_or_rescue",
         "raw_and_aligned_detection_bind_public_detection_noise_evidence",
-        "registration_geometry_gate=(requested_anchor_count=12,residual<=0.20,inlier_ratio>=0.50)"
+        "registration_geometry_gate=(requested_anchor_count=12,residual<=0.20,inlier_ratio>=0.50)",
+        "alignment_layer=lexicographic_argmax(registration_objective,observation_relation,registration_confidence,negative_frozen_layer_rank)",
+        "aligned_rgb_uint8=floor(255*clip(grid_sample(image,bilinear,border,align_corners_true),0,1))"
       ],
       "configuration_fields": [
         "detector_input_access_mode",
         "attention_stable_token_fraction",
         "attention_unstable_pair_weight",
         "attention_relation_component_weights",
+        "attention_module_names",
+        "attention_alignment_layer_selection_rule",
+        "image_alignment_resampling_mode",
+        "image_alignment_padding_mode",
+        "image_alignment_quantization_protocol",
         "attention_anchor_count",
         "attention_residual_threshold",
         "attention_minimum_inlier_ratio"
@@ -1518,6 +1620,14 @@
         {
           "path": "main/methods/geometry/attention_alignment.py",
           "symbol": "recover_attention_affine_alignment"
+        },
+        {
+          "path": "main/methods/geometry/attention_alignment.py",
+          "symbol": "resample_attention_aligned_rgb_uint8"
+        },
+        {
+          "path": "main/methods/detection/image_only.py",
+          "symbol": "select_image_only_alignment_candidate"
         },
         {
           "path": "main/methods/detection/image_only.py",
@@ -1540,11 +1650,20 @@
         "threshold_source",
         "same_threshold_rescue_source",
         "decision_scope",
+        "image_only_detector_config_digest",
         "attention_alignment_gate",
         "attention_anchor_count",
         "attention_residual_threshold",
         "attention_minimum_inlier_ratio",
         "alignment_digest",
+        "attention_geometry_score",
+        "registration_confidence",
+        "geometry_reliable",
+        "attention_module_names",
+        "attention_alignment_layer_selection_rule",
+        "image_alignment_resampling_mode",
+        "image_alignment_padding_mode",
+        "image_alignment_quantization_protocol",
         "public_detection_noise_content_sha256",
         "public_detection_noise_prg_identity_digest",
         "public_detection_noise_evidence_digest",
@@ -1558,18 +1677,26 @@
         "registration_gate_failed",
         "alignment_structure_gate_missing_or_drifted",
         "aligned_content_reencoding_missing",
-        "threshold_dependent_reason_stale"
+        "threshold_dependent_reason_stale",
+        "calibration_test_detector_config_digest_mismatch",
+        "alignment_decision_field_mismatch",
+        "alignment_layer_order_or_selection_mismatch",
+        "aligned_image_resampling_protocol_drift"
       ],
       "forbidden_substitutes": [
         "independent_rescue_threshold",
         "geometry_score_direct_positive",
         "test_split_threshold_tuning",
         "temporary_failure_reason_reuse",
-        "aligned_score_without_reencoding"
+        "aligned_score_without_reencoding",
+        "implicit_callback_order_alignment_tie_break",
+        "alternate_aligned_image_padding_or_quantization"
       ],
       "cpu_property_id": "geometry_rescue_reuses_the_calibrated_content_threshold_and_cannot_vote_positive_alone",
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_complete_evidence_calibration_includes_geometry_rescue",
+        "tests/functional/test_attention_affine_protocol_geometry.py::test_cross_layer_alignment_selection_uses_frozen_lexicographic_rule",
+        "tests/functional/test_real_scientific_operators.py::test_image_alignment_quantizes_fractional_rgb_with_floor",
         "tests/functional/test_real_scientific_operators.py::test_frozen_protocol_recomputes_threshold_dependent_failure_reason",
         "tests/functional/test_fixed_fpr_threshold_audit.py::test_main_method_threshold_audit_recomputes_complete_rescue_protocol",
         "tests/functional/test_real_scientific_operators.py::test_frozen_evidence_protocol_rejects_alignment_gate_drift"
@@ -1588,7 +1715,7 @@
         "public_detection_noise_evidence_bundle"
       ],
       "gpu_observation_requirement": "真实 calibration 和 test 记录必须绑定同一个内容阈值及完整 rescue 规则。",
-      "claim_boundary": "几何只负责恢复参考系，不能独立产生 positive；12个锚点、0.20归一化坐标残差上界和0.50最小内点比例属于预注册方法定义，calibration 只冻结运行点阈值。"
+      "claim_boundary": "几何只负责恢复参考系，不能独立产生 positive；alignment 内的关系同步分、注册置信度与可靠性必须和检测器决策字段一致；12个锚点、0.20归一化坐标残差上界和0.50最小内点比例属于预注册方法定义，calibration 只冻结运行点阈值。"
     },
     {
       "invariant_id": "scientific_content_binding",

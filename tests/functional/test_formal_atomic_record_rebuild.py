@@ -34,6 +34,7 @@ from paper_experiments.analysis.formal_record_statistics import (
 from tests.helpers.scientific_unit_provenance import (
     build_test_scientific_unit_provenance,
 )
+from tests.helpers.formal_detection_record import bind_formal_detection_record
 
 
 TARGET_FPR = 0.1
@@ -61,33 +62,12 @@ PROMPT_DIGESTS = {
     )
     for prompt_id in PROMPT_SPLITS
 }
-ATTENTION_ALIGNMENT_GATE = {
-    "attention_anchor_count": 12,
-    "attention_residual_threshold": 0.20,
-    "attention_minimum_inlier_ratio": 0.50,
-}
-
-
 def _bind_attention_alignment_gate(
     record: dict[str, Any],
 ) -> dict[str, Any]:
     """为检测夹具绑定预注册注意力配准门禁."""
 
-    gate = dict(ATTENTION_ALIGNMENT_GATE)
-    metadata = dict(record.get("metadata", {}))
-    metadata.update(gate)
-    metadata["attention_alignment_gate"] = dict(gate)
-    resolved = {**record, "metadata": metadata}
-    alignment = resolved.get("alignment")
-    if isinstance(alignment, dict):
-        alignment_metadata = dict(alignment.get("metadata", {}))
-        alignment_metadata["attention_alignment_gate"] = dict(gate)
-        resolved["alignment"] = {
-            **alignment,
-            **gate,
-            "metadata": alignment_metadata,
-        }
-    return resolved
+    return bind_formal_detection_record(record)
 
 
 def _raw_detection(
@@ -368,6 +348,7 @@ def test_ablation_runtime_aggregates_rebuild_from_detection_atoms() -> None:
         "detection_split",
         "prompt_digest",
         "threshold_digest",
+        "lf_carrier_identity",
     ),
 )
 def test_ablation_runtime_aggregate_rebuild_fails_closed_on_drift(
@@ -394,8 +375,24 @@ def test_ablation_runtime_aggregate_rebuild_fails_closed_on_drift(
         detections[0]["split"] = "test"
     elif mutation == "prompt_digest":
         runtime_records[0]["prompt_digest"] = "f" * 64
-    else:
+    elif mutation == "threshold_digest":
         protocols["complete_method"]["threshold_digest"] = "f" * 64
+    else:
+        target = next(
+            record
+            for record in detections
+            if record["split"] == "test"
+            and record["sample_role"] == "positive_source"
+            and not record.get("attack_id")
+        )
+        target.update(
+            bind_formal_detection_record(
+                target,
+                lf_weight=1.0,
+                tail_robust_weight=0.0,
+                tail_fraction=1.0,
+            )
+        )
 
     with pytest.raises(FormalRecordStatisticsError):
         rebuild_and_validate_ablation_runtime_aggregates(

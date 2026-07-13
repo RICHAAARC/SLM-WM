@@ -12,6 +12,7 @@ from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
     semantic_watermark_runtime_config_payload,
 )
+from main.methods.carrier import build_low_frequency_template
 from main.methods.detection import ImageOnlyDetectionConfig
 from main.methods.geometry import recover_attention_affine_alignment
 from main.methods.method_definition import (
@@ -36,7 +37,7 @@ PRIMITIVE_DOCUMENT = (
 )
 FIELD_REGISTRY = ROOT / "docs" / "field_registry.md"
 EXPECTED_METHOD_DEFINITION = {
-    "method_definition_schema": "slm_wm_constructive_local_tangent_v6",
+    "method_definition_schema": "slm_wm_constructive_local_tangent_v9",
     "method_name": "semantic_conditioned_latent_manifold_watermarking",
     "update_construction": {
         "semantics": "branchwise_constructive_safe_subspace_updates",
@@ -110,11 +111,38 @@ EXPECTED_METHOD_DEFINITION = {
         ),
     },
     "carrier_normalization": {
+        "lf_carrier_protocol_schema": (
+            "slm_wm_low_frequency_carrier_protocol_v1"
+        ),
+        "lf_kernel_size": 5,
+        "lf_stride": 1,
+        "lf_padding": 2,
+        "lf_boundary_mode": "zero_padding",
+        "lf_ceil_mode": False,
+        "lf_count_include_pad": True,
+        "lf_divisor_override": None,
+        "lf_pooling_axes": "height_width_only",
+        "lf_batch_channel_isolation": True,
         "lf_content_rule": "subtract_global_mean_then_l2_normalize",
+        "lf_normalization_scope": "global_tensor",
+        "lf_detection_score_weight": 0.70,
+        "tail_robust_detection_score_weight": 0.30,
         "tail_robust_rule": (
             "amplitude_truncate_then_l2_normalize_without_mean_centering"
         ),
+        "tail_carrier_protocol_schema": (
+            "slm_wm_tail_robust_carrier_protocol_v1"
+        ),
+        "tail_selection_rule": (
+            "descending_absolute_value_then_ascending_flat_index"
+        ),
         "tail_nonselected_coordinate_rule": "exact_zero_after_normalization",
+        "raw_aligned_template_identity_rule": (
+            "same_shape_same_key_same_protocol_exact_content_digest"
+        ),
+        "fixed_fpr_carrier_identity_rule": (
+            "lf_and_tail_protocol_digests_frozen_from_calibration"
+        ),
     },
     "attention_geometry": {
         "relation_source": "direct_to_q_to_k_sampled_image_token_subgraph",
@@ -133,6 +161,17 @@ EXPECTED_METHOD_DEFINITION = {
         "full_joint_attention_all_tokens_optimized": False,
     },
     "image_only_alignment": {
+        "attention_module_names": [
+            "transformer_blocks.0.attn",
+            "transformer_blocks.23.attn",
+        ],
+        "cross_layer_selection_rule": (
+            "lexicographic_objective_observation_confidence_"
+            "then_frozen_layer_order_v1"
+        ),
+        "cross_layer_tie_break_rule": (
+            "earlier_frozen_attention_module_name"
+        ),
         "anchor_selection_rule": (
             "evenly_spaced_over_sampled_token_index_range"
         ),
@@ -147,6 +186,11 @@ EXPECTED_METHOD_DEFINITION = {
             "normalized_xy_token_centers_corner_endpoints_v1"
         ),
         "attention_grid_align_corners": True,
+        "image_resampling_mode": "bilinear",
+        "image_padding_mode": "border",
+        "image_quantization_protocol": (
+            "clamp_0_1_multiply_255_floor_uint8_rgb_v1"
+        ),
         "gate_parameter_source": (
             "preregistered_formal_method_configuration"
         ),
@@ -221,7 +265,7 @@ EXPECTED_METHOD_DEFINITION = {
     ],
 }
 EXPECTED_METHOD_DEFINITION_DIGEST = (
-    "1895838d4a89b41e3692f6aad547a7feb9a698f1520bd81b83af457680476fc2"
+    "2b7ab51c952abf74d145fd23694790b9de71fc6712b319fb10b3f46c9db0a0fe"
 )
 
 
@@ -231,7 +275,7 @@ def test_machine_readable_method_definition_freezes_constructive_semantics() -> 
 
     definition = semantic_conditioned_latent_method_definition()
 
-    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v6"
+    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v9"
     assert definition == EXPECTED_METHOD_DEFINITION
     assert definition["update_construction"]["joint_argmax_solved"] is False
     assert (
@@ -319,3 +363,19 @@ def test_attention_alignment_gate_has_no_core_fallback_defaults() -> None:
         field = ImageOnlyDetectionConfig.__dataclass_fields__[field_name]
         assert field.default is MISSING
         assert field.default_factory is MISSING
+
+
+@pytest.mark.constraint
+def test_low_frequency_carrier_has_no_core_fallback_defaults() -> None:
+    """LF 构造和检测配置必须要求调用方显式提供完整协议."""
+
+    signature = inspect.signature(build_low_frequency_template)
+    assert (
+        signature.parameters["low_frequency_config"].default
+        is inspect.Parameter.empty
+    )
+    field = ImageOnlyDetectionConfig.__dataclass_fields__[
+        "low_frequency_config"
+    ]
+    assert field.default is MISSING
+    assert field.default_factory is MISSING

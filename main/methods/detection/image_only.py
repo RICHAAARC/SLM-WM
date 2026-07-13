@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
-from main.core.digest import build_stable_digest
+from main.core.digest import build_stable_digest, tensor_content_sha256
 from main.methods.carrier.keyed_tensor import (
     BlindContentScore,
+    LowFrequencyCarrierConfig,
     build_low_frequency_template,
     build_tail_robust_template,
     compute_blind_content_score,
+    tail_robust_carrier_protocol_record,
+    validate_low_frequency_carrier_protocol_record,
+    validate_tail_robust_carrier_protocol_record,
 )
 from main.core.keyed_prg import (
     KEYED_PRG_VERSION,
@@ -18,14 +23,18 @@ from main.core.keyed_prg import (
     require_supported_keyed_prg_version,
 )
 from main.methods.geometry.attention_alignment import (
+    ATTENTION_IMAGE_PADDING_MODE,
+    ATTENTION_IMAGE_QUANTIZATION_PROTOCOL,
+    ATTENTION_IMAGE_RESAMPLING_MODE,
     AttentionAlignmentResult,
     attention_alignment_gate_record,
     recover_attention_affine_alignment,
     validate_attention_alignment_gate,
+    validate_attention_alignment_record,
 )
 from main.methods.geometry.differentiable_attention import (
-    ATTENTION_RELATION_COMPONENT_WEIGHTS,
     DIRECT_QK_RELATION_SOURCE,
+    FROZEN_SD35_ATTENTION_MODULE_NAMES,
     attention_geometry_score,
     attention_relation_component_protocol,
     build_attention_relation_graph_identity,
@@ -41,6 +50,10 @@ ImageLatentEncoder = Callable[[Any], Any]
 AttentionRecord = tuple[str, Any, tuple[int, ...]]
 ImageAttentionExtractor = Callable[[Any], tuple[AttentionRecord, ...]]
 ImageAligner = Callable[[Any, AttentionAlignmentResult], Any]
+IMAGE_ONLY_DETECTOR_CONFIG_SCHEMA = "slm_wm_image_only_detector_config_v2"
+ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE = (
+    "lexicographic_objective_observation_confidence_then_frozen_layer_order_v1"
+)
 
 
 @dataclass(frozen=True)
@@ -48,29 +61,83 @@ class ImageOnlyDetectionConfig:
     """定义仅图像检测允许使用的公开参数和冻结阈值。"""
 
     model_id: str
+    attention_module_names: tuple[str, ...]
     content_threshold: float
     geometry_score_threshold: float
     attention_anchor_count: int
     attention_residual_threshold: float
     attention_minimum_inlier_ratio: float
-    keyed_prg_version: str = KEYED_PRG_VERSION
-    registration_confidence_threshold: float = 0.0
-    attention_sync_score_threshold: float = 0.0
-    rescue_margin_low: float = -0.05
-    lf_weight: float = 0.70
-    tail_robust_weight: float = 0.30
-    tail_fraction: float = 0.20
-    attention_stable_token_fraction: float = 0.50
-    attention_unstable_pair_weight: float = 0.25
-    attention_relation_component_weights: tuple[float, ...] = (
-        ATTENTION_RELATION_COMPONENT_WEIGHTS
-    )
+    low_frequency_config: LowFrequencyCarrierConfig
+    lf_weight: float
+    tail_robust_weight: float
+    tail_fraction: float
+    keyed_prg_version: str
+    registration_confidence_threshold: float
+    attention_sync_score_threshold: float
+    rescue_margin_low: float
+    attention_stable_token_fraction: float
+    attention_unstable_pair_weight: float
+    attention_relation_component_weights: tuple[float, ...]
 
     def __post_init__(self) -> None:
         """集中校验冻结检测协议。"""
 
-        if not 0.0 < self.tail_fraction <= 1.0:
+        if type(self.model_id) is not str or not self.model_id:
+            raise ValueError("model_id 必须为非空精确 str")
+        if self.attention_module_names != FROZEN_SD35_ATTENTION_MODULE_NAMES:
+            raise ValueError("attention_module_names 必须等于冻结 SD3.5 层顺序")
+        for field_name, value in (
+            ("content_threshold", self.content_threshold),
+            ("geometry_score_threshold", self.geometry_score_threshold),
+            (
+                "registration_confidence_threshold",
+                self.registration_confidence_threshold,
+            ),
+            (
+                "attention_sync_score_threshold",
+                self.attention_sync_score_threshold,
+            ),
+            ("rescue_margin_low", self.rescue_margin_low),
+            (
+                "attention_stable_token_fraction",
+                self.attention_stable_token_fraction,
+            ),
+            (
+                "attention_unstable_pair_weight",
+                self.attention_unstable_pair_weight,
+            ),
+        ):
+            if type(value) is not float or not math.isfinite(value):
+                raise ValueError(f"{field_name} 必须为有限精确 float")
+        if not isinstance(
+            self.low_frequency_config,
+            LowFrequencyCarrierConfig,
+        ):
+            raise TypeError(
+                "low_frequency_config 必须为 LowFrequencyCarrierConfig"
+            )
+        if (
+            type(self.lf_weight) is not float
+            or type(self.tail_robust_weight) is not float
+            or not 0.0 <= self.lf_weight <= 1.0
+            or not 0.0 <= self.tail_robust_weight <= 1.0
+        ):
+            raise ValueError("内容分支权重必须为 [0, 1] 内的精确 float")
+        if type(self.tail_fraction) is not float or not 0.0 < self.tail_fraction <= 1.0:
             raise ValueError("tail_fraction 必须位于 (0, 1]")
+        if (
+            type(self.attention_residual_threshold) is not float
+            or type(self.attention_minimum_inlier_ratio) is not float
+        ):
+            raise ValueError("注意力配准连续门禁必须为精确 float")
+        if (
+            type(self.attention_relation_component_weights) is not tuple
+            or any(
+                type(value) is not float
+                for value in self.attention_relation_component_weights
+            )
+        ):
+            raise ValueError("注意力关系分量权重必须为精确 float 元组")
         validate_attention_alignment_gate(
             self.attention_anchor_count,
             self.attention_residual_threshold,
@@ -100,12 +167,144 @@ class ImageOnlyDetectionConfig:
         )
 
 
+def select_image_only_alignment_candidate(
+    candidates: tuple[AttentionAlignmentResult, ...],
+    attention_module_names: tuple[str, ...],
+) -> AttentionAlignmentResult:
+    """按冻结跨层字典序选择唯一配准候选.
+
+    每个冻结层先独立完成层内仿射搜索. 本函数随后依次比较注册目标、观测关系
+    分和注册置信度；三者完全相同时选择冻结层顺序中更靠前的候选. 该显式
+    裁决保证不同运行环境不会依赖容器遍历顺序产生不同 rescue 数值.
+    """
+
+    if attention_module_names != FROZEN_SD35_ATTENTION_MODULE_NAMES:
+        raise ValueError("跨层配准选择必须使用冻结 SD3.5 层顺序")
+    if (
+        type(candidates) is not tuple
+        or len(candidates) != len(attention_module_names)
+        or any(
+            not isinstance(candidate, AttentionAlignmentResult)
+            for candidate in candidates
+        )
+        or tuple(candidate.layer_name for candidate in candidates)
+        != attention_module_names
+    ):
+        raise ValueError("跨层配准候选必须与冻结层顺序逐项一致")
+    return max(
+        enumerate(candidates),
+        key=lambda indexed: (
+            indexed[1].registration_objective_score,
+            indexed[1].observation_relation_score,
+            indexed[1].registration_confidence,
+            -indexed[0],
+        ),
+    )[1]
+
+
+def image_only_detector_config_identity_record(
+    config: ImageOnlyDetectionConfig,
+    *,
+    attention_geometry_enabled: bool,
+    image_alignment_enabled: bool,
+) -> dict[str, Any]:
+    """构造可由检测记录独立重建的完整检测器配置身份."""
+
+    if not isinstance(config, ImageOnlyDetectionConfig):
+        raise TypeError("config 必须为 ImageOnlyDetectionConfig")
+    if (
+        type(attention_geometry_enabled) is not bool
+        or type(image_alignment_enabled) is not bool
+    ):
+        raise TypeError("检测机制开关必须为精确 bool")
+    relation_protocol = attention_relation_component_protocol(
+        config.attention_relation_component_weights
+    )
+    prg_protocol = keyed_prg_protocol_record(config.keyed_prg_version)
+    tail_protocol = tail_robust_carrier_protocol_record(
+        config.tail_fraction,
+        prg_version=config.keyed_prg_version,
+    )
+    payload = {
+        "image_only_detector_config_schema": (
+            IMAGE_ONLY_DETECTOR_CONFIG_SCHEMA
+        ),
+        "model_id": config.model_id,
+        "attention_module_names": list(config.attention_module_names),
+        "attention_alignment_layer_selection_rule": (
+            ATTENTION_ALIGNMENT_LAYER_SELECTION_RULE
+        ),
+        "image_alignment_resampling_mode": ATTENTION_IMAGE_RESAMPLING_MODE,
+        "image_alignment_padding_mode": ATTENTION_IMAGE_PADDING_MODE,
+        "image_alignment_quantization_protocol": (
+            ATTENTION_IMAGE_QUANTIZATION_PROTOCOL
+        ),
+        "lf_carrier_protocol_digest": (
+            config.low_frequency_config.protocol_digest
+        ),
+        "tail_carrier_protocol_digest": tail_protocol[
+            "tail_carrier_protocol_digest"
+        ],
+        "lf_weight": config.lf_weight,
+        "tail_robust_weight": config.tail_robust_weight,
+        "tail_fraction": config.tail_fraction,
+        "keyed_prg_version": config.keyed_prg_version,
+        "keyed_prg_protocol_digest": prg_protocol[
+            "keyed_prg_protocol_digest"
+        ],
+        "content_threshold": config.content_threshold,
+        "geometry_score_threshold": config.geometry_score_threshold,
+        "registration_confidence_threshold": (
+            config.registration_confidence_threshold
+        ),
+        "attention_sync_score_threshold": (
+            config.attention_sync_score_threshold
+        ),
+        "rescue_margin_low": config.rescue_margin_low,
+        "attention_alignment_gate": attention_alignment_gate_record(
+            config.attention_anchor_count,
+            config.attention_residual_threshold,
+            config.attention_minimum_inlier_ratio,
+        ),
+        "attention_stable_token_fraction": (
+            config.attention_stable_token_fraction
+        ),
+        "attention_unstable_pair_weight": (
+            config.attention_unstable_pair_weight
+        ),
+        "attention_relation_component_weights": list(
+            config.attention_relation_component_weights
+        ),
+        "attention_relation_component_protocol_digest": relation_protocol[
+            "attention_relation_component_protocol_digest"
+        ],
+        "attention_geometry_enabled": attention_geometry_enabled,
+        "image_alignment_enabled": image_alignment_enabled,
+    }
+    return {
+        **payload,
+        "image_only_detector_config_digest": build_stable_digest(payload),
+    }
+
+
 @dataclass(frozen=True)
 class ImageOnlyDetectionResult:
     """保存内容主判、注意力几何救回和完整 evidence 判定。"""
 
     content: BlindContentScore
+    lf_carrier_protocol_digest: str
+    lf_template_content_sha256: str
+    tail_carrier_protocol_digest: str
+    tail_fraction: float
+    tail_template_content_sha256: str
+    tail_template_shape: list[int]
+    tail_template_element_count: int
+    tail_selected_element_count: int
+    tail_threshold: float
+    tail_retained_fraction: float
     raw_content_margin: float
+    aligned_lf_score: float | None
+    aligned_tail_robust_score: float | None
     aligned_content_score: float | None
     aligned_content_margin: float | None
     positive_by_content: bool
@@ -119,6 +318,7 @@ class ImageOnlyDetectionResult:
     rescue_eligible: bool
     rescue_applied: bool
     evidence_positive: bool
+    image_only_detector_config_digest: str
     detector_digest: str
     metadata: dict[str, Any]
 
@@ -130,14 +330,34 @@ class ImageOnlyDetectionResult:
             alignment_record = {
                 **self.alignment.__dict__,
                 "registration_geometry_reliable": self.alignment.geometry_reliable,
-                # 外层冻结协议读取该字段时必须看到已经包含恢复后 sync 的最终门禁。
-                "geometry_reliable": self.geometry_reliable,
             }
         return {
             "lf_score": self.content.lf_score,
             "tail_robust_score": self.content.tail_robust_score,
             "content_score": self.content.content_score,
+            "lf_weight": self.content.lf_weight,
+            "tail_robust_weight": self.content.tail_robust_weight,
+            "tail_fraction": self.tail_fraction,
+            "lf_carrier_protocol_digest": self.lf_carrier_protocol_digest,
+            "lf_template_content_sha256": self.lf_template_content_sha256,
+            "tail_carrier_protocol_digest": (
+                self.tail_carrier_protocol_digest
+            ),
+            "tail_template_content_sha256": (
+                self.tail_template_content_sha256
+            ),
+            "tail_template_shape": list(self.tail_template_shape),
+            "tail_template_element_count": (
+                self.tail_template_element_count
+            ),
+            "tail_selected_element_count": (
+                self.tail_selected_element_count
+            ),
+            "tail_threshold": self.tail_threshold,
+            "tail_retained_fraction": self.tail_retained_fraction,
             "raw_content_margin": self.raw_content_margin,
+            "aligned_lf_score": self.aligned_lf_score,
+            "aligned_tail_robust_score": self.aligned_tail_robust_score,
             "aligned_content_score": self.aligned_content_score,
             "aligned_content_margin": self.aligned_content_margin,
             "positive_by_content": self.positive_by_content,
@@ -151,9 +371,347 @@ class ImageOnlyDetectionResult:
             "rescue_eligible": self.rescue_eligible,
             "rescue_applied": self.rescue_applied,
             "evidence_positive": self.evidence_positive,
+            "image_only_detector_config_digest": (
+                self.image_only_detector_config_digest
+            ),
             "detector_digest": self.detector_digest,
             "metadata": self.metadata,
         }
+
+
+def recompute_image_only_detection_digest_payload(
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    """从样本级决策字段重建紧凑检测记录摘要正文.
+
+    完整检测器配置只保存在顶层运行配置中. 样本记录通过配置摘要引用该配置,
+    此处只绑定会改变样本分数、配准救回或最终判定的字段.
+    """
+
+    if not isinstance(record, Mapping):
+        raise TypeError("检测记录必须为 mapping")
+    metadata = record.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise ValueError("检测记录缺少 metadata")
+    alignment = record.get("alignment")
+    return {
+        "image_only_detector_config_digest": record.get(
+            "image_only_detector_config_digest"
+        ),
+        "lf_carrier_protocol_digest": record.get(
+            "lf_carrier_protocol_digest"
+        ),
+        "tail_carrier_protocol_digest": record.get(
+            "tail_carrier_protocol_digest"
+        ),
+        "lf_template_content_sha256": record.get(
+            "lf_template_content_sha256"
+        ),
+        "tail_template_content_sha256": record.get(
+            "tail_template_content_sha256"
+        ),
+        "tail_template_shape": list(record.get("tail_template_shape", [])),
+        "tail_template_element_count": record.get(
+            "tail_template_element_count"
+        ),
+        "tail_selected_element_count": record.get(
+            "tail_selected_element_count"
+        ),
+        "tail_threshold": record.get("tail_threshold"),
+        "tail_retained_fraction": record.get("tail_retained_fraction"),
+        "lf_score": record.get("lf_score"),
+        "tail_robust_score": record.get("tail_robust_score"),
+        "content_score": record.get("content_score"),
+        "lf_weight": record.get("lf_weight"),
+        "tail_robust_weight": record.get("tail_robust_weight"),
+        "tail_fraction": record.get("tail_fraction"),
+        "raw_content_margin": record.get("raw_content_margin"),
+        "aligned_lf_score": record.get("aligned_lf_score"),
+        "aligned_tail_robust_score": record.get(
+            "aligned_tail_robust_score"
+        ),
+        "aligned_content_score": record.get("aligned_content_score"),
+        "aligned_content_margin": record.get("aligned_content_margin"),
+        "content_threshold": metadata.get("content_threshold"),
+        "geometry_score_threshold": metadata.get(
+            "geometry_score_threshold"
+        ),
+        "registration_confidence_threshold": metadata.get(
+            "registration_confidence_threshold"
+        ),
+        "attention_sync_score_threshold": metadata.get(
+            "attention_sync_score_threshold"
+        ),
+        "rescue_margin_low": metadata.get("rescue_margin_low"),
+        "attention_geometry_score": record.get("attention_geometry_score"),
+        "raw_attention_geometry_score": record.get(
+            "raw_attention_geometry_score"
+        ),
+        "attention_sync_score": record.get("attention_sync_score"),
+        "registration_confidence": record.get("registration_confidence"),
+        "alignment_digest": (
+            None
+            if alignment is None
+            else dict(alignment).get("alignment_digest")
+        ),
+        "stable_pair_weight_identity_ready": metadata.get(
+            "stable_pair_weight_identity_ready"
+        ),
+        "stable_pair_weight_identity_digest": metadata.get(
+            "stable_pair_weight_identity_digest"
+        ),
+        "observed_pair_weight_realization_digest": metadata.get(
+            "observed_pair_weight_realization_digest"
+        ),
+        "aligned_pair_weight_realization_digest": metadata.get(
+            "aligned_pair_weight_realization_digest"
+        ),
+        "detection_qk_atomic_content_digest": metadata.get(
+            "detection_qk_atomic_content_digest"
+        ),
+        "content_failure_reason": record.get("content_failure_reason"),
+        "positive_by_content": record.get("positive_by_content"),
+        "geometry_reliable": record.get("geometry_reliable"),
+        "rescue_eligible": record.get("rescue_eligible"),
+        "rescue_applied": record.get("rescue_applied"),
+        "evidence_positive": record.get("evidence_positive"),
+    }
+
+
+def _finite_number(value: Any) -> bool:
+    """判断值是否为非 bool 的有限实数."""
+
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+    )
+
+
+def _sha256_text(value: Any) -> bool:
+    """判断值是否为规范小写 SHA-256 文本."""
+
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def validate_image_only_detection_digest_record(
+    record: Mapping[str, Any],
+) -> dict[str, Any]:
+    """复算样本分数、配准救回、最终判定和紧凑记录摘要."""
+
+    metadata = record.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise ValueError("检测记录缺少 metadata")
+    for field_name in (
+        "image_only_detector_config_digest",
+        "lf_carrier_protocol_digest",
+        "tail_carrier_protocol_digest",
+        "lf_template_content_sha256",
+        "tail_template_content_sha256",
+    ):
+        if not _sha256_text(record.get(field_name)):
+            raise ValueError(f"{field_name} 必须为规范 SHA-256")
+
+    lf_weight = record.get("lf_weight")
+    tail_weight = record.get("tail_robust_weight")
+    tail_fraction = record.get("tail_fraction")
+    raw_scores = (
+        record.get("lf_score"),
+        record.get("tail_robust_score"),
+        record.get("content_score"),
+    )
+    if (
+        type(lf_weight) is not float
+        or type(tail_weight) is not float
+        or type(tail_fraction) is not float
+        or not math.isclose(lf_weight + tail_weight, 1.0, abs_tol=1e-12)
+        or not 0.0 < tail_fraction <= 1.0
+        or not all(_finite_number(value) for value in raw_scores)
+        or not math.isclose(
+            float(raw_scores[2]),
+            lf_weight * float(raw_scores[0])
+            + tail_weight * float(raw_scores[1]),
+            abs_tol=1e-7,
+        )
+    ):
+        raise ValueError("检测记录的 LF/tail 加权内容分数不能重建")
+
+    shape = record.get("tail_template_shape")
+    element_count = record.get("tail_template_element_count")
+    selected_count = record.get("tail_selected_element_count")
+    retained_fraction = record.get("tail_retained_fraction")
+    threshold = record.get("tail_threshold")
+    if (
+        not isinstance(shape, list)
+        or len(shape) != 4
+        or any(type(value) is not int or value <= 0 for value in shape)
+        or type(element_count) is not int
+        or element_count != math.prod(shape)
+        or type(selected_count) is not int
+        or selected_count != math.ceil(element_count * tail_fraction)
+        or not _finite_number(retained_fraction)
+        or not math.isclose(
+            float(retained_fraction),
+            selected_count / element_count,
+            abs_tol=1e-12,
+        )
+        or not _finite_number(threshold)
+        or float(threshold) < 0.0
+    ):
+        raise ValueError("检测记录的尾部比例、shape 或选择计数不能重建")
+
+    thresholds = tuple(
+        metadata.get(field_name)
+        for field_name in (
+            "content_threshold",
+            "geometry_score_threshold",
+            "registration_confidence_threshold",
+            "attention_sync_score_threshold",
+            "rescue_margin_low",
+        )
+    )
+    if not all(type(value) is float and math.isfinite(value) for value in thresholds):
+        raise ValueError("检测记录缺少显式冻结阈值")
+    (
+        content_threshold,
+        geometry_score_threshold,
+        registration_confidence_threshold,
+        attention_sync_score_threshold,
+        rescue_margin_low,
+    ) = thresholds
+    raw_margin = record.get("raw_content_margin")
+    if not _finite_number(raw_margin) or not math.isclose(
+        float(raw_margin),
+        float(raw_scores[2]) - content_threshold,
+        abs_tol=1e-7,
+    ):
+        raise ValueError("原图内容 margin 不能由分数和阈值重建")
+
+    aligned_score = record.get("aligned_content_score")
+    aligned_margin = record.get("aligned_content_margin")
+    if aligned_score is None:
+        if any(
+            record.get(field_name) is not None
+            for field_name in (
+                "aligned_lf_score",
+                "aligned_tail_robust_score",
+                "aligned_content_margin",
+            )
+        ):
+            raise ValueError("无 aligned 分数时不得保留部分分支分数")
+    else:
+        aligned_lf = record.get("aligned_lf_score")
+        aligned_tail = record.get("aligned_tail_robust_score")
+        if (
+            not all(
+                _finite_number(value)
+                for value in (aligned_lf, aligned_tail, aligned_score, aligned_margin)
+            )
+            or not math.isclose(
+                float(aligned_score),
+                lf_weight * float(aligned_lf)
+                + tail_weight * float(aligned_tail),
+                abs_tol=1e-7,
+            )
+            or not math.isclose(
+                float(aligned_margin),
+                float(aligned_score) - content_threshold,
+                abs_tol=1e-7,
+            )
+        ):
+            raise ValueError("aligned LF/tail 加权分数不能重建")
+
+    alignment = record.get("alignment")
+    geometry_score = record.get("attention_geometry_score")
+    raw_geometry_score = record.get("raw_attention_geometry_score")
+    sync_score = record.get("attention_sync_score")
+    registration_confidence = record.get("registration_confidence")
+    stable_pair_ready = metadata.get("stable_pair_weight_identity_ready")
+    if type(stable_pair_ready) is not bool:
+        raise ValueError("stable pair 权重身份就绪字段必须为 bool")
+    registration_geometry_reliable = False
+    if alignment is None:
+        if geometry_score is not None or raw_geometry_score is not None:
+            raise ValueError("无 alignment 时不得保留注意力几何分数")
+    else:
+        if not isinstance(alignment, Mapping):
+            raise ValueError("alignment 必须为 mapping 或 None")
+        validate_attention_alignment_record(alignment)
+        if alignment.get("layer_name") not in FROZEN_SD35_ATTENTION_MODULE_NAMES:
+            raise ValueError("alignment 所选层不属于冻结 SD3.5 注意力层")
+        registration_geometry_reliable = alignment.get("geometry_reliable") is True
+        if (
+            not _finite_number(geometry_score)
+            or not _finite_number(raw_geometry_score)
+            or not _finite_number(registration_confidence)
+            or not math.isclose(
+                float(geometry_score),
+                float(alignment.get("relation_sync_score")),
+                abs_tol=1e-12,
+            )
+            or not math.isclose(
+                float(registration_confidence),
+                float(alignment.get("registration_confidence")),
+                abs_tol=1e-12,
+            )
+        ):
+            raise ValueError("注意力分数或注册置信度与 alignment 不一致")
+
+    expected_geometry_reliable = bool(
+        alignment is not None
+        and registration_geometry_reliable
+        and stable_pair_ready
+        and _finite_number(geometry_score)
+        and float(geometry_score) >= geometry_score_threshold
+        and _finite_number(registration_confidence)
+        and float(registration_confidence) >= registration_confidence_threshold
+        and _finite_number(sync_score)
+        and float(sync_score) >= attention_sync_score_threshold
+    )
+    positive_by_content = float(raw_margin) >= 0.0
+    failure_reason = (
+        "content_positive"
+        if positive_by_content
+        else (
+            "geometry_suspected"
+            if rescue_margin_low <= float(raw_margin) < 0.0
+            and expected_geometry_reliable
+            else (
+                "low_confidence"
+                if rescue_margin_low <= float(raw_margin) < 0.0
+                else "content_evidence_absent"
+            )
+        )
+    )
+    rescue_eligible = bool(
+        rescue_margin_low <= float(raw_margin) < 0.0
+        and expected_geometry_reliable
+        and aligned_score is not None
+    )
+    rescue_applied = bool(
+        rescue_eligible
+        and aligned_margin is not None
+        and float(aligned_margin) >= 0.0
+    )
+    expected = {
+        "positive_by_content": positive_by_content,
+        "geometry_reliable": expected_geometry_reliable,
+        "content_failure_reason": failure_reason,
+        "rescue_eligible": rescue_eligible,
+        "rescue_applied": rescue_applied,
+        "evidence_positive": positive_by_content or rescue_applied,
+    }
+    if any(record.get(name) != value for name, value in expected.items()):
+        raise ValueError("检测记录的配准救回或最终判定不能重建")
+
+    payload = recompute_image_only_detection_digest_payload(record)
+    if record.get("detector_digest") != build_stable_digest(payload):
+        raise ValueError("detector digest 不能由样本级决策字段独立重建")
+    return payload
 
 
 def detect_image_only_watermark(
@@ -170,6 +728,14 @@ def detect_image_only_watermark(
     基底, 从接口层阻止检测路径重新依赖生成端私有状态。
     """
 
+    detector_config_identity = image_only_detector_config_identity_record(
+        config,
+        attention_geometry_enabled=image_attention_extractor is not None,
+        image_alignment_enabled=image_aligner is not None,
+    )
+    detector_config_digest = detector_config_identity[
+        "image_only_detector_config_digest"
+    ]
     observed_latent = image_latent_encoder(image)
     alignment_gate = attention_alignment_gate_record(
         config.attention_anchor_count,
@@ -182,13 +748,18 @@ def detect_image_only_watermark(
     component_weights = tuple(
         component_protocol["attention_relation_component_weights"]
     )
-    prg_record = keyed_prg_protocol_record(config.keyed_prg_version)
+    tail_carrier_protocol = tail_robust_carrier_protocol_record(
+        config.tail_fraction,
+        prg_version=config.keyed_prg_version,
+    )
     lf_template = build_low_frequency_template(
         observed_latent,
         key_material,
         config.model_id,
+        config.low_frequency_config,
         prg_version=config.keyed_prg_version,
     )
+    lf_template_content_sha256 = tensor_content_sha256(lf_template)
     tail_template, tail_threshold, retained_fraction = build_tail_robust_template(
         observed_latent,
         key_material,
@@ -196,6 +767,25 @@ def detect_image_only_watermark(
         config.tail_fraction,
         prg_version=config.keyed_prg_version,
     )
+    tail_template_content_sha256 = tensor_content_sha256(tail_template)
+    tail_template_shape = [int(value) for value in tail_template.shape]
+    tail_template_element_count = int(tail_template.numel())
+    tail_selected_element_count = math.ceil(
+        tail_template_element_count * config.tail_fraction
+    )
+    actual_selected_element_count = int(
+        (tail_template != 0).sum().item()
+    )
+    if (
+        actual_selected_element_count != tail_selected_element_count
+        or not math.isclose(
+            retained_fraction,
+            tail_selected_element_count / tail_template_element_count,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+    ):
+        raise RuntimeError("高斯幅值尾部模板的保留计数与冻结协议不一致")
     content = compute_blind_content_score(
         observed_latent,
         lf_template,
@@ -213,14 +803,11 @@ def detect_image_only_watermark(
     alignment: AttentionAlignmentResult | None = None
     geometry_reliable = False
     aligned_image: Any | None = None
-    stable_token_indices: tuple[int, ...] = ()
     stable_token_selection_digest = ""
     stable_pair_weight_identity_digest = ""
     observed_pair_weight_realization_digest = ""
     aligned_pair_weight_realization_digest = ""
     stable_pair_weight_identity_ready = False
-    attention_record_schema_digest = ""
-    attention_relation_component_names: tuple[str, ...] = ()
     attention_relation_source = ""
     attention_relation_component_identity_digest = ""
     attention_relation_keyed_projection_digest = ""
@@ -235,9 +822,10 @@ def detect_image_only_watermark(
             (layer_name, tuple(token_indices))
             for layer_name, _, token_indices in attention_records
         )
-        attention_record_schema_digest = build_stable_digest(
-            {"attention_record_schema": attention_record_schema}
-        )
+        if tuple(
+            layer_name for layer_name, _, _ in attention_records
+        ) != config.attention_module_names:
+            raise RuntimeError("图像盲检 Q/K 层顺序与冻结检测配置不一致")
         relation_identity = build_attention_relation_graph_identity(
             attention_records,
             key_material,
@@ -268,7 +856,6 @@ def detect_image_only_watermark(
             record["record_layer_name"]
             for record in relation_identity.qk_atomic_content_records
         )
-        attention_relation_component_names = relation_identity.component_names
         attention_relation_source = relation_identity.relation_source
         attention_relation_component_identity_digest = (
             relation_identity.component_identity_digest
@@ -283,7 +870,6 @@ def detect_image_only_watermark(
             attention_records,
             stable_token_fraction=config.attention_stable_token_fraction,
         )
-        stable_token_indices = stable_selection.token_indices
         stable_token_selection_digest = stable_selection.selection_digest
         stable_pair_weights = build_stable_attention_pair_weights(
             attention_records,
@@ -319,13 +905,9 @@ def detect_image_only_watermark(
             )
             for layer_name, attention, token_indices in attention_records
         )
-        alignment = max(
+        alignment = select_image_only_alignment_candidate(
             alignment_candidates,
-            key=lambda candidate: (
-                candidate.registration_objective_score,
-                candidate.observation_relation_score,
-                candidate.registration_confidence,
-            ),
+            config.attention_module_names,
         )
         geometry_score = alignment.relation_sync_score
         registration_confidence = alignment.registration_confidence
@@ -428,55 +1010,99 @@ def detect_image_only_watermark(
         and geometry_reliable
         and content_failure_reason in {"geometry_suspected", "low_confidence"}
     )
+    aligned_lf_score: float | None = None
+    aligned_tail_robust_score: float | None = None
     aligned_content_score: float | None = None
     aligned_content_margin: float | None = None
+    aligned_lf_template_content_sha256: str | None = None
+    aligned_tail_template_content_sha256: str | None = None
+    aligned_tail_threshold: float | None = None
+    aligned_tail_retained_fraction: float | None = None
     if alignment_available and alignment is not None and aligned_image is not None:
         aligned_latent = image_latent_encoder(aligned_image)
+        if tuple(aligned_latent.shape) != tuple(observed_latent.shape):
+            raise RuntimeError("配准前后的编码 latent 形状必须完全一致")
+        aligned_lf_template = build_low_frequency_template(
+            aligned_latent,
+            key_material,
+            config.model_id,
+            config.low_frequency_config,
+            prg_version=config.keyed_prg_version,
+        )
+        aligned_lf_template_content_sha256 = tensor_content_sha256(
+            aligned_lf_template
+        )
+        if aligned_lf_template_content_sha256 != lf_template_content_sha256:
+            raise RuntimeError("配准前后的 LF 固定模板身份必须完全一致")
+        (
+            aligned_tail_template,
+            aligned_tail_threshold,
+            aligned_tail_retained_fraction,
+        ) = build_tail_robust_template(
+            aligned_latent,
+            key_material,
+            config.model_id,
+            config.tail_fraction,
+            prg_version=config.keyed_prg_version,
+        )
+        aligned_tail_template_content_sha256 = tensor_content_sha256(
+            aligned_tail_template
+        )
+        if (
+            aligned_tail_template_content_sha256
+            != tail_template_content_sha256
+            or aligned_tail_threshold != tail_threshold
+            or aligned_tail_retained_fraction != retained_fraction
+        ):
+            raise RuntimeError("配准前后的高斯幅值尾部模板身份必须完全一致")
         aligned_content = compute_blind_content_score(
             aligned_latent,
-            build_low_frequency_template(
-                aligned_latent,
-                key_material,
-                config.model_id,
-                prg_version=config.keyed_prg_version,
-            ),
-            build_tail_robust_template(
-                aligned_latent,
-                key_material,
-                config.model_id,
-                config.tail_fraction,
-                prg_version=config.keyed_prg_version,
-            )[0],
+            aligned_lf_template,
+            aligned_tail_template,
             config.lf_weight,
             config.tail_robust_weight,
         )
+        aligned_lf_score = aligned_content.lf_score
+        aligned_tail_robust_score = aligned_content.tail_robust_score
         aligned_content_score = aligned_content.content_score
         aligned_content_margin = aligned_content_score - config.content_threshold
-    rescue_applied = rescue_eligible and aligned_content_margin is not None and aligned_content_margin >= 0.0
+    rescue_applied = (
+        rescue_eligible
+        and aligned_content_margin is not None
+        and aligned_content_margin >= 0.0
+    )
     evidence_positive = positive_by_content or rescue_applied
-    payload = {
-        "content_score_digest": content.score_digest,
-        "keyed_prg_version": config.keyed_prg_version,
-        "keyed_prg_protocol_digest": prg_record[
-            "keyed_prg_protocol_digest"
-        ],
+    qk_atomic_content_digest = (
+        qk_atomic_evaluation_records_digest(
+            qk_atomic_content_records,
+            "detection_qk_atomic_content_records",
+        )
+        if qk_atomic_content_records
+        else ""
+    )
+    metadata = {
+        "detector_input_access_mode": "image_key_public_model_only",
+        "blind_image_detector": True,
+        "generation_latent_trace_required": False,
+        "source_image_required": False,
+        "prompt_required": False,
+        "image_only_detector_config_digest": detector_config_digest,
+        "attention_geometry_enabled": image_attention_extractor is not None,
+        "image_alignment_enabled": image_aligner is not None,
         "content_threshold": config.content_threshold,
-        "raw_content_margin": round(margin, 12),
-        "aligned_content_margin": None if aligned_content_margin is None else round(aligned_content_margin, 12),
-        "attention_geometry_score": None if geometry_score is None else round(geometry_score, 12),
-        "raw_attention_geometry_score": (
-            None if raw_geometry_score is None else round(raw_geometry_score, 12)
+        "rescue_margin_low": config.rescue_margin_low,
+        "geometry_score_threshold": config.geometry_score_threshold,
+        "registration_confidence_threshold": (
+            config.registration_confidence_threshold
         ),
-        "attention_sync_score": None if sync_score is None else round(sync_score, 12),
-        "registration_confidence": (
-            None if registration_confidence is None else round(registration_confidence, 12)
-        ),
-        "alignment_digest": None if alignment is None else alignment.alignment_digest,
+        "attention_sync_score_threshold": config.attention_sync_score_threshold,
         "attention_alignment_gate": dict(alignment_gate),
         **alignment_gate,
-        "stable_token_indices": stable_token_indices,
+        "attention_sync_source": "aligned_image_reextracted_real_qk",
         "stable_token_selection_digest": stable_token_selection_digest,
-        "stable_pair_weight_identity_digest": stable_pair_weight_identity_digest,
+        "stable_pair_weight_identity_digest": (
+            stable_pair_weight_identity_digest
+        ),
         "observed_pair_weight_realization_digest": (
             observed_pair_weight_realization_digest
         ),
@@ -484,11 +1110,10 @@ def detect_image_only_watermark(
             aligned_pair_weight_realization_digest
         ),
         "stable_pair_weight_identity_ready": stable_pair_weight_identity_ready,
-        "attention_record_schema_digest": attention_record_schema_digest,
-        "attention_relation_component_names": (
-            attention_relation_component_names
-        ),
         "attention_relation_source": attention_relation_source,
+        "attention_relation_direct_qk_source_ready": (
+            attention_relation_source == DIRECT_QK_RELATION_SOURCE
+        ),
         "attention_relation_component_identity_digest": (
             attention_relation_component_identity_digest
         ),
@@ -498,150 +1123,72 @@ def detect_image_only_watermark(
         "attention_relation_qk_operator_metadata_digest": (
             attention_relation_qk_operator_metadata_digest
         ),
-        "attention_relation_active_component_names": component_protocol[
-            "attention_relation_active_component_names"
-        ],
-        "attention_relation_component_weights": component_weights,
-        "attention_relation_component_protocol_digest": component_protocol[
-            "attention_relation_component_protocol_digest"
-        ],
-        "detection_qk_atomic_content_digest": (
-            qk_atomic_evaluation_records_digest(
+        "attention_relation_qk_operator_metadata_ready": (
+            bool(image_attention_extractor is not None)
+            and relation_identity.qk_operator_metadata_ready
+        ),
+        "detection_qk_atomic_content_records": qk_atomic_content_records,
+        "detection_qk_atomic_content_digest": qk_atomic_content_digest,
+        "detection_qk_atomic_content_ready": (
+            qk_atomic_evaluation_records_ready(
                 qk_atomic_content_records,
-                "detection_qk_atomic_content_records",
+                qk_atomic_content_digest,
+                aggregate_field_name="detection_qk_atomic_content_records",
+                expected_roles=(
+                    "raw_detection_image",
+                    "aligned_detection_image",
+                ),
+                expected_layer_names=qk_atomic_layer_names,
             )
             if qk_atomic_content_records
-            else ""
+            else False
         ),
+    }
+    result_kwargs = {
+        "content": content,
+        "lf_carrier_protocol_digest": (
+            config.low_frequency_config.protocol_digest
+        ),
+        "lf_template_content_sha256": lf_template_content_sha256,
+        "tail_carrier_protocol_digest": tail_carrier_protocol[
+            "tail_carrier_protocol_digest"
+        ],
+        "tail_fraction": config.tail_fraction,
+        "tail_template_content_sha256": tail_template_content_sha256,
+        "tail_template_shape": tail_template_shape,
+        "tail_template_element_count": tail_template_element_count,
+        "tail_selected_element_count": tail_selected_element_count,
+        "tail_threshold": tail_threshold,
+        "tail_retained_fraction": retained_fraction,
+        "raw_content_margin": margin,
+        "aligned_lf_score": aligned_lf_score,
+        "aligned_tail_robust_score": aligned_tail_robust_score,
+        "aligned_content_score": aligned_content_score,
+        "aligned_content_margin": aligned_content_margin,
+        "positive_by_content": positive_by_content,
+        "attention_geometry_score": geometry_score,
+        "raw_attention_geometry_score": raw_geometry_score,
+        "attention_sync_score": sync_score,
+        "registration_confidence": registration_confidence,
+        "alignment": alignment,
+        "geometry_reliable": geometry_reliable,
         "content_failure_reason": content_failure_reason,
+        "rescue_eligible": rescue_eligible,
         "rescue_applied": rescue_applied,
         "evidence_positive": evidence_positive,
+        "image_only_detector_config_digest": detector_config_digest,
+        "metadata": metadata,
     }
+    unsigned_result = ImageOnlyDetectionResult(
+        **result_kwargs,
+        detector_digest="",
+    )
+    detector_digest = build_stable_digest(
+        recompute_image_only_detection_digest_payload(
+            unsigned_result.to_record()
+        )
+    )
     return ImageOnlyDetectionResult(
-        content=content,
-        raw_content_margin=margin,
-        aligned_content_score=aligned_content_score,
-        aligned_content_margin=aligned_content_margin,
-        positive_by_content=positive_by_content,
-        attention_geometry_score=geometry_score,
-        raw_attention_geometry_score=raw_geometry_score,
-        attention_sync_score=sync_score,
-        registration_confidence=registration_confidence,
-        alignment=alignment,
-        geometry_reliable=geometry_reliable,
-        content_failure_reason=content_failure_reason,
-        rescue_eligible=rescue_eligible,
-        rescue_applied=rescue_applied,
-        evidence_positive=evidence_positive,
-        detector_digest=build_stable_digest(payload),
-        metadata={
-            "detector_input_access_mode": "image_key_public_model_only",
-            "blind_image_detector": True,
-            "generation_latent_trace_required": False,
-            "source_image_required": False,
-            "prompt_required": False,
-            "tail_threshold": tail_threshold,
-            "tail_retained_fraction": retained_fraction,
-            "keyed_prg_version": config.keyed_prg_version,
-            "keyed_prg_protocol_digest": prg_record[
-                "keyed_prg_protocol_digest"
-            ],
-            "geometry_score_threshold": config.geometry_score_threshold,
-            "registration_confidence_threshold": config.registration_confidence_threshold,
-            "attention_alignment_gate": dict(alignment_gate),
-            **alignment_gate,
-            "attention_sync_score_threshold": config.attention_sync_score_threshold,
-            "attention_sync_source": "aligned_image_reextracted_real_qk",
-            "stable_token_indices": list(stable_token_indices),
-            "stable_token_selection_digest": stable_token_selection_digest,
-            "stable_pair_weight_identity_digest": (
-                stable_pair_weight_identity_digest
-            ),
-            "observed_pair_weight_realization_digest": (
-                observed_pair_weight_realization_digest
-            ),
-            "aligned_pair_weight_realization_digest": (
-                aligned_pair_weight_realization_digest
-            ),
-            "stable_pair_weight_identity_ready": (
-                stable_pair_weight_identity_ready
-            ),
-            "stable_pair_weight_flow": (
-                "single_selection_observed_registration_canonical_recheck"
-            ),
-            "attention_record_schema_digest": attention_record_schema_digest,
-            "attention_relation_component_names": list(
-                attention_relation_component_names
-            ),
-            "attention_relation_active_component_names": list(
-                component_protocol[
-                    "attention_relation_active_component_names"
-                ]
-            ),
-            "attention_relation_component_weights": list(component_weights),
-            "attention_relation_component_protocol_digest": (
-                component_protocol[
-                    "attention_relation_component_protocol_digest"
-                ]
-            ),
-            "attention_relation_source": attention_relation_source,
-            "attention_relation_direct_qk_source_ready": (
-                attention_relation_source == DIRECT_QK_RELATION_SOURCE
-            ),
-            "attention_relation_probability_scope": (
-                "sampled_image_token_qk_relation_probability"
-            ),
-            "attention_relation_component_identity_digest": (
-                attention_relation_component_identity_digest
-            ),
-            "attention_relation_keyed_projection_digest": (
-                attention_relation_keyed_projection_digest
-            ),
-            "attention_relation_qk_operator_metadata_records": (
-                []
-                if image_attention_extractor is None
-                else list(relation_identity.qk_operator_metadata_records)
-            ),
-            "attention_relation_qk_operator_metadata_digest": (
-                attention_relation_qk_operator_metadata_digest
-            ),
-            "attention_relation_qk_operator_metadata_ready": (
-                bool(image_attention_extractor is not None)
-                and relation_identity.qk_operator_metadata_ready
-            ),
-            "detection_qk_atomic_content_records": qk_atomic_content_records,
-            "detection_qk_atomic_content_digest": (
-                qk_atomic_evaluation_records_digest(
-                    qk_atomic_content_records,
-                    "detection_qk_atomic_content_records",
-                )
-                if qk_atomic_content_records
-                else ""
-            ),
-            "detection_qk_atomic_content_ready": (
-                qk_atomic_evaluation_records_ready(
-                    qk_atomic_content_records,
-                    qk_atomic_evaluation_records_digest(
-                        qk_atomic_content_records,
-                        "detection_qk_atomic_content_records",
-                    ),
-                    aggregate_field_name=(
-                        "detection_qk_atomic_content_records"
-                    ),
-                    expected_roles=(
-                        "raw_detection_image",
-                        "aligned_detection_image",
-                    ),
-                    expected_layer_names=qk_atomic_layer_names,
-                )
-                if qk_atomic_content_records
-                else False
-            ),
-            "attention_stable_token_fraction": (
-                config.attention_stable_token_fraction
-            ),
-            "attention_unstable_pair_weight": (
-                config.attention_unstable_pair_weight
-            ),
-        },
+        **result_kwargs,
+        detector_digest=detector_digest,
     )

@@ -46,6 +46,10 @@ ATTENTION_COORDINATE_CONVENTION = (
     "normalized_xy_token_centers_corner_endpoints_v1"
 )
 ATTENTION_GRID_ALIGN_CORNERS = True
+FROZEN_SD35_ATTENTION_MODULE_NAMES = (
+    "transformer_blocks.0.attn",
+    "transformer_blocks.23.attn",
+)
 QK_ATOMIC_CONTENT_SHA256_FIELDS = (
     "sampled_query_content_sha256",
     "sampled_key_content_sha256",

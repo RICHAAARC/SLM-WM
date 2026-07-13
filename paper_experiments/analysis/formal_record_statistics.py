@@ -36,10 +36,17 @@ from experiments.protocol.dataset_quality import (
     formal_dataset_quality_metric_protocol,
     rebuild_formal_fid_kid_metric_rows,
 )
+from experiments.protocol.method_runtime_config import (
+    FORMAL_METHOD_PACKAGE_ROOT,
+    load_formal_method_runtime_config,
+)
 from experiments.runners.image_only_dataset_runtime import (
     FrozenEvidenceProtocol,
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
+    frozen_evidence_protocol_digest_payload,
+    formal_low_frequency_carrier_protocol_record,
+    validate_frozen_evidence_protocol_integrity,
 )
 from experiments.runners.semantic_watermark_runtime import (
     validate_semantic_watermark_runtime_result_provenance,
@@ -49,12 +56,27 @@ from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
 )
 from main.core.digest import build_stable_digest
+from main.methods.carrier import tail_robust_carrier_protocol_record
 from main.methods.geometry import (
     ATTENTION_ALIGNMENT_ANCHOR_COUNT,
     ATTENTION_ALIGNMENT_MINIMUM_INLIER_RATIO,
     ATTENTION_ALIGNMENT_RESIDUAL_THRESHOLD,
     attention_alignment_gate_record,
 )
+
+
+_FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
+    FORMAL_METHOD_PACKAGE_ROOT
+)
+_FORMAL_CONTENT_WEIGHT_PROTOCOLS = {
+    (
+        _FORMAL_METHOD_CONFIG.lf_detection_score_weight,
+        _FORMAL_METHOD_CONFIG.tail_robust_detection_score_weight,
+    ),
+    (1.0, 0.0),
+    (0.0, 1.0),
+}
+_FORMAL_TAIL_FRACTIONS = {_FORMAL_METHOD_CONFIG.tail_fraction, 1.0}
 
 
 DATASET_QUALITY_METRIC_FIELDNAMES = (
@@ -81,6 +103,7 @@ _FORMAL_DETECTION_DERIVED_FIELDS = (
     "frozen_registration_confidence_threshold",
     "frozen_attention_sync_score_threshold",
     "frozen_threshold_digest",
+    "frozen_image_only_detector_config_digest",
     "formal_raw_content_margin",
     "formal_aligned_content_margin",
     "formal_positive_by_content",
@@ -189,6 +212,7 @@ def validate_frozen_evidence_protocol_record(
         raise FormalRecordStatisticsError("正式消融 target_fpr 必须位于 (0, 1)")
     try:
         protocol = FrozenEvidenceProtocol(**dict(raw_protocol))
+        validate_frozen_evidence_protocol_integrity(protocol)
     except (TypeError, ValueError) as exc:
         raise FormalRecordStatisticsError("消融冻结检测协议字段集合无效") from exc
     if not math.isclose(
@@ -244,6 +268,40 @@ def validate_frozen_evidence_protocol_record(
         raise FormalRecordStatisticsError(
             "消融冻结检测协议的注意力结构门禁发生漂移"
         )
+    formal_lf_protocol = formal_low_frequency_carrier_protocol_record()
+    if protocol.lf_carrier_protocol_digest != formal_lf_protocol[
+        "lf_carrier_protocol_digest"
+    ]:
+        raise FormalRecordStatisticsError(
+            "消融冻结检测协议的 LF 载体协议发生漂移"
+        )
+    if (
+        type(protocol.lf_weight) is not float
+        or type(protocol.tail_robust_weight) is not float
+        or not math.isclose(
+            protocol.lf_weight + protocol.tail_robust_weight,
+            1.0,
+            rel_tol=0.0,
+            abs_tol=1e-12,
+        )
+        or (protocol.lf_weight, protocol.tail_robust_weight)
+        not in _FORMAL_CONTENT_WEIGHT_PROTOCOLS
+        or type(protocol.tail_fraction) is not float
+        or protocol.tail_fraction not in _FORMAL_TAIL_FRACTIONS
+    ):
+        raise FormalRecordStatisticsError(
+            "消融冻结检测协议的内容分支权重无效"
+        )
+    expected_tail_protocol = tail_robust_carrier_protocol_record(
+        protocol.tail_fraction,
+        prg_version=_FORMAL_METHOD_CONFIG.keyed_prg_version,
+    )
+    if protocol.tail_carrier_protocol_digest != expected_tail_protocol[
+        "tail_carrier_protocol_digest"
+    ]:
+        raise FormalRecordStatisticsError(
+            "消融冻结检测协议的尾部载体协议发生漂移"
+        )
     digest_payload = {
         "content_threshold": _finite_float(
             protocol.content_threshold,
@@ -266,6 +324,16 @@ def validate_frozen_evidence_protocol_record(
             "attention_sync_score_threshold",
         ),
         **alignment_gate,
+        "lf_carrier_protocol_digest": protocol.lf_carrier_protocol_digest,
+        "tail_carrier_protocol_digest": (
+            protocol.tail_carrier_protocol_digest
+        ),
+        "lf_weight": protocol.lf_weight,
+        "tail_robust_weight": protocol.tail_robust_weight,
+        "tail_fraction": protocol.tail_fraction,
+        "image_only_detector_config_digest": (
+            protocol.image_only_detector_config_digest
+        ),
         "geometry_calibration_negative_count": _nonnegative_int(
             protocol.geometry_calibration_negative_count,
             "geometry_calibration_negative_count",
@@ -329,9 +397,15 @@ def validate_frozen_evidence_protocol_record(
             raise FormalRecordStatisticsError(
                 "消融冻结检测协议的几何超限计数超过负样本数量"
             )
+    shared_digest_payload = frozen_evidence_protocol_digest_payload(protocol)
+    if digest_payload != shared_digest_payload:
+        raise FormalRecordStatisticsError(
+            "消融冻结检测协议摘要字段与共享定义不一致"
+        )
     if (
         not _is_sha256(protocol.threshold_digest)
-        or build_stable_digest(digest_payload) != protocol.threshold_digest
+        or build_stable_digest(shared_digest_payload)
+        != protocol.threshold_digest
     ):
         raise FormalRecordStatisticsError("消融冻结检测协议摘要与正文不一致")
     return protocol
@@ -711,6 +785,9 @@ def rebuild_and_validate_ablation_runtime_aggregates(
                 "ablation_id": ablation_id,
                 "prompt_id": prompt_id,
                 "split": split,
+                "image_only_detector_config_digest": (
+                    protocol.image_only_detector_config_digest
+                ),
                 **rebuilt,
             }
         )
@@ -733,6 +810,12 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         "ablation_expected_runtime_configs_digest": build_stable_digest(
             expected_runtime_configs
         ),
+        "ablation_image_only_detector_config_digests": {
+            ablation_id: protocols[
+                ablation_id
+            ].image_only_detector_config_digest
+            for ablation_id in declared_ablation_ids
+        },
         "ablation_runtime_aggregate_rebuild_ready": True,
     }
 
