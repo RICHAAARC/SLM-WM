@@ -2,7 +2,7 @@
 
 该模块描述 probe_paper、pilot_paper 与 full_paper 共用的正式验证协议,
 包括受治理输入、阈值边界、攻击矩阵、baseline 导入模板和声明边界。
-它不执行 GPU 推理。三个论文运行层级仅通过 prompt 规模和 fixed-FPR 目标区分。
+它不执行 GPU 推理。三个论文运行层级仅通过 Prompt 规模和统计强度区分。
 """
 
 from __future__ import annotations
@@ -42,15 +42,17 @@ PILOT_PAPER_RESULT_PROTOCOL_NAME = "pilot_paper_fixed_fpr_common_protocol"
 PILOT_PAPER_RESULT_SCOPE = "pilot_paper_common_protocol"
 PILOT_PAPER_CLAIM_BOUNDARY = "pilot_claim"
 FULL_PAPER_CLAIM_BOUNDARY = "full_paper_claim_requires_full_paper_sample_scale"
-PROBE_PAPER_WORKFLOW_BOUNDARY = "probe_paper_uses_same_formal_protocol_with_smaller_sample_and_fpr"
+PROBE_PAPER_WORKFLOW_BOUNDARY = (
+    "probe_paper_uses_same_formal_protocol_with_smaller_sample_only"
+)
 PAPER_RUN_CLAIM_SCOPES = {
     PROBE_PAPER_RUN_NAME: "probe_claim",
     PILOT_PAPER_PROMPT_SET: "pilot_claim",
     FULL_PAPER_RUN_NAME: "full_claim",
 }
-PROBE_PAPER_FIXED_FPR = 0.1
-PILOT_PAPER_FIXED_FPR = 0.01
-FULL_PAPER_FIXED_FPR = 0.001
+PROBE_PAPER_FIXED_FPR = float(RUN_DEFAULTS[PROBE_PAPER_RUN_NAME]["target_fpr"])
+PILOT_PAPER_FIXED_FPR = float(RUN_DEFAULTS[PILOT_PAPER_PROMPT_SET]["target_fpr"])
+FULL_PAPER_FIXED_FPR = float(RUN_DEFAULTS[FULL_PAPER_RUN_NAME]["target_fpr"])
 PAPER_RUN_FIXED_FPR = {
     PROBE_PAPER_RUN_NAME: PROBE_PAPER_FIXED_FPR,
     PILOT_PAPER_PROMPT_SET: PILOT_PAPER_FIXED_FPR,

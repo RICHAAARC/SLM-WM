@@ -48,7 +48,7 @@ def _write_paired_superiority_inputs(root: Path) -> None:
     baseline_ids = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
     summary = {
         "paper_claim_scale": "pilot_paper",
-        "target_fpr": 0.01,
+        "target_fpr": 0.1,
         "paired_superiority_exact_set_ready": True,
         "paired_superiority_scale_ready": True,
         "overall_paired_superiority_ready": True,

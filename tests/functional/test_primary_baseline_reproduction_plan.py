@@ -125,5 +125,5 @@ def test_primary_reproduction_writer_outputs_plan_and_result_templates(tmp_path:
     assert report["result_import_template_ready"] is True
     assert report["baseline_results_ready"] is False
     assert report["supports_paper_claim"] is False
-    assert {row["comparable_operating_point"] for row in template_rows} == {"fixed_fpr_0.01"}
+    assert {row["comparable_operating_point"] for row in template_rows} == {"fixed_fpr_0.1"}
 

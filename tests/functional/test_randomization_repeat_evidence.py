@@ -730,7 +730,7 @@ def test_repeat_writer_rejects_run_fpr_drift_before_reading_inputs(
         write_randomization_repeat_evidence_package(
             tmp_path / "missing_inputs",
             paper_run_name="pilot_paper",
-            target_fpr=0.1,
+            target_fpr=0.01,
             randomization_repeat_id=REPEAT_ID,
             root=tmp_path,
         )

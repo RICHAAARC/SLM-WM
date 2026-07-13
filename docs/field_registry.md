@@ -1669,7 +1669,7 @@ Notebook 与 repository module 的跨边界数据
 | pilot_paper_prompt_count | metric | none | false | false | false | pilot_paper prompt split 中的 prompt 数量。|
 | pilot_paper_prompt_split_ready | governance | none | false | false | false | pilot_paper prompt split 是否可供共同协议使用。|
 | pilot_paper_target_fpr | protocol | none | false | false | false | pilot_paper 共同协议使用的 fixed-FPR 目标值。|
-| paper_target_fpr | protocol | none | false | false | false | 当前论文运行层级使用的 fixed-FPR 目标值, pilot_paper 默认为 0.01, full_paper 默认为 0.001。|
+| paper_target_fpr | protocol | none | false | false | false | 当前论文运行层级使用的 fixed-FPR 目标值, probe_paper、pilot_paper 与 full_paper 均固定为0.1。|
 | expected_target_fpr | protocol | none | false | false | false | 当前论文运行层级按协议应匹配的 fixed-FPR 目标值。|
 | pilot_paper_negative_count_minimum_required | metric | none | false | false | false | pilot_paper fixed-FPR 校准所要求的最小 clean negative 数量。|
 | minimum_clean_negative_count | metric | none | false | false | false | fixed-FPR 协议要求的完整 test split clean negative 样本数, 三类运行层级分别为34、340、3400。|
@@ -2577,9 +2577,11 @@ Notebook 与 repository module 的跨边界数据
 | proposed_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中 SLM-WM 实际使用的审计冻结阈值摘要。 |
 | baseline_method_threshold_digest | provenance | none | true | true | false | 单条配对 outcome 中对应主表 baseline 实际使用的审计冻结阈值摘要。 |
 | paired_prompt_count | metric | none | true | true | false | 单个主表 baseline 参与总体配对统计的唯一 test Prompt 数量。 |
+| randomization_repeat_count | metric | none | true | true | false | 正式配对统计实际覆盖的注册 seed-key 交叉重复数量, 当前固定为9。 |
 | paired_attack_count | metric | none | true | true | false | 单个主表 baseline 对每个 Prompt 完整覆盖的攻击条件数量。 |
-| paired_observation_count | metric | none | true | true | false | 单个主表 baseline 参与总体统计的 Prompt x attack 配对观测数量。 |
-| mean_paired_true_positive_rate_difference | metric | none | true | true | false | 先在每个 Prompt 内跨攻击求均值, 再跨 Prompt 聚合得到的 SLM-WM 相对 baseline 平均二元检测差值。 |
+| paired_observation_count | metric | none | true | true | false | 单个主表 baseline 参与总体统计的原子 Prompt x registered-repeat x attack 配对观测数量; 该数量不是独立推断样本量。 |
+| statistical_unit | protocol | none | true | true | false | 正式总体优势推断使用的独立统计单位, 固定为 prompt_cluster; 同一 Prompt 的9重复和完整攻击观测作为一个整体。 |
+| mean_paired_true_positive_rate_difference | metric | none | true | true | false | 先在每个 Prompt 的单 repeat 内跨完整攻击集合求均值, 再对同一 Prompt 的9个注册 repeat 等权平均, 最后跨 Prompt 聚合得到的 SLM-WM 相对 baseline 平均二元检测差值。 |
 | mean_paired_difference_ci_low | metric | none | true | true | false | Prompt-clustered bootstrap 对总体平均配对差值给出的 percentile CI 下界。 |
 | mean_paired_difference_ci_high | metric | none | true | true | false | Prompt-clustered bootstrap 对总体平均配对差值给出的 percentile CI 上界。 |
 | positive_prompt_cluster_count | metric | none | true | true | false | 平均配对差值大于0的 Prompt 聚类数量。 |
@@ -2589,21 +2591,28 @@ Notebook 与 repository module 的跨边界数据
 | one_sided_exact_prompt_cluster_sign_flip_p_value | metric | none | true | true | false | 通过整数动态规划精确计算的 Prompt-cluster sign-flip sharp-null 诊断 p 值。 |
 | exact_prompt_cluster_sign_flip_p_value_is_diagnostic | governance | none | true | false | false | 明确标识 exact sign-flip 仅检验 sharp null, 不用于均值优势 claim 门禁。 |
 | sharp_null_diagnostic_method | protocol | none | true | false | false | sharp-null 诊断方法, 正式值为 exact_prompt_cluster_sign_flip_dp。 |
-| claim_p_value_method | protocol | none | true | false | false | 配对优势 claim 使用的均值检验方法, 正式值为 bounded_hoeffding_prompt_cluster_mean; 结论范围限定于受治理 Prompt benchmark, 向未采样自然 Prompt 总体外推需要额外的独立性或可交换性论证。 |
+| claim_p_value_method | protocol | none | true | false | false | 精确9重复配对优势使用的均值检验方法, 正式值为 bounded_hoeffding_prompt_cluster_registered_repeat_mean; 推断样本量只取 test Prompt 数量, 不得扩张为9倍 repeat-Prompt 数量。 |
 | holm_adjusted_p_value | metric | none | true | true | false | 对4个主表 baseline 的单侧 bounded Hoeffding claim p 值执行 Holm 校正后的结果。 |
 | bootstrap_resample_count | protocol | none | true | false | false | Prompt-clustered bootstrap 的重采样次数, 正式闭合固定为100000。 |
-| bootstrap_seed_digest_random | random | _digest_random | true | false | false | 仅由固定分析 schema、baseline、规范 Prompt 集、攻击 registry、outcome 集、置信度和重采样次数确定的 bootstrap 随机源摘要。 |
-| bootstrap_analysis_schema | protocol | none | true | false | false | bootstrap 固定分析规范, 正式值为 paired_prompt_cluster_bootstrap_v1。 |
+| bootstrap_seed_digest_random | random | _digest_random | true | false | false | 仅由固定分析 schema、baseline、规范 Prompt 集、攻击 registry、注册 repeat 集、outcome 集、置信度和重采样次数确定的 bootstrap 随机源摘要。 |
+| bootstrap_analysis_schema | protocol | none | true | false | false | 精确9重复 bootstrap 固定分析规范, 正式值为 paired_prompt_cluster_registered_repeat_mean_bootstrap_v1。 |
 | bootstrap_bit_generator | protocol | none | true | false | false | bootstrap 使用的 NumPy bit generator, 正式值为 PCG64。 |
 | bootstrap_quantile_method | protocol | none | true | false | false | percentile CI 的 NumPy quantile 算法, 正式值为 linear。 |
 | paired_attack_registry_digest | provenance | none | true | true | false | 配对 outcome 共同覆盖的正式攻击身份、资源档位与配置摘要 registry 的稳定摘要。 |
+| registered_repeat_ids_digest | provenance | none | true | true | false | 对精确9个正式 randomization repeat ID 按冻结顺序计算的稳定摘要。 |
+| proposed_method_repeat_threshold_map_digest | provenance | none | true | true | false | 单个 baseline 统计行中 SLM-WM 的9个 repeat 独立 fixed-FPR 阈值映射摘要。 |
+| baseline_method_repeat_threshold_map_digest | provenance | none | true | true | false | 单个 baseline 统计行中该 baseline 的9个 repeat 独立 fixed-FPR 阈值映射摘要。 |
 | protocol_digest | provenance | none | true | true | false | 单行配对统计绑定规范 threshold 行、审计报告与审计 manifest 配置摘要的统一 fixed-FPR 协议摘要。 |
+| randomization_paired_statistics_ready | governance | none | true | true | false | 精确9重复、4个 baseline、完整 test Prompt 与攻击笛卡尔积是否已完成可重建统计; 该字段不等价于质量匹配后的论文 claim readiness。 |
 | paired_superiority_ready | governance | none | true | true | false | 单个主表 baseline 是否同时满足正平均差值、正 CI 下界和 Holm 校正后显著性门禁。 |
 | paired_superiority_row_count | metric | none | true | true | false | 配对总体优势表实际包含的主表 baseline 统计行数, 闭合值为4。 |
 | paired_superiority_ready_ids | governance | none | true | true | false | 已通过单方法配对总体优势门禁的主表 baseline 身份序列。 |
 | paired_superiority_exact_set_ready | governance | none | true | true | false | 配对总体优势统计是否无缺失、无额外且无重复地覆盖4个主表 baseline。 |
 | overall_paired_superiority_ready | governance | none | true | true | false | 4个主表 baseline 是否全部通过 Prompt 聚类配对总体优势门禁。 |
 | paired_superiority_rows_digest | provenance | none | true | true | false | 对按主表 baseline 稳定排序的4行总体配对统计计算的稳定摘要。 |
+| method_repeat_threshold_digest_map | provenance | none | true | true | false | 精确9个 repeat 到 SLM-WM 与4个 baseline 独立 fixed-FPR 阈值摘要的规范映射。 |
+| method_repeat_threshold_map_digest | provenance | none | true | true | false | 对完整45项 method-repeat 阈值摘要映射计算的稳定摘要。 |
+| conclusion_decision | governance | none | true | true | false | 当前统计分量的结论状态; 全样本优势通过时为 all_sample_superiority_ready, 未通过时为 measured_not_supported, 在质量匹配比较合并前不得据此设置 supports_paper_claim=true。 |
 | paired_prompt_counts | metric | none | true | true | false | 配对优势 summary 中4个主表 baseline 的唯一 Prompt 数量集合。 |
 | paired_attack_counts | metric | none | true | true | false | 配对优势 summary 中4个主表 baseline 的攻击条件数量集合。 |
 | paired_outcome_count | metric | none | true | true | false | 4个主表 baseline 的全部 Prompt x attack 配对结果总数。 |

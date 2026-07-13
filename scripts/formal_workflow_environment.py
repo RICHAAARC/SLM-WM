@@ -98,15 +98,9 @@ def _set_default_env(name: str, value: str | int | float) -> None:
 
 
 def _target_fpr_text(value: float) -> str:
-    """把目标 FPR 转为稳定短文本, 便于生成 profile 名称。"""
+    """把目标 FPR 转为稳定短文本, 供子进程环境统一使用。"""
 
     return f"{float(value):g}"
-
-
-def _protocol_profile(paper_run_name: str, target_fpr_text: str) -> str:
-    """根据运行层级和目标 FPR 构造协议 profile 名称。"""
-
-    return f"{paper_run_name}_fixed_fpr_{target_fpr_text.replace('.', '_')}"
 
 
 def _repeat_drive_dir(paper_run: Any, artifact_role: str) -> str:
@@ -160,9 +154,8 @@ def _configure_common_paper_run_environment(
         paper_run.randomization_repeat_id,
     )
     target_fpr_text = _target_fpr_text(paper_run.target_fpr)
-    profile = _protocol_profile(paper_run.run_name, target_fpr_text)
     _set_env("SLM_WM_PAPER_RUN_TARGET_FPR", target_fpr_text)
-    _set_env("SLM_WM_PROTOCOL_PROFILE", profile)
+    _set_env("SLM_WM_PROTOCOL_PROFILE", paper_run.protocol_profile)
     _set_env("SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT", paper_run.sample_count)
     _set_env("SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT", paper_run.minimum_clean_negative_count)
     _set_env("SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT", paper_run.dataset_level_quality_minimum_count)

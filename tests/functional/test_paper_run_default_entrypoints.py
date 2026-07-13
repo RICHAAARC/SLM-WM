@@ -113,8 +113,8 @@ def test_external_baseline_config_defaults_match_probe_scale() -> None:
     ("paper_run_name", "expected_prompt_count", "expected_target_fpr"),
     (
         ("probe_paper", 70, 0.1),
-        ("pilot_paper", 700, 0.01),
-        ("full_paper", 7000, 0.001),
+        ("pilot_paper", 700, 0.1),
+        ("full_paper", 7000, 0.1),
     ),
 )
 def test_t2smark_default_identity_tracks_paper_run_scale(

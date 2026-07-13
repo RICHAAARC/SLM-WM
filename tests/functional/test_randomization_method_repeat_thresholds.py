@@ -63,7 +63,9 @@ from paper_experiments.runners import (
     randomization_method_repeat_thresholds as bridge_module,
 )
 from paper_experiments.runners.randomization_method_repeat_thresholds import (
+    RandomizationMethodRepeatReconstruction,
     RandomizationMethodRepeatThresholdError,
+    rebuild_randomization_method_repeat_observation_sources,
     recompute_randomization_method_repeat_fixed_fpr,
 )
 from tests.helpers.formal_detection_record import bind_formal_detection_record
@@ -816,6 +818,9 @@ class _MemoryAggregateWorkspace:
                             "model_id": MODEL_ID,
                             "model_revision": MODEL_REVISION,
                         },
+                        "detection_protocol": {
+                            "input_access_mode": "image_only",
+                        },
                         "target_fpr": TARGET_FPR,
                         "threshold": threshold,
                         "threshold_digest": threshold_digest,
@@ -1319,6 +1324,23 @@ def test_bridge_composes_with_real_exact_threshold_recomputation(
     assert result["reconstruction_report"]["supports_paper_claim"] is False
 
 
+def test_bridge_exposes_same_validated_sources_for_downstream_statistics(
+    bridge_context,
+) -> None:
+    """后续统计只接收与45阈值同次重建的原始来源对象."""
+
+    provenance, _workspace, _captured = bridge_context
+
+    rebuilt = rebuild_randomization_method_repeat_observation_sources(provenance)
+
+    assert isinstance(rebuilt, RandomizationMethodRepeatReconstruction)
+    assert len(rebuilt.method_sources) == 45
+    assert len(rebuilt.threshold_records) == 45
+    assert isinstance(rebuilt.fairness_records, tuple)
+    assert rebuilt.report["method_repeat_fixed_fpr_recomputation_ready"] is True
+    assert rebuilt.reconstruction_report["supports_paper_claim"] is False
+
+
 def test_bridge_rejects_cross_repeat_prompt_byte_and_field_drift(
     bridge_context,
 ) -> None:
@@ -1668,6 +1690,29 @@ def test_bridge_rejects_t2smark_observation_evidence_digest_drift(
     with pytest.raises(
         RandomizationMethodRepeatThresholdError,
         match="candidate 阈值协议无效",
+    ):
+        recompute_randomization_method_repeat_fixed_fpr(provenance)
+
+
+def test_bridge_rejects_non_image_only_baseline_detection_protocol(
+    bridge_context,
+) -> None:
+    """baseline 阈值来源必须同时声明仅图像检测访问模式."""
+
+    provenance, workspace, _captured = bridge_context
+    repeat_id = formal_randomization_repeat_ids()[0]
+    key = (
+        repeat_id,
+        "method_faithful_tree_ring",
+        "tree_ring_baseline_transfer_manifest",
+    )
+    declaration = copy.deepcopy(workspace._objects[key])
+    declaration["detection_protocol"]["input_access_mode"] = "latent_trace"
+    workspace._objects[key] = declaration
+
+    with pytest.raises(
+        RandomizationMethodRepeatThresholdError,
+        match="transfer 阈值或共同模型身份无效",
     ):
         recompute_randomization_method_repeat_fixed_fpr(provenance)
 

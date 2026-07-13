@@ -15,6 +15,9 @@ from experiments.protocol.attacks import (
     formal_attack_seed_random,
 )
 from main.core.digest import build_stable_digest
+from main.methods.detection.image_only import (
+    validate_image_only_detection_digest_record,
+)
 
 
 PRIMARY_BASELINE_IDS = (
@@ -626,6 +629,7 @@ def build_paired_outcomes(
     baseline_method_threshold_digest: str,
     attack_registry_rows: Iterable[Mapping[str, Any]],
     include_quality_matching: bool = False,
+    require_image_only_evidence: bool = False,
 ) -> tuple[dict[str, Any], ...]:
     """对齐一个 baseline 与主方法的完整 Prompt x 正式攻击观测."""
 
@@ -772,6 +776,57 @@ def build_paired_outcomes(
                 required_field="detection_decision",
             ),
         ).to_dict()
+        if require_image_only_evidence:
+            proposed_metadata = proposed_row.get("metadata")
+            proposed_attacked_digest = _sha256_text(
+                proposed_row.get("attacked_image_digest", ""),
+                "attacked_image_digest",
+            )
+            proposed_evaluated_digest = _sha256_text(
+                proposed_row.get("evaluated_image_digest", ""),
+                "evaluated_image_digest",
+            )
+            baseline_attacked_digest = _sha256_text(
+                baseline_row.get("image_digest", ""),
+                "image_digest",
+            )
+            if (
+                proposed_row.get("attack_performed") is not True
+                or not str(proposed_row.get("attacked_image_path", "")).strip()
+                or proposed_attacked_digest != proposed_evaluated_digest
+                or not isinstance(proposed_metadata, Mapping)
+                or proposed_metadata.get("detector_input_access_mode")
+                != "image_key_public_model_only"
+                or proposed_metadata.get("blind_image_detector") is not True
+                or proposed_metadata.get("generation_latent_trace_required")
+                is not False
+                or not str(baseline_row.get("image_path", "")).strip()
+            ):
+                raise PairedSuperiorityError(
+                    "攻击后配对观测未绑定真实图像或仅图像盲检协议"
+                )
+            try:
+                validate_image_only_detection_digest_record(proposed_row)
+            except (TypeError, ValueError) as exc:
+                raise PairedSuperiorityError(
+                    "主方法攻击后盲检原子无法独立重建"
+                ) from exc
+            outcome = {
+                key: value
+                for key, value in outcome.items()
+                if key != "paired_outcome_digest"
+            }
+            outcome.update(
+                {
+                    "proposed_detector_digest": _sha256_text(
+                        proposed_row.get("detector_digest", ""),
+                        "detector_digest",
+                    ),
+                    "proposed_attacked_image_digest": proposed_attacked_digest,
+                    "baseline_attacked_image_digest": baseline_attacked_digest,
+                }
+            )
+            outcome["paired_outcome_digest"] = build_stable_digest(outcome)
         if include_quality_matching:
             proposed_quality = proposed_quality_by_prompt.get(prompt_id)
             baseline_quality = baseline_quality_by_prompt.get(prompt_id)

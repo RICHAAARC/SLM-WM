@@ -60,6 +60,40 @@ def test_drive_paths_isolate_active_repeat_and_invariant_evidence_once() -> None
 
 
 @pytest.mark.quick
+@pytest.mark.parametrize(
+    "paper_run_name",
+    ("probe_paper", "pilot_paper", "full_paper"),
+)
+def test_formal_entry_uses_the_same_fixed_fpr_profile_for_all_run_levels(
+    paper_run_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """服务器与 Colab 入口不得重建第二套层级相关 FPR 身份."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", paper_run_name)
+    monkeypatch.setenv("SLM_WM_PROTOCOL_PROFILE", "stale_wrong_profile")
+    monkeypatch.delenv("SLM_WM_PAPER_RUN_TARGET_FPR", raising=False)
+    monkeypatch.setattr(
+        workflow_environment,
+        "require_published_formal_execution_lock",
+        lambda root: {
+            "formal_execution_commit": "a" * 40,
+            "formal_execution_lock_digest": "b" * 64,
+        },
+    )
+
+    result = workflow_environment.configure_formal_workflow_environment(
+        "threshold_calibration",
+        repository_root=Path("."),
+    )
+
+    assert result["protocol_profile"] == "paper_fixed_fpr_0_1"
+    assert result["target_fpr"] == "0.1"
+    assert os.environ["SLM_WM_PROTOCOL_PROFILE"] == "paper_fixed_fpr_0_1"
+    assert os.environ["SLM_WM_THRESHOLD_TARGET_FPR"] == "0.1"
+
+
+@pytest.mark.quick
 def test_configured_invariant_workflow_does_not_publish_active_repeat(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

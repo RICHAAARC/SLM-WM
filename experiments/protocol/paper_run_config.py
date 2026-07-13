@@ -254,7 +254,7 @@ RUN_DEFAULTS: dict[str, dict[str, Any]] = {
         "prompt_set": PROBE_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[PROBE_PAPER_RUN_NAME].as_posix(),
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/probe_paper_results",
-        "protocol_profile": "probe_paper_fixed_fpr_0_1",
+        "protocol_profile": "paper_fixed_fpr_0_1",
         "target_fpr": 0.1,
         "sample_count": "all",
     },
@@ -262,16 +262,16 @@ RUN_DEFAULTS: dict[str, dict[str, Any]] = {
         "prompt_set": PILOT_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[PILOT_PAPER_RUN_NAME].as_posix(),
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results",
-        "protocol_profile": "pilot_paper_fixed_fpr_0_01",
-        "target_fpr": 0.01,
+        "protocol_profile": "paper_fixed_fpr_0_1",
+        "target_fpr": 0.1,
         "sample_count": "all",
     },
     FULL_PAPER_RUN_NAME: {
         "prompt_set": FULL_PAPER_RUN_NAME,
         "prompt_file": PROMPT_FILES[FULL_PAPER_RUN_NAME].as_posix(),
         "drive_result_root": f"{DEFAULT_DRIVE_ROOT}/full_paper_results",
-        "protocol_profile": "full_paper_fixed_fpr_0_001",
-        "target_fpr": 0.001,
+        "protocol_profile": "paper_fixed_fpr_0_1",
+        "target_fpr": 0.1,
         "sample_count": "all",
     },
 }
@@ -785,8 +785,8 @@ def derive_minimum_clean_negative_count(prompt_count: int, target_fpr: float) ->
 
     该函数属于配置解析层。probe_paper、pilot_paper 与 full_paper 不再各自硬编码
     clean negative 门禁, 而是统一要求完整 test split。70、700、7000个 Prompt
-    分别对应34、340、3400个 test 样本; 这些规模同时提供对 0.1、0.01、0.001
-    目标 FPR 进行零误报上界检验所需的统计分辨率。
+    分别对应34、340、3400个 test 样本。三个运行层级使用同一 FPR=0.1
+    工作点; 更大样本只提高统计强度, 不改变 detector 决策协议。
     """
 
     if prompt_count <= 0:
@@ -859,7 +859,7 @@ def build_paper_run_config(
     randomization_protocol = formal_randomization_protocol_record()
     return PaperRunConfig(
         run_name=run_name,
-        protocol_profile=os.environ.get("SLM_WM_PROTOCOL_PROFILE", str(defaults["protocol_profile"])),
+        protocol_profile=str(defaults["protocol_profile"]),
         prompt_set=prompt_set,
         prompt_file=prompt_file,
         prompt_count=prompt_count,
@@ -904,8 +904,8 @@ def shared_method_settings(config: PaperRunConfig) -> dict[str, Any]:
     """返回应在各论文运行层级间保持一致的方法级设置。
 
     fixed-FPR 门禁需要的最小样本数属于协议规模约束, 不属于方法机制本身。
-    probe_paper、pilot_paper 与 full_paper 均使用同一方法设置; 三者只通过
-    prompt 数量和 fixed-FPR 目标表达不同统计强度。
+    probe_paper、pilot_paper 与 full_paper 均使用同一方法设置和 FPR=0.1
+    工作点; 三者只通过 Prompt 数量表达不同统计强度。
     """
 
     payload = config.to_dict()

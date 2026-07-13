@@ -42,7 +42,7 @@ def _paper_run() -> PaperRunConfig:
 
     return PaperRunConfig(
         run_name="probe_paper",
-        protocol_profile="probe_paper_fixed_fpr_0_1",
+        protocol_profile="paper_fixed_fpr_0_1",
         prompt_set="probe_paper",
         prompt_file="prompts/probe_paper_prompts.txt",
         prompt_count=70,

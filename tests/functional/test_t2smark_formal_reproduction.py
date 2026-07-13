@@ -252,7 +252,7 @@ def _paper_run(
     repeat = resolve_formal_randomization_repeat(None)
     return SimpleNamespace(
         run_name="probe_paper",
-        protocol_profile="probe_paper_fixed_fpr_0_1",
+        protocol_profile="paper_fixed_fpr_0_1",
         prompt_count=prompt_count,
         target_fpr=0.1,
         prompt_set="probe_paper",

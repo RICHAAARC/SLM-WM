@@ -11,6 +11,7 @@ import pytest
 from experiments.protocol.paper_run_config import (
     DEFAULT_DRIVE_ROOT,
     PaperRunPromptContract,
+    RUN_DEFAULTS,
     build_paper_run_config,
     derive_dataset_level_quality_minimum_count,
     derive_minimum_clean_negative_count,
@@ -20,6 +21,7 @@ from experiments.protocol.paper_run_config import (
     shared_method_settings,
     validate_frozen_paper_run_target_fpr,
 )
+from experiments.protocol.pilot_paper_fixed_fpr import PAPER_RUN_FIXED_FPR
 from paper_workflow.colab_utils.paper_run_environment import (
     _resolve_paper_run_name,
 )
@@ -85,6 +87,7 @@ def test_paper_run_config_resolves_probe_paper_defaults(
     monkeypatch.delenv("SLM_WM_PAPER_RUN_SAMPLE_COUNT", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_SET", raising=False)
     monkeypatch.delenv("SLM_WM_PROMPT_FILE", raising=False)
+    monkeypatch.setenv("SLM_WM_PROTOCOL_PROFILE", "stale_wrong_profile")
 
     config = build_paper_run_config(root=tmp_path, prompt_contract=prompt_contract)
 
@@ -93,7 +96,7 @@ def test_paper_run_config_resolves_probe_paper_defaults(
     assert config.prompt_count == 7
     assert config.sample_count == 7
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/probe_paper_results"
-    assert config.protocol_profile == "probe_paper_fixed_fpr_0_1"
+    assert config.protocol_profile == "paper_fixed_fpr_0_1"
     assert config.target_fpr == 0.1
     assert config.minimum_clean_negative_count == 34
     assert config.dataset_level_quality_minimum_count == 70
@@ -123,8 +126,8 @@ def test_paper_run_config_switches_to_full_paper_without_notebook_rewrite(
     assert config.prompt_count == 11
     assert config.sample_count == 11
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/full_paper_results"
-    assert config.protocol_profile == "full_paper_fixed_fpr_0_001"
-    assert config.target_fpr == 0.001
+    assert config.protocol_profile == "paper_fixed_fpr_0_1"
+    assert config.target_fpr == 0.1
     assert config.minimum_clean_negative_count == 3400
     assert config.dataset_level_quality_minimum_count == 7000
     assert config.drive_dir("threshold_calibration").endswith(
@@ -153,8 +156,8 @@ def test_paper_run_config_switches_to_pilot_paper_with_explicit_input(
     assert config.prompt_count == 700
     assert config.sample_count == 700
     assert config.drive_result_root == f"{DEFAULT_DRIVE_ROOT}/pilot_paper_results"
-    assert config.protocol_profile == "pilot_paper_fixed_fpr_0_01"
-    assert config.target_fpr == 0.01
+    assert config.protocol_profile == "paper_fixed_fpr_0_1"
+    assert config.target_fpr == 0.1
     assert config.minimum_clean_negative_count == 340
     assert config.dataset_level_quality_minimum_count == 700
     assert config.drive_dir("aligned_rescoring").endswith(
@@ -163,8 +166,8 @@ def test_paper_run_config_switches_to_pilot_paper_with_explicit_input(
 
 
 @pytest.mark.constraint
-def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """三类论文运行层级共享方法参数, 门禁规模只能由样本规模和 fixed-FPR 派生。"""
+def test_paper_run_levels_share_method_and_fixed_fpr_protocol(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """三类论文运行层级只允许样本规模和统计强度不同."""
 
     contracts = {
         run_name: write_prompt_contract(tmp_path, run_name, count)
@@ -280,8 +283,13 @@ def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: 
         "quantized_budget_envelope_backtracking_maximum_steps"
     ] == 24
     assert probe_config.target_fpr == 0.1
-    assert pilot_config.target_fpr == 0.01
-    assert full_config.target_fpr == 0.001
+    assert pilot_config.target_fpr == 0.1
+    assert full_config.target_fpr == 0.1
+    assert {
+        probe_config.protocol_profile,
+        pilot_config.protocol_profile,
+        full_config.protocol_profile,
+    } == {"paper_fixed_fpr_0_1"}
     assert probe_config.minimum_clean_negative_count == 34
     assert pilot_config.minimum_clean_negative_count == 340
     assert full_config.minimum_clean_negative_count == 3400
@@ -325,11 +333,19 @@ def test_paper_run_gate_counts_are_derived_from_scale_and_fixed_fpr() -> None:
     """门禁计数应由样本规模和 fixed-FPR 标准派生, 不应成为独立协议分叉。"""
 
     assert derive_minimum_clean_negative_count(70, 0.1) == 34
-    assert derive_minimum_clean_negative_count(700, 0.01) == 340
-    assert derive_minimum_clean_negative_count(7000, 0.001) == 3400
+    assert derive_minimum_clean_negative_count(700, 0.1) == 340
+    assert derive_minimum_clean_negative_count(7000, 0.1) == 3400
     assert derive_dataset_level_quality_minimum_count(70) == 70
     assert derive_dataset_level_quality_minimum_count(700) == 700
     assert derive_dataset_level_quality_minimum_count(7000) == 7000
+
+
+@pytest.mark.constraint
+def test_all_paper_run_levels_share_one_fixed_fpr_authority() -> None:
+    """共同协议别名必须直接跟随运行配置中的唯一 FPR=0.1 定义."""
+
+    assert {float(row["target_fpr"]) for row in RUN_DEFAULTS.values()} == {0.1}
+    assert set(PAPER_RUN_FIXED_FPR.values()) == {0.1}
 
 
 @pytest.mark.constraint
@@ -527,8 +543,8 @@ def test_paper_run_config_rejects_invalid_alignment_gate_types(
     "paper_run_name,target_fpr",
     (
         ("probe_paper", 0.1),
-        ("pilot_paper", 0.01),
-        ("full_paper", 0.001),
+        ("pilot_paper", 0.1),
+        ("full_paper", 0.1),
     ),
 )
 def test_frozen_paper_run_target_fpr_accepts_only_registered_working_point(

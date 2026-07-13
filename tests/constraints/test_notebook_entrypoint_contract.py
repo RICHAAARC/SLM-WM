@@ -34,6 +34,12 @@ ACTIVE_REPEAT_GPU_NOTEBOOKS = {
     "external_baseline_shallow_diffuse_run.ipynb",
     "official_reference_t2smark_run.ipynb",
 }
+OFFICIAL_REFERENCE_NOTEBOOKS = {
+    "official_reference_t2smark_run.ipynb",
+    "official_reference_tree_ring_run.ipynb",
+    "official_reference_gaussian_shading_run.ipynb",
+    "official_reference_shallow_diffuse_run.ipynb",
+}
 FORBIDDEN_COMPONENT_NOTEBOOKS = {
     "aligned_rescoring_run.ipynb",
     "attention_geometry_capture_run.ipynb",
@@ -75,6 +81,22 @@ def test_current_notebook_set_contains_formal_entrypoints_only() -> None:
     names = {path.name for path in NOTEBOOK_DIR.glob("*.ipynb")}
     assert REQUIRED_NOTEBOOKS <= names
     assert not (FORBIDDEN_COMPONENT_NOTEBOOKS & names)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "notebook_name",
+    sorted(OFFICIAL_REFERENCE_NOTEBOOKS),
+)
+def test_official_reference_notebooks_describe_one_fixed_fpr_working_point(
+    notebook_name: str,
+) -> None:
+    """外层入口说明不得为三个论文层级发布不同 FPR 身份."""
+
+    source = _all_cell_source(NOTEBOOK_DIR / notebook_name)
+    assert "FPR=0.1" in source
+    assert "FPR=0.01" not in source
+    assert "FPR=0.001" not in source
 
 
 @pytest.mark.quick

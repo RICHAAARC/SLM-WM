@@ -347,7 +347,7 @@ $$
 
 calibration split 只冻结内容分数阈值、几何关系分阈值、注册置信度阈值、恢复后同步分阈值和 rescue window。失败原因由冻结内容余量与几何可靠性规则确定, 不是额外调参入口。rescue 只对内容阈值附近且失败原因为 `geometry_suspected` 或 `low_confidence` 的样本开放；注册必须通过双向关系、覆盖、唯一采样、预注册内点率与残差、pair 身份和恢复后 sync。对齐后不重新选择稳定 token, 并复用同一个内容阈值。最终 fixed-FPR 对应 `content OR same-threshold rescue` 的完整布尔协议；几何分数不能独立产生 positive。
 
-三级运行配置分别使用 70/700/7000 个 Prompt，test 数量为 34/340/3400，目标 FPR 为 0.1/0.01/0.001。test split 只应用冻结协议并报告置信上界。
+三级运行配置分别使用 70/700/7000 个 Prompt，test 数量为 34/340/3400，并统一使用 FPR=0.1。test split 只应用冻结协议并报告置信上界，样本规模仅改变统计强度。
 
 ---
 

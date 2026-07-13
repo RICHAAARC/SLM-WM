@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import dataclass, fields
 import hashlib
 import math
 from typing import Any, Mapping
@@ -143,6 +143,21 @@ _RUNTIME_RANDOMIZATION_IDENTITY_FIELDS = (
 
 class RandomizationMethodRepeatThresholdError(ValueError):
     """表示聚合来源无法形成精确45个独立 fixed-FPR 阈值."""
+
+
+@dataclass(frozen=True)
+class RandomizationMethodRepeatReconstruction:
+    """保存45个已验证原始来源及其 fixed-FPR 重建结果.
+
+    该对象只在内存中连接阈值重建与后续跨重复统计. 原始 observation 仍只
+    持久化在聚合包内, 因而不会为了跨层传递而复制第二份论文原始记录.
+    """
+
+    method_sources: tuple[MethodRepeatObservationSource, ...]
+    threshold_records: tuple[Mapping[str, Any], ...]
+    fairness_records: tuple[Mapping[str, Any], ...]
+    report: Mapping[str, Any]
+    reconstruction_report: Mapping[str, Any]
 
 
 def _plain_protocol_value(value: Any) -> Any:
@@ -833,10 +848,12 @@ def _normalize_transfer_threshold(
     """把三种 method-faithful transfer 阈值规范化为统一字段."""
 
     generation = declaration.get("generation_protocol")
+    detection = declaration.get("detection_protocol")
     threshold = declaration.get("threshold")
     threshold_digest = str(declaration.get("threshold_digest", ""))
     if (
         not isinstance(generation, Mapping)
+        or not isinstance(detection, Mapping)
         or declaration.get("baseline_id") != method_id
         or declaration.get("paper_run_name") != paper_run_name
         or declaration.get("transfer_ready") is not True
@@ -846,6 +863,7 @@ def _normalize_transfer_threshold(
         != observation_source_sha256
         or generation.get("model_id") != expected_model_id
         or generation.get("model_revision") != expected_model_revision
+        or detection.get("input_access_mode") != "image_only"
         or isinstance(threshold, bool)
         or not isinstance(threshold, int | float)
         or not math.isfinite(float(threshold))
@@ -1361,10 +1379,10 @@ def _method_repeat_sources(
     return tuple(sources)
 
 
-def recompute_randomization_method_repeat_fixed_fpr(
+def _reconstruct_randomization_method_repeat_fixed_fpr(
     source: RandomizationAggregateProvenance,
-) -> dict[str, Any]:
-    """仅从精确聚合 provenance 重算45个独立 fixed-FPR 阈值."""
+) -> RandomizationMethodRepeatReconstruction:
+    """仅从精确聚合 provenance 重建45个来源及其 fixed-FPR 阈值."""
 
     if not isinstance(source, RandomizationAggregateProvenance):
         raise TypeError("阈值桥接入口只接受 RandomizationAggregateProvenance")
@@ -1541,13 +1559,44 @@ def recompute_randomization_method_repeat_fixed_fpr(
     reconstruction_report["reconstruction_report_digest"] = (
         build_stable_digest(reconstruction_report)
     )
+    return RandomizationMethodRepeatReconstruction(
+        method_sources=method_sources,
+        threshold_records=tuple(result["threshold_records"]),
+        fairness_records=tuple(result["fairness_records"]),
+        report=dict(threshold_report),
+        reconstruction_report=reconstruction_report,
+    )
+
+
+def rebuild_randomization_method_repeat_observation_sources(
+    source: RandomizationAggregateProvenance,
+) -> RandomizationMethodRepeatReconstruction:
+    """公开返回后续统计可直接消费的已验证45来源重建对象.
+
+    此入口与阈值重算共用完全相同的 Prompt、随机身份、基础 latent、阈值和
+    来源成员校验, 从而避免后续统计再实现第二套 observation 桥接逻辑.
+    """
+
+    return _reconstruct_randomization_method_repeat_fixed_fpr(source)
+
+
+def recompute_randomization_method_repeat_fixed_fpr(
+    source: RandomizationAggregateProvenance,
+) -> dict[str, Any]:
+    """仅从精确聚合 provenance 重算45个独立 fixed-FPR 阈值."""
+
+    rebuilt = _reconstruct_randomization_method_repeat_fixed_fpr(source)
     return {
-        **result,
-        "reconstruction_report": reconstruction_report,
+        "threshold_records": rebuilt.threshold_records,
+        "fairness_records": rebuilt.fairness_records,
+        "report": dict(rebuilt.report),
+        "reconstruction_report": dict(rebuilt.reconstruction_report),
     }
 
 
 __all__ = [
+    "RandomizationMethodRepeatReconstruction",
     "RandomizationMethodRepeatThresholdError",
+    "rebuild_randomization_method_repeat_observation_sources",
     "recompute_randomization_method_repeat_fixed_fpr",
 ]

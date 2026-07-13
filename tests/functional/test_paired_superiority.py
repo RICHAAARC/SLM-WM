@@ -19,6 +19,7 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     build_pilot_paper_attack_matrix_rows,
 )
 from main.core.digest import build_stable_digest
+from paper_experiments.analysis import paired_superiority as paired_module
 from paper_experiments.analysis.fixed_fpr_threshold_audit import (
     build_fixed_fpr_threshold_audit_report,
 )
@@ -332,6 +333,75 @@ def test_paired_outcomes_bind_thresholds_and_formal_attack_registry() -> None:
     assert first["attack_config_digest"] == registry_by_id[first["attack_id"]][
         "attack_config_digest"
     ]
+
+
+def test_paired_outcomes_require_real_attacked_image_only_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正式跨重复路径必须绑定真实攻击图像和仅图像盲检原子."""
+
+    proposed = observation_rows()
+    baseline = observation_rows(baseline_id="tree_ring")
+    for row_index, row in enumerate(proposed):
+        image_digest = build_stable_digest({"proposed_image": row_index})
+        row.update(
+            {
+                "attack_performed": True,
+                "attacked_image_path": f"outputs/attacked/proposed_{row_index}.png",
+                "attacked_image_digest": image_digest,
+                "evaluated_image_digest": image_digest,
+                "detector_digest": build_stable_digest(
+                    {"detector": row_index}
+                ),
+                "metadata": {
+                    "detector_input_access_mode": "image_key_public_model_only",
+                    "blind_image_detector": True,
+                    "generation_latent_trace_required": False,
+                },
+            }
+        )
+    for row_index, row in enumerate(baseline):
+        row.update(
+            {
+                "image_path": f"outputs/attacked/baseline_{row_index}.png",
+                "image_digest": build_stable_digest(
+                    {"baseline_image": row_index}
+                ),
+            }
+        )
+    monkeypatch.setattr(
+        paired_module,
+        "validate_image_only_detection_digest_record",
+        lambda record: dict(record),
+    )
+
+    outcomes = build_paired_outcomes(
+        proposed,
+        baseline,
+        baseline_id="tree_ring",
+        proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
+        baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS["tree_ring"],
+        attack_registry_rows=UNIT_ATTACK_REGISTRY,
+        require_image_only_evidence=True,
+    )
+
+    assert len(outcomes) == len(proposed)
+    assert len(outcomes[0]["proposed_attacked_image_digest"]) == 64
+    assert len(outcomes[0]["baseline_attacked_image_digest"]) == 64
+    assert len(outcomes[0]["proposed_detector_digest"]) == 64
+    proposed[0]["metadata"]["blind_image_detector"] = False
+    with pytest.raises(PairedSuperiorityError, match="仅图像盲检协议"):
+        build_paired_outcomes(
+            proposed,
+            baseline,
+            baseline_id="tree_ring",
+            proposed_method_threshold_digest=PROPOSED_THRESHOLD_DIGEST,
+            baseline_method_threshold_digest=BASELINE_THRESHOLD_DIGESTS[
+                "tree_ring"
+            ],
+            attack_registry_rows=UNIT_ATTACK_REGISTRY,
+            require_image_only_evidence=True,
+        )
 
 
 def test_paired_outcomes_reject_different_base_latent_identity() -> None:

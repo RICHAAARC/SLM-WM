@@ -628,13 +628,13 @@ $$
 
 fixed-FPR 约束的是包含 rescue 的完整 evidence 判定，而不是只冻结内容阈值后任意增加第二条判定路径。calibration clean negatives 只冻结内容分数阈值、几何关系分阈值、注册置信度阈值、恢复后同步分阈值和 rescue window；锚点数12、归一化 xy 残差上界0.20、最小内点率0.50和失败原因映射属于预注册确定性协议。test split 只能应用冻结协议并报告 clean negative 的二项分布置信上界，不参与任何参数选择。
 
-当前三类运行配置为：
+当前三类运行配置使用同一 FPR=0.1 工作点, 只通过样本规模改变统计强度：
 
 | Prompt 数量 | dev | calibration | test | 目标 FPR |
 | ---: | ---: | ---: | ---: | ---: |
 | 70 | 3 | 33 | 34 | 0.1 |
-| 700 | 30 | 330 | 340 | 0.01 |
-| 7000 | 300 | 3300 | 3400 | 0.001 |
+| 700 | 30 | 330 | 340 | 0.1 |
+| 7000 | 300 | 3300 | 3400 | 0.1 |
 
 ---
 
@@ -692,6 +692,6 @@ SLM-WM 的科学方法终止于仅图像 $y_{\mathrm{evidence}}$ 判定。事件
 
 正式比较采用3个生成种子与3个水印密钥组成的9个交叉重复。对固定 Prompt 索引, SLM-WM 与全部主表 baseline 共享同一模型 revision、实际生成 seed 和基础 latent Tensor。基础 latent 由 `sha256_counter_normal_icdf_table20_float32_v2` 在 CPU float32 中查询冻结 Q20 中点逆 CDF 表规范生成, 在 CPU 转换到目标 dtype 后才搬运到执行设备。顶层运行 manifest 保存完整9重复计划和基础 latent 的 shape、dtype 生成协议；observation 只保存实际 Tensor 的内容摘要、联合身份摘要及必要的 seed/key 引用。统计重建从顶层计划规范重建基础 latent, 再比较 observation 摘要。水印密钥重复共享根密钥派生索引与整数身份, 各方法仍使用自身载体和检测机制。配对统计在比较检测判定之前先拒绝任何 seed、密钥重复或基础 latent 身份不一致的样本。
 
-单次 GPU 运行只物化一个登记重复, 最终论文统计必须覆盖全部9个重复。三个论文运行层级使用同一个随机化注册表、方法参数、攻击与 baseline 协议, 只改变 Prompt 数量、划分规模和目标 FPR。因此 probe 结果只能支持 probe 的统计强度, 但其方法与公平评测定义不能比 pilot 或 full 更弱。
+单次 GPU 运行只物化一个登记重复, 最终论文统计必须覆盖全部9个重复。三个论文运行层级使用同一个随机化注册表、方法参数、攻击、baseline 协议和 FPR=0.1 工作点, 只改变 Prompt 数量、划分规模与由样本规模带来的统计强度。因此 probe 结果只能支持 probe 的统计强度, 但其方法与公平评测定义不能比 pilot 或 full 更弱。
 
 方法实现存在不等于论文结论成立。空间 LF 的有效性、高斯幅值尾部截断的攻击鲁棒性、Q/K 几何恢复的增益和完整 fixed-FPR 均必须由真实 GPU 生成、clean negative、真实攻击、正式机制重跑消融、外部 baseline 和受治理结果包共同支撑。

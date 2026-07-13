@@ -874,7 +874,7 @@ def test_aggregate_writer_rejects_run_fpr_drift_before_reading_inputs(
             {},
             {},
             paper_run_name="pilot_paper",
-            target_fpr=0.1,
+            target_fpr=0.01,
             root=tmp_path,
         )
 

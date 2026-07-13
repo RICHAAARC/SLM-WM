@@ -1,4 +1,4 @@
-"""pilot_paper fixed-FPR=0.01 共同协议的轻量功能测试。"""
+"""pilot_paper 统一 fixed-FPR=0.1 共同协议的轻量功能测试。"""
 
 from __future__ import annotations
 
@@ -353,7 +353,7 @@ def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dic
         "attack_name": "jpeg_compression",
         "resource_profile": "full_main",
         "attack_config_digest": attack_config_digest(attack_config),
-        "target_fpr": 0.01,
+        "target_fpr": 0.1,
         "result_protocol_name": schema["result_protocol_name"],
         "result_scope": schema["result_scope"],
         "result_claim_scope": schema["result_claim_scope"],

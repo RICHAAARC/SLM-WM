@@ -156,8 +156,8 @@ def binomial_rate_upper_confidence_bound(
 ) -> float:
     """计算 false positive rate 的单侧置信上界。
 
-    该函数属于统计协议层: full_paper 目标会推进到 FPR=0.001, 仅报告
-    observed FPR 不足以支撑正式论文结论。因此这里提供一个无需外部依赖的
+    该函数属于统计协议层: 三个论文运行层级统一使用 FPR=0.1, 仅报告
+    observed FPR 仍不足以支撑正式论文结论。因此这里提供一个无需外部依赖的
     Wilson 单侧上界, 用于选择更保守的 calibration false positive 预算。
     """
 

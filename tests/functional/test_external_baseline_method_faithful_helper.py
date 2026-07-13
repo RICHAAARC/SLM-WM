@@ -698,7 +698,7 @@ def prepare_package_source(
     )
     threshold_audit = audit_fixed_fpr_observation_threshold(
         observations,
-        target_fpr=0.01,
+        target_fpr=0.1,
         expected_calibration_negative_count=1,
     )
     assert threshold_audit.fixed_fpr_ready
@@ -807,7 +807,7 @@ def prepare_package_source(
         ],
         "method_faithful_numerical_fidelity_ready": True,
         "paper_run_name": "pilot_paper",
-        "target_fpr": 0.01,
+        "target_fpr": 0.1,
         "threshold": threshold,
         "threshold_digest": threshold_audit.threshold_digest,
         "model_id": DEFAULT_MODEL_ID,
@@ -829,7 +829,7 @@ def prepare_package_source(
         "primary_baseline_id": baseline_id,
         "primary_baseline_observation_count": len(observations),
         "paper_run_name": "pilot_paper",
-        "target_fpr": 0.01,
+        "target_fpr": 0.1,
         "threshold_digest": transfer_manifest["threshold_digest"],
         "generation_protocol": {
             "model_id": DEFAULT_MODEL_ID,
@@ -852,7 +852,7 @@ def prepare_package_source(
             "formal_execution_run_lock": FORMAL_EXECUTION_LOCK,
             "config": {
                 "prompt_set": "pilot_paper",
-                "target_fpr": 0.01,
+                "target_fpr": 0.1,
                 "primary_baseline_id": baseline_id,
                 "model_id": DEFAULT_MODEL_ID,
                 "model_revision": DEFAULT_MODEL_REVISION,
@@ -913,7 +913,7 @@ def _patch_two_prompt_package_run(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda _root=".": SimpleNamespace(
             run_name="pilot_paper",
             prompt_count=2,
-            target_fpr=0.01,
+            target_fpr=0.1,
             randomization_repeat_id=repeat.randomization_repeat_id,
             generation_seed_index=repeat.generation_seed_index,
             generation_seed_offset=repeat.generation_seed_offset,
@@ -989,7 +989,7 @@ def test_packages_are_baseline_isolated_and_failure_is_not_packaged(
             root / record.archive_path,
             spec=specs[baseline_id],
             paper_run_name="pilot_paper",
-            target_fpr=0.01,
+            target_fpr=0.1,
             randomization_repeat_id="seed_00_key_00",
         )
         assert candidate.package_family == f"method_faithful_{baseline_id}"
