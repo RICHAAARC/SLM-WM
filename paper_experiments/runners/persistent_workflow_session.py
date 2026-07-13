@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import shutil
 import threading
+import time
 from typing import Any, Callable, Mapping, Sequence
 import uuid
 
@@ -45,6 +46,7 @@ DEFAULT_CHECKPOINT_INTERVAL_SECONDS = 60.0
 CHECKPOINT_INTERVAL_ENVIRONMENT_KEY = (
     "SLM_WM_WORKFLOW_CHECKPOINT_INTERVAL_SECONDS"
 )
+_GENERATION_PUBLISH_RETRY_DELAYS_SECONDS = (0.01, 0.02, 0.04, 0.08)
 
 
 class WorkflowCheckpointError(RuntimeError):
@@ -298,6 +300,35 @@ def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
         encoding="utf-8",
     )
     os.replace(temporary_path, path)
+
+
+def _publish_generation_directory(
+    build_directory: Path,
+    generation_directory: Path,
+) -> None:
+    """原子发布完整 generation，并容忍 Windows 的短暂句柄占用.
+
+    Windows 上的实时扫描器可能在文件已经关闭后短暂持有目录句柄，导致同卷
+    ``os.replace`` 返回 ``PermissionError``。此处只重试原子目录重命名，不
+    改用复制，也不接受不完整 generation。若另一会话已发布同一内容摘要，
+    则复用该不可变目录并删除当前临时目录。
+    """
+
+    delays = _GENERATION_PUBLISH_RETRY_DELAYS_SECONDS
+    for attempt in range(len(delays) + 1):
+        if generation_directory.exists():
+            shutil.rmtree(build_directory)
+            return
+        try:
+            os.replace(build_directory, generation_directory)
+            return
+        except PermissionError:
+            if generation_directory.exists():
+                shutil.rmtree(build_directory)
+                return
+            if attempt == len(delays):
+                raise
+            time.sleep(delays[attempt])
 
 
 def _file_sha256(path: Path) -> str:
@@ -631,7 +662,10 @@ class PersistentWorkflowSession:
                 if generation_directory.exists():
                     shutil.rmtree(build_directory)
                 else:
-                    os.replace(build_directory, generation_directory)
+                    _publish_generation_directory(
+                        build_directory,
+                        generation_directory,
+                    )
                 pointer = {
                     "report_schema": CHECKPOINT_POINTER_SCHEMA,
                     "schema_version": CHECKPOINT_SCHEMA_VERSION,

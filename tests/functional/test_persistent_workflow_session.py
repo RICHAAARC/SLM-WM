@@ -79,6 +79,46 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def test_generation_publish_retries_transient_permission_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows 短暂目录句柄占用不得破坏不可变 generation 发布."""
+
+    build_directory = tmp_path / ".new-generation"
+    generation_directory = tmp_path / "published-generation"
+    build_directory.mkdir()
+    (build_directory / "checkpoint_manifest.json").write_text(
+        "{}\n",
+        encoding="utf-8",
+    )
+    real_replace = persistence.os.replace
+    attempt_count = 0
+
+    def transient_replace(source: Path, destination: Path) -> None:
+        nonlocal attempt_count
+        attempt_count += 1
+        if attempt_count <= 2:
+            raise PermissionError("模拟 Windows 短暂句柄占用")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(persistence.os, "replace", transient_replace)
+    monkeypatch.setattr(
+        persistence,
+        "_GENERATION_PUBLISH_RETRY_DELAYS_SECONDS",
+        (0.0, 0.0),
+    )
+
+    persistence._publish_generation_directory(
+        build_directory,
+        generation_directory,
+    )
+
+    assert attempt_count == 3
+    assert not build_directory.exists()
+    assert (generation_directory / "checkpoint_manifest.json").is_file()
+
+
 def _write_completed_route(
     root: Path,
     route: persistence.PersistentWorkflowRoute,
