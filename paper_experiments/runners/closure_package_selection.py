@@ -307,6 +307,19 @@ IMAGE_RUNTIME_MANIFEST = IMAGE_RUNTIME_PREFIX + "manifest.local.json"
 IMAGE_RUNTIME_PACKAGE_INPUT = (
     IMAGE_RUNTIME_PREFIX + "image_only_dataset_package_input_manifest.json"
 )
+IMAGE_RUNTIME_PROMPT_SOURCE_PREFIX = (
+    IMAGE_RUNTIME_PREFIX + "prompt_source_snapshot/"
+)
+IMAGE_RUNTIME_PROMPT_FILE = (
+    IMAGE_RUNTIME_PROMPT_SOURCE_PREFIX
+    + "paper_main_{paper_run}_prompts.txt"
+)
+IMAGE_RUNTIME_PROMPT_SELECTION_MANIFEST = (
+    IMAGE_RUNTIME_PROMPT_SOURCE_PREFIX + "prompt_selection_manifest.jsonl"
+)
+IMAGE_RUNTIME_PROMPT_SOURCE_REGISTRY = (
+    IMAGE_RUNTIME_PROMPT_SOURCE_PREFIX + "prompt_source_registry.json"
+)
 
 ABLATION_PREFIX = "outputs/formal_mechanism_ablation/{paper_run}/"
 ABLATION_SUMMARY = ABLATION_PREFIX + "ablation_component_summary.json"
@@ -498,6 +511,9 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
             IMAGE_RUNTIME_PREFIX + "score_distribution_table.csv",
             IMAGE_RUNTIME_PREFIX + "roc_curve_points.csv",
             IMAGE_RUNTIME_PREFIX + "det_curve_points.csv",
+            IMAGE_RUNTIME_PROMPT_FILE,
+            IMAGE_RUNTIME_PROMPT_SELECTION_MANIFEST,
+            IMAGE_RUNTIME_PROMPT_SOURCE_REGISTRY,
             IMAGE_RUNTIME_SUMMARY,
             IMAGE_RUNTIME_MANIFEST,
             IMAGE_RUNTIME_PACKAGE_INPUT,
@@ -529,6 +545,11 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
         value_requirements=(
             _require(IMAGE_RUNTIME_SUMMARY, "protocol_decision", "pass"),
             _require(IMAGE_RUNTIME_SUMMARY, "full_method_component_ready", True),
+            _require(
+                IMAGE_RUNTIME_SUMMARY,
+                "prompt_source_contract_ready",
+                True,
+            ),
             _require(
                 IMAGE_RUNTIME_SUMMARY,
                 "scientific_unit_provenance_ready",

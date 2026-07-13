@@ -75,6 +75,7 @@ REQUIRED_SOURCE_FIELDS = (
 )
 REQUIRED_THRESHOLD_FIELDS = (
     "evaluation_split",
+    "target_fpr",
     "calibrated_detection_threshold",
     "threshold_source",
     "calibration_clean_negative_count",
@@ -732,6 +733,20 @@ def _validate_threshold_provenance(
         return issues
     if _str_field(row, "evaluation_split") != "test":
         issues.append(_issue(row_index, row, "evaluation_split", "formal_metrics_must_use_test_split"))
+    if not math.isclose(
+        _float_field(row, "target_fpr"),
+        target_fpr,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        issues.append(
+            _issue(
+                row_index,
+                row,
+                "target_fpr",
+                "frozen_target_fpr_required",
+            )
+        )
     try:
         threshold = float(row["calibrated_detection_threshold"])
     except (TypeError, ValueError):
@@ -1469,6 +1484,7 @@ def build_primary_baseline_formal_result_record(
         "resource_profile": resource_profile,
         "attack_config_digest": attack_config_digest_value,
         "comparable_operating_point": build_fixed_fpr_operating_point(target_fpr),
+        "target_fpr": float(target_fpr),
         "result_protocol_name": PRIMARY_BASELINE_FORMAL_PROTOCOL_NAME,
         "result_source_type": result_source_type,
         "baseline_result_source": baseline_result_source,

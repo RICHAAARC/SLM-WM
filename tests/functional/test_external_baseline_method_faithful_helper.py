@@ -44,6 +44,7 @@ from paper_experiments.runners.external_baseline_method_faithful import (
     METHOD_FAITHFUL_BASELINE_IDS,
     ExternalBaselineMethodFaithfulConfig,
     _build_command_plan_command,
+    build_default_config,
     output_paths,
     package_external_baseline_method_faithful_outputs,
     prepare_single_baseline_run_directory,
@@ -301,6 +302,27 @@ def test_formal_runner_rejects_generation_budget_override(
 
     with pytest.raises(ValueError, match="公平预算"):
         validate_formal_run_config(root_path, invalid)
+
+
+def test_formal_runner_rejects_unregistered_watermark_key_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """baseline 构造和校验均须在 GPU 运行前拒绝替代根密钥."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.setenv(
+        "SLM_WM_KEY_MATERIAL",
+        "alternate_formal_root_for_test",
+    )
+    root_path = Path(__file__).resolve().parents[2]
+    config = ExternalBaselineMethodFaithfulConfig(
+        primary_baseline_id="tree_ring",
+    )
+
+    with pytest.raises(ValueError, match="预注册正式 key plan"):
+        validate_formal_run_config(root_path, config)
+    with pytest.raises(ValueError, match="预注册正式 key plan"):
+        build_default_config()
 
 
 def test_formal_runner_rejects_model_revision_override(

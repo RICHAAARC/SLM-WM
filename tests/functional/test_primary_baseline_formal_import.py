@@ -328,6 +328,26 @@ def test_formal_import_validator_recomputes_threshold_from_bound_observations(tm
 
 
 @pytest.mark.quick
+def test_formal_import_validator_rejects_explicit_target_fpr_drift(
+    tmp_path: Path,
+) -> None:
+    """candidate 明示的 target FPR 必须与验证入口冻结值一致."""
+
+    row, _ = write_formal_tree_ring_row(tmp_path)
+    row["target_fpr"] = 0.1
+
+    report = validate_primary_baseline_formal_import_rows(
+        [row],
+        evidence_root=tmp_path,
+        target_fpr=0.01,
+    )
+
+    assert "frozen_target_fpr_required" in {
+        issue["reason"] for issue in report["issues"]
+    }
+
+
+@pytest.mark.quick
 def test_formal_import_validator_requires_exact_attack_prompt_coverage(tmp_path: Path) -> None:
     """非 clean 攻击不得替换样本角色，也不得重复或遗漏 test Prompt。"""
 
@@ -807,6 +827,7 @@ def test_formal_import_protocol_writer_outputs_schema_template_and_validation(tm
     assert schema == build_primary_baseline_formal_import_schema(target_fpr=0.01)
     assert schema["required_threshold_fields"] == [
         "evaluation_split",
+        "target_fpr",
         "calibrated_detection_threshold",
         "threshold_source",
         "calibration_clean_negative_count",

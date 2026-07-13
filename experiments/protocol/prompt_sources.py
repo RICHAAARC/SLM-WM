@@ -33,6 +33,12 @@ PROMPT_CONFIG_NAMES = {
 }
 PROMPT_SELECTION_MANIFEST_PATH = Path("configs/prompt_selection_manifest.jsonl")
 PROMPT_SOURCE_REGISTRY_PATH = Path("configs/prompt_source_registry.json")
+PROMPT_SOURCE_REGISTRY_SHA256 = (
+    "ece7cfe7d053cdd012f52052c79eb34e446a8454ff9f1d2ec43f6676596015aa"
+)
+PROMPT_SOURCE_REGISTRY_DIGEST = (
+    "6333dca7528a8defb2d4091990a9aa0246dde9d867e04290af2aba4e85249fde"
+)
 PROMPT_SELECTION_MANIFEST_SHA256 = (
     "5de869b83630d6fa0f0a8484fcc51b7b7cc453ab7917bba100635e6e3f5cdf4b"
 )
@@ -495,6 +501,57 @@ def _read_selection_manifest_bytes(
     return result
 
 
+def _reject_duplicate_json_object_keys(
+    pairs: list[tuple[str, Any]],
+) -> dict[str, Any]:
+    """拒绝普通 JSON parser 会静默覆盖的重复对象字段."""
+
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Prompt 来源 JSON 包含重复字段: {key}")
+        result[key] = value
+    return result
+
+
+def read_prompt_source_registry_bytes(
+    registry_bytes: bytes,
+) -> dict[str, Any]:
+    """从原始 UTF-8 字节读取且核验 Prompt 来源注册表."""
+
+    if not isinstance(registry_bytes, bytes):
+        raise TypeError("Prompt 来源注册表输入必须是 bytes")
+    if hashlib.sha256(registry_bytes).hexdigest() != (
+        PROMPT_SOURCE_REGISTRY_SHA256
+    ):
+        raise ValueError("Prompt 来源注册表未匹配冻结原始字节身份")
+    try:
+        registry = json.loads(
+            registry_bytes.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_json_object_keys,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Prompt 来源注册表必须是 UTF-8 JSON object") from exc
+    if not isinstance(registry, dict):
+        raise TypeError("Prompt 来源注册表必须是 JSON object")
+    _validate_prompt_source_registry(registry)
+    return registry
+
+
+def read_selection_manifest_bytes(
+    manifest_bytes: bytes,
+) -> tuple[dict[str, Any], ...]:
+    """从调用方提供的原始字节读取受治理 Prompt 选择清单.
+
+    该函数与文件读取入口共享同一组逐行摘要、来源比例和文本唯一性校验,
+    供自包含结果包在不依赖解压路径的情况下复用.
+    """
+
+    if not isinstance(manifest_bytes, bytes):
+        raise TypeError("Prompt 选择清单输入必须是 bytes")
+    return _read_selection_manifest_bytes(manifest_bytes)
+
+
 def read_selection_manifest(
     path: str | Path,
 ) -> tuple[dict[str, Any], ...]:
@@ -696,6 +753,20 @@ def _load_governed_prompt_selection(
 
     registry_path = root_path / PROMPT_SOURCE_REGISTRY_PATH
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    _validate_prompt_source_registry(registry)
+
+    manifest_path = (root_path / PROMPT_SELECTION_MANIFEST_PATH).resolve()
+    manifest_path.relative_to(root_path)
+    manifest_bytes = manifest_path.read_bytes()
+    manifest_rows = _validated_selection_manifest_rows(manifest_bytes)
+    return registry, manifest_rows
+
+
+def _validate_prompt_source_registry(
+    registry: Mapping[str, Any],
+) -> None:
+    """核验 Prompt 来源注册表的冻结协议、来源身份和自身摘要."""
+
     exact_registry_fields = {
         "registry_schema": PROMPT_SOURCE_REGISTRY_SCHEMA,
         "prompt_source_protocol": PROMPT_SOURCE_PROTOCOL,
@@ -719,19 +790,11 @@ def _load_governed_prompt_selection(
         for key, value in registry.items()
         if key != "registry_digest"
     }
-    if declared_registry_digest != stable_digest(registry_payload):
+    if (
+        declared_registry_digest != PROMPT_SOURCE_REGISTRY_DIGEST
+        or declared_registry_digest != stable_digest(registry_payload)
+    ):
         raise ValueError("Prompt 来源注册表摘要不一致")
-
-    manifest_path = (root_path / PROMPT_SELECTION_MANIFEST_PATH).resolve()
-    manifest_path.relative_to(root_path)
-    manifest_bytes = manifest_path.read_bytes()
-    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
-    if manifest_sha256 != PROMPT_SELECTION_MANIFEST_SHA256:
-        raise ValueError("Prompt 选择清单未匹配注册表身份")
-    manifest_rows = _GOVERNED_SELECTION_ROWS_CACHE.get(manifest_sha256)
-    if manifest_rows is None:
-        manifest_rows = _read_selection_manifest_bytes(manifest_bytes)
-        _GOVERNED_SELECTION_ROWS_CACHE[manifest_sha256] = manifest_rows
 
     source_records = registry.get("sources")
     if not isinstance(source_records, dict) or set(source_records) != {
@@ -760,7 +823,23 @@ def _load_governed_prompt_selection(
             for field_name, expected_value in expected_contract.items()
         ):
             raise ValueError("Prompt 来源注册表未匹配冻结来源身份")
-    return registry, manifest_rows
+
+
+def _validated_selection_manifest_rows(
+    manifest_bytes: bytes,
+) -> tuple[dict[str, Any], ...]:
+    """按冻结文件摘要和记录摘要读取选择清单字节."""
+
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    if manifest_sha256 != PROMPT_SELECTION_MANIFEST_SHA256:
+        raise ValueError("Prompt 选择清单未匹配注册表身份")
+    manifest_rows = _GOVERNED_SELECTION_ROWS_CACHE.get(manifest_sha256)
+    if manifest_rows is None:
+        manifest_rows = read_selection_manifest_bytes(manifest_bytes)
+        _GOVERNED_SELECTION_ROWS_CACHE[manifest_sha256] = manifest_rows
+    if stable_digest(list(manifest_rows)) != PROMPT_SELECTION_MANIFEST_DIGEST:
+        raise ValueError("Prompt 选择记录序列未匹配冻结摘要")
+    return manifest_rows
 
 
 def _audit_prompt_set_record(
@@ -778,12 +857,41 @@ def _audit_prompt_set_record(
     record = registry.get("prompt_sets", {}).get(prompt_set)
     if not isinstance(record, dict):
         raise ValueError("Prompt 来源注册表缺少运行层级")
-    expected_bytes = prompt_file_bytes(manifest_rows, count)
     prompt_path = (root_path / str(record["prompt_file"])).resolve()
     prompt_path.relative_to(root_path)
     actual_bytes = prompt_path.read_bytes()
+    return _audit_prompt_set_record_bytes(
+        registry=registry,
+        manifest_rows=manifest_rows,
+        prompt_set=prompt_set,
+        actual_bytes=actual_bytes,
+    )
+
+
+def _audit_prompt_set_record_bytes(
+    *,
+    registry: Mapping[str, Any],
+    manifest_rows: tuple[Mapping[str, Any], ...],
+    prompt_set: str,
+    actual_bytes: bytes,
+) -> dict[str, Any]:
+    """核验一份 Prompt 原始字节能否由受治理选择清单重建."""
+
+    if prompt_set not in PROMPT_SET_COUNTS:
+        raise ValueError("未知 Prompt 运行层级")
+    if not isinstance(actual_bytes, bytes) or not actual_bytes:
+        raise ValueError("Prompt 文件必须提供非空原始字节")
+    count = PROMPT_SET_COUNTS[prompt_set]
+    record = registry.get("prompt_sets", {}).get(prompt_set)
+    if not isinstance(record, dict):
+        raise ValueError("Prompt 来源注册表缺少运行层级")
+    if record.get("prompt_file") != (
+        f"configs/{PROMPT_CONFIG_NAMES[prompt_set]}"
+    ):
+        raise ValueError("Prompt 来源注册表的运行文件路径不规范")
+    expected_bytes = prompt_file_bytes(manifest_rows, count)
     if actual_bytes != expected_bytes:
-        raise ValueError("提交内 Prompt 文件不能由选择清单逐字节重建")
+        raise ValueError("Prompt 文件不能由选择清单逐字节重建")
     if (
         int(record.get("result_count", -1)) != count
         or hashlib.sha256(actual_bytes).hexdigest()
@@ -798,6 +906,48 @@ def _audit_prompt_set_record(
         "prompt_file_sha256": hashlib.sha256(actual_bytes).hexdigest(),
         "selection_manifest_sha256": PROMPT_SELECTION_MANIFEST_SHA256,
         "byte_rebuild_ready": True,
+    }
+
+
+def audit_packaged_prompt_set_bytes(
+    *,
+    prompt_set: str,
+    prompt_file_payload: bytes,
+    selection_manifest_payload: bytes,
+    source_registry_payload: bytes,
+) -> dict[str, Any]:
+    """从自包含结果包的三份原始事实重建一个 Prompt 运行集合.
+
+    该入口不读取仓库文件系统. 它先验证来源注册表和7000条冻结选择清单,
+    再要求当前运行层级的 Prompt 文件与对应清单前缀逐字节相同.
+    """
+
+    registry = read_prompt_source_registry_bytes(source_registry_payload)
+    manifest_rows = _validated_selection_manifest_rows(
+        selection_manifest_payload
+    )
+    prompt_report = _audit_prompt_set_record_bytes(
+        registry=registry,
+        manifest_rows=manifest_rows,
+        prompt_set=prompt_set,
+        actual_bytes=prompt_file_payload,
+    )
+    registry_digest = str(registry["registry_digest"])
+    payload = {
+        "prompt_source_protocol": PROMPT_SOURCE_PROTOCOL,
+        "prompt_set": prompt_set,
+        "prompt_source_registry_digest": registry_digest,
+        "selection_manifest_sha256": PROMPT_SELECTION_MANIFEST_SHA256,
+        "selection_manifest_digest": PROMPT_SELECTION_MANIFEST_DIGEST,
+        "prompt_file_sha256": prompt_report["prompt_file_sha256"],
+        "prompt_count": prompt_report["prompt_count"],
+        "source_registry_ready": True,
+        "selection_manifest_ready": True,
+        "prompt_bank_byte_rebuild_ready": True,
+    }
+    return {
+        **payload,
+        "packaged_prompt_source_audit_digest": stable_digest(payload),
     }
 
 
@@ -870,7 +1020,10 @@ __all__ = [
     "PROMPT_SET_COUNTS",
     "PROMPT_SOURCE_PROTOCOL",
     "PROMPT_SOURCE_REGISTRY_PATH",
+    "PROMPT_SOURCE_REGISTRY_SHA256",
+    "PROMPT_SOURCE_REGISTRY_DIGEST",
     "SourcePromptRecord",
+    "audit_packaged_prompt_set_bytes",
     "audit_committed_prompt_bank",
     "audit_governed_prompt_set",
     "build_prompt_selection_rows",
@@ -878,6 +1031,8 @@ __all__ = [
     "file_sha256",
     "prompt_file_bytes",
     "read_selection_manifest",
+    "read_selection_manifest_bytes",
+    "read_prompt_source_registry_bytes",
     "selection_manifest_bytes",
     "stable_digest",
     "verify_selection_against_sources",

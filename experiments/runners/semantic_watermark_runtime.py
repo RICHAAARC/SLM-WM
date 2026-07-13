@@ -129,6 +129,7 @@ _FORMAL_ATTENTION_COMPONENT_WEIGHT_PROTOCOLS = (
     (1.0 / 3.0, 1.0 / 3.0, 0.0, 1.0 / 3.0),
     (1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 0.0),
 )
+FORMAL_RUNTIME_RESCUE_MARGIN_LOW = -0.05
 
 
 @dataclass(frozen=True)
@@ -336,7 +337,7 @@ class SemanticWatermarkRuntimeConfig:
     geometry_score_threshold: float = 0.0
     registration_confidence_threshold: float = 0.0
     attention_sync_score_threshold: float = 0.0
-    rescue_margin_low: float = -0.05
+    rescue_margin_low: float = FORMAL_RUNTIME_RESCUE_MARGIN_LOW
     output_dir: str = "outputs/semantic_watermark_runtime"
 
     def __post_init__(self) -> None:
@@ -607,7 +608,10 @@ def semantic_watermark_runtime_config_payload(
     """返回隐藏密钥原文但保留精确科学身份的运行配置."""
 
     payload = asdict(config)
-    payload["key_material"] = build_stable_digest({"key_material": config.key_material})
+    payload.pop("key_material")
+    payload["key_material_digest_random"] = build_stable_digest(
+        {"key_material": config.key_material}
+    )
     payload["injection_step_indices"] = list(config.injection_step_indices)
     payload["attention_injection_steps"] = list(
         config.attention_injection_steps

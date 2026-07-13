@@ -17,9 +17,11 @@ from experiments.protocol.prompt_sources import (
     PROMPT_SELECTION_MANIFEST_SHA256,
     PROMPT_SET_COUNTS,
     PROMPT_SOURCE_REGISTRY_PATH,
+    audit_packaged_prompt_set_bytes,
     audit_committed_prompt_bank,
     build_prompt_selection_rows,
     read_selection_manifest,
+    stable_digest,
     verify_selection_against_sources,
     write_selection_manifest,
 )
@@ -189,6 +191,95 @@ def test_committed_prompt_bank_is_byte_rebuildable(tmp_path: Path) -> None:
         assert (rebuilt_config_path / relative_path.name).read_bytes() == (
             repository_root / relative_path
         ).read_bytes()
+
+
+@pytest.mark.quick
+def test_packaged_prompt_set_bytes_rebuilds_without_repository_paths() -> None:
+    """自包含包应只凭三份原始字节重建当前 Prompt 集合."""
+
+    repository_root = Path(__file__).resolve().parents[2]
+    report = audit_packaged_prompt_set_bytes(
+        prompt_set="probe_paper",
+        prompt_file_payload=(
+            repository_root / "configs" / PROMPT_CONFIG_NAMES["probe_paper"]
+        ).read_bytes(),
+        selection_manifest_payload=(
+            repository_root / PROMPT_SELECTION_MANIFEST_PATH
+        ).read_bytes(),
+        source_registry_payload=(
+            repository_root / PROMPT_SOURCE_REGISTRY_PATH
+        ).read_bytes(),
+    )
+
+    assert report["prompt_count"] == 70
+    assert report["prompt_bank_byte_rebuild_ready"] is True
+    assert len(report["packaged_prompt_source_audit_digest"]) == 64
+
+
+@pytest.mark.quick
+def test_packaged_prompt_set_bytes_rejects_consistent_unregistered_text() -> None:
+    """同数量替换语料不得脱离冻结选择清单形成自洽 Prompt 集合."""
+
+    repository_root = Path(__file__).resolve().parents[2]
+    prompt_payload = (
+        repository_root / "configs" / PROMPT_CONFIG_NAMES["probe_paper"]
+    ).read_bytes()
+    replaced_payload = prompt_payload.replace(
+        prompt_payload.splitlines()[0],
+        b"A completely unregistered adversarial prompt",
+        1,
+    )
+
+    with pytest.raises(ValueError, match="逐字节重建"):
+        audit_packaged_prompt_set_bytes(
+            prompt_set="probe_paper",
+            prompt_file_payload=replaced_payload,
+            selection_manifest_payload=(
+                repository_root / PROMPT_SELECTION_MANIFEST_PATH
+            ).read_bytes(),
+            source_registry_payload=(
+                repository_root / PROMPT_SOURCE_REGISTRY_PATH
+            ).read_bytes(),
+        )
+
+
+@pytest.mark.quick
+def test_packaged_prompt_set_bytes_rejects_resigned_registry_metadata() -> None:
+    """篡改来源统计后重算自摘要也不得绕过冻结注册表字节身份."""
+
+    repository_root = Path(__file__).resolve().parents[2]
+    registry_path = repository_root / PROMPT_SOURCE_REGISTRY_PATH
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["sources"][COCO_SOURCE_ID]["license"] = "tampered"
+    registry_payload = {
+        key: value
+        for key, value in registry.items()
+        if key != "registry_digest"
+    }
+    registry["registry_digest"] = stable_digest(registry_payload)
+    tampered_registry_bytes = (
+        json.dumps(
+            registry,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+    with pytest.raises(ValueError, match="冻结原始字节身份"):
+        audit_packaged_prompt_set_bytes(
+            prompt_set="probe_paper",
+            prompt_file_payload=(
+                repository_root
+                / "configs"
+                / PROMPT_CONFIG_NAMES["probe_paper"]
+            ).read_bytes(),
+            selection_manifest_payload=(
+                repository_root / PROMPT_SELECTION_MANIFEST_PATH
+            ).read_bytes(),
+            source_registry_payload=tampered_registry_bytes,
+        )
 
 
 @pytest.mark.quick

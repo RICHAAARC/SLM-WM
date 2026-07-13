@@ -51,6 +51,7 @@ from experiments.runtime.scientific_unit_provenance import (
 )
 from main.core.digest import build_stable_digest
 from experiments.runners.image_only_dataset_runtime import (
+    _write_prompt_source_snapshot,
     package_image_only_dataset_runtime,
 )
 from experiments.runners.semantic_watermark_runtime import (
@@ -308,6 +309,14 @@ def _prepare_image_runtime(
             "det_curve_points.csv",
         ),
     )
+    prompt_source_snapshot_paths, prompt_source_report = (
+        _write_prompt_source_snapshot(
+            root_path=root,
+            output_dir=directory,
+            paper_run_name=PAPER_RUN_NAME,
+            prompt_path=root / PROMPT_FILES[PAPER_RUN_NAME],
+        )
+    )
     provenance_summary = aggregate_scientific_unit_provenance(
         (
             result["metadata"]["scientific_unit_provenance"]
@@ -349,6 +358,22 @@ def _prepare_image_runtime(
             "repeat_component_ready": True,
             "randomization_aggregate_ready": False,
             "supports_paper_claim": False,
+            "prompt_file_sha256": prompt_source_report[
+                "prompt_file_sha256"
+            ],
+            "prompt_source_registry_digest": prompt_source_report[
+                "prompt_source_registry_digest"
+            ],
+            "selection_manifest_sha256": prompt_source_report[
+                "selection_manifest_sha256"
+            ],
+            "selection_manifest_digest": prompt_source_report[
+                "selection_manifest_digest"
+            ],
+            "packaged_prompt_source_audit_digest": prompt_source_report[
+                "packaged_prompt_source_audit_digest"
+            ],
+            "prompt_source_contract_ready": True,
         },
     )
     _write_json(
@@ -372,6 +397,10 @@ def _prepare_image_runtime(
                     "dataset_runtime_summary.json",
                     "manifest.local.json",
                 )
+            ]
+            + [
+                path.relative_to(root).as_posix()
+                for path in prompt_source_snapshot_paths
             ]
             + ([] if omit_unit_leaves else scientific_unit_output_paths),
             "config": {
@@ -947,6 +976,17 @@ def test_primary_gpu_package_producers_pass_strict_closure_contract(
                 for name in archive_names
             )
             assert sentinel.name not in archive_names
+            if spec.package_family == "image_only_dataset_runtime":
+                snapshot_prefix = (
+                    f"outputs/image_only_dataset_runtime/{PAPER_RUN_NAME}/"
+                    "prompt_source_snapshot/"
+                )
+                assert {
+                    snapshot_prefix
+                    + f"paper_main_{PAPER_RUN_NAME}_prompts.txt",
+                    snapshot_prefix + "prompt_selection_manifest.jsonl",
+                    snapshot_prefix + "prompt_source_registry.json",
+                }.issubset(archive_names)
             assert spec.package_input_manifest_template is not None
             package_input_member = spec.package_input_manifest_template.format(
                 paper_run=PAPER_RUN_NAME,

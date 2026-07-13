@@ -17,6 +17,12 @@ from experiments.protocol.paper_run_config import (
     normalize_paper_run_name,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
+from experiments.protocol.prompt_sources import (
+    PROMPT_CONFIG_NAMES,
+    PROMPT_SELECTION_MANIFEST_PATH,
+    PROMPT_SOURCE_REGISTRY_PATH,
+    audit_packaged_prompt_set_bytes,
+)
 from experiments.protocol.splits import apply_split_assignments, build_group_split_counts
 from experiments.protocol.attacks import default_attack_configs
 from experiments.runtime import repository_environment
@@ -95,6 +101,91 @@ from main.methods.subspace import (
 
 
 PACKAGE_INPUT_MANIFEST_FILE_NAME = "image_only_dataset_package_input_manifest.json"
+PROMPT_SOURCE_SNAPSHOT_DIRECTORY_NAME = "prompt_source_snapshot"
+
+
+def _prompt_source_snapshot_paths(
+    output_dir: Path,
+    paper_run_name: str,
+) -> tuple[Path, Path, Path]:
+    """返回当前运行层级三份自包含 Prompt 来源快照路径."""
+
+    snapshot_dir = output_dir / PROMPT_SOURCE_SNAPSHOT_DIRECTORY_NAME
+    return (
+        snapshot_dir / PROMPT_CONFIG_NAMES[paper_run_name],
+        snapshot_dir / PROMPT_SELECTION_MANIFEST_PATH.name,
+        snapshot_dir / PROMPT_SOURCE_REGISTRY_PATH.name,
+    )
+
+
+def _write_prompt_source_snapshot(
+    *,
+    root_path: Path,
+    output_dir: Path,
+    paper_run_name: str,
+    prompt_path: Path,
+) -> tuple[tuple[Path, Path, Path], dict[str, Any]]:
+    """逐字节复制并复验本次 GPU 运行实际消费的 Prompt 来源."""
+
+    snapshot_paths = _prompt_source_snapshot_paths(
+        output_dir,
+        paper_run_name,
+    )
+    source_paths = (
+        prompt_path,
+        root_path / PROMPT_SELECTION_MANIFEST_PATH,
+        root_path / PROMPT_SOURCE_REGISTRY_PATH,
+    )
+    snapshot_paths[0].parent.mkdir(parents=True, exist_ok=True)
+    for source_path, snapshot_path in zip(
+        source_paths,
+        snapshot_paths,
+        strict=True,
+    ):
+        if not source_path.is_file() or source_path.is_symlink():
+            raise FileNotFoundError(
+                f"Prompt 来源快照缺少普通源文件: {source_path}"
+            )
+        payload = source_path.read_bytes()
+        temporary_path = snapshot_path.with_name(
+            snapshot_path.name + ".partial"
+        )
+        temporary_path.write_bytes(payload)
+        temporary_path.replace(snapshot_path)
+        if snapshot_path.read_bytes() != payload:
+            raise RuntimeError("Prompt 来源快照写后字节复验失败")
+    report = audit_packaged_prompt_set_bytes(
+        prompt_set=paper_run_name,
+        prompt_file_payload=snapshot_paths[0].read_bytes(),
+        selection_manifest_payload=snapshot_paths[1].read_bytes(),
+        source_registry_payload=snapshot_paths[2].read_bytes(),
+    )
+    return snapshot_paths, report
+
+
+def _audit_prompt_source_snapshot(
+    *,
+    output_dir: Path,
+    paper_run_name: str,
+) -> tuple[tuple[Path, Path, Path], dict[str, Any]]:
+    """在打包前重新读取并审计三份自包含 Prompt 来源快照."""
+
+    snapshot_paths = _prompt_source_snapshot_paths(
+        output_dir,
+        paper_run_name,
+    )
+    if any(
+        not path.is_file() or path.is_symlink()
+        for path in snapshot_paths
+    ):
+        raise FileNotFoundError("主方法结果缺少自包含 Prompt 来源快照")
+    report = audit_packaged_prompt_set_bytes(
+        prompt_set=paper_run_name,
+        prompt_file_payload=snapshot_paths[0].read_bytes(),
+        selection_manifest_payload=snapshot_paths[1].read_bytes(),
+        source_registry_payload=snapshot_paths[2].read_bytes(),
+    )
+    return snapshot_paths, report
 
 
 @dataclass(frozen=True)
@@ -2034,6 +2125,34 @@ def run_image_only_dataset_runtime(
         "randomization_aggregate_ready": False,
         "supports_paper_claim": False,
     }
+    prompt_source_snapshot_paths, prompt_source_report = (
+        _write_prompt_source_snapshot(
+            root_path=root_path,
+            output_dir=output_dir,
+            paper_run_name=resolved_paper_run.run_name,
+            prompt_path=prompt_path,
+        )
+    )
+    summary.update(
+        {
+            "prompt_file_sha256": prompt_source_report[
+                "prompt_file_sha256"
+            ],
+            "prompt_source_registry_digest": prompt_source_report[
+                "prompt_source_registry_digest"
+            ],
+            "selection_manifest_sha256": prompt_source_report[
+                "selection_manifest_sha256"
+            ],
+            "selection_manifest_digest": prompt_source_report[
+                "selection_manifest_digest"
+            ],
+            "packaged_prompt_source_audit_digest": prompt_source_report[
+                "packaged_prompt_source_audit_digest"
+            ],
+            "prompt_source_contract_ready": True,
+        }
+    )
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     scientific_unit_output_paths: list[str] = []
     for result in runtime_results:
@@ -2075,6 +2194,10 @@ def run_image_only_dataset_runtime(
             detection_score_table_paths["det_curve_points"].relative_to(root_path).as_posix(),
             summary_path.relative_to(root_path).as_posix(),
             manifest_path.relative_to(root_path).as_posix(),
+            *(
+                path.relative_to(root_path).as_posix()
+                for path in prompt_source_snapshot_paths
+            ),
             *scientific_unit_output_paths,
         ),
         config={
@@ -2084,7 +2207,6 @@ def run_image_only_dataset_runtime(
             "method_config": semantic_watermark_runtime_config_payload(
                 base_method_config
             ),
-            "method_key_digest": build_stable_digest({"key_material": base_method_config.key_material}),
         },
         code_version=formal_execution_run_lock["formal_execution_commit"],
         rebuild_command="调用 experiments.runners.image_only_dataset_runtime.run_image_only_dataset_runtime",
@@ -2169,6 +2291,13 @@ def package_image_only_dataset_runtime(
             "manifest.local.json",
         )
     )
+    prompt_source_snapshot_paths, prompt_source_report = (
+        _audit_prompt_source_snapshot(
+            output_dir=source_dir,
+            paper_run_name=resolved_paper_run_name,
+        )
+    )
+    required_paths = (*required_paths, *prompt_source_snapshot_paths)
     if any(not path.is_file() for path in required_paths):
         raise FileNotFoundError("仅图像数据集运行输出不完整, 不得打包")
     summary = json.loads((source_dir / "dataset_runtime_summary.json").read_text(encoding="utf-8-sig"))
@@ -2380,6 +2509,17 @@ def package_image_only_dataset_runtime(
             summary.get("repeat_component_ready") is True,
             summary.get("randomization_aggregate_ready") is False,
             summary.get("supports_paper_claim") is False,
+            summary.get("prompt_source_contract_ready") is True,
+            summary.get("prompt_file_sha256")
+            == prompt_source_report["prompt_file_sha256"],
+            summary.get("prompt_source_registry_digest")
+            == prompt_source_report["prompt_source_registry_digest"],
+            summary.get("selection_manifest_sha256")
+            == prompt_source_report["selection_manifest_sha256"],
+            summary.get("selection_manifest_digest")
+            == prompt_source_report["selection_manifest_digest"],
+            summary.get("packaged_prompt_source_audit_digest")
+            == prompt_source_report["packaged_prompt_source_audit_digest"],
             manifest.get("artifact_id")
             == f"{resolved_paper_run_name}_image_only_dataset_runtime_manifest",
             manifest.get("metadata", {}).get(

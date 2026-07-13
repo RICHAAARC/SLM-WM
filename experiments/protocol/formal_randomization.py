@@ -17,6 +17,27 @@ from main.core.keyed_prg import (
 FORMAL_RANDOMIZATION_PROTOCOL = "crossed_generation_seed_watermark_key_v1"
 FORMAL_GENERATION_SEED_OFFSETS = (0, 1_000_003, 2_000_003)
 FORMAL_WATERMARK_KEY_INDICES = (0, 1, 2)
+FORMAL_WATERMARK_KEY_PLAN_PROTOCOL = "fixed_three_key_commitment_v1"
+FORMAL_WATERMARK_KEY_PLAN_DIGEST = (
+    "acf5607470bc70151531e0f8984cc01aeb997ddf3956b3f761a36261232a8af4"
+)
+FORMAL_WATERMARK_KEY_PLAN = (
+    (
+        0,
+        8_320_559_253_613_457_125,
+        "de8a8bf8384a484aaf26b99b60cca4f081a530a3f74c45408041bf6014e4b3eb",
+    ),
+    (
+        1,
+        6_420_407_684_636_015_685,
+        "602a8c14d16dc1d4115435424fda685cdfb5f4f72537026b6fc2371eb7fe7cba",
+    ),
+    (
+        2,
+        3_553_778_732_585_930_283,
+        "7d54c23b2423909ea01da1a8c5db424a434fa984a191d0b152e497f473bdf948",
+    ),
+)
 DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID = "seed_00_key_00"
 FORMAL_RANDOMIZATION_REPEAT_IDENTITY_FIELDS = (
     "randomization_repeat_id",
@@ -181,6 +202,7 @@ def formal_randomization_protocol_record() -> dict[str, Any]:
     """返回完整交叉重复注册表及其稳定摘要."""
 
     repeat_records = [record.to_dict() for record in formal_randomization_repeats()]
+    key_plan = formal_watermark_key_plan_record()
     payload = {
         "formal_randomization_protocol": FORMAL_RANDOMIZATION_PROTOCOL,
         "generation_seed_repeat_count": len(FORMAL_GENERATION_SEED_OFFSETS),
@@ -194,6 +216,13 @@ def formal_randomization_protocol_record() -> dict[str, Any]:
         "base_latent_keyed_prg_protocol_digest": keyed_prg_protocol_record()[
             "keyed_prg_protocol_digest"
         ],
+        "formal_watermark_key_plan_protocol": key_plan[
+            "formal_watermark_key_plan_protocol"
+        ],
+        "formal_watermark_key_plan_digest": key_plan[
+            "formal_watermark_key_plan_digest"
+        ],
+        "watermark_key_records": key_plan["watermark_key_records"],
     }
     return {
         **payload,
@@ -253,8 +282,105 @@ def formal_watermark_key_material(
 ) -> str:
     """构造主方法可直接消费的重复密钥材料, 不暴露根密钥原文."""
 
+    require_formal_watermark_key_plan(root_key_material)
     key_seed = formal_watermark_key_seed_random(root_key_material, repeat)
-    return f"slm_wm_formal_key:{repeat.watermark_key_index}:{key_seed:016x}"
+    return formal_watermark_key_material_from_seed(key_seed, repeat)
+
+
+def formal_watermark_key_plan_record() -> dict[str, Any]:
+    """返回运行前冻结的3个正式 key seed 与 key material 摘要."""
+
+    records = [
+        {
+            "watermark_key_index": key_index,
+            "watermark_key_seed_random": key_seed,
+            "watermark_key_material_digest_random": material_digest,
+        }
+        for key_index, key_seed, material_digest in FORMAL_WATERMARK_KEY_PLAN
+    ]
+    payload = {
+        "formal_watermark_key_plan_protocol": (
+            FORMAL_WATERMARK_KEY_PLAN_PROTOCOL
+        ),
+        "watermark_key_records": records,
+    }
+    digest = build_stable_digest(payload)
+    if digest != FORMAL_WATERMARK_KEY_PLAN_DIGEST:
+        raise RuntimeError("正式 watermark key plan 常量摘要发生漂移")
+    return {
+        **payload,
+        "formal_watermark_key_plan_digest": digest,
+        "supports_paper_claim": False,
+    }
+
+
+def require_formal_watermark_key_plan(
+    root_key_material: str,
+) -> dict[str, Any]:
+    """要求运行时根密钥精确派生预注册的3个正式 key 身份."""
+
+    if not root_key_material:
+        raise ValueError("root_key_material 不能为空")
+    expected = formal_watermark_key_plan_record()
+    rebuilt_records = []
+    for key_index in FORMAL_WATERMARK_KEY_INDICES:
+        repeat = next(
+            record
+            for record in formal_randomization_repeats()
+            if record.watermark_key_index == key_index
+        )
+        key_seed = formal_watermark_key_seed_random(
+            root_key_material,
+            repeat,
+        )
+        key_material = formal_watermark_key_material_from_seed(
+            key_seed,
+            repeat,
+        )
+        rebuilt_records.append(
+            {
+                "watermark_key_index": key_index,
+                "watermark_key_seed_random": key_seed,
+                "watermark_key_material_digest_random": build_stable_digest(
+                    {"key_material": key_material}
+                ),
+            }
+        )
+    if rebuilt_records != expected["watermark_key_records"]:
+        raise ValueError("运行时根密钥未匹配预注册正式 key plan")
+    return expected
+
+
+def formal_watermark_key_material_from_seed(
+    watermark_key_seed_random: int,
+    repeat: FormalRandomizationRepeat,
+) -> str:
+    """由已公开的正式 key seed 重建重复密钥材料.
+
+    该函数用于不持有根密钥的结果审计端. 审计端可以从受治理的 runtime
+    配置读取 ``watermark_key_seed_random``, 按与生成端完全相同的结构重建
+    key material 及其摘要, 而不需要读取或恢复根密钥原文.
+    """
+
+    if (
+        type(watermark_key_seed_random) is not int
+        or watermark_key_seed_random < 0
+        or watermark_key_seed_random >= (1 << 63)
+    ):
+        raise ValueError(
+            "watermark_key_seed_random 必须是非负63位整数"
+        )
+    if not isinstance(repeat, FormalRandomizationRepeat):
+        raise TypeError("repeat 必须是 FormalRandomizationRepeat")
+    registered_repeat = resolve_formal_randomization_repeat(
+        repeat.randomization_repeat_id
+    )
+    if repeat != registered_repeat:
+        raise ValueError("repeat 身份未匹配正式随机化注册表")
+    return (
+        f"slm_wm_formal_key:{repeat.watermark_key_index}:"
+        f"{watermark_key_seed_random:016x}"
+    )
 
 
 def build_formal_randomization_identity(
@@ -373,6 +499,9 @@ __all__ = [
     "FORMAL_RANDOMIZATION_PROTOCOL",
     "FORMAL_RANDOMIZATION_REPEAT_IDENTITY_FIELDS",
     "FORMAL_WATERMARK_KEY_INDICES",
+    "FORMAL_WATERMARK_KEY_PLAN",
+    "FORMAL_WATERMARK_KEY_PLAN_DIGEST",
+    "FORMAL_WATERMARK_KEY_PLAN_PROTOCOL",
     "FormalRandomizationRepeat",
     "build_canonical_sd35_base_latent",
     "build_formal_randomization_repeat_coverage",
@@ -384,7 +513,10 @@ __all__ = [
     "formal_randomization_repeat_registry_digest",
     "formal_randomization_repeats",
     "formal_watermark_key_material",
+    "formal_watermark_key_material_from_seed",
+    "formal_watermark_key_plan_record",
     "formal_watermark_key_seed_random",
+    "require_formal_watermark_key_plan",
     "resolve_formal_randomization_repeat",
     "validate_formal_randomization_repeat_records",
 ]

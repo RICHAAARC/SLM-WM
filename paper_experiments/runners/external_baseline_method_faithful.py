@@ -27,6 +27,7 @@ from experiments.protocol.formal_randomization import (
     DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
     build_formal_randomization_identity,
     formal_watermark_key_seed_random,
+    require_formal_watermark_key_plan,
     resolve_formal_randomization_repeat,
 )
 from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
@@ -188,8 +189,13 @@ def validate_formal_run_config(
     repeat = resolve_formal_randomization_repeat(
         paper_run.randomization_repeat_id
     )
+    root_key_material = os.environ.get(
+        "SLM_WM_KEY_MATERIAL",
+        "slm_wm_paper_key",
+    )
+    require_formal_watermark_key_plan(root_key_material)
     expected_watermark_key_seed_random = formal_watermark_key_seed_random(
-        os.environ.get("SLM_WM_KEY_MATERIAL", "slm_wm_paper_key"),
+        root_key_material,
         repeat,
     )
     expected_attacks = set(supported_formal_image_attack_names())
@@ -1060,6 +1066,7 @@ def build_default_config() -> ExternalBaselineMethodFaithfulConfig:
         "SLM_WM_KEY_MATERIAL",
         "slm_wm_paper_key",
     )
+    require_formal_watermark_key_plan(root_key_material)
     return ExternalBaselineMethodFaithfulConfig(
         output_dir=os.environ.get("SLM_WM_EXTERNAL_BASELINE_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         drive_output_dir=os.environ.get(

@@ -251,6 +251,27 @@ def test_t2smark_formal_rejects_unlocked_openclip_source_branch(tmp_path: Path) 
         validate_t2smark_formal_protocol_config(config, root_path=tmp_path)
 
 
+def test_t2smark_rejects_unregistered_watermark_key_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T2SMark 构造和校验均须在 GPU 运行前拒绝替代根密钥."""
+
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
+    monkeypatch.setenv(
+        "SLM_WM_KEY_MATERIAL",
+        "alternate_formal_root_for_test",
+    )
+    root_path = Path(__file__).resolve().parents[2]
+
+    with pytest.raises(ValueError, match="预注册正式 key plan"):
+        validate_t2smark_formal_protocol_config(
+            T2SMarkFormalReproductionConfig(),
+            root_path=root_path,
+        )
+    with pytest.raises(ValueError, match="预注册正式 key plan"):
+        t2smark_runtime.build_default_config()
+
+
 def test_t2smark_protocol_binding_records_disabled_source_clip_branch() -> None:
     """复用协议必须显式绑定官方源码 OpenCLIP 分支处于禁用状态。"""
 

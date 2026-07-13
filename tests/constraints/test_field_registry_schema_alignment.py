@@ -15,6 +15,10 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_REQUIRED_METRIC_FIELDS,
     PILOT_PAPER_REQUIRED_SOURCE_FIELDS,
 )
+from experiments.runners.semantic_watermark_runtime import (
+    SemanticWatermarkRuntimeConfig,
+    SemanticWatermarkRuntimeResult,
+)
 from paper_experiments.analysis.paper_artifact_data_validation import (
     ABLATION_DELTA_FIELDS,
     ABLATION_METRIC_FIELDS,
@@ -68,6 +72,11 @@ FORMAL_PERSISTED_SCHEMA_FIELDS = set().union(
     SCORE_DISTRIBUTION_FIELDNAMES,
     CURVE_POINT_FIELDNAMES,
 )
+SEMANTIC_WATERMARK_RUNTIME_DERIVED_CONFIG_FIELDS = {
+    "key_material_digest_random",
+    "method_definition",
+    "method_definition_digest",
+}
 
 
 def _registered_fields() -> set[str]:
@@ -125,3 +134,24 @@ def test_formal_persisted_schema_fields_are_registered() -> None:
     """正式协议与论文表格持久化 schema 不得出现未登记字段."""
 
     assert FORMAL_PERSISTED_SCHEMA_FIELDS <= _registered_fields()
+
+
+def test_semantic_watermark_runtime_public_fields_are_registered() -> None:
+    """方法运行持久化配置和结果字段必须与字段注册表同步."""
+
+    config_fields = {
+        field.name
+        for field in fields(SemanticWatermarkRuntimeConfig)
+        if field.name != "key_material"
+    }
+    persisted_config_fields = (
+        config_fields | SEMANTIC_WATERMARK_RUNTIME_DERIVED_CONFIG_FIELDS
+    )
+    result_fields = {
+        field.name for field in fields(SemanticWatermarkRuntimeResult)
+    }
+
+    registered = _registered_fields()
+    assert "key_material" not in persisted_config_fields
+    assert persisted_config_fields <= registered
+    assert result_fields <= registered

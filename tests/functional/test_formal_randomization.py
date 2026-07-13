@@ -14,6 +14,11 @@ from experiments.protocol.formal_randomization import (
     formal_randomization_repeat_ids,
     formal_randomization_repeat_registry_digest,
     formal_randomization_repeats,
+    formal_watermark_key_material,
+    formal_watermark_key_material_from_seed,
+    formal_watermark_key_plan_record,
+    formal_watermark_key_seed_random,
+    require_formal_watermark_key_plan,
     resolve_formal_randomization_repeat,
     validate_formal_randomization_repeat_records,
 )
@@ -47,7 +52,7 @@ def test_formal_randomization_registry_is_exact_three_by_three_cross() -> None:
     assert protocol["watermark_key_repeat_count"] == 3
     assert protocol["crossed_repeat_count"] == 9
     assert protocol["formal_randomization_protocol_digest"] == (
-        "bac52313e8c4ed3e4339b65c3da897013c060d153c3c0b98de8e2e1d5bd679a0"
+        "7b7db91717c54923b46a1bc32d2a3756fef1831533b60fd337205ab276cd4abb"
     )
     assert formal_randomization_repeat_ids() == tuple(
         f"seed_{seed_index:02d}_key_{key_index:02d}"
@@ -175,6 +180,61 @@ def test_canonical_base_latent_is_byte_stable_and_seed_sensitive() -> None:
         first_identity["base_latent_content_digest_random"]
         != different_identity["base_latent_content_digest_random"]
     )
+
+
+def test_formal_key_material_can_be_rebuilt_from_governed_key_seed() -> None:
+    """审计端必须能在不读取根密钥时重建正式 key material 摘要."""
+
+    repeat = resolve_formal_randomization_repeat("seed_02_key_01")
+    root_key_material = "slm_wm_paper_key"
+    key_seed = formal_watermark_key_seed_random(root_key_material, repeat)
+
+    rebuilt = formal_watermark_key_material_from_seed(key_seed, repeat)
+
+    assert rebuilt == formal_watermark_key_material(
+        root_key_material,
+        repeat,
+    )
+    assert build_stable_digest({"key_material": rebuilt}) == (
+        build_formal_randomization_identity(
+            base_seed=1703,
+            prompt_index=7,
+            root_key_material=root_key_material,
+            repeat=repeat,
+        )["watermark_key_material_digest_random"]
+    )
+
+
+def test_formal_watermark_key_plan_is_preregistered_and_root_bound() -> None:
+    """正式3-key 计划必须在运行前冻结并拒绝结果后选择根密钥."""
+
+    plan = require_formal_watermark_key_plan("slm_wm_paper_key")
+
+    assert plan == formal_watermark_key_plan_record()
+    assert len(plan["watermark_key_records"]) == 3
+    assert len(plan["formal_watermark_key_plan_digest"]) == 64
+    with pytest.raises(ValueError, match="预注册正式 key plan"):
+        require_formal_watermark_key_plan("post_selected_alternate_key")
+    with pytest.raises(ValueError, match="预注册正式 key plan"):
+        formal_watermark_key_material(
+            "post_selected_alternate_key",
+            resolve_formal_randomization_repeat("seed_00_key_00"),
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_seed",
+    (False, -1, 1 << 63),
+)
+def test_formal_key_material_rebuild_rejects_noncanonical_key_seed(
+    invalid_seed: object,
+) -> None:
+    """重建入口必须拒绝 bool、负数和超出正式63位域的 seed."""
+
+    repeat = resolve_formal_randomization_repeat("seed_00_key_00")
+
+    with pytest.raises(ValueError, match="非负63位整数"):
+        formal_watermark_key_material_from_seed(invalid_seed, repeat)
 
 
 def test_main_and_all_formal_baselines_share_active_repeat(

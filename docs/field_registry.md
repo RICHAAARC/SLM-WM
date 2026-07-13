@@ -502,6 +502,51 @@ Notebook 与 repository module 的跨边界数据
 | generation_seed_random | random | _random | true | false | false | 单个 Prompt 生成 clean 与 watermarked 配对图像使用的确定性种子。 |
 | public_detection_seed_random | random | _random | true | false | false | 仅图像检测的公开反演噪声使用的确定性种子。 |
 | key_material_digest_random | random | _digest_random | true | false | false | 驱动 keyed carrier、候选方向与注意力目标随机轨迹的密钥材料摘要。 |
+| vision_model_id | runtime | none | true | false | false | 语义条件视觉编码器实际使用的冻结模型标识。 |
+| risk_signal_calibration_protocol | protocol | none | true | false | false | 把解析风险输入校准为分支风险场的冻结协议名称。 |
+| risk_image_signal_interpolation_mode | protocol | none | true | false | false | 图像风险信号映射到 latent 网格时使用的插值模式。 |
+| risk_image_signal_align_corners | protocol | none | true | false | false | 图像风险信号插值是否采用对齐角点坐标约定。 |
+| risk_attention_signal_interpolation_mode | protocol | none | true | false | false | 注意力风险信号映射到 latent 网格时使用的插值模式。 |
+| risk_attention_signal_align_corners | protocol | none | true | false | false | 注意力风险信号插值是否采用对齐角点坐标约定。 |
+| risk_neutral_texture_value | protocol | none | true | false | false | 风险校准中表示中性纹理响应的冻结标量。 |
+| risk_eligibility_comparison | protocol | none | true | false | false | 分支风险资格判断采用的冻结比较关系。 |
+| risk_budget_broadcast_protocol | protocol | none | true | false | false | 分支预算从风险支持域广播到 latent 通道的冻结协议。 |
+| risk_zero_support_protocol | protocol | none | true | false | false | 分支风险支持域为空时必须执行的冻结失败或零更新协议。 |
+| risk_bounded_scale_protocol | protocol | none | true | false | false | 单位方向按分支风险预算进行逐位置有界缩放的冻结协议。 |
+| risk_bounded_scale_direction_epsilon | protocol | none | true | false | false | 风险有界缩放中方向归一化使用的数值稳定 epsilon。 |
+| lf_content_risk_config | method | none | true | false | false | LF 内容载体分支的完整风险校准配置对象。 |
+| tail_robust_risk_config | method | none | true | false | false | 高斯幅值尾部截断载体分支的完整风险校准配置对象。 |
+| attention_geometry_risk_config | method | none | true | false | false | 注意力几何分支的完整风险校准配置对象。 |
+| attention_injection_steps | method | none | true | false | false | 注意力几何分支实际消费且与正式注入步索引一致的有序步集合。 |
+| candidate_count | method | none | true | false | false | 持久化运行配置中与 `jacobian_candidate_count` 精确一致的候选方向数量别名。 |
+| null_rank | method | none | true | false | false | 持久化运行配置中与 `null_space_rank` 精确一致的安全基底秩别名。 |
+| null_space_numerical_epsilon | protocol | none | true | false | false | Null Space 数值求解中仅用于稳定除法和退化判断的 epsilon。 |
+| maximum_qr_condition_number | protocol | none | true | false | false | QR 参考求解允许的最大条件数。 |
+| qr_reference_solve_protocol | protocol | none | true | false | false | Null Space 基底 QR 参考求解及复验使用的冻结协议。 |
+| lf_kernel_size | method | none | true | false | false | LF 平均池化算子的冻结核尺寸。 |
+| lf_stride | method | none | true | false | false | LF 平均池化算子的冻结步幅。 |
+| lf_padding | method | none | true | false | false | LF 平均池化算子的冻结填充宽度。 |
+| lf_boundary_mode | protocol | none | true | false | false | LF 平均池化边界采用的冻结处理模式。 |
+| lf_count_include_pad | protocol | none | true | false | false | LF 平均池化计算均值时是否计入填充值。 |
+| attention_backtracking_factor | method | none | true | false | false | 注意力几何更新单调回溯时的冻结缩放因子。 |
+| attention_backtracking_maximum_steps | method | none | true | false | false | 注意力几何更新允许执行的最大回溯次数。 |
+| quantized_branch_composition_protocol | protocol | none | true | false | false | 三分支量化写回前后执行组合与复验的冻结协议。 |
+| quantized_branch_composition_order | method | none | true | false | false | LF、尾部截断和注意力几何三分支的唯一量化组合顺序。 |
+| combined_budget_envelope_rule | method | none | true | false | false | 三分支组合更新必须满足的共同逐位置预算包络规则。 |
+| quantized_budget_envelope_absolute_tolerance | protocol | none | true | false | false | 量化写回预算包络复验允许的绝对数值容差。 |
+| quantized_budget_envelope_backtracking_factor | protocol | none | true | false | false | 量化写回违反共同预算包络时采用的冻结回溯因子。 |
+| quantized_budget_envelope_backtracking_maximum_steps | protocol | none | true | false | false | 量化写回共同预算包络允许执行的最大回溯次数。 |
+| semantic_routing_enabled | method | none | true | false | false | 正式方法运行是否启用语义条件分支路由。 |
+| tail_robust_enabled | method | none | true | false | false | 正式方法运行是否启用高斯幅值尾部截断载体分支。 |
+| image_alignment_enabled | method | none | true | false | false | 仅图像检测是否启用冻结的图像配准与对齐路径。 |
+| standard_attack_profiles | protocol | none | true | false | false | 当前完成单元需要执行的标准图像攻击 profile 有序集合。 |
+| diffusion_attacks_enabled | protocol | none | true | false | false | 当前 test 完成单元是否执行冻结的扩散攻击集合。 |
+| output_dir | artifact | none | true | false | false | 单个语义水印运行写入受治理输出的目录。 |
+| update_record_path | artifact | none | true | false | false | 单个语义水印运行三分支更新原子记录的受治理路径。 |
+| detection_record_path | artifact | none | true | false | false | 单个语义水印运行仅图像检测记录的受治理路径。 |
+| update_count | metric | none | true | false | false | 单个语义水印运行实际通过门禁并写回的更新次数。 |
+| clean_detection_positive | metric | none | true | false | false | 单个 clean 图像是否被仅图像检测器判定为水印阳性。 |
+| watermarked_detection_positive | metric | none | true | false | false | 单个 watermarked 图像是否被仅图像检测器判定为水印阳性。 |
 | standard_attack_seeds_random | random | _random | true | false | false | 单个完成单元按标准图像攻击标识保存的实际攻击种子映射。 |
 | diffusion_attack_seeds_random | random | _random | true | false | false | 单个完成单元按再扩散攻击标识保存的实际攻击种子映射。 |
 | feature_extraction_seed_random | random | _random | true | false | false | Inception eval 特征完成单元声明未使用随机生成器的固定随机性模式。 |
@@ -1903,6 +1948,75 @@ Notebook 与 repository module 的跨边界数据
 | invariant_package_count | metric | none | true | false | false | 聚合 manifest metadata 登记的跨 repeat 不变官方参考包数量, 固定为3。 |
 | invariant_package_families | protocol | none | true | false | false | 聚合 manifest config 按规范顺序绑定的3个跨 repeat 不变官方参考 package family。 |
 | randomization_scope | protocol | none | true | false | false | 上游包在随机化证据中的职责, 取值为 active_repeat_component 或 cross_repeat_invariant。 |
+| record_group | protocol | none | true | false | false | 聚合临时工作区为规范成员登记的消费职责组, 用于隔离 Prompt runtime、Prompt 来源字节、方法 observation、阈值声明、消融、质量和官方参考记录。 |
+| record_role | protocol | none | true | false | false | 聚合临时工作区内一个规范记录成员的唯一消费角色。 |
+| record_format | protocol | none | true | false | false | 规范记录成员的严格解析格式, 仅允许登记的 JSON object、JSON object array、JSONL object sequence 或受限原始字节。 |
+| record_member | artifact | none | true | false | false | 已验证 leaf ZIP 内由 package family 和职责唯一确定的规范 POSIX 成员路径, 不表示临时文件系统路径。 |
+| record_sha256 | provenance | none | true | true | false | 统计层实际读取的规范记录成员原始字节 SHA-256。 |
+| leaf_package_sha256 | provenance | none | true | true | false | 当前记录成员所属 leaf ZIP 的完整文件字节 SHA-256。 |
+| randomization_repeat_component_sha256 | provenance | none | true | true | false | 当前活动记录所属单 repeat component ZIP 的完整文件字节 SHA-256；跨 repeat 不变参考记录为空。 |
+| randomization_aggregate_package_sha256 | provenance | none | true | true | false | 当前记录和派生事实所属自包含 aggregate ZIP 的完整文件字节 SHA-256。 |
+| threshold_calculation_unit | protocol | none | true | true | false | fixed-FPR 阈值的独立计算单元, 正式跨重复结果固定为 method_repeat, 禁止跨 repeat 合并 calibration 分数。 |
+| repeat_component_archive_member | artifact | none | true | true | false | 当前方法重复所属 component ZIP 在 aggregate ZIP 内的规范成员路径。 |
+| leaf_package_family | protocol | none | true | false | false | 当前方法重复所属活动 leaf package 的受治理 family 身份。 |
+| leaf_package_archive_member | artifact | none | true | true | false | 当前方法重复所属 leaf ZIP 在 repeat component ZIP 内的规范成员路径。 |
+| threshold_declaration_archive_member | artifact | none | true | true | false | 当前方法重复用于核对 producer 阈值声明的 leaf ZIP 规范成员路径。 |
+| threshold_declaration_source_sha256 | provenance | none | true | true | false | producer 阈值声明成员的原始字节 SHA-256。 |
+| threshold_declaration_protocol_digest | provenance | none | true | true | false | 当前方法重复的规范化 producer 阈值声明内容摘要。 |
+| threshold_protocol | protocol | none | true | true | false | 当前方法重复从 calibration clean negatives 独立重算并与 producer 声明核对后的完整冻结阈值协议。 |
+| observation_archive_member | artifact | none | true | true | false | 当前方法重复实际用于阈值重算的 observation 成员规范路径。 |
+| observation_rows_digest | provenance | none | true | true | false | 按原始顺序对当前方法重复全部 observation object 计算的稳定摘要。 |
+| allowed_calibration_false_positive_count | metric | none | true | true | false | 当前 calibration 样本数与目标 FPR 按冻结 conformal 规则允许的最大假正例数量。 |
+| fairness_identity_match_ready | governance | none | true | false | false | 同一 Prompt 和 repeat 下五个方法的生成 seed、水印 key 与基础 latent 身份是否逐字段完全一致。 |
+| fairness_record_digest | provenance | none | true | true | false | 单个 Prompt-repeat 五方法公平随机身份记录的稳定摘要。 |
+| fairness_identity_digest | provenance | none | true | true | false | 单个 repeat 全部 Prompt 公平身份记录的有序联合摘要。 |
+| calibration_prompt_ids_digest | provenance | none | true | true | false | 当前方法重复精确 calibration Prompt ID 集合的稳定摘要。 |
+| test_prompt_ids_digest | provenance | none | true | true | false | 当前方法重复精确 test Prompt ID 集合的稳定摘要。 |
+| method_repeat_threshold_record_digest | provenance | none | true | true | false | 单个方法重复的阈值、Prompt、随机身份和完整嵌套来源摘要联合记录的稳定摘要。 |
+| threshold_records_digest | provenance | none | true | true | false | 按权威 repeat 与方法顺序排列的45个阈值记录联合摘要。 |
+| fairness_records_digest | provenance | none | true | true | false | 全部 Prompt-repeat 五方法公平身份记录的联合摘要。 |
+| repeat_fairness_identity_digest_map | provenance | none | true | true | false | 权威9个 repeat ID 到各自 Prompt 公平身份联合摘要的精确映射。 |
+| expected_threshold_record_count | metric | none | true | false | false | 当前正式协议要求的方法重复阈值记录数量, 固定为45。 |
+| expected_randomization_repeat_ids | protocol | none | true | false | false | 当前正式协议按权威顺序要求的9个随机化重复 ID。 |
+| expected_base_seed | protocol | none | true | false | false | 用于逐 Prompt 重建公开生成 seed 的冻结基础整数种子。 |
+| threshold_record_count | metric | none | true | true | false | 从精确 aggregate 原始 observation 实际重算得到的阈值记录数量。 |
+| repeat_threshold_counts | metric | none | true | true | false | 权威 repeat ID 到独立方法阈值数量的映射, 每个 repeat 必须精确为5。 |
+| method_repeat_fixed_fpr_recomputation_ready | governance | none | true | false | false | 纯分析层的45个方法重复是否全部通过 Prompt exact-set、独立阈值重算、producer 声明、共同模型和公平随机身份一致性检查；该字段只表示调用方提供的数据内部可重算, 不认证 aggregate 来源, 也不支持论文结论。 |
+| runtime_source_record_map | provenance | none | true | true | false | 权威9个 repeat ID 到 Prompt runtime 成员路径、成员 SHA、leaf SHA 和 repeat component 摘要链的精确映射。 |
+| runtime_source_records_digest | provenance | none | true | true | false | 按权威 repeat 顺序排列的9个 Prompt runtime 来源记录联合摘要。 |
+| exact_runtime_source_count | metric | none | true | true | false | 完成 Prompt exact-set 重建并纳入摘要链的 runtime 成员数量, 固定为9。 |
+| canonical_base_latent_identity_count | metric | none | true | true | false | CPU 端从版本化 PRG 重新生成并通过字节摘要核对的唯一 Prompt-generation-seed 基础 latent 数量, 等于 Prompt 数量乘3。 |
+| canonical_base_latent_identity_digest | provenance | none | true | true | false | 按冻结 generation seed 与 Prompt 顺序排列的规范基础 latent 重建身份联合摘要。 |
+| exact_method_repeat_fixed_fpr_ready | governance | none | true | false | false | 仅聚合桥接层在复验 aggregate、9个 runtime 来源、45个 observation/声明、规范 Prompt、冻结模型、真实 seed/key/base latent 和纯阈值重算后给出的就绪状态；该状态仍固定不单独支持论文结论。 |
+| reconstruction_report_digest | provenance | none | true | true | false | 聚合来源到精确45阈值重建报告在加入自身摘要前的稳定摘要。 |
+| method_repeat_fixed_fpr_report_digest | provenance | none | true | true | false | 精确45阈值汇总报告在加入自身摘要前的稳定摘要。 |
+| threshold_records | artifact | none | true | true | false | 按权威 repeat 与方法顺序返回的45个逐方法逐重复阈值事实记录。 |
+| fairness_records | artifact | none | true | true | false | 按权威 repeat 与 Prompt 顺序返回的五方法随机身份公平性事实记录。 |
+| report | artifact | none | true | true | false | 纯分析层返回的逐方法逐重复 fixed-FPR 汇总报告对象。 |
+| reconstruction_report | artifact | none | true | true | false | 聚合桥接层返回的 runtime、Prompt、基础 latent 与45阈值来源重建报告对象。 |
+| declared_threshold_protocol | protocol | none | true | true | false | 单个方法重复从 producer 声明成员规范化得到、等待原始 observation 独立核对的阈值协议。 |
+| observation_rows | artifact | none | true | true | false | 单个方法重复从已验证 leaf 成员读取并保持原始顺序的 observation 对象序列。 |
+| image_record_source | provenance | none | true | true | false | 质量图像记录所属规范成员及完整 aggregate 摘要链描述符。 |
+| feature_record_source | provenance | none | true | true | false | 质量 Inception feature 记录所属规范成员及完整 aggregate 摘要链描述符。 |
+| image_record | artifact | none | true | true | false | 质量 feature 联接中当前数据集图像的受治理原始记录。 |
+| source_feature_record | artifact | none | true | true | false | 与质量图像记录唯一联接的 source 图像 Inception feature 原始记录。 |
+| comparison_feature_record | artifact | none | true | true | false | 与质量图像记录唯一联接的 comparison 图像 Inception feature 原始记录。 |
+| runtime_randomization_identity_count | metric | none | true | true | false | 从9个 runtime 配置重建并锚定到主方法 observation 的 Prompt-repeat 随机身份数量。 |
+| runtime_randomization_identity_digest_random | random | _digest_random | true | false | false | 按权威 repeat 与 Prompt 顺序排列的 runtime seed、key 和正式随机身份映射摘要。 |
+| prompt_file_member | artifact | none | true | true | false | 当前 repeat 的主方法 leaf 内受治理 Prompt 文件规范成员路径。 |
+| selection_manifest_member | artifact | none | true | true | false | 当前 repeat 的主方法 leaf 内7000条 Prompt 选择清单规范成员路径。 |
+| prompt_source_registry_member | artifact | none | true | true | false | 当前 repeat 的主方法 leaf 内 Prompt 来源注册表规范成员路径。 |
+| prompt_source_registry_sha256 | provenance | none | true | true | false | 主方法 leaf 内 Prompt 来源注册表原始字节 SHA-256。 |
+| prompt_source_registry_digest | provenance | none | true | true | false | Prompt 来源注册表排除自身摘要字段后的稳定内容摘要。 |
+| packaged_prompt_source_audit_digest | provenance | none | true | true | false | 包内来源注册表、选择清单和当前层级 Prompt 字节联合审计记录摘要。 |
+| prompt_rows_digest | provenance | none | true | true | false | 从包内 Prompt 原始字节重建的有序 Prompt、split 与语义字段记录摘要。 |
+| prompt_source_record_map | provenance | none | true | true | false | 权威9个 repeat ID 到三份包内 Prompt 来源成员及完整摘要链的映射。 |
+| prompt_source_records_digest | provenance | none | true | true | false | 按权威 repeat 顺序排列的9组包内 Prompt 来源记录联合摘要。 |
+| prompt_source_contract_ready | governance | none | true | false | false | 包内来源注册表、冻结选择清单、Prompt 文件字节与9份 runtime 逐条文本是否形成唯一可重建契约。 |
+| prompt_source_contract_digest | provenance | none | true | true | false | 包内 Prompt 来源契约报告在加入自身摘要前的稳定摘要。 |
+| source_registry_ready | governance | none | true | false | false | Prompt 来源注册表是否通过冻结原始字节、完整内容摘要和来源身份校验。 |
+| selection_manifest_ready | governance | none | true | false | false | Prompt 选择清单是否通过冻结 SHA、记录摘要、来源比例、顺序和唯一性校验。 |
+| prompt_bank_byte_rebuild_ready | governance | none | true | false | false | 当前层级 Prompt 文件是否能由冻结7000条选择清单的对应前缀逐字节重建。 |
 | result_closure_gate_report_path | artifact | none | false | false | false | 完整结果包绑定的当前论文运行层级 result closure gate 报告路径。 |
 | result_closure_gate_report_present | governance | none | false | false | false | 完整结果包生成前是否发现当前论文运行层级的 result closure gate 报告。 |
 | result_closure_gate_manifest_path | artifact | none | false | false | false | 完整结果包绑定的当前论文运行层级 result closure gate manifest 路径。 |
@@ -2153,7 +2267,10 @@ Notebook 与 repository module 的跨边界数据
 | source_identity | provenance | none | true | false | false | T2SMark 单元契约绑定的官方 commit、固定补丁与精确工作树身份。 |
 | formal_unit_aggregate | provenance | none | true | false | false | T2SMark 完整 Prompt 单元的记录摘要与跨会话来源聚合对象。 |
 | formal_randomization_protocol | protocol | none | true | false | false | 主方法与全部正式 baseline 共同采用的生成种子和水印密钥交叉重复协议名称。 |
-| formal_randomization_protocol_digest | provenance | none | true | false | false | 完整交叉重复注册表、基础 latent 分布和设备无关 PRG 约定的稳定摘要。 |
+| formal_randomization_protocol_digest | provenance | none | true | false | false | 完整交叉重复注册表、预注册3-key 计划、基础 latent 分布和设备无关 PRG 约定的稳定摘要。 |
+| formal_watermark_key_plan_protocol | protocol | none | true | false | false | 在任何正式运行前冻结3个水印 key 身份的预注册计划协议。 |
+| formal_watermark_key_plan_digest | provenance | none | true | true | false | 按 key index 排列的3个预注册 key seed 与 key material 摘要联合承诺。 |
+| watermark_key_records | protocol | none | true | true | false | 预注册3-key 计划中按 key index 排列的 seed 与 material 摘要记录。 |
 | formal_randomization_repeat_registry_digest | provenance | none | true | false | false | 仅对权威9个 repeat 身份记录按规范顺序计算的稳定摘要。 |
 | formal_randomization_repeat_coverage_digest | provenance | none | true | false | false | 对实际 repeat 记录、权威注册表摘要、协议摘要和覆盖状态计算的稳定摘要。 |
 | exact_repeat_registry_ready | governance | none | true | false | false | 实际 repeat 记录是否无遗漏、无重复、无额外身份且逐字段匹配权威9重复注册表。 |

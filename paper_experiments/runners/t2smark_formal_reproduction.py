@@ -34,6 +34,7 @@ from experiments.protocol.formal_randomization import (
     DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID,
     build_formal_randomization_identity,
     formal_watermark_key_seed_random,
+    require_formal_watermark_key_plan,
     resolve_formal_randomization_repeat,
 )
 from experiments.protocol.method_runtime_config import load_formal_method_runtime_config
@@ -419,6 +420,11 @@ def validate_t2smark_formal_protocol_config(
     repeat = resolve_formal_randomization_repeat(
         paper_run.randomization_repeat_id
     )
+    root_key_material = os.environ.get(
+        "SLM_WM_KEY_MATERIAL",
+        "slm_wm_paper_key",
+    )
+    require_formal_watermark_key_plan(root_key_material)
     expected_attacks = tuple(supported_formal_image_attack_names())
     actual_attacks = configured_attack_names(config.formal_attack_families)
     if config.prompt_set != paper_run.prompt_set:
@@ -447,7 +453,7 @@ def validate_t2smark_formal_protocol_config(
         != paper_run.formal_randomization_protocol_digest
         or config.watermark_key_seed_random
         != formal_watermark_key_seed_random(
-            os.environ.get("SLM_WM_KEY_MATERIAL", "slm_wm_paper_key"),
+            root_key_material,
             repeat,
         )
     ):
@@ -1417,6 +1423,7 @@ def build_default_config() -> T2SMarkFormalReproductionConfig:
         "SLM_WM_KEY_MATERIAL",
         "slm_wm_paper_key",
     )
+    require_formal_watermark_key_plan(root_key_material)
     return T2SMarkFormalReproductionConfig(
         output_dir=os.environ.get("SLM_WM_T2SMARK_FORMAL_OUTPUT_DIR", DEFAULT_OUTPUT_DIR),
         drive_output_dir=os.environ.get(
