@@ -15,10 +15,42 @@ from experiments.runtime.scientific_execution_binding import (
 )
 from paper_experiments.runners import isolated_scientific_workflow as workflow
 from paper_workflow.notebook_utils import notebook_entrypoint
+from paper_workflow.notebook_utils import workflow_archive_naming
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 FORMAL_LOCK = build_test_formal_execution_lock("c" * 40)
+
+
+@pytest.mark.quick
+def test_notebook_workflow_archive_naming_owns_baseline_roles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """外层命名器必须独立解析 baseline 角色并复用内层通用身份原语。"""
+
+    monkeypatch.setattr(
+        workflow_archive_naming,
+        "utc_archive_token",
+        lambda: "20260713t000000z",
+    )
+    monkeypatch.setattr(
+        workflow_archive_naming,
+        "resolve_short_commit",
+        lambda root: "00b967c",
+    )
+
+    assert workflow_archive_naming.build_workflow_archive_name(
+        "external_baseline_method_faithful",
+        baseline_id="tree_ring",
+    ) == (
+        "external_baseline_method_faithful_package_tree_ring_"
+        "20260713t000000z_00b967c.zip"
+    )
+    with pytest.raises(ValueError, match="唯一受支持 baseline_id"):
+        workflow_archive_naming.build_workflow_archive_name(
+            "external_baseline_method_faithful",
+            baseline_id="unsupported",
+        )
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

@@ -10,9 +10,20 @@ python scripts/extract_release_package.py \
 
 ## `minimal_method_package`
 
-用途: 发布最小论文方法代码。该 profile 只包含 `main/`、`configs/model_sd35.yaml`、`configs/model_source_registry.json`、根 README 与 `pyproject.toml`; 不包含实验、论文结果、baseline、脚本、测试、Notebook 或治理工具。
+用途: 发布最小论文方法代码。该 profile 只包含 `main/`、两个模型与方法配置、核心依赖身份、标准 Python 构建元数据、专用根 README 和包内只读验证入口; 不包含实验、论文结果、baseline、论文工作流脚本、测试、Notebook 或治理工具。
 
 这一层用于审阅“语义条件潜流形水印”的关键科学算子, 不承担实验编排或论文证据闭合。
+
+正式抽离要求开发仓库 clean, 随后在目标目录创建新的 clean detached Git 根。`docs/core_method_package_readme.md` 只作为专用发布说明源文件, 抽离后映射为包根 `README.md`; 开发仓库根 README 不进入最小包。`scripts/validate_core_method_package.py` 同理映射为包根 `validate_core_method_package.py`, 使验证命令不依赖开发仓库的 `scripts/` 层。
+
+核心包不消费六个论文实验依赖锁。`configs/core_method_dependency_identity.json` 明确声明 Python 版本、与正式 GPU 锁一致的 PyTorch 2.11 可安装范围、构建后端和唯一 Python 包根, 并与 `pyproject.toml` 逐项复验。具体 CPU 或 CUDA wheel 由安装环境选择。独立验证命令为:
+
+```bash
+cd outputs/release_packages/minimal_method_package
+python -I validate_core_method_package.py --root .
+```
+
+验证入口复算 manifest 与逐文件摘要、核验 clean detached Git 身份、拒绝外层目录、复验构建元数据, 并在显式包根中导入 `main` 全部模块。它不写结果文件, 不要求 CUDA, 也不借用开发仓库 `PYTHONPATH`。
 
 ## `paper_artifact_rebuild_package`
 
@@ -38,15 +49,16 @@ python scripts/extract_release_package.py \
 
 ## 独立执行身份
 
-两个可运行 profile 在正式抽离时执行以下门禁:
+三个抽离 profile 均生成独立 Git 根。论文产物重建包和论文实验执行包还需要六个论文依赖锁; 最小核心方法包改用自己的 PyTorch 核心依赖身份协议。共同门禁如下:
 
 1. 源开发仓库必须处于 clean Git 提交;
-2. 六个依赖 profile 必须全部具有格式有效、覆盖直接输入的完整 wheel 哈希锁;
-3. 每个复制文件在 `extraction_manifest.json` 中记录源仓库相对路径、大小和 SHA-256;
-4. manifest 记录精确源仓库提交, 但不记录机器绝对路径;
-5. 抽离目录初始化为新的 SHA-1 Git 根提交并切换到 clean detached HEAD;
-6. `scripts/validate_extracted_package.py` 在抽离目录内重新验证文件、Git 身份、六个依赖锁和必需入口;
-7. 验证过程不继承开发仓库 `PYTHONPATH`, 也不导入或执行 CUDA。
+2. 每个复制文件在 `extraction_manifest.json` 中记录源仓库相对路径、包内相对路径、大小和 SHA-256;
+3. manifest 记录精确源仓库提交, 但不记录机器绝对路径;
+4. 抽离目录初始化为新的 SHA-1 Git 根提交并切换到 clean detached HEAD;
+5. 包内 validator 重新验证文件、Git 身份、依赖协议和必需入口;
+6. 验证过程不继承开发仓库 `PYTHONPATH`, 也不导入或执行 CUDA。
+
+论文产物重建包和论文实验执行包额外要求六个依赖 profile 全部具有格式有效、覆盖直接输入的完整 wheel 哈希锁, 并继续使用 `scripts/validate_extracted_package.py`。
 
 验证命令:
 

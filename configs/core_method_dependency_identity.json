@@ -1,0 +1,16 @@
+{
+  "build_backend": "setuptools.build_meta",
+  "build_requirements": [
+    "setuptools>=69"
+  ],
+  "dependency_identity_schema": "slm_wm_core_dependency_identity",
+  "distribution_name": "slm-wm-core",
+  "included_packages": [
+    "main"
+  ],
+  "requires_python": ">=3.11",
+  "runtime_dependencies": [
+    "torch>=2.11,<2.12"
+  ],
+  "schema_version": 1
+}

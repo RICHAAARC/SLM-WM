@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
-from experiments.runtime.archive_naming import (
+from paper_workflow.notebook_utils.workflow_archive_naming import (
     build_workflow_archive_name,
 )
 from experiments.protocol.paper_run_config import build_paper_run_config

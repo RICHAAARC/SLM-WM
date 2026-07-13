@@ -55,6 +55,26 @@ def test_paper_analysis_and_baselines_live_outside_experiments() -> None:
 
 
 @pytest.mark.constraint
+def test_notebook_workflow_archive_registry_stays_in_outer_layer() -> None:
+    """Notebook 与 baseline 归档词表不得由 experiments 内层维护。"""
+
+    inner_source = Path(
+        "experiments/runtime/archive_naming.py"
+    ).read_text(encoding="utf-8")
+    outer_path = Path(
+        "paper_workflow/notebook_utils/workflow_archive_naming.py"
+    )
+    outer_source = outer_path.read_text(encoding="utf-8")
+
+    assert "WORKFLOW_ARCHIVE_PREFIXES" not in inner_source
+    assert "external_baseline_method_faithful" not in inner_source
+    assert "official_reference_tree_ring" not in inner_source
+    assert outer_path.is_file()
+    assert "WORKFLOW_ARCHIVE_PREFIXES" in outer_source
+    assert "external_baseline_method_faithful" in outer_source
+
+
+@pytest.mark.constraint
 def test_formal_experiment_surface_excludes_component_entrypoints() -> None:
     """正式实验表面不得包含绕过完整方法 runner 的分量级入口。"""
 

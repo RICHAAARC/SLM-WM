@@ -5,12 +5,17 @@
 最小方法包只包含:
 
 - `main/`
+- `configs/core_method_dependency_identity.json`
 - `configs/model_sd35.yaml`
 - `configs/model_source_registry.json`
-- 根目录 `README.md`
+- 由 `docs/core_method_package_readme.md` 映射生成的专用根目录 `README.md`
 - `pyproject.toml`
+- 根目录 `validate_core_method_package.py`
+- `extraction_manifest.json`
 
-该包不包含实验协议、外部 baseline、脚本、Notebook、测试、治理工具、Prompt 数据或运行产物。
+该包不包含实验协议、外部 baseline、论文工作流脚本、Notebook、测试、治理工具、Prompt 数据或运行产物。它是从 clean 源提交抽离并初始化的 clean detached Git 仓库, 不引用开发仓库 `.git` 或 `PYTHONPATH`。
+
+核心包的正式科学算子依赖 PyTorch Tensor、自动微分与线性代数语义, 因而 `configs/core_method_dependency_identity.json` 与 `pyproject.toml` 共同声明 `torch>=2.11,<2.12`。该范围与正式 SD3.5 GPU 锁中的 PyTorch 2.11 系列一致, 但不固定 CPU 或 CUDA wheel; 安装环境负责选择平台 wheel。`python -I validate_core_method_package.py --root .` 会复验文件、Git、依赖身份、构建配置与全部 `main` 模块导入。六个论文实验依赖锁只服务外层论文代码包, 不是最小核心包的发布条件。
 
 ## 论文产物重建包
 

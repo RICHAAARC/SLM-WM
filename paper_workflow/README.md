@@ -11,6 +11,8 @@
 - `paper_result_closure_run.ipynb`: CPU 结果闭合入口。
 - `colab_drive_cold_start_smoke.ipynb`: 仅检查 Colab 与 Drive 环境。
 
+`paper_workflow/notebook_utils/workflow_archive_naming.py` 保存 Notebook、method-faithful baseline 与 official-reference 的外层归档角色词表。它只复用 `experiments.runtime.archive_naming` 提供的 UTC 时间和短提交身份原语；`experiments/` 不感知 Notebook 或外部 baseline workflow 名称。
+
 `paper_workflow/colab_utils/paper_run_environment.py` 只记录 Notebook 会话起点并转发到 `scripts/formal_workflow_environment.py`。正式运行配置由 scripts 层统一读取 `SLM_WM_PAPER_RUN_NAME`；未显式设置该变量时, Notebook、服务器与配置解析层唯一默认使用 `probe_paper`, `pilot_paper` 和 `full_paper` 必须由运行者显式选择。三个论文级别采用相同方法、攻击、baseline、消融和证据门禁, 仅规模与目标 FPR 不同:
 
 | 级别 | Prompt | test | FPR |

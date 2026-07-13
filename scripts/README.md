@@ -4,7 +4,8 @@
 
 ## 代码包抽离入口
 
-- `extract_release_package.py`: 按 `minimal_method_package`、`paper_artifact_rebuild_package` 或 `paper_experiment_execution_package` 复制唯一文件集合, 记录逐文件 SHA-256 和源仓库提交。两个可运行 profile 要求源工作树 clean、六个依赖锁完整, 并在输出目录创建新的 clean detached Git 根提交。命令只允许把持久化代码包写入 `outputs/`。
+- `extract_release_package.py`: 按 `minimal_method_package`、`paper_artifact_rebuild_package` 或 `paper_experiment_execution_package` 复制唯一文件集合, 记录源路径、包内路径、逐文件 SHA-256 和源仓库提交。三个 profile 都要求源工作树 clean 并在输出目录创建新的 clean detached Git 根提交。两个论文实验 profile 继续要求六个依赖锁; 最小核心包只复验自己的 PyTorch 2.11 可安装范围与构建依赖身份。命令只允许把持久化代码包写入 `outputs/`。
+- `validate_core_method_package.py`: 映射到最小核心包根目录的标准库只读验证入口。它要求 `python -I`, 复验专用 README、抽离 manifest、clean detached Git、核心依赖身份、只打包 `main` 的 `pyproject.toml`, 并导入全部核心模块。该入口不消费论文实验依赖锁。
 - `validate_extracted_package.py`: 在脱离开发仓库的代码包中复算全部文件摘要, 核验 Git 跟踪集合、源提交映射、六个完整依赖锁和必需 CLI 入口。验证子进程不继承开发仓库 `PYTHONPATH`, 不包含 `paper_workflow/`, 也不导入或执行 CUDA。
 
 ## 正式依赖入口

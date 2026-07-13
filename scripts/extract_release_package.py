@@ -25,7 +25,7 @@ from experiments.runtime.dependency_profiles import (  # noqa: E402
 
 
 EXTRACTION_MANIFEST_SCHEMA = "release_package_extraction_manifest"
-EXTRACTION_MANIFEST_SCHEMA_VERSION = 2
+EXTRACTION_MANIFEST_SCHEMA_VERSION = 3
 EXTRACTION_MANIFEST_FILE_NAME = "extraction_manifest.json"
 _GIT_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
@@ -40,6 +40,7 @@ class ExtractionProfile:
     standalone_repository: bool = False
     complete_dependency_locks_required: bool = False
     required_entrypoints: tuple[str, ...] = ()
+    mapped_files: tuple[tuple[str, str], ...] = ()
 
 
 COMMON_EXCLUDED_PARTS = (
@@ -57,9 +58,9 @@ PROFILES = {
         profile_name="minimal_method_package",
         include_paths=(
             "main",
+            "configs/core_method_dependency_identity.json",
             "configs/model_sd35.yaml",
             "configs/model_source_registry.json",
-            "README.md",
             "pyproject.toml",
         ),
         exclude_parts=(
@@ -69,6 +70,16 @@ PROFILES = {
             "paper_experiments",
             "external_baseline",
             "scripts",
+        ),
+        standalone_repository=True,
+        complete_dependency_locks_required=False,
+        required_entrypoints=("validate_core_method_package.py",),
+        mapped_files=(
+            ("docs/core_method_package_readme.md", "README.md"),
+            (
+                "scripts/validate_core_method_package.py",
+                "validate_core_method_package.py",
+            ),
         ),
     ),
     "paper_artifact_rebuild_package": ExtractionProfile(
@@ -315,28 +326,28 @@ def _initialize_standalone_repository(
 def _copy_file_records(
     root_path: Path,
     output_path: Path,
-    copied_files: Sequence[str],
+    copied_file_mappings: Sequence[tuple[str, str]],
     *,
     dry_run: bool,
 ) -> list[dict[str, object]]:
     """复制唯一文件集合, 并记录复制后实际字节摘要和大小."""
 
     records: list[dict[str, object]] = []
-    for relative_text in copied_files:
-        relative = Path(relative_text)
-        source_file = root_path / relative
+    for source_text, target_text in copied_file_mappings:
+        source_file = root_path / Path(source_text)
         source_digest = _sha256(source_file)
         if not dry_run:
-            target_file = output_path / relative
+            target_file = output_path / Path(target_text)
             target_file.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source_file, target_file)
             if _sha256(target_file) != source_digest:
-                raise RuntimeError(f"抽离文件复制后 SHA-256 不一致: {relative_text}")
+                raise RuntimeError(f"抽离文件复制后 SHA-256 不一致: {target_text}")
         records.append(
             {
-                "path": relative_text,
+                "path": target_text,
                 "sha256": source_digest,
                 "size_bytes": source_file.stat().st_size,
+                "source_path": source_text,
             }
         )
     return records
@@ -371,7 +382,7 @@ def extract_profile(
     if not dry_run and output_path.exists() and any(output_path.iterdir()):
         raise ValueError("抽离输出目录必须不存在或为空, 以阻止陈旧文件混入")
 
-    copied_file_set: set[str] = set()
+    copied_file_sources: dict[str, str] = {}
     missing_paths: list[str] = []
     for include_path in profile.include_paths:
         source = root_path / include_path
@@ -382,9 +393,23 @@ def extract_profile(
             relative_text = _validate_relative_file_path(
                 source_file.relative_to(root_path).as_posix()
             )
-            copied_file_set.add(relative_text)
+            copied_file_sources[relative_text] = relative_text
+    for source_text, target_text in profile.mapped_files:
+        source_relative = _validate_relative_file_path(source_text)
+        target_relative = _validate_relative_file_path(target_text)
+        source = root_path / source_relative
+        if not source.is_file() or source.is_symlink():
+            missing_paths.append(source_relative)
+            continue
+        existing_source = copied_file_sources.get(target_relative)
+        if existing_source is not None and existing_source != source_relative:
+            raise ValueError(
+                "抽离 profile 多个源文件映射到同一包路径: "
+                f"{existing_source}, {source_relative} -> {target_relative}"
+            )
+        copied_file_sources[target_relative] = source_relative
     for entrypoint in profile.required_entrypoints:
-        if not (root_path / entrypoint).is_file() and entrypoint not in missing_paths:
+        if entrypoint not in copied_file_sources and entrypoint not in missing_paths:
             missing_paths.append(entrypoint)
     if profile.complete_dependency_locks_required:
         try:
@@ -394,7 +419,11 @@ def extract_profile(
         for lock_path in missing_lock_paths:
             if lock_path not in missing_paths:
                 missing_paths.append(lock_path)
-    copied_files = sorted(copied_file_set)
+    copied_files = sorted(copied_file_sources)
+    copied_file_mappings = [
+        (copied_file_sources[target], target)
+        for target in copied_files
+    ]
     if not copied_files:
         raise ValueError("抽离 profile 未产生任何文件")
     if not dry_run and missing_paths:
@@ -416,7 +445,7 @@ def extract_profile(
     copied_file_records = _copy_file_records(
         root_path,
         output_path,
-        copied_files,
+        copied_file_mappings,
         dry_run=dry_run,
     )
     manifest: dict[str, object] = {

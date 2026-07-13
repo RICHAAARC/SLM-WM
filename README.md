@@ -73,6 +73,12 @@ outputs/audit_reports/      harness 审计输出, 默认不提交
 
 依赖方向必须保持为 `paper_workflow/ -> scripts/ -> paper_experiments/ -> experiments/ -> main/`。`external_baseline/` 是外部源码缓存与 adapter 边界, 不进入最小方法发布包。
 
+## 最小核心方法发布
+
+`minimal_method_package` 是可以脱离开发仓库验证和安装的 clean detached Git 包。它使用 `docs/core_method_package_readme.md` 生成专用包根 README, 只包含 `main/`、两个方法身份配置、`configs/core_method_dependency_identity.json`、`pyproject.toml`、抽离 manifest 与根目录验证入口。标准 wheel 发现规则只允许 `main` 及其子包。
+
+该最小包声明 `torch>=2.11,<2.12`, 与正式 SD3.5 GPU 依赖锁中的 PyTorch 2.11 系列一致; 具体 CPU 或 CUDA wheel 由安装环境选择。最小包不消费论文实验层的六个完整依赖锁。Diffusers、Transformers、模型权重、CUDA 运行资格、实验 runner、baseline 和论文证据闭合都属于外层运行包。正式抽离要求源工作树 clean; 抽离后应在包根执行 `python -I validate_core_method_package.py --root .`, 复验文件字节、Git 身份、依赖协议、构建元数据与全部核心模块独立导入。抽离通过只证明核心代码发布边界闭合, 不证明真实 GPU 方法运行或论文结果成立。详细契约见 `docs/extraction_profiles.md` 与 `docs/release_boundary.md`。
+
 精确父解释器的受治理子入口固定为 `scripts/formal_workflow_entry.py`。`scripts/run_formal_workflow_host.py`、直接 GPU 服务器命令和 Colab Notebook 均进入该 scripts 层边界；`scripts/` 中不存在对 `paper_workflow/` 的运行时导入或动态执行路径。
 
 ## Notebook 与服务器入口

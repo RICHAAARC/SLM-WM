@@ -25,7 +25,7 @@ from experiments.runtime.dependency_profiles import (  # noqa: E402
 
 MANIFEST_FILE_NAME = "extraction_manifest.json"
 MANIFEST_SCHEMA = "release_package_extraction_manifest"
-MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 SUPPORTED_STANDALONE_PROFILES = frozenset(
     {
         "paper_artifact_rebuild_package",
@@ -154,9 +154,11 @@ def _validate_file_records(
             "path",
             "sha256",
             "size_bytes",
+            "source_path",
         }:
             raise ValueError("抽离文件记录字段集合不一致")
         relative = _normalized_relative_path(record["path"])
+        _normalized_relative_path(record["source_path"])
         digest = record["sha256"]
         size_bytes = record["size_bytes"]
         if not isinstance(digest, str) or _SHA256_PATTERN.fullmatch(digest) is None:
