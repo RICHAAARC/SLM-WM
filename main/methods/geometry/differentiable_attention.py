@@ -19,7 +19,6 @@ from main.core.digest import (
     tensor_content_sha256,
 )
 from main.core.keyed_prg import (
-    KEYED_PRG_VERSION,
     build_keyed_uniform_tensor,
     keyed_prg_protocol_record,
 )
@@ -1383,7 +1382,7 @@ def keyed_relation_signs(
     attention: Any,
     key_material: str,
     layer_name: str,
-    prg_version: str = KEYED_PRG_VERSION,
+    prg_version: str,
 ) -> Any:
     """为注意力关系生成零对角、近似均衡的密钥符号矩阵。"""
 
@@ -1409,7 +1408,7 @@ def keyed_attention_relation_projection(
     descriptor: AttentionRelationDescriptor,
     key_material: str,
     layer_name: str,
-    prg_version: str = KEYED_PRG_VERSION,
+    prg_version: str,
     component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> KeyedAttentionRelationProjection:
     """为四分量关系描述构造共享密钥图和冻结分量极性的投影。"""
@@ -1460,6 +1459,8 @@ def keyed_attention_relation_projection(
 def build_attention_relation_graph_identity(
     records: Iterable[tuple[str, Any, tuple[int, ...]]],
     key_material: str,
+    *,
+    prg_version: str,
     component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> AttentionRelationGraphIdentity:
     """重建多层关系分量和密钥投影的共同身份。"""
@@ -1489,6 +1490,7 @@ def build_attention_relation_graph_identity(
             descriptor,
             key_material,
             layer_name,
+            prg_version,
             component_weights=resolved_component_weights,
         )
         for (layer_name, _, _), descriptor in zip(resolved_records, descriptors)
@@ -1756,6 +1758,8 @@ def attention_geometry_component_scores(
     records: Iterable[tuple[str, Any, tuple[int, ...]]],
     key_material: str,
     stable_pair_weights: StableAttentionPairWeights,
+    *,
+    prg_version: str,
     component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> Any:
     """使用同一 pair 权重计算多层四分量几何分数。"""
@@ -1775,6 +1779,7 @@ def attention_geometry_component_scores(
             descriptor,
             key_material,
             layer_name,
+            prg_version,
             component_weights=component_weights,
         )
         component_scores = attention_relation_component_scores(
@@ -1792,6 +1797,7 @@ def attention_geometry_score(
     records: Iterable[tuple[str, Any, tuple[int, ...]]],
     key_material: str,
     *,
+    prg_version: str,
     stable_token_positions: tuple[int, ...] | None = None,
     stable_token_fraction: float = 0.5,
     unstable_pair_weight: float = 0.25,
@@ -1847,7 +1853,8 @@ def attention_geometry_score(
         resolved_records,
         key_material,
         stable_pair_weights,
-        component_weights,
+        prg_version=prg_version,
+        component_weights=component_weights,
     )
     return combine_attention_relation_component_scores(
         component_scores,
@@ -1895,6 +1902,8 @@ def compute_attention_geometry_gradient(
     transformer_forward: Callable[[Any], Any],
     recorder: DifferentiableAttentionRecorder,
     key_material: str,
+    *,
+    prg_version: str,
     stable_token_fraction: float = 0.5,
     unstable_pair_weight: float = 0.25,
     stable_token_selection: StableAttentionTokenSelection | None = None,
@@ -1928,13 +1937,15 @@ def compute_attention_geometry_gradient(
         score_before_tensor = attention_geometry_score(
             recorder.records,
             key_material,
+            prg_version=prg_version,
             stable_pair_weights=pair_weights,
             component_weights=component_weights,
         )
         relation_identity = build_attention_relation_graph_identity(
             recorder.records,
             key_material,
-            component_weights,
+            prg_version=prg_version,
+            component_weights=component_weights,
         )
         if (
             relation_identity.relation_source != DIRECT_QK_RELATION_SOURCE
@@ -2053,6 +2064,8 @@ def optimize_attention_geometry_update(
     risk_bounded_update: RiskBoundedUpdate,
     precomputed_gradient: AttentionGeometryGradient,
     precomputed_content_base_gradient: AttentionGeometryGradient,
+    *,
+    prg_version: str,
     backtracking_factor: float = 0.5,
     maximum_backtracking_steps: int = 8,
     base_update: Any | None = None,
@@ -2242,6 +2255,7 @@ def optimize_attention_geometry_update(
             score_after_tensor = attention_geometry_score(
                 recorder.records,
                 key_material,
+                prg_version=prg_version,
                 stable_pair_weights=content_base_evidence.stable_pair_weights,
                 component_weights=resolved_component_weights,
             )
@@ -2257,7 +2271,8 @@ def optimize_attention_geometry_update(
     accepted_relation_identity = build_attention_relation_graph_identity(
         recorder.records,
         key_material,
-        resolved_component_weights,
+        prg_version=prg_version,
+        component_weights=resolved_component_weights,
     )
     if not accepted_relation_identity.qk_atomic_content_ready:
         raise RuntimeError("接受的注意力候选缺少真实 Q/K 原子内容摘要")

@@ -226,7 +226,8 @@ def detect_image_only_watermark(
         relation_identity = build_attention_relation_graph_identity(
             attention_records,
             key_material,
-            component_weights,
+            prg_version=config.keyed_prg_version,
+            component_weights=component_weights,
         )
         if (
             relation_identity.relation_source != DIRECT_QK_RELATION_SOURCE
@@ -283,6 +284,7 @@ def detect_image_only_watermark(
         score_tensor = attention_geometry_score(
             attention_records,
             key_material,
+            prg_version=config.keyed_prg_version,
             stable_pair_weights=stable_pair_weights,
             component_weights=component_weights,
         )
@@ -294,6 +296,7 @@ def detect_image_only_watermark(
                 layer_name,
                 token_indices,
                 stable_pair_weights,
+                prg_version=config.keyed_prg_version,
                 anchor_count=config.attention_anchor_count,
                 residual_threshold=config.attention_residual_threshold,
                 minimum_inlier_ratio=config.attention_minimum_inlier_ratio,
@@ -325,7 +328,8 @@ def detect_image_only_watermark(
             aligned_relation_identity = build_attention_relation_graph_identity(
                 aligned_attention_records,
                 key_material,
-                component_weights,
+                prg_version=config.keyed_prg_version,
+                component_weights=component_weights,
             )
             if (
                 aligned_relation_identity.relation_source
@@ -368,6 +372,7 @@ def detect_image_only_watermark(
             sync_score_tensor = attention_geometry_score(
                 aligned_attention_records,
                 key_material,
+                prg_version=config.keyed_prg_version,
                 stable_pair_weights=aligned_pair_weights,
                 component_weights=component_weights,
             )

@@ -305,7 +305,25 @@ PRG 的 domain payload 精确为
 }
 ```
 
-该对象通过 UTF-8、`ensure_ascii=false`、键名升序和无空白分隔符 `(',', ':')` 形成 stable JSON, 再执行 SHA-256 得到32字节 domain digest。计数器从0开始, 以16字节无符号大端编码拼接在 domain digest 后；每个计数器输入再执行 SHA-256。所得32字节块严格按 offset 0、8、16、24 划分为4个连续8字节无符号大端 word。对每个 word 取高53位
+`keyed_prg_version` 必须等于 `sha256_counter_normal_icdf_table20_float32_v2`。上述对象通过 UTF-8、`ensure_ascii=false`、键名升序和无空白分隔符 `(',', ':')` 形成 stable JSON, 再执行 SHA-256 得到32字节 domain digest。计数器从0开始, 以16字节无符号大端编码拼接在 domain digest 后；每个计数器输入再执行 SHA-256。连续32字节输出块组成 MSB-first 大端比特流。Gaussian 路径跨块连续提取20位索引 $i$, 不按字节边界丢弃剩余比特, 并查询
+
+$$
+q_i=\operatorname{round}_{\mathrm{binary32}}\!\left(
+\Phi^{-1}\!\left(\frac{i+0.5}{2^{20}}\right)
+\right),
+\qquad 0\le i<2^{20}.
+$$
+
+冻结表包含1048576个 binary32 位模式, 完整表按大端顺序连接后的 SHA-256 必须为 `70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a`。运行时只解码冻结位模式, 不调用平台 `log`、`sqrt`、`sin`、`cos` 或逆 CDF。该概率律是有限离散的 Q20 中点逆 CDF 量化标准正态, 不是连续精确的 $\mathcal N(0,1)$。理想中点离散化的 KS 距离为
+
+$$
+D_{KS}^{\mathrm{midpoint}}=2^{-21}
+=4.76837158203125\times10^{-7},
+$$
+
+计入已登记的最大 float32 CDF 舍入误差 `1.4386451474557305e-08` 后, 总 KS 距离上界为 `4.912236096776823e-7`。LF/tail 模板、Jacobian 密钥候选、公开检测噪声和论文实验共享基础 latent 都使用该 Q20 路径。输出先在 CPU 物化为规范 float32 Tensor；需要其他 dtype 时必须在 CPU 完成转换, 随后才搬运到执行设备。论文实验共享基础 latent 可复用同一通用原语, 但不属于核心水印方法密钥定义。
+
+attention 关系符号使用独立 uniform 路径。每个 SHA-256 块按 offset 0、8、16、24 划分为4个连续8字节无符号大端 word, 对每个 word 取高53位
 
 $$
 m=w\gg11,
@@ -313,20 +331,7 @@ m=w\gg11,
 u=\frac{m+1}{2^{53}+2},
 $$
 
-得到严格位于 $(0,1)$ 的 float64 uniform 值。块内、块间和 Tensor reshape 都保持上述顺序。
-
-Gaussian 路径按连续 uniform 对 $(u_{2r},u_{2r+1})$ 执行
-
-$$
-R_r=\sqrt{-2\log u_{2r}},
-\qquad
-\Theta_r=2\pi u_{2r+1},
-$$
-
-并依次输出 $R_r\cos\Theta_r$、$R_r\sin\Theta_r$。达到目标元素数后截断, 最后一次性转换为 CPU float32 并按连续行优先顺序 reshape。
-
-- LF/tail 高斯模板和 Jacobian 密钥候选在均匀流之后执行 Box-Muller, 先形成 CPU float32 规范 Tensor, 再搬运到目标设备。论文实验的共享基础 latent 可以复用同一通用原语, 但不属于核心水印方法密钥定义。
-- attention 关系符号直接把均匀值按 $u<0.5$ 映射为 $-1$, 否则映射为 $+1$；该路径不执行 Box-Muller。
+得到严格位于 $(0,1)$ 的 float64 值, 再物化为规范 CPU float32。该路径只把 $u<0.5$ 映射为 $-1$, 否则映射为 $+1$；不得用于高斯 Tensor。
 
 公开检测噪声也使用同一 Gaussian 路径。令待检图像 VAE posterior mode 重编码后的 NCHW Tensor 为 $\hat z$, 则输出 `shape` 精确为按轴顺序序列化的 `tuple(int(v) for v in hat_z.shape)`。公开调用不使用方法密钥, 而固定使用
 
@@ -345,9 +350,9 @@ domain_fields = {
 }
 ```
 
-`public_detection_noise_prg_protocol` 必须等于 `sha256_counter_box_muller_float32_v1`。上述 `key_material`、`domain_fields` 和 `shape` 进入本节定义的完整 stable JSON domain payload, 经 SHA-256、从0开始的16字节大端计数器、连续8字节大端 word、53位开区间映射和顺序 Box-Muller 得到 CPU float32 Gaussian Tensor。该公开 domain 不含水印密钥、Prompt、生成 seed 或生成轨迹。
+`public_detection_noise_prg_protocol` 必须等于 `sha256_counter_normal_icdf_table20_float32_v2`。上述 `key_material`、`domain_fields` 和 `shape` 进入本节定义的完整 stable JSON domain payload, 经 SHA-256、从0开始的16字节大端计数器、MSB-first 连续20位索引提取和冻结 Q20 表查询得到 CPU float32 Tensor；实际 latent dtype 转换在 CPU 完成, 随后才搬运到执行设备。该公开 domain 不含水印密钥、Prompt、生成 seed 或生成轨迹。
 
-CPU/CUDA 设备 RNG 不参与方法身份。CPU 固定 test vector 必须分别覆盖 uniform words、Gaussian values、relation signs 和公开检测噪声；CUDA 字节一致性属于后续 GPU 验证。
+CPU/CUDA 设备 RNG 不参与方法身份。PRG 算法摘要固定为 `a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b`, 核心方法定义摘要固定为 `aa1fe3b81f1763403b58bb85c01a44c048b8d2b0916f3a3d9cf72c2275a4fd7c`, 正式随机化协议摘要固定为 `a5389d2e72e331d81a7e7d0f9614a3ce801fbf432476f18208b5e366a9b12a64`。`tools/harness/verify_normal_quantile_reference.py` 以 `normal_quantile_reference_verification_protocol=mpfr_192bit_erf_midpoint_bracket_and_newton_v2` 使用192位 MPFR, 对正半轴全部524288个表项验证相邻 binary32 中点的 CDF 严格夹逼, 并以 Newton 根作为独立交叉检查；报告同时登记最小中点概率余量。该复验是外层参考证据, 不进入 PRG 算法摘要或采样身份。固定 test vector 必须分别覆盖20位索引跨 SHA-256 块边界、Q20 值、uniform 值、relation signs、公开检测噪声和正式 shape 基础 latent。当前固定向量只在 Windows CPU 实测；Linux/Colab 的逐字节 KAT 仍是 GPU 运行前阻断门禁, 不得表述为已经完成跨平台实测。
 
 ## `spatial_low_pass_and_amplitude_tail_carriers`
 
@@ -637,7 +642,7 @@ shape_{det},
 \right),
 $$
 
-其中 `public_detection_noise_domain=public_image_only_qk_detection_noise_v1`, $D_{det}$ 是 `versioned_key_prg_reconstruction` 中逐字段冻结的公开 domain。该调用完整执行 SHA-256 计数器、53位均匀映射、顺序 Box-Muller 和 CPU float32 reshape, 随后只搬运到 $\hat z$ 的设备与实际 dtype。加噪 latent 必须由冻结 scheduler 的真实
+其中 `public_detection_noise_domain=public_image_only_qk_detection_noise_v1`, $D_{det}$ 是 `versioned_key_prg_reconstruction` 中逐字段冻结的公开 domain。该调用完整执行 SHA-256 大端计数器、MSB-first 连续20位索引提取和冻结 Q20 中点逆 CDF float32 表查询, 在 CPU 完成实际 dtype 转换后再搬运到 $\hat z$ 的设备。加噪 latent 必须由冻结 scheduler 的真实
 
 $$
 z_{det}=\operatorname{scheduler.scale\_noise}(\hat z,t_{det},\epsilon_{det})

@@ -1,8 +1,8 @@
 {
   "registry_schema": "slm_wm_method_semantic_registry_v1",
   "registry_scope": "normative_traceability_without_scientific_conformance_decision",
-  "method_definition_schema": "slm_wm_constructive_local_tangent_v3",
-  "method_definition_digest": "80ad2e38188ec57144bd987070425d65592109d17e90f04fff99c3432309fa1a",
+  "method_definition_schema": "slm_wm_constructive_local_tangent_v4",
+  "method_definition_digest": "aa1fe3b81f1763403b58bb85c01a44c048b8d2b0916f3a3d9cf72c2275a4fd7c",
   "invariants": [
     {
       "invariant_id": "constructive_local_tangent_scope",
@@ -601,7 +601,7 @@
       "definition_pointer": "docs/builds/method_semantic_invariants.md#versioned_key_prg_reconstruction",
       "formal_expression": [
         "uniform=open_interval_uint53(sha256_counter_stream(domain))",
-        "gaussian=box_muller(uniform_pair)",
+        "gaussian=frozen_midpoint_inverse_normal_cdf_table20(consecutive_20bit_msb_counter_stream_word)",
         "canonical_tensor=cpu_float32(gaussian)",
         "device_tensor=canonical_tensor.to(target_device)",
         "public_detection_noise=gaussian_prg(key_material=public_detection_noise_domain,domain_fields=(operator,model_id,model_revision,width,height,inference_steps,public_detection_schedule_index,latent_shape),shape=latent_shape)"
@@ -623,14 +623,32 @@
         },
         {
           "path": "main/core/keyed_prg.py",
+          "symbol": "build_keyed_uniform_tensor"
+        },
+        {
+          "path": "main/core/keyed_prg.py",
           "symbol": "keyed_prg_protocol_record"
+        },
+        {
+          "path": "main/core/normal_quantile_table.py",
+          "symbol": "standard_normal_quantile_float32_table"
         }
       ],
-      "runtime_binding_symbols": [],
+      "runtime_binding_symbols": [
+        {
+          "path": "experiments/protocol/formal_randomization.py",
+          "symbol": "build_canonical_sd35_base_latent"
+        },
+        {
+          "path": "experiments/runners/semantic_watermark_runtime.py",
+          "symbol": "_public_detection_noise_tensor"
+        }
+      ],
       "runtime_evidence_fields": [
         "keyed_prg_version",
         "keyed_prg_protocol_digest",
         "base_latent_keyed_prg_version",
+        "base_latent_keyed_prg_protocol_digest",
         "base_latent_content_digest_random",
         "public_detection_noise_prg_identity",
         "public_detection_noise_prg_identity_digest",
@@ -643,6 +661,7 @@
         "unsupported_prg_version",
         "domain_binding_missing",
         "known_answer_vector_mismatch",
+        "normal_quantile_table_digest_mismatch",
         "canonical_tensor_not_cpu_float32",
         "device_transport_content_mismatch"
       ],
@@ -652,13 +671,16 @@
         "python_random",
         "unstable_hash_seed",
         "unversioned_prg",
+        "platform_libm_normal_transform",
         "device_specific_gaussian_sampling"
       ],
-      "cpu_property_id": "sha256_counter_box_muller_bytes_are_device_independent",
+      "cpu_property_id": "sha256_counter_normal_icdf_table_bytes_are_platform_independent",
       "specification_test_nodes": [
         "tests/functional/test_real_scientific_operators.py::test_keyed_templates_use_versioned_device_independent_prg"
       ],
-      "cpu_property_test_nodes": [],
+      "cpu_property_test_nodes": [
+        "tests/functional/test_normal_quantile_table.py::test_frozen_normal_quantile_table_has_exact_distribution_contract"
+      ],
       "gpu_atomic_roles": [
         "canonical_cpu_prg_tensor",
         "transported_cuda_prg_tensor",
@@ -669,7 +691,7 @@
         "public_detection_noise_evidence_bundle"
       ],
       "gpu_observation_requirement": "CPU 规范 Tensor 搬运到 CUDA 后的内容必须与相同协议输入重建结果一致。",
-      "claim_boundary": "方法身份只由版本化 SHA-256 计数器、53位均匀映射和 Box-Muller 路径决定，不依赖 CPU/CUDA 设备 RNG。"
+      "claim_boundary": "方法身份只由版本化 SHA-256 计数器、53位均匀映射和冻结20位中点逆标准正态 CDF float32 表决定；Gaussian 路径是 Kolmogorov 距离不超过0.000000492的有限精度量化标准正态律，不调用平台 libm 或 CPU/CUDA 设备 RNG。"
     },
     {
       "invariant_id": "spatial_low_pass_and_amplitude_tail_carriers",

@@ -32,7 +32,7 @@ PRIMITIVE_DOCUMENT = (
 )
 FIELD_REGISTRY = ROOT / "docs" / "field_registry.md"
 EXPECTED_METHOD_DEFINITION = {
-    "method_definition_schema": "slm_wm_constructive_local_tangent_v3",
+    "method_definition_schema": "slm_wm_constructive_local_tangent_v4",
     "method_name": "semantic_conditioned_latent_manifold_watermarking",
     "update_construction": {
         "semantics": "branchwise_constructive_safe_subspace_updates",
@@ -164,12 +164,20 @@ EXPECTED_METHOD_DEFINITION = {
         "inactive_branch_envelope_rule": "exclude_from_combined_envelope_sum",
     },
     "keyed_prg": {
+        "keyed_prg_version": (
+            "sha256_counter_normal_icdf_table20_float32_v2"
+        ),
+        "keyed_prg_protocol_digest": (
+            "a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b"
+        ),
         "canonical_device": "cpu",
         "canonical_dtype": "float32",
         "uniform_output_rule": "direct_open_unit_interval_float32",
         "uniform_output_role": "attention_relation_signs",
-        "uniform_uses_box_muller": False,
-        "gaussian_output_rule": "box_muller_float64_then_float32",
+        "uniform_uses_normal_transform": False,
+        "gaussian_output_rule": (
+            "20bit_msb_stream_index_to_frozen_midpoint_inverse_normal_cdf_float32"
+        ),
         "gaussian_output_roles": [
             "content_carrier_templates",
             "jacobian_candidate_directions",
@@ -178,7 +186,7 @@ EXPECTED_METHOD_DEFINITION = {
         "public_detection_noise_key_role": (
             "deterministic_public_protocol_identity_not_secret_key"
         ),
-        "gaussian_uses_box_muller": True,
+        "gaussian_uses_frozen_normal_quantile_table": True,
         "uniform_and_gaussian_roles_interchangeable": False,
     },
     "branch_names": [
@@ -188,7 +196,7 @@ EXPECTED_METHOD_DEFINITION = {
     ],
 }
 EXPECTED_METHOD_DEFINITION_DIGEST = (
-    "80ad2e38188ec57144bd987070425d65592109d17e90f04fff99c3432309fa1a"
+    "aa1fe3b81f1763403b58bb85c01a44c048b8d2b0916f3a3d9cf72c2275a4fd7c"
 )
 
 
@@ -198,7 +206,7 @@ def test_machine_readable_method_definition_freezes_constructive_semantics() -> 
 
     definition = semantic_conditioned_latent_method_definition()
 
-    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v3"
+    assert METHOD_DEFINITION_SCHEMA == "slm_wm_constructive_local_tangent_v4"
     assert definition == EXPECTED_METHOD_DEFINITION
     assert definition["update_construction"]["joint_argmax_solved"] is False
     assert (

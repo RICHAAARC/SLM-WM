@@ -19,7 +19,7 @@ METHOD_CONFIG_RELATIVE_PATH = PurePosixPath("configs/model_sd35.yaml")
 REGISTRY_SCHEMA = "slm_wm_method_semantic_registry_v1"
 REGISTRY_SCOPE = "normative_traceability_without_scientific_conformance_decision"
 EXPECTED_NORMATIVE_TRACE_DIGEST = (
-    "5f69999d6213863f2812ea95d5cf64e52782c3c06aed2ba8808095610b8aba66"
+    "406d491e24edefd1d1e0d511287552a6130f1519626c71bda43a36ed6dca95c4"
 )
 EXPECTED_INVARIANT_IDS = (
     "constructive_local_tangent_scope",
@@ -81,7 +81,7 @@ EXPECTED_CPU_PROPERTY_IDS = {
         "detector_signature_and_runtime_reject_generation_private_state"
     ),
     "versioned_key_prg_reconstruction": (
-        "sha256_counter_box_muller_bytes_are_device_independent"
+        "sha256_counter_normal_icdf_table_bytes_are_platform_independent"
     ),
     "three_branch_update_composition": (
         "branch_updates_compose_once_and_preserve_joint_bounds"
@@ -264,7 +264,12 @@ EXPECTED_METHOD_IMPLEMENTATION_SYMBOLS = {
     ),
     "versioned_key_prg_reconstruction": _bindings(
         ("main/core/keyed_prg.py", "build_keyed_gaussian_tensor"),
+        ("main/core/keyed_prg.py", "build_keyed_uniform_tensor"),
         ("main/core/keyed_prg.py", "keyed_prg_protocol_record"),
+        (
+            "main/core/normal_quantile_table.py",
+            "standard_normal_quantile_float32_table",
+        ),
     ),
     "three_branch_update_composition": _bindings(
         (
@@ -414,7 +419,16 @@ EXPECTED_RUNTIME_BINDING_SYMBOLS.update(
                 "package_image_only_dataset_runtime",
             ),
         ),
-        "versioned_key_prg_reconstruction": (),
+        "versioned_key_prg_reconstruction": _bindings(
+            (
+                "experiments/protocol/formal_randomization.py",
+                "build_canonical_sd35_base_latent",
+            ),
+            (
+                "experiments/runners/semantic_watermark_runtime.py",
+                "_public_detection_noise_tensor",
+            ),
+        ),
     }
 )
 EXPECTED_SPECIFICATION_TEST_NODES = {
@@ -586,6 +600,10 @@ EXPECTED_SPECIFICATION_TEST_NODES = {
 EXPECTED_CPU_PROPERTY_TEST_NODES = {
     invariant_id: () for invariant_id in EXPECTED_INVARIANT_IDS
 }
+EXPECTED_CPU_PROPERTY_TEST_NODES["versioned_key_prg_reconstruction"] = (
+    "tests/functional/test_normal_quantile_table.py::"
+    "test_frozen_normal_quantile_table_has_exact_distribution_contract",
+)
 EXPECTED_CPU_PROPERTY_TEST_NODES["exact_jacobian_low_response_subspace"] = (
     "tests/functional/test_semantic_feature_conditions.py::"
     "test_complete_feature_vector_supports_exact_jvp_and_vjp",

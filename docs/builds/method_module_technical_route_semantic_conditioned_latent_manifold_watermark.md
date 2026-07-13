@@ -171,7 +171,7 @@ $$
 (\operatorname{PRG}_{\mathcal N}(K_{\mathrm{LF}},M,shape))\right).
 $$
 
-高斯 PRG 固定为 `sha256_counter_box_muller_float32_v1`。domain payload 精确包含 `keyed_prg_version`、`key_material`、`domain_fields` 和 `shape`, 通过 UTF-8、`ensure_ascii=false`、键名升序和无空白分隔符 `(',', ':')` 形成 stable JSON, 再执行 SHA-256 得到32字节 domain digest。counter 从0开始并编码为16字节无符号大端整数；`SHA256(domain_digest || counter_uint128_be)` 的每个32字节块按 offset 0、8、16、24 分成4个连续8字节无符号大端 word。每个 word 取高53位 $m=w\gg11$, 按 $u=(m+1)/(2^{53}+2)$ 映射到 $(0,1)$。Gaussian 路径依次消费 $(u_{2r},u_{2r+1})$, 令 $R_r=\sqrt{-2\log u_{2r}}$、$\Theta_r=2\pi u_{2r+1}$, 固定先输出 $R_r\cos\Theta_r$, 再输出 $R_r\sin\Theta_r$；达到元素数后截断, 最后一次性转换为 CPU float32 并按连续行优先顺序 reshape。attention 关系符号只对独立 uniform stream 按0.5阈值符号化, 不经 Box-Muller。设备 RNG 不参与方法身份。
+高斯 PRG 固定为 `sha256_counter_normal_icdf_table20_float32_v2`。domain payload 精确包含 `keyed_prg_version`、`key_material`、`domain_fields` 和 `shape`, 通过 UTF-8、`ensure_ascii=false`、键名升序和无空白分隔符 `(',', ':')` 形成 stable JSON, 再执行 SHA-256 得到32字节 domain digest。counter 从0开始并编码为16字节无符号大端整数；`SHA256(domain_digest || counter_uint128_be)` 的连续32字节块组成 MSB-first 大端比特流。高斯路径跨块连续提取20位索引 $i$, 查询 $q_i=\operatorname{round}_{\mathrm{binary32}}\!\left(\Phi^{-1}((i+0.5)/2^{20})\right)$ 的冻结1048576项表。表的完整大端字节 SHA-256 为 `70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a`。该有限离散 Q20 量化标准正态不是连续精确的 $\mathcal N(0,1)$；其理想中点 KS 距离为 $2^{-21}$, 含 float32 舍入的登记上界为 `4.912236096776823e-7`。规范 float32 生成和目标 dtype 转换都在 CPU 完成, 随后才搬运到执行设备。独立 uniform 路径把每个块按 offset 0、8、16、24 分成8字节无符号大端 word, 取高53位并按 $u=(m+1)/(2^{53}+2)$ 映射到 $(0,1)$；该路径只用于按0.5阈值生成 attention 关系符号。设备 RNG 不参与方法身份。MPFR 复验是外层参考证据, 不进入 PRG 算法摘要。当前固定向量只在 Windows CPU 实测, Linux/Colab 逐字节一致性留给 GPU 运行前门禁。
 
 该分支只在 height/width 二维轴执行平均池化, 对每个 batch/channel 独立使用 kernel 5、stride 1、padding 2、二维零填充和 `count_include_pad=true`, 不跨 batch 或 channel 轴传播数值；池化后去均值与 L2 归一化各自在整个模板 Tensor 上计算一个全局标量, 因而具有明确的离散空间低通定义。
 
@@ -189,7 +189,7 @@ I_\gamma=\operatorname{TopK}_{\lceil n\gamma\rceil}
 \left(\left\{(|\nu_i|,-i)\right\}_{i=1}^{n}\right).
 $$
 
-$\gamma$ 是标准高斯元素绝对幅值的尾部保留比例，同幅值元素由展平索引升序确定选择顺序。非入选元素保持精确0, 模板只执行整体二范数归一化, 不执行去均值。该过程不执行 FFT、DCT、空间波数排序或频带 mask，因此只定义幅值域筛选, 不定义空间频带。其攻击鲁棒性必须由真实实验验证。
+$\gamma$ 是 Q20 中点逆 CDF 量化标准正态元素绝对幅值的尾部保留比例，同幅值元素由展平索引升序确定选择顺序。非入选元素保持精确0, 模板只执行整体二范数归一化, 不执行去均值。该过程不执行 FFT、DCT、空间波数排序或频带 mask，因此只定义幅值域筛选, 不定义空间频带。其攻击鲁棒性必须由真实实验验证。
 
 ### （三）安全投影与内容分数
 
@@ -337,7 +337,7 @@ $$
 
 检测图像使用冻结 VAE posterior mode 编码为 $\hat z=(\operatorname{mode}(q_{VAE}(x'))-\texttt{vae\_shift\_factor})\cdot\texttt{vae\_scaling\_factor}$。固定模板只依赖密钥、精确模型标识和 shape, 内容分数固定为 $0.70s_{LF}+0.30s_{tail}$。
 
-仅图像 Q/K 的公开噪声输出 `shape` 精确等于 $\hat z$ 的 NCHW shape。调用使用 `public_detection_noise_prg_protocol=sha256_counter_box_muller_float32_v1`, 且 `key_material=public_detection_noise_domain=public_image_only_qk_detection_noise_v1`；`domain_fields` 精确包含同值 `operator`、冻结 `model_id`、40位 `model_revision`、`width=512`、`height=512`、`inference_steps=20`、`public_detection_schedule_index=7` 和 `latent_shape=shape`。domain 不含水印密钥、Prompt、生成 seed 或轨迹, 并完整执行本节的 SHA-256、53位映射、顺序 Box-Muller 与 CPU float32 reshape, 再只搬运到 $\hat z$ 的设备与实际 dtype。令 $t_{det}=\operatorname{scheduler.timesteps}[7]$, 检测 latent 只能由 `scheduler.scale_noise(hat_z,t_det,epsilon_det)` 得到；缺失 `scale_noise` 时失败。Transformer 条件固定为 `public_detection_conditioning_protocol=sd3_empty_text_triplet_without_cfg_v1` 与 `public_detection_condition_text=""`。raw 与 aligned 图像分别重新编码和提取 Q/K, 原子角色固定为 `raw_detection_image` 和 `aligned_detection_image`。
+仅图像 Q/K 的公开噪声输出 `shape` 精确等于 $\hat z$ 的 NCHW shape。调用使用 `public_detection_noise_prg_protocol=sha256_counter_normal_icdf_table20_float32_v2`, 且 `key_material=public_detection_noise_domain=public_image_only_qk_detection_noise_v1`；`domain_fields` 精确包含同值 `operator`、冻结 `model_id`、40位 `model_revision`、`width=512`、`height=512`、`inference_steps=20`、`public_detection_schedule_index=7` 和 `latent_shape=shape`。domain 不含水印密钥、Prompt、生成 seed 或轨迹, 并完整执行本节的 SHA-256 大端计数器比特流、连续20位索引提取与 Q20 中点逆 CDF float32 表查询；实际 dtype 转换在 CPU 完成, 随后才搬运到 $\hat z$ 的设备。令 $t_{det}=\operatorname{scheduler.timesteps}[7]$, 检测 latent 只能由 `scheduler.scale_noise(hat_z,t_det,epsilon_det)` 得到；缺失 `scale_noise` 时失败。Transformer 条件固定为 `public_detection_conditioning_protocol=sd3_empty_text_triplet_without_cfg_v1` 与 `public_detection_condition_text=""`。raw 与 aligned 图像分别重新编码和提取 Q/K, 原子角色固定为 `raw_detection_image` 和 `aligned_detection_image`。
 
 calibration split 同时冻结内容阈值、几何可靠性阈值、rescue window 和失败原因 gate。rescue 只对内容阈值附近且失败原因为 `geometry_suspected` 或 `low_confidence` 的样本开放；注册必须通过双向关系、覆盖、唯一采样、inlier、残差、pair 身份和恢复后 sync。对齐后不重新选择稳定 token, 并复用同一个内容阈值。最终 fixed-FPR 对应 `content OR same-threshold rescue` 的完整布尔协议；几何分数不能独立产生 positive。
 

@@ -2,7 +2,7 @@
 
 该模块只负责从密钥化 SHA-256 计数器字节流构造规范 CPU float32 Tensor.
 调用方可以把结果搬运到 CUDA, 但设备、PyTorch RNG 和设备特定随机算法不会
-进入随机值定义.高斯载体、Jacobian 候选方向和注意力关系符号共享该原语.
+进入随机值定义. 高斯载体, Jacobian 候选方向和注意力关系符号共享该原语.
 """
 
 from __future__ import annotations
@@ -12,9 +12,15 @@ import math
 from typing import Any, Mapping
 
 from main.core.digest import build_stable_digest, stable_json_dumps
+from main.core.normal_quantile_table import (
+    NORMAL_QUANTILE_COUNT,
+    NORMAL_QUANTILE_INDEX_BITS,
+    standard_normal_quantile_float32_table,
+    standard_normal_quantile_table_record,
+)
 
 
-KEYED_PRG_VERSION = "sha256_counter_box_muller_float32_v1"
+KEYED_PRG_VERSION = "sha256_counter_normal_icdf_table20_float32_v2"
 _PRG_COUNTER_BYTES = 16
 _PRG_UNIFORM_BITS = 53
 
@@ -40,6 +46,7 @@ def keyed_prg_protocol_record(
     """返回不含密钥和样本输入的公开 PRG 算法身份."""
 
     require_supported_keyed_prg_version(prg_version)
+    normal_table_record = standard_normal_quantile_table_record()
     payload = {
         "keyed_prg_version": prg_version,
         "domain_serialization": "stable_json_utf8_then_sha256",
@@ -54,8 +61,16 @@ def keyed_prg_protocol_record(
         "uniform_word_rule": "high_53_bits_of_uint64_be",
         "uniform_mapping": "(mantissa+1)/(2^53+2)",
         "uniform_interval": "strict_open_unit_interval",
-        "normal_transform": "box_muller_float64_then_float32",
-        "normal_pair_order": "radius_cos_then_radius_sin",
+        "normal_index_bits": NORMAL_QUANTILE_INDEX_BITS,
+        "normal_counter_block_bits": 256,
+        "normal_bitstream_order": "sha256_blocks_then_msb_first_bits",
+        "normal_index_rule": (
+            "consecutive_20bit_words_across_counter_block_boundaries"
+        ),
+        "normal_transform": (
+            "frozen_midpoint_inverse_normal_cdf_table20_float32"
+        ),
+        **normal_table_record,
         "canonical_generation_device": "cpu",
         "canonical_output_dtype": "float32",
     }
@@ -118,6 +133,38 @@ def _uniform_values(
     return values[:element_count]
 
 
+def _normal_quantile_indices(
+    element_count: int,
+    domain: bytes,
+) -> list[int]:
+    """从连续 SHA-256 大端位流提取跨块20位分位数表索引."""
+
+    indices: list[int] = []
+    counter = 0
+    bit_buffer = 0
+    available_bits = 0
+    index_mask = (1 << NORMAL_QUANTILE_INDEX_BITS) - 1
+    while len(indices) < element_count:
+        block = hashlib.sha256(
+            domain + counter.to_bytes(_PRG_COUNTER_BYTES, "big")
+        ).digest()
+        counter += 1
+        bit_buffer = (bit_buffer << 256) | int.from_bytes(block, "big")
+        available_bits += 256
+        while (
+            available_bits >= NORMAL_QUANTILE_INDEX_BITS
+            and len(indices) < element_count
+        ):
+            available_bits -= NORMAL_QUANTILE_INDEX_BITS
+            indices.append(
+                (bit_buffer >> available_bits) & index_mask
+            )
+            bit_buffer &= (
+                (1 << available_bits) - 1 if available_bits else 0
+            )
+    return indices[:element_count]
+
+
 def build_keyed_uniform_tensor(
     shape: tuple[int, ...],
     key_material: str,
@@ -146,11 +193,11 @@ def build_keyed_gaussian_tensor(
     domain_fields: Mapping[str, Any],
     prg_version: str = KEYED_PRG_VERSION,
 ) -> Any:
-    """在 CPU 上通过 Box-Muller 构造规范高斯 float32 Tensor.
+    """在 CPU 上通过冻结逆 CDF 表构造规范高斯 float32 Tensor.
 
-    该函数先生成同一 domain 的均匀数对, 再在 Python float64 中执行
-    Box-Muller, 最后统一取整为 CPU float32.其他项目可以直接复用该函数生成
-    跨 CPU/CUDA 一致的密钥方向, 然后按自身算子需要搬运和 reshape.
+    该函数从同一 SHA-256 domain 的连续大端位流提取20位索引, 再查询
+    1048576格标准正态中点分位数表. 运行时不调用平台数学库, 因而其他
+    项目可以直接复用该函数生成跨操作系统, CPU 和 CUDA 一致的密钥方向.
     """
 
     torch = _torch()
@@ -162,14 +209,11 @@ def build_keyed_gaussian_tensor(
         domain_fields,
         prg_version,
     )
-    uniform_values = _uniform_values(2 * math.ceil(element_count / 2), domain)
-    normal_values: list[float] = []
-    for index in range(0, len(uniform_values), 2):
-        radius = math.sqrt(-2.0 * math.log(uniform_values[index]))
-        angle = 2.0 * math.pi * uniform_values[index + 1]
-        normal_values.append(radius * math.cos(angle))
-        if len(normal_values) < element_count:
-            normal_values.append(radius * math.sin(angle))
+    quantile_table = standard_normal_quantile_float32_table()
+    quantile_indices = _normal_quantile_indices(element_count, domain)
+    if len(quantile_table) != NORMAL_QUANTILE_COUNT:
+        raise RuntimeError("标准正态分位数表数量发生漂移")
+    normal_values = [quantile_table[index] for index in quantile_indices]
     return torch.tensor(
         normal_values,
         dtype=torch.float32,

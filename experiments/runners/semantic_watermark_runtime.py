@@ -2396,7 +2396,8 @@ def _final_image_attention_observability_record(
         build_attention_relation_graph_identity(
             records,
             config.key_material,
-            config.attention_relation_component_weights,
+            prg_version=config.keyed_prg_version,
+            component_weights=config.attention_relation_component_weights,
         )
         for records in (
             clean_records,
@@ -2529,6 +2530,7 @@ def _final_image_attention_observability_record(
         value = attention_geometry_score(
             records,
             config.key_material,
+            prg_version=config.keyed_prg_version,
             stable_pair_weights=pair_weights,
             component_weights=config.attention_relation_component_weights,
         )
@@ -2557,13 +2559,15 @@ def _final_image_attention_observability_record(
         carrier_only_records,
         config.key_material,
         carrier_only_pair_weights,
-        config.attention_relation_component_weights,
+        prg_version=config.keyed_prg_version,
+        component_weights=config.attention_relation_component_weights,
     )
     watermarked_carrier_paired_components = attention_geometry_component_scores(
         watermarked_records,
         config.key_material,
         carrier_only_pair_weights,
-        config.attention_relation_component_weights,
+        prg_version=config.keyed_prg_version,
+        component_weights=config.attention_relation_component_weights,
     )
     carrier_paired_component_gains = (
         watermarked_carrier_paired_components - carrier_only_paired_components
@@ -2782,6 +2786,9 @@ def _public_detection_noise_prg_identity(
         "public_detection_noise_prg_protocol": (
             config.public_detection_noise_prg_protocol
         ),
+        "keyed_prg_protocol_digest": keyed_prg_protocol_record(
+            config.public_detection_noise_prg_protocol
+        )["keyed_prg_protocol_digest"],
         "key_material": config.public_detection_noise_domain,
         "domain_fields": domain_fields,
         "shape": latent_shape,
@@ -2832,7 +2839,8 @@ def _public_detection_noise_tensor(
         domain_fields=identity["domain_fields"],
         prg_version=config.public_detection_noise_prg_protocol,
     )
-    return noise_cpu.to(device=latent.device, dtype=latent.dtype)
+    typed_noise_cpu = noise_cpu.to(device="cpu", dtype=latent.dtype)
+    return typed_noise_cpu.to(device=latent.device)
 
 
 def _image_attention_extractor(
@@ -3657,6 +3665,9 @@ def run_semantic_watermark_runtime(
                         transformer_forward,
                         recorder,
                         active_injection_config.key_material,
+                        prg_version=(
+                            active_injection_config.keyed_prg_version
+                        ),
                         stable_token_fraction=(
                             active_injection_config.attention_stable_token_fraction
                         ),
@@ -3942,6 +3953,9 @@ def run_semantic_watermark_runtime(
                         transformer_forward,
                         recorder,
                         active_injection_config.key_material,
+                        prg_version=(
+                            active_injection_config.keyed_prg_version
+                        ),
                         stable_token_fraction=(
                             attention_gradient.stable_token_fraction
                         ),
@@ -4007,6 +4021,9 @@ def run_semantic_watermark_runtime(
                         precomputed_gradient=attention_gradient,
                         precomputed_content_base_gradient=(
                             content_base_gradient
+                        ),
+                        prg_version=(
+                            active_injection_config.keyed_prg_version
                         ),
                         base_update=(
                             content_base_candidate.float32_combined_update
@@ -4151,6 +4168,9 @@ def run_semantic_watermark_runtime(
                             content_score_tensor = attention_geometry_score(
                                 recorder.records,
                                 active_injection_config.key_material,
+                                prg_version=(
+                                    active_injection_config.keyed_prg_version
+                                ),
                                 stable_pair_weights=(
                                     attention_gradient.stable_pair_weights
                                 ),
@@ -4162,7 +4182,12 @@ def run_semantic_watermark_runtime(
                                 build_attention_relation_graph_identity(
                                     recorder.records,
                                     active_injection_config.key_material,
-                                    active_injection_config.attention_relation_component_weights,
+                                    prg_version=(
+                                        active_injection_config.keyed_prg_version
+                                    ),
+                                    component_weights=(
+                                        active_injection_config.attention_relation_component_weights
+                                    ),
                                 )
                             )
                             recorder.clear()
@@ -4172,6 +4197,9 @@ def run_semantic_watermark_runtime(
                             final_score_tensor = attention_geometry_score(
                                 recorder.records,
                                 active_injection_config.key_material,
+                                prg_version=(
+                                    active_injection_config.keyed_prg_version
+                                ),
                                 stable_pair_weights=(
                                     attention_gradient.stable_pair_weights
                                 ),
@@ -4183,7 +4211,12 @@ def run_semantic_watermark_runtime(
                                 build_attention_relation_graph_identity(
                                     recorder.records,
                                     active_injection_config.key_material,
-                                    active_injection_config.attention_relation_component_weights,
+                                    prg_version=(
+                                        active_injection_config.keyed_prg_version
+                                    ),
+                                    component_weights=(
+                                        active_injection_config.attention_relation_component_weights
+                                    ),
                                 )
                             )
                         content_score = float(

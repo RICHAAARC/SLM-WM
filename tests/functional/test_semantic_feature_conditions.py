@@ -47,6 +47,7 @@ from main.methods.geometry.differentiable_attention import (
 )
 from main.methods.carrier import keyed_prg_protocol_record
 from main.core.digest import build_stable_digest
+from main.core.keyed_prg import KEYED_PRG_VERSION
 from main.core.digest import (
     TENSOR_CONTENT_DIGEST_VERSION,
     tensor_content_sha256,
@@ -907,6 +908,7 @@ def test_final_image_attention_gate_uses_reencoded_real_qk_scores() -> None:
                 torch.zeros(1, token_count, token_count),
                 key_material,
                 layer_name,
+                KEYED_PRG_VERSION,
             )
             logits = (
                 signature_strength * signs

@@ -11,7 +11,8 @@
 - `methods/geometry/`: 从真实 Transformer Q/K 直接构造中心化 logit、可微 rank、抽样图像 token 关系概率和距离调制中心化概率四分量图, 计算目标梯度, 构造可核对身份的稳定 token pair 权重, 并通过攻击配置无关的分层搜索恢复二维参考系。归一化 token 坐标把角点中心映射到 -1 与 1, 与图像仿射重采样的 `align_corners=True` 完全一致。
 - `methods/detection/`: 实现只读取待检图像、密钥和公开检测配置的盲检接口, 注册前后使用同一 pair 权重身份且不在对齐后重新选择 token。
 - `core/digest.py`: 提供 JSON 稳定摘要及绑定 dtype、shape 与连续原始字节的版本化 Tensor 内容摘要, 供风险、Null Space、分支更新和 Q/K 科学原子共同复用。
-- `core/keyed_prg.py`: 以版本化 SHA-256 计数器流生成规范均匀数；载体模板和 Jacobian 候选方向继续执行 Box-Muller 高斯变换, 注意力关系符号直接由均匀数阈值化, 使设备 RNG 不进入方法身份。
+- `core/keyed_prg.py`: 实现 `sha256_counter_normal_icdf_table20_float32_v2`。高斯用途从 SHA-256 大端计数器块组成的 MSB-first 连续比特流提取20位索引, 查询冻结 Q20 中点逆 CDF 表；注意力关系符号使用独立的53位开区间 uniform 路径, 使设备 RNG 不进入方法身份。
+- `core/normal_quantile_table.py`: 保存 $q_i=\operatorname{round}_{\mathrm{binary32}}\!\left(\Phi^{-1}((i+0.5)/2^{20})\right)$ 的1048576项冻结表。完整大端字节 SHA-256 为 `70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a`；该有限离散量化分布的理想中点 KS 距离为 $2^{-21}$, 加上已登记的 float32 舍入误差后上界为 `4.912236096776823e-7`。
 
 ## 分层边界
 
@@ -30,7 +31,7 @@
 
 内容分支由空间低通 LF 与高斯幅值尾部截断 `tail_robust` 组成。LF 在二维低通后执行全 Tensor 去均值和 L2 归一化；`tail_robust` 按高斯模板元素绝对幅值选择分布尾部, 截断后只执行 L2 归一化, 使非入选位置保持精确0。尾部分支不使用 FFT、DCT、带通滤波或空间频带掩码。
 
-正式 Q/K 算子只消费配置中精确冻结的 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 不按模型枚举顺序动态挑选层。正式检测不得接收 Prompt、生成种子、初始噪声、生成轨迹、源 latent 或样本级 Null Space。检测端可使用的全部公开随机量必须由密钥、模型标识和冻结检测协议确定。密钥化随机原语固定为 `sha256_counter_box_muller_float32_v1`, 先在 CPU 物化规范均匀流, 再按用途派生高斯 Tensor 或关系符号并搬运到目标设备；CPU 与 CUDA 的 PyTorch RNG 均不参与方法身份。
+正式 Q/K 算子只消费配置中精确冻结的 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 不按模型枚举顺序动态挑选层。正式检测不得接收 Prompt、生成种子、初始噪声、生成轨迹、源 latent 或样本级 Null Space。检测端可使用的全部公开随机量必须由密钥、模型标识和冻结检测协议确定。密钥化随机原语固定为 `sha256_counter_normal_icdf_table20_float32_v2`：高斯用途查询冻结 Q20 中点逆 CDF float32 表, 53位开区间 uniform 路径只用于注意力关系符号。Q20 输出是有限离散的量化标准正态, 不是连续精确的 $\mathcal N(0,1)$。规范 float32 生成与目标 dtype 转换均在 CPU 完成, 随后才搬运到目标设备；CPU 与 CUDA 的 PyTorch RNG 均不参与方法身份。MPFR 逐项舍入复验属于 `tools/harness/` 的外层证据, 不进入 PRG 算法摘要或采样身份。当前逐字节固定向量只在 Windows CPU 实测, Linux/Colab 一致性必须在 GPU 运行前门禁中复验。
 
 核心方法对象为三个分支的风险值、连续预算和资格 mask, Jacobian 候选矩阵、风险路由候选及其响应、投影方向及其响应、QR 基底及其响应、逐列 QR 参考响应, 三个分支更新以及真实 Q/K 输入输出提供角色限定的精确内容摘要。Q/K 原子按冻结层记录抽样后的 Q、K、中心化 logit、关系概率和原始二维 token 索引；算子身份与数据内容身份分开保存, 避免把不同图像的数值内容误写为同一个算子协议。
 

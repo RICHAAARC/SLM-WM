@@ -23,9 +23,9 @@ from tools.harness.lib.method_semantic_registry import (
 )
 
 
-EXPECTED_METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v3"
+EXPECTED_METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v4"
 EXPECTED_METHOD_DEFINITION_DIGEST = (
-    "80ad2e38188ec57144bd987070425d65592109d17e90f04fff99c3432309fa1a"
+    "aa1fe3b81f1763403b58bb85c01a44c048b8d2b0916f3a3d9cf72c2275a4fd7c"
 )
 
 

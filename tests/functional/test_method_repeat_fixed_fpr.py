@@ -118,6 +118,11 @@ def _identity(
                 "base_latent_keyed_prg_version"
             ]
         ),
+        "base_latent_keyed_prg_protocol_digest": (
+            formal_randomization_protocol_record()[
+                "base_latent_keyed_prg_protocol_digest"
+            ]
+        ),
         "base_latent_dtype": FORMAL_BASE_LATENT_DTYPE,
         "base_latent_shape": list(FORMAL_BASE_LATENT_SHAPE),
     }
@@ -372,6 +377,11 @@ def _shift_generation_seed(
             "base_latent_keyed_prg_version": (
                 formal_randomization_protocol_record()[
                     "base_latent_keyed_prg_version"
+                ]
+            ),
+            "base_latent_keyed_prg_protocol_digest": (
+                formal_randomization_protocol_record()[
+                    "base_latent_keyed_prg_protocol_digest"
                 ]
             ),
             "base_latent_dtype": FORMAL_BASE_LATENT_DTYPE,

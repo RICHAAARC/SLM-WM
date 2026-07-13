@@ -85,7 +85,7 @@ attention_backtracking_factor: 0.5
 attention_backtracking_maximum_steps: 8
 minimum_final_image_attention_score_gain: 0.0001
 tail_fraction: 0.20
-keyed_prg_version: sha256_counter_box_muller_float32_v1
+keyed_prg_version: sha256_counter_normal_icdf_table20_float32_v2
 minimum_projection_energy_retention: 0.01
 maximum_relative_response_residual: 0.0001
 maximum_quantized_write_relative_jacobian_response: 0.0001
@@ -101,7 +101,7 @@ minimum_semantic_preservation_cosine: 0.995
 maximum_handcrafted_structure_feature_relative_drift: 0.02
 injection_step_indices: [6, 10, 14]
 public_detection_schedule_index: 7
-public_detection_noise_prg_protocol: sha256_counter_box_muller_float32_v1
+public_detection_noise_prg_protocol: sha256_counter_normal_icdf_table20_float32_v2
 public_detection_noise_domain: public_image_only_qk_detection_noise_v1
 public_detection_conditioning_protocol: sd3_empty_text_triplet_without_cfg_v1
 public_detection_condition_text: ""

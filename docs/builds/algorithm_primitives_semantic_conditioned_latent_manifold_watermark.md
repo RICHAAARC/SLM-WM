@@ -290,7 +290,14 @@ $$
 
 平均池化只作用于 height/width 二维轴, 对每个 batch/channel 独立使用 kernel 5、stride 1、padding 2、二维零填充和 `count_include_pad=true`, 不跨 batch 或 channel 轴传播数值；池化后去均值与 L2 归一化各自在整个模板 Tensor 上计算一个全局标量。该离散边界条件属于方法配置, 不能使用运行库默认值替代。
 
-正式 PRG 以 `sha256_counter_box_muller_float32_v1` 登记完整逐字节协议。规范 domain payload 包含 `keyed_prg_version`、`key_material`、`domain_fields` 与 `shape`, 使用 UTF-8、`ensure_ascii=false`、键名升序和无空白分隔符 `(',', ':')` 形成 stable JSON, 再执行 SHA-256 得到32字节 domain digest。counter 从0开始, 以16字节无符号大端编码拼接到 domain digest 后再执行 SHA-256。每个32字节块按 offset 0、8、16、24 切成4个连续8字节无符号大端 word；取 $m=w\gg11$, 并按 $u=(m+1)/(2^{53}+2)$ 得到严格位于 $(0,1)$ 的53位 uniform 值。Gaussian 路径顺序消费 $(u_{2r},u_{2r+1})$, 令 $R_r=\sqrt{-2\log u_{2r}}$、$\Theta_r=2\pi u_{2r+1}$, 依次输出 $R_r\cos\Theta_r$、$R_r\sin\Theta_r$；达到元素数后截断, 最后一次性转换为 CPU float32 并按连续行优先顺序 reshape。attention 关系符号直接把均匀值按0.5阈值映射为 $\{-1,+1\}$, 不执行 Box-Muller。所有 domain 同时绑定算子角色、分支、精确模型标识和 shape；CPU/CUDA 设备 RNG 不参与方法身份。
+正式 PRG 以 `sha256_counter_normal_icdf_table20_float32_v2` 登记完整逐字节协议。规范 domain payload 包含 `keyed_prg_version`、`key_material`、`domain_fields` 与 `shape`, 使用 UTF-8、`ensure_ascii=false`、键名升序和无空白分隔符 `(',', ':')` 形成 stable JSON, 再执行 SHA-256 得到32字节 domain digest。counter 从0开始, 以16字节无符号大端编码拼接到 domain digest 后再执行 SHA-256。Gaussian 路径把连续 SHA-256 块解释为 MSB-first 大端比特流, 跨计数器块连续提取20位索引 $i$, 并查询
+
+$$
+q_i=\operatorname{round}_{\mathrm{binary32}}\!\left(\Phi^{-1}\!\left(\frac{i+0.5}{2^{20}}\right)\right),
+\qquad 0\le i<2^{20}.
+$$
+
+冻结表全部1048576个 binary32 位模式的完整大端字节 SHA-256 为 `70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a`。该分布是有限离散的 Q20 中点逆 CDF 量化标准正态, 不是连续精确的 $\mathcal N(0,1)$；理想中点 KS 距离为 $2^{-21}=4.76837158203125\times10^{-7}$, 计入登记的 float32 CDF 舍入误差后总上界为 $4.912236096776823\times10^{-7}$。规范 float32 Tensor 和目标 dtype 转换都在 CPU 完成, 随后才搬运到执行设备。独立 uniform 路径把每个32字节块按 offset 0、8、16、24 切成4个连续8字节无符号大端 word, 取 $m=w\gg11$, 按 $u=(m+1)/(2^{53}+2)$ 得到严格位于 $(0,1)$ 的53位值；该路径只用于把 attention 关系符号按0.5阈值映射为 $\{-1,+1\}$。所有 domain 同时绑定算子角色、分支、精确模型标识和 shape；CPU/CUDA 设备 RNG 不参与方法身份。MPFR 逐项舍入复验是 `tools/harness/verify_normal_quantile_reference.py` 生成的外层证据, 不进入 PRG 算法摘要或 `keyed_prg_protocol_digest`。当前逐字节固定向量只在 Windows CPU 实测, Linux/Colab 一致性必须由 GPU 运行前门禁复验。
 
 固定模板投影到真实安全子空间：
 
@@ -335,11 +342,11 @@ $$
 
 尾部截断分支负责纹理区域和困难攻击条件下的鲁棒补充，尤其面向压缩、噪声、重采样、裁剪重缩放和再扩散后仍可能保留的残余证据。该分支不单独承担主判定。
 
-该分支的正式标识为 `tail_robust`。“尾部”指标准高斯随机变量绝对幅值分布的尾部, 与二维空间频谱无关。
+该分支的正式标识为 `tail_robust`。“尾部”指 Q20 中点逆 CDF 量化标准正态随机变量绝对幅值分布的尾部, 与二维空间频谱无关。
 
 ### （二）高斯幅值尾部截断
 
-给定尾部载体密钥 $K_{\mathrm{tail}}$，生成与 latent 同形状的标准高斯候选模板：
+给定尾部载体密钥 $K_{\mathrm{tail}}$，生成与 latent 同形状的 Q20 中点逆 CDF 量化标准正态候选模板：
 
 $$
 \nu_{\mathrm{tail}}
@@ -800,7 +807,7 @@ $$
 
 并通过密钥、精确模型标识和公开 latent 形状重建 LF 与尾部截断模板。内容分数固定为 $0.70s_{\mathrm{LF}}+0.30s_{\mathrm{tail}}$, 不执行分支投票。
 
-检测 Q/K 的公开噪声输出 `shape` 精确等于 $\hat z$ 的 NCHW shape。调用固定 `public_detection_noise_prg_protocol=sha256_counter_box_muller_float32_v1`, 且 `key_material=public_detection_noise_domain=public_image_only_qk_detection_noise_v1`。`domain_fields` 精确包含同值 `operator`、冻结 `model_id`、40位 `model_revision`、`width=512`、`height=512`、`inference_steps=20`、`public_detection_schedule_index=7` 与 `latent_shape=shape`；不含水印密钥、Prompt、生成 seed 或轨迹。该 payload 执行本节冻结的 SHA-256 字节流、53位映射、顺序 Box-Muller 和 CPU float32 reshape, 再只搬运到 $\hat z$ 的设备与实际 dtype。令 $t_{det}=\operatorname{scheduler.timesteps}[7]$, 检测 latent 只能由 `scheduler.scale_noise(hat_z,t_det,epsilon_det)` 得到；scheduler 缺少真实 `scale_noise` 时直接失败。Transformer 条件固定为 `public_detection_conditioning_protocol=sd3_empty_text_triplet_without_cfg_v1` 与 `public_detection_condition_text=""`。安全基底只在嵌入端控制失真, 不成为检测端 side information。raw 与 aligned 图像必须分别重新编码和提取 Q/K, 原子角色固定为 `raw_detection_image` 与 `aligned_detection_image`。
+检测 Q/K 的公开噪声输出 `shape` 精确等于 $\hat z$ 的 NCHW shape。调用固定 `public_detection_noise_prg_protocol=sha256_counter_normal_icdf_table20_float32_v2`, 且 `key_material=public_detection_noise_domain=public_image_only_qk_detection_noise_v1`。`domain_fields` 精确包含同值 `operator`、冻结 `model_id`、40位 `model_revision`、`width=512`、`height=512`、`inference_steps=20`、`public_detection_schedule_index=7` 与 `latent_shape=shape`；不含水印密钥、Prompt、生成 seed 或轨迹。该 payload 执行本节冻结的 SHA-256 大端计数器比特流、连续20位索引提取和 Q20 中点逆 CDF float32 表查询, 在 CPU 完成实际 dtype 转换后再搬运到 $\hat z$ 的设备。令 $t_{det}=\operatorname{scheduler.timesteps}[7]$, 检测 latent 只能由 `scheduler.scale_noise(hat_z,t_det,epsilon_det)` 得到；scheduler 缺少真实 `scale_noise` 时直接失败。Transformer 条件固定为 `public_detection_conditioning_protocol=sd3_empty_text_triplet_without_cfg_v1` 与 `public_detection_condition_text=""`。安全基底只在嵌入端控制失真, 不成为检测端 side information。raw 与 aligned 图像必须分别重新编码和提取 Q/K, 原子角色固定为 `raw_detection_image` 与 `aligned_detection_image`。
 
 ### （一）Neyman-Pearson 判定
 
@@ -878,7 +885,7 @@ $$
 s_{i,q}=s_0+\Delta_i+q.
 $$
 
-基础 latent 不调用各适配器自己的 CPU/CUDA RNG。协议使用版本化 SHA-256 大端计数器流和 Box-Muller 变换, 把模型 ID、40位 revision、$s_{i,q}$、Tensor shape 和协议名称共同写入 domain, 先在 CPU 生成规范 float32 标准高斯 Tensor, 再转换到目标设备和 dtype：
+基础 latent 不调用各适配器自己的 CPU/CUDA RNG。协议使用 `sha256_counter_normal_icdf_table20_float32_v2`, 把模型 ID、40位 revision、$s_{i,q}$、Tensor shape 和协议名称共同写入 domain, 从 SHA-256 大端计数器的连续 MSB-first 比特流提取20位索引并查询冻结 Q20 中点逆 CDF float32 表。规范 float32 生成和目标 dtype 转换均在 CPU 完成, 随后才搬运到目标设备：
 
 $$
 z^{(0)}_{i,q}=\operatorname{Cast}_{d}\left(

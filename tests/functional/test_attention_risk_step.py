@@ -9,6 +9,7 @@ import pytest
 import torch
 
 import main.methods.geometry.differentiable_attention as attention_module
+from main.core.keyed_prg import KEYED_PRG_VERSION
 
 
 def _risk_bounded_fixture(
@@ -202,6 +203,7 @@ def test_attention_risk_step_starts_at_maximum_and_consumes_factor(
         transformer_forward=recorder.forward,
         recorder=recorder,
         key_material="risk-step-key",
+        prg_version=KEYED_PRG_VERSION,
         safe_subspace=fixture.safe_subspace,
         risk_bounded_update=_risk_bounded_fixture(latent + 1.0, 0.8),
         backtracking_factor=0.25,
@@ -245,6 +247,7 @@ def test_attention_optimizer_consumes_exact_risk_bounded_direction(
         transformer_forward=recorder.forward,
         recorder=recorder,
         key_material="risk-direction-key",
+        prg_version=KEYED_PRG_VERSION,
         safe_subspace=fixture.safe_subspace,
         risk_bounded_update=risk_bound,
         maximum_backtracking_steps=0,
@@ -280,6 +283,7 @@ def test_attention_optimizer_rejects_different_risk_direction(
             transformer_forward=recorder.forward,
             recorder=recorder,
             key_material="risk-direction-mismatch-key",
+            prg_version=KEYED_PRG_VERSION,
             safe_subspace=fixture.safe_subspace,
             risk_bounded_update=_risk_bounded_fixture(
                 torch.tensor([[1.0, -1.0]]),
@@ -326,6 +330,7 @@ def test_attention_optimizer_rejects_gradient_latent_identity_mismatch(
             transformer_forward=recorder.forward,
             recorder=recorder,
             key_material="gradient-latent-identity-key",
+            prg_version=KEYED_PRG_VERSION,
             safe_subspace=fixture.safe_subspace,
             risk_bounded_update=_risk_bounded_fixture(latent + 1.0, 0.5),
             precomputed_gradient=fixture.original_evidence,
@@ -360,6 +365,7 @@ def test_attention_risk_step_uses_one_actual_dtype_cast(
         transformer_forward=recorder.forward,
         recorder=recorder,
         key_material="single-cast-key",
+        prg_version=KEYED_PRG_VERSION,
         safe_subspace=fixture.safe_subspace,
         risk_bounded_update=_risk_bounded_fixture(
             torch.ones_like(latent),
@@ -423,6 +429,7 @@ def test_attention_risk_step_rejects_non_monotonic_candidates_at_step_limit(
             transformer_forward=recorder.forward,
             recorder=recorder,
             key_material="step-limit-key",
+            prg_version=KEYED_PRG_VERSION,
             safe_subspace=fixture.safe_subspace,
             risk_bounded_update=_risk_bounded_fixture(latent + 1.0, 0.8),
             backtracking_factor=0.5,
@@ -462,6 +469,7 @@ def test_attention_risk_step_rejects_invalid_search_constants(
             transformer_forward=recorder.forward,
             recorder=recorder,
             key_material="invalid-search-key",
+            prg_version=KEYED_PRG_VERSION,
             safe_subspace=safe_subspace,
             risk_bounded_update=_risk_bounded_fixture(latent + 1.0, 0.8),
             precomputed_gradient=_gradient_evidence(latent, 0.0),

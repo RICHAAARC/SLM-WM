@@ -661,8 +661,9 @@ def test_cpu_property_nodes_only_cover_independently_implemented_operators() -> 
     cpu_verified_invariants = {
         "branch_signal_origin",
         "branch_risk_bounds_written_update",
-        "exact_jacobian_low_response_subspace",
-        "spatial_low_pass_and_amplitude_tail_carriers",
+            "exact_jacobian_low_response_subspace",
+            "versioned_key_prg_reconstruction",
+            "spatial_low_pass_and_amplitude_tail_carriers",
         "direct_qk_monotonic_attention_update",
         "three_branch_update_composition",
         "actual_dtype_write_revalidation",

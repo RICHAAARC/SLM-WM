@@ -20,6 +20,7 @@ from experiments.protocol.fixed_fpr_observation_audit import (
     audit_fixed_fpr_observation_threshold,
 )
 from experiments.protocol.formal_randomization import (
+    FORMAL_BASE_LATENT_GENERATION_PROTOCOL,
     formal_randomization_protocol_record,
     formal_randomization_repeat_ids,
     formal_randomization_repeats,
@@ -53,9 +54,6 @@ METHOD_REPEAT_THRESHOLD_COUNT = len(formal_randomization_repeat_ids()) * len(
     FIXED_FPR_THRESHOLD_METHOD_IDS
 )
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
-FORMAL_BASE_LATENT_GENERATION_PROTOCOL = (
-    "device_independent_sha256_box_muller_cpu_dtype_cast_then_device_transfer_v1"
-)
 FORMAL_BASE_LATENT_DTYPE = "torch.float16"
 FORMAL_BASE_LATENT_SHAPE = (1, 16, 64, 64)
 
@@ -97,6 +95,7 @@ _PROMPT_IDENTITY_SHA256_FIELDS = (
 _MAIN_BASE_LATENT_PROTOCOL_FIELDS = (
     "base_latent_generation_protocol",
     "base_latent_keyed_prg_version",
+    "base_latent_keyed_prg_protocol_digest",
     "base_latent_dtype",
     "base_latent_shape",
 )

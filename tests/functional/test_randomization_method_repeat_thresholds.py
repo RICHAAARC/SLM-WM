@@ -155,10 +155,16 @@ def _base_latent_identity(generation_seed_random: int) -> dict[str, Any]:
     identity = {
         "generation_seed_random": generation_seed_random,
         "base_latent_generation_protocol": (
-            "device_independent_sha256_box_muller_cpu_dtype_cast_then_device_transfer_v1"
+            "device_independent_sha256_normal_icdf_table20_"
+            "cpu_dtype_cast_then_device_transfer_v2"
         ),
         "base_latent_keyed_prg_version": (
-            "sha256_counter_box_muller_float32_v1"
+            "sha256_counter_normal_icdf_table20_float32_v2"
+        ),
+        "base_latent_keyed_prg_protocol_digest": (
+            formal_randomization_protocol_record()[
+                "base_latent_keyed_prg_protocol_digest"
+            ]
         ),
         "formal_randomization_protocol_digest": (
             formal_randomization_protocol_record()[

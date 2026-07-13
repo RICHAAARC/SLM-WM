@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from main.core.digest import build_stable_digest
+from main.core.keyed_prg import KEYED_PRG_VERSION, keyed_prg_protocol_record
 
 
-METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v3"
+METHOD_DEFINITION_SCHEMA = "slm_wm_constructive_local_tangent_v4"
 
 
 def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
@@ -162,12 +163,20 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             ),
         },
         "keyed_prg": {
+            "keyed_prg_version": KEYED_PRG_VERSION,
+            "keyed_prg_protocol_digest": keyed_prg_protocol_record(
+                KEYED_PRG_VERSION
+            )[
+                "keyed_prg_protocol_digest"
+            ],
             "canonical_device": "cpu",
             "canonical_dtype": "float32",
             "uniform_output_rule": "direct_open_unit_interval_float32",
             "uniform_output_role": "attention_relation_signs",
-            "uniform_uses_box_muller": False,
-            "gaussian_output_rule": "box_muller_float64_then_float32",
+            "uniform_uses_normal_transform": False,
+            "gaussian_output_rule": (
+                "20bit_msb_stream_index_to_frozen_midpoint_inverse_normal_cdf_float32"
+            ),
             "gaussian_output_roles": [
                 "content_carrier_templates",
                 "jacobian_candidate_directions",
@@ -176,7 +185,7 @@ def semantic_conditioned_latent_method_definition() -> dict[str, Any]:
             "public_detection_noise_key_role": (
                 "deterministic_public_protocol_identity_not_secret_key"
             ),
-            "gaussian_uses_box_muller": True,
+            "gaussian_uses_frozen_normal_quantile_table": True,
             "uniform_and_gaussian_roles_interchangeable": False,
         },
         "branch_names": [

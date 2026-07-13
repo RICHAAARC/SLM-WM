@@ -10,6 +10,7 @@ import pytest
 import torch
 
 import main.methods.geometry.attention_alignment as alignment_module
+from main.core.keyed_prg import KEYED_PRG_VERSION
 from main.methods.geometry.attention_alignment import (
     recover_attention_affine_alignment,
 )
@@ -211,6 +212,7 @@ def _continuous_observed_attention(
         torch.zeros(1, _TOKEN_COUNT, _TOKEN_COUNT),
         _KEY_MATERIAL,
         _LAYER_NAME,
+        KEYED_PRG_VERSION,
     )
     observed_logits = (
         observation_weights
@@ -323,6 +325,7 @@ def test_generic_hierarchical_search_recovers_random_continuous_affine(
         _LAYER_NAME,
         _TOKEN_INDICES,
         pair_weights,
+        KEYED_PRG_VERSION,
     )
 
     recovered_transform = torch.tensor(result.affine_transform)
@@ -506,6 +509,7 @@ def test_relation_registration_rejects_signature_free_attention() -> None:
         _LAYER_NAME,
         _TOKEN_INDICES,
         pair_weights,
+        KEYED_PRG_VERSION,
     )
 
     for component_name in ATTENTION_RELATION_COMPONENT_NAMES:
@@ -534,6 +538,7 @@ def test_probability_only_relation_is_rejected_before_formal_alignment() -> None
             _LAYER_NAME,
             _TOKEN_INDICES,
             _stable_pair_weights(direct_relation),
+            KEYED_PRG_VERSION,
         )
 
 
@@ -551,6 +556,7 @@ def test_distance_modulated_component_changes_registration_objective(
         _LAYER_NAME,
         _TOKEN_INDICES,
         pair_weights,
+        KEYED_PRG_VERSION,
     )
     original_builder = alignment_module.build_attention_relation_descriptor
 
@@ -573,6 +579,7 @@ def test_distance_modulated_component_changes_registration_objective(
         _LAYER_NAME,
         _TOKEN_INDICES,
         pair_weights,
+        KEYED_PRG_VERSION,
     )
     component_name = "distance_modulated_centered_attention_probability"
 

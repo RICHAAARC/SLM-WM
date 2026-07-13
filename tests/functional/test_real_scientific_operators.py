@@ -265,13 +265,16 @@ def test_public_detection_noise_uses_canonical_gaussian_prg() -> None:
     assert torch.equal(first, second)
     assert tensor_content_sha256(first) == tensor_content_sha256(second)
     assert tensor_content_sha256(first) == (
-        "8a2811a582caffa6ac1c60124a31d277b9d30ea57ff63d6bcdd32da1c5ca0ff2"
+        "15c7795fcd10c030a8ec13c0fc4478b276f1d0bf52108f97c484dc4495f01988"
     )
     identity = _public_detection_noise_prg_identity(
         base,
         tuple(int(value) for value in latent.shape),
     )
     assert identity["key_material"] == base.public_detection_noise_domain
+    assert identity["keyed_prg_protocol_digest"] == (
+        "a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b"
+    )
     assert identity["domain_fields"] == {
         "operator": base.public_detection_noise_domain,
         "model_id": base.model_id,
@@ -283,7 +286,7 @@ def test_public_detection_noise_uses_canonical_gaussian_prg() -> None:
         "latent_shape": (1, 4, 2, 2),
     }
     assert identity["public_detection_noise_prg_identity_digest"] == (
-        "9bd16d9ee24c491bed02d841a8f3a9d77239399de63289167d8afa15593233a0"
+        "87e5a8b39005a9f9ad9f5e822e4a56fad056e87df9201b31f345358c19b7f5c3"
     )
     source = inspect.getsource(_public_detection_noise_tensor)
     assert "build_keyed_gaussian_tensor" in source
@@ -1262,46 +1265,53 @@ def test_keyed_templates_use_versioned_device_independent_prg() -> None:
     )
 
     assert KEYED_PRG_VERSION == (
-        "sha256_counter_box_muller_float32_v1"
+        "sha256_counter_normal_icdf_table20_float32_v2"
     )
     assert torch.equal(first_lf, second_lf)
     assert hashlib.sha256(
         first_lf.detach().contiguous().numpy().tobytes()
-    ).hexdigest() == "7bb7ce000ed31ce3470d4554424849c7602d735de73a9bed4e3bed491ba65f8e"
+    ).hexdigest() == "2c265021651407651263b6253a6ee7dbbb540bd879f248b583963cf401629519"
     assert hashlib.sha256(
         tail.detach().contiguous().numpy().tobytes()
-    ).hexdigest() == "770595e33f62bb6e33b16b5d0f4c52ee2a3f2b23f9478e37cecafacc739f91da"
-    assert threshold == pytest.approx(1.4844163656234741)
+    ).hexdigest() == "9bd7ac53fec2166cd4c82accf3ed4bef1a60c3114d4f71ae2edcd95f408bdc2d"
+    assert threshold == pytest.approx(1.0803799629211426)
     assert retained_fraction == 0.25
     assert protocol["canonical_generation_device"] == "cpu"
     assert protocol["counter_initial_value"] == 0
     assert protocol["counter_bytes"] == 16
     assert protocol["word_offsets"] == [0, 8, 16, 24]
     assert protocol["uniform_mapping"] == "(mantissa+1)/(2^53+2)"
+    assert protocol["normal_index_bits"] == 20
+    assert protocol["normal_bitstream_order"] == (
+        "sha256_blocks_then_msb_first_bits"
+    )
+    assert protocol["normal_quantile_table_sha256"] == (
+        "70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a"
+    )
     assert uniform_vector.tolist() == pytest.approx(
         (
-            0.6363481879234314,
-            0.9151367545127869,
-            0.688735842704773,
-            0.9310290813446045,
+            0.15819059312343597,
+            0.2266322374343872,
+            0.11157729476690292,
+            0.9893344044685364,
         )
     )
     assert gaussian_vector.tolist() == pytest.approx(
         (
-            0.8609815239906311,
-            -2.1549675464630127,
-            -0.15070036053657532,
-            1.2798569202423096,
+            0.9188238978385925,
+            0.9646357297897339,
+            1.737541675567627,
+            0.24967548251152039,
         )
     )
     assert protocol["keyed_prg_protocol_digest"] == (
-        "5c5671c02383d5b364dbeaa03de6e6cdd8aac745099f588b367ca93f7b0df363"
+        "a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b"
     )
     assert tensor_content_sha256(uniform_vector) == (
-        "4cef7d7d81adee142e4bdc3e11f8411e21b07b28b273ded3fc8924833b826a89"
+        "226041062e606ceebc26f75cda2479c32e216890495a67ef5d1ad37f76f084e5"
     )
     assert tensor_content_sha256(gaussian_vector) == (
-        "16681e4720d512d10c2f01043f7b9929ae101ae780f8de49e9eda66577aedcad"
+        "2e0775d43b078333c58079eeb0b595bfd2a7491bc09ab430b5da69f323edd0dc"
     )
 
     first_candidates = generate_keyed_candidate_directions(
@@ -1320,15 +1330,16 @@ def test_keyed_templates_use_versioned_device_independent_prg() -> None:
         torch.zeros((4, 4), dtype=torch.float32),
         "known-key",
         "transformer_blocks.0.attn",
+        KEYED_PRG_VERSION,
     )
     assert torch.equal(first_candidates, second_candidates)
     assert torch.equal(relation_signs, relation_signs.transpose(0, 1))
     assert torch.count_nonzero(torch.diag(relation_signs)).item() == 0
     assert relation_signs.tolist() == [
-        [0.0, -1.0, 1.0, -1.0],
+        [0.0, -1.0, 1.0, 1.0],
         [-1.0, 0.0, 1.0, -1.0],
         [1.0, 1.0, 0.0, -1.0],
-        [-1.0, -1.0, -1.0, 0.0],
+        [1.0, -1.0, -1.0, 0.0],
     ]
 
     source = "\n".join(
@@ -1515,12 +1526,19 @@ def test_multihead_qk_relation_matches_independent_manual_calculation() -> None:
     identity = build_attention_relation_graph_identity(
         (("manual_multihead_layer", relation, token_indices),),
         "manual_multihead_key",
+        prg_version=KEYED_PRG_VERSION,
     )
     assert identity.qk_operator_metadata_ready is True
     assert len(identity.qk_operator_metadata_digest) == 64
     assert identity.qk_atomic_content_ready is True
     assert len(identity.qk_atomic_content_records) == 1
     assert len(identity.qk_atomic_content_digest) == 64
+    assert identity.component_identity_digest == (
+        "d15cf0e871ed39bdbbbeef46fb1051b558616dc913dbeaa76e59060c0d80d7c7"
+    )
+    assert identity.keyed_projection_digest == (
+        "250e524551ebf873870790c035165f441f71ff6c4fbe0fada8012507ef1487b4"
+    )
 
 
 @pytest.mark.quick
@@ -1715,11 +1733,13 @@ def test_stable_attention_tokens_drive_keyed_geometry_score() -> None:
     weighted = attention_geometry_score(
         records,
         "stable_token_key",
+        prg_version=KEYED_PRG_VERSION,
         stable_pair_weights=pair_weights,
     )
     full = attention_geometry_score(
         records,
         "stable_token_key",
+        prg_version=KEYED_PRG_VERSION,
         stable_token_positions=selection.token_positions,
         unstable_pair_weight=0.99,
     )
@@ -1743,6 +1763,7 @@ def test_each_attention_relation_component_changes_keyed_score() -> None:
         descriptor,
         "four_component_key",
         "four_component_layer",
+        KEYED_PRG_VERSION,
     )
     pair_weights = 1.0 - torch.eye(9)
     baseline_components = attention_relation_component_scores(
@@ -1857,6 +1878,7 @@ def test_differentiable_soft_rank_contributes_nonzero_logit_gradient() -> None:
         descriptor,
         "soft_rank_gradient_key",
         "soft_rank_gradient_layer",
+        KEYED_PRG_VERSION,
     )
     component_scores = attention_relation_component_scores(
         descriptor.values,
@@ -1881,6 +1903,7 @@ def test_distance_modulated_probability_is_distinct_and_differentiable() -> None
         descriptor,
         "distance_modulation_key",
         "distance_modulation_layer",
+        KEYED_PRG_VERSION,
     )
     component_scores = attention_relation_component_scores(
         descriptor.values,
@@ -2003,6 +2026,7 @@ def test_attention_update_uses_real_qk_and_autograd() -> None:
             module,
             recorder,
             "attention_key",
+            prg_version=KEYED_PRG_VERSION,
         )
         update = optimize_attention_geometry_update(
             latent=latent,
@@ -2016,6 +2040,7 @@ def test_attention_update_uses_real_qk_and_autograd() -> None:
             ),
             precomputed_gradient=original_gradient,
             precomputed_content_base_gradient=original_gradient,
+            prg_version=KEYED_PRG_VERSION,
         )
 
     assert original_gradient.evaluation_latent_content_sha256 == (
@@ -2058,6 +2083,7 @@ def test_attention_update_verifies_actual_combined_latent() -> None:
             module,
             recorder,
             "combined_attention_key",
+            prg_version=KEYED_PRG_VERSION,
         )
         _, content_base_latent, _ = compose_ordered_float32_update_once(
             original_latent=latent,
@@ -2069,6 +2095,7 @@ def test_attention_update_verifies_actual_combined_latent() -> None:
             module,
             recorder,
             "combined_attention_key",
+            prg_version=KEYED_PRG_VERSION,
             stable_token_selection=StableAttentionTokenSelection(
                 token_positions=original_gradient.stable_token_positions,
                 token_indices=original_gradient.stable_token_indices,
@@ -2090,6 +2117,7 @@ def test_attention_update_verifies_actual_combined_latent() -> None:
             ),
             precomputed_gradient=original_gradient,
             precomputed_content_base_gradient=content_base_gradient,
+            prg_version=KEYED_PRG_VERSION,
             base_update=content_base_update,
         )
         recorder.clear()
@@ -2106,6 +2134,7 @@ def test_attention_update_verifies_actual_combined_latent() -> None:
             attention_geometry_score(
                 recorder.records,
                 "combined_attention_key",
+                prg_version=KEYED_PRG_VERSION,
             ).detach().item()
         )
 
@@ -2142,6 +2171,7 @@ def test_attention_registration_is_equivariant_to_query_and_key_permutation(
         torch.zeros(1, token_count, token_count),
         key_material,
         layer_name,
+        KEYED_PRG_VERSION,
     )
     canonical_logits = (2.0 * relation_signs).unsqueeze(0)
     index = torch.tensor(permutation, dtype=torch.long)
@@ -2180,6 +2210,7 @@ def test_attention_registration_is_equivariant_to_query_and_key_permutation(
                     )
                 ),
         ),
+        prg_version=KEYED_PRG_VERSION,
     )
 
     assert transform_name
@@ -2209,6 +2240,7 @@ def test_image_only_detector_reextracts_qk_after_alignment(
         torch.zeros(1, token_count, token_count),
         key_material,
         layer_name,
+        KEYED_PRG_VERSION,
     )
     canonical_logits = (2.0 * relation_signs).unsqueeze(0)
     canonical_attention = _direct_qk_relation_from_logits(
@@ -2227,6 +2259,7 @@ def test_image_only_detector_reextracts_qk_after_alignment(
         torch.zeros(1, token_count, token_count),
         key_material,
         second_layer_name,
+        KEYED_PRG_VERSION,
     )
     second_canonical_logits = (2.0 * second_relation_signs).unsqueeze(0)
     second_canonical_attention = _direct_qk_relation_from_logits(
@@ -2416,6 +2449,7 @@ def test_image_attention_extractor_batches_flowmatch_timestep(monkeypatch: pytes
     relation_identity = build_attention_relation_graph_identity(
         records,
         "test_detection_key",
+        prg_version=KEYED_PRG_VERSION,
     )
     detection_record = {
         "metadata": {

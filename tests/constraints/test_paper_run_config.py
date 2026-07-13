@@ -232,7 +232,7 @@ def test_paper_run_levels_share_method_settings_except_protocol_scale(tmp_path: 
     ) == (1.5305, 0.0609, "float16", "float32")
     assert frozen_settings["public_detection_schedule_index"] == 7
     assert frozen_settings["public_detection_noise_prg_protocol"] == (
-        "sha256_counter_box_muller_float32_v1"
+        "sha256_counter_normal_icdf_table20_float32_v2"
     )
     assert frozen_settings["public_detection_noise_domain"] == (
         "public_image_only_qk_detection_noise_v1"

@@ -155,7 +155,35 @@ Notebook 与 repository module 的跨边界数据
 | tail_threshold | method | none | false | false | false | 高斯幅值尾部稳定排序入选集合中的最小绝对幅值, 不表示频率截止值。 |
 | retained_fraction | method | none | false | false | false | 高斯幅值尾部截断后实际保留的模板元素比例。 |
 | keyed_prg_version | protocol | none | true | false | false | 内容模板、Jacobian 候选方向和注意力关系符号共同使用的设备无关密钥 PRG 算法版本。 |
-| keyed_prg_protocol_digest | provenance | none | true | true | false | 不含密钥的 SHA-256 计数器流、均匀映射、高斯变换和规范生成设备协议摘要。 |
+| keyed_prg_protocol_digest | provenance | none | true | true | false | 不含密钥的 SHA-256 大端计数器流、53位 uniform 映射、Q20 中点逆 CDF 量化表和规范 CPU 生成协议摘要; 外层 MPFR 复验元数据不进入该摘要。 |
+| normal_index_bits | protocol | none | true | true | false | Gaussian 路径从连续 SHA-256 位流提取的单个分位数索引位宽。 |
+| normal_counter_block_bits | protocol | none | true | true | false | Gaussian 路径拼接的单个 SHA-256 计数器输出块位数。 |
+| normal_bitstream_order | protocol | none | true | true | false | Gaussian 路径连接计数器块并读取块内位的冻结顺序。 |
+| normal_index_rule | protocol | none | true | true | false | Gaussian 路径允许20位索引跨计数器块边界连续读取的规则。 |
+| normal_quantile_table_version | protocol | none | true | true | false | Q20 中点逆标准正态 CDF binary32 分位数表的算法版本。 |
+| normal_quantile_index_bits | protocol | none | true | true | false | 冻结 Q20 分位数表使用的索引位宽。 |
+| normal_quantile_count | protocol | none | true | true | false | 冻结 Q20 分位数表的完整表项数量。 |
+| normal_quantile_probability_rule | protocol | none | true | true | false | 把索引映射为中点概率 `(index+0.5)/1048576` 的冻结规则。 |
+| normal_quantile_value_rule | protocol | none | true | true | false | 对中点概率执行逆标准正态 CDF 并正确舍入到 binary32 的表值规则。 |
+| normal_quantile_symmetry_rule | protocol | none | true | true | false | 由正半轴表值精确设置 binary32 符号位重建负半轴的规则。 |
+| normal_quantile_maximum_cdf_cell_width | protocol | none | true | true | false | Q20 中点概率网格的最大 CDF 单元宽度。 |
+| normal_quantile_ideal_midpoint_ks_distance | protocol | none | true | true | false | 不计 binary32 舍入时 Q20 中点离散律相对连续标准正态的 KS 距离。 |
+| normal_quantile_float32_cdf_rounding_error_bound | protocol | none | true | true | false | binary32 正确舍入相对目标中点概率的冻结最大 CDF 误差上界。 |
+| normal_quantile_float32_ks_distance_bound | protocol | none | true | true | false | 理想中点离散误差与 binary32 CDF 舍入误差相加后的 KS 总上界。 |
+| normal_quantile_table_sha256 | provenance | none | true | false | false | Q20 标准正态分位数表全部1048576个 binary32 位模式按大端顺序连接后的 SHA-256。 |
+| normal_quantile_reference_verification_protocol | protocol | none | true | false | false | 外层工具对 Q20 正半轴分位数执行 MPFR 逐项舍入复验的冻结算法协议。 |
+| normal_quantile_reference_precision_bits | protocol | none | true | false | false | MPFR 参考复验使用的二进制精度位数。 |
+| normal_quantile_reference_newton_iterations | protocol | none | true | false | false | MPFR 参考复验对每个正半轴分位数执行的 Newton 迭代次数。 |
+| normal_quantile_reference_verified_positive_entry_count | metric | none | true | false | false | MPFR 参考复验实际检查的 Q20 正半轴表项数量。 |
+| normal_quantile_reference_mismatch_count | metric | none | true | false | false | MPFR 中点 CDF 未严格夹逼目标概率或 Newton 根未落入 binary32 舍入区间的 Q20 表项数量。 |
+| normal_quantile_reference_minimum_midpoint_probability_margin | metric | none | true | false | false | MPFR 复验中目标中点概率到相邻 binary32 舍入边界 CDF 的最小严格概率余量。 |
+| normal_quantile_reference_mpfr_rounding_mode | protocol | none | true | false | false | MPFR 参考复验冻结的舍入模式。 |
+| normal_quantile_reference_verification_digest | provenance | none | true | false | false | MPFR 参考协议、表身份、检查数量和失配数量组成的稳定摘要。 |
+| normal_quantile_reference_verification_ready | governance | none | true | false | false | MPFR 逐项舍入、CDF 误差上界和参考摘要是否同时通过; 该外层审计字段不支持论文效果主张。 |
+| normal_quantile_observed_maximum_float32_cdf_rounding_error | metric | none | true | false | false | MPFR 参考复验观察到的 Q20 binary32 表值相对目标中点概率的最大 CDF 误差。 |
+| normal_quantile_declared_float32_cdf_rounding_error_bound | protocol | none | true | false | false | Q20 表协议登记的最大 float32 CDF 舍入误差上界, 与理想中点 KS 距离相加得到总 KS 上界。 |
+| normal_quantile_reference_gmpy2_version | runtime | none | true | false | false | 生成外层 Q20 参考复验报告时实际使用的 gmpy2 版本。 |
+| normal_quantile_reference_mpfr_version | runtime | none | true | false | false | 生成外层 Q20 参考复验报告时实际使用的 MPFR 版本。 |
 | tail_fraction | method | none | false | false | false | 高斯幅值尾部截断的目标元素保留比例, 不定义空间频带。 |
 | embedding_strength | method | none | false | false | false | 水印嵌入强度。 |
 | anchor_id | method | none | false | false | false | 注意力几何锚点对象的稳定标识。 |
@@ -1740,7 +1768,7 @@ Notebook 与 repository module 的跨边界数据
 | lf_relative_strength | method | none | true | false | false | LF 更新相对当前 latent 范数的强度。 |
 | tail_relative_strength | method | none | true | false | false | 尾部截断载体相对当前 latent 范数的强度。 |
 | attention_relative_strength | method | none | true | false | false | 注意力几何更新相对当前 latent 范数的强度。 |
-| tail_fraction | method | none | true | false | false | 标准高斯模板保留的幅值尾部比例。 |
+| tail_fraction | method | none | true | false | false | Q20 中点逆 CDF 量化标准正态模板保留的幅值尾部比例。 |
 | source_id | provenance | none | true | false | false | 外部 Prompt 数据来源稳定标识。 |
 | source_url | provenance | none | true | false | false | 外部 Prompt 项目主页。 |
 | revision_url | provenance | none | false | false | false | 直接指向资源登记40位提交树的 Hugging Face URL。 |
@@ -2293,7 +2321,7 @@ Notebook 与 repository module 的跨边界数据
 | base_latent_generation | protocol | none | true | false | false | 正式随机化注册表声明的设备无关基础 latent 构造方式。 |
 | base_latent_dtype_cast | protocol | none | true | false | false | 规范基础 latent 在 CPU 完成目标 dtype 转换后才搬运到执行设备的冻结约定。 |
 | base_latent_generation_protocol | protocol | none | true | false | false | 单次运行实际使用的规范 float32 生成和目标 dtype 转换协议。 |
-| base_latent_keyed_prg_version | protocol | none | true | false | false | 基础 latent 使用的 SHA-256 计数器流与 Box-Muller 算法版本。 |
+| base_latent_keyed_prg_version | protocol | none | true | false | false | 基础 latent 使用的 SHA-256 大端计数器连续比特流与 Q20 中点逆 CDF 量化表算法版本。 |
 | base_latent_keyed_prg_protocol_digest | provenance | none | true | false | false | 基础 latent 所用设备无关 PRG 完整协议的稳定摘要。 |
 | base_latent_dtype | provenance | none | true | false | false | 进入生成管线的共享基础 latent 实际 Tensor dtype。 |
 | base_latent_shape | provenance | none | true | false | false | 进入生成管线的共享基础 latent 实际 Tensor 形状。 |

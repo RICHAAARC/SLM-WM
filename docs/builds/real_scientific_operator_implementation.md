@@ -5,15 +5,15 @@
 | 机制 | 正式实现 | 作用 |
 | --- | --- | --- |
 | 分支风险场 | `main/methods/semantic/branch_risk.py` | 分别构造 LF、尾部截断和注意力几何风险与承载预算 |
-| 密钥随机原语 | `main/core/keyed_prg.py` | 通过版本化 SHA-256 计数器流生成规范均匀数, 为内容模板和 Jacobian 候选方向派生 Box-Muller 高斯 Tensor, 并为注意力关系符号直接执行均匀阈值化 |
+| 密钥随机原语 | `main/core/keyed_prg.py`、`main/core/normal_quantile_table.py` | 通过版本化 SHA-256 大端计数器连续比特流和冻结 Q20 中点逆 CDF float32 表生成内容模板与 Jacobian 候选方向, 并通过独立53位开区间 uniform 路径生成注意力关系符号 |
 | Tensor 内容身份 | `main/core/digest.py` | 通过版本化 dtype、shape 与连续原始字节 SHA-256 绑定风险、基底、分支更新和 Q/K 原子 |
 | 真实 Jacobian Null Space | `main/methods/subspace/jacobian_nullspace.py` | 通过完整特征 JVP/VJP、显式风险算子和无阻尼 PSD-CG 求解 rank-4 latent Null Space |
 | 语义与手工结构统计 | `experiments/runtime/diffusion/semantic_features.py` | 以512维完整归一化 CLIP embedding 和204维 RGB 统计/梯度/8x8池化向量定义716维 Jacobian，并提供有限更新与最终成图复验 |
-| LF 与尾部载体 | `main/methods/carrier/keyed_tensor.py` | 通过版本化、设备无关的 SHA-256 计数器高斯 PRG 构造检测端可重建模板, 并在嵌入端投影到安全子空间 |
+| LF 与尾部载体 | `main/methods/carrier/keyed_tensor.py` | 通过版本化 SHA-256 大端计数器比特流和冻结 Q20 中点逆 CDF float32 表构造检测端可重建模板, 并在嵌入端投影到安全子空间 |
 | 真实注意力梯度 | `main/methods/geometry/differentiable_attention.py` | 从 Transformer `to_q`/`to_k` 得到真实 attention, 构造有身份摘要的稳定 token pair 权重并对 latent 求梯度 |
 | 几何恢复 | `main/methods/geometry/attention_alignment.py` | 使用同一 pair 权重联合规范拉回 $W A_{\mathrm{obs}} W^\top$、观测前推 $V S_K V^\top$、双向覆盖惩罚和攻击无关的分层局部搜索恢复图像参考系 |
 | 仅图像检测 | `main/methods/detection/image_only.py` | 只接收图像、密钥和公开模型配置, 传递注册前后的同一 pair 权重并完成内容主判与同阈值救回 |
-| 正式随机化 | `experiments/protocol/formal_randomization.py` | 冻结3生成 seed × 3水印密钥交叉重复, 以设备无关 SHA-256 Box-Muller 协议构造主方法与 baseline 共享的实际基础 latent Tensor |
+| 正式随机化 | `experiments/protocol/formal_randomization.py` | 冻结3生成 seed × 3水印密钥交叉重复, 以 `sha256_counter_normal_icdf_table20_float32_v2` 构造主方法与 baseline 共享的实际基础 latent Tensor |
 | 真实模型运行 | `experiments/runners/semantic_watermark_runtime.py` | 在 SD3.5 Medium 中执行完整方法与同种子 carrier-only 总机制效应反事实, 持久化无 attention 更新原子, 并以三边最终特征保持和真实 Q/K 双归因增益门禁验证 attention 可观测性 |
 | 共同攻击算子 | `experiments/runtime/diffusion/regeneration_attacks.py` | 为主方法与全部 baseline 统一执行 SD3.5 img2img、flow-matching 反向 Euler 积分、inpainting 和检测器引导搜索 |
 | 科学会话 | `experiments/runtime/semantic_watermark_scientific_session.py` | 在同一受验证主方法子解释器中调度主运行、质量评估、正式消融与绑定打包 |
@@ -29,7 +29,7 @@
 | 官方参考原子批次 | `paper_experiments/runners/official_reference_unit_runtime.py` | 以10-Prompt 批次运行登记官方算子, 保存逐 Prompt 观测并确定性重建官方指标 |
 | Colab 续跑 | `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb` | 在 Drive 持久化工作区分批运行主方法、质量评估与正式消融 |
 
-高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对标准高斯模板按元素绝对幅值稳定排序，精确保留 `ceil(element_count * tail_fraction)` 个元素，并以展平索引处理同幅值排序；该算子不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。内容模板与安全投影实现位于 `main/methods/carrier/keyed_tensor.py`。
+高斯幅值尾部截断分支的正式运行标识为 `tail_robust`。`build_tail_robust_template(...)` 对 Q20 中点逆 CDF 量化标准正态模板按元素绝对幅值稳定排序，精确保留 `ceil(element_count * tail_fraction)` 个元素，并以展平索引处理同幅值排序；该算子不执行 FFT、DCT、带通滤波或空间频带 mask, 因而不具有空间频带定义。内容模板与安全投影实现位于 `main/methods/carrier/keyed_tensor.py`。
 
 注意力分支风险必须接收由真实跨层 Q/K 关系计算的独立稳定度，核心接口不接受缺失值。正式层集合精确固定为 `transformer_blocks.0.attn` 与 `transformer_blocks.23.attn`, 运行时直接按名称解析公开 `to_q`、`to_k` 与 `heads` 协议。token 坐标采用 `normalized_xy_token_centers_corner_endpoints_v1`, 角点中心分别落在 -1 与 1；关系稳定图插值和图像仿射重采样统一使用 `align_corners=True`。最终图像 Q/K 提取在冻结检测日程上调用 scheduler 的 `scale_noise`；缺少该方法或方法不可调用时运行失败，当前协议不定义线性 latent/noise 混合作为替代算子。
 
@@ -64,7 +64,7 @@ detect_image_only_watermark(
 
 ## 四、固定模板与安全投影的盲检闭合
 
-全部密钥化随机原语由密钥、算子 domain、输出 shape 和 `keyed_prg_version=sha256_counter_box_muller_float32_v1` 确定。PRG 使用 SHA-256 大端计数器流和53位开区间均匀映射；内容模板与 Jacobian 候选方向继续执行 Box-Muller 高斯变换，注意力关系符号直接使用均匀数阈值。所有结果先物化为 CPU float32 规范 Tensor，CPU/CUDA 设备 RNG 均不参与方法身份。检测模板的 domain 额外绑定公开模型标识和分支。嵌入端求得安全基底 $B$ 后执行：
+全部密钥化随机原语由密钥、算子 domain、输出 shape 和 `keyed_prg_version=sha256_counter_normal_icdf_table20_float32_v2` 确定。Gaussian 路径把 SHA-256 大端计数器块连接为 MSB-first 比特流, 跨块连续提取20位索引并查询 $q_i=\operatorname{round}_{\mathrm{binary32}}(\Phi^{-1}((i+0.5)/2^{20}))$ 的冻结 Q20 表。完整表大端字节 SHA-256 为 `70abf440a7f3670147965ffa52f5aaa639dab97f6282b68f3a9a1b1ce5e6cf5a`。该输出是有限离散的量化标准正态而非连续精确的 $\mathcal N(0,1)$；理想中点 KS 距离为 $2^{-21}$, 含 float32 舍入的登记上界为 `4.912236096776823e-7`。独立53位开区间 uniform 路径只用于注意力关系符号。所有结果先在 CPU 物化为规范 float32, 目标 dtype 转换也在 CPU 完成, 随后才搬运到执行设备；CPU/CUDA 设备 RNG 均不参与方法身份。检测模板的 domain 额外绑定公开模型标识和分支。MPFR 逐项复验属于外层参考证据, 不进入 PRG 算法摘要；当前逐字节固定向量只在 Windows CPU 实测, Linux/Colab 复验由 GPU 运行前门禁完成。嵌入端求得安全基底 $B$ 后执行：
 
 $$
 \bar\nu=BB^\top\nu.

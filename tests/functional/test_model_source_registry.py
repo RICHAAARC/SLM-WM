@@ -68,7 +68,7 @@ def test_primary_model_config_matches_immutable_source_registry() -> None:
         method_config.injection_step_indices[0] + 1
     )
     assert method_config.public_detection_noise_prg_protocol == (
-        "sha256_counter_box_muller_float32_v1"
+        "sha256_counter_normal_icdf_table20_float32_v2"
     )
     assert method_config.public_detection_noise_domain == (
         "public_image_only_qk_detection_noise_v1"

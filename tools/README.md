@@ -16,3 +16,13 @@ python tools/harness/run_all_audits.py
 ```
 
 `tools/harness/inspect_repository.py` 可用于附加结构检查, 但不能替代完整审计。工具目录不得引入真实模型下载、GPU 推理或大规模实验依赖。
+
+`tools/harness/verify_normal_quantile_reference.py` 是非默认、CPU-only 的
+Q20 量化标准正态表参考复验器。它使用开发环境中的 `gmpy2`/MPFR 对
+全部524288个正半轴表项执行中点 CDF 严格夹逼和 Newton 根区间双重检查,
+并验证冻结 binary32 位模式位于正确舍入区间。
+报告只能写入 `outputs/audit_reports/`：
+
+```bash
+python tools/harness/verify_normal_quantile_reference.py
+```

@@ -676,6 +676,7 @@ def recover_attention_affine_alignment(
     layer_name: str,
     token_indices: tuple[int, ...],
     stable_pair_weights: StableAttentionPairWeights,
+    prg_version: str,
     anchor_count: int = 12,
     residual_threshold: float = 0.20,
     minimum_inlier_ratio: float = 0.50,
@@ -715,12 +716,14 @@ def recover_attention_affine_alignment(
         descriptor,
         key_material,
         layer_name,
+        prg_version,
         component_weights=resolved_component_weights,
     )
     relation_graph_identity = build_attention_relation_graph_identity(
         ((layer_name, attention, token_indices),),
         key_material,
-        resolved_component_weights,
+        prg_version=prg_version,
+        component_weights=resolved_component_weights,
     )
     coordinates = _grid_coordinates(token_indices, matrix.device)
     coarse = _evaluate_candidates(

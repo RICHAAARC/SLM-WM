@@ -14,28 +14,32 @@ from main.core.keyed_prg import (
 )
 
 
-FORMAL_RANDOMIZATION_PROTOCOL = "crossed_generation_seed_watermark_key_v1"
+FORMAL_RANDOMIZATION_PROTOCOL = "crossed_generation_seed_watermark_key_v2"
 FORMAL_GENERATION_SEED_OFFSETS = (0, 1_000_003, 2_000_003)
 FORMAL_WATERMARK_KEY_INDICES = (0, 1, 2)
 FORMAL_WATERMARK_KEY_PLAN_PROTOCOL = "fixed_three_key_commitment_v1"
+FORMAL_BASE_LATENT_GENERATION_PROTOCOL = (
+    "device_independent_sha256_normal_icdf_table20_"
+    "cpu_dtype_cast_then_device_transfer_v2"
+)
 FORMAL_WATERMARK_KEY_PLAN_DIGEST = (
-    "acf5607470bc70151531e0f8984cc01aeb997ddf3956b3f761a36261232a8af4"
+    "04317bbace506a90fcf289cc398216033e7805bf61f947a8872b9621fe2a8b2a"
 )
 FORMAL_WATERMARK_KEY_PLAN = (
     (
         0,
-        8_320_559_253_613_457_125,
-        "de8a8bf8384a484aaf26b99b60cca4f081a530a3f74c45408041bf6014e4b3eb",
+        6_942_440_944_665_458_254,
+        "e3939356c714fd2e05570549b1c13611f49207a206b29e7f4b4c3f91602d9006",
     ),
     (
         1,
-        6_420_407_684_636_015_685,
-        "602a8c14d16dc1d4115435424fda685cdfb5f4f72537026b6fc2371eb7fe7cba",
+        897_838_034_882_004_676,
+        "4a831610d9ab6ba8839ad34b8eb3a98bed5ec89aad9f6d36db12544583247235",
     ),
     (
         2,
-        3_553_778_732_585_930_283,
-        "7d54c23b2423909ea01da1a8c5db424a434fa984a191d0b152e497f473bdf948",
+        2_380_276_531_915_020_814,
+        "d49b2a3012084807d91c65326401aa889b1a225ef8e71207f09cbfe9391dcf9c",
     ),
 )
 DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID = "seed_00_key_00"
@@ -209,13 +213,17 @@ def formal_randomization_protocol_record() -> dict[str, Any]:
         "watermark_key_repeat_count": len(FORMAL_WATERMARK_KEY_INDICES),
         "crossed_repeat_count": len(repeat_records),
         "repeat_records": repeat_records,
-        "base_latent_distribution": "standard_normal",
-        "base_latent_generation": "device_independent_sha256_box_muller",
+        "base_latent_distribution": (
+            "midpoint_inverse_cdf_quantized_standard_normal_table20"
+        ),
+        "base_latent_generation": (
+            "device_independent_sha256_normal_icdf_table20"
+        ),
         "base_latent_dtype_cast": "cpu_before_device_transfer",
         "base_latent_keyed_prg_version": KEYED_PRG_VERSION,
-        "base_latent_keyed_prg_protocol_digest": keyed_prg_protocol_record()[
-            "keyed_prg_protocol_digest"
-        ],
+        "base_latent_keyed_prg_protocol_digest": keyed_prg_protocol_record(
+            KEYED_PRG_VERSION
+        )["keyed_prg_protocol_digest"],
         "formal_watermark_key_plan_protocol": key_plan[
             "formal_watermark_key_plan_protocol"
         ],
@@ -452,6 +460,7 @@ def build_canonical_sd35_base_latent(
             "model_revision": model_revision,
             "generation_seed_random": int(generation_seed_random),
         },
+        prg_version=str(protocol["base_latent_keyed_prg_version"]),
     )
     typed_canonical = canonical.to(device="cpu", dtype=dtype)
     latent = typed_canonical.to(device=device)
@@ -459,9 +468,12 @@ def build_canonical_sd35_base_latent(
     identity = {
         "generation_seed_random": int(generation_seed_random),
         "base_latent_generation_protocol": (
-            "device_independent_sha256_box_muller_cpu_dtype_cast_then_device_transfer_v1"
+            FORMAL_BASE_LATENT_GENERATION_PROTOCOL
         ),
         "base_latent_keyed_prg_version": KEYED_PRG_VERSION,
+        "base_latent_keyed_prg_protocol_digest": protocol[
+            "base_latent_keyed_prg_protocol_digest"
+        ],
         "formal_randomization_protocol_digest": protocol[
             "formal_randomization_protocol_digest"
         ],
@@ -496,6 +508,7 @@ def formal_random_trace_fields(identity: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID",
     "FORMAL_GENERATION_SEED_OFFSETS",
+    "FORMAL_BASE_LATENT_GENERATION_PROTOCOL",
     "FORMAL_RANDOMIZATION_PROTOCOL",
     "FORMAL_RANDOMIZATION_REPEAT_IDENTITY_FIELDS",
     "FORMAL_WATERMARK_KEY_INDICES",

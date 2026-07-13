@@ -52,7 +52,7 @@ def test_formal_randomization_registry_is_exact_three_by_three_cross() -> None:
     assert protocol["watermark_key_repeat_count"] == 3
     assert protocol["crossed_repeat_count"] == 9
     assert protocol["formal_randomization_protocol_digest"] == (
-        "7b7db91717c54923b46a1bc32d2a3756fef1831533b60fd337205ab276cd4abb"
+        "a5389d2e72e331d81a7e7d0f9614a3ce801fbf432476f18208b5e366a9b12a64"
     )
     assert formal_randomization_repeat_ids() == tuple(
         f"seed_{seed_index:02d}_key_{key_index:02d}"
@@ -174,11 +174,41 @@ def test_canonical_base_latent_is_byte_stable_and_seed_sensitive() -> None:
     assert not torch.equal(first, different)
     assert (
         first_identity["base_latent_content_digest_random"]
-        == "6dced2163ba3a204de2653e49121eb647fba3cf8c76afa7418b47a4d18a7117c"
+        == "dd5f5596d163e71d6938f0ea6b656d4e68189730c318db701070c4b07329d3d7"
     )
     assert (
         first_identity["base_latent_content_digest_random"]
         != different_identity["base_latent_content_digest_random"]
+    )
+
+
+def test_formal_sd35_shape_base_latent_has_frozen_cpu_golden_identity() -> None:
+    """正式 SD3.5 shape 的 CPU float16 字节身份必须完整冻结."""
+
+    torch = pytest.importorskip("torch")
+    latent, identity = build_canonical_sd35_base_latent(
+        shape=(1, 16, 64, 64),
+        generation_seed_random=1703,
+        model_id="stabilityai/stable-diffusion-3.5-medium",
+        model_revision="b940f670f0eda2d07fbb75229e779da1ad11eb80",
+        device="cpu",
+        dtype=torch.float16,
+    )
+
+    assert latent.shape == (1, 16, 64, 64)
+    assert latent.dtype == torch.float16
+    assert identity["base_latent_generation_protocol"] == (
+        "device_independent_sha256_normal_icdf_table20_"
+        "cpu_dtype_cast_then_device_transfer_v2"
+    )
+    assert identity["base_latent_keyed_prg_protocol_digest"] == (
+        "a6266dc1fb4a59f8038062dcd120f145582153138b8176baae12013d5a22687b"
+    )
+    assert identity["base_latent_content_digest_random"] == (
+        "389678342d98601962a78b3fd03d576a7462ab294b1a6faf9d49e3d71cd1fdb1"
+    )
+    assert identity["base_latent_identity_digest_random"] == (
+        "3f246e7ff53f50bba08bd93c2677bddbf2fd511ec35067a28453901adb321116"
     )
 
 
