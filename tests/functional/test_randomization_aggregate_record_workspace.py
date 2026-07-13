@@ -427,15 +427,15 @@ def test_workspace_revalidates_and_inspects_every_leaf_before_exposing_records(
         assert len(workspace.threshold_binding_sources) == 45
         assert len(workspace.prompt_runtime_sources) == 9
         assert len(workspace.prompt_source_sources) == 27
-        assert len(workspace.ablation_sources) == 18
+        assert len(workspace.ablation_sources) == 27
         assert len(workspace.quality_sources) == 27
         assert len(workspace.quality_feature_sources) == 9
         assert len(workspace.reference_sources) == 3
-        assert len(workspace.record_sources) == 219
+        assert len(workspace.record_sources) == 237
         assert sum(
             source.record_group == "run_manifest"
             for source in workspace.record_sources
-        ) == 45
+        ) == 54
         first_prompt_source = workspace.prompt_source_sources[0]
         assert workspace.read_bytes(first_prompt_source)
         assert all(
@@ -479,6 +479,18 @@ def test_workspace_revalidates_and_inspects_every_leaf_before_exposing_records(
         )
         protocol = workspace.read_object(protocol_source)
         assert protocol["record"]["randomization_repeat_id"] == repeat_id
+        ablation_runtime_source = workspace.find_source(
+            randomization_repeat_id=repeat_id,
+            package_family="runtime_rerun_ablation",
+            record_role="ablation_runtime_record",
+        )
+        assert tuple(workspace.iter_records(ablation_runtime_source))
+        ablation_manifest_source = workspace.find_source(
+            randomization_repeat_id=repeat_id,
+            package_family="runtime_rerun_ablation",
+            record_role="ablation_run_manifest",
+        )
+        assert workspace.read_object(ablation_manifest_source)
         quality_pairs = tuple(
             workspace.iter_quality_feature_pairs(repeat_id)
         )

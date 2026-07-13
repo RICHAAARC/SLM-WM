@@ -306,6 +306,16 @@ _ACTIVE_RECORD_MEMBER_SPECS = (
     _RecordMemberSpec(
         package_family="runtime_rerun_ablation",
         record_group=RECORD_GROUP_ABLATION,
+        record_role="ablation_runtime_record",
+        member_template=(
+            "outputs/formal_mechanism_ablation/{paper_run}/"
+            "runtime_rerun_records.jsonl"
+        ),
+        record_format=RECORD_FORMAT_JSONL,
+    ),
+    _RecordMemberSpec(
+        package_family="runtime_rerun_ablation",
+        record_group=RECORD_GROUP_ABLATION,
         record_role="ablation_detection_record",
         member_template=(
             "outputs/formal_mechanism_ablation/{paper_run}/"
@@ -320,6 +330,16 @@ _ACTIVE_RECORD_MEMBER_SPECS = (
         member_template=(
             "outputs/formal_mechanism_ablation/{paper_run}/"
             "per_ablation_frozen_protocols.json"
+        ),
+        record_format=RECORD_FORMAT_JSON_OBJECT,
+    ),
+    _RecordMemberSpec(
+        package_family="runtime_rerun_ablation",
+        record_group=RECORD_GROUP_RUN_MANIFEST,
+        record_role="ablation_run_manifest",
+        member_template=(
+            "outputs/formal_mechanism_ablation/{paper_run}/"
+            "manifest.local.json"
         ),
         record_format=RECORD_FORMAT_JSON_OBJECT,
     ),

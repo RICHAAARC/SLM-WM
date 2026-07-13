@@ -10,9 +10,13 @@ from experiments.ablations.necessity_statistics import (
     _cluster_bootstrap_interval,
     _shared_cluster_bootstrap_intervals,
     build_ablation_necessity_statistics,
+    build_randomization_aggregate_ablation_necessity_statistics,
 )
 from experiments.ablations.runtime_rerun import (
     FORMAL_RUNTIME_RERUN_ABLATION_IDS,
+)
+from experiments.protocol.formal_randomization import (
+    formal_randomization_repeat_ids,
 )
 
 
@@ -79,6 +83,53 @@ def _records() -> list[dict]:
                     ),
                 }
             )
+    return rows
+
+
+def _aggregate_records(
+    effect_by_repeat_and_prompt: tuple[tuple[float, ...], ...],
+) -> list[dict]:
+    """把给定的逐 repeat、逐 Prompt 配对效应展开为完整正式记录。"""
+
+    repeat_ids = formal_randomization_repeat_ids()
+    assert len(effect_by_repeat_and_prompt) == len(repeat_ids)
+    prompt_count = len(effect_by_repeat_and_prompt[0])
+    assert prompt_count > 0
+    assert all(
+        len(prompt_effects) == prompt_count
+        for prompt_effects in effect_by_repeat_and_prompt
+    )
+    rows: list[dict] = []
+    for repeat_index, repeat_id in enumerate(repeat_ids):
+        for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS:
+            for prompt_index in range(prompt_count):
+                effect = effect_by_repeat_and_prompt[repeat_index][prompt_index]
+                if effect not in (-1.0, 0.0, 1.0):
+                    raise AssertionError("测试夹具只接受 -1、0 或1的单元效应")
+                complete = ablation_id == "complete_method"
+                if effect > 0.0:
+                    attacked_positive_rate = 1.0 if complete else 0.0
+                    positive_source_positive = complete
+                elif effect < 0.0:
+                    attacked_positive_rate = 0.0 if complete else 1.0
+                    positive_source_positive = not complete
+                else:
+                    attacked_positive_rate = 0.5
+                    positive_source_positive = True
+                rows.append(
+                    {
+                        "randomization_repeat_id": repeat_id,
+                        "ablation_id": ablation_id,
+                        "prompt_index": prompt_index,
+                        "prompt_id": f"prompt_{prompt_index:03d}",
+                        "prompt_digest": f"{prompt_index + 1:064x}",
+                        "split": "test",
+                        "formal_attack_coverage_ready": True,
+                        "attacked_positive_rate": attacked_positive_rate,
+                        "positive_source_positive": positive_source_positive,
+                        "paired_ssim": 0.95,
+                    }
+                )
     return rows
 
 
@@ -166,5 +217,139 @@ def test_paired_statistics_reject_string_boolean_outcome() -> None:
             records,
             expected_ablation_ids=VARIANT_IDS,
             expected_paired_prompt_count=40,
+            bootstrap_resample_count=100,
+        )
+
+
+@pytest.mark.quick
+def test_aggregate_statistics_average_repeats_before_prompt_inference() -> None:
+    """全部9重复必须先在各 Prompt 内求均值, 不能挑选表现最好重复。"""
+
+    effects = (
+        *((1.0, 1.0),),
+        *(((-1.0, -1.0),) * 8),
+    )
+    rows, summary = (
+        build_randomization_aggregate_ablation_necessity_statistics(
+            _aggregate_records(effects),
+            expected_ablation_ids=VARIANT_IDS,
+            expected_paired_prompt_count=2,
+            bootstrap_resample_count=100,
+        )
+    )
+
+    assert len(rows) == len(VARIANT_IDS)
+    assert rows[0]["mean_paired_effect"] == pytest.approx(-7.0 / 9.0)
+    assert rows[0]["paired_prompt_count"] == 2
+    assert rows[0]["necessity_component_decision"] == "measured_not_supported"
+    assert rows[0]["supports_paper_claim"] is False
+    assert summary["randomization_repeat_count"] == 9
+    assert summary["paired_prompt_count"] == 2
+    assert summary["paired_observation_count"] == 18
+    assert summary["randomization_aggregate_statistics_ready"] is True
+    assert summary["supports_paper_claim"] is False
+
+
+@pytest.mark.quick
+def test_aggregate_statistics_do_not_treat_repeat_cells_as_independent() -> None:
+    """Prompt 数而非9倍单元数必须控制区间、检验和顺序不变性。"""
+
+    effects = tuple((1.0, -1.0) for _ in formal_randomization_repeat_ids())
+    records = _aggregate_records(effects)
+    first_rows, first_summary = (
+        build_randomization_aggregate_ablation_necessity_statistics(
+            records,
+            expected_ablation_ids=VARIANT_IDS,
+            expected_paired_prompt_count=2,
+            bootstrap_resample_count=500,
+        )
+    )
+    second_rows, second_summary = (
+        build_randomization_aggregate_ablation_necessity_statistics(
+            reversed(records),
+            expected_ablation_ids=VARIANT_IDS,
+            expected_paired_prompt_count=2,
+            bootstrap_resample_count=500,
+        )
+    )
+
+    assert first_rows == second_rows
+    assert first_summary == second_summary
+    assert first_rows[0]["mean_paired_effect"] == 0.0
+    assert first_rows[0]["mean_paired_effect_ci_low"] == -1.0
+    assert first_rows[0]["mean_paired_effect_ci_high"] == 1.0
+    assert first_rows[0]["one_sided_paired_p_value"] == 1.0
+    assert first_rows[0]["paired_prompt_count"] == 2
+
+
+@pytest.mark.quick
+def test_aggregate_statistics_require_every_registered_repeat_and_cell() -> None:
+    """只给最佳重复或用另一重复的副本补足总行数都必须拒绝。"""
+
+    effects = tuple((1.0, 1.0) for _ in formal_randomization_repeat_ids())
+    records = _aggregate_records(effects)
+    first_repeat = formal_randomization_repeat_ids()[0]
+    selected = [
+        record
+        for record in records
+        if record["randomization_repeat_id"] == first_repeat
+    ]
+    with pytest.raises(AblationNecessityStatisticsError, match="9个随机重复"):
+        build_randomization_aggregate_ablation_necessity_statistics(
+            selected,
+            expected_ablation_ids=VARIANT_IDS,
+            expected_paired_prompt_count=2,
+            bootstrap_resample_count=100,
+        )
+
+    missing_index = next(
+        index
+        for index, record in enumerate(records)
+        if record["randomization_repeat_id"] == first_repeat
+        and record["ablation_id"] == VARIANT_IDS[0]
+        and record["prompt_id"] == "prompt_000"
+    )
+    duplicated_index = next(
+        index
+        for index, record in enumerate(records)
+        if record["randomization_repeat_id"]
+        == formal_randomization_repeat_ids()[1]
+        and record["ablation_id"] == VARIANT_IDS[0]
+        and record["prompt_id"] == "prompt_000"
+    )
+    same_total_count = list(records)
+    same_total_count[missing_index] = dict(records[duplicated_index])
+    with pytest.raises(
+        AblationNecessityStatisticsError,
+        match="重复 Prompt|同一非空 test Prompt",
+    ):
+        build_randomization_aggregate_ablation_necessity_statistics(
+            same_total_count,
+            expected_ablation_ids=VARIANT_IDS,
+            expected_paired_prompt_count=2,
+            bootstrap_resample_count=100,
+        )
+
+
+@pytest.mark.quick
+def test_aggregate_statistics_reject_prompt_identity_drift() -> None:
+    """同一 Prompt 在任一重复中的索引或摘要漂移都不得进入聚合。"""
+
+    effects = tuple((1.0, 1.0) for _ in formal_randomization_repeat_ids())
+    records = _aggregate_records(effects)
+    target = next(
+        record
+        for record in records
+        if record["randomization_repeat_id"]
+        == formal_randomization_repeat_ids()[-1]
+        and record["prompt_id"] == "prompt_000"
+    )
+    target["prompt_digest"] = "f" * 64
+
+    with pytest.raises(AblationNecessityStatisticsError, match="Prompt 身份"):
+        build_randomization_aggregate_ablation_necessity_statistics(
+            records,
+            expected_ablation_ids=VARIANT_IDS,
+            expected_paired_prompt_count=2,
             bootstrap_resample_count=100,
         )
