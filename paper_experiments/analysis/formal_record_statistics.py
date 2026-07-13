@@ -8,11 +8,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from functools import lru_cache
 import math
 import os
 from typing import Any, Iterable, Mapping
 
 import numpy as np
+import torch
 
 from experiments.ablations.necessity_statistics import (
     ABLATION_NECESSITY_BOOTSTRAP_RESAMPLE_COUNT,
@@ -29,6 +31,11 @@ from experiments.protocol.attacks import (
     formal_attack_seed_protocol_record,
     formal_attack_seed_random,
 )
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WATERMARK_KEY_ROLE,
+    REGISTERED_WRONG_KEY_ROLE,
+    build_detection_key_plan_record,
+)
 from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_ATTACK_NAME,
     FORMAL_DATASET_QUALITY_IMAGE_PAIR_ROLE,
@@ -41,6 +48,15 @@ from experiments.protocol.dataset_quality import (
 from experiments.protocol.method_runtime_config import (
     FORMAL_METHOD_PACKAGE_ROOT,
     load_formal_method_runtime_config,
+)
+from experiments.protocol.formal_randomization import (
+    build_canonical_sd35_base_latent,
+    formal_generation_seed,
+    formal_randomization_sample_reference,
+    formal_runtime_randomization_plan_record,
+    formal_watermark_key_material_from_seed,
+    resolve_formal_randomization_repeat,
+    validate_formal_prompt_randomization_identity,
 )
 from experiments.runners.image_only_dataset_runtime import (
     FrozenEvidenceProtocol,
@@ -56,6 +72,10 @@ from experiments.runners.semantic_watermark_runtime import (
 from experiments.runtime.scientific_unit_provenance import (
     SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS,
     aggregate_scientific_unit_provenance,
+)
+from experiments.runtime.scientific_content_binding import (
+    SCIENTIFIC_CONTENT_BINDING_SCHEMA,
+    recompute_scientific_content_binding_digest,
 )
 from main.core.digest import build_stable_digest
 from main.methods.carrier import tail_robust_carrier_protocol_record
@@ -115,10 +135,137 @@ _FORMAL_DETECTION_DERIVED_FIELDS = (
     "formal_metric_status",
     "supports_paper_claim",
 )
+_FORMAL_RANDOMIZATION_REFERENCE_FIELDS = (
+    "randomization_repeat_id",
+    "generation_seed_index",
+    "generation_seed_offset",
+    "generation_seed_random",
+    "watermark_key_index",
+    "watermark_key_seed_random",
+    "watermark_key_material_digest_random",
+    "formal_randomization_protocol_digest",
+    "formal_randomization_identity_digest_random",
+    "base_latent_content_digest_random",
+    "base_latent_identity_digest_random",
+)
 
 
 class FormalRecordStatisticsError(ValueError):
     """表示原始正式记录无法唯一重建或与派生证据不一致."""
+
+
+@lru_cache(maxsize=None)
+def _canonical_base_latent_identity(
+    shape: tuple[int, ...],
+    generation_seed_random: int,
+    model_id: str,
+    model_revision: str,
+    dtype_name: str,
+) -> dict[str, Any]:
+    """在 CPU 上重建正式基础 latent 身份并按公开随机身份缓存."""
+
+    torch_dtype = getattr(torch, dtype_name.removeprefix("torch."), None)
+    if not isinstance(torch_dtype, torch.dtype):
+        raise FormalRecordStatisticsError("正式 base latent dtype 无法由 PyTorch 解析")
+    _, identity = build_canonical_sd35_base_latent(
+        shape=shape,
+        generation_seed_random=generation_seed_random,
+        model_id=model_id,
+        model_revision=model_revision,
+        device="cpu",
+        dtype=torch_dtype,
+    )
+    return dict(identity)
+
+
+def _validated_ablation_randomization_context(
+    formal_randomization_plan: Mapping[str, Any],
+    randomization_repeat_identity: Mapping[str, Any],
+) -> tuple[dict[str, Any], Any]:
+    """从冻结方法配置独立验证顶层随机化计划和当前 repeat."""
+
+    expected_plan = formal_runtime_randomization_plan_record(
+        _FORMAL_METHOD_CONFIG.seed,
+        base_latent_dtype=f"torch.{_FORMAL_METHOD_CONFIG.latent_torch_dtype}",
+        base_latent_shape=(
+            1,
+            16,
+            _FORMAL_METHOD_CONFIG.height // 8,
+            _FORMAL_METHOD_CONFIG.width // 8,
+        ),
+    )
+    if dict(formal_randomization_plan) != expected_plan:
+        raise FormalRecordStatisticsError("消融顶层随机化计划未匹配冻结方法配置")
+    repeat_id = str(randomization_repeat_identity.get("randomization_repeat_id", ""))
+    try:
+        repeat = resolve_formal_randomization_repeat(repeat_id)
+    except (TypeError, ValueError) as exc:
+        raise FormalRecordStatisticsError("消融活动 repeat 未登记") from exc
+    expected_repeat_identity = {
+        **repeat.to_dict(),
+        "formal_randomization_protocol_digest": expected_plan[
+            "formal_randomization_protocol_digest"
+        ],
+    }
+    if dict(randomization_repeat_identity) != expected_repeat_identity:
+        raise FormalRecordStatisticsError("消融活动 repeat 身份未匹配冻结注册表")
+    return expected_plan, repeat
+
+
+def _canonical_ablation_randomization_reference(
+    *,
+    prompt_index: int,
+    formal_randomization_plan: Mapping[str, Any],
+    repeat: Any,
+) -> dict[str, Any]:
+    """由顶层计划、规范 Prompt 索引和冻结模型重建样本随机引用."""
+
+    generation_seed_random = formal_generation_seed(
+        int(formal_randomization_plan["base_generation_seed_random"]),
+        prompt_index,
+        repeat,
+    )
+    key_record = next(
+        (
+            dict(record)
+            for record in formal_randomization_plan["watermark_key_records"]
+            if record.get("watermark_key_index") == repeat.watermark_key_index
+        ),
+        None,
+    )
+    if key_record is None:
+        raise FormalRecordStatisticsError("顶层随机化计划缺少当前 repeat 的密钥记录")
+    key_material = formal_watermark_key_material_from_seed(
+        int(key_record["watermark_key_seed_random"]),
+        repeat,
+    )
+    identity = validate_formal_prompt_randomization_identity(
+        base_generation_seed_random=int(
+            formal_randomization_plan["base_generation_seed_random"]
+        ),
+        prompt_index=prompt_index,
+        randomization_repeat_id=repeat.randomization_repeat_id,
+        generation_seed_index=repeat.generation_seed_index,
+        generation_seed_offset=repeat.generation_seed_offset,
+        watermark_key_index=repeat.watermark_key_index,
+        generation_seed_random=generation_seed_random,
+        watermark_key_seed_random=int(key_record["watermark_key_seed_random"]),
+        key_material=key_material,
+        formal_randomization_protocol_digest=str(
+            formal_randomization_plan["formal_randomization_protocol_digest"]
+        ),
+    )
+    base_latent_identity = _canonical_base_latent_identity(
+        tuple(int(value) for value in formal_randomization_plan["base_latent_shape"]),
+        generation_seed_random,
+        _FORMAL_METHOD_CONFIG.model_id,
+        _FORMAL_METHOD_CONFIG.model_revision,
+        str(formal_randomization_plan["base_latent_dtype"]),
+    )
+    return formal_randomization_sample_reference(
+        identity,
+        base_latent_identity=base_latent_identity,
+    )
 
 
 def _strict_bool(value: Any) -> bool:
@@ -417,6 +564,7 @@ def _formal_attack_coverage_ready(
     detections: tuple[dict[str, Any], ...],
     *,
     split: str,
+    expected_generation_seed_random: int | None = None,
 ) -> bool:
     """独立核验 test split 的完整攻击笛卡尔积及其冻结配置身份."""
 
@@ -452,7 +600,7 @@ def _formal_attack_coverage_ready(
         for record in actual_by_key[key]:
             try:
                 expected_attack_seed = formal_attack_seed_random(
-                    record.get("generation_seed_random"),
+                    expected_generation_seed_random,
                     config.attack_id,
                 )
             except (TypeError, ValueError):
@@ -466,6 +614,8 @@ def _formal_attack_coverage_ready(
                 and record.get("attack_parameters")
                 == config.attack_parameters
                 and record.get("attack_performed") is True
+                and record.get("generation_seed_random")
+                == expected_generation_seed_random
                 and record.get("attack_seed_random")
                 == expected_attack_seed
                 and record.get("formal_attack_seed_protocol_digest")
@@ -507,6 +657,105 @@ def _revalidated_detection_records(
     return tuple(rebuilt_records)
 
 
+def _raw_detection_record_content_digest(
+    detection: Mapping[str, Any],
+) -> str:
+    """移除论文派生字段后重建科学运行产生的原始检测记录摘要."""
+
+    raw_record = {
+        key: value
+        for key, value in detection.items()
+        if key
+        not in {
+            "ablation_id",
+            "ablation_prompt_id",
+            *_FORMAL_DETECTION_DERIVED_FIELDS,
+        }
+    }
+    return build_stable_digest(raw_record)
+
+
+def _validate_formal_detections_against_scientific_binding(
+    detections: tuple[dict[str, Any], ...],
+    runtime_result: Mapping[str, Any],
+    protocol: FrozenEvidenceProtocol,
+    *,
+    expected_detection_key_plan_digest_random: str,
+) -> None:
+    """把论文检测原子绑定到同一次科学运行的角色、密钥和图像身份."""
+
+    metadata = runtime_result.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise FormalRecordStatisticsError("科学运行缺少检测内容绑定 metadata")
+    binding_value = metadata.get("scientific_content_binding_record")
+    if not isinstance(binding_value, Mapping):
+        raise FormalRecordStatisticsError("科学运行缺少检测内容绑定记录")
+    binding = dict(binding_value)
+    supplied_digest = metadata.get("scientific_content_binding_digest")
+    identities = binding.get("detection_content_identities")
+    if (
+        metadata.get("scientific_content_binding_schema")
+        != SCIENTIFIC_CONTENT_BINDING_SCHEMA
+        or binding.get("scientific_content_binding_schema")
+        != SCIENTIFIC_CONTENT_BINDING_SCHEMA
+        or binding.get("scientific_content_binding_digest") != supplied_digest
+        or recompute_scientific_content_binding_digest(binding)
+        != supplied_digest
+        or binding.get("run_id") != runtime_result.get("run_id")
+        or binding.get("image_only_detector_config_digest")
+        != protocol.image_only_detector_config_digest
+        or binding.get("detection_key_plan_digest_random")
+        != expected_detection_key_plan_digest_random
+        or not isinstance(identities, list)
+        or len(identities) != len(detections)
+    ):
+        raise FormalRecordStatisticsError("科学运行的检测内容绑定身份无效")
+
+    actual_by_digest: dict[str, dict[str, Any]] = {}
+    for detection in detections:
+        digest = _raw_detection_record_content_digest(detection)
+        if digest in actual_by_digest:
+            raise FormalRecordStatisticsError("论文检测原子包含重复的科学内容身份")
+        actual_by_digest[digest] = detection
+
+    expected_digests: set[str] = set()
+    for expected_index, identity_value in enumerate(identities):
+        if not isinstance(identity_value, Mapping):
+            raise FormalRecordStatisticsError("科学检测内容身份不是对象")
+        identity = dict(identity_value)
+        digest = identity.get("detection_record_content_digest")
+        key_identity = identity.get("detection_key_identity")
+        if (
+            not _is_sha256(digest)
+            or digest in expected_digests
+            or identity.get("detection_index") != expected_index
+            or not isinstance(key_identity, Mapping)
+            or key_identity.get("detection_key_plan_digest_random")
+            != expected_detection_key_plan_digest_random
+        ):
+            raise FormalRecordStatisticsError("科学检测内容身份的索引、摘要或密钥计划无效")
+        actual = actual_by_digest.get(str(digest))
+        if actual is None:
+            raise FormalRecordStatisticsError("论文检测原子未匹配科学运行原始记录")
+        sample_role = str(actual.get("sample_role", ""))
+        attack_id = str(actual.get("attack_id", "none"))
+        attack_present = attack_id not in {"", "none"}
+        expected_key_role = (
+            REGISTERED_WRONG_KEY_ROLE
+            if sample_role == "wrong_key_negative" and not attack_present
+            else REGISTERED_WATERMARK_KEY_ROLE
+        )
+        if (
+            identity.get("sample_role") != sample_role
+            or str(identity.get("attack_id", "none")) != attack_id
+            or key_identity.get("detection_key_role") != expected_key_role
+        ):
+            raise FormalRecordStatisticsError("检测样本角色、攻击或密钥角色未匹配科学运行")
+        expected_digests.add(str(digest))
+    if expected_digests != set(actual_by_digest):
+        raise FormalRecordStatisticsError("论文检测原子与科学运行内容集合不一致")
+
+
 def rebuild_and_validate_ablation_runtime_aggregates(
     runtime_records: Iterable[Mapping[str, Any]],
     formal_detection_records: Iterable[Mapping[str, Any]],
@@ -516,15 +765,18 @@ def rebuild_and_validate_ablation_runtime_aggregates(
     expected_ablation_ids: Iterable[str],
     expected_prompt_split_by_id: Mapping[str, str],
     expected_prompt_digest_by_id: Mapping[str, str],
+    expected_prompt_index_by_id: Mapping[str, int],
     expected_runtime_config_by_ablation_id: Mapping[str, Mapping[str, Any]],
     expected_runtime_output_root: str,
     expected_target_fpr: float,
+    formal_randomization_plan: Mapping[str, Any],
+    randomization_repeat_identity: Mapping[str, Any],
 ) -> dict[str, Any]:
     """从检测原子和冻结协议独立重建逐 Prompt 消融聚合字段.
 
     该函数不信任 ``runtime_rerun_records`` 中的检测率、布尔判定、攻击覆盖或
     阈值身份。它先重新应用冻结判定协议, 再按 ``ablation_id/prompt_id`` 聚合
-    原子检测记录, 并把每个 Prompt 的 split 绑定到调用方提供的规范映射。
+    原子检测记录, 并把每个 Prompt 的 split、索引和随机身份绑定到规范来源.
     """
 
     declared_ablation_ids = tuple(str(value) for value in expected_ablation_ids)
@@ -535,6 +787,10 @@ def rebuild_and_validate_ablation_runtime_aggregates(
     expected_prompt_digests = {
         str(prompt_id): str(digest)
         for prompt_id, digest in expected_prompt_digest_by_id.items()
+    }
+    expected_prompt_indices = {
+        str(prompt_id): _nonnegative_int(prompt_index, "expected_prompt_index")
+        for prompt_id, prompt_index in expected_prompt_index_by_id.items()
     }
     expected_runtime_configs = {
         str(ablation_id): dict(config)
@@ -549,6 +805,9 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         or len(expected_prompt_map) != len(expected_prompt_split_by_id)
         or any(not prompt_id for prompt_id in expected_prompt_map)
         or set(expected_prompt_digests) != set(expected_prompt_map)
+        or set(expected_prompt_indices) != set(expected_prompt_map)
+        or set(expected_prompt_indices.values())
+        != set(range(len(expected_prompt_indices)))
         or any(not _is_sha256(digest) for digest in expected_prompt_digests.values())
         or any(
             split not in {"dev", "calibration", "test"}
@@ -562,6 +821,27 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         or not runtime_output_root
     ):
         raise FormalRecordStatisticsError("正式消融身份或规范 Prompt split 映射无效")
+    try:
+        validated_randomization_plan, active_repeat = (
+            _validated_ablation_randomization_context(
+                formal_randomization_plan,
+                randomization_repeat_identity,
+            )
+        )
+        canonical_randomization_reference_by_prompt_id = {
+            prompt_id: _canonical_ablation_randomization_reference(
+                prompt_index=expected_prompt_indices[prompt_id],
+                formal_randomization_plan=validated_randomization_plan,
+                repeat=active_repeat,
+            )
+            for prompt_id in expected_prompt_map
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        if isinstance(exc, FormalRecordStatisticsError):
+            raise
+        raise FormalRecordStatisticsError(
+            "正式消融随机身份无法由顶层计划独立重建"
+        ) from exc
     if set(frozen_protocols) != set(declared_ablation_ids):
         raise FormalRecordStatisticsError("冻结检测协议未精确覆盖正式消融身份")
     protocols = {
@@ -577,7 +857,6 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         dict(record) for record in formal_detection_records
     )
     runtime_by_key: dict[tuple[str, str], dict[str, Any]] = {}
-    prompt_index_by_id: dict[str, int] = {}
     for record in materialized_runtime:
         ablation_id = str(record.get("ablation_id", ""))
         prompt_id = str(record.get("prompt_id", ""))
@@ -590,18 +869,15 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         ):
             raise FormalRecordStatisticsError("逐 Prompt 消融记录身份、split 或唯一性无效")
         prompt_index = _nonnegative_int(record.get("prompt_index"), "prompt_index")
-        previous_index = prompt_index_by_id.setdefault(prompt_id, prompt_index)
-        if previous_index != prompt_index:
-            raise FormalRecordStatisticsError("同一 Prompt 在不同消融中使用了不同索引")
+        if prompt_index != expected_prompt_indices[prompt_id]:
+            raise FormalRecordStatisticsError("逐 Prompt 消融记录索引未匹配规范 Prompt 文件")
         runtime_by_key[key] = record
     expected_keys = {
         (ablation_id, prompt_id)
         for ablation_id in declared_ablation_ids
         for prompt_id in expected_prompt_map
     }
-    if set(runtime_by_key) != expected_keys or len(set(prompt_index_by_id.values())) != len(
-        prompt_index_by_id
-    ):
+    if set(runtime_by_key) != expected_keys:
         raise FormalRecordStatisticsError("逐 Prompt 消融记录未精确覆盖规范笛卡尔积")
     materialized_unit_identities = tuple(
         dict(record) for record in scientific_unit_identity_records
@@ -679,6 +955,9 @@ def rebuild_and_validate_ablation_runtime_aggregates(
             if isinstance(runtime_result, Mapping)
             else None
         )
+        expected_randomization_reference = (
+            canonical_randomization_reference_by_prompt_id[prompt_id]
+        )
         run_id = str(runtime_result.get("run_id", "")) if isinstance(
             runtime_result,
             Mapping,
@@ -692,6 +971,7 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         if (
             not isinstance(runtime_result, Mapping)
             or not isinstance(runtime_config, Mapping)
+            or not isinstance(runtime_metadata, Mapping)
             or not isinstance(
                 scientific_config,
                 Mapping,
@@ -701,10 +981,13 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         if dict(runtime_config) != expected_runtime_configs[ablation_id]:
             raise FormalRecordStatisticsError("逐 Prompt 消融记录未执行声明消融的精确机制配置")
         try:
-            if unit_identity.get("formal_randomization_reference") != (
-                runtime_metadata.get("formal_randomization_reference")
+            if (
+                unit_identity.get("formal_randomization_reference")
+                != expected_randomization_reference
+                or runtime_metadata.get("formal_randomization_reference")
+                != expected_randomization_reference
             ):
-                raise ValueError("运行结果未引用顶层 manifest 随机身份")
+                raise ValueError("运行结果未引用独立重建的正式随机身份")
             validate_semantic_watermark_runtime_result_provenance(
                 runtime_result,
                 unit_config=scientific_config,
@@ -720,6 +1003,32 @@ def rebuild_and_validate_ablation_runtime_aggregates(
         ):
             raise FormalRecordStatisticsError("逐 Prompt 消融科学运行未完成或缺少图像质量")
         paired_ssim = _finite_float(paired_quality.get("ssim"), "paired_quality.ssim")
+        expected_scientific_randomization_config = {
+            "model_id": _FORMAL_METHOD_CONFIG.model_id,
+            "model_revision": _FORMAL_METHOD_CONFIG.model_revision,
+            "seed": expected_randomization_reference["generation_seed_random"],
+            "randomization_repeat_id": active_repeat.randomization_repeat_id,
+            "generation_seed_index": active_repeat.generation_seed_index,
+            "generation_seed_offset": active_repeat.generation_seed_offset,
+            "watermark_key_index": active_repeat.watermark_key_index,
+            "watermark_key_seed_random": expected_randomization_reference[
+                "watermark_key_seed_random"
+            ],
+            "formal_randomization_protocol_digest": (
+                expected_randomization_reference[
+                    "formal_randomization_protocol_digest"
+                ]
+            ),
+            "key_material_digest_random": expected_randomization_reference[
+                "watermark_key_material_digest_random"
+            ],
+            "torch_dtype": str(
+                validated_randomization_plan["base_latent_dtype"]
+            ).removeprefix("torch."),
+            "latent_torch_dtype": _FORMAL_METHOD_CONFIG.latent_torch_dtype,
+            "width": _FORMAL_METHOD_CONFIG.width,
+            "height": _FORMAL_METHOD_CONFIG.height,
+        }
         if (
             str(runtime_config.get("ablation_id", "")) != ablation_id
             or scientific_config.get("prompt_id") != prompt_id
@@ -737,15 +1046,56 @@ def rebuild_and_validate_ablation_runtime_aggregates(
                 for field_name, field_value in runtime_config.items()
                 if field_name != "ablation_id"
             )
+            or any(
+                scientific_config.get(field_name) != field_value
+                for field_name, field_value in (
+                    expected_scientific_randomization_config.items()
+                )
+            )
         ):
             raise FormalRecordStatisticsError("逐 Prompt 消融记录与科学运行配置身份不一致")
         if not run_id or any(
             detection.get("prompt_id") != prompt_id
             or detection.get("split") != split
             or detection.get("run_id") != run_id
+            or {
+                field_name: detection.get(field_name)
+                for field_name in _FORMAL_RANDOMIZATION_REFERENCE_FIELDS
+            }
+            != expected_randomization_reference
             for detection in detections
         ):
-            raise FormalRecordStatisticsError("消融检测原子的 Prompt、split 或 run_id 漂移")
+            raise FormalRecordStatisticsError(
+                "消融检测原子的 Prompt、运行或随机身份发生漂移"
+            )
+        try:
+            registered_key_material = formal_watermark_key_material_from_seed(
+                int(
+                    expected_randomization_reference[
+                        "watermark_key_seed_random"
+                    ]
+                ),
+                active_repeat,
+            )
+            expected_detection_key_plan = build_detection_key_plan_record(
+                registered_key_material
+            )
+            _validate_formal_detections_against_scientific_binding(
+                detections,
+                runtime_result,
+                protocol,
+                expected_detection_key_plan_digest_random=(
+                    expected_detection_key_plan[
+                        "detection_key_plan_digest_random"
+                    ]
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            if isinstance(exc, FormalRecordStatisticsError):
+                raise
+            raise FormalRecordStatisticsError(
+                "消融检测原子无法绑定正式密钥计划和科学运行内容"
+            ) from exc
 
         un_attacked = tuple(
             detection for detection in detections if not detection.get("attack_id")
@@ -776,7 +1126,13 @@ def rebuild_and_validate_ablation_runtime_aggregates(
             if detection.get("attack_id")
             and detection.get("sample_role") == "clean_negative"
         )
-        coverage_ready = _formal_attack_coverage_ready(detections, split=split)
+        coverage_ready = _formal_attack_coverage_ready(
+            detections,
+            split=split,
+            expected_generation_seed_random=int(
+                expected_randomization_reference["generation_seed_random"]
+            ),
+        )
         rebuilt = {
             "generation_rerun": True,
             "attack_and_detection_rerun": bool(attacked_positive or attacked_negative),

@@ -334,6 +334,8 @@ class AttentionRelationDescriptor:
     values: Any
     token_indices: tuple[int, ...]
     component_names: tuple[str, ...]
+    active_component_names: tuple[str, ...]
+    component_weights: tuple[float, ...]
     soft_rank_temperature: float
     soft_rank_scale: float
     relative_distance_scale: float
@@ -719,6 +721,7 @@ def _differentiable_row_rank(centered_logits: Any) -> Any:
 def build_attention_relation_descriptor(
     attention: Any,
     token_indices: tuple[int, ...],
+    component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> AttentionRelationDescriptor:
     """构造非冗余四分量 attention-relative graph 边描述。
 
@@ -732,6 +735,9 @@ def build_attention_relation_descriptor(
     """
 
     torch = _torch()
+    resolved_component_weights = validate_attention_relation_component_weights(
+        component_weights
+    )
     internal_layer_name = (
         attention.metadata.get("record_layer_name", "")
         if isinstance(attention, QKAttentionRelation)
@@ -758,30 +764,47 @@ def build_attention_relation_descriptor(
     token_count = int(probability.shape[-1])
     if len(token_indices) != token_count:
         raise ValueError("token_indices 数量必须与 Q/K 关系图宽度一致")
-    row_probability = probability / probability.sum(
-        dim=-1,
-        keepdim=True,
-    ).clamp_min(ATTENTION_RELATION_NUMERICAL_EPSILON)
-    soft_rank = _differentiable_row_rank(logits)
-    coordinates = public_token_grid_coordinates(token_indices, probability.device)
+    zero_component = torch.zeros_like(probability)
+    row_probability = None
+    if resolved_component_weights[2] > 0.0 or resolved_component_weights[3] > 0.0:
+        row_probability = probability / probability.sum(
+            dim=-1,
+            keepdim=True,
+        ).clamp_min(ATTENTION_RELATION_NUMERICAL_EPSILON)
+    soft_rank = (
+        _differentiable_row_rank(logits)
+        if resolved_component_weights[1] > 0.0
+        else zero_component
+    )
     relative_distance_scale = 1.0 / (2.0 * math.sqrt(2.0))
-    distances = torch.cdist(coordinates, coordinates) * relative_distance_scale
-    distances = distances.reshape(1, token_count, token_count).expand(
-        probability.shape[0],
-        -1,
-        -1,
-    )
-    centered_probability = row_probability - row_probability.mean(
-        dim=-1,
-        keepdim=True,
-    )
-    centered_distance = distances - distances.mean(dim=-1, keepdim=True)
-    distance_weighted_probability = centered_probability * centered_distance
+    if resolved_component_weights[3] > 0.0:
+        coordinates = public_token_grid_coordinates(
+            token_indices,
+            probability.device,
+        )
+        distances = torch.cdist(coordinates, coordinates) * relative_distance_scale
+        distances = distances.reshape(1, token_count, token_count).expand(
+            probability.shape[0],
+            -1,
+            -1,
+        )
+        if row_probability is None:
+            raise RuntimeError("距离调制分量缺少 row probability")
+        centered_probability = row_probability - row_probability.mean(
+            dim=-1,
+            keepdim=True,
+        )
+        centered_distance = distances - distances.mean(dim=-1, keepdim=True)
+        distance_weighted_probability = centered_probability * centered_distance
+    else:
+        distance_weighted_probability = zero_component
     values = torch.stack(
         (
-            logits,
+            logits if resolved_component_weights[0] > 0.0 else zero_component,
             soft_rank,
-            row_probability,
+            row_probability
+            if resolved_component_weights[2] > 0.0
+            else zero_component,
             distance_weighted_probability,
         ),
         dim=-1,
@@ -789,6 +812,15 @@ def build_attention_relation_descriptor(
     soft_rank_scale = 1.0 / float(token_count)
     identity_payload = {
         "component_names": ATTENTION_RELATION_COMPONENT_NAMES,
+        "component_weights": resolved_component_weights,
+        "active_component_names": tuple(
+            name
+            for name, weight in zip(
+                ATTENTION_RELATION_COMPONENT_NAMES,
+                resolved_component_weights,
+            )
+            if weight > 0.0
+        ),
         "soft_rank_definition": "descending_pairwise_sigmoid_rank",
         "soft_rank_temperature": ATTENTION_RELATION_SOFT_RANK_TEMPERATURE,
         "soft_rank_scale": soft_rank_scale,
@@ -806,6 +838,8 @@ def build_attention_relation_descriptor(
         values=values,
         token_indices=token_indices,
         component_names=ATTENTION_RELATION_COMPONENT_NAMES,
+        active_component_names=tuple(identity_payload["active_component_names"]),
+        component_weights=resolved_component_weights,
         soft_rank_temperature=ATTENTION_RELATION_SOFT_RANK_TEMPERATURE,
         soft_rank_scale=soft_rank_scale,
         relative_distance_scale=relative_distance_scale,
@@ -1421,6 +1455,19 @@ def keyed_attention_relation_projection(
     resolved_component_weights = validate_attention_relation_component_weights(
         component_weights
     )
+    expected_active_names = tuple(
+        name
+        for name, weight in zip(
+            ATTENTION_RELATION_COMPONENT_NAMES,
+            resolved_component_weights,
+        )
+        if weight > 0.0
+    )
+    if (
+        descriptor.component_weights != resolved_component_weights
+        or descriptor.active_component_names != expected_active_names
+    ):
+        raise ValueError("descriptor 与密钥投影没有使用同一活动分量协议")
     base_signs = keyed_relation_signs(
         descriptor.values[..., 0],
         key_material,
@@ -1433,7 +1480,16 @@ def keyed_attention_relation_projection(
         device=descriptor.values.device,
         dtype=torch.float32,
     )
-    values = base_signs.unsqueeze(-1) * polarities.reshape(1, 1, -1)
+    active_mask = torch.tensor(
+        tuple(weight > 0.0 for weight in resolved_component_weights),
+        device=descriptor.values.device,
+        dtype=torch.float32,
+    )
+    values = (
+        base_signs.unsqueeze(-1)
+        * polarities.reshape(1, 1, -1)
+        * active_mask.reshape(1, 1, -1)
+    )
     projection_payload = {
         "component_identity_digest": descriptor.component_identity_digest,
         "component_names": descriptor.component_names,
@@ -1479,7 +1535,11 @@ def build_attention_relation_graph_identity(
     if not resolved_records:
         raise RuntimeError("关系图身份要求至少一层真实 Q/K 记录")
     descriptors = tuple(
-        build_attention_relation_descriptor(attention, token_indices)
+        build_attention_relation_descriptor(
+            attention,
+            token_indices,
+            resolved_component_weights,
+        )
         for _, attention, token_indices in resolved_records
     )
     reference = descriptors[0]
@@ -1627,6 +1687,7 @@ def attention_relation_component_scores(
     projection_values: Any,
     pair_weights: Any,
     valid_positions: Any | None = None,
+    component_weights: Iterable[float] = ATTENTION_RELATION_COMPONENT_WEIGHTS,
 ) -> Any:
     """逐行加权中心化并归一化四个关系分量, 返回分量级相关分数。
 
@@ -1636,6 +1697,14 @@ def attention_relation_component_scores(
     """
 
     torch = _torch()
+    resolved_component_weights = validate_attention_relation_component_weights(
+        component_weights
+    )
+    active_component_indices = tuple(
+        index
+        for index, weight in enumerate(resolved_component_weights)
+        if weight > 0.0
+    )
     relation = relation_values
     if relation.ndim == 3:
         relation = relation.unsqueeze(0)
@@ -1643,13 +1712,23 @@ def attention_relation_component_scores(
         ATTENTION_RELATION_COMPONENT_NAMES
     ):
         raise ValueError("relation_values 必须具有 [batch, token, token, 4] 形状")
+    active_index_tensor = torch.tensor(
+        active_component_indices,
+        device=relation.device,
+        dtype=torch.long,
+    )
+    relation = relation.index_select(-1, active_index_tensor)
     projection = projection_values
     if projection.ndim == 3:
         projection = projection.unsqueeze(0)
     if projection.shape[0] == 1 and relation.shape[0] != 1:
         projection = projection.expand(relation.shape[0], -1, -1, -1)
     if projection.shape != relation.shape:
-        raise ValueError("projection_values 必须与 relation_values 具有相同关系图形状")
+        if projection.shape[:-1] != relation.shape[:-1] or projection.shape[-1] != len(
+            ATTENTION_RELATION_COMPONENT_NAMES
+        ):
+            raise ValueError("projection_values 必须与 relation_values 具有相同关系图形状")
+        projection = projection.index_select(-1, active_index_tensor)
     weights = pair_weights
     if weights.ndim == 2:
         weights = weights.unsqueeze(0)
@@ -1733,9 +1812,17 @@ def attention_relation_component_scores(
         torch.zeros_like(row_numerator),
     )
     valid_row_count = row_valid.sum(dim=-2).clamp_min(1)
-    return (row_scores * row_valid.to(dtype=row_scores.dtype)).sum(
+    active_scores = (row_scores * row_valid.to(dtype=row_scores.dtype)).sum(
         dim=-2
     ) / valid_row_count
+    component_scores = torch.zeros(
+        *active_scores.shape[:-1],
+        len(ATTENTION_RELATION_COMPONENT_NAMES),
+        device=active_scores.device,
+        dtype=active_scores.dtype,
+    )
+    component_scores.index_copy_(-1, active_index_tensor, active_scores)
+    return component_scores
 
 
 def combine_attention_relation_component_scores(
@@ -1750,12 +1837,21 @@ def combine_attention_relation_component_scores(
     resolved_weights = validate_attention_relation_component_weights(
         component_weights
     )
+    active_indices = tuple(
+        index for index, weight in enumerate(resolved_weights) if weight > 0.0
+    )
+    active_index_tensor = torch.tensor(
+        active_indices,
+        device=component_scores.device,
+        dtype=torch.long,
+    )
     weights = torch.tensor(
-        resolved_weights,
+        tuple(resolved_weights[index] for index in active_indices),
         device=component_scores.device,
         dtype=component_scores.dtype,
     )
-    return (component_scores * weights).sum(dim=-1)
+    active_scores = component_scores.index_select(-1, active_index_tensor)
+    return (active_scores * weights).sum(dim=-1)
 
 
 def attention_geometry_component_scores(
@@ -1778,7 +1874,11 @@ def attention_geometry_component_scores(
             raise ValueError("Q/K token_indices 数量必须与 attention 宽度一致")
         if tuple(token_indices) != stable_pair_weights.grid_token_indices:
             raise ValueError("稳定 token pair 权重与当前 Q/K 抽样网格不一致")
-        descriptor = build_attention_relation_descriptor(attention, token_indices)
+        descriptor = build_attention_relation_descriptor(
+            attention,
+            token_indices,
+            component_weights,
+        )
         projection = keyed_attention_relation_projection(
             descriptor,
             key_material,
@@ -1790,6 +1890,7 @@ def attention_geometry_component_scores(
             descriptor.values,
             projection.values,
             stable_pair_weights.pair_tensor(attention),
+            component_weights=component_weights,
         )
         layer_component_scores.append(component_scores.mean(dim=0))
     if not layer_component_scores:

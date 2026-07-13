@@ -178,13 +178,19 @@ def _build_single_branch(
     texture_values: tuple[float, ...],
     adjacent_step_stability_values: tuple[float, ...],
     local_contrast_risk_values: tuple[float, ...],
-    attention_stability_values: tuple[float, ...],
+    attention_stability_values: tuple[float, ...] | None,
     config: BranchRiskConfig,
     neutral_texture_risk_value: float,
     require_eligible_position: bool,
 ) -> CarrierRiskField:
     """根据统一输入构造一个分支风险场。"""
 
+    if config.attention_instability_weight > 0.0:
+        if attention_stability_values is None:
+            raise ValueError("活动风险配置需要真实跨层 Q/K attention stability")
+        resolved_attention_stability = attention_stability_values
+    else:
+        resolved_attention_stability = (1.0,) * len(semantic_values)
     weight_sum = (
         config.local_contrast_risk_weight
         + config.semantic_weight
@@ -205,7 +211,7 @@ def _build_single_branch(
         texture_values,
         adjacent_step_stability_values,
         local_contrast_risk_values,
-        attention_stability_values,
+        resolved_attention_stability,
     ):
         raw_risk = (
             config.local_contrast_risk_weight * local_contrast_risk
@@ -302,27 +308,22 @@ def _build_single_branch(
     )
 
 
-def build_branch_risk_fields(
+def build_active_branch_risk_fields(
     semantic_values: VectorInput | Iterable[NumberLike],
     texture_values: VectorInput | Iterable[NumberLike],
     adjacent_step_stability_values: VectorInput | Iterable[NumberLike],
     local_contrast_risk_values: VectorInput | Iterable[NumberLike],
-    attention_stability_values: VectorInput | Iterable[NumberLike],
+    attention_stability_values: VectorInput | Iterable[NumberLike] | None,
     *,
     configs: Mapping[str, BranchRiskConfig],
     risk_neutral_texture_value: float,
     required_eligible_branches: Iterable[str] | None = None,
-) -> BranchRiskFieldBundle:
-    """构造三个语义不同且宽度一致的分支风险场。
+) -> dict[str, CarrierRiskField]:
+    """只为实际活动载体构造分支特定风险场.
 
-    该函数是正式方法路径唯一使用的风险入口。三个分支必须分别构造风险语义,
-    不能通过单一共享标量或仅用于日志的路由记录替代。
-
-    ``required_eligible_branches`` 指定必须至少存在一个合格位置的活动分支.
-    ``None`` 表示完整方法的三个分支都必须通过门禁. 空集合用于移除风险路由的
-    正式消融, 此时仍可记录风险诊断值, 但风险阈值不得决定样本能否继续运行.
-    ``configs`` 与 ``risk_neutral_texture_value`` 必须由唯一方法配置显式传入,
-    核心方法不保存会绕过配置身份的正式默认参数.
+    该函数不会为已禁用载体计算风险场. 只有活动配置确实使用 attention
+    instability 时才接受并消费真实跨层 Q/K stability, 从算子边界保证不需要
+    attention 的消融不会执行该科学算子.
     """
 
     semantic = _require_unit_vector(semantic_values, "semantic_values")
@@ -335,42 +336,53 @@ def build_branch_risk_fields(
         local_contrast_risk_values,
         "local_contrast_risk_values",
     )
-    if attention_stability_values is None:
-        raise ValueError("attention_stability_values 必须来自真实跨层 Q/K 关系")
-    attention_stability = _require_unit_vector(
-        attention_stability_values,
-        "attention_stability_values",
-    )
-    length = ensure_equal_length(
-        {
-            "semantic_values": semantic,
-            "texture_values": texture,
-            "adjacent_step_stability_values": adjacent_step_stability,
-            "local_contrast_risk_values": local_contrast_risk,
-            "attention_stability_values": attention_stability,
-        }
-    )
+    length_inputs = {
+        "semantic_values": semantic,
+        "texture_values": texture,
+        "adjacent_step_stability_values": adjacent_step_stability,
+        "local_contrast_risk_values": local_contrast_risk,
+    }
     if (
         not math.isfinite(risk_neutral_texture_value)
         or risk_neutral_texture_value != NEUTRAL_TEXTURE_RISK_VALUE
     ):
         raise ValueError("risk_neutral_texture_value 必须精确等于 0.5")
     resolved_configs = dict(configs)
-    if set(resolved_configs) != set(BRANCH_NAMES):
-        raise ValueError("configs 必须完整定义三个载体分支")
+    active_names = tuple(
+        name for name in BRANCH_NAMES if name in resolved_configs
+    )
+    if not active_names or set(resolved_configs) != set(active_names):
+        raise ValueError("configs 必须定义非空且唯一的活动载体分支子集")
     if any(
         not isinstance(resolved_configs[name], BranchRiskConfig)
-        for name in BRANCH_NAMES
+        for name in active_names
     ):
         raise TypeError("configs 的每个分支都必须使用 BranchRiskConfig")
+    requires_attention = any(
+        resolved_configs[name].attention_instability_weight > 0.0
+        for name in active_names
+    )
+    if requires_attention:
+        if attention_stability_values is None:
+            raise ValueError("活动风险配置需要真实跨层 Q/K attention stability")
+        attention_stability = _require_unit_vector(
+            attention_stability_values,
+            "attention_stability_values",
+        )
+        length_inputs["attention_stability_values"] = attention_stability
+    else:
+        if attention_stability_values is not None:
+            raise ValueError("活动风险配置不使用 attention stability 时不得传入该信号")
+        attention_stability = None
+    ensure_equal_length(length_inputs)
     required_branches = (
-        set(BRANCH_NAMES)
+        set(active_names)
         if required_eligible_branches is None
         else set(required_eligible_branches)
     )
-    if not required_branches <= set(BRANCH_NAMES):
-        raise ValueError("required_eligible_branches 包含未知载体分支")
-    fields = {
+    if not required_branches <= set(active_names):
+        raise ValueError("required_eligible_branches 必须属于活动载体分支")
+    return {
         name: _build_single_branch(
             name,
             semantic,
@@ -382,8 +394,40 @@ def build_branch_risk_fields(
             risk_neutral_texture_value,
             name in required_branches,
         )
-        for name in BRANCH_NAMES
+        for name in active_names
     }
+
+
+def build_branch_risk_fields(
+    semantic_values: VectorInput | Iterable[NumberLike],
+    texture_values: VectorInput | Iterable[NumberLike],
+    adjacent_step_stability_values: VectorInput | Iterable[NumberLike],
+    local_contrast_risk_values: VectorInput | Iterable[NumberLike],
+    attention_stability_values: VectorInput | Iterable[NumberLike],
+    *,
+    configs: Mapping[str, BranchRiskConfig],
+    risk_neutral_texture_value: float,
+    required_eligible_branches: Iterable[str] | None = None,
+) -> BranchRiskFieldBundle:
+    """构造完整方法的三个分支特定风险场.
+
+    该公开入口保持完整方法必须同时定义三个风险场的严格语义. 正式消融调用
+    ``build_active_branch_risk_fields`` 只构造实际活动分支, 风险路由关闭时则不
+    调用任何风险场构造函数.
+    """
+
+    if set(configs) != set(BRANCH_NAMES):
+        raise ValueError("configs 必须完整定义三个载体分支")
+    fields = build_active_branch_risk_fields(
+        semantic_values,
+        texture_values,
+        adjacent_step_stability_values,
+        local_contrast_risk_values,
+        attention_stability_values,
+        configs=configs,
+        risk_neutral_texture_value=risk_neutral_texture_value,
+        required_eligible_branches=required_eligible_branches,
+    )
     bundle_digest = build_stable_digest(
         {name: field.risk_field_digest for name, field in fields.items()}
     )
@@ -392,5 +436,8 @@ def build_branch_risk_fields(
         tail_robust=fields["tail_robust"],
         attention_geometry=fields["attention_geometry"],
         bundle_digest=bundle_digest,
-        metadata={"risk_field_length": length, "branch_names": BRANCH_NAMES},
+        metadata={
+            "risk_field_length": len(fields["lf_content"].risk_values),
+            "branch_names": BRANCH_NAMES,
+        },
     )

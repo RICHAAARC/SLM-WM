@@ -504,6 +504,7 @@ def _relation_scores(
         relation_projection,
         pair_weights,
         valid,
+        component_weights,
     )
     scores = combine_attention_relation_component_scores(
         component_scores,
@@ -1194,7 +1195,11 @@ def recover_attention_affine_alignment(
     if anchor_count > token_count:
         raise ValueError("attention_anchor_count 不得超过实际 token 数量")
 
-    descriptor = build_attention_relation_descriptor(attention, token_indices)
+    descriptor = build_attention_relation_descriptor(
+        attention,
+        token_indices,
+        resolved_component_weights,
+    )
     relation_values = descriptor.values.mean(dim=0)
     relation_projection = keyed_attention_relation_projection(
         descriptor,

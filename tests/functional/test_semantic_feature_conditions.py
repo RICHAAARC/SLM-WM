@@ -28,6 +28,7 @@ from experiments.runners.semantic_watermark_runtime import (
     _final_image_preservation_record,
     _quantized_write_jacobian_response_record,
     _quantized_write_update_nonzero,
+    _runtime_public_detection_noise_identity,
     _three_way_final_image_preservation_records,
 )
 from experiments.runners.image_only_dataset_runtime import (
@@ -238,7 +239,7 @@ def _counterfactual_update_records(
         branch_update_content_records = {
             "lf_content": "5" * 64,
             "tail_robust": "6" * 64,
-            "attention_geometry": "7" * 64,
+            "attention_geometry": "7" * 64 if attention_enabled else "",
         }
         branch_risk_records = {
             branch_name: {
@@ -246,13 +247,10 @@ def _counterfactual_update_records(
                 "budget_values_content_sha256": "9" * 64,
                 "eligible_mask_content_sha256": "a" * 64,
             }
-            for branch_name in (
-                "lf_content",
-                "tail_robust",
-                "attention_geometry",
-            )
+            for branch_name in branches
+            if config.semantic_routing_enabled
         }
-        for branch_name in branches:
+        for branch_name in branch_risk_records:
             branch_risk_records[branch_name].update(
                 {
                     "effective_budget_values_content_sha256": "b" * 64,
@@ -261,12 +259,17 @@ def _counterfactual_update_records(
                     "branch_written_update_content_sha256": (
                         branch_update_content_records[branch_name]
                     ),
-                    "branch_post_risk_direction_content_sha256": "c" * 64,
-                    "branch_post_risk_reference_direction_content_sha256": "e" * 64,
-                    "branch_post_risk_response_content_sha256": "f" * 64,
-                    "branch_post_risk_reference_response_content_sha256": "0" * 64,
                 }
             )
+            if config.null_space_enabled:
+                branch_risk_records[branch_name].update(
+                    {
+                        "branch_post_risk_direction_content_sha256": "c" * 64,
+                        "branch_post_risk_reference_direction_content_sha256": "e" * 64,
+                        "branch_post_risk_response_content_sha256": "f" * 64,
+                        "branch_post_risk_reference_response_content_sha256": "0" * 64,
+                    }
+                )
         risk_signal_content_records = {
             "current_decoded_rgb_content_sha256": "6" * 64,
             "previous_step_decoded_rgb_content_sha256": "7" * 64,
@@ -276,11 +279,19 @@ def _counterfactual_update_records(
             "texture_risk_signal_content_sha256": "2" * 64,
             "local_contrast_risk_signal_content_sha256": "3" * 64,
             "adjacent_step_stability_signal_content_sha256": "4" * 64,
-            "attention_stability_signal_content_sha256": "5" * 64,
         }
+        if attention_enabled:
+            risk_signal_content_records[
+                "attention_stability_signal_content_sha256"
+            ] = "5" * 64
+        if not config.semantic_routing_enabled:
+            risk_signal_content_records = {}
         branch_risk_content_evidence = _branch_risk_content_evidence(
             risk_signal_content_records,
             branch_risk_records,
+            semantic_routing_enabled=config.semantic_routing_enabled,
+            null_space_enabled=config.null_space_enabled,
+            active_branch_names=tuple(branches),
         )
         records.append(
             {
@@ -364,6 +375,9 @@ def _counterfactual_update_records(
                 "metadata": {
                     "injection_execution_role": role,
                     "attention_geometry_enabled": attention_enabled,
+                    "semantic_routing_enabled": (
+                        config.semantic_routing_enabled
+                    ),
                     "attention_source": (
                         "real_qk_projection"
                         if attention_enabled
@@ -374,6 +388,54 @@ def _counterfactual_update_records(
             }
         )
     return records
+
+
+@pytest.mark.quick
+def test_attention_disabled_runtime_does_not_read_public_noise_evidence() -> None:
+    """关闭注意力机制后不得读取或伪造 Q/K 公开噪声身份."""
+
+    identity, digest = _runtime_public_detection_noise_identity(
+        ({"metadata": object()},),
+        attention_geometry_enabled=False,
+    )
+
+    assert identity is None
+    assert digest == ""
+
+
+@pytest.mark.quick
+def test_attention_enabled_runtime_requires_rebuildable_public_noise_identity() -> None:
+    """启用注意力机制时必须从真实检测证据重建公开噪声身份."""
+
+    identity_payload = {
+        "public_detection_noise_prg_protocol": "fixture_prg",
+        "key_material": "fixture_public_noise",
+    }
+    identity_digest = build_stable_digest(identity_payload)
+    identity = {
+        **identity_payload,
+        "public_detection_noise_prg_identity_digest": identity_digest,
+    }
+    detections = (
+        {
+            "public_detection_noise_prg_identity_digest": identity_digest,
+            "metadata": {
+                "public_detection_noise_evidence_records": [
+                    {"public_detection_noise_prg_identity": identity}
+                ]
+            },
+        },
+    )
+
+    resolved_identity, resolved_digest = (
+        _runtime_public_detection_noise_identity(
+            detections,
+            attention_geometry_enabled=True,
+        )
+    )
+
+    assert resolved_identity == identity
+    assert resolved_digest == identity_digest
 
 
 @pytest.mark.quick

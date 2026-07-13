@@ -72,7 +72,7 @@ def test_branch_risk_formula_uses_frozen_texture_directions_and_neutral_value() 
         texture_values=(0.2, 0.8),
         adjacent_step_stability_values=(1.0, 1.0),
         local_contrast_risk_values=(0.0, 0.0),
-        attention_stability_values=(1.0, 1.0),
+        attention_stability_values=None,
         configs=_formula_configs(),
         risk_neutral_texture_value=0.5,
         required_eligible_branches=(),
@@ -102,7 +102,7 @@ def test_branch_risk_threshold_equality_is_ineligible() -> None:
         texture_values=(0.0, 0.0),
         adjacent_step_stability_values=(1.0, 1.0),
         local_contrast_risk_values=(0.0, 0.0),
-        attention_stability_values=(1.0, 1.0),
+        attention_stability_values=None,
         configs={name: semantic_config for name in _formula_configs()},
         risk_neutral_texture_value=0.5,
         required_eligible_branches=(),
@@ -157,18 +157,25 @@ def test_branch_risk_builder_rejects_nonfinite_or_out_of_range_signals(
 ) -> None:
     """核心风险公式不得把非法上游信号静默裁剪成合法风险值。"""
 
+    configs = _formula_configs()
     inputs = {
         "semantic_values": (0.2,),
         "texture_values": (0.2,),
         "adjacent_step_stability_values": (1.0,),
         "local_contrast_risk_values": (0.0,),
-        "attention_stability_values": (1.0,),
+        "attention_stability_values": None,
     }
+    if field_name == "attention_stability_values":
+        configs = {
+            name: _risk_config(active_term="attention")
+            for name in _formula_configs()
+        }
+        inputs["attention_stability_values"] = (1.0,)
     inputs[field_name] = (invalid_value,)
     with pytest.raises(ValueError):
         build_branch_risk_fields(
             **inputs,
-            configs=_formula_configs(),
+            configs=configs,
             risk_neutral_texture_value=0.5,
         )
 

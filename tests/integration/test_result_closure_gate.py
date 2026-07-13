@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 import pytest
+import torch
 
 from experiments.ablations.runtime_rerun import (
     FORMAL_RUNTIME_RERUN_ABLATION_IDS,
@@ -23,6 +24,8 @@ from experiments.protocol.attacks import (
     build_attack_record_digest,
     build_attack_matrix_manifest_config,
     default_attack_configs,
+    formal_attack_seed_protocol_record,
+    formal_attack_seed_random,
 )
 from experiments.ablations.necessity_statistics import (
     ABLATION_NECESSITY_FIELDNAMES,
@@ -58,24 +61,42 @@ from experiments.artifacts.image_only_detection_metrics import (
     build_image_only_test_metric_rows,
 )
 from experiments.protocol.formal_randomization import (
+    build_canonical_sd35_base_latent,
     build_formal_randomization_identity,
+    formal_randomization_sample_reference,
     formal_randomization_protocol_record,
     formal_randomization_repeat_ids,
     formal_randomization_repeat_registry_digest,
     formal_randomization_repeats,
+    formal_runtime_randomization_plan_record,
+    formal_watermark_key_material_from_seed,
     resolve_formal_randomization_repeat,
+)
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WATERMARK_KEY_ROLE,
+    REGISTERED_WRONG_KEY_ROLE,
+    build_detection_key_plan_record,
+    resolve_detection_key_material_and_identity,
+)
+from experiments.protocol.method_runtime_config import (
+    FORMAL_METHOD_PACKAGE_ROOT,
+    load_formal_method_runtime_config,
 )
 from experiments.artifacts.dataset_level_quality_outputs import (
     _inception_batch_config_digest,
     validate_inception_feature_provenance_groups,
 )
 from experiments.runners.image_only_dataset_runtime import (
+    FrozenEvidenceProtocol,
     apply_frozen_evidence_protocol,
     calibrate_complete_evidence_protocol,
     formal_low_frequency_carrier_protocol_record,
 )
 from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
+)
+from experiments.runtime.scientific_content_binding import (
+    SCIENTIFIC_CONTENT_BINDING_SCHEMA,
 )
 from main.methods.method_definition import (
     semantic_conditioned_latent_method_definition,
@@ -259,8 +280,24 @@ PROMPT_INDEX_BY_ID = {
     record.prompt_id: record.prompt_index
     for record in PROMPT_RECORDS
 }
+_FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
+    FORMAL_METHOD_PACKAGE_ROOT
+)
+_FORMAL_REPEAT = resolve_formal_randomization_repeat("seed_00_key_00")
+FORMAL_RUNTIME_RANDOMIZATION_PLAN = formal_runtime_randomization_plan_record(
+    _FORMAL_METHOD_CONFIG.seed,
+    base_latent_dtype=f"torch.{_FORMAL_METHOD_CONFIG.latent_torch_dtype}",
+    base_latent_shape=(1, 16, 64, 64),
+)
+FORMAL_REPEAT_IDENTITY = {
+    **_FORMAL_REPEAT.to_dict(),
+    "formal_randomization_protocol_digest": FORMAL_RUNTIME_RANDOMIZATION_PLAN[
+        "formal_randomization_protocol_digest"
+    ],
+}
 
 
+@lru_cache(maxsize=None)
 def paired_randomization_identity(prompt_id: str) -> dict[str, object]:
     """构造闭合夹具中所有方法共享的正式随机化身份."""
 
@@ -271,17 +308,38 @@ def paired_randomization_identity(prompt_id: str) -> dict[str, object]:
         root_key_material="slm_wm_paper_key",
         repeat=resolve_formal_randomization_repeat("seed_00_key_00"),
     )
-    base_content_digest = build_stable_digest(
-        {"prompt_id": prompt_id, "tensor_role": "base_latent"}
+    _, base_latent_identity = build_canonical_sd35_base_latent(
+        shape=(1, 16, 64, 64),
+        generation_seed_random=int(identity["generation_seed_random"]),
+        model_id=_FORMAL_METHOD_CONFIG.model_id,
+        model_revision=_FORMAL_METHOD_CONFIG.model_revision,
+        device="cpu",
+        dtype=torch.float16,
+    )
+    return formal_randomization_sample_reference(
+        identity,
+        base_latent_identity=base_latent_identity,
+    )
+
+
+def paired_attack_random_identity(
+    prompt_id: str,
+    attack_id: str,
+) -> dict[str, object]:
+    """由共享生成 seed 重建主方法和 baseline 的正式攻击随机身份."""
+
+    generation_seed_random = int(
+        paired_randomization_identity(prompt_id)["generation_seed_random"]
     )
     return {
-        **identity,
-        "base_latent_content_digest_random": base_content_digest,
-        "base_latent_identity_digest_random": build_stable_digest(
-            {
-                "prompt_id": prompt_id,
-                "base_latent_content_digest_random": base_content_digest,
-            }
+        "attack_seed_random": formal_attack_seed_random(
+            generation_seed_random,
+            attack_id,
+        ),
+        "formal_attack_seed_protocol_digest": (
+            formal_attack_seed_protocol_record()[
+                "formal_attack_seed_protocol_digest"
+            ]
         ),
     }
 from experiments.artifacts.attack_family_metrics import (
@@ -573,6 +631,10 @@ PROPOSED_OBSERVATION_RECORDS = tuple(
                 "split": "test",
                 "sample_role": sample_role,
                 **attack,
+                **paired_attack_random_identity(
+                    prompt_id,
+                    str(attack["attack_id"]),
+                ),
                 "content_score": (
                     0.1 if sample_role == "clean_negative" else 0.8
                 ),
@@ -653,6 +715,10 @@ METHOD_OBSERVATION_RECORDS_BY_METHOD = {
                         "split": "test",
                         "sample_role": sample_role,
                         **attack,
+                        **paired_attack_random_identity(
+                            prompt_id,
+                            str(attack["attack_id"]),
+                        ),
                         "quality_score": 0.9,
                         "threshold_digest": METHOD_THRESHOLD_DIGEST_MAP[
                             baseline_id
@@ -1637,6 +1703,7 @@ def _raw_ablation_detection(
 ) -> dict[str, object]:
     """构造应用消融冻结协议前的最小图像盲检原子。"""
 
+    randomization_reference = paired_randomization_identity(prompt_id)
     record: dict[str, object] = {
         "run_id": run_id,
         "prompt_id": prompt_id,
@@ -1648,8 +1715,12 @@ def _raw_ablation_detection(
         "registration_confidence": 0.0,
         "attention_sync_score": 0.0,
         "alignment": {"registration_geometry_reliable": False},
+        **randomization_reference,
     }
     if attack is not None:
+        generation_seed_random = int(
+            randomization_reference["generation_seed_random"]
+        )
         record.update(
             {
                 "attack_id": attack.attack_id,
@@ -1659,21 +1730,88 @@ def _raw_ablation_detection(
                 "attack_config_digest": attack_config_digest(attack),
                 "attack_parameters": attack.attack_parameters,
                 "attack_performed": True,
+                "attack_seed_random": formal_attack_seed_random(
+                    generation_seed_random,
+                    attack.attack_id,
+                ),
+                "formal_attack_seed_protocol_digest": (
+                    formal_attack_seed_protocol_record()[
+                        "formal_attack_seed_protocol_digest"
+                    ]
+                ),
             }
         )
     return _bind_attention_alignment_gate(record)
+
+
+def _ablation_scientific_detection_binding(
+    *,
+    run_id: str,
+    raw_detections: list[dict[str, object]],
+    protocol: FrozenEvidenceProtocol,
+    randomization_reference: dict[str, object],
+) -> dict[str, object]:
+    """把集成夹具的论文检测记录绑定到运行时原始角色和密钥身份."""
+
+    registered_key_material = formal_watermark_key_material_from_seed(
+        int(randomization_reference["watermark_key_seed_random"]),
+        _FORMAL_REPEAT,
+    )
+    key_plan = build_detection_key_plan_record(registered_key_material)
+    identities: list[dict[str, object]] = []
+    for detection_index, raw_record in enumerate(raw_detections):
+        attack_id = str(raw_record.get("attack_id", "none"))
+        sample_role = str(raw_record["sample_role"])
+        key_role = (
+            REGISTERED_WRONG_KEY_ROLE
+            if sample_role == "wrong_key_negative"
+            and attack_id in {"", "none"}
+            else REGISTERED_WATERMARK_KEY_ROLE
+        )
+        _material, key_identity = resolve_detection_key_material_and_identity(
+            registered_key_material,
+            key_role,
+        )
+        identities.append(
+            {
+                "detection_index": detection_index,
+                "sample_role": sample_role,
+                "attack_id": attack_id,
+                "detection_key_identity": key_identity,
+                "detection_record_content_digest": build_stable_digest(
+                    raw_record
+                ),
+            }
+        )
+    payload: dict[str, object] = {
+        "scientific_content_binding_schema": SCIENTIFIC_CONTENT_BINDING_SCHEMA,
+        "run_id": run_id,
+        "image_only_detector_config_digest": (
+            protocol.image_only_detector_config_digest
+        ),
+        "detection_key_plan_digest_random": key_plan[
+            "detection_key_plan_digest_random"
+        ],
+        "detection_content_identities": identities,
+    }
+    return {
+        **payload,
+        "scientific_content_binding_digest": build_stable_digest(payload),
+    }
 
 
 def ablation_atomic_records() -> tuple[
     tuple[dict[str, object], ...],
     tuple[dict[str, object], ...],
     dict[str, dict[str, object]],
+    tuple[dict[str, object], ...],
 ]:
     """构造15项消融、70个 Prompt 和正式攻击集合的完整原子链."""
 
     runtime_records: list[dict[str, object]] = []
     detection_records: list[dict[str, object]] = []
     protocols: dict[str, dict[str, object]] = {}
+    scientific_unit_identity_records: list[dict[str, object]] = []
     for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS:
         calibration_negatives = tuple(
             _raw_ablation_detection(
@@ -1695,6 +1833,7 @@ def ablation_atomic_records() -> tuple[
         for prompt_record in PROMPT_RECORDS:
             prompt_id = prompt_record.prompt_id
             split = PROMPT_SPLIT_BY_ID[prompt_id]
+            randomization_reference = paired_randomization_identity(prompt_id)
             scientific_config = {
                 "prompt": prompt_record.prompt_text,
                 "prompt_id": prompt_id,
@@ -1709,6 +1848,28 @@ def ablation_atomic_records() -> tuple[
                     f"outputs/formal_mechanism_ablation/{SCALE}/"
                     f"runs/{spec.ablation_id}"
                 ),
+                "model_id": _FORMAL_METHOD_CONFIG.model_id,
+                "model_revision": _FORMAL_METHOD_CONFIG.model_revision,
+                "seed": randomization_reference["generation_seed_random"],
+                "randomization_repeat_id": _FORMAL_REPEAT.randomization_repeat_id,
+                "generation_seed_index": _FORMAL_REPEAT.generation_seed_index,
+                "generation_seed_offset": _FORMAL_REPEAT.generation_seed_offset,
+                "watermark_key_index": _FORMAL_REPEAT.watermark_key_index,
+                "watermark_key_seed_random": randomization_reference[
+                    "watermark_key_seed_random"
+                ],
+                "formal_randomization_protocol_digest": (
+                    randomization_reference[
+                        "formal_randomization_protocol_digest"
+                    ]
+                ),
+                "key_material_digest_random": randomization_reference[
+                    "watermark_key_material_digest_random"
+                ],
+                "torch_dtype": _FORMAL_METHOD_CONFIG.latent_torch_dtype,
+                "latent_torch_dtype": _FORMAL_METHOD_CONFIG.latent_torch_dtype,
+                "width": _FORMAL_METHOD_CONFIG.width,
+                "height": _FORMAL_METHOD_CONFIG.height,
                 **{
                     field_name: field_value
                     for field_name, field_value in runtime_config.items()
@@ -1717,6 +1878,13 @@ def ablation_atomic_records() -> tuple[
             }
             scientific_config_digest = build_stable_digest(scientific_config)
             run_id = f"semantic_watermark_{scientific_config_digest[:16]}"
+            scientific_unit_identity_records.append(
+                {
+                    "run_id": run_id,
+                    "scientific_unit_config": scientific_config,
+                    "formal_randomization_reference": randomization_reference,
+                }
+            )
             positive_score = 1.0 if spec.ablation_id == "complete_method" else 0.0
             raw_detections = [
                 _raw_ablation_detection(
@@ -1762,6 +1930,12 @@ def ablation_atomic_records() -> tuple[
                 raw_detections,
                 protocol,
             )
+            scientific_binding = _ablation_scientific_detection_binding(
+                run_id=run_id,
+                raw_detections=raw_detections,
+                protocol=protocol,
+                randomization_reference=randomization_reference,
+            )
             detection_records.extend(
                 {
                     **record,
@@ -1799,12 +1973,28 @@ def ablation_atomic_records() -> tuple[
                         "run_id": run_id,
                         "run_decision": "pass",
                         "metadata": {
-                            "scientific_unit_config": scientific_config,
+                            "scientific_unit_config_digest": (
+                                scientific_config_digest
+                            ),
+                            "formal_randomization_reference": (
+                                randomization_reference
+                            ),
                             "scientific_unit_provenance": (
                                 build_test_scientific_unit_provenance(
                                     run_id,
                                     scientific_config_digest,
                                 )
+                            ),
+                            "scientific_content_binding_schema": (
+                                SCIENTIFIC_CONTENT_BINDING_SCHEMA
+                            ),
+                            "scientific_content_binding_record": (
+                                scientific_binding
+                            ),
+                            "scientific_content_binding_digest": (
+                                scientific_binding[
+                                    "scientific_content_binding_digest"
+                                ]
                             ),
                             "paired_quality": {"ssim": 0.95},
                         },
@@ -1861,7 +2051,12 @@ def ablation_atomic_records() -> tuple[
                     "paired_ssim": 0.95,
                 }
             )
-    return tuple(runtime_records), tuple(detection_records), protocols
+    return (
+        tuple(runtime_records),
+        tuple(detection_records),
+        protocols,
+        tuple(scientific_unit_identity_records),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -1877,6 +2072,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         necessity_records,
         ablation_detection_records,
         ablation_frozen_protocols,
+        ablation_scientific_unit_identity_records,
     ) = ablation_atomic_records()
     ablation_detection_records_bytes = "".join(
         json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
@@ -2780,6 +2976,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         expected_test_prompt_id_digest=TEST_PROMPT_ID_DIGEST,
         expected_prompt_split_by_id=PROMPT_SPLIT_BY_ID,
         expected_prompt_digest_by_id=PROMPT_DIGEST_BY_ID,
+        expected_prompt_index_by_id=PROMPT_INDEX_BY_ID,
             source_file_sha256=source_file_sha256,
             attack_report=attack_report,
             attack_detection_records=attack_detection_records,
@@ -3016,6 +3213,13 @@ def _ready_bundle_template() -> ResultClosureGateInput:
                 "supports_paper_claim": True,
             },
             config={
+                "formal_randomization_plan": (
+                    FORMAL_RUNTIME_RANDOMIZATION_PLAN
+                ),
+                "randomization_repeat_identity": FORMAL_REPEAT_IDENTITY,
+                "scientific_unit_identity_records": list(
+                    ablation_scientific_unit_identity_records
+                ),
                 "expected_ablation_ids": list(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
                 "actual_ablation_ids": list(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
                 "ablation_spec_digest": FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,

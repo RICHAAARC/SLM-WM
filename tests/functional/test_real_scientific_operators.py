@@ -1074,6 +1074,9 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
     }
     record = {
         "step_index": 6,
+        "scheduler_step_timestep": 6.0,
+        "post_step_schedule_index": 7,
+        "watermark_key_material_digest_random": "0" * 64,
         **_formal_content_carrier_identity_fields(),
         "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
         "adjacent_step_reference_index": 5,
@@ -1110,6 +1113,12 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "branch_risk_records": branch_risk_records,
         "branch_risk_content_digest": build_stable_digest(
             {
+                "semantic_routing_enabled": True,
+                "active_carrier_branches": [
+                    "lf_content",
+                    "tail_robust",
+                    "attention_geometry",
+                ],
                 "risk_signal_content_records": {
                     "current_decoded_rgb_content_sha256": "6" * 64,
                     "previous_step_decoded_rgb_content_sha256": "7" * 64,
@@ -1292,6 +1301,14 @@ def test_scientific_operator_gate_requires_all_real_operator_evidence() -> None:
         "full_semantic_cosine_similarity": 0.999,
         "full_handcrafted_structure_feature_relative_drift": 0.001,
         "semantic_preservation_gate_ready": True,
+        "metadata": {
+            "semantic_routing_enabled": True,
+            "null_space_enabled": True,
+            "lf_enabled": True,
+            "tail_robust_enabled": True,
+            "tail_truncation_enabled": True,
+            "attention_geometry_enabled": True,
+        },
     }
     record["quantized_composition_evidence_digest"] = (
         recompute_quantized_composition_evidence_digest(record)
@@ -1505,6 +1522,46 @@ def test_tail_robust_template_records_amplitude_tail_semantics() -> None:
     assert int(torch.count_nonzero(tail_template).item()) == 26
     assert score.content_score > 0.5
     assert score.metadata["tail_branch_semantics"] == "gaussian_amplitude_tail_truncation"
+
+
+@pytest.mark.quick
+def test_tail_truncation_ablation_skips_amplitude_ranking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """关闭尾部截断时应保留全部高斯元素, 且不得执行幅值排序."""
+
+    import main.methods.carrier.keyed_tensor as keyed_tensor_module
+
+    def fail_ranking(*_args: object, **_kwargs: object) -> object:
+        """幅值排序一旦被调用就使消融反例测试失败."""
+
+        pytest.fail("tail_fraction=1.0 时仍执行幅值排序")
+
+    monkeypatch.setattr(
+        keyed_tensor_module,
+        "sorted",
+        fail_ranking,
+        raising=False,
+    )
+    template, threshold, retained_fraction = build_tail_robust_template(
+        torch.zeros(1, 2, 8, 8),
+        "tail_no_truncation_key",
+        "tail_no_truncation_model",
+        1.0,
+        prg_version=KEYED_PRG_VERSION,
+    )
+    protocol = tail_robust_carrier_protocol_record(
+        1.0,
+        prg_version=KEYED_PRG_VERSION,
+    )
+
+    assert threshold == 0.0
+    assert retained_fraction == 1.0
+    assert int(torch.count_nonzero(template).item()) == template.numel()
+    assert float(torch.linalg.norm(template).item()) == pytest.approx(1.0)
+    assert protocol["tail_selection_rule"] == (
+        "all_elements_without_amplitude_ranking"
+    )
 
 
 @pytest.mark.quick
@@ -1837,10 +1894,10 @@ def test_multihead_qk_relation_matches_independent_manual_calculation() -> None:
     assert len(identity.qk_atomic_content_records) == 1
     assert len(identity.qk_atomic_content_digest) == 64
     assert identity.component_identity_digest == (
-        "d15cf0e871ed39bdbbbeef46fb1051b558616dc913dbeaa76e59060c0d80d7c7"
+        "d69e5a0605182aae07f610258557ad5fb6913d0c7d526ae841f41c86fe31477f"
     )
     assert identity.keyed_projection_digest == (
-        "250e524551ebf873870790c035165f441f71ff6c4fbe0fada8012507ef1487b4"
+        "837034707b9ffb733c123b629aa0a013ce4416ee6b5a212b7060ab32bbdcde7c"
     )
 
 
@@ -2167,6 +2224,136 @@ def test_leave_one_component_out_weights_remove_exact_score_contribution() -> No
             protocol["attention_relation_active_component_names"]
         )
         assert len(protocol["attention_relation_component_protocol_digest"]) == 64
+
+
+@pytest.mark.quick
+def test_leave_one_component_out_short_circuits_descriptor_projection_and_score() -> None:
+    """留一消融必须清空被禁用通道, 且异常原子不得进入相关分数."""
+
+    generator = torch.Generator().manual_seed(260716)
+    relation = _direct_qk_relation_from_logits(
+        torch.randn(1, 9, 9, generator=generator)
+    )
+    token_indices = tuple(range(9))
+    complete_descriptor = build_attention_relation_descriptor(
+        relation,
+        token_indices,
+    )
+    complete_projection = keyed_attention_relation_projection(
+        complete_descriptor,
+        "leave_one_short_circuit_key",
+        "leave_one_short_circuit_layer",
+        KEYED_PRG_VERSION,
+    )
+    pair_weights = 1.0 - torch.eye(9)
+
+    for removed_index, removed_name in enumerate(
+        ATTENTION_RELATION_COMPONENT_NAMES
+    ):
+        weights = tuple(
+            0.0 if index == removed_index else 1.0 / 3.0
+            for index in range(len(ATTENTION_RELATION_COMPONENT_NAMES))
+        )
+        descriptor = build_attention_relation_descriptor(
+            relation,
+            token_indices,
+            weights,
+        )
+        projection = keyed_attention_relation_projection(
+            descriptor,
+            "leave_one_short_circuit_key",
+            "leave_one_short_circuit_layer",
+            KEYED_PRG_VERSION,
+            weights,
+        )
+
+        assert removed_name not in descriptor.active_component_names
+        assert torch.count_nonzero(
+            descriptor.values[..., removed_index]
+        ).item() == 0
+        assert torch.count_nonzero(
+            projection.values[..., removed_index]
+        ).item() == 0
+        for active_index in range(len(ATTENTION_RELATION_COMPONENT_NAMES)):
+            if active_index == removed_index:
+                continue
+            assert torch.allclose(
+                descriptor.values[..., active_index],
+                complete_descriptor.values[..., active_index],
+            )
+            assert torch.equal(
+                projection.values[..., active_index],
+                complete_projection.values[..., active_index],
+            )
+
+        poisoned_relation = descriptor.values.clone()
+        poisoned_projection = projection.values.clone()
+        poisoned_relation[..., removed_index] = torch.nan
+        poisoned_projection[..., removed_index] = torch.nan
+        component_scores = attention_relation_component_scores(
+            poisoned_relation,
+            poisoned_projection,
+            pair_weights,
+            component_weights=weights,
+        )
+        component_scores[..., removed_index] = torch.nan
+        total_score = combine_attention_relation_component_scores(
+            component_scores,
+            weights,
+        )
+
+        assert torch.isfinite(total_score).all()
+        assert torch.isfinite(
+            component_scores[..., [
+                index
+                for index in range(len(ATTENTION_RELATION_COMPONENT_NAMES))
+                if index != removed_index
+            ]]
+        ).all()
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("removed_index", (1, 3))
+def test_expensive_attention_component_operator_is_not_called_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    removed_index: int,
+) -> None:
+    """禁用 soft-rank 或距离调制时不得执行对应科学算子."""
+
+    import main.methods.geometry.differentiable_attention as attention_module
+
+    relation = _direct_qk_relation_from_logits(
+        torch.randn(1, 9, 9, generator=torch.Generator().manual_seed(260717))
+    )
+    weights = tuple(
+        0.0 if index == removed_index else 1.0 / 3.0
+        for index in range(len(ATTENTION_RELATION_COMPONENT_NAMES))
+    )
+
+    def fail_operator(*_args: object, **_kwargs: object) -> object:
+        """被禁用的算子一旦执行就立即使测试失败."""
+
+        pytest.fail("已禁用 attention 分量仍执行其专属算子")
+
+    if removed_index == 1:
+        monkeypatch.setattr(
+            attention_module,
+            "_differentiable_row_rank",
+            fail_operator,
+        )
+    else:
+        monkeypatch.setattr(torch, "cdist", fail_operator)
+
+    identity = build_attention_relation_graph_identity(
+        (("test_qk_relation_layer", relation, tuple(range(9))),),
+        "disabled_attention_operator_key",
+        prg_version=KEYED_PRG_VERSION,
+        component_weights=weights,
+    )
+
+    assert ATTENTION_RELATION_COMPONENT_NAMES[removed_index] not in (
+        identity.active_component_names
+    )
 
 
 @pytest.mark.quick
@@ -2969,6 +3156,124 @@ def test_image_only_detector_interface_and_positive_content_path() -> None:
     )
     assert result.content.lf_weight == _FORMAL_LF_WEIGHT
     assert result.content.tail_robust_weight == _FORMAL_TAIL_ROBUST_WEIGHT
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize("disabled_branch", ("lf_content", "tail_robust"))
+def test_disabled_detector_carrier_is_not_built_or_scored(
+    monkeypatch: pytest.MonkeyPatch,
+    disabled_branch: str,
+) -> None:
+    """内容分支消融必须跳过模板构造, 并将对应检测原子精确清空."""
+
+    import main.methods.detection.image_only as detector_module
+
+    def fail_builder(*_args: object, **_kwargs: object) -> object:
+        """已禁用模板构造器一旦执行就使测试失败."""
+
+        pytest.fail("已禁用内容分支仍构造检测模板")
+
+    if disabled_branch == "lf_content":
+        monkeypatch.setattr(
+            detector_module,
+            "build_low_frequency_template",
+            fail_builder,
+        )
+        lf_weight, tail_weight = 0.0, 1.0
+    else:
+        monkeypatch.setattr(
+            detector_module,
+            "build_tail_robust_template",
+            fail_builder,
+        )
+        lf_weight, tail_weight = 1.0, 0.0
+
+    result = detect_image_only_watermark(
+        image=torch.zeros(1, 2, 8, 8),
+        key_material="disabled_detector_carrier_key",
+        config=_image_only_detection_config(
+            lf_weight=lf_weight,
+            tail_robust_weight=tail_weight,
+        ),
+        image_latent_encoder=lambda value: value,
+    )
+    record = result.to_record()
+
+    if disabled_branch == "lf_content":
+        assert result.content.lf_score == 0.0
+        assert record["lf_template_content_sha256"] == ""
+    else:
+        assert result.content.tail_robust_score == 0.0
+        assert record["tail_template_content_sha256"] == ""
+        assert record["tail_template_shape"] == []
+        assert record["tail_template_element_count"] == 0
+        assert record["tail_selected_element_count"] == 0
+    validate_image_only_detection_digest_record(record)
+
+
+@pytest.mark.quick
+def test_alignment_ablation_keeps_raw_qk_and_skips_affine_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """关闭图像 alignment 时应保留原图 Q/K 盲检, 但不得恢复仿射变换."""
+
+    import main.methods.detection.image_only as detector_module
+
+    def fail_alignment(*_args: object, **_kwargs: object) -> object:
+        """仿射恢复一旦被调用就使 alignment 消融测试失败."""
+
+        pytest.fail("image_aligner=None 时仍执行仿射恢复")
+
+    monkeypatch.setattr(
+        detector_module,
+        "recover_attention_affine_alignment",
+        fail_alignment,
+    )
+    layer_names = FROZEN_SD35_ATTENTION_MODULE_NAMES
+    relations = tuple(
+        _direct_qk_relation_from_logits(
+            torch.randn(
+                1,
+                16,
+                16,
+                generator=torch.Generator().manual_seed(260718 + index),
+            ),
+            layer_name,
+        )
+        for index, layer_name in enumerate(layer_names)
+    )
+    extraction_count = 0
+
+    def extract(_image: object) -> tuple[tuple[str, object, tuple[int, ...]], ...]:
+        """返回一次具有冻结层身份的原图 Q/K 关系."""
+
+        nonlocal extraction_count
+        extraction_count += 1
+        return tuple(
+            (layer_name, relation, tuple(range(16)))
+            for layer_name, relation in zip(layer_names, relations)
+        )
+
+    result = detect_image_only_watermark(
+        image=torch.zeros(1, 2, 8, 8),
+        key_material="alignment_ablation_key",
+        config=_image_only_detection_config(),
+        image_latent_encoder=lambda value: value,
+        image_attention_extractor=extract,
+        image_aligner=None,
+    )
+    qk_roles = tuple(
+        item["qk_evaluation_role"]
+        for item in result.metadata["detection_qk_atomic_content_records"]
+    )
+
+    assert extraction_count == 1
+    assert result.raw_attention_geometry_score is not None
+    assert result.attention_geometry_score is None
+    assert result.alignment is None
+    assert result.metadata["image_alignment_enabled"] is False
+    assert qk_roles == ("raw_detection_image",)
+    validate_image_only_detection_digest_record(result.to_record())
 
 
 @pytest.mark.quick

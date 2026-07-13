@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import replace
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -39,6 +40,7 @@ from experiments.runtime.scientific_content_binding import (
     canonical_rgb_uint8_content_record,
     read_canonical_rgb_uint8_content_record,
     recompute_scientific_content_binding_digest,
+    validate_scientific_update_content_identity,
 )
 from main.core.digest import TENSOR_CONTENT_DIGEST_VERSION, build_stable_digest
 from main.methods.geometry import (
@@ -111,11 +113,13 @@ _RISK_BASE_FIELDS = (
     "budget_values_content_sha256",
     "eligible_mask_content_sha256",
 )
-_RISK_BOUNDED_FIELDS = (
+_RISK_ENVELOPE_FIELDS = (
     "effective_budget_values_content_sha256",
     "branch_unit_direction_content_sha256",
     "branch_budget_envelope_content_sha256",
     "branch_written_update_content_sha256",
+)
+_RISK_POST_NULL_FIELDS = (
     "branch_post_risk_direction_content_sha256",
     "branch_post_risk_reference_direction_content_sha256",
     "branch_post_risk_response_content_sha256",
@@ -339,13 +343,19 @@ def _update_record(
 
     resolved_config = config or SemanticWatermarkRuntimeConfig()
     take_digest = _digest_supplier(digest_offset)
-    risk_sources = {
-        field_name: take_digest() for field_name in _RISK_SOURCE_FIELDS
-    }
+    semantic_routing_enabled = resolved_config.semantic_routing_enabled
+    risk_sources = (
+        {
+            field_name: take_digest()
+            for field_name in _RISK_SOURCE_FIELDS
+        }
+        if semantic_routing_enabled
+        else {}
+    )
     branch_risk_records: dict[str, dict[str, Any]] = {}
     branch_updates: dict[str, str] = {}
     branch_envelopes: dict[str, str] = {}
-    for branch_name in _BRANCHES:
+    for branch_name in branches if semantic_routing_enabled else ():
         branch_record = {
             "branch_name": branch_name,
             "risk_field_digest": take_digest(),
@@ -354,29 +364,41 @@ def _update_record(
                 for field_name in _RISK_BASE_FIELDS
             },
         }
-        if branch_name in branches:
+        branch_record.update(
+            {
+                field_name: take_digest()
+                for field_name in _RISK_ENVELOPE_FIELDS
+            }
+        )
+        if resolved_config.null_space_enabled:
             branch_record.update(
                 {
                     field_name: take_digest()
-                    for field_name in _RISK_BOUNDED_FIELDS
+                    for field_name in _RISK_POST_NULL_FIELDS
                 }
             )
-            branch_updates[branch_name] = branch_record[
-                "branch_written_update_content_sha256"
-            ]
-            branch_envelopes[branch_name] = branch_record[
-                "branch_budget_envelope_content_sha256"
-            ]
+        branch_updates[branch_name] = branch_record[
+            "branch_written_update_content_sha256"
+        ]
+        branch_envelopes[branch_name] = branch_record[
+            "branch_budget_envelope_content_sha256"
+        ]
         branch_risk_records[branch_name] = branch_record
     risk_content_records = {
         branch_name: {
             field_name: branch_risk_records[branch_name][field_name]
             for field_name in (
                 _RISK_BASE_FIELDS
-                + (_RISK_BOUNDED_FIELDS if branch_name in branches else ())
+                + _RISK_ENVELOPE_FIELDS
+                + (
+                    _RISK_POST_NULL_FIELDS
+                    if resolved_config.null_space_enabled
+                    else ()
+                )
             )
         }
-        for branch_name in _BRANCHES
+        for branch_name in branches
+        if semantic_routing_enabled
     }
     latent_before = latent_before_override or take_digest()
     latent_after = take_digest()
@@ -384,16 +406,23 @@ def _update_record(
     combined_envelope = take_digest()
     written_update = take_digest()
     update_content_by_branch = {
-        "lf_content": branch_updates.get("lf_content", take_digest()),
-        "tail_robust": branch_updates.get(
-            "tail_robust",
-            take_digest(),
-        ),
-        "attention_geometry": branch_updates.get(
-            "attention_geometry",
-            take_digest(),
-        ),
+        branch_name: (
+            (
+                branch_updates[branch_name]
+                if branch_name in branch_updates
+                else take_digest()
+            )
+            if branch_name in branches
+            else ""
+        )
+        for branch_name in _BRANCHES
     }
+    for branch_name in branches:
+        branch_updates.setdefault(
+            branch_name,
+            update_content_by_branch[branch_name],
+        )
+        branch_envelopes.setdefault(branch_name, take_digest())
     attention_enabled = "attention_geometry" in branches
     record: dict[str, Any] = {
         "step_index": step_index,
@@ -407,6 +436,8 @@ def _update_record(
         "adjacent_step_reference_latent_content_sha256": take_digest(),
         "adjacent_step_stability_status": (
             "measured_from_immediately_previous_scheduler_step"
+            if semantic_routing_enabled
+            else "not_applicable_semantic_routing_disabled"
         ),
         "tensor_content_digest_version": TENSOR_CONTENT_DIGEST_VERSION,
         "active_carrier_branches": list(branches),
@@ -417,6 +448,13 @@ def _update_record(
                 else "carrier_only_counterfactual"
             ),
             "attention_geometry_enabled": attention_enabled,
+            "semantic_routing_enabled": semantic_routing_enabled,
+            "null_space_enabled": resolved_config.null_space_enabled,
+            "lf_enabled": "lf_content" in branches,
+            "tail_robust_enabled": "tail_robust" in branches,
+            "tail_truncation_enabled": (
+                resolved_config.tail_truncation_enabled
+            ),
             "attention_source": (
                 "real_qk_projection"
                 if attention_enabled
@@ -425,22 +463,40 @@ def _update_record(
         },
         **risk_sources,
         "branch_risk_records": branch_risk_records,
-        "branch_risk_bundle_digest": build_stable_digest(
-            {
-                branch_name: branch_risk_records[branch_name][
-                    "risk_field_digest"
-                ]
-                for branch_name in _BRANCHES
-            }
+        "branch_risk_bundle_digest": (
+            build_stable_digest(
+                {
+                    branch_name: branch_risk_records[branch_name][
+                        "risk_field_digest"
+                    ]
+                    for branch_name in branches
+                }
+            )
+            if semantic_routing_enabled
+            else build_stable_digest(
+                {
+                    "semantic_routing_enabled": False,
+                    "active_carrier_branches": tuple(branches),
+                }
+            )
         ),
         "branch_risk_content_digest": build_stable_digest(
             {
+                "semantic_routing_enabled": semantic_routing_enabled,
+                "active_carrier_branches": list(branches),
                 "risk_signal_content_records": risk_sources,
                 "branch_risk_content_records": risk_content_records,
             }
         ),
         "null_space_records": {
-            branch_name: _null_space_record(branch_name, take_digest)
+            branch_name: (
+                _null_space_record(branch_name, take_digest)
+                if resolved_config.null_space_enabled
+                else {
+                    "branch_name": branch_name,
+                    "solver": "full_latent_space_ablation",
+                }
+            )
             for branch_name in branches
         },
         "latent_content_sha256_before": latent_before,
@@ -487,14 +543,26 @@ def _update_record(
         "quantized_write_backtracking_step_count": 0,
         "quantized_write_maximum_envelope_ratio": 0.5,
         "quantized_write_budget_envelope_ready": True,
-        "quantized_write_reference_feature_content_sha256": take_digest(),
-        "quantized_write_jacobian_response_content_sha256": take_digest(),
+        "quantized_write_reference_feature_content_sha256": (
+            take_digest() if resolved_config.null_space_enabled else ""
+        ),
+        "quantized_write_jacobian_response_content_sha256": (
+            take_digest() if resolved_config.null_space_enabled else ""
+        ),
         "quantized_write_update_norm": 0.1,
-        "quantized_write_jacobian_gate_applicable": True,
-        "quantized_write_jacobian_gate_ready": True,
-        "quantized_write_relative_jacobian_response": 1e-6,
+        "quantized_write_jacobian_gate_applicable": (
+            resolved_config.null_space_enabled
+        ),
+        "quantized_write_jacobian_gate_ready": (
+            resolved_config.null_space_enabled
+        ),
+        "quantized_write_relative_jacobian_response": (
+            1e-6 if resolved_config.null_space_enabled else None
+        ),
         "quantized_write_jacobian_status": (
             "measured_from_actual_quantized_latent_delta"
+            if resolved_config.null_space_enabled
+            else "not_applicable_jacobian_null_space_disabled"
         ),
         "keyed_prg_version": resolved_config.keyed_prg_version,
         "keyed_prg_protocol_digest": keyed_prg_protocol_record(
@@ -603,39 +671,70 @@ def _update_record(
                 "attention_qk_atomic_content_ready": False,
             }
         )
+    lf_active = "lf_content" in branches
+    tail_active = "tail_robust" in branches
     lf_template_content_sha256 = (
         lf_template_content_sha256_override or take_digest()
+        if lf_active
+        else ""
     )
     tail_template_content_sha256 = (
         tail_template_content_sha256_override or take_digest()
+        if tail_active
+        else ""
+    )
+    effective_tail_fraction = (
+        resolved_config.tail_fraction
+        if resolved_config.tail_truncation_enabled
+        else 1.0
     )
     tail_protocol = tail_robust_carrier_protocol_record(
-        resolved_config.tail_fraction,
+        effective_tail_fraction,
         prg_version=resolved_config.keyed_prg_version,
     )
-    lf_identity = _template_identity_record(
-        branch_name="lf_content",
-        canonical_template_content_sha256=lf_template_content_sha256,
-        embedded_direction_content_sha256=take_digest(),
-        null_space_digest=record["null_space_records"]["lf_content"][
-            "solver_digest"
-        ],
-        carrier_protocol_digest=_LF_CARRIER_PROTOCOL[
-            "lf_carrier_protocol_digest"
-        ],
-        config=resolved_config,
+    lf_identity = (
+        _template_identity_record(
+            branch_name="lf_content",
+            canonical_template_content_sha256=lf_template_content_sha256,
+            embedded_direction_content_sha256=take_digest(),
+            null_space_digest=record["null_space_records"]["lf_content"].get(
+                "solver_digest",
+                build_stable_digest(
+                    record["null_space_records"]["lf_content"]
+                ),
+            ),
+            carrier_protocol_digest=_LF_CARRIER_PROTOCOL[
+                "lf_carrier_protocol_digest"
+            ],
+            config=resolved_config,
+        )
+        if lf_active
+        else None
     )
-    tail_identity = _template_identity_record(
-        branch_name="tail_robust",
-        canonical_template_content_sha256=tail_template_content_sha256,
-        embedded_direction_content_sha256=take_digest(),
-        null_space_digest=record["null_space_records"]["tail_robust"][
-            "solver_digest"
-        ],
-        carrier_protocol_digest=tail_protocol[
-            "tail_carrier_protocol_digest"
-        ],
-        config=resolved_config,
+    tail_identity = (
+        _template_identity_record(
+            branch_name="tail_robust",
+            canonical_template_content_sha256=tail_template_content_sha256,
+            embedded_direction_content_sha256=take_digest(),
+            null_space_digest=record["null_space_records"]["tail_robust"].get(
+                "solver_digest",
+                build_stable_digest(
+                    record["null_space_records"]["tail_robust"]
+                ),
+            ),
+            carrier_protocol_digest=tail_protocol[
+                "tail_carrier_protocol_digest"
+            ],
+            config=resolved_config,
+        )
+        if tail_active
+        else None
+    )
+    tail_element_count = 256 if tail_active else 0
+    tail_selected_count = (
+        math.ceil(tail_element_count * effective_tail_fraction)
+        if tail_active
+        else 0
     )
     record.update(
         {
@@ -643,23 +742,41 @@ def _update_record(
                 "lf_carrier_protocol_digest"
             ],
             "lf_template_content_sha256": lf_template_content_sha256,
-            "lf_template_digest": lf_identity["template_digest"],
-            "lf_template_shape": lf_identity["template_shape"],
-            "lf_projection_energy_retention": 0.2,
+            "lf_template_digest": (
+                lf_identity["template_digest"] if lf_identity else ""
+            ),
+            "lf_template_shape": (
+                lf_identity["template_shape"] if lf_identity else []
+            ),
+            "lf_projection_energy_retention": 0.2 if lf_active else None,
             "tail_carrier_protocol_digest": tail_protocol[
                 "tail_carrier_protocol_digest"
             ],
-            "tail_fraction": resolved_config.tail_fraction,
+            "tail_fraction": effective_tail_fraction,
             "tail_template_content_sha256": (
                 tail_template_content_sha256
             ),
-            "tail_template_digest": tail_identity["template_digest"],
-            "tail_template_shape": tail_identity["template_shape"],
-            "tail_template_element_count": 256,
-            "tail_selected_element_count": 52,
-            "tail_threshold": 1.0,
-            "tail_retained_fraction": 52 / 256,
-            "tail_projection_energy_retention": 0.2,
+            "tail_template_digest": (
+                tail_identity["template_digest"] if tail_identity else ""
+            ),
+            "tail_template_shape": (
+                tail_identity["template_shape"] if tail_identity else []
+            ),
+            "tail_template_element_count": tail_element_count,
+            "tail_selected_element_count": tail_selected_count,
+            "tail_threshold": (
+                0.0
+                if not tail_active or effective_tail_fraction == 1.0
+                else 1.0
+            ),
+            "tail_retained_fraction": (
+                tail_selected_count / tail_element_count
+                if tail_element_count
+                else 0.0
+            ),
+            "tail_projection_energy_retention": (
+                0.2 if tail_active else None
+            ),
         }
     )
     record["quantized_composition_evidence_digest"] = (
@@ -681,9 +798,13 @@ def _detection_record(
     lf_template_content_sha256: str,
     tail_template_content_sha256: str,
     digest_offset: int,
+    attention_geometry_enabled: bool = True,
     include_aligned_evaluation: bool = False,
     aligned_rgb_sha256: str | None = None,
     evaluation_index_offset: int = 3,
+    lf_weight: float = 0.7,
+    tail_robust_weight: float = 0.3,
+    tail_fraction: float = 0.2,
 ) -> dict[str, Any]:
     """构造逐次绑定图像、公开噪声和检测 Q/K 的盲检记录。"""
 
@@ -698,10 +819,16 @@ def _detection_record(
     public_noise_content = _PUBLIC_NOISE_CONTENT_SHA256
     public_noise_prg_payload = dict(_PUBLIC_NOISE_PRG_PAYLOAD)
     public_noise_prg = _PUBLIC_NOISE_PRG_DIGEST
+    if include_aligned_evaluation and not attention_geometry_enabled:
+        raise ValueError("关闭 attention geometry 时不得请求 aligned 评价")
     qk_roles = (
-        ("raw_detection_image", "aligned_detection_image")
-        if include_aligned_evaluation
-        else ("raw_detection_image",)
+        (
+            ("raw_detection_image", "aligned_detection_image")
+            if include_aligned_evaluation
+            else ("raw_detection_image",)
+        )
+        if attention_geometry_enabled
+        else ()
     )
     if include_aligned_evaluation and not aligned_rgb_sha256:
         raise ValueError("aligned 评价测试必须提供实际重采样像素摘要")
@@ -752,14 +879,27 @@ def _detection_record(
         }
         for index, qk_record in enumerate(qk_records)
     ]
-    operator_records = _qk_operator_records()
-    lf_score = 0.2
-    tail_score = 0.1
-    content_score = 0.7 * lf_score + 0.3 * tail_score
-    aligned_lf_score = 0.3 if include_aligned_evaluation else None
-    aligned_tail_score = 0.2 if include_aligned_evaluation else None
+    operator_records = (
+        _qk_operator_records() if attention_geometry_enabled else []
+    )
+    lf_score = 0.2 if lf_weight > 0.0 else 0.0
+    tail_score = 0.1 if tail_robust_weight > 0.0 else 0.0
+    content_score = lf_weight * lf_score + tail_robust_weight * tail_score
+    aligned_lf_score = (
+        0.3 if include_aligned_evaluation and lf_weight > 0.0 else None
+    )
+    aligned_tail_score = (
+        0.2
+        if include_aligned_evaluation and tail_robust_weight > 0.0
+        else None
+    )
+    if include_aligned_evaluation and lf_weight == 0.0:
+        aligned_lf_score = 0.0
+    if include_aligned_evaluation and tail_robust_weight == 0.0:
+        aligned_tail_score = 0.0
     aligned_content_score = (
-        0.7 * aligned_lf_score + 0.3 * aligned_tail_score
+        lf_weight * aligned_lf_score
+        + tail_robust_weight * aligned_tail_score
         if aligned_lf_score is not None and aligned_tail_score is not None
         else None
     )
@@ -784,25 +924,41 @@ def _detection_record(
         "lf_score": lf_score,
         "tail_robust_score": tail_score,
         "content_score": content_score,
-        "lf_weight": 0.7,
-        "tail_robust_weight": 0.3,
-        "tail_fraction": 0.2,
+        "lf_weight": lf_weight,
+        "tail_robust_weight": tail_robust_weight,
+        "tail_fraction": tail_fraction,
         "lf_carrier_protocol_digest": _LF_CARRIER_PROTOCOL[
             "lf_carrier_protocol_digest"
         ],
-        "lf_template_content_sha256": lf_template_content_sha256,
-        "tail_template_content_sha256": tail_template_content_sha256,
-        "tail_template_shape": [1, 16, 4, 4],
+        "lf_template_content_sha256": (
+            lf_template_content_sha256 if lf_weight > 0.0 else ""
+        ),
+        "tail_template_content_sha256": (
+            tail_template_content_sha256
+            if tail_robust_weight > 0.0
+            else ""
+        ),
+        "tail_template_shape": (
+            [1, 16, 4, 4] if tail_robust_weight > 0.0 else []
+        ),
         "raw_content_margin": content_score,
         "aligned_lf_score": aligned_lf_score,
         "aligned_tail_robust_score": aligned_tail_score,
         "aligned_content_score": aligned_content_score,
         "aligned_content_margin": aligned_content_score,
         "positive_by_content": True,
-        "attention_geometry_score": 0.4,
-        "raw_attention_geometry_score": 0.4,
-        "attention_sync_score": 0.4,
-        "registration_confidence": 0.8,
+        "attention_geometry_score": (
+            0.4 if include_aligned_evaluation else None
+        ),
+        "raw_attention_geometry_score": (
+            0.4 if attention_geometry_enabled else None
+        ),
+        "attention_sync_score": (
+            0.4 if include_aligned_evaluation else None
+        ),
+        "registration_confidence": (
+            0.8 if include_aligned_evaluation else None
+        ),
         "geometry_reliable": bool(include_aligned_evaluation),
         "content_failure_reason": "content_positive",
         "rescue_eligible": False,
@@ -822,25 +978,49 @@ def _detection_record(
             "content_threshold": 0.0,
             "attention_alignment_gate": dict(_ATTENTION_ALIGNMENT_GATE),
             **_ATTENTION_ALIGNMENT_GATE,
-            "stable_token_selection_digest": take_digest(),
-            "stable_pair_weight_identity_digest": take_digest(),
-            "observed_pair_weight_realization_digest": take_digest(),
+            "attention_geometry_enabled": attention_geometry_enabled,
+            "image_alignment_enabled": include_aligned_evaluation,
+            "stable_token_selection_digest": (
+                take_digest() if attention_geometry_enabled else ""
+            ),
+            "stable_pair_weight_identity_digest": (
+                take_digest() if attention_geometry_enabled else ""
+            ),
+            "observed_pair_weight_realization_digest": (
+                take_digest() if attention_geometry_enabled else ""
+            ),
             "aligned_pair_weight_realization_digest": (
                 take_digest() if include_aligned_evaluation else ""
             ),
-            "stable_pair_weight_identity_ready": True,
-            "attention_relation_source": DIRECT_QK_RELATION_SOURCE,
-            "attention_relation_component_identity_digest": take_digest(),
-            "attention_relation_keyed_projection_digest": take_digest(),
-            "public_detection_noise_content_sha256": public_noise_content,
-            "public_detection_noise_prg_identity_digest": public_noise_prg,
+            "stable_pair_weight_identity_ready": attention_geometry_enabled,
+            "attention_relation_source": (
+                DIRECT_QK_RELATION_SOURCE
+                if attention_geometry_enabled
+                else ""
+            ),
+            "attention_relation_component_identity_digest": (
+                take_digest() if attention_geometry_enabled else ""
+            ),
+            "attention_relation_keyed_projection_digest": (
+                take_digest() if attention_geometry_enabled else ""
+            ),
+            "public_detection_noise_content_sha256": (
+                public_noise_content if attention_geometry_enabled else ""
+            ),
+            "public_detection_noise_prg_identity_digest": (
+                public_noise_prg if attention_geometry_enabled else ""
+            ),
             "public_detection_noise_evidence_records": evidence_records,
-            "public_detection_noise_evidence_digest": build_stable_digest(
-                {
-                    "public_detection_noise_evidence_records": (
-                        evidence_records
-                    )
-                }
+            "public_detection_noise_evidence_digest": (
+                build_stable_digest(
+                    {
+                        "public_detection_noise_evidence_records": (
+                            evidence_records
+                        )
+                    }
+                )
+                if attention_geometry_enabled
+                else ""
             ),
             "detection_qk_atomic_content_records": qk_records,
             "detection_qk_atomic_content_digest": (
@@ -848,6 +1028,8 @@ def _detection_record(
                     qk_records,
                     "detection_qk_atomic_content_records",
                 )
+                if attention_geometry_enabled
+                else ""
             ),
             "detection_qk_image_content_bindings": image_bindings,
             "detection_qk_image_content_binding_digest": (
@@ -858,16 +1040,25 @@ def _detection_record(
                         )
                     }
                 )
+                if attention_geometry_enabled
+                else ""
             ),
             "attention_relation_qk_operator_metadata_records": (
                 operator_records
             ),
             "attention_relation_qk_operator_metadata_digest": (
                 qk_operator_metadata_records_digest(operator_records)
+                if attention_geometry_enabled
+                else ""
             ),
         },
     }
-    return bind_formal_detection_record(record)
+    return bind_formal_detection_record(
+        record,
+        lf_weight=lf_weight,
+        tail_robust_weight=tail_robust_weight,
+        tail_fraction=tail_fraction,
+    )
 
 
 def _final_observability(
@@ -1083,10 +1274,99 @@ def _binding_inputs() -> dict[str, Any]:
         "carrier_only_final_image_preservation": {"semantic_cosine": 0.98},
         "carrier_only_counterfactual": {"role": "carrier_only"},
         "attention_geometry_enabled": True,
+        "image_alignment_enabled": True,
+        "semantic_routing_enabled": True,
         "null_space_enabled": True,
         "full_active_branches": _BRANCHES,
         "carrier_only_active_branches": _CARRIER_BRANCHES,
     }
+
+
+def _paired_detection_records(
+    *,
+    images: dict[str, dict[str, Any]],
+    update_record: dict[str, Any],
+    attention_geometry_enabled: bool,
+    image_alignment_enabled: bool,
+    lf_enabled: bool,
+    tail_robust_enabled: bool,
+) -> list[dict[str, Any]]:
+    """按实际方法开关构造注册密钥和 wrong-key 两次盲检记录."""
+
+    if lf_enabled and tail_robust_enabled:
+        lf_weight, tail_weight = 0.7, 0.3
+    elif lf_enabled:
+        lf_weight, tail_weight = 1.0, 0.0
+    elif tail_robust_enabled:
+        lf_weight, tail_weight = 0.0, 1.0
+    else:
+        raise ValueError("正式方法至少需要一个内容检测分支")
+    evaluations_per_detection = (
+        2
+        if image_alignment_enabled
+        else (1 if attention_geometry_enabled else 0)
+    )
+    common = {
+        "evaluated_path": images["watermarked_image"]["image_path"],
+        "evaluated_file_sha256": images["watermarked_image"][
+            "image_file_sha256"
+        ],
+        "evaluated_rgb_sha256": images["watermarked_image"][
+            "image_rgb_uint8_content_sha256"
+        ],
+        "attention_geometry_enabled": attention_geometry_enabled,
+        "include_aligned_evaluation": image_alignment_enabled,
+        "aligned_rgb_sha256": (
+            images["watermarked_image"][
+                "image_rgb_uint8_content_sha256"
+            ]
+            if image_alignment_enabled
+            else None
+        ),
+        "lf_weight": lf_weight,
+        "tail_robust_weight": tail_weight,
+        "tail_fraction": float(update_record["tail_fraction"]),
+    }
+    return [
+        _detection_record(
+            sample_role="positive_source",
+            detection_key_role=REGISTERED_WATERMARK_KEY_ROLE,
+            source_path=images["clean_image"]["image_path"],
+            source_file_sha256=images["clean_image"]["image_file_sha256"],
+            source_rgb_sha256=images["clean_image"][
+                "image_rgb_uint8_content_sha256"
+            ],
+            lf_template_content_sha256=update_record[
+                "lf_template_content_sha256"
+            ],
+            tail_template_content_sha256=update_record[
+                "tail_template_content_sha256"
+            ],
+            digest_offset=15000,
+            evaluation_index_offset=3,
+            **common,
+        ),
+        _detection_record(
+            sample_role="wrong_key_negative",
+            detection_key_role=REGISTERED_WRONG_KEY_ROLE,
+            source_path=images["watermarked_image"]["image_path"],
+            source_file_sha256=images["watermarked_image"][
+                "image_file_sha256"
+            ],
+            source_rgb_sha256=images["watermarked_image"][
+                "image_rgb_uint8_content_sha256"
+            ],
+            lf_template_content_sha256=(
+                _sha256(16003) if lf_enabled else ""
+            ),
+            tail_template_content_sha256=(
+                _sha256(16004) if tail_robust_enabled else ""
+            ),
+            digest_offset=16000,
+            evaluation_index_offset=3 + evaluations_per_detection,
+            **common,
+        ),
+    ]
 
 
 @pytest.mark.quick
@@ -1101,6 +1381,209 @@ def test_scientific_content_binding_digest_is_recomputable() -> None:
     assert recompute_scientific_content_binding_digest(record) == record[
         "scientific_content_binding_digest"
     ]
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("config_changes", "branches"),
+    (
+        ({"semantic_routing_enabled": False}, _BRANCHES),
+        ({"lf_enabled": False}, ("tail_robust", "attention_geometry")),
+        ({"tail_robust_enabled": False}, ("lf_content", "attention_geometry")),
+        ({"attention_geometry_enabled": False}, _CARRIER_BRANCHES),
+        ({"null_space_enabled": False}, _BRANCHES),
+        ({"tail_truncation_enabled": False}, _BRANCHES),
+    ),
+)
+def test_update_content_identity_accepts_only_actual_ablation_atoms(
+    config_changes: dict[str, bool],
+    branches: tuple[str, ...],
+) -> None:
+    """正式消融记录必须只包含实际执行的风险、分支、基底和 Q/K 原子."""
+
+    config = replace(SemanticWatermarkRuntimeConfig(), **config_changes)
+    record = _update_record(
+        branches,
+        step_index=6,
+        digest_offset=17000,
+        config=config,
+    )
+    identity = validate_scientific_update_content_identity(
+        record,
+        expected_branches=branches,
+        null_space_enabled=config.null_space_enabled,
+        semantic_routing_enabled=config.semantic_routing_enabled,
+    )
+
+    assert identity["active_carrier_branches"] == list(branches)
+    if not config.semantic_routing_enabled:
+        assert identity["risk_content_evidence"] == {
+            "semantic_routing_enabled": False,
+            "active_carrier_branches": list(branches),
+            "risk_signal_content_records": {},
+            "branch_risk_content_records": {},
+        }
+    if not config.lf_enabled:
+        assert record["lf_template_content_sha256"] == ""
+        assert record["lf_update_content_sha256"] == ""
+    if not config.tail_robust_enabled:
+        assert record["tail_template_content_sha256"] == ""
+        assert record["tail_robust_update_content_sha256"] == ""
+    if not config.attention_geometry_enabled:
+        assert record["attention_qk_atomic_content_records"] == []
+        assert record["attention_geometry_update_content_sha256"] == ""
+    if not config.null_space_enabled:
+        assert record["quantized_write_jacobian_gate_applicable"] is False
+        assert all(
+            field_name not in branch_record
+            for branch_record in record["branch_risk_records"].values()
+            for field_name in _RISK_POST_NULL_FIELDS
+        )
+        assert all(
+            item["solver"] == "full_latent_space_ablation"
+            for item in record["null_space_records"].values()
+        )
+    if not config.tail_truncation_enabled:
+        assert record["tail_fraction"] == 1.0
+        assert record["tail_selected_element_count"] == (
+            record["tail_template_element_count"]
+        )
+        assert record["tail_threshold"] == 0.0
+
+
+@pytest.mark.quick
+def test_update_content_identity_rejects_disabled_mechanism_residue() -> None:
+    """已禁用机制重新出现任何决策原子时, 科学身份复验必须失败."""
+
+    risk_config = replace(
+        SemanticWatermarkRuntimeConfig(),
+        semantic_routing_enabled=False,
+    )
+    risk_record = _update_record(
+        _BRANCHES,
+        step_index=6,
+        digest_offset=18000,
+        config=risk_config,
+    )
+    risk_record["semantic_risk_signal_content_sha256"] = _sha256(18001)
+    with pytest.raises(ValueError, match="风险路由关闭"):
+        validate_scientific_update_content_identity(
+            risk_record,
+            expected_branches=_BRANCHES,
+            null_space_enabled=True,
+            semantic_routing_enabled=False,
+        )
+
+    carrier_config = replace(
+        SemanticWatermarkRuntimeConfig(),
+        lf_enabled=False,
+    )
+    carrier_record = _update_record(
+        ("tail_robust", "attention_geometry"),
+        step_index=6,
+        digest_offset=19000,
+        config=carrier_config,
+    )
+    carrier_record["lf_template_content_sha256"] = _sha256(19001)
+    with pytest.raises(ValueError, match="禁用 LF"):
+        validate_scientific_update_content_identity(
+            carrier_record,
+            expected_branches=("tail_robust", "attention_geometry"),
+            null_space_enabled=True,
+            semantic_routing_enabled=True,
+        )
+
+
+@pytest.mark.quick
+def test_scientific_binding_alignment_ablation_keeps_raw_qk_only() -> None:
+    """关闭 alignment 后, 总绑定仍应接受 raw Q/K 并拒绝 aligned 原子."""
+
+    inputs = _binding_inputs()
+    images = inputs["final_image_records"]
+    update_record = inputs["full_update_records"][0]
+    inputs["detection_records"] = _paired_detection_records(
+        images=images,
+        update_record=update_record,
+        attention_geometry_enabled=True,
+        image_alignment_enabled=False,
+        lf_enabled=True,
+        tail_robust_enabled=True,
+    )
+    inputs["image_alignment_enabled"] = False
+
+    binding = build_scientific_content_binding_record(**inputs)
+
+    assert all(
+        identity["raw_attention_geometry_score"] is not None
+        and identity["alignment_digest"] == ""
+        for identity in binding["detection_content_identities"]
+    )
+
+
+@pytest.mark.quick
+def test_scientific_binding_accepts_attention_geometry_disabled_execution() -> None:
+    """关闭 attention geometry 的真实重运行应使用双载体和双图证据."""
+
+    config = replace(
+        SemanticWatermarkRuntimeConfig(),
+        attention_geometry_enabled=False,
+    )
+    full_record = _update_record(
+        _CARRIER_BRANCHES,
+        step_index=6,
+        digest_offset=20000,
+        config=config,
+    )
+    images = {
+        "clean_image": _abstract_image_record(
+            "outputs/test/no_attention_clean.png",
+            21001,
+        ),
+        "watermarked_image": _abstract_image_record(
+            "outputs/test/no_attention_watermarked.png",
+            21003,
+        ),
+    }
+    detection_records = _paired_detection_records(
+        images=images,
+        update_record=full_record,
+        attention_geometry_enabled=False,
+        image_alignment_enabled=False,
+        lf_enabled=True,
+        tail_robust_enabled=True,
+    )
+
+    binding = build_scientific_content_binding_record(
+        run_id="scientific-content-binding-no-attention",
+        method_definition_digest=(
+            semantic_conditioned_latent_method_definition_digest()
+        ),
+        scientific_unit_config_digest=_sha256(21005),
+        full_update_records=[full_record],
+        carrier_only_update_records=[],
+        detection_records=detection_records,
+        detection_key_plan=build_detection_key_plan_record(
+            _FIXTURE_REGISTERED_KEY_MATERIAL
+        ),
+        final_image_records=images,
+        final_image_attention_observability=None,
+        final_image_preservation={"semantic_cosine": 0.99},
+        carrier_only_final_image_preservation=None,
+        carrier_only_counterfactual=None,
+        attention_geometry_enabled=False,
+        image_alignment_enabled=False,
+        semantic_routing_enabled=True,
+        null_space_enabled=True,
+        full_active_branches=_CARRIER_BRANCHES,
+        carrier_only_active_branches=(),
+    )
+
+    assert binding["carrier_only_update_content_identities"] == []
+    assert binding["final_image_qk_atomic_content_digest"] == ""
+    assert all(
+        identity["raw_attention_geometry_score"] is None
+        for identity in binding["detection_content_identities"]
+    )
 
 
 @pytest.mark.quick
@@ -1582,6 +2065,8 @@ def _artifact_fixture(
         carrier_only_final_image_preservation=carrier_preservation,
         carrier_only_counterfactual=counterfactual,
         attention_geometry_enabled=True,
+        image_alignment_enabled=True,
+        semantic_routing_enabled=True,
         null_space_enabled=True,
         full_active_branches=_BRANCHES,
         carrier_only_active_branches=_CARRIER_BRANCHES,

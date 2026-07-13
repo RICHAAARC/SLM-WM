@@ -56,11 +56,6 @@ from experiments.protocol.formal_randomization import (
     formal_randomization_repeat_ids,
     formal_randomization_repeat_registry_digest,
     formal_randomization_repeats,
-    formal_runtime_randomization_plan_record,
-)
-from experiments.protocol.method_runtime_config import (
-    FORMAL_METHOD_PACKAGE_ROOT,
-    load_formal_method_runtime_config,
 )
 from experiments.protocol.splits import build_group_split_counts
 from experiments.runtime.image_metrics import measured_score_retention
@@ -110,14 +105,6 @@ from paper_experiments.analysis.result_analysis_payload import (
 )
 from paper_experiments.baselines.formal_import import (
     build_primary_baseline_observation_metric_values,
-)
-
-
-_FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
-    FORMAL_METHOD_PACKAGE_ROOT
-)
-_FORMAL_RUNTIME_RANDOMIZATION_PLAN = formal_runtime_randomization_plan_record(
-    _FORMAL_METHOD_CONFIG.seed
 )
 
 
@@ -177,6 +164,7 @@ class ResultClosureGateInput:
     expected_test_prompt_id_digest: str
     expected_prompt_split_by_id: dict[str, str]
     expected_prompt_digest_by_id: dict[str, str]
+    expected_prompt_index_by_id: dict[str, int]
     source_file_sha256: dict[str, str]
     attack_report: dict[str, Any]
     attack_detection_records: tuple[dict[str, Any], ...]
@@ -3643,10 +3631,6 @@ def _ablation_atomic_record_rebuild_ready(
         Mapping,
     ):
         return False
-    if manifest_config.get("formal_randomization_plan") != (
-        _FORMAL_RUNTIME_RANDOMIZATION_PLAN
-    ):
-        return False
     try:
         rebuilt = rebuild_and_validate_ablation_runtime_aggregates(
             bundle.ablation_runtime_records,
@@ -3659,6 +3643,7 @@ def _ablation_atomic_record_rebuild_ready(
             expected_ablation_ids=FORMAL_RUNTIME_RERUN_ABLATION_IDS,
             expected_prompt_split_by_id=bundle.expected_prompt_split_by_id,
             expected_prompt_digest_by_id=bundle.expected_prompt_digest_by_id,
+            expected_prompt_index_by_id=bundle.expected_prompt_index_by_id,
             expected_runtime_config_by_ablation_id={
                 spec.ablation_id: spec.to_dict()
                 for spec in FORMAL_RUNTIME_RERUN_ABLATION_SPECS
@@ -3668,6 +3653,14 @@ def _ablation_atomic_record_rebuild_ready(
                 f"{bundle.expected_paper_claim_scale}/runs"
             ),
             expected_target_fpr=bundle.expected_target_fpr,
+            formal_randomization_plan=manifest_config.get(
+                "formal_randomization_plan",
+                {},
+            ),
+            randomization_repeat_identity=manifest_config.get(
+                "randomization_repeat_identity",
+                {},
+            ),
         )
     except (FormalRecordStatisticsError, KeyError, TypeError, ValueError):
         return False

@@ -834,10 +834,18 @@ def test_distance_modulated_component_changes_registration_objective(
     )
     original_builder = alignment_module.build_attention_relation_descriptor
 
-    def without_distance_modulation(attention: object, token_indices: tuple[int, ...]):
+    def without_distance_modulation(
+        attention: object,
+        token_indices: tuple[int, ...],
+        component_weights: tuple[float, ...],
+    ):
         """仅清零第4通道, 保留其余三通道和组件协议身份。"""
 
-        descriptor = original_builder(attention, token_indices)
+        descriptor = original_builder(
+            attention,
+            token_indices,
+            component_weights,
+        )
         values = descriptor.values.clone()
         values[..., 3] = 0.0
         return replace(descriptor, values=values)

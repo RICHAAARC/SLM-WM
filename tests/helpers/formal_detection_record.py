@@ -193,6 +193,15 @@ def bind_formal_detection_record(
         "raw_attention_geometry_score",
         supplied_geometry_score,
     )
+    attention_geometry_enabled = bool(
+        metadata.get(
+            "attention_geometry_enabled",
+            alignment is not None or supplied_raw_geometry_score is not None,
+        )
+    )
+    image_alignment_enabled = bool(
+        metadata.get("image_alignment_enabled", alignment is not None)
+    )
     if isinstance(alignment, Mapping):
         relation_sync_score_value = alignment.get(
             "relation_sync_score",
@@ -244,24 +253,56 @@ def bind_formal_detection_record(
         resolved["registration_confidence"] = registration_confidence
     elif alignment is None:
         resolved["attention_geometry_score"] = None
-        resolved["raw_attention_geometry_score"] = None
-    content_score = float(resolved["content_score"])
-    lf_score = float(resolved.get("lf_score", content_score))
-    tail_score = float(resolved.get("tail_robust_score", content_score))
+        resolved["raw_attention_geometry_score"] = (
+            float(supplied_raw_geometry_score)
+            if attention_geometry_enabled
+            and supplied_raw_geometry_score is not None
+            else None
+        )
+        resolved["registration_confidence"] = None
+        resolved["attention_sync_score"] = None
+    supplied_content_score = float(resolved["content_score"])
+    lf_score = (
+        float(resolved.get("lf_score", supplied_content_score))
+        if lf_weight > 0.0
+        else 0.0
+    )
+    tail_score = (
+        float(resolved.get("tail_robust_score", supplied_content_score))
+        if tail_robust_weight > 0.0
+        else 0.0
+    )
+    content_score = lf_weight * lf_score + tail_robust_weight * tail_score
     aligned_score_value = resolved.get("aligned_content_score")
     aligned_score = (
         None if aligned_score_value is None else float(aligned_score_value)
     )
+    if not image_alignment_enabled:
+        aligned_score = None
     aligned_lf_score = (
         None
         if aligned_score is None
-        else float(resolved.get("aligned_lf_score", aligned_score))
+        else (
+            float(resolved.get("aligned_lf_score", aligned_score))
+            if lf_weight > 0.0
+            else 0.0
+        )
     )
     aligned_tail_score = (
         None
         if aligned_score is None
-        else float(
-            resolved.get("aligned_tail_robust_score", aligned_score)
+        else (
+            float(resolved.get("aligned_tail_robust_score", aligned_score))
+            if tail_robust_weight > 0.0
+            else 0.0
+        )
+    )
+    aligned_score = (
+        None
+        if aligned_lf_score is None or aligned_tail_score is None
+        else (
+            lf_weight * aligned_lf_score
+            + tail_robust_weight * aligned_tail_score
         )
     )
     model_id = str(metadata.get("model_id", _FORMAL_METHOD_CONFIG.model_id))
@@ -301,11 +342,15 @@ def bind_formal_detection_record(
             _FORMAL_METHOD_CONFIG.attention_unstable_pair_weight,
         )
     )
-    lf_template_sha256 = str(
-        resolved.get(
-            "lf_template_content_sha256",
-            metadata.get("lf_template_content_sha256", "a" * 64),
+    lf_template_sha256 = (
+        str(
+            resolved.get(
+                "lf_template_content_sha256",
+                metadata.get("lf_template_content_sha256", "a" * 64),
+            )
         )
+        if lf_weight > 0.0
+        else ""
     )
     protocol_digest = _LF_PROTOCOL["lf_carrier_protocol_digest"]
     tail_protocol = tail_robust_carrier_protocol_record(
@@ -313,11 +358,15 @@ def bind_formal_detection_record(
         prg_version=_FORMAL_METHOD_CONFIG.keyed_prg_version,
     )
     tail_protocol_digest = tail_protocol["tail_carrier_protocol_digest"]
-    tail_template_sha256 = str(
-        resolved.get(
-            "tail_template_content_sha256",
-            metadata.get("tail_template_content_sha256", "c" * 64),
+    tail_template_sha256 = (
+        str(
+            resolved.get(
+                "tail_template_content_sha256",
+                metadata.get("tail_template_content_sha256", "c" * 64),
+            )
         )
+        if tail_robust_weight > 0.0
+        else ""
     )
     tail_template_shape_value = resolved.get(
         "tail_template_shape",
@@ -332,14 +381,24 @@ def bind_formal_detection_record(
         )
     ):
         raise ValueError("测试 tail 模板形状必须是4维正整数序列")
-    tail_template_shape = list(tail_template_shape_value)
-    tail_template_element_count = math.prod(tail_template_shape)
-    tail_selected_element_count = math.ceil(
-        tail_template_element_count * tail_fraction
+    tail_template_shape = (
+        list(tail_template_shape_value)
+        if tail_robust_weight > 0.0
+        else []
     )
-    tail_threshold = 1.0
+    tail_template_element_count = (
+        math.prod(tail_template_shape) if tail_template_shape else 0
+    )
+    tail_selected_element_count = (
+        math.ceil(tail_template_element_count * tail_fraction)
+        if tail_template_element_count
+        else 0
+    )
+    tail_threshold = 1.0 if tail_robust_weight > 0.0 else 0.0
     tail_retained_fraction = (
         tail_selected_element_count / tail_template_element_count
+        if tail_template_element_count
+        else 0.0
     )
     component_weights = list(
         _FORMAL_METHOD_CONFIG.attention_relation_component_weights
@@ -355,18 +414,8 @@ def bind_formal_detection_record(
                 attention_sync_score_threshold
             ),
             "rescue_margin_low": rescue_margin_low,
-            "attention_geometry_enabled": bool(
-                metadata.get(
-                    "attention_geometry_enabled",
-                    alignment is not None,
-                )
-            ),
-            "image_alignment_enabled": bool(
-                metadata.get(
-                    "image_alignment_enabled",
-                    aligned_score is not None,
-                )
-            ),
+            "attention_geometry_enabled": attention_geometry_enabled,
+            "image_alignment_enabled": image_alignment_enabled,
         }
     )
     requested_geometry_reliable = resolved.get("geometry_reliable")
@@ -446,6 +495,7 @@ def bind_formal_detection_record(
         {
             "lf_score": lf_score,
             "tail_robust_score": tail_score,
+            "content_score": content_score,
             "lf_weight": lf_weight,
             "tail_robust_weight": tail_robust_weight,
             "tail_fraction": tail_fraction,
@@ -461,6 +511,7 @@ def bind_formal_detection_record(
             "raw_content_margin": raw_margin,
             "aligned_lf_score": aligned_lf_score,
             "aligned_tail_robust_score": aligned_tail_score,
+            "aligned_content_score": aligned_score,
             "aligned_content_margin": (
                 aligned_content_margin
             ),

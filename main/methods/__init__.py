@@ -70,6 +70,7 @@ from main.methods.semantic import (
     BranchRiskConfig,
     BranchRiskFieldBundle,
     CarrierRiskField,
+    build_active_branch_risk_fields,
     build_branch_risk_fields,
 )
 from main.methods.subspace import (
@@ -143,6 +144,7 @@ __all__ = [
     "attention_geometry_score",
     "attention_relation_component_protocol",
     "build_attention_relation_descriptor",
+    "build_active_branch_risk_fields",
     "build_branch_risk_fields",
     "build_exact_jacobian_linearization",
     "build_low_frequency_template",

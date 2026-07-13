@@ -252,6 +252,7 @@ FORMAL_RUNTIME_RERUN_ABLATION_SPECS = (
     RuntimeRerunAblationSpec(
         "without_attention_geometry",
         attention_geometry_enabled=False,
+        image_alignment_enabled=False,
     ),
     RuntimeRerunAblationSpec(
         "without_image_alignment",
@@ -301,7 +302,7 @@ def _canonical_prompt_contract(
     root_path: Path,
     paper_run: Any,
     base_configs: tuple[SemanticWatermarkRuntimeConfig, ...],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, int]]:
     """核验消融配置精确覆盖当前论文运行的规范 Prompt 与 split.
 
     此处设计的主要考虑在于: 仅比较 Prompt 数量无法发现重复 Prompt、跨层级
@@ -343,22 +344,26 @@ def _canonical_prompt_contract(
             prompt_index=prompt_index_by_id[config.prompt_id],
         )
     split_prompt_ids = group_prompt_ids_by_split(canonical_records)
-    return {
-        "prompt_id_digest": build_stable_digest(sorted(expected_by_id)),
-        "calibration_prompt_id_digest": build_stable_digest(
-            sorted(split_prompt_ids["calibration"])
-        ),
-        "test_prompt_id_digest": build_stable_digest(
-            sorted(split_prompt_ids["test"])
-        ),
-        "prompt_protocol_exact_set_ready": True,
-    }
+    return (
+        {
+            "prompt_id_digest": build_stable_digest(sorted(expected_by_id)),
+            "calibration_prompt_id_digest": build_stable_digest(
+                sorted(split_prompt_ids["calibration"])
+            ),
+            "test_prompt_id_digest": build_stable_digest(
+                sorted(split_prompt_ids["test"])
+            ),
+            "prompt_protocol_exact_set_ready": True,
+        },
+        prompt_index_by_id,
+    )
 
 
 def _formal_attack_coverage_ready(
     detections: tuple[dict[str, Any], ...],
     *,
     split: str,
+    expected_generation_seed_random: int,
 ) -> bool:
     """核验单个消融运行只在 test split 精确执行完整正式攻击集."""
 
@@ -390,7 +395,7 @@ def _formal_attack_coverage_ready(
         record = actual_by_key[key][0]
         try:
             expected_attack_seed = formal_attack_seed_random(
-                record.get("generation_seed_random"),
+                expected_generation_seed_random,
                 config.attack_id,
             )
         except (TypeError, ValueError):
@@ -403,6 +408,8 @@ def _formal_attack_coverage_ready(
                 record.get("attack_config_digest") == attack_config_digest(config),
                 record.get("attack_parameters") == config.attack_parameters,
                 record.get("attack_performed") is True,
+                record.get("generation_seed_random")
+                == expected_generation_seed_random,
                 record.get("attack_seed_random") == expected_attack_seed,
                 record.get("formal_attack_seed_protocol_digest")
                 == attack_seed_protocol_digest,
@@ -547,7 +554,7 @@ def run_runtime_rerun_ablations(
     resolved_base_configs = tuple(base_configs)
     if not resolved_base_configs:
         raise ValueError("真实重运行消融至少需要一个 Prompt 配置")
-    prompt_contract = _canonical_prompt_contract(
+    prompt_contract, canonical_prompt_index_by_id = _canonical_prompt_contract(
         root_path,
         paper_run,
         resolved_base_configs,
@@ -599,7 +606,8 @@ def run_runtime_rerun_ablations(
         )
         return progress
 
-    for prompt_index, base_config in enumerate(resolved_base_configs):
+    for base_config in resolved_base_configs:
+        prompt_index = canonical_prompt_index_by_id[base_config.prompt_id]
         for spec in resolved_specs:
             run_config = spec.apply(base_config, output_dir)
             result = load_completed_semantic_watermark_runtime_result(run_config, root=root_path)
@@ -673,6 +681,11 @@ def run_runtime_rerun_ablations(
             formal_attack_coverage_ready = _formal_attack_coverage_ready(
                 detections,
                 split=str(entry["split"]),
+                expected_generation_seed_random=int(
+                    entry["runtime_result"]["metadata"][
+                        "formal_randomization_reference"
+                    ]["generation_seed_random"]
+                ),
             )
             formal_records.append(
                 {

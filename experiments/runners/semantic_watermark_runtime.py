@@ -12,7 +12,7 @@ import math
 from pathlib import Path
 import time
 from types import SimpleNamespace
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from experiments.protocol.method_runtime_config import (
     FORMAL_METHOD_PACKAGE_ROOT,
@@ -121,7 +121,7 @@ from main.methods.method_definition import (
 from main.methods.semantic import (
     BRANCH_NAMES,
     BranchRiskConfig,
-    build_branch_risk_fields,
+    build_active_branch_risk_fields,
 )
 from main.methods.subspace import (
     ExactJacobianLinearization,
@@ -1153,6 +1153,8 @@ def _scientific_content_binding_validation_parameters(
         attention_geometry_enabled = config.attention_geometry_enabled
         return {
             "attention_geometry_enabled": attention_geometry_enabled,
+            "image_alignment_enabled": config.image_alignment_enabled,
+            "semantic_routing_enabled": config.semantic_routing_enabled,
             "null_space_enabled": config.null_space_enabled,
             "full_active_branches": list(
                 _active_carrier_branch_names(config)
@@ -1183,6 +1185,8 @@ def _scientific_content_binding_validation_parameters(
         "lf_enabled",
         "tail_robust_enabled",
         "attention_geometry_enabled",
+        "image_alignment_enabled",
+        "semantic_routing_enabled",
         "null_space_enabled",
     )
     if any(not isinstance(payload.get(field_name), bool) for field_name in bool_fields):
@@ -1211,6 +1215,8 @@ def _scientific_content_binding_validation_parameters(
     attention_geometry_enabled = payload["attention_geometry_enabled"]
     return {
         "attention_geometry_enabled": attention_geometry_enabled,
+        "image_alignment_enabled": payload["image_alignment_enabled"],
+        "semantic_routing_enabled": payload["semantic_routing_enabled"],
         "null_space_enabled": payload["null_space_enabled"],
         "full_active_branches": active_branches,
         "carrier_only_active_branches": (
@@ -1273,6 +1279,12 @@ def _scientific_content_binding_artifact_ready(
         return False
     attention_geometry_enabled = validation_parameters[
         "attention_geometry_enabled"
+    ]
+    image_alignment_enabled = validation_parameters[
+        "image_alignment_enabled"
+    ]
+    semantic_routing_enabled = validation_parameters[
+        "semantic_routing_enabled"
     ]
     null_space_enabled = validation_parameters["null_space_enabled"]
     full_active_branches = validation_parameters["full_active_branches"]
@@ -1478,6 +1490,8 @@ def _scientific_content_binding_artifact_ready(
             ),
             carrier_only_counterfactual=counterfactual,
             attention_geometry_enabled=attention_geometry_enabled,
+            image_alignment_enabled=image_alignment_enabled,
+            semantic_routing_enabled=semantic_routing_enabled,
             null_space_enabled=null_space_enabled,
             full_active_branches=full_active_branches,
             carrier_only_active_branches=carrier_only_active_branches,
@@ -1670,6 +1684,21 @@ def _branch_budget(
     return spatial.expand(batch, channels, height, width).contiguous()
 
 
+def _constant_branch_budget(latent: Any, budget_ceiling: float) -> Any:
+    """为移除风险路由的消融直接构造全支持常量预算."""
+
+    import torch
+
+    if latent.ndim != 4:
+        raise ValueError("常量分支预算要求 NCHW latent")
+    return torch.full_like(
+        latent,
+        float(budget_ceiling),
+        dtype=torch.float32,
+        memory_format=torch.contiguous_format,
+    )
+
+
 def _active_carrier_branch_names(
     config: SemanticWatermarkRuntimeConfig,
 ) -> tuple[str, ...]:
@@ -1686,11 +1715,7 @@ def _active_carrier_branch_names(
 def _required_branch_risk_eligibility(
     config: SemanticWatermarkRuntimeConfig,
 ) -> tuple[str, ...]:
-    """返回需要执行风险资格门禁的活动分支。
-
-    完整方法只对实际参与嵌入的分支执行 fail-closed 门禁. 移除风险路由的正式
-    消融返回空集合, 避免已移除机制继续筛掉高风险样本.
-    """
+    """返回需要通过风险资格门禁的活动载体分支."""
 
     if not config.semantic_routing_enabled:
         return ()
@@ -1783,11 +1808,13 @@ _BRANCH_RISK_BASE_CONTENT_FIELDS = (
     "budget_values_content_sha256",
     "eligible_mask_content_sha256",
 )
-_BRANCH_RISK_BOUNDED_CONTENT_FIELDS = (
+_BRANCH_RISK_ENVELOPE_CONTENT_FIELDS = (
     "effective_budget_values_content_sha256",
     "branch_unit_direction_content_sha256",
     "branch_budget_envelope_content_sha256",
     "branch_written_update_content_sha256",
+)
+_BRANCH_RISK_POST_NULL_CONTENT_FIELDS = (
     "branch_post_risk_direction_content_sha256",
     "branch_post_risk_reference_direction_content_sha256",
     "branch_post_risk_response_content_sha256",
@@ -1798,37 +1825,66 @@ _BRANCH_RISK_BOUNDED_CONTENT_FIELDS = (
 def _branch_risk_content_evidence(
     risk_signal_source: Mapping[str, Any],
     branch_risk_records: Mapping[str, Mapping[str, Any]],
+    *,
+    semantic_routing_enabled: bool,
+    null_space_enabled: bool,
+    active_branch_names: tuple[str, ...],
 ) -> dict[str, Any]:
     """按唯一角色集合构造可重算的风险输入与分支内容证据。"""
 
-    if set(branch_risk_records) != set(BRANCH_NAMES):
-        raise ValueError("branch_risk_records 必须覆盖三个冻结分支")
+    if not semantic_routing_enabled:
+        if risk_signal_source or branch_risk_records:
+            raise ValueError("风险路由关闭时不得保留风险信号或分支风险原子")
+        return {
+            "semantic_routing_enabled": False,
+            "active_carrier_branches": list(active_branch_names),
+            "risk_signal_content_records": {},
+            "branch_risk_content_records": {},
+        }
+    if set(branch_risk_records) != set(active_branch_names):
+        raise ValueError("branch_risk_records 必须精确覆盖活动载体分支")
     risk_signal_content_records = {
         field_name: risk_signal_source.get(field_name)
         for field_name in _RISK_SIGNAL_CONTENT_FIELDS
+        if risk_signal_source.get(field_name) not in {None, ""}
     }
     branch_risk_content_records: dict[str, dict[str, Any]] = {}
-    for branch_name in BRANCH_NAMES:
+    for branch_name in active_branch_names:
         branch_record = branch_risk_records[branch_name]
         content_record = {
             field_name: branch_record.get(field_name)
             for field_name in _BRANCH_RISK_BASE_CONTENT_FIELDS
         }
-        bounded_fields_present = tuple(
-            field_name in branch_record
-            for field_name in _BRANCH_RISK_BOUNDED_CONTENT_FIELDS
+        if any(
+            field_name not in branch_record
+            for field_name in _BRANCH_RISK_ENVELOPE_CONTENT_FIELDS
+        ):
+            raise ValueError("活动分支缺少完整风险包络内容字段")
+        content_record.update(
+            {
+                field_name: branch_record[field_name]
+                for field_name in _BRANCH_RISK_ENVELOPE_CONTENT_FIELDS
+            }
         )
-        if any(bounded_fields_present) and not all(bounded_fields_present):
-            raise ValueError("活动分支的风险有界内容字段必须完整出现")
-        if all(bounded_fields_present):
+        post_null_fields_present = tuple(
+            field_name in branch_record
+            for field_name in _BRANCH_RISK_POST_NULL_CONTENT_FIELDS
+        )
+        if null_space_enabled:
+            if not all(post_null_fields_present):
+                raise ValueError("Null Space 活动分支缺少 post-risk JVP 内容字段")
             content_record.update(
                 {
                     field_name: branch_record[field_name]
-                    for field_name in _BRANCH_RISK_BOUNDED_CONTENT_FIELDS
+                    for field_name in _BRANCH_RISK_POST_NULL_CONTENT_FIELDS
                 }
             )
+        elif any(post_null_fields_present):
+            raise ValueError("Null Space 关闭时不得保留 post-risk JVP 内容字段")
         branch_risk_content_records[branch_name] = content_record
     return {
+        "semantic_routing_enabled": True,
+        "active_carrier_branches": list(active_branch_names),
         "risk_signal_content_records": risk_signal_content_records,
         "branch_risk_content_records": branch_risk_content_records,
     }
@@ -3219,6 +3275,38 @@ def _bind_public_detection_noise_qk_evidence(
     )
 
 
+def _runtime_public_detection_noise_identity(
+    detections: Sequence[Mapping[str, Any]],
+    *,
+    attention_geometry_enabled: bool,
+) -> tuple[dict[str, Any] | None, str]:
+    """仅在注意力检测实际执行时提取公开噪声 PRG 身份."""
+
+    if not attention_geometry_enabled:
+        return None, ""
+    if not detections:
+        raise RuntimeError("注意力检测缺少可提取公开噪声身份的记录")
+    first_detection = detections[0]
+    metadata = first_detection.get("metadata")
+    if not isinstance(metadata, Mapping):
+        raise RuntimeError("注意力检测缺少公开噪声 metadata")
+    evidence_records = metadata.get("public_detection_noise_evidence_records")
+    if not isinstance(evidence_records, list) or not evidence_records:
+        raise RuntimeError("注意力检测缺少公开噪声证据")
+    identity = evidence_records[0].get("public_detection_noise_prg_identity")
+    digest = first_detection.get("public_detection_noise_prg_identity_digest")
+    if not isinstance(identity, Mapping) or not _is_sha256_hex(digest):
+        raise RuntimeError("注意力检测的公开噪声 PRG 身份无效")
+    resolved_identity = dict(identity)
+    nested_digest = resolved_identity.pop(
+        "public_detection_noise_prg_identity_digest",
+        None,
+    )
+    if nested_digest != digest or build_stable_digest(resolved_identity) != digest:
+        raise RuntimeError("注意力检测的公开噪声 PRG 身份不能独立重建")
+    return dict(identity), str(digest)
+
+
 def _align_image(image: Any, alignment: Any) -> Any:
     """依据恢复的仿射参考系对待检图像执行可复现重采样。"""
 
@@ -3327,9 +3415,6 @@ def _carrier_only_counterfactual_identity(
         "combined_update_content_sha256",
         "quantized_write_update_content_sha256",
         "adjacent_step_reference_latent_content_sha256",
-        "lf_update_content_sha256",
-        "tail_robust_update_content_sha256",
-        "attention_geometry_update_content_sha256",
     )
 
     def validate_common_record(
@@ -3365,6 +3450,17 @@ def _carrier_only_counterfactual_identity(
                 character not in "0123456789abcdef" for character in value
             ):
                 raise RuntimeError("反事实更新原子缺少完整 tensor 内容 SHA-256")
+        for branch_name, field_name in (
+            ("lf_content", "lf_update_content_sha256"),
+            ("tail_robust", "tail_robust_update_content_sha256"),
+            ("attention_geometry", "attention_geometry_update_content_sha256"),
+        ):
+            value = record.get(field_name)
+            if branch_name in expected_branches:
+                if not _is_sha256_hex(value):
+                    raise RuntimeError("活动分支缺少真实更新 Tensor 摘要")
+            elif value != "":
+                raise RuntimeError("已禁用分支仍保留更新 Tensor 原子")
         branch_update_content_records = {
             "lf_content": record.get("lf_update_content_sha256"),
             "tail_robust": record.get("tail_robust_update_content_sha256"),
@@ -3377,14 +3473,21 @@ def _carrier_only_counterfactual_identity(
         ):
             raise RuntimeError("反事实更新原子的三分支 Tensor 摘要不一致")
         branch_risk_records = record.get("branch_risk_records")
+        semantic_routing_enabled = metadata.get("semantic_routing_enabled") is True
+        expected_risk_branches = (
+            set(expected_branches) if semantic_routing_enabled else set()
+        )
         if not isinstance(branch_risk_records, Mapping) or set(
             branch_risk_records
-        ) != set(BRANCH_NAMES):
-            raise RuntimeError("反事实更新原子缺少三个分支风险记录")
+        ) != expected_risk_branches:
+            raise RuntimeError("反事实更新原子的活动风险记录集合无效")
         try:
             branch_risk_content_evidence = _branch_risk_content_evidence(
                 record,
                 branch_risk_records,
+                semantic_routing_enabled=semantic_routing_enabled,
+                null_space_enabled=null_space_enabled,
+                active_branch_names=expected_branches,
             )
         except ValueError as error:
             raise RuntimeError(
@@ -3415,7 +3518,11 @@ def _carrier_only_counterfactual_identity(
             not isinstance(step_index, int)
             or record.get("adjacent_step_reference_index") != step_index - 1
             or record.get("adjacent_step_stability_status")
-            != "measured_from_immediately_previous_scheduler_step"
+            != (
+                "measured_from_immediately_previous_scheduler_step"
+                if semantic_routing_enabled
+                else "not_applicable_semantic_routing_disabled"
+            )
         ):
             raise RuntimeError("反事实更新原子的相邻调度步稳定度身份无效")
         expected_prg_digest = keyed_prg_protocol_record(
@@ -3785,115 +3892,143 @@ def run_semantic_watermark_runtime(
             raise RuntimeError("post-step 注入缺少合法的下一调度时刻")
         method_timestep = scheduler_timesteps[post_step_index]
         with torch.enable_grad():
-            signals = feature_runtime.branch_signal_maps(
-                latent.float(),
-                previous_step_latent.float(),
+            active_branch_names = _active_carrier_branch_names(
+                active_injection_config
             )
-            lf_template = build_low_frequency_template(
-                latent,
-                active_injection_config.key_material,
-                active_injection_config.carrier_model_reference,
-                active_injection_config.low_frequency_carrier_config,
-                prg_version=active_injection_config.keyed_prg_version,
+            active_branch_name_set = set(active_branch_names)
+            branch_risk_configs = _branch_risk_configs(
+                active_injection_config
             )
-            tail_template, tail_threshold, retained_fraction = build_tail_robust_template(
-                latent,
-                active_injection_config.key_material,
-                active_injection_config.carrier_model_reference,
-                active_injection_config.tail_fraction if active_injection_config.tail_truncation_enabled else 1.0,
-                prg_version=active_injection_config.keyed_prg_version,
+            active_branch_risk_configs = {
+                branch_name: branch_risk_configs[branch_name]
+                for branch_name in active_branch_names
+            }
+            effective_tail_fraction = (
+                active_injection_config.tail_fraction
+                if active_injection_config.tail_truncation_enabled
+                else 1.0
             )
-            tail_carrier_protocol = tail_robust_carrier_protocol_record(
-                (
-                    active_injection_config.tail_fraction
-                    if active_injection_config.tail_truncation_enabled
-                    else 1.0
-                ),
-                prg_version=active_injection_config.keyed_prg_version,
-            )
-            transformer_forward = _transformer_forward_function(
-                pipeline,
-                method_timestep,
-                unconditional_prompt,
-                unconditional_pooled,
-            )
-            with DifferentiableAttentionRecorder(
-                attention_modules,
-                max_tokens=active_injection_config.max_attention_tokens,
-            ) as recorder:
-                attention_gradient = (
-                    compute_attention_geometry_gradient(
-                        latent,
-                        transformer_forward,
-                        recorder,
-                        active_injection_config.key_material,
-                        prg_version=(
-                            active_injection_config.keyed_prg_version
-                        ),
-                        stable_token_fraction=(
-                            active_injection_config.attention_stable_token_fraction
-                        ),
-                        unstable_pair_weight=(
-                            active_injection_config.attention_unstable_pair_weight
-                        ),
-                        component_weights=(
-                            active_injection_config.attention_relation_component_weights
-                        ),
-                    )
-                    if active_injection_config.attention_geometry_enabled
-                    else None
+            lf_template = (
+                build_low_frequency_template(
+                    latent,
+                    active_injection_config.key_material,
+                    active_injection_config.carrier_model_reference,
+                    active_injection_config.low_frequency_carrier_config,
+                    prg_version=active_injection_config.keyed_prg_version,
                 )
-                if attention_gradient is None:
-                    recorder.clear()
-                    with torch.no_grad():
-                        transformer_forward(latent.detach().float())
-                attention_stability = attention_relation_stability_map(
-                    recorder.records,
-                    tuple(int(value) for value in latent.shape[-2:]),
-                ).detach()
+                if active_injection_config.lf_enabled
+                else None
+            )
+            tail_template = None
+            tail_threshold = 0.0
+            retained_fraction = 0.0
+            if active_injection_config.tail_robust_enabled:
+                (
+                    tail_template,
+                    tail_threshold,
+                    retained_fraction,
+                ) = build_tail_robust_template(
+                    latent,
+                    active_injection_config.key_material,
+                    active_injection_config.carrier_model_reference,
+                    effective_tail_fraction,
+                    prg_version=active_injection_config.keyed_prg_version,
+                )
+            tail_carrier_protocol = tail_robust_carrier_protocol_record(
+                effective_tail_fraction,
+                prg_version=active_injection_config.keyed_prg_version,
+            )
+            attention_gradient = None
+            attention_stability = None
+            risk_requires_attention = bool(
+                active_injection_config.semantic_routing_enabled
+                and any(
+                    risk_config.attention_instability_weight > 0.0
+                    for risk_config in active_branch_risk_configs.values()
+                )
+            )
+            attention_work_required = bool(
+                active_injection_config.attention_geometry_enabled
+                or risk_requires_attention
+            )
+            transformer_forward = None
+            if attention_work_required:
+                transformer_forward = _transformer_forward_function(
+                    pipeline,
+                    method_timestep,
+                    unconditional_prompt,
+                    unconditional_pooled,
+                )
+                with DifferentiableAttentionRecorder(
+                    attention_modules,
+                    max_tokens=active_injection_config.max_attention_tokens,
+                ) as recorder:
+                    if active_injection_config.attention_geometry_enabled:
+                        attention_gradient = compute_attention_geometry_gradient(
+                            latent,
+                            transformer_forward,
+                            recorder,
+                            active_injection_config.key_material,
+                            prg_version=(
+                                active_injection_config.keyed_prg_version
+                            ),
+                            stable_token_fraction=(
+                                active_injection_config.attention_stable_token_fraction
+                            ),
+                            unstable_pair_weight=(
+                                active_injection_config.attention_unstable_pair_weight
+                            ),
+                            component_weights=(
+                                active_injection_config.attention_relation_component_weights
+                            ),
+                        )
+                    elif risk_requires_attention:
+                        recorder.clear()
+                        with torch.no_grad():
+                            transformer_forward(latent.detach().float())
+                    if risk_requires_attention:
+                        attention_stability = attention_relation_stability_map(
+                            recorder.records,
+                            tuple(int(value) for value in latent.shape[-2:]),
+                        ).detach()
+            risk_signal_content_records: dict[str, str] = {}
+            branch_fields: dict[str, Any] = {}
+            if active_injection_config.semantic_routing_enabled:
+                signals = feature_runtime.branch_signal_maps(
+                    latent.float(),
+                    previous_step_latent.float(),
+                )
                 risk_signal_content_records = {
-                    "current_decoded_rgb_content_sha256": (
-                        tensor_content_sha256(
-                            signals["current_decoded_rgb"]
-                        )
+                    "current_decoded_rgb_content_sha256": tensor_content_sha256(
+                        signals["current_decoded_rgb"]
                     ),
-                    "previous_step_decoded_rgb_content_sha256": (
-                        tensor_content_sha256(
-                            signals["previous_step_decoded_rgb"]
-                        )
+                    "previous_step_decoded_rgb_content_sha256": tensor_content_sha256(
+                        signals["previous_step_decoded_rgb"]
                     ),
-                    "clip_patch_tokens_content_sha256": (
-                        tensor_content_sha256(
-                            signals["clip_patch_tokens"]
-                        )
+                    "clip_patch_tokens_content_sha256": tensor_content_sha256(
+                        signals["clip_patch_tokens"]
                     ),
-                    "clip_cls_token_content_sha256": (
-                        tensor_content_sha256(
-                            signals["clip_cls_token"]
-                        )
+                    "clip_cls_token_content_sha256": tensor_content_sha256(
+                        signals["clip_cls_token"]
                     ),
-                    "semantic_risk_signal_content_sha256": (
-                        tensor_content_sha256(signals["semantic"])
+                    "semantic_risk_signal_content_sha256": tensor_content_sha256(
+                        signals["semantic"]
                     ),
-                    "texture_risk_signal_content_sha256": (
-                        tensor_content_sha256(signals["texture"])
+                    "texture_risk_signal_content_sha256": tensor_content_sha256(
+                        signals["texture"]
                     ),
-                    "local_contrast_risk_signal_content_sha256": (
-                        tensor_content_sha256(signals["local_contrast_risk"])
+                    "local_contrast_risk_signal_content_sha256": tensor_content_sha256(
+                        signals["local_contrast_risk"]
                     ),
-                    "adjacent_step_stability_signal_content_sha256": (
-                        tensor_content_sha256(
-                            signals["adjacent_step_stability"]
-                        )
-                    ),
-                    "attention_stability_signal_content_sha256": (
-                        tensor_content_sha256(attention_stability)
+                    "adjacent_step_stability_signal_content_sha256": tensor_content_sha256(
+                        signals["adjacent_step_stability"]
                     ),
                 }
-                branch_risk_configs = _branch_risk_configs(
-                    active_injection_config
-                )
-                risk_bundle = build_branch_risk_fields(
+                if attention_stability is not None:
+                    risk_signal_content_records[
+                        "attention_stability_signal_content_sha256"
+                    ] = tensor_content_sha256(attention_stability)
+                branch_fields = build_active_branch_risk_fields(
                     semantic_values=signals["semantic"].reshape(-1).cpu().tolist(),
                     texture_values=signals["texture"].reshape(-1).cpu().tolist(),
                     adjacent_step_stability_values=signals[
@@ -3903,268 +4038,171 @@ def run_semantic_watermark_runtime(
                         "local_contrast_risk"
                     ].reshape(-1).cpu().tolist(),
                     attention_stability_values=(
-                        attention_stability.reshape(-1)
-                        .cpu()
-                        .tolist()
+                        None
+                        if attention_stability is None
+                        else attention_stability.reshape(-1).cpu().tolist()
                     ),
-                    configs=branch_risk_configs,
+                    configs=active_branch_risk_configs,
                     risk_neutral_texture_value=(
                         active_injection_config.risk_neutral_texture_value
                     ),
-                    required_eligible_branches=_required_branch_risk_eligibility(
-                        active_injection_config
+                    required_eligible_branches=(
+                        _required_branch_risk_eligibility(
+                            active_injection_config
+                        )
                     ),
                 )
-                branch_fields = {
-                    "lf_content": risk_bundle.lf_content,
-                    "tail_robust": risk_bundle.tail_robust,
-                    "attention_geometry": risk_bundle.attention_geometry,
-                }
-                active_branch_names = _active_carrier_branch_names(
-                    active_injection_config
+                risk_bundle_digest = build_stable_digest(
+                    {
+                        branch_name: branch_field.risk_field_digest
+                        for branch_name, branch_field in branch_fields.items()
+                    }
                 )
-                active_branch_name_set = set(active_branch_names)
-                active_branch_fields = {
-                    branch_name: branch_field
-                    for branch_name, branch_field in branch_fields.items()
-                    if branch_name in active_branch_name_set
-                }
-                preferred_directions = {
-                    "lf_content": (lf_template,),
-                    "tail_robust": (tail_template,),
-                    "attention_geometry": (
-                        () if attention_gradient is None else (attention_gradient.gradient,)
-                    ),
-                }
                 effective_branch_budgets = {
                     branch_name: _branch_budget(
                         latent,
-                        branch_field,
-                        semantic_routing_enabled=(
-                            active_injection_config.semantic_routing_enabled
-                        ),
+                        branch_fields[branch_name],
+                        semantic_routing_enabled=True,
                         budget_ceiling=(
                             branch_risk_configs[branch_name].budget_ceiling
                         ),
                     )
-                    for branch_name, branch_field in active_branch_fields.items()
+                    for branch_name in active_branch_names
                 }
-                effective_branch_budget_content_records = {
-                    branch_name: tensor_content_sha256(effective_budget)
-                    for branch_name, effective_budget in (
-                        effective_branch_budgets.items()
-                    )
-                }
-                if active_injection_config.null_space_enabled:
-                    linearized_latent = latent.float()
-                    joint_feature_linearization = build_exact_jacobian_linearization(
-                        feature_runtime.full_joint_feature_vector,
-                        linearized_latent,
-                    )
-                    subspaces = {
-                        branch_name: _solve_branch_subspace(
-                            latent=linearized_latent,
-                            feature_runtime=feature_runtime,
-                            key_material=active_injection_config.key_material,
-                            branch_name=branch_name,
-                            axis_budget=effective_branch_budgets[branch_name],
-                            candidate_count=active_injection_config.candidate_count,
-                            null_rank=active_injection_config.null_rank,
-                            joint_feature_linearization=joint_feature_linearization,
-                            preferred_directions=preferred_directions[branch_name],
-                            maximum_relative_response_residual=(
-                                active_injection_config.maximum_relative_response_residual
-                            ),
-                            minimum_projection_energy_retention=(
-                                active_injection_config.minimum_projection_energy_retention
-                            ),
-                            cg_maximum_iterations=(
-                                active_injection_config.null_space_cg_max_iterations
-                            ),
-                            cg_relative_tolerance=(
-                                active_injection_config.null_space_cg_relative_tolerance
-                            ),
-                            numerical_epsilon=(
-                                active_injection_config.null_space_numerical_epsilon
-                            ),
-                            maximum_qr_condition_number=(
-                                active_injection_config.maximum_qr_condition_number
-                            ),
-                            maximum_orthogonality_error=(
-                                active_injection_config.maximum_orthogonality_error
-                            ),
-                            qr_reference_solve_protocol=(
-                                active_injection_config.qr_reference_solve_protocol
-                            ),
-                            prg_version=active_injection_config.keyed_prg_version,
-                        )
-                        for branch_name, branch_field in active_branch_fields.items()
+            else:
+                risk_bundle_digest = build_stable_digest(
+                    {
+                        "semantic_routing_enabled": False,
+                        "active_carrier_branches": active_branch_names,
                     }
-                    # Null Space 基底已经物化; 立即释放 JVP/VJP 图, 为 Q/K 回溯腾出显存。
-                    del joint_feature_linearization
-                else:
-                    subspaces = {branch_name: _FullLatentSpace() for branch_name in active_branch_fields}
-                jvp_modes = tuple(
-                    sorted(
-                        {
-                            str(result.metadata.get("jvp_mode"))
-                            for result in subspaces.values()
-                            if hasattr(result, "metadata") and result.metadata.get("jvp_mode")
-                        }
-                    )
                 )
-                lf_carrier = (
-                    project_canonical_template(
-                        "lf_content",
-                        lf_template,
-                        subspaces["lf_content"],
-                        active_injection_config.minimum_projection_energy_retention,
-                        carrier_protocol_digest=(
-                            active_injection_config.low_frequency_carrier_config.protocol_digest
-                        ),
-                        prg_version=active_injection_config.keyed_prg_version,
+                effective_branch_budgets = {
+                    branch_name: _constant_branch_budget(
+                        latent,
+                        branch_risk_configs[branch_name].budget_ceiling,
                     )
-                    if active_injection_config.lf_enabled
-                    else None
-                )
-                tail_carrier = (
-                    project_canonical_template(
-                        "tail_robust",
-                        tail_template,
-                        subspaces["tail_robust"],
-                        active_injection_config.minimum_projection_energy_retention,
-                        carrier_protocol_digest=tail_carrier_protocol[
-                            "tail_carrier_protocol_digest"
-                        ],
-                        prg_version=active_injection_config.keyed_prg_version,
-                    )
-                    if active_injection_config.tail_robust_enabled
-                    else None
-                )
-                latent_norms = torch.linalg.vector_norm(
-                    latent.detach().float().flatten(1),
-                    dim=1,
-                )
-                bounded_branch_updates: dict[str, Any] = {}
-                post_risk_reference_directions: dict[str, Any] = {}
-                if lf_carrier is not None:
-                    bounded_branch_updates["lf_content"] = (
-                        build_risk_bounded_update(
-                            branch_name="lf_content",
-                            direction=lf_carrier.embedded_direction,
-                            effective_budget=effective_branch_budgets["lf_content"],
-                            nominal_strength=(
-                                active_injection_config.lf_relative_strength
-                                * latent_norms
-                            ),
-                            budget_ceiling=(
-                                branch_risk_configs["lf_content"].budget_ceiling
-                            ),
-                            direction_epsilon=(
-                                active_injection_config.risk_bounded_scale_direction_epsilon
-                            ),
-                            numerical_epsilon=(
-                                active_injection_config.null_space_numerical_epsilon
-                            ),
-                        )
-                    )
-                    post_risk_reference_directions["lf_content"] = (
-                        lf_carrier.canonical_template
-                    )
-                if tail_carrier is not None:
-                    bounded_branch_updates["tail_robust"] = (
-                        build_risk_bounded_update(
-                            branch_name="tail_robust",
-                            direction=tail_carrier.embedded_direction,
-                            effective_budget=effective_branch_budgets["tail_robust"],
-                            nominal_strength=(
-                                active_injection_config.tail_relative_strength
-                                * latent_norms
-                            ),
-                            budget_ceiling=(
-                                branch_risk_configs["tail_robust"].budget_ceiling
-                            ),
-                            direction_epsilon=(
-                                active_injection_config.risk_bounded_scale_direction_epsilon
-                            ),
-                            numerical_epsilon=(
-                                active_injection_config.null_space_numerical_epsilon
-                            ),
-                        )
-                    )
-                    post_risk_reference_directions["tail_robust"] = (
-                        tail_carrier.canonical_template
-                    )
-                content_branch_updates = {
-                    branch_name: bounded_update
-                    for branch_name, bounded_update in bounded_branch_updates.items()
-                    if branch_name in {"lf_content", "tail_robust"}
+                    for branch_name in active_branch_names
                 }
-                content_base_candidate = build_quantized_composition_candidate(
-                    original_latent=latent,
-                    branch_updates=content_branch_updates,
-                    common_scale=1.0,
-                    backtracking_factor=(
-                        active_injection_config.quantized_budget_envelope_backtracking_factor
-                    ),
-                    backtracking_step_count=0,
-                    absolute_tolerance=(
-                        active_injection_config.quantized_budget_envelope_absolute_tolerance
-                    ),
+            preferred_directions = {
+                "lf_content": () if lf_template is None else (lf_template,),
+                "tail_robust": () if tail_template is None else (tail_template,),
+                "attention_geometry": (
+                    () if attention_gradient is None else (attention_gradient.gradient,)
+                ),
+            }
+            effective_branch_budget_content_records = {
+                branch_name: tensor_content_sha256(effective_budget)
+                for branch_name, effective_budget in (
+                    effective_branch_budgets.items()
                 )
-                attention_update = None
-                if attention_gradient is not None:
-                    if int(latent.shape[0]) != 1:
-                        raise RuntimeError("正式注意力几何更新要求单图像 batch")
-                    content_base_gradient = compute_attention_geometry_gradient(
-                        content_base_candidate.candidate_latent,
-                        transformer_forward,
-                        recorder,
-                        active_injection_config.key_material,
-                        prg_version=(
-                            active_injection_config.keyed_prg_version
+            }
+            if active_injection_config.null_space_enabled:
+                linearized_latent = latent.float()
+                joint_feature_linearization = build_exact_jacobian_linearization(
+                    feature_runtime.full_joint_feature_vector,
+                    linearized_latent,
+                )
+                subspaces = {
+                    branch_name: _solve_branch_subspace(
+                        latent=linearized_latent,
+                        feature_runtime=feature_runtime,
+                        key_material=active_injection_config.key_material,
+                        branch_name=branch_name,
+                        axis_budget=effective_branch_budgets[branch_name],
+                        candidate_count=active_injection_config.candidate_count,
+                        null_rank=active_injection_config.null_rank,
+                        joint_feature_linearization=joint_feature_linearization,
+                        preferred_directions=preferred_directions[branch_name],
+                        maximum_relative_response_residual=(
+                            active_injection_config.maximum_relative_response_residual
                         ),
-                        stable_token_fraction=(
-                            attention_gradient.stable_token_fraction
+                        minimum_projection_energy_retention=(
+                            active_injection_config.minimum_projection_energy_retention
                         ),
-                        unstable_pair_weight=(
-                            attention_gradient.unstable_pair_weight
+                        cg_maximum_iterations=(
+                            active_injection_config.null_space_cg_max_iterations
                         ),
-                        stable_token_selection=StableAttentionTokenSelection(
-                            token_positions=(
-                                attention_gradient.stable_token_positions
-                            ),
-                            token_indices=(
-                                attention_gradient.stable_token_indices
-                            ),
-                            stable_token_fraction=(
-                                attention_gradient.stable_token_fraction
-                            ),
-                            selection_digest=(
-                                attention_gradient.stable_token_selection_digest
-                            ),
+                        cg_relative_tolerance=(
+                            active_injection_config.null_space_cg_relative_tolerance
                         ),
-                        component_weights=(
-                            active_injection_config.attention_relation_component_weights
+                        numerical_epsilon=(
+                            active_injection_config.null_space_numerical_epsilon
                         ),
+                        maximum_qr_condition_number=(
+                            active_injection_config.maximum_qr_condition_number
+                        ),
+                        maximum_orthogonality_error=(
+                            active_injection_config.maximum_orthogonality_error
+                        ),
+                        qr_reference_solve_protocol=(
+                            active_injection_config.qr_reference_solve_protocol
+                        ),
+                        prg_version=active_injection_config.keyed_prg_version,
                     )
-                    attention_safe_direction = subspaces[
-                        "attention_geometry"
-                    ].project(content_base_gradient.gradient.float())
-                    maximum_attention_bound = build_risk_bounded_update(
-                        branch_name="attention_geometry",
-                        direction=attention_safe_direction,
-                        effective_budget=effective_branch_budgets[
-                            "attention_geometry"
-                        ],
+                    for branch_name in active_branch_names
+                }
+                # Null Space 基底已经物化; 立即释放 JVP/VJP 图, 为 Q/K 回溯腾出显存.
+                del joint_feature_linearization
+            else:
+                subspaces = {
+                    branch_name: _FullLatentSpace()
+                    for branch_name in active_branch_names
+                }
+            jvp_modes = tuple(
+                sorted(
+                    {
+                        str(result.metadata.get("jvp_mode"))
+                        for result in subspaces.values()
+                        if hasattr(result, "metadata") and result.metadata.get("jvp_mode")
+                    }
+                )
+            )
+            lf_carrier = (
+                project_canonical_template(
+                    "lf_content",
+                    lf_template,
+                    subspaces["lf_content"],
+                    active_injection_config.minimum_projection_energy_retention,
+                    carrier_protocol_digest=(
+                        active_injection_config.low_frequency_carrier_config.protocol_digest
+                    ),
+                    prg_version=active_injection_config.keyed_prg_version,
+                )
+                if active_injection_config.lf_enabled
+                else None
+            )
+            tail_carrier = (
+                project_canonical_template(
+                    "tail_robust",
+                    tail_template,
+                    subspaces["tail_robust"],
+                    active_injection_config.minimum_projection_energy_retention,
+                    carrier_protocol_digest=tail_carrier_protocol[
+                        "tail_carrier_protocol_digest"
+                    ],
+                    prg_version=active_injection_config.keyed_prg_version,
+                )
+                if active_injection_config.tail_robust_enabled
+                else None
+            )
+            latent_norms = torch.linalg.vector_norm(
+                latent.detach().float().flatten(1),
+                dim=1,
+            )
+            bounded_branch_updates: dict[str, Any] = {}
+            post_risk_reference_directions: dict[str, Any] = {}
+            if lf_carrier is not None:
+                bounded_branch_updates["lf_content"] = (
+                    build_risk_bounded_update(
+                        branch_name="lf_content",
+                        direction=lf_carrier.embedded_direction,
+                        effective_budget=effective_branch_budgets["lf_content"],
                         nominal_strength=(
-                            active_injection_config.attention_relative_strength
+                            active_injection_config.lf_relative_strength
                             * latent_norms
                         ),
                         budget_ceiling=(
-                            branch_risk_configs[
-                                "attention_geometry"
-                            ].budget_ceiling
+                            branch_risk_configs["lf_content"].budget_ceiling
                         ),
                         direction_epsilon=(
                             active_injection_config.risk_bounded_scale_direction_epsilon
@@ -4173,513 +4211,631 @@ def run_semantic_watermark_runtime(
                             active_injection_config.null_space_numerical_epsilon
                         ),
                     )
-                    attention_update = optimize_attention_geometry_update(
-                        latent=latent,
-                        transformer_forward=transformer_forward,
-                        recorder=recorder,
-                        key_material=active_injection_config.key_material,
-                        safe_subspace=subspaces["attention_geometry"],
-                        risk_bounded_update=maximum_attention_bound,
-                        backtracking_factor=(
-                            active_injection_config.attention_backtracking_factor
+                )
+                post_risk_reference_directions["lf_content"] = (
+                    lf_carrier.canonical_template
+                )
+            if tail_carrier is not None:
+                bounded_branch_updates["tail_robust"] = (
+                    build_risk_bounded_update(
+                        branch_name="tail_robust",
+                        direction=tail_carrier.embedded_direction,
+                        effective_budget=effective_branch_budgets["tail_robust"],
+                        nominal_strength=(
+                            active_injection_config.tail_relative_strength
+                            * latent_norms
                         ),
-                        maximum_backtracking_steps=(
-                            active_injection_config.attention_backtracking_maximum_steps
+                        budget_ceiling=(
+                            branch_risk_configs["tail_robust"].budget_ceiling
                         ),
-                        precomputed_gradient=attention_gradient,
-                        precomputed_content_base_gradient=(
-                            content_base_gradient
+                        direction_epsilon=(
+                            active_injection_config.risk_bounded_scale_direction_epsilon
                         ),
-                        prg_version=(
-                            active_injection_config.keyed_prg_version
+                        numerical_epsilon=(
+                            active_injection_config.null_space_numerical_epsilon
                         ),
-                        base_update=(
-                            content_base_candidate.float32_combined_update
+                    )
+                )
+                post_risk_reference_directions["tail_robust"] = (
+                    tail_carrier.canonical_template
+                )
+            content_branch_updates = {
+                branch_name: bounded_update
+                for branch_name, bounded_update in bounded_branch_updates.items()
+                if branch_name in {"lf_content", "tail_robust"}
+            }
+            content_base_candidate = build_quantized_composition_candidate(
+                original_latent=latent,
+                branch_updates=content_branch_updates,
+                common_scale=1.0,
+                backtracking_factor=(
+                    active_injection_config.quantized_budget_envelope_backtracking_factor
+                ),
+                backtracking_step_count=0,
+                absolute_tolerance=(
+                    active_injection_config.quantized_budget_envelope_absolute_tolerance
+                ),
+            )
+            attention_update = None
+            if attention_gradient is not None:
+                if int(latent.shape[0]) != 1:
+                    raise RuntimeError("正式注意力几何更新要求单图像 batch")
+                content_base_gradient = compute_attention_geometry_gradient(
+                    content_base_candidate.candidate_latent,
+                    transformer_forward,
+                    recorder,
+                    active_injection_config.key_material,
+                    prg_version=(
+                        active_injection_config.keyed_prg_version
+                    ),
+                    stable_token_fraction=(
+                        attention_gradient.stable_token_fraction
+                    ),
+                    unstable_pair_weight=(
+                        attention_gradient.unstable_pair_weight
+                    ),
+                    stable_token_selection=StableAttentionTokenSelection(
+                        token_positions=(
+                            attention_gradient.stable_token_positions
+                        ),
+                        token_indices=(
+                            attention_gradient.stable_token_indices
                         ),
                         stable_token_fraction=(
-                            active_injection_config.attention_stable_token_fraction
+                            attention_gradient.stable_token_fraction
                         ),
-                        unstable_pair_weight=(
-                            active_injection_config.attention_unstable_pair_weight
+                        selection_digest=(
+                            attention_gradient.stable_token_selection_digest
                         ),
-                        component_weights=(
-                            active_injection_config.attention_relation_component_weights
-                        ),
-                    )
-                    if attention_update.unit_update_content_sha256 != (
-                        tensor_content_sha256(
-                            maximum_attention_bound.unit_direction
-                        )
-                    ):
-                        raise RuntimeError(
-                            "注意力单调回溯与风险包络没有复用同一单位方向 Tensor"
-                        )
-                    bounded_branch_updates["attention_geometry"] = (
-                        rescale_risk_bounded_update(
-                            maximum_attention_bound,
-                            attention_update.applied_update_strength,
-                        )
-                    )
-                    if attention_update.update_content_sha256 != (
-                        tensor_content_sha256(
-                            bounded_branch_updates[
-                                "attention_geometry"
-                            ].update
-                        )
-                    ):
-                        raise RuntimeError(
-                            "attention 接受候选与风险有界分支写回不是同一 update Tensor"
-                        )
-                    post_risk_reference_directions[
+                    ),
+                    component_weights=(
+                        active_injection_config.attention_relation_component_weights
+                    ),
+                )
+                attention_safe_direction = subspaces[
+                    "attention_geometry"
+                ].project(content_base_gradient.gradient.float())
+                maximum_attention_bound = build_risk_bounded_update(
+                    branch_name="attention_geometry",
+                    direction=attention_safe_direction,
+                    effective_budget=effective_branch_budgets[
                         "attention_geometry"
-                    ] = content_base_gradient.gradient
-
-                post_risk_direction_records = {
-                    branch_name: _post_risk_direction_jacobian_record(
-                        feature_runtime.full_joint_feature_vector,
-                        latent,
-                        branch_name,
-                        bounded_update.unit_direction,
-                        post_risk_reference_directions[branch_name],
-                        active_injection_config.maximum_relative_response_residual,
-                        active_injection_config.null_space_numerical_epsilon,
+                    ],
+                    nominal_strength=(
+                        active_injection_config.attention_relative_strength
+                        * latent_norms
+                    ),
+                    budget_ceiling=(
+                        branch_risk_configs[
+                            "attention_geometry"
+                        ].budget_ceiling
+                    ),
+                    direction_epsilon=(
+                        active_injection_config.risk_bounded_scale_direction_epsilon
+                    ),
+                    numerical_epsilon=(
+                        active_injection_config.null_space_numerical_epsilon
+                    ),
+                )
+                attention_update = optimize_attention_geometry_update(
+                    latent=latent,
+                    transformer_forward=transformer_forward,
+                    recorder=recorder,
+                    key_material=active_injection_config.key_material,
+                    safe_subspace=subspaces["attention_geometry"],
+                    risk_bounded_update=maximum_attention_bound,
+                    backtracking_factor=(
+                        active_injection_config.attention_backtracking_factor
+                    ),
+                    maximum_backtracking_steps=(
+                        active_injection_config.attention_backtracking_maximum_steps
+                    ),
+                    precomputed_gradient=attention_gradient,
+                    precomputed_content_base_gradient=(
+                        content_base_gradient
+                    ),
+                    prg_version=(
+                        active_injection_config.keyed_prg_version
+                    ),
+                    base_update=(
+                        content_base_candidate.float32_combined_update
+                    ),
+                    stable_token_fraction=(
+                        active_injection_config.attention_stable_token_fraction
+                    ),
+                    unstable_pair_weight=(
+                        active_injection_config.attention_unstable_pair_weight
+                    ),
+                    component_weights=(
+                        active_injection_config.attention_relation_component_weights
+                    ),
+                )
+                if attention_update.unit_update_content_sha256 != (
+                    tensor_content_sha256(
+                        maximum_attention_bound.unit_direction
                     )
-                    for branch_name, bounded_update in (
-                        bounded_branch_updates.items()
-                    )
-                } if active_injection_config.null_space_enabled else {}
-
-                accepted_composition = None
-                quantized_write_jacobian_record = None
-                preservation_record = None
-                accepted_attention_record = None
-                for quantized_step, composition_candidate in enumerate(
-                    iter_quantized_composition_candidates(
-                        original_latent=latent,
-                        branch_updates=bounded_branch_updates,
-                        backtracking_factor=(
-                            active_injection_config.quantized_budget_envelope_backtracking_factor
-                        ),
-                        maximum_steps=(
-                            active_injection_config.quantized_budget_envelope_backtracking_maximum_steps
-                        ),
-                        absolute_tolerance=(
-                            active_injection_config.quantized_budget_envelope_absolute_tolerance
-                        ),
-                    )
-                ):
-                    if not composition_candidate.envelope_ready:
-                        continue
-                    candidate_jacobian_record = (
-                        _quantized_write_jacobian_response_record(
-                            (
-                                feature_runtime.full_joint_feature_vector
-                                if active_injection_config.null_space_enabled
-                                else None
-                            ),
-                            latent,
-                            composition_candidate.candidate_latent,
-                            active_injection_config.maximum_quantized_write_relative_jacobian_response,
-                            active_injection_config.null_space_numerical_epsilon,
-                        )
-                    )
-                    if not _quantized_write_update_nonzero(
-                        candidate_jacobian_record
-                    ):
-                        continue
-                    if (
-                        active_injection_config.null_space_enabled
-                        and not candidate_jacobian_record[
-                            "quantized_write_jacobian_gate_ready"
-                        ]
-                    ):
-                        continue
-                    candidate_preservation_record = (
-                        _combined_update_preservation_record(
-                            feature_runtime,
-                            latent,
-                            composition_candidate.candidate_latent,
-                            config,
-                        )
-                    )
-                    if (
-                        active_injection_config.null_space_enabled
-                        and not candidate_preservation_record[
-                            "semantic_preservation_gate_ready"
-                        ]
-                    ):
-                        continue
-
-                    candidate_attention_record = None
-                    if attention_update is not None:
-                        content_candidate_at_scale = (
-                            build_quantized_composition_candidate(
-                                original_latent=latent,
-                                branch_updates=content_branch_updates,
-                                common_scale=composition_candidate.common_scale,
-                                backtracking_factor=(
-                                    active_injection_config.quantized_budget_envelope_backtracking_factor
-                                ),
-                                backtracking_step_count=quantized_step,
-                                absolute_tolerance=(
-                                    active_injection_config.quantized_budget_envelope_absolute_tolerance
-                                ),
-                            )
-                        )
-                        if not content_candidate_at_scale.envelope_ready:
-                            continue
-                        recorder.clear()
-                        with torch.no_grad():
-                            transformer_forward(
-                                content_candidate_at_scale.candidate_latent.detach().float()
-                            )
-                            content_score_tensor = attention_geometry_score(
-                                recorder.records,
-                                active_injection_config.key_material,
-                                prg_version=(
-                                    active_injection_config.keyed_prg_version
-                                ),
-                                stable_pair_weights=(
-                                    attention_gradient.stable_pair_weights
-                                ),
-                                component_weights=(
-                                    active_injection_config.attention_relation_component_weights
-                                ),
-                            )
-                            written_content_qk_identity = (
-                                build_attention_relation_graph_identity(
-                                    recorder.records,
-                                    active_injection_config.key_material,
-                                    prg_version=(
-                                        active_injection_config.keyed_prg_version
-                                    ),
-                                    component_weights=(
-                                        active_injection_config.attention_relation_component_weights
-                                    ),
-                                )
-                            )
-                            recorder.clear()
-                            transformer_forward(
-                                composition_candidate.candidate_latent.detach().float()
-                            )
-                            final_score_tensor = attention_geometry_score(
-                                recorder.records,
-                                active_injection_config.key_material,
-                                prg_version=(
-                                    active_injection_config.keyed_prg_version
-                                ),
-                                stable_pair_weights=(
-                                    attention_gradient.stable_pair_weights
-                                ),
-                                component_weights=(
-                                    active_injection_config.attention_relation_component_weights
-                                ),
-                            )
-                            written_qk_identity = (
-                                build_attention_relation_graph_identity(
-                                    recorder.records,
-                                    active_injection_config.key_material,
-                                    prg_version=(
-                                        active_injection_config.keyed_prg_version
-                                    ),
-                                    component_weights=(
-                                        active_injection_config.attention_relation_component_weights
-                                    ),
-                                )
-                            )
-                        content_score = float(
-                            content_score_tensor.detach().item()
-                        )
-                        final_score = float(final_score_tensor.detach().item())
-                        required_score = max(
-                            attention_update.score_before,
-                            content_score,
-                        )
-                        if (
-                            not math.isfinite(content_score)
-                            or not math.isfinite(final_score)
-                            or final_score <= required_score
-                        ):
-                            continue
-                        if (
-                            not written_content_qk_identity.qk_atomic_content_ready
-                            or not written_qk_identity.qk_atomic_content_ready
-                        ):
-                            continue
-                        if (
-                            written_qk_identity.component_protocol_digest
-                            != attention_update.attention_relation_component_protocol_digest
-                            or written_content_qk_identity.component_protocol_digest
-                            != attention_update.attention_relation_component_protocol_digest
-                            or written_qk_identity.component_weights
-                            != attention_update.attention_relation_component_weights
-                            or written_content_qk_identity.component_weights
-                            != attention_update.attention_relation_component_weights
-                            or written_qk_identity.component_identity_digest
-                            != attention_update.attention_relation_component_identity_digest
-                            or written_content_qk_identity.component_identity_digest
-                            != attention_update.attention_relation_component_identity_digest
-                            or written_qk_identity.keyed_projection_digest
-                            != attention_update.attention_relation_keyed_projection_digest
-                            or written_content_qk_identity.keyed_projection_digest
-                            != attention_update.attention_relation_keyed_projection_digest
-                            or written_qk_identity.qk_operator_metadata_digest
-                            != attention_update.attention_relation_qk_operator_metadata_digest
-                            or written_content_qk_identity.qk_operator_metadata_digest
-                            != attention_update.attention_relation_qk_operator_metadata_digest
-                        ):
-                            continue
-                        qk_atomic_evaluation_records = (
-                            attention_update.qk_atomic_evaluation_records[0],
-                            attention_update.qk_atomic_evaluation_records[1],
-                            attention_update.qk_atomic_evaluation_records[2],
-                            {
-                                "qk_evaluation_role": (
-                                    "actual_written_content_base_latent"
-                                ),
-                                "evaluation_latent_content_sha256": (
-                                    tensor_content_sha256(
-                                        content_candidate_at_scale.candidate_latent.detach().float()
-                                    )
-                                ),
-                                "evaluation_score": content_score,
-                                "qk_atomic_content_records": list(
-                                    written_content_qk_identity.qk_atomic_content_records
-                                ),
-                                "qk_atomic_content_digest": (
-                                    written_content_qk_identity.qk_atomic_content_digest
-                                ),
-                                "qk_atomic_content_ready": (
-                                    written_content_qk_identity.qk_atomic_content_ready
-                                ),
-                            },
-                            {
-                                "qk_evaluation_role": "actual_written_combined_latent",
-                                "evaluation_latent_content_sha256": (
-                                    tensor_content_sha256(
-                                        composition_candidate.candidate_latent.detach().float()
-                                    )
-                                ),
-                                "evaluation_score": final_score,
-                                "qk_atomic_content_records": list(
-                                    written_qk_identity.qk_atomic_content_records
-                                ),
-                                "qk_atomic_content_digest": (
-                                    written_qk_identity.qk_atomic_content_digest
-                                ),
-                                "qk_atomic_content_ready": (
-                                    written_qk_identity.qk_atomic_content_ready
-                                ),
-                            },
-                        )
-                        qk_evaluation_digest = (
-                            qk_atomic_evaluation_records_digest(
-                                qk_atomic_evaluation_records,
-                                "attention_qk_atomic_content_records",
-                            )
-                        )
-                        qk_evaluation_ready = (
-                            qk_atomic_evaluation_records_ready(
-                                qk_atomic_evaluation_records,
-                                qk_evaluation_digest,
-                                aggregate_field_name=(
-                                    "attention_qk_atomic_content_records"
-                                ),
-                                expected_roles=(
-                                    "latent_before",
-                                    "optimization_content_base_latent",
-                                    "accepted_attention_candidate",
-                                    "actual_written_content_base_latent",
-                                    "actual_written_combined_latent",
-                                ),
-                                expected_layer_names=(
-                                    active_injection_config.attention_module_names
-                                ),
-                                require_evaluation_identity=True,
-                            )
-                        )
-                        if not qk_evaluation_ready:
-                            continue
-                        candidate_attention_record = {
-                            "attention_score_before": attention_update.score_before,
-                            "attention_content_base_score": (
-                                attention_update.content_base_score
-                            ),
-                            "attention_score_after": attention_update.score_after,
-                            "attention_actual_written_content_base_score": (
-                                content_score
-                            ),
-                            "attention_final_combined_score": final_score,
-                            "attention_score_gain": (
-                                final_score - attention_update.score_before
-                            ),
-                            "attention_applied_update_strength": (
-                                attention_update.applied_update_strength
-                            ),
-                            "attention_backtracking_step_count": (
-                                attention_update.backtracking_step_count
-                            ),
-                            "attention_update_digest": attention_update.update_digest,
-                            "attention_update_content_sha256": (
-                                attention_update.update_content_sha256
-                            ),
-                            "attention_update_unit_direction_content_sha256": (
-                                attention_update.unit_update_content_sha256
-                            ),
-                            "stable_token_indices": list(
-                                attention_update.stable_token_indices
-                            ),
-                            "stable_token_selection_digest": (
-                                attention_update.stable_token_selection_digest
-                            ),
-                            "stable_pair_weight_identity_digest": (
-                                attention_update.stable_pair_weight_identity_digest
-                            ),
-                            "stable_pair_weight_realization_digest": (
-                                attention_update.stable_pair_weight_realization_digest
-                            ),
-                            "attention_relation_component_names": list(
-                                attention_update.attention_relation_component_names
-                            ),
-                            "attention_relation_active_component_names": list(
-                                attention_update.attention_relation_active_component_names
-                            ),
-                            "attention_relation_component_weights": list(
-                                attention_update.attention_relation_component_weights
-                            ),
-                            "attention_relation_component_protocol_digest": (
-                                attention_update.attention_relation_component_protocol_digest
-                            ),
-                            "attention_relation_source": (
-                                attention_update.attention_relation_source
-                            ),
-                            "attention_relation_direct_qk_source_ready": (
-                                attention_update.attention_relation_source
-                                == DIRECT_QK_RELATION_SOURCE
-                            ),
-                            "attention_relation_probability_scope": (
-                                "sampled_image_token_qk_relation_probability"
-                            ),
-                            "attention_relation_component_identity_digest": (
-                                attention_update.attention_relation_component_identity_digest
-                            ),
-                            "attention_relation_keyed_projection_digest": (
-                                attention_update.attention_relation_keyed_projection_digest
-                            ),
-                            "attention_relation_qk_operator_metadata_records": list(
-                                attention_update.attention_relation_qk_operator_metadata_records
-                            ),
-                            "attention_relation_qk_operator_metadata_digest": (
-                                attention_update.attention_relation_qk_operator_metadata_digest
-                            ),
-                            "attention_relation_qk_operator_metadata_ready": (
-                                attention_update.attention_relation_qk_operator_metadata_ready
-                            ),
-                            "attention_qk_atomic_content_records": list(
-                                qk_atomic_evaluation_records
-                            ),
-                            "attention_qk_atomic_content_digest": (
-                                qk_evaluation_digest
-                            ),
-                            "attention_qk_atomic_content_ready": True,
-                        }
-
-                    composition_record = composition_candidate.to_record()
-                    for shared_field in (
-                        "quantized_write_update_content_sha256",
-                        "quantized_write_update_dtype",
-                        "quantized_write_update_shape",
-                    ):
-                        if candidate_jacobian_record[shared_field] != (
-                            composition_record[shared_field]
-                        ):
-                            raise RuntimeError(
-                                "实际 JVP 写回记录与唯一量化合成记录的 Tensor 身份不一致: "
-                                f"{shared_field}"
-                            )
-                    accepted_composition = composition_candidate
-                    quantized_write_jacobian_record = {
-                        **candidate_jacobian_record,
-                        **composition_record,
-                    }
-                    preservation_record = candidate_preservation_record
-                    accepted_attention_record = candidate_attention_record
-                    break
-
-                if (
-                    accepted_composition is None
-                    or quantized_write_jacobian_record is None
-                    or preservation_record is None
                 ):
                     raise RuntimeError(
-                        "共同缩放候选未同时通过预算、JVP、有限特征和 Q/K 门禁"
+                        "注意力单调回溯与风险包络没有复用同一单位方向 Tensor"
                     )
-                injected = accepted_composition.candidate_latent
-                combined_update = accepted_composition.float32_combined_update
-                lf_update = (
-                    bounded_branch_updates["lf_content"].update
-                    if "lf_content" in bounded_branch_updates
-                    else torch.zeros_like(latent, dtype=torch.float32)
-                )
-                tail_update = (
-                    bounded_branch_updates["tail_robust"].update
-                    if "tail_robust" in bounded_branch_updates
-                    else torch.zeros_like(latent, dtype=torch.float32)
-                )
-                attention_tensor = (
-                    bounded_branch_updates["attention_geometry"].update
-                    if "attention_geometry" in bounded_branch_updates
-                    else torch.zeros_like(latent, dtype=torch.float32)
-                )
-                attention_record = (
-                    accepted_attention_record
-                    if accepted_attention_record is not None
-                    else {
-                        "attention_score_before": None,
-                        "attention_content_base_score": None,
-                        "attention_score_after": None,
-                        "attention_actual_written_content_base_score": None,
-                        "attention_final_combined_score": None,
-                        "attention_score_gain": None,
-                        "attention_applied_update_strength": None,
-                        "attention_backtracking_step_count": None,
-                        "attention_update_digest": "",
-                        "attention_update_content_sha256": "",
-                        "attention_update_unit_direction_content_sha256": "",
-                        "stable_token_indices": [],
-                        "stable_token_selection_digest": "",
-                        "stable_pair_weight_identity_digest": "",
-                        "stable_pair_weight_realization_digest": "",
-                        "attention_relation_component_names": [],
-                        "attention_relation_active_component_names": [],
-                        "attention_relation_component_weights": [],
-                        "attention_relation_component_protocol_digest": "",
-                        "attention_relation_source": "",
-                        "attention_relation_direct_qk_source_ready": False,
-                        "attention_relation_probability_scope": "",
-                        "attention_relation_component_identity_digest": "",
-                        "attention_relation_keyed_projection_digest": "",
-                        "attention_relation_qk_operator_metadata_records": [],
-                        "attention_relation_qk_operator_metadata_digest": "",
-                        "attention_relation_qk_operator_metadata_ready": False,
-                        "attention_qk_atomic_content_records": [],
-                        "attention_qk_atomic_content_digest": "",
-                        "attention_qk_atomic_content_ready": False,
-                    }
-                )
-                bounded_branch_update_records = {
-                    branch_name: {
-                        **bounded_update.to_record(),
-                        **post_risk_direction_records.get(branch_name, {}),
-                    }
-                    for branch_name, bounded_update in (
-                        bounded_branch_updates.items()
+                bounded_branch_updates["attention_geometry"] = (
+                    rescale_risk_bounded_update(
+                        maximum_attention_bound,
+                        attention_update.applied_update_strength,
                     )
+                )
+                if attention_update.update_content_sha256 != (
+                    tensor_content_sha256(
+                        bounded_branch_updates[
+                            "attention_geometry"
+                        ].update
+                    )
+                ):
+                    raise RuntimeError(
+                        "attention 接受候选与风险有界分支写回不是同一 update Tensor"
+                    )
+                post_risk_reference_directions[
+                    "attention_geometry"
+                ] = content_base_gradient.gradient
+
+            post_risk_direction_records = {
+                branch_name: _post_risk_direction_jacobian_record(
+                    feature_runtime.full_joint_feature_vector,
+                    latent,
+                    branch_name,
+                    bounded_update.unit_direction,
+                    post_risk_reference_directions[branch_name],
+                    active_injection_config.maximum_relative_response_residual,
+                    active_injection_config.null_space_numerical_epsilon,
+                )
+                for branch_name, bounded_update in (
+                    bounded_branch_updates.items()
+                )
+            } if active_injection_config.null_space_enabled else {}
+
+            accepted_composition = None
+            quantized_write_jacobian_record = None
+            preservation_record = None
+            accepted_attention_record = None
+            for quantized_step, composition_candidate in enumerate(
+                iter_quantized_composition_candidates(
+                    original_latent=latent,
+                    branch_updates=bounded_branch_updates,
+                    backtracking_factor=(
+                        active_injection_config.quantized_budget_envelope_backtracking_factor
+                    ),
+                    maximum_steps=(
+                        active_injection_config.quantized_budget_envelope_backtracking_maximum_steps
+                    ),
+                    absolute_tolerance=(
+                        active_injection_config.quantized_budget_envelope_absolute_tolerance
+                    ),
+                )
+            ):
+                if not composition_candidate.envelope_ready:
+                    continue
+                candidate_jacobian_record = (
+                    _quantized_write_jacobian_response_record(
+                        (
+                            feature_runtime.full_joint_feature_vector
+                            if active_injection_config.null_space_enabled
+                            else None
+                        ),
+                        latent,
+                        composition_candidate.candidate_latent,
+                        active_injection_config.maximum_quantized_write_relative_jacobian_response,
+                        active_injection_config.null_space_numerical_epsilon,
+                    )
+                )
+                if not _quantized_write_update_nonzero(
+                    candidate_jacobian_record
+                ):
+                    continue
+                if (
+                    active_injection_config.null_space_enabled
+                    and not candidate_jacobian_record[
+                        "quantized_write_jacobian_gate_ready"
+                    ]
+                ):
+                    continue
+                candidate_preservation_record = (
+                    _combined_update_preservation_record(
+                        feature_runtime,
+                        latent,
+                        composition_candidate.candidate_latent,
+                        config,
+                    )
+                )
+                if (
+                    active_injection_config.null_space_enabled
+                    and not candidate_preservation_record[
+                        "semantic_preservation_gate_ready"
+                    ]
+                ):
+                    continue
+
+                candidate_attention_record = None
+                if attention_update is not None:
+                    content_candidate_at_scale = (
+                        build_quantized_composition_candidate(
+                            original_latent=latent,
+                            branch_updates=content_branch_updates,
+                            common_scale=composition_candidate.common_scale,
+                            backtracking_factor=(
+                                active_injection_config.quantized_budget_envelope_backtracking_factor
+                            ),
+                            backtracking_step_count=quantized_step,
+                            absolute_tolerance=(
+                                active_injection_config.quantized_budget_envelope_absolute_tolerance
+                            ),
+                        )
+                    )
+                    if not content_candidate_at_scale.envelope_ready:
+                        continue
+                    recorder.clear()
+                    with torch.no_grad():
+                        transformer_forward(
+                            content_candidate_at_scale.candidate_latent.detach().float()
+                        )
+                        content_score_tensor = attention_geometry_score(
+                            recorder.records,
+                            active_injection_config.key_material,
+                            prg_version=(
+                                active_injection_config.keyed_prg_version
+                            ),
+                            stable_pair_weights=(
+                                attention_gradient.stable_pair_weights
+                            ),
+                            component_weights=(
+                                active_injection_config.attention_relation_component_weights
+                            ),
+                        )
+                        written_content_qk_identity = (
+                            build_attention_relation_graph_identity(
+                                recorder.records,
+                                active_injection_config.key_material,
+                                prg_version=(
+                                    active_injection_config.keyed_prg_version
+                                ),
+                                component_weights=(
+                                    active_injection_config.attention_relation_component_weights
+                                ),
+                            )
+                        )
+                        recorder.clear()
+                        transformer_forward(
+                            composition_candidate.candidate_latent.detach().float()
+                        )
+                        final_score_tensor = attention_geometry_score(
+                            recorder.records,
+                            active_injection_config.key_material,
+                            prg_version=(
+                                active_injection_config.keyed_prg_version
+                            ),
+                            stable_pair_weights=(
+                                attention_gradient.stable_pair_weights
+                            ),
+                            component_weights=(
+                                active_injection_config.attention_relation_component_weights
+                            ),
+                        )
+                        written_qk_identity = (
+                            build_attention_relation_graph_identity(
+                                recorder.records,
+                                active_injection_config.key_material,
+                                prg_version=(
+                                    active_injection_config.keyed_prg_version
+                                ),
+                                component_weights=(
+                                    active_injection_config.attention_relation_component_weights
+                                ),
+                            )
+                        )
+                    content_score = float(
+                        content_score_tensor.detach().item()
+                    )
+                    final_score = float(final_score_tensor.detach().item())
+                    required_score = max(
+                        attention_update.score_before,
+                        content_score,
+                    )
+                    if (
+                        not math.isfinite(content_score)
+                        or not math.isfinite(final_score)
+                        or final_score <= required_score
+                    ):
+                        continue
+                    if (
+                        not written_content_qk_identity.qk_atomic_content_ready
+                        or not written_qk_identity.qk_atomic_content_ready
+                    ):
+                        continue
+                    if (
+                        written_qk_identity.component_protocol_digest
+                        != attention_update.attention_relation_component_protocol_digest
+                        or written_content_qk_identity.component_protocol_digest
+                        != attention_update.attention_relation_component_protocol_digest
+                        or written_qk_identity.component_weights
+                        != attention_update.attention_relation_component_weights
+                        or written_content_qk_identity.component_weights
+                        != attention_update.attention_relation_component_weights
+                        or written_qk_identity.component_identity_digest
+                        != attention_update.attention_relation_component_identity_digest
+                        or written_content_qk_identity.component_identity_digest
+                        != attention_update.attention_relation_component_identity_digest
+                        or written_qk_identity.keyed_projection_digest
+                        != attention_update.attention_relation_keyed_projection_digest
+                        or written_content_qk_identity.keyed_projection_digest
+                        != attention_update.attention_relation_keyed_projection_digest
+                        or written_qk_identity.qk_operator_metadata_digest
+                        != attention_update.attention_relation_qk_operator_metadata_digest
+                        or written_content_qk_identity.qk_operator_metadata_digest
+                        != attention_update.attention_relation_qk_operator_metadata_digest
+                    ):
+                        continue
+                    qk_atomic_evaluation_records = (
+                        attention_update.qk_atomic_evaluation_records[0],
+                        attention_update.qk_atomic_evaluation_records[1],
+                        attention_update.qk_atomic_evaluation_records[2],
+                        {
+                            "qk_evaluation_role": (
+                                "actual_written_content_base_latent"
+                            ),
+                            "evaluation_latent_content_sha256": (
+                                tensor_content_sha256(
+                                    content_candidate_at_scale.candidate_latent.detach().float()
+                                )
+                            ),
+                            "evaluation_score": content_score,
+                            "qk_atomic_content_records": list(
+                                written_content_qk_identity.qk_atomic_content_records
+                            ),
+                            "qk_atomic_content_digest": (
+                                written_content_qk_identity.qk_atomic_content_digest
+                            ),
+                            "qk_atomic_content_ready": (
+                                written_content_qk_identity.qk_atomic_content_ready
+                            ),
+                        },
+                        {
+                            "qk_evaluation_role": "actual_written_combined_latent",
+                            "evaluation_latent_content_sha256": (
+                                tensor_content_sha256(
+                                    composition_candidate.candidate_latent.detach().float()
+                                )
+                            ),
+                            "evaluation_score": final_score,
+                            "qk_atomic_content_records": list(
+                                written_qk_identity.qk_atomic_content_records
+                            ),
+                            "qk_atomic_content_digest": (
+                                written_qk_identity.qk_atomic_content_digest
+                            ),
+                            "qk_atomic_content_ready": (
+                                written_qk_identity.qk_atomic_content_ready
+                            ),
+                        },
+                    )
+                    qk_evaluation_digest = (
+                        qk_atomic_evaluation_records_digest(
+                            qk_atomic_evaluation_records,
+                            "attention_qk_atomic_content_records",
+                        )
+                    )
+                    qk_evaluation_ready = (
+                        qk_atomic_evaluation_records_ready(
+                            qk_atomic_evaluation_records,
+                            qk_evaluation_digest,
+                            aggregate_field_name=(
+                                "attention_qk_atomic_content_records"
+                            ),
+                            expected_roles=(
+                                "latent_before",
+                                "optimization_content_base_latent",
+                                "accepted_attention_candidate",
+                                "actual_written_content_base_latent",
+                                "actual_written_combined_latent",
+                            ),
+                            expected_layer_names=(
+                                active_injection_config.attention_module_names
+                            ),
+                            require_evaluation_identity=True,
+                        )
+                    )
+                    if not qk_evaluation_ready:
+                        continue
+                    candidate_attention_record = {
+                        "attention_score_before": attention_update.score_before,
+                        "attention_content_base_score": (
+                            attention_update.content_base_score
+                        ),
+                        "attention_score_after": attention_update.score_after,
+                        "attention_actual_written_content_base_score": (
+                            content_score
+                        ),
+                        "attention_final_combined_score": final_score,
+                        "attention_score_gain": (
+                            final_score - attention_update.score_before
+                        ),
+                        "attention_applied_update_strength": (
+                            attention_update.applied_update_strength
+                        ),
+                        "attention_backtracking_step_count": (
+                            attention_update.backtracking_step_count
+                        ),
+                        "attention_update_digest": attention_update.update_digest,
+                        "attention_update_content_sha256": (
+                            attention_update.update_content_sha256
+                        ),
+                        "attention_update_unit_direction_content_sha256": (
+                            attention_update.unit_update_content_sha256
+                        ),
+                        "stable_token_indices": list(
+                            attention_update.stable_token_indices
+                        ),
+                        "stable_token_selection_digest": (
+                            attention_update.stable_token_selection_digest
+                        ),
+                        "stable_pair_weight_identity_digest": (
+                            attention_update.stable_pair_weight_identity_digest
+                        ),
+                        "stable_pair_weight_realization_digest": (
+                            attention_update.stable_pair_weight_realization_digest
+                        ),
+                        "attention_relation_component_names": list(
+                            attention_update.attention_relation_component_names
+                        ),
+                        "attention_relation_active_component_names": list(
+                            attention_update.attention_relation_active_component_names
+                        ),
+                        "attention_relation_component_weights": list(
+                            attention_update.attention_relation_component_weights
+                        ),
+                        "attention_relation_component_protocol_digest": (
+                            attention_update.attention_relation_component_protocol_digest
+                        ),
+                        "attention_relation_source": (
+                            attention_update.attention_relation_source
+                        ),
+                        "attention_relation_direct_qk_source_ready": (
+                            attention_update.attention_relation_source
+                            == DIRECT_QK_RELATION_SOURCE
+                        ),
+                        "attention_relation_probability_scope": (
+                            "sampled_image_token_qk_relation_probability"
+                        ),
+                        "attention_relation_component_identity_digest": (
+                            attention_update.attention_relation_component_identity_digest
+                        ),
+                        "attention_relation_keyed_projection_digest": (
+                            attention_update.attention_relation_keyed_projection_digest
+                        ),
+                        "attention_relation_qk_operator_metadata_records": list(
+                            attention_update.attention_relation_qk_operator_metadata_records
+                        ),
+                        "attention_relation_qk_operator_metadata_digest": (
+                            attention_update.attention_relation_qk_operator_metadata_digest
+                        ),
+                        "attention_relation_qk_operator_metadata_ready": (
+                            attention_update.attention_relation_qk_operator_metadata_ready
+                        ),
+                        "attention_qk_atomic_content_records": list(
+                            qk_atomic_evaluation_records
+                        ),
+                        "attention_qk_atomic_content_digest": (
+                            qk_evaluation_digest
+                        ),
+                        "attention_qk_atomic_content_ready": True,
+                    }
+
+                composition_record = composition_candidate.to_record()
+                for shared_field in (
+                    "quantized_write_update_content_sha256",
+                    "quantized_write_update_dtype",
+                    "quantized_write_update_shape",
+                ):
+                    if candidate_jacobian_record[shared_field] != (
+                        composition_record[shared_field]
+                    ):
+                        raise RuntimeError(
+                            "实际 JVP 写回记录与唯一量化合成记录的 Tensor 身份不一致: "
+                            f"{shared_field}"
+                        )
+                accepted_composition = composition_candidate
+                quantized_write_jacobian_record = {
+                    **candidate_jacobian_record,
+                    **composition_record,
                 }
+                preservation_record = candidate_preservation_record
+                accepted_attention_record = candidate_attention_record
+                break
+
+            if (
+                accepted_composition is None
+                or quantized_write_jacobian_record is None
+                or preservation_record is None
+            ):
+                raise RuntimeError(
+                    "共同缩放候选未同时通过预算、JVP、有限特征和 Q/K 门禁"
+                )
+            injected = accepted_composition.candidate_latent
+            combined_update = accepted_composition.float32_combined_update
+            lf_update = (
+                bounded_branch_updates["lf_content"].update
+                if "lf_content" in bounded_branch_updates
+                else torch.zeros_like(latent, dtype=torch.float32)
+            )
+            tail_update = (
+                bounded_branch_updates["tail_robust"].update
+                if "tail_robust" in bounded_branch_updates
+                else torch.zeros_like(latent, dtype=torch.float32)
+            )
+            attention_tensor = (
+                bounded_branch_updates["attention_geometry"].update
+                if "attention_geometry" in bounded_branch_updates
+                else torch.zeros_like(latent, dtype=torch.float32)
+            )
+            attention_record = (
+                accepted_attention_record
+                if accepted_attention_record is not None
+                else {
+                    "attention_score_before": None,
+                    "attention_content_base_score": None,
+                    "attention_score_after": None,
+                    "attention_actual_written_content_base_score": None,
+                    "attention_final_combined_score": None,
+                    "attention_score_gain": None,
+                    "attention_applied_update_strength": None,
+                    "attention_backtracking_step_count": None,
+                    "attention_update_digest": "",
+                    "attention_update_content_sha256": "",
+                    "attention_update_unit_direction_content_sha256": "",
+                    "stable_token_indices": [],
+                    "stable_token_selection_digest": "",
+                    "stable_pair_weight_identity_digest": "",
+                    "stable_pair_weight_realization_digest": "",
+                    "attention_relation_component_names": [],
+                    "attention_relation_active_component_names": [],
+                    "attention_relation_component_weights": [],
+                    "attention_relation_component_protocol_digest": "",
+                    "attention_relation_source": "",
+                    "attention_relation_direct_qk_source_ready": False,
+                    "attention_relation_probability_scope": "",
+                    "attention_relation_component_identity_digest": "",
+                    "attention_relation_keyed_projection_digest": "",
+                    "attention_relation_qk_operator_metadata_records": [],
+                    "attention_relation_qk_operator_metadata_digest": "",
+                    "attention_relation_qk_operator_metadata_ready": False,
+                    "attention_qk_atomic_content_records": [],
+                    "attention_qk_atomic_content_digest": "",
+                    "attention_qk_atomic_content_ready": False,
+                }
+            )
+            bounded_branch_update_records = {
+                branch_name: {
+                    **bounded_update.to_record(),
+                    **post_risk_direction_records.get(branch_name, {}),
+                }
+                for branch_name, bounded_update in (
+                    bounded_branch_updates.items()
+                )
+            }
         branch_update_content_records = {
-            "lf_content": tensor_content_sha256(lf_update),
-            "tail_robust": tensor_content_sha256(tail_update),
-            "attention_geometry": tensor_content_sha256(attention_tensor),
+            "lf_content": (
+                tensor_content_sha256(lf_update)
+                if "lf_content" in active_branch_name_set
+                else ""
+            ),
+            "tail_robust": (
+                tensor_content_sha256(tail_update)
+                if "tail_robust" in active_branch_name_set
+                else ""
+            ),
+            "attention_geometry": (
+                tensor_content_sha256(attention_tensor)
+                if "attention_geometry" in active_branch_name_set
+                else ""
+            ),
         }
         branch_risk_records = {
             name: _branch_risk_record(branch_field)
@@ -4694,10 +4850,16 @@ def run_semantic_watermark_runtime(
                 raise RuntimeError(
                     "Null Space 与风险写回没有复用同一有效预算 Tensor"
                 )
-            branch_risk_records[branch_name].update(bounded_record)
+            if active_injection_config.semantic_routing_enabled:
+                branch_risk_records[branch_name].update(bounded_record)
         branch_risk_content_evidence = _branch_risk_content_evidence(
             risk_signal_content_records,
             branch_risk_records,
+            semantic_routing_enabled=(
+                active_injection_config.semantic_routing_enabled
+            ),
+            null_space_enabled=active_injection_config.null_space_enabled,
+            active_branch_names=active_branch_names,
         )
         combined_update_content_sha256 = tensor_content_sha256(
             combined_update
@@ -4727,6 +4889,8 @@ def run_semantic_watermark_runtime(
                 ),
                 "adjacent_step_stability_status": (
                     "measured_from_immediately_previous_scheduler_step"
+                    if active_injection_config.semantic_routing_enabled
+                    else "not_applicable_semantic_routing_disabled"
                 ),
                 "timestep": float(method_timestep.detach().float().item()),
                 "latent_content_sha256_before": tensor_content_sha256(latent),
@@ -4751,7 +4915,7 @@ def run_semantic_watermark_runtime(
                 ),
                 "relative_update_norm": tensor_norm(combined_update) / max(tensor_norm(latent), 1e-12),
                 "active_carrier_branches": list(active_branch_names),
-                "branch_risk_bundle_digest": risk_bundle.bundle_digest,
+                "branch_risk_bundle_digest": risk_bundle_digest,
                 **risk_signal_content_records,
                 "branch_risk_records": branch_risk_records,
                 "branch_risk_content_digest": build_stable_digest(
@@ -4771,13 +4935,19 @@ def run_semantic_watermark_runtime(
                 "lf_carrier_protocol_digest": (
                     active_injection_config.low_frequency_carrier_config.protocol_digest
                 ),
-                "lf_template_content_sha256": tensor_content_sha256(
-                    lf_template
+                "lf_template_content_sha256": (
+                    tensor_content_sha256(lf_template)
+                    if lf_template is not None
+                    else ""
                 ),
                 "lf_template_digest": (
                     "" if lf_carrier is None else lf_carrier.template_digest
                 ),
-                "lf_template_shape": [int(value) for value in lf_template.shape],
+                "lf_template_shape": (
+                    [int(value) for value in lf_template.shape]
+                    if lf_template is not None
+                    else []
+                ),
                 "tail_template_digest": (
                     ""
                     if tail_carrier is None
@@ -4786,19 +4956,28 @@ def run_semantic_watermark_runtime(
                 "tail_carrier_protocol_digest": tail_carrier_protocol[
                     "tail_carrier_protocol_digest"
                 ],
-                "tail_fraction": active_injection_config.tail_fraction,
-                "tail_template_content_sha256": tensor_content_sha256(
-                    tail_template
+                "tail_fraction": effective_tail_fraction,
+                "tail_template_content_sha256": (
+                    tensor_content_sha256(tail_template)
+                    if tail_template is not None
+                    else ""
                 ),
                 "tail_template_shape": [
                     int(value) for value in tail_template.shape
-                ],
-                "tail_template_element_count": int(tail_template.numel()),
-                "tail_selected_element_count": int(
-                    math.ceil(
-                        tail_template.numel()
-                        * active_injection_config.tail_fraction
+                ] if tail_template is not None else [],
+                "tail_template_element_count": (
+                    int(tail_template.numel())
+                    if tail_template is not None
+                    else 0
+                ),
+                "tail_selected_element_count": (
+                    int(
+                        math.ceil(
+                            tail_template.numel() * effective_tail_fraction
+                        )
                     )
+                    if tail_template is not None
+                    else 0
                 ),
                 "tail_projection_energy_retention": (
                     None if tail_carrier is None else tail_carrier.projection_energy_retention
@@ -5231,6 +5410,13 @@ def run_semantic_watermark_runtime(
         torch_module=torch,
         random_identity_random=random_identity_random,
     )
+    (
+        public_detection_noise_prg_identity,
+        public_detection_noise_prg_identity_digest,
+    ) = _runtime_public_detection_noise_identity(
+        detections,
+        attention_geometry_enabled=config.attention_geometry_enabled,
+    )
     result = SemanticWatermarkRuntimeResult(
         run_id=run_id,
         run_decision="pass" if update_records else "fail",
@@ -5257,14 +5443,12 @@ def run_semantic_watermark_runtime(
                 sample_randomization_reference
             ),
             "detector_input_access_mode": "image_key_public_model_only",
-            "public_detection_noise_prg_identity": detections[0][
-                "metadata"
-            ]["public_detection_noise_evidence_records"][0][
-                "public_detection_noise_prg_identity"
-            ],
-            "public_detection_noise_prg_identity_digest": detections[0][
-                "public_detection_noise_prg_identity_digest"
-            ],
+            "public_detection_noise_prg_identity": (
+                public_detection_noise_prg_identity
+            ),
+            "public_detection_noise_prg_identity_digest": (
+                public_detection_noise_prg_identity_digest
+            ),
             "supports_paper_claim": False,
             "paired_quality": paired_quality,
             "final_image_preservation": final_image_preservation,
@@ -5528,6 +5712,8 @@ def write_semantic_watermark_runtime_outputs(
                 counterfactual_record or None
             ),
             attention_geometry_enabled=config.attention_geometry_enabled,
+            image_alignment_enabled=config.image_alignment_enabled,
+            semantic_routing_enabled=config.semantic_routing_enabled,
             null_space_enabled=config.null_space_enabled,
             full_active_branches=_active_carrier_branch_names(config),
             carrier_only_active_branches=(

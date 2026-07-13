@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 import pytest
+import torch
 
 from experiments.artifacts.dataset_level_quality_outputs import (
     FORMAL_FEATURE_BACKEND,
@@ -18,6 +20,24 @@ from experiments.protocol.attacks import (
     formal_attack_seed_protocol_record,
     formal_attack_seed_random,
 )
+from experiments.protocol.detection_key_identity import (
+    REGISTERED_WATERMARK_KEY_ROLE,
+    REGISTERED_WRONG_KEY_ROLE,
+    build_detection_key_plan_record,
+    resolve_detection_key_material_and_identity,
+)
+from experiments.protocol.formal_randomization import (
+    build_canonical_sd35_base_latent,
+    build_formal_randomization_identity,
+    formal_randomization_sample_reference,
+    formal_runtime_randomization_plan_record,
+    formal_watermark_key_material_from_seed,
+    resolve_formal_randomization_repeat,
+)
+from experiments.protocol.method_runtime_config import (
+    FORMAL_METHOD_PACKAGE_ROOT,
+    load_formal_method_runtime_config,
+)
 from experiments.runners.image_only_dataset_runtime import (
     FrozenEvidenceProtocol,
     apply_frozen_evidence_protocol,
@@ -25,6 +45,9 @@ from experiments.runners.image_only_dataset_runtime import (
 )
 from experiments.runtime.scientific_unit_provenance import (
     aggregate_scientific_unit_provenance,
+)
+from experiments.runtime.scientific_content_binding import (
+    SCIENTIFIC_CONTENT_BINDING_SCHEMA,
 )
 from main.core.digest import build_stable_digest
 from main.methods.method_definition import (
@@ -34,6 +57,7 @@ from main.methods.method_definition import (
 from paper_experiments.analysis.formal_record_statistics import (
     FormalRecordStatisticsError,
     _formal_attack_coverage_ready as _analysis_formal_attack_coverage_ready,
+    _validate_formal_detections_against_scientific_binding,
     rebuild_and_validate_ablation_runtime_aggregates,
     rebuild_and_validate_dataset_quality_feature_identity,
 )
@@ -68,6 +92,139 @@ PROMPT_DIGESTS = {
     )
     for prompt_id in PROMPT_SPLITS
 }
+PROMPT_INDEXES = {
+    prompt_id: prompt_index
+    for prompt_index, prompt_id in enumerate(PROMPT_SPLITS)
+}
+_FORMAL_METHOD_CONFIG = load_formal_method_runtime_config(
+    FORMAL_METHOD_PACKAGE_ROOT
+)
+_FORMAL_REPEAT = resolve_formal_randomization_repeat("seed_00_key_00")
+FORMAL_RANDOMIZATION_PLAN = formal_runtime_randomization_plan_record(
+    _FORMAL_METHOD_CONFIG.seed,
+    base_latent_dtype=f"torch.{_FORMAL_METHOD_CONFIG.latent_torch_dtype}",
+    base_latent_shape=(1, 16, 64, 64),
+)
+RANDOMIZATION_REPEAT_IDENTITY = {
+    **_FORMAL_REPEAT.to_dict(),
+    "formal_randomization_protocol_digest": FORMAL_RANDOMIZATION_PLAN[
+        "formal_randomization_protocol_digest"
+    ],
+}
+_FORMAL_DERIVED_DETECTION_FIELDS = {
+    "frozen_content_threshold",
+    "frozen_geometry_score_threshold",
+    "frozen_registration_confidence_threshold",
+    "frozen_attention_sync_score_threshold",
+    "frozen_threshold_digest",
+    "frozen_image_only_detector_config_digest",
+    "formal_raw_content_margin",
+    "formal_aligned_content_margin",
+    "formal_positive_by_content",
+    "formal_content_failure_reason",
+    "formal_rescue_applied",
+    "formal_evidence_positive",
+    "formal_metric_status",
+    "supports_paper_claim",
+}
+
+
+def _canonical_randomization_reference(prompt_id: str) -> dict[str, Any]:
+    """按冻结正式计划构造功能测试使用的真实样本随机引用."""
+
+    prompt_index = PROMPT_INDEXES[prompt_id]
+    identity = build_formal_randomization_identity(
+        base_seed=_FORMAL_METHOD_CONFIG.seed,
+        prompt_index=prompt_index,
+        root_key_material="slm_wm_paper_key",
+        repeat=_FORMAL_REPEAT,
+    )
+    _, base_latent_identity = build_canonical_sd35_base_latent(
+        shape=(1, 16, 64, 64),
+        generation_seed_random=identity["generation_seed_random"],
+        model_id=_FORMAL_METHOD_CONFIG.model_id,
+        model_revision=_FORMAL_METHOD_CONFIG.model_revision,
+        device="cpu",
+        dtype=torch.float16,
+    )
+    return formal_randomization_sample_reference(
+        identity,
+        base_latent_identity=base_latent_identity,
+    )
+
+
+CANONICAL_RANDOMIZATION_REFERENCES = {
+    prompt_id: _canonical_randomization_reference(prompt_id)
+    for prompt_id in PROMPT_SPLITS
+}
+
+
+def _scientific_detection_binding_record(
+    *,
+    run_id: str,
+    detections: list[dict[str, Any]],
+    protocol: FrozenEvidenceProtocol,
+    randomization_reference: dict[str, Any],
+) -> dict[str, Any]:
+    """为功能测试绑定真实运行先于论文判定产生的检测身份."""
+
+    registered_key_material = formal_watermark_key_material_from_seed(
+        int(randomization_reference["watermark_key_seed_random"]),
+        _FORMAL_REPEAT,
+    )
+    key_plan = build_detection_key_plan_record(registered_key_material)
+    identities = []
+    for detection_index, detection in enumerate(detections):
+        raw_record = {
+            key: value
+            for key, value in detection.items()
+            if key
+            not in {
+                "ablation_id",
+                "ablation_prompt_id",
+                *_FORMAL_DERIVED_DETECTION_FIELDS,
+            }
+        }
+        attack_id = str(raw_record.get("attack_id", "none"))
+        sample_role = str(raw_record["sample_role"])
+        key_role = (
+            REGISTERED_WRONG_KEY_ROLE
+            if sample_role == "wrong_key_negative"
+            and attack_id in {"", "none"}
+            else REGISTERED_WATERMARK_KEY_ROLE
+        )
+        _material, key_identity = resolve_detection_key_material_and_identity(
+            registered_key_material,
+            key_role,
+        )
+        identities.append(
+            {
+                "detection_index": detection_index,
+                "sample_role": sample_role,
+                "attack_id": attack_id,
+                "detection_key_identity": key_identity,
+                "detection_record_content_digest": build_stable_digest(
+                    raw_record
+                ),
+            }
+        )
+    payload = {
+        "scientific_content_binding_schema": SCIENTIFIC_CONTENT_BINDING_SCHEMA,
+        "run_id": run_id,
+        "image_only_detector_config_digest": (
+            protocol.image_only_detector_config_digest
+        ),
+        "detection_key_plan_digest_random": key_plan[
+            "detection_key_plan_digest_random"
+        ],
+        "detection_content_identities": identities,
+    }
+    return {
+        **payload,
+        "scientific_content_binding_digest": build_stable_digest(payload),
+    }
+
+
 def _bind_attention_alignment_gate(
     record: dict[str, Any],
 ) -> dict[str, Any]:
@@ -83,6 +240,7 @@ def _raw_detection(
     split: str,
     sample_role: str,
     content_score: float,
+    randomization_reference: dict[str, Any],
     attack: Any | None = None,
 ) -> dict[str, Any]:
     """构造冻结协议尚未应用的图像盲检原子。"""
@@ -98,9 +256,12 @@ def _raw_detection(
         "registration_confidence": 0.0,
         "attention_sync_score": 0.0,
         "alignment": {"registration_geometry_reliable": False},
+        **randomization_reference,
     }
     if attack is not None:
-        generation_seed_random = 1703
+        generation_seed_random = int(
+            randomization_reference["generation_seed_random"]
+        )
         record.update(
             {
                 "attack_id": attack.attack_id,
@@ -131,6 +292,7 @@ def _formal_detection_group(
     prompt_id: str,
     split: str,
     protocol: FrozenEvidenceProtocol,
+    randomization_reference: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """生成一个变体与一个 Prompt 的完整冻结检测记录组。"""
 
@@ -143,6 +305,7 @@ def _formal_detection_group(
             split=split,
             sample_role="clean_negative",
             content_score=0.0,
+            randomization_reference=randomization_reference,
         ),
         _raw_detection(
             run_id=run_id,
@@ -150,6 +313,7 @@ def _formal_detection_group(
             split=split,
             sample_role="positive_source",
             content_score=positive_score,
+            randomization_reference=randomization_reference,
         ),
         _raw_detection(
             run_id=run_id,
@@ -157,6 +321,7 @@ def _formal_detection_group(
             split=split,
             sample_role="wrong_key_negative",
             content_score=0.0,
+            randomization_reference=randomization_reference,
         ),
     ]
     if split == "test":
@@ -169,6 +334,7 @@ def _formal_detection_group(
                 content_score=(
                     positive_score if sample_role == "positive_source" else 0.0
                 ),
+                randomization_reference=randomization_reference,
                 attack=attack,
             )
             for attack in default_attack_configs()
@@ -199,12 +365,16 @@ def _ablation_atomic_fixture() -> tuple[
     protocols: dict[str, dict[str, Any]] = {}
     unit_identity_records: list[dict[str, Any]] = []
     for ablation_id in ABLATION_IDS:
+        calibration_randomization_reference = (
+            CANONICAL_RANDOMIZATION_REFERENCES["prompt_calibration"]
+        )
         calibration_negative = _raw_detection(
             run_id=f"run_{ablation_id}_prompt_calibration",
             prompt_id="prompt_calibration",
             split="calibration",
             sample_role="clean_negative",
             content_score=0.0,
+            randomization_reference=calibration_randomization_reference,
         )
         protocol = calibrate_complete_evidence_protocol(
             (calibration_negative,),
@@ -215,6 +385,9 @@ def _ablation_atomic_fixture() -> tuple[
         runtime_config = dict(ABLATION_RUNTIME_CONFIGS[ablation_id])
         for prompt_index, (prompt_id, split) in enumerate(PROMPT_SPLITS.items()):
             prompt_text = f"正式消融 {prompt_id}"
+            randomization_reference = CANONICAL_RANDOMIZATION_REFERENCES[
+                prompt_id
+            ]
             scientific_config = {
                 "prompt": prompt_text,
                 "prompt_id": prompt_id,
@@ -226,6 +399,28 @@ def _ablation_atomic_fixture() -> tuple[
                 "method_definition_digest": (
                     semantic_conditioned_latent_method_definition_digest()
                 ),
+                "model_id": _FORMAL_METHOD_CONFIG.model_id,
+                "model_revision": _FORMAL_METHOD_CONFIG.model_revision,
+                "seed": randomization_reference["generation_seed_random"],
+                "randomization_repeat_id": _FORMAL_REPEAT.randomization_repeat_id,
+                "generation_seed_index": _FORMAL_REPEAT.generation_seed_index,
+                "generation_seed_offset": _FORMAL_REPEAT.generation_seed_offset,
+                "watermark_key_index": _FORMAL_REPEAT.watermark_key_index,
+                "watermark_key_seed_random": randomization_reference[
+                    "watermark_key_seed_random"
+                ],
+                "formal_randomization_protocol_digest": (
+                    randomization_reference[
+                        "formal_randomization_protocol_digest"
+                    ]
+                ),
+                "key_material_digest_random": randomization_reference[
+                    "watermark_key_material_digest_random"
+                ],
+                "torch_dtype": _FORMAL_METHOD_CONFIG.latent_torch_dtype,
+                "latent_torch_dtype": _FORMAL_METHOD_CONFIG.latent_torch_dtype,
+                "width": _FORMAL_METHOD_CONFIG.width,
+                "height": _FORMAL_METHOD_CONFIG.height,
                 **{
                     field_name: field_value
                     for field_name, field_value in runtime_config.items()
@@ -234,13 +429,6 @@ def _ablation_atomic_fixture() -> tuple[
             }
             config_digest = build_stable_digest(scientific_config)
             run_id = f"semantic_watermark_{config_digest[:16]}"
-            randomization_reference = {
-                "formal_randomization_identity_digest_random": (
-                    build_stable_digest(
-                        {"ablation_id": ablation_id, "prompt_id": prompt_id}
-                    )
-                )
-            }
             unit_identity_records.append(
                 {
                     "run_id": run_id,
@@ -255,9 +443,16 @@ def _ablation_atomic_fixture() -> tuple[
                 prompt_id=prompt_id,
                 split=split,
                 protocol=protocol,
+                randomization_reference=randomization_reference,
             )
             for detection in detections:
                 detection["run_id"] = run_id
+            scientific_binding = _scientific_detection_binding_record(
+                run_id=run_id,
+                detections=detections,
+                protocol=protocol,
+                randomization_reference=randomization_reference,
+            )
             detection_records.extend(detections)
             un_attacked = {
                 record["sample_role"]: record
@@ -299,6 +494,17 @@ def _ablation_atomic_fixture() -> tuple[
                                     run_id,
                                     config_digest,
                                 )
+                            ),
+                            "scientific_content_binding_schema": (
+                                SCIENTIFIC_CONTENT_BINDING_SCHEMA
+                            ),
+                            "scientific_content_binding_record": (
+                                scientific_binding
+                            ),
+                            "scientific_content_binding_digest": (
+                                scientific_binding[
+                                    "scientific_content_binding_digest"
+                                ]
                             ),
                             "paired_quality": {"ssim": 0.95},
                         },
@@ -375,14 +581,87 @@ def test_ablation_runtime_aggregates_rebuild_from_detection_atoms() -> None:
         expected_ablation_ids=ABLATION_IDS,
         expected_prompt_split_by_id=PROMPT_SPLITS,
         expected_prompt_digest_by_id=PROMPT_DIGESTS,
+        expected_prompt_index_by_id=PROMPT_INDEXES,
         expected_runtime_config_by_ablation_id=ABLATION_RUNTIME_CONFIGS,
         expected_runtime_output_root=ABLATION_RUNTIME_OUTPUT_ROOT,
         expected_target_fpr=TARGET_FPR,
+        formal_randomization_plan=FORMAL_RANDOMIZATION_PLAN,
+        randomization_repeat_identity=RANDOMIZATION_REPEAT_IDENTITY,
     )
 
     assert result["ablation_runtime_aggregate_rebuild_ready"] is True
     assert result["ablation_runtime_record_count"] == 4
     assert result["ablation_detection_record_count"] == len(detections)
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    ("prompt_id", "first_role", "second_role", "attack_required"),
+    (
+        ("prompt_test", "positive_source", "wrong_key_negative", False),
+        ("prompt_test", "clean_negative", "positive_source", True),
+        ("prompt_calibration", "clean_negative", "positive_source", False),
+    ),
+)
+def test_scientific_binding_rejects_detection_role_relabeling(
+    prompt_id: str,
+    first_role: str,
+    second_role: str,
+    attack_required: bool,
+) -> None:
+    """角色重标即使保持记录数量不变也不得改变固定 FPR 或攻击统计."""
+
+    runtime_records, detections, protocols, _unit_identities = (
+        _ablation_atomic_fixture()
+    )
+    runtime_record = next(
+        record
+        for record in runtime_records
+        if record["ablation_id"] == "complete_method"
+        and record["prompt_id"] == prompt_id
+    )
+    run_id = runtime_record["runtime_result"]["run_id"]
+    group = [record for record in detections if record["run_id"] == run_id]
+    candidates = [
+        record
+        for record in group
+        if bool(record.get("attack_id")) is attack_required
+    ]
+    first = next(
+        record for record in candidates if record["sample_role"] == first_role
+    )
+    attack_id = first.get("attack_id")
+    second = next(
+        record
+        for record in candidates
+        if record["sample_role"] == second_role
+        and (
+            not attack_required or record.get("attack_id") == attack_id
+        )
+    )
+    first["sample_role"], second["sample_role"] = (
+        second["sample_role"],
+        first["sample_role"],
+    )
+    key_material = formal_watermark_key_material_from_seed(
+        int(
+            CANONICAL_RANDOMIZATION_REFERENCES[prompt_id][
+                "watermark_key_seed_random"
+            ]
+        ),
+        _FORMAL_REPEAT,
+    )
+    key_plan_digest = build_detection_key_plan_record(key_material)[
+        "detection_key_plan_digest_random"
+    ]
+
+    with pytest.raises(FormalRecordStatisticsError, match="科学运行|样本角色"):
+        _validate_formal_detections_against_scientific_binding(
+            tuple(group),
+            runtime_record["runtime_result"],
+            FrozenEvidenceProtocol(**protocols["complete_method"]),
+            expected_detection_key_plan_digest_random=key_plan_digest,
+        )
 
 
 @pytest.mark.quick
@@ -449,11 +728,14 @@ def test_ablation_runtime_aggregate_rebuild_fails_closed_on_drift(
             protocols,
             scientific_unit_identity_records=unit_identities,
             expected_ablation_ids=ABLATION_IDS,
-                expected_prompt_split_by_id=PROMPT_SPLITS,
-                expected_prompt_digest_by_id=PROMPT_DIGESTS,
-                expected_runtime_config_by_ablation_id=ABLATION_RUNTIME_CONFIGS,
-                expected_runtime_output_root=ABLATION_RUNTIME_OUTPUT_ROOT,
-                expected_target_fpr=TARGET_FPR,
+            expected_prompt_split_by_id=PROMPT_SPLITS,
+            expected_prompt_digest_by_id=PROMPT_DIGESTS,
+            expected_prompt_index_by_id=PROMPT_INDEXES,
+            expected_runtime_config_by_ablation_id=ABLATION_RUNTIME_CONFIGS,
+            expected_runtime_output_root=ABLATION_RUNTIME_OUTPUT_ROOT,
+            expected_target_fpr=TARGET_FPR,
+            formal_randomization_plan=FORMAL_RANDOMIZATION_PLAN,
+            randomization_repeat_identity=RANDOMIZATION_REPEAT_IDENTITY,
         )
 
 
@@ -495,9 +777,87 @@ def test_ablation_runtime_aggregate_rejects_semantic_identity_drift(
             expected_ablation_ids=ABLATION_IDS,
             expected_prompt_split_by_id=PROMPT_SPLITS,
             expected_prompt_digest_by_id=PROMPT_DIGESTS,
+            expected_prompt_index_by_id=PROMPT_INDEXES,
             expected_runtime_config_by_ablation_id=ABLATION_RUNTIME_CONFIGS,
             expected_runtime_output_root=ABLATION_RUNTIME_OUTPUT_ROOT,
             expected_target_fpr=TARGET_FPR,
+            formal_randomization_plan=FORMAL_RANDOMIZATION_PLAN,
+            randomization_repeat_identity=RANDOMIZATION_REPEAT_IDENTITY,
+        )
+
+
+@pytest.mark.quick
+def test_ablation_runtime_rejects_synchronized_random_reference_forgery() -> None:
+    """顶层、运行和检测同步写成同一错误引用时仍必须独立拒绝."""
+
+    runtime_records, detections, protocols, unit_identities = (
+        _ablation_atomic_fixture()
+    )
+    forged_reference = deepcopy(
+        CANONICAL_RANDOMIZATION_REFERENCES["prompt_test"]
+    )
+    target_run_ids = {
+        record["runtime_result"]["run_id"]
+        for record in runtime_records
+        if record["prompt_id"] == "prompt_calibration"
+    }
+    for record in runtime_records:
+        if record["prompt_id"] == "prompt_calibration":
+            record["runtime_result"]["metadata"][
+                "formal_randomization_reference"
+            ] = deepcopy(forged_reference)
+    for identity in unit_identities:
+        if identity["run_id"] in target_run_ids:
+            identity["formal_randomization_reference"] = deepcopy(
+                forged_reference
+            )
+    for detection in detections:
+        if detection["prompt_id"] == "prompt_calibration":
+            detection.update(forged_reference)
+
+    with pytest.raises(FormalRecordStatisticsError):
+        rebuild_and_validate_ablation_runtime_aggregates(
+            runtime_records,
+            detections,
+            protocols,
+            scientific_unit_identity_records=unit_identities,
+            expected_ablation_ids=ABLATION_IDS,
+            expected_prompt_split_by_id=PROMPT_SPLITS,
+            expected_prompt_digest_by_id=PROMPT_DIGESTS,
+            expected_prompt_index_by_id=PROMPT_INDEXES,
+            expected_runtime_config_by_ablation_id=ABLATION_RUNTIME_CONFIGS,
+            expected_runtime_output_root=ABLATION_RUNTIME_OUTPUT_ROOT,
+            expected_target_fpr=TARGET_FPR,
+            formal_randomization_plan=FORMAL_RANDOMIZATION_PLAN,
+            randomization_repeat_identity=RANDOMIZATION_REPEAT_IDENTITY,
+        )
+
+
+@pytest.mark.quick
+def test_ablation_runtime_rejects_canonical_prompt_index_swap() -> None:
+    """跨消融一致但与规范 Prompt 文件相反的索引交换必须被拒绝."""
+
+    runtime_records, detections, protocols, unit_identities = (
+        _ablation_atomic_fixture()
+    )
+    for record in runtime_records:
+        record["prompt_index"] = 1 - int(record["prompt_index"])
+
+    with pytest.raises(FormalRecordStatisticsError):
+        rebuild_and_validate_ablation_runtime_aggregates(
+            runtime_records,
+            detections,
+            protocols,
+            scientific_unit_identity_records=unit_identities,
+            expected_ablation_ids=ABLATION_IDS,
+            expected_prompt_split_by_id=PROMPT_SPLITS,
+            expected_prompt_digest_by_id=PROMPT_DIGESTS,
+            expected_prompt_index_by_id=PROMPT_INDEXES,
+            expected_runtime_config_by_ablation_id=ABLATION_RUNTIME_CONFIGS,
+            expected_runtime_output_root=ABLATION_RUNTIME_OUTPUT_ROOT,
+            expected_target_fpr=TARGET_FPR,
+            formal_randomization_plan=FORMAL_RANDOMIZATION_PLAN,
+            randomization_repeat_identity=RANDOMIZATION_REPEAT_IDENTITY,
         )
 
 
@@ -808,6 +1168,7 @@ def test_ablation_statistics_rejects_attack_seed_drift() -> None:
     assert _analysis_formal_attack_coverage_ready(
         records,
         split="test",
+        expected_generation_seed_random=generation_seed_random,
     )
 
     drifted = [dict(record) for record in records]
@@ -817,4 +1178,5 @@ def test_ablation_statistics_rejects_attack_seed_drift() -> None:
     assert not _analysis_formal_attack_coverage_ready(
         tuple(drifted),
         split="test",
+        expected_generation_seed_random=generation_seed_random,
     )

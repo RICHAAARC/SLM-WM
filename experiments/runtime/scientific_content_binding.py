@@ -35,7 +35,7 @@ from main.methods.update_composition import (
 
 
 SCIENTIFIC_CONTENT_BINDING_SCHEMA = (
-    "slm_wm_scientific_content_binding_v4"
+    "slm_wm_scientific_content_binding_v5"
 )
 IMAGE_RGB_UINT8_CONTENT_SCHEMA = "slm_wm_image_rgb_uint8_content_v1"
 
@@ -60,11 +60,13 @@ _BRANCH_RISK_BASE_CONTENT_FIELDS = (
     "budget_values_content_sha256",
     "eligible_mask_content_sha256",
 )
-_BRANCH_RISK_BOUNDED_CONTENT_FIELDS = (
+_BRANCH_RISK_ENVELOPE_CONTENT_FIELDS = (
     "effective_budget_values_content_sha256",
     "branch_unit_direction_content_sha256",
     "branch_budget_envelope_content_sha256",
     "branch_written_update_content_sha256",
+)
+_BRANCH_RISK_POST_NULL_CONTENT_FIELDS = (
     "branch_post_risk_direction_content_sha256",
     "branch_post_risk_reference_direction_content_sha256",
     "branch_post_risk_response_content_sha256",
@@ -254,29 +256,66 @@ def _branch_risk_content_evidence(
     resolved: Mapping[str, Any],
     branch_risk_records: Mapping[str, Mapping[str, Any]],
     expected_branches: Sequence[str],
+    *,
+    semantic_routing_enabled: bool,
+    null_space_enabled: bool,
 ) -> dict[str, Any]:
-    """重建风险来源及三分支内容身份, 并交叉核验写回身份。"""
+    """按机制开关重建活动分支风险内容并拒绝禁用残留."""
 
-    risk_sources = {
-        field_name: _sha256(
-            resolved.get(field_name),
-            field_name=field_name,
-        )
-        for field_name in _RISK_SOURCE_CONTENT_FIELDS
-    }
-    branch_content: dict[str, dict[str, Any]] = {}
     composition_identities = _mapping(
         resolved.get("quantized_write_branch_content_identities"),
         field_name="quantized_write_branch_content_identities",
     )
     if set(composition_identities) != set(expected_branches):
         raise ValueError("量化写回的活动分支顺序与方法分支不一致")
+    if not semantic_routing_enabled:
+        if branch_risk_records or any(
+            resolved.get(field_name) not in {None, ""}
+            for field_name in _RISK_SOURCE_CONTENT_FIELDS
+        ):
+            raise ValueError("风险路由关闭时不得保留风险信号或分支风险原子")
+        expected_bundle = build_stable_digest(
+            {
+                "semantic_routing_enabled": False,
+                "active_carrier_branches": tuple(expected_branches),
+            }
+        )
+        evidence = {
+            "semantic_routing_enabled": False,
+            "active_carrier_branches": list(expected_branches),
+            "risk_signal_content_records": {},
+            "branch_risk_content_records": {},
+        }
+        if (
+            resolved.get("branch_risk_bundle_digest") != expected_bundle
+            or resolved.get("branch_risk_content_digest")
+            != build_stable_digest(evidence)
+        ):
+            raise ValueError("关闭风险路由后的空风险身份不能重建")
+        return evidence
+
+    required_source_fields = _RISK_SOURCE_CONTENT_FIELDS[:-1]
+    risk_sources = {
+        field_name: _sha256(
+            resolved.get(field_name),
+            field_name=field_name,
+        )
+        for field_name in required_source_fields
+    }
+    if resolved.get(_RISK_SOURCE_CONTENT_FIELDS[-1]) not in {None, ""}:
+        risk_sources[_RISK_SOURCE_CONTENT_FIELDS[-1]] = _sha256(
+            resolved.get(_RISK_SOURCE_CONTENT_FIELDS[-1]),
+            field_name=_RISK_SOURCE_CONTENT_FIELDS[-1],
+        )
+    if set(branch_risk_records) != set(expected_branches):
+        raise ValueError("风险记录必须精确覆盖活动载体分支")
+    branch_content: dict[str, dict[str, Any]] = {}
     update_fields = {
         "lf_content": "lf_update_content_sha256",
         "tail_robust": "tail_robust_update_content_sha256",
         "attention_geometry": "attention_geometry_update_content_sha256",
     }
-    for branch_name in _BRANCH_NAMES:
+    for branch_name in expected_branches:
         branch_record = _mapping(
             branch_risk_records[branch_name],
             field_name=f"branch_risk_records.{branch_name}",
@@ -294,47 +333,63 @@ def _branch_risk_content_evidence(
             )
             for field_name in _BRANCH_RISK_BASE_CONTENT_FIELDS
         }
-        if branch_name in expected_branches:
-            bounded = {
-                field_name: _sha256(
-                    branch_record.get(field_name),
-                    field_name=f"{branch_name}.{field_name}",
-                )
-                for field_name in _BRANCH_RISK_BOUNDED_CONTENT_FIELDS
-            }
-            composition_identity = _mapping(
-                composition_identities[branch_name],
-                field_name=f"quantized_write_branch_content_identities.{branch_name}",
+        bounded = {
+            field_name: _sha256(
+                branch_record.get(field_name),
+                field_name=f"{branch_name}.{field_name}",
             )
-            if composition_identity != {
-                "branch_written_update_content_sha256": bounded[
-                    "branch_written_update_content_sha256"
-                ],
-                "branch_budget_envelope_content_sha256": bounded[
-                    "branch_budget_envelope_content_sha256"
-                ],
-            }:
-                raise ValueError("风险记录与量化写回的分支身份不一致")
-            if bounded["branch_written_update_content_sha256"] != resolved.get(
-                update_fields[branch_name]
-            ):
-                raise ValueError("风险记录与顶层分支 update 身份不一致")
-            content.update(bounded)
+            for field_name in _BRANCH_RISK_ENVELOPE_CONTENT_FIELDS
+        }
+        if null_space_enabled:
+            bounded.update(
+                {
+                    field_name: _sha256(
+                        branch_record.get(field_name),
+                        field_name=f"{branch_name}.{field_name}",
+                    )
+                    for field_name in _BRANCH_RISK_POST_NULL_CONTENT_FIELDS
+                }
+            )
+        elif any(
+            field_name in branch_record
+            for field_name in _BRANCH_RISK_POST_NULL_CONTENT_FIELDS
+        ):
+            raise ValueError("Null Space 关闭时不得保留投影后风险响应原子")
+        composition_identity = _mapping(
+            composition_identities[branch_name],
+            field_name=f"quantized_write_branch_content_identities.{branch_name}",
+        )
+        if composition_identity != {
+            "branch_written_update_content_sha256": bounded[
+                "branch_written_update_content_sha256"
+            ],
+            "branch_budget_envelope_content_sha256": bounded[
+                "branch_budget_envelope_content_sha256"
+            ],
+        }:
+            raise ValueError("风险记录与量化写回的分支身份不一致")
+        if bounded["branch_written_update_content_sha256"] != resolved.get(
+            update_fields[branch_name]
+        ):
+            raise ValueError("风险记录与顶层分支 update 身份不一致")
+        content.update(bounded)
         branch_content[branch_name] = content
     expected_bundle = build_stable_digest(
         {
             branch_name: branch_risk_records[branch_name][
                 "risk_field_digest"
             ]
-            for branch_name in _BRANCH_NAMES
+            for branch_name in expected_branches
         }
     )
     evidence = {
+        "semantic_routing_enabled": True,
+        "active_carrier_branches": list(expected_branches),
         "risk_signal_content_records": risk_sources,
         "branch_risk_content_records": branch_content,
     }
     if resolved.get("branch_risk_bundle_digest") != expected_bundle:
-        raise ValueError("风险场联合摘要不能由三分支记录重建")
+        raise ValueError("活动风险场联合摘要不能由分支记录重建")
     if resolved.get("branch_risk_content_digest") != build_stable_digest(
         evidence
     ):
@@ -347,10 +402,22 @@ def _update_content_identity(
     *,
     expected_branches: Sequence[str],
     null_space_enabled: bool,
+    semantic_routing_enabled: bool,
 ) -> dict[str, Any]:
     """提取一次注入原子的风险、基底、分支、写回与 Q/K 身份。"""
 
     resolved = dict(record)
+    resolved_branches = list(expected_branches)
+    if (
+        tuple(resolved_branches)
+        != tuple(name for name in _BRANCH_NAMES if name in resolved_branches)
+        or len(set(resolved_branches)) != len(resolved_branches)
+        or not resolved_branches
+    ):
+        raise ValueError("活动载体分支必须是冻结顺序的非空子集")
+    metadata = _mapping(resolved.get("metadata"), field_name="update.metadata")
+    if metadata.get("semantic_routing_enabled") is not semantic_routing_enabled:
+        raise ValueError("注入记录的风险路由开关与运行配置不一致")
     watermark_key_material_digest_random = _sha256(
         resolved.get("watermark_key_material_digest_random"),
         field_name="watermark_key_material_digest_random",
@@ -363,36 +430,21 @@ def _update_content_identity(
         resolved.get("tail_carrier_protocol_digest"),
         field_name="tail_carrier_protocol_digest",
     )
-    lf_template_content_sha256 = _sha256(
-        resolved.get("lf_template_content_sha256"),
-        field_name="lf_template_content_sha256",
-    )
-    tail_template_content_sha256 = _sha256(
-        resolved.get("tail_template_content_sha256"),
-        field_name="tail_template_content_sha256",
-    )
     lf_template_shape = list(resolved.get("lf_template_shape", ()))
     tail_template_shape = list(resolved.get("tail_template_shape", ()))
     tail_template_element_count = resolved.get("tail_template_element_count")
     tail_selected_element_count = resolved.get("tail_selected_element_count")
     tail_fraction = resolved.get("tail_fraction")
-    if (
-        len(lf_template_shape) != 4
-        or len(tail_template_shape) != 4
-        or any(
-            type(value) is not int or value <= 0
-            for value in (*lf_template_shape, *tail_template_shape)
-        )
-        or type(tail_template_element_count) is not int
-        or tail_template_element_count != math.prod(tail_template_shape)
-        or type(tail_selected_element_count) is not int
-        or type(tail_fraction) is not float
-        or tail_selected_element_count
-        != math.ceil(tail_template_element_count * tail_fraction)
-    ):
-        raise ValueError("注入载体的模板 shape 或尾部选择计数无效")
-    resolved_branches = list(expected_branches)
     if "lf_content" in resolved_branches:
+        lf_template_content_sha256 = _sha256(
+            resolved.get("lf_template_content_sha256"),
+            field_name="lf_template_content_sha256",
+        )
+        if len(lf_template_shape) != 4 or any(
+            type(value) is not int or value <= 0
+            for value in lf_template_shape
+        ):
+            raise ValueError("LF 模板 shape 无效")
         lf_template_digest = _sha256(
             resolved.get("lf_template_digest"),
             field_name="lf_template_digest",
@@ -406,14 +458,35 @@ def _update_content_identity(
         ):
             raise ValueError("LF 投影能量比例无效")
     else:
+        lf_template_content_sha256 = ""
         lf_template_digest = ""
         lf_projection_energy_retention = None
         if (
-            resolved.get("lf_template_digest") != ""
+            resolved.get("lf_template_content_sha256") != ""
+            or resolved.get("lf_template_digest") != ""
+            or lf_template_shape != []
             or resolved.get("lf_projection_energy_retention") is not None
         ):
-            raise ValueError("禁用 LF 分支不得保留投影模板摘要")
+            raise ValueError("禁用 LF 分支不得保留模板原子")
     if "tail_robust" in resolved_branches:
+        tail_template_content_sha256 = _sha256(
+            resolved.get("tail_template_content_sha256"),
+            field_name="tail_template_content_sha256",
+        )
+        if (
+            len(tail_template_shape) != 4
+            or any(
+                type(value) is not int or value <= 0
+                for value in tail_template_shape
+            )
+            or type(tail_template_element_count) is not int
+            or tail_template_element_count != math.prod(tail_template_shape)
+            or type(tail_selected_element_count) is not int
+            or type(tail_fraction) is not float
+            or tail_selected_element_count
+            != math.ceil(tail_template_element_count * tail_fraction)
+        ):
+            raise ValueError("尾部模板 shape 或选择计数无效")
         tail_template_digest = _sha256(
             resolved.get("tail_template_digest"),
             field_name="tail_template_digest",
@@ -427,13 +500,20 @@ def _update_content_identity(
         ):
             raise ValueError("尾部投影能量比例无效")
     else:
+        tail_template_content_sha256 = ""
         tail_template_digest = ""
         tail_projection_energy_retention = None
         if (
-            resolved.get("tail_template_digest") != ""
+            resolved.get("tail_template_content_sha256") != ""
+            or resolved.get("tail_template_digest") != ""
+            or tail_template_shape != []
+            or tail_template_element_count != 0
+            or tail_selected_element_count != 0
+            or resolved.get("tail_threshold") != 0.0
+            or resolved.get("tail_retained_fraction") != 0.0
             or resolved.get("tail_projection_energy_retention") is not None
         ):
-            raise ValueError("禁用尾部分支不得保留投影模板摘要")
+            raise ValueError("禁用尾部分支不得保留模板原子")
     if resolved.get("tensor_content_digest_version") != (
         TENSOR_CONTENT_DIGEST_VERSION
     ):
@@ -444,20 +524,30 @@ def _update_content_identity(
         resolved.get("branch_risk_records"),
         field_name="branch_risk_records",
     )
-    if set(branch_risk_records) != set(_BRANCH_NAMES):
-        raise ValueError("风险记录必须以冻结顺序覆盖三个分支")
     risk_evidence = _branch_risk_content_evidence(
         resolved,
         branch_risk_records,
         resolved_branches,
+        semantic_routing_enabled=semantic_routing_enabled,
+        null_space_enabled=null_space_enabled,
     )
-    update_content = {
-        field_name: _sha256(
-            resolved.get(field_name),
-            field_name=field_name,
-        )
-        for field_name in _UPDATE_CONTENT_FIELDS
+    update_content = {}
+    branch_update_fields = {
+        "lf_update_content_sha256": "lf_content",
+        "tail_robust_update_content_sha256": "tail_robust",
+        "attention_geometry_update_content_sha256": "attention_geometry",
     }
+    for field_name in _UPDATE_CONTENT_FIELDS:
+        branch_name = branch_update_fields.get(field_name)
+        if branch_name is not None and branch_name not in resolved_branches:
+            if resolved.get(field_name) != "":
+                raise ValueError("已禁用载体分支仍保留更新原子")
+            update_content[field_name] = ""
+        else:
+            update_content[field_name] = _sha256(
+                resolved.get(field_name),
+                field_name=field_name,
+            )
     update_content.update(
         {
             field_name: (
@@ -600,6 +690,53 @@ def _update_content_identity(
             ),
         }
     else:
+        none_fields = (
+            "attention_score_before",
+            "attention_content_base_score",
+            "attention_score_after",
+            "attention_actual_written_content_base_score",
+            "attention_final_combined_score",
+            "attention_score_gain",
+            "attention_applied_update_strength",
+            "attention_backtracking_step_count",
+        )
+        empty_string_fields = (
+            "attention_update_digest",
+            "attention_update_content_sha256",
+            "attention_update_unit_direction_content_sha256",
+            "stable_token_selection_digest",
+            "stable_pair_weight_identity_digest",
+            "stable_pair_weight_realization_digest",
+            "attention_relation_component_protocol_digest",
+            "attention_relation_source",
+            "attention_relation_component_identity_digest",
+            "attention_relation_keyed_projection_digest",
+            "attention_relation_qk_operator_metadata_digest",
+            "attention_qk_atomic_content_digest",
+        )
+        empty_list_fields = (
+            "stable_token_indices",
+            "attention_relation_component_names",
+            "attention_relation_active_component_names",
+            "attention_relation_component_weights",
+            "attention_relation_qk_operator_metadata_records",
+            "attention_qk_atomic_content_records",
+        )
+        if (
+            any(resolved.get(field_name) is not None for field_name in none_fields)
+            or any(
+                resolved.get(field_name) != ""
+                for field_name in empty_string_fields
+            )
+            or any(
+                resolved.get(field_name) != []
+                for field_name in empty_list_fields
+            )
+            or resolved.get("attention_relation_direct_qk_source_ready") is not False
+            or resolved.get("attention_relation_qk_operator_metadata_ready") is not False
+            or resolved.get("attention_qk_atomic_content_ready") is not False
+        ):
+            raise ValueError("关闭 attention geometry 时仍保留注意力原子")
         attention_identity = {
             "attention_qk_atomic_content_digest": "",
             "attention_relation_qk_operator_metadata_digest": "",
@@ -617,6 +754,7 @@ def _update_content_identity(
             watermark_key_material_digest_random
         ),
         "active_carrier_branches": resolved_branches,
+        "semantic_routing_enabled": bool(semantic_routing_enabled),
         "null_space_enabled": bool(null_space_enabled),
         "risk_content_evidence": risk_evidence,
         "content_carrier_identity": {
@@ -649,10 +787,29 @@ def _update_content_identity(
     }
 
 
+def validate_scientific_update_content_identity(
+    record: Mapping[str, Any],
+    *,
+    expected_branches: Sequence[str],
+    null_space_enabled: bool,
+    semantic_routing_enabled: bool,
+) -> dict[str, Any]:
+    """公开复验单个注入原子的活动科学算子身份."""
+
+    return _update_content_identity(
+        record,
+        expected_branches=expected_branches,
+        null_space_enabled=null_space_enabled,
+        semantic_routing_enabled=semantic_routing_enabled,
+    )
+
+
 def _detection_content_identity(
     record: Mapping[str, Any],
     *,
     expected_attention: bool,
+    expected_alignment: bool,
+    expected_content_branches: Sequence[str],
     detection_index: int,
     detection_key_plan: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -668,8 +825,13 @@ def _detection_content_identity(
         resolved.get("image_only_detector_config_digest"),
         field_name="detection.image_only_detector_config_digest",
     )
-    if metadata.get("attention_geometry_enabled") is not expected_attention:
+    if (
+        metadata.get("attention_geometry_enabled") is not expected_attention
+        or metadata.get("image_alignment_enabled") is not expected_alignment
+    ):
         raise ValueError("盲检配置身份与正式方法机制开关不一致")
+    if expected_alignment and not expected_attention:
+        raise ValueError("图像 alignment 不能脱离 attention geometry 启用")
     detection_key_identity = validate_detection_key_identity_record(
         resolved,
         detection_key_plan,
@@ -698,16 +860,34 @@ def _detection_content_identity(
         resolved.get("tail_carrier_protocol_digest"),
         field_name="detection.tail_carrier_protocol_digest",
     )
-    lf_template_content_sha256 = _sha256(
-        resolved.get("lf_template_content_sha256"),
-        field_name="detection.lf_template_content_sha256",
-    )
-    tail_template_content_sha256 = _sha256(
-        resolved.get("tail_template_content_sha256"),
-        field_name="detection.tail_template_content_sha256",
-    )
     lf_weight = float(resolved.get("lf_weight"))
     tail_robust_weight = float(resolved.get("tail_robust_weight"))
+    detected_content_branches = tuple(
+        branch_name
+        for branch_name, weight in (
+            ("lf_content", lf_weight),
+            ("tail_robust", tail_robust_weight),
+        )
+        if weight > 0.0
+    )
+    if detected_content_branches != tuple(expected_content_branches):
+        raise ValueError("盲检活动内容分支与嵌入方法不一致")
+    lf_template_content_sha256 = (
+        _sha256(
+            resolved.get("lf_template_content_sha256"),
+            field_name="detection.lf_template_content_sha256",
+        )
+        if lf_weight > 0.0
+        else ""
+    )
+    tail_template_content_sha256 = (
+        _sha256(
+            resolved.get("tail_template_content_sha256"),
+            field_name="detection.tail_template_content_sha256",
+        )
+        if tail_robust_weight > 0.0
+        else ""
+    )
     tail_threshold = float(resolved.get("tail_threshold"))
     tail_retained_fraction = float(resolved.get("tail_retained_fraction"))
     tail_template_shape = list(resolved.get("tail_template_shape"))
@@ -760,10 +940,12 @@ def _detection_content_identity(
         roles = tuple(
             str(item.get("qk_evaluation_role", "")) for item in qk_records
         )
-        if roles not in (
-            ("raw_detection_image",),
-            ("raw_detection_image", "aligned_detection_image"),
-        ):
+        expected_roles = (
+            ("raw_detection_image", "aligned_detection_image")
+            if expected_alignment
+            else ("raw_detection_image",)
+        )
+        if roles != expected_roles:
             raise ValueError("检测 Q/K 没有保留冻结 raw/aligned 顺序")
         first_atoms = qk_records[0].get("qk_atomic_content_records")
         if not isinstance(first_atoms, list):
@@ -903,6 +1085,32 @@ def _detection_content_identity(
             "detection_qk_operator_metadata_digest": operator_digest,
         }
     else:
+        empty_string_fields = (
+            "public_detection_noise_content_sha256",
+            "public_detection_noise_prg_identity_digest",
+            "public_detection_noise_evidence_digest",
+            "detection_qk_atomic_content_digest",
+            "detection_qk_image_content_binding_digest",
+            "attention_relation_qk_operator_metadata_digest",
+        )
+        empty_list_fields = (
+            "public_detection_noise_evidence_records",
+            "detection_qk_atomic_content_records",
+            "detection_qk_image_content_bindings",
+            "attention_relation_qk_operator_metadata_records",
+        )
+        if (
+            resolved.get("raw_attention_geometry_score") is not None
+            or any(metadata.get(name) not in {None, ""} for name in empty_string_fields)
+            or any(
+                metadata.get(name) not in (None, [])
+                for name in empty_list_fields
+            )
+            or metadata.get("detection_qk_atomic_content_ready") is True
+            or metadata.get("attention_relation_qk_operator_metadata_ready")
+            is True
+        ):
+            raise ValueError("关闭 attention geometry 时仍保留检测 Q/K 原子")
         public_noise_identity = {
             "public_detection_noise_content_sha256": "",
             "public_detection_noise_prg_identity_digest": "",
@@ -916,9 +1124,11 @@ def _detection_content_identity(
     alignment_value = resolved.get("alignment")
     if alignment_value is None:
         alignment_digest = ""
-        if expected_attention and len(roles) == 2:
+        if expected_alignment:
             raise ValueError("aligned 检测 Q/K 缺少仿射恢复记录")
     else:
+        if not expected_alignment:
+            raise ValueError("关闭图像 alignment 时不得保留仿射恢复记录")
         alignment_record = _mapping(
             alignment_value,
             field_name="alignment",
@@ -971,6 +1181,9 @@ def _detection_content_identity(
             "content_score": resolved.get("content_score"),
             **aligned_content_identity,
         },
+        "raw_attention_geometry_score": resolved.get(
+            "raw_attention_geometry_score"
+        ),
         "image_only_detector_config_digest": detector_config_digest,
         "detector_digest": _sha256(
             resolved.get("detector_digest"),
@@ -1000,6 +1213,8 @@ def build_scientific_content_binding_record(
     carrier_only_final_image_preservation: Mapping[str, Any] | None,
     carrier_only_counterfactual: Mapping[str, Any] | None,
     attention_geometry_enabled: bool,
+    image_alignment_enabled: bool,
+    semantic_routing_enabled: bool,
     null_space_enabled: bool,
     full_active_branches: Sequence[str],
     carrier_only_active_branches: Sequence[str],
@@ -1008,11 +1223,40 @@ def build_scientific_content_binding_record(
 
     if not run_id:
         raise ValueError("scientific content binding 缺少 run_id")
+    normalized_full_branches = tuple(
+        name for name in _BRANCH_NAMES if name in full_active_branches
+    )
+    normalized_carrier_branches = tuple(
+        name for name in _BRANCH_NAMES if name in carrier_only_active_branches
+    )
+    if (
+        tuple(full_active_branches) != normalized_full_branches
+        or len(set(full_active_branches)) != len(tuple(full_active_branches))
+        or not normalized_full_branches
+        or tuple(carrier_only_active_branches) != normalized_carrier_branches
+        or len(set(carrier_only_active_branches))
+        != len(tuple(carrier_only_active_branches))
+        or image_alignment_enabled and not attention_geometry_enabled
+        or ("attention_geometry" in normalized_full_branches)
+        is not attention_geometry_enabled
+        or (
+            attention_geometry_enabled
+            and normalized_carrier_branches
+            != tuple(
+                name
+                for name in normalized_full_branches
+                if name != "attention_geometry"
+            )
+        )
+        or (not attention_geometry_enabled and normalized_carrier_branches)
+    ):
+        raise ValueError("科学内容绑定的机制开关或活动分支集合无效")
     full_identities = [
         _update_content_identity(
             record,
             expected_branches=full_active_branches,
             null_space_enabled=null_space_enabled,
+            semantic_routing_enabled=semantic_routing_enabled,
         )
         for record in full_update_records
     ]
@@ -1025,6 +1269,7 @@ def build_scientific_content_binding_record(
             record,
             expected_branches=carrier_only_active_branches,
             null_space_enabled=null_space_enabled,
+            semantic_routing_enabled=semantic_routing_enabled,
         )
         for record in carrier_only_update_records
     ]
@@ -1043,6 +1288,12 @@ def build_scientific_content_binding_record(
         _detection_content_identity(
             record,
             expected_attention=attention_geometry_enabled,
+            expected_alignment=image_alignment_enabled,
+            expected_content_branches=tuple(
+                branch_name
+                for branch_name in normalized_full_branches
+                if branch_name in {"lf_content", "tail_robust"}
+            ),
             detection_index=index,
             detection_key_plan=validated_detection_key_plan,
         )
@@ -1133,14 +1384,18 @@ def build_scientific_content_binding_record(
             identity["content_carrier_identity"][protocol_field_name]
             for identity in detection_identities
         }
-        detection_template_shapes = {
-            tuple(
-                identity["content_carrier_identity"][
-                    "tail_template_shape"
-                ]
-            )
-            for identity in detection_identities
-        }
+        detection_template_shapes = (
+            {
+                tuple(
+                    identity["content_carrier_identity"][
+                        "tail_template_shape"
+                    ]
+                )
+                for identity in detection_identities
+            }
+            if branch_name == "tail_robust"
+            else update_template_shapes
+        )
         if (
             len(update_template_digests) != 1
             or registered_template_digests != update_template_digests
@@ -1443,6 +1698,8 @@ def build_scientific_content_binding_record(
             field_name="scientific_unit_config_digest",
         ),
         "attention_geometry_enabled": bool(attention_geometry_enabled),
+        "image_alignment_enabled": bool(image_alignment_enabled),
+        "semantic_routing_enabled": bool(semantic_routing_enabled),
         "null_space_enabled": bool(null_space_enabled),
         "full_active_branches": list(full_active_branches),
         "carrier_only_active_branches": list(carrier_only_active_branches),
@@ -1522,4 +1779,5 @@ __all__ = [
     "canonical_rgb_uint8_content_record",
     "read_canonical_rgb_uint8_content_record",
     "recompute_scientific_content_binding_digest",
+    "validate_scientific_update_content_identity",
 ]

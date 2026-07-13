@@ -133,6 +133,23 @@ def test_single_carrier_ablations_disable_attention_and_other_content_branch() -
 
 
 @pytest.mark.quick
+def test_attention_and_alignment_ablations_preserve_dependency_direction() -> None:
+    """移除 attention 必须同时移除 alignment, 仅移除 alignment 则保留 raw Q/K."""
+
+    specs = {
+        spec.ablation_id: spec
+        for spec in default_runtime_rerun_ablation_specs()
+    }
+    without_attention = specs["without_attention_geometry"]
+    without_alignment = specs["without_image_alignment"]
+
+    assert without_attention.attention_geometry_enabled is False
+    assert without_attention.image_alignment_enabled is False
+    assert without_alignment.attention_geometry_enabled is True
+    assert without_alignment.image_alignment_enabled is False
+
+
+@pytest.mark.quick
 def test_four_attention_component_ablations_zero_exactly_one_weight() -> None:
     """四个分量对照必须逐项置零并对其余三个分量重新归一化."""
 
@@ -205,9 +222,21 @@ def test_formal_ablation_attack_coverage_is_exact_on_test_only() -> None:
 
     records = _formal_attack_records()
 
-    assert _formal_attack_coverage_ready(records, split="test") is True
-    assert _formal_attack_coverage_ready((), split="calibration") is True
-    assert _formal_attack_coverage_ready(records, split="calibration") is False
+    assert _formal_attack_coverage_ready(
+        records,
+        split="test",
+        expected_generation_seed_random=1703,
+    ) is True
+    assert _formal_attack_coverage_ready(
+        (),
+        split="calibration",
+        expected_generation_seed_random=1703,
+    ) is True
+    assert _formal_attack_coverage_ready(
+        records,
+        split="calibration",
+        expected_generation_seed_random=1703,
+    ) is False
 
 
 @pytest.mark.quick
@@ -216,8 +245,16 @@ def test_formal_ablation_attack_coverage_rejects_missing_or_duplicate_record() -
 
     records = _formal_attack_records()
 
-    assert _formal_attack_coverage_ready(records[:-1], split="test") is False
-    assert _formal_attack_coverage_ready((*records, records[0]), split="test") is False
+    assert _formal_attack_coverage_ready(
+        records[:-1],
+        split="test",
+        expected_generation_seed_random=1703,
+    ) is False
+    assert _formal_attack_coverage_ready(
+        (*records, records[0]),
+        split="test",
+        expected_generation_seed_random=1703,
+    ) is False
 
 
 @pytest.mark.quick
@@ -229,4 +266,27 @@ def test_formal_ablation_attack_coverage_rejects_seed_drift() -> None:
         records[0]["attack_seed_random"]
     ) + 1
 
-    assert _formal_attack_coverage_ready(tuple(records), split="test") is False
+    assert _formal_attack_coverage_ready(
+        tuple(records),
+        split="test",
+        expected_generation_seed_random=1703,
+    ) is False
+
+
+@pytest.mark.quick
+def test_formal_ablation_attack_coverage_rejects_joint_seed_rewrite() -> None:
+    """攻击 seed 与错误生成 seed 同步重算也不得脱离规范样本身份."""
+
+    records = [dict(record) for record in _formal_attack_records()]
+    for record in records:
+        record["generation_seed_random"] = 1704
+        record["attack_seed_random"] = formal_attack_seed_random(
+            1704,
+            str(record["attack_id"]),
+        )
+
+    assert _formal_attack_coverage_ready(
+        tuple(records),
+        split="test",
+        expected_generation_seed_random=1703,
+    ) is False

@@ -6,6 +6,7 @@ from main.methods.semantic.branch_risk import (
     BranchRiskConfig,
     BranchRiskFieldBundle,
     CarrierRiskField,
+    build_active_branch_risk_fields,
     build_branch_risk_fields,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "BranchRiskConfig",
     "BranchRiskFieldBundle",
     "CarrierRiskField",
+    "build_active_branch_risk_fields",
     "build_branch_risk_fields",
 ]

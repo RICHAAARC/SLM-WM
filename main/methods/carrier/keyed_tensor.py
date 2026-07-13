@@ -195,7 +195,9 @@ def tail_robust_carrier_protocol_record(
         "tail_carrier_protocol_schema": TAIL_ROBUST_CARRIER_PROTOCOL_SCHEMA,
         "tail_fraction": tail_fraction,
         "tail_selection_rule": (
-            "descending_absolute_value_then_ascending_flat_index"
+            "all_elements_without_amplitude_ranking"
+            if tail_fraction == 1.0
+            else "descending_absolute_value_then_ascending_flat_index"
         ),
         "keyed_prg_version": prg_version,
     }
@@ -305,6 +307,15 @@ def build_tail_robust_template(
         },
         prg_version=prg_version,
     )
+    if tail_fraction == 1.0:
+        return (
+            _l2_normalize_without_centering(raw).to(
+                device=reference.device,
+                dtype=torch.float32,
+            ),
+            0.0,
+            1.0,
+        )
     flat = raw.reshape(-1)
     flat_values = flat.tolist()
     retained_count = max(1, math.ceil(len(flat_values) * tail_fraction))
@@ -452,8 +463,8 @@ class BlindContentScore:
 
 def compute_blind_content_score(
     observed_latent: Any,
-    lf_template: Any,
-    tail_robust_template: Any,
+    lf_template: Any | None,
+    tail_robust_template: Any | None,
     lf_weight: float,
     tail_robust_weight: float,
 ) -> BlindContentScore:
@@ -471,8 +482,20 @@ def compute_blind_content_score(
         raise ValueError("两个内容分支权重必须位于 [0, 1]")
     if not math.isclose(lf_weight + tail_robust_weight, 1.0, abs_tol=1e-9):
         raise ValueError("两个分支权重之和必须为 1")
-    lf_score = normalized_correlation(observed_latent, lf_template)
-    tail_score = normalized_correlation(observed_latent, tail_robust_template)
+    if (lf_weight > 0.0) != (lf_template is not None):
+        raise ValueError("LF 模板必须且只能在 LF 权重大于0时提供")
+    if (tail_robust_weight > 0.0) != (tail_robust_template is not None):
+        raise ValueError("尾部模板必须且只能在尾部分支权重大于0时提供")
+    lf_score = (
+        normalized_correlation(observed_latent, lf_template)
+        if lf_template is not None
+        else 0.0
+    )
+    tail_score = (
+        normalized_correlation(observed_latent, tail_robust_template)
+        if tail_robust_template is not None
+        else 0.0
+    )
     content_score = lf_weight * lf_score + tail_robust_weight * tail_score
     payload = {
         "lf_score": round(lf_score, 12),
