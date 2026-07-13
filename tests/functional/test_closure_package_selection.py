@@ -12,15 +12,11 @@ import pytest
 from paper_experiments.runners import closure_package_selection as selection_module
 from paper_experiments.runners.closure_package_selection import (
     CLOSURE_PACKAGE_FAMILY_SPECS,
-    LOCK_FILENAME,
-    LOCK_MANIFEST_FILENAME,
-    LOCK_OUTPUT_ROOT,
+    CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES,
     ClosurePackageFamilySpec,
     ClosurePackageSelectionError,
     JsonFieldSource,
-    build_closure_input_selection_report,
-    inspect_closure_package,
-    select_and_lock_closure_input_packages,
+    inspect_closure_package as _inspect_closure_package,
 )
 from experiments.runtime.scientific_execution_binding import (
     BOUND_MANIFEST_DIGEST_SCOPE,
@@ -40,6 +36,25 @@ PAPER_RUN_NAME = "probe_paper"
 TARGET_FPR = 0.1
 CODE_VERSION = "a" * 40
 GENERATED_AT = "2026-07-11T08:00:00+00:00"
+RANDOMIZATION_REPEAT_ID = "seed_00_key_00"
+
+
+def inspect_closure_package(*args: Any, **kwargs: Any) -> Any:
+    """为测试调用显式注入规范 repeat, 保持正式 API 无默认回退."""
+
+    spec = kwargs.get("spec")
+    if (
+        isinstance(spec, ClosurePackageFamilySpec)
+        and spec.package_family in CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES
+    ):
+        kwargs.setdefault("randomization_repeat_id", None)
+    else:
+        kwargs.setdefault("randomization_repeat_id", RANDOMIZATION_REPEAT_ID)
+    return _inspect_closure_package(*args, **kwargs)
+
+
+
+
 
 
 @pytest.fixture(autouse=True)
@@ -739,7 +754,7 @@ def _valid_member_payloads(
                     f"outputs/dataset_level_quality/{paper_run_name}/manifest.local.json",
                 ),
                 "runtime_rerun_ablation": (
-                    f"outputs/formal_mechanism_ablation/{paper_run_name}/ablation_claim_summary.json",
+                    f"outputs/formal_mechanism_ablation/{paper_run_name}/ablation_component_summary.json",
                     f"outputs/formal_mechanism_ablation/{paper_run_name}/manifest.local.json",
                 ),
             }
@@ -1279,145 +1294,8 @@ def _rebind_scientific_dependency_member(
     ).encode("utf-8")
 
 
-def test_dry_run_selects_exact_ten_families_without_mixing_unrelated_archives(
-    tmp_path: Path,
-) -> None:
-    package_root = tmp_path / "drive"
-    expected_paths = _write_all_family_packages(package_root)
-    with ZipFile(package_root / "probe_paper_complete_result_package_prior.zip", "w") as archive:
-        archive.writestr("outputs/paper_result/summary.json", "{}")
-    with ZipFile(package_root / "unrelated_evidence.zip", "w") as archive:
-        archive.writestr("outputs/unrelated/value.json", "{}")
-    matching_directory = package_root / CLOSURE_PACKAGE_FAMILY_SPECS[0].filename_pattern.replace(
-        "*",
-        "directory",
-    )
-    matching_directory.mkdir()
-
-    report = build_closure_input_selection_report(
-        package_root,
-        paper_run_name=PAPER_RUN_NAME,
-        target_fpr=TARGET_FPR,
-        root=tmp_path,
-    )
-
-    assert report["closure_input_selection_ready"] is True
-    assert report["repeat_component_input_ready"] is True
-    assert report["randomization_aggregate_ready"] is False
-    assert report["supports_paper_claim"] is False
-    assert report["closure_input_lock_written"] is False
-    assert report["closure_input_package_count"] == 10
-    assert len(report["selected_package_paths"]) == 10
-    assert set(report["selected_package_paths"]) == {
-        path.resolve().as_posix() for path in expected_paths
-    }
-    assert not (tmp_path / LOCK_OUTPUT_ROOT / PAPER_RUN_NAME).exists()
 
 
-def test_formal_selection_writes_run_scoped_lock_and_independent_manifest(
-    tmp_path: Path,
-) -> None:
-    package_root = tmp_path / "drive"
-    _write_all_family_packages(package_root)
-
-    selected_paths = select_and_lock_closure_input_packages(
-        package_root,
-        paper_run_name=PAPER_RUN_NAME,
-        target_fpr=TARGET_FPR,
-        root=tmp_path,
-    )
-
-    output_dir = tmp_path / LOCK_OUTPUT_ROOT / PAPER_RUN_NAME
-    lock_path = output_dir / LOCK_FILENAME
-    manifest_path = output_dir / LOCK_MANIFEST_FILENAME
-    lock_payload = json.loads(lock_path.read_text(encoding="utf-8"))
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert len(selected_paths) == 10
-    assert lock_payload["closure_input_package_count"] == 10
-    assert lock_payload["paper_run_name"] == PAPER_RUN_NAME
-    assert lock_payload["target_fpr"] == TARGET_FPR
-    assert lock_payload["common_code_version"] == CODE_VERSION
-    assert lock_payload["repeat_component_input_ready"] is True
-    assert lock_payload["randomization_aggregate_ready"] is False
-    assert lock_payload["supports_paper_claim"] is False
-    assert lock_payload["randomization_repeat_identity"][
-        "randomization_repeat_id"
-    ] == "seed_00_key_00"
-    assert [row["package_path"] for row in lock_payload["closure_input_packages"]] == list(
-        selected_paths
-    )
-    assert all(len(row["package_sha256"]) == 64 for row in lock_payload["closure_input_packages"])
-    assert all(
-        len(row["formal_execution_run_lock_digest"]) == 64
-        and len(row["formal_execution_package_lock_digest"]) == 64
-        for row in lock_payload["closure_input_packages"]
-    )
-    assert lock_payload["formal_execution_run_lock_digests"] == {
-        row["package_family"]: row["formal_execution_run_lock_digest"]
-        for row in lock_payload["closure_input_packages"]
-    }
-    assert lock_payload["formal_execution_package_lock_digests"] == {
-        row["package_family"]: row["formal_execution_package_lock_digest"]
-        for row in lock_payload["closure_input_packages"]
-    }
-    active_repeat_rows = [
-        row
-        for row in lock_payload["closure_input_packages"]
-        if row["randomization_scope"] == "active_repeat_component"
-    ]
-    invariant_rows = [
-        row
-        for row in lock_payload["closure_input_packages"]
-        if row["randomization_scope"] == "cross_repeat_invariant"
-    ]
-    assert len(active_repeat_rows) == 7
-    assert len(invariant_rows) == 3
-    assert {
-        row["randomization_repeat_id"] for row in active_repeat_rows
-    } == {"seed_00_key_00"}
-    assert all(row["randomization_repeat_id"] == "" for row in invariant_rows)
-
-
-    scientific_rows = [
-        row
-        for row in lock_payload["closure_input_packages"]
-        if row["scientific_profile_id"]
-    ]
-    assert len(scientific_rows) == 10
-    assert all(
-        len(row["scientific_profile_digest"]) == 64
-        and len(row["scientific_direct_requirements_digest"]) == 64
-        and len(row["scientific_complete_hash_lock_digest"]) == 64
-        and row["scientific_complete_hash_lock_dependency_count"] > 0
-        and len(row["scientific_python_executable_digest"]) == 64
-        and len(row["scientific_dependency_evidence_digest"]) == 64
-        for row in scientific_rows
-    )
-    assert sum(
-        len(row["scientific_execution_binding_digest"]) == 64
-        for row in scientific_rows
-    ) == 7
-    digest_payload = dict(lock_payload)
-    stored_digest = digest_payload.pop("closure_input_lock_digest")
-    canonical = json.dumps(
-        digest_payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    assert stored_digest == hashlib.sha256(canonical).hexdigest()
-    assert manifest["artifact_id"] == f"{PAPER_RUN_NAME}_closure_input_lock_manifest"
-    assert manifest["metadata"]["closure_input_lock_ready"] is True
-    assert manifest["metadata"]["closure_input_package_count"] == 10
-    assert manifest["metadata"]["closure_input_packages"] == lock_payload[
-        "closure_input_packages"
-    ]
-    assert manifest["metadata"]["closure_input_lock_digest"] == stored_digest
-    assert manifest["metadata"]["common_code_version"] == CODE_VERSION
-    assert manifest["output_paths"] == [
-        f"outputs/paper_result_closure/{PAPER_RUN_NAME}/{LOCK_FILENAME}",
-        f"outputs/paper_result_closure/{PAPER_RUN_NAME}/{LOCK_MANIFEST_FILENAME}",
-    ]
 
 
 def test_repeat_package_must_match_explicit_active_repeat(tmp_path: Path) -> None:
@@ -1479,74 +1357,8 @@ def test_repeat_package_must_match_explicit_active_repeat(tmp_path: Path) -> Non
     assert candidate.randomization_repeat_id == "seed_01_key_02"
 
 
-def test_selection_rejects_main_packages_from_different_scientific_sessions(
-    tmp_path: Path,
-) -> None:
-    """主方法、质量和消融包不得来自三个自洽但不同的科学解释器会话."""
-
-    package_root = tmp_path / "drive"
-    distinct_digests = {
-        "image_only_dataset_runtime": "6" * 64,
-        "dataset_level_quality": "7" * 64,
-        "runtime_rerun_ablation": "8" * 64,
-    }
-    for spec in CLOSURE_PACKAGE_FAMILY_SPECS:
-        _write_family_package(
-            package_root,
-            spec,
-            token="mixed_session",
-            scientific_python_digest=distinct_digests.get(
-                spec.package_family,
-                "6" * 64,
-            ),
-        )
-
-    with pytest.raises(
-        ClosurePackageSelectionError,
-        match="不属于同一科学会话",
-    ):
-        build_closure_input_selection_report(
-            package_root,
-            paper_run_name=PAPER_RUN_NAME,
-            target_fpr=TARGET_FPR,
-            root=tmp_path,
-        )
 
 
-def test_multiple_candidates_use_governed_generated_at_instead_of_path_name(
-    tmp_path: Path,
-) -> None:
-    package_root = tmp_path / "drive"
-    for spec in CLOSURE_PACKAGE_FAMILY_SPECS[1:]:
-        _write_family_package(package_root, spec, token="current")
-    selected_spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
-    _write_family_package(
-        package_root,
-        selected_spec,
-        token="zzz",
-        generated_at="2026-07-10T08:00:00+00:00",
-    )
-    latest_path = _write_family_package(
-        package_root,
-        selected_spec,
-        token="aaa",
-        generated_at="2026-07-12T08:00:00+00:00",
-    )
-
-    report = build_closure_input_selection_report(
-        package_root,
-        paper_run_name=PAPER_RUN_NAME,
-        target_fpr=TARGET_FPR,
-        root=tmp_path,
-    )
-
-    runtime_record = next(
-        row
-        for row in report["closure_input_packages"]
-        if row["package_family"] == selected_spec.package_family
-    )
-    assert runtime_record["package_path"] == latest_path.resolve().as_posix()
-    assert runtime_record["generated_at"] == "2026-07-12T08:00:00+00:00"
 
 
 def test_internal_identity_rejects_wrong_run_fpr_baseline_and_ready_flag(
@@ -1765,85 +1577,6 @@ def test_package_rejects_self_consistent_dependency_command_tampering(
         )
 
 
-def test_selection_rejects_self_consistent_dependency_count_tampering(
-    tmp_path: Path,
-) -> None:
-    """execution,顶层和内层 count 同时改写后仍必须匹配仓库完整锁."""
-
-    package_root = tmp_path / "drive"
-    package_paths = _write_all_family_packages(package_root)
-    spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
-    contract = spec.scientific_execution_binding
-    assert contract is not None
-    members = _valid_member_payloads(
-        spec,
-        paper_run_name=PAPER_RUN_NAME,
-        target_fpr=TARGET_FPR,
-        generated_at=GENERATED_AT,
-    )
-    dependency_member = _render(
-        contract.dependency_report_member_template,
-        spec,
-        PAPER_RUN_NAME,
-    )
-    execution_member = _render(
-        contract.execution_report_member_template,
-        spec,
-        PAPER_RUN_NAME,
-    )
-    binding_member = _render(
-        contract.binding_member_template,
-        spec,
-        PAPER_RUN_NAME,
-    )
-    dependency = json.loads(members[dependency_member].decode("utf-8"))
-    dependency["complete_hash_lock_dependency_count"] = 8
-    dependency["dependency_preparation_report"][
-        "complete_hash_lock_dependency_count"
-    ] = 8
-    dependency["dependency_preparation_report_digest"] = hashlib.sha256(
-        (
-            json.dumps(
-                dependency["dependency_preparation_report"],
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n"
-        ).encode("utf-8")
-    ).hexdigest()
-    _rebind_scientific_dependency_member(members, spec, dependency)
-    execution = json.loads(members[execution_member].decode("utf-8"))
-    execution["complete_hash_lock_dependency_count"] = 8
-    members[execution_member] = (
-        json.dumps(execution, ensure_ascii=False, sort_keys=True) + "\n"
-    ).encode("utf-8")
-    binding = json.loads(members[binding_member].decode("utf-8"))
-    binding["scientific_execution_report_digest"] = hashlib.sha256(
-        members[execution_member]
-    ).hexdigest()
-    members[binding_member] = (
-        json.dumps(binding, ensure_ascii=False, sort_keys=True) + "\n"
-    ).encode("utf-8")
-    _rebind_package_input_member_digests(members, spec)
-    with ZipFile(package_paths[0], "w") as archive:
-        for member_name, payload in sorted(members.items()):
-            archive.writestr(member_name, payload)
-    candidate = inspect_closure_package(
-        package_paths[0],
-        spec=spec,
-        paper_run_name=PAPER_RUN_NAME,
-        target_fpr=TARGET_FPR,
-    )
-    assert candidate.scientific_complete_hash_lock_dependency_count == 8
-
-    with pytest.raises(ClosurePackageSelectionError, match="仓库正式 profile 不一致"):
-        build_closure_input_selection_report(
-            package_root,
-            paper_run_name=PAPER_RUN_NAME,
-            target_fpr=TARGET_FPR,
-            root=tmp_path,
-        )
 
 
 def test_package_rejects_bound_scientific_manifest_lock_drift(
@@ -2155,38 +1888,6 @@ def test_package_rejects_non_clean_git_code_version(
         )
 
 
-def test_selection_requires_one_common_code_version_across_all_families(tmp_path: Path) -> None:
-    """即使各包内部自洽, 10个 family 的 clean Git 提交也必须完全相同."""
-
-    package_root = tmp_path / "drive"
-    for spec in CLOSURE_PACKAGE_FAMILY_SPECS[1:]:
-        _write_family_package(package_root, spec, token="current")
-    selected_spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
-
-    def mutate(documents: dict[str, dict[str, Any]], current_spec: ClosurePackageFamilySpec) -> None:
-        for source in current_spec.code_version_sources:
-            _assign_source(
-                documents,
-                current_spec,
-                source,
-                "b" * 40,
-                paper_run_name=PAPER_RUN_NAME,
-            )
-        _assign_execution_locks(
-            documents,
-            current_spec,
-            "b" * 40,
-            paper_run_name=PAPER_RUN_NAME,
-        )
-
-    _write_family_package(package_root, selected_spec, token="different", mutate=mutate)
-    with pytest.raises(ClosurePackageSelectionError, match="同一科学会话|共享同一"):
-        build_closure_input_selection_report(
-            package_root,
-            paper_run_name=PAPER_RUN_NAME,
-            target_fpr=TARGET_FPR,
-            root=tmp_path,
-        )
 
 
 def test_full_lowercase_clean_commit_is_accepted(tmp_path: Path) -> None:
@@ -2226,62 +1927,8 @@ def test_full_lowercase_clean_commit_is_accepted(tmp_path: Path) -> None:
     assert candidate.formal_execution_package_lock_digest == expected_lock_digest
 
 
-def test_selection_rejects_package_profile_not_anchored_to_repository_lock(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """自洽结果包的 profile 摘要仍必须匹配当前提交的正式 registry."""
-
-    package_root = tmp_path / "drive"
-    _write_all_family_packages(package_root)
-
-    def mismatched_profile(profile_id: str, registry_path: Path) -> SimpleNamespace:
-        return SimpleNamespace(
-            profile_name=profile_id,
-            profile_digest="8" * 64,
-            direct_requirements_digest="4" * 64,
-            complete_hash_lock_digest="5" * 64,
-            complete_hash_lock_dependency_count=7,
-            complete_hash_lock_present=True,
-            formal_ready=True,
-            readiness_blockers=(),
-        )
-
-    monkeypatch.setattr(
-        selection_module,
-        "require_dependency_profile_ready",
-        mismatched_profile,
-    )
-    with pytest.raises(ClosurePackageSelectionError, match="仓库正式 profile 不一致"):
-        build_closure_input_selection_report(
-            package_root,
-            paper_run_name=PAPER_RUN_NAME,
-            target_fpr=TARGET_FPR,
-            root=tmp_path,
-        )
 
 
-def test_selection_rejects_packages_from_another_repository_commit(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """10类包即使彼此一致, 只要不是当前提交就必须在闭合入口立即阻断."""
-
-    package_root = tmp_path / "drive"
-    _write_all_family_packages(package_root)
-    monkeypatch.setattr(
-        selection_module,
-        "resolve_code_version",
-        lambda root: "b" * 40,
-    )
-
-    with pytest.raises(ClosurePackageSelectionError, match="当前 clean 仓库提交"):
-        build_closure_input_selection_report(
-            package_root,
-            paper_run_name=PAPER_RUN_NAME,
-            target_fpr=TARGET_FPR,
-            root=tmp_path,
-        )
 
 
 def test_extended_clean_short_commit_is_rejected(tmp_path: Path) -> None:

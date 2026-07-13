@@ -354,7 +354,7 @@ def operating_point_metrics(
             (record["aligned_content_score"] for record in positives),
             (record["aligned_content_score"] for record in clean_negatives),
         ),
-        "full_method_claim_ready": False,
+        "full_method_component_ready": False,
         "supports_paper_claim": False,
     }
 

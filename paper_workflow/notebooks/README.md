@@ -9,10 +9,11 @@
 ```bash
 python -I scripts/run_formal_workflow_host.py --repository-commit <40位提交> gpu \
   --workflow <公开路由> --paper-run-name <论文层级> \
-  --result-path outputs/formal_workflow_execution/<论文层级>/<公开路由>/workflow_result.json
+  --randomization-repeat-id <seed-key-repeat> \
+  --result-path outputs/formal_workflow_execution/<论文层级>/<repeat>/<公开路由>/workflow_result.json
 ```
 
-Notebook 只声明论文层级和公开路由, 不导入 repository workflow helper, 也不保存包名、版本约束、安装命令、解释器创建或依赖诊断实现。宿主入口使用固定 `uv` wheel 创建 registry 指定的精确父解释器, 再执行 `scripts/formal_workflow_entry.py`；该内层入口使用 `scripts/formal_workflow_environment.py` 配置并选择唯一科学 profile。CPU 闭合同样使用该宿主入口的 `closure` 子命令。
+活动随机化 Notebook 只声明论文层级、登记的 repeat ID 和公开路由; 3个跨 repeat 不变 official-reference Notebook 不声明 repeat。Notebook 不导入 repository workflow helper, 也不保存包名、版本约束、安装命令、解释器创建或依赖诊断实现。宿主入口使用固定 `uv` wheel 创建 registry 指定的精确父解释器, 再执行 `scripts/formal_workflow_entry.py`; 该内层入口使用 `scripts/formal_workflow_environment.py` 配置并选择唯一科学 profile。单 repeat 证据封装使用同一宿主入口的 `repeat_evidence` 子命令。
 
 | Notebook 职责 | 父解释器 `profile_id` | 科学子解释器 `profile_id` |
 |---|---|---|
@@ -22,11 +23,11 @@ Notebook 只声明论文层级和公开路由, 不导入 repository workflow hel
 | Tree-Ring 官方原环境补充运行 | `workflow_orchestrator` | `tree_ring_official_py39_cu117` |
 | Gaussian Shading 官方原环境补充运行 | `workflow_orchestrator` | `gaussian_shading_official_py38_cu117` |
 | Shallow Diffuse 官方原环境补充运行 | `workflow_orchestrator` | `shallow_diffuse_official_py39_cu117` |
-| 论文结果闭合与 Drive cold-start | `workflow_orchestrator` | 不适用 |
+| 单 repeat 证据封装 | `workflow_orchestrator` | 不适用 |
 
 五个科学执行环境均由 repository runner 通过 `experiments.runtime.isolated_scientific_execution` 或对应 official-reference 隔离 runner 创建并执行, Notebook 不维护其包清单. 一次正式 session 只准备父 `workflow_orchestrator` 与当前 workflow 的一个科学子 profile, 不得在父解释器内直接安装或执行科学 profile. 主方法入口调用 `scripts.semantic_watermark_scientific_workflow`, 再由 `experiments.runtime.semantic_watermark_scientific_session` 在同一受验证子解释器中调度完整主运行与可选正式消融, 因而不会重复创建 CUDA 环境.
 
-三个 `external_baseline_*_run.ipynb` 与 `official_reference_t2smark_run.ipynb` 只发布论文运行层级、模型访问 token 和公开路由, 再以 `python -I` 调用宿主 launcher。精确 `workflow_orchestrator` 子解释器在 repository 内选择科学 profile 并启动子解释器。
+三个 `external_baseline_*_run.ipynb` 与 `official_reference_t2smark_run.ipynb` 发布论文运行层级、活动 repeat ID、模型访问 token 和公开路由, 再以 `python -I` 调用宿主 launcher。精确 `workflow_orchestrator` 子解释器在 repository 内交叉核验 repeat 身份, 选择科学 profile 并启动子解释器。
 
 ## 7条外部 GPU 路径的 Drive 恢复
 
@@ -87,7 +88,11 @@ python scripts/write_reviewed_scientific_dependency_hash_locks.py \
 
 1. `semantic_watermark_image_only_run.ipynb`。
 2. 三个 `external_baseline_*_run.ipynb`、`official_reference_t2smark_run.ipynb` 和补充方法忠实度所需的其他 `official_reference_*_run.ipynb`。
-3. `paper_result_closure_run.ipynb`。
+3. `randomization_repeat_evidence_run.ipynb`。
+
+权威9个 repeat 全部完成后, CPU 汇总环境必须使用层内
+`paper_experiments.runners.randomization_aggregate_provenance` 入口显式绑定9个
+component 和3个跨 repeat 不变包。该聚合与后续统计不属于 Notebook 职责。
 
 主方法入口在完成全部 Prompt 后释放生成模型显存, 随即从真实 clean / watermarked
 图像对提取正式 Inception 特征并计算 FID / KID。因此数据集质量不是独立 Notebook
@@ -113,4 +118,4 @@ progress 文件只描述剩余工作, 永远不能充当完成科学单元。未
 
 运行者必须先把 `SLM_WM_REPOSITORY_COMMIT` 设置为本次正式实验使用的精确40位小写 Git SHA。全部 Notebook 先 checkout 该 detached commit 并验证 clean worktree, 再安装依赖和配置 workflow; 不接受 `main`、其他分支名、短 SHA 或带空白的宽松输入。入口校验只是第一次检查, 正式运行和打包函数仍会在各自起止边界实时复验。
 
-Notebook 的状态展示路径必须从 `SLM_WM_PAPER_RUN_NAME` 构造, 不读取 artifact 全局目录。Notebook runtime 报告独立写入 `outputs/notebook_runtime_observation/<paper_run_name>/...`, 不进入10类正式 GPU 输入包。正式 ZIP 必须同时包含完整运行锁和打包锁; CPU 闭合选择器会重算锁摘要并绑定完整 `code_version`。正式运行未通过 ready 门禁时保留诊断文件, 但不会生成可供 CPU 闭合选择的 ZIP。
+Notebook 的状态展示路径必须从 `SLM_WM_PAPER_RUN_NAME` 构造, 不读取 artifact 全局目录。Notebook runtime 报告独立写入 `outputs/notebook_runtime_observation/<paper_run_name>/...`, 不进入活动随机化 leaf 包或跨 repeat 不变 official-reference 包。正式 ZIP 必须同时包含完整运行锁和打包锁; CPU 聚合选择器会重算锁摘要并绑定完整 `code_version`。正式运行未通过 ready 门禁时保留诊断文件, 但不会生成可供 CPU 聚合选择的 ZIP。

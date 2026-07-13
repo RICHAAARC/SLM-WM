@@ -33,6 +33,16 @@ FORMAL_IMAGE_ATTACK_FAMILIES = (
     "flow_matching_inversion_regeneration,sdedit_regeneration,diffusion_purification,"
     "global_editing_attack,local_editing_attack,visual_paraphrase_attack,adversarial_removal_attack"
 )
+CROSS_REPEAT_INVARIANT_WORKFLOW_NAMES = frozenset(
+    {
+        "official_reference_tree_ring",
+        "official_reference_gaussian_shading",
+        "official_reference_shallow_diffuse",
+    }
+)
+SEMANTIC_WATERMARK_REPEAT_DRIVE_ROOT_ENVIRONMENT_KEY = (
+    "SLM_WM_SEMANTIC_WATERMARK_REPEAT_DRIVE_ROOT"
+)
 _SD35_MODEL_SOURCE = get_model_source("stabilityai_stable_diffusion_3_5_medium")
 _OFFICIAL_REFERENCE_DIFFUSION_MODEL_SOURCE = get_model_source("manojb_stable_diffusion_2_1_base")
 _CLIP_MODEL_SOURCE = get_model_source("openai_clip_vit_base_patch32")
@@ -99,6 +109,23 @@ def _protocol_profile(paper_run_name: str, target_fpr_text: str) -> str:
     return f"{paper_run_name}_fixed_fpr_{target_fpr_text.replace('.', '_')}"
 
 
+def _repeat_drive_dir(paper_run: Any, artifact_role: str) -> str:
+    """把活动随机化产物隔离到当前 seed-key repeat 的持久化目录."""
+
+    # PaperRunConfig.drive_dir 已经把 repeat 身份写入规范路径, 此处不得再次追加。
+    return Path(paper_run.drive_dir(artifact_role)).as_posix()
+
+
+def _invariant_drive_dir(paper_run: Any, artifact_role: str) -> str:
+    """为只运行一次的跨 repeat 不变证据构造独立持久化目录."""
+
+    return (
+        Path(paper_run.drive_result_root)
+        / "cross_repeat_invariant"
+        / artifact_role
+    ).as_posix()
+
+
 def _resolve_paper_run_name() -> str:
     """解析外层传入的论文运行层级, 无显式输入时使用 probe_paper."""
 
@@ -155,14 +182,27 @@ def _configure_semantic_watermark_image_only(
 ) -> None:
     """配置真实科学算子、仅图像检测和正式消融的 Colab 续跑入口。"""
 
-    image_only_drive_dir = paper_run.drive_dir("image_only_dataset_runtime")
+    image_only_drive_dir = _repeat_drive_dir(
+        paper_run,
+        "image_only_dataset_runtime",
+    )
+    _set_env(
+        SEMANTIC_WATERMARK_REPEAT_DRIVE_ROOT_ENVIRONMENT_KEY,
+        Path(image_only_drive_dir).parent.as_posix(),
+    )
     _set_env("SLM_WM_DRIVE_OUTPUT_DIR", image_only_drive_dir)
     _set_env("SLM_WM_IMAGE_ONLY_RUNTIME_DRIVE_DIR", image_only_drive_dir)
-    _set_env("SLM_WM_DATASET_QUALITY_DRIVE_DIR", paper_run.drive_dir("dataset_level_quality"))
-    _set_env("SLM_WM_RUNTIME_RERUN_ABLATION_DRIVE_DIR", paper_run.drive_dir("runtime_rerun_ablation"))
+    _set_env(
+        "SLM_WM_DATASET_QUALITY_DRIVE_DIR",
+        _repeat_drive_dir(paper_run, "dataset_level_quality"),
+    )
+    _set_env(
+        "SLM_WM_RUNTIME_RERUN_ABLATION_DRIVE_DIR",
+        _repeat_drive_dir(paper_run, "runtime_rerun_ablation"),
+    )
     _set_env(
         "SLM_WM_RESUME_CHECKPOINT_DIR",
-        paper_run.drive_dir("semantic_watermark_resume_checkpoint"),
+        _repeat_drive_dir(paper_run, "semantic_watermark_resume_checkpoint"),
     )
     _set_default_env("SLM_WM_MAX_NEW_PROMPTS_PER_SESSION", "5")
     _set_default_env("SLM_WM_MAX_NEW_ABLATION_RUNS_PER_SESSION", "5")
@@ -239,7 +279,10 @@ def _configure_external_baseline_method_faithful(
     baseline_id: str,
 ) -> None:
     _set_env("SLM_WM_PRIMARY_BASELINE_ID", baseline_id)
-    _set_env("SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR", paper_run.drive_dir("external_baseline_method_faithful"))
+    _set_env(
+        "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
+        _repeat_drive_dir(paper_run, "external_baseline_method_faithful"),
+    )
     _set_env("SLM_WM_EXTERNAL_BASELINE_TARGET_FPR", target_fpr_text)
     _set_env("SLM_WM_EXTERNAL_BASELINE_MODEL_ID", _SD35_MODEL_SOURCE.repository_id)
     _set_env("SLM_WM_EXTERNAL_BASELINE_MODEL_REVISION", _SD35_MODEL_SOURCE.revision)
@@ -258,7 +301,13 @@ def _configure_external_baseline_method_faithful(
 
 
 def _configure_official_reference_common(paper_run: Any, prefix: str, sample_count_token: str) -> None:
-    _set_env(f"SLM_WM_{prefix}_OFFICIAL_DRIVE_OUTPUT_DIR", paper_run.drive_dir("external_baseline_official_reference"))
+    _set_env(
+        f"SLM_WM_{prefix}_OFFICIAL_DRIVE_OUTPUT_DIR",
+        _invariant_drive_dir(
+            paper_run,
+            "external_baseline_official_reference",
+        ),
+    )
     _set_env(f"SLM_WM_{prefix}_OFFICIAL_SAMPLE_COUNT", sample_count_token)
     _set_default_env(f"SLM_WM_{prefix}_OFFICIAL_RUN_COMMAND", "1")
     _set_default_env(f"SLM_WM_{prefix}_OFFICIAL_REQUIRE_CUDA", "1")
@@ -336,7 +385,10 @@ def _configure_official_reference_shallow_diffuse(paper_run: Any, sample_count_t
 
 def _configure_official_reference_t2smark(paper_run: Any, sample_count_token: str, target_fpr_text: str) -> None:
     _set_env("SLM_WM_T2SMARK_FORMAL_PROMPT_FILE", paper_run.prompt_file)
-    _set_env("SLM_WM_T2SMARK_FORMAL_DRIVE_OUTPUT_DIR", paper_run.drive_dir("external_baseline_official_reference"))
+    _set_env(
+        "SLM_WM_T2SMARK_FORMAL_DRIVE_OUTPUT_DIR",
+        _repeat_drive_dir(paper_run, "external_baseline_official_reference"),
+    )
     _set_env("SLM_WM_T2SMARK_MODEL_ID", _SD35_MODEL_SOURCE.repository_id)
     _set_env("SLM_WM_T2SMARK_MODEL_REVISION", _SD35_MODEL_SOURCE.revision)
     _set_env("SLM_WM_T2SMARK_FORMAL_PAIR_CLIP_MODEL_ID", _CLIP_MODEL_SOURCE.repository_id)
@@ -351,11 +403,6 @@ def _configure_official_reference_t2smark(paper_run: Any, sample_count_token: st
     _set_default_env("SLM_WM_ENABLE_WORKFLOW_PROGRESS_BAR", "1")
 
 
-def _configure_result_closure(paper_run: Any, sample_count_token: str, target_fpr_text: str) -> None:
-    _set_env("SLM_WM_PAPER_RUN_PACKAGE_SEARCH_ROOT", paper_run.drive_result_root)
-    _set_env("SLM_WM_PAPER_RUN_COMPLETE_DRIVE_OUTPUT_DIR", paper_run.drive_dir("complete_result_package"))
-
-
 WORKFLOW_CONFIGURERS = {
     "semantic_watermark_image_only": _configure_semantic_watermark_image_only,
     "attention_geometry": _configure_attention_geometry,
@@ -368,7 +415,6 @@ WORKFLOW_CONFIGURERS = {
     "official_reference_gaussian_shading": _configure_official_reference_gaussian_shading,
     "official_reference_shallow_diffuse": _configure_official_reference_shallow_diffuse,
     "official_reference_t2smark": _configure_official_reference_t2smark,
-    "paper_result_closure": _configure_result_closure,
 }
 
 
@@ -395,6 +441,10 @@ def configure_formal_workflow_environment(
     paper_run, sample_count_token, target_fpr_text = (
         _configure_common_paper_run_environment(repository_root)
     )
+    invariant_workflow = workflow_name in CROSS_REPEAT_INVARIANT_WORKFLOW_NAMES
+    if invariant_workflow:
+        # 官方原环境忠实度只运行一次, 子进程不得继承任一活动 repeat 身份。
+        os.environ.pop("SLM_WM_RANDOMIZATION_REPEAT_ID", None)
     if workflow_name == "external_baseline_method_faithful":
         if not baseline_id:
             raise ValueError("external_baseline_method_faithful 需要 baseline_id")
@@ -423,7 +473,9 @@ def configure_formal_workflow_environment(
         expected_sample_count=int(os.environ["SLM_WM_PAPER_RUN_EXPECTED_SAMPLE_COUNT"]),
         minimum_clean_negative_count=os.environ["SLM_WM_PAPER_RUN_MINIMUM_CLEAN_NEGATIVE_COUNT"],
         dataset_quality_minimum_count=os.environ["SLM_WM_PAPER_RUN_DATASET_QUALITY_MINIMUM_COUNT"],
-        randomization_repeat_id=paper_run.randomization_repeat_id,
+        randomization_repeat_id=(
+            "" if invariant_workflow else paper_run.randomization_repeat_id
+        ),
         generation_seed_index=paper_run.generation_seed_index,
         generation_seed_offset=paper_run.generation_seed_offset,
         watermark_key_index=paper_run.watermark_key_index,

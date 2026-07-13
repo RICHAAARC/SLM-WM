@@ -117,23 +117,24 @@
 
 ## 6. Colab GPU 执行顺序
 
-1. 配置当前 `SLM_WM_PAPER_RUN_NAME`。
-2. 运行 `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb` 生成主方法、真实攻击、正式消融和数据集质量结果。
-3. 分别运行 Tree-Ring、Gaussian Shading、Shallow Diffuse 三个 common-backbone 单方法 Notebook, 再运行 T2SMark 独立正式复现 Notebook。
-4. 运行 Tree-Ring、Gaussian Shading、Shallow Diffuse 与 T2SMark 的官方复现 Notebook。
-5. 将所有结果包保存到当前运行层级的 Drive 目录。
-6. 运行 `paper_workflow/notebooks/paper_result_closure_run.ipynb` 或独立服务器闭合命令。
+1. 配置当前 `SLM_WM_PAPER_RUN_NAME` 和一个权威 `SLM_WM_RANDOMIZATION_REPEAT_ID`。
+2. 运行 `paper_workflow/notebooks/semantic_watermark_image_only_run.ipynb` 生成当前 repeat 的主方法、真实攻击、正式消融和数据集质量结果。
+3. 运行 Tree-Ring、Gaussian Shading、Shallow Diffuse 三个 common-backbone Notebook 与 T2SMark 正式复现 Notebook, 全部使用同一 repeat ID。
+4. 运行 `paper_workflow/notebooks/randomization_repeat_evidence_run.ipynb`, 把当前 repeat 的7类活动随机化 leaf 封装为自包含证据组件。
+5. 对权威9个 repeat 分别重复第1至4步; 每个 repeat 使用独立 Drive 子目录。
+6. Tree-Ring、Gaussian Shading 与 Shallow Diffuse 的跨 repeat 不变官方原环境复现各运行一次, 留待最终聚合层选择。
+7. 下载9个单 repeat 组件和3个不变包到 CPU 汇总环境; 不在 Notebook 内执行跨重复统计或论文产物重建。
 
 Colab 中断后允许从同一配置、同一代码版本和通过摘要核对的当前结果继续; 任何复用记录仍必须通过正式 schema 与证据路径校验。
 
 ## 7. CPU 汇总服务器执行顺序
 
-1. 物化所有 `outputs/` 结果包条目。
-2. 校验主方法、攻击、消融、质量与 baseline manifest。
-3. 构造 baseline 正式候选并执行受治理导入。
-4. 写出主方法与 baseline 的共同协议结果记录。
-5. 重建 fixed-FPR 表、优势表与真实失败案例图。
-6. 执行证据审计、投稿就绪审计和完整结果打包。
+1. 以规范顺序显式传入9个单 repeat 组件和3个不变包, 调用 `python -m paper_experiments.runners.randomization_aggregate_provenance` 构造自包含聚合来源包。
+2. 从聚合 ZIP 重新复验全部12个输入的原始字节、9个组件内嵌的63个 leaf、3个不变包、代码版本、执行锁和随机化协议；不接受目录扫描推断、单 repeat 锁或调用方 ready 字段。
+3. 从不可变聚合来源对象中的原始 observation、消融记录和 Inception feature records 重算45个方法重复阈值及跨重复统计。
+4. 构造 baseline 正式候选并执行受治理导入, 同时传播唯一 `randomization_aggregate_digest`。
+5. 写出主方法与 baseline 的共同协议结果记录, 重建 fixed-FPR 表、优势表与真实失败案例图。
+6. 执行证据审计、投稿就绪审计、结果闭合语义门禁和完整结果打包。
 
 CPU 服务器不承担 SD3.5 GPU 推理, 也不能以代码检查结果替代图像实验。
 

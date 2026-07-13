@@ -103,17 +103,19 @@ def test_paired_statistics_are_deterministic_and_honest() -> None:
     assert first_summary == second_summary
     rows_by_id = {row["ablation_id"]: row for row in first_rows}
     unsupported = rows_by_id["without_attention_geometry"]
-    assert unsupported["necessity_claim_decision"] == "measured_not_supported"
-    assert unsupported["necessity_claim_supported"] is False
-    assert first_summary["all_mechanism_necessity_claims_supported"] is False
-    assert first_summary["necessity_not_supported_ablation_ids"] == [
+    assert unsupported["necessity_component_decision"] == "measured_not_supported"
+    assert unsupported["necessity_component_supported"] is False
+    assert first_summary["all_mechanism_necessity_components_supported"] is False
+    assert first_summary["necessity_component_not_supported_ablation_ids"] == [
         "without_branch_risk_routing",
         "without_attention_geometry",
     ]
     quality_cost = rows_by_id["without_branch_risk_routing"]
-    assert quality_cost["necessity_claim_supported"] is False
+    assert quality_cost["necessity_component_supported"] is False
     assert quality_cost["paired_ssim_noninferiority_ready"] is False
     assert quality_cost["clean_true_positive_mean_paired_effect"] == 1.0
+    assert all(row["supports_paper_claim"] is False for row in first_rows)
+    assert first_summary["supports_paper_claim"] is False
 
 
 @pytest.mark.quick

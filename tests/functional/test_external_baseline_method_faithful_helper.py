@@ -968,6 +968,7 @@ def test_packages_are_baseline_isolated_and_failure_is_not_packaged(
             spec=specs[baseline_id],
             paper_run_name="pilot_paper",
             target_fpr=0.01,
+            randomization_repeat_id="seed_00_key_00",
         )
         assert candidate.package_family == f"method_faithful_{baseline_id}"
     assert all(

@@ -1,9 +1,7 @@
-"""写出当前论文运行层级 fixed-FPR 共同协议结果记录。
+"""提供当前论文运行层级 fixed-FPR 结果记录转换能力.
 
-该脚本的作用是把方法主流程和外部 baseline 的受治理产物转换为统一
-`pilot_paper_result_records.jsonl`。Notebook 只负责在 Colab 中生成上游包,
-本脚本负责结果物化、模板覆盖检查、schema 校验和 manifest 写出。
-probe_paper、pilot_paper 与 full_paper 都只接受严格正式证据记录。
+正式记录路径只接受版本化精确9重复聚合验证器返回的来源对象; 验证器落地前
+不会读取统计输入或写出正式记录。
 """
 
 from __future__ import annotations
@@ -14,12 +12,10 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import math
-import os
 from pathlib import Path
 import sys
 import time
 from typing import Any, Iterable, Mapping
-from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -34,7 +30,6 @@ from experiments.protocol.formal_evidence import contains_nonformal_marker
 from experiments.protocol.dataset_quality import (
     FORMAL_DATASET_QUALITY_METRIC_NAMES,
 )
-from experiments.runtime.repository_environment import resolve_code_version
 from experiments.protocol.pilot_paper_fixed_fpr import (
     PILOT_PAPER_METRIC_BOUNDS,
     PilotPaperFixedFprConfig,
@@ -45,7 +40,6 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     build_pilot_paper_method_registry_rows,
     build_pilot_paper_prompt_split_summary,
     build_pilot_paper_result_record_set_digest,
-    build_pilot_paper_result_records_manifest_config,
     build_pilot_paper_result_import_schema,
     build_pilot_paper_result_import_template_rows,
     bounded_hoeffding_confidence_interval,
@@ -54,12 +48,10 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     validate_pilot_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
-from experiments.protocol.paper_run_config import normalize_paper_run_name
-from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.runtime.image_metrics import measured_score_retention
 from main.core.digest import build_stable_digest
-from paper_experiments.runners.closure_package_selection import (
-    load_validated_closure_input_lock,
+from paper_experiments.runners.paper_claim_provenance import (
+    require_exact9_randomization_aggregate_provenance,
 )
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_fixed_fpr_result_records"
@@ -128,16 +120,6 @@ def file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
-def archive_member_digest(archive: ZipFile, entry_info: Any) -> str:
-    """流式计算 ZIP 成员的 SHA-256, 用于跨包同路径内容判等."""
-
-    digest = hashlib.sha256()
-    with archive.open(entry_info, "r") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 class WorkProgress:
     """按文件数与字节数输出低噪声工作量进度。
 
@@ -193,19 +175,6 @@ class WorkProgress:
         )
         self.last_emit_at = now
         self.last_emit_count = current_count
-
-
-def is_safe_output_zip_entry(entry_name: str, root_path: Path, outputs_root: Path) -> tuple[bool, Path | None]:
-    """判断 zip 条目是否允许物化到仓库 outputs/ 目录。"""
-
-    if not entry_name.startswith("outputs/"):
-        return False, None
-    destination = (root_path / entry_name).resolve()
-    try:
-        destination.relative_to(outputs_root)
-    except ValueError:
-        return False, None
-    return True, destination
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -270,130 +239,6 @@ def _list_field(row: Mapping[str, Any], field_name: str) -> list[str]:
     if isinstance(value, str):
         return [part.strip() for part in value.split(";") if part.strip()]
     return []
-
-
-def expand_package_paths(root_path: Path, package_paths: Iterable[str | Path], package_search_roots: Iterable[str | Path]) -> tuple[Path, ...]:
-    """解析显式 zip 与镜像目录中的 zip 包路径。"""
-
-    resolved: list[Path] = []
-    for raw_path in package_paths:
-        path = resolve_path(root_path, raw_path)
-        if path is None or not path.is_file() or path.suffix.lower() != ".zip":
-            raise FileNotFoundError(f"显式论文结果包不存在或不是 zip: {raw_path}")
-        resolved.append(path)
-    for raw_root in package_search_roots:
-        root = resolve_path(root_path, raw_root)
-        if root is None or not root.is_dir():
-            raise FileNotFoundError(f"论文结果包搜索目录不存在: {raw_root}")
-        resolved.extend(sorted(path.resolve() for path in root.rglob("*.zip") if path.is_file()))
-    return tuple(dict.fromkeys(resolved))
-
-
-def materialize_output_entries(root_path: Path, package_paths: Iterable[Path]) -> dict[str, Any]:
-    """从结果包中只解出 outputs/ 条目。
-
-    该函数用于 Colab / Drive 复盘: 前序 Notebook 的 zip 包仍是证据来源, 但共同协议 builder 只消费仓库
-    `outputs/` 下的受治理文件副本。路径穿越和非 outputs 条目会被跳过。
-    """
-
-    package_path_values = tuple(package_paths)
-    outputs_root = (root_path / "outputs").resolve()
-    materialized_entries: list[str] = []
-    skipped_entries: list[str] = []
-    planned_by_destination: dict[Path, tuple[Path, Any, Path]] = {}
-    duplicate_identical_entries: list[str] = []
-    for package_path in package_path_values:
-        with ZipFile(package_path) as archive:
-            for entry_info in archive.infolist():
-                entry = entry_info.filename
-                if entry.endswith("/"):
-                    continue
-                is_safe, destination = is_safe_output_zip_entry(entry, root_path, outputs_root)
-                if not is_safe or destination is None:
-                    skipped_entries.append(entry)
-                    continue
-                existing = planned_by_destination.get(destination)
-                if existing is not None:
-                    existing_package, existing_info, _ = existing
-                    same_size = int(existing_info.file_size) == int(
-                        entry_info.file_size
-                    )
-                    if same_size:
-                        with ZipFile(existing_package) as existing_archive:
-                            same_payload = archive_member_digest(
-                                existing_archive,
-                                existing_info,
-                            ) == archive_member_digest(archive, entry_info)
-                    else:
-                        same_payload = False
-                    if not same_payload:
-                        raise RuntimeError(
-                            "结果包包含同路径不同内容, 拒绝跨运行覆盖: "
-                            f"{entry} 来自 {existing_package.name} 与 {package_path.name}"
-                        )
-                    duplicate_identical_entries.append(entry)
-                    continue
-                planned_by_destination[destination] = (package_path, entry_info, destination)
-
-    planned_items = list(planned_by_destination.values())
-
-    total_bytes = sum(int(entry_info.file_size) for _, entry_info, _ in planned_items)
-    progress = WorkProgress(
-        "pilot_paper package materialization",
-        len(planned_items),
-        total_bytes=total_bytes,
-        emit_every_count=100,
-    )
-    progress.emit(0, copied_bytes=0, profile=f"package_count={len(package_path_values)}", force=True)
-    copied_bytes = 0
-    completed_count = 0
-    current_package: Path | None = None
-    current_archive: ZipFile | None = None
-    try:
-        for package_path, entry_info, destination in planned_items:
-            if current_package != package_path:
-                if current_archive is not None:
-                    current_archive.close()
-                current_package = package_path
-                current_archive = ZipFile(package_path)
-            if current_archive is None:
-                raise RuntimeError("zip_archive_not_open")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with current_archive.open(entry_info.filename, "r") as source_handle, destination.open("wb") as target_handle:
-                for chunk in iter(lambda: source_handle.read(8 * 1024 * 1024), b""):
-                    target_handle.write(chunk)
-                    copied_bytes += len(chunk)
-                    progress.emit(
-                        completed_count,
-                        copied_bytes=copied_bytes,
-                        profile=f"package={package_path.name} extracting={entry_info.filename}",
-                    )
-            completed_count += 1
-            materialized_entries.append(entry_info.filename)
-            progress.emit(
-                completed_count,
-                copied_bytes=copied_bytes,
-                profile=f"package={package_path.name} file={entry_info.filename}",
-            )
-    finally:
-        if current_archive is not None:
-            current_archive.close()
-    progress.emit(
-        completed_count,
-        copied_bytes=copied_bytes,
-        profile=f"package_count={len(package_path_values)} done",
-        force=True,
-    )
-    return {
-        "input_package_count": len(package_path_values),
-        "input_package_paths": [relative_or_absolute(path, root_path) for path in package_path_values],
-        "materialized_output_entry_count": len(materialized_entries),
-        "materialized_output_total_bytes": copied_bytes,
-        "skipped_output_entry_count": len(skipped_entries),
-        "duplicate_identical_entry_count": len(duplicate_identical_entries),
-        "materialized_output_entries_digest": build_stable_digest(sorted(materialized_entries)),
-        "skipped_output_entries": sorted(skipped_entries),
-    }
 
 
 def build_protocol_context(root_path: Path, config: PilotPaperFixedFprConfig) -> dict[str, Any]:
@@ -484,10 +329,10 @@ def dataset_quality_claim_gate_fields(dataset_quality_metrics_path: Path, root_p
     )
     canonical_extractor_ready = bool(summary.get("canonical_formal_feature_extractor_ready", False))
     claim_gate_ready = bool(
-        summary.get("formal_fid_kid_claim_gate_ready", metric_names_ready)
+        summary.get("formal_fid_kid_component_ready", metric_names_ready)
         and canonical_extractor_ready
     )
-    blocker = _str_field(summary, "formal_fid_kid_claim_blocker")
+    blocker = _str_field(summary, "formal_fid_kid_component_blocker")
     if not blocker and not claim_gate_ready:
         blocker = "formal_fid_kid_not_measured"
     boundary = _str_field(summary, "dataset_quality_claim_boundary")
@@ -501,9 +346,9 @@ def dataset_quality_claim_gate_fields(dataset_quality_metrics_path: Path, root_p
         boundary = "dataset_quality_formal_fid_kid_not_ready"
     return {
         "formal_fid_kid_metric_names_ready": metric_names_ready,
-        "formal_fid_kid_claim_gate_ready": claim_gate_ready,
+        "formal_fid_kid_component_ready": claim_gate_ready,
         "canonical_formal_feature_extractor_ready": canonical_extractor_ready,
-        "formal_fid_kid_claim_blocker": blocker,
+        "formal_fid_kid_component_blocker": blocker,
         "dataset_quality_formal_metric_ready": claim_gate_ready,
         "dataset_quality_claim_boundary": boundary,
         "dataset_quality_summary_path": (
@@ -911,7 +756,7 @@ def build_image_only_slm_wm_result_records(
             and bool(summary.get("attack_record_coverage_ready", False))
             and bool(summary.get("attacked_image_evidence_chain_ready", False))
             and bool(summary.get("real_gpu_attack_validation_ready", False))
-            and bool(dataset_quality_gate_fields.get("formal_fid_kid_claim_gate_ready", False))
+            and bool(dataset_quality_gate_fields.get("formal_fid_kid_component_ready", False))
             and _int_field(positive_row, "record_count") >= minimum_claim_count
             and _int_field(clean_negative_row, "record_count") >= minimum_claim_count
         )
@@ -1107,47 +952,6 @@ def filter_records_to_template(
     ]
 
 
-def build_result_summary(
-    *,
-    records: list[dict[str, Any]],
-    coverage_rows: list[dict[str, Any]],
-    validation_report: Mapping[str, Any],
-    materialization_report: Mapping[str, Any],
-    schema: Mapping[str, Any],
-    result_record_set_digest: str,
-    method_threshold_digest_map: Mapping[str, str],
-    closure_input_lock_digest: str,
-    common_code_version: str,
-) -> dict[str, Any]:
-    """汇总 pilot_paper 结果记录物化状态。"""
-
-    covered_count = sum(1 for row in coverage_rows if bool(row["template_covered"]))
-    method_ids = sorted({str(row.get("method_id", "")) for row in records if row.get("method_id")})
-    missing_rows = [row for row in coverage_rows if not bool(row["template_covered"])]
-    return {
-        "construction_unit_name": CONSTRUCTION_UNIT_NAME,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "pilot_paper_result_record_count": len(records),
-        "pilot_paper_result_method_ids": method_ids,
-        "pilot_paper_template_record_count": len(coverage_rows),
-        "pilot_paper_template_covered_count": covered_count,
-        "pilot_paper_template_missing_count": len(missing_rows),
-        "pilot_paper_template_coverage_ready": bool(coverage_rows) and covered_count == len(coverage_rows),
-        "pilot_paper_result_import_ready": bool(validation_report.get("pilot_paper_result_import_ready", False)),
-        "accepted_pilot_paper_import_count": int(validation_report.get("accepted_pilot_paper_import_count", 0)),
-        "accepted_pilot_paper_claim_record_count": int(validation_report.get("accepted_pilot_paper_claim_record_count", 0)),
-        "pilot_paper_claim_record_ready": bool(validation_report.get("pilot_paper_claim_record_ready", False)),
-        "missing_template_examples": missing_rows[:20],
-        "materialization_report": dict(materialization_report),
-        "paper_claim_scale": str(schema.get("paper_claim_scale", "pilot_paper")),
-        "result_record_set_digest": result_record_set_digest,
-        "method_threshold_digest_map": dict(sorted(method_threshold_digest_map.items())),
-        "closure_input_lock_digest": closure_input_lock_digest,
-        "common_code_version": common_code_version,
-        "supports_paper_claim": bool(validation_report.get("supports_paper_claim", False)) and not missing_rows,
-    }
-
-
 def write_pilot_paper_result_record_outputs(
     *,
     root: str | Path = ".",
@@ -1156,279 +960,26 @@ def write_pilot_paper_result_record_outputs(
     baseline_validation_report_path: str | Path | None = None,
     dataset_quality_metrics_path: str | Path | None = None,
     image_only_runtime_dir: str | Path | None = None,
-    package_paths: Iterable[str | Path] = (),
-    package_search_roots: Iterable[str | Path] = (),
     require_existing_evidence: bool = False,
-    materialize_only: bool = False,
 ) -> dict[str, Any]:
-    """写出 pilot_paper 共同协议结果记录和校验报告。"""
+    """在任何 I/O 前拒绝缺少精确9重复聚合来源的正式结果写入."""
 
-    root_path = Path(root).resolve()
-    resolved_run_name = normalize_paper_run_name(os.environ.get("SLM_WM_PAPER_RUN_NAME"))
-    output_path = ensure_output_dir_under_outputs(
-        root_path,
-        output_dir or DEFAULT_OUTPUT_ROOT / resolved_run_name,
+    del (
+        root,
+        output_dir,
+        baseline_records_path,
+        baseline_validation_report_path,
+        dataset_quality_metrics_path,
+        image_only_runtime_dir,
+        require_existing_evidence,
     )
-    packages = expand_package_paths(root_path, package_paths, package_search_roots)
-    materialization_report = materialize_output_entries(root_path, packages) if packages else {
-        "input_package_count": 0,
-        "materialized_output_entry_count": 0,
-        "skipped_output_entry_count": 0,
-        "materialized_output_entries_digest": build_stable_digest([]),
-        "skipped_output_entries": [],
-    }
-    if materialize_only:
-        report_path = output_path / "pilot_paper_materialization_report.json"
-        manifest_path = output_path / "pilot_paper_materialization_manifest.local.json"
-        report_path.write_text(stable_json_text(materialization_report), encoding="utf-8")
-        manifest = build_artifact_manifest(
-            artifact_id="pilot_paper_result_record_materialization_manifest",
-            artifact_type="local_manifest",
-            input_paths=tuple(relative_or_absolute(path, root_path) for path in packages),
-            output_paths=(
-                relative_or_absolute(report_path, root_path),
-                relative_or_absolute(manifest_path, root_path),
-            ),
-            config={
-                "materialization_report_digest": build_stable_digest(materialization_report),
-            },
-            code_version=resolve_code_version(root_path),
-            rebuild_command="python scripts/write_pilot_paper_result_records.py --materialize-only",
-            metadata=materialization_report,
-        ).to_dict()
-        manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
-        return manifest
-
-    config = build_paper_fixed_fpr_config(root_path)
-    closure_input_provenance = load_validated_closure_input_lock(
-        root_path,
-        paper_run_name=config.paper_run_name,
-        target_fpr=config.target_fpr,
-        randomization_repeat_id=config.randomization_repeat_id,
-    )
-    context = build_protocol_context(root_path, config)
-    schema = context["schema"]
-    template_rows = context["template_rows"]
-    resolved_image_only_runtime_dir = resolve_path(
-        root_path,
-        image_only_runtime_dir
-        or Path("outputs/image_only_dataset_runtime") / config.paper_run_name,
-    )
-
-    resolved_baseline_records_path = resolve_path(
-        root_path,
-        baseline_records_path
-        or DEFAULT_BASELINE_RESULTS_ROOT / config.paper_run_name / "baseline_result_records.jsonl",
-    )
-    resolved_baseline_validation_report_path = resolve_path(
-        root_path,
-        baseline_validation_report_path
-        or DEFAULT_BASELINE_RESULTS_ROOT
-        / config.paper_run_name
-        / "baseline_result_candidate_validation_report.json",
-    )
-    resolved_dataset_quality_metrics_path = resolve_path(
-        root_path,
-        dataset_quality_metrics_path
-        or DEFAULT_DATASET_QUALITY_ROOT / config.paper_run_name / "dataset_quality_metrics.csv",
-    )
-    image_only_metrics_path = resolved_image_only_runtime_dir / "test_detection_metrics.csv"
-    image_only_summary_path = resolved_image_only_runtime_dir / "dataset_runtime_summary.json"
-    image_only_detection_path = resolved_image_only_runtime_dir / "image_only_detection_records.jsonl"
-    image_only_manifest_path = resolved_image_only_runtime_dir / "manifest.local.json"
-    dataset_quality_summary_path = resolved_dataset_quality_metrics_path.with_name(
-        DEFAULT_DATASET_QUALITY_SUMMARY_NAME
-    )
-    required_paths = (
-        image_only_metrics_path,
-        image_only_summary_path,
-        image_only_detection_path,
-        image_only_manifest_path,
-        resolved_baseline_records_path,
-        resolved_baseline_validation_report_path,
-        resolved_dataset_quality_metrics_path,
-        dataset_quality_summary_path,
-    )
-    missing_paths = [path for path in required_paths if not path.is_file()]
-    if missing_paths:
-        raise FileNotFoundError(f"论文结果记录缺少正式输入: {', '.join(path.as_posix() for path in missing_paths)}")
-    if not read_jsonl_rows(image_only_detection_path):
-        raise ValueError("仅图像盲检正式检测记录不能为空")
-    if not read_json(image_only_manifest_path).get("artifact_id"):
-        raise ValueError("仅图像盲检 manifest 缺少 artifact_id")
-    if not read_jsonl_rows(resolved_baseline_records_path):  # type: ignore[arg-type]
-        raise ValueError("外部 baseline 正式结果记录不能为空")
-
-    slm_wm_records = build_image_only_slm_wm_result_records(
-        root_path=root_path,
-        schema=schema,
-        metrics_path=image_only_metrics_path,
-        summary_path=image_only_summary_path,
-        detection_records_path=image_only_detection_path,
-        runtime_manifest_path=image_only_manifest_path,
-        dataset_quality_metrics_path=resolved_dataset_quality_metrics_path,
-    )
-    if not slm_wm_records:
-        raise ValueError("仅图像盲检正式指标未生成任何方法结果记录")
-    baseline_records = build_baseline_result_records(
-        root_path=root_path,
-        schema=schema,
-        baseline_records_path=resolved_baseline_records_path,  # type: ignore[arg-type]
-        baseline_validation_report_path=resolved_baseline_validation_report_path,  # type: ignore[arg-type]
-    )
-    candidate_result_records = slm_wm_records + baseline_records
-    allowed_result_keys = template_record_keys(template_rows)
-    candidate_result_keys = [
-        (
-            _str_field(record, "method_id"),
-            _str_field(record, "attack_id"),
-            _str_field(record, "attack_family"),
-            _str_field(record, "attack_name"),
-            _str_field(record, "resource_profile"),
-            _str_field(record, "attack_config_digest"),
-        )
-        for record in candidate_result_records
-    ]
-    if any(key not in allowed_result_keys for key in candidate_result_keys):
-        raise ValueError("正式结果记录包含不属于当前 method × attack 模板的记录")
-    if any(not bool(record.get("strict_formal_result_ready")) for record in candidate_result_records):
-        raise ValueError("正式结果记录包含未通过严格正式门禁的记录")
-    if len(candidate_result_keys) != len(set(candidate_result_keys)):
-        raise ValueError("正式结果记录不得包含重复的 method × attack 模板键")
-    result_records = sorted(
-        filter_records_to_template(candidate_result_records, template_rows),
-        key=lambda row: (
-            str(row.get("method_id", "")),
-            str(row.get("resource_profile", "")),
-            str(row.get("attack_family", "")),
-            str(row.get("attack_name", "")),
-        ),
-    )
-    validation_report = validate_pilot_paper_result_import_rows(
-        result_records,
-        schema,
-        evidence_root=root_path,
-        require_existing_evidence=require_existing_evidence,
-    )
-    coverage_rows = build_template_coverage_rows(template_rows=template_rows, result_records=result_records)
-    threshold_values_by_method: dict[str, set[str]] = {}
-    for record in result_records:
-        threshold_values_by_method.setdefault(_str_field(record, "method_id"), set()).add(
-            _str_field(record, "method_threshold_digest")
-        )
-    expected_method_ids = set(str(value) for value in schema["method_ids"])
-    if set(threshold_values_by_method) != expected_method_ids or any(
-        len(values) != 1 or len(next(iter(values))) != 64
-        for values in threshold_values_by_method.values()
-    ):
-        raise ValueError("正式结果记录必须为每个方法绑定唯一 SHA-256 阈值摘要")
-    method_threshold_digest_map = {
-        method_id: next(iter(values))
-        for method_id, values in sorted(threshold_values_by_method.items())
-    }
-    result_record_set_digest = build_pilot_paper_result_record_set_digest(result_records)
-    summary = build_result_summary(
-        records=result_records,
-        coverage_rows=coverage_rows,
-        validation_report=validation_report,
-        materialization_report=materialization_report,
-        schema=schema,
-        result_record_set_digest=result_record_set_digest,
-        method_threshold_digest_map=method_threshold_digest_map,
-        closure_input_lock_digest=str(
-            closure_input_provenance["closure_input_lock_digest"]
-        ),
-        common_code_version=str(closure_input_provenance["common_code_version"]),
-    )
-    summary["require_existing_evidence"] = bool(require_existing_evidence)
-
-    records_path = output_path / "pilot_paper_result_records.jsonl"
-    validation_path = output_path / "pilot_paper_result_import_validation_report.json"
-    coverage_path = output_path / "pilot_paper_result_template_coverage.csv"
-    summary_path = output_path / "pilot_paper_result_record_summary.json"
-    manifest_path = output_path / "manifest.local.json"
-
-    records_path.write_text("".join(json_line(row) for row in result_records), encoding="utf-8")
-    validation_path.write_text(stable_json_text(validation_report), encoding="utf-8")
-    write_csv(
-        coverage_path,
-        coverage_rows,
-        [
-            "method_id",
-            "attack_id",
-            "attack_family",
-            "attack_name",
-            "resource_profile",
-            "attack_config_digest",
-            "template_covered",
-            "supports_paper_claim",
-        ],
-    )
-    summary_path.write_text(stable_json_text(summary), encoding="utf-8")
-
-    input_paths = [
-        relative_or_absolute(path, root_path)
-        for path in required_paths
-        if path is not None and path.exists()
-    ]
-    input_paths.extend(relative_or_absolute(path, root_path) for path in packages)
-    input_paths.extend(
-        relative_or_absolute(closure_input_provenance[field_name], root_path)
-        for field_name in (
-            "closure_input_lock_path",
-            "closure_input_lock_manifest_path",
-        )
-    )
-    flattened_record_evidence_paths = tuple(
-        dict.fromkeys(
-            path_value
-            for record in result_records
-            for path_value in (
-                _str_field(record, "baseline_result_source"),
-                *_list_field(record, "evidence_paths"),
-            )
-            if path_value
-        )
-    )
-    for path_value in flattened_record_evidence_paths:
-        evidence_path = resolve_path(root_path, path_value)
-        if evidence_path is None or not evidence_path.is_file():
-            raise FileNotFoundError(
-                f"正式 result record 证据文件不存在: {path_value}"
-            )
-        input_paths.append(relative_or_absolute(evidence_path, root_path))
-    input_paths = list(dict.fromkeys(input_paths))
-    output_paths = tuple(
-        relative_or_absolute(path, root_path)
-        for path in (records_path, validation_path, coverage_path, summary_path, manifest_path)
-    )
-    manifest = build_artifact_manifest(
-        artifact_id="pilot_paper_fixed_fpr_result_records_manifest",
-        artifact_type="local_manifest",
-        input_paths=tuple(input_paths),
-        output_paths=output_paths,
-        config=build_pilot_paper_result_records_manifest_config(
-            result_records=result_records,
-            method_threshold_digest_map=method_threshold_digest_map,
-            closure_input_lock_digest=summary["closure_input_lock_digest"],
-            common_code_version=summary["common_code_version"],
-            validation_report=validation_report,
-            template_coverage_rows=coverage_rows,
-            summary=summary,
-            require_existing_evidence=require_existing_evidence,
-        ),
-        code_version=resolve_code_version(root_path),
-        rebuild_command="python scripts/write_pilot_paper_result_records.py",
-        metadata=summary,
-    ).to_dict()
-    manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
-    return manifest
+    require_exact9_randomization_aggregate_provenance()
 
 
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行参数解析器。"""
 
-    parser = argparse.ArgumentParser(description="写出 pilot_paper fixed-FPR 共同协议结果记录。")
+    parser = argparse.ArgumentParser(description="写出当前论文运行层级的 fixed-FPR 共同协议结果记录。")
     parser.add_argument("--root", default=".", help="仓库根目录。")
     parser.add_argument(
         "--output-dir",
@@ -1451,10 +1002,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="数据集质量指标路径; 默认读取当前论文运行子目录。",
     )
     parser.add_argument("--image-only-runtime-dir", default=None)
-    parser.add_argument("--package-path", action="append", default=[], help="可重复传入的前序结果 zip 包。")
-    parser.add_argument("--package-search-root", action="append", default=[], help="递归查找 zip 包的 Google Drive 镜像根目录。")
     parser.add_argument("--require-existing-evidence", action="store_true", help="校验 result records 中 evidence_paths 指向的文件存在。")
-    parser.add_argument("--materialize-only", action="store_true", help="只物化 zip 包中的 outputs/ 条目, 不生成结果记录。")
     return parser
 
 
@@ -1469,10 +1017,7 @@ def main() -> None:
         baseline_validation_report_path=args.baseline_validation_report_path,
         dataset_quality_metrics_path=args.dataset_quality_metrics_path,
         image_only_runtime_dir=args.image_only_runtime_dir,
-        package_paths=args.package_path,
-        package_search_roots=args.package_search_root,
         require_existing_evidence=args.require_existing_evidence,
-        materialize_only=args.materialize_only,
     )
     print(stable_json_text(manifest), end="")
 

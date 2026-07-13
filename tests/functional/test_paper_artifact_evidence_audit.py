@@ -26,7 +26,6 @@ from paper_experiments.analysis.paper_evidence_audit import (
     build_table_readiness_rows,
     build_figure_readiness_rows,
 )
-from scripts.write_paper_artifact_evidence_audit_outputs import write_paper_artifact_evidence_audit_outputs
 
 
 def make_audit_input_bundle() -> AuditInputBundle:
@@ -40,7 +39,7 @@ def make_audit_input_bundle() -> AuditInputBundle:
             "split_counts": {"test": 340},
             "protocol_decision": "pass",
             "raw_content_claim_ready": True,
-            "full_method_claim_ready": False,
+            "full_method_component_ready": False,
             "perceptual_metrics_ready": True,
             "scientific_operator_gate_ready": False,
             "supports_paper_claim": False,
@@ -57,7 +56,7 @@ def make_audit_input_bundle() -> AuditInputBundle:
             "supports_paper_claim": False,
         },
         attack_manifest={
-            "full_method_claim_ready": False,
+            "full_method_component_ready": False,
             "real_attacked_image_closed_loop_ready": False,
             "formal_attack_detection_ready": False,
             "supports_paper_claim": False,
@@ -69,11 +68,11 @@ def make_audit_input_bundle() -> AuditInputBundle:
         dataset_quality_summary={
             "formal_fid_kid_ready": False,
             "canonical_formal_feature_extractor_ready": False,
-            "formal_fid_kid_claim_gate_ready": False,
+            "formal_fid_kid_component_ready": False,
             "supports_paper_claim": False,
         },
         ablation_manifest={"artifact_id": "formal_mechanism_ablation_manifest", "supports_paper_claim": False},
-        ablation_claim_summary={"mechanism_coverage_ready": True, "supports_paper_claim": False},
+        ablation_component_summary={"mechanism_coverage_ready": True, "supports_paper_claim": False},
         source_path_map={
             "threshold_report": "outputs/image_only_dataset_runtime/pilot_paper/dataset_runtime_summary.json",
             "threshold_audit_report": "outputs/fixed_fpr_threshold_audit/pilot_paper/threshold_audit_report.json",
@@ -82,7 +81,7 @@ def make_audit_input_bundle() -> AuditInputBundle:
             "baseline_comparison_table": "outputs/external_baseline_comparison/pilot_paper/baseline_comparison_table.csv",
             "dataset_quality_summary": "outputs/dataset_level_quality/pilot_paper/dataset_quality_summary.json",
             "dataset_quality_metrics": "outputs/dataset_level_quality/pilot_paper/dataset_quality_metrics.csv",
-            "ablation_claim_summary": "outputs/formal_mechanism_ablation/pilot_paper/ablation_claim_summary.json",
+            "ablation_component_summary": "outputs/formal_mechanism_ablation/pilot_paper/ablation_component_summary.json",
             "quality_metrics_summary": "outputs/image_only_dataset_runtime/pilot_paper/runtime_results.jsonl",
         },
     )
@@ -166,9 +165,9 @@ def make_ablation_claim_ready_bundle(
         bootstrap_resample_count=1000,
     )
     summary = {
-        **bundle.ablation_claim_summary,
+        **bundle.ablation_component_summary,
         "mechanism_coverage_ready": True,
-        "ablation_claim_gate_ready": True,
+        "ablation_component_ready": True,
         **necessity_summary,
         "supports_paper_claim": True,
     }
@@ -181,7 +180,7 @@ def make_ablation_claim_ready_bundle(
     }
     return replace(
         bundle,
-        ablation_claim_summary=summary,
+        ablation_component_summary=summary,
         ablation_necessity_rows=tuple(necessity_rows),
         ablation_necessity_summary=necessity_summary,
         source_path_map=source_path_map,
@@ -352,7 +351,7 @@ def write_minimal_upstream_artifacts(tmp_path: Path) -> None:
     write_json(quality_dir / "manifest.local.json", {"artifact_id": "dataset_level_quality_manifest"})
     write_json(quality_dir / "dataset_quality_summary.json", make_audit_input_bundle().dataset_quality_summary)
     write_json(ablation_dir / "manifest.local.json", {"artifact_id": "formal_mechanism_ablation_manifest"})
-    write_json(ablation_dir / "ablation_claim_summary.json", make_audit_input_bundle().ablation_claim_summary)
+    write_json(ablation_dir / "ablation_component_summary.json", make_audit_input_bundle().ablation_component_summary)
 
 
 def write_test_prompt_contract(tmp_path: Path) -> PaperRunPromptContract:
@@ -367,74 +366,4 @@ def write_test_prompt_contract(tmp_path: Path) -> PaperRunPromptContract:
         prompt_file=relative_path.as_posix(),
         expected_prompt_count=1,
         prompt_file_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-    )
-
-
-@pytest.mark.quick
-def test_paper_artifact_evidence_outputs_are_rebuildable_and_claim_safe(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """脚本应从受治理输入重建审计产物, 且不得把当前结果标记为论文级主张。"""
-
-    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
-    write_minimal_upstream_artifacts(tmp_path)
-
-    manifest = write_paper_artifact_evidence_audit_outputs(
-        root=tmp_path,
-        prompt_contract=write_test_prompt_contract(tmp_path),
-    )
-    output_dir = tmp_path / "outputs" / "paper_artifact_evidence_audit" / "pilot_paper"
-    expected_files = {
-        "claim_audit_table.csv",
-        "paper_table_readiness.csv",
-        "paper_figure_readiness.csv",
-        "evidence_gap_list.csv",
-        "artifact_builder_readiness_report.json",
-        "evidence_audit_dry_run.json",
-        "submission_blocker_report.json",
-        "artifact_data_validation_report.json",
-        "manifest.local.json",
-    }
-
-    assert expected_files == {path.name for path in output_dir.iterdir()}
-    assert manifest["artifact_id"] == "paper_artifact_evidence_audit_manifest"
-    assert manifest["metadata"]["submission_ready"] is False
-    assert manifest["metadata"]["paper_artifact_audit_ready"] is True
-
-    claim_rows = list(csv.DictReader((output_dir / "claim_audit_table.csv").open(encoding="utf-8")))
-    gap_rows = list(csv.DictReader((output_dir / "evidence_gap_list.csv").open(encoding="utf-8")))
-    blocker_report = json.loads((output_dir / "submission_blocker_report.json").read_text(encoding="utf-8"))
-    dry_run_report = json.loads((output_dir / "evidence_audit_dry_run.json").read_text(encoding="utf-8"))
-    data_validation_report = json.loads(
-        (output_dir / "artifact_data_validation_report.json").read_text(encoding="utf-8")
-    )
-
-    assert len(claim_rows) >= 7
-    assert any(row["claim_id"] == "claim_baseline_superiority" and row["claim_decision"] == "unsupported" for row in claim_rows)
-    assert any(row["gap_id"] == "gap_baseline_results" for row in gap_rows)
-    assert all(row["supports_paper_claim"] == "False" for row in claim_rows + gap_rows)
-    assert blocker_report["submission_ready"] is False
-    assert blocker_report["supports_paper_claim"] is False
-    assert dry_run_report["dry_run_decision"] == "fail"
-    assert data_validation_report["artifact_data_validation_ready"] is False
-    assert {
-        "raw_image_only_detection_records_ready",
-        "score_distribution_table_ready",
-        "roc_curve_points_ready",
-        "det_curve_points_ready",
-    }.issubset(data_validation_report["blocked_artifact_data_ids"])
-    assert len(data_validation_report["source_paths"]) == 12
-    raw_detection_path = (
-        "outputs/image_only_dataset_runtime/pilot_paper/"
-        "image_only_detection_records.jsonl"
-    )
-    assert data_validation_report["source_paths"][
-        "raw_image_only_detection_records_ready"
-    ] == raw_detection_path
-    assert manifest["metadata"]["raw_image_only_detection_records_ready"] is False
-    assert manifest["metadata"]["raw_image_only_detection_records_sha256"] == ""
-    assert raw_detection_path in manifest["input_paths"]
-    assert set(data_validation_report["source_paths"].values()).issubset(
-        set(manifest["input_paths"])
     )

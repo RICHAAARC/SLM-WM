@@ -185,7 +185,7 @@ def test_ablation_protocol_closure_allows_measured_not_supported_result() -> Non
     )
 
     assert report["ablation_statistics_rebuild_ready"] is True
-    assert summary["all_mechanism_necessity_claims_supported"] is False
+    assert summary["all_mechanism_necessity_components_supported"] is False
 
 
 @pytest.mark.quick

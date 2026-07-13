@@ -2735,6 +2735,7 @@ def test_closed_archive_recovery_without_directories_is_empty(
         root_path=tmp_path,
         paper_run_name="probe_paper",
         target_fpr=0.1,
+        randomization_repeat_id="seed_00_key_00",
         expected_roles={
             "image_only_dataset_runtime",
             "dataset_level_quality",
@@ -3002,9 +3003,10 @@ def test_closed_archive_recovery_rejects_same_time_different_content(
 
     with pytest.raises(RuntimeError, match="同时间不同内容"):
         scientific_workflow._recover_closed_archives(
-            root_path=tmp_path,
-            paper_run_name="probe_paper",
-            target_fpr=0.1,
+                root_path=tmp_path,
+                paper_run_name="probe_paper",
+                target_fpr=0.1,
+                randomization_repeat_id="seed_00_key_00",
             expected_roles={"image_only_dataset_runtime"},
             archive_destination_dirs={
                 "image_only_dataset_runtime": candidates[0].package_path.parent,
@@ -3105,7 +3107,7 @@ def test_colab_image_only_session_mirrors_completed_formal_packages(
         json.dumps(
             {
                 "formal_fid_kid_ready": True,
-                "formal_fid_kid_claim_gate_ready": True,
+                "formal_fid_kid_component_ready": True,
                 "canonical_formal_feature_extractor_ready": True,
                 "supports_paper_claim": True,
             }
@@ -3188,7 +3190,7 @@ def test_formal_ablation_resume_skips_binding_and_packaging(
         encoding="utf-8",
     )
     (quality_dir / "dataset_quality_summary.json").write_text(
-        json.dumps({"formal_fid_kid_claim_gate_ready": True}),
+        json.dumps({"formal_fid_kid_component_ready": True}),
         encoding="utf-8",
     )
     (ablation_dir / "runtime_rerun_progress.json").write_text(

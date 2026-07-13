@@ -1599,8 +1599,8 @@ def write_dataset_level_quality_outputs(
         }
     )
     canonical_formal_feature_extractor_ready = formal_feature_extractor_ids == [FORMAL_FEATURE_EXTRACTOR_ID]
-    formal_claim_gate_ready = bool(
-        base_summary.get("formal_fid_kid_claim_gate_ready", False)
+    formal_component_ready = bool(
+        base_summary.get("formal_fid_kid_component_ready", False)
         and canonical_formal_feature_extractor_ready
         and prompt_contract["prompt_registry_exact_set_ready"]
         and scientific_unit_provenance_identity_ready
@@ -1629,13 +1629,6 @@ def write_dataset_level_quality_outputs(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "paper_run_name": resolved_paper_run_name,
         "target_fpr": resolved_target_fpr,
-        "randomization_repeat_id": paper_run.randomization_repeat_id,
-        "generation_seed_index": paper_run.generation_seed_index,
-        "generation_seed_offset": paper_run.generation_seed_offset,
-        "watermark_key_index": paper_run.watermark_key_index,
-        "formal_randomization_protocol_digest": (
-            paper_run.formal_randomization_protocol_digest
-        ),
         "randomization_repeat_identity": {
             "randomization_repeat_id": paper_run.randomization_repeat_id,
             "generation_seed_index": paper_run.generation_seed_index,
@@ -1683,16 +1676,19 @@ def write_dataset_level_quality_outputs(
             field_name: formal_feature_payload["report"][field_name]
             for field_name in SCIENTIFIC_UNIT_PROVENANCE_AGGREGATE_FIELDS
         },
-        "formal_fid_kid_claim_gate_ready": formal_claim_gate_ready,
-        "formal_fid_kid_claim_blocker": (
+        "formal_fid_kid_component_ready": formal_component_ready,
+        "formal_fid_kid_component_blocker": (
             ""
-            if formal_claim_gate_ready
+            if formal_component_ready
             else (
                 "requires_canonical_inception_feature_extractor"
                 if base_summary.get("formal_fid_kid_ready", False)
-                else base_summary.get("formal_fid_kid_claim_blocker", "formal_fid_kid_not_measured")
+                else base_summary.get("formal_fid_kid_component_blocker", "formal_fid_kid_not_measured")
             )
         ),
+        "repeat_component_ready": formal_component_ready,
+        "randomization_aggregate_ready": False,
+        "supports_paper_claim": False,
     }
 
     records_path.write_text("".join(json_line(record.to_dict()) for record in records), encoding="utf-8")
@@ -1999,7 +1995,10 @@ def package_dataset_level_quality_outputs(
                 "formal_sample_scale_ready"
             ]
             is True,
-            summary.get("formal_fid_kid_claim_gate_ready") is True,
+            summary.get("formal_fid_kid_component_ready") is True,
+            summary.get("repeat_component_ready") is True,
+            summary.get("randomization_aggregate_ready") is False,
+            summary.get("supports_paper_claim") is False,
             manifest.get("artifact_id") == "dataset_level_quality_manifest",
             manifest_config_digest_ready(manifest),
             feature_contract_ready,

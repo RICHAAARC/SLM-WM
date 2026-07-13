@@ -53,6 +53,7 @@ GPU_WORKFLOW_NAMES = (
     "official_reference_gaussian_shading",
     "official_reference_shallow_diffuse",
 )
+ACTIVE_REPEAT_GPU_WORKFLOW_NAMES = frozenset(GPU_WORKFLOW_NAMES[:6])
 DEFAULT_RUNTIME_ROOT = (
     Path(tempfile.gettempdir()) / "slm_wm_formal_workflow_orchestrator"
 )
@@ -377,6 +378,26 @@ def build_child_command(
     ]
     if arguments.operation == "gpu":
         command.extend(["--workflow", arguments.workflow])
+        if arguments.workflow in ACTIVE_REPEAT_GPU_WORKFLOW_NAMES:
+            if not arguments.randomization_repeat_id:
+                raise FormalWorkflowHostError(
+                    "活动随机化 GPU workflow 必须显式指定 repeat ID"
+                )
+            if arguments.persistent_output_dir:
+                raise FormalWorkflowHostError(
+                    "活动随机化 GPU workflow 的持久化根必须由受治理 repeat "
+                    "配置生成, 不得显式覆盖"
+                )
+            command.extend(
+                [
+                    "--randomization-repeat-id",
+                    arguments.randomization_repeat_id,
+                ]
+            )
+        elif arguments.randomization_repeat_id:
+            raise FormalWorkflowHostError(
+                "跨 repeat 不变 GPU workflow 不得绑定活动 repeat ID"
+            )
         if arguments.persistent_output_dir:
             command.extend(["--persistent-output-dir", arguments.persistent_output_dir])
     else:
@@ -384,12 +405,10 @@ def build_child_command(
             [
                 "--package-search-root",
                 arguments.package_search_root,
-                "--complete-output-dir",
-                arguments.complete_output_dir,
+                "--randomization-repeat-id",
+                arguments.randomization_repeat_id,
             ]
         )
-        if arguments.dry_run:
-            command.append("--dry-run")
     return command
 
 
@@ -426,7 +445,7 @@ def launch_formal_workflow(arguments: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """构造 GPU workflow 与 CPU 闭合共用的宿主入口参数."""
+    """构造 GPU workflow 与单 repeat 证据打包共用的宿主入口参数."""
 
     parser = argparse.ArgumentParser(
         description="从固定 uv wheel 创建精确 workflow_orchestrator 并执行论文入口."
@@ -446,18 +465,25 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         choices=("probe_paper", "pilot_paper", "full_paper"),
     )
-    gpu.add_argument("--persistent-output-dir", default="")
+    gpu.add_argument(
+        "--persistent-output-dir",
+        default="",
+        help=(
+            "仅跨 repeat 不变路由可显式指定; 活动 repeat 路由的持久根由"
+            "受治理配置生成."
+        ),
+    )
+    gpu.add_argument("--randomization-repeat-id", default="")
     gpu.add_argument("--result-path", required=True)
-    closure = subparsers.add_parser("closure")
-    closure.add_argument(
+    repeat_evidence = subparsers.add_parser("repeat_evidence")
+    repeat_evidence.add_argument(
         "--paper-run-name",
         required=True,
         choices=("probe_paper", "pilot_paper", "full_paper"),
     )
-    closure.add_argument("--package-search-root", required=True)
-    closure.add_argument("--complete-output-dir", required=True)
-    closure.add_argument("--result-path", required=True)
-    closure.add_argument("--dry-run", action="store_true")
+    repeat_evidence.add_argument("--package-search-root", required=True)
+    repeat_evidence.add_argument("--randomization-repeat-id", required=True)
+    repeat_evidence.add_argument("--result-path", required=True)
     return parser
 
 

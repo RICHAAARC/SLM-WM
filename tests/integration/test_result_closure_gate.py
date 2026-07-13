@@ -1,4 +1,4 @@
-"""论文结果闭合语义门禁的轻量功能测试。"""
+"""论文结果闭合语义门禁的耗时集成测试。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import hashlib
 import io
 import json
 from pathlib import Path
-import sys
 
 import pytest
 
@@ -60,6 +59,10 @@ from experiments.artifacts.image_only_detection_metrics import (
 )
 from experiments.protocol.formal_randomization import (
     build_formal_randomization_identity,
+    formal_randomization_protocol_record,
+    formal_randomization_repeat_ids,
+    formal_randomization_repeat_registry_digest,
+    formal_randomization_repeats,
     resolve_formal_randomization_repeat,
 )
 from experiments.artifacts.dataset_level_quality_outputs import (
@@ -132,13 +135,6 @@ from paper_experiments.analysis.result_analysis_payload import (
     build_per_attack_superiority_rows,
     rebuild_and_validate_result_analysis_derived_payload,
     build_result_analysis_manifest_config,
-)
-from scripts.write_result_closure_gate_outputs import main, write_result_closure_gate_outputs
-from scripts.write_paper_artifact_evidence_audit_outputs import (
-    write_paper_artifact_evidence_audit_outputs,
-)
-from tests.helpers.closure_input_lock import (
-    build_test_closure_input_lock_payloads,
 )
 from tests.helpers.formal_execution_lock import (
     build_test_formal_execution_lock,
@@ -693,7 +689,7 @@ def evidence_audit_source_path_map() -> dict[str, str]:
         "attacked_image_registry": f"{attack_root}/attacked_image_registry.jsonl",
         "baseline_runtime_report": f"{baseline_root}/baseline_runtime_report.json",
         "baseline_comparison_table": f"{baseline_root}/baseline_comparison_table.csv",
-        "ablation_claim_summary": f"{ablation_root}/ablation_claim_summary.json",
+        "ablation_component_summary": f"{ablation_root}/ablation_component_summary.json",
         "mechanism_ablation_table": f"{ablation_root}/mechanism_ablation_metrics.csv",
         "method_pairwise_delta_table": f"{ablation_root}/mechanism_pairwise_delta.csv",
         "mechanism_necessity_statistics": (
@@ -1153,6 +1149,7 @@ def formal_result_record(
     source_method_id = "slm_wm" if is_main else method_id
     source_path = METHOD_OBSERVATION_SOURCE_PATH_MAP[source_method_id]
     source_digest = METHOD_OBSERVATION_SOURCE_SHA256_MAP[source_method_id]
+    aggregate_payload, _ = randomization_aggregate_provenance()
 
     payload: dict[str, object] = {
         "paper_claim_scale": SCALE,
@@ -1171,6 +1168,10 @@ def formal_result_record(
         "attack_matrix_digest": ATTACK_MATRIX_DIGEST,
         "fixed_fpr_protocol_digest": FIXED_FPR_PROTOCOL_DIGEST,
         "method_threshold_digest": METHOD_THRESHOLD_DIGEST_MAP[method_id],
+        "randomization_aggregate_digest": aggregate_payload[
+            "randomization_aggregate_digest"
+        ],
+        "common_code_version": COMMON_CODE_VERSION,
         "confidence_interval_method": "bounded_hoeffding",
         "confidence_level": 0.95,
         "baseline_result_source": source_path,
@@ -1357,14 +1358,175 @@ def primary_evidence_record(baseline_id: str) -> dict[str, object]:
     }
 
 
-def closure_input_lock() -> tuple[dict[str, object], dict[str, object]]:
-    """构造精确10类输入包的当前 run 锁及独立 manifest."""
+def randomization_aggregate_provenance() -> tuple[dict[str, object], dict[str, object]]:
+    """构造精确9重复与3个跨重复不变量的聚合来源夹具."""
 
-    return build_test_closure_input_lock_payloads(
-        paper_run_name=SCALE,
-        target_fpr=TARGET_FPR,
-        common_code_version=COMMON_CODE_VERSION,
+    protocol_digest = str(
+        formal_randomization_protocol_record()[
+            "formal_randomization_protocol_digest"
+        ]
     )
+    repeat_components = [
+        {
+            **repeat.to_dict(),
+            "archive_member": (
+                f"repeat_components/{repeat.randomization_repeat_id}.zip"
+            ),
+            "package_sha256": build_stable_digest(
+                {
+                    "role": "repeat_component_package",
+                    "repeat_id": repeat.randomization_repeat_id,
+                }
+            ),
+            "code_version": COMMON_CODE_VERSION,
+            "formal_randomization_protocol_digest": protocol_digest,
+            "randomization_repeat_evidence_manifest_digest": (
+                build_stable_digest(
+                    {
+                        "role": "repeat_component_manifest",
+                        "repeat_id": repeat.randomization_repeat_id,
+                    }
+                )
+            ),
+            "component_content_digest": build_stable_digest(
+                {
+                    "role": "repeat_component_content",
+                    "repeat_id": repeat.randomization_repeat_id,
+                }
+            ),
+            "leaf_package_set_digest": build_stable_digest(
+                {
+                    "role": "repeat_leaf_package_set",
+                    "repeat_id": repeat.randomization_repeat_id,
+                }
+            ),
+        }
+        for repeat in formal_randomization_repeats()
+    ]
+    invariant_packages = [
+        {
+            "package_family": package_family,
+            "randomization_scope": "cross_repeat_invariant",
+            "archive_member": f"invariant_packages/{package_family}.zip",
+            "package_sha256": build_stable_digest(
+                {"role": "invariant_package", "package_family": package_family}
+            ),
+            "code_version": COMMON_CODE_VERSION,
+            "formal_execution_run_lock_digest": build_stable_digest(
+                {"role": "run_lock", "package_family": package_family}
+            ),
+            "formal_execution_package_lock_digest": build_stable_digest(
+                {"role": "package_lock", "package_family": package_family}
+            ),
+        }
+        for package_family in (
+            "official_reference_tree_ring",
+            "official_reference_gaussian_shading",
+            "official_reference_shallow_diffuse",
+        )
+    ]
+    aggregate_core = {
+        "randomization_aggregate_schema_version": 1,
+        "paper_run_name": SCALE,
+        "target_fpr": TARGET_FPR,
+        "formal_randomization_repeat_registry_digest": (
+            formal_randomization_repeat_registry_digest()
+        ),
+        "formal_randomization_protocol_digest": protocol_digest,
+        "randomization_repeat_ids": list(formal_randomization_repeat_ids()),
+        "randomization_repeat_components": repeat_components,
+        "invariant_packages": invariant_packages,
+        "common_code_version": COMMON_CODE_VERSION,
+        "randomization_aggregate_ready": True,
+        "supports_paper_claim": False,
+    }
+    payload = {
+        "report_schema": "randomization_aggregate_provenance_payload",
+        "generated_at": "2026-07-13T00:00:00+00:00",
+        **aggregate_core,
+        "randomization_aggregate_digest": build_stable_digest(aggregate_core),
+    }
+    payload_member = (
+        f"randomization_aggregate_provenance/{SCALE}/"
+        "randomization_aggregate_payload.json"
+    )
+    manifest_member = (
+        f"randomization_aggregate_provenance/{SCALE}/"
+        "randomization_aggregate_manifest.json"
+    )
+    payload_bytes = (
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    input_paths = [
+        str(record["archive_member"])
+        for record in repeat_components + invariant_packages
+    ]
+    entry_sha256 = {
+        str(record["archive_member"]): str(record["package_sha256"])
+        for record in repeat_components + invariant_packages
+    }
+    entry_sha256[payload_member] = hashlib.sha256(payload_bytes).hexdigest()
+    config = {
+        "paper_run_name": SCALE,
+        "target_fpr": TARGET_FPR,
+        "formal_randomization_repeat_registry_digest": (
+            formal_randomization_repeat_registry_digest()
+        ),
+        "formal_randomization_protocol_digest": protocol_digest,
+        "randomization_repeat_ids": list(formal_randomization_repeat_ids()),
+        "invariant_package_families": [
+            str(record["package_family"]) for record in invariant_packages
+        ],
+    }
+    manifest = {
+        "artifact_id": "randomization_aggregate_provenance_manifest",
+        "artifact_type": "local_manifest",
+        **{
+            field_name: payload[field_name]
+            for field_name in (
+                "randomization_aggregate_schema_version",
+                "generated_at",
+                "paper_run_name",
+                "target_fpr",
+                "formal_randomization_repeat_registry_digest",
+                "randomization_repeat_ids",
+                "randomization_repeat_components",
+                "invariant_packages",
+                "common_code_version",
+                "formal_randomization_protocol_digest",
+                "randomization_aggregate_digest",
+                "randomization_aggregate_ready",
+                "supports_paper_claim",
+            )
+        },
+        "payload_member": payload_member,
+        "payload_sha256": hashlib.sha256(payload_bytes).hexdigest(),
+        "input_paths": input_paths,
+        "output_paths": [payload_member, manifest_member],
+        "entry_sha256": entry_sha256,
+        "entry_paths_digest": build_stable_digest(sorted(entry_sha256)),
+        "code_version": COMMON_CODE_VERSION,
+        "rebuild_command": (
+            "python scripts/write_randomization_aggregate_provenance_package.py"
+        ),
+        "config": config,
+        "config_digest": build_stable_digest(config),
+        "metadata": {
+            "randomization_aggregate_schema_version": 1,
+            "randomization_aggregate_ready": True,
+            "supports_paper_claim": False,
+            "randomization_aggregate_digest": payload[
+                "randomization_aggregate_digest"
+            ],
+            "common_code_version": COMMON_CODE_VERSION,
+            "formal_randomization_protocol_digest": protocol_digest,
+            "randomization_repeat_ids": list(formal_randomization_repeat_ids()),
+            "randomization_repeat_component_count": 9,
+            "invariant_package_count": 3,
+        },
+    }
+    manifest["manifest_digest"] = build_stable_digest(manifest)
+    return payload, manifest
 
 
 def _raw_ablation_detection(
@@ -1673,8 +1835,8 @@ def _ready_bundle_template() -> ResultClosureGateInput:
     primary_evidence_records_digest = build_stable_digest(
         sorted(primary_evidence_records, key=lambda row: str(row["baseline_id"]))
     )
-    lock_payload, lock_manifest = closure_input_lock()
-    lock_digest = str(lock_payload["closure_input_lock_digest"])
+    aggregate_payload, aggregate_manifest = randomization_aggregate_provenance()
+    aggregate_digest = str(aggregate_payload["randomization_aggregate_digest"])
     official_source_payload_map = official_reference_source_payloads()
     official_records = tuple(
         official_reference_record(baseline_id, official_source_payload_map)
@@ -1816,12 +1978,12 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "attack_metrics_ready": True,
         "attack_record_coverage_ready": True,
         "real_gpu_attack_validation_ready": True,
-        "full_method_claim_ready": True,
+        "full_method_component_ready": True,
         "supports_paper_claim": True,
     }
     attack_metadata = {
         "protocol_decision": "pass",
-        "full_method_claim_ready": True,
+        "full_method_component_ready": True,
         "supports_paper_claim": True,
     }
     threshold_rows = tuple(
@@ -1956,7 +2118,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "pilot_paper_claim_record_ready": True,
         "result_record_set_digest": result_record_set_digest,
         "method_threshold_digest_map": METHOD_THRESHOLD_DIGEST_MAP,
-        "closure_input_lock_digest": lock_digest,
+        "randomization_aggregate_digest": aggregate_digest,
         "common_code_version": COMMON_CODE_VERSION,
         "require_existing_evidence": False,
         "supports_paper_claim": True,
@@ -2003,7 +2165,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "paper_claim_ready": True,
         "result_record_set_digest": result_record_set_digest,
         "method_threshold_digest_map": METHOD_THRESHOLD_DIGEST_MAP,
-        "closure_input_lock_digest": lock_digest,
+        "randomization_aggregate_digest": aggregate_digest,
         "common_code_version": COMMON_CODE_VERSION,
         "paired_outcome_set_digest": paired_summary["paired_outcome_set_digest"],
         "paired_superiority_rows_digest": paired_summary[
@@ -2069,7 +2231,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             "calibration_prompt_id_digest": CALIBRATION_PROMPT_ID_DIGEST,
             "test_prompt_id_digest": TEST_PROMPT_ID_DIGEST,
             "method_threshold_digest_map": METHOD_THRESHOLD_DIGEST_MAP,
-            "closure_input_lock_digest": lock_digest,
+            "randomization_aggregate_digest": aggregate_digest,
             "common_code_version": COMMON_CODE_VERSION,
             "paired_superiority_ready": True,
             "overall_paired_superiority_ready": True,
@@ -2259,7 +2421,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "actual_ablation_ids": list(FORMAL_RUNTIME_RERUN_ABLATION_IDS),
         "ablation_spec_digest": FORMAL_RUNTIME_RERUN_ABLATION_SPEC_DIGEST,
         "ablation_exact_set_ready": True,
-        "ablation_claim_gate_ready": True,
+        "ablation_component_ready": True,
         **necessity_summary,
         "ablation_necessity_statistics_ready": True,
         "necessity_statistic_row_count": len(
@@ -2271,13 +2433,13 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "necessity_statistic_rows_digest": necessity_summary[
             "necessity_statistic_rows_digest"
         ],
-        "necessity_supported_ablation_ids": [
+        "necessity_component_supported_ablation_ids": [
             ablation_id
             for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
             if ablation_id != "complete_method"
         ],
-        "necessity_not_supported_ablation_ids": [],
-        "all_mechanism_necessity_claims_supported": True,
+        "necessity_component_not_supported_ablation_ids": [],
+        "all_mechanism_necessity_components_supported": True,
         "protocol_decision": "pass",
         "supports_paper_claim": True,
     }
@@ -2306,7 +2468,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "missing_feature_pair_count": 0,
         "feature_issue_count": 0,
         "formal_feature_records_sha256": FEATURE_RECORDS_SHA256,
-        "formal_fid_kid_claim_gate_ready": True,
+        "formal_fid_kid_component_ready": True,
         "image_resolution_record_count": len(
             QUALITY_IMAGE_RESOLUTION_RECORDS
         ),
@@ -2442,7 +2604,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "target_fpr": TARGET_FPR,
         "frozen_threshold_digest": MAIN_THRESHOLD_DIGEST,
         "raw_content_claim_ready": True,
-        "full_method_claim_ready": True,
+        "full_method_component_ready": True,
         "perceptual_metrics_ready": True,
         "scientific_operator_gate_ready": True,
         "scientific_operator_failure_count": 0,
@@ -2475,7 +2637,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         "artifact_builder_ready": True,
         "paper_artifact_claim_ready": True,
         "paper_artifact_audit_ready": True,
-        "full_method_claim_ready": True,
+        "full_method_component_ready": True,
         "supports_paper_claim": True,
         "blocking_claim_count": 0,
         "critical_gap_count": 0,
@@ -2561,8 +2723,8 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             threshold_report,
             config=build_fixed_fpr_threshold_manifest_config(threshold_report),
         ),
-        closure_input_lock=lock_payload,
-        closure_input_lock_manifest=lock_manifest,
+        randomization_aggregate_payload=aggregate_payload,
+        randomization_aggregate_manifest=aggregate_manifest,
         official_reference_fidelity_records=official_records,
         official_reference_fidelity_summary=official_summary,
         official_reference_fidelity_manifest=manifest(
@@ -2624,7 +2786,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             config=build_pilot_paper_result_records_manifest_config(
                 result_records=result_records,
                 method_threshold_digest_map=METHOD_THRESHOLD_DIGEST_MAP,
-                closure_input_lock_digest=lock_digest,
+                randomization_aggregate_digest=aggregate_digest,
                 common_code_version=COMMON_CODE_VERSION,
                 validation_report=result_record_validation_report,
                 template_coverage_rows=result_record_template_coverage,
@@ -2650,7 +2812,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             config={
                 "result_record_set_digest": result_record_set_digest,
                 "method_threshold_digest_map": METHOD_THRESHOLD_DIGEST_MAP,
-                "closure_input_lock_digest": lock_digest,
+                "randomization_aggregate_digest": aggregate_digest,
                 "common_code_version": COMMON_CODE_VERSION,
             },
         ),
@@ -2726,7 +2888,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
                 f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_ablation_metrics.csv",
                 f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_statistics.csv",
                 f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_summary.json",
-                f"outputs/formal_mechanism_ablation/{SCALE}/ablation_claim_summary.json",
+                f"outputs/formal_mechanism_ablation/{SCALE}/ablation_component_summary.json",
                 f"outputs/formal_mechanism_ablation/{SCALE}/manifest.local.json",
             ),
             {
@@ -2745,13 +2907,13 @@ def _ready_bundle_template() -> ResultClosureGateInput:
                 "necessity_statistic_rows_digest": necessity_summary[
                     "necessity_statistic_rows_digest"
                 ],
-                "necessity_supported_ablation_ids": [
+                "necessity_component_supported_ablation_ids": [
                     ablation_id
                     for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
                     if ablation_id != "complete_method"
                 ],
-                "necessity_not_supported_ablation_ids": [],
-                "all_mechanism_necessity_claims_supported": True,
+                "necessity_component_not_supported_ablation_ids": [],
+                "all_mechanism_necessity_components_supported": True,
                 "generation_rerun_required": True,
                 "per_ablation_calibration_required": True,
                 "supports_paper_claim": True,
@@ -2830,7 +2992,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
             },
             input_paths=(
                 f"outputs/image_only_dataset_runtime/{SCALE}/dataset_runtime_summary.json",
-                f"outputs/formal_mechanism_ablation/{SCALE}/ablation_claim_summary.json",
+                f"outputs/formal_mechanism_ablation/{SCALE}/ablation_component_summary.json",
                 f"outputs/dataset_level_quality/{SCALE}/dataset_quality_summary.json",
                 *tuple(ARTIFACT_SOURCE_PATHS.values()),
             ),
@@ -2872,7 +3034,7 @@ def _ready_bundle_template() -> ResultClosureGateInput:
         dataset_quality_manifest=bundle.dataset_quality_manifest,
         dataset_quality_summary=bundle.dataset_quality_summary,
         ablation_manifest=bundle.ablation_manifest,
-        ablation_claim_summary=bundle.ablation_summary,
+        ablation_component_summary=bundle.ablation_summary,
         source_path_map=bundle.evidence_audit_source_path_map,
         artifact_data_validation=(
             {
@@ -3051,8 +3213,8 @@ def synchronize_result_record_evidence(
     result_manifest_config = build_pilot_paper_result_records_manifest_config(
         result_records=records,
         method_threshold_digest_map=METHOD_THRESHOLD_DIGEST_MAP,
-        closure_input_lock_digest=str(
-            bundle.closure_input_lock["closure_input_lock_digest"]
+        randomization_aggregate_digest=str(
+            bundle.randomization_aggregate_payload["randomization_aggregate_digest"]
         ),
         common_code_version=COMMON_CODE_VERSION,
         validation_report=validation_report,
@@ -3120,208 +3282,7 @@ def write_csv(path: Path, rows: tuple[dict[str, object], ...]) -> None:
         writer.writerows(rows)
 
 
-def write_bundle_inputs(root: Path, bundle: ResultClosureGateInput) -> None:
-    """按正式默认路径写出脚本测试需要的输入证据."""
-
-    repository_root = Path(__file__).resolve().parents[2]
-    for relative_path in (
-        Path("configs/prompt_source_registry.json"),
-        Path("configs/prompt_selection_manifest.jsonl"),
-        Path(RUN_DEFAULTS[SCALE]["prompt_file"]),
-    ):
-        target_path = root / relative_path
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_bytes((repository_root / relative_path).read_bytes())
-    json_paths = {
-        f"outputs/image_only_dataset_runtime/{SCALE}/dataset_runtime_summary.json": bundle.evidence_audit_runtime_report,
-        f"outputs/image_only_dataset_runtime/{SCALE}/manifest.local.json": bundle.evidence_audit_runtime_manifest,
-        f"outputs/attack_matrix/{SCALE}/attack_manifest.json": bundle.attack_report,
-        f"outputs/attack_matrix/{SCALE}/manifest.local.json": bundle.attack_manifest,
-        f"outputs/fixed_fpr_threshold_audit/{SCALE}/threshold_audit_report.json": bundle.threshold_audit_report,
-        f"outputs/fixed_fpr_threshold_audit/{SCALE}/manifest.local.json": bundle.threshold_audit_manifest,
-        f"outputs/paper_result_closure/{SCALE}/closure_input_lock.json": bundle.closure_input_lock,
-        f"outputs/paper_result_closure/{SCALE}/input_lock_manifest.local.json": bundle.closure_input_lock_manifest,
-        f"outputs/official_reference_fidelity_evidence/{SCALE}/official_reference_fidelity_evidence_summary.json": bundle.official_reference_fidelity_summary,
-        f"outputs/official_reference_fidelity_evidence/{SCALE}/manifest.local.json": bundle.official_reference_fidelity_manifest,
-        f"outputs/primary_baseline_evidence/{SCALE}/primary_baseline_evidence_summary.json": bundle.primary_baseline_evidence_summary,
-        f"outputs/primary_baseline_evidence/{SCALE}/manifest.local.json": bundle.primary_baseline_evidence_manifest,
-        f"outputs/external_baseline_comparison/{SCALE}/baseline_runtime_report.json": bundle.baseline_report,
-        f"outputs/external_baseline_comparison/{SCALE}/manifest.local.json": bundle.baseline_manifest,
-        f"outputs/pilot_paper_fixed_fpr_results/{SCALE}/pilot_paper_result_record_summary.json": bundle.result_record_summary,
-        f"outputs/pilot_paper_fixed_fpr_results/{SCALE}/pilot_paper_result_import_validation_report.json": bundle.result_record_validation_report,
-        f"outputs/pilot_paper_fixed_fpr_results/{SCALE}/manifest.local.json": bundle.result_record_manifest,
-        f"outputs/pilot_paper_fixed_fpr_common_protocol/{SCALE}/pilot_paper_common_protocol_summary.json": bundle.common_protocol_summary,
-        f"outputs/pilot_paper_fixed_fpr_common_protocol/{SCALE}/pilot_paper_result_import_schema.json": bundle.common_protocol_schema,
-        f"outputs/pilot_paper_fixed_fpr_common_protocol/{SCALE}/manifest.local.json": bundle.common_protocol_manifest,
-        f"outputs/pilot_paper_result_analysis/{SCALE}/result_analysis_summary.json": bundle.result_analysis_summary,
-        f"outputs/pilot_paper_result_analysis/{SCALE}/manifest.local.json": bundle.result_analysis_manifest,
-        f"outputs/paired_superiority_analysis/{SCALE}/paired_superiority_summary.json": bundle.paired_superiority_summary,
-        f"outputs/paired_superiority_analysis/{SCALE}/manifest.local.json": bundle.paired_superiority_manifest,
-        f"outputs/formal_mechanism_ablation/{SCALE}/ablation_claim_summary.json": bundle.ablation_summary,
-        f"outputs/formal_mechanism_ablation/{SCALE}/manifest.local.json": bundle.ablation_manifest,
-        f"outputs/formal_mechanism_ablation/{SCALE}/per_ablation_frozen_protocols.json": bundle.ablation_frozen_protocols,
-        f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_summary.json": bundle.ablation_necessity_summary,
-        f"outputs/dataset_level_quality/{SCALE}/dataset_quality_summary.json": bundle.dataset_quality_summary,
-        f"outputs/dataset_level_quality/{SCALE}/dataset_quality_formal_feature_import_report.json": bundle.dataset_quality_feature_report,
-        f"outputs/dataset_level_quality/{SCALE}/manifest.local.json": bundle.dataset_quality_manifest,
-        f"outputs/paper_artifact_evidence_audit/{SCALE}/artifact_builder_readiness_report.json": bundle.evidence_builder_report,
-        f"outputs/paper_artifact_evidence_audit/{SCALE}/submission_blocker_report.json": bundle.evidence_blocker_report,
-        f"outputs/paper_artifact_evidence_audit/{SCALE}/artifact_data_validation_report.json": bundle.artifact_data_validation_report,
-        f"outputs/paper_artifact_evidence_audit/{SCALE}/manifest.local.json": bundle.evidence_audit_manifest,
-        f"outputs/submission_readiness/{SCALE}/readiness_blocker_report.json": bundle.submission_readiness_report,
-        f"outputs/submission_readiness/{SCALE}/submission_readiness_manifest.local.json": bundle.submission_readiness_manifest,
-        f"outputs/evidence_closure_entry_review/{SCALE}/entry_review_report.json": bundle.entry_review_report,
-        f"outputs/evidence_closure_entry_review/{SCALE}/manifest.local.json": bundle.entry_review_manifest,
-    }
-    for relative_path, payload in json_paths.items():
-        write_json(root / relative_path, payload)
-    write_csv(
-        root / f"outputs/fixed_fpr_threshold_audit/{SCALE}/threshold_audit_rows.csv",
-        bundle.threshold_audit_rows,
-    )
-    write_jsonl(
-        root
-        / f"outputs/attack_matrix/{SCALE}/attack_detection_records.jsonl",
-        bundle.attack_detection_records,
-    )
-    write_jsonl(
-        root
-        / f"outputs/attack_matrix/{SCALE}/attacked_image_registry.jsonl",
-        bundle.attacked_image_registry,
-    )
-    write_csv(
-        root / f"outputs/attack_matrix/{SCALE}/attack_family_metrics.csv",
-        bundle.attack_family_metrics,
-    )
-    write_jsonl(
-        root
-        / f"outputs/official_reference_fidelity_evidence/{SCALE}/official_reference_fidelity_evidence_records.jsonl",
-        bundle.official_reference_fidelity_records,
-    )
-    write_jsonl(
-        root / f"outputs/primary_baseline_evidence/{SCALE}/primary_baseline_evidence_records.jsonl",
-        bundle.primary_baseline_evidence_records,
-    )
-    write_jsonl(
-        root / f"outputs/pilot_paper_fixed_fpr_results/{SCALE}/pilot_paper_result_records.jsonl",
-        bundle.result_records,
-    )
-    write_csv(
-        root
-        / f"outputs/pilot_paper_fixed_fpr_results/{SCALE}/pilot_paper_result_template_coverage.csv",
-        bundle.result_record_template_coverage,
-    )
-    write_jsonl(
-        root / f"outputs/paired_superiority_analysis/{SCALE}/paired_outcomes.jsonl",
-        bundle.paired_outcomes,
-    )
-    write_csv(
-        root
-        / f"outputs/paired_superiority_analysis/{SCALE}/paired_superiority_table.csv",
-        bundle.paired_superiority_rows,
-    )
-    write_jsonl(
-        root
-        / f"outputs/formal_mechanism_ablation/{SCALE}/runtime_rerun_records.jsonl",
-        bundle.ablation_runtime_records,
-    )
-    write_jsonl(
-        root
-        / f"outputs/formal_mechanism_ablation/{SCALE}/formal_detection_records.jsonl",
-        bundle.ablation_detection_records,
-    )
-    write_csv(
-        root
-        / f"outputs/formal_mechanism_ablation/{SCALE}/mechanism_necessity_statistics.csv",
-        bundle.ablation_necessity_rows,
-    )
-    write_csv(
-        root / f"outputs/dataset_level_quality/{SCALE}/dataset_quality_metrics.csv",
-        bundle.dataset_quality_metrics,
-    )
-    write_jsonl(
-        root
-        / f"outputs/dataset_level_quality/{SCALE}/dataset_quality_image_records.jsonl",
-        bundle.dataset_quality_image_records,
-    )
-    write_jsonl(
-        root
-        / f"outputs/dataset_level_quality/{SCALE}/dataset_quality_image_resolution_records.jsonl",
-        bundle.dataset_quality_image_resolution_records,
-    )
-    image_record_by_path = {
-        str(record[field_name]): (
-            str(record["prompt_id"]),
-            "source" if field_name == "source_image_path" else "comparison",
-        )
-        for record in bundle.dataset_quality_image_records
-        for field_name in ("source_image_path", "comparison_image_path")
-    }
-    for resolution in bundle.dataset_quality_image_resolution_records:
-        resolved_path = str(resolution["resolved_image_path"])
-        prompt_id, role = image_record_by_path[
-            str(resolution["requested_image_path"])
-        ]
-        image_path = root / resolved_path
-        image_path.parent.mkdir(parents=True, exist_ok=True)
-        image_path.write_bytes(
-            f"quality-image:{prompt_id}:{role}".encode("utf-8")
-        )
-    feature_records_path = (
-        root
-        / f"outputs/dataset_level_quality/{SCALE}/dataset_quality_formal_feature_records.jsonl"
-    )
-    feature_records_path.parent.mkdir(parents=True, exist_ok=True)
-    feature_records_path.write_bytes(
-        "".join(
-            json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n"
-            for record in bundle.dataset_quality_feature_records
-        ).encode("utf-8")
-    )
-    result_analysis_payload_bytes = {
-        RESULT_ANALYSIS_PAYLOAD_PATH_MAP["main_confidence_interval_table"]: (
-            csv_bytes(bundle.result_analysis_confidence_interval_rows)
-        ),
-        RESULT_ANALYSIS_PAYLOAD_PATH_MAP["per_attack_superiority_table"]: (
-            csv_bytes(bundle.result_analysis_per_attack_superiority_rows)
-        ),
-        RESULT_ANALYSIS_PAYLOAD_PATH_MAP["failure_case_records"]: (
-            "".join(
-                json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
-                for row in bundle.result_analysis_failure_case_rows
-            ).encode("utf-8")
-        ),
-        bundle.result_analysis_failure_figure_path: (
-            bundle.result_analysis_failure_case_svg_text.encode("utf-8")
-        ),
-    }
-    for relative_path, payload in {
-        **official_reference_source_payloads(),
-        **artifact_source_payloads(
-            bundle.dataset_quality_metrics,
-            bundle.attack_family_metrics,
-            bundle.ablation_necessity_rows,
-            bundle.result_analysis_baseline_comparison_rows,
-        ),
-        **result_analysis_payload_bytes,
-        **METHOD_OBSERVATION_SOURCE_PAYLOADS,
-    }.items():
-        source_path = root / relative_path
-        source_path.parent.mkdir(parents=True, exist_ok=True)
-        source_path.write_bytes(payload)
-    prompt_path = root / "configs/paper_main_probe_paper_prompts.txt"
-    prompt_path.parent.mkdir(parents=True, exist_ok=True)
-    prompt_path.write_text(
-        "\n".join(f"a governed prompt {index}" for index in range(PROMPT_COUNT)) + "\n",
-        encoding="utf-8",
-    )
-    write_paper_artifact_evidence_audit_outputs(
-        root=root,
-        prompt_contract=test_prompt_contract(root),
-    )
-
-
-def test_prompt_contract(root: Path) -> PaperRunPromptContract:
+def build_test_prompt_contract(root: Path) -> PaperRunPromptContract:
     """显式声明 result closure 临时 Prompt 的测试依赖。"""
 
     relative_path = Path("configs/paper_main_probe_paper_prompts.txt")
@@ -3334,7 +3295,7 @@ def test_prompt_contract(root: Path) -> PaperRunPromptContract:
     )
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_passes_only_when_all_semantic_evidence_is_ready() -> None:
     """完整逐攻击披露可闭合, 不要求每个攻击均形成显著优势."""
 
@@ -3356,7 +3317,7 @@ def test_result_closure_gate_passes_only_when_all_semantic_evidence_is_ready() -
     assert bundle.entry_review_report["entry_review_decision"] == "ready_for_evidence_closure"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_ablation_detection_atom_drift() -> None:
     """消融检测原子的冻结判定被篡改时必须阻断逐 Prompt 重建。"""
 
@@ -3379,7 +3340,7 @@ def test_result_closure_gate_rejects_ablation_detection_atom_drift() -> None:
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_ablation_atom_file_sha_drift() -> None:
     """解析内容未变时，正式消融 atom 文件字节 SHA 漂移仍必须阻断。"""
 
@@ -3400,7 +3361,7 @@ def test_result_closure_gate_rejects_ablation_atom_file_sha_drift() -> None:
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_feature_image_identity_drift() -> None:
     """正式 feature 脱离图像记录路径时必须阻断来源身份重建。"""
 
@@ -3424,7 +3385,7 @@ def test_result_closure_gate_rejects_feature_image_identity_drift() -> None:
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 @pytest.mark.parametrize("mutation", ("pair_role", "duplicate_path"))
 def test_result_closure_gate_rejects_quality_pair_identity_forgery(
     mutation: str,
@@ -3468,7 +3429,7 @@ def test_result_closure_gate_rejects_quality_pair_identity_forgery(
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_actual_quality_image_sha_drift() -> None:
     """图像解析记录的声明 SHA 不得覆盖闭合侧即时文件摘要。"""
 
@@ -3491,7 +3452,7 @@ def test_result_closure_gate_rejects_actual_quality_image_sha_drift() -> None:
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_result_analysis_cell_drift() -> None:
     """结果分析 CI 表任一单元偏离正式记录时必须阻断语义闭合。"""
 
@@ -3515,7 +3476,7 @@ def test_result_closure_gate_rejects_result_analysis_cell_drift() -> None:
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_resigned_semantic_digest_forgery() -> None:
     """summary 与 manifest 同步重签也不得替代闭合侧独立语义摘要。"""
 
@@ -3545,7 +3506,7 @@ def test_result_closure_gate_rejects_resigned_semantic_digest_forgery() -> None:
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_ablation_raw_record_statistic_drift() -> None:
     """消融 CSV/summary 未随逐 Prompt 原始记录变化时必须 fail-closed."""
 
@@ -3569,7 +3530,7 @@ def test_result_closure_gate_rejects_ablation_raw_record_statistic_drift() -> No
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_self_declared_ablation_split_relabeling() -> None:
     """重算全部派生统计也不得把非 test Prompt 伪装成正式 test 样本。"""
 
@@ -3642,7 +3603,7 @@ def test_result_closure_gate_rejects_self_declared_ablation_split_relabeling() -
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_dataset_quality_metric_value_drift() -> None:
     """FID/KID 表值脱离正式 feature records 时必须 fail-closed."""
 
@@ -3663,7 +3624,7 @@ def test_result_closure_gate_rejects_dataset_quality_metric_value_drift() -> Non
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_full_sample_kid_std_drift() -> None:
     """全样本 KID std 必须精确为0, 不能被一般浮点容差掩盖。"""
 
@@ -3685,7 +3646,7 @@ def test_result_closure_gate_rejects_full_sample_kid_std_drift() -> None:
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_negative_or_legacy_kid_std() -> None:
     """负标准差和旧 `kid` 行身份都不得通过正式质量闭合。"""
 
@@ -3712,7 +3673,7 @@ def test_result_closure_gate_rejects_negative_or_legacy_kid_std() -> None:
         assert quality_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_dataset_quality_feature_record_drift() -> None:
     """feature vector 被替换但正式指标表未重算时必须 fail-closed."""
 
@@ -3737,7 +3698,7 @@ def test_result_closure_gate_rejects_dataset_quality_feature_record_drift() -> N
     assert rebuild_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_result_analysis_payload_byte_drift() -> None:
     """结果分析图表字节摘要变化时不得继续信任 ready 布尔值."""
 
@@ -3756,7 +3717,7 @@ def test_result_closure_gate_rejects_result_analysis_payload_byte_drift() -> Non
     assert result_analysis_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_incomplete_result_analysis_payload_roles() -> None:
     """summary 或 manifest 缺少任一固定 payload 角色时必须 fail-closed."""
 
@@ -3775,7 +3736,7 @@ def test_result_closure_gate_rejects_incomplete_result_analysis_payload_roles() 
     assert result_analysis_check["check_status"] == "blocked"
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_synchronized_fpr_forgery() -> None:
     """同步重签 record 和下游摘要也不得覆盖原始 clean negative FPR."""
 
@@ -3819,7 +3780,7 @@ def test_result_closure_gate_rejects_synchronized_fpr_forgery() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_synchronized_quality_forgery() -> None:
     """质量均值和区间即使同步重签也必须等于原始攻击 observation."""
 
@@ -3865,7 +3826,7 @@ def test_result_closure_gate_rejects_synchronized_quality_forgery() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_quality_ci_with_three_group_denominator() -> None:
     """质量均值不变时, 把 CI 分母伪造为三组记录总数也必须被独立复算阻断."""
 
@@ -3910,7 +3871,7 @@ def test_result_closure_gate_rejects_quality_ci_with_three_group_denominator() -
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_synchronized_unit_range_ssim_ci() -> None:
     """同步重签旧 [0,1] SSIM 区间也必须被独立 signed-range 复算阻断."""
 
@@ -3953,7 +3914,7 @@ def test_result_closure_gate_rejects_synchronized_unit_range_ssim_ci() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_synchronized_confidence_level_forgery() -> None:
     """协议置信度失配即使同步重签自声明链也必须由独立导入校验阻断."""
 
@@ -3994,7 +3955,7 @@ def test_result_closure_gate_rejects_synchronized_confidence_level_forgery() -> 
     assert "result_records_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_incomplete_main_quality_records() -> None:
     """任一正式 attacked positive 缺少 SSIM 时不得按剩余子集计算质量."""
 
@@ -4022,7 +3983,7 @@ def test_result_closure_gate_rejects_incomplete_main_quality_records() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_incomplete_baseline_quality_records() -> None:
     """任一 baseline attacked positive 缺少质量值时不得按0补齐."""
 
@@ -4051,7 +4012,7 @@ def test_result_closure_gate_rejects_incomplete_baseline_quality_records() -> No
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_test_negative_prompt_replacement() -> None:
     """test negative 必须无重复地覆盖规范 test Prompt 集合."""
 
@@ -4081,7 +4042,7 @@ def test_result_closure_gate_rejects_test_negative_prompt_replacement() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_calibration_prompt_replacement() -> None:
     """calibration negative 必须绑定规范 calibration Prompt 集合."""
 
@@ -4110,7 +4071,7 @@ def test_result_closure_gate_rejects_calibration_prompt_replacement() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_result_source_digest_forgery() -> None:
     """来源摘要同步写入 record 与 manifest 后仍须匹配即时读取字节."""
 
@@ -4144,7 +4105,7 @@ def test_result_closure_gate_rejects_result_source_digest_forgery() -> None:
     assert "result_records_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_attack_identity_relabeling() -> None:
     """攻击记录、registry 和 manifest 同步重签也不得后贴配置身份."""
 
@@ -4180,7 +4141,7 @@ def test_result_closure_gate_rejects_attack_identity_relabeling() -> None:
     assert "attack_matrix_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_synchronized_attack_prompt_duplication() -> None:
     """攻击记录同步重签后仍须无重复地覆盖规范 test Prompt 全集."""
 
@@ -4224,7 +4185,7 @@ def test_result_closure_gate_rejects_synchronized_attack_prompt_duplication() ->
     assert "attack_matrix_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_attack_family_metric_tampering() -> None:
     """持久化攻击指标被修改后必须与原始 detection records 复算值冲突."""
 
@@ -4244,7 +4205,7 @@ def test_result_closure_gate_rejects_attack_family_metric_tampering() -> None:
     assert "attack_matrix_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_attack_family_metric_row_deletion() -> None:
     """攻击指标缺失任一正式攻击 ID 时必须阻断完整攻击矩阵."""
 
@@ -4262,7 +4223,7 @@ def test_result_closure_gate_rejects_attack_family_metric_row_deletion() -> None
     assert "attack_matrix_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_official_reference_source_digest_drift() -> None:
     """官方参考记录即使身份摘要自洽, 源文件摘要漂移仍必须阻断."""
 
@@ -4300,7 +4261,7 @@ def test_result_closure_gate_rejects_official_reference_source_digest_drift() ->
     assert "official_reference_fidelity_evidence_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_paired_prompt_key_drift() -> None:
     """配对结果重复一个 Prompt x attack 键时必须阻断总体优势证据."""
 
@@ -4324,7 +4285,7 @@ def test_result_closure_gate_rejects_paired_prompt_key_drift() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_recomputes_forged_paired_statistics() -> None:
     """伪造统计行并同步全部自声明摘要后仍必须被独立复算阻断."""
 
@@ -4345,7 +4306,7 @@ def test_result_closure_gate_recomputes_forged_paired_statistics() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_noncanonical_paired_prompt_set() -> None:
     """Prompt 数量不变但集合身份漂移时不得闭合总体优势结论."""
 
@@ -4387,7 +4348,7 @@ def test_result_closure_gate_rejects_noncanonical_paired_prompt_set() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_paired_result_rate_mismatch() -> None:
     """正式结果 TPR 与逐 Prompt 二元配对计数不一致时必须阻断."""
 
@@ -4422,7 +4383,7 @@ def test_result_closure_gate_rejects_paired_result_rate_mismatch() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_prompt_pairing_reassignment() -> None:
     """逐攻击 TP 不变但 Prompt 对应关系被置换时必须由原始 observation 阻断."""
 
@@ -4473,7 +4434,7 @@ def test_result_closure_gate_rejects_prompt_pairing_reassignment() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_observation_file_sha256_drift() -> None:
     """配对 manifest 声明的 observation 文件字节发生漂移时必须阻断."""
 
@@ -4495,7 +4456,7 @@ def test_result_closure_gate_rejects_observation_file_sha256_drift() -> None:
     assert "paired_superiority_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_artifact_source_file_sha256_drift() -> None:
     """任一论文表图源文件即时 SHA-256 漂移时必须阻断证据审计."""
 
@@ -4514,7 +4475,7 @@ def test_result_closure_gate_rejects_artifact_source_file_sha256_drift() -> None
     assert "paper_evidence_audit_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_blocked_entry_decision() -> None:
     """入口决定明确阻断时不得冒充自动证据闭合许可."""
 
@@ -4535,7 +4496,7 @@ def test_result_closure_gate_rejects_blocked_entry_decision() -> None:
     assert "evidence_closure_entry_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_blocks_unscoped_fpr_and_inexact_attack_roles() -> None:
     """baseline、质量或攻击角色边界不精确时必须阻断证据闭合。"""
 
@@ -4566,7 +4527,7 @@ def test_result_closure_gate_blocks_unscoped_fpr_and_inexact_attack_roles() -> N
     assert "attack_matrix_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_blocks_mixed_scope_and_entry_review_denial() -> None:
     """混入其他层级结果或入口拒绝时, 门禁必须 fail-closed。"""
 
@@ -4605,7 +4566,7 @@ def test_result_closure_gate_blocks_mixed_scope_and_entry_review_denial() -> Non
     assert "evidence_closure_entry_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_per_method_threshold_digest_mismatch() -> None:
     """任一 baseline 正式记录脱离统一阈值审计时必须阻断."""
 
@@ -4631,7 +4592,7 @@ def test_result_closure_gate_rejects_per_method_threshold_digest_mismatch() -> N
     assert "threshold_digest_consistent" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_record_set_digest_drift() -> None:
     """结果分析若登记了不同记录集合摘要, 不得进入闭合."""
 
@@ -4652,7 +4613,7 @@ def test_result_closure_gate_rejects_record_set_digest_drift() -> None:
     assert "result_record_set_provenance_consistent" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_primary_evidence_record_identity_drift() -> None:
     """primary baseline records 的来源分组或正文摘要漂移时必须阻断."""
 
@@ -4669,16 +4630,16 @@ def test_result_closure_gate_rejects_primary_evidence_record_identity_drift() ->
     assert "primary_baseline_evidence_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
-def test_result_closure_gate_rejects_closure_lock_provenance_drift() -> None:
-    """共同协议传播了不同输入锁摘要时必须阻断."""
+@pytest.mark.integration
+def test_result_closure_gate_rejects_randomization_aggregate_drift() -> None:
+    """共同协议传播了不同聚合摘要时必须阻断."""
 
     bundle = ready_bundle()
     blocked_bundle = replace(
         bundle,
         common_protocol_schema={
             **bundle.common_protocol_schema,
-            "closure_input_lock_digest": "f" * 64,
+            "randomization_aggregate_digest": "f" * 64,
         },
     )
 
@@ -4687,10 +4648,85 @@ def test_result_closure_gate_rejects_closure_lock_provenance_drift() -> None:
         build_result_closure_gate_checks(blocked_bundle),
     )
 
-    assert "closure_input_provenance_consistent" in report["blocked_check_ids"]
+    assert "randomization_aggregate_provenance_consistent" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
+def test_result_closure_gate_rejects_eight_repeat_aggregate() -> None:
+    """聚合自称 ready 但只含8个 repeat 时必须阻断."""
+
+    bundle = ready_bundle()
+    payload = deepcopy(bundle.randomization_aggregate_payload)
+    payload["randomization_repeat_ids"] = payload[
+        "randomization_repeat_ids"
+    ][:-1]
+    payload["randomization_repeat_components"] = payload[
+        "randomization_repeat_components"
+    ][:-1]
+    blocked_bundle = replace(bundle, randomization_aggregate_payload=payload)
+
+    report = build_result_closure_gate_report(
+        blocked_bundle,
+        build_result_closure_gate_checks(blocked_bundle),
+    )
+
+    assert "randomization_aggregate_provenance_consistent" in report[
+        "blocked_check_ids"
+    ]
+
+
+@pytest.mark.integration
+def test_result_closure_gate_rejects_record_without_aggregate_digest() -> None:
+    """任一正式结果记录未传播聚合摘要时必须阻断."""
+
+    bundle = ready_bundle()
+    records = [dict(record) for record in bundle.result_records]
+    record = records[0]
+    record.pop("randomization_aggregate_digest")
+    record.pop("pilot_paper_result_record_digest")
+    record.pop("pilot_paper_result_record_id")
+    record_digest = build_stable_digest(record)
+    record["pilot_paper_result_record_digest"] = record_digest
+    record["pilot_paper_result_record_id"] = (
+        f"pilot_paper_result_record_{record_digest[:16]}"
+    )
+    blocked_bundle = replace(bundle, result_records=tuple(records))
+
+    report = build_result_closure_gate_report(
+        blocked_bundle,
+        build_result_closure_gate_checks(blocked_bundle),
+    )
+
+    assert "randomization_aggregate_provenance_consistent" in report[
+        "blocked_check_ids"
+    ]
+
+
+@pytest.mark.integration
+def test_result_closure_gate_rejects_aggregate_manifest_config_drift() -> None:
+    """聚合 manifest 配置摘要漂移时不得依赖 payload 自报放行."""
+
+    bundle = ready_bundle()
+    manifest_payload = {
+        **bundle.randomization_aggregate_manifest,
+        "config_digest": "f" * 64,
+    }
+    blocked_bundle = replace(
+        bundle,
+        randomization_aggregate_manifest=manifest_payload,
+    )
+
+    report = build_result_closure_gate_report(
+        blocked_bundle,
+        build_result_closure_gate_checks(blocked_bundle),
+    )
+
+    assert "randomization_aggregate_provenance_consistent" in report[
+        "blocked_check_ids"
+    ]
+
+
+@pytest.mark.integration
 def test_result_closure_gate_rejects_six_item_ablation_summary() -> None:
     """旧的6项消融即使自行声明 ready 也不得通过完整正式集合门禁."""
 
@@ -4720,7 +4756,7 @@ def test_result_closure_gate_rejects_six_item_ablation_summary() -> None:
     assert "formal_ablation_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_ablation_attack_count_from_all_splits() -> None:
     """正式消融只允许 test split 执行攻击, 不得伪报为全部 Prompt 已攻击."""
 
@@ -4741,7 +4777,7 @@ def test_result_closure_gate_rejects_ablation_attack_count_from_all_splits() -> 
     assert "formal_ablation_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_ablation_prompt_identity_drift() -> None:
     """消融数量正确但 Prompt 集摘要漂移时仍必须阻断论文闭合."""
 
@@ -4763,7 +4799,7 @@ def test_result_closure_gate_rejects_ablation_prompt_identity_drift() -> None:
     assert "formal_ablation_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_incomplete_feature_coverage_and_metric_rows() -> None:
     """特征缺配对或 FID/KID 行数不精确时必须阻断质量证据。"""
 
@@ -4788,134 +4824,7 @@ def test_result_closure_gate_rejects_incomplete_feature_coverage_and_metric_rows
     assert "formal_fid_kid_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
-def test_result_closure_writer_is_run_scoped_and_require_pass_returns_nonzero(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """脚本应按 current run 写出 manifest, 阻断时 `--require-pass` 返回非零。"""
-
-    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", SCALE)
-    bundle = ready_bundle()
-    write_bundle_inputs(tmp_path, bundle)
-
-    report = write_result_closure_gate_outputs(
-        root=tmp_path,
-        prompt_contract=test_prompt_contract(tmp_path),
-    )
-    output_dir = tmp_path / "outputs/result_closure_gate" / SCALE
-    written_report = json.loads((output_dir / "result_closure_gate_report.json").read_text(encoding="utf-8"))
-    written_manifest = json.loads((output_dir / "manifest.local.json").read_text(encoding="utf-8"))
-
-    assert report["result_closure_ready"] is True
-    assert written_report["result_closure_ready"] is True
-    assert written_manifest["artifact_id"] == f"{SCALE}_result_closure_gate_manifest"
-    assert written_manifest["metadata"]["result_closure_ready"] is True
-    source_map = written_report["closure_source_file_sha256"]
-    assert set(source_map) == set(written_manifest["input_paths"])
-    assert all(
-        hashlib.sha256((tmp_path / path).read_bytes()).hexdigest() == digest
-        for path, digest in source_map.items()
-    )
-    assert written_report["closure_source_file_digest"] == build_stable_digest(source_map)
-    assert written_manifest["metadata"]["closure_source_file_sha256"] == source_map
-    assert written_manifest["metadata"]["closure_source_file_digest"] == written_report[
-        "closure_source_file_digest"
-    ]
-    assert written_manifest["metadata"]["report_digest"] == hashlib.sha256(
-        (output_dir / "result_closure_gate_report.json").read_bytes()
-    ).hexdigest()
-    assert written_manifest["metadata"]["expected_prompt_id_digest"] == PROMPT_ID_DIGEST
-
-    denied_entry_path = (
-        tmp_path / f"outputs/evidence_closure_entry_review/{SCALE}/entry_review_report.json"
-    )
-    denied_entry = {**bundle.entry_review_report, "evidence_closure_allowed": False}
-    write_json(denied_entry_path, denied_entry)
-    repository_root = Path(__file__).resolve().parents[2]
-    canonical_prompt_path = repository_root / "configs/paper_main_probe_paper_prompts.txt"
-    (tmp_path / "configs/paper_main_probe_paper_prompts.txt").write_bytes(
-        canonical_prompt_path.read_bytes()
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["write_result_closure_gate_outputs.py", "--root", str(tmp_path), "--require-pass"],
-    )
-    with pytest.raises(SystemExit) as exit_info:
-        main()
-    assert exit_info.value.code == 1
-
-
-@pytest.mark.quick
-@pytest.mark.parametrize(
-    "source_id",
-    ("dataset_quality_metrics_ready", "roc_curve_points_ready"),
-)
-def test_result_closure_writer_rejects_synchronized_artifact_self_declaration(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    source_id: str,
-) -> None:
-    """FID 或 ROC 被改写后, 同步 SHA 与持久化 ready 自声明仍必须阻断."""
-
-    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", SCALE)
-    write_bundle_inputs(tmp_path, ready_bundle())
-    relative_source_path = ARTIFACT_SOURCE_PATHS[source_id]
-    source_path = tmp_path / relative_source_path
-    with source_path.open(encoding="utf-8", newline="") as stream:
-        reader = csv.DictReader(stream)
-        fieldnames = tuple(reader.fieldnames or ())
-        rows = list(reader)
-    if source_id == "dataset_quality_metrics_ready":
-        fid_row = next(
-            row for row in rows if row["quality_metric_name"] == "fid"
-        )
-        fid_row["quality_metric_value"] = "9.875"
-    else:
-        finite_row = next(
-            row
-            for row in rows
-            if row["threshold_kind"] == "observed_score"
-        )
-        finite_row["threshold"] = str(float(finite_row["threshold"]) - 1e-4)
-    with source_path.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
-
-    synchronized_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
-    audit_dir = (
-        tmp_path / "outputs" / "paper_artifact_evidence_audit" / SCALE
-    )
-    persisted_report_path = audit_dir / "artifact_data_validation_report.json"
-    persisted_report = json.loads(
-        persisted_report_path.read_text(encoding="utf-8")
-    )
-    persisted_report["evidence_source_file_sha256"][
-        relative_source_path
-    ] = synchronized_sha256
-    write_json(persisted_report_path, persisted_report)
-
-    evidence_manifest_path = audit_dir / "manifest.local.json"
-    evidence_manifest = json.loads(
-        evidence_manifest_path.read_text(encoding="utf-8")
-    )
-    evidence_manifest["metadata"]["evidence_source_file_sha256"] = dict(
-        persisted_report["evidence_source_file_sha256"]
-    )
-    write_json(evidence_manifest_path, evidence_manifest)
-
-    report = write_result_closure_gate_outputs(
-        root=tmp_path,
-        prompt_contract=test_prompt_contract(tmp_path),
-    )
-
-    assert report["result_closure_ready"] is False
-    assert "paper_evidence_audit_ready" in report["blocked_check_ids"]
-
-
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_persisted_and_recomputed_report_divergence() -> None:
     """持久化数据报告即使仍自称 ready, 与即时重算报告不同也必须阻断."""
 
@@ -4939,7 +4848,7 @@ def test_result_closure_gate_rejects_persisted_and_recomputed_report_divergence(
     assert "paper_evidence_audit_ready" in report["blocked_check_ids"]
 
 
-@pytest.mark.quick
+@pytest.mark.integration
 def test_result_closure_gate_rejects_shape_valid_evidence_config_digest() -> None:
     """合法 SHA-256 外形不能替代 evidence manifest 配置的精确重建."""
 

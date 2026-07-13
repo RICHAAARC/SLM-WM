@@ -104,6 +104,17 @@ def validate_formal_randomization_repeat_records(
         repeat_id = record["randomization_repeat_id"]
         if not isinstance(repeat_id, str) or not repeat_id:
             raise ValueError("正式随机化 repeat 缺少非空 ID")
+        if any(
+            type(record[field_name]) is not int
+            for field_name in (
+                "generation_seed_index",
+                "generation_seed_offset",
+                "watermark_key_index",
+            )
+        ):
+            raise ValueError(
+                f"正式随机化 repeat 整数身份字段类型无效: {repeat_id}"
+            )
         if repeat_id in seen_ids:
             raise ValueError(f"正式随机化 repeat ID 重复: {repeat_id}")
         expected = expected_by_id.get(repeat_id)

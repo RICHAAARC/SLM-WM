@@ -17,6 +17,7 @@ from experiments.protocol.paper_run_config import (
     resolve_count_from_environment,
     shared_experiment_settings,
     shared_method_settings,
+    validate_frozen_paper_run_target_fpr,
 )
 from paper_workflow.colab_utils.paper_run_environment import (
     _resolve_paper_run_name,
@@ -480,3 +481,26 @@ def test_formal_prompt_contract_rejects_count_and_digest_drift(
     prompt_path.write_text("\n".join(drifted_lines) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="逐字节重建"):
         build_paper_run_config(root=tmp_path)
+
+@pytest.mark.parametrize(
+    "paper_run_name,target_fpr",
+    (
+        ("probe_paper", 0.1),
+        ("pilot_paper", 0.01),
+        ("full_paper", 0.001),
+    ),
+)
+def test_frozen_paper_run_target_fpr_accepts_only_registered_working_point(
+    paper_run_name: str,
+    target_fpr: float,
+) -> None:
+    """共享协议边界必须返回每个运行层级唯一冻结的统计工作点."""
+
+    assert (
+        validate_frozen_paper_run_target_fpr(paper_run_name, target_fpr)
+        == target_fpr
+    )
+    with pytest.raises(ValueError, match="必须使用冻结值"):
+        validate_frozen_paper_run_target_fpr(paper_run_name, 0.05)
+    with pytest.raises(TypeError, match="必须是有限数值"):
+        validate_frozen_paper_run_target_fpr(paper_run_name, True)

@@ -750,7 +750,7 @@ def test_dataset_quality_protocol_requires_formal_inception_features(tmp_path: P
     assert rows_by_name["kid_std"]["metric_status"] == FORMAL_FID_KID_BLOCKER
     assert summary["feature_backend"] == FORMAL_FEATURE_BACKEND
     assert summary["formal_fid_kid_ready"] is False
-    assert summary["formal_fid_kid_claim_blocker"] == FORMAL_FID_KID_BLOCKER
+    assert summary["formal_fid_kid_component_blocker"] == FORMAL_FID_KID_BLOCKER
     assert all("proxy" not in key for key in summary)
 
 
@@ -1078,7 +1078,7 @@ def test_dataset_quality_formal_feature_import_keeps_incomplete_coverage_blocked
     assert {row["metric_status"] for row in metric_rows} == {FORMAL_FID_KID_BLOCKER}
     assert summary["formal_feature_backend_ready"] is False
     assert summary["formal_sample_scale_ready"] is False
-    assert summary["formal_fid_kid_claim_gate_ready"] is False
+    assert summary["formal_fid_kid_component_ready"] is False
     assert summary["accepted_feature_pair_count"] == 0
     assert summary["missing_feature_pair_count"] == PROMPT_COUNT
     assert summary["feature_issue_count"] == 5

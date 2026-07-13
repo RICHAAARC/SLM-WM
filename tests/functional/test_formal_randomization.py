@@ -90,6 +90,33 @@ def test_formal_randomization_exact_coverage_rejects_count_only_substitution() -
         )
 
 
+@pytest.mark.parametrize(
+    "field_name,forged_value",
+    (
+        ("generation_seed_index", False),
+        ("generation_seed_index", 0.0),
+        ("generation_seed_offset", False),
+        ("generation_seed_offset", 0.0),
+        ("watermark_key_index", False),
+        ("watermark_key_index", 0.0),
+    ),
+)
+def test_formal_randomization_repeat_identity_requires_exact_integer_types(
+    field_name: str,
+    forged_value: object,
+) -> None:
+    """整数身份字段必须拒绝与0数值相等的 bool 或 float."""
+
+    record = resolve_formal_randomization_repeat("seed_00_key_00").to_dict()
+    record[field_name] = forged_value
+
+    with pytest.raises(ValueError, match="整数身份字段类型无效"):
+        validate_formal_randomization_repeat_records(
+            [record],
+            require_exact_registry=False,
+        )
+
+
 def test_single_repeat_component_coverage_never_supports_paper_claim() -> None:
     """单个 GPU repeat 只能形成 component, 不能冒充最终论文聚合."""
 

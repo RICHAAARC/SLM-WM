@@ -3,134 +3,37 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from experiments.runtime import repository_environment
-from paper_experiments.runners.closure_package_selection import (
-    CLOSURE_PACKAGE_FAMILY_SPECS,
-)
 from scripts import paper_result_closure as closure
 from scripts import run_gpu_server_result_closure as server_closure
-from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
 PAPER_RUN_NAME = "probe_paper"
 TARGET_FPR = 0.1
-FORMAL_EXECUTION_LOCK = build_test_formal_execution_lock("a" * 40)
-
-
-@pytest.fixture(autouse=True)
-def _publish_formal_execution_lock(monkeypatch: pytest.MonkeyPatch) -> None:
-    """把 CPU 闭合编排夹具绑定到确定性正式执行锁."""
-
-    monkeypatch.setattr(
-        repository_environment,
-        "require_published_formal_execution_lock",
-        lambda _root: dict(FORMAL_EXECUTION_LOCK),
-    )
-
-
-def build_package_records(package_root: Path) -> list[dict[str, object]]:
-    """构造按10个受治理 family 排列的绝对包记录。"""
-
-    package_root.mkdir(parents=True, exist_ok=True)
-    return [
-        {
-            "package_family": specification.package_family,
-            "package_path": (package_root / f"{specification.package_family}.zip").resolve().as_posix(),
-            "package_sha256": "a" * 64,
-            "paper_run_name": PAPER_RUN_NAME,
-            "target_fpr": TARGET_FPR,
-            "code_version": "a" * 40,
-            "generated_at": "2026-07-11T00:00:00+00:00",
-        }
-        for specification in CLOSURE_PACKAGE_FAMILY_SPECS
-    ]
-
-
-def argument_value(command: list[str], argument_name: str) -> str:
-    """读取单值命令参数。"""
-
-    return command[command.index(argument_name) + 1]
-
-
 @pytest.mark.quick
-def test_closure_command_plan_is_run_scoped_and_binds_exact_packages(tmp_path: Path) -> None:
-    """闭合 DAG 应显式绑定10个包及当前 run 的全部输入输出。"""
+def test_closure_command_plan_rejects_single_repeat_component(
+    tmp_path: Path,
+) -> None:
+    """单 repeat 输入不得继续构造论文闭合 DAG。"""
 
-    records = build_package_records(tmp_path / "packages")
-    commands = closure.build_paper_result_closure_commands(
-        closure_input_packages=records,
-        complete_drive_output_dir=tmp_path / "complete",
-        paper_run_name=PAPER_RUN_NAME,
-        target_fpr=TARGET_FPR,
-        archive_name="probe_paper_complete_result_package_exact.zip",
-        root=tmp_path,
-    )
-
-    assert len(commands) == closure.PAPER_RESULT_CLOSURE_COMMAND_COUNT
-    assert [Path(command[1]).name for command in commands] == [
-        "write_pilot_paper_result_records.py",
-        "write_official_reference_fidelity_evidence_outputs.py",
-        "write_attack_matrix_outputs.py",
-        "write_fixed_fpr_threshold_audit_outputs.py",
-        "write_paired_superiority_outputs.py",
-        "write_primary_baseline_method_faithful_adapter_protocol.py",
-        "write_primary_baseline_result_candidates.py",
-        "write_primary_baseline_formal_import_protocol.py",
-        "write_primary_baseline_evidence_outputs.py",
-        "write_external_baseline_comparison_outputs.py",
-        "write_pilot_paper_result_records.py",
-        "write_pilot_paper_fixed_fpr_common_protocol_outputs.py",
-        "write_pilot_paper_result_analysis_outputs.py",
-        "write_paper_artifact_evidence_audit_outputs.py",
-        "write_submission_readiness_outputs.py",
-        "write_evidence_closure_entry_review_outputs.py",
-        "write_result_closure_gate_outputs.py",
-        "write_pilot_paper_complete_result_package.py",
-    ]
-    assert all("--package-search-root" not in command for command in commands)
-    assert commands[0].count("--package-path") == len(CLOSURE_PACKAGE_FAMILY_SPECS)
-    assert commands[-1].count("--package-path") == len(CLOSURE_PACKAGE_FAMILY_SPECS)
-    assert "--materialize-only" in commands[0]
-    assert "--skip-package-materialization" in commands[-1]
-    assert "--require-pass" in commands[1]
-    assert "--require-pass" in commands[3]
-    assert "--require-pass" in commands[4]
-    assert "--require-pass" in commands[-2]
-    assert argument_value(commands[1], "--output-dir").endswith(
-        f"official_reference_fidelity_evidence/{PAPER_RUN_NAME}"
-    )
-    assert argument_value(commands[2], "--output-dir").endswith(
-        f"attack_matrix/{PAPER_RUN_NAME}"
-    )
-    assert argument_value(commands[4], "--proposed-records-path").endswith(
-        f"image_only_dataset_runtime/{PAPER_RUN_NAME}/image_only_detection_records.jsonl"
-    )
-    assert argument_value(commands[4], "--threshold-audit-rows-path").endswith(
-        f"fixed_fpr_threshold_audit/{PAPER_RUN_NAME}/threshold_audit_rows.csv"
-    )
-    assert argument_value(commands[10], "--baseline-records-path").endswith(
-        f"external_baseline_comparison/{PAPER_RUN_NAME}/baseline_result_records.jsonl"
-    )
-    assert argument_value(commands[-1], "--output-dir").endswith(
-        f"pilot_paper_complete_result_package/{PAPER_RUN_NAME}"
-    )
-    assert argument_value(commands[-2], "--dataset-quality-feature-records-path").endswith(
-        f"dataset_level_quality/{PAPER_RUN_NAME}/dataset_quality_formal_feature_records.jsonl"
-    )
-    assert argument_value(commands[-2], "--dataset-quality-feature-report-path").endswith(
-        f"dataset_level_quality/{PAPER_RUN_NAME}/dataset_quality_formal_feature_import_report.json"
-    )
-    assert argument_value(commands[-2], "--dataset-quality-metrics-path").endswith(
-        f"dataset_level_quality/{PAPER_RUN_NAME}/dataset_quality_metrics.csv"
-    )
-    assert "--t2smark-formal-package-path" not in commands[6]
-    assert argument_value(commands[6], "--t2smark-candidate-records-path").endswith(
-        f"t2smark_formal_reproduction/{PAPER_RUN_NAME}/t2smark_formal_import_candidate_records.jsonl"
-    )
+    with pytest.raises(RuntimeError, match="精确9重复聚合证据"):
+        closure.build_paper_result_closure_commands(
+            randomization_repeat_components=(
+                {
+                    "package_family": "randomization_repeat_evidence",
+                    "repeat_component_ready": True,
+                    "randomization_aggregate_ready": False,
+                    "supports_paper_claim": False,
+                },
+            ),
+            complete_drive_output_dir=tmp_path / "complete",
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+            archive_name="probe_paper_complete_result_package_exact.zip",
+            root=tmp_path,
+        )
 
 
 @pytest.mark.quick
@@ -185,92 +88,10 @@ def test_run_returns_current_exact_archive_without_latest_glob(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """执行器应返回本次命名归档, 不从目录中猜测 latest 文件。"""
+    """聚合闭合执行器必须在任何选择、清理和子命令前失败。"""
 
-    records = build_package_records(tmp_path / "packages")
-    for record in records:
-        Path(str(record["package_path"])).write_bytes(b"zip")
-    lock_path = tmp_path / "outputs" / "paper_result_closure" / PAPER_RUN_NAME / "closure_input_lock.json"
-    selection_report = {
-        "closure_input_packages": records,
-        "selected_package_paths": [record["package_path"] for record in records],
-        "closure_input_lock_path": lock_path.resolve().as_posix(),
-        "closure_input_lock_digest": "b" * 64,
-    }
-    selection_calls: list[dict[str, object]] = []
-
-    def fake_selection(*args: object, **kwargs: object) -> dict[str, object]:
-        selection_calls.append({"args": args, **kwargs})
-        return selection_report
-
-    archive_name = "probe_paper_complete_result_package_current.zip"
-    monkeypatch.setattr(closure, "build_closure_input_selection_report", fake_selection)
-    monkeypatch.setattr(closure, "_complete_archive_name", lambda *args, **kwargs: archive_name)
-    monkeypatch.setattr(
-        closure,
-        "build_paper_run_config",
-        lambda _root: SimpleNamespace(
-            run_name=PAPER_RUN_NAME,
-            target_fpr=TARGET_FPR,
-            randomization_repeat_id="seed_00_key_00",
-        ),
-    )
-    executed_commands: list[list[str]] = []
-
-    def fake_run(command: list[str], **kwargs: object) -> SimpleNamespace:
-        executed_commands.append(command)
-        if Path(command[1]).name == "write_pilot_paper_complete_result_package.py":
-            output_dir = tmp_path / argument_value(command, "--output-dir")
-            drive_dir = Path(argument_value(command, "--drive-output-dir"))
-            output_dir.mkdir(parents=True, exist_ok=True)
-            drive_dir.mkdir(parents=True, exist_ok=True)
-            (output_dir / archive_name).write_bytes(b"current")
-            (drive_dir / archive_name).write_bytes(b"current")
-        return SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(closure.subprocess, "run", fake_run)
-    drive_dir = tmp_path / "drive"
-    drive_dir.mkdir()
-    (drive_dir / "probe_paper_complete_result_package_zzz.zip").write_bytes(b"history")
-
-    result = closure.run_paper_result_closure_commands(
-        package_search_root=tmp_path / "packages",
-        complete_drive_output_dir=drive_dir,
-        paper_run_name=PAPER_RUN_NAME,
-        target_fpr=TARGET_FPR,
-        root=tmp_path,
-    )
-
-    assert selection_calls[0]["write_lock"] is True
-    assert len(executed_commands) == closure.PAPER_RESULT_CLOSURE_COMMAND_COUNT
-    assert result["complete_archive_path"] == (drive_dir / archive_name).resolve().as_posix()
-    assert result["local_complete_archive_path"].endswith(
-        f"pilot_paper_complete_result_package/{PAPER_RUN_NAME}/{archive_name}"
-    )
-    assert result["complete_archive_name"] == archive_name
-
-
-@pytest.mark.quick
-def test_run_rejects_explicit_protocol_mismatching_current_config(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """闭合事务开始前必须校验显式 run 与 FPR, 不得先选择或清理输入."""
-
-    selection_called = False
-
-    def fake_selection(*args: object, **kwargs: object) -> dict[str, object]:
-        nonlocal selection_called
-        selection_called = True
-        return {}
-
-    monkeypatch.setattr(closure, "build_closure_input_selection_report", fake_selection)
-    monkeypatch.setattr(
-        closure,
-        "build_paper_run_config",
-        lambda _root: SimpleNamespace(run_name="pilot_paper", target_fpr=0.01),
-    )
-    with pytest.raises(ValueError, match="build_paper_run_config"):
+    del monkeypatch
+    with pytest.raises(RuntimeError, match="精确9重复聚合证据"):
         closure.run_paper_result_closure_commands(
             package_search_root=tmp_path / "packages",
             complete_drive_output_dir=tmp_path / "complete",
@@ -278,60 +99,41 @@ def test_run_rejects_explicit_protocol_mismatching_current_config(
             target_fpr=TARGET_FPR,
             root=tmp_path,
         )
-    assert selection_called is False
 
 
 @pytest.mark.quick
-def test_server_dry_run_uses_exact_selection_without_writing_lock(
+def test_run_rejects_explicit_protocol_mismatching_current_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """服务器 dry-run 应执行包内治理选择, 而不是文件名覆盖统计。"""
+    """聚合证据不存在时, 任意显式协议都必须 fail-closed。"""
 
-    package_root = tmp_path / "packages"
-    package_root.mkdir()
-    environment_report = {
-        "root": tmp_path.as_posix(),
-        "paper_run": {
-            "run_name": PAPER_RUN_NAME,
-            "randomization_repeat_id": "seed_00_key_00",
-        },
-        "package_search_root": package_root.as_posix(),
-        "target_fpr": f"{TARGET_FPR:g}",
-    }
-    monkeypatch.setattr(
-        server_closure,
-        "configure_closure_environment",
-        lambda **kwargs: environment_report,
-    )
+    del monkeypatch
+    with pytest.raises(RuntimeError, match="精确9重复聚合证据"):
+        closure.run_paper_result_closure_commands(
+            package_search_root=tmp_path / "packages",
+            complete_drive_output_dir=tmp_path / "complete",
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+            root=tmp_path,
+        )
+
+
+@pytest.mark.quick
+def test_server_closure_requires_cross_repeat_record_recomputation(
+    tmp_path: Path,
+) -> None:
+    """服务器闭合在跨重复原始记录重算接入前必须保持 fail-closed."""
+
+    aggregate_path = tmp_path / "aggregate.zip"
+    aggregate_path.write_bytes(b"not-consumed-before-gate")
     repository_commit = "a" * 40
-    execution_lock = build_test_formal_execution_lock(repository_commit)
-    monkeypatch.setattr(
-        server_closure,
-        "build_formal_execution_lock",
-        lambda root, expected_commit: dict(execution_lock),
-    )
-    selection_calls: list[dict[str, object]] = []
-
-    def fake_selection(*args: object, **kwargs: object) -> dict[str, object]:
-        selection_calls.append({"args": args, **kwargs})
-        return {
-            "closure_input_selection_ready": True,
-            "closure_input_package_count": len(CLOSURE_PACKAGE_FAMILY_SPECS),
-        }
-
-    monkeypatch.setattr(server_closure, "build_closure_input_selection_report", fake_selection)
-    result = server_closure.execute_server_result_closure(
-        root=tmp_path,
-        paper_run_name=PAPER_RUN_NAME,
-        package_search_root=package_root,
-        complete_output_dir=tmp_path / "complete",
-        repository_commit=repository_commit,
-        dry_run=True,
-    )
-
-    assert result["server_result_closure_plan_ready"] is True
-    assert result["dry_run"] is True
-    assert selection_calls[0]["write_lock"] is False
-    assert selection_calls[0]["paper_run_name"] == PAPER_RUN_NAME
-    assert result["formal_execution_lock"]["formal_execution_commit"] == repository_commit
+    with pytest.raises(RuntimeError, match="跨重复原始记录"):
+        server_closure.execute_server_result_closure(
+            root=tmp_path,
+            paper_run_name=PAPER_RUN_NAME,
+            randomization_aggregate_package_path=aggregate_path,
+            complete_output_dir=tmp_path / "complete",
+            repository_commit=repository_commit,
+            dry_run=True,
+        )

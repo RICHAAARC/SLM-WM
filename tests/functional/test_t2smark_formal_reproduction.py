@@ -1246,6 +1246,7 @@ def test_t2smark_package_requires_pass_validation_and_exact_whitelist(
         spec=spec,
         paper_run_name="probe_paper",
         target_fpr=0.1,
+        randomization_repeat_id="seed_00_key_00",
     )
     assert candidate.package_family == "official_reference_t2smark"
     old_archive_path = output_dir / "external_baseline_official_reference_package_t2smark_old.zip"

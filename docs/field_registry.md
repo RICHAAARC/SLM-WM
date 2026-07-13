@@ -61,9 +61,10 @@ Notebook 与 repository module 的跨边界数据
 | formal_execution_package_lock | provenance | none | false | false | false | 正式归档开始与归档写出后实时复验形成的完整执行锁记录。 |
 | formal_execution_run_lock_digest | provenance | none | false | false | false | 单个正式输入包中运行锁的稳定 SHA-256 摘要。 |
 | formal_execution_package_lock_digest | provenance | none | false | false | false | 单个正式输入包中打包锁的稳定 SHA-256 摘要。 |
-| formal_execution_run_lock_digests | provenance | none | false | false | false | 闭合输入锁中由10类 package family 映射到运行锁摘要的精确字典。 |
-| formal_execution_package_lock_digests | provenance | none | false | false | false | 闭合输入锁中由10类 package family 映射到打包锁摘要的精确字典。 |
 | rebuild_command | artifact | none | false | false | false | 产物重建命令。 |
+| rebuild_input_mode | artifact | none | false | false | false | 产物重建读取原始外部输入或自包含来源包的固定模式。 |
+| rebuild_working_directory | artifact | none | false | false | false | 执行重建命令时使用的受治理工作目录角色。 |
+| rebuild_source_argument | artifact | none | false | false | false | 重建命令中由调用方替换为当前来源包路径的显式参数标记。 |
 | generated_at | governance | none | false | false | false | 本地报告或审计摘要的生成时间。 |
 | construction_unit_name | governance | none | false | false | false | 项目分阶段构建流程中的语义阶段名称。 |
 | phase_status | governance | none | false | false | false | 分阶段构建状态文档中的阶段推进状态。 |
@@ -403,12 +404,12 @@ Notebook 与 repository module 的跨边界数据
 | source_dependency_environment_report_path | provenance | none | true | false | false | 科学子进程启动时使用的隔离依赖环境报告绝对源路径, 用于离线复验仓库根、工作目录与环境覆盖的一致性。 |
 | scientific_profile_id | protocol | none | true | false | false | 外层 session 实际选择的唯一科学依赖 profile。 |
 | scientific_profile_digest | provenance | none | true | false | false | 外层 session 绑定的科学 profile 稳定摘要。 |
-| scientific_direct_requirements_digest | provenance | none | true | false | false | CPU 闭合输入锁传播的科学 profile 直接依赖输入 SHA-256。 |
+| scientific_direct_requirements_digest | provenance | none | true | false | false | 单 repeat leaf 记录传播的科学 profile 直接依赖输入 SHA-256。 |
 | scientific_complete_hash_lock_digest | provenance | none | true | false | false | 外层 session 绑定的科学 profile 完整哈希锁摘要。 |
-| scientific_complete_hash_lock_dependency_count | metric | none | true | false | false | CPU 闭合输入锁传播的完整哈希锁直接与传递依赖总数。 |
-| scientific_python_executable_digest | provenance | none | true | false | false | CPU 闭合输入锁传播的实际科学解释器文件 SHA-256。 |
-| scientific_execution_binding_digest | provenance | none | true | false | false | CPU 闭合输入锁记录的产物级科学执行绑定文件 SHA-256; official-reference 包不使用该字段。 |
-| scientific_dependency_evidence_digest | provenance | none | true | false | false | CPU 闭合输入锁记录的包内隔离依赖环境证据文件 SHA-256。 |
+| scientific_complete_hash_lock_dependency_count | metric | none | true | false | false | 单 repeat leaf 记录传播的完整哈希锁直接与传递依赖总数。 |
+| scientific_python_executable_digest | provenance | none | true | false | false | 单 repeat leaf 记录传播的实际科学解释器文件 SHA-256。 |
+| scientific_execution_binding_digest | provenance | none | true | false | false | 单 repeat leaf 记录的产物级科学执行绑定文件 SHA-256; official-reference 包不使用该字段。 |
+| scientific_dependency_evidence_digest | provenance | none | true | false | false | 单 repeat leaf 记录的包内隔离依赖环境证据文件 SHA-256。 |
 | scientific_command_sequence_digest | provenance | none | true | false | false | 主方法三个结果包共同传播的实际科学子命令序列 SHA-256, 不包含 stdout 与 stderr。 |
 | dependency_profile_count | metric | none | true | false | false | 完整论文结果包要求并复验的依赖 profile 总数。 |
 | dependency_profile_records | provenance | none | true | false | false | 完整结果包逐 profile 保存的直接依赖、完整锁、摘要与归档成员复验记录。 |
@@ -739,7 +740,7 @@ Notebook 与 repository module 的跨边界数据
 | quality_metric_name | metric | none | true | true | false | 正式质量指标身份; 数据集级取 `fid`、`kid_mean` 或 `kid_std`, 主表质量匹配固定取 `embedding_pair_ssim`。 |
 | quality_metric_value | metric | none | true | true | false | 从真实生成图像与真实参考图像特征计算的 FID、KID 子集均值或 KID 子集总体标准差。 |
 | image_quality_metrics_ready | method | none | false | false | false | 是否已经完成真实图像质量指标测量。 |
-| full_method_claim_ready | governance | none | true | true | false | 主方法真实生成、攻击、仅图像检测和科学算子门禁是否共同支持当前论文层级结论。 |
+| full_method_component_ready | governance | none | true | false | false | 单个正式 seed-key repeat 内, 主方法真实生成、攻击、仅图像检测和科学算子门禁是否全部通过。该字段不支持跨 repeat 论文结论。 |
 | selected_attention_carrier_id | method | none | true | false | false | 真实 attention latent injection 中选用的 active carrier 标识。 |
 | attention_geometry_package_path | artifact | none | true | false | false | 真实 attention latent injection 使用的 geometry 输入包路径。 |
 | method_manifest_path | artifact | none | true | false | false | 真实运行引用的 attention latent update 方法 manifest 路径。 |
@@ -805,6 +806,7 @@ Notebook 与 repository module 的跨边界数据
 | statistical_boundary | protocol | none | false | false | false | FPR 审计表中单行记录所属的统计边界名称。 |
 | governs_fixed_fpr | governance | none | false | false | false | FPR 审计表中单行记录是否参与 fixed-FPR 控制边界。 |
 | raw_content_claim_ready | claim | none | false | false | false | raw content 分支是否满足当前 fixed-FPR 口径。 |
+| raw_content_measurement_ready | governance | none | true | false | false | 当前运行是否已经真实物化 raw content 分数及同阈值判定所需测量, 只表示单次运行的测量完整性。 |
 | true_positive_rate | metric | none | false | false | false | positive source 上的 true positive rate。 |
 | false_positive_rate | metric | none | false | false | false | 冻结 operating point 下 clean negative 的 false positive rate。 |
 | false_negative_rate | metric | none | false | false | false | DET 曲线点中的 false negative rate。 |
@@ -983,7 +985,8 @@ Notebook 与 repository module 的跨边界数据
 | ablation_claim_excluded_record_examples | governance | none | false | false | false | 被正式消融 claim gate 排除的代表性记录示例。 |
 | ablation_claim_metric_status | governance | none | false | false | false | 正式消融 claim 使用的统一 metric_status 边界。 |
 | ablation_claim_formal_input_ready | governance | none | false | false | false | 内部消融 claim 输入是否全部来自正式 attacked image watermark rescore 记录。 |
-| ablation_claim_gate_ready | governance | none | false | false | false | 内部消融 standalone claim 是否通过正式门禁。 |
+| ablation_component_ready | governance | none | false | false | false | 单个正式 seed-key repeat 内15个消融配置、攻击、检测与校准是否形成完整可聚合证据。 |
+| ablation_component_summary | artifact | none | true | false | false | 单个 seed-key repeat 的正式消融组件摘要对象或其受治理路径, 只作为跨 repeat 聚合输入。 |
 | ablation_standalone_claim_ready | claim | none | false | false | false | 内部机制消融是否可作为独立论文主张证据。 |
 | strong_ablation_standalone_claim_ready | claim | none | false | false | false | 核心强消融集合是否具备独立论文主张证据。 |
 | core_ablation_claim_ready | governance | none | false | false | false | 核心机制消融集合是否全部由正式输入覆盖并支持 claim。 |
@@ -1104,8 +1107,8 @@ Notebook 与 repository module 的跨边界数据
 | formal_quality_metric_count | metric | none | false | false | false | 数据集级正式质量指标表中的指标行数量, 当前闭合值为3。 |
 | formal_fid_kid_ready | governance | none | false | false | false | 正式 FID / KID 是否已由论文约定特征后端完成。 |
 | formal_fid_kid_metric_names_ready | governance | none | false | false | false | `fid`、`kid_mean` 与 `kid_std` 三行是否均已测量, 防止缺失 KID 离散度仍被误判为完整质量结论。 |
-| formal_fid_kid_claim_gate_ready | governance | none | false | false | false | 数据集级正式 FID / KID 是否通过论文质量主张门禁。 |
-| formal_fid_kid_claim_blocker | governance | none | false | false | false | 阻断正式 FID / KID 质量主张的原因。 |
+| formal_fid_kid_component_ready | governance | none | false | false | false | 单个正式 seed-key repeat 的 FID / KID 原始特征、图像身份和样本覆盖是否完整, 仅表示可进入跨 repeat 聚合。 |
+| formal_fid_kid_component_blocker | governance | none | false | false | false | 阻断单 repeat FID / KID 证据进入跨 repeat 聚合的原因。 |
 | dataset_quality_claim_boundary | governance | none | false | false | false | 数据集级质量证据能够支撑的论文主张边界。 |
 | dataset_quality_summary_path | artifact | none | false | false | false | 数据集级质量摘要 JSON 路径。 |
 | dataset_quality_formal_metrics_path | artifact | none | false | false | false | 只包含正式 FID / KID 行的数据集级质量指标表路径。 |
@@ -1874,29 +1877,32 @@ Notebook 与 repository module 的跨边界数据
 | source_to_evaluated_ssim_mean | metric | none | true | true | false | 同一攻击与角色下 source-to-evaluated SSIM 均值。 |
 | source_to_evaluated_psnr_mean | metric | none | true | true | false | 同一攻击与角色下全量 PSNR 均值; 全组图像均完全一致且每条 MSE 为0时允许为正无穷, 不允许选择性忽略样本或混合有限值与正无穷。 |
 | attacked_positive_source_to_attacked_ssim_mean | metric | none | true | true | false | 攻击后 watermarked positive 相对其未攻击 source 的 SSIM 均值。 |
-| package_family | provenance | none | true | false | false | CPU 论文闭合输入锁中记录的唯一上游结果包职责族。 |
-| package_path | artifact | none | true | false | false | CPU 论文闭合选择后冻结的上游 ZIP 显式绝对路径。 |
-| package_sha256 | provenance | none | true | false | false | CPU 论文闭合选择后冻结的上游 ZIP 文件 SHA-256。 |
-| closure_input_package_count | metric | none | true | false | false | 单 repeat component 输入锁覆盖的互异结果包 family 数量, 当前值为10, 其中7类绑定活动 repeat, 3类为跨 repeat 不变忠实度证据。 |
-| closure_input_packages | artifact | none | true | false | false | 单 repeat component 输入锁冻结的 family、路径、摘要、论文层级、FPR、代码版本、随机化职责和生成时间记录集合。 |
-| closure_input_lock_digest | provenance | none | true | false | false | 对论文闭合输入锁核心内容执行规范序列化后得到的 SHA-256。 |
-| selected_package_paths | artifact | none | false | false | false | CPU 论文闭合 dry-run 报告返回的10个显式上游 ZIP 路径。 |
-| closure_input_lock_path | artifact | none | false | false | false | 当前论文运行层级的 CPU 闭合输入锁输出路径。 |
-| closure_input_lock_manifest_path | artifact | none | false | false | false | 当前论文运行层级输入锁独立 manifest 的输出路径。 |
-| closure_input_lock_written | governance | none | false | false | false | 当前选择调用是否请求并成功写出输入锁及其独立 manifest。 |
-| closure_input_selection_ready | governance | none | false | false | false | 单 repeat 的10个结果包 family 是否均通过包内身份、白名单、CRC 和 ready 门禁。该字段不表示9重复聚合完成。 |
-| closure_input_lock_ready | governance | none | false | false | false | 输入锁 manifest 是否绑定10个精确结果包、活动 repeat 与当前论文运行协议。 |
-| repeat_component_input_ready | governance | none | true | false | false | 7类随机化包是否精确绑定同一活动 repeat, 且3类 official-reference 忠实度包是否明确标记为跨 repeat 不变证据。 |
-| randomization_aggregate_ready | governance | none | true | false | false | 是否已经精确覆盖权威9个 repeat 并完成跨重复原始证据重算。单 repeat 输入锁固定为 false。 |
+| package_family | provenance | none | true | false | false | 单 repeat manifest 中记录的唯一上游结果包职责族。 |
+| package_path | artifact | none | true | false | false | 上游选择器复验的 leaf ZIP 显式绝对路径; 外层 component manifest 不持久化该外部路径。 |
+| package_sha256 | provenance | none | true | false | false | 上游 leaf ZIP 原始文件字节的 SHA-256。 |
+| repeat_component_ready | governance | none | true | false | false | 一个已登记 seed-key repeat 的原始证据是否完整通过其科学运行与打包契约。该字段固定不表示论文 claim 成立。 |
+| leaf_package_families | protocol | none | true | false | false | 单 repeat 自包含证据包内7类活动随机化 leaf package 的规范有序 family 集合。 |
+| leaf_package_family_count | metric | none | true | false | false | 单 repeat manifest 登记的活动随机化 leaf package family 数量, 固定为7。 |
+| leaf_packages | artifact | none | true | false | false | 单 repeat manifest 按规范 family 顺序保存的 leaf ZIP 身份、成员路径、字节摘要、代码版本与执行锁摘要记录集合。 |
+| archive_member | artifact | none | true | false | false | leaf ZIP 在单 repeat 外层归档中的规范 POSIX 成员路径, 由 repeat ID 与 package family 唯一派生。 |
+| leaf_package_sha256_map | provenance | none | true | false | false | 单 repeat 自包含证据包内从 package family 到嵌套 leaf ZIP 原始字节 SHA-256 的映射。 |
+| leaf_package_set_digest | provenance | none | true | false | false | 7个 leaf package 身份、成员路径、代码版本与执行锁摘要记录集合的稳定摘要。 |
+| component_content_digest | provenance | none | true | false | false | 排除生成时间和外部绝对路径后, 单 repeat 身份、代码版本、7个 leaf package 字节摘要与结论边界的稳定内容摘要。 |
+| randomization_repeat_evidence_manifest_digest | provenance | none | true | false | false | 单 repeat 自包含证据 manifest 在移除自身摘要字段后的稳定内容摘要。 |
+| randomization_aggregate_ready | governance | none | true | false | false | 是否已经精确覆盖权威9个 repeat、3个跨 repeat 不变包并完成全部嵌套来源生产复验。该字段只表示聚合输入就绪, 不单独支持论文 claim。单 repeat component 固定为 false。 |
+| randomization_aggregate_schema_version | protocol | none | true | false | false | 精确9+3随机化 aggregate payload 与 manifest 共同采用的整数 schema 版本。 |
+| randomization_repeat_ids | protocol | none | true | false | false | 随机化 aggregate 按权威注册表顺序保存的精确9个 repeat ID。 |
+| randomization_repeat_components | artifact | none | true | false | false | 随机化 aggregate 按权威顺序保存的9个自包含 repeat ZIP 身份、规范成员路径和内容摘要记录。 |
+| invariant_packages | artifact | none | true | false | false | 随机化 aggregate 按固定 family 顺序保存的3个跨 repeat 不变官方参考 ZIP 及其执行锁摘要记录。 |
+| randomization_aggregate_digest | provenance | none | true | false | false | 排除生成时间和自身摘要后, 对 run、FPR、随机化注册表、9个 repeat、3个不变包、共同代码版本与结论边界计算的稳定 SHA-256。 |
+| payload_member | artifact | none | true | false | false | 聚合 ZIP 内版本化 payload JSON 的规范 POSIX 成员路径。 |
+| payload_path | artifact | none | true | false | false | 已验证随机化 aggregate payload 旁路文件路径; 独立 ZIP 无旁路文件时使用 ZIP 成员定位串。 |
+| payload_sha256 | provenance | none | true | false | false | 聚合 ZIP 内 payload JSON 权威原始字节的 SHA-256。 |
+| manifest_sha256 | provenance | none | true | false | false | 聚合 ZIP 内 manifest JSON 权威原始字节的 SHA-256。 |
+| randomization_repeat_component_count | metric | none | true | false | false | 聚合 manifest metadata 登记的自包含 repeat 组件数量, 固定为9。 |
+| invariant_package_count | metric | none | true | false | false | 聚合 manifest metadata 登记的跨 repeat 不变官方参考包数量, 固定为3。 |
+| invariant_package_families | protocol | none | true | false | false | 聚合 manifest config 按规范顺序绑定的3个跨 repeat 不变官方参考 package family。 |
 | randomization_scope | protocol | none | true | false | false | 上游包在随机化证据中的职责, 取值为 active_repeat_component 或 cross_repeat_invariant。 |
-| closure_input_lock_present | governance | none | false | false | false | 完整结果包生成前是否在当前论文运行层级目录发现 closure input lock。 |
-| closure_input_lock_manifest_ready | governance | none | false | false | false | 完整结果包复核是否确认 input lock manifest 的身份、输出路径、层级、FPR、数量和锁摘要完全一致。 |
-| closure_input_lock_digest_ready | governance | none | false | false | false | 完整结果包复算的 closure input lock 规范摘要是否等于锁中声明值。 |
-| closure_input_family_ready | governance | none | false | false | false | Closure input lock 是否恰好覆盖受治理的10个互异结果包 family。 |
-| closure_input_scope_ready | governance | none | false | false | false | Closure input lock 顶层与逐包记录的论文运行层级和目标 FPR 是否完全一致。 |
-| closure_input_explicit_paths_ready | governance | none | false | false | false | 完整结果包收到的显式 package paths 是否与 closure input lock 中的路径集合完全相等。 |
-| closure_input_package_digests_ready | governance | none | false | false | false | 完整结果包生成前重新计算的10个 ZIP 文件摘要是否与 closure input lock 完全一致。 |
-| closure_input_package_metadata_ready | governance | none | false | false | false | Closure input lock 的每个结果包是否都提供非空代码版本和生成时间。 |
 | result_closure_gate_report_path | artifact | none | false | false | false | 完整结果包绑定的当前论文运行层级 result closure gate 报告路径。 |
 | result_closure_gate_report_present | governance | none | false | false | false | 完整结果包生成前是否发现当前论文运行层级的 result closure gate 报告。 |
 | result_closure_gate_manifest_path | artifact | none | false | false | false | 完整结果包绑定的当前论文运行层级 result closure gate manifest 路径。 |
@@ -1905,8 +1911,6 @@ Notebook 与 repository module 的跨边界数据
 | payload_entry_count | metric | none | false | false | false | 完整结果包中除内部 package metadata 外的受治理文件数量。 |
 | entry_paths_digest | provenance | none | false | false | false | 完整结果包全部归档成员路径列表的稳定摘要。 |
 | archive_entry_digest | provenance | none | false | false | false | 完整结果包 readiness 中全部归档成员路径列表的稳定摘要。 |
-| explicit_package_paths | artifact | none | false | false | false | 完整结果包实际复核并物化的显式上游 ZIP 路径集合。 |
-| materialization_skipped | governance | none | false | false | false | 调用者是否显式要求复用已物化 outputs 并跳过 ZIP 条目提取。 |
 | closure_check_count | metric | none | false | false | false | 当前运行层级结果闭合语义门禁执行的检查总数。 |
 | blocked_check_count | metric | none | false | false | false | 结果闭合语义门禁中未通过的检查数量。 |
 | blocked_check_ids | governance | none | false | false | false | 结果闭合语义门禁中未通过检查的稳定标识集合。 |
@@ -1954,8 +1958,7 @@ Notebook 与 repository module 的跨边界数据
 | require_existing_evidence | protocol | none | false | false | false | result record 构造时是否要求每个 evidence path 已存在, 并进入 manifest 配置摘要。 |
 | test_prompt_id_digest | provenance | none | true | false | false | 共同协议从受治理 Prompt 文件当前 test split 独立重算的标识集合摘要。 |
 | dataset_quality_feature_records_sha256 | provenance | none | false | false | false | 结果闭合门禁对规范正式特征 JSONL 文件独立计算的字节摘要。 |
-| common_code_version | provenance | none | true | false | false | CPU 结果闭合输入锁中10个上游结果包共享的精确40位小写 clean Git 提交 SHA。 |
-| closure_input_common_code_version_ready | governance | none | false | false | false | 完整结果打包前逐包代码版本是否均为同一规范化 clean Git 提交。 |
+| common_code_version | provenance | none | true | false | false | 最终聚合所消费9个 repeat component 与3个不变官方参考包共享的精确40位小写 clean Git 提交 SHA。 |
 | closure_source_file_sha256 | provenance | none | false | false | false | 结果闭合门禁全部实际读取文件的规范路径到文件字节 SHA-256 映射。 |
 | closure_source_file_digest | provenance | none | false | false | false | 对结果闭合门禁输入文件字节摘要映射执行规范序列化后得到的 SHA-256。 |
 | result_closure_gate_report_digest | provenance | none | false | false | false | 完整结果打包前从 gate manifest 读取并对 gate 报告重算的稳定摘要。 |
@@ -1964,9 +1967,9 @@ Notebook 与 repository module 的跨边界数据
 | result_closure_gate_source_file_digest_ready | governance | none | false | false | false | Gate 报告声明的输入文件摘要映射 digest 是否可由映射本身重建。 |
 | result_closure_gate_source_files_ready | governance | none | false | false | false | 完整结果打包前重新读取的全部 gate 输入文件 SHA-256 是否与门禁时完全一致。 |
 | result_closure_gate_manifest_config_ready | governance | none | false | false | false | Gate manifest 的 config digest 是否绑定运行层级、FPR、样本规模、报告和输入文件摘要。 |
-| result_closure_gate_code_version_ready | governance | none | false | false | false | Gate manifest 代码版本是否为输入锁绑定的同一 clean Git 提交。 |
+| result_closure_gate_code_version_ready | governance | none | false | false | false | Gate manifest 代码版本是否为随机化聚合来源绑定的同一 clean Git 提交。 |
 | current_repository_code_version | provenance | none | false | false | false | 完整结果打包当下仓库的精确40位小写 clean Git 提交 SHA。 |
-| current_repository_code_version_ready | governance | none | false | false | false | 完整结果打包当下仓库是否仍为输入锁绑定的同一 clean Git 提交且工作区无修改。 |
+| current_repository_code_version_ready | governance | none | false | false | false | 完整结果打包当下仓库是否仍为随机化聚合来源绑定的同一 clean Git 提交且工作区无修改。 |
 | observation_id | protocol | none | true | false | false | 分数分布表中一条仅图像检测 observation 的稳定标识。 |
 | sample_scope | protocol | none | true | true | false | 连续检测统计所属的 test overall 或单一攻击条件范围。 |
 | binary_label | metric | none | true | true | false | 由正式 sample role 映射得到的二分类真实标签, 阳性为1且阴性为0。 |
@@ -2568,7 +2571,7 @@ Notebook 与 repository module 的跨边界数据
 | result_analysis_payload_digest | provenance | none | true | false | false | 结果分析固定 payload 路径映射与文件 SHA-256 映射的稳定组合摘要。 |
 | ablation_necessity_statistics_ready | governance | none | true | false | false | 当前 manifest 声明的全部非完整方法变体必要性统计是否通过结构和摘要绑定门禁。 |
 | adjusted_significance_ready | metric | none | true | true | false | Holm 校正后的单侧配对检验是否达到预注册显著性水平。 |
-| all_mechanism_necessity_claims_supported | governance | none | true | true | false | 全部单机制必要性主张是否均满足预注册统计条件。 |
+| all_mechanism_necessity_components_supported | governance | none | true | false | false | 当前单 repeat 内全部单机制对照是否均满足预注册统计条件; 该字段不支持跨重复论文结论。 |
 | clean_true_positive_mean_paired_effect | metric | none | true | true | false | 完整方法减去消融变体的 clean TPR Prompt 配对均值效应。 |
 | clean_true_positive_mean_paired_effect_ci_low | metric | none | true | true | false | clean TPR Prompt 配对均值效应置信区间下界。 |
 | clean_true_positive_mean_paired_effect_ci_high | metric | none | true | true | false | clean TPR Prompt 配对均值效应置信区间上界。 |
@@ -2583,12 +2586,12 @@ Notebook 与 repository module 的跨边界数据
 | mean_paired_effect_ci_high | metric | none | true | true | false | 主指标 Prompt 配对均值效应 bootstrap 置信区间上界。 |
 | minimum_effect_ready | metric | none | true | true | false | 主指标均值效应是否达到预注册最小效应。 |
 | minimum_effect_size | protocol | none | true | true | false | 机制必要性主张采用的预注册最小效应阈值。 |
-| necessity_claim_decision | governance | none | true | true | false | 单机制或总机制必要性主张的实测支持决定。 |
-| necessity_claim_supported | governance | none | true | true | false | 单机制必要性主张是否同时满足效应方向、最小效应、置信区间、Holm 校正显著性和 paired SSIM 质量非劣性。 |
-| necessity_not_supported_ablation_ids | governance | none | true | true | false | 未达到必要性统计门槛的正式消融变体身份。 |
+| necessity_component_decision | governance | none | true | false | false | 当前单 repeat 内单机制对照的实测支持决定。 |
+| necessity_component_supported | governance | none | true | false | false | 当前单 repeat 内单机制对照是否同时满足效应方向、最小效应、置信区间、Holm 校正显著性和 paired SSIM 质量非劣性。 |
+| necessity_component_not_supported_ablation_ids | governance | none | true | false | false | 当前单 repeat 内未达到必要性统计门槛的消融变体身份。 |
 | necessity_statistic_row_count | metric | none | true | false | false | 独立机制必要性统计表的正式行数。 |
 | necessity_statistic_rows_digest | provenance | none | true | false | false | 独立机制必要性统计行的稳定摘要。 |
-| necessity_supported_ablation_ids | governance | none | true | true | false | 达到必要性统计门槛的正式消融变体身份。 |
+| necessity_component_supported_ablation_ids | governance | none | true | false | false | 当前单 repeat 内达到必要性统计门槛的消融变体身份。 |
 | one_sided_paired_p_value | metric | none | true | true | false | 相对最小效应零假设的单侧 Prompt 配对 p 值。 |
 | paired_p_value_method | protocol | none | true | true | false | 机制必要性单侧 Prompt 配对检验采用的方法身份。 |
 | paired_prompt_id_digest | provenance | none | true | false | false | 机制必要性统计共同 test Prompt 身份集合的稳定摘要。 |

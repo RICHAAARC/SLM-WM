@@ -83,14 +83,14 @@ def test_closed_main_runs_requested_ablation_once(
         / "dataset_level_quality"
         / run_name
         / "dataset_quality_summary.json",
-        {"formal_fid_kid_claim_gate_ready": True},
+        {"formal_fid_kid_component_ready": True},
     )
     _write_json(
         tmp_path
         / "outputs"
         / "formal_mechanism_ablation"
         / run_name
-        / "ablation_claim_summary.json",
+        / "ablation_component_summary.json",
         {"protocol_decision": "pass"},
     )
     calls = []

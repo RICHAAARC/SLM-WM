@@ -22,6 +22,10 @@ from experiments.protocol.dataset_quality import (
     build_dataset_quality_image_records,
 )
 from experiments.protocol.prompts import build_prompt_records, read_prompt_file
+from experiments.protocol.formal_randomization import (
+    formal_randomization_protocol_record,
+    resolve_formal_randomization_repeat,
+)
 from experiments.protocol.splits import apply_split_assignments
 from experiments.runners.semantic_watermark_runtime import (
     SemanticWatermarkRuntimeConfig,
@@ -83,6 +87,7 @@ def _minimal_paper_run(prompt_file: str, prompt_count: int) -> SimpleNamespace:
         )
     )
     test_count = sum(record.split == "test" for record in split_records)
+    repeat = resolve_formal_randomization_repeat("seed_00_key_00")
     return SimpleNamespace(
         run_name=PAPER_RUN_NAME,
         target_fpr=TARGET_FPR,
@@ -91,6 +96,15 @@ def _minimal_paper_run(prompt_file: str, prompt_count: int) -> SimpleNamespace:
         prompt_count=prompt_count,
         minimum_clean_negative_count=test_count,
         dataset_level_quality_minimum_count=prompt_count,
+        randomization_repeat_id=repeat.randomization_repeat_id,
+        generation_seed_index=repeat.generation_seed_index,
+        generation_seed_offset=repeat.generation_seed_offset,
+        watermark_key_index=repeat.watermark_key_index,
+        formal_randomization_protocol_digest=(
+            formal_randomization_protocol_record()[
+                "formal_randomization_protocol_digest"
+            ]
+        ),
     )
 
 
@@ -325,7 +339,7 @@ def test_runtime_rerun_writer_package_and_closure_share_manifest_config(
         artifact_role="runtime_rerun_ablation",
         paper_run_name=PAPER_RUN_NAME,
         profile_id="sd35_method_runtime_gpu",
-        summary_file_name="ablation_claim_summary.json",
+        summary_file_name="ablation_component_summary.json",
         manifest_file_name="manifest.local.json",
         formal_execution_lock=FORMAL_EXECUTION_LOCK,
         execution_route="semantic_watermark_ablation_session",

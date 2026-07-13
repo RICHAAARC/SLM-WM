@@ -17,8 +17,6 @@ import math
 from pathlib import Path
 from pathlib import PurePosixPath
 import shutil
-import stat
-import subprocess
 import sys
 from typing import Any, Iterable
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
@@ -27,13 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from experiments.artifacts.artifact_manifest import build_artifact_manifest
-from experiments.protocol.paper_run_config import build_paper_run_config
-from experiments.runtime import repository_environment
 from experiments.runtime.dependency_profiles import (
     REQUIRED_DEPENDENCY_PROFILE_NAMES,
     load_dependency_profile_registry,
-    require_dependency_profile_ready,
 )
 from experiments.runtime.repository_environment import resolve_code_version
 from main.core.digest import build_stable_digest
@@ -41,14 +35,10 @@ from paper_experiments.analysis.result_closure_gate import build_source_file_sha
 from paper_experiments.analysis.result_analysis_payload import (
     build_governed_paper_payload_path_map,
 )
-from paper_experiments.runners.closure_package_selection import (
-    CLOSURE_PACKAGE_FAMILY_SPECS,
-    ClosurePackageSelectionError,
-    inspect_closure_package,
-    normalize_clean_code_version,
-    validate_closure_input_lock_payloads,
+from paper_experiments.runners.paper_claim_provenance import (
+    require_exact9_randomization_aggregate_provenance,
 )
-from scripts.write_pilot_paper_result_records import WorkProgress, materialize_output_entries
+from scripts.write_pilot_paper_result_records import WorkProgress
 
 CONSTRUCTION_UNIT_NAME = "pilot_paper_complete_result_package"
 DEFAULT_OUTPUT_DIR = Path("outputs/pilot_paper_complete_result_package")
@@ -361,7 +351,7 @@ def resolve_explicit_package_paths(
 
 
 def _validated_zip_member_name(member_name: str) -> str:
-    """把闭合输入 ZIP 成员限制为规范相对路径."""
+    """把受治理来源 ZIP 成员限制为规范相对路径."""
 
     pure_path = PurePosixPath(member_name)
     if (
@@ -371,120 +361,15 @@ def _validated_zip_member_name(member_name: str) -> str:
         or any(part in {"", ".", ".."} for part in pure_path.parts)
         or pure_path.as_posix() != member_name
     ):
-        raise RuntimeError(f"闭合输入包包含非规范成员路径: {member_name}")
+        raise RuntimeError(f"来源包包含非规范成员路径: {member_name}")
     return member_name
-
-
-def build_locked_package_source_records(
-    root_path: Path,
-    *,
-    paper_run_name: str,
-    explicit_packages: Iterable[Path],
-) -> tuple[tuple[dict[str, Any], ...], dict[str, dict[str, Any]]]:
-    """逐成员读取10个锁定包并构造原始证据来源记录.
-
-    该函数读取 ZIP 本身, 不从已经物化的目录反推来源. 同一路径若由多个包提供,
-    只有字节摘要和大小完全相同时才允许合并, 从而与物化环节的覆盖规则一致.
-    """
-
-    lock_path = (
-        root_path
-        / "outputs"
-        / "paper_result_closure"
-        / paper_run_name
-        / "closure_input_lock.json"
-    )
-    lock_payload = read_json(lock_path)
-    records_value = lock_payload.get("closure_input_packages")
-    if not isinstance(records_value, list) or not all(
-        isinstance(row, dict) for row in records_value
-    ):
-        raise RuntimeError("闭合输入锁未提供可审计的10包记录")
-    lock_records = [dict(row) for row in records_value]
-    explicit_paths = {path.resolve() for path in explicit_packages}
-    if len(lock_records) != len(CLOSURE_PACKAGE_FAMILY_SPECS):
-        raise RuntimeError("闭合输入锁未精确覆盖10类结果包")
-
-    package_records: list[dict[str, Any]] = []
-    output_members: dict[str, dict[str, Any]] = {}
-    for lock_record in lock_records:
-        family = str(lock_record.get("package_family", "")).strip()
-        source_path = Path(str(lock_record.get("package_path", ""))).resolve()
-        locked_digest = str(lock_record.get("package_sha256", "")).lower()
-        if (
-            source_path not in explicit_paths
-            or not source_path.is_file()
-            or not _is_sha256(locked_digest)
-            or file_digest(source_path) != locked_digest
-        ):
-            raise RuntimeError(f"闭合输入包来源与锁不一致: {family}")
-
-        member_records: list[dict[str, Any]] = []
-        seen_members: set[str] = set()
-        with ZipFile(source_path) as archive:
-            for info in archive.infolist():
-                member_name = _validated_zip_member_name(info.filename)
-                unix_mode = (info.external_attr >> 16) & 0xFFFF
-                if info.is_dir() or (unix_mode and stat.S_ISLNK(unix_mode)):
-                    raise RuntimeError(
-                        f"闭合输入包不得包含目录或符号链接成员: {member_name}"
-                    )
-                if member_name in seen_members:
-                    raise RuntimeError(
-                        f"闭合输入包不得包含重复成员: {member_name}"
-                    )
-                seen_members.add(member_name)
-                digest = hashlib.sha256()
-                with archive.open(info) as source:
-                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
-                        digest.update(chunk)
-                member_digest = digest.hexdigest()
-                member_record = {
-                    "member_path": member_name,
-                    "member_size_bytes": int(info.file_size),
-                    "member_sha256": member_digest,
-                }
-                member_records.append(member_record)
-                if not member_name.startswith("outputs/"):
-                    continue
-                existing = output_members.get(member_name)
-                if existing is None:
-                    output_members[member_name] = {
-                        **member_record,
-                        "package_families": [family],
-                    }
-                elif (
-                    existing["member_size_bytes"] != int(info.file_size)
-                    or existing["member_sha256"] != member_digest
-                ):
-                    raise RuntimeError(
-                        f"闭合输入包对同一 outputs 成员声明了不同字节: {member_name}"
-                    )
-                else:
-                    existing["package_families"].append(family)
-        package_records.append(
-            {
-                "package_family": family,
-                "source_package_path": source_path.as_posix(),
-                "source_package_sha256": locked_digest,
-                "source_package_size_bytes": source_path.stat().st_size,
-                "member_count": len(member_records),
-                "member_records": member_records,
-            }
-        )
-
-    expected_families = {spec.package_family for spec in CLOSURE_PACKAGE_FAMILY_SPECS}
-    observed_families = {record["package_family"] for record in package_records}
-    if observed_families != expected_families:
-        raise RuntimeError("闭合输入包来源记录未精确覆盖10类 family")
-    return tuple(package_records), dict(sorted(output_members.items()))
 
 
 def verify_materialized_package_members(
     root_path: Path,
     output_members: dict[str, dict[str, Any]],
 ) -> tuple[Path, ...]:
-    """确认本地上游产物仍与10个来源包的成员字节完全一致."""
+    """确认本地上游产物仍与受治理来源包的成员字节完全一致."""
 
     verified: list[Path] = []
     outputs_root = (root_path / "outputs").resolve()
@@ -493,7 +378,7 @@ def verify_materialized_package_members(
         try:
             target.relative_to(outputs_root)
         except ValueError as exc:
-            raise RuntimeError("闭合输入包成员逃逸 outputs 目录") from exc
+            raise RuntimeError("来源包成员逃逸 outputs 目录") from exc
         if (
             not target.is_file()
             or target.is_symlink()
@@ -501,19 +386,19 @@ def verify_materialized_package_members(
             or file_digest(target) != record["member_sha256"]
         ):
             raise RuntimeError(
-                f"已物化上游产物与锁定来源包不一致: {member_name}"
+                f"已物化上游产物与受治理来源包不一致: {member_name}"
             )
         verified.append(target)
     return tuple(verified)
 
 
-def copy_locked_package_sources(
+def copy_package_sources(
     root_path: Path,
     output_path: Path,
     paper_run_name: str,
     package_records: Iterable[dict[str, Any]],
 ) -> tuple[tuple[Path, ...], tuple[dict[str, Any], ...]]:
-    """把10个原始 ZIP 复制到完整包内部的确定性审计路径."""
+    """把受治理原始 ZIP 复制到完整包内部的确定性审计路径."""
 
     source_dir = output_path / "source_packages" / paper_run_name
     source_dir.mkdir(parents=True, exist_ok=True)
@@ -527,7 +412,7 @@ def copy_locked_package_sources(
         copied_digest = file_digest(copied_path)
         if copied_digest != record["source_package_sha256"]:
             copied_path.unlink(missing_ok=True)
-            raise RuntimeError(f"闭合输入包审计副本摘要不一致: {family}")
+            raise RuntimeError(f"来源包审计副本摘要不一致: {family}")
         copied_paths.append(copied_path)
         enriched_records.append(
             {
@@ -608,7 +493,7 @@ def collect_exact_complete_payload_entries(
     source_provenance_path: Path | None,
     excluded_paths: Iterable[Path],
 ) -> tuple[tuple[Path, ...], dict[str, Any]]:
-    """合并10包成员、closure gate 输入和固定重建依赖的精确集合."""
+    """合并聚合来源成员、结果门禁输入和固定重建依赖的精确集合."""
 
     excluded = {path.resolve() for path in excluded_paths}
     candidates = [
@@ -804,373 +689,6 @@ def _is_sha256(value: Any) -> bool:
     return len(text) == 64 and all(character in "0123456789abcdefABCDEF" for character in text)
 
 
-def _validate_candidate_repository_profile(
-    candidate: Any,
-    *,
-    root_path: Path,
-) -> None:
-    """把重新检查的包身份锚定到当前仓库正式依赖 profile.
-
-    包记录的精确字段集合由 ``candidate.to_lock_record()`` 统一提供. 此处只复验
-    profile registry 负责的环境身份, 不复制 closure selector 的完整包 schema.
-    """
-
-    profile_id = str(getattr(candidate, "scientific_profile_id", ""))
-    if not profile_id:
-        raise ClosurePackageSelectionError("闭合输入包缺少科学依赖 profile 身份")
-    profile = require_dependency_profile_ready(
-        profile_id,
-        root_path / "configs" / "dependency_profile_registry.json",
-    )
-    expected_values = {
-        "scientific_profile_id": profile.profile_name,
-        "scientific_profile_digest": profile.profile_digest,
-        "scientific_direct_requirements_digest": (
-            profile.direct_requirements_digest
-        ),
-        "scientific_complete_hash_lock_digest": (
-            profile.complete_hash_lock_digest
-        ),
-        "scientific_complete_hash_lock_dependency_count": (
-            profile.complete_hash_lock_dependency_count
-        ),
-    }
-    candidate_record = candidate.to_lock_record()
-    if any(
-        candidate_record.get(field_name) != expected_value
-        for field_name, expected_value in expected_values.items()
-    ):
-        raise ClosurePackageSelectionError(
-            "闭合输入包的科学依赖身份与当前仓库 profile 不一致"
-        )
-
-
-def _validate_locked_package_files(
-    records: Iterable[dict[str, Any]],
-    explicit_packages: Iterable[Path],
-) -> tuple[bool, bool]:
-    """复算锁记录引用的 ZIP 摘要并核对显式输入集合."""
-
-    record_list = tuple(records)
-    explicit_paths = {path.resolve() for path in explicit_packages}
-    locked_paths: set[Path] = set()
-    package_digests_ready = bool(record_list)
-    for row in record_list:
-        try:
-            raw_path = str(row.get("package_path", "")).strip()
-            package_path = Path(raw_path).expanduser()
-            resolved_package_path = package_path.resolve()
-        except (OSError, RuntimeError, ValueError):
-            package_digests_ready = False
-            continue
-        if not raw_path or not package_path.is_absolute():
-            package_digests_ready = False
-            continue
-        locked_paths.add(resolved_package_path)
-        declared_digest = str(row.get("package_sha256", "")).strip().lower()
-        try:
-            digest_matches = (
-                resolved_package_path.is_file()
-                and _is_sha256(declared_digest)
-                and file_digest(resolved_package_path) == declared_digest
-            )
-        except OSError:
-            digest_matches = False
-        if not digest_matches:
-            package_digests_ready = False
-    explicit_paths_ready = (
-        len(explicit_paths) == len(CLOSURE_PACKAGE_FAMILY_SPECS)
-        and explicit_paths == locked_paths
-    )
-    return package_digests_ready, explicit_paths_ready
-
-
-def _require_final_locked_package_hashes(
-    root_path: Path,
-    *,
-    paper_run_name: str,
-    explicit_packages: Iterable[Path],
-) -> None:
-    """归档写出后再次确认10个闭合输入包未发生字节漂移."""
-
-    lock_path = (
-        root_path
-        / "outputs"
-        / "paper_result_closure"
-        / paper_run_name
-        / "closure_input_lock.json"
-    )
-    lock_payload = read_json(lock_path)
-    records_value = lock_payload.get("closure_input_packages")
-    if not isinstance(records_value, list) or not all(
-        isinstance(row, dict) for row in records_value
-    ):
-        raise RuntimeError("归档写出后无法读取完整闭合输入包锁")
-    records = [dict(row) for row in records_value]
-    digests_ready, paths_ready = _validate_locked_package_files(
-        records,
-        explicit_packages,
-    )
-    if (
-        len(records) != len(CLOSURE_PACKAGE_FAMILY_SPECS)
-        or not digests_ready
-        or not paths_ready
-    ):
-        raise RuntimeError("归档写出后闭合输入包路径或摘要发生漂移")
-
-
-def build_closure_input_lock_status(
-    root_path: Path,
-    *,
-    paper_run_name: str,
-    target_fpr: float,
-    explicit_packages: Iterable[Path],
-) -> dict[str, Any]:
-    """核验当前运行层级 closure input lock 与显式输入包。
-
-    锁文件只证明“曾经选择过”某些包还不够。完整包生成前必须重新计算每个
-    zip 的 SHA-256, 并确认显式 ``--package-path`` 集合与锁定集合完全相同。
-    这一检查可以阻止锁生成后包内容被替换, 也可以阻止打包器静默消费另一批包。
-    """
-
-    paper_run = build_paper_run_config(root_path)
-    if paper_run.run_name != paper_run_name or not _same_float(
-        paper_run.target_fpr,
-        target_fpr,
-    ):
-        raise ValueError("完整包锁校验身份与当前论文运行配置不一致")
-
-    lock_path = (
-        root_path
-        / "outputs"
-        / "paper_result_closure"
-        / paper_run_name
-        / "closure_input_lock.json"
-    )
-    lock_manifest_path = lock_path.parent / "input_lock_manifest.local.json"
-    validation_errors: list[str] = []
-    try:
-        lock_payload = read_json(lock_path)
-        lock_manifest = read_json(lock_manifest_path)
-    except Exception as error:
-        lock_payload = {}
-        lock_manifest = {}
-        validation_errors.append(
-            "closure_input_lock_read_failed:"
-            f"{type(error).__name__}:{error}"
-        )
-    records_value = lock_payload.get("closure_input_packages", ())
-    records = (
-        [dict(row) for row in records_value if isinstance(row, dict)]
-        if isinstance(records_value, list)
-        else []
-    )
-    records_shape_ready = isinstance(records_value, list) and len(records) == len(records_value)
-    expected_families = tuple(spec.package_family for spec in CLOSURE_PACKAGE_FAMILY_SPECS)
-    observed_families = [str(row.get("package_family", "")) for row in records]
-    family_ready = (
-        records_shape_ready
-        and len(records) == len(expected_families)
-        and len(set(observed_families)) == len(expected_families)
-        and set(observed_families) == set(expected_families)
-        and lock_payload.get("closure_input_package_count") == len(expected_families)
-    )
-    scope_ready = (
-        lock_payload.get("paper_run_name") == paper_run_name
-        and _same_float(lock_payload.get("target_fpr"), target_fpr)
-        and all(row.get("paper_run_name") == paper_run_name for row in records)
-        and all(_same_float(row.get("target_fpr"), target_fpr) for row in records)
-    )
-    declared_common_code_version = lock_payload.get("common_code_version")
-    try:
-        common_code_version = normalize_clean_code_version(declared_common_code_version)
-        record_code_versions = {
-            normalize_clean_code_version(row.get("code_version")) for row in records
-        }
-        common_code_version_ready = record_code_versions == {common_code_version}
-    except ClosurePackageSelectionError:
-        common_code_version = ""
-        common_code_version_ready = False
-    declared_lock_digest = str(lock_payload.get("closure_input_lock_digest", ""))
-    digest_payload = dict(lock_payload)
-    digest_payload.pop("closure_input_lock_digest", None)
-    digest_ready = _is_sha256(declared_lock_digest) and declared_lock_digest == build_stable_digest(digest_payload)
-
-    package_digests_ready, explicit_paths_ready = _validate_locked_package_files(
-        records,
-        explicit_packages,
-    )
-    package_metadata_ready = bool(records) and all(
-        Path(str(row.get("package_path", ""))).is_absolute()
-        and bool(str(row.get("code_version", "")).strip())
-        and bool(str(row.get("generated_at", "")).strip())
-        for row in records
-    )
-    lock_relative = relative_or_absolute(lock_path, root_path)
-    lock_manifest_relative = relative_or_absolute(lock_manifest_path, root_path)
-    manifest_output_paths_value = lock_manifest.get("output_paths", ())
-    manifest_output_paths = (
-        {
-            str(path).replace("\\", "/")
-            for path in manifest_output_paths_value
-            if str(path).strip()
-        }
-        if isinstance(manifest_output_paths_value, list | tuple)
-        else set()
-    )
-    manifest_input_paths_value = lock_manifest.get("input_paths", ())
-    manifest_input_paths = (
-        [str(path).replace("\\", "/") for path in manifest_input_paths_value]
-        if isinstance(manifest_input_paths_value, list | tuple)
-        else []
-    )
-    manifest_metadata = lock_manifest.get("metadata", {})
-    expected_manifest_config_digest = build_stable_digest(
-        {
-            "paper_run_name": paper_run_name,
-            "target_fpr": target_fpr,
-            "common_code_version": common_code_version,
-            "closure_input_packages": records,
-            "randomization_repeat_identity": lock_payload.get(
-                "randomization_repeat_identity"
-            ),
-            "repeat_component_input_ready": True,
-            "randomization_aggregate_ready": False,
-            "supports_paper_claim": False,
-        }
-    )
-    manifest_ready = (
-        lock_manifest.get("artifact_id") == f"{paper_run_name}_closure_input_lock_manifest"
-        and lock_manifest.get("artifact_type") == "local_manifest"
-        and lock_relative in manifest_output_paths
-        and lock_manifest_relative in manifest_output_paths
-        and manifest_input_paths == [str(row.get("package_path", "")).replace("\\", "/") for row in records]
-        and lock_manifest.get("config_digest") == expected_manifest_config_digest
-        and isinstance(manifest_metadata, dict)
-        and manifest_metadata.get("closure_input_lock_ready") is True
-        and manifest_metadata.get("closure_input_package_count") == len(expected_families)
-        and manifest_metadata.get("closure_input_packages") == records
-        and manifest_metadata.get("closure_input_lock_digest") == declared_lock_digest
-        and manifest_metadata.get("paper_run_name") == paper_run_name
-        and _same_float(manifest_metadata.get("target_fpr"), target_fpr)
-        and manifest_metadata.get("common_code_version") == common_code_version
-    )
-    semantic_validation_ready = False
-    try:
-        validate_closure_input_lock_payloads(
-            lock_payload,
-            lock_manifest,
-            paper_run_name=paper_run_name,
-            target_fpr=target_fpr,
-            randomization_repeat_id=paper_run.randomization_repeat_id,
-        )
-        semantic_validation_ready = True
-    except Exception as error:
-        validation_errors.append(
-            "closure_input_lock_semantic_validation_failed:"
-            f"{type(error).__name__}:{error}"
-        )
-
-    spec_by_family = {
-        spec.package_family: spec for spec in CLOSURE_PACKAGE_FAMILY_SPECS
-    }
-    package_inspection_ready = records_shape_ready and len(records) == len(
-        expected_families
-    )
-    repository_profiles_ready = package_inspection_ready
-    for row in records:
-        family = str(row.get("package_family", ""))
-        spec = spec_by_family.get(family)
-        if spec is None:
-            package_inspection_ready = False
-            repository_profiles_ready = False
-            validation_errors.append(
-                f"closure_input_package_family_unknown:{family}"
-            )
-            continue
-        try:
-            candidate = inspect_closure_package(
-                Path(str(row.get("package_path", ""))),
-                spec=spec,
-                paper_run_name=paper_run_name,
-                target_fpr=target_fpr,
-                randomization_repeat_id=paper_run.randomization_repeat_id,
-            )
-        except Exception as error:
-            package_inspection_ready = False
-            repository_profiles_ready = False
-            validation_errors.append(
-                "closure_input_package_inspection_failed:"
-                f"{family}:{type(error).__name__}:{error}"
-            )
-            continue
-        try:
-            _validate_candidate_repository_profile(
-                candidate,
-                root_path=root_path,
-            )
-        except Exception as error:
-            repository_profiles_ready = False
-            validation_errors.append(
-                "closure_input_repository_profile_validation_failed:"
-                f"{family}:{type(error).__name__}:{error}"
-            )
-        try:
-            candidate_record = candidate.to_lock_record()
-        except Exception as error:
-            package_inspection_ready = False
-            validation_errors.append(
-                "closure_input_candidate_record_failed:"
-                f"{family}:{type(error).__name__}:{error}"
-            )
-            continue
-        if candidate_record != row:
-            package_inspection_ready = False
-            validation_errors.append(
-                f"closure_input_package_lock_record_mismatch:{family}"
-            )
-    lock_ready = all(
-        (
-            lock_path.is_file(),
-            lock_manifest_path.is_file(),
-            family_ready,
-            scope_ready,
-            digest_ready,
-            explicit_paths_ready,
-            package_digests_ready,
-            package_metadata_ready,
-            common_code_version_ready,
-            manifest_ready,
-            semantic_validation_ready,
-            package_inspection_ready,
-            repository_profiles_ready,
-        )
-    )
-    return {
-        "closure_input_lock_path": lock_relative,
-        "closure_input_lock_present": lock_path.is_file(),
-        "closure_input_lock_manifest_path": lock_manifest_relative,
-        "closure_input_lock_manifest_ready": manifest_ready,
-        "closure_input_lock_digest": declared_lock_digest,
-        "closure_input_lock_digest_ready": digest_ready,
-        "closure_input_package_count": len(records),
-        "closure_input_family_ready": family_ready,
-        "closure_input_scope_ready": scope_ready,
-        "closure_input_explicit_paths_ready": explicit_paths_ready,
-        "closure_input_package_digests_ready": package_digests_ready,
-        "closure_input_package_metadata_ready": package_metadata_ready,
-        "closure_input_lock_semantic_validation_ready": (
-            semantic_validation_ready
-        ),
-        "closure_input_package_inspection_ready": package_inspection_ready,
-        "closure_input_repository_profiles_ready": repository_profiles_ready,
-        "failure_reasons": validation_errors,
-        "common_code_version": common_code_version,
-        "closure_input_common_code_version_ready": common_code_version_ready,
-        "closure_input_lock_ready": lock_ready,
-    }
-
-
 def build_result_closure_gate_status(
     root_path: Path,
     *,
@@ -1363,8 +881,7 @@ def build_readiness_summary(
     required_output_dirs: Iterable[str],
     *,
     target_fpr: float,
-    explicit_packages: Iterable[Path],
-    closure_input_lock_status: dict[str, Any] | None = None,
+    randomization_aggregate_status: dict[str, Any],
     source_provenance_status: dict[str, Any] | None = None,
     exact_payload_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1390,21 +907,19 @@ def build_readiness_summary(
     )
     entry_list = tuple(entries)
     run_claim_ready = common_protocol_summary.get("paper_run_claim_ready") is True
-    resolved_closure_input_lock_status = (
-        dict(closure_input_lock_status)
-        if closure_input_lock_status is not None
-        else build_closure_input_lock_status(
-            root_path,
-            paper_run_name=paper_claim_scale,
-            target_fpr=target_fpr,
-            explicit_packages=explicit_packages,
-        )
+    resolved_randomization_aggregate_status = dict(
+        randomization_aggregate_status
     )
     result_closure_gate_status = build_result_closure_gate_status(
         root_path,
         paper_run_name=paper_claim_scale,
         target_fpr=target_fpr,
-        expected_code_version=resolved_closure_input_lock_status["common_code_version"],
+        expected_code_version=str(
+            resolved_randomization_aggregate_status.get(
+                "common_code_version",
+                "",
+            )
+        ),
     )
     dependency_lock_status = build_dependency_lock_status(
         root_path,
@@ -1415,7 +930,10 @@ def build_readiness_summary(
         and not manifestless_dirs
         and bool(entry_list)
         and run_claim_ready
-        and resolved_closure_input_lock_status["closure_input_lock_ready"]
+        and resolved_randomization_aggregate_status.get(
+            "randomization_aggregate_ready"
+        )
+        is True
         and result_closure_gate_status["result_closure_ready"]
         and dependency_lock_status["dependency_hash_locks_ready"]
         and resolved_exact_payload_status.get("exact_payload_source_ready") is True
@@ -1442,7 +960,7 @@ def build_readiness_summary(
         "archive_entry_count": len(entry_list),
         "archive_entry_digest": build_stable_digest(entry_paths),
         "materialization_report": materialization_report,
-        **resolved_closure_input_lock_status,
+        **resolved_randomization_aggregate_status,
         **result_closure_gate_status,
         **dependency_lock_status,
         **resolved_exact_payload_status,
@@ -1581,7 +1099,8 @@ def require_complete_package_readiness(summary: dict[str, Any]) -> None:
     raise RuntimeError(
         "完整结果包 readiness 未通过, 拒绝创建 zip 或复制 Drive: "
         f"paper_run_claim_ready={summary.get('paper_run_claim_ready')};"
-        f"closure_input_lock_ready={summary.get('closure_input_lock_ready')};"
+        "randomization_aggregate_ready="
+        f"{summary.get('randomization_aggregate_ready')};"
         f"result_closure_ready={summary.get('result_closure_ready')};"
         f"dependency_hash_locks_ready={summary.get('dependency_hash_locks_ready')};"
         f"missing_dirs={missing_dirs};manifestless_dirs={manifestless_dirs}"
@@ -1599,379 +1118,12 @@ def _validate_archive_name(archive_name: str) -> str:
 
 
 def write_pilot_paper_complete_result_package_outputs(
-    *,
-    root: str | Path = ".",
-    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
-    drive_output_dir: str | None = None,
-    archive_name: str | None = None,
-    package_paths: Iterable[str | Path] = (),
-    materialize_packages: bool = True,
-    zip_compression: str = "stored",
+    *args: Any,
+    **kwargs: Any,
 ) -> dict[str, Any]:
-    """写出当前论文运行层级的完整结果包与包外 archive receipt。"""
+    """验证精确9重复聚合来源后写出完整结果包."""
 
-    root_path = Path(root).resolve()
-    formal_execution_run_lock = (
-        repository_environment.require_published_formal_execution_lock(root_path)
-    )
-    paper_run = build_paper_run_config(root_path)
-    resolved_drive_output_dir = (
-        paper_run.drive_dir("complete_result_package") if drive_output_dir is None else drive_output_dir
-    )
-    resolved_archive_name = _validate_archive_name(
-        archive_name or f"{paper_run.run_name}_complete_result_package.zip"
-    )
-    compression_method = ZIP_COMPRESSION_METHODS.get(str(zip_compression).strip().lower())
-    if compression_method is None:
-        raise ValueError(f"未知完整结果包 zip 压缩方式: {zip_compression}")
-
-    output_path = ensure_output_dir_under_outputs(root_path, output_dir)
-    archive_path = output_path / resolved_archive_name
-    receipt_path = output_path / f"{Path(resolved_archive_name).stem}_archive_receipt.json"
-    package_manifest_path = output_path / f"{paper_run.run_name}_complete_package_input_manifest.json"
-    source_provenance_path = (
-        output_path
-        / f"{paper_run.run_name}_complete_package_source_provenance.json"
-    )
-    summary_path = output_path / f"{paper_run.run_name}_complete_package_readiness_summary.json"
-    manifest_path = output_path / f"{paper_run.run_name}_complete_package_manifest.local.json"
-    for stale_path in (
-        archive_path,
-        receipt_path,
-        package_manifest_path,
-        source_provenance_path,
-        summary_path,
-        manifest_path,
-    ):
-        if stale_path.exists():
-            stale_path.unlink()
-
-    packages = resolve_explicit_package_paths(root_path, package_paths)
-    materialization_report = (
-        materialize_output_entries(root_path, packages)
-        if packages and materialize_packages
-        else build_empty_materialization_report(packages, materialize_packages=materialize_packages)
-    )
-    required_output_dirs = build_required_output_dirs(paper_run.run_name)
-    package_extra_paths = build_package_extra_paths(paper_run.prompt_file)
-    excluded_paths = (
-        archive_path,
-        receipt_path,
-        package_manifest_path,
-        source_provenance_path,
-        summary_path,
-        manifest_path,
-    )
-    closure_input_lock_status = build_closure_input_lock_status(
-        root_path,
-        paper_run_name=paper_run.run_name,
-        target_fpr=paper_run.target_fpr,
-        explicit_packages=packages,
-    )
-    gate_source_entries, gate_source_map, gate_source_map_ready = (
-        collect_result_closure_source_entries(
-            root_path,
-            paper_run_name=paper_run.run_name,
-            excluded_paths=excluded_paths,
-        )
-    )
-    package_member_paths: tuple[Path, ...] = ()
-    copied_source_package_paths: tuple[Path, ...] = ()
-    source_provenance_status: dict[str, Any] = {
-        "complete_package_source_provenance_path": relative_or_absolute(
-            source_provenance_path,
-            root_path,
-        ),
-        "complete_package_source_provenance_ready": False,
-        "complete_package_source_package_count": 0,
-        "complete_package_source_package_member_count": 0,
-        "complete_package_gate_source_map_ready": gate_source_map_ready,
-        "complete_package_source_failure_reasons": [],
-    }
-    if closure_input_lock_status.get("closure_input_lock_ready") is True:
-        try:
-            package_records, package_output_members = (
-                build_locked_package_source_records(
-                    root_path,
-                    paper_run_name=paper_run.run_name,
-                    explicit_packages=packages,
-                )
-            )
-            package_member_paths = verify_materialized_package_members(
-                root_path,
-                package_output_members,
-            )
-            (
-                copied_source_package_paths,
-                enriched_package_records,
-            ) = copy_locked_package_sources(
-                root_path,
-                output_path,
-                paper_run.run_name,
-                package_records,
-            )
-            source_provenance_ready = (
-                gate_source_map_ready
-                and len(enriched_package_records)
-                == len(CLOSURE_PACKAGE_FAMILY_SPECS)
-                and len(copied_source_package_paths)
-                == len(CLOSURE_PACKAGE_FAMILY_SPECS)
-            )
-            source_provenance = {
-                "report_schema": "complete_package_source_provenance",
-                "schema_version": 1,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
-                "paper_claim_scale": paper_run.run_name,
-                "target_fpr": paper_run.target_fpr,
-                "closure_input_lock_path": closure_input_lock_status[
-                    "closure_input_lock_path"
-                ],
-                "closure_input_lock_digest": closure_input_lock_status[
-                    "closure_input_lock_digest"
-                ],
-                "input_package_count": len(enriched_package_records),
-                "input_packages": list(enriched_package_records),
-                "package_output_member_count": len(package_output_members),
-                "package_output_member_records": [
-                    package_output_members[path]
-                    for path in sorted(package_output_members)
-                ],
-                "result_closure_gate_source_file_sha256": gate_source_map,
-                "result_closure_gate_source_file_digest": build_stable_digest(
-                    gate_source_map
-                ),
-                "result_closure_gate_source_map_ready": gate_source_map_ready,
-                "decision": "pass" if source_provenance_ready else "blocked",
-                "supports_paper_claim": False,
-            }
-            write_json(source_provenance_path, source_provenance)
-            source_provenance_status.update(
-                {
-                    "complete_package_source_provenance_ready": (
-                        source_provenance_ready
-                    ),
-                    "complete_package_source_package_count": len(
-                        enriched_package_records
-                    ),
-                    "complete_package_source_package_member_count": sum(
-                        int(record["member_count"])
-                        for record in enriched_package_records
-                    ),
-                    "complete_package_source_failure_reasons": (
-                        []
-                        if source_provenance_ready
-                        else ["result_closure_gate_source_map_not_ready"]
-                    ),
-                }
-            )
-        except Exception as error:
-            source_provenance_status[
-                "complete_package_source_failure_reasons"
-            ] = [
-                "complete_package_source_provenance_failed:"
-                f"{type(error).__name__}:{error}"
-            ]
-    else:
-        source_provenance_status[
-            "complete_package_source_failure_reasons"
-        ] = ["closure_input_lock_not_ready"]
-
-    payload_entries, exact_payload_status = collect_exact_complete_payload_entries(
-        root_path,
-        required_output_dirs=required_output_dirs,
-        package_extra_paths=package_extra_paths,
-        package_member_paths=package_member_paths,
-        gate_source_paths=gate_source_entries,
-        source_package_paths=copied_source_package_paths,
-        source_provenance_path=(
-            source_provenance_path if source_provenance_path.is_file() else None
-        ),
-        excluded_paths=(
-            archive_path,
-            receipt_path,
-            package_manifest_path,
-            summary_path,
-            manifest_path,
-        ),
-    )
-    internal_metadata_entries = (package_manifest_path, summary_path, manifest_path)
-    archive_entries = (*payload_entries, *internal_metadata_entries)
-    # 在任何 readiness 校验前冻结 payload 字节. 校验期间或校验后发生的输出漂移
-    # 都会在 ZIP 写后复验中失败, 而不能进入完整结果包.
-    payload_archive_entry_records = build_archive_entry_records(
-        root_path,
-        payload_entries,
-    )
-    readiness_summary = build_readiness_summary(
-        root_path,
-        archive_entries,
-        materialization_report,
-        paper_run.run_name,
-        required_output_dirs,
-        target_fpr=paper_run.target_fpr,
-        explicit_packages=packages,
-        closure_input_lock_status=closure_input_lock_status,
-        source_provenance_status=source_provenance_status,
-        exact_payload_status=exact_payload_status,
-    )
-    formal_execution_package_lock = (
-        repository_environment.require_published_formal_execution_lock(root_path)
-    )
-    repository_environment.validate_formal_execution_lock_pair(
-        formal_execution_run_lock,
-        formal_execution_package_lock,
-        formal_execution_run_lock["formal_execution_commit"],
-    )
-    payload_entry_paths = [relative_or_absolute(path, root_path) for path in payload_entries]
-    archive_entry_paths = [relative_or_absolute(path, root_path) for path in archive_entries]
-    entry_payload_digest = build_entry_payload_digest(root_path, payload_entries)
-    package_manifest = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "paper_claim_scale": paper_run.run_name,
-        "payload_entry_paths": payload_entry_paths,
-        "payload_entry_count": len(payload_entry_paths),
-        "entry_paths": archive_entry_paths,
-        "entry_count": len(archive_entry_paths),
-        "entry_paths_digest": build_stable_digest(archive_entry_paths),
-        "entry_payload_digest": entry_payload_digest,
-        "formal_execution_run_lock": formal_execution_run_lock,
-        "formal_execution_package_lock": formal_execution_package_lock,
-    }
-    write_json(package_manifest_path, package_manifest)
-    write_json(summary_path, readiness_summary)
-
-    rebuild_arguments = [
-        "python",
-        "scripts/write_pilot_paper_complete_result_package.py",
-        "--root",
-        root_path.as_posix(),
-        "--output-dir",
-        relative_or_absolute(output_path, root_path),
-        "--archive-name",
-        resolved_archive_name,
-        "--drive-output-dir",
-        str(resolved_drive_output_dir),
-        "--zip-compression",
-        str(zip_compression),
-    ]
-    for package_path in packages:
-        rebuild_arguments.extend(("--package-path", package_path.as_posix()))
-    if not materialize_packages:
-        rebuild_arguments.append("--skip-package-materialization")
-
-    manifest = build_artifact_manifest(
-        artifact_id="pilot_paper_complete_result_package_manifest",
-        artifact_type="local_manifest",
-        input_paths=tuple(
-            [relative_or_absolute(path, root_path) for path in packages]
-            + payload_entry_paths
-        ),
-        output_paths=(
-            relative_or_absolute(archive_path, root_path),
-            relative_or_absolute(package_manifest_path, root_path),
-            relative_or_absolute(source_provenance_path, root_path),
-            relative_or_absolute(summary_path, root_path),
-            relative_or_absolute(manifest_path, root_path),
-            relative_or_absolute(receipt_path, root_path),
-        ),
-        config={
-            "archive_name": resolved_archive_name,
-            "drive_output_dir": resolved_drive_output_dir,
-            "required_output_dirs": list(required_output_dirs),
-            "explicit_package_paths": [relative_or_absolute(path, root_path) for path in packages],
-            "materialize_packages": materialize_packages,
-            "zip_compression": str(zip_compression),
-        },
-        code_version=formal_execution_package_lock["formal_execution_commit"],
-        rebuild_command=subprocess.list2cmdline(rebuild_arguments),
-        metadata={
-            **readiness_summary,
-            "archive_payload_digest": entry_payload_digest,
-            "archive_digest_scope": "final_zip_bytes_external_sidecar",
-            "final_archive_digest_available_in_sidecar": True,
-        },
-    ).to_dict()
-    manifest["formal_execution_run_lock"] = formal_execution_run_lock
-    manifest["formal_execution_package_lock"] = formal_execution_package_lock
-    write_json(manifest_path, manifest)
-
-    # 门禁必须位于 ZipFile 构造与 Drive 目录创建之前。失败时保留 readiness
-    # summary 供审计, 但绝不产生看似可用的归档或远端副本。
-    require_complete_package_readiness(readiness_summary)
-    repository_environment.verify_formal_execution_lock_code_version(
-        formal_execution_package_lock,
-        readiness_summary.get("common_code_version"),
-    )
-    final_gate_status = build_result_closure_gate_status(
-        root_path,
-        paper_run_name=paper_run.run_name,
-        target_fpr=paper_run.target_fpr,
-        expected_code_version=str(readiness_summary["common_code_version"]),
-    )
-    if final_gate_status.get("result_closure_ready") is not True:
-        raise RuntimeError("归档前结果闭合门禁输入字节绑定已失效, 拒绝创建 zip 或复制 Drive")
-    archive_entry_records = (
-        *payload_archive_entry_records,
-        *build_archive_entry_records(root_path, internal_metadata_entries),
-    )
-    try:
-        write_archive_with_progress(
-            root_path,
-            archive_path,
-            archive_entries,
-            compression_method,
-        )
-        validate_written_archive_entries(archive_path, archive_entry_records)
-        _require_final_locked_package_hashes(
-            root_path,
-            paper_run_name=paper_run.run_name,
-            explicit_packages=packages,
-        )
-        final_package_lock = (
-            repository_environment.require_published_formal_execution_lock(root_path)
-        )
-        repository_environment.validate_formal_execution_lock_pair(
-            formal_execution_package_lock,
-            final_package_lock,
-            formal_execution_package_lock["formal_execution_commit"],
-        )
-    except Exception:
-        archive_path.unlink(missing_ok=True)
-        raise
-    archive_digest = file_digest_with_progress(archive_path, "paper run complete package digest")
-
-    drive_archive_path = ""
-    drive_archive_digest = ""
-    drive_dir: Path | None = None
-    if resolved_drive_output_dir:
-        drive_dir = Path(resolved_drive_output_dir).expanduser()
-        drive_dir.mkdir(parents=True, exist_ok=True)
-        mirrored_path = drive_dir / resolved_archive_name
-        copy_file_with_progress(archive_path, mirrored_path, "paper run complete package drive copy")
-        drive_archive_path = str(mirrored_path)
-        drive_archive_digest = archive_digest
-
-    receipt = CompletePackageArchiveReceipt(
-        archive_path=relative_or_absolute(archive_path, root_path),
-        archive_digest=archive_digest,
-        archive_entry_count=len(archive_entries),
-        drive_archive_path=drive_archive_path,
-        drive_archive_digest=drive_archive_digest,
-        metadata={
-            **readiness_summary,
-            "archive_payload_digest": entry_payload_digest,
-            "archive_digest_scope": "final_zip_bytes_external_sidecar",
-            "final_archive_digest_available_in_sidecar": True,
-        },
-    ).to_dict()
-    write_json(receipt_path, receipt)
-    if drive_dir is not None:
-        copy_file_with_progress(
-            receipt_path,
-            drive_dir / receipt_path.name,
-            "paper run complete package receipt drive copy",
-        )
-    return receipt
+    return require_exact9_randomization_aggregate_provenance()
 
 
 def build_parser() -> argparse.ArgumentParser:

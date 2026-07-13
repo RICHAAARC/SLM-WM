@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from paper_experiments.runners.paper_claim_provenance import (
+    require_exact9_randomization_aggregate_provenance,
+)
 from paper_experiments.baselines import (
     aggregate_baseline_metrics,
     aggregate_slm_metrics,
@@ -283,7 +286,7 @@ def build_runtime_report(
         "baseline_source_registry_ready": bool(source_registry.get("baseline_sources")),
         "unsupported_reasons": unsupported_reasons,
         "attack_manifest_supports_paper_claim": bool(attack_manifest.get("supports_paper_claim", False)),
-        "full_method_claim_ready": False,
+        "full_method_component_ready": False,
         "supports_paper_claim": comparison_table_supports_paper_claim,
     }
 
@@ -326,263 +329,10 @@ def align_comparison_table_claim_scope(
             row["supports_paper_claim"] = False
 
 
-def write_external_baseline_comparison_outputs(
-    root: str | Path = ".",
-    output_dir: str | Path | None = None,
-    attack_manifest_path: str | Path | None = None,
-    attack_family_metrics_path: str | Path | None = None,
-    attack_matrix_manifest_path: str | Path | None = None,
-    threshold_report_path: str | Path | None = None,
-    baseline_result_records_path: str | Path | None = None,
-    baseline_source_registry_path: str | Path = DEFAULT_BASELINE_SOURCE_REGISTRY_PATH,
-    evidence_search_roots: Iterable[str | Path] | None = None,
-) -> dict[str, Any]:
-    """写出外部 baseline 对比 records, 表格, 运行报告与 manifest。"""
-    root_path = Path(root).resolve()
-    paper_run = build_paper_run_config(root_path)
-    resolved_output_dir = ensure_output_dir_under_outputs(
-        root_path,
-        Path(output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name),
-    )
-    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+def write_external_baseline_comparison_outputs(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """在精确9重复原始记录重算 Writer 就绪前拒绝正式结论物化."""
 
-    resolved_attack_manifest_path = resolve_input_path(
-        root_path,
-        attack_manifest_path or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "attack_manifest.json",
-    )
-    resolved_attack_family_metrics_path = resolve_input_path(
-        root_path,
-        attack_family_metrics_path
-        or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "attack_family_metrics.csv",
-    )
-    resolved_attack_matrix_manifest_path = resolve_input_path(
-        root_path,
-        attack_matrix_manifest_path or DEFAULT_ATTACK_MATRIX_ROOT / paper_run.run_name / "manifest.local.json",
-    )
-    resolved_threshold_report_path = resolve_input_path(
-        root_path,
-        threshold_report_path
-        or DEFAULT_THRESHOLD_AUDIT_ROOT / paper_run.run_name / "threshold_audit_report.json",
-    )
-    resolved_baseline_result_records_path = resolve_input_path(
-        root_path,
-        baseline_result_records_path
-        or DEFAULT_BASELINE_RESULT_ROOT / paper_run.run_name / "baseline_result_records.jsonl",
-    )
-    resolved_baseline_source_registry_path = resolve_input_path(root_path, baseline_source_registry_path)
-    resolved_evidence_search_roots = parse_evidence_search_roots(evidence_search_roots)
-
-    attack_manifest = read_json(resolved_attack_manifest_path)
-    attack_matrix_manifest = read_json(resolved_attack_matrix_manifest_path)
-    threshold_report = read_json(resolved_threshold_report_path)
-    attack_rows = read_csv_rows(resolved_attack_family_metrics_path)
-    baseline_source_registry = load_baseline_source_registry(resolved_baseline_source_registry_path)
-    baseline_specs = overlay_specs_with_source_registry(
-        default_baseline_specs(),
-        baseline_source_registry,
-        root=root_path,
-    )
-    baseline_result_rows = read_jsonl_rows(resolved_baseline_result_records_path)
-    boundary = attack_manifest.get("evaluation_boundary", {})
-    if "target_fpr" not in boundary:
-        raise ValueError("攻击矩阵缺少当前论文运行的 target_fpr")
-    target_fpr = float(boundary["target_fpr"])
-    formal_import_validation = validate_primary_baseline_formal_import_rows(
-        baseline_result_rows,
-        evidence_root=root_path,
-        target_fpr=target_fpr,
-        require_existing_evidence=True,
-        evidence_search_roots=resolved_evidence_search_roots,
-        allowed_resource_profiles=("full_main", "full_extra"),
-    )
-    baseline_result_records = [
-        normalize_baseline_result_record(row) for row in formal_import_validation.get("accepted_records", [])
-    ]
-    execution_plans = build_primary_baseline_execution_plans(baseline_source_registry, root=root_path)
-    formal_template_rows = build_primary_result_templates(execution_plans, attack_rows, boundary)
-    formal_import_readiness_rows = build_primary_baseline_formal_import_readiness_rows(
-        baseline_result_rows,
-        formal_import_validation,
-    )
-    formal_import_readiness_summary = build_primary_baseline_formal_import_readiness_summary(
-        formal_import_readiness_rows
-    )
-    formal_template_coverage_rows = build_primary_baseline_formal_template_coverage_rows(
-        formal_template_rows,
-        baseline_result_rows,
-        formal_import_validation,
-    )
-    formal_template_coverage_summary = build_primary_baseline_formal_template_coverage_summary(
-        formal_template_coverage_rows
-    )
-    formal_evidence_collection_rows = build_primary_baseline_formal_evidence_collection_rows(
-        formal_template_rows,
-        baseline_result_rows,
-        formal_import_validation,
-        paper_run_name=paper_run.run_name,
-    )
-    formal_evidence_collection_summary = build_primary_baseline_formal_evidence_collection_summary(
-        formal_evidence_collection_rows
-    )
-    formal_evidence_path_summary = build_primary_baseline_formal_evidence_path_summary(
-        baseline_result_rows,
-        evidence_root=root_path,
-        evidence_search_roots=resolved_evidence_search_roots,
-    )
-
-    observations = build_baseline_observations(baseline_specs, attack_rows, boundary, baseline_result_records)
-    baseline_metric_rows = aggregate_baseline_metrics(observations)
-    slm_metrics = aggregate_slm_metrics(attack_rows)
-    comparison_rows = build_comparison_rows(slm_metrics, baseline_metric_rows)
-    formal_evidence_path_summary_path = (
-        resolved_output_dir / "baseline_formal_evidence_path_resolution_report.json"
-    )
-    runtime_report = build_runtime_report(
-        attack_manifest,
-        threshold_report,
-        baseline_metric_rows,
-        observations,
-        baseline_source_registry,
-        len(baseline_result_records),
-        formal_import_validation,
-        formal_import_readiness_summary,
-        formal_template_coverage_summary,
-        formal_evidence_collection_summary,
-        formal_evidence_path_summary,
-        relative_or_absolute(formal_evidence_path_summary_path, root_path),
-    )
-    align_comparison_table_claim_scope(baseline_metric_rows, comparison_rows, runtime_report)
-
-    observations_path = resolved_output_dir / "baseline_observations.jsonl"
-    imported_records_path = resolved_output_dir / "baseline_result_records.jsonl"
-    formal_import_validation_path = resolved_output_dir / "baseline_formal_import_validation_report.json"
-    metrics_path = resolved_output_dir / "baseline_metrics.csv"
-    comparison_path = resolved_output_dir / "baseline_comparison_table.csv"
-    runtime_report_path = resolved_output_dir / "baseline_runtime_report.json"
-    manifest_path = resolved_output_dir / "manifest.local.json"
-
-    observations_path.write_text("".join(json_line(row) for row in observations), encoding="utf-8")
-    imported_records_path.write_text(
-        "".join(json_line(record.to_dict()) for record in baseline_result_records),
-        encoding="utf-8",
-    )
-    write_csv(
-        metrics_path,
-        baseline_metric_rows,
-        [
-            "baseline_id",
-            "baseline_family",
-            "baseline_name",
-            "comparison_group",
-            "baseline_adapter_ready",
-            "baseline_official_code_ready",
-            "baseline_reproduced_result_ready",
-            "baseline_imported_result_ready",
-            "baseline_result_source",
-            "baseline_protocol_compatible",
-            "baseline_requires_gpu",
-            "baseline_requires_training",
-            "baseline_observation_count",
-            "baseline_result_ready_count",
-            "unsupported_record_count",
-            "metric_status",
-            "true_positive_rate",
-            "false_positive_rate",
-            "clean_false_positive_rate",
-            "attacked_false_positive_rate",
-            "quality_score_mean",
-            "unsupported_reason",
-            "supports_paper_claim",
-        ],
-    )
-    write_csv(
-        comparison_path,
-        comparison_rows,
-        [
-            "method_id",
-            "method_role",
-            "comparison_scope",
-            "common_prompt_protocol_ready",
-            "common_attack_protocol_ready",
-            "common_threshold_protocol_ready",
-            "metric_status",
-            "true_positive_rate",
-            "false_positive_rate",
-            "clean_false_positive_rate",
-            "attacked_false_positive_rate",
-            "quality_score_mean",
-            "supports_paper_claim",
-        ],
-    )
-    runtime_report_path.write_text(stable_json_text(runtime_report), encoding="utf-8")
-    formal_import_validation_path.write_text(stable_json_text(formal_import_validation), encoding="utf-8")
-    formal_evidence_path_summary_path.write_text(stable_json_text(formal_evidence_path_summary), encoding="utf-8")
-
-    output_paths = tuple(
-        relative_or_absolute(path, root_path)
-        for path in (
-            observations_path,
-            imported_records_path,
-            metrics_path,
-            comparison_path,
-            runtime_report_path,
-            formal_import_validation_path,
-            formal_evidence_path_summary_path,
-            manifest_path,
-        )
-    )
-    input_path_candidates = [
-        relative_or_absolute(resolved_attack_manifest_path, root_path),
-        relative_or_absolute(resolved_attack_family_metrics_path, root_path),
-        relative_or_absolute(resolved_attack_matrix_manifest_path, root_path),
-        relative_or_absolute(resolved_threshold_report_path, root_path),
-    ]
-    if resolved_baseline_result_records_path.exists():
-        input_path_candidates.append(relative_or_absolute(resolved_baseline_result_records_path, root_path))
-    if resolved_baseline_source_registry_path.exists():
-        input_path_candidates.append(relative_or_absolute(resolved_baseline_source_registry_path, root_path))
-    input_paths = tuple(input_path_candidates)
-    summary = {
-        "runtime_report": runtime_report,
-        "baseline_metrics": baseline_metric_rows,
-        "comparison_rows": comparison_rows,
-        "attack_matrix_manifest_digest": attack_matrix_manifest.get("config_digest", ""),
-        "source_registry_digest": build_stable_digest(baseline_source_registry) if baseline_source_registry else "",
-        "imported_result_digest": build_stable_digest([record.to_dict() for record in baseline_result_records])
-        if baseline_result_records
-        else "",
-        "formal_import_validation_digest": build_stable_digest(formal_import_validation),
-        "formal_import_readiness_digest": build_stable_digest(formal_import_readiness_rows),
-        "formal_template_coverage_digest": build_stable_digest(formal_template_coverage_rows),
-        "formal_evidence_collection_digest": build_stable_digest(formal_evidence_collection_rows),
-        "formal_evidence_path_summary_digest": build_stable_digest(formal_evidence_path_summary),
-    }
-    manifest = build_artifact_manifest(
-        artifact_id="external_baseline_comparison_manifest",
-        artifact_type="local_manifest",
-        input_paths=input_paths,
-        output_paths=output_paths,
-        config={
-            "baseline_spec_digest": build_stable_digest([spec.to_dict() for spec in baseline_specs]),
-            "summary_digest": build_stable_digest(summary),
-            "baseline_source_registry_path": relative_or_absolute(resolved_baseline_source_registry_path, root_path),
-            "baseline_result_records_path": relative_or_absolute(resolved_baseline_result_records_path, root_path),
-            "formal_import_validation_report_path": relative_or_absolute(formal_import_validation_path, root_path),
-            "formal_evidence_path_resolution_report_path": relative_or_absolute(
-                formal_evidence_path_summary_path,
-                root_path,
-            ),
-            "evidence_search_roots": list(resolved_evidence_search_roots),
-        },
-        code_version=resolve_code_version(root_path),
-        rebuild_command="python scripts/write_external_baseline_comparison_outputs.py",
-        metadata={
-            **runtime_report,
-            "baseline_result_ready": runtime_report["baseline_results_ready"],
-        },
-    ).to_dict()
-    manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
-    return manifest
+    require_exact9_randomization_aggregate_provenance()
 
 
 def build_parser() -> argparse.ArgumentParser:

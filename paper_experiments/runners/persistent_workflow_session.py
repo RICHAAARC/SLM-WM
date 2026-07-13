@@ -486,7 +486,7 @@ class PersistentWorkflowSession:
         """通过内层通用原语保存已通过完成门禁的整条 workflow.
 
         该快照仍声明 ``supports_paper_claim=false``. 它只允许断线后的计算重入,
-        不能替代各 workflow 的正式 archive、records 或闭合输入锁.
+        不能替代各 workflow 的正式 archive、records 或精确9+3聚合来源.
         """
 
         source_paths = tuple(

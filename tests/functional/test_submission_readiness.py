@@ -14,7 +14,6 @@ from paper_experiments.analysis.submission_readiness import (
     build_required_evidence_rows,
     build_submission_readiness_report,
 )
-from scripts.write_submission_readiness_outputs import write_submission_readiness_outputs
 
 
 def sample_gap_rows() -> tuple[dict, ...]:
@@ -181,33 +180,3 @@ def write_upstream_audit_outputs(tmp_path: Path) -> None:
         {"submission_ready": False, "blocking_claim_count": 2, "recommended_next_action": "先补齐关键证据缺口。"},
     )
     write_csv(audit_dir / "evidence_gap_list.csv", sample_gap_rows())
-
-
-@pytest.mark.quick
-def test_submission_readiness_outputs_are_rebuildable_and_claim_safe(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """脚本应从证据审计产物重建投稿就绪门禁报告, 且保持 claim 安全边界。"""
-
-    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "pilot_paper")
-    write_minimal_repository_files(tmp_path)
-    write_upstream_audit_outputs(tmp_path)
-
-    manifest = write_submission_readiness_outputs(root=tmp_path)
-    output_dir = tmp_path / "outputs" / "submission_readiness" / "pilot_paper"
-    required_rows = list(csv.DictReader((output_dir / "required_evidence_inputs.csv").open(encoding="utf-8")))
-    release_rows = list(csv.DictReader((output_dir / "release_profile_dry_run.csv").open(encoding="utf-8")))
-    report = json.loads((output_dir / "readiness_blocker_report.json").read_text(encoding="utf-8"))
-
-    assert manifest["artifact_id"] == "submission_readiness_manifest"
-    assert manifest["metadata"]["readiness_decision"] == "blocked"
-    assert report["submission_ready"] is False
-    assert report["release_dry_run_ready"] is False
-    assert {row["required_input_id"] for row in required_rows} == {"gap_real_attacked_image_closed_loop", "gap_baseline_results"}
-    assert {row["release_profile_name"] for row in release_rows} == {
-        "paper_experiment_execution_package",
-        "minimal_method_package",
-        "paper_artifact_rebuild_package",
-    }
-    assert all(row["supports_paper_claim"] == "False" for row in required_rows + release_rows)

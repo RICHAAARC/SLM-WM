@@ -139,7 +139,10 @@ def test_child_command_covers_gpu_and_cpu_closure_routes(tmp_path: Path) -> None
         "python_executable_sha256": "c" * 64,
     }
     gpu_arguments = argparse.Namespace(
-        **common,
+        **{
+            **common,
+            "randomization_repeat_id": "seed_00_key_00",
+        },
         operation="gpu",
         workflow="external_baseline_tree_ring",
     )
@@ -155,24 +158,106 @@ def test_child_command_covers_gpu_and_cpu_closure_routes(tmp_path: Path) -> None
         str(Path("/repository/scripts/formal_workflow_entry.py")),
     ]
     assert gpu_command[gpu_command.index("--workflow") + 1] == "external_baseline_tree_ring"
+    assert (
+        gpu_command[gpu_command.index("--randomization-repeat-id") + 1]
+        == "seed_00_key_00"
+    )
 
-    closure_arguments = argparse.Namespace(
+    repeat_evidence_arguments = argparse.Namespace(
         **{
             **common,
             "package_search_root": "/drive/probe_paper_results",
-            "complete_output_dir": "/drive/probe_paper_results/complete_result_package",
+            "randomization_repeat_id": "seed_00_key_00",
         },
-        operation="closure",
+        operation="repeat_evidence",
         workflow=None,
     )
-    closure_command = host_launcher.build_child_command(
-        closure_arguments,
+    repeat_evidence_command = host_launcher.build_child_command(
+        repeat_evidence_arguments,
         python_executable,
         Path("/repository"),
         bootstrap_identity,
     )
-    assert "--package-search-root" in closure_command
-    assert "--complete-output-dir" in closure_command
+    assert "--package-search-root" in repeat_evidence_command
+    assert "--randomization-repeat-id" in repeat_evidence_command
+    assert "--complete-output-dir" not in repeat_evidence_command
+
+
+@pytest.mark.quick
+def test_child_command_rejects_missing_or_misplaced_repeat_identity(
+    tmp_path: Path,
+) -> None:
+    """父入口不得为活动与不变 GPU 路由推断或混用 repeat 身份."""
+
+    python_executable = tmp_path / "python"
+    common = {
+        "root": ".",
+        "repository_commit": "a" * 40,
+        "paper_run_name": "probe_paper",
+        "result_path": "outputs/result.json",
+        "persistent_output_dir": "",
+        "package_search_root": "",
+        "complete_output_dir": "",
+        "dry_run": False,
+    }
+    bootstrap_identity = {
+        "profile_id": "workflow_orchestrator",
+        "python_version": "3.12.13",
+        "complete_hash_lock_digest": "b" * 64,
+        "python_executable": str(python_executable),
+        "python_executable_sha256": "c" * 64,
+    }
+    missing_repeat = argparse.Namespace(
+        **{**common, "randomization_repeat_id": ""},
+        operation="gpu",
+        workflow="image_only_dataset",
+    )
+    with pytest.raises(
+        host_launcher.FormalWorkflowHostError,
+        match="必须显式指定 repeat ID",
+    ):
+        host_launcher.build_child_command(
+            missing_repeat,
+            python_executable,
+            Path("/repository"),
+            bootstrap_identity,
+        )
+
+    invariant_with_repeat = argparse.Namespace(
+        **{**common, "randomization_repeat_id": "seed_00_key_00"},
+        operation="gpu",
+        workflow="official_reference_tree_ring",
+    )
+    with pytest.raises(
+        host_launcher.FormalWorkflowHostError,
+        match="不得绑定活动 repeat ID",
+    ):
+        host_launcher.build_child_command(
+            invariant_with_repeat,
+            python_executable,
+            Path("/repository"),
+            bootstrap_identity,
+        )
+
+    active_with_persistent_override = argparse.Namespace(
+        **{
+            **common,
+            "randomization_repeat_id": "seed_00_key_00",
+            "persistent_output_dir": "/shared/across_repeats",
+        },
+        operation="gpu",
+        workflow="image_only_dataset",
+    )
+    with pytest.raises(
+        host_launcher.FormalWorkflowHostError,
+        match="不得显式覆盖",
+    ):
+        host_launcher.build_child_command(
+            active_with_persistent_override,
+            python_executable,
+            Path("/repository"),
+            bootstrap_identity,
+        )
 
 
 @pytest.mark.quick

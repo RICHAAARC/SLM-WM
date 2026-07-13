@@ -46,7 +46,7 @@ SEMANTIC_ARTIFACT_SPECS = {
     ),
     "runtime_rerun_ablation": (
         "outputs/formal_mechanism_ablation/{paper_run_name}",
-        "ablation_claim_summary.json",
+        "ablation_component_summary.json",
     ),
 }
 
@@ -118,7 +118,7 @@ def _artifact_state(paper_run_name: str) -> dict[str, Any]:
         "ablation_progress_present": ablation_progress_path.is_file(),
         "ablation_progress_path": ablation_progress_path.relative_to(ROOT).as_posix(),
         "ablation_summary_path": (
-            ablation_dir / "ablation_claim_summary.json"
+            ablation_dir / "ablation_component_summary.json"
         ).relative_to(ROOT).as_posix(),
     }
 
@@ -162,7 +162,7 @@ def _closed_artifact_record(
             "protocol_decision",
             "pass"
             if artifact_role == "dataset_level_quality"
-            and summary.get("formal_fid_kid_claim_gate_ready") is True
+            and summary.get("formal_fid_kid_component_ready") is True
             else "",
         ),
     }
@@ -215,7 +215,7 @@ def run_scientific_commands(*, run_formal_ablation: bool) -> dict[str, Any]:
         quality_summary = _read_json(ROOT / state["quality_summary_path"])
         if runtime_summary.get("protocol_decision") != "pass":
             raise RuntimeError("image_only_dataset_runtime_not_closed")
-        if quality_summary.get("formal_fid_kid_claim_gate_ready") is not True:
+        if quality_summary.get("formal_fid_kid_component_ready") is not True:
             raise RuntimeError("dataset_level_quality_not_closed")
         closed_roles = [
             "image_only_dataset_runtime",

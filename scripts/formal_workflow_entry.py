@@ -1,7 +1,7 @@
 """在精确 workflow_orchestrator 子解释器中执行正式论文入口.
 
 宿主 launcher 负责解释器与完整哈希锁. 本模块只在该受验证子解释器中发布
-正式代码锁、配置当前论文运行层级, 并调用现有 GPU 服务器或 CPU 闭合入口.
+正式代码锁、配置当前论文运行层级, 并调用 GPU workflow 或单 repeat 证据入口.
 """
 
 from __future__ import annotations
@@ -25,10 +25,12 @@ from experiments.runtime.repository_environment import (  # noqa: E402
     build_formal_execution_lock,
     publish_formal_execution_lock,
 )
-from scripts.run_gpu_server_result_closure import (  # noqa: E402
-    execute_server_result_closure,
+from experiments.protocol.paper_run_config import build_paper_run_config  # noqa: E402
+from paper_experiments.runners.randomization_repeat_evidence import (  # noqa: E402
+    write_randomization_repeat_evidence_package,
 )
 from scripts.run_gpu_server_workflow import (  # noqa: E402
+    ACTIVE_REPEAT_GPU_WORKFLOW_NAMES,
     WORKFLOW_ROUTES,
     _require_workflow_orchestrator_environment,
     run_workflow,
@@ -113,6 +115,7 @@ def _gpu_result(arguments: argparse.Namespace, root: Path) -> dict[str, Any]:
         arguments.repository_commit,
         root,
         arguments.persistent_output_dir or None,
+        randomization_repeat_id=(arguments.randomization_repeat_id or None),
     )
 
 
@@ -136,20 +139,38 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
             dict,
         ):
             raise RuntimeError("GPU workflow 缺少父编排或 workflow 环境证据")
+        if result.get("randomization_repeat_id", "") != (
+            arguments.randomization_repeat_id or ""
+        ):
+            raise RuntimeError("GPU workflow 返回的 repeat 身份与请求不一致")
+        randomization_scope = str(result.get("randomization_scope", ""))
+        resolved_repeat_id = str(result.get("randomization_repeat_id", ""))
     else:
         orchestrator_environment = _require_workflow_orchestrator_environment(root)
-        result = execute_server_result_closure(
-            root=root,
-            paper_run_name=arguments.paper_run_name,
-            package_search_root=arguments.package_search_root,
-            complete_output_dir=arguments.complete_output_dir,
-            repository_commit=arguments.repository_commit,
-            dry_run=arguments.dry_run,
+        os.environ["SLM_WM_PAPER_RUN_NAME"] = arguments.paper_run_name
+        os.environ["SLM_WM_RANDOMIZATION_REPEAT_ID"] = (
+            arguments.randomization_repeat_id
         )
-        workflow_name = "paper_result_closure"
+        paper_run = build_paper_run_config(root)
+        if (
+            paper_run.run_name != arguments.paper_run_name
+            or paper_run.randomization_repeat_id
+            != arguments.randomization_repeat_id
+        ):
+            raise ValueError("单 repeat 证据入口与当前论文运行配置不一致")
+        result = write_randomization_repeat_evidence_package(
+            arguments.package_search_root,
+            paper_run_name=arguments.paper_run_name,
+            target_fpr=paper_run.target_fpr,
+            randomization_repeat_id=paper_run.randomization_repeat_id,
+            root=root,
+        )
+        workflow_name = "randomization_repeat_evidence"
         workflow_summary = result
         workflow_environment = {}
-        archive_record = None
+        archive_record = result
+        randomization_scope = "active_repeat_component"
+        resolved_repeat_id = paper_run.randomization_repeat_id
     if (
         orchestrator_environment.get("profile_id")
         != bootstrap_identity["profile_id"]
@@ -163,6 +184,8 @@ def execute(arguments: argparse.Namespace) -> dict[str, Any]:
         "operation_kind": "exact_orchestrator_workflow_execution",
         "workflow_name": workflow_name,
         "paper_run_name": arguments.paper_run_name,
+        "randomization_scope": randomization_scope,
+        "randomization_repeat_id": resolved_repeat_id,
         "profile_id": "workflow_orchestrator",
         "orchestrator_bootstrap_identity": bootstrap_identity,
         "orchestrator_dependency_environment": orchestrator_environment,
@@ -179,7 +202,7 @@ def build_parser() -> argparse.ArgumentParser:
     """构造精确父环境内部入口参数."""
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("operation", choices=("gpu", "closure"))
+    parser.add_argument("operation", choices=("gpu", "repeat_evidence"))
     parser.add_argument("--root", required=True)
     parser.add_argument("--repository-commit", required=True)
     parser.add_argument("--paper-run-name", required=True)
@@ -192,8 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workflow", choices=tuple(WORKFLOW_ROUTES))
     parser.add_argument("--persistent-output-dir", default="")
     parser.add_argument("--package-search-root", default="")
-    parser.add_argument("--complete-output-dir", default="")
-    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--randomization-repeat-id", default="")
     return parser
 
 
@@ -203,12 +225,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     root = Path(arguments.root).resolve()
     try:
-        if arguments.operation == "gpu" and arguments.workflow is None:
-            raise ValueError("GPU 入口必须提供 workflow")
-        if arguments.operation == "closure" and (
-            not arguments.package_search_root or not arguments.complete_output_dir
+        if arguments.operation == "gpu":
+            if arguments.workflow is None:
+                raise ValueError("GPU 入口必须提供 workflow")
+            if (
+                arguments.workflow in ACTIVE_REPEAT_GPU_WORKFLOW_NAMES
+                and not arguments.randomization_repeat_id
+            ):
+                raise ValueError("活动随机化 GPU 入口必须提供 repeat ID")
+            if (
+                arguments.workflow not in ACTIVE_REPEAT_GPU_WORKFLOW_NAMES
+                and arguments.randomization_repeat_id
+            ):
+                raise ValueError("跨 repeat 不变 GPU 入口不得提供 repeat ID")
+        if (
+            arguments.operation == "repeat_evidence"
+            and (
+                not arguments.package_search_root
+                or not arguments.randomization_repeat_id
+            )
         ):
-            raise ValueError("CPU 闭合入口缺少输入或输出目录")
+            raise ValueError("单 repeat 证据入口缺少 package 搜索目录或 repeat ID")
         payload = execute(arguments)
         result_path = _write_result(root, arguments.result_path, payload)
         print(
@@ -236,8 +273,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "report_schema": "formal_workflow_execution_result",
             "schema_version": 1,
             "operation_kind": "exact_orchestrator_workflow_execution",
-            "workflow_name": arguments.workflow or "paper_result_closure",
+            "workflow_name": arguments.workflow or "randomization_repeat_evidence",
             "paper_run_name": arguments.paper_run_name,
+            "randomization_repeat_id": arguments.randomization_repeat_id,
             "profile_id": "workflow_orchestrator",
             "orchestrator_bootstrap_identity": {},
             "orchestrator_dependency_environment": {},

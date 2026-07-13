@@ -396,7 +396,7 @@ def write_test_scientific_execution_binding(
                 f"outputs/dataset_level_quality/{paper_run_name}/manifest.local.json",
             ),
             "runtime_rerun_ablation": (
-                f"outputs/formal_mechanism_ablation/{paper_run_name}/ablation_claim_summary.json",
+                f"outputs/formal_mechanism_ablation/{paper_run_name}/ablation_component_summary.json",
                 f"outputs/formal_mechanism_ablation/{paper_run_name}/manifest.local.json",
             ),
         }

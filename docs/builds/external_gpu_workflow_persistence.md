@@ -127,7 +127,7 @@ supports_paper_claim = false
 evidence_eligibility = intermediate_state_only
 ```
 
-完成 checkpoint 只表示“这些字节可以安全恢复并重新进入正式打包器”, 不表示已经形成论文结论.正式证据仍要求各 workflow 生成受治理 records、运行 manifest、package input manifest、archive summary、archive manifest 和 ZIP, 再由 CPU 结果闭合验证精确输入锁、fixed-FPR、方法比较和 claim-evidence 关系.
+完成 checkpoint 只表示“这些字节可以安全恢复并重新进入正式打包器”, 不表示已经形成论文结论.正式证据仍要求各 workflow 生成受治理 records、运行 manifest、package input manifest、archive summary、archive manifest 和 ZIP, 再由 CPU 结果闭合验证精确9+3聚合来源、fixed-FPR、方法比较和 claim-evidence 关系.
 
 恢复粒度以方法内部已经原子发布的完整科学单元为界。中断时正在计算的单个 source pair、攻击样本、T2SMark Prompt 或 official-reference 批次会从该单元起点重新执行; 其他已验证单元不会重放。项目不声称进程内列表、半写图像、任意 Python 指令或 GPU kernel 可以作为完成态续跑.
 

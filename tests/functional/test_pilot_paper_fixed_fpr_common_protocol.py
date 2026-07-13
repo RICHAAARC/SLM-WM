@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
@@ -27,9 +26,10 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     validate_pilot_paper_result_import_rows,
 )
 from experiments.protocol.prompts import build_prompt_records
-from tests.helpers.formal_prompt_source import copy_governed_prompt_file
+from paper_experiments.runners.paper_claim_provenance import (
+    PaperClaimAggregateRequiredError,
+)
 from scripts.write_pilot_paper_fixed_fpr_common_protocol_outputs import write_pilot_paper_fixed_fpr_common_protocol_outputs
-from tests.helpers.closure_input_lock import write_test_closure_input_lock
 
 
 PRIMARY_BASELINE_IDS = ("tree_ring", "gaussian_shading", "shallow_diffuse", "t2smark")
@@ -114,143 +114,18 @@ def paired_superiority_summary(
     return row
 
 
-def write_paired_superiority_inputs(
-    root: Path,
-    *,
-    paper_run_name: str,
-    target_fpr: float,
-    expected_test_count: int,
-    ready: bool = False,
-) -> None:
-    """写出共同协议 writer 所需的 run-scoped 配对统计证据."""
-
-    config = PilotPaperFixedFprConfig(
-        paper_run_name=paper_run_name,
-        prompt_set=paper_run_name,
-        prompt_file=f"configs/paper_main_{paper_run_name}_prompts.txt",
-        prompt_protocol_name=f"paper_main_{paper_run_name}_prompt_protocol",
-        result_protocol_name=f"{paper_run_name}_fixed_fpr_common_protocol",
-        result_scope=f"{paper_run_name}_common_protocol",
-        result_claim_scope={
-            "probe_paper": "probe_claim",
-            "pilot_paper": "pilot_claim",
-            "full_paper": "full_claim",
-        }[paper_run_name],
-        target_fpr=target_fpr,
-        minimum_clean_negative_count=expected_test_count,
-    )
-    summary = paired_superiority_summary(
-        config,
-        attack_count=len(default_attack_configs()),
-        ready=ready,
-    )
-    output_dir = root / "outputs" / "paired_superiority_analysis" / paper_run_name
-    output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "paired_superiority_summary.json").write_text(
-        json.dumps(summary),
-        encoding="utf-8",
-    )
-    (output_dir / "manifest.local.json").write_text(
-        json.dumps(
-            {
-                "artifact_id": "paired_superiority_analysis_manifest",
-                "code_version": "a" * 40,
-                "metadata": summary,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-def write_pilot_paper_prompts(repo_root: Path) -> Path:
-    """写入受治理的 pilot_paper Prompt 配置。"""
-
-    return copy_governed_prompt_file(repo_root, "pilot_paper")
-
-
-def write_full_paper_prompts(repo_root: Path) -> Path:
-    """写入受治理的 full_paper Prompt 配置。"""
-
-    return copy_governed_prompt_file(repo_root, "full_paper")
-
-
-def write_probe_paper_prompts(repo_root: Path) -> Path:
-    """写入受治理的 probe_paper Prompt 配置。"""
-
-    return copy_governed_prompt_file(repo_root, "probe_paper")
-
-
 @pytest.mark.quick
 def test_writer_outputs_pilot_paper_common_protocol_with_shared_boundaries(tmp_path: Path) -> None:
-    """写出脚本应冻结同一 prompt split、同一攻击矩阵和同一 fixed-FPR 协议。"""
+    """未验证聚合来源时必须在读取输入和创建输出前拒绝."""
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    write_pilot_paper_prompts(repo_root)
-    write_test_closure_input_lock(
-        repo_root,
-        paper_run_name="pilot_paper",
-        target_fpr=0.01,
-    )
-    write_paired_superiority_inputs(
-        repo_root,
-        paper_run_name="pilot_paper",
-        target_fpr=0.01,
-        expected_test_count=340,
-    )
-
-    manifest = write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
-    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_common_protocol" / "pilot_paper"
-    summary = json.loads((output_dir / "pilot_paper_common_protocol_summary.json").read_text(encoding="utf-8"))
-    prompt_summary = json.loads((output_dir / "pilot_paper_prompt_split_summary.json").read_text(encoding="utf-8"))
-    schema = json.loads((output_dir / "pilot_paper_result_import_schema.json").read_text(encoding="utf-8"))
-    validation = json.loads((output_dir / "pilot_paper_result_import_validation_report.json").read_text(encoding="utf-8"))
-    method_rows = list(csv.DictReader((output_dir / "pilot_paper_method_registry.csv").open(encoding="utf-8")))
-    attack_rows = list(csv.DictReader((output_dir / "pilot_paper_attack_matrix.csv").open(encoding="utf-8")))
-    template_rows = [
-        json.loads(line)
-        for line in (output_dir / "pilot_paper_result_import_template.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-    assert manifest["artifact_id"] == "pilot_paper_fixed_fpr_common_protocol_manifest"
-    assert summary["pilot_paper_common_protocol_ready"] is True
-    assert summary["pilot_paper_result_import_ready"] is False
-    assert summary["pilot_paper_supports_superiority_claim"] is False
-    assert summary["pilot_paper_claim_ready"] is False
-    assert summary["full_paper_claim_ready"] is False
-    assert summary["supports_paper_claim"] is False
-    assert prompt_summary["prompt_set"] == "pilot_paper"
-    assert prompt_summary["target_fpr"] == 0.01
-    assert prompt_summary["prompt_split_ready"] is True
-    assert schema["minimum_result_positive_count"] == 340
-    assert schema["minimum_result_negative_count"] == 340
-    assert summary["paired_test_prompt_count"] == 340
-    assert schema["paired_test_prompt_id_digest"] == "d" * 64
-    assert summary["paired_attack_registry_digest"] == "e" * 64
-    assert summary["threshold_audit_rows_digest"] == "f" * 64
-    assert validation["input_record_count"] == 0
-    assert validation["pilot_paper_result_import_ready"] is False
-    assert {row["method_id"] for row in method_rows} == {
-        "slm_wm_current",
-        "tree_ring",
-        "gaussian_shading",
-        "shallow_diffuse",
-        "t2smark",
-    }
-    assert len(template_rows) == len(method_rows) * len(attack_rows)
-    assert {row["prompt_split_digest"] for row in method_rows} == {prompt_summary["prompt_split_digest"]}
-    assert {row["attack_matrix_digest"] for row in method_rows} == {schema["attack_matrix_digest"]}
-    assert {row["fixed_fpr_protocol_digest"] for row in method_rows} == {schema["fixed_fpr_protocol_digest"]}
-    assert all(row["target_fpr"] == 0.01 for row in template_rows)
-    assert all(row["result_claim_scope"] == "pilot_claim" for row in template_rows)
-    assert all(
-        row["required_result_record_path"]
-        == "outputs/pilot_paper_fixed_fpr_results/pilot_paper/pilot_paper_result_records.jsonl"
-        for row in template_rows
-    )
-    assert all("true_positive_rate_ci_low" in row["required_metric_fields"] for row in template_rows)
-    assert all(path.startswith("outputs/") for path in manifest["output_paths"])
+    with pytest.raises(
+        PaperClaimAggregateRequiredError,
+        match="版本化精确9重复聚合证据验证",
+    ):
+        write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
+    assert not (repo_root / "outputs").exists()
 
 
 @pytest.mark.quick
@@ -445,112 +320,23 @@ def test_common_protocol_blocks_duplicate_method_attack_records() -> None:
 
 
 @pytest.mark.quick
-def test_writer_switches_common_protocol_to_full_paper_without_logic_fork(
+@pytest.mark.parametrize("paper_run_name", ("probe_paper", "full_paper"))
+def test_common_protocol_writer_uses_same_aggregate_gate_for_all_scales(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    paper_run_name: str,
 ) -> None:
-    """同一共同协议写出脚本应仅凭论文运行配置切换到 full_paper。"""
+    """probe, pilot 和 full 只改变统计规模, 不改变聚合来源要求."""
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    write_full_paper_prompts(repo_root)
-    write_test_closure_input_lock(
-        repo_root,
-        paper_run_name="full_paper",
-        target_fpr=0.001,
-    )
-    write_paired_superiority_inputs(
-        repo_root,
-        paper_run_name="full_paper",
-        target_fpr=0.001,
-        expected_test_count=3400,
-    )
-    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "full_paper")
-
-    write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
-    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_common_protocol" / "full_paper"
-    summary = json.loads((output_dir / "pilot_paper_common_protocol_summary.json").read_text(encoding="utf-8"))
-    prompt_summary = json.loads((output_dir / "pilot_paper_prompt_split_summary.json").read_text(encoding="utf-8"))
-    schema = json.loads((output_dir / "pilot_paper_result_import_schema.json").read_text(encoding="utf-8"))
-    template_rows = [
-        json.loads(line)
-        for line in (output_dir / "pilot_paper_result_import_template.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-    assert summary["paper_claim_scale"] == "full_paper"
-    assert summary["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol"
-    assert summary["result_claim_scope"] == "full_claim"
-    assert summary["full_paper_claim_ready"] is False
-    assert prompt_summary["prompt_set"] == "full_paper"
-    assert prompt_summary["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol"
-    assert schema["paper_claim_scale"] == "full_paper"
-    assert schema["prompt_set"] == "full_paper"
-    assert schema["prompt_protocol_name"] == "paper_main_full_paper_prompt_protocol"
-    assert schema["result_protocol_name"] == "full_paper_fixed_fpr_common_protocol"
-    assert all(row["paper_claim_scale"] == "full_paper" for row in template_rows)
-    assert all(row["result_claim_scope"] == "full_claim" for row in template_rows)
-
-
-@pytest.mark.quick
-def test_writer_switches_common_protocol_to_probe_paper_without_logic_fork(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """同一共同协议写出脚本应支持 probe_paper 小规模流程对齐验证。"""
-
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    write_probe_paper_prompts(repo_root)
-    write_test_closure_input_lock(
-        repo_root,
-        paper_run_name="probe_paper",
-        target_fpr=0.1,
-    )
-    write_paired_superiority_inputs(
-        repo_root,
-        paper_run_name="probe_paper",
-        target_fpr=0.1,
-        expected_test_count=34,
-    )
-    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", "probe_paper")
-
-    write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
-    output_dir = repo_root / "outputs" / "pilot_paper_fixed_fpr_common_protocol" / "probe_paper"
-    summary = json.loads((output_dir / "pilot_paper_common_protocol_summary.json").read_text(encoding="utf-8"))
-    prompt_summary = json.loads((output_dir / "pilot_paper_prompt_split_summary.json").read_text(encoding="utf-8"))
-    schema = json.loads((output_dir / "pilot_paper_result_import_schema.json").read_text(encoding="utf-8"))
-    template_rows = [
-        json.loads(line)
-        for line in (output_dir / "pilot_paper_result_import_template.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-    assert summary["paper_claim_scale"] == "probe_paper"
-    assert summary["result_protocol_name"] == "probe_paper_fixed_fpr_common_protocol"
-    assert summary["result_claim_scope"] == "probe_claim"
-    assert summary["pilot_paper_common_protocol_ready"] is True
-    assert summary["paper_run_allows_paper_claim"] is True
-    assert summary["probe_paper_workflow_validation_ready"] is False
-    assert summary["probe_paper_claim_ready"] is False
-    assert summary["probe_claim_ready"] is False
-    assert prompt_summary["prompt_set"] == "probe_paper"
-    assert prompt_summary["pilot_paper_prompt_count"] == 70
-    assert prompt_summary["target_fpr"] == 0.1
-    assert prompt_summary["pilot_paper_negative_count_minimum_required"] == 34
-    assert prompt_summary["prompt_split_ready"] is True
-    assert prompt_summary["prompt_protocol_name"] == "paper_main_probe_paper_prompt_protocol"
-    assert schema["paper_claim_scale"] == "probe_paper"
-    assert schema["prompt_set"] == "probe_paper"
-    assert schema["target_fpr"] == 0.1
-    assert schema["minimum_result_positive_count"] == 34
-    assert schema["paper_run_allows_paper_claim"] is True
-    assert schema["paper_run_claim_type"] == "probe_claim"
-    assert schema["prompt_protocol_name"] == "paper_main_probe_paper_prompt_protocol"
-    assert schema["result_protocol_name"] == "probe_paper_fixed_fpr_common_protocol"
-    assert all(row["paper_claim_scale"] == "probe_paper" for row in template_rows)
-    assert all(row["target_fpr"] == 0.1 for row in template_rows)
-    assert all(row["result_claim_scope"] == "probe_claim" for row in template_rows)
+    monkeypatch.setenv("SLM_WM_PAPER_RUN_NAME", paper_run_name)
+    with pytest.raises(
+        PaperClaimAggregateRequiredError,
+        match="版本化精确9重复聚合证据验证",
+    ):
+        write_pilot_paper_fixed_fpr_common_protocol_outputs(root=repo_root)
+    assert not (repo_root / "outputs").exists()
 
 
 def pilot_paper_result_row(schema: dict[str, object], evidence_path: str) -> dict[str, object]:

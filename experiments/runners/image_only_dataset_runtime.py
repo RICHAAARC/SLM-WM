@@ -1912,7 +1912,7 @@ def run_image_only_dataset_runtime(
         and bool(record.get("metadata", {}).get("blind_image_detector", False))
         for record in formal_records
     )
-    full_method_claim_ready = (
+    full_method_component_ready = (
         protocol_decision == "pass"
         and clean_fixed_fpr_ready
         and wrong_key_fixed_fpr_ready
@@ -1936,15 +1936,6 @@ def run_image_only_dataset_runtime(
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "paper_run_name": resolved_paper_run.run_name,
-        "randomization_repeat_id": (
-            resolved_paper_run.randomization_repeat_id
-        ),
-        "generation_seed_index": resolved_paper_run.generation_seed_index,
-        "generation_seed_offset": resolved_paper_run.generation_seed_offset,
-        "watermark_key_index": resolved_paper_run.watermark_key_index,
-        "formal_randomization_protocol_digest": (
-            resolved_paper_run.formal_randomization_protocol_digest
-        ),
         "randomization_repeat_identity": {
             "randomization_repeat_id": (
                 resolved_paper_run.randomization_repeat_id
@@ -2018,7 +2009,7 @@ def run_image_only_dataset_runtime(
         ),
         "fixed_fpr_boundary_ready": True,
         "rescue_boundary_ready": protocol.geometry_protocol_calibration_ready,
-        "raw_content_claim_ready": True,
+        "raw_content_measurement_ready": True,
         "perceptual_metrics_ready": bool(paired_ssim_values),
         "real_attacked_image_count": len(attacked_records),
         "real_attacked_image_closed_loop_ready": attacked_image_evidence_chain_ready,
@@ -2030,16 +2021,18 @@ def run_image_only_dataset_runtime(
         "required_real_gpu_attack_count": required_real_gpu_attack_count,
         "measured_real_gpu_attack_count": measured_real_gpu_attack_count,
         "real_gpu_attack_validation_ready": real_gpu_attack_validation_ready,
-        "full_method_claim_ready": full_method_claim_ready,
+        "full_method_component_ready": full_method_component_ready,
         "detector_input_access_mode": "image_key_public_model_only",
         "generation_latent_trace_required": False,
         "protocol_decision": protocol_decision,
-        "supports_paper_claim": (
-            full_method_claim_ready
+        "repeat_component_ready": (
+            full_method_component_ready
             and attack_record_coverage_ready
             and attacked_image_evidence_chain_ready
             and real_gpu_attack_validation_ready
         ),
+        "randomization_aggregate_ready": False,
+        "supports_paper_claim": False,
     }
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     scientific_unit_output_paths: list[str] = []
@@ -2098,7 +2091,11 @@ def run_image_only_dataset_runtime(
         metadata={
             "protocol_decision": summary["protocol_decision"],
             "detector_input_access_mode": "image_key_public_model_only",
-            "full_method_claim_ready": summary["full_method_claim_ready"],
+            "full_method_component_ready": summary[
+                "full_method_component_ready"
+            ],
+            "repeat_component_ready": summary["repeat_component_ready"],
+            "randomization_aggregate_ready": False,
             "geometry_protocol_calibration_ready": summary[
                 "geometry_protocol_calibration_ready"
             ],
@@ -2365,7 +2362,7 @@ def package_image_only_dataset_runtime(
             ),
             bool(summary.get("generated_at")),
             summary.get("protocol_decision") == "pass",
-            summary.get("full_method_claim_ready") is True,
+            summary.get("full_method_component_ready") is True,
             summary.get("geometry_protocol_calibration_ready") is True,
             summary.get("scientific_unit_provenance_ready") is True,
             summary.get("scientific_unit_provenance_record_count")
@@ -2380,7 +2377,9 @@ def package_image_only_dataset_runtime(
             scientific_unit_provenance_summary_bound,
             packaged_unit_config_contract_ready,
             summary.get("detection_curve_data_ready") is True,
-            summary.get("supports_paper_claim") is True,
+            summary.get("repeat_component_ready") is True,
+            summary.get("randomization_aggregate_ready") is False,
+            summary.get("supports_paper_claim") is False,
             manifest.get("artifact_id")
             == f"{resolved_paper_run_name}_image_only_dataset_runtime_manifest",
             manifest.get("metadata", {}).get(

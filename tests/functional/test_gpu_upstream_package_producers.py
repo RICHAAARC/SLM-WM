@@ -334,7 +334,7 @@ def _prepare_image_runtime(
             "target_fpr": TARGET_FPR,
             "randomization_repeat_identity": repeat_identity,
             "protocol_decision": "pass",
-            "full_method_claim_ready": True,
+            "full_method_component_ready": True,
             "geometry_protocol_calibration_ready": True,
             "detection_curve_data_ready": True,
             "scientific_content_binding_digests": (
@@ -346,7 +346,9 @@ def _prepare_image_runtime(
             "scientific_content_binding_failure_count": 0,
             "scientific_content_binding_gate_ready": True,
             **provenance_summary,
-            "supports_paper_claim": True,
+            "repeat_component_ready": True,
+            "randomization_aggregate_ready": False,
+            "supports_paper_claim": False,
         },
     )
     _write_json(
@@ -539,7 +541,7 @@ def _prepare_ablation(root: Path) -> Path:
     }
     expected_attacked_run_count = len(split_prompt_ids["test"]) * len(specs)
     _write_json(
-        directory / "ablation_claim_summary.json",
+        directory / "ablation_component_summary.json",
         {
             "generated_at": GENERATED_AT,
             "paper_run_name": PAPER_RUN_NAME,
@@ -558,8 +560,10 @@ def _prepare_ablation(root: Path) -> Path:
             **provenance_summary,
             **necessity_summary,
             "protocol_decision": "pass",
-            "ablation_claim_gate_ready": True,
-            "supports_paper_claim": True,
+            "ablation_component_ready": True,
+            "repeat_component_ready": True,
+            "randomization_aggregate_ready": False,
+            "supports_paper_claim": False,
         },
     )
     ablation_manifest_config = {
@@ -599,7 +603,7 @@ def _prepare_ablation(root: Path) -> Path:
                     "mechanism_pairwise_delta.csv",
                     "mechanism_necessity_statistics.csv",
                     "mechanism_necessity_summary.json",
-                    "ablation_claim_summary.json",
+                    "ablation_component_summary.json",
                     "manifest.local.json",
                 )
             ],
@@ -613,14 +617,14 @@ def _prepare_ablation(root: Path) -> Path:
                 "necessity_statistic_rows_digest": necessity_summary[
                     "necessity_statistic_rows_digest"
                 ],
-                "necessity_supported_ablation_ids": necessity_summary[
-                    "necessity_supported_ablation_ids"
+                "necessity_component_supported_ablation_ids": necessity_summary[
+                    "necessity_component_supported_ablation_ids"
                 ],
-                "necessity_not_supported_ablation_ids": necessity_summary[
-                    "necessity_not_supported_ablation_ids"
+                "necessity_component_not_supported_ablation_ids": necessity_summary[
+                    "necessity_component_not_supported_ablation_ids"
                 ],
-                "all_mechanism_necessity_claims_supported": necessity_summary[
-                    "all_mechanism_necessity_claims_supported"
+                "all_mechanism_necessity_components_supported": necessity_summary[
+                    "all_mechanism_necessity_components_supported"
                 ],
             },
         },
@@ -631,7 +635,7 @@ def _prepare_ablation(root: Path) -> Path:
         artifact_role="runtime_rerun_ablation",
         paper_run_name=PAPER_RUN_NAME,
         profile_id="sd35_method_runtime_gpu",
-        summary_file_name="ablation_claim_summary.json",
+        summary_file_name="ablation_component_summary.json",
         manifest_file_name="manifest.local.json",
         formal_execution_lock=FORMAL_EXECUTION_LOCK,
         execution_route="semantic_watermark_ablation_session",
@@ -843,7 +847,10 @@ def _prepare_dataset_quality(root: Path) -> Path:
             "formal_sample_scale_ready": True,
             "canonical_formal_feature_extractor_ready": True,
             "scientific_unit_provenance_identity_ready": True,
-            "formal_fid_kid_claim_gate_ready": True,
+            "formal_fid_kid_component_ready": True,
+            "repeat_component_ready": True,
+            "randomization_aggregate_ready": False,
+            "supports_paper_claim": False,
             "kid_effective_subset_size": PROMPT_COUNT,
             "formal_metric_protocol": metric_protocol,
             "formal_metric_protocol_digest": metric_protocol[
@@ -927,6 +934,7 @@ def test_primary_gpu_package_producers_pass_strict_closure_contract(
             spec=spec,
             paper_run_name=PAPER_RUN_NAME,
             target_fpr=TARGET_FPR,
+            randomization_repeat_id="seed_00_key_00",
         )
         assert candidate.package_family == spec.package_family
         assert candidate.randomization_scope == "active_repeat_component"
@@ -1030,6 +1038,7 @@ def test_primary_package_ignores_stale_file_and_selector_rejects_undeclared_extr
             spec=spec,
             paper_run_name=PAPER_RUN_NAME,
             target_fpr=TARGET_FPR,
+            randomization_repeat_id="seed_00_key_00",
         )
 
 
@@ -1053,7 +1062,7 @@ def test_primary_gpu_package_producers_reject_non_ready_summary(
         / "dataset_runtime_summary.json"
     )
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    summary["supports_paper_claim"] = False
+    summary["repeat_component_ready"] = False
     _write_json(summary_path, summary)
     with pytest.raises(RuntimeError, match="ready 门禁"):
         package_image_only_dataset_runtime(PAPER_RUN_NAME, root=tmp_path)
@@ -1074,7 +1083,7 @@ def test_ablation_and_quality_packages_reject_inexact_scientific_contracts(
         tmp_path
         / "outputs/formal_mechanism_ablation"
         / PAPER_RUN_NAME
-        / "ablation_claim_summary.json"
+        / "ablation_component_summary.json"
     )
     ablation_summary = json.loads(ablation_summary_path.read_text(encoding="utf-8"))
     ablation_summary["actual_ablation_ids"] = list(FORMAL_RUNTIME_RERUN_ABLATION_IDS[:6])

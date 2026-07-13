@@ -303,6 +303,6 @@ def build_primary_baseline_report(
         "primary_baseline_plan_ready": bool(plans) and source_ready_count == len(plans),
         "result_import_template_ready": bool(templates),
         "baseline_results_ready": False,
-        "full_method_claim_ready": False,
+        "full_method_component_ready": False,
         "supports_paper_claim": False,
     }

@@ -1,4 +1,4 @@
-"""为 CPU 论文结果闭合选择并冻结精确的上游结果包."""
+"""校验并选择单 repeat 与跨 repeat 不变的正式上游结果包."""
 
 from __future__ import annotations
 
@@ -15,13 +15,15 @@ from typing import Any, Mapping
 import zlib
 from zipfile import BadZipFile, ZipFile
 
-from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.protocol.formal_randomization import (
     formal_randomization_protocol_record,
     resolve_formal_randomization_repeat,
     validate_formal_randomization_repeat_records,
 )
-from experiments.protocol.paper_run_config import normalize_paper_run_name
+from experiments.protocol.paper_run_config import (
+    normalize_paper_run_name,
+    validate_frozen_paper_run_target_fpr,
+)
 from experiments.runtime.dependency_profiles import require_dependency_profile_ready
 from experiments.runtime.repository_environment import (
     FormalExecutionLockError,
@@ -45,9 +47,6 @@ from paper_experiments.runners.external_source_runtime import (
 )
 
 
-LOCK_OUTPUT_ROOT = Path("outputs/paper_result_closure")
-LOCK_FILENAME = "closure_input_lock.json"
-LOCK_MANIFEST_FILENAME = "input_lock_manifest.local.json"
 MAX_GOVERNANCE_MEMBER_BYTES = 32 * 1024 * 1024
 SEMANTIC_WATERMARK_PACKAGE_FAMILIES = frozenset(
     {
@@ -310,7 +309,7 @@ IMAGE_RUNTIME_PACKAGE_INPUT = (
 )
 
 ABLATION_PREFIX = "outputs/formal_mechanism_ablation/{paper_run}/"
-ABLATION_SUMMARY = ABLATION_PREFIX + "ablation_claim_summary.json"
+ABLATION_SUMMARY = ABLATION_PREFIX + "ablation_component_summary.json"
 ABLATION_MANIFEST = ABLATION_PREFIX + "manifest.local.json"
 ABLATION_PACKAGE_INPUT = (
     ABLATION_PREFIX + "mechanism_ablation_package_input_manifest.json"
@@ -529,13 +528,15 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
         ),
         value_requirements=(
             _require(IMAGE_RUNTIME_SUMMARY, "protocol_decision", "pass"),
-            _require(IMAGE_RUNTIME_SUMMARY, "full_method_claim_ready", True),
+            _require(IMAGE_RUNTIME_SUMMARY, "full_method_component_ready", True),
             _require(
                 IMAGE_RUNTIME_SUMMARY,
                 "scientific_unit_provenance_ready",
                 True,
             ),
-            _require(IMAGE_RUNTIME_SUMMARY, "supports_paper_claim", True),
+            _require(IMAGE_RUNTIME_SUMMARY, "repeat_component_ready", True),
+            _require(IMAGE_RUNTIME_SUMMARY, "randomization_aggregate_ready", False),
+            _require(IMAGE_RUNTIME_SUMMARY, "supports_paper_claim", False),
             _require(
                 IMAGE_RUNTIME_PACKAGE_INPUT,
                 "report_schema",
@@ -602,7 +603,7 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
         ),
         value_requirements=(
             _require(ABLATION_SUMMARY, "protocol_decision", "pass"),
-            _require(ABLATION_SUMMARY, "ablation_claim_gate_ready", True),
+            _require(ABLATION_SUMMARY, "ablation_component_ready", True),
             _require(
                 ABLATION_SUMMARY,
                 "ablation_necessity_statistics_ready",
@@ -613,7 +614,9 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
                 "scientific_unit_provenance_ready",
                 True,
             ),
-            _require(ABLATION_SUMMARY, "supports_paper_claim", True),
+            _require(ABLATION_SUMMARY, "repeat_component_ready", True),
+            _require(ABLATION_SUMMARY, "randomization_aggregate_ready", False),
+            _require(ABLATION_SUMMARY, "supports_paper_claim", False),
             _require(
                 ABLATION_PACKAGE_INPUT,
                 "report_schema",
@@ -691,7 +694,10 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
                 "scientific_unit_provenance_identity_ready",
                 True,
             ),
-            _require(QUALITY_SUMMARY, "formal_fid_kid_claim_gate_ready", True),
+            _require(QUALITY_SUMMARY, "formal_fid_kid_component_ready", True),
+            _require(QUALITY_SUMMARY, "repeat_component_ready", True),
+            _require(QUALITY_SUMMARY, "randomization_aggregate_ready", False),
+            _require(QUALITY_SUMMARY, "supports_paper_claim", False),
             _require(
                 QUALITY_PACKAGE_INPUT,
                 "report_schema",
@@ -2382,16 +2388,30 @@ def inspect_closure_package(
 
     resolved_paper_run = normalize_paper_run_name(paper_run_name)
     expected_target_fpr = float(target_fpr)
-    expected_repeat = resolve_formal_randomization_repeat(
-        randomization_repeat_id
+    active_repeat_package = (
+        spec.package_family in RANDOMIZATION_REPEAT_PACKAGE_FAMILIES
+    )
+    invariant_package = (
+        spec.package_family in CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES
+    )
+    if active_repeat_package and randomization_repeat_id is None:
+        raise ClosurePackageSelectionError(
+            "活动随机化结果包检查必须显式指定 repeat ID"
+        )
+    if invariant_package and randomization_repeat_id is not None:
+        raise ClosurePackageSelectionError(
+            "跨 repeat 不变结果包检查不得绑定活动 repeat ID"
+        )
+    expected_repeat = (
+        resolve_formal_randomization_repeat(randomization_repeat_id)
+        if randomization_repeat_id is not None
+        else None
     )
     expected_randomization_protocol_digest = (
         formal_randomization_protocol_record()[
             "formal_randomization_protocol_digest"
         ]
     )
-    if not math.isfinite(expected_target_fpr) or not 0.0 < expected_target_fpr < 1.0:
-        raise ClosurePackageSelectionError("target_fpr 必须是位于 (0, 1) 的有限数值")
     path = Path(package_path).expanduser()
     if not path.is_file() or path.is_symlink():
         raise ClosurePackageSelectionError(f"闭合输入必须是普通 ZIP 文件: {path}")
@@ -2513,7 +2533,7 @@ def inspect_closure_package(
                             f"{spec.package_family} 的随机化协议摘要不匹配"
                         )
                     repeat_identities.append(normalized_identity)
-                if any(
+                if expected_repeat is None or any(
                     identity != expected_repeat.to_dict()
                     for identity in repeat_identities
                 ) or len(
@@ -2683,7 +2703,7 @@ def _select_latest_candidate(
     return min(latest, key=lambda candidate: candidate.package_path.as_posix())
 
 
-def _validate_candidate_repository_profile(
+def validate_closure_candidate_repository_profile(
     candidate: ClosurePackageCandidate,
     *,
     repository_root: Path,
@@ -2754,456 +2774,27 @@ def _validate_semantic_watermark_session_group(
         )
 
 
-def _stable_digest(payload: Any) -> str:
-    """计算锁内容的确定性 SHA-256."""
-
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def validate_closure_input_lock_payloads(
-    lock_payload: dict[str, Any],
-    lock_manifest: dict[str, Any],
-    *,
-    paper_run_name: str,
-    target_fpr: float,
-    randomization_repeat_id: str | None = None,
-) -> dict[str, str]:
-    """复验 CPU 结果闭合输入锁的基本身份与规范摘要.
-
-    该函数属于通用跨产物治理写法.它不重新读取大型 ZIP, 只验证在下游
-    records 与协议产物中必须稳定传播的 run,FPR,精确包集合,代码版本和
-    锁摘要.最终完整打包器仍负责逐包字节摘要复核.
-    """
-
-    resolved_run_name = normalize_paper_run_name(paper_run_name)
-    expected_target_fpr = float(target_fpr)
-    expected_repeat = resolve_formal_randomization_repeat(
-        randomization_repeat_id
-    )
-    expected_randomization_protocol_digest = (
-        formal_randomization_protocol_record()[
-            "formal_randomization_protocol_digest"
-        ]
-    )
-    expected_families = {spec.package_family for spec in CLOSURE_PACKAGE_FAMILY_SPECS}
-    expected_scientific_profiles = {
-        spec.package_family: (
-            spec.scientific_execution_binding.profile_id
-            if spec.scientific_execution_binding is not None
-            else spec.dependency_environment_evidence.profile_id
-        )
-        for spec in CLOSURE_PACKAGE_FAMILY_SPECS
-        if spec.scientific_execution_binding is not None
-        or spec.dependency_environment_evidence is not None
-    }
-    binding_families = {
-        spec.package_family
-        for spec in CLOSURE_PACKAGE_FAMILY_SPECS
-        if spec.scientific_execution_binding is not None
-    }
-    semantic_session_families = {
-        spec.package_family
-        for spec in CLOSURE_PACKAGE_FAMILY_SPECS
-        if spec.scientific_execution_binding is not None
-        and spec.scientific_execution_binding.execution_route
-        in {
-            "semantic_watermark_session",
-            "semantic_watermark_ablation_session",
-        }
-    }
-    records = lock_payload.get("closure_input_packages")
-    if not isinstance(records, list):
-        raise ClosurePackageSelectionError("closure input lock 缺少包记录列表")
-    actual_families = [str(record.get("package_family", "")) for record in records]
-    common_code_version = normalize_clean_code_version(
-        lock_payload.get("common_code_version")
-    )
-    declared_digest = str(lock_payload.get("closure_input_lock_digest", ""))
-    digest_payload = dict(lock_payload)
-    digest_payload.pop("closure_input_lock_digest", None)
-
-    def scientific_record_ready(record: dict[str, Any]) -> bool:
-        """复验锁记录是否保留该 family 必需的科学执行摘要."""
-
-        package_family = str(record.get("package_family", ""))
-        expected_profile_id = expected_scientific_profiles.get(package_family)
-        fields = (
-            "scientific_profile_digest",
-            "scientific_direct_requirements_digest",
-            "scientific_complete_hash_lock_digest",
-            "scientific_python_executable_digest",
-            "scientific_dependency_evidence_digest",
-        )
-        binding_report_fields = (
-            "scientific_execution_report_digest",
-            "scientific_command_dispatch_report_digest",
-        )
-        if expected_profile_id is None:
-            return (
-                record.get("scientific_profile_id") == ""
-                and record.get("scientific_execution_binding_digest") == ""
-                and record.get("scientific_complete_hash_lock_dependency_count")
-                == 0
-                and all(
-                    record.get(field_name) == ""
-                    for field_name in (*fields, *binding_report_fields)
-                )
-                and record.get("scientific_command_sequence_digest") == ""
-            )
-        base_ready = (
-            record.get("scientific_profile_id") == expected_profile_id
-            and isinstance(
-                record.get("scientific_complete_hash_lock_dependency_count"),
-                int,
-            )
-            and not isinstance(
-                record.get("scientific_complete_hash_lock_dependency_count"),
-                bool,
-            )
-            and record["scientific_complete_hash_lock_dependency_count"] > 0
-            and all(
-                isinstance(record.get(field_name), str)
-                and re.fullmatch(r"[0-9a-f]{64}", record[field_name])
-                is not None
-                for field_name in fields
-            )
-        )
-        binding_digest = record.get("scientific_execution_binding_digest")
-        if package_family in binding_families:
-            binding_ready = (
-                isinstance(binding_digest, str)
-                and re.fullmatch(r"[0-9a-f]{64}", binding_digest) is not None
-                and all(
-                    isinstance(record.get(field_name), str)
-                    and re.fullmatch(
-                        r"[0-9a-f]{64}",
-                        record[field_name],
-                    )
-                    is not None
-                    for field_name in binding_report_fields
-                )
-            )
-            sequence_digest = record.get("scientific_command_sequence_digest")
-            sequence_ready = (
-                isinstance(sequence_digest, str)
-                and re.fullmatch(r"[0-9a-f]{64}", sequence_digest) is not None
-                if package_family in semantic_session_families
-                else sequence_digest == ""
-            )
-            return base_ready and binding_ready and sequence_ready
-        return (
-            base_ready
-            and binding_digest == ""
-            and all(record.get(field_name) == "" for field_name in binding_report_fields)
-            and record.get("scientific_command_sequence_digest") == ""
-        )
-
-    def randomization_record_ready(record: dict[str, Any]) -> bool:
-        """区分活动 repeat 证据与跨 repeat 不变的忠实度证据."""
-
-        package_family = str(record.get("package_family", ""))
-        if package_family in RANDOMIZATION_REPEAT_PACKAGE_FAMILIES:
-            expected_identity = {
-                **expected_repeat.to_dict(),
-                "formal_randomization_protocol_digest": (
-                    expected_randomization_protocol_digest
-                ),
-            }
-            return bool(
-                record.get("randomization_scope")
-                == "active_repeat_component"
-                and all(
-                    record.get(field_name) == expected_value
-                    for field_name, expected_value in expected_identity.items()
-                )
-            )
-        if package_family in CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES:
-            return bool(
-                record.get("randomization_scope")
-                == "cross_repeat_invariant"
-                and record.get("randomization_repeat_id") == ""
-                and record.get("generation_seed_index") == -1
-                and record.get("generation_seed_offset") == -1
-                and record.get("watermark_key_index") == -1
-                and record.get("formal_randomization_protocol_digest") == ""
-            )
-        return False
-
-    package_rows_ready = all(
-        isinstance(record, dict)
-        and str(record.get("paper_run_name", "")) == resolved_run_name
-        and math.isclose(
-            float(record.get("target_fpr", float("nan"))),
-            expected_target_fpr,
-            rel_tol=0.0,
-            abs_tol=1e-12,
-        )
-        and normalize_clean_code_version(record.get("code_version"))
-        == common_code_version
-        and bool(str(record.get("package_path", "")))
-        and bool(re.fullmatch(r"[0-9a-fA-F]{64}", str(record.get("package_sha256", ""))))
-        and bool(
-            re.fullmatch(
-                r"[0-9a-f]{64}",
-                str(record.get("formal_execution_run_lock_digest", "")),
-            )
-        )
-        and bool(
-            re.fullmatch(
-                r"[0-9a-f]{64}",
-                str(record.get("formal_execution_package_lock_digest", "")),
-            )
-        )
-        and scientific_record_ready(record)
-        and randomization_record_ready(record)
-        for record in records
-    )
-    semantic_session_records = [
-        record
-        for record in records
-        if isinstance(record, dict)
-        and record.get("package_family")
-        in SEMANTIC_WATERMARK_PACKAGE_FAMILIES
-    ]
-    semantic_session_group_ready = (
-        len(semantic_session_records) == 3
-        and all(
-            len(
-                {
-                    record.get(field_name)
-                    for record in semantic_session_records
-                }
-            )
-            == 1
-            for field_name in SEMANTIC_SESSION_IDENTITY_FIELDS
-        )
-    )
-    expected_run_lock_digests = {
-        str(record.get("package_family", "")): str(
-            record.get("formal_execution_run_lock_digest", "")
-        )
-        for record in records
-        if isinstance(record, dict)
-    }
-    expected_package_lock_digests = {
-        str(record.get("package_family", "")): str(
-            record.get("formal_execution_package_lock_digest", "")
-        )
-        for record in records
-        if isinstance(record, dict)
-    }
-    metadata = lock_manifest.get("metadata", {})
-    output_paths = lock_manifest.get("output_paths", ())
-    expected_output_suffixes = (
-        f"{LOCK_OUTPUT_ROOT.as_posix()}/{resolved_run_name}/{LOCK_FILENAME}",
-        f"{LOCK_OUTPUT_ROOT.as_posix()}/{resolved_run_name}/{LOCK_MANIFEST_FILENAME}",
-    )
-    ready = (
-        str(lock_payload.get("paper_run_name", "")) == resolved_run_name
-        and math.isclose(
-            float(lock_payload.get("target_fpr", float("nan"))),
-            expected_target_fpr,
-            rel_tol=0.0,
-            abs_tol=1e-12,
-        )
-        and int(lock_payload.get("closure_input_package_count", -1))
-        == len(CLOSURE_PACKAGE_FAMILY_SPECS)
-        and len(records) == len(CLOSURE_PACKAGE_FAMILY_SPECS)
-        and len(set(actual_families)) == len(actual_families)
-        and set(actual_families) == expected_families
-        and package_rows_ready
-        and semantic_session_group_ready
-        and lock_payload.get("formal_execution_run_lock_digests")
-        == expected_run_lock_digests
-        and lock_payload.get("formal_execution_package_lock_digests")
-        == expected_package_lock_digests
-        and lock_payload.get("randomization_repeat_identity")
-        == {
-            **expected_repeat.to_dict(),
-            "formal_randomization_protocol_digest": (
-                expected_randomization_protocol_digest
-            ),
-        }
-        and lock_payload.get("repeat_component_input_ready") is True
-        and lock_payload.get("randomization_aggregate_ready") is False
-        and lock_payload.get("supports_paper_claim") is False
-        and bool(re.fullmatch(r"[0-9a-fA-F]{64}", declared_digest))
-        and _stable_digest(digest_payload) == declared_digest
-        and str(lock_manifest.get("artifact_id", ""))
-        == f"{resolved_run_name}_closure_input_lock_manifest"
-        and isinstance(metadata, dict)
-        and metadata.get("closure_input_lock_ready") is True
-        and int(metadata.get("closure_input_package_count", -1)) == len(records)
-        and metadata.get("closure_input_packages") == records
-        and str(metadata.get("paper_run_name", "")) == resolved_run_name
-        and math.isclose(
-            float(metadata.get("target_fpr", float("nan"))),
-            expected_target_fpr,
-            rel_tol=0.0,
-            abs_tol=1e-12,
-        )
-        and str(metadata.get("closure_input_lock_digest", "")) == declared_digest
-        and str(metadata.get("common_code_version", "")) == common_code_version
-        and metadata.get("randomization_repeat_identity")
-        == lock_payload.get("randomization_repeat_identity")
-        and metadata.get("repeat_component_input_ready") is True
-        and metadata.get("randomization_aggregate_ready") is False
-        and metadata.get("supports_paper_claim") is False
-        and all(
-            any(str(path).replace("\\", "/").endswith(suffix) for path in output_paths)
-            for suffix in expected_output_suffixes
-        )
-    )
-    if not ready:
-        raise ClosurePackageSelectionError("closure input lock 基本身份或摘要复验失败")
-    return {
-        "closure_input_lock_digest": declared_digest,
-        "common_code_version": common_code_version,
-        "randomization_repeat_id": expected_repeat.randomization_repeat_id,
-    }
-
-
-def load_validated_closure_input_lock(
-    root: str | Path,
-    *,
-    paper_run_name: str,
-    target_fpr: float,
-    randomization_repeat_id: str | None = None,
-) -> dict[str, Any]:
-    """从当前论文运行目录读取并复验 closure input lock."""
-
-    repository_root = Path(root).resolve()
-    resolved_run_name = normalize_paper_run_name(paper_run_name)
-    lock_dir = repository_root / LOCK_OUTPUT_ROOT / resolved_run_name
-    lock_path = lock_dir / LOCK_FILENAME
-    manifest_path = lock_dir / LOCK_MANIFEST_FILENAME
-    if not lock_path.is_file() or not manifest_path.is_file():
-        raise FileNotFoundError("当前论文运行缺少 closure input lock 或独立 manifest")
-    lock_payload = json.loads(lock_path.read_text(encoding="utf-8-sig"))
-    lock_manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
-    if not isinstance(lock_payload, dict) or not isinstance(lock_manifest, dict):
-        raise TypeError("closure input lock 与独立 manifest 必须是 JSON 对象")
-    provenance = validate_closure_input_lock_payloads(
-        lock_payload,
-        lock_manifest,
-        paper_run_name=resolved_run_name,
-        target_fpr=target_fpr,
-        randomization_repeat_id=randomization_repeat_id,
-    )
-    return {
-        **provenance,
-        "closure_input_lock": lock_payload,
-        "closure_input_lock_manifest": lock_manifest,
-        "closure_input_lock_path": lock_path,
-        "closure_input_lock_manifest_path": manifest_path,
-    }
-
-
-def _write_closure_input_lock(
-    *,
-    repository_root: Path,
-    paper_run_name: str,
-    target_fpr: float,
-    common_code_version: str,
-    lock_payload: dict[str, Any],
-    lock_records: list[dict[str, Any]],
-) -> tuple[Path, Path]:
-    """把已通过选择的锁和独立 manifest 原子替换到 run-scoped 目录."""
-
-    lock_output_dir = repository_root / LOCK_OUTPUT_ROOT / paper_run_name
-    lock_path = lock_output_dir / LOCK_FILENAME
-    lock_manifest_path = lock_output_dir / LOCK_MANIFEST_FILENAME
-    lock_output_dir.mkdir(parents=True, exist_ok=True)
-    lock_temporary_path = lock_path.with_suffix(".json.tmp")
-    manifest_temporary_path = lock_manifest_path.with_suffix(".json.tmp")
-    for temporary_path in (lock_temporary_path, manifest_temporary_path):
-        if temporary_path.exists():
-            temporary_path.unlink()
-    lock_temporary_path.write_text(
-        json.dumps(lock_payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    lock_manifest = build_artifact_manifest(
-        artifact_id=f"{paper_run_name}_closure_input_lock_manifest",
-        artifact_type="local_manifest",
-        input_paths=tuple(record["package_path"] for record in lock_records),
-        output_paths=(
-            lock_path.relative_to(repository_root).as_posix(),
-            lock_manifest_path.relative_to(repository_root).as_posix(),
-        ),
-        config={
-            "paper_run_name": paper_run_name,
-            "target_fpr": target_fpr,
-            "common_code_version": common_code_version,
-            "closure_input_packages": lock_records,
-            "randomization_repeat_identity": lock_payload[
-                "randomization_repeat_identity"
-            ],
-            "repeat_component_input_ready": True,
-            "randomization_aggregate_ready": False,
-            "supports_paper_claim": False,
-        },
-        code_version=resolve_code_version(repository_root),
-        rebuild_command=(
-            "调用 paper_experiments.runners.closure_package_selection."
-            "select_and_lock_closure_input_packages"
-        ),
-        metadata={
-            "closure_input_lock_ready": True,
-            "closure_input_package_count": len(lock_records),
-            "closure_input_packages": lock_records,
-            "closure_input_lock_digest": lock_payload["closure_input_lock_digest"],
-            "paper_run_name": paper_run_name,
-            "target_fpr": target_fpr,
-            "common_code_version": common_code_version,
-            "randomization_repeat_identity": lock_payload[
-                "randomization_repeat_identity"
-            ],
-            "repeat_component_input_ready": True,
-            "randomization_aggregate_ready": False,
-            "supports_paper_claim": False,
-        },
-    ).to_dict()
-    manifest_temporary_path.write_text(
-        json.dumps(lock_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    lock_temporary_path.replace(lock_path)
-    manifest_temporary_path.replace(lock_manifest_path)
-    return lock_path, lock_manifest_path
-
-
-def build_closure_input_selection_report(
+def _select_package_candidates(
     package_search_root: str | Path,
     *,
+    specifications: tuple[ClosurePackageFamilySpec, ...],
     paper_run_name: str,
     target_fpr: float,
-    randomization_repeat_id: str | None = None,
-    root: str | Path = ".",
-    write_lock: bool = False,
-) -> dict[str, Any]:
-    """解析10类精确包, 可选择在正式执行时写出锁和独立 manifest."""
+    randomization_repeat_id: str,
+    repository_root: Path,
+) -> tuple[ClosurePackageCandidate, ...]:
+    """按给定 family 契约选择最新且可复验的结果包.
 
-    resolved_paper_run = normalize_paper_run_name(paper_run_name)
-    expected_target_fpr = float(target_fpr)
-    expected_repeat = resolve_formal_randomization_repeat(
-        randomization_repeat_id
-    )
-    if not math.isfinite(expected_target_fpr) or not 0.0 < expected_target_fpr < 1.0:
-        raise ClosurePackageSelectionError("target_fpr 必须是位于 (0, 1) 的有限数值")
+    该函数收敛 ZIP 发现、包内身份核验和依赖 profile 核验.单 repeat 证据
+    封装与后续完整论文闭合复用同一选择器, 避免两条路径形成不同的公平性
+    或来源标准.
+    """
+
     search_root = Path(package_search_root).expanduser()
     if not search_root.is_dir():
         raise ClosurePackageSelectionError("package_search_root 必须是存在的目录")
-    repository_root = Path(root).resolve()
-
     selected_candidates: list[ClosurePackageCandidate] = []
-    for spec in CLOSURE_PACKAGE_FAMILY_SPECS:
+    for spec in specifications:
         matching_paths = sorted(
             (
                 path
@@ -3219,13 +2810,11 @@ def build_closure_input_selection_report(
                 candidate = inspect_closure_package(
                     candidate_path,
                     spec=spec,
-                    paper_run_name=resolved_paper_run,
-                    target_fpr=expected_target_fpr,
-                    randomization_repeat_id=(
-                        expected_repeat.randomization_repeat_id
-                    ),
+                    paper_run_name=paper_run_name,
+                    target_fpr=target_fpr,
+                    randomization_repeat_id=randomization_repeat_id,
                 )
-                _validate_candidate_repository_profile(
+                validate_closure_candidate_repository_profile(
                     candidate,
                     repository_root=repository_root,
                 )
@@ -3243,129 +2832,76 @@ def build_closure_input_selection_report(
                 package_family=spec.package_family,
             )
         )
-
-    if len(selected_candidates) != len(CLOSURE_PACKAGE_FAMILY_SPECS) or len(
+    if len(selected_candidates) != len(specifications) or len(
         {candidate.package_family for candidate in selected_candidates}
-    ) != len(CLOSURE_PACKAGE_FAMILY_SPECS):
-        raise ClosurePackageSelectionError("闭合输入必须恰好覆盖10个互异 package family")
-    active_repeat_candidates = [
-        candidate
-        for candidate in selected_candidates
-        if candidate.package_family in RANDOMIZATION_REPEAT_PACKAGE_FAMILIES
-    ]
-    invariant_candidates = [
-        candidate
-        for candidate in selected_candidates
-        if candidate.package_family in CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES
-    ]
-    if (
-        len(active_repeat_candidates)
-        != len(RANDOMIZATION_REPEAT_PACKAGE_FAMILIES)
-        or any(
-            candidate.randomization_repeat_id
-            != expected_repeat.randomization_repeat_id
-            or candidate.randomization_scope != "active_repeat_component"
-            for candidate in active_repeat_candidates
-        )
-        or len(invariant_candidates)
-        != len(CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES)
-        or any(
-            candidate.randomization_scope != "cross_repeat_invariant"
-            for candidate in invariant_candidates
-        )
-    ):
-        raise ClosurePackageSelectionError(
-            "闭合输入未精确覆盖活动 repeat 证据与跨 repeat 不变证据"
-        )
-    _validate_semantic_watermark_session_group(selected_candidates)
-    common_code_versions = {
-        normalize_clean_code_version(candidate.code_version)
-        for candidate in selected_candidates
-    }
-    if len(common_code_versions) != 1:
-        raise ClosurePackageSelectionError("10个闭合输入包必须共享同一 clean Git code_version")
-    common_code_version = next(iter(common_code_versions))
-    repository_code_version = normalize_clean_code_version(
-        resolve_code_version(repository_root)
-    )
-    if common_code_version != repository_code_version:
-        raise ClosurePackageSelectionError(
-            "10个闭合输入包的 code_version 必须匹配当前 clean 仓库提交"
-        )
-    lock_records = [candidate.to_lock_record() for candidate in selected_candidates]
-    formal_execution_run_lock_digests = {
-        candidate.package_family: candidate.formal_execution_run_lock_digest
-        for candidate in selected_candidates
-    }
-    formal_execution_package_lock_digests = {
-        candidate.package_family: candidate.formal_execution_package_lock_digest
-        for candidate in selected_candidates
-    }
-    lock_payload: dict[str, Any] = {
-        "paper_run_name": resolved_paper_run,
-        "target_fpr": expected_target_fpr,
-        "common_code_version": common_code_version,
-        "closure_input_package_count": len(lock_records),
-        "closure_input_packages": lock_records,
-        "formal_execution_run_lock_digests": formal_execution_run_lock_digests,
-        "formal_execution_package_lock_digests": (
-            formal_execution_package_lock_digests
-        ),
-        "randomization_repeat_identity": {
-            **expected_repeat.to_dict(),
-            "formal_randomization_protocol_digest": (
-                formal_randomization_protocol_record()[
-                    "formal_randomization_protocol_digest"
-                ]
-            ),
-        },
-        "repeat_component_input_ready": True,
-        "randomization_aggregate_ready": False,
-        "supports_paper_claim": False,
-    }
-    lock_payload["closure_input_lock_digest"] = _stable_digest(lock_payload)
-    lock_path = repository_root / LOCK_OUTPUT_ROOT / resolved_paper_run / LOCK_FILENAME
-    lock_manifest_path = (
-        repository_root / LOCK_OUTPUT_ROOT / resolved_paper_run / LOCK_MANIFEST_FILENAME
-    )
-    if write_lock:
-        lock_path, lock_manifest_path = _write_closure_input_lock(
-            repository_root=repository_root,
-            paper_run_name=resolved_paper_run,
-            target_fpr=expected_target_fpr,
-            common_code_version=common_code_version,
-            lock_payload=lock_payload,
-            lock_records=lock_records,
-        )
-    return {
-        **lock_payload,
-        "selected_package_paths": [record["package_path"] for record in lock_records],
-        "closure_input_lock_path": lock_path.as_posix(),
-        "closure_input_lock_manifest_path": lock_manifest_path.as_posix(),
-        "closure_input_lock_written": bool(write_lock),
-        "closure_input_selection_ready": True,
-        "repeat_component_input_ready": True,
-        "randomization_aggregate_ready": False,
-        "supports_paper_claim": False,
-    }
+    ) != len(specifications):
+        raise ClosurePackageSelectionError("结果包选择未精确覆盖互异 package family")
+    return tuple(selected_candidates)
 
 
-def select_and_lock_closure_input_packages(
+def select_randomization_repeat_package_candidates(
     package_search_root: str | Path,
     *,
     paper_run_name: str,
     target_fpr: float,
-    randomization_repeat_id: str | None = None,
+    randomization_repeat_id: str,
     root: str | Path = ".",
-) -> tuple[str, ...]:
-    """正式选择并冻结10个上游包, 返回其显式绝对路径."""
+) -> tuple[ClosurePackageCandidate, ...]:
+    """选择一个正式 repeat 的7类随机化相关证据包.
 
-    report = build_closure_input_selection_report(
-        package_search_root,
-        paper_run_name=paper_run_name,
-        target_fpr=target_fpr,
-        randomization_repeat_id=randomization_repeat_id,
-        root=root,
-        write_lock=True,
+    三个官方参考环境包不随 seed 或密钥改变, 因此不重复写入9个 component;
+    它们只在最终聚合层选择一次.此处返回的7个包均必须精确绑定活动 repeat.
+    """
+
+    resolved_paper_run = normalize_paper_run_name(paper_run_name)
+    try:
+        expected_target_fpr = validate_frozen_paper_run_target_fpr(
+            resolved_paper_run,
+            target_fpr,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ClosurePackageSelectionError(str(exc)) from exc
+    expected_repeat = resolve_formal_randomization_repeat(
+        randomization_repeat_id
     )
-    return tuple(str(path) for path in report["selected_package_paths"])
+    if not math.isfinite(expected_target_fpr) or not 0.0 < expected_target_fpr < 1.0:
+        raise ClosurePackageSelectionError("target_fpr 必须是位于 (0, 1) 的有限数值")
+    repository_root = Path(root).resolve()
+    repeat_specifications = tuple(
+        specification
+        for specification in CLOSURE_PACKAGE_FAMILY_SPECS
+        if specification.package_family in RANDOMIZATION_REPEAT_PACKAGE_FAMILIES
+    )
+    selected_candidates = _select_package_candidates(
+        package_search_root,
+        specifications=repeat_specifications,
+        paper_run_name=resolved_paper_run,
+        target_fpr=expected_target_fpr,
+        randomization_repeat_id=expected_repeat.randomization_repeat_id,
+        repository_root=repository_root,
+    )
+    if (
+        len(selected_candidates) != len(RANDOMIZATION_REPEAT_PACKAGE_FAMILIES)
+        or any(
+            candidate.randomization_scope != "active_repeat_component"
+            or candidate.randomization_repeat_id
+            != expected_repeat.randomization_repeat_id
+            for candidate in selected_candidates
+        )
+    ):
+        raise ClosurePackageSelectionError(
+            "单 repeat 输入未精确覆盖7类活动随机化证据"
+        )
+    _validate_semantic_watermark_session_group(list(selected_candidates))
+    common_code_versions = {
+        normalize_clean_code_version(candidate.code_version)
+        for candidate in selected_candidates
+    }
+    repository_code_version = normalize_clean_code_version(
+        resolve_code_version(repository_root)
+    )
+    if common_code_versions != {repository_code_version}:
+        raise ClosurePackageSelectionError(
+            "单 repeat 输入包必须共享并匹配当前 clean Git code_version"
+        )
+    return selected_candidates

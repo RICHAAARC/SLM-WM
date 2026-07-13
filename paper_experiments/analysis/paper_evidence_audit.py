@@ -90,7 +90,7 @@ class AuditInputBundle:
     dataset_quality_manifest: dict[str, Any]
     dataset_quality_summary: dict[str, Any]
     ablation_manifest: dict[str, Any]
-    ablation_claim_summary: dict[str, Any]
+    ablation_component_summary: dict[str, Any]
     source_path_map: dict[str, str]
     artifact_data_validation: dict[str, Any] = field(default_factory=dict)
     ablation_necessity_rows: tuple[dict[str, Any], ...] = ()
@@ -348,7 +348,7 @@ def _dataset_level_quality_blockers(
         blockers.append("fid_kid_dataset_metrics_missing")
     if not _yes(dataset_quality_summary.get("canonical_formal_feature_extractor_ready")):
         blockers.append("canonical_inception_feature_extractor_missing")
-    if not _yes(dataset_quality_summary.get("formal_fid_kid_claim_gate_ready")):
+    if not _yes(dataset_quality_summary.get("formal_fid_kid_component_ready")):
         blockers.append("formal_fid_kid_claim_gate_not_ready")
     if not metrics_data_ready:
         blockers.append("fid_kid_table_data_invalid")
@@ -423,7 +423,7 @@ def _ablation_necessity_rows_by_id(
             summary.get("expected_variant_ablation_ids") == list(expected_ids),
             int(summary.get("necessity_statistic_row_count", -1)) == len(rows),
             summary.get("necessity_statistic_rows_digest") == rows_digest,
-            bundle.ablation_claim_summary.get("necessity_statistic_rows_digest")
+            bundle.ablation_component_summary.get("necessity_statistic_rows_digest")
             == rows_digest,
         )
     ):
@@ -435,10 +435,10 @@ def _ablation_evidence_ready(bundle: AuditInputBundle) -> bool:
     """判断消融协议和必要性统计是否闭合, 不推断统计结论必然为正。"""
 
     return (
-        _yes(bundle.ablation_claim_summary.get("ablation_claim_gate_ready"))
-        and _yes(bundle.ablation_claim_summary.get("supports_paper_claim"))
+        _yes(bundle.ablation_component_summary.get("ablation_component_ready"))
+        and _yes(bundle.ablation_component_summary.get("supports_paper_claim"))
         and _yes(
-            bundle.ablation_claim_summary.get(
+            bundle.ablation_component_summary.get(
                 "ablation_necessity_statistics_ready"
             )
         )
@@ -475,9 +475,9 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     baseline = bundle.baseline_runtime_report
     dataset_quality = bundle.dataset_quality_summary
     full_ready = (
-        _yes(threshold.get("full_method_claim_ready"))
+        _yes(threshold.get("full_method_component_ready"))
         and _threshold_audit_ready(bundle)
-        and _yes(attack.get("full_method_claim_ready"))
+        and _yes(attack.get("full_method_component_ready"))
         and _image_only_detector_ready(threshold)
         and _scientific_operator_ready(threshold)
         and _method_curve_data_ready(bundle)
@@ -496,7 +496,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     dataset_quality_ready = (
         _yes(dataset_quality.get("formal_fid_kid_ready"))
         and _yes(dataset_quality.get("canonical_formal_feature_extractor_ready"))
-        and _yes(dataset_quality.get("formal_fid_kid_claim_gate_ready"))
+        and _yes(dataset_quality.get("formal_fid_kid_component_ready"))
         and dataset_metrics_data_ready
     )
     ablation_evidence_ready = _ablation_evidence_ready(bundle)
@@ -504,7 +504,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
     all_necessity_claims_supported = (
         ablation_evidence_ready
         and all(
-            _yes(row.get("necessity_claim_supported"))
+            _yes(row.get("necessity_component_supported"))
             for row in necessity_rows_by_id.values()
         )
     )
@@ -515,7 +515,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             claim_text,
             (
                 "paper_supported"
-                if _yes(necessity_rows_by_id[ablation_id].get("necessity_claim_supported"))
+                if _yes(necessity_rows_by_id[ablation_id].get("necessity_component_supported"))
                 else "measured_not_supported"
             ),
             (
@@ -529,7 +529,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             _necessity_row_blockers(necessity_rows_by_id[ablation_id]),
             paper_claim_supported=_yes(
                 necessity_rows_by_id[ablation_id].get(
-                    "necessity_claim_supported"
+                    "necessity_component_supported"
                 )
             ),
         )
@@ -583,7 +583,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             []
             if full_ready
             else [
-                "full_method_claim_ready_false",
+                "full_method_component_ready_false",
                 "image_only_detector_boundary_not_ready",
                 "continuous_detection_curve_data_invalid"
                 if not _method_curve_data_ready(bundle)
@@ -639,7 +639,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                         + ",".join(
                             ablation_id
                             for ablation_id, row in necessity_rows_by_id.items()
-                            if not _yes(row.get("necessity_claim_supported"))
+                            if not _yes(row.get("necessity_component_supported"))
                         )
                     ]
                     if ablation_evidence_ready
@@ -678,7 +678,7 @@ def build_claim_audit_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
             []
             if submission_core_ready
             else [
-                "" if full_ready else "full_method_claim_ready_false",
+                "" if full_ready else "full_method_component_ready_false",
                 "" if baseline_ready else "baseline_result_missing",
                 "" if attack_ready else "real_attack_evidence_missing",
                 "" if dataset_quality_ready else "formal_dataset_quality_missing",
@@ -721,7 +721,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
     baseline = bundle.baseline_runtime_report
     dataset_quality = bundle.dataset_quality_summary
     full_ready = (
-        _yes(threshold.get("full_method_claim_ready"))
+        _yes(threshold.get("full_method_component_ready"))
         and _threshold_audit_ready(bundle)
         and _image_only_detector_ready(threshold)
         and _scientific_operator_ready(threshold)
@@ -746,7 +746,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
     dataset_quality_ready = (
         _yes(dataset_quality.get("formal_fid_kid_ready"))
         and _yes(dataset_quality.get("canonical_formal_feature_extractor_ready"))
-        and _yes(dataset_quality.get("formal_fid_kid_claim_gate_ready"))
+        and _yes(dataset_quality.get("formal_fid_kid_component_ready"))
         and dataset_metrics_data_ready
     )
     ablation_evidence_ready = _ablation_evidence_ready(bundle)
@@ -794,7 +794,7 @@ def build_table_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]
             full_ready,
             []
             if full_ready
-            else (["test_detection_metrics_data_invalid"] if not test_metrics_data_ready else ["full_method_claim_ready_false"]),
+            else (["test_detection_metrics_data_invalid"] if not test_metrics_data_ready else ["full_method_component_ready_false"]),
         ),
         _artifact_row(
             "table_attack_robustness",
@@ -892,7 +892,7 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
     attack = bundle.attack_manifest
     threshold = bundle.threshold_report
     full_ready = (
-        _yes(threshold.get("full_method_claim_ready"))
+        _yes(threshold.get("full_method_component_ready"))
         and _threshold_audit_ready(bundle)
         and _image_only_detector_ready(threshold)
         and _scientific_operator_ready(threshold)
@@ -963,7 +963,7 @@ def build_figure_readiness_rows(bundle: AuditInputBundle) -> list[dict[str, Any]
             full_ready and roc_data_ready and det_data_ready,
             []
             if full_ready and roc_data_ready and det_data_ready
-            else (["roc_det_complete_threshold_sweep_invalid"] if not (roc_data_ready and det_data_ready) else ["full_method_claim_ready_false"]),
+            else (["roc_det_complete_threshold_sweep_invalid"] if not (roc_data_ready and det_data_ready) else ["full_method_component_ready_false"]),
         ),
         _artifact_row(
             "figure_attack_robustness",
@@ -1134,8 +1134,8 @@ def build_evidence_gap_rows(bundle: AuditInputBundle) -> list[dict[str, Any]]:
                 "required_action": "对每个机制开关完成逐 Prompt 配对重运行, 并生成效应方向、最小效应、bootstrap CI、配对检验与 Holm 校正统计。",
                 "related_artifacts": _source(
                     bundle,
-                    "ablation_claim_summary",
-                    "ablation_claim_summary",
+                    "ablation_component_summary",
+                    "ablation_component_summary",
                 ),
                 "closes_claim_ids": "claim_internal_mechanism_necessity;claim_submission_ready_package",
                 "recommended_order": 6,
@@ -1249,7 +1249,7 @@ def build_submission_blocker_report(
         and bool(builder_report.get("artifact_builder_ready"))
         and bool(builder_report.get("paper_artifact_claim_ready"))
     )
-    full_method_claim_ready = any(
+    full_method_component_ready = any(
         row.get("claim_id") == "claim_full_method_fixed_fpr_boundary"
         and _yes(row.get("paper_claim_supported"))
         for row in claims
@@ -1265,6 +1265,6 @@ def build_submission_blocker_report(
         "gap_count": len(gaps),
         "primary_blockers": [row["gap_id"] for row in sorted(gaps, key=lambda item: int(item["recommended_order"]))[:4]],
         "recommended_next_action": recommended_next_action,
-        "full_method_claim_ready": full_method_claim_ready,
+        "full_method_component_ready": full_method_component_ready,
         "supports_paper_claim": submission_ready,
     }

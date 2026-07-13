@@ -31,12 +31,18 @@ from experiments.runtime.repository_environment import (
     build_formal_execution_lock,
     publish_formal_execution_lock,
 )
+from experiments.protocol.formal_randomization import (
+    resolve_formal_randomization_repeat,
+)
+from experiments.protocol.paper_run_config import build_paper_run_config
 from scripts.formal_workflow_environment import (
+    SEMANTIC_WATERMARK_REPEAT_DRIVE_ROOT_ENVIRONMENT_KEY,
     configure_formal_workflow_environment,
 )
 
 
 PAPER_RUN_NAME_ENVIRONMENT_KEY = "SLM_WM_PAPER_RUN_NAME"
+RANDOMIZATION_REPEAT_ID_ENVIRONMENT_KEY = "SLM_WM_RANDOMIZATION_REPEAT_ID"
 PRIMARY_BASELINE_ID_ENVIRONMENT_KEY = "SLM_WM_PRIMARY_BASELINE_ID"
 MAIN_METHOD_PROFILE_ID = "sd35_method_runtime_gpu"
 T2SMARK_PROFILE_ID = "t2smark_sd35_gpu"
@@ -123,6 +129,16 @@ WORKFLOW_ROUTES: Dict[str, WorkflowRoute] = {
         official_reference_runner_name="shallow_diffuse",
     ),
 }
+ACTIVE_REPEAT_GPU_WORKFLOW_NAMES = frozenset(
+    {
+        "image_only_dataset",
+        "mechanism_ablation",
+        "external_baseline_tree_ring",
+        "external_baseline_gaussian_shading",
+        "external_baseline_shallow_diffuse",
+        "official_reference_t2smark",
+    }
+)
 WORKFLOW_ENVIRONMENT_CONFIGURATION = {
     "image_only_dataset": ("semantic_watermark_image_only", ""),
     "mechanism_ablation": ("semantic_watermark_image_only", ""),
@@ -150,8 +166,8 @@ WORKFLOW_ENVIRONMENT_CONFIGURATION = {
     ),
 }
 WORKFLOW_PERSISTENT_ENVIRONMENT_KEYS = {
-    "image_only_dataset": "SLM_WM_DRIVE_RESULT_ROOT",
-    "mechanism_ablation": "SLM_WM_DRIVE_RESULT_ROOT",
+    "image_only_dataset": SEMANTIC_WATERMARK_REPEAT_DRIVE_ROOT_ENVIRONMENT_KEY,
+    "mechanism_ablation": SEMANTIC_WATERMARK_REPEAT_DRIVE_ROOT_ENVIRONMENT_KEY,
     "external_baseline_tree_ring": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
     "external_baseline_gaussian_shading": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
     "external_baseline_shallow_diffuse": "SLM_WM_EXTERNAL_BASELINE_DRIVE_OUTPUT_DIR",
@@ -239,6 +255,7 @@ def _restore_environment_value(key: str, value: Optional[str]) -> None:
 def _published_workflow_environment(
     execution_lock: Mapping[str, Any],
     paper_run_name: str,
+    randomization_repeat_id: str | None,
     baseline_id: Optional[str],
 ) -> Iterator[None]:
     """临时发布正式执行锁、论文级别和唯一 baseline 身份.
@@ -255,6 +272,12 @@ def _published_workflow_environment(
     try:
         publish_formal_execution_lock(execution_lock)
         os.environ[PAPER_RUN_NAME_ENVIRONMENT_KEY] = paper_run_name
+        if randomization_repeat_id is None:
+            os.environ.pop(RANDOMIZATION_REPEAT_ID_ENVIRONMENT_KEY, None)
+        else:
+            os.environ[RANDOMIZATION_REPEAT_ID_ENVIRONMENT_KEY] = (
+                randomization_repeat_id
+            )
         if baseline_id is None:
             os.environ.pop(PRIMARY_BASELINE_ID_ENVIRONMENT_KEY, None)
         else:
@@ -277,6 +300,16 @@ def _configure_workflow_execution_environment(
     persistent_output_dir: Optional[str | Path],
 ) -> tuple[Dict[str, Any], str | Path]:
     """配置独立服务器环境并解析本次持久化根目录."""
+
+    if (
+        workflow_name in ACTIVE_REPEAT_GPU_WORKFLOW_NAMES
+        and persistent_output_dir is not None
+        and str(persistent_output_dir).strip()
+    ):
+        raise ValueError(
+            "活动随机化 GPU workflow 的持久化根必须由受治理 repeat 配置生成, "
+            "不得显式覆盖"
+        )
 
     configuration_name, baseline_id = WORKFLOW_ENVIRONMENT_CONFIGURATION[
         workflow_name
@@ -476,6 +509,7 @@ def _build_workflow_result(
     *,
     workflow_name: str,
     paper_run_name: str,
+    randomization_repeat_id: str | None,
     route: WorkflowRoute,
     execution_lock: Mapping[str, Any],
     orchestrator_environment: Mapping[str, Any],
@@ -508,6 +542,12 @@ def _build_workflow_result(
         "operation_kind": RESULT_OPERATION_KIND,
         "workflow_name": workflow_name,
         "paper_run_name": paper_run_name,
+        "randomization_scope": (
+            "active_repeat_component"
+            if randomization_repeat_id is not None
+            else "cross_repeat_invariant"
+        ),
+        "randomization_repeat_id": randomization_repeat_id or "",
         "scientific_profile_id": route.scientific_profile_id,
         "baseline_id": route.baseline_id,
         "route_kind": route.route_kind,
@@ -538,11 +578,29 @@ def run_workflow(
     repository_commit: str,
     root: str | Path = ".",
     persistent_output_dir: Optional[str | Path] = None,
+    *,
+    randomization_repeat_id: str | None = None,
 ) -> Dict[str, Any]:
     """在 CPU 父入口中发布执行身份并调度一个隔离 GPU 工作流."""
 
     if workflow_name not in WORKFLOW_ROUTES:
         raise ValueError("未知正式工作流: {0}".format(workflow_name))
+    active_repeat_workflow = workflow_name in ACTIVE_REPEAT_GPU_WORKFLOW_NAMES
+    if active_repeat_workflow:
+        if not randomization_repeat_id:
+            raise ValueError("活动随机化 GPU workflow 必须显式指定 repeat ID")
+        resolved_repeat_id = resolve_formal_randomization_repeat(
+            randomization_repeat_id
+        ).randomization_repeat_id
+        if persistent_output_dir is not None and str(persistent_output_dir).strip():
+            raise ValueError(
+                "活动随机化 GPU workflow 的持久化根必须由受治理 repeat 配置生成, "
+                "不得显式覆盖"
+            )
+    else:
+        if randomization_repeat_id:
+            raise ValueError("跨 repeat 不变 GPU workflow 不得绑定活动 repeat ID")
+        resolved_repeat_id = None
     route = WORKFLOW_ROUTES[workflow_name]
     root_path = Path(root).resolve()
     orchestrator_environment = _require_workflow_orchestrator_environment(
@@ -552,8 +610,15 @@ def run_workflow(
     with _published_workflow_environment(
         execution_lock,
         paper_run_name,
+        resolved_repeat_id,
         route.baseline_id,
     ):
+        paper_run = build_paper_run_config(root_path)
+        if paper_run.run_name != paper_run_name or (
+            active_repeat_workflow
+            and paper_run.randomization_repeat_id != resolved_repeat_id
+        ):
+            raise ValueError("GPU workflow 与当前论文运行及 repeat 配置不一致")
         workflow_environment, resolved_persistent_output_dir = (
             _configure_workflow_execution_environment(
                 workflow_name=workflow_name,
@@ -561,6 +626,15 @@ def run_workflow(
                 persistent_output_dir=persistent_output_dir,
             )
         )
+        workflow_environment = {
+            **workflow_environment,
+            "randomization_scope": (
+                "active_repeat_component"
+                if active_repeat_workflow
+                else "cross_repeat_invariant"
+            ),
+            "randomization_repeat_id": resolved_repeat_id or "",
+        }
         route_result = (
             _run_main_method_route(
                 route=route,
@@ -585,6 +659,7 @@ def run_workflow(
     return _build_workflow_result(
         workflow_name=workflow_name,
         paper_run_name=paper_run_name,
+        randomization_repeat_id=resolved_repeat_id,
         route=route,
         execution_lock=execution_lock,
         orchestrator_environment=orchestrator_environment,
@@ -603,6 +678,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("probe_paper", "pilot_paper", "full_paper"),
     )
     parser.add_argument(
+        "--randomization-repeat-id",
+        default="",
+        help="活动随机化 workflow 必须显式指定的 seed-key repeat ID.",
+    )
+    parser.add_argument(
         "--repository-commit",
         required=True,
         help="正式执行使用的精确40位小写 Git SHA.",
@@ -611,7 +691,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--persistent-output-dir",
         default=None,
-        help="可选的挂载盘或服务器持久磁盘目录; 同时保存 checkpoint 与正式归档.",
+        help=(
+            "仅跨 repeat 不变路由可显式指定的持久目录; 活动 repeat 路由必须"
+            "使用受治理配置派生的隔离目录."
+        ),
     )
     return parser
 
@@ -628,6 +711,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 args.repository_commit,
                 args.root,
                 args.persistent_output_dir,
+                randomization_repeat_id=(
+                    args.randomization_repeat_id or None
+                ),
             ),
             ensure_ascii=False,
             sort_keys=True,

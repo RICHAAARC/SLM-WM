@@ -51,6 +51,12 @@ from experiments.protocol.pilot_paper_fixed_fpr import (
     validate_pilot_paper_result_import_rows,
 )
 from experiments.protocol.paper_run_config import RUN_DEFAULTS
+from experiments.protocol.formal_randomization import (
+    formal_randomization_protocol_record,
+    formal_randomization_repeat_ids,
+    formal_randomization_repeat_registry_digest,
+    formal_randomization_repeats,
+)
 from experiments.protocol.splits import build_group_split_counts
 from experiments.runtime.image_metrics import measured_score_retention
 from main.core.digest import build_stable_digest
@@ -167,8 +173,8 @@ class ResultClosureGateInput:
     threshold_audit_report: dict[str, Any]
     threshold_audit_rows: tuple[dict[str, Any], ...]
     threshold_audit_manifest: dict[str, Any]
-    closure_input_lock: dict[str, Any]
-    closure_input_lock_manifest: dict[str, Any]
+    randomization_aggregate_payload: dict[str, Any]
+    randomization_aggregate_manifest: dict[str, Any]
     official_reference_fidelity_records: tuple[dict[str, Any], ...]
     official_reference_fidelity_summary: dict[str, Any]
     official_reference_fidelity_manifest: dict[str, Any]
@@ -889,11 +895,11 @@ def _expected_common_protocol_schema(
             ),
             "test_prompt_id_digest": bundle.expected_test_prompt_id_digest,
             "method_threshold_digest_map": threshold_map,
-            "closure_input_lock_digest": str(
-                bundle.closure_input_lock.get("closure_input_lock_digest", "")
+            "randomization_aggregate_digest": str(
+                bundle.randomization_aggregate_payload.get("randomization_aggregate_digest", "")
             ),
             "common_code_version": str(
-                bundle.closure_input_lock.get("common_code_version", "")
+                bundle.randomization_aggregate_payload.get("common_code_version", "")
             ),
             "paired_superiority_ready": paired_summary.get(
                 "overall_paired_superiority_ready",
@@ -1987,7 +1993,7 @@ def _paired_superiority_ready(bundle: ResultClosureGateInput) -> bool:
     )
     manifest_ready = bool(
         manifest.get("code_version")
-        == bundle.closure_input_lock.get("common_code_version")
+        == bundle.randomization_aggregate_payload.get("common_code_version")
         and _manifest_ready(
             manifest,
             artifact_id="paired_superiority_analysis_manifest",
@@ -2018,70 +2024,231 @@ def _paired_superiority_ready(bundle: ResultClosureGateInput) -> bool:
         )
     )
 
-def _closure_input_provenance_ready(bundle: ResultClosureGateInput) -> bool:
-    """核验输入锁身份并要求最终结果与共同协议传播同一来源."""
+def _randomization_aggregate_provenance_ready(
+    bundle: ResultClosureGateInput,
+) -> bool:
+    """复核已验证精确9重复聚合的结构及下游来源传播.
 
-    lock_payload = bundle.closure_input_lock
-    lock_manifest = bundle.closure_input_lock_manifest
-    records = lock_payload.get("closure_input_packages", ())
-    if not isinstance(records, list):
+    ZIP 字节真实性、成员摘要和来源包科学契约由外层独立 validator 负责.
+    此处不把 payload 中的 ready 自报当作验证结果, 而是重新核验规范身份、
+    精确集合、聚合摘要以及结果 records 与共同协议的来源一致性.
+    """
+
+    payload = bundle.randomization_aggregate_payload
+    manifest = bundle.randomization_aggregate_manifest
+    repeat_ids = payload.get("randomization_repeat_ids", ())
+    repeat_components = payload.get("randomization_repeat_components", ())
+    invariant_packages = payload.get("invariant_packages", ())
+    if not all(
+        isinstance(value, (list, tuple))
+        for value in (repeat_ids, repeat_components, invariant_packages)
+    ):
         return False
-    digest_payload = dict(lock_payload)
-    declared_digest = str(digest_payload.pop("closure_input_lock_digest", ""))
-    common_code_version = str(lock_payload.get("common_code_version", ""))
-    metadata = lock_manifest.get("metadata", {})
+
+    expected_repeat_ids = list(formal_randomization_repeat_ids())
+    expected_invariant_families = [
+        "official_reference_tree_ring",
+        "official_reference_gaussian_shading",
+        "official_reference_shallow_diffuse",
+    ]
+    common_code_version = str(payload.get("common_code_version", ""))
+    protocol_digest = str(
+        formal_randomization_protocol_record()[
+            "formal_randomization_protocol_digest"
+        ]
+    )
+    declared_digest = str(payload.get("randomization_aggregate_digest", ""))
+    if (
+        list(repeat_ids) != expected_repeat_ids
+        or len(repeat_components) != len(expected_repeat_ids)
+        or len(invariant_packages) != len(expected_invariant_families)
+        or len(common_code_version) != 40
+        or any(character not in string.hexdigits for character in common_code_version)
+        or not _is_sha256(declared_digest)
+    ):
+        return False
+
+    repeat_components_ready = all(
+        isinstance(record, Mapping)
+        and str(record.get("randomization_repeat_id", ""))
+        == repeat.randomization_repeat_id
+        and all(
+            record.get(field_name) == getattr(repeat, field_name)
+            for field_name in (
+                "generation_seed_index",
+                "generation_seed_offset",
+                "watermark_key_index",
+            )
+        )
+        and str(record.get("archive_member", ""))
+        == f"repeat_components/{repeat.randomization_repeat_id}.zip"
+        and str(record.get("code_version", "")) == common_code_version
+        and str(record.get("formal_randomization_protocol_digest", ""))
+        == protocol_digest
+        and all(
+            _is_sha256(record.get(field_name, ""))
+            for field_name in (
+                "package_sha256",
+                "randomization_repeat_evidence_manifest_digest",
+                "component_content_digest",
+                "leaf_package_set_digest",
+            )
+        )
+        for repeat, record in zip(
+            formal_randomization_repeats(),
+            repeat_components,
+            strict=True,
+        )
+    )
+    invariant_packages_ready = all(
+        isinstance(record, Mapping)
+        and str(record.get("package_family", "")) == package_family
+        and str(record.get("randomization_scope", ""))
+        == "cross_repeat_invariant"
+        and str(record.get("archive_member", ""))
+        == f"invariant_packages/{package_family}.zip"
+        and str(record.get("code_version", "")) == common_code_version
+        and all(
+            _is_sha256(record.get(field_name, ""))
+            for field_name in (
+                "package_sha256",
+                "formal_execution_run_lock_digest",
+                "formal_execution_package_lock_digest",
+            )
+        )
+        for package_family, record in zip(
+            expected_invariant_families,
+            invariant_packages,
+            strict=True,
+        )
+    )
+    aggregate_core = {
+        "randomization_aggregate_schema_version": 1,
+        "paper_run_name": bundle.expected_paper_claim_scale,
+        "target_fpr": bundle.expected_target_fpr,
+        "formal_randomization_repeat_registry_digest": (
+            formal_randomization_repeat_registry_digest()
+        ),
+        "formal_randomization_protocol_digest": protocol_digest,
+        "randomization_repeat_ids": expected_repeat_ids,
+        "randomization_repeat_components": [
+            dict(record) for record in repeat_components
+        ],
+        "invariant_packages": [dict(record) for record in invariant_packages],
+        "common_code_version": common_code_version,
+        "randomization_aggregate_ready": True,
+        "supports_paper_claim": False,
+    }
+    payload_ready = bool(
+        str(payload.get("report_schema", ""))
+        == "randomization_aggregate_provenance_payload"
+        and _int_value(payload.get("randomization_aggregate_schema_version"))
+        == 1
+        and str(payload.get("paper_run_name", ""))
+        == bundle.expected_paper_claim_scale
+        and _same_float(payload.get("target_fpr"), bundle.expected_target_fpr)
+        and str(
+            payload.get("formal_randomization_repeat_registry_digest", "")
+        )
+        == formal_randomization_repeat_registry_digest()
+        and str(payload.get("formal_randomization_protocol_digest", ""))
+        == protocol_digest
+        and isinstance(payload.get("generated_at"), str)
+        and bool(str(payload.get("generated_at", "")).strip())
+        and payload.get("randomization_aggregate_ready") is True
+        and payload.get("supports_paper_claim") is False
+        and repeat_components_ready
+        and invariant_packages_ready
+        and build_stable_digest(aggregate_core) == declared_digest
+    )
+
+    metadata = manifest.get("metadata", {})
+    mirrored_fields = (
+        "randomization_aggregate_schema_version",
+        "generated_at",
+        "paper_run_name",
+        "target_fpr",
+        "formal_randomization_repeat_registry_digest",
+        "randomization_repeat_ids",
+        "randomization_repeat_components",
+        "invariant_packages",
+        "common_code_version",
+        "formal_randomization_protocol_digest",
+        "randomization_aggregate_digest",
+        "randomization_aggregate_ready",
+        "supports_paper_claim",
+    )
+    expected_manifest_config = {
+        "paper_run_name": bundle.expected_paper_claim_scale,
+        "target_fpr": bundle.expected_target_fpr,
+        "formal_randomization_repeat_registry_digest": (
+            formal_randomization_repeat_registry_digest()
+        ),
+        "formal_randomization_protocol_digest": protocol_digest,
+        "randomization_repeat_ids": expected_repeat_ids,
+        "invariant_package_families": expected_invariant_families,
+    }
+    manifest_digest_payload = dict(manifest)
+    manifest_digest = str(
+        manifest_digest_payload.pop("manifest_digest", "")
+    )
+    manifest_ready = bool(
+        str(manifest.get("artifact_id", ""))
+        == "randomization_aggregate_provenance_manifest"
+        and str(manifest.get("artifact_type", "")) == "local_manifest"
+        and _int_value(manifest.get("randomization_aggregate_schema_version"))
+        == 1
+        and str(manifest.get("code_version", "")) == common_code_version
+        and all(manifest.get(field_name) == payload.get(field_name) for field_name in mirrored_fields)
+        and manifest.get("config") == expected_manifest_config
+        and manifest_config_digest_ready(manifest)
+        and _is_sha256(manifest_digest)
+        and build_stable_digest(manifest_digest_payload) == manifest_digest
+        and _is_sha256(manifest.get("payload_sha256", ""))
+        and bool(str(manifest.get("rebuild_command", "")))
+        and isinstance(metadata, Mapping)
+        and _int_value(metadata.get("randomization_aggregate_schema_version"))
+        == 1
+        and metadata.get("randomization_aggregate_ready") is True
+        and metadata.get("supports_paper_claim") is False
+        and str(metadata.get("randomization_aggregate_digest", ""))
+        == declared_digest
+        and str(metadata.get("common_code_version", ""))
+        == common_code_version
+        and str(metadata.get("formal_randomization_protocol_digest", ""))
+        == protocol_digest
+        and metadata.get("randomization_repeat_ids") == expected_repeat_ids
+        and _int_value(metadata.get("randomization_repeat_component_count"))
+        == len(expected_repeat_ids)
+        and _int_value(metadata.get("invariant_package_count"))
+        == len(expected_invariant_families)
+    )
+
     result_metadata = bundle.result_record_manifest.get("metadata", {})
     common_metadata = bundle.common_protocol_manifest.get("metadata", {})
-    propagated_pairs = (
-        (
-            bundle.result_record_summary.get("closure_input_lock_digest"),
-            bundle.result_record_summary.get("common_code_version"),
-        ),
-        (
-            result_metadata.get("closure_input_lock_digest") if isinstance(result_metadata, Mapping) else None,
-            result_metadata.get("common_code_version") if isinstance(result_metadata, Mapping) else None,
-        ),
-        (
-            bundle.common_protocol_summary.get("closure_input_lock_digest"),
-            bundle.common_protocol_summary.get("common_code_version"),
-        ),
-        (
-            bundle.common_protocol_schema.get("closure_input_lock_digest"),
-            bundle.common_protocol_schema.get("common_code_version"),
-        ),
-        (
-            common_metadata.get("closure_input_lock_digest") if isinstance(common_metadata, Mapping) else None,
-            common_metadata.get("common_code_version") if isinstance(common_metadata, Mapping) else None,
-        ),
+    propagated_payloads: tuple[Mapping[str, Any], ...] = (
+        *tuple(bundle.result_records),
+        bundle.result_record_summary,
+        result_metadata if isinstance(result_metadata, Mapping) else {},
+        bundle.common_protocol_summary,
+        bundle.common_protocol_schema,
+        common_metadata if isinstance(common_metadata, Mapping) else {},
     )
-    return (
-        _is_sha256(declared_digest)
-        and build_stable_digest(digest_payload) == declared_digest
-        and str(lock_payload.get("paper_run_name", ""))
-        == bundle.expected_paper_claim_scale
-        and _same_float(lock_payload.get("target_fpr"), bundle.expected_target_fpr)
-        and _int_value(lock_payload.get("closure_input_package_count")) == 10
-        and len(records) == 10
-        and len({str(row.get("package_family", "")) for row in records}) == 10
-        and bool(common_code_version)
-        and all(
-            isinstance(row, Mapping)
-            and str(row.get("paper_run_name", "")) == bundle.expected_paper_claim_scale
-            and _same_float(row.get("target_fpr"), bundle.expected_target_fpr)
-            and str(row.get("code_version", "")) == common_code_version
-            and _is_sha256(row.get("package_sha256", ""))
-            for row in records
-        )
-        and str(lock_manifest.get("artifact_id", ""))
-        == f"{bundle.expected_paper_claim_scale}_closure_input_lock_manifest"
-        and isinstance(metadata, Mapping)
-        and _strict_bool(metadata.get("closure_input_lock_ready"))
-        and str(metadata.get("closure_input_lock_digest", "")) == declared_digest
-        and str(metadata.get("common_code_version", "")) == common_code_version
-        and all(
-            str(digest) == declared_digest and str(version) == common_code_version
-            for digest, version in propagated_pairs
-        )
+    downstream_ready = all(
+        str(record.get("randomization_aggregate_digest", ""))
+        == declared_digest
+        and str(record.get("common_code_version", ""))
+        == common_code_version
+        for record in propagated_payloads
+    )
+    return bool(
+        payload_ready
+        and manifest_ready
+        and downstream_ready
+        and str(bundle.result_record_manifest.get("code_version", ""))
+        == common_code_version
+        and str(bundle.common_protocol_manifest.get("code_version", ""))
+        == common_code_version
     )
 
 
@@ -2332,7 +2499,7 @@ def _attack_records_ready(
         str(bundle.attack_manifest.get("config_digest", ""))
         == build_stable_digest(expected_manifest_config)
         and str(bundle.attack_manifest.get("code_version", ""))
-        == str(bundle.closure_input_lock.get("common_code_version", ""))
+        == str(bundle.randomization_aggregate_payload.get("common_code_version", ""))
     )
 
 
@@ -2356,7 +2523,7 @@ def _attack_ready(bundle: ResultClosureGateInput) -> bool:
         "attack_metrics_ready",
         "attack_record_coverage_ready",
         "real_gpu_attack_validation_ready",
-        "full_method_claim_ready",
+        "full_method_component_ready",
         "supports_paper_claim",
     )
     required_gpu_count = _int_value(bundle.attack_report.get("required_real_gpu_attack_count"))
@@ -2397,7 +2564,7 @@ def _attack_ready(bundle: ResultClosureGateInput) -> bool:
         and _metadata_matches(
             bundle.attack_manifest,
             bundle.attack_report,
-            ("full_method_claim_ready", "supports_paper_claim"),
+            ("full_method_component_ready", "supports_paper_claim"),
         )
         and str(bundle.attack_manifest.get("metadata", {}).get("protocol_decision", "")) == "pass"
     )
@@ -2557,7 +2724,7 @@ def _official_reference_fidelity_ready(bundle: ResultClosureGateInput) -> bool:
         and summary.get("main_table_eligible") is False
         and summary.get("supports_main_table_superiority_claim") is False
         and common_code_version
-        == str(bundle.closure_input_lock.get("common_code_version", ""))
+        == str(bundle.randomization_aggregate_payload.get("common_code_version", ""))
     )
     return (
         records_ready
@@ -2911,11 +3078,11 @@ def _result_record_manifest_config_ready(
         method_threshold_digest_map=(
             bundle.result_record_summary.get("method_threshold_digest_map", {})
         ),
-        closure_input_lock_digest=str(
-            bundle.closure_input_lock.get("closure_input_lock_digest", "")
+        randomization_aggregate_digest=str(
+            bundle.randomization_aggregate_payload.get("randomization_aggregate_digest", "")
         ),
         common_code_version=str(
-            bundle.closure_input_lock.get("common_code_version", "")
+            bundle.randomization_aggregate_payload.get("common_code_version", "")
         ),
         validation_report=bundle.result_record_validation_report,
         template_coverage_rows=normalized_coverage,
@@ -2923,7 +3090,7 @@ def _result_record_manifest_config_ready(
         require_existing_evidence=require_existing_evidence,
     )
     common_code_version = str(
-        bundle.closure_input_lock.get("common_code_version", "")
+        bundle.randomization_aggregate_payload.get("common_code_version", "")
     )
     return (
         str(bundle.result_record_manifest.get("config_digest", ""))
@@ -3328,11 +3495,11 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
         if ablation_id != "complete_method"
     ]
     necessity_supported_ids = bundle.ablation_summary.get(
-        "necessity_supported_ablation_ids",
+        "necessity_component_supported_ablation_ids",
         [],
     )
     necessity_not_supported_ids = bundle.ablation_summary.get(
-        "necessity_not_supported_ablation_ids",
+        "necessity_component_not_supported_ablation_ids",
         [],
     )
     necessity_partition_ready = (
@@ -3344,14 +3511,14 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
         == len(set([*necessity_supported_ids, *necessity_not_supported_ids]))
         and _strict_bool(
             bundle.ablation_summary.get(
-                "all_mechanism_necessity_claims_supported"
+                "all_mechanism_necessity_components_supported"
             )
         )
         == (not necessity_not_supported_ids)
     )
     manifest_metadata = bundle.ablation_manifest.get("metadata", {})
     return (
-        _all_true(bundle.ablation_summary, ("ablation_claim_gate_ready", "supports_paper_claim"))
+        _all_true(bundle.ablation_summary, ("ablation_component_ready", "supports_paper_claim"))
         and str(bundle.ablation_summary.get("protocol_decision", "")) == "pass"
         and bundle.ablation_summary.get("expected_ablation_ids") == expected_ids
         and bundle.ablation_summary.get("actual_ablation_ids") == expected_ids
@@ -3422,7 +3589,7 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
                 f"outputs/formal_mechanism_ablation/{scale}/mechanism_ablation_metrics.csv",
                 f"outputs/formal_mechanism_ablation/{scale}/mechanism_necessity_statistics.csv",
                 f"outputs/formal_mechanism_ablation/{scale}/mechanism_necessity_summary.json",
-                f"outputs/formal_mechanism_ablation/{scale}/ablation_claim_summary.json",
+                f"outputs/formal_mechanism_ablation/{scale}/ablation_component_summary.json",
                 f"outputs/formal_mechanism_ablation/{scale}/manifest.local.json",
             ),
         )
@@ -3439,9 +3606,9 @@ def _ablation_ready(bundle: ResultClosureGateInput) -> bool:
                 "formal_attack_coverage_ready",
                 "ablation_necessity_statistics_ready",
                 "necessity_statistic_rows_digest",
-                "necessity_supported_ablation_ids",
-                "necessity_not_supported_ablation_ids",
-                "all_mechanism_necessity_claims_supported",
+                "necessity_component_supported_ablation_ids",
+                "necessity_component_not_supported_ablation_ids",
+                "all_mechanism_necessity_components_supported",
                 "supports_paper_claim",
             ),
         )
@@ -3607,7 +3774,7 @@ def _dataset_quality_ready(bundle: ResultClosureGateInput) -> bool:
         "formal_feature_backend_ready",
         "formal_sample_scale_ready",
         "canonical_formal_feature_extractor_ready",
-        "formal_fid_kid_claim_gate_ready",
+        "formal_fid_kid_component_ready",
         "image_resolution_identity_ready",
     )
     sample_pair_count = _int_value(bundle.dataset_quality_summary.get("sample_pair_count"))
@@ -3732,7 +3899,7 @@ def _dataset_quality_ready(bundle: ResultClosureGateInput) -> bool:
             (
                 "formal_fid_kid_ready",
                 "formal_sample_scale_ready",
-                "formal_fid_kid_claim_gate_ready",
+                "formal_fid_kid_component_ready",
                 "kid_effective_subset_size",
                 *coverage_fields,
             ),
@@ -3817,7 +3984,7 @@ def _rebuild_evidence_audit(
         dataset_quality_manifest=bundle.dataset_quality_manifest,
         dataset_quality_summary=bundle.dataset_quality_summary,
         ablation_manifest=bundle.ablation_manifest,
-        ablation_claim_summary=bundle.ablation_summary,
+        ablation_component_summary=bundle.ablation_summary,
         source_path_map=bundle.evidence_audit_source_path_map,
         artifact_data_validation=(
             bundle.recomputed_artifact_data_validation_report
@@ -3856,7 +4023,7 @@ def _evidence_audit_ready(bundle: ResultClosureGateInput) -> bool:
                 "artifact_builder_ready",
                 "paper_artifact_claim_ready",
                 "paper_artifact_audit_ready",
-                "full_method_claim_ready",
+                "full_method_component_ready",
                 "supports_paper_claim",
             ),
         )
@@ -3938,7 +4105,7 @@ def _evidence_audit_ready(bundle: ResultClosureGateInput) -> bool:
         _path_present(inputs, suffix)
         for suffix in (
             f"outputs/image_only_dataset_runtime/{scale}/dataset_runtime_summary.json",
-            f"outputs/formal_mechanism_ablation/{scale}/ablation_claim_summary.json",
+            f"outputs/formal_mechanism_ablation/{scale}/ablation_component_summary.json",
             f"outputs/dataset_level_quality/{scale}/dataset_quality_summary.json",
         )
     )
@@ -4094,11 +4261,11 @@ def build_result_closure_gate_checks(bundle: ResultClosureGateInput) -> list[dic
             "method_threshold_digest_inconsistent",
         ),
         _check(
-            "closure_input_provenance_consistent",
+            "randomization_aggregate_provenance_consistent",
             "input_provenance",
-            _closure_input_provenance_ready(bundle),
-            ("closure_input_lock", "result_records", "common_protocol"),
-            "closure_input_provenance_inconsistent",
+            _randomization_aggregate_provenance_ready(bundle),
+            ("randomization_aggregate_payload", "result_records", "common_protocol"),
+            "randomization_aggregate_provenance_inconsistent",
         ),
         _check(
             "common_protocol_digests_consistent",
@@ -4323,11 +4490,11 @@ def build_result_closure_gate_report(
                 "manifest": bundle.threshold_audit_manifest,
             }
         ),
-        "closure_input_lock_digest": build_stable_digest(
-            {
-                "lock": bundle.closure_input_lock,
-                "manifest": bundle.closure_input_lock_manifest,
-            }
+        "randomization_aggregate_digest": str(
+            bundle.randomization_aggregate_payload.get(
+                "randomization_aggregate_digest",
+                "",
+            )
         ),
         "official_reference_fidelity_digest": build_stable_digest(
             {
@@ -4431,6 +4598,15 @@ def build_result_closure_gate_report(
         "expected_test_count": bundle.expected_test_count,
         "expected_prompt_id_digest": bundle.expected_prompt_id_digest,
         "expected_test_prompt_id_digest": bundle.expected_test_prompt_id_digest,
+        "randomization_aggregate_digest": source_digests[
+            "randomization_aggregate_digest"
+        ],
+        "common_code_version": str(
+            bundle.randomization_aggregate_payload.get(
+                "common_code_version",
+                "",
+            )
+        ),
         "closure_check_count": len(materialized),
         "blocked_check_count": len(blocked),
         "blocked_check_ids": [str(row.get("check_id", "")) for row in blocked],

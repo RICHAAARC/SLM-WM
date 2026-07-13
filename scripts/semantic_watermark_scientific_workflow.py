@@ -341,7 +341,7 @@ def _write_bindings(
                 / "outputs"
                 / "formal_mechanism_ablation"
                 / paper_run_name,
-                "ablation_claim_summary.json",
+                "ablation_component_summary.json",
             )
         )
     bindings: dict[str, dict[str, Any]] = {}
@@ -588,7 +588,7 @@ def run_semantic_watermark_image_only_session(
     quality_summary = _read_json(quality_output_dir / "dataset_quality_summary.json")
     if runtime_summary.get("protocol_decision") != "pass":
         raise RuntimeError("仅图像数据集运行未生成通过协议的正式摘要")
-    if quality_summary.get("formal_fid_kid_claim_gate_ready") is not True:
+    if quality_summary.get("formal_fid_kid_component_ready") is not True:
         raise RuntimeError("数据集运行完成, 但规范 Inception FID/KID 尚未闭合")
 
     ablation_progress_path = ablation_output_dir / "runtime_rerun_progress.json"
@@ -609,7 +609,7 @@ def run_semantic_watermark_image_only_session(
             **evidence,
         }
     if run_formal_ablation and not ablation_progress_path.is_file():
-        ablation_summary = _read_json(ablation_output_dir / "ablation_claim_summary.json")
+        ablation_summary = _read_json(ablation_output_dir / "ablation_component_summary.json")
         if ablation_summary.get("protocol_decision") != "pass":
             raise RuntimeError("正式机制消融未生成通过协议的摘要")
         ablation_complete = True
@@ -675,10 +675,12 @@ def run_semantic_watermark_image_only_session(
         "active_workflow": "runtime_rerun_ablation",
         "ablation_summary": ablation_summary,
         "formal_ablation_requested": True,
-        "supports_paper_claim": bool(
-            runtime_summary.get("supports_paper_claim", False)
-            and quality_summary.get("supports_paper_claim", False)
-            and ablation_summary.get("supports_paper_claim", False)
+        "repeat_component_ready": bool(
+            runtime_summary.get("repeat_component_ready", False)
+            and quality_summary.get("repeat_component_ready", False)
+            and ablation_summary.get("repeat_component_ready", False)
         ),
+        "randomization_aggregate_ready": False,
+        "supports_paper_claim": False,
         **common_result,
     }

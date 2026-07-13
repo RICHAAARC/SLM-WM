@@ -13,6 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from paper_experiments.runners.paper_claim_provenance import (
+    require_exact9_randomization_aggregate_provenance,
+)
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.protocol.splits import build_group_split_counts
@@ -127,136 +130,10 @@ def _write_rows_csv(path: Path, rows: Iterable[dict[str, Any]]) -> None:
         writer.writerows(materialized)
 
 
-def write_fixed_fpr_threshold_audit_outputs(
-    *,
-    root: str | Path = ".",
-    output_dir: str | Path | None = None,
-    method_faithful_collection_root: str | Path | None = None,
-    t2smark_output_dir: str | Path | None = None,
-) -> dict[str, Any]:
-    """独立重算五个方法的正式阈值并写出受治理报告。"""
+def write_fixed_fpr_threshold_audit_outputs(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """在精确9重复原始记录重算 Writer 就绪前拒绝正式结论物化."""
 
-    root_path = Path(root).resolve()
-    paper_run = build_paper_run_config(root_path)
-    split_counts = build_group_split_counts(paper_run.prompt_count)
-    run_dir = root_path / "outputs" / "image_only_dataset_runtime" / paper_run.run_name
-    main_observation_path = run_dir / "image_only_detection_records.jsonl"
-    main_protocol_path = run_dir / "frozen_evidence_protocol.json"
-    rows: list[dict[str, Any]] = [
-        audit_main_method_fixed_fpr(
-            _read_jsonl(main_observation_path),
-            _read_json(main_protocol_path),
-            observation_source_sha256=file_sha256(main_observation_path),
-            target_fpr=paper_run.target_fpr,
-            expected_calibration_negative_count=split_counts["calibration"],
-            expected_test_negative_count=split_counts["test"],
-        )
-    ]
-
-    collection_root = (
-        DEFAULT_METHOD_FAITHFUL_OUTPUT_ROOT / paper_run.run_name
-        if method_faithful_collection_root is None
-        else Path(method_faithful_collection_root)
-    )
-    if not collection_root.is_absolute():
-        collection_root = (root_path / collection_root).resolve()
-    common_sources = load_method_faithful_observation_collection(
-        collection_root,
-        project_root=root_path,
-    )
-    for source in common_sources:
-        manifest = source.transfer_manifest
-        rows.append(
-            audit_baseline_fixed_fpr(
-                source.baseline_id,
-                source.rows,
-                observation_source_sha256=file_sha256(source.observations_path),
-                target_fpr=paper_run.target_fpr,
-                expected_calibration_negative_count=split_counts["calibration"],
-                expected_test_negative_count=split_counts["test"],
-                declared_threshold=float(manifest["threshold"]),
-                declared_threshold_digest=str(manifest["threshold_digest"]),
-            )
-        )
-
-    resolved_t2smark_dir = (
-        DEFAULT_T2SMARK_OUTPUT_ROOT / paper_run.run_name
-        if t2smark_output_dir is None
-        else Path(t2smark_output_dir)
-    )
-    if not resolved_t2smark_dir.is_absolute():
-        resolved_t2smark_dir = (root_path / resolved_t2smark_dir).resolve()
-    t2_observation_path = resolved_t2smark_dir / "t2smark_adapter" / "baseline_observations.json"
-    t2_candidate_path = resolved_t2smark_dir / "t2smark_formal_import_candidate_records.jsonl"
-    t2_threshold, t2_threshold_digest = _read_candidate_threshold(
-        t2_candidate_path,
-        target_fpr=paper_run.target_fpr,
-    )
-    rows.append(
-        audit_baseline_fixed_fpr(
-            "t2smark",
-            _read_json_array(t2_observation_path),
-            observation_source_sha256=file_sha256(t2_observation_path),
-            target_fpr=paper_run.target_fpr,
-            expected_calibration_negative_count=split_counts["calibration"],
-            expected_test_negative_count=split_counts["test"],
-            declared_threshold=t2_threshold,
-            declared_threshold_digest=t2_threshold_digest,
-        )
-    )
-
-    report = build_fixed_fpr_threshold_audit_report(
-        rows,
-        paper_run_name=paper_run.run_name,
-        target_fpr=paper_run.target_fpr,
-    )
-    resolved_output_dir = (
-        root_path / DEFAULT_OUTPUT_ROOT / paper_run.run_name
-        if output_dir is None
-        else Path(output_dir)
-    )
-    if not resolved_output_dir.is_absolute():
-        resolved_output_dir = (root_path / resolved_output_dir).resolve()
-    resolved_output_dir.relative_to((root_path / "outputs").resolve())
-    resolved_output_dir.mkdir(parents=True, exist_ok=True)
-    rows_path = resolved_output_dir / "threshold_audit_rows.csv"
-    report_path = resolved_output_dir / "threshold_audit_report.json"
-    manifest_path = resolved_output_dir / "manifest.local.json"
-    _write_rows_csv(rows_path, rows)
-    _write_json(report_path, report)
-    manifest_config = build_fixed_fpr_threshold_manifest_config(report)
-    manifest = build_artifact_manifest(
-        artifact_id="fixed_fpr_threshold_audit_manifest",
-        artifact_type="local_manifest",
-        input_paths=(
-            main_observation_path.relative_to(root_path).as_posix(),
-            main_protocol_path.relative_to(root_path).as_posix(),
-            *(
-                path.relative_to(root_path).as_posix()
-                for source in common_sources
-                for path in (
-                    source.observations_path,
-                    source.transfer_manifest_path,
-                    source.prompt_plan_path,
-                    source.adapter_manifest_path,
-                    source.execution_manifest_path,
-                )
-            ),
-            t2_observation_path.relative_to(root_path).as_posix(),
-            t2_candidate_path.relative_to(root_path).as_posix(),
-        ),
-        output_paths=(
-            rows_path.relative_to(root_path).as_posix(),
-            report_path.relative_to(root_path).as_posix(),
-            manifest_path.relative_to(root_path).as_posix(),
-        ),
-        config=manifest_config,
-        code_version=resolve_code_version(root_path),
-        rebuild_command="python scripts/write_fixed_fpr_threshold_audit_outputs.py --require-pass",
-        metadata=report,
-    ).to_dict()
-    _write_json(manifest_path, manifest)
-    return report
+    require_exact9_randomization_aggregate_provenance()
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -11,7 +11,10 @@ import pytest
 
 from experiments.protocol.attacks import attack_config_digest, default_attack_configs
 from experiments.runtime.repository_environment import file_digest
-from scripts.write_attack_matrix_outputs import write_attack_matrix_outputs
+from scripts.write_attack_matrix_outputs import (
+    build_attack_coverage,
+    build_measured_attack_records,
+)
 
 
 def _json_line(value: dict[str, object]) -> str:
@@ -114,7 +117,7 @@ def _write_runtime_fixture(root: Path, *, attack_prompt_count: int = 1, blind_de
                 "attack_prompt_count": attack_prompt_count,
                 "formal_attack_detection_ready": True,
                 "attacked_image_evidence_chain_ready": True,
-                "full_method_claim_ready": True,
+                "full_method_component_ready": True,
             },
             ensure_ascii=False,
         ),
@@ -147,99 +150,99 @@ def test_attack_config_digest_is_stable() -> None:
     config = default_attack_configs()[1]
     assert attack_config_digest(config) == attack_config_digest(config)
 
+def _runtime_detection_records(runtime_dir: Path) -> tuple[dict[str, object], ...]:
+    """读取运行夹具中的仅图像检测记录."""
+
+    return tuple(
+        json.loads(line)
+        for line in (runtime_dir / "image_only_detection_records.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip()
+    )
+
 
 @pytest.mark.quick
-def test_attack_matrix_aggregates_only_measured_image_records(tmp_path: Path) -> None:
-    """攻击矩阵应从真实图像文件和冻结盲检记录重建全部统计。"""
+def test_attack_matrix_aggregates_only_measured_image_records(
+    tmp_path: Path,
+) -> None:
+    """纯记录构造器必须从真实攻击图像与冻结盲检记录重建事实."""
 
     runtime_dir = _write_runtime_fixture(tmp_path)
-    manifest = write_attack_matrix_outputs(
-        root=tmp_path,
-        paper_run_name="probe_paper",
-        dataset_runtime_dir=runtime_dir,
+    attack_configs = default_attack_configs()
+    records = build_measured_attack_records(
+        tmp_path,
+        _runtime_detection_records(runtime_dir),
+        attack_configs,
+        False,
     )
-    output_dir = tmp_path / "outputs" / "attack_matrix" / "probe_paper"
-    attack_manifest = json.loads((output_dir / "attack_manifest.json").read_text(encoding="utf-8"))
-    records = [
-        json.loads(line)
-        for line in (output_dir / "attack_detection_records.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
-    family_rows = list(csv.DictReader((output_dir / "attack_family_metrics.csv").open(encoding="utf-8")))
-
     expected_attack_count = sum(
-        config.enabled and config.resource_profile in {"full_main", "full_extra"}
-        for config in default_attack_configs()
+        config.enabled
+        and config.resource_profile in {"full_main", "full_extra"}
+        for config in attack_configs
     )
+
     assert len(records) == expected_attack_count * 2
-    assert attack_manifest["attack_record_coverage_ready"] is True
-    assert attack_manifest["formal_attack_detection_ready"] is True
-    assert attack_manifest["full_method_claim_ready"] is True
-    assert attack_manifest["detector_input_access_mode"] == "image_key_public_model_only"
-    assert attack_manifest["blind_image_detector"] is True
-    assert attack_manifest["generation_latent_trace_required"] is False
     assert all(record["attacked_image_available"] for record in records)
-    assert all(record["metric_status"] == "measured_real_attacked_image_image_only_detection" for record in records)
+    assert all(
+        record["metric_status"]
+        == "measured_real_attacked_image_image_only_detection"
+        for record in records
+    )
     assert all(record["quality_ssim"] > 0.0 for record in records)
-    assert all("proxy" not in key for record in records for key in record)
-    assert family_rows
-    assert "quality_score_mean" in family_rows[0]
-    assert all("proxy" not in key for key in family_rows[0])
-    assert manifest["metadata"]["protocol_decision"] == "pass"
+    assert all(record["supports_paper_claim"] is False for record in records)
 
 
 @pytest.mark.quick
-def test_attack_matrix_blocks_incomplete_split_role_coverage(tmp_path: Path) -> None:
-    """实际角色记录数与运行摘要不一致时不得形成正式攻击结论。"""
+def test_attack_matrix_blocks_incomplete_split_role_coverage(
+    tmp_path: Path,
+) -> None:
+    """纯覆盖率构造器必须识别缺失 Prompt 角色, 不生成正向结论."""
 
     runtime_dir = _write_runtime_fixture(tmp_path, attack_prompt_count=2)
-    manifest = write_attack_matrix_outputs(
-        root=tmp_path,
-        paper_run_name="probe_paper",
-        dataset_runtime_dir=runtime_dir,
+    attack_configs = default_attack_configs()
+    records = build_measured_attack_records(
+        tmp_path,
+        _runtime_detection_records(runtime_dir),
+        attack_configs,
+        False,
     )
-    attack_manifest = json.loads(
-        (tmp_path / "outputs" / "attack_matrix" / "probe_paper" / "attack_manifest.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert attack_manifest["attack_record_coverage_ready"] is False
-    assert attack_manifest["supports_paper_claim"] is False
-    assert manifest["metadata"]["protocol_decision"] == "fail"
+    coverage = build_attack_coverage(records, attack_configs, 2)
+
+    assert coverage["attack_record_coverage_ready"] is False
 
 
 @pytest.mark.quick
-def test_attack_matrix_rejects_post_hoc_attack_identity(tmp_path: Path) -> None:
-    """原始检测记录缺少或篡改攻击摘要时不得后贴正式身份."""
+def test_attack_matrix_rejects_post_hoc_attack_identity(
+    tmp_path: Path,
+) -> None:
+    """纯构造器必须拒绝后贴或篡改的正式攻击摘要."""
 
     runtime_dir = _write_runtime_fixture(tmp_path)
-    records_path = runtime_dir / "image_only_detection_records.jsonl"
-    rows = [
-        json.loads(line)
-        for line in records_path.read_text(encoding="utf-8").splitlines()
-    ]
+    rows = list(_runtime_detection_records(runtime_dir))
     attacked_row = next(row for row in rows if row.get("attack_id"))
     attacked_row["attack_config_digest"] = "f" * 64
-    records_path.write_text(
-        "".join(_json_line(row) for row in rows),
-        encoding="utf-8",
-    )
 
     with pytest.raises(ValueError, match="攻击身份与正式配置不一致"):
-        write_attack_matrix_outputs(
-            root=tmp_path,
-            paper_run_name="probe_paper",
-            dataset_runtime_dir=runtime_dir,
+        build_measured_attack_records(
+            tmp_path,
+            rows,
+            default_attack_configs(),
+            False,
         )
 
 
 @pytest.mark.quick
-def test_attack_matrix_rejects_non_blind_detection_records(tmp_path: Path) -> None:
-    """读取 prompt 或生成轨迹的检测记录不得进入正式攻击矩阵。"""
+def test_attack_matrix_rejects_non_blind_detection_records(
+    tmp_path: Path,
+) -> None:
+    """读取 Prompt 或生成轨迹的检测记录不得进入攻击事实构造器."""
 
     runtime_dir = _write_runtime_fixture(tmp_path, blind_detector=False)
     with pytest.raises(ValueError, match="仅图像盲检"):
-        write_attack_matrix_outputs(
-            root=tmp_path,
-            paper_run_name="probe_paper",
-            dataset_runtime_dir=runtime_dir,
+        build_measured_attack_records(
+            tmp_path,
+            _runtime_detection_records(runtime_dir),
+            default_attack_configs(),
+            False,
         )

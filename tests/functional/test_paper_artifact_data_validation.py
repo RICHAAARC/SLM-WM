@@ -291,8 +291,8 @@ def _prepare_valid_sources(root: Path) -> dict[str, Path]:
             "minimum_effect_ready": True,
             "confidence_interval_ready": True,
             "adjusted_significance_ready": True,
-            "necessity_claim_supported": True,
-            "necessity_claim_decision": "measured_supported",
+            "necessity_component_supported": True,
+            "necessity_component_decision": "measured_supported",
             "confidence_level": 0.95,
             "significance_alpha": 0.05,
             "bootstrap_resample_count": 100000,
@@ -370,13 +370,13 @@ def _validate(root: Path, source_paths: dict[str, Path]) -> dict:
         threshold_report={
             "target_fpr": TARGET_FPR,
             "frozen_threshold_digest": THRESHOLD_DIGEST,
-            "full_method_claim_ready": True,
+            "full_method_component_ready": True,
         },
         attack_manifest={"attack_metrics_ready": True},
         baseline_runtime_report={"comparison_table_supports_paper_claim": True},
-        dataset_quality_summary={"formal_fid_kid_claim_gate_ready": True},
-        ablation_claim_summary={
-            "ablation_claim_gate_ready": True,
+        dataset_quality_summary={"formal_fid_kid_component_ready": True},
+        ablation_component_summary={
+            "ablation_component_ready": True,
             "ablation_necessity_statistics_ready": True,
             "necessity_statistic_row_count": len(necessity_rows),
             "paired_prompt_count": 34,
@@ -384,13 +384,13 @@ def _validate(root: Path, source_paths: dict[str, Path]) -> dict:
             "necessity_statistic_rows_digest": build_stable_digest(
                 canonicalize_ablation_necessity_rows(necessity_rows)
             ),
-            "necessity_supported_ablation_ids": [
+            "necessity_component_supported_ablation_ids": [
                 ablation_id
                 for ablation_id in FORMAL_RUNTIME_RERUN_ABLATION_IDS
                 if ablation_id != "complete_method"
             ],
-            "necessity_not_supported_ablation_ids": [],
-            "all_mechanism_necessity_claims_supported": True,
+            "necessity_component_not_supported_ablation_ids": [],
+            "all_mechanism_necessity_components_supported": True,
         },
     )
 

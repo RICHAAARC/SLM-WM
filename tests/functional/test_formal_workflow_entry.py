@@ -30,9 +30,16 @@ def test_gpu_entry_delegates_to_independent_server_workflow(
 
     captured: dict[str, object] = {}
 
-    def fake_run_workflow(*arguments: object) -> dict[str, object]:
+    def fake_run_workflow(
+        *arguments: object,
+        **keywords: object,
+    ) -> dict[str, object]:
         captured["run_arguments"] = arguments
-        return {"workflow_summary": {"run_decision": "pass"}, "archive_record": {}}
+        captured["run_keywords"] = keywords
+        return {
+            "workflow_summary": {"run_decision": "pass"},
+            "archive_record": {},
+        }
 
     monkeypatch.setattr(entry, "run_workflow", fake_run_workflow)
     arguments = argparse.Namespace(
@@ -40,6 +47,7 @@ def test_gpu_entry_delegates_to_independent_server_workflow(
         paper_run_name="probe_paper",
         persistent_output_dir="",
         repository_commit="a" * 40,
+        randomization_repeat_id="seed_00_key_00",
     )
     result = entry._gpu_result(arguments, tmp_path)
 
@@ -50,6 +58,9 @@ def test_gpu_entry_delegates_to_independent_server_workflow(
         tmp_path,
         None,
     )
+    assert captured["run_keywords"] == {
+        "randomization_repeat_id": "seed_00_key_00"
+    }
     assert result["workflow_summary"] == {"run_decision": "pass"}
 
 
@@ -135,6 +146,8 @@ def test_execute_records_bootstrap_and_verified_orchestrator_environment(
             "workflow_environment": {"persistent_output_dir": "/persistent"},
             "archive_record": {"archive_ready": True},
             "orchestrator_dependency_environment": orchestrator_environment,
+            "randomization_scope": "active_repeat_component",
+            "randomization_repeat_id": "seed_00_key_00",
         },
     )
     arguments = argparse.Namespace(
@@ -143,6 +156,7 @@ def test_execute_records_bootstrap_and_verified_orchestrator_environment(
         workflow="image_only_dataset",
         paper_run_name="probe_paper",
         repository_commit="a" * 40,
+        randomization_repeat_id="seed_00_key_00",
     )
 
     result = entry.execute(arguments)

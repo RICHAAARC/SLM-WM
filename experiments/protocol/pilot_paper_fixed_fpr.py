@@ -250,7 +250,7 @@ def build_pilot_paper_result_records_manifest_config(
     *,
     result_records: Iterable[Mapping[str, Any]],
     method_threshold_digest_map: Mapping[str, str],
-    closure_input_lock_digest: str,
+    randomization_aggregate_digest: str,
     common_code_version: str,
     validation_report: Mapping[str, Any],
     template_coverage_rows: Iterable[Mapping[str, Any]],
@@ -275,7 +275,7 @@ def build_pilot_paper_result_records_manifest_config(
                 for method_id, digest in method_threshold_digest_map.items()
             )
         ),
-        "closure_input_lock_digest": str(closure_input_lock_digest),
+        "randomization_aggregate_digest": str(randomization_aggregate_digest),
         "common_code_version": str(common_code_version),
         "validation_report_digest": build_stable_digest(dict(validation_report)),
         "template_coverage_digest": build_stable_digest(

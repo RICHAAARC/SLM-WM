@@ -571,6 +571,29 @@ def normalize_paper_run_name(value: str | None) -> str:
     return resolved
 
 
+def validate_frozen_paper_run_target_fpr(
+    paper_run_name: str,
+    target_fpr: float,
+) -> float:
+    """返回运行层级冻结的 FPR, 并拒绝底层 API 改写统计工作点."""
+
+    run_name = normalize_paper_run_name(paper_run_name)
+    if isinstance(target_fpr, bool) or not isinstance(target_fpr, (int, float)):
+        raise TypeError("target_fpr 必须是有限数值")
+    resolved = float(target_fpr)
+    expected = float(RUN_DEFAULTS[run_name]["target_fpr"])
+    if not math.isfinite(resolved) or not math.isclose(
+        resolved,
+        expected,
+        rel_tol=0.0,
+        abs_tol=1e-12,
+    ):
+        raise ValueError(
+            f"{run_name} 的 target_fpr 必须使用冻结值 {expected}"
+        )
+    return expected
+
+
 def _file_sha256(path: Path) -> str:
     """计算 Prompt 文件的字节级 SHA-256。"""
 

@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from paper_experiments.runners.paper_claim_provenance import (
+    require_exact9_randomization_aggregate_provenance,
+)
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.runtime.repository_environment import resolve_code_version
@@ -107,113 +110,10 @@ def build_input_bundle(
     )
 
 
-def write_evidence_closure_entry_review_outputs(
-    root: str | Path = ".",
-    output_dir: str | Path | None = None,
-    submission_readiness_report_path: str | Path | None = None,
-    required_evidence_inputs_path: str | Path | None = None,
-    paper_blocker_report_path: str | Path | None = None,
-    baseline_runtime_report_path: str | Path | None = None,
-    dataset_quality_summary_path: str | Path | None = None,
-) -> dict[str, Any]:
-    """写出证据闭合入口审计报告、审计清单和 manifest。"""
+def write_evidence_closure_entry_review_outputs(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """在精确9重复原始记录重算 Writer 就绪前拒绝正式结论物化."""
 
-    root_path = Path(root).resolve()
-    paper_run = build_paper_run_config(root_path)
-    resolved_output_dir = ensure_output_dir_under_outputs(
-        root_path,
-        Path(output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name),
-    )
-    resolved_output_dir.mkdir(parents=True, exist_ok=True)
-
-    submission_readiness_dir = DEFAULT_SUBMISSION_READINESS_ROOT / paper_run.run_name
-    evidence_audit_dir = DEFAULT_EVIDENCE_AUDIT_ROOT / paper_run.run_name
-    baseline_comparison_dir = DEFAULT_BASELINE_COMPARISON_ROOT / paper_run.run_name
-    dataset_quality_dir = DEFAULT_DATASET_QUALITY_ROOT / paper_run.run_name
-    resolved_submission_readiness_report_path = resolve_input_path(
-        root_path,
-        submission_readiness_report_path or submission_readiness_dir / "readiness_blocker_report.json",
-    )
-    resolved_required_evidence_inputs_path = resolve_input_path(
-        root_path,
-        required_evidence_inputs_path or submission_readiness_dir / "required_evidence_inputs.csv",
-    )
-    resolved_paper_blocker_report_path = resolve_input_path(
-        root_path,
-        paper_blocker_report_path or evidence_audit_dir / "submission_blocker_report.json",
-    )
-    resolved_baseline_runtime_report_path = resolve_input_path(
-        root_path,
-        baseline_runtime_report_path or baseline_comparison_dir / "baseline_runtime_report.json",
-    )
-    resolved_dataset_quality_summary_path = resolve_input_path(
-        root_path,
-        dataset_quality_summary_path or dataset_quality_dir / "dataset_quality_summary.json",
-    )
-
-    bundle = build_input_bundle(
-        resolved_submission_readiness_report_path,
-        resolved_required_evidence_inputs_path,
-        resolved_paper_blocker_report_path,
-        resolved_baseline_runtime_report_path,
-        resolved_dataset_quality_summary_path,
-    )
-    checklist_rows = build_evidence_closure_entry_checklist(bundle)
-    review_report = build_evidence_closure_entry_review_report(bundle, checklist_rows)
-
-    review_report_path = resolved_output_dir / "entry_review_report.json"
-    checklist_path = resolved_output_dir / "entry_review_checklist.csv"
-    manifest_path = resolved_output_dir / "manifest.local.json"
-    review_report_path.write_text(stable_json_text(review_report), encoding="utf-8")
-    write_csv(
-        checklist_path,
-        checklist_rows,
-        [
-            "review_item_id",
-            "review_area",
-            "review_status",
-            "source_artifact",
-            "blocker_reason",
-            "audit_note",
-            "supports_paper_claim",
-        ],
-    )
-
-    input_paths = tuple(
-        relative_or_absolute(path, root_path)
-        for path in (
-            resolved_submission_readiness_report_path,
-            resolved_required_evidence_inputs_path,
-            resolved_paper_blocker_report_path,
-            resolved_baseline_runtime_report_path,
-            resolved_dataset_quality_summary_path,
-        )
-    )
-    output_paths = tuple(
-        relative_or_absolute(path, root_path) for path in (review_report_path, checklist_path, manifest_path)
-    )
-    summary = {
-        "review_report": review_report,
-        "checklist_rows": checklist_rows,
-    }
-    manifest = build_artifact_manifest(
-        artifact_id="evidence_closure_entry_review_manifest",
-        artifact_type="local_manifest",
-        input_paths=input_paths,
-        output_paths=output_paths,
-        config={
-            "summary_digest": build_stable_digest(summary),
-            "input_bundle_digest": build_stable_digest(bundle.to_dict()),
-        },
-        code_version=resolve_code_version(root_path),
-        rebuild_command="python scripts/write_evidence_closure_entry_review_outputs.py",
-        metadata={
-            **review_report,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        },
-    ).to_dict()
-    manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
-    return manifest
+    require_exact9_randomization_aggregate_provenance()
 
 
 def build_parser() -> argparse.ArgumentParser:

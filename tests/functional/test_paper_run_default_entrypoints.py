@@ -66,7 +66,11 @@ def test_outer_scientific_entry_uses_resolved_config_for_recovery(
     """外层入口必须先解析配置, 再以同一层级身份搜索闭合归档."""
 
     captured: dict[str, object] = {}
-    paper_run = SimpleNamespace(run_name="probe_paper", target_fpr=0.1)
+    paper_run = SimpleNamespace(
+        run_name="probe_paper",
+        target_fpr=0.1,
+        randomization_repeat_id="seed_00_key_00",
+    )
     monkeypatch.delenv("SLM_WM_PAPER_RUN_NAME", raising=False)
     monkeypatch.setattr(
         scientific_workflow,
@@ -89,6 +93,7 @@ def test_outer_scientific_entry_uses_resolved_config_for_recovery(
 
     assert captured["paper_run_name"] == "probe_paper"
     assert captured["target_fpr"] == 0.1
+    assert captured["randomization_repeat_id"] == "seed_00_key_00"
     assert summary["paper_run_name"] == "probe_paper"
     assert summary["workflow_decision"] == "closed_archives_recovered"
 

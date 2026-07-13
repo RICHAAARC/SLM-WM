@@ -66,6 +66,16 @@ def _called_attributes(function: ast.FunctionDef) -> tuple[str, ...]:
     )
 
 
+def _called_names(function: ast.FunctionDef) -> tuple[str, ...]:
+    """收集函数体直接调用的模块级函数名称."""
+
+    return tuple(
+        node.func.id
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    )
+
+
 def _string_literals(function: ast.FunctionDef) -> set[str]:
     """收集函数体字符串常量, 用于检查 manifest 锁字段."""
 
@@ -104,8 +114,8 @@ def test_formal_run_and_package_functions_revalidate_execution_lock(
 
 
 @pytest.mark.quick
-def test_cpu_closure_and_complete_package_revalidate_execution_lock() -> None:
-    """CPU 闭合编排与最终结果包也必须保留起止执行锁."""
+def test_cpu_closure_and_complete_package_require_exact9_aggregate_first() -> None:
+    """聚合闭合未启用时, 闭合与完整包入口都必须立即 fail-closed."""
 
     closure_function = _function_node(
         "scripts/paper_result_closure.py",
@@ -116,13 +126,11 @@ def test_cpu_closure_and_complete_package_revalidate_execution_lock() -> None:
         "write_pilot_paper_complete_result_package_outputs",
     )
 
-    for function in (closure_function, package_function):
-        calls = _called_attributes(function)
-        assert calls.count("require_published_formal_execution_lock") >= 2
-        assert "validate_formal_execution_lock_pair" in calls
-        literals = _string_literals(function)
-        assert "formal_execution_run_lock" in literals
-        assert "formal_execution_package_lock" in literals
+    closure_literals = _string_literals(closure_function)
+    assert any("精确9重复聚合证据" in value for value in closure_literals)
+    assert _called_names(package_function) == (
+        "require_exact9_randomization_aggregate_provenance",
+    )
 
 
 @pytest.mark.quick

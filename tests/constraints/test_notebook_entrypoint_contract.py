@@ -14,7 +14,7 @@ REQUIRED_NOTEBOOKS = {
     "colab_drive_cold_start_smoke.ipynb",
     "dependency_lock_review_run.ipynb",
     "semantic_watermark_image_only_run.ipynb",
-    "paper_result_closure_run.ipynb",
+    "randomization_repeat_evidence_run.ipynb",
     "external_baseline_tree_ring_run.ipynb",
     "external_baseline_gaussian_shading_run.ipynb",
     "external_baseline_shallow_diffuse_run.ipynb",
@@ -26,6 +26,13 @@ REQUIRED_NOTEBOOKS = {
 HOST_LAUNCHER_NOTEBOOKS = REQUIRED_NOTEBOOKS - {
     "dependency_lock_review_run.ipynb",
     "colab_drive_cold_start_smoke.ipynb",
+}
+ACTIVE_REPEAT_GPU_NOTEBOOKS = {
+    "semantic_watermark_image_only_run.ipynb",
+    "external_baseline_tree_ring_run.ipynb",
+    "external_baseline_gaussian_shading_run.ipynb",
+    "external_baseline_shallow_diffuse_run.ipynb",
+    "official_reference_t2smark_run.ipynb",
 }
 FORBIDDEN_COMPONENT_NOTEBOOKS = {
     "aligned_rescoring_run.ipynb",
@@ -130,8 +137,8 @@ def test_notebooks_contain_no_local_dependency_or_method_logic(notebook_name: st
 
 
 @pytest.mark.quick
-def test_probe_routes_cover_nine_gpu_workflows_and_cpu_closure() -> None:
-    """正式 Notebook 集合必须覆盖9条 GPU route 和 CPU 闭合."""
+def test_probe_routes_cover_nine_gpu_workflows_and_repeat_evidence() -> None:
+    """正式 Notebook 集合必须覆盖9条 GPU route 和单 repeat 证据封装."""
 
     sources = {
         name: _code_source(NOTEBOOK_DIR / name) for name in HOST_LAUNCHER_NOTEBOOKS
@@ -149,5 +156,51 @@ def test_probe_routes_cover_nine_gpu_workflows_and_cpu_closure() -> None:
         "official_reference_shallow_diffuse",
     }
     assert all(route in combined for route in expected_routes)
-    assert '"closure"' in sources["paper_result_closure_run.ipynb"]
+    assert '"repeat_evidence"' in sources[
+        "randomization_repeat_evidence_run.ipynb"
+    ]
+    assert "SLM_WM_RANDOMIZATION_REPEAT_ID" in sources[
+        "randomization_repeat_evidence_run.ipynb"
+    ]
+    assert '"--randomization-repeat-id"' in sources[
+        "randomization_repeat_evidence_run.ipynb"
+    ]
     assert '"gpu"' in sources["semantic_watermark_image_only_run.ipynb"]
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "notebook_name",
+    sorted(ACTIVE_REPEAT_GPU_NOTEBOOKS),
+)
+def test_active_repeat_gpu_notebooks_forward_explicit_repeat_identity(
+    notebook_name: str,
+) -> None:
+    """活动随机化 GPU Notebook 必须把同一 repeat 传到环境与 host CLI."""
+
+    source = _code_source(NOTEBOOK_DIR / notebook_name)
+    assert source.count("SLM_WM_RANDOMIZATION_REPEAT_ID") >= 4
+    assert 'os.environ["SLM_WM_RANDOMIZATION_REPEAT_ID"]' in source
+    assert '"--randomization-repeat-id"' in source
+    assert "/ SLM_WM_RANDOMIZATION_REPEAT_ID /" in source
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "notebook_name",
+    sorted(
+        {
+            "official_reference_tree_ring_run.ipynb",
+            "official_reference_gaussian_shading_run.ipynb",
+            "official_reference_shallow_diffuse_run.ipynb",
+        }
+    ),
+)
+def test_cross_repeat_invariant_notebooks_do_not_bind_active_repeat(
+    notebook_name: str,
+) -> None:
+    """跨 repeat 不变官方参考入口不得被复制为9份活动随机化运行."""
+
+    source = _code_source(NOTEBOOK_DIR / notebook_name)
+    assert "SLM_WM_RANDOMIZATION_REPEAT_ID" not in source
+    assert '"--randomization-repeat-id"' not in source

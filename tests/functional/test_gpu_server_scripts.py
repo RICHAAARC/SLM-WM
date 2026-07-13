@@ -78,6 +78,16 @@ PUBLIC_WORKFLOW_EXPECTATIONS = {
 }
 
 
+def _repeat_id(workflow_name: str) -> str | None:
+    """为活动随机化路由返回显式 repeat, 不变路由返回 ``None``."""
+
+    return (
+        "seed_00_key_00"
+        if workflow_name in workflow.ACTIVE_REPEAT_GPU_WORKFLOW_NAMES
+        else None
+    )
+
+
 def _patch_formal_lock(monkeypatch: pytest.MonkeyPatch) -> Mapping[str, Any]:
     """用轻量执行锁替代真实 detached Git 查询并模拟统一发布 API."""
 
@@ -106,6 +116,17 @@ def _patch_formal_lock(monkeypatch: pytest.MonkeyPatch) -> Mapping[str, Any]:
         workflow,
         "_require_workflow_orchestrator_environment",
         lambda root: dict(ORCHESTRATOR_EVIDENCE),
+    )
+    monkeypatch.setattr(
+        workflow,
+        "build_paper_run_config",
+        lambda root: SimpleNamespace(
+            run_name=os.environ[workflow.PAPER_RUN_NAME_ENVIRONMENT_KEY],
+            randomization_repeat_id=os.environ.get(
+                workflow.RANDOMIZATION_REPEAT_ID_ENVIRONMENT_KEY,
+                "seed_00_key_00",
+            ),
+        ),
     )
 
     def fake_configure_environment(
@@ -147,6 +168,29 @@ def test_server_workflow_exposes_complete_isolated_gpu_routes() -> None:
 
 
 @pytest.mark.quick
+def test_server_workflow_rejects_missing_or_misplaced_repeat_identity(
+    tmp_path: Path,
+) -> None:
+    """活动路由必须携带 repeat, 不变路由必须保持跨 repeat 身份."""
+
+    with pytest.raises(ValueError, match="必须显式指定 repeat ID"):
+        workflow.run_workflow(
+            "image_only_dataset",
+            "probe_paper",
+            COMMIT,
+            tmp_path,
+        )
+    with pytest.raises(ValueError, match="不得绑定活动 repeat ID"):
+        workflow.run_workflow(
+            "official_reference_tree_ring",
+            "probe_paper",
+            COMMIT,
+            tmp_path,
+            randomization_repeat_id="seed_00_key_00",
+        )
+
+
+@pytest.mark.quick
 @pytest.mark.parametrize("workflow_name", tuple(PUBLIC_WORKFLOW_EXPECTATIONS))
 def test_server_workflow_configures_inner_environment_and_persistence(
     workflow_name: str,
@@ -177,13 +221,13 @@ def test_server_workflow_configures_inner_environment_and_persistence(
     )
     persistent_root = tmp_path / "persistent"
     environment_key = workflow.WORKFLOW_PERSISTENT_ENVIRONMENT_KEYS[workflow_name]
-    monkeypatch.setenv(environment_key, "outer_persistent_value")
+    monkeypatch.setenv(environment_key, str(persistent_root))
 
     environment_record, resolved_path = (
         workflow._configure_workflow_execution_environment(
             workflow_name=workflow_name,
             root_path=tmp_path,
-            persistent_output_dir=persistent_root,
+            persistent_output_dir=None,
         )
     )
 
@@ -195,7 +239,7 @@ def test_server_workflow_configures_inner_environment_and_persistence(
         "baseline_id": expected_baseline,
         "repository_root": tmp_path,
     }
-    assert resolved_path == persistent_root
+    assert resolved_path == str(persistent_root)
     assert os.environ[environment_key] == str(persistent_root)
     assert environment_record["persistent_environment_key"] == environment_key
     assert environment_record["persistent_output_dir"] == str(persistent_root)
@@ -228,22 +272,46 @@ def test_server_cli_maps_every_public_workflow_option(workflow_name: str) -> Non
 
 @pytest.mark.quick
 def test_server_cli_accepts_external_persistent_output_directory() -> None:
-    """独立 GPU 服务器必须能够显式选择挂载盘持久化目录."""
+    """跨 repeat 不变路由仍可显式选择服务器持久化目录."""
 
     arguments = workflow.build_parser().parse_args(
         [
             "--workflow",
-            "official_reference_t2smark",
+            "official_reference_tree_ring",
             "--paper-run-name",
             "probe_paper",
             "--repository-commit",
             COMMIT,
             "--persistent-output-dir",
-            "/mnt/persistent/slm_wm/t2smark",
+            "/mnt/persistent/slm_wm/cross_repeat_invariant",
         ]
     )
 
-    assert arguments.persistent_output_dir == "/mnt/persistent/slm_wm/t2smark"
+    assert arguments.persistent_output_dir == (
+        "/mnt/persistent/slm_wm/cross_repeat_invariant"
+    )
+
+
+@pytest.mark.quick
+@pytest.mark.parametrize(
+    "workflow_name",
+    tuple(sorted(workflow.ACTIVE_REPEAT_GPU_WORKFLOW_NAMES)),
+)
+def test_active_repeat_routes_reject_explicit_persistent_override(
+    workflow_name: str,
+    tmp_path: Path,
+) -> None:
+    """活动 repeat 的持久化根只能来自受治理配置, CLI/API 不得改写."""
+
+    with pytest.raises(ValueError, match="不得显式覆盖"):
+        workflow.run_workflow(
+            workflow_name,
+            "probe_paper",
+            COMMIT,
+            tmp_path,
+            tmp_path / "shared_persistent_root",
+            randomization_repeat_id="seed_01_key_02",
+        )
 
 
 @pytest.mark.quick
@@ -357,6 +425,7 @@ def test_orchestrator_gate_rejects_mismatched_environment_before_dispatch(
             "probe_paper",
             COMMIT,
             tmp_path,
+            randomization_repeat_id="seed_00_key_00",
         )
 
 
@@ -390,7 +459,13 @@ def test_all_nine_routes_emit_one_output_schema(
     monkeypatch.setattr(workflow, "_run_main_method_route", fake_main)
     monkeypatch.setattr(workflow, "_run_shared_route", fake_shared)
     results = [
-        workflow.run_workflow(name, "probe_paper", COMMIT, tmp_path)
+        workflow.run_workflow(
+            name,
+            "probe_paper",
+            COMMIT,
+            tmp_path,
+            randomization_repeat_id=_repeat_id(name),
+        )
         for name in PUBLIC_WORKFLOW_EXPECTATIONS
     ]
     expected_fields = set(results[0])
@@ -444,6 +519,7 @@ def test_server_rejects_incomplete_internal_route_output(
             "probe_paper",
             COMMIT,
             tmp_path,
+            randomization_repeat_id="seed_00_key_00",
         )
 
 
@@ -522,6 +598,7 @@ def test_main_method_routes_use_isolated_scientific_command(
         "probe_paper",
         COMMIT,
         tmp_path,
+        randomization_repeat_id="seed_00_key_00",
     )
 
     assert captured["root"] == tmp_path.resolve()
@@ -693,7 +770,7 @@ def test_baseline_and_t2smark_routes_use_shared_isolated_wrapper(
         "pilot_paper",
         COMMIT,
         tmp_path,
-        tmp_path / "persistent_delivery",
+        randomization_repeat_id=_repeat_id(workflow_name),
     )
 
     assert captured["root"] == tmp_path.resolve()
@@ -703,7 +780,7 @@ def test_baseline_and_t2smark_routes_use_shared_isolated_wrapper(
     assert captured["baseline_id"] == expected_baseline
     assert captured["formal_commit"] == COMMIT
     assert captured["formal_digest"] == LOCK_DIGEST
-    assert captured["persistent_output_dir"] == tmp_path / "persistent_delivery"
+    assert captured["persistent_output_dir"] == str(TEST_PERSISTENT_ROOT)
     assert captured["route"] == workflow.WORKFLOW_ROUTES[workflow_name]
     assert result["scientific_profile_id"] == expected_profile
     assert result["baseline_id"] == expected_baseline
@@ -711,7 +788,7 @@ def test_baseline_and_t2smark_routes_use_shared_isolated_wrapper(
     assert result["return_code"] == 0
     assert result["orchestrator_dependency_environment"] == ORCHESTRATOR_EVIDENCE
     assert result["workflow_environment"]["persistent_output_dir"] == str(
-        tmp_path / "persistent_delivery"
+        TEST_PERSISTENT_ROOT
     )
     assert os.environ[workflow.PRIMARY_BASELINE_ID_ENVIRONMENT_KEY] == "outer_baseline"
 

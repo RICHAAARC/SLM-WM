@@ -745,9 +745,9 @@ def _validate_ablation_necessity_statistics(
             "measured_supported" if supported else "measured_not_supported"
         )
         if (
-            _as_bool(row["necessity_claim_supported"]) != supported
+            _as_bool(row["necessity_component_supported"]) != supported
             or _as_bool(row["supports_paper_claim"]) != supported
-            or row["necessity_claim_decision"] != expected_decision
+            or row["necessity_component_decision"] != expected_decision
         ):
             raise ValueError(
                 "机制必要性主张结论未同时满足统计条件与 paired SSIM 质量非劣门禁"
@@ -761,12 +761,12 @@ def _validate_ablation_necessity_statistics(
             if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
                 raise ValueError("机制必要性统计摘要字段不是 SHA-256")
 
-    summary = context["ablation_claim_summary"]
+    summary = context["ablation_component_summary"]
     supported_ids = [
-        row["ablation_id"] for row in rows if _as_bool(row["necessity_claim_supported"])
+        row["ablation_id"] for row in rows if _as_bool(row["necessity_component_supported"])
     ]
     not_supported_ids = [
-        row["ablation_id"] for row in rows if not _as_bool(row["necessity_claim_supported"])
+        row["ablation_id"] for row in rows if not _as_bool(row["necessity_component_supported"])
     ]
     if not all(
         (
@@ -781,9 +781,9 @@ def _validate_ablation_necessity_statistics(
             == summary.get("paired_prompt_count"),
             summary.get("necessity_statistic_rows_digest")
             == build_stable_digest(canonicalize_ablation_necessity_rows(rows)),
-            summary.get("necessity_supported_ablation_ids") == supported_ids,
-            summary.get("necessity_not_supported_ablation_ids") == not_supported_ids,
-            _as_bool(summary.get("all_mechanism_necessity_claims_supported"))
+            summary.get("necessity_component_supported_ablation_ids") == supported_ids,
+            summary.get("necessity_component_not_supported_ablation_ids") == not_supported_ids,
+            _as_bool(summary.get("all_mechanism_necessity_components_supported"))
             == (not not_supported_ids),
         )
     ):
@@ -884,7 +884,7 @@ def validate_paper_artifact_source_data(
     attack_manifest: Mapping[str, Any],
     baseline_runtime_report: Mapping[str, Any],
     dataset_quality_summary: Mapping[str, Any],
-    ablation_claim_summary: Mapping[str, Any],
+    ablation_component_summary: Mapping[str, Any],
 ) -> dict[str, Any]:
     """读取并验证论文表图所依赖的12类实际数据文件.
 
@@ -900,7 +900,7 @@ def validate_paper_artifact_source_data(
         "baseline_claim_ready": _as_bool(
             baseline_runtime_report.get("comparison_table_supports_paper_claim", False)
         ),
-        "ablation_claim_summary": dict(ablation_claim_summary),
+        "ablation_component_summary": dict(ablation_component_summary),
     }
     checks: dict[str, dict[str, Any]] = {}
     details: dict[str, dict[str, Any] | None] = {}
@@ -1003,7 +1003,7 @@ def validate_paper_artifact_source_data(
 
     implications = (
         (
-            _as_bool(threshold_report.get("full_method_claim_ready", False)),
+            _as_bool(threshold_report.get("full_method_component_ready", False)),
             (
                 "frozen_evidence_protocol_ready",
                 "raw_image_only_detection_records_ready",
@@ -1025,7 +1025,7 @@ def validate_paper_artifact_source_data(
             "baseline ready 但共同协议对比表无效",
         ),
         (
-            _as_bool(ablation_claim_summary.get("ablation_claim_gate_ready", False)),
+            _as_bool(ablation_component_summary.get("ablation_component_ready", False)),
             (
                 "mechanism_ablation_metrics_ready",
                 "mechanism_pairwise_delta_ready",
@@ -1034,7 +1034,7 @@ def validate_paper_artifact_source_data(
             "消融 ready 但实测指标, delta 或必要性统计表无效",
         ),
         (
-            _as_bool(dataset_quality_summary.get("formal_fid_kid_claim_gate_ready", False)),
+            _as_bool(dataset_quality_summary.get("formal_fid_kid_component_ready", False)),
             ("dataset_quality_metrics_ready",),
             "数据集质量 ready 但 FID/KID 表无效",
         ),

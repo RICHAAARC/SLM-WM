@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from paper_experiments.runners.paper_claim_provenance import (
+    require_exact9_randomization_aggregate_provenance,
+)
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
 from experiments.protocol.paper_run_config import build_paper_run_config
 from experiments.runtime.repository_environment import resolve_code_version
@@ -115,132 +118,10 @@ def build_input_bundle(
     )
 
 
-def write_submission_readiness_outputs(
-    root: str | Path = ".",
-    output_dir: str | Path | None = None,
-    evidence_manifest_path: str | Path | None = None,
-    builder_report_path: str | Path | None = None,
-    blocker_report_path: str | Path | None = None,
-    gap_list_path: str | Path | None = None,
-) -> dict[str, Any]:
-    """写出投稿就绪阻断报告、所需输入清单、release dry-run 表和 manifest。"""
-    root_path = Path(root).resolve()
-    paper_run = build_paper_run_config(root_path)
-    resolved_output_dir = ensure_output_dir_under_outputs(
-        root_path,
-        Path(output_dir or DEFAULT_OUTPUT_ROOT / paper_run.run_name),
-    )
-    resolved_output_dir.mkdir(parents=True, exist_ok=True)
+def write_submission_readiness_outputs(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    """在精确9重复原始记录重算 Writer 就绪前拒绝正式结论物化."""
 
-    evidence_audit_dir = DEFAULT_EVIDENCE_AUDIT_ROOT / paper_run.run_name
-    resolved_evidence_manifest_path = resolve_input_path(
-        root_path,
-        evidence_manifest_path or evidence_audit_dir / "manifest.local.json",
-    )
-    resolved_builder_report_path = resolve_input_path(
-        root_path,
-        builder_report_path or evidence_audit_dir / "artifact_builder_readiness_report.json",
-    )
-    resolved_blocker_report_path = resolve_input_path(
-        root_path,
-        blocker_report_path or evidence_audit_dir / "submission_blocker_report.json",
-    )
-    resolved_gap_list_path = resolve_input_path(
-        root_path,
-        gap_list_path or evidence_audit_dir / "evidence_gap_list.csv",
-    )
-
-    bundle = build_input_bundle(
-        root_path,
-        resolved_output_dir,
-        resolved_evidence_manifest_path,
-        resolved_builder_report_path,
-        resolved_blocker_report_path,
-        resolved_gap_list_path,
-    )
-    required_rows = build_required_evidence_rows(bundle)
-    release_rows = build_release_profile_rows(bundle)
-    readiness_report = build_submission_readiness_report(bundle, required_rows, release_rows)
-
-    blocker_report_path_out = resolved_output_dir / "readiness_blocker_report.json"
-    required_inputs_path = resolved_output_dir / "required_evidence_inputs.csv"
-    release_profile_path = resolved_output_dir / "release_profile_dry_run.csv"
-    manifest_path = resolved_output_dir / "submission_readiness_manifest.local.json"
-
-    blocker_report_path_out.write_text(stable_json_text(readiness_report), encoding="utf-8")
-    write_csv(
-        required_inputs_path,
-        required_rows,
-        [
-            "required_input_id",
-            "required_input_area",
-            "required_input_severity",
-            "required_action",
-            "related_artifacts",
-            "closes_claim_ids",
-            "recommended_order",
-            "input_ready",
-            "supports_paper_claim",
-        ],
-    )
-    write_csv(
-        release_profile_path,
-        release_rows,
-        [
-            "release_profile_name",
-            "release_profile_file_count",
-            "release_profile_missing_count",
-            "release_dry_run_ready",
-            "release_package_allowed",
-            "package_freeze_allowed",
-            "release_scope",
-            "supports_paper_claim",
-        ],
-    )
-
-    input_paths = tuple(
-        relative_or_absolute(path, root_path)
-        for path in (
-            resolved_evidence_manifest_path,
-            resolved_builder_report_path,
-            resolved_blocker_report_path,
-            resolved_gap_list_path,
-            root_path / "docs" / "extraction_profiles.md",
-            root_path / "docs" / "release_boundary.md",
-        )
-    )
-    output_paths = tuple(
-        relative_or_absolute(path, root_path)
-        for path in (
-            blocker_report_path_out,
-            required_inputs_path,
-            release_profile_path,
-            manifest_path,
-        )
-    )
-    summary = {
-        "readiness_report": readiness_report,
-        "required_rows": required_rows,
-        "release_rows": release_rows,
-    }
-    manifest = build_artifact_manifest(
-        artifact_id="submission_readiness_manifest",
-        artifact_type="local_manifest",
-        input_paths=input_paths,
-        output_paths=output_paths,
-        config={
-            "summary_digest": build_stable_digest(summary),
-            "input_bundle_digest": build_stable_digest(bundle.to_dict()),
-        },
-        code_version=resolve_code_version(root_path),
-        rebuild_command="python scripts/write_submission_readiness_outputs.py",
-        metadata={
-            **readiness_report,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        },
-    ).to_dict()
-    manifest_path.write_text(stable_json_text(manifest), encoding="utf-8")
-    return manifest
+    require_exact9_randomization_aggregate_provenance()
 
 
 def build_parser() -> argparse.ArgumentParser:

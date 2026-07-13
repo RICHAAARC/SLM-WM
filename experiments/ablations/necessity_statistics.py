@@ -2,10 +2,10 @@
 
 该模块只消费真实重运行产生的逐 Prompt 记录。完整方法与每个单机制变体
 必须共享同一 test Prompt 集合，随后以 Prompt 为聚类单位比较完整方法减去
-变体的攻击后检测率。协议闭合仅说明实验已经执行；只有预注册效应方向、
-最小效应、置信区间、多重校正显著性和图像质量非劣性同时成立时，才支持
-对应机制必要性主张。质量门禁用于排除完整方法仅依靠更大图像失真换取检测率
-提升这一混杂解释。
+变体的攻击后检测率。单 repeat 组件只记录预注册效应方向、最小效应、置信
+区间、多重校正显著性和图像质量非劣性是否成立, 不直接支持论文结论。质量
+门禁用于排除完整方法仅依靠更大图像失真换取检测率提升这一混杂解释。跨
+repeat 机制必要性结论必须由外层精确9重复聚合器重新计算。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import numpy as np
 from main.core.digest import build_stable_digest
 
 
-ABLATION_NECESSITY_ANALYSIS_SCHEMA = "ablation_prompt_cluster_necessity_v1"
+ABLATION_NECESSITY_ANALYSIS_SCHEMA = "ablation_prompt_cluster_component_v2"
 ABLATION_NECESSITY_PRIMARY_METRIC = "attacked_true_positive_rate"
 ABLATION_NECESSITY_EFFECT_DIRECTION = "complete_method_minus_ablation"
 ABLATION_NECESSITY_MINIMUM_EFFECT_SIZE = 0.01
@@ -56,8 +56,8 @@ ABLATION_NECESSITY_FIELDNAMES = (
     "minimum_effect_ready",
     "confidence_interval_ready",
     "adjusted_significance_ready",
-    "necessity_claim_supported",
-    "necessity_claim_decision",
+    "necessity_component_supported",
+    "necessity_component_decision",
     "confidence_level",
     "significance_alpha",
     "bootstrap_resample_count",
@@ -487,8 +487,8 @@ def build_ablation_necessity_statistics(
                 "minimum_effect_ready": mean_effect >= minimum_effect_size,
                 "confidence_interval_ready": ci_low > minimum_effect_size,
                 "adjusted_significance_ready": False,
-                "necessity_claim_supported": False,
-                "necessity_claim_decision": "measured_not_supported",
+                "necessity_component_supported": False,
+                "necessity_component_decision": "measured_not_supported",
                 "confidence_level": float(confidence_level),
                 "significance_alpha": float(significance_alpha),
                 "bootstrap_resample_count": int(bootstrap_resample_count),
@@ -514,19 +514,19 @@ def build_ablation_necessity_statistics(
             and row["paired_ssim_noninferiority_ready"]
         )
         row["adjusted_significance_ready"] = adjusted_ready
-        row["necessity_claim_supported"] = supported
-        row["necessity_claim_decision"] = (
+        row["necessity_component_supported"] = supported
+        row["necessity_component_decision"] = (
             "measured_supported" if supported else "measured_not_supported"
         )
-        row["supports_paper_claim"] = supported
+        row["supports_paper_claim"] = False
 
     supported_ids = [
-        str(row["ablation_id"]) for row in rows if row["necessity_claim_supported"]
+        str(row["ablation_id"]) for row in rows if row["necessity_component_supported"]
     ]
     not_supported_ids = [
         str(row["ablation_id"])
         for row in rows
-        if not row["necessity_claim_supported"]
+        if not row["necessity_component_supported"]
     ]
     rows_digest = build_stable_digest(canonicalize_ablation_necessity_rows(rows))
     summary = {
@@ -551,13 +551,13 @@ def build_ablation_necessity_statistics(
         "input_record_digest": input_record_digest,
         "necessity_statistic_row_count": len(rows),
         "necessity_statistic_rows_digest": rows_digest,
-        "necessity_supported_ablation_ids": supported_ids,
-        "necessity_not_supported_ablation_ids": not_supported_ids,
+        "necessity_component_supported_ablation_ids": supported_ids,
+        "necessity_component_not_supported_ablation_ids": not_supported_ids,
         "ablation_necessity_statistics_ready": len(rows) == len(expected_ablation_ids),
-        "all_mechanism_necessity_claims_supported": not not_supported_ids,
-        "necessity_claim_decision": (
+        "all_mechanism_necessity_components_supported": not not_supported_ids,
+        "necessity_component_decision": (
             "measured_supported" if not not_supported_ids else "measured_not_supported"
         ),
-        "supports_paper_claim": not not_supported_ids,
+        "supports_paper_claim": False,
     }
     return rows, summary
