@@ -18,6 +18,10 @@ from experiments.protocol.attacks import attack_config_digest, resolve_formal_at
 from experiments.protocol.fixed_fpr_observation_audit import (
     audit_fixed_fpr_observation_threshold,
 )
+from experiments.protocol.formal_randomization import (
+    formal_randomization_protocol_record,
+    resolve_formal_randomization_repeat,
+)
 from external_baseline.primary.sd35_method_faithful_common import (
     apply_formal_image_attack,
     canonical_attack_family,
@@ -881,12 +885,22 @@ def prepare_package_source(
 def _patch_two_prompt_package_run(monkeypatch: pytest.MonkeyPatch) -> None:
     """把归档层级缩到仍包含 calibration 和 test 的真实两 Prompt 协议."""
 
+    repeat = resolve_formal_randomization_repeat(None)
     monkeypatch.setattr(
         "paper_experiments.runners.external_baseline_method_faithful.build_paper_run_config",
         lambda _root=".": SimpleNamespace(
             run_name="pilot_paper",
             prompt_count=2,
             target_fpr=0.01,
+            randomization_repeat_id=repeat.randomization_repeat_id,
+            generation_seed_index=repeat.generation_seed_index,
+            generation_seed_offset=repeat.generation_seed_offset,
+            watermark_key_index=repeat.watermark_key_index,
+            formal_randomization_protocol_digest=(
+                formal_randomization_protocol_record()[
+                    "formal_randomization_protocol_digest"
+                ]
+            ),
             drive_dir=lambda child_name: f"drive/{child_name}",
         ),
     )

@@ -6,7 +6,12 @@ import json
 from pathlib import Path
 
 from main.core.digest import build_stable_digest
+from experiments.protocol.formal_randomization import (
+    formal_randomization_protocol_record,
+    resolve_formal_randomization_repeat,
+)
 from paper_experiments.runners.closure_package_selection import (
+    CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES,
     CLOSURE_PACKAGE_FAMILY_SPECS,
     LOCK_FILENAME,
     LOCK_MANIFEST_FILENAME,
@@ -98,7 +103,14 @@ def build_test_closure_input_lock_payloads(
     package_lock_digest = execution_lock["formal_execution_lock_digest"]
     resolved_package_root = Path(package_root)
     records = []
+    repeat = resolve_formal_randomization_repeat(None)
+    protocol_digest = formal_randomization_protocol_record()[
+        "formal_randomization_protocol_digest"
+    ]
     for index, spec in enumerate(CLOSURE_PACKAGE_FAMILY_SPECS):
+        cross_repeat_invariant = (
+            spec.package_family in CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES
+        )
         records.append(
             {
                 "package_family": spec.package_family,
@@ -112,6 +124,26 @@ def build_test_closure_input_lock_payloads(
                 "formal_execution_run_lock_digest": run_lock_digest,
                 "formal_execution_package_lock_digest": package_lock_digest,
                 "generated_at": "2026-07-11T00:00:00+00:00",
+                "randomization_scope": (
+                    "cross_repeat_invariant"
+                    if cross_repeat_invariant
+                    else "active_repeat_component"
+                ),
+                "randomization_repeat_id": (
+                    "" if cross_repeat_invariant else repeat.randomization_repeat_id
+                ),
+                "generation_seed_index": (
+                    -1 if cross_repeat_invariant else repeat.generation_seed_index
+                ),
+                "generation_seed_offset": (
+                    -1 if cross_repeat_invariant else repeat.generation_seed_offset
+                ),
+                "watermark_key_index": (
+                    -1 if cross_repeat_invariant else repeat.watermark_key_index
+                ),
+                "formal_randomization_protocol_digest": (
+                    "" if cross_repeat_invariant else protocol_digest
+                ),
                 **_scientific_lock_fields(spec, index),
             }
         )
@@ -129,6 +161,13 @@ def build_test_closure_input_lock_payloads(
             record["package_family"]: record["formal_execution_package_lock_digest"]
             for record in records
         },
+        "randomization_repeat_identity": {
+            **repeat.to_dict(),
+            "formal_randomization_protocol_digest": protocol_digest,
+        },
+        "repeat_component_input_ready": True,
+        "randomization_aggregate_ready": False,
+        "supports_paper_claim": False,
     }
     lock_payload["closure_input_lock_digest"] = build_stable_digest(lock_payload)
     manifest = {
@@ -151,6 +190,12 @@ def build_test_closure_input_lock_payloads(
             "paper_run_name": paper_run_name,
             "target_fpr": target_fpr,
             "common_code_version": common_code_version,
+            "randomization_repeat_identity": lock_payload[
+                "randomization_repeat_identity"
+            ],
+            "repeat_component_input_ready": True,
+            "randomization_aggregate_ready": False,
+            "supports_paper_claim": False,
         },
     }
     return lock_payload, manifest

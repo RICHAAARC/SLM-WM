@@ -16,6 +16,11 @@ import zlib
 from zipfile import BadZipFile, ZipFile
 
 from experiments.artifacts.artifact_manifest import build_artifact_manifest
+from experiments.protocol.formal_randomization import (
+    formal_randomization_protocol_record,
+    resolve_formal_randomization_repeat,
+    validate_formal_randomization_repeat_records,
+)
 from experiments.protocol.paper_run_config import normalize_paper_run_name
 from experiments.runtime.dependency_profiles import require_dependency_profile_ready
 from experiments.runtime.repository_environment import (
@@ -49,6 +54,24 @@ SEMANTIC_WATERMARK_PACKAGE_FAMILIES = frozenset(
         "image_only_dataset_runtime",
         "dataset_level_quality",
         "runtime_rerun_ablation",
+    }
+)
+RANDOMIZATION_REPEAT_PACKAGE_FAMILIES = frozenset(
+    {
+        "image_only_dataset_runtime",
+        "runtime_rerun_ablation",
+        "dataset_level_quality",
+        "method_faithful_tree_ring",
+        "method_faithful_gaussian_shading",
+        "method_faithful_shallow_diffuse",
+        "official_reference_t2smark",
+    }
+)
+CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES = frozenset(
+    {
+        "official_reference_tree_ring",
+        "official_reference_gaussian_shading",
+        "official_reference_shallow_diffuse",
     }
 )
 SEMANTIC_SESSION_IDENTITY_FIELDS = (
@@ -137,6 +160,7 @@ class ClosurePackageFamilySpec:
     target_fpr_sources: tuple[JsonFieldSource, ...]
     baseline_sources: tuple[JsonFieldSource, ...]
     code_version_sources: tuple[JsonFieldSource, ...]
+    randomization_repeat_sources: tuple[JsonFieldSource, ...]
     value_requirements: tuple[JsonValueRequirement, ...]
     baseline_rows_sources: tuple[BaselineRowsSource, ...] = ()
     package_input_manifest_template: str | None = None
@@ -158,6 +182,12 @@ class ClosurePackageCandidate:
     formal_execution_package_lock_digest: str
     generated_at: str
     generated_at_utc: datetime
+    randomization_scope: str
+    randomization_repeat_id: str = ""
+    generation_seed_index: int = -1
+    generation_seed_offset: int = -1
+    watermark_key_index: int = -1
+    formal_randomization_protocol_digest: str = ""
     scientific_profile_id: str = ""
     scientific_profile_digest: str = ""
     scientific_direct_requirements_digest: str = ""
@@ -187,6 +217,14 @@ class ClosurePackageCandidate:
                 self.formal_execution_package_lock_digest
             ),
             "generated_at": self.generated_at,
+            "randomization_scope": self.randomization_scope,
+            "randomization_repeat_id": self.randomization_repeat_id,
+            "generation_seed_index": self.generation_seed_index,
+            "generation_seed_offset": self.generation_seed_offset,
+            "watermark_key_index": self.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                self.formal_randomization_protocol_digest
+            ),
             "scientific_profile_id": self.scientific_profile_id,
             "scientific_profile_digest": self.scientific_profile_digest,
             "scientific_direct_requirements_digest": (
@@ -348,6 +386,10 @@ def _method_faithful_spec(baseline_id: str) -> ClosurePackageFamilySpec:
             _source(archive_manifest, "code_version"),
             _source(transfer_manifest, "code_version"),
         ),
+        randomization_repeat_sources=(
+            _source(package_input, "randomization_repeat_identity"),
+            _source(archive_manifest, "config", "randomization_repeat_identity"),
+        ),
         value_requirements=(
             _require(summary, "run_decision", "pass"),
             _require(summary, "external_baseline_method_faithful_ready", True),
@@ -414,6 +456,7 @@ def _official_reference_spec(baseline_id: str) -> ClosurePackageFamilySpec:
             _source(archive_manifest, "code_version"),
             _source(run_manifest, "code_version"),
         ),
+        randomization_repeat_sources=(),
         value_requirements=(
             _require(summary, "run_decision", "pass"),
             _require(summary, f"{baseline_id}_official_reference_ready", True),
@@ -479,6 +522,11 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
         ),
         baseline_sources=(),
         code_version_sources=(_source(IMAGE_RUNTIME_MANIFEST, "code_version"),),
+        randomization_repeat_sources=(
+            _source(IMAGE_RUNTIME_PACKAGE_INPUT, "randomization_repeat_identity"),
+            _source(IMAGE_RUNTIME_SUMMARY, "randomization_repeat_identity"),
+            _source(IMAGE_RUNTIME_MANIFEST, "config", "paper_run"),
+        ),
         value_requirements=(
             _require(IMAGE_RUNTIME_SUMMARY, "protocol_decision", "pass"),
             _require(IMAGE_RUNTIME_SUMMARY, "full_method_claim_ready", True),
@@ -493,7 +541,7 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
                 "report_schema",
                 "exact_package_input_manifest",
             ),
-            _require(IMAGE_RUNTIME_PACKAGE_INPUT, "schema_version", 1),
+            _require(IMAGE_RUNTIME_PACKAGE_INPUT, "schema_version", 2),
             _require(
                 IMAGE_RUNTIME_PACKAGE_INPUT,
                 "package_family",
@@ -547,6 +595,11 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
         ),
         baseline_sources=(),
         code_version_sources=(_source(ABLATION_MANIFEST, "code_version"),),
+        randomization_repeat_sources=(
+            _source(ABLATION_PACKAGE_INPUT, "randomization_repeat_identity"),
+            _source(ABLATION_SUMMARY, "randomization_repeat_identity"),
+            _source(ABLATION_MANIFEST, "config", "randomization_repeat_identity"),
+        ),
         value_requirements=(
             _require(ABLATION_SUMMARY, "protocol_decision", "pass"),
             _require(ABLATION_SUMMARY, "ablation_claim_gate_ready", True),
@@ -566,7 +619,7 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
                 "report_schema",
                 "exact_package_input_manifest",
             ),
-            _require(ABLATION_PACKAGE_INPUT, "schema_version", 1),
+            _require(ABLATION_PACKAGE_INPUT, "schema_version", 2),
             _require(
                 ABLATION_PACKAGE_INPUT,
                 "package_family",
@@ -619,6 +672,11 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
         ),
         baseline_sources=(),
         code_version_sources=(_source(QUALITY_MANIFEST, "code_version"),),
+        randomization_repeat_sources=(
+            _source(QUALITY_PACKAGE_INPUT, "randomization_repeat_identity"),
+            _source(QUALITY_SUMMARY, "randomization_repeat_identity"),
+            _source(QUALITY_MANIFEST, "config", "randomization_repeat_identity"),
+        ),
         value_requirements=(
             _require(QUALITY_SUMMARY, "formal_feature_backend_ready", True),
             _require(QUALITY_SUMMARY, "formal_sample_scale_ready", True),
@@ -639,7 +697,7 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
                 "report_schema",
                 "exact_package_input_manifest",
             ),
-            _require(QUALITY_PACKAGE_INPUT, "schema_version", 1),
+            _require(QUALITY_PACKAGE_INPUT, "schema_version", 2),
             _require(
                 QUALITY_PACKAGE_INPUT,
                 "package_family",
@@ -699,6 +757,14 @@ CLOSURE_PACKAGE_FAMILY_SPECS: tuple[ClosurePackageFamilySpec, ...] = (
         code_version_sources=(
             _source(T2SMARK_ARCHIVE_MANIFEST, "code_version"),
             _source(T2SMARK_RUN_MANIFEST, "code_version"),
+        ),
+        randomization_repeat_sources=(
+            _source(T2SMARK_PACKAGE_INPUT, "randomization_repeat_identity"),
+            _source(
+                T2SMARK_ARCHIVE_MANIFEST,
+                "config",
+                "randomization_repeat_identity",
+            ),
         ),
         value_requirements=(
             _require(T2SMARK_SUMMARY, "run_decision", "pass"),
@@ -2310,11 +2376,20 @@ def inspect_closure_package(
     spec: ClosurePackageFamilySpec,
     paper_run_name: str,
     target_fpr: float,
+    randomization_repeat_id: str | None = None,
 ) -> ClosurePackageCandidate:
     """按指定 family 的包内身份和证据契约校验单个 ZIP."""
 
     resolved_paper_run = normalize_paper_run_name(paper_run_name)
     expected_target_fpr = float(target_fpr)
+    expected_repeat = resolve_formal_randomization_repeat(
+        randomization_repeat_id
+    )
+    expected_randomization_protocol_digest = (
+        formal_randomization_protocol_record()[
+            "formal_randomization_protocol_digest"
+        ]
+    )
     if not math.isfinite(expected_target_fpr) or not 0.0 < expected_target_fpr < 1.0:
         raise ClosurePackageSelectionError("target_fpr 必须是位于 (0, 1) 的有限数值")
     path = Path(package_path).expanduser()
@@ -2398,6 +2473,77 @@ def inspect_closure_package(
                     raise ClosurePackageSelectionError(
                         f"{spec.package_family} 的 baseline 身份不匹配: {actual_baseline}"
                     )
+
+            if spec.package_family in RANDOMIZATION_REPEAT_PACKAGE_FAMILIES:
+                if len(spec.randomization_repeat_sources) < 2:
+                    raise ClosurePackageSelectionError(
+                        f"{spec.package_family} 缺少双来源 repeat 身份"
+                    )
+                repeat_identities = []
+                for source in spec.randomization_repeat_sources:
+                    raw_identity = _read_source_value(
+                        archive,
+                        source,
+                        spec,
+                        resolved_paper_run,
+                        cache,
+                    )
+                    if not isinstance(raw_identity, dict):
+                        raise ClosurePackageSelectionError(
+                            f"{spec.package_family} 的 repeat 身份必须是 JSON object"
+                        )
+                    try:
+                        normalized_identity = (
+                            validate_formal_randomization_repeat_records(
+                                [raw_identity],
+                                require_exact_registry=False,
+                            )[0]
+                        )
+                    except (TypeError, ValueError) as exc:
+                        raise ClosurePackageSelectionError(
+                            f"{spec.package_family} 的 repeat 身份未通过注册表校验"
+                        ) from exc
+                    if (
+                        raw_identity.get(
+                            "formal_randomization_protocol_digest"
+                        )
+                        != expected_randomization_protocol_digest
+                    ):
+                        raise ClosurePackageSelectionError(
+                            f"{spec.package_family} 的随机化协议摘要不匹配"
+                        )
+                    repeat_identities.append(normalized_identity)
+                if any(
+                    identity != expected_repeat.to_dict()
+                    for identity in repeat_identities
+                ) or len(
+                    {
+                        json.dumps(identity, sort_keys=True)
+                        for identity in repeat_identities
+                    }
+                ) != 1:
+                    raise ClosurePackageSelectionError(
+                        f"{spec.package_family} 未绑定活动随机化 repeat"
+                    )
+                randomization_evidence = {
+                    "randomization_scope": "active_repeat_component",
+                    **expected_repeat.to_dict(),
+                    "formal_randomization_protocol_digest": (
+                        expected_randomization_protocol_digest
+                    ),
+                }
+            elif spec.package_family in CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES:
+                if spec.randomization_repeat_sources:
+                    raise ClosurePackageSelectionError(
+                        f"{spec.package_family} 不得声明活动 repeat 来源"
+                    )
+                randomization_evidence = {
+                    "randomization_scope": "cross_repeat_invariant",
+                }
+            else:
+                raise ClosurePackageSelectionError(
+                    f"未登记 package family 的随机化职责: {spec.package_family}"
+                )
 
             code_versions = [
                 _read_source_value(
@@ -2515,6 +2661,7 @@ def inspect_closure_package(
         formal_execution_package_lock_digest=formal_execution_package_lock_digest,
         generated_at=generated_at,
         generated_at_utc=generated_at_utc,
+        **randomization_evidence,
         **scientific_execution_evidence,
     )
 
@@ -2625,6 +2772,7 @@ def validate_closure_input_lock_payloads(
     *,
     paper_run_name: str,
     target_fpr: float,
+    randomization_repeat_id: str | None = None,
 ) -> dict[str, str]:
     """复验 CPU 结果闭合输入锁的基本身份与规范摘要.
 
@@ -2635,6 +2783,14 @@ def validate_closure_input_lock_payloads(
 
     resolved_run_name = normalize_paper_run_name(paper_run_name)
     expected_target_fpr = float(target_fpr)
+    expected_repeat = resolve_formal_randomization_repeat(
+        randomization_repeat_id
+    )
+    expected_randomization_protocol_digest = (
+        formal_randomization_protocol_record()[
+            "formal_randomization_protocol_digest"
+        ]
+    )
     expected_families = {spec.package_family for spec in CLOSURE_PACKAGE_FAMILY_SPECS}
     expected_scientific_profiles = {
         spec.package_family: (
@@ -2748,6 +2904,37 @@ def validate_closure_input_lock_payloads(
             and record.get("scientific_command_sequence_digest") == ""
         )
 
+    def randomization_record_ready(record: dict[str, Any]) -> bool:
+        """区分活动 repeat 证据与跨 repeat 不变的忠实度证据."""
+
+        package_family = str(record.get("package_family", ""))
+        if package_family in RANDOMIZATION_REPEAT_PACKAGE_FAMILIES:
+            expected_identity = {
+                **expected_repeat.to_dict(),
+                "formal_randomization_protocol_digest": (
+                    expected_randomization_protocol_digest
+                ),
+            }
+            return bool(
+                record.get("randomization_scope")
+                == "active_repeat_component"
+                and all(
+                    record.get(field_name) == expected_value
+                    for field_name, expected_value in expected_identity.items()
+                )
+            )
+        if package_family in CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES:
+            return bool(
+                record.get("randomization_scope")
+                == "cross_repeat_invariant"
+                and record.get("randomization_repeat_id") == ""
+                and record.get("generation_seed_index") == -1
+                and record.get("generation_seed_offset") == -1
+                and record.get("watermark_key_index") == -1
+                and record.get("formal_randomization_protocol_digest") == ""
+            )
+        return False
+
     package_rows_ready = all(
         isinstance(record, dict)
         and str(record.get("paper_run_name", "")) == resolved_run_name
@@ -2774,6 +2961,7 @@ def validate_closure_input_lock_payloads(
             )
         )
         and scientific_record_ready(record)
+        and randomization_record_ready(record)
         for record in records
     )
     semantic_session_records = [
@@ -2835,6 +3023,16 @@ def validate_closure_input_lock_payloads(
         == expected_run_lock_digests
         and lock_payload.get("formal_execution_package_lock_digests")
         == expected_package_lock_digests
+        and lock_payload.get("randomization_repeat_identity")
+        == {
+            **expected_repeat.to_dict(),
+            "formal_randomization_protocol_digest": (
+                expected_randomization_protocol_digest
+            ),
+        }
+        and lock_payload.get("repeat_component_input_ready") is True
+        and lock_payload.get("randomization_aggregate_ready") is False
+        and lock_payload.get("supports_paper_claim") is False
         and bool(re.fullmatch(r"[0-9a-fA-F]{64}", declared_digest))
         and _stable_digest(digest_payload) == declared_digest
         and str(lock_manifest.get("artifact_id", ""))
@@ -2852,6 +3050,11 @@ def validate_closure_input_lock_payloads(
         )
         and str(metadata.get("closure_input_lock_digest", "")) == declared_digest
         and str(metadata.get("common_code_version", "")) == common_code_version
+        and metadata.get("randomization_repeat_identity")
+        == lock_payload.get("randomization_repeat_identity")
+        and metadata.get("repeat_component_input_ready") is True
+        and metadata.get("randomization_aggregate_ready") is False
+        and metadata.get("supports_paper_claim") is False
         and all(
             any(str(path).replace("\\", "/").endswith(suffix) for path in output_paths)
             for suffix in expected_output_suffixes
@@ -2862,6 +3065,7 @@ def validate_closure_input_lock_payloads(
     return {
         "closure_input_lock_digest": declared_digest,
         "common_code_version": common_code_version,
+        "randomization_repeat_id": expected_repeat.randomization_repeat_id,
     }
 
 
@@ -2870,6 +3074,7 @@ def load_validated_closure_input_lock(
     *,
     paper_run_name: str,
     target_fpr: float,
+    randomization_repeat_id: str | None = None,
 ) -> dict[str, Any]:
     """从当前论文运行目录读取并复验 closure input lock."""
 
@@ -2889,6 +3094,7 @@ def load_validated_closure_input_lock(
         lock_manifest,
         paper_run_name=resolved_run_name,
         target_fpr=target_fpr,
+        randomization_repeat_id=randomization_repeat_id,
     )
     return {
         **provenance,
@@ -2936,6 +3142,12 @@ def _write_closure_input_lock(
             "target_fpr": target_fpr,
             "common_code_version": common_code_version,
             "closure_input_packages": lock_records,
+            "randomization_repeat_identity": lock_payload[
+                "randomization_repeat_identity"
+            ],
+            "repeat_component_input_ready": True,
+            "randomization_aggregate_ready": False,
+            "supports_paper_claim": False,
         },
         code_version=resolve_code_version(repository_root),
         rebuild_command=(
@@ -2950,6 +3162,12 @@ def _write_closure_input_lock(
             "paper_run_name": paper_run_name,
             "target_fpr": target_fpr,
             "common_code_version": common_code_version,
+            "randomization_repeat_identity": lock_payload[
+                "randomization_repeat_identity"
+            ],
+            "repeat_component_input_ready": True,
+            "randomization_aggregate_ready": False,
+            "supports_paper_claim": False,
         },
     ).to_dict()
     manifest_temporary_path.write_text(
@@ -2966,6 +3184,7 @@ def build_closure_input_selection_report(
     *,
     paper_run_name: str,
     target_fpr: float,
+    randomization_repeat_id: str | None = None,
     root: str | Path = ".",
     write_lock: bool = False,
 ) -> dict[str, Any]:
@@ -2973,6 +3192,9 @@ def build_closure_input_selection_report(
 
     resolved_paper_run = normalize_paper_run_name(paper_run_name)
     expected_target_fpr = float(target_fpr)
+    expected_repeat = resolve_formal_randomization_repeat(
+        randomization_repeat_id
+    )
     if not math.isfinite(expected_target_fpr) or not 0.0 < expected_target_fpr < 1.0:
         raise ClosurePackageSelectionError("target_fpr 必须是位于 (0, 1) 的有限数值")
     search_root = Path(package_search_root).expanduser()
@@ -2999,6 +3221,9 @@ def build_closure_input_selection_report(
                     spec=spec,
                     paper_run_name=resolved_paper_run,
                     target_fpr=expected_target_fpr,
+                    randomization_repeat_id=(
+                        expected_repeat.randomization_repeat_id
+                    ),
                 )
                 _validate_candidate_repository_profile(
                     candidate,
@@ -3023,6 +3248,35 @@ def build_closure_input_selection_report(
         {candidate.package_family for candidate in selected_candidates}
     ) != len(CLOSURE_PACKAGE_FAMILY_SPECS):
         raise ClosurePackageSelectionError("闭合输入必须恰好覆盖10个互异 package family")
+    active_repeat_candidates = [
+        candidate
+        for candidate in selected_candidates
+        if candidate.package_family in RANDOMIZATION_REPEAT_PACKAGE_FAMILIES
+    ]
+    invariant_candidates = [
+        candidate
+        for candidate in selected_candidates
+        if candidate.package_family in CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES
+    ]
+    if (
+        len(active_repeat_candidates)
+        != len(RANDOMIZATION_REPEAT_PACKAGE_FAMILIES)
+        or any(
+            candidate.randomization_repeat_id
+            != expected_repeat.randomization_repeat_id
+            or candidate.randomization_scope != "active_repeat_component"
+            for candidate in active_repeat_candidates
+        )
+        or len(invariant_candidates)
+        != len(CROSS_REPEAT_INVARIANT_PACKAGE_FAMILIES)
+        or any(
+            candidate.randomization_scope != "cross_repeat_invariant"
+            for candidate in invariant_candidates
+        )
+    ):
+        raise ClosurePackageSelectionError(
+            "闭合输入未精确覆盖活动 repeat 证据与跨 repeat 不变证据"
+        )
     _validate_semantic_watermark_session_group(selected_candidates)
     common_code_versions = {
         normalize_clean_code_version(candidate.code_version)
@@ -3057,6 +3311,17 @@ def build_closure_input_selection_report(
         "formal_execution_package_lock_digests": (
             formal_execution_package_lock_digests
         ),
+        "randomization_repeat_identity": {
+            **expected_repeat.to_dict(),
+            "formal_randomization_protocol_digest": (
+                formal_randomization_protocol_record()[
+                    "formal_randomization_protocol_digest"
+                ]
+            ),
+        },
+        "repeat_component_input_ready": True,
+        "randomization_aggregate_ready": False,
+        "supports_paper_claim": False,
     }
     lock_payload["closure_input_lock_digest"] = _stable_digest(lock_payload)
     lock_path = repository_root / LOCK_OUTPUT_ROOT / resolved_paper_run / LOCK_FILENAME
@@ -3079,6 +3344,9 @@ def build_closure_input_selection_report(
         "closure_input_lock_manifest_path": lock_manifest_path.as_posix(),
         "closure_input_lock_written": bool(write_lock),
         "closure_input_selection_ready": True,
+        "repeat_component_input_ready": True,
+        "randomization_aggregate_ready": False,
+        "supports_paper_claim": False,
     }
 
 
@@ -3087,6 +3355,7 @@ def select_and_lock_closure_input_packages(
     *,
     paper_run_name: str,
     target_fpr: float,
+    randomization_repeat_id: str | None = None,
     root: str | Path = ".",
 ) -> tuple[str, ...]:
     """正式选择并冻结10个上游包, 返回其显式绝对路径."""
@@ -3095,6 +3364,7 @@ def select_and_lock_closure_input_packages(
         package_search_root,
         paper_run_name=paper_run_name,
         target_fpr=target_fpr,
+        randomization_repeat_id=randomization_repeat_id,
         root=root,
         write_lock=True,
     )

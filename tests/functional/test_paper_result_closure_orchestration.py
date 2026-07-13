@@ -209,7 +209,11 @@ def test_run_returns_current_exact_archive_without_latest_glob(
     monkeypatch.setattr(
         closure,
         "build_paper_run_config",
-        lambda _root: SimpleNamespace(run_name=PAPER_RUN_NAME, target_fpr=TARGET_FPR),
+        lambda _root: SimpleNamespace(
+            run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+            randomization_repeat_id="seed_00_key_00",
+        ),
     )
     executed_commands: list[list[str]] = []
 
@@ -288,7 +292,10 @@ def test_server_dry_run_uses_exact_selection_without_writing_lock(
     package_root.mkdir()
     environment_report = {
         "root": tmp_path.as_posix(),
-        "paper_run": {"run_name": PAPER_RUN_NAME},
+        "paper_run": {
+            "run_name": PAPER_RUN_NAME,
+            "randomization_repeat_id": "seed_00_key_00",
+        },
         "package_search_root": package_root.as_posix(),
         "target_fpr": f"{TARGET_FPR:g}",
     }

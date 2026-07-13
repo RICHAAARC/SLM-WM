@@ -2033,6 +2033,22 @@ def package_t2smark_formal_reproduction_outputs(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "paper_run_name": paper_run.run_name,
         "target_fpr": paper_run.target_fpr,
+        "randomization_repeat_id": paper_run.randomization_repeat_id,
+        "generation_seed_index": paper_run.generation_seed_index,
+        "generation_seed_offset": paper_run.generation_seed_offset,
+        "watermark_key_index": paper_run.watermark_key_index,
+        "formal_randomization_protocol_digest": (
+            paper_run.formal_randomization_protocol_digest
+        ),
+        "randomization_repeat_identity": {
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                paper_run.formal_randomization_protocol_digest
+            ),
+        },
         "baseline_id": "t2smark",
         "formal_execution_run_lock": formal_execution_run_lock,
         "formal_execution_package_lock": formal_execution_package_lock,
@@ -2056,6 +2072,22 @@ def package_t2smark_formal_reproduction_outputs(
             "archive_name": resolved_archive_name,
             "paper_run_name": paper_run.run_name,
             "target_fpr": paper_run.target_fpr,
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                paper_run.formal_randomization_protocol_digest
+            ),
+            "randomization_repeat_identity": {
+                "randomization_repeat_id": paper_run.randomization_repeat_id,
+                "generation_seed_index": paper_run.generation_seed_index,
+                "generation_seed_offset": paper_run.generation_seed_offset,
+                "watermark_key_index": paper_run.watermark_key_index,
+                "formal_randomization_protocol_digest": (
+                    paper_run.formal_randomization_protocol_digest
+                ),
+            },
             "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
         },
         code_version=formal_execution_package_lock["formal_execution_commit"],
@@ -2064,6 +2096,22 @@ def package_t2smark_formal_reproduction_outputs(
             "construction_unit_name": "t2smark_formal_reproduction",
             "paper_run_name": paper_run.run_name,
             "target_fpr": paper_run.target_fpr,
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                paper_run.formal_randomization_protocol_digest
+            ),
+            "randomization_repeat_identity": {
+                "randomization_repeat_id": paper_run.randomization_repeat_id,
+                "generation_seed_index": paper_run.generation_seed_index,
+                "generation_seed_offset": paper_run.generation_seed_offset,
+                "watermark_key_index": paper_run.watermark_key_index,
+                "formal_randomization_protocol_digest": (
+                    paper_run.formal_randomization_protocol_digest
+                ),
+            },
             "baseline_id": "t2smark",
             "generated_at": datetime.now(timezone.utc).isoformat(),
         },

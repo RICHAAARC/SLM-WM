@@ -798,6 +798,22 @@ def run_runtime_rerun_ablations(
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "paper_run_name": resolved_paper_run_name,
+        "randomization_repeat_id": paper_run.randomization_repeat_id,
+        "generation_seed_index": paper_run.generation_seed_index,
+        "generation_seed_offset": paper_run.generation_seed_offset,
+        "watermark_key_index": paper_run.watermark_key_index,
+        "formal_randomization_protocol_digest": (
+            paper_run.formal_randomization_protocol_digest
+        ),
+        "randomization_repeat_identity": {
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                paper_run.formal_randomization_protocol_digest
+            ),
+        },
         **ablation_contract,
         **prompt_contract,
         "record_count": len(formal_records),
@@ -873,6 +889,22 @@ def run_runtime_rerun_ablations(
             "prompt_count": len(resolved_base_configs),
             "split_counts": split_counts,
             "target_fpr": target_fpr,
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                paper_run.formal_randomization_protocol_digest
+            ),
+            "randomization_repeat_identity": {
+                "randomization_repeat_id": paper_run.randomization_repeat_id,
+                "generation_seed_index": paper_run.generation_seed_index,
+                "generation_seed_offset": paper_run.generation_seed_offset,
+                "watermark_key_index": paper_run.watermark_key_index,
+                "formal_randomization_protocol_digest": (
+                    paper_run.formal_randomization_protocol_digest
+                ),
+            },
             "record_digest": build_stable_digest(formal_records),
             "formal_detection_records_sha256": formal_detection_records_sha256,
             "formal_detection_records_digest": formal_detection_records_digest,
@@ -1200,6 +1232,15 @@ def package_runtime_rerun_ablations(
         package_family="runtime_rerun_ablation",
         paper_run_name=resolved_paper_run_name,
         target_fpr=paper_run.target_fpr,
+        randomization_repeat_identity={
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+        },
+        formal_randomization_protocol_digest=(
+            paper_run.formal_randomization_protocol_digest
+        ),
         entries=entries,
         formal_execution_run_lock=formal_execution_run_lock,
         formal_execution_package_lock=formal_execution_package_lock,

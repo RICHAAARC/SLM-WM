@@ -1629,6 +1629,22 @@ def write_dataset_level_quality_outputs(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "paper_run_name": resolved_paper_run_name,
         "target_fpr": resolved_target_fpr,
+        "randomization_repeat_id": paper_run.randomization_repeat_id,
+        "generation_seed_index": paper_run.generation_seed_index,
+        "generation_seed_offset": paper_run.generation_seed_offset,
+        "watermark_key_index": paper_run.watermark_key_index,
+        "formal_randomization_protocol_digest": (
+            paper_run.formal_randomization_protocol_digest
+        ),
+        "randomization_repeat_identity": {
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                paper_run.formal_randomization_protocol_digest
+            ),
+        },
         "quality_image_registry_path": relative_or_absolute(
             resolved_registry_path,
             root_path,
@@ -1740,6 +1756,22 @@ def write_dataset_level_quality_outputs(
         config={
             "paper_run_name": resolved_paper_run_name,
             "target_fpr": resolved_target_fpr,
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                paper_run.formal_randomization_protocol_digest
+            ),
+            "randomization_repeat_identity": {
+                "randomization_repeat_id": paper_run.randomization_repeat_id,
+                "generation_seed_index": paper_run.generation_seed_index,
+                "generation_seed_offset": paper_run.generation_seed_offset,
+                "watermark_key_index": paper_run.watermark_key_index,
+                "formal_randomization_protocol_digest": (
+                    paper_run.formal_randomization_protocol_digest
+                ),
+            },
             "records_digest": build_stable_digest([record.to_dict() for record in records]),
             "image_resolution_records_digest": build_stable_digest(image_resolution_records),
             "formal_feature_import_report_digest": build_stable_digest(formal_feature_payload["report"]),
@@ -2007,6 +2039,15 @@ def package_dataset_level_quality_outputs(
         package_family="dataset_level_quality",
         paper_run_name=resolved_paper_run_name,
         target_fpr=paper_run.target_fpr,
+        randomization_repeat_identity={
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+        },
+        formal_randomization_protocol_digest=(
+            paper_run.formal_randomization_protocol_digest
+        ),
         entries=entries,
         formal_execution_run_lock=formal_execution_run_lock,
         formal_execution_package_lock=formal_execution_package_lock,

@@ -653,6 +653,7 @@ def run_paper_result_closure_commands(
         package_search_root,
         paper_run_name=normalized_run_name,
         target_fpr=float(target_fpr),
+        randomization_repeat_id=paper_run.randomization_repeat_id,
         root=root_path,
         write_lock=True,
     )

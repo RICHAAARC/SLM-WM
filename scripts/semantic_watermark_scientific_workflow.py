@@ -167,6 +167,7 @@ def _recover_closed_archives(
     root_path: Path,
     paper_run_name: str,
     target_fpr: float,
+    randomization_repeat_id: str,
     expected_roles: set[str],
     archive_destination_dirs: Mapping[str, str | Path] | None,
 ) -> dict[str, Any]:
@@ -201,6 +202,7 @@ def _recover_closed_archives(
                     spec=spec,
                     paper_run_name=paper_run_name,
                     target_fpr=target_fpr,
+                    randomization_repeat_id=randomization_repeat_id,
                 )
                 if not _candidate_matches_repository(candidate, root_path):
                     raise ClosurePackageSelectionError(
@@ -508,6 +510,7 @@ def run_semantic_watermark_image_only_session(
         root_path=root_path,
         paper_run_name=paper_run_name,
         target_fpr=paper_run.target_fpr,
+        randomization_repeat_id=paper_run.randomization_repeat_id,
         expected_roles=expected_archive_roles,
         archive_destination_dirs=archive_destination_dirs,
     )

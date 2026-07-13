@@ -18,6 +18,7 @@ from experiments.protocol.attacks import attack_config_digest
 from experiments.protocol.formal_randomization import (
     build_formal_randomization_identity,
     formal_random_trace_fields,
+    formal_randomization_protocol_record,
     resolve_formal_randomization_repeat,
 )
 from external_baseline.primary.sd35_method_faithful_common import formal_image_attack_config
@@ -220,6 +221,7 @@ def _paper_run(
 ) -> SimpleNamespace:
     """构造协议绑定使用的最小论文运行对象。"""
 
+    repeat = resolve_formal_randomization_repeat(None)
     return SimpleNamespace(
         run_name="probe_paper",
         protocol_profile="probe_paper_fixed_fpr_0_1",
@@ -228,6 +230,15 @@ def _paper_run(
         prompt_set="probe_paper",
         prompt_file=prompt_file,
         sample_count=prompt_count,
+        randomization_repeat_id=repeat.randomization_repeat_id,
+        generation_seed_index=repeat.generation_seed_index,
+        generation_seed_offset=repeat.generation_seed_offset,
+        watermark_key_index=repeat.watermark_key_index,
+        formal_randomization_protocol_digest=(
+            formal_randomization_protocol_record()[
+                "formal_randomization_protocol_digest"
+            ]
+        ),
     )
 
 

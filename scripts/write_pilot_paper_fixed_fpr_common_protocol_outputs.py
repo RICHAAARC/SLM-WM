@@ -140,6 +140,7 @@ def write_pilot_paper_fixed_fpr_common_protocol_outputs(
         root_path,
         paper_run_name=config.paper_run_name,
         target_fpr=config.target_fpr,
+        randomization_repeat_id=config.randomization_repeat_id,
     )
     output_path = ensure_output_dir_under_outputs(
         root_path,

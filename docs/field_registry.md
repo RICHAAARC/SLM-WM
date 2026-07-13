@@ -1877,15 +1877,18 @@ Notebook 与 repository module 的跨边界数据
 | package_family | provenance | none | true | false | false | CPU 论文闭合输入锁中记录的唯一上游结果包职责族。 |
 | package_path | artifact | none | true | false | false | CPU 论文闭合选择后冻结的上游 ZIP 显式绝对路径。 |
 | package_sha256 | provenance | none | true | false | false | CPU 论文闭合选择后冻结的上游 ZIP 文件 SHA-256。 |
-| closure_input_package_count | metric | none | true | false | false | CPU 论文闭合输入锁覆盖的互异结果包 family 数量, 正式值为10。 |
-| closure_input_packages | artifact | none | true | false | false | CPU 论文闭合输入锁冻结的 family、路径、摘要、论文层级、FPR、代码版本和生成时间记录集合。 |
+| closure_input_package_count | metric | none | true | false | false | 单 repeat component 输入锁覆盖的互异结果包 family 数量, 当前值为10, 其中7类绑定活动 repeat, 3类为跨 repeat 不变忠实度证据。 |
+| closure_input_packages | artifact | none | true | false | false | 单 repeat component 输入锁冻结的 family、路径、摘要、论文层级、FPR、代码版本、随机化职责和生成时间记录集合。 |
 | closure_input_lock_digest | provenance | none | true | false | false | 对论文闭合输入锁核心内容执行规范序列化后得到的 SHA-256。 |
 | selected_package_paths | artifact | none | false | false | false | CPU 论文闭合 dry-run 报告返回的10个显式上游 ZIP 路径。 |
 | closure_input_lock_path | artifact | none | false | false | false | 当前论文运行层级的 CPU 闭合输入锁输出路径。 |
 | closure_input_lock_manifest_path | artifact | none | false | false | false | 当前论文运行层级输入锁独立 manifest 的输出路径。 |
 | closure_input_lock_written | governance | none | false | false | false | 当前选择调用是否请求并成功写出输入锁及其独立 manifest。 |
-| closure_input_selection_ready | governance | none | false | false | false | 10个结果包 family 是否均通过包内身份、白名单、CRC 和 ready 门禁。 |
-| closure_input_lock_ready | governance | none | false | false | false | 输入锁 manifest 是否绑定10个精确结果包及当前论文运行协议。 |
+| closure_input_selection_ready | governance | none | false | false | false | 单 repeat 的10个结果包 family 是否均通过包内身份、白名单、CRC 和 ready 门禁。该字段不表示9重复聚合完成。 |
+| closure_input_lock_ready | governance | none | false | false | false | 输入锁 manifest 是否绑定10个精确结果包、活动 repeat 与当前论文运行协议。 |
+| repeat_component_input_ready | governance | none | true | false | false | 7类随机化包是否精确绑定同一活动 repeat, 且3类 official-reference 忠实度包是否明确标记为跨 repeat 不变证据。 |
+| randomization_aggregate_ready | governance | none | true | false | false | 是否已经精确覆盖权威9个 repeat 并完成跨重复原始证据重算。单 repeat 输入锁固定为 false。 |
+| randomization_scope | protocol | none | true | false | false | 上游包在随机化证据中的职责, 取值为 active_repeat_component 或 cross_repeat_invariant。 |
 | closure_input_lock_present | governance | none | false | false | false | 完整结果包生成前是否在当前论文运行层级目录发现 closure input lock。 |
 | closure_input_lock_manifest_ready | governance | none | false | false | false | 完整结果包复核是否确认 input lock manifest 的身份、输出路径、层级、FPR、数量和锁摘要完全一致。 |
 | closure_input_lock_digest_ready | governance | none | false | false | false | 完整结果包复算的 closure input lock 规范摘要是否等于锁中声明值。 |
@@ -2148,6 +2151,11 @@ Notebook 与 repository module 的跨边界数据
 | formal_unit_aggregate | provenance | none | true | false | false | T2SMark 完整 Prompt 单元的记录摘要与跨会话来源聚合对象。 |
 | formal_randomization_protocol | protocol | none | true | false | false | 主方法与全部正式 baseline 共同采用的生成种子和水印密钥交叉重复协议名称。 |
 | formal_randomization_protocol_digest | provenance | none | true | false | false | 完整交叉重复注册表、基础 latent 分布和设备无关 PRG 约定的稳定摘要。 |
+| formal_randomization_repeat_registry_digest | provenance | none | true | false | false | 仅对权威9个 repeat 身份记录按规范顺序计算的稳定摘要。 |
+| formal_randomization_repeat_coverage_digest | provenance | none | true | false | false | 对实际 repeat 记录、权威注册表摘要、协议摘要和覆盖状态计算的稳定摘要。 |
+| exact_repeat_registry_ready | governance | none | true | false | false | 实际 repeat 记录是否无遗漏、无重复、无额外身份且逐字段匹配权威9重复注册表。 |
+| observed_repeat_count | metric | none | true | false | false | 当前 component 或 aggregate 证据实际覆盖的互异 repeat 数量。 |
+| observed_repeat_ids | protocol | none | true | false | false | 按权威注册表顺序排列的实际 repeat ID 集合。 |
 | formal_randomization_repeat_count | metric | none | true | false | false | 论文运行要求完成并汇总的正式交叉重复总数。 |
 | generation_seed_repeat_count | metric | none | true | false | false | 正式交叉重复协议登记的生成种子重复数。 |
 | watermark_key_repeat_count | metric | none | true | false | false | 正式交叉重复协议登记的水印密钥重复数。 |

@@ -19,6 +19,10 @@ from experiments.protocol.attacks import (
     resolve_formal_attack_config,
 )
 from experiments.protocol.formal_evidence import contains_nonformal_marker
+from experiments.protocol.formal_randomization import (
+    formal_randomization_protocol_record,
+    resolve_formal_randomization_repeat,
+)
 from experiments.protocol.paper_run_config import (
     FULL_PAPER_RUN_NAME,
     PaperRunConfig,
@@ -338,6 +342,33 @@ class PilotPaperFixedFprConfig:
     minimum_clean_negative_count: int = field(
         default_factory=lambda: int(_default_paper_run_value("minimum_clean_negative_count"))
     )
+    randomization_repeat_id: str = field(
+        default_factory=lambda: str(
+            _default_paper_run_value("randomization_repeat_id")
+        )
+    )
+    generation_seed_index: int = field(
+        default_factory=lambda: int(
+            _default_paper_run_value("generation_seed_index")
+        )
+    )
+    generation_seed_offset: int = field(
+        default_factory=lambda: int(
+            _default_paper_run_value("generation_seed_offset")
+        )
+    )
+    watermark_key_index: int = field(
+        default_factory=lambda: int(
+            _default_paper_run_value("watermark_key_index")
+        )
+    )
+    formal_randomization_protocol_digest: str = field(
+        default_factory=lambda: str(
+            _default_paper_run_value(
+                "formal_randomization_protocol_digest"
+            )
+        )
+    )
     attack_resource_profiles: tuple[str, ...] = PILOT_PAPER_ATTACK_RESOURCE_PROFILES
 
     def __post_init__(self) -> None:
@@ -357,6 +388,21 @@ class PilotPaperFixedFprConfig:
             raise ValueError("confidence_level 必须位于 (0, 1)")
         if self.minimum_clean_negative_count <= 0:
             raise ValueError("minimum_clean_negative_count 必须为正整数")
+        if not self.randomization_repeat_id:
+            raise ValueError("fixed-FPR 配置必须显式携带活动 repeat ID")
+        repeat = resolve_formal_randomization_repeat(
+            self.randomization_repeat_id
+        )
+        if (
+            self.generation_seed_index != repeat.generation_seed_index
+            or self.generation_seed_offset != repeat.generation_seed_offset
+            or self.watermark_key_index != repeat.watermark_key_index
+            or self.formal_randomization_protocol_digest
+            != formal_randomization_protocol_record()[
+                "formal_randomization_protocol_digest"
+            ]
+        ):
+            raise ValueError("fixed-FPR 配置的活动 repeat 身份不匹配")
 
     def to_dict(self) -> dict[str, Any]:
         """转为 JSON 兼容字典。"""
@@ -381,6 +427,13 @@ def build_paper_fixed_fpr_config_from_paper_run(
         result_claim_scope=result_claim_scope_for_run(paper_run.run_name),
         target_fpr=paper_run.target_fpr,
         minimum_clean_negative_count=paper_run.minimum_clean_negative_count,
+        randomization_repeat_id=paper_run.randomization_repeat_id,
+        generation_seed_index=paper_run.generation_seed_index,
+        generation_seed_offset=paper_run.generation_seed_offset,
+        watermark_key_index=paper_run.watermark_key_index,
+        formal_randomization_protocol_digest=(
+            paper_run.formal_randomization_protocol_digest
+        ),
     )
 
 

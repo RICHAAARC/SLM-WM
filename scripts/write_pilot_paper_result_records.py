@@ -1204,6 +1204,7 @@ def write_pilot_paper_result_record_outputs(
         root_path,
         paper_run_name=config.paper_run_name,
         target_fpr=config.target_fpr,
+        randomization_repeat_id=config.randomization_repeat_id,
     )
     context = build_protocol_context(root_path, config)
     schema = context["schema"]

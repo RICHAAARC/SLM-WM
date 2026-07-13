@@ -9,9 +9,13 @@ import pytest
 from experiments.protocol.formal_randomization import (
     build_canonical_sd35_base_latent,
     build_formal_randomization_identity,
+    build_formal_randomization_repeat_coverage,
     formal_randomization_protocol_record,
+    formal_randomization_repeat_ids,
+    formal_randomization_repeat_registry_digest,
     formal_randomization_repeats,
     resolve_formal_randomization_repeat,
+    validate_formal_randomization_repeat_records,
 )
 from experiments.runners.image_only_dataset_workload import build_method_config
 from main.core.digest import build_stable_digest
@@ -45,6 +49,68 @@ def test_formal_randomization_registry_is_exact_three_by_three_cross() -> None:
     assert protocol["formal_randomization_protocol_digest"] == (
         "bac52313e8c4ed3e4339b65c3da897013c060d153c3c0b98de8e2e1d5bd679a0"
     )
+    assert formal_randomization_repeat_ids() == tuple(
+        f"seed_{seed_index:02d}_key_{key_index:02d}"
+        for seed_index in range(3)
+        for key_index in range(3)
+    )
+    assert len(formal_randomization_repeat_registry_digest()) == 64
+
+
+def test_formal_randomization_exact_coverage_rejects_count_only_substitution() -> None:
+    """最终覆盖必须逐身份匹配注册表, 不能只依赖9条记录计数."""
+
+    records = [repeat.to_dict() for repeat in formal_randomization_repeats()]
+    coverage = build_formal_randomization_repeat_coverage(
+        reversed(records),
+        require_exact_registry=True,
+    )
+
+    assert coverage["observed_repeat_ids"] == list(
+        formal_randomization_repeat_ids()
+    )
+    assert coverage["observed_repeat_count"] == 9
+    assert coverage["exact_repeat_registry_ready"] is True
+    assert coverage["supports_paper_claim"] is False
+
+    wrong_identity = [dict(record) for record in records]
+    wrong_identity[-1]["watermark_key_index"] = 1
+    with pytest.raises(ValueError, match="身份未匹配注册表"):
+        validate_formal_randomization_repeat_records(
+            wrong_identity,
+            require_exact_registry=True,
+        )
+
+    duplicated = [dict(record) for record in records[:-1]]
+    duplicated.append(dict(records[0]))
+    with pytest.raises(ValueError, match="ID 重复"):
+        validate_formal_randomization_repeat_records(
+            duplicated,
+            require_exact_registry=True,
+        )
+
+
+def test_single_repeat_component_coverage_never_supports_paper_claim() -> None:
+    """单个 GPU repeat 只能形成 component, 不能冒充最终论文聚合."""
+
+    repeat = resolve_formal_randomization_repeat("seed_01_key_02")
+    coverage = build_formal_randomization_repeat_coverage(
+        [repeat.to_dict()],
+        require_exact_registry=False,
+    )
+
+    assert coverage["observed_repeat_ids"] == ["seed_01_key_02"]
+    assert coverage["exact_repeat_registry_ready"] is False
+    assert coverage["supports_paper_claim"] is False
+
+    with pytest.raises(ValueError, match="精确声明一个"):
+        build_formal_randomization_repeat_coverage(
+            [
+                resolve_formal_randomization_repeat("seed_00_key_00").to_dict(),
+                repeat.to_dict(),
+            ],
+            require_exact_registry=False,
+        )
 
 
 def test_canonical_base_latent_is_byte_stable_and_seed_sensitive() -> None:

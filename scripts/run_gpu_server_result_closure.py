@@ -116,6 +116,9 @@ def execute_server_result_closure(
             environment_report["package_search_root"],
             paper_run_name=environment_report["paper_run"]["run_name"],
             target_fpr=float(environment_report["target_fpr"]),
+            randomization_repeat_id=environment_report["paper_run"][
+                "randomization_repeat_id"
+            ],
             root=root_path,
             write_lock=False,
         )

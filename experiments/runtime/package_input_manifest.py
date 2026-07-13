@@ -13,9 +13,14 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 from zipfile import ZipFile
 
+from experiments.protocol.formal_randomization import (
+    formal_randomization_protocol_record,
+    validate_formal_randomization_repeat_records,
+)
+
 
 PACKAGE_INPUT_MANIFEST_SCHEMA = "exact_package_input_manifest"
-PACKAGE_INPUT_MANIFEST_SCHEMA_VERSION = 1
+PACKAGE_INPUT_MANIFEST_SCHEMA_VERSION = 2
 
 SCIENTIFIC_BINDING_EVIDENCE_FIELDS = (
     "scientific_execution_report_path",
@@ -122,6 +127,8 @@ def write_exact_package_input_manifest(
     package_family: str,
     paper_run_name: str,
     target_fpr: float,
+    randomization_repeat_identity: Mapping[str, Any],
+    formal_randomization_protocol_digest: str,
     entries: Iterable[str | Path],
     formal_execution_run_lock: Mapping[str, Any],
     formal_execution_package_lock: Mapping[str, Any],
@@ -154,12 +161,70 @@ def write_exact_package_input_manifest(
         entry_paths.append(relative_path)
         entry_sha256[relative_path] = _file_sha256(path)
 
+    repeat_fields = (
+        "randomization_repeat_id",
+        "generation_seed_index",
+        "generation_seed_offset",
+        "watermark_key_index",
+    )
+    repeat_identity = {
+        field_name: randomization_repeat_identity.get(field_name)
+        for field_name in repeat_fields
+    }
+    if (
+        not isinstance(repeat_identity["randomization_repeat_id"], str)
+        or not repeat_identity["randomization_repeat_id"]
+        or any(
+            isinstance(repeat_identity[field_name], bool)
+            or not isinstance(repeat_identity[field_name], int)
+            or repeat_identity[field_name] < 0
+            for field_name in repeat_fields[1:]
+        )
+    ):
+        raise ValueError("正式结果包缺少有效随机化 repeat 身份")
+    if (
+        not isinstance(formal_randomization_protocol_digest, str)
+        or len(formal_randomization_protocol_digest) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in formal_randomization_protocol_digest
+        )
+    ):
+        raise ValueError("正式结果包随机化协议摘要必须是小写 SHA-256")
+    try:
+        normalized_repeat_identity = (
+            validate_formal_randomization_repeat_records(
+                [repeat_identity],
+                require_exact_registry=False,
+            )[0]
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("正式结果包 repeat 身份未匹配权威注册表") from exc
+    if (
+        normalized_repeat_identity != repeat_identity
+        or formal_randomization_protocol_digest
+        != formal_randomization_protocol_record()[
+            "formal_randomization_protocol_digest"
+        ]
+    ):
+        raise ValueError("正式结果包随机化身份或协议摘要未匹配权威注册表")
+
     payload = {
         "report_schema": PACKAGE_INPUT_MANIFEST_SCHEMA,
         "schema_version": PACKAGE_INPUT_MANIFEST_SCHEMA_VERSION,
         "package_family": str(package_family),
         "paper_run_name": str(paper_run_name),
         "target_fpr": float(target_fpr),
+        **repeat_identity,
+        "formal_randomization_protocol_digest": (
+            formal_randomization_protocol_digest
+        ),
+        "randomization_repeat_identity": {
+            **repeat_identity,
+            "formal_randomization_protocol_digest": (
+                formal_randomization_protocol_digest
+            ),
+        },
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "entry_count": len(entry_paths),
         "entry_paths": entry_paths,

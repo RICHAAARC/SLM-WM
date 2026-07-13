@@ -933,6 +933,13 @@ def build_closure_input_lock_status(
     这一检查可以阻止锁生成后包内容被替换, 也可以阻止打包器静默消费另一批包。
     """
 
+    paper_run = build_paper_run_config(root_path)
+    if paper_run.run_name != paper_run_name or not _same_float(
+        paper_run.target_fpr,
+        target_fpr,
+    ):
+        raise ValueError("完整包锁校验身份与当前论文运行配置不一致")
+
     lock_path = (
         root_path
         / "outputs"
@@ -1024,6 +1031,12 @@ def build_closure_input_lock_status(
             "target_fpr": target_fpr,
             "common_code_version": common_code_version,
             "closure_input_packages": records,
+            "randomization_repeat_identity": lock_payload.get(
+                "randomization_repeat_identity"
+            ),
+            "repeat_component_input_ready": True,
+            "randomization_aggregate_ready": False,
+            "supports_paper_claim": False,
         }
     )
     manifest_ready = (
@@ -1049,6 +1062,7 @@ def build_closure_input_lock_status(
             lock_manifest,
             paper_run_name=paper_run_name,
             target_fpr=target_fpr,
+            randomization_repeat_id=paper_run.randomization_repeat_id,
         )
         semantic_validation_ready = True
     except Exception as error:
@@ -1080,6 +1094,7 @@ def build_closure_input_lock_status(
                 spec=spec,
                 paper_run_name=paper_run_name,
                 target_fpr=target_fpr,
+                randomization_repeat_id=paper_run.randomization_repeat_id,
             )
         except Exception as error:
             package_inspection_ready = False

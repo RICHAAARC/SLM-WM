@@ -1936,6 +1936,30 @@ def run_image_only_dataset_runtime(
     summary = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "paper_run_name": resolved_paper_run.run_name,
+        "randomization_repeat_id": (
+            resolved_paper_run.randomization_repeat_id
+        ),
+        "generation_seed_index": resolved_paper_run.generation_seed_index,
+        "generation_seed_offset": resolved_paper_run.generation_seed_offset,
+        "watermark_key_index": resolved_paper_run.watermark_key_index,
+        "formal_randomization_protocol_digest": (
+            resolved_paper_run.formal_randomization_protocol_digest
+        ),
+        "randomization_repeat_identity": {
+            "randomization_repeat_id": (
+                resolved_paper_run.randomization_repeat_id
+            ),
+            "generation_seed_index": (
+                resolved_paper_run.generation_seed_index
+            ),
+            "generation_seed_offset": (
+                resolved_paper_run.generation_seed_offset
+            ),
+            "watermark_key_index": resolved_paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                resolved_paper_run.formal_randomization_protocol_digest
+            ),
+        },
         "prompt_count": len(prompt_records),
         "split_counts": split_counts,
         "runtime_result_count": len(runtime_results),
@@ -2405,6 +2429,15 @@ def package_image_only_dataset_runtime(
         package_family="image_only_dataset_runtime",
         paper_run_name=resolved_paper_run_name,
         target_fpr=paper_run.target_fpr,
+        randomization_repeat_identity={
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+        },
+        formal_randomization_protocol_digest=(
+            paper_run.formal_randomization_protocol_digest
+        ),
         entries=entries,
         formal_execution_run_lock=formal_execution_run_lock,
         formal_execution_package_lock=formal_execution_package_lock,

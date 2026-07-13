@@ -1806,6 +1806,22 @@ def package_external_baseline_method_faithful_outputs(
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "paper_run_name": paper_run.run_name,
             "target_fpr": paper_run.target_fpr,
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                paper_run.formal_randomization_protocol_digest
+            ),
+            "randomization_repeat_identity": {
+                "randomization_repeat_id": paper_run.randomization_repeat_id,
+                "generation_seed_index": paper_run.generation_seed_index,
+                "generation_seed_offset": paper_run.generation_seed_offset,
+                "watermark_key_index": paper_run.watermark_key_index,
+                "formal_randomization_protocol_digest": (
+                    paper_run.formal_randomization_protocol_digest
+                ),
+            },
             "baseline_id": resolved_baseline_id,
             "model_id": DEFAULT_MODEL_ID,
             "model_revision": DEFAULT_MODEL_REVISION,
@@ -1848,6 +1864,22 @@ def package_external_baseline_method_faithful_outputs(
             "baseline_id": resolved_baseline_id,
             "paper_run_name": paper_run.run_name,
             "target_fpr": paper_run.target_fpr,
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                paper_run.formal_randomization_protocol_digest
+            ),
+            "randomization_repeat_identity": {
+                "randomization_repeat_id": paper_run.randomization_repeat_id,
+                "generation_seed_index": paper_run.generation_seed_index,
+                "generation_seed_offset": paper_run.generation_seed_offset,
+                "watermark_key_index": paper_run.watermark_key_index,
+                "formal_randomization_protocol_digest": (
+                    paper_run.formal_randomization_protocol_digest
+                ),
+            },
             "model_id": DEFAULT_MODEL_ID,
             "model_revision": DEFAULT_MODEL_REVISION,
             "drive_output_dir": str(Path(resolved_drive_output_dir).expanduser()),
@@ -1858,6 +1890,22 @@ def package_external_baseline_method_faithful_outputs(
             "baseline_id": resolved_baseline_id,
             "paper_run_name": paper_run.run_name,
             "target_fpr": paper_run.target_fpr,
+            "randomization_repeat_id": paper_run.randomization_repeat_id,
+            "generation_seed_index": paper_run.generation_seed_index,
+            "generation_seed_offset": paper_run.generation_seed_offset,
+            "watermark_key_index": paper_run.watermark_key_index,
+            "formal_randomization_protocol_digest": (
+                paper_run.formal_randomization_protocol_digest
+            ),
+            "randomization_repeat_identity": {
+                "randomization_repeat_id": paper_run.randomization_repeat_id,
+                "generation_seed_index": paper_run.generation_seed_index,
+                "generation_seed_offset": paper_run.generation_seed_offset,
+                "watermark_key_index": paper_run.watermark_key_index,
+                "formal_randomization_protocol_digest": (
+                    paper_run.formal_randomization_protocol_digest
+                ),
+            },
             "model_id": DEFAULT_MODEL_ID,
             "model_revision": DEFAULT_MODEL_REVISION,
             "run_decision": "pass",

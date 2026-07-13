@@ -11,6 +11,10 @@ from zipfile import ZIP_STORED, ZipFile
 import pytest
 
 from experiments.runtime import repository_environment
+from experiments.protocol.formal_randomization import (
+    formal_randomization_protocol_record,
+    resolve_formal_randomization_repeat,
+)
 from main.core.digest import build_stable_digest
 from paper_experiments.analysis.result_analysis_payload import (
     build_governed_paper_payload_path_map,
@@ -67,6 +71,12 @@ def build_test_lock_record(
         for index, spec in enumerate(CLOSURE_PACKAGE_FAMILY_SPECS)
         if spec.package_family == package_family
     )
+    repeat = resolve_formal_randomization_repeat(None)
+    repeat_dependent = package_family not in {
+        "official_reference_tree_ring",
+        "official_reference_gaussian_shading",
+        "official_reference_shallow_diffuse",
+    }
     return {
         "package_family": package_family,
         "package_path": package_path.resolve().as_posix(),
@@ -75,6 +85,30 @@ def build_test_lock_record(
         "target_fpr": target_fpr,
         "code_version": "a" * 40,
         "generated_at": f"2026-01-01T00:00:{family_index:02d}+00:00",
+        "randomization_scope": (
+            "active_repeat_component"
+            if repeat_dependent
+            else "cross_repeat_invariant"
+        ),
+        "randomization_repeat_id": (
+            repeat.randomization_repeat_id if repeat_dependent else ""
+        ),
+        "generation_seed_index": (
+            repeat.generation_seed_index if repeat_dependent else -1
+        ),
+        "generation_seed_offset": (
+            repeat.generation_seed_offset if repeat_dependent else -1
+        ),
+        "watermark_key_index": (
+            repeat.watermark_key_index if repeat_dependent else -1
+        ),
+        "formal_randomization_protocol_digest": (
+            formal_randomization_protocol_record()[
+                "formal_randomization_protocol_digest"
+            ]
+            if repeat_dependent
+            else ""
+        ),
     }
 
 
@@ -84,6 +118,7 @@ def inspect_test_closure_package(
     spec: Any,
     paper_run_name: str,
     target_fpr: float,
+    randomization_repeat_id: str | None = None,
 ) -> _ClosureCandidate:
     """模拟已由 selector 深度检查并返回动态锁字段的候选包."""
 
@@ -129,9 +164,10 @@ def configure_paper_run(monkeypatch: pytest.MonkeyPatch, root: Path, paper_run_n
     )
     monkeypatch.setattr(
         "scripts.write_pilot_paper_complete_result_package.validate_closure_input_lock_payloads",
-        lambda _lock, _manifest, *, paper_run_name, target_fpr: {
+        lambda _lock, _manifest, *, paper_run_name, target_fpr, randomization_repeat_id=None: {
             "paper_run_name": paper_run_name,
             "target_fpr": target_fpr,
+            "randomization_repeat_id": randomization_repeat_id,
         },
     )
     monkeypatch.setattr(
@@ -324,12 +360,25 @@ def create_closure_input_lock(root: Path, paper_run_name: str) -> tuple[Path, ..
                 target_fpr=target_fpr,
             )
         )
+    repeat = resolve_formal_randomization_repeat(None)
+    repeat_identity = {
+        **repeat.to_dict(),
+        "formal_randomization_protocol_digest": (
+            formal_randomization_protocol_record()[
+                "formal_randomization_protocol_digest"
+            ]
+        ),
+    }
     lock_payload: dict[str, object] = {
         "paper_run_name": paper_run_name,
         "target_fpr": target_fpr,
         "common_code_version": "a" * 40,
         "closure_input_package_count": len(lock_records),
         "closure_input_packages": lock_records,
+        "randomization_repeat_identity": repeat_identity,
+        "repeat_component_input_ready": True,
+        "randomization_aggregate_ready": False,
+        "supports_paper_claim": False,
     }
     lock_payload["closure_input_lock_digest"] = build_stable_digest(lock_payload)
     closure_dir = root / "outputs" / "paper_result_closure" / paper_run_name
@@ -342,6 +391,10 @@ def create_closure_input_lock(root: Path, paper_run_name: str) -> tuple[Path, ..
         "target_fpr": target_fpr,
         "common_code_version": "a" * 40,
         "closure_input_packages": lock_records,
+        "randomization_repeat_identity": repeat_identity,
+        "repeat_component_input_ready": True,
+        "randomization_aggregate_ready": False,
+        "supports_paper_claim": False,
     }
     write_json(
         manifest_path,
@@ -363,6 +416,10 @@ def create_closure_input_lock(root: Path, paper_run_name: str) -> tuple[Path, ..
                 "paper_run_name": paper_run_name,
                 "target_fpr": target_fpr,
                 "common_code_version": "a" * 40,
+                "randomization_repeat_identity": repeat_identity,
+                "repeat_component_input_ready": True,
+                "randomization_aggregate_ready": False,
+                "supports_paper_claim": False,
             },
         },
     )
@@ -696,11 +753,13 @@ def test_closure_input_status_revalidates_semantics_packages_and_profiles(
         *,
         paper_run_name: str,
         target_fpr: float,
+        randomization_repeat_id: str | None = None,
     ) -> dict[str, Any]:
         calls["semantic"] += 1
         return {
             "paper_run_name": paper_run_name,
             "target_fpr": target_fpr,
+            "randomization_repeat_id": randomization_repeat_id,
         }
 
     def package_inspector(
@@ -709,6 +768,7 @@ def test_closure_input_status_revalidates_semantics_packages_and_profiles(
         spec: Any,
         paper_run_name: str,
         target_fpr: float,
+        randomization_repeat_id: str | None = None,
     ) -> _ClosureCandidate:
         calls["inspection"] += 1
         return inspect_test_closure_package(
@@ -716,6 +776,7 @@ def test_closure_input_status_revalidates_semantics_packages_and_profiles(
             spec=spec,
             paper_run_name=paper_run_name,
             target_fpr=target_fpr,
+            randomization_repeat_id=randomization_repeat_id,
         )
 
     def profile_validator(_candidate: Any, *, root_path: Path) -> None:

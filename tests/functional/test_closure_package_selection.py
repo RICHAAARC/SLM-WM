@@ -26,6 +26,10 @@ from experiments.runtime.scientific_execution_binding import (
     BOUND_MANIFEST_DIGEST_SCOPE,
     scientific_manifest_payload_digest,
 )
+from experiments.protocol.formal_randomization import (
+    formal_randomization_protocol_record,
+    resolve_formal_randomization_repeat,
+)
 from tests.helpers.formal_execution_lock import build_test_formal_execution_lock
 
 
@@ -82,7 +86,12 @@ def _assign(payload: dict[str, Any], field_path: tuple[str, ...], value: Any) ->
         nested = current.setdefault(field_name, {})
         assert isinstance(nested, dict)
         current = nested
-    current[field_path[-1]] = value
+    field_name = field_path[-1]
+    existing = current.get(field_name)
+    if isinstance(existing, dict) and isinstance(value, dict):
+        existing.update(value)
+    else:
+        current[field_name] = value
 
 
 def _assign_source(
@@ -467,6 +476,23 @@ def _valid_member_payloads(
             spec,
             requirement.source,
             requirement.expected_value,
+            paper_run_name=paper_run_name,
+        )
+    repeat = resolve_formal_randomization_repeat(None)
+    repeat_identity = {
+        **repeat.to_dict(),
+        "formal_randomization_protocol_digest": (
+            formal_randomization_protocol_record()[
+                "formal_randomization_protocol_digest"
+            ]
+        ),
+    }
+    for source in spec.randomization_repeat_sources:
+        _assign_source(
+            documents,
+            spec,
+            source,
+            repeat_identity,
             paper_run_name=paper_run_name,
         )
     if mutate is not None:
@@ -1276,6 +1302,9 @@ def test_dry_run_selects_exact_ten_families_without_mixing_unrelated_archives(
     )
 
     assert report["closure_input_selection_ready"] is True
+    assert report["repeat_component_input_ready"] is True
+    assert report["randomization_aggregate_ready"] is False
+    assert report["supports_paper_claim"] is False
     assert report["closure_input_lock_written"] is False
     assert report["closure_input_package_count"] == 10
     assert len(report["selected_package_paths"]) == 10
@@ -1308,6 +1337,12 @@ def test_formal_selection_writes_run_scoped_lock_and_independent_manifest(
     assert lock_payload["paper_run_name"] == PAPER_RUN_NAME
     assert lock_payload["target_fpr"] == TARGET_FPR
     assert lock_payload["common_code_version"] == CODE_VERSION
+    assert lock_payload["repeat_component_input_ready"] is True
+    assert lock_payload["randomization_aggregate_ready"] is False
+    assert lock_payload["supports_paper_claim"] is False
+    assert lock_payload["randomization_repeat_identity"][
+        "randomization_repeat_id"
+    ] == "seed_00_key_00"
     assert [row["package_path"] for row in lock_payload["closure_input_packages"]] == list(
         selected_paths
     )
@@ -1325,6 +1360,24 @@ def test_formal_selection_writes_run_scoped_lock_and_independent_manifest(
         row["package_family"]: row["formal_execution_package_lock_digest"]
         for row in lock_payload["closure_input_packages"]
     }
+    active_repeat_rows = [
+        row
+        for row in lock_payload["closure_input_packages"]
+        if row["randomization_scope"] == "active_repeat_component"
+    ]
+    invariant_rows = [
+        row
+        for row in lock_payload["closure_input_packages"]
+        if row["randomization_scope"] == "cross_repeat_invariant"
+    ]
+    assert len(active_repeat_rows) == 7
+    assert len(invariant_rows) == 3
+    assert {
+        row["randomization_repeat_id"] for row in active_repeat_rows
+    } == {"seed_00_key_00"}
+    assert all(row["randomization_repeat_id"] == "" for row in invariant_rows)
+
+
     scientific_rows = [
         row
         for row in lock_payload["closure_input_packages"]
@@ -1365,6 +1418,65 @@ def test_formal_selection_writes_run_scoped_lock_and_independent_manifest(
         f"outputs/paper_result_closure/{PAPER_RUN_NAME}/{LOCK_FILENAME}",
         f"outputs/paper_result_closure/{PAPER_RUN_NAME}/{LOCK_MANIFEST_FILENAME}",
     ]
+
+
+def test_repeat_package_must_match_explicit_active_repeat(tmp_path: Path) -> None:
+    """选择器必须拒绝同 family 中属于其他 seed-key 单元的有效包."""
+
+    spec = CLOSURE_PACKAGE_FAMILY_SPECS[0]
+    other_repeat = resolve_formal_randomization_repeat("seed_01_key_02")
+    other_identity = {
+        **other_repeat.to_dict(),
+        "formal_randomization_protocol_digest": (
+            formal_randomization_protocol_record()[
+                "formal_randomization_protocol_digest"
+            ]
+        ),
+    }
+
+    def bind_other_repeat(
+        documents: dict[str, dict[str, Any]],
+        family_spec: ClosurePackageFamilySpec,
+    ) -> None:
+        """把 fixture 的全部双来源身份改为另一个登记 repeat."""
+
+        for source in family_spec.randomization_repeat_sources:
+            _assign_source(
+                documents,
+                family_spec,
+                source,
+                other_identity,
+                paper_run_name=PAPER_RUN_NAME,
+            )
+
+    package_path = _write_family_package(
+        tmp_path,
+        spec,
+        token="other_repeat",
+        mutate=bind_other_repeat,
+    )
+
+    with pytest.raises(
+        ClosurePackageSelectionError,
+        match="未绑定活动随机化 repeat",
+    ):
+        inspect_closure_package(
+            package_path,
+            spec=spec,
+            paper_run_name=PAPER_RUN_NAME,
+            target_fpr=TARGET_FPR,
+            randomization_repeat_id="seed_00_key_00",
+        )
+
+    candidate = inspect_closure_package(
+        package_path,
+        spec=spec,
+        paper_run_name=PAPER_RUN_NAME,
+        target_fpr=TARGET_FPR,
+        randomization_repeat_id="seed_01_key_02",
+    )
+    assert candidate.randomization_scope == "active_repeat_component"
+    assert candidate.randomization_repeat_id == "seed_01_key_02"
 
 
 def test_selection_rejects_main_packages_from_different_scientific_sessions(

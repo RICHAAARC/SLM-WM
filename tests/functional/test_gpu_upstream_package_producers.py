@@ -195,6 +195,20 @@ def _write_required_files(directory: Path, filenames: tuple[str, ...]) -> None:
         path.write_text("{}\n", encoding="utf-8")
 
 
+def _randomization_repeat_identity(paper_run: object) -> dict[str, object]:
+    """构造上游包 summary 与 manifest 共用的活动 repeat 身份."""
+
+    return {
+        "randomization_repeat_id": paper_run.randomization_repeat_id,
+        "generation_seed_index": paper_run.generation_seed_index,
+        "generation_seed_offset": paper_run.generation_seed_offset,
+        "watermark_key_index": paper_run.watermark_key_index,
+        "formal_randomization_protocol_digest": (
+            paper_run.formal_randomization_protocol_digest
+        ),
+    }
+
+
 def _prepare_image_runtime(
     root: Path,
     *,
@@ -207,6 +221,7 @@ def _prepare_image_runtime(
     directory = root / "outputs" / "image_only_dataset_runtime" / PAPER_RUN_NAME
     prompt_records = _canonical_prompt_records(root)
     paper_run = build_paper_run_config(root)
+    repeat_identity = _randomization_repeat_identity(paper_run)
     runtime_results = []
     scientific_unit_output_paths: list[str] = []
     for prompt_record in prompt_records:
@@ -317,6 +332,7 @@ def _prepare_image_runtime(
             "generated_at": GENERATED_AT,
             "paper_run_name": PAPER_RUN_NAME,
             "target_fpr": TARGET_FPR,
+            "randomization_repeat_identity": repeat_identity,
             "protocol_decision": "pass",
             "full_method_claim_ready": True,
             "geometry_protocol_calibration_ready": True,
@@ -360,6 +376,7 @@ def _prepare_image_runtime(
                 "paper_run": {
                     "run_name": PAPER_RUN_NAME,
                     "target_fpr": TARGET_FPR,
+                    **repeat_identity,
                 }
             },
             "config_digest": build_stable_digest(
@@ -367,6 +384,7 @@ def _prepare_image_runtime(
                     "paper_run": {
                         "run_name": PAPER_RUN_NAME,
                         "target_fpr": TARGET_FPR,
+                        **repeat_identity,
                     }
                 }
             ),
@@ -400,6 +418,7 @@ def _prepare_ablation(root: Path) -> Path:
     directory = root / "outputs" / "formal_mechanism_ablation" / PAPER_RUN_NAME
     prompt_records = _canonical_prompt_records(root)
     paper_run = build_paper_run_config(root)
+    repeat_identity = _randomization_repeat_identity(paper_run)
     specs = default_runtime_rerun_ablation_specs()
     ablation_records: list[dict[str, object]] = []
     for spec in specs:
@@ -525,6 +544,7 @@ def _prepare_ablation(root: Path) -> Path:
             "generated_at": GENERATED_AT,
             "paper_run_name": PAPER_RUN_NAME,
             "target_fpr": TARGET_FPR,
+            "randomization_repeat_identity": repeat_identity,
             **ablation_contract,
             **prompt_contract,
             **atom_identity,
@@ -545,6 +565,7 @@ def _prepare_ablation(root: Path) -> Path:
     ablation_manifest_config = {
         "specs": [spec.to_dict() for spec in specs],
         "target_fpr": TARGET_FPR,
+        "randomization_repeat_identity": repeat_identity,
         **ablation_contract,
         **prompt_contract,
         **atom_identity,
@@ -623,6 +644,8 @@ def _prepare_dataset_quality(root: Path) -> Path:
 
     directory = root / "outputs" / "dataset_level_quality" / PAPER_RUN_NAME
     _canonical_prompt_records(root)
+    paper_run = build_paper_run_config(root)
+    repeat_identity = _randomization_repeat_identity(paper_run)
     canonical_ids = canonical_prompt_ids_for_paper_run(
         root_path=root,
         prompt_set=PAPER_RUN_NAME,
@@ -781,6 +804,7 @@ def _prepare_dataset_quality(root: Path) -> Path:
         {
             "paper_run_name": PAPER_RUN_NAME,
             "target_fpr": TARGET_FPR,
+            "randomization_repeat_identity": repeat_identity,
             "expected_feature_pair_count": PROMPT_COUNT,
             **coverage,
             **resolution_contract,
@@ -809,6 +833,7 @@ def _prepare_dataset_quality(root: Path) -> Path:
             "generated_at": GENERATED_AT,
             "paper_run_name": PAPER_RUN_NAME,
             "target_fpr": TARGET_FPR,
+            "randomization_repeat_identity": repeat_identity,
             "expected_prompt_count": PROMPT_COUNT,
             "registry_prompt_count": PROMPT_COUNT,
             "sample_pair_count": PROMPT_COUNT,
@@ -851,9 +876,17 @@ def _prepare_dataset_quality(root: Path) -> Path:
                 **coverage,
                 **resolution_contract,
             },
-            "config": {**coverage, **resolution_contract},
+            "config": {
+                **coverage,
+                **resolution_contract,
+                "randomization_repeat_identity": repeat_identity,
+            },
             "config_digest": build_stable_digest(
-                {**coverage, **resolution_contract}
+                {
+                    **coverage,
+                    **resolution_contract,
+                    "randomization_repeat_identity": repeat_identity,
+                }
             ),
         },
     )
@@ -896,6 +929,8 @@ def test_primary_gpu_package_producers_pass_strict_closure_contract(
             target_fpr=TARGET_FPR,
         )
         assert candidate.package_family == spec.package_family
+        assert candidate.randomization_scope == "active_repeat_component"
+        assert candidate.randomization_repeat_id == "seed_00_key_00"
         with ZipFile(archive_path) as archive:
             archive_names = set(archive.namelist())
             assert archive_names
@@ -910,6 +945,10 @@ def test_primary_gpu_package_producers_pass_strict_closure_contract(
                 baseline=spec.baseline_id or "",
             )
             package_input = json.loads(archive.read(package_input_member))
+            assert package_input["schema_version"] == 2
+            assert package_input["randomization_repeat_identity"] == (
+                _randomization_repeat_identity(build_paper_run_config(tmp_path))
+            )
             declared_paths = package_input["entry_paths"]
             assert package_input["entry_count"] == len(declared_paths)
             assert set(declared_paths) == archive_names - {package_input_member}

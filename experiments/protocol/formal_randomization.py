@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import hashlib
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from main.core.digest import build_stable_digest, tensor_content_identity
 from main.core.keyed_prg import (
@@ -18,6 +18,12 @@ FORMAL_RANDOMIZATION_PROTOCOL = "crossed_generation_seed_watermark_key_v1"
 FORMAL_GENERATION_SEED_OFFSETS = (0, 1_000_003, 2_000_003)
 FORMAL_WATERMARK_KEY_INDICES = (0, 1, 2)
 DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID = "seed_00_key_00"
+FORMAL_RANDOMIZATION_REPEAT_IDENTITY_FIELDS = (
+    "randomization_repeat_id",
+    "generation_seed_index",
+    "generation_seed_offset",
+    "watermark_key_index",
+)
 
 
 @dataclass(frozen=True)
@@ -48,6 +54,116 @@ def formal_randomization_repeats() -> tuple[FormalRandomizationRepeat, ...]:
         for seed_index, seed_offset in enumerate(FORMAL_GENERATION_SEED_OFFSETS)
         for key_index in FORMAL_WATERMARK_KEY_INDICES
     )
+
+
+def formal_randomization_repeat_ids() -> tuple[str, ...]:
+    """返回正式9重复的规范有序 ID 集合."""
+
+    return tuple(
+        repeat.randomization_repeat_id
+        for repeat in formal_randomization_repeats()
+    )
+
+
+def formal_randomization_repeat_registry_digest() -> str:
+    """计算完整 repeat 身份注册表的稳定摘要."""
+
+    return build_stable_digest(
+        [repeat.to_dict() for repeat in formal_randomization_repeats()]
+    )
+
+
+def validate_formal_randomization_repeat_records(
+    records: Iterable[Mapping[str, Any]],
+    *,
+    require_exact_registry: bool,
+) -> tuple[dict[str, Any], ...]:
+    """校验 repeat 记录身份, 并按权威注册表顺序返回规范记录.
+
+    单 repeat component 使用 ``require_exact_registry=False`` 校验一个活动重复;
+    最终论文聚合使用 ``True`` 要求9个身份无缺失、无重复且无额外记录. 该函数
+    比仅检查 ``count == 9`` 更严格, 因为错误的 seed 或 key 索引也会被拒绝.
+    """
+
+    expected_records = tuple(
+        repeat.to_dict() for repeat in formal_randomization_repeats()
+    )
+    expected_by_id = {
+        record["randomization_repeat_id"]: record
+        for record in expected_records
+    }
+    materialized: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for source_record in records:
+        if not isinstance(source_record, Mapping):
+            raise TypeError("正式随机化 repeat 记录必须是 mapping")
+        record = {
+            field_name: source_record.get(field_name)
+            for field_name in FORMAL_RANDOMIZATION_REPEAT_IDENTITY_FIELDS
+        }
+        repeat_id = record["randomization_repeat_id"]
+        if not isinstance(repeat_id, str) or not repeat_id:
+            raise ValueError("正式随机化 repeat 缺少非空 ID")
+        if repeat_id in seen_ids:
+            raise ValueError(f"正式随机化 repeat ID 重复: {repeat_id}")
+        expected = expected_by_id.get(repeat_id)
+        if expected is None or record != expected:
+            raise ValueError(f"正式随机化 repeat 身份未匹配注册表: {repeat_id}")
+        seen_ids.add(repeat_id)
+        materialized.append(record)
+    expected_ids = set(expected_by_id)
+    if require_exact_registry:
+        if seen_ids != expected_ids:
+            missing = sorted(expected_ids - seen_ids)
+            unexpected = sorted(seen_ids - expected_ids)
+            raise ValueError(
+                "正式随机化 repeat 未精确覆盖注册表: "
+                f"missing={missing};unexpected={unexpected}"
+            )
+    elif len(materialized) != 1:
+        raise ValueError("单 repeat component 必须精确声明一个正式 repeat")
+    return tuple(
+        expected_by_id[repeat_id]
+        for repeat_id in formal_randomization_repeat_ids()
+        if repeat_id in seen_ids
+    )
+
+
+def build_formal_randomization_repeat_coverage(
+    records: Iterable[Mapping[str, Any]],
+    *,
+    require_exact_registry: bool,
+) -> dict[str, Any]:
+    """构造可持久化的 repeat 覆盖记录与内容摘要."""
+
+    normalized = validate_formal_randomization_repeat_records(
+        records,
+        require_exact_registry=require_exact_registry,
+    )
+    protocol = formal_randomization_protocol_record()
+    payload = {
+        "formal_randomization_protocol": FORMAL_RANDOMIZATION_PROTOCOL,
+        "formal_randomization_protocol_digest": protocol[
+            "formal_randomization_protocol_digest"
+        ],
+        "formal_randomization_repeat_registry_digest": (
+            formal_randomization_repeat_registry_digest()
+        ),
+        "required_repeat_count": len(formal_randomization_repeats()),
+        "observed_repeat_count": len(normalized),
+        "observed_repeat_ids": [
+            record["randomization_repeat_id"] for record in normalized
+        ],
+        "repeat_records": [dict(record) for record in normalized],
+        "exact_repeat_registry_ready": bool(require_exact_registry),
+    }
+    return {
+        **payload,
+        "formal_randomization_repeat_coverage_digest": build_stable_digest(
+            payload
+        ),
+        "supports_paper_claim": False,
+    }
 
 
 def formal_randomization_protocol_record() -> dict[str, Any]:
@@ -244,15 +360,20 @@ __all__ = [
     "DEFAULT_FORMAL_RANDOMIZATION_REPEAT_ID",
     "FORMAL_GENERATION_SEED_OFFSETS",
     "FORMAL_RANDOMIZATION_PROTOCOL",
+    "FORMAL_RANDOMIZATION_REPEAT_IDENTITY_FIELDS",
     "FORMAL_WATERMARK_KEY_INDICES",
     "FormalRandomizationRepeat",
     "build_canonical_sd35_base_latent",
+    "build_formal_randomization_repeat_coverage",
     "build_formal_randomization_identity",
     "formal_generation_seed",
     "formal_random_trace_fields",
     "formal_randomization_protocol_record",
+    "formal_randomization_repeat_ids",
+    "formal_randomization_repeat_registry_digest",
     "formal_randomization_repeats",
     "formal_watermark_key_material",
     "formal_watermark_key_seed_random",
     "resolve_formal_randomization_repeat",
+    "validate_formal_randomization_repeat_records",
 ]
